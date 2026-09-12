@@ -3888,17 +3888,17 @@ gives a scene where one model fills the sky. `--max-texture 2048` shrinks
 anything larger, because a character pack routinely carries several 4096-pixel
 sheets and four of those is a hundred megabytes of video memory.
 
-**`--model-size` and `MeshPart.Size` multiply - they do not override.** A part's
-`Size` scales the mesh's own coordinates, exactly as it scales the unit cube a
-built-in shape is; it does not fit the mesh into a box of that size. So a model
-baked at `--model-size 4` and given `Size = Vector3.new(4, 4, 4)` draws *sixteen
-metres* across, and the symptom is a grid of models overlapping their
-neighbours rather than anything that looks like a scale setting.
+**`MeshPart.Size` is the rendered box.** When a mesh has a nonzero extent on
+every axis, the renderer stretches each axis independently so its bounds fill
+the authored `Size`. A model baked at `--model-size 4` and given
+`Size = Vector3.new(4, 4, 4)` therefore draws four metres across, not sixteen.
+`--model-size` changes the baked geometry without multiplying the rendered
+extent in that case.
 
-Bake imports with `--model-size 1` when a scene sets sizes in metres. That makes
-an import behave exactly like a built-in, so one number means one thing across
-the whole scene. `mono.engine/examples/assets/scripts/MeshGrid.luau` is a worked example, and
-its header says the same thing at the point of use.
+Bake imports with `--model-size 1` when a scene needs to preserve the source
+mesh geometry. `MeshPart.Size` still gives the visible extent, so one size
+means one thing across the whole scene. `mono.engine/examples/assets/scripts/MeshGrid.luau`
+is a worked example, and its header says the same thing at the point of use.
 
 **`MeshPart.TrianglesCount` is how a script checks a mesh arrived.** It reports
 how many triangles the world found behind that part's `MeshId`, and it is

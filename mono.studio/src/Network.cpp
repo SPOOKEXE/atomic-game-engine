@@ -68,49 +68,6 @@ namespace studio {
 		// five hundred assets has to become five hundred assets arriving over a
 		// second, not one frame that never returns.
 		constexpr size_t REQUESTS_PER_PUMP = 4;
-
-		// Fits one part to resident mesh proportions. Callers choose the mesh
-		// lookup strategy, so a burst can scan a world once instead of once per
-		// mesh that happened to arrive in the same frame.
-		void FitPartToMesh(
-			engine::ecs::Store &store,
-			engine::ecs::Entity entity,
-			const engine::scene::Visual &visual,
-			const engine::scene::Bounds &bounds,
-			const engine::core::Name &mesh,
-			const engine::core::Vector3 &extent
-		) {
-			const float longest = std::max({extent.X, extent.Y, extent.Z});
-			if (visual.Mesh != mesh || visual.Fitted == mesh || longest <= 1e-6f) {
-				return;
-			}
-
-			// The part keeps the size it has along its longest axis. The mesh supplies
-			// its proportions, so replacing geometry cannot unexpectedly rescale a scene.
-			const float span = std::max({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
-			if (span <= 1e-6f) {
-				return;
-			}
-
-			const float unit = span / longest;
-			// `Each` exposes columns directly. Take tracked rows only after every
-			// guard, so the renderer and retained presentation see a real change.
-			engine::scene::Bounds *fittedBounds = store.GetMutable<engine::scene::Bounds>(entity);
-			engine::scene::Visual *fittedVisual = store.GetMutable<engine::scene::Visual>(entity);
-			if (fittedBounds == nullptr || fittedVisual == nullptr) {
-				return;
-			}
-
-			fittedBounds->HalfExtent = engine::core::Vector3{
-				extent.X * unit,
-				extent.Y * unit,
-				extent.Z * unit,
-			};
-			fittedVisual->Fitted = mesh;
-		}
-	}
-
-	namespace {
 		// A byte count somebody can read at a glance.
 		//
 		// **Powers of 1024 under decimal names**, matching `cdn::ReadableRate` and
@@ -362,11 +319,10 @@ namespace studio {
 	void Editor::PumpContent(double frameSeconds) {
 		ContentSeconds += frameSeconds;
 
-		// **Five spans rather than one, because "content costs 0.1 ms in an idle
+		// **Content timing scopes rather than one, because "content costs 0.1 ms in an idle
 		// editor" is not an answer.** The things under here are a delivery
 		// client polling a socket, a demand scan over every world's instances, a
-		// decode-and-upload of whatever arrived, a walk over parts waiting for a
-		// mesh to size them against, and an upload queue - and in an editor with
+		// decode-and-upload of whatever arrived and an upload queue - and in an editor with
 		// nothing downloading they cost very different amounts for very
 		// different reasons. One bar labelled `content` could only say that the
 		// total was small and non-zero, which is exactly the reading that
@@ -384,15 +340,6 @@ namespace studio {
 			DrainContent();
 		}
 		PumpAssetExport();
-
-		// **Outside the `ContentClient` guard on purpose.** A part can meet an
-		// already-loaded mesh in a process with no delivery client at all - a
-		// built-in, a duplicate, an undo - and those are exactly the cases the
-		// arrival-driven fit never saw.
-		{
-			ENGINE_PROFILE_CAT("content.fit", engine::core::ProfileCategory::Assets);
-			FitPendingParts();
-		}
 
 		if (ContentUploads) {
 			ENGINE_PROFILE_CAT("content.upload", engine::core::ProfileCategory::Assets);
@@ -438,8 +385,8 @@ namespace studio {
 		// catalogue filled for one would leave `TrianglesCount` answering zero
 		// in the others for no reason anybody could see.
 		// `EachWorld` rather than `Worlds`, which returns the list by value: this
-		// runs several times a frame between the content pump and the fit pass,
-		// and each call was a heap allocation for a list it walked once.
+		// runs several times a frame between content work, and each call was a
+		// heap allocation for a list it walked once.
 		Universe->EachWorld([this, &body](engine::world::WorldId world) {
 			Universe->Enter(world, [&body](engine::ecs::Store &store) { body(store); });
 		});
@@ -573,13 +520,8 @@ namespace studio {
 						name, footprint.DecodedBytes, footprint.CpuResidentBytes, footprint.GpuResidentBytes
 					);
 					VisualResourceRevision++;
-					ContentMeshRevision++;
 					ContentMeshes++;
 					ContentResident.Remember(name, asset->Kind, asset->Root);
-
-					// `FitPendingParts` consumes this arrival after intake completes. A
-					// batch can contain many meshes, so fitting here would rescan every
-					// world once per mesh before the batch's one revision-gated scan.
 
 					// **The sheets its submeshes name, recorded where they are
 					// readable.** They live inside the mesh file, so this is the
@@ -618,10 +560,8 @@ namespace studio {
 					});
 
 					// **Kept, because a world can arrive after a mesh does.**
-					// The line above tells the worlds that are open now; one
-					// created or opened later has parts naming this mesh and a
-					// catalogue that has never heard of it. `FitPendingParts`
-					// is what tells it, out of this.
+					// `PrepareWorldIn` gives a newly created or restored world these
+					// facts before its scripts or property panel read them.
 					ContentMeshFacts[name.Id()] = RegisteredMesh{triangles, sheets};
 				} else {
 					RecordContentAssetFailure(name);
@@ -732,142 +672,6 @@ namespace studio {
 				ContentMaterials,
 				ContentAnimations
 			);
-		}
-	}
-
-	void Editor::FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent) {
-		if (!mesh.IsValid()) {
-			return;
-		}
-
-		EachOpenWorld([&mesh, &extent](engine::ecs::Store &store) {
-			store.Each<const engine::scene::Visual, const engine::scene::Bounds>(
-				[&](engine::ecs::Entity entity,
-					const engine::scene::Visual &visual,
-					const engine::scene::Bounds &bounds) {
-					FitPartToMesh(store, entity, visual, bounds, mesh, extent);
-				}
-			);
-		});
-	}
-
-	void Editor::FitPendingParts() {
-		if (Universe == nullptr) {
-			return;
-		}
-
-		// **Gathered first, applied second.** `MeshExtentOf` is the renderer's
-		// and `Each` is inside `Universe::Enter`, so asking the renderer from
-		// within the walk would be reaching out of a scoped store - the rule at
-		// the top of `Editor.hpp`. It is also a walk that writes, and the names
-		// are what decide whether anything is written at all.
-		std::vector<engine::core::Name> waiting;
-
-		Universe->EachWorld([this, &waiting](engine::world::WorldId world) {
-			Universe->Enter(world, [this, world, &waiting](engine::ecs::Store &store) {
-				const ContentFitScanState state{
-					.VisualVersion = store.ComponentChangeVersion<engine::scene::Visual>(),
-					.VisualCount = store.CountMatching<engine::scene::Visual>(),
-					.MeshVersion = ContentMeshRevision,
-				};
-				const auto scanned = ContentFitScans.find(world.Index);
-				if (scanned != ContentFitScans.end() && scanned->second == state) {
-					return;
-				}
-				ContentFitScans[world.Index] = state;
-
-				store.Each<const engine::scene::Visual>(
-					[&waiting, &store](engine::ecs::Entity, const engine::scene::Visual &visual) {
-						if (!visual.Mesh.IsValid()) {
-							return;
-						}
-
-						// **Two reasons a mesh is pending, and the second is not the
-						// first.** A part that has never been fitted needs the shape; a
-						// world whose catalogue has never heard of the mesh needs the
-						// facts. They come apart when a world is loaded from a file -
-						// `Visual::Fitted` is saved with the part, so a reopened place
-						// is fully fitted and knows no triangle counts at all.
-						const bool unfitted = visual.Fitted != visual.Mesh;
-						const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
-						if (!unfitted && !unknown) {
-							return;
-						}
-
-						if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
-							waiting.push_back(visual.Mesh);
-						}
-					}
-				);
-			});
-		});
-
-		struct ResidentMesh {
-			engine::core::Name Name;
-			engine::core::Vector3 Extent;
-		};
-		std::unordered_map<uint32_t, ResidentMesh> resident;
-		resident.reserve(waiting.size());
-		for (const engine::core::Name &mesh : waiting) {
-			// **Only a mesh the renderer holds.** A part naming one that has not
-			// arrived - or never will - is left alone rather than fitted to
-			// nothing, which is what keeps a misspelled `MeshId` a fallback cube
-			// instead of a part collapsed to zero.
-			engine::core::Vector3 extent;
-			if (!Renderer.MeshExtentOf(mesh, extent)) {
-				continue;
-			}
-			resident.emplace(mesh.Id(), ResidentMesh{mesh, extent});
-		}
-
-		// A delivered bundle commonly contains a whole character or prop set. Walk
-		// each affected world once for that batch, rather than once for every mesh.
-		if (!resident.empty()) {
-			Universe->EachWorld([this, &resident](engine::world::WorldId world) {
-				Universe->Enter(world, [&resident](engine::ecs::Store &store) {
-					store.Each<const engine::scene::Visual, const engine::scene::Bounds>(
-						[&store, &resident](
-							engine::ecs::Entity entity,
-							const engine::scene::Visual &visual,
-							const engine::scene::Bounds &bounds
-						) {
-							const auto found = resident.find(visual.Mesh.Id());
-							if (found != resident.end()) {
-								FitPartToMesh(
-									store, entity, visual, bounds, found->second.Name, found->second.Extent
-								);
-							}
-						}
-					);
-				});
-			});
-		}
-
-		for (const auto &entry : resident) {
-			const engine::core::Name &mesh = entry.second.Name;
-
-			// **And tell any world that has not heard of it.** The catalogue is
-			// written at intake into the worlds that were open then, so a world
-			// created or opened afterwards holds parts naming a mesh it knows
-			// nothing about: `TrianglesCount` reads zero for ever while the
-			// geometry draws perfectly, which is the properties panel appearing
-			// never to update.
-			//
-			// Guarded on the count rather than written unconditionally, so this
-			// is a lookup per pending mesh rather than a write per frame - and
-			// so a republish, which *does* go through the intake path, is not
-			// overwritten here with what this cached.
-			const auto known = ContentMeshFacts.find(mesh.Id());
-			if (known == ContentMeshFacts.end()) {
-				continue;
-			}
-
-			EachOpenWorld([&mesh, &known](engine::ecs::Store &store) {
-				if (engine::scene::TrianglesOf(store, mesh) != 0) {
-					return;
-				}
-				engine::scene::RecordMesh(store, mesh, known->second.Triangles, known->second.Sheets);
-			});
 		}
 	}
 

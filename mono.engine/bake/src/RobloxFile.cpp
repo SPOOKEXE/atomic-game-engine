@@ -1,3 +1,5 @@
+#include "RobloxProperties.hpp"
+
 #include <engine/bake/RobloxModel.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -28,19 +30,6 @@ namespace engine::bake {
 
 		bool IsScript(std::string_view className) {
 			return className == "Script" || className == "LocalScript" || className == "ModuleScript";
-		}
-
-		std::string_view PublicPropertyName(std::string_view storedName) {
-			// Roblox's binary file uses private storage spellings for these two
-			// BasePart properties. The XML container and Roblox scripts use the
-			// public names, and both containers must produce one RobloxModel.
-			if (storedName == "size") {
-				return "Size";
-			}
-			if (storedName == "Color3uint8") {
-				return "Color";
-			}
-			return storedName;
 		}
 
 		RobloxAssetKind AssetKindFor(std::string_view className, std::string_view propertyName) {
@@ -400,7 +389,7 @@ namespace engine::bake {
 			instance.Properties.reserve(source.properties.size());
 
 			for (auto &[nameId, sourceValue] : source.properties) {
-				const std::string propertyName(PublicPropertyName(dom.names().name(nameId)));
+				const std::string propertyName(PublicRobloxPropertyName(dom.names().name(nameId)));
 				if (propertyName == "Name") {
 					continue;
 				}

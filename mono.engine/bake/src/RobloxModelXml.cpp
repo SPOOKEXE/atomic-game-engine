@@ -1,3 +1,5 @@
+#include "RobloxProperties.hpp"
+
 #include <engine/bake/RobloxModel.hpp>
 #include <engine/core/Chars.hpp>
 #include <engine/core/Log.hpp>
@@ -897,11 +899,12 @@ namespace engine::bake {
 				// property**, which is `RobloxModel.cpp`'s rule and has to be the
 				// same one: two readers disagreeing about where a name lives
 				// would be two trees the mapping treats differently.
-				if (name == "Name" && value.Kind() == RobloxValueKind::Text) {
+				const std::string propertyName(PublicRobloxPropertyName(name));
+				if (propertyName == "Name" && value.Kind() == RobloxValueKind::Text) {
 					items.back().Name = value.As<std::string>();
 					continue;
 				}
-				items.back().Properties.push_back(RobloxProperty{std::move(name), std::move(value)});
+				items.back().Properties.push_back(RobloxProperty{propertyName, std::move(value)});
 				continue;
 			}
 

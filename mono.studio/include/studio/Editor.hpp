@@ -2698,38 +2698,6 @@ namespace studio {
 		// `MeshPart` drew the fallback cube however good its `MeshId` was.
 		void DrainContent();
 
-		// Reshapes every part naming this mesh to the mesh's own proportions,
-		// keeping the size each part already has along its longest axis.
-		//
-		// **Because `Size` is a box the mesh is stretched into.** A part whose
-		// box is the wrong shape distorts whatever is put in it, and only the
-		// geometry knows the right shape. Idempotent, so it is safe to run
-		// whenever a mesh arrives.
-		//
-		// @param mesh   The mesh that arrived.
-		// @param extent Its own half-extent, from the renderer's table.
-		void FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent);
-
-		// Fits every part still waiting to be fitted, whatever brought it here.
-		//
-		// **Because arrival is not the only moment a part meets a mesh, and it
-		// was the only one this handled.** `FitPartsToMesh` runs when geometry
-		// lands, which covers the ordinary case - naming a mesh is what fetches
-		// it - and covers nothing else. Assigning a `MeshId` that is *already*
-		// loaded fetches nothing, so no arrival ever came and the part kept the
-		// cubic box it was created with: a character squashed into a cube, with
-		// the mesh sitting right there in the table. The same hole swallowed a
-		// paste, an undo, a duplicate and a world opened after the content had
-		// landed.
-		//
-		// **A component-and-mesh revision gate keeps the steady state out of the
-		// scene entirely.** On a changed batch it gathers resident meshes, then
-		// walks each affected world once to fit them together. `Visual::Fitted`
-		// keeps that write pass idempotent.
-		//
-		// @since v0.13
-		void FitPendingParts();
-
 		// Rebuilds `PublishedMeshNames` from the signed manifest.
 		//
 		// **Names, not content.** It is what makes
@@ -2815,22 +2783,6 @@ namespace studio {
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
 		std::unordered_map<uint32_t, engine::assets::AnimationData> ContentAnimationFacts;
-
-		// The last state that made one world's pending mesh fit scan necessary.
-		// This is a reader watermark, not a copy of the parts or their meshes.
-		struct ContentFitScanState {
-			uint64_t VisualVersion = 0;
-			size_t VisualCount = 0;
-			uint64_t MeshVersion = 0;
-
-			bool operator==(const ContentFitScanState &) const = default;
-		};
-		std::unordered_map<uint32_t, ContentFitScanState> ContentFitScans;
-
-		// Mesh admission is the only renderer event that can make an unfitted
-		// part fit. Keep it apart from the presentation revision, so texture and
-		// shader churn does not restart a full world scan.
-		uint64_t ContentMeshRevision = 0;
 
 		// The collision geometry of every mesh this session has taken in.
 		//

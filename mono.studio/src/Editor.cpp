@@ -22,6 +22,7 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -3018,11 +3019,6 @@ namespace studio {
 	// --- the game ----------------------------------------------------------
 
 	void Editor::PrepareWorld(Store &store, Scheduler &systems) {
-		// `FitPendingParts` reads these stamps instead of walking every visual in
-		// every frame. Observe while the world is being prepared, before later
-		// writes would otherwise make enabling observation reshape its rows.
-		store.Observe<engine::scene::Visual>();
-
 		// The client's half. A world with no draw list renders as an empty
 		// frame, which reads as a broken renderer rather than as a missing
 		// system.
@@ -3133,10 +3129,6 @@ namespace studio {
 	}
 
 	void Editor::PrepareWorldIn(WorldId id) {
-		// `WorldId` reuses its index. A new world in this slot must scan once,
-		// rather than inherit the old world's content-fit watermark.
-		ContentFitScans.erase(id.Index);
-
 		// Read outside the borrow, because the settings belong to the universe
 		// and the store being prepared cannot answer for them.
 		const double physicsTickRate = Universe->SettingsOf(id).PhysicsTickRate;
@@ -3176,6 +3168,11 @@ namespace studio {
 				// falls back to the part's bound in silence. `ContentShapes` is the
 				// same argument `ContentMeshFacts` makes, one layer down.
 				engine::game::MergeCollisionShapes(store, ContentShapes);
+				for (const auto &[name, mesh] : ContentMeshFacts) {
+					engine::scene::RecordMesh(
+						store, engine::core::Name::FromId(name), mesh.Triangles, mesh.Sheets
+					);
+				}
 				for (const auto &[name, animation] : ContentAnimationFacts) {
 					(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
 				}

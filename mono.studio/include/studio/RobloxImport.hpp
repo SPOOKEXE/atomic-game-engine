@@ -42,12 +42,23 @@ namespace studio {
 		size_t Occurrences = 0;
 	};
 
+	// A source class that the importer represented with a different engine
+	// class. The note names behaviour or geometry that the replacement cannot
+	// reproduce.
+	struct RobloxClassSubstitution {
+		std::string SourceClass;
+		std::string TargetClass;
+		size_t Instances = 0;
+		std::string Note;
+	};
+
 	struct RobloxImportAnalysis {
 		size_t Instances = 0;
 		size_t Classes = 0;
 		std::vector<RobloxClassGap> MissingClasses;
 		std::vector<RobloxPropertyGap> MissingProperties;
 		std::vector<RobloxPropertyGap> ConflictingProperties;
+		std::vector<RobloxClassSubstitution> Substitutions;
 	};
 
 	struct RobloxAssetChoice {
@@ -75,6 +86,7 @@ namespace studio {
 		size_t Properties = 0;
 		std::vector<RobloxClassGap> FolderFallbackClasses;
 		std::vector<RobloxPropertySkip> SkippedProperties;
+		std::vector<RobloxClassSubstitution> Substitutions;
 		std::vector<std::string> Notes;
 	};
 

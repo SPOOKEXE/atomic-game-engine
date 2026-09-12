@@ -1351,6 +1351,22 @@ TEST_CASE("the complete roblox reader exposes public part property names", "[bak
 	CHECK(Find(part, "Color") != nullptr);
 }
 
+TEST_CASE("an rbxmx exposes private part property names publicly", "[bake][rbxmx]") {
+	const RobloxModel model = ReadXml(R"xml(<roblox version="4"><Item class="Part"><Properties>
+		<string name="Name">Small</string>
+		<Vector3 name="size"><X>0.125</X><Y>3.25</Y><Z>0.03125</Z></Vector3>
+		<Color3uint8 name="Color3uint8">4278255360</Color3uint8>
+	</Properties></Item></roblox>)xml");
+	REQUIRE(model.Roots.size() == 1);
+	const RobloxInstance &part = model.Roots.front();
+	const RobloxValue *size = Find(part, "Size");
+	REQUIRE(size != nullptr);
+	CHECK(size->As<engine::core::Vector3>() == engine::core::Vector3{0.125f, 3.25f, 0.03125f});
+	CHECK(Find(part, "size") == nullptr);
+	CHECK(Find(part, "Color") != nullptr);
+	CHECK(Find(part, "Color3uint8") == nullptr);
+}
+
 TEST_CASE("roblox sequence containers preserve the same keypoints", "[bake][rbxm][rbxmx][rbxl]") {
 	Blob binary;
 	Header(binary, 1, 1);

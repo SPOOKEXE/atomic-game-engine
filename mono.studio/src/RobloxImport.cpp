@@ -129,6 +129,7 @@ namespace studio {
 
 		using GapKey = std::tuple<std::string, std::string, std::string, std::string>;
 		using SkipKey = std::tuple<std::string, std::string, std::string>;
+		using SubstitutionKey = std::tuple<std::string, std::string, std::string>;
 		using ClassCounts = std::map<std::string, size_t, std::less<>>;
 
 		void AddGap(std::map<GapKey, size_t> &gaps, const GapKey &key) {
@@ -161,6 +162,26 @@ namespace studio {
 			for (const auto &[key, count] : skips) {
 				const auto &[className, propertyName, reason] = key;
 				out.push_back({className, propertyName, reason, count});
+			}
+			return out;
+		}
+
+		void AddSubstitution(
+			std::map<SubstitutionKey, size_t> &substitutions,
+			std::string_view source,
+			std::string_view target,
+			std::string_view note
+		) {
+			substitutions[{std::string(source), std::string(target), std::string(note)}]++;
+		}
+
+		std::vector<RobloxClassSubstitution>
+		FinishSubstitutions(const std::map<SubstitutionKey, size_t> &substitutions) {
+			std::vector<RobloxClassSubstitution> out;
+			out.reserve(substitutions.size());
+			for (const auto &[key, count] : substitutions) {
+				const auto &[source, target, note] = key;
+				out.push_back({source, target, count, note});
 			}
 			return out;
 		}
@@ -205,6 +226,38 @@ namespace studio {
 		using ReplacementTable = std::unordered_map<std::string, std::vector<Replacement>>;
 		using ClassTable = std::unordered_map<std::string, engine::ecs::ClassId>;
 
+		struct BuiltinClassSubstitution {
+			std::string_view Source;
+			std::string_view Target;
+			std::string_view Note;
+		};
+
+		constexpr std::array BUILTIN_CLASS_SUBSTITUTIONS{
+			BuiltinClassSubstitution{"Hat", "Accessory", "accessory attachment behaviour is approximated"},
+			BuiltinClassSubstitution{"Seat", "Part", "seat behaviour is approximated as a part"},
+			BuiltinClassSubstitution{
+				"VehicleSeat", "Part", "vehicle seat behaviour is approximated as a part"
+			},
+			BuiltinClassSubstitution{"TrussPart", "Part", "truss geometry is approximated as a box"},
+			BuiltinClassSubstitution{"WedgePart", "Part", "wedge geometry is approximated as a box"},
+			BuiltinClassSubstitution{"CornerWedgePart", "Part", "wedge geometry is approximated as a box"},
+			BuiltinClassSubstitution{"UnionOperation", "Part", "union geometry is approximated as a box"},
+			BuiltinClassSubstitution{
+				"Sky", "SkyboxTextures", "sky settings are approximated as six textures"
+			},
+		};
+
+		const BuiltinClassSubstitution *BuiltinSubstitution(std::string_view source) {
+			const auto found = std::find_if(
+				BUILTIN_CLASS_SUBSTITUTIONS.begin(),
+				BUILTIN_CLASS_SUBSTITUTIONS.end(),
+				[source](const BuiltinClassSubstitution &substitution) {
+					return substitution.Source == source;
+				}
+			);
+			return found == BUILTIN_CLASS_SUBSTITUTIONS.end() ? nullptr : &*found;
+		}
+
 		ClassTable
 		ResolveClassMappings(const RobloxClassMappings &mappings, std::vector<std::string> *notes = nullptr) {
 			ClassTable resolved;
@@ -225,20 +278,61 @@ namespace studio {
 			return resolved;
 		}
 
-		engine::ecs::ClassId ResolveClass(const ClassTable &mappings, std::string_view source) {
+		struct ClassResolution {
+			engine::ecs::ClassId Id;
+			const BuiltinClassSubstitution *Substitution = nullptr;
+		};
+
+		ClassResolution ResolveClass(const ClassTable &mappings, std::string_view source) {
 			const engine::ecs::ClassId native =
 				engine::ecs::Classes::Find(engine::core::Name(std::string(source)));
 			if (native.IsValid()) {
-				return native;
+				return {native};
 			}
 			const auto mapped = mappings.find(std::string(source));
-			return mapped == mappings.end() ? FolderClass() : mapped->second;
+			if (mapped != mappings.end()) {
+				return {mapped->second};
+			}
+			const BuiltinClassSubstitution *substitution = BuiltinSubstitution(source);
+			if (substitution == nullptr) {
+				return {FolderClass()};
+			}
+			const engine::ecs::ClassId target =
+				engine::ecs::Classes::Find(engine::core::Name(std::string(substitution->Target)));
+			return target.IsValid() ? ClassResolution{target, substitution} : ClassResolution{FolderClass()};
 		}
 
 		bool UsesFolderFallback(const ClassTable &mappings, std::string_view source) {
 			const engine::ecs::ClassId native =
 				engine::ecs::Classes::Find(engine::core::Name(std::string(source)));
-			return !native.IsValid() && !mappings.contains(std::string(source));
+			return !native.IsValid() && !mappings.contains(std::string(source)) &&
+				   BuiltinSubstitution(source) == nullptr;
+		}
+
+		bool IsBasePart(engine::ecs::ClassId classId) {
+			const engine::ecs::ClassId basePart = engine::ecs::Classes::Find(engine::core::Name("BasePart"));
+			return basePart.IsValid() && classId.IsValid() && engine::ecs::Classes::IsA(classId, basePart);
+		}
+
+		std::string_view ImportedPropertyName(
+			std::string_view sourceClass, engine::ecs::ClassId classId, std::string_view propertyName
+		) {
+			const engine::ecs::ClassId skybox =
+				engine::ecs::Classes::Find(engine::core::Name("SkyboxTextures"));
+			if (sourceClass != "Sky" || classId != skybox) {
+				return propertyName;
+			}
+			if (propertyName == "SkyboxFt") return "Front";
+			if (propertyName == "SkyboxBk") return "Back";
+			if (propertyName == "SkyboxLf") return "Left";
+			if (propertyName == "SkyboxRt") return "Right";
+			if (propertyName == "SkyboxUp") return "Up";
+			return propertyName == "SkyboxDn" ? "Down" : propertyName;
+		}
+
+		std::string_view SurfaceAppearancePropertyName(std::string_view propertyName) {
+			if (propertyName == "ColorMap") return "TextureID";
+			return propertyName == "Color" ? "SurfaceColor" : propertyName;
 		}
 
 		std::string ReplacementKey(std::string_view path, std::string_view property) {
@@ -367,6 +461,7 @@ namespace studio {
 			std::unordered_set<std::string> SourceKeys;
 			ClassCounts FolderFallbackClasses;
 			std::map<SkipKey, size_t> SkippedProperties;
+			std::map<SubstitutionKey, size_t> Substitutions;
 			std::string Error;
 		};
 
@@ -377,6 +472,58 @@ namespace studio {
 			std::string_view reason
 		) {
 			state.SkippedProperties[{instance.ClassName, property.Name, std::string(reason)}]++;
+		}
+
+		void ApplyRobloxProperty(
+			BuildState &state,
+			const engine::bake::RobloxInstance &source,
+			std::string_view path,
+			engine::ecs::Entity instance,
+			const engine::bake::RobloxProperty &property,
+			std::string_view targetName
+		) {
+			const engine::ecs::PropertyDescriptor *descriptor =
+				RobloxPropertyNamed(state.Store, instance, targetName);
+			if (descriptor == nullptr) {
+				SkipProperty(state, source, property, "no matching engine property");
+				return;
+			}
+
+			engine::bake::RobloxValue mapped = property.Value;
+			if (mapped.Kind() == engine::bake::RobloxValueKind::Text) {
+				mapped.Set(
+					ApplyAssetMappings(state.Replacements, path, property.Name, mapped.As<std::string>())
+				);
+			}
+			if (descriptor->Spelling == "CollisionGroup" &&
+				mapped.Kind() == engine::bake::RobloxValueKind::Text) {
+				// Roblox stores the group name on each part. The computed engine
+				// property rightly refuses unknown names, so declare the imported
+				// name before asking that property to apply it.
+				const std::string &group = mapped.As<std::string>();
+				if (group.empty() ||
+					engine::spatial::CollisionGroups::Register(group) == engine::spatial::NO_GROUP) {
+					SkipProperty(state, source, property, "collision group is empty or unavailable");
+					return;
+				}
+			}
+			engine::game::PropertyValue value;
+			if (!Compatible(descriptor->Type, mapped.Kind())) {
+				SkipProperty(state, source, property, "source value type is incompatible");
+				return;
+			}
+			if (!ToGameValue(*descriptor, mapped, value)) {
+				const char *reason = descriptor->Type == PropertyType::Enum
+										 ? "engine enum does not contain value"
+										 : "source value cannot be represented";
+				SkipProperty(state, source, property, reason);
+				return;
+			}
+			if (!engine::game::WriteAuthoredProperty(state.Store, instance, *descriptor, value)) {
+				SkipProperty(state, source, property, "engine property rejected value");
+				return;
+			}
+			state.Report.Properties++;
 		}
 
 		std::string UniqueSourceKey(BuildState &state, const std::string &path) {
@@ -446,10 +593,18 @@ namespace studio {
 
 			if (instance == NULL_ENTITY) {
 				const bool fallback = UsesFolderFallback(state.Classes, node.ClassName);
-				const engine::ecs::ClassId classId = ResolveClass(state.Classes, node.ClassName);
-				instance = state.Store.CreateInstance(classId, node.Name);
+				const ClassResolution resolution = ResolveClass(state.Classes, node.ClassName);
+				instance = state.Store.CreateInstance(resolution.Id, node.Name);
 				if (instance != NULL_ENTITY && fallback) {
 					state.FolderFallbackClasses[node.ClassName]++;
+				}
+				if (instance != NULL_ENTITY && resolution.Substitution != nullptr) {
+					AddSubstitution(
+						state.Substitutions,
+						resolution.Substitution->Source,
+						resolution.Substitution->Target,
+						resolution.Substitution->Note
+					);
 				}
 			}
 			if (instance == NULL_ENTITY) {
@@ -458,52 +613,19 @@ namespace studio {
 			}
 			state.Report.Instances++;
 
+			const engine::ecs::ClassId instanceClass = state.Store.ClassOf(instance);
 			for (const engine::bake::RobloxProperty &property : node.Properties) {
 				if (&property == sourceProperty) {
 					continue;
 				}
-				const engine::ecs::PropertyDescriptor *descriptor =
-					RobloxPropertyNamed(state.Store, instance, property.Name);
-				if (descriptor == nullptr) {
-					SkipProperty(state, node, property, "no matching engine property");
-					continue;
-				}
-
-				engine::bake::RobloxValue mapped = property.Value;
-				if (mapped.Kind() == engine::bake::RobloxValueKind::Text) {
-					mapped.Set(
-						ApplyAssetMappings(state.Replacements, path, property.Name, mapped.As<std::string>())
-					);
-				}
-				if (descriptor->Spelling == "CollisionGroup" &&
-					mapped.Kind() == engine::bake::RobloxValueKind::Text) {
-					// Roblox stores the group name on each part. The computed engine
-					// property rightly refuses unknown names, so declare the imported
-					// name before asking that property to apply it.
-					const std::string &group = mapped.As<std::string>();
-					if (group.empty() ||
-						engine::spatial::CollisionGroups::Register(group) == engine::spatial::NO_GROUP) {
-						SkipProperty(state, node, property, "collision group is empty or unavailable");
-						continue;
-					}
-				}
-				engine::game::PropertyValue value;
-				if (!Compatible(descriptor->Type, mapped.Kind())) {
-					SkipProperty(state, node, property, "source value type is incompatible");
-					continue;
-				}
-				if (!ToGameValue(*descriptor, mapped, value)) {
-					const char *reason = descriptor->Type == PropertyType::Enum
-											 ? "engine enum does not contain value"
-											 : "source value cannot be represented";
-					SkipProperty(state, node, property, reason);
-					continue;
-				}
-				if (!engine::game::WriteAuthoredProperty(state.Store, instance, *descriptor, value)) {
-					SkipProperty(state, node, property, "engine property rejected value");
-					continue;
-				}
-				state.Report.Properties++;
+				ApplyRobloxProperty(
+					state,
+					node,
+					path,
+					instance,
+					property,
+					ImportedPropertyName(node.ClassName, instanceClass, property.Name)
+				);
 			}
 			if (state.Options.DisableScripts &&
 				(node.ClassName == "Script" || node.ClassName == "LocalScript")) {
@@ -513,6 +635,26 @@ namespace studio {
 
 			for (const engine::bake::RobloxInstance &child : node.Children) {
 				const std::string childPath = path + "/" + child.Name;
+				if (child.ClassName == "SurfaceAppearance" && IsBasePart(instanceClass)) {
+					state.Report.Instances++;
+					AddSubstitution(
+						state.Substitutions,
+						"SurfaceAppearance",
+						engine::ecs::Classes::Describe(instanceClass).Name.Text(),
+						"surface properties were applied to the parent; material behaviour is approximated"
+					);
+					for (const engine::bake::RobloxProperty &property : child.Properties) {
+						ApplyRobloxProperty(
+							state,
+							child,
+							childPath,
+							instance,
+							property,
+							SurfaceAppearancePropertyName(property.Name)
+						);
+					}
+					continue;
+				}
 				const Entity built = BuildRobloxInstance(state, child, childPath);
 				if (built != NULL_ENTITY) {
 					state.Store.SetParent(built, instance);
@@ -793,17 +935,46 @@ namespace studio {
 		(void)FolderClass();
 		const ClassTable mappedClasses = ResolveClassMappings(classMappings);
 		ClassCounts classCounts;
+		ClassCounts missingClasses;
 		std::map<GapKey, size_t> missingProperties;
 		std::map<GapKey, size_t> conflictingProperties;
+		std::map<SubstitutionKey, size_t> substitutions;
 
-		const auto visit = [&](const auto &self, const engine::bake::RobloxInstance &instance) -> void {
+		const auto visit = [&](const auto &self,
+							   const engine::bake::RobloxInstance &instance,
+							   engine::ecs::ClassId parentClass) -> void {
 			classCounts[instance.ClassName]++;
-			const engine::ecs::ClassId classId = ResolveClass(mappedClasses, instance.ClassName);
+			const ClassResolution resolution = ResolveClass(mappedClasses, instance.ClassName);
+			if (resolution.Substitution != nullptr) {
+				AddSubstitution(
+					substitutions,
+					resolution.Substitution->Source,
+					resolution.Substitution->Target,
+					resolution.Substitution->Note
+				);
+			}
+			const bool surfaceAppearance =
+				instance.ClassName == "SurfaceAppearance" && IsBasePart(parentClass);
+			const engine::ecs::ClassId classId = surfaceAppearance ? parentClass : resolution.Id;
+			if (!surfaceAppearance && UsesFolderFallback(mappedClasses, instance.ClassName)) {
+				missingClasses[instance.ClassName]++;
+			}
+			if (surfaceAppearance) {
+				AddSubstitution(
+					substitutions,
+					"SurfaceAppearance",
+					engine::ecs::Classes::Describe(parentClass).Name.Text(),
+					"surface properties were applied to the parent; material behaviour is approximated"
+				);
+			}
 			if (classId.IsValid()) {
 				const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(classId);
 				for (const engine::bake::RobloxProperty &property : instance.Properties) {
-					const engine::ecs::PropertyDescriptor *descriptor =
-						RobloxPropertyNamed(info, property.Name);
+					const engine::ecs::PropertyDescriptor *descriptor = RobloxPropertyNamed(
+						info,
+						surfaceAppearance ? SurfaceAppearancePropertyName(property.Name)
+										  : ImportedPropertyName(instance.ClassName, classId, property.Name)
+					);
 					if (descriptor == nullptr) {
 						AddGap(
 							missingProperties,
@@ -824,25 +995,25 @@ namespace studio {
 			}
 
 			for (const engine::bake::RobloxInstance &child : instance.Children) {
-				self(self, child);
+				self(self, child, classId);
 			}
 		};
 
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
-			visit(visit, root);
+			visit(visit, root, {});
 		}
 
 		RobloxImportAnalysis analysis;
 		analysis.Classes = classCounts.size();
 		for (const auto &[className, count] : classCounts) {
 			analysis.Instances += count;
-			if (!engine::ecs::Classes::Find(engine::core::Name(className)).IsValid() &&
-				!mappedClasses.contains(className)) {
-				analysis.MissingClasses.push_back({className, count});
-			}
+		}
+		for (const auto &[className, count] : missingClasses) {
+			analysis.MissingClasses.push_back({className, count});
 		}
 		analysis.MissingProperties = FinishGaps(missingProperties);
 		analysis.ConflictingProperties = FinishGaps(conflictingProperties);
+		analysis.Substitutions = FinishSubstitutions(substitutions);
 		return analysis;
 	}
 
@@ -1021,14 +1192,14 @@ namespace studio {
 			);
 		}
 
-		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}};
+		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}, {}};
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
 			const engine::ecs::Entity existing = store.FindFirstRoot(root.Name);
 			if (existing != engine::ecs::NULL_ENTITY) {
 				candidate.ReusedRoots++;
 				const engine::ecs::ClassId existingClass = store.ClassOf(existing);
-				const engine::ecs::ClassId wantedClass = ResolveClass(mappedClasses, root.ClassName);
-				if (wantedClass.IsValid() && existingClass != wantedClass) {
+				const ClassResolution wantedClass = ResolveClass(mappedClasses, root.ClassName);
+				if (wantedClass.Id.IsValid() && existingClass != wantedClass.Id) {
 					candidate.Notes.push_back(
 						root.Name + " reused an existing root of a different engine class"
 					);
@@ -1042,6 +1213,7 @@ namespace studio {
 		}
 		candidate.FolderFallbackClasses = FinishClassCounts(state.FolderFallbackClasses);
 		candidate.SkippedProperties = FinishSkippedProperties(state.SkippedProperties);
+		candidate.Substitutions = FinishSubstitutions(state.Substitutions);
 
 		out = std::move(candidate);
 		error.clear();
@@ -1315,6 +1487,7 @@ namespace studio {
 					std::to_string(report.DisabledScripts) + " scripts disabled, " +
 					std::to_string(report.Properties) + " properties applied, " +
 					std::to_string(report.FolderFallbackClasses.size()) + " fallback class groups, " +
+					std::to_string(report.Substitutions.size()) + " approximated class groups, " +
 					std::to_string(report.SkippedProperties.size()) + " skipped property groups";
 			}
 		}
@@ -1430,6 +1603,32 @@ namespace studio {
 				drawPropertyGaps("##roblox-missing-properties", RobloxAnalysis.MissingProperties);
 				ImGui::TextUnformatted("Type conflicts");
 				drawPropertyGaps("##roblox-conflicting-properties", RobloxAnalysis.ConflictingProperties);
+				if (!RobloxAnalysis.Substitutions.empty()) {
+					ImGui::TextUnformatted("Approximations");
+					if (ImGui::BeginTable(
+							"##roblox-substitutions", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV
+						)) {
+						ImGui::TableSetupColumn("Roblox class");
+						ImGui::TableSetupColumn("Engine class");
+						ImGui::TableSetupColumn(
+							"Uses", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(65.0f)
+						);
+						ImGui::TableSetupColumn("Approximation");
+						ImGui::TableHeadersRow();
+						for (const RobloxClassSubstitution &substitution : RobloxAnalysis.Substitutions) {
+							ImGui::TableNextRow();
+							ImGui::TableNextColumn();
+							ImGui::TextUnformatted(substitution.SourceClass.c_str());
+							ImGui::TableNextColumn();
+							ImGui::TextUnformatted(substitution.TargetClass.c_str());
+							ImGui::TableNextColumn();
+							ImGui::Text("%zu", substitution.Instances);
+							ImGui::TableNextColumn();
+							ImGui::TextUnformatted(substitution.Note.c_str());
+						}
+						ImGui::EndTable();
+					}
+				}
 				ImGui::EndTabItem();
 			}
 

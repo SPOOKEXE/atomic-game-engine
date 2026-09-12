@@ -1,3 +1,5 @@
+#include "RobloxProperties.hpp"
+
 #include <engine/bake/RobloxModel.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -879,12 +881,13 @@ namespace engine::bake {
 
 				// **`Name` becomes the instance's name and is not also a
 				// property**, so that nothing downstream has two places to read
-				// one fact from. Anything else keeps the spelling the file used.
-				if (name == "Name" && values[index].Kind() == RobloxValueKind::Text) {
+				// one fact from. The remaining name is normalized to the public API.
+				const std::string propertyName(PublicRobloxPropertyName(name));
+				if (propertyName == "Name" && values[index].Kind() == RobloxValueKind::Text) {
 					instance.Name = values[index].As<std::string>();
 					continue;
 				}
-				instance.Properties.push_back(RobloxProperty{name, std::move(values[index])});
+				instance.Properties.push_back(RobloxProperty{propertyName, std::move(values[index])});
 			}
 			return true;
 		}

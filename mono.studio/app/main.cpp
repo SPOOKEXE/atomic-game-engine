@@ -183,13 +183,24 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 		std::printf(
-			"%zu instances, %zu classes, %zu missing classes, %zu missing properties, %zu type conflicts\n",
+			"%zu instances, %zu classes, %zu missing classes, %zu missing properties, %zu type conflicts, "
+			"%zu approximations\n",
 			report.Analysis.Instances,
 			report.Analysis.Classes,
 			report.Analysis.MissingClasses.size(),
 			report.Analysis.MissingProperties.size(),
-			report.Analysis.ConflictingProperties.size()
+			report.Analysis.ConflictingProperties.size(),
+			report.Analysis.Substitutions.size()
 		);
+		for (const studio::RobloxClassSubstitution &substitution : report.Analysis.Substitutions) {
+			std::printf(
+				"  %s -> %s: %zu instance(s), %s\n",
+				substitution.SourceClass.c_str(),
+				substitution.TargetClass.c_str(),
+				substitution.Instances,
+				substitution.Note.c_str()
+			);
+		}
 		return 0;
 	}
 
