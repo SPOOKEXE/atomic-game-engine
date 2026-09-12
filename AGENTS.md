@@ -410,3 +410,12 @@ the one that gets believed.
   improve confidence, either ask the user before running it or defer it to the final verification stage.
   At that stage, ask the user for approval. If they decline, report the skipped check clearly.
 - Security is important, but not should be over-indexed on. If you think something should be audited, especially new items, add to ROADMAP.md under current work version.
+
+---
+
+## CHATGPT MODEL RULES
+
+Specifically for orchestrating models with Codex (chatgpt models) - Astra or Sol.
+
+You must spawn luna subagents for quick edits, terra agents for implementation, and review by READING with astra then modifying with terra.
+You want to minimize astra output tokens but contain enough detail for the dumber models to get right.
