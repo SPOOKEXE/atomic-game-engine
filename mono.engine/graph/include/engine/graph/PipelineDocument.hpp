@@ -431,6 +431,14 @@ namespace engine::graph {
 	//         graph that compiles.
 	PipelineDocument PathtraceDemoDocument();
 
+	// The default PBR graph with an inspectable compositor tail. The chain keeps
+	// colour grading, mixing, image transforms and the two blur axes as separate
+	// nodes so each pass can be reordered or replaced in the editor.
+	//
+	// @return The compositor demonstration document. `Build`ing it produces a
+	//         complete graph ending at the ordinary image output.
+	PipelineDocument CompositorDemoDocument();
+
 	// The default PBR graph with one frame capture node that exports the linear
 	// HDR, linear-depth, and packed-normal planes used by DataCapture.
 	PipelineDocument DefaultPbrDataCaptureDocument();

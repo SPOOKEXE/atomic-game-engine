@@ -113,6 +113,28 @@ TEST_CASE("the tracing pipeline assets match their graph recipes", "[examples][g
 	}
 }
 
+TEST_CASE("the compositor pipeline asset matches its graph recipe", "[examples][graph][compositor]") {
+	const StagedAssets assets;
+	engine::graph::RegisterRenderNodeKinds();
+	const std::filesystem::path path =
+		engine::core::Paths::Assets() / "examples" / "pipelines" / "CompositorDemo.pipeline";
+	std::ifstream input(path, std::ios::binary);
+	REQUIRE(input);
+	const std::string text(std::istreambuf_iterator<char>(input), {});
+
+	engine::graph::PipelineDocument loaded;
+	Name offender;
+	REQUIRE(engine::graph::Read(text, loaded, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	CHECK(engine::graph::Write(loaded) == engine::graph::Write(engine::graph::CompositorDemoDocument()));
+
+	engine::graph::RenderGraph graph;
+	REQUIRE(engine::graph::Build(loaded, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	for (const char *name :
+		 {"grade-exposure", "grade-hsv", "mix-original", "frame-transform", "blur-x", "blur-y"}) {
+		CHECK(HasNode(graph, Name(name)));
+	}
+}
+
 TEST_CASE("the render features scene authors policies attachments and LOD fallback", "[examples][scene]") {
 	const StagedAssets assets;
 	Store store("render_features_demo");

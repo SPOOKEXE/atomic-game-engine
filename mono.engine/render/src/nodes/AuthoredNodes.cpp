@@ -6,9 +6,10 @@
 // `Impl::GraphComputeFor`, and what the node reads and writes is whatever the
 // graph wired into it - so neither of them names a texture of this module's.
 
-#include "ViewRecording.hpp"
+#include "Compositor.hpp"
 #include "GraphHistory.hpp"
 #include "HardRender.hpp"
+#include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -69,7 +70,8 @@ namespace engine::render {
 			const scene::WorldLighting &lighting,
 			uint32_t width,
 			uint32_t height,
-			uint32_t instanceCount
+			uint32_t instanceCount,
+			const graph::Node &node
 		) {
 			GraphPassUniforms uniforms;
 			uniforms.ViewProjection = matrices.ViewProjection;
@@ -86,15 +88,19 @@ namespace engine::render {
 				static_cast<float>(width) / static_cast<float>(height),
 				static_cast<float>(instanceCount),
 			};
-			uniforms.Eye = glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
+			uniforms.Eye =
+				glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
 			const core::Vector3 forward = cameraFrame.LookVector();
-			uniforms.CameraDepth = glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(cameraFrame.Position)};
+			uniforms.CameraDepth =
+				glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(cameraFrame.Position)};
 			uniforms.RenderFeatures = glm::uvec4{
 				SupportedRenderFeatures(caps),
 				scene::ApplyRenderFeaturePolicy(scene::ALL_RENDER_FEATURES, lighting.RenderFeatures),
 				camera.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES,
 				camera.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES,
 			};
+			const CompositorParameters compositor = CompositorParametersFor(node);
+			std::copy(compositor.begin(), compositor.end(), uniforms.Parameters);
 			return uniforms;
 		}
 	}
@@ -208,7 +214,8 @@ namespace engine::render {
 				recording.CurrentLighting,
 				targets.front().Width,
 				targets.front().Height,
-				recording.InstanceCount
+				recording.InstanceCount,
+				*node
 			);
 
 			std::vector<SDL_GPUColorTargetInfo> colours(targets.size());
@@ -241,7 +248,18 @@ namespace engine::render {
 			return true;
 		};
 		frameNodes.Set(core::Name("raster"), rasterHandler);
-		for (const char *kind : {"fxaa", "taa", "smaa-edges", "smaa-blend", "smaa-resolve", "mix"}) {
+		for (const char *kind : {
+				 "fxaa",
+				 "taa",
+				 "smaa-edges",
+				 "smaa-blend",
+				 "smaa-resolve",
+				 "exposure-grade",
+				 "hsv",
+				 "mix",
+				 "transform-crop",
+				 "blur",
+			 }) {
 			frameNodes.Set(core::Name(kind), rasterHandler);
 		}
 
@@ -340,7 +358,8 @@ namespace engine::render {
 			const bool traceUniforms = IsTraceNode(node->Kind);
 			const std::string *uniforms = node->Parameter(core::Name("uniforms"));
 			// Slot one is the trace parameter block, so slot zero must exist.
-			const bool readViewUniforms = traceUniforms || !demanded || (uniforms != nullptr && *uniforms == "view");
+			const bool readViewUniforms =
+				traceUniforms || !demanded || (uniforms != nullptr && *uniforms == "view");
 			if (localX == 0 || localY == 0 || localZ == 0) {
 				ENGINE_WARN("'{}' asks for a zero-sized compute thread group", context.Name.Text());
 				return true;
@@ -458,7 +477,8 @@ namespace engine::render {
 					recording.CurrentLighting,
 					firstTarget.Width,
 					firstTarget.Height,
-					recording.InstanceCount
+					recording.InstanceCount,
+					*node
 				);
 				SDL_PushGPUComputeUniformData(dispatchCommand, 0, &passUniforms, sizeof(passUniforms));
 			}

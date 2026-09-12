@@ -1290,7 +1290,8 @@ namespace engine::graph {
 					 .Key = core::Name("radiance")}
 				);
 				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("uniforms"), .Value = "view"});
-				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("samples-per-frame"), .Value = "1"}
+				pathtrace.Record(
+					{.Kind = EditKind::Set, .Key = core::Name("samples-per-frame"), .Value = "1"}
 				);
 				pathtrace.Record({
 					.Kind = EditKind::AddNode,
@@ -1334,6 +1335,109 @@ namespace engine::graph {
 		return pathtrace;
 	}
 
+	PipelineDocument CompositorDemoDocument() {
+		PipelineDocument document = DefaultPbrDocument();
+		const auto resource =
+			[&document](std::string_view name, ResourceFormat format, bool external = false) {
+				document.Record({
+					.Kind = EditKind::AddResource,
+					.Name = core::Name(name),
+					.Resource = ResourceKind::Colour,
+					.Format = format,
+					.External = external,
+				});
+			};
+		const auto node =
+			[&document](std::string_view name, std::string_view kind, NodeScope scope = NodeScope::View) {
+				document.Record({
+					.Kind = EditKind::AddNode,
+					.Name = core::Name(name),
+					.NodeKind = core::Name(kind),
+					.Scope = scope,
+				});
+			};
+		const auto edge = [&document](EditKind kind, std::string_view resourceName, std::string_view port) {
+			document.Record({.Kind = kind, .Target = core::Name(resourceName), .Key = core::Name(port)});
+		};
+		const auto setting = [&document](std::string_view key, std::string_view value) {
+			document.Record({.Kind = EditKind::Set, .Key = core::Name(key), .Value = std::string(value)});
+		};
+
+		for (const char *disabled : {"tonemap", "present", "interface", "overlay", "output-image"}) {
+			document.Record({.Kind = EditKind::Enable, .Name = core::Name(disabled), .Enabled = false});
+		}
+
+		for (const char *name :
+			 {"grade", "hsv-grade", "mixed", "transformed", "blur-horizontal", "blurred"}) {
+			resource(name, ResourceFormat::RGBA16F);
+		}
+		resource("compositor-display", ResourceFormat::RGBA8_SRGB);
+		resource("compositor-scene", ResourceFormat::RGBA8_SRGB);
+		resource("compositor-interface", ResourceFormat::RGBA8_SRGB, true);
+		resource("compositor-output", ResourceFormat::RGBA8_SRGB);
+
+		node("grade-exposure", "exposure-grade");
+		edge(EditKind::Reads, "lens-b", "source");
+		edge(EditKind::Writes, "grade", "colour");
+		setting("exposure", "0.5");
+		setting("contrast", "1.08");
+		setting("pivot", "0.18");
+		setting("gamma", "1");
+
+		node("grade-hsv", "hsv");
+		edge(EditKind::Reads, "grade", "source");
+		edge(EditKind::Writes, "hsv-grade", "colour");
+		setting("hue", "8");
+		setting("saturation", "1.1");
+		setting("value", "1");
+		setting("factor", "0.75");
+
+		node("mix-original", "mix");
+		edge(EditKind::Reads, "lens-b", "a");
+		edge(EditKind::Reads, "hsv-grade", "b");
+		edge(EditKind::Writes, "mixed", "colour");
+		setting("operation", "screen");
+		setting("factor", "0.2");
+		setting("clamp", "zero");
+
+		node("frame-transform", "transform-crop");
+		edge(EditKind::Reads, "mixed", "source");
+		edge(EditKind::Writes, "transformed", "colour");
+		setting("scale-x", "0.96");
+		setting("scale-y", "0.96");
+		setting("extend", "mirror");
+
+		node("blur-x", "blur");
+		edge(EditKind::Reads, "transformed", "source");
+		edge(EditKind::Writes, "blur-horizontal", "colour");
+		setting("radius", "2");
+		setting("sigma", "1.25");
+		setting("angle", "0");
+
+		node("blur-y", "blur");
+		edge(EditKind::Reads, "blur-horizontal", "source");
+		edge(EditKind::Writes, "blurred", "colour");
+		setting("radius", "2");
+		setting("sigma", "1.25");
+		setting("angle", "90");
+
+		node("compositor-tonemap", "tonemap");
+		edge(EditKind::Reads, "blurred", "colour");
+		edge(EditKind::Writes, "compositor-display", "colour");
+		node("compositor-present", "present", NodeScope::Frame);
+		edge(EditKind::Reads, "compositor-display", "image");
+		edge(EditKind::Writes, "compositor-scene", "image");
+		node("compositor-interface-pass", "interface", NodeScope::Frame);
+		edge(EditKind::Writes, "compositor-interface", "image");
+		node("compositor-overlay", "overlay", NodeScope::Frame);
+		edge(EditKind::Reads, "compositor-scene", "scene");
+		edge(EditKind::Reads, "compositor-interface", "interface");
+		edge(EditKind::Writes, "compositor-output", "image");
+		node("compositor-output-image", "output-image", NodeScope::Frame);
+		edge(EditKind::Reads, "compositor-output", "image");
+		return document;
+	}
+
 	PipelineDocument DefaultPbrDataCaptureDocument() {
 		PipelineDocument document = DefaultPbrDocument();
 		document.Record(
@@ -1345,7 +1449,8 @@ namespace engine::graph {
 		for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 3>{
 				 {{"lit", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}}
 			 }) {
-			document.Record({.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
+			document.Record(
+				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
 			);
 		}
 		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 3>{
@@ -1658,28 +1763,34 @@ namespace engine::graph {
 			[&document](
 				std::string_view name, ResourceKind kind, ResourceFormat format, bool external = false
 			) {
-				document.Record(Edit{
-					.Kind = EditKind::AddResource,
-					.Name = core::Name(name),
-					.Resource = kind,
-					.Format = format,
-					.External = external,
-				});
+				document.Record(
+					Edit{
+						.Kind = EditKind::AddResource,
+						.Name = core::Name(name),
+						.Resource = kind,
+						.Format = format,
+						.External = external,
+					}
+				);
 			};
 		const auto node = [&document](std::string_view name, NodeScope scope) {
-			document.Record(Edit{
-				.Kind = EditKind::AddNode,
-				.Name = core::Name(name),
-				.NodeKind = core::Name(name),
-				.Scope = scope,
-			});
+			document.Record(
+				Edit{
+					.Kind = EditKind::AddNode,
+					.Name = core::Name(name),
+					.NodeKind = core::Name(name),
+					.Scope = scope,
+				}
+			);
 		};
 		const auto touches = [&document](EditKind kind, std::string_view target, std::string_view port) {
-			document.Record(Edit{
-				.Kind = kind,
-				.Target = core::Name(target),
-				.Key = core::Name(port),
-			});
+			document.Record(
+				Edit{
+					.Kind = kind,
+					.Target = core::Name(target),
+					.Key = core::Name(port),
+				}
+			);
 		};
 
 		resource("world-entities", ResourceKind::Entities, ResourceFormat::R8);

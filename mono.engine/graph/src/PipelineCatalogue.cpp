@@ -253,9 +253,52 @@ namespace engine::graph {
 				spec.Params.push_back(NumberParam("thickness", "Depth thickness", "0.1", 0.001, 100.0));
 			}
 			if (spec.Kind == core::Name("pathtrace")) {
-				spec.Params.push_back(NumberParam("samples-per-frame", "Samples per frame", "1", 1.0, 4096.0)
+				spec.Params.push_back(
+					NumberParam("samples-per-frame", "Samples per frame", "1", 1.0, 4096.0)
 				);
 				spec.Params.push_back(NumberParam("max-bounces", "Max bounces", "3", 1.0, 64.0));
+			}
+			if (spec.Kind == core::Name("exposure-grade")) {
+				spec.Params.push_back(NumberParam("exposure", "Exposure stops", "0", -16.0, 16.0));
+				spec.Params.push_back(NumberParam("contrast", "Contrast", "1", 0.0, 4.0));
+				spec.Params.push_back(NumberParam("pivot", "Contrast pivot", "0.18", 0.0, 4.0));
+				spec.Params.push_back(NumberParam("gamma", "Gamma", "1", 0.01, 8.0));
+			}
+			if (spec.Kind == core::Name("hsv")) {
+				spec.Params.push_back(NumberParam("hue", "Hue degrees", "0", -360.0, 360.0));
+				spec.Params.push_back(NumberParam("saturation", "Saturation", "1", 0.0, 4.0));
+				spec.Params.push_back(NumberParam("value", "Value", "1", 0.0, 16.0));
+				spec.Params.push_back(NumberParam("factor", "Factor", "1", 0.0, 1.0));
+			}
+			if (spec.Kind == core::Name("mix")) {
+				spec.Params.push_back(SelectParam(
+					"operation",
+					"Operation",
+					"alpha-over",
+					{"mix", "add", "multiply", "screen", "overlay", "subtract", "difference", "alpha-over"}
+				));
+				spec.Params.push_back(NumberParam("factor", "Factor", "1", 0.0, 1.0));
+				spec.Params.push_back(SelectParam("clamp", "Clamp", "none", {"none", "zero", "unit"}));
+			}
+			if (spec.Kind == core::Name("transform-crop")) {
+				spec.Params.push_back(NumberParam("scale-x", "Scale X", "1", 0.01, 100.0));
+				spec.Params.push_back(NumberParam("scale-y", "Scale Y", "1", 0.01, 100.0));
+				spec.Params.push_back(NumberParam("translate-x", "Translate X", "0", -10.0, 10.0));
+				spec.Params.push_back(NumberParam("translate-y", "Translate Y", "0", -10.0, 10.0));
+				spec.Params.push_back(NumberParam("rotation", "Rotation degrees", "0", -360.0, 360.0));
+				spec.Params.push_back(NumberParam("crop-left", "Crop left", "0", 0.0, 1.0));
+				spec.Params.push_back(NumberParam("crop-top", "Crop top", "0", 0.0, 1.0));
+				spec.Params.push_back(NumberParam("crop-right", "Crop right", "1", 0.0, 1.0));
+				spec.Params.push_back(NumberParam("crop-bottom", "Crop bottom", "1", 0.0, 1.0));
+				spec.Params.push_back(SelectParam(
+					"extend", "Outside image", "transparent", {"transparent", "clamp", "repeat", "mirror"}
+				));
+			}
+			if (spec.Kind == core::Name("blur")) {
+				spec.Params.push_back(SelectParam("kernel", "Kernel", "gaussian", {"gaussian", "box"}));
+				spec.Params.push_back(NumberParam("radius", "Radius pixels", "4", 0.0, 32.0));
+				spec.Params.push_back(NumberParam("sigma", "Gaussian sigma", "2", 0.01, 32.0));
+				spec.Params.push_back(NumberParam("angle", "Direction degrees", "0", -360.0, 360.0));
 			}
 			if (Named(spec.Kind, {"raster", "dispatch"})) {
 				spec.Params.push_back(TextParam("shader", "Shader", ""));
@@ -270,10 +313,12 @@ namespace engine::graph {
 			if (Named(
 					spec.Kind, {"dispatch", "tessellate", "global-illumination", "raytrace", "pathtrace"}
 				)) {
-				spec.Params.push_back(SelectParam("dispatch.mode", "Dispatch", "target", {"target", "groups"})
+				spec.Params.push_back(
+					SelectParam("dispatch.mode", "Dispatch", "target", {"target", "groups"})
 				);
 				spec.Params.push_back(SelectParam("uniforms", "Uniforms", "view", {"none", "view"}));
-				spec.Params.push_back(SelectParam("instances", "Instance rows", "none", {"none", "resident"})
+				spec.Params.push_back(
+					SelectParam("instances", "Instance rows", "none", {"none", "resident"})
 				);
 				for (const auto &[name, label, fallback] :
 					 std::initializer_list<std::tuple<const char *, const char *, const char *>>{
@@ -305,14 +350,16 @@ namespace engine::graph {
 				spec.Params.push_back(SelectParam(
 					"scope", "Capture scope", "complete-world", {"complete-world", "opaque-lighting"}
 				));
-				spec.Params.push_back(SelectParam("projection", "Capture projection", "eye", {"eye", "seam"})
+				spec.Params.push_back(
+					SelectParam("projection", "Capture projection", "eye", {"eye", "seam"})
 				);
 			}
 			if (spec.Kind == core::Name("depth-linearise"))
 				spec.Params.push_back(SelectParam("background", "Background depth", "far", {"far", "zero"}));
 			if (spec.Kind == core::Name("capture")) {
 				spec.Params.push_back(TextParam("path", "BMP path", ""));
-				spec.Params.push_back(SelectParam("capture.mode", "Capture", "once", {"once", "every-frame"})
+				spec.Params.push_back(
+					SelectParam("capture.mode", "Capture", "once", {"once", "every-frame"})
 				);
 			}
 			if (spec.Kind == core::Name("blit")) {
@@ -384,7 +431,11 @@ namespace engine::graph {
 				 "portal-overlay",
 				 "mirror-overlay",
 				 "transparent",
+				 "exposure-grade",
+				 "hsv",
 				 "mix",
+				 "transform-crop",
+				 "blur",
 				 "blit",
 				 "raster",
 				 "dispatch",
@@ -417,6 +468,11 @@ namespace engine::graph {
 				 "smaa-edges",
 				 "smaa-blend",
 				 "smaa-resolve",
+				 "exposure-grade",
+				 "hsv",
+				 "mix",
+				 "transform-crop",
+				 "blur",
 				 "cull-frustum",
 				 "cull-distance",
 				 "filter-tag",
@@ -955,8 +1011,12 @@ namespace engine::graph {
 			 {{"colour", K::Texture, RGBA16, true, "The HDR scene behind every lens."},
 			  {"depth", K::Texture, R32, true, "Linear depth for spatial occlusion."}},
 			 {{"colour", K::Colour, RGBA16, true, "The lensed HDR scene."},
-			  {"scratch", K::Colour, RGBA16, true, "Intermediate HDR image for the ordered lens chain.", true}
-			 },
+			  {"scratch",
+			   K::Colour,
+			   RGBA16,
+			   true,
+			   "Intermediate HDR image for the ordered lens chain.",
+			   true}},
 			 "Composes bounded world-space lens shader runs in priority order before tone mapping."},
 
 			// --- composite -------------------------------------------------------
@@ -977,21 +1037,49 @@ namespace engine::graph {
 			 C::Composite,
 			 S::View,
 			 {{"a", K::Texture, RGBA16, true, "The bottom image."},
-			  {"b", K::Texture, RGBA16, true, "The top image."},
-			  {"factor", K::Texture, F::R8, false, "Per-pixel blend, if any."}},
+			  {"b", K::Texture, RGBA16, true, "The top image."}},
 			 {{"colour", K::Colour, RGBA16, true, "The blend."}},
-			 "Two images and a blend mode. The most-used node in any compositor.",
+			 "Combines two straight-alpha images with an authored operation and constant factor.",
 			 false,
 			 "mix.frag"},
+
+			{"exposure-grade",
+			 "Exposure and contrast",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "Linear colour to grade."}},
+			 {{"colour", K::Colour, RGBA16, true, "Exposure, contrast and gamma adjusted colour."}},
+			 "Applies exposure in stops, contrast around an authored pivot, and display-independent gamma.",
+			 false,
+			 "exposure-grade.frag"},
+
+			{"hsv",
+			 "Hue saturation value",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "Colour to adjust."}},
+			 {{"colour", K::Colour, RGBA16, true, "Adjusted colour."}},
+			 "Offsets hue and scales saturation and value, blended by one factor.",
+			 false,
+			 "hsv.frag"},
+
+			{"transform-crop",
+			 "Transform and crop",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "Image to transform."}},
+			 {{"colour", K::Colour, RGBA16, true, "Transformed and cropped image."}},
+			 "Scales, rotates, translates and crops an image with explicit outside-image sampling.",
+			 false,
+			 "transform-crop.frag"},
 
 			{"blur",
 			 "Blur",
 			 C::Composite,
 			 S::View,
-			 {{"source", K::Texture, RGBA16, true, "What to blur."},
-			  {"depth", K::Texture, R32, false, "For a depth-aware blur."}},
+			 {{"source", K::Texture, RGBA16, true, "What to blur."}},
 			 {{"colour", K::Colour, RGBA16, true, "The blurred image."}},
-			 "Gaussian, box or directional. Depth-aware when given a depth input.",
+			 "One directional Gaussian or box pass. Chain horizontal and vertical nodes for a full blur.",
 			 false,
 			 "blur.frag"},
 
@@ -1128,8 +1216,11 @@ namespace engine::graph {
 			   "Directional response and original visibility; requires depth, normal and shadow."},
 			  {"room-depth", K::Texture, R32, false, "Retained linear depth in the current camera domain."},
 			  {"room-normal", K::Texture, LDR, false, "Retained normal in the current world domain."},
-			  {"shadow", K::Texture, D32, false, "Combined directional map in the current light projection."}
-			 },
+			  {"shadow",
+			   K::Texture,
+			   D32,
+			   false,
+			   "Combined directional map in the current light projection."}},
 			 {{"colour", K::Colour, RGBA16, true, "Room radiance with current ambient occlusion."}},
 			 "Corrects retained ambient visibility and optionally directional visibility with a complete "
 			 "shadow input group.",
@@ -1170,8 +1261,11 @@ namespace engine::graph {
 			 {{"colour", K::Colour, RGBA16, true, "Owned destination HDR radiance."},
 			  {"depth", K::Colour, R32, false, "Paired camera-forward depth; zero means no surface."},
 			  {"normal", K::Colour, LDR, false, "Retained native normal and validity."},
-			  {"ambient-response", K::Colour, F::RGBA32F, false, "Retained ambient response and original AO."
-			  },
+			  {"ambient-response",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Retained ambient response and original AO."},
 			  {"lighting-baseline", K::Colour, F::RGBA32F, false, "Retained unrounded room lighting."},
 			  {"directional-response",
 			   K::Colour,
@@ -1606,8 +1700,11 @@ namespace engine::graph {
 			 {{"source", K::Texture, LDR, true, "The frame to write out."},
 			  {"depth", K::Colour, F::R32F, false, "Optional camera-forward depth paired with the frame."},
 			  {"normal", K::Colour, F::RGB10A2, false, "Native room normal and validity paired with depth."},
-			  {"ambient-response", K::Colour, F::RGBA32F, false, "Ambient response and original sampled SSAO."
-			  },
+			  {"ambient-response",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Ambient response and original sampled SSAO."},
 			  {"lighting-baseline",
 			   K::Colour,
 			   F::RGBA32F,

@@ -119,6 +119,29 @@ TEST_CASE("the default document round trips through text", "[graph]") {
 	CHECK(Build(reloaded, graph, offender) == PipelineDocumentStatus::Ok);
 }
 
+TEST_CASE("the compositor demo keeps every image operation as a graph pass", "[graph][compositor]") {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(Build(engine::graph::CompositorDemoDocument(), graph, offender) == PipelineDocumentStatus::Ok);
+
+	CompiledGraph compiled;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	const auto position = [&](const char *name) {
+		for (size_t index = 0; index < compiled.PerView.size(); ++index) {
+			if (graph.Find(compiled.PerView[index])->Name == Name(name)) return index;
+		}
+		return compiled.PerView.size();
+	};
+	CHECK(position("grade-exposure") < position("grade-hsv"));
+	CHECK(position("grade-hsv") < position("mix-original"));
+	CHECK(position("mix-original") < position("frame-transform"));
+	CHECK(position("frame-transform") < position("blur-x"));
+	CHECK(position("blur-x") < position("blur-y"));
+	CHECK(position("blur-y") < position("compositor-tonemap"));
+	REQUIRE_FALSE(compiled.Final.empty());
+	CHECK(graph.Find(compiled.Final.back())->Name == Name("compositor-output-image"));
+}
+
 TEST_CASE("tracing demonstrations keep geometry and lighting as graph inputs", "[graph][tracing]") {
 	for (const auto &[document, trace, tessellation, illumination] : {
 			 std::tuple{

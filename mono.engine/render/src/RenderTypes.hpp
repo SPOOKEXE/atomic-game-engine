@@ -293,6 +293,10 @@ namespace engine::render {
 		// z/w: camera enable and disable masks. A shader applies the instance
 		// masks last, preserving authored instance precedence entirely on GPU.
 		glm::uvec4 RenderFeatures{};
+
+		// Built-in compositor settings. Custom authored shaders may use these as
+		// three generic vec4 values after the stable view prefix.
+		glm::vec4 Parameters[3]{};
 	};
 
 	// How many holes may transport a shadow in one frame.

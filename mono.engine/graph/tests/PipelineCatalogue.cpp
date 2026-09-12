@@ -318,9 +318,9 @@ TEST_CASE("execution and parameter metadata live on the catalogue row", "[graph]
 	CHECK(dispatch->Repeatable);
 
 	const auto mode = std::find_if(
-		dispatch->Params.begin(),
-		dispatch->Params.end(),
-		[](const engine::graph::ParameterSpec &param) { return param.Name == Name("dispatch.mode"); }
+		dispatch->Params.begin(), dispatch->Params.end(), [](const engine::graph::ParameterSpec &param) {
+			return param.Name == Name("dispatch.mode");
+		}
 	);
 	REQUIRE(mode != dispatch->Params.end());
 	CHECK(mode->Widget == ParameterWidget::Select);
@@ -344,6 +344,40 @@ TEST_CASE("antialiasing choices are executable graph nodes", "[graph][catalogue]
 	REQUIRE(taa != nullptr);
 	CHECK(taa->Inputs.size() == 3);
 	CHECK(taa->Outputs.size() == 2);
+}
+
+TEST_CASE(
+	"compositor basics have executable shaders and authored controls", "[graph][catalogue][compositor]"
+) {
+	Kinds();
+
+	for (const char *name : {"exposure-grade", "hsv", "mix", "transform-crop", "blur"}) {
+		const NodeKindSpec *spec = NodeCatalogue::Find(Name(name));
+		INFO("kind: " << name);
+		REQUIRE(spec != nullptr);
+		CHECK(spec->BuiltInBackend);
+		CHECK(spec->Repeatable);
+		CHECK(spec->Queue == engine::graph::ExecutionQueue::Graphics);
+		CHECK_FALSE(spec->DefaultShader.empty());
+		CHECK_FALSE(spec->Params.empty());
+	}
+
+	const NodeKindSpec *mix = NodeCatalogue::Find(Name("mix"));
+	REQUIRE(mix != nullptr);
+	REQUIRE(mix->Inputs.size() == 2);
+	const auto operation = std::find_if(mix->Params.begin(), mix->Params.end(), [](const auto &parameter) {
+		return parameter.Name == Name("operation");
+	});
+	REQUIRE(operation != mix->Params.end());
+	CHECK(operation->Default == "alpha-over");
+	CHECK(operation->Options.back() == "alpha-over");
+
+	const NodeKindSpec *transform = NodeCatalogue::Find(Name("transform-crop"));
+	REQUIRE(transform != nullptr);
+	CHECK(transform->Params.size() == 10);
+	const NodeKindSpec *blur = NodeCatalogue::Find(Name("blur"));
+	REQUIRE(blur != nullptr);
+	CHECK(blur->Inputs.size() == 1);
 }
 
 TEST_CASE("parameter schemas have unique names and valid defaults", "[graph][catalogue]") {
@@ -377,13 +411,15 @@ TEST_CASE("registering a kind twice replaces it", "[graph][catalogue]") {
 	NodeKindSpec replacement;
 	replacement.Kind = Name("gbuffer");
 	replacement.Label = "Replaced";
-	replacement.Outputs.push_back(PortSpec{
-		.Name = Name("colour"),
-		.Kind = ResourceKind::Colour,
-		.Format = engine::graph::ResourceFormat::RGBA8,
-		.Required = true,
-		.Summary = {},
-	});
+	replacement.Outputs.push_back(
+		PortSpec{
+			.Name = Name("colour"),
+			.Kind = ResourceKind::Colour,
+			.Format = engine::graph::ResourceFormat::RGBA8,
+			.Required = true,
+			.Summary = {},
+		}
+	);
 	REQUIRE(NodeCatalogue::Register(replacement));
 
 	CHECK(NodeCatalogue::All().size() == before);
@@ -437,13 +473,15 @@ TEST_CASE("a later Register moves what an earlier Find named", "[graph][catalogu
 	NodeKindSpec earlier;
 	earlier.Kind = Name("aaa-sorts-first");
 	earlier.Label = "Sorts first";
-	earlier.Outputs.push_back(PortSpec{
-		.Name = Name("colour"),
-		.Kind = ResourceKind::Colour,
-		.Format = engine::graph::ResourceFormat::RGBA8,
-		.Required = true,
-		.Summary = {},
-	});
+	earlier.Outputs.push_back(
+		PortSpec{
+			.Name = Name("colour"),
+			.Kind = ResourceKind::Colour,
+			.Format = engine::graph::ResourceFormat::RGBA8,
+			.Required = true,
+			.Summary = {},
+		}
+	);
 	REQUIRE(NodeCatalogue::Register(earlier));
 
 	CHECK(slotOf("gbuffer") == before + 1);
