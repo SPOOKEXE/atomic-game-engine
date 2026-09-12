@@ -9,6 +9,7 @@ resource "view-camera" camera R8 0 0 1 no
 resource "view-entities" entities R8 0 0 1 no
 resource "visible-entities" entities R8 0 0 1 no
 resource "ordered-entities" entities R8 0 0 1 no
+resource "resident-meshes" buffer R8 0 0 1 no
 resource "view-instances" buffer R8 0 0 1 no
 resource "lod-instances" buffer R8 0 0 1 no
 resource "albedo" colour RGBA8_SRGB 0 0 1 no
@@ -35,6 +36,8 @@ writes "world-entities" "entities"
 node "shadow" "shadow" world no
 reads "world-entities" "entities"
 writes "shadow" "shadow"
+node "mesh-residency" "mesh-residency" world no
+writes "resident-meshes" "meshes"
 node "camera" "camera" view no
 writes "view-camera" "camera"
 node "last-frame" "last-frame" view no
@@ -49,7 +52,8 @@ node "order-draw" "order-draw" view no
 reads "visible-entities" "entities"
 reads "view-camera" "camera"
 writes "ordered-entities" "entities"
-node "upload-instances" "upload-instances" view no
+node "delta-upload" "delta-upload" view no
+reads "resident-meshes" "meshes"
 reads "ordered-entities" "entities"
 writes "view-instances" "instances"
 node "select-lod" "select-lod" view no

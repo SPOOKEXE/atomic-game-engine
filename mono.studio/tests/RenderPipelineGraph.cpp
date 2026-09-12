@@ -19,11 +19,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 25);
+	CHECK(canvas.Nodes().size() == 26);
 
 	// The final two links carry the lit colour and depth into the sky pass. Pin
 	// them by name below so this count reads as a checksum rather than a mystery.
-	CHECK(canvas.Links().size() == 51);
+	CHECK(canvas.Links().size() == 52);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -36,6 +36,17 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		}
 	}
 	CHECK(sawSsao);
+	const auto meshResidency =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.mesh-residency";
+		});
+	REQUIRE(meshResidency != canvas.Nodes().end());
+	const auto deltaUpload =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.delta-upload";
+		});
+	REQUIRE(deltaUpload != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(deltaUpload->Id, "meshes") != nullptr);
 	const auto shaderLenses =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.shader-lenses";
