@@ -18,9 +18,9 @@ namespace engine::render {
 		return true;
 	}
 
-	TextureAtlasPlan PlanTextureAtlas(uint32_t sourceCount, uint32_t sourceExtent) {
+	TextureAtlasPlan PlanTextureAtlas(uint32_t sourceCount, uint32_t sourceExtent, uint32_t mipLevels) {
 		TextureAtlasPlan plan;
-		if (sourceCount == 0 || sourceExtent == 0) {
+		if (sourceCount == 0 || sourceExtent == 0 || mipLevels != 1) {
 			return plan;
 		}
 
@@ -45,5 +45,39 @@ namespace engine::render {
 			});
 		}
 		return plan;
+	}
+
+	TextureAtlasResidency::TextureAtlasResidency(TextureAtlasPlan plan)
+		: Layout(std::move(plan)), Resident(Layout.Rects.size(), false) {}
+
+	TextureAtlasRequest TextureAtlasResidency::Request(uint32_t source) {
+		if (!Layout.Valid() || source >= Layout.Rects.size()) {
+			return {};
+		}
+		if (Resident[source]) {
+			Counts.Hits++;
+			return {.Rect = Layout.Rects[source]};
+		}
+		Counts.Misses++;
+		return {
+			.Rect = Layout.Rects[source],
+			.Page = 0,
+			.AllocatePage = !PageResident,
+			.Upload = true,
+		};
+	}
+
+	void TextureAtlasResidency::PageAllocated(uint32_t page) {
+		if (page == 0 && !PageResident) {
+			PageResident = true;
+			Counts.PageAllocations++;
+		}
+	}
+
+	void TextureAtlasResidency::Copied(uint32_t source) {
+		if (source < Resident.size() && !Resident[source]) {
+			Resident[source] = true;
+			Counts.CopyCalls++;
+		}
 	}
 }

@@ -145,6 +145,29 @@ gpu-texture-atlas-bench samples="1":
     cmake --build --preset bench --target bench_render
     MONO_GPU_ATLAS_REPORT=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-texture-atlas --samples {{samples}}
 
+# Integrated release measurement for the medium render demo. Each run writes
+# the frame tree and heap/GPU report before teardown, then prints the report
+# rows needed to compare cold and warm frames across active camera batches.
+medium-render-profile seconds="15":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset release > /dev/null
+    cmake --build --preset release --target client
+    mkdir -p .cache/medium-render-profile
+    profile_build=".cache/build/release"
+    script="$profile_build/assets/examples/scripts/RenderFeaturesDemo.luau"
+    for cameras in 1 2 8; do
+        base=".cache/medium-render-profile/cameras-$cameras"
+        timeout $(( {{seconds}} + 120 )) "$profile_build/client/client" \
+            --headless --uncapped --frames 1000000000 --profile-seconds {{seconds}} \
+            --width 1280 --height 720 --worlds "$cameras" --view-spacing 0 \
+            --script "$script" --profile-snapshot "$base-frame.txt" --heap-report "$base-heap.txt" \
+            > "$base.log" 2>&1
+        echo "medium-render-profile cameras=$cameras"
+        grep -E "gpu heap:|gpu memory:|cache|upload|download|timestamp" "$base.log" || true
+        grep -E "^(frame|span|category)" "$base-frame.txt" || true
+    done
+
 # Coverage-guided parsing of cooked shader bytes; no graphics stack or device.
 shader-fuzz runs="10000" compiler="clang++-21":
     #!/usr/bin/env bash

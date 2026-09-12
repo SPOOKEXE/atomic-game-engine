@@ -18,6 +18,7 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -45,7 +46,10 @@ namespace {
 		uint64_t UploadBytes = 0;
 		uint32_t UploadOperations = 0;
 		uint32_t TransferOperations = 0;
-		uint32_t CacheHits = 0;
+		uint64_t PageAllocations = 0;
+		uint64_t CopyCalls = 0;
+		uint64_t CacheHits = 0;
+		uint64_t CacheMisses = 0;
 		engine::render::GpuMemoryStatistics Before;
 		engine::render::GpuMemoryStatistics Resident;
 		engine::render::GpuMemoryStatistics Released;
@@ -72,7 +76,9 @@ namespace {
 			}
 			std::cout
 				<< " upload_bytes=" << report.UploadBytes << " upload_ops=" << report.UploadOperations
-				<< " transfer_ops=" << report.TransferOperations << " cache_hits=" << report.CacheHits
+				<< " transfer_ops=" << report.TransferOperations
+				<< " page_allocations=" << report.PageAllocations << " copy_calls=" << report.CopyCalls
+				<< " cache_hits=" << report.CacheHits << " cache_misses=" << report.CacheMisses
 				<< " resident_live_bytes=" << Delta(report.Resident.LiveBytes, report.Before.LiveBytes)
 				<< " resident_texture_bytes="
 				<< Delta(report.Resident.TextureBytes, report.Before.TextureBytes)
@@ -109,6 +115,101 @@ namespace {
 		transfers.clear();
 	}
 
+	std::array<uint8_t, 4> Pattern(uint32_t source) {
+		return {static_cast<uint8_t>(31 + source * 43), static_cast<uint8_t>(197 - source * 29),
+			static_cast<uint8_t>(53 + source * 37), 255};
+	}
+
+	void FillPattern(void *mapped, uint64_t bytes, uint32_t source) {
+		const std::array<uint8_t, 4> pattern = Pattern(source);
+		auto *pixels = static_cast<uint8_t *>(mapped);
+		for (uint64_t offset = 0; offset < bytes; offset += pattern.size()) {
+			std::memcpy(pixels + offset, pattern.data(), pattern.size());
+		}
+	}
+
+	void ValidateAtlasSamples(
+		SDL_GPUDevice *device, SDL_GPUTexture *atlas, const engine::render::TextureAtlasPlan &plan
+	) {
+		constexpr uint32_t SAMPLES_PER_SOURCE = 4;
+		const uint32_t sampleCount = SOURCE_COUNT * SAMPLES_PER_SOURCE;
+		SDL_GPUTextureCreateInfo targetInfo{};
+		targetInfo.type = SDL_GPU_TEXTURETYPE_2D;
+		targetInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		targetInfo.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		targetInfo.width = sampleCount;
+		targetInfo.height = targetInfo.layer_count_or_depth = targetInfo.num_levels = 1;
+		auto *target = engine::render::gpu::CreateTexture(device, &targetInfo);
+		if (target == nullptr) throw std::runtime_error("atlas sample target allocation failed");
+		SDL_GPUTransferBufferCreateInfo downloadInfo{};
+		downloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+		downloadInfo.size = sampleCount * 4;
+		auto *download = engine::render::gpu::CreateTransferBuffer(device, &downloadInfo);
+		if (download == nullptr) {
+			engine::render::gpu::ReleaseTexture(device, target);
+			throw std::runtime_error("atlas sample download allocation failed");
+		}
+		auto *command = SDL_AcquireGPUCommandBuffer(device);
+		if (command == nullptr) throw std::runtime_error("atlas sample command acquisition failed");
+		for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
+			const engine::render::TextureAtlasRect &rect = plan.Rects[index];
+			const std::array<std::array<uint32_t, 2>, SAMPLES_PER_SOURCE> corners = {{
+				{rect.X, rect.Y},
+				{rect.X + rect.Width - 1, rect.Y},
+				{rect.X, rect.Y + rect.Height - 1},
+				{rect.X + rect.Width - 1, rect.Y + rect.Height - 1},
+			}};
+			for (uint32_t corner = 0; corner < corners.size(); corner++) {
+				SDL_GPUBlitInfo blit{};
+				blit.source.texture = atlas;
+				blit.source.x = corners[corner][0];
+				blit.source.y = corners[corner][1];
+				blit.source.w = blit.source.h = 1;
+				blit.destination.texture = target;
+				blit.destination.x = index * SAMPLES_PER_SOURCE + corner;
+				blit.destination.w = blit.destination.h = 1;
+				blit.load_op = index == 0 && corner == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+				blit.filter = SDL_GPU_FILTER_NEAREST;
+				SDL_BlitGPUTexture(command, &blit);
+			}
+		}
+		auto *copy = SDL_BeginGPUCopyPass(command);
+		if (copy == nullptr) throw std::runtime_error("atlas sample copy pass failed");
+		SDL_GPUTextureRegion source{};
+		source.texture = target;
+		source.w = sampleCount;
+		source.h = source.d = 1;
+		SDL_GPUTextureTransferInfo output{};
+		output.transfer_buffer = download;
+		output.pixels_per_row = sampleCount;
+		output.rows_per_layer = 1;
+		SDL_DownloadFromGPUTexture(copy, &source, &output);
+		SDL_EndGPUCopyPass(copy);
+		auto *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		if (fence == nullptr || !SDL_WaitForGPUFences(device, true, &fence, 1)) {
+			if (fence != nullptr) SDL_ReleaseGPUFence(device, fence);
+			engine::render::gpu::ReleaseTransferBuffer(device, download);
+			engine::render::gpu::ReleaseTexture(device, target);
+			throw std::runtime_error("atlas sample readback failed");
+		}
+		SDL_ReleaseGPUFence(device, fence);
+		const auto *pixels = static_cast<const uint8_t *>(SDL_MapGPUTransferBuffer(device, download, false));
+		if (pixels == nullptr) throw std::runtime_error("atlas sample map failed");
+		for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
+			const std::array<uint8_t, 4> expected = Pattern(index);
+			for (uint32_t corner = 0; corner < SAMPLES_PER_SOURCE; corner++) {
+				const uint32_t sample = index * SAMPLES_PER_SOURCE + corner;
+				if (!std::equal(expected.begin(), expected.end(), pixels + sample * expected.size())) {
+					SDL_UnmapGPUTransferBuffer(device, download);
+					throw std::runtime_error("atlas sample did not match source pattern");
+				}
+			}
+		}
+		SDL_UnmapGPUTransferBuffer(device, download);
+		engine::render::gpu::ReleaseTransferBuffer(device, download);
+		engine::render::gpu::ReleaseTexture(device, target);
+	}
+
 	Report Measure(Layout layout) {
 		ArrangeReport();
 		if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -127,9 +228,9 @@ namespace {
 		auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
 		if (device == nullptr) throw std::runtime_error("headless renderer returned no GPU device");
 
-		const engine::render::TextureAtlasPlan plan =
-			engine::render::PlanTextureAtlas(SOURCE_COUNT, SOURCE_EXTENT);
+		const engine::render::TextureAtlasPlan plan = engine::render::PlanTextureAtlas(SOURCE_COUNT, SOURCE_EXTENT);
 		if (!plan.Valid()) throw std::runtime_error("4k texture atlas plan is invalid");
+		engine::render::TextureAtlasResidency residency(plan);
 		const bool atlas = layout == Layout::Atlas;
 		const uint32_t textureCount = atlas ? 1 : SOURCE_COUNT;
 		const uint32_t transferCount = atlas ? 1 : SOURCE_COUNT;
@@ -160,6 +261,7 @@ namespace {
 				throw std::runtime_error(std::string("texture allocation failed: ") + SDL_GetError());
 			}
 			textures.push_back(texture);
+			if (atlas) residency.PageAllocated(0);
 		}
 
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
@@ -179,7 +281,13 @@ namespace {
 				ReleaseTextures(device, textures);
 				throw std::runtime_error(std::string("transfer map failed: ") + SDL_GetError());
 			}
-			std::memset(mapped, 0x7f, transferInfo.size);
+			if (atlas) {
+				for (uint32_t source = 0; source < SOURCE_COUNT; source++) {
+					FillPattern(static_cast<uint8_t *>(mapped) + source * SOURCE_BYTES, SOURCE_BYTES, source);
+				}
+			} else {
+				FillPattern(mapped, SOURCE_BYTES, index);
+			}
 			SDL_UnmapGPUTransferBuffer(device, transfer);
 			transfers.push_back(transfer);
 		}
@@ -201,6 +309,14 @@ namespace {
 			throw std::runtime_error(std::string("copy pass failed: ") + SDL_GetError());
 		}
 		for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
+			const engine::render::TextureAtlasRequest request = atlas ? residency.Request(index)
+																	 : engine::render::TextureAtlasRequest{
+																			.Rect = {.Width = SOURCE_EXTENT, .Height = SOURCE_EXTENT},
+																			.Upload = true,
+																		};
+			if (!request.Valid() || !request.Upload) {
+				continue;
+			}
 			SDL_GPUTextureTransferInfo source{};
 			source.transfer_buffer = transfers[atlas ? 0 : index];
 			source.offset = atlas ? index * SOURCE_BYTES : 0;
@@ -208,12 +324,13 @@ namespace {
 			source.rows_per_layer = SOURCE_EXTENT;
 			SDL_GPUTextureRegion destination{};
 			destination.texture = textures[atlas ? 0 : index];
-			destination.x = atlas ? plan.Rects[index].X : 0;
-			destination.y = atlas ? plan.Rects[index].Y : 0;
+			destination.x = atlas ? request.Rect.X : 0;
+			destination.y = atlas ? request.Rect.Y : 0;
 			destination.w = SOURCE_EXTENT;
 			destination.h = SOURCE_EXTENT;
 			destination.d = 1;
 			SDL_UploadToGPUTexture(copy, &source, &destination, false);
+			if (atlas) residency.Copied(index);
 		}
 		SDL_EndGPUCopyPass(copy);
 		const uint32_t closed = timestamps.Mark(command);
@@ -239,6 +356,7 @@ namespace {
 			throw std::runtime_error(std::string("copy fence wait failed: ") + SDL_GetError());
 		}
 		SDL_ReleaseGPUFence(device, fence);
+		if (atlas) ValidateAtlasSamples(device, textures.front(), plan);
 		if (report.Timestamps) {
 			double times[engine::render::VulkanTimestamps::MARKS]{};
 			uint32_t count = 0;
@@ -250,20 +368,28 @@ namespace {
 			}
 		}
 
-		// A second request with this unchanged plan reuses every resident page.
-		// It records no copy, creates no resource, and is the cache result this
-		// experiment reports rather than inventing a default eviction policy.
-		std::unordered_map<uint32_t, SDL_GPUTexture *> resident;
-		for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
-			resident.emplace(index, textures[atlas ? 0 : index]);
-		}
-		for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
-			if (resident.contains(index)) report.CacheHits++;
+		// A warm request must traverse the same residency object. It has no copy
+		// pass to record and is counted only after the cold uploads committed.
+		if (atlas) {
+			for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
+				const engine::render::TextureAtlasRequest warm = residency.Request(index);
+				if (!warm.Valid() || warm.Upload || warm.AllocatePage) {
+					throw std::runtime_error("atlas warm request was not resident");
+				}
+			}
+			const engine::render::TextureAtlasUsage &usage = residency.Usage();
+			report.PageAllocations = usage.PageAllocations;
+			report.CopyCalls = usage.CopyCalls;
+			report.CacheHits = usage.Hits;
+			report.CacheMisses = usage.Misses;
 		}
 		engine::core::Metrics::Count("render.gpu_atlas_probe.upload_bytes", report.UploadBytes);
 		engine::core::Metrics::Count("render.gpu_atlas_probe.upload_operations", report.UploadOperations);
 		engine::core::Metrics::Count("render.gpu_atlas_probe.transfer_operations", report.TransferOperations);
+		engine::core::Metrics::Count("render.gpu_atlas_probe.page_allocations", report.PageAllocations);
+		engine::core::Metrics::Count("render.gpu_atlas_probe.copy_calls", report.CopyCalls);
 		engine::core::Metrics::Count("render.gpu_atlas_probe.cache_hits", report.CacheHits);
+		engine::core::Metrics::Count("render.gpu_atlas_probe.cache_misses", report.CacheMisses);
 		engine::core::Metrics::CountTime(
 			"render.gpu_atlas_probe.cpu_recording", report.CpuRecordingNanoseconds
 		);

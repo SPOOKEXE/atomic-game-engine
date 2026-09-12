@@ -33,3 +33,27 @@ TEST_CASE("atlas plan refuses empty and overflowing layouts", "[render][texture-
 	CHECK_FALSE(engine::render::PlanTextureAtlas(4, 0).Valid());
 	CHECK_FALSE(engine::render::PlanTextureAtlas(4, 0x80000000u).Valid());
 }
+
+TEST_CASE("atlas residency only counts committed device work", "[render][texture-atlas]") {
+	engine::render::TextureAtlasResidency atlas(engine::render::PlanTextureAtlas(4, 4));
+	const auto cold = atlas.Request(2);
+	REQUIRE(cold.Valid());
+	CHECK(cold.AllocatePage);
+	CHECK(cold.Upload);
+	CHECK(atlas.Usage().Misses == 1);
+
+	atlas.PageAllocated(cold.Page);
+	atlas.Copied(2);
+	CHECK(atlas.Usage().PageAllocations == 1);
+	CHECK(atlas.Usage().CopyCalls == 1);
+
+	const auto warm = atlas.Request(2);
+	CHECK(warm.Valid());
+	CHECK_FALSE(warm.AllocatePage);
+	CHECK_FALSE(warm.Upload);
+	CHECK(atlas.Usage().Hits == 1);
+}
+
+TEST_CASE("atlas refuses mip layouts without gutters", "[render][texture-atlas]") {
+	CHECK_FALSE(engine::render::PlanTextureAtlas(4, 4, 2).Valid());
+}
