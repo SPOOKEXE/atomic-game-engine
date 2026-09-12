@@ -58,10 +58,12 @@ namespace engine::render {
 
 	inline TessellationMaterial
 	TessellationMaterialFor(const MeshEntry &mesh, uint32_t material, core::Name overrideTexture) {
-		if (overrideTexture.IsValid()) return {overrideTexture, {1, 1, 1, 1}};
-		if (material < mesh.Textures.size() && material < mesh.Colours.size())
-			return {mesh.Textures[material], mesh.Colours[material]};
-		return {};
+		if (material >= mesh.Textures.size() || material >= mesh.Colours.size())
+			return {overrideTexture, {1, 1, 1, 1}};
+		return {
+			overrideTexture.IsValid() ? overrideTexture : mesh.Textures[material],
+			mesh.Colours[material],
+		};
 	}
 
 	// An edge smaller than its target needs no subdivision. Larger edges use the

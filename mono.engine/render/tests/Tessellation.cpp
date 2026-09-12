@@ -82,5 +82,9 @@ TEST_CASE("tessellation retains each source material run", "[render][tessellatio
 	const auto override =
 		engine::render::TessellationMaterialFor(mesh, 1, engine::core::Name("tessellation.override"));
 	CHECK(override.Texture == engine::core::Name("tessellation.override"));
-	CHECK(override.Colour == std::array<float, 4>{1, 1, 1, 1});
+	CHECK(override.Colour == std::array<float, 4>{0, 0, 1, 1});
+	const auto missing =
+		engine::render::TessellationMaterialFor(mesh, 3, engine::core::Name("tessellation.override"));
+	CHECK(missing.Texture == engine::core::Name("tessellation.override"));
+	CHECK(missing.Colour == std::array<float, 4>{1, 1, 1, 1});
 }

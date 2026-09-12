@@ -257,7 +257,8 @@ namespace engine::render {
 					entry.Instance >= State->SlotOcclusionMap.size() ||
 					entry.Instance >= State->SlotHeightMap.size() ||
 					entry.Instance >= State->SlotMetalnessMap.size() ||
-					entry.Instance >= State->SlotEmissiveMap.size())
+					entry.Instance >= State->SlotEmissiveMap.size() ||
+					entry.Instance >= State->SlotSeam.size() || entry.Instance >= State->SlotSeamLight.size())
 					continue;
 				const MeshEntry *mesh = State->SlotMesh[entry.Instance];
 				if (mesh == nullptr) continue;
@@ -293,12 +294,19 @@ namespace engine::render {
 					State->SlotResample[entry.Instance] == scene::SurfaceResampleMode::Pixelated
 						? State->Textures.PixelSampler()
 						: State->Textures.Sampler();
+				SDL_GPUSampler *fallbackSampler =
+					State->SurfaceSampler != nullptr ? State->SurfaceSampler : State->Textures.Sampler();
+				SDL_GPUSampler *shadowSampler =
+					State->ShadowSampler != nullptr ? State->ShadowSampler : fallbackSampler;
+				SDL_GPUSampler *beamSampler =
+					State->ShadowSampler != nullptr ? State->ShadowSampler : shadowSampler;
 				const SDL_GPUTextureSamplerBinding bindings[]{
 					{State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture,
-					 State->ShadowSampler != nullptr ? State->ShadowSampler : sampler},
-					{State->FallbackTexture, sampler},
+					 shadowSampler},
+					{State->FallbackTexture, fallbackSampler},
 					{sampled != nullptr ? sampled : State->FallbackTexture, sampler},
-					{State->FallbackTexture, sampler},
+					{State->BeamTexture != nullptr ? State->BeamTexture : State->FallbackTexture, beamSampler
+					},
 					{normal != nullptr ? normal : State->FallbackTexture, sampler},
 					{roughness != nullptr ? roughness : State->FallbackTexture, sampler},
 					{occlusion != nullptr ? occlusion : State->FallbackTexture, sampler},
@@ -319,6 +327,11 @@ namespace engine::render {
 					emissive != nullptr ? 1.0f : 0.0f,
 				};
 				material.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
+				material.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
+				material.SeamPlane = State->SlotSeam[entry.Instance];
+				const glm::vec3 seamLight{State->SlotSeamLight[entry.Instance]};
+				if (glm::dot(seamLight, seamLight) > 0.0f) material.Direction = glm::vec4{seamLight, 0.0f};
 				SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));
 				SDL_DrawGPUIndexedPrimitivesIndirect(
 					pass, commands, command * TESSELLATION_COMMAND_WORDS * sizeof(uint32_t), 1
