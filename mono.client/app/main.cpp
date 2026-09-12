@@ -72,7 +72,12 @@ int main(int argc, char **argv) {
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
-	arguments.Flag("headless", "Run with no window (needs --frames)");
+	arguments.Flag("headless", "Run with no window (needs --frames except for --data-factory)");
+	arguments.Flag(
+		"data-factory",
+		"Enable the single-world paused data-factory capture host; runs until stopped unless --frames is "
+		"given"
+	);
 	arguments.Value(
 		"presentation-world", "NAME", "Serve one game world's portal images on an inherited driver link"
 	);
@@ -232,6 +237,7 @@ int main(int argc, char **argv) {
 	options.EnableParticles = options.EnableParticles && !arguments.Has("disable-particles");
 	options.EnablePostProcessing = options.EnablePostProcessing && !arguments.Has("disable-post-processing");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
+	options.DataFactory = arguments.Has("data-factory");
 	if (auto world = arguments.Get("presentation-world")) options.PresentationWorld = *world;
 	if (arguments.Has("presentation-session")) {
 		const auto session = arguments.GetInteger("presentation-session", 0);
@@ -261,7 +267,8 @@ int main(int argc, char **argv) {
 
 	// Ordinary headless runs need a frame budget. A presentation host instead
 	// ends with its inherited driver link, which startup requires before running.
-	if (options.Headless && options.MaximumFrames < 0 && options.PresentationSession == 0) {
+	if (options.Headless && options.MaximumFrames < 0 && options.PresentationSession == 0 &&
+		!options.DataFactory) {
 		std::fprintf(stderr, "--headless needs --frames N: there is no window to close.\n");
 		return 2;
 	}

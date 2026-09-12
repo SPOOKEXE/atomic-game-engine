@@ -77,6 +77,21 @@ namespace engine::control {
 		}
 	}
 
+	void Surface::SetDataCaptureAvailabilityProvider(std::function<DataCaptureAvailability()> provider) {
+		CaptureAvailabilityProvider = std::move(provider);
+	}
+
+	DataCaptureAvailability Surface::CaptureAvailability() const {
+		if (!CaptureAvailabilityProvider) {
+			return {
+				.Available = false,
+				.Channels = {},
+				.Detail = "capture channels are not implemented by this host"
+			};
+		}
+		return CaptureAvailabilityProvider();
+	}
+
 	void Surface::AddResource(Resource resource) {
 		for (Resource &existing : Resources) {
 			if (existing.Uri == resource.Uri) {
@@ -254,7 +269,15 @@ namespace engine::control {
 				}
 
 				if (!failure.empty()) {
-					return Result(id, Content(json{{"error", failure}}, true)).dump();
+					// Refusals may carry recovery data, such as the current world
+					// versions for a stale write. Keep that object while marking the
+					// transport result as an error so a client can act on it.
+					if (!payload.is_object()) {
+						payload = json{{"error", failure}};
+					} else if (!payload.contains("error")) {
+						payload["error"] = failure;
+					}
+					return Result(id, Content(std::move(payload), true)).dump();
 				}
 				return Result(id, Content(std::move(payload))).dump();
 			}

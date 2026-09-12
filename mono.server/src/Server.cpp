@@ -3636,6 +3636,7 @@ namespace server {
 				engine::control::features::Build(),
 				engine::control::features::Resources(),
 				engine::control::features::Prompts(),
+				engine::control::features::Discovery(),
 				engine::control::features::Custom("server", [this](engine::control::Surface &) {
 					RegisterControlTools();
 				}),

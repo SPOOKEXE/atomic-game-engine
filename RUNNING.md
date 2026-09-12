@@ -3471,6 +3471,36 @@ of the number cannot quietly disagree.
 
 ### What is on the surface
 
+`negotiate` is the pure capability discovery call. It accepts an object; the
+version fields are optional, but when present they must both be `"1"`:
+
+```json
+{"contract_version":"1","schema_version":"1","requested_channels":["rgb","depth"]}
+```
+
+Its result contains `contract_version`, `schema_version`, the current
+`engine_version`, `operations`, `unsupported_operations`, the requested
+channel results and `limits`. Each operation entry gives the name of a
+registered callable tool and its `input_schema`. With the data-factory host
+enabled, the registered groups are DataFactory (`lifecycle_inspect`, `pause`,
+`resume`, `step`, `snapshot`, `checkpoint`), DataCapture (`capture`,
+`poll_capture`, `get_resource`, `release_capture`, `cancel_capture`) and
+DataScene (`get_scene_snapshot`, `get_camera_rendering_data`,
+`get_capture_channels`, `get_resources`). Unsupported results are reported
+per host: checkpoint needs a real rehydrator, nonempty step actions need a
+host executor, and capture channels or backends are limited by the active
+render bridge.
+
+Requested channel names must be lowercase ASCII identifiers, at most 128 bytes,
+with at most 64 names per request. The active host reports unavailable channels
+and data-factory budgets explicitly. The limits include
+`script_bytes`, `entities`, `pixels`, `image_bytes`, `checkpoint_bytes`,
+`readbacks_in_flight`, `render_recursion`, `operation_time` and `resource_ttl`.
+`headless_cpu` and `offscreen_gpu` are explicitly unsupported with
+`not declared by this control host`. An unsupported version returns
+`capability_unsupported: ...`; non-object and malformed requests return a
+failed tool result with the validation reason.
+
 **About this program.** `engine_info` first, always. Then `world_list`,
 `world_tree`, `instance_get`, `instance_set`, `component_list`, `entity_query`,
 `component_get`, `component_set`, `engine_components` and `profile_frame`. The

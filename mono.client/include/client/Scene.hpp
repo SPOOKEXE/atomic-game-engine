@@ -35,6 +35,10 @@
 #include <span>
 #include <vector>
 
+namespace engine::script {
+	struct RuntimeLimits;
+}
+
 namespace client {
 	// Resolve the presentation world from the input camera's crossing history.
 	// An unavailable world leaves the camera state and supplied pose unchanged.
@@ -188,13 +192,15 @@ namespace client {
 	// @param path      The `.luau` file to run.
 	// @param reserve   How much draw-list capacity to reserve up front.
 	// @param runtime   Set to the VM that ran the scene, when not null.
+	// @param limits    Optional host-owned limits for the scene's runtime.
 	// @return `false` when the script could not be read, compiled or run.
 	bool BuildScriptedWorld(
 		engine::ecs::Store &store,
 		engine::ecs::Scheduler &scheduler,
 		const std::string &path,
 		uint32_t reserve,
-		std::shared_ptr<engine::script::Runtime> *runtime = nullptr
+		std::shared_ptr<engine::script::Runtime> *runtime = nullptr,
+		const engine::script::RuntimeLimits *limits = nullptr
 	);
 
 	// Establishes the player a single-player client looks through.

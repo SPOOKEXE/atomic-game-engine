@@ -29,6 +29,7 @@
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/ViewportFrames.hpp>
@@ -38,7 +39,9 @@
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/PresentationStream.hpp>
 #include <engine/world/Universe.hpp>
@@ -574,6 +577,9 @@ namespace client {
 		// construction, and that thread is decided in Initialise rather than
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
+		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
+		std::shared_ptr<engine::script::QueuedDataLifecycleBridge> DataLifecycle;
+		std::shared_ptr<engine::render::ScriptDataCaptureBridge> DataCapture;
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
 		std::unique_ptr<engine::world::HostLink> PresentationLink;
 		bool PresentationHostReady = false;

@@ -24,6 +24,7 @@
 // @tier shared
 
 #include <functional>
+#include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
@@ -31,6 +32,11 @@
 
 namespace engine::world {
 	class Universe;
+	class DataFactorySession;
+}
+
+namespace engine::script {
+	class DataCaptureBridge;
 }
 
 namespace engine::control {
@@ -69,6 +75,14 @@ namespace engine::control {
 		// the client as a tool error rather than a protocol error - the
 		// distinction MCP draws so a model can read the reason and try again.
 		std::function<nlohmann::json(const nlohmann::json &arguments, std::string &failure)> Call;
+	};
+
+	// The host reports capture readiness through this small value rather than
+	// discovery reaching into a renderer from the MCP thread.
+	struct DataCaptureAvailability {
+		bool Available = false;
+		std::vector<std::string> Channels;
+		std::string Detail;
 	};
 
 	// Something a client may read without calling a tool.
@@ -169,6 +183,11 @@ namespace engine::control {
 		// @since v0.20
 		void Enable(std::span<const Feature> features);
 
+		// Supplies the host-owned capture readiness snapshot used by `negotiate`.
+		// No provider means this surface has no capture host.
+		void SetDataCaptureAvailabilityProvider(std::function<DataCaptureAvailability()> provider);
+		DataCaptureAvailability CaptureAvailability() const;
+
 		// Installs the tools any program with worlds can answer.
 		//
 		// **The class tree and the storage under it, which are two views of one
@@ -251,6 +270,24 @@ namespace engine::control {
 		//
 		// @since v0.19
 		void AddBuildTools();
+
+		// Installs pure capability and schema discovery for an external data
+		// factory. The result reports this surface's registered tools, while
+		// proposed operations and limits with no implementation stay explicitly
+		// unsupported rather than becoming promises by name alone.
+		//
+		// @since v0.24
+		void AddDiscoveryTools();
+
+		// Installs lifecycle tools backed by one host-owned data-factory session.
+		void AddDataFactoryTools(world::DataFactorySession &session);
+		void AddDataCaptureTools(
+			world::DataFactorySession &session, std::shared_ptr<script::DataCaptureBridge> bridge
+		);
+
+		// Installs read-only data-scene observations for worlds owned by `universe`.
+		void
+		AddDataSceneTools(world::Universe &universe, std::shared_ptr<script::DataCaptureBridge> bridge = {});
 
 		// Adds one resource. Later rows win, as `Add` does.
 		//
@@ -349,6 +386,7 @@ namespace engine::control {
 		std::string Name;
 		std::string Purpose;
 		std::vector<Tool> Tools;
+		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
 		std::vector<Resource> Resources;
 		std::vector<Prompt> Prompts;
 		bool Profiling = false;

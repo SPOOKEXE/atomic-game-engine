@@ -38,7 +38,7 @@ mono_add_library(control
 # The surface suite exercises the optional universe feature. Those dependencies
 # belong to the test executable rather than to every control consumer.
 if(TARGET test_control)
-	target_link_libraries(test_control PRIVATE Engine::ecs Engine::world)
+	target_link_libraries(test_control PRIVATE Engine::ecs Engine::script Engine::world)
 endif()
 
 # The checked-in target graph, compiled in.

@@ -842,7 +842,8 @@ namespace client {
 		Scheduler &scheduler,
 		const std::string &path,
 		uint32_t reserve,
-		std::shared_ptr<engine::script::Runtime> *runtime
+		std::shared_ptr<engine::script::Runtime> *runtime,
+		const engine::script::RuntimeLimits *limits
 	) {
 		// Before anything mints an automatic id for `DrawList`. See
 		// `RegisterClientComponents`: `Components::Of<T>` caches its answer per
@@ -882,7 +883,7 @@ namespace client {
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
 		std::string error;
-		if (!engine::examples::LoadScene(store, scheduler, path, error, runtime)) {
+		if (!engine::examples::LoadScene(store, scheduler, path, error, runtime, limits)) {
 			ENGINE_ERROR("script '{}' failed:\n{}", path, error);
 			return false;
 		}
@@ -985,7 +986,7 @@ namespace client {
 		scheduler.Add(
 			"collect-instances",
 			Phase::PreRender,
-			engine::render::CollectInstances,
+			[](engine::ecs::Store &store) { engine::render::CollectInstances(store); },
 			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons", "resolve-bones"}}
 		);
 		return true;
@@ -1195,7 +1196,7 @@ namespace client {
 		scheduler.Add(
 			"collect-instances",
 			Phase::PreRender,
-			engine::render::CollectInstances,
+			[](engine::ecs::Store &store) { engine::render::CollectInstances(store); },
 			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons", "resolve-bones"}}
 		);
 	}

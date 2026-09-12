@@ -188,6 +188,7 @@ namespace studio {
 			engine::control::features::Build(),
 			engine::control::features::Resources(),
 			engine::control::features::Prompts(),
+			engine::control::features::Discovery(),
 			engine::control::features::Custom("studio", [this](engine::control::Surface &) {
 				RegisterControlTools();
 			}),

@@ -35,6 +35,7 @@
 
 namespace engine::script {
 	class Runtime;
+	struct RuntimeLimits;
 }
 
 namespace engine::examples {
@@ -158,13 +159,15 @@ namespace engine::examples {
 	// @param path      The `.luau` file to run.
 	// @param error     Filled in with the script's error when this returns false.
 	// @param runtime   Set to the VM that ran the scene, when not null.
+	// @param limits    Optional host-owned limits for the scene's runtime.
 	// @return `false` when the file could not be read, compiled or run.
 	bool LoadScene(
 		ecs::Store &store,
 		ecs::Scheduler &scheduler,
 		const std::string &path,
 		std::string &error,
-		std::shared_ptr<script::Runtime> *runtime = nullptr
+		std::shared_ptr<script::Runtime> *runtime = nullptr,
+		const script::RuntimeLimits *limits = nullptr
 	);
 
 	// The path of a scene shipped with the engine, resolved against the assets

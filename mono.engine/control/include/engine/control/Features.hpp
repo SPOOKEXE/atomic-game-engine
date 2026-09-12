@@ -30,6 +30,12 @@ namespace engine::control::features {
 		return Feature{"build", [](Surface &surface) { surface.AddBuildTools(); }};
 	}
 
+	// Pure discovery for the data-factory contract. `negotiate` reads the
+	// registry when called, so product rows may arrive before or after it.
+	inline Feature Discovery() {
+		return Feature{"discovery", [](Surface &surface) { surface.AddDiscoveryTools(); }};
+	}
+
 	// Architecture and checkout-backed context resources.
 	inline Feature Resources() {
 		return Feature{"resources", [](Surface &surface) { surface.AddStandardResources(); }};

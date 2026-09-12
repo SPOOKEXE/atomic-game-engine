@@ -31,6 +31,10 @@ namespace client {
 		// The loopback MCP port, or -1 when the control surface is disabled.
 		int ControlPort = -1;
 
+		// Runs one local world as a data-factory host. It installs the lifecycle
+		// and capture bridges but does not permit replicas or multi-world runs.
+		bool DataFactory = false;
+
 		// Window width in logical pixels, before any display scaling.
 		int Width = 1280;
 

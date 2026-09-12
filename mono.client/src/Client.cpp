@@ -1,5 +1,8 @@
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
+#include <engine/control/features/DataCapture.hpp>
+#include <engine/control/features/DataFactory.hpp>
+#include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
@@ -21,6 +24,7 @@
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
 #include <engine/parallel/Settings.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/render/DebugText.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
@@ -269,6 +273,39 @@ namespace client {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe_ = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		if (Settings.DataFactory) {
+			if (Settings.Worlds != 1 || !Settings.ConnectAddress.empty() ||
+				Settings.PresentationSession != 0 || !Settings.PresentationWorld.empty()) {
+				ENGINE_ERROR("--data-factory requires one local world with no replica or presentation host");
+				return false;
+			}
+			DataFactory = std::make_unique<engine::world::DataFactorySession>(*Universe_);
+			DataCapture = std::make_shared<engine::render::ScriptDataCaptureBridge>(*DataFactory, Renderer);
+			DataLifecycle = std::make_shared<engine::script::QueuedDataLifecycleBridge>(*DataFactory);
+			DataFactory->SetPauseParticipant([this](
+												 engine::world::WorldId world,
+												 engine::world::DataFactoryPauseScope scope,
+												 bool paused,
+												 std::string &detail
+											 ) {
+				if (!Settings.DataFactory || !world.IsValid() || (Rendered.IsValid() && world != Rendered)) {
+					detail = "client data-factory mode supports only its local world";
+					return false;
+				}
+				if (scope == engine::world::DataFactoryPauseScope::PhysicsOnly) {
+					Universe_->Enter(world, [paused](engine::ecs::Store &store) {
+						engine::physics::SetPhysicsPaused(store, paused);
+					});
+					return true;
+				}
+				if (Sound == nullptr) return true;
+				const bool before = Sound->Paused();
+				if (Sound->SetPaused(paused)) return true;
+				(void)Sound->SetPaused(before);
+				detail = "audio device could not establish the pause barrier";
+				return false;
+			});
+		}
 		if (!Universe_->ConfigurePresentation(
 				Settings.PresentationSession == 0 ? 1 : Settings.PresentationSession
 			)) {
@@ -374,10 +411,19 @@ namespace client {
 			return false;
 		}
 		RenderingProfiles = std::move(info.RenderingProfiles);
+		if (Settings.DataFactory) {
+			RenderingProfiles.Set(
+				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
+			);
+		}
 
 		auto worlds = Universe_->Worlds();
 		if (worlds.empty()) {
 			ENGINE_ERROR("--game '{}' holds no worlds", Settings.GameFile.string());
+			return false;
+		}
+		if (Settings.DataFactory && worlds.size() != 1) {
+			ENGINE_ERROR("--data-factory requires a game with exactly one local world");
 			return false;
 		}
 		if (!Settings.PresentationWorld.empty()) {
@@ -402,6 +448,8 @@ namespace client {
 		// a game's `Script` and its `LocalScript` both run here.
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
+		limits.DataCapture = DataCapture;
+		limits.DataLifecycle = DataLifecycle;
 
 		for (const engine::world::WorldId id : worlds) {
 			const double scriptTickRate = Universe_->SettingsOf(id).ScriptTickRate;
@@ -440,7 +488,16 @@ namespace client {
 	}
 
 	bool Client::BuildDemoWorlds() {
+		if (Settings.DataFactory) {
+			RenderingProfiles.Set(
+				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
+			);
+		}
 		const uint32_t worlds = std::max(1u, Settings.Worlds);
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		limits.DataCapture = DataCapture;
+		limits.DataLifecycle = DataLifecycle;
 		for (uint32_t index = 0; index < worlds; index++) {
 			engine::world::WorldSettings world;
 
@@ -468,11 +525,12 @@ namespace client {
 			std::shared_ptr<engine::script::Runtime> runtime;
 			Universe_->Enter(
 				id,
-				[this, &scripted, &scenePath, &runtime](
+				[this, &scripted, &scenePath, &runtime, &limits](
 					engine::ecs::Store &store, engine::ecs::Scheduler &systems
 				) {
 					// Do not present a partially built world.
-					scripted = BuildScriptedWorld(store, systems, scenePath, Settings.Entities, &runtime);
+					scripted =
+						BuildScriptedWorld(store, systems, scenePath, Settings.Entities, &runtime, &limits);
 				}
 			);
 
@@ -537,8 +595,18 @@ namespace client {
 				engine::control::features::Diagnostics(),
 				engine::control::features::Resources(),
 				engine::control::features::Prompts(),
+				engine::control::features::Discovery(),
 			};
 			ControlSurface.Enable(features);
+			if (DataFactory) {
+				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataCapture(*DataFactory, DataCapture)}
+				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataScene(*Universe_, DataCapture)}
+				);
+			}
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
@@ -2035,9 +2103,6 @@ namespace client {
 		}
 
 		const float delta = Clock.Tick();
-		AnimationSeconds += delta;
-		ParticleDeltaSeconds += delta;
-		PresentationDeltaSeconds += delta;
 
 		{
 			ENGINE_HEAP_SCOPE("client.events");
@@ -2047,12 +2112,24 @@ namespace client {
 		if (ControlServer.IsRunning()) {
 			ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 		}
+		auto allSystemsPaused = [this] {
+			return DataFactory && Rendered.IsValid() &&
+				   DataFactory->AllSystemsPaused(Universe_->NameOf(Rendered).Text());
+		};
+		bool factoryPaused = allSystemsPaused();
+		if (Sound != nullptr) (void)Sound->SetPaused(factoryPaused);
+		if (!factoryPaused) {
+			AnimationSeconds += delta;
+			ParticleDeltaSeconds += delta;
+			PresentationDeltaSeconds += delta;
+		}
 
 		// Input belongs to the update clock. Presentation used to write it just
 		// before PreRender, which made an independently paced client leave every
 		// intervening simulation tick reading the last presented state.
 		const engine::world::WorldId inputReplica = ReportedJoin ? Replicated : engine::world::WorldId{};
 		for (const engine::world::WorldId id : Simulated) {
+			if (factoryPaused && id == Rendered) continue;
 			Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
 		}
 		if (ReportedJoin) {
@@ -2083,6 +2160,10 @@ namespace client {
 			ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 			Universe_->Tick(delta);
 		}
+		if (DataLifecycle) DataLifecycle->Pump();
+		if (DataCapture) DataCapture->Pump();
+		factoryPaused = allSystemsPaused();
+		if (Sound != nullptr) (void)Sound->SetPaused(factoryPaused);
 
 		{
 			// After the tick and before presentation, the same place the server
@@ -2110,7 +2191,7 @@ namespace client {
 		// because presentation is where the frame stops being about state.
 		{
 			ENGINE_HEAP_SCOPE("client.sounds");
-			PumpSounds();
+			if (!factoryPaused) PumpSounds();
 		}
 
 		// Beside the audio pump: neither is part of the tick, and a presence
@@ -2217,6 +2298,7 @@ namespace client {
 			std::vector<engine::world::Presentation> presentationDemand;
 			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
+				if (factoryPaused && id == Rendered) continue;
 				// **The size of what it is being drawn into has to arrive before
 				// `Present`, for the same reason and in the same breath.**
 				// `aim-surface-cameras` clamps
@@ -2235,9 +2317,11 @@ namespace client {
 						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
 					);
 				});
-				presentationDemand.push_back(
-					engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)}
-				);
+				if (!(factoryPaused && id == Rendered)) {
+					presentationDemand.push_back(
+						engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)}
+					);
+				}
 			}
 
 			// All demanded worlds prepare their draw packets together. Each
@@ -2310,6 +2394,14 @@ namespace client {
 				// where they were produced; what leaves is a copy in a buffer
 				// the renderer owns the other end of.
 				Universe_->Enter(id, [&, id](engine::ecs::Store &store) {
+					// A suspended factory world does not run PreRender. Rebuild only
+					// its derived draw packet from current ECS rows before publishing;
+					// DrawList has an empty snapshot serializer, so this cannot alter
+					// the snapshot barrier or advance scripts and clocks.
+					if (factoryPaused && id == Rendered)
+						engine::render::CollectInstances(
+							store, engine::render::DrawCollectionTime::CurrentTick
+						);
 					const auto *active = store.Resource<engine::scene::ActiveCamera>();
 					const auto *list = store.Resource<engine::render::DrawList>();
 					if (active == nullptr || list == nullptr) {
@@ -3167,7 +3259,9 @@ namespace client {
 			.ViewportOverlay = true,
 		};
 		view.Damage = damage;
-		const bool visualChanged = damage.Any() || PresentationInvalidated;
+		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
+		if (capturePending) DataCapture->PrepareView(view);
+		const bool visualChanged = damage.Any() || PresentationInvalidated || capturePending;
 		const bool particleDeviceStep = particleLayerPresent && ParticleDeltaSeconds > 0.0f;
 		if (!visualChanged) {
 			PresentationDamage.CacheProfile().Record(damage, false, false, cacheApplicability);

@@ -165,7 +165,8 @@ namespace engine::examples {
 		Scheduler &scheduler,
 		const std::string &path,
 		std::string &error,
-		std::shared_ptr<script::Runtime> *out
+		std::shared_ptr<script::Runtime> *out,
+		const script::RuntimeLimits *limits
 	) {
 		// The class trees a script names, and this module's own components for
 		// the C++ path. A script builds out of `Part`; nothing it touches is
@@ -260,7 +261,9 @@ namespace engine::examples {
 		// to `RunService.Heartbeat` *is* the simulation for what it built, so
 		// the VM has to outlive the call that loaded it - the scheduler holds
 		// the last reference and drops it with the world.
-		std::shared_ptr<script::Runtime> runtime = script::MakeRuntime(store, script::LanguageOf(path));
+		std::shared_ptr<script::Runtime> runtime =
+			limits != nullptr ? script::MakeRuntime(store, script::LanguageOf(path), *limits)
+							  : script::MakeRuntime(store, script::LanguageOf(path));
 
 		// **The scene's script is an instance in the scene**, which is what v0.6
 		// made structural. `RunFile` still exists and still works; what this

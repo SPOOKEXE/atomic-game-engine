@@ -12,10 +12,14 @@
 
 #include <engine/control/Features.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/DataCapture.hpp>
+#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/Universe.hpp>
+#include <engine/core/Version.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -23,6 +27,7 @@
 #include <array>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.control.surface")
@@ -103,6 +108,98 @@ namespace {
 		settings.Name = Name(name);
 		return universe.Create(settings);
 	}
+
+	const json *Named(const json &values, const char *name) {
+		for (const json &value : values) {
+			if (value.value("name", "") == name) {
+				return &value;
+			}
+		}
+		return nullptr;
+	}
+
+	class FakeCapture final : public engine::script::DataCaptureBridge {
+	  public:
+		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
+			return {.Available = true, .Channels = {"rgb_linear_hdr"}, .Detail = "ready"};
+		}
+		bool Queue(
+			std::string_view instance,
+			const engine::script::DataCaptureBridgeRequest &request,
+			uint64_t &ticket,
+			std::string &
+		) override {
+			Instance = instance;
+			Snapshot = request.SnapshotId;
+			ticket = 1;
+			Queued = true;
+			return true;
+		}
+		bool Poll(
+			std::string_view instance,
+			uint64_t ticket,
+			engine::script::DataCaptureBridgePoll &poll,
+			std::string &detail
+		) override {
+			if (!Queued || instance != Instance || ticket != 1) {
+				detail = "unknown ticket";
+				return false;
+			}
+			poll.Status = "ready";
+			poll.SnapshotId = Snapshot;
+			poll.Planes = {
+				{.Channel = "rgb_linear_hdr",
+				 .Status = "ready",
+				 .Resource = "capture/1/rgb_linear_hdr",
+				 .SourceResource = "colour",
+				 .HashAlgorithm = "blake3-256",
+				 .Hash = "abcd",
+				 .Width = 2,
+				 .Height = 1,
+				 .RowStride = 6,
+				 .Scalar = "float16",
+				 .ColourSpace = "linear",
+				 .Origin = "top_left"}
+			};
+			return true;
+		}
+		bool ReadPlane(
+			std::string_view instance,
+			uint64_t ticket,
+			std::string_view resource,
+			size_t offset,
+			size_t maximum,
+			std::vector<std::byte> &bytes,
+			std::string &detail
+		) override {
+			if (!Queued || instance != Instance || ticket != 1 || resource != "capture/1/rgb_linear_hdr" ||
+				offset > 3) {
+				detail = "unknown resource";
+				return false;
+			}
+			const std::array raw{std::byte{1}, std::byte{2}, std::byte{3}};
+			const size_t count = std::min(maximum, raw.size() - offset);
+			bytes.assign(
+				raw.begin() + static_cast<ptrdiff_t>(offset),
+				raw.begin() + static_cast<ptrdiff_t>(offset + count)
+			);
+			return true;
+		}
+		bool Release(std::string_view instance, uint64_t ticket, std::string &detail) override {
+			if (!Queued || instance != Instance || ticket != 1) {
+				detail = "unknown ticket";
+				return false;
+			}
+			Queued = false;
+			return true;
+		}
+		void Cancel(std::string_view, uint64_t) override {}
+
+	  private:
+		std::string Instance;
+		std::string Snapshot;
+		bool Queued = false;
+	};
 }
 
 // --- the protocol -------------------------------------------------------------
@@ -150,6 +247,127 @@ TEST_CASE("an unknown tool is a refusal rather than a protocol error", "[control
 	// MCP draws that line deliberately: a transport error is for a malformed
 	// call, and a tool that refused is something a model reads and reacts to.
 	CHECK(failed);
+}
+
+TEST_CASE("a refused tool retains its structured recovery payload", "[control]") {
+	Surface surface("test", "a suite");
+	surface.Add(
+		Tool{
+			"guarded_write",
+			"Refuses a stale write with the current versions.",
+			nullptr,
+			[](const json &, std::string &failure) {
+				failure = "version_conflict";
+				return json{{"status", "version_conflict"}, {"current_versions", json{{"scene", 7}}}};
+			},
+		}
+	);
+
+	bool failed = false;
+	const json reply = Called(surface, "guarded_write", json::object(), failed);
+	CHECK(failed);
+	CHECK(reply["error"] == "version_conflict");
+	CHECK(reply["status"] == "version_conflict");
+	CHECK(reply["current_versions"]["scene"] == 7);
+}
+
+TEST_CASE("discovery reads each surface's installed capture readiness", "[control][discovery]") {
+	Surface supported("supported", "a suite");
+	supported.SetDataCaptureAvailabilityProvider([] {
+		return engine::control::DataCaptureAvailability{
+			.Available = true,
+			.Channels = {"rgb_linear_hdr", "linear_depth"},
+			.Detail = "renderer readback is ready",
+		};
+	});
+	supported.Enable(std::array{engine::control::features::Discovery()});
+
+	const json available =
+		Called(supported, "negotiate", json{{"requested_channels", {"rgb_linear_hdr", "shading_normal"}}});
+	CHECK(available["requested_channels"][0]["supported"]);
+	CHECK_FALSE(available["requested_channels"][1]["supported"]);
+	CHECK(available["offscreen_gpu"]["supported"]);
+
+	Surface unavailable("unavailable", "a suite");
+	unavailable.SetDataCaptureAvailabilityProvider([] {
+		return engine::control::DataCaptureAvailability{
+			.Available = false,
+			.Channels = {},
+			.Detail = "renderer is not ready",
+		};
+	});
+	unavailable.Enable(std::array{engine::control::features::Discovery()});
+	const json absent = Called(unavailable, "negotiate", json{{"requested_channels", {"rgb_linear_hdr"}}});
+	CHECK_FALSE(absent["requested_channels"][0]["supported"]);
+	CHECK(absent["requested_channels"][0]["reason"] == "renderer is not ready");
+	CHECK_FALSE(absent["offscreen_gpu"]["supported"]);
+}
+
+TEST_CASE("capture tools retain metadata and return bounded base64 resources", "[control][data-capture]") {
+	Universe universe;
+	MakeWorld(universe, "capture-world");
+	engine::world::DataFactorySession session(universe);
+	auto bridge = std::make_shared<FakeCapture>();
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataCapture(session, bridge)});
+	const auto current = session.Inspect("capture-world");
+	const json capture = Called(
+		surface,
+		"capture",
+		json{
+			{"instance_id", "capture-world"},
+			{"snapshot_id", "snapshot-1"},
+			{"pipeline", "default_pbr"},
+			{"capture_node", "capture"},
+			{"view_slot", 0},
+			{"channels", {"rgb_linear_hdr"}},
+			{"temporal_history", "preserve"},
+			{"operation_id", "capture-1"},
+			{"expected_tick", current.Clock.Tick},
+			{"expected_world_epoch", current.WorldEpoch},
+			{"expected_world_version", current.WorldVersion}
+		}
+	);
+	CHECK(capture["status"] == "queued");
+	const json poll = Called(surface, "poll_capture", json{{"instance_id", "capture-world"}, {"ticket", 1}});
+	CHECK(poll["planes"][0]["digest"] == "abcd");
+	CHECK(poll["planes"][0]["hash_algorithm"] == "blake3-256");
+	CHECK(poll["planes"][0]["shape"] == json::array({1, 2, 4}));
+	CHECK(poll["planes"][0]["snapshot_id"] == "snapshot-1");
+	CHECK(poll["planes"][0]["dtype"] == "float16");
+	const json bytes = Called(
+		surface,
+		"get_resource",
+		json{
+			{"id", "capture/1/rgb_linear_hdr"},
+			{"options", {{"instance_id", "capture-world"}, {"ticket", 1}, {"offset", 0}, {"max_bytes", 3}}}
+		}
+	);
+	CHECK(bytes["encoding"] == "base64");
+	CHECK(bytes["data"] == "AQID");
+	CHECK(
+		Called(
+			surface,
+			"cancel_capture",
+			json{{"instance_id", "capture-world"}, {"ticket", 1}, {"operation_id", "shared-action"}}
+		)["status"] == "cancel_requested"
+	);
+	bool failed = false;
+	const json conflict = Called(
+		surface,
+		"release_capture",
+		json{{"instance_id", "capture-world"}, {"ticket", 1}, {"operation_id", "shared-action"}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(conflict["error"].get<std::string>().starts_with("operation_id_conflict:"));
+	CHECK(
+		Called(
+			surface,
+			"release_capture",
+			json{{"instance_id", "capture-world"}, {"ticket", 1}, {"operation_id", "release-1"}}
+		)["status"] == "released"
+	);
 }
 
 TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {
@@ -204,6 +422,120 @@ TEST_CASE("omitted engine features publish none of their rows", "[control]") {
 		CHECK(tool.Name != "test_run");
 	}
 	CHECK(architecture);
+}
+
+TEST_CASE("discovery reports the final callable registry and schema", "[control][discovery]") {
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::Discovery()});
+	size_t calls = 0;
+
+	// A product row can arrive after the feature list. Discovery reads the
+	// registry at call time, so it describes that row instead of a snapshot from
+	// installation before the product finished registering its vocabulary.
+	surface.Add(
+		Tool{
+			"host_probe",
+			"A host-specific probe.",
+			[] {
+				return json{{"type", "object"}, {"properties", json{{"label", json{{"type", "string"}}}}}};
+			},
+			[&calls](const json &, std::string &) {
+				calls++;
+				return json::object();
+			},
+		}
+	);
+	surface.Add(
+		Tool{
+			"capture",
+			"An unrelated host tool named capture.",
+			nullptr,
+			[&calls](const json &, std::string &) {
+				calls++;
+				return json::object();
+			},
+		}
+	);
+
+	const json result = Called(surface, "negotiate", json::object());
+	CHECK(result["engine_version"] == std::string(engine::core::Version()));
+	const json *negotiate = Named(result["operations"], "negotiate");
+	REQUIRE(negotiate != nullptr);
+	CHECK((*negotiate)["input_schema"]["type"] == "object");
+	const json *probe = Named(result["operations"], "host_probe");
+	REQUIRE(probe != nullptr);
+	CHECK((*probe)["input_schema"]["properties"]["label"]["type"] == "string");
+	const json *capture = Named(result["operations"], "capture");
+	REQUIRE(capture != nullptr);
+	CHECK((*capture)["input_schema"]["type"] == "object");
+	CHECK(Named(result["unsupported_operations"], "capture") == nullptr);
+	CHECK(Called(surface, "negotiate", json::object()) == result);
+	CHECK(calls == 0);
+}
+
+TEST_CASE("discovery refuses unknown versions and oversized requests", "[control][discovery]") {
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::Discovery()});
+
+	bool failed = false;
+	const json version = Called(surface, "negotiate", json{{"contract_version", "unknown"}}, failed);
+	CHECK(failed);
+	CHECK(version["error"].get<std::string>().starts_with("capability_unsupported:"));
+
+	std::vector<std::string> channels(65, "rgb");
+	const json oversized = Called(surface, "negotiate", json{{"requested_channels", channels}}, failed);
+	CHECK(failed);
+	CHECK(oversized["error"].get<std::string>().find("64-channel") != std::string::npos);
+
+	const json malformed = Called(surface, "negotiate", json::array(), failed);
+	CHECK(failed);
+	CHECK(malformed["error"] == "negotiate arguments must be an object");
+
+	const std::array<std::pair<json, std::string_view>, 6> invalid{
+		std::pair{json{{"schema_version", "unknown"}}, "schema_version"},
+		std::pair{json{{"requested_channels", "rgb"}}, "must be an array"},
+		std::pair{json{{"requested_channels", json::array({1})}}, "lowercase ASCII"},
+		std::pair{json{{"requested_channels", json::array({""})}}, "lowercase ASCII"},
+		std::pair{json{{"requested_channels", json::array({"RGB"})}}, "lowercase ASCII"},
+		std::pair{json{{"requested_channels", json::array({std::string(129, 'a')})}}, "lowercase ASCII"},
+	};
+	for (const auto &[arguments, expected] : invalid) {
+		const json refused = Called(surface, "negotiate", arguments, failed);
+		CHECK(failed);
+		CHECK(refused["error"].get<std::string>().find(expected) != std::string::npos);
+	}
+}
+
+TEST_CASE(
+	"discovery names unavailable channels and limits instead of promising them", "[control][discovery]"
+) {
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::Discovery()});
+
+	const json result =
+		Called(surface, "negotiate", json{{"requested_channels", json::array({"rgb", "made_up"})}});
+	REQUIRE(result["requested_channels"].size() == 2);
+	CHECK_FALSE(result["requested_channels"][0]["supported"]);
+	CHECK(result["requested_channels"][0]["reason"] == "capture channels are not implemented by this host");
+	CHECK_FALSE(result["requested_channels"][1]["supported"]);
+	CHECK(result["requested_channels"][1]["reason"] == "capture channels are not implemented by this host");
+
+	const json *channels = Named(result["limits"], "channels");
+	REQUIRE(channels != nullptr);
+	CHECK_FALSE((*channels)["supported"]);
+	CHECK((*channels)["reason"] == "this host does not implement the data-factory operation");
+	CHECK_FALSE(result["offscreen_gpu"]["supported"]);
+	CHECK_FALSE(result["headless_cpu"]["supported"]);
+}
+
+TEST_CASE("discovery accepts its exact requested-channel bounds", "[control][discovery]") {
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::Discovery()});
+
+	const std::vector<std::string> channels(64, std::string(128, 'a'));
+	const json result = Called(surface, "negotiate", json{{"requested_channels", channels}});
+	CHECK(result["requested_channels"].size() == 64);
+	CHECK(result["requested_channels"].front()["name"] == channels.front());
 }
 
 // --- the storage underneath ----------------------------------------------------
@@ -464,4 +796,146 @@ TEST_CASE("a read-only surface offers neither write tool", "[control]") {
 		listed = listed || tool.Name == "component_list";
 	}
 	CHECK(listed);
+}
+
+TEST_CASE(
+	"data-factory lifecycle tools validate and deduplicate through the surface", "[control][data-factory]"
+) {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "control-data-factory");
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+
+	Surface surface("test", "a suite");
+	surface.Enable(
+		std::array{engine::control::features::Discovery(), engine::control::features::DataFactory(session)}
+	);
+	const json negotiated = Called(surface, "negotiate", json::object());
+	for (const json &unavailable : negotiated["unsupported_operations"]) {
+		CHECK(unavailable["name"] != "pause");
+		CHECK(unavailable["name"] != "resume");
+		CHECK(unavailable["name"] != "step");
+		CHECK(unavailable["name"] != "snapshot");
+		CHECK(unavailable["name"] != "checkpoint");
+		CHECK(unavailable["name"] != "restore");
+	}
+	const json inspected =
+		Called(surface, "lifecycle_inspect", json{{"instance_id", "control-data-factory"}});
+	CHECK(inspected["tick"] == 0);
+	CHECK(inspected["world_epoch"] == 1);
+	CHECK(inspected["world_version"] == 0);
+	const auto before = session.Inspect("control-data-factory");
+	const json base{
+		{"instance_id", "control-data-factory"},
+		{"expected_tick", before.Clock.Tick},
+		{"expected_world_epoch", before.WorldEpoch},
+		{"expected_world_version", before.WorldVersion}
+	};
+
+	// Every malformed value is refused before the pause participant or world can
+	// change. Negative, floating, and boolean JSON values must not coerce to an
+	// unsigned expectation.
+	json negative = base;
+	negative["expected_tick"] = -1;
+	bool failed = false;
+	Called(surface, "pause", negative, failed);
+	CHECK(failed);
+	json floating = base;
+	floating["expected_world_version"] = 1.0;
+	failed = false;
+	Called(surface, "pause", floating, failed);
+	CHECK(failed);
+	json boolean = base;
+	boolean["expected_world_epoch"] = true;
+	failed = false;
+	Called(surface, "pause", boolean, failed);
+	CHECK(failed);
+	json unknown = base;
+	unknown["scope"] = "physics";
+	failed = false;
+	Called(surface, "pause", unknown, failed);
+	CHECK(failed);
+	json nul = base;
+	nul["operation_id"] = std::string("nul\0id", 6);
+	failed = false;
+	Called(surface, "pause", nul, failed);
+	CHECK(failed);
+	CHECK(session.Inspect("control-data-factory").WorldVersion == before.WorldVersion);
+
+	json pause = base;
+	pause["operation_id"] = "pause-1";
+	const json paused = Called(surface, "pause", pause);
+	CHECK(paused["world_version"] == 1);
+
+	json step{
+		{"instance_id", "control-data-factory"},
+		{"expected_tick", 0u},
+		{"expected_world_epoch", 1u},
+		{"expected_world_version", 1u},
+		{"operation_id", "step-1"},
+		{"dt_ns", {{"numerator", 1'000'000'000u}, {"denominator", 60u}}},
+		{"actions", json::array()}
+	};
+	const json stepped = Called(surface, "step", step);
+	CHECK(stepped["tick"] == 1);
+	CHECK(stepped["world_version"] == 2);
+	const json replay = Called(surface, "step", step);
+	CHECK(replay == stepped);
+	CHECK(universe.StatisticsOf(world).Ticks == 1);
+
+	json conflict = step;
+	conflict["expected_tick"] = 1u;
+	failed = false;
+	Called(surface, "step", conflict, failed);
+	CHECK(failed);
+	json action = step;
+	action["operation_id"] = "step-actions";
+	action["actions"] = json::array({"jump"});
+	failed = false;
+	Called(surface, "step", action, failed);
+	CHECK(failed);
+
+	const json current{
+		{"instance_id", "control-data-factory"},
+		{"expected_tick", 1u},
+		{"expected_world_epoch", 1u},
+		{"expected_world_version", 2u}
+	};
+	json snapshotArguments = current;
+	snapshotArguments["operation_id"] = "capture-1";
+	const json snapshot = Called(surface, "snapshot", snapshotArguments);
+	CHECK(snapshot.contains("snapshot_id"));
+	json checkpoint = current;
+	checkpoint["operation_id"] = "capture-1";
+	failed = false;
+	Called(surface, "checkpoint", checkpoint, failed);
+	CHECK(failed);
+	checkpoint["operation_id"] = "checkpoint-1";
+	const json saved = Called(surface, "checkpoint", checkpoint);
+	REQUIRE(saved.contains("checkpoint_id"));
+	json restore = current;
+	restore["operation_id"] = "restore-1";
+	restore["checkpoint_id"] = saved["checkpoint_id"];
+	const json restored = Called(surface, "restore", restore);
+	CHECK(restored["world_epoch"] == 2);
+	const json resumed = Called(
+		surface,
+		"resume",
+		json{
+			{"instance_id", "control-data-factory"},
+			{"expected_tick", restored["tick"]},
+			{"expected_world_epoch", restored["world_epoch"]},
+			{"expected_world_version", restored["world_version"]}
+		}
+	);
+	CHECK(resumed["status"] == "ok");
+
+	json missing = base;
+	missing["instance_id"] = "no-such-world";
+	failed = false;
+	Called(surface, "pause", missing, failed);
+	CHECK(failed);
 }
