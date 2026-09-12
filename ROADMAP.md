@@ -77,14 +77,15 @@ the renderer build-out.
 
 #### 3. Hard
 
-- [_] Render foreign worlds from fresh destination geometry and capture data using the current camera, with correct parallax and disocclusion. The packet current-camera Vulkan test passes 155 assertions and in-flight request coalescing closes camera loss.
-- [_] Finish retained-world observation with authorized content, complete visual layers, handoff lifetime and gameplay lease retirement. The staging prototype is rolled back.
-- [_] Add tessellation and global illumination as composable render nodes.
-- [_] Add smart triangle reduction based on projected triangle surface area, then investigate Nanite-style virtualized geometry without CPU readback during LOD changes.
-- [_] Port semi-real ray tracing and path tracing into render nodes.
-- [_] Add demo render pipelines for semi-real ray tracing and path tracing.
-- [_] Finish the visual-compositor system and build out additional Blender-like pipeline nodes and workflows.
-- [_] Reproduce and fix the original black frame with a valid image handle, and retain the last valid image during topology waits.
+- [x] Complete portal image host and session contracts for fresh destination captures, current-camera routing, capture retention across route and body waits, inverse lens mapping, lease disconnects and player return handoff.
+- [x] Add tessellation as a composable render-graph node, with view- and capacity-aware plans, compute-readable resident mesh streams and material-matched draws.
+- [x] Add bounded screen-space global illumination, ray and path estimators as composable render nodes with view-signature history and submission-safe accumulation. These are screen-space estimators, not acceleration-structure tracing.
+- [x] Add demo render pipelines for the bounded screen-space ray and path estimators.
+- [x] Add projected-area triangle reduction and GPU cluster selection with indirect draws, coverage culling and no CPU readback during LOD changes.
+- [x] Add composable image-processing and visual-compositor nodes, a compositor demo pipeline and signed Studio controls for node settings.
+- [x] Add portal particle and ribbon layer peeling through the transparent-layer path.
+- [_] Device-validate foreign-world captures from fresh destination geometry with the current camera, including exact parallax and disocclusion. The packet current-camera Vulkan test passes 155 assertions and in-flight request coalescing closes camera loss. Device checks were not rerun after the dense sampler fix.
+- [_] Reproduce the original black frame with a valid image handle and visually confirm retention of the last valid image during topology waits.
 - [_] Verify seamless player and body crossing, Humanoid camera subjects, camera obstruction, clipping and return trips under delay, restart and lost acknowledgements.
 - [_] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam.
 - [_] Check oblique, rolled and scaled portal views at all angles, then finish visual review of the non-Euclidean demo.
