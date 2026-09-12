@@ -99,7 +99,7 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	std::vector<world::WorldId> submittedWorlds;
 	std::vector<Name> submittedPipelines;
 	const render::FrameResult submitted = collector.SubmitBatch(
-		zulu, collector.Scenes()[1].View, 640, 480, {}, [&](std::span<const render::View> batch) {
+		zulu, collector.Scenes()[1].View, 640, 480, false, {}, [&](std::span<const render::View> batch) {
 			++submissions;
 			for (const render::View &view : batch) {
 				submittedWorlds.push_back(view.World == alpha.Index ? alpha : zulu);
@@ -115,6 +115,34 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	CHECK(submittedWorlds == std::vector<world::WorldId>{alpha, zulu});
 	CHECK(submittedPipelines == std::vector<Name>{Name("alpha-pipeline"), Name("zulu-pipeline")});
 
+	std::vector<const render::SceneTarget *> firstTargets;
+	collector.SubmitBatch(
+		zulu, collector.Scenes()[1].View, 640, 480, true, {}, [&](std::span<const render::View> batch) {
+			REQUIRE(batch.size() == 2);
+			for (const render::View &view : batch) {
+				REQUIRE(view.Target != nullptr);
+				CHECK(view.Target->Width == 640);
+				CHECK(view.Target->Height == 480);
+				firstTargets.push_back(view.Target);
+			}
+			CHECK(batch.back().Target != collector.Scenes()[1].View.Target);
+			return render::FrameResult{};
+		}
+	);
+	REQUIRE(firstTargets.size() == 2);
+	CHECK(firstTargets[0] != firstTargets[1]);
+
+	collector.SubmitBatch(
+		zulu, collector.Scenes()[1].View, 0, 0, false, {}, [&](std::span<const render::View> batch) {
+			REQUIRE(batch.size() == 2);
+			REQUIRE(batch.front().Target != nullptr);
+			CHECK(batch.front().Target->Width == 1);
+			CHECK(batch.front().Target->Height == 1);
+			CHECK(batch.back().Target == nullptr);
+			return render::FrameResult{};
+		}
+	);
+
 	REQUIRE(worlds.Destroy(alpha) == world::WorldStatus::Ok);
 	const std::array remaining{
 		client::ActiveSceneDemand{world::Presentation{alpha, .016f, .5f}, Name("alpha-pipeline")},
@@ -123,6 +151,15 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	REQUIRE(collector.Collect(worlds, remaining, {640, 480}) == 1);
 	REQUIRE(collector.Scenes().size() == 1);
 	CHECK(collector.Scenes().front().Name == Name("Zulu"));
+	collector.SubmitBatch(
+		zulu, collector.Scenes().front().View, 320, 180, true, {}, [&](std::span<const render::View> batch) {
+			REQUIRE(batch.size() == 1);
+			REQUIRE(batch.front().Target != nullptr);
+			CHECK(batch.front().Target->Width == 320);
+			CHECK(batch.front().Target->Height == 180);
+			return render::FrameResult{};
+		}
+	);
 }
 
 TEST_CASE("a trailing eye draws its original world after body admission", "[client][camera-portal-world]") {

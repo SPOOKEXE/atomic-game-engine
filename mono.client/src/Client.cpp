@@ -3326,6 +3326,7 @@ namespace client {
 				view,
 				static_cast<uint32_t>(std::max(pixelWidth, 1)),
 				static_cast<uint32_t>(std::max(pixelHeight, 1)),
+				Settings.Headless,
 				ContentBindings,
 				[&](std::span<const engine::render::View> cameraBatch) {
 					return Renderer.Render(cameraBatch, Overlay, hook);

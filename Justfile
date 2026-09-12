@@ -183,6 +183,7 @@ medium-render-profile seconds="15":
     mkdir -p .cache/medium-render-profile
     profile_build=".cache/build/profile"
     script="$profile_build/assets/examples/scripts/RenderFeaturesDemo.luau"
+    previous_draw_calls=0
     for cameras in 1 2 8; do
         base=".cache/medium-render-profile/cameras-$cameras"
         rm -f "$base-frame.txt" "$base-heap.txt" "$base.log"
@@ -205,6 +206,22 @@ medium-render-profile seconds="15":
             in_gpu_heap && $1 == "allocated" && $2 + 0 > 0 { found = 1 }
             END { exit !found }
         ' "$base-heap.txt"
+        # The headless product must submit scene work. A valid heap alone can
+        # come from renderer startup, so require submitted draws, their GPU
+        # timestamp span, and the resident-row upload path as separate proof.
+        draw_calls="$(awk '
+            /triangle\(s\) in [0-9]+ draw call\(s\) at the busiest frame/ {
+                for (index = 1; index < NF; index++) {
+                    if ($index == "in" && $(index + 2) == "draw") value = $(index + 1)
+                }
+            }
+            END { if (value == "") exit 1; print value }
+        ' "$base.log")"
+        test "$draw_calls" -gt "$previous_draw_calls"
+        previous_draw_calls="$draw_calls"
+        grep -q 'gpu timestamps enabled' "$base.log"
+        grep -Eq '^gpu [[:graph:]]+' "$base-frame.txt"
+        grep -Eq '^[1-9][0-9]* of [1-9][0-9]* resident instance chunk\(s\)' "$base.log"
         echo "medium-render-profile cameras=$cameras"
         grep -E "gpu heap:|gpu memory:|cache|upload|download|timestamp" "$base.log" || true
         grep -E "^(frame|span|category)" "$base-frame.txt" || true

@@ -57,12 +57,14 @@ namespace client {
 		);
 
 		// Builds one camera batch and invokes its sink exactly once. Offscreen
-		// targets remain owned by the collector until the next call.
+		// targets remain owned by the collector until the next call. A headless
+		// product display needs its own target because it has no swapchain.
 		engine::render::FrameResult SubmitBatch(
 			engine::world::WorldId displayedWorld,
 			const engine::render::View &displayedView,
 			uint32_t width,
 			uint32_t height,
+			bool offscreenDisplayed,
 			std::span<const engine::render::WorldContentOwner> foreignContentOwners,
 			const std::function<engine::render::FrameResult(std::span<const engine::render::View>)> &submit
 		);

@@ -95,6 +95,7 @@ namespace client {
 		const engine::render::View &displayedView,
 		uint32_t width,
 		uint32_t height,
+		bool offscreenDisplayed,
 		std::span<const engine::render::WorldContentOwner> foreignContentOwners,
 		const std::function<engine::render::FrameResult(std::span<const engine::render::View>)> &submit
 	) {
@@ -111,7 +112,12 @@ namespace client {
 			view.ForeignContentOwners = foreignContentOwners;
 			BatchViews.push_back(view);
 		}
-		BatchViews.push_back(displayedView);
+		engine::render::View finalView = displayedView;
+		if (offscreenDisplayed) {
+			BatchTargets.push_back({std::max(width, 1u), std::max(height, 1u)});
+			finalView.Target = &BatchTargets.back();
+		}
+		BatchViews.push_back(finalView);
 		if (!submit) return {};
 		return submit(BatchViews);
 	}
