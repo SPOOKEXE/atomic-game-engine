@@ -59,14 +59,15 @@ namespace {
 		uint64_t CacheHits = 0;
 		uint64_t CacheMisses = 0;
 		engine::render::GpuMemoryStatistics Before;
-		engine::render::GpuMemoryStatistics Resident;
-		engine::render::GpuMemoryStatistics Released;
-		uint64_t PeakResidentLiveBytes = 0;
-		uint64_t PeakResidentTextureBytes = 0;
-		uint64_t PeakResidentTransferBytes = 0;
-		uint64_t TextureAllocations = 0;
-		uint64_t TransferAllocations = 0;
-		uint64_t ReleasedBytes = 0;
+		engine::render::GpuMemoryStatistics SourcePageResident;
+		engine::render::GpuMemoryStatistics AfterValidation;
+		engine::render::GpuMemoryStatistics AfterRelease;
+		uint64_t SourcePagePeakLiveBytes = 0;
+		uint64_t SourcePagePeakTextureBytes = 0;
+		uint64_t SourcePagePeakTransferBytes = 0;
+		uint64_t WholeProbeTextureAllocations = 0;
+		uint64_t WholeProbeTransferAllocations = 0;
+		uint64_t WholeProbeReleasedBytes = 0;
 	};
 
 	std::optional<Report> StandaloneReport;
@@ -94,12 +95,12 @@ namespace {
 				<< " transfer_ops=" << report.TransferOperations
 				<< " page_allocations=" << report.PageAllocations << " copy_calls=" << report.CopyCalls
 				<< " cache_hits=" << report.CacheHits << " cache_misses=" << report.CacheMisses
-				<< " page_peak_live_bytes=" << report.PeakResidentLiveBytes
-				<< " page_peak_texture_bytes=" << report.PeakResidentTextureBytes
-				<< " page_peak_transfer_bytes=" << report.PeakResidentTransferBytes
-				<< " texture_allocations=" << report.TextureAllocations
-				<< " transfer_allocations=" << report.TransferAllocations
-				<< " released_bytes=" << report.ReleasedBytes
+				<< " source_page_peak_live_bytes=" << report.SourcePagePeakLiveBytes
+				<< " source_page_peak_texture_bytes=" << report.SourcePagePeakTextureBytes
+				<< " source_page_peak_transfer_bytes=" << report.SourcePagePeakTransferBytes
+				<< " whole_probe_texture_allocations=" << report.WholeProbeTextureAllocations
+				<< " whole_probe_transfer_allocations=" << report.WholeProbeTransferAllocations
+				<< " whole_probe_released_bytes=" << report.WholeProbeReleasedBytes
 				<< '\n';
 		}
 	}
@@ -312,7 +313,9 @@ namespace {
 			SDL_UnmapGPUTransferBuffer(device, transfer);
 			transfers.push_back(transfer);
 		}
-		report.Resident = renderer.MemoryStatistics();
+		// The source textures and staging buffers coexist here. This is the
+		// bounded page footprint, separate from validation's transient readback.
+		report.SourcePageResident = renderer.MemoryStatistics();
 
 		engine::render::VulkanTimestamps timestamps;
 		if (!timestamps.Probe(device)) {
@@ -384,6 +387,9 @@ namespace {
 		}
 		SDL_ReleaseGPUFence(device, fence);
 		if (atlas) ValidateAtlasSamples(device, textures.front(), plan, sourceBase);
+		// Validation owns temporary resources, so cumulative allocation counters
+		// begin before the source page and finish after validation completes.
+		report.AfterValidation = renderer.MemoryStatistics();
 		double times[engine::render::VulkanTimestamps::MARKS]{};
 		uint32_t count = 0;
 		if (!timestamps.Collect(slot, times, count) || opened >= count || closed >= count) {
@@ -428,22 +434,27 @@ namespace {
 			engine::core::Metrics::CountTime("render.gpu_atlas_probe.gpu_work", report.GpuNanoseconds);
 		}
 		engine::core::Metrics::SetGauge(
-			"render.gpu_atlas_probe.resident_bytes", Delta(report.Resident.LiveBytes, report.Before.LiveBytes)
+			"render.gpu_atlas_probe.source_page_peak_bytes",
+			Delta(report.SourcePageResident.LiveBytes, report.Before.LiveBytes)
 		);
 
 		ReleaseTransfers(device, transfers);
 		ReleaseTextures(device, textures);
-		report.Released = renderer.MemoryStatistics();
+		report.AfterRelease = renderer.MemoryStatistics();
 		report.Pages = 1;
 		report.Sources = SOURCE_COUNT;
-		report.PeakResidentLiveBytes = Delta(report.Resident.LiveBytes, report.Before.LiveBytes);
-		report.PeakResidentTextureBytes = Delta(report.Resident.TextureBytes, report.Before.TextureBytes);
-		report.PeakResidentTransferBytes =
-			Delta(report.Resident.TransferBufferBytes, report.Before.TransferBufferBytes);
-		report.TextureAllocations = Delta(report.Resident.TextureAllocations, report.Before.TextureAllocations);
-		report.TransferAllocations =
-			Delta(report.Resident.TransferBufferAllocations, report.Before.TransferBufferAllocations);
-		report.ReleasedBytes = Delta(report.Released.ReleasedBytes, report.Before.ReleasedBytes);
+		report.SourcePagePeakLiveBytes =
+			Delta(report.SourcePageResident.LiveBytes, report.Before.LiveBytes);
+		report.SourcePagePeakTextureBytes =
+			Delta(report.SourcePageResident.TextureBytes, report.Before.TextureBytes);
+		report.SourcePagePeakTransferBytes =
+			Delta(report.SourcePageResident.TransferBufferBytes, report.Before.TransferBufferBytes);
+		report.WholeProbeTextureAllocations =
+			Delta(report.AfterValidation.TextureAllocations, report.Before.TextureAllocations);
+		report.WholeProbeTransferAllocations =
+			Delta(report.AfterValidation.TransferBufferAllocations, report.Before.TransferBufferAllocations);
+		report.WholeProbeReleasedBytes =
+			Delta(report.AfterRelease.ReleasedBytes, report.Before.ReleasedBytes);
 		return report;
 	}
 
@@ -466,14 +477,14 @@ namespace {
 			total.CopyCalls += pageReport.CopyCalls;
 			total.CacheHits += pageReport.CacheHits;
 			total.CacheMisses += pageReport.CacheMisses;
-			total.PeakResidentLiveBytes = std::max(total.PeakResidentLiveBytes, pageReport.PeakResidentLiveBytes);
-			total.PeakResidentTextureBytes =
-			std::max(total.PeakResidentTextureBytes, pageReport.PeakResidentTextureBytes);
-			total.PeakResidentTransferBytes =
-			std::max(total.PeakResidentTransferBytes, pageReport.PeakResidentTransferBytes);
-			total.TextureAllocations += pageReport.TextureAllocations;
-			total.TransferAllocations += pageReport.TransferAllocations;
-			total.ReleasedBytes += pageReport.ReleasedBytes;
+			total.SourcePagePeakLiveBytes = std::max(total.SourcePagePeakLiveBytes, pageReport.SourcePagePeakLiveBytes);
+			total.SourcePagePeakTextureBytes =
+				std::max(total.SourcePagePeakTextureBytes, pageReport.SourcePagePeakTextureBytes);
+			total.SourcePagePeakTransferBytes =
+				std::max(total.SourcePagePeakTransferBytes, pageReport.SourcePagePeakTransferBytes);
+			total.WholeProbeTextureAllocations += pageReport.WholeProbeTextureAllocations;
+			total.WholeProbeTransferAllocations += pageReport.WholeProbeTransferAllocations;
+			total.WholeProbeReleasedBytes += pageReport.WholeProbeReleasedBytes;
 		}
 		if (total.Sources != TOTAL_SOURCE_COUNT || total.Pages != PAGE_COUNT) {
 			throw std::runtime_error("4k atlas sweep did not measure every page");

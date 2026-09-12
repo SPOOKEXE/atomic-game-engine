@@ -181,7 +181,11 @@ medium-render-profile seconds="15":
         awk '$1 == "frame" && $2 == "ms" && $3 == "mean" && $4 + 0 > 0 { found = 1 } END { exit !found }' "$base-frame.txt"
         grep -q '^gpu logical heap$' "$base-heap.txt"
         ! grep -q 'not compiled in' "$base-heap.txt"
-        awk '$1 == "allocated" && $2 + 0 > 0 { found = 1 } END { exit !found }' "$base-heap.txt"
+        awk '
+            $0 == "gpu logical heap" { in_gpu_heap = 1; next }
+            in_gpu_heap && $1 == "allocated" && $2 + 0 > 0 { found = 1 }
+            END { exit !found }
+        ' "$base-heap.txt"
         echo "medium-render-profile cameras=$cameras"
         grep -E "gpu heap:|gpu memory:|cache|upload|download|timestamp" "$base.log" || true
         grep -E "^(frame|span|category)" "$base-frame.txt" || true

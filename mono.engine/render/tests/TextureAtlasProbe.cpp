@@ -75,6 +75,10 @@ TEST_CASE("four sequential atlas pages account for sixteen 4k source uploads", "
 			CHECK_FALSE(request.Upload);
 			warmRequests++;
 		}
+		CHECK(atlas.Usage().PageAllocations == 1);
+		CHECK(atlas.Usage().CopyCalls == SOURCES_PER_PAGE);
+		CHECK(atlas.Usage().Hits == SOURCES_PER_PAGE);
+		CHECK(atlas.Usage().Misses == SOURCES_PER_PAGE);
 	}
 
 	CHECK(pages == PAGE_COUNT);
