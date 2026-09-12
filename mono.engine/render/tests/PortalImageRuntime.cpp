@@ -3712,6 +3712,9 @@ TEST_CASE(
 	CHECK(source.CurrentImage("Door") == 0);
 	CHECK_FALSE(source.Capture("Door"));
 	CHECK(issue(1).Status == PortalInboxStatus::Busy);
+	// Return to the in-flight camera so this case isolates upload readiness.
+	// Otherwise latest-demand coalescing correctly issues position 1 after upload.
+	CHECK(issue(0).Status == PortalInboxStatus::Busy);
 	view.World = worlds.Destination.Index;
 	view.WorldName = core::Name(worlds.Requests.World);
 	view.Slot = 7;
