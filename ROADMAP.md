@@ -39,8 +39,6 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.24
 
-- [_] add EditableImage:ToBuffer()
-
 Full render plan: [docs/RENDER-REFACTOR.md](docs/RENDER-REFACTOR.md), including
 the consolidated materials, shaders and rendering optimization work.
 
@@ -73,6 +71,23 @@ Passing crossing tests do not yet establish seamless rendering at every angle.
 - [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
 - [_] different antialiasing choices as render nodes
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
+
+[ai data factory stuff]
+- [_] add EditableImage:ToBuffer() (RGBA)
+- [_] Checkpoint/restore — Seed-based only, not full ECS+physics+RNG state serialization
+- [_] Spatial queries — Basic entity queries exist, but no spatial reasoning ("objects left of X", "path blocked?")
+- [_] Shadow caster/receiver relationships — CastShadow property exists but no query API for "who shadows whom"
+- [_] Light probe/environment map query — Internal only, no external API
+- [_] Audio event/capture APIs — Audio-event grounding, spatial audio queries, waveform/spectrogram capture
+- [_] Skeleton/animation introspection — Keypoint data, animation state machine, character controller state
+- [_] Export/import standards — USD/glTF/COCO/YOLO/GeoJSON export, standard format import
+- [_] Durable evidence archive — MemoryStore persistence, versioned WorldRecord serialization
+- [_] Full checkpoint/restore — Arbitrary checkpoint save/restore beyond seed-based replay
+- [_] Recursion depth control — For mirrors/portals (currently fixed limit)
+- [_] Audio APIs
+- [_] Skeleton/animation introspection
+- [_] Export/import standards
+- [_] Durable evidence archive
 
 Rendering extra fixes:
 - [_] blackhole warp is opposite on one side to what it should be (quaternions can help do the curvature if needed).
