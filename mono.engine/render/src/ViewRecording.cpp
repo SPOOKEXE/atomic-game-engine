@@ -2912,6 +2912,7 @@ namespace engine::render {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteResidentUploads(false);
 				State->DiscardPendingGraphHistoryWrites(command);
+				State->ClearSubmittedGraphHistoryWrites();
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();

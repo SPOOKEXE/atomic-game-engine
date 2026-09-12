@@ -105,6 +105,7 @@ namespace engine::render {
 				State->ClearSubmittedGraphHistoryWrites();
 			} else {
 				State->DiscardPendingGraphHistoryWrites(command);
+				State->ClearSubmittedGraphHistoryWrites();
 			}
 			State->CompleteResidentUploads(submitted);
 			State->DropDownloads();

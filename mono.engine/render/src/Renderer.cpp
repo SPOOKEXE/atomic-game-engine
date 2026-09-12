@@ -2590,6 +2590,7 @@ namespace engine::render {
 				// A partial batch releases its command buffer but never certifies history.
 				State->DiscardPendingGraphHistoryWrites(State->BatchCommand);
 			}
+			State->ClearSubmittedGraphHistoryWrites();
 			State->CompleteResidentUploads(submitted);
 			State->BatchCommand = nullptr;
 
