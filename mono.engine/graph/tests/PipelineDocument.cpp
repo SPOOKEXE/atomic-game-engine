@@ -148,6 +148,8 @@ TEST_CASE("tracing demonstrations keep geometry and lighting as graph inputs", "
 		const auto *traceNode = find(trace);
 		REQUIRE(traceNode != nullptr);
 		REQUIRE(find(tessellation) != nullptr);
+		REQUIRE(find(Name("tessellated-geometry")) != nullptr);
+		CHECK(find(Name("tessellated-geometry"))->Reads.size() == 3);
 		REQUIRE(find(illumination) != nullptr);
 		CHECK(
 			std::find(traceNode->ReadPorts.begin(), traceNode->ReadPorts.end(), Name("indirect")) !=

@@ -253,8 +253,7 @@ namespace engine::graph {
 				spec.Params.push_back(NumberParam("thickness", "Depth thickness", "0.1", 0.001, 100.0));
 			}
 			if (spec.Kind == core::Name("pathtrace")) {
-				spec.Params.push_back(
-					NumberParam("samples-per-frame", "Samples per frame", "1", 1.0, 4096.0)
+				spec.Params.push_back(NumberParam("samples-per-frame", "Samples per frame", "1", 1.0, 4096.0)
 				);
 				spec.Params.push_back(NumberParam("max-bounces", "Max bounces", "3", 1.0, 64.0));
 			}
@@ -271,12 +270,10 @@ namespace engine::graph {
 			if (Named(
 					spec.Kind, {"dispatch", "tessellate", "global-illumination", "raytrace", "pathtrace"}
 				)) {
-				spec.Params.push_back(
-					SelectParam("dispatch.mode", "Dispatch", "target", {"target", "groups"})
+				spec.Params.push_back(SelectParam("dispatch.mode", "Dispatch", "target", {"target", "groups"})
 				);
 				spec.Params.push_back(SelectParam("uniforms", "Uniforms", "view", {"none", "view"}));
-				spec.Params.push_back(
-					SelectParam("instances", "Instance rows", "none", {"none", "resident"})
+				spec.Params.push_back(SelectParam("instances", "Instance rows", "none", {"none", "resident"})
 				);
 				for (const auto &[name, label, fallback] :
 					 std::initializer_list<std::tuple<const char *, const char *, const char *>>{
@@ -308,16 +305,14 @@ namespace engine::graph {
 				spec.Params.push_back(SelectParam(
 					"scope", "Capture scope", "complete-world", {"complete-world", "opaque-lighting"}
 				));
-				spec.Params.push_back(
-					SelectParam("projection", "Capture projection", "eye", {"eye", "seam"})
+				spec.Params.push_back(SelectParam("projection", "Capture projection", "eye", {"eye", "seam"})
 				);
 			}
 			if (spec.Kind == core::Name("depth-linearise"))
 				spec.Params.push_back(SelectParam("background", "Background depth", "far", {"far", "zero"}));
 			if (spec.Kind == core::Name("capture")) {
 				spec.Params.push_back(TextParam("path", "BMP path", ""));
-				spec.Params.push_back(
-					SelectParam("capture.mode", "Capture", "once", {"once", "every-frame"})
+				spec.Params.push_back(SelectParam("capture.mode", "Capture", "once", {"once", "every-frame"})
 				);
 			}
 			if (spec.Kind == core::Name("blit")) {
@@ -401,6 +396,7 @@ namespace engine::graph {
 				 "interface",
 				 "output-image",
 				 "tessellate",
+				 "tessellated-draw",
 				 "global-illumination",
 				 "raytrace",
 				 "pathtrace"}
@@ -884,16 +880,29 @@ namespace engine::graph {
 			 "raytrace.comp"},
 
 			{"tessellate",
-			 "Tessellation factor field",
+			 "Tessellate geometry",
 			 C::Draw,
 			 S::View,
 			 {{"instances", K::Buffer, F::R8, true, "LOD-selected source instances."},
 			  {"camera", K::Camera, F::R8, true, "The projection that sets edge density."}},
-			 {{"factors", K::Storage, F::R16F, true, "Screen-space tessellation factor field."}},
-			 "Builds a screen-space factor field for a future geometry tessellation pass. No draw node "
-			 "consumes it yet.",
+			 {{"vertices", K::Buffer, F::R8, true, "Generated MeshVertex stream."},
+			  {"indices", K::Buffer, F::R8, true, "Generated uint32 index stream."},
+			  {"commands", K::Buffer, F::R8, true, "Generated indexed indirect commands."}},
+			 "Expands bounded material ranges into generated vertices, indices and indirect draws.",
 			 false,
 			 "tessellate.comp"},
+
+			{"tessellated-draw",
+			 "Tessellated geometry",
+			 C::Draw,
+			 S::View,
+			 {{"vertices", K::Buffer, F::R8, true, "Generated MeshVertex stream."},
+			  {"indices", K::Buffer, F::R8, true, "Generated uint32 index stream."},
+			  {"commands", K::Buffer, F::R8, true, "Generated indexed indirect commands."}},
+			 {{"colour", K::Colour, RGBA16, true, "Tessellated geometry colour."},
+			  {"depth", K::Depth, D32, true, "Tessellated geometry depth."}},
+			 "Binds generated streams and consumes their indirect commands in a geometry pass.",
+			 false},
 
 			{"global-illumination",
 			 "Global illumination",
@@ -946,12 +955,8 @@ namespace engine::graph {
 			 {{"colour", K::Texture, RGBA16, true, "The HDR scene behind every lens."},
 			  {"depth", K::Texture, R32, true, "Linear depth for spatial occlusion."}},
 			 {{"colour", K::Colour, RGBA16, true, "The lensed HDR scene."},
-			  {"scratch",
-			   K::Colour,
-			   RGBA16,
-			   true,
-			   "Intermediate HDR image for the ordered lens chain.",
-			   true}},
+			  {"scratch", K::Colour, RGBA16, true, "Intermediate HDR image for the ordered lens chain.", true}
+			 },
 			 "Composes bounded world-space lens shader runs in priority order before tone mapping."},
 
 			// --- composite -------------------------------------------------------
@@ -1123,11 +1128,8 @@ namespace engine::graph {
 			   "Directional response and original visibility; requires depth, normal and shadow."},
 			  {"room-depth", K::Texture, R32, false, "Retained linear depth in the current camera domain."},
 			  {"room-normal", K::Texture, LDR, false, "Retained normal in the current world domain."},
-			  {"shadow",
-			   K::Texture,
-			   D32,
-			   false,
-			   "Combined directional map in the current light projection."}},
+			  {"shadow", K::Texture, D32, false, "Combined directional map in the current light projection."}
+			 },
 			 {{"colour", K::Colour, RGBA16, true, "Room radiance with current ambient occlusion."}},
 			 "Corrects retained ambient visibility and optionally directional visibility with a complete "
 			 "shadow input group.",
@@ -1168,11 +1170,8 @@ namespace engine::graph {
 			 {{"colour", K::Colour, RGBA16, true, "Owned destination HDR radiance."},
 			  {"depth", K::Colour, R32, false, "Paired camera-forward depth; zero means no surface."},
 			  {"normal", K::Colour, LDR, false, "Retained native normal and validity."},
-			  {"ambient-response",
-			   K::Colour,
-			   F::RGBA32F,
-			   false,
-			   "Retained ambient response and original AO."},
+			  {"ambient-response", K::Colour, F::RGBA32F, false, "Retained ambient response and original AO."
+			  },
 			  {"lighting-baseline", K::Colour, F::RGBA32F, false, "Retained unrounded room lighting."},
 			  {"directional-response",
 			   K::Colour,
@@ -1607,11 +1606,8 @@ namespace engine::graph {
 			 {{"source", K::Texture, LDR, true, "The frame to write out."},
 			  {"depth", K::Colour, F::R32F, false, "Optional camera-forward depth paired with the frame."},
 			  {"normal", K::Colour, F::RGB10A2, false, "Native room normal and validity paired with depth."},
-			  {"ambient-response",
-			   K::Colour,
-			   F::RGBA32F,
-			   false,
-			   "Ambient response and original sampled SSAO."},
+			  {"ambient-response", K::Colour, F::RGBA32F, false, "Ambient response and original sampled SSAO."
+			  },
 			  {"lighting-baseline",
 			   K::Colour,
 			   F::RGBA32F,

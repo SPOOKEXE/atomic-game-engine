@@ -7,7 +7,11 @@ resource "material" colour RGBA8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient 
 resource "linear-depth" colour R32F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "occlusion" colour R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "scene-radiance" colour RGBA16F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
-resource "tessellated-factors" storage R16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "tessellated-vertices" buffer R8 524288 1 1 no auto 1 1 1 0 1 auto auto 48 transient "" 0
+resource "tessellated-indices" buffer R8 1572864 1 1 no auto 1 1 1 0 1 auto auto 4 transient "" 0
+resource "tessellated-commands" buffer R8 4096 1 1 no auto 1 1 1 0 1 auto auto 20 transient "" 0
+resource "tessellated-colour" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "tessellated-depth" depth D32F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "indirect" storage RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "reflections" storage RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "combined-radiance" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
@@ -16,20 +20,28 @@ resource "scene-image" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 tra
 node "adaptive-tessellation" "tessellate" view no
 reads "coarse-instances" "instances"
 reads "camera" "camera"
-writes "tessellated-factors" "factors"
+writes "tessellated-vertices" "vertices"
+writes "tessellated-indices" "indices"
+writes "tessellated-commands" "commands"
 set "target-pixels" "12"
-set "uniforms" "view"
+set "max-subdivisions" "2"
+node "tessellated-geometry" "tessellated-draw" view no
+reads "tessellated-vertices" "vertices"
+reads "tessellated-indices" "indices"
+reads "tessellated-commands" "commands"
+writes "tessellated-colour" "colour"
+writes "tessellated-depth" "depth"
 node "indirect-light" "global-illumination" view no
 reads "albedo" "albedo"
 reads "normal" "normal"
 reads "material" "material"
-reads "linear-depth" "depth"
+reads "tessellated-depth" "depth"
 reads "occlusion" "occlusion"
 writes "indirect" "indirect"
 set "uniforms" "view"
 node "screen-raytrace" "raytrace" view no
-reads "scene-radiance" "scene"
-reads "linear-depth" "depth"
+reads "tessellated-colour" "scene"
+reads "tessellated-depth" "depth"
 reads "normal" "normal"
 reads "material" "material"
 reads "indirect" "indirect"

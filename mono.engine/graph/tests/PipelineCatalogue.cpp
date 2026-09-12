@@ -216,8 +216,14 @@ TEST_CASE(
 		CHECK(spec->Queue == engine::graph::ExecutionQueue::Compute);
 		CHECK(spec->Needs.Compute);
 		CHECK(spec->BuiltInBackend);
-		REQUIRE(spec->Outputs.size() == 1);
-		CHECK(spec->Outputs.front().Kind == engine::graph::ResourceKind::Storage);
+		if (std::string_view(name) == "tessellate") {
+			REQUIRE(spec->Outputs.size() == 3);
+			for (const PortSpec &port : spec->Outputs)
+				CHECK(port.Kind == engine::graph::ResourceKind::Buffer);
+		} else {
+			REQUIRE(spec->Outputs.size() == 1);
+			CHECK(spec->Outputs.front().Kind == engine::graph::ResourceKind::Storage);
+		}
 		CHECK(spec->DefaultShader == std::string(name) + ".comp");
 	}
 	for (const char *name : {"global-illumination", "raytrace", "pathtrace"}) {
@@ -312,9 +318,9 @@ TEST_CASE("execution and parameter metadata live on the catalogue row", "[graph]
 	CHECK(dispatch->Repeatable);
 
 	const auto mode = std::find_if(
-		dispatch->Params.begin(), dispatch->Params.end(), [](const engine::graph::ParameterSpec &param) {
-			return param.Name == Name("dispatch.mode");
-		}
+		dispatch->Params.begin(),
+		dispatch->Params.end(),
+		[](const engine::graph::ParameterSpec &param) { return param.Name == Name("dispatch.mode"); }
 	);
 	REQUIRE(mode != dispatch->Params.end());
 	CHECK(mode->Widget == ParameterWidget::Select);
@@ -371,15 +377,13 @@ TEST_CASE("registering a kind twice replaces it", "[graph][catalogue]") {
 	NodeKindSpec replacement;
 	replacement.Kind = Name("gbuffer");
 	replacement.Label = "Replaced";
-	replacement.Outputs.push_back(
-		PortSpec{
-			.Name = Name("colour"),
-			.Kind = ResourceKind::Colour,
-			.Format = engine::graph::ResourceFormat::RGBA8,
-			.Required = true,
-			.Summary = {},
-		}
-	);
+	replacement.Outputs.push_back(PortSpec{
+		.Name = Name("colour"),
+		.Kind = ResourceKind::Colour,
+		.Format = engine::graph::ResourceFormat::RGBA8,
+		.Required = true,
+		.Summary = {},
+	});
 	REQUIRE(NodeCatalogue::Register(replacement));
 
 	CHECK(NodeCatalogue::All().size() == before);
@@ -433,15 +437,13 @@ TEST_CASE("a later Register moves what an earlier Find named", "[graph][catalogu
 	NodeKindSpec earlier;
 	earlier.Kind = Name("aaa-sorts-first");
 	earlier.Label = "Sorts first";
-	earlier.Outputs.push_back(
-		PortSpec{
-			.Name = Name("colour"),
-			.Kind = ResourceKind::Colour,
-			.Format = engine::graph::ResourceFormat::RGBA8,
-			.Required = true,
-			.Summary = {},
-		}
-	);
+	earlier.Outputs.push_back(PortSpec{
+		.Name = Name("colour"),
+		.Kind = ResourceKind::Colour,
+		.Format = engine::graph::ResourceFormat::RGBA8,
+		.Required = true,
+		.Summary = {},
+	});
 	REQUIRE(NodeCatalogue::Register(earlier));
 
 	CHECK(slotOf("gbuffer") == before + 1);

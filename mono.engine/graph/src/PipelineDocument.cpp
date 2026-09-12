@@ -1126,18 +1126,25 @@ namespace engine::graph {
 
 	PipelineDocument RaytraceDemoDocument() {
 		PipelineDocument document;
-		const auto resource =
-			[&document](
-				std::string_view name, ResourceKind kind, ResourceFormat format, bool external = false
-			) {
-				document.Record({
-					.Kind = EditKind::AddResource,
-					.Name = core::Name(name),
-					.Resource = kind,
-					.Format = format,
-					.External = external,
-				});
-			};
+		const auto resource = [&document](
+								  std::string_view name,
+								  ResourceKind kind,
+								  ResourceFormat format,
+								  bool external = false,
+								  uint32_t stride = 0,
+								  uint32_t width = 0
+							  ) {
+			document.Record({
+				.Kind = EditKind::AddResource,
+				.Name = core::Name(name),
+				.Resource = kind,
+				.Format = format,
+				.Width = width,
+				.Height = width == 0 ? 0u : 1u,
+				.External = external,
+				.BufferStride = stride,
+			});
+		};
 		const auto node =
 			[&document](std::string_view name, std::string_view kind, NodeScope scope = NodeScope::View) {
 				document.Record({
@@ -1162,7 +1169,11 @@ namespace engine::graph {
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F, true);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, true);
 		resource("scene-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F, true);
-		resource("tessellated-factors", ResourceKind::Storage, ResourceFormat::R16F);
+		resource("tessellated-vertices", ResourceKind::Buffer, ResourceFormat::R8, false, 48, 524288);
+		resource("tessellated-indices", ResourceKind::Buffer, ResourceFormat::R8, false, 4, 1572864);
+		resource("tessellated-commands", ResourceKind::Buffer, ResourceFormat::R8, false, 20, 4096);
+		resource("tessellated-colour", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("tessellated-depth", ResourceKind::Depth, ResourceFormat::D32F);
 		resource("indirect", ResourceKind::Storage, ResourceFormat::RGBA16F);
 		resource("reflections", ResourceKind::Storage, ResourceFormat::RGBA16F);
 		resource("combined-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1172,15 +1183,23 @@ namespace engine::graph {
 		node("adaptive-tessellation", "tessellate");
 		edge(EditKind::Reads, "coarse-instances", "instances");
 		edge(EditKind::Reads, "camera", "camera");
-		edge(EditKind::Writes, "tessellated-factors", "factors");
+		edge(EditKind::Writes, "tessellated-vertices", "vertices");
+		edge(EditKind::Writes, "tessellated-indices", "indices");
+		edge(EditKind::Writes, "tessellated-commands", "commands");
 		setting("target-pixels", "12");
-		setting("uniforms", "view");
+		setting("max-subdivisions", "2");
+		node("tessellated-geometry", "tessellated-draw");
+		edge(EditKind::Reads, "tessellated-vertices", "vertices");
+		edge(EditKind::Reads, "tessellated-indices", "indices");
+		edge(EditKind::Reads, "tessellated-commands", "commands");
+		edge(EditKind::Writes, "tessellated-colour", "colour");
+		edge(EditKind::Writes, "tessellated-depth", "depth");
 		node("indirect-light", "global-illumination");
 		for (const auto &[source, port] : std::array{
 				 std::pair{"albedo", "albedo"},
 				 std::pair{"normal", "normal"},
 				 std::pair{"material", "material"},
-				 std::pair{"linear-depth", "depth"},
+				 std::pair{"tessellated-depth", "depth"},
 				 std::pair{"occlusion", "occlusion"}
 			 }) {
 			edge(EditKind::Reads, source, port);
@@ -1189,8 +1208,8 @@ namespace engine::graph {
 		setting("uniforms", "view");
 		node("screen-raytrace", "raytrace");
 		for (const auto &[source, port] : std::array{
-				 std::pair{"scene-radiance", "scene"},
-				 std::pair{"linear-depth", "depth"},
+				 std::pair{"tessellated-colour", "scene"},
+				 std::pair{"tessellated-depth", "depth"},
 				 std::pair{"normal", "normal"},
 				 std::pair{"material", "material"},
 				 std::pair{"indirect", "indirect"}
@@ -1271,8 +1290,7 @@ namespace engine::graph {
 					 .Key = core::Name("radiance")}
 				);
 				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("uniforms"), .Value = "view"});
-				pathtrace.Record(
-					{.Kind = EditKind::Set, .Key = core::Name("samples-per-frame"), .Value = "1"}
+				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("samples-per-frame"), .Value = "1"}
 				);
 				pathtrace.Record({
 					.Kind = EditKind::AddNode,
@@ -1308,6 +1326,9 @@ namespace engine::graph {
 			if (copied.Kind == EditKind::Reads && copied.Target == core::Name("reflections")) {
 				copied.Target = core::Name("path-radiance");
 			}
+			if (copied.Kind == EditKind::Reads && copied.Target == core::Name("scene-radiance")) {
+				copied.Target = core::Name("tessellated-colour");
+			}
 			pathtrace.Record(std::move(copied));
 		}
 		return pathtrace;
@@ -1324,8 +1345,7 @@ namespace engine::graph {
 		for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 3>{
 				 {{"lit", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}}
 			 }) {
-			document.Record(
-				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
+			document.Record({.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
 			);
 		}
 		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 3>{
@@ -1638,34 +1658,28 @@ namespace engine::graph {
 			[&document](
 				std::string_view name, ResourceKind kind, ResourceFormat format, bool external = false
 			) {
-				document.Record(
-					Edit{
-						.Kind = EditKind::AddResource,
-						.Name = core::Name(name),
-						.Resource = kind,
-						.Format = format,
-						.External = external,
-					}
-				);
+				document.Record(Edit{
+					.Kind = EditKind::AddResource,
+					.Name = core::Name(name),
+					.Resource = kind,
+					.Format = format,
+					.External = external,
+				});
 			};
 		const auto node = [&document](std::string_view name, NodeScope scope) {
-			document.Record(
-				Edit{
-					.Kind = EditKind::AddNode,
-					.Name = core::Name(name),
-					.NodeKind = core::Name(name),
-					.Scope = scope,
-				}
-			);
+			document.Record(Edit{
+				.Kind = EditKind::AddNode,
+				.Name = core::Name(name),
+				.NodeKind = core::Name(name),
+				.Scope = scope,
+			});
 		};
 		const auto touches = [&document](EditKind kind, std::string_view target, std::string_view port) {
-			document.Record(
-				Edit{
-					.Kind = kind,
-					.Target = core::Name(target),
-					.Key = core::Name(port),
-				}
-			);
+			document.Record(Edit{
+				.Kind = kind,
+				.Target = core::Name(target),
+				.Key = core::Name(port),
+			});
 		};
 
 		resource("world-entities", ResourceKind::Entities, ResourceFormat::R8);

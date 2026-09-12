@@ -1,45 +1,40 @@
 #version 450
 
-// Bounded triangle expansion. One invocation owns one source triangle and
-// writes a fixed maximum region, so the indirect count never needs CPU readback.
+// One workgroup expands one source triangle. Vertices are three uvec4 words:
+// MeshVertex is 48 bytes, while std430 vec3 fields would add hidden padding.
 layout(local_size_x = 64) in;
-
-struct Vertex { vec3 position; vec3 normal; vec2 uv; uvec2 joints; uvec2 weights; };
-layout(set = 0, binding = 0) readonly buffer Vertices { Vertex rows[]; } vertices;
-layout(set = 0, binding = 1) readonly buffer Indices { uint rows[]; } indices;
-layout(set = 1, binding = 0) buffer OutVertices { Vertex rows[]; } outVertices;
-layout(set = 1, binding = 1) buffer OutIndices { uint rows[]; } outIndices;
-layout(set = 1, binding = 2) buffer Arguments { uint words[]; } arguments;
-layout(set = 2, binding = 0) uniform View {
-	mat4 viewProjection;
-	uvec4 counts; // source triangles, output triangle capacity, max subdivisions, target pixels
-} view;
-
+struct Vertex { uvec4 words[3]; };
+struct Plan { uint sourceFirstIndex; uint sourceIndexCount; int sourceVertexOffset; uint material; uint instance; uint factor; uint outputFirstVertex; uint outputFirstIndex; uint command; };
+layout(set = 0, binding = 0, std430) readonly buffer SourceVertices { Vertex rows[]; } sourceVertices;
+layout(set = 0, binding = 1, std430) readonly buffer SourceIndices { uint rows[]; } sourceIndices;
+layout(set = 0, binding = 2, std430) readonly buffer Plans { Plan rows[]; } plans;
+layout(set = 1, binding = 0, std430) writeonly buffer OutputVertices { Vertex rows[]; } outputVertices;
+layout(set = 1, binding = 1, std430) writeonly buffer OutputIndices { uint rows[]; } outputIndices;
+layout(set = 1, binding = 2, std430) writeonly buffer Commands { uint words[]; } commands;
+layout(set = 2, binding = 0) uniform Counts { uint planCount; uint vertexCapacity; uint indexCapacity; uint commandCapacity; } counts;
+float wordFloat(Vertex value, uint word) { return uintBitsToFloat(value.words[word / 4u][word % 4u]); }
+void putFloat(inout Vertex value, uint word, float number) { value.words[word / 4u][word % 4u] = floatBitsToUint(number); }
+Vertex interpolate(Vertex a, Vertex b, Vertex c, vec3 barycentric) {
+	Vertex result = a;
+	for (uint word = 0u; word < 8u; ++word) putFloat(result, word, wordFloat(a, word) * barycentric.x + wordFloat(b, word) * barycentric.y + wordFloat(c, word) * barycentric.z);
+	vec3 normal = vec3(wordFloat(result, 3u), wordFloat(result, 4u), wordFloat(result, 5u));
+	float lengthSquared = dot(normal, normal); if (lengthSquared > 0.0) normal *= inversesqrt(lengthSquared);
+	putFloat(result, 3u, normal.x); putFloat(result, 4u, normal.y); putFloat(result, 5u, normal.z);
+	Vertex owner = barycentric.y > barycentric.x && barycentric.y >= barycentric.z ? b : (barycentric.z > barycentric.x ? c : a);
+	result.words[2] = owner.words[2]; return result;
+}
+uint row(uint factor, uint i, uint j) { return i * (factor + 1u) - (i * (i - 1u)) / 2u + j; }
 void main() {
-	uint source = gl_GlobalInvocationID.x;
-	if (source >= view.counts.x) return;
-	uint level = min(view.counts.z, 8u);
-	uint pieces = 1u << level;
-	uint triangles = pieces * pieces;
-	if (source >= view.counts.y / triangles) return;
-	// The first bounded slice preserves source triangles. Later passes replace
-	// these three copies with barycentric children without changing buffer shape.
-	uint first = source * triangles * 3u;
-	for (uint corner = 0u; corner < 3u; ++corner) {
-		Vertex value = vertices.rows[indices.rows[source * 3u + corner]];
-		outVertices.rows[first + corner] = value;
-		outIndices.rows[first + corner] = first + corner;
-	}
-	for (uint child = 1u; child < triangles; ++child) {
-		outIndices.rows[first + child * 3u] = first;
-		outIndices.rows[first + child * 3u + 1u] = first;
-		outIndices.rows[first + child * 3u + 2u] = first;
-	}
-	if (source == 0u) {
-		arguments.words[0] = min(view.counts.x * triangles * 3u, view.counts.y * 3u);
-		arguments.words[1] = 1u;
-		arguments.words[2] = 0u;
-		arguments.words[3] = 0u;
-		arguments.words[4] = 0u;
-	}
+	uint work = gl_WorkGroupID.x; if (work >= counts.planCount) return;
+	Plan plan = plans.rows[work]; uint sourceTriangle = gl_WorkGroupID.y * gl_WorkGroupSize.x + gl_LocalInvocationID.x; uint triangleCount = plan.sourceIndexCount / 3u;
+	if (sourceTriangle >= triangleCount) return;
+	uint factor = plan.factor; uint vertexCount = (factor + 1u) * (factor + 2u) / 2u; uint indexCount = factor * factor * 3u;
+	uint vertexBase = plan.outputFirstVertex + sourceTriangle * vertexCount; uint indexBase = plan.outputFirstIndex + sourceTriangle * indexCount;
+	if (vertexBase + vertexCount > counts.vertexCapacity || indexBase + indexCount > counts.indexCapacity) return;
+	uint source = plan.sourceFirstIndex + sourceTriangle * 3u;
+	Vertex a = sourceVertices.rows[uint(int(sourceIndices.rows[source]) + plan.sourceVertexOffset)]; Vertex b = sourceVertices.rows[uint(int(sourceIndices.rows[source + 1u]) + plan.sourceVertexOffset)]; Vertex c = sourceVertices.rows[uint(int(sourceIndices.rows[source + 2u]) + plan.sourceVertexOffset)];
+	for (uint i = 0u; i <= factor; ++i) for (uint j = 0u; j <= factor - i; ++j) { float inv = 1.0 / float(factor); outputVertices.rows[vertexBase + row(factor, i, j)] = interpolate(a, b, c, vec3(1.0 - float(i + j) * inv, float(i) * inv, float(j) * inv)); }
+	uint cursor = indexBase;
+	for (uint i = 0u; i < factor; ++i) for (uint j = 0u; j < factor - i; ++j) { uint p = row(factor, i, j), q = row(factor, i + 1u, j), r = row(factor, i, j + 1u); outputIndices.rows[cursor++] = vertexBase + p; outputIndices.rows[cursor++] = vertexBase + q; outputIndices.rows[cursor++] = vertexBase + r; if (j + i + 1u < factor) { uint s = row(factor, i + 1u, j + 1u); outputIndices.rows[cursor++] = vertexBase + q; outputIndices.rows[cursor++] = vertexBase + s; outputIndices.rows[cursor++] = vertexBase + r; } }
+	if (sourceTriangle == 0u && plan.command < counts.commandCapacity) { uint base = plan.command * 5u; commands.words[base] = triangleCount * indexCount; commands.words[base + 1u] = 1u; commands.words[base + 2u] = plan.outputFirstIndex; commands.words[base + 3u] = 0u; commands.words[base + 4u] = plan.instance; }
 }
