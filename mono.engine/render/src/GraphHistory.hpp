@@ -51,9 +51,7 @@ namespace engine::render {
 
 	// A queued producer is visible to later commands in this graph invocation.
 	// An unqueued producer is visible only inside the command buffer recording it.
-	inline bool GraphHistoryCurrentProducer(
-		bool pending, bool sameCommand, bool submitted
-	) {
+	inline bool GraphHistoryCurrentProducer(bool pending, bool sameCommand, bool submitted) {
 		return submitted || (pending && sameCommand);
 	}
 
@@ -70,7 +68,7 @@ namespace engine::render {
 
 		bool Matches(uint64_t candidate, const void *command) const {
 			return (Ready && Signature == candidate) ||
-				(Pending && PendingCommand == command && PendingSignature == candidate);
+				   (Pending && PendingCommand == command && PendingSignature == candidate);
 		}
 
 		uint64_t SignatureFor(const void *command) const {

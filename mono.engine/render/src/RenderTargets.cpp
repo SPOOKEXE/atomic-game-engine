@@ -555,7 +555,9 @@ namespace engine::render {
 			 ++write) {
 			if (write->Pipeline == &pipeline && write->Resource == resource && write->Scope == scope &&
 				write->Owner == owner &&
-				GraphHistoryCurrentProducer(!write->Submitted, write->Command == readCommand, write->Submitted)) {
+				GraphHistoryCurrentProducer(
+					!write->Submitted, write->Command == readCommand, write->Submitted
+				)) {
 				return FindGraphTarget(pipeline, resource, scope, owner);
 			}
 		}
@@ -603,7 +605,9 @@ namespace engine::render {
 		for (PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
 			if (write.Command != command || write.Submitted) continue;
 			if (write.Pipeline != nullptr) {
-				CommitGraphHistoryWrite(*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature);
+				CommitGraphHistoryWrite(
+					*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature
+				);
 			}
 			write.Submitted = true;
 		}

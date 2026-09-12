@@ -56,9 +56,7 @@ TEST_CASE("four sequential atlas pages account for sixteen 4k source uploads", "
 	uint64_t warmRequests = 0;
 
 	for (uint32_t page = 0; page < PAGE_COUNT; page++) {
-		engine::render::TextureAtlasResidency atlas(
-			engine::render::PlanTextureAtlas(SOURCES_PER_PAGE, 4096)
-		);
+		engine::render::TextureAtlasResidency atlas(engine::render::PlanTextureAtlas(SOURCES_PER_PAGE, 4096));
 		for (uint32_t source = 0; source < SOURCES_PER_PAGE; source++) {
 			const auto request = atlas.Request(source);
 			REQUIRE(request.Valid());

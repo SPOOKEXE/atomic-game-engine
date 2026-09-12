@@ -544,8 +544,7 @@ namespace engine::render {
 		// @param context  What the graph decided this invocation is.
 		// @param make     Whether to allocate one that does not exist.
 		// @return The texture, or an invalid one.
-		Impl::NamedTexture
-		GraphTexture(
+		Impl::NamedTexture GraphTexture(
 			graph::ResourceId resource,
 			const graph::RunContext &context,
 			bool make,

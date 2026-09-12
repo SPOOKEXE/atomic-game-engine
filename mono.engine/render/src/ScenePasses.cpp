@@ -940,12 +940,8 @@ namespace engine::render {
 		return texture;
 	}
 
-	Renderer::Impl::NamedTexture
-	ViewRecording::ResourceTexture(
-		graph::ResourceId resource,
-		size_t selectedSlot,
-		bool make,
-		SDL_GPUCommandBuffer *readCommand
+	Renderer::Impl::NamedTexture ViewRecording::ResourceTexture(
+		graph::ResourceId resource, size_t selectedSlot, bool make, SDL_GPUCommandBuffer *readCommand
 	) {
 		Impl *const State = this->State;
 		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
@@ -968,14 +964,9 @@ namespace engine::render {
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, world);
 		if (GraphHistoryReadNeedsValidation(*desc, make)) {
-			const Impl::NamedTexture current =
-				State->FindCurrentGraphHistoryWrite(
-					*selectedPipeline,
-					selectedCommand,
-					desc->Name,
-					scope,
-					owner
-				);
+			const Impl::NamedTexture current = State->FindCurrentGraphHistoryWrite(
+				*selectedPipeline, selectedCommand, desc->Name, scope, owner
+			);
 			const GraphHistoryReadSource source = SelectGraphHistoryRead(current.IsValid(), Request.Damage);
 			if (source == GraphHistoryReadSource::CurrentProducer) {
 				return current;
@@ -1031,8 +1022,7 @@ namespace engine::render {
 		return selectsView ? node->Integer(core::Name("view"), 0) : Request.TargetSlot;
 	}
 
-	Renderer::Impl::NamedTexture
-	ViewRecording::GraphTexture(
+	Renderer::Impl::NamedTexture ViewRecording::GraphTexture(
 		graph::ResourceId resource,
 		const graph::RunContext &context,
 		bool make,
@@ -1083,7 +1073,7 @@ namespace engine::render {
 				bindings.clear();
 				return bindings;
 			}
-				Impl::NamedTexture source = GraphTexture(resource, context, false, readCommand);
+			Impl::NamedTexture source = GraphTexture(resource, context, false, readCommand);
 			bindings.push_back(
 				SDL_GPUTextureSamplerBinding{
 					source.IsValid() ? source.Texture : State->FallbackTexture,

@@ -2619,8 +2619,7 @@ namespace engine::render {
 			}
 		};
 		ProbedRunner probed(
-			frameRunner,
-			[this, State](const graph::RunContext &context, bool before, bool accepted) {
+			frameRunner, [this, State](const graph::RunContext &context, bool before, bool accepted) {
 				if (!State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)) return;
 				ClosePass();
 				const auto save = [&](const Impl::NamedTexture &texture, std::string_view resource) {

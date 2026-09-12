@@ -278,18 +278,17 @@ namespace engine::render {
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
 			const auto graphTexture = [&recording](
-				graph::ResourceId resource,
-				const graph::RunContext &runContext,
-				bool make,
-				SDL_GPUCommandBuffer *readCommand
-			) {
-					return recording.GraphTexture(resource, runContext, make, readCommand);
-				};
-			const auto textureBindings = [&recording](
-				const graph::RunContext &runContext, SDL_GPUCommandBuffer *readCommand
-			) {
-				return recording.TextureBindings(runContext, readCommand);
+										  graph::ResourceId resource,
+										  const graph::RunContext &runContext,
+										  bool make,
+										  SDL_GPUCommandBuffer *readCommand
+									  ) {
+				return recording.GraphTexture(resource, runContext, make, readCommand);
 			};
+			const auto textureBindings =
+				[&recording](const graph::RunContext &runContext, SDL_GPUCommandBuffer *readCommand) {
+					return recording.TextureBindings(runContext, readCommand);
+				};
 
 			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 			if (node == nullptr) {

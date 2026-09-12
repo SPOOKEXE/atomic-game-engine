@@ -82,26 +82,23 @@ namespace {
 			if (!stored) continue;
 			const Report &report = *stored;
 			std::cout << "atlas-report layout=" << report.Name << " pages=" << report.Pages
-					  << " sources=" << report.Sources
-					  << " extent=" << SOURCE_EXTENT << " cpu_record_ns=" << report.CpuRecordingNanoseconds
-					  << " gpu_ns=";
+					  << " sources=" << report.Sources << " extent=" << SOURCE_EXTENT
+					  << " cpu_record_ns=" << report.CpuRecordingNanoseconds << " gpu_ns=";
 			if (report.Timestamps) {
 				std::cout << report.GpuNanoseconds;
 			} else {
 				std::cout << "unavailable";
 			}
-			std::cout
-				<< " upload_bytes=" << report.UploadBytes << " upload_ops=" << report.UploadOperations
-				<< " transfer_ops=" << report.TransferOperations
-				<< " page_allocations=" << report.PageAllocations << " copy_calls=" << report.CopyCalls
-				<< " cache_hits=" << report.CacheHits << " cache_misses=" << report.CacheMisses
-				<< " source_page_peak_live_bytes=" << report.SourcePagePeakLiveBytes
-				<< " source_page_peak_texture_bytes=" << report.SourcePagePeakTextureBytes
-				<< " source_page_peak_transfer_bytes=" << report.SourcePagePeakTransferBytes
-				<< " whole_probe_texture_allocations=" << report.WholeProbeTextureAllocations
-				<< " whole_probe_transfer_allocations=" << report.WholeProbeTransferAllocations
-				<< " whole_probe_released_bytes=" << report.WholeProbeReleasedBytes
-				<< '\n';
+			std::cout << " upload_bytes=" << report.UploadBytes << " upload_ops=" << report.UploadOperations
+					  << " transfer_ops=" << report.TransferOperations
+					  << " page_allocations=" << report.PageAllocations << " copy_calls=" << report.CopyCalls
+					  << " cache_hits=" << report.CacheHits << " cache_misses=" << report.CacheMisses
+					  << " source_page_peak_live_bytes=" << report.SourcePagePeakLiveBytes
+					  << " source_page_peak_texture_bytes=" << report.SourcePagePeakTextureBytes
+					  << " source_page_peak_transfer_bytes=" << report.SourcePagePeakTransferBytes
+					  << " whole_probe_texture_allocations=" << report.WholeProbeTextureAllocations
+					  << " whole_probe_transfer_allocations=" << report.WholeProbeTransferAllocations
+					  << " whole_probe_released_bytes=" << report.WholeProbeReleasedBytes << '\n';
 		}
 	}
 
@@ -304,7 +301,9 @@ namespace {
 			if (atlas) {
 				for (uint32_t source = 0; source < SOURCE_COUNT; source++) {
 					FillPattern(
-						static_cast<uint8_t *>(mapped) + source * SOURCE_BYTES, SOURCE_BYTES, sourceBase + source
+						static_cast<uint8_t *>(mapped) + source * SOURCE_BYTES,
+						SOURCE_BYTES,
+						sourceBase + source
 					);
 				}
 			} else {
@@ -443,8 +442,7 @@ namespace {
 		report.AfterRelease = renderer.MemoryStatistics();
 		report.Pages = 1;
 		report.Sources = SOURCE_COUNT;
-		report.SourcePagePeakLiveBytes =
-			Delta(report.SourcePageResident.LiveBytes, report.Before.LiveBytes);
+		report.SourcePagePeakLiveBytes = Delta(report.SourcePageResident.LiveBytes, report.Before.LiveBytes);
 		report.SourcePagePeakTextureBytes =
 			Delta(report.SourcePageResident.TextureBytes, report.Before.TextureBytes);
 		report.SourcePagePeakTransferBytes =
@@ -477,7 +475,8 @@ namespace {
 			total.CopyCalls += pageReport.CopyCalls;
 			total.CacheHits += pageReport.CacheHits;
 			total.CacheMisses += pageReport.CacheMisses;
-			total.SourcePagePeakLiveBytes = std::max(total.SourcePagePeakLiveBytes, pageReport.SourcePagePeakLiveBytes);
+			total.SourcePagePeakLiveBytes =
+				std::max(total.SourcePagePeakLiveBytes, pageReport.SourcePagePeakLiveBytes);
 			total.SourcePagePeakTextureBytes =
 				std::max(total.SourcePagePeakTextureBytes, pageReport.SourcePagePeakTextureBytes);
 			total.SourcePagePeakTransferBytes =
