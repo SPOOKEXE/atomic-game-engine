@@ -167,6 +167,58 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"player portal return trip keeps one live body through both committed handoffs",
+	"[script][portal-transfer][portal-return]"
+) {
+	Pair pair;
+	const auto outward = pair.Begin();
+	pair.Tick(8);
+	ecs::Entity destinationPlayer;
+	core::Vector3 destinationPosition;
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		destinationPlayer = PortalTransferPlayer(store, outward);
+		REQUIRE(destinationPlayer != ecs::NULL_ENTITY);
+		REQUIRE(scene::PlayerCount(store) == 1);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, destinationPlayer));
+		destinationPosition = store.Get<scene::Transform>(rig.Root)->Frame.Position;
+	});
+	const scene::SeamTransform returnThrough{core::CFrame({-20, 4, 7}), {}, 2};
+	PortalTransferId returnId;
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		std::string failure;
+		REQUIRE(
+			BeginPortalTransfer(
+				store, destinationPlayer, "source", returnThrough, returnId, failure
+			)
+		);
+	});
+	for (int tick = 0; tick < 6; ++tick) {
+		pair.Tick();
+		size_t authorities = 0;
+		for (const auto world : {pair.Source, pair.Destination})
+			pair.Worlds.Enter(world, [&](ecs::Store &store) {
+				store.Each<const scene::Character>([&](ecs::Entity, const scene::Character &rig) {
+					authorities += store.Has<scene::Simulated>(rig.Root);
+				});
+			});
+		CHECK(authorities <= 1);
+	}
+	pair.Tick(2);
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		CHECK_FALSE(store.Alive(destinationPlayer));
+		CHECK(scene::PlayerCount(store) == 0);
+	});
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		const auto returned = PortalTransferPlayer(store, returnId);
+		REQUIRE(returned != ecs::NULL_ENTITY);
+		CHECK(scene::PlayerCount(store) == 1);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, returned));
+		CHECK(store.Get<scene::Transform>(rig.Root)->Frame.Position == returnThrough.Point(destinationPosition));
+		CHECK(store.Get<scene::Humanoid>(rig.Humanoid)->Health == 23);
+	});
+}
+
+TEST_CASE(
 	"duplicate portal commit cannot admit a second body and snapshot replay resumes each handoff phase",
 	"[script][portal-transfer]"
 ) {
