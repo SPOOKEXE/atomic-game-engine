@@ -169,54 +169,6 @@ vec3 ApplyAtmosphere(vec3 colour, vec3 direction) {
 	return colour + source.AtmosphereColour.rgb * glare * source.Atmosphere.z;
 }
 
-vec3 ApplyClouds(vec3 colour, vec3 direction) {
-	if (source.Modes.z == 0u || direction.y <= -0.03) {
-		return colour;
-	}
-	vec2 windDirection = source.Clouds.zw;
-	windDirection = dot(windDirection, windDirection) > 0.0
-		? normalize(windDirection)
-		: vec2(1.0, 0.0);
-	vec2 wind = windDirection * source.CloudMotion.x * source.CloudMotion.y * 0.001;
-	float cellSize = max(source.CloudCompute.x, 0.001);
-	float density = 0.0;
-	if (source.Modes.z == 1u) {
-		vec3 point = direction * 8.0 / cellSize + vec3(wind.x, 0.0, wind.y);
-		if (source.Shaders.z == 1u) {
-			point.y *= 0.18;
-		} else if (source.Shaders.z == 3u) {
-			point = floor(point * 1.5) / 1.5;
-		}
-		density = Fbm(point, source.Counts.y, source.CloudCompute.y);
-	} else {
-		uint steps = clamp(source.Counts.w, 1u, 64u);
-		for (uint stepIndex = 0u; stepIndex < 64u; stepIndex++) {
-			if (stepIndex >= steps) {
-				break;
-			}
-			float along = (float(stepIndex) + 0.5) / float(steps);
-			float shell = source.CloudCompute.z + along * source.CloudCompute.w;
-			vec3 point = direction * (10.0 + shell * 24.0) / cellSize + vec3(wind.x, 0.0, wind.y);
-			if (source.Shaders.z == 1u) {
-				point.y *= 0.18;
-			} else if (source.Shaders.z == 3u) {
-				point = floor(point * 1.5) / 1.5;
-			}
-			float sampleDensity = Fbm(point, source.Counts.y, source.CloudCompute.y);
-			density += sampleDensity / float(steps);
-		}
-	}
-	float coverage = 1.0 - source.Clouds.x;
-	float alpha = smoothstep(coverage, min(coverage + 0.24, 1.0), density) * source.Clouds.y;
-	alpha *= smoothstep(-0.03, 0.12, direction.y);
-	vec3 cloudColour = source.CloudColour.rgb;
-	if (source.Modes.z == 2u && source.Shaders.z == 2u) {
-		cloudColour *= vec3(0.32, 0.36, 0.45);
-		alpha = min(alpha * 1.45, 1.0);
-	}
-	return mix(colour, cloudColour, clamp(alpha, 0.0, 1.0));
-}
-
 void main() {
 	ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 size = imageSize(environmentImage);

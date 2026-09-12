@@ -2705,10 +2705,10 @@ namespace engine::render {
 		}
 		State->DroppedProfileMarks += frameRunner.DroppedProfileMarks();
 		if (!dispatched) {
+			const core::Name failed =
+				frameRunner.Rejected().IsValid() ? frameRunner.Rejected() : frameRunner.Unhandled();
 			ENGINE_ERROR(
-				"render graph '{}' refused while executing '{}'",
-				selectedPipeline->Name.Text(),
-				frameRunner.Unhandled().Text()
+				"render graph '{}' refused while executing '{}'", selectedPipeline->Name.Text(), failed.Text()
 			);
 			closePass();
 			State->BatchFailed = State->BatchActive;

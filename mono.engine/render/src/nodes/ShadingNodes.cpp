@@ -425,7 +425,10 @@ namespace engine::render {
 			};
 
 			const auto *node = Pipeline->Graph.Find(context.Node);
-			if (!node) return false;
+			if (!node) {
+				ENGINE_ERROR("deferred lighting '{}' has no graph node", context.Name.Text());
+				return false;
+			}
 			const auto read = [&](const char *port) {
 				const auto found =
 					std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(port));
@@ -566,25 +569,80 @@ namespace engine::render {
 				node->WritePorts.begin(), node->WritePorts.end(), core::Name("directional-response")
 			);
 			const bool directionalRequested = directionalPort != node->WritePorts.end();
-			if (directionalRequested && baselinePort == node->WritePorts.end()) return false;
+			if (directionalRequested && baselinePort == node->WritePorts.end()) {
+				ENGINE_ERROR(
+					"deferred lighting '{}' requires lighting-baseline when directional-response is "
+					"requested",
+					context.Name.Text()
+				);
+				return false;
+			}
 			if (baselinePort != node->WritePorts.end()) {
 				const auto baseline =
 					GraphTexture(context.Writes[baselinePort - node->WritePorts.begin()], context, true);
-				if (!baseline.IsValid() || baseline.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
-					baseline.Width != pbrDimensions.LitWidth || baseline.Height != pbrDimensions.LitHeight ||
-					!(directionalRequested ? State->EnsureDeferredLightingDirectional()
-										   : State->EnsureDeferredLightingBaseline()))
+				if (!baseline.IsValid()) {
+					ENGINE_ERROR(
+						"deferred lighting '{}' could not allocate its lighting-baseline target",
+						context.Name.Text()
+					);
 					return false;
+				}
+				if (baseline.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT) {
+					ENGINE_ERROR(
+						"deferred lighting '{}' requires an RGBA32F lighting-baseline target",
+						context.Name.Text()
+					);
+					return false;
+				}
+				if (baseline.Width != pbrDimensions.LitWidth || baseline.Height != pbrDimensions.LitHeight) {
+					ENGINE_ERROR(
+						"deferred lighting '{}' requires lighting-baseline extent {}x{}, got {}x{}",
+						context.Name.Text(),
+						pbrDimensions.LitWidth,
+						pbrDimensions.LitHeight,
+						baseline.Width,
+						baseline.Height
+					);
+					return false;
+				}
+				if (!(directionalRequested ? State->EnsureDeferredLightingDirectional()
+										   : State->EnsureDeferredLightingBaseline())) {
+					ENGINE_ERROR(
+						"deferred lighting '{}' could not create its response pipeline", context.Name.Text()
+					);
+					return false;
+				}
 				SDL_GPUTexture *directionalTexture = nullptr;
 				if (directionalRequested) {
 					const auto directional = GraphTexture(
 						context.Writes[directionalPort - node->WritePorts.begin()], context, true
 					);
-					if (!directional.IsValid() ||
-						directional.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
-						directional.Width != pbrDimensions.LitWidth ||
-						directional.Height != pbrDimensions.LitHeight)
+					if (!directional.IsValid()) {
+						ENGINE_ERROR(
+							"deferred lighting '{}' could not allocate its directional-response target",
+							context.Name.Text()
+						);
 						return false;
+					}
+					if (directional.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT) {
+						ENGINE_ERROR(
+							"deferred lighting '{}' requires an RGBA32F directional-response target",
+							context.Name.Text()
+						);
+						return false;
+					}
+					if (directional.Width != pbrDimensions.LitWidth ||
+						directional.Height != pbrDimensions.LitHeight) {
+						ENGINE_ERROR(
+							"deferred lighting '{}' requires directional-response extent {}x{}, got {}x{}",
+							context.Name.Text(),
+							pbrDimensions.LitWidth,
+							pbrDimensions.LitHeight,
+							directional.Width,
+							directional.Height
+						);
+						return false;
+					}
 					directionalTexture = directional.Texture;
 				}
 				EnterNamedPass(context.Name);

@@ -165,6 +165,94 @@ TEST_CASE("invalid node registrations are refused", "[render][graph]") {
 	CHECK(table.Count() == 0);
 }
 
+TEST_CASE("registered handler refusal reports the authored node", "[render][graph]") {
+	RenderGraph graph;
+	const auto target = graph.AddResource({.Name = Name("target")});
+	REQUIRE(target.IsValid());
+	engine::graph::Node node;
+	node.Name = Name("deferred-output");
+	node.Kind = Name("deferred-lighting");
+	node.Writes = {target};
+	node.Scope = engine::graph::NodeScope::View;
+	REQUIRE(graph.AddNode(node).IsValid());
+
+	NodeTable table;
+	REQUIRE(table.Set(Name("deferred-lighting"), [](const RunContext &) { return false; }));
+	for (const auto tier :
+		 {engine::render::ProfilingTier::Off,
+		  engine::render::ProfilingTier::Cpu,
+		  engine::render::ProfilingTier::Full}) {
+		GraphRunner runner(table, tier);
+		CHECK_FALSE(graph.Execute(Compile(graph), runner, size_t{1}));
+		CHECK(runner.Rejected() == Name("deferred-output"));
+		CHECK_FALSE(runner.Unhandled().IsValid());
+	}
+}
+
+TEST_CASE("deferred baseline port extent follows its port in either order", "[render][graph]") {
+	using engine::graph::Edit;
+	using engine::graph::EditKind;
+	using engine::graph::PipelineDocument;
+	using engine::graph::PipelineDocumentStatus;
+	const bool baselineFirst = GENERATE(false, true);
+	const bool matchingExtent = GENERATE(false, true);
+	CAPTURE(baselineFirst, matchingExtent);
+
+	PipelineDocument document;
+	document.Record(
+		{.Kind = EditKind::AddResource,
+		 .Name = Name("lighting-baseline"),
+		 .Resource = engine::graph::ResourceKind::Colour,
+		 .Format = engine::graph::ResourceFormat::RGBA32F,
+		 .Width = matchingExtent ? 65u : 33u,
+		 .Height = matchingExtent ? 37u : 19u}
+	);
+	const Edit baselineWrite{
+		.Kind = EditKind::Writes, .Target = Name("lighting-baseline"), .Key = Name("lighting-baseline")
+	};
+	const engine::graph::PipelineDocument base = engine::graph::DefaultPbrDocument();
+	for (auto edit : base.Edits()) {
+		if (edit.Kind == EditKind::AddResource && edit.Name == Name("lit")) {
+			edit.Width = 65;
+			edit.Height = 37;
+		}
+		const bool colourWrite = edit.Kind == EditKind::Writes && edit.Target == Name("lit");
+		if (colourWrite && baselineFirst) document.Record(baselineWrite);
+		document.Record(edit);
+		if (colourWrite && !baselineFirst) document.Record(baselineWrite);
+	}
+
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(engine::graph::Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+	const engine::graph::Node *deferred = nullptr;
+	for (uint32_t value = 1; value <= graph.Count(); ++value) {
+		const auto *node = graph.Find(engine::graph::NodeId{value});
+		if (node != nullptr && node->Kind == Name("deferred-lighting")) {
+			deferred = node;
+			break;
+		}
+	}
+	REQUIRE(deferred != nullptr);
+	const auto colourPort =
+		std::find(deferred->WritePorts.begin(), deferred->WritePorts.end(), Name("colour"));
+	const auto baselinePort =
+		std::find(deferred->WritePorts.begin(), deferred->WritePorts.end(), Name("lighting-baseline"));
+	REQUIRE(colourPort != deferred->WritePorts.end());
+	REQUIRE(baselinePort != deferred->WritePorts.end());
+	const auto *colour = graph.FindResource(deferred->Writes[colourPort - deferred->WritePorts.begin()]);
+	const auto *baseline = graph.FindResource(deferred->Writes[baselinePort - deferred->WritePorts.begin()]);
+	REQUIRE(colour != nullptr);
+	REQUIRE(baseline != nullptr);
+	uint32_t colourWidth = 0, colourHeight = 0, baselineWidth = 0, baselineHeight = 0;
+	colour->Resolve(1, 1, colourWidth, colourHeight);
+	baseline->Resolve(1, 1, baselineWidth, baselineHeight);
+	CHECK(colourWidth == 65);
+	CHECK(colourHeight == 37);
+	CHECK(baseline->Format == engine::graph::ResourceFormat::RGBA32F);
+	CHECK((baselineWidth == colourWidth && baselineHeight == colourHeight) == matchingExtent);
+}
+
 TEST_CASE(
 	"deferred baseline extent validation is independent of output port order",
 	"[render][gpu][graph][lighting-baseline-extent][.]"

@@ -147,6 +147,14 @@ namespace engine::render {
 			return Missing;
 		}
 
+		// The authored node whose registered backend handler refused the frame.
+		//
+		// @return Its name, or an empty Name when every registered handler accepted.
+		// @since v0.24
+		core::Name Rejected() const {
+			return RejectedNode;
+		}
+
 		// How many nodes were recorded.
 		//
 		// @return The count since construction.
@@ -168,6 +176,9 @@ namespace engine::render {
 
 		// The first kind found without a handler.
 		core::Name Missing;
+
+		// The first authored node whose registered handler returned false.
+		core::Name RejectedNode;
 
 		// How many nodes have been recorded.
 		size_t SubmittedCount = 0;

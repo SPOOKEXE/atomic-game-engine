@@ -88,7 +88,9 @@ namespace engine::render {
 		};
 
 		if (!profile) {
-			return submit();
+			const bool accepted = submit();
+			if (!accepted && !RejectedNode.IsValid()) RejectedNode = context.Name;
+			return accepted;
 		}
 
 		// **One span per node, here rather than in each handler.** The handlers
@@ -104,6 +106,8 @@ namespace engine::render {
 		// would answer with one bar for both. `core::Name` interns for the life
 		// of the process, so the stable form is right and nothing is copied.
 		ENGINE_PROFILE_DYNAMIC_STABLE("graph node", context.Name.Text(), core::ProfileCategory::Render);
-		return submit();
+		const bool accepted = submit();
+		if (!accepted && !RejectedNode.IsValid()) RejectedNode = context.Name;
+		return accepted;
 	}
 }

@@ -1317,6 +1317,9 @@ namespace engine::render {
 			info.target_info.color_target_descriptions = targets;
 			info.target_info.num_color_targets = 2;
 			DeferredLightingBaselinePipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (DeferredLightingBaselinePipeline == nullptr) {
+				ENGINE_ERROR("deferred lighting baseline pipeline: {}", SDL_GetError());
+			}
 		}
 		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
 		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
@@ -1341,6 +1344,9 @@ namespace engine::render {
 			info.target_info.color_target_descriptions = targets;
 			info.target_info.num_color_targets = 3;
 			DeferredLightingDirectionalPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (DeferredLightingDirectionalPipeline == nullptr) {
+				ENGINE_ERROR("deferred lighting directional pipeline: {}", SDL_GetError());
+			}
 		}
 		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
 		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
