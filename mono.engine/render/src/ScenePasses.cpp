@@ -14,8 +14,8 @@
 // own draws look like once it is, and those were written out twice side by side
 // before v0.15, so every bug in one was available to the other.
 
-#include "ViewRecording.hpp"
 #include "GraphHistory.hpp"
+#include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -1017,7 +1017,8 @@ namespace engine::render {
 		return ResourceTexture(resource, GraphTextureSlot(context), make);
 	}
 
-	SDL_GPUBuffer *ViewRecording::GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make) {
+	SDL_GPUBuffer *
+	ViewRecording::GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make) {
 		return ResourceBuffer(resource, GraphTextureSlot(context), make);
 	}
 

@@ -186,11 +186,7 @@ TEST_CASE(
 	PortalTransferId returnId;
 	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
 		std::string failure;
-		REQUIRE(
-			BeginPortalTransfer(
-				store, destinationPlayer, "source", returnThrough, returnId, failure
-			)
-		);
+		REQUIRE(BeginPortalTransfer(store, destinationPlayer, "source", returnThrough, returnId, failure));
 	});
 	for (int tick = 0; tick < 6; ++tick) {
 		pair.Tick();
@@ -213,7 +209,9 @@ TEST_CASE(
 		REQUIRE(returned != ecs::NULL_ENTITY);
 		CHECK(scene::PlayerCount(store) == 1);
 		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, returned));
-		CHECK(store.Get<scene::Transform>(rig.Root)->Frame.Position == returnThrough.Point(destinationPosition));
+		CHECK(
+			store.Get<scene::Transform>(rig.Root)->Frame.Position == returnThrough.Point(destinationPosition)
+		);
 		CHECK(store.Get<scene::Humanoid>(rig.Humanoid)->Health == 23);
 	});
 }

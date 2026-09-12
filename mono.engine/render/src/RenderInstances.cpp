@@ -457,9 +457,10 @@ namespace engine::render {
 							return;
 						}
 						const bool material = cluster.Material < mesh.Textures.size();
-						const core::Name texture = SlotTexture[slot].IsValid()
-							? SlotTexture[slot]
-							: (material ? mesh.Textures[cluster.Material] : core::Name{});
+						const core::Name texture =
+							SlotTexture[slot].IsValid()
+								? SlotTexture[slot]
+								: (material ? mesh.Textures[cluster.Material] : core::Name{});
 						const std::array<float, 4> colour =
 							material ? mesh.Colours[cluster.Material] : std::array<float, 4>{1, 1, 1, 1};
 						emit(

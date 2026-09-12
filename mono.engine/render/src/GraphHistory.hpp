@@ -14,16 +14,14 @@
 namespace engine::render {
 
 	inline uint64_t GraphHistorySignature(
-		uint64_t contentSignature,
-		const scene::CameraMatrices &matrices,
-		uint32_t width,
-		uint32_t height
+		uint64_t contentSignature, const scene::CameraMatrices &matrices, uint32_t width, uint32_t height
 	) {
 		uint64_t signature = contentSignature;
 		for (const glm::mat4 *matrix : {&matrices.ViewProjection, &matrices.Projection})
 			for (size_t column = 0; column < 4; column++)
 				for (size_t row = 0; row < 4; row++)
-					signature = scene::MixSignature(signature, std::bit_cast<uint32_t>((*matrix)[column][row]));
+					signature =
+						scene::MixSignature(signature, std::bit_cast<uint32_t>((*matrix)[column][row]));
 		signature = scene::MixSignature(signature, width);
 		return scene::MixSignature(signature, height);
 	}
@@ -40,8 +38,8 @@ namespace engine::render {
 	}
 
 	inline uint64_t GraphHistoryOwner(graph::NodeScope scope, size_t view, uint64_t world) {
-		return scope == graph::NodeScope::View   ? static_cast<uint64_t>(view)
-			 : scope == graph::NodeScope::World ? world
-										: 0;
+		return scope == graph::NodeScope::View	  ? static_cast<uint64_t>(view)
+			   : scope == graph::NodeScope::World ? world
+												  : 0;
 	}
 }
