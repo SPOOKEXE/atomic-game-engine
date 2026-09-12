@@ -1,8 +1,10 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -10,6 +12,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -34,6 +37,55 @@ namespace {
 		part.Frame.Position = position;
 		return scene::MakePart(store, part);
 	}
+}
+
+TEST_CASE(
+	"current-tick draw collection ignores a stale presentation alpha", "[render][world-view][data-capture]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("current-tick-draw");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity part = PartAt(store, {10, 0, 0});
+	REQUIRE(store.SetParent(part, workspace));
+	REQUIRE(scene::SyncRendered(store) == 1);
+	render::CollectInstances(store);
+	const auto *previous = store.Get<scene::PreviousTransform>(part);
+	REQUIRE(previous != nullptr);
+	auto currentTickPrevious = *previous;
+	currentTickPrevious.Frame.Position = {0, 0, 0};
+	store.Set(part, currentTickPrevious);
+	store.SetFrame(0.25f, 0.25f);
+	const ecs::WorldTime before = store.Time();
+	core::ByteWriter snapshotBefore;
+	REQUIRE(store.Save(snapshotBefore));
+
+	render::CollectInstances(store);
+	const auto *interpolated = store.Resource<render::DrawList>();
+	REQUIRE(interpolated != nullptr);
+	REQUIRE(interpolated->Instances.size() == 1);
+	CHECK(interpolated->Instances.front().Frame.Position.X == 2.5f);
+
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	const auto *current = store.Resource<render::DrawList>();
+	REQUIRE(current != nullptr);
+	REQUIRE(current->Instances.size() == 1);
+	CHECK(current->Instances.front().Frame.Position.X == 10.0f);
+	const ecs::WorldTime after = store.Time();
+	CHECK(after.Tick == before.Tick);
+	CHECK(after.Elapsed == before.Elapsed);
+	CHECK(after.Alpha == before.Alpha);
+	core::ByteWriter snapshotAfter;
+	REQUIRE(store.Save(snapshotAfter));
+	CHECK(snapshotAfter.Bytes().size() == snapshotBefore.Bytes().size());
+	CHECK(
+		std::equal(
+			snapshotAfter.Bytes().begin(),
+			snapshotAfter.Bytes().end(),
+			snapshotBefore.Bytes().begin(),
+			snapshotBefore.Bytes().end()
+		)
+	);
 }
 
 TEST_CASE(

@@ -28,12 +28,32 @@ namespace engine::render {
 	}
 
 	uint64_t Renderer::QueueResourceImage(
-		core::Name pipeline, core::Name node, size_t viewSlot, ResourceImageDelivery delivery
+		core::Name pipeline,
+		core::Name node,
+		size_t viewSlot,
+		ResourceImageDelivery delivery,
+		std::string expectedSnapshotId
 	) {
-		uint64_t token = 0;
-		return QueueResourceImages(pipeline, std::span(&node, 1), viewSlot, delivery, std::span(&token, 1))
-				   ? token
-				   : 0;
+		RequireOwningThread("QueueResourceImage");
+		if (expectedSnapshotId.empty()) {
+			uint64_t token = 0;
+			return QueueResourceImages(
+					   pipeline, std::span(&node, 1), viewSlot, delivery, std::span(&token, 1)
+				   )
+					   ? token
+					   : 0;
+		}
+		if (State->NextResourceImageToken == 0) return 0;
+		const ResourceImageRequest request{
+			.Token = State->NextResourceImageToken,
+			.Pipeline = pipeline,
+			.Node = node,
+			.ViewSlot = viewSlot,
+			.Delivery = delivery,
+			.ExpectedSnapshotId = std::move(expectedSnapshotId),
+		};
+		if (!RequestResourceImage(request)) return 0;
+		return State->NextResourceImageToken++;
 	}
 
 	bool Renderer::QueueResourceImages(
@@ -352,6 +372,27 @@ namespace engine::render {
 		}
 	}
 
+	namespace {
+		bool CaptureFormat(SDL_GPUTextureFormat format, ResourceImageFormat &captured, uint32_t &bytes) {
+			switch (format) {
+			case SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT:
+				captured = ResourceImageFormat::RGBA16_Float;
+				bytes = 8;
+				return true;
+			case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM:
+				captured = ResourceImageFormat::RGBA8_UNorm;
+				bytes = 4;
+				return true;
+			case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
+				captured = ResourceImageFormat::RGBA8_SRGB;
+				bytes = 4;
+				return true;
+			default:
+				return false;
+			}
+		}
+	}
+
 	void Renderer::Impl::RecordResourceImages(
 		SDL_GPUCommandBuffer *command,
 		core::Name pipeline,
@@ -377,9 +418,12 @@ namespace engine::render {
 		const std::array<const NamedTexture *, 6> planes{
 			&source, &depth, &normal, &ambientResponse, &lightingBaseline, &directionalResponse
 		};
-		const std::array<uint32_t, 6> pixelBytes{8, 4, 4, 16, 16, 16};
+		ResourceImageFormat sourceCaptureFormat = ResourceImageFormat::Unknown;
+		uint32_t sourceBytes = 0;
+		const bool supportedSource = CaptureFormat(source.Format, sourceCaptureFormat, sourceBytes);
+		const std::array<uint32_t, 6> pixelBytes{sourceBytes, 4, 4, 16, 16, 16};
 		const std::array<SDL_GPUTextureFormat, 6> formats{
-			SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+			source.Format,
 			SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
 			SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM,
 			SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,
@@ -393,7 +437,23 @@ namespace engine::render {
 				request.Node != node || request.ViewSlot != viewSlot)
 				continue;
 			ENGINE_PROFILE("resource image download");
+			if (!request.ExpectedSnapshotId.empty() &&
+				request.ExpectedSnapshotId != ActiveDataCaptureSource.SnapshotId) {
+				slot.Image.Status = ResourceImageStatus::Failed;
+				slot.Phase = ResourceImagePhase::Ready;
+				continue;
+			}
 			slot.Image.CaptureFrame = FrameCounter;
+			slot.Image.SnapshotId = ActiveDataCaptureSource.SnapshotId;
+			const glm::mat4 camera = ActiveDataCaptureSource.CameraFrame.ToMatrix();
+			for (size_t column = 0; column < 4; ++column)
+				for (size_t row = 0; row < 4; ++row)
+					slot.Image.CameraWorldFromCamera[column * 4 + row] = camera[column][row];
+			slot.Image.CameraFieldOfViewRadians = ActiveDataCaptureSource.Camera.FieldOfViewRadians;
+			slot.Image.CameraProjectionAvailable = ActiveDataCaptureSource.ProjectionAvailable;
+			slot.Image.CameraProjection = ActiveDataCaptureSource.Projection;
+			slot.Image.CameraNearPlane = ActiveDataCaptureSource.Camera.NearPlane;
+			slot.Image.CameraFarPlane = ActiveDataCaptureSource.Camera.FarPlane;
 			slot.Image.Resource = resource;
 			slot.Image.DepthResource = depthResource;
 			slot.Image.NormalResource = normalResource;
@@ -404,7 +464,7 @@ namespace engine::render {
 			slot.DepthStride = slot.NormalStride = slot.AmbientResponseStride = slot.LightingBaselineStride =
 				0;
 			slot.Phase = ResourceImagePhase::Ready;
-			bool valid = source.Width <= 512 && source.Height <= 512 &&
+			bool valid = supportedSource && source.Width <= 512 && source.Height <= 512 &&
 						 normalResource.IsValid() == ambientResponseResource.IsValid() &&
 						 normalResource.IsValid() == lightingBaselineResource.IsValid() &&
 						 (!withAmbient || withDepth) && (!withDirectional || withAmbient);
@@ -527,7 +587,8 @@ namespace engine::render {
 			}
 			slot.Image.Width = source.Width;
 			slot.Image.Height = source.Height;
-			slot.Image.RowStride = source.Width * 8;
+			slot.Image.RowStride = source.Width * sourceBytes;
+			slot.Image.Format = sourceCaptureFormat;
 			slot.Image.Status = ResourceImageStatus::Ok;
 			slot.Phase = ResourceImagePhase::Recorded;
 			const double bytes = double(source.Width) * source.Height *
@@ -595,7 +656,7 @@ namespace engine::render {
 			slot.LightingBaselineOffset,
 			slot.DirectionalResponseOffset
 		};
-		const std::array<uint32_t, 6> pixelBytes{8, 4, 4, 16, 16, 16};
+		const std::array<uint32_t, 6> pixelBytes{slot.Image.RowStride / slot.Image.Width, 4, 4, 16, 16, 16};
 		for (size_t plane = 0; plane < planes.size(); ++plane) {
 			if (!strides[plane]) continue;
 			auto &bytes = *planes[plane];
@@ -608,7 +669,10 @@ namespace engine::render {
 					rowBytes
 				);
 			if constexpr (std::endian::native == std::endian::big) {
-				const size_t wordBytes = plane == 0 ? 2 : 4;
+				const size_t wordBytes = plane == 0 && slot.Image.Format == ResourceImageFormat::RGBA8_UNorm
+											 ? 1
+										 : plane == 0 ? 2
+													  : 4;
 				for (size_t offset = 0; offset < bytes.size(); offset += wordBytes)
 					std::reverse(bytes.begin() + offset, bytes.begin() + offset + wordBytes);
 			}

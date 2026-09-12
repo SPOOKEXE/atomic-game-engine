@@ -15,6 +15,7 @@
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Capabilities.hpp>
+#include <engine/render/DataCapture.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/render/Overlay.hpp>
@@ -672,6 +673,10 @@ namespace engine::render {
 		//@{
 		core::CFrame CameraFrame;
 		scene::Camera Camera;
+		// Set by the product's completed world snapshot barrier. A queued data
+		// capture only becomes Ready when this exact identity reaches its graph
+		// capture node; an empty value is intentionally not a data-factory frame.
+		std::string SnapshotId;
 		//@}
 
 		// Explicit clip-space projection for a fitted or portal capture. Uses
@@ -1647,7 +1652,8 @@ namespace engine::render {
 			core::Name pipeline,
 			core::Name node,
 			size_t viewSlot = 0,
-			ResourceImageDelivery delivery = ResourceImageDelivery::CopiedPixels
+			ResourceImageDelivery delivery = ResourceImageDelivery::CopiedPixels,
+			std::string expectedSnapshotId = {}
 		);
 
 		// Generate tokens and admit the whole capture group. Refusal preserves outputs.
@@ -1690,6 +1696,19 @@ namespace engine::render {
 
 		// Suppress delivery. A submitted copy keeps its slot until its fence signals.
 		bool CancelResourceImage(uint64_t token);
+
+		// Queues every requested render-graph capture atomically. The named node
+		// must be an enabled `capture` node; unsupported channels stay explicit in
+		// the later poll rather than being filled with invented labels.
+		bool QueueDataCapture(const DataCaptureRequest &request, DataCaptureTicket &ticket);
+
+		// Returns Pending until every underlying GPU fence has completed. Ready
+		// planes own tightly packed bytes and BLAKE3-256 hashes, so they remain
+		// immutable after the renderer reuses its transfer buffers.
+		DataCapturePoll PollDataCapture(DataCaptureTicket &ticket);
+
+		// Cancels all outstanding resource transfers named by a ticket.
+		void CancelDataCapture(DataCaptureTicket &ticket);
 
 		// GPU execution time and CPU command-recording wall time for each
 		// physical pass, in microseconds and keyed by Name::Id. GPU results lag

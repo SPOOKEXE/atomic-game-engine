@@ -37,6 +37,8 @@ mono_add_library(render
 		# the tier check has nothing to say about it.
 		Engine::effects
 
+		Engine::script
+
 		# Public table APIs use asset data types.
 		Engine::assets
 

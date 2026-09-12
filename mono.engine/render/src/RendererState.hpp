@@ -1519,6 +1519,14 @@ namespace engine::render {
 		);
 		void ReleaseResidentImageCache();
 		uint64_t NextResourceImageToken = 1;
+		struct DataCaptureSource {
+			std::string SnapshotId;
+			core::CFrame CameraFrame;
+			scene::Camera Camera;
+			bool ProjectionAvailable = false;
+			std::array<float, 16> Projection{};
+		};
+		DataCaptureSource ActiveDataCaptureSource;
 		bool HasShadowCaptureRequest(core::Name pipeline, size_t viewSlot) const;
 		bool EnsureResourceImageTransfer(ResourceImageSlot &slot, uint32_t bytes);
 		void RecordShadowResourceImages(

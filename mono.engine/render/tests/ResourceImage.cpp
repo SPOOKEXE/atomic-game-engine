@@ -10,6 +10,7 @@
 #include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/ResourceImage.hpp>
+#include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
@@ -22,6 +23,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 
 #include <catch2/generators/catch_generators.hpp>
 #include <glm/packing.hpp>
@@ -2777,7 +2779,7 @@ layout(set=2,binding=0) uniform sampler2D sceneColour;
 layout(set=2,binding=1) uniform sampler2D sceneDepth;
 struct Lens {vec4 centre;vec4 x;vec4 y;vec4 z;vec4 spin;};
 layout(set=3,binding=0) uniform LensPass {
- mat4 vp;mat4 inverseVp;vec4 target;vec4 eye;vec4 timeCount;Lens lenses[16];
+ mat4 vp;mat4 inverseVp;vec4 target;vec4 eye;vec4 timeCount;Lens lenses[16];vec4 cameraDepth;
 } pass;
 void main(){ivec2 size=textureSize(sceneColour,0);ivec2 pixel=ivec2(gl_FragCoord.xy);
 )glsl") +
@@ -3134,7 +3136,7 @@ layout(set=2,binding=0) uniform sampler2D sceneColour;
 layout(set=2,binding=1) uniform sampler2D linearDepth;
 struct Lens { vec4 CentreRadius; vec4 AxisXInner; vec4 AxisYFalloff; vec4 AxisZStrength; vec4 SpinPriority; };
 layout(set=3,binding=0) uniform LensPass {
- mat4 ViewProjection; mat4 InverseViewProjection; vec4 Target; vec4 Eye; vec4 TimeCount; Lens Lenses[16];
+ mat4 ViewProjection; mat4 InverseViewProjection; vec4 Target; vec4 Eye; vec4 TimeCount; Lens Lenses[16]; vec4 CameraDepth;
 } pass;
 void main() {
  vec4 colour=texture(sceneColour,inUv);
@@ -3624,4 +3626,158 @@ void main() {
 	for (const auto handle : view.EyeTransparentImages)
 		CHECK_FALSE(renderer.DropPortalImage(handle));
 	CHECK(renderer.PortalImageUsage().Images == 0);
+}
+
+TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render][gpu][data-capture][.]") {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	InstallImageCapture(renderer, "lit", true, true);
+
+	render::SceneTarget target{32, 24};
+	render::View view;
+	view.Pipeline = core::Name("image-export-pipeline");
+	view.Target = &target;
+	view.SnapshotId = "snapshot-render-1";
+	render::DataCaptureRequest request{
+		.SnapshotId = view.SnapshotId,
+		.Pipeline = view.Pipeline,
+		.CaptureNode = core::Name("image-export"),
+		.Channels = {
+			render::DataCaptureChannel::RgbLinearHdr,
+			render::DataCaptureChannel::LinearDepth,
+			render::DataCaptureChannel::ShadingNormal,
+		},
+	};
+	render::DataCaptureTicket ticket;
+	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+
+	render::DataCapturePoll captured;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	do {
+		captured = renderer.PollDataCapture(ticket);
+		if (captured.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
+	} while (captured.Status == render::DataCaptureStatus::Pending &&
+			 std::chrono::steady_clock::now() < deadline);
+	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
+	REQUIRE(captured.SnapshotId == view.SnapshotId);
+	REQUIRE(captured.Planes.size() == 3);
+	for (const auto &plane : captured.Planes) {
+		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
+		CHECK(plane.Width == target.Width);
+		CHECK(plane.Height == target.Height);
+		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
+	}
+	CHECK(captured.CameraPose.NearPlaneMetres == view.Camera.NearPlane);
+	CHECK(captured.CameraPose.FarPlaneMetres == view.Camera.FarPlane);
+
+	request.Channels = {render::DataCaptureChannel::RgbLinearHdr, render::DataCaptureChannel::ObjectIds};
+	render::DataCaptureTicket partial;
+	REQUIRE(renderer.QueueDataCapture(request, partial));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	do {
+		captured = renderer.PollDataCapture(partial);
+		if (captured.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
+	} while (captured.Status == render::DataCaptureStatus::Pending &&
+			 std::chrono::steady_clock::now() < deadline);
+	REQUIRE(captured.Status == render::DataCaptureStatus::Partial);
+	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
+	CHECK(captured.Planes[1].Status == render::DataCaptureStatus::Unsupported);
+
+	render::DataCaptureTicket cancelled;
+	REQUIRE(renderer.QueueDataCapture(request, cancelled));
+	renderer.CancelDataCapture(cancelled);
+	CHECK(renderer.PollDataCapture(cancelled).Status == render::DataCaptureStatus::Cancelled);
+
+	request.SnapshotId = "snapshot-render-2";
+	request.Channels = {render::DataCaptureChannel::RgbLinearHdr};
+	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	do {
+		captured = renderer.PollDataCapture(ticket);
+		if (captured.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
+	} while (captured.Status == render::DataCaptureStatus::Pending &&
+			 std::chrono::steady_clock::now() < deadline);
+	CHECK(captured.Status == render::DataCaptureStatus::Invalid);
+}
+
+TEST_CASE("script capture retains copied bytes until explicit release", "[render][gpu][data-capture][.]") {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	InstallImageCapture(renderer, "lit", true);
+
+	world::Universe worlds;
+	world::WorldSettings settings;
+	settings.Name = core::Name("script-capture-world");
+	const world::WorldId world = worlds.Create(settings);
+	REQUIRE(world.IsValid());
+	world::DataFactorySession session(worlds);
+	session.SetPauseParticipant(
+		[world](world::WorldId paused, world::DataFactoryPauseScope scope, bool, std::string &) {
+			return paused == world && scope == world::DataFactoryPauseScope::AllSystems;
+		}
+	);
+	REQUIRE(
+		session.Pause("script-capture-world", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("script-capture-world", snapshot).Status == world::DataFactoryStatus::Ok);
+
+	render::ScriptDataCaptureBridge bridge(session, renderer);
+	script::DataCaptureBridgeRequest request{
+		.InstanceId = "script-capture-world",
+		.SnapshotId = snapshot,
+		.Pipeline = "image-export-pipeline",
+		.CaptureNode = "image-export",
+		.Channels = {"rgb_linear_hdr"},
+		.TemporalHistory = "preserve",
+	};
+	uint64_t ticket = 0;
+	std::string detail;
+	REQUIRE(bridge.Queue("script-capture-world", request, ticket, detail));
+
+	render::SceneTarget target{32, 24};
+	render::View view;
+	view.WorldName = core::Name("script-capture-world");
+	view.Pipeline = core::Name("image-export-pipeline");
+	view.Target = &target;
+	bridge.PrepareView(view);
+	bridge.PrepareView(view);
+	REQUIRE(view.SnapshotId == snapshot);
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+
+	script::DataCaptureBridgePoll poll;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	do {
+		bridge.Pump();
+		REQUIRE(bridge.Poll("script-capture-world", ticket, poll, detail));
+		if (poll.Status == "pending") SDL_Delay(1);
+	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == "ready");
+	REQUIRE(poll.Planes.size() == 1);
+	CHECK(poll.Planes.front().Resource != poll.Planes.front().SourceResource);
+	std::vector<std::byte> bytes;
+	const size_t byteCount = static_cast<size_t>(poll.Planes.front().RowStride) * poll.Planes.front().Height;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world", ticket, poll.Planes.front().Resource, 0, byteCount, bytes, detail
+	));
+	CHECK(bytes.size() == byteCount);
+	CHECK(assets::Hasher::Of(bytes).ToHex() == poll.Planes.front().Hash);
+	script::DataCaptureBridgePoll repeated;
+	REQUIRE(bridge.Poll("script-capture-world", ticket, repeated, detail));
+	REQUIRE(repeated.Planes.size() == 1);
+	CHECK(repeated.Planes.front().Resource == poll.Planes.front().Resource);
+	CHECK(repeated.Planes.front().Hash == poll.Planes.front().Hash);
+	std::vector<std::byte> repeatedBytes;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world", ticket, repeated.Planes.front().Resource, 0, byteCount, repeatedBytes, detail
+	));
+	CHECK(repeatedBytes == bytes);
+	REQUIRE(bridge.Release("script-capture-world", ticket, detail));
+	CHECK_FALSE(bridge.Poll("script-capture-world", ticket, poll, detail));
 }

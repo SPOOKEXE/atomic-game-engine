@@ -640,6 +640,11 @@ namespace engine::render {
 		const float cameraAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 		matrices = source.Projection ? scene::ResolveSurfaceCamera(cameraFrame, *source.Projection)
 									 : scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect);
+		State->ActiveDataCaptureSource.ProjectionAvailable = true;
+		for (size_t column = 0; column < 4; ++column)
+			for (size_t row = 0; row < 4; ++row)
+				State->ActiveDataCaptureSource.Projection[column * 4 + row] =
+					matrices.Projection[column][row];
 		cameraMatrix = matrices.ViewProjection;
 		if (sharedCaptures) {
 			const auto budget = source.SurfaceBudget.value_or(

@@ -392,6 +392,10 @@ namespace engine::graph {
 	// @return The PBR document. `Build`ing it produces a graph that compiles.
 	PipelineDocument DefaultPbrDocument();
 
+	// The default PBR graph with one frame capture node that exports the linear
+	// HDR, linear-depth, and packed-normal planes used by DataCapture.
+	PipelineDocument DefaultPbrDataCaptureDocument();
+
 	// The same default spatial chain for world-image producers and native views.
 	// Capture consumers export before tone mapping; screen GUI follows the world.
 	PipelineDocument DefaultWorldHdrDocument();

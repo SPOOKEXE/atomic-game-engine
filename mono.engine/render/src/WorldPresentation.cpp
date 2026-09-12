@@ -604,7 +604,11 @@ namespace engine::render {
 	// reads the simulation and writes only the draw list, which is what
 	// "PreRender never mutates simulation state" means in practice.
 	void CollectInstances(Store &store) {
-		const float alpha = store.Time().Alpha;
+		CollectInstances(store, DrawCollectionTime::Interpolated);
+	}
+
+	void CollectInstances(Store &store, DrawCollectionTime time) {
+		const float alpha = time == DrawCollectionTime::CurrentTick ? 1.0f : store.Time().Alpha;
 
 		auto *drawList = store.ResourceMutable<DrawList>();
 

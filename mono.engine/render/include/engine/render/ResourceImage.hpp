@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace engine::render {
@@ -19,10 +20,16 @@ namespace engine::render {
 		core::Name Node{};
 		size_t ViewSlot = 0;
 		ResourceImageDelivery Delivery = ResourceImageDelivery::CopiedPixels;
+		// Empty for ordinary renderer clients. Data captures use this as the
+		// snapshot barrier checked before any GPU download is recorded.
+		std::string ExpectedSnapshotId{};
 	};
 
 	enum class ResourceImageStatus : uint8_t { Ok, Unsupported, Failed };
 	enum class ResourceImageKind : uint8_t { Colour, DirectionalShadow };
+	// Native texture storage copied for a colour capture. Consumers must inspect
+	// this before assigning scalar or colour-space semantics to Pixels.
+	enum class ResourceImageFormat : uint8_t { Unknown, RGBA8_UNorm, RGBA8_SRGB, RGBA16_Float };
 	// Transfer allocations retained by all capture slots share this bound.
 	inline constexpr size_t MAX_RESOURCE_IMAGE_STAGING_BYTES = 32 * 1024 * 1024;
 	struct ResourceShadowCapture {
@@ -43,10 +50,21 @@ namespace engine::render {
 		// Renderer-local frame that actually executed the capture, zero if it did
 		// not run. Compare within one live renderer only, never as a world tick.
 		uint64_t CaptureFrame = 0;
+		// Filled at the capture node from the View that produced these bytes. It
+		// is empty for ordinary renderer clients that do not establish a data
+		// snapshot barrier.
+		std::string SnapshotId;
+		std::array<float, 16> CameraWorldFromCamera{};
+		bool CameraProjectionAvailable = false;
+		std::array<float, 16> CameraProjection{};
+		float CameraFieldOfViewRadians = 0.0f;
+		float CameraNearPlane = 0.0f;
+		float CameraFarPlane = 0.0f;
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		uint32_t RowStride = 0;
-		// Owned top-left, tightly packed linear RGBA16F, in little-endian order.
+		ResourceImageFormat Format = ResourceImageFormat::Unknown;
+		// Owned top-left rows in the native Format, in little-endian order.
 		std::vector<std::byte> Pixels;
 		// Optional declared R32F capture input, copied in the same submission.
 		// DirectionalShadow instead owns only this plane: exact D32F device depth,

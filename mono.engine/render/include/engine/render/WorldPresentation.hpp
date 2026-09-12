@@ -178,6 +178,10 @@ namespace engine::render {
 		//@}
 	};
 
+	// The regular presentation packet interpolates between completed ticks. A
+	// data-factory snapshot instead renders the current completed tick exactly.
+	enum class DrawCollectionTime : uint8_t { Interpolated, CurrentTick };
+
 	// Rebuilds the world-owned draw list from visible scene rows.
 	//
 	// Interpolation and device-neutral draw payload construction happen once
@@ -186,6 +190,7 @@ namespace engine::render {
 	//
 	// @param store The world being presented.
 	void CollectInstances(ecs::Store &store);
+	void CollectInstances(ecs::Store &store, DrawCollectionTime time);
 
 	// Rebuilds the flat joint palette and assigns each skinned draw row its run.
 	// Useful to both the live-world and replicated collectors.

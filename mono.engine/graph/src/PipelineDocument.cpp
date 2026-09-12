@@ -989,6 +989,40 @@ namespace engine::graph {
 		return document;
 	}
 
+	PipelineDocument DefaultPbrDataCaptureDocument() {
+		PipelineDocument document = DefaultPbrDocument();
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 3>{
+				 {{"lit", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}}
+			 }) {
+			document.Record(
+				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
+			);
+		}
+		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 3>{
+				 {{"data-capture-albedo", "albedo"},
+				  {"data-capture-material", "material"},
+				  {"data-capture-emissive", "emissive"}}
+			 }) {
+			document.Record(
+				{.Kind = EditKind::AddNode,
+				 .Name = core::Name(node),
+				 .NodeKind = core::Name("capture"),
+				 .Scope = NodeScope::Frame}
+			);
+			document.Record(
+				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
+			);
+		}
+
+		return document;
+	}
+
 	PipelineDocument DefaultPortalBodyDocument(
 		bool seamProjection,
 		bool orderedLayers,
