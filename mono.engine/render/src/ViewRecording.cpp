@@ -2927,6 +2927,7 @@ namespace engine::render {
 				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
 				State->CompleteResidentUploads(true);
 				State->CommitPendingGraphHistoryWrites(command);
+				State->ClearSubmittedGraphHistoryWrites();
 			}
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {

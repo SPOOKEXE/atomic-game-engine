@@ -277,12 +277,18 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto graphTexture =
-				[&recording](graph::ResourceId resource, const graph::RunContext &runContext, bool make) {
-					return recording.GraphTexture(resource, runContext, make);
+			const auto graphTexture = [&recording](
+				graph::ResourceId resource,
+				const graph::RunContext &runContext,
+				bool make,
+				SDL_GPUCommandBuffer *readCommand
+			) {
+					return recording.GraphTexture(resource, runContext, make, readCommand);
 				};
-			const auto textureBindings = [&recording](const graph::RunContext &runContext) {
-				return recording.TextureBindings(runContext);
+			const auto textureBindings = [&recording](
+				const graph::RunContext &runContext, SDL_GPUCommandBuffer *readCommand
+			) {
+				return recording.TextureBindings(runContext, readCommand);
 			};
 
 			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
@@ -333,7 +339,7 @@ namespace engine::render {
 				if (desc == nullptr || desc->Kind != graph::ResourceKind::Storage) {
 					continue;
 				}
-				Impl::NamedTexture target = graphTexture(resource, context, true);
+				Impl::NamedTexture target = recording.GraphTexture(resource, context, true);
 				if (!target.IsValid()) {
 					continue;
 				}
@@ -349,7 +355,6 @@ namespace engine::render {
 				ENGINE_WARN("'{}' has no storage target to dispatch into", context.Name.Text());
 				return true;
 			}
-			const std::vector<SDL_GPUTextureSamplerBinding> bindings = textureBindings(context);
 			const uint32_t localX = demanded ? node->Integer(core::Name("local.x"), 8) : 8;
 			const uint32_t localY = demanded ? node->Integer(core::Name("local.y"), 8) : 8;
 			const uint32_t localZ = demanded ? node->Integer(core::Name("local.z"), 1) : 1;
@@ -368,21 +373,6 @@ namespace engine::render {
 				ENGINE_WARN("'{}' asks for resident instances before any are available", context.Name.Text());
 				return true;
 			}
-			SDL_GPUComputePipeline *compute = State->GraphComputeFor(
-				*selectedPipeline,
-				*node,
-				bindings.size(),
-				writes.size(),
-				readInstances ? 1u : 0u,
-				(readViewUniforms ? 1u : 0u) + (traceUniforms ? 1u : 0u),
-				localX,
-				localY,
-				localZ
-			);
-			if (compute == nullptr) {
-				return true;
-			}
-
 			const graph::ScheduledNode *scheduled = scheduledFor(context.Node);
 
 			// The traffic plan decides which command buffer this dispatch
@@ -439,6 +429,26 @@ namespace engine::render {
 					State->BatchTimingSlot = timingSlot;
 				}
 			}
+			const std::vector<SDL_GPUTextureSamplerBinding> bindings =
+				textureBindings(context, dispatchCommand);
+			SDL_GPUComputePipeline *compute = State->GraphComputeFor(
+				*selectedPipeline,
+				*node,
+				bindings.size(),
+				writes.size(),
+				readInstances ? 1u : 0u,
+				(readViewUniforms ? 1u : 0u) + (traceUniforms ? 1u : 0u),
+				localX,
+				localY,
+				localZ
+			);
+			if (compute == nullptr) {
+				if (separateCommand) {
+					State->Timestamps.Abandon(timingSlot);
+					SDL_CancelGPUCommandBuffer(dispatchCommand);
+				}
+				return true;
+			}
 			enterNamedPass(context.Name, dispatchCommand);
 			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(
 				dispatchCommand, writes.data(), static_cast<uint32_t>(writes.size()), nullptr, 0
@@ -487,7 +497,7 @@ namespace engine::render {
 				for (const graph::ResourceId resource : context.Reads) {
 					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
 					if (desc != nullptr && desc->Lifetime == graph::ResourceLifetime::History) {
-						historyAvailable = graphTexture(resource, context, false).IsValid();
+						historyAvailable = graphTexture(resource, context, false, dispatchCommand).IsValid();
 						break;
 					}
 				}

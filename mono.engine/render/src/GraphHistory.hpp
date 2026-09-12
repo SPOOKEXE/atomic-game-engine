@@ -49,6 +49,14 @@ namespace engine::render {
 											: GraphHistoryReadSource::Unavailable;
 	}
 
+	// A queued producer is visible to later commands in this graph invocation.
+	// An unqueued producer is visible only inside the command buffer recording it.
+	inline bool GraphHistoryCurrentProducer(
+		bool pending, bool sameCommand, bool submitted
+	) {
+		return submitted || (pending && sameCommand);
+	}
+
 	// A renderer-side cache may avoid recording a deterministic producer only
 	// after the command that produced it entered the queue. Pending generations
 	// never replace the last completed one, so cancellation cannot certify pixels

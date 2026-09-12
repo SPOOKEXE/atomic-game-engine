@@ -525,7 +525,12 @@ namespace engine::render {
 		// @param selectedSlot Which viewport's copy.
 		// @param make         Whether to allocate one that does not exist.
 		// @return The texture, or an invalid one.
-		Impl::NamedTexture ResourceTexture(graph::ResourceId resource, size_t selectedSlot, bool make);
+		Impl::NamedTexture ResourceTexture(
+			graph::ResourceId resource,
+			size_t selectedSlot,
+			bool make,
+			SDL_GPUCommandBuffer *readCommand = nullptr
+		);
 
 		// The buffer backing a graph resource, allocating it when asked.
 		SDL_GPUBuffer *ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make);
@@ -540,7 +545,12 @@ namespace engine::render {
 		// @param make     Whether to allocate one that does not exist.
 		// @return The texture, or an invalid one.
 		Impl::NamedTexture
-		GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make);
+		GraphTexture(
+			graph::ResourceId resource,
+			const graph::RunContext &context,
+			bool make,
+			SDL_GPUCommandBuffer *readCommand = nullptr
+		);
 
 		// Marks successful history writers as readable by later nodes in this command
 		// buffer. Submission still decides when that generation becomes temporal history.
@@ -554,7 +564,8 @@ namespace engine::render {
 		//
 		// @param context What the graph decided this invocation is.
 		// @return The bindings.
-		std::vector<SDL_GPUTextureSamplerBinding> TextureBindings(const graph::RunContext &context);
+		std::vector<SDL_GPUTextureSamplerBinding>
+		TextureBindings(const graph::RunContext &context, SDL_GPUCommandBuffer *readCommand = nullptr);
 
 		// Copies one image into another through the image pipeline.
 		//

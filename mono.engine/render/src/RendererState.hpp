@@ -522,6 +522,7 @@ namespace engine::render {
 			graph::NodeScope Scope = graph::NodeScope::Frame;
 			uint64_t Owner = 0;
 			uint64_t Signature = 0;
+			bool Submitted = false;
 		};
 
 		std::vector<PendingGraphHistoryWrite> PendingGraphHistoryWrites;
@@ -579,7 +580,11 @@ namespace engine::render {
 			uint64_t signature
 		) const;
 		NamedTexture FindCurrentGraphHistoryWrite(
-			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+			const NamedPipeline &pipeline,
+			SDL_GPUCommandBuffer *readCommand,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner
 		) const;
 		void CommitGraphHistoryWrite(
 			const NamedPipeline &pipeline,
@@ -598,6 +603,7 @@ namespace engine::render {
 		);
 		void CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command);
 		void DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command = nullptr);
+		void ClearSubmittedGraphHistoryWrites();
 		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
 			const NamedPipeline &pipeline,

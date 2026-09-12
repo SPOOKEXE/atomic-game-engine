@@ -12,6 +12,7 @@ using engine::graph::NodeScope;
 using engine::graph::ResourceDesc;
 using engine::graph::ResourceLifetime;
 using engine::render::GraphHistoryOwner;
+using engine::render::GraphHistoryCurrentProducer;
 using engine::render::GraphHistoryReadable;
 using engine::render::GraphHistoryReadNeedsValidation;
 using engine::render::GraphHistoryReadSource;
@@ -81,6 +82,12 @@ TEST_CASE("a direct producer outranks temporal history during graph damage", "[r
 		GraphHistoryReadSource::CurrentProducer
 	);
 	CHECK(SelectGraphHistoryRead(false, PresentationDamage{}) == GraphHistoryReadSource::PreviousGeneration);
+}
+
+TEST_CASE("current graph history observes command ownership", "[render][graph-history]") {
+	CHECK(GraphHistoryCurrentProducer(true, true, false));
+	CHECK_FALSE(GraphHistoryCurrentProducer(true, false, false));
+	CHECK(GraphHistoryCurrentProducer(false, false, true));
 }
 
 TEST_CASE("discarded graph history writes cannot become readable", "[render][graph-history]") {

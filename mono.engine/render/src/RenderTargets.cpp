@@ -545,12 +545,17 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::NamedTexture Renderer::Impl::FindCurrentGraphHistoryWrite(
-		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+		const NamedPipeline &pipeline,
+		SDL_GPUCommandBuffer *readCommand,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner
 	) const {
 		for (auto write = PendingGraphHistoryWrites.rbegin(); write != PendingGraphHistoryWrites.rend();
 			 ++write) {
 			if (write->Pipeline == &pipeline && write->Resource == resource && write->Scope == scope &&
-				write->Owner == owner) {
+				write->Owner == owner &&
+				GraphHistoryCurrentProducer(!write->Submitted, write->Command == readCommand, write->Submitted)) {
 				return FindGraphTarget(pipeline, resource, scope, owner);
 			}
 		}
@@ -587,27 +592,21 @@ namespace engine::render {
 			if (write.Pipeline == &pipeline && write.Command == command && write.Resource == resource &&
 				write.Scope == scope && write.Owner == owner) {
 				write.Signature = signature;
+				write.Submitted = false;
 				return;
 			}
 		}
-		PendingGraphHistoryWrites.push_back({&pipeline, command, resource, scope, owner, signature});
+		PendingGraphHistoryWrites.push_back({&pipeline, command, resource, scope, owner, signature, false});
 	}
 
 	void Renderer::Impl::CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
-		auto firstRetained = std::remove_if(
-			PendingGraphHistoryWrites.begin(),
-			PendingGraphHistoryWrites.end(),
-			[this, command](const PendingGraphHistoryWrite &write) {
-				if (write.Command != command) return false;
-				if (write.Pipeline != nullptr) {
-					CommitGraphHistoryWrite(
-						*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature
-					);
-				}
-				return true;
+		for (PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
+			if (write.Command != command || write.Submitted) continue;
+			if (write.Pipeline != nullptr) {
+				CommitGraphHistoryWrite(*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature);
 			}
-		);
-		PendingGraphHistoryWrites.erase(firstRetained, PendingGraphHistoryWrites.end());
+			write.Submitted = true;
+		}
 		CommitEnvironmentWrites(command);
 	}
 
@@ -623,6 +622,12 @@ namespace engine::render {
 			PendingGraphHistoryWrites.erase(firstRetained, PendingGraphHistoryWrites.end());
 		}
 		DiscardEnvironmentWrites(command);
+	}
+
+	void Renderer::Impl::ClearSubmittedGraphHistoryWrites() {
+		std::erase_if(PendingGraphHistoryWrites, [](const PendingGraphHistoryWrite &write) {
+			return write.Submitted;
+		});
 	}
 
 	core::Name Renderer::Impl::GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const {
