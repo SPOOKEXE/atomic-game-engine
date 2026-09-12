@@ -610,25 +610,7 @@ function(mono_add_tests name)
 	# suites, but make `test_render` runnable from its staged directory without a
 	# full client build happening to have populated another tree first.
 	if("Engine::render" IN_LIST _mono_test_deps)
-		get_target_property(_mono_test_shader_dir engine_resources MONO_SHADER_DIR)
-		get_target_property(_mono_test_shader_inputs engine_resources MONO_SHADER_OUTPUTS)
-		set(_mono_test_shader_outputs "")
-		foreach(_mono_test_shader IN LISTS _mono_test_shader_inputs)
-			get_filename_component(_mono_test_shader_name "${_mono_test_shader}" NAME)
-			list(APPEND _mono_test_shader_outputs
-				"${MONO_STAGE_ROOT}/tests/shaders/resources/${_mono_test_shader_name}")
-		endforeach()
-
-		add_custom_command(
-			OUTPUT ${_mono_test_shader_outputs}
-			COMMAND ${CMAKE_COMMAND} -E rm -rf "${MONO_STAGE_ROOT}/tests/shaders/resources"
-			COMMAND ${CMAKE_COMMAND} -E copy_directory
-				"${_mono_test_shader_dir}" "${MONO_STAGE_ROOT}/tests/shaders/resources"
-			DEPENDS ${_mono_test_shader_inputs}
-			COMMENT "Staging renderer shaders into tests/shaders"
-			VERBATIM)
-		add_custom_target(${target}_stage_shaders DEPENDS ${_mono_test_shader_outputs})
-		add_dependencies(${target} ${target}_stage_shaders)
+		_mono_stage_renderer_shaders(${target} "${MONO_STAGE_ROOT}/tests")
 	endif()
 
 	add_test(NAME ${name} COMMAND ${target})
@@ -695,6 +677,13 @@ function(mono_add_benchmarks name)
 
 	set_target_properties(${target} PROPERTIES
 		RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/bench")
+
+	# A renderer benchmark may own a real device, so it needs the same built-in
+	# shaders a renderer program stages beside its executable. This remains a
+	# build dependency: running the benchmark still decides whether to open SDL.
+	if("Engine::render" IN_LIST ARG_DEPS)
+		_mono_stage_renderer_shaders(${target} "${MONO_STAGE_ROOT}/bench")
+	endif()
 	set_property(GLOBAL APPEND PROPERTY MONO_ALL_BENCH_TARGETS ${target})
 endfunction()
 
@@ -948,6 +937,28 @@ function(_mono_transitive_deps roots out)
 		endif()
 	endwhile()
 	set(${out} "${seen}" PARENT_SCOPE)
+endfunction()
+
+# Stages the engine's built-in shaders where a renderer test or benchmark opens
+# them. The resources module owns both the compile target and the path layout.
+function(_mono_stage_renderer_shaders target stage)
+	get_target_property(shader_dir engine_resources MONO_SHADER_DIR)
+	get_target_property(shader_inputs engine_resources MONO_SHADER_OUTPUTS)
+	set(shader_staged "")
+	foreach(shader IN LISTS shader_inputs)
+		get_filename_component(shader_name "${shader}" NAME)
+		list(APPEND shader_staged "${stage}/shaders/resources/${shader_name}")
+	endforeach()
+
+	add_custom_command(
+		OUTPUT ${shader_staged}
+		COMMAND ${CMAKE_COMMAND} -E rm -rf "${stage}/shaders/resources"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${shader_dir}" "${stage}/shaders/resources"
+		DEPENDS ${shader_inputs}
+		COMMENT "Staging renderer shaders into ${stage}/shaders"
+		VERBATIM)
+	add_custom_target(${target}_stage_shaders DEPENDS ${shader_staged})
+	add_dependencies(${target} ${target}_stage_shaders)
 endfunction()
 
 # ---------------------------------------------------------------------------

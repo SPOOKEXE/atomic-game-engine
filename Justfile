@@ -153,6 +153,25 @@ gpu-texture-atlas-bench samples="1":
         exit 1
     fi
 
+# Builds the device-owning benchmark without running it, then proves every
+# compiled resource shader was staged beside that benchmark.
+check-bench-render-shaders:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    shopt -s nullglob
+    compiled=(.cache/build/bench/shaderstage/resources/*)
+    if [ "${#compiled[@]}" -eq 0 ]; then
+        echo "FAIL: bench shader check found no compiled resource shaders" >&2
+        exit 1
+    fi
+    for shader in "${compiled[@]}"; do
+        test -f ".cache/build/bench/bench/shaders/resources/$(basename "$shader")" \
+            || (echo "FAIL: bench_render did not stage $(basename "$shader")" >&2 && exit 1)
+    done
+    echo "bench_render stages renderer shaders without opening a device"
+
 # Integrated release measurement for the medium render demo. Each run writes
 # the frame tree and heap/GPU report before teardown, then prints the report
 # rows needed to compare cold and warm frames across active camera batches.
