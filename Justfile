@@ -151,18 +151,24 @@ gpu-texture-atlas-bench samples="1":
 medium-render-profile seconds="15":
     #!/usr/bin/env bash
     set -euo pipefail
-    cmake --preset release > /dev/null
-    cmake --build --preset release --target client
+    cmake --preset profile > /dev/null
+    cmake --build --preset profile --target client
     mkdir -p .cache/medium-render-profile
-    profile_build=".cache/build/release"
+    profile_build=".cache/build/profile"
     script="$profile_build/assets/examples/scripts/RenderFeaturesDemo.luau"
     for cameras in 1 2 8; do
         base=".cache/medium-render-profile/cameras-$cameras"
+        rm -f "$base-frame.txt" "$base-heap.txt" "$base.log"
         timeout $(( {{seconds}} + 120 )) "$profile_build/client/client" \
             --headless --uncapped --frames 1000000000 --profile-seconds {{seconds}} \
             --width 1280 --height 720 --worlds "$cameras" --view-spacing 0 \
             --script "$script" --profile-snapshot "$base-frame.txt" --heap-report "$base-heap.txt" \
             > "$base.log" 2>&1
+        test -s "$base-frame.txt"
+        test -s "$base-heap.txt"
+        grep -Eq '^window +[1-9][0-9]* frames ' "$base-frame.txt"
+        grep -q '^gpu logical heap$' "$base-heap.txt"
+        ! grep -q 'not compiled in' "$base-heap.txt"
         echo "medium-render-profile cameras=$cameras"
         grep -E "gpu heap:|gpu memory:|cache|upload|download|timestamp" "$base.log" || true
         grep -E "^(frame|span|category)" "$base-frame.txt" || true

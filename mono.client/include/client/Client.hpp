@@ -156,6 +156,10 @@ namespace client {
 		// "this build leaks" from "this build would not start".
 		static constexpr int EXIT_RUNAWAY_HEAP = 3;
 
+		// The requested profiling artifacts could not be written. A profiling job
+		// that reports success without its evidence is not a successful job.
+		static constexpr int EXIT_PROFILE_ARTIFACT = 4;
+
 		// Below this many seconds of readings a slope is noise. Six, because a
 		// least-squares fit over five points is as answerable to one outlier as
 		// to the trend.

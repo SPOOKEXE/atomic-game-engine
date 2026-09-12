@@ -3550,11 +3550,13 @@ namespace client {
 		// call gives: the graph's history is what is being written, and a
 		// snapshot taken after the world has gone is a snapshot of the
 		// shutdown.
+		bool profileArtifactsWritten = true;
 		if (!Settings.ProfileSnapshot.empty()) {
 			if (FrameGraph::WriteSnapshot(Settings.ProfileSnapshot)) {
 				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.ProfileSnapshot.string());
+				profileArtifactsWritten = false;
 			}
 		}
 
@@ -3581,10 +3583,12 @@ namespace client {
 				ENGINE_INFO("heap report written to {}", Settings.HeapReport.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.HeapReport.string());
+				profileArtifactsWritten = false;
 			}
 		}
 
-		return CheckHeapGrowth();
+		const int heapStatus = CheckHeapGrowth();
+		return heapStatus != 0 ? heapStatus : profileArtifactsWritten ? 0 : EXIT_PROFILE_ARTIFACT;
 	}
 
 	engine::render::NetworkStatistics Client::SampleNetwork() {
