@@ -57,12 +57,12 @@ namespace {
 	}
 }
 
-TEST_CASE("GPU cases are absent from ordinary suite filters", "[cascade][gpu-filter]") {
+TEST_CASE("suite filters keep hidden helpers out while GPU runs include GPU cases", "[cascade][gpu-filter]") {
 	Suite suite;
 	suite.Source = "/source/mono.engine/render/tests/SceneCapture.cpp";
 
-	CHECK(CatchFilter(suite, false) == "[#SceneCapture]~[gpu]");
-	CHECK(CatchFilter(suite, true) == "[#SceneCapture]");
+	CHECK(CatchFilter(suite, false) == "[#SceneCapture]~[gpu]~[.]");
+	CHECK(CatchFilter(suite, true) == "[#SceneCapture]~[.],[#SceneCapture][gpu]");
 }
 
 TEST_CASE("a signature changes when the source does", "[cascade]") {

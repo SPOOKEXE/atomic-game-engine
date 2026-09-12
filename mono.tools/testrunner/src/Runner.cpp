@@ -211,10 +211,11 @@ namespace testrunner {
 
 	std::string CatchFilter(const Suite &suite, bool gpuTests) {
 		std::string filter = "[#" + suite.Source.stem().string() + "]";
-		if (!gpuTests) {
-			filter += "~[gpu]";
-		}
-		return filter;
+		if (!gpuTests) return filter + "~[gpu]~[.]";
+
+		// A GPU run explicitly selects hidden GPU cases while leaving process
+		// helpers hidden. Catch combines comma-separated specifications as a union.
+		return filter + "~[.]," + filter + "[gpu]";
 	}
 
 	DependencyClosures ReadDependencyClosures(const fs::path &build) {

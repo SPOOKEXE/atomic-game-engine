@@ -45,6 +45,10 @@ namespace {
 		const auto started = std::chrono::steady_clock::now();
 		const auto result = Run(
 			{suite.Binary.string(),
+			 // A source file can deliberately contain only GPU cases. The ordinary
+			 // run excludes them, which is a successful empty selection rather than
+			 // a failed suite.
+			 "--allow-running-no-tests",
 			 "-#",
 			 filter,
 			 "--reporter",
