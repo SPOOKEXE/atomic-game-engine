@@ -362,6 +362,14 @@ diagnostic paths. The full working-tree checkpoint is not a completed phase.
   revive the expired handle. Runtime, exchange, host, demand, inbox and resident
   tests pass 5,749 assertions / 35 cases on Vulkan. Process transport and release
   performance measurements remain separate gates.
+- [x] P8 in-flight camera request coalescing: one portal/profile request remains
+  active while the source retains only its newest distinct normalized camera/body
+  demand. Geometry enters camera identity before that comparison. Imported-image
+  completion or failure issues the retained demand, while capture payloads wait
+  for `TakeTree`. A full presentation queue retries only until the deferred
+  deadline; permanent refusal, expiry and endpoint invalidation retire it.
+  Focused non-GPU tests cover movement, sampling, payload handoff, bounded retry,
+  seam and endpoint supersession.
 - [x] P8 codec cost benchmark: `just portal-exchange-bench` measures owned reply
   encode/decode batches for 1, 2 and 8 views at 512x512 linear HDR, alongside
   resident receipts and renewals. Each copied image has a 2 MiB pixel payload.

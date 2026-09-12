@@ -120,8 +120,10 @@ namespace engine::render {
 		~PortalImageSource();
 		PortalImageSource(const PortalImageSource &) = delete;
 		PortalImageSource &operator=(const PortalImageSource &) = delete;
-		// One request per mouth stays in flight. Retry the latest camera/geometry
-		// after Poll completes it; seam and endpoint changes supersede immediately.
+		// One request per mouth stays in flight. A distinct latest camera, body or
+		// geometry demand is retained. Poll issues it when an imported image completes;
+		// a capture payload waits until TakeTree consumes the completed payload. Seam
+		// and endpoint changes supersede immediately.
 		PortalRuntimeIssue Issue(
 			const world::PresentationAddress &producer,
 			PortalImageRequest request,

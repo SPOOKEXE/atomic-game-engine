@@ -13,6 +13,7 @@
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Materials.hpp>
@@ -298,38 +299,170 @@ TEST_CASE("portal producer retries a refused failure reply without recapturing",
 	}
 }
 
-TEST_CASE("moving portal cameras keep one request in flight", "[render][portal-runtime]") {
+TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render][portal-runtime]") {
 	RuntimeWorlds worlds;
 	Renderer renderer;
 	PortalImageSource source(worlds.Universe, renderer, worlds.Source, worlds.Replies);
 	PortalImageProducer producer(worlds.Universe, renderer, worlds.Destination, worlds.Requests);
-	auto request = Request();
-	REQUIRE(source.Issue(worlds.Requests, request, Binding(), START).Status == PortalInboxStatus::Issued);
-	for (uint64_t camera = 2; camera <= 100; ++camera) {
-		request.Key.CameraRevision = camera;
-		auto movingBinding = Binding();
-		movingBinding.Sampling[3][0] = static_cast<float>(camera) * .001f;
+	const auto first = Request();
+	auto second = first;
+	second.Position = {1, 0, 0};
+	PortalGeometry secondGeometry;
+	secondGeometry.Rows.emplace_back();
+	secondGeometry.Rows.front().Name = "second";
+	std::string geometryError;
+	REQUIRE(EncodePortalGeometry(secondGeometry, second.Geometry, geometryError));
+	auto latest = first;
+	latest.Position = {2, 0, 0};
+	PortalGeometry latestGeometry;
+	latestGeometry.Rows.emplace_back();
+	latestGeometry.Rows.front().Name = "latest";
+	REQUIRE(EncodePortalGeometry(latestGeometry, latest.Geometry, geometryError));
+	REQUIRE(source.Issue(worlds.Requests, first, Binding(), START).Status == PortalInboxStatus::Issued);
+
+	SECTION("completion immediately sends only the latest distinct demand") {
+		CHECK(source.Issue(worlds.Requests, second, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
+		CHECK(producer.Pump(0, 0, START).Requests == 1);
+		const auto completed = source.Poll(START);
+		REQUIRE(completed.size() == 1);
+		CHECK(completed.front().RequestId != 0);
+		CHECK(completed.front().Status == PortalImageStatus::Unavailable);
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
+
+		const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+		REQUIRE(messages.size() == 1);
+		PortalImageRequest decoded;
+		std::string error;
+		REQUIRE(DecodePortalImageRequest(messages.front().Payload, decoded, error));
+		CHECK(decoded.Geometry == latest.Geometry);
+		CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 		REQUIRE(
-			source.Issue(worlds.Requests, request, movingBinding, START).Status == PortalInboxStatus::Busy
+			worlds.Universe.SendPresentation(
+				worlds.Source,
+				worlds.Replies,
+				worlds.Requests,
+				messages.front().Correlation,
+				messages.front().Payload
+			) == world::PresentationStatus::Ok
 		);
+		CHECK(producer.Pump(0, 0, START + std::chrono::milliseconds(1)).Requests == 1);
+		REQUIRE(source.Poll(START + std::chrono::milliseconds(1)).size() == 1);
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+		CHECK(source.Poll(START + std::chrono::milliseconds(2)).empty());
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 	}
-	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
-	CHECK(producer.Pump(0, 0, START).Requests == 1);
-	REQUIRE(source.Poll(START).size() == 1);
-	REQUIRE(source.Issue(worlds.Requests, request, Binding(), START).Status == PortalInboxStatus::Issued);
-	const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
-	REQUIRE(messages.size() == 1);
-	PortalImageRequest latest;
-	std::string error;
-	REQUIRE(DecodePortalImageRequest(messages.front().Payload, latest, error));
-	CHECK(latest.Key.CameraRevision == 100);
-	request.Key.SeamRevision++;
-	CHECK(source.Issue(worlds.Requests, request, Binding(), START).Status == PortalInboxStatus::Issued);
-	REQUIRE(worlds.Universe.ClosePresentation(worlds.Requests) == world::PresentationStatus::Ok);
-	const auto replacement =
-		worlds.Universe.OpenPresentation(worlds.Destination, core::Name(PORTAL_REQUEST_CHANNEL));
-	REQUIRE(replacement.Status == world::PresentationStatus::Ok);
-	CHECK(source.Issue(replacement.Address, request, Binding(), START).Status == PortalInboxStatus::Issued);
+
+	SECTION("endpoint invalidation drops the retained demand") {
+		CHECK(source.Issue(worlds.Requests, second, Binding(), START).Status == PortalInboxStatus::Busy);
+		source.InvalidateEndpoint(worlds.Requests);
+		CHECK(producer.Pump(0, 0, START).Requests == 1);
+		CHECK(source.Poll(START).empty());
+		CHECK(producer.Pump(0, 0, START + std::chrono::milliseconds(1)).Requests == 0);
+	}
+
+	SECTION("returning to the in-flight camera drops older movement") {
+		CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK(source.Issue(worlds.Requests, first, Binding(), START).Status == PortalInboxStatus::Busy);
+		CHECK(producer.Pump(0, 0, START).Requests == 1);
+		REQUIRE(source.Poll(START).size() == 1);
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+	}
+
+	SECTION("a sampling-only change is retained") {
+		auto sampled = Binding();
+		sampled.Sampling[3][0] = .25f;
+		CHECK(source.Issue(worlds.Requests, first, sampled, START).Status == PortalInboxStatus::Busy);
+		CHECK(producer.Pump(0, 0, START).Requests == 1);
+		REQUIRE(source.Poll(START).size() == 1);
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
+	}
+
+	SECTION("seam changes still supersede immediately") {
+		auto changed = first;
+		changed.Key.SeamRevision = 1;
+		const auto superseding = source.Issue(worlds.Requests, changed, Binding(), START);
+		CHECK(superseding.Status == PortalInboxStatus::Issued);
+		CHECK(superseding.RequestId != 0);
+		const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+		REQUIRE(messages.size() == 2);
+	}
+
+	SECTION("a replacement endpoint still supersedes immediately") {
+		REQUIRE(worlds.Universe.ClosePresentation(worlds.Requests) == world::PresentationStatus::Ok);
+		const auto replacement =
+			worlds.Universe.OpenPresentation(worlds.Destination, core::Name(PORTAL_REQUEST_CHANNEL));
+		REQUIRE(replacement.Status == world::PresentationStatus::Ok);
+		CHECK(source.Issue(replacement.Address, first, Binding(), START).Status == PortalInboxStatus::Issued);
+	}
+
+	SECTION("bounded transport pressure retries the retained latest demand") {
+		RuntimeWorlds limited(1);
+		Renderer limitedRenderer;
+		PortalImageSource limitedSource(limited.Universe, limitedRenderer, limited.Source, limited.Replies);
+		PortalImageProducer limitedProducer(
+			limited.Universe, limitedRenderer, limited.Destination, limited.Requests
+		);
+		REQUIRE(
+			limitedSource.Issue(limited.Requests, first, Binding(), START).Status == PortalInboxStatus::Issued
+		);
+		CHECK(
+			limitedSource.Issue(limited.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy
+		);
+		CHECK(limitedProducer.Pump(0, 0, START).Requests == 1);
+		const std::array occupied{std::byte{0}};
+		REQUIRE(
+			limited.Universe.SendPresentation(
+				limited.Source, limited.Replies, limited.Requests, 999, occupied
+			) == world::PresentationStatus::Ok
+		);
+		REQUIRE(limitedSource.Poll(START).size() == 1);
+		REQUIRE(limited.Universe.TakePresentation(limited.Requests).size() == 1);
+		CHECK(limitedSource.Poll(START + std::chrono::milliseconds(1)).empty());
+		const auto retried = limited.Universe.TakePresentation(limited.Requests);
+		REQUIRE(retried.size() == 1);
+		PortalImageRequest decoded;
+		std::string error;
+		REQUIRE(DecodePortalImageRequest(retried.front().Payload, decoded, error));
+		CHECK(decoded.Geometry == latest.Geometry);
+	}
+
+	SECTION("deferred work expires while presentation pressure blocks retry") {
+		RuntimeWorlds expiringWorlds(1);
+		Renderer expiringRenderer;
+		PortalInboxLimits limits;
+		limits.Timeout = std::chrono::milliseconds(1);
+		PortalImageSource expiring(
+			expiringWorlds.Universe, expiringRenderer, expiringWorlds.Source, expiringWorlds.Replies, limits
+		);
+		REQUIRE(
+			expiring.Issue(expiringWorlds.Requests, first, Binding(), START).Status ==
+			PortalInboxStatus::Issued
+		);
+		CHECK(
+			expiring.Issue(expiringWorlds.Requests, latest, Binding(), START).Status ==
+			PortalInboxStatus::Busy
+		);
+		PortalImageProducer expiringProducer(
+			expiringWorlds.Universe, expiringRenderer, expiringWorlds.Destination, expiringWorlds.Requests
+		);
+		CHECK(expiringProducer.Pump(0, 0, START).Requests == 1);
+		const std::array occupied{std::byte{0}};
+		REQUIRE(
+			expiringWorlds.Universe.SendPresentation(
+				expiringWorlds.Source, expiringWorlds.Replies, expiringWorlds.Requests, 999, occupied
+			) == world::PresentationStatus::Ok
+		);
+		REQUIRE(expiring.Poll(START).size() == 1);
+		CHECK(expiringWorlds.Universe.PresentationQueueUsage().Messages == 1);
+		CHECK(expiring.Poll(START + limits.Timeout).empty());
+		REQUIRE(expiringWorlds.Universe.TakePresentation(expiringWorlds.Requests).size() == 1);
+		CHECK(expiring.Poll(START + std::chrono::milliseconds(2)).empty());
+		CHECK(expiringWorlds.Universe.PresentationQueueUsage().Messages == 0);
+	}
 }
 
 TEST_CASE("portal source bounds configured expiry at steady clock maximum", "[render][portal-runtime]") {
@@ -3789,6 +3922,75 @@ TEST_CASE(
 	}
 	CHECK(renderer.PortalImageUsage().Images == before.Images);
 	CHECK(renderer.PortalImageUsage().PendingCpuBytes == before.PendingCpuBytes);
+}
+
+TEST_CASE(
+	"payload portal sources consume completed captures before issuing deferred demand",
+	"[render][portal-runtime][portal-payload]"
+) {
+	RuntimeWorlds worlds(1);
+	Renderer renderer;
+	PortalImageSource source(
+		worlds.Universe,
+		renderer,
+		worlds.Source,
+		worlds.Replies,
+		{},
+		nullptr,
+		PortalImageSourceDelivery::CapturePayloads
+	);
+	auto first = Request();
+	first.OrderedLayers = true;
+	first.Scope = PortalImageScope::OpaqueLighting;
+	first.PixelBudget = 1024;
+	const auto issued = source.Issue(worlds.Requests, first, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	auto latest = first;
+	latest.Key.CameraRevision = 7;
+	PortalGeometry geometry;
+	geometry.Rows.emplace_back();
+	geometry.Rows.front().Name = "latest";
+	std::string error;
+	REQUIRE(EncodePortalGeometry(geometry, latest.Geometry, error));
+	CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
+
+	const auto requests = worlds.Universe.TakePresentation(worlds.Requests);
+	REQUIRE(requests.size() == 1);
+	PortalImageRequest accepted;
+	REQUIRE(DecodePortalImageRequest(requests.front().Payload, accepted, error));
+	PortalImageLayerSet layers = PayloadNode(accepted, worlds.Requests, false).Layers;
+	std::vector<std::byte> wire;
+	REQUIRE(EncodePortalImageLayerSet(layers, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(
+			worlds.Destination, worlds.Requests, worlds.Replies, issued.RequestId, wire
+		) == world::PresentationStatus::Ok
+	);
+	REQUIRE(source.Poll(START).size() == 1);
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+	const std::array occupied{std::byte{0}};
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, worlds.Replies, worlds.Requests, 999, occupied) ==
+		world::PresentationStatus::Ok
+	);
+
+	const auto captured = source.TakeTree("Door", START);
+	REQUIRE(captured);
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
+	CHECK(source.Poll(START).empty());
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
+	REQUIRE(worlds.Universe.TakePresentation(worlds.Requests).size() == 1);
+	CHECK(source.Poll(START + std::chrono::milliseconds(1)).empty());
+	const auto deferred = worlds.Universe.TakePresentation(worlds.Requests);
+	REQUIRE(deferred.size() == 1);
+	PortalImageRequest decoded;
+	REQUIRE(DecodePortalImageRequest(deferred.front().Payload, decoded, error));
+	uint64_t expectedRevision = latest.Key.CameraRevision;
+	for (const auto byte : assets::Hasher::Of(latest.Geometry).Digest)
+		expectedRevision = scene::MixSignature(expectedRevision, byte);
+	CHECK(decoded.Key.CameraRevision == expectedRevision);
+	CHECK(source.Poll(START + std::chrono::milliseconds(2)).empty());
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 }
 
 TEST_CASE(

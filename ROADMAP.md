@@ -49,7 +49,7 @@ the consolidated materials, shaders and rendering optimization work.
 - [x] Reduce editable collision BVH build work and scratch storage. Full Terrain worker profiling remains below.
 
 continue on `docs/RENDER-REFACTOR-TASKS.md`:
-- [_] Render foreign worlds from the current camera with correct parallax and disocclusion. The moving-camera whole-eye test still fails with flat images.
+- [_] Render foreign worlds from the current camera with correct parallax and disocclusion. The packet current-camera Vulkan test passes 155 assertions. In-flight request coalescing closes camera loss, while exact remote image disocclusion still needs fresh geometry/capture and remains open.
 - [_] Finish retained-world observation: authorized content, complete visual layers, handoff lifetime and gameplay lease retirement. The staging prototype is rolled back.
 - [_] Reproduce and fix the original black frame with a valid image handle; prevent missing-image black frames during topology waits.
 - [_] Verify seamless player/body crossing, Humanoid camera subjects, camera obstruction, clipping and return trips under delay, restart and lost acknowledgements.

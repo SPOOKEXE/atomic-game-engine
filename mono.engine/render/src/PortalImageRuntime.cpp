@@ -505,6 +505,12 @@ namespace engine::render {
 		bool EndpointCurrent(PortalEndpointView endpoint) const {
 			return CurrentPublishedEndpoint(Universe, EndpointBindings, endpoint);
 		}
+		struct Demand {
+			PortalImageRequest Request;
+			PortalImageRequest Normalized;
+			PortalImageBinding Binding;
+			Time Deadline;
+		};
 		struct Preview {
 			world::PresentationAddress Producer;
 			PortalImageBinding Binding;
@@ -519,6 +525,8 @@ namespace engine::render {
 			std::optional<PortalImageVersion> OfferedVersion;
 			std::string EyePlayer;
 			PortalCaptureCamera PendingCamera{};
+			PortalImageRequest PendingRequest{};
+			std::optional<Demand> Deferred;
 			PortalImageBinding CapturedBinding{};
 			PortalCaptureCamera CapturedCamera{};
 			std::string CapturedEyePlayer{};
@@ -547,6 +555,27 @@ namespace engine::render {
 				CapturedRetainedBodyPlayer = RetainedBodyPlayer;
 			}
 		};
+		static bool SameRequestDemand(const PortalImageRequest &left, const PortalImageRequest &right) {
+			PortalImageRequest normalizedLeft = left;
+			normalizedLeft.Key.RequestId = 0;
+			normalizedLeft.KnownImage.reset();
+			PortalImageRequest normalizedRight = right;
+			normalizedRight.Key.RequestId = 0;
+			normalizedRight.KnownImage.reset();
+			return normalizedLeft == normalizedRight;
+		}
+		static bool SameBindingProfile(const PortalImageBinding &left, const PortalImageBinding &right) {
+			return left.World == right.World && left.WorldName == right.WorldName &&
+				   left.ViewSlot == right.ViewSlot && left.Portal == right.Portal &&
+				   left.Index == right.Index && left.Layer == right.Layer;
+		}
+		static bool SameBindingDemand(const PortalImageBinding &left, const PortalImageBinding &right) {
+			if (!SameBindingProfile(left, right)) return false;
+			for (size_t column = 0; column < 4; ++column)
+				for (size_t row = 0; row < 4; ++row)
+					if (left.Sampling[column][row] != right.Sampling[column][row]) return false;
+			return true;
+		}
 		std::vector<Preview> Previews;
 		struct PinnedCapture {
 			uint64_t Tree = 0, Lease = 0;
@@ -619,6 +648,7 @@ namespace engine::render {
 			if (preview.Handle != 0) {
 				Render.DropPortalImage(preview.Handle);
 			}
+			preview.Deferred.reset();
 		}
 		void ReleaseImageOwner(Preview &preview) {
 			PreserveCaptureLease(preview);
@@ -649,6 +679,7 @@ namespace engine::render {
 			if (Resident) Resident->Cancel(Replies, preview.Pending);
 			Inbox.CancelRequest(preview.Pending);
 			preview.Pending = 0;
+			preview.Deferred.reset();
 		}
 		void Expire(Time now) {
 			Inbox.Expire(now);
@@ -657,6 +688,7 @@ namespace engine::render {
 				Resident->Expire(now);
 			}
 			std::erase_if(Previews, [&](Preview &preview) {
+				if (preview.Deferred && now >= preview.Deferred->Deadline) preview.Deferred.reset();
 				if (preview.CapturePinned &&
 					(preview.Tree == 0 || Render.FindPortalCaptureTree(preview.Tree) == nullptr))
 					RetireImage(preview);
@@ -697,6 +729,7 @@ namespace engine::render {
 					}
 					Inbox.CancelRequest(preview.Pending);
 					preview.Pending = 0;
+					preview.Deferred.reset();
 				}
 				if (preview.Handle != 0 && now >= preview.ImageDeadline && !preview.CapturePinned) {
 					ENGINE_TRACE(
@@ -724,10 +757,15 @@ namespace engine::render {
 						Inbox.CancelRequest(preview.Pending);
 						preview.Pending = 0;
 						preview.OfferedVersion.reset();
+						preview.Deferred.reset();
 					}
 				}
-				if (preview.PayloadReady && now >= preview.ImageDeadline) preview.PayloadReady = false;
-				return preview.Pending == 0 && preview.Handle == 0 && !preview.PayloadReady;
+				if (preview.PayloadReady && now >= preview.ImageDeadline) {
+					preview.PayloadReady = false;
+					preview.Deferred.reset();
+				}
+				return preview.Pending == 0 && preview.Handle == 0 && !preview.PayloadReady &&
+					   !preview.Deferred;
 			});
 		}
 	};
@@ -779,6 +817,7 @@ namespace engine::render {
 			!Clock(state.LastTime, now, state.Limits.Timeout)) {
 			return result;
 		}
+		const PortalImageRequest rawRequest = request;
 		state.Expire(now);
 		if (request.OrderedLayers)
 			request.Key.SeamRevision = scene::MixSignature(request.Key.SeamRevision, 0x4c4159455253ULL);
@@ -803,27 +842,39 @@ namespace engine::render {
 			for (const unsigned char byte : request.RetainedBodyPlayer)
 				request.Key.SeamRevision = scene::MixSignature(request.Key.SeamRevision, byte);
 		}
-		auto existing =
-			std::find_if(state.Previews.begin(), state.Previews.end(), [&](const Impl::Preview &preview) {
-				return preview.Binding.Portal == binding.Portal;
-			});
-		// Keep camera motion from cancelling every reply before it arrives. The
-		// caller retries its latest demand after Poll completes this request.
-		if (existing != state.Previews.end() && existing->Pending != 0 && existing->Producer == producer &&
-			existing->OrderedLayers == request.OrderedLayers && existing->EyePlayer == request.EyePlayer &&
-			existing->RetainedBodyPlayer == request.RetainedBodyPlayer &&
-			existing->Binding.Index == binding.Index &&
-			existing->Binding.Expected.SeamRevision == request.Key.SeamRevision &&
-			existing->Binding.ExpectedScope == request.Scope &&
-			existing->Binding.ExpectedProjection == request.Projection) {
-			result.Status = PortalInboxStatus::Busy;
-			return result;
-		}
 		if (!request.Geometry.empty()) {
 			const auto hash = assets::Hasher::Of(request.Geometry);
 			for (const auto byte : hash.Digest) {
 				request.Key.CameraRevision = scene::MixSignature(request.Key.CameraRevision, byte);
 			}
+		}
+		auto existing =
+			std::find_if(state.Previews.begin(), state.Previews.end(), [&](const Impl::Preview &preview) {
+				return preview.Binding.Portal == binding.Portal;
+			});
+		// Keep the current request alive, but retain only the latest normalized
+		// demand. Geometry contributes to CameraRevision above, before this decision.
+		if (existing != state.Previews.end() && existing->Pending != 0 && existing->Producer == producer &&
+			existing->OrderedLayers == request.OrderedLayers && existing->EyePlayer == request.EyePlayer &&
+			existing->RetainedBodyPlayer == request.RetainedBodyPlayer &&
+			state.SameBindingProfile(existing->Binding, binding) &&
+			existing->Binding.Expected.SeamRevision == request.Key.SeamRevision &&
+			existing->Binding.ExpectedScope == request.Scope &&
+			existing->Binding.ExpectedProjection == request.Projection) {
+			if (state.SameRequestDemand(existing->PendingRequest, request) &&
+				state.SameBindingDemand(existing->Binding, binding)) {
+				// The request already in flight is the most recent demand, so a
+				// previously retained movement no longer needs a follow-up capture.
+				existing->Deferred.reset();
+			} else if (!existing->Deferred ||
+					   !state.SameRequestDemand(existing->Deferred->Normalized, request) ||
+					   !state.SameBindingDemand(existing->Deferred->Binding, binding)) {
+				existing->Deferred = Impl::Demand{
+					rawRequest, std::move(request), std::move(binding), now + state.Limits.Timeout
+				};
+			}
+			result.Status = PortalInboxStatus::Busy;
+			return result;
 		}
 		if (existing == state.Previews.end() && state.Previews.size() >= MAX_IMPORTED_PORTAL_IMAGES) {
 			result.Status = PortalInboxStatus::Full;
@@ -886,7 +937,8 @@ namespace engine::render {
 			.Pending = result.RequestId,
 			.PendingDeadline = now + state.Limits.Timeout,
 			.OfferedVersion = issued.Request.KnownImage,
-			.EyePlayer = issued.Request.EyePlayer
+			.EyePlayer = issued.Request.EyePlayer,
+			.PendingRequest = issued.Request
 		};
 		preview.OrderedLayers = issued.Request.OrderedLayers;
 		preview.RetainedBodyPlayer = issued.Request.RetainedBodyPlayer;
@@ -1299,6 +1351,33 @@ namespace engine::render {
 				 {imageVersion.ContentRevision, imageVersion.LightingRevision}}
 			);
 		}
+		// Dispatch after reply processing so the completed preview has released its
+		// pending slot. Retain the entries while collecting, since Issue can replace
+		// previews and therefore invalidate a range-for reference.
+		struct DeferredIssue {
+			world::PresentationAddress Producer;
+			Impl::Demand Demand;
+		};
+		std::vector<DeferredIssue> deferred;
+		for (const auto &preview : state.Previews) {
+			if (preview.Pending != 0 || !preview.Deferred || now >= preview.Deferred->Deadline ||
+				(state.Delivery == PortalImageSourceDelivery::CapturePayloads && preview.PayloadReady))
+				continue;
+			deferred.push_back({preview.Producer, *preview.Deferred});
+		}
+		for (const auto &next : deferred) {
+			const PortalRuntimeIssue issued =
+				Issue(next.Producer, next.Demand.Request, next.Demand.Binding, now);
+			if (issued.Status == PortalInboxStatus::Issued || issued.Status == PortalInboxStatus::Full ||
+				issued.Transport == world::PresentationStatus::Full)
+				continue;
+			auto preview =
+				std::find_if(state.Previews.begin(), state.Previews.end(), [&](const Impl::Preview &entry) {
+					return entry.Producer == next.Producer &&
+						   entry.Binding.Portal == next.Demand.Binding.Portal && entry.Pending == 0;
+				});
+			if (preview != state.Previews.end()) preview->Deferred.reset();
+		}
 		return completions;
 	}
 	std::optional<world::PresentationMessage> PortalImageSource::TakeShadowReply() {
@@ -1328,6 +1407,8 @@ namespace engine::render {
 				return entry.Binding.Portal.Text() == portal && entry.PayloadReady && entry.Pending == 0;
 			});
 		if (preview == state.Previews.end()) return {};
+		const world::PresentationAddress producer = preview->Producer;
+		const std::optional<Impl::Demand> deferred = preview->Deferred;
 		auto tree = state.Inbox.TakeTree(Borrow(state.Replies), Borrow(preview->Producer), portal, now);
 		if (!tree) {
 			auto layers =
@@ -1351,17 +1432,34 @@ namespace engine::render {
 				);
 			}
 		}
-		state.Previews.erase(preview);
-		if (tree) {
-			if (!ValidPortalCaptureTree(*tree)) return {};
-			for (const auto &node : tree->Nodes) {
-				const auto &producer = node.Producer;
-				if (!state.EndpointCurrent(
-						{producer.World, producer.Channel, producer.Session, producer.Generation}
-					))
-					return {};
+		if (!tree) {
+			state.Previews.erase(preview);
+			return {};
+		}
+		if (!ValidPortalCaptureTree(*tree)) {
+			state.Previews.erase(preview);
+			return {};
+		}
+		for (const auto &node : tree->Nodes) {
+			const auto &nodeProducer = node.Producer;
+			if (!state.EndpointCurrent(
+					{nodeProducer.World, nodeProducer.Channel, nodeProducer.Session, nodeProducer.Generation}
+				)) {
+				state.Previews.erase(preview);
+				return {};
 			}
 		}
+		if (!deferred || now >= deferred->Deadline) {
+			state.Previews.erase(preview);
+			return tree;
+		}
+		preview->PayloadReady = false;
+		const PortalRuntimeIssue issued = Issue(producer, deferred->Request, deferred->Binding, now);
+		if (issued.Status == PortalInboxStatus::Issued || issued.Status == PortalInboxStatus::Full ||
+			issued.Transport == world::PresentationStatus::Full)
+			return tree;
+		preview->Deferred.reset();
+		state.Previews.erase(preview);
 		return tree;
 	}
 	bool PortalImageSource::HasPendingUploads() const {
@@ -1504,6 +1602,7 @@ namespace engine::render {
 			State->Inbox.CancelRequest(preview.Pending);
 			preview.Pending = 0;
 			preview.OfferedVersion.reset();
+			preview.Deferred.reset();
 		}
 	}
 
