@@ -108,11 +108,8 @@ TEST_CASE("a missing selection falls back to Default PBR", "[client][pipeline]")
 
 namespace {
 	// The default document with a `raytrace` node inserted after the linear
-	// depth it reads, wired the way the catalogue entry asks and writing a
-	// sampled colour image. This is what the Studio's graph editor produces when
-	// somebody drops the catalogue's "Ray trace" box into a working PBR
-	// pipeline - a per-view pass among the other per-view passes, so what the
-	// renderer refuses is the *kind* rather than the placement.
+	// depth it reads. Its storage target matches the compute node contract, so
+	// this checks profile installation can admit the built-in screen-space pass.
 	engine::graph::PipelineDocument RaytracedDocument() {
 		using engine::graph::Edit;
 		using engine::graph::EditKind;
@@ -138,7 +135,7 @@ namespace {
 				Edit traced;
 				traced.Kind = EditKind::AddResource;
 				traced.Name = Name("traced");
-				traced.Resource = engine::graph::ResourceKind::Colour;
+				traced.Resource = engine::graph::ResourceKind::Storage;
 				traced.Format = engine::graph::ResourceFormat::RGBA16F;
 				record(std::move(traced));
 
@@ -168,36 +165,25 @@ namespace {
 	}
 }
 
-TEST_CASE("a raytrace node is refused by the backend and the profile falls back", "[client][pipeline]") {
-	// **The catalogue sells a pass the backend does not run.** `raytrace` is a
-	// registered `NodeKindSpec`, so the Studio's editor offers it and a saved
-	// document holding one round-trips - but `BackendNodes()` in the renderer
-	// has no executor for the kind, so the graph must be refused whole rather
-	// than drawn with a silently missing pass. This pins where portal scenes
-	// stand under raytracing today: there is no executable raytraced lighting
-	// path for them to disagree with, and a world that saved one draws through
-	// the default raster graph, portal lighting included.
+TEST_CASE("a raytrace node installs through the screen-space compute backend", "[client][pipeline]") {
 	const engine::graph::PipelineDocument document = RaytracedDocument();
 
-	// The document itself is legal: it replays into a graph. The refusal has
-	// to come from the renderer, or the editor could never author the kind the
-	// roadmap's raytrace port will eventually implement.
+	// The document is legal and its kind has a compute handler. Device-free
+	// installation proves saved profiles no longer fall back because the handler
+	// table lacks the node.
 	engine::graph::RenderGraph graph;
 	Name offender;
 	REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
 
 	Renderer renderer;
-	CHECK_FALSE(renderer.SetPipeline(Name("raytraced"), graph));
-	CHECK(renderer.Pipelines().empty());
+	CHECK(renderer.SetPipeline(Name("raytraced"), graph));
+	CHECK(renderer.Pipelines() == std::vector<Name>{Name("raytraced")});
 
-	// A world whose saved profile traces still gets a frame: the install walks
-	// past the refused candidate to the stock document.
+	// A selected saved profile keeps its authored screen-space tracing pass.
 	PipelineSet profiles;
 	REQUIRE(profiles.Set(Name("Raytraced"), document));
 	REQUIRE(profiles.Set(Name("Default PBR"), engine::graph::DefaultPbrDocument()));
 
-	CHECK(
-		client::InstallRenderingProfiles(profiles, renderer, 7, Name("Raytraced")) == Name("Default PBR#7")
-	);
-	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#7")});
+	CHECK(client::InstallRenderingProfiles(profiles, renderer, 7, Name("Raytraced")) == Name("Raytraced#7"));
+	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Raytraced#7"), Name("raytraced")});
 }

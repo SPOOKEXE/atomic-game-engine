@@ -1,0 +1,19 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, r16f) uniform writeonly image2D factors;
+layout(set = 2, binding = 0, std140) uniform Pass {
+	mat4 vp;
+	mat4 ivp;
+	vec4 target;
+	vec4 view;
+	uvec4 features;
+} pass;
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, ivec2(pass.target.xy)))) return;
+	vec2 uv = (vec2(pixel) + 0.5) * pass.target.zw;
+	float centreWeight = 1.0 - min(length(uv - 0.5) * 1.41421356, 1.0);
+	float factor = mix(1.0, 8.0, centreWeight);
+	imageStore(factors, pixel, vec4(factor));
+}

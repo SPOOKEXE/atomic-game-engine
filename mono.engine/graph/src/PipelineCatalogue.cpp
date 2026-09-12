@@ -386,6 +386,7 @@ namespace engine::graph {
 				 "portal-overlay",
 				 "mirror-overlay",
 				 "transparent",
+				 "mix",
 				 "blit",
 				 "raster",
 				 "dispatch",
@@ -395,7 +396,11 @@ namespace engine::graph {
 				 "shadow-capture",
 				 "overlay",
 				 "interface",
-				 "output-image"}
+				 "output-image",
+				 "tessellate",
+				 "global-illumination",
+				 "raytrace",
+				 "pathtrace"}
 			);
 			spec.Repeatable = Named(
 				spec.Kind,
@@ -869,9 +874,11 @@ namespace engine::graph {
 			  {"normal", K::Texture, LDR, true, "World normals and material tags."},
 			  {"material", K::Texture, RGBA8, true, "Roughness, to pick which pixels trace."},
 			  {"indirect", K::Texture, RGBA16, false, "Optional indirect-light estimate."}},
-			 {{"reflection", K::Colour, RGBA16, true, "Screen-space reflected radiance."}},
+			 {{"reflection", K::Storage, RGBA16, true, "Screen-space reflected radiance."}},
 			 "Marches low-roughness screen-space rays through the current depth and radiance. "
-			 "It is not hardware ray tracing and has no off-screen hit guarantee."},
+			 "It is not hardware ray tracing and has no off-screen hit guarantee.",
+			 false,
+			 "raytrace.comp"},
 
 			{"tessellate",
 			 "Adaptive tessellation",
@@ -879,9 +886,10 @@ namespace engine::graph {
 			 S::View,
 			 {{"instances", K::Buffer, F::R8, true, "LOD-selected source instances."},
 			  {"camera", K::Camera, F::R8, true, "The projection that sets edge density."}},
-			 {{"instances", K::Buffer, F::R8, true, "Instances with tessellation factors."}},
-			 "Declares per-instance subdivision factors from projected edge size before geometry draws. "
-			 "A device backend has not implemented the pass yet."},
+			 {{"factors", K::Storage, F::R16F, true, "Screen-space tessellation factor field."}},
+			 "Builds a projected edge-density field for adaptive tessellation before geometry draws.",
+			 false,
+			 "tessellate.comp"},
 
 			{"global-illumination",
 			 "Global illumination",
@@ -892,10 +900,11 @@ namespace engine::graph {
 			  {"material", K::Texture, RGBA8, true, "Surface roughness and metalness."},
 			  {"depth", K::Texture, R32, true, "Linear view depth."},
 			  {"occlusion", K::Texture, F::R8, false, "Ambient visibility, when available."}},
-			 {{"indirect", K::Colour, RGBA16, true, "Estimated indirect radiance."}},
-			 "Declares one-bounce indirect radiance from the visible G-buffer, composed with direct "
-			 "lighting. "
-			 "A device backend has not implemented the pass yet."},
+			 {{"indirect", K::Storage, RGBA16, true, "Estimated indirect radiance."}},
+			 "Estimates one-bounce indirect radiance from the visible G-buffer, composed with direct "
+			 "lighting.",
+			 false,
+			 "global-illumination.comp"},
 
 			{"pathtrace",
 			 "Path trace",
@@ -909,9 +918,11 @@ namespace engine::graph {
 			  {"material", K::Texture, RGBA8, true, "Visible surface material."},
 			  {"depth", K::Texture, R32, true, "Visible hit distance."},
 			  {"indirect", K::Texture, RGBA16, false, "Optional one-bounce guide."}},
-			 {{"radiance", K::Colour, RGBA16, true, "Progressive path-traced radiance estimate."}},
-			 "A progressive transport pass with explicit scene and G-buffer inputs. A backend must provide "
-			 "its acceleration structure and accumulation policy before this node can run."},
+			 {{"radiance", K::Storage, RGBA16, true, "One-sample screen-space transport estimate."}},
+			 "Builds a bounded, stochastic one-bounce estimate from the visible G-buffer. It has no "
+			 "accumulation, acceleration structure, or off-screen hits.",
+			 false,
+			 "pathtrace.comp"},
 
 			{"fog",
 			 "Volumetric fog",

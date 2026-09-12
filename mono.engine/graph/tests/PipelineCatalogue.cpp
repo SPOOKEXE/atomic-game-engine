@@ -207,7 +207,7 @@ TEST_CASE("the default PBR frame's kinds and material ports are registered", "[g
 }
 
 TEST_CASE(
-	"hard-render nodes declare executable contracts without claiming a backend", "[graph][catalogue][tracing]"
+	"hard-render nodes declare compute contracts and renderer backends", "[graph][catalogue][tracing]"
 ) {
 	Kinds();
 	for (const char *name : {"tessellate", "global-illumination", "raytrace", "pathtrace"}) {
@@ -215,7 +215,10 @@ TEST_CASE(
 		REQUIRE(spec != nullptr);
 		CHECK(spec->Queue == engine::graph::ExecutionQueue::Compute);
 		CHECK(spec->Needs.Compute);
-		CHECK_FALSE(spec->BuiltInBackend);
+		CHECK(spec->BuiltInBackend);
+		REQUIRE(spec->Outputs.size() == 1);
+		CHECK(spec->Outputs.front().Kind == engine::graph::ResourceKind::Storage);
+		CHECK(spec->DefaultShader == std::string(name) + ".comp");
 	}
 	for (const char *name : {"global-illumination", "raytrace", "pathtrace"}) {
 		REQUIRE(NodeCatalogue::Find(Name(name)) != nullptr);

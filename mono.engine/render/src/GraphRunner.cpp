@@ -6,9 +6,9 @@
 
 namespace engine::render {
 	namespace {
-		// The catalogue currently has 33 built-in handlers. Three spare slots keep
+		// The catalogue currently has 38 built-in handlers. Two spare slots keep
 		// the common custom-node case in the same allocation.
-		constexpr size_t BUILT_IN_NODE_CAPACITY = 36;
+		constexpr size_t BUILT_IN_NODE_CAPACITY = 40;
 	}
 
 	NodeTable::NodeTable() {

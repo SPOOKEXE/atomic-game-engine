@@ -1159,9 +1159,9 @@ namespace engine::graph {
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F, true);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, true);
 		resource("scene-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F, true);
-		resource("tessellated-instances", ResourceKind::Buffer, ResourceFormat::R8);
-		resource("indirect", ResourceKind::Colour, ResourceFormat::RGBA16F);
-		resource("reflections", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("tessellated-factors", ResourceKind::Storage, ResourceFormat::R16F);
+		resource("indirect", ResourceKind::Storage, ResourceFormat::RGBA16F);
+		resource("reflections", ResourceKind::Storage, ResourceFormat::RGBA16F);
 		resource("combined-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("display", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
@@ -1169,7 +1169,7 @@ namespace engine::graph {
 		node("adaptive-tessellation", "tessellate");
 		edge(EditKind::Reads, "coarse-instances", "instances");
 		edge(EditKind::Reads, "camera", "camera");
-		edge(EditKind::Writes, "tessellated-instances", "instances");
+		edge(EditKind::Writes, "tessellated-factors", "factors");
 		document.Record({.Kind = EditKind::Set, .Key = core::Name("target-pixels"), .Value = "12"});
 		node("indirect-light", "global-illumination");
 		for (const auto &[source, port] : std::array{
@@ -1225,7 +1225,7 @@ namespace engine::graph {
 				pathtrace.Record({
 					.Kind = EditKind::AddResource,
 					.Name = core::Name("path-radiance"),
-					.Resource = ResourceKind::Colour,
+					.Resource = ResourceKind::Storage,
 					.Format = ResourceFormat::RGBA16F,
 				});
 				pathtrace.Record({
@@ -1237,7 +1237,7 @@ namespace engine::graph {
 				for (const auto &[source, port] : std::array{
 						 std::pair{"camera", "camera"},
 						 std::pair{"visible-entities", "entities"},
-						 std::pair{"tessellated-instances", "instances"},
+						 std::pair{"coarse-instances", "instances"},
 						 std::pair{"albedo", "albedo"},
 						 std::pair{"normal", "normal"},
 						 std::pair{"material", "material"},

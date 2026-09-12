@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <string>
 #include <thread>
 #include <vector>
@@ -95,6 +96,20 @@ TEST_CASE("the default PBR graph compiles into the graph backend", "[render][gra
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("Default PBR#1"), DefaultGraph()));
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
+}
+
+TEST_CASE("hard render demo graphs install compute handlers", "[render][graph][hard-render]") {
+	for (const auto &[name, document] : std::array{
+			 std::pair{Name("Raytrace Demo"), engine::graph::RaytraceDemoDocument()},
+			 std::pair{Name("Pathtrace Demo"), engine::graph::PathtraceDemoDocument()},
+		 }) {
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+
+		Renderer renderer;
+		CHECK(renderer.SetPipeline(name, graph));
+	}
 }
 
 TEST_CASE(

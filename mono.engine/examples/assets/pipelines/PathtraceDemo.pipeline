@@ -7,15 +7,15 @@ resource "material" colour RGBA8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient 
 resource "linear-depth" colour R32F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "occlusion" colour R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "scene-radiance" colour RGBA16F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
-resource "tessellated-instances" buffer R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
-resource "indirect" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "tessellated-factors" storage R16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "indirect" storage RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "combined-radiance" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "display" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "scene-image" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 node "adaptive-tessellation" "tessellate" view no
 reads "coarse-instances" "instances"
 reads "camera" "camera"
-writes "tessellated-instances" "instances"
+writes "tessellated-factors" "factors"
 set "target-pixels" "12"
 node "indirect-light" "global-illumination" view no
 reads "albedo" "albedo"
@@ -25,11 +25,11 @@ reads "linear-depth" "depth"
 reads "occlusion" "occlusion"
 writes "indirect" "indirect"
 resource "visible-entities" entities R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
-resource "path-radiance" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "path-radiance" storage RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 node "progressive-pathtrace" "pathtrace" view no
 reads "camera" "camera"
 reads "visible-entities" "entities"
-reads "tessellated-instances" "instances"
+reads "coarse-instances" "instances"
 reads "albedo" "albedo"
 reads "normal" "normal"
 reads "material" "material"

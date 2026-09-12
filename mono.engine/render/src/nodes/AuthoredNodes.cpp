@@ -234,11 +234,11 @@ namespace engine::render {
 			return true;
 		};
 		frameNodes.Set(core::Name("raster"), rasterHandler);
-		for (const char *kind : {"fxaa", "taa", "smaa-edges", "smaa-blend", "smaa-resolve"}) {
+		for (const char *kind : {"fxaa", "taa", "smaa-edges", "smaa-blend", "smaa-resolve", "mix"}) {
 			frameNodes.Set(core::Name(kind), rasterHandler);
 		}
 
-		frameNodes.Set(core::Name("dispatch"), [this](const graph::RunContext &context) {
+		const NodeHandler dispatchHandler = [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
@@ -478,6 +478,10 @@ namespace engine::render {
 				mainGpuWorkRecorded = true;
 			}
 			return true;
-		});
+		};
+		frameNodes.Set(core::Name("dispatch"), dispatchHandler);
+		for (const char *kind : {"tessellate", "global-illumination", "raytrace", "pathtrace"}) {
+			frameNodes.Set(core::Name(kind), dispatchHandler);
+		}
 	}
 }
