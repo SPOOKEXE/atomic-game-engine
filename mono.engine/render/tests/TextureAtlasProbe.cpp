@@ -48,6 +48,40 @@ TEST_CASE("atlas planner keeps a sixteen-source 4k page disjoint", "[render][tex
 	}
 }
 
+TEST_CASE("four sequential atlas pages account for sixteen 4k source uploads", "[render][texture-atlas]") {
+	constexpr uint32_t SOURCES_PER_PAGE = 4;
+	constexpr uint32_t PAGE_COUNT = 4;
+	uint64_t pages = 0;
+	uint64_t uploads = 0;
+	uint64_t warmRequests = 0;
+
+	for (uint32_t page = 0; page < PAGE_COUNT; page++) {
+		engine::render::TextureAtlasResidency atlas(
+			engine::render::PlanTextureAtlas(SOURCES_PER_PAGE, 4096)
+		);
+		for (uint32_t source = 0; source < SOURCES_PER_PAGE; source++) {
+			const auto request = atlas.Request(source);
+			REQUIRE(request.Valid());
+			CHECK(request.Upload);
+			if (request.AllocatePage) {
+				atlas.PageAllocated(request.Page);
+				pages++;
+			}
+			atlas.Copied(source);
+			uploads++;
+		}
+		for (uint32_t source = 0; source < SOURCES_PER_PAGE; source++) {
+			const auto request = atlas.Request(source);
+			CHECK_FALSE(request.Upload);
+			warmRequests++;
+		}
+	}
+
+	CHECK(pages == PAGE_COUNT);
+	CHECK(uploads == uint64_t(SOURCES_PER_PAGE) * PAGE_COUNT);
+	CHECK(warmRequests == uint64_t(SOURCES_PER_PAGE) * PAGE_COUNT);
+}
+
 TEST_CASE("atlas plan refuses empty and overflowing layouts", "[render][texture-atlas]") {
 	CHECK_FALSE(engine::render::PlanTextureAtlas(0, 4096).Valid());
 	CHECK_FALSE(engine::render::PlanTextureAtlas(4, 0).Valid());

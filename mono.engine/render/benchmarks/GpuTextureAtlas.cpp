@@ -1,9 +1,10 @@
 // A release-only, headless device measurement for the texture-atlas decision.
 //
 // This deliberately bypasses TextureTable: the table's 512 MiB content ceiling
-// is production policy, while the experiment needs to compare the same four
-// 4096-square payloads as four resources and as one 8192-square renderer-owned
-// page. No result here changes content packing or residency defaults.
+// is production policy, while the experiment compares sixteen 4096-square
+// payloads as standalone resources and 8192-square renderer-owned pages. The
+// four pages run sequentially, so the experiment stays practical on modest
+// devices. No result here changes content packing or residency defaults.
 
 #include "GpuHeap.hpp"
 #include "TextureAtlasProbe.hpp"
@@ -32,11 +33,12 @@ TEST_SUITE_ID("engine.render.bench.gpu-texture-atlas")
 
 namespace {
 
-	// Four 4k sources are a 256 MiB payload. Each layout also holds one upload
-	// staging copy, so this keeps its largest simultaneous working set at 512 MiB
-	// on modest devices. Wider page packing is covered without a device in
-	// TextureAtlasProbe; this device case proves one capacity-equivalent page.
+	// Each page has a 256 MiB source payload and one 256 MiB staging copy. Four
+	// pages therefore exercise sixteen 4k sources, while sequential execution
+	// keeps the largest simultaneous working set at 512 MiB on modest devices.
 	constexpr uint32_t SOURCE_COUNT = 4;
+	constexpr uint32_t PAGE_COUNT = 4;
+	constexpr uint32_t TOTAL_SOURCE_COUNT = SOURCE_COUNT * PAGE_COUNT;
 	constexpr uint32_t SOURCE_EXTENT = 4096;
 	constexpr uint64_t SOURCE_BYTES = uint64_t(SOURCE_EXTENT) * SOURCE_EXTENT * 4;
 
@@ -44,6 +46,8 @@ namespace {
 
 	struct Report {
 		const char *Name = "";
+		uint32_t Pages = 0;
+		uint32_t Sources = 0;
 		bool Timestamps = false;
 		uint64_t CpuRecordingNanoseconds = 0;
 		uint64_t GpuNanoseconds = 0;
@@ -57,6 +61,12 @@ namespace {
 		engine::render::GpuMemoryStatistics Before;
 		engine::render::GpuMemoryStatistics Resident;
 		engine::render::GpuMemoryStatistics Released;
+		uint64_t PeakResidentLiveBytes = 0;
+		uint64_t PeakResidentTextureBytes = 0;
+		uint64_t PeakResidentTransferBytes = 0;
+		uint64_t TextureAllocations = 0;
+		uint64_t TransferAllocations = 0;
+		uint64_t ReleasedBytes = 0;
 	};
 
 	std::optional<Report> StandaloneReport;
@@ -70,7 +80,8 @@ namespace {
 		for (const std::optional<Report> &stored : {StandaloneReport, AtlasReport}) {
 			if (!stored) continue;
 			const Report &report = *stored;
-			std::cout << "atlas-report layout=" << report.Name << " sources=" << SOURCE_COUNT
+			std::cout << "atlas-report layout=" << report.Name << " pages=" << report.Pages
+					  << " sources=" << report.Sources
 					  << " extent=" << SOURCE_EXTENT << " cpu_record_ns=" << report.CpuRecordingNanoseconds
 					  << " gpu_ns=";
 			if (report.Timestamps) {
@@ -83,16 +94,12 @@ namespace {
 				<< " transfer_ops=" << report.TransferOperations
 				<< " page_allocations=" << report.PageAllocations << " copy_calls=" << report.CopyCalls
 				<< " cache_hits=" << report.CacheHits << " cache_misses=" << report.CacheMisses
-				<< " resident_live_bytes=" << Delta(report.Resident.LiveBytes, report.Before.LiveBytes)
-				<< " resident_texture_bytes="
-				<< Delta(report.Resident.TextureBytes, report.Before.TextureBytes)
-				<< " resident_transfer_bytes="
-				<< Delta(report.Resident.TransferBufferBytes, report.Before.TransferBufferBytes)
-				<< " texture_allocations="
-				<< Delta(report.Resident.TextureAllocations, report.Before.TextureAllocations)
-				<< " transfer_allocations="
-				<< Delta(report.Resident.TransferBufferAllocations, report.Before.TransferBufferAllocations)
-				<< " released_bytes=" << Delta(report.Released.ReleasedBytes, report.Before.ReleasedBytes)
+				<< " page_peak_live_bytes=" << report.PeakResidentLiveBytes
+				<< " page_peak_texture_bytes=" << report.PeakResidentTextureBytes
+				<< " page_peak_transfer_bytes=" << report.PeakResidentTransferBytes
+				<< " texture_allocations=" << report.TextureAllocations
+				<< " transfer_allocations=" << report.TransferAllocations
+				<< " released_bytes=" << report.ReleasedBytes
 				<< '\n';
 		}
 	}
@@ -137,7 +144,10 @@ namespace {
 	}
 
 	void ValidateAtlasSamples(
-		SDL_GPUDevice *device, SDL_GPUTexture *atlas, const engine::render::TextureAtlasPlan &plan
+		SDL_GPUDevice *device,
+		SDL_GPUTexture *atlas,
+		const engine::render::TextureAtlasPlan &plan,
+		uint32_t sourceBase
 	) {
 		constexpr uint32_t SAMPLES_PER_SOURCE = 4;
 		const uint32_t sampleCount = SOURCE_COUNT * SAMPLES_PER_SOURCE;
@@ -204,7 +214,7 @@ namespace {
 		const auto *pixels = static_cast<const uint8_t *>(SDL_MapGPUTransferBuffer(device, download, false));
 		if (pixels == nullptr) throw std::runtime_error("atlas sample map failed");
 		for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
-			const std::array<uint8_t, 4> expected = Pattern(index);
+			const std::array<uint8_t, 4> expected = Pattern(sourceBase + index);
 			for (uint32_t corner = 0; corner < SAMPLES_PER_SOURCE; corner++) {
 				const uint32_t sample = index * SAMPLES_PER_SOURCE + corner;
 				if (!std::equal(expected.begin(), expected.end(), pixels + sample * expected.size())) {
@@ -218,7 +228,7 @@ namespace {
 		engine::render::gpu::ReleaseTexture(device, target);
 	}
 
-	Report Measure(Layout layout) {
+	Report MeasurePage(Layout layout, uint32_t sourceBase) {
 		ArrangeReport();
 		if (!SDL_Init(SDL_INIT_VIDEO)) {
 			throw std::runtime_error(std::string("SDL video init failed: ") + SDL_GetError());
@@ -292,10 +302,12 @@ namespace {
 			}
 			if (atlas) {
 				for (uint32_t source = 0; source < SOURCE_COUNT; source++) {
-					FillPattern(static_cast<uint8_t *>(mapped) + source * SOURCE_BYTES, SOURCE_BYTES, source);
+					FillPattern(
+						static_cast<uint8_t *>(mapped) + source * SOURCE_BYTES, SOURCE_BYTES, sourceBase + source
+					);
 				}
 			} else {
-				FillPattern(mapped, SOURCE_BYTES, index);
+				FillPattern(mapped, SOURCE_BYTES, sourceBase + index);
 			}
 			SDL_UnmapGPUTransferBuffer(device, transfer);
 			transfers.push_back(transfer);
@@ -371,7 +383,7 @@ namespace {
 			throw std::runtime_error(std::string("copy fence wait failed: ") + SDL_GetError());
 		}
 		SDL_ReleaseGPUFence(device, fence);
-		if (atlas) ValidateAtlasSamples(device, textures.front(), plan);
+		if (atlas) ValidateAtlasSamples(device, textures.front(), plan, sourceBase);
 		double times[engine::render::VulkanTimestamps::MARKS]{};
 		uint32_t count = 0;
 		if (!timestamps.Collect(slot, times, count) || opened >= count || closed >= count) {
@@ -422,7 +434,51 @@ namespace {
 		ReleaseTransfers(device, transfers);
 		ReleaseTextures(device, textures);
 		report.Released = renderer.MemoryStatistics();
+		report.Pages = 1;
+		report.Sources = SOURCE_COUNT;
+		report.PeakResidentLiveBytes = Delta(report.Resident.LiveBytes, report.Before.LiveBytes);
+		report.PeakResidentTextureBytes = Delta(report.Resident.TextureBytes, report.Before.TextureBytes);
+		report.PeakResidentTransferBytes =
+			Delta(report.Resident.TransferBufferBytes, report.Before.TransferBufferBytes);
+		report.TextureAllocations = Delta(report.Resident.TextureAllocations, report.Before.TextureAllocations);
+		report.TransferAllocations =
+			Delta(report.Resident.TransferBufferAllocations, report.Before.TransferBufferAllocations);
+		report.ReleasedBytes = Delta(report.Released.ReleasedBytes, report.Before.ReleasedBytes);
 		return report;
+	}
+
+	Report Measure(Layout layout) {
+		Report total;
+		for (uint32_t page = 0; page < PAGE_COUNT; page++) {
+			const Report pageReport = MeasurePage(layout, page * SOURCE_COUNT);
+			if (page == 0) {
+				total.Name = pageReport.Name;
+				total.Timestamps = pageReport.Timestamps;
+			}
+			total.Pages += pageReport.Pages;
+			total.Sources += pageReport.Sources;
+			total.CpuRecordingNanoseconds += pageReport.CpuRecordingNanoseconds;
+			total.GpuNanoseconds += pageReport.GpuNanoseconds;
+			total.UploadBytes += pageReport.UploadBytes;
+			total.UploadOperations += pageReport.UploadOperations;
+			total.TransferOperations += pageReport.TransferOperations;
+			total.PageAllocations += pageReport.PageAllocations;
+			total.CopyCalls += pageReport.CopyCalls;
+			total.CacheHits += pageReport.CacheHits;
+			total.CacheMisses += pageReport.CacheMisses;
+			total.PeakResidentLiveBytes = std::max(total.PeakResidentLiveBytes, pageReport.PeakResidentLiveBytes);
+			total.PeakResidentTextureBytes =
+			std::max(total.PeakResidentTextureBytes, pageReport.PeakResidentTextureBytes);
+			total.PeakResidentTransferBytes =
+			std::max(total.PeakResidentTransferBytes, pageReport.PeakResidentTransferBytes);
+			total.TextureAllocations += pageReport.TextureAllocations;
+			total.TransferAllocations += pageReport.TransferAllocations;
+			total.ReleasedBytes += pageReport.ReleasedBytes;
+		}
+		if (total.Sources != TOTAL_SOURCE_COUNT || total.Pages != PAGE_COUNT) {
+			throw std::runtime_error("4k atlas sweep did not measure every page");
+		}
+		return total;
 	}
 
 	void Store(Layout layout, Report report) {
@@ -435,10 +491,10 @@ namespace {
 	}
 }
 
-BENCH("GPU upload | four 4096x4096 RGBA8 standalone textures", 1) {
+BENCH("GPU upload | sixteen 4096x4096 RGBA8 standalone textures across four sequential pages", 1) {
 	Store(Layout::Standalone, Measure(Layout::Standalone));
 }
 
-BENCH("GPU upload | four 4096x4096 RGBA8 cells in one atlas", 1) {
+BENCH("GPU upload | sixteen 4096x4096 RGBA8 cells across four sequential atlas pages", 1) {
 	Store(Layout::Atlas, Measure(Layout::Atlas));
 }
