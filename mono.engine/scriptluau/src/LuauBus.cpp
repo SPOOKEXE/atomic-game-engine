@@ -224,16 +224,18 @@ namespace engine::script {
 			out.Boolean = lua_toboolean(state, index) != 0;
 			return true;
 		}
-		if (lua_isnumber(state, index)) {
-			out = ScriptValue{ValueTag::Number};
-			out.Number = lua_tonumber(state, index);
-			return true;
-		}
-		if (lua_isstring(state, index)) {
+		// lua_isstring also accepts numbers. Preserve a script's explicit string
+		// so stable ids and uint64 decimal values do not cross as doubles.
+		if (lua_type(state, index) == LUA_TSTRING) {
 			size_t length = 0;
 			const char *text = lua_tolstring(state, index, &length);
 			out = ScriptValue{ValueTag::String};
 			out.Text.assign(text, length);
+			return true;
+		}
+		if (lua_isnumber(state, index)) {
+			out = ScriptValue{ValueTag::Number};
+			out.Number = lua_tonumber(state, index);
 			return true;
 		}
 

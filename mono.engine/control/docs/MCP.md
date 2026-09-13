@@ -24,3 +24,4 @@
 | metrics_read | Read all counters, gauges and histograms optionally prefixed. | prefix string |
 | test_run | Start test suites non‑blocking; returns handle. | all bool, verbose bool |
 | test_result | Get status/result of a `test_run`. | none |
+| get_event_narratives | Read bounded script-declared event narratives for one scene. | instance_id, empty options object |

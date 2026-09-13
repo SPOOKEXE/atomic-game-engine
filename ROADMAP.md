@@ -84,7 +84,7 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records.
 - [x] define camera intrinsics, both extrinsic transform directions, near/far planes, requested resolution, crop, units and coordinate conventions. The authored camera record names its sources and reports exact render projection, lens distortion and temporal jitter as unavailable until a capture resolves them.
 - [_] describe render-graph passes and resources with budgets and dependencies, without inventing ground truth.
-- [_] emit structured event narratives with time, knowledge, belief and provenance fields.
+- [x] emit structured event narratives with time, knowledge, belief and provenance fields.
 - [_] export rigs, skeletons, keypoints, skinning data and animation tracks.
 - [_] expose PBR albedo, roughness, metallic, emissive, specular, transmission, shading geometry, normals and UV maps.
 - [_] expose physics contacts, impulses, forces, torque, sleep, assemblies, joints, controller fields and units. `physics-observation/v1` now exports bounded identified contacts, event phases, completed-solver impulses with world-space basis, sleep, rigid assembly identity, authored joints, humanoid and input controller fields, units and explicit availability. Persistent force and torque accumulators remain unsupported.

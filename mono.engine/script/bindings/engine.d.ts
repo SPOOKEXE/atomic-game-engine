@@ -2613,6 +2613,8 @@ declare interface DataSceneService {
 	PollLifecycle(ticket: string): Record<string, unknown>;
 	ReleaseLifecycle(ticket: string): Record<string, unknown>;
 	GetResources(): Record<string, unknown>;
+	SetEventNarratives(bundle: unknown): Record<string, unknown>;
+	GetEventNarratives(): Record<string, unknown>;
 	Raycast(request: unknown): Record<string, unknown>;
 	OverlapAABB(request: unknown): Record<string, unknown>;
 	OverlapOBB(request: unknown): Record<string, unknown>;

@@ -33,6 +33,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
+#include <engine/script/EventNarratives.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -364,6 +365,36 @@ TEST_CASE("the data factory capture request runs without a heartbeat", "[example
 	std::string error;
 	REQUIRE(LoadScene(store, systems, ExamplePath("DataFactoryDemo.luau"), error, &runtime, &limits));
 	REQUIRE(runtime != nullptr);
+	const auto *narratives = store.Resource<engine::script::EventNarratives>();
+	REQUIRE(narratives != nullptr);
+	REQUIRE(narratives->Bundle.Tag == engine::script::ValueTag::Map);
+	const auto records = std::find_if(
+		narratives->Bundle.Entries.begin(), narratives->Bundle.Entries.end(), [](const auto &entry) {
+			return entry.first == "records";
+		}
+	);
+	REQUIRE(records != narratives->Bundle.Entries.end());
+	REQUIRE(records->second.Tag == engine::script::ValueTag::Array);
+	CHECK(records->second.Items.size() == 3);
+	const auto field = [](const engine::script::ScriptValue &value,
+						  std::string_view name) -> const engine::script::ScriptValue * {
+		for (const auto &[key, item] : value.Entries)
+			if (key == name) return &item;
+		return nullptr;
+	};
+	const auto *observation = field(records->second.Items[0], "temporal_reference");
+	const auto *hidden = field(records->second.Items[1], "knowledge_state");
+	const auto *prediction = field(records->second.Items[2], "temporal_reference");
+	const auto *hiddenEvidence = field(records->second.Items[1], "evidence_ids");
+	REQUIRE(observation != nullptr);
+	REQUIRE(hidden != nullptr);
+	REQUIRE(prediction != nullptr);
+	REQUIRE(hiddenEvidence != nullptr);
+	CHECK(observation->Text == "observation");
+	CHECK(hidden->Text == "simulator_hidden");
+	CHECK(hiddenEvidence->Tag == engine::script::ValueTag::Array);
+	CHECK(hiddenEvidence->Items.empty());
+	CHECK(prediction->Text == "prediction");
 	const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
 	REQUIRE(driver != nullptr);
 	engine::script::HostValue snapshot(engine::script::HostTag::String);

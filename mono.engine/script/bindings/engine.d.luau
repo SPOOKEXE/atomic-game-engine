@@ -2981,6 +2981,8 @@ declare extern type DataSceneService with
 	function PollLifecycle(self, ticket: string): any
 	function ReleaseLifecycle(self, ticket: string): any
 	function GetResources(self): any
+	function SetEventNarratives(self, bundle: any): any
+	function GetEventNarratives(self): any
 	function Raycast(self, request: any): any
 	function OverlapAABB(self, request: any): any
 	function OverlapOBB(self, request: any): any

@@ -18,6 +18,7 @@
 #include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/DataSceneService.hpp>
+#include <engine/script/EventNarratives.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceSurface.hpp>
 
@@ -169,6 +170,259 @@ namespace engine::script {
 			if (text.empty() || text.size() > 20 || text.find('\0') != std::string_view::npos) return false;
 			const auto converted = std::from_chars(text.data(), text.data() + text.size(), out);
 			return converted.ec == std::errc{} && converted.ptr == text.data() + text.size();
+		}
+
+		constexpr size_t MAX_EVENT_NARRATIVE_STRING_BYTES = 4'096;
+		constexpr size_t MAX_EVENT_NARRATIVE_IDS = 64;
+		constexpr size_t MAX_EVENT_NARRATIVE_TRANSPORT_BYTES = 64u * 1024u;
+
+		bool JsonStringBytes(std::string_view value, size_t &bytes) {
+			if (bytes > MAX_EVENT_NARRATIVE_TRANSPORT_BYTES - 2) return false;
+			bytes += 2;
+			for (const unsigned char character : value) {
+				const size_t added = character < 0x20 ? 6 : (character == '"' || character == '\\' ? 2 : 1);
+				if (bytes > MAX_EVENT_NARRATIVE_TRANSPORT_BYTES - added) return false;
+				bytes += added;
+			}
+			return true;
+		}
+
+		bool JsonBytes(const ScriptValue &value, size_t &bytes) {
+			auto add = [&bytes](size_t amount) {
+				if (bytes > MAX_EVENT_NARRATIVE_TRANSPORT_BYTES - amount) return false;
+				bytes += amount;
+				return true;
+			};
+			switch (value.Tag) {
+			case ValueTag::Nil:
+				return add(4);
+			case ValueTag::False:
+			case ValueTag::True:
+				return add(5);
+			case ValueTag::Number:
+				return add(32);
+			case ValueTag::String:
+				return JsonStringBytes(value.Text, bytes);
+			case ValueTag::Array:
+				if (!add(2)) return false;
+				for (size_t index = 0; index < value.Items.size(); index++)
+					if ((index != 0 && !add(1)) || !JsonBytes(value.Items[index], bytes)) return false;
+				return true;
+			case ValueTag::Map:
+				if (!add(2)) return false;
+				for (size_t index = 0; index < value.Entries.size(); index++)
+					if ((index != 0 && !add(1)) || !JsonStringBytes(value.Entries[index].first, bytes) ||
+						!add(1) || !JsonBytes(value.Entries[index].second, bytes))
+						return false;
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		bool EventNarrativeTime(const ScriptValue &record, std::string_view name, uint64_t &out) {
+			const ScriptValue *field = Field(record, name);
+			if (field == nullptr || field->Tag != ValueTag::String || field->Text.empty() ||
+				field->Text.size() > 20 || field->Text.find('\0') != std::string::npos)
+				return false;
+			uint64_t value = 0;
+			for (const char character : field->Text) {
+				if (character < '0' || character > '9') return false;
+				const uint64_t digit = static_cast<uint64_t>(character - '0');
+				if (value > (std::numeric_limits<uint64_t>::max() - digit) / 10) return false;
+				value = value * 10 + digit;
+			}
+			out = value;
+			return true;
+		}
+
+		bool EventNarrativeState(std::string_view value) {
+			return value == "observed" || value == "known" || value == "hidden" ||
+				   value == "simulator_hidden" || value == "inferred" || value == "generated" ||
+				   value == "user_specified" || value == "script_declared" || value == "unknown" ||
+				   value == "unavailable";
+		}
+
+		bool EventNarrativeKind(std::string_view value) {
+			return value == "observation" || value == "flashback" || value == "prediction";
+		}
+
+		bool
+		EventNarrativeIds(const ScriptValue &record, std::string_view name, std::vector<std::string> &out) {
+			const ScriptValue *field = Field(record, name);
+			if (field == nullptr ||
+				(field->Tag != ValueTag::Array && !(field->Tag == ValueTag::Map && field->Entries.empty())) ||
+				field->Items.size() > MAX_EVENT_NARRATIVE_IDS)
+				return false;
+			std::unordered_set<std::string> unique;
+			out.clear();
+			out.reserve(field->Items.size());
+			for (const ScriptValue &item : field->Items) {
+				if (item.Tag != ValueTag::String || item.Text.empty() ||
+					item.Text.size() > MAX_DATA_SCENE_ID_BYTES || item.Text.find('\0') != std::string::npos ||
+					!unique.insert(item.Text).second)
+					return false;
+				out.push_back(item.Text);
+			}
+			std::sort(out.begin(), out.end());
+			return true;
+		}
+
+		bool EventNarrativeConfidence(
+			const ScriptValue &record, std::string_view name, double &out, bool &present
+		) {
+			const ScriptValue *field = Field(record, name);
+			present = field != nullptr && field->Tag != ValueTag::Nil;
+			if (!present) return true;
+			if (field->Tag != ValueTag::Number || !std::isfinite(field->Number) || field->Number < 0.0 ||
+				field->Number > 1.0)
+				return false;
+			out = field->Number;
+			return true;
+		}
+
+		DataSceneResult InvalidEventNarratives(std::string_view reason) {
+			return {
+				"invalid_argument",
+				Map({{"status", String("invalid_event_narratives")}, {"reason", String(reason)}})
+			};
+		}
+
+		DataSceneResult ValidateEventNarratives(const ScriptValue &bundle, ScriptValue &canonical) {
+			if (!HasOnlyFields(bundle, {"version", "records"}))
+				return InvalidEventNarratives("invalid_bundle_fields");
+			const ScriptValue *version = Field(bundle, "version");
+			const ScriptValue *records = Field(bundle, "records");
+			if (version == nullptr || version->Tag != ValueTag::Number ||
+				version->Number != EVENT_NARRATIVE_SCHEMA_VERSION || records == nullptr ||
+				(records->Tag != ValueTag::Array &&
+				 !(records->Tag == ValueTag::Map && records->Entries.empty())) ||
+				records->Items.size() > MAX_EVENT_NARRATIVES)
+				return InvalidEventNarratives("invalid_bundle");
+
+			std::vector<ScriptValue> output;
+			std::vector<std::vector<std::byte>> unique;
+			output.reserve(records->Items.size());
+			unique.reserve(records->Items.size());
+			for (const ScriptValue &record : records->Items) {
+				if (!HasOnlyFields(
+						record,
+						{"event_time_ns",
+						 "narration_time_ns",
+						 "subject_id",
+						 "speaker_id",
+						 "text",
+						 "knowledge_state",
+						 "belief",
+						 "certainty",
+						 "evidence_ids",
+						 "provenance_ids",
+						 "temporal_reference",
+						 "unavailable_reason"}
+					))
+					return InvalidEventNarratives("invalid_record_fields");
+				uint64_t eventTime = 0;
+				uint64_t narrationTime = 0;
+				std::string subject;
+				std::string speaker;
+				std::string text;
+				std::string knowledge;
+				std::string temporal;
+				std::vector<std::string> evidence;
+				std::vector<std::string> provenance;
+				double belief = 0.0;
+				double certainty = 0.0;
+				bool hasBelief = false;
+				bool hasCertainty = false;
+				if (!EventNarrativeTime(record, "event_time_ns", eventTime) ||
+					!EventNarrativeTime(record, "narration_time_ns", narrationTime))
+					return InvalidEventNarratives("invalid_time");
+				if (!BoundedStringField(record, "subject_id", MAX_DATA_SCENE_ID_BYTES, subject) ||
+					!BoundedStringField(record, "speaker_id", MAX_DATA_SCENE_ID_BYTES, speaker) ||
+					!BoundedStringField(record, "text", MAX_EVENT_NARRATIVE_STRING_BYTES, text) ||
+					!BoundedStringField(record, "knowledge_state", 32, knowledge) ||
+					!BoundedStringField(record, "temporal_reference", 16, temporal) ||
+					!EventNarrativeState(knowledge) || !EventNarrativeKind(temporal))
+					return InvalidEventNarratives("invalid_text_or_kind");
+				if (!EventNarrativeIds(record, "evidence_ids", evidence) ||
+					!EventNarrativeIds(record, "provenance_ids", provenance) || provenance.empty())
+					return InvalidEventNarratives("invalid_ids");
+				if (!EventNarrativeConfidence(record, "belief", belief, hasBelief) ||
+					!EventNarrativeConfidence(record, "certainty", certainty, hasCertainty))
+					return InvalidEventNarratives("invalid_confidence");
+				const bool confident =
+					knowledge == "observed" || knowledge == "known" || knowledge == "inferred";
+				const bool evidenced = confident || knowledge == "generated" ||
+									   knowledge == "user_specified" || knowledge == "script_declared";
+				const bool hidden = knowledge == "hidden" || knowledge == "simulator_hidden" ||
+									knowledge == "unknown" || knowledge == "unavailable";
+				if ((confident && (!hasBelief || !hasCertainty)) ||
+					(!confident && (hasBelief || hasCertainty)) || (evidenced && evidence.empty()) ||
+					(hidden && !evidence.empty()) ||
+					((temporal == "prediction") ? eventTime < narrationTime : eventTime > narrationTime))
+					return InvalidEventNarratives("inconsistent_record");
+				const ScriptValue *reason = Field(record, "unavailable_reason");
+				std::string unavailable;
+				const bool hasReason = reason != nullptr && reason->Tag != ValueTag::Nil;
+				if (hasReason && (reason->Tag != ValueTag::String || reason->Text.empty() ||
+								  reason->Text.size() > MAX_EVENT_NARRATIVE_STRING_BYTES ||
+								  reason->Text.find('\0') != std::string::npos))
+					return InvalidEventNarratives("invalid_unavailable_reason");
+				if ((knowledge == "unavailable") != hasReason)
+					return InvalidEventNarratives("unavailable_reason_mismatch");
+				if (hasReason) unavailable = reason->Text;
+
+				ScriptValue item = Map({
+					{"event_time_ns", String(Decimal(eventTime))},
+					{"narration_time_ns", String(Decimal(narrationTime))},
+					{"subject_id", String(subject)},
+					{"speaker_id", String(speaker)},
+					{"text", String(text)},
+					{"knowledge_state", String(knowledge)},
+					{"belief", hasBelief ? Number(belief) : ScriptValue(ValueTag::Nil)},
+					{"certainty", hasCertainty ? Number(certainty) : ScriptValue(ValueTag::Nil)},
+				});
+				std::vector<ScriptValue> evidenceValues;
+				std::vector<ScriptValue> provenanceValues;
+				for (const std::string &id : evidence)
+					evidenceValues.push_back(String(id));
+				for (const std::string &id : provenance)
+					provenanceValues.push_back(String(id));
+				item.Entries.push_back({"evidence_ids", Array(std::move(evidenceValues))});
+				item.Entries.push_back({"provenance_ids", Array(std::move(provenanceValues))});
+				item.Entries.push_back({"temporal_reference", String(temporal)});
+				item.Entries.push_back(
+					{"unavailable_reason", hasReason ? String(unavailable) : ScriptValue(ValueTag::Nil)}
+				);
+				std::vector<std::byte> encoded;
+				ScriptValue encodedItem = item;
+				if (Encode(encodedItem, encoded) != CodecStatus::Ok ||
+					std::find(unique.begin(), unique.end(), encoded) != unique.end())
+					return InvalidEventNarratives("duplicate_or_oversized_record");
+				unique.push_back(std::move(encoded));
+				output.push_back(std::move(item));
+			}
+			canonical = Map(
+				{{"version", Number(EVENT_NARRATIVE_SCHEMA_VERSION)}, {"records", Array(std::move(output))}}
+			);
+			std::vector<std::byte> encoded;
+			ScriptValue checked = canonical;
+			if (Encode(checked, encoded) != CodecStatus::Ok)
+				return InvalidEventNarratives("payload_too_large");
+			ScriptValue response = canonical;
+			response.Entries.push_back({"status", String("ok")});
+			response.Entries.push_back({"schema_version", String("event-narrative/v1")});
+			size_t transportBytes = 0;
+			if (!JsonBytes(response, transportBytes))
+				return InvalidEventNarratives("transport_payload_too_large");
+			return {
+				"ok",
+				Map(
+					{{"status", String("ok")},
+					 {"schema_version", String("event-narrative/v1")},
+					 {"record_count", Number(records->Items.size())}}
+				)
+			};
 		}
 
 		bool VectorField(const ScriptValue &value, std::string_view name, core::Vector3 &out) {
@@ -1143,6 +1397,18 @@ namespace engine::script {
 		void ServiceResources(ScriptCall &call) {
 			call.ReturnValue(GetResources(call.World()).Value);
 		}
+		void ServiceSetEventNarratives(ScriptCall &call) {
+			ScriptValue bundle;
+			CodecStatus status = CodecStatus::Ok;
+			if (!call.ReadValue(0, bundle, status)) {
+				call.ReturnValue(InvalidEventNarratives("invalid_codec_value").Value);
+				return;
+			}
+			call.ReturnValue(SetEventNarratives(call.World(), bundle).Value);
+		}
+		void ServiceEventNarratives(ScriptCall &call) {
+			call.ReturnValue(GetEventNarratives(call.World()).Value);
+		}
 		void ServiceRaycast(ScriptCall &call) {
 			ScriptValue request;
 			CodecStatus status = CodecStatus::Ok;
@@ -1196,7 +1462,7 @@ namespace engine::script {
 			call.ReturnValue(OverlapOBB(call.World(), {frame->Frame, halfExtent}).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 18> DATA_SCENE_METHODS{{
+		constexpr std::array<ServiceMethod, 20> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
@@ -1212,6 +1478,8 @@ namespace engine::script {
 			{"PollLifecycle", ServicePollLifecycle},
 			{"ReleaseLifecycle", ServiceReleaseLifecycle},
 			{"GetResources", ServiceResources},
+			{"SetEventNarratives", ServiceSetEventNarratives},
+			{"GetEventNarratives", ServiceEventNarratives},
 			{"Raycast", ServiceRaycast},
 			{"OverlapAABB", ServiceAabb},
 			{"OverlapOBB", ServiceObb},
@@ -1230,6 +1498,10 @@ namespace engine::script {
 				{"camera_metadata", Boolean(true)},
 				{"camera_metadata_schema_version", String("camera-rendering-data/v1")},
 				{"physics_observation_schema_version", String("physics-observation/v1")},
+				{"event_narratives", Boolean(true)},
+				{"event_narrative_schema_version", String("event-narrative/v1")},
+				{"event_narratives_script_declared", Boolean(true)},
+				{"max_event_narratives", Number(MAX_EVENT_NARRATIVES)},
 				{"editable_image_rgba8", Boolean(true)},
 				{"spatial_queries", Boolean(true)},
 				{"spatial_query_kinds",
@@ -1563,6 +1835,41 @@ namespace engine::script {
 				{"reason", String("this service has no durable resource owner")},
 			})
 		};
+	}
+
+	DataSceneResult SetEventNarratives(ecs::Store &store, const ScriptValue &bundle) {
+		ScriptValue canonical;
+		DataSceneResult result = ValidateEventNarratives(bundle, canonical);
+		if (std::string_view(result.Status) != "ok") return result;
+		store.SetResource(EventNarratives{std::move(canonical)});
+		return result;
+	}
+
+	bool CanonicalEventNarratives(const ScriptValue &bundle, ScriptValue &canonical) {
+		return std::string_view(ValidateEventNarratives(bundle, canonical).Status) == "ok";
+	}
+
+	DataSceneResult GetEventNarratives(const ecs::Store &store) {
+		const auto *narratives = store.Resource<EventNarratives>();
+		if (narratives == nullptr)
+			return {
+				"unavailable",
+				Map({
+					{"status", String("unavailable")},
+					{"schema_version", String("event-narrative/v1")},
+					{"version", Number(EVENT_NARRATIVE_SCHEMA_VERSION)},
+					{"records", Array({})},
+					{"unavailable_reason", String("no_script_declared_narratives")},
+				})
+			};
+		ScriptValue result = narratives->Bundle;
+		ScriptValue canonical;
+		if (!CanonicalEventNarratives(result, canonical))
+			return {"invalid_data", Map({{"status", String("invalid_event_narratives")}})};
+		result = std::move(canonical);
+		result.Entries.push_back({"status", String("ok")});
+		result.Entries.push_back({"schema_version", String("event-narrative/v1")});
+		return {"ok", std::move(result)};
 	}
 
 	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request) {

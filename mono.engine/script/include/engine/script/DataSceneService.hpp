@@ -9,8 +9,10 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/EventNarratives.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string_view>
 
@@ -34,6 +36,7 @@ namespace engine::script {
 	inline constexpr std::string_view DATA_SCENE_ID_ATTRIBUTE = "DataFactoryId";
 	inline constexpr size_t MAX_DATA_SCENE_ENTITIES = 10'000;
 	inline constexpr size_t MAX_DATA_SCENE_ID_BYTES = 256;
+	inline constexpr size_t MAX_EVENT_NARRATIVES = 256;
 
 	// Typed query requests shared by scripts and thin control-surface adapters.
 	// Directions and rotations are normalized at this boundary before physics sees them.
@@ -59,6 +62,13 @@ namespace engine::script {
 	DataSceneResult
 	GetCaptureChannels(const ecs::Store &store, const std::shared_ptr<DataCaptureBridge> &bridge);
 	DataSceneResult GetResources(const ecs::Store &store);
+	// Validate and canonicalize a bundle before script, MCP, or snapshot code retains it.
+	// @param bundle Script-declared narrative data.
+	// @param canonical Receives the bounded canonical bundle on success.
+	// @return `true` when the bundle is valid for the current schema.
+	bool CanonicalEventNarratives(const ScriptValue &bundle, ScriptValue &canonical);
+	DataSceneResult SetEventNarratives(ecs::Store &store, const ScriptValue &bundle);
+	DataSceneResult GetEventNarratives(const ecs::Store &store);
 
 	// Query prepared collider geometry and return only stable authored identities.
 	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request);

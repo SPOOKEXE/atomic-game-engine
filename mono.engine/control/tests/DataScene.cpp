@@ -15,6 +15,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/EventNarratives.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -169,6 +170,63 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	const json malformed = Call(surface, "get_scene_snapshot", {{"instance_id", "scene"}}, failed);
 	CHECK(failed);
 	CHECK(malformed.contains("error"));
+}
+
+TEST_CASE("data-scene MCP exposes read-only script-declared event narratives", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "narratives");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	const json unavailableReply = json::parse(surface.Answer(
+		json{
+			{"jsonrpc", "2.0"},
+			{"id", 1},
+			{"method", "tools/call"},
+			{"params",
+			 {{"name", "get_event_narratives"},
+			  {"arguments", {{"instance_id", "narratives"}, {"options", json::object()}}}}}
+		}.dump()
+	));
+	const json &unavailableResult = unavailableReply.at("result");
+	CHECK_FALSE(unavailableResult.value("isError", true));
+	const json unavailable = json::parse(unavailableResult.at("content").at(0).at("text").get<std::string>());
+	CHECK(unavailable.at("status") == "unavailable");
+	CHECK(unavailable.at("version").is_number());
+	CHECK(unavailable.at("version").get<double>() == 1.0);
+	bool failed = false;
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		store.SetResource(engine::script::EventNarratives{engine::script::ScriptValue{}});
+	});
+	const json corrupt = Call(
+		surface, "get_event_narratives", {{"instance_id", "narratives"}, {"options", json::object()}}, failed
+	);
+	CHECK(failed);
+	CHECK(corrupt.at("status") == "invalid_event_narratives");
+
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::script::ScriptValue version(engine::script::ValueTag::Number);
+		version.Number = engine::script::EVENT_NARRATIVE_SCHEMA_VERSION;
+		engine::script::ScriptValue records(engine::script::ValueTag::Array);
+		engine::script::ScriptValue bundle(engine::script::ValueTag::Map);
+		bundle.Entries = {{"version", std::move(version)}, {"records", std::move(records)}};
+		REQUIRE(std::string_view(engine::script::SetEventNarratives(store, bundle).Status) == "ok");
+	});
+	const json narratives = Call(
+		surface, "get_event_narratives", {{"instance_id", "narratives"}, {"options", json::object()}}, failed
+	);
+	CHECK_FALSE(failed);
+	CHECK(narratives.at("status") == "ok");
+	CHECK(narratives.at("schema_version") == "event-narrative/v1");
+	CHECK(narratives.at("records") == json::array());
+
+	const json invalid = Call(
+		surface,
+		"get_event_narratives",
+		{{"instance_id", "narratives"}, {"options", {{"extra", true}}}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(invalid.contains("error"));
 }
 
 TEST_CASE("data-scene MCP snapshot refuses duplicate stable identifiers", "[control][datascene]") {

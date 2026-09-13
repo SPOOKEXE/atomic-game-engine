@@ -4,6 +4,8 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
+#include <engine/script/DataSceneService.hpp>
+#include <engine/script/EventNarratives.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -28,6 +30,33 @@ namespace engine::script {
 			auto *drivers = static_cast<DataCaptureDriver *>(destination);
 			for (size_t index = 0; index < count; index++)
 				drivers[index] = {};
+		}
+
+		void WriteEventNarratives(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *narratives = static_cast<const EventNarratives *>(source);
+			for (size_t index = 0; index < count; index++) {
+				ScriptValue bundle = narratives[index].Bundle;
+				std::vector<std::byte> bytes;
+				if (Encode(bundle, bytes) != CodecStatus::Ok) bytes.clear();
+				writer.WriteUInt32(static_cast<uint32_t>(bytes.size()));
+				writer.WriteRaw(bytes.data(), bytes.size());
+			}
+		}
+
+		void ReadEventNarratives(core::ByteReader &reader, void *destination, size_t count) {
+			auto *narratives = static_cast<EventNarratives *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				const uint32_t size = reader.ReadUInt32();
+				const auto bytes = reader.ReadRawView(size);
+				ScriptValue bundle;
+				ScriptValue canonical;
+				if (reader.Failed() || Decode(bytes, bundle) != CodecStatus::Ok ||
+					!CanonicalEventNarratives(bundle, canonical)) {
+					reader.Fail();
+					return;
+				}
+				narratives[index].Bundle = std::move(canonical);
+			}
 		}
 
 		// Written as text with a length, never as the object representation.
@@ -205,6 +234,9 @@ namespace engine::script {
 		ecs::Components::Register<ScriptClock>("script.ScriptClock");
 		ecs::Components::Register<DataCaptureDriver>(
 			"script.DataCaptureDriver", WriteTransientDataCaptureDriver, ReadTransientDataCaptureDriver
+		);
+		ecs::Components::Register<EventNarratives>(
+			"script.EventNarratives", WriteEventNarratives, ReadEventNarratives
 		);
 		RegisterTeleportRequestComponents();
 		RegisterPortalTransferComponents();

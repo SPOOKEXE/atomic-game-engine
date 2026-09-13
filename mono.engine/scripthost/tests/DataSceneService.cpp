@@ -11,6 +11,8 @@
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
+#include <engine/script/DataSceneService.hpp>
+#include <engine/script/EventNarratives.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -221,6 +223,113 @@ TEST_CASE("capture driver snapshots restore without a stale VM callback", "[scri
 	const auto *driver = restored.Resource<engine::script::DataCaptureDriver>();
 	REQUIRE(driver != nullptr);
 	CHECK_FALSE(driver->Callback.Valid());
+}
+
+TEST_CASE(
+	"event narrative snapshots round trip the default bundle and reject invalid bundles", "[scripting][data]"
+) {
+	engine::script::RegisterScriptComponents();
+	engine::ecs::Store source("event_narrative_snapshot_source");
+	const auto runtime = Runtime(source, engine::script::Language::Luau);
+	REQUIRE(runtime != nullptr);
+	Run(*runtime, R"(
+		local service = game:GetService("DataSceneService")
+		assert(service:SetEventNarratives({version=1, records={{event_time_ns="1", narration_time_ns="1", subject_id="fixture", speaker_id="script", text="saved", knowledge_state="script_declared", evidence_ids={"fixture"}, provenance_ids={"fixture"}, temporal_reference="observation"}}}).status == "ok")
+	)");
+	engine::core::ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	const std::vector<std::byte> valid(writer.Bytes().begin(), writer.Bytes().end());
+
+	engine::ecs::Store restored("event_narrative_snapshot_restored");
+	engine::core::ByteReader validReader(valid);
+	REQUIRE(restored.Load(validReader));
+	const auto *restoredNarratives = restored.Resource<engine::script::EventNarratives>();
+	REQUIRE(restoredNarratives != nullptr);
+	CHECK(restoredNarratives->Bundle.Tag == engine::script::ValueTag::Map);
+
+	engine::ecs::Store emptySource("event_narrative_empty_snapshot_source");
+	emptySource.SetResource(engine::script::EventNarratives{});
+	engine::core::ByteWriter emptyWriter;
+	REQUIRE(emptySource.Save(emptyWriter));
+	engine::ecs::Store emptyRestored("event_narrative_empty_snapshot_restored");
+	engine::core::ByteReader emptyReader(emptyWriter.Bytes());
+	REQUIRE(emptyRestored.Load(emptyReader));
+	const auto *emptyNarratives = emptyRestored.Resource<engine::script::EventNarratives>();
+	REQUIRE(emptyNarratives != nullptr);
+	engine::script::ScriptValue emptyCanonical;
+	CHECK(engine::script::CanonicalEventNarratives(emptyNarratives->Bundle, emptyCanonical));
+	CHECK(emptyCanonical.Entries.at(1).first == "records");
+	CHECK(emptyCanonical.Entries.at(1).second.Items.empty());
+
+	std::vector<std::byte> corrupt = valid;
+	corrupt.back() ^= std::byte{0xff};
+	engine::ecs::Store corruptStore("event_narrative_corrupt_snapshot");
+	engine::core::ByteReader corruptReader(corrupt);
+	CHECK_FALSE(corruptStore.Load(corruptReader));
+
+	engine::ecs::Store invalidSource("event_narrative_invalid_snapshot_source");
+	invalidSource.SetResource(engine::script::EventNarratives{engine::script::ScriptValue{}});
+	engine::core::ByteWriter invalidWriter;
+	REQUIRE(invalidSource.Save(invalidWriter));
+	engine::ecs::Store invalidStore("event_narrative_invalid_snapshot");
+	engine::core::ByteReader invalidReader(invalidWriter.Bytes());
+	CHECK_FALSE(invalidStore.Load(invalidReader));
+}
+
+TEST_CASE("DataSceneService keeps validated event narratives in both VMs", "[scripting][data]") {
+	for (const auto language : {engine::script::Language::Luau, engine::script::Language::JavaScript}) {
+		engine::scene::EnsureClassTree();
+		engine::ecs::Store store("event_narratives");
+		const auto runtime = Runtime(store, language);
+		REQUIRE(runtime != nullptr);
+		if (language == engine::script::Language::Luau)
+			Run(*runtime, R"(
+				local service = game:GetService("DataSceneService")
+				assert(service:GetEventNarratives().status == "unavailable")
+				local result = service:SetEventNarratives({version = 1, records = {
+					{event_time_ns="18446744073709551615", narration_time_ns="18446744073709551615", subject_id="crate", speaker_id="camera", text="seen", knowledge_state="observed", belief=1, certainty=1, evidence_ids={"capture/1"}, provenance_ids={"demo"}, temporal_reference="observation"},
+					{event_time_ns="3", narration_time_ns="4", subject_id="crate", speaker_id="sim", text="hidden", knowledge_state="simulator_hidden", evidence_ids={}, provenance_ids={"demo"}, temporal_reference="flashback"},
+					{event_time_ns="5", narration_time_ns="4", subject_id="crate", speaker_id="model", text="next", knowledge_state="inferred", belief=.8, certainty=.7, evidence_ids={"capture/1"}, provenance_ids={"demo"}, temporal_reference="prediction"},
+				}})
+				assert(result.status == "ok", result.reason)
+				local records = service:GetEventNarratives()
+				assert(records.status == "ok" and records.schema_version == "event-narrative/v1")
+				assert(records.records[1].event_time_ns == "18446744073709551615")
+				assert(records.records[2].belief == nil and #records.records[2].evidence_ids == 0)
+				assert(service:SetEventNarratives({version=1, records={{event_time_ns="1", narration_time_ns="1", subject_id="x", speaker_id="x", text="bad", knowledge_state="observed", evidence_ids={}, provenance_ids={"demo"}, temporal_reference="observation"}}}).status == "invalid_event_narratives")
+				assert(service:GetEventNarratives().records[1].text == "seen")
+				assert(service:SetEventNarratives({version=1, records={}}).status == "ok")
+				assert(#service:GetEventNarratives().records == 0)
+				local near = {}
+				for index = 1, 3 do
+					near[index] = {event_time_ns="1", narration_time_ns="1", subject_id="fixture/" .. index, speaker_id="script", text=string.rep("\1", 2800), knowledge_state="script_declared", evidence_ids={"fixture"}, provenance_ids={"fixture"}, temporal_reference="observation"}
+				end
+				local nearResult = service:SetEventNarratives({version=1, records=near})
+				assert(nearResult.status == "ok", nearResult.reason)
+				assert(#service:GetEventNarratives().records == 3)
+				local oversized = {}
+				for index = 1, 16 do
+					oversized[index] = {event_time_ns="1", narration_time_ns="1", subject_id="fixture/" .. index, speaker_id="script", text=string.rep("\1", 4096), knowledge_state="script_declared", evidence_ids={"fixture"}, provenance_ids={"fixture"}, temporal_reference="observation"}
+				end
+				assert(service:SetEventNarratives({version=1, records=oversized}).status == "invalid_event_narratives")
+			)");
+		else
+			Run(*runtime, R"(
+				const service = game.GetService("DataSceneService");
+				if (service.GetEventNarratives().status !== "unavailable") throw new Error("initial state");
+				const result = service.SetEventNarratives({version: 1, records: [
+					{event_time_ns:"18446744073709551615", narration_time_ns:"18446744073709551615", subject_id:"crate", speaker_id:"camera", text:"seen", knowledge_state:"observed", belief:1, certainty:1, evidence_ids:["capture/1"], provenance_ids:["demo"], temporal_reference:"observation"},
+					{event_time_ns:"3", narration_time_ns:"4", subject_id:"crate", speaker_id:"sim", text:"hidden", knowledge_state:"simulator_hidden", evidence_ids:[], provenance_ids:["demo"], temporal_reference:"flashback"},
+					{event_time_ns:"5", narration_time_ns:"4", subject_id:"crate", speaker_id:"model", text:"next", knowledge_state:"inferred", belief:.8, certainty:.7, evidence_ids:["capture/1"], provenance_ids:["demo"], temporal_reference:"prediction"},
+				]});
+				if (result.status !== "ok") throw new Error("set");
+				const records = service.GetEventNarratives();
+				if (records.status !== "ok" || records.schema_version !== "event-narrative/v1" || records.records[0].event_time_ns !== "18446744073709551615" || records.records[1].belief !== null || records.records[1].evidence_ids.length !== 0) throw new Error("stored");
+				if (service.SetEventNarratives({version:1, records:[{event_time_ns:"1", narration_time_ns:"1", subject_id:"x", speaker_id:"x", text:"bad", knowledge_state:"observed", evidence_ids:[], provenance_ids:["demo"], temporal_reference:"observation"}]}).status !== "invalid_event_narratives") throw new Error("reject");
+				if (service.GetEventNarratives().records[0].text !== "seen") throw new Error("atomic");
+				if (service.SetEventNarratives({version:1, records:[]}).status !== "ok" || service.GetEventNarratives().records.length !== 0) throw new Error("clear");
+			)");
+	}
 }
 
 TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[scripting][data]") {

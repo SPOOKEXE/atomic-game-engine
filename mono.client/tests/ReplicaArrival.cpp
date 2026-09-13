@@ -343,13 +343,16 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// Capture and teleport callbacks are retained VM handles that a replica
 		// cannot reconstruct. The teleport outbox is unsent client traffic that
 		// the authority must never echo into another client.
+		// Event narratives are world-local data-factory records with no replication
+		// row. A capture consumer asks its own world for them, so sending the
+		// authority's declared observations to every gameplay replica is wrong.
 		// Portal contact requests and native input queues belong to the authority's tick exchange.
 		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
 							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
 							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
 							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache" ||
 							  name == "script.ScriptClock" || name == "script.DataCaptureDriver" ||
-							  name == "script.TeleportRequestHandler" ||
+							  name == "script.EventNarratives" || name == "script.TeleportRequestHandler" ||
 							  name == "script.TeleportRequestOutbox" || name == "script.PortalTransfers" ||
 							  name == "script.PortalContactRequests" || name == "script.PortalPlayerInput";
 

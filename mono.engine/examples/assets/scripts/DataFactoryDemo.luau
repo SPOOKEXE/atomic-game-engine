@@ -51,6 +51,46 @@ local snapshot = DataSceneService:GetSceneSnapshot(128)
 local cameraMetadata = DataSceneService:GetCameraRenderingData(camera)
 local imageMetadata = DataSceneService:GetEditableImageMetadata(image)
 local captureChannels = DataSceneService:GetCaptureChannels()
+local narratives = DataSceneService:SetEventNarratives({
+	version = 1,
+	records = {
+		{
+			event_time_ns = "0",
+			narration_time_ns = "0",
+			subject_id = "data-factory-demo/narrative-fixture",
+			speaker_id = "data-factory-demo/script",
+			text = "This authored fixture declares an observation-shaped narrative record.",
+			knowledge_state = "script_declared",
+			evidence_ids = {"script/DataFactoryDemo.luau"},
+			provenance_ids = {"script/DataFactoryDemo.luau"},
+			temporal_reference = "observation",
+		},
+		{
+			event_time_ns = "0",
+			narration_time_ns = "0",
+			subject_id = "data-factory-demo/narrative-fixture",
+			speaker_id = "data-factory-demo/script",
+			text = "This authored fixture marks its hidden fact without exposing evidence.",
+			knowledge_state = "simulator_hidden",
+			evidence_ids = {},
+			provenance_ids = {"script/DataFactoryDemo.luau"},
+			temporal_reference = "observation",
+		},
+		{
+			event_time_ns = "0",
+			narration_time_ns = "0",
+			subject_id = "data-factory-demo/narrative-fixture",
+			speaker_id = "data-factory-demo/script",
+			text = "This authored fixture declares a prediction-shaped narrative record.",
+			knowledge_state = "script_declared",
+			evidence_ids = {"script/DataFactoryDemo.luau"},
+			provenance_ids = {"script/DataFactoryDemo.luau"},
+			temporal_reference = "prediction",
+		},
+	},
+})
+assert(narratives.status == "ok")
+local eventNarratives = DataSceneService:GetEventNarratives()
 
 print(
 	"DataFactory capabilities",
@@ -96,6 +136,7 @@ print(
 print("DataFactory image", imageMetadata.width, imageMetadata.height, imageMetadata.format, imageMetadata.row_order)
 print("DataFactory image bytes", buffer.len(pixels))
 print("DataFactory capture", captureChannels.status, captureChannels.reason)
+print("DataFactory narratives", eventNarratives.schema_version, #eventNarratives.records, eventNarratives.records[1].event_time_ns)
 
 -- The host-owned evaluation path supplies the barriered snapshot ID and ticket
 -- explicitly. Each host call does one request or poll, so it needs no scheduler

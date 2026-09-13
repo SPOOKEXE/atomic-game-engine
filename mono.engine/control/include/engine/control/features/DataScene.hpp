@@ -302,6 +302,36 @@ namespace engine::control {
 			};
 		Add(observation("get_capture_channels", "Capture channel capability metadata for one scene.", true));
 		Add(observation("get_resources", "Durable resource metadata for one scene.", false));
+		Add(Tool{
+			"get_event_narratives",
+			"Script-declared, bounded event narratives for one scene.",
+			schema,
+			[worlds](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure)) return nullptr;
+				if (!arguments.contains("options") || !arguments["options"].is_object() ||
+					!arguments["options"].empty()) {
+					failure = "options must be an empty object";
+					return nullptr;
+				}
+				const world::WorldId id = World(*worlds, arguments, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					const script::DataSceneResult narratives = script::GetEventNarratives(store);
+					if (std::strcmp(narratives.Status, "unavailable") != 0) {
+						out = Result(narratives, failure);
+						return;
+					}
+					size_t bytes = 0;
+					if (!JsonValue(narratives.Value, out, 0, bytes) ||
+						out.dump().size() > MAXIMUM_RESULT_BYTES)
+						failure = "data-scene result exceeds the safe response limit";
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
 		auto querySchema = [](json properties, json required) {
 			return [properties = std::move(properties), required = std::move(required)] {
 				return json{
