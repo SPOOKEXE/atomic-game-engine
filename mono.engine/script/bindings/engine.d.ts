@@ -2606,7 +2606,7 @@ declare interface ComputeService {
 declare interface DataSceneService {
 	GetCapabilities(): Record<string, unknown>;
 	GetSceneSnapshot(limit?: number): Record<string, unknown>;
-	GetCameraRenderingData(camera: Instance): Record<string, unknown>;
+	GetCameraRenderingData(camera: Instance, objectLimit?: number): Record<string, unknown>;
 	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
 	GetCaptureChannels(): Record<string, unknown>;
 	Capture(request: unknown): Record<string, unknown>;

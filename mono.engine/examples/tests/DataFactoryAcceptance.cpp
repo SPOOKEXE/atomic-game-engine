@@ -68,13 +68,37 @@ namespace {
 	}
 }
 
+TEST_CASE("data factory starter scene exposes three bounded spatial observations", "[data][acceptance]") {
+	StagedAssets assets;
+	Store store("data-factory-starter");
+	engine::ecs::Scheduler scheduler;
+	PrepareDataFactoryWorld(store);
+	std::string error;
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryDemo.luau"), error));
+	const Entity camera = DemoChild(store, "DataFactoryCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	const engine::script::DataSceneResult rendering =
+		engine::script::GetCameraRenderingData(store, camera, 16);
+	REQUIRE(rendering.Status == std::string_view("ok"));
+	const auto *observations = Field(rendering.Value, "object_observations");
+	REQUIRE(observations != nullptr);
+	REQUIRE(observations->Items.size() == 3);
+	CHECK(Field(observations->Items[0], "id")->Text == "data-factory-demo/behind");
+	CHECK(Field(observations->Items[1], "id")->Text == "data-factory-demo/partly-offscreen");
+	CHECK(Field(observations->Items[2], "id")->Text == "data-factory-demo/visible");
+	const auto *occlusion = Field(observations->Items[2], "occlusion");
+	REQUIRE(occlusion != nullptr);
+	CHECK(Field(*occlusion, "available")->Boolean == false);
+	CHECK(Field(*occlusion, "reason")->Text == "requires_capture_visibility_evidence");
+}
+
 TEST_CASE("data factory image labels stay aligned with identified snapshots", "[data][acceptance]") {
 	StagedAssets assets;
 	Store store("data-factory-alignment");
 	engine::ecs::Scheduler scheduler;
 	PrepareDataFactoryWorld(store);
 	std::string error;
-	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryDemo.luau"), error));
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryAdvancedDemo.luau"), error));
 	engine::physics::SyncBroadphase(store);
 
 	const Entity label = DemoChild(store, "DataFactoryLabel");
@@ -173,7 +197,7 @@ TEST_CASE("data factory refuses malformed image data and duplicate identities", 
 	engine::ecs::Scheduler scheduler;
 	PrepareDataFactoryWorld(store);
 	std::string error;
-	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryDemo.luau"), error));
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryAdvancedDemo.luau"), error));
 
 	const Entity label = DemoChild(store, "DataFactoryLabel");
 	REQUIRE(label != engine::ecs::NULL_ENTITY);

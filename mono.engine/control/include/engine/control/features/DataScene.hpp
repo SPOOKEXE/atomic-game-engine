@@ -223,10 +223,20 @@ namespace engine::control {
 					failure = "options must be an object";
 					return nullptr;
 				}
-				if (!Only(arguments["options"], {"camera_id"}, failure)) return nullptr;
+				if (!Only(arguments["options"], {"camera_id", "object_limit"}, failure)) return nullptr;
 				const world::WorldId id = World(*worlds, arguments, failure);
 				if (!failure.empty()) return nullptr;
 				std::string wanted;
+				size_t objectLimit = 0;
+				if (arguments["options"].contains("object_limit")) {
+					const json &value = arguments["options"]["object_limit"];
+					if (!value.is_number_unsigned() ||
+						value.get<uint64_t>() > script::MAX_CAMERA_OBJECT_OBSERVATIONS) {
+						failure = "options.object_limit must be an integer from 0 through 64";
+						return nullptr;
+					}
+					objectLimit = value.get<size_t>();
+				}
 				if (arguments["options"].contains("camera_id")) {
 					if (!arguments["options"]["camera_id"].is_string()) {
 						failure = "options.camera_id must be a string";
@@ -260,7 +270,7 @@ namespace engine::control {
 												 : "no camera has that stable authored id";
 						return;
 					}
-					out = Result(script::GetCameraRenderingData(store, camera), failure);
+					out = Result(script::GetCameraRenderingData(store, camera, objectLimit), failure);
 				});
 				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
 				return out;

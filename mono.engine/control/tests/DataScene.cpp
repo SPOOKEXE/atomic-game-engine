@@ -21,8 +21,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <numbers>
 
 TEST_SUITE_ID("engine.control.datascene")
 TEST_DEPENDS("engine.scripthost.datasceneservice")
@@ -93,13 +95,28 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 		store.Set<Transform>(camera, Transform{cameraFrame});
 		Identify(store, camera, "fixture/camera");
 		store.SetResource(ActiveCamera{camera});
+		const Entity visible = store.Create();
+		store.Set<InstanceName>(visible, InstanceName{Name("Visible")});
+		store.Set<Transform>(visible, Transform{CFrame{Vector3{0.0f, 0.0f, -4.0f}}});
+		store.Set<engine::scene::Bounds>(visible, {{0.5f, 0.5f, 0.5f}});
+		Identify(store, visible, "fixture/object-visible");
+		const Entity behind = store.Create();
+		store.Set<InstanceName>(behind, InstanceName{Name("Behind")});
+		store.Set<Transform>(behind, Transform{CFrame{Vector3{0.0f, 0.0f, 4.0f}}});
+		store.Set<engine::scene::Bounds>(behind, {{0.5f, 0.5f, 0.5f}});
+		Identify(store, behind, "fixture/object-behind");
+		const Entity inside = store.Create();
+		store.Set<InstanceName>(inside, InstanceName{Name("Inside")});
+		store.Set<Transform>(inside, Transform{CFrame{Vector3{1.0f, 2.0f, 3.0f}}});
+		store.Set<engine::scene::Bounds>(inside, {{1.0f, 1.0f, 1.0f}});
+		Identify(store, inside, "fixture/object-inside");
 	});
 
 	bool failed = false;
 	const json camera = Call(
 		surface,
 		"get_camera_rendering_data",
-		{{"instance_id", "scene"}, {"options", {{"camera_id", "fixture/camera"}}}},
+		{{"instance_id", "scene"}, {"options", {{"camera_id", "fixture/camera"}, {"object_limit", 3}}}},
 		failed
 	);
 	INFO(camera.dump());
@@ -115,6 +132,30 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	CHECK(camera.at("requested_height") == 360);
 	CHECK(camera.at("requested_resolution_available") == true);
 	CHECK(camera.at("projection_available") == false);
+	const json &observations = camera.at("object_observations");
+	REQUIRE(observations.size() == 3);
+	CHECK(observations[0].at("id") == "fixture/object-behind");
+	CHECK(observations[1].at("id") == "fixture/object-inside");
+	CHECK(observations[2].at("id") == "fixture/object-visible");
+	CHECK(observations[0].at("projected_bounds").at("available") == false);
+	CHECK(observations[0].at("projected_bounds").at("xyxy_pixels").is_null());
+	CHECK(observations[0].at("projected_bounds").at("clipped_to_image").is_null());
+	CHECK(observations[0].at("authored_visible").at("value").is_null());
+	CHECK(observations[1].at("projected_bounds").at("available") == true);
+	CHECK(observations[1].at("projected_bounds").at("clipped_to_image") == true);
+	CHECK(observations[2].at("projected_bounds").at("available") == true);
+	CHECK(observations[2].at("projected_bounds").at("xyxy_pixels").size() == 4);
+	CHECK(observations[2].at("frustum_intersection").at("value") == true);
+	CHECK(observations[2].at("occlusion").at("available") == false);
+	CHECK(observations[2].at("occlusion").at("reason") == "requires_capture_visibility_evidence");
+	const json calibrationOnly = Call(
+		surface,
+		"get_camera_rendering_data",
+		{{"instance_id", "scene"}, {"options", {{"camera_id", "fixture/camera"}}}},
+		failed
+	);
+	CHECK_FALSE(failed);
+	CHECK(calibrationOnly.at("object_observations").empty());
 	CHECK(camera.at("crop").at("convention") == "normalized_full_view_left_top_width_height");
 	CHECK(camera.at("lens_distortion").at("available") == false);
 	CHECK(camera.at("temporal_jitter").at("available") == false);
@@ -132,6 +173,15 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	CHECK(snapshot.at("physics_observations").at("impulses").at("available") == false);
 	CHECK(snapshot.at("contacts").empty());
 	CHECK(snapshot.at("contact_events").empty());
+	const json &snapshotEntities = snapshot.at("entities");
+	const auto visibleRecord =
+		std::find_if(snapshotEntities.begin(), snapshotEntities.end(), [](const json &record) {
+			return record.at("id") == "fixture/object-visible";
+		});
+	REQUIRE(visibleRecord != snapshotEntities.end());
+	CHECK(visibleRecord->at("size_metres") == json{{"x", 1.0}, {"y", 1.0}, {"z", 1.0}});
+	CHECK(visibleRecord->at("world_from_object").at("position") == json::array({0.0, 0.0, -4.0}));
+	CHECK(visibleRecord->at("parent_from_object").at("available") == false);
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		const auto *active = store.Resource<ActiveCamera>();
@@ -170,6 +220,225 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	const json malformed = Call(surface, "get_scene_snapshot", {{"instance_id", "scene"}}, failed);
 	CHECK(failed);
 	CHECK(malformed.contains("error"));
+}
+
+TEST_CASE("camera object observations reject diagonal screen-bound false positives", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "diagonal");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		const Entity camera = store.Create();
+		store.Set<InstanceName>(camera, InstanceName{Name("Camera")});
+		Camera lens;
+		lens.FieldOfViewRadians = std::numbers::pi_v<float> / 2.0f;
+		lens.NearPlane = 0.1f;
+		lens.FarPlane = 10.0f;
+		lens.ImageWidth = 100;
+		lens.ImageHeight = 100;
+		store.Set<Camera>(camera, lens);
+		store.Set<Transform>(camera, Transform{});
+		Identify(store, camera, "fixture/diagonal-camera");
+		store.SetResource(ActiveCamera{camera});
+		const Entity thin = store.Create();
+		store.Set<InstanceName>(thin, InstanceName{Name("Thin")});
+		CFrame frame = CFrame::Angles(0.0f, 0.0f, -std::numbers::pi_v<float> / 4.0f);
+		frame.Position = {1.5f, 1.5f, -1.0f};
+		store.Set<Transform>(thin, Transform{frame});
+		store.Set<engine::scene::Bounds>(thin, {{1.4f, 0.01f, 0.001f}});
+		Identify(store, thin, "fixture/diagonal-thin");
+	});
+	bool failed = false;
+	const json result = Call(
+		surface,
+		"get_camera_rendering_data",
+		{{"instance_id", "diagonal"}, {"options", {{"object_limit", 1}}}},
+		failed
+	);
+	CHECK_FALSE(failed);
+	const json &observation = result.at("object_observations").at(0);
+	CHECK(observation.at("frustum_intersection").at("value") == false);
+	CHECK(observation.at("projected_bounds").at("available") == false);
+}
+
+TEST_CASE("data-scene refuses finite geometry whose derived corners overflow", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "overflow");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		const Entity camera = store.Create();
+		store.Set<Camera>(camera, Camera{});
+		store.Set<Transform>(camera, Transform{});
+		Identify(store, camera, "fixture/overflow-camera");
+		store.SetResource(ActiveCamera{camera});
+		const Entity object = store.CreateInstance(engine::scene::PartClass(), "Overflow");
+		Identify(store, object, "fixture/overflow");
+		store.Set<Transform>(
+			object, Transform{CFrame{Vector3{std::numeric_limits<float>::max(), 0.0f, 0.0f}}}
+		);
+		store.Set<engine::scene::Bounds>(object, {{std::numeric_limits<float>::max(), 1.0f, 1.0f}});
+	});
+	bool failed = false;
+	const json result = Call(
+		surface,
+		"get_camera_rendering_data",
+		{{"instance_id", "overflow"}, {"options", {{"object_limit", 1}}}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(result.at("status") == "invalid_spatial_data");
+}
+
+TEST_CASE(
+	"data-scene derives parent-from-object from translated rotated world frames", "[control][datascene]"
+) {
+	Universe universe;
+	const WorldId world = World(universe, "parent-frame");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		const Entity parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
+		const Entity child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		Identify(store, parent, "fixture/parent");
+		Identify(store, child, "fixture/child");
+		REQUIRE(store.SetParent(child, parent));
+		CFrame parentFrame = CFrame::Angles(0.0f, 0.0f, std::numbers::pi_v<float> / 2.0f);
+		parentFrame.Position = {3.0f, 4.0f, 0.0f};
+		const CFrame local{Vector3{2.0f, 0.0f, 0.0f}};
+		store.Set<Transform>(parent, Transform{parentFrame});
+		store.Set<Transform>(child, Transform{parentFrame * local});
+		store.Set<engine::scene::Bounds>(child, {{1.0f, 1.0f, 1.0f}});
+	});
+	bool failed = false;
+	const json snapshot = Call(
+		surface, "get_scene_snapshot", {{"instance_id", "parent-frame"}, {"options", json::object()}}, failed
+	);
+	CHECK_FALSE(failed);
+	const auto child =
+		std::find_if(snapshot.at("entities").begin(), snapshot.at("entities").end(), [](const json &row) {
+			return row.at("id") == "fixture/child";
+		});
+	REQUIRE(child != snapshot.at("entities").end());
+	CHECK(child->at("parent_from_object").at("available") == true);
+	CHECK(
+		std::abs(child->at("parent_from_object").at("frame").at("position").at(0).get<float>() - 2.0f) <
+		0.001f
+	);
+}
+
+TEST_CASE("rolled camera projects an object along its look vector", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "rolled-camera");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		const Entity camera = store.Create();
+		Camera lens;
+		lens.ImageWidth = 640;
+		lens.ImageHeight = 360;
+		store.Set<Camera>(camera, lens);
+		const CFrame cameraFrame = CFrame::Angles(0.0f, 0.0f, std::numbers::pi_v<float> / 4.0f);
+		store.Set<Transform>(camera, Transform{cameraFrame});
+		Identify(store, camera, "fixture/rolled-camera");
+		store.SetResource(ActiveCamera{camera});
+		const Entity object = store.CreateInstance(engine::scene::PartClass(), "Object");
+		Identify(store, object, "fixture/rolled-object");
+		CFrame objectFrame;
+		objectFrame.Position = cameraFrame.LookVector() * 4.0f + cameraFrame.RightVector() * 0.25f;
+		store.Set<Transform>(object, Transform{objectFrame});
+		store.Set<engine::scene::Bounds>(object, {{0.25f, 0.25f, 0.25f}});
+	});
+	bool failed = false;
+	const json result = Call(
+		surface,
+		"get_camera_rendering_data",
+		{{"instance_id", "rolled-camera"}, {"options", {{"object_limit", 1}}}},
+		failed
+	);
+	CHECK_FALSE(failed);
+	const json &observation = result.at("object_observations").at(0);
+	CHECK(observation.at("frustum_intersection").at("value") == true);
+	CHECK(observation.at("projected_bounds").at("available") == true);
+}
+
+TEST_CASE("camera projection keeps extreme finite depth denominators truthful", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "extreme-projection");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		const Entity camera = store.Create();
+		Camera lens;
+		lens.FieldOfViewRadians = 1.0f;
+		lens.NearPlane = 1.0f;
+		lens.FarPlane = std::numeric_limits<float>::max();
+		lens.ImageWidth = std::numeric_limits<uint32_t>::max();
+		lens.ImageHeight = 1;
+		store.Set<Camera>(camera, lens);
+		store.Set<Transform>(camera, Transform{});
+		Identify(store, camera, "fixture/extreme-camera");
+		store.SetResource(ActiveCamera{camera});
+		const Entity object = store.CreateInstance(engine::scene::PartClass(), "Object");
+		Identify(store, object, "fixture/extreme-object");
+		store.Set<Transform>(
+			object,
+			Transform{CFrame{Vector3{
+				std::numeric_limits<float>::max() / 4.0f, 0.0f, -std::numeric_limits<float>::max() / 2.0f
+			}}}
+		);
+		store.Set<engine::scene::Bounds>(object, {{1.0f, 1.0f, 1.0f}});
+	});
+	bool failed = false;
+	const json result = Call(
+		surface,
+		"get_camera_rendering_data",
+		{{"instance_id", "extreme-projection"}, {"options", {{"object_limit", 1}}}},
+		failed
+	);
+	CHECK_FALSE(failed);
+	const json &projected = result.at("object_observations").at(0).at("projected_bounds");
+	CHECK(projected.at("available") == false);
+	CHECK(projected.at("xyxy_pixels").is_null());
+}
+
+TEST_CASE("camera projection preserves a clipped UINT32_MAX right edge", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "wide-edge");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		const Entity camera = store.Create();
+		Camera lens;
+		lens.ImageWidth = std::numeric_limits<uint32_t>::max();
+		lens.ImageHeight = std::numeric_limits<uint32_t>::max();
+		store.Set<Camera>(camera, lens);
+		store.Set<Transform>(camera, Transform{});
+		Identify(store, camera, "fixture/wide-camera");
+		store.SetResource(ActiveCamera{camera});
+		const Entity object = store.CreateInstance(engine::scene::PartClass(), "Edge");
+		Identify(store, object, "fixture/wide-edge");
+		store.Set<Transform>(object, Transform{CFrame{Vector3{2.0f, 0.0f, -4.0f}}});
+		store.Set<engine::scene::Bounds>(object, {{2.0f, 1.0f, 1.0f}});
+	});
+	bool failed = false;
+	const json result = Call(
+		surface,
+		"get_camera_rendering_data",
+		{{"instance_id", "wide-edge"}, {"options", {{"object_limit", 1}}}},
+		failed
+	);
+	CHECK_FALSE(failed);
+	const json &bounds = result.at("object_observations").at(0).at("projected_bounds");
+	REQUIRE(bounds.at("available") == true);
+	CHECK(bounds.at("clipped_to_image") == true);
+	CHECK(bounds.at("xyxy_pixels").at(2).get<double>() <= std::numeric_limits<uint32_t>::max());
 }
 
 TEST_CASE("data-scene MCP exposes read-only script-declared event narratives", "[control][datascene]") {

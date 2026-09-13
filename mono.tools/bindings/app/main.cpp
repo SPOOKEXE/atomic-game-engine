@@ -1591,7 +1591,7 @@ end
 declare extern type DataSceneService with
 	function GetCapabilities(self): any
 	function GetSceneSnapshot(self, limit: number?): any
-	function GetCameraRenderingData(self, camera: Instance): any
+	function GetCameraRenderingData(self, camera: Instance, objectLimit: number?): any
 	function GetEditableImageMetadata(self, image: Instance): any
 	function GetCaptureChannels(self): any
 	function Capture(self, request: any): any
@@ -3441,7 +3441,7 @@ declare interface ComputeService {
 declare interface DataSceneService {
 	GetCapabilities(): Record<string, unknown>;
 	GetSceneSnapshot(limit?: number): Record<string, unknown>;
-	GetCameraRenderingData(camera: Instance): Record<string, unknown>;
+	GetCameraRenderingData(camera: Instance, objectLimit?: number): Record<string, unknown>;
 	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
 	GetCaptureChannels(): Record<string, unknown>;
 	Capture(request: unknown): Record<string, unknown>;

@@ -72,6 +72,252 @@ namespace engine::script {
 			return value;
 		}
 
+		bool Finite(const core::Vector3 &value) {
+			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
+		}
+		bool DataSceneUtf8(std::string_view value) {
+			for (size_t index = 0; index < value.size();) {
+				const uint8_t first = static_cast<uint8_t>(value[index++]);
+				if (first < 0x80) continue;
+				const unsigned extra = first >= 0xC2 && first <= 0xDF	? 1
+									   : first >= 0xE0 && first <= 0xEF ? 2
+									   : first >= 0xF0 && first <= 0xF4 ? 3
+																		: 4;
+				if (extra == 4 || index + extra > value.size()) return false;
+				uint32_t codepoint = first & ((1u << (7 - extra)) - 1u);
+				for (unsigned part = 0; part < extra; ++part) {
+					const uint8_t next = static_cast<uint8_t>(value[index++]);
+					if ((next & 0xC0u) != 0x80u) return false;
+					codepoint = (codepoint << 6u) | (next & 0x3Fu);
+				}
+				if ((extra == 1 && codepoint < 0x80) || (extra == 2 && codepoint < 0x800) ||
+					(extra == 3 && codepoint < 0x10000) || codepoint > 0x10FFFF ||
+					(codepoint >= 0xD800 && codepoint <= 0xDFFF))
+					return false;
+			}
+			return true;
+		}
+		bool Finite(const core::CFrame &value) {
+			const double length = std::hypot(
+				std::hypot(static_cast<double>(value.QuaternionX), value.QuaternionY),
+				std::hypot(static_cast<double>(value.QuaternionZ), value.QuaternionW)
+			);
+			return Finite(value.Position) && std::isfinite(length) && std::abs(length - 1.0) <= 0.001;
+		}
+
+		struct ProjectedBounds {
+			bool Available = false;
+			bool Intersects = false;
+			bool Clipped = false;
+			const char *Reason = "outside_camera_frustum";
+			double Left = 0.0;
+			double Top = 0.0;
+			double Right = 0.0;
+			double Bottom = 0.0;
+		};
+
+		ProjectedBounds ProjectBounds(
+			const core::CFrame &cameraFromWorld,
+			const scene::Camera &camera,
+			const scene::Transform &object,
+			const scene::Bounds &bounds
+		) {
+			ProjectedBounds result;
+			if (camera.ImageWidth == 0 || camera.ImageHeight == 0) {
+				result.Reason = "camera_has_no_explicit_image_size";
+				return result;
+			}
+			const double tangent = std::tan(static_cast<double>(camera.FieldOfViewRadians) * 0.5);
+			const double aspect = static_cast<double>(camera.ImageWidth) / camera.ImageHeight;
+			if (!Finite(object.Frame) || !std::isfinite(tangent) || tangent <= 0.0f ||
+				!Finite(bounds.HalfExtent) || bounds.HalfExtent.X < 0.0f || bounds.HalfExtent.Y < 0.0f ||
+				bounds.HalfExtent.Z < 0.0f) {
+				result.Reason = "invalid_authored_spatial_data";
+				return result;
+			}
+			std::array<core::Vector3, 8> points;
+			for (size_t index = 0; index < points.size(); ++index) {
+				const core::Vector3 local{
+					(index & 1) == 0 ? -bounds.HalfExtent.X : bounds.HalfExtent.X,
+					(index & 2) == 0 ? -bounds.HalfExtent.Y : bounds.HalfExtent.Y,
+					(index & 4) == 0 ? -bounds.HalfExtent.Z : bounds.HalfExtent.Z,
+				};
+				points[index] = cameraFromWorld.PointToWorldSpace(object.Frame.PointToWorldSpace(local));
+				if (!Finite(points[index])) {
+					result.Reason = "invalid_authored_spatial_data";
+					return result;
+				}
+			}
+			std::vector<core::Vector3> clipped;
+			const auto accept = [&](core::Vector3 point) {
+				const float depth = -point.Z;
+				if (depth < camera.NearPlane || depth > camera.FarPlane) return;
+				clipped.push_back(point);
+			};
+			for (const auto point : points)
+				accept(point);
+			constexpr std::array<std::array<size_t, 2>, 12> EDGES{{
+				{{0, 1}},
+				{{0, 2}},
+				{{0, 4}},
+				{{1, 3}},
+				{{1, 5}},
+				{{2, 3}},
+				{{2, 6}},
+				{{3, 7}},
+				{{4, 5}},
+				{{4, 6}},
+				{{5, 7}},
+				{{6, 7}},
+			}};
+			for (const auto edge : EDGES) {
+				core::Vector3 first = points[edge[0]];
+				core::Vector3 second = points[edge[1]];
+				float firstDepth = -first.Z;
+				float secondDepth = -second.Z;
+				const auto clip = [&](float plane, bool keepGreater) {
+					const bool firstInside = keepGreater ? firstDepth >= plane : firstDepth <= plane;
+					const bool secondInside = keepGreater ? secondDepth >= plane : secondDepth <= plane;
+					if (firstInside == secondInside) return firstInside;
+					const double denominator = static_cast<double>(secondDepth) - firstDepth;
+					const double fraction = (static_cast<double>(plane) - firstDepth) / denominator;
+					const auto lerp = [&](float left, float right) -> std::optional<float> {
+						const double value =
+							static_cast<double>(left) + (static_cast<double>(right) - left) * fraction;
+						if (!std::isfinite(value) || value < -std::numeric_limits<float>::max() ||
+							value > std::numeric_limits<float>::max())
+							return std::nullopt;
+						return static_cast<float>(value);
+					};
+					const auto x = lerp(first.X, second.X), y = lerp(first.Y, second.Y),
+							   z = lerp(first.Z, second.Z);
+					if (!std::isfinite(denominator) || denominator == 0.0 || !std::isfinite(fraction) || !x ||
+						!y || !z)
+						return false;
+					const core::Vector3 point{*x, *y, *z};
+					if (!firstInside)
+						first = point;
+					else
+						second = point;
+					firstDepth = -first.Z;
+					secondDepth = -second.Z;
+					return true;
+				};
+				if (!clip(camera.NearPlane, true) || !clip(camera.FarPlane, false)) continue;
+				clipped.push_back(first);
+				clipped.push_back(second);
+			}
+			if (clipped.empty()) {
+				result.Reason = "outside_camera_depth_range";
+				return result;
+			}
+			double left = std::numeric_limits<double>::infinity();
+			double top = std::numeric_limits<double>::infinity();
+			double right = -std::numeric_limits<double>::infinity();
+			double bottom = -std::numeric_limits<double>::infinity();
+			std::vector<std::pair<double, double>> pixels;
+			for (const core::Vector3 point : clipped) {
+				const double depth = -static_cast<double>(point.Z);
+				if (!std::isfinite(depth) || depth <= 0.0) {
+					result.Reason = "invalid_authored_spatial_data";
+					return result;
+				}
+				const double x = static_cast<double>(point.X) / (depth * tangent * aspect);
+				const double y = static_cast<double>(point.Y) / (depth * tangent);
+				if (!std::isfinite(x) || !std::isfinite(y)) {
+					result.Reason = "invalid_authored_spatial_data";
+					return result;
+				}
+				const double pixelX = (x + 1.0) * 0.5 * camera.ImageWidth;
+				const double pixelY = (1.0 - y) * 0.5 * camera.ImageHeight;
+				if (!std::isfinite(pixelX) || !std::isfinite(pixelY)) {
+					result.Reason = "invalid_authored_spatial_data";
+					return result;
+				}
+				left = std::min(left, pixelX);
+				right = std::max(right, pixelX);
+				top = std::min(top, pixelY);
+				bottom = std::max(bottom, pixelY);
+				pixels.emplace_back(pixelX, pixelY);
+			}
+			std::sort(pixels.begin(), pixels.end());
+			const auto cross = [](const auto &a, const auto &b, const auto &c) {
+				return (b.first - a.first) * (c.second - a.second) -
+					   (b.second - a.second) * (c.first - a.first);
+			};
+			std::vector<std::pair<double, double>> hull;
+			for (const auto &point : pixels) {
+				while (hull.size() > 1 && cross(hull[hull.size() - 2], hull.back(), point) <= 0.0)
+					hull.pop_back();
+				hull.push_back(point);
+			}
+			const size_t lower = hull.size();
+			for (size_t index = pixels.size(); index-- > 0;) {
+				const auto point = pixels[index];
+				while (hull.size() > lower && cross(hull[hull.size() - 2], hull.back(), point) <= 0.0)
+					hull.pop_back();
+				hull.push_back(point);
+			}
+			if (hull.size() > 1) hull.pop_back();
+			const auto inside = [&](const auto point) {
+				bool positive = false, negative = false;
+				for (size_t index = 0; index < hull.size(); ++index) {
+					const double value = cross(hull[index], hull[(index + 1) % hull.size()], point);
+					positive = positive || value > 0.0;
+					negative = negative || value < 0.0;
+				}
+				return !(positive && negative);
+			};
+			const auto orientation = [](const auto &a, const auto &b, const auto &c) {
+				return (b.first - a.first) * (c.second - a.second) -
+					   (b.second - a.second) * (c.first - a.first);
+			};
+			const auto segments = [&](const auto &a, const auto &b, const auto &c, const auto &d) {
+				const double abC = orientation(a, b, c), abD = orientation(a, b, d);
+				const double cdA = orientation(c, d, a), cdB = orientation(c, d, b);
+				return ((abC > 0.0) != (abD > 0.0)) && ((cdA > 0.0) != (cdB > 0.0));
+			};
+			const std::array<std::pair<double, double>, 4> image{{
+				{0.0, 0.0},
+				{static_cast<double>(camera.ImageWidth), 0.0},
+				{static_cast<double>(camera.ImageWidth), static_cast<double>(camera.ImageHeight)},
+				{0.0, static_cast<double>(camera.ImageHeight)},
+			}};
+			result.Intersects = std::any_of(
+									hull.begin(),
+									hull.end(),
+									[&](const auto point) {
+										return point.first > 0.0 && point.first < camera.ImageWidth &&
+											   point.second > 0.0 && point.second < camera.ImageHeight;
+									}
+								) ||
+								std::any_of(image.begin(), image.end(), inside);
+			for (size_t edge = 0; !result.Intersects && edge < hull.size(); ++edge)
+				for (size_t imageEdge = 0; imageEdge < image.size(); ++imageEdge)
+					if (segments(
+							hull[edge],
+							hull[(edge + 1) % hull.size()],
+							image[imageEdge],
+							image[(imageEdge + 1) % image.size()]
+						))
+						result.Intersects = true;
+			if (!result.Intersects) return result;
+			result.Clipped =
+				left < 0.0 || top < 0.0 || right > camera.ImageWidth || bottom > camera.ImageHeight;
+			result.Left = std::clamp(left, 0.0, static_cast<double>(camera.ImageWidth));
+			result.Top = std::clamp(top, 0.0, static_cast<double>(camera.ImageHeight));
+			result.Right = std::clamp(right, 0.0, static_cast<double>(camera.ImageWidth));
+			result.Bottom = std::clamp(bottom, 0.0, static_cast<double>(camera.ImageHeight));
+			result.Available = result.Right > result.Left && result.Bottom > result.Top;
+			if (!result.Available) {
+				result.Intersects = false;
+				result.Reason = "outside_camera_frustum";
+			} else {
+				result.Reason = "";
+			}
+			return result;
+		}
+
 		ScriptValue Colour(const core::Color3 &colour) {
 			ScriptValue value(ValueTag::Color3);
 			value.Colour = colour;
@@ -948,6 +1194,30 @@ namespace engine::script {
 			}
 			if (const auto *transform = store.Get<scene::Transform>(entity); transform != nullptr) {
 				entries.emplace_back("transform", Frame(transform->Frame));
+				entries.emplace_back("world_from_object", Frame(transform->Frame));
+				const auto *parent = store.Get<scene::Transform>(store.ParentOf(entity));
+				const core::CFrame relative =
+					parent == nullptr ? core::CFrame{} : parent->Frame.Inverse() * transform->Frame;
+				const bool relativeAvailable = parent != nullptr && Finite(transform->Frame) &&
+											   Finite(parent->Frame) && Finite(relative);
+				entries.emplace_back(
+					"parent_from_object",
+					!relativeAvailable ? Map({
+											 {"available", Boolean(false)},
+											 {"frame", ScriptValue{}},
+											 {"source", String("derived_from_world_transforms")},
+											 {"reason", String("parent_transform_unavailable_or_invalid")},
+										 })
+									   : Map({
+											 {"available", Boolean(true)},
+											 {"frame", Frame(relative)},
+											 {"source", String("derived_from_world_transforms")},
+											 {"reason", String("")},
+										 })
+				);
+			}
+			if (const auto *bounds = store.Get<scene::Bounds>(entity); bounds != nullptr) {
+				entries.emplace_back("size_metres", Vector(bounds->HalfExtent * 2.0f));
 			}
 			if (const auto *visual = store.Get<scene::Visual>(entity); visual != nullptr) {
 				entries.emplace_back(
@@ -1344,7 +1614,17 @@ namespace engine::script {
 			call.ReturnValue(GetSceneSnapshot(call.World(), limit).Value);
 		}
 		void ServiceCamera(ScriptCall &call) {
-			call.ReturnValue(GetCameraRenderingData(call.World(), call.AsInstance(0)).Value);
+			size_t limit = 0;
+			if (call.Arguments() > 1) {
+				const double requested = call.AsNumber(1);
+				if (!(requested >= 0.0) || requested > static_cast<double>(MAX_CAMERA_OBJECT_OBSERVATIONS) ||
+					static_cast<double>(static_cast<size_t>(requested)) != requested) {
+					call.ReturnValue(Map({{"status", String("invalid_limit")}}));
+					return;
+				}
+				limit = static_cast<size_t>(requested);
+			}
+			call.ReturnValue(GetCameraRenderingData(call.World(), call.AsInstance(0), limit).Value);
 		}
 		void ServiceImage(ScriptCall &call) {
 			call.ReturnValue(GetEditableImageMetadata(call.World(), call.AsInstance(0)).Value);
@@ -1723,7 +2003,12 @@ namespace engine::script {
 		return {"ok", Map(std::move(result))};
 	}
 
-	DataSceneResult GetCameraRenderingData(const ecs::Store &store, ecs::Entity entity) {
+	DataSceneResult GetCameraRenderingData(ecs::Store &store, ecs::Entity entity, size_t observationLimit) {
+		if (observationLimit > MAX_CAMERA_OBJECT_OBSERVATIONS)
+			return {
+				"resource_limit",
+				Map({{"status", String("resource_limit")}, {"limit", Number(MAX_CAMERA_OBJECT_OBSERVATIONS)}})
+			};
 		const auto *camera = store.Get<scene::Camera>(entity);
 		const auto *transform = store.Get<scene::Transform>(entity);
 		if (camera == nullptr || transform == nullptr)
@@ -1750,6 +2035,99 @@ namespace engine::script {
 		if (!StableId(store, entity, id))
 			return {"identity_required", Map({{"status", String("identity_required")}})};
 		const bool hasRequestedResolution = camera->ImageWidth != 0;
+		std::vector<std::pair<std::string, ecs::Entity>> observed;
+		std::unordered_set<std::string> observedIds;
+		bool duplicateObservationId = false;
+		bool invalidObservationId = false;
+		bool observationOverflow = false;
+		if (observationLimit != 0)
+			store.Each<const scene::Transform, const scene::Bounds>(
+				[&](ecs::Entity candidate, const scene::Transform &, const scene::Bounds &) {
+					if (duplicateObservationId || invalidObservationId || observationOverflow) return;
+					std::string candidateId;
+					if (!StableId(store, candidate, candidateId)) return;
+					if (candidateId.size() > MAX_DATA_SCENE_ID_BYTES ||
+						candidateId.find('\0') != std::string::npos || !DataSceneUtf8(candidateId)) {
+						invalidObservationId = true;
+						return;
+					}
+					if (observed.size() == observationLimit) {
+						observationOverflow = true;
+						return;
+					}
+					if (!observedIds.emplace(candidateId).second) {
+						duplicateObservationId = true;
+						return;
+					}
+					observed.emplace_back(std::move(candidateId), candidate);
+				}
+			);
+		if (invalidObservationId) return {"invalid_identity", Map({{"status", String("invalid_identity")}})};
+		if (duplicateObservationId)
+			return {"identity_conflict", Map({{"status", String("identity_conflict")}})};
+		if (observationOverflow)
+			return {
+				"resource_limit",
+				Map({{"status", String("resource_limit")}, {"limit", Number(MAX_CAMERA_OBJECT_OBSERVATIONS)}})
+			};
+		std::sort(observed.begin(), observed.end(), [](const auto &left, const auto &right) {
+			return left.first < right.first;
+		});
+		std::vector<ScriptValue> observations;
+		observations.reserve(observed.size());
+		const core::CFrame cameraFromWorld = worldFromCamera.Inverse();
+		for (const auto &[objectId, objectEntity] : observed) {
+			const auto *object = store.Get<scene::Transform>(objectEntity);
+			const auto *bounds = store.Get<scene::Bounds>(objectEntity);
+			const auto *visual = store.Get<scene::Visual>(objectEntity);
+			if (!Finite(object->Frame) || !Finite(bounds->HalfExtent) || bounds->HalfExtent.X < 0.0f ||
+				bounds->HalfExtent.Y < 0.0f || bounds->HalfExtent.Z < 0.0f)
+				return {"invalid_spatial_data", Map({{"status", String("invalid_spatial_data")}})};
+			const core::CFrame cameraFromObject = cameraFromWorld * object->Frame;
+			const core::Vector3 size = bounds->HalfExtent * 2.0f;
+			if (!Finite(cameraFromObject) || !Finite(size))
+				return {"invalid_spatial_data", Map({{"status", String("invalid_spatial_data")}})};
+			const ProjectedBounds projected = ProjectBounds(cameraFromWorld, *camera, *object, *bounds);
+			if (std::string_view(projected.Reason) == "invalid_authored_spatial_data")
+				return {"invalid_spatial_data", Map({{"status", String("invalid_spatial_data")}})};
+			observations.push_back(Map({
+				{"id", String(objectId)},
+				{"camera_from_object", Frame(cameraFromObject)},
+				{"size_metres", Vector(size)},
+				{"authored_visible",
+				 Map({
+					 {"available", Boolean(visual != nullptr)},
+					 {"value", visual == nullptr ? ScriptValue{} : Boolean(visual->Visible)},
+					 {"reason", String(visual == nullptr ? "visual_component_unavailable" : "")},
+				 })},
+				{"projected_bounds",
+				 Map({
+					 {"available", Boolean(projected.Available)},
+					 {"xyxy_pixels",
+					  projected.Available ? Array(
+												{Number(projected.Left),
+												 Number(projected.Top),
+												 Number(projected.Right),
+												 Number(projected.Bottom)}
+											)
+										  : ScriptValue{}},
+					 {"clipped_to_image", projected.Available ? Boolean(projected.Clipped) : ScriptValue{}},
+					 {"source", String("projected_scene_bounds")},
+					 {"reason", String(projected.Reason)},
+				 })},
+				{"frustum_intersection",
+				 Map({
+					 {"available", Boolean(hasRequestedResolution)},
+					 {"value", hasRequestedResolution ? Boolean(projected.Intersects) : ScriptValue{}},
+					 {"reason", String(hasRequestedResolution ? "" : "camera_has_no_explicit_image_size")},
+				 })},
+				{"occlusion",
+				 Map({
+					 {"available", Boolean(false)},
+					 {"reason", String("requires_capture_visibility_evidence")},
+				 })},
+			}));
+		}
 		return {
 			"ok",
 			Map({
@@ -1769,6 +2147,7 @@ namespace engine::script {
 				 )},
 				{"projection_available", Boolean(false)},
 				{"projection_reason", String("exact_projection_available_after_render_capture")},
+				{"object_observations", Array(std::move(observations))},
 				{"crop",
 				 Map({
 					 {"left", Number(0.0)},

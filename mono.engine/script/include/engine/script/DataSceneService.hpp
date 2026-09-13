@@ -36,6 +36,7 @@ namespace engine::script {
 	// are process-local, so no snapshot uses them as an identity.
 	inline constexpr std::string_view DATA_SCENE_ID_ATTRIBUTE = "DataFactoryId";
 	inline constexpr size_t MAX_DATA_SCENE_ENTITIES = 10'000;
+	inline constexpr size_t MAX_CAMERA_OBJECT_OBSERVATIONS = 64;
 	inline constexpr size_t MAX_DATA_SCENE_ID_BYTES = 256;
 	inline constexpr size_t MAX_EVENT_NARRATIVES = 256;
 
@@ -57,7 +58,8 @@ namespace engine::script {
 
 	DataSceneResult GetCapabilities(const ecs::Store &store);
 	DataSceneResult GetSceneSnapshot(ecs::Store &store, size_t limit = MAX_DATA_SCENE_ENTITIES);
-	DataSceneResult GetCameraRenderingData(const ecs::Store &store, ecs::Entity camera);
+	DataSceneResult
+	GetCameraRenderingData(ecs::Store &store, ecs::Entity camera, size_t observationLimit = 0);
 	DataSceneResult GetEditableImageMetadata(const ecs::Store &store, ecs::Entity image);
 	DataSceneResult GetCaptureChannels(const ecs::Store &store);
 	DataSceneResult

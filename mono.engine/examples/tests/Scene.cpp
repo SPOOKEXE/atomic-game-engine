@@ -363,7 +363,7 @@ TEST_CASE("the data factory capture request runs without a heartbeat", "[example
 	limits.DataCapture = bridge;
 	std::shared_ptr<engine::script::Runtime> runtime;
 	std::string error;
-	REQUIRE(LoadScene(store, systems, ExamplePath("DataFactoryDemo.luau"), error, &runtime, &limits));
+	REQUIRE(LoadScene(store, systems, ExamplePath("DataFactoryAdvancedDemo.luau"), error, &runtime, &limits));
 	REQUIRE(runtime != nullptr);
 	const auto *narratives = store.Resource<engine::script::EventNarratives>();
 	REQUIRE(narratives != nullptr);
@@ -432,7 +432,9 @@ TEST_CASE("the data factory demo rejects invalid capture chunks", "[examples][sc
 		limits.DataCapture = bridge;
 		std::shared_ptr<engine::script::Runtime> runtime;
 		std::string error;
-		REQUIRE(LoadScene(store, systems, ExamplePath("DataFactoryDemo.luau"), error, &runtime, &limits));
+		REQUIRE(
+			LoadScene(store, systems, ExamplePath("DataFactoryAdvancedDemo.luau"), error, &runtime, &limits)
+		);
 		REQUIRE(runtime != nullptr);
 		const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
 		REQUIRE(driver != nullptr);

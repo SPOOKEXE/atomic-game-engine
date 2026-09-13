@@ -2975,7 +2975,7 @@ end
 declare extern type DataSceneService with
 	function GetCapabilities(self): any
 	function GetSceneSnapshot(self, limit: number?): any
-	function GetCameraRenderingData(self, camera: Instance): any
+	function GetCameraRenderingData(self, camera: Instance, objectLimit: number?): any
 	function GetEditableImageMetadata(self, image: Instance): any
 	function GetCaptureChannels(self): any
 	function Capture(self, request: any): any
