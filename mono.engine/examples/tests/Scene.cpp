@@ -2105,6 +2105,12 @@ TEST_CASE(
 		  "emissiveMap"}) {
 		CHECK(sampler.Code.find(samplerName) != std::string::npos);
 	}
+	// Keep the runtime shader's light and shadow paths present in the authored
+	// source so changes do not silently remove them.
+	for (const char *lightingTerm :
+		 {"LocalLight", "LightRows[48]", "DirectionalShadow", "inLightPosition.w <= 0.0"}) {
+		CHECK(sampler.Code.find(lightingTerm) != std::string::npos);
+	}
 
 	for (const auto &[lampName, kind, brightness] : std::array{
 			 std::tuple{"CoolPointLamp", engine::scene::LightKind::Point, 280.0f},

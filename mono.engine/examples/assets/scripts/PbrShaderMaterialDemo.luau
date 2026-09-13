@@ -103,7 +103,9 @@ samplerShader.Source = [[
 
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inColour;
+layout(location = 2) in vec4 inLightPosition;
 layout(location = 4) in vec2 inTexCoord;
+layout(location = 5) in vec3 inWorldPosition;
 layout(location = 7) flat in vec3 inSurfaceColour;
 layout(location = 0) out vec4 outColour;
 
@@ -133,6 +135,60 @@ layout(set = 3, binding = 2) uniform Beams {
 	vec4 BeamRows[41];
 } beams;
 
+const int MAX_LIGHTS = 16;
+
+vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo) {
+	vec3 total = vec3(0.0);
+	int count = min(int(lights.LightRows[48].x), MAX_LIGHTS);
+	for (int index = 0; index < MAX_LIGHTS; index++) {
+		if (index >= count) {
+			break;
+		}
+		vec4 position = lights.LightRows[index];
+		vec3 offset = position.xyz - world;
+		float distanceToLight = length(offset);
+		if (position.w <= 0.0 || distanceToLight >= position.w) {
+			continue;
+		}
+		vec3 toLight = offset / max(distanceToLight, 1e-4);
+		float lambert = max(dot(normal, toLight), 0.0);
+		if (lambert <= 0.0) {
+			continue;
+		}
+		float ratio = distanceToLight / position.w;
+		float window = max(1.0 - ratio * ratio, 0.0);
+		float falloff = window * window / (1.0 + distanceToLight * distanceToLight);
+		vec4 direction = lights.LightRows[32 + index];
+		if (direction.w > -1.0) {
+			float aligned = dot(-toLight, normalize(direction.xyz));
+			falloff *= smoothstep(direction.w, mix(direction.w, 1.0, 0.1), aligned);
+		}
+		total += albedo * lights.LightRows[16 + index].rgb * lambert * falloff;
+	}
+	return total;
+}
+
+float DirectionalShadow() {
+	if (lighting.Flags.x < 0.5 || inLightPosition.w <= 0.0) {
+		return 1.0;
+	}
+	vec3 projected = inLightPosition.xyz / inLightPosition.w;
+	vec2 uv = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
+	if (projected.z < 0.0 || projected.z > 1.0 ||
+		uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+		return 1.0;
+	}
+	float texel = lighting.Flags.y;
+	float lit = 0.0;
+	for (int x = -1; x <= 1; x++) {
+		for (int y = -1; y <= 1; y++) {
+			vec2 offset = vec2(x, y) * texel;
+			lit += projected.z - 0.003 <= texture(shadowMap, uv + offset).r ? 1.0 : 0.0;
+		}
+	}
+	return lit / 9.0;
+}
+
 void main() {
 	vec2 uv = fract(inTexCoord);
 	vec3 albedo = texture(colourMap, uv).rgb;
@@ -142,12 +198,15 @@ void main() {
 	float height = texture(heightMap, uv).r;
 	float metalness = texture(metalnessMap, uv).r;
 	vec3 emissive = texture(emissiveMap, uv).rgb;
+	vec3 normal = normalize(inNormal);
 	float normalLight = clamp(normalSample.z * 0.5 + 0.5, 0.0, 1.0);
-	vec3 lit = albedo * (0.25 + 0.75 * normalLight) * mix(0.35, 1.0, occlusion);
+	vec3 directional = albedo * normalLight * max(dot(normal, -normalize(lighting.Direction.xyz)), 0.0);
+	vec3 lit = albedo * lighting.Ambient.rgb * mix(0.35, 1.0, occlusion);
+	lit += directional * lighting.Direct.rgb * DirectionalShadow();
+	lit += LocalLight(inWorldPosition, normal, albedo);
 	lit *= mix(0.45, 1.1, roughness);
 	lit = mix(lit, vec3(lit.b, lit.r, lit.g), metalness * 0.35);
 	lit += emissive * (0.3 + height * 0.7);
-	lit *= lighting.Ambient.rgb + lighting.Direct.rgb;
 	outColour = vec4(lit * inColour.rgb * inSurfaceColour, max(inColour.a, lighting.Flags.w));
 }
 ]]
