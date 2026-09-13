@@ -11,39 +11,8 @@
 
 namespace studio {
 	namespace {
-		void CapturePhysics(std::vector<DiagnosticSpan> &into) {
-			const auto &spans = engine::core::FrameGraph::Spans();
-			std::vector<bool> include;
-			PhysicsProfilerSpanMask(spans, include);
-			into.clear();
-			into.reserve(spans.size());
-			std::vector<uint32_t> kept(spans.size(), engine::core::FrameGraph::NO_PARENT);
-			for (size_t index = 0; index < spans.size(); ++index) {
-				const engine::core::FrameSpan &source = spans[index];
-				if (!include[index]) continue;
-				uint32_t parent = source.Parent;
-				while (parent < index && kept[parent] == engine::core::FrameGraph::NO_PARENT)
-					parent = spans[parent].Parent;
-				const uint32_t retainedParent =
-					parent < index ? kept[parent] : engine::core::FrameGraph::NO_PARENT;
-				into.push_back(
-					DiagnosticSpan{
-						.Name = std::string(source.Name),
-						.Depth = retainedParent == engine::core::FrameGraph::NO_PARENT
-									 ? 0
-									 : into[retainedParent].Depth + 1,
-						.Parent = retainedParent,
-						.StartMilliseconds = source.StartMilliseconds,
-						.Milliseconds = source.Milliseconds,
-						.SelfMilliseconds = source.SelfMilliseconds,
-						.IdleMilliseconds = source.IdleMilliseconds,
-						.Category = source.Category,
-						.Owner = source.Owner,
-						.Reported = source.Reported
-					}
-				);
-				kept[index] = static_cast<uint32_t>(into.size() - 1);
-			}
+		bool CapturePhysics(std::vector<DiagnosticSpan> &into) {
+			return CapturePhysicsProfilerSpans(engine::core::FrameGraph::Spans(), into);
 		}
 
 		void DrawPhysicsFlame(const std::vector<DiagnosticSpan> &spans, float capturedFrame) {
@@ -93,19 +62,21 @@ namespace studio {
 			return;
 		}
 		if (!PhysicsProfiler.Paused) {
-			CapturePhysics(PhysicsProfiler.Spans);
-			PhysicsProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
-			PhysicsProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
-			PhysicsProfiler.Dropped = engine::core::FrameGraph::Dropped();
+			if (CapturePhysics(PhysicsProfiler.Spans)) {
+				PhysicsProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
+				PhysicsProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
+				PhysicsProfiler.Dropped = engine::core::FrameGraph::Dropped();
+			}
 		}
 		if (ImGui::Button(PhysicsProfiler.Paused ? "Resume" : "Pause"))
 			PhysicsProfiler.Paused = !PhysicsProfiler.Paused;
 		ImGui::SameLine();
 		if (ImGui::Button("Snapshot")) {
-			CapturePhysics(PhysicsProfiler.Spans);
-			PhysicsProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
-			PhysicsProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
-			PhysicsProfiler.Dropped = engine::core::FrameGraph::Dropped();
+			if (CapturePhysics(PhysicsProfiler.Spans)) {
+				PhysicsProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
+				PhysicsProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
+				PhysicsProfiler.Dropped = engine::core::FrameGraph::Dropped();
+			}
 		}
 		ImGui::SameLine();
 		ImGui::TextWrapped(

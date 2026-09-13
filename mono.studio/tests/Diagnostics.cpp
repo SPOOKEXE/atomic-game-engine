@@ -3,18 +3,28 @@
 #include "TimelineBar.hpp"
 
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/examples/Scene.hpp>
+#include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Gravity.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <filesystem>
 #include <studio/Diagnostics.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.diagnostics")
 TEST_DEPENDS("engine.core.framegraph")
+TEST_DEPENDS("engine.examples.scene")
+TEST_DEPENDS("engine.physics.pipeline")
 
 using engine::core::FrameGraph;
 using engine::core::FrameSpan;
@@ -82,6 +92,53 @@ TEST_CASE("physics profiler retains reported work and its scheduler ancestors", 
 	std::vector<bool> selected;
 	studio::PhysicsProfilerSpanMask(spans, selected);
 	CHECK(selected == std::vector<bool>{true, true, true, false});
+}
+
+TEST_CASE("physics profiler retains the last Slide reading between physics ticks", "[studio][diagnostics]") {
+	struct RestoreAssets {
+		std::filesystem::path Previous;
+		~RestoreAssets() {
+			engine::core::Paths::SetAssetsOverride(Previous);
+		}
+	};
+	const RestoreAssets restoreAssets{engine::core::Paths::Assets()};
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+
+	engine::ecs::Store store("studio.physics-profiler.slide");
+	engine::ecs::Scheduler systems;
+	std::string error;
+	REQUIRE(engine::examples::LoadScene(store, systems, engine::examples::ExamplePath("Slide.luau"), error));
+	engine::physics::PreparePhysicsWorld(store);
+	engine::physics::RegisterPhysicsSystems(systems);
+	engine::scene::PrepareGravity(store);
+	engine::scene::RegisterGravitySystem(systems);
+
+	FrameGraph::SetEnabled(true);
+	struct DisableFrameGraph {
+		~DisableFrameGraph() {
+			FrameGraph::SetEnabled(false);
+		}
+	};
+	const DisableFrameGraph disableFrameGraph;
+	FrameGraph::BeginFrame();
+	systems.Tick(store, 1.0f / 60.0f);
+	FrameGraph::EndFrame();
+
+	std::vector<DiagnosticSpan> captured;
+	REQUIRE(studio::CapturePhysicsProfilerSpans(FrameGraph::Spans(), captured));
+	REQUIRE_FALSE(captured.empty());
+	CHECK(std::any_of(captured.begin(), captured.end(), [](const DiagnosticSpan &span) {
+		return span.Name == "physics.integrate" && span.Milliseconds > 0.0f;
+	}));
+
+	const std::vector<DiagnosticSpan> prior = captured;
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("studio render-only fixture"); }
+	FrameGraph::EndFrame();
+	CHECK_FALSE(studio::CapturePhysicsProfilerSpans(FrameGraph::Spans(), captured));
+	CHECK(captured.size() == prior.size());
+	CHECK(captured.front().Name == prior.front().Name);
+	CHECK(captured.front().Milliseconds == prior.front().Milliseconds);
 }
 
 TEST_CASE("studio profiling macros submit studio ownership", "[studio][diagnostics]") {
