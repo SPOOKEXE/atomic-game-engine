@@ -121,7 +121,11 @@ namespace engine::render {
 		view.Pipeline = binding.Pipeline;
 		view.Instances = frame.Instances;
 		view.ObjectLabels = frame.ObjectLabels;
+		view.SemanticLabels = frame.SemanticLabels;
+		view.PartLabels = frame.PartLabels;
 		view.ObjectLabelsValid = frame.ObjectLabelsValid;
+		view.SemanticLabelsValid = frame.SemanticLabelsValid;
+		view.PartLabelsValid = frame.PartLabelsValid;
 		view.JointFrames = frame.Joints;
 		view.Lighting = frame.Lighting;
 		view.OverrideLighting = true;
@@ -163,7 +167,11 @@ namespace engine::render {
 		if (const auto *draw = store.Resource<DrawList>()) {
 			frame.Instances = draw->Instances;
 			frame.ObjectLabels = draw->ObjectLabels;
+			frame.SemanticLabels = draw->SemanticLabels;
+			frame.PartLabels = draw->PartLabels;
 			frame.ObjectLabelsValid = draw->ObjectLabelsValid;
+			frame.SemanticLabelsValid = draw->SemanticLabelsValid;
+			frame.PartLabelsValid = draw->PartLabelsValid;
 			frame.Joints = draw->JointFrames;
 		}
 		scene::GatherSurfaceSlots(store, frame.Slots);

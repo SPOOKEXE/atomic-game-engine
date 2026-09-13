@@ -300,8 +300,14 @@ TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][prese
 		REQUIRE(store.SetParent(entity, workspace));
 		engine::ecs::AttributeValue value;
 		value.Type = engine::ecs::PropertyType::String;
-		value.String = std::move(id);
+		value.String = id;
 		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryId"), value));
+		engine::ecs::AttributeValue semantic = value;
+		semantic.String = "fixture/box";
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactorySemanticId"), semantic));
+		engine::ecs::AttributeValue part = value;
+		part.String = "fixture/part/" + id;
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryPartId"), part));
 		return entity;
 	};
 	const auto later = part("zeta");
@@ -315,9 +321,17 @@ TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][prese
 	CHECK(draw->ObjectLabels[0].StableId == "alpha");
 	CHECK(draw->ObjectLabels[1].Label == 2);
 	CHECK(draw->ObjectLabels[1].StableId == "zeta");
+	REQUIRE(draw->SemanticLabelsValid);
+	REQUIRE(draw->SemanticLabels.size() == 1);
+	CHECK(draw->SemanticLabels[0].StableId == "fixture/box");
+	REQUIRE(draw->PartLabelsValid);
+	REQUIRE(draw->PartLabels.size() == 2);
+	CHECK(draw->PartLabels[0].StableId == "fixture/part/alpha");
+	CHECK(draw->PartLabels[1].StableId == "fixture/part/zeta");
 	for (const auto &instance : draw->Instances) {
 		if (instance.Source == earlier.Id) CHECK(instance.ObjectLabel == 1);
 		if (instance.Source == later.Id) CHECK(instance.ObjectLabel == 2);
+		CHECK(instance.SemanticLabel == 1);
 	}
 
 	// Attribute writes do not change the drawable shape. The reusable draw-list
@@ -355,6 +369,31 @@ TEST_CASE("ambiguous data-factory ids refuse an object label table", "[render][p
 	CHECK(draw->ObjectLabels.empty());
 	for (const auto &instance : draw->Instances)
 		CHECK(instance.ObjectLabel == 0);
+}
+
+TEST_CASE(
+	"shared semantic label tables bound unique classes rather than instances", "[render][presentation]"
+) {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("shared-semantic-labels");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	for (size_t index = 0; index < engine::render::MAX_DATA_CAPTURE_OBJECT_LABELS + 1; ++index) {
+		const auto entity = engine::scene::MakePart(store, engine::scene::PartDesc{});
+		REQUIRE(store.SetParent(entity, workspace));
+		engine::ecs::AttributeValue value;
+		value.Type = engine::ecs::PropertyType::String;
+		value.String = "fixture/shared-box";
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactorySemanticId"), value));
+	}
+	REQUIRE(engine::scene::SyncRendered(store) == engine::render::MAX_DATA_CAPTURE_OBJECT_LABELS + 1);
+	engine::render::CollectInstances(store);
+	const auto *draw = store.Resource<engine::render::DrawList>();
+	REQUIRE(draw != nullptr);
+	CHECK(draw->SemanticLabelsValid);
+	REQUIRE(draw->SemanticLabels.size() == 1);
+	CHECK(draw->SemanticLabels[0].StableId == "fixture/shared-box");
 }
 
 TEST_CASE("irrelevant transform writes do not hide visible source changes", "[render][presentation][cache]") {

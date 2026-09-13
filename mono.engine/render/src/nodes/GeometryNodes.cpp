@@ -432,8 +432,8 @@ namespace engine::render {
 								  State->EnsurePyramid(sceneWidth, sceneHeight);
 
 			const auto beginGBuffer = [&](bool clear) {
-				SDL_GPUColorTargetInfo gbufferTargets[5]{};
-				for (size_t target = 0; target < 5; target++) {
+				SDL_GPUColorTargetInfo gbufferTargets[7]{};
+				for (size_t target = 0; target < 7; target++) {
 					gbufferTargets[target].clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
 					gbufferTargets[target].load_op = clear ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 					gbufferTargets[target].store_op = SDL_GPU_STOREOP_STORE;
@@ -446,12 +446,14 @@ namespace engine::render {
 				gbufferTargets[2].texture = pbr.Material;
 				gbufferTargets[3].texture = pbr.Emissive;
 				gbufferTargets[4].texture = pbr.ObjectIds;
+				gbufferTargets[5].texture = pbr.SemanticIds;
+				gbufferTargets[6].texture = pbr.PartIds;
 
 				depthTarget.load_op = clear ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 				depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 				depthTarget.cycle = clear;
 
-				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, gbufferTargets, 5, &depthTarget);
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, gbufferTargets, 7, &depthTarget);
 				if (pass == nullptr) {
 					return pass;
 				}

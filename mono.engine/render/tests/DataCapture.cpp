@@ -20,6 +20,8 @@ using namespace engine::render;
 TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::RgbLinearHdr)) == "rgb_linear_hdr");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::LinearDepth)) == "linear_depth");
+	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::SemanticMask)) == "semantic_ids");
+	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::PartMask)) == "part_ids");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::OpticalFlow)) == "optical_flow");
 }
 

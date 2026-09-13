@@ -120,7 +120,9 @@ namespace engine::render {
 		uint32_t FeatureEnable = 0;
 		uint32_t FeatureDisable = 0;
 		uint32_t ObjectLabel = 0;
-		uint32_t LabelReserved[3]{};
+		uint32_t SemanticLabel = 0;
+		uint32_t PartLabel = 0;
+		uint32_t LabelReserved = 0;
 	};
 
 	// The resources build reads these strides for instance.glsl's layout guards.
@@ -233,6 +235,8 @@ namespace engine::render {
 		gpu.FeatureEnable = instance.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
 		gpu.FeatureDisable = instance.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
 		gpu.ObjectLabel = instance.ObjectLabel;
+		gpu.SemanticLabel = instance.SemanticLabel;
+		gpu.PartLabel = instance.PartLabel;
 		return gpu;
 	}
 }

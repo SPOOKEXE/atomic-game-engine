@@ -122,7 +122,8 @@ namespace engine::scene {
 			// the same image", and a texture swap, a tag change or an alpha mode
 			// change all produce a different one.
 			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
-			d = MixSignature(d, Pair(instance.ObjectLabel, 0u));
+			d = MixSignature(d, Pair(instance.ObjectLabel, instance.SemanticLabel));
+			d = MixSignature(d, Pair(instance.PartLabel, 0u));
 			c = MixSignature(
 				c,
 				Pair(

@@ -121,7 +121,11 @@ namespace {
 	class FakeCapture final : public engine::script::DataCaptureBridge {
 	  public:
 		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
-			return {.Available = true, .Channels = {"rgb_linear_hdr"}, .Detail = "ready"};
+			return {
+				.Available = true,
+				.Channels = {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"},
+				.Detail = "ready"
+			};
 		}
 		bool Queue(
 			std::string_view instance,
@@ -293,6 +297,9 @@ TEST_CASE("discovery reads each surface's installed capture readiness", "[contro
 	CHECK(available["requested_channels"][0]["supported"]);
 	CHECK_FALSE(available["requested_channels"][1]["supported"]);
 	CHECK(available["offscreen_gpu"]["supported"]);
+	const json *captureLimits = Named(available["limits"], "channels");
+	REQUIRE(captureLimits != nullptr);
+	CHECK((*captureLimits)["maximum"] == 4);
 
 	Surface unavailable("unavailable", "a suite");
 	unavailable.SetDataCaptureAvailabilityProvider([] {
@@ -326,7 +333,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			{"pipeline", "default_pbr"},
 			{"capture_node", "capture"},
 			{"view_slot", 0},
-			{"channels", {"rgb_linear_hdr"}},
+			{"channels", {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"}},
 			{"temporal_history", "preserve"},
 			{"operation_id", "capture-1"},
 			{"expected_tick", current.Clock.Tick},

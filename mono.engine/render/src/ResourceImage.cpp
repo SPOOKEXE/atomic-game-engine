@@ -176,8 +176,10 @@ namespace engine::render {
 				}
 				const graph::ResourceDesc *source =
 					node->Reads.size() == 1 ? pipeline->Graph.FindResource(node->Reads.front()) : nullptr;
-				const bool objectIds = source != nullptr && source->Name == core::Name("object-ids");
-				declared = (!objectIds || hasProducer) && portsValid && colour == 1 && depth <= 1 &&
+				const bool labelIds = source != nullptr && (source->Name == core::Name("object-ids") ||
+															source->Name == core::Name("semantic-ids") ||
+															source->Name == core::Name("part-ids"));
+				declared = (!labelIds || hasProducer) && portsValid && colour == 1 && depth <= 1 &&
 						   normal <= 1 && response == normal && baseline == normal && directional <= normal &&
 						   (normal == 0 || depth == 1) &&
 						   (node->Scope == graph::NodeScope::View ||

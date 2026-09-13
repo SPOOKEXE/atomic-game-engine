@@ -47,7 +47,11 @@ namespace {
 		explicit FakeCaptureBridge(uint64_t ticket) : Ticket(ticket) {}
 
 		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
-			return {.Available = true, .Channels = {"rgb_linear_hdr"}, .Detail = "test queue"};
+			return {
+				.Available = true,
+				.Channels = {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"},
+				.Detail = "test queue"
+			};
 		}
 
 		bool Queue(
@@ -95,7 +99,24 @@ namespace {
 				.Origin = "top_left",
 				.Packing = "RGBA16F",
 			});
+			for (const char *channel : {"object_ids", "semantic_ids", "part_ids"})
+				poll.Planes.push_back({
+					.Channel = channel,
+					.Status = poll.Status,
+					.Resource = std::string("capture/fixture/") + channel,
+					.SourceResource = std::string(channel),
+					.HashAlgorithm = "blake3-256",
+					.Hash = "fixture",
+					.Width = 1,
+					.Height = 1,
+					.RowStride = 4,
+					.Scalar = "uint32",
+					.ColourSpace = "not_applicable",
+					.Origin = "top_left",
+				});
 			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
+			poll.SemanticLabels = {{1, "fixture/box"}};
+			poll.PartLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			detail = "ready copy retained";
 			return true;
 		}
@@ -485,7 +506,7 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				local service = game:GetService("DataSceneService")
 				assert(service:GetCapabilities().render_capture)
 				assert(service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 4294967296, channels = {"rgb_linear_hdr"}, temporal_history = "preserve"}).status == "invalid_capture_request")
-				local queued = service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr"}, temporal_history = "preserve"})
+				local queued = service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"}, temporal_history = "preserve"})
 				assert(queued.status == "queued")
 				assert(service:PollCapture("202").status == "unknown_capture_ticket")
 				local poll = service:PollCapture(queued.ticket)
@@ -493,6 +514,8 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				assert(#poll.object_labels == 2 and poll.object_labels[1].label == 1)
 				assert(poll.object_labels[1].stable_id == "fixture/alpha")
 				assert(poll.object_labels[2].label == 2 and poll.object_labels[2].stable_id == "fixture/packed")
+				assert(#poll.semantic_labels == 1 and poll.semantic_labels[1].stable_id == "fixture/box")
+				assert(#poll.part_labels == 2 and poll.part_labels[2].stable_id == "fixture/packed")
 				assert(buffer.len(service:GetCaptureBuffer(queued.ticket, poll.planes[1].resource, 0, 4)) == 4)
 				assert(service:CancelCapture(queued.ticket).status == "cancellation_requested")
 				assert(service:PollCapture(queued.ticket).status == "cancelled")

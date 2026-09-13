@@ -20,9 +20,9 @@ namespace engine::render {
 		case DataCaptureChannel::ObjectIds:
 			return "object_ids";
 		case DataCaptureChannel::SemanticMask:
-			return "semantic_mask";
+			return "semantic_ids";
 		case DataCaptureChannel::PartMask:
-			return "part_mask";
+			return "part_ids";
 		case DataCaptureChannel::MotionVectors:
 			return "motion_vectors";
 		case DataCaptureChannel::OpticalFlow:

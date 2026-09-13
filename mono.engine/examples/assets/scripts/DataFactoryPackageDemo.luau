@@ -18,16 +18,18 @@ camera.ImageHeight = 360
 camera.Parent = root
 workspace.CurrentCamera = camera
 
-local function part(name, id, position, size)
+local function part(name, id, semanticId, partId, position, size)
 	local object = Instance.new("Part")
 	object.Name = name
 	object:SetAttribute("DataFactoryId", id)
+	object:SetAttribute("DataFactorySemanticId", semanticId)
+	object:SetAttribute("DataFactoryPartId", partId)
 	object.Position = position
 	object.Size = size
 	object.Anchored = true
 	object.Parent = root
 end
 
-part("VisibleBox", "data-factory-package/visible", Vector3.new(0, 1, 0), Vector3.new(2, 2, 2))
-part("OffscreenBox", "data-factory-package/offscreen", Vector3.new(8, 1, 0), Vector3.new(4, 2, 2))
-part("BehindBox", "data-factory-package/behind", Vector3.new(0, 1, 12), Vector3.new(2, 2, 2))
+part("VisibleBox", "data-factory-package/visible", "data-factory-package/semantic/box", "data-factory-package/part/visible", Vector3.new(0, 1, 0), Vector3.new(2, 2, 2))
+part("OffscreenBox", "data-factory-package/offscreen", "data-factory-package/semantic/box", "data-factory-package/part/offscreen", Vector3.new(8, 1, 0), Vector3.new(4, 2, 2))
+part("BehindBox", "data-factory-package/behind", "data-factory-package/semantic/box", "data-factory-package/part/behind", Vector3.new(0, 1, 12), Vector3.new(2, 2, 2))

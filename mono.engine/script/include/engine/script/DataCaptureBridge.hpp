@@ -74,6 +74,8 @@ namespace engine::script {
 		std::string CoordinateConvention;
 		std::vector<DataCaptureBridgePlane> Planes;
 		std::vector<DataCaptureBridgeObjectLabel> ObjectLabels;
+		std::vector<DataCaptureBridgeObjectLabel> SemanticLabels;
+		std::vector<DataCaptureBridgeObjectLabel> PartLabels;
 	};
 
 	struct DataCaptureBridgeCapabilities {

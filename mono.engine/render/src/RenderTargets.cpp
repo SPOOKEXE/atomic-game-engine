@@ -421,6 +421,8 @@ namespace engine::render {
 			  slot.Material,
 			  slot.Emissive,
 			  slot.ObjectIds,
+			  slot.SemanticIds,
+			  slot.PartIds,
 			  slot.LinearDepth,
 			  slot.Occlusion,
 			  slot.Lit,
@@ -471,6 +473,10 @@ namespace engine::render {
 		);
 		made.ObjectIds =
 			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
+		made.SemanticIds =
+			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
+		made.PartIds =
+			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
 		made.LinearDepth =
 			texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.LinearWidth, dimensions.LinearHeight);
 		made.Occlusion =
@@ -481,8 +487,9 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
-			made.Emissive == nullptr || made.ObjectIds == nullptr || made.LinearDepth == nullptr ||
-			made.Occlusion == nullptr || made.Lit == nullptr || made.SkyLit == nullptr) {
+			made.Emissive == nullptr || made.ObjectIds == nullptr || made.SemanticIds == nullptr ||
+			made.PartIds == nullptr || made.LinearDepth == nullptr || made.Occlusion == nullptr ||
+			made.Lit == nullptr || made.SkyLit == nullptr) {
 			ENGINE_ERROR(
 				"render graph targets for {}x{} view: {}",
 				dimensions.ViewWidth,

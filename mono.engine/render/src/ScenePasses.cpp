@@ -922,6 +922,22 @@ namespace engine::render {
 				SDL_GPU_TEXTUREFORMAT_R32_UINT,
 			};
 		}
+		if (role == Impl::ResourceRole::SemanticIds) {
+			return Impl::NamedTexture{
+				slotPbr.SemanticIds,
+				slotPbr.Dimensions.TargetWidth,
+				slotPbr.Dimensions.TargetHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_UINT,
+			};
+		}
+		if (role == Impl::ResourceRole::PartIds) {
+			return Impl::NamedTexture{
+				slotPbr.PartIds,
+				slotPbr.Dimensions.TargetWidth,
+				slotPbr.Dimensions.TargetHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_UINT,
+			};
+		}
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return Impl::NamedTexture{
 				slotPbr.LinearDepth,

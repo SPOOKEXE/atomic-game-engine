@@ -613,6 +613,7 @@ namespace engine::graph {
 		constexpr F RGBA16 = F::RGBA16F;
 		constexpr F RG16 = F::RG16F;
 		constexpr F R32 = F::R32F;
+		constexpr F R32U = F::R32U;
 		constexpr F D24 = F::D24S8;
 		constexpr F D32 = F::D32F;
 		constexpr F HDR = F::RG11B10F;
@@ -720,9 +721,12 @@ namespace engine::graph {
 			  {"normal", K::Colour, LDR, true, "World normals. Ten bits an axis is enough."},
 			  {"material", K::Colour, RGBA8, true, "Roughness, metalness, and material tags."},
 			  {"emissive", K::Colour, RGBA16, true, "Light emitted by the surface before exposure."},
+			  {"object-ids", K::Colour, R32U, true, "Dense object labels; zero is background."},
+			  {"semantic-ids", K::Colour, R32U, true, "Dense authored semantic labels; zero is background."},
+			  {"part-ids", K::Colour, R32U, true, "Dense authored part labels; zero is background."},
 			  {"depth", K::Depth, D24, true, "Scene depth."}},
 			 "The deferred split of the opaque pass: surface properties, not light. "
-			 "**Built** - three targets, and the engine ships the shader. Declare "
+			 "**Built** - seven colour targets plus depth, and the engine ships the shader. Declare "
 			 "albedo, normal and material in that order; a node declaring fewer is "
 			 "refused rather than drawn short."},
 

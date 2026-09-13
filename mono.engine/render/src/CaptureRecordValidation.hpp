@@ -22,6 +22,8 @@ namespace engine::render::capture_record_validation {
 			: channel == DataCaptureChannel::LinearDepth   ? scalar == DataCaptureScalar::Float32
 			: channel == DataCaptureChannel::ShadingNormal ? scalar == DataCaptureScalar::UNorm10A2
 			: channel == DataCaptureChannel::ObjectIds	   ? scalar == DataCaptureScalar::UInt32
+			: (channel == DataCaptureChannel::SemanticMask || channel == DataCaptureChannel::PartMask)
+				? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::PbrAlbedo || channel == DataCaptureChannel::PbrMaterial)
 				? scalar == DataCaptureScalar::UNorm8
 				: false;

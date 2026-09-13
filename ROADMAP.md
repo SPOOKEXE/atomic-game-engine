@@ -77,6 +77,15 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 
 `datafactories-docs/MCP-ADDITIONS.md` defines one public data-factory contract. The engine process is the MCP host. It owns isolated scene lifecycle, validated scene setup and edits, deterministic stepping, structured observations, captures and resources. The external data factory owns recipes, parameters, batching, storage, manifests, training and evaluation. Its Python `api.py` is a typed client for the engine MCP tools, not a second engine API or a training runtime. Agents register the same stdio `mcpbridge`, discover the same schemas and call the same bounded tools. No capability counts as exposed until both an external program and an MCP agent can discover and call it.
 
+Definition of done for each factory capability:
+
+| Layer | Required result | Proof required |
+|---|---|---|
+| Engine service | Owns bounded scene setup or mutation, time control, and structured or binary export. | Service tests cover valid results, limits, and unsupported cases. |
+| Engine-hosted MCP tool | Validates requests and exposes the service through the versioned MCP schema. | MCP tests cover schemas, lifecycle guards, and error envelopes. |
+| Typed Python client | Calls the MCP tool through `mcpbridge` with typed bounded requests and replies. | Python tests cover negotiation, decoding, checksums, and failure handling. |
+| Agent discovery and callability | An MCP agent discovers and calls the identical advertised tool. | An acceptance test runs Python and agent workflows and compares artifacts. |
+
 Implementation order:
 
 1. **Usable external and agent loop:** from both Python and an agent, connect and negotiate, create or reset an isolated factory-owned world, submit a pinned scene package or a validated patch, drive explicit fixed ticks, then snapshot camera and object poses, sizes, frustum, visibility and 2D projections, poll captures and fetch verified resources. Selecting the existing local client world remains a useful compatibility path, but it does not complete the unattended factory workflow.
@@ -133,11 +142,11 @@ Capture and persist aligned artifacts:
 - [_] make step plus snapshot plus multicamera capture atomic, with asynchronous readback completion.
 - [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
 - [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure. The Python factory already provides durable chunks, sample finalization, pins, recovery, provenance, sweeps, holdouts and metrics.
-- [_] maintain acceptance fixtures for replay roundtrip, no-time-advance, image-label alignment, retry isolation, invalid data and Python or agent parity. Headless fixtures now cover rerunnable package replacement, initial integer object-ID pixels, stable sidecars, malformed label bounds and typed Python parsing.
+- [_] maintain acceptance fixtures for replay roundtrip, no-time-advance, image-label alignment, retry isolation, invalid data and Python or agent parity. Headless fixtures now cover rerunnable package replacement, exact object, semantic and part ID pixels, stable sidecars, malformed and partial label replies, typed Python parsing and cleanup after malformed terminal captures. A live host plus agent artifact-parity run remains open.
 
 Add richer scene, render and multimodal truth:
 - [x] capture object IDs as exact `R32_UINT` opaque or masked gbuffer pixels with stable string sidecars and explicit zero background or unidentified values. Transparent surfaces, particles and later composited layers are excluded.
-- [_] capture semantic masks and part masks.
+- [_] capture semantic masks and part masks. Opaque and masked gbuffer draws now export exact `R32_UINT` `semantic_ids` and `part_ids` planes from authored `DataFactorySemanticId` and `DataFactoryPartId` attributes. Snapshot-scoped dense sidecars retain stable strings, shared semantic classes and distinct parts across regular and packed draws, with zero for background or unidentified geometry. The bounded MCP capture tool, Luau bridge, typed Python client and starter fixtures cover the channels. Live MCP-agent artifact parity and later composited visual layers remain open under the four-layer completion gate above.
 - [_] record visibility, occlusion, disocclusion and visible or amodal masks.
 - [_] record optical flow, motion vectors, trajectories, scene cuts and validity flags.
 - [_] expose PBR albedo, roughness, metallic, emissive, specular, transmission, shading geometry, normals and UV maps.

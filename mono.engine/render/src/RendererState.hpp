@@ -132,6 +132,8 @@ namespace engine::render {
 			Material,
 			Emissive,
 			ObjectIds,
+			SemanticIds,
+			PartIds,
 			LinearDepth,
 			Occlusion,
 			Lit,
@@ -184,6 +186,8 @@ namespace engine::render {
 							ResourceRole::Material,
 							ResourceRole::Emissive,
 							ResourceRole::ObjectIds,
+							ResourceRole::SemanticIds,
+							ResourceRole::PartIds,
 							ResourceRole::Depth,
 						};
 						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
@@ -449,6 +453,8 @@ namespace engine::render {
 			SDL_GPUTexture *Material = nullptr;
 			SDL_GPUTexture *Emissive = nullptr;
 			SDL_GPUTexture *ObjectIds = nullptr;
+			SDL_GPUTexture *SemanticIds = nullptr;
+			SDL_GPUTexture *PartIds = nullptr;
 			SDL_GPUTexture *LinearDepth = nullptr;
 			SDL_GPUTexture *Occlusion = nullptr;
 			SDL_GPUTexture *Lit = nullptr;

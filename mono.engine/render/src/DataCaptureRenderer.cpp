@@ -21,11 +21,13 @@ namespace engine::render {
 		}
 
 		core::Name CaptureNode(const DataCaptureTicket &ticket, DataCaptureChannel channel) {
-			const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	 ? "-albedo"
-											: channel == DataCaptureChannel::PbrMaterial ? "-material"
-											: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
-											: channel == DataCaptureChannel::ObjectIds	 ? "-object-ids"
-																						 : "";
+			const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	  ? "-albedo"
+											: channel == DataCaptureChannel::PbrMaterial  ? "-material"
+											: channel == DataCaptureChannel::PbrEmissive  ? "-emissive"
+											: channel == DataCaptureChannel::ObjectIds	  ? "-object-ids"
+											: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
+											: channel == DataCaptureChannel::PartMask	  ? "-part-ids"
+																						  : "";
 			return suffix.empty() ? ticket.CaptureNode
 								  : core::Name(std::string(ticket.CaptureNode.Text()) + std::string(suffix));
 		}
@@ -143,8 +145,12 @@ namespace engine::render {
 				);
 				break;
 			case DataCaptureChannel::ObjectIds:
+			case DataCaptureChannel::SemanticMask:
+			case DataCaptureChannel::PartMask:
 				primary(
-					core::Name("object-ids"),
+					plane.Channel == DataCaptureChannel::ObjectIds		? core::Name("object-ids")
+					: plane.Channel == DataCaptureChannel::SemanticMask ? core::Name("semantic-ids")
+																		: core::Name("part-ids"),
 					DataCaptureScalar::UInt32,
 					DataCaptureColourSpace::NotApplicable,
 					ResourceImageFormat::R32_UInt
@@ -161,11 +167,17 @@ namespace engine::render {
 		RequireOwningThread("QueueDataCapture");
 		const bool wantsObjectIds =
 			std::ranges::find(request.Channels, DataCaptureChannel::ObjectIds) != request.Channels.end();
+		const bool wantsSemantic =
+			std::ranges::find(request.Channels, DataCaptureChannel::SemanticMask) != request.Channels.end();
+		const bool wantsPart =
+			std::ranges::find(request.Channels, DataCaptureChannel::PartMask) != request.Channels.end();
 		if (!ValidSnapshotId(request.SnapshotId) || !request.Pipeline.IsValid() ||
 			!request.CaptureNode.IsValid() ||
 			request.TemporalHistory != DataCaptureTemporalHistory::Preserve ||
 			!UniqueChannels(request.Channels) || !ticket.ResourceTokens.empty() ||
-			(wantsObjectIds && !ValidDataCaptureObjectLabels(request.ObjectLabels)))
+			(wantsObjectIds && !ValidDataCaptureObjectLabels(request.ObjectLabels)) ||
+			(wantsSemantic && !ValidDataCaptureObjectLabels(request.SemanticLabels)) ||
+			(wantsPart && !ValidDataCaptureObjectLabels(request.PartLabels)))
 			return false;
 
 		DataCaptureTicket queued{
@@ -176,6 +188,9 @@ namespace engine::render {
 			.TemporalHistory = request.TemporalHistory,
 			.Channels = request.Channels,
 			.ObjectLabels = wantsObjectIds ? request.ObjectLabels : std::vector<DataCaptureObjectLabel>{},
+			.SemanticLabels =
+				wantsSemantic ? request.SemanticLabels : std::vector<DataCaptureSemanticLabel>{},
+			.PartLabels = wantsPart ? request.PartLabels : std::vector<DataCapturePartLabel>{},
 			.ResourceTokens = {}
 		};
 		for (const DataCaptureChannel channel : request.Channels) {
@@ -202,6 +217,8 @@ namespace engine::render {
 		poll.SnapshotId = ticket.SnapshotId;
 		poll.Camera = DataCaptureCameraConventions();
 		poll.ObjectLabels = ticket.ObjectLabels;
+		poll.SemanticLabels = ticket.SemanticLabels;
+		poll.PartLabels = ticket.PartLabels;
 		if (ticket.Cancelled) {
 			poll.Status = DataCaptureStatus::Cancelled;
 			return poll;

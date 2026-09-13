@@ -73,7 +73,11 @@ namespace engine::render {
 		scene::WorldLighting Lighting;
 		std::vector<scene::DrawInstance> Instances;
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		std::vector<DataCapturePartLabel> PartLabels;
 		bool ObjectLabelsValid = true;
+		bool SemanticLabelsValid = true;
+		bool PartLabelsValid = true;
 		std::vector<core::CFrame> Joints;
 		std::vector<scene::SurfaceSlot> Slots;
 		std::vector<scene::PortalSeam> Seams;

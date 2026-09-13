@@ -112,7 +112,8 @@ namespace engine::render {
 			   std::memcmp(&entry.Transparency, &source.Transparency, sizeof(float) * 2) == 0 &&
 			   entry.FeatureEnable == (source.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES) &&
 			   entry.FeatureDisable == (source.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES) &&
-			   entry.ObjectLabel == source.ObjectLabel && entry.Alpha == source.Alpha &&
+			   entry.ObjectLabel == source.ObjectLabel && entry.SemanticLabel == source.SemanticLabel &&
+			   entry.PartLabel == source.PartLabel && entry.Alpha == source.Alpha &&
 			   entry.Resample == source.Resample &&
 			   std::memcmp(&entry.MeshCentre, &mesh.Centre, sizeof(core::Vector3)) == 0 &&
 			   std::memcmp(&entry.MeshExtent, &mesh.Extent, sizeof(core::Vector3)) == 0;
@@ -169,6 +170,8 @@ namespace engine::render {
 			entry.FeatureEnable = source->RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
 			entry.FeatureDisable = source->RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
 			entry.ObjectLabel = source->ObjectLabel;
+			entry.SemanticLabel = source->SemanticLabel;
+			entry.PartLabel = source->PartLabel;
 			entry.Alpha = source->Alpha;
 			entry.Resample = source->Resample;
 			entry.MeshCentre = mesh->Centre;
@@ -218,6 +221,8 @@ namespace engine::render {
 			entry.FeatureEnable = source->RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
 			entry.FeatureDisable = source->RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
 			entry.ObjectLabel = source->ObjectLabel;
+			entry.SemanticLabel = source->SemanticLabel;
+			entry.PartLabel = source->PartLabel;
 			entry.Alpha = source->Alpha;
 			entry.Resample = source->Resample;
 			entry.MeshCentre = mesh->Centre;

@@ -25,6 +25,8 @@ namespace engine::render {
 			if (name == "pbr_material") return DataCaptureChannel::PbrMaterial;
 			if (name == "pbr_emissive") return DataCaptureChannel::PbrEmissive;
 			if (name == "object_ids") return DataCaptureChannel::ObjectIds;
+			if (name == "semantic_ids") return DataCaptureChannel::SemanticMask;
+			if (name == "part_ids") return DataCaptureChannel::PartMask;
 			return std::nullopt;
 		}
 
@@ -149,7 +151,9 @@ namespace engine::render {
 				 "pbr_albedo",
 				 "pbr_material",
 				 "pbr_emissive",
-				 "object_ids"},
+				 "object_ids",
+				 "semantic_ids",
+				 "part_ids"},
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
 		};
@@ -351,6 +355,8 @@ namespace engine::render {
 				.ViewSlot = view.Slot,
 				.Channels = {},
 				.ObjectLabels = {view.ObjectLabels.begin(), view.ObjectLabels.end()},
+				.SemanticLabels = {view.SemanticLabels.begin(), view.SemanticLabels.end()},
+				.PartLabels = {view.PartLabels.begin(), view.PartLabels.end()},
 			};
 			for (const std::string &name : pendingRequest.Request.Channels) {
 				const auto channel = Channel(name);
@@ -370,12 +376,28 @@ namespace engine::render {
 			if (request.Channels.size() != pendingRequest.Request.Channels.size()) continue;
 			const bool wantsObjectIds =
 				std::ranges::find(request.Channels, DataCaptureChannel::ObjectIds) != request.Channels.end();
+			const bool wantsSemantic =
+				std::ranges::find(request.Channels, DataCaptureChannel::SemanticMask) !=
+				request.Channels.end();
+			const bool wantsPart =
+				std::ranges::find(request.Channels, DataCaptureChannel::PartMask) != request.Channels.end();
 			if (wantsObjectIds && !view.ObjectLabelsValid) {
 				std::lock_guard lock(Mutex);
 				if (auto entry = Entries.find(pendingRequest.Id); entry != Entries.end()) {
 					entry->second.Reply.Status = "invalid";
 					entry->second.Reply.SnapshotId = pendingRequest.Request.SnapshotId;
 					entry->second.Detail = "object ids require unique bounded DataFactoryId values";
+					entry->second.Terminal = true;
+					entry->second.Preparing = false;
+				}
+				continue;
+			}
+			if ((wantsSemantic && !view.SemanticLabelsValid) || (wantsPart && !view.PartLabelsValid)) {
+				std::lock_guard lock(Mutex);
+				if (auto entry = Entries.find(pendingRequest.Id); entry != Entries.end()) {
+					entry->second.Reply.Status = "invalid";
+					entry->second.Reply.SnapshotId = pendingRequest.Request.SnapshotId;
+					entry->second.Detail = "semantic or part ids require unique bounded authored labels";
 					entry->second.Terminal = true;
 					entry->second.Preparing = false;
 				}
@@ -452,15 +474,14 @@ namespace engine::render {
 			reply.Status = Status(captured.Status);
 			reply.SnapshotId = captured.SnapshotId;
 			reply.CaptureFrame = captured.CaptureFrame;
-			if (std::ranges::find(ticket.second.Channels, DataCaptureChannel::ObjectIds) !=
-				ticket.second.Channels.end())
-				for (const DataCaptureObjectLabel &label : captured.ObjectLabels)
-					reply.ObjectLabels.push_back({label.Label, label.StableId});
 			if (captured.Status == DataCaptureStatus::Ready || captured.Status == DataCaptureStatus::Partial)
 				CopyCamera(captured, reply);
 			std::unordered_map<std::string, std::vector<std::byte>> bytes;
 			capture_record_validation::State validation;
 			bool malformedPlane = false;
+			bool objectIdsReady = false;
+			bool semanticIdsReady = false;
+			bool partIdsReady = false;
 			size_t totalBytes = 0;
 			for (DataCapturePlane &plane : captured.Planes) {
 				if (!capture_record_validation::Plane(ticket.second, plane, ticket.first, validation)) {
@@ -497,7 +518,21 @@ namespace engine::render {
 						totalBytes += plane.Bytes.size();
 					bytes.emplace(resource, std::move(plane.Bytes));
 				}
+				if (plane.Status == DataCaptureStatus::Ready) {
+					objectIdsReady = objectIdsReady || plane.Channel == DataCaptureChannel::ObjectIds;
+					semanticIdsReady = semanticIdsReady || plane.Channel == DataCaptureChannel::SemanticMask;
+					partIdsReady = partIdsReady || plane.Channel == DataCaptureChannel::PartMask;
+				}
 			}
+			if (objectIdsReady)
+				for (const DataCaptureObjectLabel &label : captured.ObjectLabels)
+					reply.ObjectLabels.push_back({label.Label, label.StableId});
+			if (semanticIdsReady)
+				for (const DataCaptureSemanticLabel &label : captured.SemanticLabels)
+					reply.SemanticLabels.push_back({label.Label, label.StableId});
+			if (partIdsReady)
+				for (const DataCapturePartLabel &label : captured.PartLabels)
+					reply.PartLabels.push_back({label.Label, label.StableId});
 			const bool coherentStatus =
 				(captured.Status == DataCaptureStatus::Ready &&
 				 validation.ReadyPlanes == ticket.second.Channels.size() &&

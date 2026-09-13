@@ -30,7 +30,9 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <glm/packing.hpp>
 
+#include <algorithm>
 #include <array>
+#include <initializer_list>
 
 TEST_SUITE_ID("engine.render.resourceimage")
 
@@ -145,6 +147,19 @@ namespace {
 		document.Record(
 			{.Kind = graph::EditKind::Reads, .Target = core::Name("object-ids"), .Key = core::Name("source")}
 		);
+		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 2>{
+				 {{"image-export-semantic-ids", "semantic-ids"}, {"image-export-part-ids", "part-ids"}}
+			 }) {
+			document.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = core::Name(node),
+				 .NodeKind = core::Name("capture"),
+				 .Scope = graph::NodeScope::Frame}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
+			);
+		}
 		graph::RenderGraph pipeline;
 		core::Name offender;
 		REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
@@ -3691,6 +3706,8 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	labelled.Mesh = core::Name("object-id-plane");
 	labelled.Texture = core::Name("object-id-white");
 	labelled.ObjectLabel = 1;
+	labelled.SemanticLabel = 1;
+	labelled.PartLabel = 1;
 	labelled.CastShadow = false;
 	scene::DrawInstance unlabelled = labelled;
 	unlabelled.Source = 2;
@@ -3713,6 +3730,8 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	packed.Frame.Position = {1, 0, -4};
 	packed.Mesh = packedMesh;
 	packed.ObjectLabel = 2;
+	packed.SemanticLabel = 1;
+	packed.PartLabel = 2;
 	const std::array rows{labelled, unlabelled, packed};
 	view.Instances = rows;
 	render::DataCaptureRequest request{
@@ -3751,8 +3770,15 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	CHECK(captured.CameraPose.NearPlaneMetres == view.Camera.NearPlane);
 	CHECK(captured.CameraPose.FarPlaneMetres == view.Camera.FarPlane);
 
-	request.Channels = {render::DataCaptureChannel::RgbLinearHdr, render::DataCaptureChannel::ObjectIds};
+	request.Channels = {
+		render::DataCaptureChannel::RgbLinearHdr,
+		render::DataCaptureChannel::ObjectIds,
+		render::DataCaptureChannel::SemanticMask,
+		render::DataCaptureChannel::PartMask
+	};
 	request.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
+	request.SemanticLabels = {{1, "fixture/box"}};
+	request.PartLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	render::DataCaptureTicket partial;
 	REQUIRE(renderer.QueueDataCapture(request, partial));
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
@@ -3763,10 +3789,18 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
-	CHECK(captured.Planes[1].Status == render::DataCaptureStatus::Ready);
-	CHECK(captured.Planes[1].Scalar == render::DataCaptureScalar::UInt32);
-	CHECK(captured.Planes[1].RowStride == captured.Planes[1].Width * 4);
-	REQUIRE(captured.Planes[1].Bytes.size() == captured.Planes[1].Width * captured.Planes[1].Height * 4);
+	REQUIRE(captured.Planes.size() == 4);
+	for (size_t planeIndex = 1; planeIndex < captured.Planes.size(); ++planeIndex) {
+		CHECK(captured.Planes[planeIndex].Status == render::DataCaptureStatus::Ready);
+		CHECK(captured.Planes[planeIndex].Scalar == render::DataCaptureScalar::UInt32);
+		CHECK(captured.Planes[planeIndex].RowStride == captured.Planes[planeIndex].Width * 4);
+		REQUIRE(
+			captured.Planes[planeIndex].Bytes.size() ==
+			captured.Planes[planeIndex].Width * captured.Planes[planeIndex].Height * 4
+		);
+	}
+	REQUIRE(captured.SemanticLabels.size() == 1);
+	REQUIRE(captured.PartLabels.size() == 2);
 	core::ByteReader objectIds(captured.Planes[1].Bytes);
 	size_t labelledPixels = 0, packedPixels = 0, zeroPixels = 0;
 	uint32_t centreLabel = 99;
@@ -3789,6 +3823,23 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	CHECK(captured.ObjectLabels[0].StableId == "fixture/alpha");
 	CHECK(captured.ObjectLabels[1].Label == 2);
 	CHECK(captured.ObjectLabels[1].StableId == "fixture/packed");
+	const auto checkIdPlane = [&](size_t planeIndex, std::initializer_list<uint32_t> allowed) {
+		core::ByteReader ids(captured.Planes[planeIndex].Bytes);
+		size_t background = 0;
+		std::array<size_t, 3> seen{};
+		for (size_t pixel = 0; pixel < captured.Planes[planeIndex].Width * captured.Planes[planeIndex].Height;
+			 ++pixel) {
+			const uint32_t label = ids.ReadUInt32();
+			CHECK(std::find(allowed.begin(), allowed.end(), label) != allowed.end());
+			if (label == 0) ++background;
+			if (label < seen.size()) ++seen[label];
+		}
+		CHECK(background > 0);
+		for (const uint32_t label : allowed)
+			if (label != 0) CHECK(seen[label] > 0);
+	};
+	checkIdPlane(2, {0, 1});
+	checkIdPlane(3, {0, 1, 2});
 
 	render::DataCaptureTicket cancelled;
 	REQUIRE(renderer.QueueDataCapture(request, cancelled));

@@ -88,7 +88,9 @@ namespace engine::render {
 			caps.UnifiedQueue = true;
 			caps.PrefersMSL = binary.Form == resources::ShaderForm::Msl;
 			caps.MaxSamplersPerDraw = 10;
-			caps.MaxColourTargets = 4;
+			// The default PBR graph uses seven colour attachments, including the
+			// object, semantic, and part ID planes.
+			caps.MaxColourTargets = 8;
 
 			const SDL_GPUTextureUsageFlags storageUsage = SDL_GPU_TEXTUREUSAGE_SAMPLER |
 														  SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ |

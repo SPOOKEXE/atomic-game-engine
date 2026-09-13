@@ -53,7 +53,11 @@ namespace engine::render {
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		std::vector<DataCapturePartLabel> PartLabels;
 		bool ObjectLabelsValid = true;
+		bool SemanticLabelsValid = true;
+		bool PartLabelsValid = true;
 
 		// Joint transforms for those instances, flattened into one allocation.
 		std::vector<core::CFrame> JointFrames;

@@ -170,7 +170,7 @@ namespace engine::control {
 				);
 				limits.push_back(
 					capture.Available
-						? json{{"name", "channels"}, {"supported", true}, {"maximum", 3}}
+						? json{{"name", "channels"}, {"supported", true}, {"maximum", 4}}
 						: Unsupported(
 							  "channels",
 							  capture.Detail == "capture channels are not implemented by this host"

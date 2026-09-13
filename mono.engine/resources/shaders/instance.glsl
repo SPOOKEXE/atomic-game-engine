@@ -17,7 +17,7 @@ struct InstanceRow {
 	uvec4 Rotation;
 	uvec4 ScaleAppearance;
 	uvec4 SurfaceEmissionFeatures;
-	uvec4 ObjectLabel;
+	uvec4 Labels;
 };
 layout(set = 0, binding = 0) readonly buffer InstanceRows {
 	InstanceRow rows[];
@@ -53,7 +53,15 @@ uint InstanceFeatureDisable(InstanceRow instance) {
 }
 
 uint InstanceObjectLabel(InstanceRow instance) {
-	return instance.ObjectLabel.x;
+	return instance.Labels.x;
+}
+
+uint InstanceSemanticLabel(InstanceRow instance) {
+	return instance.Labels.y;
+}
+
+uint InstancePartLabel(InstanceRow instance) {
+	return instance.Labels.z;
 }
 
 // viewPolicy is supported bits, world-resolved defaults, camera enables and

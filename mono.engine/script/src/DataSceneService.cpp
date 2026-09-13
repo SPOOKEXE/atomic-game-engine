@@ -898,6 +898,20 @@ namespace engine::script {
 				);
 			}
 			entries.emplace_back("object_labels", Array(std::move(labels)));
+			std::vector<ScriptValue> semanticLabels;
+			semanticLabels.reserve(poll.SemanticLabels.size());
+			for (const DataCaptureBridgeObjectLabel &label : poll.SemanticLabels)
+				semanticLabels.push_back(
+					Map({{"label", Number(label.Label)}, {"stable_id", String(label.StableId)}})
+				);
+			entries.emplace_back("semantic_labels", Array(std::move(semanticLabels)));
+			std::vector<ScriptValue> partLabels;
+			partLabels.reserve(poll.PartLabels.size());
+			for (const DataCaptureBridgeObjectLabel &label : poll.PartLabels)
+				partLabels.push_back(
+					Map({{"label", Number(label.Label)}, {"stable_id", String(label.StableId)}})
+				);
+			entries.emplace_back("part_labels", Array(std::move(partLabels)));
 			if (poll.HasCamera) {
 				std::vector<std::pair<std::string, ScriptValue>> camera{
 					{"world_from_camera", Matrix(poll.WorldFromCamera)},

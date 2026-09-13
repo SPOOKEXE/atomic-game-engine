@@ -696,7 +696,11 @@ namespace engine::render {
 		//@{
 		std::span<const scene::DrawInstance> Instances;
 		std::span<const DataCaptureObjectLabel> ObjectLabels;
+		std::span<const DataCaptureSemanticLabel> SemanticLabels;
+		std::span<const DataCapturePartLabel> PartLabels;
 		bool ObjectLabelsValid = true;
+		bool SemanticLabelsValid = true;
+		bool PartLabelsValid = true;
 		std::span<const core::CFrame> JointFrames;
 		std::span<const SurfaceView> Surfaces;
 		//@}

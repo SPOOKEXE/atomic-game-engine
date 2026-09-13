@@ -21,6 +21,8 @@ namespace engine::render {
 		uint32_t Label = 0;
 		std::string StableId;
 	};
+	using DataCaptureSemanticLabel = DataCaptureObjectLabel;
+	using DataCapturePartLabel = DataCaptureObjectLabel;
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABELS = 4096;
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABEL_BYTES = 512 * 1024;
 
@@ -143,6 +145,8 @@ namespace engine::render {
 		size_t ViewSlot = 0;
 		std::vector<DataCaptureChannel> Channels;
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		std::vector<DataCapturePartLabel> PartLabels;
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 	};
 
@@ -172,6 +176,8 @@ namespace engine::render {
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 		std::vector<DataCaptureChannel> Channels;
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		std::vector<DataCapturePartLabel> PartLabels;
 		std::vector<uint64_t> ResourceTokens;
 		bool Cancelled = false;
 	};
@@ -186,6 +192,8 @@ namespace engine::render {
 		DataCaptureCameraConvention Camera;
 		DataCaptureCamera CameraPose;
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		std::vector<DataCapturePartLabel> PartLabels;
 		std::vector<DataCapturePlane> Planes;
 	};
 

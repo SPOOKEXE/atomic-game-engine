@@ -146,6 +146,71 @@ namespace engine::render {
 			}
 		}
 
+		template <typename Label>
+		void AssignAuthoredLabels(
+			ecs::Store &store,
+			DrawList &drawList,
+			std::string_view attributeName,
+			std::vector<Label> &output,
+			bool &valid,
+			uint32_t scene::DrawInstance::*member,
+			bool allowShared
+		) {
+			valid = true;
+			std::vector<std::pair<uint64_t, std::string>> identifiers;
+			for (const scene::DrawInstance &instance : drawList.Instances) {
+				ecs::AttributeValue attribute;
+				if (!ecs::GetAttribute(
+						store, ecs::Entity(instance.Source), core::Name(attributeName), attribute
+					) ||
+					attribute.Type != ecs::PropertyType::String || attribute.String.empty())
+					continue;
+				if (attribute.String.size() > 256 || attribute.String.find('\0') != std::string::npos ||
+					!DataCaptureUtf8(attribute.String)) {
+					valid = false;
+					continue;
+				}
+				identifiers.emplace_back(instance.Source, attribute.String);
+			}
+			std::sort(identifiers.begin(), identifiers.end(), [](const auto &left, const auto &right) {
+				return BytewiseLess(left.second, right.second) ||
+					   (!BytewiseLess(right.second, left.second) && left.first < right.first);
+			});
+			identifiers.erase(
+				std::unique(
+					identifiers.begin(),
+					identifiers.end(),
+					[](const auto &left, const auto &right) { return left.first == right.first; }
+				),
+				identifiers.end()
+			);
+			output.clear();
+			std::vector<std::string> names;
+			for (const auto &identifier : identifiers)
+				if (names.empty() || names.back() != identifier.second) names.push_back(identifier.second);
+			valid = valid && names.size() <= MAX_DATA_CAPTURE_OBJECT_LABELS;
+			if (!allowShared)
+				for (size_t index = 1; index < identifiers.size(); ++index)
+					if (identifiers[index - 1].second == identifiers[index].second) valid = false;
+			std::unordered_map<uint64_t, uint32_t> labels;
+			if (valid) {
+				output.reserve(names.size());
+				for (size_t index = 0; index < names.size(); ++index)
+					output.push_back({static_cast<uint32_t>(index + 1), names[index]});
+				for (const auto &[source, name] : identifiers) {
+					const auto found = std::lower_bound(names.begin(), names.end(), name, BytewiseLess);
+					labels.emplace(source, static_cast<uint32_t>(found - names.begin() + 1));
+				}
+			}
+			if (!ValidDataCaptureObjectLabels(output)) {
+				output.clear();
+				valid = false;
+				labels.clear();
+			}
+			for (scene::DrawInstance &instance : drawList.Instances)
+				instance.*member = labels.contains(instance.Source) ? labels.at(instance.Source) : 0;
+		}
+
 		uint64_t FoldPresentation(uint64_t signature, uint64_t word) {
 			return scene::MixSignature(signature, word);
 		}
@@ -769,6 +834,24 @@ namespace engine::render {
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 			AssignObjectLabels(store, *drawList);
+			AssignAuthoredLabels(
+				store,
+				*drawList,
+				"DataFactorySemanticId",
+				drawList->SemanticLabels,
+				drawList->SemanticLabelsValid,
+				&scene::DrawInstance::SemanticLabel,
+				true
+			);
+			AssignAuthoredLabels(
+				store,
+				*drawList,
+				"DataFactoryPartId",
+				drawList->PartLabels,
+				drawList->PartLabelsValid,
+				&scene::DrawInstance::PartLabel,
+				false
+			);
 			return;
 		}
 		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
@@ -786,6 +869,24 @@ namespace engine::render {
 				}
 				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 				AssignObjectLabels(store, *drawList);
+				AssignAuthoredLabels(
+					store,
+					*drawList,
+					"DataFactorySemanticId",
+					drawList->SemanticLabels,
+					drawList->SemanticLabelsValid,
+					&scene::DrawInstance::SemanticLabel,
+					true
+				);
+				AssignAuthoredLabels(
+					store,
+					*drawList,
+					"DataFactoryPartId",
+					drawList->PartLabels,
+					drawList->PartLabelsValid,
+					&scene::DrawInstance::PartLabel,
+					false
+				);
 				return;
 			}
 			// A source query changed shape without a matching component epoch. The
@@ -1067,6 +1168,24 @@ namespace engine::render {
 		// which has a draw list and no simulation behind it.
 		(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 		AssignObjectLabels(store, *drawList);
+		AssignAuthoredLabels(
+			store,
+			*drawList,
+			"DataFactorySemanticId",
+			drawList->SemanticLabels,
+			drawList->SemanticLabelsValid,
+			&scene::DrawInstance::SemanticLabel,
+			true
+		);
+		AssignAuthoredLabels(
+			store,
+			*drawList,
+			"DataFactoryPartId",
+			drawList->PartLabels,
+			drawList->PartLabelsValid,
+			&scene::DrawInstance::PartLabel,
+			false
+		);
 	}
 
 	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList) {
