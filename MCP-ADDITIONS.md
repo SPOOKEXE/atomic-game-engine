@@ -233,6 +233,26 @@ the manifest. Flow resources include forward/backward direction, source and
 target times, pixel-center convention, units, validity, occlusion, disocclusion,
 out-of-frame, camera-cut, and undefined-motion masks.
 
+The current calibrated camera record uses these exact fields:
+
+| Field | Meaning |
+|---|---|
+| `world_from_camera[16]` | Column-major affine transform from camera-local metres into the right-handed, Y-up world. Camera forward is local negative Z. This copied matrix is the extrinsic record; a consumer may invert it for `camera_from_world`. |
+| `projection[16]` | Column-major camera-to-clip matrix used for the captured draw. Clip Y points up and depth is zero through one. `projection_available=false` means no pinhole or focal values may be inferred. |
+| `vertical_fov_radians` | Resolved vertical field of view for the full uncropped view. It is zero when the projection does not expose this value. |
+| `near_metres`, `far_metres` | Positive camera-space clipping distances in metres. They describe raster clipping and do not clamp a separately encoded distance-depth plane. |
+| `crop[4]` | Left, top, width and height as fractions of the full view, with top-left image origin. The companion convention is `normalized_full_view_left_top_width_height`. |
+| `lens_distortion_available`, `lens_distortion_reason` | Whether a calibrated distortion model and coefficients exist. The current pinhole capture path reports unavailable with a reason, so zero coefficients are never invented. |
+| `jitter_available`, `jitter_policy` | Whether the projection contains a declared temporal subpixel offset. The current path reports unavailable. Future available records must add the X/Y offset in output pixels and name whether the matrix already contains it. |
+| `coordinate_convention` | Stable text carrying handedness, camera forward, clip Y, clip depth range, matrix layout and metres per world unit. |
+
+Image width, height, row origin and pixel encoding remain properties of each
+captured plane. A camera record and its planes are joined by the same snapshot,
+capture ticket and capture frame. Pixel coordinates address pixel centres from
+the top-left: integer `(0, 0)` is the centre of the first pixel. Intrinsic values
+derived from a projection matrix must retain that projection and convention as
+their source instead of replacing it with an assumed symmetric pinhole model.
+
 Pixel identity is queried by integer pixel coordinates and returns the exact ID
 resource value plus coverage and validity. It is never recovered by sampling a
 lossy color visualization. Capture may expose visible masks, amodal masks, and
