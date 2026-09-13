@@ -31,4 +31,13 @@ namespace engine::script {
 		}
 		return MakeLuauRuntime(store, limits);
 	}
+
+	DataScriptPackageRunResult RunDataScriptPackage(
+		Runtime &runtime,
+		const DataScriptPackageContext &context,
+		std::string_view source,
+		std::string_view entry
+	) {
+		return runtime.RunDataScriptPackage(context, source, entry);
+	}
 }

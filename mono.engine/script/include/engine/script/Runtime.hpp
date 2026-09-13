@@ -56,6 +56,8 @@
 #include <vector>
 
 namespace engine::script {
+	class DataScriptPackageContext;
+	struct DataScriptPackageRunResult;
 
 	// Where a script is standing.
 	//
@@ -263,6 +265,7 @@ namespace engine::script {
 		// role and origin above. Supplying an explicit set never adds implicit
 		// grants, so a host can construct a genuinely narrower sandbox.
 		ScriptCapabilities Capabilities = ScriptCapabilities::Automatic;
+		bool PackageOnly = false;
 
 		// Resolves an automatic profile or returns the explicitly granted set.
 		constexpr ScriptCapabilities EffectiveCapabilities() const {
@@ -389,6 +392,12 @@ namespace engine::script {
 	class Runtime {
 	  public:
 		virtual ~Runtime() = default;
+
+		// Runs one verified package with its package-only global installed by
+		// the adapter. Ordinary Run never gains this extra host surface.
+		virtual DataScriptPackageRunResult RunDataScriptPackage(
+			const DataScriptPackageContext &context, std::string_view source, std::string_view entry
+		);
 
 		Runtime(const Runtime &) = delete;
 		Runtime &operator=(const Runtime &) = delete;
@@ -637,6 +646,10 @@ namespace engine::script {
 			return HasCapabilities(ScriptCapabilitiesValue, required);
 		}
 
+		bool IsPackageOnly() const {
+			return PackageOnly;
+		}
+
 		// The world this runtime builds into.
 		//
 		// @return The store passed at construction.
@@ -806,7 +819,7 @@ namespace engine::script {
 		Runtime(ecs::Store &store, const RuntimeLimits &limits)
 			: Store(store), HostRoleValue(limits.Role), ScriptOriginValue(limits.Origin),
 			  ScriptCapabilitiesValue(limits.EffectiveCapabilities()), DataCapture(limits.DataCapture),
-			  DataLifecycle(limits.DataLifecycle) {}
+			  DataLifecycle(limits.DataLifecycle), PackageOnly(limits.PackageOnly) {}
 
 		// The world this runtime builds into. A reference rather than a handle,
 		// because a VM is created for one world and dies with it.
@@ -822,6 +835,7 @@ namespace engine::script {
 		ScriptCapabilities ScriptCapabilitiesValue = ScriptCapabilities::None;
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		bool PackageOnly = false;
 
 		// The last failure, or empty. Read through `LastError`.
 		std::string Error;

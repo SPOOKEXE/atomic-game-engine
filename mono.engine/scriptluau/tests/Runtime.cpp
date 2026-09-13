@@ -10,6 +10,7 @@
 // The behaviour of a Luau runtime is asserted in `engine.scripthost.*`, where it
 // is asserted against JavaScript's at the same time. This is deliberately thin.
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
@@ -17,12 +18,16 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptluau/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <memory>
+#include <string_view>
 
 TEST_SUITE_ID("engine.scriptluau.runtime")
 // A script's vocabulary is the class tree, so a change to it has to re-run this.
@@ -52,6 +57,23 @@ namespace {
 		REQUIRE(module != engine::ecs::NULL_ENTITY);
 		REQUIRE(store.SetParent(module, engine::scene::WorkspaceOf(store)));
 		return module;
+	}
+
+	engine::script::DataScriptPackageRunResult RunFreshPackage(std::string_view source) {
+		Store store("scriptluau_package_fresh");
+		engine::scene::InstallServices(store);
+		const auto runtime = MakeLuauRuntime(
+			store, {.Capabilities = engine::script::ScriptCapabilities::None, .PackageOnly = true}
+		);
+		engine::script::DataScriptPackage package;
+		const engine::script::DataScriptPackageContext context(package, {});
+		return runtime->RunDataScriptPackage(context, source, "package.luau");
+	}
+
+	void CheckPackageRefusal(std::string_view source, std::string_view reason) {
+		const auto result = RunFreshPackage(source);
+		CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Failed);
+		CHECK(result.Error.find(reason) != std::string::npos);
 	}
 }
 
@@ -84,6 +106,74 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
+}
+
+TEST_CASE("luau package runtime exposes only immutable package data", "[scriptluau][data-script-package]") {
+	RegisterClasses();
+	Store store("scriptluau_package");
+	const auto runtime = MakeLuauRuntime(
+		store, {.Capabilities = engine::script::ScriptCapabilities::None, .PackageOnly = true}
+	);
+	engine::script::DataScriptPackage package;
+	package.Seed = UINT64_MAX;
+	package.Parameters.push_back(
+		{"count", {.Type = engine::script::DataScriptScalar::Kind::Integer, .Integer = INT64_MIN}}
+	);
+	std::vector<engine::script::DataScriptAssetInput> assets{{"input.bin", {std::byte{1}, std::byte{2}}}};
+	package.Assets.push_back({"input.bin", engine::assets::Hasher::Of(assets.front().Bytes)});
+	const engine::script::DataScriptPackageContext context(package, assets);
+	const auto result = runtime->RunDataScriptPackage(
+		context,
+		"-- task.wait Promise Debris:AddItem in a harmless comment\nlocal text = 'task.wait TweenService "
+		"ContextActionService RunService' assert(Package.parameters.count == '-9223372036854775808') "
+		"assert(Package.seed == '18446744073709551615') assert(#Package.asset('input.bin') == 2) "
+		"assert(Package.seedStream('same') == Package.seedStream('same')) "
+		"local ok = pcall(function() Package.parameters.count = 5 end) assert(not ok)",
+		"package.luau"
+	);
+	CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
+}
+
+TEST_CASE(
+	"luau packages refuse every deferred boundary in a fresh runtime", "[scriptluau][data-script-package]"
+) {
+	RegisterClasses();
+	CheckPackageRefusal("task.wait()", "data-script packages may not schedule deferred work");
+	CheckPackageRefusal("task.defer(function() end)", "data-script packages may not schedule deferred work");
+	CheckPackageRefusal("task.spawn(function() end)", "data-script packages may not schedule deferred work");
+	CheckPackageRefusal(
+		"task.delay(1, function() end)", "data-script packages may not schedule deferred work"
+	);
+	CheckPackageRefusal("workspace:WaitForChild('never', 1)", "data-script packages may not suspend");
+	CheckPackageRefusal(
+		"workspace.ChildAdded:Connect(function() end)", "data-script packages may not retain callbacks"
+	);
+	CheckPackageRefusal(
+		"game:GetService('Debris'):AddItem(Instance.new('Part'), 1)",
+		"data-script packages may not use services"
+	);
+	CheckPackageRefusal(
+		"game:GetService('TweenService'):Create(Instance.new('Part'), TweenInfo.new(), {})",
+		"data-script packages may not use services"
+	);
+	CheckPackageRefusal(
+		"local part = Instance.new('Part')\npart:TweenSize(Vector3.new(1, 1, 1))",
+		"data-script packages may not create tweens"
+	);
+	CheckPackageRefusal(
+		"local part = Instance.new('Part')\npart:TweenPosition(Vector3.new(1, 1, 1))",
+		"data-script packages may not create tweens"
+	);
+	CheckPackageRefusal(
+		"game:GetService('ContextActionService'):BindAction('jump', function() end, false)",
+		"data-script packages may not use services"
+	);
+	CheckPackageRefusal(
+		"game:GetService('RunService').Heartbeat:Connect(function() end)",
+		"data-script packages may not use services"
+	);
+	const auto scope = RunFreshPackage("assert(Scope == nil)");
+	CHECK(scope.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
 }
 
 TEST_CASE("the luau adapter records a completed native binding", "[scriptluau][profile]") {

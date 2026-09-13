@@ -6,6 +6,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
@@ -303,6 +304,87 @@ namespace engine::script {
 			return 0;
 		}
 
+		int PackageDeferred(lua_State *state) {
+			luaL_errorL(state, "data-script packages may not schedule deferred work");
+			return 0;
+		}
+
+		int PackageSeedStream(lua_State *state) {
+			const auto *package = ContextOf(state).Package;
+			if (package == nullptr) {
+				luaL_errorL(state, "Package is unavailable");
+				return 0;
+			}
+			const char *name = luaL_checkstring(state, 1);
+			const std::string value = std::to_string(package->SeedStream(name));
+			lua_pushlstring(state, value.data(), value.size());
+			return 1;
+		}
+
+		int PackageAsset(lua_State *state) {
+			const auto *package = ContextOf(state).Package;
+			if (package == nullptr) {
+				luaL_errorL(state, "Package is unavailable");
+				return 0;
+			}
+			const char *path = luaL_checkstring(state, 1);
+			const auto bytes = package->Asset(path);
+			if (!bytes) {
+				luaL_errorL(state, "Package asset is not declared");
+				return 0;
+			}
+			lua_pushlstring(state, reinterpret_cast<const char *>(bytes->data()), bytes->size());
+			return 1;
+		}
+
+		void PushPackageValue(lua_State *state, const DataScriptScalar &value) {
+			switch (value.Type) {
+			case DataScriptScalar::Kind::Boolean:
+				lua_pushboolean(state, value.Boolean);
+				break;
+			case DataScriptScalar::Kind::Integer: {
+				const std::string integer = std::to_string(value.Integer);
+				lua_pushlstring(state, integer.data(), integer.size());
+			} break;
+			case DataScriptScalar::Kind::Number:
+				lua_pushnumber(state, value.Number);
+				break;
+			case DataScriptScalar::Kind::String:
+				lua_pushlstring(state, value.String.data(), value.String.size());
+				break;
+			}
+		}
+
+		void OpenDataPackage(lua_State *state) {
+			const auto *context = ContextOf(state).Package;
+			if (context == nullptr) return;
+			lua_newtable(state);
+			const std::string seed = std::to_string(context->Manifest().Seed);
+			lua_pushlstring(state, seed.data(), seed.size());
+			lua_setfield(state, -2, "seed");
+			lua_newtable(state);
+			for (const DataScriptParameter &parameter : context->Manifest().Parameters) {
+				PushPackageValue(state, parameter.Value);
+				lua_setfield(state, -2, parameter.Name.c_str());
+			}
+			lua_setreadonly(state, -1, 1);
+			lua_setfield(state, -2, "parameters");
+			lua_pushcfunction(state, PackageSeedStream, "seedStream");
+			lua_setfield(state, -2, "seedStream");
+			lua_pushcfunction(state, PackageAsset, "asset");
+			lua_setfield(state, -2, "asset");
+			lua_setreadonly(state, -1, 1);
+			lua_setglobal(state, "Package");
+
+			lua_newtable(state);
+			for (const char *name : {"wait", "defer", "delay", "spawn"}) {
+				lua_pushcfunction(state, PackageDeferred, name);
+				lua_setfield(state, -2, name);
+			}
+			lua_setreadonly(state, -1, 1);
+			lua_setglobal(state, "task");
+		}
+
 		// The libraries a script gets, and the two it does not.
 		//
 		// `luaL_openlibs` would also open **`os`** and **`debug`**, and both are
@@ -466,7 +548,9 @@ namespace engine::script {
 		OpenDatatypes(State);
 		OpenEnums(State);
 		OpenSignals(State);
-		OpenScopes(State);
+		if (!IsPackageOnly()) {
+			OpenScopes(State);
+		}
 		OpenInstances(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
@@ -490,7 +574,7 @@ namespace engine::script {
 		// came to be two lists - this one and the JavaScript runtime's - that
 		// drifted by four services with nothing in the build to say so. See
 		// `ServiceCatalogue.hpp`.
-		InstallLuauServices(State, ServiceAvailability::Always, bounds->Context.Access);
+		InstallLuauServices(State, ServiceAvailability::Always, bounds->Context.Access, IsPackageOnly());
 
 		OpenQueries(State);
 
@@ -527,7 +611,7 @@ namespace engine::script {
 		// it writes a global, so it cannot run once the table is frozen. That is
 		// the whole reason `ServiceAvailability` has a second value and the
 		// catalogue is walked twice.
-		InstallLuauServices(State, ServiceAvailability::Studio, bounds->Context.Access);
+		InstallLuauServices(State, ServiceAvailability::Studio, bounds->Context.Access, IsPackageOnly());
 
 		// Freezes the global table and the library tables. After this a script
 		// can read `math.floor` and cannot replace it, so one script cannot
@@ -604,6 +688,7 @@ namespace engine::script {
 		// its own: assigning a global in one chunk does not leak into the next.
 		lua_State *thread = lua_newthread(State);
 		luaL_sandboxthread(thread);
+		OpenDataPackage(thread);
 
 		// **`script` goes on the thread, after the sandbox.** The state's global
 		// table is frozen and shared; the thread's is this chunk's alone, which
@@ -684,6 +769,48 @@ namespace engine::script {
 		return true;
 	}
 
+	DataScriptPackageRunResult LuauRuntime::RunDataScriptPackage(
+		const DataScriptPackageContext &context, std::string_view source, std::string_view entry
+	) {
+		if (!IsPackageOnly())
+			return {
+				.Terminal = DataScriptPackageRunResult::State::Failed,
+				.Error = "data-script package execution requires a package-only runtime"
+			};
+		if (PackageUsed)
+			return {
+				.Terminal = DataScriptPackageRunResult::State::Failed,
+				.Error = "data-script package runtimes are one-shot"
+			};
+		PackageUsed = true;
+		LuauContext &bound = ContextOf(State);
+		const ScriptCapabilities access = bound.Access;
+		bound.Access = ScriptCapabilities::World;
+		bound.Package = &context;
+		struct ClearPackage final {
+			LuauContext &Context;
+			ScriptCapabilities Access;
+			~ClearPackage() {
+				Context.Package = nullptr;
+				Context.Access = Access;
+			}
+		} clear{bound, access};
+		const bool completed = Run(source, entry);
+		const LuauContext &live = ContextOf(State);
+		const bool terminal = completed && live.Tasks.Pending() == 0 && live.Waiters.Empty() &&
+							  live.Signals.Empty() && live.Threads.empty() && live.PendingArguments.empty() &&
+							  live.AwaitedTickets.empty() && live.AwaitedChildren.empty() &&
+							  live.AwaitedEditableMeshes.empty() && live.AwaitedComputations.empty() &&
+							  live.Tweens.Count() == 0;
+		return {
+			.Terminal = terminal ? DataScriptPackageRunResult::State::Completed
+								 : DataScriptPackageRunResult::State::Failed,
+			.Error = terminal	 ? ""
+					 : completed ? "data-script package retained deferred work"
+								 : LastError()
+		};
+	}
+
 	namespace {
 		// `require(moduleScript)`.
 		//
@@ -694,6 +821,9 @@ namespace engine::script {
 		// instance is already in the world, already saved, already replicated.
 		int Require(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
+			if (context.Package != nullptr) {
+				luaL_errorL(state, "data-script packages may not require modules");
+			}
 
 			void *value = lua_touserdatatagged(state, 1, TAG_INSTANCE);
 			if (value == nullptr) {

@@ -6,10 +6,12 @@
 // behaviour of a JavaScript runtime is asserted in `engine.scripthost.*`, beside
 // Luau's.
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/scriptjs/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -47,6 +49,21 @@ TEST_CASE("the javascript adapter builds into the world it was handed", "[script
 
 	const auto runtime = MakeJavaScriptRuntime(store);
 	REQUIRE(runtime->Run("Instance.new('Part').Name = 'FromJavaScript';"));
+}
+
+TEST_CASE("javascript package runtime refuses source before execution", "[scriptjs][data-script-package]") {
+	RegisterClasses();
+	Store store("scriptjs_package");
+	const auto runtime = MakeJavaScriptRuntime(
+		store, {.Capabilities = engine::script::ScriptCapabilities::None, .PackageOnly = true}
+	);
+	engine::script::DataScriptPackage package;
+	const engine::script::DataScriptPackageContext context(package, {});
+	const auto result =
+		runtime->RunDataScriptPackage(context, "throw new Error('must not run');", "package.js");
+	CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Failed);
+	CHECK(result.Error == "javascript data-script packages are unsupported");
+	CHECK(runtime->LastError().empty());
 }
 
 TEST_CASE("javascript refuses virtual classes and still creates their leaves", "[scriptjs]") {

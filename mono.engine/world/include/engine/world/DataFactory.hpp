@@ -184,6 +184,10 @@ namespace engine::world {
 		DataFactoryRenderOnlyReply PollRenderOnly(std::string_view instanceId, uint64_t operationId) const;
 		DataFactoryReply Checkpoint(std::string_view instanceId, std::string &checkpointId);
 		DataFactoryReply Restore(std::string_view instanceId, std::string_view checkpointId);
+		// Advances the lifecycle revision after an external executor completed an
+		// atomic mutation against the live, all-systems-paused world.
+		DataFactoryReply
+		CommitExternalMutation(std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion);
 		DataFactoryReply ApplyIntervention(
 			std::string_view instanceId,
 			std::string_view baseSnapshotId,

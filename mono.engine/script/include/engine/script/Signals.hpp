@@ -468,6 +468,10 @@ namespace engine::script {
 		// @param released Appended with every callable the table held.
 		void Clear(std::vector<CallbackRef> &released);
 
+		bool Empty() const {
+			return Owners.empty();
+		}
+
 		// How many live connections one signal has.
 		//
 		// @param kind    Which signal.

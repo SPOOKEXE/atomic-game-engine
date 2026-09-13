@@ -41,6 +41,7 @@
 #include <vector>
 
 namespace engine::script {
+	class DataScriptPackageContext;
 
 	// One neutral service property installed in this VM, and the service it is
 	// on.
@@ -62,6 +63,7 @@ namespace engine::script {
 	//
 	// @since v0.5
 	struct JsContext {
+		const DataScriptPackageContext *Package = nullptr;
 		ecs::Store *World = nullptr;
 
 		// What the host is, for `RunService.IsServer()` and friends.

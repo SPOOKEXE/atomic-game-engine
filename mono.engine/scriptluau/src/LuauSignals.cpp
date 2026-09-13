@@ -136,6 +136,9 @@ namespace engine::script {
 		// `signal:Connect(fn)` -> RBXScriptConnection
 		int SignalConnect(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
+			if (context.Package != nullptr) {
+				luaL_errorL(state, "data-script packages may not retain callbacks");
+			}
 			SignalHandle &signal = CheckSignal(state, 1);
 			luaL_checktype(state, 2, LUA_TFUNCTION);
 
@@ -171,6 +174,9 @@ namespace engine::script {
 		// assigns it, which is the one shape a Luau author reliably gets wrong.
 		int SignalOnce(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
+			if (context.Package != nullptr) {
+				luaL_errorL(state, "data-script packages may not retain callbacks");
+			}
 			SignalHandle &signal = CheckSignal(state, 1);
 			luaL_checktype(state, 2, LUA_TFUNCTION);
 

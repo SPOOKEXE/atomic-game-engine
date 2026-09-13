@@ -648,6 +648,27 @@ namespace engine::world {
 		return Reply(restored, DataFactoryStatus::Ok, "restored through a scratch universe and fresh epoch");
 	}
 
+	DataFactoryReply DataFactorySession::CommitExternalMutation(
+		std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion
+	) {
+		const WorldId world = Resolve(instanceId);
+		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
+		if (!AllSystemsPaused(instanceId))
+			return Reply(
+				world, DataFactoryStatus::NotPaused, "external mutation requires an all_systems pause"
+			);
+		if (expectedVersion != Version)
+			return Reply(world, DataFactoryStatus::VersionConflict, "expected_world_version does not match");
+		if (ClockOf(world).Tick != expectedTick)
+			return Reply(
+				world, DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
+			);
+		Version++;
+		return Reply(world, DataFactoryStatus::Ok, "external atomic mutation committed at a fresh revision");
+	}
+
 	DataFactoryReply DataFactorySession::ApplyIntervention(
 		std::string_view instanceId,
 		std::string_view baseSnapshotId,

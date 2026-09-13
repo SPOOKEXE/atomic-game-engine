@@ -258,6 +258,25 @@ TEST_CASE(
 	CHECK(snapshot.empty());
 }
 
+TEST_CASE("data-factory external mutation commits one fresh paused revision", "[world][data-factory]") {
+	Universe universe;
+	MakeWorld(universe, "data-factory.external-mutation");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const auto paused = session.Pause("data-factory.external-mutation", DataFactoryPauseScope::AllSystems, 0);
+	REQUIRE(paused.Status == DataFactoryStatus::Ok);
+	const auto committed = session.CommitExternalMutation(
+		"data-factory.external-mutation", paused.Clock.Tick, paused.WorldVersion
+	);
+	REQUIRE(committed.Status == DataFactoryStatus::Ok);
+	CHECK(committed.WorldVersion == paused.WorldVersion + 1);
+	CHECK(
+		session
+			.CommitExternalMutation("data-factory.external-mutation", paused.Clock.Tick, paused.WorldVersion)
+			.Status == DataFactoryStatus::VersionConflict
+	);
+}
+
 TEST_CASE(
 	"data-factory render-only presentation keeps a paused snapshot unchanged", "[world][data-factory]"
 ) {

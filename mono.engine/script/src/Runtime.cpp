@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
@@ -14,6 +15,13 @@
 #endif
 
 namespace engine::script {
+
+	DataScriptPackageRunResult
+	Runtime::RunDataScriptPackage(const DataScriptPackageContext &, std::string_view, std::string_view) {
+		return {
+			.Terminal = DataScriptPackageRunResult::State::Failed, .Error = "runtime has no package executor"
+		};
+	}
 
 	namespace {
 		// Windows faults raised by a VM extension are structured exceptions, not

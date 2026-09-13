@@ -18,6 +18,9 @@ namespace engine::script {
 		~LuauRuntime() override;
 
 		bool Run(std::string_view source, std::string_view name) override;
+		DataScriptPackageRunResult RunDataScriptPackage(
+			const DataScriptPackageContext &context, std::string_view source, std::string_view entry
+		) override;
 
 		bool RunInstance(ecs::Entity instance) override;
 
@@ -47,5 +50,6 @@ namespace engine::script {
 
 	  private:
 		lua_State *State = nullptr;
+		bool PackageUsed = false;
 	};
 }
