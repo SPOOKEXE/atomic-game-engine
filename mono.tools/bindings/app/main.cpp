@@ -1604,6 +1604,8 @@ declare extern type DataSceneService with
 	function PollLifecycle(self, ticket: string): any
 	function ReleaseLifecycle(self, ticket: string): any
 	function GetResources(self): any
+	function SetEventNarratives(self, bundle: any): any
+	function GetEventNarratives(self): any
 	function Raycast(self, request: any): any
 	function OverlapAABB(self, request: any): any
 	function OverlapOBB(self, request: any): any
@@ -3450,6 +3452,8 @@ declare interface DataSceneService {
 	PollLifecycle(ticket: string): Record<string, unknown>;
 	ReleaseLifecycle(ticket: string): Record<string, unknown>;
 	GetResources(): Record<string, unknown>;
+	SetEventNarratives(bundle: unknown): Record<string, unknown>;
+	GetEventNarratives(): Record<string, unknown>;
 	Raycast(request: unknown): Record<string, unknown>;
 	OverlapAABB(request: unknown): Record<string, unknown>;
 	OverlapOBB(request: unknown): Record<string, unknown>;
