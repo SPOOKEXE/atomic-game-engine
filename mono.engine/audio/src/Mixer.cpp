@@ -155,6 +155,9 @@ namespace engine::audio {
 	}
 
 	size_t AudioMixer::ApplyPending() {
+		++CurrentObservationSerial;
+		AppliedCommandCount = 0;
+		FinishedSourceCount = 0;
 		Taken.clear();
 		Queue.Drain(Taken);
 		for (const Command &command : Taken) {
@@ -164,7 +167,7 @@ namespace engine::audio {
 		return Taken.size();
 	}
 
-	void AudioMixer::RenderNode(size_t index, size_t frames) {
+	void AudioMixer::RenderNode(size_t index, size_t frames, size_t blockOffset) {
 		const NodeId id = ScratchFor[index];
 		Node *node = Nodes.Find(id);
 		SampleBuffer &out = Scratch[index];
@@ -197,6 +200,11 @@ namespace engine::audio {
 				if (node->Cursor >= static_cast<double>(sourceFrames)) {
 					if (!node->Looping) {
 						node->Playing = false;
+						FinishedSources[FinishedSourceCount++] = FinishedAudioSource{
+							.Source = id,
+							.AtSample = Rendered + blockOffset + frame,
+							.OffsetFrames = blockOffset + frame,
+						};
 						++FinishedThisBlock;
 						break;
 					}
@@ -219,6 +227,19 @@ namespace engine::audio {
 					}
 				}
 				node->Cursor += step;
+			}
+			// Reaching the source exactly at a segment boundary has no next
+			// iteration to notice it. Stop and report it at that boundary so a
+			// block ending with the final sample does not defer the event until
+			// the following callback.
+			if (node->Playing && !node->Looping && node->Cursor >= static_cast<double>(sourceFrames)) {
+				node->Playing = false;
+				FinishedSources[FinishedSourceCount++] = FinishedAudioSource{
+					.Source = id,
+					.AtSample = Rendered + blockOffset + frames,
+					.OffsetFrames = blockOffset + frames,
+				};
+				++FinishedThisBlock;
 			}
 			return;
 		}
@@ -293,7 +314,7 @@ namespace engine::audio {
 		}
 
 		for (size_t index = 0; index < ScratchFor.size(); ++index) {
-			RenderNode(index, frames);
+			RenderNode(index, frames, offset);
 		}
 
 		// Copy the output's scratch into place.
@@ -313,6 +334,12 @@ namespace engine::audio {
 		ENGINE_PROFILE("audio::AudioMixer::Render");
 
 		MixReport report;
+		++CurrentObservationSerial;
+		report.BeginSample = Rendered;
+		report.EndSample = Rendered;
+		report.ObservationSerial = CurrentObservationSerial;
+		AppliedCommandCount = 0;
+		FinishedSourceCount = 0;
 		if (out.Format() != Shape) {
 			// Silence rather than a resample. A resample on this thread is the
 			// wrong answer to a caller's configuration mistake, and silence is
@@ -362,6 +389,15 @@ namespace engine::audio {
 		while (at < frames) {
 			// Apply everything due exactly here.
 			while (next < Schedule.size() && Schedule[next].Offset <= at) {
+				const Due &due = Schedule[next];
+				AppliedCommands[AppliedCommandCount++] = AppliedAudioCommand{
+					.Kind = due.What.Kind,
+					.Target = due.What.Target,
+					.Related = due.What.Second,
+					.RequestedSample = due.What.AtSample,
+					.AppliedSample = Rendered + at,
+					.OffsetFrames = at,
+				};
 				Apply(Schedule[next].What);
 				++report.Applied;
 				++next;
@@ -381,6 +417,15 @@ namespace engine::audio {
 		// it takes effect at the start of the next one rather than being
 		// dropped.
 		while (next < Schedule.size()) {
+			const Due &due = Schedule[next];
+			AppliedCommands[AppliedCommandCount++] = AppliedAudioCommand{
+				.Kind = due.What.Kind,
+				.Target = due.What.Target,
+				.Related = due.What.Second,
+				.RequestedSample = due.What.AtSample,
+				.AppliedSample = Rendered + frames,
+				.OffsetFrames = frames,
+			};
 			Apply(Schedule[next].What);
 			++report.Applied;
 			++next;
@@ -404,6 +449,7 @@ namespace engine::audio {
 		}
 
 		Rendered += frames;
+		report.EndSample = Rendered;
 		return report;
 	}
 }

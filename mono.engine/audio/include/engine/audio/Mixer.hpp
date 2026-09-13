@@ -26,8 +26,10 @@
 #include <engine/audio/Graph.hpp>
 #include <engine/audio/Sample.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -59,6 +61,36 @@ namespace engine::audio {
 
 		// Players that reached the end and stopped this block.
 		size_t Finished = 0;
+
+		// The first sample produced by this block on the absolute mixer clock.
+		uint64_t BeginSample = 0;
+
+		// One past the final sample produced by this block.
+		uint64_t EndSample = 0;
+
+		// Process-local token tying this report to the mixer's retained trace.
+		uint64_t ObservationSerial = 0;
+	};
+
+	// One command as it actually landed in the most recently rendered block.
+	//
+	// This is an internal-clock record. `NodeId` is deliberately kept here and
+	// translated to a stable source name by the observation boundary before the
+	// record leaves the process.
+	struct AppliedAudioCommand {
+		CommandKind Kind = CommandKind::None;
+		NodeId Target;
+		NodeId Related;
+		uint64_t RequestedSample = 0;
+		uint64_t AppliedSample = 0;
+		size_t OffsetFrames = 0;
+	};
+
+	// A player that reached the end of its source during the latest block.
+	struct FinishedAudioSource {
+		NodeId Source;
+		uint64_t AtSample = 0;
+		size_t OffsetFrames = 0;
 	};
 
 	// Runs the graph.
@@ -110,6 +142,25 @@ namespace engine::audio {
 			return Rendered;
 		}
 
+		// Commands applied by the most recent successful render.
+		//
+		// The span remains valid until the next call to `Render` or
+		// `ApplyPending`. Storage is fixed so recording it never allocates on the
+		// device thread.
+		std::span<const AppliedAudioCommand> LastAppliedCommands() const {
+			return std::span<const AppliedAudioCommand>(AppliedCommands.data(), AppliedCommandCount);
+		}
+
+		// Players that naturally finished in the most recent successful render.
+		std::span<const FinishedAudioSource> LastFinishedSources() const {
+			return std::span<const FinishedAudioSource>(FinishedSources.data(), FinishedSourceCount);
+		}
+
+		// Process-local token for the retained render trace.
+		uint64_t ObservationSerial() const {
+			return CurrentObservationSerial;
+		}
+
 		// Renders one block.
 		//
 		// Drains the queue, splits the block at every deadline inside it,
@@ -145,7 +196,7 @@ namespace engine::audio {
 		void MixSegment(SampleBuffer &out, size_t offset, size_t frames);
 
 		// Fills one node's scratch buffer for a segment.
-		void RenderNode(size_t index, size_t frames);
+		void RenderNode(size_t index, size_t frames, size_t blockOffset);
 
 		void EnsureScratch();
 
@@ -181,6 +232,15 @@ namespace engine::audio {
 		// Reused across renders for the same reason.
 		std::vector<Command> Taken;
 		std::vector<Due> Schedule;
+
+		// A render can drain at most the command ring's capacity. Fixed storage
+		// preserves the callback's no-allocation rule while retaining exact
+		// event timing for an offline observation made after the block.
+		std::array<AppliedAudioCommand, CommandQueue::CAPACITY> AppliedCommands{};
+		size_t AppliedCommandCount = 0;
+		std::array<FinishedAudioSource, AudioGraph::MAXIMUM_NODES> FinishedSources{};
+		size_t FinishedSourceCount = 0;
+		uint64_t CurrentObservationSerial = 0;
 
 		size_t FinishedThisBlock = 0;
 	};
