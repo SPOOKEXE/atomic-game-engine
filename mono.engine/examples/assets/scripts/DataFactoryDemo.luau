@@ -56,9 +56,19 @@ print(
 	"DataFactory capabilities",
 	capabilities.schema_version,
 	capabilities.camera_metadata_schema_version,
+	capabilities.physics_observation_schema_version,
 	capabilities.scene_snapshot
 )
 print("DataFactory snapshot", snapshot.tick, #snapshot.entities, snapshot.coverage)
+print(
+	"DataFactory physics",
+	snapshot.physics_observations.schema_version,
+	snapshot.physics_observations.world_prepared,
+	snapshot.physics_observations.contacts.available,
+	snapshot.physics_observations.impulses.available,
+	snapshot.physics_observations.forces.available,
+	snapshot.physics_observations.forces.reason
+)
 print(
 	"DataFactory camera",
 	cameraMetadata.id,

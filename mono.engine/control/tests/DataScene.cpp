@@ -6,10 +6,15 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/physics/Welds.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Constraints.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -116,6 +121,17 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	CHECK(camera.at("camera_axes") == "x_right_y_up_negative_z_forward");
 	CHECK(camera.at("clip_depth_range") == "zero_to_one");
 
+	const json snapshot =
+		Call(surface, "get_scene_snapshot", {{"instance_id", "scene"}, {"options", json::object()}}, failed);
+	INFO(snapshot.dump());
+	CHECK_FALSE(failed);
+	CHECK(snapshot.at("physics_observations").at("schema_version") == "physics-observation/v1");
+	CHECK(snapshot.at("physics_observations").at("world_prepared") == false);
+	CHECK(snapshot.at("physics_observations").at("contacts").at("available") == false);
+	CHECK(snapshot.at("physics_observations").at("impulses").at("available") == false);
+	CHECK(snapshot.at("contacts").empty());
+	CHECK(snapshot.at("contact_events").empty());
+
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		const auto *active = store.Resource<ActiveCamera>();
 		REQUIRE(active != nullptr);
@@ -187,6 +203,7 @@ TEST_CASE("data-scene MCP queries prepared collider geometry", "[control][datasc
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
+		engine::scene::InstallServices(store);
 		engine::physics::PreparePhysicsWorld(store);
 		engine::scene::PartDesc partDesc;
 		partDesc.Frame = CFrame{Vector3::Zero};
@@ -275,4 +292,192 @@ TEST_CASE("data-scene MCP queries prepared collider geometry", "[control][datasc
 	);
 	CHECK(failed);
 	CHECK(unknown.contains("error"));
+}
+
+TEST_CASE(
+	"data-scene snapshot reports solver observations and explicit unavailable accumulators",
+	"[control][datascene]"
+) {
+	Universe universe;
+	const WorldId world = World(universe, "physics_observation");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	Entity body;
+
+	universe.Enter(world, [&](engine::ecs::Store &store) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		const Entity workspace = engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+		engine::scene::PartDesc staticDescription;
+		staticDescription.Frame = CFrame{Vector3::Zero};
+		staticDescription.Size = Vector3{2.0f, 2.0f, 2.0f};
+		const Entity floor = engine::scene::MakePart(store, staticDescription);
+		Identify(store, floor, "physics/floor");
+
+		engine::scene::PartDesc dynamicDescription = staticDescription;
+		dynamicDescription.Frame = CFrame{Vector3{0.0f, 0.5f, 0.0f}};
+		body = engine::scene::MakePart(store, dynamicDescription);
+		Identify(store, body, "physics/body");
+		store.Set<engine::scene::Simulated>(body, {});
+		engine::scene::Motion motion;
+		motion.Linear = Vector3{0.0f, -2.0f, 0.0f};
+		store.Set<engine::scene::Motion>(body, motion);
+		engine::scene::Humanoid humanoid;
+		humanoid.RootPart = body;
+		humanoid.MoveDirection = Vector3{1.0f, 0.0f, 0.0f};
+		humanoid.WalkSpeed = 4.5f;
+		store.Set<engine::scene::Humanoid>(body, humanoid);
+		// This collider shares the observed body's contact, but lacks a factory
+		// id. The snapshot must report only contact pairs with both endpoints in
+		// its explicit stable-id subset.
+		engine::scene::MakePart(store, dynamicDescription);
+
+		engine::scene::PartDesc assemblyDescription = staticDescription;
+		assemblyDescription.Frame = CFrame{Vector3{20.0f, 0.0f, 0.0f}};
+		const Entity unlabelledAssemblyRoot = engine::scene::MakePart(store, assemblyDescription);
+		assemblyDescription.Frame = CFrame{Vector3{22.0f, 0.0f, 0.0f}};
+		const Entity assemblyLeaf = engine::scene::MakePart(store, assemblyDescription);
+		Identify(store, assemblyLeaf, "physics/assembly-leaf");
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		store.SetParent(unlabelledAssemblyRoot, workspace);
+		store.SetParent(assemblyLeaf, workspace);
+		REQUIRE(store.IsDescendantOf(unlabelledAssemblyRoot, workspace));
+		REQUIRE(store.IsDescendantOf(assemblyLeaf, workspace));
+		engine::scene::JointInstance joint;
+		joint.Part0 = unlabelledAssemblyRoot;
+		joint.Part1 = assemblyLeaf;
+		store.Set<engine::scene::JointInstance>(assemblyLeaf, joint);
+
+		engine::scene::CameraController cameraController;
+		cameraController.Distance = 7.0f;
+		cameraController.MinimumDistance = 1.0f;
+		cameraController.MaximumDistance = 30.0f;
+		store.SetResource(cameraController);
+		engine::scene::ControllerState controllers;
+		controllers.Slots[0].Connected = true;
+		controllers.Slots[0].Mapped = true;
+		controllers.Slots[0].Buttons = 3;
+		controllers.Slots[0].PressedButtons = 1;
+		controllers.Slots[0].Axes[0] = 0.25f;
+		store.SetResource(controllers);
+		engine::ecs::Scheduler scheduler;
+		engine::physics::RegisterPhysicsSystems(scheduler);
+		scheduler.Tick(store, 1.0 / 60.0);
+		engine::physics::SolveRigidJoints(store);
+	});
+
+	bool failed = false;
+	const json snapshot = Call(
+		surface,
+		"get_scene_snapshot",
+		{{"instance_id", "physics_observation"}, {"options", json::object()}},
+		failed
+	);
+	INFO(snapshot.dump());
+	CHECK_FALSE(failed);
+	CHECK(snapshot.at("physics_observations").at("schema_version") == "physics-observation/v1");
+	CHECK(snapshot.at("physics_observations").at("world_prepared") == true);
+	CHECK(snapshot.at("physics_observations").at("contacts").at("available") == true);
+	CHECK(snapshot.at("physics_observations").at("impulses").at("available") == true);
+	CHECK(
+		snapshot.at("physics_observations").at("contacts").at("coverage") ==
+		"identified_endpoints_in_explicit_subset"
+	);
+	CHECK(snapshot.at("physics_observations").at("impulses").at("skipped_manifolds") == "excluded");
+	CHECK(snapshot.at("physics_observations").at("forces").at("available") == false);
+	CHECK(snapshot.at("physics_observations").at("torques").at("available") == false);
+	CHECK(snapshot.at("physics_observations").at("forces").at("reason").get<std::string>().size() > 0);
+	REQUIRE(snapshot.at("contacts").is_array());
+	REQUIRE(snapshot.at("contact_events").is_array());
+	bool contactObserved = false;
+	for (const auto &contact : snapshot.at("contacts")) {
+		if (contact.at("a_id") != "physics/floor" || contact.at("b_id") != "physics/body") {
+			continue;
+		}
+		REQUIRE_FALSE(contact.at("points").empty());
+		const auto &point = contact.at("points").at(0);
+		CHECK(point.at("normal_impulse_newton_seconds").get<float>() > 0.0f);
+		CHECK(point.at("friction_impulse_newton_seconds").at("tangent0_world_direction").is_object());
+		CHECK(point.at("world_impulse_newton_seconds").is_object());
+		CHECK(point.at("world_impulse_applied_to") == "b_from_a");
+		contactObserved = true;
+	}
+	CHECK(contactObserved);
+	bool beganObserved = false;
+	for (const auto &event : snapshot.at("contact_events")) {
+		beganObserved |= event.at("a_id") == "physics/floor" && event.at("b_id") == "physics/body" &&
+						 event.at("phase") == "began";
+	}
+	CHECK(beganObserved);
+	CHECK(
+		snapshot.at("physics_observations")
+			.at("contacts")
+			.at("omitted_unidentified_endpoints")
+			.get<size_t>() >= 1
+	);
+	for (const auto &entity : snapshot.at("entities")) {
+		if (entity.at("id") == "physics/body") {
+			CHECK(entity.at("physics").at("sleeping").is_boolean());
+			CHECK(entity.at("physics").at("sleep_state") == "awake");
+			CHECK(entity.at("physics").at("awake") == true);
+			CHECK(entity.at("physics").at("assembly_available") == true);
+			CHECK(entity.at("physics").at("has_rigid_assembly") == false);
+			CHECK(entity.at("physics").at("assembly_root_has_stable_id") == false);
+			CHECK(entity.at("physics").at("units").at("impulse") == "N*s");
+			CHECK(entity.at("humanoid_controller").at("root_part_id") == "physics/body");
+			CHECK(entity.at("humanoid_controller").at("walk_speed_mps") == 4.5);
+		}
+		if (entity.at("id") == "physics/assembly-leaf") {
+			CHECK(entity.at("physics").at("has_rigid_assembly") == true);
+			CHECK(entity.at("physics").at("assembly_root_has_stable_id") == false);
+			REQUIRE(entity.at("joints").size() == 1);
+			CHECK(entity.at("joints").at(0).at("kind") == "joint_instance");
+			CHECK(entity.at("joints").at(0).at("part1_id") == "physics/assembly-leaf");
+		}
+	}
+	CHECK(snapshot.at("camera_controller").at("distance_metres") == 7.0);
+	CHECK(snapshot.at("controllers").at(0).at("connected") == true);
+	CHECK(snapshot.at("controllers").at(0).at("axes").at(0) == 0.25);
+
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::ecs::Scheduler scheduler;
+		engine::physics::RegisterPhysicsSystems(scheduler);
+		scheduler.Tick(store, 1.0 / 60.0);
+	});
+	const json persisted = Call(
+		surface,
+		"get_scene_snapshot",
+		{{"instance_id", "physics_observation"}, {"options", json::object()}},
+		failed
+	);
+	INFO(persisted.dump());
+	CHECK_FALSE(failed);
+	bool persistedObserved = false;
+	for (const auto &event : persisted.at("contact_events")) {
+		persistedObserved |= event.at("a_id") == "physics/floor" && event.at("b_id") == "physics/body" &&
+							 event.at("phase") == "persisted";
+	}
+	CHECK(persistedObserved);
+
+	universe.Enter(world, [&](engine::ecs::Store &store) {
+		store.GetMutable<Transform>(body)->Frame.Position = Vector3{0.0f, 10.0f, 0.0f};
+		engine::ecs::Scheduler scheduler;
+		engine::physics::RegisterPhysicsSystems(scheduler);
+		scheduler.Tick(store, 1.0 / 60.0);
+	});
+	const json ended = Call(
+		surface,
+		"get_scene_snapshot",
+		{{"instance_id", "physics_observation"}, {"options", json::object()}},
+		failed
+	);
+	INFO(ended.dump());
+	CHECK_FALSE(failed);
+	bool endedObserved = false;
+	for (const auto &event : ended.at("contact_events")) {
+		endedObserved |= event.at("a_id") == "physics/floor" && event.at("b_id") == "physics/body" &&
+						 event.at("phase") == "ended";
+	}
+	CHECK(endedObserved);
 }

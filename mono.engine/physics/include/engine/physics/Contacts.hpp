@@ -32,10 +32,28 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
 namespace engine::physics {
+
+	// Resolves the deterministic pair of unit directions spanning a contact
+	// plane. The solver and observation consumers share this function so a
+	// reported friction magnitude always has the same world-space basis that
+	// accumulated it.
+	//
+	// @param normal Unit contact normal from A toward B.
+	// @param first Filled with the first unit tangent direction.
+	// @param second Filled with the second unit tangent direction.
+	inline void
+	ContactTangentBasis(const core::Vector3 &normal, core::Vector3 &first, core::Vector3 &second) {
+		const core::Vector3 seed = std::abs(normal.X) < 0.57735f   ? core::Vector3::XAxis
+								   : std::abs(normal.Y) < 0.57735f ? core::Vector3::YAxis
+																   : core::Vector3::ZAxis;
+		first = normal.Cross(seed).Unit();
+		second = normal.Cross(first);
+	}
 
 	// One place two colliders touch.
 	//

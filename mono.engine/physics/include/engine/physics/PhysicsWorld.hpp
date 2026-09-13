@@ -846,6 +846,19 @@ namespace engine::physics {
 			return BodyList;
 		}
 
+		// The accumulated contact impulses from the most recent completed solve.
+		//
+		// The cache is retained for warm starting, so this is the solver's last
+		// answer rather than an authored force. It includes speculative rows only
+		// as zero contact impulses with their captured closing speed. Manifolds
+		// skipped because neither body can move do not appear. It is valid until
+		// the next solve and is empty when no contact solve has completed.
+		//
+		// @return Contact impulses sorted by body pair and feature.
+		std::span<const ContactImpulse> Impulses() const {
+			return ImpulseCache;
+		}
+
 		// Logical storage owned by this world's physics pipeline.
 		//
 		// `BodyIndexByOwner` contributes its bucket pointers and live key-value
@@ -917,6 +930,13 @@ namespace engine::physics {
 
 		// Whether two parts belong to the same active rigid assembly.
 		bool RigidlyConnected(ecs::Entity first, ecs::Entity second) const;
+
+		// The root of an active rigid assembly, or a null entity when the body is
+		// not in an active joint graph.
+		//
+		// @param entity Body to inspect.
+		// @return Active assembly root, or `ecs::NULL_ENTITY` when none exists.
+		ecs::Entity RigidAssemblyRoot(ecs::Entity entity) const;
 
 		// How many colliders the dynamic index held after the last sync.
 		//

@@ -391,21 +391,6 @@ namespace engine::physics {
 				   first.AngularVelocity.Dot(axis.FirstTorque);
 		}
 
-		// Two unit directions across `normal`, spanning the contact plane.
-		//
-		// Built from whichever world axis the normal is least aligned with, so
-		// the cross product is never near-degenerate. The choice is a function
-		// of the normal alone, which is what keeps the friction basis - and
-		// therefore the warm start that reuses its impulses - the same from one
-		// tick to the next.
-		void TangentsFor(const core::Vector3 &normal, core::Vector3 &first, core::Vector3 &second) {
-			const core::Vector3 seed = std::abs(normal.X) < 0.57735f   ? core::Vector3::XAxis
-									   : std::abs(normal.Y) < 0.57735f ? core::Vector3::YAxis
-																	   : core::Vector3::ZAxis;
-			first = normal.Cross(seed).Unit();
-			second = normal.Cross(first);
-		}
-
 		// Resolves one impulse direction: the two angular responses and the mass
 		// that falls out of them.
 		//
@@ -1502,7 +1487,7 @@ namespace engine::physics {
 						row.Speculative = speculative;
 
 						row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
-						TangentsFor(
+						ContactTangentBasis(
 							manifold.Normal,
 							row.Along[ContactRow::TANGENT].Direction,
 							row.Along[ContactRow::TANGENT + 1].Direction

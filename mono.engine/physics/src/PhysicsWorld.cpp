@@ -197,4 +197,14 @@ namespace engine::physics {
 		return a != RigidNodes.end() && b != RigidNodes.end() && a->Part == first && b->Part == second &&
 			   a->Root != ecs::NULL_ENTITY && a->Root == b->Root;
 	}
+
+	ecs::Entity PhysicsWorld::RigidAssemblyRoot(ecs::Entity entity) const {
+		const auto found = std::lower_bound(
+			RigidNodes.begin(), RigidNodes.end(), entity, [](const RigidNode &entry, ecs::Entity wanted) {
+				return entry.Part.Id < wanted.Id;
+			}
+		);
+		if (found == RigidNodes.end() || found->Part != entity) return ecs::NULL_ENTITY;
+		return found->Root;
+	}
 }

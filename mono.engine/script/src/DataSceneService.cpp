@@ -3,11 +3,15 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
+#include <engine/physics/Contacts.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Constraints.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
@@ -81,6 +85,32 @@ namespace engine::script {
 				return "spot";
 			case scene::LightKind::Surface:
 				return "surface";
+			}
+			return "unknown";
+		}
+
+		const char *CameraModeName(scene::CameraMode mode) {
+			switch (mode) {
+			case scene::CameraMode::Classic:
+				return "classic";
+			case scene::CameraMode::LockFirstPerson:
+				return "lock_first_person";
+			case scene::CameraMode::ShiftLock:
+				return "shift_lock";
+			case scene::CameraMode::Scriptable:
+				return "scriptable";
+			}
+			return "unknown";
+		}
+
+		const char *ConstraintMotionName(scene::ConstraintMotion motion) {
+			switch (motion) {
+			case scene::ConstraintMotion::Locked:
+				return "locked";
+			case scene::ConstraintMotion::Limited:
+				return "limited";
+			case scene::ConstraintMotion::Free:
+				return "free";
 			}
 			return "unknown";
 		}
@@ -630,7 +660,8 @@ namespace engine::script {
 			const ecs::Store &store,
 			ecs::Entity entity,
 			std::string_view id,
-			const std::unordered_map<uint64_t, std::string> &ids
+			const std::unordered_map<uint64_t, std::string> &ids,
+			const physics::PhysicsWorld *physicsWorld
 		) {
 			const ecs::ClassInfo &classInfo = ecs::Classes::Describe(store.ClassOf(entity));
 			std::vector<std::pair<std::string, ScriptValue>> entries{
@@ -722,17 +753,45 @@ namespace engine::script {
 				);
 			}
 			if (const auto *body = store.Get<scene::RigidBody>(entity); body != nullptr) {
-				entries.emplace_back(
-					"physics",
-					Map({
-						{"mass_kg", Number(body->Mass)},
-						{"linear_damping_per_second", Number(body->LinearDamping)},
-						{"angular_damping_per_second", Number(body->AngularDamping)},
-						{"body_kind", String(scene::Describe(body->Kind))},
-						{"simulated", Boolean(store.Has<scene::Simulated>(entity))},
-						{"awake", Boolean(store.Has<scene::Motion>(entity))},
-					})
-				);
+				const bool sleeping = physicsWorld != nullptr && physicsWorld->Sleeping(entity);
+				const bool simulated = store.Has<scene::Simulated>(entity);
+				const bool assemblyAvailable = physicsWorld != nullptr;
+				const ecs::Entity root =
+					physicsWorld == nullptr ? ecs::NULL_ENTITY : physicsWorld->RigidAssemblyRoot(entity);
+				const auto found = ids.find(root.Id);
+				const bool hasAssembly = root != ecs::NULL_ENTITY;
+				const bool rootHasStableId = hasAssembly && found != ids.end();
+				const bool awake =
+					assemblyAvailable && simulated && body->Kind == scene::BodyKind::Dynamic && !sleeping;
+				const char *sleepState = !simulated || body->Kind != scene::BodyKind::Dynamic
+											 ? "not_applicable"
+										 : physicsWorld == nullptr ? "unavailable"
+										 : sleeping				   ? "sleeping"
+																   : "awake";
+				std::vector<std::pair<std::string, ScriptValue>> physics{
+					{"mass_kg", Number(body->Mass)},
+					{"linear_damping_per_second", Number(body->LinearDamping)},
+					{"angular_damping_per_second", Number(body->AngularDamping)},
+					{"body_kind", String(scene::Describe(body->Kind))},
+					{"simulated", Boolean(simulated)},
+					{"awake", Boolean(awake)},
+					{"sleeping", Boolean(sleeping)},
+					{"sleep_state", String(sleepState)},
+					{"assembly_available", Boolean(assemblyAvailable)},
+					{"has_rigid_assembly", Boolean(hasAssembly)},
+					{"assembly_root_has_stable_id", Boolean(rootHasStableId)},
+					{"assembly_root_id", String(rootHasStableId ? found->second : "")},
+					{"units",
+					 Map({
+						 {"mass", String("kg")},
+						 {"linear_velocity", String("m/s")},
+						 {"angular_velocity", String("rad/s")},
+						 {"impulse", String("N*s")},
+						 {"force", String("N")},
+						 {"torque", String("N*m")},
+					 })},
+				};
+				entries.emplace_back("physics", Map(std::move(physics)));
 			}
 			if (const auto *motion = store.Get<scene::Motion>(entity); motion != nullptr) {
 				entries.emplace_back(
@@ -754,41 +813,239 @@ namespace engine::script {
 					})
 				);
 			}
+			std::vector<ScriptValue> joints;
+			if (const auto *constraint = store.Get<scene::Constraint>(entity); constraint != nullptr) {
+				const auto stable = [&](ecs::Entity target) {
+					const auto found = ids.find(target.Id);
+					return String(found == ids.end() ? "" : found->second);
+				};
+				std::vector<ScriptValue> linearMotion;
+				std::vector<ScriptValue> angularMotion;
+				std::vector<ScriptValue> linearLower;
+				std::vector<ScriptValue> linearUpper;
+				std::vector<ScriptValue> angularLower;
+				std::vector<ScriptValue> angularUpper;
+				for (size_t axis = 0; axis < scene::CONSTRAINT_AXES; ++axis) {
+					linearMotion.push_back(String(ConstraintMotionName(constraint->Linear[axis])));
+					angularMotion.push_back(String(ConstraintMotionName(constraint->Angular[axis])));
+					linearLower.push_back(Number(constraint->LinearLower[axis]));
+					linearUpper.push_back(Number(constraint->LinearUpper[axis]));
+					angularLower.push_back(Number(constraint->AngularLower[axis]));
+					angularUpper.push_back(Number(constraint->AngularUpper[axis]));
+				}
+				joints.push_back(Map({
+					{"kind", String("constraint")},
+					{"attachment0_id", stable(constraint->Attachment0)},
+					{"attachment1_id", stable(constraint->Attachment1)},
+					{"attachment0_has_stable_id", Boolean(ids.contains(constraint->Attachment0.Id))},
+					{"attachment1_has_stable_id", Boolean(ids.contains(constraint->Attachment1.Id))},
+					{"enabled", Boolean(constraint->Enabled)},
+					{"physics_support", String("authored_only")},
+					{"target", Frame(constraint->Target)},
+					{"linear_motion", Array(std::move(linearMotion))},
+					{"angular_motion", Array(std::move(angularMotion))},
+					{"linear_lower_metres", Array(std::move(linearLower))},
+					{"linear_upper_metres", Array(std::move(linearUpper))},
+					{"angular_lower_radians", Array(std::move(angularLower))},
+					{"angular_upper_radians", Array(std::move(angularUpper))},
+					{"stiffness_n_per_m", Number(constraint->Stiffness)},
+					{"damping_newton_seconds_per_metre", Number(constraint->Damping)},
+					{"max_force_n", Number(constraint->MaxForce)},
+					{"max_torque_nm", Number(constraint->MaxTorque)},
+					{"units",
+					 Map({
+						 {"linear", String("m")},
+						 {"angular", String("rad")},
+						 {"stiffness", String("N/m")},
+						 {"damping", String("N*s/m")},
+						 {"force", String("N")},
+						 {"torque", String("N*m")},
+					 })},
+				}));
+			}
+			if (const auto *joint = store.Get<scene::JointInstance>(entity); joint != nullptr) {
+				const auto stable = [&](ecs::Entity target) {
+					const auto found = ids.find(target.Id);
+					return String(found == ids.end() ? "" : found->second);
+				};
+				joints.push_back(Map({
+					{"kind", String("joint_instance")},
+					{"part0_id", stable(joint->Part0)},
+					{"part1_id", stable(joint->Part1)},
+					{"part0_has_stable_id", Boolean(ids.contains(joint->Part0.Id))},
+					{"part1_has_stable_id", Boolean(ids.contains(joint->Part1.Id))},
+					{"enabled", Boolean(joint->Enabled)},
+					{"physics_support", String("rigid")},
+					{"c0", Frame(joint->C0)},
+					{"c1", Frame(joint->C1)},
+				}));
+			}
+			if (const auto *joint = store.Get<scene::WeldConstraint>(entity); joint != nullptr) {
+				const auto stable = [&](ecs::Entity target) {
+					const auto found = ids.find(target.Id);
+					return String(found == ids.end() ? "" : found->second);
+				};
+				joints.push_back(Map({
+					{"kind", String("weld_constraint")},
+					{"part0_id", stable(joint->Part0)},
+					{"part1_id", stable(joint->Part1)},
+					{"part0_has_stable_id", Boolean(ids.contains(joint->Part0.Id))},
+					{"part1_has_stable_id", Boolean(ids.contains(joint->Part1.Id))},
+					{"enabled", Boolean(joint->Enabled)},
+					{"physics_support", String("rigid")},
+				}));
+			}
+			if (!joints.empty()) {
+				entries.emplace_back("joints", Array(std::move(joints)));
+			}
+			if (const auto *humanoid = store.Get<scene::Humanoid>(entity); humanoid != nullptr) {
+				const auto root = ids.find(humanoid->RootPart.Id);
+				entries.emplace_back(
+					"humanoid_controller",
+					Map({
+						{"root_part_id", String(root == ids.end() ? "" : root->second)},
+						{"root_part_has_stable_id", Boolean(root != ids.end())},
+						{"move_direction_world", Vector(humanoid->MoveDirection)},
+						{"walk_speed_mps", Number(humanoid->WalkSpeed)},
+						{"jump_speed_mps", Number(humanoid->JumpSpeed)},
+						{"height_metres", Number(humanoid->Height)},
+						{"ground_tolerance_metres", Number(humanoid->GroundTolerance)},
+						{"health", Number(humanoid->Health)},
+						{"max_health", Number(humanoid->MaxHealth)},
+						{"grounded", Boolean(humanoid->Grounded)},
+						{"jump_requested", Boolean(humanoid->JumpRequested)},
+						{"enabled", Boolean(humanoid->Enabled)},
+						{"auto_rotate", Boolean(humanoid->AutoRotate)},
+						{"units",
+						 Map({
+							 {"linear_speed", String("m/s")},
+							 {"distance", String("m")},
+							 {"move_direction", String("unitless_world_space")},
+						 })},
+					})
+				);
+			}
 			return Map(std::move(entries));
 		}
 
-		ScriptValue ContactRecords(
+		struct ObservationRecords {
+			ScriptValue Values;
+			size_t OmittedUnidentifiedEndpoints = 0;
+			size_t OmittedResourceLimit = 0;
+		};
+
+		ObservationRecords ContactRecords(
 			const physics::PhysicsWorld &world, const std::unordered_map<uint64_t, std::string> &ids
 		) {
 			std::vector<ScriptValue> records;
-			records.reserve(world.Manifolds().size());
+			records.reserve(std::min(world.Manifolds().size(), MAX_DATA_SCENE_ENTITIES));
+			size_t omittedUnidentifiedEndpoints = 0;
+			size_t omittedResourceLimit = 0;
 			for (const physics::ContactManifold &manifold : world.Manifolds()) {
-				auto endpoint = [&](ecs::Entity entity) {
-					if (const auto found = ids.find(entity.Id); found != ids.end())
-						return String(found->second);
-					return String("");
-				};
+				const auto first = ids.find(manifold.A.Id);
+				const auto second = ids.find(manifold.B.Id);
+				if (first == ids.end() || second == ids.end()) {
+					omittedUnidentifiedEndpoints++;
+					continue;
+				}
+				if (records.size() == MAX_DATA_SCENE_ENTITIES) {
+					omittedResourceLimit++;
+					continue;
+				}
+				core::Vector3 tangent0;
+				core::Vector3 tangent1;
+				physics::ContactTangentBasis(manifold.Normal, tangent0, tangent1);
 				std::vector<ScriptValue> points;
 				points.reserve(manifold.PointCount);
 				for (size_t index = 0; index < manifold.PointCount; index++) {
 					const physics::ContactPoint &point = manifold.Points[index];
-					points.push_back(Map({
+					physics::ContactImpulse key;
+					key.A = manifold.A;
+					key.B = manifold.B;
+					key.Feature = point.Feature;
+					const auto found =
+						std::lower_bound(world.Impulses().begin(), world.Impulses().end(), key);
+					const physics::ContactImpulse *impulse =
+						found != world.Impulses().end() && !(key < *found) ? &*found : nullptr;
+					const float normalImpulse = impulse == nullptr ? 0.0f : impulse->Normal;
+					const float tangentImpulse0 = impulse == nullptr ? 0.0f : impulse->Tangent[0];
+					const float tangentImpulse1 = impulse == nullptr ? 0.0f : impulse->Tangent[1];
+					std::vector<std::pair<std::string, ScriptValue>> pointRecord{
 						{"position_metres", Vector(point.Position)},
 						{"penetration_metres", Number(point.Penetration)},
+						{"separation_metres", Number(point.Separation)},
 						{"feature", String(Decimal(point.Feature))},
-					}));
+						{"normal_impulse_newton_seconds", Number(normalImpulse)},
+						{"friction_impulse_newton_seconds",
+						 Map({
+							 {"tangent0", Number(tangentImpulse0)},
+							 {"tangent1", Number(tangentImpulse1)},
+							 {"tangent0_world_direction", Vector(tangent0)},
+							 {"tangent1_world_direction", Vector(tangent1)},
+						 })},
+						{"world_impulse_newton_seconds",
+						 Vector(
+							 manifold.Normal * normalImpulse + tangent0 * tangentImpulse0 +
+							 tangent1 * tangentImpulse1
+						 )},
+						{"world_impulse_applied_to", String("b_from_a")},
+						{"impulse_provenance",
+						 String(impulse == nullptr ? "no_completed_solver_impulse" : "solver_accumulated")},
+					};
+					points.push_back(Map(std::move(pointRecord)));
 				}
 				records.push_back(Map({
-					{"a_id", endpoint(manifold.A)},
-					{"b_id", endpoint(manifold.B)},
-					{"a_has_stable_id", Boolean(ids.contains(manifold.A.Id))},
-					{"b_has_stable_id", Boolean(ids.contains(manifold.B.Id))},
+					{"a_id", String(first->second)},
+					{"b_id", String(second->second)},
+					{"a_has_stable_id", Boolean(true)},
+					{"b_has_stable_id", Boolean(true)},
 					{"normal", Vector(manifold.Normal)},
 					{"trigger", Boolean(manifold.Trigger)},
 					{"points", Array(std::move(points))},
 				}));
 			}
-			return Array(std::move(records));
+			return {Array(std::move(records)), omittedUnidentifiedEndpoints, omittedResourceLimit};
+		}
+
+		const char *ContactPhaseName(physics::ContactPhase phase) {
+			switch (phase) {
+			case physics::ContactPhase::Began:
+				return "began";
+			case physics::ContactPhase::Persisted:
+				return "persisted";
+			case physics::ContactPhase::Ended:
+				return "ended";
+			}
+			return "unknown";
+		}
+
+		ObservationRecords ContactEventRecords(
+			const physics::PhysicsWorld &world, const std::unordered_map<uint64_t, std::string> &ids
+		) {
+			std::vector<ScriptValue> records;
+			records.reserve(std::min(world.Events().size(), MAX_DATA_SCENE_ENTITIES));
+			size_t omittedUnidentifiedEndpoints = 0;
+			size_t omittedResourceLimit = 0;
+			for (const physics::ContactEvent &event : world.Events()) {
+				const auto first = ids.find(event.A.Id);
+				const auto second = ids.find(event.B.Id);
+				if (first == ids.end() || second == ids.end()) {
+					omittedUnidentifiedEndpoints++;
+					continue;
+				}
+				if (records.size() == MAX_DATA_SCENE_ENTITIES) {
+					omittedResourceLimit++;
+					continue;
+				}
+				records.push_back(Map({
+					{"a_id", String(first->second)},
+					{"b_id", String(second->second)},
+					{"a_has_stable_id", Boolean(true)},
+					{"b_has_stable_id", Boolean(true)},
+					{"phase", String(ContactPhaseName(event.Phase))},
+				}));
+			}
+			return {Array(std::move(records)), omittedUnidentifiedEndpoints, omittedResourceLimit};
 		}
 
 		void ServiceCapabilities(ScriptCall &call) {
@@ -961,7 +1218,9 @@ namespace engine::script {
 		}};
 	}
 
-	DataSceneResult GetCapabilities(const ecs::Store &) {
+	DataSceneResult GetCapabilities(const ecs::Store &store) {
+		const bool physicsPrepared = ecs::Components::Find(core::Name("physics.PhysicsWorld")).IsValid() &&
+									 store.Resource<physics::PhysicsWorld>() != nullptr;
 		return {
 			"ok",
 			Map({
@@ -970,11 +1229,21 @@ namespace engine::script {
 				{"scene_snapshot", Boolean(true)},
 				{"camera_metadata", Boolean(true)},
 				{"camera_metadata_schema_version", String("camera-rendering-data/v1")},
+				{"physics_observation_schema_version", String("physics-observation/v1")},
 				{"editable_image_rgba8", Boolean(true)},
 				{"spatial_queries", Boolean(true)},
 				{"spatial_query_kinds",
 				 Array({String("raycast"), String("aabb_overlap"), String("obb_overlap")})},
 				{"max_raycast_distance_metres", Number(100'000.0)},
+				{"physics_contacts", Boolean(physicsPrepared)},
+				{"physics_contact_impulses", Boolean(physicsPrepared)},
+				{"physics_sleep_and_assemblies", Boolean(physicsPrepared)},
+				{"physics_joints", Boolean(true)},
+				{"physics_forces", Boolean(false)},
+				{"physics_torques", Boolean(false)},
+				{"physics_force_reason", String("engine has no persistent force accumulator")},
+				{"physics_torque_reason", String("engine has no persistent torque accumulator")},
+				{"controller_fields", Boolean(true)},
 				{"durable_resources", Boolean(false)},
 				{"render_capture", Boolean(false)},
 				{"checkpoint", Boolean(false)},
@@ -1033,10 +1302,13 @@ namespace engine::script {
 		std::sort(selected.begin(), selected.end(), [](const auto &left, const auto &right) {
 			return left.second < right.second;
 		});
+		const physics::PhysicsWorld *physicsWorld = nullptr;
+		if (ecs::Components::Find(core::Name("physics.PhysicsWorld")).IsValid())
+			physicsWorld = store.Resource<physics::PhysicsWorld>();
 		std::vector<ScriptValue> entities;
 		entities.reserve(selected.size());
 		for (const auto &[entity, id] : selected)
-			entities.push_back(EntityRecord(store, entity, id, ids));
+			entities.push_back(EntityRecord(store, entity, id, ids, physicsWorld));
 		const ecs::WorldTime time = store.Time();
 		std::vector<std::pair<std::string, ScriptValue>> result{
 			{"status", String("ok")},
@@ -1059,9 +1331,103 @@ namespace engine::script {
 				})
 			);
 		}
-		if (ecs::Components::Find(core::Name("physics.PhysicsWorld")).IsValid())
-			if (const auto *world = store.Resource<physics::PhysicsWorld>(); world != nullptr)
-				result.emplace_back("contacts", ContactRecords(*world, ids));
+		const ObservationRecords contacts = physicsWorld == nullptr ? ObservationRecords{Array({}), 0, 0}
+																	: ContactRecords(*physicsWorld, ids);
+		const ObservationRecords events = physicsWorld == nullptr ? ObservationRecords{Array({}), 0, 0}
+																  : ContactEventRecords(*physicsWorld, ids);
+		result.emplace_back("contacts", contacts.Values);
+		result.emplace_back("contact_events", events.Values);
+		result.emplace_back(
+			"physics_observations",
+			Map({
+				{"schema_version", String("physics-observation/v1")},
+				{"world_prepared", Boolean(physicsWorld != nullptr)},
+				{"contacts",
+				 Map({
+					 {"available", Boolean(physicsWorld != nullptr)},
+					 {"reason", String(physicsWorld == nullptr ? "physics world is not prepared" : "")},
+					 {"coverage",
+					  String(
+						  contacts.OmittedResourceLimit == 0
+							  ? "identified_endpoints_in_explicit_subset"
+							  : "identified_endpoints_in_explicit_subset_capped"
+					  )},
+					 {"omitted_unidentified_endpoints", Number(contacts.OmittedUnidentifiedEndpoints)},
+					 {"omitted_resource_limit", Number(contacts.OmittedResourceLimit)},
+				 })},
+				{"contact_events",
+				 Map({
+					 {"available", Boolean(physicsWorld != nullptr)},
+					 {"reason", String(physicsWorld == nullptr ? "physics world is not prepared" : "")},
+					 {"coverage",
+					  String(
+						  events.OmittedResourceLimit == 0 ? "identified_endpoints_in_explicit_subset"
+														   : "identified_endpoints_in_explicit_subset_capped"
+					  )},
+					 {"omitted_unidentified_endpoints", Number(events.OmittedUnidentifiedEndpoints)},
+					 {"omitted_resource_limit", Number(events.OmittedResourceLimit)},
+				 })},
+				{"forces",
+				 Map({
+					 {"available", Boolean(false)},
+					 {"reason", String("engine has no persistent force accumulator")},
+				 })},
+				{"torques",
+				 Map({
+					 {"available", Boolean(false)},
+					 {"reason", String("engine has no persistent torque accumulator")},
+				 })},
+				{"impulses",
+				 Map({
+					 {"available", Boolean(physicsWorld != nullptr)},
+					 {"reason", String(physicsWorld == nullptr ? "physics world is not prepared" : "")},
+					 {"source", String("most_recent_completed_solver")},
+					 {"units", String("N*s")},
+					 {"coverage", String("identified_real_contacts_only")},
+					 {"speculative_rows", String("zero_contact_impulses_only")},
+					 {"skipped_manifolds", String("excluded")},
+				 })},
+			})
+		);
+		if (const auto *controller = store.Resource<scene::CameraController>(); controller != nullptr) {
+			result.emplace_back(
+				"camera_controller",
+				Map({
+					{"mode", String(CameraModeName(controller->Mode))},
+					{"enabled", Boolean(controller->Enabled)},
+					{"angles_radians", Array({Number(controller->Angles.X), Number(controller->Angles.Y)})},
+					{"distance_metres", Number(controller->Distance)},
+					{"minimum_distance_metres", Number(controller->MinimumDistance)},
+					{"maximum_distance_metres", Number(controller->MaximumDistance)},
+					{"occluded_distance_metres", Number(controller->OccludedDistance)},
+					{"head_height_metres", Number(controller->HeadHeight)},
+					{"shoulder_offset_metres", Number(controller->ShoulderOffset)},
+					{"units",
+					 Map({
+						 {"distance", String("m")},
+						 {"angle", String("rad")},
+					 })},
+				})
+			);
+		}
+		if (const auto *controllers = store.Resource<scene::ControllerState>(); controllers != nullptr) {
+			std::vector<ScriptValue> slots;
+			for (size_t index = 0; index < scene::MAX_CONTROLLERS; index++) {
+				const scene::ControllerSlot &slot = controllers->Slots[index];
+				std::vector<ScriptValue> axes;
+				for (float axis : slot.Axes)
+					axes.push_back(Number(axis));
+				slots.push_back(Map({
+					{"index", Number(index)},
+					{"connected", Boolean(slot.Connected)},
+					{"mapped", Boolean(slot.Mapped)},
+					{"buttons", Number(slot.Buttons)},
+					{"pressed_buttons", Number(slot.PressedButtons)},
+					{"axes", Array(std::move(axes))},
+				}));
+			}
+			result.emplace_back("controllers", Array(std::move(slots)));
+		}
 		return {"ok", Map(std::move(result))};
 	}
 

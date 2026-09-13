@@ -243,11 +243,20 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				assert(snapshot.entities[1].id == "fixture/observed")
 				assert(snapshot.entities[1].transform.Position.X == 1)
 				assert(snapshot.entities[1].physics.mass_kg == 1)
+				assert(not snapshot.entities[1].physics.assembly_available)
+				assert(not snapshot.entities[1].physics.has_rigid_assembly)
+				assert(not snapshot.entities[1].physics.assembly_root_has_stable_id)
+				assert(snapshot.entities[1].physics.assembly_root_id == "")
+				assert(snapshot.physics_observations.schema_version == "physics-observation/v1")
+				assert(not snapshot.physics_observations.world_prepared)
+				assert(not snapshot.physics_observations.contacts.available)
+				assert(not snapshot.physics_observations.impulses.available)
 				snapshot.entities[1].id = "mutated"
 				assert(game:GetService("DataSceneService"):GetSceneSnapshot().entities[1].id == "fixture/observed")
 				local capabilities = game:GetService("DataSceneService"):GetCapabilities()
 				assert(capabilities.scene_snapshot and not capabilities.render_capture)
 				assert(capabilities.camera_metadata_schema_version == "camera-rendering-data/v1")
+				assert(capabilities.physics_observation_schema_version == "physics-observation/v1")
 				assert(capabilities.spatial_queries and capabilities.spatial_query_kinds[3] == "obb_overlap")
 				assert(capabilities.max_raycast_distance_metres == 100000)
 				local capture = game:GetService("DataSceneService"):GetCaptureChannels()
@@ -262,11 +271,17 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				const snapshot = game.GetService("DataSceneService").GetSceneSnapshot();
 				if (snapshot.status !== "ok" || snapshot.coverage !== "explicitly_identified_subset" ||
 					 snapshot.entities[0].id !== "fixture/observed" || snapshot.entities[0].transform.Position.X !== 1 ||
-					 snapshot.entities[0].physics.mass_kg !== 1) throw new Error("snapshot mismatch");
+					 snapshot.entities[0].physics.mass_kg !== 1 || snapshot.entities[0].physics.assembly_available ||
+					 snapshot.entities[0].physics.has_rigid_assembly ||
+					 snapshot.entities[0].physics.assembly_root_has_stable_id ||
+					 snapshot.entities[0].physics.assembly_root_id !== "" ||
+					 snapshot.physics_observations.schema_version !== "physics-observation/v1" ||
+					 snapshot.physics_observations.world_prepared || snapshot.physics_observations.contacts.available ||
+					 snapshot.physics_observations.impulses.available) throw new Error("snapshot mismatch");
 				snapshot.entities[0].id = "mutated";
 				if (game.GetService("DataSceneService").GetSceneSnapshot().entities[0].id !== "fixture/observed") throw new Error("snapshot aliases ECS state");
 				const capabilities = game.GetService("DataSceneService").GetCapabilities();
-				if (!capabilities.scene_snapshot || capabilities.render_capture || capabilities.camera_metadata_schema_version !== "camera-rendering-data/v1" || !capabilities.spatial_queries || capabilities.spatial_query_kinds[2] !== "obb_overlap" || capabilities.max_raycast_distance_metres !== 100000) throw new Error("capabilities mismatch");
+				if (!capabilities.scene_snapshot || capabilities.render_capture || capabilities.camera_metadata_schema_version !== "camera-rendering-data/v1" || capabilities.physics_observation_schema_version !== "physics-observation/v1" || !capabilities.spatial_queries || capabilities.spatial_query_kinds[2] !== "obb_overlap" || capabilities.max_raycast_distance_metres !== 100000) throw new Error("capabilities mismatch");
 				const capture = game.GetService("DataSceneService").GetCaptureChannels();
 				if (capture.status !== "capability_unsupported" || capture.channels.length !== 0) throw new Error("capture mismatch");
 			)");

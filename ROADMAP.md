@@ -87,7 +87,7 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [_] emit structured event narratives with time, knowledge, belief and provenance fields.
 - [_] export rigs, skeletons, keypoints, skinning data and animation tracks.
 - [_] expose PBR albedo, roughness, metallic, emissive, specular, transmission, shading geometry, normals and UV maps.
-- [_] expose physics contacts, impulses, forces, torque, sleep, assemblies, joints, controller fields and units.
+- [_] expose physics contacts, impulses, forces, torque, sleep, assemblies, joints, controller fields and units. `physics-observation/v1` now exports bounded identified contacts, event phases, completed-solver impulses with world-space basis, sleep, rigid assembly identity, authored joints, humanoid and input controller fields, units and explicit availability. Persistent force and torque accumulators remain unsupported.
 - [_] finish broad multimodal and prediction tools in the Python factory.
 - [_] finish deterministic action and script sequencing at fixed-tick boundaries; rational timing and manual tick boundaries are checked.
 - [_] finish thin MCP adapters for every service.
