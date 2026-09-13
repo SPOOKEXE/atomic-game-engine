@@ -51,6 +51,7 @@
 #include <client/ActiveScenes.hpp>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
+#include <client/DataFactoryRenderOnly.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <client/SettingsMenu.hpp>
@@ -585,6 +586,7 @@ namespace client {
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
 		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
+		data_factory_render_only::Queue DataFactoryRenderOnly;
 		std::shared_ptr<engine::script::QueuedDataLifecycleBridge> DataLifecycle;
 		std::shared_ptr<engine::render::ScriptDataCaptureBridge> DataCapture;
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;

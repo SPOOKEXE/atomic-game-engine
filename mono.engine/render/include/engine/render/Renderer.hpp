@@ -1058,6 +1058,10 @@ namespace engine::render {
 	// @since v0.1
 	// @client
 	struct FrameResult {
+		// Whether the renderer submitted this frame's command buffer. Unlike
+		// Presented, this stays true for a confirmed headless offscreen frame.
+		bool Submitted = false;
+
 		// Whether SDL accepted a command buffer for presentation.
 		bool Presented = false;
 

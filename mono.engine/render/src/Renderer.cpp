@@ -324,6 +324,7 @@ namespace engine::render {
 	// -----------------------------------------------------------------------
 
 	void FrameResult::Accumulate(const FrameResult &view) {
+		Submitted = Submitted || view.Submitted;
 		Presented = Presented || view.Presented;
 		DrawCalls += view.DrawCalls;
 		Triangles += view.Triangles;
@@ -2582,6 +2583,7 @@ namespace engine::render {
 				State->PendingMarks[State->BatchTimingSlot].clear();
 			}
 			const bool submitted = State->SubmitSceneCommand(State->BatchCommand);
+			frame.Submitted = submitted;
 			if (!submitted) {
 				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());

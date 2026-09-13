@@ -43,6 +43,10 @@ namespace engine::world {
 		InterventionExecutor = std::move(executor);
 	}
 
+	void DataFactorySession::SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter) {
+		Presenter = std::move(presenter);
+	}
+
 	WorldId DataFactorySession::Resolve(std::string_view instanceId) const {
 		return Worlds.Find(core::Name(instanceId));
 	}
@@ -75,6 +79,22 @@ namespace engine::world {
 		return reply;
 	}
 
+	DataFactoryRenderOnlyReply DataFactorySession::RenderReply(
+		WorldId world,
+		DataFactoryStatus status,
+		DataFactoryTemporalHistory temporalHistory,
+		std::string detail,
+		bool presented,
+		uint64_t operationId
+	) const {
+		DataFactoryRenderOnlyReply reply;
+		static_cast<DataFactoryReply &>(reply) = Reply(world, status, std::move(detail));
+		reply.TemporalHistory = temporalHistory;
+		reply.Presented = presented;
+		reply.OperationId = operationId;
+		return reply;
+	}
+
 	bool DataFactorySession::IsCanonicalInterval(WorldId world, DataFactoryInterval interval) const {
 		const double rate = Worlds.SettingsOf(world).TickRate;
 		if (!(rate > 0.0) || rate != std::round(rate) || rate > static_cast<double>(UINT32_MAX)) return false;
@@ -83,11 +103,18 @@ namespace engine::world {
 			   interval.Denominator == clock.Interval.Denominator;
 	}
 
+	bool DataFactorySession::RenderOnlyInFlight(std::string_view instanceId) const {
+		const auto paused = Paused.find(std::string(instanceId));
+		return paused != Paused.end() && paused->second.RenderOnly.has_value();
+	}
+
 	DataFactoryReply DataFactorySession::Pause(
 		std::string_view instanceId, DataFactoryPauseScope scope, uint64_t expectedTick
 	) {
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
 		if (ClockOf(world).Tick != expectedTick)
 			return Reply(
 				world, DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
@@ -122,6 +149,8 @@ namespace engine::world {
 	DataFactoryReply DataFactorySession::Resume(std::string_view instanceId, uint64_t expectedTick) {
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
 		if (ClockOf(world).Tick != expectedTick)
 			return Reply(
 				world, DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
@@ -186,6 +215,8 @@ namespace engine::world {
 	) {
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
 		if (expectedVersion != Version)
 			return Reply(world, DataFactoryStatus::VersionConflict, "expected_world_version does not match");
 		if (ClockOf(world).Tick != expectedTick)
@@ -241,6 +272,8 @@ namespace engine::world {
 	DataFactoryReply DataFactorySession::Snapshot(std::string_view instanceId, std::string &snapshotId) {
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
 		if (Limit == 0)
 			return Reply(world, DataFactoryStatus::ResourceLimit, "checkpoint retention limit is zero");
 		if (Worlds.Count() != 1)
@@ -323,9 +356,216 @@ namespace engine::world {
 		return Reply(world, DataFactoryStatus::Ok, "retained immutable snapshot matches the paused world");
 	}
 
+	void DataFactorySession::FinishRenderOnly(PauseState &state, DataFactoryRenderOnlyReply reply) {
+		state.RenderOnly.reset();
+		state.RenderOnlyTerminal = std::move(reply);
+	}
+
+	DataFactoryRenderOnlyReply DataFactorySession::ValidateRenderOnlySubmission(
+		WorldId world, const DataFactoryRenderOnlyRequest &request
+	) {
+		const auto reply = [&](DataFactoryStatus status, std::string detail) {
+			return RenderReply(
+				world, status, request.TemporalHistory, std::move(detail), false, request.OperationId
+			);
+		};
+		if (!world.IsValid()) return reply(DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (request.ExpectedWorldEpoch != Epoch)
+			return reply(DataFactoryStatus::StaleSnapshot, "expected_world_epoch does not match");
+		if (request.ExpectedWorldVersion != Version)
+			return reply(DataFactoryStatus::VersionConflict, "expected_world_version does not match");
+		if (ClockOf(world).Tick != request.ExpectedTick)
+			return reply(
+				DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
+			);
+		if (!AllSystemsPaused(request.InstanceId))
+			return reply(
+				DataFactoryStatus::NotPaused, "render-only presentation requires an all_systems pause"
+			);
+		const auto snapshot = Checkpoints.find(request.SnapshotId);
+		if (snapshot == Checkpoints.end() || snapshot->second.Epoch != Epoch)
+			return reply(DataFactoryStatus::StaleSnapshot, "snapshot is not in the current world epoch");
+		if (snapshot->second.Version != Version)
+			return reply(
+				DataFactoryStatus::StaleSnapshot, "snapshot does not match the current world version"
+			);
+		const DataFactoryReply barrier = RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
+		if (barrier.Status != DataFactoryStatus::Ok) return reply(barrier.Status, barrier.Detail);
+		return reply(DataFactoryStatus::Pending, "render-only presentation is ready for submission");
+	}
+
+	DataFactoryRenderOnlyReply DataFactorySession::RenderOnly(DataFactoryRenderOnlyRequest request) {
+		const WorldId world = Resolve(request.InstanceId);
+		const auto reply = [&](DataFactoryStatus status, std::string detail) {
+			return RenderReply(
+				world, status, request.TemporalHistory, std::move(detail), false, request.OperationId
+			);
+		};
+		if (!world.IsValid()) return reply(DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (request.TemporalHistory != DataFactoryTemporalHistory::Preserve)
+			return reply(
+				DataFactoryStatus::Unsupported,
+				"reset and disable temporal history require renderer-local history support"
+			);
+		if (!Presenter)
+			return reply(
+				DataFactoryStatus::Unsupported, "the host has not installed a render-only presenter"
+			);
+		auto paused = Paused.find(request.InstanceId);
+		if (paused == Paused.end() || !paused->second.AllSystems)
+			return reply(
+				DataFactoryStatus::NotPaused, "render-only presentation requires an all_systems pause"
+			);
+		if (paused->second.RenderOnly)
+			return reply(DataFactoryStatus::VersionConflict, "render-only presentation is already in flight");
+		const DataFactoryRenderOnlyReply ready = ValidateRenderOnlySubmission(world, request);
+		if (ready.Status != DataFactoryStatus::Pending) return ready;
+		if (NextRenderOnly == 0)
+			return reply(DataFactoryStatus::ResourceLimit, "render-only operation id space exhausted");
+		request.OperationId = NextRenderOnly++;
+		paused->second.RenderOnly = request;
+		paused->second.RenderOnlyTerminal.reset();
+
+		std::string detail;
+		bool queued = false;
+		try {
+			queued = Presenter(request, detail);
+		} catch (const std::exception &exception) {
+			detail = std::string("render-only presenter threw: ") + exception.what();
+		} catch (...) {
+			detail = "render-only presenter threw an unknown exception";
+		}
+		paused = Paused.find(request.InstanceId);
+		if (paused == Paused.end() || !paused->second.RenderOnly ||
+			paused->second.RenderOnly->OperationId != request.OperationId)
+			return RenderReply(
+				world,
+				DataFactoryStatus::PresentationFailed,
+				request.TemporalHistory,
+				"host changed render-only lifecycle state while queueing",
+				false,
+				request.OperationId
+			);
+		if (!queued) {
+			FinishRenderOnly(
+				paused->second,
+				RenderReply(
+					world,
+					DataFactoryStatus::PresentationFailed,
+					request.TemporalHistory,
+					detail.empty() ? "host refused render-only presentation" : std::move(detail),
+					false,
+					request.OperationId
+				)
+			);
+			return *paused->second.RenderOnlyTerminal;
+		}
+		return RenderReply(
+			world,
+			DataFactoryStatus::Pending,
+			request.TemporalHistory,
+			std::move(detail),
+			false,
+			request.OperationId
+		);
+	}
+
+	DataFactoryRenderOnlyReply
+	DataFactorySession::ValidateRenderOnlySubmission(std::string_view instanceId, uint64_t operationId) {
+		const WorldId world = Resolve(instanceId);
+		const auto paused = Paused.find(std::string(instanceId));
+		if (paused == Paused.end() || !paused->second.RenderOnly ||
+			paused->second.RenderOnly->OperationId != operationId)
+			return RenderReply(
+				world,
+				DataFactoryStatus::ValidationFailed,
+				DataFactoryTemporalHistory::Preserve,
+				"render-only operation is not pending",
+				false,
+				operationId
+			);
+		DataFactoryRenderOnlyReply reply = ValidateRenderOnlySubmission(world, *paused->second.RenderOnly);
+		if (reply.Status != DataFactoryStatus::Pending) FinishRenderOnly(paused->second, reply);
+		return reply;
+	}
+
+	DataFactoryRenderOnlyReply
+	DataFactorySession::CompleteRenderOnly(DataFactoryRenderOnlyCompletion completion) {
+		const WorldId world = Resolve(completion.InstanceId);
+		const auto paused = Paused.find(completion.InstanceId);
+		if (paused == Paused.end() || !paused->second.RenderOnly ||
+			paused->second.RenderOnly->OperationId != completion.OperationId)
+			return RenderReply(
+				world,
+				DataFactoryStatus::ValidationFailed,
+				DataFactoryTemporalHistory::Preserve,
+				"render-only operation is not pending",
+				false,
+				completion.OperationId
+			);
+		const DataFactoryRenderOnlyRequest request = *paused->second.RenderOnly;
+		if (completion.Submitted) {
+			DataFactoryRenderOnlyReply valid = ValidateRenderOnlySubmission(world, request);
+			if (valid.Status != DataFactoryStatus::Pending) {
+				FinishRenderOnly(paused->second, valid);
+				return valid;
+			}
+		}
+		DataFactoryRenderOnlyReply reply =
+			completion.Submitted
+				? RenderReply(
+					  world,
+					  DataFactoryStatus::Ok,
+					  request.TemporalHistory,
+					  std::move(completion.Detail),
+					  true,
+					  request.OperationId
+				  )
+				: RenderReply(
+					  world,
+					  DataFactoryStatus::PresentationFailed,
+					  request.TemporalHistory,
+					  completion.Detail.empty() ? "renderer did not submit the render-only frame"
+												: std::move(completion.Detail),
+					  false,
+					  request.OperationId
+				  );
+		FinishRenderOnly(paused->second, reply);
+		return reply;
+	}
+
+	DataFactoryRenderOnlyReply
+	DataFactorySession::PollRenderOnly(std::string_view instanceId, uint64_t operationId) const {
+		const WorldId world = Resolve(instanceId);
+		const auto paused = Paused.find(std::string(instanceId));
+		if (paused != Paused.end() && paused->second.RenderOnly &&
+			paused->second.RenderOnly->OperationId == operationId)
+			return RenderReply(
+				world,
+				DataFactoryStatus::Pending,
+				paused->second.RenderOnly->TemporalHistory,
+				"render-only presentation is pending host submission",
+				false,
+				operationId
+			);
+		if (paused != Paused.end() && paused->second.RenderOnlyTerminal &&
+			paused->second.RenderOnlyTerminal->OperationId == operationId)
+			return *paused->second.RenderOnlyTerminal;
+		return RenderReply(
+			world,
+			DataFactoryStatus::ValidationFailed,
+			DataFactoryTemporalHistory::Preserve,
+			"unknown render-only operation",
+			false,
+			operationId
+		);
+	}
+
 	DataFactoryReply DataFactorySession::Restore(std::string_view instanceId, std::string_view checkpointId) {
 		const WorldId live = Resolve(instanceId);
 		if (!live.IsValid()) return Reply(live, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(live, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
 		if (Worlds.Count() != 1)
 			return Reply(
 				live, DataFactoryStatus::Unsupported, "world checkpoints require a single-world universe"
@@ -361,6 +601,8 @@ namespace engine::world {
 		const PauseState restoredPause{
 			.AllSystems = found->second.AllSystemsPaused,
 			.PhysicsOnly = found->second.PhysicsOnlyPaused,
+			.RenderOnly = {},
+			.RenderOnlyTerminal = {},
 		};
 		std::vector<std::pair<DataFactoryPauseScope, bool>> changed;
 		const auto reconcile =
@@ -407,6 +649,8 @@ namespace engine::world {
 	) {
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
 		if (!InterventionExecutor)
 			return Reply(world, DataFactoryStatus::Unsupported, "no host intervention executor is installed");
 		if (!Rehydrate)
@@ -504,6 +748,10 @@ namespace engine::world {
 			return "restore_incomplete";
 		case DataFactoryStatus::ResourceLimit:
 			return "resource_limit";
+		case DataFactoryStatus::PresentationFailed:
+			return "presentation_failed";
+		case DataFactoryStatus::Pending:
+			return "pending";
 		}
 		return "?";
 	}

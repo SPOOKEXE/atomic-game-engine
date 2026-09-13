@@ -17,8 +17,10 @@ using engine::ecs::Scheduler;
 using engine::ecs::Store;
 using engine::world::DataFactoryInterval;
 using engine::world::DataFactoryPauseScope;
+using engine::world::DataFactoryRenderOnlyRequest;
 using engine::world::DataFactorySession;
 using engine::world::DataFactoryStatus;
+using engine::world::DataFactoryTemporalHistory;
 using engine::world::Delivery;
 using engine::world::Postbox;
 using engine::world::Universe;
@@ -254,6 +256,177 @@ TEST_CASE(
 	const auto refused = session.Snapshot("data-factory.inspect", snapshot);
 	CHECK(refused.Status == DataFactoryStatus::ResourceLimit);
 	CHECK(snapshot.empty());
+}
+
+TEST_CASE(
+	"data-factory render-only presentation keeps a paused snapshot unchanged", "[world][data-factory]"
+) {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.render-only");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.render-only", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-factory.render-only", snapshot).Status == DataFactoryStatus::Ok);
+	const auto before = session.Inspect("data-factory.render-only");
+	int presented = 0;
+	session.SetRenderOnlyPresenter([&](const DataFactoryRenderOnlyRequest &request, std::string &) {
+		presented++;
+		CHECK(request.InstanceId == "data-factory.render-only");
+		CHECK(request.SnapshotId == snapshot);
+		CHECK(request.TemporalHistory == DataFactoryTemporalHistory::Preserve);
+		CHECK(
+			session
+				.Step(
+					"data-factory.render-only",
+					DataFactoryInterval{},
+					request.ExpectedTick,
+					request.ExpectedWorldVersion
+				)
+				.Status == DataFactoryStatus::VersionConflict
+		);
+		return true;
+	});
+
+	const DataFactoryRenderOnlyRequest request{
+		.InstanceId = "data-factory.render-only",
+		.SnapshotId = snapshot,
+		.ExpectedWorldEpoch = before.WorldEpoch,
+		.ExpectedWorldVersion = before.WorldVersion,
+		.ExpectedTick = before.Clock.Tick,
+	};
+	const auto rendered = session.RenderOnly(request);
+	REQUIRE(rendered.Status == DataFactoryStatus::Pending);
+	CHECK_FALSE(rendered.Presented);
+	CHECK(rendered.OperationId != 0);
+	CHECK(rendered.TemporalHistory == DataFactoryTemporalHistory::Preserve);
+	CHECK(rendered.WorldEpoch == before.WorldEpoch);
+	CHECK(rendered.WorldVersion == before.WorldVersion);
+	CHECK(rendered.Clock.Tick == before.Clock.Tick);
+	CHECK(rendered.Clock.TimeNanoseconds == before.Clock.TimeNanoseconds);
+	CHECK(presented == 1);
+	CHECK(
+		session.PollRenderOnly("data-factory.render-only", rendered.OperationId).Status ==
+		DataFactoryStatus::Pending
+	);
+	CHECK(
+		session.Resume("data-factory.render-only", before.Clock.Tick).Status ==
+		DataFactoryStatus::VersionConflict
+	);
+	CHECK(session.Restore("data-factory.render-only", snapshot).Status == DataFactoryStatus::VersionConflict);
+	CHECK(
+		session
+			.ApplyIntervention(
+				"data-factory.render-only", snapshot, {}, before.Clock.Tick, before.WorldVersion
+			)
+			.Status == DataFactoryStatus::VersionConflict
+	);
+	CHECK(
+		session.ValidateRenderOnlySubmission("data-factory.render-only", rendered.OperationId).Status ==
+		DataFactoryStatus::Pending
+	);
+	const auto completed = session.CompleteRenderOnly({
+		.InstanceId = "data-factory.render-only",
+		.OperationId = rendered.OperationId,
+		.Submitted = true,
+		.Detail = {},
+	});
+	CHECK(completed.Status == DataFactoryStatus::Ok);
+	CHECK(completed.Presented);
+	CHECK(
+		session.PollRenderOnly("data-factory.render-only", rendered.OperationId).Status ==
+		DataFactoryStatus::Ok
+	);
+	CHECK(Count(universe, world) == 0);
+	CHECK(universe.StatisticsOf(world).Ticks == 0);
+	CHECK(universe.StateOf(world) == WorldState::Suspended);
+}
+
+TEST_CASE(
+	"data-factory render-only refuses stale and unsupported requests before the host", "[world][data-factory]"
+) {
+	Universe universe;
+	MakeWorld(universe, "data-factory.render-refusal");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.render-refusal", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-factory.render-refusal", snapshot).Status == DataFactoryStatus::Ok);
+	const auto current = session.Inspect("data-factory.render-refusal");
+	int presented = 0;
+	session.SetRenderOnlyPresenter([&](const DataFactoryRenderOnlyRequest &, std::string &) {
+		presented++;
+		return true;
+	});
+	DataFactoryRenderOnlyRequest request{
+		.InstanceId = "data-factory.render-refusal",
+		.SnapshotId = snapshot,
+		.ExpectedWorldEpoch = current.WorldEpoch,
+		.ExpectedWorldVersion = current.WorldVersion,
+		.ExpectedTick = current.Clock.Tick,
+	};
+	request.TemporalHistory = DataFactoryTemporalHistory::Reset;
+	CHECK(session.RenderOnly(request).Status == DataFactoryStatus::Unsupported);
+	request.TemporalHistory = DataFactoryTemporalHistory::Disable;
+	CHECK(session.RenderOnly(request).Status == DataFactoryStatus::Unsupported);
+	request.TemporalHistory = DataFactoryTemporalHistory::Preserve;
+	request.ExpectedWorldEpoch++;
+	CHECK(session.RenderOnly(request).Status == DataFactoryStatus::StaleSnapshot);
+	request.ExpectedWorldEpoch = current.WorldEpoch;
+	request.ExpectedWorldVersion++;
+	CHECK(session.RenderOnly(request).Status == DataFactoryStatus::VersionConflict);
+	request.ExpectedWorldVersion = current.WorldVersion;
+	request.SnapshotId = "snapshot-not-retained";
+	CHECK(session.RenderOnly(request).Status == DataFactoryStatus::StaleSnapshot);
+	CHECK(presented == 0);
+}
+
+TEST_CASE(
+	"data-factory render-only reports terminal failure after a queued frame cannot submit",
+	"[world][data-factory]"
+) {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.render-terminal");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.render-terminal", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-factory.render-terminal", snapshot).Status == DataFactoryStatus::Ok);
+	const auto current = session.Inspect("data-factory.render-terminal");
+	session.SetRenderOnlyPresenter([](const DataFactoryRenderOnlyRequest &, std::string &) { return true; });
+	const auto queued = session.RenderOnly({
+		.InstanceId = "data-factory.render-terminal",
+		.SnapshotId = snapshot,
+		.ExpectedWorldEpoch = current.WorldEpoch,
+		.ExpectedWorldVersion = current.WorldVersion,
+		.ExpectedTick = current.Clock.Tick,
+	});
+	REQUIRE(queued.Status == DataFactoryStatus::Pending);
+	const auto failed = session.CompleteRenderOnly({
+		.InstanceId = "data-factory.render-terminal",
+		.OperationId = queued.OperationId,
+		.Submitted = false,
+		.Detail = "renderer lost its target",
+	});
+	CHECK(failed.Status == DataFactoryStatus::PresentationFailed);
+	CHECK_FALSE(failed.Presented);
+	CHECK(failed.Detail == "renderer lost its target");
+	CHECK(
+		session.PollRenderOnly("data-factory.render-terminal", queued.OperationId).Status ==
+		DataFactoryStatus::PresentationFailed
+	);
+	CHECK(session.Resume("data-factory.render-terminal", current.Clock.Tick).Status == DataFactoryStatus::Ok);
+	CHECK(universe.StateOf(world) == WorldState::Active);
 }
 
 TEST_CASE(

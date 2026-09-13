@@ -23,6 +23,17 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::OpticalFlow)) == "optical_flow");
 }
 
+TEST_CASE(
+	"frame result keeps headless command submission separate from presentation", "[render][data-capture]"
+) {
+	FrameResult frame;
+	FrameResult headless;
+	headless.Submitted = true;
+	frame.Accumulate(headless);
+	CHECK(frame.Submitted);
+	CHECK_FALSE(frame.Presented);
+}
+
 TEST_CASE("data capture camera convention records the engine projection", "[render][data-capture]") {
 	const DataCaptureCameraConvention convention = DataCaptureCameraConventions();
 	CHECK(convention.RightHandedWorld);

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -31,9 +32,17 @@ namespace engine::world {
 		NotPaused,
 		RestoreIncomplete,
 		ResourceLimit,
+		PresentationFailed,
+		Pending,
 	};
 
 	enum class DataFactoryPauseScope : uint8_t { AllSystems, PhysicsOnly };
+
+	// This belongs to the data-factory lifecycle rather than the renderer. The
+	// host converts it to its renderer-specific policy at the client boundary.
+	// Preserve is the only policy currently offered because Reset and Disable
+	// require an actual renderer-local history pass.
+	enum class DataFactoryTemporalHistory : uint8_t { Preserve, Reset, Disable };
 
 	// The interval is represented as a rational number of nanoseconds. This is
 	// the exported clock contract, separate from the engine's current float
@@ -59,6 +68,32 @@ namespace engine::world {
 		DataFactoryClock Clock;
 	};
 
+	// A value-only request crosses from the shared world layer to the host that
+	// owns presentation. No store, renderer, GPU handle, or callback-owned state
+	// leaks through this boundary, so a headless host can refuse it honestly.
+	struct DataFactoryRenderOnlyRequest {
+		std::string InstanceId;
+		std::string SnapshotId;
+		uint64_t ExpectedWorldEpoch = 0;
+		uint64_t ExpectedWorldVersion = 0;
+		uint64_t ExpectedTick = 0;
+		uint64_t OperationId = 0;
+		DataFactoryTemporalHistory TemporalHistory = DataFactoryTemporalHistory::Preserve;
+	};
+
+	struct DataFactoryRenderOnlyReply : DataFactoryReply {
+		uint64_t OperationId = 0;
+		DataFactoryTemporalHistory TemporalHistory = DataFactoryTemporalHistory::Preserve;
+		bool Presented = false;
+	};
+
+	struct DataFactoryRenderOnlyCompletion {
+		std::string InstanceId;
+		uint64_t OperationId = 0;
+		bool Submitted = false;
+		std::string Detail;
+	};
+
 	struct DataFactoryCheckpoint {
 		std::string Id;
 		uint64_t Epoch = 0;
@@ -78,6 +113,12 @@ namespace engine::world {
 	// installed through this hook.
 	using DataFactoryPauseParticipant =
 		std::function<bool(WorldId world, DataFactoryPauseScope scope, bool paused, std::string &)>;
+
+	// Presentation is owned by the product. The callback starts exactly one
+	// render-only frame for a request already proven to name the live paused
+	// snapshot. Deferred image readback remains owned by the renderer ticket.
+	using DataFactoryRenderOnlyPresenter =
+		std::function<bool(const DataFactoryRenderOnlyRequest &, std::string &)>;
 
 	// Copied control values cross into the host executor. The world service does
 	// not interpret a scene property path or retain a JSON representation.
@@ -112,6 +153,7 @@ namespace engine::world {
 		void SetRehydrate(DataFactoryRehydrate rehydrate);
 		void SetPauseParticipant(DataFactoryPauseParticipant participant);
 		void SetInterventionExecutor(DataFactoryInterventionExecutor executor);
+		void SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter);
 
 		DataFactoryReply
 		Pause(std::string_view instanceId, DataFactoryPauseScope scope, uint64_t expectedTick);
@@ -132,6 +174,13 @@ namespace engine::world {
 
 		DataFactoryReply Snapshot(std::string_view instanceId, std::string &snapshotId);
 		DataFactoryReply RenderSnapshotBarrier(std::string_view instanceId, std::string_view snapshotId);
+		// Begins one host-owned frame. A successful reply is Pending until the
+		// host validates and completes the operation after renderer submission.
+		DataFactoryRenderOnlyReply RenderOnly(DataFactoryRenderOnlyRequest request);
+		DataFactoryRenderOnlyReply
+		ValidateRenderOnlySubmission(std::string_view instanceId, uint64_t operationId);
+		DataFactoryRenderOnlyReply CompleteRenderOnly(DataFactoryRenderOnlyCompletion completion);
+		DataFactoryRenderOnlyReply PollRenderOnly(std::string_view instanceId, uint64_t operationId) const;
 		DataFactoryReply Checkpoint(std::string_view instanceId, std::string &checkpointId);
 		DataFactoryReply Restore(std::string_view instanceId, std::string_view checkpointId);
 		DataFactoryReply ApplyIntervention(
@@ -149,12 +198,26 @@ namespace engine::world {
 		struct PauseState {
 			bool AllSystems = false;
 			bool PhysicsOnly = false;
+			std::optional<DataFactoryRenderOnlyRequest> RenderOnly;
+			std::optional<DataFactoryRenderOnlyReply> RenderOnlyTerminal;
 		};
 
 		WorldId Resolve(std::string_view instanceId) const;
 		DataFactoryClock ClockOf(WorldId world) const;
 		DataFactoryReply Reply(WorldId world, DataFactoryStatus status, std::string detail) const;
+		DataFactoryRenderOnlyReply RenderReply(
+			WorldId world,
+			DataFactoryStatus status,
+			DataFactoryTemporalHistory temporalHistory,
+			std::string detail,
+			bool presented = false,
+			uint64_t operationId = 0
+		) const;
 		bool IsCanonicalInterval(WorldId world, DataFactoryInterval interval) const;
+		bool RenderOnlyInFlight(std::string_view instanceId) const;
+		DataFactoryRenderOnlyReply
+		ValidateRenderOnlySubmission(WorldId world, const DataFactoryRenderOnlyRequest &request);
+		void FinishRenderOnly(PauseState &state, DataFactoryRenderOnlyReply reply);
 		void Store(DataFactoryCheckpoint checkpoint);
 
 		Universe &Worlds;
@@ -163,9 +226,11 @@ namespace engine::world {
 		uint64_t Epoch = 1;
 		uint64_t Version = 0;
 		uint64_t NextCheckpoint = 1;
+		uint64_t NextRenderOnly = 1;
 		DataFactoryRehydrate Rehydrate;
 		DataFactoryPauseParticipant Participant;
 		DataFactoryInterventionExecutor InterventionExecutor;
+		DataFactoryRenderOnlyPresenter Presenter;
 		std::unordered_map<std::string, PauseState> Paused;
 		std::unordered_map<std::string, DataFactoryCheckpoint> Checkpoints;
 		std::vector<std::string> CheckpointOrder;

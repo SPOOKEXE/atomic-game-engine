@@ -325,6 +325,16 @@ namespace client {
 				detail = "audio device could not establish the pause barrier";
 				return false;
 			});
+			DataFactory->SetRenderOnlyPresenter(
+				[this](const engine::world::DataFactoryRenderOnlyRequest &request, std::string &detail) {
+					if (!Settings.DataFactory || !Rendered.IsValid() ||
+						request.InstanceId != Universe_->NameOf(Rendered).Text()) {
+						detail = "client data-factory mode supports only its rendered local world";
+						return false;
+					}
+					return DataFactoryRenderOnly.Enqueue(request, detail);
+				}
+			);
 		}
 		if (!Universe_->ConfigurePresentation(
 				Settings.PresentationSession == 0 ? 1 : Settings.PresentationSession
@@ -2180,6 +2190,22 @@ namespace client {
 				   DataFactory->AllSystemsPaused(Universe_->NameOf(Rendered).Text());
 		};
 		bool factoryPaused = allSystemsPaused();
+		const bool renderOnlyPending = DataFactoryRenderOnly.Pending();
+		auto failRenderOnly = [this](std::string detail) {
+			const auto *request = DataFactoryRenderOnly.Request();
+			if (request == nullptr || !DataFactory) return;
+			(void)DataFactory->CompleteRenderOnly({
+				.InstanceId = request->InstanceId,
+				.OperationId = request->OperationId,
+				.Submitted = false,
+				.Detail = std::move(detail),
+			});
+			DataFactoryRenderOnly.Consume();
+		};
+		// A pending render-only operation owns exactly one static visual state.
+		// Drop time accumulated before the pause even if the renderer later
+		// refuses submission, rather than carrying it into a later normal frame.
+		if (renderOnlyPending) ParticleDeltaSeconds = 0.0f;
 		if (Sound != nullptr) (void)Sound->SetPaused(factoryPaused);
 		if (!factoryPaused) {
 			AnimationSeconds += delta;
@@ -2419,9 +2445,11 @@ namespace client {
 		// while PreRender and every GPU allocation below remain demand driven.
 		// Headless rendering still returns true so captures and bounded runs keep
 		// their existing behaviour.
-		if (!renderingActive || !presentationDue) {
-			if (renderingActive && !presentationDue && (Settings.Uncapped || PresentationLink) &&
-				Presentations.Rate() > 0) {
+		if (!renderingActive || (!presentationDue && !renderOnlyPending)) {
+			if (!renderingActive && renderOnlyPending)
+				failRenderOnly("renderer did not provide a presentation frame");
+			if (renderingActive && !presentationDue && !renderOnlyPending &&
+				(Settings.Uncapped || PresentationLink) && Presentations.Rate() > 0) {
 				// Keep simulation and services independent from a lower presentation
 				// rate, but do not poll a future image deadline millions of times a
 				// second. The short ceiling preserves sub-frame input and network
@@ -2997,7 +3025,7 @@ namespace client {
 			if (ReportedJoin) prepareEditable(Replicated);
 		}
 
-		if (interfaceWorld.IsValid()) {
+		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui()) {
 			ENGINE_HEAP_SCOPE("client.interface");
 
 			engine::gui::CompileRequest request;
@@ -3211,6 +3239,10 @@ namespace client {
 					}
 				}
 			}
+		} else if (interfaceWorld.IsValid()) {
+			// The retained interface buffer is part of the snapshot's visual state.
+			// Do not relayout, route, or deliver events while submitting it.
+			hook = &Interface;
 		}
 
 		// **SDL is asked for text only while a `TextBox` has the keyboard, and
@@ -3369,7 +3401,11 @@ namespace client {
 		// The time since the last device step. Presentation may be slower than the
 		// update loop, and using only this update's delta would slow resident
 		// particles by exactly that ratio.
-		view.ParticleDelta = ParticleDeltaSeconds;
+		// A render-only frame intentionally discards accumulated presentation time.
+		// Advancing particles between the snapshot and its capture would make the
+		// image name a state the checkpoint never contained.
+		const float particleDelta = DataFactoryRenderOnly.ParticleDelta(ParticleDeltaSeconds);
+		view.ParticleDelta = particleDelta;
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;
@@ -3485,8 +3521,9 @@ namespace client {
 		view.Damage = damage;
 		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
 		if (capturePending) DataCapture->PrepareView(view);
-		const bool visualChanged = damage.Any() || PresentationInvalidated || capturePending;
-		const bool particleDeviceStep = particleLayerPresent && ParticleDeltaSeconds > 0.0f;
+		const bool visualChanged =
+			damage.Any() || PresentationInvalidated || capturePending || renderOnlyPending;
+		const bool particleDeviceStep = particleLayerPresent && particleDelta > 0.0f;
 		if (!visualChanged) {
 			PresentationDamage.CacheProfile().Record(damage, false, false, cacheApplicability);
 			UnchangedPresentationsSkipped++;
@@ -3506,6 +3543,7 @@ namespace client {
 		// then redo the entire update before trying again. One frame in flight fell
 		// from the old blocking path's throughput to roughly one third of it.
 		if (!Renderer.WaitForFrame()) {
+			if (renderOnlyPending) failRenderOnly("renderer refused the render-only presentation frame");
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
 			Metrics::Clear();
@@ -3513,6 +3551,20 @@ namespace client {
 		}
 		{
 			ENGINE_HEAP_SCOPE("client.submit");
+			if (renderOnlyPending) {
+				const auto *request = DataFactoryRenderOnly.Request();
+				const auto ready = DataFactory->ValidateRenderOnlySubmission(
+					request == nullptr ? std::string_view{} : request->InstanceId,
+					request == nullptr ? 0 : request->OperationId
+				);
+				if (ready.Status != engine::world::DataFactoryStatus::Pending) {
+					DataFactoryRenderOnly.Consume();
+					FrameGraph::EndFrame();
+					ENGINE_PROFILE_FRAME();
+					Metrics::Clear();
+					return;
+				}
+			}
 			CaptureFrame(view, presentationWorld);
 			// Capture cameras are separate from the displayed camera. Each active
 			// world gets an offscreen target and the selected display view stays
@@ -3528,6 +3580,17 @@ namespace client {
 					return Renderer.Render(cameraBatch, Overlay, hook);
 				}
 			);
+			if (renderOnlyPending) {
+				const auto *request = DataFactoryRenderOnly.Request();
+				const bool submitted = LastFrame.Submitted;
+				(void)DataFactory->CompleteRenderOnly({
+					.InstanceId = request == nullptr ? std::string{} : request->InstanceId,
+					.OperationId = request == nullptr ? 0 : request->OperationId,
+					.Submitted = submitted,
+					.Detail = submitted ? std::string{} : "renderer did not submit the render-only frame",
+				});
+				DataFactoryRenderOnly.Consume();
+			}
 			if (PresentationLink) (void)PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
 		}
 		{
