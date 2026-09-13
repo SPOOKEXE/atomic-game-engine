@@ -1712,6 +1712,7 @@ namespace engine::render {
 			uint32_t width,
 			uint32_t height,
 			bool depth,
+			bool normal,
 			bool ambient = false,
 			bool directional = false
 		);

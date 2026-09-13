@@ -130,6 +130,9 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	CHECK(camera.at("far_metres") == 400.0);
 	CHECK(camera.at("requested_width") == 640);
 	CHECK(camera.at("requested_height") == 360);
+	CHECK(camera.at("requested_width").is_number_integer());
+	CHECK(camera.at("requested_height").is_number_integer());
+	CHECK(camera.at("near_metres").is_number_float());
 	CHECK(camera.at("requested_resolution_available") == true);
 	CHECK(camera.at("projection_available") == false);
 	const json &observations = camera.at("object_observations");
@@ -167,6 +170,7 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 		Call(surface, "get_scene_snapshot", {{"instance_id", "scene"}, {"options", json::object()}}, failed);
 	INFO(snapshot.dump());
 	CHECK_FALSE(failed);
+	CHECK(snapshot.at("unlabelled_instances").is_number_integer());
 	CHECK(snapshot.at("physics_observations").at("schema_version") == "physics-observation/v1");
 	CHECK(snapshot.at("physics_observations").at("world_prepared") == false);
 	CHECK(snapshot.at("physics_observations").at("contacts").at("available") == false);

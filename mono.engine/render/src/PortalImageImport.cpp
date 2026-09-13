@@ -275,7 +275,9 @@ namespace engine::render {
 			const bool ambient = !member(index).Normal.empty();
 			const bool directional = !member(index).DirectionalResponse.empty();
 			Impl::ResourceImageSlot cached;
-			if (State->ReuseResidentImage(cached, image.Width, image.Height, paired, ambient, directional)) {
+			if (State->ReuseResidentImage(
+					cached, image.Width, image.Height, paired, ambient, ambient, directional
+				)) {
 				image.Texture = cached.Resident;
 				image.DepthTexture = cached.ResidentDepth;
 				image.NormalTexture = cached.ResidentNormal;
@@ -509,6 +511,13 @@ namespace engine::render {
 
 	void Renderer::Impl::CacheResidentImage(ImportedPortalImage &image) {
 		if (!image.Texture) return;
+		const auto residentBytesPerPixel = [](const ResidentImagePair &pair) -> size_t {
+			return pair.DirectionalResponse ? 64
+				 : pair.AmbientResponse	  ? 48
+				 : pair.Normal			  ? 16
+				 : pair.Depth			  ? 12
+										  : 8;
+		};
 		auto found = std::find_if(
 			ResidentImageCache.begin(), ResidentImageCache.end(), [](const ResidentImagePair &pair) {
 				return pair.Colour == nullptr;
@@ -517,11 +526,8 @@ namespace engine::render {
 		if (found == ResidentImageCache.end()) {
 			found = ResidentImageCache.begin() + NextResidentCache;
 			NextResidentCache = (NextResidentCache + 1) % ResidentImageCache.size();
-			PortalImportUsage.CachedTextureBytes -= size_t(found->Width) * found->Height *
-													(found->DirectionalResponse ? 64
-													 : found->Normal			? 48
-													 : found->Depth				? 12
-																				: 8);
+			PortalImportUsage.CachedTextureBytes -=
+				size_t(found->Width) * found->Height * residentBytesPerPixel(*found);
 			gpu::ReleaseTexture(Device, found->Colour);
 			gpu::ReleaseTexture(Device, found->Depth);
 			gpu::ReleaseTexture(Device, found->Normal);
@@ -539,11 +545,8 @@ namespace engine::render {
 			image.TextureWidth,
 			image.TextureHeight
 		};
-		PortalImportUsage.CachedTextureBytes += size_t(found->Width) * found->Height *
-												(found->DirectionalResponse ? 64
-												 : found->Normal			? 48
-												 : found->Depth				? 12
-																			: 8);
+		PortalImportUsage.CachedTextureBytes +=
+			size_t(found->Width) * found->Height * residentBytesPerPixel(*found);
 	}
 
 	void Renderer::Impl::ReportPortalImportUsage() {

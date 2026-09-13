@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <array>
 #include <initializer_list>
+#include <string>
 
 TEST_SUITE_ID("engine.render.resourceimage")
 
@@ -44,7 +45,8 @@ namespace {
 		std::string_view resource = "lit",
 		bool depth = false,
 		bool ambient = false,
-		bool directional = false
+		bool directional = false,
+		std::string_view pipelineName = "image-export-pipeline"
 	) {
 		graph::PipelineDocument document, frameTail;
 		if (directional)
@@ -163,7 +165,7 @@ namespace {
 		graph::RenderGraph pipeline;
 		core::Name offender;
 		REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
-		REQUIRE(renderer.SetPipeline(core::Name("image-export-pipeline"), pipeline));
+		REQUIRE(renderer.SetPipeline(core::Name(pipelineName), pipeline));
 	}
 
 	void InstallFailedImageCapture(render::Renderer &renderer) {
@@ -1082,6 +1084,57 @@ TEST_CASE(
 	REQUIRE(renderer.RequestResourceImage(request(21)));
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
 	CHECK(AwaitImages(renderer, 1).front().Status == render::ResourceImageStatus::Ok);
+}
+
+TEST_CASE("default data capture records source depth and normal planes", "[render][gpu][resourceimage][.]") {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const core::Name pipelineName("default-data-capture");
+	const core::Name captureNode("data-capture");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+
+	const render::ResourceImageRequest request{1, pipelineName, captureNode, 0};
+	REQUIRE(renderer.RequestResourceImage(request));
+	render::SceneTarget target{32, 24};
+	render::View view;
+	view.Pipeline = pipelineName;
+	view.Target = &target;
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
+	const auto image = AwaitImage(renderer, request.Token);
+	CHECK(image.Status == render::ResourceImageStatus::Ok);
+	CHECK(image.Width == target.Width);
+	CHECK(image.Height == target.Height);
+	CHECK(image.DepthResource == core::Name("linear-depth"));
+	CHECK(image.NormalResource == core::Name("normal"));
+	REQUIRE(image.Depth.size() == size_t(target.Width) * target.Height * 4);
+	REQUIRE(image.Normal.size() == size_t(target.Width) * target.Height * 4);
+	CHECK(image.AmbientResponse.empty());
+	CHECK(image.LightingBaseline.empty());
+
+	graph::PipelineDocument malformed = graph::DefaultPbrDataCaptureDocument();
+	malformed.Record(
+		{.Kind = graph::EditKind::AddNode,
+		 .Name = core::Name("unpaired-ambient-capture"),
+		 .NodeKind = core::Name("capture"),
+		 .Scope = graph::NodeScope::Frame}
+	);
+	for (const auto &[name, port] : std::array<std::pair<const char *, const char *>, 4>{
+			 {{"lit", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}, {"albedo", "ambient-response"}}}) {
+		malformed.Record(
+			{.Kind = graph::EditKind::Reads, .Target = core::Name(name), .Key = core::Name(port)}
+		);
+	}
+	graph::RenderGraph malformedPipeline;
+	REQUIRE(graph::Build(malformed, malformedPipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const core::Name malformedName("unpaired-ambient-capture-pipeline");
+	REQUIRE(renderer.SetPipeline(malformedName, malformedPipeline));
+	CHECK_FALSE(renderer.RequestResourceImage({2, malformedName, core::Name("unpaired-ambient-capture"), 0}));
 }
 
 TEST_CASE(
@@ -3862,13 +3915,15 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
-	InstallImageCapture(renderer, "lit", true);
 
 	world::Universe worlds;
 	world::WorldSettings settings;
 	settings.Name = core::Name("script-capture-world");
 	const world::WorldId world = worlds.Create(settings);
 	REQUIRE(world.IsValid());
+	const std::string stablePipeline = "image-export-pipeline";
+	const std::string runtimePipeline = stablePipeline + "#" + std::to_string(world.Index);
+	InstallImageCapture(renderer, "lit", true, false, false, runtimePipeline);
 	world::DataFactorySession session(worlds);
 	session.SetPauseParticipant(
 		[world](world::WorldId paused, world::DataFactoryPauseScope scope, bool, std::string &) {
@@ -3886,7 +3941,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",
 		.SnapshotId = snapshot,
-		.Pipeline = "image-export-pipeline",
+		.Pipeline = stablePipeline,
 		.CaptureNode = "image-export",
 		.Channels = {"object_ids"},
 		.TemporalHistory = "preserve",
@@ -3898,7 +3953,8 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	render::SceneTarget target{32, 24};
 	render::View view;
 	view.WorldName = core::Name("script-capture-world");
-	view.Pipeline = core::Name("image-export-pipeline");
+	view.World = world.Index;
+	view.Pipeline = core::Name(runtimePipeline);
 	view.Target = &target;
 	const std::array objectLabels{
 		render::DataCaptureObjectLabel{1, "script/alpha"},
@@ -3946,6 +4002,8 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(bridge.Release("script-capture-world", ticket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", ticket, poll, detail));
 
+	// The process-local view key stays supported for older internal callers.
+	request.Pipeline = runtimePipeline;
 	request.Channels = {"rgb_linear_hdr"};
 	uint64_t rgbTicket = 0;
 	REQUIRE(bridge.Queue("script-capture-world", request, rgbTicket, detail));
@@ -3959,4 +4017,20 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(poll.Status == "ready");
 	CHECK(poll.ObjectLabels.empty());
 	REQUIRE(bridge.Release("script-capture-world", rgbTicket, detail));
+
+	// A runtime key from another world is neither the stable profile nor this view's key.
+	request.Pipeline = stablePipeline + "#" + std::to_string(world.Index + 1);
+	uint64_t rejectedTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", request, rejectedTicket, detail));
+	view.SnapshotId.clear();
+	bridge.PrepareView(view);
+	CHECK(view.SnapshotId.empty());
+	REQUIRE(bridge.Poll("script-capture-world", rejectedTicket, poll, detail));
+	CHECK(poll.Status == "pending");
+	bridge.Cancel("script-capture-world", rejectedTicket);
+	bridge.Pump();
+	REQUIRE(bridge.Poll("script-capture-world", rejectedTicket, poll, detail));
+	CHECK(poll.Status == "cancelled");
+	REQUIRE(bridge.Release("script-capture-world", rejectedTicket, detail));
+	CHECK_FALSE(bridge.Poll("script-capture-world", rejectedTicket, poll, detail));
 }

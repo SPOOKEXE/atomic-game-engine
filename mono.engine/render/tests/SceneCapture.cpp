@@ -183,6 +183,7 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	renderer.Inspect(inspectedResource, 0);
 	const std::array<render::View, 1> views{view};
 	const render::FrameResult frame = renderer.Render(views, overlay, nullptr, false);
+	CHECK(frame.Submitted);
 	CHECK(frame.ComputeDispatches > 0);
 	CHECK(frame.Particles == block.Capacity);
 

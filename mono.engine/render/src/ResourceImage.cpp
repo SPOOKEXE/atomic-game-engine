@@ -179,9 +179,13 @@ namespace engine::render {
 				const bool labelIds = source != nullptr && (source->Name == core::Name("object-ids") ||
 															source->Name == core::Name("semantic-ids") ||
 															source->Name == core::Name("part-ids"));
+				const bool pairedAmbient = response == baseline;
+				const bool ambientNeedsNormal = response == 0 || normal == 1;
+				const bool directionalNeedsAmbient = directional <= response;
+				const bool normalNeedsDepth = normal == 0 || depth == 1;
 				declared = (!labelIds || hasProducer) && portsValid && colour == 1 && depth <= 1 &&
-						   normal <= 1 && response == normal && baseline == normal && directional <= normal &&
-						   (normal == 0 || depth == 1) &&
+						   normal <= 1 && pairedAmbient && ambientNeedsNormal && directionalNeedsAmbient &&
+						   normalNeedsDepth &&
 						   (node->Scope == graph::NodeScope::View ||
 							(node->Scope == graph::NodeScope::Frame &&
 							 node->Integer(core::Name("view"), 0) == request.ViewSlot));
@@ -435,8 +439,10 @@ namespace engine::render {
 	) {
 		const bool withDirectional = directionalResponseResource.IsValid();
 		const bool withDepth = depthResource.IsValid();
-		const bool withAmbient = normalResource.IsValid() && ambientResponseResource.IsValid() &&
-								 lightingBaselineResource.IsValid();
+		const bool withNormal = normalResource.IsValid();
+		const bool withAmbientResponse = ambientResponseResource.IsValid();
+		const bool withLightingBaseline = lightingBaselineResource.IsValid();
+		const bool withAmbient = withAmbientResponse && withLightingBaseline;
 		const std::array<const NamedTexture *, 6> planes{
 			&source, &depth, &normal, &ambientResponse, &lightingBaseline, &directionalResponse
 		};
@@ -452,7 +458,7 @@ namespace engine::render {
 			SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,
 			SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT
 		};
-		const size_t count = withDirectional ? 6 : withAmbient ? 5 : withDepth ? 2 : 1;
+		const size_t count = withDirectional ? 6 : withAmbient ? 5 : withNormal ? 3 : withDepth ? 2 : 1;
 		for (ResourceImageSlot &slot : ResourceImages) {
 			const auto &request = slot.Image.Request;
 			if (slot.Phase != ResourceImagePhase::Queued || request.Pipeline != pipeline ||
@@ -487,9 +493,8 @@ namespace engine::render {
 				0;
 			slot.Phase = ResourceImagePhase::Ready;
 			bool valid = supportedSource && source.Width <= 512 && source.Height <= 512 &&
-						 normalResource.IsValid() == ambientResponseResource.IsValid() &&
-						 normalResource.IsValid() == lightingBaselineResource.IsValid() &&
-						 (!withAmbient || withDepth) && (!withDirectional || withAmbient);
+						 withAmbientResponse == withLightingBaseline && (!withAmbient || withNormal) &&
+						 (!withNormal || withDepth) && (!withDirectional || withAmbient);
 			for (size_t plane = 0; plane < count; ++plane)
 				valid = valid && planes[plane]->IsValid() && planes[plane]->Format == formats[plane] &&
 						planes[plane]->Width == source.Width && planes[plane]->Height == source.Height;
@@ -534,7 +539,13 @@ namespace engine::render {
 					&slot.ResidentDirectionalResponse
 				};
 				if (!ReuseResidentImage(
-						slot, source.Width, source.Height, withDepth, withAmbient, withDirectional
+						slot,
+						source.Width,
+						source.Height,
+						withDepth,
+						withNormal,
+						withAmbient,
+						withDirectional
 					)) {
 					SDL_GPUTextureCreateInfo info{};
 					info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -616,6 +627,7 @@ namespace engine::render {
 			const double bytes = double(source.Width) * source.Height *
 								 (withDirectional ? 64
 								  : withAmbient	  ? 48
+								  : withNormal	  ? 16
 								  : withDepth	  ? 12
 												  : 8);
 			const bool resident = request.Delivery == ResourceImageDelivery::Resident;
@@ -711,11 +723,17 @@ namespace engine::render {
 		);
 	}
 	bool Renderer::Impl::ReuseResidentImage(
-		ResourceImageSlot &slot, uint32_t width, uint32_t height, bool depth, bool ambient, bool directional
+		ResourceImageSlot &slot,
+		uint32_t width,
+		uint32_t height,
+		bool depth,
+		bool normal,
+		bool ambient,
+		bool directional
 	) {
 		for (auto &pair : ResidentImageCache) {
 			if (!pair.Colour || pair.Width != width || pair.Height != height || bool(pair.Depth) != depth ||
-				bool(pair.Normal) != ambient || bool(pair.AmbientResponse) != ambient ||
+				bool(pair.Normal) != normal || bool(pair.AmbientResponse) != ambient ||
 				bool(pair.LightingBaseline) != ambient || bool(pair.DirectionalResponse) != directional)
 				continue;
 			// These textures no longer belong to an imported image. Subsequent copies
@@ -727,9 +745,10 @@ namespace engine::render {
 			slot.ResidentLightingBaseline = pair.LightingBaseline;
 			slot.ResidentDirectionalResponse = pair.DirectionalResponse;
 			PortalImportUsage.CachedTextureBytes -= size_t(width) * height *
-													(directional ? 64
-													 : ambient	 ? 48
-													 : depth	 ? 12
+												(directional ? 64
+												 : ambient	 ? 48
+												 : normal	 ? 16
+												 : depth	 ? 12
 																 : 8);
 			pair = {};
 			ReportPortalImportUsage();

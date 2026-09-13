@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <optional>
+#include <string>
 #include <unordered_set>
 #include <utility>
 
@@ -42,6 +43,14 @@ namespace engine::render {
 					if (request.Channels[first] == request.Channels[second]) return false;
 			}
 			return true;
+		}
+
+		bool PipelineMatches(std::string_view requested, const View &view) {
+			const std::string_view runtime = view.Pipeline.Text();
+			if (requested == runtime) return true;
+			const std::string suffix = "#" + std::to_string(view.World);
+			return runtime.ends_with(suffix) &&
+				   requested == runtime.substr(0, runtime.size() - suffix.size());
 		}
 
 		const char *Status(DataCaptureStatus status) {
@@ -307,7 +316,7 @@ namespace engine::render {
 			for (auto &[id, entry] : Entries) {
 				if (OwnerTickets.contains(id) || entry.Preparing || entry.CancelRequested || entry.Terminal ||
 					entry.Request.InstanceId != view.WorldName.Text() ||
-					entry.Request.Pipeline != view.Pipeline.Text() || entry.Request.ViewSlot != view.Slot)
+					!PipelineMatches(entry.Request.Pipeline, view) || entry.Request.ViewSlot != view.Slot)
 					continue;
 				pending.push_back({.Id = id, .Request = entry.Request});
 			}

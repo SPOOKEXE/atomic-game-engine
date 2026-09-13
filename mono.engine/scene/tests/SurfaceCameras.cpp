@@ -512,6 +512,9 @@ TEST_CASE("a viewport size is recorded, and a degenerate one is refused", "[scen
 		mirror.World.Resource<ActiveCamera>()->AspectRatio,
 		Catch::Matchers::WithinAbs(1631.0f / 599.0f, TOLERANCE)
 	);
+	const uint64_t settled = mirror.World.ChangeVersion();
+	REQUIRE(engine::scene::SetViewportSize(mirror.World, 1631, 599));
+	CHECK(mirror.World.ChangeVersion() == settled);
 
 	CHECK_FALSE(engine::scene::SetViewportSize(mirror.World, 1024, 0));
 	CHECK_FALSE(engine::scene::SetViewportSize(mirror.World, 0, 768));
@@ -522,6 +525,8 @@ TEST_CASE("a viewport size is recorded, and a degenerate one is refused", "[scen
 		mirror.World.Resource<ActiveCamera>()->AspectRatio,
 		Catch::Matchers::WithinAbs(1631.0f / 599.0f, TOLERANCE)
 	);
+	REQUIRE(engine::scene::SetViewportSize(mirror.World, 800, 800));
+	CHECK(mirror.World.Resource<ActiveCamera>()->AspectRatio == 1.0f);
 
 	// A world with no camera named has nothing to tell, and says so rather than
 	// creating one - a resource minted here would name a dead entity.

@@ -94,7 +94,7 @@ Implementation order:
 
 Connect, discover and expose the engine:
 - [x] publish one supported engine MCP endpoint, startup flow and server manifest for external programs and MCP agents. `client --data-factory --mcp-port 8736`, the checked `.mcp.json` entry, generic stdio `mcpbridge`, `RUNNING.md` and the served `data-factory` agent prompt expose the same versioned tools, limits and structured unsupported results.
-- [_] add an end-to-end acceptance fixture in which the Python client and an MCP agent independently connect, negotiate, run the starter workflow and fetch the same verified artifact. The Python workflow now drives the real typed MCP calls through a low-level transport fixture; a live client-host run and agent artifact parity remain open.
+- [_] add an end-to-end acceptance fixture in which the Python client and an MCP agent independently connect, negotiate, run the starter workflow and fetch the same verified artifact. The Python workflow now passes both its low-level transport fixture and a live client-host run that creates an isolated world, loads the package, warms presentation, re-pauses, captures two verified planes, writes a PNG plus JSON sidecar, releases the capture and retires the world. Independent MCP-agent artifact parity remains open.
 - [x] expose capability, version and schema discovery, and report unsupported features explicitly.
 - [x] provide the Python sibling API's negotiation, thin reads, lifecycle and ranged, BLAKE3-verified resource reads.
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records. Capture submission, cancellation and release now carry bounded unique operation IDs and exact ticket identity checks; the full cross-tool policy remains open.
@@ -129,7 +129,7 @@ Deliver the first useful structured observation loop:
 - [x] provide real headless raycast, AABB and OBB spatial queries through Luau, JavaScript, typed engine calls, thin MCP tools and the Python client.
 - [x] provide a small `DataFactoryDemo.luau` that creates one camera and three identified objects, reads the scene snapshot and camera object observations, and prints the stable IDs, poses, sizes, visibility and projected bounds.
 - [x] retain the broader API walkthrough in `DataFactoryAdvancedDemo.luau`, including metadata reads, image-buffer round trip and capture request setup.
-- [_] complete an autonomous MCP capture workflow around the starter demo. The Python workflow prefers the full advertised lifecycle, creates a caller-named isolated world, binds every later call to that world, submits the pinned rerunnable package, snapshots, requires the three stable object IDs, polls with a monotonic deadline, fetches BLAKE3-verified byte ranges, releases or cancels the ticket and retires its world on success or failure. It uses an existing local world only when the complete lifecycle is absent and never retires that fallback. A live client-host run and independent agent artifact parity remain open.
+- [_] complete an autonomous MCP capture workflow around the starter demo. The Python workflow prefers the full advertised lifecycle, creates a caller-named isolated world, binds every later call to that world, submits the pinned rerunnable package, optionally warms presentation before re-pausing, snapshots, requires the three stable object IDs, polls with a monotonic deadline, fetches BLAKE3-verified byte ranges, releases or cancels the ticket and retires its world on success or failure. The checked live example writes a viewable PBR-albedo PNG and a canonical JSON sidecar containing lifecycle, camera, object, plane and checksum data. It uses an existing local world only when the complete lifecycle is absent and never retires that fallback. Independent agent artifact parity remains open.
 - [_] provide occupancy, SDF, BEV, navmesh and affordance queries with authored semantics.
 
 Capture and persist aligned artifacts:
@@ -137,6 +137,7 @@ Capture and persist aligned artifacts:
 - [x] validate RGBA8 buffers as exactly `width*height*4`, including orientation, color space, alpha and copy semantics.
 - [x] keep typed HDR buffers separate from RGBA8 buffers.
 - [x] add the data-capture graph's default PBR data-capture node.
+- [x] allow the default capture node to copy source, depth and normal without requiring optional ambient-response and lighting-baseline planes. A Vulkan regression records all three declared planes and rejects an unpaired lighting-response declaration.
 - [x] capture RGB linear HDR, depth and packed normals.
 - [x] make asynchronous HDR, depth, packed-normal and object-ID capture retain its ticket, ranged bytes and exact projection metadata. Object-ID captures include a bounded dense sidecar from integer labels to stable `DataFactoryId` strings; background and unidentified opaque or masked gbuffer pixels use zero. Transparent surfaces, particles and later composited layers do not write this plane, so final-composite visibility truth remains open.
 - [_] make step plus snapshot plus multicamera capture atomic, with asynchronous readback completion.

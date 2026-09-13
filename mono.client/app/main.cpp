@@ -8,6 +8,7 @@
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/render/DebugPanels.hpp>
@@ -15,6 +16,7 @@
 
 #include <cctype>
 #include <client/Client.hpp>
+#include <client/Scene.hpp>
 #include <client/Settings.hpp>
 #include <cstdio>
 #include <discord/Settings.hpp>
@@ -436,6 +438,12 @@ int main(int argc, char **argv) {
 		ENGINE_ERROR("client failed to start");
 		return 1;
 	}
+	if (options.DataFactory) {
+		// An empty data-factory host does not load a game or create a presentation
+		// world, so neither normal registration path runs before the table seals.
+		engine::game::RegisterGameClasses();
+		client::RegisterClientComponents();
+	}
 
 	// **The component table closes here, and this is what makes the determinism
 	// promise real rather than intended.** Registration order fixes component
@@ -446,10 +454,10 @@ int main(int argc, char **argv) {
 	// test, which meant the guarantee `just determinism` and `just replay-check`
 	// rest on was not switched on in any shipped binary.
 	//
-	// **After `Initialise`, because that is what registers everything.** Every
-	// module's `Register*Components` runs during start-up, and a `Store`'s
-	// constructor registers the instance components on the way past. Sealing
-	// before that would close an empty table.
+	// **After `Initialise`, so startup scripts retain their registration
+	// window.** Every normal startup path registers its components there. The
+	// empty data-factory host has no game or presentation world, so it registers
+	// its game and client types explicitly just above before the table closes.
 	//
 	// **A script that declares a component after this gets a clean refusal, not
 	// a crash.** `Schemas::Register` checks `Components::Sealed()` and returns

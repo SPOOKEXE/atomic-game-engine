@@ -143,6 +143,7 @@ namespace registration_test {
 		"scene.SkyboxCompute",
 		"scene.CloudCompute",
 		"scene.AtmosphereProcedural",
+		"scene.Gravity",
 	};
 }
 

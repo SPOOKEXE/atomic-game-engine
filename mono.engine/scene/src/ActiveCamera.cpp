@@ -158,12 +158,22 @@ namespace engine::scene {
 			return false;
 		}
 
-		auto *active = store.ResourceMutable<ActiveCamera>();
+		const ActiveCamera *active = store.Resource<ActiveCamera>();
 		if (active == nullptr) {
 			return false;
 		}
 
-		active->AspectRatio = static_cast<float>(width) / static_cast<float>(height);
+		const float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+		if (active->AspectRatio == aspectRatio) {
+			return true;
+		}
+
+		auto *mutableActive = store.ResourceMutable<ActiveCamera>();
+		if (mutableActive == nullptr) {
+			return false;
+		}
+
+		mutableActive->AspectRatio = aspectRatio;
 		return true;
 	}
 }

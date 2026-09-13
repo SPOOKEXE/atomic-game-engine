@@ -15,6 +15,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
@@ -1539,8 +1540,8 @@ namespace engine::scene {
 			"scene.CharacterChanges", WriteCharacterChanges, ReadCharacterChanges
 		);
 
-		// **Registered rather than left to be minted, unlike `Gravity` and
-		// `Sun` beside it.** `workspace.SurfaceBounces` is a declared property,
+		// **Registered rather than left to be minted, unlike `Sun` beside it.**
+		// `workspace.SurfaceBounces` is a declared property,
 		// so the class table names this resource's component id while the tree
 		// is being registered - and a type that reaches `Components::Of` before
 		// an explicit name arrives keeps the compiler's spelling and aborts when
@@ -1754,6 +1755,12 @@ namespace engine::scene {
 		// The shader name crosses as text. A process-local Name id in a scene
 		// file would resolve to an unrelated shader after a different load order.
 		ecs::Components::Register<ShaderLens>("scene.ShaderLens", WriteShaderLenses, ReadShaderLenses);
+
+		// **The per-world gravity rule is a resource too.** The client creates it
+		// when installing local world systems, including an empty data-factory
+		// world after global registration has sealed. Naming it here keeps that
+		// startup path from minting an automatic compiler-spelled component id.
+		ecs::Components::Register<Gravity>("scene.Gravity");
 	}
 
 	void RegisterSceneClasses() {

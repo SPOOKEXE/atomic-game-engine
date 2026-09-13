@@ -382,6 +382,12 @@ namespace client {
 							if (EnsureLocalPlayer(store) == engine::ecs::NULL_ENTITY) return;
 							(void)RestoreDefaultCameraMovement(store, systems);
 							(void)InstallDefaultCamera(store, systems);
+							if (!engine::scene::SetViewportSize(
+									store,
+									static_cast<uint32_t>(Settings.Width),
+									static_cast<uint32_t>(Settings.Height)
+								))
+								return;
 							installed = true;
 						}
 					) != engine::world::WorldStatus::Ok ||
@@ -678,9 +684,14 @@ namespace client {
 	bool Client::PublishDataFactoryWorld(engine::world::WorldId world) {
 		if (!world.IsValid()) return false;
 		uint64_t identity = 0;
-		if (Universe_->Enter(world, [&identity](engine::ecs::Store &store) {
+		bool viewportReady = false;
+		if (Universe_->Enter(world, [this, &identity, &viewportReady](engine::ecs::Store &store) {
 				identity = store.Identity();
-			}) != engine::world::WorldStatus::Ok)
+				viewportReady = engine::scene::SetViewportSize(
+					store, static_cast<uint32_t>(Settings.Width), static_cast<uint32_t>(Settings.Height)
+				);
+			}) != engine::world::WorldStatus::Ok ||
+			!viewportReady)
 			return false;
 		Views.Track(world, Universe_->NameOf(world), Settings.Entities);
 		Simulated.push_back(world);

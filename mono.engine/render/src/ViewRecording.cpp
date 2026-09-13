@@ -2923,6 +2923,7 @@ namespace engine::render {
 				ENGINE_PROFILE_CAT("submit.scene", core::ProfileCategory::Render);
 				sceneSubmitted = State->SubmitSceneCommand(command);
 			}
+			result.Submitted = sceneSubmitted;
 			if (!sceneSubmitted) {
 				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());

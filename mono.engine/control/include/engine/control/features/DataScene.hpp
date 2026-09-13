@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -25,6 +26,9 @@ namespace engine::control {
 	namespace data_scene_detail {
 		inline constexpr size_t MAXIMUM_DEPTH = 16;
 		inline constexpr size_t MAXIMUM_RESULT_BYTES = 64u * 1024u;
+		// Script numbers are doubles. Keep a whole value as an integer only while
+		// every signed integer in this range is represented exactly by that double.
+		inline constexpr double MAXIMUM_EXACT_JSON_INTEGER = 9'007'199'254'740'991.0;
 
 		inline bool Only(const json &value, std::initializer_list<const char *> names, std::string &failure) {
 			if (!value.is_object()) {
@@ -76,7 +80,12 @@ namespace engine::control {
 				return true;
 			case script::ValueTag::Number:
 				if (!std::isfinite(source.Number) || !Spend(bytes, 32)) return false;
-				destination = source.Number;
+				if (std::trunc(source.Number) == source.Number &&
+					source.Number >= -MAXIMUM_EXACT_JSON_INTEGER &&
+					source.Number <= MAXIMUM_EXACT_JSON_INTEGER)
+					destination = static_cast<std::int64_t>(source.Number);
+				else
+					destination = source.Number;
 				return true;
 			case script::ValueTag::String:
 				if (!Spend(bytes, source.Text.size() + 2)) return false;
