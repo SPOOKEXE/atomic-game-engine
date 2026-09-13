@@ -288,6 +288,7 @@ namespace engine::control {
 		// Installs read-only data-scene observations for worlds owned by `universe`.
 		void
 		AddDataSceneTools(world::Universe &universe, std::shared_ptr<script::DataCaptureBridge> bridge = {});
+		void AddRigExportTools(world::Universe &universe);
 
 		// Adds one resource. Later rows win, as `Add` does.
 		//

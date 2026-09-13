@@ -5,6 +5,7 @@
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/RigExport.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
@@ -699,6 +700,7 @@ namespace client {
 				ControlSurface.Enable(
 					std::array{engine::control::features::DataScene(*Universe_, DataCapture)}
 				);
+				ControlSurface.Enable(std::array{engine::control::features::RigExport(*Universe_)});
 			}
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
