@@ -48,6 +48,7 @@ replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring o
 script.PortalContactRequests | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts.
 script.CodeSourceContainerSelector | Which language container the script actually runs, and the one part of the script trio a game may set at run time. Absent means Luau.
 script.DataCaptureDriver | Per-world singleton holding the scene's retained data-capture callback. The client invokes it only at a paused capture barrier, and snapshot restore clears the VM-local handle.
+script.EventNarratives | Per-world canonical bundle of validated script-declared narrative records, retained for data-scene reads and checkpoint serialization.
 script.Disabled | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all.
 script.JavaScriptSourceContainer | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column.
 script.LuaSourceContainer | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference.
