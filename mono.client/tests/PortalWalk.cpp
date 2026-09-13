@@ -33,6 +33,7 @@ TEST_DEPENDS("client.presentationhost")
 TEST_DEPENDS("client.portalsession")
 
 enum class RoomShader { None, Material, Spatial, SpatialOverlay, Lens };
+enum class PortalWalkFault { None, Delay, RestartDestinationPresentation, DropAcknowledgement };
 
 static void RunPortalWalk(
 	double worldTickRate,
@@ -43,13 +44,14 @@ static void RunPortalWalk(
 	bool imageHandoff = false,
 	bool warmPortal = false,
 	bool ownedContent = false,
-	RoomShader roomShader = RoomShader::None
+	RoomShader roomShader = RoomShader::None,
+	PortalWalkFault fault = PortalWalkFault::None
 ) {
 	using namespace engine;
 	const bool authoredShaders = roomShader != RoomShader::None;
 	const bool spatialOverlay = roomShader == RoomShader::SpatialOverlay || roomShader == RoomShader::Lens;
 	CAPTURE(roomShader);
-	CAPTURE(worldTickRate, firstPerson, explicitSubject, holdThroughAdoption, lateClear, warmPortal);
+	CAPTURE(worldTickRate, firstPerson, explicitSubject, holdThroughAdoption, lateClear, warmPortal, fault);
 	const auto programs = core::Paths::Base().parent_path();
 	const auto serverProgram = programs / "server" / core::Paths::Program("server");
 	const auto clientProgram = programs / "client" / core::Paths::Program("client");
@@ -81,6 +83,14 @@ local portal = Instance.new("Portal")
 portal.Destination = beyond
 portal.DestinationWorld = game.JobId == "walk.destination" and "server.world" or "walk.destination"
 portal.Parent = pane
+)";
+	if (fault != PortalWalkFault::None)
+		sceneSource += R"(
+local obstruction = Instance.new("Part")
+obstruction.Anchored = true
+obstruction.Size = Vector3.new(4, 4, 0.2)
+obstruction.Position = Vector3.new(0, 4, 5)
+obstruction.Parent = workspace
 )";
 	if (ownedContent)
 		sceneSource += R"(
@@ -177,7 +187,11 @@ lens.Parent = workspace
 	script::RegisterScriptComponents();
 	world::Universe authored;
 	for (const auto *name : {"server.world", "walk.destination"}) {
-		const auto id = authored.Create({.Name = core::Name(name), .TickRate = worldTickRate});
+		const auto id = authored.Create(
+			{.Name = core::Name(name),
+			 .TickRate = worldTickRate,
+			 .GlobalSimulatedNetworkLatency = fault == PortalWalkFault::Delay ? 150.0 : 0.0}
+		);
 		authored.Enter(id, [&](ecs::Store &store) {
 			scene::InstallServices(store);
 			script::SourceCache programs;
@@ -223,7 +237,7 @@ game:GetService("RunService").Heartbeat:Connect(function()
     local root = humanoid and humanoid.RootPart
     if valid and root then
         local distance = (camera.CFrame.Position - root.Position - Vector3.new(0, 1.5, 0)).Magnitude
-        print("portal-camera-distance", authority, distance < 1 and "first" or "third", humanoid.MoveDirection.Magnitude < 0.001 and "rest" or "moving", distance, camera.CFrame.LookVector.X)
+        print("portal-camera-distance", authority, distance < 1 and "first" or "third", humanoid.MoveDirection.Magnitude < 0.001 and "rest" or "moving", distance, distance < 6 and "blocked" or "clear", camera.CFrame.LookVector.X)
     end
 end)
 )"
@@ -241,6 +255,8 @@ end)
 	std::string saveError;
 	REQUIRE(game::SaveGame(authored, core::Name("portal walk"), scenePath, saveError));
 	const auto configPath = core::Paths::Base() / "portal-client-walk.ini";
+	const auto faultReportPath = core::Paths::Base() / "portal-client-walk-fault-report.txt";
+	std::filesystem::remove(faultReportPath);
 	std::ofstream(configPath).close();
 	const auto localPath = core::Paths::Base() / "portal-client-empty.luau";
 	std::ofstream(localPath) << "return\n";
@@ -249,21 +265,32 @@ end)
 	const auto port = reservation->Local().Port;
 	reservation->Close();
 	parallel::Process server;
-	REQUIRE(server.Start(
-		serverProgram,
-		{"--listen",
-		 std::to_string(port),
-		 "--game",
-		 scenePath.string(),
-		 "--remote-world",
-		 "walk.destination",
-		 "--presentation-program",
-		 clientProgram.string(),
-		 "--config",
-		 configPath.string(),
-		 "--mcp-port",
-		 "-1"}
-	));
+	std::vector<std::string> serverArguments{
+		"--listen",
+		std::to_string(port),
+		"--game",
+		scenePath.string(),
+		"--remote-world",
+		"walk.destination",
+		"--presentation-program",
+		clientProgram.string(),
+		"--config",
+		configPath.string(),
+		"--mcp-port",
+		"-1"
+	};
+	if (fault == PortalWalkFault::RestartDestinationPresentation) {
+		serverArguments.insert(
+			serverArguments.end(), {"--test-restart-presentation-world", "walk.destination"}
+		);
+	}
+	if (fault == PortalWalkFault::DropAcknowledgement)
+		serverArguments.emplace_back("--test-drop-next-portal-crossed-acknowledgement");
+	if (fault != PortalWalkFault::None) {
+		serverArguments.emplace_back("--test-portal-fault-report");
+		serverArguments.emplace_back(faultReportPath.string());
+	}
+	REQUIRE(server.Start(serverProgram, serverArguments));
 	struct Observations {
 		std::mutex Mutex;
 		bool Joined = false;
@@ -276,6 +303,7 @@ end)
 		std::array<size_t, 3> CameraModeSamples{};
 		std::array<bool, 3> Moving{};
 		std::array<size_t, 3> LookSamples{};
+		std::array<size_t, 3> ObstructedSamples{};
 		std::array<size_t, 3> PointerFrames{};
 		std::array<float, 3> MinimumLookX{};
 		std::array<float, 3> MaximumLookX{};
@@ -340,6 +368,8 @@ end)
 			const std::string_view authority = stage == 1 ? "walk.destination" : "server.world";
 			message.remove_prefix(distancePrefix.size());
 			if (!message.starts_with(authority)) return;
+			const bool blocked = message.find("\tblocked\t") != std::string_view::npos;
+			if (blocked) ++observed.ObstructedSamples[stage];
 			const std::string_view mode = firstPerson ? "\tfirst\t" : "\tthird\t";
 			// During movement the predicted eye and authoritative root describe different times.
 			if (observed.Moving[stage]) {
@@ -361,7 +391,7 @@ end)
 				return;
 			}
 			if (message.find("\trest\t") == std::string_view::npos) return;
-			if (message.find(mode) != std::string_view::npos) {
+			if (message.find(mode) != std::string_view::npos || (!firstPerson && blocked)) {
 				++observed.CameraModeSamples[stage];
 				if (stage < 2 && observed.CameraModeSamples[stage] >= 3 &&
 					(stage != 0 || !warmPortal || observed.PortalReady)) {
@@ -470,7 +500,9 @@ end)
 	options.ProfileSeconds = 45;
 	options.MaximumFrameRate = 60;
 	options.Uncapped = true;
-	options.MaximumFrames = 600;
+	options.MaximumFrames = fault == PortalWalkFault::DropAcknowledgement ? 960
+							: fault == PortalWalkFault::Delay			  ? 660
+																		  : 600;
 	options.CaptureSequence =
 		core::Paths::Base() /
 		("portal-client-walk-" + std::to_string(static_cast<int>(worldTickRate)) +
@@ -509,6 +541,11 @@ end)
 	bool returned = false;
 	bool outboundMotion = false, returnMotion = false;
 	bool outboundReplay = false, returnReplay = false;
+	size_t exactFaultCameraSamples = 0;
+	size_t faultClipSamples = 0;
+	size_t faultVisibleFrames = 0;
+	size_t faultBodyFrames = 0;
+	size_t faultNonBlackEyeFrames = 0;
 	std::vector<std::string> nativeWorlds;
 	std::vector<std::string> movingNativeWorlds;
 	for (int frame = 0; frame < options.MaximumFrames; ++frame) {
@@ -690,7 +727,7 @@ end)
 					}
 				}
 			}
-			if (imageHandoff) {
+			if (imageHandoff && fault == PortalWalkFault::None) {
 				REQUIRE(previousSample->value("eye_world", "") == sample.value("eye_world", ""));
 				const auto bluePixels = [](const std::filesystem::path &path) {
 					std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
@@ -817,7 +854,7 @@ end)
 			previousYaw = yaw;
 			// Foreign eyes render in the persistent viewport world. A missing reply
 			// must fail even when no frame ever claims to have a ready image.
-			if (sample.value("view_world", "") == "client.world") {
+			if (fault == PortalWalkFault::None && sample.value("view_world", "") == "client.world") {
 				CAPTURE(frame);
 				CHECK(sample.value("eye_image", false));
 			}
@@ -899,17 +936,33 @@ end)
 			}
 			CAPTURE(frame);
 			REQUIRE(readable);
-			CHECK(visible);
+			if (fault == PortalWalkFault::None) CHECK(visible);
+			if (fault != PortalWalkFault::None && visible) ++faultVisibleFrames;
 			// Prediction can carry the body fully beyond the plane before its
 			// authority changes worlds. Check that interval as well as adoption.
-			if (expectBody) CHECK(yellowPixels > 0);
+			if (expectBody && fault == PortalWalkFault::None) CHECK(yellowPixels > 0);
+			if (fault != PortalWalkFault::None && expectBody && yellowPixels > 0) ++faultBodyFrames;
 			if (sample.value("eye_image", false)) {
 				REQUIRE(SDL_ReadSurfacePixel(eye.get(), eye->w / 2, eye->h - 1, &red, &green, &blue, &alpha));
 				// Both rooms have a floor below the level eye. A resident handle
 				// alone is insufficient: the bound image must reach this draw slot.
 				CHECK((red != 0 || green != 0 || blue != 0));
+				if (fault != PortalWalkFault::None && (red != 0 || green != 0 || blue != 0))
+					++faultNonBlackEyeFrames;
 			}
 		}
+		if (fault != PortalWalkFault::None)
+			for (const auto &portal : sample.at("portal_views")) {
+				if (!portal.value("external", false) || !portal.contains("capture") ||
+					!portal.at("capture").is_object())
+					continue;
+				const auto &clip = portal.at("capture").at("clip_plane");
+				CHECK(clip.size() == 4);
+				const float normal = std::abs(clip.at(0).get<float>()) + std::abs(clip.at(1).get<float>()) +
+									 std::abs(clip.at(2).get<float>());
+				CHECK(normal > .99f);
+				++faultClipSamples;
+			}
 		if (imageHandoff && sample.contains("observed_world")) {
 			CHECK_FALSE(sample.value("eye_image", true));
 			CHECK(sample.at("view_world") != sample.at("input_world"));
@@ -918,6 +971,8 @@ end)
 			for (const auto &portal : sample.at("portal_views")) {
 				if (!portal.value("external", false)) continue;
 				REQUIRE(portal.contains("capture"));
+				if (fault != PortalWalkFault::None && !portal.at("capture").is_object()) continue;
+				REQUIRE(portal.at("capture").is_object());
 				CHECK(portal.at("capture").at("producer") == sample.at("input_world"));
 			}
 			++observedEyeSamples;
@@ -940,6 +995,8 @@ end)
 			for (const auto &portal : sample.at("portal_views")) {
 				if (!portal.value("external", false)) continue;
 				REQUIRE(portal.contains("capture"));
+				if (fault != PortalWalkFault::None && !portal.at("capture").is_object()) continue;
+				REQUIRE(portal.at("capture").is_object());
 				// This fixture's seam mapping is identity apart from wire rounding.
 				// A stale camera can pass the room-colour check while exposing a gray border.
 				const auto &capturedEye = portal.at("capture").at("position");
@@ -957,6 +1014,7 @@ end)
 					rotationDot +=
 						capturedRotation.at(axis).get<float>() * liveRotation.at(axis).get<float>();
 				CHECK(std::abs(rotationDot) > 1.0f - 1e-6f);
+				if (fault != PortalWalkFault::None) ++exactFaultCameraSamples;
 			}
 		}
 		if (imageHandoff && returned && !sample.value("eye_image", false)) {
@@ -987,6 +1045,13 @@ end)
 	CHECK(returnMotion);
 	CHECK(outboundReplay);
 	CHECK(returnReplay);
+	if (fault != PortalWalkFault::None) {
+		CHECK(exactFaultCameraSamples > 0);
+		CHECK(faultClipSamples > 16);
+		CHECK(faultVisibleFrames > 16);
+		CHECK(faultBodyFrames > 0);
+		if (imageHandoff) CHECK(faultNonBlackEyeFrames > 0);
+	}
 	CHECK(maximumEyeHeightError < 0.05f);
 	CHECK(explicitSubjectSeen == explicitSubject);
 	std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> capture(
@@ -1020,6 +1085,16 @@ end)
 	}
 	CHECK(stopped.Reason == parallel::ExitReason::Exited);
 	CHECK(stopped.Code == 0);
+	if (fault != PortalWalkFault::None) {
+		std::ifstream report(faultReportPath);
+		const std::string markers(std::istreambuf_iterator<char>(report), {});
+		if (fault == PortalWalkFault::RestartDestinationPresentation)
+			CHECK(markers.find("restarted-presentation-producer") != std::string::npos);
+		if (fault == PortalWalkFault::DropAcknowledgement) {
+			CHECK(markers.find("dropped-lease-adopted") != std::string::npos);
+			CHECK(markers.find("recovered-lease-adopted") != std::string::npos);
+		}
+	}
 	std::lock_guard lock(observed.Mutex);
 	CAPTURE(observed.Refusals);
 	CHECK(observed.Joined);
@@ -1029,7 +1104,7 @@ end)
 	}
 	REQUIRE(observed.Adoptions.size() == 2);
 	CHECK(nativeWorlds.size() == 2);
-	if (holdThroughAdoption) CHECK(movingNativeWorlds.size() == 2);
+	if (holdThroughAdoption && fault != PortalWalkFault::Delay) CHECK(movingNativeWorlds.size() == 2);
 	if (spatialOverlay) CHECK(spatialOverlayAdoptions == 1);
 	CHECK(observed.Adoptions[0].starts_with("portal session adopted walk.destination "));
 	CHECK(observed.Adoptions[1].starts_with("portal session adopted server.world "));
@@ -1038,6 +1113,12 @@ end)
 		CHECK(samples > 0);
 	for (const auto samples : observed.CameraModeSamples)
 		CHECK(samples > 0);
+	if (fault != PortalWalkFault::None) {
+		CHECK(observed.ObstructedSamples[0] > 0);
+		CHECK(
+			observed.ObstructedSamples[0] + observed.ObstructedSamples[1] + observed.ObstructedSamples[2] > 16
+		);
+	}
 	CHECK(observed.CameraFailures.empty());
 	CAPTURE(observed.LookSamples, observed.MinimumLookX, observed.MaximumLookX);
 	for (size_t stage = 0; stage < 2; ++stage) {
@@ -1050,6 +1131,18 @@ end)
 		CHECK(samples > 0);
 	CHECK_FALSE(observed.DuplicateMove);
 #endif
+}
+
+TEST_CASE(
+	"faulted product portal round trips retain humanoid camera continuity",
+	"[client][portal-product-fault-roundtrip][gpu][.]"
+) {
+	const auto fault = GENERATE(
+		PortalWalkFault::Delay,
+		PortalWalkFault::RestartDestinationPresentation,
+		PortalWalkFault::DropAcknowledgement
+	);
+	RunPortalWalk(60, false, true, true, false, true, false, false, RoomShader::None, fault);
 }
 
 TEST_CASE("Client walks through product portal images and returns", "[client][portal-product-walk][gpu][.]") {

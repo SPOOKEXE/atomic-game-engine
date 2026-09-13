@@ -68,6 +68,9 @@ int main(int argc, char **argv) {
 		"force-serial-compute",
 		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
 	);
+	arguments.Value(
+		"test-portal-fault-report", "PATH", "Test only: append fired portal fault markers to PATH"
+	);
 
 	// The control surface. Off unless asked for - see `Options::ControlPort`.
 	// The number is read from the one constant rather than written here, so the
@@ -108,6 +111,15 @@ int main(int argc, char **argv) {
 		"presentation-program",
 		"PATH",
 		"Client executable to launch for live portal images on each listening host"
+	);
+	arguments.Value(
+		"test-restart-presentation-world",
+		"NAME",
+		"Test only: restart this world's portal image producer on its first portal lease"
+	);
+	arguments.Flag(
+		"test-drop-next-portal-crossed-acknowledgement",
+		"Test only: lose the next inbound portal-crossing acknowledgement"
 	);
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("physical-core", "N", "Physical-core slot assigned by a supervising driver");
@@ -354,6 +366,12 @@ int main(int argc, char **argv) {
 	if (auto program = arguments.Get("presentation-program")) {
 		options.PresentationProgram = std::filesystem::absolute(std::filesystem::path(*program));
 	}
+	if (auto world = arguments.Get("test-restart-presentation-world")) {
+		options.TestRestartPresentationWorld = std::string(*world);
+	}
+	options.TestDropNextPortalCrossedAcknowledgement =
+		arguments.Has("test-drop-next-portal-crossed-acknowledgement");
+	if (auto report = arguments.Get("test-portal-fault-report")) options.TestPortalFaultReport = *report;
 	options.Processes = static_cast<uint32_t>(arguments.GetInteger("processes", options.Processes));
 	if (arguments.Has("physical-core")) {
 		options.PhysicalCore =

@@ -44,6 +44,7 @@ static void RunPortalSuccessor(int outcome) {
 	const bool lostCancellationAck = outcome == 6;
 	const bool readinessExpiry = outcome == 7;
 	const bool readinessDisconnect = outcome == 8;
+	const bool delayedDestination = outcome == 16;
 	const bool withheldSnapshot = readinessExpiry || readinessDisconnect;
 	const bool retryRefusal = outcome == 1 || lostCancellationAck || withheldSnapshot;
 	CAPTURE(outcome);
@@ -123,6 +124,8 @@ static void RunPortalSuccessor(int outcome) {
 	std::optional<double> offerSentAt;
 	bool destinationRefusalSeen = false;
 	bool transportLost = false, restartDestination = false;
+	std::optional<double> destinationLatencyAppliedAt;
+	std::optional<double> delayedResumeReceivedAt, delayedCommitReceivedAt;
 	size_t sourceFresh = 0, destinationFresh = 0, sourceInputsAfterAdoption = 0,
 		   sourceInputsDuringContinuation = 0;
 	std::optional<double> destinationInputAt;
@@ -447,6 +450,10 @@ static void RunPortalSuccessor(int outcome) {
 		if (receivePresentation(*destinationPresentation, destinationConsumers, bytes)) {
 			destinationPeer = peer;
 			CHECK(to->IdentityOf(peer) == from.IdentityOf(*sourcePeer));
+			if (delayedDestination && !destinationLatencyAppliedAt) {
+				REQUIRE(to->SetSimulatedLatency(peer, 150));
+				destinationLatencyAppliedAt = now;
+			}
 			if (readinessDisconnect && !transportLost) {
 				transportLost = true;
 				restartDestination = true;
@@ -470,6 +477,10 @@ static void RunPortalSuccessor(int outcome) {
 		CHECK(request.Claim == offer.Claim);
 		CHECK(request.Attempt == offer.Attempt);
 		CHECK(to->IdentityOf(peer) == from.IdentityOf(*sourcePeer));
+		if (delayedDestination && request.Kind == game::PortalSessionKind::Resume)
+			delayedResumeReceivedAt = now;
+		if (delayedDestination && request.Kind == game::PortalSessionKind::Commit)
+			delayedCommitReceivedAt = now;
 		game::PortalSessionMessage reply;
 		reply.Attempt = request.Attempt;
 		reply.Player = arrived;
@@ -785,6 +796,12 @@ end)
 	CHECK(destinationRefusalSeen == (outcome == 2 || outcome == 3));
 	CHECK(transportLost == (outcome == 4 || outcome == 5 || readinessDisconnect));
 	CHECK(cancellationRequests == (lostCancellationAck ? 2 : retryRefusal ? 1 : 0));
+	if (delayedDestination) {
+		REQUIRE(destinationLatencyAppliedAt);
+		REQUIRE(delayedResumeReceivedAt);
+		REQUIRE(delayedCommitReceivedAt);
+		CHECK(*delayedCommitReceivedAt >= *delayedResumeReceivedAt + .15);
+	}
 }
 
 TEST_CASE(
@@ -812,6 +829,13 @@ TEST_CASE(
 	"[client][portal-successor][portal-readiness-disconnect][gpu][.]"
 ) {
 	RunPortalSuccessor(8);
+}
+
+TEST_CASE(
+	"client completes a delayed portal successor admission",
+	"[client][portal-successor][portal-delay][gpu][.]"
+) {
+	RunPortalSuccessor(16);
 }
 
 TEST_CASE(

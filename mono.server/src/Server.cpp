@@ -63,6 +63,12 @@
 namespace server {
 
 	namespace {
+		void ReportPortalFault(const Options &settings, std::string_view marker) {
+			if (settings.TestPortalFaultReport.empty()) return;
+			std::ofstream report(settings.TestPortalFaultReport, std::ios::app);
+			report << marker << '\n' << std::flush;
+		}
+
 		// Writes one `core::Metrics` snapshot to the log.
 		//
 		// **The whole reason `Metrics` grew a read side.** Everything below L11
@@ -837,6 +843,18 @@ namespace server {
 				driver.Hosts.Arguments.end(),
 				{"--presentation-program", Settings.PresentationProgram.string()}
 			);
+		}
+		if (!Settings.TestRestartPresentationWorld.empty()) {
+			driver.Hosts.Arguments.insert(
+				driver.Hosts.Arguments.end(),
+				{"--test-restart-presentation-world", Settings.TestRestartPresentationWorld}
+			);
+		}
+		if (Settings.TestDropNextPortalCrossedAcknowledgement)
+			driver.Hosts.Arguments.emplace_back("--test-drop-next-portal-crossed-acknowledgement");
+		if (!Settings.TestPortalFaultReport.empty()) {
+			driver.Hosts.Arguments.emplace_back("--test-portal-fault-report");
+			driver.Hosts.Arguments.emplace_back(Settings.TestPortalFaultReport.string());
 		}
 		if (!Settings.AssetsDirectory.empty()) {
 			driver.Hosts.Arguments.emplace_back("--override-assets-directory");
@@ -2859,6 +2877,25 @@ namespace server {
 					Replication->SendTo(client, game::EncodePortalSession(transfer), nowSeconds);
 			}
 		}
+		for (auto &[_, departure] : PortalDepartures) {
+			// The committed player has left Players, but the departure must keep
+			// renewing until its destination confirms adoption. Otherwise one lost
+			// final reply leaves the source lease alive forever.
+			if (!departure.Route || !departure.CrossedSent || nowSeconds < departure.RetryAt) continue;
+			const auto destination = Worlds().Find(core::Name(departure.Request.Claim.Destination));
+			const auto endpoint = Worlds().LookupPresentation(destination, "portal-sessions");
+			if (endpoint.Generation == 0 || endpoint != departure.Destination) continue;
+			auto request = departure.Request;
+			request.Claim.DestinationIncarnation = departure.Route->Claim.DestinationIncarnation;
+			if (Worlds().SendPresentation(
+					PrimaryWorld,
+					PortalSessionEndpoint,
+					endpoint,
+					request.Attempt,
+					game::EncodePortalSession(request)
+				) == world::PresentationStatus::Ok)
+				departure.RetryAt = nowSeconds + 5.0;
+		}
 	}
 
 	void Server::PumpPortalSessions(double nowSeconds) {
@@ -2891,7 +2928,18 @@ namespace server {
 						(departure.Route && departure.Route->Claim != request.Claim))
 						break;
 					if (request.Kind == game::PortalSessionKind::LeaseAdopted) {
-						if (departure.Route && departure.CrossedSent) PortalDepartures.erase(index);
+						if (Settings.TestDropNextPortalCrossedAcknowledgement &&
+							!TestPortalCrossedAcknowledgementDropped) {
+							TestPortalCrossedAcknowledgementDropped = true;
+							ENGINE_INFO("portal test dropped crossed acknowledgement");
+							ReportPortalFault(Settings, "dropped-lease-adopted");
+							break;
+						}
+						if (departure.Route && departure.CrossedSent) {
+							if (TestPortalCrossedAcknowledgementDropped)
+								ReportPortalFault(Settings, "recovered-lease-adopted");
+							PortalDepartures.erase(index);
+						}
 						break;
 					}
 					departure.Route = request;
@@ -2904,6 +2952,12 @@ namespace server {
 				request.Claim.SourceSession != message.From.Session ||
 				request.Claim.Destination != PortalSessionEndpoint.World)
 				continue;
+			const bool restarted =
+				!TestPresentationRestarted &&
+				Settings.TestRestartPresentationWorld == Worlds().NameOf(PrimaryWorld).Text() &&
+				ImageProcess.Started() && (TestPresentationRestarted = ImageProcess.Kill());
+			if (restarted) ENGINE_INFO("portal test restarted presentation producer");
+			if (restarted) ReportPortalFault(Settings, "restarted-presentation-producer");
 			game::PortalSessionMessage response;
 			response.Kind = game::PortalSessionKind::Refused;
 			response.Attempt = request.Attempt;

@@ -312,6 +312,17 @@ namespace server {
 		// Optional Client executable. Each listening host launches one live image producer.
 		std::filesystem::path PresentationProgram;
 
+		// Test-only fault injection: terminate this world's image producer when it
+		// first receives a portal lease request. An empty name leaves it off.
+		std::string TestRestartPresentationWorld;
+
+		// Test-only fault injection: ignore the first LeaseAdopted after this authority
+		// reports a portal crossing, exercising the retry path.
+		bool TestDropNextPortalCrossedAcknowledgement = false;
+
+		// Test-only append-only report for deterministic fault evidence. Empty leaves it off.
+		std::filesystem::path TestPortalFaultReport;
+
 		// The worlds this host was granted, by name.
 		//
 		// Names rather than ids: an id is an index into one process's registry
@@ -1170,6 +1181,8 @@ namespace server {
 		// `--listen` was given, which is what keeps a headless determinism run
 		// from binding a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
+		bool TestPortalCrossedAcknowledgementDropped = false;
+		bool TestPresentationRestarted = false;
 		std::unique_ptr<engine::replication::Listener> Replication;
 
 		// What Discord is told this server is hosting, or null when nothing is
