@@ -436,13 +436,6 @@ namespace engine::render {
 		RetainedNodesOf(const graph::RenderGraph &pipeline, std::span<const core::Name> customKinds) {
 			std::vector<uint8_t> retained(pipeline.Count(), 0);
 			std::vector<uint8_t> liveResources(pipeline.ResourceCount() + 1, 0);
-			std::vector<uint8_t> historyResources(pipeline.ResourceCount() + 1, 0);
-			for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
-				const graph::ResourceDesc *resource = pipeline.FindResource(graph::ResourceId{value});
-				historyResources[value] =
-					resource != nullptr && resource->Lifetime == graph::ResourceLifetime::History;
-				liveResources[value] = historyResources[value];
-			}
 
 			bool changed = true;
 			while (changed) {
@@ -454,18 +447,15 @@ namespace engine::render {
 					const bool output = kind != nullptr && kind->Category == graph::NodeCategory::Output;
 					const bool custom =
 						std::find(customKinds.begin(), customKinds.end(), node->Kind) != customKinds.end();
+					// Path tracing advances its accumulation even when the scene is unchanged.
+					// Other history resources are caches and do not make their writers temporal.
+					const bool temporal = node->Kind == core::Name("pathtrace");
 					const bool consumesLive =
 						std::any_of(node->Reads.begin(), node->Reads.end(), [&](graph::ResourceId resource) {
 							return resource.Value < liveResources.size() &&
 								   liveResources[resource.Value] != 0;
 						});
-					const bool writesHistory = std::any_of(
-						node->Writes.begin(), node->Writes.end(), [&](graph::ResourceId resource) {
-							return resource.Value < historyResources.size() &&
-								   historyResources[resource.Value] != 0;
-						}
-					);
-					if (!output && !custom && !consumesLive && !writesHistory) continue;
+					if (!output && !custom && !temporal && !consumesLive) continue;
 					retained[value - 1] = 1;
 					changed = true;
 					for (const graph::ResourceId resource : node->Writes) {

@@ -2712,15 +2712,15 @@ namespace engine::render {
 			for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
 				frameNodes.Set(installed.Kind, installed.Handler);
 			}
-			if (retains(RetainedAuthored)) recording.RegisterAuthoredNodes(frameNodes);
 			if (retains(RetainedUpload)) recording.RegisterUploadNodes(frameNodes);
 			if (retains(RetainedShadow)) recording.RegisterShadowNodes(frameNodes);
 			if (retains(RetainedMirror)) recording.RegisterMirrorNodes(frameNodes);
 			if (retains(RetainedPortal)) recording.RegisterPortalNodes(frameNodes);
 			if (retains(RetainedSurface)) recording.RegisterSurfaceNodes(frameNodes);
-			if (retains(RetainedShading)) recording.RegisterShadingNodes(frameNodes);
+			if (retains(RetainedAuthored)) recording.RegisterAuthoredNodes(frameNodes);
 			// Dedicated geometry handlers win over authored fallbacks that share a kind.
 			if (retains(RetainedGeometry)) recording.RegisterGeometryNodes(frameNodes);
+			if (retains(RetainedShading)) recording.RegisterShadingNodes(frameNodes);
 			recording.RegisterOutputNodes(frameNodes);
 		}
 
