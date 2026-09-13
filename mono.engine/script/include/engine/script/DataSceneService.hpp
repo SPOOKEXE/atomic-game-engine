@@ -9,6 +9,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/DataAudioObservationBridge.hpp>
 #include <engine/script/EventNarratives.hpp>
 
 #include <cstddef>
@@ -62,6 +63,10 @@ namespace engine::script {
 	DataSceneResult
 	GetCaptureChannels(const ecs::Store &store, const std::shared_ptr<DataCaptureBridge> &bridge);
 	DataSceneResult GetResources(const ecs::Store &store);
+	// Audio capture is host-owned. This only describes whether an installed
+	// copied-record bridge can supply audio_observation/v1 records.
+	DataSceneResult
+	GetAudioObservationCapabilities(const std::shared_ptr<DataAudioObservationBridge> &bridge);
 	// Validate and canonicalize a bundle before script, MCP, or snapshot code retains it.
 	// @param bundle Script-declared narrative data.
 	// @param canonical Receives the bounded canonical bundle on success.

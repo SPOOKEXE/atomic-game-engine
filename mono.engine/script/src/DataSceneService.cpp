@@ -1857,6 +1857,31 @@ namespace engine::script {
 		};
 	}
 
+	DataSceneResult
+	GetAudioObservationCapabilities(const std::shared_ptr<DataAudioObservationBridge> &bridge) {
+		if (!bridge)
+			return {
+				"ok",
+				Map({
+					{"status", String("ok")},
+					{"audio_observation", Boolean(false)},
+					{"audio_observation_schema_version", String(AUDIO_OBSERVATION_SCHEMA)},
+					{"audio_observation_reason", String("audio observation bridge is not installed")},
+				})
+			};
+		const DataAudioObservationBridgeCapabilities capabilities = bridge->Capabilities();
+		return {
+			"ok",
+			Map({
+				{"status", String("ok")},
+				{"audio_observation", Boolean(capabilities.Available)},
+				{"audio_observation_schema_version", String(AUDIO_OBSERVATION_SCHEMA)},
+				{"audio_observation_maximum_frames", Number(capabilities.MaximumFrames)},
+				{"audio_observation_reason", String(capabilities.Detail)},
+			})
+		};
+	}
+
 	DataSceneResult SetEventNarratives(ecs::Store &store, const ScriptValue &bundle) {
 		ScriptValue canonical;
 		DataSceneResult result = ValidateEventNarratives(bundle, canonical);
