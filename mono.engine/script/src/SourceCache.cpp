@@ -3,6 +3,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/script/Clock.hpp>
+#include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -18,6 +19,17 @@
 namespace engine::script {
 
 	namespace {
+		// A retained callback is meaningful only inside the VM which created it.
+		// Keep the resource present across a snapshot so the component set remains
+		// compatible, but restore it empty instead of reviving a stale VM handle.
+		void WriteTransientDataCaptureDriver(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadTransientDataCaptureDriver(core::ByteReader &, void *destination, size_t count) {
+			auto *drivers = static_cast<DataCaptureDriver *>(destination);
+			for (size_t index = 0; index < count; index++)
+				drivers[index] = {};
+		}
+
 		// Written as text with a length, never as the object representation.
 		//
 		// The row holds a `core::Name` and a `std::string`, and both would be a
@@ -191,6 +203,9 @@ namespace engine::script {
 		// end**.
 		ecs::Components::Register<Program>("script.Program", WritePrograms, ReadPrograms);
 		ecs::Components::Register<ScriptClock>("script.ScriptClock");
+		ecs::Components::Register<DataCaptureDriver>(
+			"script.DataCaptureDriver", WriteTransientDataCaptureDriver, ReadTransientDataCaptureDriver
+		);
 		RegisterTeleportRequestComponents();
 		RegisterPortalTransferComponents();
 	}

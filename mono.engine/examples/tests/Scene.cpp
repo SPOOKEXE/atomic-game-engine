@@ -9,6 +9,7 @@
 
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -30,7 +31,10 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -66,6 +70,63 @@ using engine::scene::Visual;
 using engine::scene::WorldBounds;
 
 namespace {
+	class DemoCaptureBridge final : public engine::script::DataCaptureBridge {
+	  public:
+		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
+			return {.Available = true, .Channels = {"rgb_linear_hdr"}, .Detail = "fixture"};
+		}
+		bool Queue(
+			std::string_view owner,
+			const engine::script::DataCaptureBridgeRequest &request,
+			uint64_t &ticket,
+			std::string &
+		) override {
+			Owner = std::string(owner);
+			if (request.InstanceId != owner) return false;
+			ticket = 77;
+			return true;
+		}
+		bool Poll(
+			std::string_view owner,
+			uint64_t ticket,
+			engine::script::DataCaptureBridgePoll &poll,
+			std::string &
+		) override {
+			if (owner != Owner || ticket != 77) return false;
+			poll.Status = "ready";
+			poll.SnapshotId = "snapshot-test";
+			engine::script::DataCaptureBridgePlane plane;
+			plane.Channel = "rgb_linear_hdr";
+			plane.Status = "ready";
+			plane.Resource = "capture/77/rgb_linear_hdr";
+			poll.Planes.push_back(std::move(plane));
+			return true;
+		}
+		bool ReadPlane(
+			std::string_view owner,
+			uint64_t ticket,
+			std::string_view resource,
+			size_t,
+			size_t,
+			std::vector<std::byte> &bytes,
+			std::string &
+		) override {
+			if (owner != Owner || ticket != 77 || resource != "capture/77/rgb_linear_hdr") return false;
+			bytes = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+			Read = true;
+			return true;
+		}
+		bool Release(std::string_view owner, uint64_t ticket, std::string &) override {
+			Released = owner == Owner && ticket == 77 && Read;
+			return Released;
+		}
+		void Cancel(std::string_view, uint64_t) override {}
+		bool Read = false;
+		bool Released = false;
+
+	  private:
+		std::string Owner;
+	};
 
 	// Where a script's content lives now.
 	//
@@ -272,6 +333,42 @@ TEST_CASE("the rings scene builds and moves itself", "[examples][scene]") {
 	// for.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 5.0f);
+}
+
+TEST_CASE("the data factory capture request runs without a heartbeat", "[examples][scene][data]") {
+	const StagedAssets assets;
+
+	Store store("data-factory");
+	Scheduler systems;
+	auto bridge = std::make_shared<DemoCaptureBridge>();
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
+	limits.DataCapture = bridge;
+	std::shared_ptr<engine::script::Runtime> runtime;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("DataFactoryDemo.luau"), error, &runtime, &limits));
+	REQUIRE(runtime != nullptr);
+	const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
+	REQUIRE(driver != nullptr);
+	engine::script::HostValue snapshot(engine::script::HostTag::String);
+	snapshot.Text = "snapshot-test";
+	engine::script::HostValue none(engine::script::HostTag::Nil);
+	engine::script::HostValue queued;
+	REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, none}, queued));
+	engine::script::HostValue ticket(engine::script::HostTag::String);
+	ticket.Text = "77";
+	engine::script::HostValue ready;
+	REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, ticket}, ready));
+	bool copied = false;
+	for (const auto &[name, value] : ready.Entries)
+		if (name == "copied_payload_bytes" && value.Tag == engine::script::HostTag::Number &&
+			value.Number == 4)
+			copied = true;
+	CHECK(copied);
+	CHECK(bridge->Read);
+	std::string detail;
+	CHECK(bridge->Release("data-factory", 77, detail));
+	CHECK(bridge->Released);
 }
 
 TEST_CASE("the animation scene builds rigs around one procedural buffer", "[examples][scene][animation]") {

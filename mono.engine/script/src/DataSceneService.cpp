@@ -11,6 +11,7 @@
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/ScriptCall.hpp>
@@ -353,6 +354,18 @@ namespace engine::script {
 					{"vertical_fov_radians", Number(poll.VerticalFieldOfViewRadians)},
 					{"near_metres", Number(poll.NearMetres)},
 					{"far_metres", Number(poll.FarMetres)},
+					{"crop",
+					 Array(
+						 {Number(poll.CropLeft),
+						  Number(poll.CropTop),
+						  Number(poll.CropWidth),
+						  Number(poll.CropHeight)}
+					 )},
+					{"crop_convention", String(poll.CropConvention)},
+					{"lens_distortion_available", Boolean(poll.LensDistortionAvailable)},
+					{"lens_distortion_reason", String(poll.LensDistortionReason)},
+					{"jitter_available", Boolean(poll.JitterAvailable)},
+					{"jitter_policy", String(poll.JitterPolicy)},
 					{"coordinate_convention", String(poll.CoordinateConvention)},
 				};
 				if (poll.HasProjection) camera.emplace_back("projection", Matrix(poll.Projection));
@@ -819,6 +832,26 @@ namespace engine::script {
 		void ServiceReleaseCapture(ScriptCall &call) {
 			call.ReturnValue(ReleaseCapture(call.DataCapture(), call.World().Name(), call.AsString(0)).Value);
 		}
+		void ServiceSetCaptureDriver(ScriptCall &call) {
+			if (call.IsNil(0)) {
+				if (auto *previous = call.World().ResourceMutable<DataCaptureDriver>();
+					previous != nullptr && previous->Callback.Valid())
+					call.ReleaseHostCallback(previous->Callback);
+				call.World().RemoveResource<DataCaptureDriver>();
+				call.ReturnValue(Map({{"status", String("released")}}));
+				return;
+			}
+			const HostCallback replacement = call.RetainHostCallback(0);
+			if (!replacement.Valid()) {
+				call.ReturnValue(Map({{"status", String("invalid_driver")}}));
+				return;
+			}
+			if (auto *previous = call.World().ResourceMutable<DataCaptureDriver>();
+				previous != nullptr && previous->Callback.Valid())
+				call.ReleaseHostCallback(previous->Callback);
+			call.World().SetResource(DataCaptureDriver{replacement});
+			call.ReturnValue(Map({{"status", String("registered")}}));
+		}
 		void ServiceRequestLifecycle(ScriptCall &call) {
 			ScriptValue request;
 			CodecStatus status = CodecStatus::Ok;
@@ -869,7 +902,7 @@ namespace engine::script {
 			call.ReturnValue(QueryObb(call.World(), request).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 17> DATA_SCENE_METHODS{{
+		constexpr std::array<ServiceMethod, 18> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
@@ -880,6 +913,7 @@ namespace engine::script {
 			{"CancelCapture", ServiceCancelCapture},
 			{"GetCaptureBuffer", ServiceCaptureBuffer},
 			{"ReleaseCapture", ServiceReleaseCapture},
+			{"SetCaptureDriver", ServiceSetCaptureDriver},
 			{"RequestLifecycle", ServiceRequestLifecycle},
 			{"PollLifecycle", ServicePollLifecycle},
 			{"ReleaseLifecycle", ServiceReleaseLifecycle},

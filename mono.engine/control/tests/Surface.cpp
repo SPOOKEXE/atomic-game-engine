@@ -147,6 +147,11 @@ namespace {
 			}
 			poll.Status = "ready";
 			poll.SnapshotId = Snapshot;
+			poll.HasCamera = true;
+			poll.CropLeft = 0.125;
+			poll.CropTop = 0.25;
+			poll.CropWidth = 0.5;
+			poll.CropHeight = 0.75;
 			poll.Planes = {
 				{.Channel = "rgb_linear_hdr",
 				 .Status = "ready",
@@ -336,6 +341,12 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(poll["planes"][0]["shape"] == json::array({1, 2, 4}));
 	CHECK(poll["planes"][0]["snapshot_id"] == "snapshot-1");
 	CHECK(poll["planes"][0]["dtype"] == "float16");
+	CHECK(poll["camera"]["crop"] == json::array({0.125, 0.25, 0.5, 0.75}));
+	CHECK(poll["camera"]["crop_convention"] == "normalized_full_view_left_top_width_height");
+	CHECK_FALSE(poll["camera"]["lens_distortion_available"]);
+	CHECK(poll["camera"]["lens_distortion_reason"] == "unavailable");
+	CHECK_FALSE(poll["camera"]["jitter_available"]);
+	CHECK(poll["camera"]["jitter_policy"] == "unavailable");
 	const json bytes = Called(
 		surface,
 		"get_resource",

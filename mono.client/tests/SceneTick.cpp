@@ -39,6 +39,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <DataCaptureDriver.hpp>
 #include <algorithm>
 #include <client/Scene.hpp>
 #include <filesystem>
@@ -146,6 +147,138 @@ namespace {
 		});
 		return found;
 	}
+}
+
+TEST_CASE("data capture driver ticket transition is paused, strict, and terminal", "[client][data-capture]") {
+	using namespace client::data_capture_driver;
+	State state;
+	const engine::script::HostCallback callback{1};
+	CHECK(Transition(state, false, callback, nullptr) == Action::None);
+	CHECK(Transition(state, true, callback, nullptr) == Action::None);
+	engine::script::HostValue queued(engine::script::HostTag::Map);
+	engine::script::HostValue status(engine::script::HostTag::String);
+	status.Text = "queued";
+	engine::script::HostValue ticket(engine::script::HostTag::String);
+	ticket.Text = "7";
+	queued.Entries.emplace_back("status", std::move(status));
+	queued.Entries.emplace_back("ticket", std::move(ticket));
+	CHECK(Transition(state, true, callback, &queued) == Action::None);
+	REQUIRE(state.Ticket == 7);
+	CHECK(Transition(state, true, callback, &queued) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	state.Ticket = 7;
+	engine::script::HostValue pending(engine::script::HostTag::Map);
+	engine::script::HostValue pendingStatus(engine::script::HostTag::String);
+	pendingStatus.Text = "pending";
+	pending.Entries.emplace_back("status", std::move(pendingStatus));
+	CHECK(Transition(state, true, callback, &pending) == Action::None);
+	state.Ticket.reset();
+	CHECK(Transition(state, true, callback, &pending) == Action::Invalid);
+	queued.Entries[1].second.Text = "18446744073709551616";
+	CHECK(Transition(state, true, callback, &queued) == Action::Invalid);
+	queued.Entries[1].second.Text = "7";
+	state.Ticket = 7;
+	for (const std::string_view terminal :
+		 {"ready", "partial", "cancelled", "error", "failed", "unsupported", "invalid", "stale_snapshot"}) {
+		engine::script::HostValue result(engine::script::HostTag::Map);
+		engine::script::HostValue terminalStatus(engine::script::HostTag::String);
+		terminalStatus.Text = terminal;
+		result.Entries.emplace_back("status", std::move(terminalStatus));
+		CHECK(Transition(state, true, callback, &result) == Action::Release);
+		CHECK(state.Ticket == 7);
+		state.Ticket = 7;
+	}
+	engine::script::HostValue malformed(engine::script::HostTag::String);
+	CHECK(Transition(state, true, callback, &malformed) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	CHECK(Transition(state, false, callback, nullptr) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	state.Ticket = 7;
+	engine::script::HostValue unknown(engine::script::HostTag::Map);
+	engine::script::HostValue unknownStatus(engine::script::HostTag::String);
+	unknownStatus.Text = "wat";
+	unknown.Entries.emplace_back("status", std::move(unknownStatus));
+	CHECK(Transition(state, true, callback, &unknown) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	state.Ticket = 7;
+	CHECK(Transition(state, true, engine::script::HostCallback{2}, nullptr) == Action::None);
+	CHECK(state.Cancelling);
+	CHECK(Transition(state, true, std::nullopt, nullptr) == Action::None);
+	engine::script::HostValue cancelled(engine::script::HostTag::Map);
+	engine::script::HostValue cancelledStatus(engine::script::HostTag::String);
+	cancelledStatus.Text = "cancelled";
+	cancelled.Entries.emplace_back("status", std::move(cancelledStatus));
+	CHECK(Transition(state, true, std::nullopt, &cancelled) == Action::Release);
+	CHECK(state.Ticket == 7);
+	engine::script::HostValue richReady(engine::script::HostTag::Map);
+	engine::script::HostValue richStatus(engine::script::HostTag::String);
+	richStatus.Text = "ready";
+	engine::script::HostValue planes(engine::script::HostTag::Array);
+	richReady.Entries.emplace_back("status", std::move(richStatus));
+	richReady.Entries.emplace_back("planes", std::move(planes));
+	CHECK(Transition(state, true, callback, &richReady) == Action::Release);
+
+	const int firstOwner = 1;
+	const int secondOwner = 2;
+	State owners;
+	CHECK(Transition(owners, true, callback, nullptr, &firstOwner) == Action::None);
+	CHECK(Transition(owners, true, callback, &queued, &firstOwner) == Action::None);
+	CHECK(Transition(owners, true, callback, nullptr, &secondOwner) == Action::None);
+	CHECK(owners.Cancelling);
+	CHECK(owners.Ticket == 7);
+
+	State cleanup{callback, 9, true};
+	bool cancelSent = false;
+	int cancels = 0;
+	int pumps = 0;
+	int releases = 0;
+	std::string bridgeStatus = "pending";
+	bool releaseAccepted = false;
+	auto cancel = [&](uint64_t ticket) {
+		CHECK(ticket == 9);
+		cancels++;
+	};
+	auto pump = [&] { pumps++; };
+	auto poll = [&](uint64_t ticket) {
+		CHECK(ticket == 9);
+		return bridgeStatus;
+	};
+	auto release = [&](uint64_t ticket) {
+		CHECK(ticket == 9);
+		releases++;
+		return releaseAccepted;
+	};
+	CHECK_FALSE(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(cancels == 1);
+	CHECK(pumps == 1);
+	CHECK(releases == 0);
+	CHECK_FALSE(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(cancels == 1);
+	CHECK(pumps == 2);
+	bridgeStatus = "cancelled";
+	CHECK_FALSE(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(releases == 1);
+	CHECK(cleanup.Ticket == 9);
+	releaseAccepted = true;
+	CHECK(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(releases == 2);
+	CHECK_FALSE(cleanup.Ticket.has_value());
+	CHECK_FALSE(cleanup.Cancelling);
+
+	State invokeFailure{callback, 9};
+	engine::script::HostValue noResult;
+	CHECK(Transition(invokeFailure, true, callback, &noResult) == Action::None);
+	CHECK(invokeFailure.Cancelling);
+	State noTicketFailure;
+	noTicketFailure.Callback = callback;
+	CHECK(Transition(noTicketFailure, true, callback, &noResult) == Action::Invalid);
+	CHECK_FALSE(noTicketFailure.Cancelling);
+	CHECK(Transition(noTicketFailure, true, callback, &queued) == Action::None);
+	CHECK(noTicketFailure.Ticket == 7);
 }
 
 TEST_CASE("a built scene produces one instance per entity", "[demo]") {

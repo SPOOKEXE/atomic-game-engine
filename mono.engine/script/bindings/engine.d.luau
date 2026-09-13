@@ -2976,6 +2976,7 @@ declare extern type DataSceneService with
 	function CancelCapture(self, ticket: string): any
 	function GetCaptureBuffer(self, ticket: string, resource: string, offset: number, maximumBytes: number): buffer
 	function ReleaseCapture(self, ticket: string): any
+	function SetCaptureDriver(self, driver: ((snapshotId: string, ticket: string?) -> any)?): any
 	function RequestLifecycle(self, request: any): any
 	function PollLifecycle(self, ticket: string): any
 	function ReleaseLifecycle(self, ticket: string): any

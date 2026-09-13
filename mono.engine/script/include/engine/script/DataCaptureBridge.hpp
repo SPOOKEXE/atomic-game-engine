@@ -55,6 +55,17 @@ namespace engine::script {
 		double VerticalFieldOfViewRadians = 0.0;
 		double NearMetres = 0.0;
 		double FarMetres = 0.0;
+		double CropLeft = 0.0;
+		double CropTop = 0.0;
+		double CropWidth = 1.0;
+		double CropHeight = 1.0;
+		std::string CropConvention = "normalized_full_view_left_top_width_height";
+		// The current capture path has no lens or temporal jitter model. These
+		// flags make that absence explicit instead of fabricating calibration.
+		bool LensDistortionAvailable = false;
+		std::string LensDistortionReason = "unavailable";
+		bool JitterAvailable = false;
+		std::string JitterPolicy = "unavailable";
 		std::string CoordinateConvention;
 		std::vector<DataCaptureBridgePlane> Planes;
 	};

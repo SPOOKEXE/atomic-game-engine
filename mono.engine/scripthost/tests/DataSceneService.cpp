@@ -2,13 +2,16 @@
 // description is neutral and a map that only one adapter can return is not a
 // usable data-factory boundary.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -29,6 +32,7 @@ namespace {
 		std::shared_ptr<engine::script::DataCaptureBridge> capture = nullptr,
 		std::shared_ptr<engine::script::DataLifecycleBridge> lifecycle = nullptr
 	) {
+		engine::script::RegisterScriptComponents();
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
 		limits.DataCapture = std::move(capture);
@@ -169,6 +173,56 @@ namespace {
 	}
 }
 
+TEST_CASE("DataSceneService retains and replaces one capture driver in both VMs", "[scripting][data]") {
+	for (const auto language : {engine::script::Language::Luau, engine::script::Language::JavaScript}) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		engine::ecs::Store store("capture_driver");
+		const auto runtime = Runtime(store, language);
+		REQUIRE(runtime != nullptr);
+		if (language == engine::script::Language::Luau) {
+			Run(*runtime,
+				"local s=game:GetService('DataSceneService'); assert(s:SetCaptureDriver(function() return "
+				"{status='queued',ticket='1'} end).status=='registered'); "
+				"local ok=pcall(function() s:SetCaptureDriver(42) end); assert(not ok); "
+				"assert(s:SetCaptureDriver(function() return {status='pending'} end).status=='registered')");
+		} else {
+			Run(*runtime,
+				"const s=game.GetService('DataSceneService'); "
+				"if(s.SetCaptureDriver(()=>({status:'queued',ticket:'1'})).status!=='registered') throw new "
+				"Error('register'); try{s.SetCaptureDriver(42)}catch(_){ } "
+				"if(s.SetCaptureDriver(()=>({status:'pending'})).status!=='registered') "
+				"throw new Error('replace');");
+		}
+		const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
+		REQUIRE(driver != nullptr);
+		CHECK(driver->Callback.Valid());
+		if (language == engine::script::Language::Luau)
+			Run(*runtime,
+				"assert(game:GetService('DataSceneService'):SetCaptureDriver(nil).status=='released')");
+		else
+			Run(*runtime,
+				"if(game.GetService('DataSceneService').SetCaptureDriver(null).status!=='released') throw "
+				"new Error('release');");
+		CHECK(store.Resource<engine::script::DataCaptureDriver>() == nullptr);
+	}
+}
+
+TEST_CASE("capture driver snapshots restore without a stale VM callback", "[scripting][data]") {
+	engine::script::RegisterScriptComponents();
+	engine::ecs::Store source("capture_driver_snapshot_source");
+	source.SetResource(engine::script::DataCaptureDriver{engine::script::HostCallback{17}});
+	engine::core::ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	engine::ecs::Store restored("capture_driver_snapshot_restored");
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const auto *driver = restored.Resource<engine::script::DataCaptureDriver>();
+	REQUIRE(driver != nullptr);
+	CHECK_FALSE(driver->Callback.Valid());
+}
+
 TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[scripting][data]") {
 	for (const auto language : {engine::script::Language::Luau, engine::script::Language::JavaScript}) {
 		engine::scene::EnsureClassTree();
@@ -277,6 +331,44 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 		}
 		CHECK(bridge->Released);
 	}
+}
+
+TEST_CASE("retained capture driver copies a ready plane before terminal release", "[scripting][data]") {
+	engine::scene::EnsureClassTree();
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("capture_driver_payload");
+	auto bridge = std::make_shared<FakeCaptureBridge>(303);
+	const auto runtime = Runtime(store, engine::script::Language::Luau, bridge);
+	REQUIRE(runtime != nullptr);
+	Run(*runtime, R"(
+		local service = game:GetService("DataSceneService")
+		assert(service:SetCaptureDriver(function(snapshot, ticket)
+			if ticket == nil then return service:Capture({snapshot_id=snapshot, pipeline="main", capture_node="lit", view_slot=0, channels={"rgb_linear_hdr"}, temporal_history="preserve"}) end
+			local poll=service:PollCapture(ticket)
+			if poll.status == "ready" then poll.copied_payload_bytes=buffer.len(service:GetCaptureBuffer(ticket, poll.planes[1].resource, 0, 4)) end
+			return poll
+		end).status == "registered")
+	)");
+	const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
+	REQUIRE(driver != nullptr);
+	engine::script::HostValue snapshot(engine::script::HostTag::String);
+	snapshot.Text = "fixture/snapshot";
+	engine::script::HostValue none(engine::script::HostTag::Nil);
+	engine::script::HostValue queued;
+	REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, none}, queued));
+	engine::script::HostValue ticket(engine::script::HostTag::String);
+	ticket.Text = "303";
+	engine::script::HostValue ready;
+	REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, ticket}, ready));
+	bool copied = false;
+	for (const auto &[name, value] : ready.Entries)
+		if (name == "copied_payload_bytes" && value.Tag == engine::script::HostTag::Number &&
+			value.Number == 4)
+			copied = true;
+	CHECK(copied);
+	std::string detail;
+	CHECK(bridge->Release("capture_driver_payload", 303, detail));
+	CHECK(bridge->Released);
 }
 
 TEST_CASE("queued lifecycle bridge mutates only at Pump and retains released retries", "[scripting][data]") {

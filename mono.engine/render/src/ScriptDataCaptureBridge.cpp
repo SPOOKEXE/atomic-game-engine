@@ -1,8 +1,11 @@
+#include "CaptureRecordValidation.hpp"
+
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 
 #include <algorithm>
 #include <limits>
 #include <optional>
+#include <unordered_set>
 #include <utility>
 
 namespace engine::render {
@@ -112,13 +115,24 @@ namespace engine::render {
 			destination.VerticalFieldOfViewRadians = source.CameraPose.VerticalFieldOfViewRadians;
 			destination.NearMetres = source.CameraPose.NearPlaneMetres;
 			destination.FarMetres = source.CameraPose.FarPlaneMetres;
+			destination.CropLeft = source.CameraPose.CropLeft;
+			destination.CropTop = source.CameraPose.CropTop;
+			destination.CropWidth = source.CameraPose.CropWidth;
+			destination.CropHeight = source.CameraPose.CropHeight;
 			destination.CoordinateConvention = CoordinateConvention(source.Camera);
 		}
 	}
 
 	ScriptDataCaptureBridge::~ScriptDataCaptureBridge() {
-		for (auto &entry : OwnerTickets)
-			RendererRef.CancelDataCapture(entry.second);
+		std::vector<DataCaptureTicket> tickets;
+		{
+			std::lock_guard lock(Mutex);
+			for (auto &entry : OwnerTickets)
+				tickets.push_back(std::move(entry.second));
+			OwnerTickets.clear();
+		}
+		for (DataCaptureTicket &ticket : tickets)
+			RendererRef.CancelDataCapture(ticket);
 	}
 
 	script::DataCaptureBridgeCapabilities ScriptDataCaptureBridge::Capabilities() const {
@@ -305,8 +319,22 @@ namespace engine::render {
 				.ViewSlot = view.Slot,
 				.Channels = {},
 			};
-			for (const std::string &name : pendingRequest.Request.Channels)
-				request.Channels.push_back(*Channel(name));
+			for (const std::string &name : pendingRequest.Request.Channels) {
+				const auto channel = Channel(name);
+				if (!channel) {
+					std::lock_guard lock(Mutex);
+					if (auto entry = Entries.find(pendingRequest.Id); entry != Entries.end()) {
+						entry->second.Reply.Status = "invalid";
+						entry->second.Reply.SnapshotId = pendingRequest.Request.SnapshotId;
+						entry->second.Detail = "unknown capture channel";
+						entry->second.Terminal = true;
+						entry->second.Preparing = false;
+					}
+					continue;
+				}
+				request.Channels.push_back(*channel);
+			}
+			if (request.Channels.size() != pendingRequest.Request.Channels.size()) continue;
 			DataCaptureTicket rendererTicket;
 			const bool queued = RendererRef.QueueDataCapture(request, rendererTicket);
 			bool cancel = false;
@@ -352,10 +380,26 @@ namespace engine::render {
 		for (DataCaptureTicket &ticket : cancelled)
 			RendererRef.CancelDataCapture(ticket);
 
-		for (auto ticket = OwnerTickets.begin(); ticket != OwnerTickets.end();) {
-			DataCapturePoll captured = RendererRef.PollDataCapture(ticket->second);
+		std::vector<std::pair<uint64_t, DataCaptureTicket>> polling;
+		{
+			std::lock_guard lock(Mutex);
+			for (auto &entry : OwnerTickets)
+				polling.emplace_back(entry.first, std::move(entry.second));
+			OwnerTickets.clear();
+		}
+		for (auto &ticket : polling) {
+			DataCapturePoll captured = RendererRef.PollDataCapture(ticket.second);
 			if (captured.Status == DataCaptureStatus::Pending) {
-				++ticket;
+				bool cancel = false;
+				{
+					std::lock_guard lock(Mutex);
+					if (const auto entry = Entries.find(ticket.first); entry != Entries.end())
+						cancel = entry->second.CancelRequested || entry->second.Terminal;
+					if (!cancel) OwnerTickets.emplace(ticket.first, std::move(ticket.second));
+				}
+				if (cancel) {
+					RendererRef.CancelDataCapture(ticket.second);
+				}
 				continue;
 			}
 			script::DataCaptureBridgePoll reply;
@@ -365,16 +409,25 @@ namespace engine::render {
 			if (captured.Status == DataCaptureStatus::Ready || captured.Status == DataCaptureStatus::Partial)
 				CopyCamera(captured, reply);
 			std::unordered_map<std::string, std::vector<std::byte>> bytes;
+			capture_record_validation::State validation;
+			bool malformedPlane = false;
 			size_t totalBytes = 0;
 			for (DataCapturePlane &plane : captured.Planes) {
-				const std::string resource = ResourceId(ticket->first, plane.Channel);
+				if (!capture_record_validation::Plane(ticket.second, plane, ticket.first, validation)) {
+					malformedPlane = true;
+					break;
+				}
+				const std::string resource = ResourceId(ticket.first, plane.Channel);
+				const std::string channel(DataCaptureChannelName(plane.Channel));
+				const std::string source(plane.Resource.Text());
+				const std::string hash = plane.Hash.ToHex();
 				reply.Planes.push_back(
-					{.Channel = std::string(DataCaptureChannelName(plane.Channel)),
+					{.Channel = channel,
 					 .Status = Status(plane.Status),
 					 .Resource = resource,
-					 .SourceResource = std::string(plane.Resource.Text()),
+					 .SourceResource = source,
 					 .HashAlgorithm = "blake3-256",
-					 .Hash = plane.Hash.ToHex(),
+					 .Hash = hash,
 					 .Width = plane.Width,
 					 .Height = plane.Height,
 					 .RowStride = plane.RowStride,
@@ -394,14 +447,35 @@ namespace engine::render {
 					bytes.emplace(resource, std::move(plane.Bytes));
 				}
 			}
+			const bool coherentStatus =
+				(captured.Status == DataCaptureStatus::Ready &&
+				 validation.ReadyPlanes == ticket.second.Channels.size() &&
+				 validation.Channels.size() == ticket.second.Channels.size()) ||
+				(captured.Status == DataCaptureStatus::Partial && validation.ReadyPlanes > 0 &&
+				 validation.ReadyPlanes < ticket.second.Channels.size() &&
+				 validation.Channels.size() == ticket.second.Channels.size()) ||
+				((captured.Status == DataCaptureStatus::Unsupported ||
+				  captured.Status == DataCaptureStatus::Invalid ||
+				  captured.Status == DataCaptureStatus::Failed ||
+				  captured.Status == DataCaptureStatus::Cancelled) &&
+				 validation.ReadyPlanes == 0 && validation.Channels.size() == ticket.second.Channels.size());
+			malformedPlane = malformedPlane || !coherentStatus;
 			{
 				std::lock_guard lock(Mutex);
-				const auto entry = Entries.find(ticket->first);
+				const auto entry = Entries.find(ticket.first);
 				if (entry != Entries.end() && !entry->second.Terminal) {
 					if (entry->second.CancelRequested) {
 						entry->second.Reply.Status = "cancelled";
 						entry->second.Reply.SnapshotId = entry->second.Request.SnapshotId;
 						entry->second.Detail.clear();
+					} else if (captured.SnapshotId != entry->second.Request.SnapshotId) {
+						entry->second.Reply.Status = "stale_snapshot";
+						entry->second.Reply.SnapshotId = entry->second.Request.SnapshotId;
+						entry->second.Detail = "renderer returned a different snapshot";
+					} else if (malformedPlane) {
+						entry->second.Reply.Status = "failed";
+						entry->second.Reply.SnapshotId = captured.SnapshotId;
+						entry->second.Detail = "renderer returned a malformed capture plane";
 					} else if (totalBytes > RETAINED_BYTE_LIMIT - RetainedBytes) {
 						entry->second.Reply.Status = "failed";
 						entry->second.Reply.SnapshotId = captured.SnapshotId;
@@ -415,7 +489,6 @@ namespace engine::render {
 					entry->second.Terminal = true;
 				}
 			}
-			ticket = OwnerTickets.erase(ticket);
 		}
 	}
 

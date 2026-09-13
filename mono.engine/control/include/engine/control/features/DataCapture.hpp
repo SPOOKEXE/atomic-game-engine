@@ -218,6 +218,12 @@ namespace engine::control {
 				  {"vertical_field_of_view_radians", reply.VerticalFieldOfViewRadians},
 				  {"near_metres", reply.NearMetres},
 				  {"far_metres", reply.FarMetres},
+				  {"crop", {reply.CropLeft, reply.CropTop, reply.CropWidth, reply.CropHeight}},
+				  {"crop_convention", reply.CropConvention},
+				  {"lens_distortion_available", reply.LensDistortionAvailable},
+				  {"lens_distortion_reason", reply.LensDistortionReason},
+				  {"jitter_available", reply.JitterAvailable},
+				  {"jitter_policy", reply.JitterPolicy},
 				  {"coordinate_convention", reply.CoordinateConvention}}},
 				{"planes", std::move(planes)}
 			};

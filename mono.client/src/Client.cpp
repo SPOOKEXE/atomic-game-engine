@@ -1,3 +1,5 @@
+#include "DataCaptureDriver.hpp"
+
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
 #include <engine/control/features/DataCapture.hpp>
@@ -916,6 +918,34 @@ namespace client {
 	void Client::Shutdown() {
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
+		if (DataCapture && DataCaptureDriverWorld.IsValid() && DataCaptureDriverTicket) {
+			const std::string instance(Universe_->NameOf(DataCaptureDriverWorld).Text());
+			DataCapture->Cancel(instance, *DataCaptureDriverTicket);
+			for (size_t attempt = 0; attempt < 4 && DataCaptureDriverTicket; attempt++) {
+				DataCapture->Pump();
+				engine::script::DataCaptureBridgePoll poll;
+				std::string detail;
+				if (DataCapture->Poll(instance, *DataCaptureDriverTicket, poll, detail) &&
+					client::data_capture_driver::Terminal(poll.Status) &&
+					DataCapture->Release(instance, *DataCaptureDriverTicket, detail))
+					DataCaptureDriverTicket.reset();
+			}
+		}
+		for (const auto &[world, runtime] : Runtimes) {
+			if (!runtime) continue;
+			engine::script::HostCallback callback;
+			Universe_->Enter(world, [&](engine::ecs::Store &store) {
+				if (const auto *driver = store.Resource<engine::script::DataCaptureDriver>())
+					callback = driver->Callback;
+				store.RemoveResource<engine::script::DataCaptureDriver>();
+			});
+			if (callback.Valid()) runtime->Release(callback);
+		}
+		DataCaptureDriverCallback = {};
+		// The bridge owns renderer capture tickets. Tear it down while the renderer
+		// still exists so a ticket that remained pending after the bounded drain is
+		// cancelled by its one owner before device teardown.
+		DataCapture.reset();
 		Sound.reset();
 		ContentState->Client.reset();
 
@@ -2196,6 +2226,155 @@ namespace client {
 		if (DataLifecycle) DataLifecycle->Pump();
 		if (DataCapture) DataCapture->Pump();
 		factoryPaused = allSystemsPaused();
+		// A ticket belongs to the world and VM which created it. Keep that owner
+		// until the renderer accepts its terminal release, even if presentation
+		// switches worlds while the cancellation is in flight.
+		auto finishCaptureCancellation = [this] {
+			if (!DataCaptureDriverCancelling || !DataCapture || !DataCaptureDriverTicket ||
+				!DataCaptureDriverWorld.IsValid())
+				return;
+			const std::string instance(Universe_->NameOf(DataCaptureDriverWorld).Text());
+			client::data_capture_driver::State state{
+				DataCaptureDriverCallback,
+				DataCaptureDriverTicket,
+				DataCaptureDriverCancelling,
+				DataCaptureDriverRuntime
+			};
+			const bool released = client::data_capture_driver::AdvanceCancellation(
+				state,
+				DataCaptureDriverCancelSent,
+				[&](uint64_t ticket) { DataCapture->Cancel(instance, ticket); },
+				[this] { DataCapture->Pump(); },
+				[&](uint64_t ticket) {
+					engine::script::DataCaptureBridgePoll poll;
+					std::string detail;
+					return DataCapture->Poll(instance, ticket, poll, detail) ? poll.Status : std::string{};
+				},
+				[&](uint64_t ticket) {
+					std::string detail;
+					return DataCapture->Release(instance, ticket, detail);
+				}
+			);
+			DataCaptureDriverTicket = state.Ticket;
+			DataCaptureDriverCancelling = state.Cancelling;
+			if (!released) return;
+			DataCaptureDriverCallback = {};
+			DataCaptureDriverSnapshot.clear();
+			DataCaptureDriverWorld = {};
+			DataCaptureDriverRuntime = nullptr;
+		};
+		if (!factoryPaused && DataCaptureDriverTicket) DataCaptureDriverCancelling = true;
+		finishCaptureCancellation();
+		if (factoryPaused && DataFactory && DataCapture && Rendered.IsValid() &&
+			!DataCaptureDriverCancelling) {
+			engine::script::DataCaptureDriver driver;
+			bool registered = false;
+			Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+				if (const auto *stored = store.Resource<engine::script::DataCaptureDriver>();
+					stored != nullptr) {
+					driver = *stored;
+					registered = driver.Callback.Valid();
+				}
+			});
+			const std::optional<engine::script::HostCallback> callback =
+				registered ? std::optional(driver.Callback) : std::nullopt;
+			engine::script::Runtime *ownerRuntime = RuntimeOf(Rendered);
+			client::data_capture_driver::State state;
+			bool ownerCleanupPending = false;
+			if (DataCaptureDriverWorld.IsValid() &&
+				(DataCaptureDriverWorld != Rendered || DataCaptureDriverRuntime != ownerRuntime)) {
+				if (DataCaptureDriverTicket) {
+					DataCaptureDriverCancelling = true;
+					finishCaptureCancellation();
+					ownerCleanupPending = true;
+				} else {
+					DataCaptureDriverCallback = {};
+					DataCaptureDriverWorld = {};
+					DataCaptureDriverRuntime = nullptr;
+				}
+			}
+			if (!ownerCleanupPending && !DataCaptureDriverCancelling) {
+				DataCaptureDriverWorld = Rendered;
+				DataCaptureDriverRuntime = ownerRuntime;
+				state = {
+					DataCaptureDriverCallback,
+					DataCaptureDriverTicket,
+					DataCaptureDriverCancelling,
+					DataCaptureDriverRuntime
+				};
+				const std::optional<uint64_t> retainedTicket = state.Ticket;
+				const auto registration =
+					client::data_capture_driver::Transition(state, true, callback, nullptr, ownerRuntime);
+				DataCaptureDriverCallback = state.Callback;
+				DataCaptureDriverTicket = state.Ticket;
+				DataCaptureDriverCancelling = state.Cancelling;
+				if (registration == client::data_capture_driver::Action::Release && retainedTicket) {
+					std::string detail;
+					if (DataCapture->Release(Universe_->NameOf(Rendered).Text(), *retainedTicket, detail)) {
+						DataCaptureDriverTicket.reset();
+						DataCaptureDriverCancelling = false;
+						DataCaptureDriverSnapshot.clear();
+					} else {
+						DataCaptureDriverTicket = retainedTicket;
+						DataCaptureDriverCancelling = true;
+						DataCaptureDriverCancelSent = false;
+					}
+				}
+			}
+			if (registered && !ownerCleanupPending && !DataCaptureDriverCancelling) {
+				if (!DataCaptureDriverTicket) {
+					const auto saved =
+						DataFactory->Snapshot(Universe_->NameOf(Rendered).Text(), DataCaptureDriverSnapshot);
+					if (saved.Status != engine::world::DataFactoryStatus::Ok)
+						DataCaptureDriverSnapshot.clear();
+				}
+				if (!DataCaptureDriverSnapshot.empty()) {
+					if (engine::script::Runtime *runtime = RuntimeOf(Rendered); runtime != nullptr) {
+						engine::script::HostValue returned;
+						engine::script::HostValue snapshotValue(engine::script::HostTag::String);
+						snapshotValue.Text = DataCaptureDriverSnapshot;
+						engine::script::HostValue ticketValue(engine::script::HostTag::Nil);
+						if (DataCaptureDriverTicket) {
+							ticketValue.Tag = engine::script::HostTag::String;
+							ticketValue.Text = std::to_string(*DataCaptureDriverTicket);
+						}
+						const std::array arguments{std::move(snapshotValue), std::move(ticketValue)};
+						const bool invoked = runtime->Invoke(driver.Callback, arguments, returned);
+						engine::script::HostValue failed;
+						state = {
+							DataCaptureDriverCallback,
+							DataCaptureDriverTicket,
+							DataCaptureDriverCancelling,
+							DataCaptureDriverRuntime
+						};
+						const std::optional<uint64_t> ticketBefore = state.Ticket;
+						const auto action = client::data_capture_driver::Transition(
+							state, true, callback, invoked ? &returned : &failed, ownerRuntime
+						);
+						DataCaptureDriverCallback = state.Callback;
+						DataCaptureDriverTicket = state.Ticket;
+						DataCaptureDriverCancelling = state.Cancelling;
+						if (action == client::data_capture_driver::Action::Release && ticketBefore) {
+							std::string detail;
+							if (DataCapture->Release(
+									Universe_->NameOf(Rendered).Text(), *ticketBefore, detail
+								)) {
+								DataCaptureDriverTicket.reset();
+								DataCaptureDriverCancelling = false;
+								DataCaptureDriverSnapshot.clear();
+							} else {
+								DataCaptureDriverTicket = ticketBefore;
+								DataCaptureDriverCancelling = true;
+								DataCaptureDriverCancelSent = false;
+							}
+						}
+						if (action == client::data_capture_driver::Action::Invalid)
+							ENGINE_WARN("data capture driver returned an invalid structured result");
+					}
+				}
+			}
+		}
+		finishCaptureCancellation();
 		if (Sound != nullptr) (void)Sound->SetPaused(factoryPaused);
 
 		{

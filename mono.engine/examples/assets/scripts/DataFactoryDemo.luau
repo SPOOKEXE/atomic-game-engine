@@ -12,6 +12,16 @@
 
 local DataSceneService = game:GetService("DataSceneService")
 
+type CapturePlane = {
+	status: string,
+	resource: string,
+}
+type CaptureResult = {
+	status: string,
+	planes: {CapturePlane},
+	copied_payload_bytes: number?,
+}
+
 local crate = Instance.new("Part")
 crate.Name = "DataFactoryCrate"
 crate:SetAttribute("DataFactoryId", "data-factory-demo/crate")
@@ -48,17 +58,36 @@ print("DataFactory image", imageMetadata.width, imageMetadata.height, imageMetad
 print("DataFactory image bytes", buffer.len(pixels))
 print("DataFactory capture", captureChannels.status, captureChannels.reason)
 
--- This is the script-side request shape for a snapshot already retained by the
--- external lifecycle owner. Capture is asynchronous: keep its ticket, poll for
--- a terminal status, read each plane through GetCaptureBuffer, then release it.
--- The retained bytes are never put into a Lua table.
-local function _requestCapture(snapshotId: string)
+-- The host-owned evaluation path supplies the barriered snapshot ID and ticket
+-- explicitly. Each host call does one request or poll, so it needs no scheduler
+-- tick. The lifecycle sequence is pause -> snapshot -> capture -> poll_capture
+-- -> get_resource -> release_capture. The current runtime evaluates host chunks
+-- in isolated environments, so the host retains the ticket between calls.
+
+DataSceneService:SetCaptureDriver(function(snapshotId, ticket)
+	if ticket ~= nil then
+		local result = DataSceneService:PollCapture(ticket) :: CaptureResult
+		if result.status == "ready" or result.status == "partial" then
+			local payloadBytes = 0
+			for _, plane in ipairs(result.planes) do
+				if plane.status == "ready" then
+					-- The host releases only after each bounded copy returns, so terminal
+					-- capture bytes remain observable without a scheduler heartbeat.
+					local bytes = DataSceneService:GetCaptureBuffer(ticket, plane.resource, 0, 65536)
+					assert(buffer.len(bytes) > 0)
+					payloadBytes += buffer.len(bytes)
+				end
+			end
+			result.copied_payload_bytes = payloadBytes
+		end
+		return result
+	end
 	return DataSceneService:Capture({
 		snapshot_id = snapshotId,
 		pipeline = "Default PBR#1",
 		capture_node = "data-capture",
 		view_slot = 0,
-		channels = {"rgb_linear_hdr", "linear_depth", "shading_normal"},
+		channels = {"rgb_linear_hdr"},
 		temporal_history = "preserve",
 	})
-end
+end)

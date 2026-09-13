@@ -247,6 +247,7 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `script.CodeSourceContainerSelector` | 1 | 1 | yes | yes | . | . | Which language container the script actually runs, and the one part of the script trio a game may set at run time. Absent means Luau. |
+| `script.DataCaptureDriver` | 8 | 8 | yes | . | . | . | Per-world singleton holding the scene's retained data-capture callback. The client invokes it only at a paused capture barrier, and snapshot restore clears the VM-local handle. |
 | `script.Disabled` | 0 | 1 | . | . | . | . | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all. |
 | `script.JavaScriptSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column. |
 | `script.LuaSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference. |
@@ -271,4 +272,4 @@ state until v0.19.
 
 ---
 
-194 components registered by the engine, 0 without a purpose line.
+195 components registered by the engine, 0 without a purpose line.

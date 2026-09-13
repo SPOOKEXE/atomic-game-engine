@@ -39,6 +39,7 @@
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -613,6 +614,13 @@ namespace client {
 		// of them, so an index into the other would have been right until
 		// somebody ran the client without `--game`.
 		std::vector<std::pair<engine::world::WorldId, std::shared_ptr<engine::script::Runtime>>> Runtimes;
+		engine::script::HostCallback DataCaptureDriverCallback;
+		std::optional<uint64_t> DataCaptureDriverTicket;
+		bool DataCaptureDriverCancelling = false;
+		bool DataCaptureDriverCancelSent = false;
+		std::string DataCaptureDriverSnapshot;
+		engine::world::WorldId DataCaptureDriverWorld;
+		engine::script::Runtime *DataCaptureDriverRuntime = nullptr;
 
 		// The VM for one world, or null when it runs no scripts.
 		//

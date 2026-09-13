@@ -1,3 +1,5 @@
+#include "CaptureRecordValidation.hpp"
+
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
@@ -6,7 +8,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.datacapture")
@@ -45,6 +49,47 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 	request.TemporalHistory = DataCaptureTemporalHistory::Preserve;
 	request.SnapshotId.clear();
 	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
+}
+
+TEST_CASE(
+	"capture record validation rejects hostile planes and status mismatches", "[render][data-capture]"
+) {
+	DataCaptureTicket ticket;
+	ticket.CaptureNode = engine::core::Name("capture");
+	ticket.Channels = {DataCaptureChannel::RgbLinearHdr};
+	DataCapturePlane plane;
+	plane.Channel = DataCaptureChannel::RgbLinearHdr;
+	plane.CaptureNode = ticket.CaptureNode;
+	plane.Status = DataCaptureStatus::Ready;
+	plane.Resource = engine::core::Name("lit");
+	plane.Width = 1;
+	plane.Height = 1;
+	plane.RowStride = 0;
+	plane.Scalar = DataCaptureScalar::Float16;
+	plane.ColourSpace = DataCaptureColourSpace::Linear;
+	capture_record_validation::State state;
+	CHECK_FALSE(capture_record_validation::Plane(ticket, plane, 1, state));
+	plane.Status = DataCaptureStatus::Pending;
+	plane.Resource = engine::core::Name{};
+	plane.Width = 0;
+	plane.Height = 0;
+	plane.RowStride = 0;
+	plane.Scalar = DataCaptureScalar::Unknown;
+	plane.ColourSpace = DataCaptureColourSpace::Unknown;
+	capture_record_validation::State pending;
+	CHECK_FALSE(capture_record_validation::Plane(ticket, plane, 1, pending));
+	plane.Status = DataCaptureStatus::Unsupported;
+	plane.Resource = engine::core::Name{};
+	plane.Scalar = DataCaptureScalar::Unknown;
+	plane.ColourSpace = DataCaptureColourSpace::Unknown;
+	CHECK_FALSE(capture_record_validation::Plane(ticket, plane, 1, state));
+	DataCapturePlane duplicate = plane;
+	duplicate.Width = 0;
+	duplicate.Height = 0;
+	duplicate.RowStride = 0;
+	capture_record_validation::State duplicates;
+	CHECK(capture_record_validation::Plane(ticket, duplicate, 1, duplicates));
+	CHECK_FALSE(capture_record_validation::Plane(ticket, duplicate, 1, duplicates));
 }
 
 namespace {
@@ -120,6 +165,30 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 	CHECK(reply.Status == "cancelled");
 	REQUIRE(second.Release("data-world", secondTicket, detail));
 	CHECK_FALSE(second.Poll("data-world", firstTicket, reply, detail));
+}
+
+TEST_CASE("script capture synchronizes cancellation with an owner pump", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t ticket = 0;
+	REQUIRE(bridge.Queue("data-world", Request(), ticket, detail));
+	std::atomic<bool> started = false;
+	std::thread owner([&] {
+		started = true;
+		for (size_t index = 0; index < 16; ++index)
+			bridge.Pump();
+	});
+	while (!started.load()) {}
+	bridge.Cancel("data-world", ticket);
+	owner.join();
+	bridge.Pump();
+	engine::script::DataCaptureBridgePoll reply;
+	REQUIRE(bridge.Poll("data-world", ticket, reply, detail));
+	CHECK(reply.Status == "cancelled");
+	REQUIRE(bridge.Release("data-world", ticket, detail));
 }
 
 TEST_CASE("script capture reuses capacity after sequential terminal releases", "[render][data-capture]") {

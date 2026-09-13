@@ -109,6 +109,7 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [_] support render-only steps with zero simulation advance and an explicit temporal-history policy.
 - [_] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership.
 - [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure.
+- [_] add position/rotation values in global space then we can convert to local space or in the reference of another object. really useful for self-world-modeling and changing perspectives.
 - [x] add a dedicated OBB geometry test. The core suite checks rotated half extents and containment of every transformed corner.
 - [x] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks. The Python factory validates immutable text spans, points, semantic and part masks, control IDs, frame times and audio sample rates against media bounds.
 - [x] declare interop subsets for glTF, USD, COCO, YOLO, GeoJSON and WKT. The named profiles now define exact represented fields, bundle sidecars, coordinate rules, stable-ID mappings, machine-readable loss classes and atomic import refusal conditions.
