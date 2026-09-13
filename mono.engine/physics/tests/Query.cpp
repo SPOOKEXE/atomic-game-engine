@@ -59,6 +59,7 @@ using engine::ecs::Store;
 using engine::physics::BroadPhase;
 using engine::physics::ColliderHit;
 using engine::physics::OverlapBox;
+using engine::physics::OverlapOrientedBox;
 using engine::physics::OverlapSphere;
 using engine::physics::PhysicsWorld;
 using engine::physics::PhysicsWorldRegistered;
@@ -516,6 +517,35 @@ TEST_CASE("an overlap box finds what it encloses", "[physics][query]") {
 
 	REQUIRE(result.Written == 1);
 	CHECK(found[0] == inside);
+	CHECK_FALSE(result.Overflowed);
+}
+
+TEST_CASE("an oriented-box overlap filters candidates outside its rotated shape", "[physics][query]") {
+	// This collider overlaps the query's conservative world AABB, but lies past
+	// the rotated box's narrow axis. Keeping it before the interior collider
+	// also proves the answer is the exact hit rather than the first candidate.
+	Store store("query.orientedexact");
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity broadphaseOnly =
+		Place(store, Placed{.Position = Vector3{1.5f, 0.0f, 0.0f}, .Extent = Vector3{0.1f, 0.1f, 0.1f}});
+	const Entity interior = Place(store, Placed{.Extent = Vector3{0.1f, 0.1f, 0.1f}});
+	const CFrame queryFrame{Vector3::Zero, CFrame::Angles(0.0f, EIGHTH_TURN, 0.0f).Rotation()};
+	const Vector3 queryExtent{2.0f, 0.5f, 0.5f};
+	Index(store);
+
+	const AABB queryBound = engine::core::OrientedBoxBounds(queryFrame, queryExtent);
+	const Transform *outsideTransform = store.Get<Transform>(broadphaseOnly);
+	const Collider *outsideCollider = store.Get<Collider>(broadphaseOnly);
+	REQUIRE(outsideTransform != nullptr);
+	REQUIRE(outsideCollider != nullptr);
+	CHECK(queryBound.Overlaps(ShapeWorldBounds(*outsideCollider, outsideTransform->Frame)));
+
+	std::array<Entity, 8> found{};
+	const QueryResult result = OverlapOrientedBox(store, queryFrame, queryExtent, LayerMask::All(), found);
+
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == interior);
 	CHECK_FALSE(result.Overflowed);
 }
 
