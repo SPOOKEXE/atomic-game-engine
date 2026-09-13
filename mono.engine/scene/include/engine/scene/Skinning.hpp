@@ -165,6 +165,19 @@ namespace engine::scene {
 		float PoseScale = 1.0f;
 	};
 
+	// One authored semantic point relative to a skeleton joint.
+	//
+	// The point is an instance under its rig, rather than a list hidden on the
+	// skeleton, so an author can name, save and inspect each training label. Its
+	// frame is in the named joint's local coordinates. The exported world frame
+	// is derived from that joint's current pose and is never stored twice.
+	struct RigKeypoint {
+		core::Name Keypoint;
+		core::CFrame Frame;
+		uint16_t Joint = NO_JOINT;
+		uint8_t Reserved[2] = {};
+	};
+
 	// Fills every `Bone::WorldFrame` under every `Skeleton`.
 	//
 	// A `void(Store &)` wrapper registers as an ordinary system, exactly as
@@ -235,4 +248,9 @@ namespace engine::scene {
 	//
 	// @return The class id.
 	ecs::ClassId BoneClass();
+
+	// The `RigKeypoint` class id, registering the scene tree on first call.
+	//
+	// @return The class id.
+	ecs::ClassId RigKeypointClass();
 }

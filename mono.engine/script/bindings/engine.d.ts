@@ -1540,6 +1540,12 @@ declare interface Bone extends Instance {
 	readonly TransformedWorldCFrame: CFrame;
 }
 
+declare interface RigKeypoint extends Instance {
+	CFrame: CFrame;
+	Joint: number;
+	KeypointId: string;
+}
+
 declare interface AnimationBuffer extends Instance {
 	readonly DataSize: number;
 	readonly KeyframeBytes: number;
@@ -2954,6 +2960,7 @@ declare const Instance: {
 		(className: "ObjectValue", parent?: Instance): ObjectValue;
 		(className: "Vector3Value", parent?: Instance): Vector3Value;
 		(className: "Bone", parent?: Instance): Bone;
+		(className: "RigKeypoint", parent?: Instance): RigKeypoint;
 		(className: "AnimationBuffer", parent?: Instance): AnimationBuffer;
 		(className: "Animation", parent?: Instance): Animation;
 		(className: "Animator", parent?: Instance): Animator;

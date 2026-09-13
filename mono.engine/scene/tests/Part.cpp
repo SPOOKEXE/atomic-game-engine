@@ -735,6 +735,31 @@ TEST_CASE("a SkinnedMeshPart exposes the skeleton it always carries", "[scene][p
 	CHECK_FALSE(Write(store, rig, "JointCount", int32_t{engine::scene::MAX_JOINTS + 1}));
 }
 
+TEST_CASE("a RigKeypoint joint uses minus one to clear its optional rig slot", "[scene][part]") {
+	Store store("rig_keypoint_joint_property_test");
+	RegisterSceneClasses();
+
+	const Entity keypoint = store.CreateInstance(engine::scene::RigKeypointClass(), "Wrist");
+	REQUIRE(keypoint != NULL_ENTITY);
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{-1}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{-2}));
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{0}));
+
+	const Entity rig = store.CreateInstance(Classes::Find(Name("Part")), "Rig");
+	REQUIRE(rig != NULL_ENTITY);
+	store.Set(rig, engine::scene::Skeleton{Name("test.rig"), 2, {}});
+	REQUIRE(store.SetParent(keypoint, rig));
+
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{1}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == 1);
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{2}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == 1);
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{-1}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
+}
+
 TEST_CASE("a plain Part names no mesh and no texture", "[scene][part]") {
 	// **The point of the split.** A `Part` is one of six built-in shapes, and a
 	// mesh reference on it is a property that does nothing - an author sets it,

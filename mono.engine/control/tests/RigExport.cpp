@@ -35,6 +35,12 @@ TEST_CASE("rig export MCP tool validates selection and preserves data-rig shape"
 		const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");
 		REQUIRE(store.SetParent(bone, rig));
 		store.Set(bone, engine::scene::Bone{});
+		const auto point = store.CreateInstance(engine::scene::RigKeypointClass(), "Point");
+		REQUIRE(store.SetParent(point, rig));
+		engine::scene::RigKeypoint keypoint;
+		keypoint.Keypoint = engine::core::Name("tip");
+		keypoint.Joint = 0;
+		store.Set(point, keypoint);
 	});
 	engine::control::Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::RigExport(worlds)});
@@ -58,6 +64,15 @@ TEST_CASE("rig export MCP tool validates selection and preserves data-rig shape"
 	CHECK(payload["tick_seconds_denominator"].is_number_unsigned());
 	CHECK(payload["entities"][0]["joints"][0]["slot"].is_number_unsigned());
 	CHECK(payload["entities"][0]["joints"][0]["rest_frame"].contains("rotation_xyzw"));
+	const nlohmann::json &keypoints = payload["entities"][0]["keypoints"];
+	REQUIRE(keypoints.is_array());
+	REQUIRE(keypoints.size() == 1);
+	CHECK(keypoints[0].size() == 5);
+	CHECK(keypoints[0].contains("keypoint_id"));
+	CHECK(keypoints[0].contains("name"));
+	CHECK(keypoints[0]["state"] == "present");
+	CHECK(keypoints[0]["position"].is_array());
+	CHECK(keypoints[0]["missing_reason"].is_null());
 	CHECK(payload["entities"][0]["skinning"]["unavailable_reason"].is_string());
 	const auto tool =
 		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &item) {

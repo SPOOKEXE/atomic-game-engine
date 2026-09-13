@@ -180,4 +180,9 @@ namespace engine::scene {
 		EnsureClassTree();
 		return ecs::Classes::Find(core::Name("Bone"));
 	}
+
+	ecs::ClassId RigKeypointClass() {
+		EnsureClassTree();
+		return ecs::Classes::Find(core::Name("RigKeypoint"));
+	}
 }

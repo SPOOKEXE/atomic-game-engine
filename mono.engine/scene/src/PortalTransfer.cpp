@@ -96,6 +96,7 @@ namespace engine::scene {
 			TextContent,
 			Skeleton,
 			Bone,
+			RigKeypoint,
 			Animator,
 			AnimationTrack,
 			AnimationClip,
@@ -172,6 +173,8 @@ namespace engine::scene {
 				return Finite(value.Rest) && Finite(value.Transform) && Finite(value.InverseBind) &&
 					   Finite(value.WorldFrame) && value.Joint < MAX_JOINTS &&
 					   (value.ParentJoint == NO_JOINT || value.ParentJoint < value.Joint);
+			else if constexpr (std::is_same_v<T, RigKeypoint>)
+				return value.Keypoint.IsValid() && Finite(value.Frame) && value.Joint < MAX_JOINTS;
 			else if constexpr (std::is_same_v<T, Animator>)
 				return Finite(value.RootMotionWeight) && value.RootMotionWeight >= 0 &&
 					   value.RootMotionWeight <= 1;
@@ -350,7 +353,8 @@ namespace engine::scene {
 					!linked("scene.AnimationClip", "scene.AnimationBuffer"))
 					return false;
 				const auto *encoded = Component(node, "scene.Bone");
-				if (!encoded) continue;
+				const auto *keypoint = Component(node, "scene.RigKeypoint");
+				if (!encoded && !keypoint) continue;
 				const PortalNodeCopy *rig = Find(body, node.Parent);
 				for (size_t depth = 0; rig && depth < body.Nodes.size(); ++depth) {
 					if (Component(*rig, "scene.Skeleton")) break;
@@ -358,10 +362,17 @@ namespace engine::scene {
 				}
 				if (!rig) return false;
 				const size_t rigIndex = static_cast<size_t>(rig - body.Nodes.data());
-				Bone bone;
-				Decode(*encoded, bone);
-				if (bone.Joint >= counts[rigIndex]) return false;
-				joints.push_back({rigIndex, bone.Joint, bone.ParentJoint});
+				if (encoded) {
+					Bone bone;
+					Decode(*encoded, bone);
+					if (bone.Joint >= counts[rigIndex]) return false;
+					joints.push_back({rigIndex, bone.Joint, bone.ParentJoint});
+				}
+				if (keypoint) {
+					RigKeypoint point;
+					Decode(*keypoint, point);
+					if (point.Joint >= counts[rigIndex]) return false;
+				}
 			}
 			const auto order = [](const Joint &left, const Joint &right) {
 				return left.Rig < right.Rig || (left.Rig == right.Rig && left.Slot < right.Slot);
@@ -873,6 +884,8 @@ namespace engine::scene {
 						value.Transform.Position = value.Transform.Position * through.Scale;
 						value.InverseBind.Position = value.InverseBind.Position * through.Scale;
 						value.WorldFrame = through.Place(value.WorldFrame);
+					} else if constexpr (std::is_same_v<T, RigKeypoint>) {
+						value.Frame.Position = value.Frame.Position * through.Scale;
 					} else if constexpr (std::is_same_v<T, Tool>)
 						value.Grip.Position = value.Grip.Position * through.Scale;
 					else if constexpr (std::is_same_v<T, Humanoid>) {

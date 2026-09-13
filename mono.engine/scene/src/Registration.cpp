@@ -145,6 +145,26 @@ namespace engine::scene {
 			}
 		}
 
+		void WriteRigKeypoints(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *keypoints = static_cast<const RigKeypoint *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(keypoints[index].Keypoint);
+				writer.WriteRaw(&keypoints[index].Frame, sizeof(core::CFrame));
+				writer.WriteUInt16(keypoints[index].Joint);
+			}
+		}
+
+		void ReadRigKeypoints(core::ByteReader &reader, void *destination, size_t count) {
+			auto *keypoints = static_cast<RigKeypoint *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				keypoints[index].Keypoint = reader.ReadName();
+				reader.ReadRaw(&keypoints[index].Frame, sizeof(core::CFrame));
+				keypoints[index].Joint = reader.ReadUInt16();
+				keypoints[index].Reserved[0] = 0;
+				keypoints[index].Reserved[1] = 0;
+			}
+		}
+
 		void WriteAnimationClips(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *clips = static_cast<const AnimationClip *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -1615,6 +1635,7 @@ namespace engine::scene {
 		// on arrival would present a rig at the origin for one frame. A frame of a
 		// character in the wrong place is more visible than the bytes.
 		ecs::Components::Register<Bone>("scene.Bone");
+		ecs::Components::Register<RigKeypoint>("scene.RigKeypoint", WriteRigKeypoints, ReadRigKeypoints);
 
 		// **A hand-written pair, because a clip holds names and an entity reference.**
 		ecs::Components::Register<AnimationClip>(

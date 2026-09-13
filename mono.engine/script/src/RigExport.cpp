@@ -204,6 +204,7 @@ namespace engine::script {
 		std::vector<ScriptValue> entities;
 		entities.reserve(rigs.size());
 		size_t totalBones = 0;
+		size_t totalKeypoints = 0;
 		for (const auto &[rig, entityId] : rigs) {
 			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(rig);
 			if (skeleton == nullptr || !skeleton->Rig.IsValid() || skeleton->JointCount == 0 ||
@@ -252,6 +253,61 @@ namespace engine::script {
 					{"world_frame", std::move(world)},
 				}));
 			}
+			std::vector<std::pair<std::string, const scene::RigKeypoint *>> keypoints;
+			bool duplicateKeypoint = false;
+			bool invalidKeypoint = false;
+			store.Each<const scene::RigKeypoint>([&](Entity pointEntity, const scene::RigKeypoint &point) {
+				if (scene::SkeletonOf(store, pointEntity) != rig) return;
+				if (!point.Keypoint.IsValid() || !Text(point.Keypoint.Text(), MAX_RIG_EXPORT_ID_BYTES) ||
+					point.Joint >= slots.size() || slots[point.Joint] == nullptr) {
+					invalidKeypoint = true;
+					return;
+				}
+				keypoints.emplace_back(std::string(point.Keypoint.Text()), &point);
+			});
+			if (invalidKeypoint)
+				return Refusal(
+					"invalid_keypoint", "keypoints need a unique UTF-8 name and an existing skeleton joint"
+				);
+			if (keypoints.size() > MAX_RIG_EXPORT_KEYPOINTS ||
+				keypoints.size() > MAX_RIG_EXPORT_TOTAL_KEYPOINTS - totalKeypoints)
+				return Refusal("resource_limit", "exported keypoints exceed the 1024 response bound");
+			std::sort(keypoints.begin(), keypoints.end(), [](const auto &left, const auto &right) {
+				return left.first < right.first;
+			});
+			for (size_t index = 1; index < keypoints.size(); ++index)
+				if (keypoints[index - 1].first == keypoints[index].first) duplicateKeypoint = true;
+			if (duplicateKeypoint)
+				return Refusal("invalid_keypoint", "two keypoints on one skeleton carry the same name");
+			totalKeypoints += keypoints.size();
+			std::vector<ScriptValue> exportedKeypoints;
+			exportedKeypoints.reserve(keypoints.size());
+			for (const auto &[name, point] : keypoints) {
+				const std::string keypointId = entityId + ":keypoint:" + name;
+				if (!Text(keypointId, MAX_RIG_EXPORT_ID_BYTES))
+					return Refusal(
+						"invalid_keypoint_id",
+						"composed keypoint ID must be valid UTF-8 text within 512 bytes"
+					);
+				ScriptValue checked;
+				const core::CFrame worldFrame = slots[point->Joint]->WorldFrame * point->Frame;
+				if (!Frame(point->Frame, checked) || !Frame(worldFrame, checked))
+					return Refusal(
+						"invalid_frame", "keypoint frame is non-finite or has a non-unit quaternion"
+					);
+				exportedKeypoints.push_back(Map({
+					{"keypoint_id", String(keypointId)},
+					{"name", String(name)},
+					{"state", String("present")},
+					{"position",
+					 Array(
+						 {Number(worldFrame.Position.X),
+						  Number(worldFrame.Position.Y),
+						  Number(worldFrame.Position.Z)}
+					 )},
+					{"missing_reason", ScriptValue{}},
+				}));
+			}
 			entities.push_back(Map({
 				{"entity_id", String(entityId)},
 				{"rig_id", String(skeleton->Rig.Text())},
@@ -264,7 +320,7 @@ namespace engine::script {
 					  {"meters_per_unit", Number(1)}}
 				 )},
 				{"joints", Array(std::move(joints))},
-				{"keypoints", Array({})},
+				{"keypoints", Array(std::move(exportedKeypoints))},
 				{"skinning",
 				 Map(
 					 {{"available", Boolean(false)},

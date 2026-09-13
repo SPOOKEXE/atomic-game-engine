@@ -1939,6 +1939,46 @@ namespace engine::scene {
 			return property;
 		}
 
+		PropertyDescriptor RigKeypointJointProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Joint");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RigKeypoint>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RigKeypoint *keypoint = store.Get<RigKeypoint>(instance);
+				if (keypoint == nullptr) return false;
+				*static_cast<int32_t *>(out) =
+					keypoint->Joint == NO_JOINT ? -1 : static_cast<int32_t>(keypoint->Joint);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t joint = *static_cast<const int32_t *>(value);
+				if (store.Get<RigKeypoint>(instance) == nullptr) return false;
+				if (joint == -1) {
+					RigKeypoint *keypoint = store.GetMutable<RigKeypoint>(instance);
+					if (keypoint == nullptr) return false;
+					keypoint->Joint = NO_JOINT;
+					return true;
+				}
+				if (joint < 0) return false;
+				const Skeleton *skeleton = nullptr;
+				for (ecs::Entity walk = store.ParentOf(instance); walk != ecs::NULL_ENTITY;
+					 walk = store.ParentOf(walk)) {
+					if ((skeleton = store.Get<Skeleton>(walk)) != nullptr) break;
+				}
+				if (skeleton == nullptr || joint >= skeleton->JointCount) return false;
+				RigKeypoint *keypoint = store.GetMutable<RigKeypoint>(instance);
+				if (keypoint == nullptr) return false;
+				keypoint->Joint = static_cast<uint16_t>(joint);
+				return true;
+			};
+			return property;
+		}
+
 		PropertyDescriptor AnimationBufferSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("DataSize");
@@ -2772,6 +2812,8 @@ namespace engine::scene {
 			// against two different parents.
 			const std::array joint{ecs::Components::Of<Bone>()};
 			const ecs::ClassId boneClass = ecs::Classes::Register("Bone", instance, joint);
+			const std::array keypoint{ecs::Components::Of<RigKeypoint>()};
+			const ecs::ClassId rigKeypointClass = ecs::Classes::Register("RigKeypoint", instance, keypoint);
 
 			// **A `Skeleton` is not a class**, and that is deliberate. It is a
 			// component on whatever drawable is skinned - a `MeshPart` today -
@@ -3421,6 +3463,9 @@ namespace engine::scene {
 			ecs::Classes::Property<&Bone::Rest>(boneClass, "RestCFrame");
 			ecs::Classes::Property<&Bone::InverseBind>(boneClass, "InverseBindCFrame");
 			ecs::Classes::Computed(boneClass, BoneWorldProperty());
+			ecs::Classes::Property<&RigKeypoint::Keypoint>(rigKeypointClass, "KeypointId");
+			ecs::Classes::Property<&RigKeypoint::Frame>(rigKeypointClass, "CFrame");
+			ecs::Classes::Computed(rigKeypointClass, RigKeypointJointProperty());
 
 			// The skeleton is guaranteed by this class's component set, unlike the
 			// optional component on an imported ordinary `MeshPart`.

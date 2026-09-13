@@ -18,6 +18,8 @@ namespace engine::script {
 	inline constexpr size_t MAX_RIG_EXPORT_ENTITIES = 256;
 	inline constexpr size_t MAX_RIG_EXPORT_BONES = 1024;
 	inline constexpr size_t MAX_RIG_EXPORT_TOTAL_BONES = 1024;
+	inline constexpr size_t MAX_RIG_EXPORT_KEYPOINTS = 1024;
+	inline constexpr size_t MAX_RIG_EXPORT_TOTAL_KEYPOINTS = 1024;
 	inline constexpr size_t MAX_RIG_EXPORT_ID_BYTES = 512;
 	inline constexpr size_t MAX_RIG_EXPORT_ENTITY_ID_BYTES = 500;
 

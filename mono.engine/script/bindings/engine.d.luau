@@ -1807,6 +1807,13 @@ declare extern type Bone extends Instance with
 	read TransformedWorldCFrame: CFrame
 end
 
+declare extern type RigKeypoint extends Instance with
+	CFrame: CFrame
+	Joint: number
+	read KeypointId: string
+	write KeypointId: string?
+end
+
 declare extern type AnimationBuffer extends Instance with
 	read DataSize: number
 	read KeyframeBytes: number
@@ -3360,6 +3367,7 @@ type CreatableInstances = {
 	ObjectValue: ObjectValue,
 	Vector3Value: Vector3Value,
 	Bone: Bone,
+	RigKeypoint: RigKeypoint,
 	AnimationBuffer: AnimationBuffer,
 	Animation: Animation,
 	Animator: Animator,

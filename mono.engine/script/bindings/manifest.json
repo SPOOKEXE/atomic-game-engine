@@ -816,6 +816,19 @@
 			]
 		},
 		{
+			"name": "RigKeypoint",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.RigKeypoint"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.RigKeypoint"], "writes": ["scene.RigKeypoint"]},
+				{"name": "Joint", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.RigKeypoint"], "writes": ["scene.RigKeypoint"]},
+				{"name": "KeypointId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigKeypoint"], "writes": ["scene.RigKeypoint"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+			]
+		},
+		{
 			"name": "AnimationBuffer",
 			"parent": "Instance",
 			"constructible": true,

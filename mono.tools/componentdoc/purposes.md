@@ -130,6 +130,7 @@ scene.PublishedCatalogue | Resource: the published mesh names in manifest order,
 scene.Rendered | Marks exactly the entities a draw list should contain, added and removed only by `SyncRendered`; the `Mark` byte is that walk's own scratch and is zero between passes.
 scene.RenderedSignature | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved.
 scene.RigidBody | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact.
+scene.RigKeypoint | One authored named semantic point under a skeleton: its joint slot and joint-local frame. The data-rig export derives its current world frame from the named joint pose.
 scene.Service | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup.
 scene.ShaderSource | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild.
 scene.ShaderLens | A placed spherical HDR image-warp region. Its lens shader name and numeric controls are authored world data; the renderer resolves a bounded value snapshot before presentation.

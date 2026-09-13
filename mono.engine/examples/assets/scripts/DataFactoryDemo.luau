@@ -47,6 +47,25 @@ crate.Position = Vector3.new(0, 1, 0)
 crate.Size = Vector3.new(2, 2, 2)
 crate.Parent = workspace
 
+local rig = Instance.new("SkinnedMeshPart")
+rig.Name = "DataFactoryRig"
+rig:SetAttribute("DataFactoryId", "data-factory-demo/rig")
+rig.RigId = "data-factory-demo-rig"
+rig.JointCount = 1
+rig.Parent = workspace
+
+local rigBone = Instance.new("Bone")
+rigBone.Name = "Root"
+rigBone.RestCFrame = CFrame.new(0, 1, 0)
+rigBone.Parent = rig
+
+local rigKeypoint = Instance.new("RigKeypoint")
+rigKeypoint.Name = "Nose"
+rigKeypoint.KeypointId = "nose"
+rigKeypoint.CFrame = CFrame.new(0, 0.5, 0)
+rigKeypoint.Parent = rig
+rigKeypoint.Joint = 0
+
 local camera = Instance.new("Camera")
 camera.Name = "DataFactoryCamera"
 camera:SetAttribute("DataFactoryId", "data-factory-demo/camera")
@@ -147,6 +166,13 @@ print(
 	capabilities.scene_snapshot
 )
 print("DataFactory snapshot", snapshot.tick, #snapshot.entities, snapshot.coverage)
+print(
+	"DataFactory rig keypoint",
+	rigKeypoint.KeypointId,
+	rigKeypoint.Joint,
+	rigKeypoint.CFrame.Position,
+	rigBone.RestCFrame.Position
+)
 print(
 	"DataFactory physics",
 	snapshot.physics_observations.schema_version,

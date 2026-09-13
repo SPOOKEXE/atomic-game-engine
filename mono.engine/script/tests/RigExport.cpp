@@ -8,9 +8,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <string>
 #include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("engine.script.rigexport")
 TEST_DEPENDS("engine.scene.skinning")
@@ -47,8 +49,22 @@ TEST_CASE("rig export preserves skeleton frames and dense stable slots", "[scrip
 	childBone.Joint = 1;
 	childBone.ParentJoint = 0;
 	childBone.Transform.Position = {4, 5, 6};
+	childBone.WorldFrame.Position = {10, 20, 30};
 	store.Set(root, rootBone);
 	store.Set(child, childBone);
+	const auto nose = store.CreateInstance(engine::scene::RigKeypointClass(), "Nose");
+	const auto leftEye = store.CreateInstance(engine::scene::RigKeypointClass(), "LeftEye");
+	REQUIRE(store.SetParent(nose, rig));
+	REQUIRE(store.SetParent(leftEye, rig));
+	engine::scene::RigKeypoint nosePoint;
+	nosePoint.Keypoint = engine::core::Name("nose");
+	nosePoint.Joint = 1;
+	nosePoint.Frame.Position = {0, 1, 0};
+	store.Set(nose, nosePoint);
+	engine::scene::RigKeypoint eyePoint;
+	eyePoint.Keypoint = engine::core::Name("left_eye");
+	eyePoint.Joint = 0;
+	store.Set(leftEye, eyePoint);
 
 	const auto exported = engine::script::GetRigExport(store, "export/one");
 	REQUIRE(std::string_view(exported.Status) == "ok");
@@ -67,7 +83,24 @@ TEST_CASE("rig export preserves skeleton frames and dense stable slots", "[scrip
 	REQUIRE(translation != nullptr);
 	CHECK(translation->Items[0].Number == 1);
 	CHECK(Field(entities[0], "skinning")->Entries[0].second.Boolean == false);
-	CHECK(Field(entities[0], "keypoints")->Items.empty());
+	const auto &keypoints = Field(entities[0], "keypoints")->Items;
+	REQUIRE(keypoints.size() == 2);
+	CHECK(Field(keypoints[0], "keypoint_id")->Text == "rig/hero:keypoint:left_eye");
+	std::vector<std::string> fields;
+	for (const auto &[name, ignored] : keypoints[1].Entries) {
+		(void)ignored;
+		fields.push_back(name);
+	}
+	std::sort(fields.begin(), fields.end());
+	CHECK(fields == std::vector<std::string>{"keypoint_id", "missing_reason", "name", "position", "state"});
+	CHECK(Field(keypoints[1], "state")->Text == "present");
+	CHECK(Field(keypoints[1], "missing_reason")->Tag == engine::script::ValueTag::Nil);
+	const auto *position = Field(keypoints[1], "position");
+	REQUIRE(position != nullptr);
+	REQUIRE(position->Items.size() == 3);
+	CHECK(position->Items[0].Number == 10);
+	CHECK(position->Items[1].Number == 21);
+	CHECK(position->Items[2].Number == 30);
 	CHECK(Field(entities[0], "clips")->Items.empty());
 }
 
@@ -86,6 +119,26 @@ TEST_CASE("rig export bounds generated joint IDs and validates rig IDs", "[scrip
 	CHECK(
 		Field(Field(Field(exported.Value, "entities")->Items[0], "joints")->Items[0], "joint_id")
 			->Text.size() <= 512
+	);
+	const auto point = store.CreateInstance(engine::scene::RigKeypointClass(), "Point");
+	REQUIRE(store.SetParent(point, rig));
+	engine::scene::RigKeypoint keypoint;
+	keypoint.Keypoint = engine::core::Name("ok");
+	keypoint.Joint = 0;
+	store.Set(point, keypoint);
+	const auto keypointBound = engine::script::GetRigExport(store, "export/keypoint-bound");
+	REQUIRE(std::string_view(keypointBound.Status) == "ok");
+	CHECK(
+		Field(Field(keypointBound.Value, "entities")->Items[0], "keypoints")
+			->Items[0]
+			.Entries[0]
+			.second.Text.size() <= engine::script::MAX_RIG_EXPORT_ID_BYTES
+	);
+	keypoint.Keypoint = engine::core::Name("too");
+	store.Set(point, keypoint);
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/keypoint-too-long").Status) ==
+		"invalid_keypoint_id"
 	);
 	engine::ecs::Store tooLong("script.rigexport.long-id");
 	const auto tooLongRig = tooLong.CreateInstance(engine::scene::PartClass(), "Rig");
@@ -157,5 +210,38 @@ TEST_CASE(
 	sparse.Set(bone, row);
 	CHECK(
 		std::string_view(engine::script::GetRigExport(sparse, "export/sparse").Status) == "invalid_skeleton"
+	);
+}
+
+TEST_CASE("rig export refuses malformed and duplicate authored keypoints", "[script][rigexport]") {
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("script.rigexport.keypoints");
+	const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(store, rig, "rig/keypoints");
+	store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("keypoints"), 1});
+	const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");
+	REQUIRE(store.SetParent(bone, rig));
+	store.Set(bone, engine::scene::Bone{});
+	for (const char *instanceName : {"First", "Second"}) {
+		const auto point = store.CreateInstance(engine::scene::RigKeypointClass(), instanceName);
+		REQUIRE(store.SetParent(point, rig));
+		engine::scene::RigKeypoint row;
+		row.Keypoint = engine::core::Name("shared");
+		row.Joint = 0;
+		store.Set(point, row);
+	}
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/duplicate-keypoint").Status) ==
+		"invalid_keypoint"
+	);
+	const auto malformed = store.CreateInstance(engine::scene::RigKeypointClass(), "Malformed");
+	REQUIRE(store.SetParent(malformed, rig));
+	engine::scene::RigKeypoint bad;
+	bad.Keypoint = engine::core::Name("bad");
+	bad.Joint = 1;
+	store.Set(malformed, bad);
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/malformed-keypoint").Status) ==
+		"invalid_keypoint"
 	);
 }

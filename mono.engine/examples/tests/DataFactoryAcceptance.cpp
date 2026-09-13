@@ -7,11 +7,13 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
 #include <string>
@@ -98,6 +100,15 @@ TEST_CASE("data factory image labels stay aligned with identified snapshots", "[
 	}
 	CHECK(found);
 
+	const Entity rig = DemoChild(store, "DataFactoryRig");
+	REQUIRE(rig != engine::ecs::NULL_ENTITY);
+	const Entity keypoint = store.FindFirstChild(rig, "Nose");
+	REQUIRE(keypoint != engine::ecs::NULL_ENTITY);
+	const auto *point = store.Get<engine::scene::RigKeypoint>(keypoint);
+	REQUIRE(point != nullptr);
+	CHECK(point->Keypoint.Text() == "nose");
+	CHECK(point->Joint == 0);
+
 	// The script demonstrates only first-frame query envelopes. This host syncs
 	// after scene construction, then the fixture proves the crate's stable-id
 	// labels without relying on captured stdout.
@@ -113,16 +124,18 @@ TEST_CASE("data factory image labels stay aligned with identified snapshots", "[
 	REQUIRE(aabb.Status == std::string_view("ok"));
 	const auto *aabbIds = Field(aabb.Value, "ids");
 	REQUIRE(aabbIds != nullptr);
-	REQUIRE(aabbIds->Items.size() == 1);
-	CHECK(aabbIds->Items.front().Text == "data-factory-demo/crate");
+	CHECK(std::ranges::any_of(aabbIds->Items, [](const engine::script::ScriptValue &entry) {
+		return entry.Text == "data-factory-demo/crate";
+	}));
 
 	const engine::script::DataSceneResult obb =
 		engine::script::OverlapOBB(store, {CFrame{Vector3{0.0f, 1.0f, 0.0f}}, Vector3{1.1f, 1.1f, 1.1f}});
 	REQUIRE(obb.Status == std::string_view("ok"));
 	const auto *obbIds = Field(obb.Value, "ids");
 	REQUIRE(obbIds != nullptr);
-	REQUIRE(obbIds->Items.size() == 1);
-	CHECK(obbIds->Items.front().Text == "data-factory-demo/crate");
+	CHECK(std::ranges::any_of(obbIds->Items, [](const engine::script::ScriptValue &entry) {
+		return entry.Text == "data-factory-demo/crate";
+	}));
 }
 
 TEST_CASE("data factory refuses malformed image data and duplicate identities", "[data][acceptance]") {
