@@ -92,9 +92,9 @@ the renderer build-out.
 
 `datafactories-docs/MCP-ADDITIONS.md` describes proposed data-factory requirements; these are design targets, not verified implemented APIs:
 - [_] accept text instructions with reference images, controls, video motion constraints and externally interpreted engine-validated patches.
-- [_] add a dedicated OBB geometry test.
+- [x] add a dedicated OBB geometry test. The core suite checks rotated half extents and containment of every transformed corner.
 - [_] add the remaining MCP tools and demo coverage for script packages, multicamera, multiworld, segmentation, optical flow, lighting contribution, rigs, audio export and interop.
-- [_] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks.
+- [x] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks. The Python factory validates immutable text spans, points, semantic and part masks, control IDs, frame times and audio sample rates against media bounds.
 - [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
 - [_] capture IDs, semantic masks and part masks.
 - [_] complete autonomous capture workflow in `DataFactoryDemo.luau`.
@@ -125,7 +125,7 @@ the renderer build-out.
 - [_] provide full checkpoint coverage for ECS, physics warm start, RNG, script schedulers, events, clocks, string IDs and pinned assets; the API requires a real host rehydrator.
 - [_] support reflections from SSR, probes, mirrors and portals, including secondary views, recursion and staleness.
 - [_] support render-only steps with zero simulation advance and an explicit temporal-history policy.
-- [_] synchronize audio waveforms with source events and timing.
+- [x] synchronize audio waveforms with source events and timing. The audio mixer retains a fixed-capacity, allocation-free applied-command and natural-finish trace; immutable observations copy post-clip float32 samples, exact sample clocks, stable scene source names, spatial state, attenuation provenance and explicit unsupported occlusion state.
 - [_] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership.
 - [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure.
 - [x] add EditableImage:ToBuffer() and EditableImage:FromBuffer(buffer) (RGBA) to luau and engine.
