@@ -136,7 +136,7 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [x] validate RGBA8 buffers as exactly width*height*4, including orientation, color space, alpha and copy semantics.
 
 General:
-- [_] physics profiler in studio is non-functional. idk if its capturing snapshots or anything, but it shows no values. Use `slide` demo to test it.
+- [x] physics profiler in studio is non-functional. idk if its capturing snapshots or anything, but it shows no values. Use `slide` demo to test it.
 - [x] blackhole warp curves inward consistently across spin phases.
 - [x] character collision and wall sliding work against objects.
 - [x] batch and reuse selection geometry across viewports.
