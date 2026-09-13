@@ -136,7 +136,7 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [x] validate RGBA8 buffers as exactly width*height*4, including orientation, color space, alpha and copy semantics.
 
 General:
-- [x] physics profiler in studio is non-functional. idk if its capturing snapshots or anything, but it shows no values. Use `slide` demo to test it.
+- [_] physics profiler in studio is non-functional. idk if its capturing snapshots or anything, but it shows no values. Use `slide` demo to test it.
 - [x] blackhole warp curves inward consistently across spin phases.
 - [x] character collision and wall sliding work against objects.
 - [x] batch and reuse selection geometry across viewports.
@@ -162,14 +162,14 @@ General:
 - [x] when i play on a client and interact with the ui, its only for that client. startergui ones do NOT show here, they are cloned into PlayerGui.
 
 Extra:
-- [_] update and prune old content in documentation. check each statement, update, remove or replace.
+- [x] merge flamegraph visuals into the Physics and Network profilers.
+- [_] merge flamegraph visuals into the remaining profilers, and add tabs to swap between `Tabular` and `Flamegraph` views.
 
 ### v0.25
 
-- [_] /docs/future-work/character-system.md
-- [_] gtlf default character (unreal style)
-- [x] merge flamegraph visuals into the Physics and Network profilers.
-- [_] merge flamegraph visuals into the remaining profilers, and add tabs to swap between `Tabular` and `Flamegraph` views.
+- [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
+- [_] update and prune old content in documentation. check each statement, update, remove or replace.
+- [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
 
 ### v0.26
 
@@ -178,6 +178,8 @@ Extra:
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 
+- [_] gtlf default character (unreal style)
+- [_] /docs/future-work/character-system.md
 - [_] /docs/future-work/world-streaming.md
 - [_] /docs/future-work/terrain-system.md
 - [_] /docs/future-work/navigation-ai-system.md
@@ -190,6 +192,23 @@ Extra:
 - [_] /docs/future-work/procedural-generation.md
 - [_] /docs/future-work/session-and-social.md
 - [_] /docs/future-work/audio-system.md
+
+QOL:
+- [_] ```const char *CameraModeName(scene::CameraMode mode) {
+	switch (mode) {
+	case scene::CameraMode::Classic:
+		return "classic";
+	case scene::CameraMode::LockFirstPerson:
+		return "lock_first_person";
+	case scene::CameraMode::ShiftLock:
+		return "shift_lock";
+	case scene::CameraMode::Scriptable:
+		return "scriptable";
+	}
+	return "unknown";
+}``` move all character management code to a "PlayerModule" script called CameraController.
+Same with movement system, needs to be server authoritive but pure-lua so it can be changed.
+When you create a new world/scene, it auto appends the scripts in.
 
 ### FUTURE
 
