@@ -34,6 +34,7 @@ namespace engine::script {
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		uint32_t RowStride = 0;
+		size_t ByteSize = 0;
 		std::string Scalar;
 		std::string ColourSpace;
 		std::string Origin;

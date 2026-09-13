@@ -336,6 +336,7 @@ namespace engine::script {
 					{"width", Number(plane.Width)},
 					{"height", Number(plane.Height)},
 					{"row_stride", Number(plane.RowStride)},
+					{"byte_size", Number(plane.ByteSize)},
 					{"scalar", String(plane.Scalar)},
 					{"color_space", String(plane.ColourSpace)},
 					{"origin", String(plane.Origin)},

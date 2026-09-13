@@ -431,6 +431,7 @@ namespace engine::render {
 					 .Width = plane.Width,
 					 .Height = plane.Height,
 					 .RowStride = plane.RowStride,
+					 .ByteSize = plane.Bytes.size(),
 					 .Scalar = Scalar(plane.Scalar),
 					 .ColourSpace = ColourSpace(plane.ColourSpace),
 					 .Origin = "top_left",

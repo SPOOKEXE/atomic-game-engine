@@ -72,6 +72,10 @@ using engine::scene::WorldBounds;
 namespace {
 	class DemoCaptureBridge final : public engine::script::DataCaptureBridge {
 	  public:
+		enum class ReadBehavior : uint8_t { Exact, Empty, Overlong };
+
+		explicit DemoCaptureBridge(ReadBehavior behavior = ReadBehavior::Exact) : Behavior(behavior) {}
+
 		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
 			return {.Available = true, .Channels = {"rgb_linear_hdr"}, .Detail = "fixture"};
 		}
@@ -99,6 +103,7 @@ namespace {
 			plane.Channel = "rgb_linear_hdr";
 			plane.Status = "ready";
 			plane.Resource = "capture/77/rgb_linear_hdr";
+			plane.ByteSize = PayloadBytes;
 			poll.Planes.push_back(std::move(plane));
 			return true;
 		}
@@ -106,26 +111,37 @@ namespace {
 			std::string_view owner,
 			uint64_t ticket,
 			std::string_view resource,
-			size_t,
-			size_t,
+			size_t offset,
+			size_t maximum,
 			std::vector<std::byte> &bytes,
 			std::string &
 		) override {
-			if (owner != Owner || ticket != 77 || resource != "capture/77/rgb_linear_hdr") return false;
-			bytes = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+			if (owner != Owner || ticket != 77 || resource != "capture/77/rgb_linear_hdr" ||
+				offset != ExpectedOffset || maximum == 0 || offset >= PayloadBytes)
+				return false;
+			size_t copied = std::min(maximum, PayloadBytes - offset);
+			if (Behavior == ReadBehavior::Empty) copied = 0;
+			if (Behavior == ReadBehavior::Overlong) copied++;
+			bytes.assign(copied, std::byte{1});
+			ExpectedOffset += copied;
+			ReadCount++;
 			Read = true;
 			return true;
 		}
 		bool Release(std::string_view owner, uint64_t ticket, std::string &) override {
-			Released = owner == Owner && ticket == 77 && Read;
+			Released = owner == Owner && ticket == 77 && Read && ExpectedOffset == PayloadBytes;
 			return Released;
 		}
 		void Cancel(std::string_view, uint64_t) override {}
 		bool Read = false;
 		bool Released = false;
+		size_t ReadCount = 0;
 
 	  private:
 		std::string Owner;
+		static constexpr size_t PayloadBytes = 65537;
+		ReadBehavior Behavior;
+		size_t ExpectedOffset = 0;
 	};
 
 	// Where a script's content lives now.
@@ -362,13 +378,43 @@ TEST_CASE("the data factory capture request runs without a heartbeat", "[example
 	bool copied = false;
 	for (const auto &[name, value] : ready.Entries)
 		if (name == "copied_payload_bytes" && value.Tag == engine::script::HostTag::Number &&
-			value.Number == 4)
+			value.Number == 65537)
 			copied = true;
 	CHECK(copied);
 	CHECK(bridge->Read);
+	CHECK(bridge->ReadCount == 2);
 	std::string detail;
 	CHECK(bridge->Release("data-factory", 77, detail));
 	CHECK(bridge->Released);
+}
+
+TEST_CASE("the data factory demo rejects invalid capture chunks", "[examples][scene][data]") {
+	const StagedAssets assets;
+
+	for (const auto behavior :
+		 {DemoCaptureBridge::ReadBehavior::Empty, DemoCaptureBridge::ReadBehavior::Overlong}) {
+		Store store("data-factory-invalid-chunk");
+		Scheduler systems;
+		auto bridge = std::make_shared<DemoCaptureBridge>(behavior);
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		limits.DataCapture = bridge;
+		std::shared_ptr<engine::script::Runtime> runtime;
+		std::string error;
+		REQUIRE(LoadScene(store, systems, ExamplePath("DataFactoryDemo.luau"), error, &runtime, &limits));
+		REQUIRE(runtime != nullptr);
+		const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
+		REQUIRE(driver != nullptr);
+		engine::script::HostValue snapshot(engine::script::HostTag::String);
+		snapshot.Text = "snapshot-test";
+		engine::script::HostValue none(engine::script::HostTag::Nil);
+		engine::script::HostValue queued;
+		REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, none}, queued));
+		engine::script::HostValue ticket(engine::script::HostTag::String);
+		ticket.Text = "77";
+		engine::script::HostValue result;
+		CHECK_FALSE(runtime->Invoke(driver->Callback, std::array{snapshot, ticket}, result));
+	}
 }
 
 TEST_CASE("the animation scene builds rigs around one procedural buffer", "[examples][scene][animation]") {

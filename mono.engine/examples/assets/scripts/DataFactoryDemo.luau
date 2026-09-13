@@ -15,6 +15,7 @@ local DataSceneService = game:GetService("DataSceneService")
 type CapturePlane = {
 	status: string,
 	resource: string,
+	byte_size: number,
 }
 type CaptureResult = {
 	status: string,
@@ -69,15 +70,24 @@ DataSceneService:SetCaptureDriver(function(snapshotId, ticket)
 		local result = DataSceneService:PollCapture(ticket) :: CaptureResult
 		if result.status == "ready" or result.status == "partial" then
 			local payloadBytes = 0
+			local declaredBytes = 0
 			for _, plane in ipairs(result.planes) do
 				if plane.status == "ready" then
-					-- The host releases only after each bounded copy returns, so terminal
-					-- capture bytes remain observable without a scheduler heartbeat.
-					local bytes = DataSceneService:GetCaptureBuffer(ticket, plane.resource, 0, 65536)
-					assert(buffer.len(bytes) > 0)
-					payloadBytes += buffer.len(bytes)
+					assert(type(plane.byte_size) == "number" and plane.byte_size > 0)
+					declaredBytes += plane.byte_size
+					local offset = 0
+					while offset < plane.byte_size do
+						local remaining = plane.byte_size - offset
+						local requested = math.min(remaining, 65536)
+						local bytes = DataSceneService:GetCaptureBuffer(ticket, plane.resource, offset, requested)
+						local copied = buffer.len(bytes)
+						assert(copied > 0 and copied <= requested)
+						offset += copied
+						payloadBytes += copied
+					end
 				end
 			end
+			assert(payloadBytes == declaredBytes)
 			result.copied_payload_bytes = payloadBytes
 		end
 		return result
