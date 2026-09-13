@@ -759,7 +759,8 @@ namespace engine::script {
 			const bool inspect = request.Operation == "inspect";
 			const bool known = inspect || request.Operation == "pause" || request.Operation == "resume" ||
 							   request.Operation == "step" || request.Operation == "snapshot" ||
-							   request.Operation == "checkpoint" || request.Operation == "restore";
+							   request.Operation == "checkpoint" || request.Operation == "restore" ||
+							   request.Operation == "render_only";
 			if (!known) return {"invalid_argument", Map({{"status", String("invalid_lifecycle_request")}})};
 			if (request.Operation == "inspect" && !HasOnlyFields(value, {"operation"}))
 				return {"invalid_argument", Map({{"status", String("invalid_lifecycle_request")}})};
@@ -804,6 +805,17 @@ namespace engine::script {
 													"dt_ns"}
 											   ))
 				return {"invalid_argument", Map({{"status", String("invalid_lifecycle_request")}})};
+			if (request.Operation == "render_only" && !HasOnlyFields(
+														  value,
+														  {"operation",
+														   "operation_id",
+														   "expected_tick",
+														   "expected_world_epoch",
+														   "expected_world_version",
+														   "snapshot_id",
+														   "temporal_history"}
+													  ))
+				return {"invalid_argument", Map({{"status", String("invalid_lifecycle_request")}})};
 			if (const ScriptValue *scope = Field(value, "scope"); scope != nullptr) {
 				if (scope->Tag != ValueTag::String ||
 					(scope->Text != "all_systems" && scope->Text != "physics_only"))
@@ -815,6 +827,12 @@ namespace engine::script {
 					snapshot->Text.size() > 256 || snapshot->Text.find('\0') != std::string::npos)
 					return {"invalid_argument", Map({{"status", String("invalid_lifecycle_request")}})};
 				request.CheckpointId = snapshot->Text;
+			}
+			if (request.Operation == "render_only") {
+				if (!BoundedStringField(value, "snapshot_id", 256, request.SnapshotId) ||
+					!BoundedStringField(value, "temporal_history", 16, request.TemporalHistory) ||
+					request.TemporalHistory != "preserve")
+					return {"invalid_argument", Map({{"status", String("invalid_lifecycle_request")}})};
 			}
 			auto count = [&](std::string_view name, uint64_t &out) {
 				const ScriptValue *field = Field(value, name);
@@ -877,7 +895,9 @@ namespace engine::script {
 					 {"tick", String(reply.Tick)},
 					 {"time_nanoseconds", String(reply.TimeNanoseconds)},
 					 {"version", String(reply.Version)},
-					 {"epoch", String(reply.Epoch)}}
+					 {"epoch", String(reply.Epoch)},
+					 {"operation_id", String(reply.OperationId)},
+					 {"temporal_history", String(reply.TemporalHistory)}}
 				)
 			};
 		}

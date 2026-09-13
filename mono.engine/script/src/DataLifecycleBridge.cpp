@@ -16,7 +16,8 @@ namespace engine::script {
 				   left.ExpectedWorldVersion == right.ExpectedWorldVersion &&
 				   left.DtNumeratorNanoseconds == right.DtNumeratorNanoseconds &&
 				   left.DtDenominator == right.DtDenominator && left.Scope == right.Scope &&
-				   left.CheckpointId == right.CheckpointId;
+				   left.CheckpointId == right.CheckpointId && left.SnapshotId == right.SnapshotId &&
+				   left.TemporalHistory == right.TemporalHistory;
 		}
 
 		bool ValidText(std::string_view text, size_t limit, bool required = false) {
@@ -27,11 +28,15 @@ namespace engine::script {
 		bool KnownOperation(std::string_view operation) {
 			return operation == "inspect" || operation == "pause" || operation == "resume" ||
 				   operation == "step" || operation == "snapshot" || operation == "checkpoint" ||
-				   operation == "restore";
+				   operation == "restore" || operation == "render_only";
 		}
 
 		DataLifecycleBridgeReply Reply(
-			const world::DataFactoryReply &source, std::string snapshotId = {}, std::string checkpointId = {}
+			const world::DataFactoryReply &source,
+			std::string snapshotId = {},
+			std::string checkpointId = {},
+			std::string operationId = {},
+			std::string temporalHistory = {}
 		) {
 			return {
 				.Status = world::Describe(source.Status),
@@ -43,6 +48,8 @@ namespace engine::script {
 				.TimeNanoseconds = std::to_string(source.Clock.TimeNanoseconds),
 				.Version = std::to_string(source.WorldVersion),
 				.Epoch = std::to_string(source.WorldEpoch),
+				.OperationId = std::move(operationId),
+				.TemporalHistory = std::move(temporalHistory),
 			};
 		}
 	}
@@ -52,6 +59,7 @@ namespace engine::script {
 			DataLifecycleBridgeRequest Request;
 			DataLifecycleBridgeReply Reply;
 			bool Done = false;
+			uint64_t RenderOperationId = 0;
 		};
 		struct Operation {
 			DataLifecycleBridgeRequest Request;
@@ -85,10 +93,16 @@ namespace engine::script {
 		if (instanceId != request.InstanceId || !ValidText(request.InstanceId, 256, true) ||
 			!ValidText(request.Operation, 32, true) || !KnownOperation(request.Operation) ||
 			!ValidText(request.OperationId, 128) || !ValidText(request.Scope, 32) ||
-			!ValidText(request.CheckpointId, 256) ||
+			!ValidText(request.CheckpointId, 256) || !ValidText(request.SnapshotId, 256) ||
+			!ValidText(request.TemporalHistory, 16) ||
 			(!request.Scope.empty() && (request.Operation != "pause" || (request.Scope != "all_systems" &&
 																		 request.Scope != "physics_only"))) ||
-			(!request.CheckpointId.empty() && request.Operation != "restore") || QueueState->Next == 0) {
+			(!request.CheckpointId.empty() && request.Operation != "restore") ||
+			(request.Operation == "render_only" &&
+			 (request.SnapshotId.empty() || request.TemporalHistory != "preserve")) ||
+			(!request.SnapshotId.empty() && request.Operation != "render_only") ||
+			(!request.TemporalHistory.empty() && request.Operation != "render_only") ||
+			QueueState->Next == 0) {
 			detail = "invalid or full lifecycle queue";
 			return false;
 		}
@@ -171,14 +185,45 @@ namespace engine::script {
 
 	void QueuedDataLifecycleBridge::Pump() {
 		std::deque<std::pair<uint64_t, DataLifecycleBridgeRequest>> pending;
+		std::deque<std::pair<uint64_t, std::pair<std::string, uint64_t>>> renderPending;
 		{
 			std::lock_guard lock(QueueState->Mutex);
 			while (!QueueState->Order.empty()) {
 				const uint64_t ticket = QueueState->Order.front();
 				QueueState->Order.pop_front();
-				if (const auto entry = QueueState->Entries.find(ticket);
-					entry != QueueState->Entries.end() && !entry->second.Done)
+				if (const auto entry = QueueState->Entries.find(ticket); entry != QueueState->Entries.end() &&
+																		 !entry->second.Done &&
+																		 entry->second.RenderOperationId == 0)
 					pending.emplace_back(ticket, entry->second.Request);
+			}
+			for (const auto &[ticket, entry] : QueueState->Entries) {
+				if (!entry.Done && entry.RenderOperationId != 0)
+					renderPending.emplace_back(
+						ticket, std::pair{entry.Request.InstanceId, entry.RenderOperationId}
+					);
+			}
+		}
+		for (const auto &[ticket, render] : renderPending) {
+			const world::DataFactoryRenderOnlyReply outcome =
+				Session.PollRenderOnly(render.first, render.second);
+			if (outcome.Status == world::DataFactoryStatus::Pending) continue;
+			std::lock_guard lock(QueueState->Mutex);
+			if (auto found = QueueState->Entries.find(ticket);
+				found != QueueState->Entries.end() && !found->second.Done) {
+				found->second.Reply = Reply(
+					outcome,
+					{},
+					{},
+					std::to_string(outcome.OperationId),
+					outcome.TemporalHistory == world::DataFactoryTemporalHistory::Preserve ? "preserve"
+																						   : "unsupported"
+				);
+				if (outcome.Status == world::DataFactoryStatus::Ok) {
+					found->second.Reply.Status = "submitted";
+					found->second.Reply.Detail =
+						"render-only frame command submitted; readback readiness is not tracked";
+				}
+				found->second.Done = true;
 			}
 		}
 		for (const auto &[ticket, request] : pending) {
@@ -212,7 +257,30 @@ namespace engine::script {
 				outcome = Session.Checkpoint(request.InstanceId, checkpointId);
 			else if (request.Operation == "restore")
 				outcome = Session.Restore(request.InstanceId, request.CheckpointId);
-			else if (request.Operation == "step") {
+			else if (request.Operation == "render_only") {
+				const world::DataFactoryRenderOnlyReply rendered = Session.RenderOnly({
+					.InstanceId = request.InstanceId,
+					.SnapshotId = request.SnapshotId,
+					.ExpectedWorldEpoch = request.ExpectedWorldEpoch,
+					.ExpectedWorldVersion = request.ExpectedWorldVersion,
+					.ExpectedTick = request.ExpectedTick,
+					.TemporalHistory = world::DataFactoryTemporalHistory::Preserve,
+				});
+				std::lock_guard lock(QueueState->Mutex);
+				if (auto found = QueueState->Entries.find(ticket);
+					found != QueueState->Entries.end() && !found->second.Done) {
+					found->second.Reply = Reply(
+						rendered, {}, {}, std::to_string(rendered.OperationId), request.TemporalHistory
+					);
+					if (rendered.Status == world::DataFactoryStatus::Pending) {
+						found->second.Reply.Status = "pending";
+						found->second.RenderOperationId = rendered.OperationId;
+					} else {
+						found->second.Done = true;
+					}
+				}
+				continue;
+			} else if (request.Operation == "step") {
 				const world::DataFactoryReply state = Session.Inspect(request.InstanceId);
 				outcome = state.Status == world::DataFactoryStatus::Ok
 							  ? Session.Step(

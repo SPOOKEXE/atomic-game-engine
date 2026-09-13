@@ -952,6 +952,105 @@ TEST_CASE(
 	CHECK(failed);
 }
 
+TEST_CASE(
+	"data-factory render-only MCP tools distinguish pending from submitted", "[control][data-factory]"
+) {
+	Universe universe;
+	MakeWorld(universe, "control-render-only");
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	const auto current = session.Inspect("control-render-only");
+	Called(
+		surface,
+		"pause",
+		json{
+			{"instance_id", "control-render-only"},
+			{"expected_tick", current.Clock.Tick},
+			{"expected_world_epoch", current.WorldEpoch},
+			{"expected_world_version", current.WorldVersion}
+		}
+	);
+	const auto paused = session.Inspect("control-render-only");
+	const json snapshot = Called(
+		surface,
+		"snapshot",
+		json{
+			{"instance_id", "control-render-only"},
+			{"expected_tick", paused.Clock.Tick},
+			{"expected_world_epoch", paused.WorldEpoch},
+			{"expected_world_version", paused.WorldVersion}
+		}
+	);
+	session.SetRenderOnlyPresenter([](const engine::world::DataFactoryRenderOnlyRequest &, std::string &) {
+		return true;
+	});
+	const json request{
+		{"instance_id", "control-render-only"},
+		{"snapshot_id", snapshot["snapshot_id"]},
+		{"temporal_history", "preserve"},
+		{"expected_tick", paused.Clock.Tick},
+		{"expected_world_epoch", paused.WorldEpoch},
+		{"expected_world_version", paused.WorldVersion},
+		{"operation_id", "render-1"}
+	};
+	const json pending = Called(surface, "render_only", request);
+	CHECK(pending["status"] == "pending");
+	CHECK(pending["temporal_history"] == "preserve");
+	const json replayedPending = Called(surface, "render_only", request);
+	CHECK(replayedPending["status"] == "pending");
+	CHECK(replayedPending["operation_id"] == pending["operation_id"]);
+	CHECK(replayedPending["detail"] == "render-only presentation is pending host submission");
+	const uint64_t operation = pending["operation_id"];
+	REQUIRE(
+		session
+			.CompleteRenderOnly({
+				.InstanceId = "control-render-only",
+				.OperationId = operation,
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == engine::world::DataFactoryStatus::Ok
+	);
+	json laterRequest = request;
+	laterRequest["operation_id"] = "render-2";
+	const json later = Called(surface, "render_only", laterRequest);
+	CHECK(later["status"] == "pending");
+	const json replay = Called(surface, "render_only", request);
+	CHECK(replay["status"] == "submitted");
+	const json submitted = Called(
+		surface, "poll_render_only", json{{"instance_id", "control-render-only"}, {"operation_id", operation}}
+	);
+	CHECK(submitted["status"] == "submitted");
+	CHECK(
+		submitted["detail"].get<std::string>().find("readback readiness is not tracked") != std::string::npos
+	);
+	REQUIRE(
+		session
+			.CompleteRenderOnly({
+				.InstanceId = "control-render-only",
+				.OperationId = later["operation_id"],
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == engine::world::DataFactoryStatus::Ok
+	);
+	REQUIRE(
+		session.Resume("control-render-only", paused.Clock.Tick).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	CHECK(
+		Called(
+			surface,
+			"poll_render_only",
+			json{{"instance_id", "control-render-only"}, {"operation_id", operation}}
+		)["status"] == "submitted"
+	);
+}
+
 TEST_CASE("data-factory intervention is guarded, typed, and idempotent", "[control][data-factory]") {
 	Universe universe;
 	MakeWorld(universe, "control-intervention");

@@ -2977,6 +2977,8 @@ declare extern type DataSceneService with
 	function GetCaptureBuffer(self, ticket: string, resource: string, offset: number, maximumBytes: number): buffer
 	function ReleaseCapture(self, ticket: string): any
 	function SetCaptureDriver(self, driver: ((snapshotId: string, ticket: string?) -> any)?): any
+	-- A render_only lifecycle request reaches submitted after frame-command submission.
+	-- GPU readback readiness is not part of this lifecycle surface.
 	function RequestLifecycle(self, request: any): any
 	function PollLifecycle(self, ticket: string): any
 	function ReleaseLifecycle(self, ticket: string): any

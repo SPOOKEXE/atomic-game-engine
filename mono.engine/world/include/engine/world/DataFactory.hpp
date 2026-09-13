@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <optional>
 #include <span>
@@ -199,7 +200,6 @@ namespace engine::world {
 			bool AllSystems = false;
 			bool PhysicsOnly = false;
 			std::optional<DataFactoryRenderOnlyRequest> RenderOnly;
-			std::optional<DataFactoryRenderOnlyReply> RenderOnlyTerminal;
 		};
 
 		WorldId Resolve(std::string_view instanceId) const;
@@ -218,6 +218,7 @@ namespace engine::world {
 		DataFactoryRenderOnlyReply
 		ValidateRenderOnlySubmission(WorldId world, const DataFactoryRenderOnlyRequest &request);
 		void FinishRenderOnly(PauseState &state, DataFactoryRenderOnlyReply reply);
+		void StoreRenderOnlyTerminal(DataFactoryRenderOnlyReply reply);
 		void Store(DataFactoryCheckpoint checkpoint);
 
 		Universe &Worlds;
@@ -232,6 +233,8 @@ namespace engine::world {
 		DataFactoryInterventionExecutor InterventionExecutor;
 		DataFactoryRenderOnlyPresenter Presenter;
 		std::unordered_map<std::string, PauseState> Paused;
+		std::unordered_map<uint64_t, DataFactoryRenderOnlyReply> RenderOnlyTerminals;
+		std::deque<uint64_t> RenderOnlyTerminalOrder;
 		std::unordered_map<std::string, DataFactoryCheckpoint> Checkpoints;
 		std::vector<std::string> CheckpointOrder;
 		size_t RetainedCheckpointBytes = 0;

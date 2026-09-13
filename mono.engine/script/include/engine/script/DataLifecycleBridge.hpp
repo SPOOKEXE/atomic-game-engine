@@ -26,6 +26,8 @@ namespace engine::script {
 		uint32_t DtDenominator = 0;
 		std::string Scope;
 		std::string CheckpointId;
+		std::string SnapshotId;
+		std::string TemporalHistory;
 	};
 
 	struct DataLifecycleBridgeReply {
@@ -38,6 +40,8 @@ namespace engine::script {
 		std::string TimeNanoseconds;
 		std::string Version;
 		std::string Epoch;
+		std::string OperationId;
+		std::string TemporalHistory;
 	};
 
 	struct DataLifecycleBridgeCapabilities {

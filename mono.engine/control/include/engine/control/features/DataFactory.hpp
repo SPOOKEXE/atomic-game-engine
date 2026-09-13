@@ -32,6 +32,8 @@ namespace engine::control {
 			std::string InstanceId;
 			std::string OperationId;
 			std::string CheckpointId;
+			std::string SnapshotId;
+			std::string TemporalHistory;
 			uint64_t Tick = 0;
 			uint64_t Epoch = 0;
 			uint64_t Version = 0;
@@ -69,6 +71,27 @@ namespace engine::control {
 				 {{"numerator", reply.Clock.Interval.NumeratorNanoseconds},
 				  {"denominator", reply.Clock.Interval.Denominator}}},
 			};
+		}
+
+		inline void
+		RenderOnlyReply(const world::DataFactoryRenderOnlyReply &reply, json &result, std::string &failure) {
+			result = Reply(reply);
+			result["operation_id"] = reply.OperationId;
+			result["temporal_history"] = "preserve";
+			failure.clear();
+			if (reply.Status == world::DataFactoryStatus::Pending) {
+				result["status"] = "pending";
+				return;
+			}
+			if (reply.Status == world::DataFactoryStatus::Ok) {
+				result["status"] = "submitted";
+				result["detail"] = "render-only frame command submitted; readback readiness is not tracked";
+				return;
+			}
+			failure = Error(
+				world::Describe(reply.Status),
+				reply.Detail.empty() ? "render-only operation refused" : reply.Detail
+			);
 		}
 
 		inline bool Text(const json &value, std::string_view name, std::string &out, std::string &failure) {
@@ -279,6 +302,8 @@ namespace engine::control {
 				{"expected_world_version", {{"type", "integer"}, {"minimum", 0}}},
 				{"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"checkpoint_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+				{"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+				{"temporal_history", {{"type", "string"}, {"enum", {"preserve"}}}},
 				{"base_snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"changed_causes",
 				 {{"type", "array"},
@@ -585,6 +610,124 @@ namespace engine::control {
 		Add(
 			capture("checkpoint", "Retains a restorable checkpoint when the host provides rehydration.", true)
 		);
+		Add(Tool{
+			"render_only",
+			"Queues one static frame from a paused snapshot. Submitted means the frame command was accepted, "
+			"not that GPU readback is ready.",
+			[] {
+				return Schema(
+					{"instance_id",
+					 "snapshot_id",
+					 "temporal_history",
+					 "expected_tick",
+					 "expected_world_epoch",
+					 "expected_world_version",
+					 "operation_id"},
+					{"instance_id",
+					 "snapshot_id",
+					 "temporal_history",
+					 "expected_tick",
+					 "expected_world_epoch",
+					 "expected_world_version",
+					 "operation_id"}
+				);
+			},
+			[&session, ledger](const json &v, std::string &f) -> json {
+				Request request;
+				json normalized;
+				if (!Base(v, true, request, normalized, f) || !Only(
+																  v,
+																  {"instance_id",
+																   "snapshot_id",
+																   "temporal_history",
+																   "expected_tick",
+																   "expected_world_epoch",
+																   "expected_world_version",
+																   "operation_id"},
+																  f
+															  ))
+					return nullptr;
+				const json *field = nullptr;
+				if (!Field(v, "snapshot_id", field, f) ||
+					!Text(*field, "snapshot_id", request.SnapshotId, f) ||
+					!Field(v, "temporal_history", field, f) ||
+					!Text(*field, "temporal_history", request.TemporalHistory, f))
+					return nullptr;
+				if (request.TemporalHistory != "preserve") {
+					f = Error("capability_unsupported", "this host supports only preserve temporal history");
+					return nullptr;
+				}
+				normalized["tool"] = "render_only";
+				normalized["snapshot_id"] = request.SnapshotId;
+				normalized["temporal_history"] = request.TemporalHistory;
+				if (const auto prior = ledger->Entries.find(request.OperationId);
+					prior != ledger->Entries.end()) {
+					if (prior->second.Arguments != normalized.dump()) {
+						f = Error(
+							"operation_id_conflict", "operation_id was already used with different arguments"
+						);
+						return nullptr;
+					}
+					if (prior->second.Result.value("status", "") == "pending" &&
+						prior->second.Result.contains("operation_id") &&
+						prior->second.Result["operation_id"].is_number_unsigned()) {
+						RenderOnlyReply(
+							session.PollRenderOnly(
+								request.InstanceId, prior->second.Result["operation_id"].get<uint64_t>()
+							),
+							prior->second.Result,
+							prior->second.Failure
+						);
+					}
+					f = prior->second.Failure;
+					return prior->second.Result;
+				}
+				if (!Preconditions(session, request, f)) return nullptr;
+				const world::DataFactoryRenderOnlyReply reply = session.RenderOnly({
+					.InstanceId = request.InstanceId,
+					.SnapshotId = request.SnapshotId,
+					.ExpectedWorldEpoch = request.Epoch,
+					.ExpectedWorldVersion = request.Version,
+					.ExpectedTick = request.Tick,
+					.TemporalHistory = world::DataFactoryTemporalHistory::Preserve,
+				});
+				json result;
+				RenderOnlyReply(reply, result, f);
+				Store(*ledger, request.OperationId, normalized.dump(), result, f);
+				return result;
+			}
+		});
+		Add(Tool{
+			"poll_render_only",
+			"Reads pending, submitted, or failed render-only command status. Submitted does not claim GPU "
+			"readback readiness.",
+			[] {
+				return json{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"instance_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"operation_id", {{"type", "integer"}, {"minimum", 1}}}}},
+					{"required", {"instance_id", "operation_id"}}
+				};
+			},
+			[&session](const json &v, std::string &f) -> json {
+				if (!Only(v, {"instance_id", "operation_id"}, f)) return nullptr;
+				const json *field = nullptr;
+				std::string instance;
+				uint64_t operationId = 0;
+				if (!Field(v, "instance_id", field, f) || !Text(*field, "instance_id", instance, f) ||
+					!Field(v, "operation_id", field, f) || !UInt(*field, "operation_id", operationId, f) ||
+					operationId == 0) {
+					if (f.empty()) f = Error("validation_failed", "operation_id must be positive");
+					return nullptr;
+				}
+				const world::DataFactoryRenderOnlyReply reply = session.PollRenderOnly(instance, operationId);
+				json result;
+				RenderOnlyReply(reply, result, f);
+				return result;
+			}
+		});
 		Add(Tool{
 			"restore",
 			"Restores a compatible checkpoint through a scratch universe and starts a fresh epoch.",

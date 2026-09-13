@@ -171,6 +171,8 @@ namespace {
 			.DtDenominator = 0,
 			.Scope = {},
 			.CheckpointId = {},
+			.SnapshotId = {},
+			.TemporalHistory = {},
 		};
 	}
 }
@@ -647,6 +649,75 @@ TEST_CASE("queued lifecycle bridge mutates only at Pump and retains released ret
 	DataLifecycleBridgeReply stale;
 	REQUIRE(bridge.Poll("lifecycle.direct", staleTicket, stale, detail));
 	CHECK(stale.Status == "version_conflict");
+}
+
+TEST_CASE(
+	"queued lifecycle bridge reports render-only command submission without readback", "[scripting][data]"
+) {
+	using engine::script::DataLifecycleBridgeReply;
+	using engine::script::QueuedDataLifecycleBridge;
+	using engine::world::DataFactoryPauseScope;
+	using engine::world::DataFactorySession;
+	using engine::world::Universe;
+
+	Universe universe;
+	MakeWorld(universe, "lifecycle.render-only");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](engine::world::WorldId, DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	REQUIRE(
+		session.Pause("lifecycle.render-only", DataFactoryPauseScope::AllSystems, 0).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(
+		session.Snapshot("lifecycle.render-only", snapshot).Status == engine::world::DataFactoryStatus::Ok
+	);
+	const auto current = session.Inspect("lifecycle.render-only");
+	session.SetRenderOnlyPresenter([](const engine::world::DataFactoryRenderOnlyRequest &, std::string &) {
+		return true;
+	});
+	QueuedDataLifecycleBridge bridge(session);
+	auto request = Request("lifecycle.render-only", "render_only", "render-1", 0, 1, current.WorldVersion);
+	request.SnapshotId = snapshot;
+	request.TemporalHistory = "preserve";
+	uint64_t ticket = 0;
+	std::string detail;
+	REQUIRE(bridge.Queue("lifecycle.render-only", request, ticket, detail));
+	bridge.Pump();
+	DataLifecycleBridgeReply pending;
+	REQUIRE(bridge.Poll("lifecycle.render-only", ticket, pending, detail));
+	CHECK(pending.Status == "pending");
+	CHECK(pending.TemporalHistory == "preserve");
+	REQUIRE_FALSE(pending.OperationId.empty());
+	const uint64_t operation = std::stoull(pending.OperationId);
+	REQUIRE(
+		session
+			.CompleteRenderOnly({
+				.InstanceId = "lifecycle.render-only",
+				.OperationId = operation,
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == engine::world::DataFactoryStatus::Ok
+	);
+	const auto later = session.RenderOnly({
+		.InstanceId = "lifecycle.render-only",
+		.SnapshotId = snapshot,
+		.ExpectedWorldEpoch = current.WorldEpoch,
+		.ExpectedWorldVersion = current.WorldVersion,
+		.ExpectedTick = current.Clock.Tick,
+	});
+	REQUIRE(later.Status == engine::world::DataFactoryStatus::Pending);
+	bridge.Pump();
+	DataLifecycleBridgeReply submitted;
+	REQUIRE(bridge.Poll("lifecycle.render-only", ticket, submitted, detail));
+	CHECK(submitted.Status == "submitted");
+	CHECK(submitted.Detail.find("readback readiness is not tracked") != std::string::npos);
+	uint64_t repeated = 0;
+	REQUIRE(bridge.Queue("lifecycle.render-only", request, repeated, detail));
+	CHECK(repeated == ticket);
 }
 
 TEST_CASE("DataSceneService lifecycle schema and queue work in both VMs", "[scripting][data]") {

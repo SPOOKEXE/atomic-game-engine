@@ -430,6 +430,71 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"data-factory retains render-only terminals across a later request and resume", "[world][data-factory]"
+) {
+	Universe universe;
+	MakeWorld(universe, "data-factory.render-history");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.render-history", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-factory.render-history", snapshot).Status == DataFactoryStatus::Ok);
+	const auto current = session.Inspect("data-factory.render-history");
+	session.SetRenderOnlyPresenter([](const DataFactoryRenderOnlyRequest &, std::string &) { return true; });
+	const auto request = [&] {
+		return DataFactoryRenderOnlyRequest{
+			.InstanceId = "data-factory.render-history",
+			.SnapshotId = snapshot,
+			.ExpectedWorldEpoch = current.WorldEpoch,
+			.ExpectedWorldVersion = current.WorldVersion,
+			.ExpectedTick = current.Clock.Tick,
+		};
+	};
+	const auto first = session.RenderOnly(request());
+	REQUIRE(first.Status == DataFactoryStatus::Pending);
+	REQUIRE(
+		session
+			.CompleteRenderOnly({
+				.InstanceId = "data-factory.render-history",
+				.OperationId = first.OperationId,
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == DataFactoryStatus::Ok
+	);
+	const auto second = session.RenderOnly(request());
+	REQUIRE(second.Status == DataFactoryStatus::Pending);
+	CHECK(
+		session.PollRenderOnly("data-factory.render-history", first.OperationId).Status ==
+		DataFactoryStatus::Ok
+	);
+	REQUIRE(
+		session
+			.CompleteRenderOnly({
+				.InstanceId = "data-factory.render-history",
+				.OperationId = second.OperationId,
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == DataFactoryStatus::Ok
+	);
+	REQUIRE(
+		session.Resume("data-factory.render-history", current.Clock.Tick).Status == DataFactoryStatus::Ok
+	);
+	CHECK(
+		session.PollRenderOnly("data-factory.render-history", first.OperationId).Status ==
+		DataFactoryStatus::Ok
+	);
+	CHECK(
+		session.PollRenderOnly("data-factory.render-history", second.OperationId).Status ==
+		DataFactoryStatus::Ok
+	);
+}
+
+TEST_CASE(
 	"data-factory checkpoint restores through scratch and creates a fresh epoch", "[world][data-factory]"
 ) {
 	Universe universe;

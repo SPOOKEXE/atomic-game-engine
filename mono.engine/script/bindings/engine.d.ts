@@ -2609,6 +2609,8 @@ declare interface DataSceneService {
 	GetCaptureBuffer(ticket: string, resource: string, offset: number, maximumBytes: number): ArrayBuffer;
 	ReleaseCapture(ticket: string): Record<string, unknown>;
 	SetCaptureDriver(driver: ((snapshotId: string, ticket?: string) => Record<string, unknown>) | null): Record<string, unknown>;
+	// A render_only lifecycle request reaches submitted after frame-command submission.
+	// GPU readback readiness is not part of this lifecycle surface.
 	RequestLifecycle(request: unknown): Record<string, unknown>;
 	PollLifecycle(ticket: string): Record<string, unknown>;
 	ReleaseLifecycle(ticket: string): Record<string, unknown>;

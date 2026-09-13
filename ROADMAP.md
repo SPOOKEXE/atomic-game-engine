@@ -91,7 +91,7 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [_] finish broad multimodal and prediction tools in the Python factory.
 - [_] finish deterministic action and script sequencing at fixed-tick boundaries; rational timing and manual tick boundaries are checked.
 - [_] finish thin MCP adapters for every service.
-- [_] generate counterfactual pairs, parameter sweeps, domain randomization and holdouts without label leakage.
+- [x] generate counterfactual pairs, parameter sweeps, domain randomization and holdouts without label leakage. The Python factory builds immutable seeded plans, paired one-axis variants, typed choice and uniform sweeps, connected group-aware holdouts and leakage checks across scenes, pairs, assets, sources and provenance.
 - [_] implement backward seek as checkpoint plus replay, never negative dt, with bounded history.
 - [_] label lights, shadows, per-light caster and receiver contribution, and ambient-occlusion estimator provenance.
 - [_] load repository script packages with source and asset hashes, seeded parameters, type checking, sandboxing and atomic scene edits.
@@ -106,8 +106,8 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [_] support forks and versioned causal edits, including effects outside the edited spatial region while keeping branches isolated.
 - [_] support forward scene-to-modalities and inverse observation-to-scene patches, with rerendered numeric and semantic metrics plus ambiguity masks.
 - [_] support reflections from SSR, probes, mirrors and portals, including secondary views, recursion and staleness.
-- [_] support render-only steps with zero simulation advance and an explicit temporal-history policy.
-- [_] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership.
+- [x] support render-only steps with zero simulation advance and an explicit temporal-history policy. The paused-world session validates retained snapshots and revisions, the client submits one forced frame with zero particle or simulation delta, and Luau, MCP and Python expose bounded submit and poll records. Preserve is supported now; reset and disable return explicit unsupported states until renderer-local history control exists.
+- [x] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership. The evidence ledger enforces stable source and fact identities, legal freshness transitions, monotonic observation times, atomic bounded updates and repair-result lineage across engine and external owners.
 - [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure.
 - [_] add position/rotation values in global space then we can convert to local space or in the reference of another object. really useful for self-world-modeling and changing perspectives.
 - [x] add a dedicated OBB geometry test. The core suite checks rotated half extents and containment of every transformed corner.

@@ -356,9 +356,21 @@ namespace engine::world {
 		return Reply(world, DataFactoryStatus::Ok, "retained immutable snapshot matches the paused world");
 	}
 
+	void DataFactorySession::StoreRenderOnlyTerminal(DataFactoryRenderOnlyReply reply) {
+		// The control ledger retains 256 idempotency keys. Keep terminal results for
+		// the same window so a retained retry can always refresh its pending reply.
+		constexpr size_t LIMIT = 256;
+		RenderOnlyTerminalOrder.push_back(reply.OperationId);
+		RenderOnlyTerminals.emplace(reply.OperationId, std::move(reply));
+		while (RenderOnlyTerminalOrder.size() > LIMIT) {
+			RenderOnlyTerminals.erase(RenderOnlyTerminalOrder.front());
+			RenderOnlyTerminalOrder.pop_front();
+		}
+	}
+
 	void DataFactorySession::FinishRenderOnly(PauseState &state, DataFactoryRenderOnlyReply reply) {
 		state.RenderOnly.reset();
-		state.RenderOnlyTerminal = std::move(reply);
+		StoreRenderOnlyTerminal(std::move(reply));
 	}
 
 	DataFactoryRenderOnlyReply DataFactorySession::ValidateRenderOnlySubmission(
@@ -424,7 +436,6 @@ namespace engine::world {
 			return reply(DataFactoryStatus::ResourceLimit, "render-only operation id space exhausted");
 		request.OperationId = NextRenderOnly++;
 		paused->second.RenderOnly = request;
-		paused->second.RenderOnlyTerminal.reset();
 
 		std::string detail;
 		bool queued = false;
@@ -447,18 +458,16 @@ namespace engine::world {
 				request.OperationId
 			);
 		if (!queued) {
-			FinishRenderOnly(
-				paused->second,
-				RenderReply(
-					world,
-					DataFactoryStatus::PresentationFailed,
-					request.TemporalHistory,
-					detail.empty() ? "host refused render-only presentation" : std::move(detail),
-					false,
-					request.OperationId
-				)
+			DataFactoryRenderOnlyReply failed = RenderReply(
+				world,
+				DataFactoryStatus::PresentationFailed,
+				request.TemporalHistory,
+				detail.empty() ? "host refused render-only presentation" : std::move(detail),
+				false,
+				request.OperationId
 			);
-			return *paused->second.RenderOnlyTerminal;
+			FinishRenderOnly(paused->second, failed);
+			return failed;
 		}
 		return RenderReply(
 			world,
@@ -548,9 +557,9 @@ namespace engine::world {
 				false,
 				operationId
 			);
-		if (paused != Paused.end() && paused->second.RenderOnlyTerminal &&
-			paused->second.RenderOnlyTerminal->OperationId == operationId)
-			return *paused->second.RenderOnlyTerminal;
+		if (const auto terminal = RenderOnlyTerminals.find(operationId);
+			terminal != RenderOnlyTerminals.end() && terminal->second.InstanceId == instanceId)
+			return terminal->second;
 		return RenderReply(
 			world,
 			DataFactoryStatus::ValidationFailed,
@@ -602,7 +611,6 @@ namespace engine::world {
 			.AllSystems = found->second.AllSystemsPaused,
 			.PhysicsOnly = found->second.PhysicsOnlyPaused,
 			.RenderOnly = {},
-			.RenderOnlyTerminal = {},
 		};
 		std::vector<std::pair<DataFactoryPauseScope, bool>> changed;
 		const auto reconcile =
