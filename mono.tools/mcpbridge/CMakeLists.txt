@@ -49,6 +49,13 @@ if(NOT bridge_port_line MATCHES "=[ \t]*([0-9]+)")
 endif()
 set(bridge_port "${CMAKE_MATCH_1}")
 
+file(STRINGS "${bridge_header}" bridge_client_port_line
+	REGEX "inline constexpr uint16_t DEFAULT_CLIENT_PORT")
+if(NOT bridge_client_port_line MATCHES "=[ \t]*([0-9]+)")
+	message(FATAL_ERROR "mcpbridge: could not read DEFAULT_CLIENT_PORT from ${bridge_header}.")
+endif()
+set(bridge_client_port "${CMAKE_MATCH_1}")
+
 set(bridge_elsewhere
 	"${CMAKE_SOURCE_DIR}/.mcp.json"
 	"${CMAKE_SOURCE_DIR}/Justfile")
@@ -57,19 +64,35 @@ foreach(bridge_file IN LISTS bridge_elsewhere)
 	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${bridge_file}")
 endforeach()
 
-file(STRINGS "${CMAKE_SOURCE_DIR}/.mcp.json" bridge_mcp_json
-	REGEX "\"--port\"")
-if(NOT bridge_mcp_json MATCHES "\"([0-9]+)\"[^\"]*$")
-	message(FATAL_ERROR
-		"mcpbridge: .mcp.json no longer names a --port. It is what a client reads "
-		"to find the editor, so it has to name one.")
-elseif(NOT CMAKE_MATCH_1 STREQUAL bridge_port)
-	message(FATAL_ERROR
-		"mcpbridge: .mcp.json dials port ${CMAKE_MATCH_1} and "
-		"engine::control::DEFAULT_PORT is ${bridge_port}.\n"
-		"  A client that reads .mcp.json would connect to a port the editor does "
-		"not open. Change both, in the same commit.")
-endif()
+file(READ "${CMAKE_SOURCE_DIR}/.mcp.json" bridge_mcp_json)
+function(bridge_mcp_port name expected)
+	string(JSON args GET "${bridge_mcp_json}" mcpServers "${name}" args)
+	string(JSON count LENGTH "${args}")
+	math(EXPR last_index "${count} - 1")
+	set(found FALSE)
+	foreach(index RANGE 0 ${last_index})
+		string(JSON argument GET "${args}" ${index})
+		if(argument STREQUAL "--port")
+			if(found)
+				message(FATAL_ERROR "mcpbridge: ${name} has duplicate --port flags in .mcp.json.")
+			endif()
+			math(EXPR value_index "${index} + 1")
+			if(value_index GREATER_EQUAL count)
+				message(FATAL_ERROR "mcpbridge: ${name} has --port without a value in .mcp.json.")
+			endif()
+			string(JSON value GET "${args}" ${value_index})
+			if(NOT value STREQUAL expected)
+				message(FATAL_ERROR "mcpbridge: ${name} dials ${value}, expected ${expected}.")
+			endif()
+			set(found TRUE)
+		endif()
+	endforeach()
+	if(NOT found)
+		message(FATAL_ERROR "mcpbridge: ${name} has no --port in .mcp.json.")
+	endif()
+endfunction()
+bridge_mcp_port("atomic-studio" "${bridge_port}")
+bridge_mcp_port("atomic-client" "${bridge_client_port}")
 
 file(STRINGS "${CMAKE_SOURCE_DIR}/Justfile" bridge_recipe
 	REGEX "^mcp port=")

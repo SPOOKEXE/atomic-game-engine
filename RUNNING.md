@@ -3437,12 +3437,12 @@ only be a format for bun and npm to disagree about.
 
 ## Driving the engine from outside - `--mcp-port`
 
-The `server` and `studio` programs can open a socket that answers **Model
+The `client`, `server` and `studio` programs can open a socket that answers **Model
 Context Protocol**, so a language model or a script can watch them and steer
 them: list scenes, read and write properties, start and stop a world, read the
 log and the metrics, ask what a module is allowed to link, type-check a script,
-and start a test run. The client, unified harness and content origin do not
-currently register `--mcp-port`.
+and start a test run. The client adds the data-factory lifecycle, scene and
+capture tools when started with `--data-factory`.
 
 **It is off unless you ask.** Read
 [SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
@@ -3452,21 +3452,23 @@ never be enabled on a host in front of players.
 ```sh
 just mcp                                  # the editor, port 8738
 server --mcp-port 8734 --game My.agame    # a dedicated server
+client --data-factory --mcp-port 8736     # a local data-factory host
 ```
 
-The port is yours to choose; the defaults exist so the two supported programs on
+The port is yours to choose; the defaults exist so the three supported programs on
 one machine do not collide:
 
 | Program | Port | What it exposes |
 |---|---|---|
 | `server` | 8734 | its worlds, who is connected, and what the game socket has done |
+| `client` | 8736 | local data-factory lifecycle, scene observations and capture tools |
 | `studio` | 8738 | worlds, plus selection, Play and the output panel |
 
-Both also answer the tools that are about the repository rather than about the
+All three also answer the tools that are about the repository rather than about the
 program - the module graph, the class table, the log and the test runner - and
-both serve resources and prompts. `--mcp-port` always takes a number; the ports
+all three serve resources and prompts. `--mcp-port` always takes a number; the ports
 above are conventions, and `engine::control::DEFAULT_PORT` and
-`DEFAULT_SERVER_PORT` are where they are written down. `.mcp.json` and the `just
+`DEFAULT_SERVER_PORT` and `DEFAULT_CLIENT_PORT` are where they are written down. `.mcp.json` and the `just
 mcp` recipe are checked against that header at configure time, so a fourth copy
 of the number cannot quietly disagree.
 
@@ -3554,6 +3556,10 @@ with nothing to set up. Another program is one more entry:
 		"atomic-server": {
 			"command": ".cache/build/dev/tools/mcpbridge",
 			"args": ["--port", "8734"]
+		},
+		"atomic-client": {
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8736"]
 		}
 	}
 }
