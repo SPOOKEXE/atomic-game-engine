@@ -695,6 +695,8 @@ namespace engine::render {
 		// Borrowed world data consumed by view-scoped nodes.
 		//@{
 		std::span<const scene::DrawInstance> Instances;
+		std::span<const DataCaptureObjectLabel> ObjectLabels;
+		bool ObjectLabelsValid = true;
 		std::span<const core::CFrame> JointFrames;
 		std::span<const SurfaceView> Surfaces;
 		//@}

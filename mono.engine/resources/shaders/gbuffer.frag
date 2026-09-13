@@ -11,11 +11,13 @@ layout(location = 6) flat in uint inAppearance;
 layout(location = 7) flat in vec3 inSurfaceColour;
 layout(location = 8) flat in vec4 inEmission;
 layout(location = 9) flat in uvec2 inFeaturePolicy;
+layout(location = 10) flat in uint inObjectLabel;
 
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormal;
 layout(location = 2) out vec4 outMaterial;
 layout(location = 3) out vec4 outEmissive;
+layout(location = 4) out uint outObjectId;
 
 // DrawSlots binds the renderer's complete material table for every material
 // pipeline. Keeping the same binding layout makes SurfaceAppearance data flow
@@ -119,4 +121,5 @@ void main() {
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
 	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, 0.0);
 	outEmissive = vec4(emissive, 1.0);
+	outObjectId = inObjectLabel;
 }

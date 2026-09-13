@@ -24,6 +24,7 @@ namespace engine::render {
 			const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	 ? "-albedo"
 											: channel == DataCaptureChannel::PbrMaterial ? "-material"
 											: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
+											: channel == DataCaptureChannel::ObjectIds	 ? "-object-ids"
 																						 : "";
 			return suffix.empty() ? ticket.CaptureNode
 								  : core::Name(std::string(ticket.CaptureNode.Text()) + std::string(suffix));
@@ -141,6 +142,14 @@ namespace engine::render {
 					ResourceImageFormat::RGBA16_Float
 				);
 				break;
+			case DataCaptureChannel::ObjectIds:
+				primary(
+					core::Name("object-ids"),
+					DataCaptureScalar::UInt32,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::R32_UInt
+				);
+				break;
 			default:
 				break;
 			}
@@ -150,10 +159,13 @@ namespace engine::render {
 
 	bool Renderer::QueueDataCapture(const DataCaptureRequest &request, DataCaptureTicket &ticket) {
 		RequireOwningThread("QueueDataCapture");
+		const bool wantsObjectIds =
+			std::ranges::find(request.Channels, DataCaptureChannel::ObjectIds) != request.Channels.end();
 		if (!ValidSnapshotId(request.SnapshotId) || !request.Pipeline.IsValid() ||
 			!request.CaptureNode.IsValid() ||
 			request.TemporalHistory != DataCaptureTemporalHistory::Preserve ||
-			!UniqueChannels(request.Channels) || !ticket.ResourceTokens.empty())
+			!UniqueChannels(request.Channels) || !ticket.ResourceTokens.empty() ||
+			(wantsObjectIds && !ValidDataCaptureObjectLabels(request.ObjectLabels)))
 			return false;
 
 		DataCaptureTicket queued{
@@ -163,6 +175,7 @@ namespace engine::render {
 			.ViewSlot = request.ViewSlot,
 			.TemporalHistory = request.TemporalHistory,
 			.Channels = request.Channels,
+			.ObjectLabels = wantsObjectIds ? request.ObjectLabels : std::vector<DataCaptureObjectLabel>{},
 			.ResourceTokens = {}
 		};
 		for (const DataCaptureChannel channel : request.Channels) {
@@ -188,6 +201,7 @@ namespace engine::render {
 		DataCapturePoll poll;
 		poll.SnapshotId = ticket.SnapshotId;
 		poll.Camera = DataCaptureCameraConventions();
+		poll.ObjectLabels = ticket.ObjectLabels;
 		if (ticket.Cancelled) {
 			poll.Status = DataCaptureStatus::Cancelled;
 			return poll;

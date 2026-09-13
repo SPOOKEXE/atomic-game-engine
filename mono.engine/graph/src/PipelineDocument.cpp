@@ -958,6 +958,7 @@ namespace engine::graph {
 		resource("normal", ResourceKind::Colour, ResourceFormat::RGB10A2);
 		resource("material", ResourceKind::Colour, ResourceFormat::RGBA8);
 		resource("emissive", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("object-ids", ResourceKind::Colour, ResourceFormat::R32U);
 		resource("depth", ResourceKind::Depth, ResourceFormat::D24S8);
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
@@ -1038,6 +1039,7 @@ namespace engine::graph {
 		touches(EditKind::Writes, "normal", "normal");
 		touches(EditKind::Writes, "material", "material");
 		touches(EditKind::Writes, "emissive", "emissive");
+		touches(EditKind::Writes, "object-ids", "object-ids");
 		touches(EditKind::Writes, "depth", "depth");
 
 		node("depth-linearise", NodeScope::View);
@@ -1468,6 +1470,15 @@ namespace engine::graph {
 				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
 			);
 		}
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-object-ids"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads, .Target = core::Name("object-ids"), .Key = core::Name("source")}
+		);
 
 		return document;
 	}

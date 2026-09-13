@@ -1,8 +1,8 @@
 // Private resident instance and joint layouts, paired with InstancePacking.hpp.
 #ifndef GPU_INSTANCE_WORDS
-#define GPU_INSTANCE_WORDS 16
+#define GPU_INSTANCE_WORDS 20
 #endif
-#if GPU_INSTANCE_WORDS != 16
+#if GPU_INSTANCE_WORDS != 20
 #error GPU instance row declarations must change together
 #endif
 #ifndef GPU_JOINT_WORDS
@@ -17,6 +17,7 @@ struct InstanceRow {
 	uvec4 Rotation;
 	uvec4 ScaleAppearance;
 	uvec4 SurfaceEmissionFeatures;
+	uvec4 ObjectLabel;
 };
 layout(set = 0, binding = 0) readonly buffer InstanceRows {
 	InstanceRow rows[];
@@ -49,6 +50,10 @@ uint InstanceFeatureEnable(InstanceRow instance) {
 
 uint InstanceFeatureDisable(InstanceRow instance) {
 	return instance.SurfaceEmissionFeatures.w;
+}
+
+uint InstanceObjectLabel(InstanceRow instance) {
+	return instance.ObjectLabel.x;
 }
 
 // viewPolicy is supported bits, world-resolved defaults, camera enables and

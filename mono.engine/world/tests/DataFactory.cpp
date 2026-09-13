@@ -21,6 +21,8 @@ using engine::world::DataFactoryRenderOnlyRequest;
 using engine::world::DataFactorySession;
 using engine::world::DataFactoryStatus;
 using engine::world::DataFactoryTemporalHistory;
+using engine::world::DataFactoryWorldOperation;
+using engine::world::DataFactoryWorldRequest;
 using engine::world::Delivery;
 using engine::world::Postbox;
 using engine::world::Universe;
@@ -661,4 +663,321 @@ TEST_CASE("data-factory manual steps route each mailbox delivery once", "[world]
 	);
 	CHECK(deliveries == 1);
 	CHECK(universe.Statistics().Deliveries == 0);
+}
+
+TEST_CASE("data-factory owns create reset retire lifecycle state", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.lifecycle",
+		.Seed = 42,
+		.TickRate = 60.0,
+		.OperationId = "create-1",
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	CHECK(created.InstanceId == "factory.lifecycle");
+	CHECK(created.Clock.Tick == 0);
+	CHECK(universe.Find(Name("factory.lifecycle")).IsValid());
+	CHECK(session.CreateWorld(create).Status == DataFactoryStatus::Ok);
+	DataFactoryWorldRequest second = create;
+	second.InstanceId = "factory.lifecycle.second";
+	second.OperationId = "create-second";
+	CHECK(session.CreateWorld(second).Status == DataFactoryStatus::ResourceLimit);
+	const auto conflict = DataFactoryWorldRequest{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.lifecycle",
+		.Seed = 43,
+		.TickRate = 60.0,
+		.OperationId = "create-1",
+	};
+	CHECK(session.CreateWorld(conflict).Status == DataFactoryStatus::OperationIdConflict);
+	const DataFactoryWorldRequest staleReset{
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "factory.lifecycle",
+		.Seed = 43,
+		.TickRate = 30.0,
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick + 1,
+		.OperationId = "reset-stale",
+	};
+	CHECK(session.ResetWorld(staleReset).Status == DataFactoryStatus::VersionConflict);
+	CHECK(session.AllSystemsPaused("factory.lifecycle"));
+
+	bool externalPaused = false;
+	session.SetPauseParticipant(
+		[&externalPaused](WorldId, DataFactoryPauseScope, bool paused, std::string &) {
+			externalPaused = paused;
+			return true;
+		}
+	);
+	REQUIRE(
+		session.Pause("factory.lifecycle", DataFactoryPauseScope::AllSystems, created.Clock.Tick).Status ==
+		DataFactoryStatus::Ok
+	);
+	CHECK_FALSE(externalPaused);
+	const auto paused = session.Inspect("factory.lifecycle");
+	std::string snapshotId;
+	REQUIRE(session.Snapshot("factory.lifecycle", snapshotId).Status == DataFactoryStatus::Ok);
+	REQUIRE(session.HasCheckpoint(snapshotId));
+	DataFactoryWorldRequest reset{
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "factory.lifecycle",
+		.Seed = 43,
+		.TickRate = 30.0,
+		.ExpectedWorldEpoch = paused.WorldEpoch,
+		.ExpectedWorldVersion = paused.WorldVersion,
+		.ExpectedTick = paused.Clock.Tick,
+		.OperationId = "reset-1",
+	};
+	const auto resetReply = session.ResetWorld(reset);
+	REQUIRE(resetReply.Status == DataFactoryStatus::Ok);
+	CHECK(resetReply.Clock.Tick == 0);
+	CHECK(resetReply.WorldEpoch == paused.WorldEpoch + 1);
+	CHECK(resetReply.WorldVersion == paused.WorldVersion + 1);
+	CHECK(universe.SettingsOf(universe.Find(Name("factory.lifecycle"))).TickRate == 30.0);
+	CHECK_FALSE(session.HasCheckpoint(snapshotId));
+	CHECK(externalPaused);
+	CHECK(session.ResetWorld(reset).Status == DataFactoryStatus::Ok);
+	const auto replayedCreate = session.CreateWorld(create);
+	CHECK(replayedCreate.Status == DataFactoryStatus::Ok);
+	CHECK(replayedCreate.WorldEpoch == created.WorldEpoch);
+	CHECK(replayedCreate.WorldVersion == created.WorldVersion);
+	CHECK(universe.Find(Name("factory.lifecycle")).IsValid());
+
+	const auto afterReset = session.Inspect("factory.lifecycle");
+	REQUIRE(
+		session.Pause("factory.lifecycle", DataFactoryPauseScope::AllSystems, afterReset.Clock.Tick).Status ==
+		DataFactoryStatus::Ok
+	);
+	const auto pausedReset = session.Inspect("factory.lifecycle");
+	REQUIRE(
+		session
+			.Step(
+				"factory.lifecycle",
+				DataFactoryInterval{.NumeratorNanoseconds = 1'000'000'000, .Denominator = 30},
+				pausedReset.Clock.Tick,
+				pausedReset.WorldVersion
+			)
+			.Status == DataFactoryStatus::Ok
+	);
+	const auto finalState = session.Inspect("factory.lifecycle");
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool paused, std::string &detail) {
+		if (!paused) {
+			detail = "audio device refused resume";
+			return false;
+		}
+		return true;
+	});
+	DataFactoryWorldRequest retire{
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "factory.lifecycle",
+		.ExpectedWorldEpoch = finalState.WorldEpoch,
+		.ExpectedWorldVersion = finalState.WorldVersion,
+		.ExpectedTick = finalState.Clock.Tick,
+		.OperationId = "retire-1",
+	};
+	CHECK(session.RetireWorld(retire).Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(universe.Find(Name("factory.lifecycle")).IsValid());
+	session.SetPauseParticipant(
+		[&externalPaused](WorldId, DataFactoryPauseScope, bool paused, std::string &) {
+			externalPaused = paused;
+			return true;
+		}
+	);
+	const auto retired = session.RetireWorld(retire);
+	CHECK(retired.Status == DataFactoryStatus::Ok);
+	CHECK(retired.Tombstone);
+	CHECK(retired.InstanceId == "factory.lifecycle");
+	CHECK(retired.Clock.Tick == finalState.Clock.Tick);
+	CHECK(retired.Clock.Tick == 1);
+	CHECK(retired.WorldEpoch == finalState.WorldEpoch);
+	CHECK(retired.WorldVersion == finalState.WorldVersion + 1);
+	CHECK_FALSE(universe.Find(Name("factory.lifecycle")).IsValid());
+	CHECK_FALSE(externalPaused);
+	CHECK(session.RetireWorld(retire).Status == DataFactoryStatus::Ok);
+	const auto retiredCreateReplay = session.CreateWorld(create);
+	CHECK(retiredCreateReplay.Status == DataFactoryStatus::Ok);
+	CHECK(retiredCreateReplay.WorldEpoch == created.WorldEpoch);
+	CHECK_FALSE(universe.Find(Name("factory.lifecycle")).IsValid());
+}
+
+TEST_CASE("data-factory prepares a scratch universe before lifecycle replacement", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.transaction",
+		.Seed = 7,
+		.TickRate = 60.0,
+		.OperationId = "transaction-create",
+	};
+	REQUIRE(session.CreateWorld(create).Status == DataFactoryStatus::Ok);
+	const WorldId original = universe.Find(Name("factory.transaction"));
+	REQUIRE(original.IsValid());
+
+	bool externallyPaused = false;
+	session.SetPauseParticipant(
+		[&externallyPaused](WorldId, DataFactoryPauseScope, bool paused, std::string &) {
+			externallyPaused = paused;
+			return true;
+		}
+	);
+	REQUIRE(
+		session.Pause("factory.transaction", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	const auto paused = session.Inspect("factory.transaction");
+
+	bool stagedReset = false;
+	bool committed = false;
+	session.SetWorldLifecycle([&](DataFactoryWorldOperation operation,
+								  Universe &candidate,
+								  WorldId world,
+								  bool isCommitted,
+								  std::string &detail) {
+		if (isCommitted) {
+			committed = true;
+			return false;
+		}
+		if (operation != DataFactoryWorldOperation::Reset) return true;
+		stagedReset = &candidate != &universe && candidate.SettingsOf(world).TickRate == 30.0;
+		detail = "product setup rejected candidate";
+		return false;
+	});
+	const DataFactoryWorldRequest rejectedReset{
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "factory.transaction",
+		.Seed = 8,
+		.TickRate = 30.0,
+		.ExpectedWorldEpoch = paused.WorldEpoch,
+		.ExpectedWorldVersion = paused.WorldVersion,
+		.ExpectedTick = paused.Clock.Tick,
+		.OperationId = "transaction-reset-rejected",
+	};
+	const auto rejected = session.ResetWorld(rejectedReset);
+	CHECK(rejected.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(stagedReset);
+	CHECK_FALSE(committed);
+	CHECK(universe.Find(Name("factory.transaction")) == original);
+	CHECK(universe.SettingsOf(original).TickRate == 60.0);
+	const auto afterRejected = session.Inspect("factory.transaction");
+	CHECK(afterRejected.WorldEpoch == paused.WorldEpoch);
+	CHECK(afterRejected.WorldVersion == paused.WorldVersion);
+	CHECK(afterRejected.Clock.Tick == paused.Clock.Tick);
+	CHECK(session.AllSystemsPaused("factory.transaction"));
+	CHECK_FALSE(externallyPaused);
+
+	session.SetWorldLifecycle(
+		[&committed](DataFactoryWorldOperation, Universe &, WorldId, bool isCommitted, std::string &) {
+			if (isCommitted) committed = true;
+			return true;
+		}
+	);
+	const DataFactoryWorldRequest acceptedReset{
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "factory.transaction",
+		.Seed = 8,
+		.TickRate = 30.0,
+		.ExpectedWorldEpoch = afterRejected.WorldEpoch,
+		.ExpectedWorldVersion = afterRejected.WorldVersion,
+		.ExpectedTick = afterRejected.Clock.Tick,
+		.OperationId = "transaction-reset-accepted",
+	};
+	CHECK(session.ResetWorld(acceptedReset).Status == DataFactoryStatus::Ok);
+	CHECK(committed);
+	CHECK(universe.SettingsOf(universe.Find(Name("factory.transaction"))).TickRate == 30.0);
+}
+
+TEST_CASE("data-factory refuses create when candidate preparation fails", "[world][data-factory]") {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	bool staged = false;
+	session.SetWorldLifecycle([&](DataFactoryWorldOperation operation,
+								  Universe &candidate,
+								  WorldId world,
+								  bool committed,
+								  std::string &detail) {
+		if (committed || operation != DataFactoryWorldOperation::Create) return true;
+		staged = &candidate != &universe && world.IsValid();
+		detail = "product setup rejected candidate";
+		return false;
+	});
+	const auto reply = session.CreateWorld(
+		DataFactoryWorldRequest{
+			.Operation = DataFactoryWorldOperation::Create,
+			.InstanceId = "factory.create-rejected",
+			.Seed = 9,
+			.TickRate = 60.0,
+			.OperationId = "transaction-create-rejected",
+		}
+	);
+	CHECK(reply.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(staged);
+	CHECK_FALSE(universe.Find(Name("factory.create-rejected")).IsValid());
+	CHECK(universe.Worlds().empty());
+}
+
+TEST_CASE(
+	"data-factory retains lifecycle retries until its bounded ledger is full", "[world][data-factory]"
+) {
+	Universe universe;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "factory.ledger",
+		.TickRate = 60.0,
+		.OperationId = "ledger-create",
+	};
+	REQUIRE(session.CreateWorld(create).Status == DataFactoryStatus::Ok);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	for (size_t index = 0; index < 255; ++index) {
+		const auto before = session.Inspect("factory.ledger");
+		REQUIRE(
+			session.Pause("factory.ledger", DataFactoryPauseScope::AllSystems, before.Clock.Tick).Status ==
+			DataFactoryStatus::Ok
+		);
+		CHECK(
+			session
+				.ResetWorld(
+					DataFactoryWorldRequest{
+						.Operation = DataFactoryWorldOperation::Reset,
+						.InstanceId = "factory.ledger",
+						.TickRate = 60.0,
+						.ExpectedWorldEpoch = before.WorldEpoch,
+						.ExpectedWorldVersion = before.WorldVersion,
+						.ExpectedTick = before.Clock.Tick,
+						.OperationId = "ledger-reset-" + std::to_string(index),
+					}
+				)
+				.Status == DataFactoryStatus::Ok
+		);
+	}
+	const auto full = session.Inspect("factory.ledger");
+	REQUIRE(
+		session.Pause("factory.ledger", DataFactoryPauseScope::AllSystems, full.Clock.Tick).Status ==
+		DataFactoryStatus::Ok
+	);
+	CHECK(
+		session
+			.ResetWorld(
+				DataFactoryWorldRequest{
+					.Operation = DataFactoryWorldOperation::Reset,
+					.InstanceId = "factory.ledger",
+					.TickRate = 60.0,
+					.ExpectedWorldEpoch = full.WorldEpoch,
+					.ExpectedWorldVersion = full.WorldVersion,
+					.ExpectedTick = full.Clock.Tick,
+					.OperationId = "ledger-overflow",
+				}
+			)
+			.Status == DataFactoryStatus::ResourceLimit
+	);
+	CHECK(session.Inspect("factory.ledger").WorldVersion == full.WorldVersion);
 }

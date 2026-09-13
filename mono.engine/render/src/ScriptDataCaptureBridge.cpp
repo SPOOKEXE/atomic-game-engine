@@ -24,6 +24,7 @@ namespace engine::render {
 			if (name == "pbr_albedo") return DataCaptureChannel::PbrAlbedo;
 			if (name == "pbr_material") return DataCaptureChannel::PbrMaterial;
 			if (name == "pbr_emissive") return DataCaptureChannel::PbrEmissive;
+			if (name == "object_ids") return DataCaptureChannel::ObjectIds;
 			return std::nullopt;
 		}
 
@@ -67,6 +68,8 @@ namespace engine::render {
 				return "float16";
 			case DataCaptureScalar::Float32:
 				return "float32";
+			case DataCaptureScalar::UInt32:
+				return "uint32";
 			case DataCaptureScalar::UNorm8:
 				return "unorm8";
 			case DataCaptureScalar::UNorm10A2:
@@ -145,7 +148,8 @@ namespace engine::render {
 				 "shading_normal",
 				 "pbr_albedo",
 				 "pbr_material",
-				 "pbr_emissive"},
+				 "pbr_emissive",
+				 "object_ids"},
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
 		};
@@ -263,6 +267,34 @@ namespace engine::render {
 			found->second.CancelRequested = true;
 	}
 
+	bool ScriptDataCaptureBridge::TeardownInstance(std::string_view instanceId, std::string &detail) {
+		if (!Text(instanceId)) {
+			detail = "invalid capture instance";
+			return false;
+		}
+		std::vector<DataCaptureTicket> tickets;
+		{
+			std::lock_guard lock(Mutex);
+			for (auto entry = Entries.begin(); entry != Entries.end();) {
+				if (entry->second.Request.InstanceId != instanceId) {
+					++entry;
+					continue;
+				}
+				if (auto owner = OwnerTickets.find(entry->first); owner != OwnerTickets.end()) {
+					tickets.push_back(std::move(owner->second));
+					OwnerTickets.erase(owner);
+				}
+				for (const auto &[resource, bytes] : entry->second.PlaneBytes)
+					RetainedBytes -= bytes.size();
+				entry = Entries.erase(entry);
+			}
+		}
+		for (DataCaptureTicket &ticket : tickets)
+			RendererRef.CancelDataCapture(ticket);
+		detail.clear();
+		return true;
+	}
+
 	void ScriptDataCaptureBridge::PrepareView(View &view) {
 		RefreshCapabilities();
 		std::vector<PendingRequest> pending;
@@ -318,6 +350,7 @@ namespace engine::render {
 				.CaptureNode = core::Name(pendingRequest.Request.CaptureNode),
 				.ViewSlot = view.Slot,
 				.Channels = {},
+				.ObjectLabels = {view.ObjectLabels.begin(), view.ObjectLabels.end()},
 			};
 			for (const std::string &name : pendingRequest.Request.Channels) {
 				const auto channel = Channel(name);
@@ -335,6 +368,19 @@ namespace engine::render {
 				request.Channels.push_back(*channel);
 			}
 			if (request.Channels.size() != pendingRequest.Request.Channels.size()) continue;
+			const bool wantsObjectIds =
+				std::ranges::find(request.Channels, DataCaptureChannel::ObjectIds) != request.Channels.end();
+			if (wantsObjectIds && !view.ObjectLabelsValid) {
+				std::lock_guard lock(Mutex);
+				if (auto entry = Entries.find(pendingRequest.Id); entry != Entries.end()) {
+					entry->second.Reply.Status = "invalid";
+					entry->second.Reply.SnapshotId = pendingRequest.Request.SnapshotId;
+					entry->second.Detail = "object ids require unique bounded DataFactoryId values";
+					entry->second.Terminal = true;
+					entry->second.Preparing = false;
+				}
+				continue;
+			}
 			DataCaptureTicket rendererTicket;
 			const bool queued = RendererRef.QueueDataCapture(request, rendererTicket);
 			bool cancel = false;
@@ -406,6 +452,10 @@ namespace engine::render {
 			reply.Status = Status(captured.Status);
 			reply.SnapshotId = captured.SnapshotId;
 			reply.CaptureFrame = captured.CaptureFrame;
+			if (std::ranges::find(ticket.second.Channels, DataCaptureChannel::ObjectIds) !=
+				ticket.second.Channels.end())
+				for (const DataCaptureObjectLabel &label : captured.ObjectLabels)
+					reply.ObjectLabels.push_back({label.Label, label.StableId});
 			if (captured.Status == DataCaptureStatus::Ready || captured.Status == DataCaptureStatus::Partial)
 				CopyCamera(captured, reply);
 			std::unordered_map<std::string, std::vector<std::byte>> bytes;

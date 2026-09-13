@@ -119,11 +119,13 @@ namespace engine::render {
 		uint32_t Emission = PackEmission(core::Color3{1.0f, 1.0f, 1.0f}, 1.0f);
 		uint32_t FeatureEnable = 0;
 		uint32_t FeatureDisable = 0;
+		uint32_t ObjectLabel = 0;
+		uint32_t LabelReserved[3]{};
 	};
 
 	// The resources build reads these strides for instance.glsl's layout guards.
 	// Occlusion compacts slot indices; it does not copy these resident rows.
-	inline constexpr size_t GPU_INSTANCE_WORDS = 16;
+	inline constexpr size_t GPU_INSTANCE_WORDS = 20;
 	inline constexpr size_t GPU_JOINT_WORDS = 7;
 
 	// Both word strides are passed to the shader by the resources build.
@@ -230,6 +232,7 @@ namespace engine::render {
 		gpu.Emission = PackEmission(instance.EmissiveTint, instance.EmissiveStrength);
 		gpu.FeatureEnable = instance.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
 		gpu.FeatureDisable = instance.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
+		gpu.ObjectLabel = instance.ObjectLabel;
 		return gpu;
 	}
 }

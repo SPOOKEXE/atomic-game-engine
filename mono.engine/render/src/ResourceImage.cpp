@@ -162,8 +162,24 @@ namespace engine::render {
 							portsValid = false;
 					}
 				}
-				declared = portsValid && colour == 1 && depth <= 1 && normal <= 1 && response == normal &&
-						   baseline == normal && directional <= normal && (normal == 0 || depth == 1) &&
+				bool hasProducer = false;
+				for (uint32_t writerIndex = 1;
+					 writerIndex <= pipeline->Graph.Count() && node->Reads.size() == 1;
+					 ++writerIndex) {
+					const graph::Node *writer = pipeline->Graph.Find(graph::NodeId{writerIndex});
+					if (writer != nullptr && writer->Enabled &&
+						std::find(writer->Writes.begin(), writer->Writes.end(), node->Reads.front()) !=
+							writer->Writes.end()) {
+						hasProducer = true;
+						break;
+					}
+				}
+				const graph::ResourceDesc *source =
+					node->Reads.size() == 1 ? pipeline->Graph.FindResource(node->Reads.front()) : nullptr;
+				const bool objectIds = source != nullptr && source->Name == core::Name("object-ids");
+				declared = (!objectIds || hasProducer) && portsValid && colour == 1 && depth <= 1 &&
+						   normal <= 1 && response == normal && baseline == normal && directional <= normal &&
+						   (normal == 0 || depth == 1) &&
 						   (node->Scope == graph::NodeScope::View ||
 							(node->Scope == graph::NodeScope::Frame &&
 							 node->Integer(core::Name("view"), 0) == request.ViewSlot));
@@ -385,6 +401,10 @@ namespace engine::render {
 				return true;
 			case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
 				captured = ResourceImageFormat::RGBA8_SRGB;
+				bytes = 4;
+				return true;
+			case SDL_GPU_TEXTUREFORMAT_R32_UINT:
+				captured = ResourceImageFormat::R32_UInt;
 				bytes = 4;
 				return true;
 			default:

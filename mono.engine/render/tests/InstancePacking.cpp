@@ -343,7 +343,7 @@ TEST_CASE("alpha mode and cutoff share one pinned resident word", "[render][inst
 }
 
 TEST_CASE("the instance row matches four shader vectors", "[render][instancepacking]") {
-	static_assert(sizeof(GpuInstance) == 64);
+	static_assert(sizeof(GpuInstance) == 80);
 	static_assert(alignof(GpuInstance) == 16);
 	CHECK(sizeof(GpuInstance) / sizeof(uint32_t) == engine::render::GPU_INSTANCE_WORDS);
 	CHECK(offsetof(GpuInstance, Position) == 0);

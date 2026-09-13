@@ -284,6 +284,10 @@ namespace engine::scene {
 		// and makes visibility a separate index stream.
 		uint64_t Source = 0;
 
+		// Snapshot-local data-capture label. Zero is background or an entity
+		// without an authored DataFactoryId.
+		uint32_t ObjectLabel = 0;
+
 		// Which synthetic form of `Source` this row is, or zero for the entity
 		// itself. A portal half uses the pane entity, so the original and its copy
 		// can both be resident without claiming the same slot.

@@ -1,6 +1,7 @@
 // Device-free checks for the shared world-to-renderer presentation boundary.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
@@ -286,6 +287,74 @@ TEST_CASE("fully transparent parts never enter the resident draw list", "[render
 	CHECK(drawList->Instances[0].SkinFirst == 0);
 	CHECK(drawList->Instances[0].SkinCount == 0);
 	CHECK(drawList->JointFrames.empty());
+}
+
+TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][presentation]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("object-labels");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	const auto part = [&](std::string id) {
+		const auto entity = engine::scene::MakePart(store, engine::scene::PartDesc{});
+		REQUIRE(store.SetParent(entity, workspace));
+		engine::ecs::AttributeValue value;
+		value.Type = engine::ecs::PropertyType::String;
+		value.String = std::move(id);
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryId"), value));
+		return entity;
+	};
+	const auto later = part("zeta");
+	const auto earlier = part("alpha");
+	REQUIRE(engine::scene::SyncRendered(store) == 2);
+	engine::render::CollectInstances(store);
+	const auto *draw = store.Resource<engine::render::DrawList>();
+	REQUIRE(draw != nullptr);
+	REQUIRE(draw->ObjectLabels.size() == 2);
+	CHECK(draw->ObjectLabels[0].Label == 1);
+	CHECK(draw->ObjectLabels[0].StableId == "alpha");
+	CHECK(draw->ObjectLabels[1].Label == 2);
+	CHECK(draw->ObjectLabels[1].StableId == "zeta");
+	for (const auto &instance : draw->Instances) {
+		if (instance.Source == earlier.Id) CHECK(instance.ObjectLabel == 1);
+		if (instance.Source == later.Id) CHECK(instance.ObjectLabel == 2);
+	}
+
+	// Attribute writes do not change the drawable shape. The reusable draw-list
+	// path must still refresh labels because an id-only edit changes object-id pixels.
+	engine::ecs::AttributeValue changed;
+	changed.Type = engine::ecs::PropertyType::String;
+	changed.String = "aardvark";
+	REQUIRE(engine::ecs::SetAttribute(store, later, Name("DataFactoryId"), changed));
+	engine::render::CollectInstances(store);
+	REQUIRE(draw->ObjectLabels.size() == 2);
+	CHECK(draw->ObjectLabels[0].StableId == "aardvark");
+	for (const auto &instance : draw->Instances)
+		if (instance.Source == later.Id) CHECK(instance.ObjectLabel == 1);
+}
+
+TEST_CASE("ambiguous data-factory ids refuse an object label table", "[render][presentation]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("duplicate-object-labels");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	for (size_t index = 0; index < 2; ++index) {
+		const auto entity = engine::scene::MakePart(store, engine::scene::PartDesc{});
+		REQUIRE(store.SetParent(entity, workspace));
+		engine::ecs::AttributeValue value;
+		value.Type = engine::ecs::PropertyType::String;
+		value.String = "same";
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryId"), value));
+	}
+	REQUIRE(engine::scene::SyncRendered(store) == 2);
+	engine::render::CollectInstances(store);
+	const auto *draw = store.Resource<engine::render::DrawList>();
+	REQUIRE(draw != nullptr);
+	CHECK_FALSE(draw->ObjectLabelsValid);
+	CHECK(draw->ObjectLabels.empty());
+	for (const auto &instance : draw->Instances)
+		CHECK(instance.ObjectLabel == 0);
 }
 
 TEST_CASE("irrelevant transform writes do not hide visible source changes", "[render][presentation][cache]") {

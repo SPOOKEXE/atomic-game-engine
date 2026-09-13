@@ -29,7 +29,7 @@ namespace engine::render {
 	enum class ResourceImageKind : uint8_t { Colour, DirectionalShadow };
 	// Native texture storage copied for a colour capture. Consumers must inspect
 	// this before assigning scalar or colour-space semantics to Pixels.
-	enum class ResourceImageFormat : uint8_t { Unknown, RGBA8_UNorm, RGBA8_SRGB, RGBA16_Float };
+	enum class ResourceImageFormat : uint8_t { Unknown, RGBA8_UNorm, RGBA8_SRGB, RGBA16_Float, R32_UInt };
 	// Transfer allocations retained by all capture slots share this bound.
 	inline constexpr size_t MAX_RESOURCE_IMAGE_STAGING_BYTES = 32 * 1024 * 1024;
 	struct ResourceShadowCapture {

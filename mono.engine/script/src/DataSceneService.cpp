@@ -890,6 +890,14 @@ namespace engine::script {
 				{"planes", Array(std::move(planes))},
 				{"detail", String(detail)},
 			};
+			std::vector<ScriptValue> labels;
+			labels.reserve(poll.ObjectLabels.size());
+			for (const DataCaptureBridgeObjectLabel &label : poll.ObjectLabels) {
+				labels.push_back(
+					Map({{"label", Number(label.Label)}, {"stable_id", String(label.StableId)}})
+				);
+			}
+			entries.emplace_back("object_labels", Array(std::move(labels)));
 			if (poll.HasCamera) {
 				std::vector<std::pair<std::string, ScriptValue>> camera{
 					{"world_from_camera", Matrix(poll.WorldFromCamera)},

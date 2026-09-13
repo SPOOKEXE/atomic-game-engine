@@ -11,6 +11,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/render/DataCapture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -51,6 +52,8 @@ namespace engine::render {
 	struct DrawList {
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
+		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		bool ObjectLabelsValid = true;
 
 		// Joint transforms for those instances, flattened into one allocation.
 		std::vector<core::CFrame> JointFrames;

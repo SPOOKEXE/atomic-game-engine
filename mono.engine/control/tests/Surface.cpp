@@ -953,6 +953,110 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"data-factory world lifecycle tools publish and enforce their exact contract", "[control][data-factory]"
+) {
+	Universe universe;
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+
+	const json listed = Ask(surface, "tools/list");
+	for (const char *name : {"world_create", "world_reset", "world_retire"}) {
+		const auto tool = std::find_if(
+			listed["result"]["tools"].begin(), listed["result"]["tools"].end(), [name](const json &row) {
+				return row["name"] == name;
+			}
+		);
+		REQUIRE(tool != listed["result"]["tools"].end());
+		const json &schema = tool->at("inputSchema");
+		CHECK(schema.at("additionalProperties") == false);
+		CHECK(schema.at("properties").contains("instance_id"));
+		CHECK(schema.at("properties").contains("operation_id"));
+		if (std::string_view(name) != "world_retire") {
+			CHECK(schema.at("properties").contains("seed"));
+			CHECK(schema.at("properties").contains("tick_rate"));
+		}
+	}
+
+	const json create{
+		{"instance_id", "control-factory-owned"},
+		{"seed", 7u},
+		{"tick_rate", 60.0},
+		{"operation_id", "create-owned"},
+	};
+	bool failed = false;
+	json malformed = create;
+	malformed["unknown"] = true;
+	Called(surface, "world_create", malformed, failed);
+	CHECK(failed);
+	malformed = create;
+	malformed["tick_rate"] = 0.0;
+	Called(surface, "world_create", malformed, failed);
+	CHECK(failed);
+	const json created = Called(surface, "world_create", create);
+	CHECK(created["status"] == "ok");
+	CHECK(created["instance_id"] == "control-factory-owned");
+	CHECK(created["tick"] == 0);
+	CHECK_FALSE(created.contains("tombstone"));
+	const json paused = Called(
+		surface,
+		"pause",
+		json{
+			{"instance_id", "control-factory-owned"},
+			{"expected_tick", created["tick"]},
+			{"expected_world_epoch", created["world_epoch"]},
+			{"expected_world_version", created["world_version"]}
+		}
+	);
+	const json reset = Called(
+		surface,
+		"world_reset",
+		json{
+			{"instance_id", "control-factory-owned"},
+			{"seed", 8u},
+			{"tick_rate", 30.0},
+			{"expected_tick", paused["tick"]},
+			{"expected_world_epoch", paused["world_epoch"]},
+			{"expected_world_version", paused["world_version"]},
+			{"operation_id", "reset-owned"}
+		}
+	);
+	CHECK(reset["status"] == "ok");
+	CHECK(reset["tick"] == 0);
+	CHECK(reset["world_epoch"] == paused["world_epoch"].get<uint64_t>() + 1);
+	CHECK(reset["world_version"] == paused["world_version"].get<uint64_t>() + 1);
+	CHECK_FALSE(reset.contains("tombstone"));
+	const json resetPaused = Called(
+		surface,
+		"pause",
+		json{
+			{"instance_id", "control-factory-owned"},
+			{"expected_tick", reset["tick"]},
+			{"expected_world_epoch", reset["world_epoch"]},
+			{"expected_world_version", reset["world_version"]}
+		}
+	);
+	const json retired = Called(
+		surface,
+		"world_retire",
+		json{
+			{"instance_id", "control-factory-owned"},
+			{"expected_tick", resetPaused["tick"]},
+			{"expected_world_epoch", resetPaused["world_epoch"]},
+			{"expected_world_version", resetPaused["world_version"]},
+			{"operation_id", "retire-owned"}
+		}
+	);
+	CHECK(retired["status"] == "ok");
+	CHECK(retired["tombstone"] == true);
+	CHECK(retired["world_epoch"] == resetPaused["world_epoch"]);
+	CHECK(retired["world_version"] == resetPaused["world_version"].get<uint64_t>() + 1);
+}
+
+TEST_CASE(
 	"data-factory render-only MCP tools distinguish pending from submitted", "[control][data-factory]"
 ) {
 	Universe universe;

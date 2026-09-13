@@ -720,16 +720,17 @@ namespace engine::render {
 			HdrWireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
 		}
 
-		SDL_GPUColorTargetDescription gbufferTargets[4]{};
+		SDL_GPUColorTargetDescription gbufferTargets[5]{};
 		gbufferTargets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
 		gbufferTargets[1].format = SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
 		gbufferTargets[2].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		gbufferTargets[3].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		gbufferTargets[4].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
 
 		SDL_GPUGraphicsPipelineCreateInfo gbuffer = opaque;
 		gbuffer.fragment_shader = gbufferFragment;
 		gbuffer.target_info.color_target_descriptions = gbufferTargets;
-		gbuffer.target_info.num_color_targets = 4;
+		gbuffer.target_info.num_color_targets = 5;
 		if (pbrSupported) {
 			GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
 			if (GBufferPipeline == nullptr) {

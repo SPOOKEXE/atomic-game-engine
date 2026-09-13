@@ -23,6 +23,27 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::OpticalFlow)) == "optical_flow");
 }
 
+TEST_CASE("object label sidecars require bounded UTF-8 labels", "[render][data-capture]") {
+	std::vector<DataCaptureObjectLabel> labels{{1, "alpha"}};
+	CHECK(ValidDataCaptureObjectLabels(labels));
+	labels[0].StableId = std::string{"\xC0\x80", 2};
+	CHECK_FALSE(ValidDataCaptureObjectLabels(labels));
+
+	labels.assign(MAX_DATA_CAPTURE_OBJECT_LABELS + 1, {});
+	for (size_t index = 0; index < labels.size(); ++index) {
+		labels[index].Label = static_cast<uint32_t>(index + 1);
+		labels[index].StableId = "a";
+	}
+	CHECK_FALSE(ValidDataCaptureObjectLabels(labels));
+
+	labels.assign(MAX_DATA_CAPTURE_OBJECT_LABEL_BYTES / 256 + 1, {});
+	for (size_t index = 0; index < labels.size(); ++index) {
+		labels[index].Label = static_cast<uint32_t>(index + 1);
+		labels[index].StableId.assign(256, 'a');
+	}
+	CHECK_FALSE(ValidDataCaptureObjectLabels(labels));
+}
+
 TEST_CASE(
 	"frame result keeps headless command submission separate from presentation", "[render][data-capture]"
 ) {
@@ -51,6 +72,7 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 		.Pipeline = engine::core::Name("capture-pipeline"),
 		.CaptureNode = engine::core::Name("capture"),
 		.Channels = {DataCaptureChannel::RgbLinearHdr},
+		.ObjectLabels = {},
 		.TemporalHistory = DataCaptureTemporalHistory::Reset,
 	};
 	DataCaptureTicket ticket;
@@ -156,7 +178,7 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 	malformed.CaptureNode = std::string("capture\0node", 12);
 	CHECK_FALSE(first.Queue("data-world", malformed, ticket, detail));
 	malformed = Request();
-	malformed.Channels = {"object_ids"};
+	malformed.Channels = {"semantic_mask"};
 	CHECK_FALSE(first.Queue("data-world", malformed, ticket, detail));
 	CHECK_FALSE(first.Queue("another-world", Request(), ticket, detail));
 
@@ -221,4 +243,23 @@ TEST_CASE("script capture reuses capacity after sequential terminal releases", "
 		CHECK_FALSE(bridge.ReadPlane("data-world", ticket, "capture/invalid", 0, 16, bytes, detail));
 		REQUIRE(bridge.Release("data-world", ticket, detail));
 	}
+}
+
+TEST_CASE("script capture tears down one instance without touching another", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t retiring = 0;
+	uint64_t retained = 0;
+	REQUIRE(bridge.Queue("retiring-world", Request("retiring-world"), retiring, detail));
+	REQUIRE(bridge.Queue("retained-world", Request("retained-world"), retained, detail));
+	REQUIRE(bridge.TeardownInstance("retiring-world", detail));
+	engine::script::DataCaptureBridgePoll reply;
+	CHECK_FALSE(bridge.Poll("retiring-world", retiring, reply, detail));
+	CHECK(bridge.Poll("retained-world", retained, reply, detail));
+	uint64_t replacement = 0;
+	CHECK(bridge.Queue("retiring-world", Request("retiring-world"), replacement, detail));
+	CHECK_FALSE(bridge.TeardownInstance("", detail));
 }

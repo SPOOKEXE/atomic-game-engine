@@ -292,6 +292,12 @@ namespace engine::control {
 			}
 		}
 
+		inline json WorldReply(const world::DataFactoryReply &reply, bool retired) {
+			json result = Reply(reply);
+			if (retired) result["tombstone"] = reply.Tombstone;
+			return result;
+		}
+
 		inline json Schema(
 			std::initializer_list<std::string_view> optional, std::initializer_list<std::string_view> required
 		) {
@@ -301,6 +307,8 @@ namespace engine::control {
 				{"expected_world_epoch", {{"type", "integer"}, {"minimum", 0}}},
 				{"expected_world_version", {{"type", "integer"}, {"minimum", 0}}},
 				{"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+				{"seed", {{"type", "integer"}, {"minimum", 0}}},
+				{"tick_rate", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 1000}}},
 				{"checkpoint_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"temporal_history", {{"type", "string"}, {"enum", {"preserve"}}}},
@@ -387,6 +395,129 @@ namespace engine::control {
 				data_factory_detail::Store(*ledger, request.OperationId, normalized.dump(), result, failure);
 			return result;
 		};
+		auto worldTool = [&session](
+							 std::string name,
+							 std::string description,
+							 bool revisionRequired,
+							 bool settingsRequired,
+							 bool retired,
+							 auto operation
+						 ) {
+			return Tool{
+				std::move(name),
+				std::move(description),
+				[revisionRequired, settingsRequired] {
+					if (!settingsRequired)
+						return Schema(
+							{"instance_id",
+							 "expected_tick",
+							 "expected_world_epoch",
+							 "expected_world_version",
+							 "operation_id"},
+							{"instance_id",
+							 "expected_tick",
+							 "expected_world_epoch",
+							 "expected_world_version",
+							 "operation_id"}
+						);
+					return revisionRequired ? Schema(
+												  {"instance_id",
+												   "seed",
+												   "tick_rate",
+												   "expected_tick",
+												   "expected_world_epoch",
+												   "expected_world_version",
+												   "operation_id"},
+												  {"instance_id",
+												   "seed",
+												   "tick_rate",
+												   "expected_tick",
+												   "expected_world_epoch",
+												   "expected_world_version",
+												   "operation_id"}
+											  )
+											: Schema(
+												  {"instance_id", "seed", "tick_rate", "operation_id"},
+												  {"instance_id", "seed", "tick_rate", "operation_id"}
+											  );
+				},
+				[&session, revisionRequired, settingsRequired, retired, operation](
+					const json &values, std::string &failure
+				) -> json {
+					if (!values.is_object()) {
+						failure = Error("validation_failed", "arguments must be an object");
+						return nullptr;
+					}
+					const auto allowed =
+						settingsRequired
+							? std::initializer_list<
+								  std::
+									  string_view>{"instance_id", "seed", "tick_rate", "expected_tick", "expected_world_epoch", "expected_world_version", "operation_id"}
+							: std::initializer_list<std::string_view>{
+								  "instance_id",
+								  "expected_tick",
+								  "expected_world_epoch",
+								  "expected_world_version",
+								  "operation_id"
+							  };
+					if (!Only(values, allowed, failure)) return nullptr;
+					world::DataFactoryWorldRequest request;
+					const json *field = nullptr;
+					if (!Field(values, "instance_id", field, failure) ||
+						!Text(*field, "instance_id", request.InstanceId, failure) ||
+						(settingsRequired &&
+						 (!Field(values, "seed", field, failure) ||
+						  !UInt(*field, "seed", request.Seed, failure) ||
+						  !Field(values, "tick_rate", field, failure) || !field->is_number() ||
+						  !std::isfinite(request.TickRate = field->get<double>()) ||
+						  request.TickRate <= 0.0 || request.TickRate > 1000.0)) ||
+						!Field(values, "operation_id", field, failure) ||
+						!Text(*field, "operation_id", request.OperationId, failure)) {
+						if (failure.empty())
+							failure =
+								Error("validation_failed", "tick_rate must be finite and between 0 and 1000");
+						return nullptr;
+					}
+					if (revisionRequired &&
+						(!Field(values, "expected_world_epoch", field, failure) ||
+						 !UInt(*field, "expected_world_epoch", request.ExpectedWorldEpoch, failure) ||
+						 !Field(values, "expected_tick", field, failure) ||
+						 !UInt(*field, "expected_tick", request.ExpectedTick, failure) ||
+						 !Field(values, "expected_world_version", field, failure) ||
+						 !UInt(*field, "expected_world_version", request.ExpectedWorldVersion, failure)))
+						return nullptr;
+					const auto reply = (session.*operation)(request);
+					json result = WorldReply(reply, retired);
+					if (reply.Status != world::DataFactoryStatus::Ok)
+						failure = Error(world::Describe(reply.Status), reply.Detail);
+					return result;
+				}
+			};
+		};
+		Add(worldTool(
+			"world_create",
+			"Creates one factory-owned local world in this Universe.",
+			false,
+			true,
+			false,
+			&world::DataFactorySession::CreateWorld
+		));
+		Add(worldTool(
+			"world_reset",
+			"Resets one factory-owned local world after an all-systems pause.",
+			true,
+			true,
+			false,
+			&world::DataFactorySession::ResetWorld
+		));
+		Add(worldTool(
+			"world_retire",
+			"Retires one factory-owned local world after an all-systems pause and returns a tombstone.",
+			true,
+			false,
+			true,
+			&world::DataFactorySession::RetireWorld
+		));
 
 		Add(Tool{
 			"lifecycle_inspect",

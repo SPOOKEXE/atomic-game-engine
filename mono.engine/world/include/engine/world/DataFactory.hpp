@@ -28,6 +28,7 @@ namespace engine::world {
 		Ok,
 		Unsupported,
 		ValidationFailed,
+		OperationIdConflict,
 		VersionConflict,
 		StaleSnapshot,
 		NotPaused,
@@ -67,6 +68,22 @@ namespace engine::world {
 		uint64_t WorldEpoch = 0;
 		uint64_t WorldVersion = 0;
 		DataFactoryClock Clock;
+		bool Tombstone = false;
+	};
+
+	enum class DataFactoryWorldOperation : uint8_t { Create, Reset, Retire };
+
+	struct DataFactoryWorldRequest {
+		DataFactoryWorldOperation Operation = DataFactoryWorldOperation::Create;
+		std::string InstanceId;
+		// Episode metadata is retained for a later package or manifest. WorldSettings
+		// intentionally has no seed because it does not own product random sources.
+		uint64_t Seed = 0;
+		double TickRate = 60.0;
+		uint64_t ExpectedWorldEpoch = 0;
+		uint64_t ExpectedWorldVersion = 0;
+		uint64_t ExpectedTick = 0;
+		std::string OperationId;
 	};
 
 	// A value-only request crosses from the shared world layer to the host that
@@ -115,6 +132,17 @@ namespace engine::world {
 	using DataFactoryPauseParticipant =
 		std::function<bool(WorldId world, DataFactoryPauseScope scope, bool paused, std::string &)>;
 
+	// Product-owned state is prepared against the candidate before replacement.
+	// A false pre-commit result refuses the operation with the live universe
+	// intact. The committed call is notification only and must not fail.
+	using DataFactoryWorldLifecycle = std::function<bool(
+		DataFactoryWorldOperation operation,
+		Universe &universe,
+		WorldId world,
+		bool committed,
+		std::string &detail
+	)>;
+
 	// Presentation is owned by the product. The callback starts exactly one
 	// render-only frame for a request already proven to name the live paused
 	// snapshot. Deferred image readback remains owned by the renderer ticket.
@@ -153,6 +181,7 @@ namespace engine::world {
 
 		void SetRehydrate(DataFactoryRehydrate rehydrate);
 		void SetPauseParticipant(DataFactoryPauseParticipant participant);
+		void SetWorldLifecycle(DataFactoryWorldLifecycle lifecycle);
 		void SetInterventionExecutor(DataFactoryInterventionExecutor executor);
 		void SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter);
 
@@ -194,6 +223,9 @@ namespace engine::world {
 		// atomic mutation against the live, all-systems-paused world.
 		DataFactoryReply
 		CommitExternalMutation(std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion);
+		DataFactoryReply CreateWorld(const DataFactoryWorldRequest &request);
+		DataFactoryReply ResetWorld(const DataFactoryWorldRequest &request);
+		DataFactoryReply RetireWorld(const DataFactoryWorldRequest &request);
 		DataFactoryReply ApplyIntervention(
 			std::string_view instanceId,
 			std::string_view baseSnapshotId,
@@ -204,6 +236,8 @@ namespace engine::world {
 		bool SupportsIntervention() const;
 
 		bool HasCheckpoint(std::string_view checkpointId) const;
+		// Product hosts use this to distinguish an MCP-owned world from a compatibility world.
+		bool OwnsWorld(std::string_view instanceId) const;
 
 	  private:
 		struct PauseState {
@@ -230,6 +264,8 @@ namespace engine::world {
 		void FinishRenderOnly(PauseState &state, DataFactoryRenderOnlyReply reply);
 		void StoreRenderOnlyTerminal(DataFactoryRenderOnlyReply reply);
 		void Store(DataFactoryCheckpoint checkpoint);
+		DataFactoryReply WorldOperation(const DataFactoryWorldRequest &request);
+		void InvalidateWorldState(std::string_view instanceId);
 
 		Universe &Worlds;
 		size_t Limit = 0;
@@ -240,8 +276,20 @@ namespace engine::world {
 		uint64_t NextRenderOnly = 1;
 		DataFactoryRehydrate Rehydrate;
 		DataFactoryPauseParticipant Participant;
+		DataFactoryWorldLifecycle WorldLifecycle;
 		DataFactoryInterventionExecutor InterventionExecutor;
 		DataFactoryRenderOnlyPresenter Presenter;
+		struct OwnedWorld {
+			// Retain episode metadata beside ownership until package manifests carry it.
+			uint64_t Seed = 0;
+			double TickRate = 60.0;
+		};
+		struct WorldOperationRecord {
+			DataFactoryWorldRequest Request;
+			DataFactoryReply Reply;
+		};
+		std::unordered_map<std::string, WorldOperationRecord> WorldOperations;
+		std::unordered_map<std::string, OwnedWorld> OwnedWorlds;
 		std::unordered_map<std::string, PauseState> Paused;
 		std::unordered_map<uint64_t, DataFactoryRenderOnlyReply> RenderOnlyTerminals;
 		std::deque<uint64_t> RenderOnlyTerminalOrder;

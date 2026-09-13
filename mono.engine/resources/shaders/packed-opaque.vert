@@ -8,7 +8,8 @@ layout(set = 1, binding = 0) uniform Frame {
 	mat4 ViewProjection;
 	mat4 LightViewProjection;
 	mat4 SurfaceViewProjection;
-} frame;
+}
+frame;
 
 layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec4 outColour;
@@ -20,6 +21,7 @@ layout(location = 6) flat out uint outAppearance;
 layout(location = 7) flat out vec3 outSurfaceColour;
 layout(location = 8) flat out vec4 outEmission;
 layout(location = 9) flat out uvec2 outFeaturePolicy;
+layout(location = 10) flat out uint outObjectLabel;
 
 void main() {
 	InstanceRow instance = LoadInstance();
@@ -35,6 +37,7 @@ void main() {
 	outSurfaceColour = InstanceSurfaceColour(instance);
 	outEmission = InstanceEmission(instance);
 	outFeaturePolicy = uvec2(InstanceFeatureEnable(instance), InstanceFeatureDisable(instance));
+	outObjectLabel = InstanceObjectLabel(instance);
 	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
 	outWorldPosition = world.xyz;
 	outLightPosition = frame.LightViewProjection * world;

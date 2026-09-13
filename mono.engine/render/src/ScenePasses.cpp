@@ -914,6 +914,14 @@ namespace engine::render {
 				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 			};
 		}
+		if (role == Impl::ResourceRole::ObjectIds) {
+			return Impl::NamedTexture{
+				slotPbr.ObjectIds,
+				slotPbr.Dimensions.TargetWidth,
+				slotPbr.Dimensions.TargetHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_UINT,
+			};
+		}
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return Impl::NamedTexture{
 				slotPbr.LinearDepth,

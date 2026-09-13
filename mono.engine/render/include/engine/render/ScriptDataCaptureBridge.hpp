@@ -32,6 +32,8 @@ namespace engine::render {
 		) override;
 		bool Release(std::string_view, uint64_t, std::string &) override;
 		void Cancel(std::string_view, uint64_t) override;
+		// Releases every terminal payload and cancels every renderer ticket for one world.
+		bool TeardownInstance(std::string_view instanceId, std::string &detail);
 		void PrepareView(View &view);
 		void Pump();
 		bool HasPending() const;

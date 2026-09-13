@@ -301,7 +301,7 @@ TEST_CASE("a reply larger than one read still arrives whole", "[mcpbridge]") {
 TEST_CASE("the bridge says which command would have opened the port", "[mcpbridge]") {
 	// Nothing is listening on this one: `Start(0)` bound a port, and stopping
 	// releases it. The ordinary case rather than a fault - a client launches the
-	// bridge when it starts and the editor is started by a person - so the
+	// bridge when it starts and the engine host is started by a person, so the
 	// message has to name the command that fixes it.
 	uint16_t closed = 0;
 	{
@@ -319,7 +319,7 @@ TEST_CASE("the bridge says which command would have opened the port", "[mcpbridg
 	REQUIRE(ran.Started);
 	CHECK(ran.ExitCode == 1);
 	INFO(ran.Output);
-	CHECK(ran.Output.find("could not reach an editor") != std::string::npos);
+	CHECK(ran.Output.find("could not reach an engine host") != std::string::npos);
 	CHECK(ran.Output.find("--mcp-port") != std::string::npos);
 }
 

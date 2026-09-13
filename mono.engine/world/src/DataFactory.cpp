@@ -39,12 +39,218 @@ namespace engine::world {
 		Participant = std::move(participant);
 	}
 
+	void DataFactorySession::SetWorldLifecycle(DataFactoryWorldLifecycle lifecycle) {
+		WorldLifecycle = std::move(lifecycle);
+	}
+
 	void DataFactorySession::SetInterventionExecutor(DataFactoryInterventionExecutor executor) {
 		InterventionExecutor = std::move(executor);
 	}
 
 	void DataFactorySession::SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter) {
 		Presenter = std::move(presenter);
+	}
+
+	DataFactoryReply DataFactorySession::CreateWorld(const DataFactoryWorldRequest &request) {
+		DataFactoryWorldRequest copy = request;
+		copy.Operation = DataFactoryWorldOperation::Create;
+		return WorldOperation(copy);
+	}
+
+	DataFactoryReply DataFactorySession::ResetWorld(const DataFactoryWorldRequest &request) {
+		DataFactoryWorldRequest copy = request;
+		copy.Operation = DataFactoryWorldOperation::Reset;
+		return WorldOperation(copy);
+	}
+
+	DataFactoryReply DataFactorySession::RetireWorld(const DataFactoryWorldRequest &request) {
+		DataFactoryWorldRequest copy = request;
+		copy.Operation = DataFactoryWorldOperation::Retire;
+		return WorldOperation(copy);
+	}
+
+	void DataFactorySession::InvalidateWorldState(std::string_view instanceId) {
+		Paused.erase(std::string(instanceId));
+		Checkpoints.clear();
+		CheckpointOrder.clear();
+		RetainedCheckpointBytes = 0;
+		RenderOnlyTerminals.clear();
+		RenderOnlyTerminalOrder.clear();
+	}
+
+	DataFactoryReply DataFactorySession::WorldOperation(const DataFactoryWorldRequest &request) {
+		const auto replyFor = [this, &request](DataFactoryStatus status, std::string detail) {
+			DataFactoryReply reply = Reply(WorldId{}, status, std::move(detail));
+			reply.InstanceId = request.InstanceId;
+			return reply;
+		};
+		const auto invalid = [&replyFor](std::string detail) {
+			return replyFor(DataFactoryStatus::ValidationFailed, std::move(detail));
+		};
+		if (request.InstanceId.empty() || request.InstanceId.size() > 128 ||
+			request.InstanceId.find('\0') != std::string::npos)
+			return invalid("instance_id must contain 1 to 128 bytes");
+		if (request.OperationId.empty() || request.OperationId.size() > 128 ||
+			request.OperationId.find('\0') != std::string::npos)
+			return invalid("operation_id must contain 1 to 128 bytes");
+		if (!std::isfinite(request.TickRate) || request.TickRate <= 0.0 || request.TickRate > 1000.0)
+			return invalid("tick_rate must be finite and between 0 and 1000");
+		const auto prior = WorldOperations.find(request.OperationId);
+		if (prior != WorldOperations.end()) {
+			const auto &old = prior->second.Request;
+			if (old.InstanceId != request.InstanceId || old.Seed != request.Seed ||
+				old.TickRate != request.TickRate || old.Operation != request.Operation ||
+				old.ExpectedWorldEpoch != request.ExpectedWorldEpoch ||
+				old.ExpectedWorldVersion != request.ExpectedWorldVersion ||
+				old.ExpectedTick != request.ExpectedTick)
+				return replyFor(
+					DataFactoryStatus::OperationIdConflict,
+					"operation_id was already used with different arguments"
+				);
+			return prior->second.Reply;
+		}
+		const WorldId existing = Resolve(request.InstanceId);
+		const bool create = request.Operation == DataFactoryWorldOperation::Create;
+		const bool reset = request.Operation == DataFactoryWorldOperation::Reset;
+		if (!create && !reset && request.Operation != DataFactoryWorldOperation::Retire)
+			return invalid("unknown world lifecycle operation");
+		if (create && (existing.IsValid() || OwnedWorlds.contains(request.InstanceId)))
+			return replyFor(DataFactoryStatus::VersionConflict, "factory world already exists");
+		if (create && Worlds.Count() != 0)
+			return replyFor(
+				DataFactoryStatus::ResourceLimit, "a compatibility world already occupies this universe"
+			);
+		// Epoch and version are session-wide, so one session deliberately owns one
+		// factory world until per-world lifecycle revisions exist.
+		if (create && !OwnedWorlds.empty())
+			return replyFor(DataFactoryStatus::ResourceLimit, "this session already owns a factory world");
+		if (!create && (!existing.IsValid() || !OwnedWorlds.contains(request.InstanceId) ||
+						request.ExpectedWorldEpoch != Epoch || request.ExpectedWorldVersion != Version ||
+						request.ExpectedTick != ClockOf(existing).Tick))
+			return replyFor(
+				DataFactoryStatus::VersionConflict, "world revision, tick, or ownership is stale"
+			);
+		if (!create && RenderOnlyInFlight(request.InstanceId))
+			return replyFor(DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
+		if (!create && !AllSystemsPaused(request.InstanceId))
+			return replyFor(DataFactoryStatus::NotPaused, "reset and retire require an all_systems pause");
+		if (WorldOperations.size() >= 256)
+			return replyFor(DataFactoryStatus::ResourceLimit, "world operation ledger is full");
+		if (Epoch == UINT64_MAX || Version == UINT64_MAX)
+			return replyFor(DataFactoryStatus::ResourceLimit, "world lifecycle revision exhausted");
+
+		WorldId world = existing;
+		if (request.Operation == DataFactoryWorldOperation::Retire) {
+			std::string detail;
+			if (!Participant || !Participant(world, DataFactoryPauseScope::AllSystems, false, detail))
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete,
+					detail.empty() ? "cannot release the all_systems pause" : detail
+				);
+			if (WorldLifecycle && !WorldLifecycle(request.Operation, Worlds, world, false, detail)) {
+				std::string restoreDetail;
+				(void)Participant(world, DataFactoryPauseScope::AllSystems, true, restoreDetail);
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete,
+					detail.empty() ? "client lifecycle retirement refused the world" : detail
+				);
+			}
+			const DataFactoryClock finalClock = ClockOf(world);
+			if (Worlds.Destroy(world) != WorldStatus::Ok || Resolve(request.InstanceId).IsValid())
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete, "world retirement did not remove the world"
+				);
+			OwnedWorlds.erase(request.InstanceId);
+			InvalidateWorldState(request.InstanceId);
+			if (WorldLifecycle) {
+				std::string ignored;
+				(void)WorldLifecycle(request.Operation, Worlds, WorldId{}, true, ignored);
+			}
+			++Version;
+			DataFactoryReply reply = replyFor(DataFactoryStatus::Ok, "factory world retired");
+			reply.Clock = finalClock;
+			reply.Tombstone = true;
+			WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, reply});
+			return reply;
+		}
+
+		WorldSettings settings;
+		settings.Name = core::Name(request.InstanceId.c_str());
+		settings.TickRate = request.TickRate;
+		// Save into the candidate even for create: presentation and bus configuration
+		// belong to the host universe and must survive a no-world lifecycle commit.
+		core::ByteWriter staged(0, MaximumCheckpointBytes);
+		try {
+			if (!Worlds.Save(staged))
+				return replyFor(DataFactoryStatus::Unsupported, "world lifecycle cannot stage a replacement");
+		} catch (const std::length_error &) {
+			return replyFor(
+				DataFactoryStatus::ResourceLimit, "world lifecycle staging exceeds the byte limit"
+			);
+		}
+		Universe candidate;
+		core::ByteReader reader(staged.Bytes());
+		if (!candidate.Load(reader) || reader.Remaining() != 0)
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "world lifecycle could not stage a replacement"
+			);
+		if (reset) {
+			world = candidate.Find(core::Name(request.InstanceId));
+			if (!world.IsValid() || candidate.Destroy(world) != WorldStatus::Ok)
+				return replyFor(DataFactoryStatus::RestoreIncomplete, "world reset could not stage removal");
+		}
+		WorldStatus status = WorldStatus::Ok;
+		world = candidate.Create(settings, &status);
+		if (status != WorldStatus::Ok || !world.IsValid() ||
+			candidate.NameOf(world).Text() != request.InstanceId ||
+			candidate.SettingsOf(world).TickRate != request.TickRate)
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "world lifecycle did not create the requested world"
+			);
+		if (WorldLifecycle) {
+			std::string detail;
+			if (!WorldLifecycle(request.Operation, candidate, world, false, detail)) {
+				return replyFor(
+					DataFactoryStatus::RestoreIncomplete,
+					detail.empty() ? "client lifecycle installation refused the world" : detail
+				);
+			}
+		}
+		if (candidate.SetState(world, WorldState::Suspended) != WorldStatus::Ok)
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete, "world lifecycle could not suspend the candidate"
+			);
+		if (!Participant)
+			return replyFor(DataFactoryStatus::Unsupported, "the host has not installed pause participants");
+		std::string pauseDetail;
+		if (!Participant(world, DataFactoryPauseScope::AllSystems, true, pauseDetail))
+			return replyFor(
+				DataFactoryStatus::RestoreIncomplete,
+				pauseDetail.empty() ? "cannot establish the all_systems pause" : pauseDetail
+			);
+		Worlds.ReplaceWith(candidate);
+		world = Worlds.Find(core::Name(request.InstanceId));
+		if (!world.IsValid())
+			return replyFor(DataFactoryStatus::RestoreIncomplete, "world replacement did not commit");
+		if (WorldLifecycle) {
+			// Replacement is the atomic commit. The product hook may now publish its
+			// prepared state, but it cannot turn that completed mutation into a refusal.
+			std::string ignored;
+			(void)WorldLifecycle(request.Operation, Worlds, world, true, ignored);
+		}
+		OwnedWorlds[request.InstanceId] = OwnedWorld{request.Seed, request.TickRate};
+		InvalidateWorldState(request.InstanceId);
+		Paused[request.InstanceId].AllSystems = true;
+		++Epoch;
+		++Version;
+		DataFactoryReply reply =
+			Reply(world, DataFactoryStatus::Ok, reset ? "factory world reset" : "factory world created");
+		WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, reply});
+		return reply;
+	}
+
+	bool DataFactorySession::OwnsWorld(std::string_view instanceId) const {
+		return OwnedWorlds.contains(std::string(instanceId));
 	}
 
 	WorldId DataFactorySession::Resolve(std::string_view instanceId) const {
@@ -119,6 +325,8 @@ namespace engine::world {
 			return Reply(
 				world, DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
 			);
+		if (scope == DataFactoryPauseScope::AllSystems && AllSystemsPaused(instanceId))
+			return Reply(world, DataFactoryStatus::Ok, {});
 		if (!Participant)
 			return Reply(
 				world, DataFactoryStatus::Unsupported, "the host has not installed pause participants"
@@ -767,6 +975,8 @@ namespace engine::world {
 			return "capability_unsupported";
 		case DataFactoryStatus::ValidationFailed:
 			return "validation_failed";
+		case DataFactoryStatus::OperationIdConflict:
+			return "operation_id_conflict";
 		case DataFactoryStatus::VersionConflict:
 			return "version_conflict";
 		case DataFactoryStatus::StaleSnapshot:

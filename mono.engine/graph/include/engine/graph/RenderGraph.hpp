@@ -171,6 +171,7 @@ namespace engine::graph {
 		// Full floats, for depth a pass has linearised and for reductions.
 		//@{
 		R32F,
+		R32U,
 		RG32F,
 		RGBA32F,
 		//@}

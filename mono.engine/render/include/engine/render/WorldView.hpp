@@ -72,6 +72,8 @@ namespace engine::render {
 		double Seconds = 0;
 		scene::WorldLighting Lighting;
 		std::vector<scene::DrawInstance> Instances;
+		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		bool ObjectLabelsValid = true;
 		std::vector<core::CFrame> Joints;
 		std::vector<scene::SurfaceSlot> Slots;
 		std::vector<scene::PortalSeam> Seams;

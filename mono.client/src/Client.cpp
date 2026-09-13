@@ -334,6 +334,63 @@ namespace client {
 				detail = "audio device could not establish the pause barrier";
 				return false;
 			});
+			DataFactory->SetWorldLifecycle([this](
+											   engine::world::DataFactoryWorldOperation operation,
+											   engine::world::Universe &universe,
+											   engine::world::WorldId world,
+											   bool committed,
+											   std::string &detail
+										   ) {
+				if (committed) {
+					if (operation == engine::world::DataFactoryWorldOperation::Reset && DataCapture &&
+						world.IsValid()) {
+						std::string ignored;
+						(void)DataCapture->TeardownInstance(universe.NameOf(world).Text(), ignored);
+					}
+					(void)ReconcileDataFactoryWorlds();
+					return true;
+				}
+				if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+					if (!world.IsValid()) {
+						detail = "client could not identify factory world for retirement";
+						return false;
+					}
+					const std::string instance(universe.NameOf(world).Text());
+					if (DataCapture && !DataCapture->TeardownInstance(instance, detail)) return false;
+					if (DataCaptureDriverWorld == world) {
+						DataCaptureDriverCallback = {};
+						DataCaptureDriverTicket.reset();
+						DataCaptureDriverSnapshot.clear();
+						DataCaptureDriverWorld = {};
+						DataCaptureDriverRuntime = nullptr;
+					}
+					return true;
+				}
+				if (!world.IsValid()) {
+					detail = "client could not prepare factory world state";
+					return false;
+				}
+				const engine::world::WorldSettings settings = universe.SettingsOf(world);
+				bool installed = false;
+				if (universe.Enter(
+						world,
+						[this,
+						 &installed,
+						 &settings](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							InstallPresentation(store, systems, Settings.Entities);
+							InstallClientWorldSystems(store, systems, settings.PhysicsTickRate);
+							if (EnsureLocalPlayer(store) == engine::ecs::NULL_ENTITY) return;
+							(void)RestoreDefaultCameraMovement(store, systems);
+							(void)InstallDefaultCamera(store, systems);
+							installed = true;
+						}
+					) != engine::world::WorldStatus::Ok ||
+					!installed) {
+					detail = "client could not prepare factory world state";
+					return false;
+				}
+				return true;
+			});
 			DataFactory->SetRenderOnlyPresenter(
 				[this](const engine::world::DataFactoryRenderOnlyRequest &request, std::string &detail) {
 					if (!Settings.DataFactory || !Rendered.IsValid() ||
@@ -343,6 +400,9 @@ namespace client {
 					}
 					return DataFactoryRenderOnly.Enqueue(request, detail);
 				}
+			);
+			RenderingProfiles.Set(
+				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
 			);
 		}
 		if (!Universe_->ConfigurePresentation(
@@ -360,7 +420,7 @@ namespace client {
 		if (!replicaProducer) {
 			if (!Settings.GameFile.empty()) {
 				if (!LoadGameFile()) return false;
-			} else if (!BuildDemoWorlds()) {
+			} else if (!(Settings.DataFactory && Settings.ScriptPath.empty()) && !BuildDemoWorlds()) {
 				return false;
 			}
 		}
@@ -613,6 +673,62 @@ namespace client {
 		}
 
 		return true;
+	}
+
+	bool Client::PublishDataFactoryWorld(engine::world::WorldId world) {
+		if (!world.IsValid()) return false;
+		uint64_t identity = 0;
+		if (Universe_->Enter(world, [&identity](engine::ecs::Store &store) {
+				identity = store.Identity();
+			}) != engine::world::WorldStatus::Ok)
+			return false;
+		Views.Track(world, Universe_->NameOf(world), Settings.Entities);
+		Simulated.push_back(world);
+		Rendered = world;
+		DataFactoryWorld = world;
+		DataFactoryStoreIdentity = identity;
+		return true;
+	}
+
+	void Client::RemoveDataFactoryWorld(engine::world::WorldId world) {
+		if (!DataFactoryWorld.IsValid() || world != DataFactoryWorld) return;
+		Views.Untrack(world);
+		std::erase(Simulated, world);
+		std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
+		std::erase_if(InstalledWorldPipelines, [world](const auto &entry) { return entry.World == world; });
+		if (Rendered == world) Rendered = {};
+		DataFactoryStoreIdentity = 0;
+		DataFactoryWorld = {};
+		if (DataCaptureDriverWorld == world) {
+			DataCaptureDriverCallback = {};
+			DataCaptureDriverTicket.reset();
+			DataCaptureDriverSnapshot.clear();
+			DataCaptureDriverWorld = {};
+			DataCaptureDriverRuntime = nullptr;
+		}
+	}
+
+	bool Client::ReconcileDataFactoryWorlds() {
+		if (!DataFactory) return true;
+		engine::world::WorldId owned;
+		for (const engine::world::WorldId world : Universe_->Worlds()) {
+			if (DataFactory->OwnsWorld(Universe_->NameOf(world).Text())) {
+				owned = world;
+				break;
+			}
+		}
+		if (!owned.IsValid()) {
+			if (DataFactoryWorld.IsValid()) RemoveDataFactoryWorld(DataFactoryWorld);
+			return true;
+		}
+		uint64_t identity = 0;
+		if (Universe_->Enter(owned, [&identity](engine::ecs::Store &store) {
+				identity = store.Identity();
+			}) != engine::world::WorldStatus::Ok)
+			return false;
+		if (DataFactoryWorld == owned && identity == DataFactoryStoreIdentity) return true;
+		if (DataFactoryWorld.IsValid()) RemoveDataFactoryWorld(DataFactoryWorld);
+		return PublishDataFactoryWorld(owned);
 	}
 
 	bool Client::FinishStartup() {
@@ -2312,14 +2428,17 @@ namespace client {
 			ControlServer.Pump([this](const std::string &line) {
 				if (!Settings.DataFactory || !DataFactory || !Rendered.IsValid())
 					return ControlSurface.Answer(line);
-				return AnswerDataFactoryControlLine(
+				const std::string answer = AnswerDataFactoryControlLine(
 					*DataFactory,
 					Universe_->NameOf(Rendered).Text(),
 					[this, &line] { return ControlSurface.Answer(line); },
 					[this](const engine::world::DataFactoryReply &) { PumpSounds(); }
 				);
+				(void)ReconcileDataFactoryWorlds();
+				return answer;
 			});
 		}
+		if (Settings.DataFactory) (void)ReconcileDataFactoryWorlds();
 		auto allSystemsPaused = [this] {
 			return DataFactory && Rendered.IsValid() &&
 				   DataFactory->AllSystemsPaused(Universe_->NameOf(Rendered).Text());
@@ -2659,6 +2778,8 @@ namespace client {
 			SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
 		}
 		const ActiveScene *displayedActiveScene = nullptr;
+		std::vector<engine::render::DataCaptureObjectLabel> drawnObjectLabels;
+		bool drawnObjectLabelsValid = true;
 
 		{
 			// Once per frame, and separate from the tick because a client draws
@@ -2806,6 +2927,8 @@ namespace client {
 					ComposedCamera = scene.View.Camera;
 					if (!ReportedJoin) {
 						displayedActiveScene = &scene;
+						drawnObjectLabels = scene.Frame->ObjectLabels;
+						drawnObjectLabelsValid = scene.Frame->ObjectLabelsValid;
 						Portals.assign(scene.View.Portals.begin(), scene.View.Portals.end());
 						Surfaces.assign(scene.View.Surfaces.begin(), scene.View.Surfaces.end());
 						Windowed = std::ranges::any_of(scene.Frame->Seams, [](const auto &seam) {
@@ -2837,6 +2960,10 @@ namespace client {
 							store, engine::render::DrawCollectionTime::CurrentTick
 						);
 					collectPresentation(Rendered, store, ComposedFrame.Position);
+					if (const auto *list = store.Resource<engine::render::DrawList>()) {
+						drawnObjectLabels = list->ObjectLabels;
+						drawnObjectLabelsValid = list->ObjectLabelsValid;
+					}
 				});
 			}
 			if (!particleFrameCollected) {
@@ -2906,6 +3033,8 @@ namespace client {
 					}
 
 					collectPresentation(Replicated, store, frame.Position);
+					drawnObjectLabels = list->ObjectLabels;
+					drawnObjectLabelsValid = list->ObjectLabelsValid;
 					Views.Publish(
 						Replicated,
 						frame,
@@ -3465,7 +3594,13 @@ namespace client {
 			// The copy `Drawn`'s comment argues for: the published list is
 			// `const` and the return leg has to go somewhere.
 			Drawn.assign(drawn.begin(), drawn.end());
+			const size_t nativeRows = Drawn.size();
 			(void)AppendForeignPortalClones(*Universe_, presentationWorld, Drawn, &drawnJoints);
+			// The capture sidecar belongs to the native snapshot. Portal clones are
+			// derived from another world's rows, so retaining their local label would
+			// make the integer plane disagree with this snapshot's descriptor.
+			for (size_t index = nativeRows; index < Drawn.size(); ++index)
+				Drawn[index].ObjectLabel = 0;
 			drawn = Drawn;
 		}
 
@@ -3535,6 +3670,8 @@ namespace client {
 		view.CameraFrame = Views.CameraFrame();
 		view.Camera = Views.Camera();
 		view.Instances = drawn;
+		view.ObjectLabels = drawnObjectLabels;
+		view.ObjectLabelsValid = drawnObjectLabelsValid;
 		view.JointFrames = drawnJoints;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;

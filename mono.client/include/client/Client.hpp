@@ -140,6 +140,11 @@ namespace client {
 		//
 		// @return `true` when the client is ready to run.
 		bool FinishStartup();
+		// Reconciles the factory-owned world after the control boundary has
+		// committed it. This runs only on the driver thread that owns Universe.
+		bool ReconcileDataFactoryWorlds();
+		bool PublishDataFactoryWorld(engine::world::WorldId world);
+		void RemoveDataFactoryWorld(engine::world::WorldId world);
 		bool InitialisePresentationHost();
 		bool PumpPresentationHost();
 		void ResetPlayPresentation();
@@ -587,6 +592,8 @@ namespace client {
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
 		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
+		uint64_t DataFactoryStoreIdentity = 0;
+		engine::world::WorldId DataFactoryWorld;
 		std::shared_ptr<DataAudioObservationHost> DataAudio;
 		uint64_t DataAudioEpoch = 0;
 		data_factory_render_only::Queue DataFactoryRenderOnly;

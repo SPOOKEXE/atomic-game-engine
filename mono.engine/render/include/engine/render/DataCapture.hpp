@@ -7,14 +7,76 @@
 #include <engine/core/Name.hpp>
 #include <engine/render/ResourceImage.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::render {
+	struct DataCaptureObjectLabel {
+		uint32_t Label = 0;
+		std::string StableId;
+	};
+	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABELS = 4096;
+	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABEL_BYTES = 512 * 1024;
+
+	inline bool DataCaptureUtf8(std::string_view value) {
+		for (size_t offset = 0; offset < value.size();) {
+			const uint8_t first = static_cast<uint8_t>(value[offset]);
+			if (first < 0x80) {
+				++offset;
+				continue;
+			}
+			const size_t count = first >= 0xC2 && first <= 0xDF	  ? 2
+								 : first >= 0xE0 && first <= 0xEF ? 3
+								 : first >= 0xF0 && first <= 0xF4 ? 4
+																  : 0;
+			if (count == 0 || offset + count > value.size()) return false;
+			for (size_t index = 1; index < count; ++index)
+				if ((static_cast<uint8_t>(value[offset + index]) & 0xC0) != 0x80) return false;
+			const uint32_t codepoint =
+				count == 2	 ? (first & 0x1F) << 6 | (static_cast<uint8_t>(value[offset + 1]) & 0x3F)
+				: count == 3 ? (first & 0x0F) << 12 | (static_cast<uint8_t>(value[offset + 1]) & 0x3F) << 6 |
+								   (static_cast<uint8_t>(value[offset + 2]) & 0x3F)
+							 : (first & 0x07) << 18 | (static_cast<uint8_t>(value[offset + 1]) & 0x3F) << 12 |
+								   (static_cast<uint8_t>(value[offset + 2]) & 0x3F) << 6 |
+								   (static_cast<uint8_t>(value[offset + 3]) & 0x3F);
+			if ((count == 3 && codepoint < 0x800) || (count == 4 && codepoint < 0x10000) ||
+				codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+				return false;
+			offset += count;
+		}
+		return true;
+	}
+
+	inline bool ValidDataCaptureObjectLabels(std::span<const DataCaptureObjectLabel> labels) {
+		if (labels.size() > MAX_DATA_CAPTURE_OBJECT_LABELS) return false;
+		size_t bytes = 0;
+		for (size_t index = 0; index < labels.size(); ++index) {
+			const DataCaptureObjectLabel &label = labels[index];
+			if (label.Label != index + 1 || label.StableId.empty() || label.StableId.size() > 256 ||
+				label.StableId.find('\0') != std::string::npos || !DataCaptureUtf8(label.StableId) ||
+				label.StableId.size() > MAX_DATA_CAPTURE_OBJECT_LABEL_BYTES - bytes)
+				return false;
+			bytes += label.StableId.size();
+			if (index != 0 && !std::lexicographical_compare(
+								  labels[index - 1].StableId.begin(),
+								  labels[index - 1].StableId.end(),
+								  label.StableId.begin(),
+								  label.StableId.end(),
+								  [](char left, char right) {
+									  return static_cast<unsigned char>(left) <
+											 static_cast<unsigned char>(right);
+								  }
+							  ))
+				return false;
+		}
+		return true;
+	}
 
 	// Stable channel names are represented by this enum at the device boundary.
 	// A channel only becomes Ready when its declared render-graph input was copied.
@@ -42,7 +104,7 @@ namespace engine::render {
 		Failed,
 		Cancelled,
 	};
-	enum class DataCaptureScalar : uint8_t { Float16, Float32, UNorm8, UNorm10A2, Unknown };
+	enum class DataCaptureScalar : uint8_t { Float16, Float32, UInt32, UNorm8, UNorm10A2, Unknown };
 	enum class DataCaptureColourSpace : uint8_t { Linear, SRGB, NotApplicable, Unknown };
 	enum class DataCaptureOrigin : uint8_t { TopLeft };
 	enum class DataCaptureTemporalHistory : uint8_t { Preserve, Reset, Disable };
@@ -80,6 +142,7 @@ namespace engine::render {
 		core::Name CaptureNode;
 		size_t ViewSlot = 0;
 		std::vector<DataCaptureChannel> Channels;
+		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 	};
 
@@ -108,6 +171,7 @@ namespace engine::render {
 		size_t ViewSlot = 0;
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 		std::vector<DataCaptureChannel> Channels;
+		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		std::vector<uint64_t> ResourceTokens;
 		bool Cancelled = false;
 	};
@@ -121,6 +185,7 @@ namespace engine::render {
 		bool TemporalHistoryChanged = false;
 		DataCaptureCameraConvention Camera;
 		DataCaptureCamera CameraPose;
+		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		std::vector<DataCapturePlane> Planes;
 	};
 

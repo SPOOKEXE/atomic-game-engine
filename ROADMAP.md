@@ -75,11 +75,11 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [x] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam. Two actual portal-exchange Vulkan modes pass 102 and 104 assertions across the complete visual layer set.
 - [x] Check oblique, rolled and scaled portal views at all angles, then finish visual review of the non-Euclidean demo. The scripted angle matrix passes 11,920 assertions, and seven rendered tour shots pass 127 Vulkan assertions for oblique, rolled, non-uniformly scaled and return views.
 
-`datafactories-docs/MCP-ADDITIONS.md` defines one public data-factory contract. The external factory owns recipes, parameters, batching, storage, manifests, training and evaluation. The engine host owns scene lifecycle, validated mutation, deterministic stepping, structured observations, captures and resources. Python is a typed MCP client and agents register the same stdio mcpbridge, discover the same schemas and call the same bounded tools. MCP is the connection, not the factory or a training runtime.
+`datafactories-docs/MCP-ADDITIONS.md` defines one public data-factory contract. The engine process is the MCP host. It owns isolated scene lifecycle, validated scene setup and edits, deterministic stepping, structured observations, captures and resources. The external data factory owns recipes, parameters, batching, storage, manifests, training and evaluation. Its Python `api.py` is a typed client for the engine MCP tools, not a second engine API or a training runtime. Agents register the same stdio `mcpbridge`, discover the same schemas and call the same bounded tools. No capability counts as exposed until both an external program and an MCP agent can discover and call it.
 
 Implementation order:
 
-1. **Usable external and agent loop:** first prove the existing local client world from both Python and an agent: connect and negotiate, select and inspect it, pause, submit a pinned script package at its paused revision, then snapshot, observe camera and object poses, sizes, frustum and 2D projections, poll captures and fetch verified resources. Factory-owned create, reset and retire follow as a second stage.
+1. **Usable external and agent loop:** from both Python and an agent, connect and negotiate, create or reset an isolated factory-owned world, submit a pinned scene package or a validated patch, drive explicit fixed ticks, then snapshot camera and object poses, sizes, frustum, visibility and 2D projections, poll captures and fetch verified resources. Selecting the existing local client world remains a useful compatibility path, but it does not complete the unattended factory workflow.
 2. **Rich render and simulation labels:** add capture-backed visibility, IDs, masks, flow, material, lighting, physics, rig and audio truth on the same snapshot contract.
 3. **Scale and inverse tasks:** add atomic multicamera and multiworld batches, complete checkpoint and fork replay, durable dataset finalization, counterfactuals, inverse scene hypotheses and release profiling.
 
@@ -89,18 +89,18 @@ Connect, discover and expose the engine:
 - [x] expose capability, version and schema discovery, and report unsupported features explicitly.
 - [x] provide the Python sibling API's negotiation, thin reads, lifecycle and ranged, BLAKE3-verified resource reads.
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records. Capture submission, cancellation and release now carry bounded unique operation IDs and exact ticket identity checks; the full cross-tool policy remains open.
-- [_] finish thin MCP adapters for every engine service used by the contract. Verified adapters now cover lifecycle control, snapshots, interventions, render-only submission, script packages, scene and physics observations, spatial queries, camera metadata, rigs, audio, event narratives, capabilities, source checking, asynchronous capture, bounded resource reads, cancellation and release. World creation and reset, multicamera coordination and remaining render labels are open.
+- [_] finish thin MCP adapters for every engine service used by the contract. Verified client adapters now cover factory-owned create, reset and retire, lifecycle control, snapshots, interventions, render-only submission, script packages, scene and physics observations, spatial queries, camera metadata, rigs, audio, event narratives, capabilities, source checking, asynchronous capture, bounded resource reads, cancellation and release. Server and Studio lifecycle hosts, multicamera coordination and remaining render labels are open.
 - [_] add the remaining MCP tools and examples for multicamera, multiworld, segmentation, optical flow, lighting contribution and interop.
 
 Create and modify isolated scenes:
-- [_] expose create, select, reset and retire operations for isolated data-factory worlds in client, server and Studio hosts. Current lifecycle tools operate on an existing client world.
+- [_] expose create, select, reset and retire operations for isolated data-factory worlds in client, server and Studio hosts. Client MCP can now create one caller-named local world in an empty host, stage create or reset through a scratch Universe, install product systems before commit, return the new zero-tick world all-systems paused, retain bounded idempotency tombstones and drain captures before retirement. Compatibility worlds cannot be claimed or retired. Server and Studio hosts remain open.
 - [_] load repository and inline script packages with source and asset hashes, seeded parameters, type checking, sandboxing and atomic scene edits. The client MCP accepts bounded inline `atomic.data-script.v1` Luau packages, verifies BLAKE3 source and asset hashes plus typed manifest parameters, runs them in a one-shot capability-limited scratch world, and swaps only after a terminal result. Descriptor-safe repository loading lives in the Python client. Static Luau admission loads generated engine declarations, narrows them to the package sandbox, forces strict checking and refuses bounded syntax or type failures before live-world serialization. `DataFactoryPackageDemo.luau` is a rerunnable fixture that replaces only its owned workspace subtree. Server and Studio hosts remain open.
-- [_] accept text instructions with reference images, controls and video motion constraints, then apply only externally interpreted, engine-validated scene patches.
+- [x] accept text instructions with reference images, structured controls and video motion constraints, then apply only externally interpreted, engine-validated scene patches. The Python boundary copies and bounds every instruction, artifact, control tree, evidence ID and motion interval. An external interpreter returns a typed candidate grounded in that evidence; only validated `CausalEdit` values cross MCP through `apply_intervention` at an exact snapshot, tick, epoch and version.
 - [x] share engine services through Luau `DataSceneService`, with VM-neutral ECS metadata, queued lifecycle work and Luau or JavaScript render bridges.
 - [x] expose thin MCP `pause`, `resume`, `step`, `snapshot`, `checkpoint` and `restore` commands.
 
 Drive deterministic time and state:
-- [x] support all-system pause for one local client with `--data-factory`, including the SDL device barrier.
+- [x] support all-system pause for one local client with `--data-factory`, including the SDL device barrier. Factory create and reset establish this barrier atomically before returning their tick-zero revision.
 - [x] support physics-only pause, including clock and character gates.
 - [x] define rational timing metadata and deterministic manual tick boundaries.
 - [_] finish deterministic action and script sequencing at fixed-tick boundaries; rational timing and manual tick boundaries are checked.
@@ -120,7 +120,7 @@ Deliver the first useful structured observation loop:
 - [x] provide real headless raycast, AABB and OBB spatial queries through Luau, JavaScript, typed engine calls, thin MCP tools and the Python client.
 - [x] provide a small `DataFactoryDemo.luau` that creates one camera and three identified objects, reads the scene snapshot and camera object observations, and prints the stable IDs, poses, sizes, visibility and projected bounds.
 - [x] retain the broader API walkthrough in `DataFactoryAdvancedDemo.luau`, including metadata reads, image-buffer round trip and capture request setup.
-- [_] complete an autonomous MCP capture workflow around the starter demo. The Python workflow and served agent prompt select and inspect the local client world, pause it, submit the pinned rerunnable package at its paused revision, snapshot, require the three stable object IDs, poll with a monotonic deadline, fetch BLAKE3-verified byte ranges and release or cancel the ticket. A live client-host run, agent parity and external factory-owned world create, reset and retire remain open.
+- [_] complete an autonomous MCP capture workflow around the starter demo. The Python workflow prefers the full advertised lifecycle, creates a caller-named isolated world, binds every later call to that world, submits the pinned rerunnable package, snapshots, requires the three stable object IDs, polls with a monotonic deadline, fetches BLAKE3-verified byte ranges, releases or cancels the ticket and retires its world on success or failure. It uses an existing local world only when the complete lifecycle is absent and never retires that fallback. A live client-host run and independent agent artifact parity remain open.
 - [_] provide occupancy, SDF, BEV, navmesh and affordance queries with authored semantics.
 
 Capture and persist aligned artifacts:
@@ -129,14 +129,15 @@ Capture and persist aligned artifacts:
 - [x] keep typed HDR buffers separate from RGBA8 buffers.
 - [x] add the data-capture graph's default PBR data-capture node.
 - [x] capture RGB linear HDR, depth and packed normals.
-- [x] make asynchronous HDR, depth and packed-normal capture retain its ticket, ranged bytes and exact projection metadata.
+- [x] make asynchronous HDR, depth, packed-normal and object-ID capture retain its ticket, ranged bytes and exact projection metadata. Object-ID captures include a bounded dense sidecar from integer labels to stable `DataFactoryId` strings; background and unidentified opaque or masked gbuffer pixels use zero. Transparent surfaces, particles and later composited layers do not write this plane, so final-composite visibility truth remains open.
 - [_] make step plus snapshot plus multicamera capture atomic, with asynchronous readback completion.
 - [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
 - [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure. The Python factory already provides durable chunks, sample finalization, pins, recovery, provenance, sweeps, holdouts and metrics.
-- [_] maintain acceptance fixtures for replay roundtrip, no-time-advance, image-label alignment, retry isolation, invalid data and Python or agent parity.
+- [_] maintain acceptance fixtures for replay roundtrip, no-time-advance, image-label alignment, retry isolation, invalid data and Python or agent parity. Headless fixtures now cover rerunnable package replacement, initial integer object-ID pixels, stable sidecars, malformed label bounds and typed Python parsing.
 
 Add richer scene, render and multimodal truth:
-- [_] capture IDs, semantic masks and part masks.
+- [x] capture object IDs as exact `R32_UINT` opaque or masked gbuffer pixels with stable string sidecars and explicit zero background or unidentified values. Transparent surfaces, particles and later composited layers are excluded.
+- [_] capture semantic masks and part masks.
 - [_] record visibility, occlusion, disocclusion and visible or amodal masks.
 - [_] record optical flow, motion vectors, trajectories, scene cuts and validity flags.
 - [_] expose PBR albedo, roughness, metallic, emissive, specular, transmission, shading geometry, normals and UV maps.

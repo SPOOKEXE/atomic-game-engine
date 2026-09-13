@@ -5,6 +5,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageImport.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
@@ -17,6 +18,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -134,6 +136,15 @@ namespace {
 				 .Target = core::Name("directional-response"),
 				 .Key = core::Name("directional-response")}
 			);
+		document.Record(
+			{.Kind = graph::EditKind::AddNode,
+			 .Name = core::Name("image-export-object-ids"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = graph::NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = graph::EditKind::Reads, .Target = core::Name("object-ids"), .Key = core::Name("source")}
+		);
 		graph::RenderGraph pipeline;
 		core::Name offender;
 		REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
@@ -3658,15 +3669,63 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	view.Pipeline = core::Name("image-export-pipeline");
 	view.Target = &target;
 	view.SnapshotId = "snapshot-render-1";
+	assets::MeshData plane;
+	plane.Vertices = {
+		{{-1, -1, 0}, {0, 0, 1}, {0, 1}},
+		{{1, -1, 0}, {0, 0, 1}, {1, 1}},
+		{{1, 1, 0}, {0, 0, 1}, {1, 0}},
+		{{-1, 1, 0}, {0, 0, 1}, {0, 0}},
+	};
+	plane.Indices = {0, 1, 2, 0, 2, 3};
+	plane.ComputeBounds();
+	REQUIRE(renderer.AddMesh(core::Name("object-id-plane"), plane));
+	assets::TextureData white;
+	white.Width = white.Height = 1;
+	white.Format = assets::TextureFormat::RGBA8;
+	white.Pixels.assign(4, std::byte{255});
+	REQUIRE(renderer.AddTexture(core::Name("object-id-white"), white));
+	scene::DrawInstance labelled;
+	labelled.Source = 1;
+	labelled.Frame.Position = {-1, 0, -4};
+	labelled.HalfExtent = {.5f, .5f, .01f};
+	labelled.Mesh = core::Name("object-id-plane");
+	labelled.Texture = core::Name("object-id-white");
+	labelled.ObjectLabel = 1;
+	labelled.CastShadow = false;
+	scene::DrawInstance unlabelled = labelled;
+	unlabelled.Source = 2;
+	unlabelled.Frame.Position = {0, 0, -3.5f};
+	unlabelled.ObjectLabel = 0;
+
+	scene::EditableMesh editable;
+	editable.Positions = {{-.5f, -.5f, 0}, {.5f, -.5f, 0}, {0, .5f, 0}};
+	editable.Normals = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+	editable.UVs = {{0, 1}, {1, 1}, {.5f, 0}};
+	editable.Colours = {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}};
+	editable.Alphas = {1, 1, 1};
+	editable.Indices = {0, 1, 2};
+	editable.Packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position);
+	editable.Packing.Format = scene::EditablePackingFormat::Unsigned16;
+	const core::Name packedMesh("object-id-packed");
+	REQUIRE(renderer.AddPackedMesh(packedMesh, render::BuildPackedMeshData(editable)));
+	scene::DrawInstance packed = labelled;
+	packed.Source = 3;
+	packed.Frame.Position = {1, 0, -4};
+	packed.Mesh = packedMesh;
+	packed.ObjectLabel = 2;
+	const std::array rows{labelled, unlabelled, packed};
+	view.Instances = rows;
 	render::DataCaptureRequest request{
 		.SnapshotId = view.SnapshotId,
 		.Pipeline = view.Pipeline,
 		.CaptureNode = core::Name("image-export"),
-		.Channels = {
-			render::DataCaptureChannel::RgbLinearHdr,
-			render::DataCaptureChannel::LinearDepth,
-			render::DataCaptureChannel::ShadingNormal,
-		},
+		.Channels =
+			{
+				render::DataCaptureChannel::RgbLinearHdr,
+				render::DataCaptureChannel::LinearDepth,
+				render::DataCaptureChannel::ShadingNormal,
+			},
+		.ObjectLabels = {},
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -3693,6 +3752,7 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	CHECK(captured.CameraPose.FarPlaneMetres == view.Camera.FarPlane);
 
 	request.Channels = {render::DataCaptureChannel::RgbLinearHdr, render::DataCaptureChannel::ObjectIds};
+	request.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	render::DataCaptureTicket partial;
 	REQUIRE(renderer.QueueDataCapture(request, partial));
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
@@ -3701,9 +3761,34 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 		if (captured.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
 	} while (captured.Status == render::DataCaptureStatus::Pending &&
 			 std::chrono::steady_clock::now() < deadline);
-	REQUIRE(captured.Status == render::DataCaptureStatus::Partial);
+	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
-	CHECK(captured.Planes[1].Status == render::DataCaptureStatus::Unsupported);
+	CHECK(captured.Planes[1].Status == render::DataCaptureStatus::Ready);
+	CHECK(captured.Planes[1].Scalar == render::DataCaptureScalar::UInt32);
+	CHECK(captured.Planes[1].RowStride == captured.Planes[1].Width * 4);
+	REQUIRE(captured.Planes[1].Bytes.size() == captured.Planes[1].Width * captured.Planes[1].Height * 4);
+	core::ByteReader objectIds(captured.Planes[1].Bytes);
+	size_t labelledPixels = 0, packedPixels = 0, zeroPixels = 0;
+	uint32_t centreLabel = 99;
+	for (size_t pixel = 0; pixel < captured.Planes[1].Width * captured.Planes[1].Height; ++pixel) {
+		const uint32_t label = objectIds.ReadUInt32();
+		if (label == 1) ++labelledPixels;
+		if (label == 2) ++packedPixels;
+		if (label == 0) ++zeroPixels;
+		if (pixel ==
+			(captured.Planes[1].Height / 2) * captured.Planes[1].Width + captured.Planes[1].Width / 2)
+			centreLabel = label;
+		CHECK((label == 0 || label == 1 || label == 2));
+	}
+	CHECK(labelledPixels > 0);
+	CHECK(packedPixels > 0);
+	CHECK(zeroPixels > 0);
+	CHECK(centreLabel == 0);
+	REQUIRE(captured.ObjectLabels.size() == 2);
+	CHECK(captured.ObjectLabels[0].Label == 1);
+	CHECK(captured.ObjectLabels[0].StableId == "fixture/alpha");
+	CHECK(captured.ObjectLabels[1].Label == 2);
+	CHECK(captured.ObjectLabels[1].StableId == "fixture/packed");
 
 	render::DataCaptureTicket cancelled;
 	REQUIRE(renderer.QueueDataCapture(request, cancelled));
@@ -3752,7 +3837,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 		.SnapshotId = snapshot,
 		.Pipeline = "image-export-pipeline",
 		.CaptureNode = "image-export",
-		.Channels = {"rgb_linear_hdr"},
+		.Channels = {"object_ids"},
 		.TemporalHistory = "preserve",
 	};
 	uint64_t ticket = 0;
@@ -3764,6 +3849,11 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	view.WorldName = core::Name("script-capture-world");
 	view.Pipeline = core::Name("image-export-pipeline");
 	view.Target = &target;
+	const std::array objectLabels{
+		render::DataCaptureObjectLabel{1, "script/alpha"},
+		render::DataCaptureObjectLabel{2, "script/packed"},
+	};
+	view.ObjectLabels = objectLabels;
 	bridge.PrepareView(view);
 	bridge.PrepareView(view);
 	REQUIRE(view.SnapshotId == snapshot);
@@ -3779,6 +3869,11 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
 	REQUIRE(poll.Status == "ready");
 	REQUIRE(poll.Planes.size() == 1);
+	REQUIRE(poll.ObjectLabels.size() == 2);
+	CHECK(poll.ObjectLabels[0].Label == 1);
+	CHECK(poll.ObjectLabels[0].StableId == "script/alpha");
+	CHECK(poll.ObjectLabels[1].Label == 2);
+	CHECK(poll.ObjectLabels[1].StableId == "script/packed");
 	CHECK(poll.Planes.front().Resource != poll.Planes.front().SourceResource);
 	std::vector<std::byte> bytes;
 	const size_t byteCount = static_cast<size_t>(poll.Planes.front().RowStride) * poll.Planes.front().Height;
@@ -3799,4 +3894,18 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(repeatedBytes == bytes);
 	REQUIRE(bridge.Release("script-capture-world", ticket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", ticket, poll, detail));
+
+	request.Channels = {"rgb_linear_hdr"};
+	uint64_t rgbTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", request, rgbTicket, detail));
+	bridge.PrepareView(view);
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	do {
+		bridge.Pump();
+		REQUIRE(bridge.Poll("script-capture-world", rgbTicket, poll, detail));
+		if (poll.Status == "pending") SDL_Delay(1);
+	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == "ready");
+	CHECK(poll.ObjectLabels.empty());
+	REQUIRE(bridge.Release("script-capture-world", rgbTicket, detail));
 }

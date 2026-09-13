@@ -225,7 +225,13 @@ namespace engine::control {
 				  {"jitter_available", reply.JitterAvailable},
 				  {"jitter_policy", reply.JitterPolicy},
 				  {"coordinate_convention", reply.CoordinateConvention}}},
-				{"planes", std::move(planes)}
+				{"planes", std::move(planes)},
+				{"object_labels", [&] {
+					 json labels = json::array();
+					 for (const auto &label : reply.ObjectLabels)
+						 labels.push_back({{"label", label.Label}, {"stable_id", label.StableId}});
+					 return labels;
+				 }()}
 			};
 		}
 

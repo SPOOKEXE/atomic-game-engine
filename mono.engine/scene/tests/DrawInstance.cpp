@@ -621,6 +621,7 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinFirst = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinCount = 1; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.ObjectLabel = 1; }) != unchanged);
 
 	// A rotation with the same position, because the quaternion is four floats
 	// that a position-only hash would miss entirely - and a mirror on a

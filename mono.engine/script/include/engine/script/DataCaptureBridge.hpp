@@ -41,6 +41,10 @@ namespace engine::script {
 		// Exact source storage for packed channels, such as rgba8_unorm.
 		std::string Packing;
 	};
+	struct DataCaptureBridgeObjectLabel {
+		uint32_t Label = 0;
+		std::string StableId;
+	};
 
 	struct DataCaptureBridgePoll {
 		std::string Status;
@@ -69,6 +73,7 @@ namespace engine::script {
 		std::string JitterPolicy = "unavailable";
 		std::string CoordinateConvention;
 		std::vector<DataCaptureBridgePlane> Planes;
+		std::vector<DataCaptureBridgeObjectLabel> ObjectLabels;
 	};
 
 	struct DataCaptureBridgeCapabilities {

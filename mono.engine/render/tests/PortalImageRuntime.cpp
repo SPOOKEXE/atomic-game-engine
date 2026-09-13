@@ -978,7 +978,13 @@ TEST_CASE(
 			store.Set(wall, latest);
 			scheduler.Add(
 				"publish-interpolated-rows", ecs::Phase::PreRender, [interpolated](ecs::Store &target) {
-					target.SetResource(DrawList{.Instances = {interpolated}, .JointFrames = {}});
+					target.SetResource(
+						DrawList{
+							.Instances = {interpolated},
+							.ObjectLabels = {},
+							.JointFrames = {},
+						}
+					);
 				}
 			);
 		}

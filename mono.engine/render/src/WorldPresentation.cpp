@@ -6,6 +6,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
@@ -35,6 +36,7 @@
 #include <numbers>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 
 namespace engine::render {
 	void SelectFirstPersonBody(const ecs::Store &store, View &view) {
@@ -77,6 +79,73 @@ namespace engine::render {
 	}
 
 	namespace {
+		bool BytewiseLess(std::string_view left, std::string_view right) {
+			return std::lexicographical_compare(
+				left.begin(), left.end(), right.begin(), right.end(), [](char a, char b) {
+					return static_cast<unsigned char>(a) < static_cast<unsigned char>(b);
+				}
+			);
+		}
+
+		void AssignObjectLabels(ecs::Store &store, DrawList &drawList) {
+			drawList.ObjectLabelsValid = true;
+			std::vector<std::pair<uint64_t, std::string>> identifiers;
+			identifiers.reserve(drawList.Instances.size());
+			for (const scene::DrawInstance &instance : drawList.Instances) {
+				ecs::AttributeValue attribute;
+				if (!ecs::GetAttribute(
+						store, ecs::Entity(instance.Source), core::Name("DataFactoryId"), attribute
+					) ||
+					attribute.Type != ecs::PropertyType::String || attribute.String.empty())
+					continue;
+				if (attribute.String.size() > 256 || attribute.String.find('\0') != std::string::npos ||
+					!DataCaptureUtf8(attribute.String)) {
+					drawList.ObjectLabelsValid = false;
+					continue;
+				}
+				identifiers.emplace_back(instance.Source, attribute.String);
+			}
+			std::sort(identifiers.begin(), identifiers.end(), [](const auto &left, const auto &right) {
+				return BytewiseLess(left.second, right.second) ||
+					   (!BytewiseLess(right.second, left.second) && left.first < right.first);
+			});
+			identifiers.erase(
+				std::unique(
+					identifiers.begin(),
+					identifiers.end(),
+					[](const auto &left, const auto &right) { return left.first == right.first; }
+				),
+				identifiers.end()
+			);
+			drawList.ObjectLabels.clear();
+			drawList.ObjectLabelsValid =
+				drawList.ObjectLabelsValid && identifiers.size() <= MAX_DATA_CAPTURE_OBJECT_LABELS;
+			for (size_t index = 1; index < identifiers.size(); ++index) {
+				if (identifiers[index - 1].second == identifiers[index].second) {
+					drawList.ObjectLabelsValid = false;
+					break;
+				}
+			}
+			std::unordered_map<uint64_t, uint32_t> labels;
+			if (drawList.ObjectLabelsValid) {
+				drawList.ObjectLabels.reserve(identifiers.size());
+				for (size_t index = 0; index < identifiers.size(); ++index) {
+					const auto &[source, id] = identifiers[index];
+					const uint32_t label = static_cast<uint32_t>(index + 1);
+					drawList.ObjectLabels.push_back({label, id});
+					labels.emplace(source, label);
+				}
+			}
+			if (!ValidDataCaptureObjectLabels(drawList.ObjectLabels)) {
+				drawList.ObjectLabels.clear();
+				drawList.ObjectLabelsValid = false;
+				labels.clear();
+			}
+			for (scene::DrawInstance &instance : drawList.Instances) {
+				instance.ObjectLabel = labels.contains(instance.Source) ? labels.at(instance.Source) : 0;
+			}
+		}
+
 		uint64_t FoldPresentation(uint64_t signature, uint64_t word) {
 			return scene::MixSignature(signature, word);
 		}
@@ -699,6 +768,7 @@ namespace engine::render {
 			drawList->Instances.resize(drawList->BaseInstanceCount);
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+			AssignObjectLabels(store, *drawList);
 			return;
 		}
 		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
@@ -715,6 +785,7 @@ namespace engine::render {
 					CollectSkinPalettes(store, *drawList);
 				}
 				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+				AssignObjectLabels(store, *drawList);
 				return;
 			}
 			// A source query changed shape without a matching component epoch. The
@@ -995,6 +1066,7 @@ namespace engine::render {
 		// whole copies straddling two panes. The same call serves a replica,
 		// which has a draw list and no simulation behind it.
 		(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+		AssignObjectLabels(store, *drawList);
 	}
 
 	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList) {

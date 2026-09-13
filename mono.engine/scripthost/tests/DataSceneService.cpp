@@ -95,6 +95,7 @@ namespace {
 				.Origin = "top_left",
 				.Packing = "RGBA16F",
 			});
+			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			detail = "ready copy retained";
 			return true;
 		}
@@ -489,6 +490,9 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				assert(service:PollCapture("202").status == "unknown_capture_ticket")
 				local poll = service:PollCapture(queued.ticket)
 				assert(poll.status == "ready" and poll.planes[1].source_resource == "lit")
+				assert(#poll.object_labels == 2 and poll.object_labels[1].label == 1)
+				assert(poll.object_labels[1].stable_id == "fixture/alpha")
+				assert(poll.object_labels[2].label == 2 and poll.object_labels[2].stable_id == "fixture/packed")
 				assert(buffer.len(service:GetCaptureBuffer(queued.ticket, poll.planes[1].resource, 0, 4)) == 4)
 				assert(service:CancelCapture(queued.ticket).status == "cancellation_requested")
 				assert(service:PollCapture(queued.ticket).status == "cancelled")

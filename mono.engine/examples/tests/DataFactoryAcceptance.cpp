@@ -1,5 +1,6 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
@@ -7,6 +8,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/EditableImage.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/script/DataSceneService.hpp>
@@ -90,6 +92,50 @@ TEST_CASE("data factory starter scene exposes three bounded spatial observations
 	REQUIRE(occlusion != nullptr);
 	CHECK(Field(*occlusion, "available")->Boolean == false);
 	CHECK(Field(*occlusion, "reason")->Text == "requires_capture_visibility_evidence");
+}
+
+TEST_CASE("data factory package fixture replaces only its owned workspace subtree", "[data][acceptance]") {
+	StagedAssets assets;
+	Store store("data-factory-package");
+	engine::ecs::Scheduler scheduler;
+	PrepareDataFactoryWorld(store);
+	std::string error;
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryPackageDemo.luau"), error));
+	const Entity workspace = engine::scene::WorkspaceOf(store);
+	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+	const Entity firstRoot = store.FindFirstChild(workspace, "DataFactoryPackageDemo");
+	REQUIRE(firstRoot != engine::ecs::NULL_ENTITY);
+	const Entity unrelated = store.CreateInstance(engine::scene::PartClass(), "UnrelatedWorldContent");
+	REQUIRE(unrelated != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.SetParent(unrelated, workspace));
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryPackageDemo.luau"), error));
+	const Entity root = store.FindFirstChild(workspace, "DataFactoryPackageDemo");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+	CHECK(root != firstRoot);
+	CHECK(store.FindFirstChild(workspace, "UnrelatedWorldContent") == unrelated);
+	const Entity camera = store.FindFirstChild(root, "DataFactoryPackageCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(root, "VisibleBox") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(root, "OffscreenBox") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(root, "BehindBox") != engine::ecs::NULL_ENTITY);
+	const engine::script::DataSceneResult snapshot = engine::script::GetSceneSnapshot(store);
+	REQUIRE(snapshot.Status == std::string_view("ok"));
+	const auto *entities = Field(snapshot.Value, "entities");
+	REQUIRE(entities != nullptr);
+	std::vector<std::string> ids;
+	for (const auto &entity : entities->Items) {
+		const auto *id = Field(entity, "id");
+		REQUIRE(id != nullptr);
+		ids.push_back(id->Text);
+	}
+	CHECK(
+		ids == std::vector<std::string>{
+				   "data-factory-package/behind",
+				   "data-factory-package/camera",
+				   "data-factory-package/offscreen",
+				   "data-factory-package/visible"
+			   }
+	);
 }
 
 TEST_CASE("data factory image labels stay aligned with identified snapshots", "[data][acceptance]") {

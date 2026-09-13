@@ -117,6 +117,26 @@ TEST_CASE("render feature policy invalidates exact resident reuse", "[render][re
 	);
 }
 
+TEST_CASE("object label changes invalidate exact resident reuse", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	source.Source = 1;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	uint32_t slot = rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	source.ObjectLabel = 2;
+	CHECK_FALSE(rows.Reuse(Key(1), source, mesh, slot));
+	CHECK(rows.UpsertSlot(slot, Key(1), ToGpu(source, mesh), source, mesh) == slot);
+	rows.EndFrame();
+	CHECK(rows.DirtyCount() == 1);
+	CHECK(rows.Row(slot).ObjectLabel == 2);
+}
+
 TEST_CASE("a retained slot updates without changing resident identity", "[render][residency]") {
 	InstanceResidency rows;
 	DrawInstance source;
