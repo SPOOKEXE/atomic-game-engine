@@ -20,15 +20,18 @@
 #include <engine/control/Architecture.hpp>
 #include <engine/control/Features.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <string>
 
 TEST_SUITE_ID("tools.mcpbridge.schemas")
@@ -145,6 +148,44 @@ TEST_CASE("every tool's schema is one a client could build a call from", "[mcpbr
 			CHECK(schema.at("properties").contains(field));
 		}
 	}
+}
+
+TEST_CASE("intervention schema requires a causal base and typed edits", "[mcpbridge][data-factory]") {
+	Universe universe;
+	WorldSettings settings;
+	settings.Name = Name("mcpbridge-intervention");
+	universe.Create(settings);
+	engine::world::DataFactorySession session(universe);
+	session.SetRehydrate([](Universe &, engine::world::WorldId, std::string &) { return true; });
+	session.SetInterventionExecutor([](Universe &,
+									   engine::world::WorldId,
+									   std::span<const engine::world::DataFactoryIntervention>,
+									   std::string &) { return true; });
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	const json listed = Ask(surface, "tools/list");
+	const auto tool =
+		std::find_if(listed["result"]["tools"].begin(), listed["result"]["tools"].end(), [](const json &row) {
+			return row.at("name") == "apply_intervention";
+		});
+	REQUIRE(tool != listed["result"]["tools"].end());
+	const json &schema = tool->at("inputSchema");
+	const auto isRequired = [&schema](const char *name) {
+		for (const json &required : schema.at("required"))
+			if (required.is_string() && required.get<std::string>() == name) return true;
+		return false;
+	};
+	CHECK(isRequired("base_snapshot_id"));
+	CHECK(isRequired("changed_causes"));
+	CHECK(isRequired("operation_id"));
+	const json &changes = schema.at("properties").at("changed_causes");
+	REQUIRE(changes.at("items").at("properties").is_object());
+	CHECK(changes.at("items").at("additionalProperties") == false);
+	CHECK(changes.at("items").at("required") == json::array({"target_id", "path", "expected", "value"}));
+	CHECK(changes.at("items").at("properties").at("target_id").at("type") == "string");
+	CHECK(changes.at("items").at("properties").at("path").at("type") == "string");
+	CHECK(changes.at("items").at("properties").at("expected").at("type").is_array());
+	CHECK(changes.at("items").at("properties").at("value").at("type").is_array());
 }
 
 TEST_CASE("every resource has an address and reads", "[mcpbridge]") {

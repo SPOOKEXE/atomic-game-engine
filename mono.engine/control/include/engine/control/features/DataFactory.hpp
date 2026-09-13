@@ -7,6 +7,7 @@
 #include <engine/world/DataFactory.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -16,6 +17,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace engine::control {
 
@@ -35,6 +37,8 @@ namespace engine::control {
 			uint64_t Version = 0;
 			world::DataFactoryInterval Interval;
 			world::DataFactoryPauseScope Scope = world::DataFactoryPauseScope::AllSystems;
+			std::string BaseSnapshotId;
+			std::vector<world::DataFactoryIntervention> Changes;
 		};
 
 		struct LedgerEntry {
@@ -206,6 +210,31 @@ namespace engine::control {
 		}
 
 		inline bool
+		InterventionValue(const json &value, world::DataFactoryInterventionValue &out, std::string &failure) {
+			if (value.is_null())
+				out.Type = world::DataFactoryInterventionValue::Kind::Missing;
+			else if (value.is_boolean()) {
+				out.Type = world::DataFactoryInterventionValue::Kind::Boolean;
+				out.Boolean = value.get<bool>();
+			} else if (value.is_number_integer()) {
+				out.Type = world::DataFactoryInterventionValue::Kind::Integer;
+				out.Integer = value.get<int64_t>();
+			} else if (value.is_number_float() && std::isfinite(value.get<double>())) {
+				out.Type = world::DataFactoryInterventionValue::Kind::Number;
+				out.Number = value.get<double>();
+			} else if (value.is_string()) {
+				out.Type = world::DataFactoryInterventionValue::Kind::String;
+				if (!Text(value, "intervention value", out.String, failure)) return false;
+			} else {
+				failure = Error(
+					"validation_failed", "intervention values must be null, bool, integer, number, or string"
+				);
+				return false;
+			}
+			return true;
+		}
+
+		inline bool
 		Preconditions(world::DataFactorySession &session, const Request &request, std::string &failure) {
 			const world::DataFactoryReply current = session.Inspect(request.InstanceId);
 			if (current.Status != world::DataFactoryStatus::Ok) {
@@ -250,6 +279,20 @@ namespace engine::control {
 				{"expected_world_version", {{"type", "integer"}, {"minimum", 0}}},
 				{"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"checkpoint_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+				{"base_snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+				{"changed_causes",
+				 {{"type", "array"},
+				  {"minItems", 1},
+				  {"maxItems", MAXIMUM_ACTIONS},
+				  {"items",
+				   {{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"target_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"path", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"expected", {{"type", {"null", "boolean", "integer", "number", "string"}}}},
+					  {"value", {{"type", {"null", "boolean", "integer", "number", "string"}}}}}},
+					{"required", {"target_id", "path", "expected", "value"}}}}}},
 				{"scope", {{"type", "string"}, {"enum", {"all_systems", "physics_only"}}}},
 				{"dt_ns",
 				 {{"type", "object"},
@@ -316,7 +359,7 @@ namespace engine::control {
 					world::Describe(reply.Status), reply.Detail.empty() ? "operation refused" : reply.Detail
 				);
 			if (!request.OperationId.empty())
-				Store(*ledger, request.OperationId, normalized.dump(), result, failure);
+				data_factory_detail::Store(*ledger, request.OperationId, normalized.dump(), result, failure);
 			return result;
 		};
 
@@ -531,7 +574,9 @@ namespace engine::control {
 							reply.Detail.empty() ? "operation refused" : reply.Detail
 						);
 					if (!request.OperationId.empty())
-						Store(*ledger, request.OperationId, normalized.dump(), result, f);
+						data_factory_detail::Store(
+							*ledger, request.OperationId, normalized.dump(), result, f
+						);
 					return result;
 				}
 			};
@@ -587,6 +632,83 @@ namespace engine::control {
 				);
 			}
 		});
+		if (session.SupportsIntervention())
+			Add(Tool{
+				"apply_intervention",
+				"Atomically applies host-owned stable-id property edits against one current paused snapshot.",
+				[] {
+					return Schema(
+						{"instance_id",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version",
+						 "operation_id",
+						 "base_snapshot_id",
+						 "changed_causes"},
+						{"instance_id",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version",
+						 "operation_id",
+						 "base_snapshot_id",
+						 "changed_causes"}
+					);
+				},
+				[invoke, &session](const json &v, std::string &f) {
+					return invoke(
+						"apply_intervention",
+						v,
+						f,
+						true,
+						[](const json &v, Request &r, json &n, std::string &f) {
+							if (!Only(
+									v,
+									{"instance_id",
+									 "expected_tick",
+									 "expected_world_epoch",
+									 "expected_world_version",
+									 "operation_id",
+									 "base_snapshot_id",
+									 "changed_causes"},
+									f
+								))
+								return false;
+							const json *field = nullptr;
+							if (!Field(v, "base_snapshot_id", field, f) ||
+								!Text(*field, "base_snapshot_id", r.BaseSnapshotId, f))
+								return false;
+							if (!Field(v, "changed_causes", field, f) || !field->is_array() ||
+								field->empty() || field->size() > MAXIMUM_ACTIONS) {
+								f = Error("validation_failed", "changed_causes must contain 1 to 32 edits");
+								return false;
+							}
+							for (const json &row : *field) {
+								if (!Only(row, {"target_id", "path", "expected", "value"}, f)) return false;
+								const json *target = nullptr, *path = nullptr, *expected = nullptr,
+										   *value = nullptr;
+								world::DataFactoryIntervention edit;
+								if (!Field(row, "target_id", target, f) ||
+									!Text(*target, "target_id", edit.TargetId, f) ||
+									!Field(row, "path", path, f) || !Text(*path, "path", edit.Path, f) ||
+									!Field(row, "expected", expected, f) ||
+									!InterventionValue(*expected, edit.Expected, f) ||
+									!Field(row, "value", value, f) ||
+									!InterventionValue(*value, edit.Value, f))
+									return false;
+								r.Changes.push_back(std::move(edit));
+							}
+							n["base_snapshot_id"] = r.BaseSnapshotId;
+							n["changed_causes"] = *field;
+							return true;
+						},
+						[&session](const Request &r) {
+							return session.ApplyIntervention(
+								r.InstanceId, r.BaseSnapshotId, r.Changes, r.Tick, r.Version
+							);
+						}
+					);
+				}
+			});
 	}
 }
 

@@ -940,3 +940,67 @@ TEST_CASE(
 	Called(surface, "pause", missing, failed);
 	CHECK(failed);
 }
+
+TEST_CASE("data-factory intervention is guarded, typed, and idempotent", "[control][data-factory]") {
+	Universe universe;
+	MakeWorld(universe, "control-intervention");
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	std::vector<engine::world::DataFactoryIntervention> received;
+	session.SetInterventionExecutor([&](Universe &,
+										WorldId,
+										std::span<const engine::world::DataFactoryIntervention> edits,
+										std::string &) {
+		received.assign(edits.begin(), edits.end());
+		return true;
+	});
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	const auto current = session.Inspect("control-intervention");
+	Called(
+		surface,
+		"pause",
+		json{
+			{"instance_id", "control-intervention"},
+			{"expected_tick", current.Clock.Tick},
+			{"expected_world_epoch", current.WorldEpoch},
+			{"expected_world_version", current.WorldVersion}
+		}
+	);
+	const auto paused = session.Inspect("control-intervention");
+	const json snapshot = Called(
+		surface,
+		"snapshot",
+		json{
+			{"instance_id", "control-intervention"},
+			{"expected_tick", paused.Clock.Tick},
+			{"expected_world_epoch", paused.WorldEpoch},
+			{"expected_world_version", paused.WorldVersion}
+		}
+	);
+	const json request{
+		{"instance_id", "control-intervention"},
+		{"expected_tick", paused.Clock.Tick},
+		{"expected_world_epoch", paused.WorldEpoch},
+		{"expected_world_version", paused.WorldVersion},
+		{"operation_id", "edit-1"},
+		{"base_snapshot_id", snapshot["snapshot_id"]},
+		{"changed_causes",
+		 json::array(
+			 {{{"target_id", "fixture/part"},
+			   {"path", "attributes.Label"},
+			   {"expected", "old"},
+			   {"value", "new"}}}
+		 )}
+	};
+	const json applied = Called(surface, "apply_intervention", request);
+	CHECK(applied["world_version"] == paused.WorldVersion + 1);
+	REQUIRE(received.size() == 1);
+	CHECK(received[0].TargetId == "fixture/part");
+	CHECK(received[0].Expected.Type == engine::world::DataFactoryInterventionValue::Kind::String);
+	CHECK(received[0].Value.String == "new");
+	CHECK(Called(surface, "apply_intervention", request) == applied);
+}

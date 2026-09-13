@@ -100,6 +100,43 @@ TEST_CASE("data-factory refuses a scope without participating systems", "[world]
 	CHECK(reply.Status == DataFactoryStatus::Unsupported);
 }
 
+TEST_CASE("data-factory intervention rolls back a refusing host executor", "[world][data-factory]") {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.intervention");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.intervention", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-factory.intervention", snapshot).Status == DataFactoryStatus::Ok);
+	session.SetInterventionExecutor(
+		[](Universe &worlds,
+		   WorldId target,
+		   std::span<const engine::world::DataFactoryIntervention>,
+		   std::string &) -> bool {
+			worlds.SetState(target, WorldState::Active);
+			throw std::runtime_error("expected value did not match");
+		}
+	);
+	const auto before = session.Inspect("data-factory.intervention");
+	const engine::world::DataFactoryIntervention edit{
+		.TargetId = "fixture",
+		.Path = "attributes.Health",
+		.Expected = {},
+		.Value = {},
+	};
+	const auto refused = session.ApplyIntervention(
+		"data-factory.intervention", snapshot, std::array{edit}, before.Clock.Tick, before.WorldVersion
+	);
+	CHECK(refused.Status == DataFactoryStatus::ValidationFailed);
+	CHECK(refused.Detail == "intervention executor threw: expected value did not match");
+	CHECK(universe.StateOf(world) == WorldState::Suspended);
+	CHECK(session.Inspect("data-factory.intervention").WorldVersion == before.WorldVersion);
+}
+
 TEST_CASE(
 	"data-factory resume restores an all-system pause when physics resume refuses", "[world][data-factory]"
 ) {

@@ -39,6 +39,10 @@ namespace engine::world {
 		Participant = std::move(participant);
 	}
 
+	void DataFactorySession::SetInterventionExecutor(DataFactoryInterventionExecutor executor) {
+		InterventionExecutor = std::move(executor);
+	}
+
 	WorldId DataFactorySession::Resolve(std::string_view instanceId) const {
 		return Worlds.Find(core::Name(instanceId));
 	}
@@ -392,6 +396,90 @@ namespace engine::world {
 			Paused.emplace(std::string(instanceId), restoredPause);
 		const WorldId restored = Resolve(instanceId);
 		return Reply(restored, DataFactoryStatus::Ok, "restored through a scratch universe and fresh epoch");
+	}
+
+	DataFactoryReply DataFactorySession::ApplyIntervention(
+		std::string_view instanceId,
+		std::string_view baseSnapshotId,
+		std::span<const DataFactoryIntervention> changes,
+		uint64_t expectedTick,
+		uint64_t expectedVersion
+	) {
+		const WorldId world = Resolve(instanceId);
+		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (!InterventionExecutor)
+			return Reply(world, DataFactoryStatus::Unsupported, "no host intervention executor is installed");
+		if (!Rehydrate)
+			return Reply(
+				world,
+				DataFactoryStatus::Unsupported,
+				"intervention rollback needs a scheduler rehydrate callback"
+			);
+		if (changes.empty())
+			return Reply(world, DataFactoryStatus::ValidationFailed, "changed_causes is empty");
+		if (expectedVersion != Version || ClockOf(world).Tick != expectedTick)
+			return Reply(
+				world,
+				DataFactoryStatus::VersionConflict,
+				"intervention precondition does not match the world"
+			);
+		if (RenderSnapshotBarrier(instanceId, baseSnapshotId).Status != DataFactoryStatus::Ok)
+			return Reply(
+				world, DataFactoryStatus::StaleSnapshot, "base_snapshot_id is not the current paused world"
+			);
+
+		core::ByteWriter writer(0, MaximumCheckpointBytes);
+		try {
+			if (!Worlds.Save(writer))
+				return Reply(
+					world,
+					DataFactoryStatus::RestoreIncomplete,
+					"world cannot be saved for intervention rollback"
+				);
+		} catch (const std::length_error &) {
+			return Reply(
+				world,
+				DataFactoryStatus::ResourceLimit,
+				"intervention rollback exceeds the configured byte limit"
+			);
+		}
+		std::string detail;
+		bool applied = false;
+		try {
+			applied = InterventionExecutor(Worlds, world, changes, detail);
+		} catch (const std::exception &exception) {
+			detail = std::string("intervention executor threw: ") + exception.what();
+		} catch (...) {
+			detail = "intervention executor threw an unknown exception";
+		}
+		if (applied) {
+			Version++;
+			return Reply(world, DataFactoryStatus::Ok, {});
+		}
+
+		core::ByteReader reader(writer.Bytes());
+		Universe rollback;
+		if (!rollback.Load(reader) || reader.Remaining() != 0)
+			return Reply(
+				world, DataFactoryStatus::RestoreIncomplete, "intervention rollback checkpoint is invalid"
+			);
+		for (const WorldId restored : rollback.Worlds()) {
+			std::string rehydrate;
+			if (!Rehydrate(rollback, restored, rehydrate))
+				return Reply(
+					world, DataFactoryStatus::RestoreIncomplete, "intervention rollback rehydration failed"
+				);
+		}
+		Worlds.ReplaceWith(rollback);
+		return Reply(
+			Resolve(instanceId),
+			DataFactoryStatus::ValidationFailed,
+			detail.empty() ? "intervention executor refused the change" : detail
+		);
+	}
+
+	bool DataFactorySession::SupportsIntervention() const {
+		return static_cast<bool>(InterventionExecutor) && static_cast<bool>(Rehydrate);
 	}
 
 	bool DataFactorySession::HasCheckpoint(std::string_view checkpointId) const {

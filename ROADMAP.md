@@ -39,30 +39,18 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.24
 
-Full render plan: [docs/RENDER-REFACTOR.md](docs/RENDER-REFACTOR.md), including
-the consolidated materials, shaders and rendering optimization work.
-
+Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shaders and rendering optimization work:
 - [x] Add opt-in render-stage image snapshots, raw pixels, metadata and a visual index. GPU overwrite checks pass; capture stalls affect timing.
 - [x] Fix topology renewal after cache expiry and consume ready topology replies before camera routing.
 - [x] Add portal startup readiness and Humanoid camera routing fixes. All 16 product crossing variants pass: 30/60 Hz, first/third person, explicit/automatic subject, held/released movement.
 - [x] Capture a missing-eye-image black frame at its first render stage; retain useful images and remove bulk captures.
 - [x] Reduce editable collision BVH build work and scratch storage. Full Terrain worker profiling remains below.
-
-Continue on `docs/RENDER-REFACTOR-TASKS.md` in feature-first order. Complete
-stabilization work after the feature milestones so isolated bugs do not block
-the renderer build-out.
-
-#### 1. Easy
-
 - [x] Add per-mesh, global-lighting and camera render capability fields to GPU-resident rows so compute passes can branch without CPU readback. Instance policy occupies the existing 64-byte resident row, world and camera policy occupy the shared view uniform, and authored compute nodes can request both without CPU readback.
 - [x] Expose the existing render passes as render-pipeline nodes. Every native render pass has a graph node and backend handler; the remaining work below extends that graph with new features.
 - [x] Add selectable antialiasing choices as render-pipeline nodes. FXAA, TAA and all three SMAA stages have graph node kinds, default shaders and multi-target authored-raster support. A Vulkan graph fixture runs every choice against a hard diagonal, verifies softened output pixels, and verifies TAA's paired history output.
 - [x] Add four authored mesh LOD levels with GPU-side per-instance selection beside occlusion culling. `CustomMeshLOD` overrides `AutoMeshLOD` per level, while nil custom slots fall back to the matching automatic artifact. Each resolved level has its own resident instance row and indirect draw command; a per-view compute pass selects one from projected bounds without returning the result to the CPU. The Vulkan fixture proves near views draw the detailed quad and distant views draw the coarse triangle while preserving the part's authored bounds.
 - [x] Allow visual items to attach compute and post-processing shader nodes, resident only while their pipeline is active. Scene records, serialization, BasePart script properties and policy-aware demand checks select lazy graph shaders. Inactive post and compute nodes pass their input through; a Vulkan fixture proves independent activation, output changes, and target retirement when the pipeline is removed.
 - [x] Add a demo pipeline that exercises capability toggles, antialiasing, post-processing and authored LOD selection. `RenderFeatures.pipeline` extends the production PBR graph with lazy visual compute and post nodes plus FXAA; `RenderFeaturesDemo.luau` authors world, camera and instance policies, then demonstrates `CustomMeshLOD` overriding and falling back per level to `AutoMeshLOD`. The example fixture checks the staged document against its C++ recipe and executes the scene through Luau.
-
-#### 2. Medium
-
 - [x] Define the visual-compositor graph contract using the Unity Scriptable Render Pipeline and Visual Compositor as references. Resources now enforce access, colour space, alpha interpretation, sample and mip shape, array depth, lifetime, history ownership and byte sizing. Authored graphs round-trip the same contract through Studio: https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html and https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html.
 - [x] Move residency and delta upload into nodes, then remove each replaced legacy rendering path. `mesh-residency` owns mesh-table admission and `delta-upload` owns changed instance, skin, indirect, ribbon and overlay transfers. Draw nodes no longer perform hidden upload fallbacks.
 - [x] Add the product-side active-scene collector and parallel presentation walk, then batch every active camera across worlds. Complete owned packets keep their pipeline identity on stable world lanes, ordinary display worlds are not reopened, and one renderer submission includes offscreen active cameras plus the display camera.
@@ -74,9 +62,6 @@ the renderer build-out.
 - [x] Add automatic mesh decimation as the second LOD generation mode. Content intake builds and publishes deterministic artifacts from the base mesh, shares matching artifacts across worlds, preserves material, winding and skin boundaries, and lets each nil `CustomMeshLOD` slot fall back to the generated `AutoMeshLOD` artifact.
 - [x] Profile release CPU and GPU work, residency, caching and transfer bytes after the medium feature set is integrated. The full 15-second `just medium-render-profile` run covers 1, 2 and 8 active worlds through the explicit headless offscreen final target and `--render-pipeline` path. Busiest frames reached 26/57/243 draws and 744/2,232/11,160 triangles; GPU live memory was 133.2/235.2/847.3 MiB; frame means were 0.703/1.598/51.979 ms. Authored demo compute, post and FXAA spans plus GPU delta-upload spans were present.
 - [x] Finish Terrain editable collision worker profiling and optimization as a separate performance task. Dirty refresh keeps unrelated ECS-owned BVHs resident, detects missing triangle resources even at a matching revision, and sends eight terrain chunks across the worker dispatch floor. The latest five-sample release run measured the complete eight-chunk refresh beside 2,000 resident shapes at 7.16 ms, with the retained 64-chunk ledger at 50.99 us.
-
-#### 3. Hard
-
 - [x] Complete portal image host and session contracts for fresh destination captures, current-camera routing, capture retention across route and body waits, inverse lens mapping, lease disconnects and player return handoff. Authorization withdrawal now retires source portal and body compositions, with the full shadow integration, focused withdrawal and server grant suites covering lease retirement.
 - [x] Add tessellation as a composable render-graph node, with view- and capacity-aware plans, compute-readable resident mesh streams and material-matched draws. The Vulkan hard-render fixture proves the dedicated geometry handler submits the exact compute plan and wins over the authored fallback of the same kind.
 - [x] Add bounded screen-space global illumination, ray and path estimators as composable render nodes with view-signature history and submission-safe accumulation. Cached frames execute only the precomputed retained-node closure, path history advances from one to two samples, and a changed view resets it to one. These are screen-space estimators, not acceleration-structure tracing.
@@ -92,13 +77,10 @@ the renderer build-out.
 
 `datafactories-docs/MCP-ADDITIONS.md` describes proposed data-factory requirements; these are design targets, not verified implemented APIs:
 - [_] accept text instructions with reference images, controls, video motion constraints and externally interpreted engine-validated patches.
-- [x] add a dedicated OBB geometry test. The core suite checks rotated half extents and containment of every transformed corner.
 - [_] add the remaining MCP tools and demo coverage for script packages, multicamera, multiworld, segmentation, optical flow, lighting contribution, rigs, audio export and interop.
-- [x] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks. The Python factory validates immutable text spans, points, semantic and part masks, control IDs, frame times and audio sample rates against media bounds.
 - [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
 - [_] capture IDs, semantic masks and part masks.
 - [_] complete autonomous capture workflow in `DataFactoryDemo.luau`.
-- [x] declare interop subsets for glTF, USD, COCO, YOLO, GeoJSON and WKT. The named profiles now define exact represented fields, bundle sidecars, coordinate rules, stable-ID mappings, machine-readable loss classes and atomic import refusal conditions.
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records.
 - [_] define the remaining camera intrinsics, extrinsics, near/far, jitter, lens distortion, crop, units and world/camera coordinates.
 - [_] describe render-graph passes and resources with budgets and dependencies, without inventing ground truth.
@@ -116,18 +98,21 @@ the renderer build-out.
 - [_] maintain an acceptance fixture suite for replay roundtrip, no-time-advance, image-label alignment, retry isolation and invalid data.
 - [_] make step plus snapshot plus multicamera capture atomic, with asynchronous readback completion.
 - [_] profile release captures for actual bytes, allocations, peak memory, timings and output quality.
+- [_] provide full checkpoint coverage for ECS, physics warm start, RNG, script schedulers, events, clocks, string IDs and pinned assets; the API requires a real host rehydrator.
 - [_] provide occupancy, SDF, BEV, navmesh and affordance queries with authored semantics.
 - [_] record optical flow, motion vectors, trajectories, scene cuts and validity flags.
 - [_] record visibility, occlusion, disocclusion and visible or amodal masks.
 - [_] restore checkpoints only when compatible, and create fresh versions after restore.
 - [_] support forks and versioned causal edits, including effects outside the edited spatial region while keeping branches isolated.
 - [_] support forward scene-to-modalities and inverse observation-to-scene patches, with rerendered numeric and semantic metrics plus ambiguity masks.
-- [_] provide full checkpoint coverage for ECS, physics warm start, RNG, script schedulers, events, clocks, string IDs and pinned assets; the API requires a real host rehydrator.
 - [_] support reflections from SSR, probes, mirrors and portals, including secondary views, recursion and staleness.
 - [_] support render-only steps with zero simulation advance and an explicit temporal-history policy.
-- [x] synchronize audio waveforms with source events and timing. The audio mixer retains a fixed-capacity, allocation-free applied-command and natural-finish trace; immutable observations copy post-clip float32 samples, exact sample clocks, stable scene source names, spatial state, attenuation provenance and explicit unsupported occlusion state.
 - [_] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership.
 - [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure.
+- [x] add a dedicated OBB geometry test. The core suite checks rotated half extents and containment of every transformed corner.
+- [x] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks. The Python factory validates immutable text spans, points, semantic and part masks, control IDs, frame times and audio sample rates against media bounds.
+- [x] declare interop subsets for glTF, USD, COCO, YOLO, GeoJSON and WKT. The named profiles now define exact represented fields, bundle sidecars, coordinate rules, stable-ID mappings, machine-readable loss classes and atomic import refusal conditions.
+- [x] synchronize audio waveforms with source events and timing. The audio mixer retains a fixed-capacity, allocation-free applied-command and natural-finish trace; immutable observations copy post-clip float32 samples, exact sample clocks, stable scene source names, spatial state, attenuation provenance and explicit unsupported occlusion state.
 - [x] add EditableImage:ToBuffer() and EditableImage:FromBuffer(buffer) (RGBA) to luau and engine.
 - [x] add the data-capture graph's default PBR data-capture node.
 - [x] capture RGB linear HDR, depth and packed normals.
@@ -149,11 +134,10 @@ the renderer build-out.
 - [x] support physics-only pause, including clock and character gates.
 - [x] validate RGBA8 buffers as exactly width*height*4, including orientation, color space, alpha and copy semantics.
 
-Rendering extra fixes:
+General:
+- [_] physics profiler in studio is non-functional. idk if its capturing snapshots or anything, but it shows no values. Use `slide` demo to test it.
 - [x] blackhole warp curves inward consistently across spin phases.
 - [x] character collision and wall sliding work against objects.
-
-TODO tweaks:
 - [x] batch and reuse selection geometry across viewports.
 - [x] marquee selection and direct surface drag work, with undo support.
 - [x] node canvas dragging works.
@@ -167,18 +151,15 @@ TODO tweaks:
 - [x] rename View > Physics Solver to View > Physics Profiler, place it under View > Pipeline Profiler, and add stage and flame views, pause, and joined worker timings including tick exchange.
 - [x] queue particle:Emit through ECS, drain bursts in batches, and include Enabled continuous emission.
 - [x] separate Network Profiler waiting, active wire, ready and failed states, with stage and flame views.
-
-Verification: focused Vulkan lens, full-world, Studio and live Studio checks pass for the covered rendering, editor, profiler and pause work. The broader pipeline, source and generated-doc checks were outside this verification.
-
-Extra:
-- [_] update and prune old content in documentation. check each statement, update, remove or replace.
-
 - [x] Store script demos in `mono.engine/examples/assets/scripts/` and world
   demos in `mono.engine/examples/assets/worlds/`, staged as
   `assets/examples/scripts/` and `assets/examples/worlds/`, with `DemosLoader`
   as the shared interface. Bladeborne is a plain XML `.aworld` with client,
   server, and shared role-separated scripts; Studio, client, server, and
   launcher access the demo tree.
+
+Extra:
+- [_] update and prune old content in documentation. check each statement, update, remove or replace.
 
 ### v0.25
 

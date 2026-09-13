@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -78,6 +79,30 @@ namespace engine::world {
 	using DataFactoryPauseParticipant =
 		std::function<bool(WorldId world, DataFactoryPauseScope scope, bool paused, std::string &)>;
 
+	// Copied control values cross into the host executor. The world service does
+	// not interpret a scene property path or retain a JSON representation.
+	struct DataFactoryInterventionValue {
+		enum class Kind : uint8_t { Missing, Boolean, Integer, Number, String };
+
+		Kind Type = Kind::Missing;
+		bool Boolean = false;
+		int64_t Integer = 0;
+		double Number = 0.0;
+		std::string String;
+	};
+
+	struct DataFactoryIntervention {
+		std::string TargetId;
+		std::string Path;
+		DataFactoryInterventionValue Expected;
+		DataFactoryInterventionValue Value;
+	};
+
+	// The product owns scene-property vocabulary and must apply every row or no
+	// rows. The session restores its encoded rollback point if this refuses.
+	using DataFactoryInterventionExecutor =
+		std::function<bool(Universe &, WorldId, std::span<const DataFactoryIntervention>, std::string &)>;
+
 	class DataFactorySession final {
 	  public:
 		explicit DataFactorySession(
@@ -86,6 +111,7 @@ namespace engine::world {
 
 		void SetRehydrate(DataFactoryRehydrate rehydrate);
 		void SetPauseParticipant(DataFactoryPauseParticipant participant);
+		void SetInterventionExecutor(DataFactoryInterventionExecutor executor);
 
 		DataFactoryReply
 		Pause(std::string_view instanceId, DataFactoryPauseScope scope, uint64_t expectedTick);
@@ -108,6 +134,14 @@ namespace engine::world {
 		DataFactoryReply RenderSnapshotBarrier(std::string_view instanceId, std::string_view snapshotId);
 		DataFactoryReply Checkpoint(std::string_view instanceId, std::string &checkpointId);
 		DataFactoryReply Restore(std::string_view instanceId, std::string_view checkpointId);
+		DataFactoryReply ApplyIntervention(
+			std::string_view instanceId,
+			std::string_view baseSnapshotId,
+			std::span<const DataFactoryIntervention> changes,
+			uint64_t expectedTick,
+			uint64_t expectedVersion
+		);
+		bool SupportsIntervention() const;
 
 		bool HasCheckpoint(std::string_view checkpointId) const;
 
@@ -131,6 +165,7 @@ namespace engine::world {
 		uint64_t NextCheckpoint = 1;
 		DataFactoryRehydrate Rehydrate;
 		DataFactoryPauseParticipant Participant;
+		DataFactoryInterventionExecutor InterventionExecutor;
 		std::unordered_map<std::string, PauseState> Paused;
 		std::unordered_map<std::string, DataFactoryCheckpoint> Checkpoints;
 		std::vector<std::string> CheckpointOrder;
