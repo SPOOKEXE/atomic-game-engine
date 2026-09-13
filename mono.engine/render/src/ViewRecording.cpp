@@ -2607,10 +2607,26 @@ namespace engine::render {
 		profile.End = [this](const graph::RunContext &context) { return EndNodeProfile(context); };
 		GraphRunner frameRunner(frameNodes, State->ProfileTier, std::move(profile));
 
-		struct ProbedRunner final : graph::NodeRunner {
+		struct RetainedRunner final : graph::NodeRunner {
 			GraphRunner &Inner;
+			std::function<bool(const graph::RunContext &)> Enabled;
+			RetainedRunner(GraphRunner &inner, decltype(Enabled) enabled)
+				: Inner(inner), Enabled(std::move(enabled)) {}
+			bool Run(const graph::RunContext &context) override {
+				return !Enabled || Enabled(context) ? Inner.Run(context) : true;
+			}
+		};
+		RetainedRunner retained(frameRunner, [this](const graph::RunContext &context) {
+			if (Request.Damage.Scene) return true;
+			return context.Node.Value != 0 && context.Node.Value <= Pipeline->RetainedNodes.size() &&
+				   Pipeline->RetainedNodes[context.Node.Value - 1] != 0;
+		});
+
+		struct ProbedRunner final : graph::NodeRunner {
+			graph::NodeRunner &Inner;
 			std::function<void(const graph::RunContext &, bool, bool)> Probe;
-			ProbedRunner(GraphRunner &inner, decltype(Probe) probe) : Inner(inner), Probe(std::move(probe)) {}
+			ProbedRunner(graph::NodeRunner &inner, decltype(Probe) probe)
+				: Inner(inner), Probe(std::move(probe)) {}
 			bool Run(const graph::RunContext &context) override {
 				Probe(context, true, true);
 				const bool accepted = Inner.Run(context);
@@ -2619,7 +2635,7 @@ namespace engine::render {
 			}
 		};
 		ProbedRunner probed(
-			frameRunner, [this, State](const graph::RunContext &context, bool before, bool accepted) {
+			retained, [this, State](const graph::RunContext &context, bool before, bool accepted) {
 				if (!State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)) return;
 				ClosePass();
 				const auto save = [&](const Impl::NamedTexture &texture, std::string_view resource) {
@@ -2673,7 +2689,7 @@ namespace engine::render {
 		);
 		graph::NodeRunner &runner = State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)
 										? static_cast<graph::NodeRunner &>(probed)
-										: frameRunner;
+										: retained;
 		bool dispatched = false;
 		if (State->BatchActive) {
 			const bool frameSetup =

@@ -15,6 +15,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
@@ -334,6 +335,145 @@ namespace engine::render {
 				}
 			}
 			return nodes;
+		}
+
+		struct RetainedNodePlan {
+			std::vector<uint8_t> Nodes;
+			uint16_t Families = 0;
+		};
+
+		template <size_t Size> bool KindIn(core::Name kind, const std::array<std::string_view, Size> &kinds) {
+			return std::find(kinds.begin(), kinds.end(), kind.Text()) != kinds.end();
+		}
+
+		uint16_t RetainedFamiliesOf(const graph::RenderGraph &pipeline, std::span<const uint8_t> retained) {
+			static constexpr std::array uploadKinds{
+				std::string_view("world"),
+				std::string_view("camera"),
+				std::string_view("entities"),
+				std::string_view("cull-frustum"),
+				std::string_view("cull-distance"),
+				std::string_view("filter-tag"),
+				std::string_view("order-draw"),
+				std::string_view("mesh-residency"),
+				std::string_view("delta-upload"),
+				std::string_view("select-lod")
+			};
+			static constexpr std::array shadowKinds{std::string_view("shadow")};
+			static constexpr std::array mirrorKinds{
+				std::string_view("mirror-capture"), std::string_view("mirror-overlay")
+			};
+			static constexpr std::array portalKinds{
+				std::string_view("portal-capture"),
+				std::string_view("portal-tonemap"),
+				std::string_view("portal-overlay")
+			};
+			static constexpr std::array surfaceKinds{std::string_view("surface-capture")};
+			static constexpr std::array authoredKinds{
+				std::string_view("raster"),
+				std::string_view("fxaa"),
+				std::string_view("taa"),
+				std::string_view("smaa-edges"),
+				std::string_view("smaa-blend"),
+				std::string_view("smaa-resolve"),
+				std::string_view("exposure-grade"),
+				std::string_view("hsv"),
+				std::string_view("mix"),
+				std::string_view("transform-crop"),
+				std::string_view("blur"),
+				std::string_view("dispatch"),
+				std::string_view("tessellate"),
+				std::string_view("global-illumination"),
+				std::string_view("raytrace"),
+				std::string_view("pathtrace")
+			};
+			static constexpr std::array shadingKinds{
+				std::string_view("ambient-response"),
+				std::string_view("ambient-merge"),
+				std::string_view("ambient-correct"),
+				std::string_view("colour-compose"),
+				std::string_view("depth-compose"),
+				std::string_view("last-frame"),
+				std::string_view("blit"),
+				std::string_view("depth-linearise"),
+				std::string_view("hzb"),
+				std::string_view("ssao"),
+				std::string_view("deferred-lighting"),
+				std::string_view("skybox-compute"),
+				std::string_view("clouds-compute"),
+				std::string_view("sky"),
+				std::string_view("fog"),
+				std::string_view("shader-lenses"),
+				std::string_view("tonemap")
+			};
+			static constexpr std::array geometryKinds{
+				std::string_view("tessellate"),
+				std::string_view("tessellated-draw"),
+				std::string_view("forward"),
+				std::string_view("gbuffer"),
+				std::string_view("transparent-layer"),
+				std::string_view("transparent")
+			};
+
+			uint16_t families = 0;
+			for (uint32_t value = 1; value <= pipeline.Count(); ++value) {
+				if (value > retained.size() || retained[value - 1] == 0) continue;
+				const graph::Node *node = pipeline.Find(graph::NodeId{value});
+				if (node == nullptr) continue;
+				if (KindIn(node->Kind, uploadKinds)) families |= RetainedUpload;
+				if (KindIn(node->Kind, shadowKinds)) families |= RetainedShadow;
+				if (KindIn(node->Kind, mirrorKinds)) families |= RetainedMirror;
+				if (KindIn(node->Kind, portalKinds)) families |= RetainedPortal;
+				if (KindIn(node->Kind, surfaceKinds)) families |= RetainedSurface;
+				if (KindIn(node->Kind, authoredKinds)) families |= RetainedAuthored;
+				if (KindIn(node->Kind, shadingKinds)) families |= RetainedShading;
+				if (KindIn(node->Kind, geometryKinds)) families |= RetainedGeometry;
+			}
+			return families;
+		}
+
+		RetainedNodePlan
+		RetainedNodesOf(const graph::RenderGraph &pipeline, std::span<const core::Name> customKinds) {
+			std::vector<uint8_t> retained(pipeline.Count(), 0);
+			std::vector<uint8_t> liveResources(pipeline.ResourceCount() + 1, 0);
+			std::vector<uint8_t> historyResources(pipeline.ResourceCount() + 1, 0);
+			for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
+				const graph::ResourceDesc *resource = pipeline.FindResource(graph::ResourceId{value});
+				historyResources[value] =
+					resource != nullptr && resource->Lifetime == graph::ResourceLifetime::History;
+				liveResources[value] = historyResources[value];
+			}
+
+			bool changed = true;
+			while (changed) {
+				changed = false;
+				for (uint32_t value = 1; value <= pipeline.Count(); ++value) {
+					const graph::Node *node = pipeline.Find(graph::NodeId{value});
+					if (node == nullptr || !node->Enabled || retained[value - 1] != 0) continue;
+					const graph::NodeKindSpec *kind = graph::NodeCatalogue::Find(node->Kind);
+					const bool output = kind != nullptr && kind->Category == graph::NodeCategory::Output;
+					const bool custom =
+						std::find(customKinds.begin(), customKinds.end(), node->Kind) != customKinds.end();
+					const bool consumesLive =
+						std::any_of(node->Reads.begin(), node->Reads.end(), [&](graph::ResourceId resource) {
+							return resource.Value < liveResources.size() &&
+								   liveResources[resource.Value] != 0;
+						});
+					const bool writesHistory = std::any_of(
+						node->Writes.begin(), node->Writes.end(), [&](graph::ResourceId resource) {
+							return resource.Value < historyResources.size() &&
+								   historyResources[resource.Value] != 0;
+						}
+					);
+					if (!output && !custom && !consumesLive && !writesHistory) continue;
+					retained[value - 1] = 1;
+					changed = true;
+					for (const graph::ResourceId resource : node->Writes) {
+						if (resource.Value < liveResources.size()) liveResources[resource.Value] = 1;
+					}
+				}
+			}
+			return {retained, RetainedFamiliesOf(pipeline, retained)};
 		}
 	}
 
@@ -2012,6 +2152,9 @@ namespace engine::render {
 			installed.Graph = pipeline;
 			installed.Compiled = std::move(compiled);
 			installed.EntityNodes = EntityNodesOf(installed.Graph, installed.Compiled);
+			RetainedNodePlan retained = RetainedNodesOf(installed.Graph, customKinds);
+			installed.RetainedNodes = std::move(retained.Nodes);
+			installed.RetainedFamilies = retained.Families;
 			installed.Aliases = graph::BuildResourceAliases(installed.Graph, installed.Compiled);
 			installed.Buffers = graph::PlanCommandBuffers(schedule);
 			installed.Schedule = std::move(schedule);
@@ -2022,12 +2165,15 @@ namespace engine::render {
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
+		RetainedNodePlan retained = RetainedNodesOf(pipeline, customKinds);
 		State->NamedPipelines.push_back(
 			Impl::NamedPipeline{
 				name,
 				pipeline,
 				std::move(compiled),
 				std::move(entityNodes),
+				std::move(retained.Nodes),
+				retained.Families,
 				std::move(schedule),
 				std::move(aliases),
 				std::move(buffers),
@@ -2124,11 +2270,15 @@ namespace engine::render {
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
+		const std::vector<core::Name> noCustomKinds;
+		RetainedNodePlan retained = RetainedNodesOf(pipeline, noCustomKinds);
 		State->EngineDefault = Impl::NamedPipeline{
 			core::Name("Engine Default"),
 			pipeline,
 			std::move(compiled),
 			std::move(entityNodes),
+			std::move(retained.Nodes),
+			retained.Families,
 			std::move(schedule),
 			std::move(aliases),
 			std::move(buffers)

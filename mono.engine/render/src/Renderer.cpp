@@ -2693,13 +2693,17 @@ namespace engine::render {
 			return result;
 		}
 
-		// A damaged scene binds every built-in kind directly. Filling the table
-		// with no-op handlers first would build the node catalogue and then replace
-		// every entry on the hot path. An unchanged scene still needs those no-ops
-		// because graph traversal reaches the cached stages before the output nodes.
+		// A damaged scene binds every built-in kind directly. An unchanged scene
+		// starts with no-op handlers, then replaces only families containing retained
+		// history or output work. This keeps temporal pipelines alive without rebuilding
+		// every handler closure for a cached frame.
 		NodeTable frameNodes;
 		{
 			ENGINE_PROFILE_CAT("build node table", core::ProfileCategory::Render);
+			const auto retains = [&recording](RetainedNodeFamily family) {
+				return recording.Request.Damage.Scene ||
+					   (recording.Pipeline->RetainedFamilies & static_cast<uint16_t>(family)) != 0;
+			};
 			if (!recording.Request.Damage.Scene) {
 				static const NodeTable idleNodes =
 					BackendTable([](const graph::RunContext &) { return true; });
@@ -2708,16 +2712,15 @@ namespace engine::render {
 			for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
 				frameNodes.Set(installed.Kind, installed.Handler);
 			}
-			if (recording.Request.Damage.Scene) {
-				recording.RegisterUploadNodes(frameNodes);
-				recording.RegisterShadowNodes(frameNodes);
-				recording.RegisterMirrorNodes(frameNodes);
-				recording.RegisterPortalNodes(frameNodes);
-				recording.RegisterSurfaceNodes(frameNodes);
-				recording.RegisterGeometryNodes(frameNodes);
-				recording.RegisterShadingNodes(frameNodes);
-				recording.RegisterAuthoredNodes(frameNodes);
-			}
+			if (retains(RetainedAuthored)) recording.RegisterAuthoredNodes(frameNodes);
+			if (retains(RetainedUpload)) recording.RegisterUploadNodes(frameNodes);
+			if (retains(RetainedShadow)) recording.RegisterShadowNodes(frameNodes);
+			if (retains(RetainedMirror)) recording.RegisterMirrorNodes(frameNodes);
+			if (retains(RetainedPortal)) recording.RegisterPortalNodes(frameNodes);
+			if (retains(RetainedSurface)) recording.RegisterSurfaceNodes(frameNodes);
+			if (retains(RetainedShading)) recording.RegisterShadingNodes(frameNodes);
+			// Dedicated geometry handlers win over authored fallbacks that share a kind.
+			if (retains(RetainedGeometry)) recording.RegisterGeometryNodes(frameNodes);
 			recording.RegisterOutputNodes(frameNodes);
 		}
 

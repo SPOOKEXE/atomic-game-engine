@@ -125,11 +125,11 @@ namespace engine::render {
 				return recording.TextureBindings(runContext);
 			};
 
-			enterNamedPass(context.Name);
 			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 			if (node == nullptr) {
 				return false;
 			}
+			enterNamedPass(context.Name);
 			const std::string *attachment = node->Parameter(core::Name("attachment"));
 			const bool attachmentNode = attachment != nullptr && *attachment == "visual";
 			const uint32_t supported = SupportedRenderFeatures(State->Caps);

@@ -62,6 +62,16 @@
 namespace engine::render {
 	// Which half of the two-pass transparent-layer capture a draw records.
 	enum class TransparentLayerPhase : uint8_t { None, Nearest, Colour };
+	enum RetainedNodeFamily : uint16_t {
+		RetainedUpload = 1u << 0,
+		RetainedShadow = 1u << 1,
+		RetainedMirror = 1u << 2,
+		RetainedPortal = 1u << 3,
+		RetainedSurface = 1u << 4,
+		RetainedAuthored = 1u << 5,
+		RetainedShading = 1u << 6,
+		RetainedGeometry = 1u << 7,
+	};
 
 	struct Renderer::Impl {
 		SDL_Window *Window = nullptr;
@@ -74,6 +84,12 @@ namespace engine::render {
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
 			std::vector<graph::NodeId> EntityNodes;
+			// Nodes that must still execute while scene inputs are retained. This
+			// includes output/custom nodes and the forward closure from history.
+			std::vector<uint8_t> RetainedNodes;
+			// Built-in handler families represented in RetainedNodes, computed once
+			// when the pipeline is installed so cached frames do no graph scans.
+			uint16_t RetainedFamilies = 0;
 			graph::ExecutionSchedule Schedule;
 			graph::ResourceAliasPlan Aliases;
 
