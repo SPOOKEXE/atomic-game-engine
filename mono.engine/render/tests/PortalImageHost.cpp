@@ -1106,12 +1106,15 @@ TEST_CASE(
 	eye.Target = &target;
 	eye.CameraFrame = destinationEye;
 	const PortalEyeGeometrySource geometry{bodyWorld, std::span(body), {}};
-	const auto centrePixel = [&] {
+	const auto captureEye = [&] {
 		OverlayImage overlay;
 		fixture.Render.Render(std::span(&eye, 1), overlay, nullptr, false);
-		const auto image = render::test::CaptureResource(
+		return render::test::CaptureResource(
 			fixture.Render, core::Name("composed-image"), 0, 65, 65, render::test::ImageFormat::Bgra8Unorm
 		);
+	};
+	const auto centrePixel = [&] {
+		const auto image = captureEye();
 		const auto *pixel = image.Bytes.data() + 32 * image.RowStrideBytes + 32 * 4;
 		return std::array{
 			std::to_integer<int>(pixel[2]), std::to_integer<int>(pixel[1]), std::to_integer<int>(pixel[0])
@@ -1125,9 +1128,27 @@ TEST_CASE(
 	eye.EyeImage = host.Image(eye.Slot, eye.EyeImageKey);
 	const uint64_t firstImage = eye.EyeImage;
 	REQUIRE(firstImage != 0);
-	const auto firstCentre = centrePixel();
+	const auto firstFrame = captureEye();
+	const auto *firstPixel = firstFrame.Bytes.data() + 32 * firstFrame.RowStrideBytes + 32 * 4;
+	const std::array firstCentre{
+		std::to_integer<int>(firstPixel[2]),
+		std::to_integer<int>(firstPixel[1]),
+		std::to_integer<int>(firstPixel[0])
+	};
 	CAPTURE(firstCentre);
 	CHECK(firstCentre[2] > firstCentre[0]);
+
+	// A route can be absent for one frame while its topology request is in flight.
+	// The prior eye image remains drawable until a route explicitly retires it.
+	const auto topologyWait = PortalImageDestination{worlds.Route().Authored, {}};
+	const auto topologyWaitNow = START + std::chrono::milliseconds(1);
+	CHECK(host.SubmitEye(worlds.Source, topologyWait, eye, settings, topologyWaitNow, geometry) == 0);
+	CHECK(eye.EyeImage == firstImage);
+	CHECK(host.Image(eye.Slot, eye.EyeImageKey) == firstImage);
+	const auto retainedFrame = captureEye();
+	const auto retained = render::test::CompareImages(firstFrame.View(), retainedFrame.View());
+	CAPTURE(retained.MismatchedPixels, retained.MaximumAbsoluteError);
+	CHECK(retained.Passed());
 
 	// The blue foreign body hides the red backdrop at the initial pose. Moving
 	// sideways reveals the backdrop at the same pixel, so this checks the capture

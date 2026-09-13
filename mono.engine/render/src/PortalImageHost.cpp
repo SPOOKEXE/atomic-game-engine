@@ -648,7 +648,7 @@ namespace engine::render {
 		view.Pipeline = pipelineName;
 		view.EyeImageKey = key;
 		view.EyeImage = 0;
-		if (!destination.Authored.IsValid() || !state.Universe.NameOf(destination.World).IsValid()) {
+		if (!destination.Authored.IsValid()) {
 			RemoveViewport(view.Slot);
 			return 0;
 		}
