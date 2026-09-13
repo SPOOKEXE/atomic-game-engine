@@ -55,11 +55,17 @@ namespace engine::render {
 			std::vector<DemandedPortal> Portals;
 			std::vector<Composition> Compositions;
 		};
-		void RetireCompositions(Source &source, bool all = false) {
+		void RetireCompositions(
+			Source &source, bool all = false, const std::vector<core::Name> *revokedPortals = nullptr
+		) {
 			if (BodyJob && BodyJob->Slot == source.Slot && (all || !BodySource()))
 				AbortBody(LastTime.value_or(Time{}));
 			std::erase_if(source.Compositions, [&](const Composition &image) {
-				if (!all) {
+				const bool revoked =
+					revokedPortals != nullptr &&
+					std::find(revokedPortals->begin(), revokedPortals->end(), image.Portal) !=
+						revokedPortals->end();
+				if (!all && !revoked) {
 					const auto prepared =
 						std::find_if(PreparedBodies.begin(), PreparedBodies.end(), [&](const auto &entry) {
 							return entry.PreparationToken == image.Preparation &&
@@ -743,6 +749,18 @@ namespace engine::render {
 				if (prepared->Route)
 					State->ReleaseShadowRoute(*prepared->Route, State->LastTime.value_or(Time{}));
 				prepared = State->PreparedBodies.erase(prepared);
+			}
+			// A retained body is authorization-bound even after its capture reached the
+			// source. Drop each routed preview before a later frame can reuse its tree.
+			for (auto &source : State->Sources) {
+				std::vector<core::Name> revokedPortals;
+				std::erase_if(source.Portals, [&](const Impl::DemandedPortal &portal) {
+					if (portal.Destination != world) return false;
+					revokedPortals.push_back(portal.Name);
+					source.Runtime->InvalidatePortal(portal.Name.Text());
+					return true;
+				});
+				State->RetireCompositions(source, false, &revokedPortals);
 			}
 		}
 		return true;

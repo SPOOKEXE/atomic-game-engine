@@ -18,6 +18,9 @@
 
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
+#include <numeric>
+
 TEST_SUITE_ID("engine.render.portalshadowtransportintegration")
 TEST_DEPENDS("engine.render.portalimagehost")
 
@@ -27,10 +30,11 @@ TEST_CASE(
 ) {
 	using namespace engine;
 	using namespace engine::render;
-	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 	const bool nested = mode == 1 || mode == 4;
 	const bool prepared = mode >= 9;
 	const bool animatedAccessory = mode == 12;
+	const bool withdrawAuthorization = mode == 13;
 	CAPTURE(mode);
 	scene::RegisterSceneClasses();
 	world::Universe worlds;
@@ -330,6 +334,30 @@ TEST_CASE(
 	auto result = finish(job);
 	REQUIRE(result.Status == PortalTreeCompositionStatus::Complete);
 	REQUIRE(result.Image != 0);
+	if (withdrawAuthorization) {
+		const auto activeTreeLeases =
+			std::count_if(tree->Leases.begin(), tree->Leases.end(), [](uint64_t lease) {
+				return lease != 0;
+			});
+		const auto captureImages = std::accumulate(
+			tree->Nodes.begin(), tree->Nodes.end(), size_t{}, [](size_t count, const auto &node) {
+				return count + std::count_if(node.Images.begin(), node.Images.end(), [](uint64_t image) {
+						   return image != 0;
+					   });
+			}
+		);
+		const auto beforeWithdrawal = renderer.PortalImageUsage();
+		CAPTURE(activeTreeLeases, captureImages, beforeWithdrawal.Images);
+		REQUIRE(activeTreeLeases == 2);
+		REQUIRE(captureImages == 3);
+		REQUIRE(beforeWithdrawal.Images == 5);
+		REQUIRE(host.SetRetainedBodyAuthorization(rooms[0], {}));
+		CHECK_FALSE(host.Capture(0, portal));
+		CHECK_FALSE(renderer.FindPortalCaptureTree(capture->Tree));
+		CHECK_FALSE(renderer.DropPortalImage(result.Image));
+		CHECK(renderer.PortalImageUsage().Images == 0);
+		return;
+	}
 	size_t releasedDisplayImages = 0;
 	if (prepared) {
 		const auto preparedUsage = renderer.PortalImageUsage();
