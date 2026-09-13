@@ -52,7 +52,7 @@ print("DataFactory capture", captureChannels.status, captureChannels.reason)
 -- external lifecycle owner. Capture is asynchronous: keep its ticket, poll for
 -- a terminal status, read each plane through GetCaptureBuffer, then release it.
 -- The retained bytes are never put into a Lua table.
-local function requestCapture(snapshotId: string)
+local function _requestCapture(snapshotId: string)
 	return DataSceneService:Capture({
 		snapshot_id = snapshotId,
 		pipeline = "Default PBR#1",
