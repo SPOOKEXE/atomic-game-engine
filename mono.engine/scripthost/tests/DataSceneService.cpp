@@ -247,6 +247,8 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				assert(game:GetService("DataSceneService"):GetSceneSnapshot().entities[1].id == "fixture/observed")
 				local capabilities = game:GetService("DataSceneService"):GetCapabilities()
 				assert(capabilities.scene_snapshot and not capabilities.render_capture)
+				assert(capabilities.spatial_queries and capabilities.spatial_query_kinds[3] == "obb_overlap")
+				assert(capabilities.max_raycast_distance_metres == 100000)
 				local capture = game:GetService("DataSceneService"):GetCaptureChannels()
 				assert(capture.status == "capability_unsupported" and #capture.channels == 0)
 			)");
@@ -263,7 +265,7 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				snapshot.entities[0].id = "mutated";
 				if (game.GetService("DataSceneService").GetSceneSnapshot().entities[0].id !== "fixture/observed") throw new Error("snapshot aliases ECS state");
 				const capabilities = game.GetService("DataSceneService").GetCapabilities();
-				if (!capabilities.scene_snapshot || capabilities.render_capture) throw new Error("capabilities mismatch");
+				if (!capabilities.scene_snapshot || capabilities.render_capture || !capabilities.spatial_queries || capabilities.spatial_query_kinds[2] !== "obb_overlap" || capabilities.max_raycast_distance_metres !== 100000) throw new Error("capabilities mismatch");
 				const capture = game.GetService("DataSceneService").GetCaptureChannels();
 				if (capture.status !== "capability_unsupported" || capture.channels.length !== 0) throw new Error("capture mismatch");
 			)");
@@ -554,6 +556,7 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				assert(service:OverlapAABB({minimum = Vector3.new(-1, -1, -1), maximum = Vector3.new(1, 1, 1)}).ids[1] == "query/box")
 				assert(service:OverlapOBB({frame = CFrame.new(0, 0, 0), half_extent = Vector3.new(1, 1, 1)}).ids[1] == "query/box")
 				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(1, 0, 0), max_distance_metres = -1}).status == "invalid_raycast_query")
+				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(0, 0, 0), max_distance_metres = 1}).status == "invalid_raycast_query")
 			)");
 		} else {
 			Run(*runtime, R"(
@@ -562,6 +565,7 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				if (service.OverlapAABB({minimum: Vector3.new(-1, -1, -1), maximum: Vector3.new(1, 1, 1)}).ids[0] !== "query/box") throw new Error("aabb mismatch");
 				if (service.OverlapOBB({frame: CFrame.new(0, 0, 0), half_extent: Vector3.new(1, 1, 1)}).ids[0] !== "query/box") throw new Error("obb mismatch");
 				if (service.OverlapAABB({minimum: Vector3.new(1, 1, 1), maximum: Vector3.new(-1, -1, -1)}).status !== "invalid_aabb_query") throw new Error("invalid bounds accepted");
+				if (service.Raycast({origin: Vector3.new(0, 0, 0), direction: Vector3.new(0, 0, 0), max_distance_metres: 1}).status !== "invalid_raycast_query") throw new Error("zero ray accepted");
 			)");
 		}
 	}

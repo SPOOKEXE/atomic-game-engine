@@ -5,6 +5,8 @@
 // remain at their respective boundaries.
 // @tier L9 · shared
 
+#include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/script/Codec.hpp>
 
@@ -33,6 +35,22 @@ namespace engine::script {
 	inline constexpr size_t MAX_DATA_SCENE_ENTITIES = 10'000;
 	inline constexpr size_t MAX_DATA_SCENE_ID_BYTES = 256;
 
+	// Typed query requests shared by scripts and thin control-surface adapters.
+	// Directions and rotations are normalized at this boundary before physics sees them.
+	struct DataSceneRaycastRequest {
+		core::Vector3 Origin;
+		core::Vector3 Direction;
+		float MaxDistanceMetres = 0;
+	};
+	struct DataSceneAabbRequest {
+		core::Vector3 Minimum;
+		core::Vector3 Maximum;
+	};
+	struct DataSceneObbRequest {
+		core::CFrame Frame;
+		core::Vector3 HalfExtent;
+	};
+
 	DataSceneResult GetCapabilities(const ecs::Store &store);
 	DataSceneResult GetSceneSnapshot(ecs::Store &store, size_t limit = MAX_DATA_SCENE_ENTITIES);
 	DataSceneResult GetCameraRenderingData(const ecs::Store &store, ecs::Entity camera);
@@ -41,6 +59,11 @@ namespace engine::script {
 	DataSceneResult
 	GetCaptureChannels(const ecs::Store &store, const std::shared_ptr<DataCaptureBridge> &bridge);
 	DataSceneResult GetResources(const ecs::Store &store);
+
+	// Query prepared collider geometry and return only stable authored identities.
+	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request);
+	DataSceneResult OverlapAABB(const ecs::Store &store, const DataSceneAabbRequest &request);
+	DataSceneResult OverlapOBB(const ecs::Store &store, const DataSceneObbRequest &request);
 
 	const ServiceSurface &DataSceneServiceSurface();
 }

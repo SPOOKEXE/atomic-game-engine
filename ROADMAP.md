@@ -127,9 +127,9 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [x] make `DataFactoryDemo.luau` read and print metadata, round-trip a buffer and include a capture request example.
 - [x] make asynchronous HDR, depth and packed-normal capture retain its ticket, ranged bytes and exact projection metadata.
 - [x] provide durable Python factory chunks, sample finalization, pins, recovery, provenance, sweeps, holdouts and metrics.
-- [x] provide real headless raycast and AABB spatial queries.
+- [x] provide real headless raycast and AABB spatial queries through Luau, JavaScript, typed engine calls, thin MCP tools and the Python client.
 - [x] provide the Python sibling API's negotiation, thin reads, lifecycle and ranged, BLAKE3-verified resource reads.
-- [x] provide the real headless OBB query.
+- [x] provide the real headless OBB query through Luau, JavaScript, a typed engine call, a thin MCP tool and the Python client.
 - [x] share engine services through Luau DataSceneService, with VM-neutral ECS metadata, queued lifecycle work and Luau/JavaScript render bridges.
 - [x] support all-system pause for one local client with `--data-factory`, including the SDL device barrier.
 - [x] support physics-only pause, including clock and character gates.

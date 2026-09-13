@@ -11,6 +11,7 @@
 #include <engine/script/DataSceneService.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -51,6 +52,13 @@ namespace engine::control {
 
 		inline bool Finite(float value) {
 			return std::isfinite(value);
+		}
+		inline bool Vector(const json &value, core::Vector3 &out) {
+			if (!value.is_array() || value.size() != 3) return false;
+			for (const auto &item : value)
+				if (!item.is_number()) return false;
+			out = {value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
+			return Finite(out.X) && Finite(out.Y) && Finite(out.Z);
 		}
 
 		inline bool
@@ -294,6 +302,165 @@ namespace engine::control {
 			};
 		Add(observation("get_capture_channels", "Capture channel capability metadata for one scene.", true));
 		Add(observation("get_resources", "Durable resource metadata for one scene.", false));
+		auto querySchema = [](json properties, json required) {
+			return [properties = std::move(properties), required = std::move(required)] {
+				return json{
+					{"type", "object"},
+					{"properties",
+					 json{
+						 {"instance_id", json{{"type", "string"}, {"minLength", 1}}},
+						 {"options",
+						  json{
+							  {"type", "object"},
+							  {"properties", properties},
+							  {"required", required},
+							  {"additionalProperties", false},
+						  }},
+					 }},
+					{"required", json::array({"instance_id", "options"})},
+					{"additionalProperties", false},
+				};
+			};
+		};
+		const json vectorSchema{
+			{"type", "array"},
+			{"items", json{{"type", "number"}}},
+			{"minItems", 3},
+			{"maxItems", 3},
+		};
+		Add(Tool{
+			"raycast",
+			"Cast a finite ray through one scene's prepared physics colliders and return exact hit metadata "
+			"with a stable authored entity id when one exists.",
+			querySchema(
+				json{
+					{"origin", vectorSchema},
+					{"direction", vectorSchema},
+					{"max_distance_metres",
+					 json{{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 100'000}}},
+				},
+				json::array({"origin", "direction", "max_distance_metres"})
+			),
+			[worlds](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object()) {
+					if (failure.empty()) failure = "options must be an object";
+					return nullptr;
+				}
+				const json &options = arguments["options"];
+				if (!Only(options, {"origin", "direction", "max_distance_metres"}, failure)) return nullptr;
+				core::Vector3 origin;
+				core::Vector3 direction;
+				if (!Vector(options.value("origin", json{}), origin) ||
+					!Vector(options.value("direction", json{}), direction) ||
+					!options.contains("max_distance_metres") || !options["max_distance_metres"].is_number()) {
+					failure = "options requires finite origin, direction and max_distance_metres";
+					return nullptr;
+				}
+				const world::WorldId id = World(*worlds, arguments, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					out = Result(
+						script::Raycast(
+							store, {origin, direction, options["max_distance_metres"].get<float>()}
+						),
+						failure
+					);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
+		Add(Tool{
+			"overlap_aabb",
+			"Return stable authored ids for prepared physics colliders overlapping one finite world-space "
+			"axis-aligned box.",
+			querySchema(
+				json{{"minimum", vectorSchema}, {"maximum", vectorSchema}},
+				json::array({"minimum", "maximum"})
+			),
+			[worlds](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object()) {
+					if (failure.empty()) failure = "options must be an object";
+					return nullptr;
+				}
+				const json &options = arguments["options"];
+				if (!Only(options, {"minimum", "maximum"}, failure)) return nullptr;
+				core::Vector3 minimum;
+				core::Vector3 maximum;
+				if (!Vector(options.value("minimum", json{}), minimum) ||
+					!Vector(options.value("maximum", json{}), maximum)) {
+					failure = "options requires finite minimum and maximum vectors";
+					return nullptr;
+				}
+				const world::WorldId id = World(*worlds, arguments, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					out = Result(script::OverlapAABB(store, {minimum, maximum}), failure);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
+		Add(Tool{
+			"overlap_obb",
+			"Return stable authored ids for prepared physics colliders overlapping one finite world-space "
+			"oriented box.",
+			querySchema(
+				json{
+					{"center", vectorSchema},
+					{"orientation_xyzw",
+					 json{
+						 {"type", "array"},
+						 {"items", json{{"type", "number"}}},
+						 {"minItems", 4},
+						 {"maxItems", 4},
+					 }},
+					{"half_extent", vectorSchema},
+				},
+				json::array({"center", "orientation_xyzw", "half_extent"})
+			),
+			[worlds](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object()) {
+					if (failure.empty()) failure = "options must be an object";
+					return nullptr;
+				}
+				const json &options = arguments["options"];
+				if (!Only(options, {"center", "orientation_xyzw", "half_extent"}, failure)) return nullptr;
+				core::Vector3 center;
+				core::Vector3 halfExtent;
+				const json &rotation = options.value("orientation_xyzw", json{});
+				if (!Vector(options.value("center", json{}), center) ||
+					!Vector(options.value("half_extent", json{}), halfExtent) || !rotation.is_array() ||
+					rotation.size() != 4 ||
+					std::any_of(rotation.begin(), rotation.end(), [](const json &value) {
+						return !value.is_number();
+					})) {
+					failure = "options requires finite center, orientation_xyzw and half_extent";
+					return nullptr;
+				}
+				core::CFrame frame{center};
+				frame.QuaternionX = rotation[0].get<float>();
+				frame.QuaternionY = rotation[1].get<float>();
+				frame.QuaternionZ = rotation[2].get<float>();
+				frame.QuaternionW = rotation[3].get<float>();
+				const world::WorldId id = World(*worlds, arguments, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					out = Result(script::OverlapOBB(store, {frame, halfExtent}), failure);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
 	}
 
 	namespace features {

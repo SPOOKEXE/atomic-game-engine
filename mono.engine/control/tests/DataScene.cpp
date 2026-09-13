@@ -4,14 +4,18 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Scheduler.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
 #include <nlohmann/json.hpp>
 
 TEST_SUITE_ID("engine.control.datascene")
@@ -120,4 +124,103 @@ TEST_CASE("data-scene MCP snapshot refuses duplicate stable identifiers", "[cont
 	INFO(reply.dump());
 	CHECK(failed);
 	CHECK(reply.at("status") == "identity_conflict");
+}
+
+TEST_CASE("data-scene MCP queries prepared collider geometry", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "queries");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		engine::physics::PreparePhysicsWorld(store);
+		engine::scene::PartDesc partDesc;
+		partDesc.Frame = CFrame{Vector3::Zero};
+		partDesc.Size = Vector3{2.0f, 2.0f, 2.0f};
+		const Entity part = engine::scene::MakePart(store, partDesc);
+		Identify(store, part, "query/box");
+		engine::ecs::Scheduler scheduler;
+		engine::physics::RegisterPhysicsSystems(scheduler);
+		scheduler.Tick(store, 1.0 / 60.0);
+	});
+
+	bool failed = false;
+	const json ray = Call(
+		surface,
+		"raycast",
+		{{"instance_id", "queries"},
+		 {"options", {{"origin", {-3, 0, 0}}, {"direction", {2, 0, 0}}, {"max_distance_metres", 10}}}},
+		failed
+	);
+	INFO(ray.dump());
+	CHECK_FALSE(failed);
+	CHECK(ray.at("id") == "query/box");
+	CHECK(ray.at("provenance") == "physics_exact_collider_raycast");
+	const float large = std::numeric_limits<float>::max();
+	const json largeDirection = Call(
+		surface,
+		"raycast",
+		{{"instance_id", "queries"},
+		 {"options",
+		  {{"origin", {-3, -3, 0}}, {"direction", {large, large, 0}}, {"max_distance_metres", 10}}}},
+		failed
+	);
+	INFO(largeDirection.dump());
+	CHECK_FALSE(failed);
+	CHECK(largeDirection.at("id") == "query/box");
+
+	const json aabb = Call(
+		surface,
+		"overlap_aabb",
+		{{"instance_id", "queries"}, {"options", {{"minimum", {-1, -1, -1}}, {"maximum", {1, 1, 1}}}}},
+		failed
+	);
+	INFO(aabb.dump());
+	CHECK_FALSE(failed);
+	CHECK(aabb.at("ids") == json::array({"query/box"}));
+
+	const json obb = Call(
+		surface,
+		"overlap_obb",
+		{{"instance_id", "queries"},
+		 {"options",
+		  {{"center", {0, 0, 0}}, {"orientation_xyzw", {0, 0, 0, 1}}, {"half_extent", {1, 1, 1}}}}},
+		failed
+	);
+	INFO(obb.dump());
+	CHECK_FALSE(failed);
+	CHECK(obb.at("ids") == json::array({"query/box"}));
+	const json tinyQuaternion = Call(
+		surface,
+		"overlap_obb",
+		{{"instance_id", "queries"},
+		 {"options",
+		  {{"center", {0, 0, 0}}, {"orientation_xyzw", {0, 0, 0, 1e-40}}, {"half_extent", {1, 1, 1}}}}},
+		failed
+	);
+	INFO(tinyQuaternion.dump());
+	CHECK_FALSE(failed);
+	CHECK(tinyQuaternion.at("ids") == json::array({"query/box"}));
+
+	const json zeroDirection = Call(
+		surface,
+		"raycast",
+		{{"instance_id", "queries"},
+		 {"options", {{"origin", {0, 0, 0}}, {"direction", {0, 0, 0}}, {"max_distance_metres", 10}}}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(zeroDirection.at("status") == "invalid_raycast_query");
+
+	const json unknown = Call(
+		surface,
+		"overlap_aabb",
+		{{"instance_id", "queries"},
+		 {"options", {{"minimum", {-1, -1, -1}}, {"maximum", {1, 1, 1}}, {"extra", true}}}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(unknown.contains("error"));
 }

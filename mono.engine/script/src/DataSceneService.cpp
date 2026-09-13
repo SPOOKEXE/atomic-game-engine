@@ -42,6 +42,11 @@ namespace engine::script {
 			value.Number = number;
 			return value;
 		}
+		ScriptValue CFrame(const core::CFrame &frame) {
+			ScriptValue value(ValueTag::CFrame);
+			value.Frame = frame;
+			return value;
+		}
 
 		ScriptValue Boolean(bool boolean) {
 			ScriptValue value(boolean ? ValueTag::True : ValueTag::False);
@@ -145,7 +150,11 @@ namespace engine::script {
 		}
 
 		ScriptValue QueryIds(
-			const ecs::Store &store, std::span<const ecs::Entity> entities, size_t count, bool overflowed
+			const ecs::Store &store,
+			std::span<const ecs::Entity> entities,
+			size_t count,
+			bool overflowed,
+			std::string_view provenance = "physics_exact_collider_query"
 		) {
 			std::vector<ScriptValue> records;
 			records.reserve(count);
@@ -155,7 +164,7 @@ namespace engine::script {
 			}
 			return Map({
 				{"status", String("ok")},
-				{"provenance", String("physics_exact_collider_query")},
+				{"provenance", String(provenance)},
 				{"ids", Array(std::move(records))},
 				{"overflowed", Boolean(overflowed)},
 			});
@@ -165,8 +174,8 @@ namespace engine::script {
 			core::Vector3 minimum;
 			core::Vector3 maximum;
 			if (!HasOnlyFields(value, {"minimum", "maximum"}) || !VectorField(value, "minimum", minimum) ||
-				!VectorField(value, "maximum", maximum) || minimum.X > maximum.X || minimum.Y > maximum.Y ||
-				minimum.Z > maximum.Z)
+				!VectorField(value, "maximum", maximum) || minimum.X >= maximum.X || minimum.Y >= maximum.Y ||
+				minimum.Z >= maximum.Z)
 				return {"invalid_argument", Map({{"status", String("invalid_aabb_query")}})};
 			std::array<ecs::Entity, 64> found;
 			const spatial::QueryResult result =
@@ -179,15 +188,16 @@ namespace engine::script {
 			core::Vector3 halfExtent;
 			if (!HasOnlyFields(value, {"frame", "half_extent"}) || frame == nullptr ||
 				frame->Tag != ValueTag::CFrame || !VectorField(value, "half_extent", halfExtent) ||
-				!(halfExtent.X >= 0.0f) || !(halfExtent.Y >= 0.0f) || !(halfExtent.Z >= 0.0f))
+				!(halfExtent.X > 0.0f) || !(halfExtent.Y > 0.0f) || !(halfExtent.Z > 0.0f))
 				return {"invalid_argument", Map({{"status", String("invalid_obb_query")}})};
 			std::array<ecs::Entity, 64> found;
 			const spatial::QueryResult result = physics::OverlapOrientedBox(
 				store, frame->Frame, halfExtent, spatial::LayerMask::All(), found
 			);
-			ScriptValue answer = QueryIds(store, found, result.Written, result.Overflowed);
-			answer.Entries.emplace_back("provenance", String("physics_exact_oriented_box_query"));
-			return {"ok", std::move(answer)};
+			return {
+				"ok",
+				QueryIds(store, found, result.Written, result.Overflowed, "physics_exact_oriented_box_query")
+			};
 		}
 
 		DataSceneResult QueryRay(const ecs::Store &store, const ScriptValue &value) {
@@ -882,7 +892,18 @@ namespace engine::script {
 				call.ReturnValue(Map({{"status", String("invalid_raycast_query")}}));
 				return;
 			}
-			call.ReturnValue(QueryRay(call.World(), request).Value);
+			core::Vector3 origin;
+			core::Vector3 direction;
+			const ScriptValue *distance = Field(request, "max_distance_metres");
+			if (!HasOnlyFields(request, {"origin", "direction", "max_distance_metres"}) ||
+				!VectorField(request, "origin", origin) || !VectorField(request, "direction", direction) ||
+				distance == nullptr || distance->Tag != ValueTag::Number) {
+				call.ReturnValue(Map({{"status", String("invalid_raycast_query")}}));
+				return;
+			}
+			call.ReturnValue(
+				Raycast(call.World(), {origin, direction, static_cast<float>(distance->Number)}).Value
+			);
 		}
 		void ServiceAabb(ScriptCall &call) {
 			ScriptValue request;
@@ -891,7 +912,14 @@ namespace engine::script {
 				call.ReturnValue(Map({{"status", String("invalid_aabb_query")}}));
 				return;
 			}
-			call.ReturnValue(QueryAabb(call.World(), request).Value);
+			core::Vector3 minimum;
+			core::Vector3 maximum;
+			if (!HasOnlyFields(request, {"minimum", "maximum"}) ||
+				!VectorField(request, "minimum", minimum) || !VectorField(request, "maximum", maximum)) {
+				call.ReturnValue(Map({{"status", String("invalid_aabb_query")}}));
+				return;
+			}
+			call.ReturnValue(OverlapAABB(call.World(), {minimum, maximum}).Value);
 		}
 		void ServiceObb(ScriptCall &call) {
 			ScriptValue request;
@@ -900,7 +928,14 @@ namespace engine::script {
 				call.ReturnValue(Map({{"status", String("invalid_obb_query")}}));
 				return;
 			}
-			call.ReturnValue(QueryObb(call.World(), request).Value);
+			const ScriptValue *frame = Field(request, "frame");
+			core::Vector3 halfExtent;
+			if (!HasOnlyFields(request, {"frame", "half_extent"}) || frame == nullptr ||
+				frame->Tag != ValueTag::CFrame || !VectorField(request, "half_extent", halfExtent)) {
+				call.ReturnValue(Map({{"status", String("invalid_obb_query")}}));
+				return;
+			}
+			call.ReturnValue(OverlapOBB(call.World(), {frame->Frame, halfExtent}).Value);
 		}
 
 		constexpr std::array<ServiceMethod, 18> DATA_SCENE_METHODS{{
@@ -934,6 +969,10 @@ namespace engine::script {
 				{"scene_snapshot", Boolean(true)},
 				{"camera_metadata", Boolean(true)},
 				{"editable_image_rgba8", Boolean(true)},
+				{"spatial_queries", Boolean(true)},
+				{"spatial_query_kinds",
+				 Array({String("raycast"), String("aabb_overlap"), String("obb_overlap")})},
+				{"max_raycast_distance_metres", Number(100'000.0)},
 				{"durable_resources", Boolean(false)},
 				{"render_capture", Boolean(false)},
 				{"checkpoint", Boolean(false)},
@@ -1095,6 +1134,61 @@ namespace engine::script {
 				{"reason", String("this service has no durable resource owner")},
 			})
 		};
+	}
+
+	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request) {
+		const double length = std::hypot(
+			static_cast<double>(request.Direction.X),
+			static_cast<double>(request.Direction.Y),
+			static_cast<double>(request.Direction.Z)
+		);
+		if (!std::isfinite(request.Origin.X) || !std::isfinite(request.Origin.Y) ||
+			!std::isfinite(request.Origin.Z) || !std::isfinite(request.Direction.X) ||
+			!std::isfinite(request.Direction.Y) || !std::isfinite(request.Direction.Z) ||
+			!std::isfinite(request.MaxDistanceMetres) || !std::isfinite(length) || length <= 0.0 ||
+			request.MaxDistanceMetres <= 0.0f || request.MaxDistanceMetres > 100'000.0f)
+			return {"invalid_argument", Map({{"status", String("invalid_raycast_query")}})};
+		const core::Vector3 direction{
+			static_cast<float>(static_cast<double>(request.Direction.X) / length),
+			static_cast<float>(static_cast<double>(request.Direction.Y) / length),
+			static_cast<float>(static_cast<double>(request.Direction.Z) / length),
+		};
+		return QueryRay(
+			store,
+			Map(
+				{{"origin", Vector(request.Origin)},
+				 {"direction", Vector(direction)},
+				 {"max_distance_metres", Number(request.MaxDistanceMetres)}}
+			)
+		);
+	}
+
+	DataSceneResult OverlapAABB(const ecs::Store &store, const DataSceneAabbRequest &request) {
+		return QueryAabb(
+			store, Map({{"minimum", Vector(request.Minimum)}, {"maximum", Vector(request.Maximum)}})
+		);
+	}
+
+	DataSceneResult OverlapOBB(const ecs::Store &store, const DataSceneObbRequest &request) {
+		core::CFrame frame = request.Frame;
+		const double length = std::hypot(
+			std::hypot(
+				static_cast<double>(frame.QuaternionX),
+				static_cast<double>(frame.QuaternionY),
+				static_cast<double>(frame.QuaternionZ)
+			),
+			static_cast<double>(frame.QuaternionW)
+		);
+		if (!std::isfinite(frame.Position.X) || !std::isfinite(frame.Position.Y) ||
+			!std::isfinite(frame.Position.Z) || !std::isfinite(frame.QuaternionX) ||
+			!std::isfinite(frame.QuaternionY) || !std::isfinite(frame.QuaternionZ) ||
+			!std::isfinite(frame.QuaternionW) || !std::isfinite(length) || length <= 0.0)
+			return {"invalid_argument", Map({{"status", String("invalid_obb_query")}})};
+		frame.QuaternionX = static_cast<float>(static_cast<double>(frame.QuaternionX) / length);
+		frame.QuaternionY = static_cast<float>(static_cast<double>(frame.QuaternionY) / length);
+		frame.QuaternionZ = static_cast<float>(static_cast<double>(frame.QuaternionZ) / length);
+		frame.QuaternionW = static_cast<float>(static_cast<double>(frame.QuaternionW) / length);
+		return QueryObb(store, Map({{"frame", CFrame(frame)}, {"half_extent", Vector(request.HalfExtent)}}));
 	}
 
 	const ServiceSurface &DataSceneServiceSurface() {
