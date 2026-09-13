@@ -10,6 +10,7 @@ local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
 
 local BLACK_HOLE_RADIUS = 5.5
+local CAMERA_NEAR_PLANE = 0.01
 local DISK_INNER_RADIUS = 7.5
 local DISK_OUTER_RADIUS = 22
 local DISK_RING_COUNT = 4
@@ -184,6 +185,9 @@ end
 local camera = Instance.new("Camera")
 camera.Name = "Black Hole Camera"
 camera.FieldOfView = 46
+-- The horizon is intended for close inspection. The default 0.1 m plane
+-- clips the nearby field while the lens pass still leaves the horizon mask.
+camera.NearPlaneZ = CAMERA_NEAR_PLANE
 camera.FarPlaneZ = 300
 camera.Parent = workspace
 workspace.CurrentCamera = camera
