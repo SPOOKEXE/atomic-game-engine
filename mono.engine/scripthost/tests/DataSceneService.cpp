@@ -652,6 +652,76 @@ TEST_CASE("queued lifecycle bridge mutates only at Pump and retains released ret
 }
 
 TEST_CASE(
+	"queued lifecycle PumpOne keeps consecutive paused steps as separate boundaries", "[scripting][data]"
+) {
+	using engine::script::DataLifecycleBridgeReply;
+	using engine::script::QueuedDataLifecycleBridge;
+	using engine::world::DataFactoryPauseScope;
+	using engine::world::DataFactorySession;
+	using engine::world::Universe;
+
+	Universe universe;
+	const auto world = MakeWorld(universe, "lifecycle.one");
+	DataFactorySession session(universe);
+	session.SetPauseParticipant(
+		[&](engine::world::WorldId candidate, DataFactoryPauseScope scope, bool, std::string &) {
+			return candidate == world && scope == DataFactoryPauseScope::AllSystems;
+		}
+	);
+	QueuedDataLifecycleBridge bridge(session);
+	std::string detail;
+	uint64_t pauseTicket = 0;
+	REQUIRE(bridge.Queue(
+		"lifecycle.one", Request("lifecycle.one", "pause", "pause", 0, 1, 0), pauseTicket, detail
+	));
+	const auto paused = bridge.PumpOne();
+	CHECK(paused.Processed);
+	CHECK(paused.WorldMutated);
+	CHECK_FALSE(paused.CompletedTick);
+
+	auto first = Request("lifecycle.one", "step", "step-1", 0, 1, 1);
+	first.DtNumeratorNanoseconds = 1'000'000'000;
+	first.DtDenominator = 60;
+	auto second = Request("lifecycle.one", "step", "step-2", 1, 1, 2);
+	second.DtNumeratorNanoseconds = 1'000'000'000;
+	second.DtDenominator = 60;
+	uint64_t firstTicket = 0;
+	uint64_t secondTicket = 0;
+	REQUIRE(bridge.Queue("lifecycle.one", first, firstTicket, detail));
+	REQUIRE(bridge.Queue("lifecycle.one", second, secondTicket, detail));
+
+	const auto firstBoundary = bridge.PumpOne();
+	CHECK(firstBoundary.Processed);
+	CHECK(firstBoundary.CompletedTick);
+	CHECK(firstBoundary.InstanceId == "lifecycle.one");
+	CHECK(session.Inspect("lifecycle.one").Clock.Tick == 1);
+	DataLifecycleBridgeReply firstReply;
+	REQUIRE(bridge.Poll("lifecycle.one", firstTicket, firstReply, detail));
+	CHECK(firstReply.Status == "ok");
+	CHECK(firstReply.Tick == "1");
+
+	const auto secondBoundary = bridge.PumpOne();
+	CHECK(secondBoundary.Processed);
+	CHECK(secondBoundary.CompletedTick);
+	CHECK(session.Inspect("lifecycle.one").Clock.Tick == 2);
+	DataLifecycleBridgeReply secondReply;
+	REQUIRE(bridge.Poll("lifecycle.one", secondTicket, secondReply, detail));
+	CHECK(secondReply.Status == "ok");
+	CHECK(secondReply.Tick == "2");
+
+	auto conflicting = Request("lifecycle.one", "step", "step-conflict", 2, 1, 99);
+	conflicting.DtNumeratorNanoseconds = 1'000'000'000;
+	conflicting.DtDenominator = 60;
+	uint64_t conflictingTicket = 0;
+	REQUIRE(bridge.Queue("lifecycle.one", conflicting, conflictingTicket, detail));
+	const auto refused = bridge.PumpOne();
+	CHECK(refused.Processed);
+	CHECK_FALSE(refused.WorldMutated);
+	CHECK_FALSE(refused.CompletedTick);
+	CHECK_FALSE(refused.Restored);
+}
+
+TEST_CASE(
 	"queued lifecycle bridge reports render-only command submission without readback", "[scripting][data]"
 ) {
 	using engine::script::DataLifecycleBridgeReply;
@@ -702,19 +772,35 @@ TEST_CASE(
 			})
 			.Status == engine::world::DataFactoryStatus::Ok
 	);
-	const auto later = session.RenderOnly({
-		.InstanceId = "lifecycle.render-only",
-		.SnapshotId = snapshot,
-		.ExpectedWorldEpoch = current.WorldEpoch,
-		.ExpectedWorldVersion = current.WorldVersion,
-		.ExpectedTick = current.Clock.Tick,
-	});
-	REQUIRE(later.Status == engine::world::DataFactoryStatus::Pending);
-	bridge.Pump();
+	// Ticket A is terminal in the session but still retained by the bridge.
+	// Queue B before the next pump. The bridge must collect A before it can
+	// dequeue B, otherwise a pending B can hide A indefinitely.
+	auto secondRequest = request;
+	secondRequest.OperationId = "render-2";
+	uint64_t secondTicket = 0;
+	REQUIRE(bridge.Queue("lifecycle.render-only", secondRequest, secondTicket, detail));
+	const auto completedFirst = bridge.PumpOne();
+	CHECK(completedFirst.Processed);
+	CHECK_FALSE(completedFirst.PendingRenderOnly);
 	DataLifecycleBridgeReply submitted;
 	REQUIRE(bridge.Poll("lifecycle.render-only", ticket, submitted, detail));
 	CHECK(submitted.Status == "submitted");
 	CHECK(submitted.Detail.find("readback readiness is not tracked") != std::string::npos);
+
+	const auto acceptedSecond = bridge.PumpOne();
+	CHECK(acceptedSecond.Processed);
+	CHECK_FALSE(acceptedSecond.PendingRenderOnly);
+	DataLifecycleBridgeReply second;
+	REQUIRE(bridge.Poll("lifecycle.render-only", secondTicket, second, detail));
+	CHECK(second.Status == "pending");
+	const auto waiting = bridge.PumpOne();
+	CHECK(waiting.Processed);
+	CHECK(waiting.PendingRenderOnly);
+	CHECK_FALSE(waiting.WorldMutated);
+	bridge.Pump();
+	DataLifecycleBridgeReply stillPending;
+	REQUIRE(bridge.Poll("lifecycle.render-only", secondTicket, stillPending, detail));
+	CHECK(stillPending.Status == "pending");
 	uint64_t repeated = 0;
 	REQUIRE(bridge.Queue("lifecycle.render-only", request, repeated, detail));
 	CHECK(repeated == ticket);

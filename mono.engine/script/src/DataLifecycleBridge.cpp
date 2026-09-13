@@ -3,7 +3,9 @@
 
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::script {
 	namespace {
@@ -70,6 +72,7 @@ namespace engine::script {
 		std::unordered_map<uint64_t, Entry> Entries;
 		std::unordered_map<uint64_t, DataLifecycleBridgeReply> Released;
 		std::deque<uint64_t> Order;
+		std::deque<uint64_t> RenderOrder;
 		std::deque<uint64_t> ReleasedOrder;
 		std::unordered_map<std::string, Operation> Operations;
 	};
@@ -166,6 +169,7 @@ namespace engine::script {
 		QueueState->Released.emplace(ticket, std::move(found->second.Reply));
 		QueueState->ReleasedOrder.push_back(ticket);
 		QueueState->Entries.erase(found);
+		std::erase(QueueState->RenderOrder, ticket);
 		while (QueueState->ReleasedOrder.size() > LIMIT) {
 			const uint64_t expired = QueueState->ReleasedOrder.front();
 			QueueState->ReleasedOrder.pop_front();
@@ -183,30 +187,27 @@ namespace engine::script {
 		return true;
 	}
 
-	void QueuedDataLifecycleBridge::Pump() {
-		std::deque<std::pair<uint64_t, DataLifecycleBridgeRequest>> pending;
-		std::deque<std::pair<uint64_t, std::pair<std::string, uint64_t>>> renderPending;
+	DataLifecyclePumpResult QueuedDataLifecycleBridge::PumpOne() {
+		DataLifecyclePumpResult result;
+		std::optional<std::pair<uint64_t, DataLifecycleBridgeRequest>> pending;
+		std::vector<std::pair<uint64_t, std::pair<std::string, uint64_t>>> renders;
 		{
 			std::lock_guard lock(QueueState->Mutex);
-			while (!QueueState->Order.empty()) {
-				const uint64_t ticket = QueueState->Order.front();
-				QueueState->Order.pop_front();
-				if (const auto entry = QueueState->Entries.find(ticket); entry != QueueState->Entries.end() &&
-																		 !entry->second.Done &&
-																		 entry->second.RenderOperationId == 0)
-					pending.emplace_back(ticket, entry->second.Request);
-			}
-			for (const auto &[ticket, entry] : QueueState->Entries) {
-				if (!entry.Done && entry.RenderOperationId != 0)
-					renderPending.emplace_back(
-						ticket, std::pair{entry.Request.InstanceId, entry.RenderOperationId}
+			for (const uint64_t ticket : QueueState->RenderOrder) {
+				const auto entry = QueueState->Entries.find(ticket);
+				if (entry != QueueState->Entries.end() && !entry->second.Done &&
+					entry->second.RenderOperationId != 0)
+					renders.emplace_back(
+						ticket, std::pair{entry->second.Request.InstanceId, entry->second.RenderOperationId}
 					);
 			}
 		}
-		for (const auto &[ticket, render] : renderPending) {
+		for (const auto &[ticket, render] : renders) {
 			const world::DataFactoryRenderOnlyReply outcome =
 				Session.PollRenderOnly(render.first, render.second);
 			if (outcome.Status == world::DataFactoryStatus::Pending) continue;
+			result.Processed = true;
+			result.InstanceId = render.first;
 			std::lock_guard lock(QueueState->Mutex);
 			if (auto found = QueueState->Entries.find(ticket);
 				found != QueueState->Entries.end() && !found->second.Done) {
@@ -225,85 +226,122 @@ namespace engine::script {
 				}
 				found->second.Done = true;
 			}
+			return result;
 		}
-		for (const auto &[ticket, request] : pending) {
-			world::DataFactoryReply outcome;
-			std::string snapshotId;
-			std::string checkpointId;
-			const world::DataFactoryReply observed = Session.Inspect(request.InstanceId);
-			const bool preconditions =
-				request.Operation == "inspect" || (observed.Status == world::DataFactoryStatus::Ok &&
-												   observed.Clock.Tick == request.ExpectedTick &&
-												   observed.WorldEpoch == request.ExpectedWorldEpoch &&
-												   observed.WorldVersion == request.ExpectedWorldVersion);
-			if (!preconditions) outcome = observed;
-			if (outcome.Status == world::DataFactoryStatus::Ok) {
-				outcome.Status = world::DataFactoryStatus::VersionConflict;
-				outcome.Detail = "lifecycle preconditions do not match current world";
-			} else if (request.Operation == "pause")
-				outcome = Session.Pause(
-					request.InstanceId,
-					request.Scope == "physics_only" ? world::DataFactoryPauseScope::PhysicsOnly
-													: world::DataFactoryPauseScope::AllSystems,
-					request.ExpectedTick
-				);
-			else if (request.Operation == "resume")
-				outcome = Session.Resume(request.InstanceId, request.ExpectedTick);
-			else if (request.Operation == "snapshot")
-				outcome = Session.Snapshot(request.InstanceId, snapshotId);
-			else if (request.Operation == "inspect")
-				outcome = Session.Inspect(request.InstanceId);
-			else if (request.Operation == "checkpoint")
-				outcome = Session.Checkpoint(request.InstanceId, checkpointId);
-			else if (request.Operation == "restore")
-				outcome = Session.Restore(request.InstanceId, request.CheckpointId);
-			else if (request.Operation == "render_only") {
-				const world::DataFactoryRenderOnlyReply rendered = Session.RenderOnly({
-					.InstanceId = request.InstanceId,
-					.SnapshotId = request.SnapshotId,
-					.ExpectedWorldEpoch = request.ExpectedWorldEpoch,
-					.ExpectedWorldVersion = request.ExpectedWorldVersion,
-					.ExpectedTick = request.ExpectedTick,
-					.TemporalHistory = world::DataFactoryTemporalHistory::Preserve,
-				});
-				std::lock_guard lock(QueueState->Mutex);
-				if (auto found = QueueState->Entries.find(ticket);
-					found != QueueState->Entries.end() && !found->second.Done) {
-					found->second.Reply = Reply(
-						rendered, {}, {}, std::to_string(rendered.OperationId), request.TemporalHistory
-					);
-					if (rendered.Status == world::DataFactoryStatus::Pending) {
-						found->second.Reply.Status = "pending";
-						found->second.RenderOperationId = rendered.OperationId;
-					} else {
-						found->second.Done = true;
-					}
-				}
-				continue;
-			} else if (request.Operation == "step") {
-				const world::DataFactoryReply state = Session.Inspect(request.InstanceId);
-				outcome = state.Status == world::DataFactoryStatus::Ok
-							  ? Session.Step(
-									request.InstanceId,
-									{.NumeratorNanoseconds = request.DtNumeratorNanoseconds,
-									 .Denominator = request.DtDenominator},
-									request.ExpectedTick,
-									request.ExpectedWorldVersion
-								)
-							  : state;
-			} else
-				outcome = {
-					.Status = world::DataFactoryStatus::ValidationFailed,
-					.Detail = "unknown lifecycle operation",
-					.InstanceId = request.InstanceId,
-					.Clock = {}
-				};
+		{
+			std::lock_guard lock(QueueState->Mutex);
+			while (!QueueState->Order.empty() && !pending) {
+				const uint64_t ticket = QueueState->Order.front();
+				QueueState->Order.pop_front();
+				if (const auto entry = QueueState->Entries.find(ticket); entry != QueueState->Entries.end() &&
+																		 !entry->second.Done &&
+																		 entry->second.RenderOperationId == 0)
+					pending.emplace(ticket, entry->second.Request);
+			}
+		}
+		if (!pending) {
+			if (!renders.empty()) {
+				result.Processed = true;
+				result.PendingRenderOnly = true;
+				result.InstanceId = renders.front().second.first;
+			}
+			return result;
+		}
+
+		result.Processed = true;
+		const uint64_t ticket = pending->first;
+		const DataLifecycleBridgeRequest &request = pending->second;
+		result.InstanceId = request.InstanceId;
+		world::DataFactoryReply outcome;
+		std::string snapshotId;
+		std::string checkpointId;
+		const world::DataFactoryReply observed = Session.Inspect(request.InstanceId);
+		const bool preconditions =
+			request.Operation == "inspect" ||
+			(observed.Status == world::DataFactoryStatus::Ok && observed.Clock.Tick == request.ExpectedTick &&
+			 observed.WorldEpoch == request.ExpectedWorldEpoch &&
+			 observed.WorldVersion == request.ExpectedWorldVersion);
+		if (!preconditions) outcome = observed;
+		if (outcome.Status == world::DataFactoryStatus::Ok) {
+			outcome.Status = world::DataFactoryStatus::VersionConflict;
+			outcome.Detail = "lifecycle preconditions do not match current world";
+		} else if (request.Operation == "pause")
+			outcome = Session.Pause(
+				request.InstanceId,
+				request.Scope == "physics_only" ? world::DataFactoryPauseScope::PhysicsOnly
+												: world::DataFactoryPauseScope::AllSystems,
+				request.ExpectedTick
+			);
+		else if (request.Operation == "resume")
+			outcome = Session.Resume(request.InstanceId, request.ExpectedTick);
+		else if (request.Operation == "snapshot")
+			outcome = Session.Snapshot(request.InstanceId, snapshotId);
+		else if (request.Operation == "inspect")
+			outcome = Session.Inspect(request.InstanceId);
+		else if (request.Operation == "checkpoint")
+			outcome = Session.Checkpoint(request.InstanceId, checkpointId);
+		else if (request.Operation == "restore")
+			outcome = Session.Restore(request.InstanceId, request.CheckpointId);
+		else if (request.Operation == "render_only") {
+			const world::DataFactoryRenderOnlyReply rendered = Session.RenderOnly({
+				.InstanceId = request.InstanceId,
+				.SnapshotId = request.SnapshotId,
+				.ExpectedWorldEpoch = request.ExpectedWorldEpoch,
+				.ExpectedWorldVersion = request.ExpectedWorldVersion,
+				.ExpectedTick = request.ExpectedTick,
+				.TemporalHistory = world::DataFactoryTemporalHistory::Preserve,
+			});
 			std::lock_guard lock(QueueState->Mutex);
 			if (auto found = QueueState->Entries.find(ticket);
 				found != QueueState->Entries.end() && !found->second.Done) {
-				found->second.Reply = Reply(outcome, std::move(snapshotId), std::move(checkpointId));
-				found->second.Done = true;
+				found->second.Reply =
+					Reply(rendered, {}, {}, std::to_string(rendered.OperationId), request.TemporalHistory);
+				if (rendered.Status == world::DataFactoryStatus::Pending) {
+					found->second.Reply.Status = "pending";
+					found->second.RenderOperationId = rendered.OperationId;
+					QueueState->RenderOrder.push_back(ticket);
+				} else {
+					found->second.Done = true;
+				}
 			}
+			return result;
+		} else if (request.Operation == "step") {
+			const world::DataFactoryReply state = Session.Inspect(request.InstanceId);
+			outcome = state.Status == world::DataFactoryStatus::Ok
+						  ? Session.Step(
+								request.InstanceId,
+								{.NumeratorNanoseconds = request.DtNumeratorNanoseconds,
+								 .Denominator = request.DtDenominator},
+								request.ExpectedTick,
+								request.ExpectedWorldVersion
+							)
+						  : state;
+		} else
+			outcome = {
+				.Status = world::DataFactoryStatus::ValidationFailed,
+				.Detail = "unknown lifecycle operation",
+				.InstanceId = request.InstanceId,
+				.Clock = {}
+			};
+		std::lock_guard lock(QueueState->Mutex);
+		if (auto found = QueueState->Entries.find(ticket);
+			found != QueueState->Entries.end() && !found->second.Done) {
+			found->second.Reply = Reply(outcome, std::move(snapshotId), std::move(checkpointId));
+			found->second.Done = true;
+		}
+		if (outcome.Status == world::DataFactoryStatus::Ok) {
+			result.WorldMutated = request.Operation == "pause" || request.Operation == "resume" ||
+								  request.Operation == "step" || request.Operation == "restore";
+			result.CompletedTick = request.Operation == "step";
+			result.Restored = request.Operation == "restore";
+		}
+		return result;
+	}
+
+	void QueuedDataLifecycleBridge::Pump() {
+		for (;;) {
+			const DataLifecyclePumpResult result = PumpOne();
+			if (!result.Processed || result.PendingRenderOnly) return;
 		}
 	}
 }

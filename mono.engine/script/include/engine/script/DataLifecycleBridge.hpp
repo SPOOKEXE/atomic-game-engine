@@ -49,6 +49,18 @@ namespace engine::script {
 		std::string Detail;
 	};
 
+	// One completed request boundary. Hosts that need an observation between
+	// deterministic steps use this copied result without receiving a world or
+	// store handle.
+	struct DataLifecyclePumpResult {
+		bool Processed = false;
+		bool PendingRenderOnly = false;
+		bool WorldMutated = false;
+		bool CompletedTick = false;
+		bool Restored = false;
+		std::string InstanceId;
+	};
+
 	class DataLifecycleBridge {
 	  public:
 		virtual ~DataLifecycleBridge() = default;
@@ -75,6 +87,13 @@ namespace engine::script {
 		bool Queue(std::string_view, const DataLifecycleBridgeRequest &, uint64_t &, std::string &) override;
 		bool Poll(std::string_view, uint64_t, DataLifecycleBridgeReply &, std::string &) override;
 		bool Release(std::string_view, uint64_t, std::string &) override;
+		// Processes at most one queued request or terminal render-only reply. It
+		// checks the bounded retained render order first, so a completed reply
+		// cannot hide behind a newer pending request.
+		DataLifecyclePumpResult PumpOne();
+
+		// Drains the bridge for hosts that do not need an observer between
+		// completed requests. Equivalent to repeatedly calling PumpOne().
 		void Pump();
 
 	  private:
