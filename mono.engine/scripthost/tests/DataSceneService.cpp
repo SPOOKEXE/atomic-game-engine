@@ -247,6 +247,7 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				assert(game:GetService("DataSceneService"):GetSceneSnapshot().entities[1].id == "fixture/observed")
 				local capabilities = game:GetService("DataSceneService"):GetCapabilities()
 				assert(capabilities.scene_snapshot and not capabilities.render_capture)
+				assert(capabilities.camera_metadata_schema_version == "camera-rendering-data/v1")
 				assert(capabilities.spatial_queries and capabilities.spatial_query_kinds[3] == "obb_overlap")
 				assert(capabilities.max_raycast_distance_metres == 100000)
 				local capture = game:GetService("DataSceneService"):GetCaptureChannels()
@@ -265,9 +266,61 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				snapshot.entities[0].id = "mutated";
 				if (game.GetService("DataSceneService").GetSceneSnapshot().entities[0].id !== "fixture/observed") throw new Error("snapshot aliases ECS state");
 				const capabilities = game.GetService("DataSceneService").GetCapabilities();
-				if (!capabilities.scene_snapshot || capabilities.render_capture || !capabilities.spatial_queries || capabilities.spatial_query_kinds[2] !== "obb_overlap" || capabilities.max_raycast_distance_metres !== 100000) throw new Error("capabilities mismatch");
+				if (!capabilities.scene_snapshot || capabilities.render_capture || capabilities.camera_metadata_schema_version !== "camera-rendering-data/v1" || !capabilities.spatial_queries || capabilities.spatial_query_kinds[2] !== "obb_overlap" || capabilities.max_raycast_distance_metres !== 100000) throw new Error("capabilities mismatch");
 				const capture = game.GetService("DataSceneService").GetCaptureChannels();
 				if (capture.status !== "capability_unsupported" || capture.channels.length !== 0) throw new Error("capture mismatch");
+			)");
+		}
+	}
+}
+
+TEST_CASE("DataSceneService reports complete authored camera calibration in both VMs", "[scripting][data]") {
+	for (const auto language : {engine::script::Language::Luau, engine::script::Language::JavaScript}) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		engine::ecs::Store store("data_scene_camera");
+		const auto runtime = Runtime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		if (language == engine::script::Language::Luau) {
+			Run(*runtime, R"(
+				local camera = Instance.new("Camera")
+				camera:SetAttribute("DataFactoryId", "fixture/camera")
+				camera.CFrame = CFrame.new(1, 2, 3)
+				camera.FieldOfView = 60
+				camera.NearPlaneZ = 0.25
+				camera.FarPlaneZ = 400
+				camera.ImageWidth = 640
+				camera.ImageHeight = 360
+				local data = game:GetService("DataSceneService"):GetCameraRenderingData(camera)
+				assert(data.status == "ok" and data.id == "fixture/camera")
+				assert(data.world_from_camera.Position.Z == 3 and data.camera_from_world.Position.Z == -3)
+				assert(data.requested_resolution_available and data.requested_width == 640 and data.requested_height == 360)
+				assert(not data.projection_available and data.projection_reason == "exact_projection_available_after_render_capture")
+				assert(data.crop.width == 1 and data.crop.convention == "normalized_full_view_left_top_width_height")
+				assert(not data.lens_distortion.available and not data.temporal_jitter.available)
+				assert(data.units.world == "metres" and data.units.angle == "radians")
+				assert(data.camera_axes == "x_right_y_up_negative_z_forward" and data.clip_depth_range == "zero_to_one")
+			)");
+		} else {
+			Run(*runtime, R"(
+				const camera = Instance.new("Camera");
+				camera.SetAttribute("DataFactoryId", "fixture/camera");
+				camera.CFrame = CFrame.new(1, 2, 3);
+				camera.FieldOfView = 60;
+				camera.NearPlaneZ = 0.25;
+				camera.FarPlaneZ = 400;
+				camera.ImageWidth = 640;
+				camera.ImageHeight = 360;
+				const data = game.GetService("DataSceneService").GetCameraRenderingData(camera);
+				if (data.status !== "ok" || data.id !== "fixture/camera") throw new Error("identity");
+				if (data.world_from_camera.Position.Z !== 3 || data.camera_from_world.Position.Z !== -3) throw new Error("extrinsics");
+				if (!data.requested_resolution_available || data.requested_width !== 640 || data.requested_height !== 360) throw new Error("resolution");
+				if (data.projection_available || data.projection_reason !== "exact_projection_available_after_render_capture") throw new Error("projection");
+				if (data.crop.width !== 1 || data.crop.convention !== "normalized_full_view_left_top_width_height") throw new Error("crop");
+				if (data.lens_distortion.available || data.temporal_jitter.available) throw new Error("unsupported calibration");
+				if (data.units.world !== "metres" || data.units.angle !== "radians") throw new Error("units");
+				if (data.camera_axes !== "x_right_y_up_negative_z_forward" || data.clip_depth_range !== "zero_to_one") throw new Error("coordinates");
 			)");
 		}
 	}

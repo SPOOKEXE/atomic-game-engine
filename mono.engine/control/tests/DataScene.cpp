@@ -75,8 +75,16 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
 		store.Set<InstanceName>(camera, InstanceName{Name("Camera")});
-		store.Set<Camera>(camera, Camera{});
-		store.Set<Transform>(camera, Transform{CFrame{Vector3::Zero}});
+		Camera calibration;
+		calibration.FieldOfViewRadians = 1.0f;
+		calibration.NearPlane = 0.25f;
+		calibration.FarPlane = 400.0f;
+		calibration.ImageWidth = 640;
+		calibration.ImageHeight = 360;
+		store.Set<Camera>(camera, calibration);
+		CFrame cameraFrame{Vector3{1.0f, 2.0f, 3.0f}};
+		cameraFrame.QuaternionW = 1.0005f;
+		store.Set<Transform>(camera, Transform{cameraFrame});
 		Identify(store, camera, "fixture/camera");
 		store.SetResource(ActiveCamera{camera});
 	});
@@ -91,6 +99,50 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	INFO(camera.dump());
 	CHECK_FALSE(failed);
 	CHECK(camera.at("id") == "fixture/camera");
+	CHECK(camera.at("world_from_camera").at("position") == json::array({1.0, 2.0, 3.0}));
+	CHECK(camera.at("camera_from_world").at("position") == json::array({-1.0, -2.0, -3.0}));
+	CHECK(camera.at("world_from_camera").at("rotation") == json::array({0.0, 0.0, 0.0, 1.0}));
+	CHECK(camera.at("vertical_fov_radians") == 1.0);
+	CHECK(camera.at("near_metres") == 0.25);
+	CHECK(camera.at("far_metres") == 400.0);
+	CHECK(camera.at("requested_width") == 640);
+	CHECK(camera.at("requested_height") == 360);
+	CHECK(camera.at("requested_resolution_available") == true);
+	CHECK(camera.at("projection_available") == false);
+	CHECK(camera.at("crop").at("convention") == "normalized_full_view_left_top_width_height");
+	CHECK(camera.at("lens_distortion").at("available") == false);
+	CHECK(camera.at("temporal_jitter").at("available") == false);
+	CHECK(camera.at("units").at("world") == "metres");
+	CHECK(camera.at("camera_axes") == "x_right_y_up_negative_z_forward");
+	CHECK(camera.at("clip_depth_range") == "zero_to_one");
+
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		const auto *active = store.Resource<ActiveCamera>();
+		REQUIRE(active != nullptr);
+		Camera inherited = *store.Get<Camera>(active->Entity);
+		inherited.ImageWidth = 0;
+		inherited.ImageHeight = 0;
+		store.Set<Camera>(active->Entity, inherited);
+	});
+	const json inherited = Call(
+		surface, "get_camera_rendering_data", {{"instance_id", "scene"}, {"options", json::object()}}, failed
+	);
+	CHECK_FALSE(failed);
+	CHECK(inherited.at("requested_resolution_available") == false);
+	CHECK(inherited.at("requested_resolution_reason") == "host_viewport_resolves_at_capture");
+
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		const auto *active = store.Resource<ActiveCamera>();
+		REQUIRE(active != nullptr);
+		Camera invalid = *store.Get<Camera>(active->Entity);
+		invalid.ImageWidth = 640;
+		store.Set<Camera>(active->Entity, invalid);
+	});
+	const json invalid = Call(
+		surface, "get_camera_rendering_data", {{"instance_id", "scene"}, {"options", json::object()}}, failed
+	);
+	CHECK(failed);
+	CHECK(invalid.at("status") == "invalid_camera_calibration");
 
 	const json unknown = Call(
 		surface, "get_scene_snapshot", {{"instance_id", "missing"}, {"options", json::object()}}, failed

@@ -23,6 +23,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -968,6 +969,7 @@ namespace engine::script {
 				{"schema_version", String("data-scene/v1")},
 				{"scene_snapshot", Boolean(true)},
 				{"camera_metadata", Boolean(true)},
+				{"camera_metadata_schema_version", String("camera-rendering-data/v1")},
 				{"editable_image_rgba8", Boolean(true)},
 				{"spatial_queries", Boolean(true)},
 				{"spatial_query_kinds",
@@ -1068,21 +1070,82 @@ namespace engine::script {
 		const auto *transform = store.Get<scene::Transform>(entity);
 		if (camera == nullptr || transform == nullptr)
 			return {"invalid_argument", Map({{"status", String("invalid_camera")}})};
+		core::CFrame worldFromCamera = transform->Frame;
+		const double rotationLength = std::hypot(
+			std::hypot(static_cast<double>(worldFromCamera.QuaternionX), worldFromCamera.QuaternionY),
+			std::hypot(static_cast<double>(worldFromCamera.QuaternionZ), worldFromCamera.QuaternionW)
+		);
+		if (!std::isfinite(worldFromCamera.Position.X) || !std::isfinite(worldFromCamera.Position.Y) ||
+			!std::isfinite(worldFromCamera.Position.Z) || !std::isfinite(rotationLength) ||
+			std::abs(rotationLength - 1.0) > 0.001 || !std::isfinite(camera->FieldOfViewRadians) ||
+			camera->FieldOfViewRadians <= 0.0f || camera->FieldOfViewRadians >= std::numbers::pi_v<float> ||
+			!std::isfinite(camera->NearPlane) || !std::isfinite(camera->FarPlane) ||
+			camera->NearPlane <= 0.0f || camera->FarPlane <= camera->NearPlane ||
+			((camera->ImageWidth == 0) != (camera->ImageHeight == 0))) {
+			return {"invalid_argument", Map({{"status", String("invalid_camera_calibration")}})};
+		}
+		worldFromCamera.QuaternionX = static_cast<float>(worldFromCamera.QuaternionX / rotationLength);
+		worldFromCamera.QuaternionY = static_cast<float>(worldFromCamera.QuaternionY / rotationLength);
+		worldFromCamera.QuaternionZ = static_cast<float>(worldFromCamera.QuaternionZ / rotationLength);
+		worldFromCamera.QuaternionW = static_cast<float>(worldFromCamera.QuaternionW / rotationLength);
 		std::string id;
 		if (!StableId(store, entity, id))
 			return {"identity_required", Map({{"status", String("identity_required")}})};
+		const bool hasRequestedResolution = camera->ImageWidth != 0;
 		return {
 			"ok",
 			Map({
 				{"status", String("ok")},
 				{"id", String(id)},
-				{"world_from_camera", Frame(transform->Frame)},
+				{"world_from_camera", Frame(worldFromCamera)},
+				{"camera_from_world", Frame(worldFromCamera.Inverse())},
 				{"vertical_fov_radians", Number(camera->FieldOfViewRadians)},
 				{"near_metres", Number(camera->NearPlane)},
 				{"far_metres", Number(camera->FarPlane)},
 				{"requested_width", Number(camera->ImageWidth)},
 				{"requested_height", Number(camera->ImageHeight)},
-				{"coordinate_convention", String("right-handed, Y-up, Vulkan depth 0..1")},
+				{"requested_resolution_available", Boolean(hasRequestedResolution)},
+				{"requested_resolution_reason",
+				 String(
+					 hasRequestedResolution ? "explicit_camera_size" : "host_viewport_resolves_at_capture"
+				 )},
+				{"projection_available", Boolean(false)},
+				{"projection_reason", String("exact_projection_available_after_render_capture")},
+				{"crop",
+				 Map({
+					 {"left", Number(0.0)},
+					 {"top", Number(0.0)},
+					 {"width", Number(1.0)},
+					 {"height", Number(1.0)},
+					 {"convention", String("normalized_full_view_left_top_width_height")},
+				 })},
+				{"lens_distortion",
+				 Map({
+					 {"available", Boolean(false)},
+					 {"model", String("unavailable")},
+					 {"reason", String("camera_component_has_no_lens_distortion_model")},
+				 })},
+				{"temporal_jitter",
+				 Map({
+					 {"available", Boolean(false)},
+					 {"policy", String("unavailable")},
+					 {"reason", String("resolved_only_by_render_pipeline")},
+				 })},
+				{"units",
+				 Map({
+					 {"world", String("metres")},
+					 {"camera", String("metres")},
+					 {"angle", String("radians")},
+					 {"image", String("pixels")},
+				 })},
+				{"world_axes", String("right_handed_y_up")},
+				{"camera_axes", String("x_right_y_up_negative_z_forward")},
+				{"matrix_layout", String("column_major")},
+				{"clip_depth_range", String("zero_to_one")},
+				{"intrinsics_source", String("scene_camera_component")},
+				{"extrinsics_source", String("scene_transform")},
+				{"coordinate_convention",
+				 String("right_handed_y_up_camera_negative_z_clip_y_up_depth_zero_to_one_column_major")},
 			})
 		};
 	}

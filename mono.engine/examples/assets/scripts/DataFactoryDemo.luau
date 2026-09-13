@@ -52,9 +52,37 @@ local cameraMetadata = DataSceneService:GetCameraRenderingData(camera)
 local imageMetadata = DataSceneService:GetEditableImageMetadata(image)
 local captureChannels = DataSceneService:GetCaptureChannels()
 
-print("DataFactory capabilities", capabilities.schema_version, capabilities.scene_snapshot)
+print(
+	"DataFactory capabilities",
+	capabilities.schema_version,
+	capabilities.camera_metadata_schema_version,
+	capabilities.scene_snapshot
+)
 print("DataFactory snapshot", snapshot.tick, #snapshot.entities, snapshot.coverage)
-print("DataFactory camera", cameraMetadata.id, cameraMetadata.near_metres, cameraMetadata.coordinate_convention)
+print(
+	"DataFactory camera",
+	cameraMetadata.id,
+	cameraMetadata.world_from_camera,
+	cameraMetadata.camera_from_world,
+	cameraMetadata.vertical_fov_radians,
+	cameraMetadata.near_metres,
+	cameraMetadata.far_metres,
+	cameraMetadata.requested_width,
+	cameraMetadata.requested_height,
+	cameraMetadata.coordinate_convention
+)
+print(
+	"DataFactory calibration",
+	cameraMetadata.projection_available,
+	cameraMetadata.projection_reason,
+	cameraMetadata.crop.convention,
+	cameraMetadata.lens_distortion.available,
+	cameraMetadata.lens_distortion.reason,
+	cameraMetadata.temporal_jitter.available,
+	cameraMetadata.temporal_jitter.reason,
+	cameraMetadata.units.world,
+	cameraMetadata.units.image
+)
 print("DataFactory image", imageMetadata.width, imageMetadata.height, imageMetadata.format, imageMetadata.row_order)
 print("DataFactory image bytes", buffer.len(pixels))
 print("DataFactory capture", captureChannels.status, captureChannels.reason)

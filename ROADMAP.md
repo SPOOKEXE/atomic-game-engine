@@ -82,7 +82,7 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [_] capture IDs, semantic masks and part masks.
 - [_] complete autonomous capture workflow in `DataFactoryDemo.luau`.
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records.
-- [_] define the remaining camera intrinsics, extrinsics, near/far, jitter, lens distortion, crop, units and world/camera coordinates.
+- [x] define camera intrinsics, both extrinsic transform directions, near/far planes, requested resolution, crop, units and coordinate conventions. The authored camera record names its sources and reports exact render projection, lens distortion and temporal jitter as unavailable until a capture resolves them.
 - [_] describe render-graph passes and resources with budgets and dependencies, without inventing ground truth.
 - [_] emit structured event narratives with time, knowledge, belief and provenance fields.
 - [_] export rigs, skeletons, keypoints, skinning data and animation tracks.
