@@ -5,6 +5,9 @@
 #include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PortalShadowTransport.hpp>
+#include <engine/scene/Accessories.hpp>
+#include <engine/scene/Attachments.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -27,6 +30,7 @@ TEST_CASE(
 	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
 	const bool nested = mode == 1 || mode == 4;
 	const bool prepared = mode >= 9;
+	const bool animatedAccessory = mode == 12;
 	CAPTURE(mode);
 	scene::RegisterSceneClasses();
 	world::Universe worlds;
@@ -65,6 +69,39 @@ TEST_CASE(
 			visual.Tint = index == 0 ? core::Color3{1, .1f, .05f} : core::Color3{.05f, .1f, 1};
 			store.Set(wall, visual);
 			store.SetResource(scene::Sun{{0, 0, 1}, {.5f, .5f, .5f}});
+			if (animatedAccessory && index == 0) {
+				const auto player = scene::AddPlayer(store, "accessory-viewer");
+				const auto character = scene::LoadCharacter(store, player);
+				REQUIRE(character != ecs::NULL_ENTITY);
+				const auto root = store.Get<scene::Character>(character)->Root;
+				const auto head = store.FindFirstChild(character, "Head");
+				REQUIRE(head != ecs::NULL_ENTITY);
+				const auto hat = store.CreateInstance(scene::AccessoryClass(), "animated-hat");
+				scene::PartDesc handlePart;
+				handlePart.Mesh = mesh;
+				handlePart.Size = {12, 12, .01f};
+				const auto handle = scene::MakePart(store, handlePart);
+				store.SetInstanceName(handle, "Handle");
+				REQUIRE(store.SetParent(handle, hat));
+				store.GetMutable<scene::Visual>(handle)->Tint = {0, 1, 0};
+				const auto handlePoint = store.CreateInstance(scene::AttachmentClass(), "HatAttachment");
+				const auto headPoint = store.CreateInstance(scene::AttachmentClass(), "HatAttachment");
+				REQUIRE(store.SetParent(handlePoint, handle));
+				REQUIRE(store.SetParent(headPoint, head));
+				store.Set(handlePoint, scene::Attachment{});
+				store.Set(headPoint, scene::Attachment{});
+				REQUIRE(scene::EquipAccessory(store, character, hat));
+				REQUIRE(scene::PoseCharacters(store) > 0);
+				const auto beforePose = store.Get<scene::Transform>(handle)->Frame.Position;
+				store.Set(root, scene::Transform{core::CFrame({.45f, -5, -4})});
+				REQUIRE(scene::PoseCharacters(store) > 0);
+				CHECK((store.Get<scene::Transform>(handle)->Frame.Position - beforePose).Magnitude() > 4);
+				const auto accessory = store.Get<scene::Accessory>(hat);
+				REQUIRE(accessory != nullptr);
+				const auto handleFrame = scene::ResolveAttachment(store, accessory->HandleAttachment);
+				const auto characterFrame = scene::ResolveAttachment(store, accessory->CharacterAttachment);
+				CHECK((handleFrame.Position - characterFrame.Position).Magnitude() < .0001f);
+			}
 			if (!nested || index + 1 == rooms.size()) return;
 			part.Frame.Position = {0, 0, -2};
 			part.Size = {4, 4, .01f};
@@ -353,6 +390,18 @@ TEST_CASE(
 						 std::to_integer<unsigned>(colour.Bytes[pixel * 4 + 2]) >
 					 5;
 	CHECK(litPixels > 0);
+	if (animatedAccessory) {
+		size_t greenPixels = 0;
+		for (size_t pixel = 0; pixel < 33 * 33; ++pixel) {
+			const auto offset = pixel * 4;
+			const auto red = std::to_integer<uint8_t>(colour.Bytes[offset]);
+			const auto green = std::to_integer<uint8_t>(colour.Bytes[offset + 1]);
+			const auto blue = std::to_integer<uint8_t>(colour.Bytes[offset + 2]);
+			greenPixels += green > red + 16 && green > blue + 16;
+		}
+		CHECK(greenPixels >= 16);
+		CHECK(greenPixels <= 1000);
+	}
 	if (prepared) {
 		if (mode == 12) {
 			REQUIRE(worlds.ClosePresentation(capture->Producer) == world::PresentationStatus::Ok);

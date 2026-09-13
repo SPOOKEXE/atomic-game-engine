@@ -860,6 +860,13 @@ TEST_CASE(
 		complete = particleOnly = true;
 		expectedRed = 128.0 / 255.0;
 	}
+	SECTION("portal seam keeps lit glass, spatial UI, particles and ribbons in one composed image") {
+		// These inputs are normally exercised one at a time. Keep one combined
+		// capture on the production exchange path so a layer can no longer be
+		// accidentally omitted while every isolated fixture still passes.
+		complete = glass = spatialOnly = particleOnly = beamOnly = true;
+		expectedRed = 128.0 / 255.0;
+	}
 	SECTION("camera-facing beam uses the requested eye instead of retained world geometry") {
 		complete = beamOnly = true;
 		expectedRed = 128.0 / 255.0;
