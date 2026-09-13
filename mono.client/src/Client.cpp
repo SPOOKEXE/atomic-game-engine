@@ -2,6 +2,7 @@
 
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
+#include <engine/control/features/AudioObservation.hpp>
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
@@ -305,6 +306,9 @@ namespace client {
 				return false;
 			}
 			DataFactory = std::make_unique<engine::world::DataFactorySession>(*Universe_);
+			DataAudio = std::make_shared<DataAudioObservationHost>([this](std::string_view instanceId) {
+				return DataFactory ? DataFactory->Inspect(instanceId) : engine::world::DataFactoryReply{};
+			});
 			DataCapture = std::make_shared<engine::render::ScriptDataCaptureBridge>(*DataFactory, Renderer);
 			DataLifecycle = std::make_shared<engine::script::QueuedDataLifecycleBridge>(*DataFactory);
 			DataFactory->SetPauseParticipant([this](
@@ -653,6 +657,9 @@ namespace client {
 			ControlSurface.Enable(features);
 			if (DataFactory) {
 				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataAudioObservation(*Universe_, DataAudio)}
+				);
 				AddDataScriptPackageTool(
 					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
 						return ExecuteDataScriptPackageTransaction(
@@ -831,6 +838,21 @@ namespace client {
 		if (Sound == nullptr) {
 			return;
 		}
+		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
+			const engine::world::DataFactoryReply clock =
+				DataFactory->Inspect(Universe_->NameOf(Rendered).Text());
+			if (DataAudioEpoch != 0 && DataAudioEpoch != clock.WorldEpoch) {
+				// A restored universe has no matching mixer snapshot. Rebuild the
+				// null device and stages before it may publish another observation.
+				DataAudio->Clear(clock.InstanceId);
+				Stages.clear();
+				Sound = std::unique_ptr<engine::audio::Device>(engine::audio::OpenNullDevice({}));
+				if (Sound == nullptr) return;
+				DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
+			}
+			if (DataAudioEpoch == 0) DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
+			DataAudioEpoch = clock.WorldEpoch;
+		}
 		std::erase_if(Stages, [&](auto &entry) {
 			const engine::world::WorldId world{entry.first};
 			if (world == Replicated ||
@@ -844,7 +866,12 @@ namespace client {
 		// frame's**. One frame of latency on an ear is inaudible; reading a live
 		// camera out of a store here would be reading something a world is
 		// writing, which is the whole reason the compositor exists.
-		const engine::core::Vector3 ear = Views.CameraFrame().Position;
+		engine::core::Vector3 ear = Views.CameraFrame().Position;
+		if (Settings.DataFactory && Rendered.IsValid()) {
+			Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+				ear = DataFactoryListener(store, ear);
+			});
+		}
 		const uint32_t rate = Sound->Format().SampleRate;
 
 		const auto sync = [&](engine::world::WorldId id) {
@@ -868,6 +895,47 @@ namespace client {
 		// fall out of replication rather than out of an audio rule.
 		if (ReportedJoin) {
 			sync(Replicated);
+		}
+
+		// Data-factory capture owns a null device. The client thread both posts
+		// commands and advances its mixer, so copying this block cannot race an
+		// SDL callback. The regular output path intentionally has no capture.
+		if (!Settings.DataFactory || !DataAudio || !DataFactory || !Rendered.IsValid()) return;
+		auto *nullDevice = dynamic_cast<engine::audio::NullDevice *>(Sound.get());
+		if (nullDevice == nullptr) return;
+		const engine::world::DataFactoryReply clock =
+			DataFactory->Inspect(Universe_->NameOf(Rendered).Text());
+		DataAudio->InvalidateUnless(clock);
+		const std::vector<size_t> slices = DataAudio->AdvanceFrames(clock, nullDevice->Format().SampleRate);
+		std::vector<AudioObservationSourceBinding> sources;
+		std::string detail;
+		bool labelled = false;
+		Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+			const auto stage = Stages.find(Rendered.Index);
+			labelled =
+				stage != Stages.end() && stage->second.CollectObservationSources(store, sources, detail);
+		});
+		if (!labelled) {
+			DataAudio->Clear(clock.InstanceId);
+		}
+		bool rendered = false;
+		for (size_t index = 0; index < slices.size(); ++index) {
+			const size_t frames = slices[index];
+			engine::audio::SampleBuffer waveform(nullDevice->Format(), frames);
+			const engine::audio::MixReport report = nullDevice->Mixer().Render(waveform);
+			rendered = true;
+			if (labelled &&
+				!DataAudio->Publish(
+					clock, nullDevice->Mixer(), waveform, report, sources, detail, index + 1 == slices.size()
+				)) {
+				ENGINE_WARN("data-factory audio observation unavailable: {}", detail);
+			}
+		}
+		if (rendered) {
+			Universe_->Enter(Rendered, [this](engine::ecs::Store &) {
+				if (const auto stage = Stages.find(Rendered.Index); stage != Stages.end())
+					stage->second.ConsumeObservationSources();
+			});
 		}
 	}
 
@@ -904,7 +972,9 @@ namespace client {
 		// Opened whether or not a sound was asked for: a world's own scripts
 		// will want one, and a device that is only opened when a flag is passed
 		// is a device nothing exercises.
-		Sound = engine::audio::OpenDevice({});
+		Sound = Settings.DataFactory
+					? std::unique_ptr<engine::audio::Device>(engine::audio::OpenNullDevice({}))
+					: engine::audio::OpenDevice({});
 		if (Sound == nullptr) {
 			// Not a failure. A CI container has no sound server and a laptop
 			// may have its output disabled; a game that refused to start
@@ -918,6 +988,12 @@ namespace client {
 				);
 			}
 			return true;
+		}
+		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
+			const engine::world::DataFactoryReply clock =
+				DataFactory->Inspect(Universe_->NameOf(Rendered).Text());
+			DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
+			DataAudioEpoch = clock.WorldEpoch;
 		}
 		if (!decoded) {
 			return true;
@@ -2233,7 +2309,16 @@ namespace client {
 		}
 
 		if (ControlServer.IsRunning()) {
-			ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
+			ControlServer.Pump([this](const std::string &line) {
+				if (!Settings.DataFactory || !DataFactory || !Rendered.IsValid())
+					return ControlSurface.Answer(line);
+				return AnswerDataFactoryControlLine(
+					*DataFactory,
+					Universe_->NameOf(Rendered).Text(),
+					[this, &line] { return ControlSurface.Answer(line); },
+					[this](const engine::world::DataFactoryReply &) { PumpSounds(); }
+				);
+			});
 		}
 		auto allSystemsPaused = [this] {
 			return DataFactory && Rendered.IsValid() &&
@@ -2299,9 +2384,26 @@ namespace client {
 			ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 			Universe_->Tick(delta);
 		}
-		if (DataLifecycle) DataLifecycle->Pump();
+		// A normal data-factory tick is a completed world boundary before queued
+		// lifecycle work. Capture it now so a following pause or manual Step cannot
+		// relabel its audio with a later scene state.
+		if (Settings.DataFactory) PumpSounds();
+		if (DataLifecycle) {
+			for (;;) {
+				const engine::script::DataLifecyclePumpResult lifecycle = DataLifecycle->PumpOne();
+				if (!lifecycle.Processed) break;
+				// A paused Step owns one completed world tick. Capture it before the
+				// next queued request can mutate the same scene, so every waveform
+				// record retains that exact tick's source state and clock.
+				if (lifecycle.CompletedTick || lifecycle.Restored) PumpSounds();
+				if (lifecycle.PendingRenderOnly) break;
+			}
+		}
 		if (DataCapture) DataCapture->Pump();
 		factoryPaused = allSystemsPaused();
+		if (DataAudio && DataFactory && Rendered.IsValid()) {
+			DataAudio->InvalidateUnless(DataFactory->Inspect(Universe_->NameOf(Rendered).Text()));
+		}
 		// A ticket belongs to the world and VM which created it. Keep that owner
 		// until the renderer accepts its terminal release, even if presentation
 		// switches worlds while the cancellation is in flight.
@@ -2479,7 +2581,7 @@ namespace client {
 		// because presentation is where the frame stops being about state.
 		{
 			ENGINE_HEAP_SCOPE("client.sounds");
-			if (!factoryPaused) PumpSounds();
+			if (!factoryPaused || Settings.DataFactory) PumpSounds();
 		}
 
 		// Beside the audio pump: neither is part of the tick, and a presence

@@ -51,6 +51,7 @@
 #include <client/ActiveScenes.hpp>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
+#include <client/DataAudioObservation.hpp>
 #include <client/DataFactoryRenderOnly.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
@@ -586,6 +587,8 @@ namespace client {
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
 		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
+		std::shared_ptr<DataAudioObservationHost> DataAudio;
+		uint64_t DataAudioEpoch = 0;
 		data_factory_render_only::Queue DataFactoryRenderOnly;
 		std::shared_ptr<engine::script::QueuedDataLifecycleBridge> DataLifecycle;
 		std::shared_ptr<engine::render::ScriptDataCaptureBridge> DataCapture;

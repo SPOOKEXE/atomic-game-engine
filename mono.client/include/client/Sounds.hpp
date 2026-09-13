@@ -47,6 +47,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -169,7 +170,23 @@ namespace client {
 		// is holding a player that was never started. While this is false the
 		// next pass posts it again, against a fresh deadline.
 		bool Started = false;
+
+		// Set only by the data-factory collector from the authored attribute.
+		// It survives teardown until the final completed audio block is copied.
+		std::string ObservationId;
+		uint64_t ObservationGeneration = 0;
 	};
+
+	// A scene-owned audio source and the player node currently standing in for
+	// it. The numeric node never leaves the client boundary.
+	struct AudioObservationSourceBinding {
+		std::string SourceId;
+		engine::audio::NodeId Player;
+	};
+
+	// Reads the authoritative camera row for deterministic data-factory audio.
+	engine::core::Vector3
+	DataFactoryListener(const engine::ecs::Store &store, engine::core::Vector3 fallback);
 
 	// The voices standing in for a world's `Sound` rows.
 	//
@@ -239,6 +256,17 @@ namespace client {
 		// @return Its voice, or nullptr.
 		const Voice *Find(engine::ecs::Entity instance) const;
 
+		// Collects the current player bindings under their authored
+		// `DataFactoryId` attributes. A data observation refuses an unlabelled or
+		// duplicated active source rather than turning a transient entity id into
+		// durable training data.
+		bool CollectObservationSources(
+			const engine::ecs::Store &store,
+			std::vector<AudioObservationSourceBinding> &sources,
+			std::string &detail
+		);
+		void ConsumeObservationSources();
+
 		// How many commands this stage could not post, over its life.
 		//
 		// **Beside `CommandQueue::Dropped` rather than instead of it.** That
@@ -306,6 +334,8 @@ namespace client {
 		// voice whose row has gone is remembered by nothing else - so it is
 		// remembered here.
 		std::vector<Voice> Closing;
+		std::vector<Voice> CompletedObservation;
+		uint64_t NextObservationGeneration = 1;
 
 		// The listener pose last accepted, and whether one ever was.
 		//

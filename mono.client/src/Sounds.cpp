@@ -2,8 +2,12 @@
 #include <engine/audio/Wav.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Attributes.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/DataAudioObservationBridge.hpp>
+#include <engine/script/DataSceneService.hpp>
 
 #include <algorithm>
 #include <client/Sounds.hpp>
@@ -81,6 +85,90 @@ namespace client {
 	const Voice *SoundStage::Find(engine::ecs::Entity instance) const {
 		const auto found = Voices.find(instance.Id);
 		return found == Voices.end() ? nullptr : &found->second;
+	}
+
+	engine::core::Vector3
+	DataFactoryListener(const engine::ecs::Store &store, engine::core::Vector3 fallback) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		const auto *camera =
+			active == nullptr ? nullptr : store.Get<engine::scene::Transform>(active->Entity);
+		return camera == nullptr ? fallback : camera->Frame.Position;
+	}
+
+	bool SoundStage::CollectObservationSources(
+		const engine::ecs::Store &store,
+		std::vector<AudioObservationSourceBinding> &sources,
+		std::string &detail
+	) {
+		sources.clear();
+		sources.reserve((Voices.size() + Closing.size() + CompletedObservation.size()) * 3);
+		auto identify = [&](Voice &voice, uint64_t entityId, bool live) {
+			if (!live && voice.ObservationId.empty()) return true;
+			if (live) {
+				engine::ecs::AttributeValue attribute;
+				const engine::ecs::Entity entity{entityId};
+				if (!engine::ecs::GetAttribute(
+						store, entity, engine::core::Name(engine::script::DATA_SCENE_ID_ATTRIBUTE), attribute
+					) ||
+					attribute.Type != engine::ecs::PropertyType::String ||
+					!engine::script::IsDataAudioObservationText(
+						attribute.String, engine::script::MAX_AUDIO_OBSERVATION_ID_BYTES
+					)) {
+					detail = "every active Sound needs an authored valid DataFactoryId";
+					return false;
+				}
+				voice.ObservationId = attribute.String;
+			}
+			auto append = [&](engine::audio::NodeId node, std::string_view role) {
+				if (!node.IsValid()) return true;
+				const std::string id = voice.ObservationId + "/" +
+									   std::to_string(voice.ObservationGeneration) + "/" + std::string(role);
+				if (!engine::script::IsDataAudioObservationText(
+						id, engine::script::MAX_AUDIO_OBSERVATION_ID_BYTES
+					)) {
+					detail = "DataFactoryId is too long to identify every audio node";
+					return false;
+				}
+				sources.push_back({id, node});
+				return true;
+			};
+			return append(voice.Player, "player") && append(voice.Fader, "fader") &&
+				   append(voice.Placement, "emitter");
+		};
+		for (auto &[entityId, voice] : Voices) {
+			if (!identify(voice, entityId, true)) {
+				sources.clear();
+				return false;
+			}
+		}
+		for (Voice &voice : Closing) {
+			if (!identify(voice, 0, false)) {
+				sources.clear();
+				return false;
+			}
+		}
+		for (Voice &voice : CompletedObservation) {
+			if (!identify(voice, 0, false)) {
+				sources.clear();
+				return false;
+			}
+		}
+		std::sort(sources.begin(), sources.end(), [](const auto &left, const auto &right) {
+			return left.SourceId < right.SourceId;
+		});
+		for (size_t index = 1; index < sources.size(); ++index) {
+			if (sources[index - 1].SourceId == sources[index].SourceId) {
+				detail = "two active Sound rows have the same DataFactoryId";
+				sources.clear();
+				return false;
+			}
+		}
+		detail.clear();
+		return true;
+	}
+
+	void SoundStage::ConsumeObservationSources() {
+		CompletedObservation.clear();
 	}
 
 	std::optional<Voice> SoundStage::Open(
@@ -200,6 +288,14 @@ namespace client {
 				command.Target = node;
 				(void)queue.Post(command);
 			}
+		}
+		if (!voice.ObservationId.empty()) {
+			const auto retained = std::find_if(
+				CompletedObservation.begin(), CompletedObservation.end(), [&](const Voice &candidate) {
+					return candidate.Player == voice.Player;
+				}
+			);
+			if (retained == CompletedObservation.end()) CompletedObservation.push_back(voice);
 		}
 
 		return true;
@@ -327,6 +423,7 @@ namespace client {
 					return;
 				}
 				made->Sound = sound.SoundId;
+				made->ObservationGeneration = NextObservationGeneration++;
 				voice = Voices.emplace(instance.Id, *made).first;
 			}
 
