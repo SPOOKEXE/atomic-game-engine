@@ -1105,16 +1105,68 @@ TEST_CASE(
 	View eye;
 	eye.Target = &target;
 	eye.CameraFrame = destinationEye;
+	const PortalEyeGeometrySource geometry{bodyWorld, std::span(body), {}};
+	const auto centrePixel = [&] {
+		OverlayImage overlay;
+		fixture.Render.Render(std::span(&eye, 1), overlay, nullptr, false);
+		const auto image = render::test::CaptureResource(
+			fixture.Render, core::Name("composed-image"), 0, 65, 65, render::test::ImageFormat::Bgra8Unorm
+		);
+		const auto *pixel = image.Bytes.data() + 32 * image.RowStrideBytes + 32 * 4;
+		return std::array{
+			std::to_integer<int>(pixel[2]), std::to_integer<int>(pixel[1]), std::to_integer<int>(pixel[0])
+		};
+	};
+	const PortalImageDemandSettings settings{
+		.Width = 65, .Height = 65, .RecursionDepth = 0, .PixelBudget = 65 * 65
+	};
+	REQUIRE(host.SubmitEye(worlds.Source, worlds.Route(), eye, settings, START, geometry) == 1);
+	REQUIRE(host.Pump(0, 1, START).Rendered == 1);
+	eye.EyeImage = host.Image(eye.Slot, eye.EyeImageKey);
+	const uint64_t firstImage = eye.EyeImage;
+	REQUIRE(firstImage != 0);
+	const auto firstCentre = centrePixel();
+	CAPTURE(firstCentre);
+	CHECK(firstCentre[2] > firstCentre[0]);
+
+	// The blue foreign body hides the red backdrop at the initial pose. Moving
+	// sideways reveals the backdrop at the same pixel, so this checks the capture
+	// camera rather than merely that another image arrived.
+	eye.CameraFrame.Position.X += 4;
+	const auto movedNow = START + std::chrono::milliseconds(1);
+	REQUIRE(host.SubmitEye(worlds.Source, worlds.Route(), eye, settings, movedNow, geometry) == 1);
+	CHECK(eye.EyeImage == firstImage);
+	CHECK(host.CurrentImage(eye.Slot, eye.EyeImageKey) == 0);
+	const auto pendingCentre = centrePixel();
+	CAPTURE(pendingCentre);
+	CHECK(pendingCentre[2] > pendingCentre[0]);
+	CHECK((pendingCentre[0] != 0 || pendingCentre[1] != 0 || pendingCentre[2] != 0));
+
+	REQUIRE(host.Pump(0, 1, movedNow).Rendered == 1);
+	eye.EyeImage = host.Image(eye.Slot, eye.EyeImageKey);
+	REQUIRE(eye.EyeImage != 0);
+	CHECK(eye.EyeImage != firstImage);
+	const auto capture = host.Capture(eye.Slot, eye.EyeImageKey);
+	REQUIRE(capture);
+	CHECK(capture->Camera.Position[0] == eye.CameraFrame.Position.X);
+	CHECK(capture->Camera.Position[1] == eye.CameraFrame.Position.Y);
+	CHECK(capture->Camera.Position[2] == eye.CameraFrame.Position.Z);
+	const auto movedCentre = centrePixel();
+	CAPTURE(movedCentre);
+	CHECK(movedCentre[0] > movedCentre[2]);
+
+	eye.CameraFrame = destinationEye;
 	uint64_t lastImage = 0;
 	for (int phase = 0; phase < 6; ++phase) {
 		CAPTURE(phase);
+		const auto now = START + std::chrono::milliseconds(10 + phase);
 		eye.EyePlayer = phase == 2 ? std::optional<int64_t>(91) : std::nullopt;
 		if (phase == 4) body[0].Frame.Position.X += 1000;
 		if (phase == 5) {
 			body[0].Frame.Position.X -= 1000;
 			body[0].SkinCount = 1;
 		}
-		const PortalEyeGeometrySource geometry{
+		const PortalEyeGeometrySource phaseGeometry{
 			bodyWorld, phase == 0 ? std::span<const scene::DrawInstance>{} : std::span(body), {}
 		};
 		const auto issued = host.SubmitEye(
@@ -1122,17 +1174,17 @@ TEST_CASE(
 			worlds.Route(),
 			eye,
 			{.Width = 65, .Height = 65, .RecursionDepth = 0, .PixelBudget = 65 * 65},
-			START,
-			geometry
+			now,
+			phaseGeometry
 		);
 		if (phase == 5) {
 			CHECK(issued == 0);
 			CHECK(eye.EyeImage == lastImage);
-			CHECK(host.Pump(0, 1, START).Rendered == 0);
+			CHECK(host.Pump(0, 1, now).Rendered == 0);
 			continue;
 		}
 		REQUIRE(issued == 1);
-		const auto pumped = host.Pump(0, 1, START);
+		const auto pumped = host.Pump(0, 1, now);
 		REQUIRE(pumped.Rendered == 1);
 		REQUIRE(pumped.Sent == 1);
 		eye.EyeImage = host.Image(eye.Slot, eye.EyeImageKey);
