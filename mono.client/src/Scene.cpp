@@ -1032,6 +1032,17 @@ namespace client {
 		return true;
 	}
 
+	bool RestoreDefaultCameraMovement(Store &store, Scheduler &scheduler) {
+		RegisterClientComponents();
+		const auto *active = store.Resource<ActiveCamera>();
+		if (active == nullptr || active->Entity == engine::ecs::NULL_ENTITY || !store.Alive(active->Entity) ||
+			!store.HasResource<FallbackCameraState>()) {
+			return false;
+		}
+		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
+		return true;
+	}
+
 	engine::core::Name InstallRenderingProfiles(
 		const engine::graph::PipelineSet &profiles,
 		engine::render::Renderer &renderer,

@@ -647,6 +647,7 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Run(std::string_view source, std::string_view name) {
+		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
@@ -772,6 +773,7 @@ namespace engine::script {
 	DataScriptPackageRunResult LuauRuntime::RunDataScriptPackage(
 		const DataScriptPackageContext &context, std::string_view source, std::string_view entry
 	) {
+		MarkWorldSwapUsed();
 		if (!IsPackageOnly())
 			return {
 				.Terminal = DataScriptPackageRunResult::State::Failed,
@@ -1280,6 +1282,7 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
+		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;

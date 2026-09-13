@@ -83,12 +83,13 @@ mono_add_library(client
 		# L9, `shared`. The VM-free half of the script layer, and the one this
 		# directory compiles against: `client/Client.hpp` and
 		# `client/Replicated.hpp` both name `script::Runtime` in a public header
-		# because a client owns one VM per world. **`Engine::scripthost` is
-		# deliberately absent** - nothing here calls `MakeRuntime`; the worlds
-		# are opened through `Engine::examples` and `Engine::game`, which are
-		# above the adapters and name the factory themselves. Undeclared until
-		# v0.19, arriving through `Engine::examples`.
+		# because a client owns one VM per world.
 		Engine::script
+
+		# A data-script package is a client-only control action. Its fresh Luau
+		# runtime is opened through the neutral factory, never by this module
+		# naming an adapter directly.
+		Engine::scripthost
 
 		# L12, `shared`. `--script` builds the scene by running a Luau file
 		# instead of the C++ loop in Demo.cpp. The VM itself is private to that

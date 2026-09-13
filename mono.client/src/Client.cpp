@@ -40,6 +40,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/TeleportRequest.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -50,7 +51,10 @@
 #include <array>
 #include <chrono>
 #include <client/Client.hpp>
+#include <client/DataScriptPackage.hpp>
+#include <client/DataScriptPackageTransaction.hpp>
 #include <client/Replicated.hpp>
+#include <client/WorldSystems.hpp>
 #include <cstddef>
 #include <fstream>
 #include <network/SessionKey.hpp>
@@ -491,11 +495,12 @@ namespace client {
 		limits.DataLifecycle = DataLifecycle;
 
 		for (const engine::world::WorldId id : worlds) {
-			const double scriptTickRate = Universe_->SettingsOf(id).ScriptTickRate;
+			const engine::world::WorldSettings worldSettings = Universe_->SettingsOf(id);
 			std::string failure;
 
 			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				InstallPresentation(store, systems, Settings.Entities);
+				InstallClientWorldSystems(store, systems, worldSettings.PhysicsTickRate);
 				const engine::ecs::Entity localPlayer = EnsureLocalPlayer(store);
 				if (localPlayer == engine::ecs::NULL_ENTITY) {
 					failure = "could not establish the single-player client";
@@ -506,7 +511,9 @@ namespace client {
 				// its own keeps it - see `InstallDefaultCamera`.
 				Runtimes.emplace_back(
 					id,
-					engine::game::StartWorldScripts(store, systems, limits, failure, nullptr, scriptTickRate)
+					engine::game::StartWorldScripts(
+						store, systems, limits, failure, nullptr, worldSettings.ScriptTickRate
+					)
 				);
 				(void)engine::gui::ResetPlayerGui(store, localPlayer);
 				InstallDefaultCamera(store, systems);
@@ -645,6 +652,47 @@ namespace client {
 			ControlSurface.Enable(features);
 			if (DataFactory) {
 				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
+				AddDataScriptPackageTool(
+					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
+						return ExecuteDataScriptPackageTransaction(
+							{
+								.Universe = *Universe_,
+								.Session = *DataFactory,
+								.RuntimeOf =
+									[this](engine::world::WorldId world) -> engine::script::Runtime * {
+									const auto runtime =
+										std::ranges::find_if(Runtimes, [world](const auto &entry) {
+											return entry.first == world;
+										});
+									return runtime == Runtimes.end() ? nullptr : runtime->second.get();
+								},
+								.DiscardRuntime =
+									[this](engine::world::WorldId world) {
+										std::erase_if(Runtimes, [world](const auto &entry) {
+											return entry.first == world;
+										});
+									},
+								.MakeRuntime =
+									[](engine::ecs::Store &store,
+									   const engine::script::RuntimeLimits &limits) {
+										return engine::script::MakeRuntime(
+											store, engine::script::Language::Luau, limits
+										);
+									},
+								.RunPackage = engine::script::RunDataScriptPackage,
+								.InstallSystems =
+									[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+										InstallPresentation(store, systems, Settings.Entities);
+										(void)EnsureLocalPlayer(store);
+										(void)RestoreDefaultCameraMovement(store, systems);
+										(void)InstallDefaultCamera(store, systems);
+										InstallClientWorldSystems(store, systems);
+									},
+							},
+							request
+						);
+					}
+				);
 				ControlSurface.Enable(
 					std::array{engine::control::features::DataCapture(*DataFactory, DataCapture)}
 				);

@@ -40,7 +40,11 @@ TEST_CASE("the javascript adapter opens a runtime on its own", "[scriptjs]") {
 	const auto runtime = MakeJavaScriptRuntime(store);
 	REQUIRE(runtime != nullptr);
 	CHECK(runtime->Which() == Language::JavaScript);
+	CHECK(runtime->CanDiscardForWorldSwap());
+	CHECK(runtime->Heartbeat(1.0f / 60.0f));
+	CHECK(runtime->CanDiscardForWorldSwap());
 	CHECK(runtime->Run("if (1 + 1 !== 2) throw new Error('arithmetic');"));
+	CHECK_FALSE(runtime->CanDiscardForWorldSwap());
 }
 
 TEST_CASE("the javascript adapter builds into the world it was handed", "[scriptjs]") {
@@ -64,6 +68,7 @@ TEST_CASE("javascript package runtime refuses source before execution", "[script
 	CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Failed);
 	CHECK(result.Error == "javascript data-script packages are unsupported");
 	CHECK(runtime->LastError().empty());
+	CHECK_FALSE(runtime->CanDiscardForWorldSwap());
 }
 
 TEST_CASE("javascript refuses virtual classes and still creates their leaves", "[scriptjs]") {

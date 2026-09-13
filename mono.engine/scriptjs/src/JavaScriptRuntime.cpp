@@ -409,6 +409,7 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
+		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
@@ -430,6 +431,7 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Run(std::string_view source, std::string_view name) {
+		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
@@ -486,6 +488,7 @@ namespace engine::script {
 	DataScriptPackageRunResult JavaScriptRuntime::RunDataScriptPackage(
 		const DataScriptPackageContext &context, std::string_view source, std::string_view entry
 	) {
+		MarkWorldSwapUsed();
 		(void)context;
 		(void)source;
 		(void)entry;

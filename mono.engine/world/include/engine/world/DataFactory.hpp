@@ -173,6 +173,12 @@ namespace engine::world {
 		// keep a second pause map beside the lifecycle session.
 		bool AllSystemsPaused(std::string_view instanceId) const;
 
+		// The maximum serialized checkpoint size accepted by this session. Host
+		// extensions use the same bound when preparing an atomic candidate.
+		size_t CheckpointByteLimit() const {
+			return MaximumCheckpointBytes;
+		}
+
 		DataFactoryReply Snapshot(std::string_view instanceId, std::string &snapshotId);
 		DataFactoryReply RenderSnapshotBarrier(std::string_view instanceId, std::string_view snapshotId);
 		// Begins one host-owned frame. A successful reply is Pending until the

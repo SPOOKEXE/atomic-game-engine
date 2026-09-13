@@ -650,6 +650,11 @@ namespace engine::script {
 			return PackageOnly;
 		}
 
+		bool CanDiscardForWorldSwap() const {
+			return WorldSwapDiscardable && PendingGuiEvents.empty() && PendingSettingsMenuActions.empty() &&
+				   PendingTeleportResults.empty();
+		}
+
 		// The world this runtime builds into.
 		//
 		// @return The store passed at construction.
@@ -836,6 +841,9 @@ namespace engine::script {
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 		bool PackageOnly = false;
+		void MarkWorldSwapUsed() {
+			WorldSwapDiscardable = false;
+		}
 
 		// The last failure, or empty. Read through `LastError`.
 		std::string Error;
@@ -867,6 +875,7 @@ namespace engine::script {
 		// Authority answers waiting for the next script barrier, in network order.
 		// The client admits only ids in its bounded outbox before adding one here.
 		std::vector<TeleportResult> PendingTeleportResults;
+		bool WorldSwapDiscardable = true;
 
 		// Where execution should be reported from. Read through `Debug`.
 		Debugger Breakpoints;

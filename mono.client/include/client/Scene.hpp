@@ -259,6 +259,11 @@ namespace client {
 	//         already had one.
 	bool InstallDefaultCamera(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
+	// Restores the fallback camera system after a serialized world is loaded.
+	// A saved fallback camera already has an active camera resource, so it is
+	// intentionally separate from InstallDefaultCamera.
+	bool RestoreDefaultCameraMovement(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+
 	// Installs one universe rendering profile under a key qualified by world.
 	//
 	// The renderer owns compiled device plans and knows nothing about stores.

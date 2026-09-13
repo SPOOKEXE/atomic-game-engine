@@ -243,6 +243,7 @@ namespace engine::script {
 	}
 
 	void Runtime::DeliverGuiEvents(std::span<const gui::GuiEvent> events) {
+		if (!events.empty()) MarkWorldSwapUsed();
 		// **Appended rather than assigned**, because a host may poll more than
 		// one canvas between beats. The studio compiles and routes one
 		// `gui::Router` per viewport panel - a panel *is* a canvas - so two
@@ -254,12 +255,14 @@ namespace engine::script {
 
 	void Runtime::DeliverSettingsMenuAction(core::Name action) {
 		if (action.IsValid()) {
+			MarkWorldSwapUsed();
 			PendingSettingsMenuActions.push_back(action);
 		}
 	}
 
 	void Runtime::DeliverTeleportResult(TeleportResult result) {
 		if (result.Id != 0) {
+			MarkWorldSwapUsed();
 			PendingTeleportResults.push_back(std::move(result));
 		}
 	}
@@ -291,6 +294,7 @@ namespace engine::script {
 		ScriptCosts.reserve(scripts.size());
 
 		for (const ecs::Entity instance : scripts) {
+			MarkWorldSwapUsed();
 			// Recorded whether or not it is new: this call starts everything it
 			// finds, and what the record is for is stopping `RunNewScripts` from
 			// starting the same instance a second time.
@@ -362,6 +366,7 @@ namespace engine::script {
 		std::string firstError;
 
 		for (const ecs::Entity instance : wanted) {
+			MarkWorldSwapUsed();
 			if (!RememberStarted(instance)) {
 				continue;
 			}

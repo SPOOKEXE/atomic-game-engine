@@ -149,6 +149,14 @@ TEST_CASE("data-script package parses bounded typed inputs", "[script][data-scri
 	);
 }
 
+TEST_CASE("runtime discard proof is sticky after retained host work", "[script][data-script-package]") {
+	engine::ecs::Store store("discard-proof");
+	TestRuntime runtime(store);
+	CHECK(runtime.CanDiscardForWorldSwap());
+	runtime.DeliverSettingsMenuAction(engine::core::Name("open-settings"));
+	CHECK_FALSE(runtime.CanDiscardForWorldSwap());
+}
+
 TEST_CASE(
 	"data-script package refuses traversal, untyped values, and unknown fields",
 	"[script][data-script-package]"

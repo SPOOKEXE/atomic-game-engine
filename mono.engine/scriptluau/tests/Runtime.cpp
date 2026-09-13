@@ -84,7 +84,11 @@ TEST_CASE("the luau adapter opens a runtime on its own", "[scriptluau]") {
 	const auto runtime = MakeLuauRuntime(store);
 	REQUIRE(runtime != nullptr);
 	CHECK(runtime->Which() == Language::Luau);
+	CHECK(runtime->CanDiscardForWorldSwap());
+	CHECK(runtime->Heartbeat(1.0f / 60.0f));
+	CHECK(runtime->CanDiscardForWorldSwap());
 	CHECK(runtime->Run("local x = 1 + 1 assert(x == 2, 'arithmetic')"));
+	CHECK_FALSE(runtime->CanDiscardForWorldSwap());
 }
 
 TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]") {
