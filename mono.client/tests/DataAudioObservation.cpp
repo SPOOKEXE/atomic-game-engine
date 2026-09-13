@@ -27,7 +27,7 @@
 
 TEST_SUITE_ID("client.data-audio-observation")
 TEST_DEPENDS("engine.audio.observation")
-TEST_DEPENDS("engine.script.data-audio-observation-bridge")
+TEST_DEPENDS("engine.script.dataaudioobservationbridge")
 
 namespace {
 	engine::world::DataFactoryReply Clock(uint64_t epoch = 2, uint64_t version = 4) {
