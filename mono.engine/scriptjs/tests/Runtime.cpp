@@ -59,7 +59,18 @@ TEST_CASE("javascript package runtime refuses source before execution", "[script
 	RegisterClasses();
 	Store store("scriptjs_package");
 	const auto runtime = MakeJavaScriptRuntime(
-		store, {.Capabilities = engine::script::ScriptCapabilities::None, .PackageOnly = true}
+		store,
+		{
+			.DataCapture = {},
+			.DataLifecycle = {},
+			.MemoryBytes = 64u * 1024u * 1024u,
+			.StepBudget = 200u * 1000u * 1000u,
+			.JobBudget = 100u * 1000u,
+			.Role = engine::script::HostRole::OfServer(),
+			.Origin = engine::script::ScriptOrigin::Game,
+			.Capabilities = engine::script::ScriptCapabilities::None,
+			.PackageOnly = true,
+		}
 	);
 	engine::script::DataScriptPackage package;
 	const engine::script::DataScriptPackageContext context(package, {});

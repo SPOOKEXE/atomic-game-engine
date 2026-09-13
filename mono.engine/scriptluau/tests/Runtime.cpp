@@ -63,7 +63,18 @@ namespace {
 		Store store("scriptluau_package_fresh");
 		engine::scene::InstallServices(store);
 		const auto runtime = MakeLuauRuntime(
-			store, {.Capabilities = engine::script::ScriptCapabilities::None, .PackageOnly = true}
+			store,
+			{
+				.DataCapture = {},
+				.DataLifecycle = {},
+				.MemoryBytes = 64u * 1024u * 1024u,
+				.StepBudget = 200u * 1000u * 1000u,
+				.JobBudget = 100u * 1000u,
+				.Role = engine::script::HostRole::OfServer(),
+				.Origin = engine::script::ScriptOrigin::Game,
+				.Capabilities = engine::script::ScriptCapabilities::None,
+				.PackageOnly = true,
+			}
 		);
 		engine::script::DataScriptPackage package;
 		const engine::script::DataScriptPackageContext context(package, {});
@@ -116,13 +127,31 @@ TEST_CASE("luau package runtime exposes only immutable package data", "[scriptlu
 	RegisterClasses();
 	Store store("scriptluau_package");
 	const auto runtime = MakeLuauRuntime(
-		store, {.Capabilities = engine::script::ScriptCapabilities::None, .PackageOnly = true}
+		store,
+		{
+			.DataCapture = {},
+			.DataLifecycle = {},
+			.MemoryBytes = 64u * 1024u * 1024u,
+			.StepBudget = 200u * 1000u * 1000u,
+			.JobBudget = 100u * 1000u,
+			.Role = engine::script::HostRole::OfServer(),
+			.Origin = engine::script::ScriptOrigin::Game,
+			.Capabilities = engine::script::ScriptCapabilities::None,
+			.PackageOnly = true,
+		}
 	);
 	engine::script::DataScriptPackage package;
 	package.Seed = UINT64_MAX;
-	package.Parameters.push_back(
-		{"count", {.Type = engine::script::DataScriptScalar::Kind::Integer, .Integer = INT64_MIN}}
-	);
+	package.Parameters.push_back({
+		"count",
+		{
+			.Type = engine::script::DataScriptScalar::Kind::Integer,
+			.Boolean = false,
+			.Integer = INT64_MIN,
+			.Number = 0.0,
+			.String = {},
+		},
+	});
 	std::vector<engine::script::DataScriptAssetInput> assets{{"input.bin", {std::byte{1}, std::byte{2}}}};
 	package.Assets.push_back({"input.bin", engine::assets::Hasher::Of(assets.front().Bytes)});
 	const engine::script::DataScriptPackageContext context(package, assets);

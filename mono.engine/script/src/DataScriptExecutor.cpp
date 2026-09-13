@@ -5,7 +5,7 @@
 
 namespace engine::script {
 	namespace {
-		bool RelativePath(std::string_view path) {
+		bool ValidPackageInputPath(std::string_view path) {
 			if (path.empty() || path.size() > 256 || path.front() == '/' ||
 				path.find('\\') != std::string_view::npos)
 				return false;
@@ -26,7 +26,7 @@ namespace engine::script {
 		InputFor(std::span<const DataScriptAssetInput> inputs, std::string_view path) {
 			const DataScriptAssetInput *found = nullptr;
 			for (const DataScriptAssetInput &input : inputs) {
-				if (!RelativePath(input.Path)) return nullptr;
+				if (!ValidPackageInputPath(input.Path)) return nullptr;
 				if (input.Path == path) {
 					if (found != nullptr) return nullptr;
 					found = &input;

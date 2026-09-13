@@ -33,7 +33,15 @@ namespace {
 			: Runtime(
 				  store,
 				  RuntimeLimits{
-					  .Role = HostRole::OfServer(), .Capabilities = engine::script::ScriptCapabilities::World
+					  .DataCapture = {},
+					  .DataLifecycle = {},
+					  .MemoryBytes = 64u * 1024u * 1024u,
+					  .StepBudget = 200u * 1000u * 1000u,
+					  .JobBudget = 100u * 1000u,
+					  .Role = HostRole::OfServer(),
+					  .Origin = engine::script::ScriptOrigin::Game,
+					  .Capabilities = engine::script::ScriptCapabilities::World,
+					  .PackageOnly = false,
 				  }
 			  ) {}
 
@@ -64,6 +72,7 @@ namespace {
 		return DataScriptPackageRunResult{
 			.Terminal = runtime.Run(source, entry) ? DataScriptPackageRunResult::State::Completed
 												   : DataScriptPackageRunResult::State::Failed,
+			.Error = {},
 		};
 	}
 
@@ -108,6 +117,9 @@ namespace {
 				.InstanceId = "package-world",
 				.Manifest = Manifest(source),
 				.Source = std::move(source),
+				.Assets = {},
+				.SourceHash = {},
+				.Name = "mcp",
 				.ExpectedTick = pause.Clock.Tick,
 				.ExpectedEpoch = pause.WorldEpoch,
 				.ExpectedVersion = pause.WorldVersion,
