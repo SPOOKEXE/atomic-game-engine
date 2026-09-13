@@ -357,6 +357,41 @@ names, coordinate units, camera conventions, class labels, masks, and temporal
 references. Each export writes a loss report for properties its target cannot
 preserve.
 
+### Interop profiles
+
+Every export is a bundle rather than one allegedly complete file. The bundle
+contains `manifest.json`, `coordinates.json`, `entities.jsonl`, and
+`losses.json`, plus the format payload and any binary buffers or images it
+references. The manifest records its profile name and revision, engine and
+schema versions, source snapshot, source hashes, artifact checksums, and the
+stable string ID assigned to every exported object. `coordinates.json` records
+world units, handedness, up and forward axes, transform order, camera convention,
+image origin, pixel-centre convention, and any geographic reference. Numeric
+indices in a target file are local aliases only; `entities.jsonl` maps them back
+to stable strings.
+
+`losses.json` contains one row per source property that is not represented
+exactly. A row carries the stable entity ID, component and field path, one of
+`dropped`, `approximated`, `baked`, `externalized`, or `unavailable`, the target
+field or sidecar when one exists, and a reason. Export fails when the requested
+policy forbids a recorded loss. An empty loss file means the declared subset was
+preserved, not that every engine feature can round trip through the format.
+
+| Profile | Exact declared subset | Required sidecars and known losses |
+|---|---|---|
+| `gltf2_scene` | Node hierarchy and transforms; triangle meshes with positions, normals, tangents, UVs, vertex colours, joints and weights; indexed primitives; perspective and orthographic cameras; metallic-roughness materials with base colour, normal, emissive and occlusion textures; punctual lights; translation, rotation, scale, morph-weight and skeletal animation. | Stable IDs, units and camera/image conventions remain in the bundle sidecars. Physics, scripts, constraints, portals, procedural terrain, render graphs, non-punctual lighting, custom BRDF fields and unsupported texture channels are recorded as losses. Generated collision or terrain meshes are marked `baked`. |
+| `usd_scene` | Xform hierarchy; polygonal meshes and primvars; cameras; preview-surface materials and bound textures; authored lights; skeletal rigs, blend shapes and time-sampled transforms; named variants used for declared scene alternatives. | The manifest names the selected USD encoding and applied schemas. Stable engine component paths, gameplay state, physics fields outside the selected schema, scripts, portal semantics, renderer history and custom nodes stay in sidecars or losses. No USD feature outside this row is implied. |
+| `coco_instances` | Image rows; category rows; per-image bounding boxes; polygon or run-length instance segmentation; keypoints with declared visibility values; crowd flag where authored; image dimensions and capture IDs. | Sidecars map image, annotation and category integers to snapshot-scoped stable strings, camera metadata, semantic and part taxonomies, frame time and provenance. Amodal masks, depth, 3D geometry, tracks, material values and uncertainty are externalized because base COCO has no lossless fields for them. |
+| `yolo_detection` | One declared task dialect per bundle: normalized centre-width-height boxes, normalized segmentation polygons, or normalized keypoints with visibility. Class indices are dense aliases into the bundle taxonomy. | Sidecars retain stable entity IDs, camera and frame IDs, pixel-space source geometry, clipping, mask artifact IDs and provenance. Mixing dialects in one label file is refused. Holes, amodal regions, 3D state, tracks and arbitrary attributes are externalized or recorded as losses. |
+| `geojson_wgs84` | RFC-style FeatureCollection geometry using longitude and latitude, with optional altitude, only when the source has an explicit world-to-WGS84 transform. Stable IDs and authored semantics appear as properties as well as in the entity sidecar. | Engine-local Cartesian coordinates are not labelled GeoJSON. Without a geographic transform the exporter refuses this profile and may offer a separately named engine-local JSON geometry profile. Volumes, orientation, meshes, physics and temporal samples require sidecars or losses. |
+| `wkt_simple_features` | Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon and GeometryCollection, with Z only when requested and representable. | `coordinates.json` supplies the coordinate reference and units; an SRID is emitted only when one is known. WKT carries no stable identity, styling, time, hierarchy, camera, mask or component state, so those remain in sidecars. Solids, oriented boxes and meshes are approximated only under an explicit policy and are otherwise refused. |
+
+Import uses the same profile revision and validates every sidecar before editing a
+scene. It builds changes in scratch state, preserves stable IDs where the profile
+contains them, and commits once. A missing sidecar, checksum mismatch, unknown
+coordinate convention, duplicate stable ID, unsupported required field, or
+forbidden loss rejects the import without partially editing the live world.
+
 ## Proposed external factory workflow
 
 This is pseudocode for a `datafactories` package. Local collector functions are

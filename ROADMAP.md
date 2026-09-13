@@ -98,7 +98,7 @@ the renderer build-out.
 - [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
 - [_] capture IDs, semantic masks and part masks.
 - [_] complete autonomous capture workflow in `DataFactoryDemo.luau`.
-- [_] declare interop subsets for glTF, USD, COCO, YOLO, GeoJSON and WKT, including sidecars and known losses.
+- [x] declare interop subsets for glTF, USD, COCO, YOLO, GeoJSON and WKT. The named profiles now define exact represented fields, bundle sidecars, coordinate rules, stable-ID mappings, machine-readable loss classes and atomic import refusal conditions.
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records.
 - [_] define the remaining camera intrinsics, extrinsics, near/far, jitter, lens distortion, crop, units and world/camera coordinates.
 - [_] describe render-graph passes and resources with budgets and dependencies, without inventing ground truth.
