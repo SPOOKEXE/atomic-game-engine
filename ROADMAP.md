@@ -77,18 +77,18 @@ the renderer build-out.
 
 #### 3. Hard
 
-- [x] Complete portal image host and session contracts for fresh destination captures, current-camera routing, capture retention across route and body waits, inverse lens mapping, lease disconnects and player return handoff.
-- [x] Add tessellation as a composable render-graph node, with view- and capacity-aware plans, compute-readable resident mesh streams and material-matched draws.
-- [x] Add bounded screen-space global illumination, ray and path estimators as composable render nodes with view-signature history and submission-safe accumulation. These are screen-space estimators, not acceleration-structure tracing.
-- [x] Add demo render pipelines for the bounded screen-space ray and path estimators.
+- [x] Complete portal image host and session contracts for fresh destination captures, current-camera routing, capture retention across route and body waits, inverse lens mapping, lease disconnects and player return handoff. Authorization withdrawal now retires source portal and body compositions, with the full shadow integration, focused withdrawal and server grant suites covering lease retirement.
+- [x] Add tessellation as a composable render-graph node, with view- and capacity-aware plans, compute-readable resident mesh streams and material-matched draws. The Vulkan hard-render fixture proves the dedicated geometry handler submits the exact compute plan and wins over the authored fallback of the same kind.
+- [x] Add bounded screen-space global illumination, ray and path estimators as composable render nodes with view-signature history and submission-safe accumulation. Cached frames execute only the precomputed retained-node closure, path history advances from one to two samples, and a changed view resets it to one. These are screen-space estimators, not acceleration-structure tracing.
+- [x] Add demo render pipelines for the bounded screen-space ray and path estimators. The Vulkan fixture captures numeric RGBA16F results and proves retained path, history-store and tone-map stages run while unchanged albedo and global-illumination stages stay cached.
 - [x] Add projected-area triangle reduction and GPU cluster selection with indirect draws, coverage culling and no CPU readback during LOD changes.
-- [x] Add composable image-processing and visual-compositor nodes, a compositor demo pipeline and signed Studio controls for node settings.
+- [x] Add composable image-processing and visual-compositor nodes, a compositor demo pipeline and signed Studio controls for node settings. The real-device compositor fixture proves numeric changes through exposure, HSV, mix, transform, horizontal and vertical blur, then validates display, scene and output captures.
 - [x] Add portal particle and ribbon layer peeling through the transparent-layer path.
 - [x] Device-validate foreign-world captures from fresh destination geometry with the current camera, including exact parallax and disocclusion. The 186-assertion Vulkan fixture captures a blue foreign occluder over a red backdrop, preserves that nonblack image while the moved-camera request is pending, then proves the fresh image uses the new camera by revealing the red backdrop at the same pixel.
-- [_] Reproduce the original black frame with a valid image handle and visually confirm retention of the last valid image during topology waits.
-- [_] Verify seamless player and body crossing, Humanoid camera subjects, camera obstruction, clipping and return trips under delay, restart and lost acknowledgements.
-- [_] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam.
-- [_] Check oblique, rolled and scaled portal views at all angles, then finish visual review of the non-Euclidean demo.
+- [x] Reproduce the original black frame with a valid image handle and retain the last valid image during topology waits. The device regression first reproduces 4,225 black pixels, then passes 203 assertions while the replacement topology is pending.
+- [x] Verify seamless player and body crossing, Humanoid camera subjects, camera obstruction, clipping and return trips under delay, restart and lost acknowledgements. The 42,077-assertion product round-trip matrix covers 150 ms latency, presentation-producer restart and two deliberately dropped LeaseAdopted replies. Both dropped replies recover through real lease renewal after the body has left its source authority.
+- [x] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam. Two actual portal-exchange Vulkan modes pass 102 and 104 assertions across the complete visual layer set.
+- [x] Check oblique, rolled and scaled portal views at all angles, then finish visual review of the non-Euclidean demo. The scripted angle matrix passes 11,920 assertions, and seven rendered tour shots pass 127 Vulkan assertions for oblique, rolled, non-uniformly scaled and return views.
 
 `datafactories-docs/MCP-ADDITIONS.md` describes proposed data-factory requirements; these are design targets, not verified implemented APIs:
 - [_] accept text instructions with reference images, controls, video motion constraints and externally interpreted engine-validated patches.
