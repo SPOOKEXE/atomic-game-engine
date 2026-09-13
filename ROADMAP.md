@@ -158,6 +158,8 @@ General:
   as the shared interface. Bladeborne is a plain XML `.aworld` with client,
   server, and shared role-separated scripts; Studio, client, server, and
   launcher access the demo tree.
+- [x] when im interacting with ui in a viewport, its ONLY for that viewport. server view when running worlds do NOT show ui (only in studio for ui in StarterGui).
+- [x] when i play on a client and interact with the ui, its only for that client. startergui ones do NOT show here, they are cloned into PlayerGui.
 
 Extra:
 - [_] update and prune old content in documentation. check each statement, update, remove or replace.

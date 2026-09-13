@@ -40,6 +40,8 @@ using studio::ResolveViewportTargetSize;
 using studio::SnapViewportCameraDirection;
 using studio::ViewportCameraMemory;
 using studio::ViewportCameraPose;
+using studio::ViewportGuiSource;
+using studio::ViewportGuiSourceFor;
 
 namespace {
 	// Three scenes and a client view, as an editor mid-play holds them.
@@ -62,6 +64,15 @@ TEST_CASE(
 	CHECK(right.Height == 674.0f);
 	CHECK(right.PointerX == 364.5f);
 	CHECK(right.PointerY == 337.0f);
+}
+
+TEST_CASE("each viewport has an explicit game UI owner", "[studio][viewports][gui]") {
+	// Two edit viewports may both author the template. A client viewport owns
+	// its PlayerGui, while the running server view has neither UI nor input.
+	CHECK(ViewportGuiSourceFor(false, false) == ViewportGuiSource::StarterGui);
+	CHECK(ViewportGuiSourceFor(false, false) == ViewportGuiSource::StarterGui);
+	CHECK(ViewportGuiSourceFor(false, true) == ViewportGuiSource::PlayerGui);
+	CHECK(ViewportGuiSourceFor(true, false) == ViewportGuiSource::None);
 }
 
 TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewports][render]") {

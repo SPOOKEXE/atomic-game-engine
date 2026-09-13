@@ -79,6 +79,19 @@ namespace studio {
 		//@}
 	};
 
+	// Which game-interface tree one Studio viewport may draw and route.
+	//
+	// A server viewport has no local player and therefore no client interface.
+	// Keeping that as an explicit source rather than relying on an empty viewer
+	// prevents a future generic compiler request from exposing every player's UI.
+	//
+	// @since v0.23
+	enum class ViewportGuiSource : uint8_t {
+		StarterGui,
+		PlayerGui,
+		None,
+	};
+
 	// The pixel extent one viewport asks the renderer to allocate.
 	//
 	// @since v0.23
@@ -193,6 +206,16 @@ namespace studio {
 	ViewportCanvas CanvasForViewport(
 		float panelX, float panelY, float panelWidth, float panelHeight, float pointerX, float pointerY
 	);
+
+	// Selects the interface source for one viewport. Edit views author the
+	// StarterGui template, client replicas see only their own PlayerGui, and a
+	// running authority has no interface to render or receive input.
+	//
+	// @param running Whether this is the authority world of a live run.
+	// @param clientView Whether this viewport shows a client replica.
+	// @return The only game-interface source this viewport may use.
+	// @since v0.23
+	ViewportGuiSource ViewportGuiSourceFor(bool running, bool clientView);
 
 	// Which panel should show a world.
 	//

@@ -17,6 +17,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -25,8 +26,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 TEST_SUITE_ID("engine.gui.services")
 
@@ -100,6 +104,72 @@ TEST_CASE("installing the services is idempotent", "[gui][services]") {
 
 	CHECK(InstallGuiServices(world.Data) == first);
 	CHECK(GuiServiceOf(world.Data) == first);
+}
+
+TEST_CASE("each player receives and routes only their PlayerGui copy", "[gui][services][players]") {
+	// One template and two player containers is the authority's view of two
+	// runtime clients. The copies must be distinct, each compiler must select
+	// one, and an input into one compiled canvas must not name the other copy.
+	World world("gui_services.player_copies");
+	const Entity templateButton = world.Button("Launch", 10.0f, 10.0f, 120.0f, 40.0f);
+	const engine::ecs::ClassId instance = engine::ecs::Classes::Find(engine::core::Name("Instance"));
+	REQUIRE(instance.IsValid());
+
+	const auto player = [&](const char *name) {
+		const Entity owner = world.Data.CreateInstance(instance, name);
+		const Entity gui = world.Data.CreateInstance(instance, "PlayerGui");
+		REQUIRE(world.Data.SetParent(gui, owner));
+		REQUIRE(ResetPlayerGui(world.Data, owner) == 1);
+		return std::pair{owner, gui};
+	};
+	const auto [firstPlayer, firstGui] = player("First");
+	const auto [secondPlayer, secondGui] = player("Second");
+
+	const Entity firstScreen = world.Data.FindFirstChild(firstGui, "ScreenGui");
+	const Entity secondScreen = world.Data.FindFirstChild(secondGui, "ScreenGui");
+	REQUIRE(firstScreen != engine::ecs::NULL_ENTITY);
+	REQUIRE(secondScreen != engine::ecs::NULL_ENTITY);
+	const Entity firstButton = world.Data.FindFirstChild(firstScreen, "Launch");
+	const Entity secondButton = world.Data.FindFirstChild(secondScreen, "Launch");
+	REQUIRE(firstButton != engine::ecs::NULL_ENTITY);
+	REQUIRE(secondButton != engine::ecs::NULL_ENTITY);
+	CHECK(firstButton != secondButton);
+	CHECK(firstButton != templateButton);
+	CHECK(secondButton != templateButton);
+
+	CompileRequest request = world.Request;
+	request.ScreenGuis = ScreenGuiSource::PlayerGui;
+	request.Viewer = firstPlayer;
+	Compiled firstList;
+	REQUIRE(firstList.Rebuild(world.Data, request));
+	CHECK(firstList.Commands().Elements == 1);
+
+	request.Viewer = secondPlayer;
+	Compiled secondList;
+	REQUIRE(secondList.Rebuild(world.Data, request));
+	CHECK(secondList.Commands().Elements == 1);
+
+	Router firstRouter;
+	Router secondRouter;
+	Pointer press;
+	press.Position = {30.0f, 30.0f};
+	press.Down = true;
+	press.Inside = true;
+	const auto firstDown = firstRouter.Update(world.Data, firstList.Commands(), press);
+	CHECK(std::any_of(firstDown.begin(), firstDown.end(), [firstButton](const GuiEvent &event) {
+		return event.Instance == firstButton;
+	}));
+	CHECK(std::none_of(firstDown.begin(), firstDown.end(), [secondButton](const GuiEvent &event) {
+		return event.Instance == secondButton;
+	}));
+
+	const auto secondIdle = secondRouter.Update(world.Data, secondList.Commands(), Pointer{});
+	CHECK(secondIdle.empty());
+
+	request.Viewer = engine::ecs::NULL_ENTITY;
+	Compiled serverList;
+	REQUIRE(serverList.Rebuild(world.Data, request));
+	CHECK(serverList.Commands().Elements == 0);
 }
 
 TEST_CASE("the gui inset is the screen's reserved strip", "[gui][services]") {

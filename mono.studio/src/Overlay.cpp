@@ -2039,6 +2039,15 @@ namespace studio {
 		if (!shown.IsValid()) {
 			return;
 		}
+		if (GuiRouterWorlds[index] != shown) {
+			GuiRouters[index].Forget();
+			GuiRouterWorlds[index] = shown;
+		}
+		const ViewportGuiSource source = ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown));
+		if (source == ViewportGuiSource::None) {
+			GuiRouters[index].Forget();
+			return;
+		}
 
 		const ViewportState *viewport = ExtraAt(index);
 		const ImVec2 mouse = ImGui::GetIO().MousePos;
@@ -2047,8 +2056,9 @@ namespace studio {
 		engine::gui::CompileRequest request;
 		request.Display.Width = canvas.Width;
 		request.Display.Height = canvas.Height;
-		request.ScreenGuis = IsRunning(shown) ? engine::gui::ScreenGuiSource::PlayerGui
-											  : engine::gui::ScreenGuiSource::StarterGui;
+		request.ScreenGuis = source == ViewportGuiSource::PlayerGui
+								 ? engine::gui::ScreenGuiSource::PlayerGui
+								 : engine::gui::ScreenGuiSource::StarterGui;
 
 		// The clock a page slide and a rubber band are measured against. See
 		// `CompileRequest::Seconds` for why it is handed in.

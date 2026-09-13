@@ -126,6 +126,13 @@ namespace studio {
 		};
 	}
 
+	ViewportGuiSource ViewportGuiSourceFor(bool running, bool clientView) {
+		if (clientView) {
+			return ViewportGuiSource::PlayerGui;
+		}
+		return running ? ViewportGuiSource::None : ViewportGuiSource::StarterGui;
+	}
+
 	size_t
 	ChooseViewportFor(WorldId world, WorldId mainWorld, bool mainOpen, std::span<const PanelView> panels) {
 		if (!world.IsValid()) {
