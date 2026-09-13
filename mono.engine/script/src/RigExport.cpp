@@ -1,11 +1,15 @@
+#include <engine/assets/Animation.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/RigExport.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -28,6 +32,7 @@ namespace engine::script {
 			value.Number = number;
 			return value;
 		}
+		constexpr uint64_t MAX_EXACT_SCRIPT_INTEGER = (uint64_t{1} << 53u) - 1u;
 		ScriptValue Boolean(bool value) {
 			ScriptValue out(value ? ValueTag::True : ValueTag::False);
 			out.Boolean = value;
@@ -134,6 +139,50 @@ namespace engine::script {
 		RigExportResult Refusal(const char *status, std::string_view detail) {
 			return {status, Map({{"status", String(status)}, {"detail", String(detail)}})};
 		}
+
+		bool Seconds(float value, uint64_t &numerator, uint64_t &denominator) {
+			if (!std::isfinite(value) || value < 0.0f) return false;
+			const uint32_t bits = std::bit_cast<uint32_t>(value);
+			const uint32_t exponent = (bits >> 23u) & 0xFFu;
+			uint64_t significand = exponent == 0 ? bits & 0x7FFFFFu : (1u << 23u) | (bits & 0x7FFFFFu);
+			int shift = exponent == 0 ? -149 : static_cast<int>(exponent) - 150;
+			if (significand == 0) {
+				numerator = 0;
+				denominator = 1;
+				return true;
+			}
+			while ((significand & 1u) == 0) {
+				significand >>= 1u;
+				shift++;
+			}
+			if (shift >= 0) {
+				if (shift >= 64 || significand > std::numeric_limits<uint64_t>::max() >> shift) return false;
+				numerator = significand << shift;
+				denominator = 1;
+			} else {
+				if (shift <= -64) return false;
+				numerator = significand;
+				denominator = uint64_t{1} << -shift;
+			}
+			return true;
+		}
+
+		bool Tick(float seconds, uint64_t tickNumerator, uint64_t tickDenominator, uint64_t &tick) {
+			uint64_t numerator = 0, denominator = 0;
+			if (!Seconds(seconds, numerator, denominator)) return false;
+			const uint64_t first = std::gcd(numerator, tickNumerator);
+			numerator /= first;
+			tickNumerator /= first;
+			const uint64_t second = std::gcd(tickDenominator, denominator);
+			tickDenominator /= second;
+			denominator /= second;
+			if (denominator != 1 || tickNumerator != 1 ||
+				numerator > MAX_EXACT_SCRIPT_INTEGER / tickDenominator)
+				return false;
+			// ScriptValue stores numbers as double, so keep every exported tick exactly representable.
+			tick = numerator * tickDenominator;
+			return true;
+		}
 	}
 
 	RigExportResult GetRigExport(
@@ -201,10 +250,15 @@ namespace engine::script {
 		uint64_t tickNumerator = 0, tickDenominator = 0;
 		if (!TickRate(store.Time().Delta, tickNumerator, tickDenominator))
 			return Refusal("invalid_tick_duration", "world tick duration is not a positive finite rational");
+		if (tickNumerator > MAX_EXACT_SCRIPT_INTEGER || tickDenominator > MAX_EXACT_SCRIPT_INTEGER)
+			return Refusal(
+				"invalid_tick_duration", "world tick duration cannot be represented exactly by ScriptValue"
+			);
 		std::vector<ScriptValue> entities;
 		entities.reserve(rigs.size());
 		size_t totalBones = 0;
 		size_t totalKeypoints = 0;
+		size_t totalAnimationKeys = 0;
 		for (const auto &[rig, entityId] : rigs) {
 			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(rig);
 			if (skeleton == nullptr || !skeleton->Rig.IsValid() || skeleton->JointCount == 0 ||
@@ -308,6 +362,169 @@ namespace engine::script {
 					{"missing_reason", ScriptValue{}},
 				}));
 			}
+			std::vector<std::pair<std::string, ScriptValue>> clips;
+			std::unordered_set<std::string> clipIds;
+			bool invalidClip = false;
+			const char *clipFailure = "invalid_clip";
+			store.Each<scene::AnimationClip>([&](Entity clipEntity, const scene::AnimationClip &clip) {
+				if (invalidClip || clip.Rig != skeleton->Rig) return;
+				if (clips.size() == MAX_RIG_EXPORT_CLIPS_PER_ENTITY) {
+					invalidClip = true;
+					clipFailure = "resource_limit";
+					return;
+				}
+				if (clip.Buffer == ecs::NULL_ENTITY) {
+					invalidClip = true;
+					clipFailure = "asset_only_clip";
+					return;
+				}
+				const scene::AnimationBuffer *buffer = store.Get<scene::AnimationBuffer>(clip.Buffer);
+				if (buffer == nullptr) {
+					invalidClip = true;
+					clipFailure = "dangling_clip_buffer";
+					return;
+				}
+				if (buffer->Data.empty() || buffer->Data.size() > MAX_RIG_EXPORT_ANIMATION_BYTES) {
+					invalidClip = true;
+					clipFailure = "resource_limit";
+					return;
+				}
+				std::string clipId;
+				if (!StableId(store, clipEntity, clipId) || !clipIds.emplace(clipId).second) {
+					invalidClip = true;
+					clipFailure = "invalid_clip_id";
+					return;
+				}
+				const std::string_view name = store.InstanceNameOf(clipEntity).Text();
+				if (!Text(name, MAX_RIG_EXPORT_ID_BYTES)) {
+					invalidClip = true;
+					clipFailure = "invalid_clip_name";
+					return;
+				}
+				core::ByteReader reader(buffer->Data);
+				assets::AnimationData animation;
+				if (!assets::Animation::Read(reader, animation) || !reader.AtEnd()) {
+					invalidClip = true;
+					clipFailure = "malformed_clip_buffer";
+					return;
+				}
+				uint64_t endTick = 0;
+				if (!Tick(animation.Duration, tickNumerator, tickDenominator, endTick)) {
+					invalidClip = true;
+					clipFailure = "unaligned_clip_time";
+					return;
+				}
+				std::vector<std::pair<std::string, ScriptValue>> channels;
+				for (const assets::AnimationChannel &channel : animation.Channels) {
+					if (channel.Joint >= slots.size() || slots[channel.Joint] == nullptr ||
+						channel.Keys.empty()) {
+						invalidClip = true;
+						clipFailure = "invalid_clip_channel";
+						return;
+					}
+					if (channel.Keys.size() > MAX_RIG_EXPORT_KEYS_PER_CHANNEL ||
+						totalAnimationKeys > MAX_RIG_EXPORT_TOTAL_ANIMATION_KEYS - channel.Keys.size()) {
+						invalidClip = true;
+						clipFailure = "resource_limit";
+						return;
+					}
+					std::vector<ScriptValue> translations, rotations;
+					translations.reserve(channel.Keys.size());
+					rotations.reserve(channel.Keys.size());
+					uint64_t previousTick = 0;
+					bool firstKey = true;
+					for (const assets::AnimationKeyframe &key : channel.Keys) {
+						uint64_t keyTick = 0, secondsNumerator = 0, secondsDenominator = 0;
+						ScriptValue checked;
+						if (!Tick(key.Time, tickNumerator, tickDenominator, keyTick) || keyTick > endTick ||
+							!Seconds(key.Time, secondsNumerator, secondsDenominator) ||
+							(!firstKey && keyTick <= previousTick) || !Frame(key.Transform, checked)) {
+							invalidClip = true;
+							clipFailure = "invalid_clip_key";
+							return;
+						}
+						firstKey = false;
+						previousTick = keyTick;
+						const ScriptValue time = Map({
+							{"tick", Number(keyTick)},
+							{"seconds_numerator", Number(secondsNumerator)},
+							{"seconds_denominator", Number(secondsDenominator)},
+						});
+						translations.push_back(Map({
+							{"time", time},
+							{"value",
+							 Array(
+								 {Number(key.Transform.Position.X),
+								  Number(key.Transform.Position.Y),
+								  Number(key.Transform.Position.Z)}
+							 )},
+						}));
+						rotations.push_back(Map({
+							{"time", time},
+							{"value",
+							 Array(
+								 {Number(key.Transform.QuaternionX),
+								  Number(key.Transform.QuaternionY),
+								  Number(key.Transform.QuaternionZ),
+								  Number(key.Transform.QuaternionW)}
+							 )},
+						}));
+					}
+					totalAnimationKeys += channel.Keys.size();
+					for (const auto &[property, keys] :
+						 std::array<std::pair<const char *, const std::vector<ScriptValue> *>, 2>{
+							 {{"rotation", &rotations}, {"translation", &translations}}
+						 }) {
+						const std::string channelId =
+							clipId + ":joint:" + std::to_string(channel.Joint) + ":" + property;
+						if (!Text(channelId, MAX_RIG_EXPORT_ID_BYTES) ||
+							channels.size() == MAX_RIG_EXPORT_CHANNELS_PER_CLIP) {
+							invalidClip = true;
+							clipFailure = "invalid_channel_id";
+							return;
+						}
+						channels.emplace_back(
+							channelId,
+							Map({
+								{"channel_id", String(channelId)},
+								{"joint_slot", Number(channel.Joint)},
+								{"property", String(property)},
+								{"keys", Array(*keys)},
+							})
+						);
+					}
+				}
+				if (invalidClip) return;
+				std::sort(channels.begin(), channels.end(), [](const auto &left, const auto &right) {
+					return left.first < right.first;
+				});
+				std::vector<ScriptValue> exportedChannels;
+				exportedChannels.reserve(channels.size());
+				for (auto &[ignored, value] : channels) {
+					(void)ignored;
+					exportedChannels.push_back(std::move(value));
+				}
+				clips.emplace_back(
+					clipId,
+					Map({
+						{"clip_id", String(clipId)},
+						{"name", String(name)},
+						{"start_tick", Number(0)},
+						{"end_tick", Number(endTick)},
+						{"channels", Array(std::move(exportedChannels))},
+					})
+				);
+			});
+			if (invalidClip) return Refusal(clipFailure, "buffered animation clip cannot be exported");
+			std::sort(clips.begin(), clips.end(), [](const auto &left, const auto &right) {
+				return left.first < right.first;
+			});
+			std::vector<ScriptValue> exportedClips;
+			exportedClips.reserve(clips.size());
+			for (auto &[ignored, value] : clips) {
+				(void)ignored;
+				exportedClips.push_back(std::move(value));
+			}
 			entities.push_back(Map({
 				{"entity_id", String(entityId)},
 				{"rig_id", String(skeleton->Rig.Text())},
@@ -328,7 +545,7 @@ namespace engine::script {
 					   String("engine skeleton rows do not retain per-vertex skin weights")},
 					  {"vertices", Array({})}}
 				 )},
-				{"clips", Array({})},
+				{"clips", Array(std::move(exportedClips))},
 			}));
 		}
 		return {

@@ -66,6 +66,33 @@ rigKeypoint.CFrame = CFrame.new(0, 0.5, 0)
 rigKeypoint.Parent = rig
 rigKeypoint.Joint = 0
 
+local clipBuffer = Instance.new("AnimationBuffer")
+clipBuffer.Name = "DataFactoryWaveBuffer"
+local clipRecords = buffer.create(clipBuffer.KeyframeBytes * 2)
+for index = 0, 1 do
+	local offset = index * clipBuffer.KeyframeBytes
+	buffer.writeu16(clipRecords, offset, 0)
+	buffer.writeu16(clipRecords, offset + 2, 0)
+	buffer.writef32(clipRecords, offset + 4, index / 60)
+	buffer.writef32(clipRecords, offset + 8, index)
+	buffer.writef32(clipRecords, offset + 12, 0)
+	buffer.writef32(clipRecords, offset + 16, 0)
+	buffer.writef32(clipRecords, offset + 20, 0)
+	buffer.writef32(clipRecords, offset + 24, 0)
+	buffer.writef32(clipRecords, offset + 28, 0)
+	buffer.writef32(clipRecords, offset + 32, 1)
+end
+assert(clipBuffer:BakeAnimation(1 / 60, clipRecords))
+clipBuffer.Parent = workspace
+
+local rigClip = Instance.new("Animation")
+rigClip.Name = "DataFactoryWave"
+rigClip:SetAttribute("DataFactoryId", "data-factory-demo/clip/wave")
+rigClip.RigId = "data-factory-demo-rig"
+rigClip.AnimationBuffer = clipBuffer
+rigClip.Parent = workspace
+print("DataFactory buffered clip", rigClip.Name, clipBuffer.DataSize)
+
 local camera = Instance.new("Camera")
 camera.Name = "DataFactoryCamera"
 camera:SetAttribute("DataFactoryId", "data-factory-demo/camera")

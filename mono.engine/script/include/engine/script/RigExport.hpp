@@ -22,6 +22,13 @@ namespace engine::script {
 	inline constexpr size_t MAX_RIG_EXPORT_TOTAL_KEYPOINTS = 1024;
 	inline constexpr size_t MAX_RIG_EXPORT_ID_BYTES = 512;
 	inline constexpr size_t MAX_RIG_EXPORT_ENTITY_ID_BYTES = 500;
+	// Animation buffers can carry the asset format's multi-million-key limits.
+	// Keep the observation below the data-rig transport budget instead.
+	inline constexpr size_t MAX_RIG_EXPORT_CLIPS_PER_ENTITY = 64;
+	inline constexpr size_t MAX_RIG_EXPORT_CHANNELS_PER_CLIP = 128;
+	inline constexpr size_t MAX_RIG_EXPORT_KEYS_PER_CHANNEL = 4096;
+	inline constexpr size_t MAX_RIG_EXPORT_TOTAL_ANIMATION_KEYS = 16384;
+	inline constexpr size_t MAX_RIG_EXPORT_ANIMATION_BYTES = 1024u * 1024u;
 
 	struct RigExportResult {
 		const char *Status = "ok";

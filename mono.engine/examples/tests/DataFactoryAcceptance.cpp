@@ -5,10 +5,12 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/script/DataSceneService.hpp>
+#include <engine/script/RigExport.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -108,6 +110,33 @@ TEST_CASE("data factory image labels stay aligned with identified snapshots", "[
 	REQUIRE(point != nullptr);
 	CHECK(point->Keypoint.Text() == "nose");
 	CHECK(point->Joint == 0);
+	const Entity clip = DemoChild(store, "DataFactoryWave");
+	const Entity buffer = DemoChild(store, "DataFactoryWaveBuffer");
+	REQUIRE(clip != engine::ecs::NULL_ENTITY);
+	REQUIRE(buffer != engine::ecs::NULL_ENTITY);
+	const auto *definition = store.Get<engine::scene::AnimationClip>(clip);
+	const auto *baked = store.Get<engine::scene::AnimationBuffer>(buffer);
+	REQUIRE(definition != nullptr);
+	REQUIRE(baked != nullptr);
+	CHECK(definition->Buffer == buffer);
+	CHECK(baked->Data.size() == 84);
+	const engine::script::RigExportResult rigExport =
+		engine::script::GetRigExport(store, "data-factory-demo/rig-export", {"data-factory-demo/rig"});
+	REQUIRE(rigExport.Status == std::string_view("ok"));
+	const auto *rigEntities = Field(rigExport.Value, "entities");
+	REQUIRE(rigEntities != nullptr);
+	REQUIRE(rigEntities->Items.size() == 1);
+	const auto *exportedClips = Field(rigEntities->Items[0], "clips");
+	REQUIRE(exportedClips != nullptr);
+	REQUIRE(exportedClips->Items.size() == 1);
+	CHECK(Field(exportedClips->Items[0], "clip_id")->Text == "data-factory-demo/clip/wave");
+	CHECK(Field(exportedClips->Items[0], "end_tick")->Number == 1);
+	const auto *channels = Field(exportedClips->Items[0], "channels");
+	REQUIRE(channels != nullptr);
+	REQUIRE(channels->Items.size() == 2);
+	const auto *keys = Field(channels->Items[1], "keys");
+	REQUIRE(keys != nullptr);
+	CHECK(keys->Items.size() == 2);
 
 	// The script demonstrates only first-frame query envelopes. This host syncs
 	// after scene construction, then the fixture proves the crate's stable-id

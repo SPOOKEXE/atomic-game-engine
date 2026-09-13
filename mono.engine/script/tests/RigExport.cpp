@@ -1,5 +1,9 @@
+#include <engine/assets/Animation.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -104,6 +108,55 @@ TEST_CASE("rig export preserves skeleton frames and dense stable slots", "[scrip
 	CHECK(Field(entities[0], "clips")->Items.empty());
 }
 
+TEST_CASE(
+	"rig export decodes buffered clips into exact translation and rotation keys", "[script][rigexport]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("script.rigexport.clip");
+	const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(store, rig, "rig/clip");
+	store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("clip-rig"), 1});
+	const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Root");
+	REQUIRE(store.SetParent(bone, rig));
+	store.Set(bone, engine::scene::Bone{});
+	const auto buffer =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("AnimationBuffer")), "WaveBuffer");
+	engine::assets::AnimationData data;
+	data.Duration = store.Time().Delta;
+	engine::assets::AnimationChannel channel;
+	channel.Joint = 0;
+	channel.Keys = {{0.0f, {}}, {store.Time().Delta, {}}};
+	channel.Keys[1].Transform.Position.X = 3.0f;
+	data.Channels.push_back(std::move(channel));
+	engine::core::ByteWriter writer;
+	REQUIRE(engine::assets::Animation::Write(writer, data));
+	store.Set(
+		buffer, engine::scene::AnimationBuffer{std::vector(writer.Bytes().begin(), writer.Bytes().end()), 1}
+	);
+	const auto clip =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Wave");
+	Identify(store, clip, "clip/wave");
+	store.Set(
+		clip,
+		engine::scene::AnimationClip{
+			engine::core::Name("asset/ignored"), engine::core::Name("clip-rig"), buffer
+		}
+	);
+
+	const auto exported = engine::script::GetRigExport(store, "export/clip");
+	REQUIRE(std::string_view(exported.Status) == "ok");
+	const auto &clips = Field(Field(exported.Value, "entities")->Items[0], "clips")->Items;
+	REQUIRE(clips.size() == 1);
+	CHECK(Field(clips[0], "clip_id")->Text == "clip/wave");
+	CHECK(Field(clips[0], "name")->Text == "Wave");
+	CHECK(Field(clips[0], "end_tick")->Number == 1);
+	const auto &channels = Field(clips[0], "channels")->Items;
+	REQUIRE(channels.size() == 2);
+	CHECK(Field(channels[0], "property")->Text == "rotation");
+	CHECK(Field(channels[1], "property")->Text == "translation");
+	CHECK(Field(Field(channels[1], "keys")->Items[1], "time")->Entries[0].second.Number == 1);
+}
+
 TEST_CASE("rig export bounds generated joint IDs and validates rig IDs", "[script][rigexport]") {
 	engine::scene::RegisterSceneComponents();
 	engine::ecs::Store store("script.rigexport.identifiers");
@@ -178,6 +231,225 @@ TEST_CASE("rig export reduces exact stored float tick duration", "[script][rigex
 	REQUIRE(std::string_view(exported.Status) == "ok");
 	CHECK(Field(exported.Value, "tick_seconds_numerator")->Number == 1);
 	CHECK(Field(exported.Value, "tick_seconds_denominator")->Number == (uint64_t{1} << 50));
+}
+
+TEST_CASE("rig export refuses clip ticks beyond exact ScriptValue integers", "[script][rigexport]") {
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("script.rigexport.tick-overflow");
+	const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(store, rig, "rig/tick-overflow");
+	store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("tick-overflow"), 1});
+	const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");
+	REQUIRE(store.SetParent(bone, rig));
+	store.Set(bone, engine::scene::Bone{});
+	store.AdvanceTick(std::bit_cast<float>(uint32_t{0x2B800000})); // 2^-40 seconds.
+	const auto buffer =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("AnimationBuffer")), "Buffer");
+	engine::assets::AnimationData data;
+	data.Duration = std::bit_cast<float>(uint32_t{0x5F000000}); // 2^63 seconds.
+	engine::assets::AnimationChannel channel;
+	channel.Joint = 0;
+	channel.Keys = {{0.0f, {}}, {data.Duration, {}}};
+	data.Channels.push_back(std::move(channel));
+	engine::core::ByteWriter writer;
+	REQUIRE(engine::assets::Animation::Write(writer, data));
+	store.Set(
+		buffer, engine::scene::AnimationBuffer{std::vector(writer.Bytes().begin(), writer.Bytes().end()), 1}
+	);
+	const auto clip =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Clip");
+	Identify(store, clip, "clip/tick-overflow");
+	store.Set(clip, engine::scene::AnimationClip{{}, engine::core::Name("tick-overflow"), buffer});
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/tick-overflow").Status) ==
+		"unaligned_clip_time"
+	);
+}
+
+TEST_CASE("rig export refuses asset-only, dangling, and malformed buffered clips", "[script][rigexport]") {
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("script.rigexport.invalid-clip");
+	const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(store, rig, "rig/invalid-clip");
+	store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("invalid-clip"), 1});
+	const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");
+	REQUIRE(store.SetParent(bone, rig));
+	store.Set(bone, engine::scene::Bone{});
+	const auto clip =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Clip");
+	Identify(store, clip, "clip/invalid");
+	engine::scene::AnimationClip definition;
+	definition.Asset = engine::core::Name("asset/only");
+	definition.Rig = engine::core::Name("invalid-clip");
+	store.Set(clip, definition);
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/asset-only").Status) == "asset_only_clip"
+	);
+	definition.Buffer = engine::ecs::Entity{999};
+	store.Set(clip, definition);
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/dangling").Status) ==
+		"dangling_clip_buffer"
+	);
+	const auto buffer =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("AnimationBuffer")), "Buffer");
+	store.Set(buffer, engine::scene::AnimationBuffer{{std::byte{0}}, 1});
+	definition.Buffer = buffer;
+	store.Set(clip, definition);
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/malformed").Status) ==
+		"malformed_clip_buffer"
+	);
+}
+
+TEST_CASE(
+	"rig export excludes other rigs and rejects decoded clip contract violations", "[script][rigexport]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("script.rigexport.clip-contract");
+	const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(store, rig, "rig/clip-contract");
+	store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("clip-contract"), 1});
+	const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");
+	REQUIRE(store.SetParent(bone, rig));
+	store.Set(bone, engine::scene::Bone{});
+	const auto buffer =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("AnimationBuffer")), "Buffer");
+	const auto clip =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Clip");
+	Identify(store, clip, "clip/contract");
+	engine::assets::AnimationData data;
+	data.Duration = store.Time().Delta;
+	engine::assets::AnimationChannel channel;
+	channel.Joint = 0;
+	channel.Keys = {{0.0f, {}}, {data.Duration, {}}};
+	data.Channels.push_back(channel);
+	auto bake = [&] {
+		engine::core::ByteWriter writer;
+		REQUIRE(engine::assets::Animation::Write(writer, data));
+		store.Set(
+			buffer,
+			engine::scene::AnimationBuffer{std::vector(writer.Bytes().begin(), writer.Bytes().end()), 1}
+		);
+	};
+	bake();
+	store.Set(clip, engine::scene::AnimationClip{{}, engine::core::Name("clip-contract"), buffer});
+	const auto foreign =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Foreign");
+	Identify(store, foreign, "clip/foreign");
+	store.Set(
+		foreign, engine::scene::AnimationClip{{}, engine::core::Name("other-rig"), engine::ecs::NULL_ENTITY}
+	);
+	const auto scoped = engine::script::GetRigExport(store, "export/scoped");
+	REQUIRE(std::string_view(scoped.Status) == "ok");
+	const auto &clips = Field(Field(scoped.Value, "entities")->Items[0], "clips")->Items;
+	REQUIRE(clips.size() == 1);
+	const auto &key = Field(Field(clips[0], "channels")->Items[1], "keys")->Items[1];
+	CHECK(Field(key, "value")->Items.size() == 3);
+	const auto *time = Field(key, "time");
+	REQUIRE(time != nullptr);
+	CHECK(Field(*time, "tick")->Number == 1);
+	CHECK(Field(*time, "seconds_numerator")->Number == 8'947'849);
+	CHECK(Field(*time, "seconds_denominator")->Number == 536'870'912);
+
+	const auto duplicate =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Duplicate");
+	Identify(store, duplicate, "clip/contract");
+	store.Set(duplicate, engine::scene::AnimationClip{{}, engine::core::Name("clip-contract"), buffer});
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/duplicate").Status) == "invalid_clip_id"
+	);
+	store.Set(duplicate, engine::scene::AnimationClip{{}, engine::core::Name("other-rig"), buffer});
+
+	std::vector<std::byte> trailing = store.Get<engine::scene::AnimationBuffer>(buffer)->Data;
+	trailing.push_back(std::byte{0});
+	store.Set(buffer, engine::scene::AnimationBuffer{std::move(trailing), 2});
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/trailing").Status) ==
+		"malformed_clip_buffer"
+	);
+
+	data.Duration = 0.5f;
+	data.Channels[0].Keys = {{0.0f, {}}, {data.Duration, {}}};
+	bake();
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/off-grid").Status) ==
+		"unaligned_clip_time"
+	);
+	data.Duration = store.Time().Delta;
+	data.Channels[0].Joint = 1;
+	data.Channels[0].Keys = {{0.0f, {}}, {data.Duration, {}}};
+	bake();
+	CHECK(
+		std::string_view(engine::script::GetRigExport(store, "export/missing-slot").Status) ==
+		"invalid_clip_channel"
+	);
+}
+
+TEST_CASE("rig export bounds clips and aggregate animation keys", "[script][rigexport]") {
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store clipsStore("script.rigexport.clip-limit");
+	const auto rig = clipsStore.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(clipsStore, rig, "rig/clip-limit");
+	clipsStore.Set<engine::scene::Skeleton>(rig, {engine::core::Name("clip-limit"), 1});
+	const auto bone = clipsStore.CreateInstance(engine::scene::BoneClass(), "Bone");
+	REQUIRE(clipsStore.SetParent(bone, rig));
+	clipsStore.Set(bone, engine::scene::Bone{});
+	const auto buffer = clipsStore.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("AnimationBuffer")), "Buffer"
+	);
+	engine::assets::AnimationData small;
+	small.Duration = clipsStore.Time().Delta;
+	small.Channels = {{{0, {{0.0f, {}}, {small.Duration, {}}}}}};
+	engine::core::ByteWriter smallWriter;
+	REQUIRE(engine::assets::Animation::Write(smallWriter, small));
+	clipsStore.Set(
+		buffer,
+		engine::scene::AnimationBuffer{std::vector(smallWriter.Bytes().begin(), smallWriter.Bytes().end()), 1}
+	);
+	for (size_t index = 0; index <= engine::script::MAX_RIG_EXPORT_CLIPS_PER_ENTITY; ++index) {
+		const auto clip =
+			clipsStore.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Clip");
+		Identify(clipsStore, clip, "clip/" + std::to_string(index));
+		clipsStore.Set(clip, engine::scene::AnimationClip{{}, engine::core::Name("clip-limit"), buffer});
+	}
+	CHECK(
+		std::string_view(engine::script::GetRigExport(clipsStore, "export/clip-limit").Status) ==
+		"resource_limit"
+	);
+
+	engine::ecs::Store keysStore("script.rigexport.key-limit");
+	const auto keysRig = keysStore.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(keysStore, keysRig, "rig/key-limit");
+	keysStore.Set<engine::scene::Skeleton>(keysRig, {engine::core::Name("key-limit"), 1});
+	const auto keysBone = keysStore.CreateInstance(engine::scene::BoneClass(), "Bone");
+	REQUIRE(keysStore.SetParent(keysBone, keysRig));
+	keysStore.Set(keysBone, engine::scene::Bone{});
+	keysStore.AdvanceTick(1.0f / 4096.0f);
+	engine::assets::AnimationData large;
+	large.Duration = 1.0f;
+	large.Channels.emplace_back();
+	large.Channels[0].Joint = 0;
+	for (size_t index = 0; index < engine::script::MAX_RIG_EXPORT_KEYS_PER_CHANNEL; ++index)
+		large.Channels[0].Keys.push_back({static_cast<float>(index) / 4096.0f, {}});
+	engine::core::ByteWriter largeWriter;
+	REQUIRE(engine::assets::Animation::Write(largeWriter, large));
+	const auto keysBuffer =
+		keysStore.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("AnimationBuffer")), "Buffer");
+	keysStore.Set(
+		keysBuffer,
+		engine::scene::AnimationBuffer{std::vector(largeWriter.Bytes().begin(), largeWriter.Bytes().end()), 1}
+	);
+	for (size_t index = 0; index < 5; ++index) {
+		const auto clip =
+			keysStore.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Animation")), "Clip");
+		Identify(keysStore, clip, "keys/" + std::to_string(index));
+		keysStore.Set(clip, engine::scene::AnimationClip{{}, engine::core::Name("key-limit"), keysBuffer});
+	}
+	CHECK(
+		std::string_view(engine::script::GetRigExport(keysStore, "export/key-limit").Status) ==
+		"resource_limit"
+	);
 }
 
 TEST_CASE(

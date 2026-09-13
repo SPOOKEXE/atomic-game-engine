@@ -31,7 +31,9 @@ namespace engine::control {
 			case script::ValueTag::Number:
 				if (!std::isfinite(source.Number)) return false;
 				if (field == "slot" || field == "tick_seconds_numerator" ||
-					field == "tick_seconds_denominator") {
+					field == "tick_seconds_denominator" || field == "start_tick" || field == "end_tick" ||
+					field == "joint_slot" || field == "tick" || field == "seconds_numerator" ||
+					field == "seconds_denominator") {
 					constexpr double FIRST_UNREPRESENTABLE_UINT64 = 18'446'744'073'709'551'616.0;
 					if (source.Number < 0.0 || source.Number >= FIRST_UNREPRESENTABLE_UINT64 ||
 						std::floor(source.Number) != source.Number)
