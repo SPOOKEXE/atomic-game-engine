@@ -1,11 +1,15 @@
 -- A compact data-factory scene: each exported entity declares a stable string
 -- identity, then the script reads the ECS-backed metadata the MCP boundary uses.
 -- Run `client --data-factory --mcp-port 8738 --script DataFactoryDemo.luau`.
--- The MCP owner pauses, snapshots, steps, polls and releases independently of
--- this world's scheduler. Do not use task.wait polling after all_systems pause:
--- a suspended scheduler cannot advance that waiter. The external sequence is
--- lifecycle_inspect -> pause -> snapshot -> capture -> poll_capture ->
--- get_resource(id, {instance_id, ticket, offset, max_bytes}) -> release_capture.
+-- This script owns the stable scene reads, collider query request examples, its
+-- authored narrative records and the capture-driver callback below. Package
+-- loading, rig and audio exports, plus lifecycle ticket orchestration are MCP
+-- host operations. The host pauses, snapshots, steps, polls and releases
+-- independently of this world's scheduler. Do not use task.wait polling after
+-- all_systems pause: a suspended scheduler cannot advance that waiter. The
+-- external sequence is lifecycle_inspect -> pause -> snapshot -> capture ->
+-- poll_capture -> get_resource(id, {instance_id, ticket, offset, max_bytes})
+-- -> release_capture.
 -- The factory profile is `Default PBR#1` and its capture node is `data-capture`.
 -- Poll metadata carries calibrated world_from_camera and only declares a
 -- projection when the renderer captured the exact resolved matrix.
@@ -21,6 +25,19 @@ type CaptureResult = {
 	status: string,
 	planes: {CapturePlane},
 	copied_payload_bytes: number?,
+}
+type RaycastResult = {
+	status: string,
+	hit: boolean,
+	id: string?,
+	distance_metres: number?,
+	provenance: string?,
+}
+type OverlapResult = {
+	status: string,
+	ids: {string},
+	overflowed: boolean,
+	provenance: string,
 }
 
 local crate = Instance.new("Part")
@@ -51,6 +68,36 @@ local snapshot = DataSceneService:GetSceneSnapshot(128)
 local cameraMetadata = DataSceneService:GetCameraRenderingData(camera)
 local imageMetadata = DataSceneService:GetEditableImageMetadata(image)
 local captureChannels = DataSceneService:GetCaptureChannels()
+
+-- Collider queries read the host's most recently completed broadphase. These
+-- first-frame calls demonstrate their bounded request and response shapes only.
+-- `world_prepared` means the service can accept a query; it does not mean this
+-- crate is indexed yet. A miss or empty list here is not a usable label and is
+-- not evidence that the crate is absent. The data-factory host syncs the
+-- broadphase after scene construction, then issues its own label queries.
+if snapshot.physics_observations.world_prepared then
+	local raycast = DataSceneService:Raycast({
+		origin = Vector3.new(-3, 1, 0),
+		direction = Vector3.new(1, 0, 0),
+		max_distance_metres = 6,
+	}) :: RaycastResult
+	local aabb = DataSceneService:OverlapAABB({
+		minimum = Vector3.new(-1.1, -0.1, -1.1),
+		maximum = Vector3.new(1.1, 2.1, 1.1),
+	}) :: OverlapResult
+	local obb = DataSceneService:OverlapOBB({
+		frame = CFrame.new(0, 1, 0),
+		half_extent = Vector3.new(1.1, 1.1, 1.1),
+	}) :: OverlapResult
+	assert(raycast.status == "ok")
+	assert(aabb.status == "ok" and not aabb.overflowed and #aabb.ids <= 64)
+	assert(obb.status == "ok" and not obb.overflowed and #obb.ids <= 64)
+	print("DataFactory raycast", raycast.hit, raycast.id, raycast.distance_metres, raycast.provenance)
+	print("DataFactory aabb", #aabb.ids, aabb.overflowed, aabb.provenance)
+	print("DataFactory obb", #obb.ids, obb.overflowed, obb.provenance)
+else
+	print("DataFactory queries unavailable", "physics world is not prepared")
+end
 local narratives = DataSceneService:SetEventNarratives({
 	version = 1,
 	records = {

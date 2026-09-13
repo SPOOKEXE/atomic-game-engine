@@ -3,6 +3,8 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/DataSceneService.hpp>
@@ -19,7 +21,9 @@
 TEST_SUITE_ID("engine.examples.data_factory_acceptance")
 TEST_DEPENDS("engine.scripthost.scripting")
 
+using engine::core::CFrame;
 using engine::core::Name;
+using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::examples::ExamplePath;
@@ -54,14 +58,20 @@ namespace {
 			if (key == name) return &field;
 		return nullptr;
 	}
+
+	void PrepareDataFactoryWorld(Store &store) {
+		engine::physics::PreparePhysicsWorld(store);
+	}
 }
 
 TEST_CASE("data factory image labels stay aligned with identified snapshots", "[data][acceptance]") {
 	StagedAssets assets;
 	Store store("data-factory-alignment");
 	engine::ecs::Scheduler scheduler;
+	PrepareDataFactoryWorld(store);
 	std::string error;
 	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryDemo.luau"), error));
+	engine::physics::SyncBroadphase(store);
 
 	const Entity label = DemoChild(store, "DataFactoryLabel");
 	REQUIRE(label != engine::ecs::NULL_ENTITY);
@@ -87,12 +97,39 @@ TEST_CASE("data factory image labels stay aligned with identified snapshots", "[
 		if (entityId != nullptr && entityId->Text == id.String) found = true;
 	}
 	CHECK(found);
+
+	// The script demonstrates only first-frame query envelopes. This host syncs
+	// after scene construction, then the fixture proves the crate's stable-id
+	// labels without relying on captured stdout.
+	const engine::script::DataSceneResult raycast =
+		engine::script::Raycast(store, {Vector3{-3.0f, 1.0f, 0.0f}, Vector3{1.0f, 0.0f, 0.0f}, 6.0f});
+	REQUIRE(raycast.Status == std::string_view("ok"));
+	const auto *raycastId = Field(raycast.Value, "id");
+	REQUIRE(raycastId != nullptr);
+	CHECK(raycastId->Text == "data-factory-demo/crate");
+
+	const engine::script::DataSceneResult aabb =
+		engine::script::OverlapAABB(store, {Vector3{-1.1f, -0.1f, -1.1f}, Vector3{1.1f, 2.1f, 1.1f}});
+	REQUIRE(aabb.Status == std::string_view("ok"));
+	const auto *aabbIds = Field(aabb.Value, "ids");
+	REQUIRE(aabbIds != nullptr);
+	REQUIRE(aabbIds->Items.size() == 1);
+	CHECK(aabbIds->Items.front().Text == "data-factory-demo/crate");
+
+	const engine::script::DataSceneResult obb =
+		engine::script::OverlapOBB(store, {CFrame{Vector3{0.0f, 1.0f, 0.0f}}, Vector3{1.1f, 1.1f, 1.1f}});
+	REQUIRE(obb.Status == std::string_view("ok"));
+	const auto *obbIds = Field(obb.Value, "ids");
+	REQUIRE(obbIds != nullptr);
+	REQUIRE(obbIds->Items.size() == 1);
+	CHECK(obbIds->Items.front().Text == "data-factory-demo/crate");
 }
 
 TEST_CASE("data factory refuses malformed image data and duplicate identities", "[data][acceptance]") {
 	StagedAssets assets;
 	Store store("data-factory-invalid");
 	engine::ecs::Scheduler scheduler;
+	PrepareDataFactoryWorld(store);
 	std::string error;
 	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryDemo.luau"), error));
 
