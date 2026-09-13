@@ -2,6 +2,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/script/DataScriptPackage.hpp>
+#include <engine/scripthost/Runtime.hpp>
 
 #include <algorithm>
 #include <client/DataScriptPackageTransaction.hpp>
@@ -91,6 +92,10 @@ namespace client {
 			}
 		}
 		if (!ValidateAssets(*parsed.Package, request, result.Error)) return result;
+		if (!engine::script::CheckDataScriptPackageSource(
+				engine::script::Language::Luau, request.Source, parsed.Package->Entry, result.Error
+			))
+			return result;
 		if (!dependencies.MakeRuntime || !dependencies.InstallSystems) {
 			Fail(result, "data-script package transaction is missing client dependencies");
 			return result;

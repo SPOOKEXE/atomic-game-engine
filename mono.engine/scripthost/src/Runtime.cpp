@@ -40,4 +40,14 @@ namespace engine::script {
 	) {
 		return runtime.RunDataScriptPackage(context, source, entry);
 	}
+
+	bool CheckDataScriptPackageSource(
+		Language language, std::string_view source, std::string_view entry, std::string &error
+	) {
+		if (language != Language::Luau) {
+			error = "data-script package type checking is unavailable for this language";
+			return false;
+		}
+		return CheckLuauDataScriptPackageSource(source, entry, error);
+	}
 }

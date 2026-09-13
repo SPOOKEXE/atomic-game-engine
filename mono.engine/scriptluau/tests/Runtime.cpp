@@ -27,6 +27,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <string>
 #include <string_view>
 
 TEST_SUITE_ID("engine.scriptluau.runtime")
@@ -165,6 +166,82 @@ TEST_CASE("luau package runtime exposes only immutable package data", "[scriptlu
 		"package.luau"
 	);
 	CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
+}
+
+TEST_CASE(
+	"luau package source checking refuses syntax and strict type errors", "[scriptluau][data-script-package]"
+) {
+	std::string error;
+	CHECK(
+		engine::script::CheckLuauDataScriptPackageSource(
+			"local count: number = 4\nlocal bytes: string = Package.asset('input.bin')\n"
+			"local part = Instance.new('Part')\npart.Parent = workspace\nreturn count",
+			"package.luau",
+			error
+		)
+	);
+	CHECK(error.empty());
+
+	CHECK_FALSE(engine::script::CheckLuauDataScriptPackageSource("local =", "package.luau", error));
+	CHECK(error.starts_with("data-script package syntax error at "));
+	CHECK(error.size() <= 512);
+
+	CHECK_FALSE(
+		engine::script::CheckLuauDataScriptPackageSource(
+			"--!nonstrict\nlocal count: number = 'wrong'", "package.luau", error
+		)
+	);
+	CHECK(error.starts_with("data-script package type error at "));
+	CHECK(error.size() <= 512);
+}
+
+TEST_CASE(
+	"luau package source checking matches the package-only vocabulary", "[scriptluau][data-script-package]"
+) {
+	std::string error;
+	CHECK(
+		engine::script::CheckLuauDataScriptPackageSource(
+			"local axis: EnumItem = Enum.Axis.X\n"
+			"local two: Vector2 = Vector2.new(1, 2)\n"
+			"local vector: Vector3 = Vector3.new(1, 2, 3) + Vector3.one\n"
+			"local dot: number = vector:Dot(Vector3.xAxis)\n"
+			"local frame: CFrame = CFrame.new(vector)\n"
+			"local size: UDim2 = UDim2.fromScale(1, 1)\n"
+			"local range: NumberRange = NumberRange.new(1, 2)\n"
+			"local sequence: NumberSequence = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), "
+			"NumberSequenceKeypoint.new(1, 0)})\n"
+			"local colours: ColorSequence = ColorSequence.new(Color3.new())\n"
+			"local ray: Ray = Ray.new(Vector3.zero, Vector3.one)\n"
+			"local random: Random = Random.new(4)\n"
+			"local date = DateTime.fromSimulated()\nlocal timestamp: number = date.UnixTimestamp\n"
+			"local part = Instance.new('Part')\npart.Size = vector\npart.Anchored = true\npart.Parent = "
+			"workspace\nlocal viaGame: Workspace = game:GetService('Workspace')\n"
+			"return random:NextInteger(1, 2) + dot",
+			"package.luau",
+			error
+		)
+	);
+	CHECK(error.empty());
+
+	for (const std::string_view source :
+		 {"return require('x')",
+		  "return os.clock()",
+		  "return debug.traceback()",
+		  "return Scope.new()",
+		  "return task.wait()",
+		  "return task.cancel(nil)",
+		  "return wait()",
+		  "return spawn(function() end)",
+		  "return delay(1, function() end)",
+		  "return game:GetService('RunService')",
+		  "return RunService:IsServer()"}) {
+		CHECK_FALSE(engine::script::CheckLuauDataScriptPackageSource(source, "package.luau", error));
+		CHECK(error.starts_with("data-script package type error at "));
+	}
+
+	std::string oversized(engine::script::DATA_SCRIPT_PACKAGE_MAX_SOURCE_BYTES + 1, ' ');
+	CHECK_FALSE(engine::script::CheckLuauDataScriptPackageSource(oversized, "package.luau", error));
+	CHECK(error == "data-script package source exceeds the static-check byte limit");
 }
 
 TEST_CASE(

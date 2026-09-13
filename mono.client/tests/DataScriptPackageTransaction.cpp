@@ -245,6 +245,27 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"client transaction refuses invalid Luau source before it copies or installs a world",
+	"[client][data-script-package]"
+) {
+	for (const std::string_view source : {"local =", "local count: number = 'wrong'"}) {
+		Fixture fixture;
+		const DataScriptRequest request = fixture.Request(std::string(source));
+		const std::vector<std::byte> before = Save(fixture.Worlds);
+		const auto revision = fixture.Session.Inspect(INSTANCE_ID);
+
+		const DataScriptResult result =
+			client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
+		CHECK_FALSE(result.Ran);
+		CHECK_FALSE(result.Atomic);
+		CHECK(result.Error.starts_with("data-script package"));
+		CHECK(Save(fixture.Worlds) == before);
+		CHECK(fixture.Session.Inspect(INSTANCE_ID).WorldVersion == revision.WorldVersion);
+		CHECK(fixture.Installed == 0);
+	}
+}
+
+TEST_CASE(
 	"client transaction stale request and checkpoint cap preserve exact live bytes",
 	"[client][data-script-package]"
 ) {

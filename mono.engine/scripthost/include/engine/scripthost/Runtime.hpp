@@ -44,4 +44,10 @@ namespace engine::script {
 		std::string_view source,
 		std::string_view entry
 	);
+
+	// Checks package source through the adapter selected by `language`. It is
+	// separate from execution so callers can refuse before copying a live world.
+	bool CheckDataScriptPackageSource(
+		Language language, std::string_view source, std::string_view entry, std::string &error
+	);
 }

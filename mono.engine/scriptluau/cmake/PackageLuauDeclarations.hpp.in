@@ -1,0 +1,10 @@
+#pragma once
+
+#include <string_view>
+
+namespace engine::script {
+
+inline constexpr std::string_view GENERATED_LUAU_DECLARATIONS =
+@SCRIPT_LUAU_DECLARATION_LITERALS@;
+
+} // namespace engine::script
