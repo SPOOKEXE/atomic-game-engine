@@ -45,6 +45,9 @@ namespace engine::render {
 		// Arms compatible capture work and returns true only when a named camera
 		// replaced the supplied view camera.
 		bool PrepareView(View &view);
+		// Cancels capture and camera work prepared for this exact view. A host uses
+		// this when it cannot bind the rebuilt world packet that the capture needs.
+		void AbortPreparedView(const View &view);
 		void Pump();
 		bool HasPending() const;
 

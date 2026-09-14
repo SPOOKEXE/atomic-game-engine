@@ -1,9 +1,9 @@
 #include "CaptureRecordValidation.hpp"
 
-#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/ecs/Attributes.hpp>
-#include <engine/scene/Components.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/script/DataSceneService.hpp>
 
 #include <algorithm>
@@ -83,8 +83,8 @@ namespace engine::render {
 			size_t matchingIdentities = 0;
 			std::optional<scene::Camera> selectedCamera;
 			std::optional<core::CFrame> selectedFrame;
-			const world::WorldStatus status = session.UniverseOf().Enter(
-				session.UniverseOf().Find(view.WorldName), [&](ecs::Store &store) {
+			const world::WorldStatus status =
+				session.UniverseOf().Enter(session.UniverseOf().Find(view.WorldName), [&](ecs::Store &store) {
 					store.EachEntity([&](ecs::Entity entity) {
 						ecs::AttributeValue identity;
 						if (!ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identity) ||
@@ -98,12 +98,15 @@ namespace engine::render {
 							selectedFrame = transform->Frame;
 						}
 					});
-				}
-			);
-			if (status != world::WorldStatus::Ok) detail = "capture world is unavailable";
-			else if (matchingIdentities != 1) detail = "named camera id is not unique or absent";
-			else if (!selectedCamera || !selectedFrame) detail = "named camera id does not identify a camera";
-			if (status != world::WorldStatus::Ok || matchingIdentities != 1 || !selectedCamera || !selectedFrame)
+				});
+			if (status != world::WorldStatus::Ok)
+				detail = "capture world is unavailable";
+			else if (matchingIdentities != 1)
+				detail = "named camera id is not unique or absent";
+			else if (!selectedCamera || !selectedFrame)
+				detail = "named camera id does not identify a camera";
+			if (status != world::WorldStatus::Ok || matchingIdentities != 1 || !selectedCamera ||
+				!selectedFrame)
 				return false;
 			view.CameraFrame = *selectedFrame;
 			view.Camera = *selectedCamera;
@@ -577,6 +580,7 @@ namespace engine::render {
 		if (!Hooks) Hooks = std::make_unique<HookState>();
 		const auto pipeline = RendererRef.ResolvePipelineIdentity(view.Pipeline);
 		if (!pipeline) return false;
+		const std::string originalSnapshot = view.SnapshotId;
 		bool namedCameraApplied = false;
 		std::vector<PendingRequest> pending;
 		std::vector<std::pair<uint64_t, std::string>> mutationSnapshots;
@@ -654,7 +658,6 @@ namespace engine::render {
 			armedSnapshotCurrent = false;
 		}
 		if (!armedSnapshotCurrent) return false;
-		if (!selectedSnapshot.empty()) view.SnapshotId = selectedSnapshot;
 		if (!pending.empty()) {
 			const world::DataFactoryReply barrier =
 				Session.RenderSnapshotBarrier(view.WorldName.Text(), pending.front().Request.SnapshotId);
@@ -671,6 +674,7 @@ namespace engine::render {
 			}
 			std::string cameraDetail;
 			if (!ResolveNamedCamera(Session, view, pending.front().Request.CameraId, cameraDetail)) {
+				view.SnapshotId = originalSnapshot;
 				std::lock_guard lock(Mutex);
 				for (const PendingRequest &request : pending)
 					if (auto entry = Entries.find(request.Id); entry != Entries.end()) {
@@ -683,6 +687,7 @@ namespace engine::render {
 			}
 			namedCameraApplied = pending.front().Request.CameraId != "current_view";
 		}
+		if (!selectedSnapshot.empty()) view.SnapshotId = selectedSnapshot;
 		{
 			std::lock_guard lock(Mutex);
 			for (const PendingRequest &request : pending)
@@ -958,6 +963,42 @@ namespace engine::render {
 			if (cancelArmed) RendererRef.Hooks().Cancel(armed.Mutation);
 		}
 		return namedCameraApplied;
+	}
+
+	void ScriptDataCaptureBridge::AbortPreparedView(const View &view) {
+		std::vector<ConnectionHandle> connections;
+		std::vector<MutationHandle> mutations;
+		{
+			std::lock_guard lock(Mutex);
+			for (auto &[ticket, entry] : Entries) {
+				if (entry.Request.InstanceId != view.WorldName.Text() ||
+					!PipelineMatches(entry.Request.Pipeline, view) || entry.Request.ViewSlot != view.Slot ||
+					entry.Request.SnapshotId != view.SnapshotId)
+					continue;
+				entry.CancelRequested = true;
+				if (Hooks) {
+					if (const auto connection = Hooks->Connections.find(ticket);
+						connection != Hooks->Connections.end()) {
+						connections.push_back(connection->second);
+						Hooks->Connections.erase(connection);
+					}
+					Hooks->Batches.erase(ticket);
+				}
+			}
+			for (auto &[ticket, entry] : Mutations) {
+				(void)ticket;
+				const auto &request = entry.Request;
+				if (request.InstanceId != view.WorldName.Text() || request.Pipeline != view.Pipeline.Text() ||
+					request.ViewSlot != view.Slot || request.SnapshotId != view.SnapshotId)
+					continue;
+				entry.CancelRequested = true;
+				if (entry.Handle.IsValid()) mutations.push_back(entry.Handle);
+			}
+		}
+		RendererRef.Hooks().DisconnectHooks(connections);
+		for (MutationHandle mutation : mutations)
+			RendererRef.Hooks().Cancel(mutation);
+		Pump();
 	}
 
 	void ScriptDataCaptureBridge::Pump() {

@@ -2,11 +2,15 @@
 #include "RenderFixture.hpp"
 #include "SecondSurfaceDepth.hpp"
 
+#include <engine/ecs/Attributes.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/script/DataSceneService.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -792,7 +796,10 @@ TEST_CASE(
 	REQUIRE(bridge.Release("data-world", ticket, detail));
 }
 
-TEST_CASE("named capture cameras resolve stable identities without changing a refused view", "[render][data-capture]") {
+TEST_CASE(
+	"named capture cameras resolve stable identities without changing a refused view",
+	"[render][data-capture]"
+) {
 	engine::scene::RegisterSceneComponents();
 	engine::world::Universe worlds;
 	const auto world = worlds.Create({.Name = engine::core::Name("data-world")});
@@ -816,18 +823,29 @@ TEST_CASE("named capture cameras resolve stable identities without changing a re
 		identify(second, "camera/second");
 		const auto duplicate = store.Create();
 		identify(duplicate, "camera/second");
+		const auto nonCamera = store.Create();
+		store.Set(nonCamera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{4, 5, 6})});
+		identify(nonCamera, "object/not-camera");
 	});
 	engine::world::DataFactorySession session(worlds);
-	session.SetPauseParticipant([world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
-		return candidate == world;
-	});
-	REQUIRE(session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status == engine::world::DataFactoryStatus::Ok);
+	session.SetPauseParticipant(
+		[world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
+			return candidate == world;
+		}
+	);
+	REQUIRE(
+		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
 	std::string snapshot;
 	REQUIRE(session.Snapshot("data-world", snapshot).Status == engine::world::DataFactoryStatus::Ok);
 	Renderer renderer;
 	engine::graph::RenderGraph graph;
 	engine::core::Name offender;
-	REQUIRE(engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
 	const engine::core::Name pipeline("named-camera-pipeline");
 	REQUIRE(renderer.SetPipeline(pipeline, graph));
 	ScriptDataCaptureBridge bridge(session, renderer);
@@ -848,7 +866,7 @@ TEST_CASE("named capture cameras resolve stable identities without changing a re
 	bridge.Pump();
 	REQUIRE(bridge.Release("data-world", ticket, detail));
 
-	for (const std::string_view rejected : {"missing", "camera/second"}) {
+	for (const std::string_view rejected : {"missing", "camera/second", "object/not-camera"}) {
 		request.CameraId = rejected;
 		REQUIRE(bridge.Queue("data-world", request, ticket, detail));
 		View refused = MutationView(snapshot, pipeline);
@@ -857,10 +875,76 @@ TEST_CASE("named capture cameras resolve stable identities without changing a re
 		CHECK_FALSE(bridge.PrepareView(refused));
 		CHECK(refused.CameraFrame.Position.X == -2);
 		CHECK(refused.Camera.FieldOfViewRadians == .3f);
+		CHECK(refused.SnapshotId == snapshot);
 		engine::script::DataCaptureBridgePoll poll;
 		REQUIRE(bridge.Poll("data-world", ticket, poll, detail));
 		CHECK(poll.Status == "invalid");
 	}
+}
+
+TEST_CASE(
+	"interleaved named and current capture snapshots each get a preparation turn", "[render][data-capture]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::world::Universe worlds;
+	const auto world = worlds.Create({.Name = engine::core::Name("data-world")});
+	worlds.Enter(world, [](engine::ecs::Store &store) {
+		const auto camera = store.Create();
+		store.Set(camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{3, 0, 0})});
+		store.Set(camera, engine::scene::Camera{});
+		engine::ecs::AttributeValue identity;
+		identity.Type = engine::ecs::PropertyType::String;
+		identity.String = "camera/selected";
+		REQUIRE(engine::ecs::SetAttribute(store, camera, engine::core::Name("DataFactoryId"), identity));
+	});
+	engine::world::DataFactorySession session(worlds);
+	session.SetPauseParticipant(
+		[world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
+			return candidate == world;
+		}
+	);
+	REQUIRE(
+		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	std::string firstSnapshot, secondSnapshot;
+	REQUIRE(session.Snapshot("data-world", firstSnapshot).Status == engine::world::DataFactoryStatus::Ok);
+	REQUIRE(session.Snapshot("data-world", secondSnapshot).Status == engine::world::DataFactoryStatus::Ok);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("interleaved-capture-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	auto named = Request();
+	named.SnapshotId = firstSnapshot;
+	named.Pipeline = pipeline.Text();
+	named.CameraId = "camera/selected";
+	uint64_t namedTicket = 0;
+	REQUIRE(bridge.Queue("data-world", named, namedTicket, detail));
+	auto current = named;
+	current.SnapshotId = secondSnapshot;
+	current.CameraId = "current_view";
+	uint64_t currentTicket = 0;
+	REQUIRE(bridge.Queue("data-world", current, currentTicket, detail));
+	View namedView = MutationView({}, pipeline);
+	CHECK(bridge.PrepareView(namedView));
+	CHECK(namedView.SnapshotId == firstSnapshot);
+	bridge.Cancel("data-world", namedTicket);
+	bridge.Pump();
+	REQUIRE(bridge.Release("data-world", namedTicket, detail));
+	View currentView = MutationView({}, pipeline);
+	CHECK_FALSE(bridge.PrepareView(currentView));
+	CHECK(currentView.SnapshotId == secondSnapshot);
+	engine::script::DataCaptureBridgePoll poll;
+	REQUIRE(bridge.Poll("data-world", currentTicket, poll, detail));
+	CHECK(poll.Status == "failed");
+	REQUIRE(bridge.Release("data-world", currentTicket, detail));
 }
 
 TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data-capture]") {

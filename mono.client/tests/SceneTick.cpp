@@ -23,6 +23,8 @@
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/WorldPresentation.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
@@ -40,6 +42,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <DataCaptureDriver.hpp>
+#include <NamedCaptureView.hpp>
 #include <algorithm>
 #include <client/Scene.hpp>
 #include <filesystem>
@@ -279,6 +282,73 @@ TEST_CASE("data capture driver ticket transition is paused, strict, and terminal
 	CHECK_FALSE(noTicketFailure.Cancelling);
 	CHECK(Transition(noTicketFailure, true, callback, &queued) == Action::None);
 	CHECK(noTicketFailure.Ticket == 7);
+}
+
+TEST_CASE(
+	"named capture views rebuild the camera cache and leave the next view normal", "[client][data-capture]"
+) {
+	Session session;
+	Store &store = session.World;
+	const auto camera = store.Create();
+	store.Set(camera, Transform{engine::core::CFrame(engine::core::Vector3{8, 0, 0})});
+	Camera lens;
+	lens.FieldOfViewRadians = 0.8f;
+	store.Set(camera, lens);
+
+	engine::render::View normal;
+	normal.World = 1;
+	normal.WorldName = engine::core::Name("named-capture");
+	normal.Pipeline = engine::core::Name("capture-pipeline");
+	normal.CameraFrame = engine::core::CFrame(engine::core::Vector3{-4, 0, 0});
+	normal.Camera.FieldOfViewRadians = 0.4f;
+	normal.Grid.Enabled = true;
+	const auto normalSignature = engine::render::ScenePresentationSignature(normal, {});
+
+	engine::render::View capture = normal;
+	capture.CameraFrame = store.Get<Transform>(camera)->Frame;
+	capture.Camera = *store.Get<Camera>(camera);
+	engine::render::WorldViewFrame frame;
+	engine::render::WorldCameraFrame cameraFrame;
+	REQUIRE(
+		client::BindNamedCaptureWorldView(
+			store,
+			{.World = capture.World,
+			 .Name = capture.WorldName,
+			 .Identity = store.Identity(),
+			 .ContentOwner = capture.WorldName,
+			 .ForeignContentOwners = {},
+			 .Pipeline = capture.Pipeline},
+			{64, 64},
+			capture,
+			frame,
+			cameraFrame,
+			[](const engine::render::View &) {}
+		)
+	);
+	CHECK(capture.CameraFrame.Position.X == Approx(8));
+	CHECK(capture.Camera.FieldOfViewRadians == Approx(0.8f));
+	CHECK(engine::render::ScenePresentationSignature(capture, {}) != normalSignature);
+	CHECK(engine::render::ScenePresentationSignature(normal, {}) == normalSignature);
+	int aborted = 0;
+	engine::render::View refused = capture;
+	CHECK_FALSE(
+		client::BindNamedCaptureWorldView(
+			store,
+			{.World = capture.World,
+			 .Name = capture.WorldName,
+			 .Identity = store.Identity() + 1,
+			 .ContentOwner = capture.WorldName,
+			 .ForeignContentOwners = {},
+			 .Pipeline = capture.Pipeline},
+			{64, 64},
+			refused,
+			frame,
+			cameraFrame,
+			[&aborted](const engine::render::View &) { aborted++; }
+		)
+	);
+	CHECK(aborted == 1);
+	CHECK(refused.CameraFrame.Position.X == Approx(8));
 }
 
 TEST_CASE("a built scene produces one instance per entity", "[demo]") {

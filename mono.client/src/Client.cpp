@@ -1,5 +1,6 @@
 #include "DataCaptureDriver.hpp"
 #include "DataFactoryPausedPresentation.hpp"
+#include "NamedCaptureView.hpp"
 
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
@@ -4028,30 +4029,38 @@ namespace client {
 		std::optional<engine::render::WorldViewFrame> namedCaptureFrame;
 		std::optional<engine::render::WorldCameraFrame> namedCaptureCamera;
 		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
-		if (capturePending && DataCapture->PrepareView(view)) {
-			namedCaptureFrame.emplace();
-			namedCaptureCamera.emplace();
-			Universe_->Enter(presentationWorld, [&](engine::ecs::Store &store) {
-				engine::render::CollectWorldView(store, view.WorldName, *namedCaptureFrame);
-				engine::render::CollectWorldCamera(
-					store,
-					view,
-					{static_cast<float>(std::max(pixelWidth, 0)), static_cast<float>(std::max(pixelHeight, 0))},
-					*namedCaptureCamera
-				);
-				(void)engine::render::BindWorldView(
-					*namedCaptureFrame,
-					*namedCaptureCamera,
-					{.World = presentationWorld.Index,
-					 .Name = view.WorldName,
-					 .Identity = store.Identity(),
-					 .ContentOwner = view.ContentOwner,
-					 .ForeignContentOwners = view.ForeignContentOwners,
-					 .Pipeline = view.Pipeline},
-					view
-				);
-				visualLighting = view.Lighting;
-			});
+		if (capturePending) {
+			const engine::render::View normalView = view;
+			const bool namedCapture = DataCapture->PrepareView(view);
+			if (namedCapture) {
+				namedCaptureFrame.emplace();
+				namedCaptureCamera.emplace();
+				bool bound = false;
+				Universe_->Enter(presentationWorld, [&](engine::ecs::Store &store) {
+					bound = BindNamedCaptureWorldView(
+						store,
+						{.World = presentationWorld.Index,
+						 .Name = view.WorldName,
+						 .Identity = store.Identity(),
+						 .ContentOwner = view.ContentOwner,
+						 .ForeignContentOwners = view.ForeignContentOwners,
+						 .Pipeline = view.Pipeline},
+						{static_cast<float>(std::max(pixelWidth, 0)),
+						 static_cast<float>(std::max(pixelHeight, 0))},
+						view,
+						*namedCaptureFrame,
+						*namedCaptureCamera,
+						[this](const engine::render::View &prepared) {
+							DataCapture->AbortPreparedView(prepared);
+						}
+					);
+				});
+				if (bound)
+					visualLighting = view.Lighting;
+				else {
+					view = normalView;
+				}
+			}
 		}
 
 		const uint32_t targetWidth = static_cast<uint32_t>(std::max(pixelWidth, 0));
