@@ -6,6 +6,7 @@
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/TemporalSample.hpp>
 #include <engine/control/features/RigExport.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
@@ -1044,6 +1045,9 @@ namespace client {
 				);
 				ControlSurface.Enable(
 					std::array{engine::control::features::DataScene(*Universe_, DataCapture)}
+				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::TemporalSample(*Universe_, *DataFactory)}
 				);
 				ControlSurface.Enable(std::array{engine::control::features::RigExport(*Universe_)});
 			}
