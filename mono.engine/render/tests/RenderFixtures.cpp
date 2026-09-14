@@ -281,6 +281,105 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("completed camera submission publishes bounded visibility facts", "[render][gpu][visibility][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallFixture(fixture.Render);
+	std::array instances{
+		DrawPlanes(std::array{Plane{0, 0, 4, .5f, .5f}}).front(),
+		DrawPlanes(std::array{Plane{8, 0, 4, .5f, .5f}}).front(),
+		DrawPlanes(std::array{Plane{0, 0, 5, .5f, .5f}}).front(),
+	};
+	instances[0].Source = 101;
+	instances[1].Source = 202;
+	instances[2].Source = 303;
+	instances[2].Transparency = .5f;
+	render::SceneTarget target{64, 64};
+	render::View view;
+	view.Slot = 17;
+	view.World = 17;
+	view.WorldName = core::Name("visibility.fixture");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32;
+	view.Instances = instances;
+	render::OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Ran(core::Name("gbuffer")));
+	const auto snapshot = fixture.Render.Visibility();
+	REQUIRE(snapshot.Valid);
+	CHECK(snapshot.ViewSlot == view.Slot);
+	CHECK(snapshot.World == view.WorldName);
+	REQUIRE(snapshot.Observations.size() == 3);
+	CHECK(snapshot.Observations[0].Entity == 101);
+	CHECK(snapshot.Observations[0].State == render::VisibilityState::SubmittedOpaqueOrMasked);
+	CHECK(snapshot.Observations[1].Entity == 202);
+	CHECK(snapshot.Observations[1].State == render::VisibilityState::FrustumCulled);
+	CHECK(snapshot.Observations[2].Entity == 303);
+	CHECK(snapshot.Observations[2].State == render::VisibilityState::SubmittedBlended);
+
+	view.Instances = {};
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto empty = fixture.Render.Visibility();
+	CHECK(empty.Valid);
+	CHECK(empty.Observations.empty());
+
+	view.Instances = instances;
+	view.Projection = glm::mat4{std::numeric_limits<float>::infinity()};
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK_FALSE(fixture.Render.Visibility().Valid);
+
+	view.Projection.reset();
+	render::View second = view;
+	second.Slot = 18;
+	second.World = 18;
+	second.WorldName = core::Name("visibility.second");
+	std::array views{view, second};
+	fixture.Render.Render(views, overlay, nullptr, false);
+	const auto finalView = fixture.Render.Visibility();
+	REQUIRE(finalView.Valid);
+	CHECK(finalView.ViewSlot == second.Slot);
+	CHECK(finalView.World == second.WorldName);
+
+	graph::RenderGraph forwardGraph;
+	core::Name forwardOffender;
+	REQUIRE(
+		graph::Build(graph::DefaultForwardTierCDocument(), forwardGraph, forwardOffender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("visibility.forward"), forwardGraph));
+	view.Pipeline = core::Name("visibility.forward");
+	view.Instances = instances;
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto forward = fixture.Render.Visibility();
+	REQUIRE(forward.Valid);
+	REQUIRE(forward.Observations.size() == 3);
+	CHECK(forward.Observations[0].Entity == 101);
+	CHECK(forward.Observations[0].State == render::VisibilityState::SubmittedOpaqueOrMasked);
+
+	render::ShaderCompiler compiler;
+	const auto program = compiler.Compile(
+		"#version 450\nlayout(location=0) out vec4 colour; void main(){colour=vec4(1);}",
+		render::ShaderStage::Fragment,
+		"visibility-authored.frag"
+	);
+	INFO(program.Error);
+	REQUIRE_FALSE(program.Failed);
+	const core::Name authoredShader("visibility.authored");
+	REQUIRE(fixture.Render.AddShader(authoredShader, program.SpirV));
+	instances[0].Shader = authoredShader;
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Instances = std::span(instances).first(1);
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto authored = fixture.Render.Visibility();
+	REQUIRE(authored.Valid);
+	REQUIRE(authored.Observations.size() == 1);
+	CHECK(authored.Observations[0].Entity == 101);
+	CHECK(authored.Observations[0].State == render::VisibilityState::SubmittedOpaqueOrMasked);
+}
+
 TEST_CASE(
 	"rendered assets follow native and copied world content owners", "[render][gpu][content-binding][.]"
 ) {

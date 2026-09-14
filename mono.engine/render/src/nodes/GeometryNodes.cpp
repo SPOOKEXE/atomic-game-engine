@@ -237,7 +237,10 @@ namespace engine::render {
 					nullptr,
 					State->SurfaceSampler,
 					0,
-					Result.Triangles
+					Result.Triangles,
+					nullptr,
+					Impl::SlotSelection::All,
+					Impl::VisibilityPass::MainCamera
 				);
 				SDL_EndGPURenderPass(pass);
 				return true;
@@ -251,6 +254,11 @@ namespace engine::render {
 			SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
 			for (uint32_t command = 0; command < State->Tessellation.Count; ++command) {
 				const GpuTessellationPlan &entry = State->Tessellation.Entries[command];
+				if (entry.Instance >= SceneCount && entry.Instance - SceneCount < State->DrawOrder.size()) {
+					State->RecordVisibilityCandidates(
+						std::span(&State->SceneInstances[State->DrawOrder[entry.Instance - SceneCount]], 1)
+					);
+				}
 				if (entry.Instance >= State->SlotMesh.size() || entry.Instance >= State->SlotTexture.size() ||
 					entry.Instance >= State->SlotContentOwner.size() ||
 					entry.Instance >= State->SlotResample.size() ||
@@ -395,7 +403,9 @@ namespace engine::render {
 					State->SurfaceSampler,
 					0,
 					Result.Triangles,
-					nullptr
+					nullptr,
+					Impl::SlotSelection::All,
+					Impl::VisibilityPass::MainCamera
 				);
 			}
 			SDL_EndGPURenderPass(pass);
@@ -481,7 +491,9 @@ namespace engine::render {
 						State->SurfaceSampler,
 						0,
 						result.Triangles,
-						phase
+						phase,
+						Impl::SlotSelection::All,
+						Impl::VisibilityPass::MainCamera
 					);
 				};
 
@@ -540,7 +552,10 @@ namespace engine::render {
 						nullptr,
 						State->SurfaceSampler,
 						0,
-						result.Triangles
+						result.Triangles,
+						nullptr,
+						Impl::SlotSelection::All,
+						Impl::VisibilityPass::MainCamera
 					);
 				}
 				SDL_EndGPURenderPass(pass);
@@ -572,6 +587,7 @@ namespace engine::render {
 			// Early phase: the CPU-picked occluders, by indirect arguments so
 			// both phases drive their draws the same way.
 			const Impl::IndirectPhase early{State->Occlusion.Arguments, 0, &State->OcclusionFrame.RunEarly};
+			State->RecordVisibilityCandidates(State->OcclusionFrame.EarlyInstances);
 			SDL_GPURenderPass *earlyPass = beginGBuffer(!customOpaque);
 			if (earlyPass == nullptr) {
 				ENGINE_ERROR("gbuffer early: SDL_BeginGPURenderPass: {}", SDL_GetError());
@@ -592,6 +608,7 @@ namespace engine::render {
 				State->OcclusionFrame.ArgCount,
 				&State->OcclusionFrame.RunCandidates
 			};
+			State->RecordVisibilityCandidates(State->OcclusionFrame.LateInstances);
 			SDL_GPURenderPass *latePass = beginGBuffer(false);
 			if (latePass == nullptr) {
 				ENGINE_ERROR("gbuffer late: SDL_BeginGPURenderPass: {}", SDL_GetError());
@@ -612,7 +629,8 @@ namespace engine::render {
 				0,
 				result.Triangles,
 				nullptr,
-				Impl::SlotSelection::LodOnly
+				Impl::SlotSelection::LodOnly,
+				Impl::VisibilityPass::MainCamera
 			);
 			SDL_EndGPURenderPass(latePass);
 			return true;
@@ -1248,7 +1266,10 @@ namespace engine::render {
 							nullptr,
 							surfaceSampler,
 							0,
-							result.Triangles
+							result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::MainCamera
 						);
 					}
 				}

@@ -12,6 +12,7 @@
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/TemporalSample.hpp>
 #include <engine/control/features/Universe.hpp>
+#include <engine/control/features/VisibilityObservation.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -1108,6 +1109,24 @@ namespace client {
 				);
 				ControlSurface.Enable(std::array{engine::control::features::RigExport(*Universe_)});
 			}
+			ControlSurface.Enable(std::array{engine::control::features::VisibilityObservations([this] {
+				const engine::render::VisibilitySnapshot snapshot = Renderer.Visibility();
+				engine::control::features::VisibilitySnapshotReply reply;
+				reply.Frame = snapshot.Frame;
+				reply.ViewSlot = snapshot.ViewSlot;
+				reply.World = std::string(snapshot.World.Text());
+				reply.Valid = snapshot.Valid;
+				reply.Dropped = snapshot.Dropped;
+				reply.DroppedExact = snapshot.DroppedExact;
+				for (const engine::render::VisibilityObservation &row : snapshot.Observations)
+					reply.Observations.push_back(
+						{std::string(row.World.Text()),
+						 row.Entity,
+						 engine::render::Describe(row.State),
+						 engine::render::Describe(row.Cause)}
+					);
+				return reply;
+			})});
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",

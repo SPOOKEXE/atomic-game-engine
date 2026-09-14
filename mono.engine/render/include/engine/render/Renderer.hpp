@@ -25,6 +25,7 @@
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
 #include <engine/render/ResourceImage.hpp>
+#include <engine/render/VisibilityObservation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -1365,6 +1366,10 @@ namespace engine::render {
 		//        to be ahead of.
 		// @return True when the device, pipelines and geometry are ready.
 		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1);
+
+		// An owned copy of the last successfully submitted visibility snapshot.
+		// A submission is not a claim that pixels survived depth or blending.
+		VisibilitySnapshot Visibility() const;
 
 		// Whether this renderer has a window to present to.
 		//

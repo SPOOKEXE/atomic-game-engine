@@ -42,6 +42,7 @@
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/TextureTable.hpp>
+#include <engine/render/VisibilityObservation.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_video.h>
@@ -104,6 +105,8 @@ namespace engine::render {
 		std::optional<NamedPipeline> EngineDefault;
 		std::vector<NamedPipeline> NamedPipelines;
 		core::Name ActiveGraph;
+		VisibilityObservations VisibilityWorking;
+		VisibilitySnapshot VisibilityCompleted;
 
 		const NamedPipeline *PipelineFor(core::Name name) const {
 			if (!name.IsValid()) {
@@ -1167,6 +1170,8 @@ namespace engine::render {
 			std::vector<uint32_t> RunEarly;
 			std::vector<uint32_t> RunCandidates;
 			std::vector<uint32_t> RunFirstSlot;
+			std::vector<scene::DrawInstance> EarlyInstances;
+			std::vector<scene::DrawInstance> LateInstances;
 			// Two vec4 per candidate, already in the layout the cull reads -
 			// see occlusion-cull.comp.
 			std::vector<glm::vec4> CandidatePairs;
@@ -2672,6 +2677,8 @@ namespace engine::render {
 		// @param surfaceSampler  Its sampler.
 		// @param triangles  Incremented by what was actually drawn.
 		// @return How many draw calls were issued.
+		enum class VisibilityPass : uint8_t { Secondary, MainCamera };
+
 		uint32_t DrawSlots(
 			SDL_GPUCommandBuffer *command,
 			SDL_GPURenderPass *pass,
@@ -2685,8 +2692,13 @@ namespace engine::render {
 			uint32_t tagFilter,
 			uint64_t &triangles,
 			const IndirectPhase *indirect = nullptr,
-			SlotSelection selection = SlotSelection::All
+			SlotSelection selection = SlotSelection::All,
+			VisibilityPass visibilityPass = VisibilityPass::Secondary
 		);
+
+		void RecordVisibilityDraw(uint32_t first, uint32_t count);
+		void RecordVisibilityCandidate(uint32_t first, uint32_t count);
+		void RecordVisibilityCandidates(std::span<const scene::DrawInstance> instances);
 
 		// Binds mesh vertices plus the resident rows and one ordered index stream.
 		void BindInstanceBuffers(

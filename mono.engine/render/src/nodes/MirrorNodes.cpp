@@ -1017,7 +1017,10 @@ namespace engine::render {
 							image,
 							State->SurfaceSampler,
 							0,
-							result.Triangles
+							result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::MainCamera
 						);
 						SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
 					}

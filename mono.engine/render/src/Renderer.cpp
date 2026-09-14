@@ -724,6 +724,8 @@ namespace engine::render {
 		// another thread holds a command buffer against it is the same violation
 		// arriving at the end of the frame instead of the middle.
 		RequireOwningThread("Shutdown");
+		State->VisibilityWorking.Invalidate();
+		State->VisibilityCompleted = {};
 		HookBind->Shutdown();
 
 		// **A frame waited for and never drawn, which is what quitting during
@@ -2071,6 +2073,10 @@ namespace engine::render {
 		return State->Headless();
 	}
 
+	VisibilitySnapshot Renderer::Visibility() const {
+		return State == nullptr ? VisibilitySnapshot{} : State->VisibilityCompleted;
+	}
+
 	void *Renderer::SceneTexture(size_t slot) const {
 		if (slot >= State->SceneSlots.size()) {
 			return nullptr;
@@ -2423,9 +2429,16 @@ namespace engine::render {
 			PollPortalCaptureTreeComposition(State->PortalTreeJob.Token);
 
 		FrameResult frame;
-		if (State == nullptr || State->Device == nullptr || views.empty() || State->BatchActive) {
+		if (State == nullptr) {
 			return frame;
 		}
+		if (State->Device == nullptr || views.empty() || State->BatchActive) {
+			State->VisibilityWorking.Invalidate();
+			State->VisibilityCompleted = {};
+			return frame;
+		}
+		State->VisibilityCompleted = {};
+		State->VisibilityWorking.Invalidate();
 		State->PollSceneFrames();
 
 		std::vector<FrameViewIdentity> identities;

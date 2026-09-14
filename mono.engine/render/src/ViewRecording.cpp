@@ -703,6 +703,10 @@ namespace engine::render {
 		size_t visibleCount = instances.size();
 		opaqueCount = 0;
 		core::Name orderedEntities;
+		State->VisibilityWorking.Begin(State->FrameCounter, Request.TargetSlot, Request.Source->WorldName);
+		for (const scene::DrawInstance &instance : instances) {
+			State->VisibilityWorking.Observe(instance);
+		}
 
 		// **The whole CPU half of the pipeline, and it had no span.** Frustum
 		// culling, distance culling, tag filtering and the draw-order sort all
@@ -717,6 +721,16 @@ namespace engine::render {
 				if (node == nullptr) {
 					continue;
 				}
+				std::span<const uint32_t> frustumInput;
+				if (node->Kind == core::Name("cull-frustum")) {
+					for (const graph::ResourceId resource : node->Reads) {
+						const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+						if (desc != nullptr && desc->Kind == graph::ResourceKind::Entities) {
+							frustumInput = entityFlow.Get(desc->Name);
+							break;
+						}
+					}
+				}
 				const auto started = std::chrono::steady_clock::now();
 				const graph::EntityNodeRun run = graph::RunEntityNode(
 					selectedPipeline->Graph,
@@ -729,6 +743,19 @@ namespace engine::render {
 				);
 				if (!run.Handled) {
 					continue;
+				}
+				if (!frustumInput.empty() && run.Output.IsValid()) {
+					const std::span<const uint32_t> survivors = entityFlow.Get(run.Output);
+					size_t survivor = 0;
+					for (const uint32_t candidate : frustumInput) {
+						if (survivor < survivors.size() && survivors[survivor] == candidate) {
+							survivor++;
+							continue;
+						}
+						if (candidate < instances.size()) {
+							State->VisibilityWorking.FrustumCulled(instances[candidate]);
+						}
+					}
 				}
 				if (run.BoundedAll) {
 					sceneBounds = run.Bounds;
@@ -2178,8 +2205,14 @@ namespace engine::render {
 					const float away = std::max(glm::distance(centre, eye), 0.01f);
 					if (widest >= away * OCCLUDER_SCORE) {
 						earlyRows.push_back(residentSlot);
+						occlusionPlan.EarlyInstances.push_back(
+							State->SceneInstances[State->DrawOrder[at - base]]
+						);
 					} else {
 						lateRows.push_back(residentSlot);
+						occlusionPlan.LateInstances.push_back(
+							State->SceneInstances[State->DrawOrder[at - base]]
+						);
 						occlusionPlan.CandidatePairs.emplace_back(centre, std::bit_cast<float>(runIndex));
 						occlusionPlan.CandidatePairs.emplace_back(extent, std::bit_cast<float>(residentSlot));
 					}
@@ -2927,6 +2960,8 @@ namespace engine::render {
 			}
 			result.Submitted = sceneSubmitted;
 			if (!sceneSubmitted) {
+				State->VisibilityWorking.Invalidate();
+				State->VisibilityCompleted = {};
 				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteResidentUploads(false);
@@ -2942,6 +2977,7 @@ namespace engine::render {
 				State->DropDownloads();
 				return;
 			}
+			State->VisibilityCompleted = State->VisibilityWorking.Snapshot();
 			{
 				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
 				State->CompleteResidentUploads(true);

@@ -99,6 +99,8 @@ namespace engine::render {
 		if (State->BatchActive) {
 			// The batch owner drops any recorded downloads with the frame.
 			State->BatchFailed = true;
+			State->VisibilityWorking.Invalidate();
+			State->VisibilityCompleted = {};
 		} else {
 			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
 			if (submitted) {
@@ -110,6 +112,8 @@ namespace engine::render {
 			}
 			State->CompleteResidentUploads(submitted);
 			State->DropDownloads();
+			State->VisibilityWorking.Invalidate();
+			State->VisibilityCompleted = {};
 		}
 	}
 

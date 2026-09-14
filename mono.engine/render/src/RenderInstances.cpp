@@ -28,6 +28,32 @@
 #include <vector>
 
 namespace engine::render {
+
+	void Renderer::Impl::RecordVisibilityDraw(uint32_t first, uint32_t count) {
+		const uint32_t sceneCount = static_cast<uint32_t>(SceneInstances.size());
+		// Scene slots feed shadows, mirrors, portals, and surfaces. The camera
+		// rows start after them, so only they describe this view's main output.
+		if (first < sceneCount) return;
+		for (uint32_t slot = first; slot < first + count; slot++) {
+			const uint32_t source = slot - sceneCount;
+			const uint32_t index = source < DrawOrder.size() ? DrawOrder[source] : sceneCount;
+			if (index < SceneInstances.size()) VisibilityWorking.Submitted(SceneInstances[index]);
+		}
+	}
+	void Renderer::Impl::RecordVisibilityCandidate(uint32_t first, uint32_t count) {
+		const uint32_t sceneCount = static_cast<uint32_t>(SceneInstances.size());
+		if (first < sceneCount) return;
+		for (uint32_t slot = first; slot < first + count; slot++) {
+			const uint32_t source = slot - sceneCount;
+			const uint32_t index = source < DrawOrder.size() ? DrawOrder[source] : sceneCount;
+			if (index < SceneInstances.size()) VisibilityWorking.GpuIndirectCandidate(SceneInstances[index]);
+		}
+	}
+
+	void Renderer::Impl::RecordVisibilityCandidates(std::span<const scene::DrawInstance> instances) {
+		for (const scene::DrawInstance &instance : instances)
+			VisibilityWorking.GpuIndirectCandidate(instance);
+	}
 	void Renderer::Impl::BindInstanceBuffers(
 		SDL_GPURenderPass *pass, SDL_GPUBuffer *indices, SDL_GPUBuffer *instances, SDL_GPUBuffer *skinOffsets
 	) {
@@ -56,7 +82,8 @@ namespace engine::render {
 		uint32_t tagFilter,
 		uint64_t &triangles,
 		const IndirectPhase *indirect,
-		SlotSelection selection
+		SlotSelection selection,
+		VisibilityPass visibilityPass
 	) {
 		if (count == 0 || first + count > SlotMesh.size()) {
 			return 0;
@@ -371,6 +398,7 @@ namespace engine::render {
 					forcedArgument * static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
 					1
 				);
+				if (visibilityPass == VisibilityPass::MainCamera) RecordVisibilityCandidate(slot, run);
 			} else if (indirect != nullptr) {
 				// The counts live on the GPU. `run` here is the phase's upper
 				// bound, so the triangle tally can only overcount what the
@@ -388,6 +416,7 @@ namespace engine::render {
 				SDL_DrawGPUIndexedPrimitives(
 					pass, range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot
 				);
+				if (visibilityPass == VisibilityPass::MainCamera) RecordVisibilityDraw(slot, run);
 			}
 			calls++;
 			if (tallyTriangles) {
