@@ -1116,9 +1116,8 @@ namespace engine::script {
 			};
 		}
 
-		// DataSceneOptions is plain, copied script data. The current bridge captures
-		// only its selected view, so CameraId is the explicit current_view token
-		// rather than a misleading arbitrary Instance reference.
+		// DataSceneOptions is plain, copied script data. CameraId is either the
+		// current_view token or a stable authored camera identity, never an Instance.
 		ScriptValue NewCaptureOptions() {
 			return Map({
 				{"SchemaVersion", String("data-scene-options/v1")},

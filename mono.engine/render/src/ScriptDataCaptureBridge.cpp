@@ -80,32 +80,34 @@ namespace engine::render {
 			world::DataFactorySession &session, View &view, std::string_view cameraId, std::string &detail
 		) {
 			if (cameraId == "current_view") return true;
-			bool found = false;
-			bool duplicate = false;
+			size_t matchingIdentities = 0;
+			std::optional<scene::Camera> selectedCamera;
+			std::optional<core::CFrame> selectedFrame;
 			const world::WorldStatus status = session.UniverseOf().Enter(
 				session.UniverseOf().Find(view.WorldName), [&](ecs::Store &store) {
 					store.EachEntity([&](ecs::Entity entity) {
-						const scene::Camera *camera = store.Get<scene::Camera>(entity);
-						const scene::Transform *transform = store.Get<scene::Transform>(entity);
 						ecs::AttributeValue identity;
-						if (!camera || !transform ||
-							!ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identity) ||
+						if (!ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identity) ||
 							identity.Type != ecs::PropertyType::String || identity.String != cameraId)
 							return;
-						if (found) {
-							duplicate = true;
-							return;
+						matchingIdentities++;
+						const scene::Camera *camera = store.Get<scene::Camera>(entity);
+						const scene::Transform *transform = store.Get<scene::Transform>(entity);
+						if (camera && transform) {
+							selectedCamera = *camera;
+							selectedFrame = transform->Frame;
 						}
-						view.CameraFrame = transform->Frame;
-						view.Camera = *camera;
-						found = true;
 					});
 				}
 			);
 			if (status != world::WorldStatus::Ok) detail = "capture world is unavailable";
-			else if (duplicate) detail = "named camera id is not unique";
-			else if (!found) detail = "named camera id does not identify a camera";
-			return status == world::WorldStatus::Ok && found && !duplicate;
+			else if (matchingIdentities != 1) detail = "named camera id is not unique or absent";
+			else if (!selectedCamera || !selectedFrame) detail = "named camera id does not identify a camera";
+			if (status != world::WorldStatus::Ok || matchingIdentities != 1 || !selectedCamera || !selectedFrame)
+				return false;
+			view.CameraFrame = *selectedFrame;
+			view.Camera = *selectedCamera;
+			return true;
 		}
 
 		const char *Status(DataCaptureStatus status) {
@@ -611,10 +613,13 @@ namespace engine::render {
 				else if (!mutationSnapshots.empty())
 					selectedSnapshot = mutationSnapshots.front().second;
 			}
+			std::erase_if(pending, [&](const PendingRequest &request) {
+				return request.Request.SnapshotId != selectedSnapshot;
+			});
 			const std::string selectedCamera =
 				pending.empty() ? "current_view" : pending.front().Request.CameraId;
 			std::erase_if(pending, [&](const PendingRequest &request) {
-				return request.Request.SnapshotId != selectedSnapshot || request.Request.CameraId != selectedCamera;
+				return request.Request.CameraId != selectedCamera;
 			});
 			for (const auto &[ticket, entry] : Mutations) {
 				const auto &request = entry.Request;
