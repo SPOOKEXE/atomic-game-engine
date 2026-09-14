@@ -29,7 +29,7 @@ namespace engine::control {
 
 	namespace data_capture_detail {
 		inline constexpr size_t MAXIMUM_ID = 128;
-		inline constexpr size_t MAXIMUM_CHANNELS = 9;
+		inline constexpr size_t MAXIMUM_CHANNELS = 10;
 		inline constexpr size_t MAXIMUM_RANGE_BYTES = 1024 * 1024;
 		inline constexpr size_t MAXIMUM_LEDGER_ENTRIES = 256;
 
@@ -173,7 +173,7 @@ namespace engine::control {
 			const uint64_t byteSize = static_cast<uint64_t>(plane.RowStride) * plane.Height;
 			json shape{plane.Height, plane.Width};
 			std::string dtype = plane.Scalar;
-			json packing = nullptr;
+			json packing = plane.Packing.empty() ? json(nullptr) : json(plane.Packing);
 			if (plane.Channel == "rgb_linear_hdr") {
 				shape.push_back(4);
 				dtype = "float16";
@@ -195,6 +195,7 @@ namespace engine::control {
 				{"shape", std::move(shape)},
 				{"dtype", dtype},
 				{"packing", std::move(packing)},
+				{"provenance", plane.Provenance.empty() ? json(nullptr) : json(plane.Provenance)},
 				{"row_stride", plane.RowStride},
 				{"colour_space", plane.ColourSpace},
 				{"origin", plane.Origin}
@@ -351,7 +352,7 @@ namespace engine::control {
 				}
 				if (!Field(values, "channels", field, failure) || !field->is_array() || field->empty() ||
 					field->size() > MAXIMUM_CHANNELS) {
-					failure = Error("validation_failed", "channels must contain 1 to 9 names");
+					failure = Error("validation_failed", "channels must contain 1 to 10 names");
 					return nullptr;
 				}
 				for (const json &channel : *field) {

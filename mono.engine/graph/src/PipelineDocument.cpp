@@ -1474,6 +1474,17 @@ namespace engine::graph {
 				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
 			);
 		}
+		// SSAO is a half-size R8 screen-space estimate, so it has its own source-only
+		// capture rather than pretending it shares the full-size lit attachment.
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-ambient-occlusion"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads, .Target = core::Name("occlusion"), .Key = core::Name("source")}
+		);
 		document.Record(
 			{.Kind = EditKind::AddNode,
 			 .Name = core::Name("data-capture-object-ids"),

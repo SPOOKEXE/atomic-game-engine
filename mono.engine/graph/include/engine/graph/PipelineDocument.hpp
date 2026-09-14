@@ -439,8 +439,9 @@ namespace engine::graph {
 	//         complete graph ending at the ordinary image output.
 	PipelineDocument CompositorDemoDocument();
 
-	// The default PBR graph with one frame capture node that exports the linear
-	// HDR, linear-depth, and packed-normal planes used by DataCapture.
+	// The default PBR graph with capture nodes for linear HDR, depth, normal,
+	// material, segmentation, and the half-size SSAO visibility estimate used by
+	// DataCapture. SSAO is an estimator rather than ambient-occlusion ground truth.
 	PipelineDocument DefaultPbrDataCaptureDocument();
 
 	// The same default spatial chain for world-image producers and native views.

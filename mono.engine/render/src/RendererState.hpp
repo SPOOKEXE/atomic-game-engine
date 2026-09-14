@@ -1665,9 +1665,9 @@ namespace engine::render {
 			uint32_t Frame = 0;
 			uint64_t Sequence = 0;
 		};
-		// One data-factory capture keeps the nine planes the current bridge
-		// advertises together, including the three integer segmentation planes.
-		static constexpr size_t RESOURCE_IMAGE_CAPACITY = 9;
+		// One data-factory capture keeps the ten planes the current bridge
+		// advertises together, including SSAO and three integer segmentation planes.
+		static constexpr size_t RESOURCE_IMAGE_CAPACITY = 10;
 		struct PendingSceneSubmission {
 			SDL_GPUFence *Fence = nullptr;
 			std::vector<StagedSceneFrame> Frames;
@@ -1697,8 +1697,8 @@ namespace engine::render {
 			bool Cancelled = false;
 		};
 		// Bounded copied-image requests. The default data-factory capture consumes
-		// nine slots for RGB, depth, normals, albedo, material, emissive, and
-		// three segmentations.
+		// ten slots for RGB, depth, normals, albedo, material, emissive, SSAO,
+		// and three segmentations.
 		std::array<ResourceImageSlot, RESOURCE_IMAGE_CAPACITY> ResourceImages;
 		struct ResidentImagePair {
 			SDL_GPUTexture *Colour = nullptr;

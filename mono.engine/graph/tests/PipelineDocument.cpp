@@ -119,6 +119,30 @@ TEST_CASE("the default document round trips through text", "[graph]") {
 	CHECK(Build(reloaded, graph, offender) == PipelineDocumentStatus::Ok);
 }
 
+TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[graph][data-capture]") {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(
+		Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok
+	);
+
+	const engine::graph::Node *ambient = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("data-capture-ambient-occlusion")) ambient = node;
+	}
+	REQUIRE(ambient != nullptr);
+	CHECK(ambient->Kind == Name("capture"));
+	CHECK(ambient->Scope == NodeScope::Frame);
+	REQUIRE(ambient->Reads.size() == 1);
+	CHECK(ambient->ReadPorts == std::vector<Name>{Name("source")});
+	const auto *occlusion = graph.FindResource(ambient->Reads.front());
+	REQUIRE(occlusion != nullptr);
+	CHECK(occlusion->Name == Name("occlusion"));
+	CHECK(occlusion->Format == engine::graph::ResourceFormat::R8);
+	CHECK(occlusion->Divisor == 2);
+}
+
 TEST_CASE("the compositor demo keeps every image operation as a graph pass", "[graph][compositor]") {
 	RenderGraph graph;
 	Name offender;

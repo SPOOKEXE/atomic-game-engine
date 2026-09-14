@@ -49,7 +49,7 @@ namespace {
 		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
 			return {
 				.Available = true,
-				.Channels = {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"},
+				.Channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"},
 				.Detail = "test queue"
 			};
 		}
@@ -98,6 +98,24 @@ namespace {
 				.ColourSpace = "linear",
 				.Origin = "top_left",
 				.Packing = "RGBA16F",
+				.Provenance = {},
+			});
+			poll.Planes.push_back({
+				.Channel = "ambient_occlusion",
+				.Status = poll.Status,
+				.Resource = "capture/fixture/ambient_occlusion",
+				.SourceResource = "occlusion",
+				.HashAlgorithm = "blake3-256",
+				.Hash = "fixture",
+				.Width = 1,
+				.Height = 1,
+				.RowStride = 1,
+				.ByteSize = 1,
+				.Scalar = "unorm8",
+				.ColourSpace = "not_applicable",
+				.Origin = "top_left",
+				.Packing = "unorm8",
+				.Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
 			});
 			for (const char *channel : {"object_ids", "semantic_ids", "part_ids"})
 				poll.Planes.push_back({
@@ -113,6 +131,8 @@ namespace {
 					.Scalar = "uint32",
 					.ColourSpace = "not_applicable",
 					.Origin = "top_left",
+					.Packing = {},
+					.Provenance = {},
 				});
 			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			poll.SemanticLabels = {{1, "fixture/box"}};
@@ -506,11 +526,13 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				local service = game:GetService("DataSceneService")
 				assert(service:GetCapabilities().render_capture)
 				assert(service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 4294967296, channels = {"rgb_linear_hdr"}, temporal_history = "preserve"}).status == "invalid_capture_request")
-				local queued = service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"}, temporal_history = "preserve"})
+				local queued = service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"}, temporal_history = "preserve"})
 				assert(queued.status == "queued")
 				assert(service:PollCapture("202").status == "unknown_capture_ticket")
 				local poll = service:PollCapture(queued.ticket)
 				assert(poll.status == "ready" and poll.planes[1].source_resource == "lit")
+				assert(poll.planes[2].channel == "ambient_occlusion" and poll.planes[2].packing == "unorm8")
+				assert(poll.planes[2].provenance == "ssao_estimator_visibility_factor_not_ground_truth")
 				assert(#poll.object_labels == 2 and poll.object_labels[1].label == 1)
 				assert(poll.object_labels[1].stable_id == "fixture/alpha")
 				assert(poll.object_labels[2].label == 2 and poll.object_labels[2].stable_id == "fixture/packed")

@@ -131,6 +131,7 @@ namespace {
 					 "pbr_albedo",
 					 "pbr_material",
 					 "pbr_emissive",
+					 "ambient_occlusion",
 					 "object_ids",
 					 "semantic_ids",
 					 "part_ids"},
@@ -180,7 +181,23 @@ namespace {
 				 .Scalar = "float16",
 				 .ColourSpace = "linear",
 				 .Origin = "top_left",
-				 .Packing = {}}
+				 .Packing = {},
+				 .Provenance = {}},
+				{.Channel = "ambient_occlusion",
+				 .Status = "ready",
+				 .Resource = "capture/1/ambient_occlusion",
+				 .SourceResource = "occlusion",
+				 .HashAlgorithm = "blake3-256",
+				 .Hash = "efgh",
+				 .Width = 1,
+				 .Height = 1,
+				 .RowStride = 1,
+				 .ByteSize = 1,
+				 .Scalar = "unorm8",
+				 .ColourSpace = "not_applicable",
+				 .Origin = "top_left",
+				 .Packing = "unorm8",
+				 .Provenance = "ssao_estimator_visibility_factor_not_ground_truth"}
 			};
 			return true;
 		}
@@ -314,7 +331,7 @@ TEST_CASE("discovery reads each surface's installed capture readiness", "[contro
 	CHECK(available["offscreen_gpu"]["supported"]);
 	const json *captureLimits = Named(available["limits"], "channels");
 	REQUIRE(captureLimits != nullptr);
-	CHECK((*captureLimits)["maximum"] == 9);
+	CHECK((*captureLimits)["maximum"] == 10);
 
 	Surface unavailable("unavailable", "a suite");
 	unavailable.SetDataCaptureAvailabilityProvider([] {
@@ -355,6 +372,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			  "pbr_albedo",
 			  "pbr_material",
 			  "pbr_emissive",
+			  "ambient_occlusion",
 			  "object_ids",
 			  "semantic_ids",
 			  "part_ids"}},
@@ -375,6 +393,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 				"pbr_albedo",
 				"pbr_material",
 				"pbr_emissive",
+				"ambient_occlusion",
 				"object_ids",
 				"semantic_ids",
 				"part_ids"}
@@ -385,6 +404,13 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(poll["planes"][0]["shape"] == json::array({1, 2, 4}));
 	CHECK(poll["planes"][0]["snapshot_id"] == "snapshot-1");
 	CHECK(poll["planes"][0]["dtype"] == "float16");
+	CHECK(poll["planes"][1]["channel"] == "ambient_occlusion");
+	CHECK(poll["planes"][1]["shape"] == json::array({1, 1}));
+	CHECK(poll["planes"][1]["dtype"] == "unorm8");
+	CHECK(poll["planes"][1]["packing"] == "unorm8");
+	CHECK(poll["planes"][1]["colour_space"] == "not_applicable");
+	CHECK(poll["planes"][1]["origin"] == "top_left");
+	CHECK(poll["planes"][1]["provenance"] == "ssao_estimator_visibility_factor_not_ground_truth");
 	CHECK(poll["camera"]["crop"] == json::array({0.125, 0.25, 0.5, 0.75}));
 	CHECK(poll["camera"]["crop_convention"] == "normalized_full_view_left_top_width_height");
 	CHECK_FALSE(poll["camera"]["lens_distortion_available"]);
@@ -441,6 +467,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			  "pbr_albedo",
 			  "pbr_material",
 			  "pbr_emissive",
+			  "ambient_occlusion",
 			  "object_ids",
 			  "semantic_ids",
 			  "part_ids",
@@ -454,7 +481,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 		overflowFailed
 	);
 	CHECK(overflowFailed);
-	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 9 names");
+	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 10 names");
 }
 
 TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {

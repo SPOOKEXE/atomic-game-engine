@@ -881,6 +881,8 @@ namespace engine::script {
 					{"scalar", String(plane.Scalar)},
 					{"color_space", String(plane.ColourSpace)},
 					{"origin", String(plane.Origin)},
+					{"packing", String(plane.Packing)},
+					{"provenance", String(plane.Provenance)},
 				}));
 			}
 			std::vector<std::pair<std::string, ScriptValue>> entries{

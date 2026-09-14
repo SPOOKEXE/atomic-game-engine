@@ -89,6 +89,7 @@ namespace engine::render {
 		PbrAlbedo,
 		PbrMaterial,
 		PbrEmissive,
+		// Screen-space ambient-occlusion estimator visibility, not ground truth.
 		AmbientOcclusion,
 		ObjectIds,
 		SemanticMask,

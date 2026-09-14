@@ -1100,7 +1100,7 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 
 	const render::ResourceImageRequest request{1, pipelineName, captureNode, 0};
 	REQUIRE(renderer.RequestResourceImage(request));
-	render::SceneTarget target{32, 24};
+	render::SceneTarget target{33, 25};
 	render::View view;
 	view.Pipeline = pipelineName;
 	view.Target = &target;
@@ -1116,6 +1116,28 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	REQUIRE(image.Normal.size() == size_t(target.Width) * target.Height * 4);
 	CHECK(image.AmbientResponse.empty());
 	CHECK(image.LightingBaseline.empty());
+
+	const render::ResourceImageRequest ambient{2, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	REQUIRE(renderer.RequestResourceImage(ambient));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(ambient.Node));
+	const auto occlusion = AwaitImage(renderer, ambient.Token);
+	CHECK(occlusion.Status == render::ResourceImageStatus::Ok);
+	CHECK(occlusion.Resource == core::Name("occlusion"));
+	CHECK(occlusion.Format == render::ResourceImageFormat::R8_UNorm);
+	CHECK(occlusion.Width == std::max(1u, target.Width / 2));
+	CHECK(occlusion.Height == std::max(1u, target.Height / 2));
+	CHECK(occlusion.RowStride == occlusion.Width);
+	CHECK(occlusion.Pixels.size() == size_t(occlusion.Width) * occlusion.Height);
+
+	const render::ResourceImageRequest residentAmbient{
+		3,
+		pipelineName,
+		core::Name("data-capture-ambient-occlusion"),
+		0,
+		render::ResourceImageDelivery::Resident
+	};
+	CHECK_FALSE(renderer.RequestResourceImage(residentAmbient));
+	CHECK_FALSE(renderer.CanPublishResourceImage(residentAmbient.Token, occlusion.Width, occlusion.Height));
 
 	graph::PipelineDocument malformed = graph::DefaultPbrDataCaptureDocument();
 	malformed.Record(
@@ -3847,6 +3869,7 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 		render::DataCaptureChannel::PbrAlbedo,
 		render::DataCaptureChannel::PbrMaterial,
 		render::DataCaptureChannel::PbrEmissive,
+		render::DataCaptureChannel::AmbientOcclusion,
 		render::DataCaptureChannel::ObjectIds,
 		render::DataCaptureChannel::SemanticMask,
 		render::DataCaptureChannel::PartMask
@@ -3864,8 +3887,16 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
-	REQUIRE(captured.Planes.size() == 9);
-	for (size_t planeIndex = 6; planeIndex < captured.Planes.size(); ++planeIndex) {
+	REQUIRE(captured.Planes.size() == 10);
+	CHECK(captured.Planes[6].Channel == render::DataCaptureChannel::AmbientOcclusion);
+	CHECK(captured.Planes[6].Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(captured.Planes[6].ColourSpace == render::DataCaptureColourSpace::NotApplicable);
+	CHECK(captured.Planes[6].Origin == render::DataCaptureOrigin::TopLeft);
+	CHECK(captured.Planes[6].Width == target.Width / 2);
+	CHECK(captured.Planes[6].Height == target.Height / 2);
+	CHECK(captured.Planes[6].RowStride == captured.Planes[6].Width);
+	REQUIRE(captured.Planes[6].Bytes.size() == captured.Planes[6].Width * captured.Planes[6].Height);
+	for (size_t planeIndex = 7; planeIndex < captured.Planes.size(); ++planeIndex) {
 		CHECK(captured.Planes[planeIndex].Status == render::DataCaptureStatus::Ready);
 		CHECK(captured.Planes[planeIndex].Scalar == render::DataCaptureScalar::UInt32);
 		CHECK(captured.Planes[planeIndex].RowStride == captured.Planes[planeIndex].Width * 4);
@@ -3884,10 +3915,10 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	CHECK(captured.Planes[4].ColourSpace == render::DataCaptureColourSpace::NotApplicable);
 	CHECK(captured.Planes[5].Scalar == render::DataCaptureScalar::Float16);
 	CHECK(captured.Planes[5].ColourSpace == render::DataCaptureColourSpace::Linear);
-	core::ByteReader objectIds(captured.Planes[6].Bytes);
+	core::ByteReader objectIds(captured.Planes[7].Bytes);
 	size_t labelledPixels = 0, packedPixels = 0, zeroPixels = 0;
 	uint32_t centreLabel = 99;
-	for (size_t pixel = 0; pixel < captured.Planes[6].Width * captured.Planes[6].Height; ++pixel) {
+	for (size_t pixel = 0; pixel < captured.Planes[7].Width * captured.Planes[7].Height; ++pixel) {
 		const uint32_t label = objectIds.ReadUInt32();
 		if (label == 1) ++labelledPixels;
 		if (label == 2) ++packedPixels;
@@ -3921,8 +3952,8 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 		for (const uint32_t label : allowed)
 			if (label != 0) CHECK(seen[label] > 0);
 	};
-	checkIdPlane(7, {0, 1});
-	checkIdPlane(8, {0, 1, 2});
+	checkIdPlane(8, {0, 1});
+	checkIdPlane(9, {0, 1, 2});
 
 	render::DataCaptureTicket cancelled;
 	REQUIRE(renderer.QueueDataCapture(request, cancelled));

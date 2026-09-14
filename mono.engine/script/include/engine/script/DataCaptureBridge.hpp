@@ -40,6 +40,8 @@ namespace engine::script {
 		std::string Origin;
 		// Exact source storage for packed channels, such as rgba8_unorm.
 		std::string Packing;
+		// Empty when a channel has no extra estimator provenance.
+		std::string Provenance;
 	};
 	struct DataCaptureBridgeObjectLabel {
 		uint32_t Label = 0;

@@ -24,10 +24,14 @@ namespace engine::render::capture_record_validation {
 			: channel == DataCaptureChannel::ObjectIds	   ? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::SemanticMask || channel == DataCaptureChannel::PartMask)
 				? scalar == DataCaptureScalar::UInt32
+			: channel == DataCaptureChannel::AmbientOcclusion ? scalar == DataCaptureScalar::UNorm8
 			: (channel == DataCaptureChannel::PbrAlbedo || channel == DataCaptureChannel::PbrMaterial)
 				? scalar == DataCaptureScalar::UNorm8
 				: false;
-		const size_t bytesPerPixel = scalar == DataCaptureScalar::Float16 ? 8 : 4;
+		const size_t bytesPerPixel =
+			channel == DataCaptureChannel::AmbientOcclusion ? 1
+			: scalar == DataCaptureScalar::Float16			 ? 8
+														 : 4;
 		return valid && width > 0 && bytesPerPixel <= std::numeric_limits<size_t>::max() / width
 				   ? bytesPerPixel * width
 				   : 0;

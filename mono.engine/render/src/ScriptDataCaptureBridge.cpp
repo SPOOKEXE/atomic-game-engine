@@ -11,7 +11,7 @@
 
 namespace engine::render {
 	namespace {
-		constexpr size_t MAX_CAPTURE_CHANNELS = 9;
+		constexpr size_t MAX_CAPTURE_CHANNELS = 10;
 		constexpr size_t MAX_CAPTURE_TICKETS = 6;
 		constexpr size_t RETAINED_BYTE_LIMIT = 64 * 1024 * 1024;
 
@@ -26,6 +26,7 @@ namespace engine::render {
 			if (name == "pbr_albedo") return DataCaptureChannel::PbrAlbedo;
 			if (name == "pbr_material") return DataCaptureChannel::PbrMaterial;
 			if (name == "pbr_emissive") return DataCaptureChannel::PbrEmissive;
+			if (name == "ambient_occlusion") return DataCaptureChannel::AmbientOcclusion;
 			if (name == "object_ids") return DataCaptureChannel::ObjectIds;
 			if (name == "semantic_ids") return DataCaptureChannel::SemanticMask;
 			if (name == "part_ids") return DataCaptureChannel::PartMask;
@@ -106,6 +107,12 @@ namespace engine::render {
 			return "unknown";
 		}
 
+		const char *Provenance(DataCaptureChannel channel) {
+			return channel == DataCaptureChannel::AmbientOcclusion
+				 ? "ssao_estimator_visibility_factor_not_ground_truth"
+				 : "";
+		}
+
 		std::string ResourceId(uint64_t ticket, DataCaptureChannel channel) {
 			return "capture/" + std::to_string(ticket) + "/" + std::string(DataCaptureChannelName(channel));
 		}
@@ -161,6 +168,7 @@ namespace engine::render {
 				 "pbr_albedo",
 				 "pbr_material",
 				 "pbr_emissive",
+				 "ambient_occlusion",
 				 "object_ids",
 				 "semantic_ids",
 				 "part_ids"},
@@ -516,9 +524,11 @@ namespace engine::render {
 					 .Scalar = Scalar(plane.Scalar),
 					 .ColourSpace = ColourSpace(plane.ColourSpace),
 					 .Origin = "top_left",
-					 .Packing = plane.Scalar == DataCaptureScalar::UNorm8	   ? "rgba8_unorm"
+					 .Packing = plane.Channel == DataCaptureChannel::AmbientOcclusion ? "unorm8"
+								: plane.Scalar == DataCaptureScalar::UNorm8	   ? "rgba8_unorm"
 								: plane.Scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
-																			   : ""}
+																									   : "",
+					 .Provenance = Provenance(plane.Channel)}
 				);
 				if (!plane.Bytes.empty()) {
 					if (totalBytes > RETAINED_BYTE_LIMIT ||

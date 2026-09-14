@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <string_view>
 #include <thread>
@@ -20,6 +21,7 @@ using namespace engine::render;
 TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::RgbLinearHdr)) == "rgb_linear_hdr");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::LinearDepth)) == "linear_depth");
+	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::AmbientOcclusion)) == "ambient_occlusion");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::SemanticMask)) == "semantic_ids");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::PartMask)) == "part_ids");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::OpticalFlow)) == "optical_flow");
@@ -127,6 +129,25 @@ TEST_CASE(
 	capture_record_validation::State duplicates;
 	CHECK(capture_record_validation::Plane(ticket, duplicate, 1, duplicates));
 	CHECK_FALSE(capture_record_validation::Plane(ticket, duplicate, 1, duplicates));
+
+	ticket.Channels = {DataCaptureChannel::AmbientOcclusion};
+	DataCapturePlane ambient;
+	ambient.Channel = DataCaptureChannel::AmbientOcclusion;
+	ambient.CaptureNode = ticket.CaptureNode;
+	ambient.Status = DataCaptureStatus::Ready;
+	ambient.Resource = engine::core::Name("occlusion");
+	ambient.Width = 2;
+	ambient.Height = 1;
+	ambient.RowStride = 2;
+	ambient.Scalar = DataCaptureScalar::UNorm8;
+	ambient.ColourSpace = DataCaptureColourSpace::NotApplicable;
+	ambient.Bytes = {std::byte{0}, std::byte{255}};
+	ambient.Hash = engine::assets::Hasher::Of(ambient.Bytes);
+	capture_record_validation::State ambientState;
+	CHECK(capture_record_validation::Plane(ticket, ambient, 1, ambientState));
+	ambient.RowStride = 1;
+	capture_record_validation::State malformedAmbient;
+	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, malformedAmbient));
 }
 
 namespace {
@@ -166,6 +187,18 @@ TEST_CASE("script capture retains terminal tickets until release", "[render][dat
 	CHECK(bridge.Queue("data-world", request, reused, detail));
 }
 
+TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	const auto capabilities = bridge.Capabilities();
+	CHECK(
+		std::find(capabilities.Channels.begin(), capabilities.Channels.end(), "ambient_occlusion") !=
+		capabilities.Channels.end()
+	);
+}
+
 TEST_CASE("script capture validates requests and isolates ticket owners", "[render][data-capture]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
@@ -195,6 +228,9 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 			 "linear_depth",
 			 "shading_normal",
 			 "pbr_albedo",
+			 "pbr_material",
+			 "pbr_emissive",
+			 "ambient_occlusion",
 			 "object_ids",
 			 "semantic_ids",
 			 "part_ids"},

@@ -24,6 +24,7 @@ namespace engine::render {
 			const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	  ? "-albedo"
 											: channel == DataCaptureChannel::PbrMaterial  ? "-material"
 											: channel == DataCaptureChannel::PbrEmissive  ? "-emissive"
+											: channel == DataCaptureChannel::AmbientOcclusion ? "-ambient-occlusion"
 											: channel == DataCaptureChannel::ObjectIds	  ? "-object-ids"
 											: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
 											: channel == DataCaptureChannel::PartMask	  ? "-part-ids"
@@ -142,6 +143,14 @@ namespace engine::render {
 					DataCaptureScalar::Float16,
 					DataCaptureColourSpace::Linear,
 					ResourceImageFormat::RGBA16_Float
+				);
+				break;
+			case DataCaptureChannel::AmbientOcclusion:
+				primary(
+					core::Name("occlusion"),
+					DataCaptureScalar::UNorm8,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::R8_UNorm
 				);
 				break;
 			case DataCaptureChannel::ObjectIds:

@@ -176,6 +176,8 @@ namespace engine::render {
 				}
 				const graph::ResourceDesc *source =
 					node->Reads.size() == 1 ? pipeline->Graph.FindResource(node->Reads.front()) : nullptr;
+				const bool residentR8Source =
+					source != nullptr && source->Format == graph::ResourceFormat::R8;
 				const bool labelIds = source != nullptr && (source->Name == core::Name("object-ids") ||
 															source->Name == core::Name("semantic-ids") ||
 															source->Name == core::Name("part-ids"));
@@ -186,6 +188,7 @@ namespace engine::render {
 				declared = (!labelIds || hasProducer) && portsValid && colour == 1 && depth <= 1 &&
 						   normal <= 1 && pairedAmbient && ambientNeedsNormal && directionalNeedsAmbient &&
 						   normalNeedsDepth &&
+						   (request.Delivery != ResourceImageDelivery::Resident || !residentR8Source) &&
 						   (node->Scope == graph::NodeScope::View ||
 							(node->Scope == graph::NodeScope::Frame &&
 							 node->Integer(core::Name("view"), 0) == request.ViewSlot));
@@ -397,6 +400,10 @@ namespace engine::render {
 	namespace {
 		bool CaptureFormat(SDL_GPUTextureFormat format, ResourceImageFormat &captured, uint32_t &bytes) {
 			switch (format) {
+			case SDL_GPU_TEXTUREFORMAT_R8_UNORM:
+				captured = ResourceImageFormat::R8_UNorm;
+				bytes = 1;
+				return true;
 			case SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT:
 				captured = ResourceImageFormat::RGBA16_Float;
 				bytes = 8;
@@ -416,6 +423,22 @@ namespace engine::render {
 			default:
 				return false;
 			}
+		}
+
+		size_t CaptureWordBytes(ResourceImageFormat format) {
+			switch (format) {
+			case ResourceImageFormat::R8_UNorm:
+			case ResourceImageFormat::RGBA8_UNorm:
+			case ResourceImageFormat::RGBA8_SRGB:
+				return 1;
+			case ResourceImageFormat::RGBA16_Float:
+				return 2;
+			case ResourceImageFormat::R32_UInt:
+				return 4;
+			case ResourceImageFormat::Unknown:
+				return 0;
+			}
+			return 0;
 		}
 	}
 
@@ -492,6 +515,13 @@ namespace engine::render {
 			slot.DepthStride = slot.NormalStride = slot.AmbientResponseStride = slot.LightingBaselineStride =
 				0;
 			slot.Phase = ResourceImagePhase::Ready;
+			// The resident cache keys only attachment presence and extent. An R8 SSAO
+			// map could otherwise reuse a colour texture of the same size.
+			if (request.Delivery == ResourceImageDelivery::Resident &&
+				sourceCaptureFormat == ResourceImageFormat::R8_UNorm) {
+				slot.Image.Status = ResourceImageStatus::Unsupported;
+				continue;
+			}
 			bool valid = supportedSource && source.Width <= 512 && source.Height <= 512 &&
 						 withAmbientResponse == withLightingBaseline && (!withAmbient || withNormal) &&
 						 (!withNormal || withDepth) && (!withDirectional || withAmbient);
@@ -624,12 +654,10 @@ namespace engine::render {
 			slot.Image.Format = sourceCaptureFormat;
 			slot.Image.Status = ResourceImageStatus::Ok;
 			slot.Phase = ResourceImagePhase::Recorded;
-			const double bytes = double(source.Width) * source.Height *
-								 (withDirectional ? 64
-								  : withAmbient	  ? 48
-								  : withNormal	  ? 16
-								  : withDepth	  ? 12
-												  : 8);
+			size_t bytesPerPixel = 0;
+			for (size_t plane = 0; plane < count; ++plane)
+				bytesPerPixel += pixelBytes[plane];
+			const double bytes = double(source.Width) * source.Height * bytesPerPixel;
 			const bool resident = request.Delivery == ResourceImageDelivery::Resident;
 			core::Metrics::Count(
 				resident ? "render.resource_image.resident_copy_bytes"
@@ -691,6 +719,7 @@ namespace engine::render {
 			slot.DirectionalResponseOffset
 		};
 		const std::array<uint32_t, 6> pixelBytes{slot.Image.RowStride / slot.Image.Width, 4, 4, 16, 16, 16};
+		bool copied = true;
 		for (size_t plane = 0; plane < planes.size(); ++plane) {
 			if (!strides[plane]) continue;
 			auto &bytes = *planes[plane];
@@ -703,15 +732,21 @@ namespace engine::render {
 					rowBytes
 				);
 			if constexpr (std::endian::native == std::endian::big) {
-				const size_t wordBytes = plane == 0 && slot.Image.Format == ResourceImageFormat::RGBA8_UNorm
-											 ? 1
-										 : plane == 0 ? 2
-													  : 4;
+				const size_t wordBytes = plane == 0 ? CaptureWordBytes(slot.Image.Format) : 4;
+				if (wordBytes == 0) {
+					copied = false;
+					break;
+				}
 				for (size_t offset = 0; offset < bytes.size(); offset += wordBytes)
 					std::reverse(bytes.begin() + offset, bytes.begin() + offset + wordBytes);
 			}
 		}
 		SDL_UnmapGPUTransferBuffer(Device, slot.Transfer);
+		if (!copied) {
+			slot.Image.Status = ResourceImageStatus::Failed;
+			slot.Image.Width = slot.Image.Height = slot.Image.RowStride = 0;
+			return;
+		}
 		slot.Image.Status = ResourceImageStatus::Ok;
 		core::Metrics::Count(
 			"render.resource_image.copied_bytes",
