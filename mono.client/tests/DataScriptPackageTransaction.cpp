@@ -3,6 +3,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
@@ -412,6 +413,85 @@ return
 			CHECK(after->Frame.Position.Z == 3.0f);
 		}
 	);
+}
+
+TEST_CASE(
+	"client transaction fences package presentation before its committed snapshot",
+	"[client][data-script-package]"
+) {
+	Fixture fixture;
+	fixture.PrepareClientWorld();
+	const std::string source = R"(
+local workspace = game:GetService("Workspace")
+local camera = Instance.new("Camera")
+camera.CFrame = CFrame.new(4, 5, 6)
+camera.Parent = workspace
+workspace.CurrentCamera = camera
+
+local part = Instance.new("Part")
+part.Name = "FencePart"
+part.CFrame = CFrame.new(1, 2, 3)
+part:SetAttribute("DataFactoryId", "fixture/fence")
+part:SetAttribute("DataFactorySemanticId", "fixture/box")
+part:SetAttribute("DataFactoryPartId", "fixture/part/fence")
+part.Parent = workspace
+return
+)";
+	const DataScriptRequest request = fixture.Request(source, true);
+	const DataScriptResult result =
+		client::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), request);
+	REQUIRE(result.Ran);
+	CHECK(result.Lifecycle.Clock.Tick == request.ExpectedTick);
+
+	const WorldId committed = fixture.Worlds.Find(engine::core::Name(INSTANCE_ID));
+	std::vector<std::byte> beforeSecondPresent = Save(fixture.Worlds);
+	fixture.Worlds.Enter(committed, [](engine::ecs::Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *camera = store.Get<engine::scene::Transform>(active->Entity);
+		REQUIRE(camera != nullptr);
+		CHECK(camera->Frame.Position.X == 4.0f);
+		CHECK(camera->Frame.Position.Y == 5.0f);
+		CHECK(camera->Frame.Position.Z == 6.0f);
+
+		const auto *draw = store.Resource<engine::render::DrawList>();
+		REQUIRE(draw != nullptr);
+		REQUIRE(draw->Instances.size() == 1);
+		REQUIRE(draw->ObjectLabelsValid);
+		REQUIRE(draw->ObjectLabels.size() == 1);
+		CHECK(draw->ObjectLabels.front().StableId == "fixture/fence");
+		REQUIRE(draw->SemanticLabelsValid);
+		REQUIRE(draw->SemanticLabels.size() == 1);
+		CHECK(draw->SemanticLabels.front().StableId == "fixture/box");
+		REQUIRE(draw->PartLabelsValid);
+		REQUIRE(draw->PartLabels.size() == 1);
+		CHECK(draw->PartLabels.front().StableId == "fixture/part/fence");
+	});
+
+	REQUIRE(fixture.Worlds.Present(committed, 0.0f, 1.0f) == engine::world::WorldStatus::Ok);
+	CHECK(Save(fixture.Worlds) == beforeSecondPresent);
+}
+
+TEST_CASE(
+	"client transaction preserves the live world when package presentation throws",
+	"[client][data-script-package]"
+) {
+	Fixture fixture;
+	const DataScriptRequest request = fixture.Request();
+	const std::vector<std::byte> before = Save(fixture.Worlds);
+	const auto revision = fixture.Session.Inspect(INSTANCE_ID);
+	auto dependencies = fixture.Dependencies();
+	dependencies.InstallSystems = [](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+		systems.Add("package-presentation-fault", engine::ecs::Phase::Render, [](engine::ecs::Store &) {
+			throw std::runtime_error("deliberate presentation exception");
+		});
+	};
+
+	const DataScriptResult result = client::ExecuteDataScriptPackageTransaction(dependencies, request);
+	CHECK_FALSE(result.Ran);
+	CHECK(result.Error.find("deliberate presentation exception") != std::string::npos);
+	CHECK(Save(fixture.Worlds) == before);
+	CHECK(fixture.Session.Inspect(INSTANCE_ID).WorldVersion == revision.WorldVersion);
 }
 
 TEST_CASE("client transaction preserves a current physics-only pause", "[client][data-script-package]") {

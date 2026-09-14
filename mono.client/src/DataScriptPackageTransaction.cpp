@@ -160,6 +160,19 @@ namespace client {
 		// the candidate takes ownership of the live universe's slot.
 		packageRuntime.reset();
 		if (!result.Error.empty()) return result;
+		try {
+			if (scratch.Present(scratchWorld, 0.0f, 1.0f) != engine::world::WorldStatus::Ok ||
+				scratch.StateOf(scratchWorld) == engine::world::WorldState::Faulted) {
+				Fail(result, "package presentation failed");
+				return result;
+			}
+		} catch (const std::exception &exception) {
+			Fail(result, "package presentation failed: " + std::string(exception.what()));
+			return result;
+		} catch (...) {
+			Fail(result, "package presentation failed");
+			return result;
+		}
 
 		result.Lifecycle = dependencies.Session.CommitExternalMutation(
 			request.InstanceId, request.ExpectedTick, request.ExpectedVersion

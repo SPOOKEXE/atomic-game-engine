@@ -1,4 +1,5 @@
 #include "DataCaptureDriver.hpp"
+#include "DataFactoryPausedPresentation.hpp"
 
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
@@ -3189,19 +3190,37 @@ namespace client {
 			// current-tick fallback without reopening ordinary presented worlds.
 			if (!ReportedJoin && displayedActiveScene == nullptr) {
 				Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
-					if (factoryPaused)
-						engine::render::CollectInstances(
-							store, engine::render::DrawCollectionTime::CurrentTick
-						);
-					collectPresentation(Rendered, store, ComposedFrame.Position);
-					if (const auto *list = store.Resource<engine::render::DrawList>()) {
-						drawnObjectLabels = list->ObjectLabels;
-						drawnSemanticLabels = list->SemanticLabels;
-						drawnPartLabels = list->PartLabels;
-						drawnObjectLabelsValid = list->ObjectLabelsValid;
-						drawnSemanticLabelsValid = list->SemanticLabelsValid;
-						drawnPartLabelsValid = list->PartLabelsValid;
+					engine::core::CFrame frame = ComposedFrame;
+					engine::scene::Camera camera = ComposedCamera;
+					bool hasCamera = false;
+					const std::optional<PausedDataFactoryPresentation> paused =
+						factoryPaused ? PublishPausedDataFactoryPresentation(store, Views, Rendered)
+									  : std::nullopt;
+					if (paused) {
+						frame = paused->Frame;
+						camera = paused->Camera;
+						hasCamera = true;
+						drawnObjectLabels = paused->ObjectLabels;
+						drawnSemanticLabels = paused->SemanticLabels;
+						drawnPartLabels = paused->PartLabels;
+						drawnObjectLabelsValid = paused->ObjectLabelsValid;
+						drawnSemanticLabelsValid = paused->SemanticLabelsValid;
+						drawnPartLabelsValid = paused->PartLabelsValid;
+					} else if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+							   active != nullptr && store.Alive(active->Entity)) {
+						const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
+						const auto *lens = store.Get<engine::scene::Camera>(active->Entity);
+						if (placement != nullptr && lens != nullptr) {
+							frame = placement->Frame;
+							camera = *lens;
+							hasCamera = true;
+						}
 					}
+					if (hasCamera) {
+						ComposedFrame = frame;
+						ComposedCamera = camera;
+					}
+					collectPresentation(Rendered, store, frame.Position);
 				});
 			}
 			if (!particleFrameCollected) {
