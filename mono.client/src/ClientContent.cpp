@@ -342,6 +342,18 @@ namespace client {
 
 					// Mesh metadata is world data, not renderer state.
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
+					engine::scene::MeshSkinning skinning;
+					skinning.JointCount = mesh.JointCount;
+					skinning.Vertices.reserve(mesh.Vertices.size());
+					for (const engine::assets::MeshVertex &vertex : mesh.Vertices) {
+						skinning.Vertices.push_back({
+							.Joints =
+								{vertex.Joints[0], vertex.Joints[1], vertex.Joints[2], vertex.Joints[3]},
+							.Weights = {
+								vertex.Weights[0], vertex.Weights[1], vertex.Weights[2], vertex.Weights[3]
+							},
+						});
+					}
 
 					// **The collision geometry, baked once here rather than per
 					// world.** A hull and a triangle soup are a function of the
@@ -360,10 +372,11 @@ namespace client {
 						engine::game::AddCollisionShapes(arrived, name, mesh);
 					}
 
-					const auto record = [&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
-						engine::scene::RecordMesh(store, name, triangles, sheets);
-						engine::game::MergeCollisionShapes(store, arrived);
-					};
+					const auto record =
+						[&name, triangles, &sheets, &skinning, &arrived](engine::ecs::Store &store) {
+							engine::scene::RecordMesh(store, name, triangles, sheets, skinning);
+							engine::game::MergeCollisionShapes(store, arrived);
+						};
 
 					for (const engine::world::WorldId id : worlds) {
 						Universe_->Enter(id, record);

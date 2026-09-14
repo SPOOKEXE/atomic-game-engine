@@ -632,6 +632,8 @@ namespace engine::scene {
 			auto *catalogues = static_cast<MeshCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].Triangles.clear();
+				catalogues[index].Textures.clear();
+				catalogues[index].Skinning.clear();
 			}
 		}
 

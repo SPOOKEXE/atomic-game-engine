@@ -52,6 +52,7 @@ rig.Name = "DataFactoryRig"
 rig:SetAttribute("DataFactoryId", "data-factory-demo/rig")
 rig.RigId = "data-factory-demo-rig"
 rig.JointCount = 1
+rig.MeshId = "data-factory-demo/rig.amesh"
 rig.Parent = workspace
 
 local rigBone = Instance.new("Bone")

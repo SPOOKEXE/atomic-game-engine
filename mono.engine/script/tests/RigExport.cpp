@@ -4,6 +4,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -42,6 +43,16 @@ TEST_CASE("rig export preserves skeleton frames and dense stable slots", "[scrip
 	const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
 	Identify(store, rig, "rig/hero");
 	store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("hero-rig"), 2});
+	engine::scene::Visual visual;
+	visual.Mesh = engine::core::Name("characters/hero.amesh");
+	store.Set(rig, visual);
+	engine::scene::MeshSkinning skinning;
+	skinning.JointCount = 2;
+	skinning.Vertices = {
+		{{0, 1, 0, 0}, {32768, 32767, 0, 0}},
+		{{1, 0, 0, 0}, {65535, 0, 0, 0}},
+	};
+	REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 1, {}, skinning));
 	const auto root = store.CreateInstance(engine::scene::BoneClass(), "Root");
 	const auto child = store.CreateInstance(engine::scene::BoneClass(), "Child");
 	REQUIRE(store.SetParent(root, rig));
@@ -86,7 +97,24 @@ TEST_CASE("rig export preserves skeleton frames and dense stable slots", "[scrip
 	const auto *translation = Field(*rest, "translation");
 	REQUIRE(translation != nullptr);
 	CHECK(translation->Items[0].Number == 1);
-	CHECK(Field(entities[0], "skinning")->Entries[0].second.Boolean == false);
+	const auto *exportedSkinning = Field(entities[0], "skinning");
+	REQUIRE(exportedSkinning != nullptr);
+	CHECK(Field(*exportedSkinning, "available")->Boolean);
+	CHECK(Field(*exportedSkinning, "unavailable_reason")->Tag == engine::script::ValueTag::Nil);
+	CHECK(Field(*exportedSkinning, "mesh_id")->Text == "characters/hero.amesh");
+	CHECK(Field(*exportedSkinning, "position_space")->Text == "mesh_object");
+	CHECK(Field(*exportedSkinning, "joint_index_space")->Text == "skeleton_palette_slot");
+	CHECK(Field(*exportedSkinning, "weight_encoding")->Text == "uint16_unorm");
+	CHECK(Field(*exportedSkinning, "weight_denominator")->Number == 65535);
+	const auto &skinVertices = Field(*exportedSkinning, "vertices")->Items;
+	REQUIRE(skinVertices.size() == 2);
+	CHECK(Field(skinVertices[0], "vertex_index")->Number == 0);
+	const auto &influences = Field(skinVertices[0], "influences")->Items;
+	REQUIRE(influences.size() == 4);
+	CHECK(Field(influences[0], "joint_id")->Text == "rig/hero:joint:0");
+	CHECK(Field(influences[1], "joint_slot")->Number == 1);
+	CHECK(Field(influences[0], "weight")->Number == 32768);
+	CHECK(Field(influences[1], "weight")->Number == 32767);
 	const auto &keypoints = Field(entities[0], "keypoints")->Items;
 	REQUIRE(keypoints.size() == 2);
 	CHECK(Field(keypoints[0], "keypoint_id")->Text == "rig/hero:keypoint:left_eye");
@@ -155,6 +183,45 @@ TEST_CASE(
 	CHECK(Field(channels[0], "property")->Text == "rotation");
 	CHECK(Field(channels[1], "property")->Text == "translation");
 	CHECK(Field(Field(channels[1], "keys")->Items[1], "time")->Entries[0].second.Number == 1);
+}
+
+TEST_CASE(
+	"rig export declares missing and over-limit mesh skinning without inventing rows", "[script][rigexport]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("script.rigexport.skinning-limits");
+	const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
+	Identify(store, rig, "rig/skinning-limits");
+	store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("skinning-limits"), 1});
+	engine::scene::Visual visual;
+	visual.Mesh = engine::core::Name("characters/limits.amesh");
+	store.Set(rig, visual);
+	const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");
+	REQUIRE(store.SetParent(bone, rig));
+	store.Set(bone, engine::scene::Bone{});
+
+	auto exported = engine::script::GetRigExport(store, "export/missing-skinning");
+	REQUIRE(std::string_view(exported.Status) == "ok");
+	const auto *missing = Field(Field(exported.Value, "entities")->Items[0], "skinning");
+	REQUIRE(missing != nullptr);
+	CHECK_FALSE(Field(*missing, "available")->Boolean);
+	CHECK(Field(*missing, "unavailable_reason")->Text == "mesh skinning source is unavailable in this world");
+	CHECK(Field(*missing, "vertices")->Items.empty());
+
+	engine::scene::MeshSkinning skinning;
+	skinning.JointCount = 1;
+	skinning.Vertices.resize(engine::script::MAX_RIG_EXPORT_SKIN_VERTICES + 1);
+	REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 1, {}, skinning));
+	exported = engine::script::GetRigExport(store, "export/over-limit-skinning");
+	REQUIRE(std::string_view(exported.Status) == "ok");
+	const auto *overLimit = Field(Field(exported.Value, "entities")->Items[0], "skinning");
+	REQUIRE(overLimit != nullptr);
+	CHECK_FALSE(Field(*overLimit, "available")->Boolean);
+	CHECK(
+		Field(*overLimit, "unavailable_reason")->Text ==
+		"mesh skinning vertices exceed the 1024 response limit"
+	);
+	CHECK(Field(*overLimit, "vertices")->Items.empty());
 }
 
 TEST_CASE("rig export bounds generated joint IDs and validates rig IDs", "[script][rigexport]") {

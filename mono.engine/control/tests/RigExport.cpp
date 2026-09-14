@@ -7,6 +7,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -38,6 +39,13 @@ TEST_CASE("rig export MCP tool validates selection and preserves data-rig shape"
 		id.String = "rig/one";
 		REQUIRE(engine::ecs::SetAttribute(store, rig, engine::core::Name("DataFactoryId"), id));
 		store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("one"), 1});
+		engine::scene::Visual visual;
+		visual.Mesh = engine::core::Name("rig/one.amesh");
+		store.Set(rig, visual);
+		engine::scene::MeshSkinning skinning;
+		skinning.JointCount = 1;
+		skinning.Vertices = {{{0, 0, 0, 0}, {65535, 0, 0, 0}}};
+		REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 1, {}, skinning));
 		const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");
 		REQUIRE(store.SetParent(bone, rig));
 		store.Set(bone, engine::scene::Bone{});
@@ -65,7 +73,24 @@ TEST_CASE("rig export MCP tool validates selection and preserves data-rig shape"
 		store.Set(clip, engine::scene::AnimationClip{{}, engine::core::Name("one"), buffer});
 	});
 	engine::control::Surface surface("test", "test");
+	surface.AddDiscoveryTools();
 	surface.Enable(std::array{engine::control::features::RigExport(worlds)});
+	const nlohmann::json discoveryRequest{
+		{"jsonrpc", "2.0"},
+		{"id", 0},
+		{"method", "tools/call"},
+		{"params", {{"name", "negotiate"}, {"arguments", nlohmann::json::object()}}}
+	};
+	const nlohmann::json discoveryReply = nlohmann::json::parse(surface.Answer(discoveryRequest.dump()));
+	const nlohmann::json discovery =
+		nlohmann::json::parse(discoveryReply["result"]["content"][0]["text"].get<std::string>());
+	CHECK(
+		std::any_of(
+			discovery["operations"].begin(),
+			discovery["operations"].end(),
+			[](const nlohmann::json &operation) { return operation["name"] == "get_rig_export"; }
+		)
+	);
 	const nlohmann::json request{
 		{"jsonrpc", "2.0"},
 		{"id", 1},
@@ -95,7 +120,17 @@ TEST_CASE("rig export MCP tool validates selection and preserves data-rig shape"
 	CHECK(keypoints[0]["state"] == "present");
 	CHECK(keypoints[0]["position"].is_array());
 	CHECK(keypoints[0]["missing_reason"].is_null());
-	CHECK(payload["entities"][0]["skinning"]["unavailable_reason"].is_string());
+	const nlohmann::json &skinning = payload["entities"][0]["skinning"];
+	CHECK(skinning["available"] == true);
+	CHECK(skinning["unavailable_reason"].is_null());
+	CHECK(skinning["mesh_id"] == "rig/one.amesh");
+	CHECK(skinning["position_space"] == "mesh_object");
+	CHECK(skinning["joint_index_space"] == "skeleton_palette_slot");
+	CHECK(skinning["weight_encoding"] == "uint16_unorm");
+	CHECK(skinning["weight_denominator"] == 65535);
+	REQUIRE(skinning["vertices"].size() == 1);
+	CHECK(skinning["vertices"][0]["influences"][0]["joint_id"] == "rig/one:joint:0");
+	CHECK(skinning["vertices"][0]["influences"][0]["weight"] == 65535);
 	const nlohmann::json &clips = payload["entities"][0]["clips"];
 	REQUIRE(clips.is_array());
 	REQUIRE(clips.size() == 1);

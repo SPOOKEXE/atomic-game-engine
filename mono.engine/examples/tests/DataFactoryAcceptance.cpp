@@ -8,6 +8,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/EditableImage.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -181,6 +182,13 @@ TEST_CASE("data factory image labels stay aligned with identified snapshots", "[
 	REQUIRE(point != nullptr);
 	CHECK(point->Keypoint.Text() == "nose");
 	CHECK(point->Joint == 0);
+	const auto *visual = store.Get<engine::scene::Visual>(rig);
+	REQUIRE(visual != nullptr);
+	CHECK(visual->Mesh.Text() == "data-factory-demo/rig.amesh");
+	engine::scene::MeshSkinning skinning;
+	skinning.JointCount = 1;
+	skinning.Vertices = {{{0, 0, 0, 0}, {65535, 0, 0, 0}}};
+	REQUIRE(engine::scene::RecordMesh(store, visual->Mesh, 1, {}, skinning));
 	const Entity clip = DemoChild(store, "DataFactoryWave");
 	const Entity buffer = DemoChild(store, "DataFactoryWaveBuffer");
 	REQUIRE(clip != engine::ecs::NULL_ENTITY);
@@ -197,6 +205,12 @@ TEST_CASE("data factory image labels stay aligned with identified snapshots", "[
 	const auto *rigEntities = Field(rigExport.Value, "entities");
 	REQUIRE(rigEntities != nullptr);
 	REQUIRE(rigEntities->Items.size() == 1);
+	const auto *exportedSkinning = Field(rigEntities->Items[0], "skinning");
+	REQUIRE(exportedSkinning != nullptr);
+	CHECK(Field(*exportedSkinning, "available")->Boolean);
+	CHECK(Field(*exportedSkinning, "mesh_id")->Text == "data-factory-demo/rig.amesh");
+	CHECK(Field(*exportedSkinning, "weight_encoding")->Text == "uint16_unorm");
+	CHECK(Field(*exportedSkinning, "vertices")->Items.size() == 1);
 	const auto *exportedClips = Field(rigEntities->Items[0], "clips");
 	REQUIRE(exportedClips != nullptr);
 	REQUIRE(exportedClips->Items.size() == 1);

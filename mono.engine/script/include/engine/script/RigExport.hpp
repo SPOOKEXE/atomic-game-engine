@@ -20,6 +20,10 @@ namespace engine::script {
 	inline constexpr size_t MAX_RIG_EXPORT_TOTAL_BONES = 1024;
 	inline constexpr size_t MAX_RIG_EXPORT_KEYPOINTS = 1024;
 	inline constexpr size_t MAX_RIG_EXPORT_TOTAL_KEYPOINTS = 1024;
+	// Four influence records carry stable joint IDs. 1024 vertices leaves room
+	// for their worst-case 512-byte IDs under the control surface's 4 MiB cap.
+	inline constexpr size_t MAX_RIG_EXPORT_SKIN_VERTICES = 1024;
+	inline constexpr size_t MAX_RIG_EXPORT_TOTAL_SKIN_VERTICES = 1024;
 	inline constexpr size_t MAX_RIG_EXPORT_ID_BYTES = 512;
 	inline constexpr size_t MAX_RIG_EXPORT_ENTITY_ID_BYTES = 500;
 	// Animation buffers can carry the asset format's multi-million-key limits.

@@ -30,6 +30,7 @@
 
 #include <engine/core/Name.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -41,6 +42,20 @@ namespace engine::ecs {
 }
 
 namespace engine::scene {
+	// One vertex's authored skin palette references. Joint numbers are local to
+	// the mesh's named skeleton palette, never process-local entity IDs.
+	struct MeshSkinningVertex {
+		std::array<uint16_t, 4> Joints{};
+		std::array<uint16_t, 4> Weights{};
+	};
+
+	// The bounded skinning source that arrived with one published mesh. We keep
+	// the exact uint16 normalization the renderer consumes, so data export never
+	// has to reconstruct weights from a pose or a GPU buffer.
+	struct MeshSkinning {
+		uint16_t JointCount = 0;
+		std::vector<MeshSkinningVertex> Vertices;
+	};
 
 	// What a world knows about the meshes named on its parts.
 	//
@@ -90,6 +105,11 @@ namespace engine::scene {
 		// @since v0.13
 		std::unordered_map<uint32_t, std::vector<core::Name>> Textures;
 
+		// Exact authored skin weights keyed by the stable mesh name. This is
+		// intake metadata, like triangle counts: it is rebuilt from content and
+		// never survives a save without the mesh that supplied it.
+		std::unordered_map<uint32_t, MeshSkinning> Skinning;
+
 		// The sheets a mesh names, or an empty span.
 		//
 		// **Empty means "not known here", like `Find`'s zero.** A mesh whose
@@ -132,8 +152,17 @@ namespace engine::scene {
 	//        the geometry no longer wears.
 	// @return `false` for an invalid name.
 	bool RecordMesh(
-		ecs::Store &store, const core::Name &mesh, uint32_t triangles, std::span<const core::Name> sheets = {}
+		ecs::Store &store,
+		const core::Name &mesh,
+		uint32_t triangles,
+		std::span<const core::Name> sheets = {},
+		const MeshSkinning &skinning = {}
 	);
+
+	// Copies the exact skinning source for a mesh. Returns false when this world
+	// has not received that mesh; a successful empty result means an observed
+	// unskinned mesh rather than invented zero-weight vertices.
+	bool SkinningOf(const ecs::Store &store, const core::Name &mesh, MeshSkinning &out);
 
 	// The sheets a mesh's submeshes name, in this world.
 	//

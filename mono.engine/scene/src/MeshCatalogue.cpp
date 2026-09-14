@@ -27,10 +27,23 @@ namespace engine::scene {
 	}
 
 	bool RecordMesh(
-		ecs::Store &store, const core::Name &mesh, uint32_t triangles, std::span<const core::Name> sheets
+		ecs::Store &store,
+		const core::Name &mesh,
+		uint32_t triangles,
+		std::span<const core::Name> sheets,
+		const MeshSkinning &skinning
 	) {
 		if (!mesh.IsValid()) {
 			return false;
+		}
+		for (const MeshSkinningVertex &vertex : skinning.Vertices) {
+			uint32_t total = 0;
+			for (size_t influence = 0; influence < vertex.Weights.size(); ++influence) {
+				total += vertex.Weights[influence];
+				if (vertex.Weights[influence] != 0 && vertex.Joints[influence] >= skinning.JointCount)
+					return false;
+			}
+			if (total != 0 && total != UINT16_MAX) return false;
 		}
 
 		// A count of zero is stored rather than rejected. It reads back
@@ -49,6 +62,18 @@ namespace engine::scene {
 		// names no sheet at all, and leaving a stale entry there would be the
 		// same lie one layer along.
 		catalogue.Textures[mesh.Id()].assign(sheets.begin(), sheets.end());
+		catalogue.Skinning[mesh.Id()] = skinning;
+		return true;
+	}
+
+	bool SkinningOf(const ecs::Store &store, const core::Name &mesh, MeshSkinning &out) {
+		out = {};
+		if (!mesh.IsValid()) return false;
+		const MeshCatalogue *catalogue = store.Resource<MeshCatalogue>();
+		if (catalogue == nullptr) return false;
+		const auto found = catalogue->Skinning.find(mesh.Id());
+		if (found == catalogue->Skinning.end()) return false;
+		out = found->second;
 		return true;
 	}
 

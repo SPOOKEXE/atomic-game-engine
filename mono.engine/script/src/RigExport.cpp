@@ -4,6 +4,8 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/RigExport.hpp>
@@ -259,6 +261,7 @@ namespace engine::script {
 		size_t totalBones = 0;
 		size_t totalKeypoints = 0;
 		size_t totalAnimationKeys = 0;
+		size_t totalSkinVertices = 0;
 		for (const auto &[rig, entityId] : rigs) {
 			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(rig);
 			if (skeleton == nullptr || !skeleton->Rig.IsValid() || skeleton->JointCount == 0 ||
@@ -525,6 +528,70 @@ namespace engine::script {
 				(void)ignored;
 				exportedClips.push_back(std::move(value));
 			}
+			ScriptValue exportedSkinning;
+			const scene::Visual *visual = store.Get<scene::Visual>(rig);
+			scene::MeshSkinning skinning;
+			const bool sourceKnown = visual != nullptr && visual->Mesh.IsValid() &&
+									 engine::scene::SkinningOf(store, visual->Mesh, skinning);
+			const auto unavailableSkinning = [&](std::string_view reason) {
+				exportedSkinning = Map({
+					{"available", Boolean(false)},
+					{"unavailable_reason", String(reason)},
+					{"mesh_id", ScriptValue{}},
+					{"position_space", String("mesh_object")},
+					{"joint_index_space", String("skeleton_palette_slot")},
+					{"weight_encoding", String("uint16_unorm")},
+					{"weight_denominator", Number(65535)},
+					{"normalization", String("unavailable")},
+					{"vertices", Array({})},
+				});
+			};
+			if (visual == nullptr || !visual->Mesh.IsValid()) {
+				unavailableSkinning("skinned drawable has no stable mesh ID");
+			} else if (!Text(visual->Mesh.Text(), MAX_RIG_EXPORT_ID_BYTES)) {
+				unavailableSkinning("mesh ID must be valid UTF-8 text within 512 bytes");
+			} else if (!sourceKnown) {
+				unavailableSkinning("mesh skinning source is unavailable in this world");
+			} else if (skinning.JointCount == 0) {
+				unavailableSkinning("mesh has no authored skin palette");
+			} else if (skinning.JointCount != skeleton->JointCount) {
+				unavailableSkinning("mesh skin palette does not match the skeleton joint count");
+			} else if (skinning.Vertices.size() > MAX_RIG_EXPORT_SKIN_VERTICES ||
+					   skinning.Vertices.size() > MAX_RIG_EXPORT_TOTAL_SKIN_VERTICES - totalSkinVertices) {
+				unavailableSkinning("mesh skinning vertices exceed the 1024 response limit");
+			} else {
+				totalSkinVertices += skinning.Vertices.size();
+				std::vector<ScriptValue> vertices;
+				vertices.reserve(skinning.Vertices.size());
+				for (size_t vertexIndex = 0; vertexIndex < skinning.Vertices.size(); ++vertexIndex) {
+					const scene::MeshSkinningVertex &vertex = skinning.Vertices[vertexIndex];
+					std::vector<ScriptValue> influences;
+					influences.reserve(vertex.Weights.size());
+					for (size_t influence = 0; influence < vertex.Weights.size(); ++influence) {
+						const uint16_t slot = vertex.Joints[influence];
+						influences.push_back(Map({
+							{"joint_id", String(entityId + ":joint:" + std::to_string(slot))},
+							{"joint_slot", Number(slot)},
+							{"weight", Number(vertex.Weights[influence])},
+						}));
+					}
+					vertices.push_back(Map(
+						{{"vertex_index", Number(vertexIndex)}, {"influences", Array(std::move(influences))}}
+					));
+				}
+				exportedSkinning = Map({
+					{"available", Boolean(true)},
+					{"unavailable_reason", ScriptValue{}},
+					{"mesh_id", String(visual->Mesh.Text())},
+					{"position_space", String("mesh_object")},
+					{"joint_index_space", String("skeleton_palette_slot")},
+					{"weight_encoding", String("uint16_unorm")},
+					{"weight_denominator", Number(65535)},
+					{"normalization",
+					 String("each weighted vertex sums to 65535; zero-weight influences are retained")},
+					{"vertices", Array(std::move(vertices))},
+				});
+			}
 			entities.push_back(Map({
 				{"entity_id", String(entityId)},
 				{"rig_id", String(skeleton->Rig.Text())},
@@ -538,13 +605,7 @@ namespace engine::script {
 				 )},
 				{"joints", Array(std::move(joints))},
 				{"keypoints", Array(std::move(exportedKeypoints))},
-				{"skinning",
-				 Map(
-					 {{"available", Boolean(false)},
-					  {"unavailable_reason",
-					   String("engine skeleton rows do not retain per-vertex skin weights")},
-					  {"vertices", Array({})}}
-				 )},
+				{"skinning", std::move(exportedSkinning)},
 				{"clips", Array(std::move(exportedClips))},
 			}));
 		}
