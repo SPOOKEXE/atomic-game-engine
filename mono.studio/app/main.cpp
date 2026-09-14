@@ -50,6 +50,7 @@ int main(int argc, char **argv) {
 		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
 	);
 	arguments.Flag("headless", "Run with no window (needs --frames)");
+	arguments.Flag("data-factory", "Start an empty isolated Studio data-factory host (needs --mcp-port)");
 	arguments.Flag("uncapped", "Draw with no frame rate ceiling (default 120 fps)");
 
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
@@ -235,6 +236,7 @@ int main(int argc, char **argv) {
 							  : -1;
 	options.SurfaceBounces = static_cast<int>(arguments.GetInteger("surface-bounces", 0));
 	options.Headless = arguments.Has("headless");
+	options.DataFactory = arguments.Has("data-factory");
 	options.Uncapped = arguments.Has("uncapped");
 	// A flag turns a panel on for this run; the file remembers what was left
 	// open. Neither can turn the other's off, which is the honest reading of two

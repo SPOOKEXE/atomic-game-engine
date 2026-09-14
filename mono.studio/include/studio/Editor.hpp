@@ -136,6 +136,7 @@ struct ImGuiTableSortSpecs;
 namespace studio {
 	struct ComponentPanelProbe;
 	struct PlayedInputAdapter;
+	class DataFactoryHost;
 
 	using engine::ecs::Entity;
 	using engine::world::WorldId;
@@ -477,6 +478,10 @@ namespace studio {
 		// Zero means "any free port", which is what a launcher wants - the one
 		// actually bound is logged and reported by `engine_info`.
 		int ControlPort = -1;
+
+		// Uses an empty universe for external data-factory lifecycle calls.
+		// Normal Studio launches leave this false and retain their normal worlds.
+		bool DataFactory = false;
 
 		// How many viewport panels are open at start-up, counting the main one.
 		//
@@ -3270,6 +3275,7 @@ namespace studio {
 		//
 		// @param world The world whose resident storage is no longer needed.
 		void ReleaseWorldResidency(WorldId world);
+		void ReleaseWorldPresentation(WorldId world);
 
 		// Stops one local play client after releasing its replica's residency.
 		//
@@ -3349,13 +3355,15 @@ namespace studio {
 		// frame loop, because `Universe::Enter` aborts on a foreign one.
 
 		// Binds the port, if `--mcp-port` asked for one, and fills the table.
-		void StartControl();
+		bool StartControl();
 
 		// Answers everything the socket parked since the last frame.
 		void PumpControl();
 
 		// Enables this product's ordered engine and studio feature list once.
 		void EnableControlFeatures();
+		bool StartDataFactoryHost();
+		bool PrepareDataFactoryWorld(engine::world::Universe &universe, WorldId world, std::string &detail);
 
 		// The editor's own tools, added on top of the shared ones.
 		void RegisterControlTools();
@@ -3566,6 +3574,7 @@ namespace studio {
 		// its own that way.
 		std::unique_ptr<engine::world::Universe> Universe;
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
+		std::unique_ptr<DataFactoryHost> FactoryHost;
 
 		// Undo and redo. Held the same way and for a narrower version of the
 		// same reason: it binds to the universe above, so it cannot exist before

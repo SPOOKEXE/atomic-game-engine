@@ -60,6 +60,7 @@
 #include <mutex>
 #include <network/Advert.hpp>
 #include <sstream>
+#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
@@ -771,11 +772,28 @@ namespace studio {
 		Commands = std::make_unique<CommandLog>(*Universe);
 		Team = std::make_unique<TeamCreate>(*Commands, *Universe);
 		InstallHistoryWatcher();
+		if (Settings.DataFactory) {
+			if (!Settings.Game.empty() || !Settings.RojoProject.empty() ||
+				Settings.StartIn != RunMode::Edit) {
+				ENGINE_ERROR("--data-factory requires an empty Studio universe in edit mode");
+				return false;
+			}
+			if (Settings.ControlPort < 0) {
+				ENGINE_ERROR("--data-factory requires --mcp-port");
+				return false;
+			}
+			if (!StartDataFactoryHost()) {
+				return false;
+			}
+		}
 
 		// After both, because several polls read them.
 		RegisterOperators();
 
-		if (!Settings.Game.empty()) {
+		if (Settings.DataFactory) {
+			GameName = Name(DEFAULT_GAME);
+			UniverseNameDraft = std::string(GameName.Text());
+		} else if (!Settings.Game.empty()) {
 			if (!OpenGame(Settings.Game)) {
 				// Not fatal. An editor that refused to start because of one bad
 				// file is an editor you cannot use to fix that file.
@@ -865,7 +883,7 @@ namespace studio {
 
 		// **After the game is loaded**, so the first thing a client can ask
 		// about is a universe that has its worlds rather than an empty one.
-		StartControl();
+		if (!StartControl() && Settings.DataFactory) return false;
 
 		// **After the universe exists and before the first frame**, because a
 		// plugin holds a `Store &` and there has to be one. Reloaded whenever
@@ -1303,6 +1321,11 @@ namespace studio {
 		// which - see `studio::PresentationAlpha` for what reading it wrong
 		// did.
 		Advancing = false;
+
+		if (FactoryHost != nullptr) {
+			Advancing = FactoryHost->Tick(frameSeconds);
+			return;
+		}
 
 		if (!AnyRunning()) {
 			// **A world being edited does not tick, and that is deliberate.**
@@ -3181,6 +3204,104 @@ namespace studio {
 		);
 	}
 
+	bool
+	Editor::PrepareDataFactoryWorld(engine::world::Universe &universe, WorldId world, std::string &detail) {
+		if (!world.IsValid()) {
+			detail = "Studio could not identify the factory world";
+			return false;
+		}
+		const engine::world::WorldSettings settings = universe.SettingsOf(world);
+		bool prepared = false;
+		if (universe.Enter(
+				world,
+				[this, &prepared, &settings](Store &store, Scheduler &systems) {
+					PrepareWorld(store, systems);
+					engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
+					engine::script::SetScriptTickRate(store, settings.ScriptTickRate);
+					prepared = true;
+				}
+			) != WorldStatus::Ok ||
+			!prepared) {
+			detail = "Studio could not prepare the factory world";
+			return false;
+		}
+		return true;
+	}
+
+	bool Editor::StartDataFactoryHost() {
+		FactoryHost = std::make_unique<DataFactoryHost>();
+		std::string detail;
+		const bool started = FactoryHost->Start(
+			*Universe,
+			DataFactoryHostCallbacks{
+				.Lifecycle =
+					[this](
+						engine::world::DataFactoryWorldOperation operation,
+						engine::world::Universe &universe,
+						WorldId world,
+						bool committed,
+						std::string &failure
+					) {
+						if (committed) {
+							if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+								Active = {};
+								SelectionWorld = {};
+								ClearSelection();
+							} else {
+								// Replacement committed before stale presentation is released.
+								// A candidate refusal leaves the old renderer, portal and particle
+								// residency untouched.
+								if (operation == engine::world::DataFactoryWorldOperation::Reset)
+									ReleaseWorldPresentation(world);
+								Active = world;
+								SelectionWorld = world;
+								ClearSelection();
+							}
+							return true;
+						}
+						if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+							if (Renderer.CapturePending() || !ControlScreenshots.empty()) {
+								failure = "Studio must drain pending captures before factory retirement";
+								return false;
+							}
+							ReleaseWorldResidency(world);
+							return true;
+						}
+						return PrepareDataFactoryWorld(universe, world, failure);
+					},
+				.Pause =
+					[this](
+						WorldId world,
+						engine::world::DataFactoryPauseScope scope,
+						bool paused,
+						std::string &failure
+					) {
+						if (!world.IsValid()) {
+							failure = "Studio does not own this factory world";
+							return false;
+						}
+						if (scope != engine::world::DataFactoryPauseScope::PhysicsOnly) return true;
+						if (Universe->Enter(world, [paused](Store &store) {
+								engine::physics::SetPhysicsPaused(store, paused);
+							}) != WorldStatus::Ok) {
+							failure = "Studio could not apply the factory physics pause";
+							return false;
+						}
+						return true;
+					},
+				.Rehydrate = [this](
+								 engine::world::Universe &universe, WorldId world, std::string &failure
+							 ) { return PrepareDataFactoryWorld(universe, world, failure); },
+			},
+			detail
+		);
+		if (!started) {
+			FactoryHost.reset();
+			ENGINE_ERROR("Studio data-factory host: {}", detail);
+		}
+		return started;
+	}
+
 	void Editor::NewGame() {
 		EndAllRuns();
 		StopAllPlaytestPlugins();
@@ -4776,17 +4897,18 @@ namespace studio {
 		return true;
 	}
 
-	void Editor::ReleaseWorldResidency(WorldId world) {
+	void Editor::ReleaseWorldPresentation(WorldId world) {
 		if (PortalImages) {
 			PortalImages->RemoveWorld(world);
 		}
-		if (Universe == nullptr || !world.IsValid()) {
-			return;
-		}
+		if (Universe == nullptr || !world.IsValid()) return;
+		Renderer.ForgetWorld(world.Index, Universe->NameOf(world));
+	}
 
-		const Name name = Universe->NameOf(world);
+	void Editor::ReleaseWorldResidency(WorldId world) {
+		if (Universe == nullptr || !world.IsValid()) return;
+		ReleaseWorldPresentation(world);
 		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
-		Renderer.ForgetWorld(world.Index, name);
 	}
 
 	void Editor::StopPlayLink(PlayLink &link) {

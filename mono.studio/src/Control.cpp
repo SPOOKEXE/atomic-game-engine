@@ -38,6 +38,7 @@
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 
@@ -180,6 +181,22 @@ namespace studio {
 	}
 
 	void Editor::EnableControlFeatures() {
+		if (FactoryHost != nullptr) {
+			// A factory session owns world state and lifecycle. Ordinary Studio
+			// universe tools would mutate the same world outside that session.
+			const std::array features{
+				engine::control::features::Architecture(),
+				engine::control::features::Script(),
+				engine::control::features::Diagnostics(),
+				engine::control::features::Resources(),
+				engine::control::features::Prompts(),
+				engine::control::features::Discovery(),
+			};
+			ControlSurface.Enable(features);
+			FactoryHost->InstallTools(ControlSurface, true);
+			return;
+		}
+
 		const std::array features{
 			engine::control::features::Universe(*Universe),
 			engine::control::features::Architecture(),
@@ -196,7 +213,7 @@ namespace studio {
 		ControlSurface.Enable(features);
 	}
 
-	void Editor::StartControl() {
+	bool Editor::StartControl() {
 		// **The port field is seeded whether or not the server starts**, because
 		// the panel's Start button has to offer something sensible in the case
 		// this function returns early - an editor launched without `--control`
@@ -206,7 +223,7 @@ namespace studio {
 		}
 
 		if (Settings.ControlPort < 0) {
-			return;
+			return true;
 		}
 
 		// The shared tools first, then the editor's - so a replacement of one of
@@ -222,11 +239,12 @@ namespace studio {
 		if (!ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 			Say("control: could not listen - is another program already on that port?",
 				engine::core::LogLevel::Error);
-			return;
+			return false;
 		}
 
 		Say("control: listening on 127.0.0.1:" + std::to_string(ControlServer.Port()) + " - " +
 			std::to_string(ControlSurface.Count()) + " tools");
+		return true;
 	}
 
 	void Editor::PumpControl() {
