@@ -35,6 +35,7 @@ namespace engine::render {
 		R8_UNorm,
 		RGBA8_UNorm,
 		RGBA8_SRGB,
+		RG16_Float,
 		RGBA16_Float,
 		R32_UInt
 	};

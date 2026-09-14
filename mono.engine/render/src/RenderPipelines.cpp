@@ -10,6 +10,7 @@
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
+#include "RendererTestHooks.hpp"
 #include "ShaderBinary.hpp"
 #include "VulkanTimestamps.hpp"
 
@@ -29,6 +30,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <span>
 #include <string>
@@ -38,6 +40,8 @@
 namespace engine::render {
 
 	namespace {
+		std::atomic_bool ForceGBufferPipelineFailureForTests = false;
+
 		// Keep the GPU vertex layout identical to the asset vertex layout.
 		using Vertex = assets::MeshVertex;
 
@@ -710,9 +714,9 @@ namespace engine::render {
 		const auto hasFormat = [this](graph::ResourceFormat format) {
 			return std::find(Caps.Formats.begin(), Caps.Formats.end(), format) != Caps.Formats.end();
 		};
-		const bool pbrSupported = Caps.MaxColourTargets >= 7 && hasFormat(graph::ResourceFormat::RGBA16F) &&
-								  hasFormat(graph::ResourceFormat::R32F) &&
-								  hasFormat(graph::ResourceFormat::R32U);
+		const bool pbrFormatsSupported =
+			hasFormat(graph::ResourceFormat::RGBA16F) && hasFormat(graph::ResourceFormat::RG16F) &&
+			hasFormat(graph::ResourceFormat::R32F) && hasFormat(graph::ResourceFormat::R32U);
 		const bool hdrSupported = hasFormat(graph::ResourceFormat::RGBA16F);
 		SDL_GPUColorTargetDescription hdrTarget = opaqueTarget;
 		hdrTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -725,7 +729,7 @@ namespace engine::render {
 			HdrWireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
 		}
 
-		SDL_GPUColorTargetDescription gbufferTargets[7]{};
+		SDL_GPUColorTargetDescription gbufferTargets[8]{};
 		gbufferTargets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
 		gbufferTargets[1].format = SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
 		gbufferTargets[2].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
@@ -733,17 +737,31 @@ namespace engine::render {
 		gbufferTargets[4].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
 		gbufferTargets[5].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
 		gbufferTargets[6].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
+		gbufferTargets[7].format = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
 
 		SDL_GPUGraphicsPipelineCreateInfo gbuffer = opaque;
 		gbuffer.fragment_shader = gbufferFragment;
 		gbuffer.target_info.color_target_descriptions = gbufferTargets;
-		gbuffer.target_info.num_color_targets = 7;
-		if (pbrSupported) {
-			GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+		gbuffer.target_info.num_color_targets = 8;
+		if (pbrFormatsSupported) {
+			const bool forceFailure = ForceGBufferPipelineFailureForTests.load(std::memory_order_relaxed);
+			if (forceFailure) {
+				ENGINE_INFO("gbuffer pipeline probe forced unavailable for test");
+			} else {
+				GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+			}
 			if (GBufferPipeline == nullptr) {
-				ENGINE_ERROR("gbuffer pipeline: {}", SDL_GetError());
+				if (forceFailure) {
+					ENGINE_WARN("gbuffer pipeline unavailable: test fault injection");
+				} else {
+					ENGINE_WARN("gbuffer pipeline unavailable: {}", SDL_GetError());
+				}
+			} else {
+				// This is the only portable proof that all eight formats bind together.
+				Caps.MaxColourTargets = 8;
 			}
 		}
+		const bool pbrSupported = GBufferPipeline != nullptr;
 
 		SDL_GPUColorTargetDescription depthPeelTargets[2]{};
 		depthPeelTargets[0].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
@@ -2388,6 +2406,10 @@ namespace engine::render {
 		(void)InstallEngineDefault(graph::DefaultPbrDocument());
 		HookBind->RegisterBuiltInDataCaptureHooks();
 		HookBind->RegisterBuiltInViewMutationHooks();
+	}
+
+	void test_support::SetForceGBufferPipelineFailure(bool enabled) {
+		ForceGBufferPipelineFailureForTests.store(enabled, std::memory_order_relaxed);
 	}
 
 	Renderer::~Renderer() {

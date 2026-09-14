@@ -440,7 +440,7 @@ namespace engine::graph {
 	PipelineDocument CompositorDemoDocument();
 
 	// The default PBR graph with capture nodes for linear HDR, depth, normal,
-	// material, segmentation, and the half-size SSAO visibility estimate used by
+	// material, authored mesh UVs, segmentation, and the half-size SSAO visibility estimate used by
 	// DataCapture. SSAO is an estimator rather than ambient-occlusion ground truth.
 	PipelineDocument DefaultPbrDataCaptureDocument();
 

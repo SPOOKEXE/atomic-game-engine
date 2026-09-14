@@ -143,6 +143,28 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 	CHECK(occlusion->Divisor == 2);
 }
 
+TEST_CASE(
+	"the data capture document reads exact visible mesh UVs as compact half floats", "[graph][data-capture]"
+) {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(
+		Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok
+	);
+	const engine::graph::Node *capture = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("data-capture-mesh-uv")) capture = node;
+	}
+	REQUIRE(capture != nullptr);
+	CHECK(capture->Kind == Name("capture"));
+	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
+	const auto *uv = graph.FindResource(capture->Reads.front());
+	REQUIRE(uv != nullptr);
+	CHECK(uv->Name == Name("mesh-uv"));
+	CHECK(uv->Format == engine::graph::ResourceFormat::RG16F);
+}
+
 TEST_CASE("the data capture document peels one aligned second surface", "[graph][data-capture]") {
 	RenderGraph graph;
 	Name offender;
@@ -409,6 +431,7 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	RenderGraph graph;
 	Name offender;
 	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+	CHECK(graph.ResourceCount() == 41);
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 

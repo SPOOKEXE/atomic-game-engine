@@ -164,6 +164,9 @@ namespace {
 					 "pbr_albedo",
 					 "pbr_material",
 					 "pbr_emissive",
+					 "pbr_specular",
+					 "pbr_transmission",
+					 "mesh_uv",
 					 "ambient_occlusion",
 					 "object_ids",
 					 "semantic_ids",
@@ -176,15 +179,18 @@ namespace {
 						ObservationHook("data_capture.pbr_albedo", "pbr_albedo"),
 						ObservationHook("data_capture.pbr_material", "pbr_material"),
 						ObservationHook("data_capture.pbr_emissive", "pbr_emissive"),
+						ObservationHook("data_capture.pbr_specular", "pbr_specular"),
+						ObservationHook("data_capture.pbr_transmission", "pbr_transmission"),
+						ObservationHook("data_capture.mesh_uv", "mesh_uv"),
 						ObservationHook("data_capture.ambient_occlusion", "ambient_occlusion"),
 						ObservationHook("data_capture.object_ids", "object_ids"),
 						ObservationHook("data_capture.semantic_ids", "semantic_ids"),
 						ObservationHook("data_capture.part_ids", "part_ids"),
 					},
-				.MaximumHooks = 14,
+				.MaximumHooks = 16,
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
-				.MaximumReadbackNodes = 12,
+				.MaximumReadbackNodes = 10,
 				.MaximumRetainedBytes = 64u * 1024u * 1024u,
 				.MaximumPendingPumps = 600,
 				.NamedCameraSelection = NamedCameraSelection,
@@ -797,17 +803,17 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 	CHECK(reply["status"] == "ok");
 	CHECK(reply["schema_version"] == "data-capture-hooks/v1");
 	REQUIRE(reply["hooks"].is_array());
-	REQUIRE(reply["hooks"].size() == 10);
+	REQUIRE(reply["hooks"].size() == 13);
 	const json &first = reply["hooks"][0];
 	CHECK(first["name"] == "data_capture.rgb_linear_hdr");
 	CHECK(first["schema_version"] == 1);
 	CHECK(first["node_kind"] == "capture");
 	CHECK(first["required"] == true);
 	CHECK(first["channels"] == json::array({"rgb_linear_hdr"}));
-	CHECK(reply["limits"]["maximum_hooks"] == 14);
+	CHECK(reply["limits"]["maximum_hooks"] == 16);
 	CHECK(reply["limits"]["maximum_connections"] == 6);
 	CHECK(reply["limits"]["maximum_batches"] == 6);
-	CHECK(reply["limits"]["maximum_readback_nodes"] == 12);
+	CHECK(reply["limits"]["maximum_readback_nodes"] == 10);
 	CHECK(reply["limits"]["maximum_retained_bytes"] == 67'108'864);
 	CHECK(reply["limits"]["maximum_pending_pumps"] == 600);
 	CHECK(reply["limits"]["named_camera_selection"] == true);

@@ -25,7 +25,7 @@ namespace engine::render {
 	}
 
 	namespace {
-		constexpr size_t MAX_CAPTURE_CHANNELS = 12;
+		constexpr size_t MAX_CAPTURE_CHANNELS = 15;
 		constexpr size_t MAX_CAPTURE_TICKETS = 6;
 		constexpr size_t RETAINED_BYTE_LIMIT = 64 * 1024 * 1024;
 
@@ -40,6 +40,9 @@ namespace engine::render {
 			if (name == "pbr_albedo") return DataCaptureChannel::PbrAlbedo;
 			if (name == "pbr_material") return DataCaptureChannel::PbrMaterial;
 			if (name == "pbr_emissive") return DataCaptureChannel::PbrEmissive;
+			if (name == "pbr_specular") return DataCaptureChannel::PbrSpecular;
+			if (name == "pbr_transmission") return DataCaptureChannel::PbrTransmission;
+			if (name == "mesh_uv") return DataCaptureChannel::MeshUv;
 			if (name == "ambient_occlusion") return DataCaptureChannel::AmbientOcclusion;
 			if (name == "object_ids") return DataCaptureChannel::ObjectIds;
 			if (name == "semantic_ids") return DataCaptureChannel::SemanticMask;
@@ -292,6 +295,9 @@ namespace engine::render {
 				 "pbr_albedo",
 				 "pbr_material",
 				 "pbr_emissive",
+				 "pbr_specular",
+				 "pbr_transmission",
+				 "mesh_uv",
 				 "ambient_occlusion",
 				 "object_ids",
 				 "semantic_ids",
@@ -1140,6 +1146,7 @@ namespace engine::render {
 										plane.Channel == DataCaptureChannel::SecondSurfaceValidity
 									? "unorm8"
 								: plane.Scalar == DataCaptureScalar::UNorm8	   ? "rgba8_unorm"
+								: plane.Channel == DataCaptureChannel::MeshUv  ? "rg16_float"
 								: plane.Scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
 																			   : "",
 					 .Provenance = plane.Provenance.empty() ? Provenance(plane.Channel) : plane.Provenance,

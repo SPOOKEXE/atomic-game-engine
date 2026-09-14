@@ -43,6 +43,11 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 		"second_surface_validity"
 	);
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::OpticalFlow)) == "optical_flow");
+	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::PbrSpecular)) == "pbr_specular");
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::PbrTransmission)) == "pbr_transmission"
+	);
+	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::MeshUv)) == "mesh_uv");
 }
 
 TEST_CASE("object label sidecars require bounded UTF-8 labels", "[render][data-capture]") {
@@ -148,6 +153,34 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 	request.Channels = {DataCaptureChannel::SecondSurfaceDepth};
 	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
 	CHECK(ticket.ChannelResourceIndices.empty());
+}
+
+TEST_CASE(
+	"unmodeled authored material facts complete with explicit unavailable provenance",
+	"[render][data-capture]"
+) {
+	Renderer renderer;
+	DataCaptureRequest request{
+		.SnapshotId = "snapshot-1",
+		.Pipeline = engine::core::Name("capture-pipeline"),
+		.CaptureNode = engine::core::Name("capture"),
+		.Channels = {DataCaptureChannel::PbrSpecular, DataCaptureChannel::PbrTransmission},
+		.ObjectLabels = {},
+		.SemanticLabels = {},
+		.PartLabels = {},
+	};
+	DataCaptureTicket ticket;
+	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	CHECK(ticket.ResourceTokens.empty());
+	const DataCapturePoll captured = renderer.PollDataCapture(ticket);
+	CHECK(captured.Status == DataCaptureStatus::Unsupported);
+	REQUIRE(captured.Planes.size() == 2);
+	CHECK(captured.Planes[0].Status == DataCaptureStatus::Unsupported);
+	CHECK(captured.Planes[0].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
+	CHECK(captured.Planes[1].Status == DataCaptureStatus::Unsupported);
+	CHECK(
+		captured.Planes[1].Provenance == "unavailable/authored_transmission_not_in_current_material_model/v1"
+	);
 }
 
 TEST_CASE(
@@ -967,7 +1000,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			return hook.Access == "observation";
 		})
 	);
-	REQUIRE(observationHooks == 12);
+	REQUIRE(observationHooks == 15);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
 		if (hook.Access != "observation") continue;
@@ -991,7 +1024,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 	CHECK(capabilities.MaximumHooks == MAX_DATA_FACTORY_HOOKS);
 	CHECK(capabilities.MaximumConnections == MAX_DATA_FACTORY_CONNECTIONS);
 	CHECK(capabilities.MaximumBatches == MAX_DATA_FACTORY_BATCHES);
-	CHECK(capabilities.MaximumReadbackNodes == 12);
+	CHECK(capabilities.MaximumReadbackNodes == 10);
 }
 
 TEST_CASE("script capture validates requests and isolates ticket owners", "[render][data-capture]") {

@@ -23,6 +23,7 @@ layout(location = 3) out vec4 outEmissive;
 layout(location = 4) out uint outObjectId;
 layout(location = 5) out uint outSemanticId;
 layout(location = 6) out uint outPartId;
+layout(location = 7) out vec2 outMeshUv;
 
 // DrawSlots binds the renderer's complete material table for every material
 // pipeline. Keeping the same binding layout makes SurfaceAppearance data flow
@@ -91,4 +92,7 @@ void main() {
 	outObjectId = inObjectLabel;
 	outSemanticId = inSemanticLabel;
 	outPartId = inPartLabel;
+	// This is the mesh-authored coordinate before repeat, flipbook, parallax,
+	// or any material lookup changes it.
+	outMeshUv = inTexCoord;
 }

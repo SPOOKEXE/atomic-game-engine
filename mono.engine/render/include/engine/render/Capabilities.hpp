@@ -49,6 +49,7 @@ namespace engine::render {
 		MissingCompute,
 		MissingStorageTextures,
 		MissingIndirectDraws,
+		InsufficientColourTargets,
 		MissingFormat,
 	};
 

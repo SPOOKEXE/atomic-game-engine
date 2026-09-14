@@ -4,6 +4,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/render/DataCapture.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 
 #include <algorithm>
@@ -12,6 +13,18 @@
 namespace engine::render {
 	namespace {
 		constexpr size_t MAX_DATA_CAPTURE_CHANNELS = static_cast<size_t>(DataCaptureChannel::OpticalFlow) + 1;
+		constexpr uint8_t NO_DATA_CAPTURE_RESOURCE = UINT8_MAX;
+
+		bool AuthoredFactUnavailable(DataCaptureChannel channel) {
+			return channel == DataCaptureChannel::PbrSpecular ||
+				   channel == DataCaptureChannel::PbrTransmission;
+		}
+
+		const char *UnavailableProvenance(DataCaptureChannel channel) {
+			return channel == DataCaptureChannel::PbrSpecular
+					   ? "unavailable/authored_specular_not_in_current_material_model/v1"
+					   : "unavailable/authored_transmission_not_in_current_material_model/v1";
+		}
 
 		bool UniqueChannels(std::span<const DataCaptureChannel> channels) {
 			if (channels.empty() || channels.size() > MAX_DATA_CAPTURE_CHANNELS) return false;
@@ -46,6 +59,7 @@ namespace engine::render {
 			plane.Channel = channel;
 			plane.Status = DataCaptureStatus::Unsupported;
 			plane.CaptureNode = ticket.CaptureNode;
+			if (AuthoredFactUnavailable(channel)) plane.Provenance = UnavailableProvenance(channel);
 			return plane;
 		}
 
@@ -148,6 +162,19 @@ namespace engine::render {
 					ResourceImageFormat::RGBA16_Float
 				);
 				break;
+			case DataCaptureChannel::MeshUv:
+				primary(
+					core::Name("mesh-uv"),
+					DataCaptureScalar::Float16,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::RG16_Float
+				);
+				if (plane.Status == DataCaptureStatus::Ready)
+					plane.Provenance =
+						"authored_mesh_texcoord/v1;components=u_v;units=dimensionless;range=unbounded;"
+						"interpolation=perspective_correct;surface=visible_builtin_opaque_or_masked;"
+						"validity=both_float16_components_finite";
+				break;
 			case DataCaptureChannel::AmbientOcclusion:
 				primary(
 					core::Name("occlusion"),
@@ -234,6 +261,10 @@ namespace engine::render {
 		};
 		std::vector<core::Name> resourceNodes;
 		for (const DataCaptureChannel channel : request.Channels) {
+			if (AuthoredFactUnavailable(channel)) {
+				queued.ChannelResourceIndices.push_back(NO_DATA_CAPTURE_RESOURCE);
+				continue;
+			}
 			const core::Name node = CaptureNode(queued, channel);
 			const auto existing = std::ranges::find(resourceNodes, node);
 			if (existing != resourceNodes.end()) {
@@ -241,6 +272,10 @@ namespace engine::render {
 					static_cast<uint8_t>(existing - resourceNodes.begin())
 				);
 				continue;
+			}
+			if (queued.ResourceTokens.size() >= MAX_DATA_FACTORY_READBACK_NODES) {
+				CancelDataCapture(queued);
+				return false;
 			}
 			const uint64_t token = QueueResourceImage(
 				request.Pipeline,
@@ -276,18 +311,28 @@ namespace engine::render {
 			return poll;
 		}
 		if (ticket.SnapshotId.empty() || ticket.Channels.empty() ||
-			ticket.ChannelResourceIndices.size() != ticket.Channels.size() || ticket.ResourceTokens.empty() ||
+			ticket.ChannelResourceIndices.size() != ticket.Channels.size() ||
 			!HasSecondSurfacePair(ticket.Channels) ||
 			std::ranges::any_of(ticket.ChannelResourceIndices, [&](uint8_t index) {
-				return index >= ticket.ResourceTokens.size();
+				return index != NO_DATA_CAPTURE_RESOURCE && index >= ticket.ResourceTokens.size();
 			})) {
 			poll.Status = DataCaptureStatus::Invalid;
 			return poll;
 		}
 
-		auto images = TakeResourceImages(ticket.ResourceTokens);
+		auto images = ticket.ResourceTokens.empty() ? std::optional<std::vector<ResourceImage>>(std::in_place)
+													: TakeResourceImages(ticket.ResourceTokens);
 		if (!images) {
 			poll.Status = DataCaptureStatus::Pending;
+			return poll;
+		}
+		if (images->empty()) {
+			poll.Pipeline = ticket.Pipeline;
+			poll.ViewSlot = ticket.ViewSlot;
+			for (const DataCaptureChannel channel : ticket.Channels)
+				poll.Planes.push_back(Plane(channel, ticket));
+			poll.Status = DataCaptureStatus::Unsupported;
+			ticket.ChannelResourceIndices.clear();
 			return poll;
 		}
 		const ResourceImage &image = images->front();
@@ -308,6 +353,7 @@ namespace engine::render {
 		poll.CameraPose.CropHeight = image.CameraCropHeight;
 		bool correctNodes = true;
 		for (size_t channelIndex = 0; channelIndex < ticket.Channels.size(); ++channelIndex) {
+			if (ticket.ChannelResourceIndices[channelIndex] == NO_DATA_CAPTURE_RESOURCE) continue;
 			const ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[channelIndex]];
 			correctNodes =
 				correctNodes && channelImage.Observation &&
@@ -334,8 +380,12 @@ namespace engine::render {
 		poll.Planes.reserve(ticket.Channels.size());
 		for (size_t index = 0; index < ticket.Channels.size(); ++index) {
 			const DataCaptureChannel channel = ticket.Channels[index];
-			ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[index]];
 			DataCapturePlane plane = Plane(channel, ticket);
+			if (ticket.ChannelResourceIndices[index] == NO_DATA_CAPTURE_RESOURCE) {
+				poll.Planes.push_back(std::move(plane));
+				continue;
+			}
+			ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[index]];
 			if (channelImage.Status == ResourceImageStatus::Ok) {
 				FillPlane(plane, channelImage);
 			} else if (channelImage.Status == ResourceImageStatus::Failed) {

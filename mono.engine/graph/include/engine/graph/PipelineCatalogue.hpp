@@ -211,6 +211,9 @@ namespace engine::graph {
 		// Benefits from timestamps but remains runnable without them.
 		bool TimestampsUseful = false;
 
+		// Simultaneous colour attachments required by this node.
+		uint32_t ColourTargets = 0;
+
 		// Colour formats that must be creatable.
 		std::vector<ResourceFormat> Formats;
 

@@ -194,6 +194,16 @@ TEST_CASE("the default PBR frame's kinds and material ports are registered", "[g
 	CHECK(std::any_of(gbuffer->Outputs.begin(), gbuffer->Outputs.end(), [](const PortSpec &port) {
 		return port.Name == Name("emissive");
 	}));
+	CHECK(std::any_of(gbuffer->Outputs.begin(), gbuffer->Outputs.end(), [](const PortSpec &port) {
+		return port.Name == Name("mesh-uv") && port.Format == engine::graph::ResourceFormat::RG16F;
+	}));
+	CHECK(gbuffer->Needs.ColourTargets == 8);
+	REQUIRE(gbuffer->Outputs.size() == 9);
+	CHECK(gbuffer->Outputs[4].Name == Name("mesh-uv"));
+	CHECK(gbuffer->Outputs[5].Name == Name("object-ids"));
+	CHECK(gbuffer->Outputs[6].Name == Name("semantic-ids"));
+	CHECK(gbuffer->Outputs[7].Name == Name("part-ids"));
+	CHECK(gbuffer->Outputs[8].Name == Name("depth"));
 	CHECK(std::any_of(lighting->Inputs.begin(), lighting->Inputs.end(), [](const PortSpec &port) {
 		return port.Name == Name("emissive");
 	}));

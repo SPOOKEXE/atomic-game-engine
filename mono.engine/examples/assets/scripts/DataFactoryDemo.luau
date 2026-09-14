@@ -28,7 +28,7 @@ box("BehindBox", "data-factory-demo/behind", Vector3.new(0, 1, 12), Vector3.new(
 local snapshot = DataSceneService:GetSceneSnapshot(16)
 local cameraData = DataSceneService:GetCameraRenderingData(camera, 16)
 local captureOptions = DataSceneService:CreateOptions()
-captureOptions.Channels = {"rgb_linear_hdr", "linear_depth", "object_ids", "semantic_ids", "part_ids"}
+captureOptions.Channels = {"rgb_linear_hdr", "linear_depth", "mesh_uv", "object_ids", "semantic_ids", "part_ids"}
 print("DataFactory snapshot", snapshot.entities)
 print("DataFactory camera", cameraData.world_from_camera, cameraData.object_observations)
 -- This scene has no retained lifecycle snapshot or render bridge. It checks

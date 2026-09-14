@@ -298,6 +298,9 @@ namespace engine::control {
 				packing = "UNorm10A2";
 			} else if (plane.Channel == "second_surface_depth") {
 				dtype = "float32";
+			} else if (plane.Channel == "mesh_uv") {
+				shape.push_back(2);
+				dtype = "float16";
 			}
 			const auto ambientOcclusion =
 				[](const std::optional<script::DataCaptureBridgeAmbientOcclusion> &value) {

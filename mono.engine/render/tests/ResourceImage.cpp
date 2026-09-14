@@ -1,5 +1,6 @@
 #include "AmbientOcclusionCapture.hpp"
 #include "RenderFixture.hpp"
+#include "RendererTestHooks.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -35,6 +36,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstring>
 #include <initializer_list>
 #include <string>
 
@@ -72,6 +75,16 @@ TEST_CASE("custom R8 capture does not inherit SSAO facts", "[render][resourceima
 
 namespace {
 	using namespace engine;
+
+	struct ForcedGBufferFailure {
+		ForcedGBufferFailure() {
+			render::test_support::SetForceGBufferPipelineFailure(true);
+		}
+
+		~ForcedGBufferFailure() {
+			render::test_support::SetForceGBufferPipelineFailure(false);
+		}
+	};
 
 	void InstallImageCapture(
 		render::Renderer &renderer,
@@ -543,6 +556,56 @@ namespace {
 		REQUIRE(renderer.DropPortalImage(portal.ImportedImage));
 		REQUIRE(renderer.DropPortalImage(roomImage));
 	}
+}
+
+TEST_CASE(
+	"an unavailable eight-target G-buffer selects the forward default", "[render][gpu][capabilities][.]"
+) {
+	ForcedGBufferFailure forced;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+
+	const render::DeviceCaps &caps = fixture.Render.Capabilities();
+	CHECK(caps.MaxColourTargets == 0);
+	const render::PipelineTierDecision selected = render::ChooseDefaultPipeline(caps);
+	CHECK(selected.Tier == render::DefaultPipelineTier::C);
+	REQUIRE(selected.Fallthrough.size() == 2);
+	CHECK(selected.Fallthrough[0].Cause.Status == render::CapabilityStatus::InsufficientColourTargets);
+	CHECK(selected.Fallthrough[1].Cause.Status == render::CapabilityStatus::InsufficientColourTargets);
+
+	const auto defaultGraph = fixture.Render.DescribePipeline(core::Name("Engine Default"), 32, 24);
+	REQUIRE(defaultGraph);
+	bool hasForward = false;
+	bool hasGBuffer = false;
+	for (uint32_t index = 1; index <= defaultGraph->Graph.Count(); ++index) {
+		const graph::Node *node = defaultGraph->Graph.Find(graph::NodeId{index});
+		REQUIRE(node != nullptr);
+		hasForward = hasForward || node->Kind == core::Name("forward");
+		hasGBuffer = hasGBuffer || node->Kind == core::Name("gbuffer");
+	}
+	CHECK(hasForward);
+	CHECK_FALSE(hasGBuffer);
+}
+
+TEST_CASE(
+	"a successful eight-target G-buffer probe reports the PBR capability", "[render][gpu][capabilities][.]"
+) {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+
+	const render::DeviceCaps &caps = fixture.Render.Capabilities();
+	REQUIRE(caps.MaxColourTargets == 8);
+	CHECK(render::ChooseDefaultPipeline(caps).Tier == render::DefaultPipelineTier::A);
+
+	const auto defaultGraph = fixture.Render.DescribePipeline(core::Name("Engine Default"), 32, 24);
+	REQUIRE(defaultGraph);
+	bool hasGBuffer = false;
+	for (uint32_t index = 1; index <= defaultGraph->Graph.Count(); ++index) {
+		const graph::Node *node = defaultGraph->Graph.Find(graph::NodeId{index});
+		REQUIRE(node != nullptr);
+		hasGBuffer = hasGBuffer || node->Kind == core::Name("gbuffer");
+	}
+	CHECK(hasGBuffer);
 }
 
 TEST_CASE("resource image requests require a live device", "[render][resourceimage]") {
@@ -4038,6 +4101,7 @@ TEST_CASE(
 				render::DataCaptureChannel::LinearDepth,
 				render::DataCaptureChannel::ShadingNormal,
 				render::DataCaptureChannel::PbrAlbedo,
+				render::DataCaptureChannel::MeshUv,
 			},
 		.ObjectLabels = {},
 		.SemanticLabels = {},
@@ -4045,8 +4109,8 @@ TEST_CASE(
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
-	CHECK(ticket.ResourceTokens.size() == 2);
-	CHECK(ticket.ChannelResourceIndices == std::vector<uint8_t>{0, 0, 0, 1});
+	CHECK(ticket.ResourceTokens.size() == 3);
+	CHECK(ticket.ChannelResourceIndices == std::vector<uint8_t>{0, 0, 0, 1, 2});
 	render::OverlayImage overlay;
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
 
@@ -4059,7 +4123,7 @@ TEST_CASE(
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	REQUIRE(captured.SnapshotId == view.SnapshotId);
-	REQUIRE(captured.Planes.size() == 4);
+	REQUIRE(captured.Planes.size() == 5);
 	for (const auto &plane : captured.Planes) {
 		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
 		CHECK(plane.Width > 0);
@@ -4072,6 +4136,35 @@ TEST_CASE(
 	CHECK(captured.Planes[3].Channel == render::DataCaptureChannel::PbrAlbedo);
 	CHECK(captured.Planes[3].Scalar == render::DataCaptureScalar::UNorm8);
 	CHECK(captured.Planes[3].ColourSpace == render::DataCaptureColourSpace::SRGB);
+	CHECK(captured.Planes[4].Channel == render::DataCaptureChannel::MeshUv);
+	CHECK(captured.Planes[4].Scalar == render::DataCaptureScalar::Float16);
+	CHECK(captured.Planes[4].ColourSpace == render::DataCaptureColourSpace::NotApplicable);
+	CHECK(captured.Planes[4].RowStride == captured.Planes[4].Width * 4);
+	// UV is stored as two IEEE 754 half values. Visible built-in fragments retain
+	// the perspective-correct mesh interpolation while cleared background remains NaN.
+	size_t finiteUvPixels = 0;
+	size_t nanUvPixels = 0;
+	for (size_t pixel = 0; pixel < captured.Planes[4].Width * captured.Planes[4].Height; ++pixel) {
+		uint32_t packed = 0;
+		std::memcpy(&packed, captured.Planes[4].Bytes.data() + pixel * 4, sizeof(packed));
+		const glm::vec2 uv = glm::unpackHalf2x16(packed);
+		if (std::isfinite(uv.x) && std::isfinite(uv.y)) {
+			++finiteUvPixels;
+		} else {
+			++nanUvPixels;
+			CHECK(std::isnan(uv.x));
+			CHECK(std::isnan(uv.y));
+		}
+	}
+	CHECK(finiteUvPixels > 0);
+	CHECK(nanUvPixels > 0);
+	CHECK(
+		captured.Planes[4].Provenance ==
+		"authored_mesh_texcoord/"
+		"v1;components=u_v;units=dimensionless;range=unbounded;"
+		"interpolation=perspective_correct;surface=visible_builtin_opaque_or_masked;"
+		"validity=both_float16_components_finite"
+	);
 	CHECK(captured.CameraPose.NearPlaneMetres == view.Camera.NearPlane);
 	CHECK(captured.CameraPose.FarPlaneMetres == view.Camera.FarPlane);
 
@@ -4247,6 +4340,206 @@ TEST_CASE(
 	CHECK(captured.Status == render::DataCaptureStatus::Invalid);
 }
 
+TEST_CASE(
+	"mesh UV capture records perspective interpolation and omitted fragments",
+	"[render][gpu][data-capture][.]"
+) {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("mesh-uv-device-evidence");
+	const core::Name captureNode("data-capture");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+
+	assets::MeshData triangle;
+	triangle.Vertices = {
+		{{-.4f, -.4f, 0}, {0, 0, 1}, {0, 0}},
+		{{.6f, -.3f, 0}, {0, 0, 1}, {1, 0}},
+		{{-.1f, .6f, 0}, {0, 0, 1}, {0, 1}},
+	};
+	triangle.Indices = {0, 1, 2};
+	triangle.ComputeBounds();
+	const core::Name triangleName("mesh-uv-perspective-triangle");
+	REQUIRE(renderer.AddMesh(triangleName, triangle));
+
+	assets::TextureData transparent;
+	transparent.Width = transparent.Height = 1;
+	transparent.Format = assets::TextureFormat::RGBA8;
+	transparent.Pixels = {std::byte{255}, std::byte{255}, std::byte{255}, std::byte{0}};
+	const core::Name transparentName("mesh-uv-discard");
+	REQUIRE(renderer.AddTexture(transparentName, transparent));
+
+	render::ShaderCompiler compiler;
+	const auto customProgram = compiler.Compile(
+		"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(0,1,0,1);}\n",
+		render::ShaderStage::Fragment,
+		"mesh-uv-omitted.frag"
+	);
+	INFO(customProgram.Error);
+	REQUIRE_FALSE(customProgram.Failed);
+	const core::Name customShader("mesh-uv-omitted-custom-shader");
+	REQUIRE(renderer.AddShader(customShader, customProgram.SpirV));
+
+	constexpr uint32_t WIDTH = 64;
+	constexpr uint32_t HEIGHT = 64;
+	constexpr uint32_t PIXEL_X = 30;
+	constexpr uint32_t PIXEL_Y = 30;
+	render::SceneTarget target{WIDTH, HEIGHT};
+	render::View view;
+	view.Pipeline = pipelineName;
+	view.Target = &target;
+	glm::mat4 projection(0.0f);
+	projection[0][0] = 1.0f;
+	projection[1][1] = 1.0f;
+	projection[2][2] = 1.0f;
+	projection[0][3] = .5f;
+	projection[3][2] = .5f;
+	projection[3][3] = 1.0f;
+	view.Projection = projection;
+
+	scene::DrawInstance instance;
+	instance.Source = 1;
+	instance.Mesh = triangleName;
+	// Keep the mesh's authored local coordinates after residency centres it.
+	// The expected interpolation below is therefore over these exact vertices.
+	instance.Frame.Position = {.1f, .1f, 0};
+	instance.HalfExtent = {.5f, .5f, .5f};
+	instance.CastShadow = false;
+
+	const auto capture =
+		[&](scene::DrawInstance row,
+			std::string snapshot,
+			std::vector<render::DataCaptureChannel> channels = {render::DataCaptureChannel::MeshUv}) {
+			view.SnapshotId = std::move(snapshot);
+			view.Instances = std::span(&row, 1);
+			render::DataCaptureRequest request{
+				.SnapshotId = view.SnapshotId,
+				.Pipeline = pipelineName,
+				.CaptureNode = captureNode,
+				.Channels = std::move(channels),
+				.ObjectLabels = {},
+				.SemanticLabels = {},
+				.PartLabels = {},
+			};
+			render::DataCaptureTicket ticket;
+			REQUIRE(renderer.QueueDataCapture(request, ticket));
+			render::OverlayImage overlay;
+			REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
+			render::DataCapturePoll poll;
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+			do {
+				poll = renderer.PollDataCapture(ticket);
+				if (poll.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
+			} while (poll.Status == render::DataCaptureStatus::Pending &&
+					 std::chrono::steady_clock::now() < deadline);
+			REQUIRE(poll.Status == render::DataCaptureStatus::Ready);
+			return poll;
+		};
+	const auto plane = [](const render::DataCapturePoll &poll, render::DataCaptureChannel channel) {
+		const auto found =
+			std::find_if(poll.Planes.begin(), poll.Planes.end(), [channel](const auto &candidate) {
+				return candidate.Channel == channel;
+			});
+		return found == poll.Planes.end() ? nullptr : &*found;
+	};
+
+	const auto at = [](const render::DataCapturePlane &plane, uint32_t x, uint32_t y) {
+		REQUIRE(x < plane.Width);
+		REQUIRE(y < plane.Height);
+		uint32_t packed = 0;
+		std::memcpy(&packed, plane.Bytes.data() + y * plane.RowStride + x * 4, sizeof(packed));
+		return glm::unpackHalf2x16(packed);
+	};
+	const auto rgbaAt = [](const render::DataCapturePlane &plane, uint32_t x, uint32_t y) {
+		REQUIRE(x < plane.Width);
+		REQUIRE(y < plane.Height);
+		uint32_t lower = 0;
+		uint32_t upper = 0;
+		const std::byte *const pixel = plane.Bytes.data() + y * plane.RowStride + x * 8;
+		std::memcpy(&lower, pixel, sizeof(lower));
+		std::memcpy(&upper, pixel + sizeof(lower), sizeof(upper));
+		const glm::vec2 redGreen = glm::unpackHalf2x16(lower);
+		const glm::vec2 blueAlpha = glm::unpackHalf2x16(upper);
+		return glm::vec4{redGreen, blueAlpha};
+	};
+
+	const render::DataCapturePoll visiblePoll = capture(instance, "mesh-uv-visible");
+	REQUIRE(visiblePoll.Planes.size() == 1);
+	const render::DataCapturePlane *const visible = plane(visiblePoll, render::DataCaptureChannel::MeshUv);
+	REQUIRE(visible != nullptr);
+	const glm::vec2 observed = at(*visible, PIXEL_X, PIXEL_Y);
+	const auto screen = [](const glm::vec4 &clip) {
+		return glm::vec2{(clip.x / clip.w * .5f + .5f) * WIDTH, (clip.y / clip.w * .5f + .5f) * HEIGHT};
+	};
+	const std::array clip = {
+		projection * glm::vec4(triangle.Vertices[0].Position[0], triangle.Vertices[0].Position[1], 0, 1),
+		projection * glm::vec4(triangle.Vertices[1].Position[0], triangle.Vertices[1].Position[1], 0, 1),
+		projection * glm::vec4(triangle.Vertices[2].Position[0], triangle.Vertices[2].Position[1], 0, 1),
+	};
+	const std::array screenPoints = {screen(clip[0]), screen(clip[1]), screen(clip[2])};
+	const glm::vec2 point{PIXEL_X + .5f, HEIGHT - PIXEL_Y - .5f};
+	const auto edge = [](glm::vec2 first, glm::vec2 second, glm::vec2 sample) {
+		return (second.x - first.x) * (sample.y - first.y) - (second.y - first.y) * (sample.x - first.x);
+	};
+	const float area = edge(screenPoints[0], screenPoints[1], screenPoints[2]);
+	REQUIRE(std::abs(area) > .001f);
+	const float first = edge(screenPoints[1], screenPoints[2], point) / area;
+	const float second = edge(screenPoints[2], screenPoints[0], point) / area;
+	const float third = edge(screenPoints[0], screenPoints[1], point) / area;
+	REQUIRE((first > 0 && second > 0 && third > 0));
+	const float reciprocalW = first / clip[0].w + second / clip[1].w + third / clip[2].w;
+	const glm::vec2 expected = (first * glm::vec2{0, 0} / clip[0].w + second * glm::vec2{1, 0} / clip[1].w +
+								third * glm::vec2{0, 1} / clip[2].w) /
+							   reciprocalW;
+	CHECK(std::isfinite(observed.x));
+	CHECK(std::isfinite(observed.y));
+	CHECK(observed.x == Catch::Approx(expected.x).margin(.002f));
+	CHECK(observed.y == Catch::Approx(expected.y).margin(.002f));
+	const glm::vec2 background = at(*visible, 0, 0);
+	CHECK(std::isnan(background.x));
+	CHECK(std::isnan(background.y));
+
+	scene::DrawInstance masked = instance;
+	masked.Texture = transparentName;
+	masked.Alpha = scene::AlphaMode::Transparency;
+	masked.AlphaCutoff = .5f;
+	const render::DataCapturePoll maskedPoll = capture(masked, "mesh-uv-masked");
+	const render::DataCapturePlane *const maskedUv = plane(maskedPoll, render::DataCaptureChannel::MeshUv);
+	REQUIRE(maskedUv != nullptr);
+	const glm::vec2 discarded = at(*maskedUv, PIXEL_X, PIXEL_Y);
+	CHECK(std::isnan(discarded.x));
+	CHECK(std::isnan(discarded.y));
+
+	scene::DrawInstance custom = instance;
+	custom.Shader = customShader;
+	const render::DataCapturePoll customPoll = capture(
+		custom,
+		"mesh-uv-custom",
+		{render::DataCaptureChannel::RgbLinearHdr, render::DataCaptureChannel::MeshUv}
+	);
+	const render::DataCapturePlane *const customColour =
+		plane(customPoll, render::DataCaptureChannel::RgbLinearHdr);
+	const render::DataCapturePlane *const customUv = plane(customPoll, render::DataCaptureChannel::MeshUv);
+	REQUIRE(customColour != nullptr);
+	REQUIRE(customUv != nullptr);
+	const glm::vec4 customPixel = rgbaAt(*customColour, PIXEL_X, PIXEL_Y);
+	CHECK(std::isfinite(customPixel.r));
+	CHECK(std::isfinite(customPixel.g));
+	CHECK(std::isfinite(customPixel.b));
+	CHECK(customPixel.r == Catch::Approx(0.0f).margin(.01f));
+	CHECK(customPixel.g == Catch::Approx(1.0f).margin(.01f));
+	CHECK(customPixel.b == Catch::Approx(0.0f).margin(.01f));
+	const glm::vec2 omitted = at(*customUv, PIXEL_X, PIXEL_Y);
+	CHECK(std::isnan(omitted.x));
+	CHECK(std::isnan(omitted.y));
+}
+
 TEST_CASE("second surface eligibility rejects non-built-in fragments", "[render][gpu][data-capture][.]") {
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
@@ -4391,7 +4684,8 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 			return hook.Kind == render::RenderHookKind::DataCapture;
 		})
 	);
-	REQUIRE(observationHookCount == render::MAX_DATA_FACTORY_READBACK_NODES);
+	REQUIRE(observationHookCount == 15);
+	REQUIRE(observationHookCount + 1 == render::MAX_DATA_FACTORY_HOOKS);
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",
 		.SnapshotId = snapshot,
@@ -4464,6 +4758,50 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(repeatedBytes == bytes);
 	REQUIRE(bridge.Release("script-capture-world", ticket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", ticket, poll, detail));
+
+	// Unmodeled authored facts have no readback texture, but still complete with
+	// the dispatch identity and explicit unavailable provenance.
+	script::DataCaptureBridgeRequest unavailable = request;
+	unavailable.Channels = {"pbr_specular", "pbr_transmission"};
+	unavailable.IncludeSceneData = false;
+	uint64_t unavailableTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", unavailable, unavailableTicket, detail));
+	view.SnapshotId.clear();
+	bridge.PrepareView(view);
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	do {
+		bridge.Pump();
+		REQUIRE(bridge.Poll("script-capture-world", unavailableTicket, poll, detail));
+		if (poll.Status == "pending") SDL_Delay(1);
+	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == "unsupported");
+	REQUIRE(poll.SnapshotId == snapshot);
+	REQUIRE(poll.Planes.size() == 2);
+	CHECK(poll.Planes[0].Status == "unsupported");
+	CHECK(poll.Planes[0].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
+	CHECK(poll.Planes[1].Status == "unsupported");
+	CHECK(poll.Planes[1].Provenance == "unavailable/authored_transmission_not_in_current_material_model/v1");
+	REQUIRE(bridge.Release("script-capture-world", unavailableTicket, detail));
+
+	script::DataCaptureBridgeRequest mixed = request;
+	mixed.Channels = {"object_ids", "pbr_specular"};
+	mixed.IncludeSceneData = false;
+	uint64_t mixedTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", mixed, mixedTicket, detail));
+	view.SnapshotId.clear();
+	bridge.PrepareView(view);
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	do {
+		bridge.Pump();
+		REQUIRE(bridge.Poll("script-capture-world", mixedTicket, poll, detail));
+		if (poll.Status == "pending") SDL_Delay(1);
+	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == "partial");
+	REQUIRE(poll.Planes.size() == 2);
+	CHECK(poll.Planes[0].Status == "ready");
+	CHECK(poll.Planes[1].Status == "unsupported");
+	CHECK(poll.Planes[1].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
+	REQUIRE(bridge.Release("script-capture-world", mixedTicket, detail));
 
 	// A canceled sidecar has already been captured and reserved by PrepareView.
 	// Releasing it must return that reservation before a later capture arrives.

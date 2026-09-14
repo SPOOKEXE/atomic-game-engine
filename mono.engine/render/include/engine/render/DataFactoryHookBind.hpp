@@ -21,11 +21,11 @@ namespace engine::render {
 	class Renderer;
 	struct View;
 
-	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 14;
+	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 16;
 	inline constexpr size_t MAX_DATA_FACTORY_CONNECTIONS = 6;
 	inline constexpr size_t MAX_DATA_FACTORY_BATCHES = 6;
 	inline constexpr size_t MAX_DATA_FACTORY_HOOK_CHANNELS = 1;
-	inline constexpr size_t MAX_DATA_FACTORY_READBACK_NODES = 12;
+	inline constexpr size_t MAX_DATA_FACTORY_READBACK_NODES = 10;
 	inline constexpr size_t MAX_DATA_FACTORY_RETAINED_BYTES = 64 * 1024 * 1024;
 	// Pump runs once per owner frame, so this bounds a lost completion to ten
 	// seconds at a 60 Hz owner cadence without a blocking wall-clock dependency.

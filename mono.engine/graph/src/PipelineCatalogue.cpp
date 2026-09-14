@@ -505,6 +505,9 @@ namespace engine::graph {
 				 "depth-peel",
 				 "transparent"}
 			);
+			if (spec.Kind == core::Name("gbuffer")) {
+				spec.Needs.ColourTargets = 8;
+			}
 			for (const PortSpec &output : spec.Outputs) {
 				// Ordinary deferred views do not allocate or require the optional capture target.
 				if (spec.Kind == core::Name("deferred-lighting") &&
@@ -719,12 +722,13 @@ namespace engine::graph {
 			 {{"shadow", K::Texture, D32, false, "Shadows, if any."},
 			  {"entities", K::Entities, F::R8, false, "What to fill the buffers from."},
 			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
-			 // The fixed seven attachments include ID planes that the internal occlusion
+			 // The fixed eight attachments include ID planes that the internal occlusion
 			 // second pass LOADs and preserves.
 			 {{"albedo", K::Colour, RGBA8, true, "Base colour. Alpha is opacity."},
 			  {"normal", K::Colour, LDR, true, "World normals. Ten bits an axis is enough."},
 			  {"material", K::Colour, RGBA8, true, "Roughness, metalness, and material tags."},
 			  {"emissive", K::Colour, RGBA16, true, "Light emitted by the surface before exposure."},
+			  {"mesh-uv", K::Colour, RG16, true, "Visible authored mesh texture coordinates.", true},
 			  {"object-ids", K::Colour, R32U, true, "Dense object labels; zero is background.", true},
 			  {"semantic-ids",
 			   K::Colour,
@@ -735,7 +739,7 @@ namespace engine::graph {
 			  {"part-ids", K::Colour, R32U, true, "Dense authored part labels; zero is background.", true},
 			  {"depth", K::Depth, D24, true, "Scene depth."}},
 			 "The deferred split of the opaque pass: surface properties, not light. "
-			 "**Built** - seven colour targets plus depth, and the engine ships the shader. Declare "
+			 "**Built** - eight colour targets plus depth, and the engine ships the shader. Declare "
 			 "albedo, normal and material in that order; a node declaring fewer is "
 			 "refused rather than drawn short."},
 

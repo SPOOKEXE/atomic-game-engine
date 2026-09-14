@@ -35,6 +35,7 @@
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/MeshTable.hpp>
 #include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalImageImport.hpp>
@@ -137,6 +138,7 @@ namespace engine::render {
 			ObjectIds,
 			SemanticIds,
 			PartIds,
+			MeshUv,
 			LinearDepth,
 			SecondSurfaceZ,
 			SecondSurfaceDepth,
@@ -191,6 +193,7 @@ namespace engine::render {
 							ResourceRole::Normal,
 							ResourceRole::Material,
 							ResourceRole::Emissive,
+							ResourceRole::MeshUv,
 							ResourceRole::ObjectIds,
 							ResourceRole::SemanticIds,
 							ResourceRole::PartIds,
@@ -469,6 +472,7 @@ namespace engine::render {
 			SDL_GPUTexture *Normal = nullptr;
 			SDL_GPUTexture *Material = nullptr;
 			SDL_GPUTexture *Emissive = nullptr;
+			SDL_GPUTexture *MeshUv = nullptr;
 			SDL_GPUTexture *ObjectIds = nullptr;
 			SDL_GPUTexture *SemanticIds = nullptr;
 			SDL_GPUTexture *PartIds = nullptr;
@@ -1691,9 +1695,15 @@ namespace engine::render {
 			uint32_t Frame = 0;
 			uint64_t Sequence = 0;
 		};
-		// One data-factory capture keeps all twelve logical planes together. Shared
-		// capture nodes reduce those planes to at most nine GPU readbacks.
+		// One data-factory capture keeps its logical planes together. Shared
+		// capture nodes reduce thirteen resource-backed logical planes to at most
+		// ten deduplicated per-batch readback nodes. This is separate from the
+		// twelve-slot global resident-image capacity below.
 		static constexpr size_t RESOURCE_IMAGE_CAPACITY = 12;
+		static_assert(
+			MAX_DATA_FACTORY_READBACK_NODES <= RESOURCE_IMAGE_CAPACITY,
+			"data-factory readbacks must fit the renderer resource-image capacity"
+		);
 		struct PendingSceneSubmission {
 			SDL_GPUFence *Fence = nullptr;
 			std::vector<StagedSceneFrame> Frames;
@@ -1722,9 +1732,9 @@ namespace engine::render {
 			uint32_t DirectionalResponseStride = 0, DirectionalResponseOffset = 0;
 			bool Cancelled = false;
 		};
-		// Bounded copied-image requests. The default data-factory capture consumes
-		// ten slots for RGB, depth, normals, albedo, material, emissive, SSAO,
-		// and three segmentations.
+		// Bounded copied-image requests. The default data-factory capture has
+		// thirteen logical planes, with shared resources deduplicated to ten
+		// per-batch nodes. The global resident-image capacity remains twelve.
 		std::array<ResourceImageSlot, RESOURCE_IMAGE_CAPACITY> ResourceImages;
 		struct ResidentImagePair {
 			SDL_GPUTexture *Colour = nullptr;

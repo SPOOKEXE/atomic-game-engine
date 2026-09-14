@@ -420,6 +420,7 @@ namespace engine::render {
 			  slot.Normal,
 			  slot.Material,
 			  slot.Emissive,
+			  slot.MeshUv,
 			  slot.ObjectIds,
 			  slot.SemanticIds,
 			  slot.PartIds,
@@ -489,6 +490,8 @@ namespace engine::render {
 		made.Emissive = texture(
 			SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.TargetWidth, dimensions.TargetHeight
 		);
+		made.MeshUv =
+			texture(SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT, dimensions.TargetWidth, dimensions.TargetHeight);
 		made.ObjectIds =
 			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
 		made.SemanticIds =
@@ -512,8 +515,8 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
-			made.Emissive == nullptr || made.ObjectIds == nullptr || made.SemanticIds == nullptr ||
-			made.PartIds == nullptr || made.LinearDepth == nullptr ||
+			made.Emissive == nullptr || made.MeshUv == nullptr || made.ObjectIds == nullptr ||
+			made.SemanticIds == nullptr || made.PartIds == nullptr || made.LinearDepth == nullptr ||
 			(dimensions.SecondSurface &&
 			 (made.SecondSurfaceZ == nullptr || made.SecondSurfaceDepth == nullptr ||
 			  made.SecondSurfaceValidity == nullptr)) ||

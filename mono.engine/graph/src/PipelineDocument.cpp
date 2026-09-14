@@ -958,6 +958,7 @@ namespace engine::graph {
 		resource("normal", ResourceKind::Colour, ResourceFormat::RGB10A2);
 		resource("material", ResourceKind::Colour, ResourceFormat::RGBA8);
 		resource("emissive", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("mesh-uv", ResourceKind::Colour, ResourceFormat::RG16F);
 		resource("object-ids", ResourceKind::Colour, ResourceFormat::R32U);
 		resource("semantic-ids", ResourceKind::Colour, ResourceFormat::R32U);
 		resource("part-ids", ResourceKind::Colour, ResourceFormat::R32U);
@@ -1044,6 +1045,7 @@ namespace engine::graph {
 		touches(EditKind::Writes, "normal", "normal");
 		touches(EditKind::Writes, "material", "material");
 		touches(EditKind::Writes, "emissive", "emissive");
+		touches(EditKind::Writes, "mesh-uv", "mesh-uv");
 		touches(EditKind::Writes, "object-ids", "object-ids");
 		touches(EditKind::Writes, "semantic-ids", "semantic-ids");
 		touches(EditKind::Writes, "part-ids", "part-ids");
@@ -1487,6 +1489,15 @@ namespace engine::graph {
 				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
 			);
 		}
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-mesh-uv"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads, .Target = core::Name("mesh-uv"), .Key = core::Name("source")}
+		);
 		// SSAO is a half-size R8 screen-space estimate, so it has its own source-only
 		// capture rather than pretending it shares the full-size lit attachment.
 		document.Record(

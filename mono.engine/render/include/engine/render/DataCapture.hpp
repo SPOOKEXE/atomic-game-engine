@@ -90,6 +90,12 @@ namespace engine::render {
 		PbrAlbedo,
 		PbrMaterial,
 		PbrEmissive,
+		// The current material model has no authored specular or transmission fact.
+		// They remain requestable so consumers receive a terminal provenance record.
+		PbrSpecular,
+		PbrTransmission,
+		// Perspective-correct interpolated authored mesh texcoords at visible opaque pixels.
+		MeshUv,
 		// Screen-space ambient-occlusion estimator visibility, not ground truth.
 		AmbientOcclusion,
 		ObjectIds,
@@ -118,6 +124,7 @@ namespace engine::render {
 		const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	 ? "-albedo"
 										: channel == DataCaptureChannel::PbrMaterial ? "-material"
 										: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
+										: channel == DataCaptureChannel::MeshUv		 ? "-mesh-uv"
 										: channel == DataCaptureChannel::AmbientOcclusion
 											? "-ambient-occlusion"
 										: channel == DataCaptureChannel::ObjectIds	  ? "-object-ids"

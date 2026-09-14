@@ -41,6 +41,7 @@ namespace engine::render::capture_record_validation {
 		const bool valid =
 			(channel == DataCaptureChannel::RgbLinearHdr || channel == DataCaptureChannel::PbrEmissive)
 				? scalar == DataCaptureScalar::Float16
+			: channel == DataCaptureChannel::MeshUv ? scalar == DataCaptureScalar::Float16
 			: (channel == DataCaptureChannel::LinearDepth ||
 			   channel == DataCaptureChannel::SecondSurfaceDepth)
 				? scalar == DataCaptureScalar::Float32
@@ -57,8 +58,9 @@ namespace engine::render::capture_record_validation {
 		const size_t bytesPerPixel = (channel == DataCaptureChannel::AmbientOcclusion ||
 									  channel == DataCaptureChannel::SecondSurfaceValidity)
 										 ? 1
-									 : scalar == DataCaptureScalar::Float16 ? 8
-																			: 4;
+									 : channel == DataCaptureChannel::MeshUv ? 4
+									 : scalar == DataCaptureScalar::Float16	 ? 8
+																			 : 4;
 		return valid && width > 0 && bytesPerPixel <= std::numeric_limits<size_t>::max() / width
 				   ? bytesPerPixel * width
 				   : 0;
@@ -131,7 +133,16 @@ namespace engine::render::capture_record_validation {
 								  plane.Status == DataCaptureStatus::Invalid ||
 								  plane.Status == DataCaptureStatus::Failed ||
 								  plane.Status == DataCaptureStatus::Cancelled;
-			return terminal && !plane.AmbientOcclusion && plane.Provenance.empty() &&
+			const bool authoredUnavailable = plane.Channel == DataCaptureChannel::PbrSpecular ||
+											 plane.Channel == DataCaptureChannel::PbrTransmission;
+			const std::string_view expectedUnavailable =
+				plane.Channel == DataCaptureChannel::PbrSpecular
+					? "unavailable/authored_specular_not_in_current_material_model/v1"
+					: "unavailable/authored_transmission_not_in_current_material_model/v1";
+			return terminal && !plane.AmbientOcclusion &&
+				   (authoredUnavailable ? plane.Status == DataCaptureStatus::Unsupported &&
+											  plane.Provenance == expectedUnavailable
+										: plane.Provenance.empty()) &&
 				   !plane.Resource.IsValid() && plane.Hash.IsZero() && plane.Bytes.empty() &&
 				   plane.Width == 0 && plane.Height == 0 && plane.RowStride == 0 &&
 				   plane.Scalar == DataCaptureScalar::Unknown &&
@@ -142,7 +153,13 @@ namespace engine::render::capture_record_validation {
 		if ((plane.Channel == DataCaptureChannel::AmbientOcclusion
 				 ? !plane.AmbientOcclusion || !ValidAmbientOcclusion(*plane.AmbientOcclusion)
 				 : plane.AmbientOcclusion.has_value()) ||
-			(secondSurface ? !validSecondProvenance : !plane.Provenance.empty()) ||
+			(secondSurface ? !validSecondProvenance
+			 : plane.Channel == DataCaptureChannel::MeshUv
+				 ? plane.Provenance != "authored_mesh_texcoord/"
+									   "v1;components=u_v;units=dimensionless;range=unbounded;interpolation="
+									   "perspective_correct;surface=visible_builtin_opaque_or_masked;"
+									   "validity=both_float16_components_finite"
+				 : !plane.Provenance.empty()) ||
 			!plane.Resource.IsValid() || plane.Hash.IsZero() || plane.Width == 0 || plane.Height == 0 ||
 			stride == 0 || plane.RowStride < stride || plane.Origin != DataCaptureOrigin::TopLeft ||
 			plane.ColourSpace != ((plane.Channel == DataCaptureChannel::RgbLinearHdr ||

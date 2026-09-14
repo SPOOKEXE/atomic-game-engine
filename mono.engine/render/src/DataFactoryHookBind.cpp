@@ -588,9 +588,14 @@ namespace engine::render {
 					State->Fail(batch, DataCaptureStatus::Failed);
 				continue;
 			}
-			if (poll.Status == DataCaptureStatus::Partial) {
-				State->Fail(batch, DataCaptureStatus::Failed);
-				continue;
+			if (poll.Status == DataCaptureStatus::Unsupported) {
+				// Virtual unavailable channels have no readback image, so the hook
+				// supplies the observation identity captured at dispatch.
+				poll.CaptureFrame = batch.Observation.Frame;
+				poll.Pipeline = batch.Observation.Pipeline;
+				poll.PipelineRevision = batch.Observation.PipelineRevision;
+				poll.WorldName = batch.Observation.WorldName;
+				poll.ViewSlot = batch.Observation.ViewSlot;
 			}
 			if (poll.SnapshotId != batch.Observation.SnapshotId ||
 				poll.CaptureFrame != batch.Observation.Frame || poll.Pipeline != batch.Observation.Pipeline ||

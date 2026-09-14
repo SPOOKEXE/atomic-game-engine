@@ -89,9 +89,9 @@ namespace engine::render {
 			caps.UnifiedQueue = true;
 			caps.PrefersMSL = binary.Form == resources::ShaderForm::Msl;
 			caps.MaxSamplersPerDraw = 10;
-			// The default PBR graph uses seven colour attachments, including the
-			// object, semantic, and part ID planes.
-			caps.MaxColourTargets = 8;
+			// SDL exposes no portable maximum-colour-target query. The renderer
+			// fills this only after its real eight-target G-buffer pipeline builds.
+			// A format query alone does not prove simultaneous attachment support.
 
 			const SDL_GPUTextureUsageFlags storageUsage = SDL_GPU_TEXTUREUSAGE_SAMPLER |
 														  SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ |
@@ -667,6 +667,24 @@ namespace engine::render {
 			}
 		}
 
+		SDL_GPUSamplerCreateInfo sampler{};
+		// Nearest, because the overlay is pixel art at exactly one texel per
+		// pixel. Linear would blur the 3x5 font into illegibility.
+		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		State->OverlaySampler = SDL_CreateGPUSampler(State->Device, &sampler);
+
+		if (!State->CreatePipelines() || !State->CreateGeometry()) {
+			Shutdown();
+			return false;
+		}
+
+		// The native G-buffer pipeline is the proof that this device accepts all
+		// eight attachments at once. Choose after that probe so a backend that
+		// rejects it starts with the forward graph instead of aborting startup.
 		const PipelineTierDecision defaultTier = ChooseDefaultPipeline(State->Caps);
 		for (const PipelineTierRejection &rejected : defaultTier.Fallthrough) {
 			ENGINE_INFO(
@@ -696,21 +714,6 @@ namespace engine::render {
 			return false;
 		}
 		if (!InstallEngineDefault(defaultDocument)) {
-			Shutdown();
-			return false;
-		}
-
-		SDL_GPUSamplerCreateInfo sampler{};
-		// Nearest, because the overlay is pixel art at exactly one texel per
-		// pixel. Linear would blur the 3x5 font into illegibility.
-		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
-		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
-		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-		State->OverlaySampler = SDL_CreateGPUSampler(State->Device, &sampler);
-
-		if (!State->CreatePipelines() || !State->CreateGeometry()) {
 			Shutdown();
 			return false;
 		}
@@ -2175,6 +2178,9 @@ namespace engine::render {
 		}
 		if (role == Impl::ResourceRole::Emissive) {
 			return pbr.Emissive;
+		}
+		if (role == Impl::ResourceRole::MeshUv) {
+			return pbr.MeshUv;
 		}
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return pbr.LinearDepth;

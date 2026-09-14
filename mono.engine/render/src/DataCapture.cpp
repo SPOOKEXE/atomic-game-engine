@@ -15,6 +15,12 @@ namespace engine::render {
 			return "pbr_material";
 		case DataCaptureChannel::PbrEmissive:
 			return "pbr_emissive";
+		case DataCaptureChannel::PbrSpecular:
+			return "pbr_specular";
+		case DataCaptureChannel::PbrTransmission:
+			return "pbr_transmission";
+		case DataCaptureChannel::MeshUv:
+			return "mesh_uv";
 		case DataCaptureChannel::AmbientOcclusion:
 			return "ambient_occlusion";
 		case DataCaptureChannel::ObjectIds:
