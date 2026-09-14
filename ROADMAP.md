@@ -160,6 +160,8 @@ Add richer scene, render and multimodal truth:
 - [x] emit structured event narratives with time, knowledge, belief and provenance fields.
 - [x] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks. The Python factory validates immutable text spans, points, semantic and part masks, control IDs, frame times and audio sample rates against media bounds.
 - [x] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership. The evidence ledger enforces stable source and fact identities, legal freshness transitions, monotonic observation times, atomic bounded updates and repair-result lineage across engine and external owners.
+- [_] per-object isolated views for normals, shadows, light reflections, segmentations, etc.
+- [_] layered-image variant where we extract per-object isolated views in a way where we can rebuild the original scene by layering them on top. Maybe add a cross-object domain for shadows/lighting/normals for reflections off ground for other objects and such.
 
 Scale into dataset generation, evaluation and inverse tasks:
 - [x] generate counterfactual pairs, parameter sweeps, domain randomization and holdouts without label leakage. The Python factory builds immutable seeded plans, paired one-axis variants, typed choice and uniform sweeps, connected group-aware holdouts and leakage checks across scenes, pairs, assets, sources and provenance.
