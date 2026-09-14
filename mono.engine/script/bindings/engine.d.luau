@@ -2974,12 +2974,12 @@ declare extern type ComputeService with
 	): { number }
 end
 
--- A copied, non-parented capture request. CameraId is the current_view token
--- for this bridge, never a live Instance reference.
+-- A copied, non-parented capture request. CameraId is `current_view` or a
+-- stable DataFactoryId for a Camera, never a live Instance reference.
 export type DataSceneOptions = {
 	SchemaVersion: "data-scene-options/v1",
 	Channels: { string },
-	CameraId: "current_view",
+	CameraId: string,
 	Pipeline: string,
 	CaptureNode: string,
 	ViewSlot: number,

@@ -1,6 +1,8 @@
 #include "CaptureRecordValidation.hpp"
 
 #include <engine/render/DataFactoryHookBind.hpp>
+#include <engine/ecs/Attributes.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/script/DataSceneService.hpp>
 
@@ -49,7 +51,8 @@ namespace engine::render {
 
 		bool Valid(std::string_view instanceId, const script::DataCaptureBridgeRequest &request) {
 			if (!Text(instanceId) || request.InstanceId != instanceId || !Text(request.SnapshotId) ||
-				!Text(request.Pipeline) || !Text(request.CaptureNode) || request.Channels.empty() ||
+				!Text(request.Pipeline) || !Text(request.CaptureNode) ||
+				!Text(request.CameraId, script::MAX_DATA_SCENE_ID_BYTES) || request.Channels.empty() ||
 				request.Channels.size() > MAX_CAPTURE_CHANNELS || request.TemporalHistory != "preserve" ||
 				request.ViewSlot > std::numeric_limits<size_t>::max())
 				return false;
@@ -71,6 +74,38 @@ namespace engine::render {
 			const std::string suffix = "#" + std::to_string(view.World);
 			return runtime.ends_with(suffix) &&
 				   requested == runtime.substr(0, runtime.size() - suffix.size());
+		}
+
+		bool ResolveNamedCamera(
+			world::DataFactorySession &session, View &view, std::string_view cameraId, std::string &detail
+		) {
+			if (cameraId == "current_view") return true;
+			bool found = false;
+			bool duplicate = false;
+			const world::WorldStatus status = session.UniverseOf().Enter(
+				session.UniverseOf().Find(view.WorldName), [&](ecs::Store &store) {
+					store.EachEntity([&](ecs::Entity entity) {
+						const scene::Camera *camera = store.Get<scene::Camera>(entity);
+						const scene::Transform *transform = store.Get<scene::Transform>(entity);
+						ecs::AttributeValue identity;
+						if (!camera || !transform ||
+							!ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identity) ||
+							identity.Type != ecs::PropertyType::String || identity.String != cameraId)
+							return;
+						if (found) {
+							duplicate = true;
+							return;
+						}
+						view.CameraFrame = transform->Frame;
+						view.Camera = *camera;
+						found = true;
+					});
+				}
+			);
+			if (status != world::WorldStatus::Ok) detail = "capture world is unavailable";
+			else if (duplicate) detail = "named camera id is not unique";
+			else if (!found) detail = "named camera id does not identify a camera";
+			return status == world::WorldStatus::Ok && found && !duplicate;
 		}
 
 		const char *Status(DataCaptureStatus status) {
@@ -265,6 +300,8 @@ namespace engine::render {
 			.MaximumReadbackNodes = static_cast<uint32_t>(MAX_DATA_FACTORY_READBACK_NODES),
 			.MaximumRetainedBytes = MAX_DATA_FACTORY_RETAINED_BYTES,
 			.MaximumPendingPumps = MAX_DATA_FACTORY_PENDING_PUMPS,
+			.NamedCameraSelection = true,
+			.MaximumCameraIdBytes = static_cast<uint32_t>(script::MAX_DATA_SCENE_ID_BYTES),
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
 		};
@@ -574,8 +611,10 @@ namespace engine::render {
 				else if (!mutationSnapshots.empty())
 					selectedSnapshot = mutationSnapshots.front().second;
 			}
+			const std::string selectedCamera =
+				pending.empty() ? "current_view" : pending.front().Request.CameraId;
 			std::erase_if(pending, [&](const PendingRequest &request) {
-				return request.Request.SnapshotId != selectedSnapshot;
+				return request.Request.SnapshotId != selectedSnapshot || request.Request.CameraId != selectedCamera;
 			});
 			for (const auto &[ticket, entry] : Mutations) {
 				const auto &request = entry.Request;
@@ -610,6 +649,33 @@ namespace engine::render {
 		}
 		if (!armedSnapshotCurrent) return;
 		if (!selectedSnapshot.empty()) view.SnapshotId = selectedSnapshot;
+		if (!pending.empty()) {
+			const world::DataFactoryReply barrier =
+				Session.RenderSnapshotBarrier(view.WorldName.Text(), pending.front().Request.SnapshotId);
+			if (barrier.Status != world::DataFactoryStatus::Ok) {
+				std::lock_guard lock(Mutex);
+				for (const PendingRequest &request : pending)
+					if (auto entry = Entries.find(request.Id); entry != Entries.end()) {
+						entry->second.Reply.Status = "stale_snapshot";
+						entry->second.Reply.SnapshotId = request.Request.SnapshotId;
+						entry->second.Detail = barrier.Detail;
+						entry->second.Terminal = true;
+					}
+				return;
+			}
+			std::string cameraDetail;
+			if (!ResolveNamedCamera(Session, view, pending.front().Request.CameraId, cameraDetail)) {
+				std::lock_guard lock(Mutex);
+				for (const PendingRequest &request : pending)
+					if (auto entry = Entries.find(request.Id); entry != Entries.end()) {
+						entry->second.Reply.Status = "invalid";
+						entry->second.Reply.SnapshotId = request.Request.SnapshotId;
+						entry->second.Detail = cameraDetail;
+						entry->second.Terminal = true;
+					}
+				return;
+			}
+		}
 		{
 			std::lock_guard lock(Mutex);
 			for (const PendingRequest &request : pending)

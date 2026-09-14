@@ -141,7 +141,7 @@ namespace engine::control {
 				failure = Error("validation_failed", "options.view_slot must fit uint32");
 				return false;
 			}
-			if (schema != "data-scene-options/v1" || camera != "current_view" || history != "preserve" ||
+			if (schema != "data-scene-options/v1" || history != "preserve" ||
 				storage != "lossless" || output != "raw_planes" || coordinate != "world_camera_image" ||
 				noise != "none" || noiseSeed != 0) {
 				failure = Error(
@@ -150,6 +150,7 @@ namespace engine::control {
 				return false;
 			}
 			request.ViewSlot = slot;
+			request.CameraId = std::move(camera);
 			if (!Field(options, "include_scene_data", field, failure)) return false;
 			if (!field->is_boolean()) {
 				failure = Error("validation_failed", "options.include_scene_data must be a boolean");
@@ -463,6 +464,7 @@ namespace engine::control {
 					 {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"pipeline", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"capture_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"camera_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					 {"view_slot", {{"type", "integer"}, {"minimum", 0}}},
 					 {"channels",
 					  {{"type", "array"},
@@ -494,6 +496,7 @@ namespace engine::control {
 						 "snapshot_id",
 						 "pipeline",
 						 "capture_node",
+						 "camera_id",
 						 "view_slot",
 						 "channels",
 						 "temporal_history",
@@ -524,6 +527,14 @@ namespace engine::control {
 					!Text(*field, "operation_id", operation, failure))
 					return nullptr;
 				request.ViewSlot = slot;
+				if (const auto camera = values.find("camera_id"); camera != values.end()) {
+					if (!OptionText(*camera, "camera_id", MAXIMUM_OPTION_TEXT, request.CameraId, failure))
+						return nullptr;
+					if (request.CameraId != "current_view" && !bridge->Capabilities().NamedCameraSelection) {
+						failure = Error("capability_unsupported", "named camera selection is unavailable");
+						return nullptr;
+					}
+				}
 				if (request.TemporalHistory != "preserve") {
 					failure =
 						Error("capability_unsupported", "this host supports only preserve temporal history");
@@ -553,6 +564,12 @@ namespace engine::control {
 					return prior->second.Result;
 				}
 				if (!Versions(session, request.InstanceId, values, failure)) {
+					json result = VersionReply(session, request.InstanceId);
+					Store(*ledger, operation, normalizedText, result, failure);
+					return result;
+				}
+				if (request.CameraId != "current_view" && !bridge->Capabilities().NamedCameraSelection) {
+					failure = Error("capability_unsupported", "named camera selection is unavailable");
 					json result = VersionReply(session, request.InstanceId);
 					Store(*ledger, operation, normalizedText, result, failure);
 					return result;

@@ -2608,7 +2608,7 @@ declare interface ComputeService {
 interface DataSceneOptions {
 	SchemaVersion: "data-scene-options/v1";
 	Channels: string[];
-	CameraId: "current_view";
+	CameraId: string;
 	Pipeline: string;
 	CaptureNode: string;
 	ViewSlot: number;

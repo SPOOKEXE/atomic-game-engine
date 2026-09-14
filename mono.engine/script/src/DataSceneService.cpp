@@ -911,6 +911,8 @@ namespace engine::script {
 						 {"maximum_readback_nodes", Number(capabilities.MaximumReadbackNodes)},
 						 {"maximum_retained_bytes", Number(capabilities.MaximumRetainedBytes)},
 						 {"maximum_pending_pumps", Number(capabilities.MaximumPendingPumps)},
+						 {"named_camera_selection", Boolean(capabilities.NamedCameraSelection)},
+						 {"maximum_camera_id_bytes", Number(capabilities.MaximumCameraIdBytes)},
 					 })},
 					{"reason", String(capabilities.Detail)},
 				})
@@ -934,6 +936,16 @@ namespace engine::script {
 			}
 			request.InstanceId = worldName;
 			request.IncludeSceneData = includeSceneData;
+			if (const ScriptValue *camera = Field(value, "camera_id"); camera != nullptr) {
+				if (camera->Tag != ValueTag::String || camera->Text.empty() ||
+					camera->Text.size() > MAX_DATA_SCENE_ID_BYTES || camera->Text.find('\0') != std::string::npos ||
+					!DataSceneUtf8(camera->Text))
+					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
+				request.CameraId = camera->Text;
+				if (request.CameraId != "current_view" && !bridge->Capabilities().NamedCameraSelection)
+					return {"unsupported", Map({{"status", String("unsupported_capture_request")},
+						{"reason", String("named camera selection is unavailable")}})};
+			}
 			const ScriptValue *slot = Field(value, "view_slot");
 			if (slot == nullptr || slot->Tag != ValueTag::Number || !std::isfinite(slot->Number) ||
 				!(slot->Number >= 0.0) ||
@@ -1163,7 +1175,7 @@ namespace engine::script {
 			std::string schema, cameraId, pipeline, captureNode, history, storage, output, coordinateSpace,
 				noiseMode;
 			if (!OptionText(options, "SchemaVersion", "data-scene-options/v1", schema) ||
-				!OptionText(options, "CameraId", "current_view", cameraId) ||
+				!BoundedStringField(options, "CameraId", MAX_DATA_SCENE_ID_BYTES, cameraId) ||
 				!BoundedStringField(options, "Pipeline", 256, pipeline) ||
 				!BoundedStringField(options, "CaptureNode", 256, captureNode) ||
 				!OptionText(options, "TemporalHistory", "preserve", history) ||
@@ -1198,6 +1210,10 @@ namespace engine::script {
 						{"reason", String("bundle exact mask assembly is not implemented")},
 					})
 				};
+			if (cameraId != "current_view" &&
+				(!bridge || !bridge->Capabilities().NamedCameraSelection))
+				return {"unsupported", Map({{"status", String("unsupported_data_scene_options")},
+					{"reason", String("named camera selection is unavailable")}})};
 
 			std::vector<ScriptValue> copiedChannels;
 			copiedChannels.reserve(channels->Items.size());
@@ -1225,6 +1241,7 @@ namespace engine::script {
 				{"snapshot_id", String(snapshotId)},
 				{"pipeline", String(pipeline)},
 				{"capture_node", String(captureNode)},
+				{"camera_id", String(cameraId)},
 				{"view_slot", Number(slot->Number)},
 				{"channels", Array(std::move(copiedChannels))},
 				{"temporal_history", String(history)},

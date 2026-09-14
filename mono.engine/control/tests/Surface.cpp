@@ -186,6 +186,8 @@ namespace {
 				.MaximumReadbackNodes = 12,
 				.MaximumRetainedBytes = 64u * 1024u * 1024u,
 				.MaximumPendingPumps = 600,
+				.NamedCameraSelection = true,
+				.MaximumCameraIdBytes = 256,
 				.Detail = "ready"
 			};
 		}
@@ -199,6 +201,7 @@ namespace {
 			Snapshot = request.SnapshotId;
 			Pipeline = request.Pipeline;
 			CaptureNode = request.CaptureNode;
+			CameraId = request.CameraId;
 			ViewSlot = request.ViewSlot;
 			Channels = request.Channels;
 			IncludeSceneData = request.IncludeSceneData;
@@ -362,6 +365,7 @@ namespace {
 		std::string Snapshot;
 		std::string Pipeline;
 		std::string CaptureNode;
+		std::string CameraId;
 		std::vector<std::string> Channels;
 		uint64_t ViewSlot = 0;
 		bool Queued = false;
@@ -690,12 +694,18 @@ TEST_CASE(
 	CHECK(bridge->RequestedPipeline() == "Default PBR");
 	CHECK(bridge->RequestedCaptureNode() == "data-capture");
 	CHECK(bridge->RequestedViewSlot() == 3);
+	CHECK(bridge->CameraId == "current_view");
+	json namedCamera = valid;
+	namedCamera["operation_id"] = "bundle-named-camera";
+	namedCamera["options"]["camera_id"] = "camera/fixture";
+	CHECK(Called(surface, "capture_bundle", namedCamera)["status"] == "queued");
+	CHECK(bridge->CameraId == "camera/fixture");
 	CHECK(
 		bridge->RequestedChannels() ==
 		std::vector<std::string>{"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"}
 	);
 	CHECK(Called(surface, "capture_bundle", valid) == queued);
-	CHECK(bridge->QueueCount == 1);
+	CHECK(bridge->QueueCount == 2);
 	const json withoutSidecar =
 		Called(surface, "poll_capture", {{"instance_id", "capture-bundle-world"}, {"ticket", 1}});
 	CHECK(withoutSidecar["scene_sidecar"].is_null());
@@ -786,6 +796,8 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 	CHECK(reply["limits"]["maximum_readback_nodes"] == 12);
 	CHECK(reply["limits"]["maximum_retained_bytes"] == 67'108'864);
 	CHECK(reply["limits"]["maximum_pending_pumps"] == 600);
+	CHECK(reply["limits"]["named_camera_selection"] == true);
+	CHECK(reply["limits"]["maximum_camera_id_bytes"] == 256);
 }
 
 TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {

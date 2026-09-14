@@ -20,6 +20,9 @@ namespace engine::script {
 		std::string SnapshotId;
 		std::string Pipeline;
 		std::string CaptureNode;
+		// `current_view` keeps the host's selected view. Any other value is a
+		// stable authored DataFactoryId for one Camera and Transform in the world.
+		std::string CameraId = "current_view";
 		uint64_t ViewSlot = 0;
 		std::vector<std::string> Channels;
 		std::string TemporalHistory;
@@ -155,6 +158,8 @@ namespace engine::script {
 		uint32_t MaximumReadbackNodes = 0;
 		uint64_t MaximumRetainedBytes = 0;
 		uint32_t MaximumPendingPumps = 0;
+		bool NamedCameraSelection = false;
+		uint32_t MaximumCameraIdBytes = 0;
 		std::string Detail;
 	};
 

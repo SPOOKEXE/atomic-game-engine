@@ -802,6 +802,8 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 		std::find(capabilities.Channels.begin(), capabilities.Channels.end(), "ambient_occlusion") !=
 		capabilities.Channels.end()
 	);
+	CHECK(capabilities.NamedCameraSelection);
+	CHECK(capabilities.MaximumCameraIdBytes == engine::script::MAX_DATA_SCENE_ID_BYTES);
 	const size_t observationHooks = static_cast<size_t>(
 		std::count_if(capabilities.HookRecords.begin(), capabilities.HookRecords.end(), [](const auto &hook) {
 			return hook.Access == "observation";

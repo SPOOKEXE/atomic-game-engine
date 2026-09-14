@@ -20,6 +20,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -105,6 +106,8 @@ namespace {
 				.MaximumReadbackNodes = 12,
 				.MaximumRetainedBytes = 64u * 1024u * 1024u,
 				.MaximumPendingPumps = 600,
+				.NamedCameraSelection = true,
+				.MaximumCameraIdBytes = 256,
 				.Detail = "test queue"
 			};
 		}
@@ -121,6 +124,7 @@ namespace {
 			}
 			Owner = request.InstanceId;
 			LastRequest = request;
+			CameraIds.push_back(request.CameraId);
 			Queued = true;
 			ticket = Ticket;
 			detail = "accepted";
@@ -256,6 +260,7 @@ namespace {
 		bool Released = false;
 		engine::script::DataCaptureBridgeRequest LastRequest;
 		engine::script::ViewCameraMutationRequest Mutation;
+		std::vector<std::string> CameraIds;
 		bool MutationQueued = false;
 		bool MutationCancelled = false;
 
@@ -770,7 +775,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				assert(queued.status == "queued" and queued.options.CameraId == "current_view")
 				local invalid = service:CreateOptions()
 				invalid.CameraId = "fixture/camera"
-				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "queued")
 				options.IncludeSceneData = true
 				assert(service:CaptureBundle("fixture/snapshot", options).status == "queued")
 				invalid = service:CreateOptions()
@@ -808,7 +813,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				if (queued.status !== "queued" || queued.options.CameraId !== "current_view") throw new Error("queue");
 				let invalid = service.CreateOptions();
 				invalid.CameraId = "fixture/camera";
-				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("camera");
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "queued") throw new Error("camera");
 				options.IncludeSceneData = true;
 				if (service.CaptureBundle("fixture/snapshot", options).status !== "queued") throw new Error("scene data");
 				invalid = service.CreateOptions(); invalid.IncludeExactMasks = true;
@@ -830,6 +835,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 		CHECK(bridge->LastRequest.SnapshotId == "fixture/snapshot");
 		CHECK(bridge->LastRequest.Pipeline == "main");
 		CHECK(bridge->LastRequest.CaptureNode == "lit");
+		CHECK(bridge->LastRequest.CameraId == "current_view");
+		CHECK(std::find(bridge->CameraIds.begin(), bridge->CameraIds.end(), "fixture/camera") != bridge->CameraIds.end());
 		CHECK(bridge->LastRequest.Channels == std::vector<std::string>{"rgb_linear_hdr", "object_ids"});
 		CHECK(bridge->LastRequest.IncludeSceneData);
 	}
