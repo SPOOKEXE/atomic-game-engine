@@ -30,6 +30,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.control.surface")
@@ -1693,6 +1694,51 @@ TEST_CASE(
 	CHECK(retired["world_version"] == resetPaused["world_version"].get<uint64_t>() + 1);
 }
 
+TEST_CASE("data-factory world tools canonicalize numeric operation arguments", "[control][data-factory]") {
+	Universe universe;
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+
+	const json integerTickRate{
+		{"instance_id", "canonical-tick-rate"}, {"seed", 7u}, {"tick_rate", 60u}, {"operation_id", "create"}
+	};
+	const json decimalTickRate{
+		{"instance_id", "canonical-tick-rate"}, {"seed", 7u}, {"tick_rate", 60.0}, {"operation_id", "create"}
+	};
+	const json created = Called(surface, "world_create", integerTickRate);
+	CHECK(Called(surface, "world_create", decimalTickRate) == created);
+	CHECK(universe.Count() == 1);
+}
+
+TEST_CASE("data-factory ledger remains valid across surface copies and moves", "[control][data-factory]") {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "surface-ledger-lifetime");
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	Surface original("test", "a suite");
+	original.Enable(std::array{engine::control::features::DataFactory(session)});
+	Surface copied = original;
+	Surface moved = std::move(original);
+	const auto lifecycle = session.Inspect("surface-ledger-lifetime");
+	const json request{
+		{"instance_id", "surface-ledger-lifetime"},
+		{"expected_tick", lifecycle.Clock.Tick},
+		{"expected_world_epoch", lifecycle.WorldEpoch},
+		{"expected_world_version", lifecycle.WorldVersion},
+		{"operation_id", "moved-surface-pause"}
+	};
+	const json paused = Called(moved, "pause", request);
+	CHECK(paused["status"] == "ok");
+	CHECK(Called(copied, "pause", request) == paused);
+	CHECK(universe.StatisticsOf(world).Ticks == 0);
+}
+
 TEST_CASE(
 	"data-factory render-only MCP tools distinguish pending from submitted", "[control][data-factory]"
 ) {
@@ -1854,4 +1900,67 @@ TEST_CASE("data-factory intervention is guarded, typed, and idempotent", "[contr
 	CHECK(received[0].Expected.Type == engine::world::DataFactoryInterventionValue::Kind::String);
 	CHECK(received[0].Value.String == "new");
 	CHECK(Called(surface, "apply_intervention", request) == applied);
+}
+
+TEST_CASE(
+	"data-factory mutation ids are shared and audited across lifecycle and capture", "[control][data-factory]"
+) {
+	Universe universe;
+	MakeWorld(universe, "cross-tool-policy");
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	auto bridge = std::make_shared<FakeCapture>();
+	Surface surface("test", "a suite");
+	surface.Enable(
+		std::array{
+			engine::control::features::DataFactory(session),
+			engine::control::features::DataCapture(session, bridge)
+		}
+	);
+	const auto before = session.Inspect("cross-tool-policy");
+	CHECK(
+		Called(
+			surface,
+			"pause",
+			json{
+				{"instance_id", "cross-tool-policy"},
+				{"expected_tick", before.Clock.Tick},
+				{"expected_world_epoch", before.WorldEpoch},
+				{"expected_world_version", before.WorldVersion},
+				{"operation_id", "shared-id"}
+			}
+		)["status"] == "ok"
+	);
+
+	bool failed = false;
+	const json conflict = Called(
+		surface,
+		"capture",
+		json{
+			{"instance_id", "cross-tool-policy"},
+			{"snapshot_id", "snapshot-1"},
+			{"pipeline", "default_pbr"},
+			{"capture_node", "capture"},
+			{"view_slot", 0u},
+			{"channels", json::array({"rgb_linear_hdr"})},
+			{"temporal_history", "preserve"},
+			{"operation_id", "shared-id"},
+			{"expected_tick", before.Clock.Tick},
+			{"expected_world_epoch", before.WorldEpoch},
+			{"expected_world_version", before.WorldVersion}
+		},
+		failed
+	);
+	CHECK(failed);
+	CHECK(conflict["error"].get<std::string>().starts_with("operation_id_conflict:"));
+
+	const json audit = Called(surface, "data_factory_operation_audit", json{{"limit", 1u}});
+	CHECK(audit["maximum_entries"] == 256);
+	REQUIRE(audit["entries"].size() == 1);
+	CHECK(audit["entries"][0]["tool"] == "pause");
+	CHECK(audit["entries"][0]["operation_id"] == "shared-id");
+	CHECK(audit["entries"][0]["status"] == "ok");
+	CHECK_FALSE(audit["entries"][0].contains("arguments"));
 }

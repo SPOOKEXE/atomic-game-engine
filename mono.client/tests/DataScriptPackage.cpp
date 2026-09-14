@@ -1,10 +1,15 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/DataFactory.hpp>
+#include <engine/core/Name.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <client/DataScriptPackage.hpp>
 #include <nlohmann/json.hpp>
 #include <span>
@@ -106,7 +111,80 @@ TEST_CASE(
 	json conflict = Request();
 	conflict["expected_world_version"] = 5;
 	CHECK(PackageTool(surface).Call(conflict, failure).is_null());
-	CHECK(failure.starts_with("operation_conflict:"));
+	CHECK(failure.starts_with("operation_id_conflict:"));
+}
+
+TEST_CASE("client package tool shares lifecycle and capture operation ids", "[client][mcp]") {
+	engine::world::Universe universe;
+	engine::world::WorldSettings settings;
+	settings.Name = engine::core::Name("script-package-policy");
+	universe.Create(settings);
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant(
+		[](engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) { return true; }
+	);
+	engine::control::Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	unsigned calls = 0;
+	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &request) {
+		calls++;
+		engine::script::DataScriptResult result;
+		result.Ran = true;
+		result.Atomic = true;
+		result.Lifecycle.InstanceId = request.InstanceId;
+		result.Lifecycle.Clock.Tick = request.ExpectedTick;
+		result.Lifecycle.WorldEpoch = request.ExpectedEpoch;
+		result.Lifecycle.WorldVersion = request.ExpectedVersion + 1;
+		return result;
+	});
+
+	auto lifecycle = session.Inspect("script-package-policy");
+	std::string failure;
+	bool paused = false;
+	for (const engine::control::Tool &tool : surface.Registered()) {
+		if (tool.Name != "pause") continue;
+		const json reply = tool.Call(
+			json{
+				{"instance_id", "script-package-policy"},
+				{"expected_tick", lifecycle.Clock.Tick},
+				{"expected_world_epoch", lifecycle.WorldEpoch},
+				{"expected_world_version", lifecycle.WorldVersion},
+				{"operation_id", "pause-id"}
+			},
+			failure
+		);
+		REQUIRE(reply["status"] == "ok");
+		paused = true;
+		break;
+	}
+	REQUIRE(paused);
+	CHECK(failure.empty());
+	CHECK(PackageTool(surface).Call(Request("pause-id"), failure).is_null());
+	CHECK(failure.starts_with("operation_id_conflict:"));
+	CHECK(calls == 0);
+
+	surface.DataFactoryOperations()->Store(
+		"capture", "capture-id", "capture", json{{"status", "queued"}}, ""
+	);
+	CHECK(PackageTool(surface).Call(Request("capture-id"), failure).is_null());
+	CHECK(failure.starts_with("operation_id_conflict:"));
+	CHECK(calls == 0);
+
+	CHECK(PackageTool(surface).Call(Request("script-id"), failure)["status"] == "completed");
+	CHECK(failure.empty());
+	CHECK(calls == 1);
+	bool audited = false;
+	failure.clear();
+	for (const engine::control::Tool &tool : surface.Registered()) {
+		if (tool.Name != "data_factory_operation_audit") continue;
+		const json audit = tool.Call(json{{"limit", 1u}}, failure);
+		REQUIRE(failure.empty());
+		CHECK(audit["entries"][0]["tool"] == "run_script_package");
+		CHECK(audit["entries"][0]["operation_id"] == "script-id");
+		audited = true;
+		break;
+	}
+	REQUIRE(audited);
 }
 
 TEST_CASE("client package tool bounds hostile bytes and declares Luau only", "[client][mcp]") {
@@ -176,7 +254,7 @@ TEST_CASE("client package tool applies manifest byte budgets before execution", 
 	CHECK(calls == 0);
 }
 
-TEST_CASE("client package tool keeps exact terminal wire replies and bounded replay", "[client][mcp]") {
+TEST_CASE("client package tool makes an evicted operation id fresh again", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
 	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {

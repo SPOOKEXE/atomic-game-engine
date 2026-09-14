@@ -42,6 +42,7 @@ namespace engine::script {
 namespace engine::control {
 
 	class Surface;
+	class DataFactoryOperationLedger;
 
 	// One named group of tools, resources, or prompts a program elects to
 	// expose. The installer runs immediately and is not retained.
@@ -191,6 +192,13 @@ namespace engine::control {
 		DataCaptureAvailability CaptureAvailability() const;
 		void SetRenderGraphProvider(RenderGraphProvider provider);
 		const RenderGraphProvider &RenderGraph() const;
+
+		// The one replay and audit ledger shared by all installed data-factory
+		// mutation tools. It is surface-local because MCP clients do not share
+		// authority across host processes.
+		std::shared_ptr<DataFactoryOperationLedger> DataFactoryOperations() const {
+			return FactoryOperations;
+		}
 
 		// Installs the tools any program with worlds can answer.
 		//
@@ -396,6 +404,7 @@ namespace engine::control {
 		std::vector<Tool> Tools;
 		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
 		RenderGraphProvider RenderGraphProviderCallback;
+		std::shared_ptr<DataFactoryOperationLedger> FactoryOperations;
 		std::vector<Resource> Resources;
 		std::vector<Prompt> Prompts;
 		bool Profiling = false;

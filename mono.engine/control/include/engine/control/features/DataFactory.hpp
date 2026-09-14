@@ -3,6 +3,7 @@
 // The data-factory lifecycle tools. The host owns the session; this adapter
 // validates MCP input before inspecting or mutating that session.
 
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Attributes.hpp>
@@ -35,7 +36,6 @@ namespace engine::control {
 	namespace data_factory_detail {
 		inline constexpr size_t MAXIMUM_ID = 128;
 		inline constexpr size_t MAXIMUM_ACTIONS = 32;
-		inline constexpr size_t MAXIMUM_LEDGER_ENTRIES = 256;
 
 		inline const char *OccupancyReason(physics::ColliderOccupancy::Reason reason) {
 			switch (reason) {
@@ -113,16 +113,6 @@ namespace engine::control {
 			std::string BaseSnapshotId;
 			std::vector<world::DataFactoryIntervention> Changes;
 			std::vector<world::DataFactoryAction> Actions;
-		};
-
-		struct LedgerEntry {
-			std::string Arguments;
-			json Result;
-			std::string Failure;
-		};
-		struct Ledger {
-			std::unordered_map<std::string, LedgerEntry> Entries;
-			std::deque<std::string> Order;
 		};
 
 		inline std::string Error(std::string_view code, std::string_view detail) {
@@ -351,19 +341,6 @@ namespace engine::control {
 			return true;
 		}
 
-		inline void Store(
-			Ledger &ledger, const std::string &id, std::string arguments, json result, std::string failure
-		) {
-			ledger.Order.push_back(id);
-			ledger.Entries.emplace(
-				id, LedgerEntry{std::move(arguments), std::move(result), std::move(failure)}
-			);
-			while (ledger.Order.size() > MAXIMUM_LEDGER_ENTRIES) {
-				ledger.Entries.erase(ledger.Order.front());
-				ledger.Order.pop_front();
-			}
-		}
-
 		inline json WorldReply(const world::DataFactoryReply &reply, bool retired) {
 			json result = Reply(reply);
 			if (retired) result["tombstone"] = reply.Tombstone;
@@ -428,7 +405,7 @@ namespace engine::control {
 
 	inline void Surface::AddDataFactoryTools(world::DataFactorySession &session) {
 		using namespace data_factory_detail;
-		auto ledger = std::make_shared<Ledger>();
+		auto ledger = DataFactoryOperations();
 		auto invoke = [&session, ledger](
 						  std::string_view tool,
 						  const json &values,
@@ -444,17 +421,11 @@ namespace engine::control {
 				return nullptr;
 			normalized["tool"] = tool;
 			if (!request.OperationId.empty()) {
-				const auto prior = ledger->Entries.find(request.OperationId);
-				if (prior != ledger->Entries.end()) {
-					if (prior->second.Arguments != normalized.dump()) {
-						failure = Error(
-							"operation_id_conflict", "operation_id was already used with different arguments"
-						);
-						return nullptr;
-					}
-					failure = prior->second.Failure;
-					return prior->second.Result;
-				}
+				json replay;
+				const auto prior =
+					ledger->Replay(tool, request.OperationId, normalized.dump(), replay, failure);
+				if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+				if (prior == DataFactoryOperationReplay::Replay) return replay;
 			}
 			if (!Preconditions(session, request, failure)) return nullptr;
 			const world::DataFactoryReply reply = call(request);
@@ -464,10 +435,10 @@ namespace engine::control {
 					world::Describe(reply.Status), reply.Detail.empty() ? "operation refused" : reply.Detail
 				);
 			if (!request.OperationId.empty())
-				data_factory_detail::Store(*ledger, request.OperationId, normalized.dump(), result, failure);
+				ledger->Store(std::string(tool), request.OperationId, normalized.dump(), result, failure);
 			return result;
 		};
-		auto worldTool = [&session](
+		auto worldTool = [&session, ledger](
 							 std::string name,
 							 std::string description,
 							 bool revisionRequired,
@@ -475,6 +446,7 @@ namespace engine::control {
 							 bool retired,
 							 auto operation
 						 ) {
+			const std::string toolName = name;
 			return Tool{
 				std::move(name),
 				std::move(description),
@@ -513,7 +485,7 @@ namespace engine::control {
 												  {"instance_id", "seed", "tick_rate", "operation_id"}
 											  );
 				},
-				[&session, revisionRequired, settingsRequired, retired, operation](
+				[&session, ledger, toolName, revisionRequired, settingsRequired, retired, operation](
 					const json &values, std::string &failure
 				) -> json {
 					if (!values.is_object()) {
@@ -558,10 +530,30 @@ namespace engine::control {
 						 !Field(values, "expected_world_version", field, failure) ||
 						 !UInt(*field, "expected_world_version", request.ExpectedWorldVersion, failure)))
 						return nullptr;
+					json normalized{
+						{"tool", toolName},
+						{"instance_id", request.InstanceId},
+						{"operation_id", request.OperationId}
+					};
+					if (settingsRequired) {
+						normalized["seed"] = request.Seed;
+						normalized["tick_rate"] = request.TickRate;
+					}
+					if (revisionRequired) {
+						normalized["expected_tick"] = request.ExpectedTick;
+						normalized["expected_world_epoch"] = request.ExpectedWorldEpoch;
+						normalized["expected_world_version"] = request.ExpectedWorldVersion;
+					}
+					json replay;
+					const auto prior =
+						ledger->Replay(toolName, request.OperationId, normalized.dump(), replay, failure);
+					if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+					if (prior == DataFactoryOperationReplay::Replay) return replay;
 					const auto reply = (session.*operation)(request);
 					json result = WorldReply(reply, retired);
 					if (reply.Status != world::DataFactoryStatus::Ok)
 						failure = Error(world::Describe(reply.Status), reply.Detail);
+					ledger->Store(toolName, request.OperationId, normalized.dump(), result, failure);
 					return result;
 				}
 			};
@@ -611,6 +603,45 @@ namespace engine::control {
 					return nullptr;
 				}
 				return Reply(reply);
+			}
+		});
+		Add(Tool{
+			"data_factory_operation_audit",
+			"Reads the bounded, redacted replay ledger shared by lifecycle and capture mutation tools. "
+			"Rows are newest first and contain no raw scene arguments.",
+			[] {
+				return json{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties", {{"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}}}}}
+				};
+			},
+			[ledger](const json &values, std::string &failure) -> json {
+				if (!values.is_object() || !Only(values, {"limit"}, failure)) {
+					if (failure.empty()) failure = Error("validation_failed", "arguments must be an object");
+					return nullptr;
+				}
+				size_t limit = 32;
+				if (const auto found = values.find("limit"); found != values.end()) {
+					uint64_t requested = 0;
+					if (!UInt(*found, "limit", requested, failure) || requested == 0 ||
+						requested > DataFactoryOperationLedger::MAXIMUM_ENTRIES) {
+						if (failure.empty())
+							failure = Error("validation_failed", "limit must be between 1 and 256");
+						return nullptr;
+					}
+					limit = static_cast<size_t>(requested);
+				}
+				json rows = json::array();
+				for (const DataFactoryOperationAudit &row : ledger->Recent(limit)) {
+					rows.push_back(
+						{{"tool", row.Tool},
+						 {"operation_id", row.OperationId},
+						 {"status", row.Status},
+						 {"refused", row.Refused}}
+					);
+				}
+				return {{"maximum_entries", DataFactoryOperationLedger::MAXIMUM_ENTRIES}, {"entries", rows}};
 			}
 		});
 
@@ -775,18 +806,16 @@ namespace engine::control {
 						return nullptr;
 					normalized["tool"] = checkpoint ? "checkpoint" : "snapshot";
 					if (!request.OperationId.empty()) {
-						if (const auto prior = ledger->Entries.find(request.OperationId);
-							prior != ledger->Entries.end()) {
-							if (prior->second.Arguments != normalized.dump()) {
-								f = Error(
-									"operation_id_conflict",
-									"operation_id was already used with different arguments"
-								);
-								return nullptr;
-							}
-							f = prior->second.Failure;
-							return prior->second.Result;
-						}
+						json replay;
+						const auto prior = ledger->Replay(
+							normalized["tool"].get<std::string>(),
+							request.OperationId,
+							normalized.dump(),
+							replay,
+							f
+						);
+						if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+						if (prior == DataFactoryOperationReplay::Replay) return replay;
 					}
 					if (!Preconditions(session, request, f)) return nullptr;
 					std::string id;
@@ -802,8 +831,12 @@ namespace engine::control {
 							reply.Detail.empty() ? "operation refused" : reply.Detail
 						);
 					if (!request.OperationId.empty())
-						data_factory_detail::Store(
-							*ledger, request.OperationId, normalized.dump(), result, f
+						ledger->Store(
+							normalized["tool"].get<std::string>(),
+							request.OperationId,
+							normalized.dump(),
+							result,
+							f
 						);
 					return result;
 				}
@@ -863,27 +896,23 @@ namespace engine::control {
 				normalized["tool"] = "render_only";
 				normalized["snapshot_id"] = request.SnapshotId;
 				normalized["temporal_history"] = request.TemporalHistory;
-				if (const auto prior = ledger->Entries.find(request.OperationId);
-					prior != ledger->Entries.end()) {
-					if (prior->second.Arguments != normalized.dump()) {
-						f = Error(
-							"operation_id_conflict", "operation_id was already used with different arguments"
-						);
-						return nullptr;
-					}
-					if (prior->second.Result.value("status", "") == "pending" &&
-						prior->second.Result.contains("operation_id") &&
-						prior->second.Result["operation_id"].is_number_unsigned()) {
+				json replay;
+				const auto prior =
+					ledger->Replay("render_only", request.OperationId, normalized.dump(), replay, f);
+				if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+				if (prior == DataFactoryOperationReplay::Replay) {
+					if (replay.value("status", "") == "pending" && replay.contains("operation_id") &&
+						replay["operation_id"].is_number_unsigned()) {
 						RenderOnlyReply(
 							session.PollRenderOnly(
-								request.InstanceId, prior->second.Result["operation_id"].get<uint64_t>()
+								request.InstanceId, replay["operation_id"].get<uint64_t>()
 							),
-							prior->second.Result,
-							prior->second.Failure
+							replay,
+							f
 						);
+						ledger->Update(request.OperationId, replay, f);
 					}
-					f = prior->second.Failure;
-					return prior->second.Result;
+					return replay;
 				}
 				if (!Preconditions(session, request, f)) return nullptr;
 				const world::DataFactoryRenderOnlyReply reply = session.RenderOnly({
@@ -896,7 +925,7 @@ namespace engine::control {
 				});
 				json result;
 				RenderOnlyReply(reply, result, f);
-				Store(*ledger, request.OperationId, normalized.dump(), result, f);
+				ledger->Store("render_only", request.OperationId, normalized.dump(), result, f);
 				return result;
 			}
 		});

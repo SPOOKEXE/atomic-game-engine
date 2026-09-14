@@ -1,13 +1,11 @@
-#include <engine/assets/ContentHash.hpp>
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 
 #include <array>
 #include <client/DataScriptPackage.hpp>
 #include <cstddef>
-#include <deque>
 #include <exception>
 #include <nlohmann/json.hpp>
-#include <unordered_map>
 #include <utility>
 
 namespace client {
@@ -15,24 +13,9 @@ namespace client {
 
 	namespace {
 		constexpr size_t MAXIMUM_ID = 128;
-		constexpr size_t MAXIMUM_LEDGER_ENTRIES = 256;
-
-		struct LedgerEntry {
-			engine::assets::ContentHash Arguments;
-			json Result;
-			std::string Failure;
-		};
-		struct Ledger {
-			std::unordered_map<std::string, LedgerEntry> Entries;
-			std::deque<std::string> Order;
-		};
 
 		std::string Error(std::string_view code, std::string_view detail) {
 			return std::string(code) + ": " + std::string(detail);
-		}
-
-		engine::assets::ContentHash Digest(std::string_view text) {
-			return engine::assets::Hasher::Of(std::as_bytes(std::span(text.data(), text.size())));
 		}
 
 		bool Text(
@@ -138,7 +121,7 @@ namespace client {
 	}
 
 	void AddDataScriptPackageTool(engine::control::Surface &surface, DataScriptPackageExecutor execute) {
-		auto ledger = std::make_shared<Ledger>();
+		auto ledger = surface.DataFactoryOperations();
 		surface.Add(
 			{"run_script_package",
 			 "Runs one atomic.data-script.v1 package in a fresh client Luau sandbox. Client Luau only; "
@@ -284,17 +267,11 @@ namespace client {
 					 request.Assets.push_back(std::move(input));
 				 }
 				 const std::string serialized = values.dump();
-				 const engine::assets::ContentHash digest = Digest(serialized);
-				 if (const auto prior = ledger->Entries.find(operation); prior != ledger->Entries.end()) {
-					 if (prior->second.Arguments != digest) {
-						 failure = Error(
-							 "operation_conflict", "operation_id was already used with different arguments"
-						 );
-						 return nullptr;
-					 }
-					 failure = prior->second.Failure;
-					 return prior->second.Result;
-				 }
+				 json replay;
+				 const auto prior =
+					 ledger->Replay("run_script_package", operation, serialized, replay, failure);
+				 if (prior == engine::control::DataFactoryOperationReplay::Conflict) return nullptr;
+				 if (prior == engine::control::DataFactoryOperationReplay::Replay) return replay;
 				 engine::script::DataScriptResult result;
 				 try {
 					 result = execute(request);
@@ -308,12 +285,7 @@ namespace client {
 				 if (!result.Ran && result.Error.empty()) result.Error = "package execution failed";
 				 json reply = Reply(result);
 				 failure.clear();
-				 ledger->Order.push_back(operation);
-				 ledger->Entries.emplace(operation, LedgerEntry{digest, reply, failure});
-				 while (ledger->Order.size() > MAXIMUM_LEDGER_ENTRIES) {
-					 ledger->Entries.erase(ledger->Order.front());
-					 ledger->Order.pop_front();
-				 }
+				 ledger->Store("run_script_package", operation, serialized, reply, failure);
 				 return reply;
 			 }}
 		);

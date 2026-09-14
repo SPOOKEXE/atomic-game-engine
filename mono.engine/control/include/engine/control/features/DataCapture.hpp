@@ -4,6 +4,7 @@
 // Capture bytes remain in the bridge until explicit release; this surface only
 // serializes a caller-selected range as base64.
 
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
@@ -34,17 +35,6 @@ namespace engine::control {
 		inline constexpr size_t MAXIMUM_CHANNEL_NAME = 64;
 		inline constexpr size_t MAXIMUM_CHANNELS = 12;
 		inline constexpr size_t MAXIMUM_RANGE_BYTES = 1024 * 1024;
-		inline constexpr size_t MAXIMUM_LEDGER_ENTRIES = 256;
-
-		struct LedgerEntry {
-			std::string Arguments;
-			json Result;
-			std::string Failure;
-		};
-		struct Ledger {
-			std::unordered_map<std::string, LedgerEntry> Entries;
-			std::deque<std::string> Order;
-		};
 
 		inline std::string Error(std::string_view code, std::string_view detail) {
 			return std::string(code) + ": " + std::string(detail);
@@ -269,19 +259,6 @@ namespace engine::control {
 			};
 		}
 
-		inline void Store(
-			Ledger &ledger, const std::string &id, std::string arguments, json result, std::string failure
-		) {
-			ledger.Order.push_back(id);
-			ledger.Entries.emplace(
-				id, LedgerEntry{std::move(arguments), std::move(result), std::move(failure)}
-			);
-			while (ledger.Order.size() > MAXIMUM_LEDGER_ENTRIES) {
-				ledger.Entries.erase(ledger.Order.front());
-				ledger.Order.pop_front();
-			}
-		}
-
 		inline std::string Base64(std::span<const std::byte> bytes) {
 			static constexpr std::array alphabet{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
 												 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
@@ -453,7 +430,7 @@ namespace engine::control {
 				.Detail = capabilities.Detail,
 			};
 		});
-		auto ledger = std::make_shared<Ledger>();
+		auto ledger = DataFactoryOperations();
 
 		Add(Tool{
 			"capture",
@@ -554,25 +531,19 @@ namespace engine::control {
 				json normalized = values;
 				normalized["tool"] = "capture";
 				const std::string normalizedText = normalized.dump();
-				if (const auto prior = ledger->Entries.find(operation); prior != ledger->Entries.end()) {
-					if (prior->second.Arguments != normalizedText) {
-						failure = Error(
-							"operation_id_conflict", "operation_id was already used with different arguments"
-						);
-						return nullptr;
-					}
-					failure = prior->second.Failure;
-					return prior->second.Result;
-				}
+				json replay;
+				const auto prior = ledger->Replay("capture", operation, normalizedText, replay, failure);
+				if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+				if (prior == DataFactoryOperationReplay::Replay) return replay;
 				if (!Versions(session, request.InstanceId, values, failure)) {
 					json result = VersionReply(session, request.InstanceId);
-					Store(*ledger, operation, normalizedText, result, failure);
+					ledger->Store("capture", operation, normalizedText, result, failure);
 					return result;
 				}
 				if (request.CameraId != "current_view" && !bridge->Capabilities().NamedCameraSelection) {
 					failure = Error("capability_unsupported", "named camera selection is unavailable");
 					json result = VersionReply(session, request.InstanceId);
-					Store(*ledger, operation, normalizedText, result, failure);
+					ledger->Store("capture", operation, normalizedText, result, failure);
 					return result;
 				}
 				uint64_t ticket = 0;
@@ -580,7 +551,7 @@ namespace engine::control {
 				if (!bridge->Queue(request.InstanceId, request, ticket, detail)) {
 					failure = Error("capture_refused", detail);
 					json result = VersionReply(session, request.InstanceId);
-					Store(*ledger, operation, normalizedText, result, failure);
+					ledger->Store("capture", operation, normalizedText, result, failure);
 					return result;
 				}
 				json result{
@@ -589,7 +560,7 @@ namespace engine::control {
 					{"instance_id", request.InstanceId},
 					{"snapshot_id", request.SnapshotId}
 				};
-				Store(*ledger, operation, normalizedText, result, {});
+				ledger->Store("capture", operation, normalizedText, result, {});
 				return result;
 			},
 		});
@@ -693,25 +664,20 @@ namespace engine::control {
 				json normalized = values;
 				normalized["tool"] = "capture_bundle";
 				const std::string normalizedText = normalized.dump();
-				if (const auto prior = ledger->Entries.find(operation); prior != ledger->Entries.end()) {
-					if (prior->second.Arguments != normalizedText) {
-						failure = Error(
-							"operation_id_conflict", "operation_id was already used with different arguments"
-						);
-						return nullptr;
-					}
-					failure = prior->second.Failure;
-					return prior->second.Result;
-				}
+				json replay;
+				const auto prior =
+					ledger->Replay("capture_bundle", operation, normalizedText, replay, failure);
+				if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+				if (prior == DataFactoryOperationReplay::Replay) return replay;
 				if (!Versions(session, request.InstanceId, values, failure)) {
 					json result = VersionReply(session, request.InstanceId);
-					Store(*ledger, operation, normalizedText, result, failure);
+					ledger->Store("capture_bundle", operation, normalizedText, result, failure);
 					return result;
 				}
 				if (request.CameraId != "current_view" && !bridge->Capabilities().NamedCameraSelection) {
 					failure = Error("capability_unsupported", "named camera selection is unavailable");
 					json result = VersionReply(session, request.InstanceId);
-					Store(*ledger, operation, normalizedText, result, failure);
+					ledger->Store("capture_bundle", operation, normalizedText, result, failure);
 					return result;
 				}
 				uint64_t ticket = 0;
@@ -719,7 +685,7 @@ namespace engine::control {
 				if (!bridge->Queue(request.InstanceId, request, ticket, detail)) {
 					failure = Error("capture_refused", detail);
 					json result = VersionReply(session, request.InstanceId);
-					Store(*ledger, operation, normalizedText, result, failure);
+					ledger->Store("capture_bundle", operation, normalizedText, result, failure);
 					return result;
 				}
 				json result{
@@ -728,7 +694,7 @@ namespace engine::control {
 					{"instance_id", request.InstanceId},
 					{"snapshot_id", request.SnapshotId},
 				};
-				Store(*ledger, operation, normalizedText, result, {});
+				ledger->Store("capture_bundle", operation, normalizedText, result, {});
 				return result;
 			},
 		});
@@ -1045,17 +1011,10 @@ namespace engine::control {
 					json normalized = values;
 					normalized["tool"] = name;
 					const std::string normalizedText = normalized.dump();
-					if (const auto prior = ledger->Entries.find(operation); prior != ledger->Entries.end()) {
-						if (prior->second.Arguments != normalizedText) {
-							failure = Error(
-								"operation_id_conflict",
-								"operation_id was already used with different arguments"
-							);
-							return nullptr;
-						}
-						failure = prior->second.Failure;
-						return prior->second.Result;
-					}
+					json replay;
+					const auto prior = ledger->Replay(name, operation, normalizedText, replay, failure);
+					if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+					if (prior == DataFactoryOperationReplay::Replay) return replay;
 					std::string detail;
 					bool ok = true;
 					if (release)
@@ -1068,7 +1027,7 @@ namespace engine::control {
 						{"instance_id", instance}
 					};
 					if (!ok) failure = Error("capture_refused", detail);
-					Store(*ledger, operation, normalizedText, result, failure);
+					ledger->Store(name, operation, normalizedText, result, failure);
 					return result;
 				}
 			};

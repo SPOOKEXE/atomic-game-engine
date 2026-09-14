@@ -20,6 +20,7 @@
 // `tools/call` almost always succeeds at the protocol level with `isError` set,
 // and the text says what went wrong.
 
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
 
 #include <nlohmann/json.hpp>
@@ -57,7 +58,8 @@ namespace engine::control {
 	}
 
 	Surface::Surface(std::string name, std::string purpose)
-		: Name(std::move(name)), Purpose(std::move(purpose)) {}
+		: Name(std::move(name)), Purpose(std::move(purpose)),
+		  FactoryOperations(std::make_shared<DataFactoryOperationLedger>()) {}
 
 	void Surface::Add(Tool tool) {
 		for (Tool &existing : Tools) {
