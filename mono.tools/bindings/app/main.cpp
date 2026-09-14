@@ -2263,9 +2263,13 @@ declare task: {
 				out << "\tfunction GetNetworkOwner(self): Instance?\n";
 				out << "\tfunction GetLinearVelocity(self): Vector3\n";
 				out << "\tfunction GetAngularVelocity(self): Vector3\n";
+				out << "\tfunction GetAppliedForce(self): Vector3\n";
+				out << "\tfunction GetAppliedTorque(self): Vector3\n";
 				out << "\tfunction SetLinearVelocity(self, velocity: Vector3): ()\n";
 				out << "\tfunction SetAngularVelocity(self, velocity: Vector3): ()\n";
 				out << "\tfunction ApplyImpulse(self, impulse: Vector3): ()\n";
+				out << "\tfunction SetAppliedForce(self, force: Vector3): ()\n";
+				out << "\tfunction SetAppliedTorque(self, torque: Vector3): ()\n";
 				out << "\tfunction Break(self): number\n";
 
 				// **The one door onto `LocalTransparency`, for the same reason
@@ -3967,9 +3971,13 @@ declare const task: {
 				out << "\tGetNetworkOwner(): Instance | null;\n";
 				out << "\tGetLinearVelocity(): Vector3;\n";
 				out << "\tGetAngularVelocity(): Vector3;\n";
+				out << "\tGetAppliedForce(): Vector3;\n";
+				out << "\tGetAppliedTorque(): Vector3;\n";
 				out << "\tSetLinearVelocity(velocity: Vector3): void;\n";
 				out << "\tSetAngularVelocity(velocity: Vector3): void;\n";
 				out << "\tApplyImpulse(impulse: Vector3): void;\n";
+				out << "\tSetAppliedForce(force: Vector3): void;\n";
+				out << "\tSetAppliedTorque(torque: Vector3): void;\n";
 				out << "\tBreak(): number;\n";
 
 				// The one door onto `LocalTransparency`, matching the Luau half

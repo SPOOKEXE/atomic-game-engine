@@ -2445,7 +2445,7 @@ namespace engine::scene {
 				// unanchoring it brought back the defaults rather than what the
 				// author typed. `Simulated` carries that decision now, so this
 				// is free to be what it reads as: the part's physical
-				// description. Sixteen bytes on every part, which is the trade
+				// description. Forty bytes on every part, which is the trade
 				// the two entries above already make.
 				ecs::Components::Of<RigidBody>(),
 

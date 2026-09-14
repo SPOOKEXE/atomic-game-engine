@@ -1,3 +1,4 @@
+#include "Inertia.hpp"
 #include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
 
@@ -26,7 +27,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <numbers>
 #include <numeric>
 #include <unordered_map>
 #include <utility>
@@ -275,107 +275,15 @@ namespace engine::physics {
 			}
 		}
 
-		// One component of a vector by index, so the three principal axes can
-		// be walked in a loop rather than written out three times.
-		float Component(const core::Vector3 &vector, size_t index) {
-			return index == 0 ? vector.X : (index == 1 ? vector.Y : vector.Z);
-		}
-
-		// One over each principal moment of inertia, in the shape's own axes.
-		//
-		// Every shape here is symmetric about its own axes, so the local tensor
-		// is diagonal and these three numbers are the whole of it. The formulae
-		// are the standard solid ones, written against **half**-extents because
-		// that is what `Collider::Extent` is - reading them as full extents
-		// makes every body four times harder to turn, which reads as a
-		// suspiciously heavy world rather than as a units mistake.
-		core::Vector3 InverseInertiaOf(const scene::Collider &collider, float mass) {
-			const float extentX = collider.Extent.X;
-			const float extentY = collider.Extent.Y;
-			const float extentZ = collider.Extent.Z;
-
-			core::Vector3 inertia;
-			switch (collider.Shape) {
-			case scene::ShapeKind::Box:
-				inertia = core::Vector3{
-					mass * (extentY * extentY + extentZ * extentZ) / 3.0f,
-					mass * (extentX * extentX + extentZ * extentZ) / 3.0f,
-					mass * (extentX * extentX + extentY * extentY) / 3.0f,
-				};
-				break;
-
-			case scene::ShapeKind::Sphere: {
-				const float solid = 0.4f * mass * extentX * extentX;
-				inertia = core::Vector3{solid, solid, solid};
-				break;
-			}
-
-			case scene::ShapeKind::Cylinder: {
-				// About the barrel it is a disc; across it, a disc plus a rod.
-				const float across = mass * (3.0f * extentX * extentX + 4.0f * extentY * extentY) / 12.0f;
-				inertia = core::Vector3{across, 0.5f * mass * extentX * extentX, across};
-				break;
-			}
-
-			case scene::ShapeKind::Capsule: {
-				const float radius = std::max(extentX, 0.0f);
-				const float halfSegment = std::max(extentY, 0.0f);
-				const float cylinderVolume =
-					std::numbers::pi_v<float> * radius * radius * (2.0f * halfSegment);
-				const float sphereVolume =
-					(4.0f / 3.0f) * std::numbers::pi_v<float> * radius * radius * radius;
-				const float totalVolume = cylinderVolume + sphereVolume;
-				const float cylinderMass = totalVolume > 0.0f ? mass * cylinderVolume / totalVolume : 0.0f;
-				const float sphereMass = mass - cylinderMass;
-				const float radiusSquared = radius * radius;
-				const float axial = 0.5f * cylinderMass * radiusSquared + 0.4f * sphereMass * radiusSquared;
-				const float capCentroid = halfSegment + 3.0f * radius / 8.0f;
-				const float across =
-					cylinderMass * (3.0f * radiusSquared + 4.0f * halfSegment * halfSegment) / 12.0f +
-					sphereMass * (83.0f * radiusSquared / 320.0f + capCentroid * capCentroid);
-				inertia = core::Vector3{across, axial, across};
-				break;
-			}
-
-			case scene::ShapeKind::Hull:
-			case scene::ShapeKind::Mesh:
-				// **The box tensor of the part's own extent**, which is the same
-				// choice `scene::VolumeOf` makes about the mass and for the same
-				// reason: the exact tensor of a baked hull is an integral over
-				// its tetrahedra, it would have to be recomputed whenever the
-				// shape table changed, and it differs from this by a factor a
-				// designer will not notice on a hull that is a good fit for its
-				// part. A hull that is *not* a good fit is a scene mistake, and
-				// an exact tensor would only hide it.
-				//
-				// A mesh collider is static in practice, so its tensor is read
-				// only by a world that made one dynamic - where a box is the
-				// answer least likely to be surprising.
-				inertia = core::Vector3{
-					mass * (extentY * extentY + extentZ * extentZ) / 3.0f,
-					mass * (extentX * extentX + extentZ * extentZ) / 3.0f,
-					mass * (extentX * extentX + extentY * extentY) / 3.0f,
-				};
-				break;
-			}
-
-			return core::Vector3{
-				inertia.X > 0.0f ? 1.0f / inertia.X : 0.0f,
-				inertia.Y > 0.0f ? 1.0f / inertia.Y : 0.0f,
-				inertia.Z > 0.0f ? 1.0f / inertia.Z : 0.0f,
-			};
-		}
-
 		// The world inverse inertia applied to a torque.
 		//
 		// `R diag Rt` times a vector, without ever building `R diag Rt`.
 		core::Vector3 AngularResponse(const SolverBody &body, const core::Vector3 &torque) {
-			core::Vector3 response;
-			for (size_t index = 0; index < 3; index++) {
-				const core::Vector3 &axis = body.PrincipalAxis[index];
-				response = response + axis * (Component(body.InverseInertia, index) * axis.Dot(torque));
-			}
-			return response;
+			return AngularAcceleration(
+				{body.PrincipalAxis[0], body.PrincipalAxis[1], body.PrincipalAxis[2]},
+				body.InverseInertia,
+				torque
+			);
 		}
 
 		// How fast the two bodies are separating along one direction, at the

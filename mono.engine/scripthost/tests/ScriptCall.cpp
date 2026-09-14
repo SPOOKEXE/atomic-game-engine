@@ -1985,6 +1985,8 @@ TEST_CASE("body velocity and impulse methods share one physics surface", "[scrip
 				   Send(language, "part", "SetLinearVelocity(Vector3.new(1, 2, 3))") +
 				   Send(language, "part", "SetAngularVelocity(Vector3.new(0, 4, 0))") +
 				   Send(language, "part", "ApplyImpulse(Vector3.new(2, 0, 0))") +
+				   Send(language, "part", "SetAppliedForce(Vector3.new(5, 0, 0))") +
+				   Send(language, "part", "SetAppliedTorque(Vector3.new(0, 6, 0))") +
 				   Say(language,
 					   Cat(language,
 						   {Text(language, Call(language, "part", "GetLinearVelocity()") + ".X"),
@@ -1993,9 +1995,13 @@ TEST_CASE("body velocity and impulse methods share one physics surface", "[scrip
 							"'/'",
 							Text(language, Call(language, "part", "GetLinearVelocity()") + ".Z"),
 							"'/'",
-							Text(language, Call(language, "part", "GetAngularVelocity()") + ".Y")}));
+							Text(language, Call(language, "part", "GetAngularVelocity()") + ".Y"),
+							"'/'",
+							Text(language, Call(language, "part", "GetAppliedForce()") + ".X"),
+							"'/'",
+							Text(language, Call(language, "part", "GetAppliedTorque()") + ".Y")}));
 		},
-		"3/2/3/4",
+		"3/2/3/4/5/6",
 		0,
 		[](Store &store) { engine::physics::PreparePhysicsWorld(store); },
 	};

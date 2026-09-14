@@ -1215,9 +1215,13 @@ declare interface Instance {
 	GetNetworkOwner(): Instance | null;
 	GetLinearVelocity(): Vector3;
 	GetAngularVelocity(): Vector3;
+	GetAppliedForce(): Vector3;
+	GetAppliedTorque(): Vector3;
 	SetLinearVelocity(velocity: Vector3): void;
 	SetAngularVelocity(velocity: Vector3): void;
 	ApplyImpulse(impulse: Vector3): void;
+	SetAppliedForce(force: Vector3): void;
+	SetAppliedTorque(torque: Vector3): void;
 	Break(): number;
 	SetLocalTransparency(value: number): void;
 	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;

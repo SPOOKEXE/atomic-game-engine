@@ -150,7 +150,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// And so is an effect, which is what let it come out of the reserve.
 	CHECK(sizeof(SurfaceEffect) == sizeof(uint8_t));
 
-	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + sizeof(BodyKind) + 3);
+	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + 2 * sizeof(Vector3) + sizeof(BodyKind) + 3);
 	// **`Geometry` widened this by exactly its own four bytes at v0.17**, and
 	// could not have been paid for out of the reserve: a `core::Name` needs
 	// four-byte alignment and the reserve is a two-byte tail after a pair of
@@ -228,12 +228,14 @@ TEST_CASE("a default body is dynamic and unit mass", "[scene][components]") {
 	// expressed to the ECS by the row losing its `Motion` - the archetype move
 	// itself. A flag on this row would be that same state a second time, and
 	// readable only by making the visit the move exists to avoid.
-	STATIC_REQUIRE(sizeof(RigidBody) == 16);
+	STATIC_REQUIRE(sizeof(RigidBody) == 40);
 
 	// Damping defaults to a vacuum rather than to a guess, so a scene that
 	// wants drag has to say so and one that does not is not silently slowed.
 	CHECK(body.LinearDamping == 0.0f);
 	CHECK(body.AngularDamping == 0.0f);
+	CHECK(body.AppliedForce == Vector3::Zero);
+	CHECK(body.AppliedTorque == Vector3::Zero);
 }
 
 TEST_CASE("a default collider is a solid box on layer one", "[scene][components]") {

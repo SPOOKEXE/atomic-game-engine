@@ -1812,6 +1812,28 @@ namespace engine::script {
 			size_t OmittedResourceLimit = 0;
 		};
 
+		ObservationRecords AppliedLoadRecords(
+			const ecs::Store &store,
+			const std::vector<std::pair<ecs::Entity, std::string>> &selected,
+			bool torque
+		) {
+			std::vector<ScriptValue> records;
+			records.reserve(selected.size());
+			for (const auto &[entity, id] : selected) {
+				const scene::RigidBody *body = store.Get<scene::RigidBody>(entity);
+				if (body == nullptr || body->Kind != scene::BodyKind::Dynamic ||
+					!store.Has<scene::Simulated>(entity)) {
+					continue;
+				}
+				records.push_back(Map({
+					{"id", String(id)},
+					{torque ? "torque_world_newton_metres" : "force_world_newtons",
+					 Vector(torque ? body->AppliedTorque : body->AppliedForce)},
+				}));
+			}
+			return {Array(std::move(records)), 0, 0};
+		}
+
 		ObservationRecords ContactRecords(
 			const physics::PhysicsWorld &world, const std::unordered_map<uint64_t, std::string> &ids
 		) {
@@ -2246,10 +2268,10 @@ namespace engine::script {
 				{"physics_contact_impulses", Boolean(physicsPrepared)},
 				{"physics_sleep_and_assemblies", Boolean(physicsPrepared)},
 				{"physics_joints", Boolean(true)},
-				{"physics_forces", Boolean(false)},
-				{"physics_torques", Boolean(false)},
-				{"physics_force_reason", String("engine has no persistent force accumulator")},
-				{"physics_torque_reason", String("engine has no persistent torque accumulator")},
+				{"physics_forces", Boolean(true)},
+				{"physics_torques", Boolean(true)},
+				{"physics_force_reason", String("")},
+				{"physics_torque_reason", String("")},
 				{"controller_fields", Boolean(true)},
 				{"durable_resources", Boolean(false)},
 				{"render_capture", Boolean(false)},
@@ -2459,8 +2481,12 @@ namespace engine::script {
 																	: ContactRecords(*physicsWorld, ids);
 		const ObservationRecords events = physicsWorld == nullptr ? ObservationRecords{Array({}), 0, 0}
 																  : ContactEventRecords(*physicsWorld, ids);
+		const ObservationRecords forces = AppliedLoadRecords(store, selected, false);
+		const ObservationRecords torques = AppliedLoadRecords(store, selected, true);
 		result.emplace_back("contacts", contacts.Values);
 		result.emplace_back("contact_events", events.Values);
+		result.emplace_back("forces", forces.Values);
+		result.emplace_back("torques", torques.Values);
 		result.emplace_back(
 			"physics_observations",
 			Map({
@@ -2493,13 +2519,23 @@ namespace engine::script {
 				 })},
 				{"forces",
 				 Map({
-					 {"available", Boolean(false)},
-					 {"reason", String("engine has no persistent force accumulator")},
+					 {"available", Boolean(true)},
+					 {"reason", String("")},
+					 {"source", String("persistent_applied_load")},
+					 {"units", String("N")},
+					 {"coordinate_space", String("world")},
+					 {"timing", String("applied_once_per_completed_physics_step")},
+					 {"coverage", String("identified_dynamic_rigid_bodies")},
 				 })},
 				{"torques",
 				 Map({
-					 {"available", Boolean(false)},
-					 {"reason", String("engine has no persistent torque accumulator")},
+					 {"available", Boolean(true)},
+					 {"reason", String("")},
+					 {"source", String("persistent_applied_load")},
+					 {"units", String("N*m")},
+					 {"coordinate_space", String("world")},
+					 {"timing", String("applied_once_per_completed_physics_step")},
+					 {"coverage", String("identified_dynamic_rigid_bodies")},
 				 })},
 				{"impulses",
 				 Map({

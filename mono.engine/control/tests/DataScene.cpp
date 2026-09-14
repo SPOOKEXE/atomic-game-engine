@@ -5,6 +5,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/physics/BodyMotion.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Welds.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -259,6 +260,8 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	CHECK(snapshot.at("physics_observations").at("world_prepared") == false);
 	CHECK(snapshot.at("physics_observations").at("contacts").at("available") == false);
 	CHECK(snapshot.at("physics_observations").at("impulses").at("available") == false);
+	CHECK(snapshot.at("physics_observations").at("forces").at("available") == true);
+	CHECK(snapshot.at("physics_observations").at("torques").at("available") == true);
 	CHECK(snapshot.at("contacts").empty());
 	CHECK(snapshot.at("contact_events").empty());
 	const json &snapshotEntities = snapshot.at("entities");
@@ -710,8 +713,7 @@ TEST_CASE("data-scene MCP queries prepared collider geometry", "[control][datasc
 }
 
 TEST_CASE(
-	"data-scene snapshot reports solver observations and explicit unavailable accumulators",
-	"[control][datascene]"
+	"data-scene snapshot reports solver observations and persistent applied loads", "[control][datascene]"
 ) {
 	Universe universe;
 	const WorldId world = World(universe, "physics_observation");
@@ -738,6 +740,8 @@ TEST_CASE(
 		engine::scene::Motion motion;
 		motion.Linear = Vector3{0.0f, -2.0f, 0.0f};
 		store.Set<engine::scene::Motion>(body, motion);
+		REQUIRE(engine::physics::SetAppliedForce(store, body, Vector3{6.0f, 0.0f, 0.0f}));
+		REQUIRE(engine::physics::SetAppliedTorque(store, body, Vector3{0.0f, 3.0f, 0.0f}));
 		engine::scene::Humanoid humanoid;
 		humanoid.RootPart = body;
 		humanoid.MoveDirection = Vector3{1.0f, 0.0f, 0.0f};
@@ -800,9 +804,22 @@ TEST_CASE(
 		"identified_endpoints_in_explicit_subset"
 	);
 	CHECK(snapshot.at("physics_observations").at("impulses").at("skipped_manifolds") == "excluded");
-	CHECK(snapshot.at("physics_observations").at("forces").at("available") == false);
-	CHECK(snapshot.at("physics_observations").at("torques").at("available") == false);
-	CHECK(snapshot.at("physics_observations").at("forces").at("reason").get<std::string>().size() > 0);
+	CHECK(snapshot.at("physics_observations").at("forces").at("available") == true);
+	CHECK(snapshot.at("physics_observations").at("torques").at("available") == true);
+	CHECK(snapshot.at("physics_observations").at("forces").at("source") == "persistent_applied_load");
+	CHECK(snapshot.at("physics_observations").at("forces").at("units") == "N");
+	CHECK(snapshot.at("physics_observations").at("torques").at("units") == "N*m");
+	CHECK(snapshot.at("physics_observations").at("forces").at("coordinate_space") == "world");
+	CHECK(
+		snapshot.at("physics_observations").at("forces").at("timing") ==
+		"applied_once_per_completed_physics_step"
+	);
+	REQUIRE(snapshot.at("forces").size() == 1);
+	CHECK(snapshot.at("forces").at(0).at("id") == "physics/body");
+	CHECK(snapshot.at("forces").at(0).at("force_world_newtons").at("x") == 6.0);
+	REQUIRE(snapshot.at("torques").size() == 1);
+	CHECK(snapshot.at("torques").at(0).at("id") == "physics/body");
+	CHECK(snapshot.at("torques").at(0).at("torque_world_newton_metres").at("y") == 3.0);
 	REQUIRE(snapshot.at("contacts").is_array());
 	REQUIRE(snapshot.at("contact_events").is_array());
 	bool contactObserved = false;

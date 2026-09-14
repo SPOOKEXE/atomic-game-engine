@@ -5,6 +5,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/BodyMotion.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
@@ -215,6 +216,7 @@ namespace engine::physics {
 			}
 
 			BeginCopiedContactStep(store);
+			ApplyPersistentLoads(store);
 			IntegrateMotion(store);
 			SolveCopiedContactStep(store);
 			SolveRigidJoints(store);
@@ -263,6 +265,7 @@ namespace engine::physics {
 
 			while (BeginPhysicsStep(store)) {
 				BeginCopiedContactStep(store);
+				ApplyPersistentLoads(store);
 				IntegrateMotion(store);
 				SolveCopiedContactStep(store);
 				SolveRigidJoints(store);

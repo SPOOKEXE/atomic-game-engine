@@ -1147,6 +1147,14 @@ namespace engine::script {
 			call.ReturnVector3(physics::AngularVelocity(call.World(), call.Subject()));
 		}
 
+		void GetAppliedForce(ScriptCall &call) {
+			call.ReturnVector3(physics::AppliedForce(call.World(), call.Subject()));
+		}
+
+		void GetAppliedTorque(ScriptCall &call) {
+			call.ReturnVector3(physics::AppliedTorque(call.World(), call.Subject()));
+		}
+
 		void SetLinearVelocity(ScriptCall &call) {
 			if (!physics::SetLinearVelocity(
 					call.World(), call.Subject(), AsVector3(call, 0, "SetLinearVelocity")
@@ -1169,6 +1177,22 @@ namespace engine::script {
 			}
 		}
 
+		void SetAppliedForce(ScriptCall &call) {
+			if (!physics::SetAppliedForce(
+					call.World(), call.Subject(), AsVector3(call, 0, "SetAppliedForce")
+				)) {
+				call.Raise("SetAppliedForce needs a simulated dynamic BasePart and a physics world");
+			}
+		}
+
+		void SetAppliedTorque(ScriptCall &call) {
+			if (!physics::SetAppliedTorque(
+					call.World(), call.Subject(), AsVector3(call, 0, "SetAppliedTorque")
+				)) {
+				call.Raise("SetAppliedTorque needs a simulated dynamic BasePart and a physics world");
+			}
+		}
+
 		// `breakGroup:Break()` releases its authored pieces. Damage, health and
 		// debris policy remain outside this low-level structural operation.
 		void Break(ScriptCall &call) {
@@ -1185,7 +1209,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 68> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 72> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1193,9 +1217,13 @@ namespace engine::script {
 			{"SetLocalTransparency", SetLocalTransparency},
 			{"GetLinearVelocity", GetLinearVelocity},
 			{"GetAngularVelocity", GetAngularVelocity},
+			{"GetAppliedForce", GetAppliedForce},
+			{"GetAppliedTorque", GetAppliedTorque},
 			{"SetLinearVelocity", SetLinearVelocity},
 			{"SetAngularVelocity", SetAngularVelocity},
 			{"ApplyImpulse", ApplyImpulse},
+			{"SetAppliedForce", SetAppliedForce},
+			{"SetAppliedTorque", SetAppliedTorque},
 			{"Break", Break},
 
 			{"AddVertex", EditableMeshAddVertex},

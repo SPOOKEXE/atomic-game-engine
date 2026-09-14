@@ -247,9 +247,9 @@ namespace engine::scene {
 	// What a part weighs, how it sheds speed, and what the solver may do with
 	// it.
 	//
-	// **On every `BasePart`, simulated or not**, because all four fields are
-	// authored rather than simulated: an author types a mass and a drag, and a
-	// part that is anchored for a while should still have them afterwards.
+	// **On every `BasePart`, simulated or not**, because its persistent loads
+	// and physical description are authored state. An author types a mass, drag
+	// or load, and a part anchored for a while must keep each value afterwards.
 	// `Simulated` is what decides whether the solver visits the row.
 	//
 	// Widest-first with named padding, so the object representation a snapshot
@@ -257,6 +257,14 @@ namespace engine::scene {
 	//
 	// @since v0.4
 	struct RigidBody {
+		// Persistent world-space force in newtons. It is applied once per
+		// completed physics step until its owner replaces it.
+		core::Vector3 AppliedForce = core::Vector3::Zero;
+
+		// Persistent world-space torque in newton metres. It uses the same
+		// lifetime and fixed-step timing as `AppliedForce`.
+		core::Vector3 AppliedTorque = core::Vector3::Zero;
+
 		// Kilograms. Ignored for a `Static` or `Kinematic` body, which is why
 		// it is here rather than on `Motion`.
 		float Mass = 1.0f;

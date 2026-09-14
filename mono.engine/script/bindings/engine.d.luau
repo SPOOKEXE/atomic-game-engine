@@ -1455,9 +1455,13 @@ declare extern type Instance with
 	function GetNetworkOwner(self): Instance?
 	function GetLinearVelocity(self): Vector3
 	function GetAngularVelocity(self): Vector3
+	function GetAppliedForce(self): Vector3
+	function GetAppliedTorque(self): Vector3
 	function SetLinearVelocity(self, velocity: Vector3): ()
 	function SetAngularVelocity(self, velocity: Vector3): ()
 	function ApplyImpulse(self, impulse: Vector3): ()
+	function SetAppliedForce(self, force: Vector3): ()
+	function SetAppliedTorque(self, torque: Vector3): ()
 	function Break(self): number
 	function SetLocalTransparency(self, value: number): ()
 	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number
