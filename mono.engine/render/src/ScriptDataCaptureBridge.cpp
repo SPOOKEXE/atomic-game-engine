@@ -1,4 +1,5 @@
 #include "CaptureRecordValidation.hpp"
+#include "DataCaptureCompact.hpp"
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
@@ -7,6 +8,9 @@
 #include <engine/script/DataSceneService.hpp>
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <string>
@@ -57,6 +61,7 @@ namespace engine::render {
 				!Text(request.Pipeline) || !Text(request.CaptureNode) ||
 				!Text(request.CameraId, script::MAX_DATA_SCENE_ID_BYTES) || request.Channels.empty() ||
 				request.Channels.size() > MAX_CAPTURE_CHANNELS || request.TemporalHistory != "preserve" ||
+				(request.StorageProfile != "lossless" && request.StorageProfile != "training_compact") ||
 				request.ViewSlot > std::numeric_limits<size_t>::max())
 				return false;
 			for (size_t first = 0; first < request.Channels.size(); ++first) {
@@ -168,6 +173,78 @@ namespace engine::render {
 				return "unknown";
 			}
 			return "unknown";
+		}
+
+		const char *Encoding(DataCaptureScalar scalar) {
+			switch (scalar) {
+			case DataCaptureScalar::Float16:
+				return "ieee754_binary16_le";
+			case DataCaptureScalar::Float32:
+				return "ieee754_binary32_le";
+			case DataCaptureScalar::UInt32:
+				return "uint32_le";
+			case DataCaptureScalar::UNorm8:
+				return "unorm8";
+			case DataCaptureScalar::UNorm10A2:
+				return "unorm10a2_le";
+			case DataCaptureScalar::Unknown:
+				return "unknown";
+			}
+			return "unknown";
+		}
+
+		bool CompactDepthPlane(
+			DataCapturePlane &plane,
+			std::optional<double> &maximumError,
+			std::string &valueClassification,
+			std::string &rejection
+		) {
+			if (std::endian::native != std::endian::little || plane.Scalar != DataCaptureScalar::Float32) {
+				rejection = "unsupported_source_layout";
+				return false;
+			}
+			std::vector<std::byte> compact;
+			if (!data_capture_compact::CompactFloat32DepthBytes(
+					plane.Bytes,
+					plane.Width,
+					plane.Height,
+					plane.RowStride,
+					compact,
+					maximumError,
+					valueClassification,
+					rejection
+				))
+				return false;
+			plane.RowStride = plane.Width * 2;
+			plane.Scalar = DataCaptureScalar::Float16;
+			plane.Bytes = std::move(compact);
+			plane.Hash = assets::Hasher::Of(plane.Bytes);
+			return true;
+		}
+
+		const char *Packing(DataCaptureChannel channel, DataCaptureScalar scalar) {
+			return channel == DataCaptureChannel::AmbientOcclusion ||
+						   channel == DataCaptureChannel::SecondSurfaceValidity
+					   ? "unorm8"
+				   : scalar == DataCaptureScalar::UNorm8	? "rgba8_unorm"
+				   : channel == DataCaptureChannel::MeshUv	? "rg16_float"
+				   : scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
+															: "";
+		}
+
+		bool Compactible(DataCaptureChannel channel) {
+			return channel == DataCaptureChannel::LinearDepth ||
+				   channel == DataCaptureChannel::SecondSurfaceDepth;
+		}
+
+		void CompactUnavailable(DataCapturePlane &plane, std::string_view reason) {
+			const DataCaptureChannel channel = plane.Channel;
+			const core::Name node = plane.CaptureNode;
+			plane = {};
+			plane.Channel = channel;
+			plane.CaptureNode = node;
+			plane.Status = DataCaptureStatus::Unsupported;
+			plane.Provenance = "unavailable/training_compact_" + std::string(reason) + "/v1";
 		}
 
 		const char *ColourSpace(DataCaptureColourSpace colourSpace) {
@@ -304,6 +381,13 @@ namespace engine::render {
 				 "part_ids",
 				 "second_surface_depth",
 				 "second_surface_validity"},
+			.StorageProfiles = {"lossless", "training_compact"},
+			.TrainingCompactLimitations =
+				{"linear_depth=float32_to_float16_le",
+				 "second_surface_depth=float32_to_float16_le",
+				 "finite_overflow_above_65504_rejected",
+				 "infinity_and_nan_classes_preserved",
+				 "source_descriptor_preserved"},
 			.HookRecords = HookCapabilities,
 			.MaximumHooks = static_cast<uint32_t>(MAX_DATA_FACTORY_HOOKS),
 			.MaximumConnections = static_cast<uint32_t>(MAX_DATA_FACTORY_CONNECTIONS),
@@ -372,9 +456,10 @@ namespace engine::render {
 			return false;
 		}
 		ticket = NextTicket++;
-		Entries.emplace(
-			ticket, Entry{.Request = request, .Reply = {}, .PlaneBytes = {}, .SceneSidecar = {}, .Detail = {}}
-		);
+		Entry entry;
+		entry.Request = request;
+		entry.Reply.StorageProfile = request.StorageProfile;
+		Entries.emplace(ticket, std::move(entry));
 		detail.clear();
 		return true;
 	}
@@ -468,6 +553,7 @@ namespace engine::render {
 		if (!found->second.Terminal) {
 			poll.Status = "pending";
 			poll.SnapshotId = found->second.Request.SnapshotId;
+			poll.StorageProfile = found->second.Request.StorageProfile;
 		}
 		detail = found->second.Detail;
 		return true;
@@ -748,6 +834,7 @@ namespace engine::render {
 					.Tick = barrier.Clock.Tick,
 					.WorldEpoch = barrier.WorldEpoch,
 					.WorldVersion = barrier.WorldVersion,
+					.StorageProfile = pendingRequest.Request.StorageProfile,
 					.Scene = std::move(scene.Value),
 				};
 			}
@@ -1091,12 +1178,14 @@ namespace engine::render {
 			if (!bundle) continue;
 			DataCapturePoll captured = std::move(bundle->Capture);
 			DataCaptureTicket validationTicket;
+			std::string storageProfile;
 			{
 				std::lock_guard lock(Mutex);
 				const auto entry = Entries.find(ticket.first);
 				if (entry == Entries.end()) continue;
 				validationTicket.SnapshotId = entry->second.Request.SnapshotId;
 				validationTicket.CaptureNode = core::Name(entry->second.Request.CaptureNode);
+				storageProfile = entry->second.Request.StorageProfile;
 				for (const std::string &name : entry->second.Request.Channels)
 					if (const auto channel = Channel(name)) validationTicket.Channels.push_back(*channel);
 				Hooks->Batches.erase(ticket.first);
@@ -1106,27 +1195,96 @@ namespace engine::render {
 					Hooks->Connections.erase(connection);
 				}
 			}
+			capture_record_validation::State validation;
+			bool malformedPlane = false;
+			for (const DataCapturePlane &plane : captured.Planes) {
+				if (!capture_record_validation::Plane(validationTicket, plane, ticket.first, validation)) {
+					malformedPlane = true;
+					break;
+				}
+			}
+			struct SourceDescriptor {
+				std::string Resource;
+				std::string Hash;
+				uint32_t Width = 0;
+				uint32_t Height = 0;
+				uint32_t RowStride = 0;
+				size_t ByteSize = 0;
+				DataCaptureScalar Scalar = DataCaptureScalar::Unknown;
+				DataCaptureColourSpace ColourSpace = DataCaptureColourSpace::Unknown;
+				DataCaptureOrigin Origin = DataCaptureOrigin::TopLeft;
+				std::string Provenance;
+			};
+			std::vector<SourceDescriptor> sources;
+			sources.reserve(captured.Planes.size());
+			for (const DataCapturePlane &plane : captured.Planes)
+				sources.push_back(
+					{std::string(plane.Resource.Text()),
+					 plane.Hash.ToHex(),
+					 plane.Width,
+					 plane.Height,
+					 plane.RowStride,
+					 plane.Bytes.size(),
+					 plane.Scalar,
+					 plane.ColourSpace,
+					 plane.Origin,
+					 plane.Provenance}
+				);
+			std::vector<bool> compacted(captured.Planes.size());
+			std::vector<std::optional<double>> compactErrors(captured.Planes.size());
+			std::vector<std::string> classifications(captured.Planes.size(), "not_inspected");
+			if (!malformedPlane && storageProfile == "training_compact" &&
+				(captured.Status == DataCaptureStatus::Ready ||
+				 captured.Status == DataCaptureStatus::Partial)) {
+				bool rejectSecondSurfacePair = false;
+				for (size_t index = 0; index < captured.Planes.size(); ++index) {
+					DataCapturePlane &plane = captured.Planes[index];
+					if (plane.Status != DataCaptureStatus::Ready || !Compactible(plane.Channel)) continue;
+					std::optional<double> error;
+					std::string rejection;
+					if (CompactDepthPlane(plane, error, classifications[index], rejection)) {
+						compacted[index] = true;
+						compactErrors[index] = error;
+						continue;
+					}
+					rejectSecondSurfacePair =
+						rejectSecondSurfacePair || plane.Channel == DataCaptureChannel::SecondSurfaceDepth;
+					CompactUnavailable(plane, rejection);
+				}
+				if (rejectSecondSurfacePair)
+					for (DataCapturePlane &plane : captured.Planes)
+						if (plane.Channel == DataCaptureChannel::SecondSurfaceValidity)
+							CompactUnavailable(plane, "second_surface_depth_rejected");
+			}
+			const size_t readyPlanes = std::count_if(
+				captured.Planes.begin(), captured.Planes.end(), [](const DataCapturePlane &plane) {
+					return plane.Status == DataCaptureStatus::Ready;
+				}
+			);
+			if (storageProfile == "training_compact" && !malformedPlane &&
+				(captured.Status == DataCaptureStatus::Ready ||
+				 captured.Status == DataCaptureStatus::Partial)) {
+				captured.Status = readyPlanes == captured.Planes.size() ? DataCaptureStatus::Ready
+								  : readyPlanes != 0					? DataCaptureStatus::Partial
+																		: DataCaptureStatus::Unsupported;
+			}
 			script::DataCaptureBridgePoll reply;
 			reply.Status = Status(captured.Status);
+			reply.StorageProfile = storageProfile;
 			reply.SnapshotId = captured.SnapshotId;
 			reply.CaptureFrame = captured.CaptureFrame;
 			if (captured.Status == DataCaptureStatus::Ready || captured.Status == DataCaptureStatus::Partial)
 				CopyCamera(captured, reply);
 			std::unordered_map<std::string, std::vector<std::byte>> bytes;
-			capture_record_validation::State validation;
-			bool malformedPlane = false;
 			bool objectIdsReady = false;
 			bool semanticIdsReady = false;
 			bool partIdsReady = false;
 			size_t totalBytes = 0;
-			for (DataCapturePlane &plane : captured.Planes) {
-				if (!capture_record_validation::Plane(validationTicket, plane, ticket.first, validation)) {
-					malformedPlane = true;
-					break;
-				}
+			for (size_t index = 0; index < captured.Planes.size(); ++index) {
+				DataCapturePlane &plane = captured.Planes[index];
 				const std::string resource = ResourceId(ticket.first, plane.Channel);
 				const std::string channel(DataCaptureChannelName(plane.Channel));
-				const std::string source(plane.Resource.Text());
+				const std::string &source = sources[index].Resource;
 				const std::string hash = plane.Hash.ToHex();
 				reply.Planes.push_back(
 					{.Channel = channel,
@@ -1140,15 +1298,23 @@ namespace engine::render {
 					 .RowStride = plane.RowStride,
 					 .ByteSize = plane.Bytes.size(),
 					 .Scalar = Scalar(plane.Scalar),
+					 .SourceScalar = Scalar(sources[index].Scalar),
+					 .SourceHash = std::move(sources[index].Hash),
+					 .SourceWidth = sources[index].Width,
+					 .SourceHeight = sources[index].Height,
+					 .SourceRowStride = sources[index].RowStride,
+					 .SourceByteSize = sources[index].ByteSize,
+					 .SourceEncoding = Encoding(sources[index].Scalar),
+					 .SourceColourSpace = ColourSpace(sources[index].ColourSpace),
+					 .SourceOrigin = "top_left",
+					 .SourcePacking = Packing(plane.Channel, sources[index].Scalar),
+					 .SourceProvenance = std::move(sources[index].Provenance),
+					 .ValueClassification = classifications[index],
+					 .Encoding = Encoding(plane.Scalar),
+					 .MaximumAbsoluteError = compacted[index] ? compactErrors[index] : std::nullopt,
 					 .ColourSpace = ColourSpace(plane.ColourSpace),
 					 .Origin = "top_left",
-					 .Packing = plane.Channel == DataCaptureChannel::AmbientOcclusion ||
-										plane.Channel == DataCaptureChannel::SecondSurfaceValidity
-									? "unorm8"
-								: plane.Scalar == DataCaptureScalar::UNorm8	   ? "rgba8_unorm"
-								: plane.Channel == DataCaptureChannel::MeshUv  ? "rg16_float"
-								: plane.Scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
-																			   : "",
+					 .Packing = Packing(plane.Channel, plane.Scalar),
 					 .Provenance = plane.Provenance.empty() ? Provenance(plane.Channel) : plane.Provenance,
 					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion)}
 				);
@@ -1177,17 +1343,16 @@ namespace engine::render {
 					reply.PartLabels.push_back({label.Label, label.StableId});
 			const bool coherentStatus =
 				(captured.Status == DataCaptureStatus::Ready &&
-				 validation.ReadyPlanes == validationTicket.Channels.size() &&
+				 readyPlanes == validationTicket.Channels.size() &&
 				 validation.Channels.size() == validationTicket.Channels.size()) ||
-				(captured.Status == DataCaptureStatus::Partial && validation.ReadyPlanes > 0 &&
-				 validation.ReadyPlanes < validationTicket.Channels.size() &&
+				(captured.Status == DataCaptureStatus::Partial && readyPlanes > 0 &&
+				 readyPlanes < validationTicket.Channels.size() &&
 				 validation.Channels.size() == validationTicket.Channels.size()) ||
 				((captured.Status == DataCaptureStatus::Unsupported ||
 				  captured.Status == DataCaptureStatus::Invalid ||
 				  captured.Status == DataCaptureStatus::Failed ||
 				  captured.Status == DataCaptureStatus::Cancelled) &&
-				 validation.ReadyPlanes == 0 &&
-				 validation.Channels.size() == validationTicket.Channels.size());
+				 readyPlanes == 0 && validation.Channels.size() == validationTicket.Channels.size());
 			malformedPlane = malformedPlane || !coherentStatus;
 			{
 				std::lock_guard lock(Mutex);

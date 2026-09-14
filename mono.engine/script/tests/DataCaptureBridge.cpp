@@ -23,6 +23,8 @@ namespace {
 			return {
 				.Available = true,
 				.Channels = {"rgb_linear_hdr"},
+				.StorageProfiles = {"lossless", "training_compact"},
+				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
 				.HookRecords =
 					{
 						{.Name = "data_capture.rgb_linear_hdr",

@@ -4735,6 +4735,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(poll.SceneSidecar->Tick == 0);
 	CHECK(poll.SceneSidecar->WorldEpoch == session.Inspect("script-capture-world").WorldEpoch);
 	CHECK(poll.SceneSidecar->WorldVersion == session.Inspect("script-capture-world").WorldVersion);
+	CHECK(poll.SceneSidecar->StorageProfile == "lossless");
 	CHECK(poll.SceneSidecar->Scene.Tag == script::ValueTag::Map);
 	CHECK(poll.Planes.front().Resource != poll.Planes.front().SourceResource);
 	std::vector<std::byte> bytes;
@@ -4758,6 +4759,107 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(repeatedBytes == bytes);
 	REQUIRE(bridge.Release("script-capture-world", ticket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", ticket, poll, detail));
+
+	// Training compact is a retained-byte transform, never a renderer precision
+	// change. The lossless and compact captures therefore share exact ID bytes.
+	auto complete = [&](uint64_t captureTicket, script::DataCaptureBridgePoll &result) {
+		view.SnapshotId.clear();
+		bridge.PrepareView(view);
+		REQUIRE(
+			renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export"))
+		);
+		do {
+			bridge.Pump();
+			REQUIRE(bridge.Poll("script-capture-world", captureTicket, result, detail));
+			if (result.Status == "pending") SDL_Delay(1);
+		} while (result.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+		REQUIRE(result.Status == "ready");
+	};
+	auto plane = [](const script::DataCaptureBridgePoll &result,
+					std::string_view channel) -> const script::DataCaptureBridgePlane & {
+		const auto found =
+			std::ranges::find_if(result.Planes, [&](const auto &item) { return item.Channel == channel; });
+		REQUIRE(found != result.Planes.end());
+		return *found;
+	};
+	script::DataCaptureBridgeRequest losslessDepth = request;
+	losslessDepth.Channels = {"linear_depth", "object_ids"};
+	uint64_t losslessDepthTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", losslessDepth, losslessDepthTicket, detail));
+	script::DataCaptureBridgePoll losslessDepthPoll;
+	complete(losslessDepthTicket, losslessDepthPoll);
+	const auto &losslessDepthPlane = plane(losslessDepthPoll, "linear_depth");
+	const auto &losslessIdsPlane = plane(losslessDepthPoll, "object_ids");
+	CHECK(losslessDepthPlane.Scalar == "float32");
+	CHECK(losslessDepthPlane.Encoding == "ieee754_binary32_le");
+	CHECK(losslessIdsPlane.Scalar == "uint32");
+	CHECK(losslessIdsPlane.Encoding == "uint32_le");
+	std::vector<std::byte> losslessIds;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		losslessDepthTicket,
+		losslessIdsPlane.Resource,
+		0,
+		losslessIdsPlane.ByteSize,
+		losslessIds,
+		detail
+	));
+
+	script::DataCaptureBridgeRequest compactDepth = losslessDepth;
+	compactDepth.StorageProfile = "training_compact";
+	uint64_t compactDepthTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", compactDepth, compactDepthTicket, detail));
+	script::DataCaptureBridgePoll compactDepthPoll;
+	complete(compactDepthTicket, compactDepthPoll);
+	const auto &compactDepthPlane = plane(compactDepthPoll, "linear_depth");
+	const auto &compactIdsPlane = plane(compactDepthPoll, "object_ids");
+	CHECK(compactDepthPlane.Scalar == "float16");
+	CHECK(compactDepthPlane.SourceScalar == "float32");
+	CHECK(compactDepthPlane.Encoding == "ieee754_binary16_le");
+	CHECK(compactDepthPlane.SourceResource == losslessDepthPlane.SourceResource);
+	CHECK(compactDepthPlane.SourceHash == losslessDepthPlane.Hash);
+	CHECK(compactDepthPlane.SourceWidth == losslessDepthPlane.Width);
+	CHECK(compactDepthPlane.SourceHeight == losslessDepthPlane.Height);
+	CHECK(compactDepthPlane.SourceRowStride == losslessDepthPlane.RowStride);
+	CHECK(compactDepthPlane.SourceByteSize == losslessDepthPlane.ByteSize);
+	CHECK(compactDepthPlane.SourceEncoding == "ieee754_binary32_le");
+	CHECK(compactDepthPlane.SourceColourSpace == "not_applicable");
+	CHECK(compactDepthPlane.SourceOrigin == "top_left");
+	CHECK(compactDepthPlane.SourceProvenance.empty());
+	REQUIRE(compactDepthPlane.MaximumAbsoluteError);
+	CHECK(*compactDepthPlane.MaximumAbsoluteError <= .01);
+	CHECK(compactDepthPlane.RowStride * 2 == losslessDepthPlane.RowStride);
+	CHECK(compactDepthPlane.ByteSize * 2 == losslessDepthPlane.ByteSize);
+	CHECK(compactIdsPlane.Scalar == "uint32");
+	CHECK(compactIdsPlane.SourceScalar == "uint32");
+	CHECK(compactIdsPlane.Encoding == "uint32_le");
+	std::vector<std::byte> compactIds;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		compactDepthTicket,
+		compactIdsPlane.Resource,
+		0,
+		compactIdsPlane.ByteSize,
+		compactIds,
+		detail
+	));
+	CHECK(compactIds == losslessIds);
+	std::vector<std::byte> compactDepthBytes;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		compactDepthTicket,
+		compactDepthPlane.Resource,
+		0,
+		compactDepthPlane.ByteSize,
+		compactDepthBytes,
+		detail
+	));
+	CHECK(assets::Hasher::Of(compactDepthBytes).ToHex() == compactDepthPlane.Hash);
+	REQUIRE(compactDepthPoll.SceneSidecar);
+	CHECK(compactDepthPoll.SceneSidecar->StorageProfile == "training_compact");
+	REQUIRE(bridge.Release("script-capture-world", losslessDepthTicket, detail));
+	REQUIRE(bridge.Release("script-capture-world", compactDepthTicket, detail));
+	CHECK_FALSE(bridge.Poll("script-capture-world", compactDepthTicket, poll, detail));
 
 	// Unmodeled authored facts have no readback texture, but still complete with
 	// the dispatch identity and explicit unavailable provenance.
@@ -4802,6 +4904,21 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(poll.Planes[1].Status == "unsupported");
 	CHECK(poll.Planes[1].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
 	REQUIRE(bridge.Release("script-capture-world", mixedTicket, detail));
+
+	// Requested storage is observable before submission and after an early cancellation.
+	script::DataCaptureBridgeRequest pendingCompact = request;
+	pendingCompact.StorageProfile = "training_compact";
+	uint64_t pendingCompactTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", pendingCompact, pendingCompactTicket, detail));
+	REQUIRE(bridge.Poll("script-capture-world", pendingCompactTicket, poll, detail));
+	CHECK(poll.Status == "pending");
+	CHECK(poll.StorageProfile == "training_compact");
+	bridge.Cancel("script-capture-world", pendingCompactTicket);
+	bridge.Pump();
+	REQUIRE(bridge.Poll("script-capture-world", pendingCompactTicket, poll, detail));
+	CHECK(poll.Status == "cancelled");
+	CHECK(poll.StorageProfile == "training_compact");
+	REQUIRE(bridge.Release("script-capture-world", pendingCompactTicket, detail));
 
 	// A canceled sidecar has already been captured and reserved by PrepareView.
 	// Releasing it must return that reservation before a later capture arrives.

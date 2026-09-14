@@ -131,9 +131,9 @@ namespace engine::control {
 				failure = Error("validation_failed", "options.view_slot must fit uint32");
 				return false;
 			}
-			if (schema != "data-scene-options/v1" || history != "preserve" || storage != "lossless" ||
-				output != "raw_planes" || coordinate != "world_camera_image" || noise != "none" ||
-				noiseSeed != 0) {
+			if (schema != "data-scene-options/v1" || history != "preserve" ||
+				(storage != "lossless" && storage != "training_compact") || output != "raw_planes" ||
+				coordinate != "world_camera_image" || noise != "none" || noiseSeed != 0) {
 				failure = Error(
 					"capability_unsupported", "this host supports only the data-scene-options/v1 base profile"
 				);
@@ -141,6 +141,7 @@ namespace engine::control {
 			}
 			request.ViewSlot = slot;
 			request.CameraId = std::move(camera);
+			request.StorageProfile = std::move(storage);
 			if (!Field(options, "include_scene_data", field, failure)) return false;
 			if (!field->is_boolean()) {
 				failure = Error("validation_failed", "options.include_scene_data must be a boolean");
@@ -284,20 +285,16 @@ namespace engine::control {
 		}
 
 		inline json Plane(const script::DataCaptureBridgePlane &plane, std::string_view snapshot) {
-			const uint64_t byteSize = static_cast<uint64_t>(plane.RowStride) * plane.Height;
+			const uint64_t byteSize = plane.ByteSize;
 			json shape{plane.Height, plane.Width};
 			std::string dtype = plane.Scalar;
 			json packing = plane.Packing.empty() ? json(nullptr) : json(plane.Packing);
 			if (plane.Channel == "rgb_linear_hdr") {
 				shape.push_back(4);
 				dtype = "float16";
-			} else if (plane.Channel == "linear_depth") {
-				dtype = "float32";
 			} else if (plane.Channel == "shading_normal") {
 				dtype = "uint32";
 				packing = "UNorm10A2";
-			} else if (plane.Channel == "second_surface_depth") {
-				dtype = "float32";
 			} else if (plane.Channel == "mesh_uv") {
 				shape.push_back(2);
 				dtype = "float16";
@@ -332,6 +329,21 @@ namespace engine::control {
 				{"hash_algorithm", plane.HashAlgorithm},
 				{"shape", std::move(shape)},
 				{"dtype", dtype},
+				{"source_dtype", plane.SourceScalar},
+				{"source_hash", plane.SourceHash},
+				{"source_width", plane.SourceWidth},
+				{"source_height", plane.SourceHeight},
+				{"source_row_stride", plane.SourceRowStride},
+				{"source_byte_size", plane.SourceByteSize},
+				{"source_encoding", plane.SourceEncoding},
+				{"source_color_space", plane.SourceColourSpace},
+				{"source_origin", plane.SourceOrigin},
+				{"source_packing", plane.SourcePacking},
+				{"source_provenance", plane.SourceProvenance},
+				{"value_classification", plane.ValueClassification},
+				{"encoding", plane.Encoding},
+				{"maximum_absolute_error",
+				 plane.MaximumAbsoluteError ? json(*plane.MaximumAbsoluteError) : json(nullptr)},
 				{"packing", std::move(packing)},
 				{"provenance", plane.Provenance.empty() ? json(nullptr) : json(plane.Provenance)},
 				{"ambient_occlusion", ambientOcclusion(plane.AmbientOcclusion)},
@@ -360,6 +372,7 @@ namespace engine::control {
 						 {{"tick", reply.SceneSidecar->Tick},
 						  {"world_epoch", reply.SceneSidecar->WorldEpoch},
 						  {"world_version", reply.SceneSidecar->WorldVersion}}},
+						{"storage_profile", reply.SceneSidecar->StorageProfile},
 						{"scene", std::move(scene)},
 					};
 				}
@@ -369,6 +382,7 @@ namespace engine::control {
 				{"status", reply.Status},
 				{"snapshot_id", reply.SnapshotId},
 				{"capture_frame", reply.CaptureFrame},
+				{"storage_profile", reply.StorageProfile},
 				{"camera",
 				 {{"available", reply.HasCamera},
 				  {"world_from_camera", reply.WorldFromCamera},

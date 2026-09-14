@@ -2984,7 +2984,7 @@ export type DataSceneOptions = {
 	CaptureNode: string,
 	ViewSlot: number,
 	TemporalHistory: "preserve",
-	StorageProfile: "lossless",
+	StorageProfile: "lossless" | "training_compact",
 	Output: "raw_planes",
 	IncludeSceneData: boolean,
 	IncludeExactMasks: false,

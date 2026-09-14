@@ -52,6 +52,8 @@ namespace {
 			return {
 				.Available = true,
 				.Channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"},
+				.StorageProfiles = {"lossless", "training_compact"},
+				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
 				.HookRecords =
 					{
 						{
@@ -154,7 +156,25 @@ namespace {
 				.Width = 1,
 				.Height = 1,
 				.RowStride = 4,
+				.ByteSize = 4,
 				.Scalar = "float16",
+				.SourceScalar = "float16",
+				.SourceHash = "fixture",
+				.SourceRowStride = 4,
+				.SourceByteSize = 4,
+
+				.SourceEncoding = {},
+
+				.SourceColourSpace = {},
+
+				.SourceOrigin = {},
+
+				.SourcePacking = {},
+
+				.SourceProvenance = {},
+				.ValueClassification = "not_inspected",
+				.Encoding = "ieee754_binary16_le",
+				.MaximumAbsoluteError = {},
 				.ColourSpace = "linear",
 				.Origin = "top_left",
 				.Packing = "RGBA16F",
@@ -173,6 +193,23 @@ namespace {
 				.RowStride = 1,
 				.ByteSize = 1,
 				.Scalar = "unorm8",
+				.SourceScalar = "unorm8",
+				.SourceHash = "fixture",
+				.SourceRowStride = 1,
+				.SourceByteSize = 1,
+
+				.SourceEncoding = {},
+
+				.SourceColourSpace = {},
+
+				.SourceOrigin = {},
+
+				.SourcePacking = {},
+
+				.SourceProvenance = {},
+				.ValueClassification = "not_inspected",
+				.Encoding = "unorm8",
+				.MaximumAbsoluteError = {},
 				.ColourSpace = "not_applicable",
 				.Origin = "top_left",
 				.Packing = "unorm8",
@@ -190,7 +227,25 @@ namespace {
 					.Width = 1,
 					.Height = 1,
 					.RowStride = 4,
+					.ByteSize = 4,
 					.Scalar = "uint32",
+					.SourceScalar = "uint32",
+					.SourceHash = "fixture",
+					.SourceRowStride = 4,
+					.SourceByteSize = 4,
+
+					.SourceEncoding = {},
+
+					.SourceColourSpace = {},
+
+					.SourceOrigin = {},
+
+					.SourcePacking = {},
+
+					.SourceProvenance = {},
+					.ValueClassification = "not_inspected",
+					.Encoding = "uint32_le",
+					.MaximumAbsoluteError = {},
 					.ColourSpace = "not_applicable",
 					.Origin = "top_left",
 					.Packing = {},
@@ -783,7 +838,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "unsupported_data_scene_options")
 				invalid = service:CreateOptions()
 				invalid.StorageProfile = "training_compact"
-				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "queued")
 				invalid = service:CreateOptions()
 				invalid.NoiseMode = "gaussian"
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
@@ -799,6 +854,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				invalid = service:CreateOptions()
 				invalid.ViewSlot = 4294967296
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				assert(service:CaptureBundle("fixture/snapshot", options).status == "queued")
 			)");
 		} else {
 			Run(*runtime, R"(
@@ -819,7 +875,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				invalid = service.CreateOptions(); invalid.IncludeExactMasks = true;
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "unsupported_data_scene_options") throw new Error("exact masks");
 				invalid = service.CreateOptions(); invalid.StorageProfile = "training_compact";
-				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("storage");
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "queued") throw new Error("storage");
 				invalid = service.CreateOptions(); invalid.NoiseMode = "gaussian";
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("noise mode");
 				invalid = service.CreateOptions(); invalid.NoiseSeed = 1;
@@ -830,6 +886,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("pair");
 				invalid = service.CreateOptions(); invalid.ViewSlot = 4294967296;
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("view slot");
+				if (service.CaptureBundle("fixture/snapshot", options).status !== "queued") throw new Error("final queue");
 			)");
 		}
 		CHECK(bridge->LastRequest.SnapshotId == "fixture/snapshot");

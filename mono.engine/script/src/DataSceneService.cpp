@@ -875,6 +875,14 @@ namespace engine::script {
 			channels.reserve(capabilities.Channels.size());
 			for (const std::string &channel : capabilities.Channels)
 				channels.push_back(String(channel));
+			std::vector<ScriptValue> storageProfiles;
+			storageProfiles.reserve(capabilities.StorageProfiles.size());
+			for (const std::string &profile : capabilities.StorageProfiles)
+				storageProfiles.push_back(String(profile));
+			std::vector<ScriptValue> compactLimitations;
+			compactLimitations.reserve(capabilities.TrainingCompactLimitations.size());
+			for (const std::string &limitation : capabilities.TrainingCompactLimitations)
+				compactLimitations.push_back(String(limitation));
 			std::vector<ScriptValue> hooks;
 			hooks.reserve(capabilities.HookRecords.size());
 			for (const auto &hook : capabilities.HookRecords) {
@@ -902,6 +910,8 @@ namespace engine::script {
 					{"status", String(capabilities.Available ? "ok" : "capability_unsupported")},
 					{"schema_version", String("data-capture-hooks/v1")},
 					{"channels", Array(std::move(channels))},
+					{"storage_profiles", Array(std::move(storageProfiles))},
+					{"training_compact_limitations", Array(std::move(compactLimitations))},
 					{"hooks", Array(std::move(hooks))},
 					{"limits",
 					 Map({
@@ -936,6 +946,12 @@ namespace engine::script {
 			}
 			request.InstanceId = worldName;
 			request.IncludeSceneData = includeSceneData;
+			if (const ScriptValue *storage = Field(value, "storage_profile"); storage != nullptr) {
+				if (storage->Tag != ValueTag::String ||
+					(storage->Text != "lossless" && storage->Text != "training_compact"))
+					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
+				request.StorageProfile = storage->Text;
+			}
 			if (const ScriptValue *camera = Field(value, "camera_id"); camera != nullptr) {
 				if (camera->Tag != ValueTag::String || camera->Text.empty() ||
 					camera->Text.size() > MAX_DATA_SCENE_ID_BYTES ||
@@ -1183,11 +1199,13 @@ namespace engine::script {
 				!BoundedStringField(options, "Pipeline", 256, pipeline) ||
 				!BoundedStringField(options, "CaptureNode", 256, captureNode) ||
 				!OptionText(options, "TemporalHistory", "preserve", history) ||
-				!OptionText(options, "StorageProfile", "lossless", storage) ||
+				!BoundedStringField(options, "StorageProfile", 32, storage) ||
 				!OptionText(options, "Output", "raw_planes", output) ||
 				!OptionText(options, "CoordinateSpace", "world_camera_image", coordinateSpace) ||
 				!OptionText(options, "NoiseMode", "none", noiseMode))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+			if (storage != "lossless" && storage != "training_compact")
+				return {"unsupported", Map({{"status", String("unsupported_data_scene_options")}})};
 
 			const ScriptValue *channels = Field(options, "Channels");
 			const ScriptValue *slot = Field(options, "ViewSlot");
@@ -1253,6 +1271,7 @@ namespace engine::script {
 				{"view_slot", Number(slot->Number)},
 				{"channels", Array(std::move(copiedChannels))},
 				{"temporal_history", String(history)},
+				{"storage_profile", String(storage)},
 			});
 			DataSceneResult queued = QueueCapture(bridge, worldName, request, sceneData->Boolean);
 			if (queued.Status == std::string_view("ok") && sceneData->Boolean) {
@@ -1301,6 +1320,21 @@ namespace engine::script {
 					{"row_stride", Number(plane.RowStride)},
 					{"byte_size", Number(plane.ByteSize)},
 					{"scalar", String(plane.Scalar)},
+					{"source_scalar", String(plane.SourceScalar)},
+					{"source_hash", String(plane.SourceHash)},
+					{"source_width", Number(plane.SourceWidth)},
+					{"source_height", Number(plane.SourceHeight)},
+					{"source_row_stride", Number(plane.SourceRowStride)},
+					{"source_byte_size", Number(plane.SourceByteSize)},
+					{"source_encoding", String(plane.SourceEncoding)},
+					{"source_color_space", String(plane.SourceColourSpace)},
+					{"source_origin", String(plane.SourceOrigin)},
+					{"source_packing", String(plane.SourcePacking)},
+					{"source_provenance", String(plane.SourceProvenance)},
+					{"value_classification", String(plane.ValueClassification)},
+					{"encoding", String(plane.Encoding)},
+					{"maximum_absolute_error",
+					 plane.MaximumAbsoluteError ? Number(*plane.MaximumAbsoluteError) : ScriptValue{}},
 					{"color_space", String(plane.ColourSpace)},
 					{"origin", String(plane.Origin)},
 					{"packing", String(plane.Packing)},
@@ -1311,6 +1345,7 @@ namespace engine::script {
 				{"status", String(poll.Status)},
 				{"snapshot_id", String(poll.SnapshotId)},
 				{"capture_frame", String(Decimal(poll.CaptureFrame))},
+				{"storage_profile", String(poll.StorageProfile)},
 				{"planes", Array(std::move(planes))},
 				{"detail", String(detail)},
 			};
@@ -1349,6 +1384,7 @@ namespace engine::script {
 							 {"world_epoch", String(Decimal(sidecar.WorldEpoch))},
 							 {"world_version", String(Decimal(sidecar.WorldVersion))},
 						 })},
+						{"storage_profile", String(sidecar.StorageProfile)},
 						{"scene", sidecar.Scene},
 					})
 				);

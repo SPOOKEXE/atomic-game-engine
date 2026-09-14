@@ -26,6 +26,9 @@ namespace engine::script {
 		uint64_t ViewSlot = 0;
 		std::vector<std::string> Channels;
 		std::string TemporalHistory;
+		// "lossless" retains renderer readback bytes. "training_compact" is an
+		// explicit storage transform with per-plane encoding metadata.
+		std::string StorageProfile = "lossless";
 		// The renderer copies a scene sidecar only after its retained-snapshot
 		// barrier succeeds. This flag asks for that bounded copied observation.
 		bool IncludeSceneData = false;
@@ -38,6 +41,7 @@ namespace engine::script {
 		uint64_t Tick = 0;
 		uint64_t WorldEpoch = 0;
 		uint64_t WorldVersion = 0;
+		std::string StorageProfile = "lossless";
 		ScriptValue Scene;
 	};
 
@@ -67,6 +71,24 @@ namespace engine::script {
 		uint32_t RowStride = 0;
 		size_t ByteSize = 0;
 		std::string Scalar;
+		// SourceScalar is the source value representation. Scalar and Encoding
+		// describe the retained bytes returned by ReadPlane.
+		std::string SourceScalar;
+		std::string SourceHash;
+		uint32_t SourceWidth = 0;
+		uint32_t SourceHeight = 0;
+		uint32_t SourceRowStride = 0;
+		size_t SourceByteSize = 0;
+		std::string SourceEncoding;
+		std::string SourceColourSpace;
+		std::string SourceOrigin;
+		std::string SourcePacking;
+		std::string SourceProvenance;
+		// not_inspected, finite, finite_overflow, unsupported_source_layout,
+		// contains_infinity, contains_nan or contains_infinity_and_nan.
+		std::string ValueClassification = "not_inspected";
+		std::string Encoding;
+		std::optional<double> MaximumAbsoluteError;
 		std::string ColourSpace;
 		std::string Origin;
 		// Exact source storage for packed channels, such as rgba8_unorm.
@@ -84,6 +106,8 @@ namespace engine::script {
 		std::string Status;
 		std::string SnapshotId;
 		uint64_t CaptureFrame = 0;
+		// Describes the stored plane bytes even when no scene sidecar was requested.
+		std::string StorageProfile = "lossless";
 
 		// Camera values are copied with the completed capture so a consumer never
 		// infers calibration from a later live view. Matrices are column-major.
@@ -149,6 +173,9 @@ namespace engine::script {
 	struct DataCaptureBridgeCapabilities {
 		bool Available = false;
 		std::vector<std::string> Channels;
+		std::vector<std::string> StorageProfiles;
+		// Bounded machine-readable constraints for the training_compact profile.
+		std::vector<std::string> TrainingCompactLimitations;
 		// Stable render hook contracts. They are strings and fixed limits, never
 		// renderer handles or process-local enum values.
 		std::vector<DataCaptureBridgeHookCapability> HookRecords;

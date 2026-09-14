@@ -171,6 +171,8 @@ namespace {
 					 "object_ids",
 					 "semantic_ids",
 					 "part_ids"},
+				.StorageProfiles = {"lossless", "training_compact"},
+				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
 				.HookRecords =
 					{
 						ObservationHook("data_capture.rgb_linear_hdr", "rgb_linear_hdr"),
@@ -212,6 +214,7 @@ namespace {
 			ViewSlot = request.ViewSlot;
 			Channels = request.Channels;
 			IncludeSceneData = request.IncludeSceneData;
+			StorageProfile = request.StorageProfile;
 			ticket = 1;
 			Queued = true;
 			++QueueCount;
@@ -244,7 +247,25 @@ namespace {
 				 .Width = 2,
 				 .Height = 1,
 				 .RowStride = 6,
+				 .ByteSize = 6,
 				 .Scalar = "float16",
+				 .SourceScalar = "float16",
+				 .SourceHash = "abcd",
+				 .SourceRowStride = 6,
+				 .SourceByteSize = 6,
+
+				 .SourceEncoding = {},
+
+				 .SourceColourSpace = {},
+
+				 .SourceOrigin = {},
+
+				 .SourcePacking = {},
+
+				 .SourceProvenance = {},
+				 .ValueClassification = "not_inspected",
+				 .Encoding = "ieee754_binary16_le",
+				 .MaximumAbsoluteError = {},
 				 .ColourSpace = "linear",
 				 .Origin = "top_left",
 				 .Packing = {},
@@ -261,6 +282,23 @@ namespace {
 				 .RowStride = 1,
 				 .ByteSize = 1,
 				 .Scalar = "unorm8",
+				 .SourceScalar = "unorm8",
+				 .SourceHash = "efgh",
+				 .SourceRowStride = 1,
+				 .SourceByteSize = 1,
+
+				 .SourceEncoding = {},
+
+				 .SourceColourSpace = {},
+
+				 .SourceOrigin = {},
+
+				 .SourcePacking = {},
+
+				 .SourceProvenance = {},
+				 .ValueClassification = "not_inspected",
+				 .Encoding = "unorm8",
+				 .MaximumAbsoluteError = {},
 				 .ColourSpace = "not_applicable",
 				 .Origin = "top_left",
 				 .Packing = "unorm8",
@@ -298,6 +336,7 @@ namespace {
 					.Tick = 4,
 					.WorldEpoch = 2,
 					.WorldVersion = 8,
+					.StorageProfile = StorageProfile.empty() ? "lossless" : StorageProfile,
 					.Scene = std::move(scene),
 				};
 			}
@@ -368,6 +407,7 @@ namespace {
 		bool MutationQueued = false;
 		bool MutationCancelled = false;
 		bool IncludeSceneData = false;
+		std::string StorageProfile;
 		uint32_t QueueCount = 0;
 		bool NamedCameraSelection = true;
 
@@ -706,6 +746,11 @@ TEST_CASE(
 	CHECK(bridge->RequestedCaptureNode() == "data-capture");
 	CHECK(bridge->RequestedViewSlot() == 3);
 	CHECK(bridge->RequestedCameraId() == "current_view");
+	json compact = valid;
+	compact["operation_id"] = "bundle-training-compact";
+	compact["options"]["storage_profile"] = "training_compact";
+	CHECK(Called(surface, "capture_bundle", compact)["status"] == "queued");
+	CHECK(bridge->StorageProfile == "training_compact");
 	json namedCamera = valid;
 	namedCamera["operation_id"] = "bundle-named-camera";
 	namedCamera["options"]["camera_id"] = "camera/fixture";
@@ -725,7 +770,7 @@ TEST_CASE(
 		std::vector<std::string>{"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"}
 	);
 	CHECK(Called(surface, "capture_bundle", valid) == queued);
-	CHECK(bridge->QueueCount == 2);
+	CHECK(bridge->QueueCount == 3);
 	const json withoutSidecar =
 		Called(surface, "poll_capture", {{"instance_id", "capture-bundle-world"}, {"ticket", 1}});
 	CHECK(withoutSidecar["scene_sidecar"].is_null());
@@ -743,7 +788,7 @@ TEST_CASE(
 	CHECK(staleReply["current_tick"] == current.Clock.Tick);
 	CHECK(Called(surface, "capture_bundle", stale, failed) == staleReply);
 	CHECK(failed);
-	CHECK(bridge->QueueCount == 2);
+	CHECK(bridge->QueueCount == 3);
 
 	json malformed = request("bundle-unknown");
 	malformed["options"]["unknown"] = true;
@@ -818,6 +863,7 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 	CHECK(reply["limits"]["maximum_pending_pumps"] == 600);
 	CHECK(reply["limits"]["named_camera_selection"] == true);
 	CHECK(reply["limits"]["maximum_camera_id_bytes"] == 256);
+	CHECK(reply["storage_profiles"] == json::array({"lossless", "training_compact"}));
 }
 
 TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {

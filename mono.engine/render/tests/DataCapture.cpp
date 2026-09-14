@@ -1,4 +1,5 @@
 #include "CaptureRecordValidation.hpp"
+#include "DataCaptureCompact.hpp"
 #include "RenderFixture.hpp"
 #include "SecondSurfaceDepth.hpp"
 
@@ -18,6 +19,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
+#include <cmath>
+#include <limits>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -25,6 +29,90 @@
 TEST_SUITE_ID("engine.render.datacapture")
 
 using namespace engine::render;
+
+TEST_CASE(
+	"compact depth uses exact binary16 rounding and preserves special classes", "[render][data-capture]"
+) {
+	using namespace data_capture_compact;
+	for (uint32_t raw = 0; raw <= 0xffff; ++raw) {
+		const uint16_t half = static_cast<uint16_t>(raw);
+		if ((half & 0x7c00) == 0x7c00) continue;
+		uint16_t encoded = 0;
+		REQUIRE(Float32ToFloat16(Float16ToFloat32(half), encoded));
+		CHECK(encoded == half);
+	}
+	uint16_t encoded = 0;
+	const float leastSubnormal = std::ldexp(1.0f, -24);
+	REQUIRE(Float32ToFloat16(std::ldexp(1.0f, -25), encoded));
+	CHECK(encoded == 0x0000);
+	REQUIRE(Float32ToFloat16(std::nextafter(std::ldexp(1.0f, -25), 1.0f), encoded));
+	CHECK(encoded == 0x0001);
+	REQUIRE(Float32ToFloat16(leastSubnormal * 1.5f, encoded));
+	CHECK(encoded == 0x0002);
+	REQUIRE(Float32ToFloat16(65504.0f, encoded));
+	CHECK(encoded == 0x7bff);
+	CHECK_FALSE(Float32ToFloat16(std::nextafter(65504.0f, std::numeric_limits<float>::infinity()), encoded));
+	REQUIRE(Float32ToFloat16(std::numeric_limits<float>::infinity(), encoded));
+	CHECK(encoded == 0x7c00);
+	CHECK(std::isinf(Float16ToFloat32(encoded)));
+	REQUIRE(Float32ToFloat16(std::numeric_limits<float>::quiet_NaN(), encoded));
+	CHECK(std::isnan(Float16ToFloat32(encoded)));
+	CHECK((encoded & 0x7c00) == 0x7c00);
+	CHECK((encoded & 0x03ff) != 0);
+}
+
+TEST_CASE("compact depth strips padding and reports finite quantization error", "[render][data-capture]") {
+	using namespace data_capture_compact;
+	constexpr uint32_t width = 2;
+	constexpr uint32_t height = 2;
+	constexpr uint32_t sourceStride = 12;
+	std::vector<std::byte> source(sourceStride * height, std::byte{0xa5});
+	const std::array values{1.0003f, 2.0003f, 3.0003f, 4.0003f};
+	for (size_t row = 0; row < height; ++row)
+		for (size_t column = 0; column < width; ++column) {
+			const uint32_t bits = std::bit_cast<uint32_t>(values[row * width + column]);
+			for (size_t byte = 0; byte < 4; ++byte)
+				source[row * sourceStride + column * 4 + byte] =
+					static_cast<std::byte>((bits >> (byte * 8)) & 0xff);
+		}
+	std::vector<std::byte> compact;
+	std::optional<double> error;
+	std::string classification;
+	std::string rejection;
+	REQUIRE(CompactFloat32DepthBytes(
+		source, width, height, sourceStride, compact, error, classification, rejection
+	));
+	CHECK(compact.size() == width * height * 2);
+	REQUIRE(error);
+	CHECK(*error > 0.0);
+	CHECK(classification == "finite");
+	std::vector<std::byte> special(8);
+	const std::array specialValues{
+		std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()
+	};
+	for (size_t column = 0; column < specialValues.size(); ++column) {
+		const uint32_t bits = std::bit_cast<uint32_t>(specialValues[column]);
+		for (size_t byte = 0; byte < 4; ++byte)
+			special[column * 4 + byte] = static_cast<std::byte>((bits >> (byte * 8)) & 0xff);
+	}
+	REQUIRE(CompactFloat32DepthBytes(special, 2, 1, 8, compact, error, classification, rejection));
+	CHECK_FALSE(error);
+	CHECK(classification == "contains_infinity_and_nan");
+	const uint32_t overflowBits = std::bit_cast<uint32_t>(65536.0f);
+	for (size_t byte = 0; byte < 4; ++byte)
+		special[byte] = static_cast<std::byte>((overflowBits >> (byte * 8)) & 0xff);
+	compact.assign(3, std::byte{0x7f});
+	error = 42.0;
+	classification = "stale";
+	rejection = "stale";
+	CHECK_FALSE(CompactFloat32DepthBytes(
+		std::span(special).first(4), 1, 1, 4, compact, error, classification, rejection
+	));
+	CHECK(compact.empty());
+	CHECK_FALSE(error);
+	CHECK(classification == "finite_overflow");
+	CHECK(rejection == "finite_overflow_above_65504");
+}
 
 TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::RgbLinearHdr)) == "rgb_linear_hdr");
