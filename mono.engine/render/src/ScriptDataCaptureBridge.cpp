@@ -2,6 +2,7 @@
 
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
+#include <engine/script/DataSceneService.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -323,7 +324,9 @@ namespace engine::render {
 			return false;
 		}
 		ticket = NextTicket++;
-		Entries.emplace(ticket, Entry{.Request = request, .Reply = {}, .PlaneBytes = {}, .Detail = {}});
+		Entries.emplace(
+			ticket, Entry{.Request = request, .Reply = {}, .PlaneBytes = {}, .SceneSidecar = {}, .Detail = {}}
+		);
 		detail.clear();
 		return true;
 	}
@@ -472,6 +475,7 @@ namespace engine::render {
 		}
 		for (const auto &plane : found->second.PlaneBytes)
 			RetainedBytes -= plane.second.size();
+		RetainedBytes -= found->second.SceneSidecarBytes;
 		Entries.erase(found);
 		detail.clear();
 		return true;
@@ -509,6 +513,7 @@ namespace engine::render {
 				}
 				for (const auto &[resource, bytes] : entry->second.PlaneBytes)
 					RetainedBytes -= bytes.size();
+				RetainedBytes -= entry->second.SceneSidecarBytes;
 				entry = Entries.erase(entry);
 			}
 			for (auto entry = Mutations.begin(); entry != Mutations.end();) {
@@ -629,6 +634,35 @@ namespace engine::render {
 				}
 				continue;
 			}
+			std::optional<script::DataCaptureBridgeSceneSidecar> sceneSidecar;
+			size_t sceneSidecarBytes = 0;
+			if (pendingRequest.Request.IncludeSceneData) {
+				script::DataSceneResult scene;
+				const world::WorldStatus entered = Session.UniverseOf().Enter(
+					Session.UniverseOf().Find(core::Name(pendingRequest.Request.InstanceId)),
+					[&](ecs::Store &store) { scene = script::GetSceneSnapshot(store); }
+				);
+				if (entered != world::WorldStatus::Ok || scene.Status != std::string_view("ok") ||
+					!script::DataSceneJsonResponseBudget(scene.Value, sceneSidecarBytes)) {
+					std::lock_guard lock(Mutex);
+					if (auto entry = Entries.find(pendingRequest.Id);
+						entry != Entries.end() && !entry->second.CancelRequested) {
+						entry->second.Reply.Status = "failed";
+						entry->second.Reply.SnapshotId = pendingRequest.Request.SnapshotId;
+						entry->second.Detail = "scene sidecar is unavailable or exceeds its byte limit";
+						entry->second.Terminal = true;
+						entry->second.Preparing = false;
+					}
+					continue;
+				}
+				sceneSidecar = script::DataCaptureBridgeSceneSidecar{
+					.SnapshotId = pendingRequest.Request.SnapshotId,
+					.Tick = barrier.Clock.Tick,
+					.WorldEpoch = barrier.WorldEpoch,
+					.WorldVersion = barrier.WorldVersion,
+					.Scene = std::move(scene.Value),
+				};
+			}
 			bool releaseHook = false;
 			{
 				std::lock_guard lock(Mutex);
@@ -740,7 +774,18 @@ namespace engine::render {
 					entry->second.Detail = "renderer capture hook backpressured";
 					entry->second.Terminal = true;
 					entry->second.Preparing = false;
+				} else if (RetainedBytes > RETAINED_BYTE_LIMIT ||
+						   sceneSidecarBytes > RETAINED_BYTE_LIMIT - RetainedBytes) {
+					releaseHook = true;
+					entry->second.Reply.Status = "failed";
+					entry->second.Reply.SnapshotId = pendingRequest.Request.SnapshotId;
+					entry->second.Detail = "scene sidecar exceeds retained byte quota";
+					entry->second.Terminal = true;
+					entry->second.Preparing = false;
 				} else {
+					entry->second.SceneSidecar = std::move(sceneSidecar);
+					entry->second.SceneSidecarBytes = sceneSidecarBytes;
+					RetainedBytes += sceneSidecarBytes;
 					Hooks->Connections.emplace(pendingRequest.Id, connection.Connection);
 					Hooks->Batches.emplace(pendingRequest.Id, *batch);
 					entry->second.Preparing = false;
@@ -1034,12 +1079,19 @@ namespace engine::render {
 						entry->second.Reply.Status = "failed";
 						entry->second.Reply.SnapshotId = captured.SnapshotId;
 						entry->second.Detail = "renderer returned a malformed capture plane";
-					} else if (totalBytes > RETAINED_BYTE_LIMIT - RetainedBytes) {
+					} else if (RetainedBytes > RETAINED_BYTE_LIMIT ||
+							   totalBytes > RETAINED_BYTE_LIMIT - RetainedBytes) {
 						entry->second.Reply.Status = "failed";
 						entry->second.Reply.SnapshotId = captured.SnapshotId;
 						entry->second.Detail = "capture exceeds retained byte quota";
 					} else {
 						RetainedBytes += totalBytes;
+						if (captured.Status == DataCaptureStatus::Ready ||
+							captured.Status == DataCaptureStatus::Partial) {
+							// Reply becomes the sidecar owner. The entry retains only its
+							// reserved-byte marker until Release or Teardown.
+							reply.SceneSidecar = std::move(entry->second.SceneSidecar);
+						}
 						entry->second.Reply = std::move(reply);
 						entry->second.PlaneBytes = std::move(bytes);
 						entry->second.Detail.clear();

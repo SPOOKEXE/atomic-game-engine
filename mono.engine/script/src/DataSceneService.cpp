@@ -100,6 +100,96 @@ namespace engine::script {
 			}
 			return true;
 		}
+
+		constexpr size_t MAXIMUM_JSON_NUMBER_BYTES = 32;
+
+		bool JsonBudgetAdd(size_t &bytes, size_t amount) {
+			if (bytes > MAX_DATA_SCENE_JSON_RESPONSE_BYTES) return false;
+			if (amount > MAX_DATA_SCENE_JSON_RESPONSE_BYTES - bytes) return false;
+			bytes += amount;
+			return true;
+		}
+
+		bool JsonBudgetString(std::string_view value, size_t &bytes) {
+			if (!DataSceneUtf8(value) || !JsonBudgetAdd(bytes, 2)) return false;
+			for (const unsigned char character : value) {
+				const size_t escapedBytes =
+					character < 0x20 ? (character == '\b' || character == '\t' || character == '\n' ||
+												character == '\f' || character == '\r'
+											? 2
+											: 6)
+									 : (character == '"' || character == '\\' ? 2 : 1);
+				if (!JsonBudgetAdd(bytes, escapedBytes)) return false;
+			}
+			return true;
+		}
+
+		bool JsonBudgetNumber(double value, size_t &bytes) {
+			return std::isfinite(value) && JsonBudgetAdd(bytes, MAXIMUM_JSON_NUMBER_BYTES);
+		}
+
+		bool JsonBudgetVector(const core::Vector3 &value, size_t &bytes) {
+			return Finite(value) && JsonBudgetAdd(bytes, 16) && JsonBudgetNumber(value.X, bytes) &&
+				   JsonBudgetNumber(value.Y, bytes) && JsonBudgetNumber(value.Z, bytes);
+		}
+
+		bool JsonBudgetFrame(const core::CFrame &value, size_t &bytes) {
+			return std::isfinite(value.Position.X) && std::isfinite(value.Position.Y) &&
+				   std::isfinite(value.Position.Z) && std::isfinite(value.QuaternionX) &&
+				   std::isfinite(value.QuaternionY) && std::isfinite(value.QuaternionZ) &&
+				   std::isfinite(value.QuaternionW) && JsonBudgetAdd(bytes, 34) &&
+				   JsonBudgetNumber(value.Position.X, bytes) && JsonBudgetNumber(value.Position.Y, bytes) &&
+				   JsonBudgetNumber(value.Position.Z, bytes) && JsonBudgetNumber(value.QuaternionX, bytes) &&
+				   JsonBudgetNumber(value.QuaternionY, bytes) && JsonBudgetNumber(value.QuaternionZ, bytes) &&
+				   JsonBudgetNumber(value.QuaternionW, bytes);
+		}
+
+		bool JsonBudget(const ScriptValue &value, size_t depth, size_t &bytes) {
+			if (depth > 16) return false;
+			switch (value.Tag) {
+			case ValueTag::Nil:
+				return JsonBudgetAdd(bytes, 4);
+			case ValueTag::False:
+				return JsonBudgetAdd(bytes, 5);
+			case ValueTag::True:
+				// The control converter reserves five bytes for either boolean.
+				return JsonBudgetAdd(bytes, 5);
+			case ValueTag::Number:
+				return JsonBudgetNumber(value.Number, bytes);
+			case ValueTag::String:
+				return JsonBudgetString(value.Text, bytes);
+			case ValueTag::Array:
+				if (!JsonBudgetAdd(bytes, 2)) return false;
+				for (size_t index = 0; index < value.Items.size(); ++index) {
+					if ((index != 0 && !JsonBudgetAdd(bytes, 1)) ||
+						!JsonBudget(value.Items[index], depth + 1, bytes))
+						return false;
+				}
+				return true;
+			case ValueTag::Map: {
+				if (!JsonBudgetAdd(bytes, 2)) return false;
+				std::unordered_set<std::string_view> names;
+				names.reserve(value.Entries.size());
+				for (size_t index = 0; index < value.Entries.size(); ++index) {
+					const auto &[name, item] = value.Entries[index];
+					if (!names.emplace(name).second || (index != 0 && !JsonBudgetAdd(bytes, 1)) ||
+						!JsonBudgetString(name, bytes) || !JsonBudgetAdd(bytes, 1) ||
+						!JsonBudget(item, depth + 1, bytes))
+						return false;
+				}
+				return true;
+			}
+			case ValueTag::Vector3:
+				return JsonBudgetVector(value.Vector, bytes);
+			case ValueTag::Color3:
+				return Finite(core::Vector3{value.Colour.R, value.Colour.G, value.Colour.B}) &&
+					   JsonBudgetAdd(bytes, 16) && JsonBudgetNumber(value.Colour.R, bytes) &&
+					   JsonBudgetNumber(value.Colour.G, bytes) && JsonBudgetNumber(value.Colour.B, bytes);
+			case ValueTag::CFrame:
+				return JsonBudgetFrame(value.Frame, bytes);
+			}
+			return false;
+		}
 		bool Finite(const core::CFrame &value) {
 			const double length = std::hypot(
 				std::hypot(static_cast<double>(value.QuaternionX), value.QuaternionY),
@@ -830,7 +920,8 @@ namespace engine::script {
 		DataSceneResult QueueCapture(
 			const std::shared_ptr<DataCaptureBridge> &bridge,
 			std::string_view worldName,
-			const ScriptValue &value
+			const ScriptValue &value,
+			bool includeSceneData = false
 		) {
 			if (bridge == nullptr) return CaptureUnavailable();
 			DataCaptureBridgeRequest request;
@@ -842,6 +933,7 @@ namespace engine::script {
 				return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
 			}
 			request.InstanceId = worldName;
+			request.IncludeSceneData = includeSceneData;
 			const ScriptValue *slot = Field(value, "view_slot");
 			if (slot == nullptr || slot->Tag != ValueTag::Number || !std::isfinite(slot->Number) ||
 				!(slot->Number >= 0.0) ||
@@ -1098,14 +1190,6 @@ namespace engine::script {
 				noiseSeed == nullptr || noiseSeed->Tag != ValueTag::Number || noiseSeed->Number != 0.0)
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 
-			if (sceneData->Boolean)
-				return {
-					"unsupported",
-					Map({
-						{"status", String("unsupported_data_scene_options")},
-						{"reason", String("bundle scene sidecar is not captured by the renderer")},
-					})
-				};
 			if (exactMasks->Boolean)
 				return {
 					"unsupported",
@@ -1145,7 +1229,10 @@ namespace engine::script {
 				{"channels", Array(std::move(copiedChannels))},
 				{"temporal_history", String(history)},
 			});
-			DataSceneResult queued = QueueCapture(bridge, worldName, request);
+			DataSceneResult queued = QueueCapture(bridge, worldName, request, sceneData->Boolean);
+			if (queued.Status == std::string_view("ok") && sceneData->Boolean) {
+				queued.Value.Entries.push_back({"scene_sidecar_requested", Boolean(true)});
+			}
 			if (queued.Value.Tag == ValueTag::Map && queued.Status == std::string_view("ok"))
 				queued.Value.Entries.push_back({"options", options});
 			return queued;
@@ -1224,6 +1311,23 @@ namespace engine::script {
 					Map({{"label", Number(label.Label)}, {"stable_id", String(label.StableId)}})
 				);
 			entries.emplace_back("part_labels", Array(std::move(partLabels)));
+			if (poll.SceneSidecar) {
+				const DataCaptureBridgeSceneSidecar &sidecar = *poll.SceneSidecar;
+				entries.emplace_back(
+					"scene_sidecar",
+					Map({
+						{"schema_version", String("data-capture-scene-sidecar/v1")},
+						{"snapshot_id", String(sidecar.SnapshotId)},
+						{"lifecycle",
+						 Map({
+							 {"tick", String(Decimal(sidecar.Tick))},
+							 {"world_epoch", String(Decimal(sidecar.WorldEpoch))},
+							 {"world_version", String(Decimal(sidecar.WorldVersion))},
+						 })},
+						{"scene", sidecar.Scene},
+					})
+				);
+			}
 			if (poll.HasCamera) {
 				std::vector<std::pair<std::string, ScriptValue>> camera{
 					{"world_from_camera", Matrix(poll.WorldFromCamera)},
@@ -2237,6 +2341,11 @@ namespace engine::script {
 			{"OverlapOBB", ServiceObb},
 			{"GetColliderBev", ServiceColliderBev},
 		}};
+	}
+
+	bool DataSceneJsonResponseBudget(const ScriptValue &value, size_t &bytes) {
+		bytes = 0;
+		return JsonBudget(value, 0, bytes);
 	}
 
 	DataSceneResult GetCapabilities(const ecs::Store &store) {

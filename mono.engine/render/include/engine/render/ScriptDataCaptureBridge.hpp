@@ -51,6 +51,8 @@ namespace engine::render {
 			script::DataCaptureBridgeRequest Request;
 			script::DataCaptureBridgePoll Reply;
 			std::unordered_map<std::string, std::vector<std::byte>> PlaneBytes;
+			std::optional<script::DataCaptureBridgeSceneSidecar> SceneSidecar;
+			size_t SceneSidecarBytes = 0;
 			std::string Detail;
 			bool Preparing = false;
 			bool CancelRequested = false;

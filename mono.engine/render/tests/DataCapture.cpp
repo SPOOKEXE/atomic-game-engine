@@ -708,6 +708,39 @@ TEST_CASE("script capture retains terminal tickets until release", "[render][dat
 	CHECK(bridge.Queue("data-world", request, reused, detail));
 }
 
+TEST_CASE("script capture does not retain a scene sidecar for a stale snapshot", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const std::string snapshot = PauseAndSnapshot(worlds, session);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("stale-sidecar-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	ScriptDataCaptureBridge bridge(session, renderer);
+	auto request = Request();
+	request.SnapshotId = snapshot;
+	request.Pipeline = pipeline.Text();
+	request.IncludeSceneData = true;
+	uint64_t ticket = 0;
+	std::string detail;
+	REQUIRE(bridge.Queue("data-world", request, ticket, detail));
+	REQUIRE(session.Resume("data-world", 0).Status == engine::world::DataFactoryStatus::Ok);
+	View view = MutationView(snapshot, pipeline);
+	bridge.PrepareView(view);
+	bridge.Pump();
+	engine::script::DataCaptureBridgePoll reply;
+	REQUIRE(bridge.Poll("data-world", ticket, reply, detail));
+	CHECK(reply.Status == "stale_snapshot");
+	CHECK_FALSE(reply.SceneSidecar);
+	REQUIRE(bridge.Release("data-world", ticket, detail));
+	CHECK_FALSE(bridge.Poll("data-world", ticket, reply, detail));
+}
+
 TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data-capture]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);

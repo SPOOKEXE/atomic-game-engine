@@ -771,9 +771,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				local invalid = service:CreateOptions()
 				invalid.CameraId = "fixture/camera"
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
-				invalid = service:CreateOptions()
-				invalid.IncludeSceneData = true
-				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "unsupported_data_scene_options")
+				options.IncludeSceneData = true
+				assert(service:CaptureBundle("fixture/snapshot", options).status == "queued")
 				invalid = service:CreateOptions()
 				invalid.IncludeExactMasks = true
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "unsupported_data_scene_options")
@@ -810,8 +809,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				let invalid = service.CreateOptions();
 				invalid.CameraId = "fixture/camera";
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("camera");
-				invalid = service.CreateOptions(); invalid.IncludeSceneData = true;
-				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "unsupported_data_scene_options") throw new Error("scene data");
+				options.IncludeSceneData = true;
+				if (service.CaptureBundle("fixture/snapshot", options).status !== "queued") throw new Error("scene data");
 				invalid = service.CreateOptions(); invalid.IncludeExactMasks = true;
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "unsupported_data_scene_options") throw new Error("exact masks");
 				invalid = service.CreateOptions(); invalid.StorageProfile = "training_compact";
@@ -832,6 +831,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 		CHECK(bridge->LastRequest.Pipeline == "main");
 		CHECK(bridge->LastRequest.CaptureNode == "lit");
 		CHECK(bridge->LastRequest.Channels == std::vector<std::string>{"rgb_linear_hdr", "object_ids"});
+		CHECK(bridge->LastRequest.IncludeSceneData);
 	}
 }
 

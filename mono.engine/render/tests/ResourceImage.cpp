@@ -4399,6 +4399,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 		.CaptureNode = "image-export",
 		.Channels = {"object_ids"},
 		.TemporalHistory = "preserve",
+		.IncludeSceneData = true,
 	};
 	uint64_t ticket = 0;
 	std::string detail;
@@ -4435,6 +4436,12 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(poll.ObjectLabels[0].StableId == "script/alpha");
 	CHECK(poll.ObjectLabels[1].Label == 2);
 	CHECK(poll.ObjectLabels[1].StableId == "script/packed");
+	REQUIRE(poll.SceneSidecar);
+	CHECK(poll.SceneSidecar->SnapshotId == snapshot);
+	CHECK(poll.SceneSidecar->Tick == 0);
+	CHECK(poll.SceneSidecar->WorldEpoch == session.Inspect("script-capture-world").WorldEpoch);
+	CHECK(poll.SceneSidecar->WorldVersion == session.Inspect("script-capture-world").WorldVersion);
+	CHECK(poll.SceneSidecar->Scene.Tag == script::ValueTag::Map);
 	CHECK(poll.Planes.front().Resource != poll.Planes.front().SourceResource);
 	std::vector<std::byte> bytes;
 	const size_t byteCount = static_cast<size_t>(poll.Planes.front().RowStride) * poll.Planes.front().Height;
@@ -4446,6 +4453,8 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	script::DataCaptureBridgePoll repeated;
 	REQUIRE(bridge.Poll("script-capture-world", ticket, repeated, detail));
 	REQUIRE(repeated.Planes.size() == 1);
+	REQUIRE(repeated.SceneSidecar);
+	CHECK(repeated.SceneSidecar->SnapshotId == snapshot);
 	CHECK(repeated.Planes.front().Resource == poll.Planes.front().Resource);
 	CHECK(repeated.Planes.front().Hash == poll.Planes.front().Hash);
 	std::vector<std::byte> repeatedBytes;
@@ -4455,6 +4464,34 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(repeatedBytes == bytes);
 	REQUIRE(bridge.Release("script-capture-world", ticket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", ticket, poll, detail));
+
+	// A canceled sidecar has already been captured and reserved by PrepareView.
+	// Releasing it must return that reservation before a later capture arrives.
+	uint64_t cancelledSidecarTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", request, cancelledSidecarTicket, detail));
+	view.SnapshotId.clear();
+	bridge.PrepareView(view);
+	REQUIRE(view.SnapshotId == snapshot);
+	bridge.Cancel("script-capture-world", cancelledSidecarTicket);
+	bridge.Pump();
+	REQUIRE(bridge.Poll("script-capture-world", cancelledSidecarTicket, poll, detail));
+	CHECK(poll.Status == "cancelled");
+	CHECK_FALSE(poll.SceneSidecar);
+	REQUIRE(bridge.Release("script-capture-world", cancelledSidecarTicket, detail));
+
+	uint64_t recoveredSidecarTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", request, recoveredSidecarTicket, detail));
+	view.SnapshotId.clear();
+	bridge.PrepareView(view);
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	do {
+		bridge.Pump();
+		REQUIRE(bridge.Poll("script-capture-world", recoveredSidecarTicket, poll, detail));
+		if (poll.Status == "pending") SDL_Delay(1);
+	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == "ready");
+	REQUIRE(poll.SceneSidecar);
+	REQUIRE(bridge.Release("script-capture-world", recoveredSidecarTicket, detail));
 
 	// The process-local view key stays supported for older internal callers.
 	request.Pipeline = runtimePipeline;
@@ -4485,6 +4522,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	bridge.Pump();
 	REQUIRE(bridge.Poll("script-capture-world", rejectedTicket, poll, detail));
 	CHECK(poll.Status == "cancelled");
+	CHECK_FALSE(poll.SceneSidecar);
 	REQUIRE(bridge.Release("script-capture-world", rejectedTicket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", rejectedTicket, poll, detail));
 

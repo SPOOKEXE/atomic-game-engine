@@ -2986,7 +2986,7 @@ export type DataSceneOptions = {
 	TemporalHistory: "preserve",
 	StorageProfile: "lossless",
 	Output: "raw_planes",
-	IncludeSceneData: false,
+	IncludeSceneData: boolean,
 	IncludeExactMasks: false,
 	CoordinateSpace: "world_camera_image",
 	NoiseMode: "none",

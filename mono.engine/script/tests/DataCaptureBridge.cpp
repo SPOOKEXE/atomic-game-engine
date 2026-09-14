@@ -102,3 +102,47 @@ TEST_CASE("data capture capabilities carry only stable hook facts", "[script][da
 	CHECK(Field(*limits, "maximum_retained_bytes")->Number == 67'108'864.0);
 	CHECK(Field(*limits, "maximum_pending_pumps")->Number == 600.0);
 }
+
+TEST_CASE(
+	"data scene JSON response budget rejects values the MCP adapter cannot represent",
+	"[script][data-capture]"
+) {
+	using engine::script::DataSceneJsonResponseBudget;
+	using engine::script::MAX_DATA_SCENE_JSON_RESPONSE_BYTES;
+
+	engine::script::ScriptValue text{engine::script::ValueTag::String};
+	text.Text = "plain";
+	size_t bytes = 0;
+	REQUIRE(DataSceneJsonResponseBudget(text, bytes));
+	CHECK(bytes == 7);
+	text.Text = "\"\\";
+	REQUIRE(DataSceneJsonResponseBudget(text, bytes));
+	CHECK(bytes == 6);
+	text.Text = "\b\t\n\f\r";
+	REQUIRE(DataSceneJsonResponseBudget(text, bytes));
+	CHECK(bytes == 12);
+	text.Text.assign(1, '\x01');
+	REQUIRE(DataSceneJsonResponseBudget(text, bytes));
+	CHECK(bytes == 8);
+	text.Text = "\xC3\xA9";
+	REQUIRE(DataSceneJsonResponseBudget(text, bytes));
+	CHECK(bytes == 4);
+
+	text.Text.assign(MAX_DATA_SCENE_JSON_RESPONSE_BYTES - 2, 'x');
+	REQUIRE(DataSceneJsonResponseBudget(text, bytes));
+	text.Text.push_back('x');
+	CHECK_FALSE(DataSceneJsonResponseBudget(text, bytes));
+
+	engine::script::ScriptValue duplicate{engine::script::ValueTag::Map};
+	duplicate.Entries.emplace_back("same", engine::script::ScriptValue{engine::script::ValueTag::Nil});
+	duplicate.Entries.emplace_back("same", engine::script::ScriptValue{engine::script::ValueTag::Nil});
+	CHECK_FALSE(DataSceneJsonResponseBudget(duplicate, bytes));
+
+	engine::script::ScriptValue nested{engine::script::ValueTag::Nil};
+	for (size_t index = 0; index < 17; ++index) {
+		engine::script::ScriptValue parent{engine::script::ValueTag::Array};
+		parent.Items.push_back(std::move(nested));
+		nested = std::move(parent);
+	}
+	CHECK_FALSE(DataSceneJsonResponseBudget(nested, bytes));
+}

@@ -25,7 +25,7 @@ namespace engine::control {
 
 	namespace data_scene_detail {
 		inline constexpr size_t MAXIMUM_DEPTH = 16;
-		inline constexpr size_t MAXIMUM_RESULT_BYTES = 64u * 1024u;
+		inline constexpr size_t MAXIMUM_RESULT_BYTES = script::MAX_DATA_SCENE_JSON_RESPONSE_BYTES;
 		// Script numbers are doubles. Keep a whole value as an integer only while
 		// every signed integer in this range is represented exactly by that double.
 		inline constexpr double MAXIMUM_EXACT_JSON_INTEGER = 9'007'199'254'740'991.0;

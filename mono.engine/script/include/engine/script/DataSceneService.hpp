@@ -39,6 +39,10 @@ namespace engine::script {
 	inline constexpr size_t MAX_CAMERA_OBJECT_OBSERVATIONS = 64;
 	inline constexpr size_t MAX_DATA_SCENE_ID_BYTES = 256;
 	inline constexpr size_t MAX_EVENT_NARRATIVES = 256;
+	// The conservative compact-JSON budget shared by the renderer and the MCP
+	// adapter. A sidecar admitted against this bound is representable by the
+	// adapter without changing its response shape.
+	inline constexpr size_t MAX_DATA_SCENE_JSON_RESPONSE_BYTES = 64u * 1024u;
 
 	// Typed query requests shared by scripts and thin control-surface adapters.
 	// Directions and rotations are normalized at this boundary before physics sees them.
@@ -70,6 +74,9 @@ namespace engine::script {
 	};
 
 	DataSceneResult GetCapabilities(const ecs::Store &store);
+	// Computes a conservative upper bound for the compact JSON representation
+	// used by the MCP adapter. Rejects values the adapter cannot serialize.
+	bool DataSceneJsonResponseBudget(const ScriptValue &value, size_t &bytes);
 	DataSceneResult GetSceneSnapshot(ecs::Store &store, size_t limit = MAX_DATA_SCENE_ENTITIES);
 	DataSceneResult
 	GetCameraRenderingData(ecs::Store &store, ecs::Entity camera, size_t observationLimit = 0);

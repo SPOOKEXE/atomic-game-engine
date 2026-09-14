@@ -4,6 +4,8 @@
 // renderer. Script owns no renderer object or ticket state.
 // @tier L9 · shared
 
+#include <engine/script/Codec.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +23,19 @@ namespace engine::script {
 		uint64_t ViewSlot = 0;
 		std::vector<std::string> Channels;
 		std::string TemporalHistory;
+		// The renderer copies a scene sidecar only after its retained-snapshot
+		// barrier succeeds. This flag asks for that bounded copied observation.
+		bool IncludeSceneData = false;
+	};
+
+	// A scene observation retained with one capture ticket. The lifecycle values
+	// identify the exact paused state from which `Scene` was copied.
+	struct DataCaptureBridgeSceneSidecar {
+		std::string SnapshotId;
+		uint64_t Tick = 0;
+		uint64_t WorldEpoch = 0;
+		uint64_t WorldVersion = 0;
+		ScriptValue Scene;
 	};
 
 	struct DataCaptureBridgeAmbientOcclusion {
@@ -92,6 +107,7 @@ namespace engine::script {
 		std::vector<DataCaptureBridgeObjectLabel> ObjectLabels;
 		std::vector<DataCaptureBridgeObjectLabel> SemanticLabels;
 		std::vector<DataCaptureBridgeObjectLabel> PartLabels;
+		std::optional<DataCaptureBridgeSceneSidecar> SceneSidecar;
 	};
 
 	struct DataCaptureBridgeHookCapability {

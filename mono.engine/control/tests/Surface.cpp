@@ -201,6 +201,7 @@ namespace {
 			CaptureNode = request.CaptureNode;
 			ViewSlot = request.ViewSlot;
 			Channels = request.Channels;
+			IncludeSceneData = request.IncludeSceneData;
 			ticket = 1;
 			Queued = true;
 			++QueueCount;
@@ -278,6 +279,18 @@ namespace {
 					.BackgroundValue = std::nullopt,
 					.BackgroundClassification = "unavailable"
 				};
+			if (IncludeSceneData) {
+				engine::script::ScriptValue scene(engine::script::ValueTag::Map);
+				scene.Entries = {{"status", engine::script::ScriptValue(engine::script::ValueTag::String)}};
+				scene.Entries.front().second.Text = "ok";
+				poll.SceneSidecar = engine::script::DataCaptureBridgeSceneSidecar{
+					.SnapshotId = Snapshot,
+					.Tick = 4,
+					.WorldEpoch = 2,
+					.WorldVersion = 8,
+					.Scene = std::move(scene),
+				};
+			}
 			return true;
 		}
 		bool ReadPlane(
@@ -341,6 +354,7 @@ namespace {
 		}
 		bool MutationQueued = false;
 		bool MutationCancelled = false;
+		bool IncludeSceneData = false;
 		uint32_t QueueCount = 0;
 
 	  private:
@@ -682,6 +696,9 @@ TEST_CASE(
 	);
 	CHECK(Called(surface, "capture_bundle", valid) == queued);
 	CHECK(bridge->QueueCount == 1);
+	const json withoutSidecar =
+		Called(surface, "poll_capture", {{"instance_id", "capture-bundle-world"}, {"ticket", 1}});
+	CHECK(withoutSidecar["scene_sidecar"].is_null());
 
 	bool failed = false;
 	json conflict = valid;
@@ -731,9 +748,15 @@ TEST_CASE(
 	CHECK(failed);
 	json sidecar = request("bundle-sidecar");
 	sidecar["options"]["include_scene_data"] = true;
-	const json sidecarReply = Called(surface, "capture_bundle", sidecar, failed);
-	CHECK(failed);
-	CHECK(sidecarReply["error"].get<std::string>().starts_with("capability_unsupported:"));
+	const json sidecarReply = Called(surface, "capture_bundle", sidecar);
+	CHECK(sidecarReply["status"] == "queued");
+	CHECK(bridge->IncludeSceneData);
+	CHECK(Called(surface, "capture_bundle", sidecar) == sidecarReply);
+	const json withSidecar =
+		Called(surface, "poll_capture", {{"instance_id", "capture-bundle-world"}, {"ticket", 1}});
+	CHECK(withSidecar["scene_sidecar"]["snapshot_id"] == "snapshot-bundle");
+	CHECK(withSidecar["scene_sidecar"]["lifecycle"]["tick"] == 4);
+	CHECK(withSidecar["scene_sidecar"]["scene"]["status"] == "ok");
 }
 
 TEST_CASE("data scene discovery reports capture hooks as stable records", "[control][data-capture]") {

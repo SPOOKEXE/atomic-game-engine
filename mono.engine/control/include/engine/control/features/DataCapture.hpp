@@ -5,6 +5,7 @@
 // serializes a caller-selected range as base64.
 
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/DataScene.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -154,11 +155,7 @@ namespace engine::control {
 				failure = Error("validation_failed", "options.include_scene_data must be a boolean");
 				return false;
 			}
-			if (options.at("include_scene_data").get<bool>()) {
-				failure =
-					Error("capability_unsupported", "bundle scene sidecars are not captured by the renderer");
-				return false;
-			}
+			request.IncludeSceneData = options.at("include_scene_data").get<bool>();
 			if (!Field(options, "include_exact_masks", field, failure)) return false;
 			if (!field->is_boolean()) {
 				failure = Error("validation_failed", "options.include_exact_masks must be a boolean");
@@ -367,6 +364,25 @@ namespace engine::control {
 			json planes = json::array();
 			for (const auto &plane : reply.Planes)
 				planes.push_back(Plane(plane, reply.SnapshotId));
+			json sceneSidecar = nullptr;
+			if (reply.SceneSidecar) {
+				json scene;
+				size_t budgetBytes = 0;
+				size_t responseBytes = 0;
+				if (script::DataSceneJsonResponseBudget(reply.SceneSidecar->Scene, budgetBytes) &&
+					data_scene_detail::JsonValue(reply.SceneSidecar->Scene, scene, 0, responseBytes) &&
+					scene.dump().size() <= data_scene_detail::MAXIMUM_RESULT_BYTES) {
+					sceneSidecar = {
+						{"schema_version", "data-capture-scene-sidecar/v1"},
+						{"snapshot_id", reply.SceneSidecar->SnapshotId},
+						{"lifecycle",
+						 {{"tick", reply.SceneSidecar->Tick},
+						  {"world_epoch", reply.SceneSidecar->WorldEpoch},
+						  {"world_version", reply.SceneSidecar->WorldVersion}}},
+						{"scene", std::move(scene)},
+					};
+				}
+			}
 			return {
 				{"ticket", ticket},
 				{"status", reply.Status},
@@ -402,12 +418,14 @@ namespace engine::control {
 						 labels.push_back({{"label", label.Label}, {"stable_id", label.StableId}});
 					 return labels;
 				 }()},
-				{"part_labels", [&] {
+				{"part_labels",
+				 [&] {
 					 json labels = json::array();
 					 for (const auto &label : reply.PartLabels)
 						 labels.push_back({{"label", label.Label}, {"stable_id", label.StableId}});
 					 return labels;
-				 }()}
+				 }()},
+				{"scene_sidecar", std::move(sceneSidecar)}
 			};
 		}
 
