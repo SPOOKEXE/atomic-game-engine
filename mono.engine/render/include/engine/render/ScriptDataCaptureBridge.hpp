@@ -37,7 +37,9 @@ namespace engine::render {
 			std::string_view, const script::ViewCameraMutationRequest &, uint64_t &, std::string &
 		) override;
 		void CancelViewCameraMutation(std::string_view, uint64_t) override;
-		bool PollViewCameraMutation(std::string_view, uint64_t, script::ViewCameraMutationPoll &, std::string &) override;
+		bool PollViewCameraMutation(
+			std::string_view, uint64_t, script::ViewCameraMutationPoll &, std::string &
+		) override;
 		// Releases every terminal payload and cancels every renderer ticket for one world.
 		bool TeardownInstance(std::string_view instanceId, std::string &detail);
 		void PrepareView(View &view);

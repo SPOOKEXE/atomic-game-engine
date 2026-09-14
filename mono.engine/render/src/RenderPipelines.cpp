@@ -17,8 +17,8 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -2264,7 +2264,8 @@ namespace engine::render {
 		RequireOwningThread("ResolvePipelineIdentity");
 		if (State == nullptr) return std::nullopt;
 		const Impl::NamedPipeline *installed = State->PipelineFor(requested);
-		if (installed == nullptr || !installed->Name.IsValid() || installed->Revision == 0) return std::nullopt;
+		if (installed == nullptr || !installed->Name.IsValid() || installed->Revision == 0)
+			return std::nullopt;
 		return PipelineIdentity{.Name = installed->Name, .Revision = installed->Revision};
 	}
 
@@ -2393,6 +2394,10 @@ namespace engine::render {
 		Shutdown();
 	}
 
-	DataFactoryHookBind &Renderer::Hooks() { return *HookBind; }
-	const DataFactoryHookBind &Renderer::Hooks() const { return *HookBind; }
+	DataFactoryHookBind &Renderer::Hooks() {
+		return *HookBind;
+	}
+	const DataFactoryHookBind &Renderer::Hooks() const {
+		return *HookBind;
+	}
 }

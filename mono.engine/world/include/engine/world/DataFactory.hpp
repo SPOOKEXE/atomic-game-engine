@@ -259,7 +259,9 @@ namespace engine::world {
 		// Product hosts use this to distinguish an MCP-owned world from a compatibility world.
 		bool OwnsWorld(std::string_view instanceId) const;
 		// Control adapters enter a verified lifecycle world through this one owner.
-		Universe &UniverseOf() const { return Worlds; }
+		Universe &UniverseOf() const {
+			return Worlds;
+		}
 
 	  private:
 		struct PauseState {

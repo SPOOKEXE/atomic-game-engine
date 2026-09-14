@@ -175,18 +175,14 @@ namespace engine::script {
 		// A one-shot typed mutation ticket. Hosts that do not provide the renderer
 		// hook return false rather than pretending a queued patch will run.
 		virtual bool QueueViewCameraMutation(
-			std::string_view,
-			const ViewCameraMutationRequest &,
-			uint64_t &,
-			std::string &detail
+			std::string_view, const ViewCameraMutationRequest &, uint64_t &, std::string &detail
 		) {
 			detail = "view.camera is unavailable";
 			return false;
 		}
 		virtual void CancelViewCameraMutation(std::string_view, uint64_t) {}
-		virtual bool PollViewCameraMutation(
-			std::string_view, uint64_t, ViewCameraMutationPoll &, std::string &detail
-		) {
+		virtual bool
+		PollViewCameraMutation(std::string_view, uint64_t, ViewCameraMutationPoll &, std::string &detail) {
 			detail = "view.camera is unavailable";
 			return false;
 		}

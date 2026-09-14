@@ -51,13 +51,14 @@ namespace {
 			return {
 				.Available = true,
 				.Channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"},
-				.HookRecords = {
-					{"data_capture.rgb_linear_hdr", 1, "capture", true, {"rgb_linear_hdr"}},
-					{"data_capture.ambient_occlusion", 1, "capture", true, {"ambient_occlusion"}},
-					{"data_capture.object_ids", 1, "capture", true, {"object_ids"}},
-					{"data_capture.semantic_ids", 1, "capture", true, {"semantic_ids"}},
-					{"data_capture.part_ids", 1, "capture", true, {"part_ids"}},
-				},
+				.HookRecords =
+					{
+						{"data_capture.rgb_linear_hdr", 1, "capture", true, {"rgb_linear_hdr"}},
+						{"data_capture.ambient_occlusion", 1, "capture", true, {"ambient_occlusion"}},
+						{"data_capture.object_ids", 1, "capture", true, {"object_ids"}},
+						{"data_capture.semantic_ids", 1, "capture", true, {"semantic_ids"}},
+						{"data_capture.part_ids", 1, "capture", true, {"part_ids"}},
+					},
 				.MaximumHooks = 14,
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
@@ -208,7 +209,8 @@ namespace {
 		}
 
 		void CancelViewCameraMutation(std::string_view instanceId, uint64_t ticket) override {
-			if (MutationQueued && instanceId == Mutation.InstanceId && ticket == 303) MutationCancelled = true;
+			if (MutationQueued && instanceId == Mutation.InstanceId && ticket == 303)
+				MutationCancelled = true;
 		}
 
 		bool Released = false;

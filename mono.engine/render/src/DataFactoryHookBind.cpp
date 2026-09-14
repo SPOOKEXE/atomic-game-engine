@@ -6,13 +6,13 @@
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 
+#include <glm/gtc/matrix_inverse.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
 #include <numbers>
 #include <utility>
-
-#include <glm/gtc/matrix_inverse.hpp>
 
 namespace engine::render {
 	RenderObservationContext DataFactoryObservation(
@@ -56,10 +56,10 @@ namespace engine::render {
 	namespace {
 		bool SameSpec(const RenderHookSpec &left, const RenderHookSpec &right) {
 			return left.Name == right.Name && left.Kind == right.Kind && left.Access == right.Access &&
-				   left.NodeKind == right.NodeKind &&
-				   left.SchemaVersion == right.SchemaVersion && left.Required == right.Required &&
-				   left.ChannelCount == right.ChannelCount && left.Channels == right.Channels &&
-				   left.MutatedFieldCount == right.MutatedFieldCount && left.MutatedFields == right.MutatedFields;
+				   left.NodeKind == right.NodeKind && left.SchemaVersion == right.SchemaVersion &&
+				   left.Required == right.Required && left.ChannelCount == right.ChannelCount &&
+				   left.Channels == right.Channels && left.MutatedFieldCount == right.MutatedFieldCount &&
+				   left.MutatedFields == right.MutatedFields;
 		}
 
 		bool ValidSpec(const RenderHookSpec &spec) {
@@ -68,9 +68,9 @@ namespace engine::render {
 				spec.SchemaVersion == 0)
 				return false;
 			if (spec.Kind == RenderHookKind::ViewMutation) {
-				if (spec.Access != RenderHookAccess::SynchronousMutation || spec.NodeKind != core::Name("view") ||
-					spec.ChannelCount != 0 || spec.MutatedFieldCount == 0 ||
-					spec.MutatedFieldCount > spec.MutatedFields.size())
+				if (spec.Access != RenderHookAccess::SynchronousMutation ||
+					spec.NodeKind != core::Name("view") || spec.ChannelCount != 0 ||
+					spec.MutatedFieldCount == 0 || spec.MutatedFieldCount > spec.MutatedFields.size())
 					return false;
 				for (size_t index = 0; index < spec.MutatedFieldCount; ++index) {
 					if (static_cast<size_t>(spec.MutatedFields[index]) >
@@ -82,7 +82,8 @@ namespace engine::render {
 				return true;
 			}
 			if (spec.Kind != RenderHookKind::DataCapture || spec.Access != RenderHookAccess::Observation ||
-				spec.ChannelCount == 0 || spec.ChannelCount > spec.Channels.size() || spec.MutatedFieldCount != 0)
+				spec.ChannelCount == 0 || spec.ChannelCount > spec.Channels.size() ||
+				spec.MutatedFieldCount != 0)
 				return false;
 			for (size_t index = 0; index < spec.ChannelCount; ++index) {
 				if (static_cast<size_t>(spec.Channels[index]) >
@@ -217,7 +218,8 @@ namespace engine::render {
 			mutation.Generation = generation;
 		}
 		static bool Terminal(ViewMutationStatus status) {
-			return status != ViewMutationStatus::Pending && status != ViewMutationStatus::AppliedAwaitingRestore;
+			return status != ViewMutationStatus::Pending &&
+				   status != ViewMutationStatus::AppliedAwaitingRestore;
 		}
 		void Release(BatchSlot &batch) {
 			if (batch.Submitted) RendererRef.CancelDataCapture(batch.Ticket);
@@ -410,9 +412,9 @@ namespace engine::render {
 	ArmViewMutationResult DataFactoryHookBind::ArmViewMutation(HookHandle hook, ViewCameraPatch patch) {
 		if (!State->Valid(hook)) return {.Status = HookBindStatus::UnknownHandle, .Mutation = {}};
 		const RenderHookSpec &spec = State->Hooks[hook.Slot].Spec;
-		if (spec.Kind != RenderHookKind::ViewMutation || spec.Access != RenderHookAccess::SynchronousMutation ||
-			spec.Name != core::Name("view.camera") || !ValidIdentity(patch.Identity) ||
-			(!patch.CameraFrame && !patch.Camera && !patch.Projection) ||
+		if (spec.Kind != RenderHookKind::ViewMutation ||
+			spec.Access != RenderHookAccess::SynchronousMutation || spec.Name != core::Name("view.camera") ||
+			!ValidIdentity(patch.Identity) || (!patch.CameraFrame && !patch.Camera && !patch.Projection) ||
 			(patch.CameraFrame && !ValidFrame(*patch.CameraFrame)) ||
 			(patch.Camera && !ValidCamera(*patch.Camera)) ||
 			(patch.Projection && !ValidProjection(*patch.Projection)))
@@ -428,7 +430,9 @@ namespace engine::render {
 			slot.Hook = hook;
 			slot.Patch = std::move(patch);
 			slot.Used = true;
-			return {.Status = HookBindStatus::Ok, .Mutation = {static_cast<uint16_t>(index), slot.Generation}};
+			return {
+				.Status = HookBindStatus::Ok, .Mutation = {static_cast<uint16_t>(index), slot.Generation}
+			};
 		}
 		return {.Status = HookBindStatus::Capacity, .Mutation = {}};
 	}
@@ -470,7 +474,7 @@ namespace engine::render {
 	bool DataFactoryHookBind::HasViewMutationRestore(const ViewMutationIdentity &identity) const {
 		return std::any_of(State->Mutations.begin(), State->Mutations.end(), [&](const auto &mutation) {
 			return mutation.Used && mutation.Status == ViewMutationStatus::AppliedAwaitingRestore &&
-				SameIdentity(mutation.Patch.Identity, identity);
+				   SameIdentity(mutation.Patch.Identity, identity);
 		});
 	}
 
@@ -478,13 +482,15 @@ namespace engine::render {
 		for (auto &mutation : State->Mutations)
 			if (mutation.Used && mutation.Status == ViewMutationStatus::AppliedAwaitingRestore &&
 				SameIdentity(mutation.Patch.Identity, identity))
-				mutation.Status = mutation.CancelRequested ? ViewMutationStatus::Cancelled : ViewMutationStatus::Applied;
+				mutation.Status =
+					mutation.CancelRequested ? ViewMutationStatus::Cancelled : ViewMutationStatus::Applied;
 	}
 
 	bool DataFactoryHookBind::ConsumeViewMutation(const ViewMutationIdentity &identity, View &view) {
 		for (auto &mutation : State->Mutations) {
 			if (!mutation.Used || mutation.Status != ViewMutationStatus::Pending ||
-				!SameIdentity(mutation.Patch.Identity, identity)) continue;
+				!SameIdentity(mutation.Patch.Identity, identity))
+				continue;
 			if (!State->RendererRef.HasPipelineRevision(identity.Pipeline, identity.PipelineRevision)) {
 				mutation.Status = ViewMutationStatus::Stale;
 				return false;
@@ -647,11 +653,12 @@ namespace engine::render {
 			.Required = true,
 			.Channels = {},
 			.ChannelCount = 0,
-			.MutatedFields = {
-				RenderHookMutatedField::CameraFrame,
-				RenderHookMutatedField::Camera,
-				RenderHookMutatedField::Projection,
-			},
+			.MutatedFields =
+				{
+					RenderHookMutatedField::CameraFrame,
+					RenderHookMutatedField::Camera,
+					RenderHookMutatedField::Projection,
+				},
 			.MutatedFieldCount = 3,
 		});
 	}

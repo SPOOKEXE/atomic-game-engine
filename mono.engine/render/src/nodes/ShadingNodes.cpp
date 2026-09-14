@@ -120,12 +120,13 @@ namespace engine::render {
 						return false;
 				if (response && !GraphEnabled(core::Name("ssao"))) {
 					const uint32_t resolved = scene::ResolveRenderFeatures(
-						scene::ALL_RENDER_FEATURES,
-						CurrentLighting.RenderFeatures,
-						DrawCamera.RenderFeatures,
-						{},
-						SupportedRenderFeatures(State->Caps)
-					).Enabled;
+												  scene::ALL_RENDER_FEATURES,
+												  CurrentLighting.RenderFeatures,
+												  DrawCamera.RenderFeatures,
+												  {},
+												  SupportedRenderFeatures(State->Caps)
+					)
+												  .Enabled;
 					ClearOcclusion(
 						AmbientOcclusionSourceState::ClearedNoPass,
 						(resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) != 0u
@@ -500,12 +501,13 @@ namespace engine::render {
 			const auto graphEnabled = [&recording](core::Name kind) { return recording.GraphEnabled(kind); };
 			const auto clearOcclusion = [&recording, State] {
 				const uint32_t resolved = scene::ResolveRenderFeatures(
-					scene::ALL_RENDER_FEATURES,
-					recording.CurrentLighting.RenderFeatures,
-					recording.DrawCamera.RenderFeatures,
-					{},
-					SupportedRenderFeatures(State->Caps)
-				).Enabled;
+											  scene::ALL_RENDER_FEATURES,
+											  recording.CurrentLighting.RenderFeatures,
+											  recording.DrawCamera.RenderFeatures,
+											  {},
+											  SupportedRenderFeatures(State->Caps)
+				)
+											  .Enabled;
 				recording.ClearOcclusion(
 					AmbientOcclusionSourceState::ClearedNoPass,
 					(resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) != 0u

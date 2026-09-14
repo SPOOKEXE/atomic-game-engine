@@ -136,18 +136,19 @@ namespace {
 					 "object_ids",
 					 "semantic_ids",
 					 "part_ids"},
-				.HookRecords = {
-					{"data_capture.rgb_linear_hdr", 1, "capture", true, {"rgb_linear_hdr"}},
-					{"data_capture.linear_depth", 1, "capture", true, {"linear_depth"}},
-					{"data_capture.shading_normal", 1, "capture", true, {"shading_normal"}},
-					{"data_capture.pbr_albedo", 1, "capture", true, {"pbr_albedo"}},
-					{"data_capture.pbr_material", 1, "capture", true, {"pbr_material"}},
-					{"data_capture.pbr_emissive", 1, "capture", true, {"pbr_emissive"}},
-					{"data_capture.ambient_occlusion", 1, "capture", true, {"ambient_occlusion"}},
-					{"data_capture.object_ids", 1, "capture", true, {"object_ids"}},
-					{"data_capture.semantic_ids", 1, "capture", true, {"semantic_ids"}},
-					{"data_capture.part_ids", 1, "capture", true, {"part_ids"}},
-				},
+				.HookRecords =
+					{
+						{"data_capture.rgb_linear_hdr", 1, "capture", true, {"rgb_linear_hdr"}},
+						{"data_capture.linear_depth", 1, "capture", true, {"linear_depth"}},
+						{"data_capture.shading_normal", 1, "capture", true, {"shading_normal"}},
+						{"data_capture.pbr_albedo", 1, "capture", true, {"pbr_albedo"}},
+						{"data_capture.pbr_material", 1, "capture", true, {"pbr_material"}},
+						{"data_capture.pbr_emissive", 1, "capture", true, {"pbr_emissive"}},
+						{"data_capture.ambient_occlusion", 1, "capture", true, {"ambient_occlusion"}},
+						{"data_capture.object_ids", 1, "capture", true, {"object_ids"}},
+						{"data_capture.semantic_ids", 1, "capture", true, {"semantic_ids"}},
+						{"data_capture.part_ids", 1, "capture", true, {"part_ids"}},
+					},
 				.MaximumHooks = 14,
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
@@ -218,17 +219,17 @@ namespace {
 				 .Origin = "top_left",
 				 .Packing = "unorm8",
 				 .Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
-				 .AmbientOcclusion =
-					 engine::script::DataCaptureBridgeAmbientOcclusion{
-						 .SourceState = "estimated",
-						 .ProducerFrame = 9,
-						 .Enabled = true,
-						 .SampleCount = 12,
-						 .RadiusWorldUnits = 0.65,
-						 .Denoiser = "none",
-						 .TemporalHistory = "none",
-						 .BackgroundValue = 1.0,
-						 .BackgroundClassification = "unavailable"}}
+				 .AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
+					 .SourceState = "estimated",
+					 .ProducerFrame = 9,
+					 .Enabled = true,
+					 .SampleCount = 12,
+					 .RadiusWorldUnits = 0.65,
+					 .Denoiser = "none",
+					 .TemporalHistory = "none",
+					 .BackgroundValue = 1.0,
+					 .BackgroundClassification = "unavailable"
+				 }}
 			};
 			if (UnavailableAmbientOcclusion)
 				poll.Planes[1].AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
@@ -421,16 +422,22 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	const json mutation = Called(
 		surface,
 		"submit_view_camera_mutation",
-		json{{"instance_id", "capture-world"},
-			 {"snapshot_id", "snapshot-1"},
-			 {"pipeline", "default_pbr"},
-			 {"pipeline_revision", 1},
-			 {"view_slot", 0},
-			 {"camera", {{"field_of_view_radians", 0.9}, {"near_plane", 0.2}, {"far_plane", 200.0}}}}
+		json{
+			{"instance_id", "capture-world"},
+			{"snapshot_id", "snapshot-1"},
+			{"pipeline", "default_pbr"},
+			{"pipeline_revision", 1},
+			{"view_slot", 0},
+			{"camera", {{"field_of_view_radians", 0.9}, {"near_plane", 0.2}, {"far_plane", 200.0}}}
+		}
 	);
 	CHECK(mutation["status"] == "queued");
 	CHECK(bridge->MutationQueued);
-	CHECK(Called(surface, "cancel_view_camera_mutation", json{{"instance_id", "capture-world"}, {"ticket", 2}})["status"] == "cancellation_requested");
+	CHECK(
+		Called(
+			surface, "cancel_view_camera_mutation", json{{"instance_id", "capture-world"}, {"ticket", 2}}
+		)["status"] == "cancellation_requested"
+	);
 	CHECK(bridge->MutationCancelled);
 	const json capture = Called(
 		surface,

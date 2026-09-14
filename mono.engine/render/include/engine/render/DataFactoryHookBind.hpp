@@ -6,6 +6,8 @@
 #include <engine/render/RenderObservation.hpp>
 #include <engine/scene/Components.hpp>
 
+#include <glm/mat4x4.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -14,8 +16,6 @@
 #include <span>
 #include <string>
 #include <vector>
-
-#include <glm/mat4x4.hpp>
 
 namespace engine::render {
 	class Renderer;
@@ -133,7 +133,14 @@ namespace engine::render {
 		HookBindStatus Status = HookBindStatus::Invalid;
 		MutationHandle Mutation;
 	};
-	enum class ViewMutationStatus : uint8_t { Pending, AppliedAwaitingRestore, Applied, Cancelled, Stale, Invalid };
+	enum class ViewMutationStatus : uint8_t {
+		Pending,
+		AppliedAwaitingRestore,
+		Applied,
+		Cancelled,
+		Stale,
+		Invalid
+	};
 	struct ViewMutationPoll {
 		ViewMutationStatus Status = ViewMutationStatus::Invalid;
 		bool Terminal = true;

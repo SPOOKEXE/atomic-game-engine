@@ -454,7 +454,8 @@ namespace engine::physics {
 	) {
 		const Indexes indexes = IndexesOf(store);
 		const PhysicsWorld *prepared = PreparedWorld(store);
-		const bool stale = prepared != nullptr &&
+		const bool stale =
+			prepared != nullptr &&
 			(prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion());
 		const size_t count = std::min(probes.size(), results.size());
 		for (size_t probeIndex = 0; probeIndex < count; ++probeIndex) {
@@ -470,8 +471,10 @@ namespace engine::physics {
 			answer.Why = ColliderOccupancy::Reason::None;
 			const core::AABB &box = probes[probeIndex];
 			const auto resolveAxis = [](float minimum, float maximum, float &centre, float &extent) {
-				const double resolvedCentre = (static_cast<double>(minimum) + static_cast<double>(maximum)) * 0.5;
-				const double resolvedExtent = (static_cast<double>(maximum) - static_cast<double>(minimum)) * 0.5;
+				const double resolvedCentre =
+					(static_cast<double>(minimum) + static_cast<double>(maximum)) * 0.5;
+				const double resolvedExtent =
+					(static_cast<double>(maximum) - static_cast<double>(minimum)) * 0.5;
 				if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum ||
 					!std::isfinite(resolvedCentre) || !std::isfinite(resolvedExtent) ||
 					resolvedCentre < -std::numeric_limits<float>::max() ||
@@ -481,7 +484,7 @@ namespace engine::physics {
 				}
 				centre = static_cast<float>(resolvedCentre);
 				extent = static_cast<float>(resolvedExtent);
-					return true;
+				return true;
 			};
 			core::Vector3 centre;
 			core::Vector3 extent;
@@ -503,11 +506,13 @@ namespace engine::physics {
 					answer.Why = ColliderOccupancy::Reason::CandidateOverflow;
 				}
 				for (size_t candidateIndex = 0; candidateIndex < found.Written; ++candidateIndex) {
-					const QueryCandidate candidate = ResolveCandidate(store, index, candidates[candidateIndex]);
+					const QueryCandidate candidate =
+						ResolveCandidate(store, index, candidates[candidateIndex]);
 					if (!candidate.Present) continue;
 					const scene::Collider *collider = store.Get<scene::Collider>(candidate.Owner);
 					if (collider == nullptr) continue;
-					if (collider->Shape == scene::ShapeKind::Hull || collider->Shape == scene::ShapeKind::Mesh) {
+					if (collider->Shape == scene::ShapeKind::Hull ||
+						collider->Shape == scene::ShapeKind::Mesh) {
 						// Broadphase overlap is enough to make a negative answer unsafe.
 						answer.Complete = false;
 						if (answer.Why == ColliderOccupancy::Reason::None)

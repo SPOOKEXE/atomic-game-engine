@@ -530,7 +530,7 @@ namespace engine::render {
 					}
 				}
 				const RenderObservationContext observation =
-					 DataFactoryObservation(recording, context, selectedPipeline->Name, slot);
+					DataFactoryObservation(recording, context, selectedPipeline->Name, slot);
 				recording.Owner.Hooks().Observe(observation);
 				State->RecordResourceImages(
 					recording.Command,

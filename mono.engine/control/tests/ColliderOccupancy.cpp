@@ -42,7 +42,10 @@ using engine::world::WorldSettings;
 using nlohmann::json;
 
 namespace {
-	json Call(Surface &surface, const json &arguments, bool &failed,
+	json Call(
+		Surface &surface,
+		const json &arguments,
+		bool &failed,
 		std::string_view name = "get_collider_occupancy"
 	) {
 		const json request{
@@ -71,7 +74,9 @@ namespace {
 		Surface Control{"test", "test"};
 
 		Fixture() : Session(Worlds) {
-			Session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+			Session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) {
+				return true;
+			});
 			Id = Create();
 			Control.Enable(std::array{engine::control::features::DataFactory(Session)});
 			Worlds.Enter(Id, [](engine::ecs::Store &) {
@@ -110,13 +115,31 @@ namespace {
 			});
 		}
 
-		json Request(const json &probes = json::array({{{"name", "origin"}, {"minimum_metres", {-0.5, -0.5, -0.5}}, {"maximum_metres", {0.5, 0.5, 0.5}}}})) {
+		json Request(
+			const json &probes = json::array(
+				{{{"name", "origin"},
+				  {"minimum_metres", {-0.5, -0.5, -0.5}},
+				  {"maximum_metres", {0.5, 0.5, 0.5}}}}
+			)
+		) {
 			const auto before = Session.Inspect("occupancy");
-			REQUIRE(Session.Pause("occupancy", DataFactoryPauseScope::AllSystems, before.Clock.Tick).Status == DataFactoryStatus::Ok);
+			REQUIRE(
+				Session.Pause("occupancy", DataFactoryPauseScope::AllSystems, before.Clock.Tick).Status ==
+				DataFactoryStatus::Ok
+			);
 			std::string snapshot;
 			REQUIRE(Session.Snapshot("occupancy", snapshot).Status == DataFactoryStatus::Ok);
 			const auto current = Session.Inspect("occupancy");
-			return {{"schema_version", "collider-occupancy/v1"}, {"world_id", "occupancy"}, {"lifecycle", {{"tick", current.Clock.Tick}, {"world_epoch", current.WorldEpoch}, {"world_version", current.WorldVersion}}}, {"snapshot_id", snapshot}, {"probes", probes}};
+			return {
+				{"schema_version", "collider-occupancy/v1"},
+				{"world_id", "occupancy"},
+				{"lifecycle",
+				 {{"tick", current.Clock.Tick},
+				  {"world_epoch", current.WorldEpoch},
+				  {"world_version", current.WorldVersion}}},
+				{"snapshot_id", snapshot},
+				{"probes", probes}
+			};
 		}
 
 		json BevRequest(uint8_t rows = 2, uint8_t columns = 2) {
@@ -374,7 +397,9 @@ TEST_CASE("collider BEV MCP maps incomplete physics answers to unknown cells", "
 	requireUnknown(reply, "candidate_overflow");
 }
 
-TEST_CASE("collider occupancy MCP preserves an unlabelled positive witness", "[control][collider-occupancy]") {
+TEST_CASE(
+	"collider occupancy MCP preserves an unlabelled positive witness", "[control][collider-occupancy]"
+) {
 	Fixture fixture;
 	fixture.AddPrimitiveCollider();
 	bool failed = false;
@@ -421,7 +446,11 @@ TEST_CASE("collider occupancy MCP validates strict bounded probes", "[control][c
 
 	json many = json::array();
 	for (size_t index = 0; index < 33; ++index)
-		many.push_back({{"name", "probe" + std::to_string(index)}, {"minimum_metres", {-1.0, -1.0, -1.0}}, {"maximum_metres", {1.0, 1.0, 1.0}}});
+		many.push_back(
+			{{"name", "probe" + std::to_string(index)},
+			 {"minimum_metres", {-1.0, -1.0, -1.0}},
+			 {"maximum_metres", {1.0, 1.0, 1.0}}}
+		);
 	const json limited = Call(fixture.Control, fixture.Request(many), failed);
 	CHECK(failed);
 	CHECK(limited.dump().find("validation_failed") != std::string::npos);
@@ -455,7 +484,9 @@ TEST_CASE("collider occupancy MCP returns a complete negative Boolean row", "[co
 TEST_CASE("collider occupancy MCP echoes caller decimal bounds exactly", "[control][collider-occupancy]") {
 	Fixture fixture;
 	fixture.PrepareEmptyPhysics();
-	const json probes = json::array({{{"name", "decimal"}, {"minimum_metres", {0.1, 0.2, 0.3}}, {"maximum_metres", {2.9, 3.8, 4.7}}}});
+	const json probes = json::array(
+		{{{"name", "decimal"}, {"minimum_metres", {0.1, 0.2, 0.3}}, {"maximum_metres", {2.9, 3.8, 4.7}}}}
+	);
 	bool failed = false;
 	const json reply = Call(fixture.Control, fixture.Request(probes), failed);
 	CHECK_FALSE(failed);
@@ -490,7 +521,10 @@ TEST_CASE("collider occupancy MCP withholds an ambiguous witness identity", "[co
 	CHECK(probe.at("reason").is_null());
 }
 
-TEST_CASE("collider occupancy MCP withholds a witness ID duplicated by a non-collider instance", "[control][collider-occupancy]") {
+TEST_CASE(
+	"collider occupancy MCP withholds a witness ID duplicated by a non-collider instance",
+	"[control][collider-occupancy]"
+) {
 	Fixture fixture;
 	const Entity collider = fixture.AddPrimitiveCollider();
 	fixture.Worlds.Enter(fixture.Id, [&](engine::ecs::Store &store) {

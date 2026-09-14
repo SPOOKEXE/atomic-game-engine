@@ -26,11 +26,12 @@ namespace {
 			engine::graph::RenderGraph graph;
 			engine::core::Name offender;
 			if (engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) !=
-				engine::graph::PipelineDocumentStatus::Ok ||
+					engine::graph::PipelineDocumentStatus::Ok ||
 				!Renderer.SetPipeline(Pipeline, graph))
 				throw std::runtime_error("data capture hook benchmark graph setup failed");
 			const auto described = Renderer.DescribePipeline(Pipeline, 1, 1);
-			if (!described) throw std::runtime_error("data capture hook benchmark pipeline was not installed");
+			if (!described)
+				throw std::runtime_error("data capture hook benchmark pipeline was not installed");
 			Connection = {
 				.Session = {.WorldName = "bench-world"},
 				.Pipeline = Pipeline,
@@ -61,19 +62,22 @@ namespace {
 				.Camera = {},
 			};
 			Hook = Renderer.Hooks().FindHook(engine::core::Name("data_capture.rgb_linear_hdr"));
-			if (!Hook.IsValid()) throw std::runtime_error("data capture hook benchmark hook was not registered");
+			if (!Hook.IsValid())
+				throw std::runtime_error("data capture hook benchmark hook was not registered");
 		}
 	};
 
 	void RunLifecycles() {
 		static Fixture fixture;
 		for (size_t iteration = 0; iteration < LIFECYCLES; ++iteration) {
-			const auto connected = fixture.Renderer.Hooks().ConnectHooks(fixture.Connection, std::array{fixture.Hook});
+			const auto connected =
+				fixture.Renderer.Hooks().ConnectHooks(fixture.Connection, std::array{fixture.Hook});
 			if (connected.Status != engine::render::HookBindStatus::Ok)
 				throw std::runtime_error("data capture hook benchmark connection failed");
 			const auto batch = fixture.Renderer.Hooks().ArmDataCapture(connected.Connection, fixture.Request);
 			if (!batch) throw std::runtime_error("data capture hook benchmark arm failed");
-			const auto called = fixture.Renderer.Hooks().CallHooks(connected.Connection, *batch, fixture.Context);
+			const auto called =
+				fixture.Renderer.Hooks().CallHooks(connected.Connection, *batch, fixture.Context);
 			if (called.Status != engine::render::HookBindStatus::Backpressured)
 				throw std::runtime_error("data capture hook benchmark expected no-device backpressure");
 			fixture.Renderer.Hooks().Cancel(*batch);

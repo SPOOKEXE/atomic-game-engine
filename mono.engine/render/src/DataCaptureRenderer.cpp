@@ -309,7 +309,8 @@ namespace engine::render {
 		bool correctNodes = true;
 		for (size_t channelIndex = 0; channelIndex < ticket.Channels.size(); ++channelIndex) {
 			const ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[channelIndex]];
-			correctNodes = correctNodes && channelImage.Observation &&
+			correctNodes =
+				correctNodes && channelImage.Observation &&
 				channelImage.Observation->Node == CaptureNode(ticket, ticket.Channels[channelIndex]);
 		}
 		if (image.SnapshotId != ticket.SnapshotId || !image.Observation || !correctNodes ||

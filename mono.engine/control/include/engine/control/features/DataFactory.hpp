@@ -16,8 +16,8 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
-#include <memory>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
@@ -39,12 +39,18 @@ namespace engine::control {
 
 		inline const char *OccupancyReason(physics::ColliderOccupancy::Reason reason) {
 			switch (reason) {
-			case physics::ColliderOccupancy::Reason::None: return "";
-			case physics::ColliderOccupancy::Reason::PhysicsUnprepared: return "physics_unprepared";
-			case physics::ColliderOccupancy::Reason::CandidateOverflow: return "candidate_overflow";
-			case physics::ColliderOccupancy::Reason::BakedGeometryUncertain: return "baked_geometry_uncertain";
-			case physics::ColliderOccupancy::Reason::PhysicsStale: return "physics_stale";
-			case physics::ColliderOccupancy::Reason::InvalidProbe: return "invalid_probe";
+			case physics::ColliderOccupancy::Reason::None:
+				return "";
+			case physics::ColliderOccupancy::Reason::PhysicsUnprepared:
+				return "physics_unprepared";
+			case physics::ColliderOccupancy::Reason::CandidateOverflow:
+				return "candidate_overflow";
+			case physics::ColliderOccupancy::Reason::BakedGeometryUncertain:
+				return "baked_geometry_uncertain";
+			case physics::ColliderOccupancy::Reason::PhysicsStale:
+				return "physics_stale";
+			case physics::ColliderOccupancy::Reason::InvalidProbe:
+				return "invalid_probe";
 			}
 			return "unknown";
 		}
@@ -62,11 +68,12 @@ namespace engine::control {
 				const double centre = (static_cast<double>(low) + static_cast<double>(high)) * 0.5;
 				const double extent = (static_cast<double>(high) - static_cast<double>(low)) * 0.5;
 				return low < high && std::isfinite(centre) && std::isfinite(extent) &&
-					centre >= -std::numeric_limits<float>::max() && centre <= std::numeric_limits<float>::max() &&
-					extent <= std::numeric_limits<float>::max();
+					   centre >= -std::numeric_limits<float>::max() &&
+					   centre <= std::numeric_limits<float>::max() &&
+					   extent <= std::numeric_limits<float>::max();
 			};
 			return validAxis(minimum.X, maximum.X) && validAxis(minimum.Y, maximum.Y) &&
-				validAxis(minimum.Z, maximum.Z);
+				   validAxis(minimum.Z, maximum.Z);
 		}
 
 		inline bool OccupancyUtf8(std::string_view value) {
@@ -74,9 +81,9 @@ namespace engine::control {
 				const uint8_t first = static_cast<uint8_t>(value[index++]);
 				if (first < 0x80) continue;
 				const unsigned extra = first >= 0xC2 && first <= 0xDF	? 1
-					: first >= 0xE0 && first <= 0xEF ? 2
-					: first >= 0xF0 && first <= 0xF4 ? 3
-													 : 4;
+									   : first >= 0xE0 && first <= 0xEF ? 2
+									   : first >= 0xF0 && first <= 0xF4 ? 3
+																		: 4;
 				if (extra == 4 || index + extra > value.size()) return false;
 				uint32_t codepoint = first & ((1u << (7 - extra)) - 1u);
 				for (unsigned part = 0; part < extra; ++part) {
@@ -1249,33 +1256,89 @@ namespace engine::control {
 
 		Add(Tool{
 			"get_collider_occupancy",
-			"Tests up to 32 named finite world-space AABBs against the exact completed, retained all-systems-paused snapshot. Boundary contact counts as collider contact. This is not a filled-volume test: unavailable physics, broad-phase overflow, and mesh or hull candidates remain explicitly incomplete.",
+			"Tests up to 32 named finite world-space AABBs against the exact completed, retained "
+			"all-systems-paused snapshot. Boundary contact counts as collider contact. This is not a "
+			"filled-volume test: unavailable physics, broad-phase overflow, and mesh or hull candidates "
+			"remain explicitly incomplete.",
 			[] {
-				const json vector{{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
-				const json lifecycle{{"type", "object"}, {"additionalProperties", false}, {"properties", {{"tick", {{"type", "integer"}, {"minimum", 0}}}, {"world_epoch", {{"type", "integer"}, {"minimum", 0}}}, {"world_version", {{"type", "integer"}, {"minimum", 0}}}}}, {"required", {"tick", "world_epoch", "world_version"}}};
-				return json{{"type", "object"}, {"properties", {{"schema_version", {{"const", "collider-occupancy/v1"}}}, {"world_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}, {"lifecycle", lifecycle}, {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}, {"probes", {{"type", "array"}, {"minItems", 1}, {"maxItems", 32}, {"items", {{"type", "object"}, {"additionalProperties", false}, {"properties", {{"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}, {"minimum_metres", vector}, {"maximum_metres", vector}}}, {"required", {"name", "minimum_metres", "maximum_metres"}}}}}}}}, {"required", {"schema_version", "world_id", "lifecycle", "snapshot_id", "probes"}}, {"additionalProperties", false}};
+				const json vector{
+					{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}
+				};
+				const json lifecycle{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"tick", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_epoch", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_version", {{"type", "integer"}, {"minimum", 0}}}}},
+					{"required", {"tick", "world_epoch", "world_version"}}
+				};
+				return json{
+					{"type", "object"},
+					{"properties",
+					 {{"schema_version", {{"const", "collider-occupancy/v1"}}},
+					  {"world_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"lifecycle", lifecycle},
+					  {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"probes",
+					   {{"type", "array"},
+						{"minItems", 1},
+						{"maxItems", 32},
+						{"items",
+						 {{"type", "object"},
+						  {"additionalProperties", false},
+						  {"properties",
+						   {{"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+							{"minimum_metres", vector},
+							{"maximum_metres", vector}}},
+						  {"required", {"name", "minimum_metres", "maximum_metres"}}}}}}}},
+					{"required", {"schema_version", "world_id", "lifecycle", "snapshot_id", "probes"}},
+					{"additionalProperties", false}
+				};
 			},
 			[&session](const json &arguments, std::string &failure) -> json {
 				using namespace data_factory_detail;
-				if (!arguments.is_object() || !Only(arguments, {"schema_version", "world_id", "lifecycle", "snapshot_id", "probes"}, failure)) {
+				if (!arguments.is_object() ||
+					!Only(
+						arguments,
+						{"schema_version", "world_id", "lifecycle", "snapshot_id", "probes"},
+						failure
+					)) {
 					if (failure.empty()) failure = Error("validation_failed", "arguments must be an object");
 					return nullptr;
 				}
 				Request request;
 				const json *field = nullptr;
-				if (!Field(arguments, "schema_version", field, failure) || !field->is_string() || field->get<std::string>() != "collider-occupancy/v1" || !Field(arguments, "world_id", field, failure) || !Text(*field, "world_id", request.InstanceId, failure)) {
-					if (failure.empty()) failure = Error("validation_failed", "schema_version must be collider-occupancy/v1");
+				if (!Field(arguments, "schema_version", field, failure) || !field->is_string() ||
+					field->get<std::string>() != "collider-occupancy/v1" ||
+					!Field(arguments, "world_id", field, failure) ||
+					!Text(*field, "world_id", request.InstanceId, failure)) {
+					if (failure.empty())
+						failure = Error("validation_failed", "schema_version must be collider-occupancy/v1");
 					return nullptr;
 				}
 				const auto lifecycle = arguments.find("lifecycle");
-				if (lifecycle == arguments.end() || !lifecycle->is_object() || !Only(*lifecycle, {"tick", "world_epoch", "world_version"}, failure) || !Field(*lifecycle, "tick", field, failure) || !UInt(*field, "lifecycle.tick", request.Tick, failure) || !Field(*lifecycle, "world_epoch", field, failure) || !UInt(*field, "lifecycle.world_epoch", request.Epoch, failure) || !Field(*lifecycle, "world_version", field, failure) || !UInt(*field, "lifecycle.world_version", request.Version, failure)) {
-					if (failure.empty()) failure = Error("validation_failed", "lifecycle requires tick, world_epoch and world_version");
+				if (lifecycle == arguments.end() || !lifecycle->is_object() ||
+					!Only(*lifecycle, {"tick", "world_epoch", "world_version"}, failure) ||
+					!Field(*lifecycle, "tick", field, failure) ||
+					!UInt(*field, "lifecycle.tick", request.Tick, failure) ||
+					!Field(*lifecycle, "world_epoch", field, failure) ||
+					!UInt(*field, "lifecycle.world_epoch", request.Epoch, failure) ||
+					!Field(*lifecycle, "world_version", field, failure) ||
+					!UInt(*field, "lifecycle.world_version", request.Version, failure)) {
+					if (failure.empty())
+						failure = Error(
+							"validation_failed", "lifecycle requires tick, world_epoch and world_version"
+						);
 					return nullptr;
 				}
 				const json *snapshot = nullptr;
-				if (!Field(arguments, "snapshot_id", snapshot, failure) || !Text(*snapshot, "snapshot_id", request.SnapshotId, failure)) return nullptr;
+				if (!Field(arguments, "snapshot_id", snapshot, failure) ||
+					!Text(*snapshot, "snapshot_id", request.SnapshotId, failure))
+					return nullptr;
 				const auto probesField = arguments.find("probes");
-				if (probesField == arguments.end() || !probesField->is_array() || probesField->empty() || probesField->size() > 32) {
+				if (probesField == arguments.end() || !probesField->is_array() || probesField->empty() ||
+					probesField->size() > 32) {
 					failure = Error("validation_failed", "probes must contain 1 through 32 named AABBs");
 					return nullptr;
 				}
@@ -1284,19 +1347,30 @@ namespace engine::control {
 				std::unordered_set<std::string> uniqueNames;
 				for (size_t index = 0; index < probesField->size(); ++index) {
 					const json &probe = (*probesField)[index];
-					if (!probe.is_object() || !Only(probe, {"name", "minimum_metres", "maximum_metres"}, failure) || !probe.contains("name") || !Text(probe.at("name"), "probe name", names[index], failure) || !uniqueNames.emplace(names[index]).second) {
-						if (failure.empty()) failure = Error("validation_failed", "probe names must be unique");
+					if (!probe.is_object() ||
+						!Only(probe, {"name", "minimum_metres", "maximum_metres"}, failure) ||
+						!probe.contains("name") ||
+						!Text(probe.at("name"), "probe name", names[index], failure) ||
+						!uniqueNames.emplace(names[index]).second) {
+						if (failure.empty())
+							failure = Error("validation_failed", "probe names must be unique");
 						return nullptr;
 					}
 					core::Vector3 minimum, maximum;
-					if (!probe.contains("minimum_metres") || !probe.contains("maximum_metres") || !FiniteVector(probe.at("minimum_metres"), minimum) || !FiniteVector(probe.at("maximum_metres"), maximum) || !StrictFiniteBox(minimum, maximum)) {
-						failure = Error("validation_failed", "each probe needs finite strict minimum and maximum vectors");
+					if (!probe.contains("minimum_metres") || !probe.contains("maximum_metres") ||
+						!FiniteVector(probe.at("minimum_metres"), minimum) ||
+						!FiniteVector(probe.at("maximum_metres"), maximum) ||
+						!StrictFiniteBox(minimum, maximum)) {
+						failure = Error(
+							"validation_failed", "each probe needs finite strict minimum and maximum vectors"
+						);
 						return nullptr;
 					}
 					probes[index] = {minimum, maximum};
 				}
 				if (!Preconditions(session, request, failure)) return nullptr;
-				const world::DataFactoryReply barrier = session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
+				const world::DataFactoryReply barrier =
+					session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
 				if (barrier.Status != world::DataFactoryStatus::Ok) {
 					failure = Error(world::Describe(barrier.Status), barrier.Detail);
 					return nullptr;
@@ -1304,39 +1378,90 @@ namespace engine::control {
 				std::array<physics::ColliderOccupancy, 32> occupancy;
 				json answers = json::array();
 				world::Universe &universe = session.UniverseOf();
-				const world::WorldStatus entered = universe.Enter(universe.Find(core::Name(barrier.InstanceId)), [&](ecs::Store &store) {
-					physics::ColliderOccupancyBatch(store, std::span{probes}.first(probesField->size()), std::span{occupancy}.first(probesField->size()));
-					for (size_t index = 0; index < probesField->size(); ++index) {
-						const physics::ColliderOccupancy &answer = occupancy[index];
-						bool witnessIdentityAvailable = false;
-						json witnessId = nullptr;
-						bool ambiguousIdentity = false;
-						if (answer.WitnessAvailable) {
-							ecs::AttributeValue value;
-							if (ecs::GetAttribute(store, answer.Witness, core::Name(script::DATA_SCENE_ID_ATTRIBUTE), value) && value.Type == ecs::PropertyType::String && !value.String.empty() && value.String.size() <= script::MAX_DATA_SCENE_ID_BYTES && value.String.find('\0') == std::string::npos && OccupancyUtf8(value.String)) {
-								size_t matches = 0;
-								store.Each<const ecs::InstanceName>([&](ecs::Entity entity, const ecs::InstanceName &) {
-									ecs::AttributeValue candidate;
-									if (ecs::GetAttribute(store, entity, core::Name(script::DATA_SCENE_ID_ATTRIBUTE), candidate) && candidate.Type == ecs::PropertyType::String && candidate.String == value.String) matches++;
-								});
-								ambiguousIdentity = matches != 1;
-								if (!ambiguousIdentity) { witnessIdentityAvailable = true; witnessId = value.String; }
+				const world::WorldStatus entered =
+					universe.Enter(universe.Find(core::Name(barrier.InstanceId)), [&](ecs::Store &store) {
+						physics::ColliderOccupancyBatch(
+							store,
+							std::span{probes}.first(probesField->size()),
+							std::span{occupancy}.first(probesField->size())
+						);
+						for (size_t index = 0; index < probesField->size(); ++index) {
+							const physics::ColliderOccupancy &answer = occupancy[index];
+							bool witnessIdentityAvailable = false;
+							json witnessId = nullptr;
+							bool ambiguousIdentity = false;
+							if (answer.WitnessAvailable) {
+								ecs::AttributeValue value;
+								if (ecs::GetAttribute(
+										store,
+										answer.Witness,
+										core::Name(script::DATA_SCENE_ID_ATTRIBUTE),
+										value
+									) &&
+									value.Type == ecs::PropertyType::String && !value.String.empty() &&
+									value.String.size() <= script::MAX_DATA_SCENE_ID_BYTES &&
+									value.String.find('\0') == std::string::npos &&
+									OccupancyUtf8(value.String)) {
+									size_t matches = 0;
+									store.Each<const ecs::InstanceName>([&](ecs::Entity entity,
+																			const ecs::InstanceName &) {
+										ecs::AttributeValue candidate;
+										if (ecs::GetAttribute(
+												store,
+												entity,
+												core::Name(script::DATA_SCENE_ID_ATTRIBUTE),
+												candidate
+											) &&
+											candidate.Type == ecs::PropertyType::String &&
+											candidate.String == value.String)
+											matches++;
+									});
+									ambiguousIdentity = matches != 1;
+									if (!ambiguousIdentity) {
+										witnessIdentityAvailable = true;
+										witnessId = value.String;
+									}
+								}
 							}
+							const bool rowAvailable =
+								answer.Available && (answer.OverlapFound || answer.Complete);
+							const json overlap = rowAvailable ? json(answer.OverlapFound) : json(nullptr);
+							const json reason =
+								rowAvailable || answer.Why == physics::ColliderOccupancy::Reason::None
+									? json(nullptr)
+									: json(OccupancyReason(answer.Why));
+							answers.push_back(
+								{{"name", names[index]},
+								 {"minimum_metres", (*probesField)[index].at("minimum_metres")},
+								 {"maximum_metres", (*probesField)[index].at("maximum_metres")},
+								 {"available", rowAvailable},
+								 {"overlap_found", overlap},
+								 {"witness_id", std::move(witnessId)},
+								 {"witness_identity_available", witnessIdentityAvailable},
+								 {"complete", answer.Complete},
+								 {"reason", reason}}
+							);
 						}
-						const bool rowAvailable = answer.Available && (answer.OverlapFound || answer.Complete);
-						const json overlap = rowAvailable ? json(answer.OverlapFound) : json(nullptr);
-						const json reason = rowAvailable || answer.Why == physics::ColliderOccupancy::Reason::None
-							? json(nullptr)
-							: json(OccupancyReason(answer.Why));
-						answers.push_back({{"name", names[index]}, {"minimum_metres", (*probesField)[index].at("minimum_metres")}, {"maximum_metres", (*probesField)[index].at("maximum_metres")}, {"available", rowAvailable}, {"overlap_found", overlap}, {"witness_id", std::move(witnessId)}, {"witness_identity_available", witnessIdentityAvailable}, {"complete", answer.Complete}, {"reason", reason}});
-					}
-				});
+					});
 				if (entered != world::WorldStatus::Ok) {
 					failure = Error("validation_failed", "scene is unavailable");
 					return nullptr;
 				}
-				json result{{"schema_version", "collider-occupancy/v1"}, {"world_id", barrier.InstanceId}, {"lifecycle", {{"tick", barrier.Clock.Tick}, {"world_epoch", barrier.WorldEpoch}, {"world_version", barrier.WorldVersion}}}, {"snapshot_id", request.SnapshotId}, {"probes", std::move(answers)}};
-				if (result.dump().size() > 64u * 1024u) { failure = Error("resource_limit", "collider occupancy exceeds the 65536-byte response limit"); return nullptr; }
+				json result{
+					{"schema_version", "collider-occupancy/v1"},
+					{"world_id", barrier.InstanceId},
+					{"lifecycle",
+					 {{"tick", barrier.Clock.Tick},
+					  {"world_epoch", barrier.WorldEpoch},
+					  {"world_version", barrier.WorldVersion}}},
+					{"snapshot_id", request.SnapshotId},
+					{"probes", std::move(answers)}
+				};
+				if (result.dump().size() > 64u * 1024u) {
+					failure =
+						Error("resource_limit", "collider occupancy exceeds the 65536-byte response limit");
+					return nullptr;
+				}
 				return result;
 			}
 		});

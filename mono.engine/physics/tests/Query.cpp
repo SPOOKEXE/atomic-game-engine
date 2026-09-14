@@ -179,7 +179,9 @@ TEST_CASE("legacy overlap remains available after an unrelated store write", "[p
 	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsStale);
 }
 
-TEST_CASE("collider occupancy resolves extreme finite bounds without float intermediates", "[physics][query]") {
+TEST_CASE(
+	"collider occupancy resolves extreme finite bounds without float intermediates", "[physics][query]"
+) {
 	Store store("query.occupancy.extreme-bounds");
 	PreparePhysicsWorld(store, 4.0f);
 	Index(store);

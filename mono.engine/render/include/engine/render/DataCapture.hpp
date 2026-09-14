@@ -115,15 +115,18 @@ namespace engine::render {
 	enum class DataCaptureOrigin : uint8_t { TopLeft };
 	enum class DataCaptureTemporalHistory : uint8_t { Preserve, Reset, Disable };
 	inline core::Name DataCaptureNode(core::Name base, DataCaptureChannel channel) {
-		const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo ? "-albedo"
-			: channel == DataCaptureChannel::PbrMaterial ? "-material"
-			: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
-			: channel == DataCaptureChannel::AmbientOcclusion ? "-ambient-occlusion"
-			: channel == DataCaptureChannel::ObjectIds ? "-object-ids"
-			: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
-			: channel == DataCaptureChannel::PartMask ? "-part-ids"
-			: channel == DataCaptureChannel::SecondSurfaceDepth || channel == DataCaptureChannel::SecondSurfaceValidity
-				? "-second-surface" : "";
+		const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	 ? "-albedo"
+										: channel == DataCaptureChannel::PbrMaterial ? "-material"
+										: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
+										: channel == DataCaptureChannel::AmbientOcclusion
+											? "-ambient-occlusion"
+										: channel == DataCaptureChannel::ObjectIds	  ? "-object-ids"
+										: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
+										: channel == DataCaptureChannel::PartMask	  ? "-part-ids"
+										: channel == DataCaptureChannel::SecondSurfaceDepth ||
+												channel == DataCaptureChannel::SecondSurfaceValidity
+											? "-second-surface"
+											: "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 

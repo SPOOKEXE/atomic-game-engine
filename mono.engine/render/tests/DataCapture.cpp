@@ -2,11 +2,11 @@
 #include "RenderFixture.hpp"
 #include "SecondSurfaceDepth.hpp"
 
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
-#include <engine/graph/PipelineDocument.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -362,18 +362,24 @@ namespace {
 		request.PipelineRevision = revision;
 		request.ViewSlot = slot;
 		request.Lens = engine::script::ViewCameraMutationRequest::Camera{
-			.FieldOfViewRadians = 0.9f, .NearPlane = 0.2f, .FarPlane = 100.0f,
-			.MaxImageWidth = 0, .MaxImageHeight = 0, .ImageWidth = 0, .ImageHeight = 0
+			.FieldOfViewRadians = 0.9f,
+			.NearPlane = 0.2f,
+			.FarPlane = 100.0f,
+			.MaxImageWidth = 0,
+			.MaxImageHeight = 0,
+			.ImageWidth = 0,
+			.ImageHeight = 0
 		};
 		return request;
 	}
 
-	std::string PauseAndSnapshot(engine::world::Universe &worlds, engine::world::DataFactorySession &session) {
+	std::string
+	PauseAndSnapshot(engine::world::Universe &worlds, engine::world::DataFactorySession &session) {
 		const auto world = worlds.Create({.Name = engine::core::Name("data-world")});
 		session.SetPauseParticipant(
-			[world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
-				return candidate == world;
-			}
+			[world](
+				engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &
+			) { return candidate == world; }
 		);
 		REQUIRE(
 			session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
@@ -396,7 +402,8 @@ namespace {
 		};
 	}
 
-	engine::render::View MutationView(std::string_view snapshot, engine::core::Name pipeline, size_t slot = 0) {
+	engine::render::View
+	MutationView(std::string_view snapshot, engine::core::Name pipeline, size_t slot = 0) {
 		engine::render::View view;
 		view.WorldName = engine::core::Name("data-world");
 		view.SnapshotId = snapshot;
@@ -432,7 +439,10 @@ TEST_CASE("script view.camera validates a queued snapshot on its owner", "[rende
 	Renderer renderer;
 	engine::graph::RenderGraph graph;
 	engine::core::Name offender;
-	REQUIRE(engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
 	const engine::core::Name pipeline("mutation-owner-pipeline");
 	REQUIRE(renderer.SetPipeline(pipeline, graph));
 	const auto installed = renderer.ResolvePipelineIdentity(pipeline);
@@ -440,7 +450,12 @@ TEST_CASE("script view.camera validates a queued snapshot on its owner", "[rende
 	ScriptDataCaptureBridge bridge(session, renderer);
 	std::string detail;
 	uint64_t ticket = 0;
-	REQUIRE(bridge.QueueViewCameraMutation("missing-world", MutationRequest("missing-world", pipeline.Text(), installed->Revision), ticket, detail));
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"missing-world",
+		MutationRequest("missing-world", pipeline.Text(), installed->Revision),
+		ticket,
+		detail
+	));
 	View view;
 	view.WorldName = engine::core::Name("missing-world");
 	view.Pipeline = pipeline;
@@ -452,7 +467,9 @@ TEST_CASE("script view.camera validates a queued snapshot on its owner", "[rende
 	CHECK(poll.Status == "stale");
 }
 
-TEST_CASE("script view.camera rejects an armed patch after its snapshot becomes stale", "[render][data-capture]") {
+TEST_CASE(
+	"script view.camera rejects an armed patch after its snapshot becomes stale", "[render][data-capture]"
+) {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
 	const std::string snapshot = PauseAndSnapshot(worlds, session);
@@ -470,11 +487,12 @@ TEST_CASE("script view.camera rejects an armed patch after its snapshot becomes 
 	ScriptDataCaptureBridge bridge(session, renderer);
 	std::string detail;
 	uint64_t ticket = 0;
-	REQUIRE(
-		bridge.QueueViewCameraMutation(
-			"data-world", MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot), ticket, detail
-		)
-	);
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"data-world",
+		MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot),
+		ticket,
+		detail
+	));
 	View armed = MutationView(snapshot, pipeline);
 	bridge.PrepareView(armed);
 	REQUIRE(session.Resume("data-world", 0).Status == engine::world::DataFactoryStatus::Ok);
@@ -488,7 +506,9 @@ TEST_CASE("script view.camera rejects an armed patch after its snapshot becomes 
 	REQUIRE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
 	CHECK(poll.Terminal);
 	CHECK(poll.Status == "stale");
-	CHECK_FALSE(renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, installed->Revision), fresh));
+	CHECK_FALSE(
+		renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, installed->Revision), fresh)
+	);
 }
 
 TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[render][data-capture]") {
@@ -511,27 +531,28 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 	ScriptDataCaptureBridge bridge(session, renderer);
 	std::string detail;
 	uint64_t appliedTicket = 0;
-	REQUIRE(
-		bridge.QueueViewCameraMutation(
-			"data-world", MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot), appliedTicket, detail
-		)
-	);
-		View armedView = MutationView(snapshot, pipeline);
-		SceneTarget target{16, 16};
-		armedView.Target = &target;
-		armedView.World = 1;
-		bridge.PrepareView(armedView);
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"data-world",
+		MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot),
+		appliedTicket,
+		detail
+	));
+	View armedView = MutationView(snapshot, pipeline);
+	SceneTarget target{16, 16};
+	armedView.Target = &target;
+	armedView.World = 1;
+	bridge.PrepareView(armedView);
 
-		// A host can return before Render. The armed patch must still choose its
-		// admitted snapshot for the next fresh view rather than waiting forever.
-		View view;
-		view.WorldName = engine::core::Name("data-world");
-		view.Pipeline = pipeline;
-		view.Target = &target;
-		view.World = 1;
-		bridge.PrepareView(view);
-		CHECK(view.SnapshotId == snapshot);
-		const auto identity = MutationIdentity(snapshot, pipeline, installed->Revision);
+	// A host can return before Render. The armed patch must still choose its
+	// admitted snapshot for the next fresh view rather than waiting forever.
+	View view;
+	view.WorldName = engine::core::Name("data-world");
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.World = 1;
+	bridge.PrepareView(view);
+	CHECK(view.SnapshotId == snapshot);
+	const auto identity = MutationIdentity(snapshot, pipeline, installed->Revision);
 	OverlayImage overlay;
 	const FrameResult appliedFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(appliedFrame.Submitted);
@@ -557,17 +578,17 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 		engine::world::DataFactoryStatus::Ok
 	);
 	std::string cancellationSnapshot;
-	REQUIRE(session.Snapshot("data-world", cancellationSnapshot).Status == engine::world::DataFactoryStatus::Ok);
+	REQUIRE(
+		session.Snapshot("data-world", cancellationSnapshot).Status == engine::world::DataFactoryStatus::Ok
+	);
 	view.SnapshotId = cancellationSnapshot;
 	uint64_t cancelledTicket = 0;
-	REQUIRE(
-		bridge.QueueViewCameraMutation(
-			"data-world",
-			MutationRequest("data-world", pipeline.Text(), installed->Revision, cancellationSnapshot),
-			cancelledTicket,
-			detail
-		)
-	);
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"data-world",
+		MutationRequest("data-world", pipeline.Text(), installed->Revision, cancellationSnapshot),
+		cancelledTicket,
+		detail
+	));
 	bridge.PrepareView(view);
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
 	bridge.Pump();
@@ -583,7 +604,10 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 	CHECK(poll.Status == "cancelled");
 }
 
-TEST_CASE("script view.camera bridge reclaims applied slots after stale pipeline and teardown", "[render][data-capture]") {
+TEST_CASE(
+	"script view.camera bridge reclaims applied slots after stale pipeline and teardown",
+	"[render][data-capture]"
+) {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
 	const std::string snapshot = PauseAndSnapshot(worlds, session);
@@ -601,11 +625,12 @@ TEST_CASE("script view.camera bridge reclaims applied slots after stale pipeline
 	ScriptDataCaptureBridge bridge(session, renderer);
 	std::string detail;
 	uint64_t staleTicket = 0;
-	REQUIRE(
-		bridge.QueueViewCameraMutation(
-			"data-world", MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot), staleTicket, detail
-		)
-	);
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"data-world",
+		MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot),
+		staleTicket,
+		detail
+	));
 	View staleView = MutationView(snapshot, pipeline);
 	bridge.PrepareView(staleView);
 	const auto staleIdentity = MutationIdentity(snapshot, pipeline, installed->Revision);
@@ -623,29 +648,35 @@ TEST_CASE("script view.camera bridge reclaims applied slots after stale pipeline
 	REQUIRE(current);
 	for (size_t slot = 0; slot < MAX_DATA_FACTORY_BATCHES; ++slot) {
 		uint64_t ticket = 0;
-		REQUIRE(
-			bridge.QueueViewCameraMutation(
-				"data-world", MutationRequest("data-world", pipeline.Text(), current->Revision, snapshot, slot), ticket, detail
-			)
-		);
+		REQUIRE(bridge.QueueViewCameraMutation(
+			"data-world",
+			MutationRequest("data-world", pipeline.Text(), current->Revision, snapshot, slot),
+			ticket,
+			detail
+		));
 		View view = MutationView(snapshot, pipeline, slot);
 		bridge.PrepareView(view);
 		View applied = view;
-		REQUIRE(renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, current->Revision, slot), applied));
+		REQUIRE(renderer.Hooks().ConsumeViewMutation(
+			MutationIdentity(snapshot, pipeline, current->Revision, slot), applied
+		));
 		bridge.Pump();
 	}
 	REQUIRE(bridge.TeardownInstance("data-world", detail));
 	for (size_t slot = 0; slot < MAX_DATA_FACTORY_BATCHES; ++slot) {
 		uint64_t ticket = 0;
-		REQUIRE(
-			bridge.QueueViewCameraMutation(
-				"data-world", MutationRequest("data-world", pipeline.Text(), current->Revision, snapshot, slot), ticket, detail
-			)
-		);
+		REQUIRE(bridge.QueueViewCameraMutation(
+			"data-world",
+			MutationRequest("data-world", pipeline.Text(), current->Revision, snapshot, slot),
+			ticket,
+			detail
+		));
 		View view = MutationView(snapshot, pipeline, slot);
 		bridge.PrepareView(view);
 		View applied = view;
-		REQUIRE(renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, current->Revision, slot), applied));
+		REQUIRE(renderer.Hooks().ConsumeViewMutation(
+			MutationIdentity(snapshot, pipeline, current->Revision, slot), applied
+		));
 		bridge.Pump();
 		REQUIRE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
 		CHECK_FALSE(poll.Terminal);
@@ -687,11 +718,11 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 		std::find(capabilities.Channels.begin(), capabilities.Channels.end(), "ambient_occlusion") !=
 		capabilities.Channels.end()
 	);
-	const size_t observationHooks = static_cast<size_t>(std::count_if(
-		capabilities.HookRecords.begin(),
-		capabilities.HookRecords.end(),
-		[](const auto &hook) { return hook.Access == "observation"; }
-	));
+	const size_t observationHooks = static_cast<size_t>(
+		std::count_if(capabilities.HookRecords.begin(), capabilities.HookRecords.end(), [](const auto &hook) {
+			return hook.Access == "observation";
+		})
+	);
 	REQUIRE(observationHooks == 12);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
@@ -706,11 +737,10 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			capabilities.Channels.end()
 		);
 	}
-	const auto mutation = std::find_if(
-		capabilities.HookRecords.begin(),
-		capabilities.HookRecords.end(),
-		[](const auto &hook) { return hook.Name == "view.camera"; }
-	);
+	const auto mutation =
+		std::find_if(capabilities.HookRecords.begin(), capabilities.HookRecords.end(), [](const auto &hook) {
+			return hook.Name == "view.camera";
+		});
 	REQUIRE(mutation != capabilities.HookRecords.end());
 	CHECK(mutation->Access == "synchronous_mutation");
 	CHECK(mutation->MutatedFields.size() == 3);

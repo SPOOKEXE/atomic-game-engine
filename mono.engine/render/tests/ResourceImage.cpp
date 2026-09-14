@@ -64,7 +64,10 @@ TEST_CASE("custom R8 capture does not inherit SSAO facts", "[render][resourceima
 	CHECK_FALSE(custom->Denoiser);
 	CHECK_FALSE(custom->TemporalHistory);
 	CHECK_FALSE(custom->BackgroundValue);
-	CHECK(custom->BackgroundClassification == engine::render::AmbientOcclusionBackgroundClassification::Unavailable);
+	CHECK(
+		custom->BackgroundClassification ==
+		engine::render::AmbientOcclusionBackgroundClassification::Unavailable
+	);
 }
 
 namespace {
@@ -1234,7 +1237,9 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	// The output capture remains live on an unchanged scene while SSAO stays in
 	// the PBR slot. Its download is newer, but its producer is not.
 	view.Damage.Scene = false;
-	const render::ResourceImageRequest cached{6, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	const render::ResourceImageRequest cached{
+		6, pipelineName, core::Name("data-capture-ambient-occlusion"), 0
+	};
 	REQUIRE(renderer.RequestResourceImage(cached));
 	const render::FrameResult cachedFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(cachedFrame.Ran(cached.Node));
@@ -1249,7 +1254,9 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	view.OverrideLighting = true;
 	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
 	view.Camera.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
-	const render::ResourceImageRequest disabled{4, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	const render::ResourceImageRequest disabled{
+		4, pipelineName, core::Name("data-capture-ambient-occlusion"), 0
+	};
 	REQUIRE(renderer.RequestResourceImage(disabled));
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(disabled.Node));
 	const auto cleared = AwaitImage(renderer, disabled.Token);
@@ -1261,9 +1268,7 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	CHECK(cleared.AmbientOcclusion->RadiusWorldUnits == 0.65f);
 
 	graph::PipelineDocument noPassDocument = graph::DefaultPbrDataCaptureDocument();
-	noPassDocument.Record(
-		{.Kind = graph::EditKind::Enable, .Name = core::Name("ssao"), .Enabled = false}
-	);
+	noPassDocument.Record({.Kind = graph::EditKind::Enable, .Name = core::Name("ssao"), .Enabled = false});
 	graph::RenderGraph noPassPipeline;
 	REQUIRE(graph::Build(noPassDocument, noPassPipeline, offender) == graph::PipelineDocumentStatus::Ok);
 	const core::Name noPassName("default-data-capture-no-ssao");
@@ -1276,7 +1281,9 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(noPass.Node));
 	const auto noPassOcclusion = AwaitImage(renderer, noPass.Token);
 	REQUIRE(noPassOcclusion.AmbientOcclusion);
-	CHECK(noPassOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass);
+	CHECK(
+		noPassOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass
+	);
 	CHECK(noPassOcclusion.AmbientOcclusion->ProducerFrame == noPassOcclusion.CaptureFrame);
 	CHECK(noPassOcclusion.AmbientOcclusion->Enabled == true);
 	CHECK_FALSE(noPassOcclusion.AmbientOcclusion->SampleCount);
@@ -1292,7 +1299,10 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(noPassDisabled.Node));
 	const auto noPassDisabledOcclusion = AwaitImage(renderer, noPassDisabled.Token);
 	REQUIRE(noPassDisabledOcclusion.AmbientOcclusion);
-	CHECK(noPassDisabledOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass);
+	CHECK(
+		noPassDisabledOcclusion.AmbientOcclusion->SourceState ==
+		render::AmbientOcclusionSourceState::ClearedNoPass
+	);
 	CHECK(noPassDisabledOcclusion.AmbientOcclusion->Enabled == false);
 
 	const render::ResourceImageRequest residentAmbient{
@@ -4376,11 +4386,11 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 
 	render::ScriptDataCaptureBridge bridge(session, renderer);
 	const auto hookCapabilities = renderer.Hooks().DescribeHooks();
-	const size_t observationHookCount = static_cast<size_t>(std::count_if(
-		hookCapabilities.begin(),
-		hookCapabilities.end(),
-		[](const auto &hook) { return hook.Kind == render::RenderHookKind::DataCapture; }
-	));
+	const size_t observationHookCount = static_cast<size_t>(
+		std::count_if(hookCapabilities.begin(), hookCapabilities.end(), [](const auto &hook) {
+			return hook.Kind == render::RenderHookKind::DataCapture;
+		})
+	);
 	REQUIRE(observationHookCount == render::MAX_DATA_FACTORY_READBACK_NODES);
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",

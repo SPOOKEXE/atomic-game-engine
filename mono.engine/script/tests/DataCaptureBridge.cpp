@@ -23,15 +23,16 @@ namespace {
 			return {
 				.Available = true,
 				.Channels = {"rgb_linear_hdr"},
-				.HookRecords = {
-					{.Name = "data_capture.rgb_linear_hdr",
-					 .SchemaVersion = 1,
-					 .NodeKind = "capture",
-					 .Required = true,
-					 .Channels = {"rgb_linear_hdr"},
-					 .Access = "observation",
-					 .MutatedFields = {}},
-				},
+				.HookRecords =
+					{
+						{.Name = "data_capture.rgb_linear_hdr",
+						 .SchemaVersion = 1,
+						 .NodeKind = "capture",
+						 .Required = true,
+						 .Channels = {"rgb_linear_hdr"},
+						 .Access = "observation",
+						 .MutatedFields = {}},
+					},
 				.MaximumHooks = 14,
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
@@ -43,14 +44,12 @@ namespace {
 		}
 
 		bool Queue(
-			std::string_view,
-			const engine::script::DataCaptureBridgeRequest &,
-			uint64_t &,
-			std::string &
+			std::string_view, const engine::script::DataCaptureBridgeRequest &, uint64_t &, std::string &
 		) override {
 			return false;
 		}
-		bool Poll(std::string_view, uint64_t, engine::script::DataCaptureBridgePoll &, std::string &) override {
+		bool
+		Poll(std::string_view, uint64_t, engine::script::DataCaptureBridgePoll &, std::string &) override {
 			return false;
 		}
 		bool ReadPlane(
@@ -64,7 +63,9 @@ namespace {
 		) override {
 			return false;
 		}
-		bool Release(std::string_view, uint64_t, std::string &) override { return false; }
+		bool Release(std::string_view, uint64_t, std::string &) override {
+			return false;
+		}
 		void Cancel(std::string_view, uint64_t) override {}
 	};
 }

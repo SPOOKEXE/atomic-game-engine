@@ -663,6 +663,7 @@ namespace engine::render {
 
 	// Copies the current recording into the render hook's owned observation
 	// value. This is outside ViewRecording so asynchronous capture has one owner.
-	RenderObservationContext
-	DataFactoryObservation(const ViewRecording &recording, const graph::RunContext &context, core::Name pipeline, size_t viewSlot);
+	RenderObservationContext DataFactoryObservation(
+		const ViewRecording &recording, const graph::RunContext &context, core::Name pipeline, size_t viewSlot
+	);
 }
