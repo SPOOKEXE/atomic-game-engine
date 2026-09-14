@@ -35,6 +35,7 @@
 #include <engine/parallel/Settings.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/render/DebugText.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
@@ -4024,6 +4025,34 @@ namespace client {
 			presentationWorld.IsValid() ? Universe_->NameOf(presentationWorld) : engine::core::Name{};
 		view.ContentOwner = view.WorldName;
 		view.ForeignContentOwners = ContentBindings;
+		std::optional<engine::render::WorldViewFrame> namedCaptureFrame;
+		std::optional<engine::render::WorldCameraFrame> namedCaptureCamera;
+		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
+		if (capturePending && DataCapture->PrepareView(view)) {
+			namedCaptureFrame.emplace();
+			namedCaptureCamera.emplace();
+			Universe_->Enter(presentationWorld, [&](engine::ecs::Store &store) {
+				engine::render::CollectWorldView(store, view.WorldName, *namedCaptureFrame);
+				engine::render::CollectWorldCamera(
+					store,
+					view,
+					{static_cast<float>(std::max(pixelWidth, 0)), static_cast<float>(std::max(pixelHeight, 0))},
+					*namedCaptureCamera
+				);
+				(void)engine::render::BindWorldView(
+					*namedCaptureFrame,
+					*namedCaptureCamera,
+					{.World = presentationWorld.Index,
+					 .Name = view.WorldName,
+					 .Identity = store.Identity(),
+					 .ContentOwner = view.ContentOwner,
+					 .ForeignContentOwners = view.ForeignContentOwners,
+					 .Pipeline = view.Pipeline},
+					view
+				);
+				visualLighting = view.Lighting;
+			});
+		}
 
 		const uint32_t targetWidth = static_cast<uint32_t>(std::max(pixelWidth, 0));
 		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
@@ -4127,8 +4156,6 @@ namespace client {
 			.ViewportOverlay = true,
 		};
 		view.Damage = damage;
-		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
-		if (capturePending) DataCapture->PrepareView(view);
 		const bool visualChanged =
 			damage.Any() || PresentationInvalidated || capturePending || renderOnlyPending;
 		const bool particleDeviceStep = particleLayerPresent && particleDelta > 0.0f;

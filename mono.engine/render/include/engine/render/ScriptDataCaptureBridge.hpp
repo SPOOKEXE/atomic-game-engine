@@ -42,7 +42,9 @@ namespace engine::render {
 		) override;
 		// Releases every terminal payload and cancels every renderer ticket for one world.
 		bool TeardownInstance(std::string_view instanceId, std::string &detail);
-		void PrepareView(View &view);
+		// Arms compatible capture work and returns true only when a named camera
+		// replaced the supplied view camera.
+		bool PrepareView(View &view);
 		void Pump();
 		bool HasPending() const;
 

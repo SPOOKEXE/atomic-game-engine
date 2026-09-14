@@ -572,11 +572,12 @@ namespace engine::render {
 		return true;
 	}
 
-	void ScriptDataCaptureBridge::PrepareView(View &view) {
+	bool ScriptDataCaptureBridge::PrepareView(View &view) {
 		RefreshCapabilities();
 		if (!Hooks) Hooks = std::make_unique<HookState>();
 		const auto pipeline = RendererRef.ResolvePipelineIdentity(view.Pipeline);
-		if (!pipeline) return;
+		if (!pipeline) return false;
+		bool namedCameraApplied = false;
 		std::vector<PendingRequest> pending;
 		std::vector<std::pair<uint64_t, std::string>> mutationSnapshots;
 		std::vector<std::pair<uint64_t, MutationHandle>> armedPendingMutations;
@@ -652,7 +653,7 @@ namespace engine::render {
 			}
 			armedSnapshotCurrent = false;
 		}
-		if (!armedSnapshotCurrent) return;
+		if (!armedSnapshotCurrent) return false;
 		if (!selectedSnapshot.empty()) view.SnapshotId = selectedSnapshot;
 		if (!pending.empty()) {
 			const world::DataFactoryReply barrier =
@@ -666,7 +667,7 @@ namespace engine::render {
 						entry->second.Detail = barrier.Detail;
 						entry->second.Terminal = true;
 					}
-				return;
+				return false;
 			}
 			std::string cameraDetail;
 			if (!ResolveNamedCamera(Session, view, pending.front().Request.CameraId, cameraDetail)) {
@@ -678,8 +679,9 @@ namespace engine::render {
 						entry->second.Detail = cameraDetail;
 						entry->second.Terminal = true;
 					}
-				return;
+				return false;
 			}
+			namedCameraApplied = pending.front().Request.CameraId != "current_view";
 		}
 		{
 			std::lock_guard lock(Mutex);
@@ -955,6 +957,7 @@ namespace engine::render {
 			}
 			if (cancelArmed) RendererRef.Hooks().Cancel(armed.Mutation);
 		}
+		return namedCameraApplied;
 	}
 
 	void ScriptDataCaptureBridge::Pump() {
