@@ -2177,6 +2177,65 @@ namespace engine::render {
 		return true;
 	}
 
+	std::optional<Renderer::RenderGraphSnapshot>
+	Renderer::DescribePipeline(core::Name name, uint32_t viewWidth, uint32_t viewHeight) const {
+		RequireOwningThread("DescribePipeline");
+		if (State == nullptr || !name.IsValid() || viewWidth == 0 || viewHeight == 0 || viewWidth > 16384 ||
+			viewHeight > 16384) {
+			return std::nullopt;
+		}
+		const auto boundedName = [](core::Name value, bool required) {
+			return (!required || value.IsValid()) &&
+				   (!value.IsValid() || (!value.Text().empty() && value.Text().size() <= 128));
+		};
+		const Impl::NamedPipeline *installed = nullptr;
+		for (const Impl::NamedPipeline &candidate : State->NamedPipelines) {
+			if (candidate.Name == name) {
+				installed = &candidate;
+				break;
+			}
+		}
+		if (installed == nullptr && State->EngineDefault && State->EngineDefault->Name == name) {
+			installed = &*State->EngineDefault;
+		}
+		if (installed == nullptr || !boundedName(installed->Name, true) || installed->Graph.Count() > 256 ||
+			installed->Graph.ResourceCount() > 512) {
+			return std::nullopt;
+		}
+		for (uint32_t value = 1; value <= installed->Graph.Count(); ++value) {
+			const graph::Node *node = installed->Graph.Find(graph::NodeId{value});
+			if (node == nullptr || !boundedName(node->Name, true) || !boundedName(node->Kind, true)) {
+				return std::nullopt;
+			}
+			for (const core::Name port : node->ReadPorts) {
+				if (!boundedName(port, false)) {
+					return std::nullopt;
+				}
+			}
+			for (const core::Name port : node->WritePorts) {
+				if (!boundedName(port, false)) {
+					return std::nullopt;
+				}
+			}
+		}
+		for (uint32_t value = 1; value <= installed->Graph.ResourceCount(); ++value) {
+			const graph::ResourceDesc *resource = installed->Graph.FindResource(graph::ResourceId{value});
+			if (resource == nullptr || !boundedName(resource->Name, true) ||
+				!boundedName(resource->Owner, false)) {
+				return std::nullopt;
+			}
+		}
+		return RenderGraphSnapshot{
+			.Pipeline = installed->Name,
+			.Revision = installed->Revision,
+			.Graph = installed->Graph,
+			.Compiled = installed->Compiled,
+			.Schedule = installed->Schedule,
+			.Aliases = installed->Aliases,
+			.Profile = graph::ProfilePipeline(installed->Graph, installed->Compiled, viewWidth, viewHeight),
+		};
+	}
+
 	bool Renderer::InstallNodeHandler(core::Name kind, NodeHandler handler, NodeHandlerLifecycle lifecycle) {
 		RequireOwningThread("InstallNodeHandler");
 		const graph::NodeKindSpec *spec = graph::NodeCatalogue::Find(kind);

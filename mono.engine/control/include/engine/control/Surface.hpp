@@ -85,6 +85,8 @@ namespace engine::control {
 		std::string Detail;
 	};
 
+	using RenderGraphProvider = std::function<nlohmann::json(const nlohmann::json &, std::string &)>;
+
 	// Something a client may read without calling a tool.
 	//
 	// **The difference from a tool is who decides to fetch it.** A tool is an
@@ -187,6 +189,8 @@ namespace engine::control {
 		// No provider means this surface has no capture host.
 		void SetDataCaptureAvailabilityProvider(std::function<DataCaptureAvailability()> provider);
 		DataCaptureAvailability CaptureAvailability() const;
+		void SetRenderGraphProvider(RenderGraphProvider provider);
+		const RenderGraphProvider &RenderGraph() const;
 
 		// Installs the tools any program with worlds can answer.
 		//
@@ -388,6 +392,7 @@ namespace engine::control {
 		std::string Purpose;
 		std::vector<Tool> Tools;
 		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
+		RenderGraphProvider RenderGraphProviderCallback;
 		std::vector<Resource> Resources;
 		std::vector<Prompt> Prompts;
 		bool Profiling = false;

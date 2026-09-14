@@ -4389,6 +4389,11 @@ namespace studio {
 		// mouse is.
 		std::vector<engine::gui::Router> GuiRouters;
 
+		// The world each viewport router was last allowed to address. A router
+		// remembers a press across frames, so moving a panel to another world must
+		// discard that gesture before matching entity ids can target the new UI.
+		std::vector<WorldId> GuiRouterWorlds;
+
 		// A click in a viewport, waiting to be turned into a selection.
 		//
 		// A `Pending*` like every other action a panel offers, for the reason

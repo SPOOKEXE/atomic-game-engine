@@ -60,6 +60,7 @@
 #include <cstddef>
 #include <fstream>
 #include <network/SessionKey.hpp>
+#include <nlohmann/json.hpp>
 #include <thread>
 #include <type_traits>
 
@@ -310,6 +311,206 @@ namespace client {
 				return DataFactory ? DataFactory->Inspect(instanceId) : engine::world::DataFactoryReply{};
 			});
 			DataCapture = std::make_shared<engine::render::ScriptDataCaptureBridge>(*DataFactory, Renderer);
+			ControlSurface.SetRenderGraphProvider([this](
+													  const nlohmann::json &arguments, std::string &failure
+												  ) {
+				const std::string instance = arguments.at("instance_id").get<std::string>();
+				const auto current = DataFactory->Inspect(instance);
+				if (current.Status != engine::world::DataFactoryStatus::Ok) {
+					failure = "unavailable: " + current.Detail;
+					return nlohmann::json(nullptr);
+				}
+				if (current.WorldEpoch != arguments.at("expected_world_epoch").get<uint64_t>() ||
+					current.WorldVersion != arguments.at("expected_world_version").get<uint64_t>()) {
+					failure = "version_conflict: world revision changed";
+					return nlohmann::json(nullptr);
+				}
+				const uint64_t viewWidth = arguments.at("view_width").get<uint64_t>();
+				const uint64_t viewHeight = arguments.at("view_height").get<uint64_t>();
+				if (viewWidth == 0 || viewHeight == 0 || viewWidth > 16384 || viewHeight > 16384) {
+					failure = "validation_failed: view dimensions are outside the bounded view size";
+					return nlohmann::json(nullptr);
+				}
+				const auto graph = Renderer.DescribePipeline(
+					engine::core::Name(arguments.at("pipeline").get<std::string>()),
+					static_cast<uint32_t>(viewWidth),
+					static_cast<uint32_t>(viewHeight)
+				);
+				if (!graph) {
+					failure = "unavailable: pipeline is not installed";
+					return nlohmann::json(nullptr);
+				}
+				const auto resourceName = [&](engine::graph::ResourceId id) -> nlohmann::json {
+					const auto *resource = graph->Graph.FindResource(id);
+					return resource == nullptr ? nlohmann::json(nullptr)
+											   : nlohmann::json(resource->Name.Text());
+				};
+				const auto bindings = [&](const std::vector<engine::graph::ResourceId> &resources,
+										  const std::vector<engine::core::Name> &ports) {
+					nlohmann::json values = nlohmann::json::array();
+					for (size_t index = 0; index < resources.size(); ++index) {
+						values.push_back(
+							{{"resource", resourceName(resources[index])},
+							 {"port",
+							  index < ports.size() && ports[index].IsValid()
+								  ? nlohmann::json(ports[index].Text())
+								  : nlohmann::json(nullptr)}}
+						);
+					}
+					return values;
+				};
+				const auto profileFor =
+					[&](engine::graph::ResourceId id) -> const engine::graph::ProfileResource * {
+					const auto found = std::find_if(
+						graph->Profile.Resources.begin(),
+						graph->Profile.Resources.end(),
+						[id](const auto &row) { return row.Id == id; }
+					);
+					return found == graph->Profile.Resources.end() ? nullptr : &*found;
+				};
+				nlohmann::json nodes = nlohmann::json::array();
+				for (uint32_t value = 1; value <= graph->Graph.Count(); ++value) {
+					const auto *node = graph->Graph.Find(engine::graph::NodeId{value});
+					if (node != nullptr) {
+						std::vector<std::string> dependencies;
+						const auto current = std::find_if(
+							graph->Profile.Passes.begin(),
+							graph->Profile.Passes.end(),
+							[value](const auto &pass) { return pass.Node.Value == value; }
+						);
+						if (current != graph->Profile.Passes.end()) {
+							for (const engine::graph::ResourceId read : node->Reads) {
+								const engine::graph::Node *producer = nullptr;
+								for (auto pass = graph->Profile.Passes.begin(); pass != current; ++pass) {
+									const auto *candidate = graph->Graph.Find(pass->Node);
+									if (candidate != nullptr &&
+										std::find(candidate->Writes.begin(), candidate->Writes.end(), read) !=
+											candidate->Writes.end()) {
+										producer = candidate;
+									}
+								}
+								if (producer != nullptr &&
+									std::find(
+										dependencies.begin(), dependencies.end(), producer->Name.Text()
+									) == dependencies.end()) {
+									dependencies.emplace_back(producer->Name.Text());
+								}
+							}
+						}
+						nodes.push_back(
+							{{"name", node->Name.Text()},
+							 {"kind", node->Kind.Text()},
+							 {"scope", engine::graph::Describe(node->Scope)},
+							 {"enabled", node->Enabled},
+							 {"reads", bindings(node->Reads, node->ReadPorts)},
+							 {"writes", bindings(node->Writes, node->WritePorts)},
+							 {"depends_on", dependencies}}
+						);
+					}
+				}
+				nlohmann::json resources = nlohmann::json::array();
+				for (uint32_t value = 1; value <= graph->Graph.ResourceCount(); ++value) {
+					const engine::graph::ResourceId id{value};
+					const auto *resource = graph->Graph.FindResource(id);
+					const auto *profile = profileFor(id);
+					if (resource != nullptr && profile != nullptr) {
+						const engine::graph::ResourceId allocation = graph->Aliases.AllocationOf(id);
+						const char *lifetime = engine::graph::Describe(resource->Lifetime);
+						resources.push_back(
+							{{"name", resource->Name.Text()},
+							 {"kind", engine::graph::Describe(resource->Kind)},
+							 {"format", engine::graph::Describe(resource->Format)},
+							 {"external", resource->External},
+							 {"width", profile->Width},
+							 {"height", profile->Height},
+							 {"logical_bytes", profile->Bytes},
+							 {"declared_width", resource->Width},
+							 {"declared_height", resource->Height},
+							 {"divisor", resource->Divisor},
+							 {"access", engine::graph::Describe(resource->Access)},
+							 {"samples", resource->Samples},
+							 {"depth", resource->Depth},
+							 {"layers", resource->Layers},
+							 {"first_mip", resource->FirstMip},
+							 {"mip_count", resource->MipCount},
+							 {"colour_space", engine::graph::Describe(resource->ColourSpace)},
+							 {"alpha_space", engine::graph::Describe(resource->AlphaSpace)},
+							 {"buffer_stride", resource->BufferStride},
+							 {"lifetime",
+							  std::string_view(lifetime) == "?" ? nlohmann::json(nullptr)
+																: nlohmann::json(lifetime)},
+							 {"owner",
+							  resource->Owner.IsValid() ? nlohmann::json(resource->Owner.Text())
+														: nlohmann::json(nullptr)},
+							 {"history_generation", resource->HistoryGeneration},
+							 {"first_write",
+							  profile->FirstWrite == engine::graph::ProfileResource::NEVER
+								  ? nlohmann::json(nullptr)
+								  : nlohmann::json(profile->FirstWrite)},
+							 {"last_read",
+							  profile->LastRead == engine::graph::ProfileResource::NEVER
+								  ? nlohmann::json(nullptr)
+								  : nlohmann::json(profile->LastRead)},
+							 {"alias_owner",
+							  allocation.IsValid() ? resourceName(allocation) : nlohmann::json(nullptr)}}
+						);
+					}
+				}
+				nlohmann::json compiled = nlohmann::json::array();
+				for (size_t index = 0; index < graph->Profile.Passes.size(); ++index) {
+					const auto &pass = graph->Profile.Passes[index];
+					compiled.push_back(
+						{{"index", index},
+						 {"name", pass.Name.Text()},
+						 {"kind", pass.Kind.Text()},
+						 {"band", engine::graph::Describe(pass.Where)}}
+					);
+				}
+				nlohmann::json waves = nlohmann::json::array();
+				for (const auto &wave : graph->Schedule.Waves) {
+					nlohmann::json entries = nlohmann::json::array();
+					for (const auto &scheduled : wave.Nodes) {
+						const auto *node = graph->Graph.Find(scheduled.Node);
+						if (node != nullptr)
+							entries.push_back(
+								{{"node", node->Name.Text()},
+								 {"queue", engine::graph::Describe(scheduled.Queue)},
+								 {"async_eligible", scheduled.AsyncEligible},
+								 {"dispatch", {scheduled.GroupsX, scheduled.GroupsY, scheduled.GroupsZ}}}
+							);
+					}
+					waves.push_back({{"concurrent", wave.Concurrent}, {"nodes", std::move(entries)}});
+				}
+				return nlohmann::json{
+					{"schema", "render_graph/v1"},
+					{"status", "ok"},
+					{"instance_id", instance},
+					{"world_epoch", current.WorldEpoch},
+					{"world_version", current.WorldVersion},
+					{"lifecycle",
+					 {{"tick", current.Clock.Tick},
+					  {"time_ns", current.Clock.TimeNanoseconds},
+					  {"rational_time_available", current.Clock.RationalTimeAvailable}}},
+					{"pipeline", graph->Pipeline.Text()},
+					{"pipeline_revision", graph->Revision},
+					{"provenance", "installed_graph_static_description"},
+					{"dimensions",
+					 {{"width", arguments.at("view_width")}, {"height", arguments.at("view_height")}}},
+					{"nodes", std::move(nodes)},
+					{"resources", std::move(resources)},
+					{"compiled_passes", std::move(compiled)},
+					{"schedule", std::move(waves)},
+					{"budget_estimates",
+					 {{"total_logical_bytes", graph->Profile.TotalBytes},
+					  {"allocated_logical_bytes", graph->Profile.AllocatedBytes},
+					  {"peak_live_bytes", graph->Profile.PeakBytes}}},
+					{"unavailable",
+					 {{"actual_timings", "not measured by the installed graph"},
+					  {"driver_residency", "logical bytes do not report driver heap residency"},
+					  {"physical_overlap", "async eligibility does not prove device overlap"},
+					  {"historical_snapshot_identity", "the graph carries no captured snapshot identity"}}}
+				};
+			});
 			DataLifecycle = std::make_shared<engine::script::QueuedDataLifecycleBridge>(*DataFactory);
 			DataFactory->SetPauseParticipant([this](
 												 engine::world::WorldId world,
@@ -780,6 +981,7 @@ namespace client {
 				engine::control::features::Resources(),
 				engine::control::features::Prompts(),
 				engine::control::features::Discovery(),
+				engine::control::features::RenderGraph(),
 			};
 			ControlSurface.Enable(features);
 			if (DataFactory) {

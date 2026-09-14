@@ -25,6 +25,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -555,6 +556,120 @@ TEST_CASE("discovery accepts its exact requested-channel bounds", "[control][dis
 	const json result = Called(surface, "negotiate", json{{"requested_channels", channels}});
 	CHECK(result["requested_channels"].size() == 64);
 	CHECK(result["requested_channels"].front()["name"] == channels.front());
+}
+
+TEST_CASE(
+	"render graph tool validates bounded requests and delegates normalized dimensions",
+	"[control][render-graph]"
+) {
+	Surface surface("test", "a suite");
+	surface.SetRenderGraphProvider([](const json &arguments, std::string &failure) {
+		CHECK(arguments["pipeline"] == "default_pbr");
+		CHECK(arguments["view_width"].get<uint32_t>() == 1280);
+		CHECK(arguments["view_height"].get<uint32_t>() == 720);
+		failure.clear();
+		return json{
+			{"schema", "render_graph/v1"},
+			{"status", "ok"},
+			{"nodes", json::array()},
+			{"resources", json::array()}
+		};
+	});
+	surface.Enable(std::array{engine::control::features::RenderGraph()});
+	const json result = Called(
+		surface,
+		"get_render_graph",
+		json{
+			{"instance_id", "world"},
+			{"pipeline", "default_pbr"},
+			{"view_width", 1280},
+			{"view_height", 720},
+			{"expected_world_epoch", 1},
+			{"expected_world_version", 2}
+		}
+	);
+	CHECK(result["schema"] == "render_graph/v1");
+	CHECK(result["status"] == "ok");
+	bool failed = false;
+	(void)Called(
+		surface,
+		"get_render_graph",
+		json{
+			{"instance_id", "world"},
+			{"pipeline", "default_pbr"},
+			{"view_width", 16385},
+			{"view_height", 720},
+			{"expected_world_epoch", 1},
+			{"expected_world_version", 2}
+		},
+		failed
+	);
+	CHECK(failed);
+	for (const char *field : {"instance_id", "pipeline"}) {
+		json invalid{
+			{"instance_id", "world"},
+			{"pipeline", "default_pbr"},
+			{"view_width", 1280},
+			{"view_height", 720},
+			{"expected_world_epoch", 1},
+			{"expected_world_version", 2}
+		};
+		invalid[field] = "";
+		(void)Called(surface, "get_render_graph", invalid, failed);
+		CHECK(failed);
+	}
+	(void)Called(
+		surface,
+		"get_render_graph",
+		json{
+			{"instance_id", "world"},
+			{"pipeline", "default_pbr"},
+			{"view_width", std::numeric_limits<uint64_t>::max()},
+			{"view_height", 720},
+			{"expected_world_epoch", 1},
+			{"expected_world_version", 2}
+		},
+		failed
+	);
+	CHECK(failed);
+}
+
+TEST_CASE("render graph feature is absent without a provider", "[control][render-graph]") {
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::RenderGraph()});
+	const json listed = Ask(surface, "tools/list");
+	REQUIRE(listed.contains("result"));
+	for (const json &tool : listed["result"]["tools"]) {
+		CHECK(tool["name"] != "get_render_graph");
+	}
+}
+
+TEST_CASE("render graph tool refuses provider graph bounds", "[control][render-graph]") {
+	Surface surface("test", "a suite");
+	surface.SetRenderGraphProvider([](const json &, std::string &failure) {
+		failure.clear();
+		json nodes = json::array();
+		for (size_t index = 0; index <= engine::control::features::MAXIMUM_GRAPH_NODES; ++index) {
+			nodes.push_back(json::object());
+		}
+		return json{{"nodes", std::move(nodes)}, {"resources", json::array()}};
+	});
+	surface.Enable(std::array{engine::control::features::RenderGraph()});
+	bool failed = false;
+	(void)Called(
+		surface,
+		"get_render_graph",
+		json{
+			{"instance_id", "world"},
+			{"pipeline", "default_pbr"},
+			{"view_width", 1},
+			{"view_height", 1},
+			{"expected_world_epoch", 0},
+			{"expected_world_version", 0}
+		},
+		failed
+	);
+	CHECK(failed);
 }
 
 // --- the storage underneath ----------------------------------------------------

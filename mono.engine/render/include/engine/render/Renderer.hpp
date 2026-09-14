@@ -13,7 +13,9 @@
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Schedule.hpp>
 #include <engine/render/Capabilities.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Flipbook.hpp>
@@ -1300,6 +1302,16 @@ namespace engine::render {
 	// @client
 	class Renderer {
 	  public:
+		// A bounded, device-free description of one installed render graph.
+		struct RenderGraphSnapshot {
+			core::Name Pipeline;
+			uint64_t Revision = 0;
+			graph::RenderGraph Graph;
+			graph::CompiledGraph Compiled;
+			graph::ExecutionSchedule Schedule;
+			graph::ResourceAliasPlan Aliases;
+			graph::PipelineProfile Profile;
+		};
 		// Creates an uninitialised renderer with no GPU resources.
 		Renderer();
 
@@ -1585,6 +1597,11 @@ namespace engine::render {
 
 		// Every installed graph key, sorted by text.
 		std::vector<core::Name> Pipelines() const;
+
+		// Copies an installed graph, its compiled schedule, and its device-free
+		// dimensioned profile for a read-only host diagnostic.
+		std::optional<RenderGraphSnapshot>
+		DescribePipeline(core::Name name, uint32_t viewWidth, uint32_t viewHeight) const;
 
 		// Removes every named graph.
 		void ResetPipelines();

@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <thread>
@@ -96,6 +97,40 @@ TEST_CASE("the default PBR graph compiles into the graph backend", "[render][gra
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("Default PBR#1"), DefaultGraph()));
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
+}
+
+TEST_CASE("render graph snapshots require an exact installed name", "[render][graph][diagnostic]") {
+	Renderer renderer;
+	CHECK_FALSE(renderer.DescribePipeline(Name("not-installed"), 640, 480));
+	CHECK_FALSE(renderer.DescribePipeline(Name("Engine Default"), 0, 480));
+
+	const auto snapshot = renderer.DescribePipeline(Name("Engine Default"), 640, 480);
+	REQUIRE(snapshot);
+	CHECK(snapshot->Pipeline == Name("Engine Default"));
+	CHECK_FALSE(snapshot->Profile.Passes.empty());
+	CHECK(snapshot->Aliases.Allocations.size() == snapshot->Graph.ResourceCount());
+
+	for (const engine::graph::ProfilePass &pass : snapshot->Profile.Passes) {
+		const auto *node = snapshot->Graph.Find(pass.Node);
+		REQUIRE(node != nullptr);
+		CHECK(pass.Name == node->Name);
+		CHECK(pass.Kind == node->Kind);
+	}
+	for (uint32_t value = 1; value <= snapshot->Graph.ResourceCount(); ++value) {
+		const engine::graph::ResourceId resource{value};
+		const auto allocation = snapshot->Aliases.AllocationOf(resource);
+		if (allocation.IsValid()) {
+			CHECK(snapshot->Graph.FindResource(allocation) != nullptr);
+		}
+	}
+
+	bool hasHistory = false;
+	for (uint32_t value = 1; value <= snapshot->Graph.ResourceCount(); ++value) {
+		const auto *resource = snapshot->Graph.FindResource(engine::graph::ResourceId{value});
+		hasHistory = hasHistory ||
+					 (resource != nullptr && resource->Lifetime == engine::graph::ResourceLifetime::History);
+	}
+	CHECK(hasHistory);
 }
 
 TEST_CASE("hard render demo graphs install compute handlers", "[render][graph][hard-render]") {

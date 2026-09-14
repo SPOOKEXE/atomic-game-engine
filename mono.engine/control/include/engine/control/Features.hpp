@@ -10,10 +10,15 @@
 // @tier shared
 
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/RenderGraph.hpp>
 
 #include <utility>
 
 namespace engine::control::features {
+
+	inline Feature RenderGraph() {
+		return Feature{"render_graph", [](Surface &surface) { RenderGraph(surface); }};
+	}
 
 	// The checked module graph and layer rules.
 	inline Feature Architecture() {

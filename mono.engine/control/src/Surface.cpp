@@ -92,6 +92,14 @@ namespace engine::control {
 		return CaptureAvailabilityProvider();
 	}
 
+	void Surface::SetRenderGraphProvider(RenderGraphProvider provider) {
+		RenderGraphProviderCallback = std::move(provider);
+	}
+
+	const RenderGraphProvider &Surface::RenderGraph() const {
+		return RenderGraphProviderCallback;
+	}
+
 	void Surface::AddResource(Resource resource) {
 		for (Resource &existing : Resources) {
 			if (existing.Uri == resource.Uri) {
