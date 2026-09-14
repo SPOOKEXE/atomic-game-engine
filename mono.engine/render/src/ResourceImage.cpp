@@ -446,6 +446,7 @@ namespace engine::render {
 
 	void Renderer::Impl::RecordResourceImages(
 		SDL_GPUCommandBuffer *command,
+		const RenderObservationContext &observation,
 		core::Name pipeline,
 		core::Name node,
 		size_t viewSlot,
@@ -497,6 +498,7 @@ namespace engine::render {
 				continue;
 			}
 			slot.Image.CaptureFrame = FrameCounter;
+			slot.Image.Observation = observation;
 			slot.Image.SnapshotId = ActiveDataCaptureSource.SnapshotId;
 			const glm::mat4 camera = ActiveDataCaptureSource.CameraFrame.ToMatrix();
 			for (size_t column = 0; column < 4; ++column)

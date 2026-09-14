@@ -2493,7 +2493,9 @@ namespace engine::render {
 			for (size_t member = 0; member < group.Views.size(); member++, position++) {
 				const size_t viewIndex = group.Views[member];
 				const View &view = views[viewIndex];
-				State->ActiveDataCaptureSource = {view.SnapshotId, view.CameraFrame, view.Camera};
+				State->ActiveDataCaptureSource = {
+					view.SnapshotId, view.WorldName, view.CameraFrame, view.Camera
+				};
 				SetLighting(view.OverrideLighting ? view.Lighting : previousLighting);
 
 				State->BatchFirst = position == 0;

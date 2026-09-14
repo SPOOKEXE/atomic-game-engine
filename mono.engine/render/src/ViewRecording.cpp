@@ -59,6 +59,42 @@ namespace engine::render {
 		}
 	}
 
+	RenderObservationContext ViewRecording::DataCaptureObservation(
+		const graph::RunContext &context, core::Name pipeline, size_t viewSlot
+	) const {
+		RenderObservationContext observation;
+		observation.Pipeline = pipeline;
+		observation.Node = context.Name;
+		observation.WorldName = State->ActiveDataCaptureSource.WorldName;
+		observation.ViewSlot = viewSlot;
+		observation.SnapshotId = State->ActiveDataCaptureSource.SnapshotId;
+		observation.Frame = State->FrameCounter;
+		const glm::mat4 camera = State->ActiveDataCaptureSource.CameraFrame.ToMatrix();
+		for (size_t column = 0; column < 4; ++column)
+			for (size_t row = 0; row < 4; ++row)
+				observation.Camera.WorldFromCamera[column * 4 + row] = camera[column][row];
+		observation.Camera.ProjectionAvailable = State->ActiveDataCaptureSource.ProjectionAvailable;
+		observation.Camera.Projection = State->ActiveDataCaptureSource.Projection;
+		observation.Camera.FieldOfViewRadians = State->ActiveDataCaptureSource.Camera.FieldOfViewRadians;
+		observation.Camera.NearPlane = State->ActiveDataCaptureSource.Camera.NearPlane;
+		observation.Camera.FarPlane = State->ActiveDataCaptureSource.Camera.FarPlane;
+		observation.Camera.Width = State->ActiveDataCaptureSource.Width;
+		observation.Camera.Height = State->ActiveDataCaptureSource.Height;
+		const auto nameOf = [this](graph::ResourceId resource) {
+			const graph::ResourceDesc *desc = Pipeline->Graph.FindResource(resource);
+			return desc != nullptr ? desc->Name : core::Name{};
+		};
+		for (graph::ResourceId resource : context.Reads) {
+			if (observation.ReadCount == observation.ReadResources.size()) break;
+			observation.ReadResources[observation.ReadCount++] = nameOf(resource);
+		}
+		for (graph::ResourceId resource : context.Writes) {
+			if (observation.WriteCount == observation.WriteResources.size()) break;
+			observation.WriteResources[observation.WriteCount++] = nameOf(resource);
+		}
+		return observation;
+	}
+
 	ViewStart ViewRecording::Begin(const ViewRequest &request) {
 		ENGINE_PROFILE_CAT("ViewRecording::Begin", core::ProfileCategory::Render);
 

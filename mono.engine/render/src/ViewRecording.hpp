@@ -388,6 +388,11 @@ namespace engine::render {
 		// @return Always `true`; a CPU node cannot fail the frame here.
 		bool FinishCpuNode(const graph::RunContext &context);
 
+		// Copies the exact graph and camera identity visible at a data-capture
+		// node. The result may outlive this recording in an asynchronous readback.
+		RenderObservationContext
+		DataCaptureObservation(const graph::RunContext &context, core::Name pipeline, size_t viewSlot) const;
+
 		// Records the frame's dynamic deltas, once. Every node that draws
 		// instances, ribbons or the overlay calls it first.
 		//

@@ -2,6 +2,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/core/types/AABB.hpp>
+#include <engine/render/RenderObservation.hpp>
 
 #include <array>
 #include <cstddef>
@@ -73,6 +74,9 @@ namespace engine::render {
 
 	struct ResourceImage {
 		ResourceImageRequest Request;
+		// Present for the built-in data-capture observation hook. The value is
+		// copied before GPU work is submitted and survives asynchronous completion.
+		std::optional<RenderObservationContext> Observation;
 		core::Name Resource;
 		ResourceImageStatus Status = ResourceImageStatus::Failed;
 		ResourceImageKind Kind = ResourceImageKind::Colour;

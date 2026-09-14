@@ -530,6 +530,7 @@ namespace engine::render {
 				}
 				State->RecordResourceImages(
 					recording.Command,
+					recording.DataCaptureObservation(context, selectedPipeline->Name, slot),
 					selectedPipeline->Name,
 					context.Name,
 					slot,

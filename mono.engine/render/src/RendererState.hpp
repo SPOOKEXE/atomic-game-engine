@@ -1745,6 +1745,7 @@ namespace engine::render {
 		uint64_t NextResourceImageToken = 1;
 		struct DataCaptureSource {
 			std::string SnapshotId;
+			core::Name WorldName;
 			core::CFrame CameraFrame;
 			scene::Camera Camera;
 			bool ProjectionAvailable = false;
@@ -1766,6 +1767,7 @@ namespace engine::render {
 		);
 		void RecordResourceImages(
 			SDL_GPUCommandBuffer *command,
+			const RenderObservationContext &observation,
 			core::Name pipeline,
 			core::Name node,
 			size_t slot,

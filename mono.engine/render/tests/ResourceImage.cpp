@@ -1151,16 +1151,52 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	const core::Name captureNode("data-capture");
 	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
 
-	const render::ResourceImageRequest request{1, pipelineName, captureNode, 0};
-	REQUIRE(renderer.RequestResourceImage(request));
 	render::SceneTarget target{33, 25};
 	render::View view;
 	view.Pipeline = pipelineName;
 	view.Target = &target;
+	view.WorldName = core::Name("fixture/world-a");
+	view.SnapshotId = "render-observation-snapshot";
+	view.CameraFrame.Position = {3, 4, 5};
+	const glm::mat4 expectedCamera = view.CameraFrame.ToMatrix();
+	const render::ResourceImageRequest request{
+		.Token = 1,
+		.Pipeline = pipelineName,
+		.Node = captureNode,
+		.ViewSlot = 0,
+		.ExpectedSnapshotId = view.SnapshotId,
+	};
+	REQUIRE(renderer.RequestResourceImage(request));
 	render::OverlayImage overlay;
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
+	// The graph has submitted. Mutating this caller-owned View must not change
+	// the observation that the asynchronous readback later returns.
+	view.WorldName = core::Name("fixture/world-b");
+	view.SnapshotId = "later-snapshot";
+	view.CameraFrame.Position = {9, 8, 7};
 	const auto image = AwaitImage(renderer, request.Token);
 	CHECK(image.Status == render::ResourceImageStatus::Ok);
+	REQUIRE(image.Observation);
+	const auto &observation = *image.Observation;
+	CHECK(render::RenderObservationHookName(observation.Hook) == "data_capture");
+	CHECK(observation.Pipeline == pipelineName);
+	CHECK(observation.Node == captureNode);
+	CHECK(observation.WorldName == core::Name("fixture/world-a"));
+	CHECK(observation.ViewSlot == 0);
+	CHECK(observation.SnapshotId == "render-observation-snapshot");
+	CHECK(observation.Frame == image.CaptureFrame);
+	CHECK(observation.Camera.Width == target.Width);
+	CHECK(observation.Camera.Height == target.Height);
+	for (size_t column = 0; column < 4; ++column)
+		for (size_t row = 0; row < 4; ++row)
+			CHECK(observation.Camera.WorldFromCamera[column * 4 + row] == expectedCamera[column][row]);
+	CHECK(observation.ReadCount == 3);
+	CHECK(observation.ReadCount <= render::MAX_RENDER_OBSERVATION_RESOURCES);
+	CHECK(observation.ReadResources[0] == core::Name("lit"));
+	CHECK(observation.ReadResources[1] == core::Name("linear-depth"));
+	CHECK(observation.ReadResources[2] == core::Name("normal"));
+	CHECK(observation.WriteCount == 0);
+	CHECK(observation.WriteCount <= render::MAX_RENDER_OBSERVATION_RESOURCES);
 	CHECK(image.Width == target.Width);
 	CHECK(image.Height == target.Height);
 	CHECK(image.DepthResource == core::Name("linear-depth"));
