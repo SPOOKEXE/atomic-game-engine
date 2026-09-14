@@ -2627,6 +2627,9 @@ declare interface DataSceneService {
 	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
 	GetCaptureChannels(): Record<string, unknown>;
 	Capture(request: unknown): Record<string, unknown>;
+	SubmitViewCameraMutation(request: unknown): Record<string, unknown>;
+	CancelViewCameraMutation(ticket: string): Record<string, unknown>;
+	PollViewCameraMutation(ticket: string): Record<string, unknown>;
 	CreateOptions(): DataSceneOptions;
 	CaptureBundle(snapshotId: string, options: DataSceneOptions): Record<string, unknown>;
 	PollCapture(ticket: string): Record<string, unknown>;

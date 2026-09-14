@@ -275,12 +275,27 @@ namespace {
 			return true;
 		}
 		void Cancel(std::string_view, uint64_t) override {}
+		bool QueueViewCameraMutation(
+			std::string_view instance,
+			const engine::script::ViewCameraMutationRequest &request,
+			uint64_t &ticket,
+			std::string &
+		) override {
+			MutationQueued = instance == request.InstanceId;
+			ticket = 2;
+			return MutationQueued;
+		}
+		void CancelViewCameraMutation(std::string_view, uint64_t ticket) override {
+			MutationCancelled = ticket == 2;
+		}
 		const std::vector<std::string> &RequestedChannels() const {
 			return Channels;
 		}
 		void UseUnavailableAmbientOcclusion() {
 			UnavailableAmbientOcclusion = true;
 		}
+		bool MutationQueued = false;
+		bool MutationCancelled = false;
 
 	  private:
 		std::string Instance;
@@ -403,6 +418,20 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	Surface surface("test", "a suite");
 	surface.Enable(std::array{engine::control::features::DataCapture(session, bridge)});
 	const auto current = session.Inspect("capture-world");
+	const json mutation = Called(
+		surface,
+		"submit_view_camera_mutation",
+		json{{"instance_id", "capture-world"},
+			 {"snapshot_id", "snapshot-1"},
+			 {"pipeline", "default_pbr"},
+			 {"pipeline_revision", 1},
+			 {"view_slot", 0},
+			 {"camera", {{"field_of_view_radians", 0.9}, {"near_plane", 0.2}, {"far_plane", 200.0}}}}
+	);
+	CHECK(mutation["status"] == "queued");
+	CHECK(bridge->MutationQueued);
+	CHECK(Called(surface, "cancel_view_camera_mutation", json{{"instance_id", "capture-world"}, {"ticket", 2}})["status"] == "cancellation_requested");
+	CHECK(bridge->MutationCancelled);
 	const json capture = Called(
 		surface,
 		"capture",

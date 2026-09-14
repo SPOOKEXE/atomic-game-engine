@@ -1,9 +1,9 @@
 # Render hooks
 
-This document defines the render observation hook system. It gives the data
-factory one place to declare, connect, run, and collect render observations
-without creating a second render graph or allowing arbitrary callbacks in the
-renderer.
+This document defines the render hook system. It gives the data factory one
+place to declare, connect, run, collect observations, and submit bounded
+typed mutations without creating a second render graph or allowing arbitrary
+callbacks in the renderer.
 
 The first hook is data capture. The system is deliberately small so a second
 real consumer can prove which parts should be shared before more hook kinds are
@@ -11,11 +11,10 @@ added.
 
 ## Purpose
 
-`DataFactoryHookBind` owns the binding between named observation hooks and the
-static seams in the existing render graph. A host registers the hooks it can
-provide, connects the hooks needed for a session, and polls completed immutable
-records. The render graph invokes connected hooks when their declared node
-runs.
+`DataFactoryHookBind` owns the binding between named hooks and static render
+seams. Observation hooks keep their asynchronous immutable-record contract.
+The built-in `view.camera` hook accepts a bounded owned one-shot patch before a
+matching view begins recording.
 
 The flow is:
 
@@ -61,7 +60,10 @@ leaving GPU copy and fence work in `render`.
 
 - Do not build a callback graph beside the render graph.
 - Do not call user code, Lua, MCP, or a file system from a render thread.
-- Do not let a hook mutate scene, graph, pipeline, resource, or camera state.
+- Do not let a hook mutate scene, graph, pipeline, or resource state.
+- Do not let a hook invoke external code. `view.camera` is a typed owned value
+  patch consumed synchronously by the renderer, never a callback or mutable
+  `View` reference.
 - Do not expose SDL GPU objects in a hook context or saved record.
 - Do not make a hook wait for a GPU fence or for another CPU thread.
 - Do not make physics or replication hooks until the render hook has two real
@@ -208,9 +210,17 @@ If the node is skipped, the hook is not called. If a declared resource is not
 available, the hook records `Unsupported` according to its typed contract. It
 does not invent a value from a previous frame.
 
-Render changes are made through CPU-owned scene or graph state before
-submission. A hook can observe those changes after the normal delta is staged,
-but it cannot apply a change itself.
+Render changes normally arrive through CPU-owned scene or graph state before
+submission. The narrow exception is `view.camera`: its identity contains the
+exact world name, snapshot id, pipeline name and installed revision, and view
+slot. It can replace optional `View::CameraFrame`, `View::Camera`, and
+`View::Projection` only. The binder validates the complete patch before it
+claims capacity, rejects a second pending patch for that identity, and the
+renderer copies only the matching caller view on its stack. It consumes the
+patch before setting `ActiveDataCaptureSource` and before `RenderView`, forces
+scene and viewport camera invalidation, and leaves the caller's `View`
+unchanged. Cancellation, consumption, shutdown, and stale pipeline replacement
+invalidate the generation handle.
 
 ## Readback and atomic bundles
 
@@ -314,10 +324,12 @@ readback tokens.
 ## Capability discovery and saving
 
 Capability discovery enumerates the live registry as owned records with stable
-hook names, schema versions, supported channels, node kinds, in-flight limits,
-readback-node limits, retained-byte limits, pending-pump limits, and required
-flags. The Luau, MCP, and client adapters read this description. They do not
-reach into binder state or receive renderer pointers.
+hook names, schema versions, access, kind, supported channels, node kinds,
+mutated fields, in-flight limits, readback-node limits, retained-byte limits,
+pending-pump limits, and required flags. `view.camera` reports
+`synchronous_mutation`, empty channels, and `camera_frame`, `camera`, and
+`projection` fields. The Luau, MCP, and client adapters read this description.
+They do not reach into binder state or receive renderer pointers.
 
 The binder returns owned records and bytes. The external data factory saves
 payloads first, computes or verifies hashes, and commits the manifest last.
@@ -347,6 +359,15 @@ is in a command buffer. `ready` means
 all required readbacks are complete and validated. `collected` transfers the
 bundle to the caller. `failed` and `disconnected` release all pending resources,
 and their old handles cannot be reused.
+
+`view.camera` has a separate one-shot lifecycle: `pending` is owned by the
+bridge until the renderer owner validates its snapshot barrier and exact
+installed pipeline revision, then arms the typed patch. Consumption becomes
+`applied-awaiting-restore`; the next matching submission renders the original
+view with camera damage forced. Only a successful submission acknowledges
+`applied`. Cancellation after consumption waits for that restoration and then
+reports `cancelled`. Bridge polling reads cached terminal status and releases
+the ticket only after the owner has reclaimed its binder handle.
 
 ## Rollout
 

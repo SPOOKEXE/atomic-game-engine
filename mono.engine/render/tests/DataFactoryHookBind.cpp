@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <limits>
 
 namespace engine::render {
 	namespace {
@@ -49,6 +50,42 @@ namespace engine::render {
 				.SemanticLabels = {},
 				.PartLabels = {}
 			};
+		}
+		RenderHookSpec CameraSpec() {
+			return {
+				.Name = core::Name("view.camera"),
+				.Kind = RenderHookKind::ViewMutation,
+				.Access = RenderHookAccess::SynchronousMutation,
+				.NodeKind = core::Name("view"),
+				.SchemaVersion = 1,
+				.Required = true,
+				.Channels = {},
+				.ChannelCount = 0,
+				.MutatedFields = {
+					RenderHookMutatedField::CameraFrame,
+					RenderHookMutatedField::Camera,
+					RenderHookMutatedField::Projection,
+				},
+				.MutatedFieldCount = 3,
+			};
+		}
+		ViewMutationIdentity MutationIdentity(const HookConnectionRequest &connection) {
+			return {
+				.WorldName = connection.Session.WorldName,
+				.SnapshotId = "snapshot",
+				.Pipeline = connection.Pipeline,
+				.PipelineRevision = connection.PipelineRevision,
+				.ViewSlot = connection.ViewSlot,
+			};
+		}
+		View ViewFor(const ViewMutationIdentity &identity) {
+			View view;
+			view.WorldName = core::Name(identity.WorldName);
+			view.SnapshotId = identity.SnapshotId;
+			view.Pipeline = identity.Pipeline;
+			view.Slot = identity.ViewSlot;
+			view.CameraFrame = core::CFrame(core::Vector3{1.0f, 2.0f, 3.0f});
+			return view;
 		}
 	}
 
@@ -198,5 +235,98 @@ namespace engine::render {
 		context.PipelineRevision = connectionRequest.PipelineRevision;
 		context.ViewSlot = 0;
 		CHECK(bind.CallHooks(connected.Connection, *batch, context).Status == HookBindStatus::Invalid);
+	}
+
+	TEST_CASE("DataFactoryHookBind applies an owned camera patch to only the matching view", "[render]") {
+		Renderer renderer;
+		DataFactoryHookBind bind(renderer);
+		const HookConnectionRequest connection = Connection(renderer);
+		const HookHandle hook = bind.RegisterHook(CameraSpec());
+		REQUIRE(hook.IsValid());
+		const ViewMutationIdentity identity = MutationIdentity(connection);
+		const core::CFrame replacement(core::Vector3{9.0f, 8.0f, 7.0f});
+		const scene::Camera camera{.FieldOfViewRadians = 0.9f, .NearPlane = 0.2f, .FarPlane = 200.0f};
+		const ArmViewMutationResult armed = bind.ArmViewMutation(
+			hook, {.Identity = identity, .CameraFrame = replacement, .Camera = camera, .Projection = glm::mat4(1.0f)}
+		);
+		REQUIRE(armed.Status == HookBindStatus::Ok);
+		View caller = ViewFor(identity);
+		View prepared = caller;
+		REQUIRE(bind.ConsumeViewMutation(identity, prepared));
+		CHECK(caller.CameraFrame.Position == core::Vector3{1.0f, 2.0f, 3.0f});
+		CHECK(prepared.CameraFrame.Position == replacement.Position);
+		CHECK(prepared.Camera.FieldOfViewRadians == camera.FieldOfViewRadians);
+		CHECK(prepared.Projection == glm::mat4(1.0f));
+		CHECK(prepared.Damage.Scene);
+		CHECK(prepared.Damage.Viewport);
+		CHECK_FALSE(bind.HasViewMutation(identity));
+	}
+
+	TEST_CASE("Renderer discovers view.camera as a synchronous mutation hook", "[render]") {
+		Renderer renderer;
+		const auto hooks = renderer.Hooks().DescribeHooks();
+		const auto found = std::find_if(hooks.begin(), hooks.end(), [](const RenderHookCapability &hook) {
+			return hook.Name == core::Name("view.camera");
+		});
+		REQUIRE(found != hooks.end());
+		CHECK(found->Kind == RenderHookKind::ViewMutation);
+		CHECK(found->Access == RenderHookAccess::SynchronousMutation);
+		CHECK(found->ChannelCount == 0);
+		REQUIRE(found->MutatedFieldCount == 3);
+		CHECK(found->MutatedFields[0] == RenderHookMutatedField::CameraFrame);
+		CHECK(found->MutatedFields[1] == RenderHookMutatedField::Camera);
+		CHECK(found->MutatedFields[2] == RenderHookMutatedField::Projection);
+	}
+
+	TEST_CASE("DataFactoryHookBind validates and isolates camera patches atomically", "[render]") {
+		Renderer renderer;
+		DataFactoryHookBind bind(renderer);
+		const HookConnectionRequest connection = Connection(renderer);
+		const HookHandle hook = bind.RegisterHook(CameraSpec());
+		const ViewMutationIdentity identity = MutationIdentity(connection);
+		ViewCameraPatch invalid{.Identity = identity, .CameraFrame = core::CFrame{}};
+		invalid.CameraFrame->QuaternionW = std::numeric_limits<float>::quiet_NaN();
+		CHECK(bind.ArmViewMutation(hook, invalid).Status == HookBindStatus::Invalid);
+		const ArmViewMutationResult first = bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}});
+		REQUIRE(first.Status == HookBindStatus::Ok);
+		CHECK(bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}}).Status == HookBindStatus::Conflict);
+		ViewMutationIdentity otherSnapshot = identity;
+		otherSnapshot.SnapshotId = "other";
+		CHECK(bind.ArmViewMutation(hook, {.Identity = otherSnapshot, .Camera = scene::Camera{}}).Status == HookBindStatus::Ok);
+		ViewMutationIdentity otherView = identity;
+		otherView.ViewSlot = 1;
+		CHECK(bind.ArmViewMutation(hook, {.Identity = otherView, .Camera = scene::Camera{}}).Status == HookBindStatus::Ok);
+		bind.Cancel(first.Mutation);
+		CHECK_FALSE(bind.HasViewMutation(identity));
+		CHECK(bind.PollViewMutation(first.Mutation).Status == ViewMutationStatus::Cancelled);
+		bind.ReleaseViewMutation(first.Mutation);
+		const ArmViewMutationResult reused = bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}});
+		REQUIRE(reused.Status == HookBindStatus::Ok);
+		CHECK(reused.Mutation.Generation != first.Mutation.Generation);
+	}
+
+	TEST_CASE("DataFactoryHookBind reclaims applied camera patches after pipeline replacement", "[render]") {
+		Renderer renderer;
+		DataFactoryHookBind bind(renderer);
+		const HookConnectionRequest connection = Connection(renderer);
+		const HookHandle hook = bind.RegisterHook(CameraSpec());
+		const ViewMutationIdentity identity = MutationIdentity(connection);
+		const ArmViewMutationResult armed = bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}});
+		REQUIRE(armed.Status == HookBindStatus::Ok);
+		View applied = ViewFor(identity);
+		REQUIRE(bind.ConsumeViewMutation(identity, applied));
+		CHECK(bind.PollViewMutation(armed.Mutation).Status == ViewMutationStatus::AppliedAwaitingRestore);
+		graph::RenderGraph replacement;
+		core::Name offender;
+		REQUIRE(graph::Build(graph::DefaultPbrDataCaptureDocument(), replacement, offender) == graph::PipelineDocumentStatus::Ok);
+		REQUIRE(renderer.SetPipeline(connection.Pipeline, replacement));
+		bind.Pump();
+		CHECK(bind.PollViewMutation(armed.Mutation).Status == ViewMutationStatus::Stale);
+		bind.ReleaseViewMutation(armed.Mutation);
+		const auto current = renderer.ResolvePipelineIdentity(connection.Pipeline);
+		REQUIRE(current);
+		ViewMutationIdentity next = identity;
+		next.PipelineRevision = current->Revision;
+		CHECK(bind.ArmViewMutation(hook, {.Identity = next, .Camera = scene::Camera{}}).Status == HookBindStatus::Ok);
 	}
 }

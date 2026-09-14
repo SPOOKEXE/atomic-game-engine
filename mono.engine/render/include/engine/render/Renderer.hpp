@@ -1313,6 +1313,12 @@ namespace engine::render {
 			graph::ResourceAliasPlan Aliases;
 			graph::PipelineProfile Profile;
 		};
+		// The installed identity used by render-owned one-shot work. Invalid and
+		// missing view names resolve through the same fallback as Render.
+		struct PipelineIdentity {
+			core::Name Name;
+			uint64_t Revision = 0;
+		};
 		// Creates an uninitialised renderer with no GPU resources.
 		Renderer();
 
@@ -1603,6 +1609,8 @@ namespace engine::render {
 		// dimensioned profile for a read-only host diagnostic.
 		std::optional<RenderGraphSnapshot>
 		DescribePipeline(core::Name name, uint32_t viewWidth, uint32_t viewHeight) const;
+
+		std::optional<PipelineIdentity> ResolvePipelineIdentity(core::Name requested) const;
 
 		// Removes every named graph.
 		void ResetPipelines();

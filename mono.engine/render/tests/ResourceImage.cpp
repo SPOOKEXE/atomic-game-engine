@@ -4375,7 +4375,13 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(session.Snapshot("script-capture-world", snapshot).Status == world::DataFactoryStatus::Ok);
 
 	render::ScriptDataCaptureBridge bridge(session, renderer);
-	REQUIRE(renderer.Hooks().DescribeHooks().size() == render::MAX_DATA_FACTORY_READBACK_NODES);
+	const auto hookCapabilities = renderer.Hooks().DescribeHooks();
+	const size_t observationHookCount = static_cast<size_t>(std::count_if(
+		hookCapabilities.begin(),
+		hookCapabilities.end(),
+		[](const auto &hook) { return hook.Kind == render::RenderHookKind::DataCapture; }
+	));
+	REQUIRE(observationHookCount == render::MAX_DATA_FACTORY_READBACK_NODES);
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",
 		.SnapshotId = snapshot,

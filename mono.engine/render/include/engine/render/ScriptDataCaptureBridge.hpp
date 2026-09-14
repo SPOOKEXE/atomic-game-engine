@@ -1,6 +1,7 @@
 #pragma once
 
 #include <engine/render/DataCapture.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -32,6 +33,11 @@ namespace engine::render {
 		) override;
 		bool Release(std::string_view, uint64_t, std::string &) override;
 		void Cancel(std::string_view, uint64_t) override;
+		bool QueueViewCameraMutation(
+			std::string_view, const script::ViewCameraMutationRequest &, uint64_t &, std::string &
+		) override;
+		void CancelViewCameraMutation(std::string_view, uint64_t) override;
+		bool PollViewCameraMutation(std::string_view, uint64_t, script::ViewCameraMutationPoll &, std::string &) override;
 		// Releases every terminal payload and cancels every renderer ticket for one world.
 		bool TeardownInstance(std::string_view instanceId, std::string &detail);
 		void PrepareView(View &view);
@@ -58,6 +64,14 @@ namespace engine::render {
 		mutable std::mutex Mutex;
 		uint64_t NextTicket = 1;
 		std::unordered_map<uint64_t, Entry> Entries;
+		struct MutationEntry {
+			script::ViewCameraMutationRequest Request;
+			MutationHandle Handle;
+			ViewMutationStatus Status = ViewMutationStatus::Pending;
+			std::string Detail;
+			bool CancelRequested = false;
+		};
+		std::unordered_map<uint64_t, MutationEntry> Mutations;
 		size_t RetainedBytes = 0;
 		bool CaptureAvailable = false;
 		std::vector<script::DataCaptureBridgeHookCapability> HookCapabilities;

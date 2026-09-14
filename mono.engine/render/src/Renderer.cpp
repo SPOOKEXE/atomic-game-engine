@@ -2489,12 +2489,36 @@ namespace engine::render {
 		State->BatchHeight = height;
 		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
 
+		std::vector<ViewMutationIdentity> restorations;
 		size_t position = 0;
 		for (size_t groupIndex = 0; groupIndex < groups.size() && !State->BatchFailed; groupIndex++) {
 			const FrameViewGroup &group = groups[groupIndex];
 			for (size_t member = 0; member < group.Views.size(); member++, position++) {
 				const size_t viewIndex = group.Views[member];
-				const View &view = views[viewIndex];
+				const View &source = views[viewIndex];
+				const auto pipelineIdentity = ResolvePipelineIdentity(source.Pipeline);
+				const ViewMutationIdentity identity{
+					.WorldName = std::string(source.WorldName.Text()),
+					.SnapshotId = source.SnapshotId,
+					.Pipeline = pipelineIdentity ? pipelineIdentity->Name : core::Name{},
+					.PipelineRevision = pipelineIdentity ? pipelineIdentity->Revision : 0,
+					.ViewSlot = source.Slot,
+				};
+				const View *active = &source;
+				View mutated;
+				if (HookBind->HasViewMutation(identity)) {
+					mutated = source;
+					if (HookBind->ConsumeViewMutation(identity, mutated)) active = &mutated;
+				} else if (HookBind->HasViewMutationRestore(identity)) {
+					mutated = source;
+					mutated.Damage.Scene = true;
+					mutated.Damage.Viewport = true;
+					mutated.Damage.Environment = true;
+					mutated.Damage.Portals = true;
+					active = &mutated;
+					restorations.push_back(identity);
+				}
+				const View &view = *active;
 				State->ActiveDataCaptureSource = {
 					view.SnapshotId, view.WorldName, view.CameraFrame, view.Camera
 				};
@@ -2532,6 +2556,9 @@ namespace engine::render {
 				}
 			}
 		}
+		if (frame.Submitted && !State->BatchFailed)
+			for (const ViewMutationIdentity &identity : restorations)
+				HookBind->CompleteViewMutationRestore(identity);
 
 		std::vector<const Impl::NamedPipeline *> plannedPipelines;
 		plannedPipelines.reserve(groups.size());

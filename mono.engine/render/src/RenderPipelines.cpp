@@ -2260,6 +2260,14 @@ namespace engine::render {
 		};
 	}
 
+	std::optional<Renderer::PipelineIdentity> Renderer::ResolvePipelineIdentity(core::Name requested) const {
+		RequireOwningThread("ResolvePipelineIdentity");
+		if (State == nullptr) return std::nullopt;
+		const Impl::NamedPipeline *installed = State->PipelineFor(requested);
+		if (installed == nullptr || !installed->Name.IsValid() || installed->Revision == 0) return std::nullopt;
+		return PipelineIdentity{.Name = installed->Name, .Revision = installed->Revision};
+	}
+
 	bool Renderer::HasPipelineRevision(core::Name name, uint64_t revision) const {
 		RequireOwningThread("HasPipelineRevision");
 		if (State == nullptr || !name.IsValid() || revision == 0) return false;
@@ -2378,6 +2386,7 @@ namespace engine::render {
 		  Owner(std::this_thread::get_id()) {
 		(void)InstallEngineDefault(graph::DefaultPbrDocument());
 		HookBind->RegisterBuiltInDataCaptureHooks();
+		HookBind->RegisterBuiltInViewMutationHooks();
 	}
 
 	Renderer::~Renderer() {

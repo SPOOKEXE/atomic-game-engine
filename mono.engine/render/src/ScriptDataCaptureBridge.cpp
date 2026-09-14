@@ -91,6 +91,22 @@ namespace engine::render {
 			}
 			return "invalid";
 		}
+		const char *MutationStatusText(ViewMutationStatus status) {
+			switch (status) {
+		case ViewMutationStatus::Pending:
+		case ViewMutationStatus::AppliedAwaitingRestore:
+			return "pending";
+			case ViewMutationStatus::Applied:
+				return "applied";
+			case ViewMutationStatus::Cancelled:
+				return "cancelled";
+			case ViewMutationStatus::Stale:
+				return "stale";
+			case ViewMutationStatus::Invalid:
+				return "invalid";
+			}
+			return "invalid";
+		}
 
 		const char *Scalar(DataCaptureScalar scalar) {
 			switch (scalar) {
@@ -207,10 +223,22 @@ namespace engine::render {
 	}
 
 	ScriptDataCaptureBridge::~ScriptDataCaptureBridge() {
-		if (!Hooks) return;
 		std::vector<ConnectionHandle> connections;
-		for (const auto &[id, connection] : Hooks->Connections) connections.push_back(connection);
+		std::vector<MutationHandle> mutations;
+		{
+			std::lock_guard lock(Mutex);
+			if (Hooks)
+				for (const auto &[id, connection] : Hooks->Connections) connections.push_back(connection);
+			for (const auto &[ticket, entry] : Mutations) {
+				(void)ticket;
+				if (entry.Handle.IsValid()) mutations.push_back(entry.Handle);
+			}
+			Mutations.clear();
+		}
 		RendererRef.Hooks().DisconnectHooks(connections);
+		for (MutationHandle mutation : mutations) {
+			RendererRef.Hooks().DiscardViewMutation(mutation);
+		}
 	}
 
 	script::DataCaptureBridgeCapabilities ScriptDataCaptureBridge::Capabilities() const {
@@ -246,15 +274,29 @@ namespace engine::render {
 		const bool available = RendererRef.Backend().Device != nullptr;
 		std::vector<script::DataCaptureBridgeHookCapability> hooks;
 		for (const RenderHookCapability &hook : RendererRef.Hooks().DescribeHooks()) {
-			if (hook.Kind != RenderHookKind::DataCapture) continue;
 			script::DataCaptureBridgeHookCapability record;
 			record.Name = hook.Name.Text();
 			record.SchemaVersion = hook.SchemaVersion;
 			record.NodeKind = hook.NodeKind.Text();
 			record.Required = hook.Required;
+			record.Access = hook.Access == RenderHookAccess::SynchronousMutation ? "synchronous_mutation"
+																								 : "observation";
 			record.Channels.reserve(hook.ChannelCount);
 			for (size_t index = 0; index < hook.ChannelCount; ++index)
 				record.Channels.emplace_back(DataCaptureChannelName(hook.Channels[index]));
+			for (size_t index = 0; index < hook.MutatedFieldCount; ++index) {
+				switch (hook.MutatedFields[index]) {
+				case RenderHookMutatedField::CameraFrame:
+					record.MutatedFields.emplace_back("camera_frame");
+					break;
+				case RenderHookMutatedField::Camera:
+					record.MutatedFields.emplace_back("camera");
+					break;
+				case RenderHookMutatedField::Projection:
+					record.MutatedFields.emplace_back("projection");
+					break;
+				}
+			}
 			hooks.push_back(std::move(record));
 		}
 		std::lock_guard lock(Mutex);
@@ -283,6 +325,74 @@ namespace engine::render {
 		}
 		ticket = NextTicket++;
 		Entries.emplace(ticket, Entry{.Request = request, .Reply = {}, .PlaneBytes = {}, .Detail = {}});
+		detail.clear();
+		return true;
+	}
+
+	bool ScriptDataCaptureBridge::QueueViewCameraMutation(
+		std::string_view instanceId,
+		const script::ViewCameraMutationRequest &request,
+		uint64_t &ticket,
+		std::string &detail
+	) {
+		if (!Text(instanceId) || request.InstanceId != instanceId || !Text(request.SnapshotId) ||
+			!Text(request.Pipeline) || request.PipelineRevision == 0 ||
+			(!request.CameraFrame && !request.Lens && !request.Projection)) {
+			detail = "invalid view.camera patch";
+			return false;
+		}
+		std::lock_guard lock(Mutex);
+		if (Mutations.size() >= MAX_DATA_FACTORY_BATCHES) {
+			detail = "view.camera capacity reached";
+			return false;
+		}
+		if (NextTicket == 0) {
+			detail = "view.camera ticket space exhausted";
+			return false;
+		}
+		for (const auto &[existingTicket, existing] : Mutations) {
+			(void)existingTicket;
+			const auto &identity = existing.Request;
+			if (!existing.CancelRequested && identity.InstanceId == request.InstanceId &&
+				identity.SnapshotId == request.SnapshotId && identity.Pipeline == request.Pipeline &&
+				identity.PipelineRevision == request.PipelineRevision && identity.ViewSlot == request.ViewSlot) {
+				detail = "view.camera patch already pending for this identity";
+				return false;
+			}
+		}
+		ticket = NextTicket++;
+		Mutations.emplace(
+			ticket,
+			MutationEntry{
+				.Request = request, .Handle = {}, .Status = ViewMutationStatus::Pending, .Detail = {},
+				.CancelRequested = false
+			}
+		);
+		detail = "queued";
+		return true;
+	}
+
+	void ScriptDataCaptureBridge::CancelViewCameraMutation(std::string_view instanceId, uint64_t ticket) {
+		std::lock_guard lock(Mutex);
+		if (const auto entry = Mutations.find(ticket);
+			entry != Mutations.end() && entry->second.Request.InstanceId == instanceId)
+			entry->second.CancelRequested = true;
+	}
+
+	bool ScriptDataCaptureBridge::PollViewCameraMutation(
+		std::string_view instanceId, uint64_t ticket, script::ViewCameraMutationPoll &poll, std::string &detail
+	) {
+		std::lock_guard lock(Mutex);
+		const auto entry = Mutations.find(ticket);
+		if (entry == Mutations.end() || entry->second.Request.InstanceId != instanceId) {
+			detail = "unknown view.camera ticket";
+			return false;
+		}
+		poll.Status = MutationStatusText(entry->second.Status);
+		poll.Terminal = entry->second.Status != ViewMutationStatus::Pending &&
+			entry->second.Status != ViewMutationStatus::AppliedAwaitingRestore && !entry->second.Handle.IsValid();
+		poll.Detail = entry->second.Detail;
+		if (poll.Terminal) Mutations.erase(entry);
 		detail.clear();
 		return true;
 	}
@@ -374,6 +484,7 @@ namespace engine::render {
 			return false;
 		}
 		std::vector<ConnectionHandle> connections;
+		std::vector<MutationHandle> mutations;
 		{
 			std::lock_guard lock(Mutex);
 			for (auto entry = Entries.begin(); entry != Entries.end();) {
@@ -392,8 +503,19 @@ namespace engine::render {
 					RetainedBytes -= bytes.size();
 				entry = Entries.erase(entry);
 			}
+			for (auto entry = Mutations.begin(); entry != Mutations.end();) {
+				if (entry->second.Request.InstanceId != instanceId) {
+					++entry;
+					continue;
+				}
+				if (entry->second.Handle.IsValid()) mutations.push_back(entry->second.Handle);
+				entry = Mutations.erase(entry);
+			}
 		}
 		RendererRef.Hooks().DisconnectHooks(connections);
+		for (MutationHandle mutation : mutations) {
+			RendererRef.Hooks().DiscardViewMutation(mutation);
+		}
 		detail.clear();
 		return true;
 	}
@@ -401,7 +523,12 @@ namespace engine::render {
 	void ScriptDataCaptureBridge::PrepareView(View &view) {
 		RefreshCapabilities();
 		if (!Hooks) Hooks = std::make_unique<HookState>();
+		const auto pipeline = RendererRef.ResolvePipelineIdentity(view.Pipeline);
+		if (!pipeline) return;
 		std::vector<PendingRequest> pending;
+		std::vector<std::pair<uint64_t, std::string>> mutationSnapshots;
+		std::vector<std::pair<uint64_t, MutationHandle>> armedPendingMutations;
+		std::string selectedSnapshot = view.SnapshotId;
 		{
 			std::lock_guard lock(Mutex);
 			for (auto &[id, entry] : Entries) {
@@ -416,14 +543,61 @@ namespace engine::render {
 					return left.Id < right.Id;
 				}
 			);
-			const std::string selectedSnapshot =
-				view.SnapshotId.empty() ? (pending.empty() ? "" : pending.front().Request.SnapshotId)
-										: view.SnapshotId;
+			for (const auto &[ticket, entry] : Mutations) {
+				const auto &request = entry.Request;
+				if (request.InstanceId == view.WorldName.Text() && request.Pipeline == pipeline->Name.Text() &&
+					request.ViewSlot == view.Slot &&
+						((entry.Status == ViewMutationStatus::Pending && !entry.CancelRequested) ||
+					 entry.Status == ViewMutationStatus::AppliedAwaitingRestore))
+					mutationSnapshots.emplace_back(ticket, request.SnapshotId);
+			}
+			std::sort(mutationSnapshots.begin(), mutationSnapshots.end());
+			if (selectedSnapshot.empty()) {
+				const bool captureFirst = !pending.empty() &&
+					(mutationSnapshots.empty() || pending.front().Id < mutationSnapshots.front().first);
+				if (captureFirst) selectedSnapshot = pending.front().Request.SnapshotId;
+				else if (!mutationSnapshots.empty()) selectedSnapshot = mutationSnapshots.front().second;
+			}
 			std::erase_if(pending, [&](const PendingRequest &request) {
 				return request.Request.SnapshotId != selectedSnapshot;
 			});
+			for (const auto &[ticket, entry] : Mutations) {
+				const auto &request = entry.Request;
+				if (entry.Status == ViewMutationStatus::Pending && entry.Handle.IsValid() && !entry.CancelRequested &&
+					request.InstanceId == view.WorldName.Text() && request.Pipeline == pipeline->Name.Text() &&
+					request.ViewSlot == view.Slot && request.SnapshotId == selectedSnapshot)
+					armedPendingMutations.emplace_back(ticket, entry.Handle);
+			}
+		}
+		bool armedSnapshotCurrent = true;
+		for (const auto &[ticket, handle] : armedPendingMutations) {
+			const world::DataFactoryReply barrier = Session.RenderSnapshotBarrier(view.WorldName.Text(), selectedSnapshot);
+			if (barrier.Status == world::DataFactoryStatus::Ok) continue;
+			RendererRef.Hooks().Cancel(handle);
+			RendererRef.Hooks().ReleaseViewMutation(handle);
+			std::lock_guard lock(Mutex);
+			if (auto entry = Mutations.find(ticket);
+				entry != Mutations.end() && entry->second.Handle.Slot == handle.Slot &&
+				entry->second.Handle.Generation == handle.Generation) {
+				entry->second.Handle = {};
+				if (entry->second.CancelRequested) {
+					entry->second.Status = ViewMutationStatus::Cancelled;
+					entry->second.Detail.clear();
+				} else {
+					entry->second.Status = ViewMutationStatus::Stale;
+					entry->second.Detail = barrier.Detail;
+				}
+			}
+			armedSnapshotCurrent = false;
+		}
+		if (!armedSnapshotCurrent) return;
+		if (!selectedSnapshot.empty()) view.SnapshotId = selectedSnapshot;
+		{
+			std::lock_guard lock(Mutex);
 			for (const PendingRequest &request : pending)
-				Entries.find(request.Id)->second.Preparing = true;
+				if (auto entry = Entries.find(request.Id);
+					entry != Entries.end() && !entry->second.CancelRequested && !entry->second.Terminal)
+					entry->second.Preparing = true;
 		}
 
 		for (const PendingRequest &pendingRequest : pending) {
@@ -562,11 +736,93 @@ namespace engine::render {
 					RendererRef.Hooks().DisconnectHooks(std::array{connection.Connection});
 			}
 		}
+
+		std::vector<std::pair<uint64_t, script::ViewCameraMutationRequest>> mutations;
+		std::vector<MutationHandle> cancelledMutations;
+		{
+			std::lock_guard lock(Mutex);
+			for (auto &[ticket, entry] : Mutations) {
+				(void)ticket;
+				if (entry.CancelRequested) continue;
+				const auto &request = entry.Request;
+				if (entry.Status == ViewMutationStatus::Pending && !entry.Handle.IsValid() &&
+					request.InstanceId == view.WorldName.Text() &&
+					request.Pipeline == pipeline->Name.Text() && request.ViewSlot == view.Slot &&
+					request.SnapshotId == view.SnapshotId)
+					mutations.emplace_back(ticket, request);
+			}
+		}
+		std::sort(mutations.begin(), mutations.end(), [](const auto &left, const auto &right) {
+			return left.first < right.first;
+		});
+		for (MutationHandle handle : cancelledMutations)
+			RendererRef.Hooks().Cancel(handle);
+		for (const auto &[ticket, request] : mutations) {
+			const auto current = RendererRef.ResolvePipelineIdentity(core::Name(request.Pipeline));
+			const world::DataFactoryReply barrier = Session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
+			if (!current || current->Name.Text() != request.Pipeline || current->Revision != request.PipelineRevision ||
+				barrier.Status != world::DataFactoryStatus::Ok) {
+				std::lock_guard lock(Mutex);
+				if (auto entry = Mutations.find(ticket); entry != Mutations.end() && !entry->second.CancelRequested) {
+					entry->second.Status = ViewMutationStatus::Stale;
+					entry->second.Detail = current ? barrier.Detail : "render pipeline revision changed";
+				}
+				continue;
+			}
+			ViewCameraPatch patch;
+			patch.Identity = {
+				.WorldName = std::string(view.WorldName.Text()),
+				.SnapshotId = view.SnapshotId,
+				.Pipeline = core::Name(request.Pipeline),
+				.PipelineRevision = request.PipelineRevision,
+				.ViewSlot = view.Slot,
+			};
+			if (request.CameraFrame) {
+				const auto &frame = *request.CameraFrame;
+				patch.CameraFrame = core::CFrame(
+					core::Vector3{frame[0], frame[1], frame[2]}, glm::quat(frame[6], frame[3], frame[4], frame[5])
+				);
+			}
+			if (request.Lens) {
+				const auto &lens = *request.Lens;
+				patch.Camera = view.Camera;
+				patch.Camera->FieldOfViewRadians = lens.FieldOfViewRadians;
+				patch.Camera->NearPlane = lens.NearPlane;
+				patch.Camera->FarPlane = lens.FarPlane;
+			}
+			if (request.Projection) {
+				glm::mat4 projection;
+				for (size_t column = 0; column < 4; ++column)
+					for (size_t row = 0; row < 4; ++row)
+						projection[column][row] = (*request.Projection)[column * 4 + row];
+				patch.Projection = projection;
+			}
+			const HookHandle hook = RendererRef.Hooks().FindHook(core::Name("view.camera"));
+			const ArmViewMutationResult armed = RendererRef.Hooks().ArmViewMutation(hook, std::move(patch));
+			bool cancelArmed = false;
+			{
+			std::lock_guard lock(Mutex);
+			if (const auto entry = Mutations.find(ticket); entry != Mutations.end()) {
+				if (entry->second.CancelRequested) {
+					entry->second.Handle = armed.Mutation;
+					cancelArmed = armed.Mutation.IsValid();
+				} else if (armed.Status == HookBindStatus::Ok) {
+					entry->second.Handle = armed.Mutation;
+				} else {
+					entry->second.Status = armed.Status == HookBindStatus::Stale ? ViewMutationStatus::Stale
+																						 : ViewMutationStatus::Invalid;
+					entry->second.Detail = "renderer refused view.camera patch";
+				}
+			}
+			}
+			if (cancelArmed) RendererRef.Hooks().Cancel(armed.Mutation);
+		}
 	}
 
 	void ScriptDataCaptureBridge::Pump() {
 		RefreshCapabilities();
 		std::vector<ConnectionHandle> cancelled;
+		std::vector<MutationHandle> cancelledMutations;
 		{
 			std::lock_guard lock(Mutex);
 			for (auto &[id, entry] : Entries) {
@@ -584,10 +840,49 @@ namespace engine::render {
 				entry.Terminal = true;
 				entry.Preparing = false;
 			}
+			for (auto &[ticket, entry] : Mutations) {
+				(void)ticket;
+				if (!entry.CancelRequested) continue;
+				if (entry.Handle.IsValid())
+					cancelledMutations.push_back(entry.Handle);
+				else if (entry.Status == ViewMutationStatus::Pending) {
+					entry.Status = ViewMutationStatus::Cancelled;
+					entry.Detail.clear();
+				}
+			}
 		}
 		if (Hooks) RendererRef.Hooks().DisconnectHooks(cancelled);
-		if (!Hooks) return;
+		for (MutationHandle handle : cancelledMutations) RendererRef.Hooks().Cancel(handle);
 		RendererRef.Hooks().Pump();
+		std::vector<std::pair<uint64_t, MutationHandle>> mutationPolling;
+		{
+			std::lock_guard lock(Mutex);
+			for (const auto &[ticket, entry] : Mutations)
+				if (entry.Handle.IsValid())
+					mutationPolling.emplace_back(ticket, entry.Handle);
+		}
+		for (const auto &[ticket, handle] : mutationPolling) {
+			const ViewMutationPoll state = RendererRef.Hooks().PollViewMutation(handle);
+			if (state.Status == ViewMutationStatus::Pending || state.Status == ViewMutationStatus::AppliedAwaitingRestore) {
+				std::lock_guard lock(Mutex);
+				if (auto entry = Mutations.find(ticket);
+					entry != Mutations.end() && entry->second.Handle.Slot == handle.Slot &&
+					entry->second.Handle.Generation == handle.Generation) {
+					entry->second.Status = state.Status;
+				}
+				continue;
+			}
+			RendererRef.Hooks().ReleaseViewMutation(handle);
+			std::lock_guard lock(Mutex);
+			if (auto entry = Mutations.find(ticket);
+				entry != Mutations.end() && entry->second.Handle.Slot == handle.Slot &&
+				entry->second.Handle.Generation == handle.Generation) {
+				entry->second.Status = state.Status;
+				entry->second.Handle = {};
+				if (state.Status != ViewMutationStatus::Applied) entry->second.Detail = "renderer did not apply view.camera patch";
+			}
+		}
+		if (!Hooks) return;
 
 		std::vector<std::pair<uint64_t, BatchHandle>> polling;
 		std::vector<ConnectionHandle> completedConnections;
@@ -731,8 +1026,12 @@ namespace engine::render {
 
 	bool ScriptDataCaptureBridge::HasPending() const {
 		std::lock_guard lock(Mutex);
-		return std::any_of(Entries.begin(), Entries.end(), [](const auto &entry) {
+		const bool captures = std::any_of(Entries.begin(), Entries.end(), [](const auto &entry) {
 			return !entry.second.Terminal;
+		});
+		return captures || std::any_of(Mutations.begin(), Mutations.end(), [](const auto &entry) {
+			return entry.second.Status == ViewMutationStatus::Pending ||
+				entry.second.Status == ViewMutationStatus::AppliedAwaitingRestore;
 		});
 	}
 }

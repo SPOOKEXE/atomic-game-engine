@@ -1,10 +1,12 @@
 #include "CaptureRecordValidation.hpp"
+#include "RenderFixture.hpp"
 #include "SecondSurfaceDepth.hpp"
 
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -346,6 +348,309 @@ namespace {
 			.TemporalHistory = "preserve",
 		};
 	}
+	engine::script::ViewCameraMutationRequest MutationRequest(
+		std::string_view instanceId = "data-world",
+		std::string_view pipeline = "pipeline",
+		uint64_t revision = 1,
+		std::string_view snapshot = "snapshot-1",
+		size_t slot = 0
+	) {
+		engine::script::ViewCameraMutationRequest request;
+		request.InstanceId = instanceId;
+		request.SnapshotId = snapshot;
+		request.Pipeline = pipeline;
+		request.PipelineRevision = revision;
+		request.ViewSlot = slot;
+		request.Lens = engine::script::ViewCameraMutationRequest::Camera{
+			.FieldOfViewRadians = 0.9f, .NearPlane = 0.2f, .FarPlane = 100.0f,
+			.MaxImageWidth = 0, .MaxImageHeight = 0, .ImageWidth = 0, .ImageHeight = 0
+		};
+		return request;
+	}
+
+	std::string PauseAndSnapshot(engine::world::Universe &worlds, engine::world::DataFactorySession &session) {
+		const auto world = worlds.Create({.Name = engine::core::Name("data-world")});
+		session.SetPauseParticipant(
+			[world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
+				return candidate == world;
+			}
+		);
+		REQUIRE(
+			session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+			engine::world::DataFactoryStatus::Ok
+		);
+		std::string snapshot;
+		REQUIRE(session.Snapshot("data-world", snapshot).Status == engine::world::DataFactoryStatus::Ok);
+		return snapshot;
+	}
+
+	engine::render::ViewMutationIdentity MutationIdentity(
+		std::string_view snapshot, engine::core::Name pipeline, uint64_t revision, size_t slot = 0
+	) {
+		return {
+			.WorldName = "data-world",
+			.SnapshotId = std::string(snapshot),
+			.Pipeline = pipeline,
+			.PipelineRevision = revision,
+			.ViewSlot = slot,
+		};
+	}
+
+	engine::render::View MutationView(std::string_view snapshot, engine::core::Name pipeline, size_t slot = 0) {
+		engine::render::View view;
+		view.WorldName = engine::core::Name("data-world");
+		view.SnapshotId = snapshot;
+		view.Pipeline = pipeline;
+		view.Slot = slot;
+		return view;
+	}
+}
+
+TEST_CASE("script view.camera lifecycle is owner-pumped and reclaimable", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	for (size_t index = 0; index < MAX_DATA_FACTORY_BATCHES; ++index) {
+		uint64_t ticket = 0;
+		REQUIRE(bridge.QueueViewCameraMutation("data-world", MutationRequest(), ticket, detail));
+		CHECK(bridge.HasPending());
+		bridge.CancelViewCameraMutation("data-world", ticket);
+		bridge.Pump();
+		engine::script::ViewCameraMutationPoll poll;
+		REQUIRE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
+		CHECK(poll.Terminal);
+		CHECK(poll.Status == "cancelled");
+		CHECK_FALSE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
+	}
+}
+
+TEST_CASE("script view.camera validates a queued snapshot on its owner", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	const engine::core::Name pipeline("mutation-owner-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto installed = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(installed);
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t ticket = 0;
+	REQUIRE(bridge.QueueViewCameraMutation("missing-world", MutationRequest("missing-world", pipeline.Text(), installed->Revision), ticket, detail));
+	View view;
+	view.WorldName = engine::core::Name("missing-world");
+	view.Pipeline = pipeline;
+	bridge.PrepareView(view);
+	bridge.Pump();
+	engine::script::ViewCameraMutationPoll poll;
+	REQUIRE(bridge.PollViewCameraMutation("missing-world", ticket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "stale");
+}
+
+TEST_CASE("script view.camera rejects an armed patch after its snapshot becomes stale", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const std::string snapshot = PauseAndSnapshot(worlds, session);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("mutation-armed-stale-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto installed = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(installed);
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t ticket = 0;
+	REQUIRE(
+		bridge.QueueViewCameraMutation(
+			"data-world", MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot), ticket, detail
+		)
+	);
+	View armed = MutationView(snapshot, pipeline);
+	bridge.PrepareView(armed);
+	REQUIRE(session.Resume("data-world", 0).Status == engine::world::DataFactoryStatus::Ok);
+	View fresh;
+	fresh.WorldName = engine::core::Name("data-world");
+	fresh.Pipeline = pipeline;
+	bridge.PrepareView(fresh);
+	CHECK(fresh.SnapshotId.empty());
+	bridge.Pump();
+	engine::script::ViewCameraMutationPoll poll;
+	REQUIRE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "stale");
+	CHECK_FALSE(renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, installed->Revision), fresh));
+}
+
+TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const std::string snapshot = PauseAndSnapshot(worlds, session);
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("mutation-lifecycle-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto installed = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(installed);
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t appliedTicket = 0;
+	REQUIRE(
+		bridge.QueueViewCameraMutation(
+			"data-world", MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot), appliedTicket, detail
+		)
+	);
+		View armedView = MutationView(snapshot, pipeline);
+		SceneTarget target{16, 16};
+		armedView.Target = &target;
+		armedView.World = 1;
+		bridge.PrepareView(armedView);
+
+		// A host can return before Render. The armed patch must still choose its
+		// admitted snapshot for the next fresh view rather than waiting forever.
+		View view;
+		view.WorldName = engine::core::Name("data-world");
+		view.Pipeline = pipeline;
+		view.Target = &target;
+		view.World = 1;
+		bridge.PrepareView(view);
+		CHECK(view.SnapshotId == snapshot);
+		const auto identity = MutationIdentity(snapshot, pipeline, installed->Revision);
+	OverlayImage overlay;
+	const FrameResult appliedFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(appliedFrame.Submitted);
+	bridge.Pump();
+	engine::script::ViewCameraMutationPoll poll;
+	REQUIRE(bridge.PollViewCameraMutation("data-world", appliedTicket, poll, detail));
+	CHECK_FALSE(poll.Terminal);
+	CHECK(poll.Status == "pending");
+
+	// The completed patched image may need its unmodified replacement even if
+	// the scene advances before the restore view is prepared.
+	REQUIRE(session.Resume("data-world", 0).Status == engine::world::DataFactoryStatus::Ok);
+	bridge.PrepareView(view);
+	const FrameResult restoredFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(restoredFrame.Submitted);
+	bridge.Pump();
+	REQUIRE(bridge.PollViewCameraMutation("data-world", appliedTicket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "applied");
+
+	REQUIRE(
+		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	std::string cancellationSnapshot;
+	REQUIRE(session.Snapshot("data-world", cancellationSnapshot).Status == engine::world::DataFactoryStatus::Ok);
+	view.SnapshotId = cancellationSnapshot;
+	uint64_t cancelledTicket = 0;
+	REQUIRE(
+		bridge.QueueViewCameraMutation(
+			"data-world",
+			MutationRequest("data-world", pipeline.Text(), installed->Revision, cancellationSnapshot),
+			cancelledTicket,
+			detail
+		)
+	);
+	bridge.PrepareView(view);
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	bridge.Pump();
+	bridge.CancelViewCameraMutation("data-world", cancelledTicket);
+	bridge.Pump();
+	REQUIRE(bridge.PollViewCameraMutation("data-world", cancelledTicket, poll, detail));
+	CHECK_FALSE(poll.Terminal);
+	bridge.PrepareView(view);
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	bridge.Pump();
+	REQUIRE(bridge.PollViewCameraMutation("data-world", cancelledTicket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "cancelled");
+}
+
+TEST_CASE("script view.camera bridge reclaims applied slots after stale pipeline and teardown", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const std::string snapshot = PauseAndSnapshot(worlds, session);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("mutation-stale-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto installed = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(installed);
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t staleTicket = 0;
+	REQUIRE(
+		bridge.QueueViewCameraMutation(
+			"data-world", MutationRequest("data-world", pipeline.Text(), installed->Revision, snapshot), staleTicket, detail
+		)
+	);
+	View staleView = MutationView(snapshot, pipeline);
+	bridge.PrepareView(staleView);
+	const auto staleIdentity = MutationIdentity(snapshot, pipeline, installed->Revision);
+	View prepared = staleView;
+	REQUIRE(renderer.Hooks().ConsumeViewMutation(staleIdentity, prepared));
+	bridge.Pump();
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	bridge.Pump();
+	engine::script::ViewCameraMutationPoll poll;
+	REQUIRE(bridge.PollViewCameraMutation("data-world", staleTicket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "stale");
+
+	const auto current = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(current);
+	for (size_t slot = 0; slot < MAX_DATA_FACTORY_BATCHES; ++slot) {
+		uint64_t ticket = 0;
+		REQUIRE(
+			bridge.QueueViewCameraMutation(
+				"data-world", MutationRequest("data-world", pipeline.Text(), current->Revision, snapshot, slot), ticket, detail
+			)
+		);
+		View view = MutationView(snapshot, pipeline, slot);
+		bridge.PrepareView(view);
+		View applied = view;
+		REQUIRE(renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, current->Revision, slot), applied));
+		bridge.Pump();
+	}
+	REQUIRE(bridge.TeardownInstance("data-world", detail));
+	for (size_t slot = 0; slot < MAX_DATA_FACTORY_BATCHES; ++slot) {
+		uint64_t ticket = 0;
+		REQUIRE(
+			bridge.QueueViewCameraMutation(
+				"data-world", MutationRequest("data-world", pipeline.Text(), current->Revision, snapshot, slot), ticket, detail
+			)
+		);
+		View view = MutationView(snapshot, pipeline, slot);
+		bridge.PrepareView(view);
+		View applied = view;
+		REQUIRE(renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, current->Revision, slot), applied));
+		bridge.Pump();
+		REQUIRE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
+		CHECK_FALSE(poll.Terminal);
+	}
+	REQUIRE(bridge.TeardownInstance("data-world", detail));
 }
 
 TEST_CASE("script capture retains terminal tickets until release", "[render][data-capture]") {
@@ -382,8 +687,15 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 		std::find(capabilities.Channels.begin(), capabilities.Channels.end(), "ambient_occlusion") !=
 		capabilities.Channels.end()
 	);
-	REQUIRE(capabilities.HookRecords.size() == 12);
+	const size_t observationHooks = static_cast<size_t>(std::count_if(
+		capabilities.HookRecords.begin(),
+		capabilities.HookRecords.end(),
+		[](const auto &hook) { return hook.Access == "observation"; }
+	));
+	REQUIRE(observationHooks == 12);
+	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
+		if (hook.Access != "observation") continue;
 		CHECK(hook.Name.starts_with("data_capture."));
 		CHECK(hook.SchemaVersion == 1);
 		CHECK(hook.NodeKind == "capture");
@@ -394,6 +706,14 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			capabilities.Channels.end()
 		);
 	}
+	const auto mutation = std::find_if(
+		capabilities.HookRecords.begin(),
+		capabilities.HookRecords.end(),
+		[](const auto &hook) { return hook.Name == "view.camera"; }
+	);
+	REQUIRE(mutation != capabilities.HookRecords.end());
+	CHECK(mutation->Access == "synchronous_mutation");
+	CHECK(mutation->MutatedFields.size() == 3);
 	CHECK(capabilities.MaximumHooks == MAX_DATA_FACTORY_HOOKS);
 	CHECK(capabilities.MaximumConnections == MAX_DATA_FACTORY_CONNECTIONS);
 	CHECK(capabilities.MaximumBatches == MAX_DATA_FACTORY_BATCHES);

@@ -793,12 +793,18 @@ namespace engine::script {
 				hookChannels.reserve(hook.Channels.size());
 				for (const std::string &channel : hook.Channels)
 					hookChannels.push_back(String(channel));
+				std::vector<ScriptValue> mutatedFields;
+				mutatedFields.reserve(hook.MutatedFields.size());
+				for (const std::string &field : hook.MutatedFields)
+					mutatedFields.push_back(String(field));
 				hooks.push_back(Map({
 					{"name", String(hook.Name)},
 					{"schema_version", Number(hook.SchemaVersion)},
 					{"node_kind", String(hook.NodeKind)},
 					{"required", Boolean(hook.Required)},
+					{"access", String(hook.Access)},
 					{"channels", Array(std::move(hookChannels))},
+					{"mutated_fields", Array(std::move(mutatedFields))},
 				}));
 			}
 			return {
@@ -872,6 +878,107 @@ namespace engine::script {
 					{"detail", String(detail)},
 				})
 			};
+		}
+
+		DataSceneResult QueueViewCameraMutation(
+			const std::shared_ptr<DataCaptureBridge> &bridge,
+			std::string_view worldName,
+			const ScriptValue &value
+		) {
+			if (bridge == nullptr) return CaptureUnavailable();
+			if (value.Tag != ValueTag::Map ||
+				!HasOnlyFields(
+					value,
+					{"snapshot_id", "pipeline", "pipeline_revision", "view_slot", "camera_frame", "camera", "projection"}
+				))
+				return {"invalid_argument", Map({{"status", String("invalid_view_camera_patch")}})};
+			script::ViewCameraMutationRequest request;
+			request.InstanceId = worldName;
+			if (worldName.empty() || worldName.size() > 256 ||
+				!BoundedStringField(value, "snapshot_id", 256, request.SnapshotId) ||
+				!BoundedStringField(value, "pipeline", 128, request.Pipeline))
+				return {"invalid_argument", Map({{"status", String("invalid_view_camera_patch")}})};
+			const ScriptValue *revision = Field(value, "pipeline_revision");
+			const ScriptValue *slot = Field(value, "view_slot");
+			const double maximumTicket = std::nextafter(static_cast<double>(UINT64_MAX), 0.0);
+			const double maximumSlot = std::nextafter(static_cast<double>(std::numeric_limits<size_t>::max()), 0.0);
+			if (revision == nullptr || slot == nullptr || revision->Tag != ValueTag::Number || slot->Tag != ValueTag::Number ||
+				!std::isfinite(revision->Number) || !std::isfinite(slot->Number) || revision->Number <= 0 ||
+				slot->Number < 0 || revision->Number > maximumTicket || slot->Number > maximumSlot ||
+				static_cast<double>(static_cast<uint64_t>(revision->Number)) != revision->Number ||
+				static_cast<double>(static_cast<uint64_t>(slot->Number)) != slot->Number)
+				return {"invalid_argument", Map({{"status", String("invalid_view_camera_patch")}})};
+			request.PipelineRevision = static_cast<uint64_t>(revision->Number);
+			request.ViewSlot = static_cast<uint64_t>(slot->Number);
+			if (const ScriptValue *frame = Field(value, "camera_frame"); frame != nullptr) {
+				if (frame->Tag != ValueTag::CFrame) return {"invalid_argument", Map({{"status", String("invalid_view_camera_patch")}})};
+				request.CameraFrame = {frame->Frame.Position.X,
+					frame->Frame.Position.Y,
+					frame->Frame.Position.Z,
+					frame->Frame.QuaternionX,
+					frame->Frame.QuaternionY,
+					frame->Frame.QuaternionZ,
+					frame->Frame.QuaternionW};
+			}
+			if (const ScriptValue *camera = Field(value, "camera"); camera != nullptr) {
+				const ScriptValue *fov = Field(*camera, "field_of_view_radians");
+				const ScriptValue *near = Field(*camera, "near_plane");
+				const ScriptValue *far = Field(*camera, "far_plane");
+				if (camera->Tag != ValueTag::Map || !HasOnlyFields(
+						*camera,
+						{"field_of_view_radians", "near_plane", "far_plane"}
+					) || fov == nullptr || near == nullptr || far == nullptr || fov->Tag != ValueTag::Number ||
+					near->Tag != ValueTag::Number || far->Tag != ValueTag::Number || !std::isfinite(fov->Number) ||
+					!std::isfinite(near->Number) || !std::isfinite(far->Number) ||
+					std::abs(fov->Number) > std::numeric_limits<float>::max() ||
+					std::abs(near->Number) > std::numeric_limits<float>::max() ||
+					std::abs(far->Number) > std::numeric_limits<float>::max())
+					return {"invalid_argument", Map({{"status", String("invalid_view_camera_patch")}})};
+				request.Lens = {.FieldOfViewRadians = static_cast<float>(fov->Number),
+					.NearPlane = static_cast<float>(near->Number), .FarPlane = static_cast<float>(far->Number)};
+			}
+			if (const ScriptValue *projection = Field(value, "projection"); projection != nullptr) {
+				if (projection->Tag != ValueTag::Array || projection->Items.size() != 16)
+					return {"invalid_argument", Map({{"status", String("invalid_view_camera_patch")}})};
+				std::array<float, 16> values{};
+				for (size_t index = 0; index < values.size(); ++index) {
+					if (projection->Items[index].Tag != ValueTag::Number || !std::isfinite(projection->Items[index].Number) ||
+						std::abs(projection->Items[index].Number) > std::numeric_limits<float>::max())
+						return {"invalid_argument", Map({{"status", String("invalid_view_camera_patch")}})};
+					values[index] = static_cast<float>(projection->Items[index].Number);
+				}
+				request.Projection = values;
+			}
+			uint64_t ticket = 0;
+			std::string detail;
+			if (!bridge->QueueViewCameraMutation(worldName, request, ticket, detail))
+				return {"rejected", Map({{"status", String("view_camera_rejected")}, {"reason", String(detail)}})};
+			return {"ok", Map({{"status", String("queued")}, {"ticket", String(Decimal(ticket))}})};
+		}
+
+		DataSceneResult CancelViewCameraMutation(
+			const std::shared_ptr<DataCaptureBridge> &bridge, std::string_view worldName, std::string_view text
+		) {
+			if (bridge == nullptr) return CaptureUnavailable();
+			uint64_t ticket = 0;
+			if (!Ticket(text, ticket))
+				return {"invalid_argument", Map({{"status", String("invalid_view_camera_ticket")}})};
+			bridge->CancelViewCameraMutation(worldName, ticket);
+			return {"ok", Map({{"status", String("cancellation_requested")}, {"ticket", String(Decimal(ticket))}})};
+		}
+
+		DataSceneResult PollViewCameraMutation(
+			const std::shared_ptr<DataCaptureBridge> &bridge, std::string_view worldName, std::string_view text
+		) {
+			if (bridge == nullptr) return CaptureUnavailable();
+			uint64_t ticket = 0;
+			if (!Ticket(text, ticket))
+				return {"invalid_argument", Map({{"status", String("invalid_view_camera_ticket")}})};
+			script::ViewCameraMutationPoll poll;
+			std::string detail;
+			if (!bridge->PollViewCameraMutation(worldName, ticket, poll, detail))
+				return {"invalid_argument", Map({{"status", String("view_camera_not_found")}, {"reason", String(detail)}})};
+			return {"ok", Map({{"status", String(poll.Status)}, {"terminal", Boolean(poll.Terminal)}, {"detail", String(poll.Detail)}})};
 		}
 
 		// DataSceneOptions is plain, copied script data. The current bridge captures
@@ -1839,6 +1946,21 @@ namespace engine::script {
 			}
 			call.ReturnValue(QueueCapture(call.DataCapture(), call.World().Name(), request).Value);
 		}
+		void ServiceSubmitViewCameraMutation(ScriptCall &call) {
+			ScriptValue request;
+			CodecStatus status = CodecStatus::Ok;
+			if (!call.ReadValue(0, request, status)) {
+				call.ReturnValue(Map({{"status", String("invalid_view_camera_patch")}, {"reason", String(Describe(status))}}));
+				return;
+			}
+			call.ReturnValue(QueueViewCameraMutation(call.DataCapture(), call.World().Name(), request).Value);
+		}
+		void ServiceCancelViewCameraMutation(ScriptCall &call) {
+			call.ReturnValue(CancelViewCameraMutation(call.DataCapture(), call.World().Name(), call.AsString(0)).Value);
+		}
+		void ServicePollViewCameraMutation(ScriptCall &call) {
+			call.ReturnValue(PollViewCameraMutation(call.DataCapture(), call.World().Name(), call.AsString(0)).Value);
+		}
 		void ServiceCreateOptions(ScriptCall &call) {
 			call.ReturnValue(NewCaptureOptions());
 		}
@@ -2028,13 +2150,16 @@ namespace engine::script {
 			call.ReturnValue(ColliderBev(call.World(), request).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 23> DATA_SCENE_METHODS{{
+		constexpr std::array<ServiceMethod, 26> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
 			{"GetEditableImageMetadata", ServiceImage},
 			{"GetCaptureChannels", ServiceChannels},
 			{"Capture", ServiceCapture},
+			{"SubmitViewCameraMutation", ServiceSubmitViewCameraMutation},
+			{"CancelViewCameraMutation", ServiceCancelViewCameraMutation},
+			{"PollViewCameraMutation", ServicePollViewCameraMutation},
 			{"CreateOptions", ServiceCreateOptions},
 			{"CaptureBundle", ServiceCaptureBundle},
 			{"PollCapture", ServicePollCapture},

@@ -100,6 +100,32 @@ namespace engine::script {
 		std::string NodeKind;
 		bool Required = false;
 		std::vector<std::string> Channels;
+		std::string Access = "observation";
+		std::vector<std::string> MutatedFields;
+	};
+	struct ViewCameraMutationRequest {
+		std::string InstanceId;
+		std::string SnapshotId;
+		std::string Pipeline;
+		uint64_t PipelineRevision = 0;
+		uint64_t ViewSlot = 0;
+		std::optional<std::array<float, 7>> CameraFrame;
+		struct Camera {
+			float FieldOfViewRadians = 0.0f;
+			float NearPlane = 0.0f;
+			float FarPlane = 0.0f;
+			uint32_t MaxImageWidth = 0;
+			uint32_t MaxImageHeight = 0;
+			uint32_t ImageWidth = 0;
+			uint32_t ImageHeight = 0;
+		};
+		std::optional<Camera> Lens;
+		std::optional<std::array<float, 16>> Projection;
+	};
+	struct ViewCameraMutationPoll {
+		std::string Status;
+		bool Terminal = false;
+		std::string Detail;
 	};
 	struct DataCaptureBridgeCapabilities {
 		bool Available = false;
@@ -146,6 +172,24 @@ namespace engine::script {
 		// captures must be cancelled and observed terminal before release.
 		virtual bool Release(std::string_view instanceId, uint64_t ticket, std::string &detail) = 0;
 		virtual void Cancel(std::string_view instanceId, uint64_t ticket) = 0;
+		// A one-shot typed mutation ticket. Hosts that do not provide the renderer
+		// hook return false rather than pretending a queued patch will run.
+		virtual bool QueueViewCameraMutation(
+			std::string_view,
+			const ViewCameraMutationRequest &,
+			uint64_t &,
+			std::string &detail
+		) {
+			detail = "view.camera is unavailable";
+			return false;
+		}
+		virtual void CancelViewCameraMutation(std::string_view, uint64_t) {}
+		virtual bool PollViewCameraMutation(
+			std::string_view, uint64_t, ViewCameraMutationPoll &, std::string &detail
+		) {
+			detail = "view.camera is unavailable";
+			return false;
+		}
 	};
 
 }

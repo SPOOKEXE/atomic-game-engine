@@ -190,8 +190,32 @@ namespace {
 			if (Queued && ticket == Ticket && instanceId == Owner) Cancelled = true;
 		}
 
+		bool QueueViewCameraMutation(
+			std::string_view instanceId,
+			const engine::script::ViewCameraMutationRequest &request,
+			uint64_t &ticket,
+			std::string &detail
+		) override {
+			if (instanceId != request.InstanceId || request.InstanceId.empty()) {
+				detail = "world mismatch";
+				return false;
+			}
+			Mutation = request;
+			MutationQueued = true;
+			ticket = 303;
+			detail = "accepted";
+			return true;
+		}
+
+		void CancelViewCameraMutation(std::string_view instanceId, uint64_t ticket) override {
+			if (MutationQueued && instanceId == Mutation.InstanceId && ticket == 303) MutationCancelled = true;
+		}
+
 		bool Released = false;
 		engine::script::DataCaptureBridgeRequest LastRequest;
+		engine::script::ViewCameraMutationRequest Mutation;
+		bool MutationQueued = false;
+		bool MutationCancelled = false;
 
 	  private:
 		uint64_t Ticket;
@@ -633,6 +657,9 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				assert(captureCapabilities.limits.maximum_hooks == 14)
 				assert(captureCapabilities.limits.maximum_retained_bytes == 67108864)
 				assert(captureCapabilities.limits.maximum_pending_pumps == 600)
+				local mutation = service:SubmitViewCameraMutation({snapshot_id = "fixture/snapshot", pipeline = "main", pipeline_revision = 1, view_slot = 0, camera = {field_of_view_radians = 0.9, near_plane = 0.2, far_plane = 200}})
+				assert(mutation.status == "queued" and mutation.ticket == "303")
+				assert(service:CancelViewCameraMutation(mutation.ticket).status == "cancellation_requested")
 				assert(service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 4294967296, channels = {"rgb_linear_hdr"}, temporal_history = "preserve"}).status == "invalid_capture_request")
 				local queued = service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"}, temporal_history = "preserve"})
 				assert(queued.status == "queued")
@@ -657,6 +684,8 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				if (!service.GetCapabilities().render_capture) throw new Error("capture missing");
 				const captureCapabilities = service.GetCaptureChannels();
 				if (captureCapabilities.status !== "ok" || captureCapabilities.schema_version !== "data-capture-hooks/v1" || captureCapabilities.hooks.length !== 5 || captureCapabilities.hooks[0].name !== "data_capture.rgb_linear_hdr" || captureCapabilities.hooks[0].schema_version !== 1 || captureCapabilities.hooks[0].node_kind !== "capture" || !captureCapabilities.hooks[0].required || captureCapabilities.hooks[0].channels[0] !== "rgb_linear_hdr" || captureCapabilities.limits.maximum_connections !== 6 || captureCapabilities.limits.maximum_batches !== 6 || captureCapabilities.limits.maximum_readback_nodes !== 12) throw new Error("capture capability mismatch");
+				const mutation = service.SubmitViewCameraMutation({snapshot_id: "fixture/snapshot", pipeline: "main", pipeline_revision: 1, view_slot: 0, camera: {field_of_view_radians: .9, near_plane: .2, far_plane: 200}});
+				if (mutation.status !== "queued" || mutation.ticket !== "303" || service.CancelViewCameraMutation(mutation.ticket).status !== "cancellation_requested") throw new Error("mutation bridge failed");
 				if (service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: Infinity, channels: ["rgb_linear_hdr"], temporal_history: "preserve"}).status !== "invalid_capture_request") throw new Error("invalid request accepted");
 				const queued = service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: 0, channels: ["rgb_linear_hdr"], temporal_history: "preserve"});
 				if (queued.status !== "queued") throw new Error("queue failed");
@@ -670,6 +699,8 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 			)");
 		}
 		CHECK(bridge->Released);
+		CHECK(bridge->MutationQueued);
+		CHECK(bridge->MutationCancelled);
 	}
 }
 

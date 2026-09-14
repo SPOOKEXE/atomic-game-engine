@@ -453,6 +453,105 @@ namespace engine::control {
 		});
 
 		Add(Tool{
+			"submit_view_camera_mutation",
+			"Queues one owned synchronous view.camera patch for an exact paused snapshot and pipeline revision.",
+			[] {
+				return Schema(
+					{{"instance_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"pipeline", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"pipeline_revision", {{"type", "integer"}, {"minimum", 1}}},
+					 {"view_slot", {{"type", "integer"}, {"minimum", 0}}},
+					 {"camera_frame", {{"type", "array"}, {"minItems", 7}, {"maxItems", 7}}},
+					 {"camera", {{"type", "object"}}},
+					 {"projection", {{"type", "array"}, {"minItems", 16}, {"maxItems", 16}}}},
+					{"instance_id", "snapshot_id", "pipeline", "pipeline_revision", "view_slot"}
+				);
+			},
+			[bridge](const json &values, std::string &failure) -> json {
+				if (!Only(values, {"instance_id", "snapshot_id", "pipeline", "pipeline_revision", "view_slot", "camera_frame", "camera", "projection"}, failure))
+					return nullptr;
+				const json *field = nullptr;
+				script::ViewCameraMutationRequest request;
+				uint64_t revision = 0, slot = 0;
+				if (!Field(values, "instance_id", field, failure) || !Text(*field, "instance_id", request.InstanceId, failure) ||
+					!Field(values, "snapshot_id", field, failure) || !Text(*field, "snapshot_id", request.SnapshotId, failure) ||
+					!Field(values, "pipeline", field, failure) || !Text(*field, "pipeline", request.Pipeline, failure) ||
+					!Field(values, "pipeline_revision", field, failure) || !UInt(*field, "pipeline_revision", revision, failure) ||
+					!Field(values, "view_slot", field, failure) || !UInt(*field, "view_slot", slot, failure) || revision == 0) return nullptr;
+				request.PipelineRevision = revision;
+				request.ViewSlot = slot;
+				if (const auto frame = values.find("camera_frame"); frame != values.end()) {
+					if (!frame->is_array() || frame->size() != 7) { failure = Error("validation_failed", "camera_frame must contain seven finite numbers"); return nullptr; }
+					std::array<float, 7> copied{};
+					for (size_t index = 0; index < copied.size(); ++index) {
+						const double value = (*frame)[index].is_number() ? (*frame)[index].get<double>() : 0.0;
+						if (!(*frame)[index].is_number() || !std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max()) { failure = Error("validation_failed", "camera_frame must contain seven finite float values"); return nullptr; }
+						copied[index] = static_cast<float>(value);
+					}
+					request.CameraFrame = copied;
+				}
+				if (const auto camera = values.find("camera"); camera != values.end()) {
+					if (!camera->is_object() || !Only(*camera, {"field_of_view_radians", "near_plane", "far_plane"}, failure)) return nullptr;
+					script::ViewCameraMutationRequest::Camera copied;
+					for (const auto &[name, target] : std::array<std::pair<const char *, float *>, 3>{{{"field_of_view_radians", &copied.FieldOfViewRadians}, {"near_plane", &copied.NearPlane}, {"far_plane", &copied.FarPlane}}}) {
+						const auto value = camera->find(name);
+						const double number = value != camera->end() && value->is_number() ? value->get<double>() : 0.0;
+						if (value == camera->end() || !value->is_number() || !std::isfinite(number) || std::abs(number) > std::numeric_limits<float>::max()) { failure = Error("validation_failed", "camera values must be finite floats"); return nullptr; }
+						*target = static_cast<float>(number);
+					}
+					request.Lens = copied;
+				}
+				if (const auto projection = values.find("projection"); projection != values.end()) {
+					if (!projection->is_array() || projection->size() != 16) { failure = Error("validation_failed", "projection must contain sixteen finite numbers"); return nullptr; }
+					std::array<float, 16> copied{};
+					for (size_t index = 0; index < copied.size(); ++index) {
+						const double value = (*projection)[index].is_number() ? (*projection)[index].get<double>() : 0.0;
+						if (!(*projection)[index].is_number() || !std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max()) { failure = Error("validation_failed", "projection must contain sixteen finite float values"); return nullptr; }
+						copied[index] = static_cast<float>(value);
+					}
+					request.Projection = copied;
+				}
+				uint64_t ticket = 0;
+				std::string detail;
+				if (!bridge->QueueViewCameraMutation(request.InstanceId, request, ticket, detail)) { failure = Error("view_camera_refused", detail); return nullptr; }
+				return {{"status", "queued"}, {"ticket", ticket}, {"instance_id", request.InstanceId}, {"snapshot_id", request.SnapshotId}};
+			},
+		});
+
+		Add(Tool{
+			"cancel_view_camera_mutation",
+			"Cancels one queued view.camera mutation.",
+			[] { return Schema({{"instance_id", {{"type", "string"}}}, {"ticket", {{"type", "integer"}, {"minimum", 1}}}}, {"instance_id", "ticket"}); },
+			[bridge](const json &values, std::string &failure) -> json {
+				if (!Only(values, {"instance_id", "ticket"}, failure)) return nullptr;
+				const json *field = nullptr;
+				std::string instance;
+				uint64_t ticket = 0;
+				if (!Field(values, "instance_id", field, failure) || !Text(*field, "instance_id", instance, failure) || !Field(values, "ticket", field, failure) || !UInt(*field, "ticket", ticket, failure) || ticket == 0) return nullptr;
+				bridge->CancelViewCameraMutation(instance, ticket);
+				return {{"status", "cancellation_requested"}, {"ticket", ticket}};
+			},
+		});
+
+		Add(Tool{
+			"poll_view_camera_mutation",
+			"Returns a view.camera mutation status and releases a terminal mutation ticket.",
+			[] { return Schema({{"instance_id", {{"type", "string"}}}, {"ticket", {{"type", "integer"}, {"minimum", 1}}}}, {"instance_id", "ticket"}); },
+			[bridge](const json &values, std::string &failure) -> json {
+				if (!Only(values, {"instance_id", "ticket"}, failure)) return nullptr;
+				const json *field = nullptr;
+				std::string instance;
+				uint64_t ticket = 0;
+				if (!Field(values, "instance_id", field, failure) || !Text(*field, "instance_id", instance, failure) || !Field(values, "ticket", field, failure) || !UInt(*field, "ticket", ticket, failure) || ticket == 0) return nullptr;
+				script::ViewCameraMutationPoll poll;
+				std::string detail;
+				if (!bridge->PollViewCameraMutation(instance, ticket, poll, detail)) { failure = Error("view_camera_not_found", detail); return nullptr; }
+				return {{"status", poll.Status}, {"terminal", poll.Terminal}, {"detail", poll.Detail}, {"ticket", ticket}};
+			},
+		});
+
+		Add(Tool{
 			"get_resource",
 			"Returns up to one MiB of one retained capture resource as base64.",
 			[] {
