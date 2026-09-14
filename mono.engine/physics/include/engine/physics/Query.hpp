@@ -33,6 +33,7 @@
 #include <engine/spatial/Query.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 
@@ -67,6 +68,28 @@ namespace engine::physics {
 	// than quietly answering from a prefix - a truncated overlap read as "and
 	// nothing more" is a contact that never happens.
 	inline constexpr size_t QUERY_CANDIDATE_LIMIT = 256;
+
+	// A conservative collider occupancy answer for one finite AABB. It is
+	// deliberately separate from `OverlapBox`: an empty overlap list cannot say
+	// that space is free when physics was never prepared or its candidate walk
+	// overflowed.
+	struct ColliderOccupancy {
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			CandidateOverflow,
+			BakedGeometryUncertain,
+			PhysicsStale,
+			InvalidProbe,
+		};
+
+		bool Available = false;
+		bool OverlapFound = false;
+		bool WitnessAvailable = false;
+		ecs::Entity Witness;
+		bool Complete = false;
+		Reason Why = Reason::PhysicsUnprepared;
+	};
 
 	// One collider a query found.
 	//
@@ -196,6 +219,15 @@ namespace engine::physics {
 	// @threadsafe
 	spatial::QueryResult OverlapBox(
 		const ecs::Store &store, const core::AABB &box, spatial::LayerMask mask, std::span<ecs::Entity> found
+	);
+
+	// Tests up to a caller-bounded batch of world-space AABBs. Contact includes
+	// boundary contact, as the physics narrow phase does. This reports collider
+	// contact only, not whether an AABB is filled volume. A mesh or hull candidate
+	// makes a negative answer incomplete so missing baked geometry cannot turn
+	// into a false free-space claim.
+	void ColliderOccupancyBatch(
+		const ecs::Store &store, std::span<const core::AABB> probes, std::span<ColliderOccupancy> results
 	);
 
 	// Finds colliders whose exact shape overlaps an oriented box. The broad phase

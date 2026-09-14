@@ -58,6 +58,8 @@ using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::physics::BroadPhase;
 using engine::physics::ColliderHit;
+using engine::physics::ColliderOccupancy;
+using engine::physics::ColliderOccupancyBatch;
 using engine::physics::OverlapBox;
 using engine::physics::OverlapOrientedBox;
 using engine::physics::OverlapSphere;
@@ -116,6 +118,82 @@ namespace {
 		collider.Extent = extent;
 		return collider;
 	}
+}
+
+TEST_CASE("collider occupancy refuses to call an unprepared index free space", "[physics][query]") {
+	Store store("query.occupancy.unprepared");
+	const std::array probes{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}};
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK_FALSE(answers[0].OverlapFound);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsUnprepared);
+}
+
+TEST_CASE("collider occupancy preserves an unlabelled primitive contact", "[physics][query]") {
+	Store store("query.occupancy.primitive");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity collider = Place(store, {});
+	Index(store);
+	const std::array probes{AABB{Vector3{-0.5f, -0.5f, -0.5f}, Vector3{0.5f, 0.5f, 0.5f}}};
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].OverlapFound);
+	CHECK(answers[0].WitnessAvailable);
+	CHECK(answers[0].Witness == collider);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::None);
+}
+
+TEST_CASE("collider occupancy refuses a stale broadphase after a collider moves", "[physics][query]") {
+	Store store("query.occupancy.stale");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity collider = Place(store, {});
+	Index(store);
+	store.Set(collider, Transform{CFrame{Vector3{8.0f, 0.0f, 0.0f}}});
+	const std::array probes{AABB{Vector3{7.5f, -0.5f, -0.5f}, Vector3{8.5f, 0.5f, 0.5f}}};
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsStale);
+}
+
+TEST_CASE("legacy overlap remains available after an unrelated store write", "[physics][query]") {
+	Store store("query.occupancy.legacy");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity collider = Place(store, {});
+	Index(store);
+	const Entity unrelated = store.Create();
+	store.Set(unrelated, Transform{CFrame{Vector3{20.0f, 0.0f, 0.0f}}});
+	const AABB probe{Vector3{-0.5f, -0.5f, -0.5f}, Vector3{0.5f, 0.5f, 0.5f}};
+	std::array<Entity, 4> legacy;
+	const QueryResult overlap = OverlapBox(store, probe, LayerMask::All(), legacy);
+	REQUIRE(overlap.Written == 1);
+	CHECK(legacy[0] == collider);
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, std::array{probe}, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsStale);
+}
+
+TEST_CASE("collider occupancy resolves extreme finite bounds without float intermediates", "[physics][query]") {
+	Store store("query.occupancy.extreme-bounds");
+	PreparePhysicsWorld(store, 4.0f);
+	Index(store);
+	const float maximum = std::numeric_limits<float>::max();
+	const std::array probes{
+		AABB{Vector3{-maximum, -maximum, -maximum}, Vector3{maximum, maximum, maximum}},
+		AABB{Vector3{maximum * 0.5f, maximum * 0.5f, maximum * 0.5f}, Vector3{maximum, maximum, maximum}},
+	};
+	std::array<ColliderOccupancy, 2> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Complete);
+	CHECK(answers[1].Available);
+	CHECK(answers[1].Complete);
 }
 
 // --- raycast ------------------------------------------------------------------

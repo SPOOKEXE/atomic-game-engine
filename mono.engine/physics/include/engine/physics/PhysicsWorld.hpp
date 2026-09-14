@@ -928,6 +928,12 @@ namespace engine::physics {
 			return StaticStale;
 		}
 
+		// The store version observed by the last broadphase sync. A read query
+		// uses this to refuse stale index data instead of reporting free space.
+		uint64_t BroadphaseChangeVersion() const {
+			return StaticChangeVersion;
+		}
+
 		// Whether two parts belong to the same active rigid assembly.
 		bool RigidlyConnected(ecs::Entity first, ecs::Entity second) const;
 

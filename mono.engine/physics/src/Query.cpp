@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -446,6 +447,82 @@ namespace engine::physics {
 	) {
 		const ShapeInstance volume{core::CFrame{box.Centre()}, box.Size() * 0.5f, scene::ShapeKind::Box};
 		return OverlapExact(store, volume, box, mask, found);
+	}
+
+	void ColliderOccupancyBatch(
+		const ecs::Store &store, std::span<const core::AABB> probes, std::span<ColliderOccupancy> results
+	) {
+		const Indexes indexes = IndexesOf(store);
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		const bool stale = prepared != nullptr &&
+			(prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion());
+		const size_t count = std::min(probes.size(), results.size());
+		for (size_t probeIndex = 0; probeIndex < count; ++probeIndex) {
+			ColliderOccupancy &answer = results[probeIndex];
+			answer = {};
+			if (!indexes.Valid || stale) {
+				if (stale) answer.Why = ColliderOccupancy::Reason::PhysicsStale;
+				continue;
+			}
+
+			answer.Available = true;
+			answer.Complete = true;
+			answer.Why = ColliderOccupancy::Reason::None;
+			const core::AABB &box = probes[probeIndex];
+			const auto resolveAxis = [](float minimum, float maximum, float &centre, float &extent) {
+				const double resolvedCentre = (static_cast<double>(minimum) + static_cast<double>(maximum)) * 0.5;
+				const double resolvedExtent = (static_cast<double>(maximum) - static_cast<double>(minimum)) * 0.5;
+				if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum ||
+					!std::isfinite(resolvedCentre) || !std::isfinite(resolvedExtent) ||
+					resolvedCentre < -std::numeric_limits<float>::max() ||
+					resolvedCentre > std::numeric_limits<float>::max() ||
+					resolvedExtent > std::numeric_limits<float>::max()) {
+					return false;
+				}
+				centre = static_cast<float>(resolvedCentre);
+				extent = static_cast<float>(resolvedExtent);
+					return true;
+			};
+			core::Vector3 centre;
+			core::Vector3 extent;
+			if (!resolveAxis(box.Minimum.X, box.Maximum.X, centre.X, extent.X) ||
+				!resolveAxis(box.Minimum.Y, box.Maximum.Y, centre.Y, extent.Y) ||
+				!resolveAxis(box.Minimum.Z, box.Maximum.Z, centre.Z, extent.Z)) {
+				answer.Available = false;
+				answer.Complete = false;
+				answer.Why = ColliderOccupancy::Reason::InvalidProbe;
+				continue;
+			}
+			const ShapeInstance volume{core::CFrame{centre}, extent, scene::ShapeKind::Box};
+			uint64_t candidates[QUERY_CANDIDATE_LIMIT];
+			for (const Index &index : indexes.Entry) {
+				const spatial::QueryResult found =
+					QueryOverlap(index, box, spatial::LayerMask::All(), std::span<uint64_t>{candidates});
+				if (found.Overflowed) {
+					answer.Complete = false;
+					answer.Why = ColliderOccupancy::Reason::CandidateOverflow;
+				}
+				for (size_t candidateIndex = 0; candidateIndex < found.Written; ++candidateIndex) {
+					const QueryCandidate candidate = ResolveCandidate(store, index, candidates[candidateIndex]);
+					if (!candidate.Present) continue;
+					const scene::Collider *collider = store.Get<scene::Collider>(candidate.Owner);
+					if (collider == nullptr) continue;
+					if (collider->Shape == scene::ShapeKind::Hull || collider->Shape == scene::ShapeKind::Mesh) {
+						// Broadphase overlap is enough to make a negative answer unsafe.
+						answer.Complete = false;
+						if (answer.Why == ColliderOccupancy::Reason::None)
+							answer.Why = ColliderOccupancy::Reason::BakedGeometryUncertain;
+						continue;
+					}
+					if (!ContactBetween(volume, candidate.Shape).Touching) continue;
+					answer.OverlapFound = true;
+					if (!answer.WitnessAvailable) {
+						answer.WitnessAvailable = true;
+						answer.Witness = candidate.Owner;
+					}
+				}
+			}
+		}
 	}
 
 	spatial::QueryResult OverlapOrientedBox(
