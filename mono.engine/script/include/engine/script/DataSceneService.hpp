@@ -73,6 +73,16 @@ namespace engine::script {
 		uint8_t Columns = 0;
 	};
 
+	// A bounded world-space voxel grid. A cell is filled only when one analytic
+	// collider contains its complete AABB, never merely because it touches it.
+	struct DataSceneFilledOccupancyRequest {
+		core::Vector3 MinimumMetres;
+		core::Vector3 MaximumMetres;
+		uint8_t Columns = 0;
+		uint8_t Rows = 0;
+		uint8_t Layers = 0;
+	};
+
 	DataSceneResult GetCapabilities(const ecs::Store &store);
 	// Computes a conservative upper bound for the compact JSON representation
 	// used by the MCP adapter. Rejects values the adapter cannot serialize.
@@ -103,6 +113,7 @@ namespace engine::script {
 	DataSceneResult OverlapOBB(const ecs::Store &store, const DataSceneObbRequest &request);
 
 	DataSceneResult ColliderBev(ecs::Store &store, const DataSceneColliderBevRequest &request);
+	DataSceneResult FilledOccupancy(ecs::Store &store, const DataSceneFilledOccupancyRequest &request);
 
 	const ServiceSurface &DataSceneServiceSurface();
 }

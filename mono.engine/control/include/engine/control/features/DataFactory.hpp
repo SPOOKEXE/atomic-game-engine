@@ -1284,6 +1284,150 @@ namespace engine::control {
 		});
 
 		Add(Tool{
+			"get_filled_occupancy",
+			"Returns a bounded snapshot-bound voxel grid. A filled cell is proven only when one analytic "
+			"collider contains its whole AABB. Collider unions, baked hulls and meshes remain explicitly "
+			"unknown rather than being inferred.",
+			[] {
+				const json vector{
+					{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}
+				};
+				const json lifecycle{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"tick", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_epoch", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_version", {{"type", "integer"}, {"minimum", 0}}}}},
+					{"required", {"tick", "world_epoch", "world_version"}}
+				};
+				return json{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"schema_version", {{"const", "filled-occupancy/v1"}}},
+					  {"world_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"lifecycle", lifecycle},
+					  {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"minimum_metres", vector},
+					  {"maximum_metres", vector},
+					  {"columns", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}},
+					  {"rows", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}},
+					  {"layers", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}}}},
+					{"required",
+					 {"schema_version",
+					  "world_id",
+					  "lifecycle",
+					  "snapshot_id",
+					  "minimum_metres",
+					  "maximum_metres",
+					  "columns",
+					  "rows",
+					  "layers"}}
+				};
+			},
+			[&session](const json &arguments, std::string &failure) -> json {
+				using namespace data_factory_detail;
+				if (!arguments.is_object() || !Only(
+												  arguments,
+												  {"schema_version",
+												   "world_id",
+												   "lifecycle",
+												   "snapshot_id",
+												   "minimum_metres",
+												   "maximum_metres",
+												   "columns",
+												   "rows",
+												   "layers"},
+												  failure
+											  ))
+					return nullptr;
+				Request request;
+				const json *field = nullptr;
+				if (!Field(arguments, "schema_version", field, failure) || !field->is_string() ||
+					field->get<std::string>() != "filled-occupancy/v1" ||
+					!Field(arguments, "world_id", field, failure) ||
+					!Text(*field, "world_id", request.InstanceId, failure) ||
+					!Field(arguments, "snapshot_id", field, failure) ||
+					!Text(*field, "snapshot_id", request.SnapshotId, failure)) {
+					if (failure.empty())
+						failure = Error("validation_failed", "schema_version must be filled-occupancy/v1");
+					return nullptr;
+				}
+				const auto lifecycle = arguments.find("lifecycle");
+				if (lifecycle == arguments.end() || !lifecycle->is_object() ||
+					!Only(*lifecycle, {"tick", "world_epoch", "world_version"}, failure) ||
+					!Field(*lifecycle, "tick", field, failure) ||
+					!UInt(*field, "lifecycle.tick", request.Tick, failure) ||
+					!Field(*lifecycle, "world_epoch", field, failure) ||
+					!UInt(*field, "lifecycle.world_epoch", request.Epoch, failure) ||
+					!Field(*lifecycle, "world_version", field, failure) ||
+					!UInt(*field, "lifecycle.world_version", request.Version, failure)) {
+					if (failure.empty())
+						failure = Error(
+							"validation_failed", "lifecycle requires tick, world_epoch and world_version"
+						);
+					return nullptr;
+				}
+				script::DataSceneFilledOccupancyRequest occupancy;
+				if (!arguments.contains("minimum_metres") || !arguments.contains("maximum_metres") ||
+					!FiniteVector(arguments.at("minimum_metres"), occupancy.MinimumMetres) ||
+					!FiniteVector(arguments.at("maximum_metres"), occupancy.MaximumMetres) ||
+					!StrictFiniteBox(occupancy.MinimumMetres, occupancy.MaximumMetres)) {
+					failure = Error(
+						"validation_failed", "minimum_metres and maximum_metres must be finite strict vectors"
+					);
+					return nullptr;
+				}
+				const auto dimension = [&](std::string_view name, uint8_t &out) {
+					const auto found = arguments.find(name);
+					if (found == arguments.end() || !found->is_number_unsigned() ||
+						found->get<uint64_t>() == 0 || found->get<uint64_t>() > 4)
+						return false;
+					out = found->get<uint8_t>();
+					return true;
+				};
+				if (!dimension("columns", occupancy.Columns) || !dimension("rows", occupancy.Rows) ||
+					!dimension("layers", occupancy.Layers)) {
+					failure = Error(
+						"validation_failed", "columns, rows and layers must be integers from 1 through 4"
+					);
+					return nullptr;
+				}
+				if (!session.OwnsWorld(request.InstanceId)) {
+					failure =
+						Error("validation_failed", "world_id is not owned by this data-factory session");
+					return nullptr;
+				}
+				if (!Preconditions(session, request, failure)) return nullptr;
+				const world::DataFactoryReply barrier =
+					session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
+				if (barrier.Status != world::DataFactoryStatus::Ok) {
+					failure = Error(world::Describe(barrier.Status), barrier.Detail);
+					return nullptr;
+				}
+				json result;
+				const world::WorldStatus entered = session.UniverseOf().Enter(
+					session.UniverseOf().Find(core::Name(barrier.InstanceId)), [&](ecs::Store &store) {
+						result =
+							data_scene_detail::Result(script::FilledOccupancy(store, occupancy), failure);
+					}
+				);
+				if (entered != world::WorldStatus::Ok && failure.empty())
+					failure = Error("validation_failed", "scene is unavailable");
+				if (!failure.empty()) return nullptr;
+				result["world_id"] = barrier.InstanceId;
+				result["lifecycle"] = {
+					{"tick", barrier.Clock.Tick},
+					{"world_epoch", barrier.WorldEpoch},
+					{"world_version", barrier.WorldVersion}
+				};
+				result["snapshot_id"] = request.SnapshotId;
+				return result;
+			}
+		});
+
+		Add(Tool{
 			"get_collider_occupancy",
 			"Tests up to 32 named finite world-space AABBs against the exact completed, retained "
 			"all-systems-paused snapshot. Boundary contact counts as collider contact. This is not a "

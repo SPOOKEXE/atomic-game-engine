@@ -60,6 +60,8 @@ using engine::physics::BroadPhase;
 using engine::physics::ColliderHit;
 using engine::physics::ColliderOccupancy;
 using engine::physics::ColliderOccupancyBatch;
+using engine::physics::FilledColliderOccupancy;
+using engine::physics::FilledColliderOccupancyBatch;
 using engine::physics::OverlapBox;
 using engine::physics::OverlapOrientedBox;
 using engine::physics::OverlapSphere;
@@ -196,6 +198,165 @@ TEST_CASE(
 	CHECK(answers[0].Complete);
 	CHECK(answers[1].Available);
 	CHECK(answers[1].Complete);
+}
+
+TEST_CASE("filled collider occupancy proves one solid primitive contains a cell", "[physics][query]") {
+	Store store("query.filled-occupancy");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity box = Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Place(store, Placed{.Position = Vector3{6.0f, 0.0f, 0.0f}});
+	Index(store);
+	const std::array probes{
+		AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}},
+		AABB{Vector3{7.5f, -1.0f, -1.0f}, Vector3{8.5f, 1.0f, 1.0f}},
+	};
+	std::array<FilledColliderOccupancy, 2> answers;
+	FilledColliderOccupancyBatch(store, probes, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].WitnessAvailable);
+	CHECK(answers[0].Witness == box);
+	CHECK(answers[1].Available);
+	CHECK_FALSE(answers[1].Filled);
+	CHECK(answers[1].Complete);
+}
+
+TEST_CASE("filled collider occupancy never infers volume from a collider union", "[physics][query]") {
+	Store store("query.filled-occupancy-union");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Position = Vector3{-0.5f, 0.0f, 0.0f}, .Extent = Vector3{0.5f, 1.0f, 1.0f}});
+	Place(store, Placed{.Position = Vector3{0.5f, 0.0f, 0.0f}, .Extent = Vector3{0.5f, 1.0f, 1.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::UnprovenCoverage);
+}
+
+TEST_CASE("filled collider occupancy keeps unresolved baked shapes unknown", "[physics][query]") {
+	Store store("query.filled-occupancy-baked");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}, .Shape = ShapeKind::Hull});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::BakedGeometryUncertain);
+}
+
+TEST_CASE("filled collider occupancy keeps partial analytic coverage unknown", "[physics][query]") {
+	Store store("query.filled-occupancy-partial");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{1.0f, 1.0f, 1.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{0.5f, -0.5f, -0.5f}, Vector3{1.5f, 0.5f, 0.5f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::UnprovenCoverage);
+}
+
+TEST_CASE("filled collider occupancy preserves a proof beside a partial collider", "[physics][query]") {
+	Store store("query.filled-occupancy-proof-partial");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Position = Vector3{1.5f, 0.0f, 0.0f}, .Extent = Vector3{1.0f, 1.0f, 1.0f}});
+	const Entity containing = Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].Witness == containing);
+}
+
+TEST_CASE("filled collider occupancy preserves a proof beside a second proof", "[physics][query]") {
+	Store store("query.filled-occupancy-two-proofs");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Place(store, Placed{.Extent = Vector3{3.0f, 3.0f, 3.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].WitnessAvailable);
+}
+
+TEST_CASE(
+	"filled collider occupancy preserves a proof beside unresolved baked geometry", "[physics][query]"
+) {
+	Store store("query.filled-occupancy-proof-baked");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}, .Shape = ShapeKind::Hull});
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].WitnessAvailable);
+}
+
+TEST_CASE("filled collider occupancy preserves a proof when broadphase overflows", "[physics][query]") {
+	Store store("query.filled-occupancy-proof-overflow");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}, .Moving = false});
+	for (size_t count = 0; count < engine::physics::QUERY_CANDIDATE_LIMIT; ++count) {
+		Place(
+			store,
+			Placed{
+				.Position = Vector3{1.5f, 0.0f, 0.0f},
+				.Extent = Vector3{1.0f, 1.0f, 1.0f},
+				.Moving = false,
+			}
+		);
+	}
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::None);
+}
+
+TEST_CASE("filled collider occupancy avoids finite float square overflow", "[physics][query]") {
+	Store store("query.filled-occupancy-finite-overflow");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{1.0e38f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere});
+	Index(store);
+	const float near = 0.9e38f;
+	const float next = std::nextafter(near, std::numeric_limits<float>::max());
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{near, near, -1.0f}, Vector3{next, next, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
 }
 
 // --- raycast ------------------------------------------------------------------

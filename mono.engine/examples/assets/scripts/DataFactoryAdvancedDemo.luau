@@ -136,12 +136,21 @@ if snapshot.physics_observations.world_prepared then
 		frame = CFrame.new(0, 1, 0),
 		half_extent = Vector3.new(1.1, 1.1, 1.1),
 	}) :: OverlapResult
+	local filled = DataSceneService:GetFilledOccupancy({
+		minimum_metres = Vector3.new(-1, 0, -1),
+		maximum_metres = Vector3.new(1, 2, 1),
+		columns = 1,
+		rows = 1,
+		layers = 1,
+	})
 	assert(raycast.status == "ok")
 	assert(aabb.status == "ok" and not aabb.overflowed and #aabb.ids <= 64)
 	assert(obb.status == "ok" and not obb.overflowed and #obb.ids <= 64)
+	assert(filled.status == "ok" and filled.cells[1].state == "filled")
 	print("DataFactory raycast", raycast.hit, raycast.id, raycast.distance_metres, raycast.provenance)
 	print("DataFactory aabb", #aabb.ids, aabb.overflowed, aabb.provenance)
 	print("DataFactory obb", #obb.ids, obb.overflowed, obb.provenance)
+	print("DataFactory filled occupancy", filled.cell_order, filled.cells[1].state)
 else
 	print("DataFactory queries unavailable", "physics world is not prepared")
 end

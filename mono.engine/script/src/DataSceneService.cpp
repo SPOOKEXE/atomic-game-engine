@@ -2374,7 +2374,34 @@ namespace engine::script {
 			call.ReturnValue(ColliderBev(call.World(), request).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 26> DATA_SCENE_METHODS{{
+		void ServiceFilledOccupancy(ScriptCall &call) {
+			ScriptValue value;
+			CodecStatus status = CodecStatus::Ok;
+			if (!call.ReadValue(0, value, status)) {
+				call.ReturnValue(Map({{"status", String("invalid_filled_occupancy")}}));
+				return;
+			}
+			const auto dimension = [](const ScriptValue *field, uint8_t &out) {
+				if (field == nullptr || field->Tag != ValueTag::Number || !std::isfinite(field->Number) ||
+					field->Number != std::floor(field->Number) || field->Number < 1.0 || field->Number > 4.0)
+					return false;
+				out = static_cast<uint8_t>(field->Number);
+				return true;
+			};
+			DataSceneFilledOccupancyRequest request;
+			if (!HasOnlyFields(value, {"minimum_metres", "maximum_metres", "columns", "rows", "layers"}) ||
+				!VectorField(value, "minimum_metres", request.MinimumMetres) ||
+				!VectorField(value, "maximum_metres", request.MaximumMetres) ||
+				!dimension(Field(value, "columns"), request.Columns) ||
+				!dimension(Field(value, "rows"), request.Rows) ||
+				!dimension(Field(value, "layers"), request.Layers)) {
+				call.ReturnValue(Map({{"status", String("invalid_filled_occupancy")}}));
+				return;
+			}
+			call.ReturnValue(FilledOccupancy(call.World(), request).Value);
+		}
+
+		constexpr std::array<ServiceMethod, 27> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
@@ -2401,6 +2428,7 @@ namespace engine::script {
 			{"OverlapAABB", ServiceAabb},
 			{"OverlapOBB", ServiceObb},
 			{"GetColliderBev", ServiceColliderBev},
+			{"GetFilledOccupancy", ServiceFilledOccupancy},
 		}};
 	}
 
@@ -2432,7 +2460,18 @@ namespace engine::script {
 				{"editable_image_rgba8", Boolean(true)},
 				{"spatial_queries", Boolean(true)},
 				{"spatial_query_kinds",
-				 Array({String("raycast"), String("aabb_overlap"), String("obb_overlap")})},
+				 Array(
+					 {String("raycast"),
+					  String("aabb_overlap"),
+					  String("obb_overlap"),
+					  String("filled_occupancy")}
+				 )},
+				{"filled_occupancy", Boolean(true)},
+				{"filled_occupancy_schema_version", String("filled-occupancy/v1")},
+				{"filled_occupancy_limitations",
+				 String(
+					 "one analytic primitive per cell; collider unions, hulls and meshes are not inferred"
+				 )},
 				{"max_raycast_distance_metres", Number(100'000.0)},
 				{"physics_contacts", Boolean(physicsPrepared)},
 				{"physics_contact_impulses", Boolean(physicsPrepared)},
@@ -3259,6 +3298,171 @@ namespace engine::script {
 				 })},
 				{"y_minimum_metres", Number(request.MinimumYMetres)},
 				{"y_maximum_metres", Number(request.MaximumYMetres)},
+				{"cells", Array(std::move(cells))},
+			})
+		};
+	}
+
+	DataSceneResult FilledOccupancy(ecs::Store &store, const DataSceneFilledOccupancyRequest &request) {
+		constexpr size_t MAXIMUM_CELLS = 64;
+		if (request.Columns == 0 || request.Columns > 4 || request.Rows == 0 || request.Rows > 4 ||
+			request.Layers == 0 || request.Layers > 4 ||
+			static_cast<size_t>(request.Columns) * request.Rows * request.Layers > MAXIMUM_CELLS ||
+			!std::isfinite(request.MinimumMetres.X) || !std::isfinite(request.MinimumMetres.Y) ||
+			!std::isfinite(request.MinimumMetres.Z) || !std::isfinite(request.MaximumMetres.X) ||
+			!std::isfinite(request.MaximumMetres.Y) || !std::isfinite(request.MaximumMetres.Z) ||
+			request.MinimumMetres.X >= request.MaximumMetres.X ||
+			request.MinimumMetres.Y >= request.MaximumMetres.Y ||
+			request.MinimumMetres.Z >= request.MaximumMetres.Z) {
+			return {"invalid_argument", Map({{"status", String("invalid_filled_occupancy")}})};
+		}
+
+		const auto boundary = [](float minimum, float maximum, uint8_t index, uint8_t count) {
+			if (index == 0) return minimum;
+			if (index == count) return maximum;
+			return static_cast<float>(
+				static_cast<double>(minimum) +
+				(static_cast<double>(maximum) - minimum) * static_cast<double>(index) / count
+			);
+		};
+		const auto hasExtent = [](float minimum, float maximum) {
+			return static_cast<float>((static_cast<double>(maximum) - minimum) * 0.5) > 0.0f;
+		};
+		std::array<core::AABB, MAXIMUM_CELLS> probes;
+		const size_t cellCount = static_cast<size_t>(request.Columns) * request.Rows * request.Layers;
+		for (uint8_t layer = 0; layer < request.Layers; ++layer) {
+			const float minimumY =
+				boundary(request.MinimumMetres.Y, request.MaximumMetres.Y, layer, request.Layers);
+			const float maximumY =
+				boundary(request.MinimumMetres.Y, request.MaximumMetres.Y, layer + 1, request.Layers);
+			for (uint8_t row = 0; row < request.Rows; ++row) {
+				const float minimumZ =
+					boundary(request.MinimumMetres.Z, request.MaximumMetres.Z, row, request.Rows);
+				const float maximumZ =
+					boundary(request.MinimumMetres.Z, request.MaximumMetres.Z, row + 1, request.Rows);
+				for (uint8_t column = 0; column < request.Columns; ++column) {
+					const float minimumX =
+						boundary(request.MinimumMetres.X, request.MaximumMetres.X, column, request.Columns);
+					const float maximumX = boundary(
+						request.MinimumMetres.X, request.MaximumMetres.X, column + 1, request.Columns
+					);
+					if (!hasExtent(minimumX, maximumX) || !hasExtent(minimumY, maximumY) ||
+						!hasExtent(minimumZ, maximumZ))
+						return {"invalid_argument", Map({{"status", String("invalid_filled_occupancy")}})};
+					const size_t index =
+						(static_cast<size_t>(layer) * request.Rows + row) * request.Columns + column;
+					probes[index] = {{minimumX, minimumY, minimumZ}, {maximumX, maximumY, maximumZ}};
+				}
+			}
+		}
+
+		std::unordered_map<std::string, size_t> identities;
+		store.EachEntity([&](ecs::Entity entity) {
+			std::string id;
+			if (StableId(store, entity, id) && id.size() <= MAX_DATA_SCENE_ID_BYTES &&
+				id.find('\0') == std::string::npos && DataSceneUtf8(id))
+				identities[id]++;
+		});
+		std::array<physics::FilledColliderOccupancy, MAXIMUM_CELLS> occupancy;
+		physics::FilledColliderOccupancyBatch(
+			store, std::span{probes}.first(cellCount), std::span{occupancy}.first(cellCount)
+		);
+		const auto reason = [](physics::FilledColliderOccupancy::Reason value) -> const char * {
+			switch (value) {
+			case physics::FilledColliderOccupancy::Reason::None:
+				return "";
+			case physics::FilledColliderOccupancy::Reason::PhysicsUnprepared:
+				return "physics_unprepared";
+			case physics::FilledColliderOccupancy::Reason::CandidateOverflow:
+				return "candidate_overflow";
+			case physics::FilledColliderOccupancy::Reason::BakedGeometryUncertain:
+				return "baked_geometry_uncertain";
+			case physics::FilledColliderOccupancy::Reason::UnprovenCoverage:
+				return "unproven_coverage";
+			case physics::FilledColliderOccupancy::Reason::PhysicsStale:
+				return "physics_stale";
+			case physics::FilledColliderOccupancy::Reason::InvalidProbe:
+				return "invalid_probe";
+			}
+			return "unknown";
+		};
+		std::vector<ScriptValue> cells;
+		cells.reserve(cellCount);
+		for (uint8_t layer = 0; layer < request.Layers; ++layer) {
+			for (uint8_t row = 0; row < request.Rows; ++row) {
+				for (uint8_t column = 0; column < request.Columns; ++column) {
+					const size_t index =
+						(static_cast<size_t>(layer) * request.Rows + row) * request.Columns + column;
+					const physics::FilledColliderOccupancy &answer = occupancy[index];
+					const bool filled = answer.Available && answer.Complete && answer.Filled;
+					const bool empty = answer.Available && answer.Complete && !answer.Filled;
+					ScriptValue witness;
+					bool witnessAvailable = false;
+					if (filled && answer.WitnessAvailable) {
+						std::string id;
+						if (StableId(store, answer.Witness, id) && identities[id] == 1) {
+							witness = String(id);
+							witnessAvailable = true;
+						}
+					}
+					cells.push_back(Map({
+						{"layer", Number(layer)},
+						{"row", Number(row)},
+						{"column", Number(column)},
+						{"minimum_metres",
+						 Array(
+							 {Number(probes[index].Minimum.X),
+							  Number(probes[index].Minimum.Y),
+							  Number(probes[index].Minimum.Z)}
+						 )},
+						{"maximum_metres",
+						 Array(
+							 {Number(probes[index].Maximum.X),
+							  Number(probes[index].Maximum.Y),
+							  Number(probes[index].Maximum.Z)}
+						 )},
+						{"state",
+						 String(
+							 filled	 ? "filled"
+							 : empty ? "empty"
+									 : "unknown"
+						 )},
+						{"filled",
+						 filled	 ? Boolean(true)
+						 : empty ? Boolean(false)
+								 : ScriptValue{}},
+						{"complete", Boolean(answer.Complete)},
+						{"reason",
+						 answer.Why == physics::FilledColliderOccupancy::Reason::None
+							 ? ScriptValue{}
+							 : String(reason(answer.Why))},
+						{"witness_id", std::move(witness)},
+						{"witness_identity_available", Boolean(witnessAvailable)},
+					}));
+				}
+			}
+		}
+		return {
+			"ok",
+			Map({
+				{"status", String("ok")},
+				{"schema_version", String("filled-occupancy/v1")},
+				{"cell_order", String("y_then_z_then_x")},
+				{"minimum_metres",
+				 Array(
+					 {Number(request.MinimumMetres.X),
+					  Number(request.MinimumMetres.Y),
+					  Number(request.MinimumMetres.Z)}
+				 )},
+				{"maximum_metres",
+				 Array(
+					 {Number(request.MaximumMetres.X),
+					  Number(request.MaximumMetres.Y),
+					  Number(request.MaximumMetres.Z)}
+				 )},
+				{"columns", Number(request.Columns)},
+				{"rows", Number(request.Rows)},
+				{"layers", Number(request.Layers)},
 				{"cells", Array(std::move(cells))},
 			})
 		};

@@ -166,7 +166,65 @@ namespace {
 				{"columns", columns},
 			};
 		}
+
+		json FilledRequest(uint8_t layers = 2, uint8_t rows = 2, uint8_t columns = 2) {
+			const auto before = Session.Inspect("occupancy");
+			REQUIRE(
+				Session.Pause("occupancy", DataFactoryPauseScope::AllSystems, before.Clock.Tick).Status ==
+				DataFactoryStatus::Ok
+			);
+			std::string snapshot;
+			REQUIRE(Session.Snapshot("occupancy", snapshot).Status == DataFactoryStatus::Ok);
+			const auto current = Session.Inspect("occupancy");
+			return {
+				{"schema_version", "filled-occupancy/v1"},
+				{"world_id", "occupancy"},
+				{"lifecycle",
+				 {{"tick", current.Clock.Tick},
+				  {"world_epoch", current.WorldEpoch},
+				  {"world_version", current.WorldVersion}}},
+				{"snapshot_id", snapshot},
+				{"minimum_metres", {-2.0, -3.0, -5.0}},
+				{"maximum_metres", {2.0, 3.0, 5.0}},
+				{"columns", columns},
+				{"rows", rows},
+				{"layers", layers},
+			};
+		}
 	};
+}
+
+TEST_CASE(
+	"filled occupancy MCP reports only wholly contained analytic cells", "[control][filled-occupancy]"
+) {
+	Fixture fixture;
+	fixture.Worlds.Enter(fixture.Id, [](engine::ecs::Store &store) {
+		PreparePhysicsWorld(store, 4.0f);
+		const Entity collider = store.Create();
+		store.Set(collider, Transform{CFrame{Vector3{-1.0f, -1.5f, -2.5f}}});
+		Collider shape;
+		shape.Extent = {1.0f, 1.5f, 2.5f};
+		store.Set(collider, shape);
+		SyncBroadphase(store);
+	});
+	bool failed = false;
+	const json reply = Call(fixture.Control, fixture.FilledRequest(), failed, "get_filled_occupancy");
+	INFO(reply.dump());
+	CHECK_FALSE(failed);
+	CHECK(reply.at("schema_version") == "filled-occupancy/v1");
+	CHECK(reply.at("cell_order") == "y_then_z_then_x");
+	REQUIRE(reply.at("cells").size() == 8);
+	CHECK(reply.at("cells").at(0).at("state") == "filled");
+	CHECK(reply.at("cells").at(0).at("filled") == true);
+	CHECK(reply.at("cells").at(4).at("layer") == 1);
+	CHECK(reply.at("cells").at(4).at("row") == 0);
+	CHECK(reply.at("cells").at(4).at("column") == 0);
+	CHECK(reply.at("cells").at(4).at("minimum_metres") == json::array({-2.0, 0.0, -5.0}));
+	CHECK(reply.at("cells").at(4).at("maximum_metres") == json::array({0.0, 3.0, 0.0}));
+	CHECK(reply.at("cells").at(4).at("state") == "unknown");
+	CHECK(reply.at("cells").at(4).at("reason") == "unproven_coverage");
+	CHECK(reply.at("cells").at(7).at("state") == "unknown");
+	CHECK(reply.at("cells").at(7).at("filled").is_null());
 }
 
 TEST_CASE("collider BEV MCP discovery advertises the strict grid schema", "[control][collider-bev]") {

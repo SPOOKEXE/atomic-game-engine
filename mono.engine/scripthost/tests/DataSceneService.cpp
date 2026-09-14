@@ -555,7 +555,7 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				assert(capabilities.scene_snapshot and not capabilities.render_capture)
 				assert(capabilities.camera_metadata_schema_version == "camera-rendering-data/v1")
 				assert(capabilities.physics_observation_schema_version == "physics-observation/v1")
-				assert(capabilities.spatial_queries and capabilities.spatial_query_kinds[3] == "obb_overlap")
+				assert(capabilities.spatial_queries and capabilities.spatial_query_kinds[4] == "filled_occupancy" and capabilities.filled_occupancy)
 				assert(capabilities.max_raycast_distance_metres == 100000)
 				local capture = game:GetService("DataSceneService"):GetCaptureChannels()
 				assert(capture.status == "capability_unsupported" and #capture.channels == 0)
@@ -579,7 +579,7 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 				snapshot.entities[0].id = "mutated";
 				if (game.GetService("DataSceneService").GetSceneSnapshot().entities[0].id !== "fixture/observed") throw new Error("snapshot aliases ECS state");
 				const capabilities = game.GetService("DataSceneService").GetCapabilities();
-				if (!capabilities.scene_snapshot || capabilities.render_capture || capabilities.camera_metadata_schema_version !== "camera-rendering-data/v1" || capabilities.physics_observation_schema_version !== "physics-observation/v1" || !capabilities.spatial_queries || capabilities.spatial_query_kinds[2] !== "obb_overlap" || capabilities.max_raycast_distance_metres !== 100000) throw new Error("capabilities mismatch");
+				if (!capabilities.scene_snapshot || capabilities.render_capture || capabilities.camera_metadata_schema_version !== "camera-rendering-data/v1" || capabilities.physics_observation_schema_version !== "physics-observation/v1" || !capabilities.spatial_queries || capabilities.spatial_query_kinds[3] !== "filled_occupancy" || !capabilities.filled_occupancy || capabilities.max_raycast_distance_metres !== 100000) throw new Error("capabilities mismatch");
 				const capture = game.GetService("DataSceneService").GetCaptureChannels();
 				if (capture.status !== "capability_unsupported" || capture.channels.length !== 0) throw new Error("capture mismatch");
 			)");
@@ -1279,6 +1279,8 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				assert(service:OverlapOBB({frame = CFrame.new(0, 0, 0), half_extent = Vector3.new(1, 1, 1)}).ids[1] == "query/box")
 				local bev = service:GetColliderBev({xz_bounds_metres = {minimum = {-1, -1}, maximum = {1, 1}}, y_minimum_metres = -1, y_maximum_metres = 1, rows = 1, columns = 1})
 				assert(bev.status == "ok" and bev.row_order == "z_major_then_x" and bev.cells[1].state == "occupied")
+				local filled = service:GetFilledOccupancy({minimum_metres = Vector3.new(-1, -1, -1), maximum_metres = Vector3.new(1, 1, 1), columns = 1, rows = 1, layers = 1})
+				assert(filled.status == "ok" and filled.cell_order == "y_then_z_then_x" and filled.cells[1].state == "filled")
 				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(1, 0, 0), max_distance_metres = -1}).status == "invalid_raycast_query")
 				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(0, 0, 0), max_distance_metres = 1}).status == "invalid_raycast_query")
 			)");
@@ -1290,6 +1292,8 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				if (service.OverlapOBB({frame: CFrame.new(0, 0, 0), half_extent: Vector3.new(1, 1, 1)}).ids[0] !== "query/box") throw new Error("obb mismatch");
 				const bev = service.GetColliderBev({xz_bounds_metres: {minimum: [-1, -1], maximum: [1, 1]}, y_minimum_metres: -1, y_maximum_metres: 1, rows: 1, columns: 1});
 				if (bev.status !== "ok" || bev.row_order !== "z_major_then_x" || bev.cells[0].state !== "occupied") throw new Error("BEV mismatch");
+				const filled = service.GetFilledOccupancy({minimum_metres: Vector3.new(-1, -1, -1), maximum_metres: Vector3.new(1, 1, 1), columns: 1, rows: 1, layers: 1});
+				if (filled.status !== "ok" || filled.cell_order !== "y_then_z_then_x" || filled.cells[0].state !== "filled") throw new Error("filled occupancy mismatch");
 				if (service.OverlapAABB({minimum: Vector3.new(1, 1, 1), maximum: Vector3.new(-1, -1, -1)}).status !== "invalid_aabb_query") throw new Error("invalid bounds accepted");
 				if (service.Raycast({origin: Vector3.new(0, 0, 0), direction: Vector3.new(0, 0, 0), max_distance_metres: 1}).status !== "invalid_raycast_query") throw new Error("zero ray accepted");
 			)");

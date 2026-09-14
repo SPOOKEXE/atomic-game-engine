@@ -80,6 +80,7 @@ namespace engine::physics {
 			ecs::Entity Owner;
 			ShapeInstance Shape;
 			bool Present = false;
+			bool BakedGeometry = false;
 		};
 
 		QueryCandidate ResolveCandidate(
@@ -131,6 +132,7 @@ namespace engine::physics {
 				owner,
 				ShapeInstance{transform->Frame, collider->Extent, collider->Shape, hull, mesh},
 				true,
+				collider->Shape == scene::ShapeKind::Hull || collider->Shape == scene::ShapeKind::Mesh,
 			};
 		}
 
@@ -140,6 +142,46 @@ namespace engine::physics {
 				return false;
 			}
 			found[result.Written++] = entity;
+			return true;
+		}
+
+		bool PrimitiveContainsPoint(const ShapeInstance &shape, const core::Vector3 &point) {
+			const core::Vector3 local = shape.Frame.PointToObjectSpace(point);
+			const double x = local.X;
+			const double y = local.Y;
+			const double z = local.Z;
+			const double radius = shape.Extent.X;
+			switch (shape.Shape) {
+			case scene::ShapeKind::Box:
+				return std::abs(x) <= static_cast<double>(shape.Extent.X) &&
+					   std::abs(y) <= static_cast<double>(shape.Extent.Y) &&
+					   std::abs(z) <= static_cast<double>(shape.Extent.Z);
+			case scene::ShapeKind::Sphere:
+				return x * x + y * y + z * z <= radius * radius;
+			case scene::ShapeKind::Cylinder:
+				return std::abs(y) <= static_cast<double>(shape.Extent.Y) && x * x + z * z <= radius * radius;
+			case scene::ShapeKind::Capsule: {
+				const double axis =
+					std::clamp(y, -static_cast<double>(shape.Extent.Y), static_cast<double>(shape.Extent.Y));
+				const double offsetY = y - axis;
+				return x * x + offsetY * offsetY + z * z <= radius * radius;
+			}
+			case scene::ShapeKind::Hull:
+			case scene::ShapeKind::Mesh:
+				return false;
+			}
+			return false;
+		}
+
+		bool PrimitiveContainsBox(const ShapeInstance &shape, const core::AABB &box) {
+			for (uint8_t corner = 0; corner < 8; ++corner) {
+				const core::Vector3 point{
+					(corner & 1) == 0 ? box.Minimum.X : box.Maximum.X,
+					(corner & 2) == 0 ? box.Minimum.Y : box.Maximum.Y,
+					(corner & 4) == 0 ? box.Minimum.Z : box.Maximum.Z,
+				};
+				if (!PrimitiveContainsPoint(shape, point)) return false;
+			}
 			return true;
 		}
 
@@ -526,6 +568,85 @@ namespace engine::physics {
 						answer.Witness = candidate.Owner;
 					}
 				}
+			}
+		}
+	}
+
+	void FilledColliderOccupancyBatch(
+		const ecs::Store &store,
+		std::span<const core::AABB> probes,
+		std::span<FilledColliderOccupancy> results
+	) {
+		const Indexes indexes = IndexesOf(store);
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		const bool stale =
+			prepared != nullptr &&
+			(prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion());
+		const size_t count = std::min(probes.size(), results.size());
+		for (size_t probeIndex = 0; probeIndex < count; ++probeIndex) {
+			FilledColliderOccupancy &answer = results[probeIndex];
+			answer = {};
+			if (!indexes.Valid || stale) {
+				if (stale) answer.Why = FilledColliderOccupancy::Reason::PhysicsStale;
+				continue;
+			}
+
+			const core::AABB &box = probes[probeIndex];
+			if (!std::isfinite(box.Minimum.X) || !std::isfinite(box.Minimum.Y) ||
+				!std::isfinite(box.Minimum.Z) || !std::isfinite(box.Maximum.X) ||
+				!std::isfinite(box.Maximum.Y) || !std::isfinite(box.Maximum.Z) ||
+				box.Minimum.X >= box.Maximum.X || box.Minimum.Y >= box.Maximum.Y ||
+				box.Minimum.Z >= box.Maximum.Z) {
+				answer.Why = FilledColliderOccupancy::Reason::InvalidProbe;
+				continue;
+			}
+
+			answer.Available = true;
+			answer.Complete = true;
+			answer.Why = FilledColliderOccupancy::Reason::None;
+			uint64_t candidates[QUERY_CANDIDATE_LIMIT];
+			bool candidateEvidence = false;
+			bool positiveProof = false;
+			for (const Index &index : indexes.Entry) {
+				const spatial::QueryResult found =
+					QueryOverlap(index, box, spatial::LayerMask::All(), std::span<uint64_t>{candidates});
+				if (found.Overflowed) {
+					candidateEvidence = true;
+					answer.Complete = false;
+					answer.Why = FilledColliderOccupancy::Reason::CandidateOverflow;
+				}
+				for (size_t candidateIndex = 0; candidateIndex < found.Written; ++candidateIndex) {
+					candidateEvidence = true;
+					const QueryCandidate candidate =
+						ResolveCandidate(store, index, candidates[candidateIndex]);
+					if (!candidate.Present) continue;
+					if (candidate.BakedGeometry || candidate.Shape.Shape == scene::ShapeKind::Hull ||
+						candidate.Shape.Shape == scene::ShapeKind::Mesh) {
+						answer.Complete = false;
+						answer.Why = FilledColliderOccupancy::Reason::BakedGeometryUncertain;
+						continue;
+					}
+					if (!PrimitiveContainsBox(candidate.Shape, box) || positiveProof) continue;
+
+					// A complete analytic containment proof cannot be invalidated by a
+					// second collider. The query asks whether the cell is filled, not
+					// which collider owns every point in it.
+					positiveProof = true;
+					answer.WitnessAvailable = true;
+					answer.Witness = candidate.Owner;
+				}
+			}
+			if (positiveProof) {
+				answer.Filled = true;
+				answer.Complete = true;
+				answer.Why = FilledColliderOccupancy::Reason::None;
+			} else if (candidateEvidence) {
+				answer.Complete = false;
+				if (answer.Why == FilledColliderOccupancy::Reason::None)
+					answer.Why = FilledColliderOccupancy::Reason::UnprovenCoverage;
+			} else {
+				answer.Filled = false;
+				answer.WitnessAvailable = false;
 			}
 		}
 	}

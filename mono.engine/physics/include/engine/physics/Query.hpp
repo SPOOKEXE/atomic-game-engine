@@ -91,6 +91,31 @@ namespace engine::physics {
 		Reason Why = Reason::PhysicsUnprepared;
 	};
 
+	// A conservative filled-volume answer for one finite AABB. `Filled` means
+	// one queryable analytic primitive contains every corner of the probe, hence
+	// the complete probe because the supported primitives are convex. It does
+	// not infer coverage from a union of colliders. One supported analytic proof
+	// is decisive, even if another candidate is baked or only touches the cell.
+	// Without that proof, candidate evidence is unknown rather than empty.
+	struct FilledColliderOccupancy {
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			CandidateOverflow,
+			BakedGeometryUncertain,
+			UnprovenCoverage,
+			PhysicsStale,
+			InvalidProbe,
+		};
+
+		bool Available = false;
+		bool Filled = false;
+		bool WitnessAvailable = false;
+		ecs::Entity Witness;
+		bool Complete = false;
+		Reason Why = Reason::PhysicsUnprepared;
+	};
+
 	// One collider a query found.
 	//
 	// An `ecs::Entity` rather than the `uint64_t` a `core::RayHit` carries.
@@ -228,6 +253,17 @@ namespace engine::physics {
 	// into a false free-space claim.
 	void ColliderOccupancyBatch(
 		const ecs::Store &store, std::span<const core::AABB> probes, std::span<ColliderOccupancy> results
+	);
+
+	// Tests whether one analytic collider completely fills each probe AABB.
+	// Baked hull and mesh candidates, candidate overflow, an unprepared world,
+	// and a stale physics index make a negative answer unavailable. A positive
+	// answer is settled even if another candidate is uncertain because one solid
+	// primitive already proves the whole cell filled.
+	void FilledColliderOccupancyBatch(
+		const ecs::Store &store,
+		std::span<const core::AABB> probes,
+		std::span<FilledColliderOccupancy> results
 	);
 
 	// Finds colliders whose exact shape overlaps an oriented box. The broad phase
