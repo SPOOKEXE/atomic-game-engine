@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -162,6 +163,9 @@ namespace engine::render {
 		DataCaptureScalar Scalar = DataCaptureScalar::Unknown;
 		DataCaptureColourSpace ColourSpace = DataCaptureColourSpace::Unknown;
 		DataCaptureOrigin Origin = DataCaptureOrigin::TopLeft;
+		// Present only for the ambient-occlusion plane, including an explicit
+		// Unavailable state for an unrecognised R8 source.
+		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
 		// BLAKE3-256 of Bytes. It is zero until this plane is Ready.
 		assets::ContentHash Hash;
 		std::vector<std::byte> Bytes;

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +21,18 @@ namespace engine::script {
 		uint64_t ViewSlot = 0;
 		std::vector<std::string> Channels;
 		std::string TemporalHistory;
+	};
+
+	struct DataCaptureBridgeAmbientOcclusion {
+		std::string SourceState;
+		std::optional<uint64_t> ProducerFrame;
+		std::optional<bool> Enabled;
+		std::optional<uint32_t> SampleCount;
+		std::optional<double> RadiusWorldUnits;
+		std::optional<std::string> Denoiser;
+		std::optional<std::string> TemporalHistory;
+		std::optional<double> BackgroundValue;
+		std::optional<std::string> BackgroundClassification;
 	};
 
 	struct DataCaptureBridgePlane {
@@ -42,6 +55,7 @@ namespace engine::script {
 		std::string Packing;
 		// Empty when a channel has no extra estimator provenance.
 		std::string Provenance;
+		std::optional<DataCaptureBridgeAmbientOcclusion> AmbientOcclusion;
 	};
 	struct DataCaptureBridgeObjectLabel {
 		uint32_t Label = 0;

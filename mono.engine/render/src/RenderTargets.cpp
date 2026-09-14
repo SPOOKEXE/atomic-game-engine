@@ -431,6 +431,9 @@ namespace engine::render {
 				gpu::ReleaseTexture(Device, texture);
 			}
 		}
+		// A resized or released target must not lend its old producer frame to
+		// the next allocation.
+		slot.OcclusionProvenance = {};
 		slot = {};
 	}
 

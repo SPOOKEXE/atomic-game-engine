@@ -7,6 +7,7 @@
 // samplers, pushes the uniforms and sets the viewport, so a node added here
 // cannot forget the scissor and scribble outside its own rectangle.
 
+#include "../SsaoSettings.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -117,7 +118,19 @@ namespace engine::render {
 					if (inputs[index].Texture == first.Texture ||
 						(merge && inputs[index].Texture == second.Texture))
 						return false;
-				if (response && !GraphEnabled(core::Name("ssao"))) ClearOcclusion();
+				if (response && !GraphEnabled(core::Name("ssao"))) {
+					const uint32_t resolved = scene::ResolveRenderFeatures(
+						scene::ALL_RENDER_FEATURES,
+						CurrentLighting.RenderFeatures,
+						DrawCamera.RenderFeatures,
+						{},
+						SupportedRenderFeatures(State->Caps)
+					).Enabled;
+					ClearOcclusion(
+						AmbientOcclusionSourceState::ClearedNoPass,
+						(resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) != 0u
+					);
+				}
 				EnterNamedPass(context.Name);
 				SDL_GPUColorTargetInfo targets[2]{};
 				targets[0].texture = first.Texture;
@@ -401,7 +414,7 @@ namespace engine::render {
 			)
 										  .Enabled;
 			if ((resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) == 0u) {
-				recording.ClearOcclusion();
+				recording.ClearOcclusion(AmbientOcclusionSourceState::ClearedDisabled, false);
 				return true;
 			}
 			const Impl::PbrDimensions &pbrDimensions = recording.PbrDimensions;
@@ -459,6 +472,17 @@ namespace engine::render {
 				nullptr,
 				SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f}
 			);
+			pbr.OcclusionProvenance = {
+				.SourceState = AmbientOcclusionSourceState::Estimated,
+				.ProducerFrame = State->FrameCounter,
+				.Enabled = true,
+				.SampleCount = SSAO_SAMPLE_COUNT,
+				.RadiusWorldUnits = SSAO_RADIUS_WORLD_UNITS,
+				.Denoiser = AmbientOcclusionDenoiser::None,
+				.TemporalHistory = AmbientOcclusionTemporalHistory::Disabled,
+				.BackgroundValue = 1.0f,
+				.BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable
+			};
 			return true;
 		});
 
@@ -474,7 +498,19 @@ namespace engine::render {
 			SDL_GPUSampler *const sampler = recording.Sampler;
 			const auto &lightingBindings = recording.LightingBindings;
 			const auto graphEnabled = [&recording](core::Name kind) { return recording.GraphEnabled(kind); };
-			const auto clearOcclusion = [&recording] { recording.ClearOcclusion(); };
+			const auto clearOcclusion = [&recording, State] {
+				const uint32_t resolved = scene::ResolveRenderFeatures(
+					scene::ALL_RENDER_FEATURES,
+					recording.CurrentLighting.RenderFeatures,
+					recording.DrawCamera.RenderFeatures,
+					{},
+					SupportedRenderFeatures(State->Caps)
+				).Enabled;
+				recording.ClearOcclusion(
+					AmbientOcclusionSourceState::ClearedNoPass,
+					(resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) != 0u
+				);
+			};
 			const auto fullscreen = [&recording](
 										core::Name name,
 										SDL_GPUGraphicsPipeline *pipeline,

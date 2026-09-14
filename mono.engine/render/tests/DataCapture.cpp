@@ -143,8 +143,48 @@ TEST_CASE(
 	ambient.ColourSpace = DataCaptureColourSpace::NotApplicable;
 	ambient.Bytes = {std::byte{0}, std::byte{255}};
 	ambient.Hash = engine::assets::Hasher::Of(ambient.Bytes);
+	ambient.AmbientOcclusion = {
+		.SourceState = AmbientOcclusionSourceState::Unavailable,
+		.ProducerFrame = std::nullopt,
+		.Enabled = std::nullopt,
+		.SampleCount = std::nullopt,
+		.RadiusWorldUnits = std::nullopt,
+		.Denoiser = std::nullopt,
+		.TemporalHistory = std::nullopt,
+		.BackgroundValue = std::nullopt,
+		.BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable
+	};
 	capture_record_validation::State ambientState;
 	CHECK(capture_record_validation::Plane(ticket, ambient, 1, ambientState));
+	ambient.AmbientOcclusion->Enabled = true;
+	capture_record_validation::State unavailableWithFacts;
+	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, unavailableWithFacts));
+	ambient.AmbientOcclusion = {.SourceState = AmbientOcclusionSourceState::Estimated,
+								 .ProducerFrame = 7,
+								 .Enabled = true,
+								 .SampleCount = 12,
+								 .RadiusWorldUnits = 0.65f,
+								 .Denoiser = AmbientOcclusionDenoiser::None,
+								 .TemporalHistory = AmbientOcclusionTemporalHistory::Disabled,
+								 .BackgroundValue = 1.0f,
+								 .BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable};
+	capture_record_validation::State estimated;
+	CHECK(capture_record_validation::Plane(ticket, ambient, 1, estimated));
+	ambient.AmbientOcclusion->SourceState = AmbientOcclusionSourceState::ClearedDisabled;
+	ambient.AmbientOcclusion->Enabled = false;
+	capture_record_validation::State disabled;
+	CHECK(capture_record_validation::Plane(ticket, ambient, 1, disabled));
+	ambient.AmbientOcclusion = {.SourceState = AmbientOcclusionSourceState::ClearedNoPass,
+								 .ProducerFrame = 8,
+								 .Enabled = true,
+								 .SampleCount = std::nullopt,
+								 .RadiusWorldUnits = std::nullopt,
+								 .Denoiser = std::nullopt,
+								 .TemporalHistory = std::nullopt,
+								 .BackgroundValue = 1.0f,
+								 .BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable};
+	capture_record_validation::State noPass;
+	CHECK(capture_record_validation::Plane(ticket, ambient, 1, noPass));
 	ambient.RowStride = 1;
 	capture_record_validation::State malformedAmbient;
 	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, malformedAmbient));

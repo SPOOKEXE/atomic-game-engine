@@ -1,4 +1,5 @@
 #include "RenderFixture.hpp"
+#include "AmbientOcclusionCapture.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -36,6 +37,33 @@
 #include <string>
 
 TEST_SUITE_ID("engine.render.resourceimage")
+
+TEST_CASE("custom R8 capture does not inherit SSAO facts", "[render][resourceimage]") {
+	const engine::render::AmbientOcclusionProvenance builtIn{
+		.SourceState = engine::render::AmbientOcclusionSourceState::Estimated,
+		.ProducerFrame = 7,
+		.Enabled = true,
+		.SampleCount = 12,
+		.RadiusWorldUnits = 0.65f,
+		.Denoiser = engine::render::AmbientOcclusionDenoiser::None,
+		.TemporalHistory = engine::render::AmbientOcclusionTemporalHistory::Disabled,
+		.BackgroundValue = 1.0f,
+		.BackgroundClassification = engine::render::AmbientOcclusionBackgroundClassification::Unavailable
+	};
+	const auto custom = engine::render::CapturedAmbientOcclusion(
+		engine::render::ResourceImageFormat::R8_UNorm, false, builtIn
+	);
+	REQUIRE(custom);
+	CHECK(custom->SourceState == engine::render::AmbientOcclusionSourceState::Unavailable);
+	CHECK_FALSE(custom->ProducerFrame);
+	CHECK_FALSE(custom->Enabled);
+	CHECK_FALSE(custom->SampleCount);
+	CHECK_FALSE(custom->RadiusWorldUnits);
+	CHECK_FALSE(custom->Denoiser);
+	CHECK_FALSE(custom->TemporalHistory);
+	CHECK_FALSE(custom->BackgroundValue);
+	CHECK(custom->BackgroundClassification == engine::render::AmbientOcclusionBackgroundClassification::Unavailable);
+}
 
 namespace {
 	using namespace engine;
@@ -1128,6 +1156,83 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	CHECK(occlusion.Height == std::max(1u, target.Height / 2));
 	CHECK(occlusion.RowStride == occlusion.Width);
 	CHECK(occlusion.Pixels.size() == size_t(occlusion.Width) * occlusion.Height);
+	REQUIRE(occlusion.AmbientOcclusion);
+	CHECK(occlusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::Estimated);
+	CHECK(occlusion.AmbientOcclusion->ProducerFrame == occlusion.CaptureFrame);
+	CHECK(occlusion.AmbientOcclusion->Enabled == true);
+	CHECK(occlusion.AmbientOcclusion->SampleCount == 12);
+	CHECK(occlusion.AmbientOcclusion->RadiusWorldUnits == 0.65f);
+	CHECK(occlusion.AmbientOcclusion->Denoiser == render::AmbientOcclusionDenoiser::None);
+	CHECK(occlusion.AmbientOcclusion->TemporalHistory == render::AmbientOcclusionTemporalHistory::Disabled);
+	CHECK(occlusion.AmbientOcclusion->BackgroundValue == 1.0f);
+	CHECK(
+		occlusion.AmbientOcclusion->BackgroundClassification ==
+		render::AmbientOcclusionBackgroundClassification::Unavailable
+	);
+
+	// The output capture remains live on an unchanged scene while SSAO stays in
+	// the PBR slot. Its download is newer, but its producer is not.
+	view.Damage.Scene = false;
+	const render::ResourceImageRequest cached{6, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	REQUIRE(renderer.RequestResourceImage(cached));
+	const render::FrameResult cachedFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(cachedFrame.Ran(cached.Node));
+	CHECK_FALSE(cachedFrame.Ran(core::Name("ssao")));
+	const auto reused = AwaitImage(renderer, cached.Token);
+	REQUIRE(reused.AmbientOcclusion);
+	CHECK(reused.CaptureFrame > occlusion.CaptureFrame);
+	CHECK(reused.AmbientOcclusion->ProducerFrame == occlusion.AmbientOcclusion->ProducerFrame);
+	CHECK(reused.AmbientOcclusion->ProducerFrame < reused.CaptureFrame);
+
+	view.Damage.Scene = true;
+	view.OverrideLighting = true;
+	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	view.Camera.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	const render::ResourceImageRequest disabled{4, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	REQUIRE(renderer.RequestResourceImage(disabled));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(disabled.Node));
+	const auto cleared = AwaitImage(renderer, disabled.Token);
+	REQUIRE(cleared.AmbientOcclusion);
+	CHECK(cleared.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedDisabled);
+	CHECK(cleared.AmbientOcclusion->ProducerFrame == cleared.CaptureFrame);
+	CHECK(cleared.AmbientOcclusion->Enabled == false);
+	CHECK(cleared.AmbientOcclusion->SampleCount == 12);
+	CHECK(cleared.AmbientOcclusion->RadiusWorldUnits == 0.65f);
+
+	graph::PipelineDocument noPassDocument = graph::DefaultPbrDataCaptureDocument();
+	noPassDocument.Record(
+		{.Kind = graph::EditKind::Enable, .Name = core::Name("ssao"), .Enabled = false}
+	);
+	graph::RenderGraph noPassPipeline;
+	REQUIRE(graph::Build(noPassDocument, noPassPipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const core::Name noPassName("default-data-capture-no-ssao");
+	REQUIRE(renderer.SetPipeline(noPassName, noPassPipeline));
+	view.Pipeline = noPassName;
+	view.Lighting.RenderFeatures.Disable &= ~scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	view.Camera.RenderFeatures.Disable &= ~scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	const render::ResourceImageRequest noPass{5, noPassName, core::Name("data-capture-ambient-occlusion"), 0};
+	REQUIRE(renderer.RequestResourceImage(noPass));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(noPass.Node));
+	const auto noPassOcclusion = AwaitImage(renderer, noPass.Token);
+	REQUIRE(noPassOcclusion.AmbientOcclusion);
+	CHECK(noPassOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass);
+	CHECK(noPassOcclusion.AmbientOcclusion->ProducerFrame == noPassOcclusion.CaptureFrame);
+	CHECK(noPassOcclusion.AmbientOcclusion->Enabled == true);
+	CHECK_FALSE(noPassOcclusion.AmbientOcclusion->SampleCount);
+	CHECK_FALSE(noPassOcclusion.AmbientOcclusion->RadiusWorldUnits);
+	CHECK_FALSE(noPassOcclusion.AmbientOcclusion->Denoiser);
+	CHECK_FALSE(noPassOcclusion.AmbientOcclusion->TemporalHistory);
+
+	view.Camera.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	const render::ResourceImageRequest noPassDisabled{
+		7, noPassName, core::Name("data-capture-ambient-occlusion"), 0
+	};
+	REQUIRE(renderer.RequestResourceImage(noPassDisabled));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(noPassDisabled.Node));
+	const auto noPassDisabledOcclusion = AwaitImage(renderer, noPassDisabled.Token);
+	REQUIRE(noPassDisabledOcclusion.AmbientOcclusion);
+	CHECK(noPassDisabledOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass);
+	CHECK(noPassDisabledOcclusion.AmbientOcclusion->Enabled == false);
 
 	const render::ResourceImageRequest residentAmbient{
 		3,

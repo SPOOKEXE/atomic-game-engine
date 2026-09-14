@@ -457,6 +457,9 @@ namespace engine::render {
 			SDL_GPUTexture *PartIds = nullptr;
 			SDL_GPUTexture *LinearDepth = nullptr;
 			SDL_GPUTexture *Occlusion = nullptr;
+			// Kept with the allocation so a graph cache hit retains the frame that
+			// actually produced this occlusion image.
+			AmbientOcclusionProvenance OcclusionProvenance;
 			SDL_GPUTexture *Lit = nullptr;
 			SDL_GPUTexture *SkyLit = nullptr;
 			PbrDimensions Dimensions;

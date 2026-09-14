@@ -182,7 +182,8 @@ namespace {
 				 .ColourSpace = "linear",
 				 .Origin = "top_left",
 				 .Packing = {},
-				 .Provenance = {}},
+				 .Provenance = {},
+				 .AmbientOcclusion = {}},
 				{.Channel = "ambient_occlusion",
 				 .Status = "ready",
 				 .Resource = "capture/1/ambient_occlusion",
@@ -197,7 +198,30 @@ namespace {
 				 .ColourSpace = "not_applicable",
 				 .Origin = "top_left",
 				 .Packing = "unorm8",
-				 .Provenance = "ssao_estimator_visibility_factor_not_ground_truth"}
+				 .Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
+				 .AmbientOcclusion =
+					 engine::script::DataCaptureBridgeAmbientOcclusion{
+						 .SourceState = "estimated",
+						 .ProducerFrame = 9,
+						 .Enabled = true,
+						 .SampleCount = 12,
+						 .RadiusWorldUnits = 0.65,
+						 .Denoiser = "none",
+						 .TemporalHistory = "none",
+						 .BackgroundValue = 1.0,
+						 .BackgroundClassification = "unavailable"}}
+			};
+			if (UnavailableAmbientOcclusion)
+				poll.Planes[1].AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
+					.SourceState = "unavailable",
+					.ProducerFrame = std::nullopt,
+					.Enabled = std::nullopt,
+					.SampleCount = std::nullopt,
+					.RadiusWorldUnits = std::nullopt,
+					.Denoiser = std::nullopt,
+					.TemporalHistory = std::nullopt,
+					.BackgroundValue = std::nullopt,
+					.BackgroundClassification = "unavailable"
 			};
 			return true;
 		}
@@ -235,12 +259,16 @@ namespace {
 		const std::vector<std::string> &RequestedChannels() const {
 			return Channels;
 		}
+		void UseUnavailableAmbientOcclusion() {
+			UnavailableAmbientOcclusion = true;
+		}
 
 	  private:
 		std::string Instance;
 		std::string Snapshot;
 		std::vector<std::string> Channels;
 		bool Queued = false;
+		bool UnavailableAmbientOcclusion = false;
 	};
 }
 
@@ -404,6 +432,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(poll["planes"][0]["shape"] == json::array({1, 2, 4}));
 	CHECK(poll["planes"][0]["snapshot_id"] == "snapshot-1");
 	CHECK(poll["planes"][0]["dtype"] == "float16");
+	CHECK(poll["planes"][0]["ambient_occlusion"].is_null());
 	CHECK(poll["planes"][1]["channel"] == "ambient_occlusion");
 	CHECK(poll["planes"][1]["shape"] == json::array({1, 1}));
 	CHECK(poll["planes"][1]["dtype"] == "unorm8");
@@ -411,6 +440,31 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(poll["planes"][1]["colour_space"] == "not_applicable");
 	CHECK(poll["planes"][1]["origin"] == "top_left");
 	CHECK(poll["planes"][1]["provenance"] == "ssao_estimator_visibility_factor_not_ground_truth");
+	const json &ambient = poll["planes"][1]["ambient_occlusion"];
+	CHECK(ambient["schema_version"] == "ssao-provenance/v1");
+	CHECK(ambient["source_state"] == "estimated");
+	CHECK(ambient["producer_frame"] == 9);
+	CHECK(ambient["enabled"] == true);
+	CHECK(ambient["sample_count"] == 12);
+	CHECK(ambient["radius_world_units"] == 0.65);
+	CHECK(ambient["denoiser"] == "none");
+	CHECK(ambient["temporal_history"] == "none");
+	CHECK(ambient["background_value"] == 1.0);
+	CHECK(ambient["background_classification"] == "unavailable");
+	bridge->UseUnavailableAmbientOcclusion();
+	const json unavailablePoll =
+		Called(surface, "poll_capture", json{{"instance_id", "capture-world"}, {"ticket", 1}});
+	const json &unavailableAmbient = unavailablePoll["planes"][1]["ambient_occlusion"];
+	CHECK(unavailableAmbient["schema_version"] == "ssao-provenance/v1");
+	CHECK(unavailableAmbient["source_state"] == "unavailable");
+	CHECK(unavailableAmbient["producer_frame"].is_null());
+	CHECK(unavailableAmbient["enabled"].is_null());
+	CHECK(unavailableAmbient["sample_count"].is_null());
+	CHECK(unavailableAmbient["radius_world_units"].is_null());
+	CHECK(unavailableAmbient["denoiser"].is_null());
+	CHECK(unavailableAmbient["temporal_history"].is_null());
+	CHECK(unavailableAmbient["background_value"].is_null());
+	CHECK(unavailableAmbient["background_classification"] == "unavailable");
 	CHECK(poll["camera"]["crop"] == json::array({0.125, 0.25, 0.5, 0.75}));
 	CHECK(poll["camera"]["crop_convention"] == "normalized_full_view_left_top_width_height");
 	CHECK_FALSE(poll["camera"]["lens_distortion_available"]);

@@ -15,6 +15,7 @@
 // before v0.15, so every bug in one was available to the other.
 
 #include "GraphHistory.hpp"
+#include "SsaoSettings.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -1222,7 +1223,7 @@ namespace engine::render {
 		return true;
 	}
 
-	void ViewRecording::ClearOcclusion() {
+	void ViewRecording::ClearOcclusion(AmbientOcclusionSourceState sourceState, bool enabled) {
 		Impl::PbrSlot &pbr = *Pbr;
 		SDL_GPUCommandBuffer *const command = Command;
 
@@ -1234,5 +1235,30 @@ namespace engine::render {
 		clearAo.cycle = true;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &clearAo, 1, nullptr);
 		SDL_EndGPURenderPass(pass);
+
+		pbr.OcclusionProvenance = {
+			.SourceState = sourceState,
+			.ProducerFrame = sourceState == AmbientOcclusionSourceState::ClearedDisabled ||
+							 sourceState == AmbientOcclusionSourceState::ClearedNoPass
+							 ? std::optional<uint64_t>(State->FrameCounter)
+							 : std::nullopt,
+			.Enabled = enabled,
+			.SampleCount = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+							   ? std::optional<uint32_t>(SSAO_SAMPLE_COUNT)
+							   : std::nullopt,
+			.RadiusWorldUnits = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+									? std::optional<float>(SSAO_RADIUS_WORLD_UNITS)
+									: std::nullopt,
+			.Denoiser = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+							? std::optional<AmbientOcclusionDenoiser>(AmbientOcclusionDenoiser::None)
+							: std::nullopt,
+			.TemporalHistory = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+								   ? std::optional<AmbientOcclusionTemporalHistory>(
+										 AmbientOcclusionTemporalHistory::Disabled
+									 )
+								   : std::nullopt,
+			.BackgroundValue = 1.0f,
+			.BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable
+		};
 	}
 }

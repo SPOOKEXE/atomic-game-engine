@@ -1,3 +1,4 @@
+#include "AmbientOcclusionCapture.hpp"
 #include "RendererState.hpp"
 
 #include <engine/core/Log.hpp>
@@ -506,6 +507,13 @@ namespace engine::render {
 			slot.Image.CameraNearPlane = ActiveDataCaptureSource.Camera.NearPlane;
 			slot.Image.CameraFarPlane = ActiveDataCaptureSource.Camera.FarPlane;
 			slot.Image.Resource = resource;
+			const bool builtInOcclusion = resource == core::Name("occlusion") && viewSlot < PbrSlots.size() &&
+				source.Texture == PbrSlots[viewSlot].Occlusion;
+			slot.Image.AmbientOcclusion = CapturedAmbientOcclusion(
+				sourceCaptureFormat,
+				builtInOcclusion,
+				builtInOcclusion ? PbrSlots[viewSlot].OcclusionProvenance : AmbientOcclusionProvenance{}
+			);
 			slot.Image.DepthResource = depthResource;
 			slot.Image.NormalResource = normalResource;
 			slot.Image.AmbientResponseResource = ambientResponseResource;

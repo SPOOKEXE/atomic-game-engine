@@ -597,7 +597,7 @@ namespace engine::render {
 
 		// Fills the occlusion image with "nothing is occluded", for a graph that
 		// lights without having authored an `ssao` node.
-		void ClearOcclusion();
+		void ClearOcclusion(AmbientOcclusionSourceState sourceState, bool enabled);
 
 		// --- the node families ---------------------------------------------
 		//

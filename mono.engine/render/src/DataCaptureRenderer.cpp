@@ -152,6 +152,7 @@ namespace engine::render {
 					DataCaptureColourSpace::NotApplicable,
 					ResourceImageFormat::R8_UNorm
 				);
+				if (plane.Status == DataCaptureStatus::Ready) plane.AmbientOcclusion = image.AmbientOcclusion;
 				break;
 			case DataCaptureChannel::ObjectIds:
 			case DataCaptureChannel::SemanticMask:

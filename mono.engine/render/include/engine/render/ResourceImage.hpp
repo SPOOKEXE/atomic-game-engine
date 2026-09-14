@@ -37,6 +37,29 @@ namespace engine::render {
 		RGBA16_Float,
 		R32_UInt
 	};
+	// The state of the built-in SSAO image that produced an occlusion capture.
+	// It describes estimator provenance, never physical ambient-occlusion truth.
+	enum class AmbientOcclusionSourceState : uint8_t {
+		Estimated,
+		ClearedDisabled,
+		ClearedNoPass,
+		Unavailable
+	};
+	enum class AmbientOcclusionDenoiser : uint8_t { None };
+	enum class AmbientOcclusionTemporalHistory : uint8_t { Disabled };
+	enum class AmbientOcclusionBackgroundClassification : uint8_t { Unavailable };
+
+	struct AmbientOcclusionProvenance {
+		AmbientOcclusionSourceState SourceState = AmbientOcclusionSourceState::Unavailable;
+		std::optional<uint64_t> ProducerFrame;
+		std::optional<bool> Enabled;
+		std::optional<uint32_t> SampleCount;
+		std::optional<float> RadiusWorldUnits;
+		std::optional<AmbientOcclusionDenoiser> Denoiser;
+		std::optional<AmbientOcclusionTemporalHistory> TemporalHistory;
+		std::optional<float> BackgroundValue;
+		std::optional<AmbientOcclusionBackgroundClassification> BackgroundClassification;
+	};
 	// Transfer allocations retained by all capture slots share this bound.
 	inline constexpr size_t MAX_RESOURCE_IMAGE_STAGING_BYTES = 32 * 1024 * 1024;
 	struct ResourceShadowCapture {
@@ -71,6 +94,9 @@ namespace engine::render {
 		uint32_t Height = 0;
 		uint32_t RowStride = 0;
 		ResourceImageFormat Format = ResourceImageFormat::Unknown;
+		// Present for an R8 ambient-occlusion capture. Custom R8 resources carry
+		// the explicit Unavailable state rather than borrowed built-in settings.
+		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
 		// Owned top-left rows in the native Format, in little-endian order.
 		std::vector<std::byte> Pixels;
 		// Optional declared R32F capture input, copied in the same submission.

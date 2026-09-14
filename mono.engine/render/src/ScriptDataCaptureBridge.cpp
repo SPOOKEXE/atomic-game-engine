@@ -113,6 +113,50 @@ namespace engine::render {
 				 : "";
 		}
 
+		const char *SourceState(AmbientOcclusionSourceState state) {
+			switch (state) {
+			case AmbientOcclusionSourceState::Estimated:
+				return "estimated";
+			case AmbientOcclusionSourceState::ClearedDisabled:
+				return "cleared_disabled";
+			case AmbientOcclusionSourceState::ClearedNoPass:
+				return "cleared_no_pass";
+			case AmbientOcclusionSourceState::Unavailable:
+				return "unavailable";
+			}
+			return "unavailable";
+		}
+
+		std::optional<script::DataCaptureBridgeAmbientOcclusion>
+		CopyAmbientOcclusion(const std::optional<AmbientOcclusionProvenance> &source) {
+			if (!source) return std::nullopt;
+			const auto denoiser = source->Denoiser == std::optional(AmbientOcclusionDenoiser::None)
+				? std::optional<std::string>("none")
+				: std::nullopt;
+			const auto temporalHistory =
+				source->TemporalHistory == std::optional(AmbientOcclusionTemporalHistory::Disabled)
+					? std::optional<std::string>("none")
+					: std::nullopt;
+			const auto backgroundClassification = source->BackgroundClassification
+				? std::optional<std::string>("unavailable")
+				: std::nullopt;
+			return script::DataCaptureBridgeAmbientOcclusion{
+				.SourceState = SourceState(source->SourceState),
+				.ProducerFrame = source->ProducerFrame,
+				.Enabled = source->Enabled,
+				.SampleCount = source->SampleCount,
+				.RadiusWorldUnits = source->RadiusWorldUnits
+					? std::optional<double>(*source->RadiusWorldUnits)
+					: std::nullopt,
+				.Denoiser = std::move(denoiser),
+				.TemporalHistory = std::move(temporalHistory),
+				.BackgroundValue = source->BackgroundValue
+					? std::optional<double>(*source->BackgroundValue)
+					: std::nullopt,
+				.BackgroundClassification = std::move(backgroundClassification)
+			};
+		}
+
 		std::string ResourceId(uint64_t ticket, DataCaptureChannel channel) {
 			return "capture/" + std::to_string(ticket) + "/" + std::string(DataCaptureChannelName(channel));
 		}
@@ -528,7 +572,8 @@ namespace engine::render {
 								: plane.Scalar == DataCaptureScalar::UNorm8	   ? "rgba8_unorm"
 								: plane.Scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
 																									   : "",
-					 .Provenance = Provenance(plane.Channel)}
+					 .Provenance = Provenance(plane.Channel),
+					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion)}
 				);
 				if (!plane.Bytes.empty()) {
 					if (totalBytes > RETAINED_BYTE_LIMIT ||

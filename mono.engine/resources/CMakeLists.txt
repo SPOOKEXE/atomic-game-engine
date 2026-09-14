@@ -72,11 +72,28 @@ if(NOT joint_words_line MATCHES "=[ \t]*([0-9]+)")
 endif()
 set(joint_words "${CMAKE_MATCH_1}")
 
+# SSAO settings are renderer-owned constants. Reading them here gives every
+# built-in shader the same values the capture provenance reports.
+set(ssao_header "${CMAKE_SOURCE_DIR}/mono.engine/render/src/SsaoSettings.hpp")
+file(STRINGS "${ssao_header}" ssao_samples_line REGEX "inline constexpr uint32_t SSAO_SAMPLE_COUNT")
+if(NOT ssao_samples_line MATCHES "=[ \t]*([0-9]+)")
+	message(FATAL_ERROR "resources: could not read SSAO_SAMPLE_COUNT from ${ssao_header}")
+endif()
+set(ssao_sample_count "${CMAKE_MATCH_1}")
+file(STRINGS "${ssao_header}" ssao_radius_line REGEX "inline constexpr float SSAO_RADIUS_WORLD_UNITS")
+if(NOT ssao_radius_line MATCHES "=[ \t]*([0-9]+(\\.[0-9]+)?)f")
+	message(FATAL_ERROR "resources: could not read SSAO_RADIUS_WORLD_UNITS from ${ssao_header}")
+endif()
+set(ssao_radius_world_units "${CMAKE_MATCH_1}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ssao_header}")
+
 mono_add_library(resources
 	SHADER_DEFINES
 		MAX_LIGHTS=${max_scene_lights}
 		GPU_INSTANCE_WORDS=${instance_words}
 		GPU_JOINT_WORDS=${joint_words}
+		SSAO_SAMPLE_COUNT=${ssao_sample_count}
+		SSAO_RADIUS_WORLD_UNITS=${ssao_radius_world_units}
 
 	TIER client
 	DEPS Engine::core

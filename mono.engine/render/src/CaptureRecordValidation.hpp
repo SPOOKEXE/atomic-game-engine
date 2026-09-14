@@ -37,6 +37,32 @@ namespace engine::render::capture_record_validation {
 				   : 0;
 	}
 
+	inline bool ValidAmbientOcclusion(const AmbientOcclusionProvenance &provenance) {
+		const bool noFacts = !provenance.ProducerFrame && !provenance.Enabled && !provenance.SampleCount &&
+			!provenance.RadiusWorldUnits && !provenance.Denoiser && !provenance.TemporalHistory &&
+			!provenance.BackgroundValue;
+		if (provenance.SourceState == AmbientOcclusionSourceState::Unavailable)
+			return noFacts && provenance.BackgroundClassification &&
+				*provenance.BackgroundClassification == AmbientOcclusionBackgroundClassification::Unavailable;
+		if (!provenance.BackgroundValue || *provenance.BackgroundValue != 1.0f ||
+			!provenance.BackgroundClassification ||
+			*provenance.BackgroundClassification != AmbientOcclusionBackgroundClassification::Unavailable)
+			return false;
+		if (provenance.SourceState == AmbientOcclusionSourceState::ClearedNoPass)
+			return provenance.ProducerFrame && provenance.Enabled &&
+				!provenance.SampleCount && !provenance.RadiusWorldUnits && !provenance.Denoiser &&
+				!provenance.TemporalHistory;
+		const bool builtIn = provenance.Enabled && provenance.SampleCount && provenance.RadiusWorldUnits &&
+			provenance.Denoiser && provenance.TemporalHistory &&
+			*provenance.Denoiser == AmbientOcclusionDenoiser::None &&
+			*provenance.TemporalHistory == AmbientOcclusionTemporalHistory::Disabled;
+		return provenance.SourceState == AmbientOcclusionSourceState::Estimated
+			? builtIn && *provenance.Enabled && provenance.ProducerFrame.has_value()
+			: provenance.SourceState == AmbientOcclusionSourceState::ClearedDisabled
+				? builtIn && !*provenance.Enabled && provenance.ProducerFrame.has_value()
+				: false;
+	}
+
 	inline bool
 	Plane(const DataCaptureTicket &ticket, const DataCapturePlane &plane, uint64_t id, State &state) {
 		const std::string channel(DataCaptureChannelName(plane.Channel));
@@ -53,13 +79,17 @@ namespace engine::render::capture_record_validation {
 								  plane.Status == DataCaptureStatus::Invalid ||
 								  plane.Status == DataCaptureStatus::Failed ||
 								  plane.Status == DataCaptureStatus::Cancelled;
-			return terminal && !plane.Resource.IsValid() && plane.Hash.IsZero() && plane.Bytes.empty() &&
+			return terminal && !plane.AmbientOcclusion && !plane.Resource.IsValid() && plane.Hash.IsZero() &&
+				   plane.Bytes.empty() &&
 				   plane.Width == 0 && plane.Height == 0 && plane.RowStride == 0 &&
 				   plane.Scalar == DataCaptureScalar::Unknown &&
 				   plane.ColourSpace == DataCaptureColourSpace::Unknown;
 		}
 		const size_t stride = MinimumRowStride(plane.Channel, plane.Scalar, plane.Width);
-		if (!plane.Resource.IsValid() || plane.Hash.IsZero() || plane.Width == 0 || plane.Height == 0 ||
+		if ((plane.Channel == DataCaptureChannel::AmbientOcclusion
+				 ? !plane.AmbientOcclusion || !ValidAmbientOcclusion(*plane.AmbientOcclusion)
+				 : plane.AmbientOcclusion.has_value()) ||
+			!plane.Resource.IsValid() || plane.Hash.IsZero() || plane.Width == 0 || plane.Height == 0 ||
 			stride == 0 || plane.RowStride < stride || plane.Origin != DataCaptureOrigin::TopLeft ||
 			plane.ColourSpace != ((plane.Channel == DataCaptureChannel::RgbLinearHdr ||
 								   plane.Channel == DataCaptureChannel::PbrEmissive)

@@ -183,6 +183,24 @@ namespace engine::control {
 				dtype = "uint32";
 				packing = "UNorm10A2";
 			}
+			const auto ambientOcclusion = [](const std::optional<script::DataCaptureBridgeAmbientOcclusion> &value) {
+				if (!value) return json(nullptr);
+				const auto nullable = [](const auto &field) -> json {
+					return field ? json(*field) : json(nullptr);
+				};
+				return json{
+					{"schema_version", "ssao-provenance/v1"},
+					{"source_state", value->SourceState},
+					{"producer_frame", nullable(value->ProducerFrame)},
+					{"enabled", nullable(value->Enabled)},
+					{"sample_count", nullable(value->SampleCount)},
+					{"radius_world_units", nullable(value->RadiusWorldUnits)},
+					{"denoiser", nullable(value->Denoiser)},
+					{"temporal_history", nullable(value->TemporalHistory)},
+					{"background_value", nullable(value->BackgroundValue)},
+					{"background_classification", nullable(value->BackgroundClassification)}
+				};
+			};
 			return {
 				{"channel", plane.Channel},
 				{"status", plane.Status},
@@ -196,6 +214,7 @@ namespace engine::control {
 				{"dtype", dtype},
 				{"packing", std::move(packing)},
 				{"provenance", plane.Provenance.empty() ? json(nullptr) : json(plane.Provenance)},
+				{"ambient_occlusion", ambientOcclusion(plane.AmbientOcclusion)},
 				{"row_stride", plane.RowStride},
 				{"colour_space", plane.ColourSpace},
 				{"origin", plane.Origin}

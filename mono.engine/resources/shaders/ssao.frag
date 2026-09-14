@@ -25,9 +25,6 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 Shadow;
 } pass;
 
-const int SAMPLE_COUNT = 12;
-const float WORLD_RADIUS = 0.65;
-
 float Hash(vec2 value) {
 	return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453);
 }
@@ -49,10 +46,10 @@ void main() {
 	vec3 origin = WorldAt(inUv, centre);
 	float turn = Hash(gl_FragCoord.xy) * 6.2831853;
 	float blocked = 0.0;
-	for (int index = 0; index < SAMPLE_COUNT; index++) {
-		float along = (float(index) + 0.5) / float(SAMPLE_COUNT);
+	for (int index = 0; index < SSAO_SAMPLE_COUNT; index++) {
+		float along = (float(index) + 0.5) / float(SSAO_SAMPLE_COUNT);
 		float angle = turn + along * 12.5663706;
-		vec2 at = inUv + vec2(cos(angle), sin(angle)) * along * WORLD_RADIUS / max(centre, 1.0);
+		vec2 at = inUv + vec2(cos(angle), sin(angle)) * along * SSAO_RADIUS_WORLD_UNITS / max(centre, 1.0);
 		float around = texture(depthImage, at).r;
 		if (around >= pass.Planes.y) {
 			continue;
@@ -61,8 +58,8 @@ void main() {
 		float span = length(delta);
 		if (span > 1e-4) {
 			float facing = max(dot(normal, delta / span) - 0.02, 0.0);
-			blocked += facing * smoothstep(1.0, 0.0, span / WORLD_RADIUS);
+			blocked += facing * smoothstep(1.0, 0.0, span / SSAO_RADIUS_WORLD_UNITS);
 		}
 	}
-	outOcclusion = vec4(clamp(1.0 - blocked / float(SAMPLE_COUNT), 0.0, 1.0));
+	outOcclusion = vec4(clamp(1.0 - blocked / float(SSAO_SAMPLE_COUNT), 0.0, 1.0));
 }
