@@ -1,0 +1,338 @@
+# Render hooks
+
+This document defines the render observation hook system. It gives the data
+factory one place to declare, connect, run, and collect render observations
+without creating a second render graph or allowing arbitrary callbacks in the
+renderer.
+
+The first hook is data capture. The system is deliberately small so a second
+real consumer can prove which parts should be shared before more hook kinds are
+added.
+
+## Purpose
+
+`DataFactoryHookBind` owns the binding between named observation hooks and the
+static seams in the existing render graph. A host registers the hooks it can
+provide, connects the hooks needed for a session, and polls completed immutable
+records. The render graph invokes connected hooks when their declared node
+runs.
+
+The flow is:
+
+```text
+register hook specs
+        |
+connect a session's hook set
+        |
+graph executes a declared node
+        |
+hook copies context and queues bounded GPU readback
+        |
+renderer submits without waiting
+        |
+DataFactoryHookBind::Pump collects completed readback
+        |
+host takes a complete bundle and saves it
+```
+
+The binder is an observation owner. It does not become a general event bus,
+command dispatcher, or file writer.
+
+## Current seam
+
+`RenderObservationContext` in `mono.engine/render/include/engine/render/RenderObservation.hpp`
+is the value record used at the current seam. `ViewRecording::DataCaptureObservation`
+copies the pipeline, authored node, world and snapshot identity, frame, camera
+facts, and named graph resources from a `graph::RunContext`. The record contains
+names and values, never device handles or callbacks.
+
+The current data capture path queues `ResourceImage` readbacks with
+`ResourceImageDelivery::CopiedPixels`. `Renderer::Impl::RecordResourceImages`
+records the copies at the node, and `PollDataCapture` takes the completed image
+group later. `CaptureRecordValidation` checks that the returned images agree on
+snapshot, frame, dimensions, camera and resource identity. The hook binder
+moves ownership of this scheduling and collection state into one place while
+leaving GPU copy and fence work in `render`.
+
+## Non-goals
+
+- Do not build a callback graph beside the render graph.
+- Do not call user code, Lua, MCP, or a file system from a render thread.
+- Do not let a hook mutate scene, graph, pipeline, resource, or camera state.
+- Do not expose SDL GPU objects in a hook context or saved record.
+- Do not make a hook wait for a GPU fence or for another CPU thread.
+- Do not make physics or replication hooks until the render hook has two real
+  consumers and its queue and polling rules have been measured.
+- Do not serialize process-local enum values or slot indices.
+- Do not retain a full frame of GPU images for every submitted frame.
+
+## One owner and API
+
+`DataFactoryHookBind` is the only owner of hook registration, session
+connections, pending batches, completed bundles, generation checks, budgets,
+and teardown. Its public API is intentionally boring:
+
+```cpp
+HookHandle RegisterHook(const RenderHookSpec &spec);
+
+ConnectResult ConnectHooks(
+    DataFactorySessionKey session,
+    std::span<const HookHandle> hooks
+);
+
+void DisconnectHook(ConnectionHandle connection);
+
+CallResult CallHooks(
+    ConnectionHandle connection,
+    const RenderObservationContext &context
+);
+
+std::optional<HookBundle> TakeCompleted(BatchHandle batch);
+
+void Pump();
+```
+
+`CallHooks` is a graph-owned scheduling call. The implementation may rename it
+to `ScheduleHooks` if that makes its non-blocking behavior clearer. It never
+invokes arbitrary callback code. The graph seam supplies the context and the
+binder asks each connected typed hook to append its bounded work.
+
+`ConnectHooks` validates the whole requested set before changing the session.
+It rejects an unknown handle, duplicate hook, unsupported channel, missing
+graph node, stale pipeline revision, or budget overflow. A failed connect leaves
+the previous connection intact.
+
+`DisconnectHook` stops new scheduling for that connection, cancels its pending
+readbacks, and releases its completed records. It is safe to call more than
+once. Disconnect does not invalidate records already copied out by the caller.
+
+`Pump` runs on the renderer owner thread. It checks only completed readbacks,
+turns them into value records, and publishes complete bundles. It does not
+wait. `TakeCompleted` transfers ownership of one published bundle to the
+caller, or returns no value when that batch is still pending or has expired.
+
+## Hook specs and names
+
+Each built-in hook has a typed specification. There is no generic `any` bag and
+no inheritance tree for contexts.
+
+```cpp
+struct RenderHookSpec {
+    core::Name Name;
+    RenderObservationHook Kind;
+    core::Name Node;
+    uint32_t SchemaVersion;
+    bool Required;
+    std::array<DataCaptureChannel, MAX_HOOK_CHANNELS> Channels;
+    uint8_t ChannelCount;
+};
+```
+
+The enum is useful for a process-local switch. A stable string is the contract
+for capability discovery, manifests, logs, and MCP. Persist names such as
+`data_capture`, `data_capture.rgb_linear_hdr`, or a future
+`render.visibility`. Never persist the enum's numeric value.
+
+Names are validated as non-empty, bounded, and unique within a registry. The
+pipeline and graph node are also names. `core::Name::Id()` is an in-process
+comparison aid only and must not appear in a saved bundle.
+
+The initial built-in hook is `data_capture`. Its typed request declares the
+requested data channels, object, semantic, and part labels, snapshot identity,
+pipeline, capture node, view slot, and temporal history. Its output is the
+existing data capture poll shape: one camera convention, one snapshot, and a
+bounded set of planes with status, dimensions, format metadata, bytes, and
+hashes.
+
+## Context and lifetime
+
+Every hook receives an immutable, owned context. The context is copied while
+the graph node is executing, so a later camera change, view reuse, or recording
+destruction cannot change what the readback describes.
+
+The context states:
+
+- world and snapshot identity
+- capture frame and view slot
+- pipeline and authored node
+- camera transform, projection availability, crop facts, and dimensions
+- named resources read and written by the node
+- fields that are unavailable for this node
+
+It contains no pointer to a world, renderer, pipeline, texture, command buffer,
+ECS row, or callback-owned object. A pointer may exist in private transient
+implementation state while recording a command, but it never enters the
+context, queue, bundle, or world boundary.
+
+The graph thread creates the context. The renderer owner thread may enqueue the
+GPU work. `Pump` and `TakeCompleted` run on the renderer owner thread unless a
+future adapter explicitly copies the bundle across a message boundary.
+Consumers may retain a taken bundle after the recording and connection are
+gone.
+
+## Automatic graph execution
+
+Hooks are observer nodes or declared outputs at existing static graph seams.
+They are not an additional graph of callbacks. A connected hook runs when its
+declared node runs, after that node has established its named outputs and before
+those outputs can be recycled.
+
+The first seam is the existing data capture resource observation in the data
+capture output path. The node passes its immutable observation context to the
+binder. The binder schedules copies for the resources named by the typed data
+capture request. Other render code keeps recording ordinary graph work through
+the same command buffers.
+
+If the node is skipped, the hook is not called. If a declared resource is not
+available, the hook records `Unsupported` or `Unavailable` according to its
+typed contract. It does not invent a value from a previous frame.
+
+Render changes are made through CPU-owned scene or graph state before
+submission. A hook can observe those changes after the normal delta is staged,
+but it cannot apply a change itself.
+
+## Readback and atomic bundles
+
+Readback is asynchronous. A hook queues a bounded set of resource copies and
+returns. Submission, fence polling, and image conversion stay in the renderer.
+The binder never blocks on a fence.
+
+A `HookBundle` is published only when all required hooks and planes for its
+batch agree on:
+
+- world name and snapshot id
+- capture frame and pipeline revision
+- pipeline and authored node
+- view slot
+- camera and projection facts
+- crop and image dimensions
+- connection generation
+
+Optional hooks produce explicit unavailable records. A failed required hook
+fails the whole bundle. Partial bytes are discarded or marked failed and are
+never presented as a successful capture.
+
+Resource tokens are private to the renderer and are consumed exactly once.
+Every queued token is cancelled on failure, expiry, disconnect, or shutdown.
+The existing resource image validation remains the final check on dimensions,
+formats, frame identity, and named resources.
+
+## Capacity and handles
+
+All limits are fixed or explicitly configured at construction. The initial
+limits cover registered hooks, connections, in-flight batches per connection,
+resource planes per hook, and total readback bytes per frame. Registration and
+connection fail cleanly when a limit is reached. Per-frame vectors may hold
+only the bounded capacity declared by the binder.
+
+Handles are `{slot, generation}` values. Registration, connection, and batch
+handles each have their own generation. A released slot increments its
+generation before reuse, so a stale handle cannot cancel, collect, or mutate a
+new object. Handle values are process-local and never cross a world boundary.
+
+Backpressure is visible. When no batch slot or byte budget is available,
+`CallHooks` returns `Dropped` with a reason and increments a metric. The render
+frame continues unless the hook is marked required by the connection's typed
+contract. The binder never grows an unbounded queue to hide a slow consumer.
+
+## Sessions, teardown, and failure
+
+Connections belong to a data factory session. A session disconnects before its
+world or renderer is destroyed. Teardown follows this order:
+
+1. Mark the connection closed, so no new graph seam can schedule work.
+2. Cancel pending resource image tokens.
+3. Drain or discard completed bundles owned by the connection.
+4. Release labels, copied bytes, and private scratch storage.
+5. Invalidate the connection generation.
+
+World destruction and pipeline replacement perform the same cancellation. A
+late GPU completion is ignored when its batch generation, snapshot, or pipeline
+revision no longer matches. No destructor calls into a graph node or external
+consumer.
+
+Required hook failure is reported in the bundle status and diagnostic. An
+unsupported optional channel remains explicit and does not become a cache hit.
+Expired work is reported as expired, with its readback latency and dropped byte
+counts available to profiling.
+
+## Capability discovery and saving
+
+Capability discovery exposes stable hook names, schema versions, supported
+channels, node names, dimensions, readback byte limits, in-flight limits, and
+whether a hook is required or optional. The MCP and client adapters read this
+description. They do not reach into binder state or receive renderer pointers.
+
+The binder returns owned records and bytes. The external data factory saves
+payloads first, computes or verifies hashes, and commits the manifest last.
+Saving a manifest is outside the render thread and outside `DataFactoryHookBind`.
+The manifest records stable names, schema versions, snapshot and frame identity,
+camera facts, dimensions, status, and hashes.
+
+## State machine
+
+```text
+registered
+    -> connected
+    -> scheduled
+    -> submitted
+    -> ready
+    -> collected
+
+scheduled or submitted -> failed
+scheduled or submitted -> expired
+connected              -> disconnected
+```
+
+`registered` describes a validated immutable spec. `connected` associates it
+with a session. `scheduled` owns an immutable context and private resource
+tokens. `submitted` means the GPU work is in a command buffer. `ready` means
+all required readbacks are complete and validated. `collected` transfers the
+bundle to the caller. `failed`, `expired`, and `disconnected` release all
+pending resources and cannot be reused.
+
+## Rollout
+
+1. Inventory the current node output, resource lifetime, submission, and
+   asynchronous readback boundaries. Keep `RenderObservationContext` as the
+   value seam.
+2. Add the registry, stable names, typed specs, fixed capacities, and generation
+   handles to `DataFactoryHookBind`.
+3. Move current data capture ticket scheduling, polling, cancellation, and
+   bundle validation ownership into the binder.
+4. Connect the binder at the static data capture output node. Remove the
+   duplicate bridge state after the new path is proven.
+5. Publish hook capabilities through the existing data factory and MCP adapters.
+6. Profile a release capture for record bytes, allocations, GPU work, readback
+   latency, queue depth, and dropped records.
+7. Add a second real render consumer only after the first path passes the
+   acceptance checks below. Consider physics and replication hooks separately,
+   with their own tick and lifetime contracts.
+
+## Acceptance tests
+
+The first implementation is complete when these behaviors are covered:
+
+- registering the same stable name with the same typed spec is idempotent;
+- conflicting names, invalid nodes, duplicate channels, and capacity overflow
+  are rejected without partial state;
+- connecting an all-valid set is atomic and a failed set changes nothing;
+- a connected hook runs automatically exactly once per matching node execution;
+- a skipped node produces no fabricated record;
+- contexts retain the original snapshot, frame, camera, crop, and resource names
+  after the view is reused;
+- readback polling never blocks and publishes only complete matching bundles;
+- optional unavailable channels remain explicit and required failures reject the
+  bundle;
+- stale connection and batch handles are rejected after generation reuse;
+- byte and in-flight limits produce a dropped result and a metric;
+- disconnect, pipeline replacement, world destruction, cancellation, and expiry
+  release every resource token;
+- capabilities expose stable names and limits, with no enum number in output;
+- the external saver can write payloads and commit the manifest after collection;
+- a release capture reports readback latency, allocations, GPU work, and drops;
+- existing data capture tests still validate camera, snapshot, frame, dimensions,
+  formats, and resource alignment.
+
+The binder is ready for another hook when these checks pass with no render-thread
+waits, no unbounded growth, and no second copy of world or renderer ownership.
