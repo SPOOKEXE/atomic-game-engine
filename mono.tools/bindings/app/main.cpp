@@ -1614,6 +1614,9 @@ declare extern type DataSceneService with
 	function GetEditableImageMetadata(self, image: Instance): any
 	function GetCaptureChannels(self): any
 	function Capture(self, request: any): any
+	function SubmitViewCameraMutation(self, request: any): any
+	function CancelViewCameraMutation(self, ticket: string): any
+	function PollViewCameraMutation(self, ticket: string): any
 	function CreateOptions(self): DataSceneOptions
 	function CaptureBundle(self, snapshotId: string, options: DataSceneOptions): any
 	function PollCapture(self, ticket: string): any
@@ -3484,6 +3487,9 @@ declare interface DataSceneService {
 	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
 	GetCaptureChannels(): Record<string, unknown>;
 	Capture(request: unknown): Record<string, unknown>;
+	SubmitViewCameraMutation(request: unknown): Record<string, unknown>;
+	CancelViewCameraMutation(ticket: string): Record<string, unknown>;
+	PollViewCameraMutation(ticket: string): Record<string, unknown>;
 	CreateOptions(): DataSceneOptions;
 	CaptureBundle(snapshotId: string, options: DataSceneOptions): Record<string, unknown>;
 	PollCapture(ticket: string): Record<string, unknown>;

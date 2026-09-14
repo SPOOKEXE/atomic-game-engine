@@ -118,7 +118,11 @@ endif()
 # them, which is the only way to prove the pump carries a protocol rather than
 # merely carrying bytes.
 if(MONO_BUILD_TESTS AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-	mono_add_tests(mcpbridge DEPS Engine::control Engine::core Engine::world)
+	# `Schemas.cpp` installs the header-only data-factory feature. Its collider
+	# observation reaches script and physics through the feature's public headers,
+	# so the protocol suite owns that dependency rather than relying on a product
+	# to supply it transitively.
+	mono_add_tests(mcpbridge DEPS Engine::control Engine::core Engine::script Engine::world)
 
 	# The suite spawns the program it is testing, so the program has to be there.
 	add_dependencies(test_mcpbridge mcpbridge)

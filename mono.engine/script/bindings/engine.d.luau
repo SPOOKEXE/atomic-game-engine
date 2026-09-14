@@ -2998,6 +2998,9 @@ declare extern type DataSceneService with
 	function GetEditableImageMetadata(self, image: Instance): any
 	function GetCaptureChannels(self): any
 	function Capture(self, request: any): any
+	function SubmitViewCameraMutation(self, request: any): any
+	function CancelViewCameraMutation(self, ticket: string): any
+	function PollViewCameraMutation(self, ticket: string): any
 	function CreateOptions(self): DataSceneOptions
 	function CaptureBundle(self, snapshotId: string, options: DataSceneOptions): any
 	function PollCapture(self, ticket: string): any

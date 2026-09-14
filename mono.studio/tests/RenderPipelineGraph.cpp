@@ -19,11 +19,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 28);
+	CHECK(canvas.Nodes().size() == 29);
 
 	// The environment compute stages add three links before the lit colour and
 	// depth enter the sky pass. Pin the stages below so this remains a checksum.
-	CHECK(canvas.Links().size() == 55);
+	CHECK(canvas.Links().size() == 58);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -36,6 +36,13 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		}
 	}
 	CHECK(sawSsao);
+	const auto depthPeel =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.depth-peel";
+		});
+	REQUIRE(depthPeel != canvas.Nodes().end());
+	CHECK_FALSE(depthPeel->Widgets.at("enabled").Flag);
+	CHECK(canvas.LinkInto(depthPeel->Id, "first-depth") != nullptr);
 	const auto meshResidency =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.mesh-residency";

@@ -6,6 +6,7 @@
 
 #include <array>
 #include <limits>
+#include <optional>
 
 namespace engine::render {
 	namespace {
@@ -246,7 +247,9 @@ namespace engine::render {
 		REQUIRE(hook.IsValid());
 		const ViewMutationIdentity identity = MutationIdentity(connection);
 		const core::CFrame replacement(core::Vector3{9.0f, 8.0f, 7.0f});
-		const scene::Camera camera{.FieldOfViewRadians = 0.9f, .NearPlane = 0.2f, .FarPlane = 200.0f};
+		const scene::Camera camera{
+			.FieldOfViewRadians = 0.9f, .NearPlane = 0.2f, .FarPlane = 200.0f, .RenderFeatures = {}
+		};
 		const ArmViewMutationResult armed = bind.ArmViewMutation(
 			hook,
 			{.Identity = identity,
@@ -289,34 +292,67 @@ namespace engine::render {
 		const HookConnectionRequest connection = Connection(renderer);
 		const HookHandle hook = bind.RegisterHook(CameraSpec());
 		const ViewMutationIdentity identity = MutationIdentity(connection);
-		ViewCameraPatch invalid{.Identity = identity, .CameraFrame = core::CFrame{}};
+		ViewCameraPatch invalid{
+			.Identity = identity,
+			.CameraFrame = core::CFrame{},
+			.Camera = std::nullopt,
+			.Projection = std::nullopt
+		};
 		invalid.CameraFrame->QuaternionW = std::numeric_limits<float>::quiet_NaN();
 		CHECK(bind.ArmViewMutation(hook, invalid).Status == HookBindStatus::Invalid);
-		const ArmViewMutationResult first =
-			bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}});
+		const ArmViewMutationResult first = bind.ArmViewMutation(
+			hook,
+			{.Identity = identity,
+			 .CameraFrame = std::nullopt,
+			 .Camera = scene::Camera{},
+			 .Projection = std::nullopt}
+		);
 		REQUIRE(first.Status == HookBindStatus::Ok);
 		CHECK(
-			bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}}).Status ==
-			HookBindStatus::Conflict
+			bind.ArmViewMutation(
+					hook,
+					{.Identity = identity,
+					 .CameraFrame = std::nullopt,
+					 .Camera = scene::Camera{},
+					 .Projection = std::nullopt}
+			)
+				.Status == HookBindStatus::Conflict
 		);
 		ViewMutationIdentity otherSnapshot = identity;
 		otherSnapshot.SnapshotId = "other";
 		CHECK(
-			bind.ArmViewMutation(hook, {.Identity = otherSnapshot, .Camera = scene::Camera{}}).Status ==
-			HookBindStatus::Ok
+			bind.ArmViewMutation(
+					hook,
+					{.Identity = otherSnapshot,
+					 .CameraFrame = std::nullopt,
+					 .Camera = scene::Camera{},
+					 .Projection = std::nullopt}
+			)
+				.Status == HookBindStatus::Ok
 		);
 		ViewMutationIdentity otherView = identity;
 		otherView.ViewSlot = 1;
 		CHECK(
-			bind.ArmViewMutation(hook, {.Identity = otherView, .Camera = scene::Camera{}}).Status ==
-			HookBindStatus::Ok
+			bind.ArmViewMutation(
+					hook,
+					{.Identity = otherView,
+					 .CameraFrame = std::nullopt,
+					 .Camera = scene::Camera{},
+					 .Projection = std::nullopt}
+			)
+				.Status == HookBindStatus::Ok
 		);
 		bind.Cancel(first.Mutation);
 		CHECK_FALSE(bind.HasViewMutation(identity));
 		CHECK(bind.PollViewMutation(first.Mutation).Status == ViewMutationStatus::Cancelled);
 		bind.ReleaseViewMutation(first.Mutation);
-		const ArmViewMutationResult reused =
-			bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}});
+		const ArmViewMutationResult reused = bind.ArmViewMutation(
+			hook,
+			{.Identity = identity,
+			 .CameraFrame = std::nullopt,
+			 .Camera = scene::Camera{},
+			 .Projection = std::nullopt}
+		);
 		REQUIRE(reused.Status == HookBindStatus::Ok);
 		CHECK(reused.Mutation.Generation != first.Mutation.Generation);
 	}
@@ -327,8 +363,13 @@ namespace engine::render {
 		const HookConnectionRequest connection = Connection(renderer);
 		const HookHandle hook = bind.RegisterHook(CameraSpec());
 		const ViewMutationIdentity identity = MutationIdentity(connection);
-		const ArmViewMutationResult armed =
-			bind.ArmViewMutation(hook, {.Identity = identity, .Camera = scene::Camera{}});
+		const ArmViewMutationResult armed = bind.ArmViewMutation(
+			hook,
+			{.Identity = identity,
+			 .CameraFrame = std::nullopt,
+			 .Camera = scene::Camera{},
+			 .Projection = std::nullopt}
+		);
 		REQUIRE(armed.Status == HookBindStatus::Ok);
 		View applied = ViewFor(identity);
 		REQUIRE(bind.ConsumeViewMutation(identity, applied));
@@ -348,8 +389,14 @@ namespace engine::render {
 		ViewMutationIdentity next = identity;
 		next.PipelineRevision = current->Revision;
 		CHECK(
-			bind.ArmViewMutation(hook, {.Identity = next, .Camera = scene::Camera{}}).Status ==
-			HookBindStatus::Ok
+			bind.ArmViewMutation(
+					hook,
+					{.Identity = next,
+					 .CameraFrame = std::nullopt,
+					 .Camera = scene::Camera{},
+					 .Projection = std::nullopt}
+			)
+				.Status == HookBindStatus::Ok
 		);
 	}
 }

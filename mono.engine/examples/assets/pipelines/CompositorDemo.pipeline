@@ -23,6 +23,9 @@ resource "semantic-ids" colour R32U 0 0 1 no auto 1 1 1 0 1 auto auto 0 transien
 resource "part-ids" colour R32U 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "depth" depth D24S8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "linear-depth" colour R32F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "second-surface-z" depth D24S8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "second-surface-depth" colour R32F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "second-surface-validity" colour R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "occlusion" colour R8 0 0 2 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "lit" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "sky-lit" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
@@ -91,6 +94,14 @@ writes "object-ids" "object-ids"
 writes "semantic-ids" "semantic-ids"
 writes "part-ids" "part-ids"
 writes "depth" "depth"
+node "depth-peel" "depth-peel" view no
+reads "depth" "first-depth"
+reads "ordered-entities" "entities"
+reads "lod-instances" "instances"
+writes "second-surface-z" "z"
+writes "second-surface-depth" "depth"
+writes "second-surface-validity" "validity"
+enable "depth-peel" no
 node "depth-linearise" "depth-linearise" view no
 reads "depth" "depth"
 writes "linear-depth" "linear"

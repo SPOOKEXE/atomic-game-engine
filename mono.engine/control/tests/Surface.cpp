@@ -120,6 +120,18 @@ namespace {
 		return nullptr;
 	}
 
+	engine::script::DataCaptureBridgeHookCapability ObservationHook(const char *name, const char *channel) {
+		return {
+			.Name = name,
+			.SchemaVersion = 1,
+			.NodeKind = "capture",
+			.Required = true,
+			.Channels = {channel},
+			.Access = "observation",
+			.MutatedFields = {},
+		};
+	}
+
 	class FakeCapture final : public engine::script::DataCaptureBridge {
 	  public:
 		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
@@ -138,16 +150,16 @@ namespace {
 					 "part_ids"},
 				.HookRecords =
 					{
-						{"data_capture.rgb_linear_hdr", 1, "capture", true, {"rgb_linear_hdr"}},
-						{"data_capture.linear_depth", 1, "capture", true, {"linear_depth"}},
-						{"data_capture.shading_normal", 1, "capture", true, {"shading_normal"}},
-						{"data_capture.pbr_albedo", 1, "capture", true, {"pbr_albedo"}},
-						{"data_capture.pbr_material", 1, "capture", true, {"pbr_material"}},
-						{"data_capture.pbr_emissive", 1, "capture", true, {"pbr_emissive"}},
-						{"data_capture.ambient_occlusion", 1, "capture", true, {"ambient_occlusion"}},
-						{"data_capture.object_ids", 1, "capture", true, {"object_ids"}},
-						{"data_capture.semantic_ids", 1, "capture", true, {"semantic_ids"}},
-						{"data_capture.part_ids", 1, "capture", true, {"part_ids"}},
+						ObservationHook("data_capture.rgb_linear_hdr", "rgb_linear_hdr"),
+						ObservationHook("data_capture.linear_depth", "linear_depth"),
+						ObservationHook("data_capture.shading_normal", "shading_normal"),
+						ObservationHook("data_capture.pbr_albedo", "pbr_albedo"),
+						ObservationHook("data_capture.pbr_material", "pbr_material"),
+						ObservationHook("data_capture.pbr_emissive", "pbr_emissive"),
+						ObservationHook("data_capture.ambient_occlusion", "ambient_occlusion"),
+						ObservationHook("data_capture.object_ids", "object_ids"),
+						ObservationHook("data_capture.semantic_ids", "semantic_ids"),
+						ObservationHook("data_capture.part_ids", "part_ids"),
 					},
 				.MaximumHooks = 14,
 				.MaximumConnections = 6,

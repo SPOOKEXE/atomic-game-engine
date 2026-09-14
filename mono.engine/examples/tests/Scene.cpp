@@ -78,7 +78,18 @@ namespace {
 		explicit DemoCaptureBridge(ReadBehavior behavior = ReadBehavior::Exact) : Behavior(behavior) {}
 
 		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
-			return {.Available = true, .Channels = {"rgb_linear_hdr"}, .Detail = "fixture"};
+			return {
+				.Available = true,
+				.Channels = {"rgb_linear_hdr"},
+				.HookRecords = {},
+				.MaximumHooks = 0,
+				.MaximumConnections = 0,
+				.MaximumBatches = 0,
+				.MaximumReadbackNodes = 0,
+				.MaximumRetainedBytes = 0,
+				.MaximumPendingPumps = 0,
+				.Detail = "fixture",
+			};
 		}
 		bool Queue(
 			std::string_view owner,
