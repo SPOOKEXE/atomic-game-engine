@@ -53,6 +53,8 @@ namespace engine::control {
 					 "resume",
 					 "step",
 					 "snapshot",
+					 "render_only",
+					 "poll_render_only",
 					 "capture",
 					 "capture_render_screenshot",
 					 "checkpoint",

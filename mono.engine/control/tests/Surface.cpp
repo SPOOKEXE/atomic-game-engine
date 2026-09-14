@@ -969,6 +969,30 @@ TEST_CASE("discovery reports the final callable registry and schema", "[control]
 	CHECK(calls == 0);
 }
 
+TEST_CASE("headless data factories omit presenter-only operations", "[control][data-factory]") {
+	Universe universe;
+	engine::world::DataFactorySession session(universe);
+	Surface surface("headless", "a headless data factory");
+	surface.Enable(
+		std::array{
+			engine::control::features::Discovery(),
+			engine::control::features::DataFactory(session, {.RenderOnly = false}),
+		}
+	);
+
+	const json listed = Ask(surface, "tools/list");
+	const json &tools = listed["result"]["tools"];
+	CHECK(Named(tools, "world_create") != nullptr);
+	CHECK(Named(tools, "render_only") == nullptr);
+	CHECK(Named(tools, "poll_render_only") == nullptr);
+
+	const json negotiated = Called(surface, "negotiate", json::object());
+	CHECK(Named(negotiated["operations"], "render_only") == nullptr);
+	const json *renderOnly = Named(negotiated["unsupported_operations"], "render_only");
+	REQUIRE(renderOnly != nullptr);
+	CHECK((*renderOnly)["reason"] == "this host does not implement the data-factory operation");
+}
+
 TEST_CASE("discovery refuses unknown versions and oversized requests", "[control][discovery]") {
 	Surface surface("test", "a suite");
 	surface.Enable(std::array{engine::control::features::Discovery()});

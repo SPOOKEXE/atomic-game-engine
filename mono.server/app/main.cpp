@@ -81,6 +81,10 @@ int main(int argc, char **argv) {
 		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " +
 			std::to_string(engine::control::DEFAULT_SERVER_PORT) + ")"
 	);
+	arguments.Flag(
+		"data-factory",
+		"Start an isolated headless data-factory host; scenes are created and retired through MCP"
+	);
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
@@ -276,6 +280,7 @@ int main(int argc, char **argv) {
 		options.ControlPort =
 			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_SERVER_PORT));
 	}
+	options.DataFactory = options.DataFactory || arguments.Has("data-factory");
 	options.Chatter = options.Chatter || arguments.Has("chatter");
 
 	if (auto store = arguments.Get("content-store")) {
@@ -451,9 +456,9 @@ int main(int argc, char **argv) {
 	std::signal(SIGINT, OnInterrupt);
 	std::signal(SIGTERM, OnInterrupt);
 
-	host.Run();
+	const server::RunSummary summary = host.Run();
 
 	Running = nullptr;
 	host.Shutdown();
-	return 0;
+	return summary.Failed ? 1 : 0;
 }

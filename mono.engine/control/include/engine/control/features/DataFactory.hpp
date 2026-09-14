@@ -403,7 +403,7 @@ namespace engine::control {
 		}
 	}
 
-	inline void Surface::AddDataFactoryTools(world::DataFactorySession &session) {
+	inline void Surface::AddDataFactoryTools(world::DataFactorySession &session, DataFactoryToolSet tools) {
 		using namespace data_factory_detail;
 		auto ledger = DataFactoryOperations();
 		auto invoke = [&session, ledger](
@@ -846,120 +846,127 @@ namespace engine::control {
 		Add(
 			capture("checkpoint", "Retains a restorable checkpoint when the host provides rehydration.", true)
 		);
-		Add(Tool{
-			"render_only",
-			"Queues one static frame from a paused snapshot. Submitted means the frame command was accepted, "
-			"not that GPU readback is ready.",
-			[] {
-				return Schema(
-					{"instance_id",
-					 "snapshot_id",
-					 "temporal_history",
-					 "expected_tick",
-					 "expected_world_epoch",
-					 "expected_world_version",
-					 "operation_id"},
-					{"instance_id",
-					 "snapshot_id",
-					 "temporal_history",
-					 "expected_tick",
-					 "expected_world_epoch",
-					 "expected_world_version",
-					 "operation_id"}
-				);
-			},
-			[&session, ledger](const json &v, std::string &f) -> json {
-				Request request;
-				json normalized;
-				if (!Base(v, true, request, normalized, f) || !Only(
-																  v,
-																  {"instance_id",
-																   "snapshot_id",
-																   "temporal_history",
-																   "expected_tick",
-																   "expected_world_epoch",
-																   "expected_world_version",
-																   "operation_id"},
-																  f
-															  ))
-					return nullptr;
-				const json *field = nullptr;
-				if (!Field(v, "snapshot_id", field, f) ||
-					!Text(*field, "snapshot_id", request.SnapshotId, f) ||
-					!Field(v, "temporal_history", field, f) ||
-					!Text(*field, "temporal_history", request.TemporalHistory, f))
-					return nullptr;
-				if (request.TemporalHistory != "preserve") {
-					f = Error("capability_unsupported", "this host supports only preserve temporal history");
-					return nullptr;
-				}
-				normalized["tool"] = "render_only";
-				normalized["snapshot_id"] = request.SnapshotId;
-				normalized["temporal_history"] = request.TemporalHistory;
-				json replay;
-				const auto prior =
-					ledger->Replay("render_only", request.OperationId, normalized.dump(), replay, f);
-				if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
-				if (prior == DataFactoryOperationReplay::Replay) {
-					if (replay.value("status", "") == "pending" && replay.contains("operation_id") &&
-						replay["operation_id"].is_number_unsigned()) {
-						RenderOnlyReply(
-							session.PollRenderOnly(
-								request.InstanceId, replay["operation_id"].get<uint64_t>()
-							),
-							replay,
-							f
+		if (tools.RenderOnly) {
+			Add(Tool{
+				"render_only",
+				"Queues one static frame from a paused snapshot. Submitted means the frame command was "
+				"accepted, "
+				"not that GPU readback is ready.",
+				[] {
+					return Schema(
+						{"instance_id",
+						 "snapshot_id",
+						 "temporal_history",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version",
+						 "operation_id"},
+						{"instance_id",
+						 "snapshot_id",
+						 "temporal_history",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version",
+						 "operation_id"}
+					);
+				},
+				[&session, ledger](const json &v, std::string &f) -> json {
+					Request request;
+					json normalized;
+					if (!Base(v, true, request, normalized, f) || !Only(
+																	  v,
+																	  {"instance_id",
+																	   "snapshot_id",
+																	   "temporal_history",
+																	   "expected_tick",
+																	   "expected_world_epoch",
+																	   "expected_world_version",
+																	   "operation_id"},
+																	  f
+																  ))
+						return nullptr;
+					const json *field = nullptr;
+					if (!Field(v, "snapshot_id", field, f) ||
+						!Text(*field, "snapshot_id", request.SnapshotId, f) ||
+						!Field(v, "temporal_history", field, f) ||
+						!Text(*field, "temporal_history", request.TemporalHistory, f))
+						return nullptr;
+					if (request.TemporalHistory != "preserve") {
+						f = Error(
+							"capability_unsupported", "this host supports only preserve temporal history"
 						);
-						ledger->Update(request.OperationId, replay, f);
+						return nullptr;
 					}
-					return replay;
+					normalized["tool"] = "render_only";
+					normalized["snapshot_id"] = request.SnapshotId;
+					normalized["temporal_history"] = request.TemporalHistory;
+					json replay;
+					const auto prior =
+						ledger->Replay("render_only", request.OperationId, normalized.dump(), replay, f);
+					if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+					if (prior == DataFactoryOperationReplay::Replay) {
+						if (replay.value("status", "") == "pending" && replay.contains("operation_id") &&
+							replay["operation_id"].is_number_unsigned()) {
+							RenderOnlyReply(
+								session.PollRenderOnly(
+									request.InstanceId, replay["operation_id"].get<uint64_t>()
+								),
+								replay,
+								f
+							);
+							ledger->Update(request.OperationId, replay, f);
+						}
+						return replay;
+					}
+					if (!Preconditions(session, request, f)) return nullptr;
+					const world::DataFactoryRenderOnlyReply reply = session.RenderOnly({
+						.InstanceId = request.InstanceId,
+						.SnapshotId = request.SnapshotId,
+						.ExpectedWorldEpoch = request.Epoch,
+						.ExpectedWorldVersion = request.Version,
+						.ExpectedTick = request.Tick,
+						.TemporalHistory = world::DataFactoryTemporalHistory::Preserve,
+					});
+					json result;
+					RenderOnlyReply(reply, result, f);
+					ledger->Store("render_only", request.OperationId, normalized.dump(), result, f);
+					return result;
 				}
-				if (!Preconditions(session, request, f)) return nullptr;
-				const world::DataFactoryRenderOnlyReply reply = session.RenderOnly({
-					.InstanceId = request.InstanceId,
-					.SnapshotId = request.SnapshotId,
-					.ExpectedWorldEpoch = request.Epoch,
-					.ExpectedWorldVersion = request.Version,
-					.ExpectedTick = request.Tick,
-					.TemporalHistory = world::DataFactoryTemporalHistory::Preserve,
-				});
-				json result;
-				RenderOnlyReply(reply, result, f);
-				ledger->Store("render_only", request.OperationId, normalized.dump(), result, f);
-				return result;
-			}
-		});
-		Add(Tool{
-			"poll_render_only",
-			"Reads pending, submitted, or failed render-only command status. Submitted does not claim GPU "
-			"readback readiness.",
-			[] {
-				return json{
-					{"type", "object"},
-					{"additionalProperties", false},
-					{"properties",
-					 {{"instance_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
-					  {"operation_id", {{"type", "integer"}, {"minimum", 1}}}}},
-					{"required", {"instance_id", "operation_id"}}
-				};
-			},
-			[&session](const json &v, std::string &f) -> json {
-				if (!Only(v, {"instance_id", "operation_id"}, f)) return nullptr;
-				const json *field = nullptr;
-				std::string instance;
-				uint64_t operationId = 0;
-				if (!Field(v, "instance_id", field, f) || !Text(*field, "instance_id", instance, f) ||
-					!Field(v, "operation_id", field, f) || !UInt(*field, "operation_id", operationId, f) ||
-					operationId == 0) {
-					if (f.empty()) f = Error("validation_failed", "operation_id must be positive");
-					return nullptr;
+			});
+			Add(Tool{
+				"poll_render_only",
+				"Reads pending, submitted, or failed render-only command status. Submitted does not claim "
+				"GPU "
+				"readback readiness.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"additionalProperties", false},
+						{"properties",
+						 {{"instance_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+						  {"operation_id", {{"type", "integer"}, {"minimum", 1}}}}},
+						{"required", {"instance_id", "operation_id"}}
+					};
+				},
+				[&session](const json &v, std::string &f) -> json {
+					if (!Only(v, {"instance_id", "operation_id"}, f)) return nullptr;
+					const json *field = nullptr;
+					std::string instance;
+					uint64_t operationId = 0;
+					if (!Field(v, "instance_id", field, f) || !Text(*field, "instance_id", instance, f) ||
+						!Field(v, "operation_id", field, f) ||
+						!UInt(*field, "operation_id", operationId, f) || operationId == 0) {
+						if (f.empty()) f = Error("validation_failed", "operation_id must be positive");
+						return nullptr;
+					}
+					const world::DataFactoryRenderOnlyReply reply =
+						session.PollRenderOnly(instance, operationId);
+					json result;
+					RenderOnlyReply(reply, result, f);
+					return result;
 				}
-				const world::DataFactoryRenderOnlyReply reply = session.PollRenderOnly(instance, operationId);
-				json result;
-				RenderOnlyReply(reply, result, f);
-				return result;
-			}
-		});
+			});
+		}
 		Add(Tool{
 			"restore",
 			"Restores a compatible checkpoint through a scratch universe and starts a fresh epoch.",
@@ -1645,9 +1652,9 @@ namespace engine::control::features {
 
 	// A product explicitly opts into the lifecycle vocabulary for the session it
 	// owns. The feature retains no state beyond the Surface's tool closures.
-	inline Feature DataFactory(world::DataFactorySession &session) {
-		return Feature{"data_factory", [&session](Surface &surface) {
-						   surface.AddDataFactoryTools(session);
+	inline Feature DataFactory(world::DataFactorySession &session, DataFactoryToolSet tools = {}) {
+		return Feature{"data_factory", [&session, tools](Surface &surface) {
+						   surface.AddDataFactoryTools(session, tools);
 					   }};
 	}
 }

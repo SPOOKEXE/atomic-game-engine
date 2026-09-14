@@ -86,6 +86,12 @@ namespace engine::control {
 		std::string Detail;
 	};
 
+	// The lifecycle rows a host can support. A headless host omits renderer
+	// dependent rows so discovery lists only callable operations.
+	struct DataFactoryToolSet {
+		bool RenderOnly = true;
+	};
+
 	using RenderGraphProvider = std::function<nlohmann::json(const nlohmann::json &, std::string &)>;
 
 	// Something a client may read without calling a tool.
@@ -292,7 +298,7 @@ namespace engine::control {
 		void AddDiscoveryTools();
 
 		// Installs lifecycle tools backed by one host-owned data-factory session.
-		void AddDataFactoryTools(world::DataFactorySession &session);
+		void AddDataFactoryTools(world::DataFactorySession &session, DataFactoryToolSet tools = {});
 		void AddDataCaptureTools(
 			world::DataFactorySession &session, std::shared_ptr<script::DataCaptureBridge> bridge
 		);

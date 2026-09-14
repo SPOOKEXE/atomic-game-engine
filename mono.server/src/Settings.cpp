@@ -122,6 +122,11 @@ namespace server {
 					defaults.ControlPort,
 					"Listen for Model Context Protocol on 127.0.0.1:PORT, or -1 for off"
 				);
+				built.Boolean(
+					"server.data-factory",
+					defaults.DataFactory,
+					"Start an isolated headless data-factory lifecycle host"
+				);
 
 				built.Text(
 					"server.content-store",
@@ -300,6 +305,7 @@ namespace server {
 		options.MetricsReportSeconds = std::max(0.0, Flag("server.metrics-every").Number());
 
 		options.ControlPort = static_cast<int>(Flag("server.control-port").Integer());
+		options.DataFactory = Flag("server.data-factory").Boolean();
 
 		options.ContentStore = std::filesystem::path(Flag("server.content-store").Text());
 		options.ContentPort = static_cast<uint16_t>(Flag("server.content-port").Integer());

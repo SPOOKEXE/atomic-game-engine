@@ -21,6 +21,7 @@
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/DataStore.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
@@ -114,6 +115,11 @@ namespace server {
 		//
 		// Unauthenticated world control; disabled by default.
 		int ControlPort = -1;
+
+		// Starts with no compatibility world and exposes one MCP-owned world at a
+		// time through the engine data-factory lifecycle service. This mode is
+		// deliberately headless and isolated from game hosting and replication.
+		bool DataFactory = false;
 
 		// Ticks per second. A world ticks at its own rate; this is the rate the
 		// one world this version hosts runs at.
@@ -559,6 +565,10 @@ namespace server {
 	// What the run produced. Returned rather than logged only, so a test can
 	// assert on it.
 	struct RunSummary {
+		// A required host service could not start, so this run did not enter its
+		// normal loop. The executable returns failure for this case.
+		bool Failed = false;
+
 		// Ticks simulated, read from the world's own clock rather than counted
 		// here - there is only ever one tally, so there is nothing to disagree.
 		uint64_t Ticks = 0;
@@ -784,6 +794,12 @@ namespace server {
 		// @return The universe.
 		engine::world::Universe &Worlds() {
 			return Driver_->Worlds();
+		}
+
+		// The engine-owned lifecycle service when this host was started for a
+		// data factory. The server only installs host callbacks and MCP rows.
+		engine::world::DataFactorySession *DataFactorySession() {
+			return DataFactory.get();
 		}
 
 		// The universe and the hosts holding the rest of it.
@@ -1044,8 +1060,9 @@ namespace server {
 		engine::control::Surface ControlSurface{
 			"atomic-server",
 			"A dedicated server of the atomic game engine, hosting worlds headlessly. `world_list` "
-			"is worth calling first: a world is a scene and the universe is the game. This program "
-			"authors nothing - it hosts, so there is no selection and no run mode to change."
+			"is worth calling first: a world is a scene and the universe is the game. In ordinary "
+			"mode this program authors nothing. `--data-factory` instead exposes one isolated, "
+			"MCP-owned world through the data-factory lifecycle tools."
 		};
 
 		Options Settings;
@@ -1070,6 +1087,7 @@ namespace server {
 		// options are read - a universe binds its driver thread on
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
+		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
 		engine::world::WorldId PrimaryWorld;
 
 		// Placement derived once from `Options::Worlds`. The driver keeps the

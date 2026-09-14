@@ -4,6 +4,7 @@
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/control/Features.hpp>
+#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Bytes.hpp>
@@ -27,6 +28,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Priority.hpp>
@@ -374,6 +376,7 @@ namespace server {
 		ContentGrantSecret.reset();
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
+		DataFactory.reset();
 		Driver_.reset();
 		HostedProject.reset();
 	}
@@ -731,6 +734,24 @@ namespace server {
 
 	bool Server::Initialise(const Options &options) {
 		Settings = options;
+		// Stop is process-global because signal handlers cannot borrow a host. A
+		// fresh host must clear a prior host's stop before any early return.
+		StopRequested.store(false);
+		if (Settings.DataFactory && Settings.ControlPort < 0) {
+			ENGINE_ERROR("--data-factory requires --mcp-port so an external factory can create its world");
+			return false;
+		}
+		if (Settings.DataFactory &&
+			(IsHost() || Settings.HostTickExchange || Settings.Listening || !Settings.GamePath.empty() ||
+			 !Settings.ReplayPath.empty() || !Settings.RecordPath.empty() || Settings.Worlds != 1 ||
+			 Settings.Processes != 0 || !Settings.RemoteWorlds.empty() || !Settings.HostWorlds.empty() ||
+			 Settings.Chatter || Settings.ManageWorldLifetime)) {
+			ENGINE_ERROR(
+				"--data-factory requires one local, unrecorded, headless world slot with no game, "
+				"replication, host, chatter, or automatic lifetime management"
+			);
+			return false;
+		}
 		if (Settings.HostTickExchange && !IsHost()) return false;
 		LocalWorlds = 1;
 		RemoteHosts = 0;
@@ -885,6 +906,89 @@ namespace server {
 		}
 
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
+		if (Settings.DataFactory) {
+			// A factory begins empty, but its first MCP create still constructs a
+			// Store. Construct and remove one private world while component
+			// registration remains open, so the later create cannot mint ECS
+			// bookkeeping types after the executable sealed the shared table.
+			engine::world::WorldSettings bootstrap;
+			bootstrap.Name = engine::core::Name("server.data-factory.bootstrap");
+			bootstrap.TickRate = Settings.TickRate;
+			const engine::world::WorldId bootstrapWorld = Worlds().Create(bootstrap);
+			if (!bootstrapWorld.IsValid() ||
+				Worlds().Destroy(bootstrapWorld) != engine::world::WorldStatus::Ok) {
+				ENGINE_ERROR("server could not prepare isolated data-factory world storage");
+				return false;
+			}
+			DataFactory = std::make_unique<engine::world::DataFactorySession>(Worlds());
+			DataFactory->SetPauseParticipant([this](
+												 engine::world::WorldId world,
+												 engine::world::DataFactoryPauseScope scope,
+												 bool paused,
+												 std::string &detail
+											 ) {
+				if (!Settings.DataFactory || !world.IsValid()) {
+					detail = "server data-factory host does not own this world";
+					return false;
+				}
+				if (scope == engine::world::DataFactoryPauseScope::PhysicsOnly) {
+					if (Worlds().Enter(world, [paused](engine::ecs::Store &store) {
+							engine::physics::SetPhysicsPaused(store, paused);
+						}) != engine::world::WorldStatus::Ok) {
+						detail = "server could not enter the factory world for a physics pause";
+						return false;
+					}
+				}
+				return true;
+			});
+			DataFactory->SetRehydrate(
+				[this](engine::world::Universe &universe, engine::world::WorldId world, std::string &detail) {
+					if (universe.Enter(world, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							RegisterPlaceholderSystems(store, systems);
+						}) != engine::world::WorldStatus::Ok) {
+						detail = "server could not rebuild factory scheduler state";
+						return false;
+					}
+					PrimaryWorld = world;
+					return true;
+				}
+			);
+			DataFactory->SetWorldLifecycle([this](
+											   engine::world::DataFactoryWorldOperation operation,
+											   engine::world::Universe &universe,
+											   engine::world::WorldId world,
+											   bool committed,
+											   std::string &detail
+										   ) {
+				if (committed) {
+					if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+						PrimaryWorld = {};
+						Lives.clear();
+					} else {
+						PrimaryWorld = world;
+						Lives.clear();
+					}
+					return true;
+				}
+				if (operation == engine::world::DataFactoryWorldOperation::Retire) return world.IsValid();
+				bool prepared = false;
+				if (!world.IsValid() ||
+					universe.Enter(
+						world,
+						[this, &prepared](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							prepared = BuildWorld(store, systems);
+						}
+					) != engine::world::WorldStatus::Ok ||
+					!prepared) {
+					detail = "server could not prepare the isolated factory world";
+					return false;
+				}
+				return true;
+			});
+			Running = true;
+			ENGINE_INFO("server data-factory host ready at {:.1f} Hz", Settings.TickRate);
+			return true;
+		}
 		if (Settings.Listening) {
 			const auto nonce = network::SessionKey::Draw();
 			if (!nonce) return false;
@@ -893,7 +997,6 @@ namespace server {
 			const uint64_t session = reader.ReadUInt64();
 			if (session == 0 || !Worlds().ConfigurePresentation(session)) return false;
 		}
-		StopRequested.store(false);
 
 		if (IsHost()) {
 			return InitialiseHost();
@@ -3631,6 +3734,7 @@ namespace server {
 
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
+		DataFactory.reset();
 		Driver_.reset();
 		DataStorePersistence.reset();
 		DataStoreReady = false;
@@ -3684,6 +3788,7 @@ namespace server {
 			return cumulativeObservedTicks;
 		};
 		uint64_t lastProfileWindowTick = 0;
+		uint64_t factoryControlFrames = 0;
 
 		// Collection has to be on for there to be a tree to fold, and asking for
 		// the profile is what says so - `--graph` is the other way in and the
@@ -3721,12 +3826,25 @@ namespace server {
 				}),
 			};
 			ControlSurface.Enable(features);
+			if (DataFactory) {
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataFactory(*DataFactory, {.RenderOnly = false})}
+				);
+			}
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
 					ControlServer.Port(),
 					ControlSurface.Count()
 				);
+			} else if (Settings.DataFactory) {
+				// This host has no other creation route. Entering its empty loop
+				// without the required MCP listener would be a live process that
+				// can never receive work.
+				ENGINE_ERROR("server data-factory could not start its required MCP listener");
+				summary.Failed = true;
+				Running = false;
+				return summary;
 			}
 		}
 
@@ -3772,6 +3890,23 @@ namespace server {
 				tickStarted - lastDataStoreFlush >= 1'000'000'000ull) {
 				lastDataStoreFlush = tickStarted;
 				(void)FlushDataStore();
+			}
+
+			// A factory starts with no compatibility world. Its control frames are
+			// bounded even though no world clock exists yet, so CI and a caller's
+			// explicit --ticks or --seconds limits cannot wait forever for MCP.
+			if (Settings.DataFactory && !PrimaryWorld.IsValid()) {
+				const double elapsed = static_cast<double>(tickStarted - started) / 1e9;
+				if ((Settings.MaximumTicks >= 0 &&
+					 factoryControlFrames >= static_cast<uint64_t>(Settings.MaximumTicks)) ||
+					(Settings.Seconds > 0.0 && elapsed >= Settings.Seconds)) {
+					engine::core::FrameGraph::EndFrame();
+					break;
+				}
+				++factoryControlFrames;
+				engine::core::FrameGraph::EndFrame();
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				continue;
 			}
 
 			if (Replayer_) {
@@ -3848,8 +3983,16 @@ namespace server {
 			// world while the rest keep simulating. A headless server has no
 			// such choice: `PreRender` is where deriving what to send lives -
 			// the same shape as deriving what to draw - so it runs every tick,
-			// with an alpha of zero because nothing here interpolates.
-			Worlds().Present(PrimaryWorld, delta, 0.0f);
+			// with an alpha of zero because nothing here interpolates. A factory
+			// all-systems pause covers PreRender too: snapshot and lifecycle work
+			// must not cause a hidden presentation-side mutation.
+			const bool factoryPaused =
+				DataFactory && DataFactory->AllSystemsPaused(Worlds().NameOf(PrimaryWorld).Text());
+			if (factoryPaused) {
+				engine::core::Metrics::Count("server.data-factory.presentation.skipped", 1);
+			} else {
+				Worlds().Present(PrimaryWorld, delta, 0.0f);
+			}
 
 			// After presentation, because that is the phase this comment has
 			// always said replication extraction belongs to, and before the next

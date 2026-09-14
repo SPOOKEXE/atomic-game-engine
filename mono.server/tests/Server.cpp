@@ -1,3 +1,4 @@
+#include <engine/control/Server.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -13,6 +14,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -51,12 +53,161 @@ using engine::scene::Attachment;
 using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::WorldBounds;
+using engine::world::DataFactoryStatus;
+using engine::world::DataFactoryWorldOperation;
+using engine::world::DataFactoryWorldRequest;
 
 TEST_CASE("a thousand worlds leave main for presentation and use every worker core", "[server]") {
 	const server::WorldProcessPlan plan = server::PlanWorldProcesses(1000, 12);
 	REQUIRE(plan.Processes == 12);
 	REQUIRE(plan.LocalWorlds == 0);
 	REQUIRE(plan.RemoteHosts == 11);
+}
+
+TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][data-factory]") {
+	server::Options options;
+	options.Entities = 4;
+	options.MaximumTicks = 0;
+	options.Unpaced = true;
+	options.DataFactory = true;
+	options.ControlPort = 0;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	REQUIRE(host.DataFactorySession() != nullptr);
+	CHECK(host.Worlds().Count() == 0);
+
+	engine::world::DataFactorySession &session = *host.DataFactorySession();
+	const DataFactoryWorldRequest create{
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "server-factory-world",
+		.Seed = 17,
+		.TickRate = 60.0,
+		.OperationId = "server-create",
+	};
+	const auto created = session.CreateWorld(create);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	CHECK(created.Clock.Tick == 0);
+	CHECK(session.OwnsWorld("server-factory-world"));
+	CHECK(host.Worlds().Count() == 1);
+	CHECK(host.Worlds().NameOf(host.Primary()).Text() == "server-factory-world");
+	CHECK(host.Worlds().StatisticsOf(host.Primary()).Ticks == 0);
+	CHECK(session.AllSystemsPaused("server-factory-world"));
+	CHECK(session.CreateWorld(create).WorldVersion == created.WorldVersion);
+
+	const DataFactoryWorldRequest reset{
+		.Operation = DataFactoryWorldOperation::Reset,
+		.InstanceId = "server-factory-world",
+		.Seed = 18,
+		.TickRate = 30.0,
+		.ExpectedWorldEpoch = created.WorldEpoch,
+		.ExpectedWorldVersion = created.WorldVersion,
+		.ExpectedTick = created.Clock.Tick,
+		.OperationId = "server-reset",
+	};
+	const auto resetReply = session.ResetWorld(reset);
+	REQUIRE(resetReply.Status == DataFactoryStatus::Ok);
+	CHECK(resetReply.WorldEpoch == created.WorldEpoch + 1);
+	CHECK(resetReply.WorldVersion == created.WorldVersion + 1);
+	CHECK(host.Worlds().SettingsOf(host.Primary()).TickRate == 30.0);
+	CHECK(session.ResetWorld(reset).WorldVersion == resetReply.WorldVersion);
+
+	const DataFactoryWorldRequest retire{
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "server-factory-world",
+		.ExpectedWorldEpoch = resetReply.WorldEpoch,
+		.ExpectedWorldVersion = resetReply.WorldVersion,
+		.ExpectedTick = resetReply.Clock.Tick,
+		.OperationId = "server-retire",
+	};
+	const auto retired = session.RetireWorld(retire);
+	REQUIRE(retired.Status == DataFactoryStatus::Ok);
+	CHECK(retired.Tombstone);
+	CHECK_FALSE(session.OwnsWorld("server-factory-world"));
+	CHECK(host.Worlds().Count() == 0);
+	CHECK_FALSE(host.Primary().IsValid());
+	host.Shutdown();
+}
+
+TEST_CASE("a paused factory skips headless presentation and empty bounds", "[server][data-factory]") {
+	Metrics::Clear();
+	server::Options options;
+	options.Entities = 4;
+	options.DataFactory = true;
+	options.ControlPort = 0;
+	options.MaximumTicks = -1;
+	options.Seconds = 0.02;
+	options.Unpaced = true;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	engine::world::DataFactorySession &session = *host.DataFactorySession();
+	const auto created = session.CreateWorld({
+		.Operation = DataFactoryWorldOperation::Create,
+		.InstanceId = "paused-factory-world",
+		.Seed = 9,
+		.TickRate = 30.0,
+		.OperationId = "create-paused-world",
+	});
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const auto summary = host.Run();
+	CHECK(summary.Ticks == 0);
+	CHECK(summary.Seconds >= 0.01);
+	const auto skipped = Metrics::Get("server.data-factory.presentation.skipped");
+	REQUIRE(skipped.has_value());
+	CHECK(skipped->Value > 0.0);
+	CHECK_FALSE(Metrics::Get("world.entities").has_value());
+	host.Shutdown();
+
+	server::Options missingControl;
+	missingControl.DataFactory = true;
+	CHECK_FALSE(server::Server{}.Initialise(missingControl));
+
+	server::Options limited;
+	limited.DataFactory = true;
+	limited.ControlPort = 0;
+	limited.MaximumTicks = 0;
+	limited.Unpaced = true;
+	server::Server bounded;
+	REQUIRE(bounded.Initialise(limited));
+	const auto boundedSummary = bounded.Run();
+	CHECK(boundedSummary.Ticks == 0);
+	CHECK(boundedSummary.Seconds < 0.1);
+	bounded.Shutdown();
+
+	server::Server stopped;
+	REQUIRE(stopped.Initialise(limited));
+	stopped.Stop();
+	stopped.Shutdown();
+
+	server::Options freshOptions = limited;
+	freshOptions.MaximumTicks = -1;
+	freshOptions.Seconds = 0.02;
+	server::Server fresh;
+	REQUIRE(fresh.Initialise(freshOptions));
+	const auto emptySummary = fresh.Run();
+	CHECK(emptySummary.Ticks == 0);
+	CHECK(emptySummary.Seconds >= 0.01);
+	fresh.Shutdown();
+}
+
+TEST_CASE("a factory exits when its required MCP port is occupied", "[server][data-factory]") {
+	engine::control::Server occupant;
+	REQUIRE(occupant.Start(0));
+
+	server::Options options;
+	options.DataFactory = true;
+	options.ControlPort = occupant.Port();
+	options.MaximumTicks = -1;
+	options.Unpaced = true;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	const double started = engine::core::Clock::Seconds();
+	const auto summary = host.Run();
+	CHECK(engine::core::Clock::Seconds() - started < 0.5);
+	CHECK(summary.Failed);
+	CHECK(summary.Ticks == 0);
+	CHECK(host.Worlds().Count() == 0);
+	host.Shutdown();
+	occupant.Stop();
 }
 
 TEST_CASE("world process placement stays within worlds and cores", "[server]") {
