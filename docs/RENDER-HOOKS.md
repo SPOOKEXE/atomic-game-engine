@@ -24,9 +24,11 @@ register hook specs
         |
 connect a session's hook set
         |
-graph executes a declared node
+arm and admit one bounded batch
         |
-hook copies context and queues bounded GPU readback
+graph executes each derived capture node
+        |
+hook freezes context and records queued GPU readback
         |
 renderer submits without waiting
         |
@@ -41,8 +43,9 @@ command dispatcher, or file writer.
 ## Current seam
 
 `RenderObservationContext` in `mono.engine/render/include/engine/render/RenderObservation.hpp`
-is the value record used at the current seam. `ViewRecording::DataCaptureObservation`
-copies the pipeline, authored node, world and snapshot identity, frame, camera
+is the value record used at the current seam. The binder-owned
+`DataFactoryObservation` helper copies the pipeline, authored node, world and
+snapshot identity, frame, camera
 facts, and named graph resources from a `graph::RunContext`. The record contains
 names and values, never device handles or callbacks.
 
@@ -75,32 +78,47 @@ and teardown. Its public API is intentionally boring:
 ```cpp
 HookHandle RegisterHook(const RenderHookSpec &spec);
 
-ConnectResult ConnectHooks(
-    DataFactorySessionKey session,
+ConnectHooksResult ConnectHooks(
+    const HookConnectionRequest &request,
     std::span<const HookHandle> hooks
 );
 
 void DisconnectHooks(std::span<const ConnectionHandle> connections);
 
-CallResult CallHooks(
+std::optional<BatchHandle> ArmDataCapture(
     ConnectionHandle connection,
+    DataCaptureRequest request
+);
+
+CallHooksResult CallHooks(
+    ConnectionHandle connection,
+    BatchHandle batch,
     const RenderObservationContext &context
 );
 
+void Observe(const RenderObservationContext &context);
+
 std::optional<HookBundle> TakeCompleted(BatchHandle batch);
 
+std::vector<RenderHookCapability> DescribeHooks() const;
+
 void Pump();
+
+void Cancel(BatchHandle batch);
+
+void Shutdown();
 ```
 
-`CallHooks` is a graph-owned scheduling call. The implementation may rename it
-to `ScheduleHooks` if that makes its non-blocking behavior clearer. It never
-invokes arbitrary callback code. The graph seam supplies the context and the
-binder asks each connected typed hook to append its bounded work.
+`CallHooks` admits readback work before graph recording. It rechecks the
+installed pipeline revision and never invokes arbitrary callback code.
+`Observe` is the static graph seam. It freezes the exact context when a matching
+derived capture node runs. The already queued renderer copy then records from
+that node without waiting.
 
 `ConnectHooks` validates the whole requested set before changing the session.
 It rejects an unknown handle, duplicate hook, unsupported channel, missing
 graph node, stale pipeline revision, or budget overflow. A failed connect leaves
-the previous connection intact.
+all registry slots unchanged.
 
 `DisconnectHooks` stops new scheduling for each connection, cancels its pending
 readbacks, and releases its completed records. It is safe to pass an already
@@ -110,7 +128,7 @@ by the caller.
 `Pump` runs on the renderer owner thread. It checks only completed readbacks,
 turns them into value records, and publishes complete bundles. It does not
 wait. `TakeCompleted` transfers ownership of one published bundle to the
-caller, or returns no value when that batch is still pending or has expired.
+caller, or returns no value when that batch is still pending.
 
 ## Hook specs and names
 
@@ -120,8 +138,8 @@ no inheritance tree for contexts.
 ```cpp
 struct RenderHookSpec {
     core::Name Name;
-    RenderObservationHook Kind;
-    core::Name Node;
+    RenderHookKind Kind;
+    core::Name NodeKind;
     uint32_t SchemaVersion;
     bool Required;
     std::array<DataCaptureChannel, MAX_HOOK_CHANNELS> Channels;
@@ -138,12 +156,13 @@ Names are validated as non-empty, bounded, and unique within a registry. The
 pipeline and graph node are also names. `core::Name::Id()` is an in-process
 comparison aid only and must not appear in a saved bundle.
 
-The initial built-in hook is `data_capture`. Its typed request declares the
-requested data channels, object, semantic, and part labels, snapshot identity,
-pipeline, capture node, view slot, and temporal history. Its output is the
-existing data capture poll shape: one camera convention, one snapshot, and a
-bounded set of planes with status, dimensions, format metadata, bytes, and
-hashes.
+The initial built-ins are the twelve `data_capture.<channel>` hooks. Their node
+kind is `capture`. A connection supplies the authored base node, and
+`DataCaptureNode` derives the channel-specific node name. The typed request
+declares object, semantic, and part labels, snapshot identity, pipeline, view
+slot, and temporal history. Its output is the existing data capture poll shape:
+one camera convention, one snapshot, and a bounded set of planes with status,
+dimensions, format metadata, bytes, and hashes.
 
 ## Context and lifetime
 
@@ -165,8 +184,8 @@ ECS row, or callback-owned object. A pointer may exist in private transient
 implementation state while recording a command, but it never enters the
 context, queue, bundle, or world boundary.
 
-The graph thread creates the context. The renderer owner thread may enqueue the
-GPU work. `Pump` and `TakeCompleted` run on the renderer owner thread unless a
+The renderer owner thread creates the context and enqueues the GPU work. `Pump`
+and `TakeCompleted` run on the renderer owner thread unless a
 future adapter explicitly copies the bundle across a message boundary.
 Consumers may retain a taken bundle after the recording and connection are
 gone.
@@ -180,9 +199,10 @@ those outputs can be recycled.
 
 The first seam is the existing data capture resource observation in the data
 capture output path. The node passes its immutable observation context to the
-binder. The binder schedules copies for the resources named by the typed data
-capture request. Other render code keeps recording ordinary graph work through
-the same command buffers.
+binder. The binder matches it to the admitted batch. The existing resource
+image path records copies for resources named by the typed data capture
+request. Other render code keeps recording ordinary graph work through the same
+command buffers.
 
 If the node is skipped, the hook is not called. If a declared resource is not
 available, the hook records `Unsupported` or `Unavailable` according to its
@@ -212,20 +232,22 @@ Different hooks may observe different authored nodes. Each result must match
 the node declared by its own hook spec. Node names are not required to match
 across the bundle.
 
-Optional hooks produce explicit unavailable records. A failed required hook
-fails the whole bundle. Partial bytes are discarded or marked failed and are
-never presented as a successful capture.
+All current data capture hooks are required. A failed hook fails the whole
+bundle. Partial bytes are discarded or marked failed and are never presented
+as a successful capture. A future optional hook must add an explicit
+unavailable record before the binder may accept it.
 
 Resource tokens are private to the renderer and are consumed exactly once.
-Every queued token is cancelled on failure, expiry, disconnect, or shutdown.
+Every queued token is cancelled on failure, disconnect, or shutdown.
 The existing resource image validation remains the final check on dimensions,
 formats, frame identity, and named resources.
 
 ## Capacity and handles
 
-All limits are fixed or explicitly configured at construction. The first
-implementation retains the renderer's twelve resource image slots, the
-bridge's six live capture jobs, and its 64 MiB retained-byte ceiling. Resource
+All current limits are fixed constants. The first implementation retains the
+renderer's twelve resource image slots, the bridge's six live capture jobs, and
+a 64 MiB binder completed-byte ceiling. The script bridge separately caps the
+bytes retained after collection at 64 MiB. Resource
 admission counts unique capture nodes because several logical channels can
 share one GPU readback. Registration and connection fail cleanly when a limit
 is reached. Per-frame vectors may hold only the bounded capacity declared by
@@ -237,10 +259,10 @@ generation before reuse, so a stale handle cannot cancel, collect, or mutate a
 new object. Handle values are process-local and never cross a world boundary.
 
 Backpressure is visible. When no batch slot or readback budget is available,
-`CallHooks` returns `Backpressured` with a reason and changes no ownership. The
-caller may retry at the next eligible view. An expired required capture becomes
-a terminal failure. The binder never grows an unbounded queue to hide a slow
-consumer.
+admission returns `Capacity` or `Backpressured` and changes no ownership. The
+caller may retry at the next eligible view. Pending work has a fixed owner-pump
+limit and becomes a terminal failure when that bound is reached. The binder
+never grows an unbounded queue to hide a slow consumer.
 
 ## Sessions, teardown, and failure
 
@@ -253,22 +275,24 @@ world or renderer is destroyed. Teardown follows this order:
 4. Release labels, copied bytes, and private scratch storage.
 5. Invalidate the connection generation.
 
-World destruction and pipeline replacement perform the same cancellation. A
-late GPU completion is ignored when its batch generation, snapshot, or pipeline
-revision no longer matches. No destructor calls into a graph node or external
-consumer.
+World teardown and renderer shutdown perform the same cancellation. A pipeline
+revision mismatch is rejected before admission and checked again at the graph
+seam and on collection. A late GPU completion is ignored when its batch
+generation, snapshot, or pipeline revision no longer matches. No destructor
+calls into a graph node or external consumer.
 
 Required hook failure is reported in the bundle status and diagnostic. An
-unsupported optional channel remains explicit and does not become a cache hit.
-Expired work is reported as expired, with its readback latency and dropped byte
-counts available to profiling.
+unsupported channel remains explicit and does not become a cache hit. Pending
+work that reaches the pump bound is reported as failed and releases its private
+readback tokens.
 
 ## Capability discovery and saving
 
-Capability discovery exposes stable hook names, schema versions, supported
-channels, node names, dimensions, readback byte limits, in-flight limits, and
-whether a hook is required or optional. The MCP and client adapters read this
-description. They do not reach into binder state or receive renderer pointers.
+Capability discovery enumerates the live registry as owned records with stable
+hook names, schema versions, supported channels, node kinds, in-flight limits,
+readback-node limits, retained-byte limits, pending-pump limits, and required
+flags. The Luau, MCP, and client adapters read this description. They do not
+reach into binder state or receive renderer pointers.
 
 The binder returns owned records and bytes. The external data factory saves
 payloads first, computes or verifies hashes, and commits the manifest last.
@@ -287,8 +311,7 @@ registered
     -> ready
     -> collected
 
-scheduled or submitted -> failed
-scheduled or submitted -> expired
+scheduled or submitted -> failed at pump bound
 connected              -> disconnected
 ```
 
@@ -297,7 +320,7 @@ with a session. `armed` waits for its matching prepared view. `queued` owns an
 immutable context and private resource tokens. `submitted` means the GPU work
 is in a command buffer. `ready` means
 all required readbacks are complete and validated. `collected` transfers the
-bundle to the caller. `failed`, `expired`, and `disconnected` release all
+bundle to the caller. `failed` and `disconnected` release all
 pending resources and cannot be reused.
 
 ## Rollout
@@ -331,8 +354,7 @@ The first implementation is complete when these behaviors are covered:
 - contexts retain the original snapshot, frame, camera, crop, and resource names
   after the view is reused;
 - readback polling never blocks and publishes only complete matching bundles;
-- optional unavailable channels remain explicit and required failures reject the
-  bundle;
+- unsupported channels are refused and required failures reject the bundle;
 - stale connection and batch handles are rejected after generation reuse;
 - byte and in-flight limits produce a dropped result and a metric;
 - disconnect, pipeline replacement, world destruction, cancellation, and expiry
