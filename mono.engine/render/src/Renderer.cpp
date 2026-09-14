@@ -17,6 +17,7 @@
 #include <engine/graph/Schedule.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/GraphRunner.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/MeshTable.hpp>
 #include <engine/render/MissingTexture.hpp>
 #include <engine/render/PortalExchange.hpp>
@@ -723,6 +724,7 @@ namespace engine::render {
 		// another thread holds a command buffer against it is the same violation
 		// arriving at the end of the frame instead of the middle.
 		RequireOwningThread("Shutdown");
+		HookBind->Shutdown();
 
 		// **A frame waited for and never drawn, which is what quitting during
 		// the event pump produces.** The loop's usual shape makes this

@@ -2,6 +2,7 @@
 #include "SecondSurfaceDepth.hpp"
 
 #include <engine/render/DataCapture.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/testing/Suite.hpp>
@@ -381,6 +382,22 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 		std::find(capabilities.Channels.begin(), capabilities.Channels.end(), "ambient_occlusion") !=
 		capabilities.Channels.end()
 	);
+	REQUIRE(capabilities.HookRecords.size() == 12);
+	for (const auto &hook : capabilities.HookRecords) {
+		CHECK(hook.Name.starts_with("data_capture."));
+		CHECK(hook.SchemaVersion == 1);
+		CHECK(hook.NodeKind == "capture");
+		CHECK(hook.Required);
+		REQUIRE(hook.Channels.size() == 1);
+		CHECK(
+			std::find(capabilities.Channels.begin(), capabilities.Channels.end(), hook.Channels.front()) !=
+			capabilities.Channels.end()
+		);
+	}
+	CHECK(capabilities.MaximumHooks == MAX_DATA_FACTORY_HOOKS);
+	CHECK(capabilities.MaximumConnections == MAX_DATA_FACTORY_CONNECTIONS);
+	CHECK(capabilities.MaximumBatches == MAX_DATA_FACTORY_BATCHES);
+	CHECK(capabilities.MaximumReadbackNodes == 12);
 }
 
 TEST_CASE("script capture validates requests and isolates ticket owners", "[render][data-capture]") {

@@ -6,6 +6,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageImport.hpp>
@@ -4377,6 +4378,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(session.Snapshot("script-capture-world", snapshot).Status == world::DataFactoryStatus::Ok);
 
 	render::ScriptDataCaptureBridge bridge(session, renderer);
+	REQUIRE(renderer.Hooks().DescribeHooks().size() == render::MAX_DATA_FACTORY_READBACK_NODES);
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",
 		.SnapshotId = snapshot,
@@ -4472,4 +4474,19 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(poll.Status == "cancelled");
 	REQUIRE(bridge.Release("script-capture-world", rejectedTicket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", rejectedTicket, poll, detail));
+
+	// Shutdown after admission must publish the binder's terminal bundle to the
+	// bridge, so a script ticket cannot remain pending after device teardown.
+	request.Pipeline = stablePipeline;
+	request.Channels = {"object_ids"};
+	uint64_t shutdownTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", request, shutdownTicket, detail));
+	view.SnapshotId.clear();
+	bridge.PrepareView(view);
+	REQUIRE(view.SnapshotId == snapshot);
+	renderer.Shutdown();
+	bridge.Pump();
+	REQUIRE(bridge.Poll("script-capture-world", shutdownTicket, poll, detail));
+	CHECK(poll.Status == "cancelled");
+	REQUIRE(bridge.Release("script-capture-world", shutdownTicket, detail));
 }

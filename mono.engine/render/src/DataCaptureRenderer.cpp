@@ -31,20 +31,7 @@ namespace engine::render {
 		}
 
 		core::Name CaptureNode(const DataCaptureTicket &ticket, DataCaptureChannel channel) {
-			const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	 ? "-albedo"
-											: channel == DataCaptureChannel::PbrMaterial ? "-material"
-											: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
-											: channel == DataCaptureChannel::AmbientOcclusion
-												? "-ambient-occlusion"
-											: channel == DataCaptureChannel::ObjectIds	  ? "-object-ids"
-											: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
-											: channel == DataCaptureChannel::PartMask	  ? "-part-ids"
-											: channel == DataCaptureChannel::SecondSurfaceDepth ||
-													channel == DataCaptureChannel::SecondSurfaceValidity
-												? "-second-surface"
-												: "";
-			return suffix.empty() ? ticket.CaptureNode
-								  : core::Name(std::string(ticket.CaptureNode.Text()) + std::string(suffix));
+			return DataCaptureNode(ticket.CaptureNode, channel);
 		}
 
 		bool ValidSnapshotId(std::string_view snapshotId) {
@@ -300,6 +287,10 @@ namespace engine::render {
 		}
 		const ResourceImage &image = images->front();
 		poll.CaptureFrame = image.CaptureFrame;
+		poll.Pipeline = image.Observation ? image.Observation->Pipeline : ticket.Pipeline;
+		poll.PipelineRevision = image.Observation ? image.Observation->PipelineRevision : 0;
+		poll.WorldName = image.Observation ? image.Observation->WorldName : core::Name{};
+		poll.ViewSlot = image.Observation ? image.Observation->ViewSlot : ticket.ViewSlot;
 		poll.CameraPose.WorldFromCamera = image.CameraWorldFromCamera;
 		poll.CameraPose.ProjectionAvailable = image.CameraProjectionAvailable;
 		poll.CameraPose.Projection = image.CameraProjection;
@@ -310,9 +301,19 @@ namespace engine::render {
 		poll.CameraPose.CropTop = image.CameraCropTop;
 		poll.CameraPose.CropWidth = image.CameraCropWidth;
 		poll.CameraPose.CropHeight = image.CameraCropHeight;
-		if (image.SnapshotId != ticket.SnapshotId ||
+		bool correctNodes = true;
+		for (size_t channelIndex = 0; channelIndex < ticket.Channels.size(); ++channelIndex) {
+			const ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[channelIndex]];
+			correctNodes = correctNodes && channelImage.Observation &&
+				channelImage.Observation->Node == CaptureNode(ticket, ticket.Channels[channelIndex]);
+		}
+		if (image.SnapshotId != ticket.SnapshotId || !image.Observation || !correctNodes ||
 			std::any_of(images->begin(), images->end(), [&](const ResourceImage &item) {
-				return !capture_record_validation::SameCaptureBundle(image, item);
+				return !capture_record_validation::SameCaptureBundle(image, item) || !item.Observation ||
+					   item.Observation->Pipeline != image.Observation->Pipeline ||
+					   item.Observation->PipelineRevision != image.Observation->PipelineRevision ||
+					   item.Observation->WorldName != image.Observation->WorldName ||
+					   item.Observation->ViewSlot != image.Observation->ViewSlot;
 			})) {
 			poll.Status = DataCaptureStatus::Invalid;
 			for (const DataCaptureChannel channel : ticket.Channels) {

@@ -6,6 +6,7 @@
 #include <engine/world/DataFactory.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
@@ -14,8 +15,7 @@
 namespace engine::render {
 	class ScriptDataCaptureBridge final : public script::DataCaptureBridge {
 	  public:
-		ScriptDataCaptureBridge(world::DataFactorySession &session, Renderer &renderer)
-			: Session(session), RendererRef(renderer) {}
+		ScriptDataCaptureBridge(world::DataFactorySession &session, Renderer &renderer);
 		~ScriptDataCaptureBridge() override;
 		script::DataCaptureBridgeCapabilities Capabilities() const override;
 		bool
@@ -60,7 +60,9 @@ namespace engine::render {
 		std::unordered_map<uint64_t, Entry> Entries;
 		size_t RetainedBytes = 0;
 		bool CaptureAvailable = false;
+		std::vector<script::DataCaptureBridgeHookCapability> HookCapabilities;
+		struct HookState;
 		// Accessed only by the renderer owner through PrepareView, Pump, and destruction.
-		std::unordered_map<uint64_t, DataCaptureTicket> OwnerTickets;
+		std::unique_ptr<HookState> Hooks;
 	};
 }

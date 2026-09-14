@@ -210,7 +210,7 @@ Extra:
 - [_] update and prune old content in documentation. check each statement, update, remove or replace.
 - [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
 
-- [_] add typed, read-only observation hooks at proven render-graph boundaries. Build one render hook now for data capture, move one existing capture path onto it, and measure it before extending the design. A hook is an observer node or declared node output in the existing graph, not a second callback graph beside it.
+- [_] add typed, read-only observation hooks at proven render-graph boundaries. `DataFactoryHookBind` now registers and discovers twelve stable data-capture hooks, pins exact pipeline, revision, view, snapshot and node identity, observes the static output seam, and returns bounded asynchronous readbacks through Luau and MCP capability discovery. Release profiling and a second real consumer remain open. A hook is an observer node or declared node output in the existing graph, not a second callback graph beside it.
   1. Inventory the current node output, resource lifetime, GPU submission and asynchronous readback boundaries, then choose one stable post-pass observation point.
   2. Give each internal hook an enum value and a stable string name for discovery, manifests and MCP. Never serialize the enum number.
   3. Give each hook its own typed immutable context. Do not use a generic `any` bag or an inheritance tree. A context states its valid lifetime, thread, resource access and unavailable fields.

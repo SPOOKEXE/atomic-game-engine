@@ -14,6 +14,7 @@
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
+#include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Version.hpp>
 #include <engine/ecs/Schema.hpp>
@@ -135,6 +136,24 @@ namespace {
 					 "object_ids",
 					 "semantic_ids",
 					 "part_ids"},
+				.HookRecords = {
+					{"data_capture.rgb_linear_hdr", 1, "capture", true, {"rgb_linear_hdr"}},
+					{"data_capture.linear_depth", 1, "capture", true, {"linear_depth"}},
+					{"data_capture.shading_normal", 1, "capture", true, {"shading_normal"}},
+					{"data_capture.pbr_albedo", 1, "capture", true, {"pbr_albedo"}},
+					{"data_capture.pbr_material", 1, "capture", true, {"pbr_material"}},
+					{"data_capture.pbr_emissive", 1, "capture", true, {"pbr_emissive"}},
+					{"data_capture.ambient_occlusion", 1, "capture", true, {"ambient_occlusion"}},
+					{"data_capture.object_ids", 1, "capture", true, {"object_ids"}},
+					{"data_capture.semantic_ids", 1, "capture", true, {"semantic_ids"}},
+					{"data_capture.part_ids", 1, "capture", true, {"part_ids"}},
+				},
+				.MaximumHooks = 14,
+				.MaximumConnections = 6,
+				.MaximumBatches = 6,
+				.MaximumReadbackNodes = 12,
+				.MaximumRetainedBytes = 64u * 1024u * 1024u,
+				.MaximumPendingPumps = 600,
 				.Detail = "ready"
 			};
 		}
@@ -538,6 +557,35 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	);
 	CHECK(overflowFailed);
 	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 12 names");
+}
+
+TEST_CASE("data scene discovery reports capture hooks as stable records", "[control][data-capture]") {
+	Universe universe;
+	MakeWorld(universe, "capture-capabilities");
+	auto bridge = std::make_shared<FakeCapture>();
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataScene(universe, bridge)});
+	const json reply = Called(
+		surface,
+		"get_capture_channels",
+		json{{"instance_id", "capture-capabilities"}, {"options", json::object()}}
+	);
+	CHECK(reply["status"] == "ok");
+	CHECK(reply["schema_version"] == "data-capture-hooks/v1");
+	REQUIRE(reply["hooks"].is_array());
+	REQUIRE(reply["hooks"].size() == 10);
+	const json &first = reply["hooks"][0];
+	CHECK(first["name"] == "data_capture.rgb_linear_hdr");
+	CHECK(first["schema_version"] == 1);
+	CHECK(first["node_kind"] == "capture");
+	CHECK(first["required"] == true);
+	CHECK(first["channels"] == json::array({"rgb_linear_hdr"}));
+	CHECK(reply["limits"]["maximum_hooks"] == 14);
+	CHECK(reply["limits"]["maximum_connections"] == 6);
+	CHECK(reply["limits"]["maximum_batches"] == 6);
+	CHECK(reply["limits"]["maximum_readback_nodes"] == 12);
+	CHECK(reply["limits"]["maximum_retained_bytes"] == 67'108'864);
+	CHECK(reply["limits"]["maximum_pending_pumps"] == 600);
 }
 
 TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {

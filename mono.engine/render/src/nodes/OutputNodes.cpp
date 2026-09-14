@@ -13,6 +13,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -528,9 +529,12 @@ namespace engine::render {
 						normal.Height = source.Height;
 					}
 				}
+				const RenderObservationContext observation =
+					 DataFactoryObservation(recording, context, selectedPipeline->Name, slot);
+				recording.Owner.Hooks().Observe(observation);
 				State->RecordResourceImages(
 					recording.Command,
-					recording.DataCaptureObservation(context, selectedPipeline->Name, slot),
+					observation,
 					selectedPipeline->Name,
 					context.Name,
 					slot,

@@ -18,6 +18,7 @@
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/ShaderCompiler.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -2363,11 +2364,17 @@ namespace engine::render {
 		return true;
 	}
 
-	Renderer::Renderer() : State(std::make_unique<Impl>()), Owner(std::this_thread::get_id()) {
+	Renderer::Renderer()
+		: State(std::make_unique<Impl>()), HookBind(std::make_unique<DataFactoryHookBind>(*this)),
+		  Owner(std::this_thread::get_id()) {
 		(void)InstallEngineDefault(graph::DefaultPbrDocument());
+		HookBind->RegisterBuiltInDataCaptureHooks();
 	}
 
 	Renderer::~Renderer() {
 		Shutdown();
 	}
+
+	DataFactoryHookBind &Renderer::Hooks() { return *HookBind; }
+	const DataFactoryHookBind &Renderer::Hooks() const { return *HookBind; }
 }

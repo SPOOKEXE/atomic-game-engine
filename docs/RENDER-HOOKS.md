@@ -45,8 +45,8 @@ command dispatcher, or file writer.
 `RenderObservationContext` in `mono.engine/render/include/engine/render/RenderObservation.hpp`
 is the value record used at the current seam. The binder-owned
 `DataFactoryObservation` helper copies the pipeline, authored node, world and
-snapshot identity, frame, camera
-facts, and named graph resources from a `graph::RunContext`. The record contains
+snapshot identity, frame, camera facts, and named graph resources from a
+`graph::RunContext`. The record contains
 names and values, never device handles or callbacks.
 
 The current data capture path queues `ResourceImage` readbacks with
@@ -116,9 +116,9 @@ derived capture node runs. The already queued renderer copy then records from
 that node without waiting.
 
 `ConnectHooks` validates the whole requested set before changing the session.
-It rejects an unknown handle, duplicate hook, unsupported channel, missing
-graph node, stale pipeline revision, or budget overflow. A failed connect leaves
-all registry slots unchanged.
+It rejects an unknown handle, duplicate hook or channel, unsupported channel,
+missing graph node, stale pipeline revision, or connection capacity overflow.
+A failed connect leaves all registry slots unchanged.
 
 `DisconnectHooks` stops new scheduling for each connection, cancels its pending
 readbacks, and releases its completed records. It is safe to pass an already
@@ -205,8 +205,8 @@ request. Other render code keeps recording ordinary graph work through the same
 command buffers.
 
 If the node is skipped, the hook is not called. If a declared resource is not
-available, the hook records `Unsupported` or `Unavailable` according to its
-typed contract. It does not invent a value from a previous frame.
+available, the hook records `Unsupported` according to its typed contract. It
+does not invent a value from a previous frame.
 
 Render changes are made through CPU-owned scene or graph state before
 submission. A hook can observe those changes after the normal delta is staged,
@@ -247,8 +247,8 @@ formats, frame identity, and named resources.
 All current limits are fixed constants. The first implementation retains the
 renderer's twelve resource image slots, the bridge's six live capture jobs, and
 a 64 MiB binder completed-byte ceiling. The script bridge separately caps the
-bytes retained after collection at 64 MiB. Resource
-admission counts unique capture nodes because several logical channels can
+bytes retained after collection at 64 MiB. Resource admission counts unique
+capture nodes because several logical channels can
 share one GPU readback. Registration and connection fail cleanly when a limit
 is reached. Per-frame vectors may hold only the bounded capacity declared by
 the binder.
@@ -311,7 +311,7 @@ registered
     -> ready
     -> collected
 
-scheduled or submitted -> failed at pump bound
+queued or submitted    -> failed at pump bound
 connected              -> disconnected
 ```
 
@@ -320,8 +320,8 @@ with a session. `armed` waits for its matching prepared view. `queued` owns an
 immutable context and private resource tokens. `submitted` means the GPU work
 is in a command buffer. `ready` means
 all required readbacks are complete and validated. `collected` transfers the
-bundle to the caller. `failed` and `disconnected` release all
-pending resources and cannot be reused.
+bundle to the caller. `failed` and `disconnected` release all pending resources,
+and their old handles cannot be reused.
 
 ## Rollout
 
@@ -356,12 +356,11 @@ The first implementation is complete when these behaviors are covered:
 - readback polling never blocks and publishes only complete matching bundles;
 - unsupported channels are refused and required failures reject the bundle;
 - stale connection and batch handles are rejected after generation reuse;
-- byte and in-flight limits produce a dropped result and a metric;
-- disconnect, pipeline replacement, world destruction, cancellation, and expiry
+- byte and in-flight limits produce a terminal result without leaking a slot;
+- disconnect, pipeline replacement, world destruction, cancellation, and the pump bound
   release every resource token;
 - capabilities expose stable names and limits, with no enum number in output;
 - the external saver can write payloads and commit the manifest after collection;
-- a release capture reports readback latency, allocations, GPU work, and drops;
 - existing data capture tests still validate camera, snapshot, frame, dimensions,
   formats, and resource alignment.
 

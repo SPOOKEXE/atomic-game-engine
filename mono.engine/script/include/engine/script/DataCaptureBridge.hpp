@@ -94,9 +94,25 @@ namespace engine::script {
 		std::vector<DataCaptureBridgeObjectLabel> PartLabels;
 	};
 
+	struct DataCaptureBridgeHookCapability {
+		std::string Name;
+		uint32_t SchemaVersion = 0;
+		std::string NodeKind;
+		bool Required = false;
+		std::vector<std::string> Channels;
+	};
 	struct DataCaptureBridgeCapabilities {
 		bool Available = false;
 		std::vector<std::string> Channels;
+		// Stable render hook contracts. They are strings and fixed limits, never
+		// renderer handles or process-local enum values.
+		std::vector<DataCaptureBridgeHookCapability> HookRecords;
+		uint32_t MaximumHooks = 0;
+		uint32_t MaximumConnections = 0;
+		uint32_t MaximumBatches = 0;
+		uint32_t MaximumReadbackNodes = 0;
+		uint64_t MaximumRetainedBytes = 0;
+		uint32_t MaximumPendingPumps = 0;
 		std::string Detail;
 	};
 

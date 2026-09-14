@@ -114,6 +114,18 @@ namespace engine::render {
 	enum class DataCaptureColourSpace : uint8_t { Linear, SRGB, NotApplicable, Unknown };
 	enum class DataCaptureOrigin : uint8_t { TopLeft };
 	enum class DataCaptureTemporalHistory : uint8_t { Preserve, Reset, Disable };
+	inline core::Name DataCaptureNode(core::Name base, DataCaptureChannel channel) {
+		const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo ? "-albedo"
+			: channel == DataCaptureChannel::PbrMaterial ? "-material"
+			: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
+			: channel == DataCaptureChannel::AmbientOcclusion ? "-ambient-occlusion"
+			: channel == DataCaptureChannel::ObjectIds ? "-object-ids"
+			: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
+			: channel == DataCaptureChannel::PartMask ? "-part-ids"
+			: channel == DataCaptureChannel::SecondSurfaceDepth || channel == DataCaptureChannel::SecondSurfaceValidity
+				? "-second-surface" : "";
+		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
+	}
 
 	// These conventions are fixed by scene::ResolveCamera and are repeated on
 	// every result so an exported image cannot be separated from its coordinates.
@@ -197,6 +209,10 @@ namespace engine::render {
 		DataCaptureStatus Status = DataCaptureStatus::Invalid;
 		std::string SnapshotId;
 		uint64_t CaptureFrame = 0;
+		core::Name Pipeline;
+		uint64_t PipelineRevision = 0;
+		core::Name WorldName;
+		size_t ViewSlot = 0;
 		// This is false only for Preserve. Reset and Disable are refused until a
 		// render-only pass applies their declared renderer-local history policy.
 		bool TemporalHistoryChanged = false;

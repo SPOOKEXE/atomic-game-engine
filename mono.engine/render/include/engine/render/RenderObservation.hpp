@@ -46,6 +46,7 @@ namespace engine::render {
 		size_t ViewSlot = 0;
 		std::string SnapshotId;
 		uint64_t Frame = 0;
+		uint64_t PipelineRevision = 0;
 		RenderObservationCamera Camera;
 		std::array<core::Name, MAX_RENDER_OBSERVATION_RESOURCES> ReadResources{};
 		uint8_t ReadCount = 0;

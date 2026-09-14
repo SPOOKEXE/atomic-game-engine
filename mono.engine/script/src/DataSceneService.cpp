@@ -769,7 +769,10 @@ namespace engine::script {
 				Map({
 					{"status", String("capability_unsupported")},
 					{"feature", String("render_capture")},
+					{"schema_version", String("data-capture-hooks/v1")},
 					{"channels", Array({})},
+					{"hooks", Array({})},
+					{"limits", Map({})},
 					{"reason", String("no runtime-scoped render capture bridge installed")},
 				})
 			};
@@ -782,11 +785,38 @@ namespace engine::script {
 			channels.reserve(capabilities.Channels.size());
 			for (const std::string &channel : capabilities.Channels)
 				channels.push_back(String(channel));
+			std::vector<ScriptValue> hooks;
+			hooks.reserve(capabilities.HookRecords.size());
+			for (const auto &hook : capabilities.HookRecords)
+			{
+				std::vector<ScriptValue> hookChannels;
+				hookChannels.reserve(hook.Channels.size());
+				for (const std::string &channel : hook.Channels)
+					hookChannels.push_back(String(channel));
+				hooks.push_back(Map({
+					{"name", String(hook.Name)},
+					{"schema_version", Number(hook.SchemaVersion)},
+					{"node_kind", String(hook.NodeKind)},
+					{"required", Boolean(hook.Required)},
+					{"channels", Array(std::move(hookChannels))},
+				}));
+			}
 			return {
 				capabilities.Available ? "ok" : "unsupported",
 				Map({
 					{"status", String(capabilities.Available ? "ok" : "capability_unsupported")},
+					{"schema_version", String("data-capture-hooks/v1")},
 					{"channels", Array(std::move(channels))},
+					{"hooks", Array(std::move(hooks))},
+					{"limits",
+					 Map({
+						 {"maximum_hooks", Number(capabilities.MaximumHooks)},
+						 {"maximum_connections", Number(capabilities.MaximumConnections)},
+						 {"maximum_batches", Number(capabilities.MaximumBatches)},
+						 {"maximum_readback_nodes", Number(capabilities.MaximumReadbackNodes)},
+						 {"maximum_retained_bytes", Number(capabilities.MaximumRetainedBytes)},
+						 {"maximum_pending_pumps", Number(capabilities.MaximumPendingPumps)},
+					 })},
 					{"reason", String(capabilities.Detail)},
 				})
 			};

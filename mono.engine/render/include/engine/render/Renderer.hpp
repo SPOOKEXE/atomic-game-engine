@@ -54,6 +54,7 @@ namespace engine::graph {
 }
 
 namespace engine::render {
+	class DataFactoryHookBind;
 	struct PackedMeshData;
 	class ShaderLibrary;
 	struct PortalImageBinding;
@@ -1734,6 +1735,11 @@ namespace engine::render {
 		// Cancels all outstanding resource transfers named by a ticket.
 		void CancelDataCapture(DataCaptureTicket &ticket);
 
+		// Render-owned hook state. Script and world adapters use it through their
+		// implementation files; no hook type crosses those public boundaries.
+		DataFactoryHookBind &Hooks();
+		const DataFactoryHookBind &Hooks() const;
+
 		// GPU execution time and CPU command-recording wall time for each
 		// physical pass, in microseconds and keyed by Name::Id. GPU results lag
 		// until the query pool resolves; wall time is from the latest Render.
@@ -2541,6 +2547,7 @@ namespace engine::render {
 
 		struct Impl;
 		std::unique_ptr<Impl> State;
+		std::unique_ptr<DataFactoryHookBind> HookBind;
 
 		struct InstalledNodeHandler {
 			core::Name Kind;

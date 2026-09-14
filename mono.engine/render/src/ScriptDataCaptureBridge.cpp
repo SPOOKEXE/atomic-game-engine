@@ -1,6 +1,7 @@
 #include "CaptureRecordValidation.hpp"
 
 #include <engine/render/ScriptDataCaptureBridge.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -10,6 +11,16 @@
 #include <utility>
 
 namespace engine::render {
+	struct ScriptDataCaptureBridge::HookState {
+		std::unordered_map<uint64_t, ConnectionHandle> Connections;
+		std::unordered_map<uint64_t, BatchHandle> Batches;
+	};
+
+	ScriptDataCaptureBridge::ScriptDataCaptureBridge(world::DataFactorySession &session, Renderer &renderer)
+		: Session(session), RendererRef(renderer) {
+		RefreshCapabilities();
+	}
+
 	namespace {
 		constexpr size_t MAX_CAPTURE_CHANNELS = 12;
 		constexpr size_t MAX_CAPTURE_TICKETS = 6;
@@ -194,15 +205,10 @@ namespace engine::render {
 	}
 
 	ScriptDataCaptureBridge::~ScriptDataCaptureBridge() {
-		std::vector<DataCaptureTicket> tickets;
-		{
-			std::lock_guard lock(Mutex);
-			for (auto &entry : OwnerTickets)
-				tickets.push_back(std::move(entry.second));
-			OwnerTickets.clear();
-		}
-		for (DataCaptureTicket &ticket : tickets)
-			RendererRef.CancelDataCapture(ticket);
+		if (!Hooks) return;
+		std::vector<ConnectionHandle> connections;
+		for (const auto &[id, connection] : Hooks->Connections) connections.push_back(connection);
+		RendererRef.Hooks().DisconnectHooks(connections);
 	}
 
 	script::DataCaptureBridgeCapabilities ScriptDataCaptureBridge::Capabilities() const {
@@ -222,6 +228,13 @@ namespace engine::render {
 				 "part_ids",
 				 "second_surface_depth",
 				 "second_surface_validity"},
+			.HookRecords = HookCapabilities,
+			.MaximumHooks = static_cast<uint32_t>(MAX_DATA_FACTORY_HOOKS),
+			.MaximumConnections = static_cast<uint32_t>(MAX_DATA_FACTORY_CONNECTIONS),
+			.MaximumBatches = static_cast<uint32_t>(MAX_DATA_FACTORY_BATCHES),
+			.MaximumReadbackNodes = static_cast<uint32_t>(MAX_DATA_FACTORY_READBACK_NODES),
+			.MaximumRetainedBytes = MAX_DATA_FACTORY_RETAINED_BYTES,
+			.MaximumPendingPumps = MAX_DATA_FACTORY_PENDING_PUMPS,
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
 		};
@@ -229,8 +242,22 @@ namespace engine::render {
 
 	void ScriptDataCaptureBridge::RefreshCapabilities() {
 		const bool available = RendererRef.Backend().Device != nullptr;
+		std::vector<script::DataCaptureBridgeHookCapability> hooks;
+		for (const RenderHookCapability &hook : RendererRef.Hooks().DescribeHooks()) {
+			if (hook.Kind != RenderHookKind::DataCapture) continue;
+			script::DataCaptureBridgeHookCapability record;
+			record.Name = hook.Name.Text();
+			record.SchemaVersion = hook.SchemaVersion;
+			record.NodeKind = hook.NodeKind.Text();
+			record.Required = hook.Required;
+			record.Channels.reserve(hook.ChannelCount);
+			for (size_t index = 0; index < hook.ChannelCount; ++index)
+				record.Channels.emplace_back(DataCaptureChannelName(hook.Channels[index]));
+			hooks.push_back(std::move(record));
+		}
 		std::lock_guard lock(Mutex);
 		CaptureAvailable = available;
+		HookCapabilities = std::move(hooks);
 	}
 
 	bool ScriptDataCaptureBridge::Queue(
@@ -344,7 +371,7 @@ namespace engine::render {
 			detail = "invalid capture instance";
 			return false;
 		}
-		std::vector<DataCaptureTicket> tickets;
+		std::vector<ConnectionHandle> connections;
 		{
 			std::lock_guard lock(Mutex);
 			for (auto entry = Entries.begin(); entry != Entries.end();) {
@@ -352,28 +379,31 @@ namespace engine::render {
 					++entry;
 					continue;
 				}
-				if (auto owner = OwnerTickets.find(entry->first); owner != OwnerTickets.end()) {
-					tickets.push_back(std::move(owner->second));
-					OwnerTickets.erase(owner);
+				if (Hooks) {
+					if (auto owner = Hooks->Connections.find(entry->first); owner != Hooks->Connections.end()) {
+						connections.push_back(owner->second);
+						Hooks->Connections.erase(owner);
+					}
+					Hooks->Batches.erase(entry->first);
 				}
 				for (const auto &[resource, bytes] : entry->second.PlaneBytes)
 					RetainedBytes -= bytes.size();
 				entry = Entries.erase(entry);
 			}
 		}
-		for (DataCaptureTicket &ticket : tickets)
-			RendererRef.CancelDataCapture(ticket);
+		RendererRef.Hooks().DisconnectHooks(connections);
 		detail.clear();
 		return true;
 	}
 
 	void ScriptDataCaptureBridge::PrepareView(View &view) {
 		RefreshCapabilities();
+		if (!Hooks) Hooks = std::make_unique<HookState>();
 		std::vector<PendingRequest> pending;
 		{
 			std::lock_guard lock(Mutex);
 			for (auto &[id, entry] : Entries) {
-				if (OwnerTickets.contains(id) || entry.Preparing || entry.CancelRequested || entry.Terminal ||
+				if (Hooks->Batches.contains(id) || entry.Preparing || entry.CancelRequested || entry.Terminal ||
 					entry.Request.InstanceId != view.WorldName.Text() ||
 					!PipelineMatches(entry.Request.Pipeline, view) || entry.Request.ViewSlot != view.Slot)
 					continue;
@@ -410,6 +440,7 @@ namespace engine::render {
 				}
 				continue;
 			}
+			bool releaseHook = false;
 			{
 				std::lock_guard lock(Mutex);
 				const auto entry = Entries.find(pendingRequest.Id);
@@ -471,40 +502,79 @@ namespace engine::render {
 				}
 				continue;
 			}
-			DataCaptureTicket rendererTicket;
-			const bool queued = RendererRef.QueueDataCapture(request, rendererTicket);
-			bool cancel = false;
+			std::array<HookHandle, MAX_CAPTURE_CHANNELS> hookHandles{};
+			for (size_t index = 0; index < request.Channels.size(); ++index)
+				hookHandles[index] = RendererRef.Hooks().FindHook(
+					core::Name("data_capture." + std::string(DataCaptureChannelName(request.Channels[index])))
+				);
+			const auto described = RendererRef.DescribePipeline(
+				view.Pipeline, view.Target != nullptr ? view.Target->Width : 1, view.Target != nullptr ? view.Target->Height : 1
+			);
+			const ConnectHooksResult connection = described ? RendererRef.Hooks().ConnectHooks(
+				{.Session = {.WorldName = pendingRequest.Request.InstanceId},
+				 .Pipeline = view.Pipeline,
+				 .PipelineRevision = described->Revision,
+				 .ViewSlot = view.Slot,
+				 .CaptureNode = request.CaptureNode,
+				 .ViewWidth = view.Target != nullptr ? view.Target->Width : 1,
+				 .ViewHeight = view.Target != nullptr ? view.Target->Height : 1},
+				std::span(hookHandles).first(request.Channels.size())
+			) : ConnectHooksResult{.Status = HookBindStatus::Stale, .Connection = {}};
+			const auto batch = connection.Status == HookBindStatus::Ok
+				? RendererRef.Hooks().ArmDataCapture(connection.Connection, request)
+				: std::optional<BatchHandle>{};
+			const RenderObservationContext observation{
+				.Pipeline = view.Pipeline,
+				.Node = request.CaptureNode,
+				.WorldName = view.WorldName,
+				.ViewSlot = view.Slot,
+				.SnapshotId = request.SnapshotId,
+				.PipelineRevision = described ? described->Revision : 0,
+				.Camera = {},
+			};
+			const CallHooksResult queued = batch
+				? RendererRef.Hooks().CallHooks(connection.Connection, *batch, observation)
+				: CallHooksResult{.Status = HookBindStatus::Backpressured, .Batch = {}};
 			{
 				std::lock_guard lock(Mutex);
 				auto entry = Entries.find(pendingRequest.Id);
 				if (entry == Entries.end() || entry->second.CancelRequested || entry->second.Terminal) {
-					cancel = queued;
-				} else if (!queued) {
+					releaseHook = true;
+				} else if (queued.Status != HookBindStatus::Ok) {
+					releaseHook = true;
 					entry->second.Reply.Status = "failed";
 					entry->second.Reply.SnapshotId = pendingRequest.Request.SnapshotId;
-					entry->second.Detail = "renderer refused capture";
+					entry->second.Detail = "renderer capture hook backpressured";
 					entry->second.Terminal = true;
 					entry->second.Preparing = false;
 				} else {
-					OwnerTickets.emplace(pendingRequest.Id, std::move(rendererTicket));
+					Hooks->Connections.emplace(pendingRequest.Id, connection.Connection);
+					Hooks->Batches.emplace(pendingRequest.Id, *batch);
 					entry->second.Preparing = false;
 					view.SnapshotId = request.SnapshotId;
 				}
 			}
-			if (cancel) RendererRef.CancelDataCapture(rendererTicket);
+			if (releaseHook) {
+				if (batch) RendererRef.Hooks().Cancel(*batch);
+				if (connection.Status == HookBindStatus::Ok)
+					RendererRef.Hooks().DisconnectHooks(std::array{connection.Connection});
+			}
 		}
 	}
 
 	void ScriptDataCaptureBridge::Pump() {
 		RefreshCapabilities();
-		std::vector<DataCaptureTicket> cancelled;
+		std::vector<ConnectionHandle> cancelled;
 		{
 			std::lock_guard lock(Mutex);
 			for (auto &[id, entry] : Entries) {
 				if (!entry.CancelRequested || entry.Terminal) continue;
-				if (auto ticket = OwnerTickets.find(id); ticket != OwnerTickets.end()) {
-					cancelled.push_back(std::move(ticket->second));
-					OwnerTickets.erase(ticket);
+				if (Hooks) {
+					if (auto connection = Hooks->Connections.find(id); connection != Hooks->Connections.end()) {
+						cancelled.push_back(connection->second);
+						Hooks->Connections.erase(connection);
+						Hooks->Batches.erase(id);
+					}
 				}
 				entry.Reply.Status = "cancelled";
 				entry.Reply.SnapshotId = entry.Request.SnapshotId;
@@ -513,30 +583,35 @@ namespace engine::render {
 				entry.Preparing = false;
 			}
 		}
-		for (DataCaptureTicket &ticket : cancelled)
-			RendererRef.CancelDataCapture(ticket);
+		if (Hooks) RendererRef.Hooks().DisconnectHooks(cancelled);
+		if (!Hooks) return;
+		RendererRef.Hooks().Pump();
 
-		std::vector<std::pair<uint64_t, DataCaptureTicket>> polling;
+		std::vector<std::pair<uint64_t, BatchHandle>> polling;
+		std::vector<ConnectionHandle> completedConnections;
 		{
 			std::lock_guard lock(Mutex);
-			for (auto &entry : OwnerTickets)
-				polling.emplace_back(entry.first, std::move(entry.second));
-			OwnerTickets.clear();
+			for (const auto &entry : Hooks->Batches) polling.emplace_back(entry.first, entry.second);
 		}
-		for (auto &ticket : polling) {
-			DataCapturePoll captured = RendererRef.PollDataCapture(ticket.second);
-			if (captured.Status == DataCaptureStatus::Pending) {
-				bool cancel = false;
-				{
-					std::lock_guard lock(Mutex);
-					if (const auto entry = Entries.find(ticket.first); entry != Entries.end())
-						cancel = entry->second.CancelRequested || entry->second.Terminal;
-					if (!cancel) OwnerTickets.emplace(ticket.first, std::move(ticket.second));
+		for (const auto &ticket : polling) {
+			auto bundle = RendererRef.Hooks().TakeCompleted(ticket.second);
+			if (!bundle) continue;
+			DataCapturePoll captured = std::move(bundle->Capture);
+			DataCaptureTicket validationTicket;
+			{
+				std::lock_guard lock(Mutex);
+				const auto entry = Entries.find(ticket.first);
+				if (entry == Entries.end()) continue;
+				validationTicket.SnapshotId = entry->second.Request.SnapshotId;
+				validationTicket.CaptureNode = core::Name(entry->second.Request.CaptureNode);
+				for (const std::string &name : entry->second.Request.Channels)
+					if (const auto channel = Channel(name)) validationTicket.Channels.push_back(*channel);
+				Hooks->Batches.erase(ticket.first);
+				if (const auto connection = Hooks->Connections.find(ticket.first);
+					connection != Hooks->Connections.end()) {
+					completedConnections.push_back(connection->second);
+					Hooks->Connections.erase(connection);
 				}
-				if (cancel) {
-					RendererRef.CancelDataCapture(ticket.second);
-				}
-				continue;
 			}
 			script::DataCaptureBridgePoll reply;
 			reply.Status = Status(captured.Status);
@@ -552,7 +627,7 @@ namespace engine::render {
 			bool partIdsReady = false;
 			size_t totalBytes = 0;
 			for (DataCapturePlane &plane : captured.Planes) {
-				if (!capture_record_validation::Plane(ticket.second, plane, ticket.first, validation)) {
+				if (!capture_record_validation::Plane(validationTicket, plane, ticket.first, validation)) {
 					malformedPlane = true;
 					break;
 				}
@@ -608,16 +683,16 @@ namespace engine::render {
 					reply.PartLabels.push_back({label.Label, label.StableId});
 			const bool coherentStatus =
 				(captured.Status == DataCaptureStatus::Ready &&
-				 validation.ReadyPlanes == ticket.second.Channels.size() &&
-				 validation.Channels.size() == ticket.second.Channels.size()) ||
+					 validation.ReadyPlanes == validationTicket.Channels.size() &&
+					 validation.Channels.size() == validationTicket.Channels.size()) ||
 				(captured.Status == DataCaptureStatus::Partial && validation.ReadyPlanes > 0 &&
-				 validation.ReadyPlanes < ticket.second.Channels.size() &&
-				 validation.Channels.size() == ticket.second.Channels.size()) ||
+					 validation.ReadyPlanes < validationTicket.Channels.size() &&
+					 validation.Channels.size() == validationTicket.Channels.size()) ||
 				((captured.Status == DataCaptureStatus::Unsupported ||
 				  captured.Status == DataCaptureStatus::Invalid ||
 				  captured.Status == DataCaptureStatus::Failed ||
 				  captured.Status == DataCaptureStatus::Cancelled) &&
-				 validation.ReadyPlanes == 0 && validation.Channels.size() == ticket.second.Channels.size());
+				 validation.ReadyPlanes == 0 && validation.Channels.size() == validationTicket.Channels.size());
 			malformedPlane = malformedPlane || !coherentStatus;
 			{
 				std::lock_guard lock(Mutex);
@@ -649,6 +724,7 @@ namespace engine::render {
 				}
 			}
 		}
+		RendererRef.Hooks().DisconnectHooks(completedConnections);
 	}
 
 	bool ScriptDataCaptureBridge::HasPending() const {

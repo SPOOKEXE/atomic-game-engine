@@ -21,6 +21,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -50,6 +51,19 @@ namespace {
 			return {
 				.Available = true,
 				.Channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"},
+				.HookRecords = {
+					{"data_capture.rgb_linear_hdr", 1, "capture", true, {"rgb_linear_hdr"}},
+					{"data_capture.ambient_occlusion", 1, "capture", true, {"ambient_occlusion"}},
+					{"data_capture.object_ids", 1, "capture", true, {"object_ids"}},
+					{"data_capture.semantic_ids", 1, "capture", true, {"semantic_ids"}},
+					{"data_capture.part_ids", 1, "capture", true, {"part_ids"}},
+				},
+				.MaximumHooks = 14,
+				.MaximumConnections = 6,
+				.MaximumBatches = 6,
+				.MaximumReadbackNodes = 12,
+				.MaximumRetainedBytes = 64u * 1024u * 1024u,
+				.MaximumPendingPumps = 600,
 				.Detail = "test queue"
 			};
 		}
@@ -100,6 +114,7 @@ namespace {
 				.Origin = "top_left",
 				.Packing = "RGBA16F",
 				.Provenance = {},
+				.AmbientOcclusion = std::nullopt,
 			});
 			poll.Planes.push_back({
 				.Channel = "ambient_occlusion",
@@ -117,6 +132,7 @@ namespace {
 				.Origin = "top_left",
 				.Packing = "unorm8",
 				.Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
+				.AmbientOcclusion = std::nullopt,
 			});
 			for (const char *channel : {"object_ids", "semantic_ids", "part_ids"})
 				poll.Planes.push_back({
@@ -134,6 +150,7 @@ namespace {
 					.Origin = "top_left",
 					.Packing = {},
 					.Provenance = {},
+					.AmbientOcclusion = std::nullopt,
 				});
 			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			poll.SemanticLabels = {{1, "fixture/box"}};
@@ -604,6 +621,18 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 			Run(*runtime, R"(
 				local service = game:GetService("DataSceneService")
 				assert(service:GetCapabilities().render_capture)
+				local captureCapabilities = service:GetCaptureChannels()
+				assert(captureCapabilities.status == "ok")
+				assert(captureCapabilities.schema_version == "data-capture-hooks/v1")
+				assert(#captureCapabilities.hooks == 5)
+				assert(captureCapabilities.hooks[1].name == "data_capture.rgb_linear_hdr")
+				assert(captureCapabilities.hooks[1].schema_version == 1)
+				assert(captureCapabilities.hooks[1].node_kind == "capture")
+				assert(captureCapabilities.hooks[1].required)
+				assert(captureCapabilities.hooks[1].channels[1] == "rgb_linear_hdr")
+				assert(captureCapabilities.limits.maximum_hooks == 14)
+				assert(captureCapabilities.limits.maximum_retained_bytes == 67108864)
+				assert(captureCapabilities.limits.maximum_pending_pumps == 600)
 				assert(service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 4294967296, channels = {"rgb_linear_hdr"}, temporal_history = "preserve"}).status == "invalid_capture_request")
 				local queued = service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"}, temporal_history = "preserve"})
 				assert(queued.status == "queued")
@@ -626,6 +655,8 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 			Run(*runtime, R"(
 				const service = game.GetService("DataSceneService");
 				if (!service.GetCapabilities().render_capture) throw new Error("capture missing");
+				const captureCapabilities = service.GetCaptureChannels();
+				if (captureCapabilities.status !== "ok" || captureCapabilities.schema_version !== "data-capture-hooks/v1" || captureCapabilities.hooks.length !== 5 || captureCapabilities.hooks[0].name !== "data_capture.rgb_linear_hdr" || captureCapabilities.hooks[0].schema_version !== 1 || captureCapabilities.hooks[0].node_kind !== "capture" || !captureCapabilities.hooks[0].required || captureCapabilities.hooks[0].channels[0] !== "rgb_linear_hdr" || captureCapabilities.limits.maximum_connections !== 6 || captureCapabilities.limits.maximum_batches !== 6 || captureCapabilities.limits.maximum_readback_nodes !== 12) throw new Error("capture capability mismatch");
 				if (service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: Infinity, channels: ["rgb_linear_hdr"], temporal_history: "preserve"}).status !== "invalid_capture_request") throw new Error("invalid request accepted");
 				const queued = service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: 0, channels: ["rgb_linear_hdr"], temporal_history: "preserve"});
 				if (queued.status !== "queued") throw new Error("queue failed");
