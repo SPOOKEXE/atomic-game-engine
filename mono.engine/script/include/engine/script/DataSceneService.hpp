@@ -56,6 +56,19 @@ namespace engine::script {
 		core::Vector3 HalfExtent;
 	};
 
+	// A fixed-height bird's-eye grid over world-space collider contact. Rows run
+	// from minimum Z to maximum Z; columns run from minimum X to maximum X.
+	struct DataSceneColliderBevRequest {
+		float MinimumXMetres = 0.0f;
+		float MinimumZMetres = 0.0f;
+		float MaximumXMetres = 0.0f;
+		float MaximumZMetres = 0.0f;
+		float MinimumYMetres = 0.0f;
+		float MaximumYMetres = 0.0f;
+		uint8_t Rows = 0;
+		uint8_t Columns = 0;
+	};
+
 	DataSceneResult GetCapabilities(const ecs::Store &store);
 	DataSceneResult GetSceneSnapshot(ecs::Store &store, size_t limit = MAX_DATA_SCENE_ENTITIES);
 	DataSceneResult
@@ -81,6 +94,8 @@ namespace engine::script {
 	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request);
 	DataSceneResult OverlapAABB(const ecs::Store &store, const DataSceneAabbRequest &request);
 	DataSceneResult OverlapOBB(const ecs::Store &store, const DataSceneObbRequest &request);
+
+	DataSceneResult ColliderBev(ecs::Store &store, const DataSceneColliderBevRequest &request);
 
 	const ServiceSurface &DataSceneServiceSurface();
 }

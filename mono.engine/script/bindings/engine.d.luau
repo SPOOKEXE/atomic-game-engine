@@ -2995,6 +2995,7 @@ declare extern type DataSceneService with
 	function Raycast(self, request: any): any
 	function OverlapAABB(self, request: any): any
 	function OverlapOBB(self, request: any): any
+	function GetColliderBev(self, request: any): any
 end
 
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.

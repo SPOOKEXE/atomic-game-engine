@@ -1015,6 +1015,8 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				assert(service:Raycast({origin = Vector3.new(-3, 0, 0), direction = Vector3.new(1, 0, 0), max_distance_metres = 10}).id == "query/box")
 				assert(service:OverlapAABB({minimum = Vector3.new(-1, -1, -1), maximum = Vector3.new(1, 1, 1)}).ids[1] == "query/box")
 				assert(service:OverlapOBB({frame = CFrame.new(0, 0, 0), half_extent = Vector3.new(1, 1, 1)}).ids[1] == "query/box")
+				local bev = service:GetColliderBev({xz_bounds_metres = {minimum = {-1, -1}, maximum = {1, 1}}, y_minimum_metres = -1, y_maximum_metres = 1, rows = 1, columns = 1})
+				assert(bev.status == "ok" and bev.row_order == "z_major_then_x" and bev.cells[1].state == "occupied")
 				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(1, 0, 0), max_distance_metres = -1}).status == "invalid_raycast_query")
 				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(0, 0, 0), max_distance_metres = 1}).status == "invalid_raycast_query")
 			)");
@@ -1024,6 +1026,8 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				if (service.Raycast({origin: Vector3.new(-3, 0, 0), direction: Vector3.new(1, 0, 0), max_distance_metres: 10}).id !== "query/box") throw new Error("raycast mismatch");
 				if (service.OverlapAABB({minimum: Vector3.new(-1, -1, -1), maximum: Vector3.new(1, 1, 1)}).ids[0] !== "query/box") throw new Error("aabb mismatch");
 				if (service.OverlapOBB({frame: CFrame.new(0, 0, 0), half_extent: Vector3.new(1, 1, 1)}).ids[0] !== "query/box") throw new Error("obb mismatch");
+				const bev = service.GetColliderBev({xz_bounds_metres: {minimum: [-1, -1], maximum: [1, 1]}, y_minimum_metres: -1, y_maximum_metres: 1, rows: 1, columns: 1});
+				if (bev.status !== "ok" || bev.row_order !== "z_major_then_x" || bev.cells[0].state !== "occupied") throw new Error("BEV mismatch");
 				if (service.OverlapAABB({minimum: Vector3.new(1, 1, 1), maximum: Vector3.new(-1, -1, -1)}).status !== "invalid_aabb_query") throw new Error("invalid bounds accepted");
 				if (service.Raycast({origin: Vector3.new(0, 0, 0), direction: Vector3.new(0, 0, 0), max_distance_metres: 1}).status !== "invalid_raycast_query") throw new Error("zero ray accepted");
 			)");

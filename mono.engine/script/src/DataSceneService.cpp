@@ -1789,7 +1789,61 @@ namespace engine::script {
 			call.ReturnValue(OverlapOBB(call.World(), {frame->Frame, halfExtent}).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 20> DATA_SCENE_METHODS{{
+		void ServiceColliderBev(ScriptCall &call) {
+			ScriptValue value;
+			CodecStatus status = CodecStatus::Ok;
+			if (!call.ReadValue(0, value, status)) {
+				call.ReturnValue(Map({{"status", String("invalid_collider_bev")}}));
+				return;
+			}
+			const auto number = [](const ScriptValue *field, float &out) {
+				if (field == nullptr || field->Tag != ValueTag::Number || !std::isfinite(field->Number) ||
+					field->Number < -std::numeric_limits<float>::max() ||
+					field->Number > std::numeric_limits<float>::max())
+					return false;
+				out = static_cast<float>(field->Number);
+				return std::isfinite(out);
+			};
+			const auto dimension = [](const ScriptValue *field, uint8_t &out) {
+				if (field == nullptr || field->Tag != ValueTag::Number || !std::isfinite(field->Number) ||
+					field->Number != std::floor(field->Number) || field->Number < 1.0 || field->Number > 8.0)
+					return false;
+				out = static_cast<uint8_t>(field->Number);
+				return true;
+			};
+			const ScriptValue *bounds = Field(value, "xz_bounds_metres");
+			if (!HasOnlyFields(
+					value, {"xz_bounds_metres", "y_minimum_metres", "y_maximum_metres", "rows", "columns"}
+				) ||
+				bounds == nullptr || !HasOnlyFields(*bounds, {"minimum", "maximum"})) {
+				call.ReturnValue(Map({{"status", String("invalid_collider_bev")}}));
+				return;
+			}
+			DataSceneColliderBevRequest request;
+			const auto boundsField = [](const ScriptValue &map,
+										std::string_view name) -> const ScriptValue * {
+				for (const auto &[key, field] : map.Entries)
+					if (key == name) return &field;
+				return nullptr;
+			};
+			const auto boundsPair = [&](std::string_view name, float &x, float &z) {
+				const ScriptValue *pair = boundsField(*bounds, name);
+				if (pair == nullptr || pair->Tag != ValueTag::Array || pair->Items.size() != 2) return false;
+				return number(&pair->Items[0], x) && number(&pair->Items[1], z);
+			};
+			if (!boundsPair("minimum", request.MinimumXMetres, request.MinimumZMetres) ||
+				!boundsPair("maximum", request.MaximumXMetres, request.MaximumZMetres) ||
+				!number(Field(value, "y_minimum_metres"), request.MinimumYMetres) ||
+				!number(Field(value, "y_maximum_metres"), request.MaximumYMetres) ||
+				!dimension(Field(value, "rows"), request.Rows) ||
+				!dimension(Field(value, "columns"), request.Columns)) {
+				call.ReturnValue(Map({{"status", String("invalid_collider_bev")}}));
+				return;
+			}
+			call.ReturnValue(ColliderBev(call.World(), request).Value);
+		}
+
+		constexpr std::array<ServiceMethod, 21> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
@@ -1810,6 +1864,7 @@ namespace engine::script {
 			{"Raycast", ServiceRaycast},
 			{"OverlapAABB", ServiceAabb},
 			{"OverlapOBB", ServiceObb},
+			{"GetColliderBev", ServiceColliderBev},
 		}};
 	}
 
@@ -2497,6 +2552,161 @@ namespace engine::script {
 		frame.QuaternionZ = static_cast<float>(static_cast<double>(frame.QuaternionZ) / length);
 		frame.QuaternionW = static_cast<float>(static_cast<double>(frame.QuaternionW) / length);
 		return QueryObb(store, Map({{"frame", CFrame(frame)}, {"half_extent", Vector(request.HalfExtent)}}));
+	}
+
+	DataSceneResult ColliderBev(ecs::Store &store, const DataSceneColliderBevRequest &request) {
+		constexpr size_t MAXIMUM_CELLS = 64;
+		if (request.Rows == 0 || request.Rows > 8 || request.Columns == 0 || request.Columns > 8 ||
+			static_cast<size_t>(request.Rows) * request.Columns > MAXIMUM_CELLS ||
+			!std::isfinite(request.MinimumXMetres) || !std::isfinite(request.MinimumZMetres) ||
+			!std::isfinite(request.MaximumXMetres) || !std::isfinite(request.MaximumZMetres) ||
+			!std::isfinite(request.MinimumYMetres) || !std::isfinite(request.MaximumYMetres) ||
+			request.MinimumXMetres >= request.MaximumXMetres ||
+			request.MinimumZMetres >= request.MaximumZMetres ||
+			request.MinimumYMetres >= request.MaximumYMetres) {
+			return {"invalid_argument", Map({{"status", String("invalid_collider_bev")}})};
+		}
+
+		const auto boundary = [](float minimum, float maximum, uint8_t index, uint8_t count) {
+			if (index == 0) return minimum;
+			if (index == count) return maximum;
+			return static_cast<float>(
+				static_cast<double>(minimum) +
+				(static_cast<double>(maximum) - minimum) * static_cast<double>(index) / count
+			);
+		};
+		const auto hasExtent = [](float minimum, float maximum) {
+			return static_cast<float>((static_cast<double>(maximum) - minimum) * 0.5) > 0.0f;
+		};
+		if (!hasExtent(request.MinimumYMetres, request.MaximumYMetres))
+			return {"invalid_argument", Map({{"status", String("invalid_collider_bev")}})};
+		const size_t cellCount = static_cast<size_t>(request.Rows) * request.Columns;
+		std::array<core::AABB, MAXIMUM_CELLS> probes;
+		for (uint8_t row = 0; row < request.Rows; ++row) {
+			const float minimumZ =
+				boundary(request.MinimumZMetres, request.MaximumZMetres, row, request.Rows);
+			const float maximumZ =
+				boundary(request.MinimumZMetres, request.MaximumZMetres, row + 1, request.Rows);
+			for (uint8_t column = 0; column < request.Columns; ++column) {
+				const float minimumX =
+					boundary(request.MinimumXMetres, request.MaximumXMetres, column, request.Columns);
+				const float maximumX =
+					boundary(request.MinimumXMetres, request.MaximumXMetres, column + 1, request.Columns);
+				if (!std::isfinite(minimumX) || !std::isfinite(maximumX) || !std::isfinite(minimumZ) ||
+					!std::isfinite(maximumZ) || minimumX >= maximumX || minimumZ >= maximumZ ||
+					!hasExtent(minimumX, maximumX) || !hasExtent(minimumZ, maximumZ)) {
+					return {"invalid_argument", Map({{"status", String("invalid_collider_bev")}})};
+				}
+				probes[static_cast<size_t>(row) * request.Columns + column] = {
+					{minimumX, request.MinimumYMetres, minimumZ},
+					{maximumX, request.MaximumYMetres, maximumZ},
+				};
+			}
+		}
+
+		std::unordered_map<std::string, size_t> identities;
+		store.EachEntity([&](ecs::Entity entity) {
+			std::string id;
+			if (StableId(store, entity, id) && id.size() <= MAX_DATA_SCENE_ID_BYTES &&
+				id.find('\0') == std::string::npos && DataSceneUtf8(id))
+				identities[id]++;
+		});
+
+		std::array<physics::ColliderOccupancy, MAXIMUM_CELLS> occupancy;
+		physics::ColliderOccupancyBatch(
+			store, std::span{probes}.first(cellCount), std::span{occupancy}.first(cellCount)
+		);
+		const auto reason = [](physics::ColliderOccupancy::Reason value) -> const char * {
+			switch (value) {
+			case physics::ColliderOccupancy::Reason::None:
+				return "";
+			case physics::ColliderOccupancy::Reason::PhysicsUnprepared:
+				return "physics_unprepared";
+			case physics::ColliderOccupancy::Reason::CandidateOverflow:
+				return "candidate_overflow";
+			case physics::ColliderOccupancy::Reason::BakedGeometryUncertain:
+				return "baked_geometry_uncertain";
+			case physics::ColliderOccupancy::Reason::PhysicsStale:
+				return "physics_stale";
+			case physics::ColliderOccupancy::Reason::InvalidProbe:
+				return "invalid_probe";
+			}
+			return "unknown";
+		};
+
+		std::vector<ScriptValue> cells;
+		cells.reserve(cellCount);
+		for (uint8_t row = 0; row < request.Rows; ++row) {
+			for (uint8_t column = 0; column < request.Columns; ++column) {
+				const size_t index = static_cast<size_t>(row) * request.Columns + column;
+				const physics::ColliderOccupancy &answer = occupancy[index];
+				// A positive broadphase witness cannot make an incomplete cell usable:
+				// callers need one three-state grid where overflow and baked geometry
+				// never masquerade as a settled collider-contact answer.
+				const bool knownEmpty = answer.Available && answer.Complete && !answer.OverlapFound;
+				const bool occupied = answer.Available && answer.Complete && answer.OverlapFound;
+				const char *cellReason = answer.Why == physics::ColliderOccupancy::Reason::None
+											 ? (answer.Complete ? "" : "incomplete")
+											 : reason(answer.Why);
+				ScriptValue witness = ScriptValue{};
+				bool witnessAvailable = false;
+				if (occupied && answer.WitnessAvailable) {
+					std::string id;
+					if (StableId(store, answer.Witness, id) && identities[id] == 1) {
+						witness = String(id);
+						witnessAvailable = true;
+					}
+				}
+				cells.push_back(Map({
+					{"row", Number(row)},
+					{"column", Number(column)},
+					{"minimum_metres",
+					 Array(
+						 {Number(probes[index].Minimum.X),
+						  Number(probes[index].Minimum.Y),
+						  Number(probes[index].Minimum.Z)}
+					 )},
+					{"maximum_metres",
+					 Array(
+						 {Number(probes[index].Maximum.X),
+						  Number(probes[index].Maximum.Y),
+						  Number(probes[index].Maximum.Z)}
+					 )},
+					{"state",
+					 String(
+						 occupied	  ? "occupied"
+						 : knownEmpty ? "empty"
+									  : "unknown"
+					 )},
+					{"occupied",
+					 occupied	  ? Boolean(true)
+					 : knownEmpty ? Boolean(false)
+								  : ScriptValue{}},
+					{"complete", Boolean(answer.Complete)},
+					{"reason", *cellReason == '\0' ? ScriptValue{} : String(cellReason)},
+					{"witness_id", std::move(witness)},
+					{"witness_identity_available", Boolean(witnessAvailable)},
+				}));
+			}
+		}
+		return {
+			"ok",
+			Map({
+				{"status", String("ok")},
+				{"schema_version", String("collider-bev/v1")},
+				{"row_order", String("z_major_then_x")},
+				{"rows", Number(request.Rows)},
+				{"columns", Number(request.Columns)},
+				{"xz_bounds_metres",
+				 Map({
+					 {"minimum", Array({Number(request.MinimumXMetres), Number(request.MinimumZMetres)})},
+					 {"maximum", Array({Number(request.MaximumXMetres), Number(request.MaximumZMetres)})},
+				 })},
+				{"y_minimum_metres", Number(request.MinimumYMetres)},
+				{"y_maximum_metres", Number(request.MaximumYMetres)},
+				{"cells", Array(std::move(cells))},
+			})
+		};
 	}
 
 	const ServiceSurface &DataSceneServiceSurface() {
