@@ -331,8 +331,17 @@ namespace client {
 					failure = "validation_failed: view dimensions are outside the bounded view size";
 					return nlohmann::json(nullptr);
 				}
+				const engine::world::WorldId instanceWorld = Universe_->Find(engine::core::Name(instance));
+				if (!DataFactoryWorld.IsValid() || instanceWorld != DataFactoryWorld ||
+					Universe_->NameOf(instanceWorld).Text() != instance) {
+					failure = "unavailable: the validated factory world has no current presentation pipeline";
+					return nlohmann::json(nullptr);
+				}
+				const engine::core::Name requested(arguments.at("pipeline").get<std::string>());
+				const engine::core::Name runtime =
+					engine::render::WorldPipelineKey(requested, instanceWorld.Index);
 				const auto graph = Renderer.DescribePipeline(
-					engine::core::Name(arguments.at("pipeline").get<std::string>()),
+					runtime,
 					static_cast<uint32_t>(viewWidth),
 					static_cast<uint32_t>(viewHeight)
 				);

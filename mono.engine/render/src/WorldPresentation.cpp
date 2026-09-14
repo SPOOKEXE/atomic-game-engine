@@ -1502,6 +1502,11 @@ namespace engine::render {
 		return lights.size();
 	}
 
+	core::Name WorldPipelineKey(core::Name profile, uint64_t world) {
+		if (!profile.IsValid()) return {};
+		return core::Name(std::format("{}#{}", profile.Text(), world));
+	}
+
 	core::Name InstallWorldPipeline(
 		const graph::PipelineSet &profiles, Renderer &renderer, uint64_t world, core::Name selected
 	) {
@@ -1581,7 +1586,7 @@ namespace engine::render {
 				continue;
 			}
 
-			const core::Name key(std::format("{}#{}", name.Text(), world));
+			const core::Name key = WorldPipelineKey(name, world);
 			if (renderer.SetPipeline(key, pipeline)) {
 				return key;
 			}
@@ -1591,7 +1596,7 @@ namespace engine::render {
 			graph::RenderGraph pipeline;
 			core::Name offender;
 			if (graph::Build(defaultDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok) {
-				const core::Name key(std::format("Default PBR#{}", world));
+				const core::Name key = WorldPipelineKey(core::Name("Default PBR"), world);
 				if (renderer.SetPipeline(key, pipeline)) {
 					return key;
 				}

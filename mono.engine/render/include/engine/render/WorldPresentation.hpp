@@ -235,6 +235,17 @@ namespace engine::render {
 	// @return The number of lights written.
 	size_t CollectLights(ecs::Store &store, const core::Vector3 &eye, std::vector<SceneLight> &lights);
 
+	// Builds one renderer key for an authored profile in one world.
+	//
+	// A runtime pipeline is local to one world even when several worlds select
+	// the same authored profile. Diagnostic and capture callers must derive this
+	// key from the world they have already validated.
+	//
+	// @param profile The authored profile name.
+	// @param world The stable world number that owns the runtime graph.
+	// @return The renderer key for this profile in that one world.
+	core::Name WorldPipelineKey(core::Name profile, uint64_t world);
+
 	// Installs one universe rendering profile under a world-qualified key.
 	//
 	// The selected profile is tried first, followed by Default PBR and the

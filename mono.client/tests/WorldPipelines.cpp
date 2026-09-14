@@ -119,6 +119,25 @@ TEST_CASE("worlds with the same authored name keep separate runtime keys", "[cli
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("main#4"), Name("main#9")});
 }
 
+TEST_CASE("a world graph diagnostic resolves only its own qualified pipeline", "[client][pipeline][diagnostic]") {
+	PipelineSet pipelines;
+	REQUIRE(pipelines.Set(Name("main"), engine::graph::DefaultPbrDocument()));
+	Renderer renderer;
+
+	REQUIRE(client::InstallRenderingProfiles(pipelines, renderer, 4, Name("main")) == Name("main#4"));
+	REQUIRE(client::InstallRenderingProfiles(pipelines, renderer, 9, Name("main")) == Name("main#9"));
+
+	const auto local = renderer.DescribePipeline(engine::render::WorldPipelineKey(Name("main"), 4), 640, 360);
+	REQUIRE(local);
+	CHECK(local->Pipeline == Name("main#4"));
+	CHECK_FALSE(renderer.DescribePipeline(Name("main"), 640, 360));
+	CHECK_FALSE(renderer.DescribePipeline(engine::render::WorldPipelineKey(Name("main#9"), 4), 640, 360));
+
+	const auto other = renderer.DescribePipeline(engine::render::WorldPipelineKey(Name("main"), 9), 640, 360);
+	REQUIRE(other);
+	CHECK(other->Pipeline == Name("main#9"));
+}
+
 TEST_CASE("an empty profile library installs the engine default graph", "[client][pipeline]") {
 	PipelineSet profiles;
 	Renderer renderer;
