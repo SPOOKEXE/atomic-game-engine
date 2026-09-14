@@ -81,6 +81,8 @@ namespace {
 			return {
 				.Available = true,
 				.Channels = {"rgb_linear_hdr"},
+				.StorageProfiles = {"lossless"},
+				.TrainingCompactLimitations = {},
 				.HookRecords = {},
 				.MaximumHooks = 0,
 				.MaximumConnections = 0,
@@ -88,6 +90,8 @@ namespace {
 				.MaximumReadbackNodes = 0,
 				.MaximumRetainedBytes = 0,
 				.MaximumPendingPumps = 0,
+				.NamedCameraSelection = false,
+				.MaximumCameraIdBytes = 0,
 				.Detail = "fixture",
 			};
 		}
