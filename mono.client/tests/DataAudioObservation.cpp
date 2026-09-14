@@ -595,3 +595,90 @@ TEST_CASE(
 	CHECK(observation);
 	CHECK(waveform);
 }
+
+TEST_CASE(
+	"audio observation MCP refuses stale factory lifecycle revisions", "[client][audio][data-factory]"
+) {
+	engine::world::Universe worlds;
+	engine::world::Universe decoy;
+	engine::world::DataFactorySession session(worlds);
+	session.SetPauseParticipant(
+		[](engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) { return true; }
+	);
+	const engine::world::DataFactoryWorldRequest create{
+		.Operation = engine::world::DataFactoryWorldOperation::Create,
+		.InstanceId = "audio-fence",
+		.TickRate = 60.0,
+		.OperationId = "audio-fence-create",
+	};
+	REQUIRE(session.CreateWorld(create).Status == engine::world::DataFactoryStatus::Ok);
+	engine::world::WorldSettings decoySettings;
+	decoySettings.Name = engine::core::Name("audio-fence");
+	REQUIRE(decoy.Create(decoySettings).IsValid());
+	const auto host = std::make_shared<client::DataAudioObservationHost>();
+	engine::control::Surface surface("client-data-audio", "client data audio tests");
+	surface.Enable(std::array{engine::control::features::DataAudioObservation(decoy, host, &session)});
+	const auto observation =
+		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &tool) {
+			return tool.Name == "get_audio_observation";
+		});
+	REQUIRE(observation != surface.Registered().end());
+	const auto current = session.Inspect("audio-fence");
+	REQUIRE(current.Status == engine::world::DataFactoryStatus::Ok);
+	const nlohmann::json revision{
+		{"expected_tick", current.Clock.Tick},
+		{"expected_world_epoch", current.WorldEpoch},
+		{"expected_world_version", current.WorldVersion},
+	};
+
+	std::string failure;
+	const nlohmann::json currentRead = observation->Call(
+		{{"instance_id", "audio-fence"},
+		 {"expected_tick", revision["expected_tick"]},
+		 {"expected_world_epoch", revision["expected_world_epoch"]},
+		 {"expected_world_version", revision["expected_world_version"]}},
+		failure
+	);
+	INFO(currentRead.dump());
+	CHECK(failure.find("no scene") == std::string::npos);
+
+	const auto waveform =
+		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &tool) {
+			return tool.Name == "get_audio_waveform_chunk";
+		});
+	REQUIRE(waveform != surface.Registered().end());
+	failure.clear();
+	const nlohmann::json waveformRead = waveform->Call(
+		{{"instance_id", "audio-fence"},
+		 {"resource_id", "audio/fence"},
+		 {"sha256", std::string(64, 'a')},
+		 {"byte_begin", 0},
+		 {"byte_end", 1},
+		 {"expected_tick", revision["expected_tick"]},
+		 {"expected_world_epoch", revision["expected_world_epoch"]},
+		 {"expected_world_version", revision["expected_world_version"]}},
+		failure
+	);
+	INFO(waveformRead.dump());
+	CHECK(failure.find("instance_id is invalid") == std::string::npos);
+
+	failure.clear();
+	const nlohmann::json missing = observation->Call({{"instance_id", "audio-fence"}}, failure);
+	CHECK(missing.is_null());
+	CHECK(failure.find("expected lifecycle revision") != std::string::npos);
+	REQUIRE(
+		session.CommitExternalMutation("audio-fence", current.Clock.Tick, current.WorldVersion).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	failure.clear();
+	const nlohmann::json stale = observation->Call(
+		{{"instance_id", "audio-fence"},
+		 {"expected_tick", revision["expected_tick"]},
+		 {"expected_world_epoch", revision["expected_world_epoch"]},
+		 {"expected_world_version", revision["expected_world_version"]}},
+		failure
+	);
+	CHECK(failure.find("version_conflict") != std::string::npos);
+	CHECK(stale.at("status") == "version_conflict");
+	CHECK(stale.at("current_world_version") == current.WorldVersion + 1);
+}

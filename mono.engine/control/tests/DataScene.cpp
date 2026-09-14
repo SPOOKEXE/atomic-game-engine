@@ -1,4 +1,5 @@
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -19,6 +20,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/script/EventNarratives.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -43,6 +45,9 @@ using engine::ecs::PropertyType;
 using engine::scene::ActiveCamera;
 using engine::scene::Camera;
 using engine::scene::Transform;
+using engine::world::DataFactoryPauseScope;
+using engine::world::DataFactorySession;
+using engine::world::DataFactoryStatus;
 using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
@@ -912,4 +917,145 @@ TEST_CASE(
 						 event.at("phase") == "ended";
 	}
 	CHECK(endedObserved);
+}
+
+TEST_CASE(
+	"data-factory read observations require and preserve their inspected lifecycle revision",
+	"[control][datascene][data-factory]"
+) {
+	Universe universe;
+	Universe decoy;
+	DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const engine::world::DataFactoryWorldRequest create{
+		.Operation = engine::world::DataFactoryWorldOperation::Create,
+		.InstanceId = "fenced",
+		.TickRate = 60.0,
+		.OperationId = "fenced-create",
+	};
+	REQUIRE(session.CreateWorld(create).Status == DataFactoryStatus::Ok);
+	const WorldId fenced = universe.Find(Name("fenced"));
+	REQUIRE(fenced.IsValid());
+	universe.Enter(fenced, [](engine::ecs::Store &) { engine::scene::RegisterSceneComponents(); });
+	const WorldId foreign = World(universe, "foreign");
+	REQUIRE(foreign.IsValid());
+	REQUIRE(World(decoy, "fenced").IsValid());
+
+	Surface surface("test", "test");
+	surface.Enable(
+		std::array{
+			engine::control::features::DataFactory(session),
+			// The supplied universe is deliberately a same-name decoy. Factory reads
+			// must resolve through the session-owned universe instead.
+			engine::control::features::DataScene(decoy, {}, &session),
+		}
+	);
+	const auto current = session.Inspect("fenced");
+	REQUIRE(current.Status == DataFactoryStatus::Ok);
+	const json revision{
+		{"expected_tick", current.Clock.Tick},
+		{"expected_world_epoch", current.WorldEpoch},
+		{"expected_world_version", current.WorldVersion},
+	};
+
+	bool failed = false;
+	const json accepted =
+		Call(surface, "get_scene_snapshot", {{"instance_id", "fenced"}, {"options", revision}}, failed);
+	INFO(accepted.dump());
+	CHECK_FALSE(failed);
+	CHECK(accepted.at("schema_version") == "data-scene/v1");
+
+	// Every read entry point receives the same decoy universe. Valid requests
+	// may be unavailable for scene-specific reasons, but none may look up that
+	// decoy and report the owned same-name world as missing.
+	auto checkSessionUniverse = [&](std::string_view tool, json options) {
+		for (const auto &[name, value] : revision.items())
+			options[name] = value;
+		const json response = Call(
+			surface, std::string(tool), {{"instance_id", "fenced"}, {"options", std::move(options)}}, failed
+		);
+		INFO(tool << ": " << response.dump());
+		CHECK(response.dump().find("no scene called") == std::string::npos);
+	};
+	checkSessionUniverse("get_camera_rendering_data", json::object());
+	checkSessionUniverse("get_capture_channels", json::object());
+	checkSessionUniverse("get_resources", json::object());
+	checkSessionUniverse("get_event_narratives", json::object());
+	checkSessionUniverse(
+		"raycast", {{"origin", {0.0, 0.0, 0.0}}, {"direction", {0.0, 1.0, 0.0}}, {"max_distance_metres", 1.0}}
+	);
+	checkSessionUniverse("overlap_aabb", {{"minimum", {0.0, 0.0, 0.0}}, {"maximum", {1.0, 1.0, 1.0}}});
+	checkSessionUniverse(
+		"overlap_obb",
+		{{"center", {0.0, 0.0, 0.0}},
+		 {"orientation_xyzw", {0.0, 0.0, 0.0, 1.0}},
+		 {"half_extent", {1.0, 1.0, 1.0}}}
+	);
+
+	const json missing =
+		Call(surface, "get_scene_snapshot", {{"instance_id", "fenced"}, {"options", json::object()}}, failed);
+	INFO(missing.dump());
+	CHECK(failed);
+	CHECK(missing.at("error").get<std::string>().find("expected lifecycle revision") != std::string::npos);
+
+	REQUIRE(
+		session.CommitExternalMutation("fenced", current.Clock.Tick, current.WorldVersion).Status ==
+		DataFactoryStatus::Ok
+	);
+	const json stale =
+		Call(surface, "get_scene_snapshot", {{"instance_id", "fenced"}, {"options", revision}}, failed);
+	INFO(stale.dump());
+	CHECK(failed);
+	CHECK(stale.at("status") == "version_conflict");
+	CHECK(stale.at("expected_world_version") == current.WorldVersion);
+	CHECK(stale.at("current_world_version") == current.WorldVersion + 1);
+
+	const size_t namesBeforeHostileRead = Name::Count();
+	const json hostile = Call(
+		surface,
+		"get_scene_snapshot",
+		{{"instance_id", "hostile-unowned-world"}, {"options", revision}},
+		failed
+	);
+	INFO(hostile.dump());
+	CHECK(failed);
+	CHECK(hostile.at("status") == "validation_failed");
+	CHECK(Name::Count() == namesBeforeHostileRead);
+	CHECK_FALSE(Name::Exists("hostile-unowned-world"));
+
+	const json crossWorld =
+		Call(surface, "get_scene_snapshot", {{"instance_id", "foreign"}, {"options", revision}}, failed);
+	INFO(crossWorld.dump());
+	CHECK(failed);
+	CHECK(crossWorld.at("status") == "validation_failed");
+	CHECK(crossWorld.at("detail").get<std::string>().find("not owned") != std::string::npos);
+
+	const json audit = Call(surface, "data_factory_operation_audit", json::object(), failed);
+	INFO(audit.dump());
+	CHECK_FALSE(failed);
+	CHECK(audit.at("entries").empty());
+}
+
+TEST_CASE("compatibility data-scene reads reject factory revision fields", "[control][datascene]") {
+	Universe universe;
+	REQUIRE(World(universe, "compatibility").IsValid());
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	bool failed = false;
+	const json response = Call(
+		surface,
+		"get_scene_snapshot",
+		{{"instance_id", "compatibility"}, {"options", {{"expected_tick", 0}}}},
+		failed
+	);
+	INFO(response.dump());
+	CHECK(failed);
+	CHECK(response.at("error").get<std::string>().find("unknown option") != std::string::npos);
+	const auto tool =
+		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &item) {
+			return item.Name == "get_scene_snapshot";
+		});
+	REQUIRE(tool != surface.Registered().end());
+	const json schema = tool->Schema();
+	CHECK_FALSE(schema["properties"]["options"].contains("expected_tick"));
 }

@@ -194,3 +194,94 @@ TEST_CASE("rig export response cap becomes a compact Surface refusal", "[control
 	CHECK(reply["result"].value("isError", false));
 	CHECK(wire.size() < 1024);
 }
+
+TEST_CASE(
+	"factory rig exports resolve through the owning session before world lookup",
+	"[control][rigexport][data-factory]"
+) {
+	engine::world::Universe owned;
+	engine::world::Universe decoy;
+	engine::world::DataFactorySession session(owned);
+	session.SetPauseParticipant(
+		[](engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) { return true; }
+	);
+	const engine::world::DataFactoryWorldRequest create{
+		.Operation = engine::world::DataFactoryWorldOperation::Create,
+		.InstanceId = "rig-fence",
+		.TickRate = 60.0,
+		.OperationId = "rig-fence-create",
+	};
+	REQUIRE(session.CreateWorld(create).Status == engine::world::DataFactoryStatus::Ok);
+	engine::world::WorldSettings decoySettings;
+	decoySettings.Name = engine::core::Name("rig-fence");
+	REQUIRE(decoy.Create(decoySettings).IsValid());
+	const auto ownedWorld = owned.Find(engine::core::Name("rig-fence"));
+	owned.Enter(ownedWorld, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		const auto rig = store.CreateInstance(engine::scene::PartClass(), "Rig");
+		engine::ecs::AttributeValue id;
+		id.Type = engine::ecs::PropertyType::String;
+		id.String = "rig/fenced";
+		REQUIRE(engine::ecs::SetAttribute(store, rig, engine::core::Name("DataFactoryId"), id));
+		store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("fenced"), 0});
+	});
+	engine::control::Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::RigExport(decoy, &session)});
+	const auto current = session.Inspect("rig-fence");
+	const auto tool =
+		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &item) {
+			return item.Name == "get_rig_export";
+		});
+	REQUIRE(tool != surface.Registered().end());
+	std::string failure;
+	const nlohmann::json result = tool->Call(
+		{{"instance_id", "rig-fence"},
+		 {"export_id", "fence"},
+		 {"options",
+		  {{"expected_tick", current.Clock.Tick},
+		   {"expected_world_epoch", current.WorldEpoch},
+		   {"expected_world_version", current.WorldVersion}}}},
+		failure
+	);
+	INFO(result.dump());
+	CHECK_FALSE(failure.empty());
+	CHECK(failure.find("no scene called") == std::string::npos);
+	CHECK_FALSE(result.is_null());
+
+	const size_t namesBeforeHostileRead = engine::core::Name::Count();
+	failure.clear();
+	const nlohmann::json hostile = tool->Call(
+		{{"instance_id", "hostile-rig-world"},
+		 {"export_id", "fence"},
+		 {"options",
+		  {{"expected_tick", current.Clock.Tick},
+		   {"expected_world_epoch", current.WorldEpoch},
+		   {"expected_world_version", current.WorldVersion}}}},
+		failure
+	);
+	CHECK(failure.find("not owned") != std::string::npos);
+	CHECK(hostile.at("status") == "validation_failed");
+	CHECK(engine::core::Name::Count() == namesBeforeHostileRead);
+	CHECK_FALSE(engine::core::Name::Exists("hostile-rig-world"));
+}
+
+TEST_CASE("compatibility rig exports reject factory revision fields", "[control][rigexport]") {
+	engine::world::Universe worlds;
+	engine::world::WorldSettings settings;
+	settings.Name = engine::core::Name("compat-rig");
+	REQUIRE(worlds.Create(settings).IsValid());
+	engine::control::Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::RigExport(worlds)});
+	const auto tool =
+		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &item) {
+			return item.Name == "get_rig_export";
+		});
+	REQUIRE(tool != surface.Registered().end());
+	CHECK_FALSE(tool->Schema()["properties"]["options"]["properties"].contains("expected_tick"));
+	std::string failure;
+	const nlohmann::json result = tool->Call(
+		{{"instance_id", "compat-rig"}, {"export_id", "compat"}, {"options", {{"expected_tick", 0}}}}, failure
+	);
+	CHECK(result.is_null());
+	CHECK(failure.find("unknown option") != std::string::npos);
+}

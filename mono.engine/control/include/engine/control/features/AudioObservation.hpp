@@ -4,6 +4,7 @@
 // the L12 bridge; this L13 feature never reaches into a mixer or a device.
 // @tier L13 · shared
 
+#include <engine/control/DataFactoryReadFence.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/script/DataAudioObservationBridge.hpp>
 #include <engine/script/DataSceneService.hpp>
@@ -70,15 +71,20 @@ namespace engine::control {
 			return value.dump(2).size() <= script::MAX_AUDIO_OBSERVATION_JSON_BYTES;
 		}
 
-		inline bool
-		Only(const json &value, std::initializer_list<std::string_view> allowed, std::string &failure) {
+		inline bool Only(
+			const json &value,
+			std::initializer_list<std::string_view> allowed,
+			bool requireRevision,
+			std::string &failure
+		) {
 			if (!value.is_object()) {
 				failure = Error("validation_failed", "arguments must be an object");
 				return false;
 			}
 			for (auto item = value.begin(); item != value.end(); ++item) {
 				if (std::find(allowed.begin(), allowed.end(), std::string_view(item.key())) ==
-					allowed.end()) {
+						allowed.end() ||
+					(!requireRevision && data_factory_read_fence::IsExpectedRevisionField(item.key()))) {
 					failure = Error("validation_failed", "unknown argument: " + item.key());
 					return false;
 				}
@@ -182,16 +188,27 @@ namespace engine::control {
 			};
 		}
 
-		inline json Schema() {
+		inline json Schema(world::DataFactorySession *session) {
+			json properties{
+				{"instance_id",
+				 {{"type", "string"},
+				  {"minLength", 1},
+				  {"maxLength", script::MAX_AUDIO_OBSERVATION_ID_BYTES}}}
+			};
+			json required = json::array({"instance_id"});
+			if (session != nullptr) {
+				properties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
+				properties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
+				properties["expected_world_version"] = {{"type", "integer"}, {"minimum", 0}};
+				required.push_back("expected_tick");
+				required.push_back("expected_world_epoch");
+				required.push_back("expected_world_version");
+			}
 			return {
 				{"type", "object"},
 				{"additionalProperties", false},
-				{"properties",
-				 {{"instance_id",
-				   {{"type", "string"},
-					{"minLength", 1},
-					{"maxLength", script::MAX_AUDIO_OBSERVATION_ID_BYTES}}}}},
-				{"required", json::array({"instance_id"})}
+				{"properties", std::move(properties)},
+				{"required", std::move(required)}
 			};
 		}
 	}
@@ -202,11 +219,12 @@ namespace engine::control {
 	inline void AddDataAudioObservationTools(
 		Surface &surface,
 		world::Universe &universe,
-		std::shared_ptr<script::DataAudioObservationBridge> bridge
+		std::shared_ptr<script::DataAudioObservationBridge> bridge,
+		world::DataFactorySession *session = nullptr
 	) {
 		using namespace audio_observation_detail;
 		if (!bridge) return;
-		world::Universe *worlds = &universe;
+		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
 		surface.AddResource(
 			Resource{
 				"atomic://metadata/audio_observation/v1",
@@ -244,9 +262,18 @@ namespace engine::control {
 				"get_audio_observation",
 				"Returns one bounded audio_observation/v1 record. Waveform bytes remain external "
 				"digest-addressed chunks.",
-				Schema,
-				[worlds, bridge](const json &arguments, std::string &failure) -> json {
-					if (!Only(arguments, {"instance_id"}, failure)) return nullptr;
+				[session] { return Schema(session); },
+				[worlds, bridge, session](const json &arguments, std::string &failure) -> json {
+					if (!Only(
+							arguments,
+							{"instance_id",
+							 "expected_tick",
+							 "expected_world_epoch",
+							 "expected_world_version"},
+							session != nullptr,
+							failure
+						))
+						return nullptr;
 					std::string instance;
 					const auto field = arguments.find("instance_id");
 					if (field == arguments.end()) {
@@ -257,6 +284,9 @@ namespace engine::control {
 							*field, "instance_id", script::MAX_AUDIO_OBSERVATION_ID_BYTES, instance, failure
 						))
 						return nullptr;
+					json fence;
+					if (!data_factory_read_fence::Validate(session, instance, arguments, fence, failure))
+						return fence;
 					if (!worlds->Find(core::Name(instance)).IsValid()) {
 						failure = Error("not_found", "no scene has that instance_id");
 						return nullptr;
@@ -301,24 +331,43 @@ namespace engine::control {
 				"get_audio_waveform_chunk",
 				"Copies a bounded byte range from one digest-addressed waveform chunk returned by "
 				"get_audio_observation.",
-				[] {
+				[session] {
+					json properties{
+						{"instance_id", {{"type", "string"}}},
+						{"resource_id", {{"type", "string"}}},
+						{"sha256", {{"type", "string"}, {"pattern", "^[0-9a-f]{64}$"}}},
+						{"byte_begin", {{"type", "integer"}, {"minimum", 0}}},
+						{"byte_end", {{"type", "integer"}, {"minimum", 1}}},
+					};
+					json required =
+						json::array({"instance_id", "resource_id", "sha256", "byte_begin", "byte_end"});
+					if (session != nullptr) {
+						properties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
+						properties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
+						properties["expected_world_version"] = {{"type", "integer"}, {"minimum", 0}};
+						required.push_back("expected_tick");
+						required.push_back("expected_world_epoch");
+						required.push_back("expected_world_version");
+					}
 					return json{
 						{"type", "object"},
 						{"additionalProperties", false},
-						{"properties",
-						 {{"instance_id", {{"type", "string"}}},
-						  {"resource_id", {{"type", "string"}}},
-						  {"sha256", {{"type", "string"}, {"pattern", "^[0-9a-f]{64}$"}}},
-						  {"byte_begin", {{"type", "integer"}, {"minimum", 0}}},
-						  {"byte_end", {{"type", "integer"}, {"minimum", 1}}}}},
-						{"required",
-						 json::array({"instance_id", "resource_id", "sha256", "byte_begin", "byte_end"})}
+						{"properties", std::move(properties)},
+						{"required", std::move(required)}
 					};
 				},
-				[worlds, bridge](const json &arguments, std::string &failure) -> json {
+				[worlds, bridge, session](const json &arguments, std::string &failure) -> json {
 					if (!Only(
 							arguments,
-							{"instance_id", "resource_id", "sha256", "byte_begin", "byte_end"},
+							{"instance_id",
+							 "resource_id",
+							 "sha256",
+							 "byte_begin",
+							 "byte_end",
+							 "expected_tick",
+							 "expected_world_epoch",
+							 "expected_world_version"},
+							session != nullptr,
 							failure
 						))
 						return nullptr;
@@ -342,6 +391,9 @@ namespace engine::control {
 						!UInt(arguments.value("byte_begin", json{}), "byte_begin", begin, failure) ||
 						!UInt(arguments.value("byte_end", json{}), "byte_end", end, failure))
 						return nullptr;
+					json fence;
+					if (!data_factory_read_fence::Validate(session, instance, arguments, fence, failure))
+						return fence;
 					if (!script::IsDataAudioObservationDigest(digest)) {
 						failure =
 							Error("validation_failed", "sha256 must be 64 lowercase hexadecimal characters");
@@ -388,11 +440,15 @@ namespace engine::control {
 
 	namespace features {
 		inline Feature DataAudioObservation(
-			world::Universe &universe, std::shared_ptr<script::DataAudioObservationBridge> bridge
+			world::Universe &universe,
+			std::shared_ptr<script::DataAudioObservationBridge> bridge,
+			world::DataFactorySession *session = nullptr
 		) {
-			return Feature{"audio_observation", [&universe, bridge = std::move(bridge)](Surface &surface) {
-							   AddDataAudioObservationTools(surface, universe, bridge);
-						   }};
+			return Feature{
+				"audio_observation", [&universe, bridge = std::move(bridge), session](Surface &surface) {
+					AddDataAudioObservationTools(surface, universe, bridge, session);
+				}
+			};
 		}
 	}
 }

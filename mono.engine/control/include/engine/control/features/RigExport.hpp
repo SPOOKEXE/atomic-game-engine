@@ -3,6 +3,7 @@
 // Read-only MCP access to the VM-neutral data-rig/v1 observation.
 // @tier L13 · shared
 
+#include <engine/control/DataFactoryReadFence.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/script/RigExport.hpp>
 #include <engine/world/Universe.hpp>
@@ -87,28 +88,44 @@ namespace engine::control {
 			}
 			return true;
 		}
-		inline world::WorldId World(world::Universe &universe, const json &arguments, std::string &failure) {
-			if (!arguments.contains("instance_id") || !arguments["instance_id"].is_string()) {
-				failure = "instance_id must name a scene";
-				return {};
-			}
-			const std::string name = arguments["instance_id"].get<std::string>();
-			if (name.empty() || name.size() > 128 || name.find('\0') != std::string::npos) {
-				failure = "instance_id must be a non-empty identifier of at most 128 bytes";
-				return {};
-			}
-			const world::WorldId id = universe.Find(core::Name(name));
-			if (!id.IsValid()) failure = "no scene called '" + name + "'";
+		inline bool Option(std::string_view name, bool requireRevision) {
+			return name == "entity_ids" || name == "limit" ||
+				   (requireRevision && data_factory_read_fence::IsExpectedRevisionField(name));
+		}
+		inline world::WorldId
+		World(world::Universe &universe, std::string_view instance, std::string &failure) {
+			const world::WorldId id = universe.Find(core::Name(instance));
+			if (!id.IsValid()) failure = "no scene called '" + std::string(instance) + "'";
 			return id;
 		}
 	}
-	inline void Surface::AddRigExportTools(world::Universe &universe) {
-		world::Universe *worlds = &universe;
+	inline void Surface::AddRigExportTools(world::Universe &universe, world::DataFactorySession *session) {
+		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
 		Add(Tool{
 			"get_rig_export",
 			"A bounded data-rig/v1 export of identified skeletons. Missing engine source data is declared "
 			"rather than inferred.",
-			[] {
+			[session] {
+				json optionProperties{
+					{"entity_ids",
+					 json{
+						 {"type", "array"},
+						 {"maxItems", script::MAX_RIG_EXPORT_ENTITIES},
+						 {"items",
+						  json{
+							  {"type", "string"},
+							  {"minLength", 1},
+							  {"maxLength", script::MAX_RIG_EXPORT_ENTITY_ID_BYTES}
+						  }}
+					 }},
+					{"limit",
+					 json{{"type", "integer"}, {"minimum", 0}, {"maximum", script::MAX_RIG_EXPORT_ENTITIES}}},
+				};
+				if (session != nullptr) {
+					optionProperties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
+					optionProperties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
+					optionProperties["expected_world_version"] = {{"type", "integer"}, {"minimum", 0}};
+				}
 				return json{
 					{"type", "object"},
 					{"properties",
@@ -118,34 +135,21 @@ namespace engine::control {
 						 {"options",
 						  json{
 							  {"type", "object"},
-							  {"properties",
-							   json{
-								   {"entity_ids",
-									json{
-										{"type", "array"},
-										{"maxItems", script::MAX_RIG_EXPORT_ENTITIES},
-										{"items",
-										 json{
-											 {"type", "string"},
-											 {"minLength", 1},
-											 {"maxLength", script::MAX_RIG_EXPORT_ENTITY_ID_BYTES}
-										 }}
-									}},
-								   {"limit",
-									json{
-										{"type", "integer"},
-										{"minimum", 0},
-										{"maximum", script::MAX_RIG_EXPORT_ENTITIES}
-									}}
-							   }},
-							  {"additionalProperties", false}
+							  {"properties", std::move(optionProperties)},
+							  {"additionalProperties", false},
+							  {"required",
+							   session != nullptr
+								   ? json::array(
+										 {"expected_tick", "expected_world_epoch", "expected_world_version"}
+									 )
+								   : json::array()}
 						  }}
 					 }},
 					{"required", json::array({"instance_id", "export_id", "options"})},
 					{"additionalProperties", false}
 				};
 			},
-			[worlds](const json &arguments, std::string &failure) -> json {
+			[worlds, session](const json &arguments, std::string &failure) -> json {
 				using namespace rig_export_detail;
 				if (!Only(arguments, failure)) return nullptr;
 				if (!arguments.contains("export_id") || !arguments["export_id"].is_string()) {
@@ -158,7 +162,7 @@ namespace engine::control {
 				}
 				for (const auto &[name, ignored] : arguments["options"].items()) {
 					(void)ignored;
-					if (name != "entity_ids" && name != "limit") {
+					if (!Option(name, session != nullptr)) {
 						failure = "unknown option '" + name + "'";
 						return nullptr;
 					}
@@ -188,7 +192,14 @@ namespace engine::control {
 					}
 					limit = value.get<size_t>();
 				}
-				const world::WorldId id = World(*worlds, arguments, failure);
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(
+						session, instance, arguments["options"], fence, failure
+					))
+					return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
 				if (!failure.empty()) return nullptr;
 				json output;
 				bool overflow = false;
@@ -212,9 +223,9 @@ namespace engine::control {
 		});
 	}
 	namespace features {
-		inline Feature RigExport(world::Universe &universe) {
-			return Feature{"rig-export", [&universe](Surface &surface) {
-							   surface.AddRigExportTools(universe);
+		inline Feature RigExport(world::Universe &universe, world::DataFactorySession *session = nullptr) {
+			return Feature{"rig-export", [&universe, session](Surface &surface) {
+							   surface.AddRigExportTools(universe, session);
 						   }};
 		}
 	}

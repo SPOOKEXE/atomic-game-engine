@@ -1055,7 +1055,9 @@ namespace client {
 			if (DataFactory) {
 				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
 				ControlSurface.Enable(
-					std::array{engine::control::features::DataAudioObservation(*Universe_, DataAudio)}
+					std::array{engine::control::features::DataAudioObservation(
+						*Universe_, DataAudio, DataFactory.get()
+					)}
 				);
 				AddDataScriptPackageTool(
 					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
@@ -1102,12 +1104,16 @@ namespace client {
 					std::array{engine::control::features::DataCapture(*DataFactory, DataCapture)}
 				);
 				ControlSurface.Enable(
-					std::array{engine::control::features::DataScene(*Universe_, DataCapture)}
+					std::array{
+						engine::control::features::DataScene(*Universe_, DataCapture, DataFactory.get())
+					}
 				);
 				ControlSurface.Enable(
 					std::array{engine::control::features::TemporalSample(*Universe_, *DataFactory)}
 				);
-				ControlSurface.Enable(std::array{engine::control::features::RigExport(*Universe_)});
+				ControlSurface.Enable(
+					std::array{engine::control::features::RigExport(*Universe_, DataFactory.get())}
+				);
 			}
 			ControlSurface.Enable(std::array{engine::control::features::VisibilityObservations([this] {
 				const engine::render::VisibilitySnapshot snapshot = Renderer.Visibility();
