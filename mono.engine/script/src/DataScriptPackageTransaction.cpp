@@ -2,23 +2,17 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/script/DataScriptPackage.hpp>
-#include <engine/scripthost/Runtime.hpp>
+#include <engine/script/DataScriptPackageTransaction.hpp>
 
 #include <algorithm>
-#include <client/DataScriptPackageTransaction.hpp>
 #include <exception>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
-namespace client {
-	using engine::script::DataScriptPackage;
-	using engine::script::DataScriptPackageContext;
-	using engine::script::DataScriptPackageRunResult;
-	using engine::script::DataScriptRequest;
-	using engine::script::DataScriptResult;
-	using engine::world::DataFactoryStatus;
+namespace engine::script {
+	using world::DataFactoryStatus;
 
 	namespace {
 		bool ValidateAssets(
@@ -61,6 +55,7 @@ namespace client {
 			Fail(result, "unknown instance_id");
 			return result;
 		}
+		if (dependencies.Preflight && !dependencies.Preflight(live, result.Error)) return result;
 
 		engine::script::Runtime *const active =
 			dependencies.RuntimeOf ? dependencies.RuntimeOf(live) : nullptr;
@@ -92,12 +87,10 @@ namespace client {
 			}
 		}
 		if (!ValidateAssets(*parsed.Package, request, result.Error)) return result;
-		if (!engine::script::CheckDataScriptPackageSource(
-				engine::script::Language::Luau, request.Source, parsed.Package->Entry, result.Error
-			))
+		if (!dependencies.Admit || !dependencies.Admit(request.Source, parsed.Package->Entry, result.Error))
 			return result;
 		if (!dependencies.MakeRuntime || !dependencies.InstallSystems) {
-			Fail(result, "data-script package transaction is missing client dependencies");
+			Fail(result, "data-script package transaction is missing host dependencies");
 			return result;
 		}
 
@@ -128,7 +121,7 @@ namespace client {
 		try {
 			scratch.Enter(scratchWorld, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				engine::script::RuntimeLimits limits;
-				limits.Role = engine::script::HostRole::OfBoth();
+				limits.Role = dependencies.Role;
 				limits.Capabilities = parsed.Package->Capabilities;
 				limits.PackageOnly = true;
 				packageRuntime = dependencies.MakeRuntime(store, limits);
@@ -160,9 +153,14 @@ namespace client {
 		// the candidate takes ownership of the live universe's slot.
 		packageRuntime.reset();
 		if (!result.Error.empty()) return result;
+		if (dependencies.PrepareWorld && !dependencies.PrepareWorld(scratch, scratchWorld, result.Error)) {
+			if (result.Error.empty()) Fail(result, "package world preparation failed");
+			return result;
+		}
 		try {
-			if (scratch.Present(scratchWorld, 0.0f, 1.0f) != engine::world::WorldStatus::Ok ||
-				scratch.StateOf(scratchWorld) == engine::world::WorldState::Faulted) {
+			if (dependencies.Present &&
+				(scratch.Present(scratchWorld, 0.0f, 1.0f) != engine::world::WorldStatus::Ok ||
+				 scratch.StateOf(scratchWorld) == engine::world::WorldState::Faulted)) {
 				Fail(result, "package presentation failed");
 				return result;
 			}
@@ -183,6 +181,9 @@ namespace client {
 		}
 		if (dependencies.DiscardRuntime) dependencies.DiscardRuntime(live);
 		dependencies.Universe.ReplaceWith(scratch);
+		if (dependencies.AfterSwap) try {
+				dependencies.AfterSwap(dependencies.Universe.Find(core::Name(request.InstanceId)));
+			} catch (...) {}
 		result.Package = *parsed.Package;
 		result.Atomic = true;
 		result.Ran = true;

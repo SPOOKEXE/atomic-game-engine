@@ -164,8 +164,18 @@
       "tier": "shared",
       "layer": 13,
       "links": [
+        "assets",
+        "collision",
         "core",
-        "parallel"
+        "ecs",
+        "effects",
+        "gui",
+        "parallel",
+        "physics",
+        "scene",
+        "script",
+        "spatial",
+        "world"
       ]
     },
     "core": {

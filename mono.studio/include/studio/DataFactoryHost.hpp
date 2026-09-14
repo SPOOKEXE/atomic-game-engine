@@ -7,6 +7,7 @@
 // release residency before retirement.
 
 #include <engine/control/Surface.hpp>
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/world/DataFactory.hpp>
 
 #include <functional>
@@ -27,6 +28,7 @@ namespace studio {
 		std::function<bool(engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &)>
 			Pause;
 		std::function<bool(engine::world::Universe &, engine::world::WorldId, std::string &)> Rehydrate;
+		std::function<engine::script::DataScriptResult(const engine::script::DataScriptRequest &)> Package;
 	};
 
 	// Binds one empty Studio universe to the shared factory lifecycle and MCP
@@ -52,5 +54,6 @@ namespace studio {
 	  private:
 		engine::world::Universe *Worlds = nullptr;
 		std::unique_ptr<engine::world::DataFactorySession> Lifecycle;
+		std::function<engine::script::DataScriptResult(const engine::script::DataScriptRequest &)> Package;
 	};
 }

@@ -187,7 +187,14 @@ TEST_CASE("Studio factory tools omit unavailable render work", "[studio][data-fa
 	engine::world::Universe worlds;
 	studio::DataFactoryHost host;
 	std::string detail;
-	REQUIRE(host.Start(worlds, Callbacks(), detail));
+	studio::DataFactoryHostCallbacks callbacks = Callbacks();
+	callbacks.Package = [](const engine::script::DataScriptRequest &) {
+		engine::script::DataScriptResult result;
+		result.Ran = true;
+		result.Atomic = true;
+		return result;
+	};
+	REQUIRE(host.Start(worlds, std::move(callbacks), detail));
 	engine::control::Surface surface("studio-test", "test");
 	host.InstallTools(surface, true);
 
@@ -200,6 +207,7 @@ TEST_CASE("Studio factory tools omit unavailable render work", "[studio][data-fa
 	CHECK(has("world_select"));
 	CHECK(has("world_reset"));
 	CHECK(has("world_retire"));
+	CHECK(has("run_script_package"));
 	CHECK(has("pause"));
 	CHECK(has("resume"));
 	CHECK_FALSE(has("world_run"));

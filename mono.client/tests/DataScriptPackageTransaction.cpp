@@ -10,13 +10,13 @@
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/DataScriptPackage.hpp>
+#include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <client/DataScriptPackageTransaction.hpp>
 #include <client/Scene.hpp>
 #include <client/WorldSystems.hpp>
 #include <cstddef>
@@ -122,7 +122,7 @@ namespace {
 			};
 		}
 
-		client::DataScriptPackageTransactionDependencies
+		engine::script::DataScriptPackageTransactionDependencies
 		Dependencies(engine::script::DataScriptPackageRunner run = {}) {
 			return {
 				.Universe = Worlds,
@@ -141,6 +141,14 @@ namespace {
 					},
 				.RunPackage = std::move(run),
 				.InstallSystems = [this](engine::ecs::Store &, engine::ecs::Scheduler &) { Installed++; },
+				.Admit =
+					[](std::string_view source, std::string_view entry, std::string &error) {
+						return engine::script::CheckDataScriptPackageSource(
+							engine::script::Language::Luau, source, entry, error
+						);
+					},
+				.Role = engine::script::HostRole::OfBoth(),
+				.Present = true,
 			};
 		}
 
@@ -166,7 +174,7 @@ namespace {
 			});
 		}
 
-		client::DataScriptPackageTransactionDependencies ProductDependencies() {
+		engine::script::DataScriptPackageTransactionDependencies ProductDependencies() {
 			auto dependencies = Dependencies();
 			dependencies.InstallSystems = [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				client::InstallPresentation(store, systems);
@@ -185,14 +193,14 @@ TEST_CASE(
 ) {
 	Fixture fixture;
 	const DataScriptResult first =
-		client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), fixture.Request());
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), fixture.Request());
 	REQUIRE(first.Ran);
 	CHECK(first.Atomic);
 	CHECK(first.Error.empty());
 	CHECK(fixture.Installed == 1);
 
 	const DataScriptResult second =
-		client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), fixture.Request());
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), fixture.Request());
 	CHECK(second.Ran);
 	CHECK(second.Lifecycle.WorldVersion == first.Lifecycle.WorldVersion + 1);
 	CHECK(fixture.Installed == 2);
@@ -213,7 +221,7 @@ TEST_CASE(
 	const auto revision = fixture.Session.Inspect(INSTANCE_ID);
 
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
 	CHECK_FALSE(result.Ran);
 	CHECK(result.Error == "active_script_runtime_unsupported");
 	CHECK(Save(fixture.Worlds) == before);
@@ -229,7 +237,7 @@ TEST_CASE(
 		const DataScriptRequest request = fixture.Request();
 		const std::vector<std::byte> before = Save(fixture.Worlds);
 		const auto revision = fixture.Session.Inspect(INSTANCE_ID);
-		const DataScriptResult result = client::ExecuteDataScriptPackageTransaction(
+		const DataScriptResult result = engine::script::ExecuteDataScriptPackageTransaction(
 			fixture.Dependencies(
 				[throws](Runtime &, const DataScriptPackageContext &, std::string_view, std::string_view) {
 					if (throws) throw std::runtime_error("deliberate package exception");
@@ -259,7 +267,7 @@ TEST_CASE(
 		const auto revision = fixture.Session.Inspect(INSTANCE_ID);
 
 		const DataScriptResult result =
-			client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
+			engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
 		CHECK_FALSE(result.Ran);
 		CHECK_FALSE(result.Atomic);
 		CHECK(result.Error.starts_with("data-script package"));
@@ -279,14 +287,14 @@ TEST_CASE(
 	const std::vector<std::byte> before = Save(fixture.Worlds);
 	const auto revision = fixture.Session.Inspect(INSTANCE_ID);
 	const DataScriptResult staleResult =
-		client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), stale);
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), stale);
 	CHECK_FALSE(staleResult.Ran);
 	CHECK(Save(fixture.Worlds) == before);
 	CHECK(fixture.Session.Inspect(INSTANCE_ID).WorldVersion == revision.WorldVersion);
 
 	Fixture limited(1);
 	const DataScriptResult capResult =
-		client::ExecuteDataScriptPackageTransaction(limited.Dependencies(), limited.Request());
+		engine::script::ExecuteDataScriptPackageTransaction(limited.Dependencies(), limited.Request());
 	CHECK_FALSE(capResult.Ran);
 	CHECK(capResult.Error == "live world exceeds the configured checkpoint byte limit");
 }
@@ -301,7 +309,7 @@ TEST_CASE(
 	const std::vector<std::byte> before = Save(fixture.Worlds);
 	const auto revision = fixture.Session.Inspect(INSTANCE_ID);
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
 	CHECK_FALSE(result.Ran);
 	CHECK(result.Error == "source_hash does not match the package source_hash");
 	CHECK(Save(fixture.Worlds) == before);
@@ -313,7 +321,7 @@ TEST_CASE("client transaction identifies an unknown requested instance", "[clien
 	DataScriptRequest request = fixture.Request();
 	request.InstanceId = "missing.world";
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
 	CHECK_FALSE(result.Ran);
 	CHECK(result.Error == "unknown instance_id");
 	CHECK(result.Lifecycle.InstanceId == "missing.world");
@@ -340,7 +348,7 @@ TEST_CASE(
 	const std::vector<std::byte> before = Save(fixture.Worlds);
 
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.Dependencies(), request);
 	CHECK_FALSE(result.Ran);
 	CHECK(result.Error == "render-only presentation is in flight");
 	CHECK(Save(fixture.Worlds) == before);
@@ -354,7 +362,7 @@ TEST_CASE(
 	Fixture fixture;
 	fixture.PrepareClientWorld();
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), fixture.Request());
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), fixture.Request());
 	REQUIRE(result.Ran);
 	fixture.Worlds.Enter(
 		fixture.Worlds.Find(engine::core::Name(INSTANCE_ID)),
@@ -389,7 +397,7 @@ camera.Parent = workspace
 workspace.CurrentCamera = camera
 return
 )";
-	const DataScriptResult result = client::ExecuteDataScriptPackageTransaction(
+	const DataScriptResult result = engine::script::ExecuteDataScriptPackageTransaction(
 		fixture.ProductDependencies(), fixture.Request(source, true)
 	);
 	REQUIRE(result.Ran);
@@ -439,7 +447,7 @@ return
 )";
 	const DataScriptRequest request = fixture.Request(source, true);
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), request);
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), request);
 	REQUIRE(result.Ran);
 	CHECK(result.Lifecycle.Clock.Tick == request.ExpectedTick);
 
@@ -487,7 +495,8 @@ TEST_CASE(
 		});
 	};
 
-	const DataScriptResult result = client::ExecuteDataScriptPackageTransaction(dependencies, request);
+	const DataScriptResult result =
+		engine::script::ExecuteDataScriptPackageTransaction(dependencies, request);
 	CHECK_FALSE(result.Ran);
 	CHECK(result.Error.find("deliberate presentation exception") != std::string::npos);
 	CHECK(Save(fixture.Worlds) == before);
@@ -513,7 +522,7 @@ TEST_CASE("client transaction preserves a current physics-only pause", "[client]
 	);
 
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), fixture.Request());
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), fixture.Request());
 	REQUIRE(result.Ran);
 	fixture.Worlds.Enter(fixture.Worlds.Find(engine::core::Name(INSTANCE_ID)), [](engine::ecs::Store &store) {
 		CHECK(engine::physics::IsPhysicsPaused(store));
@@ -523,7 +532,7 @@ TEST_CASE("client transaction preserves a current physics-only pause", "[client]
 TEST_CASE("client transaction prepares physics for an empty loaded world", "[client][data-script-package]") {
 	Fixture fixture;
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), fixture.Request());
+		engine::script::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), fixture.Request());
 	REQUIRE(result.Ran);
 	fixture.Worlds.Enter(
 		fixture.Worlds.Find(engine::core::Name(INSTANCE_ID)),
@@ -562,7 +571,7 @@ TEST_CASE(
 		discardedAfterDestroy = packageDestroyed;
 	};
 	const DataScriptResult result =
-		client::ExecuteDataScriptPackageTransaction(dependencies, fixture.Request());
+		engine::script::ExecuteDataScriptPackageTransaction(dependencies, fixture.Request());
 	CHECK(result.Ran);
 	CHECK(packageDestroyed);
 	CHECK(discardedAfterDestroy);

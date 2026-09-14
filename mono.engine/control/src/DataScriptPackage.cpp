@@ -1,14 +1,14 @@
 #include <engine/control/DataFactoryOperationLedger.hpp>
+#include <engine/control/DataScriptPackage.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 
 #include <array>
-#include <client/DataScriptPackage.hpp>
 #include <cstddef>
 #include <exception>
 #include <nlohmann/json.hpp>
 #include <utility>
 
-namespace client {
+namespace engine::control {
 	using nlohmann::json;
 
 	namespace {
@@ -120,12 +120,12 @@ namespace client {
 		}
 	}
 
-	void AddDataScriptPackageTool(engine::control::Surface &surface, DataScriptPackageExecutor execute) {
+	void AddDataScriptPackageTool(Surface &surface, DataScriptPackageExecutor execute) {
 		auto ledger = surface.DataFactoryOperations();
 		surface.Add(
 			{"run_script_package",
-			 "Runs one atomic.data-script.v1 package in a fresh client Luau sandbox. Client Luau only; "
-			 "server and Studio do not provide this tool.",
+			 "Runs one atomic.data-script.v1 package in a fresh capability-limited Luau sandbox and "
+			 "atomically replaces a paused factory world.",
 			 [] {
 				 json properties;
 				 properties["instance_id"] = {
@@ -227,7 +227,7 @@ namespace client {
 					 ) ||
 					 !values["language"].is_string() || values["language"] != "luau") {
 					 if (failure.empty())
-						 failure = Error("capability_unsupported", "only client Luau packages are available");
+						 failure = Error("capability_unsupported", "only Luau packages are available");
 					 return nullptr;
 				 }
 				 const auto manifest = engine::script::ParseDataScriptPackage(request.Manifest);

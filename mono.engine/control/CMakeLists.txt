@@ -22,6 +22,7 @@ mono_add_library(control
 	DEPS
 		Engine::core
 		Engine::parallel
+		Engine::script
 	VENDOR
 		# The socket. Private: `Server.hpp` keeps asio behind a pimpl, so nothing
 		# that links this module compiles a networking library.

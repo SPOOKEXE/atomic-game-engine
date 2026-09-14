@@ -1,4 +1,6 @@
+#include <engine/assets/ContentHash.hpp>
 #include <engine/control/Server.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -13,6 +15,8 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
@@ -28,6 +32,8 @@
 #include <iterator>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
+#include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -56,6 +62,24 @@ using engine::scene::WorldBounds;
 using engine::world::DataFactoryStatus;
 using engine::world::DataFactoryWorldOperation;
 using engine::world::DataFactoryWorldRequest;
+
+namespace {
+	std::string PackageManifest(std::string_view source) {
+		const std::string hash =
+			engine::assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+		return "{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" + hash +
+			   "\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+			   "\"asset_bytes\":0,\"assets\":0,\"parameters\":0},\"seed\":0}";
+	}
+
+	size_t Entities(engine::world::Universe &worlds, engine::world::WorldId world) {
+		size_t count = 0;
+		REQUIRE(worlds.Enter(world, [&count](Store &store) {
+			store.EachEntity([&count](Entity) { count++; });
+		}) == engine::world::WorldStatus::Ok);
+		return count;
+	}
+}
 
 TEST_CASE("a thousand worlds leave main for presentation and use every worker core", "[server]") {
 	const server::WorldProcessPlan plan = server::PlanWorldProcesses(1000, 12);
@@ -126,6 +150,59 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 	CHECK(host.Worlds().Count() == 0);
 	CHECK_FALSE(host.Primary().IsValid());
 	host.Shutdown();
+}
+
+TEST_CASE(
+	"server packages rehydrate systems without rebuilding placeholder entities", "[server][data-factory]"
+) {
+	server::Options options;
+	options.Entities = 4;
+	options.DataFactory = true;
+	options.ControlPort = 0;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	auto &session = *host.DataFactorySession();
+	const auto created = session.CreateWorld(
+		{.Operation = DataFactoryWorldOperation::Create,
+		 .InstanceId = "package-world",
+		 .Seed = 1,
+		 .TickRate = 30.0,
+		 .OperationId = "create"}
+	);
+	REQUIRE(created.Status == DataFactoryStatus::Ok);
+	const auto run = [&](const engine::world::DataFactoryReply &before) {
+		return engine::script::ExecuteDataScriptPackageTransaction(
+			{.Universe = host.Worlds(),
+			 .Session = session,
+			 .MakeRuntime =
+				 [](Store &store, const engine::script::RuntimeLimits &limits) {
+					 return engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+				 },
+			 .RunPackage = engine::script::RunDataScriptPackage,
+			 .InstallSystems = [](Store &store,
+								  Scheduler &systems) { server::RegisterPlaceholderSystems(store, systems); },
+			 .Admit =
+				 [](std::string_view source, std::string_view entry, std::string &error) {
+					 return engine::script::CheckDataScriptPackageSource(
+						 engine::script::Language::Luau, source, entry, error
+					 );
+				 },
+			 .Role = engine::script::HostRole::OfServer()},
+			{.InstanceId = "package-world",
+			 .Manifest = PackageManifest("return"),
+			 .Source = "return",
+			 .Name = "package",
+			 .ExpectedTick = before.Clock.Tick,
+			 .ExpectedEpoch = before.WorldEpoch,
+			 .ExpectedVersion = before.WorldVersion}
+		);
+	};
+	const auto first = run(session.Inspect("package-world"));
+	REQUIRE(first.Ran);
+	const size_t afterFirst = Entities(host.Worlds(), host.Primary());
+	const auto second = run(session.Inspect("package-world"));
+	REQUIRE(second.Ran);
+	CHECK(Entities(host.Worlds(), host.Primary()) == afterFirst);
 }
 
 TEST_CASE("a paused factory skips headless presentation and empty bounds", "[server][data-factory]") {

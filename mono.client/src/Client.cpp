@@ -1095,6 +1095,14 @@ namespace client {
 										(void)InstallDefaultCamera(store, systems);
 										InstallClientWorldSystems(store, systems);
 									},
+								.Admit =
+									[](std::string_view source, std::string_view entry, std::string &error) {
+										return engine::script::CheckDataScriptPackageSource(
+											engine::script::Language::Luau, source, entry, error
+										);
+									},
+								.Role = engine::script::HostRole::OfBoth(),
+								.Present = true,
 							},
 							request
 						);

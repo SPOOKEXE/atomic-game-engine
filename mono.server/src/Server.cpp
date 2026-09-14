@@ -3,6 +3,7 @@
 #include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/control/DataScriptPackage.hpp>
 #include <engine/control/Features.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/Script.hpp>
@@ -41,7 +42,9 @@
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/script/TeleportRequest.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
 
@@ -3829,6 +3832,40 @@ namespace server {
 			if (DataFactory) {
 				ControlSurface.Enable(
 					std::array{engine::control::features::DataFactory(*DataFactory, {.RenderOnly = false})}
+				);
+				engine::control::AddDataScriptPackageTool(
+					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
+						return engine::script::ExecuteDataScriptPackageTransaction(
+							{.Universe = Worlds(),
+							 .Session = *DataFactory,
+							 .RuntimeOf = [this](engine::world::WorldId world) { return RuntimeOf(world); },
+							 .DiscardRuntime =
+								 [this](engine::world::WorldId world) {
+									 std::erase_if(Runtimes, [world](const auto &entry) {
+										 return entry.first == world;
+									 });
+								 },
+							 .MakeRuntime =
+								 [](engine::ecs::Store &store, const engine::script::RuntimeLimits &limits) {
+									 return engine::script::MakeRuntime(
+										 store, engine::script::Language::Luau, limits
+									 );
+								 },
+							 .RunPackage = engine::script::RunDataScriptPackage,
+							 .InstallSystems = [](
+												   engine::ecs::Store &store, engine::ecs::Scheduler &systems
+											   ) { RegisterPlaceholderSystems(store, systems); },
+							 .Admit =
+								 [](std::string_view source, std::string_view entry, std::string &error) {
+									 return engine::script::CheckDataScriptPackageSource(
+										 engine::script::Language::Luau, source, entry, error
+									 );
+								 },
+							 .Role = engine::script::HostRole::OfServer(),
+							 .Present = false},
+							request
+						);
+					}
 				);
 			}
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
