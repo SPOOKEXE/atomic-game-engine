@@ -446,7 +446,7 @@ namespace studio {
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
 			Skinned("Asset Profiler", [&] { DrawAssetProfiler(); });
-			Skinned("Physics Solver", [&] { DrawPhysicsSolver(); });
+			Skinned("Physics Profiler", [&] { DrawPhysicsSolver(); });
 			Skinned("DataStores", [&] { DrawDataStores(); });
 			Skinned("CDN", [&] { DrawCdn(); });
 			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
