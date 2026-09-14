@@ -80,7 +80,7 @@ ConnectResult ConnectHooks(
     std::span<const HookHandle> hooks
 );
 
-void DisconnectHook(ConnectionHandle connection);
+void DisconnectHooks(std::span<const ConnectionHandle> connections);
 
 CallResult CallHooks(
     ConnectionHandle connection,
@@ -102,9 +102,10 @@ It rejects an unknown handle, duplicate hook, unsupported channel, missing
 graph node, stale pipeline revision, or budget overflow. A failed connect leaves
 the previous connection intact.
 
-`DisconnectHook` stops new scheduling for that connection, cancels its pending
-readbacks, and releases its completed records. It is safe to call more than
-once. Disconnect does not invalidate records already copied out by the caller.
+`DisconnectHooks` stops new scheduling for each connection, cancels its pending
+readbacks, and releases its completed records. It is safe to pass an already
+disconnected handle. Disconnect does not invalidate records already copied out
+by the caller.
 
 `Pump` runs on the renderer owner thread. It checks only completed readbacks,
 turns them into value records, and publishes complete bundles. It does not
@@ -202,11 +203,14 @@ batch agree on:
 
 - world name and snapshot id
 - capture frame and pipeline revision
-- pipeline and authored node
-- view slot
+- pipeline and view slot
 - camera and projection facts
 - crop and image dimensions
 - connection generation
+
+Different hooks may observe different authored nodes. Each result must match
+the node declared by its own hook spec. Node names are not required to match
+across the bundle.
 
 Optional hooks produce explicit unavailable records. A failed required hook
 fails the whole bundle. Partial bytes are discarded or marked failed and are
@@ -219,21 +223,24 @@ formats, frame identity, and named resources.
 
 ## Capacity and handles
 
-All limits are fixed or explicitly configured at construction. The initial
-limits cover registered hooks, connections, in-flight batches per connection,
-resource planes per hook, and total readback bytes per frame. Registration and
-connection fail cleanly when a limit is reached. Per-frame vectors may hold
-only the bounded capacity declared by the binder.
+All limits are fixed or explicitly configured at construction. The first
+implementation retains the renderer's twelve resource image slots, the
+bridge's six live capture jobs, and its 64 MiB retained-byte ceiling. Resource
+admission counts unique capture nodes because several logical channels can
+share one GPU readback. Registration and connection fail cleanly when a limit
+is reached. Per-frame vectors may hold only the bounded capacity declared by
+the binder.
 
 Handles are `{slot, generation}` values. Registration, connection, and batch
 handles each have their own generation. A released slot increments its
 generation before reuse, so a stale handle cannot cancel, collect, or mutate a
 new object. Handle values are process-local and never cross a world boundary.
 
-Backpressure is visible. When no batch slot or byte budget is available,
-`CallHooks` returns `Dropped` with a reason and increments a metric. The render
-frame continues unless the hook is marked required by the connection's typed
-contract. The binder never grows an unbounded queue to hide a slow consumer.
+Backpressure is visible. When no batch slot or readback budget is available,
+`CallHooks` returns `Backpressured` with a reason and changes no ownership. The
+caller may retry at the next eligible view. An expired required capture becomes
+a terminal failure. The binder never grows an unbounded queue to hide a slow
+consumer.
 
 ## Sessions, teardown, and failure
 
@@ -274,7 +281,8 @@ camera facts, dimensions, status, and hashes.
 ```text
 registered
     -> connected
-    -> scheduled
+    -> armed
+    -> queued
     -> submitted
     -> ready
     -> collected
@@ -285,8 +293,9 @@ connected              -> disconnected
 ```
 
 `registered` describes a validated immutable spec. `connected` associates it
-with a session. `scheduled` owns an immutable context and private resource
-tokens. `submitted` means the GPU work is in a command buffer. `ready` means
+with a session. `armed` waits for its matching prepared view. `queued` owns an
+immutable context and private resource tokens. `submitted` means the GPU work
+is in a command buffer. `ready` means
 all required readbacks are complete and validated. `collected` transfers the
 bundle to the caller. `failed`, `expired`, and `disconnected` release all
 pending resources and cannot be reused.
