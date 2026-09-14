@@ -25,6 +25,7 @@ namespace {
 				.Channels = {"rgb_linear_hdr"},
 				.StorageProfiles = {"lossless", "training_compact"},
 				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
+				.NoiseLimitations = {"gaussian=rgb_linear_hdr_only"},
 				.HookRecords =
 					{
 						{.Name = "data_capture.rgb_linear_hdr",
@@ -98,6 +99,10 @@ TEST_CASE("data capture capabilities carry only stable hook facts", "[script][da
 	const auto *limits = Field(result.Value, "limits");
 	REQUIRE(limits != nullptr);
 	CHECK(Field(*limits, "maximum_hooks")->Number == 14.0);
+	const auto *noise = Field(result.Value, "noise_limitations");
+	REQUIRE(noise != nullptr);
+	REQUIRE(noise->Items.size() == 1);
+	CHECK(noise->Items.front().Text == "gaussian=rgb_linear_hdr_only");
 	CHECK(Field(*limits, "maximum_connections")->Number == 6.0);
 	CHECK(Field(*limits, "maximum_batches")->Number == 6.0);
 	CHECK(Field(*limits, "maximum_readback_nodes")->Number == 12.0);

@@ -54,6 +54,7 @@ namespace {
 				.Channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"},
 				.StorageProfiles = {"lossless", "training_compact"},
 				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
+				.NoiseLimitations = {"gaussian=rgb_linear_hdr_only"},
 				.HookRecords =
 					{
 						{
@@ -180,6 +181,21 @@ namespace {
 				.Packing = "RGBA16F",
 				.Provenance = {},
 				.AmbientOcclusion = std::nullopt,
+				.Noise = engine::script::DataCaptureBridgeNoise{
+					.Mode = "gaussian",
+					.Algorithm = "xorshift64star_clt12_q17/v2",
+					.Seed = 17,
+					.Sigma = .25,
+					.SigmaQuantization = "binary64_to_q24_round_to_nearest_ties_to_even/v1",
+					.EffectiveSigmaQ24 = 4194304,
+					.EffectiveSigma = .25,
+					.SeedStatePolicy = "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1",
+					.Order = "after_storage_profile/v1",
+					.ClampPolicy = "finite_rgb_clamped_to_binary16_range[-65504,65504]",
+					.AlphaPolicy = "preserve_exact_binary16",
+					.ValueClassification = "finite",
+					.MaximumAbsoluteError = .25,
+				},
 			});
 			poll.Planes.push_back({
 				.Channel = "ambient_occlusion",
@@ -215,6 +231,7 @@ namespace {
 				.Packing = "unorm8",
 				.Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
 				.AmbientOcclusion = std::nullopt,
+				.Noise = {},
 			});
 			for (const char *channel : {"object_ids", "semantic_ids", "part_ids"})
 				poll.Planes.push_back({
@@ -251,6 +268,7 @@ namespace {
 					.Packing = {},
 					.Provenance = {},
 					.AmbientOcclusion = std::nullopt,
+					.Noise = {},
 				});
 			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			poll.SemanticLabels = {{1, "fixture/box"}};
@@ -763,11 +781,17 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				assert(mutation.status == "queued" and mutation.ticket == "303")
 				assert(service:CancelViewCameraMutation(mutation.ticket).status == "cancellation_requested")
 				assert(service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 4294967296, channels = {"rgb_linear_hdr"}, temporal_history = "preserve"}).status == "invalid_capture_request")
+				assert(service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr"}, temporal_history = "preserve", noise_mode = "gaussian", noise_seed = 18446744073709551616, noise_sigma = .25}).status == "invalid_capture_request")
+				assert(service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr"}, temporal_history = "preserve", noise_mode = "gaussian", noise_seed = 0, noise_sigma = -0.0}).status == "queued")
 				local queued = service:Capture({snapshot_id = "fixture/snapshot", pipeline = "main", capture_node = "lit", view_slot = 0, channels = {"rgb_linear_hdr", "ambient_occlusion", "object_ids", "semantic_ids", "part_ids"}, temporal_history = "preserve"})
 				assert(queued.status == "queued")
 				assert(service:PollCapture("202").status == "unknown_capture_ticket")
 				local poll = service:PollCapture(queued.ticket)
 				assert(poll.status == "ready" and poll.planes[1].source_resource == "lit")
+				assert(poll.planes[1].noise.algorithm == "xorshift64star_clt12_q17/v2")
+				assert(poll.planes[1].noise.sigma_quantization == "binary64_to_q24_round_to_nearest_ties_to_even/v1")
+				assert(poll.planes[1].noise.effective_sigma_q24 == "4194304" and poll.planes[1].noise.effective_sigma == .25)
+				assert(poll.planes[1].noise.seed_state_policy == "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1")
 				assert(poll.planes[2].channel == "ambient_occlusion" and poll.planes[2].packing == "unorm8")
 				assert(poll.planes[2].provenance == "ssao_estimator_visibility_factor_not_ground_truth")
 				assert(#poll.object_labels == 2 and poll.object_labels[1].label == 1)
@@ -789,11 +813,14 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 				const mutation = service.SubmitViewCameraMutation({snapshot_id: "fixture/snapshot", pipeline: "main", pipeline_revision: 1, view_slot: 0, camera: {field_of_view_radians: .9, near_plane: .2, far_plane: 200}});
 				if (mutation.status !== "queued" || mutation.ticket !== "303" || service.CancelViewCameraMutation(mutation.ticket).status !== "cancellation_requested") throw new Error("mutation bridge failed");
 				if (service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: Infinity, channels: ["rgb_linear_hdr"], temporal_history: "preserve"}).status !== "invalid_capture_request") throw new Error("invalid request accepted");
+				if (service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: 0, channels: ["rgb_linear_hdr"], temporal_history: "preserve", noise_mode: "gaussian", noise_seed: 18446744073709551616, noise_sigma: .25}).status !== "invalid_capture_request") throw new Error("out of range raw seed accepted");
+				if (service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: 0, channels: ["rgb_linear_hdr"], temporal_history: "preserve", noise_mode: "gaussian", noise_seed: 0, noise_sigma: -0.0}).status !== "queued") throw new Error("negative zero raw sigma");
 				const queued = service.Capture({snapshot_id: "fixture/snapshot", pipeline: "main", capture_node: "lit", view_slot: 0, channels: ["rgb_linear_hdr"], temporal_history: "preserve"});
 				if (queued.status !== "queued") throw new Error("queue failed");
 				if (service.PollCapture("101").status !== "unknown_capture_ticket") throw new Error("other runtime ticket accepted");
 				const poll = service.PollCapture(queued.ticket);
 				if (poll.status !== "ready" || poll.planes[0].source_resource !== "lit") throw new Error("poll failed");
+				if (poll.planes[0].noise.algorithm !== "xorshift64star_clt12_q17/v2" || poll.planes[0].noise.sigma_quantization !== "binary64_to_q24_round_to_nearest_ties_to_even/v1" || poll.planes[0].noise.effective_sigma_q24 !== "4194304" || poll.planes[0].noise.effective_sigma !== .25 || poll.planes[0].noise.seed_state_policy !== "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1") throw new Error("noise metadata failed");
 				if (service.GetCaptureBuffer(queued.ticket, poll.planes[0].resource, 0, 4).byteLength !== 4) throw new Error("bytes failed");
 				if (service.CancelCapture(queued.ticket).status !== "cancellation_requested") throw new Error("cancel failed");
 				if (service.PollCapture(queued.ticket).status !== "cancelled") throw new Error("cancel state missing");
@@ -841,9 +868,18 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "queued")
 				invalid = service:CreateOptions()
 				invalid.NoiseMode = "gaussian"
-				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid.NoiseSeed = 17
+				invalid.NoiseSigma = 0.25
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "queued")
+				invalid = service:CreateOptions()
+				invalid.NoiseMode = "gaussian"
+				invalid.NoiseSigma = -0.0
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "queued")
 				invalid = service:CreateOptions()
 				invalid.NoiseSeed = 1
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.NoiseSeed = 18446744073709551616
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
 				invalid = service:CreateOptions()
 				invalid.Channels = {"rgb_linear_hdr", "rgb_linear_hdr"}
@@ -876,10 +912,14 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "unsupported_data_scene_options") throw new Error("exact masks");
 				invalid = service.CreateOptions(); invalid.StorageProfile = "training_compact";
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "queued") throw new Error("storage");
-				invalid = service.CreateOptions(); invalid.NoiseMode = "gaussian";
-				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("noise mode");
+				invalid = service.CreateOptions(); invalid.NoiseMode = "gaussian"; invalid.NoiseSeed = 17; invalid.NoiseSigma = .25;
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "queued") throw new Error("noise mode");
+				invalid = service.CreateOptions(); invalid.NoiseMode = "gaussian"; invalid.NoiseSigma = -0.0;
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "queued") throw new Error("negative zero sigma");
 				invalid = service.CreateOptions(); invalid.NoiseSeed = 1;
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("noise seed");
+				invalid = service.CreateOptions(); invalid.NoiseSeed = 18446744073709551616;
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("out of range typed seed");
 				invalid = service.CreateOptions(); invalid.Channels = ["rgb_linear_hdr", "rgb_linear_hdr"];
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("duplicates");
 				invalid = service.CreateOptions(); invalid.Channels = ["second_surface_depth"];

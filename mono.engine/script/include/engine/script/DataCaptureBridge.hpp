@@ -29,6 +29,11 @@ namespace engine::script {
 		// "lossless" retains renderer readback bytes. "training_compact" is an
 		// explicit storage transform with per-plane encoding metadata.
 		std::string StorageProfile = "lossless";
+		// `gaussian` applies a deterministic bounded perturbation to copied
+		// rgb_linear_hdr colour lanes only. It never changes alpha or a label plane.
+		std::string NoiseMode = "none";
+		uint64_t NoiseSeed = 0;
+		double NoiseSigma = 0.0;
 		// The renderer copies a scene sidecar only after its retained-snapshot
 		// barrier succeeds. This flag asks for that bounded copied observation.
 		bool IncludeSceneData = false;
@@ -55,6 +60,24 @@ namespace engine::script {
 		std::optional<std::string> TemporalHistory;
 		std::optional<double> BackgroundValue;
 		std::optional<std::string> BackgroundClassification;
+	};
+
+	// Describes the copied RGB perturbation. The native renderer bytes remain
+	// addressable through the source descriptor on the same plane.
+	struct DataCaptureBridgeNoise {
+		std::string Mode;
+		std::string Algorithm;
+		uint64_t Seed = 0;
+		double Sigma = 0.0;
+		std::string SigmaQuantization;
+		uint64_t EffectiveSigmaQ24 = 0;
+		double EffectiveSigma = 0.0;
+		std::string SeedStatePolicy;
+		std::string Order;
+		std::string ClampPolicy;
+		std::string AlphaPolicy;
+		std::string ValueClassification;
+		std::optional<double> MaximumAbsoluteError;
 	};
 
 	struct DataCaptureBridgePlane {
@@ -96,6 +119,7 @@ namespace engine::script {
 		// Empty when a channel has no extra estimator provenance.
 		std::string Provenance;
 		std::optional<DataCaptureBridgeAmbientOcclusion> AmbientOcclusion;
+		std::optional<DataCaptureBridgeNoise> Noise;
 	};
 	struct DataCaptureBridgeObjectLabel {
 		uint32_t Label = 0;
@@ -176,6 +200,7 @@ namespace engine::script {
 		std::vector<std::string> StorageProfiles;
 		// Bounded machine-readable constraints for the training_compact profile.
 		std::vector<std::string> TrainingCompactLimitations;
+		std::vector<std::string> NoiseLimitations;
 		// Stable render hook contracts. They are strings and fixed limits, never
 		// renderer handles or process-local enum values.
 		std::vector<DataCaptureBridgeHookCapability> HookRecords;

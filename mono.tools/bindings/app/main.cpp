@@ -1601,8 +1601,9 @@ export type DataSceneOptions = {
 	IncludeSceneData: boolean,
 	IncludeExactMasks: false,
 	CoordinateSpace: "world_camera_image",
-	NoiseMode: "none",
+	NoiseMode: "none" | "gaussian",
 	NoiseSeed: number,
+	NoiseSigma: number,
 }
 
 -- Read-only ECS observations for a data factory. Returned records are copies;
@@ -3478,8 +3479,9 @@ interface DataSceneOptions {
 	IncludeSceneData: boolean;
 	IncludeExactMasks: false;
 	CoordinateSpace: "world_camera_image";
-	NoiseMode: "none";
-	NoiseSeed: 0;
+	NoiseMode: "none" | "gaussian";
+	NoiseSeed: number;
+	NoiseSigma: number;
 }
 
 // Read-only ECS observations. The result records are intentionally typed as

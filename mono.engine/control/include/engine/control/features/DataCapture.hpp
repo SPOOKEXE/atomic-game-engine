@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -94,7 +95,8 @@ namespace engine::control {
 					 "include_exact_masks",
 					 "coordinate_space",
 					 "noise_mode",
-					 "noise_seed"},
+					 "noise_seed",
+					 "noise_sigma"},
 					failure
 				))
 				return false;
@@ -102,6 +104,7 @@ namespace engine::control {
 			std::string schema, camera, history, storage, output, coordinate, noise;
 			uint64_t slot = 0;
 			uint64_t noiseSeed = 0;
+			double noiseSigma = 0.0;
 			if (!Field(options, "schema_version", field, failure) ||
 				!OptionText(*field, "options.schema_version", MAXIMUM_OPTION_TEXT, schema, failure) ||
 				!Field(options, "camera_id", field, failure) ||
@@ -125,15 +128,23 @@ namespace engine::control {
 				!Field(options, "noise_mode", field, failure) ||
 				!OptionText(*field, "options.noise_mode", MAXIMUM_OPTION_TEXT, noise, failure) ||
 				!Field(options, "noise_seed", field, failure) ||
-				!UInt(*field, "options.noise_seed", noiseSeed, failure))
+				!UInt(*field, "options.noise_seed", noiseSeed, failure) ||
+				!Field(options, "noise_sigma", field, failure))
 				return false;
+			if (!field->is_number() || !std::isfinite(noiseSigma = field->get<double>()) ||
+				noiseSigma < 0.0 || noiseSigma > 64.0) {
+				failure =
+					Error("validation_failed", "options.noise_sigma must be a finite number from 0 to 64");
+				return false;
+			}
 			if (slot > std::numeric_limits<uint32_t>::max()) {
 				failure = Error("validation_failed", "options.view_slot must fit uint32");
 				return false;
 			}
 			if (schema != "data-scene-options/v1" || history != "preserve" ||
 				(storage != "lossless" && storage != "training_compact") || output != "raw_planes" ||
-				coordinate != "world_camera_image" || noise != "none" || noiseSeed != 0) {
+				coordinate != "world_camera_image" || (noise != "none" && noise != "gaussian") ||
+				(noise == "none" && (noiseSeed != 0 || noiseSigma != 0.0))) {
 				failure = Error(
 					"capability_unsupported", "this host supports only the data-scene-options/v1 base profile"
 				);
@@ -142,6 +153,9 @@ namespace engine::control {
 			request.ViewSlot = slot;
 			request.CameraId = std::move(camera);
 			request.StorageProfile = std::move(storage);
+			request.NoiseMode = std::move(noise);
+			request.NoiseSeed = noiseSeed;
+			request.NoiseSigma = noiseSigma;
 			if (!Field(options, "include_scene_data", field, failure)) return false;
 			if (!field->is_boolean()) {
 				failure = Error("validation_failed", "options.include_scene_data must be a boolean");
@@ -182,6 +196,12 @@ namespace engine::control {
 					"validation_failed",
 					"second_surface_depth and second_surface_validity must be requested together"
 				);
+				return false;
+			}
+			if (request.NoiseMode == "gaussian" &&
+				std::find(request.Channels.begin(), request.Channels.end(), "rgb_linear_hdr") ==
+					request.Channels.end()) {
+				failure = Error("capability_unsupported", "gaussian noise requires rgb_linear_hdr");
 				return false;
 			}
 			request.TemporalHistory = std::move(history);
@@ -318,6 +338,25 @@ namespace engine::control {
 						{"background_classification", nullable(value->BackgroundClassification)}
 					};
 				};
+			const auto noise = [](const std::optional<script::DataCaptureBridgeNoise> &value) -> json {
+				if (!value) return nullptr;
+				return {
+					{"mode", value->Mode},
+					{"algorithm", value->Algorithm},
+					{"seed", value->Seed},
+					{"sigma", value->Sigma},
+					{"sigma_quantization", value->SigmaQuantization},
+					{"effective_sigma_q24", value->EffectiveSigmaQ24},
+					{"effective_sigma", value->EffectiveSigma},
+					{"seed_state_policy", value->SeedStatePolicy},
+					{"order", value->Order},
+					{"clamp_policy", value->ClampPolicy},
+					{"alpha_policy", value->AlphaPolicy},
+					{"value_classification", value->ValueClassification},
+					{"maximum_absolute_error",
+					 value->MaximumAbsoluteError ? json(*value->MaximumAbsoluteError) : json(nullptr)},
+				};
+			};
 			return {
 				{"channel", plane.Channel},
 				{"status", plane.Status},
@@ -347,6 +386,7 @@ namespace engine::control {
 				{"packing", std::move(packing)},
 				{"provenance", plane.Provenance.empty() ? json(nullptr) : json(plane.Provenance)},
 				{"ambient_occlusion", ambientOcclusion(plane.AmbientOcclusion)},
+				{"noise", noise(plane.Noise)},
 				{"row_stride", plane.RowStride},
 				{"colour_space", plane.ColourSpace},
 				{"origin", plane.Origin}
@@ -615,6 +655,7 @@ namespace engine::control {
 					{"noise_mode",
 					 {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					{"noise_seed", {{"type", "integer"}, {"minimum", 0}}},
+					{"noise_sigma", {{"type", "number"}, {"minimum", 0}, {"maximum", 64}}},
 				};
 				return Schema(
 					{{"instance_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
@@ -637,7 +678,8 @@ namespace engine::control {
 							 "include_exact_masks",
 							 "coordinate_space",
 							 "noise_mode",
-							 "noise_seed"}
+							 "noise_seed",
+							 "noise_sigma"}
 						)},
 					   {"additionalProperties", false}}},
 					 {"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},

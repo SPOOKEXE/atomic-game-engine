@@ -1,4 +1,5 @@
 #include "AmbientOcclusionCapture.hpp"
+#include "DataCaptureCompact.hpp"
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
 
@@ -36,12 +37,150 @@
 
 #include <algorithm>
 #include <array>
+#include <cfenv>
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <string>
 
 TEST_SUITE_ID("engine.render.resourceimage")
+
+TEST_CASE("captured RGB Gaussian noise is deterministic and preserves alpha", "[render][data-capture]") {
+	using namespace engine::render::data_capture_compact;
+	auto half = [](float value) {
+		uint16_t bits = 0;
+		REQUIRE(Float32ToFloat16(value, bits));
+		return bits;
+	};
+	auto append = [](std::vector<std::byte> &bytes, uint16_t value) {
+		bytes.push_back(static_cast<std::byte>(value & 0xff));
+		bytes.push_back(static_cast<std::byte>(value >> 8));
+	};
+	std::vector<std::byte> finite;
+	append(finite, half(1.0f));
+	append(finite, half(-.5f));
+	append(finite, half(.25f));
+	append(finite, half(.75f));
+	std::vector<std::byte> first = finite;
+	std::vector<std::byte> second = finite;
+	RgbNoiseResult firstResult;
+	RgbNoiseResult secondResult;
+	REQUIRE(ApplyGaussianRgbFloat16(first, 1, 1, 8, 17, .25, firstResult));
+	REQUIRE(ApplyGaussianRgbFloat16(second, 1, 1, 8, 17, .25, secondResult));
+	CHECK(first == second);
+	CHECK(
+		first == std::vector<std::byte>{
+					 std::byte{0x18},
+					 std::byte{0x3b},
+					 std::byte{0xc0},
+					 std::byte{0xb7},
+					 std::byte{0x67},
+					 std::byte{0x33},
+					 std::byte{0x00},
+					 std::byte{0x3a}
+				 }
+	);
+	CHECK(firstResult.EffectiveSigmaQ24 == 4194304);
+	CHECK(firstResult.EffectiveSigma == .25);
+	std::vector<std::byte> seedZero = finite;
+	seedZero.insert(seedZero.end(), finite.begin(), finite.end());
+	RgbNoiseResult seedZeroResult;
+	REQUIRE(ApplyGaussianRgbFloat16(seedZero, 2, 1, 16, 0, .25, seedZeroResult));
+	CHECK(
+		seedZero == std::vector<std::byte>{
+						std::byte{0x0b},
+						std::byte{0x3c},
+						std::byte{0x0a},
+						std::byte{0xba},
+						std::byte{0x94},
+						std::byte{0x32},
+						std::byte{0x00},
+						std::byte{0x3a},
+						std::byte{0x42},
+						std::byte{0x3b},
+						std::byte{0x85},
+						std::byte{0xb6},
+						std::byte{0x62},
+						std::byte{0x30},
+						std::byte{0x00},
+						std::byte{0x3a}
+					}
+	);
+	CHECK(
+		std::vector<std::byte>(seedZero.begin(), seedZero.begin() + 6) !=
+		std::vector<std::byte>(seedZero.begin() + 8, seedZero.begin() + 14)
+	);
+	REQUIRE(firstResult.MaximumAbsoluteError);
+	CHECK(*firstResult.MaximumAbsoluteError == .11328125);
+
+	const int savedRounding = std::fegetround();
+	if (savedRounding != -1 && std::fesetround(FE_UPWARD) == 0) {
+		std::vector<std::byte> upward = finite;
+		RgbNoiseResult upwardResult;
+		REQUIRE(ApplyGaussianRgbFloat16(upward, 1, 1, 8, 17, .25, upwardResult));
+		CHECK(upward == first);
+		CHECK(upwardResult.MaximumAbsoluteError == firstResult.MaximumAbsoluteError);
+		REQUIRE(std::fesetround(FE_DOWNWARD) == 0);
+		std::vector<std::byte> downward = finite;
+		RgbNoiseResult downwardResult;
+		REQUIRE(ApplyGaussianRgbFloat16(downward, 1, 1, 8, 17, .25, downwardResult));
+		CHECK(downward == first);
+		CHECK(downwardResult.MaximumAbsoluteError == firstResult.MaximumAbsoluteError);
+		REQUIRE(std::fesetround(savedRounding) == 0);
+	}
+
+	std::vector<std::byte> exceptional;
+	append(exceptional, half(1.0f));
+	append(exceptional, 0x7e00); // NaN is copied, never perturbed.
+	append(exceptional, 0x7c00); // Infinity is copied, never perturbed.
+	append(exceptional, half(.75f));
+	const std::vector<std::byte> alpha{exceptional.begin() + 6, exceptional.begin() + 8};
+	RgbNoiseResult exceptionalResult;
+	REQUIRE(ApplyGaussianRgbFloat16(exceptional, 1, 1, 8, 17, .25, exceptionalResult));
+	CHECK(
+		std::vector<std::byte>(exceptional.begin() + 2, exceptional.begin() + 6) ==
+		std::vector<std::byte>{std::byte{0x00}, std::byte{0x7e}, std::byte{0x00}, std::byte{0x7c}}
+	);
+	CHECK(std::vector<std::byte>(exceptional.begin() + 6, exceptional.begin() + 8) == alpha);
+	CHECK(exceptionalResult.ValueClassification == "contains_infinity_and_nan");
+
+	std::vector<std::byte> padded(16, std::byte{0xa5});
+	std::copy(finite.begin(), finite.end(), padded.begin());
+	padded[0] = std::byte{0xff};
+	padded[1] = std::byte{0x7b};
+	RgbNoiseResult paddedResult;
+	REQUIRE(ApplyGaussianRgbFloat16(padded, 1, 1, 16, 1, 64.0, paddedResult));
+	CHECK(std::all_of(padded.begin() + 8, padded.end(), [](std::byte value) {
+		return value == std::byte{0xa5};
+	}));
+	CHECK(
+		(uint16_t(std::to_integer<uint8_t>(padded[0])) | uint16_t(std::to_integer<uint8_t>(padded[1]))
+															 << 8) == 0x7bff
+	); // Clamp at binary16 maximum.
+
+	std::vector<std::byte> exhaustive;
+	exhaustive.reserve(65536 * 8);
+	for (uint32_t bits = 0; bits <= 0xffff; ++bits) {
+		for (size_t component = 0; component < 4; ++component)
+			append(exhaustive, static_cast<uint16_t>(bits));
+	}
+	const std::vector<std::byte> zeroSource = exhaustive;
+	RgbNoiseResult zeroResult;
+	REQUIRE(ApplyGaussianRgbFloat16(exhaustive, 65536, 1, 65536 * 8, 17, 0.0, zeroResult));
+	CHECK(exhaustive == zeroSource);
+	REQUIRE(zeroResult.MaximumAbsoluteError);
+	CHECK(*zeroResult.MaximumAbsoluteError == 0.0);
+	std::vector<std::byte> negativeZero = zeroSource;
+	RgbNoiseResult negativeZeroResult;
+	REQUIRE(ApplyGaussianRgbFloat16(negativeZero, 65536, 1, 65536 * 8, 0, -0.0, negativeZeroResult));
+	CHECK(negativeZero == zeroSource);
+	CHECK(negativeZeroResult.EffectiveSigmaQ24 == 0);
+	CHECK(negativeZeroResult.EffectiveSigma == 0.0);
+
+	RgbNoiseResult malformedResult;
+	CHECK_FALSE(ApplyGaussianRgbFloat16(finite, UINT32_MAX, 2, UINT32_MAX, 17, .25, malformedResult));
+	CHECK_FALSE(ApplyGaussianRgbFloat16(finite, 1, 1, 7, 17, .25, malformedResult));
+}
 
 TEST_CASE("custom R8 capture does not inherit SSAO facts", "[render][resourceimage]") {
 	const engine::render::AmbientOcclusionProvenance builtIn{
@@ -4860,6 +4999,127 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(bridge.Release("script-capture-world", losslessDepthTicket, detail));
 	REQUIRE(bridge.Release("script-capture-world", compactDepthTicket, detail));
 	CHECK_FALSE(bridge.Poll("script-capture-world", compactDepthTicket, poll, detail));
+
+	// Noise is a retained RGB copy transform. Its descriptor keeps the native
+	// source while object IDs remain byte-identical labels from the same render.
+	script::DataCaptureBridgeRequest nativeRgb = request;
+	nativeRgb.Channels = {"rgb_linear_hdr", "object_ids"};
+	uint64_t nativeRgbTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", nativeRgb, nativeRgbTicket, detail));
+	script::DataCaptureBridgePoll nativeRgbPoll;
+	complete(nativeRgbTicket, nativeRgbPoll);
+	REQUIRE(nativeRgbPoll.Status == "ready");
+	const auto &nativeRgbPlane = plane(nativeRgbPoll, "rgb_linear_hdr");
+	const auto &nativeNoiseIdsPlane = plane(nativeRgbPoll, "object_ids");
+	std::vector<std::byte> nativeRgbBytes;
+	std::vector<std::byte> nativeNoiseIds;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		nativeRgbTicket,
+		nativeRgbPlane.Resource,
+		0,
+		nativeRgbPlane.ByteSize,
+		nativeRgbBytes,
+		detail
+	));
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		nativeRgbTicket,
+		nativeNoiseIdsPlane.Resource,
+		0,
+		nativeNoiseIdsPlane.ByteSize,
+		nativeNoiseIds,
+		detail
+	));
+
+	script::DataCaptureBridgeRequest noisyRgb = nativeRgb;
+	noisyRgb.NoiseMode = "gaussian";
+	noisyRgb.NoiseSeed = 17;
+	noisyRgb.NoiseSigma = .1;
+	uint64_t noisyRgbTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", noisyRgb, noisyRgbTicket, detail));
+	script::DataCaptureBridgePoll noisyRgbPoll;
+	complete(noisyRgbTicket, noisyRgbPoll);
+	REQUIRE(noisyRgbPoll.Status == "ready");
+	const auto &noisyRgbPlane = plane(noisyRgbPoll, "rgb_linear_hdr");
+	const auto &noisyIdsPlane = plane(noisyRgbPoll, "object_ids");
+	REQUIRE(noisyRgbPlane.Noise);
+	CHECK(noisyRgbPlane.Noise->Algorithm == "xorshift64star_clt12_q17/v2");
+	CHECK(noisyRgbPlane.Noise->Sigma == .1);
+	CHECK(noisyRgbPlane.Noise->EffectiveSigmaQ24 == 1677722);
+	CHECK(noisyRgbPlane.Noise->EffectiveSigma == 1677722.0 / 16777216.0);
+	CHECK(noisyRgbPlane.Noise->Order == "after_storage_profile/v1");
+	CHECK(noisyRgbPlane.Noise->AlphaPolicy == "preserve_exact_binary16");
+	REQUIRE(noisyRgbPlane.Noise->MaximumAbsoluteError);
+	CHECK(*noisyRgbPlane.Noise->MaximumAbsoluteError >= 0.0);
+	CHECK(noisyRgbPlane.SourceHash == nativeRgbPlane.Hash);
+	CHECK(noisyRgbPlane.SourceScalar == nativeRgbPlane.Scalar);
+	CHECK(noisyRgbPlane.SourceEncoding == nativeRgbPlane.Encoding);
+	CHECK(noisyRgbPlane.SourceWidth == nativeRgbPlane.Width);
+	CHECK(noisyRgbPlane.SourceHeight == nativeRgbPlane.Height);
+	CHECK(noisyRgbPlane.SourceRowStride == nativeRgbPlane.RowStride);
+	CHECK(noisyRgbPlane.SourceByteSize == nativeRgbPlane.ByteSize);
+	CHECK(noisyRgbPlane.Hash != nativeRgbPlane.Hash);
+	std::vector<std::byte> noisyRgbBytes;
+	std::vector<std::byte> noisyIds;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		noisyRgbTicket,
+		noisyRgbPlane.Resource,
+		0,
+		noisyRgbPlane.ByteSize,
+		noisyRgbBytes,
+		detail
+	));
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		noisyRgbTicket,
+		noisyIdsPlane.Resource,
+		0,
+		noisyIdsPlane.ByteSize,
+		noisyIds,
+		detail
+	));
+	CHECK(assets::Hasher::Of(noisyRgbBytes).ToHex() == noisyRgbPlane.Hash);
+	CHECK(noisyRgbBytes != nativeRgbBytes);
+	CHECK(noisyIds == nativeNoiseIds);
+	script::DataCaptureBridgePoll noisyRetry;
+	REQUIRE(bridge.Poll("script-capture-world", noisyRgbTicket, noisyRetry, detail));
+	CHECK(noisyRetry.Status == "ready");
+	CHECK(plane(noisyRetry, "rgb_linear_hdr").Hash == noisyRgbPlane.Hash);
+	CHECK(plane(noisyRetry, "object_ids").Hash == noisyIdsPlane.Hash);
+	REQUIRE(bridge.Release("script-capture-world", nativeRgbTicket, detail));
+	REQUIRE(bridge.Release("script-capture-world", noisyRgbTicket, detail));
+
+	// Signed zero is normalized to exact zero after validation, retaining the
+	// native RGB bytes while still reporting a reproducible seed policy.
+	script::DataCaptureBridgeRequest signedZeroNoise = nativeRgb;
+	signedZeroNoise.NoiseMode = "gaussian";
+	signedZeroNoise.NoiseSeed = 0;
+	signedZeroNoise.NoiseSigma = -0.0;
+	uint64_t signedZeroTicket = 0;
+	REQUIRE(bridge.Queue("script-capture-world", signedZeroNoise, signedZeroTicket, detail));
+	script::DataCaptureBridgePoll signedZeroPoll;
+	complete(signedZeroTicket, signedZeroPoll);
+	REQUIRE(signedZeroPoll.Status == "ready");
+	const auto &signedZeroPlane = plane(signedZeroPoll, "rgb_linear_hdr");
+	REQUIRE(signedZeroPlane.Noise);
+	CHECK(signedZeroPlane.Noise->Sigma == 0.0);
+	CHECK(signedZeroPlane.Noise->EffectiveSigmaQ24 == 0);
+	CHECK(signedZeroPlane.Noise->EffectiveSigma == 0.0);
+	CHECK(signedZeroPlane.Noise->SeedStatePolicy == "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1");
+	std::vector<std::byte> signedZeroBytes;
+	REQUIRE(bridge.ReadPlane(
+		"script-capture-world",
+		signedZeroTicket,
+		signedZeroPlane.Resource,
+		0,
+		signedZeroPlane.ByteSize,
+		signedZeroBytes,
+		detail
+	));
+	CHECK(signedZeroBytes == nativeRgbBytes);
+	REQUIRE(bridge.Release("script-capture-world", signedZeroTicket, detail));
 
 	// Unmodeled authored facts have no readback texture, but still complete with
 	// the dispatch identity and explicit unavailable provenance.

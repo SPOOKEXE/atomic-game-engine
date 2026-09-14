@@ -137,6 +137,7 @@ namespace {
 			{"coordinate_space", "world_camera_image"},
 			{"noise_mode", "none"},
 			{"noise_seed", 0u},
+			{"noise_sigma", 0.0},
 		};
 	}
 
@@ -173,6 +174,7 @@ namespace {
 					 "part_ids"},
 				.StorageProfiles = {"lossless", "training_compact"},
 				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
+				.NoiseLimitations = {"gaussian=rgb_linear_hdr_only"},
 				.HookRecords =
 					{
 						ObservationHook("data_capture.rgb_linear_hdr", "rgb_linear_hdr"),
@@ -215,6 +217,9 @@ namespace {
 			Channels = request.Channels;
 			IncludeSceneData = request.IncludeSceneData;
 			StorageProfile = request.StorageProfile;
+			NoiseMode = request.NoiseMode;
+			NoiseSeed = request.NoiseSeed;
+			NoiseSigma = request.NoiseSigma;
 			ticket = 1;
 			Queued = true;
 			++QueueCount;
@@ -270,7 +275,23 @@ namespace {
 				 .Origin = "top_left",
 				 .Packing = {},
 				 .Provenance = {},
-				 .AmbientOcclusion = {}},
+				 .AmbientOcclusion = {},
+				 .Noise =
+					 engine::script::DataCaptureBridgeNoise{
+						 .Mode = "gaussian",
+						 .Algorithm = "xorshift64star_clt12_q17/v2",
+						 .Seed = 17,
+						 .Sigma = .25,
+						 .SigmaQuantization = "binary64_to_q24_round_to_nearest_ties_to_even/v1",
+						 .EffectiveSigmaQ24 = 4194304,
+						 .EffectiveSigma = .25,
+						 .SeedStatePolicy = "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1",
+						 .Order = "after_storage_profile/v1",
+						 .ClampPolicy = "finite_rgb_clamped_to_binary16_range[-65504,65504]",
+						 .AlphaPolicy = "preserve_exact_binary16",
+						 .ValueClassification = "finite",
+						 .MaximumAbsoluteError = .25,
+					 }},
 				{.Channel = "ambient_occlusion",
 				 .Status = "ready",
 				 .Resource = "capture/1/ambient_occlusion",
@@ -303,17 +324,19 @@ namespace {
 				 .Origin = "top_left",
 				 .Packing = "unorm8",
 				 .Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
-				 .AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
-					 .SourceState = "estimated",
-					 .ProducerFrame = 9,
-					 .Enabled = true,
-					 .SampleCount = 12,
-					 .RadiusWorldUnits = 0.65,
-					 .Denoiser = "none",
-					 .TemporalHistory = "none",
-					 .BackgroundValue = 1.0,
-					 .BackgroundClassification = "unavailable"
-				 }}
+				 .AmbientOcclusion =
+					 engine::script::DataCaptureBridgeAmbientOcclusion{
+						 .SourceState = "estimated",
+						 .ProducerFrame = 9,
+						 .Enabled = true,
+						 .SampleCount = 12,
+						 .RadiusWorldUnits = 0.65,
+						 .Denoiser = "none",
+						 .TemporalHistory = "none",
+						 .BackgroundValue = 1.0,
+						 .BackgroundClassification = "unavailable"
+					 },
+				 .Noise = {}}
 			};
 			if (UnavailableAmbientOcclusion)
 				poll.Planes[1].AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
@@ -408,6 +431,9 @@ namespace {
 		bool MutationCancelled = false;
 		bool IncludeSceneData = false;
 		std::string StorageProfile;
+		std::string NoiseMode;
+		uint64_t NoiseSeed = 0;
+		double NoiseSigma = 0.0;
 		uint32_t QueueCount = 0;
 		bool NamedCameraSelection = true;
 
@@ -751,6 +777,18 @@ TEST_CASE(
 	compact["options"]["storage_profile"] = "training_compact";
 	CHECK(Called(surface, "capture_bundle", compact)["status"] == "queued");
 	CHECK(bridge->StorageProfile == "training_compact");
+	json noisy = valid;
+	noisy["operation_id"] = "bundle-gaussian";
+	noisy["options"]["noise_mode"] = "gaussian";
+	noisy["options"]["noise_seed"] = 17u;
+	noisy["options"]["noise_sigma"] = .25;
+	const json noisyQueued = Called(surface, "capture_bundle", noisy);
+	CHECK(noisyQueued["status"] == "queued");
+	CHECK(bridge->NoiseMode == "gaussian");
+	CHECK(bridge->NoiseSeed == 17);
+	CHECK(bridge->NoiseSigma == .25);
+	CHECK(Called(surface, "capture_bundle", noisy) == noisyQueued);
+	CHECK(bridge->QueueCount == 3);
 	json namedCamera = valid;
 	namedCamera["operation_id"] = "bundle-named-camera";
 	namedCamera["options"]["camera_id"] = "camera/fixture";
@@ -770,10 +808,22 @@ TEST_CASE(
 		std::vector<std::string>{"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"}
 	);
 	CHECK(Called(surface, "capture_bundle", valid) == queued);
-	CHECK(bridge->QueueCount == 3);
+	CHECK(bridge->QueueCount == 4);
 	const json withoutSidecar =
 		Called(surface, "poll_capture", {{"instance_id", "capture-bundle-world"}, {"ticket", 1}});
 	CHECK(withoutSidecar["scene_sidecar"].is_null());
+	CHECK(withoutSidecar["planes"][0]["noise"]["algorithm"] == "xorshift64star_clt12_q17/v2");
+	CHECK(
+		withoutSidecar["planes"][0]["noise"]["sigma_quantization"] ==
+		"binary64_to_q24_round_to_nearest_ties_to_even/v1"
+	);
+	CHECK(withoutSidecar["planes"][0]["noise"]["effective_sigma_q24"] == 4194304);
+	CHECK(withoutSidecar["planes"][0]["noise"]["effective_sigma"] == .25);
+	CHECK(
+		withoutSidecar["planes"][0]["noise"]["seed_state_policy"] ==
+		"zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1"
+	);
+	CHECK(withoutSidecar["planes"][0]["noise"]["alpha_policy"] == "preserve_exact_binary16");
 
 	bool failed = false;
 	json conflict = valid;
@@ -788,7 +838,7 @@ TEST_CASE(
 	CHECK(staleReply["current_tick"] == current.Clock.Tick);
 	CHECK(Called(surface, "capture_bundle", stale, failed) == staleReply);
 	CHECK(failed);
-	CHECK(bridge->QueueCount == 3);
+	CHECK(bridge->QueueCount == 4);
 
 	json malformed = request("bundle-unknown");
 	malformed["options"]["unknown"] = true;
@@ -808,8 +858,17 @@ TEST_CASE(
 	const json oversizedSlotReply = Called(surface, "capture_bundle", oversizedSlot, failed);
 	CHECK(failed);
 	CHECK(oversizedSlotReply["error"] == "validation_failed: options.view_slot must fit uint32");
+	json invalidNoiseSigma = request("bundle-invalid-noise-sigma");
+	invalidNoiseSigma["options"]["noise_sigma"] = "not-a-number";
+	const json invalidNoiseSigmaReply = Called(surface, "capture_bundle", invalidNoiseSigma, failed);
+	CHECK(failed);
+	CHECK(
+		invalidNoiseSigmaReply["error"] ==
+		"validation_failed: options.noise_sigma must be a finite number from 0 to 64"
+	);
 	json unsupported = request("bundle-noise");
 	unsupported["options"]["noise_mode"] = "gaussian";
+	unsupported["options"]["channels"] = json::array({"object_ids"});
 	const json unsupportedReply = Called(surface, "capture_bundle", unsupported, failed);
 	CHECK(failed);
 	CHECK(unsupportedReply["error"].get<std::string>().starts_with("capability_unsupported:"));

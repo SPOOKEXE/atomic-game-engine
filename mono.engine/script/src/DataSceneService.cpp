@@ -102,6 +102,16 @@ namespace engine::script {
 		}
 
 		constexpr size_t MAXIMUM_JSON_NUMBER_BYTES = 32;
+		constexpr uint64_t MAXIMUM_SCRIPT_NOISE_SEED = (uint64_t{1} << 53) - 1;
+
+		bool ScriptNoiseSeed(const ScriptValue *value, uint64_t &seed) {
+			if (value == nullptr || value->Tag != ValueTag::Number || !std::isfinite(value->Number) ||
+				value->Number < 0.0 || value->Number > static_cast<double>(MAXIMUM_SCRIPT_NOISE_SEED) ||
+				std::trunc(value->Number) != value->Number)
+				return false;
+			seed = static_cast<uint64_t>(value->Number);
+			return true;
+		}
 
 		bool JsonBudgetAdd(size_t &bytes, size_t amount) {
 			if (bytes > MAX_DATA_SCENE_JSON_RESPONSE_BYTES) return false;
@@ -883,6 +893,10 @@ namespace engine::script {
 			compactLimitations.reserve(capabilities.TrainingCompactLimitations.size());
 			for (const std::string &limitation : capabilities.TrainingCompactLimitations)
 				compactLimitations.push_back(String(limitation));
+			std::vector<ScriptValue> noiseLimitations;
+			noiseLimitations.reserve(capabilities.NoiseLimitations.size());
+			for (const std::string &limitation : capabilities.NoiseLimitations)
+				noiseLimitations.push_back(String(limitation));
 			std::vector<ScriptValue> hooks;
 			hooks.reserve(capabilities.HookRecords.size());
 			for (const auto &hook : capabilities.HookRecords) {
@@ -912,6 +926,7 @@ namespace engine::script {
 					{"channels", Array(std::move(channels))},
 					{"storage_profiles", Array(std::move(storageProfiles))},
 					{"training_compact_limitations", Array(std::move(compactLimitations))},
+					{"noise_limitations", Array(std::move(noiseLimitations))},
 					{"hooks", Array(std::move(hooks))},
 					{"limits",
 					 Map({
@@ -951,6 +966,21 @@ namespace engine::script {
 					(storage->Text != "lossless" && storage->Text != "training_compact"))
 					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
 				request.StorageProfile = storage->Text;
+			}
+			if (const ScriptValue *noiseMode = Field(value, "noise_mode"); noiseMode != nullptr) {
+				if (noiseMode->Tag != ValueTag::String ||
+					(noiseMode->Text != "none" && noiseMode->Text != "gaussian"))
+					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
+				request.NoiseMode = noiseMode->Text;
+			}
+			if (const ScriptValue *noiseSeed = Field(value, "noise_seed");
+				noiseSeed != nullptr && !ScriptNoiseSeed(noiseSeed, request.NoiseSeed))
+				return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
+			if (const ScriptValue *noiseSigma = Field(value, "noise_sigma"); noiseSigma != nullptr) {
+				if (noiseSigma->Tag != ValueTag::Number || !std::isfinite(noiseSigma->Number) ||
+					noiseSigma->Number < 0.0 || noiseSigma->Number > 64.0)
+					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
+				request.NoiseSigma = noiseSigma->Number;
 			}
 			if (const ScriptValue *camera = Field(value, "camera_id"); camera != nullptr) {
 				if (camera->Tag != ValueTag::String || camera->Text.empty() ||
@@ -1155,6 +1185,7 @@ namespace engine::script {
 				{"CoordinateSpace", String("world_camera_image")},
 				{"NoiseMode", String("none")},
 				{"NoiseSeed", Number(0)},
+				{"NoiseSigma", Number(0)},
 			});
 		}
 
@@ -1188,7 +1219,8 @@ namespace engine::script {
 					 "IncludeExactMasks",
 					 "CoordinateSpace",
 					 "NoiseMode",
-					 "NoiseSeed"}
+					 "NoiseSeed",
+					 "NoiseSigma"}
 				))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 
@@ -1202,7 +1234,7 @@ namespace engine::script {
 				!BoundedStringField(options, "StorageProfile", 32, storage) ||
 				!OptionText(options, "Output", "raw_planes", output) ||
 				!OptionText(options, "CoordinateSpace", "world_camera_image", coordinateSpace) ||
-				!OptionText(options, "NoiseMode", "none", noiseMode))
+				!BoundedStringField(options, "NoiseMode", 32, noiseMode))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 			if (storage != "lossless" && storage != "training_compact")
 				return {"unsupported", Map({{"status", String("unsupported_data_scene_options")}})};
@@ -1212,6 +1244,8 @@ namespace engine::script {
 			const ScriptValue *sceneData = Field(options, "IncludeSceneData");
 			const ScriptValue *exactMasks = Field(options, "IncludeExactMasks");
 			const ScriptValue *noiseSeed = Field(options, "NoiseSeed");
+			const ScriptValue *noiseSigma = Field(options, "NoiseSigma");
+			uint64_t parsedNoiseSeed = 0;
 			if (channels == nullptr || channels->Tag != ValueTag::Array || channels->Items.empty() ||
 				channels->Items.size() > 12 || slot == nullptr || slot->Tag != ValueTag::Number ||
 				!std::isfinite(slot->Number) || slot->Number < 0.0 ||
@@ -1221,7 +1255,11 @@ namespace engine::script {
 				(sceneData->Tag != ValueTag::True && sceneData->Tag != ValueTag::False) ||
 				exactMasks == nullptr ||
 				(exactMasks->Tag != ValueTag::True && exactMasks->Tag != ValueTag::False) ||
-				noiseSeed == nullptr || noiseSeed->Tag != ValueTag::Number || noiseSeed->Number != 0.0)
+				!ScriptNoiseSeed(noiseSeed, parsedNoiseSeed) || noiseSigma == nullptr ||
+				noiseSigma->Tag != ValueTag::Number || !std::isfinite(noiseSigma->Number) ||
+				noiseSigma->Number < 0.0 || noiseSigma->Number > 64.0 ||
+				(noiseMode == "none" && (noiseSeed->Number != 0.0 || noiseSigma->Number != 0.0)) ||
+				(noiseMode != "none" && noiseMode != "gaussian"))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 
 			if (exactMasks->Boolean)
@@ -1260,6 +1298,17 @@ namespace engine::script {
 			}
 			if (hasSecondSurfaceDepth != hasSecondSurfaceValidity)
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+			if (noiseMode == "gaussian" &&
+				std::none_of(copiedChannels.begin(), copiedChannels.end(), [](const ScriptValue &channel) {
+					return channel.Text == "rgb_linear_hdr";
+				}))
+				return {
+					"unsupported",
+					Map(
+						{{"status", String("unsupported_data_scene_options")},
+						 {"reason", String("gaussian noise requires rgb_linear_hdr")}}
+					)
+				};
 
 			// Build a separate tree before queuing. The bridge retains only this copied
 			// request, never the reusable script-side options table.
@@ -1272,6 +1321,9 @@ namespace engine::script {
 				{"channels", Array(std::move(copiedChannels))},
 				{"temporal_history", String(history)},
 				{"storage_profile", String(storage)},
+				{"noise_mode", String(noiseMode)},
+				{"noise_seed", Number(static_cast<double>(parsedNoiseSeed))},
+				{"noise_sigma", Number(noiseSigma->Number)},
 			});
 			DataSceneResult queued = QueueCapture(bridge, worldName, request, sceneData->Boolean);
 			if (queued.Status == std::string_view("ok") && sceneData->Boolean) {
@@ -1308,6 +1360,26 @@ namespace engine::script {
 			std::vector<ScriptValue> planes;
 			planes.reserve(poll.Planes.size());
 			for (const DataCaptureBridgePlane &plane : poll.Planes) {
+				ScriptValue noise;
+				if (plane.Noise) {
+					const DataCaptureBridgeNoise &value = *plane.Noise;
+					noise = Map({
+						{"mode", String(value.Mode)},
+						{"algorithm", String(value.Algorithm)},
+						{"seed", String(Decimal(value.Seed))},
+						{"sigma", Number(value.Sigma)},
+						{"sigma_quantization", String(value.SigmaQuantization)},
+						{"effective_sigma_q24", String(Decimal(value.EffectiveSigmaQ24))},
+						{"effective_sigma", Number(value.EffectiveSigma)},
+						{"seed_state_policy", String(value.SeedStatePolicy)},
+						{"order", String(value.Order)},
+						{"clamp_policy", String(value.ClampPolicy)},
+						{"alpha_policy", String(value.AlphaPolicy)},
+						{"value_classification", String(value.ValueClassification)},
+						{"maximum_absolute_error",
+						 value.MaximumAbsoluteError ? Number(*value.MaximumAbsoluteError) : ScriptValue{}},
+					});
+				}
 				planes.push_back(Map({
 					{"channel", String(plane.Channel)},
 					{"status", String(plane.Status)},
@@ -1339,6 +1411,7 @@ namespace engine::script {
 					{"origin", String(plane.Origin)},
 					{"packing", String(plane.Packing)},
 					{"provenance", String(plane.Provenance)},
+					{"noise", std::move(noise)},
 				}));
 			}
 			std::vector<std::pair<std::string, ScriptValue>> entries{

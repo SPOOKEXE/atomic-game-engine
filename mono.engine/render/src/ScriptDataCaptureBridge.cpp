@@ -62,6 +62,9 @@ namespace engine::render {
 				!Text(request.CameraId, script::MAX_DATA_SCENE_ID_BYTES) || request.Channels.empty() ||
 				request.Channels.size() > MAX_CAPTURE_CHANNELS || request.TemporalHistory != "preserve" ||
 				(request.StorageProfile != "lossless" && request.StorageProfile != "training_compact") ||
+				(request.NoiseMode != "none" && request.NoiseMode != "gaussian") ||
+				!std::isfinite(request.NoiseSigma) || request.NoiseSigma < 0.0 || request.NoiseSigma > 64.0 ||
+				(request.NoiseMode == "none" && (request.NoiseSeed != 0 || request.NoiseSigma != 0.0)) ||
 				request.ViewSlot > std::numeric_limits<size_t>::max())
 				return false;
 			for (size_t first = 0; first < request.Channels.size(); ++first) {
@@ -73,7 +76,66 @@ namespace engine::render {
 				std::ranges::find(request.Channels, "second_surface_depth") != request.Channels.end();
 			const bool secondValidity =
 				std::ranges::find(request.Channels, "second_surface_validity") != request.Channels.end();
-			return secondDepth == secondValidity;
+			return secondDepth == secondValidity &&
+				   (request.NoiseMode != "gaussian" ||
+					std::ranges::find(request.Channels, "rgb_linear_hdr") != request.Channels.end());
+		}
+
+		std::optional<script::DataCaptureBridgeNoise>
+		ApplyNoise(DataCapturePlane &plane, const script::DataCaptureBridgeRequest &request) {
+			if (request.NoiseMode != "gaussian" || plane.Channel != DataCaptureChannel::RgbLinearHdr ||
+				plane.Status != DataCaptureStatus::Ready)
+				return std::nullopt;
+			if (plane.Scalar != DataCaptureScalar::Float16 ||
+				plane.ColourSpace != DataCaptureColourSpace::Linear) {
+				plane.Status = DataCaptureStatus::Unsupported;
+				plane.Bytes.clear();
+				plane.Hash = {};
+				plane.Width = 0;
+				plane.Height = 0;
+				plane.RowStride = 0;
+				plane.Scalar = DataCaptureScalar::Unknown;
+				plane.ColourSpace = DataCaptureColourSpace::Unknown;
+				plane.Provenance = "unavailable/gaussian_noise_requires_linear_rgba16f/v1";
+				return std::nullopt;
+			}
+			data_capture_compact::RgbNoiseResult result;
+			if (!data_capture_compact::ApplyGaussianRgbFloat16(
+					plane.Bytes,
+					plane.Width,
+					plane.Height,
+					plane.RowStride,
+					request.NoiseSeed,
+					request.NoiseSigma,
+					result
+				)) {
+				plane.Status = DataCaptureStatus::Unsupported;
+				plane.Bytes.clear();
+				plane.Hash = {};
+				plane.Width = 0;
+				plane.Height = 0;
+				plane.RowStride = 0;
+				plane.Scalar = DataCaptureScalar::Unknown;
+				plane.ColourSpace = DataCaptureColourSpace::Unknown;
+				plane.Provenance = "unavailable/gaussian_noise_source_layout/v1";
+				return std::nullopt;
+			}
+			plane.Hash = assets::Hasher::Of(plane.Bytes);
+			return script::DataCaptureBridgeNoise{
+				.Mode = "gaussian",
+				.Algorithm = "xorshift64star_clt12_q17/v2",
+				.Seed = request.NoiseSeed,
+				.Sigma = request.NoiseSigma == 0.0 ? 0.0 : request.NoiseSigma,
+				.SigmaQuantization = "binary64_to_q24_round_to_nearest_ties_to_even/v1",
+				.EffectiveSigmaQ24 = result.EffectiveSigmaQ24,
+				.EffectiveSigma = result.EffectiveSigma,
+				.SeedStatePolicy = "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1",
+				.Order = "after_storage_profile/v1",
+				.ClampPolicy = "finite_rgb_clamped_to_binary16_range[-65504,65504]",
+				.AlphaPolicy = "preserve_exact_binary16",
+				.ValueClassification = std::move(result.ValueClassification),
+				.MaximumAbsoluteError = result.MaximumAbsoluteError,
+			};
 		}
 
 		bool PipelineMatches(std::string_view requested, const View &view) {
@@ -388,6 +450,15 @@ namespace engine::render {
 				 "finite_overflow_above_65504_rejected",
 				 "infinity_and_nan_classes_preserved",
 				 "source_descriptor_preserved"},
+			.NoiseLimitations =
+				{"gaussian=rgb_linear_hdr_only",
+				 "algorithm=xorshift64star_clt12_q17/v2",
+				 "seed_state=zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1",
+				 "sigma=finite_0_to_64",
+				 "sigma_quantization=binary64_to_q24_round_to_nearest_ties_to_even/v1",
+				 "colour_lanes=rgb_only_alpha_exact",
+				 "order=after_storage_profile/v1",
+				 "labels_depth_normals_sidecars=never_modified"},
 			.HookRecords = HookCapabilities,
 			.MaximumHooks = static_cast<uint32_t>(MAX_DATA_FACTORY_HOOKS),
 			.MaximumConnections = static_cast<uint32_t>(MAX_DATA_FACTORY_CONNECTIONS),
@@ -1179,6 +1250,7 @@ namespace engine::render {
 			DataCapturePoll captured = std::move(bundle->Capture);
 			DataCaptureTicket validationTicket;
 			std::string storageProfile;
+			script::DataCaptureBridgeRequest storedRequest;
 			{
 				std::lock_guard lock(Mutex);
 				const auto entry = Entries.find(ticket.first);
@@ -1186,6 +1258,7 @@ namespace engine::render {
 				validationTicket.SnapshotId = entry->second.Request.SnapshotId;
 				validationTicket.CaptureNode = core::Name(entry->second.Request.CaptureNode);
 				storageProfile = entry->second.Request.StorageProfile;
+				storedRequest = entry->second.Request;
 				for (const std::string &name : entry->second.Request.Channels)
 					if (const auto channel = Channel(name)) validationTicket.Channels.push_back(*channel);
 				Hooks->Batches.erase(ticket.first);
@@ -1233,6 +1306,7 @@ namespace engine::render {
 			std::vector<bool> compacted(captured.Planes.size());
 			std::vector<std::optional<double>> compactErrors(captured.Planes.size());
 			std::vector<std::string> classifications(captured.Planes.size(), "not_inspected");
+			std::vector<std::optional<script::DataCaptureBridgeNoise>> noises(captured.Planes.size());
 			if (!malformedPlane && storageProfile == "training_compact" &&
 				(captured.Status == DataCaptureStatus::Ready ||
 				 captured.Status == DataCaptureStatus::Partial)) {
@@ -1256,12 +1330,19 @@ namespace engine::render {
 						if (plane.Channel == DataCaptureChannel::SecondSurfaceValidity)
 							CompactUnavailable(plane, "second_surface_depth_rejected");
 			}
+			// Storage transforms first. The RGB noise then operates on exactly the
+			// bytes this ticket retains, while every source descriptor stays native.
+			if (!malformedPlane && (captured.Status == DataCaptureStatus::Ready ||
+									captured.Status == DataCaptureStatus::Partial))
+				for (size_t index = 0; index < captured.Planes.size(); ++index)
+					noises[index] = ApplyNoise(captured.Planes[index], storedRequest);
 			const size_t readyPlanes = std::count_if(
 				captured.Planes.begin(), captured.Planes.end(), [](const DataCapturePlane &plane) {
 					return plane.Status == DataCaptureStatus::Ready;
 				}
 			);
-			if (storageProfile == "training_compact" && !malformedPlane &&
+			if ((storageProfile == "training_compact" || storedRequest.NoiseMode != "none") &&
+				!malformedPlane &&
 				(captured.Status == DataCaptureStatus::Ready ||
 				 captured.Status == DataCaptureStatus::Partial)) {
 				captured.Status = readyPlanes == captured.Planes.size() ? DataCaptureStatus::Ready
@@ -1316,7 +1397,8 @@ namespace engine::render {
 					 .Origin = "top_left",
 					 .Packing = Packing(plane.Channel, plane.Scalar),
 					 .Provenance = plane.Provenance.empty() ? Provenance(plane.Channel) : plane.Provenance,
-					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion)}
+					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion),
+					 .Noise = std::move(noises[index])}
 				);
 				if (!plane.Bytes.empty()) {
 					if (totalBytes > RETAINED_BYTE_LIMIT ||

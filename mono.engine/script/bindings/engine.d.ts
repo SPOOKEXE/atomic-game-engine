@@ -2618,8 +2618,9 @@ interface DataSceneOptions {
 	IncludeSceneData: boolean;
 	IncludeExactMasks: false;
 	CoordinateSpace: "world_camera_image";
-	NoiseMode: "none";
-	NoiseSeed: 0;
+	NoiseMode: "none" | "gaussian";
+	NoiseSeed: number;
+	NoiseSigma: number;
 }
 
 // Read-only ECS observations. The result records are intentionally typed as
