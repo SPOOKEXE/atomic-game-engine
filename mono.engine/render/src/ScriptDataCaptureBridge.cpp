@@ -11,7 +11,8 @@
 
 namespace engine::render {
 	namespace {
-		constexpr size_t LIMIT = 6;
+		constexpr size_t MAX_CAPTURE_CHANNELS = 9;
+		constexpr size_t MAX_CAPTURE_TICKETS = 6;
 		constexpr size_t RETAINED_BYTE_LIMIT = 64 * 1024 * 1024;
 
 		bool Text(std::string_view value, size_t limit = 256) {
@@ -34,7 +35,7 @@ namespace engine::render {
 		bool Valid(std::string_view instanceId, const script::DataCaptureBridgeRequest &request) {
 			if (!Text(instanceId) || request.InstanceId != instanceId || !Text(request.SnapshotId) ||
 				!Text(request.Pipeline) || !Text(request.CaptureNode) || request.Channels.empty() ||
-				request.Channels.size() > LIMIT || request.TemporalHistory != "preserve" ||
+				request.Channels.size() > MAX_CAPTURE_CHANNELS || request.TemporalHistory != "preserve" ||
 				request.ViewSlot > std::numeric_limits<size_t>::max())
 				return false;
 			for (size_t first = 0; first < request.Channels.size(); ++first) {
@@ -185,7 +186,7 @@ namespace engine::render {
 			detail = "invalid capture request";
 			return false;
 		}
-		if (Entries.size() >= LIMIT) {
+		if (Entries.size() >= MAX_CAPTURE_TICKETS) {
 			detail = "capture queue is full; release a terminal capture";
 			return false;
 		}

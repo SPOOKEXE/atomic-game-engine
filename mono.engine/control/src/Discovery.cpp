@@ -20,6 +20,7 @@ namespace engine::control {
 		constexpr std::string_view SCHEMA_VERSION = "1";
 		constexpr size_t MAXIMUM_REQUESTED_CHANNELS = 64;
 		constexpr size_t MAXIMUM_CHANNEL_NAME_BYTES = 128;
+		constexpr size_t MAXIMUM_CAPTURE_CHANNELS = 9;
 
 		bool IsChannelIdentifier(std::string_view channel) {
 			return !channel.empty() && std::all_of(channel.begin(), channel.end(), [](unsigned char byte) {
@@ -170,7 +171,7 @@ namespace engine::control {
 				);
 				limits.push_back(
 					capture.Available
-						? json{{"name", "channels"}, {"supported", true}, {"maximum", 4}}
+						? json{{"name", "channels"}, {"supported", true}, {"maximum", MAXIMUM_CAPTURE_CHANNELS}}
 						: Unsupported(
 							  "channels",
 							  capture.Detail == "capture channels are not implemented by this host"

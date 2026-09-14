@@ -3,6 +3,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
@@ -45,10 +47,11 @@ namespace {
 		return engine::assets::Hasher::Of(std::as_bytes(std::span(text.data(), text.size()))).ToHex();
 	}
 
-	std::string Manifest(std::string_view source) {
+	std::string Manifest(std::string_view source, bool worldCapability = false) {
 		return "{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" +
-			   HashOf(source) +
-			   "\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+			   HashOf(source) + "\",\"assets\":[],\"parameters\":[],\"capabilities\":" +
+			   (worldCapability ? "[\"world\"]" : "[]") +
+			   ",\"budget\":{\"source_bytes\":1024,"
 			   "\"asset_bytes\":1024,\"assets\":0,\"parameters\":0},\"seed\":0}";
 	}
 
@@ -98,7 +101,7 @@ namespace {
 			});
 		}
 
-		DataScriptRequest Request(std::string source = "return") {
+		DataScriptRequest Request(std::string source = "return", bool worldCapability = false) {
 			const auto before = Session.Inspect(INSTANCE_ID);
 			const auto paused =
 				Session.AllSystemsPaused(INSTANCE_ID)
@@ -107,7 +110,7 @@ namespace {
 			REQUIRE(paused.Status == DataFactoryStatus::Ok);
 			return {
 				.InstanceId = std::string(INSTANCE_ID),
-				.Manifest = Manifest(source),
+				.Manifest = Manifest(source, worldCapability),
 				.Source = std::move(source),
 				.Assets = {},
 				.SourceHash = {},
@@ -368,6 +371,47 @@ TEST_CASE(
 		}
 	);
 	CHECK(fixture.Session.Resume(INSTANCE_ID, result.Lifecycle.Clock.Tick).Status == DataFactoryStatus::Ok);
+}
+
+TEST_CASE(
+	"client transaction leaves a package-authored active camera fixed after system install",
+	"[client][data-script-package]"
+) {
+	Fixture fixture;
+	fixture.PrepareClientWorld();
+	const std::string source = R"(
+local workspace = game:GetService("Workspace")
+local camera = Instance.new("Camera")
+camera.CFrame = CFrame.new(1, 2, 3)
+camera.CameraSubjectAutomatic = false
+camera.Parent = workspace
+workspace.CurrentCamera = camera
+return
+)";
+	const DataScriptResult result = client::ExecuteDataScriptPackageTransaction(
+		fixture.ProductDependencies(), fixture.Request(source, true)
+	);
+	REQUIRE(result.Ran);
+	fixture.Worlds.Enter(
+		fixture.Worlds.Find(engine::core::Name(INSTANCE_ID)),
+		[](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			const auto *before = store.Get<engine::scene::Transform>(active->Entity);
+			REQUIRE(before != nullptr);
+			CHECK(before->Frame.Position.X == 1.0f);
+			CHECK(before->Frame.Position.Y == 2.0f);
+			CHECK(before->Frame.Position.Z == 3.0f);
+			CHECK_FALSE(systems.HasSystem("move-camera", engine::ecs::Phase::Simulation));
+
+			systems.Tick(store, 1.0f / 60.0f);
+			const auto *after = store.Get<engine::scene::Transform>(active->Entity);
+			REQUIRE(after != nullptr);
+			CHECK(after->Frame.Position.X == 1.0f);
+			CHECK(after->Frame.Position.Y == 2.0f);
+			CHECK(after->Frame.Position.Z == 3.0f);
+		}
+	);
 }
 
 TEST_CASE("client transaction preserves a current physics-only pause", "[client][data-script-package]") {

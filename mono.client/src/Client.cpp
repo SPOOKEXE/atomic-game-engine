@@ -2992,7 +2992,11 @@ namespace client {
 		}
 		const ActiveScene *displayedActiveScene = nullptr;
 		std::vector<engine::render::DataCaptureObjectLabel> drawnObjectLabels;
+		std::vector<engine::render::DataCaptureSemanticLabel> drawnSemanticLabels;
+		std::vector<engine::render::DataCapturePartLabel> drawnPartLabels;
 		bool drawnObjectLabelsValid = true;
+		bool drawnSemanticLabelsValid = true;
+		bool drawnPartLabelsValid = true;
 
 		{
 			// Once per frame, and separate from the tick because a client draws
@@ -3141,7 +3145,11 @@ namespace client {
 					if (!ReportedJoin) {
 						displayedActiveScene = &scene;
 						drawnObjectLabels = scene.Frame->ObjectLabels;
+						drawnSemanticLabels = scene.Frame->SemanticLabels;
+						drawnPartLabels = scene.Frame->PartLabels;
 						drawnObjectLabelsValid = scene.Frame->ObjectLabelsValid;
+						drawnSemanticLabelsValid = scene.Frame->SemanticLabelsValid;
+						drawnPartLabelsValid = scene.Frame->PartLabelsValid;
 						Portals.assign(scene.View.Portals.begin(), scene.View.Portals.end());
 						Surfaces.assign(scene.View.Surfaces.begin(), scene.View.Surfaces.end());
 						Windowed = std::ranges::any_of(scene.Frame->Seams, [](const auto &seam) {
@@ -3175,7 +3183,11 @@ namespace client {
 					collectPresentation(Rendered, store, ComposedFrame.Position);
 					if (const auto *list = store.Resource<engine::render::DrawList>()) {
 						drawnObjectLabels = list->ObjectLabels;
+						drawnSemanticLabels = list->SemanticLabels;
+						drawnPartLabels = list->PartLabels;
 						drawnObjectLabelsValid = list->ObjectLabelsValid;
+						drawnSemanticLabelsValid = list->SemanticLabelsValid;
+						drawnPartLabelsValid = list->PartLabelsValid;
 					}
 				});
 			}
@@ -3247,7 +3259,11 @@ namespace client {
 
 					collectPresentation(Replicated, store, frame.Position);
 					drawnObjectLabels = list->ObjectLabels;
+					drawnSemanticLabels = list->SemanticLabels;
+					drawnPartLabels = list->PartLabels;
 					drawnObjectLabelsValid = list->ObjectLabelsValid;
+					drawnSemanticLabelsValid = list->SemanticLabelsValid;
+					drawnPartLabelsValid = list->PartLabelsValid;
 					Views.Publish(
 						Replicated,
 						frame,
@@ -3884,7 +3900,11 @@ namespace client {
 		view.Camera = Views.Camera();
 		view.Instances = drawn;
 		view.ObjectLabels = drawnObjectLabels;
+		view.SemanticLabels = drawnSemanticLabels;
+		view.PartLabels = drawnPartLabels;
 		view.ObjectLabelsValid = drawnObjectLabelsValid;
+		view.SemanticLabelsValid = drawnSemanticLabelsValid;
+		view.PartLabelsValid = drawnPartLabelsValid;
 		view.JointFrames = drawnJoints;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;

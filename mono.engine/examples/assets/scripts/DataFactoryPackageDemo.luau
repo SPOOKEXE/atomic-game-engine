@@ -13,6 +13,7 @@ local camera = Instance.new("Camera")
 camera.Name = "DataFactoryPackageCamera"
 camera:SetAttribute("DataFactoryId", "data-factory-package/camera")
 camera.CFrame = CFrame.new(0, 2, 8)
+camera.CameraSubjectAutomatic = false
 camera.ImageWidth = 512
 camera.ImageHeight = 288
 camera.Parent = root
@@ -31,8 +32,8 @@ local function part(name, id, semanticId, partId, position, size, colour)
 	object.Parent = root
 end
 
-part("VisibleBox", "data-factory-package/visible", "data-factory-package/semantic/box", "data-factory-package/part/visible", Vector3.new(0, 10, 0), Vector3.new(20, 20, 20), Color3.fromRGB(50, 190, 255))
-part("OffscreenBox", "data-factory-package/offscreen", "data-factory-package/semantic/box", "data-factory-package/part/offscreen", Vector3.new(8, 1, 0), Vector3.new(4, 2, 2), Color3.fromRGB(255, 120, 54))
+part("VisibleBox", "data-factory-package/visible", "data-factory-package/semantic/box", "data-factory-package/part/visible", Vector3.new(-1.75, 1.5, 0), Vector3.new(2.5, 3, 2), Color3.fromRGB(50, 190, 255))
+part("OffscreenBox", "data-factory-package/offscreen", "data-factory-package/semantic/box", "data-factory-package/part/offscreen", Vector3.new(1.75, 1.5, -2), Vector3.new(2.5, 3, 2), Color3.fromRGB(255, 120, 54))
 part("BehindBox", "data-factory-package/behind", "data-factory-package/semantic/box", "data-factory-package/part/behind", Vector3.new(0, 1, 12), Vector3.new(2, 2, 2), Color3.fromRGB(190, 80, 255))
 
 local floor = Instance.new("Part")

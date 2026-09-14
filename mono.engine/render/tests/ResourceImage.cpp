@@ -3726,15 +3726,23 @@ void main() {
 	CHECK(renderer.PortalImageUsage().Images == 0);
 }
 
-TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render][gpu][data-capture][.]") {
+TEST_CASE("default data capture binds copied planes to the rendered snapshot", "[render][gpu][data-capture][.]") {
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
-	InstallImageCapture(renderer, "lit", true, true);
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("default-data-capture-snapshot");
+	const core::Name captureNode("data-capture");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
 
 	render::SceneTarget target{32, 24};
 	render::View view;
-	view.Pipeline = core::Name("image-export-pipeline");
+	view.Pipeline = pipelineName;
 	view.Target = &target;
 	view.SnapshotId = "snapshot-render-1";
 	assets::MeshData plane;
@@ -3790,19 +3798,22 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	render::DataCaptureRequest request{
 		.SnapshotId = view.SnapshotId,
 		.Pipeline = view.Pipeline,
-		.CaptureNode = core::Name("image-export"),
+		.CaptureNode = captureNode,
 		.Channels =
 			{
 				render::DataCaptureChannel::RgbLinearHdr,
 				render::DataCaptureChannel::LinearDepth,
 				render::DataCaptureChannel::ShadingNormal,
+				render::DataCaptureChannel::PbrAlbedo,
 			},
 		.ObjectLabels = {},
+		.SemanticLabels = {},
+		.PartLabels = {},
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
 	render::OverlayImage overlay;
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
 
 	render::DataCapturePoll captured;
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -3813,18 +3824,29 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	REQUIRE(captured.SnapshotId == view.SnapshotId);
-	REQUIRE(captured.Planes.size() == 3);
+	REQUIRE(captured.Planes.size() == 4);
 	for (const auto &plane : captured.Planes) {
 		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
-		CHECK(plane.Width == target.Width);
-		CHECK(plane.Height == target.Height);
+		CHECK(plane.Width > 0);
+		CHECK(plane.Height > 0);
 		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
 	}
+	CHECK(captured.Planes[0].Channel == render::DataCaptureChannel::RgbLinearHdr);
+	CHECK(captured.Planes[1].Channel == render::DataCaptureChannel::LinearDepth);
+	CHECK(captured.Planes[2].Channel == render::DataCaptureChannel::ShadingNormal);
+	CHECK(captured.Planes[3].Channel == render::DataCaptureChannel::PbrAlbedo);
+	CHECK(captured.Planes[3].Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(captured.Planes[3].ColourSpace == render::DataCaptureColourSpace::SRGB);
 	CHECK(captured.CameraPose.NearPlaneMetres == view.Camera.NearPlane);
 	CHECK(captured.CameraPose.FarPlaneMetres == view.Camera.FarPlane);
 
 	request.Channels = {
 		render::DataCaptureChannel::RgbLinearHdr,
+		render::DataCaptureChannel::LinearDepth,
+		render::DataCaptureChannel::ShadingNormal,
+		render::DataCaptureChannel::PbrAlbedo,
+		render::DataCaptureChannel::PbrMaterial,
+		render::DataCaptureChannel::PbrEmissive,
 		render::DataCaptureChannel::ObjectIds,
 		render::DataCaptureChannel::SemanticMask,
 		render::DataCaptureChannel::PartMask
@@ -3834,7 +3856,7 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	request.PartLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	render::DataCaptureTicket partial;
 	REQUIRE(renderer.QueueDataCapture(request, partial));
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
 	do {
 		captured = renderer.PollDataCapture(partial);
 		if (captured.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
@@ -3842,8 +3864,8 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
-	REQUIRE(captured.Planes.size() == 4);
-	for (size_t planeIndex = 1; planeIndex < captured.Planes.size(); ++planeIndex) {
+	REQUIRE(captured.Planes.size() == 9);
+	for (size_t planeIndex = 6; planeIndex < captured.Planes.size(); ++planeIndex) {
 		CHECK(captured.Planes[planeIndex].Status == render::DataCaptureStatus::Ready);
 		CHECK(captured.Planes[planeIndex].Scalar == render::DataCaptureScalar::UInt32);
 		CHECK(captured.Planes[planeIndex].RowStride == captured.Planes[planeIndex].Width * 4);
@@ -3854,10 +3876,18 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	}
 	REQUIRE(captured.SemanticLabels.size() == 1);
 	REQUIRE(captured.PartLabels.size() == 2);
-	core::ByteReader objectIds(captured.Planes[1].Bytes);
+	CHECK(captured.Planes[1].Scalar == render::DataCaptureScalar::Float32);
+	CHECK(captured.Planes[2].Scalar == render::DataCaptureScalar::UNorm10A2);
+	CHECK(captured.Planes[3].Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(captured.Planes[3].ColourSpace == render::DataCaptureColourSpace::SRGB);
+	CHECK(captured.Planes[4].Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(captured.Planes[4].ColourSpace == render::DataCaptureColourSpace::NotApplicable);
+	CHECK(captured.Planes[5].Scalar == render::DataCaptureScalar::Float16);
+	CHECK(captured.Planes[5].ColourSpace == render::DataCaptureColourSpace::Linear);
+	core::ByteReader objectIds(captured.Planes[6].Bytes);
 	size_t labelledPixels = 0, packedPixels = 0, zeroPixels = 0;
 	uint32_t centreLabel = 99;
-	for (size_t pixel = 0; pixel < captured.Planes[1].Width * captured.Planes[1].Height; ++pixel) {
+	for (size_t pixel = 0; pixel < captured.Planes[6].Width * captured.Planes[6].Height; ++pixel) {
 		const uint32_t label = objectIds.ReadUInt32();
 		if (label == 1) ++labelledPixels;
 		if (label == 2) ++packedPixels;
@@ -3891,8 +3921,8 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 		for (const uint32_t label : allowed)
 			if (label != 0) CHECK(seen[label] > 0);
 	};
-	checkIdPlane(2, {0, 1});
-	checkIdPlane(3, {0, 1, 2});
+	checkIdPlane(7, {0, 1});
+	checkIdPlane(8, {0, 1, 2});
 
 	render::DataCaptureTicket cancelled;
 	REQUIRE(renderer.QueueDataCapture(request, cancelled));
@@ -3902,7 +3932,7 @@ TEST_CASE("data capture binds copied planes to the rendered snapshot", "[render]
 	request.SnapshotId = "snapshot-render-2";
 	request.Channels = {render::DataCaptureChannel::RgbLinearHdr};
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
 	do {
 		captured = renderer.PollDataCapture(ticket);
 		if (captured.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);

@@ -174,7 +174,8 @@ namespace engine::render {
 		if (!ValidSnapshotId(request.SnapshotId) || !request.Pipeline.IsValid() ||
 			!request.CaptureNode.IsValid() ||
 			request.TemporalHistory != DataCaptureTemporalHistory::Preserve ||
-			!UniqueChannels(request.Channels) || !ticket.ResourceTokens.empty() ||
+			!UniqueChannels(request.Channels) || request.Channels.size() > State->ResourceImages.size() ||
+			!ticket.ResourceTokens.empty() ||
 			(wantsObjectIds && !ValidDataCaptureObjectLabels(request.ObjectLabels)) ||
 			(wantsSemantic && !ValidDataCaptureObjectLabels(request.SemanticLabels)) ||
 			(wantsPart && !ValidDataCaptureObjectLabels(request.PartLabels)))

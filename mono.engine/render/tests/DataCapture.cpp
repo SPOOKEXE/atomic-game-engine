@@ -75,6 +75,8 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 		.CaptureNode = engine::core::Name("capture"),
 		.Channels = {DataCaptureChannel::RgbLinearHdr},
 		.ObjectLabels = {},
+		.SemanticLabels = {},
+		.PartLabels = {},
 		.TemporalHistory = DataCaptureTemporalHistory::Reset,
 	};
 	DataCaptureTicket ticket;
@@ -183,6 +185,23 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 	malformed.Channels = {"semantic_mask"};
 	CHECK_FALSE(first.Queue("data-world", malformed, ticket, detail));
 	CHECK_FALSE(first.Queue("another-world", Request(), ticket, detail));
+	const auto broad = engine::script::DataCaptureBridgeRequest{
+		.InstanceId = "data-world",
+		.SnapshotId = "snapshot-1",
+		.Pipeline = "pipeline",
+		.CaptureNode = "capture",
+		.Channels =
+			{"rgb_linear_hdr",
+			 "linear_depth",
+			 "shading_normal",
+			 "pbr_albedo",
+			 "object_ids",
+			 "semantic_ids",
+			 "part_ids"},
+		.TemporalHistory = "preserve",
+	};
+	uint64_t broadTicket = 0;
+	REQUIRE(first.Queue("data-world", broad, broadTicket, detail));
 
 	uint64_t firstTicket = 0;
 	uint64_t secondTicket = 0;

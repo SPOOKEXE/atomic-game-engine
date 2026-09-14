@@ -76,6 +76,10 @@ namespace client {
 			bool Standing = false;
 		};
 
+		// Marks the camera owned by the client's fallback orbit. The orbit system
+		// must stop when a script replaces `ActiveCamera` with an authored view.
+		struct FallbackCameraMarker {};
+
 		// The deterministic sequence used to be an integer mixer written out
 		// here, and the same one again in mono.server/src/Simulation.cpp. It is
 		// engine::core::Random now - same reason, one copy, and a specified
@@ -99,7 +103,8 @@ namespace client {
 		// rather than a rewrite of this function.
 		void MoveCamera(Store &store) {
 			const ActiveCamera *active = store.Resource<ActiveCamera>();
-			if (active == nullptr) {
+			if (active == nullptr || active->Entity == engine::ecs::NULL_ENTITY ||
+				!store.Alive(active->Entity) || !store.Has<FallbackCameraMarker>(active->Entity)) {
 				return;
 			}
 
@@ -207,6 +212,7 @@ namespace client {
 			const Entity camera = store.Create();
 			store.Set<Transform>(camera, Transform{});
 			store.Set<engine::scene::Camera>(camera, engine::scene::Camera{});
+			store.Set<FallbackCameraMarker>(camera, FallbackCameraMarker{});
 			return camera;
 		}
 
@@ -1036,7 +1042,7 @@ namespace client {
 		RegisterClientComponents();
 		const auto *active = store.Resource<ActiveCamera>();
 		if (active == nullptr || active->Entity == engine::ecs::NULL_ENTITY || !store.Alive(active->Entity) ||
-			!store.HasResource<FallbackCameraState>()) {
+			!store.HasResource<FallbackCameraState>() || !store.Has<FallbackCameraMarker>(active->Entity)) {
 			return false;
 		}
 		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
@@ -1126,6 +1132,7 @@ namespace client {
 		// ever used.
 		engine::render::RegisterPresentationComponents();
 		engine::ecs::Components::Register<FallbackCameraState>("client.FallbackCameraState");
+		engine::ecs::Components::Register<FallbackCameraMarker>("client.FallbackCameraMarker");
 	}
 
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {

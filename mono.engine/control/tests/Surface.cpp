@@ -124,7 +124,16 @@ namespace {
 		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
 			return {
 				.Available = true,
-				.Channels = {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"},
+				.Channels =
+					{"rgb_linear_hdr",
+					 "linear_depth",
+					 "shading_normal",
+					 "pbr_albedo",
+					 "pbr_material",
+					 "pbr_emissive",
+					 "object_ids",
+					 "semantic_ids",
+					 "part_ids"},
 				.Detail = "ready"
 			};
 		}
@@ -136,6 +145,7 @@ namespace {
 		) override {
 			Instance = instance;
 			Snapshot = request.SnapshotId;
+			Channels = request.Channels;
 			ticket = 1;
 			Queued = true;
 			return true;
@@ -205,10 +215,14 @@ namespace {
 			return true;
 		}
 		void Cancel(std::string_view, uint64_t) override {}
+		const std::vector<std::string> &RequestedChannels() const {
+			return Channels;
+		}
 
 	  private:
 		std::string Instance;
 		std::string Snapshot;
+		std::vector<std::string> Channels;
 		bool Queued = false;
 	};
 }
@@ -300,7 +314,7 @@ TEST_CASE("discovery reads each surface's installed capture readiness", "[contro
 	CHECK(available["offscreen_gpu"]["supported"]);
 	const json *captureLimits = Named(available["limits"], "channels");
 	REQUIRE(captureLimits != nullptr);
-	CHECK((*captureLimits)["maximum"] == 4);
+	CHECK((*captureLimits)["maximum"] == 9);
 
 	Surface unavailable("unavailable", "a suite");
 	unavailable.SetDataCaptureAvailabilityProvider([] {
@@ -334,7 +348,16 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			{"pipeline", "default_pbr"},
 			{"capture_node", "capture"},
 			{"view_slot", 0},
-			{"channels", {"rgb_linear_hdr", "object_ids", "semantic_ids", "part_ids"}},
+			{"channels",
+			 {"rgb_linear_hdr",
+			  "linear_depth",
+			  "shading_normal",
+			  "pbr_albedo",
+			  "pbr_material",
+			  "pbr_emissive",
+			  "object_ids",
+			  "semantic_ids",
+			  "part_ids"}},
 			{"temporal_history", "preserve"},
 			{"operation_id", "capture-1"},
 			{"expected_tick", current.Clock.Tick},
@@ -343,6 +366,19 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 		}
 	);
 	CHECK(capture["status"] == "queued");
+	CHECK(
+		bridge->RequestedChannels() ==
+			std::vector<std::string>{
+				"rgb_linear_hdr",
+				"linear_depth",
+				"shading_normal",
+				"pbr_albedo",
+				"pbr_material",
+				"pbr_emissive",
+				"object_ids",
+				"semantic_ids",
+				"part_ids"}
+	);
 	const json poll = Called(surface, "poll_capture", json{{"instance_id", "capture-world"}, {"ticket", 1}});
 	CHECK(poll["planes"][0]["digest"] == "abcd");
 	CHECK(poll["planes"][0]["hash_algorithm"] == "blake3-256");
@@ -388,6 +424,37 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			json{{"instance_id", "capture-world"}, {"ticket", 1}, {"operation_id", "release-1"}}
 		)["status"] == "released"
 	);
+	bool overflowFailed = false;
+	const json overflow = Called(
+		surface,
+		"capture",
+		json{
+			{"instance_id", "capture-world"},
+			{"snapshot_id", "snapshot-1"},
+			{"pipeline", "default_pbr"},
+			{"capture_node", "capture"},
+			{"view_slot", 0},
+			{"channels",
+			 {"rgb_linear_hdr",
+			  "linear_depth",
+			  "shading_normal",
+			  "pbr_albedo",
+			  "pbr_material",
+			  "pbr_emissive",
+			  "object_ids",
+			  "semantic_ids",
+			  "part_ids",
+			  "optical_flow"}},
+			{"temporal_history", "preserve"},
+			{"operation_id", "capture-10"},
+			{"expected_tick", current.Clock.Tick},
+			{"expected_world_epoch", current.WorldEpoch},
+			{"expected_world_version", current.WorldVersion}
+		},
+		overflowFailed
+	);
+	CHECK(overflowFailed);
+	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 9 names");
 }
 
 TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {

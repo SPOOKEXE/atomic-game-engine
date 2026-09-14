@@ -29,7 +29,7 @@ namespace engine::control {
 
 	namespace data_capture_detail {
 		inline constexpr size_t MAXIMUM_ID = 128;
-		inline constexpr size_t MAXIMUM_CHANNELS = 4;
+		inline constexpr size_t MAXIMUM_CHANNELS = 9;
 		inline constexpr size_t MAXIMUM_RANGE_BYTES = 1024 * 1024;
 		inline constexpr size_t MAXIMUM_LEDGER_ENTRIES = 256;
 
@@ -351,7 +351,7 @@ namespace engine::control {
 				}
 				if (!Field(values, "channels", field, failure) || !field->is_array() || field->empty() ||
 					field->size() > MAXIMUM_CHANNELS) {
-					failure = Error("validation_failed", "channels must contain 1 to 4 names");
+					failure = Error("validation_failed", "channels must contain 1 to 9 names");
 					return nullptr;
 				}
 				for (const json &channel : *field) {
