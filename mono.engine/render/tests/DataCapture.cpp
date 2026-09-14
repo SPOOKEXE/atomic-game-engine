@@ -933,10 +933,13 @@ TEST_CASE(
 	uint64_t currentTicket = 0;
 	REQUIRE(bridge.Queue("data-world", current, currentTicket, detail));
 	View namedView = MutationView({}, pipeline);
-	CHECK(bridge.PrepareView(namedView));
+	ScriptDataCaptureBridge::PreparedView prepared;
+	CHECK(bridge.PrepareView(namedView, &prepared));
 	CHECK(namedView.SnapshotId == firstSnapshot);
-	bridge.Cancel("data-world", namedTicket);
-	bridge.Pump();
+	REQUIRE(prepared.Captures == std::vector<uint64_t>{namedTicket});
+	bridge.AbortPreparedView(prepared);
+	engine::script::DataCaptureBridgePoll cancelled;
+	REQUIRE(bridge.Poll("data-world", namedTicket, cancelled, detail));
 	REQUIRE(bridge.Release("data-world", namedTicket, detail));
 	View currentView = MutationView({}, pipeline);
 	CHECK_FALSE(bridge.PrepareView(currentView));

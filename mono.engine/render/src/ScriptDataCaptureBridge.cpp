@@ -575,7 +575,8 @@ namespace engine::render {
 		return true;
 	}
 
-	bool ScriptDataCaptureBridge::PrepareView(View &view) {
+	bool ScriptDataCaptureBridge::PrepareView(View &view, PreparedView *prepared) {
+		if (prepared != nullptr) *prepared = {};
 		RefreshCapabilities();
 		if (!Hooks) Hooks = std::make_unique<HookState>();
 		const auto pipeline = RendererRef.ResolvePipelineIdentity(view.Pipeline);
@@ -626,6 +627,9 @@ namespace engine::render {
 			std::erase_if(pending, [&](const PendingRequest &request) {
 				return request.Request.CameraId != selectedCamera;
 			});
+			if (prepared != nullptr)
+				for (const PendingRequest &request : pending)
+					prepared->Captures.push_back(request.Id);
 			for (const auto &[ticket, entry] : Mutations) {
 				const auto &request = entry.Request;
 				if (entry.Status == ViewMutationStatus::Pending && entry.Handle.IsValid() &&
@@ -895,6 +899,9 @@ namespace engine::render {
 		std::sort(mutations.begin(), mutations.end(), [](const auto &left, const auto &right) {
 			return left.first < right.first;
 		});
+		if (prepared != nullptr)
+			for (const auto &[ticket, request] : mutations)
+				prepared->CameraMutations.push_back(ticket);
 		for (MutationHandle handle : cancelledMutations)
 			RendererRef.Hooks().Cancel(handle);
 		for (const auto &[ticket, request] : mutations) {
@@ -965,32 +972,29 @@ namespace engine::render {
 		return namedCameraApplied;
 	}
 
-	void ScriptDataCaptureBridge::AbortPreparedView(const View &view) {
+	void ScriptDataCaptureBridge::AbortPreparedView(const PreparedView &prepared) {
 		std::vector<ConnectionHandle> connections;
 		std::vector<MutationHandle> mutations;
 		{
 			std::lock_guard lock(Mutex);
-			for (auto &[ticket, entry] : Entries) {
-				if (entry.Request.InstanceId != view.WorldName.Text() ||
-					!PipelineMatches(entry.Request.Pipeline, view) || entry.Request.ViewSlot != view.Slot ||
-					entry.Request.SnapshotId != view.SnapshotId)
-					continue;
+			for (const uint64_t ticket : prepared.Captures) {
+				auto found = Entries.find(ticket);
+				if (found == Entries.end()) continue;
+				auto &[entryTicket, entry] = *found;
 				entry.CancelRequested = true;
 				if (Hooks) {
-					if (const auto connection = Hooks->Connections.find(ticket);
+					if (const auto connection = Hooks->Connections.find(entryTicket);
 						connection != Hooks->Connections.end()) {
 						connections.push_back(connection->second);
 						Hooks->Connections.erase(connection);
 					}
-					Hooks->Batches.erase(ticket);
+					Hooks->Batches.erase(entryTicket);
 				}
 			}
-			for (auto &[ticket, entry] : Mutations) {
-				(void)ticket;
-				const auto &request = entry.Request;
-				if (request.InstanceId != view.WorldName.Text() || request.Pipeline != view.Pipeline.Text() ||
-					request.ViewSlot != view.Slot || request.SnapshotId != view.SnapshotId)
-					continue;
+			for (const uint64_t ticket : prepared.CameraMutations) {
+				auto found = Mutations.find(ticket);
+				if (found == Mutations.end()) continue;
+				auto &[mutationTicket, entry] = *found;
 				entry.CancelRequested = true;
 				if (entry.Handle.IsValid()) mutations.push_back(entry.Handle);
 			}

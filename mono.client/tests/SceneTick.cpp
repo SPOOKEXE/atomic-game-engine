@@ -20,9 +20,11 @@
 #include <engine/game/Game.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -30,6 +32,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -289,6 +292,44 @@ TEST_CASE(
 ) {
 	Session session;
 	Store &store = session.World;
+	const auto workspace = engine::scene::WorkspaceOf(store);
+	engine::scene::PartDesc portalPart;
+	portalPart.Frame.Position = {0, 0, -8};
+	portalPart.Size = {2, 2, .1f};
+	const auto portalPane = engine::scene::MakePart(store, portalPart);
+	portalPart.Frame.Position = {8, 0, -8};
+	const auto portalDestination = engine::scene::MakePart(store, portalPart);
+	portalPart.Frame.Position = {-8, 0, -8};
+	const auto mirrorPane = engine::scene::MakePart(store, portalPart);
+	REQUIRE(store.SetParent(portalPane, workspace));
+	REQUIRE(store.SetParent(portalDestination, workspace));
+	REQUIRE(store.SetParent(mirrorPane, workspace));
+	const auto portalCamera =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "PortalCamera");
+	REQUIRE(store.SetParent(portalCamera, portalPane));
+	auto portalSurface = *store.Get<engine::scene::SurfaceCamera>(portalCamera);
+	portalSurface.Surface = -1;
+	store.Set(portalCamera, portalSurface);
+	engine::scene::Portal portal;
+	portal.Destination = portalDestination;
+	store.Set(portalCamera, portal);
+	const auto mirrorCamera =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "MirrorCamera");
+	REQUIRE(store.SetParent(mirrorCamera, mirrorPane));
+	auto mirrorSurface = *store.Get<engine::scene::SurfaceCamera>(mirrorCamera);
+	mirrorSurface.Surface = -1;
+	store.Set(mirrorCamera, mirrorSurface);
+	const auto billboard = store.CreateInstance(engine::gui::GuiClass("BillboardGui"), "CaptureLabel");
+	REQUIRE(store.SetParent(billboard, mirrorPane));
+	engine::gui::Billboard label;
+	label.Size = {2, 0, 2, 0};
+	store.Set(billboard, label);
+	const auto panel = store.CreateInstance(engine::gui::GuiClass("Frame"), "Panel");
+	REQUIRE(store.SetParent(panel, billboard));
+	engine::gui::Element element;
+	element.Size = {1, 0, 1, 0};
+	store.Set(panel, element);
+	store.Set(panel, engine::gui::Background{});
 	const auto camera = store.Create();
 	store.Set(camera, Transform{engine::core::CFrame(engine::core::Vector3{8, 0, 0})});
 	Camera lens;
@@ -309,8 +350,9 @@ TEST_CASE(
 	capture.Camera = *store.Get<Camera>(camera);
 	engine::render::WorldViewFrame frame;
 	engine::render::WorldCameraFrame cameraFrame;
+	engine::render::InterfacePass namedInterface;
 	REQUIRE(
-		client::BindNamedCaptureWorldView(
+		client::BindNamedCapturePresentation(
 			store,
 			{.World = capture.World,
 			 .Name = capture.WorldName,
@@ -322,11 +364,23 @@ TEST_CASE(
 			capture,
 			frame,
 			cameraFrame,
-			[](const engine::render::View &) {}
+			namedInterface,
+			[] {}
 		)
 	);
 	CHECK(capture.CameraFrame.Position.X == Approx(8));
 	CHECK(capture.Camera.FieldOfViewRadians == Approx(0.8f));
+	REQUIRE(capture.Portals.size() == 1);
+	CHECK(capture.Portals.data() == frame.Portals.data());
+	CHECK(capture.Portals[0].Index == 0);
+	CHECK(capture.Portals[0].Centre.X == Approx(0));
+	REQUIRE(capture.Surfaces.size() == 1);
+	CHECK(capture.Surfaces.data() == cameraFrame.Surfaces.data());
+	CHECK(capture.Surfaces[0].Index == 1);
+	CHECK(capture.Surfaces[0].PaneCentre.X == Approx(-8));
+	REQUIRE_FALSE(cameraFrame.SpatialCommands.Commands.empty());
+	CHECK(cameraFrame.SpatialCommands.Commands[0].Collector == billboard);
+	CHECK(namedInterface.AffectsScene());
 	CHECK(engine::render::ScenePresentationSignature(capture, {}) != normalSignature);
 	CHECK(engine::render::ScenePresentationSignature(normal, {}) == normalSignature);
 	int aborted = 0;
@@ -344,11 +398,32 @@ TEST_CASE(
 			refused,
 			frame,
 			cameraFrame,
-			[&aborted](const engine::render::View &) { aborted++; }
+			[&aborted] { aborted++; }
 		)
 	);
 	CHECK(aborted == 1);
 	CHECK(refused.CameraFrame.Position.X == Approx(8));
+
+	engine::world::Universe worlds;
+	aborted = 0;
+	CHECK_FALSE(
+		client::BindNamedCaptureWorldView(
+			worlds,
+			{},
+			{.World = capture.World,
+			 .Name = capture.WorldName,
+			 .Identity = 0,
+			 .ContentOwner = capture.WorldName,
+			 .ForeignContentOwners = {},
+			 .Pipeline = capture.Pipeline},
+			{64, 64},
+			refused,
+			frame,
+			cameraFrame,
+			[&aborted] { aborted++; }
+		)
+	);
+	CHECK(aborted == 1);
 }
 
 TEST_CASE("a built scene produces one instance per entity", "[demo]") {

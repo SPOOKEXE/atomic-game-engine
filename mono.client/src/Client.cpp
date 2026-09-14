@@ -4028,36 +4028,36 @@ namespace client {
 		view.ForeignContentOwners = ContentBindings;
 		std::optional<engine::render::WorldViewFrame> namedCaptureFrame;
 		std::optional<engine::render::WorldCameraFrame> namedCaptureCamera;
+		bool namedCaptureBound = false;
 		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
 		if (capturePending) {
 			const engine::render::View normalView = view;
-			const bool namedCapture = DataCapture->PrepareView(view);
+			engine::render::ScriptDataCaptureBridge::PreparedView prepared;
+			const bool namedCapture = DataCapture->PrepareView(view, &prepared);
 			if (namedCapture) {
 				namedCaptureFrame.emplace();
 				namedCaptureCamera.emplace();
-				bool bound = false;
-				Universe_->Enter(presentationWorld, [&](engine::ecs::Store &store) {
-					bound = BindNamedCaptureWorldView(
-						store,
-						{.World = presentationWorld.Index,
-						 .Name = view.WorldName,
-						 .Identity = store.Identity(),
-						 .ContentOwner = view.ContentOwner,
-						 .ForeignContentOwners = view.ForeignContentOwners,
-						 .Pipeline = view.Pipeline},
-						{static_cast<float>(std::max(pixelWidth, 0)),
-						 static_cast<float>(std::max(pixelHeight, 0))},
-						view,
-						*namedCaptureFrame,
-						*namedCaptureCamera,
-						[this](const engine::render::View &prepared) {
-							DataCapture->AbortPreparedView(prepared);
-						}
-					);
-				});
-				if (bound)
+				namedCaptureBound = BindNamedCapturePresentation(
+					*Universe_,
+					presentationWorld,
+					{.World = presentationWorld.Index,
+					 .Name = view.WorldName,
+					 .Identity = 0,
+					 .ContentOwner = view.ContentOwner,
+					 .ForeignContentOwners = view.ForeignContentOwners,
+					 .Pipeline = view.Pipeline},
+					{static_cast<float>(std::max(pixelWidth, 0)),
+					 static_cast<float>(std::max(pixelHeight, 0))},
+					view,
+					*namedCaptureFrame,
+					*namedCaptureCamera,
+					Interface,
+					[this, &prepared] { DataCapture->AbortPreparedView(prepared); }
+				);
+				if (namedCaptureBound) {
 					visualLighting = view.Lighting;
-				else {
+					hook = &Interface;
+				} else {
 					view = normalView;
 				}
 			}
@@ -4067,9 +4067,10 @@ namespace client {
 		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
 		PortalDrawing = nullptr;
 		// Delegated producers answer requested cameras and own no viewer endpoints.
-		if (!PresentationLink && PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true)) {
+		if (!namedCaptureBound && !PresentationLink &&
+			PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true)) {
 			Renderer.SetAnimationTime(AnimationSeconds);
-		} else if (!PresentationLink && PortalImages && Windowed) {
+		} else if (!namedCaptureBound && !PresentationLink && PortalImages && Windowed) {
 			if (!ReportedJoin) {
 				auto sourceView = view;
 				sourceView.Instances = Views.Instances();
@@ -4090,7 +4091,7 @@ namespace client {
 			Renderer.SetAnimationTime(AnimationSeconds);
 			view.Portals = Portals;
 			view.Surfaces = Surfaces;
-		} else if (PortalImages) {
+		} else if (!namedCaptureBound && PortalImages) {
 			PortalImages->RemoveViewport(view.Slot);
 		}
 
@@ -4111,6 +4112,7 @@ namespace client {
 			Renderer.SetSurfaceBounces(visualSurfaceBounces);
 			Renderer.SetSurfaceLimit(visualSurfaceLimit);
 		}
+		if (namedCaptureBound) spatialSignature = namedCaptureCamera->Compiled.Signature();
 
 		const uint64_t viewportSignature =
 			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);

@@ -16,6 +16,10 @@
 namespace engine::render {
 	class ScriptDataCaptureBridge final : public script::DataCaptureBridge {
 	  public:
+		struct PreparedView {
+			std::vector<uint64_t> Captures;
+			std::vector<uint64_t> CameraMutations;
+		};
 		ScriptDataCaptureBridge(world::DataFactorySession &session, Renderer &renderer);
 		~ScriptDataCaptureBridge() override;
 		script::DataCaptureBridgeCapabilities Capabilities() const override;
@@ -44,10 +48,10 @@ namespace engine::render {
 		bool TeardownInstance(std::string_view instanceId, std::string &detail);
 		// Arms compatible capture work and returns true only when a named camera
 		// replaced the supplied view camera.
-		bool PrepareView(View &view);
+		bool PrepareView(View &view, PreparedView *prepared = nullptr);
 		// Cancels capture and camera work prepared for this exact view. A host uses
 		// this when it cannot bind the rebuilt world packet that the capture needs.
-		void AbortPreparedView(const View &view);
+		void AbortPreparedView(const PreparedView &prepared);
 		void Pump();
 		bool HasPending() const;
 

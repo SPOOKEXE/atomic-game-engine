@@ -125,6 +125,26 @@ TEST_CASE("failed presentation does not consume its damage", "[render][presentat
 }
 
 TEST_CASE(
+	"a committed named camera packet invalidates the restored normal camera packet",
+	"[render][presentation][damage]"
+) {
+	PresentationDamageTracker tracker;
+	PresentationSignatures normal = Settled();
+	PresentationSignatures named = normal;
+	named.Scene.Objects++;
+	named.Scene.Portals++;
+	named.GameInterface++;
+	tracker.Commit(normal);
+	CHECK(tracker.Inspect(named).Scene);
+	tracker.Commit(named);
+	const PresentationDamage restored = tracker.Inspect(normal);
+	CHECK(restored.Scene);
+	CHECK(restored.Objects);
+	CHECK(restored.Portals);
+	CHECK(restored.GameInterface);
+}
+
+TEST_CASE(
 	"scene source causes remain separate before their image cascades", "[render][presentation][cache]"
 ) {
 	PresentationDamageTracker tracker;

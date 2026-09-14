@@ -141,9 +141,9 @@ namespace engine::control {
 				failure = Error("validation_failed", "options.view_slot must fit uint32");
 				return false;
 			}
-			if (schema != "data-scene-options/v1" || history != "preserve" ||
-				storage != "lossless" || output != "raw_planes" || coordinate != "world_camera_image" ||
-				noise != "none" || noiseSeed != 0) {
+			if (schema != "data-scene-options/v1" || history != "preserve" || storage != "lossless" ||
+				output != "raw_planes" || coordinate != "world_camera_image" || noise != "none" ||
+				noiseSeed != 0) {
 				failure = Error(
 					"capability_unsupported", "this host supports only the data-scene-options/v1 base profile"
 				);
@@ -464,7 +464,8 @@ namespace engine::control {
 					 {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"pipeline", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"capture_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
-					 {"camera_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
+					 {"camera_id",
+					  {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					 {"view_slot", {{"type", "integer"}, {"minimum", 0}}},
 					 {"channels",
 					  {{"type", "array"},
@@ -703,6 +704,12 @@ namespace engine::control {
 					return prior->second.Result;
 				}
 				if (!Versions(session, request.InstanceId, values, failure)) {
+					json result = VersionReply(session, request.InstanceId);
+					Store(*ledger, operation, normalizedText, result, failure);
+					return result;
+				}
+				if (request.CameraId != "current_view" && !bridge->Capabilities().NamedCameraSelection) {
+					failure = Error("capability_unsupported", "named camera selection is unavailable");
 					json result = VersionReply(session, request.InstanceId);
 					Store(*ledger, operation, normalizedText, result, failure);
 					return result;

@@ -186,7 +186,7 @@ namespace {
 				.MaximumReadbackNodes = 12,
 				.MaximumRetainedBytes = 64u * 1024u * 1024u,
 				.MaximumPendingPumps = 600,
-				.NamedCameraSelection = true,
+				.NamedCameraSelection = NamedCameraSelection,
 				.MaximumCameraIdBytes = 256,
 				.Detail = "ready"
 			};
@@ -352,6 +352,9 @@ namespace {
 		uint64_t RequestedViewSlot() const {
 			return ViewSlot;
 		}
+		const std::string &RequestedCameraId() const {
+			return CameraId;
+		}
 		void UseUnavailableAmbientOcclusion() {
 			UnavailableAmbientOcclusion = true;
 		}
@@ -359,6 +362,7 @@ namespace {
 		bool MutationCancelled = false;
 		bool IncludeSceneData = false;
 		uint32_t QueueCount = 0;
+		bool NamedCameraSelection = true;
 
 	  private:
 		std::string Instance;
@@ -694,12 +698,21 @@ TEST_CASE(
 	CHECK(bridge->RequestedPipeline() == "Default PBR");
 	CHECK(bridge->RequestedCaptureNode() == "data-capture");
 	CHECK(bridge->RequestedViewSlot() == 3);
-	CHECK(bridge->CameraId == "current_view");
+	CHECK(bridge->RequestedCameraId() == "current_view");
 	json namedCamera = valid;
 	namedCamera["operation_id"] = "bundle-named-camera";
 	namedCamera["options"]["camera_id"] = "camera/fixture";
 	CHECK(Called(surface, "capture_bundle", namedCamera)["status"] == "queued");
-	CHECK(bridge->CameraId == "camera/fixture");
+	CHECK(bridge->RequestedCameraId() == "camera/fixture");
+	bridge->NamedCameraSelection = false;
+	json unsupportedCamera = valid;
+	unsupportedCamera["operation_id"] = "bundle-camera-unsupported";
+	unsupportedCamera["options"]["camera_id"] = "camera/unsupported";
+	bool namedCameraFailed = false;
+	const json unsupportedCameraReply =
+		Called(surface, "capture_bundle", unsupportedCamera, namedCameraFailed);
+	CHECK(namedCameraFailed);
+	CHECK(unsupportedCameraReply["error"] == "capability_unsupported: named camera selection is unavailable");
 	CHECK(
 		bridge->RequestedChannels() ==
 		std::vector<std::string>{"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"}
@@ -723,7 +736,7 @@ TEST_CASE(
 	CHECK(staleReply["current_tick"] == current.Clock.Tick);
 	CHECK(Called(surface, "capture_bundle", stale, failed) == staleReply);
 	CHECK(failed);
-	CHECK(bridge->QueueCount == 1);
+	CHECK(bridge->QueueCount == 2);
 
 	json malformed = request("bundle-unknown");
 	malformed["options"]["unknown"] = true;

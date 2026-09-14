@@ -836,7 +836,10 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 		CHECK(bridge->LastRequest.Pipeline == "main");
 		CHECK(bridge->LastRequest.CaptureNode == "lit");
 		CHECK(bridge->LastRequest.CameraId == "current_view");
-		CHECK(std::find(bridge->CameraIds.begin(), bridge->CameraIds.end(), "fixture/camera") != bridge->CameraIds.end());
+		CHECK(
+			std::find(bridge->CameraIds.begin(), bridge->CameraIds.end(), "fixture/camera") !=
+			bridge->CameraIds.end()
+		);
 		CHECK(bridge->LastRequest.Channels == std::vector<std::string>{"rgb_linear_hdr", "object_ids"});
 		CHECK(bridge->LastRequest.IncludeSceneData);
 	}

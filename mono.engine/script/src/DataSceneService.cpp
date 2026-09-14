@@ -938,13 +938,18 @@ namespace engine::script {
 			request.IncludeSceneData = includeSceneData;
 			if (const ScriptValue *camera = Field(value, "camera_id"); camera != nullptr) {
 				if (camera->Tag != ValueTag::String || camera->Text.empty() ||
-					camera->Text.size() > MAX_DATA_SCENE_ID_BYTES || camera->Text.find('\0') != std::string::npos ||
-					!DataSceneUtf8(camera->Text))
+					camera->Text.size() > MAX_DATA_SCENE_ID_BYTES ||
+					camera->Text.find('\0') != std::string::npos || !DataSceneUtf8(camera->Text))
 					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
 				request.CameraId = camera->Text;
 				if (request.CameraId != "current_view" && !bridge->Capabilities().NamedCameraSelection)
-					return {"unsupported", Map({{"status", String("unsupported_capture_request")},
-						{"reason", String("named camera selection is unavailable")}})};
+					return {
+						"unsupported",
+						Map(
+							{{"status", String("unsupported_capture_request")},
+							 {"reason", String("named camera selection is unavailable")}}
+						)
+					};
 			}
 			const ScriptValue *slot = Field(value, "view_slot");
 			if (slot == nullptr || slot->Tag != ValueTag::Number || !std::isfinite(slot->Number) ||
@@ -1209,10 +1214,14 @@ namespace engine::script {
 						{"reason", String("bundle exact mask assembly is not implemented")},
 					})
 				};
-			if (cameraId != "current_view" &&
-				(!bridge || !bridge->Capabilities().NamedCameraSelection))
-				return {"unsupported", Map({{"status", String("unsupported_data_scene_options")},
-					{"reason", String("named camera selection is unavailable")}})};
+			if (cameraId != "current_view" && (!bridge || !bridge->Capabilities().NamedCameraSelection))
+				return {
+					"unsupported",
+					Map(
+						{{"status", String("unsupported_data_scene_options")},
+						 {"reason", String("named camera selection is unavailable")}}
+					)
+				};
 
 			std::vector<ScriptValue> copiedChannels;
 			copiedChannels.reserve(channels->Items.size());
