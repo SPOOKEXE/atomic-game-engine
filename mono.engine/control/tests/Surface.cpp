@@ -120,6 +120,25 @@ namespace {
 		return nullptr;
 	}
 
+	json CaptureBundleOptions(json channels = json::array({"rgb_linear_hdr"})) {
+		return {
+			{"schema_version", "data-scene-options/v1"},
+			{"channels", std::move(channels)},
+			{"camera_id", "current_view"},
+			{"pipeline", "Default PBR"},
+			{"capture_node", "data-capture"},
+			{"view_slot", 3u},
+			{"temporal_history", "preserve"},
+			{"storage_profile", "lossless"},
+			{"output", "raw_planes"},
+			{"include_scene_data", false},
+			{"include_exact_masks", false},
+			{"coordinate_space", "world_camera_image"},
+			{"noise_mode", "none"},
+			{"noise_seed", 0u},
+		};
+	}
+
 	engine::script::DataCaptureBridgeHookCapability ObservationHook(const char *name, const char *channel) {
 		return {
 			.Name = name,
@@ -178,9 +197,13 @@ namespace {
 		) override {
 			Instance = instance;
 			Snapshot = request.SnapshotId;
+			Pipeline = request.Pipeline;
+			CaptureNode = request.CaptureNode;
+			ViewSlot = request.ViewSlot;
 			Channels = request.Channels;
 			ticket = 1;
 			Queued = true;
+			++QueueCount;
 			return true;
 		}
 		bool Poll(
@@ -304,16 +327,29 @@ namespace {
 		const std::vector<std::string> &RequestedChannels() const {
 			return Channels;
 		}
+		const std::string &RequestedPipeline() const {
+			return Pipeline;
+		}
+		const std::string &RequestedCaptureNode() const {
+			return CaptureNode;
+		}
+		uint64_t RequestedViewSlot() const {
+			return ViewSlot;
+		}
 		void UseUnavailableAmbientOcclusion() {
 			UnavailableAmbientOcclusion = true;
 		}
 		bool MutationQueued = false;
 		bool MutationCancelled = false;
+		uint32_t QueueCount = 0;
 
 	  private:
 		std::string Instance;
 		std::string Snapshot;
+		std::string Pipeline;
+		std::string CaptureNode;
 		std::vector<std::string> Channels;
+		uint64_t ViewSlot = 0;
 		bool Queued = false;
 		bool UnavailableAmbientOcclusion = false;
 	};
@@ -605,6 +641,99 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	);
 	CHECK(overflowFailed);
 	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 12 names");
+}
+
+TEST_CASE(
+	"capture_bundle validates and queues the data-scene-options base profile", "[control][data-capture]"
+) {
+	Universe universe;
+	MakeWorld(universe, "capture-bundle-world");
+	engine::world::DataFactorySession session(universe);
+	auto bridge = std::make_shared<FakeCapture>();
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataCapture(session, bridge)});
+	const auto current = session.Inspect("capture-bundle-world");
+	auto request = [&](std::string operation, json options = CaptureBundleOptions()) {
+		return json{
+			{"instance_id", "capture-bundle-world"},
+			{"snapshot_id", "snapshot-bundle"},
+			{"options", std::move(options)},
+			{"operation_id", std::move(operation)},
+			{"expected_tick", current.Clock.Tick},
+			{"expected_world_epoch", current.WorldEpoch},
+			{"expected_world_version", current.WorldVersion},
+		};
+	};
+
+	const json valid = request(
+		"bundle-valid",
+		CaptureBundleOptions(
+			json::array({"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"})
+		)
+	);
+	const json queued = Called(surface, "capture_bundle", valid);
+	CHECK(queued["status"] == "queued");
+	CHECK(bridge->RequestedPipeline() == "Default PBR");
+	CHECK(bridge->RequestedCaptureNode() == "data-capture");
+	CHECK(bridge->RequestedViewSlot() == 3);
+	CHECK(
+		bridge->RequestedChannels() ==
+		std::vector<std::string>{"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"}
+	);
+	CHECK(Called(surface, "capture_bundle", valid) == queued);
+	CHECK(bridge->QueueCount == 1);
+
+	bool failed = false;
+	json conflict = valid;
+	conflict["options"]["pipeline"] = "Other";
+	Called(surface, "capture_bundle", conflict, failed);
+	CHECK(failed);
+
+	json stale = request("bundle-stale");
+	stale["expected_tick"] = current.Clock.Tick + 1;
+	const json staleReply = Called(surface, "capture_bundle", stale, failed);
+	CHECK(failed);
+	CHECK(staleReply["current_tick"] == current.Clock.Tick);
+	CHECK(Called(surface, "capture_bundle", stale, failed) == staleReply);
+	CHECK(failed);
+	CHECK(bridge->QueueCount == 1);
+
+	json malformed = request("bundle-unknown");
+	malformed["options"]["unknown"] = true;
+	Called(surface, "capture_bundle", malformed, failed);
+	CHECK(failed);
+	CHECK(malformed["options"]["pipeline"] == "Default PBR");
+	json oversized = request("bundle-oversized");
+	oversized["options"]["pipeline"] = std::string(257, 'p');
+	Called(surface, "capture_bundle", oversized, failed);
+	CHECK(failed);
+	json maximumSlot = request("bundle-maximum-slot");
+	maximumSlot["options"]["view_slot"] = std::numeric_limits<uint32_t>::max();
+	Called(surface, "capture_bundle", maximumSlot);
+	CHECK(bridge->RequestedViewSlot() == std::numeric_limits<uint32_t>::max());
+	json oversizedSlot = request("bundle-oversized-slot");
+	oversizedSlot["options"]["view_slot"] = uint64_t{std::numeric_limits<uint32_t>::max()} + 1;
+	const json oversizedSlotReply = Called(surface, "capture_bundle", oversizedSlot, failed);
+	CHECK(failed);
+	CHECK(oversizedSlotReply["error"] == "validation_failed: options.view_slot must fit uint32");
+	json unsupported = request("bundle-noise");
+	unsupported["options"]["noise_mode"] = "gaussian";
+	const json unsupportedReply = Called(surface, "capture_bundle", unsupported, failed);
+	CHECK(failed);
+	CHECK(unsupportedReply["error"].get<std::string>().starts_with("capability_unsupported:"));
+
+	json duplicate =
+		request("bundle-duplicate", CaptureBundleOptions(json::array({"rgb_linear_hdr", "rgb_linear_hdr"})));
+	Called(surface, "capture_bundle", duplicate, failed);
+	CHECK(failed);
+	json unpaired = request("bundle-unpaired", CaptureBundleOptions(json::array({"second_surface_depth"})));
+	Called(surface, "capture_bundle", unpaired, failed);
+	CHECK(failed);
+	json sidecar = request("bundle-sidecar");
+	sidecar["options"]["include_scene_data"] = true;
+	const json sidecarReply = Called(surface, "capture_bundle", sidecar, failed);
+	CHECK(failed);
+	CHECK(sidecarReply["error"].get<std::string>().starts_with("capability_unsupported:"));
 }
 
 TEST_CASE("data scene discovery reports capture hooks as stable records", "[control][data-capture]") {
