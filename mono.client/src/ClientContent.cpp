@@ -14,6 +14,7 @@
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 
+#include <algorithm>
 #include <client/Client.hpp>
 #include <client/ContentDemand.hpp>
 
@@ -344,15 +345,21 @@ namespace client {
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
 					engine::scene::MeshSkinning skinning;
 					skinning.JointCount = mesh.JointCount;
-					skinning.Vertices.reserve(mesh.Vertices.size());
-					for (const engine::assets::MeshVertex &vertex : mesh.Vertices) {
-						skinning.Vertices.push_back({
-							.Joints =
-								{vertex.Joints[0], vertex.Joints[1], vertex.Joints[2], vertex.Joints[3]},
-							.Weights = {
-								vertex.Weights[0], vertex.Weights[1], vertex.Weights[2], vertex.Weights[3]
-							},
-						});
+					if (mesh.JointCount != 0) {
+						skinning.VertexCount = static_cast<uint32_t>(mesh.Vertices.size());
+						const size_t retainedSkinVertices =
+							std::min(mesh.Vertices.size(), engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES);
+						skinning.Vertices.reserve(retainedSkinVertices);
+						for (size_t index = 0; index < retainedSkinVertices; ++index) {
+							const engine::assets::MeshVertex &vertex = mesh.Vertices[index];
+							skinning.Vertices.push_back({
+								.Joints =
+									{vertex.Joints[0], vertex.Joints[1], vertex.Joints[2], vertex.Joints[3]},
+								.Weights = {
+									vertex.Weights[0], vertex.Weights[1], vertex.Weights[2], vertex.Weights[3]
+								},
+							});
+						}
 					}
 
 					// **The collision geometry, baked once here rather than per

@@ -187,6 +187,7 @@ TEST_CASE("data factory image labels stay aligned with identified snapshots", "[
 	CHECK(visual->Mesh.Text() == "data-factory-demo/rig.amesh");
 	engine::scene::MeshSkinning skinning;
 	skinning.JointCount = 1;
+	skinning.VertexCount = 1;
 	skinning.Vertices = {{{0, 0, 0, 0}, {65535, 0, 0, 0}}};
 	REQUIRE(engine::scene::RecordMesh(store, visual->Mesh, 1, {}, skinning));
 	const Entity clip = DemoChild(store, "DataFactoryWave");

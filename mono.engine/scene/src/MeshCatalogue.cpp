@@ -36,6 +36,11 @@ namespace engine::scene {
 		if (!mesh.IsValid()) {
 			return false;
 		}
+		if (skinning.Vertices.size() > MAXIMUM_RETAINED_SKINNING_VERTICES ||
+			skinning.VertexCount < skinning.Vertices.size() ||
+			(skinning.VertexCount <= MAXIMUM_RETAINED_SKINNING_VERTICES &&
+			 skinning.VertexCount != skinning.Vertices.size()))
+			return false;
 		for (const MeshSkinningVertex &vertex : skinning.Vertices) {
 			uint32_t total = 0;
 			for (size_t influence = 0; influence < vertex.Weights.size(); ++influence) {

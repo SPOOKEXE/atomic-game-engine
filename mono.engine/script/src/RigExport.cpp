@@ -22,6 +22,7 @@
 
 namespace engine::script {
 	using ecs::Entity;
+	static_assert(MAX_RIG_EXPORT_SKIN_VERTICES == scene::MAXIMUM_RETAINED_SKINNING_VERTICES);
 
 	namespace {
 		ScriptValue String(std::string_view text) {
@@ -556,11 +557,11 @@ namespace engine::script {
 				unavailableSkinning("mesh has no authored skin palette");
 			} else if (skinning.JointCount != skeleton->JointCount) {
 				unavailableSkinning("mesh skin palette does not match the skeleton joint count");
-			} else if (skinning.Vertices.size() > MAX_RIG_EXPORT_SKIN_VERTICES ||
-					   skinning.Vertices.size() > MAX_RIG_EXPORT_TOTAL_SKIN_VERTICES - totalSkinVertices) {
+			} else if (skinning.VertexCount > MAX_RIG_EXPORT_SKIN_VERTICES ||
+					   skinning.VertexCount > MAX_RIG_EXPORT_TOTAL_SKIN_VERTICES - totalSkinVertices) {
 				unavailableSkinning("mesh skinning vertices exceed the 1024 response limit");
 			} else {
-				totalSkinVertices += skinning.Vertices.size();
+				totalSkinVertices += skinning.VertexCount;
 				std::vector<ScriptValue> vertices;
 				vertices.reserve(skinning.Vertices.size());
 				for (size_t vertexIndex = 0; vertexIndex < skinning.Vertices.size(); ++vertexIndex) {
@@ -568,6 +569,7 @@ namespace engine::script {
 					std::vector<ScriptValue> influences;
 					influences.reserve(vertex.Weights.size());
 					for (size_t influence = 0; influence < vertex.Weights.size(); ++influence) {
+						if (vertex.Weights[influence] == 0) continue;
 						const uint16_t slot = vertex.Joints[influence];
 						influences.push_back(Map({
 							{"joint_id", String(entityId + ":joint:" + std::to_string(slot))},
@@ -588,7 +590,9 @@ namespace engine::script {
 					{"weight_encoding", String("uint16_unorm")},
 					{"weight_denominator", Number(65535)},
 					{"normalization",
-					 String("each weighted vertex sums to 65535; zero-weight influences are retained")},
+					 String(
+						 "each weighted vertex sums to 65535; only positive-weight influences are emitted"
+					 )},
 					{"vertices", Array(std::move(vertices))},
 				});
 			}

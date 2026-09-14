@@ -48,8 +48,9 @@ TEST_CASE("rig export preserves skeleton frames and dense stable slots", "[scrip
 	store.Set(rig, visual);
 	engine::scene::MeshSkinning skinning;
 	skinning.JointCount = 2;
+	skinning.VertexCount = 2;
 	skinning.Vertices = {
-		{{0, 1, 0, 0}, {32768, 32767, 0, 0}},
+		{{0, 1, 65535, 65535}, {32768, 32767, 0, 0}},
 		{{1, 0, 0, 0}, {65535, 0, 0, 0}},
 	};
 	REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 1, {}, skinning));
@@ -110,7 +111,7 @@ TEST_CASE("rig export preserves skeleton frames and dense stable slots", "[scrip
 	REQUIRE(skinVertices.size() == 2);
 	CHECK(Field(skinVertices[0], "vertex_index")->Number == 0);
 	const auto &influences = Field(skinVertices[0], "influences")->Items;
-	REQUIRE(influences.size() == 4);
+	REQUIRE(influences.size() == 2);
 	CHECK(Field(influences[0], "joint_id")->Text == "rig/hero:joint:0");
 	CHECK(Field(influences[1], "joint_slot")->Number == 1);
 	CHECK(Field(influences[0], "weight")->Number == 32768);
@@ -210,7 +211,8 @@ TEST_CASE(
 
 	engine::scene::MeshSkinning skinning;
 	skinning.JointCount = 1;
-	skinning.Vertices.resize(engine::script::MAX_RIG_EXPORT_SKIN_VERTICES + 1);
+	skinning.VertexCount = engine::script::MAX_RIG_EXPORT_SKIN_VERTICES + 1;
+	skinning.Vertices.resize(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES);
 	REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 1, {}, skinning));
 	exported = engine::script::GetRigExport(store, "export/over-limit-skinning");
 	REQUIRE(std::string_view(exported.Status) == "ok");

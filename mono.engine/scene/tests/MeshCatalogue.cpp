@@ -29,6 +29,7 @@ using engine::ecs::Store;
 using engine::scene::MeshCatalogue;
 using engine::scene::MeshesOf;
 using engine::scene::RecordMesh;
+using engine::scene::SkinningOf;
 using engine::scene::TrianglesOf;
 using engine::scene::Visual;
 
@@ -83,6 +84,27 @@ TEST_CASE("an unknown mesh is zero rather than a guess", "[scene][meshcatalogue]
 	// to be the same answer rather than a lookup on a null id.
 	CHECK(TrianglesOf(store, Name()) == 0);
 	CHECK_FALSE(RecordMesh(store, Name(), 4));
+}
+
+TEST_CASE("mesh skinning retains only the exportable prefix", "[scene][meshcatalogue]") {
+	Store store = Fresh("mesh_catalogue_test.skinning_bound");
+	const Name mesh("catalogue_test/skinned.amesh");
+	engine::scene::MeshSkinning prefix;
+	prefix.JointCount = 1;
+	prefix.VertexCount = static_cast<uint32_t>(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	prefix.Vertices.resize(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES);
+	REQUIRE(RecordMesh(store, mesh, 1, {}, prefix));
+
+	engine::scene::MeshSkinning copied;
+	REQUIRE(SkinningOf(store, mesh, copied));
+	CHECK(copied.VertexCount == engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	CHECK(copied.Vertices.size() == engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES);
+
+	engine::scene::MeshSkinning tooLarge;
+	tooLarge.JointCount = 1;
+	tooLarge.VertexCount = static_cast<uint32_t>(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	tooLarge.Vertices.resize(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	CHECK_FALSE(RecordMesh(store, Name("catalogue_test/too-large.amesh"), 1, {}, tooLarge));
 }
 
 TEST_CASE("reading a count never creates the resource", "[scene][meshcatalogue]") {

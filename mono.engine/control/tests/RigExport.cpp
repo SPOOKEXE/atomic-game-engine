@@ -44,6 +44,7 @@ TEST_CASE("rig export MCP tool validates selection and preserves data-rig shape"
 		store.Set(rig, visual);
 		engine::scene::MeshSkinning skinning;
 		skinning.JointCount = 1;
+		skinning.VertexCount = 1;
 		skinning.Vertices = {{{0, 0, 0, 0}, {65535, 0, 0, 0}}};
 		REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 1, {}, skinning));
 		const auto bone = store.CreateInstance(engine::scene::BoneClass(), "Bone");

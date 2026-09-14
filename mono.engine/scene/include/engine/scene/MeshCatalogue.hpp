@@ -42,18 +42,30 @@ namespace engine::ecs {
 }
 
 namespace engine::scene {
+	// A data-rig reply can retain this many vertices. At 16 bytes each the
+	// per-mesh, per-world skinning payload is at most 16 KiB, rather than a copy
+	// of an asset's four-million-vertex render stream.
+	inline constexpr size_t MAXIMUM_RETAINED_SKINNING_VERTICES = 1024;
+
 	// One vertex's authored skin palette references. Joint numbers are local to
 	// the mesh's named skeleton palette, never process-local entity IDs.
 	struct MeshSkinningVertex {
 		std::array<uint16_t, 4> Joints{};
 		std::array<uint16_t, 4> Weights{};
 	};
+	static_assert(sizeof(MeshSkinningVertex) == 16);
 
 	// The bounded skinning source that arrived with one published mesh. We keep
 	// the exact uint16 normalization the renderer consumes, so data export never
 	// has to reconstruct weights from a pose or a GPU buffer.
 	struct MeshSkinning {
 		uint16_t JointCount = 0;
+
+		// The full mesh source count. It remains exact when `Vertices` retains
+		// only the bounded prefix, so export can refuse a non-exportable mesh
+		// rather than silently returning a partial skin.
+		uint32_t VertexCount = 0;
+
 		std::vector<MeshSkinningVertex> Vertices;
 	};
 
