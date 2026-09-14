@@ -98,6 +98,7 @@ scene.EditableImage | Script-drawable RGBA8 pixels with dimensions, presentation
 scene.EditableMesh | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision.
 scene.PortalBodyView | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
+scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.

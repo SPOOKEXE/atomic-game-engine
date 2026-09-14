@@ -173,6 +173,7 @@ state until v0.19.
 | `scene.EditableImage` | 56 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes. |
 | `scene.EditableMesh` | 176 | 8 | yes | . | . | . | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
+| `scene.Gravity` | 12 | 4 | yes | yes | . | . | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
 | `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
@@ -274,4 +275,4 @@ state until v0.19.
 
 ---
 
-197 components registered by the engine, 0 without a purpose line.
+198 components registered by the engine, 0 without a purpose line.
