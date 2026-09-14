@@ -24,6 +24,8 @@
 
 namespace engine::world {
 
+	inline constexpr size_t MAXIMUM_DATA_FACTORY_ACTIONS = 32;
+
 	enum class DataFactoryStatus : uint8_t {
 		Ok,
 		Unsupported,
@@ -173,6 +175,22 @@ namespace engine::world {
 	using DataFactoryInterventionExecutor =
 		std::function<bool(Universe &, WorldId, std::span<const DataFactoryIntervention>, std::string &)>;
 
+	// A named script-authored settings-menu action to deliver at one fixed-tick
+	// boundary. The host validates its vocabulary before queuing any action.
+	struct DataFactoryAction {
+		std::string Name;
+	};
+
+	// An infallible host commit that runs at the exact paused tick boundary.
+	using DataFactoryActionCommit = std::function<void()>;
+
+	// The product owns which named actions its current script runtime exposes.
+	// It must either refuse the complete batch or return one infallible deferred
+	// commit after validating every action.
+	using DataFactoryActionExecutor = std::function<bool(
+		Universe &, WorldId, std::span<const DataFactoryAction>, DataFactoryActionCommit &, std::string &
+	)>;
+
 	class DataFactorySession final {
 	  public:
 		explicit DataFactorySession(
@@ -183,6 +201,7 @@ namespace engine::world {
 		void SetPauseParticipant(DataFactoryPauseParticipant participant);
 		void SetWorldLifecycle(DataFactoryWorldLifecycle lifecycle);
 		void SetInterventionExecutor(DataFactoryInterventionExecutor executor);
+		void SetActionExecutor(DataFactoryActionExecutor executor);
 		void SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter);
 
 		DataFactoryReply
@@ -192,7 +211,8 @@ namespace engine::world {
 			std::string_view instanceId,
 			DataFactoryInterval interval,
 			uint64_t expectedTick,
-			uint64_t expectedVersion
+			uint64_t expectedVersion,
+			std::span<const DataFactoryAction> actions = {}
 		);
 		// Returns the lifecycle revision without retaining a snapshot or changing
 		// the world, so adapters can reject stale requests before mutation.
@@ -280,6 +300,7 @@ namespace engine::world {
 		DataFactoryPauseParticipant Participant;
 		DataFactoryWorldLifecycle WorldLifecycle;
 		DataFactoryInterventionExecutor InterventionExecutor;
+		DataFactoryActionExecutor ActionExecutor;
 		DataFactoryRenderOnlyPresenter Presenter;
 		struct OwnedWorld {
 			// Retain episode metadata beside ownership until package manifests carry it.

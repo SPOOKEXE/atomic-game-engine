@@ -7,9 +7,9 @@
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
-#include <engine/control/features/TemporalSample.hpp>
 #include <engine/control/features/RigExport.hpp>
 #include <engine/control/features/Script.hpp>
+#include <engine/control/features/TemporalSample.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -26,6 +26,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/SettingsMenu.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -545,6 +546,58 @@ namespace client {
 				(void)Sound->SetPaused(before);
 				detail = "audio device could not establish the pause barrier";
 				return false;
+			});
+			DataFactory->SetActionExecutor([this](
+											   engine::world::Universe &universe,
+											   engine::world::WorldId world,
+											   std::span<const engine::world::DataFactoryAction> actions,
+											   engine::world::DataFactoryActionCommit &commit,
+											   std::string &detail
+										   ) {
+				if (!Settings.DataFactory || !world.IsValid() || (Rendered.IsValid() && world != Rendered)) {
+					detail = "client data-factory mode supports only its local world";
+					return false;
+				}
+				const auto found = std::ranges::find_if(Runtimes, [world](const auto &entry) {
+					return entry.first == world;
+				});
+				if (found == Runtimes.end() || found->second == nullptr) {
+					detail = "the factory world has no script runtime";
+					return false;
+				}
+
+				std::vector<engine::core::Name> accepted;
+				accepted.reserve(actions.size());
+				bool valid = true;
+				if (universe.Enter(
+						world,
+						[&](const engine::ecs::Store &store) {
+							const auto available = engine::gui::SettingsMenuActionsOf(store);
+							for (const engine::world::DataFactoryAction &action : actions) {
+								const engine::core::Name id(action.Name);
+								if (std::ranges::find(available, id, &engine::gui::SettingsMenuAction::Id) ==
+									available.end()) {
+									detail = "unsupported action: " + action.Name;
+									valid = false;
+									return;
+								}
+								accepted.push_back(id);
+							}
+						}
+					) != engine::world::WorldStatus::Ok ||
+					!valid)
+					return false;
+				if (!found->second->PrepareSettingsMenuActions(accepted)) {
+					detail = "the script runtime cannot reserve the action batch";
+					return false;
+				}
+
+				// The universe calls this only after its paused-world revalidation,
+				// immediately before the fixed tick that drains the script barrier.
+				commit = [runtime = found->second, actions = std::move(accepted)]() noexcept {
+					runtime->CommitSettingsMenuActions(actions);
+				};
+				return true;
 			});
 			DataFactory->SetWorldLifecycle([this](
 											   engine::world::DataFactoryWorldOperation operation,

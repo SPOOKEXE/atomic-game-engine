@@ -260,6 +260,29 @@ namespace engine::script {
 		}
 	}
 
+	bool Runtime::PrepareSettingsMenuActions(std::span<const core::Name> actions) {
+		if (std::any_of(actions.begin(), actions.end(), [](const core::Name action) {
+				return !action.IsValid();
+			})) {
+			return false;
+		}
+		if (actions.empty()) return true;
+		if (actions.size() > PendingSettingsMenuActions.max_size() - PendingSettingsMenuActions.size())
+			return false;
+		try {
+			PendingSettingsMenuActions.reserve(PendingSettingsMenuActions.size() + actions.size());
+			return true;
+		} catch (...) {
+			return false;
+		}
+	}
+
+	void Runtime::CommitSettingsMenuActions(std::span<const core::Name> actions) noexcept {
+		if (actions.empty()) return;
+		MarkWorldSwapUsed();
+		PendingSettingsMenuActions.insert(PendingSettingsMenuActions.end(), actions.begin(), actions.end());
+	}
+
 	void Runtime::DeliverTeleportResult(TeleportResult result) {
 		if (result.Id != 0) {
 			MarkWorldSwapUsed();

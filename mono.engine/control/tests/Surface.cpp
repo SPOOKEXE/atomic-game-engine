@@ -1225,6 +1225,98 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"data-factory actions are ordered, atomic, and isolated by operation id", "[control][data-factory]"
+) {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "control-data-factory-actions");
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+
+	std::vector<std::string> delivered;
+	std::vector<uint64_t> boundaries;
+	session.SetActionExecutor([&](Universe &host,
+								  WorldId target,
+								  std::span<const engine::world::DataFactoryAction> actions,
+								  engine::world::DataFactoryActionCommit &commit,
+								  std::string &detail) {
+		boundaries.push_back(host.StatisticsOf(target).Ticks);
+		for (const engine::world::DataFactoryAction &action : actions) {
+			if (action.Name == "invalid") {
+				detail = "unsupported action: invalid";
+				return false;
+			}
+		}
+		std::vector<std::string> accepted;
+		accepted.reserve(actions.size());
+		for (const engine::world::DataFactoryAction &action : actions)
+			accepted.push_back(action.Name);
+		delivered.reserve(delivered.size() + accepted.size());
+		commit = [&delivered, actions = std::move(accepted)]() noexcept {
+			delivered.insert(
+				delivered.end(),
+				std::make_move_iterator(actions.begin()),
+				std::make_move_iterator(actions.end())
+			);
+		};
+		return true;
+	});
+
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	const auto pause = session.Inspect("control-data-factory-actions");
+	REQUIRE(
+		Called(
+			surface,
+			"pause",
+			json{
+				{"instance_id", "control-data-factory-actions"},
+				{"expected_tick", pause.Clock.Tick},
+				{"expected_world_epoch", pause.WorldEpoch},
+				{"expected_world_version", pause.WorldVersion},
+				{"operation_id", "actions-pause"}
+			}
+		)["status"] == "ok"
+	);
+
+	auto step = [](uint64_t tick, uint64_t version, std::string operation, json actions) {
+		return json{
+			{"instance_id", "control-data-factory-actions"},
+			{"expected_tick", tick},
+			{"expected_world_epoch", 1u},
+			{"expected_world_version", version},
+			{"operation_id", std::move(operation)},
+			{"dt_ns", {{"numerator", 1'000'000'000u}, {"denominator", 60u}}},
+			{"actions", std::move(actions)}
+		};
+	};
+
+	const json first = step(0, 1, "actions-first", json::array({"second", "first"}));
+	const json completed = Called(surface, "step", first);
+	CHECK(completed["tick"] == 1);
+	CHECK(delivered == std::vector<std::string>{"second", "first"});
+	CHECK(boundaries == std::vector<uint64_t>{0});
+	CHECK(Called(surface, "step", first) == completed);
+	CHECK(delivered == std::vector<std::string>{"second", "first"});
+
+	const json invalid = step(1, 2, "actions-invalid", json::array({"third", "invalid"}));
+	bool failed = false;
+	Called(surface, "step", invalid, failed);
+	CHECK(failed);
+	CHECK(universe.StatisticsOf(world).Ticks == 1);
+	CHECK(delivered == std::vector<std::string>{"second", "first"});
+	CHECK(Called(surface, "step", invalid, failed).is_object());
+	CHECK(failed);
+	CHECK(boundaries == std::vector<uint64_t>{0, 1});
+
+	const json next = step(1, 2, "actions-next", json::array({"third"}));
+	CHECK(Called(surface, "step", next)["tick"] == 2);
+	CHECK(delivered == std::vector<std::string>{"second", "first", "third"});
+	CHECK(boundaries == std::vector<uint64_t>{0, 1, 1});
+}
+
+TEST_CASE(
 	"data-factory world lifecycle tools publish and enforce their exact contract", "[control][data-factory]"
 ) {
 	Universe universe;

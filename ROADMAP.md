@@ -110,7 +110,7 @@ Create and modify isolated scenes:
 - [x] share engine services through Luau `DataSceneService`, with VM-neutral ECS metadata, queued lifecycle work and Luau or JavaScript render bridges.
 
 Drive deterministic time and state:
-- [_] finish deterministic action and script sequencing at fixed-tick boundaries; rational timing and manual tick boundaries are checked.
+- [_] finish deterministic action and script sequencing at fixed-tick boundaries; rational timing and manual tick boundaries are checked. Bounded data-factory settings-menu action batches now validate atomically, preserve request order, and enter the next paused fixed step through the script barrier; replay, broader input injection, and complete sequencing remain open.
 - [_] implement backward seek as checkpoint plus replay, never negative dt, with bounded history.
 - [_] provide full checkpoint coverage for ECS, physics warm start, RNG, script schedulers, events, clocks, string IDs and pinned assets; the API requires a real host rehydrator.
 - [_] restore checkpoints only when compatible, and create fresh versions after restore.
@@ -210,8 +210,20 @@ Extra:
 - [_] update and prune old content in documentation. check each statement, update, remove or replace.
 - [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
 
+- [_] add typed, read-only observation hooks at proven render-graph boundaries. Build one render hook now for data capture, move one existing capture path onto it, and measure it before extending the design. A hook is an observer node or declared node output in the existing graph, not a second callback graph beside it.
+  1. Inventory the current node output, resource lifetime, GPU submission and asynchronous readback boundaries, then choose one stable post-pass observation point.
+  2. Give each internal hook an enum value and a stable string name for discovery, manifests and MCP. Never serialize the enum number.
+  3. Give each hook its own typed immutable context. Do not use a generic `any` bag or an inheritance tree. A context states its valid lifetime, thread, resource access and unavailable fields.
+  4. Keep observation non-blocking and read-only. GPU hooks append bounded records or schedule bounded asynchronous readback; the client polls completed records later. They never wait for the CPU or call arbitrary external code from the render thread.
+  5. Apply render changes through CPU-owned scene or graph state before submission, then upload the normal delta. Observation hooks cannot mutate renderer state.
+  6. Make the existing data-capture resource observation the first consumer. Expose supported hook names and limits through capability discovery, then verify snapshot, camera, frame, crop and resource identity remain aligned.
+  7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
+  8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
+
 ### v0.26
 
+- [_] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
+- [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
 - [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
 - [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
 - [_] pathfinding

@@ -105,6 +105,7 @@ namespace engine::control {
 			world::DataFactoryPauseScope Scope = world::DataFactoryPauseScope::AllSystems;
 			std::string BaseSnapshotId;
 			std::vector<world::DataFactoryIntervention> Changes;
+			std::vector<world::DataFactoryAction> Actions;
 		};
 
 		struct LedgerEntry {
@@ -274,25 +275,25 @@ namespace engine::control {
 			return true;
 		}
 
-		inline bool Actions(const json &values, json &normalized, std::string &failure) {
+		inline bool Actions(const json &values, Request &request, json &normalized, std::string &failure) {
 			const auto found = values.find("actions");
 			if (found == values.end()) {
 				normalized["actions"] = json::array();
 				return true;
 			}
-			if (!found->is_array() || found->size() > MAXIMUM_ACTIONS) {
+			if (!found->is_array() || found->size() > world::MAXIMUM_DATA_FACTORY_ACTIONS) {
 				failure = Error("validation_failed", "actions must be an array with at most 32 names");
 				return false;
 			}
+			std::vector<world::DataFactoryAction> parsed;
+			parsed.reserve(found->size());
 			for (const json &action : *found) {
 				std::string name;
 				if (!Text(action, "actions entry", name, failure)) return false;
+				parsed.push_back({std::move(name)});
 			}
 			normalized["actions"] = *found;
-			if (!found->empty()) {
-				failure = Error("capability_unsupported", "actions have no installed executor");
-				return false;
-			}
+			request.Actions = std::move(parsed);
 			return true;
 		}
 
@@ -400,7 +401,7 @@ namespace engine::control {
 				  {"required", {"numerator", "denominator"}}}},
 				{"actions",
 				 {{"type", "array"},
-				  {"maxItems", MAXIMUM_ACTIONS},
+				  {"maxItems", world::MAXIMUM_DATA_FACTORY_ACTIONS},
 				  {"items", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}}},
 			};
 			json selected = json::object();
@@ -729,10 +730,10 @@ namespace engine::control {
 									"actions"},
 								   f
 							   ) &&
-							   Interval(v, r, n, f) && Actions(v, n, f);
+							   Interval(v, r, n, f) && Actions(v, r, n, f);
 					},
 					[&session](const Request &r) {
-						return session.Step(r.InstanceId, r.Interval, r.Tick, r.Version);
+						return session.Step(r.InstanceId, r.Interval, r.Tick, r.Version, r.Actions);
 					}
 				);
 			}

@@ -968,7 +968,7 @@ namespace engine::world {
 			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
 	}
 
-	WorldStatus Universe::StepPaused(WorldId id) {
+	WorldStatus Universe::StepPaused(WorldId id, const std::function<void()> &boundary) {
 		RequireDriverThread("StepPaused");
 		if (Ticking) {
 			return WorldStatus::WrongThread;
@@ -993,7 +993,13 @@ namespace engine::world {
 		Stats.Deliveries = barrier.Deliveries;
 
 		Ticking = true;
-		world->TickPaused();
+		try {
+			if (boundary) boundary();
+			world->TickPaused();
+		} catch (...) {
+			Ticking = false;
+			throw;
+		}
 		Ticking = false;
 
 		Stats.ActiveWorlds = 1;

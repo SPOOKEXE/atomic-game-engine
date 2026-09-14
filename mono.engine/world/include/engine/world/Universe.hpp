@@ -471,6 +471,13 @@ namespace engine::world {
 		// @tick
 		void Tick(float frameSeconds);
 
+		// Whether a driver tick or paused manual tick is currently running.
+		// Control adapters use this to refuse work that cannot reach a new
+		// boundary without running host validation inside a world tick.
+		bool TickInFlight() const {
+			return Ticking;
+		}
+
 		// Runs one normal same-universe barrier, then advances one suspended local
 		// world by one completed simulation tick.
 		//
@@ -480,9 +487,15 @@ namespace engine::world {
 		// applies traffic for every world in this universe, so bus effects remain
 		// causal and its diagnostics describe the actual boundary.
 		//
+		// `boundary` runs after controls have drained and the target has been
+		// revalidated as suspended, immediately before its tick. It is for
+		// infallible host commits that must not leak when that barrier removed or
+		// resumed the target.
+		//
 		// @param id The paused local world to advance.
+		// @param boundary An optional infallible commit at the tick boundary.
 		// @return `Ok`, `NoSuchWorld`, or `WrongThread` when it is not suspended.
-		WorldStatus StepPaused(WorldId id);
+		WorldStatus StepPaused(WorldId id, const std::function<void()> &boundary = {});
 
 		// Runs one world's presentation phase on its stable execution lane.
 		//

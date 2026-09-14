@@ -47,6 +47,10 @@ namespace engine::world {
 		InterventionExecutor = std::move(executor);
 	}
 
+	void DataFactorySession::SetActionExecutor(DataFactoryActionExecutor executor) {
+		ActionExecutor = std::move(executor);
+	}
+
 	void DataFactorySession::SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter) {
 		Presenter = std::move(presenter);
 	}
@@ -419,12 +423,19 @@ namespace engine::world {
 		std::string_view instanceId,
 		DataFactoryInterval interval,
 		uint64_t expectedTick,
-		uint64_t expectedVersion
+		uint64_t expectedVersion,
+		std::span<const DataFactoryAction> actions
 	) {
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
 		if (RenderOnlyInFlight(instanceId))
 			return Reply(world, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
+		if (Worlds.TickInFlight())
+			return Reply(
+				world,
+				DataFactoryStatus::RestoreIncomplete,
+				"step cannot start while a world tick is in flight"
+			);
 		if (expectedVersion != Version)
 			return Reply(world, DataFactoryStatus::VersionConflict, "expected_world_version does not match");
 		if (ClockOf(world).Tick != expectedTick)
@@ -437,10 +448,35 @@ namespace engine::world {
 				DataFactoryStatus::ValidationFailed,
 				"dt is not this instance's canonical fixed interval"
 			);
+		if (actions.size() > MAXIMUM_DATA_FACTORY_ACTIONS)
+			return Reply(world, DataFactoryStatus::ValidationFailed, "action batch exceeds the fixed limit");
+		for (const DataFactoryAction &action : actions) {
+			if (action.Name.empty() || action.Name.size() > 128 ||
+				action.Name.find('\0') != std::string::npos)
+				return Reply(
+					world, DataFactoryStatus::ValidationFailed, "action name must contain 1 to 128 bytes"
+				);
+		}
 		const auto paused = Paused.find(std::string(instanceId));
 		if (paused == Paused.end() || !paused->second.AllSystems)
 			return Reply(world, DataFactoryStatus::NotPaused, "step requires an all_systems pause");
-		if (Worlds.StepPaused(world) != WorldStatus::Ok) {
+		if (!actions.empty() && !ActionExecutor)
+			return Reply(world, DataFactoryStatus::Unsupported, "the host has no action executor");
+		DataFactoryActionCommit commit;
+		if (!actions.empty()) {
+			std::string detail;
+			if (!ActionExecutor(Worlds, world, actions, commit, detail))
+				return Reply(
+					world,
+					DataFactoryStatus::ValidationFailed,
+					detail.empty() ? "the host refused the action batch" : std::move(detail)
+				);
+			if (!commit)
+				return Reply(
+					world, DataFactoryStatus::ValidationFailed, "the host returned no action commit"
+				);
+		}
+		if (Worlds.StepPaused(world, commit) != WorldStatus::Ok) {
 			// A scheduler fault can occur after the world committed its tick, so
 			// callers must not reuse the revision they observed before the call.
 			Version++;

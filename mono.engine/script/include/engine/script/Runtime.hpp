@@ -523,6 +523,15 @@ namespace engine::script {
 		// boundary.
 		void DeliverSettingsMenuAction(core::Name action);
 
+		// Reserves space for a complete host action batch without queuing it.
+		// The paired commit is then allocation-free at the fixed-tick boundary.
+		bool PrepareSettingsMenuActions(std::span<const core::Name> actions);
+
+		// Queues a batch for the next heartbeat after PrepareSettingsMenuActions
+		// reserved its full capacity. This is noexcept so a boundary commit cannot
+		// leave a manual step half-open.
+		void CommitSettingsMenuActions(std::span<const core::Name> actions) noexcept;
+
 		// Queues one correlated authority reply for the next script barrier. The
 		// client calls this only after matching the id to a request it sent.
 		void DeliverTeleportResult(TeleportResult result);
