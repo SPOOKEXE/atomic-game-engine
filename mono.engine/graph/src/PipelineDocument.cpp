@@ -963,6 +963,9 @@ namespace engine::graph {
 		resource("part-ids", ResourceKind::Colour, ResourceFormat::R32U);
 		resource("depth", ResourceKind::Depth, ResourceFormat::D24S8);
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F);
+		resource("second-surface-z", ResourceKind::Depth, ResourceFormat::D24S8);
+		resource("second-surface-depth", ResourceKind::Colour, ResourceFormat::R32F);
+		resource("second-surface-validity", ResourceKind::Colour, ResourceFormat::R8);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1045,6 +1048,15 @@ namespace engine::graph {
 		touches(EditKind::Writes, "semantic-ids", "semantic-ids");
 		touches(EditKind::Writes, "part-ids", "part-ids");
 		touches(EditKind::Writes, "depth", "depth");
+
+		node("depth-peel", NodeScope::View);
+		touches(EditKind::Reads, "depth", "first-depth");
+		touches(EditKind::Reads, "ordered-entities", "entities");
+		touches(EditKind::Reads, "lod-instances", "instances");
+		touches(EditKind::Writes, "second-surface-z", "z");
+		touches(EditKind::Writes, "second-surface-depth", "depth");
+		touches(EditKind::Writes, "second-surface-validity", "validity");
+		document.Record({.Kind = EditKind::Enable, .Name = core::Name("depth-peel"), .Enabled = false});
 
 		node("depth-linearise", NodeScope::View);
 		touches(EditKind::Reads, "depth", "depth");
@@ -1446,6 +1458,7 @@ namespace engine::graph {
 
 	PipelineDocument DefaultPbrDataCaptureDocument() {
 		PipelineDocument document = DefaultPbrDocument();
+		document.Record({.Kind = EditKind::Enable, .Name = core::Name("depth-peel"), .Enabled = true});
 		document.Record(
 			{.Kind = EditKind::AddNode,
 			 .Name = core::Name("data-capture"),
@@ -1484,6 +1497,24 @@ namespace engine::graph {
 		);
 		document.Record(
 			{.Kind = EditKind::Reads, .Target = core::Name("occlusion"), .Key = core::Name("source")}
+		);
+		// Validity is the primary R8 source and depth is its aligned optional R32F plane.
+		// One capture node therefore publishes both without a second render or readback epoch.
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-second-surface"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads,
+			 .Target = core::Name("second-surface-validity"),
+			 .Key = core::Name("source")}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads,
+			 .Target = core::Name("second-surface-depth"),
+			 .Key = core::Name("depth")}
 		);
 		document.Record(
 			{.Kind = EditKind::AddNode,

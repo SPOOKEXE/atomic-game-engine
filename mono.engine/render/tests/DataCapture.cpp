@@ -1,4 +1,5 @@
 #include "CaptureRecordValidation.hpp"
+#include "SecondSurfaceDepth.hpp"
 
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Renderer.hpp>
@@ -21,9 +22,19 @@ using namespace engine::render;
 TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::RgbLinearHdr)) == "rgb_linear_hdr");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::LinearDepth)) == "linear_depth");
-	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::AmbientOcclusion)) == "ambient_occlusion");
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::AmbientOcclusion)) == "ambient_occlusion"
+	);
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::SemanticMask)) == "semantic_ids");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::PartMask)) == "part_ids");
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::SecondSurfaceDepth)) ==
+		"second_surface_depth"
+	);
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::SecondSurfaceValidity)) ==
+		"second_surface_validity"
+	);
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::OpticalFlow)) == "optical_flow");
 }
 
@@ -69,6 +80,44 @@ TEST_CASE("data capture camera convention records the engine projection", "[rend
 	CHECK(convention.MetresPerWorldUnit == 1.0f);
 }
 
+TEST_CASE("capture bundle alignment includes every camera and extent field", "[render][data-capture]") {
+	ResourceImage first;
+	first.SnapshotId = "snapshot";
+	first.CaptureFrame = 4;
+	first.CameraWorldFromCamera[0] = 1;
+	first.CameraProjectionAvailable = true;
+	first.CameraProjection[0] = 2;
+	first.CameraFieldOfViewRadians = 1;
+	first.CameraNearPlane = .1f;
+	first.CameraFarPlane = 100;
+	first.CameraCropLeft = .1f;
+	first.CameraCropTop = .2f;
+	first.CameraCropWidth = .7f;
+	first.CameraCropHeight = .6f;
+	first.CaptureWidth = 64;
+	first.CaptureHeight = 48;
+	CHECK(capture_record_validation::SameCaptureBundle(first, first));
+	const auto rejects = [&](auto change) {
+		ResourceImage candidate = first;
+		change(candidate);
+		CHECK_FALSE(capture_record_validation::SameCaptureBundle(first, candidate));
+	};
+	rejects([](ResourceImage &image) { image.SnapshotId = "other"; });
+	rejects([](ResourceImage &image) { ++image.CaptureFrame; });
+	rejects([](ResourceImage &image) { image.CameraWorldFromCamera[0] = 3; });
+	rejects([](ResourceImage &image) { image.CameraProjectionAvailable = false; });
+	rejects([](ResourceImage &image) { image.CameraProjection[0] = 3; });
+	rejects([](ResourceImage &image) { image.CameraFieldOfViewRadians = 2; });
+	rejects([](ResourceImage &image) { image.CameraNearPlane = .2f; });
+	rejects([](ResourceImage &image) { image.CameraFarPlane = 200; });
+	rejects([](ResourceImage &image) { image.CameraCropLeft = .2f; });
+	rejects([](ResourceImage &image) { image.CameraCropTop = .3f; });
+	rejects([](ResourceImage &image) { image.CameraCropWidth = .6f; });
+	rejects([](ResourceImage &image) { image.CameraCropHeight = .5f; });
+	rejects([](ResourceImage &image) { ++image.CaptureWidth; });
+	rejects([](ResourceImage &image) { ++image.CaptureHeight; });
+}
+
 TEST_CASE("data capture refuses a non-rendering history policy before queueing", "[render][data-capture]") {
 	Renderer renderer;
 	DataCaptureRequest request{
@@ -88,6 +137,10 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 	request.TemporalHistory = DataCaptureTemporalHistory::Preserve;
 	request.SnapshotId.clear();
 	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
+	request.SnapshotId = "snapshot-1";
+	request.Channels = {DataCaptureChannel::SecondSurfaceDepth};
+	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
+	CHECK(ticket.ChannelResourceIndices.empty());
 }
 
 TEST_CASE(
@@ -159,35 +212,126 @@ TEST_CASE(
 	ambient.AmbientOcclusion->Enabled = true;
 	capture_record_validation::State unavailableWithFacts;
 	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, unavailableWithFacts));
-	ambient.AmbientOcclusion = {.SourceState = AmbientOcclusionSourceState::Estimated,
-								 .ProducerFrame = 7,
-								 .Enabled = true,
-								 .SampleCount = 12,
-								 .RadiusWorldUnits = 0.65f,
-								 .Denoiser = AmbientOcclusionDenoiser::None,
-								 .TemporalHistory = AmbientOcclusionTemporalHistory::Disabled,
-								 .BackgroundValue = 1.0f,
-								 .BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable};
+	ambient.AmbientOcclusion = {
+		.SourceState = AmbientOcclusionSourceState::Estimated,
+		.ProducerFrame = 7,
+		.Enabled = true,
+		.SampleCount = 12,
+		.RadiusWorldUnits = 0.65f,
+		.Denoiser = AmbientOcclusionDenoiser::None,
+		.TemporalHistory = AmbientOcclusionTemporalHistory::Disabled,
+		.BackgroundValue = 1.0f,
+		.BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable
+	};
 	capture_record_validation::State estimated;
 	CHECK(capture_record_validation::Plane(ticket, ambient, 1, estimated));
 	ambient.AmbientOcclusion->SourceState = AmbientOcclusionSourceState::ClearedDisabled;
 	ambient.AmbientOcclusion->Enabled = false;
 	capture_record_validation::State disabled;
 	CHECK(capture_record_validation::Plane(ticket, ambient, 1, disabled));
-	ambient.AmbientOcclusion = {.SourceState = AmbientOcclusionSourceState::ClearedNoPass,
-								 .ProducerFrame = 8,
-								 .Enabled = true,
-								 .SampleCount = std::nullopt,
-								 .RadiusWorldUnits = std::nullopt,
-								 .Denoiser = std::nullopt,
-								 .TemporalHistory = std::nullopt,
-								 .BackgroundValue = 1.0f,
-								 .BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable};
+	ambient.AmbientOcclusion = {
+		.SourceState = AmbientOcclusionSourceState::ClearedNoPass,
+		.ProducerFrame = 8,
+		.Enabled = true,
+		.SampleCount = std::nullopt,
+		.RadiusWorldUnits = std::nullopt,
+		.Denoiser = std::nullopt,
+		.TemporalHistory = std::nullopt,
+		.BackgroundValue = 1.0f,
+		.BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable
+	};
 	capture_record_validation::State noPass;
 	CHECK(capture_record_validation::Plane(ticket, ambient, 1, noPass));
 	ambient.RowStride = 1;
 	capture_record_validation::State malformedAmbient;
 	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, malformedAmbient));
+}
+
+TEST_CASE("second surface capture records one strict aligned provenance pair", "[render][data-capture]") {
+	constexpr std::string_view suffix =
+		";eligibility=built_in_plain_opaque_front_facing;invalid_depth_metres=0;"
+		"validity=0_or_255;identity=unavailable;amodal_ground_truth=false";
+	const std::string provenance =
+		"second_surface_depth_peel/v1;source_depth=d24_unorm;equality_bias=one_source_quantum" +
+		std::string(suffix);
+	CHECK(capture_record_validation::ValidSecondSurfaceProvenance(provenance));
+	CHECK_FALSE(
+		capture_record_validation::ValidSecondSurfaceProvenance(
+			"second_surface_depth_peel/v1;source_depth=d24_unorm;equality_bias=next_representable_float" +
+			std::string(suffix)
+		)
+	);
+	const auto d16 = SecondSurfaceRule(SDL_GPU_TEXTUREFORMAT_D16_UNORM);
+	const auto d24 = SecondSurfaceRule(SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT);
+	const auto d32 = SecondSurfaceRule(SDL_GPU_TEXTUREFORMAT_D32_FLOAT);
+	REQUIRE(d16);
+	REQUIRE(d24);
+	REQUIRE(d32);
+	CHECK(d16->SourceQuantum == 1.0f / 65535.0f);
+	CHECK_FALSE(d16->NextRepresentable);
+	CHECK(d24->SourceQuantum == 1.0f / 16777215.0f);
+	CHECK_FALSE(d24->NextRepresentable);
+	CHECK(d32->SourceQuantum == 0);
+	CHECK(d32->NextRepresentable);
+	for (const SDL_GPUTextureFormat format :
+		 {SDL_GPU_TEXTUREFORMAT_D16_UNORM, SDL_GPU_TEXTUREFORMAT_D24_UNORM, SDL_GPU_TEXTUREFORMAT_D32_FLOAT})
+		CHECK(capture_record_validation::ValidSecondSurfaceProvenance(SecondSurfaceProvenance(format)));
+	CHECK_FALSE(SecondSurfaceRule(SDL_GPU_TEXTUREFORMAT_R8_UNORM));
+
+	DataCaptureTicket ticket;
+	ticket.CaptureNode = engine::core::Name("capture");
+	ticket.Channels = {
+		DataCaptureChannel::SecondSurfaceDepth,
+		DataCaptureChannel::SecondSurfaceValidity,
+	};
+	DataCapturePlane depth;
+	depth.Channel = DataCaptureChannel::SecondSurfaceDepth;
+	depth.CaptureNode = ticket.CaptureNode;
+	depth.Status = DataCaptureStatus::Ready;
+	depth.Resource = engine::core::Name("second-surface-depth");
+	depth.Width = 2;
+	depth.Height = 1;
+	depth.RowStride = 8;
+	depth.Scalar = DataCaptureScalar::Float32;
+	depth.ColourSpace = DataCaptureColourSpace::NotApplicable;
+	depth.Provenance = provenance;
+	depth.Bytes.assign(8, std::byte{0});
+	depth.Hash = engine::assets::Hasher::Of(depth.Bytes);
+	DataCapturePlane validity;
+	validity.Channel = DataCaptureChannel::SecondSurfaceValidity;
+	validity.CaptureNode = ticket.CaptureNode;
+	validity.Status = DataCaptureStatus::Ready;
+	validity.Resource = engine::core::Name("second-surface-validity");
+	validity.Width = 2;
+	validity.Height = 1;
+	validity.RowStride = 2;
+	validity.Scalar = DataCaptureScalar::UNorm8;
+	validity.ColourSpace = DataCaptureColourSpace::NotApplicable;
+	validity.Provenance = provenance;
+	validity.Bytes = {std::byte{0}, std::byte{255}};
+	validity.Hash = engine::assets::Hasher::Of(validity.Bytes);
+
+	capture_record_validation::State aligned;
+	CHECK(capture_record_validation::Plane(ticket, depth, 1, aligned));
+	CHECK(capture_record_validation::Plane(ticket, validity, 1, aligned));
+	validity.Width = 1;
+	validity.RowStride = 1;
+	validity.Bytes = {std::byte{255}};
+	validity.Hash = engine::assets::Hasher::Of(validity.Bytes);
+	capture_record_validation::State wrongExtent;
+	CHECK(capture_record_validation::Plane(ticket, depth, 1, wrongExtent));
+	CHECK_FALSE(capture_record_validation::Plane(ticket, validity, 1, wrongExtent));
+	validity.Status = DataCaptureStatus::Unsupported;
+	validity.Resource = {};
+	validity.Width = validity.Height = validity.RowStride = 0;
+	validity.Scalar = DataCaptureScalar::Unknown;
+	validity.ColourSpace = DataCaptureColourSpace::Unknown;
+	validity.Bytes.clear();
+	validity.Hash = {};
+	validity.Provenance.clear();
+	capture_record_validation::State mismatchedTerminal;
+	CHECK(capture_record_validation::Plane(ticket, depth, 1, mismatchedTerminal));
+	CHECK_FALSE(capture_record_validation::Plane(ticket, validity, 1, mismatchedTerminal));
 }
 
 namespace {
@@ -257,6 +401,9 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 	malformed = Request();
 	malformed.Channels = {"semantic_mask"};
 	CHECK_FALSE(first.Queue("data-world", malformed, ticket, detail));
+	malformed = Request();
+	malformed.Channels = {"second_surface_depth"};
+	CHECK_FALSE(first.Queue("data-world", malformed, ticket, detail));
 	CHECK_FALSE(first.Queue("another-world", Request(), ticket, detail));
 	const auto broad = engine::script::DataCaptureBridgeRequest{
 		.InstanceId = "data-world",
@@ -273,7 +420,9 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 			 "ambient_occlusion",
 			 "object_ids",
 			 "semantic_ids",
-			 "part_ids"},
+			 "part_ids",
+			 "second_surface_depth",
+			 "second_surface_validity"},
 		.TemporalHistory = "preserve",
 	};
 	uint64_t broadTicket = 0;

@@ -29,7 +29,7 @@ namespace engine::control {
 
 	namespace data_capture_detail {
 		inline constexpr size_t MAXIMUM_ID = 128;
-		inline constexpr size_t MAXIMUM_CHANNELS = 10;
+		inline constexpr size_t MAXIMUM_CHANNELS = 12;
 		inline constexpr size_t MAXIMUM_RANGE_BYTES = 1024 * 1024;
 		inline constexpr size_t MAXIMUM_LEDGER_ENTRIES = 256;
 
@@ -182,25 +182,28 @@ namespace engine::control {
 			} else if (plane.Channel == "shading_normal") {
 				dtype = "uint32";
 				packing = "UNorm10A2";
+			} else if (plane.Channel == "second_surface_depth") {
+				dtype = "float32";
 			}
-			const auto ambientOcclusion = [](const std::optional<script::DataCaptureBridgeAmbientOcclusion> &value) {
-				if (!value) return json(nullptr);
-				const auto nullable = [](const auto &field) -> json {
-					return field ? json(*field) : json(nullptr);
+			const auto ambientOcclusion =
+				[](const std::optional<script::DataCaptureBridgeAmbientOcclusion> &value) {
+					if (!value) return json(nullptr);
+					const auto nullable = [](const auto &field) -> json {
+						return field ? json(*field) : json(nullptr);
+					};
+					return json{
+						{"schema_version", "ssao-provenance/v1"},
+						{"source_state", value->SourceState},
+						{"producer_frame", nullable(value->ProducerFrame)},
+						{"enabled", nullable(value->Enabled)},
+						{"sample_count", nullable(value->SampleCount)},
+						{"radius_world_units", nullable(value->RadiusWorldUnits)},
+						{"denoiser", nullable(value->Denoiser)},
+						{"temporal_history", nullable(value->TemporalHistory)},
+						{"background_value", nullable(value->BackgroundValue)},
+						{"background_classification", nullable(value->BackgroundClassification)}
+					};
 				};
-				return json{
-					{"schema_version", "ssao-provenance/v1"},
-					{"source_state", value->SourceState},
-					{"producer_frame", nullable(value->ProducerFrame)},
-					{"enabled", nullable(value->Enabled)},
-					{"sample_count", nullable(value->SampleCount)},
-					{"radius_world_units", nullable(value->RadiusWorldUnits)},
-					{"denoiser", nullable(value->Denoiser)},
-					{"temporal_history", nullable(value->TemporalHistory)},
-					{"background_value", nullable(value->BackgroundValue)},
-					{"background_classification", nullable(value->BackgroundClassification)}
-				};
-			};
 			return {
 				{"channel", plane.Channel},
 				{"status", plane.Status},
@@ -371,7 +374,7 @@ namespace engine::control {
 				}
 				if (!Field(values, "channels", field, failure) || !field->is_array() || field->empty() ||
 					field->size() > MAXIMUM_CHANNELS) {
-					failure = Error("validation_failed", "channels must contain 1 to 10 names");
+					failure = Error("validation_failed", "channels must contain 1 to 12 names");
 					return nullptr;
 				}
 				for (const json &channel : *field) {

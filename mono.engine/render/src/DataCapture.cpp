@@ -23,6 +23,10 @@ namespace engine::render {
 			return "semantic_ids";
 		case DataCaptureChannel::PartMask:
 			return "part_ids";
+		case DataCaptureChannel::SecondSurfaceDepth:
+			return "second_surface_depth";
+		case DataCaptureChannel::SecondSurfaceValidity:
+			return "second_surface_validity";
 		case DataCaptureChannel::MotionVectors:
 			return "motion_vectors";
 		case DataCaptureChannel::OpticalFlow:

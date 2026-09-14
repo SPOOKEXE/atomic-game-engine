@@ -20,7 +20,7 @@ namespace engine::control {
 		constexpr std::string_view SCHEMA_VERSION = "1";
 		constexpr size_t MAXIMUM_REQUESTED_CHANNELS = 64;
 		constexpr size_t MAXIMUM_CHANNEL_NAME_BYTES = 128;
-		constexpr size_t MAXIMUM_CAPTURE_CHANNELS = 10;
+		constexpr size_t MAXIMUM_CAPTURE_CHANNELS = 12;
 
 		bool IsChannelIdentifier(std::string_view channel) {
 			return !channel.empty() && std::all_of(channel.begin(), channel.end(), [](unsigned char byte) {

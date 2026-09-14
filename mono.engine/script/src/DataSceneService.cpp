@@ -844,6 +844,145 @@ namespace engine::script {
 			};
 		}
 
+		// DataSceneOptions is plain, copied script data. The current bridge captures
+		// only its selected view, so CameraId is the explicit current_view token
+		// rather than a misleading arbitrary Instance reference.
+		ScriptValue NewCaptureOptions() {
+			return Map({
+				{"SchemaVersion", String("data-scene-options/v1")},
+				{"Channels", Array({String("rgb_linear_hdr")})},
+				{"CameraId", String("current_view")},
+				{"Pipeline", String("Default PBR")},
+				{"CaptureNode", String("data-capture")},
+				{"ViewSlot", Number(0)},
+				{"TemporalHistory", String("preserve")},
+				{"StorageProfile", String("lossless")},
+				{"Output", String("raw_planes")},
+				{"IncludeSceneData", Boolean(false)},
+				{"IncludeExactMasks", Boolean(false)},
+				{"CoordinateSpace", String("world_camera_image")},
+				{"NoiseMode", String("none")},
+				{"NoiseSeed", Number(0)},
+			});
+		}
+
+		bool OptionText(
+			const ScriptValue &options, std::string_view name, std::string_view expected, std::string &out
+		) {
+			return BoundedStringField(options, name, 256, out) && out == expected;
+		}
+
+		DataSceneResult QueueCaptureBundle(
+			const std::shared_ptr<DataCaptureBridge> &bridge,
+			std::string_view worldName,
+			std::string_view snapshotId,
+			const ScriptValue &options
+		) {
+			if (snapshotId.empty() || snapshotId.size() > 256 ||
+				snapshotId.find('\0') != std::string_view::npos || !DataSceneUtf8(snapshotId) ||
+				options.Tag != ValueTag::Map ||
+				!HasOnlyFields(
+					options,
+					{"SchemaVersion",
+					 "Channels",
+					 "CameraId",
+					 "Pipeline",
+					 "CaptureNode",
+					 "ViewSlot",
+					 "TemporalHistory",
+					 "StorageProfile",
+					 "Output",
+					 "IncludeSceneData",
+					 "IncludeExactMasks",
+					 "CoordinateSpace",
+					 "NoiseMode",
+					 "NoiseSeed"}
+				))
+				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+
+			std::string schema, cameraId, pipeline, captureNode, history, storage, output, coordinateSpace,
+				noiseMode;
+			if (!OptionText(options, "SchemaVersion", "data-scene-options/v1", schema) ||
+				!OptionText(options, "CameraId", "current_view", cameraId) ||
+				!BoundedStringField(options, "Pipeline", 256, pipeline) ||
+				!BoundedStringField(options, "CaptureNode", 256, captureNode) ||
+				!OptionText(options, "TemporalHistory", "preserve", history) ||
+				!OptionText(options, "StorageProfile", "lossless", storage) ||
+				!OptionText(options, "Output", "raw_planes", output) ||
+				!OptionText(options, "CoordinateSpace", "world_camera_image", coordinateSpace) ||
+				!OptionText(options, "NoiseMode", "none", noiseMode))
+				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+
+			const ScriptValue *channels = Field(options, "Channels");
+			const ScriptValue *slot = Field(options, "ViewSlot");
+			const ScriptValue *sceneData = Field(options, "IncludeSceneData");
+			const ScriptValue *exactMasks = Field(options, "IncludeExactMasks");
+			const ScriptValue *noiseSeed = Field(options, "NoiseSeed");
+			if (channels == nullptr || channels->Tag != ValueTag::Array || channels->Items.empty() ||
+				channels->Items.size() > 12 || slot == nullptr || slot->Tag != ValueTag::Number ||
+				!std::isfinite(slot->Number) || slot->Number < 0.0 ||
+				slot->Number > static_cast<double>(std::numeric_limits<uint32_t>::max()) ||
+				static_cast<double>(static_cast<uint64_t>(slot->Number)) != slot->Number ||
+				sceneData == nullptr ||
+				(sceneData->Tag != ValueTag::True && sceneData->Tag != ValueTag::False) ||
+				exactMasks == nullptr ||
+				(exactMasks->Tag != ValueTag::True && exactMasks->Tag != ValueTag::False) ||
+				noiseSeed == nullptr || noiseSeed->Tag != ValueTag::Number || noiseSeed->Number != 0.0)
+				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+
+			if (sceneData->Boolean)
+				return {
+					"unsupported",
+					Map({
+						{"status", String("unsupported_data_scene_options")},
+						{"reason", String("bundle scene sidecar is not captured by the renderer")},
+					})
+				};
+			if (exactMasks->Boolean)
+				return {
+					"unsupported",
+					Map({
+						{"status", String("unsupported_data_scene_options")},
+						{"reason", String("bundle exact mask assembly is not implemented")},
+					})
+				};
+
+			std::vector<ScriptValue> copiedChannels;
+			copiedChannels.reserve(channels->Items.size());
+			bool hasSecondSurfaceDepth = false;
+			bool hasSecondSurfaceValidity = false;
+			for (const ScriptValue &channel : channels->Items) {
+				if (channel.Tag != ValueTag::String || channel.Text.empty() || channel.Text.size() > 64 ||
+					std::any_of(
+						copiedChannels.begin(), copiedChannels.end(), [&](const ScriptValue &existing) {
+							return existing.Text == channel.Text;
+						}
+					))
+					return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+				hasSecondSurfaceDepth = hasSecondSurfaceDepth || channel.Text == "second_surface_depth";
+				hasSecondSurfaceValidity =
+					hasSecondSurfaceValidity || channel.Text == "second_surface_validity";
+				copiedChannels.push_back(String(channel.Text));
+			}
+			if (hasSecondSurfaceDepth != hasSecondSurfaceValidity)
+				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+
+			// Build a separate tree before queuing. The bridge retains only this copied
+			// request, never the reusable script-side options table.
+			const ScriptValue request = Map({
+				{"snapshot_id", String(snapshotId)},
+				{"pipeline", String(pipeline)},
+				{"capture_node", String(captureNode)},
+				{"view_slot", Number(slot->Number)},
+				{"channels", Array(std::move(copiedChannels))},
+				{"temporal_history", String(history)},
+			});
+			DataSceneResult queued = QueueCapture(bridge, worldName, request);
+			if (queued.Value.Tag == ValueTag::Map && queued.Status == std::string_view("ok"))
+				queued.Value.Entries.push_back({"options", options});
+			return queued;
+		}
+
 		ScriptValue Matrix(const std::array<double, 16> &matrix) {
 			std::vector<ScriptValue> values;
 			values.reserve(matrix.size());
@@ -1670,6 +1809,22 @@ namespace engine::script {
 			}
 			call.ReturnValue(QueueCapture(call.DataCapture(), call.World().Name(), request).Value);
 		}
+		void ServiceCreateOptions(ScriptCall &call) {
+			call.ReturnValue(NewCaptureOptions());
+		}
+		void ServiceCaptureBundle(ScriptCall &call) {
+			ScriptValue options;
+			CodecStatus status = CodecStatus::Ok;
+			if (!call.ReadValue(1, options, status)) {
+				call.ReturnValue(Map(
+					{{"status", String("invalid_data_scene_options")}, {"reason", String(Describe(status))}}
+				));
+				return;
+			}
+			call.ReturnValue(
+				QueueCaptureBundle(call.DataCapture(), call.World().Name(), call.AsString(0), options).Value
+			);
+		}
 		void ServicePollCapture(ScriptCall &call) {
 			call.ReturnValue(PollCapture(call.DataCapture(), call.World().Name(), call.AsString(0)).Value);
 		}
@@ -1843,13 +1998,15 @@ namespace engine::script {
 			call.ReturnValue(ColliderBev(call.World(), request).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 21> DATA_SCENE_METHODS{{
+		constexpr std::array<ServiceMethod, 23> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
 			{"GetEditableImageMetadata", ServiceImage},
 			{"GetCaptureChannels", ServiceChannels},
 			{"Capture", ServiceCapture},
+			{"CreateOptions", ServiceCreateOptions},
+			{"CaptureBundle", ServiceCaptureBundle},
 			{"PollCapture", ServicePollCapture},
 			{"CancelCapture", ServiceCancelCapture},
 			{"GetCaptureBuffer", ServiceCaptureBuffer},

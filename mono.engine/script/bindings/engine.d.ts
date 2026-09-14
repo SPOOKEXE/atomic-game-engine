@@ -2601,6 +2601,23 @@ declare interface ComputeService {
 	): Promise<number[]>;
 }
 
+interface DataSceneOptions {
+	SchemaVersion: "data-scene-options/v1";
+	Channels: string[];
+	CameraId: "current_view";
+	Pipeline: string;
+	CaptureNode: string;
+	ViewSlot: number;
+	TemporalHistory: "preserve";
+	StorageProfile: "lossless";
+	Output: "raw_planes";
+	IncludeSceneData: false;
+	IncludeExactMasks: false;
+	CoordinateSpace: "world_camera_image";
+	NoiseMode: "none";
+	NoiseSeed: 0;
+}
+
 // Read-only ECS observations. The result records are intentionally typed as
 // unknown-shaped maps while negotiated capture and lifecycle adapters evolve.
 declare interface DataSceneService {
@@ -2610,6 +2627,8 @@ declare interface DataSceneService {
 	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
 	GetCaptureChannels(): Record<string, unknown>;
 	Capture(request: unknown): Record<string, unknown>;
+	CreateOptions(): DataSceneOptions;
+	CaptureBundle(snapshotId: string, options: DataSceneOptions): Record<string, unknown>;
 	PollCapture(ticket: string): Record<string, unknown>;
 	CancelCapture(ticket: string): Record<string, unknown>;
 	GetCaptureBuffer(ticket: string, resource: string, offset: number, maximumBytes: number): ArrayBuffer;

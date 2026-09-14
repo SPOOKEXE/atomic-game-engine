@@ -826,6 +826,7 @@ namespace engine::render {
 			  State->PackedHdrWireframeOpaquePipeline,
 			  State->PackedHdrWireframeTransparentPipeline,
 			  State->PackedGBufferPipeline,
+			  State->PackedDepthPeelPipeline,
 			  State->PackedMeshShadowPipeline,
 			  State->PackedTransparentLayerPipeline,
 			  State->PackedTransparentLayerColourPipeline,
@@ -844,6 +845,7 @@ namespace engine::render {
 			  State->HdrWireframeOpaquePipeline,
 			  State->HdrWireframeTransparentPipeline,
 			  State->GBufferPipeline,
+			  State->DepthPeelPipeline,
 			  State->DepthLinearPipeline,
 			  State->DepthComposePipeline,
 			  State->ColourComposePipeline,
@@ -2168,6 +2170,15 @@ namespace engine::render {
 		}
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return pbr.LinearDepth;
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceZ) {
+			return pbr.SecondSurfaceZ;
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceDepth) {
+			return pbr.SecondSurfaceDepth;
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceValidity) {
+			return pbr.SecondSurfaceValidity;
 		}
 		if (role == Impl::ResourceRole::Occlusion) {
 			return pbr.Occlusion;

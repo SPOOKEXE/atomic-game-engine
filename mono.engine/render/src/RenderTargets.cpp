@@ -424,6 +424,9 @@ namespace engine::render {
 			  slot.SemanticIds,
 			  slot.PartIds,
 			  slot.LinearDepth,
+			  slot.SecondSurfaceZ,
+			  slot.SecondSurfaceDepth,
+			  slot.SecondSurfaceValidity,
 			  slot.Occlusion,
 			  slot.Lit,
 			  slot.SkyLit}) {
@@ -463,6 +466,18 @@ namespace engine::render {
 			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 			return gpu::CreateTexture(Device, &info);
 		};
+		const auto depth = [&] {
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = DepthFormat;
+			info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+			info.width = dimensions.ViewWidth;
+			info.height = dimensions.ViewHeight;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			return gpu::CreateTexture(Device, &info);
+		};
 
 		made.Albedo = texture(
 			SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB, dimensions.TargetWidth, dimensions.TargetHeight
@@ -482,6 +497,13 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
 		made.LinearDepth =
 			texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.LinearWidth, dimensions.LinearHeight);
+		if (dimensions.SecondSurface) {
+			made.SecondSurfaceZ = depth();
+			made.SecondSurfaceDepth =
+				texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.ViewWidth, dimensions.ViewHeight);
+			made.SecondSurfaceValidity =
+				texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.ViewWidth, dimensions.ViewHeight);
+		}
 		made.Occlusion =
 			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.OcclusionWidth, dimensions.OcclusionHeight);
 		made.Lit =
@@ -491,8 +513,11 @@ namespace engine::render {
 
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
 			made.Emissive == nullptr || made.ObjectIds == nullptr || made.SemanticIds == nullptr ||
-			made.PartIds == nullptr || made.LinearDepth == nullptr || made.Occlusion == nullptr ||
-			made.Lit == nullptr || made.SkyLit == nullptr) {
+			made.PartIds == nullptr || made.LinearDepth == nullptr ||
+			(dimensions.SecondSurface &&
+			 (made.SecondSurfaceZ == nullptr || made.SecondSurfaceDepth == nullptr ||
+			  made.SecondSurfaceValidity == nullptr)) ||
+			made.Occlusion == nullptr || made.Lit == nullptr || made.SkyLit == nullptr) {
 			ENGINE_ERROR(
 				"render graph targets for {}x{} view: {}",
 				dimensions.ViewWidth,

@@ -143,6 +143,38 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 	CHECK(occlusion->Divisor == 2);
 }
 
+TEST_CASE("the data capture document peels one aligned second surface", "[graph][data-capture]") {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(
+		Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok
+	);
+
+	const engine::graph::Node *peel = nullptr;
+	const engine::graph::Node *capture = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("depth-peel")) peel = node;
+		if (node && node->Name == Name("data-capture-second-surface")) capture = node;
+	}
+	REQUIRE(peel != nullptr);
+	CHECK(peel->Kind == Name("depth-peel"));
+	CHECK(peel->ReadPorts == std::vector<Name>{Name("first-depth"), Name("entities"), Name("instances")});
+	CHECK(peel->WritePorts == std::vector<Name>{Name("z"), Name("depth"), Name("validity")});
+	REQUIRE(capture != nullptr);
+	CHECK(capture->Kind == Name("capture"));
+	CHECK(capture->Scope == NodeScope::Frame);
+	CHECK(capture->ReadPorts == std::vector<Name>{Name("source"), Name("depth")});
+	const auto *validity = graph.FindResource(capture->Reads[0]);
+	const auto *depth = graph.FindResource(capture->Reads[1]);
+	REQUIRE(validity != nullptr);
+	REQUIRE(depth != nullptr);
+	CHECK(validity->Name == Name("second-surface-validity"));
+	CHECK(validity->Format == engine::graph::ResourceFormat::R8);
+	CHECK(depth->Name == Name("second-surface-depth"));
+	CHECK(depth->Format == engine::graph::ResourceFormat::R32F);
+}
+
 TEST_CASE("the compositor demo keeps every image operation as a graph pass", "[graph][compositor]") {
 	RenderGraph graph;
 	Name offender;

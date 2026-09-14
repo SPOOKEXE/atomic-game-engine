@@ -199,17 +199,17 @@ namespace {
 				 .Origin = "top_left",
 				 .Packing = "unorm8",
 				 .Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
-				 .AmbientOcclusion =
-					 engine::script::DataCaptureBridgeAmbientOcclusion{
-						 .SourceState = "estimated",
-						 .ProducerFrame = 9,
-						 .Enabled = true,
-						 .SampleCount = 12,
-						 .RadiusWorldUnits = 0.65,
-						 .Denoiser = "none",
-						 .TemporalHistory = "none",
-						 .BackgroundValue = 1.0,
-						 .BackgroundClassification = "unavailable"}}
+				 .AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
+					 .SourceState = "estimated",
+					 .ProducerFrame = 9,
+					 .Enabled = true,
+					 .SampleCount = 12,
+					 .RadiusWorldUnits = 0.65,
+					 .Denoiser = "none",
+					 .TemporalHistory = "none",
+					 .BackgroundValue = 1.0,
+					 .BackgroundClassification = "unavailable"
+				 }}
 			};
 			if (UnavailableAmbientOcclusion)
 				poll.Planes[1].AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
@@ -222,7 +222,7 @@ namespace {
 					.TemporalHistory = std::nullopt,
 					.BackgroundValue = std::nullopt,
 					.BackgroundClassification = "unavailable"
-			};
+				};
 			return true;
 		}
 		bool ReadPlane(
@@ -359,7 +359,7 @@ TEST_CASE("discovery reads each surface's installed capture readiness", "[contro
 	CHECK(available["offscreen_gpu"]["supported"]);
 	const json *captureLimits = Named(available["limits"], "channels");
 	REQUIRE(captureLimits != nullptr);
-	CHECK((*captureLimits)["maximum"] == 10);
+	CHECK((*captureLimits)["maximum"] == 12);
 
 	Surface unavailable("unavailable", "a suite");
 	unavailable.SetDataCaptureAvailabilityProvider([] {
@@ -413,18 +413,18 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	);
 	CHECK(capture["status"] == "queued");
 	CHECK(
-		bridge->RequestedChannels() ==
-			std::vector<std::string>{
-				"rgb_linear_hdr",
-				"linear_depth",
-				"shading_normal",
-				"pbr_albedo",
-				"pbr_material",
-				"pbr_emissive",
-				"ambient_occlusion",
-				"object_ids",
-				"semantic_ids",
-				"part_ids"}
+		bridge->RequestedChannels() == std::vector<std::string>{
+										   "rgb_linear_hdr",
+										   "linear_depth",
+										   "shading_normal",
+										   "pbr_albedo",
+										   "pbr_material",
+										   "pbr_emissive",
+										   "ambient_occlusion",
+										   "object_ids",
+										   "semantic_ids",
+										   "part_ids"
+									   }
 	);
 	const json poll = Called(surface, "poll_capture", json{{"instance_id", "capture-world"}, {"ticket", 1}});
 	CHECK(poll["planes"][0]["digest"] == "abcd");
@@ -525,9 +525,11 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			  "object_ids",
 			  "semantic_ids",
 			  "part_ids",
+			  "second_surface_depth",
+			  "second_surface_validity",
 			  "optical_flow"}},
 			{"temporal_history", "preserve"},
-			{"operation_id", "capture-10"},
+			{"operation_id", "capture-12"},
 			{"expected_tick", current.Clock.Tick},
 			{"expected_world_epoch", current.WorldEpoch},
 			{"expected_world_version", current.WorldVersion}
@@ -535,7 +537,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 		overflowFailed
 	);
 	CHECK(overflowFailed);
-	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 10 names");
+	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 12 names");
 }
 
 TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {

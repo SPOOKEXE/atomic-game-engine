@@ -641,6 +641,8 @@ namespace engine::render {
 		matrices = source.Projection ? scene::ResolveSurfaceCamera(cameraFrame, *source.Projection)
 									 : scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect);
 		State->ActiveDataCaptureSource.ProjectionAvailable = true;
+		State->ActiveDataCaptureSource.Width = sceneWidth;
+		State->ActiveDataCaptureSource.Height = sceneHeight;
 		for (size_t column = 0; column < 4; ++column)
 			for (size_t row = 0; row < 4; ++row)
 				State->ActiveDataCaptureSource.Projection[column * 4 + row] =
@@ -1556,9 +1558,8 @@ namespace engine::render {
 		depthTarget.texture = offscreen ? State->SlotAt(targetSlot).Depth : State->DepthTexture;
 		depthTarget.clear_depth = 1.0f;
 		depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-		// Nothing reads depth after the pass, so there is no reason to write it
-		// back out to memory.
-		depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+		// Graph consumers sample the completed opaque depth after the gbuffer pass.
+		depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 		depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 		depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 		depthTarget.cycle = true;
@@ -1605,6 +1606,7 @@ namespace engine::render {
 		pbrDimensions.OcclusionHeight = sceneHeight;
 		pbrDimensions.LitWidth = sceneWidth;
 		pbrDimensions.LitHeight = sceneHeight;
+		pbrDimensions.SecondSurface = graphEnabled(core::Name("depth-peel"));
 		outputDimensions(
 			core::Name("depth-linearise"), 0, pbrDimensions.LinearWidth, pbrDimensions.LinearHeight
 		);
@@ -1618,10 +1620,10 @@ namespace engine::render {
 			core::Name("colour")
 		);
 		const bool needsPbrTargets =
-			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-linearise")) ||
-			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
-			graphEnabled(core::Name("fog")) || graphEnabled(core::Name("tonemap")) ||
-			graphEnabled(core::Name("transparent"));
+			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-peel")) ||
+			graphEnabled(core::Name("depth-linearise")) || graphEnabled(core::Name("ssao")) ||
+			graphEnabled(core::Name("deferred-lighting")) || graphEnabled(core::Name("fog")) ||
+			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
 		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
 		if (!graphTargetsReady) {
 			closePass();

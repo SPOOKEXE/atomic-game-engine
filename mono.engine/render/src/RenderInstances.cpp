@@ -97,6 +97,7 @@ namespace engine::render {
 			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
 			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
 			if (native == GBufferPipeline) return PackedGBufferPipeline;
+			if (native == DepthPeelPipeline) return PackedDepthPeelPipeline;
 			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
 			if (native == TransparentLayerPipeline) return PackedTransparentLayerPipeline;
 			if (native == TransparentLayerColourPipeline) return PackedTransparentLayerColourPipeline;
@@ -428,6 +429,10 @@ namespace engine::render {
 				}
 
 				const core::Name shader = SlotShader[slot];
+				if (ActiveFamily == PipelineFamily::DepthPeel && shader.IsValid()) {
+					slot++;
+					continue;
+				}
 				bool resolvedBeforeGBuffer = false;
 				if (!baseMesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
 					const auto authored =
@@ -500,6 +505,10 @@ namespace engine::render {
 			// data maps, the shader, the seam plane and its light all join the
 			// mesh and the texture in what ends a run.
 			const core::Name shader = SlotShader[slot];
+			if (ActiveFamily == PipelineFamily::DepthPeel && shader.IsValid()) {
+				slot++;
+				continue;
+			}
 
 			uint32_t run = 1;
 			bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;

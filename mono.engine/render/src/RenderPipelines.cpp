@@ -168,7 +168,8 @@ namespace engine::render {
 						node->Kind == core::Name("surface-capture") ||
 						node->Kind == core::Name("mirror-capture") ||
 						node->Kind == core::Name("portal-capture") || node->Kind == core::Name("gbuffer") ||
-						node->Kind == core::Name("forward") || node->Kind == core::Name("portal-overlay") ||
+						node->Kind == core::Name("depth-peel") || node->Kind == core::Name("forward") ||
+						node->Kind == core::Name("portal-overlay") ||
 						node->Kind == core::Name("mirror-overlay") ||
 						node->Kind == core::Name("transparent") ||
 						node->Kind == core::Name("transparent-layer");
@@ -411,6 +412,7 @@ namespace engine::render {
 				std::string_view("tessellated-draw"),
 				std::string_view("forward"),
 				std::string_view("gbuffer"),
+				std::string_view("depth-peel"),
 				std::string_view("transparent-layer"),
 				std::string_view("transparent")
 			};
@@ -572,6 +574,7 @@ namespace engine::render {
 		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 1);
+		SDL_GPUShader *depthPeelFragment = LoadShader("depth-peel.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 2);
 		SDL_GPUShader *depthLinearFragment =
 			LoadShader("depth-linearise.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
@@ -585,8 +588,8 @@ namespace engine::render {
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
-			!depthLinearFragment || !ssaoFragment || !deferredLightingFragment || !skyFragment ||
-			!volumeFragment || !tonemapFragment) {
+			!depthPeelFragment || !depthLinearFragment || !ssaoFragment || !deferredLightingFragment ||
+			!skyFragment || !volumeFragment || !tonemapFragment) {
 			return false;
 		}
 
@@ -738,6 +741,20 @@ namespace engine::render {
 			GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
 			if (GBufferPipeline == nullptr) {
 				ENGINE_ERROR("gbuffer pipeline: {}", SDL_GetError());
+			}
+		}
+
+		SDL_GPUColorTargetDescription depthPeelTargets[2]{};
+		depthPeelTargets[0].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+		depthPeelTargets[1].format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+		SDL_GPUGraphicsPipelineCreateInfo depthPeel = opaque;
+		depthPeel.fragment_shader = depthPeelFragment;
+		depthPeel.target_info.color_target_descriptions = depthPeelTargets;
+		depthPeel.target_info.num_color_targets = 2;
+		if (pbrSupported) {
+			DepthPeelPipeline = SDL_CreateGPUGraphicsPipeline(Device, &depthPeel);
+			if (DepthPeelPipeline == nullptr) {
+				ENGINE_ERROR("depth peel pipeline: {}", SDL_GetError());
 			}
 		}
 
@@ -906,10 +923,13 @@ namespace engine::render {
 			packedHdrTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 			PackedHdrWireframeTransparentPipeline = packedPipeline(packedHdrTransparent, packedOpaqueVertex);
 		}
-		if (pbrSupported) PackedGBufferPipeline = packedPipeline(gbuffer, packedOpaqueVertex);
+		if (pbrSupported) {
+			PackedGBufferPipeline = packedPipeline(gbuffer, packedOpaqueVertex);
+			PackedDepthPeelPipeline = packedPipeline(depthPeel, packedOpaqueVertex);
+		}
 		if (PackedOpaquePipeline == nullptr || PackedForwardPipeline == nullptr ||
 			PackedTransparentPipeline == nullptr || PackedMeshShadowPipeline == nullptr ||
-			(pbrSupported && PackedGBufferPipeline == nullptr) ||
+			(pbrSupported && (PackedGBufferPipeline == nullptr || PackedDepthPeelPipeline == nullptr)) ||
 			(hdrSupported &&
 			 (PackedHdrOpaquePipeline == nullptr || PackedHdrTransparentPipeline == nullptr))) {
 			ENGINE_ERROR("packed editable mesh pipeline: {}", SDL_GetError());
@@ -1176,6 +1196,7 @@ namespace engine::render {
 		// released in `Shutdown` instead** - see `OpaqueVertexShader`.
 		SDL_ReleaseGPUShader(Device, opaqueFragment);
 		SDL_ReleaseGPUShader(Device, gbufferFragment);
+		SDL_ReleaseGPUShader(Device, depthPeelFragment);
 		SDL_ReleaseGPUShader(Device, depthLinearFragment);
 		SDL_ReleaseGPUShader(Device, ssaoFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
@@ -1220,10 +1241,10 @@ namespace engine::render {
 			   PackedTransparentPipeline != nullptr && PackedMeshShadowPipeline != nullptr &&
 			   (!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
-			   (!pbrSupported ||
-				(GBufferPipeline != nullptr && DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
-				 DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && VolumePipeline != nullptr &&
-				 TonemapPipeline != nullptr)) &&
+			   (!pbrSupported || (GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
+								  DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
+								  DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
+								  VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
 			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
 									 Lod.Select != nullptr));
 	}
@@ -1841,6 +1862,7 @@ namespace engine::render {
 			return found->second.HdrTransparent;
 		case PipelineFamily::Other:
 		case PipelineFamily::GBuffer:
+		case PipelineFamily::DepthPeel:
 			break;
 		}
 		return nullptr;
@@ -1862,6 +1884,7 @@ namespace engine::render {
 			return found->second.PackedHdrTransparent;
 		case PipelineFamily::Other:
 		case PipelineFamily::GBuffer:
+		case PipelineFamily::DepthPeel:
 			return nullptr;
 		}
 		return nullptr;

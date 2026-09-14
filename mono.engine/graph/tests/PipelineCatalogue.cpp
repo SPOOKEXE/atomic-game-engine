@@ -272,6 +272,7 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	ports("portal-capture", 3, 2);
 	ports("portal-tonemap", 1, 1);
 	ports("gbuffer", 3, 8);
+	ports("depth-peel", 3, 3);
 	ports("depth-linearise", 1, 1);
 	ports("ssao", 2, 1);
 	ports("deferred-lighting", 8, 1);

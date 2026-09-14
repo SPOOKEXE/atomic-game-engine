@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Records the opaque material once so lighting and screen-space effects shade
 // the visible pixel rather than every fragment that happened to cover it.
@@ -57,71 +58,33 @@ layout(set = 3, binding = 0) uniform Lighting {
 	uvec4 RenderFeatures;
 } lighting;
 
-const uint FEATURE_EMISSION = 1u << 2u;
-const uint FEATURE_DISPLACEMENT = 1u << 9u;
-
-uint ResolvedSurfaceFeatures() {
-	uint camera = (lighting.RenderFeatures.y | lighting.RenderFeatures.z) & ~lighting.RenderFeatures.w;
-	return ((camera | inFeaturePolicy.x) & ~inFeaturePolicy.y) & lighting.RenderFeatures.x;
-}
-
-mat3 CotangentFrame(vec3 normal, vec3 position, vec2 uv) {
-	vec3 positionX = dFdx(position);
-	vec3 positionY = dFdy(position);
-	vec2 uvX = dFdx(uv);
-	vec2 uvY = dFdy(uv);
-	vec3 tangent = positionX * uvY.y - positionY * uvX.y;
-	vec3 bitangent = -positionX * uvY.x + positionY * uvX.x;
-	float scale = inversesqrt(max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 1e-8));
-	return mat3(tangent * scale, bitangent * scale, normal);
-}
+#include "opaque-eligibility.glsl"
 
 void main() {
-	const uint features = ResolvedSurfaceFeatures();
+	OpaqueSurfaceSample surface = SampleEligibleOpaqueSurface();
 	vec3 normal = normalize(inNormal);
-	vec2 localUv = fract(inTexCoord);
-	vec2 cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
-	if ((features & FEATURE_DISPLACEMENT) != 0u && lighting.Surface.z > 0.5) {
-		mat3 tangentFrame = CotangentFrame(normal, inWorldPosition, cellUv);
-		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
-		float height = texture(heightMap, cellUv).r - 0.5;
-		float grazing = max(abs(tangentEye.z), 0.2);
-		localUv = fract(localUv - tangentEye.xy * (height * lighting.Surface.w / grazing));
-		cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
-	}
-	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, cellUv) : vec4(1.0);
-	uint alphaMode = inAppearance & 0xFFu;
-	float cutoff = float((inAppearance >> 8u) & 0xFFu) / 255.0;
-	float materialAlpha = sampled.a * lighting.BaseColour.a;
-	if (alphaMode == 1u && inColour.a >= 0.98 && materialAlpha < cutoff) {
-		discard;
-	}
-	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
-	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
-		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
-		discard;
-	}
 
 	if (lighting.Material.x > 0.5) {
-		vec3 mapped = texture(normalMap, cellUv).xyz * 2.0 - 1.0;
-		normal = normalize(CotangentFrame(normal, inWorldPosition, cellUv) * mapped);
+		vec3 mapped = texture(normalMap, surface.cellUv).xyz * 2.0 - 1.0;
+		normal = normalize(CotangentFrame(normal, inWorldPosition, surface.cellUv) * mapped);
 	}
 
-	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
-	float materialOcclusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = (features & FEATURE_EMISSION) != 0u && lighting.Material.w > 0.5
-		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
+	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, surface.cellUv).r : 0.65;
+	float materialOcclusion = lighting.Material.z > 0.5 ? texture(occlusionMap, surface.cellUv).r : 1.0;
+	vec3 emissive = (surface.features & FEATURE_EMISSION) != 0u && lighting.Material.w > 0.5
+		? texture(emissiveMap, surface.cellUv).rgb * inEmission.rgb * inEmission.a
 		: vec3(0.0);
-	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;
+	float metalness =
+		lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, surface.cellUv).r : 0.0;
 
-	vec3 mappedColour = sampled.rgb * lighting.BaseColour.rgb;
+	vec3 mappedColour = surface.colour.rgb * lighting.BaseColour.rgb;
 	vec3 albedo = inColour.rgb * mappedColour * inSurfaceColour;
-	if (alphaMode == 0u) {
-		albedo = mix(inColour.rgb, albedo, materialAlpha);
-	} else if (alphaMode == 2u) {
-		albedo = inColour.rgb * mappedColour * mix(vec3(1.0), inSurfaceColour, materialAlpha);
+	if (surface.alphaMode == 0u) {
+		albedo = mix(inColour.rgb, albedo, surface.materialAlpha);
+	} else if (surface.alphaMode == 2u) {
+		albedo = inColour.rgb * mappedColour * mix(vec3(1.0), inSurfaceColour, surface.materialAlpha);
 	}
-	outAlbedo = vec4(albedo, alpha);
+	outAlbedo = vec4(albedo, surface.alpha);
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
 	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, 0.0);
 	outEmissive = vec4(emissive, 1.0);

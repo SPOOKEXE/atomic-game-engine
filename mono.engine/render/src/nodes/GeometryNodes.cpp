@@ -7,6 +7,7 @@
 // particles and the ribbons ride in the transparent node for the same reason -
 // see its own comment for why they are not a node of their own.
 
+#include "../SecondSurfaceDepth.hpp"
 #include "Tessellation.hpp"
 #include "TransparentLayerWork.hpp"
 #include "ViewRecording.hpp"
@@ -614,6 +615,123 @@ namespace engine::render {
 				Impl::SlotSelection::LodOnly
 			);
 			SDL_EndGPURenderPass(latePass);
+			return true;
+		});
+
+		frameNodes.Set(core::Name("depth-peel"), [this](const graph::RunContext &context) {
+			const graph::Node *node = Pipeline->Graph.Find(context.Node);
+			if (node == nullptr || context.Reads.size() != 3 || context.Writes.size() != 3 ||
+				Pbr == nullptr || State->DepthPeelPipeline == nullptr) {
+				ENGINE_ERROR(
+					"depth-peel setup invalid: node={} reads={} writes={} pbr={} pipeline={}",
+					node != nullptr,
+					context.Reads.size(),
+					context.Writes.size(),
+					Pbr != nullptr,
+					State->DepthPeelPipeline != nullptr
+				);
+				return false;
+			}
+			const auto texture = [&](bool output, const char *port) {
+				const auto &ports = output ? node->WritePorts : node->ReadPorts;
+				const auto resources = output ? context.Writes : context.Reads;
+				const auto found = std::find(ports.begin(), ports.end(), core::Name(port));
+				if (found == ports.end()) return Impl::NamedTexture{};
+				const size_t index = static_cast<size_t>(found - ports.begin());
+				return index < resources.size() ? GraphTexture(resources[index], context, output)
+												: Impl::NamedTexture{};
+			};
+			const auto first = texture(false, "first-depth");
+			const auto z = texture(true, "z");
+			const auto depth = texture(true, "depth");
+			const auto validity = texture(true, "validity");
+			if (!first.IsValid() || !z.IsValid() || !depth.IsValid() || !validity.IsValid() ||
+				first.Format != State->DepthFormat || z.Format != State->DepthFormat ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+				validity.Format != SDL_GPU_TEXTUREFORMAT_R8_UNORM || first.Width < depth.Width ||
+				first.Height < depth.Height || z.Width != depth.Width || z.Height != depth.Height ||
+				validity.Width != depth.Width || validity.Height != depth.Height) {
+				ENGINE_ERROR(
+					"depth-peel resources invalid: valid={}/{}/{}/{} formats={}/{}/{}/{} expected-depth={} "
+					"sizes={}x{}/{}x{}/{}x{}/{}x{}",
+					first.IsValid(),
+					z.IsValid(),
+					depth.IsValid(),
+					validity.IsValid(),
+					int(first.Format),
+					int(z.Format),
+					int(depth.Format),
+					int(validity.Format),
+					int(State->DepthFormat),
+					first.Width,
+					first.Height,
+					z.Width,
+					z.Height,
+					depth.Width,
+					depth.Height,
+					validity.Width,
+					validity.Height
+				);
+				return false;
+			}
+
+			const auto depthRule = SecondSurfaceRule(State->DepthFormat);
+			if (!depthRule) return false;
+
+			EnterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo targets[2]{};
+			targets[0].texture = depth.Texture;
+			targets[1].texture = validity.Texture;
+			for (auto &target : targets) {
+				target.clear_color = SDL_FColor{0, 0, 0, 0};
+				target.load_op = SDL_GPU_LOADOP_CLEAR;
+				target.store_op = SDL_GPU_STOREOP_STORE;
+				target.cycle = true;
+			}
+			SDL_GPUDepthStencilTargetInfo secondZ{};
+			secondZ.texture = z.Texture;
+			secondZ.clear_depth = 1.0f;
+			secondZ.load_op = SDL_GPU_LOADOP_CLEAR;
+			secondZ.store_op = SDL_GPU_STOREOP_STORE;
+			secondZ.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+			secondZ.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+			secondZ.cycle = true;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(Command, targets, 2, &secondZ);
+			if (pass == nullptr) {
+				ENGINE_ERROR("depth-peel: SDL_BeginGPURenderPass: {}", SDL_GetError());
+				return false;
+			}
+			State->BindPipeline(pass, State->DepthPeelPipeline, Impl::PipelineFamily::DepthPeel);
+			SDL_SetGPUViewport(pass, &SceneViewport);
+			SDL_SetGPUScissor(pass, &SceneScissor);
+			SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
+			const core::Vector3 eye = Request.CameraFrame.Position;
+			const core::Vector3 forward = Request.CameraFrame.LookVector();
+			const std::array<glm::vec4, 2> peelUniforms{
+				glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(eye)},
+				glm::vec4{depthRule->SourceQuantum, depthRule->NextRepresentable ? 1.0f : 0.0f, 0, 0},
+			};
+			SDL_PushGPUFragmentUniformData(Command, 1, peelUniforms.data(), sizeof(peelUniforms));
+			if (HaveInstances && PlainOpaque > 0) {
+				State->BindInstanceBuffers(pass, State->InstanceIndexBuffer);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				Result.DrawCalls += State->DrawSlots(
+					Command,
+					pass,
+					SceneCount,
+					PlainOpaque,
+					&Lighting,
+					first.Texture,
+					State->OverlaySampler,
+					nullptr,
+					State->SurfaceSampler,
+					0,
+					Result.Triangles
+				);
+			}
+			SDL_EndGPURenderPass(pass);
+			core::Metrics::Count("render.depth_peel.pixels", uint64_t(depth.Width) * depth.Height);
 			return true;
 		});
 

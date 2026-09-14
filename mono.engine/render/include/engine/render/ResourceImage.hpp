@@ -90,6 +90,12 @@ namespace engine::render {
 		float CameraFieldOfViewRadians = 0.0f;
 		float CameraNearPlane = 0.0f;
 		float CameraFarPlane = 0.0f;
+		float CameraCropLeft = 0.0f;
+		float CameraCropTop = 0.0f;
+		float CameraCropWidth = 1.0f;
+		float CameraCropHeight = 1.0f;
+		uint32_t CaptureWidth = 0;
+		uint32_t CaptureHeight = 0;
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		uint32_t RowStride = 0;
@@ -97,6 +103,9 @@ namespace engine::render {
 		// Present for an R8 ambient-occlusion capture. Custom R8 resources carry
 		// the explicit Unavailable state rather than borrowed built-in settings.
 		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
+		// Set for the built-in second-surface pair. The string names the source
+		// depth format and its exact equality-bias rule.
+		std::string Provenance;
 		// Owned top-left rows in the native Format, in little-endian order.
 		std::vector<std::byte> Pixels;
 		// Optional declared R32F capture input, copied in the same submission.

@@ -1,5 +1,6 @@
 #include "AmbientOcclusionCapture.hpp"
 #include "RendererState.hpp"
+#include "SecondSurfaceDepth.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -506,15 +507,23 @@ namespace engine::render {
 			slot.Image.CameraProjection = ActiveDataCaptureSource.Projection;
 			slot.Image.CameraNearPlane = ActiveDataCaptureSource.Camera.NearPlane;
 			slot.Image.CameraFarPlane = ActiveDataCaptureSource.Camera.FarPlane;
+			slot.Image.CaptureWidth = ActiveDataCaptureSource.Width;
+			slot.Image.CaptureHeight = ActiveDataCaptureSource.Height;
 			slot.Image.Resource = resource;
 			const bool builtInOcclusion = resource == core::Name("occlusion") && viewSlot < PbrSlots.size() &&
-				source.Texture == PbrSlots[viewSlot].Occlusion;
+										  source.Texture == PbrSlots[viewSlot].Occlusion;
 			slot.Image.AmbientOcclusion = CapturedAmbientOcclusion(
 				sourceCaptureFormat,
 				builtInOcclusion,
 				builtInOcclusion ? PbrSlots[viewSlot].OcclusionProvenance : AmbientOcclusionProvenance{}
 			);
 			slot.Image.DepthResource = depthResource;
+			const bool builtInSecondSurface = resource == core::Name("second-surface-validity") &&
+											  depthResource == core::Name("second-surface-depth") &&
+											  viewSlot < PbrSlots.size() &&
+											  source.Texture == PbrSlots[viewSlot].SecondSurfaceValidity &&
+											  depth.Texture == PbrSlots[viewSlot].SecondSurfaceDepth;
+			slot.Image.Provenance = builtInSecondSurface ? SecondSurfaceProvenance(DepthFormat) : "";
 			slot.Image.NormalResource = normalResource;
 			slot.Image.AmbientResponseResource = ambientResponseResource;
 			slot.Image.LightingBaselineResource = lightingBaselineResource;
@@ -577,13 +586,7 @@ namespace engine::render {
 					&slot.ResidentDirectionalResponse
 				};
 				if (!ReuseResidentImage(
-						slot,
-						source.Width,
-						source.Height,
-						withDepth,
-						withNormal,
-						withAmbient,
-						withDirectional
+						slot, source.Width, source.Height, withDepth, withNormal, withAmbient, withDirectional
 					)) {
 					SDL_GPUTextureCreateInfo info{};
 					info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -788,10 +791,10 @@ namespace engine::render {
 			slot.ResidentLightingBaseline = pair.LightingBaseline;
 			slot.ResidentDirectionalResponse = pair.DirectionalResponse;
 			PortalImportUsage.CachedTextureBytes -= size_t(width) * height *
-												(directional ? 64
-												 : ambient	 ? 48
-												 : normal	 ? 16
-												 : depth	 ? 12
+													(directional ? 64
+													 : ambient	 ? 48
+													 : normal	 ? 16
+													 : depth	 ? 12
 																 : 8);
 			pair = {};
 			ReportPortalImportUsage();

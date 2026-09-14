@@ -809,6 +809,9 @@ namespace engine::render {
 			return texture;
 		}
 		if (role == Impl::ResourceRole::Depth) {
+			if (slot == targetSlot) {
+				return Impl::NamedTexture{DepthTarget.texture, sceneWidth, sceneHeight, State->DepthFormat};
+			}
 			if (slot < State->SceneSlots.size()) {
 				const Impl::SceneSlot &scene = State->SceneSlots[slot];
 				return Impl::NamedTexture{
@@ -945,6 +948,30 @@ namespace engine::render {
 				slotPbr.Dimensions.LinearWidth,
 				slotPbr.Dimensions.LinearHeight,
 				SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceZ) {
+			return Impl::NamedTexture{
+				slotPbr.SecondSurfaceZ,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				State->DepthFormat,
+			};
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceDepth) {
+			return Impl::NamedTexture{
+				slotPbr.SecondSurfaceDepth,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceValidity) {
+			return Impl::NamedTexture{
+				slotPbr.SecondSurfaceValidity,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				SDL_GPU_TEXTUREFORMAT_R8_UNORM,
 			};
 		}
 		if (role == Impl::ResourceRole::Occlusion) {
@@ -1239,9 +1266,9 @@ namespace engine::render {
 		pbr.OcclusionProvenance = {
 			.SourceState = sourceState,
 			.ProducerFrame = sourceState == AmbientOcclusionSourceState::ClearedDisabled ||
-							 sourceState == AmbientOcclusionSourceState::ClearedNoPass
-							 ? std::optional<uint64_t>(State->FrameCounter)
-							 : std::nullopt,
+									 sourceState == AmbientOcclusionSourceState::ClearedNoPass
+								 ? std::optional<uint64_t>(State->FrameCounter)
+								 : std::nullopt,
 			.Enabled = enabled,
 			.SampleCount = sourceState == AmbientOcclusionSourceState::ClearedDisabled
 							   ? std::optional<uint32_t>(SSAO_SAMPLE_COUNT)

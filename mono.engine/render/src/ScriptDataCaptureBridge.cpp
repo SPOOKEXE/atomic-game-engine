@@ -11,7 +11,7 @@
 
 namespace engine::render {
 	namespace {
-		constexpr size_t MAX_CAPTURE_CHANNELS = 10;
+		constexpr size_t MAX_CAPTURE_CHANNELS = 12;
 		constexpr size_t MAX_CAPTURE_TICKETS = 6;
 		constexpr size_t RETAINED_BYTE_LIMIT = 64 * 1024 * 1024;
 
@@ -30,6 +30,8 @@ namespace engine::render {
 			if (name == "object_ids") return DataCaptureChannel::ObjectIds;
 			if (name == "semantic_ids") return DataCaptureChannel::SemanticMask;
 			if (name == "part_ids") return DataCaptureChannel::PartMask;
+			if (name == "second_surface_depth") return DataCaptureChannel::SecondSurfaceDepth;
+			if (name == "second_surface_validity") return DataCaptureChannel::SecondSurfaceValidity;
 			return std::nullopt;
 		}
 
@@ -44,7 +46,11 @@ namespace engine::render {
 				for (size_t second = first + 1; second < request.Channels.size(); ++second)
 					if (request.Channels[first] == request.Channels[second]) return false;
 			}
-			return true;
+			const bool secondDepth =
+				std::ranges::find(request.Channels, "second_surface_depth") != request.Channels.end();
+			const bool secondValidity =
+				std::ranges::find(request.Channels, "second_surface_validity") != request.Channels.end();
+			return secondDepth == secondValidity;
 		}
 
 		bool PipelineMatches(std::string_view requested, const View &view) {
@@ -109,8 +115,8 @@ namespace engine::render {
 
 		const char *Provenance(DataCaptureChannel channel) {
 			return channel == DataCaptureChannel::AmbientOcclusion
-				 ? "ssao_estimator_visibility_factor_not_ground_truth"
-				 : "";
+					   ? "ssao_estimator_visibility_factor_not_ground_truth"
+					   : "";
 		}
 
 		const char *SourceState(AmbientOcclusionSourceState state) {
@@ -131,28 +137,26 @@ namespace engine::render {
 		CopyAmbientOcclusion(const std::optional<AmbientOcclusionProvenance> &source) {
 			if (!source) return std::nullopt;
 			const auto denoiser = source->Denoiser == std::optional(AmbientOcclusionDenoiser::None)
-				? std::optional<std::string>("none")
-				: std::nullopt;
+									  ? std::optional<std::string>("none")
+									  : std::nullopt;
 			const auto temporalHistory =
 				source->TemporalHistory == std::optional(AmbientOcclusionTemporalHistory::Disabled)
 					? std::optional<std::string>("none")
 					: std::nullopt;
-			const auto backgroundClassification = source->BackgroundClassification
-				? std::optional<std::string>("unavailable")
-				: std::nullopt;
+			const auto backgroundClassification =
+				source->BackgroundClassification ? std::optional<std::string>("unavailable") : std::nullopt;
 			return script::DataCaptureBridgeAmbientOcclusion{
 				.SourceState = SourceState(source->SourceState),
 				.ProducerFrame = source->ProducerFrame,
 				.Enabled = source->Enabled,
 				.SampleCount = source->SampleCount,
 				.RadiusWorldUnits = source->RadiusWorldUnits
-					? std::optional<double>(*source->RadiusWorldUnits)
-					: std::nullopt,
+										? std::optional<double>(*source->RadiusWorldUnits)
+										: std::nullopt,
 				.Denoiser = std::move(denoiser),
 				.TemporalHistory = std::move(temporalHistory),
-				.BackgroundValue = source->BackgroundValue
-					? std::optional<double>(*source->BackgroundValue)
-					: std::nullopt,
+				.BackgroundValue =
+					source->BackgroundValue ? std::optional<double>(*source->BackgroundValue) : std::nullopt,
 				.BackgroundClassification = std::move(backgroundClassification)
 			};
 		}
@@ -215,7 +219,9 @@ namespace engine::render {
 				 "ambient_occlusion",
 				 "object_ids",
 				 "semantic_ids",
-				 "part_ids"},
+				 "part_ids",
+				 "second_surface_depth",
+				 "second_surface_validity"},
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
 		};
@@ -568,11 +574,13 @@ namespace engine::render {
 					 .Scalar = Scalar(plane.Scalar),
 					 .ColourSpace = ColourSpace(plane.ColourSpace),
 					 .Origin = "top_left",
-					 .Packing = plane.Channel == DataCaptureChannel::AmbientOcclusion ? "unorm8"
+					 .Packing = plane.Channel == DataCaptureChannel::AmbientOcclusion ||
+										plane.Channel == DataCaptureChannel::SecondSurfaceValidity
+									? "unorm8"
 								: plane.Scalar == DataCaptureScalar::UNorm8	   ? "rgba8_unorm"
 								: plane.Scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
-																									   : "",
-					 .Provenance = Provenance(plane.Channel),
+																			   : "",
+					 .Provenance = plane.Provenance.empty() ? Provenance(plane.Channel) : plane.Provenance,
 					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion)}
 				);
 				if (!plane.Bytes.empty()) {

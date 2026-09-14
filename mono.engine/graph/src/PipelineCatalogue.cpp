@@ -405,6 +405,7 @@ namespace engine::graph {
 				 "portal-tonemap",
 				 "forward",
 				 "gbuffer",
+				 "depth-peel",
 				 "depth-linearise",
 				 "depth-compose",
 				 "ambient-response",
@@ -501,6 +502,7 @@ namespace engine::graph {
 				 "portal-capture",
 				 "select-lod",
 				 "gbuffer",
+				 "depth-peel",
 				 "transparent"}
 			);
 			for (const PortSpec &output : spec.Outputs) {
@@ -729,6 +731,19 @@ namespace engine::graph {
 			 "**Built** - seven colour targets plus depth, and the engine ships the shader. Declare "
 			 "albedo, normal and material in that order; a node declaring fewer is "
 			 "refused rather than drawn short."},
+
+			{"depth-peel",
+			 "Second Surface Depth",
+			 C::Draw,
+			 S::View,
+			 {{"first-depth", K::Texture, D24, true, "The visible opaque hardware depth."},
+			  {"entities", K::Entities, F::R8, false, "The same ordered opaque draw ranges."},
+			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
+			 {{"z", K::Depth, D24, true, "Private nearest eligible second-fragment depth."},
+			  {"depth", K::Colour, R32, true, "Camera-forward metres, zero when invalid."},
+			  {"validity", K::Colour, F::R8, true, "255 for a second hit and zero otherwise."}},
+			 "Peels the nearest built-in opaque fragment strictly behind visible hardware depth. "
+			 "This is a second surface sample, not amodal geometry truth."},
 
 			{"forward",
 			 "Forward",

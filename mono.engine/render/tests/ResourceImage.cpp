@@ -1,5 +1,5 @@
-#include "RenderFixture.hpp"
 #include "AmbientOcclusionCapture.hpp"
+#include "RenderFixture.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -28,6 +28,7 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <glm/packing.hpp>
 
@@ -62,7 +63,10 @@ TEST_CASE("custom R8 capture does not inherit SSAO facts", "[render][resourceima
 	CHECK_FALSE(custom->Denoiser);
 	CHECK_FALSE(custom->TemporalHistory);
 	CHECK_FALSE(custom->BackgroundValue);
-	CHECK(custom->BackgroundClassification == engine::render::AmbientOcclusionBackgroundClassification::Unavailable);
+	CHECK(
+		custom->BackgroundClassification ==
+		engine::render::AmbientOcclusionBackgroundClassification::Unavailable
+	);
 }
 
 namespace {
@@ -901,6 +905,8 @@ TEST_CASE(
 	));
 	CHECK(generatedGroup == std::array<uint64_t, 2>{2, 4});
 	REQUIRE(renderer.RequestResourceImage(request(99)));
+	for (uint64_t token = 200; token < 207; ++token)
+		REQUIRE(renderer.RequestResourceImage(request(token)));
 	std::array<uint64_t, 2> refusedGroup{777, 888};
 	CHECK_FALSE(renderer.QueueResourceImages(
 		core::Name("image-export-pipeline"),
@@ -913,6 +919,8 @@ TEST_CASE(
 	for (uint64_t token = 1; token <= 4; ++token)
 		REQUIRE(renderer.CancelResourceImage(token));
 	REQUIRE(renderer.CancelResourceImage(99));
+	for (uint64_t token = 200; token < 207; ++token)
+		REQUIRE(renderer.CancelResourceImage(token));
 	const std::array invalidNodes{core::Name("image-export"), core::Name("missing-capture")};
 	CHECK_FALSE(renderer.QueueResourceImages(
 		core::Name("image-export-pipeline"),
@@ -926,7 +934,19 @@ TEST_CASE(
 	CHECK_FALSE(renderer.RequestResourceImages({}));
 	CHECK_FALSE(renderer.RequestResourceImages(
 		std::array{
-			request(100), request(101), request(102), request(103), request(104), request(105), request(106)
+			request(100),
+			request(101),
+			request(102),
+			request(103),
+			request(104),
+			request(105),
+			request(106),
+			request(107),
+			request(108),
+			request(109),
+			request(110),
+			request(111),
+			request(112)
 		}
 	));
 	for (const int invalid : {0, 1, 2, 3, 4, 5}) {
@@ -964,11 +984,11 @@ TEST_CASE(
 	CHECK_FALSE(renderer.RequestResourceImage(absent));
 	REQUIRE(renderer.RequestResourceImage(request(99)));
 	REQUIRE(renderer.RequestResourceImage(request(98)));
-	for (uint64_t token = 1; token <= 4; token++) {
+	for (uint64_t token = 1; token <= 10; token++) {
 		REQUIRE(renderer.RequestResourceImage(request(token)));
 	}
 	CHECK_FALSE(renderer.RequestResourceImage(request(1)));
-	CHECK_FALSE(renderer.RequestResourceImage(request(5)));
+	CHECK_FALSE(renderer.RequestResourceImage(request(11)));
 	REQUIRE(renderer.CancelResourceImage(4));
 	CHECK_FALSE(renderer.RequestResourceImages(validGroup));
 	CHECK_FALSE(renderer.CancelResourceImage(100));
@@ -976,7 +996,7 @@ TEST_CASE(
 	CHECK_FALSE(renderer.RequestResourceImages(std::array{request(100), request(1)}));
 	CHECK_FALSE(renderer.CancelResourceImage(100));
 
-	REQUIRE(renderer.RequestResourceImage(request(5)));
+	REQUIRE(renderer.RequestResourceImage(request(11)));
 	CHECK(renderer.TakeResourceImages().empty());
 
 	assets::MeshData plane;
@@ -1016,9 +1036,11 @@ TEST_CASE(
 	render::OverlayImage overlay;
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
 	// Pending cancellation suppresses bytes while retaining staging ownership until completion.
-	REQUIRE(renderer.CancelResourceImage(5));
+	REQUIRE(renderer.CancelResourceImage(11));
 	REQUIRE(renderer.CancelResourceImage(99));
 	REQUIRE(renderer.CancelResourceImage(98));
+	for (uint64_t token = 5; token <= 10; ++token)
+		REQUIRE(renderer.CancelResourceImage(token));
 	auto firstImage = AwaitImage(renderer, 1);
 	CHECK_FALSE(renderer.TakeResourceImage(1));
 	// A completed member must survive a group with an unfinished or invalid member.
@@ -1121,7 +1143,10 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	auto &renderer = fixture.Render;
 	graph::RenderGraph pipeline;
 	core::Name offender;
-	REQUIRE(graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
 	const core::Name pipelineName("default-data-capture");
 	const core::Name captureNode("data-capture");
 	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
@@ -1145,7 +1170,9 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	CHECK(image.AmbientResponse.empty());
 	CHECK(image.LightingBaseline.empty());
 
-	const render::ResourceImageRequest ambient{2, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	const render::ResourceImageRequest ambient{
+		2, pipelineName, core::Name("data-capture-ambient-occlusion"), 0
+	};
 	REQUIRE(renderer.RequestResourceImage(ambient));
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(ambient.Node));
 	const auto occlusion = AwaitImage(renderer, ambient.Token);
@@ -1173,7 +1200,9 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	// The output capture remains live on an unchanged scene while SSAO stays in
 	// the PBR slot. Its download is newer, but its producer is not.
 	view.Damage.Scene = false;
-	const render::ResourceImageRequest cached{6, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	const render::ResourceImageRequest cached{
+		6, pipelineName, core::Name("data-capture-ambient-occlusion"), 0
+	};
 	REQUIRE(renderer.RequestResourceImage(cached));
 	const render::FrameResult cachedFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(cachedFrame.Ran(cached.Node));
@@ -1188,7 +1217,9 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	view.OverrideLighting = true;
 	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
 	view.Camera.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
-	const render::ResourceImageRequest disabled{4, pipelineName, core::Name("data-capture-ambient-occlusion"), 0};
+	const render::ResourceImageRequest disabled{
+		4, pipelineName, core::Name("data-capture-ambient-occlusion"), 0
+	};
 	REQUIRE(renderer.RequestResourceImage(disabled));
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(disabled.Node));
 	const auto cleared = AwaitImage(renderer, disabled.Token);
@@ -1200,9 +1231,7 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	CHECK(cleared.AmbientOcclusion->RadiusWorldUnits == 0.65f);
 
 	graph::PipelineDocument noPassDocument = graph::DefaultPbrDataCaptureDocument();
-	noPassDocument.Record(
-		{.Kind = graph::EditKind::Enable, .Name = core::Name("ssao"), .Enabled = false}
-	);
+	noPassDocument.Record({.Kind = graph::EditKind::Enable, .Name = core::Name("ssao"), .Enabled = false});
 	graph::RenderGraph noPassPipeline;
 	REQUIRE(graph::Build(noPassDocument, noPassPipeline, offender) == graph::PipelineDocumentStatus::Ok);
 	const core::Name noPassName("default-data-capture-no-ssao");
@@ -1215,7 +1244,9 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(noPass.Node));
 	const auto noPassOcclusion = AwaitImage(renderer, noPass.Token);
 	REQUIRE(noPassOcclusion.AmbientOcclusion);
-	CHECK(noPassOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass);
+	CHECK(
+		noPassOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass
+	);
 	CHECK(noPassOcclusion.AmbientOcclusion->ProducerFrame == noPassOcclusion.CaptureFrame);
 	CHECK(noPassOcclusion.AmbientOcclusion->Enabled == true);
 	CHECK_FALSE(noPassOcclusion.AmbientOcclusion->SampleCount);
@@ -1231,7 +1262,10 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(noPassDisabled.Node));
 	const auto noPassDisabledOcclusion = AwaitImage(renderer, noPassDisabled.Token);
 	REQUIRE(noPassDisabledOcclusion.AmbientOcclusion);
-	CHECK(noPassDisabledOcclusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass);
+	CHECK(
+		noPassDisabledOcclusion.AmbientOcclusion->SourceState ==
+		render::AmbientOcclusionSourceState::ClearedNoPass
+	);
 	CHECK(noPassDisabledOcclusion.AmbientOcclusion->Enabled == false);
 
 	const render::ResourceImageRequest residentAmbient{
@@ -1252,7 +1286,11 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 		 .Scope = graph::NodeScope::Frame}
 	);
 	for (const auto &[name, port] : std::array<std::pair<const char *, const char *>, 4>{
-			 {{"lit", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}, {"albedo", "ambient-response"}}}) {
+			 {{"lit", "source"},
+			  {"linear-depth", "depth"},
+			  {"normal", "normal"},
+			  {"albedo", "ambient-response"}}
+		 }) {
 		malformed.Record(
 			{.Kind = graph::EditKind::Reads, .Target = core::Name(name), .Key = core::Name(port)}
 		);
@@ -3853,7 +3891,9 @@ void main() {
 	CHECK(renderer.PortalImageUsage().Images == 0);
 }
 
-TEST_CASE("default data capture binds copied planes to the rendered snapshot", "[render][gpu][data-capture][.]") {
+TEST_CASE(
+	"default data capture binds copied planes to the rendered snapshot", "[render][gpu][data-capture][.]"
+) {
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
@@ -3887,6 +3927,13 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	white.Format = assets::TextureFormat::RGBA8;
 	white.Pixels.assign(4, std::byte{255});
 	REQUIRE(renderer.AddTexture(core::Name("object-id-white"), white));
+	assets::TextureData alphaSplit;
+	alphaSplit.Width = 2;
+	alphaSplit.Height = 1;
+	alphaSplit.Format = assets::TextureFormat::RGBA8;
+	alphaSplit.Pixels.assign(8, std::byte{255});
+	alphaSplit.Pixels[3] = std::byte{0};
+	REQUIRE(renderer.AddTexture(core::Name("second-surface-alpha-split"), alphaSplit));
 	scene::DrawInstance labelled;
 	labelled.Source = 1;
 	labelled.Frame.Position = {-1, 0, -4};
@@ -3901,18 +3948,37 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	unlabelled.Source = 2;
 	unlabelled.Frame.Position = {0, 0, -3.5f};
 	unlabelled.ObjectLabel = 0;
+	unlabelled.Texture = core::Name("second-surface-alpha-split");
+	unlabelled.Alpha = scene::AlphaMode::Transparency;
+	unlabelled.AlphaCutoff = .5f;
+	scene::DrawInstance centreRear = labelled;
+	centreRear.Source = 4;
+	centreRear.Frame.Position = {0, 0, -4.5f};
+	centreRear.ObjectLabel = 0;
+	scene::DrawInstance transparentFront = labelled;
+	transparentFront.Source = 5;
+	transparentFront.Frame.Position = {-1.25f, 0, -5};
+	transparentFront.Transparency = .5f;
+	scene::DrawInstance nativeRear = labelled;
+	nativeRear.Source = 7;
+	nativeRear.Frame.Position = {-1, 0, -6};
 
 	scene::EditableMesh editable;
-	editable.Positions = {{-.5f, -.5f, 0}, {.5f, -.5f, 0}, {0, .5f, 0}};
-	editable.Normals = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
-	editable.UVs = {{0, 1}, {1, 1}, {.5f, 0}};
-	editable.Colours = {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}};
-	editable.Alphas = {1, 1, 1};
-	editable.Indices = {0, 1, 2};
-	editable.Packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position);
+	editable.Positions = {{-1, -1, 0}, {1, -1, 0}, {1, 1, 0}, {-1, 1, 0}};
+	editable.Normals = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+	editable.UVs = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+	editable.Colours = {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}};
+	editable.Alphas = {1, 1, 1, 1};
+	editable.Indices = {0, 1, 2, 0, 2, 3};
+	editable.Packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position) |
+								  static_cast<uint8_t>(scene::EditablePackingAttribute::Normal) |
+								  static_cast<uint8_t>(scene::EditablePackingAttribute::UV);
 	editable.Packing.Format = scene::EditablePackingFormat::Unsigned16;
+	editable.Packing.Minimum = -1;
+	editable.Packing.Maximum = 1;
 	const core::Name packedMesh("object-id-packed");
 	REQUIRE(renderer.AddPackedMesh(packedMesh, render::BuildPackedMeshData(editable)));
+	centreRear.Mesh = packedMesh;
 	scene::DrawInstance packed = labelled;
 	packed.Source = 3;
 	packed.Frame.Position = {1, 0, -4};
@@ -3920,7 +3986,10 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	packed.ObjectLabel = 2;
 	packed.SemanticLabel = 1;
 	packed.PartLabel = 2;
-	const std::array rows{labelled, unlabelled, packed};
+	scene::DrawInstance packedFront = packed;
+	packedFront.Source = 6;
+	packedFront.Frame.Position = {1, 0, -3};
+	const std::array rows{labelled, transparentFront, nativeRear, unlabelled, centreRear, packedFront};
 	view.Instances = rows;
 	render::DataCaptureRequest request{
 		.SnapshotId = view.SnapshotId,
@@ -3939,6 +4008,8 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	CHECK(ticket.ResourceTokens.size() == 2);
+	CHECK(ticket.ChannelResourceIndices == std::vector<uint8_t>{0, 0, 0, 1});
 	render::OverlayImage overlay;
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
 
@@ -3977,13 +4048,18 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 		render::DataCaptureChannel::AmbientOcclusion,
 		render::DataCaptureChannel::ObjectIds,
 		render::DataCaptureChannel::SemanticMask,
-		render::DataCaptureChannel::PartMask
+		render::DataCaptureChannel::PartMask,
+		render::DataCaptureChannel::SecondSurfaceDepth,
+		render::DataCaptureChannel::SecondSurfaceValidity,
 	};
 	request.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	request.SemanticLabels = {{1, "fixture/box"}};
 	request.PartLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	render::DataCaptureTicket partial;
 	REQUIRE(renderer.QueueDataCapture(request, partial));
+	CHECK(partial.ResourceTokens.size() == 9);
+	CHECK(partial.ChannelResourceIndices.size() == request.Channels.size());
+	CHECK(partial.ChannelResourceIndices[10] == partial.ChannelResourceIndices[11]);
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
 	do {
 		captured = renderer.PollDataCapture(partial);
@@ -3992,7 +4068,7 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
-	REQUIRE(captured.Planes.size() == 10);
+	REQUIRE(captured.Planes.size() == 12);
 	CHECK(captured.Planes[6].Channel == render::DataCaptureChannel::AmbientOcclusion);
 	CHECK(captured.Planes[6].Scalar == render::DataCaptureScalar::UNorm8);
 	CHECK(captured.Planes[6].ColourSpace == render::DataCaptureColourSpace::NotApplicable);
@@ -4001,7 +4077,7 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	CHECK(captured.Planes[6].Height == target.Height / 2);
 	CHECK(captured.Planes[6].RowStride == captured.Planes[6].Width);
 	REQUIRE(captured.Planes[6].Bytes.size() == captured.Planes[6].Width * captured.Planes[6].Height);
-	for (size_t planeIndex = 7; planeIndex < captured.Planes.size(); ++planeIndex) {
+	for (size_t planeIndex = 7; planeIndex < 10; ++planeIndex) {
 		CHECK(captured.Planes[planeIndex].Status == render::DataCaptureStatus::Ready);
 		CHECK(captured.Planes[planeIndex].Scalar == render::DataCaptureScalar::UInt32);
 		CHECK(captured.Planes[planeIndex].RowStride == captured.Planes[planeIndex].Width * 4);
@@ -4060,9 +4136,59 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	checkIdPlane(8, {0, 1});
 	checkIdPlane(9, {0, 1, 2});
 
+	const auto &secondDepth = captured.Planes[10];
+	const auto &secondValidity = captured.Planes[11];
+	CHECK(secondDepth.Channel == render::DataCaptureChannel::SecondSurfaceDepth);
+	CHECK(secondDepth.Scalar == render::DataCaptureScalar::Float32);
+	CHECK(secondValidity.Channel == render::DataCaptureChannel::SecondSurfaceValidity);
+	CHECK(secondValidity.Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(secondDepth.Width == captured.Planes[1].Width);
+	CHECK(secondDepth.Height == captured.Planes[1].Height);
+	CHECK(secondValidity.Width == secondDepth.Width);
+	CHECK(secondValidity.Height == secondDepth.Height);
+	CHECK_FALSE(secondDepth.Provenance.empty());
+	CHECK(secondValidity.Provenance == secondDepth.Provenance);
+	core::ByteReader visibleDepth(captured.Planes[1].Bytes), hiddenDepth(secondDepth.Bytes);
+	size_t validHiddenPixels = 0;
+	size_t invalidHiddenPixels = 0;
+	size_t maskedOpaquePixels = 0;
+	size_t maskedHolePixels = 0;
+	size_t nativeHiddenPixels = 0;
+	size_t transparentDepthPixels = 0;
+	for (size_t pixel = 0; pixel < secondDepth.Width * secondDepth.Height; ++pixel) {
+		const float visibleMetres = visibleDepth.ReadFloat();
+		const float hiddenMetres = hiddenDepth.ReadFloat();
+		const uint8_t validity = std::to_integer<uint8_t>(secondValidity.Bytes[pixel]);
+		CHECK((validity == 0 || validity == 255));
+		if (validity == 0) {
+			++invalidHiddenPixels;
+			CHECK(hiddenMetres == 0.f);
+		} else {
+			++validHiddenPixels;
+			CHECK(hiddenMetres > visibleMetres);
+			CHECK(visibleMetres > 0.f);
+		}
+		if (visibleMetres == Catch::Approx(3.5f).margin(.05f) &&
+			hiddenMetres == Catch::Approx(4.5f).margin(.05f))
+			++maskedOpaquePixels;
+		if (visibleMetres == Catch::Approx(4.5f).margin(.05f) && validity == 0) ++maskedHolePixels;
+		if (validity == 255 && hiddenMetres == Catch::Approx(6.f).margin(.05f)) ++nativeHiddenPixels;
+		if (hiddenMetres == Catch::Approx(5.f).margin(.05f)) ++transparentDepthPixels;
+	}
+	CHECK(validHiddenPixels > 0);
+	CHECK(invalidHiddenPixels > 0);
+	// The hidden centre plane is packed, so these pixels exercise packed decoding
+	// through the same alpha-cutout eligibility path as the visible G-buffer.
+	CHECK(maskedOpaquePixels > 0);
+	CHECK(maskedHolePixels > 0);
+	CHECK(nativeHiddenPixels > 0);
+	CHECK(transparentDepthPixels == 0);
+
 	render::DataCaptureTicket cancelled;
 	REQUIRE(renderer.QueueDataCapture(request, cancelled));
 	renderer.CancelDataCapture(cancelled);
+	CHECK(cancelled.ResourceTokens.empty());
+	CHECK(cancelled.ChannelResourceIndices.empty());
 	CHECK(renderer.PollDataCapture(cancelled).Status == render::DataCaptureStatus::Cancelled);
 
 	request.SnapshotId = "snapshot-render-2";
@@ -4075,6 +4201,117 @@ TEST_CASE("default data capture binds copied planes to the rendered snapshot", "
 	} while (captured.Status == render::DataCaptureStatus::Pending &&
 			 std::chrono::steady_clock::now() < deadline);
 	CHECK(captured.Status == render::DataCaptureStatus::Invalid);
+}
+
+TEST_CASE("second surface eligibility rejects non-built-in fragments", "[render][gpu][data-capture][.]") {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("second-surface-eligibility");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+
+	assets::MeshData plane;
+	plane.Vertices = {
+		{{-1, -1, 0}, {0, 0, 1}, {0, 1}},
+		{{1, -1, 0}, {0, 0, 1}, {1, 1}},
+		{{1, 1, 0}, {0, 0, 1}, {1, 0}},
+		{{-1, 1, 0}, {0, 0, 1}, {0, 0}},
+	};
+	plane.Indices = {0, 1, 2, 0, 2, 3};
+	plane.ComputeBounds();
+	assets::MeshData backface = plane;
+	backface.Indices = {2, 1, 0, 3, 2, 0};
+	REQUIRE(renderer.AddMesh(core::Name("second-surface-plane"), plane));
+	REQUIRE(renderer.AddMesh(core::Name("second-surface-backface"), backface));
+	assets::TextureData white;
+	white.Width = white.Height = 1;
+	white.Format = assets::TextureFormat::RGBA8;
+	white.Pixels.assign(4, std::byte{255});
+	REQUIRE(renderer.AddTexture(core::Name("second-surface-white"), white));
+	assets::TextureData middleHeight = white;
+	middleHeight.Pixels = {std::byte{128}, std::byte{128}, std::byte{128}, std::byte{255}};
+	REQUIRE(renderer.AddTexture(core::Name("second-surface-middle-height"), middleHeight));
+
+	scene::DrawInstance front;
+	front.Source = 1;
+	front.Frame.Position = {0, 0, -3};
+	front.HalfExtent = {1, 1, .01f};
+	front.Mesh = core::Name("second-surface-plane");
+	front.Texture = core::Name("second-surface-white");
+	front.CastShadow = false;
+	const auto validPixels = [&](scene::DrawInstance candidate, std::string snapshot) {
+		const std::array rows{front, candidate};
+		render::SceneTarget target{32, 24};
+		render::View view;
+		view.Pipeline = pipelineName;
+		view.Target = &target;
+		view.SnapshotId = std::move(snapshot);
+		view.Instances = rows;
+		render::DataCaptureRequest request{
+			.SnapshotId = view.SnapshotId,
+			.Pipeline = pipelineName,
+			.CaptureNode = core::Name("data-capture"),
+			.Channels =
+				{render::DataCaptureChannel::SecondSurfaceDepth,
+				 render::DataCaptureChannel::SecondSurfaceValidity},
+			.ObjectLabels = {},
+			.SemanticLabels = {},
+			.PartLabels = {},
+		};
+		render::DataCaptureTicket ticket;
+		REQUIRE(renderer.QueueDataCapture(request, ticket));
+		REQUIRE(ticket.ResourceTokens.size() == 1);
+		CHECK(ticket.ChannelResourceIndices == std::vector<uint8_t>{0, 0});
+		render::OverlayImage overlay;
+		REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false)
+					.Ran(core::Name("data-capture-second-surface")));
+		render::DataCapturePoll captured;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		do {
+			captured = renderer.PollDataCapture(ticket);
+			if (captured.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
+		} while (captured.Status == render::DataCaptureStatus::Pending &&
+				 std::chrono::steady_clock::now() < deadline);
+		REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
+		REQUIRE(captured.Planes.size() == 2);
+		size_t count = 0;
+		for (const std::byte value : captured.Planes[1].Bytes)
+			if (std::to_integer<uint8_t>(value) == 255) ++count;
+		return count;
+	};
+
+	scene::DrawInstance rear = front;
+	rear.Source = 2;
+	rear.Frame.Position.Z = -4;
+	CHECK(validPixels(rear, "eligible") > 0);
+	scene::DrawInstance equal = rear;
+	equal.Source = 3;
+	equal.Frame.Position.Z = -3;
+	CHECK(validPixels(equal, "equal") == 0);
+	scene::DrawInstance custom = rear;
+	custom.Source = 4;
+	custom.Shader = core::Name("authored-shader");
+	CHECK(validPixels(custom, "custom") == 0);
+	scene::DrawInstance reversed = rear;
+	reversed.Source = 5;
+	reversed.Mesh = core::Name("second-surface-backface");
+	CHECK(validPixels(reversed, "backface") == 0);
+	scene::DrawInstance clipped = rear;
+	clipped.Source = 6;
+	clipped.SeamNormal = {0, 0, 1};
+	clipped.SeamOffset = 0;
+	CHECK(validPixels(clipped, "seam") == 0);
+	scene::DrawInstance displaced = rear;
+	displaced.Source = 7;
+	displaced.HeightMap = core::Name("second-surface-middle-height");
+	displaced.RenderFeatures.Enable |= scene::FeatureBit(scene::RenderFeature::Displacement);
+	CHECK(validPixels(displaced, "displaced") > 0);
 }
 
 TEST_CASE("script capture retains copied bytes until explicit release", "[render][gpu][data-capture][.]") {

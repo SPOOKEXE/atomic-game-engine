@@ -2970,6 +2970,25 @@ declare extern type ComputeService with
 	): { number }
 end
 
+-- A copied, non-parented capture request. CameraId is the current_view token
+-- for this bridge, never a live Instance reference.
+export type DataSceneOptions = {
+	SchemaVersion: "data-scene-options/v1",
+	Channels: { string },
+	CameraId: "current_view",
+	Pipeline: string,
+	CaptureNode: string,
+	ViewSlot: number,
+	TemporalHistory: "preserve",
+	StorageProfile: "lossless",
+	Output: "raw_planes",
+	IncludeSceneData: false,
+	IncludeExactMasks: false,
+	CoordinateSpace: "world_camera_image",
+	NoiseMode: "none",
+	NoiseSeed: number,
+}
+
 -- Read-only ECS observations for a data factory. Returned records are copies;
 -- entities without a unique DataFactoryId string are intentionally omitted.
 declare extern type DataSceneService with
@@ -2979,6 +2998,8 @@ declare extern type DataSceneService with
 	function GetEditableImageMetadata(self, image: Instance): any
 	function GetCaptureChannels(self): any
 	function Capture(self, request: any): any
+	function CreateOptions(self): DataSceneOptions
+	function CaptureBundle(self, snapshotId: string, options: DataSceneOptions): any
 	function PollCapture(self, ticket: string): any
 	function CancelCapture(self, ticket: string): any
 	function GetCaptureBuffer(self, ticket: string, resource: string, offset: number, maximumBytes: number): buffer

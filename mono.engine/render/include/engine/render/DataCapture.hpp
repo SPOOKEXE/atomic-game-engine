@@ -95,6 +95,8 @@ namespace engine::render {
 		ObjectIds,
 		SemanticMask,
 		PartMask,
+		SecondSurfaceDepth,
+		SecondSurfaceValidity,
 		MotionVectors,
 		OpticalFlow,
 	};
@@ -166,6 +168,7 @@ namespace engine::render {
 		// Present only for the ambient-occlusion plane, including an explicit
 		// Unavailable state for an unrecognised R8 source.
 		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
+		std::string Provenance;
 		// BLAKE3-256 of Bytes. It is zero until this plane is Ready.
 		assets::ContentHash Hash;
 		std::vector<std::byte> Bytes;
@@ -183,6 +186,9 @@ namespace engine::render {
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
 		std::vector<DataCapturePartLabel> PartLabels;
+		// One entry per logical channel, indexing ResourceTokens. Channels emitted
+		// by one capture node share a single GPU readback.
+		std::vector<uint8_t> ChannelResourceIndices;
 		std::vector<uint64_t> ResourceTokens;
 		bool Cancelled = false;
 	};

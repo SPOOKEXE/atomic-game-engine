@@ -135,6 +135,9 @@ namespace engine::render {
 			SemanticIds,
 			PartIds,
 			LinearDepth,
+			SecondSurfaceZ,
+			SecondSurfaceDepth,
+			SecondSurfaceValidity,
 			Occlusion,
 			Lit,
 			SkyLit,
@@ -201,6 +204,14 @@ namespace engine::render {
 						// texture.
 						return background && *background == "zero" ? ResourceRole::Unknown
 																   : ResourceRole::LinearDepth;
+					}
+					if (node->Kind == core::Name("depth-peel")) {
+						constexpr std::array roles{
+							ResourceRole::SecondSurfaceZ,
+							ResourceRole::SecondSurfaceDepth,
+							ResourceRole::SecondSurfaceValidity,
+						};
+						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
 					}
 					if (node->Kind == core::Name("ssao")) {
 						return ResourceRole::Occlusion;
@@ -370,6 +381,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *PackedTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedForwardPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedGBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedDepthPeelPipeline = nullptr;
 
 		// The two above, redrawn as lines. See where they are created for why
 		// there are two objects and not a bindable state.
@@ -395,6 +407,7 @@ namespace engine::render {
 		// blended tail stay on the forward family below because their projected
 		// images and ordering are not representable by one G-buffer pixel.
 		SDL_GPUGraphicsPipeline *GBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DepthPeelPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthLinearPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthComposePipeline = nullptr;
 		bool EnsureDepthCompose();
@@ -443,6 +456,7 @@ namespace engine::render {
 			uint32_t OcclusionHeight = 0;
 			uint32_t LitWidth = 0;
 			uint32_t LitHeight = 0;
+			bool SecondSurface = false;
 
 			bool operator==(const PbrDimensions &) const = default;
 		};
@@ -456,6 +470,9 @@ namespace engine::render {
 			SDL_GPUTexture *SemanticIds = nullptr;
 			SDL_GPUTexture *PartIds = nullptr;
 			SDL_GPUTexture *LinearDepth = nullptr;
+			SDL_GPUTexture *SecondSurfaceZ = nullptr;
+			SDL_GPUTexture *SecondSurfaceDepth = nullptr;
+			SDL_GPUTexture *SecondSurfaceValidity = nullptr;
 			SDL_GPUTexture *Occlusion = nullptr;
 			// Kept with the allocation so a graph cache hit retains the frame that
 			// actually produced this occlusion image.
@@ -819,6 +836,7 @@ namespace engine::render {
 			// ribbon passes. A slot's shader is ignored while one is bound.
 			Other,
 			GBuffer,
+			DepthPeel,
 			Opaque,
 			Transparent,
 			HdrOpaque,
@@ -1668,9 +1686,9 @@ namespace engine::render {
 			uint32_t Frame = 0;
 			uint64_t Sequence = 0;
 		};
-		// One data-factory capture keeps the ten planes the current bridge
-		// advertises together, including SSAO and three integer segmentation planes.
-		static constexpr size_t RESOURCE_IMAGE_CAPACITY = 10;
+		// One data-factory capture keeps all twelve logical planes together. Shared
+		// capture nodes reduce those planes to at most nine GPU readbacks.
+		static constexpr size_t RESOURCE_IMAGE_CAPACITY = 12;
 		struct PendingSceneSubmission {
 			SDL_GPUFence *Fence = nullptr;
 			std::vector<StagedSceneFrame> Frames;
@@ -1731,6 +1749,8 @@ namespace engine::render {
 			scene::Camera Camera;
 			bool ProjectionAvailable = false;
 			std::array<float, 16> Projection{};
+			uint32_t Width = 0;
+			uint32_t Height = 0;
 		};
 		DataCaptureSource ActiveDataCaptureSource;
 		bool HasShadowCaptureRequest(core::Name pipeline, size_t viewSlot) const;

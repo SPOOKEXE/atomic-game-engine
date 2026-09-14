@@ -1,3 +1,4 @@
+#include "CaptureRecordValidation.hpp"
 #include "RendererState.hpp"
 
 #include <engine/render/DataCapture.hpp>
@@ -20,15 +21,28 @@ namespace engine::render {
 			return true;
 		}
 
+		bool HasChannel(std::span<const DataCaptureChannel> channels, DataCaptureChannel channel) {
+			return std::ranges::find(channels, channel) != channels.end();
+		}
+
+		bool HasSecondSurfacePair(std::span<const DataCaptureChannel> channels) {
+			return HasChannel(channels, DataCaptureChannel::SecondSurfaceDepth) ==
+				   HasChannel(channels, DataCaptureChannel::SecondSurfaceValidity);
+		}
+
 		core::Name CaptureNode(const DataCaptureTicket &ticket, DataCaptureChannel channel) {
-			const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	  ? "-albedo"
-											: channel == DataCaptureChannel::PbrMaterial  ? "-material"
-											: channel == DataCaptureChannel::PbrEmissive  ? "-emissive"
-											: channel == DataCaptureChannel::AmbientOcclusion ? "-ambient-occlusion"
+			const std::string_view suffix = channel == DataCaptureChannel::PbrAlbedo	 ? "-albedo"
+											: channel == DataCaptureChannel::PbrMaterial ? "-material"
+											: channel == DataCaptureChannel::PbrEmissive ? "-emissive"
+											: channel == DataCaptureChannel::AmbientOcclusion
+												? "-ambient-occlusion"
 											: channel == DataCaptureChannel::ObjectIds	  ? "-object-ids"
 											: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
 											: channel == DataCaptureChannel::PartMask	  ? "-part-ids"
-																						  : "";
+											: channel == DataCaptureChannel::SecondSurfaceDepth ||
+													channel == DataCaptureChannel::SecondSurfaceValidity
+												? "-second-surface"
+												: "";
 			return suffix.empty() ? ticket.CaptureNode
 								  : core::Name(std::string(ticket.CaptureNode.Text()) + std::string(suffix));
 		}
@@ -166,6 +180,29 @@ namespace engine::render {
 					ResourceImageFormat::R32_UInt
 				);
 				break;
+			case DataCaptureChannel::SecondSurfaceDepth:
+				if (image.DepthResource == core::Name("second-surface-depth") && !image.Depth.empty())
+					Ready(
+						plane,
+						image.DepthResource,
+						image.Width,
+						image.Height,
+						image.Width * 4,
+						DataCaptureScalar::Float32,
+						DataCaptureColourSpace::NotApplicable,
+						image.Depth
+					);
+				if (plane.Status == DataCaptureStatus::Ready) plane.Provenance = image.Provenance;
+				break;
+			case DataCaptureChannel::SecondSurfaceValidity:
+				primary(
+					core::Name("second-surface-validity"),
+					DataCaptureScalar::UNorm8,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::R8_UNorm
+				);
+				if (plane.Status == DataCaptureStatus::Ready) plane.Provenance = image.Provenance;
+				break;
 			default:
 				break;
 			}
@@ -184,8 +221,8 @@ namespace engine::render {
 		if (!ValidSnapshotId(request.SnapshotId) || !request.Pipeline.IsValid() ||
 			!request.CaptureNode.IsValid() ||
 			request.TemporalHistory != DataCaptureTemporalHistory::Preserve ||
-			!UniqueChannels(request.Channels) || request.Channels.size() > State->ResourceImages.size() ||
-			!ticket.ResourceTokens.empty() ||
+			!UniqueChannels(request.Channels) || !HasSecondSurfacePair(request.Channels) ||
+			!ticket.ChannelResourceIndices.empty() || !ticket.ResourceTokens.empty() ||
 			(wantsObjectIds && !ValidDataCaptureObjectLabels(request.ObjectLabels)) ||
 			(wantsSemantic && !ValidDataCaptureObjectLabels(request.SemanticLabels)) ||
 			(wantsPart && !ValidDataCaptureObjectLabels(request.PartLabels)))
@@ -202,12 +239,22 @@ namespace engine::render {
 			.SemanticLabels =
 				wantsSemantic ? request.SemanticLabels : std::vector<DataCaptureSemanticLabel>{},
 			.PartLabels = wantsPart ? request.PartLabels : std::vector<DataCapturePartLabel>{},
+			.ChannelResourceIndices = {},
 			.ResourceTokens = {}
 		};
+		std::vector<core::Name> resourceNodes;
 		for (const DataCaptureChannel channel : request.Channels) {
+			const core::Name node = CaptureNode(queued, channel);
+			const auto existing = std::ranges::find(resourceNodes, node);
+			if (existing != resourceNodes.end()) {
+				queued.ChannelResourceIndices.push_back(
+					static_cast<uint8_t>(existing - resourceNodes.begin())
+				);
+				continue;
+			}
 			const uint64_t token = QueueResourceImage(
 				request.Pipeline,
-				CaptureNode(queued, channel),
+				node,
 				request.ViewSlot,
 				ResourceImageDelivery::CopiedPixels,
 				request.SnapshotId
@@ -216,7 +263,9 @@ namespace engine::render {
 				CancelDataCapture(queued);
 				return false;
 			}
+			queued.ChannelResourceIndices.push_back(static_cast<uint8_t>(queued.ResourceTokens.size()));
 			queued.ResourceTokens.push_back(token);
+			resourceNodes.push_back(node);
 		}
 		ticket = std::move(queued);
 		return true;
@@ -234,8 +283,12 @@ namespace engine::render {
 			poll.Status = DataCaptureStatus::Cancelled;
 			return poll;
 		}
-		if (ticket.SnapshotId.empty() || ticket.ResourceTokens.size() != ticket.Channels.size() ||
-			ticket.Channels.empty()) {
+		if (ticket.SnapshotId.empty() || ticket.Channels.empty() ||
+			ticket.ChannelResourceIndices.size() != ticket.Channels.size() || ticket.ResourceTokens.empty() ||
+			!HasSecondSurfacePair(ticket.Channels) ||
+			std::ranges::any_of(ticket.ChannelResourceIndices, [&](uint8_t index) {
+				return index >= ticket.ResourceTokens.size();
+			})) {
 			poll.Status = DataCaptureStatus::Invalid;
 			return poll;
 		}
@@ -253,8 +306,13 @@ namespace engine::render {
 		poll.CameraPose.VerticalFieldOfViewRadians = image.CameraFieldOfViewRadians;
 		poll.CameraPose.NearPlaneMetres = image.CameraNearPlane;
 		poll.CameraPose.FarPlaneMetres = image.CameraFarPlane;
-		if (std::any_of(images->begin(), images->end(), [&](const ResourceImage &item) {
-				return item.SnapshotId != ticket.SnapshotId;
+		poll.CameraPose.CropLeft = image.CameraCropLeft;
+		poll.CameraPose.CropTop = image.CameraCropTop;
+		poll.CameraPose.CropWidth = image.CameraCropWidth;
+		poll.CameraPose.CropHeight = image.CameraCropHeight;
+		if (image.SnapshotId != ticket.SnapshotId ||
+			std::any_of(images->begin(), images->end(), [&](const ResourceImage &item) {
+				return !capture_record_validation::SameCaptureBundle(image, item);
 			})) {
 			poll.Status = DataCaptureStatus::Invalid;
 			for (const DataCaptureChannel channel : ticket.Channels) {
@@ -263,12 +321,13 @@ namespace engine::render {
 				poll.Planes.push_back(std::move(plane));
 			}
 			ticket.ResourceTokens.clear();
+			ticket.ChannelResourceIndices.clear();
 			return poll;
 		}
 		poll.Planes.reserve(ticket.Channels.size());
 		for (size_t index = 0; index < ticket.Channels.size(); ++index) {
 			const DataCaptureChannel channel = ticket.Channels[index];
-			const ResourceImage &channelImage = (*images)[index];
+			const ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[index]];
 			DataCapturePlane plane = Plane(channel, ticket);
 			if (channelImage.Status == ResourceImageStatus::Ok) {
 				FillPlane(plane, channelImage);
@@ -276,6 +335,21 @@ namespace engine::render {
 				plane.Status = DataCaptureStatus::Failed;
 			}
 			poll.Planes.push_back(std::move(plane));
+		}
+		const auto secondDepth = std::ranges::find_if(poll.Planes, [](const DataCapturePlane &plane) {
+			return plane.Channel == DataCaptureChannel::SecondSurfaceDepth;
+		});
+		const auto secondValidity = std::ranges::find_if(poll.Planes, [](const DataCapturePlane &plane) {
+			return plane.Channel == DataCaptureChannel::SecondSurfaceValidity;
+		});
+		bool invalidSecondSurfacePair = false;
+		if (secondDepth != poll.Planes.end() && secondValidity != poll.Planes.end() &&
+			secondDepth->Status != secondValidity->Status) {
+			*secondDepth = Plane(DataCaptureChannel::SecondSurfaceDepth, ticket);
+			secondDepth->Status = DataCaptureStatus::Invalid;
+			*secondValidity = Plane(DataCaptureChannel::SecondSurfaceValidity, ticket);
+			secondValidity->Status = DataCaptureStatus::Invalid;
+			invalidSecondSurfacePair = true;
 		}
 		const bool anyReady =
 			std::any_of(poll.Planes.begin(), poll.Planes.end(), [](const DataCapturePlane &plane) {
@@ -285,11 +359,13 @@ namespace engine::render {
 			std::any_of(poll.Planes.begin(), poll.Planes.end(), [](const DataCapturePlane &plane) {
 				return plane.Status != DataCaptureStatus::Ready;
 			});
-		poll.Status = anyReady
+		poll.Status = invalidSecondSurfacePair ? DataCaptureStatus::Invalid
+					  : anyReady
 						  ? (anyUnavailable ? DataCaptureStatus::Partial : DataCaptureStatus::Ready)
 						  : (image.Status == ResourceImageStatus::Failed ? DataCaptureStatus::Failed
 																		 : DataCaptureStatus::Unsupported);
 		ticket.ResourceTokens.clear();
+		ticket.ChannelResourceIndices.clear();
 		return poll;
 	}
 
@@ -298,6 +374,7 @@ namespace engine::render {
 		for (const uint64_t token : ticket.ResourceTokens)
 			(void)CancelResourceImage(token);
 		ticket.ResourceTokens.clear();
+		ticket.ChannelResourceIndices.clear();
 		ticket.Cancelled = true;
 	}
 }

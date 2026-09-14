@@ -65,6 +65,7 @@ namespace {
 				return false;
 			}
 			Owner = request.InstanceId;
+			LastRequest = request;
 			Queued = true;
 			ticket = Ticket;
 			detail = "accepted";
@@ -173,6 +174,7 @@ namespace {
 		}
 
 		bool Released = false;
+		engine::script::DataCaptureBridgeRequest LastRequest;
 
 	  private:
 		uint64_t Ticket;
@@ -637,6 +639,95 @@ TEST_CASE("DataSceneService capture bridges remain runtime-local", "[scripting][
 			)");
 		}
 		CHECK(bridge->Released);
+	}
+}
+
+TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[scripting][data]") {
+	for (const auto &[language, worldName, ticket] : {
+			 std::tuple{engine::script::Language::Luau, "options_luau", uint64_t{401}},
+			 std::tuple{engine::script::Language::JavaScript, "options_javascript", uint64_t{402}},
+		 }) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		engine::ecs::Store store(worldName);
+		auto bridge = std::make_shared<FakeCaptureBridge>(ticket);
+		const auto runtime = Runtime(store, language, bridge);
+		REQUIRE(runtime != nullptr);
+		if (language == engine::script::Language::Luau) {
+			Run(*runtime, R"(
+				local service = game:GetService("DataSceneService")
+				local options = service:CreateOptions()
+				assert(options.SchemaVersion == "data-scene-options/v1")
+				assert(options.Pipeline == "Default PBR")
+				options.Pipeline = "main"
+				options.CaptureNode = "lit"
+				options.Channels = {"rgb_linear_hdr", "object_ids"}
+				local queued = service:CaptureBundle("fixture/snapshot", options)
+				assert(queued.status == "queued" and queued.options.CameraId == "current_view")
+				local invalid = service:CreateOptions()
+				invalid.CameraId = "fixture/camera"
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.IncludeSceneData = true
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "unsupported_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.IncludeExactMasks = true
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "unsupported_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.StorageProfile = "training_compact"
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.NoiseMode = "gaussian"
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.NoiseSeed = 1
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.Channels = {"rgb_linear_hdr", "rgb_linear_hdr"}
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.Channels = {"second_surface_depth"}
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.ViewSlot = 4294967296
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+			)");
+		} else {
+			Run(*runtime, R"(
+				const service = game.GetService("DataSceneService");
+				const options = service.CreateOptions();
+				if (options.SchemaVersion !== "data-scene-options/v1") throw new Error("schema");
+				if (options.Pipeline !== "Default PBR") throw new Error("pipeline");
+				options.Pipeline = "main";
+				options.CaptureNode = "lit";
+				options.Channels = ["rgb_linear_hdr", "object_ids"];
+				const queued = service.CaptureBundle("fixture/snapshot", options);
+				if (queued.status !== "queued" || queued.options.CameraId !== "current_view") throw new Error("queue");
+				let invalid = service.CreateOptions();
+				invalid.CameraId = "fixture/camera";
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("camera");
+				invalid = service.CreateOptions(); invalid.IncludeSceneData = true;
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "unsupported_data_scene_options") throw new Error("scene data");
+				invalid = service.CreateOptions(); invalid.IncludeExactMasks = true;
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "unsupported_data_scene_options") throw new Error("exact masks");
+				invalid = service.CreateOptions(); invalid.StorageProfile = "training_compact";
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("storage");
+				invalid = service.CreateOptions(); invalid.NoiseMode = "gaussian";
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("noise mode");
+				invalid = service.CreateOptions(); invalid.NoiseSeed = 1;
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("noise seed");
+				invalid = service.CreateOptions(); invalid.Channels = ["rgb_linear_hdr", "rgb_linear_hdr"];
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("duplicates");
+				invalid = service.CreateOptions(); invalid.Channels = ["second_surface_depth"];
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("pair");
+				invalid = service.CreateOptions(); invalid.ViewSlot = 4294967296;
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("view slot");
+			)");
+		}
+		CHECK(bridge->LastRequest.SnapshotId == "fixture/snapshot");
+		CHECK(bridge->LastRequest.Pipeline == "main");
+		CHECK(bridge->LastRequest.CaptureNode == "lit");
+		CHECK(bridge->LastRequest.Channels == std::vector<std::string>{"rgb_linear_hdr", "object_ids"});
 	}
 }
 
