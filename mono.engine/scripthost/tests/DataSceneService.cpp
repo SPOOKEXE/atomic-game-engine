@@ -442,6 +442,83 @@ TEST_CASE("DataSceneService reports a bounded stable-id subset in both VMs", "[s
 	}
 }
 
+TEST_CASE("DataSceneService reports source-stage lighting metadata in both VMs", "[scripting][data]") {
+	for (const auto language : {engine::script::Language::Luau, engine::script::Language::JavaScript}) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		engine::scene::RegisterSceneClasses();
+		engine::ecs::Store store("data_scene_lighting");
+		const auto runtime = Runtime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		if (language == engine::script::Language::Luau) {
+			Run(*runtime, R"(
+				local parent = Instance.new("Part")
+				parent.CFrame = CFrame.new(2, 3, 4)
+				local point = Instance.new("PointLight")
+				point:SetAttribute("DataFactoryId", "light/point")
+				point.Color = Color3.new(.5, .25, .125)
+				point.Brightness = 4
+				point.Parent = parent
+				local spot = Instance.new("SpotLight")
+				spot:SetAttribute("DataFactoryId", "light/spot")
+				spot.Angle = 360
+				spot.Parent = parent
+				local surface = Instance.new("SurfaceLight")
+				surface:SetAttribute("DataFactoryId", "light/surface")
+				surface.Angle = 0
+				surface.Parent = parent
+				local rejected = Instance.new("PointLight")
+				rejected:SetAttribute("DataFactoryId", "light/rejected")
+				rejected.Enabled = false
+				rejected.Parent = parent
+				local snapshot = game:GetService("DataSceneService"):GetSceneSnapshot()
+				local lighting = snapshot.lighting_observation
+				assert(lighting.schema_version == "lighting-observation/v1", tostring(lighting.schema_version))
+				assert(lighting.local_light_coverage == "identified_source_rows_before_portal_copies_and_camera_cap")
+				assert(lighting.identified_local_light_count == 4 and lighting.omitted_unidentified_local_light_count == 0)
+				assert(lighting.local_lights[1].id == "light/point" and lighting.local_lights[1].renderer_rgb.R == 2)
+				assert(lighting.local_lights[1].authored_color_rgb.R == .5 and lighting.local_lights[1].authored_brightness_renderer_relative == 4 and lighting.local_lights[1].authored_enabled and not lighting.local_lights[1].authored_shadows_requested)
+				assert(not lighting.local_lights[1].resolved_direction_available and lighting.local_lights[1].resolved_direction_world == nil and lighting.local_lights[1].resolved_direction_reason == "point_is_omnidirectional")
+				assert(lighting.local_lights[2].id == "light/rejected" and not lighting.local_lights[2].source_stage_eligible and lighting.local_lights[2].source_stage_rejection == "disabled")
+				assert(lighting.local_lights[3].kind == "spot" and math.abs(lighting.local_lights[3].cone_cosine) < .0001)
+				assert(lighting.local_lights[4].kind == "surface" and lighting.local_lights[4].cone_cosine == 1)
+				assert(not lighting.view_selection.available and not lighting.portal_copies.available)
+				assert(not lighting.per_pixel_contribution.available and not lighting.shadow_factor.available)
+				assert(not lighting.shadow_caster.available and not lighting.shadow_receiver.available and not lighting.photometric_units.available)
+				local capabilities = game:GetService("DataSceneService"):GetCapabilities()
+				assert(capabilities.lighting_source_metadata and not capabilities.lighting_contribution)
+			)");
+		} else {
+			Run(*runtime, R"(
+				const parent = Instance.new("Part");
+				parent.CFrame = CFrame.new(2, 3, 4);
+				const point = Instance.new("PointLight");
+				point.SetAttribute("DataFactoryId", "light/point");
+				point.Color = Color3.new(.5, .25, .125);
+				point.Brightness = 4;
+				point.Parent = parent;
+				const spot = Instance.new("SpotLight");
+				spot.SetAttribute("DataFactoryId", "light/spot");
+				spot.Angle = 360;
+				spot.Parent = parent;
+				const surface = Instance.new("SurfaceLight");
+				surface.SetAttribute("DataFactoryId", "light/surface");
+				surface.Angle = 0;
+				surface.Parent = parent;
+				const rejected = Instance.new("PointLight");
+				rejected.SetAttribute("DataFactoryId", "light/rejected");
+				rejected.Enabled = false;
+				rejected.Parent = parent;
+				const lighting = game.GetService("DataSceneService").GetSceneSnapshot().lighting_observation;
+				if (lighting.schema_version !== "lighting-observation/v1" || lighting.local_light_coverage !== "identified_source_rows_before_portal_copies_and_camera_cap" || lighting.identified_local_light_count !== 4 || lighting.omitted_unidentified_local_light_count !== 0 || lighting.local_lights[0].renderer_rgb.R !== 2 || lighting.local_lights[0].authored_brightness_renderer_relative !== 4 || !lighting.local_lights[0].authored_enabled || lighting.local_lights[0].resolved_direction_available || lighting.local_lights[0].resolved_direction_world !== null || lighting.local_lights[1].source_stage_rejection !== "disabled" || Math.abs(lighting.local_lights[2].cone_cosine) > .0001 || lighting.local_lights[3].cone_cosine !== 1 || lighting.view_selection.available || lighting.portal_copies.available || lighting.per_pixel_contribution.available || lighting.shadow_factor.available || lighting.shadow_caster.available || lighting.shadow_receiver.available || lighting.photometric_units.available) throw new Error("lighting metadata mismatch");
+				const capabilities = game.GetService("DataSceneService").GetCapabilities();
+				if (!capabilities.lighting_source_metadata || capabilities.lighting_contribution) throw new Error("lighting capabilities mismatch");
+			)");
+		}
+	}
+}
+
 TEST_CASE("DataSceneService reports complete authored camera calibration in both VMs", "[scripting][data]") {
 	for (const auto language : {engine::script::Language::Luau, engine::script::Language::JavaScript}) {
 		engine::scene::EnsureClassTree();

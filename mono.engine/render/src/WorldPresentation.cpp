@@ -20,6 +20,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/LocalLight.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -1424,41 +1425,15 @@ namespace engine::render {
 		lights.clear();
 
 		store.Each<const scene::Light>([&](ecs::Entity entity, const scene::Light &bulb) {
-			if (!bulb.Enabled || bulb.Brightness <= 0.0f || bulb.Range <= 0.0f) {
+			scene::ResolvedLocalLight source;
+			if (scene::ResolveLocalLight(store, entity, bulb, source) != scene::LocalLightRejection::None)
 				return;
-			}
-
-			const ecs::Entity parent = store.ParentOf(entity);
-			if (parent == ecs::NULL_ENTITY) {
-				return;
-			}
-
-			core::CFrame frame;
-			if (const auto *point = store.Get<scene::Attachment>(parent)) {
-				frame = point->WorldFrame;
-			} else if (const auto *placement = store.Get<scene::Transform>(parent)) {
-				frame = placement->Frame;
-			} else {
-				return;
-			}
-
 			SceneLight light;
-			light.Position = frame.Position;
-			light.Range = bulb.Range;
-			light.Colour = core::Color3{
-				bulb.Colour.R * bulb.Brightness,
-				bulb.Colour.G * bulb.Brightness,
-				bulb.Colour.B * bulb.Brightness,
-			};
-
-			if (bulb.Kind == scene::LightKind::Point) {
-				light.ConeCosine = -1.0f;
-			} else {
-				light.Direction = frame.VectorToWorldSpace(scene::NormalOf(bulb.Face));
-				light.ConeCosine = std::cos(
-					std::clamp(bulb.Angle, 0.0f, 180.0f) * 0.5f * std::numbers::pi_v<float> / 180.0f
-				);
-			}
+			light.Position = source.Position;
+			light.Range = source.Range;
+			light.Colour = source.Colour;
+			light.Direction = source.Direction;
+			light.ConeCosine = source.ConeCosine;
 
 			lights.push_back(light);
 		});

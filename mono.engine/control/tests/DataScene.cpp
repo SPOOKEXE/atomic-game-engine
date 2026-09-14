@@ -15,10 +15,12 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/script/EventNarratives.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -71,6 +73,88 @@ namespace {
 		value.String = id;
 		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryId"), value));
 	}
+}
+
+TEST_CASE(
+	"data-scene MCP exposes source lighting metadata and unavailable contribution evidence",
+	"[control][datascene]"
+) {
+	Universe universe;
+	const WorldId world = World(universe, "lighting");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		engine::scene::RegisterSceneClasses();
+		const Entity parent = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Lamp");
+		store.Set<Transform>(parent, Transform{CFrame(Vector3{2.0f, 3.0f, 4.0f})});
+		const Entity bulb = store.CreateInstance(engine::ecs::Classes::Find(Name("PointLight")), "Bulb");
+		REQUIRE(store.SetParent(bulb, parent));
+		engine::scene::Light light;
+		light.Colour = engine::core::Color3{0.5f, 0.25f, 0.125f};
+		light.Brightness = 4.0f;
+		store.Set(bulb, light);
+		Identify(store, bulb, "lighting/bulb");
+	});
+
+	bool failed = false;
+	const json snapshot = Call(
+		surface, "get_scene_snapshot", {{"instance_id", "lighting"}, {"options", json::object()}}, failed
+	);
+	INFO(snapshot.dump());
+	CHECK_FALSE(failed);
+	const json &lighting = snapshot.at("lighting_observation");
+	CHECK(lighting.at("schema_version") == "lighting-observation/v1");
+	CHECK(lighting.at("resolved_global").at("provenance").at("lighting_service") == "engine_defaults");
+	REQUIRE(lighting.at("local_lights").size() == 1);
+	CHECK(lighting.at("local_lights").at(0).at("id") == "lighting/bulb");
+	CHECK(lighting.at("local_lights").at(0).at("source_stage_eligible") == true);
+	CHECK(lighting.at("local_lights").at(0).at("renderer_rgb").at("r") == 2.0);
+	CHECK(
+		lighting.at("local_light_coverage") == "identified_source_rows_before_portal_copies_and_camera_cap"
+	);
+	CHECK(lighting.at("identified_local_light_count") == 1);
+	CHECK(lighting.at("omitted_unidentified_local_light_count") == 0);
+	CHECK(lighting.at("view_selection").at("available") == false);
+	CHECK(lighting.at("portal_copies").at("available") == false);
+	CHECK(lighting.at("per_pixel_contribution").at("available") == false);
+	CHECK(lighting.at("shadow_factor").at("available") == false);
+	CHECK(lighting.at("shadow_caster").at("available") == false);
+	CHECK(lighting.at("shadow_receiver").at("available") == false);
+	CHECK(lighting.at("photometric_units").at("available") == false);
+}
+
+TEST_CASE("data-scene MCP reports the Sun resource override provenance", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "sun_override");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::Sun sun;
+		sun.Direction = Vector3{0.0f, 3.0f, 4.0f};
+		sun.Ambient = engine::core::Color3{0.2f, 0.3f, 0.4f};
+		store.SetResource(sun);
+	});
+
+	bool failed = false;
+	const json snapshot = Call(
+		surface, "get_scene_snapshot", {{"instance_id", "sun_override"}, {"options", json::object()}}, failed
+	);
+	INFO(snapshot.dump());
+	CHECK_FALSE(failed);
+	const json &global = snapshot.at("lighting_observation").at("resolved_global");
+	CHECK(global.at("direction_world_towards").at("x") == Catch::Approx(0.0));
+	CHECK(global.at("direction_world_towards").at("y") == Catch::Approx(0.6));
+	CHECK(global.at("direction_world_towards").at("z") == Catch::Approx(0.8));
+	CHECK(global.at("ambient_rgb").at("r") == Catch::Approx(0.2));
+	CHECK(global.at("ambient_rgb").at("g") == Catch::Approx(0.3));
+	CHECK(global.at("ambient_rgb").at("b") == Catch::Approx(0.4));
+	CHECK(global.at("provenance").at("lighting_service") == "engine_defaults");
+	CHECK(global.at("provenance").at("sun_override") == "sun_resource_override");
+	CHECK(global.at("provenance").at("direction") == "sun_resource_override");
+	CHECK(global.at("provenance").at("ambient") == "sun_resource_override");
 }
 
 TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[control][datascene]") {

@@ -12,7 +12,10 @@
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/LocalLight.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
@@ -1819,6 +1822,10 @@ namespace engine::script {
 				{"status", String("ok")},
 				{"schema_version", String("data-scene/v1")},
 				{"scene_snapshot", Boolean(true)},
+				{"lighting_source_metadata", Boolean(true)},
+				{"lighting_contribution", Boolean(false)},
+				{"lighting_contribution_reason",
+				 String("requires a selected rendered view and per-pixel evidence")},
 				{"camera_metadata", Boolean(true)},
 				{"camera_metadata_schema_version", String("camera-rendering-data/v1")},
 				{"physics_observation_schema_version", String("physics-observation/v1")},
@@ -1905,6 +1912,66 @@ namespace engine::script {
 		entities.reserve(selected.size());
 		for (const auto &[entity, id] : selected)
 			entities.push_back(EntityRecord(store, entity, id, ids, physicsWorld));
+		const scene::WorldLighting lighting = scene::LightingOf(store);
+		const ecs::Entity lightingService =
+			scene::ServiceOf(store, ecs::Classes::Find(core::Name("Lighting")));
+		const bool hasLightingService =
+			store.Get<scene::LightingServiceComponent>(lightingService) != nullptr;
+		const bool hasSunOverride = store.Resource<scene::Sun>() != nullptr;
+		const char *const serviceSource = hasLightingService ? "lighting_service" : "engine_defaults";
+		const char *const directionSource = hasSunOverride		 ? "sun_resource_override"
+											: hasLightingService ? "lighting_service_solar_arc"
+																 : "engine_default";
+		const char *const ambientSource = hasSunOverride	   ? "sun_resource_override"
+										  : hasLightingService ? "lighting_service"
+															   : "engine_default";
+		std::vector<ScriptValue> localLights;
+		localLights.reserve(selected.size());
+		size_t omittedUnidentifiedLights = 0;
+		store.Each<const scene::Light>([&](ecs::Entity entity, const scene::Light &) {
+			std::string ignored;
+			if (!StableId(store, entity, ignored)) omittedUnidentifiedLights++;
+		});
+		for (const auto &[entity, id] : selected) {
+			const auto *authored = store.Get<scene::Light>(entity);
+			if (authored == nullptr) continue;
+			scene::ResolvedLocalLight resolved;
+			const scene::LocalLightRejection rejection =
+				scene::ResolveLocalLight(store, entity, *authored, resolved);
+			const bool resolvedDirectionAvailable =
+				rejection == scene::LocalLightRejection::None && authored->Kind != scene::LightKind::Point;
+			localLights.push_back(Map({
+				{"id", String(id)},
+				{"kind", String(LightKindName(authored->Kind))},
+				{"authored_color_rgb", Colour(authored->Colour)},
+				{"authored_brightness_renderer_relative", Number(authored->Brightness)},
+				{"authored_range_metres", Number(authored->Range)},
+				{"authored_angle_degrees", Number(authored->Angle)},
+				{"authored_face", String(scene::Describe(authored->Face))},
+				{"authored_enabled", Boolean(authored->Enabled)},
+				{"authored_shadows_requested", Boolean(authored->Shadows)},
+				{"source_stage_eligible", Boolean(rejection == scene::LocalLightRejection::None)},
+				{"source_stage_rejection", String(scene::Describe(rejection))},
+				{"resolved_position_world_metres",
+				 rejection == scene::LocalLightRejection::None ? Vector(resolved.Position) : ScriptValue{}},
+				{"resolved_direction_world",
+				 resolvedDirectionAvailable ? Vector(resolved.Direction) : ScriptValue{}},
+				{"resolved_direction_available", Boolean(resolvedDirectionAvailable)},
+				{"resolved_direction_reason",
+				 String(
+					 resolvedDirectionAvailable					 ? ""
+					 : authored->Kind == scene::LightKind::Point ? "point_is_omnidirectional"
+																 : scene::Describe(rejection)
+				 )},
+				{"renderer_rgb",
+				 rejection == scene::LocalLightRejection::None ? Colour(resolved.Colour) : ScriptValue{}},
+				{"resolved_range_metres",
+				 rejection == scene::LocalLightRejection::None ? Number(resolved.Range) : ScriptValue{}},
+				{"cone_cosine",
+				 rejection == scene::LocalLightRejection::None ? Number(resolved.ConeCosine) : ScriptValue{}},
+			}));
+		}
+		const size_t identifiedLocalLightCount = localLights.size();
 		const ecs::WorldTime time = store.Time();
 		std::vector<std::pair<std::string, ScriptValue>> result{
 			{"status", String("ok")},
@@ -1915,6 +1982,63 @@ namespace engine::script {
 			{"coverage", String("explicitly_identified_subset")},
 			{"unlabelled_instances", Number(unlabelled)},
 			{"entities", Array(std::move(entities))},
+			{"lighting_observation",
+			 Map({
+				 {"schema_version", String("lighting-observation/v1")},
+				 {"resolved_global",
+				  Map({
+					  {"direction_world_towards", Vector(lighting.Direction)},
+					  {"ambient_rgb", Colour(lighting.Ambient)},
+					  {"outdoor_ambient_rgb", Colour(lighting.OutdoorAmbient)},
+					  {"direct_rgb", Colour(lighting.Direct)},
+					  {"fog_color_rgb", Colour(lighting.FogColor)},
+					  {"fog_start_metres", Number(lighting.FogStart)},
+					  {"fog_end_metres", Number(lighting.FogEnd)},
+					  {"provenance",
+					   Map({
+						   {"lighting_service", String(serviceSource)},
+						   {"sun_override", String(hasSunOverride ? "sun_resource_override" : "none")},
+						   {"direction", String(directionSource)},
+						   {"ambient", String(ambientSource)},
+						   {"outdoor_ambient", String(serviceSource)},
+						   {"direct", String(serviceSource)},
+						   {"fog", String(serviceSource)},
+					   })},
+				  })},
+				 {"local_lights", Array(std::move(localLights))},
+				 {"local_light_coverage",
+				  String("identified_source_rows_before_portal_copies_and_camera_cap")},
+				 {"identified_local_light_count", Number(identifiedLocalLightCount)},
+				 {"omitted_unidentified_local_light_count", Number(omittedUnidentifiedLights)},
+				 {"view_selection",
+				  Map({{"available", Boolean(false)}, {"reason", String("no selected view")}})},
+				 {"portal_copies",
+				  Map(
+					  {{"available", Boolean(false)},
+					   {"reason", String("view-derived portal transport is not observed")}}
+				  )},
+				 {"per_pixel_contribution",
+				  Map(
+					  {{"available", Boolean(false)}, {"reason", String("requires rendered pixel evidence")}}
+				  )},
+				 {"shadow_factor",
+				  Map(
+					  {{"available", Boolean(false)}, {"reason", String("requires rendered shadow evidence")}}
+				  )},
+				 {"shadow_caster",
+				  Map(
+					  {{"available", Boolean(false)}, {"reason", String("requires rendered shadow evidence")}}
+				  )},
+				 {"shadow_receiver",
+				  Map(
+					  {{"available", Boolean(false)}, {"reason", String("requires rendered shadow evidence")}}
+				  )},
+				 {"photometric_units",
+				  Map(
+					  {{"available", Boolean(false)},
+					   {"reason", String("authored brightness is renderer-relative")}}
+				  )},
+			 })},
 		};
 		if (const auto *clock = physics::PhysicsClockOf(store); clock != nullptr) {
 			result.emplace_back(

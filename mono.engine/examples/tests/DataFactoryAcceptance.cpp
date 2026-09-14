@@ -132,6 +132,7 @@ TEST_CASE("data factory package fixture replaces only its owned workspace subtre
 		ids == std::vector<std::string>{
 				   "data-factory-package/behind",
 				   "data-factory-package/camera",
+				   "data-factory-package/light/bulb",
 				   "data-factory-package/offscreen",
 				   "data-factory-package/visible"
 			   }

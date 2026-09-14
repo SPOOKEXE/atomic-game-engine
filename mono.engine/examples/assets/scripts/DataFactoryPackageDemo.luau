@@ -56,6 +56,7 @@ lamp.Parent = root
 
 local bulb = Instance.new("PointLight")
 bulb.Name = "Bulb"
+bulb:SetAttribute("DataFactoryId", "data-factory-package/light/bulb")
 bulb.Color = lamp.Color
 bulb.Brightness = 260
 bulb.Range = 18
