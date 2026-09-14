@@ -4096,6 +4096,13 @@ TEST_CASE(
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
 	REQUIRE(captured.Planes.size() == 12);
+	for (const auto &plane : captured.Planes) {
+		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
+		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
+	}
+	CHECK_FALSE(captured.Planes[0].Bytes.empty());
+	CHECK_FALSE(captured.Planes[1].Bytes.empty());
+	CHECK_FALSE(captured.Planes[2].Bytes.empty());
 	CHECK(captured.Planes[6].Channel == render::DataCaptureChannel::AmbientOcclusion);
 	CHECK(captured.Planes[6].Scalar == render::DataCaptureScalar::UNorm8);
 	CHECK(captured.Planes[6].ColourSpace == render::DataCaptureColourSpace::NotApplicable);

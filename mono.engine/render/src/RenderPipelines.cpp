@@ -2260,6 +2260,15 @@ namespace engine::render {
 		};
 	}
 
+	bool Renderer::HasPipelineRevision(core::Name name, uint64_t revision) const {
+		RequireOwningThread("HasPipelineRevision");
+		if (State == nullptr || !name.IsValid() || revision == 0) return false;
+		for (const Impl::NamedPipeline &candidate : State->NamedPipelines)
+			if (candidate.Name == name) return candidate.Revision == revision;
+		return State->EngineDefault && State->EngineDefault->Name == name &&
+			   State->EngineDefault->Revision == revision;
+	}
+
 	bool Renderer::InstallNodeHandler(core::Name kind, NodeHandler handler, NodeHandlerLifecycle lifecycle) {
 		RequireOwningThread("InstallNodeHandler");
 		const graph::NodeKindSpec *spec = graph::NodeCatalogue::Find(kind);

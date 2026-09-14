@@ -2542,6 +2542,10 @@ namespace engine::render {
 		// @param what The call being refused, for the message.
 		void RequireOwningThread(const char *what) const;
 
+		// Checks an explicitly installed graph name. This deliberately does not
+		// resolve the unnamed fallback for an arbitrary missing name.
+		bool HasPipelineRevision(core::Name name, uint64_t revision) const;
+
 		// Rebuilds the unnamed fallback from the selected capability tier.
 		bool InstallEngineDefault(const graph::PipelineDocument &document);
 
@@ -2569,6 +2573,7 @@ namespace engine::render {
 		// consumer of this header can do anything with. `src/ViewRecording.hpp`
 		// carries the split's argument; `docs/ARCH_REVIEW.md` C2 is the finding.
 		friend class ViewRecording;
+		friend class DataFactoryHookBind;
 
 		// The thread that called `Initialise`, and the only one that may record.
 		//

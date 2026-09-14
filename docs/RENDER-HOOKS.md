@@ -264,6 +264,31 @@ caller may retry at the next eligible view. Pending work has a fixed owner-pump
 limit and becomes a terminal failure when that bound is reached. The binder
 never grows an unbounded queue to hide a slow consumer.
 
+## Profiling
+
+`just data-capture-hook-bench 5` measures 64 complete connect, arm, call,
+cancel, and disconnect lifecycles through the real renderer without opening a
+device. Removing the full graph snapshot from dispatch reduced this release
+benchmark from 41.62 microseconds with a 3 percent spread to 20.48 microseconds
+with a 1 percent spread. This benchmark measures CPU dispatch and no-device
+backpressure. It does not measure GPU execution or readback throughput.
+
+The hook path reports fixed metric names:
+
+- `render.data_capture_hook.dispatches` and `backpressure` count admission;
+- `readback_poll_calls` counts actual renderer polls;
+- `readback_polls` records polls per non-cancelled terminal request;
+- `readback_latency` records submission-to-terminal time for those requests;
+- `package_bytes`, `retained_bytes`, and `released_bytes` report byte traffic;
+- `drops` counts non-cancelled terminal failures.
+
+The renderer's resource-image counters remain the source for GPU transfer and
+host copy bytes. Heap profiling remains the source for process live and peak
+allocation. The data-capture packager moves validated resource-image vectors
+into result planes before hashing them, so it does not allocate and copy a
+second full host plane. The Vulkan capture suite checks every moved plane's
+payload and hash, but is a correctness check rather than a throughput claim.
+
 ## Sessions, teardown, and failure
 
 Connections belong to a data factory session. A session disconnects before its

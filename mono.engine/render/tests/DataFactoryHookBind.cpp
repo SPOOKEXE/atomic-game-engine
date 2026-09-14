@@ -174,7 +174,7 @@ namespace engine::render {
 		CHECK_FALSE(bind.ArmDataCapture(connected.Connection, request));
 	}
 
-	TEST_CASE("DataFactoryHookBind rejects a stale revision before submission", "[render]") {
+	TEST_CASE("DataFactoryHookBind rejects a replaced pipeline revision before submission", "[render]") {
 		Renderer renderer;
 		DataFactoryHookBind bind(renderer);
 		const HookHandle colour =
@@ -184,11 +184,18 @@ namespace engine::render {
 		REQUIRE(connected.Status == HookBindStatus::Ok);
 		const auto batch = bind.ArmDataCapture(connected.Connection, Request());
 		REQUIRE(batch);
+		graph::RenderGraph replacement;
+		core::Name offender;
+		REQUIRE(
+			graph::Build(graph::DefaultPbrDataCaptureDocument(), replacement, offender) ==
+			graph::PipelineDocumentStatus::Ok
+		);
+		REQUIRE(renderer.SetPipeline(core::Name("hook-test-pipeline"), replacement));
 		RenderObservationContext context;
 		context.WorldName = core::Name("test-world");
 		context.SnapshotId = "snapshot";
 		context.Pipeline = core::Name("hook-test-pipeline");
-		context.PipelineRevision = connectionRequest.PipelineRevision + 1;
+		context.PipelineRevision = connectionRequest.PipelineRevision;
 		context.ViewSlot = 0;
 		CHECK(bind.CallHooks(connected.Connection, *batch, context).Status == HookBindStatus::Invalid);
 	}

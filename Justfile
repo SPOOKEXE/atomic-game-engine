@@ -137,6 +137,12 @@ render-preparation-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_render
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --baseline .cache/build/bench/render-baseline.tsv --filter engine.render.bench.world-presentation --all --samples {{samples}}
 
+# Data-capture hook dispatch through the real renderer without opening a device.
+data-capture-hook-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_render
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.render.bench.data-capture-hooks --all --samples {{samples}}
+
 # The normal benchmark runner reports only wall time. This GPU suite also emits
 # CPU recording, Vulkan timestamp, residency, allocation, cache and transfer
 # counters, so invoke its selected suite directly in the optimized preset.

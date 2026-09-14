@@ -1,6 +1,8 @@
 #include "CaptureRecordValidation.hpp"
 #include "RendererState.hpp"
 
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Renderer.hpp>
 
@@ -55,7 +57,7 @@ namespace engine::render {
 			uint32_t rowStride,
 			DataCaptureScalar scalar,
 			DataCaptureColourSpace colourSpace,
-			const std::vector<std::byte> &bytes
+			std::vector<std::byte> &bytes
 		) {
 			plane.Status = DataCaptureStatus::Ready;
 			plane.Resource = resource;
@@ -64,11 +66,11 @@ namespace engine::render {
 			plane.RowStride = rowStride;
 			plane.Scalar = scalar;
 			plane.ColourSpace = colourSpace;
-			plane.Bytes = bytes;
+			plane.Bytes = std::move(bytes);
 			plane.Hash = assets::Hasher::Of(plane.Bytes);
 		}
 
-		void FillPlane(DataCapturePlane &plane, const ResourceImage &image) {
+		void FillPlane(DataCapturePlane &plane, ResourceImage &image) {
 			const core::Name lit("lit"), albedo("albedo"), material("material"), emissive("emissive"),
 				depth("linear-depth"), normal("normal");
 			auto primary = [&](core::Name expected,
@@ -198,6 +200,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::QueueDataCapture(const DataCaptureRequest &request, DataCaptureTicket &ticket) {
+		ENGINE_PROFILE_CAT("data capture queue", core::ProfileCategory::Render);
 		RequireOwningThread("QueueDataCapture");
 		const bool wantsObjectIds =
 			std::ranges::find(request.Channels, DataCaptureChannel::ObjectIds) != request.Channels.end();
@@ -255,10 +258,12 @@ namespace engine::render {
 			resourceNodes.push_back(node);
 		}
 		ticket = std::move(queued);
+		core::Metrics::Count("render.data_capture.readback_resources", ticket.ResourceTokens.size());
 		return true;
 	}
 
 	DataCapturePoll Renderer::PollDataCapture(DataCaptureTicket &ticket) {
+		ENGINE_PROFILE_CAT("data capture poll", core::ProfileCategory::Render);
 		RequireOwningThread("PollDataCapture");
 		DataCapturePoll poll;
 		poll.SnapshotId = ticket.SnapshotId;
@@ -328,7 +333,7 @@ namespace engine::render {
 		poll.Planes.reserve(ticket.Channels.size());
 		for (size_t index = 0; index < ticket.Channels.size(); ++index) {
 			const DataCaptureChannel channel = ticket.Channels[index];
-			const ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[index]];
+			ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[index]];
 			DataCapturePlane plane = Plane(channel, ticket);
 			if (channelImage.Status == ResourceImageStatus::Ok) {
 				FillPlane(plane, channelImage);

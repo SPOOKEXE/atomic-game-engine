@@ -1,5 +1,8 @@
 #include "ViewRecording.hpp"
 
+#include <engine/core/Clock.hpp>
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 
@@ -103,6 +106,7 @@ namespace engine::render {
 			bool Observed = false;
 			uint16_t PollAttempts = 0;
 			size_t AccountedBytes = 0;
+			uint64_t SubmittedNanoseconds = 0;
 		};
 		std::array<HookSlot, MAX_DATA_FACTORY_HOOKS> Hooks{};
 		std::array<ConnectionSlot, MAX_DATA_FACTORY_CONNECTIONS> Connections{};
@@ -124,12 +128,25 @@ namespace engine::render {
 		void Release(BatchSlot &batch) {
 			if (batch.Submitted) RendererRef.CancelDataCapture(batch.Ticket);
 			ReadyBytes -= batch.AccountedBytes;
+			if (batch.AccountedBytes != 0)
+				core::Metrics::Count("render.data_capture_hook.released_bytes", batch.AccountedBytes);
 			const uint32_t generation = NextGeneration(batch.Generation);
 			batch = {};
 			batch.Generation = generation;
 		}
+		void RecordReadback(const BatchSlot &batch) const {
+			if (batch.SubmittedNanoseconds == 0) return;
+			core::Metrics::ObserveTime(
+				"render.data_capture_hook.readback_latency",
+				core::Clock::Nanoseconds() - batch.SubmittedNanoseconds
+			);
+			core::Metrics::Observe("render.data_capture_hook.readback_polls", batch.PollAttempts);
+		}
 		void Fail(BatchSlot &batch, DataCaptureStatus status) {
 			if (batch.Submitted) RendererRef.CancelDataCapture(batch.Ticket);
+			if (status != DataCaptureStatus::Cancelled) RecordReadback(batch);
+			if (status != DataCaptureStatus::Cancelled)
+				core::Metrics::Count("render.data_capture_hook.drops", 1);
 			batch.Submitted = false;
 			batch.Bundle.Capture = {};
 			batch.Bundle.Capture.Status = status;
@@ -297,26 +314,27 @@ namespace engine::render {
 	CallHooksResult DataFactoryHookBind::CallHooks(
 		ConnectionHandle connection, BatchHandle batch, const RenderObservationContext &context
 	) {
+		ENGINE_PROFILE_CAT("data capture hook dispatch", core::ProfileCategory::Render);
 		if (!State->Valid(connection) || !State->Valid(batch))
 			return {.Status = HookBindStatus::Stale, .Batch = {}};
 		auto &pending = State->Batches[batch.Slot];
-		const auto current = State->RendererRef.DescribePipeline(
-			State->Connections[connection.Slot].Request.Pipeline,
-			State->Connections[connection.Slot].Request.ViewWidth,
-			State->Connections[connection.Slot].Request.ViewHeight
-		);
+		const auto &request = State->Connections[connection.Slot].Request;
 		if (pending.Connection.Slot != connection.Slot ||
 			pending.Connection.Generation != connection.Generation || pending.Submitted || pending.Ready ||
-			context.WorldName.Text() != State->Connections[connection.Slot].Request.Session.WorldName ||
+			context.WorldName.Text() != request.Session.WorldName ||
 			context.SnapshotId != pending.Request.SnapshotId ||
 			context.Pipeline != pending.Request.Pipeline || context.ViewSlot != pending.Request.ViewSlot ||
-			!current || current->Revision != State->Connections[connection.Slot].Request.PipelineRevision ||
-			context.PipelineRevision != current->Revision)
+			!State->RendererRef.HasPipelineRevision(request.Pipeline, request.PipelineRevision) ||
+			context.PipelineRevision != request.PipelineRevision)
 			return {.Status = HookBindStatus::Invalid, .Batch = {}};
-		if (!State->RendererRef.QueueDataCapture(pending.Request, pending.Ticket))
+		core::Metrics::Count("render.data_capture_hook.dispatches", 1);
+		if (!State->RendererRef.QueueDataCapture(pending.Request, pending.Ticket)) {
+			core::Metrics::Count("render.data_capture_hook.backpressure", 1);
 			return {.Status = HookBindStatus::Backpressured, .Batch = {}};
+		}
 		pending.Observation = context;
 		pending.Submitted = true;
+		pending.SubmittedNanoseconds = core::Clock::Nanoseconds();
 		return {.Status = HookBindStatus::Ok, .Batch = batch};
 	}
 
@@ -351,11 +369,14 @@ namespace engine::render {
 	}
 
 	void DataFactoryHookBind::Pump() {
+		ENGINE_PROFILE_CAT("data capture hook pump", core::ProfileCategory::Render);
 		for (auto &batch : State->Batches) {
 			if (!batch.Used || !batch.Submitted || batch.Ready) continue;
+			++batch.PollAttempts;
+			core::Metrics::Count("render.data_capture_hook.readback_poll_calls", 1);
 			DataCapturePoll poll = State->RendererRef.PollDataCapture(batch.Ticket);
 			if (poll.Status == DataCaptureStatus::Pending) {
-				if (++batch.PollAttempts >= MAX_DATA_FACTORY_PENDING_PUMPS)
+				if (batch.PollAttempts >= MAX_DATA_FACTORY_PENDING_PUMPS)
 					State->Fail(batch, DataCaptureStatus::Failed);
 				continue;
 			}
@@ -379,6 +400,9 @@ namespace engine::render {
 				continue;
 			}
 			State->ReadyBytes += bytes;
+			core::Metrics::Count("render.data_capture_hook.package_bytes", bytes);
+			core::Metrics::Count("render.data_capture_hook.retained_bytes", bytes);
+			State->RecordReadback(batch);
 			batch.AccountedBytes = bytes;
 			batch.Bundle.Capture = std::move(poll);
 			batch.Ready = true;
