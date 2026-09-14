@@ -344,9 +344,7 @@ namespace client {
 				const engine::core::Name runtime =
 					engine::render::WorldPipelineKey(requested, instanceWorld.Index);
 				const auto graph = Renderer.DescribePipeline(
-					runtime,
-					static_cast<uint32_t>(viewWidth),
-					static_cast<uint32_t>(viewHeight)
+					runtime, static_cast<uint32_t>(viewWidth), static_cast<uint32_t>(viewHeight)
 				);
 				if (!graph) {
 					failure = "unavailable: pipeline is not installed";
@@ -950,12 +948,15 @@ namespace client {
 		if (!world.IsValid()) return false;
 		uint64_t identity = 0;
 		bool viewportReady = false;
-		if (Universe_->Enter(world, [this, &identity, &viewportReady](engine::ecs::Store &store) {
-				identity = store.Identity();
-				viewportReady = engine::scene::SetViewportSize(
-					store, static_cast<uint32_t>(Settings.Width), static_cast<uint32_t>(Settings.Height)
-				);
-			}) != engine::world::WorldStatus::Ok ||
+		if (Universe_->Enter(
+				world,
+				[this, &identity, &viewportReady](engine::ecs::Store &store) {
+					identity = store.Identity();
+					viewportReady = engine::scene::SetViewportSize(
+						store, static_cast<uint32_t>(Settings.Width), static_cast<uint32_t>(Settings.Height)
+					);
+				}
+			) != engine::world::WorldStatus::Ok ||
 			!viewportReady)
 			return false;
 		Views.Track(world, Universe_->NameOf(world), Settings.Entities);

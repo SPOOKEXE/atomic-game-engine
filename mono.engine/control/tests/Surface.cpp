@@ -218,17 +218,17 @@ namespace {
 				 .Origin = "top_left",
 				 .Packing = "unorm8",
 				 .Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
-				 .AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
-					 .SourceState = "estimated",
-					 .ProducerFrame = 9,
-					 .Enabled = true,
-					 .SampleCount = 12,
-					 .RadiusWorldUnits = 0.65,
-					 .Denoiser = "none",
-					 .TemporalHistory = "none",
-					 .BackgroundValue = 1.0,
-					 .BackgroundClassification = "unavailable"
-				 }}
+				 .AmbientOcclusion =
+					 engine::script::DataCaptureBridgeAmbientOcclusion{
+						 .SourceState = "estimated",
+						 .ProducerFrame = 9,
+						 .Enabled = true,
+						 .SampleCount = 12,
+						 .RadiusWorldUnits = 0.65,
+						 .Denoiser = "none",
+						 .TemporalHistory = "none",
+						 .BackgroundValue = 1.0,
+						 .BackgroundClassification = "unavailable"}}
 			};
 			if (UnavailableAmbientOcclusion)
 				poll.Planes[1].AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{

@@ -513,10 +513,10 @@ namespace engine::render {
 		if (!image.Texture) return;
 		const auto residentBytesPerPixel = [](const ResidentImagePair &pair) -> size_t {
 			return pair.DirectionalResponse ? 64
-				 : pair.AmbientResponse	  ? 48
-				 : pair.Normal			  ? 16
-				 : pair.Depth			  ? 12
-										  : 8;
+				   : pair.AmbientResponse	? 48
+				   : pair.Normal			? 16
+				   : pair.Depth				? 12
+											: 8;
 		};
 		auto found = std::find_if(
 			ResidentImageCache.begin(), ResidentImageCache.end(), [](const ResidentImagePair &pair) {

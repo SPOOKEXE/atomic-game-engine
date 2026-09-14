@@ -442,6 +442,7 @@ namespace engine::render {
 			}
 			return 0;
 		}
+
 	}
 
 	void Renderer::Impl::RecordResourceImages(

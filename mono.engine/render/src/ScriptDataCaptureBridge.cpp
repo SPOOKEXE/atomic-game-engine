@@ -148,26 +148,28 @@ namespace engine::render {
 		CopyAmbientOcclusion(const std::optional<AmbientOcclusionProvenance> &source) {
 			if (!source) return std::nullopt;
 			const auto denoiser = source->Denoiser == std::optional(AmbientOcclusionDenoiser::None)
-									  ? std::optional<std::string>("none")
-									  : std::nullopt;
+				? std::optional<std::string>("none")
+				: std::nullopt;
 			const auto temporalHistory =
 				source->TemporalHistory == std::optional(AmbientOcclusionTemporalHistory::Disabled)
 					? std::optional<std::string>("none")
 					: std::nullopt;
-			const auto backgroundClassification =
-				source->BackgroundClassification ? std::optional<std::string>("unavailable") : std::nullopt;
+			const auto backgroundClassification = source->BackgroundClassification
+				? std::optional<std::string>("unavailable")
+				: std::nullopt;
 			return script::DataCaptureBridgeAmbientOcclusion{
 				.SourceState = SourceState(source->SourceState),
 				.ProducerFrame = source->ProducerFrame,
 				.Enabled = source->Enabled,
 				.SampleCount = source->SampleCount,
 				.RadiusWorldUnits = source->RadiusWorldUnits
-										? std::optional<double>(*source->RadiusWorldUnits)
-										: std::nullopt,
+					? std::optional<double>(*source->RadiusWorldUnits)
+					: std::nullopt,
 				.Denoiser = std::move(denoiser),
 				.TemporalHistory = std::move(temporalHistory),
-				.BackgroundValue =
-					source->BackgroundValue ? std::optional<double>(*source->BackgroundValue) : std::nullopt,
+				.BackgroundValue = source->BackgroundValue
+					? std::optional<double>(*source->BackgroundValue)
+					: std::nullopt,
 				.BackgroundClassification = std::move(backgroundClassification)
 			};
 		}

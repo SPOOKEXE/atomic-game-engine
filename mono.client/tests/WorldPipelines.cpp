@@ -119,7 +119,9 @@ TEST_CASE("worlds with the same authored name keep separate runtime keys", "[cli
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("main#4"), Name("main#9")});
 }
 
-TEST_CASE("a world graph diagnostic resolves only its own qualified pipeline", "[client][pipeline][diagnostic]") {
+TEST_CASE(
+	"a world graph diagnostic resolves only its own qualified pipeline", "[client][pipeline][diagnostic]"
+) {
 	PipelineSet pipelines;
 	REQUIRE(pipelines.Set(Name("main"), engine::graph::DefaultPbrDocument()));
 	Renderer renderer;
