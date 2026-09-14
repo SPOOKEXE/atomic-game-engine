@@ -83,6 +83,7 @@ namespace {
 				.Channels = {"rgb_linear_hdr"},
 				.StorageProfiles = {"lossless"},
 				.TrainingCompactLimitations = {},
+				.NoiseLimitations = {},
 				.HookRecords = {},
 				.MaximumHooks = 0,
 				.MaximumConnections = 0,
