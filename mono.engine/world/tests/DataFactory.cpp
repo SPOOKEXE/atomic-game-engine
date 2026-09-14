@@ -516,6 +516,124 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"data-factory render-only rejects non-pending operation ids without advancing instances",
+	"[world][data-factory]"
+) {
+	Universe firstUniverse;
+	Universe secondUniverse;
+	DataFactorySession first(firstUniverse);
+	DataFactorySession second(secondUniverse);
+	const auto prepare = [](Universe &universe,
+							DataFactorySession &session,
+							const char *instanceId,
+							std::string &snapshot) {
+		MakeWorld(universe, instanceId);
+		session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+		REQUIRE(
+			session.Pause(instanceId, DataFactoryPauseScope::AllSystems, 0).Status == DataFactoryStatus::Ok
+		);
+		REQUIRE(session.Snapshot(instanceId, snapshot).Status == DataFactoryStatus::Ok);
+		const auto before = session.Inspect(instanceId);
+		CHECK(before.Clock.Tick == 0);
+		CHECK(before.Clock.TimeNanoseconds == 0);
+		CHECK(before.WorldVersion == 1);
+		session.SetRenderOnlyPresenter([](const DataFactoryRenderOnlyRequest &, std::string &) {
+			return true;
+		});
+	};
+	const auto queue = [](DataFactorySession &session, const char *instanceId, const std::string &snapshot) {
+		const auto before = session.Inspect(instanceId);
+		return session.RenderOnly({
+			.InstanceId = instanceId,
+			.SnapshotId = snapshot,
+			.ExpectedWorldEpoch = before.WorldEpoch,
+			.ExpectedWorldVersion = before.WorldVersion,
+			.ExpectedTick = before.Clock.Tick,
+		});
+	};
+	std::string firstSnapshot;
+	std::string secondSnapshot;
+	prepare(firstUniverse, first, "data-factory.render-operation.first", firstSnapshot);
+	prepare(secondUniverse, second, "data-factory.render-operation.second", secondSnapshot);
+	const auto consumed = queue(first, "data-factory.render-operation.first", firstSnapshot);
+	REQUIRE(consumed.Status == DataFactoryStatus::Pending);
+	REQUIRE(
+		first
+			.CompleteRenderOnly({
+				.InstanceId = "data-factory.render-operation.first",
+				.OperationId = consumed.OperationId,
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == DataFactoryStatus::Ok
+	);
+	const auto firstQueued = queue(first, "data-factory.render-operation.first", firstSnapshot);
+	const auto secondQueued = queue(second, "data-factory.render-operation.second", secondSnapshot);
+	REQUIRE(firstQueued.Status == DataFactoryStatus::Pending);
+	REQUIRE(secondQueued.Status == DataFactoryStatus::Pending);
+	REQUIRE(firstQueued.OperationId != secondQueued.OperationId);
+
+	const auto foreignFirst = first.CompleteRenderOnly({
+		.InstanceId = "data-factory.render-operation.first",
+		.OperationId = secondQueued.OperationId,
+		.Submitted = true,
+		.Detail = {},
+	});
+	CHECK(foreignFirst.Status == DataFactoryStatus::ValidationFailed);
+	CHECK(
+		second
+			.CompleteRenderOnly({
+				.InstanceId = "data-factory.render-operation.second",
+				.OperationId = firstQueued.OperationId,
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == DataFactoryStatus::ValidationFailed
+	);
+	CHECK(
+		first.PollRenderOnly("data-factory.render-operation.first", firstQueued.OperationId).Status ==
+		DataFactoryStatus::Pending
+	);
+	CHECK(
+		second.PollRenderOnly("data-factory.render-operation.second", secondQueued.OperationId).Status ==
+		DataFactoryStatus::Pending
+	);
+
+	const auto firstCompleted = first.CompleteRenderOnly({
+		.InstanceId = "data-factory.render-operation.first",
+		.OperationId = firstQueued.OperationId,
+		.Submitted = true,
+		.Detail = {},
+	});
+	const auto secondCompleted = second.CompleteRenderOnly({
+		.InstanceId = "data-factory.render-operation.second",
+		.OperationId = secondQueued.OperationId,
+		.Submitted = true,
+		.Detail = {},
+	});
+	CHECK(firstCompleted.Status == DataFactoryStatus::Ok);
+	CHECK(secondCompleted.Status == DataFactoryStatus::Ok);
+	CHECK(
+		first
+			.CompleteRenderOnly({
+				.InstanceId = "data-factory.render-operation.first",
+				.OperationId = firstQueued.OperationId,
+				.Submitted = true,
+				.Detail = {},
+			})
+			.Status == DataFactoryStatus::ValidationFailed
+	);
+	const auto firstAfter = first.Inspect("data-factory.render-operation.first");
+	const auto secondAfter = second.Inspect("data-factory.render-operation.second");
+	CHECK(firstAfter.Clock.Tick == 0);
+	CHECK(firstAfter.Clock.TimeNanoseconds == 0);
+	CHECK(firstAfter.WorldVersion == 1);
+	CHECK(secondAfter.Clock.Tick == 0);
+	CHECK(secondAfter.Clock.TimeNanoseconds == 0);
+	CHECK(secondAfter.WorldVersion == 1);
+}
+
+TEST_CASE(
 	"data-factory checkpoint restores through scratch and creates a fresh epoch", "[world][data-factory]"
 ) {
 	Universe universe;

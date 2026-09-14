@@ -741,6 +741,57 @@ TEST_CASE("script capture does not retain a scene sidecar for a stale snapshot",
 	CHECK_FALSE(bridge.Poll("data-world", ticket, reply, detail));
 }
 
+TEST_CASE(
+	"script capture terminally refuses invalid resource labels without advancing the world",
+	"[render][data-capture]"
+) {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const std::string snapshot = PauseAndSnapshot(worlds, session);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("invalid-capture-label-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	ScriptDataCaptureBridge bridge(session, renderer);
+	auto request = Request();
+	request.SnapshotId = snapshot;
+	request.Pipeline = pipeline.Text();
+	request.Channels = {"object_ids"};
+	uint64_t ticket = 0;
+	std::string detail;
+	REQUIRE(bridge.Queue("data-world", request, ticket, detail));
+	const auto before = session.Inspect("data-world");
+
+	View view = MutationView(snapshot, pipeline);
+	view.ObjectLabelsValid = false;
+	bridge.PrepareView(view);
+	bridge.Pump();
+	engine::script::DataCaptureBridgePoll reply;
+	REQUIRE(bridge.Poll("data-world", ticket, reply, detail));
+	CHECK(reply.Status == "invalid");
+	CHECK(reply.SnapshotId == snapshot);
+	CHECK(reply.Planes.empty());
+	std::vector<std::byte> bytes;
+	CHECK_FALSE(bridge.ReadPlane(
+		"data-world", ticket, "capture/" + std::to_string(ticket) + "/object_ids", 0, 16, bytes, detail
+	));
+	CHECK(bytes.empty());
+	CHECK(detail == "unknown capture resource");
+	const auto after = session.Inspect("data-world");
+	CHECK(after.Clock.Tick == before.Clock.Tick);
+	CHECK(after.Clock.TimeNanoseconds == before.Clock.TimeNanoseconds);
+	CHECK(after.WorldVersion == before.WorldVersion);
+	CHECK(
+		session.RenderSnapshotBarrier("data-world", snapshot).Status == engine::world::DataFactoryStatus::Ok
+	);
+	REQUIRE(bridge.Release("data-world", ticket, detail));
+}
+
 TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data-capture]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
