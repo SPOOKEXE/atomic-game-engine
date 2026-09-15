@@ -6,6 +6,7 @@
 #include <engine/control/DataScriptPackage.hpp>
 #include <engine/control/Features.hpp>
 #include <engine/control/features/DataFactory.hpp>
+#include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Bytes.hpp>
@@ -3832,6 +3833,9 @@ namespace server {
 			if (DataFactory) {
 				ControlSurface.Enable(
 					std::array{engine::control::features::DataFactory(*DataFactory, {.RenderOnly = false})}
+				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataScene(Worlds(), {}, DataFactory.get())}
 				);
 				engine::control::AddDataScriptPackageTool(
 					ControlSurface, [this](const engine::script::DataScriptRequest &request) {

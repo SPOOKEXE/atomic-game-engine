@@ -1,6 +1,11 @@
 #include <engine/assets/ContentHash.hpp>
+#include <engine/control/Features.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/core/Name.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
@@ -17,6 +22,7 @@
 
 TEST_SUITE_ID("studio.datafactoryhost")
 TEST_DEPENDS("engine.world.datafactory")
+TEST_DEPENDS("engine.control.datascene")
 
 namespace {
 	class PackageRuntime final : public engine::script::Runtime {
@@ -63,6 +69,26 @@ namespace {
 			{"source_base64", "cmV0dXJu"},
 			{"assets", nlohmann::json::array()},
 		};
+	}
+
+	nlohmann::json
+	Ask(engine::control::Surface &surface, std::string_view method, nlohmann::json parameters = {}) {
+		const nlohmann::json request{
+			{"jsonrpc", "2.0"}, {"id", 1}, {"method", method}, {"params", std::move(parameters)}
+		};
+		return nlohmann::json::parse(surface.Answer(request.dump()));
+	}
+
+	nlohmann::json Call(
+		engine::control::Surface &surface,
+		std::string_view name,
+		const nlohmann::json &arguments,
+		bool &failed
+	) {
+		const nlohmann::json reply = Ask(surface, "tools/call", {{"name", name}, {"arguments", arguments}});
+		const nlohmann::json &result = reply.at("result");
+		failed = result.value("isError", false);
+		return nlohmann::json::parse(result.at("content").at(0).at("text").get<std::string>());
 	}
 
 	studio::DataFactoryHostCallbacks Callbacks() {
@@ -267,6 +293,81 @@ TEST_CASE("Studio factory tools omit unavailable render work", "[studio][data-fa
 	CHECK_FALSE(has("world_resume"));
 	CHECK_FALSE(has("world_list"));
 	CHECK_FALSE(has("render_only"));
+}
+
+TEST_CASE("Studio factory exposes fenced authored-affordance reads", "[studio][data-factory]") {
+	engine::scene::RegisterSceneComponents();
+	engine::world::Universe worlds;
+	studio::DataFactoryHost host;
+	std::string detail;
+	REQUIRE(host.Start(worlds, Callbacks(), detail));
+	engine::control::Surface surface("studio-test", "test");
+	surface.Enable(std::array{engine::control::features::Discovery()});
+	host.InstallTools(surface, true);
+
+	const auto created = host.Session()->CreateWorld(Request("affordances", "create"));
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	const engine::world::WorldId world = worlds.Find(engine::core::Name("affordances"));
+	REQUIRE(world.IsValid());
+	REQUIRE(worlds.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::EnsureClassTree();
+		const engine::ecs::Entity part = engine::scene::MakePart(store, {});
+		auto *affordance = store.GetMutable<engine::scene::AuthoredAffordance>(part);
+		affordance->Id = engine::core::Name("studio/door");
+		affordance->Kind = engine::scene::AuthoredAffordanceKind::Interactable;
+		affordance->Enabled = true;
+	}) == engine::world::WorldStatus::Ok);
+	const nlohmann::json listed = Ask(surface, "tools/list");
+	const auto tool = std::ranges::find_if(listed["result"]["tools"], [](const nlohmann::json &item) {
+		return item["name"] == "get_authored_affordances";
+	});
+	REQUIRE(tool != listed["result"]["tools"].end());
+	bool failed = false;
+	const nlohmann::json negotiated = Call(surface, "negotiate", nlohmann::json::object(), failed);
+	REQUIRE_FALSE(failed);
+	CHECK(std::ranges::any_of(negotiated["operations"], [](const nlohmann::json &item) {
+		return item["name"] == "get_authored_affordances";
+	}));
+
+	const nlohmann::json revision{
+		{"expected_tick", created.Clock.Tick},
+		{"expected_world_epoch", created.WorldEpoch},
+		{"expected_world_version", created.WorldVersion},
+		{"limit", 256},
+	};
+	const nlohmann::json reply = Call(
+		surface, "get_authored_affordances", {{"instance_id", "affordances"}, {"options", revision}}, failed
+	);
+	INFO(reply.dump());
+	CHECK_FALSE(failed);
+	CHECK(reply["schema_version"] == "authored-affordance/v1");
+	CHECK(reply["limit"] == 256);
+	CHECK(reply["affordances"] == nlohmann::json::array({{{"id", "studio/door"}, {"kind", "interactable"}}}));
+
+	REQUIRE(
+		host.Session()
+			->CommitExternalMutation("affordances", created.Clock.Tick, created.WorldVersion)
+			.Status == engine::world::DataFactoryStatus::Ok
+	);
+	const nlohmann::json stale = Call(
+		surface, "get_authored_affordances", {{"instance_id", "affordances"}, {"options", revision}}, failed
+	);
+	INFO(stale.dump());
+	CHECK(failed);
+	CHECK(stale["status"] == "version_conflict");
+	CHECK(stale["expected_world_version"] == created.WorldVersion);
+	CHECK(stale["current_world_version"] == created.WorldVersion + 1);
+
+	engine::world::WorldSettings foreignSettings;
+	foreignSettings.Name = engine::core::Name("foreign");
+	REQUIRE(worlds.Create(foreignSettings).IsValid());
+	const nlohmann::json foreign = Call(
+		surface, "get_authored_affordances", {{"instance_id", "foreign"}, {"options", revision}}, failed
+	);
+	INFO(foreign.dump());
+	CHECK(failed);
+	CHECK(foreign["status"] == "validation_failed");
+	CHECK(foreign["detail"].get<std::string>().find("not owned") != std::string::npos);
 }
 
 TEST_CASE(

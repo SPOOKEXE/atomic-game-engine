@@ -1,5 +1,6 @@
 #include <engine/control/DataScriptPackage.hpp>
 #include <engine/control/features/DataFactory.hpp>
+#include <engine/control/features/DataScene.hpp>
 
 #include <array>
 #include <nlohmann/json.hpp>
@@ -49,7 +50,10 @@ namespace studio {
 		// presenter yet. Do not list render_only until one can complete it.
 		const engine::control::DataFactoryToolSet tools{.RenderOnly = false};
 		(void)rendererReady;
-		const std::array features{engine::control::features::DataFactory(*Lifecycle, tools)};
+		const std::array features{
+			engine::control::features::DataFactory(*Lifecycle, tools),
+			engine::control::features::DataScene(*Worlds, {}, Lifecycle.get()),
+		};
 		surface.Enable(features);
 		if (PackageDependencies)
 			engine::control::AddDataScriptPackageTool(
