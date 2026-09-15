@@ -3039,6 +3039,7 @@ declare extern type DataSceneService with
 	function OverlapAABB(self, request: any): any
 	function OverlapOBB(self, request: any): any
 	function GetColliderBev(self, request: any): any
+	function GetFilledOccupancy(self, request: any): any
 	function GetSignedDistanceField(self, request: any): any
 	function GetAuthoredAffordances(self, request: any): any
 end

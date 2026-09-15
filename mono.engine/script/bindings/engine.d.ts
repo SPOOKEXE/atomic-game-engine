@@ -2665,6 +2665,7 @@ declare interface DataSceneService {
 	OverlapAABB(request: unknown): Record<string, unknown>;
 	OverlapOBB(request: unknown): Record<string, unknown>;
 	GetColliderBev(request: unknown): Record<string, unknown>;
+	GetFilledOccupancy(request: unknown): Record<string, unknown>;
 	GetSignedDistanceField(request: unknown): Record<string, unknown>;
 	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
 }

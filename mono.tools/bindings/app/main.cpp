@@ -1637,6 +1637,7 @@ declare extern type DataSceneService with
 	function OverlapAABB(self, request: any): any
 	function OverlapOBB(self, request: any): any
 	function GetColliderBev(self, request: any): any
+	function GetFilledOccupancy(self, request: any): any
 	function GetSignedDistanceField(self, request: any): any
 	function GetAuthoredAffordances(self, request: any): any
 end
@@ -3517,6 +3518,7 @@ declare interface DataSceneService {
 	OverlapAABB(request: unknown): Record<string, unknown>;
 	OverlapOBB(request: unknown): Record<string, unknown>;
 	GetColliderBev(request: unknown): Record<string, unknown>;
+	GetFilledOccupancy(request: unknown): Record<string, unknown>;
 	GetSignedDistanceField(request: unknown): Record<string, unknown>;
 	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
 }
