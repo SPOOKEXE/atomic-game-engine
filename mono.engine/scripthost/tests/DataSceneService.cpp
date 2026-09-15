@@ -1300,7 +1300,7 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				part.Position = Vector3.new(0, 0, 0)
 				part.Size = Vector3.new(2, 2, 2)
 				part.AffordanceId = "query/box/interact"
-				part.AffordanceKind = 3
+				part.AffordanceKind = Enum.AuthoredAffordanceKind.Interactable
 				part.AffordanceEnabled = true
 			)");
 		} else {
@@ -1310,7 +1310,7 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				part.Position = Vector3.new(0, 0, 0);
 				part.Size = Vector3.new(2, 2, 2);
 				part.AffordanceId = "query/box/interact";
-				part.AffordanceKind = 3;
+				part.AffordanceKind = Enum.AuthoredAffordanceKind.Interactable;
 				part.AffordanceEnabled = true;
 			)");
 		}

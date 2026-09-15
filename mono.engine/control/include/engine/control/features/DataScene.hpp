@@ -373,329 +373,274 @@ namespace engine::control {
 			};
 		Add(observation("get_capture_channels", "Capture channel capability metadata for one scene.", true));
 		Add(observation("get_resources", "Durable resource metadata for one scene.", false));
-		const auto authoredAffordanceSchema =
-			[session] {
-				json properties{
-					{"limit",
-					 {{"type", "integer"}, {"minimum", 0}, {"maximum", script::MAX_AUTHORED_AFFORDANCES}}}
-				};
-				json required = json::array({"limit"});
+		Add(Tool{
+			"get_event_narratives",
+			"Script-declared, bounded event narratives for one scene.",
+			schema,
+			[worlds, session](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure)) return nullptr;
+				if (!arguments.contains("options") ||
+					!Options(arguments["options"], {}, session != nullptr, failure))
+					return nullptr;
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(
+						session, instance, arguments["options"], fence, failure
+					))
+					return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					const script::DataSceneResult narratives = script::GetEventNarratives(store);
+					if (std::strcmp(narratives.Status, "unavailable") != 0) {
+						out = Result(narratives, failure);
+						return;
+					}
+					size_t bytes = 0;
+					if (!JsonValue(narratives.Value, out, 0, bytes) ||
+						out.dump().size() > MAXIMUM_RESULT_BYTES)
+						failure = "data-scene result exceeds the safe response limit";
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
+		auto querySchema = [session](json properties, json required) {
+			return [session, properties = std::move(properties), required = std::move(required)] {
+				json optionProperties = properties;
+				json optionRequired = required;
 				if (session != nullptr) {
-					properties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
-					properties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
-					properties["expected_world_version"] = {{"type", "integer"}, {"minimum", 0}};
-					required.push_back("expected_tick");
-					required.push_back("expected_world_epoch");
-					required.push_back("expected_world_version");
+					optionProperties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
+					optionProperties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
+					optionProperties["expected_world_version"] = {{"type", "integer"}, {"minimum", 0}};
+					optionRequired.push_back("expected_tick");
+					optionRequired.push_back("expected_world_epoch");
+					optionRequired.push_back("expected_world_version");
 				}
-				return json {
-					{"type", "object"}, {{"properties",
-										  {{"instance_id", {{"type", "string"}, {"minLength", 1}}},
-										   {"options",
-											{{"type", "object"},
-											 {"properties", std::move(properties)},
-											 {"required", std::move(required)},
-											 {"additionalProperties", false}}}}},
-										 {"required", json::array({"instance_id", "options"})},
-										 {"additionalProperties", false}};
+				return json{
+					{"type", "object"},
+					{"properties",
+					 json{
+						 {"instance_id", json{{"type", "string"}, {"minLength", 1}}},
+						 {"options",
+						  json{
+							  {"type", "object"},
+							  {"properties", std::move(optionProperties)},
+							  {"required", std::move(optionRequired)},
+							  {"additionalProperties", false},
+						  }},
+					 }},
+					{"required", json::array({"instance_id", "options"})},
+					{"additionalProperties", false},
 				};
-				Add(Tool{
-					"get_authored_affordances",
-					"Return bounded explicit authored affordances in stable identity order. Geometry and "
-					"colliders "
-					"do not infer semantics.",
-					authoredAffordanceSchema(),
-					[worlds, session](const json &arguments, std::string &failure) -> json {
-						using namespace data_scene_detail;
-						if (!Only(arguments, {"instance_id", "options"}, failure) ||
-							!arguments.contains("options") || !arguments["options"].is_object())
-							return nullptr;
-						if (!Options(arguments["options"], {"limit"}, session != nullptr, failure))
-							return nullptr;
-						const json &options = arguments["options"];
-						if (!options.contains("limit") || !options["limit"].is_number_unsigned() ||
-							options["limit"].get<uint64_t>() > script::MAX_AUTHORED_AFFORDANCES) {
-							failure = "options.limit must be an integer from 0 through 256";
-							return nullptr;
-						}
-						std::string instance;
-						if (!data_factory_read_fence::InstanceId(arguments, instance, failure))
-							return nullptr;
-						json fence;
-						if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
-							return fence;
-						const world::WorldId id = World(*worlds, instance, failure);
-						if (!failure.empty()) return nullptr;
-						json out;
-						const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-							out = Result(
-								script::GetAuthoredAffordances(store, options["limit"].get<size_t>()), failure
-							);
-						});
-						if (status != world::WorldStatus::Ok && failure.empty())
-							failure = "scene is unavailable";
-						return out;
-					}
+			};
+		};
+		const json vectorSchema{
+			{"type", "array"},
+			{"items", json{{"type", "number"}}},
+			{"minItems", 3},
+			{"maxItems", 3},
+		};
+		Add(Tool{
+			"get_authored_affordances",
+			"Return bounded explicit authored affordances in stable identity order. Geometry and colliders do not infer semantics.",
+			querySchema(
+				json{{"limit", {{"type", "integer"}, {"minimum", 0}, {"maximum", script::MAX_AUTHORED_AFFORDANCES}}}},
+				json::array({"limit"})
+			),
+			[worlds, session](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object()) return nullptr;
+				const json &options = arguments["options"];
+				if (!Options(options, {"limit"}, session != nullptr, failure) ||
+					!options.contains("limit") || !options["limit"].is_number_unsigned() ||
+					options["limit"].get<uint64_t>() > script::MAX_AUTHORED_AFFORDANCES) {
+					if (failure.empty()) failure = "options.limit must be an integer from 0 through 256";
+					return nullptr;
+				}
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(session, instance, options, fence, failure)) return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					out = Result(script::GetAuthoredAffordances(store, options["limit"].get<size_t>()), failure);
 				});
-				Add(Tool{
-					"get_event_narratives",
-					"Script-declared, bounded event narratives for one scene.",
-					schema,
-					[worlds, session](const json &arguments, std::string &failure) -> json {
-						using namespace data_scene_detail;
-						if (!Only(arguments, {"instance_id", "options"}, failure)) return nullptr;
-						if (!arguments.contains("options") ||
-							!Options(arguments["options"], {}, session != nullptr, failure))
-							return nullptr;
-						std::string instance;
-						if (!data_factory_read_fence::InstanceId(arguments, instance, failure))
-							return nullptr;
-						json fence;
-						if (!data_factory_read_fence::Validate(
-								session, instance, arguments["options"], fence, failure
-							))
-							return fence;
-						const world::WorldId id = World(*worlds, instance, failure);
-						if (!failure.empty()) return nullptr;
-						json out;
-						const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-							const script::DataSceneResult narratives = script::GetEventNarratives(store);
-							if (std::strcmp(narratives.Status, "unavailable") != 0) {
-								out = Result(narratives, failure);
-								return;
-							}
-							size_t bytes = 0;
-							if (!JsonValue(narratives.Value, out, 0, bytes) ||
-								out.dump().size() > MAXIMUM_RESULT_BYTES)
-								failure = "data-scene result exceeds the safe response limit";
-						});
-						if (status != world::WorldStatus::Ok && failure.empty())
-							failure = "scene is unavailable";
-						return out;
-					}
-				});
-				auto querySchema = [session](json properties, json required) {
-					return [session, properties = std::move(properties), required = std::move(required)] {
-						json optionProperties = properties;
-						json optionRequired = required;
-						if (session != nullptr) {
-							optionProperties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
-							optionProperties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
-							optionProperties["expected_world_version"] = {
-								{"type", "integer"}, {"minimum", 0}
-							};
-							optionRequired.push_back("expected_tick");
-							optionRequired.push_back("expected_world_epoch");
-							optionRequired.push_back("expected_world_version");
-						}
-						return json{
-							{"type", "object"},
-							{"properties",
-							 json{
-								 {"instance_id", json{{"type", "string"}, {"minLength", 1}}},
-								 {"options",
-								  json{
-									  {"type", "object"},
-									  {"properties", std::move(optionProperties)},
-									  {"required", std::move(optionRequired)},
-									  {"additionalProperties", false},
-								  }},
-							 }},
-							{"required", json::array({"instance_id", "options"})},
-							{"additionalProperties", false},
-						};
-					};
-				};
-				const json vectorSchema{
-					{"type", "array"},
-					{"items", json{{"type", "number"}}},
-					{"minItems", 3},
-					{"maxItems", 3},
-				};
-				Add(Tool{
-					"raycast",
-					"Cast a finite ray through one scene's prepared physics colliders and return exact hit "
-					"metadata "
-					"with a stable authored entity id when one exists.",
-					querySchema(
-						json{
-							{"origin", vectorSchema},
-							{"direction", vectorSchema},
-							{"max_distance_metres",
-							 json{{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 100'000}}},
-						},
-						json::array({"origin", "direction", "max_distance_metres"})
-					),
-					[worlds, session](const json &arguments, std::string &failure) -> json {
-						using namespace data_scene_detail;
-						if (!Only(arguments, {"instance_id", "options"}, failure) ||
-							!arguments.contains("options") || !arguments["options"].is_object()) {
-							if (failure.empty()) failure = "options must be an object";
-							return nullptr;
-						}
-						const json &options = arguments["options"];
-						if (!Options(
-								options,
-								{"origin", "direction", "max_distance_metres"},
-								session != nullptr,
-								failure
-							))
-							return nullptr;
-						core::Vector3 origin;
-						core::Vector3 direction;
-						if (!Vector(options.value("origin", json{}), origin) ||
-							!Vector(options.value("direction", json{}), direction) ||
-							!options.contains("max_distance_metres") ||
-							!options["max_distance_metres"].is_number()) {
-							failure = "options requires finite origin, direction and max_distance_metres";
-							return nullptr;
-						}
-						std::string instance;
-						if (!data_factory_read_fence::InstanceId(arguments, instance, failure))
-							return nullptr;
-						json fence;
-						if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
-							return fence;
-						const world::WorldId id = World(*worlds, instance, failure);
-						if (!failure.empty()) return nullptr;
-						json out;
-						const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-							out = Result(
-								script::Raycast(
-									store, {origin, direction, options["max_distance_metres"].get<float>()}
-								),
-								failure
-							);
-						});
-						if (status != world::WorldStatus::Ok && failure.empty())
-							failure = "scene is unavailable";
-						return out;
-					}
-				});
-				Add(Tool{
-					"overlap_aabb",
-					"Return stable authored ids for prepared physics colliders overlapping one finite "
-					"world-space "
-					"axis-aligned box.",
-					querySchema(
-						json{{"minimum", vectorSchema}, {"maximum", vectorSchema}},
-						json::array({"minimum", "maximum"})
-					),
-					[worlds, session](const json &arguments, std::string &failure) -> json {
-						using namespace data_scene_detail;
-						if (!Only(arguments, {"instance_id", "options"}, failure) ||
-							!arguments.contains("options") || !arguments["options"].is_object()) {
-							if (failure.empty()) failure = "options must be an object";
-							return nullptr;
-						}
-						const json &options = arguments["options"];
-						if (!Options(options, {"minimum", "maximum"}, session != nullptr, failure))
-							return nullptr;
-						core::Vector3 minimum;
-						core::Vector3 maximum;
-						if (!Vector(options.value("minimum", json{}), minimum) ||
-							!Vector(options.value("maximum", json{}), maximum)) {
-							failure = "options requires finite minimum and maximum vectors";
-							return nullptr;
-						}
-						std::string instance;
-						if (!data_factory_read_fence::InstanceId(arguments, instance, failure))
-							return nullptr;
-						json fence;
-						if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
-							return fence;
-						const world::WorldId id = World(*worlds, instance, failure);
-						if (!failure.empty()) return nullptr;
-						json out;
-						const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-							out = Result(script::OverlapAABB(store, {minimum, maximum}), failure);
-						});
-						if (status != world::WorldStatus::Ok && failure.empty())
-							failure = "scene is unavailable";
-						return out;
-					}
-				});
-				Add(Tool{
-					"overlap_obb",
-					"Return stable authored ids for prepared physics colliders overlapping one finite "
-					"world-space "
-					"oriented box.",
-					querySchema(
-						json{
-							{"center", vectorSchema},
-							{"orientation_xyzw",
-							 json{
-								 {"type", "array"},
-								 {"items", json{{"type", "number"}}},
-								 {"minItems", 4},
-								 {"maxItems", 4},
-							 }},
-							{"half_extent", vectorSchema},
-						},
-						json::array({"center", "orientation_xyzw", "half_extent"})
-					),
-					[worlds, session](const json &arguments, std::string &failure) -> json {
-						using namespace data_scene_detail;
-						if (!Only(arguments, {"instance_id", "options"}, failure) ||
-							!arguments.contains("options") || !arguments["options"].is_object()) {
-							if (failure.empty()) failure = "options must be an object";
-							return nullptr;
-						}
-						const json &options = arguments["options"];
-						if (!Options(
-								options,
-								{"center", "orientation_xyzw", "half_extent"},
-								session != nullptr,
-								failure
-							))
-							return nullptr;
-						core::Vector3 center;
-						core::Vector3 halfExtent;
-						const json &rotation = options.value("orientation_xyzw", json{});
-						if (!Vector(options.value("center", json{}), center) ||
-							!Vector(options.value("half_extent", json{}), halfExtent) ||
-							!rotation.is_array() || rotation.size() != 4 ||
-							std::any_of(rotation.begin(), rotation.end(), [](const json &value) {
-								return !value.is_number();
-							})) {
-							failure = "options requires finite center, orientation_xyzw and half_extent";
-							return nullptr;
-						}
-						core::CFrame frame{center};
-						frame.QuaternionX = rotation[0].get<float>();
-						frame.QuaternionY = rotation[1].get<float>();
-						frame.QuaternionZ = rotation[2].get<float>();
-						frame.QuaternionW = rotation[3].get<float>();
-						std::string instance;
-						if (!data_factory_read_fence::InstanceId(arguments, instance, failure))
-							return nullptr;
-						json fence;
-						if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
-							return fence;
-						const world::WorldId id = World(*worlds, instance, failure);
-						if (!failure.empty()) return nullptr;
-						json out;
-						const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-							out = Result(script::OverlapOBB(store, {frame, halfExtent}), failure);
-						});
-						if (status != world::WorldStatus::Ok && failure.empty())
-							failure = "scene is unavailable";
-						return out;
-					}
-				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
 			}
+		});
+		Add(Tool{
+			"raycast",
+			"Cast a finite ray through one scene's prepared physics colliders and return exact hit metadata "
+			"with a stable authored entity id when one exists.",
+			querySchema(
+				json{
+					{"origin", vectorSchema},
+					{"direction", vectorSchema},
+					{"max_distance_metres",
+					 json{{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 100'000}}},
+				},
+				json::array({"origin", "direction", "max_distance_metres"})
+			),
+			[worlds, session](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object()) {
+					if (failure.empty()) failure = "options must be an object";
+					return nullptr;
+				}
+				const json &options = arguments["options"];
+				if (!Options(
+						options, {"origin", "direction", "max_distance_metres"}, session != nullptr, failure
+					))
+					return nullptr;
+				core::Vector3 origin;
+				core::Vector3 direction;
+				if (!Vector(options.value("origin", json{}), origin) ||
+					!Vector(options.value("direction", json{}), direction) ||
+					!options.contains("max_distance_metres") || !options["max_distance_metres"].is_number()) {
+					failure = "options requires finite origin, direction and max_distance_metres";
+					return nullptr;
+				}
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
+					return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					out = Result(
+						script::Raycast(
+							store, {origin, direction, options["max_distance_metres"].get<float>()}
+						),
+						failure
+					);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
+		Add(Tool{
+			"overlap_aabb",
+			"Return stable authored ids for prepared physics colliders overlapping one finite world-space "
+			"axis-aligned box.",
+			querySchema(
+				json{{"minimum", vectorSchema}, {"maximum", vectorSchema}},
+				json::array({"minimum", "maximum"})
+			),
+			[worlds, session](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object()) {
+					if (failure.empty()) failure = "options must be an object";
+					return nullptr;
+				}
+				const json &options = arguments["options"];
+				if (!Options(options, {"minimum", "maximum"}, session != nullptr, failure)) return nullptr;
+				core::Vector3 minimum;
+				core::Vector3 maximum;
+				if (!Vector(options.value("minimum", json{}), minimum) ||
+					!Vector(options.value("maximum", json{}), maximum)) {
+					failure = "options requires finite minimum and maximum vectors";
+					return nullptr;
+				}
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
+					return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					out = Result(script::OverlapAABB(store, {minimum, maximum}), failure);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
+		Add(Tool{
+			"overlap_obb",
+			"Return stable authored ids for prepared physics colliders overlapping one finite world-space "
+			"oriented box.",
+			querySchema(
+				json{
+					{"center", vectorSchema},
+					{"orientation_xyzw",
+					 json{
+						 {"type", "array"},
+						 {"items", json{{"type", "number"}}},
+						 {"minItems", 4},
+						 {"maxItems", 4},
+					 }},
+					{"half_extent", vectorSchema},
+				},
+				json::array({"center", "orientation_xyzw", "half_extent"})
+			),
+			[worlds, session](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object()) {
+					if (failure.empty()) failure = "options must be an object";
+					return nullptr;
+				}
+				const json &options = arguments["options"];
+				if (!Options(
+						options, {"center", "orientation_xyzw", "half_extent"}, session != nullptr, failure
+					))
+					return nullptr;
+				core::Vector3 center;
+				core::Vector3 halfExtent;
+				const json &rotation = options.value("orientation_xyzw", json{});
+				if (!Vector(options.value("center", json{}), center) ||
+					!Vector(options.value("half_extent", json{}), halfExtent) || !rotation.is_array() ||
+					rotation.size() != 4 ||
+					std::any_of(rotation.begin(), rotation.end(), [](const json &value) {
+						return !value.is_number();
+					})) {
+					failure = "options requires finite center, orientation_xyzw and half_extent";
+					return nullptr;
+				}
+				core::CFrame frame{center};
+				frame.QuaternionX = rotation[0].get<float>();
+				frame.QuaternionY = rotation[1].get<float>();
+				frame.QuaternionZ = rotation[2].get<float>();
+				frame.QuaternionW = rotation[3].get<float>();
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
+					return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
+				if (!failure.empty()) return nullptr;
+				json out;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					out = Result(script::OverlapOBB(store, {frame, halfExtent}), failure);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				return out;
+			}
+		});
+	}
 
-		namespace features {
-			inline Feature DataScene(
-				world::Universe & universe,
-				std::shared_ptr<script::DataCaptureBridge> bridge = {},
-				world::DataFactorySession *session = nullptr
-			) {
-				return Feature{
-					"data_scene", [&universe, bridge = std::move(bridge), session](Surface &surface) {
-						surface.AddDataSceneTools(universe, bridge, session);
-					}
-				};
-			}
+	namespace features {
+		inline Feature DataScene(
+			world::Universe &universe,
+			std::shared_ptr<script::DataCaptureBridge> bridge = {},
+			world::DataFactorySession *session = nullptr
+		) {
+			return Feature{"data_scene", [&universe, bridge = std::move(bridge), session](Surface &surface) {
+							   surface.AddDataSceneTools(universe, bridge, session);
+						   }};
 		}
 	}
+}

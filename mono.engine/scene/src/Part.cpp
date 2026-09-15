@@ -324,7 +324,6 @@ namespace engine::scene {
 			property.Size = sizeof(float);
 			property.Reads = &ecs::ComponentSet::Intern({
 				ecs::Components::Of<RigidBody>(),
-				ecs::Components::Of<AuthoredAffordance>(),
 				ecs::Components::Of<Collider>(),
 				ecs::Components::Of<PhysicsProperties>(),
 
@@ -729,6 +728,11 @@ namespace engine::scene {
 
 		const core::Name &AutoMeshLodStrategyEnum() {
 			static const core::Name name("AutoMeshLODStrategy");
+			return name;
+		}
+
+		const core::Name &AuthoredAffordanceKindEnum() {
+			static const core::Name name("AuthoredAffordanceKind");
 			return name;
 		}
 
@@ -2356,6 +2360,10 @@ namespace engine::scene {
 			ecs::EnumTable::Register(
 				AutoMeshLodStrategyEnum().Text(), std::array<std::string_view, 2>{"Decimated", "Reduced"}
 			);
+			ecs::EnumTable::Register(
+				AuthoredAffordanceKindEnum().Text(),
+				std::array<std::string_view, 5>{"None", "Walkable", "Climbable", "Interactable", "Cover"}
+			);
 
 			// The collider shapes. **In `ShapeKind`'s own declaration order**,
 			// because `CollisionShapeProperty` converts between an ordinal and
@@ -2450,6 +2458,11 @@ namespace engine::scene {
 				// description. Forty bytes on every part, which is the trade
 				// the two entries above already make.
 				ecs::Components::Of<RigidBody>(),
+
+				// Data-factory reads become a column scan because every BasePart has
+				// this eight-byte record. The fixed cost keeps one authoring surface
+				// and avoids a structural join for the bounded affordance query.
+				ecs::Components::Of<AuthoredAffordance>(),
 
 				// **`Simulated` is deliberately not here, and that is the safe
 				// default rather than an omission.** A part is static until
@@ -3036,7 +3049,12 @@ namespace engine::scene {
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
 			ecs::Classes::Property<&AuthoredAffordance::Id>(basePart, "AffordanceId");
-			ecs::Classes::Property<&AuthoredAffordance::Kind>(basePart, "AffordanceKind");
+			ecs::Classes::Computed(
+				basePart,
+				EnumFieldProperty<
+					AuthoredAffordance, &AuthoredAffordance::Kind, AuthoredAffordanceKindEnum
+				>("AffordanceKind")
+			);
 			ecs::Classes::Property<&AuthoredAffordance::Enabled>(basePart, "AffordanceEnabled");
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 

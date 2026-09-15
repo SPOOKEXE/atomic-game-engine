@@ -66,6 +66,7 @@ world.Replica | Marks a world as a mirror of one the server owns, naming the wor
 ## `scene`
 
 scene.CameraPortalView | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses.
+scene.AuthoredAffordance | Explicit bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry.
 scene.CameraCharacterHold | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending.
 scene.CameraBodyPose | Local last-presented body rows, joint palette and root pose retained while a replica's source rows retire.
 scene.ActiveCamera | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`.

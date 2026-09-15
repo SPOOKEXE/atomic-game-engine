@@ -46,7 +46,7 @@ crate:SetAttribute("DataFactoryId", "data-factory-demo/crate")
 crate.Position = Vector3.new(0, 1, 0)
 crate.Size = Vector3.new(2, 2, 2)
 crate.AffordanceId = "data-factory-demo/crate/interact"
-crate.AffordanceKind = 3
+crate.AffordanceKind = Enum.AuthoredAffordanceKind.Interactable
 crate.AffordanceEnabled = true
 crate.Parent = workspace
 
