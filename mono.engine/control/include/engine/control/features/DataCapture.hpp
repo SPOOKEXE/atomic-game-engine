@@ -435,14 +435,12 @@ namespace engine::control {
 				  {"cpu_readback_nanoseconds",
 				   reply.Profile.CpuReadbackNanoseconds ? json(*reply.Profile.CpuReadbackNanoseconds)
 														: json(nullptr)},
-				  {"cpu_storage_conversion_nanoseconds",
-				   reply.Profile.CpuStorageConversionNanoseconds
-					   ? json(*reply.Profile.CpuStorageConversionNanoseconds)
-					   : json(nullptr)},
-				  {"storage_conversion_bytes_per_second",
-				   reply.Profile.StorageConversionBytesPerSecond
-					   ? json(*reply.Profile.StorageConversionBytesPerSecond)
-					   : json(nullptr)},
+				  {"cpu_finalization_nanoseconds",
+				   reply.Profile.CpuFinalizationNanoseconds ? json(*reply.Profile.CpuFinalizationNanoseconds)
+															: json(nullptr)},
+				  {"finalization_bytes_per_second",
+				   reply.Profile.FinalizationBytesPerSecond ? json(*reply.Profile.FinalizationBytesPerSecond)
+															: json(nullptr)},
 				  {"gpu_nanoseconds",
 				   reply.Profile.GpuNanoseconds ? json(*reply.Profile.GpuNanoseconds) : json(nullptr)},
 				  {"gpu_timing_reason", reply.Profile.GpuTimingReason},

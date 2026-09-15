@@ -246,8 +246,8 @@ namespace {
 			poll.Profile.ReadbackOperations = 2;
 			poll.Profile.TransferOperations = 1;
 			poll.Profile.CpuReadbackNanoseconds = 11;
-			poll.Profile.CpuStorageConversionNanoseconds = 13;
-			poll.Profile.StorageConversionBytesPerSecond = 538461538.0;
+			poll.Profile.CpuFinalizationNanoseconds = 13;
+			poll.Profile.FinalizationBytesPerSecond = 538461538.0;
 			poll.HasCamera = true;
 			poll.CropLeft = 0.125;
 			poll.CropTop = 0.25;
@@ -690,7 +690,8 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(profile["readback_operations"] == 2);
 	CHECK(profile["transfer_operations"] == 1);
 	CHECK(profile["cpu_readback_nanoseconds"] == 11);
-	CHECK(profile["cpu_storage_conversion_nanoseconds"] == 13);
+	CHECK(profile["cpu_finalization_nanoseconds"] == 13);
+	CHECK(profile["finalization_bytes_per_second"] == 538461538.0);
 	CHECK(profile["gpu_nanoseconds"].is_null());
 	CHECK(profile["gpu_timing_reason"] == "unavailable/no_completed_gpu_timestamp");
 	CHECK(profile["allocation_bytes"].is_null());

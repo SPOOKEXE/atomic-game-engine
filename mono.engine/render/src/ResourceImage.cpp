@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cstring>
 #include <utility>
 
@@ -706,6 +707,7 @@ namespace engine::render {
 			slot.Image.Width = slot.Image.Height = slot.Image.RowStride = 0;
 			return;
 		}
+		const auto readbackStart = std::chrono::steady_clock::now();
 		const auto *mapped =
 			static_cast<const std::byte *>(SDL_MapGPUTransferBuffer(Device, slot.Transfer, false));
 		if (mapped == nullptr) {
@@ -761,6 +763,11 @@ namespace engine::render {
 			}
 		}
 		SDL_UnmapGPUTransferBuffer(Device, slot.Transfer);
+		slot.Image.ReadbackCpuNanoseconds =
+			static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+									  std::chrono::steady_clock::now() - readbackStart
+			)
+									  .count());
 		if (!copied) {
 			slot.Image.Status = ResourceImageStatus::Failed;
 			slot.Image.Width = slot.Image.Height = slot.Image.RowStride = 0;

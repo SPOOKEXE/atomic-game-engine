@@ -1251,7 +1251,7 @@ namespace engine::render {
 			auto bundle = RendererRef.Hooks().TakeCompleted(ticket.second);
 			if (!bundle) continue;
 			DataCapturePoll captured = std::move(bundle->Capture);
-			const auto storageStart = std::chrono::steady_clock::now();
+			const auto finalizationStart = std::chrono::steady_clock::now();
 			DataCaptureTicket validationTicket;
 			std::string storageProfile;
 			script::DataCaptureBridgeRequest storedRequest;
@@ -1359,13 +1359,13 @@ namespace engine::render {
 			reply.SnapshotId = captured.SnapshotId;
 			reply.CaptureFrame = captured.CaptureFrame;
 			reply.Profile.CpuReadbackNanoseconds = captured.CpuReadbackNanoseconds;
-			for (const DataCapturePlane &plane : captured.Planes) {
-				if (plane.Status != DataCaptureStatus::Ready) continue;
-				reply.Profile.SourceBytes += plane.Bytes.size();
-				reply.Profile.ReadbackBytes += plane.Bytes.size();
-				++reply.Profile.SourceOperations;
-				++reply.Profile.ReadbackOperations;
-			}
+			for (const SourceDescriptor &source : sources)
+				if (source.ByteSize != 0) {
+					reply.Profile.SourceBytes += source.ByteSize;
+					reply.Profile.ReadbackBytes += source.ByteSize;
+					++reply.Profile.SourceOperations;
+					++reply.Profile.ReadbackOperations;
+				}
 			if (captured.Status == DataCaptureStatus::Ready || captured.Status == DataCaptureStatus::Partial)
 				CopyCamera(captured, reply);
 			std::unordered_map<std::string, std::vector<std::byte>> bytes;
@@ -1437,16 +1437,15 @@ namespace engine::render {
 					reply.PartLabels.push_back({label.Label, label.StableId});
 			reply.Profile.RetainedBytes = totalBytes;
 			reply.Profile.RetainedOperations = static_cast<uint64_t>(bytes.size());
-			const uint64_t storageNanoseconds =
+			const uint64_t finalizationNanoseconds =
 				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-										  std::chrono::steady_clock::now() - storageStart
+										  std::chrono::steady_clock::now() - finalizationStart
 				)
 										  .count());
-			reply.Profile.CpuStorageConversionNanoseconds = storageNanoseconds;
-			if (storageNanoseconds != 0)
-				reply.Profile.StorageConversionBytesPerSecond = static_cast<double>(totalBytes) *
-																1'000'000'000.0 /
-																static_cast<double>(storageNanoseconds);
+			reply.Profile.CpuFinalizationNanoseconds = finalizationNanoseconds;
+			if (finalizationNanoseconds != 0)
+				reply.Profile.FinalizationBytesPerSecond = static_cast<double>(totalBytes) * 1'000'000'000.0 /
+														   static_cast<double>(finalizationNanoseconds);
 			const bool coherentStatus =
 				(captured.Status == DataCaptureStatus::Ready &&
 				 readyPlanes == validationTicket.Channels.size() &&
@@ -1472,10 +1471,16 @@ namespace engine::render {
 					if (entry->second.CancelRequested) {
 						entry->second.Reply.Status = "cancelled";
 						entry->second.Reply.SnapshotId = entry->second.Request.SnapshotId;
+						entry->second.Reply.Profile.RetainedBytes = entry->second.SceneSidecarBytes;
+						entry->second.Reply.Profile.RetainedOperations =
+							entry->second.SceneSidecarBytes == 0 ? 0 : 1;
 						entry->second.Detail.clear();
 					} else if (captured.SnapshotId != entry->second.Request.SnapshotId) {
 						entry->second.Reply.Status = "stale_snapshot";
 						entry->second.Reply.SnapshotId = entry->second.Request.SnapshotId;
+						entry->second.Reply.Profile.RetainedBytes = entry->second.SceneSidecarBytes;
+						entry->second.Reply.Profile.RetainedOperations =
+							entry->second.SceneSidecarBytes == 0 ? 0 : 1;
 						entry->second.Detail = "renderer returned a different snapshot";
 					} else if (malformedPlane) {
 						entry->second.Reply.Status = "failed";

@@ -139,8 +139,8 @@ namespace engine::script {
 		uint64_t ReadbackOperations = 0;
 		uint64_t TransferOperations = 0;
 		std::optional<uint64_t> CpuReadbackNanoseconds;
-		std::optional<uint64_t> CpuStorageConversionNanoseconds;
-		std::optional<double> StorageConversionBytesPerSecond;
+		std::optional<uint64_t> CpuFinalizationNanoseconds;
+		std::optional<double> FinalizationBytesPerSecond;
 		std::optional<uint64_t> GpuNanoseconds;
 		std::string GpuTimingReason = "unavailable/no_completed_gpu_timestamp";
 		std::optional<uint64_t> AllocationBytes;

@@ -1414,11 +1414,40 @@ namespace engine::script {
 					{"noise", std::move(noise)},
 				}));
 			}
+			const DataCaptureBridgeProfile &profile = poll.Profile;
+			const ScriptValue profileValue = Map({
+				{"source_bytes", String(Decimal(profile.SourceBytes))},
+				{"retained_bytes", String(Decimal(profile.RetainedBytes))},
+				{"readback_bytes", String(Decimal(profile.ReadbackBytes))},
+				{"transfer_bytes", String(Decimal(profile.TransferBytes))},
+				{"source_operations", String(Decimal(profile.SourceOperations))},
+				{"retained_operations", String(Decimal(profile.RetainedOperations))},
+				{"readback_operations", String(Decimal(profile.ReadbackOperations))},
+				{"transfer_operations", String(Decimal(profile.TransferOperations))},
+				{"cpu_readback_nanoseconds",
+				 profile.CpuReadbackNanoseconds ? String(Decimal(*profile.CpuReadbackNanoseconds))
+												: ScriptValue{}},
+				{"cpu_finalization_nanoseconds",
+				 profile.CpuFinalizationNanoseconds ? String(Decimal(*profile.CpuFinalizationNanoseconds))
+													: ScriptValue{}},
+				{"finalization_bytes_per_second",
+				 profile.FinalizationBytesPerSecond ? Number(*profile.FinalizationBytesPerSecond)
+													: ScriptValue{}},
+				{"gpu_nanoseconds",
+				 profile.GpuNanoseconds ? String(Decimal(*profile.GpuNanoseconds)) : ScriptValue{}},
+				{"gpu_timing_reason", String(profile.GpuTimingReason)},
+				{"allocation_bytes",
+				 profile.AllocationBytes ? String(Decimal(*profile.AllocationBytes)) : ScriptValue{}},
+				{"peak_allocation_bytes",
+				 profile.PeakAllocationBytes ? String(Decimal(*profile.PeakAllocationBytes)) : ScriptValue{}},
+				{"allocation_reason", String(profile.AllocationReason)},
+			});
 			std::vector<std::pair<std::string, ScriptValue>> entries{
 				{"status", String(poll.Status)},
 				{"snapshot_id", String(poll.SnapshotId)},
 				{"capture_frame", String(Decimal(poll.CaptureFrame))},
 				{"storage_profile", String(poll.StorageProfile)},
+				{"profile", profileValue},
 				{"planes", Array(std::move(planes))},
 				{"detail", String(detail)},
 			};

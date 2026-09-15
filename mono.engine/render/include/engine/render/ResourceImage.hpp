@@ -85,6 +85,9 @@ namespace engine::render {
 		// Renderer-local frame that actually executed the capture, zero if it did
 		// not run. Compare within one live renderer only, never as a world tick.
 		uint64_t CaptureFrame = 0;
+		// Measured after the fence was observed complete, around mapping and
+		// copying this image's transfer planes into owned CPU bytes.
+		uint64_t ReadbackCpuNanoseconds = 0;
 		// Filled at the capture node from the View that produced these bytes. It
 		// is empty for ordinary renderer clients that do not establish a data
 		// snapshot barrier.

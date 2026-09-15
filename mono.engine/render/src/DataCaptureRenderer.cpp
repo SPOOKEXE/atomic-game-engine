@@ -8,7 +8,7 @@
 #include <engine/render/Renderer.hpp>
 
 #include <algorithm>
-#include <chrono>
+#include <numeric>
 #include <utility>
 
 namespace engine::render {
@@ -321,16 +321,14 @@ namespace engine::render {
 			return poll;
 		}
 
-		const auto readbackStart = std::chrono::steady_clock::now();
 		auto images = ticket.ResourceTokens.empty() ? std::optional<std::vector<ResourceImage>>(std::in_place)
 													: TakeResourceImages(ticket.ResourceTokens);
-		if (images) {
-			poll.CpuReadbackNanoseconds =
-				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-										  std::chrono::steady_clock::now() - readbackStart
-				)
-										  .count());
-		}
+		if (images)
+			poll.CpuReadbackNanoseconds = std::accumulate(
+				images->begin(), images->end(), uint64_t{0}, [](uint64_t total, const ResourceImage &image) {
+					return total + image.ReadbackCpuNanoseconds;
+				}
+			);
 		if (!images) {
 			poll.Status = DataCaptureStatus::Pending;
 			return poll;

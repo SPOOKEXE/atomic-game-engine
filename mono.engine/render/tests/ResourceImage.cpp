@@ -4969,6 +4969,17 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(*compactDepthPlane.MaximumAbsoluteError <= .01);
 	CHECK(compactDepthPlane.RowStride * 2 == losslessDepthPlane.RowStride);
 	CHECK(compactDepthPlane.ByteSize * 2 == losslessDepthPlane.ByteSize);
+	const uint64_t sidecarBytes =
+		losslessDepthPoll.Profile.RetainedBytes - losslessDepthPoll.Profile.SourceBytes;
+	CHECK(compactDepthPoll.Profile.SourceBytes == losslessDepthPoll.Profile.RetainedBytes - sidecarBytes);
+	CHECK(compactDepthPoll.Profile.ReadbackBytes == compactDepthPoll.Profile.SourceBytes);
+	CHECK(
+		compactDepthPoll.Profile.RetainedBytes ==
+		compactDepthPlane.ByteSize + compactIdsPlane.ByteSize + sidecarBytes
+	);
+	CHECK(compactDepthPoll.Profile.SourceBytes > compactDepthPoll.Profile.RetainedBytes - sidecarBytes);
+	REQUIRE(compactDepthPoll.Profile.CpuFinalizationNanoseconds);
+	CHECK(compactDepthPoll.Profile.FinalizationBytesPerSecond);
 	CHECK(compactIdsPlane.Scalar == "uint32");
 	CHECK(compactIdsPlane.SourceScalar == "uint32");
 	CHECK(compactIdsPlane.Encoding == "uint32_le");
@@ -4994,6 +5005,9 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 		detail
 	));
 	CHECK(assets::Hasher::Of(compactDepthBytes).ToHex() == compactDepthPlane.Hash);
+	REQUIRE(bridge.Poll("script-capture-world", compactDepthTicket, poll, detail));
+	CHECK(poll.Profile.TransferBytes == compactIdsPlane.ByteSize + compactDepthPlane.ByteSize);
+	CHECK(poll.Profile.TransferOperations == 2);
 	REQUIRE(compactDepthPoll.SceneSidecar);
 	CHECK(compactDepthPoll.SceneSidecar->StorageProfile == "training_compact");
 	REQUIRE(bridge.Release("script-capture-world", losslessDepthTicket, detail));
@@ -5178,6 +5192,8 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(bridge.Poll("script-capture-world", pendingCompactTicket, poll, detail));
 	CHECK(poll.Status == "cancelled");
 	CHECK(poll.StorageProfile == "training_compact");
+	CHECK(poll.Profile.RetainedBytes == 0);
+	CHECK(poll.Profile.RetainedOperations == 0);
 	REQUIRE(bridge.Release("script-capture-world", pendingCompactTicket, detail));
 
 	// A canceled sidecar has already been captured and reserved by PrepareView.
