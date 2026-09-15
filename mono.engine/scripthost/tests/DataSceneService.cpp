@@ -1323,6 +1323,8 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				assert(filled.status == "ok" and filled.cell_order == "y_then_z_then_x" and filled.cells[1].state == "filled")
 				local sdf = service:GetSignedDistanceField({minimum_metres = Vector3.new(-1, -1, -1), maximum_metres = Vector3.new(1, 1, 1), columns = 1, rows = 1, layers = 1})
 				assert(sdf.status == "ok" and sdf.cell_order == "y_then_z_then_x" and sdf.samples[1].state == "known" and sdf.samples[1].distance_metres < 0)
+				local collapsed = service:GetSignedDistanceField({minimum_metres = Vector3.new(1.0000001192092896, -1, -1), maximum_metres = Vector3.new(1.0000003576278687, 1, 1), columns = 2, rows = 1, layers = 1})
+				assert(collapsed.status == "invalid_signed_distance_field")
 				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(1, 0, 0), max_distance_metres = -1}).status == "invalid_raycast_query")
 				assert(service:Raycast({origin = Vector3.new(0, 0, 0), direction = Vector3.new(0, 0, 0), max_distance_metres = 1}).status == "invalid_raycast_query")
 			)");
@@ -1338,6 +1340,8 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				if (filled.status !== "ok" || filled.cell_order !== "y_then_z_then_x" || filled.cells[0].state !== "filled") throw new Error("filled occupancy mismatch");
 				const sdf = service.GetSignedDistanceField({minimum_metres: Vector3.new(-1, -1, -1), maximum_metres: Vector3.new(1, 1, 1), columns: 1, rows: 1, layers: 1});
 				if (sdf.status !== "ok" || sdf.cell_order !== "y_then_z_then_x" || sdf.samples[0].state !== "known" || !(sdf.samples[0].distance_metres < 0)) throw new Error("signed distance mismatch");
+				const collapsed = service.GetSignedDistanceField({minimum_metres: Vector3.new(1.0000001192092896, -1, -1), maximum_metres: Vector3.new(1.0000003576278687, 1, 1), columns: 2, rows: 1, layers: 1});
+				if (collapsed.status !== "invalid_signed_distance_field") throw new Error("collapsed signed distance centres accepted");
 				if (service.OverlapAABB({minimum: Vector3.new(1, 1, 1), maximum: Vector3.new(-1, -1, -1)}).status !== "invalid_aabb_query") throw new Error("invalid bounds accepted");
 				if (service.Raycast({origin: Vector3.new(0, 0, 0), direction: Vector3.new(0, 0, 0), max_distance_metres: 1}).status !== "invalid_raycast_query") throw new Error("zero ray accepted");
 			)");

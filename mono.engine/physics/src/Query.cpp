@@ -186,9 +186,8 @@ namespace engine::physics {
 			return true;
 		}
 
-		bool PrimitiveSignedDistance(
-			const ShapeInstance &shape, const core::Vector3 &point, float &distance
-		) {
+		bool
+		PrimitiveSignedDistance(const ShapeInstance &shape, const core::Vector3 &point, float &distance) {
 			const core::Vector3 local = shape.Frame.PointToObjectSpace(point);
 			const double x = local.X;
 			const double y = local.Y;
@@ -202,11 +201,10 @@ namespace engine::physics {
 				const double qx = std::abs(x) - shape.Extent.X;
 				const double qy = std::abs(y) - shape.Extent.Y;
 				const double qz = std::abs(z) - shape.Extent.Z;
-				if (!(shape.Extent.X >= 0.0f) || !(shape.Extent.Y >= 0.0f) ||
-					!(shape.Extent.Z >= 0.0f))
+				if (!(shape.Extent.X >= 0.0f) || !(shape.Extent.Y >= 0.0f) || !(shape.Extent.Z >= 0.0f))
 					return false;
 				signedDistance = length(std::max(qx, 0.0), std::max(qy, 0.0), std::max(qz, 0.0)) +
-							 std::min(std::max({qx, qy, qz}), 0.0);
+								 std::min(std::max({qx, qy, qz}), 0.0);
 				break;
 			}
 			case scene::ShapeKind::Sphere:
@@ -218,7 +216,7 @@ namespace engine::physics {
 				const double radial = length(x, z) - shape.Extent.X;
 				const double axial = std::abs(y) - shape.Extent.Y;
 				signedDistance = length(std::max(radial, 0.0), std::max(axial, 0.0)) +
-							 std::min(std::max(radial, axial), 0.0);
+								 std::min(std::max(radial, axial), 0.0);
 				break;
 			}
 			case scene::ShapeKind::Capsule:
@@ -747,7 +745,7 @@ namespace engine::physics {
 			}
 			if (candidateCount != 1) {
 				answer.Why = candidateCount == 0 ? ColliderSignedDistance::Reason::UnsupportedGeometry
-															 : ColliderSignedDistance::Reason::UnionUncertain;
+												 : ColliderSignedDistance::Reason::UnionUncertain;
 				continue;
 			}
 			const QueryCandidate &candidate = candidates.front();

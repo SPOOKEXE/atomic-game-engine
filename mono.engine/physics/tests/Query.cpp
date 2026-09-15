@@ -254,14 +254,36 @@ TEST_CASE("signed distance handles rotated boxes, spheres and finite cylinders",
 	};
 	const ColliderSignedDistance rotated = sample(
 		Placed{.Extent = Vector3{2.0f, 1.0f, 1.0f}, .Rotation = CFrame::Angles(0.0f, EIGHTH_TURN, 0.0f)},
-		Vector3{0.0f, 0.0f, 0.0f}
+		Vector3{1.5f, 0.0f, 0.0f}
 	);
 	CHECK(rotated.Available);
-	CHECK(rotated.DistanceMetres == Approx(-1.0f));
-	CHECK(sample(Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{2.0f, 0.0f, 0.0f}).DistanceMetres == Approx(0.0f));
-	CHECK(sample(Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{3.0f, 0.0f, 0.0f}).DistanceMetres == Approx(1.0f));
-	CHECK(sample(Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder}, Vector3{0.0f, 3.0f, 0.0f}).DistanceMetres == Approx(1.0f));
-	CHECK(sample(Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder}, Vector3{2.0f, 3.0f, 0.0f}).DistanceMetres == Approx(std::sqrt(2.0f)));
+	CHECK(rotated.DistanceMetres == Approx(std::sqrt(1.125f) - 1.0f));
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{2.0f, 0.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(0.0f)
+	);
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{3.0f, 0.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(1.0f)
+	);
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder},
+			Vector3{0.0f, 3.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(1.0f)
+	);
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder},
+			Vector3{2.0f, 3.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(std::sqrt(2.0f))
+	);
 }
 
 TEST_CASE("signed distance refuses unavailable geometry evidence", "[physics][query]") {
@@ -290,7 +312,8 @@ TEST_CASE("signed distance refuses unavailable geometry evidence", "[physics][qu
 	CHECK(answer[0].Why == ColliderSignedDistance::Reason::PhysicsStale);
 	Store overflow("query.signed-distance-overflow");
 	PreparePhysicsWorld(overflow, 4.0f);
-	for (size_t index = 0; index <= engine::physics::QUERY_CANDIDATE_LIMIT; ++index) Place(overflow, Placed{});
+	for (size_t index = 0; index <= engine::physics::QUERY_CANDIDATE_LIMIT; ++index)
+		Place(overflow, Placed{});
 	Index(overflow);
 	ColliderSignedDistanceBatch(overflow, std::array{Vector3::Zero}, answer);
 	CHECK(answer[0].Why == ColliderSignedDistance::Reason::CandidateOverflow);

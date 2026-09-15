@@ -2577,7 +2577,10 @@ namespace engine::script {
 				{"signed_distance_field", Boolean(true)},
 				{"signed_distance_field_schema_version", String("signed-distance-field/v1")},
 				{"signed_distance_field_limitations",
-				 String("exact only for one authored box, sphere or cylinder; unions and baked geometry are unknown")},
+				 String(
+					 "exact only for one authored box, sphere or cylinder; unions and baked geometry are "
+					 "unknown"
+				 )},
 				{"max_raycast_distance_metres", Number(100'000.0)},
 				{"physics_contacts", Boolean(physicsPrepared)},
 				{"physics_contact_impulses", Boolean(physicsPrepared)},
@@ -3574,9 +3577,8 @@ namespace engine::script {
 		};
 	}
 
-	DataSceneResult SignedDistanceField(
-		ecs::Store &store, const DataSceneSignedDistanceFieldRequest &request
-	) {
+	DataSceneResult
+	SignedDistanceField(ecs::Store &store, const DataSceneSignedDistanceFieldRequest &request) {
 		constexpr size_t MAXIMUM_SAMPLES = 64;
 		if (request.Columns == 0 || request.Columns > 4 || request.Rows == 0 || request.Rows > 4 ||
 			request.Layers == 0 || request.Layers > 4 ||
@@ -3606,6 +3608,19 @@ namespace engine::script {
 		const auto hasExtent = [](float minimum, float maximum) {
 			return static_cast<float>((static_cast<double>(maximum) - minimum) * 0.5) > 0.0f;
 		};
+		const auto centresDistinct = [&](float minimum, float maximum, uint8_t count) {
+			float previous = centre(minimum, maximum, 0, count);
+			for (uint8_t index = 1; index < count; ++index) {
+				const float current = centre(minimum, maximum, index, count);
+				if (!(previous < current)) return false;
+				previous = current;
+			}
+			return true;
+		};
+		if (!centresDistinct(request.MinimumMetres.X, request.MaximumMetres.X, request.Columns) ||
+			!centresDistinct(request.MinimumMetres.Y, request.MaximumMetres.Y, request.Layers) ||
+			!centresDistinct(request.MinimumMetres.Z, request.MaximumMetres.Z, request.Rows))
+			return {"invalid_argument", Map({{"status", String("invalid_signed_distance_field")}})};
 		for (uint8_t column = 0; column < request.Columns; ++column) {
 			if (!hasExtent(
 					boundary(request.MinimumMetres.X, request.MaximumMetres.X, column, request.Columns),
@@ -3655,14 +3670,22 @@ namespace engine::script {
 		);
 		const auto reason = [](physics::ColliderSignedDistance::Reason value) -> const char * {
 			switch (value) {
-			case physics::ColliderSignedDistance::Reason::None: return "";
-			case physics::ColliderSignedDistance::Reason::PhysicsUnprepared: return "physics_unprepared";
-			case physics::ColliderSignedDistance::Reason::CandidateOverflow: return "candidate_overflow";
-			case physics::ColliderSignedDistance::Reason::BakedGeometryUncertain: return "baked_geometry_uncertain";
-			case physics::ColliderSignedDistance::Reason::UnionUncertain: return "union_uncertain";
-			case physics::ColliderSignedDistance::Reason::UnsupportedGeometry: return "unsupported_geometry";
-			case physics::ColliderSignedDistance::Reason::PhysicsStale: return "physics_stale";
-			case physics::ColliderSignedDistance::Reason::InvalidProbe: return "invalid_probe";
+			case physics::ColliderSignedDistance::Reason::None:
+				return "";
+			case physics::ColliderSignedDistance::Reason::PhysicsUnprepared:
+				return "physics_unprepared";
+			case physics::ColliderSignedDistance::Reason::CandidateOverflow:
+				return "candidate_overflow";
+			case physics::ColliderSignedDistance::Reason::BakedGeometryUncertain:
+				return "baked_geometry_uncertain";
+			case physics::ColliderSignedDistance::Reason::UnionUncertain:
+				return "union_uncertain";
+			case physics::ColliderSignedDistance::Reason::UnsupportedGeometry:
+				return "unsupported_geometry";
+			case physics::ColliderSignedDistance::Reason::PhysicsStale:
+				return "physics_stale";
+			case physics::ColliderSignedDistance::Reason::InvalidProbe:
+				return "invalid_probe";
 			}
 			return "unknown";
 		};
@@ -3675,36 +3698,53 @@ namespace engine::script {
 						(static_cast<size_t>(layer) * request.Rows + row) * request.Columns + column;
 					const physics::ColliderSignedDistance &answer = distances[index];
 					std::string id;
-					const bool witnessAvailable =
-						answer.Available && answer.WitnessAvailable && StableId(store, answer.Witness, id) &&
-						identities[id] == 1;
+					const bool witnessAvailable = answer.Available && answer.WitnessAvailable &&
+												  StableId(store, answer.Witness, id) && identities[id] == 1;
 					samples.push_back(Map({
 						{"layer", Number(layer)},
 						{"row", Number(row)},
 						{"column", Number(column)},
-						{"point_metres", Array({Number(probes[index].X), Number(probes[index].Y), Number(probes[index].Z)})},
+						{"point_metres",
+						 Array({Number(probes[index].X), Number(probes[index].Y), Number(probes[index].Z)})},
 						{"state", String(answer.Available ? "known" : "unknown")},
-						{"distance_metres", answer.Available ? ScriptValue{Number(answer.DistanceMetres)} : ScriptValue{}},
-						{"reason", answer.Available ? ScriptValue{} : ScriptValue{String(reason(answer.Why))}},
+						{"distance_metres",
+						 answer.Available ? ScriptValue{Number(answer.DistanceMetres)} : ScriptValue{}},
+						{"reason",
+						 answer.Available ? ScriptValue{} : ScriptValue{String(reason(answer.Why))}},
 						{"witness_id", witnessAvailable ? ScriptValue{String(id)} : ScriptValue{}},
 						{"witness_identity_available", Boolean(witnessAvailable)},
 					}));
 				}
 			}
 		}
-		return {"ok", Map({
-			{"status", String("ok")},
-			{"schema_version", String("signed-distance-field/v1")},
-			{"sign_convention", String("negative_inside_zero_surface_positive_outside")},
-			{"units", String("metres")},
-			{"cell_order", String("y_then_z_then_x")},
-			{"sampling", String("cell_centres")},
-			{"supported_primitives", Array({String("box"), String("sphere"), String("cylinder")})},
-			{"minimum_metres", Array({Number(request.MinimumMetres.X), Number(request.MinimumMetres.Y), Number(request.MinimumMetres.Z)})},
-			{"maximum_metres", Array({Number(request.MaximumMetres.X), Number(request.MaximumMetres.Y), Number(request.MaximumMetres.Z)})},
-			{"columns", Number(request.Columns)}, {"rows", Number(request.Rows)}, {"layers", Number(request.Layers)},
-			{"samples", Array(std::move(samples))},
-		})};
+		return {
+			"ok",
+			Map({
+				{"status", String("ok")},
+				{"schema_version", String("signed-distance-field/v1")},
+				{"sign_convention", String("negative_inside_zero_surface_positive_outside")},
+				{"units", String("metres")},
+				{"cell_order", String("y_then_z_then_x")},
+				{"sampling", String("cell_centres")},
+				{"supported_primitives", Array({String("box"), String("sphere"), String("cylinder")})},
+				{"minimum_metres",
+				 Array(
+					 {Number(request.MinimumMetres.X),
+					  Number(request.MinimumMetres.Y),
+					  Number(request.MinimumMetres.Z)}
+				 )},
+				{"maximum_metres",
+				 Array(
+					 {Number(request.MaximumMetres.X),
+					  Number(request.MaximumMetres.Y),
+					  Number(request.MaximumMetres.Z)}
+				 )},
+				{"columns", Number(request.Columns)},
+				{"rows", Number(request.Rows)},
+				{"layers", Number(request.Layers)},
+				{"samples", Array(std::move(samples))},
+			})
+		};
 	}
 
 	const ServiceSurface &DataSceneServiceSurface() {

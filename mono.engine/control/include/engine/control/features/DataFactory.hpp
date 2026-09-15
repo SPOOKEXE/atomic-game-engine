@@ -1495,69 +1495,181 @@ namespace engine::control {
 			"snapshot. Distances are metres, negative inside and positive outside. Exact values require one "
 			"authored analytic box, sphere or cylinder; unions and baked geometry are returned as unknown.",
 			[] {
-				const json vector{{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
-				const json lifecycle{{"type", "object"}, {"additionalProperties", false}, {"properties", {{"tick", {{"type", "integer"}, {"minimum", 0}}}, {"world_epoch", {{"type", "integer"}, {"minimum", 0}}}, {"world_version", {{"type", "integer"}, {"minimum", 0}}}}}, {"required", {"tick", "world_epoch", "world_version"}}};
-				return json{{"type", "object"}, {"additionalProperties", false}, {"properties", {{"schema_version", {{"const", "signed-distance-field/v1"}}}, {"world_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}, {"lifecycle", lifecycle}, {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}, {"minimum_metres", vector}, {"maximum_metres", vector}, {"columns", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}}, {"rows", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}}, {"layers", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}}}}, {"required", {"schema_version", "world_id", "lifecycle", "snapshot_id", "minimum_metres", "maximum_metres", "columns", "rows", "layers"}}};
+				const json vector{
+					{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}
+				};
+				const json lifecycle{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"tick", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_epoch", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_version", {{"type", "integer"}, {"minimum", 0}}}}},
+					{"required", {"tick", "world_epoch", "world_version"}}
+				};
+				return json{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"schema_version", {{"const", "signed-distance-field/v1"}}},
+					  {"world_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"lifecycle", lifecycle},
+					  {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"minimum_metres", vector},
+					  {"maximum_metres", vector},
+					  {"columns", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}},
+					  {"rows", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}},
+					  {"layers", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4}}}}},
+					{"required",
+					 {"schema_version",
+					  "world_id",
+					  "lifecycle",
+					  "snapshot_id",
+					  "minimum_metres",
+					  "maximum_metres",
+					  "columns",
+					  "rows",
+					  "layers"}}
+				};
 			},
 			[&session](const json &arguments, std::string &failure) -> json {
 				using namespace data_factory_detail;
-				if (!arguments.is_object() || !Only(arguments, {"schema_version", "world_id", "lifecycle", "snapshot_id", "minimum_metres", "maximum_metres", "columns", "rows", "layers"}, failure)) return nullptr;
+				if (!arguments.is_object() || !Only(
+												  arguments,
+												  {"schema_version",
+												   "world_id",
+												   "lifecycle",
+												   "snapshot_id",
+												   "minimum_metres",
+												   "maximum_metres",
+												   "columns",
+												   "rows",
+												   "layers"},
+												  failure
+											  ))
+					return nullptr;
 				Request request;
 				const json *field = nullptr;
-				if (!Field(arguments, "schema_version", field, failure) || !field->is_string() || field->get<std::string>() != "signed-distance-field/v1" || !Field(arguments, "world_id", field, failure) || !Text(*field, "world_id", request.InstanceId, failure) || !Field(arguments, "snapshot_id", field, failure) || !Text(*field, "snapshot_id", request.SnapshotId, failure)) {
-					if (failure.empty()) failure = Error("validation_failed", "schema_version must be signed-distance-field/v1");
+				if (!Field(arguments, "schema_version", field, failure) || !field->is_string() ||
+					field->get<std::string>() != "signed-distance-field/v1" ||
+					!Field(arguments, "world_id", field, failure) ||
+					!Text(*field, "world_id", request.InstanceId, failure) ||
+					!Field(arguments, "snapshot_id", field, failure) ||
+					!Text(*field, "snapshot_id", request.SnapshotId, failure)) {
+					if (failure.empty())
+						failure =
+							Error("validation_failed", "schema_version must be signed-distance-field/v1");
 					return nullptr;
 				}
 				const auto lifecycle = arguments.find("lifecycle");
-				if (lifecycle == arguments.end() || !lifecycle->is_object() || !Only(*lifecycle, {"tick", "world_epoch", "world_version"}, failure) || !Field(*lifecycle, "tick", field, failure) || !UInt(*field, "lifecycle.tick", request.Tick, failure) || !Field(*lifecycle, "world_epoch", field, failure) || !UInt(*field, "lifecycle.world_epoch", request.Epoch, failure) || !Field(*lifecycle, "world_version", field, failure) || !UInt(*field, "lifecycle.world_version", request.Version, failure)) {
-					if (failure.empty()) failure = Error("validation_failed", "lifecycle requires tick, world_epoch and world_version");
+				if (lifecycle == arguments.end() || !lifecycle->is_object() ||
+					!Only(*lifecycle, {"tick", "world_epoch", "world_version"}, failure) ||
+					!Field(*lifecycle, "tick", field, failure) ||
+					!UInt(*field, "lifecycle.tick", request.Tick, failure) ||
+					!Field(*lifecycle, "world_epoch", field, failure) ||
+					!UInt(*field, "lifecycle.world_epoch", request.Epoch, failure) ||
+					!Field(*lifecycle, "world_version", field, failure) ||
+					!UInt(*field, "lifecycle.world_version", request.Version, failure)) {
+					if (failure.empty())
+						failure = Error(
+							"validation_failed", "lifecycle requires tick, world_epoch and world_version"
+						);
 					return nullptr;
 				}
 				script::DataSceneSignedDistanceFieldRequest sdf;
-				if (!arguments.contains("minimum_metres") || !arguments.contains("maximum_metres") || !FiniteVector(arguments.at("minimum_metres"), sdf.MinimumMetres) || !FiniteVector(arguments.at("maximum_metres"), sdf.MaximumMetres) || !StrictFiniteBox(sdf.MinimumMetres, sdf.MaximumMetres)) {
-					failure = Error("validation_failed", "minimum_metres and maximum_metres must be finite strict vectors");
+				if (!arguments.contains("minimum_metres") || !arguments.contains("maximum_metres") ||
+					!FiniteVector(arguments.at("minimum_metres"), sdf.MinimumMetres) ||
+					!FiniteVector(arguments.at("maximum_metres"), sdf.MaximumMetres) ||
+					!StrictFiniteBox(sdf.MinimumMetres, sdf.MaximumMetres)) {
+					failure = Error(
+						"validation_failed", "minimum_metres and maximum_metres must be finite strict vectors"
+					);
 					return nullptr;
 				}
 				const auto dimension = [&](std::string_view name, uint8_t &out) {
 					const auto found = arguments.find(name);
-					if (found == arguments.end() || !found->is_number_unsigned() || found->get<uint64_t>() == 0 || found->get<uint64_t>() > 4) return false;
+					if (found == arguments.end() || !found->is_number_unsigned() ||
+						found->get<uint64_t>() == 0 || found->get<uint64_t>() > 4)
+						return false;
 					out = found->get<uint8_t>();
 					return true;
 				};
-				if (!dimension("columns", sdf.Columns) || !dimension("rows", sdf.Rows) || !dimension("layers", sdf.Layers)) {
-					failure = Error("validation_failed", "columns, rows and layers must be integers from 1 through 4");
+				if (!dimension("columns", sdf.Columns) || !dimension("rows", sdf.Rows) ||
+					!dimension("layers", sdf.Layers)) {
+					failure = Error(
+						"validation_failed", "columns, rows and layers must be integers from 1 through 4"
+					);
 					return nullptr;
 				}
 				const auto boundary = [](float minimum, float maximum, uint8_t index, uint8_t count) {
 					if (index == 0) return minimum;
 					if (index == count) return maximum;
-					return static_cast<float>(static_cast<double>(minimum) +
-						(static_cast<double>(maximum) - minimum) * static_cast<double>(index) / count);
+					return static_cast<float>(
+						static_cast<double>(minimum) +
+						(static_cast<double>(maximum) - minimum) * static_cast<double>(index) / count
+					);
 				};
 				const auto cellsDistinct = [&](float minimum, float maximum, uint8_t count) {
 					for (uint8_t index = 0; index < count; ++index) {
 						const float width = boundary(minimum, maximum, index + 1, count) -
-							boundary(minimum, maximum, index, count);
+											boundary(minimum, maximum, index, count);
 						if (!(static_cast<float>(static_cast<double>(width) * 0.5) > 0.0f)) return false;
+					}
+					return true;
+				};
+				const auto centre = [](float minimum, float maximum, uint8_t index, uint8_t count) {
+					return static_cast<float>(
+						static_cast<double>(minimum) +
+						(static_cast<double>(maximum) - minimum) * (static_cast<double>(index) + 0.5) / count
+					);
+				};
+				const auto centresDistinct = [&](float minimum, float maximum, uint8_t count) {
+					float previous = centre(minimum, maximum, 0, count);
+					for (uint8_t index = 1; index < count; ++index) {
+						const float current = centre(minimum, maximum, index, count);
+						if (!(previous < current)) return false;
+						previous = current;
 					}
 					return true;
 				};
 				if (!cellsDistinct(sdf.MinimumMetres.X, sdf.MaximumMetres.X, sdf.Columns) ||
 					!cellsDistinct(sdf.MinimumMetres.Y, sdf.MaximumMetres.Y, sdf.Layers) ||
-					!cellsDistinct(sdf.MinimumMetres.Z, sdf.MaximumMetres.Z, sdf.Rows)) {
-					failure = Error("validation_failed", "a signed-distance-field cell half extent rounds to zero");
+					!cellsDistinct(sdf.MinimumMetres.Z, sdf.MaximumMetres.Z, sdf.Rows) ||
+					!centresDistinct(sdf.MinimumMetres.X, sdf.MaximumMetres.X, sdf.Columns) ||
+					!centresDistinct(sdf.MinimumMetres.Y, sdf.MaximumMetres.Y, sdf.Layers) ||
+					!centresDistinct(sdf.MinimumMetres.Z, sdf.MaximumMetres.Z, sdf.Rows)) {
+					failure = Error(
+						"validation_failed", "signed-distance-field cells collapse at float32 precision"
+					);
 					return nullptr;
 				}
-				if (!session.OwnsWorld(request.InstanceId)) { failure = Error("validation_failed", "world_id is not owned by this data-factory session"); return nullptr; }
+				if (!session.OwnsWorld(request.InstanceId)) {
+					failure =
+						Error("validation_failed", "world_id is not owned by this data-factory session");
+					return nullptr;
+				}
 				if (!Preconditions(session, request, failure)) return nullptr;
-				const world::DataFactoryReply barrier = session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
-				if (barrier.Status != world::DataFactoryStatus::Ok) { failure = Error(world::Describe(barrier.Status), barrier.Detail); return nullptr; }
+				const world::DataFactoryReply barrier =
+					session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
+				if (barrier.Status != world::DataFactoryStatus::Ok) {
+					failure = Error(world::Describe(barrier.Status), barrier.Detail);
+					return nullptr;
+				}
 				json result;
-				const world::WorldStatus entered = session.UniverseOf().Enter(session.UniverseOf().Find(core::Name(barrier.InstanceId)), [&](ecs::Store &store) { result = data_scene_detail::Result(script::SignedDistanceField(store, sdf), failure); });
-				if (entered != world::WorldStatus::Ok && failure.empty()) failure = Error("validation_failed", "scene is unavailable");
+				const world::WorldStatus entered = session.UniverseOf().Enter(
+					session.UniverseOf().Find(core::Name(barrier.InstanceId)), [&](ecs::Store &store) {
+						result = data_scene_detail::Result(script::SignedDistanceField(store, sdf), failure);
+					}
+				);
+				if (entered != world::WorldStatus::Ok && failure.empty())
+					failure = Error("validation_failed", "scene is unavailable");
 				if (!failure.empty()) return nullptr;
 				result["world_id"] = barrier.InstanceId;
-				result["lifecycle"] = {{"tick", barrier.Clock.Tick}, {"world_epoch", barrier.WorldEpoch}, {"world_version", barrier.WorldVersion}};
+				result["lifecycle"] = {
+					{"tick", barrier.Clock.Tick},
+					{"world_epoch", barrier.WorldEpoch},
+					{"world_version", barrier.WorldVersion}
+				};
 				result["snapshot_id"] = request.SnapshotId;
 				return result;
 			}

@@ -227,7 +227,8 @@ TEST_CASE(
 	CHECK(reply.at("cells").at(7).at("filled").is_null());
 }
 
-TEST_CASE("signed distance MCP fences lifecycle and preserves conservative samples", "[control][signed-distance]"
+TEST_CASE(
+	"signed distance MCP fences lifecycle and preserves conservative samples", "[control][signed-distance]"
 ) {
 	Fixture fixture;
 	const json tools = Tools(fixture.Control);
@@ -235,7 +236,10 @@ TEST_CASE("signed distance MCP fences lifecycle and preserves conservative sampl
 		return tool.at("name") == "get_signed_distance_field";
 	});
 	REQUIRE(found != tools.end());
-	CHECK(found->at("inputSchema").at("properties").at("schema_version").at("const") == "signed-distance-field/v1");
+	CHECK(
+		found->at("inputSchema").at("properties").at("schema_version").at("const") ==
+		"signed-distance-field/v1"
+	);
 	CHECK(found->at("inputSchema").at("properties").at("columns").at("maximum") == 4);
 	fixture.Worlds.Enter(fixture.Id, [](engine::ecs::Store &store) {
 		PreparePhysicsWorld(store, 4.0f);
@@ -268,6 +272,13 @@ TEST_CASE("signed distance MCP fences lifecycle and preserves conservative sampl
 	collapsed["minimum_metres"][0] = 1.0e30;
 	collapsed["maximum_metres"][0] = 1.0e30 + 1.0e20;
 	const json invalid = Call(fixture.Control, collapsed, failed, "get_signed_distance_field");
+	CHECK(failed);
+	json collapsedCentres = request;
+	collapsedCentres["minimum_metres"][0] = 1.0000001192092896;
+	collapsedCentres["maximum_metres"][0] = 1.0000003576278687;
+	collapsedCentres["columns"] = 2;
+	failed = false;
+	Call(fixture.Control, collapsedCentres, failed, "get_signed_distance_field");
 	CHECK(failed);
 	CHECK(invalid.dump().find("validation_failed") != std::string::npos);
 	for (const char *field : {"tick", "world_epoch", "world_version"}) {
