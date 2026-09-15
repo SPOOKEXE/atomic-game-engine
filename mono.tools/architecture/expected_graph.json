@@ -724,13 +724,22 @@
       "tier": "shared",
       "links": [
         "assets",
+        "collision",
         "control",
         "core",
         "delivery",
         "discord",
+        "ecs",
+        "effects",
+        "gui",
         "net",
         "network",
-        "parallel"
+        "parallel",
+        "physics",
+        "scene",
+        "script",
+        "spatial",
+        "world"
       ],
       "requires": "MONO_BUILD_CDN"
     },
