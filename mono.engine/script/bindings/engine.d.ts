@@ -2655,6 +2655,7 @@ declare interface DataSceneService {
 	OverlapOBB(request: unknown): Record<string, unknown>;
 	GetColliderBev(request: unknown): Record<string, unknown>;
 	GetSignedDistanceField(request: unknown): Record<string, unknown>;
+	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
 }
 
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.

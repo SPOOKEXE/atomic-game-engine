@@ -45,6 +45,9 @@ crate.Name = "DataFactoryCrate"
 crate:SetAttribute("DataFactoryId", "data-factory-demo/crate")
 crate.Position = Vector3.new(0, 1, 0)
 crate.Size = Vector3.new(2, 2, 2)
+crate.AffordanceId = "data-factory-demo/crate/interact"
+crate.AffordanceKind = 3
+crate.AffordanceEnabled = true
 crate.Parent = workspace
 
 local rig = Instance.new("SkinnedMeshPart")
@@ -111,6 +114,7 @@ local pixels = image:ToBuffer()
 assert(image:FromBuffer(pixels))
 
 local capabilities = DataSceneService:GetCapabilities()
+local affordances = DataSceneService:GetAuthoredAffordances({limit = 16})
 local snapshot = DataSceneService:GetSceneSnapshot(128)
 local cameraMetadata = DataSceneService:GetCameraRenderingData(camera)
 local imageMetadata = DataSceneService:GetEditableImageMetadata(image)

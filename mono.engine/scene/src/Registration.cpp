@@ -6,6 +6,7 @@
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Audio.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Characters.hpp>
@@ -84,6 +85,27 @@ namespace engine::scene {
 			auto *surfaces = static_cast<Surface *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				surfaces[index].Material = reader.ReadName();
+			}
+		}
+
+		void WriteAuthoredAffordances(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *affordances = static_cast<const AuthoredAffordance *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteName(affordances[index].Id);
+				writer.WriteUInt8(static_cast<uint8_t>(affordances[index].Kind));
+				writer.WriteBool(affordances[index].Enabled);
+			}
+		}
+		void ReadAuthoredAffordances(core::ByteReader &reader, void *destination, size_t count) {
+			auto *affordances = static_cast<AuthoredAffordance *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				affordances[index].Id = reader.ReadName();
+				const uint8_t kind = reader.ReadUInt8();
+				if (kind > static_cast<uint8_t>(AuthoredAffordanceKind::Cover)) reader.Fail();
+				affordances[index].Kind = static_cast<AuthoredAffordanceKind>(kind);
+				affordances[index].Enabled = reader.ReadBool();
+				affordances[index].Reserved[0] = 0;
+				affordances[index].Reserved[1] = 0;
 			}
 		}
 
@@ -1763,6 +1785,12 @@ namespace engine::scene {
 		// world after global registration has sealed. Naming it here keeps that
 		// startup path from minting an automatic compiler-spelled component id.
 		ecs::Components::Register<Gravity>("scene.Gravity");
+
+		// Registration order is part of the ECS layout. This new row stays last
+		// so existing component ids and snapshot layouts do not move.
+		ecs::Components::Register<AuthoredAffordance>(
+			"scene.AuthoredAffordance", WriteAuthoredAffordances, ReadAuthoredAffordances
+		);
 	}
 
 	void RegisterSceneClasses() {

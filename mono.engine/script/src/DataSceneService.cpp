@@ -6,6 +6,7 @@
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
@@ -2530,7 +2531,21 @@ namespace engine::script {
 			call.ReturnValue(SignedDistanceField(call.World(), request).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 28> DATA_SCENE_METHODS{{
+		void ServiceAuthoredAffordances(ScriptCall &call) {
+			ScriptValue value;
+			CodecStatus status = CodecStatus::Ok;
+			const ScriptValue *limit = nullptr;
+			if (!call.ReadValue(0, value, status) || !HasOnlyFields(value, {"limit"}) ||
+				(limit = Field(value, "limit")) == nullptr || limit->Tag != ValueTag::Number ||
+				!std::isfinite(limit->Number) || limit->Number < 0.0 ||
+				limit->Number > MAX_AUTHORED_AFFORDANCES || std::trunc(limit->Number) != limit->Number) {
+				call.ReturnValue(Map({{"status", String("invalid_authored_affordances")}}));
+				return;
+			}
+			call.ReturnValue(GetAuthoredAffordances(call.World(), static_cast<size_t>(limit->Number)).Value);
+		}
+
+		constexpr std::array<ServiceMethod, 29> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
@@ -2559,6 +2574,7 @@ namespace engine::script {
 			{"GetColliderBev", ServiceColliderBev},
 			{"GetFilledOccupancy", ServiceFilledOccupancy},
 			{"GetSignedDistanceField", ServiceSignedDistanceField},
+			{"GetAuthoredAffordances", ServiceAuthoredAffordances},
 		}};
 	}
 
@@ -2587,6 +2603,9 @@ namespace engine::script {
 				{"event_narrative_schema_version", String("event-narrative/v1")},
 				{"event_narratives_script_declared", Boolean(true)},
 				{"max_event_narratives", Number(MAX_EVENT_NARRATIVES)},
+				{"authored_affordances", Boolean(true)},
+				{"authored_affordance_schema_version", String("authored-affordance/v1")},
+				{"max_authored_affordances", Number(MAX_AUTHORED_AFFORDANCES)},
 				{"editable_image_rgba8", Boolean(true)},
 				{"spatial_queries", Boolean(true)},
 				{"spatial_query_kinds",
@@ -3229,6 +3248,55 @@ namespace engine::script {
 		result.Entries.push_back({"status", String("ok")});
 		result.Entries.push_back({"schema_version", String("event-narrative/v1")});
 		return {"ok", std::move(result)};
+	}
+
+	DataSceneResult GetAuthoredAffordances(const ecs::Store &store, size_t limit) {
+		if (limit > MAX_AUTHORED_AFFORDANCES)
+			return {"invalid_argument", Map({{"status", String("invalid_authored_affordances")}})};
+		struct Record {
+			std::string Id;
+			const char *Kind;
+		};
+		std::vector<Record> records;
+		store.Each<const scene::AuthoredAffordance>([&](ecs::Entity,
+														const scene::AuthoredAffordance &affordance) {
+			if (!affordance.Enabled || !affordance.Id.IsValid()) return;
+			const std::string id(affordance.Id.Text());
+			if (id.empty() || id.size() > MAX_DATA_SCENE_ID_BYTES || !DataSceneUtf8(id)) return;
+			const char *kind = affordance.Kind == scene::AuthoredAffordanceKind::Walkable	 ? "walkable"
+							   : affordance.Kind == scene::AuthoredAffordanceKind::Climbable ? "climbable"
+							   : affordance.Kind == scene::AuthoredAffordanceKind::Interactable
+								   ? "interactable"
+							   : affordance.Kind == scene::AuthoredAffordanceKind::Cover ? "cover"
+																						 : "none";
+			if (affordance.Kind != scene::AuthoredAffordanceKind::None) records.push_back({id, kind});
+		});
+		std::sort(records.begin(), records.end(), [](const Record &left, const Record &right) {
+			return left.Id < right.Id;
+		});
+		for (size_t index = 1; index < records.size(); ++index)
+			if (records[index - 1].Id == records[index].Id)
+				return {
+					"invalid_authored_affordances",
+					Map({{"status", String("duplicate_authored_affordance_id")}})
+				};
+		const bool overflowed = records.size() > limit;
+		records.resize(std::min(records.size(), limit));
+		std::vector<ScriptValue> affordances;
+		affordances.reserve(records.size());
+		for (const Record &record : records)
+			affordances.push_back(Map({{"id", String(record.Id)}, {"kind", String(record.Kind)}}));
+		return {
+			"ok",
+			Map(
+				{{"status", String("ok")},
+				 {"schema_version", String("authored-affordance/v1")},
+				 {"order", String("id_ascending")},
+				 {"limit", Number(limit)},
+				 {"overflowed", Boolean(overflowed)},
+				 {"affordances", Array(std::move(affordances))}}
+			)
+		};
 	}
 
 	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request) {

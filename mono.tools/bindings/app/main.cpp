@@ -1638,6 +1638,7 @@ declare extern type DataSceneService with
 	function OverlapOBB(self, request: any): any
 	function GetColliderBev(self, request: any): any
 	function GetSignedDistanceField(self, request: any): any
+	function GetAuthoredAffordances(self, request: any): any
 end
 
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.
@@ -3517,6 +3518,7 @@ declare interface DataSceneService {
 	OverlapOBB(request: unknown): Record<string, unknown>;
 	GetColliderBev(request: unknown): Record<string, unknown>;
 	GetSignedDistanceField(request: unknown): Record<string, unknown>;
+	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
 }
 
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.

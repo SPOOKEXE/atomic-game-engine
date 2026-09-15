@@ -9,6 +9,7 @@
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Audio.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
@@ -323,6 +324,7 @@ namespace engine::scene {
 			property.Size = sizeof(float);
 			property.Reads = &ecs::ComponentSet::Intern({
 				ecs::Components::Of<RigidBody>(),
+				ecs::Components::Of<AuthoredAffordance>(),
 				ecs::Components::Of<Collider>(),
 				ecs::Components::Of<PhysicsProperties>(),
 
@@ -3033,6 +3035,9 @@ namespace engine::scene {
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
+			ecs::Classes::Property<&AuthoredAffordance::Id>(basePart, "AffordanceId");
+			ecs::Classes::Property<&AuthoredAffordance::Kind>(basePart, "AffordanceKind");
+			ecs::Classes::Property<&AuthoredAffordance::Enabled>(basePart, "AffordanceEnabled");
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 
 			// The plain fields. `Color` is a rename rather than a conversion -

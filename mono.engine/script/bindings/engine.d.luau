@@ -3026,6 +3026,7 @@ declare extern type DataSceneService with
 	function OverlapOBB(self, request: any): any
 	function GetColliderBev(self, request: any): any
 	function GetSignedDistanceField(self, request: any): any
+	function GetAuthoredAffordances(self, request: any): any
 end
 
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.

@@ -39,6 +39,7 @@ namespace engine::script {
 	inline constexpr size_t MAX_CAMERA_OBJECT_OBSERVATIONS = 64;
 	inline constexpr size_t MAX_DATA_SCENE_ID_BYTES = 256;
 	inline constexpr size_t MAX_EVENT_NARRATIVES = 256;
+	inline constexpr size_t MAX_AUTHORED_AFFORDANCES = 256;
 	// The conservative compact-JSON budget shared by the renderer and the MCP
 	// adapter. A sidecar admitted against this bound is representable by the
 	// adapter without changing its response shape.
@@ -116,6 +117,8 @@ namespace engine::script {
 	bool CanonicalEventNarratives(const ScriptValue &bundle, ScriptValue &canonical);
 	DataSceneResult SetEventNarratives(ecs::Store &store, const ScriptValue &bundle);
 	DataSceneResult GetEventNarratives(const ecs::Store &store);
+	// Returns only explicit, enabled affordance components in stable id order.
+	DataSceneResult GetAuthoredAffordances(const ecs::Store &store, size_t limit = MAX_AUTHORED_AFFORDANCES);
 
 	// Query prepared collider geometry and return only stable authored identities.
 	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request);

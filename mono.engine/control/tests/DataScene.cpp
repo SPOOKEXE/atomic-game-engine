@@ -10,6 +10,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Welds.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
@@ -1058,4 +1059,33 @@ TEST_CASE("compatibility data-scene reads reject factory revision fields", "[con
 	REQUIRE(tool != surface.Registered().end());
 	const json schema = tool->Schema();
 	CHECK_FALSE(schema["properties"]["options"].contains("expected_tick"));
+}
+
+TEST_CASE("data-scene MCP returns only explicit authored affordances", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "affordances");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		engine::scene::EnsureClassTree();
+		const Entity part = engine::scene::MakePart(store, {});
+		auto *affordance = store.GetMutable<engine::scene::AuthoredAffordance>(part);
+		affordance->Id = Name("fixture/door/open");
+		affordance->Kind = engine::scene::AuthoredAffordanceKind::Interactable;
+		affordance->Enabled = true;
+	});
+	bool failed = false;
+	const json response = Call(
+		surface,
+		"get_authored_affordances",
+		{{"instance_id", "affordances"}, {"options", {{"limit", 1}}}},
+		failed
+	);
+	INFO(response.dump());
+	CHECK_FALSE(failed);
+	CHECK(response.at("schema_version") == "authored-affordance/v1");
+	CHECK(
+		response.at("affordances") == json::array({{{"id", "fixture/door/open"}, {"kind", "interactable"}}})
+	);
 }
