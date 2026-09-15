@@ -1,18 +1,69 @@
+#include <engine/assets/ContentHash.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/script/DataScriptPackage.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <nlohmann/json.hpp>
+#include <span>
+#include <stdexcept>
 #include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
+#include <vector>
 
 TEST_SUITE_ID("studio.datafactoryhost")
 TEST_DEPENDS("engine.world.datafactory")
 
 namespace {
+	class PackageRuntime final : public engine::script::Runtime {
+	  public:
+		PackageRuntime(engine::ecs::Store &store, const engine::script::RuntimeLimits &limits)
+			: engine::script::Runtime(store, limits) {}
+		bool Run(std::string_view, std::string_view) override {
+			return true;
+		}
+		bool RunInstance(engine::ecs::Entity) override {
+			return false;
+		}
+		bool Heartbeat(float) override {
+			return true;
+		}
+		engine::script::Language Which() const override {
+			return engine::script::Language::Luau;
+		}
+	};
+
+	std::string PackageManifest(std::string_view source) {
+		const std::string hash =
+			engine::assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+		return "{\"format\":\"atomic.data-script.v1\",\"entry\":\"package.luau\",\"source_hash\":\"" + hash +
+			   "\",\"assets\":[],\"parameters\":[],\"capabilities\":[],\"budget\":{\"source_bytes\":1024,"
+			   "\"asset_bytes\":0,\"assets\":0,\"parameters\":0},\"seed\":0}";
+	}
+
+	const engine::control::Tool &PackageTool(engine::control::Surface &surface) {
+		for (const engine::control::Tool &tool : surface.Registered())
+			if (tool.Name == "run_script_package") return tool;
+		throw std::runtime_error("package tool was not installed");
+	}
+
+	nlohmann::json PackageRequest(const engine::world::DataFactoryReply &lifecycle, std::string operation) {
+		return {
+			{"instance_id", lifecycle.InstanceId},
+			{"expected_tick", lifecycle.Clock.Tick},
+			{"expected_world_epoch", lifecycle.WorldEpoch},
+			{"expected_world_version", lifecycle.WorldVersion},
+			{"operation_id", std::move(operation)},
+			{"language", "luau"},
+			{"manifest", PackageManifest("return")},
+			{"source_base64", "cmV0dXJu"},
+			{"assets", nlohmann::json::array()},
+		};
+	}
 
 	studio::DataFactoryHostCallbacks Callbacks() {
 		return {
@@ -188,11 +239,12 @@ TEST_CASE("Studio factory tools omit unavailable render work", "[studio][data-fa
 	studio::DataFactoryHost host;
 	std::string detail;
 	studio::DataFactoryHostCallbacks callbacks = Callbacks();
-	callbacks.Package = [](const engine::script::DataScriptRequest &) {
-		engine::script::DataScriptResult result;
-		result.Ran = true;
-		result.Atomic = true;
-		return result;
+	callbacks.PackageDependencies = [](engine::world::Universe &worlds,
+									   engine::world::DataFactorySession &session) {
+		return engine::script::DataScriptPackageTransactionDependencies{
+			.Universe = worlds,
+			.Session = session,
+		};
 	};
 	REQUIRE(host.Start(worlds, std::move(callbacks), detail));
 	engine::control::Surface surface("studio-test", "test");
@@ -215,4 +267,97 @@ TEST_CASE("Studio factory tools omit unavailable render work", "[studio][data-fa
 	CHECK_FALSE(has("world_resume"));
 	CHECK_FALSE(has("world_list"));
 	CHECK_FALSE(has("render_only"));
+}
+
+TEST_CASE(
+	"Studio package path rejects runs and rebinds every idle world borrower",
+	"[studio][data-factory][data-script-package]"
+) {
+	engine::world::Universe worlds;
+	studio::DataFactoryHost host;
+	std::string detail;
+	bool runOwnsWorld = true;
+	bool commandBorrower = true;
+	bool scriptPluginBorrower = true;
+	bool cppPluginBorrower = true;
+	bool presentationResident = true;
+	bool pluginsReloaded = false;
+	std::vector<std::string> order;
+
+	studio::DataFactoryHostCallbacks callbacks = Callbacks();
+	callbacks.PackageDependencies = [&](engine::world::Universe &universe,
+										engine::world::DataFactorySession &session) {
+		return engine::script::DataScriptPackageTransactionDependencies{
+			.Universe = universe,
+			.Session = session,
+			.DiscardRuntime =
+				[&](engine::world::WorldId) {
+					order.emplace_back("discard_borrowers");
+					commandBorrower = false;
+					scriptPluginBorrower = false;
+					cppPluginBorrower = false;
+				},
+			.MakeRuntime = [](
+							   engine::ecs::Store &store, const engine::script::RuntimeLimits &limits
+						   ) { return std::make_unique<PackageRuntime>(store, limits); },
+			.RunPackage =
+				[](engine::script::Runtime &,
+				   const engine::script::DataScriptPackageContext &,
+				   std::string_view,
+				   std::string_view) {
+					return engine::script::DataScriptPackageRunResult{
+						.Terminal = engine::script::DataScriptPackageRunResult::State::Completed,
+						.Error = {},
+					};
+				},
+			.InstallSystems = [](engine::ecs::Store &, engine::ecs::Scheduler &) {},
+			.Preflight =
+				[&](engine::world::WorldId, std::string &error) {
+					order.emplace_back("preflight");
+					if (!runOwnsWorld) return true;
+					error = "active_script_runtime_unsupported";
+					return false;
+				},
+			.AfterSwap =
+				[&](engine::world::WorldId) {
+					order.emplace_back("reconcile");
+					CHECK_FALSE(commandBorrower);
+					CHECK_FALSE(scriptPluginBorrower);
+					CHECK_FALSE(cppPluginBorrower);
+					presentationResident = false;
+					pluginsReloaded = true;
+				},
+			.Admit = [](std::string_view, std::string_view, std::string &) { return true; },
+			.Role = {true, true, true},
+		};
+	};
+	REQUIRE(host.Start(worlds, std::move(callbacks), detail));
+	const auto created = host.Session()->CreateWorld(Request("studio-package", "create"));
+	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
+	engine::control::Surface surface("studio-test", "test");
+	host.InstallTools(surface, true);
+
+	std::string failure;
+	const nlohmann::json busy = PackageTool(surface).Call(PackageRequest(created, "package-busy"), failure);
+	CHECK(failure.empty());
+	CHECK(busy["terminal"] == "failed");
+	CHECK(busy["error"] == "active_script_runtime_unsupported");
+	CHECK(order == std::vector<std::string>{"preflight"});
+	CHECK(commandBorrower);
+	CHECK(scriptPluginBorrower);
+	CHECK(cppPluginBorrower);
+	CHECK(presentationResident);
+	CHECK_FALSE(pluginsReloaded);
+
+	runOwnsWorld = false;
+	order.clear();
+	failure.clear();
+	const nlohmann::json completed =
+		PackageTool(surface).Call(PackageRequest(created, "package-idle"), failure);
+	REQUIRE(failure.empty());
+	CHECK(completed["terminal"] == "completed");
+	CHECK(completed["atomic"] == true);
+	CHECK(order == std::vector<std::string>{"preflight", "discard_borrowers", "reconcile"});
+	CHECK_FALSE(presentationResident);
+	CHECK(pluginsReloaded);
 }

@@ -35,6 +35,7 @@
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL.h>
@@ -46,8 +47,6 @@
 #include "ExternalEditor.hpp"
 #include "PlayedInput.hpp"
 #include "SourceEditor.hpp"
-
-#include <engine/script/DataScriptPackageTransaction.hpp>
 
 #include <spdlog/logger.h>
 #include <spdlog/sinks/base_sink.h>
@@ -3294,62 +3293,61 @@ namespace studio {
 				.Rehydrate = [this](
 								 engine::world::Universe &universe, WorldId world, std::string &failure
 							 ) { return PrepareDataFactoryWorld(universe, world, failure); },
-				.Package =
-					[this](const engine::script::DataScriptRequest &request) {
-						return engine::script::ExecuteDataScriptPackageTransaction(
-							{.Universe = *Universe,
-							 .Session = *FactoryHost->Session(),
-							 .RuntimeOf = [this](WorldId world) -> engine::script::Runtime * {
-								 const WorldRun *const run = RunOf(world);
-								 return run == nullptr ? nullptr : run->Runtime.get();
-							 },
-							 .Preflight =
-								 [this](WorldId world, std::string &error) {
-									 if (RunOf(world) == nullptr) return true;
-									 error = "active_script_runtime_unsupported";
-									 return false;
-								 },
-							 .DiscardRuntime =
-								 [this](WorldId world) {
-									 (void)world;
-									 CommandHost.Vm.reset();
-									 CommandHost.Surface.reset();
-									 CommandWorld = {};
-									 StudioPluginBindings.OnChanged({});
-									 Plugins.clear();
-									 ScriptPlugins.clear();
-									 StopCppPlugins(CppPlugins);
-								 },
-							 .MakeRuntime =
-								 [](Store &store, const engine::script::RuntimeLimits &limits) {
-									 return engine::script::MakeRuntime(
-										 store, engine::script::Language::Luau, limits
-									 );
-								 },
-							 .RunPackage = engine::script::RunDataScriptPackage,
-							 .InstallSystems = [](Store &, engine::ecs::Scheduler &) {},
-							 .PrepareWorld =
-								 [this](
-									 engine::world::Universe &universe, WorldId world, std::string &error
-								 ) { return PrepareDataFactoryWorld(universe, world, error); },
-							 .AfterSwap =
-								 [this](WorldId world) {
-									 ReleaseWorldPresentation(world);
-									 Active = world;
-									 SelectionWorld = world;
-									 ClearSelection();
-									 LoadPlugins();
-								 },
-							 .Admit =
-								 [](std::string_view source, std::string_view entry, std::string &error) {
-									 return engine::script::CheckDataScriptPackageSource(
-										 engine::script::Language::Luau, source, entry, error
-									 );
-								 },
-							 .Role = {true, true, true},
-							 .Present = true},
-							request
-						);
+				.PackageDependencies =
+					[this](engine::world::Universe &universe, engine::world::DataFactorySession &session) {
+						return engine::script::DataScriptPackageTransactionDependencies{
+							.Universe = universe,
+							.Session = session,
+							.RuntimeOf = [this](WorldId world) -> engine::script::Runtime * {
+								const WorldRun *const run = RunOf(world);
+								return run == nullptr ? nullptr : run->Runtime.get();
+							},
+							.DiscardRuntime =
+								[this](WorldId world) {
+									(void)world;
+									CommandHost.Vm.reset();
+									CommandHost.Surface.reset();
+									CommandWorld = {};
+									StudioPluginBindings.OnChanged({});
+									Plugins.clear();
+									ScriptPlugins.clear();
+									StopCppPlugins(CppPlugins);
+								},
+							.MakeRuntime =
+								[](Store &store, const engine::script::RuntimeLimits &limits) {
+									return engine::script::MakeRuntime(
+										store, engine::script::Language::Luau, limits
+									);
+								},
+							.RunPackage = engine::script::RunDataScriptPackage,
+							.InstallSystems = [](Store &, engine::ecs::Scheduler &) {},
+							.PrepareWorld =
+								[this](engine::world::Universe &universe, WorldId world, std::string &error) {
+									return PrepareDataFactoryWorld(universe, world, error);
+								},
+							.Preflight =
+								[this](WorldId world, std::string &error) {
+									if (RunOf(world) == nullptr) return true;
+									error = "active_script_runtime_unsupported";
+									return false;
+								},
+							.AfterSwap =
+								[this](WorldId world) {
+									ReleaseWorldPresentation(world);
+									Active = world;
+									SelectionWorld = world;
+									ClearSelection();
+									LoadPlugins();
+								},
+							.Admit =
+								[](std::string_view source, std::string_view entry, std::string &error) {
+									return engine::script::CheckDataScriptPackageSource(
+										engine::script::Language::Luau, source, entry, error
+									);
+								},
+							.Role = {true, true, true},
+							.Present = true
+						};
 					},
 			},
 			detail

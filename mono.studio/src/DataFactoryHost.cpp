@@ -28,7 +28,7 @@ namespace studio {
 		Lifecycle->SetWorldLifecycle(std::move(callbacks.Lifecycle));
 		Lifecycle->SetPauseParticipant(std::move(callbacks.Pause));
 		Lifecycle->SetRehydrate(std::move(callbacks.Rehydrate));
-		Package = std::move(callbacks.Package);
+		PackageDependencies = std::move(callbacks.PackageDependencies);
 		return true;
 	}
 
@@ -51,7 +51,14 @@ namespace studio {
 		(void)rendererReady;
 		const std::array features{engine::control::features::DataFactory(*Lifecycle, tools)};
 		surface.Enable(features);
-		if (Package) engine::control::AddDataScriptPackageTool(surface, Package);
+		if (PackageDependencies)
+			engine::control::AddDataScriptPackageTool(
+				surface, [this](const engine::script::DataScriptRequest &request) {
+					return engine::script::ExecuteDataScriptPackageTransaction(
+						PackageDependencies(*Worlds, *Lifecycle), request
+					);
+				}
+			);
 		surface.Add({
 			"world_select",
 			"Selects the one factory-owned Studio world and returns its pinned lifecycle revision.",

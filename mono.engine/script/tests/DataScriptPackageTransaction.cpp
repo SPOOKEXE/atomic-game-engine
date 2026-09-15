@@ -44,7 +44,7 @@ namespace {
 	engine::script::DataScriptResult Run(bool succeed, bool throwAfterSwap = false) {
 		engine::world::Universe worlds;
 		engine::world::DataFactorySession session(worlds);
-		const auto world = worlds.Create({.Name = engine::core::Name("package")});
+		REQUIRE(worlds.Create({.Name = engine::core::Name("package")}).IsValid());
 		session.SetPauseParticipant(
 			[](engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
 				return true;
@@ -84,6 +84,8 @@ namespace {
 			{.InstanceId = "package",
 			 .Manifest = Manifest("return"),
 			 .Source = "return",
+			 .Assets = {},
+			 .SourceHash = {},
 			 .ExpectedTick = paused.Clock.Tick,
 			 .ExpectedEpoch = paused.WorldEpoch,
 			 .ExpectedVersion = paused.WorldVersion}

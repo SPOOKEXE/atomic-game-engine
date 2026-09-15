@@ -191,6 +191,8 @@ TEST_CASE(
 			{.InstanceId = "package-world",
 			 .Manifest = PackageManifest("return"),
 			 .Source = "return",
+			 .Assets = {},
+			 .SourceHash = {},
 			 .Name = "package",
 			 .ExpectedTick = before.Clock.Tick,
 			 .ExpectedEpoch = before.WorldEpoch,
