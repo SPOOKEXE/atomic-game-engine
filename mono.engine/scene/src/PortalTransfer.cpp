@@ -7,6 +7,7 @@
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -83,6 +84,7 @@ namespace engine::scene {
 			Visual,
 			PhysicsProperties,
 			SurfaceAppearance,
+			AuthoredAffordance,
 			Tags,
 			Character,
 			CharacterLimb,
@@ -191,6 +193,10 @@ namespace engine::scene {
 				return value.Value.size() <= MAXIMUM_COMPONENT_BYTES - 4;
 			else if constexpr (std::is_same_v<T, PortalTransit>)
 				return Finite(value.Frame) && Finite(value.Scale) && value.Scale > 0;
+			else if constexpr (std::is_same_v<T, AuthoredAffordance>)
+				return static_cast<uint8_t>(value.Kind) <=
+						   static_cast<uint8_t>(AuthoredAffordanceKind::Cover) &&
+					   (!value.Enabled || (value.Id.IsValid() && value.Kind != AuthoredAffordanceKind::None));
 			return true;
 		}
 

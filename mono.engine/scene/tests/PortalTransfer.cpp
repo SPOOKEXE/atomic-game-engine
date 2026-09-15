@@ -1,6 +1,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -233,6 +234,10 @@ TEST_CASE(
 	source.Set(object, PreviousTransform{CFrame({1, 2, 30})});
 	source.Set(object, Motion{{3, 4, 5}, {1, 2, 3}});
 	source.Set(object, Simulated{});
+	source.Set(
+		object,
+		AuthoredAffordance{engine::core::Name("cargo/carry"), AuthoredAffordanceKind::Interactable, true, {}}
+	);
 	Collider collider;
 	collider.Shape = ShapeKind::Sphere;
 	collider.Extent = {2, 0, 0};
@@ -261,6 +266,11 @@ TEST_CASE(
 	REQUIRE(arrival.Humanoid == engine::ecs::NULL_ENTITY);
 	REQUIRE(destination.InstanceNameOf(arrival.Root).Text() == "cargo");
 	REQUIRE(destination.Get<Collider>(arrival.Root)->Shape == ShapeKind::Sphere);
+	const auto *affordance = destination.Get<AuthoredAffordance>(arrival.Root);
+	REQUIRE(affordance != nullptr);
+	REQUIRE(affordance->Id.Text() == "cargo/carry");
+	REQUIRE(affordance->Kind == AuthoredAffordanceKind::Interactable);
+	REQUIRE(affordance->Enabled);
 	REQUIRE(
 		destination.Get<PreviousTransform>(arrival.Root)->Frame.Position ==
 		destination.Get<Transform>(arrival.Root)->Frame.Position
