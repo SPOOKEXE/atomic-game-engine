@@ -139,6 +139,7 @@ TEST_CASE("data-scene MCP reports the Sun resource override provenance", "[contr
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
 		engine::scene::Sun sun;
 		sun.Direction = Vector3{0.0f, 3.0f, 4.0f};
 		sun.Ambient = engine::core::Color3{0.2f, 0.3f, 0.4f};
