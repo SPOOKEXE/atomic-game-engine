@@ -552,6 +552,9 @@ end
 declare extern type Enum_AtmosphereProceduralShader extends EnumItem with
 end
 
+declare extern type Enum_AuthoredAffordanceKind extends EnumItem with
+end
+
 declare extern type Enum_AutoMeshLODStrategy extends EnumItem with
 end
 
@@ -762,6 +765,13 @@ declare Enum: {
 		Thin: Enum_AtmosphereProceduralShader,
 		Mars: Enum_AtmosphereProceduralShader,
 		Alien: Enum_AtmosphereProceduralShader,
+	},
+	AuthoredAffordanceKind: {
+		None: Enum_AuthoredAffordanceKind,
+		Walkable: Enum_AuthoredAffordanceKind,
+		Climbable: Enum_AuthoredAffordanceKind,
+		Interactable: Enum_AuthoredAffordanceKind,
+		Cover: Enum_AuthoredAffordanceKind,
 	},
 	AutoMeshLODStrategy: {
 		Decimated: Enum_AutoMeshLODStrategy,
@@ -1549,6 +1559,10 @@ declare extern type VectorField3D extends PVInstance with
 end
 
 declare extern type BasePart extends PVInstance with
+	AffordanceEnabled: boolean
+	read AffordanceId: string
+	write AffordanceId: string?
+	AffordanceKind: Enum_AuthoredAffordanceKind
 	AlphaCutoff: number
 	AlphaMode: Enum_AlphaMode
 	Anchored: boolean

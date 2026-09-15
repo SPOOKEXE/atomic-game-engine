@@ -118,7 +118,7 @@ namespace engine::script {
 	DataSceneResult SetEventNarratives(ecs::Store &store, const ScriptValue &bundle);
 	DataSceneResult GetEventNarratives(const ecs::Store &store);
 	// Returns only explicit, enabled affordance components in stable id order.
-	DataSceneResult GetAuthoredAffordances(const ecs::Store &store, size_t limit = MAX_AUTHORED_AFFORDANCES);
+	DataSceneResult GetAuthoredAffordances(ecs::Store &store, size_t limit = MAX_AUTHORED_AFFORDANCES);
 
 	// Query prepared collider geometry and return only stable authored identities.
 	DataSceneResult Raycast(const ecs::Store &store, const DataSceneRaycastRequest &request);

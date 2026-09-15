@@ -446,18 +446,23 @@ namespace engine::control {
 		};
 		Add(Tool{
 			"get_authored_affordances",
-			"Return bounded explicit authored affordances in stable identity order. Geometry and colliders do not infer semantics.",
+			"Return bounded explicit authored affordances in stable identity order. Geometry and colliders "
+			"do not infer semantics.",
 			querySchema(
-				json{{"limit", {{"type", "integer"}, {"minimum", 0}, {"maximum", script::MAX_AUTHORED_AFFORDANCES}}}},
+				json{
+					{"limit",
+					 {{"type", "integer"}, {"minimum", 0}, {"maximum", script::MAX_AUTHORED_AFFORDANCES}}}
+				},
 				json::array({"limit"})
 			),
 			[worlds, session](const json &arguments, std::string &failure) -> json {
 				using namespace data_scene_detail;
 				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
-					!arguments["options"].is_object()) return nullptr;
+					!arguments["options"].is_object())
+					return nullptr;
 				const json &options = arguments["options"];
-				if (!Options(options, {"limit"}, session != nullptr, failure) ||
-					!options.contains("limit") || !options["limit"].is_number_unsigned() ||
+				if (!Options(options, {"limit"}, session != nullptr, failure) || !options.contains("limit") ||
+					!options["limit"].is_number_unsigned() ||
 					options["limit"].get<uint64_t>() > script::MAX_AUTHORED_AFFORDANCES) {
 					if (failure.empty()) failure = "options.limit must be an integer from 0 through 256";
 					return nullptr;
@@ -465,12 +470,15 @@ namespace engine::control {
 				std::string instance;
 				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
 				json fence;
-				if (!data_factory_read_fence::Validate(session, instance, options, fence, failure)) return fence;
+				if (!data_factory_read_fence::Validate(session, instance, options, fence, failure))
+					return fence;
 				const world::WorldId id = World(*worlds, instance, failure);
 				if (!failure.empty()) return nullptr;
 				json out;
 				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-					out = Result(script::GetAuthoredAffordances(store, options["limit"].get<size_t>()), failure);
+					out = Result(
+						script::GetAuthoredAffordances(store, options["limit"].get<size_t>()), failure
+					);
 				});
 				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
 				return out;

@@ -147,6 +147,7 @@ state until v0.19.
 | `scene.AtmosphereProcedural` | 24 | 4 | yes | . | . | . | Extra scattering controls on an `AtmosphereProcedural` instance: planet and atmosphere scale, Rayleigh and Mie strength, and bounded integration quality for the resident environment compute pass. |
 | `scene.Attachment` | 56 | 4 | yes | yes | . | . | A named point on a part: the authored local `Frame` plus the `WorldFrame` every host recomposes each tick. The cache puts an emitter and a lamp where their part is, and its reported write is what signals a change. |
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
+| `scene.AuthoredAffordance` | 8 | 4 | yes | . | . | . | Explicit bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry. |
 | `scene.AutoMeshLOD` | 32 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
 | `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
@@ -184,7 +185,7 @@ state until v0.19.
 | `scene.LocalTransparency` | 4 | 4 | yes | . | . | . | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching. |
 | `scene.MaterialCatalogue` | 80 | 8 | yes | . | . | . | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved. |
 | `scene.MaterialRef` | 8 | 4 | yes | . | . | . | On a `Material` instance: which material asset it names and which shader draws the parts wearing it. `ResolveMaterials` reads it onto every such part. |
-| `scene.MeshCatalogue` | 112 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
+| `scene.MeshCatalogue` | 168 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
 | `scene.Motion` | 24 | 4 | yes | yes | . | 12 | Linear and angular velocity in world space. Physics integrates it every tick for every body carrying `Simulated`; gravity and the control pass write it. |
 | `scene.NetworkOwner` | 8 | 8 | yes | yes | . | . | Which `Player` simulates this body; a null handle means the server does. `ReclaimAbandonedOwnership` scans it every tick and clears owners that have gone. |
 | `scene.NumberValue` | 8 | 8 | yes | yes | . | . | The double-precision number stored by a `NumberValue` instance. |
@@ -275,4 +276,4 @@ state until v0.19.
 
 ---
 
-198 components registered by the engine, 0 without a purpose line.
+199 components registered by the engine, 0 without a purpose line.

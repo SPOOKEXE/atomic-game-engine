@@ -3051,9 +3051,9 @@ namespace engine::scene {
 			ecs::Classes::Property<&AuthoredAffordance::Id>(basePart, "AffordanceId");
 			ecs::Classes::Computed(
 				basePart,
-				EnumFieldProperty<
-					AuthoredAffordance, &AuthoredAffordance::Kind, AuthoredAffordanceKindEnum
-				>("AffordanceKind")
+				EnumFieldProperty<AuthoredAffordance, &AuthoredAffordance::Kind, AuthoredAffordanceKindEnum>(
+					"AffordanceKind"
+				)
 			);
 			ecs::Classes::Property<&AuthoredAffordance::Enabled>(basePart, "AffordanceEnabled");
 			ecs::Classes::Computed(basePart, AnchoredProperty());

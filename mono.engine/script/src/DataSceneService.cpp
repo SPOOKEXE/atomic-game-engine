@@ -3250,7 +3250,7 @@ namespace engine::script {
 		return {"ok", std::move(result)};
 	}
 
-	DataSceneResult GetAuthoredAffordances(const ecs::Store &store, size_t limit) {
+	DataSceneResult GetAuthoredAffordances(ecs::Store &store, size_t limit) {
 		if (limit > MAX_AUTHORED_AFFORDANCES)
 			return {"invalid_argument", Map({{"status", String("invalid_authored_affordances")}})};
 		struct Record {

@@ -458,6 +458,7 @@ declare namespace Enum {
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
 	interface AtmosphereProceduralShader extends EnumItem { readonly __enum: "AtmosphereProceduralShader"; }
+	interface AuthoredAffordanceKind extends EnumItem { readonly __enum: "AuthoredAffordanceKind"; }
 	interface AutoMeshLODStrategy extends EnumItem { readonly __enum: "AutoMeshLODStrategy"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface Axis extends EnumItem { readonly __enum: "Axis"; }
@@ -546,6 +547,13 @@ declare namespace Enum {
 		readonly Thin: AtmosphereProceduralShader;
 		readonly Mars: AtmosphereProceduralShader;
 		readonly Alien: AtmosphereProceduralShader;
+	};
+	const AuthoredAffordanceKind: {
+		readonly None: AuthoredAffordanceKind;
+		readonly Walkable: AuthoredAffordanceKind;
+		readonly Climbable: AuthoredAffordanceKind;
+		readonly Interactable: AuthoredAffordanceKind;
+		readonly Cover: AuthoredAffordanceKind;
 	};
 	const AutoMeshLODStrategy: {
 		readonly Decimated: AutoMeshLODStrategy;
@@ -1309,6 +1317,9 @@ declare interface VectorField3D extends PVInstance {
 }
 
 declare interface BasePart extends PVInstance {
+	AffordanceEnabled: boolean;
+	AffordanceId: string;
+	AffordanceKind: Enum.AuthoredAffordanceKind;
 	AlphaCutoff: number;
 	AlphaMode: Enum.AlphaMode;
 	Anchored: boolean;
