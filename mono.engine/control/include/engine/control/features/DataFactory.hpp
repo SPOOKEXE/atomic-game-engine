@@ -108,6 +108,7 @@ namespace engine::control {
 			uint64_t Tick = 0;
 			uint64_t Epoch = 0;
 			uint64_t Version = 0;
+			uint64_t TargetTick = 0;
 			world::DataFactoryInterval Interval;
 			world::DataFactoryPauseScope Scope = world::DataFactoryPauseScope::AllSystems;
 			std::string BaseSnapshotId;
@@ -353,6 +354,7 @@ namespace engine::control {
 			json properties{
 				{"instance_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"expected_tick", {{"type", "integer"}, {"minimum", 0}}},
+				{"target_tick", {{"type", "integer"}, {"minimum", 0}}},
 				{"expected_world_epoch", {{"type", "integer"}, {"minimum", 0}}},
 				{"expected_world_version", {{"type", "integer"}, {"minimum", 0}}},
 				{"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
@@ -1014,6 +1016,59 @@ namespace engine::control {
 				);
 			}
 		});
+		if (session.SupportsBackwardSeek())
+			Add(Tool{
+				"seek_backward",
+				"Restores the newest retained paused checkpoint and replays contiguous action-free fixed "
+				"steps "
+				"to an earlier completed tick.",
+				[] {
+					return Schema(
+						{"instance_id",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version",
+						 "operation_id",
+						 "target_tick"},
+						{"instance_id",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version",
+						 "operation_id",
+						 "target_tick"}
+					);
+				},
+				[invoke, &session](const json &v, std::string &f) {
+					return invoke(
+						"seek_backward",
+						v,
+						f,
+						true,
+						[](const json &v, Request &r, json &n, std::string &f) {
+							if (!Only(
+									v,
+									{"instance_id",
+									 "expected_tick",
+									 "expected_world_epoch",
+									 "expected_world_version",
+									 "operation_id",
+									 "target_tick"},
+									f
+								))
+								return false;
+							const json *field = nullptr;
+							if (!Field(v, "target_tick", field, f) ||
+								!UInt(*field, "target_tick", r.TargetTick, f))
+								return false;
+							n["target_tick"] = r.TargetTick;
+							return true;
+						},
+						[&session](const Request &r) {
+							return session.SeekBackward(r.InstanceId, r.TargetTick, r.Tick, r.Version);
+						}
+					);
+				}
+			});
 		if (session.SupportsIntervention())
 			Add(Tool{
 				"apply_intervention",

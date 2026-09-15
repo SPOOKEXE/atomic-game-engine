@@ -1,3 +1,5 @@
+#include "DataFactoryRevision.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -80,6 +82,12 @@ namespace engine::world {
 		RetainedCheckpointBytes = 0;
 		RenderOnlyTerminals.clear();
 		RenderOnlyTerminalOrder.clear();
+		BeginReplayGeneration();
+	}
+
+	void DataFactorySession::BeginReplayGeneration() {
+		ReplaySteps.clear();
+		if (++ReplayGeneration == 0) ReplayGeneration = 1;
 	}
 
 	DataFactoryReply DataFactorySession::WorldOperation(const DataFactoryWorldRequest &request) {
@@ -387,6 +395,7 @@ namespace engine::world {
 				// The host could not prove the all-system pause was restored, so no
 				// later step or capture may rely on the stale session claim.
 				found->second.AllSystems = false;
+				BeginReplayGeneration();
 				Version++;
 			}
 			return restored;
@@ -414,7 +423,9 @@ namespace engine::world {
 				world, DataFactoryStatus::RestoreIncomplete, detail.empty() ? "cannot resume physics" : detail
 			);
 		}
+		const bool crossedAllSystemsBoundary = found->second.AllSystems;
 		Paused.erase(found);
+		if (crossedAllSystemsBoundary) BeginReplayGeneration();
 		Version++;
 		return Reply(world, DataFactoryStatus::Ok, {});
 	}
@@ -479,12 +490,22 @@ namespace engine::world {
 		if (Worlds.StepPaused(world, commit) != WorldStatus::Ok) {
 			// A scheduler fault can occur after the world committed its tick, so
 			// callers must not reuse the revision they observed before the call.
+			BeginReplayGeneration();
 			Version++;
 			return Reply(
 				world,
 				DataFactoryStatus::RestoreIncomplete,
 				"the completed step faulted or the world is not suspended"
 			);
+		}
+		if (actions.empty()) {
+			constexpr size_t MAXIMUM_REPLAY_STEPS = 4096;
+			ReplaySteps.push_back({ReplayGeneration, expectedTick, interval});
+			if (ReplaySteps.size() > MAXIMUM_REPLAY_STEPS) ReplaySteps.pop_front();
+		} else {
+			// The live host action executor may own script state outside Universe.
+			// Crossing such a step without a replay-safe executor would invent state.
+			BeginReplayGeneration();
 		}
 		Version++;
 		return Reply(world, DataFactoryStatus::Ok, "simulation uses the engine's declared float fixed delta");
@@ -545,6 +566,8 @@ namespace engine::world {
 		checkpoint.Id = "snapshot-" + std::to_string(Epoch) + "-" + std::to_string(NextCheckpoint++);
 		checkpoint.Epoch = Epoch;
 		checkpoint.Version = Version;
+		checkpoint.Tick = ClockOf(world).Tick;
+		checkpoint.ReplayGeneration = ReplayGeneration;
 		if (const auto paused = Paused.find(std::string(instanceId)); paused != Paused.end()) {
 			checkpoint.AllSystemsPaused = paused->second.AllSystems;
 			checkpoint.PhysicsOnlyPaused = paused->second.PhysicsOnly;
@@ -829,6 +852,8 @@ namespace engine::world {
 				DataFactoryStatus::Unsupported,
 				"checkpoint restore needs a scheduler rehydrate callback"
 			);
+		if (!detail::CanAdvanceDataFactoryRevision(Epoch, Version, true))
+			return Reply(live, DataFactoryStatus::ResourceLimit, "world lifecycle revision exhausted");
 		const auto found = Checkpoints.find(std::string(checkpointId));
 		if (found == Checkpoints.end())
 			return Reply(live, DataFactoryStatus::StaleSnapshot, "checkpoint is not retained");
@@ -885,11 +910,125 @@ namespace engine::world {
 		Worlds.ReplaceWith(candidate);
 		Epoch++;
 		Version++;
+		BeginReplayGeneration();
+		found->second.ReplayGeneration = ReplayGeneration;
 		Paused.clear();
 		if (restoredPause.AllSystems || restoredPause.PhysicsOnly)
 			Paused.emplace(std::string(instanceId), restoredPause);
 		const WorldId restored = Resolve(instanceId);
 		return Reply(restored, DataFactoryStatus::Ok, "restored through a scratch universe and fresh epoch");
+	}
+
+	DataFactoryReply DataFactorySession::SeekBackward(
+		std::string_view instanceId, uint64_t targetTick, uint64_t expectedTick, uint64_t expectedVersion
+	) {
+		const WorldId live = Resolve(instanceId);
+		if (!live.IsValid()) return Reply(live, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (RenderOnlyInFlight(instanceId))
+			return Reply(live, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
+		if (!AllSystemsPaused(instanceId))
+			return Reply(live, DataFactoryStatus::NotPaused, "backward seek requires an all_systems pause");
+		if (expectedVersion != Version || ClockOf(live).Tick != expectedTick)
+			return Reply(
+				live, DataFactoryStatus::VersionConflict, "seek precondition does not match the world"
+			);
+		if (targetTick >= expectedTick)
+			return Reply(
+				live, DataFactoryStatus::ValidationFailed, "target_tick must be less than the completed tick"
+			);
+		if (!Rehydrate)
+			return Reply(
+				live, DataFactoryStatus::Unsupported, "backward seek needs a scheduler rehydrate callback"
+			);
+		if (Worlds.Count() != 1)
+			return Reply(
+				live, DataFactoryStatus::Unsupported, "backward seek requires a single-world universe"
+			);
+		if (!detail::CanAdvanceDataFactoryRevision(Epoch, Version, true))
+			return Reply(live, DataFactoryStatus::ResourceLimit, "world lifecycle revision exhausted");
+
+		auto selected = Checkpoints.end();
+		for (auto id = CheckpointOrder.rbegin(); id != CheckpointOrder.rend(); ++id) {
+			const auto checkpoint = Checkpoints.find(*id);
+			if (checkpoint == Checkpoints.end() || checkpoint->second.ReplayGeneration != ReplayGeneration ||
+				!checkpoint->second.AllSystemsPaused || checkpoint->second.Tick > targetTick)
+				continue;
+			if (selected == Checkpoints.end() || checkpoint->second.Tick > selected->second.Tick)
+				selected = checkpoint;
+		}
+		if (selected == Checkpoints.end())
+			return Reply(
+				live,
+				DataFactoryStatus::StaleSnapshot,
+				"no retained all-systems-paused checkpoint covers target_tick"
+			);
+
+		std::vector<ReplayStep> replay;
+		const uint64_t replayCount = targetTick - selected->second.Tick;
+		if (replayCount > ReplaySteps.size())
+			return Reply(
+				live, DataFactoryStatus::StaleSnapshot, "bounded replay history does not cover target_tick"
+			);
+		replay.reserve(static_cast<size_t>(replayCount));
+		uint64_t nextTick = selected->second.Tick;
+		for (const ReplayStep &step : ReplaySteps) {
+			if (step.Generation != ReplayGeneration || step.BeforeTick < nextTick) continue;
+			if (step.BeforeTick >= targetTick) break;
+			if (step.BeforeTick != nextTick)
+				return Reply(
+					live,
+					DataFactoryStatus::StaleSnapshot,
+					"bounded replay history does not cover target_tick"
+				);
+			replay.push_back(step);
+			nextTick++;
+		}
+		if (nextTick != targetTick)
+			return Reply(
+				live, DataFactoryStatus::StaleSnapshot, "bounded replay history does not cover target_tick"
+			);
+
+		core::ByteReader reader(selected->second.Bytes);
+		Universe candidate;
+		if (!candidate.Load(reader) || reader.Remaining() != 0)
+			return Reply(
+				live, DataFactoryStatus::RestoreIncomplete, "checkpoint is incompatible with this engine"
+			);
+		for (const WorldId world : candidate.Worlds()) {
+			std::string detail;
+			if (!Rehydrate(candidate, world, detail))
+				return Reply(
+					live,
+					DataFactoryStatus::RestoreIncomplete,
+					detail.empty() ? "rehydration failed" : std::move(detail)
+				);
+		}
+		const WorldId target = candidate.Find(core::Name(instanceId));
+		if (!target.IsValid() || candidate.StatisticsOf(target).Ticks != selected->second.Tick)
+			return Reply(
+				live, DataFactoryStatus::RestoreIncomplete, "checkpoint identity or clock is incompatible"
+			);
+		for (const ReplayStep &step : replay) {
+			if (!IsCanonicalInterval(target, step.Interval) ||
+				candidate.StepPaused(target) != WorldStatus::Ok)
+				return Reply(
+					live, DataFactoryStatus::RestoreIncomplete, "fixed-step replay failed in scratch state"
+				);
+		}
+
+		Worlds.ReplaceWith(candidate);
+		Epoch++;
+		Version++;
+		BeginReplayGeneration();
+		selected->second.ReplayGeneration = ReplayGeneration;
+		for (ReplayStep &step : replay) {
+			step.Generation = ReplayGeneration;
+			ReplaySteps.push_back(step);
+		}
+		RenderOnlyTerminals.clear();
+		RenderOnlyTerminalOrder.clear();
+		const WorldId restored = Resolve(instanceId);
+		return Reply(restored, DataFactoryStatus::Ok, "restored and replayed to target_tick in scratch");
 	}
 
 	DataFactoryReply DataFactorySession::CommitExternalMutation(
@@ -910,6 +1049,7 @@ namespace engine::world {
 				world, DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
 			);
 		Version++;
+		BeginReplayGeneration();
 		return Reply(world, DataFactoryStatus::Ok, "external atomic mutation committed at a fresh revision");
 	}
 
@@ -971,6 +1111,7 @@ namespace engine::world {
 		}
 		if (applied) {
 			Version++;
+			BeginReplayGeneration();
 			return Reply(world, DataFactoryStatus::Ok, {});
 		}
 

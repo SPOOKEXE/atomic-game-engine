@@ -118,6 +118,8 @@ namespace engine::world {
 		std::string Id;
 		uint64_t Epoch = 0;
 		uint64_t Version = 0;
+		uint64_t Tick = 0;
+		uint64_t ReplayGeneration = 0;
 		bool AllSystemsPaused = false;
 		bool PhysicsOnlyPaused = false;
 		std::vector<std::byte> Bytes;
@@ -239,6 +241,11 @@ namespace engine::world {
 		DataFactoryRenderOnlyReply PollRenderOnly(std::string_view instanceId, uint64_t operationId) const;
 		DataFactoryReply Checkpoint(std::string_view instanceId, std::string &checkpointId);
 		DataFactoryReply Restore(std::string_view instanceId, std::string_view checkpointId);
+		// Rebuilds an earlier paused state in scratch, then replays only contiguous
+		// action-free fixed steps. Unobserved and action-bearing ticks are barriers.
+		DataFactoryReply SeekBackward(
+			std::string_view instanceId, uint64_t targetTick, uint64_t expectedTick, uint64_t expectedVersion
+		);
 		// Advances the lifecycle revision after an external executor completed an
 		// atomic mutation against the live, all-systems-paused world.
 		DataFactoryReply
@@ -254,6 +261,9 @@ namespace engine::world {
 			uint64_t expectedVersion
 		);
 		bool SupportsIntervention() const;
+		bool SupportsBackwardSeek() const {
+			return static_cast<bool>(Rehydrate);
+		}
 
 		bool HasCheckpoint(std::string_view checkpointId) const;
 		// Product hosts use this to distinguish an MCP-owned world from a compatibility world.
@@ -288,6 +298,7 @@ namespace engine::world {
 		void FinishRenderOnly(PauseState &state, DataFactoryRenderOnlyReply reply);
 		void StoreRenderOnlyTerminal(DataFactoryRenderOnlyReply reply);
 		void Store(DataFactoryCheckpoint checkpoint);
+		void BeginReplayGeneration();
 		DataFactoryReply WorldOperation(const DataFactoryWorldRequest &request);
 		void InvalidateWorldState(std::string_view instanceId);
 
@@ -298,6 +309,7 @@ namespace engine::world {
 		uint64_t Version = 0;
 		uint64_t NextCheckpoint = 1;
 		uint64_t NextRenderOnly = 1;
+		uint64_t ReplayGeneration = 1;
 		DataFactoryRehydrate Rehydrate;
 		DataFactoryPauseParticipant Participant;
 		DataFactoryWorldLifecycle WorldLifecycle;
@@ -320,6 +332,12 @@ namespace engine::world {
 		std::deque<uint64_t> RenderOnlyTerminalOrder;
 		std::unordered_map<std::string, DataFactoryCheckpoint> Checkpoints;
 		std::vector<std::string> CheckpointOrder;
+		struct ReplayStep {
+			uint64_t Generation = 0;
+			uint64_t BeforeTick = 0;
+			DataFactoryInterval Interval;
+		};
+		std::deque<ReplayStep> ReplaySteps;
 		size_t RetainedCheckpointBytes = 0;
 	};
 

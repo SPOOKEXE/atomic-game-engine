@@ -1044,12 +1044,16 @@ TEST_CASE("headless data factories omit presenter-only operations", "[control][d
 	CHECK(Named(tools, "world_create") != nullptr);
 	CHECK(Named(tools, "render_only") == nullptr);
 	CHECK(Named(tools, "poll_render_only") == nullptr);
+	CHECK(Named(tools, "seek_backward") == nullptr);
 
 	const json negotiated = Called(surface, "negotiate", json::object());
 	CHECK(Named(negotiated["operations"], "render_only") == nullptr);
 	const json *renderOnly = Named(negotiated["unsupported_operations"], "render_only");
 	REQUIRE(renderOnly != nullptr);
 	CHECK((*renderOnly)["reason"] == "this host does not implement the data-factory operation");
+	const json *seek = Named(negotiated["unsupported_operations"], "seek_backward");
+	REQUIRE(seek != nullptr);
+	CHECK((*seek)["reason"] == "this host does not implement the data-factory operation");
 }
 
 TEST_CASE("discovery refuses unknown versions and oversized requests", "[control][discovery]") {
@@ -1631,6 +1635,49 @@ TEST_CASE(
 	failed = false;
 	Called(surface, "pause", missing, failed);
 	CHECK(failed);
+}
+
+TEST_CASE("data-factory backward seek is fenced and idempotent", "[control][data-factory]") {
+	Universe universe;
+	MakeWorld(universe, "control-data-factory-seek");
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+
+	const auto initial = session.Inspect("control-data-factory-seek");
+	REQUIRE(
+		session.Pause("control-data-factory-seek", engine::world::DataFactoryPauseScope::AllSystems, 0)
+			.Status == engine::world::DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	REQUIRE(
+		session.Checkpoint("control-data-factory-seek", checkpoint).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	const auto paused = session.Inspect("control-data-factory-seek");
+	REQUIRE(
+		session
+			.Step("control-data-factory-seek", engine::world::DataFactoryInterval{}, 0, paused.WorldVersion)
+			.Status == engine::world::DataFactoryStatus::Ok
+	);
+	const auto stepped = session.Inspect("control-data-factory-seek");
+	const json request{
+		{"instance_id", "control-data-factory-seek"},
+		{"expected_tick", stepped.Clock.Tick},
+		{"expected_world_epoch", stepped.WorldEpoch},
+		{"expected_world_version", stepped.WorldVersion},
+		{"operation_id", "seek-1"},
+		{"target_tick", 0u},
+	};
+	const json sought = Called(surface, "seek_backward", request);
+	CHECK(sought["tick"] == 0);
+	CHECK(sought["world_epoch"] == initial.WorldEpoch + 1);
+	CHECK(Called(surface, "seek_backward", request) == sought);
+	CHECK(universe.StatisticsOf(universe.Find(Name("control-data-factory-seek"))).Ticks == 0);
 }
 
 TEST_CASE(

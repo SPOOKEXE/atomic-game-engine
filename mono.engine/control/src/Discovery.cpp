@@ -59,6 +59,7 @@ namespace engine::control {
 					 "capture_render_screenshot",
 					 "checkpoint",
 					 "restore",
+					 "seek_backward",
 					 "apply_intervention",
 					 "step_and_capture",
 				 }) {

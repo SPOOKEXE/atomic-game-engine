@@ -113,7 +113,7 @@ Create and modify isolated scenes:
 
 Drive deterministic time and state:
 - [_] finish deterministic action and script sequencing at fixed-tick boundaries; rational timing and manual tick boundaries are checked. Bounded data-factory settings-menu action batches now validate atomically, preserve request order, and enter the next paused fixed step through the script barrier; replay, broader input injection, and complete sequencing remain open.
-- [_] implement backward seek as checkpoint plus replay, never negative dt, with bounded history.
+- [_] implement backward seek as checkpoint plus replay, never negative dt, with bounded history. The engine service and MCP surface now seek an all-systems-paused single world to an earlier tick by loading the newest compatible retained checkpoint into scratch and replaying up to 4,096 contiguous action-free canonical fixed steps before one atomic replacement. Resume, external edits, scheduler faults and action-bearing steps start a new replay generation, so the service refuses gaps instead of applying negative dt or guessing through host-owned script state. Replay-safe scripted actions and a real client rehydrator remain open.
 - [_] provide full checkpoint coverage for ECS, physics warm start, RNG, script schedulers, events, clocks, string IDs and pinned assets; the API requires a real host rehydrator.
 - [_] restore checkpoints only when compatible, and create fresh versions after restore.
 - [_] support forks and versioned causal edits, including effects outside the edited spatial region while keeping branches isolated.
