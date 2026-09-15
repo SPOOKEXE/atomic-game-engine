@@ -153,11 +153,13 @@ TEST_CASE("an empty profile library installs the engine default graph", "[client
 TEST_CASE("capability tiers fall through with reasons and runnable documents", "[client][pipeline]") {
 	engine::render::DeviceCaps caps;
 	caps.HasIndirectDraws = true;
+	caps.MaxColourTargets = 8;
 	caps.Formats = {
 		engine::graph::ResourceFormat::RGBA8,
 		engine::graph::ResourceFormat::RGBA8_SRGB,
 		engine::graph::ResourceFormat::RGB10A2,
 		engine::graph::ResourceFormat::RGBA16F,
+		engine::graph::ResourceFormat::RG16F,
 		engine::graph::ResourceFormat::R32F,
 		engine::graph::ResourceFormat::D24S8,
 		engine::graph::ResourceFormat::D32F,

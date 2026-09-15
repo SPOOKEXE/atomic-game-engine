@@ -18,6 +18,7 @@ resource "albedo" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transien
 resource "normal" colour RGB10A2 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "material" colour RGBA8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "emissive" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "mesh-uv" colour RG16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "object-ids" colour R32U 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "semantic-ids" colour R32U 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "part-ids" colour R32U 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
@@ -90,6 +91,7 @@ writes "albedo" "albedo"
 writes "normal" "normal"
 writes "material" "material"
 writes "emissive" "emissive"
+writes "mesh-uv" "mesh-uv"
 writes "object-ids" "object-ids"
 writes "semantic-ids" "semantic-ids"
 writes "part-ids" "part-ids"
