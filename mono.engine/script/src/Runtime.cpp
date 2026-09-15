@@ -412,6 +412,22 @@ namespace engine::script {
 				continue;
 			}
 
+			// A replica can receive the script instance before the observed
+			// `Program` row that carries its source. Do not turn that temporary
+			// gap into a permanent disabled tag; the next arrival pass must retry
+			// the instance once the row is present.
+			if (Store.AdoptOnly() && Store.Get<Program>(instance) == nullptr) {
+				const auto found = std::find_if(
+					StartedScripts.begin(), StartedScripts.end(), [instance](ecs::Entity started) {
+						return started.Id == instance.Id;
+					}
+				);
+				if (found != StartedScripts.end()) {
+					StartedScripts.erase(found);
+				}
+				continue;
+			}
+
 			Store.Set(instance, Disabled{});
 
 			// Logged per failure and reported once, for the reason
