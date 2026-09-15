@@ -126,6 +126,28 @@ namespace engine::script {
 		std::string StableId;
 	};
 
+	// Per-ticket facts collected at the boundaries that actually move capture
+	// bytes. Optional values remain unavailable when the renderer has no
+	// completed timestamp or allocator counter to report.
+	struct DataCaptureBridgeProfile {
+		uint64_t SourceBytes = 0;
+		uint64_t RetainedBytes = 0;
+		uint64_t ReadbackBytes = 0;
+		uint64_t TransferBytes = 0;
+		uint64_t SourceOperations = 0;
+		uint64_t RetainedOperations = 0;
+		uint64_t ReadbackOperations = 0;
+		uint64_t TransferOperations = 0;
+		std::optional<uint64_t> CpuReadbackNanoseconds;
+		std::optional<uint64_t> CpuStorageConversionNanoseconds;
+		std::optional<double> StorageConversionBytesPerSecond;
+		std::optional<uint64_t> GpuNanoseconds;
+		std::string GpuTimingReason = "unavailable/no_completed_gpu_timestamp";
+		std::optional<uint64_t> AllocationBytes;
+		std::optional<uint64_t> PeakAllocationBytes;
+		std::string AllocationReason = "unavailable/no_capture_allocator_counter";
+	};
+
 	struct DataCaptureBridgePoll {
 		std::string Status;
 		std::string SnapshotId;
@@ -159,6 +181,7 @@ namespace engine::script {
 		std::vector<DataCaptureBridgeObjectLabel> SemanticLabels;
 		std::vector<DataCaptureBridgeObjectLabel> PartLabels;
 		std::optional<DataCaptureBridgeSceneSidecar> SceneSidecar;
+		DataCaptureBridgeProfile Profile;
 	};
 
 	struct DataCaptureBridgeHookCapability {

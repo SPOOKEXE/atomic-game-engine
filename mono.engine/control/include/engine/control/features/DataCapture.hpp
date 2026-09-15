@@ -423,6 +423,35 @@ namespace engine::control {
 				{"snapshot_id", reply.SnapshotId},
 				{"capture_frame", reply.CaptureFrame},
 				{"storage_profile", reply.StorageProfile},
+				{"profile",
+				 {{"source_bytes", reply.Profile.SourceBytes},
+				  {"retained_bytes", reply.Profile.RetainedBytes},
+				  {"readback_bytes", reply.Profile.ReadbackBytes},
+				  {"transfer_bytes", reply.Profile.TransferBytes},
+				  {"source_operations", reply.Profile.SourceOperations},
+				  {"retained_operations", reply.Profile.RetainedOperations},
+				  {"readback_operations", reply.Profile.ReadbackOperations},
+				  {"transfer_operations", reply.Profile.TransferOperations},
+				  {"cpu_readback_nanoseconds",
+				   reply.Profile.CpuReadbackNanoseconds ? json(*reply.Profile.CpuReadbackNanoseconds)
+														: json(nullptr)},
+				  {"cpu_storage_conversion_nanoseconds",
+				   reply.Profile.CpuStorageConversionNanoseconds
+					   ? json(*reply.Profile.CpuStorageConversionNanoseconds)
+					   : json(nullptr)},
+				  {"storage_conversion_bytes_per_second",
+				   reply.Profile.StorageConversionBytesPerSecond
+					   ? json(*reply.Profile.StorageConversionBytesPerSecond)
+					   : json(nullptr)},
+				  {"gpu_nanoseconds",
+				   reply.Profile.GpuNanoseconds ? json(*reply.Profile.GpuNanoseconds) : json(nullptr)},
+				  {"gpu_timing_reason", reply.Profile.GpuTimingReason},
+				  {"allocation_bytes",
+				   reply.Profile.AllocationBytes ? json(*reply.Profile.AllocationBytes) : json(nullptr)},
+				  {"peak_allocation_bytes",
+				   reply.Profile.PeakAllocationBytes ? json(*reply.Profile.PeakAllocationBytes)
+													 : json(nullptr)},
+				  {"allocation_reason", reply.Profile.AllocationReason}}},
 				{"camera",
 				 {{"available", reply.HasCamera},
 				  {"world_from_camera", reply.WorldFromCamera},

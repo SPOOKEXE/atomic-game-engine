@@ -232,6 +232,9 @@ namespace engine::render {
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
 		std::vector<DataCapturePartLabel> PartLabels;
 		std::vector<DataCapturePlane> Planes;
+		// CPU time spent taking completed readback images into this poll. GPU time
+		// is deliberately absent because this path has no completed timestamp query.
+		std::optional<uint64_t> CpuReadbackNanoseconds;
 	};
 
 	const char *DataCaptureChannelName(DataCaptureChannel channel);

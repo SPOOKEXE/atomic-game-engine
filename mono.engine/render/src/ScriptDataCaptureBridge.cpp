@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -663,6 +664,8 @@ namespace engine::render {
 			plane->second.begin() + static_cast<std::ptrdiff_t>(offset),
 			plane->second.begin() + static_cast<std::ptrdiff_t>(offset + count)
 		);
+		found->second.Reply.Profile.TransferBytes += count;
+		++found->second.Reply.Profile.TransferOperations;
 		detail.clear();
 		return true;
 	}
@@ -1248,6 +1251,7 @@ namespace engine::render {
 			auto bundle = RendererRef.Hooks().TakeCompleted(ticket.second);
 			if (!bundle) continue;
 			DataCapturePoll captured = std::move(bundle->Capture);
+			const auto storageStart = std::chrono::steady_clock::now();
 			DataCaptureTicket validationTicket;
 			std::string storageProfile;
 			script::DataCaptureBridgeRequest storedRequest;
@@ -1354,6 +1358,14 @@ namespace engine::render {
 			reply.StorageProfile = storageProfile;
 			reply.SnapshotId = captured.SnapshotId;
 			reply.CaptureFrame = captured.CaptureFrame;
+			reply.Profile.CpuReadbackNanoseconds = captured.CpuReadbackNanoseconds;
+			for (const DataCapturePlane &plane : captured.Planes) {
+				if (plane.Status != DataCaptureStatus::Ready) continue;
+				reply.Profile.SourceBytes += plane.Bytes.size();
+				reply.Profile.ReadbackBytes += plane.Bytes.size();
+				++reply.Profile.SourceOperations;
+				++reply.Profile.ReadbackOperations;
+			}
 			if (captured.Status == DataCaptureStatus::Ready || captured.Status == DataCaptureStatus::Partial)
 				CopyCamera(captured, reply);
 			std::unordered_map<std::string, std::vector<std::byte>> bytes;
@@ -1423,6 +1435,18 @@ namespace engine::render {
 			if (partIdsReady)
 				for (const DataCapturePartLabel &label : captured.PartLabels)
 					reply.PartLabels.push_back({label.Label, label.StableId});
+			reply.Profile.RetainedBytes = totalBytes;
+			reply.Profile.RetainedOperations = static_cast<uint64_t>(bytes.size());
+			const uint64_t storageNanoseconds =
+				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+										  std::chrono::steady_clock::now() - storageStart
+				)
+										  .count());
+			reply.Profile.CpuStorageConversionNanoseconds = storageNanoseconds;
+			if (storageNanoseconds != 0)
+				reply.Profile.StorageConversionBytesPerSecond = static_cast<double>(totalBytes) *
+																1'000'000'000.0 /
+																static_cast<double>(storageNanoseconds);
 			const bool coherentStatus =
 				(captured.Status == DataCaptureStatus::Ready &&
 				 readyPlanes == validationTicket.Channels.size() &&
@@ -1440,6 +1464,11 @@ namespace engine::render {
 				std::lock_guard lock(Mutex);
 				const auto entry = Entries.find(ticket.first);
 				if (entry != Entries.end() && !entry->second.Terminal) {
+					if (entry->second.SceneSidecarBytes != 0) {
+						reply.Profile.RetainedBytes += entry->second.SceneSidecarBytes;
+						++reply.Profile.RetainedOperations;
+					}
+					entry->second.Reply.Profile = reply.Profile;
 					if (entry->second.CancelRequested) {
 						entry->second.Reply.Status = "cancelled";
 						entry->second.Reply.SnapshotId = entry->second.Request.SnapshotId;
@@ -1451,11 +1480,17 @@ namespace engine::render {
 					} else if (malformedPlane) {
 						entry->second.Reply.Status = "failed";
 						entry->second.Reply.SnapshotId = captured.SnapshotId;
+						entry->second.Reply.Profile.RetainedBytes = entry->second.SceneSidecarBytes;
+						entry->second.Reply.Profile.RetainedOperations =
+							entry->second.SceneSidecarBytes == 0 ? 0 : 1;
 						entry->second.Detail = "renderer returned a malformed capture plane";
 					} else if (RetainedBytes > RETAINED_BYTE_LIMIT ||
 							   totalBytes > RETAINED_BYTE_LIMIT - RetainedBytes) {
 						entry->second.Reply.Status = "failed";
 						entry->second.Reply.SnapshotId = captured.SnapshotId;
+						entry->second.Reply.Profile.RetainedBytes = entry->second.SceneSidecarBytes;
+						entry->second.Reply.Profile.RetainedOperations =
+							entry->second.SceneSidecarBytes == 0 ? 0 : 1;
 						entry->second.Detail = "capture exceeds retained byte quota";
 					} else {
 						RetainedBytes += totalBytes;

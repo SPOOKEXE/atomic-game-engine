@@ -237,6 +237,17 @@ namespace {
 			}
 			poll.Status = "ready";
 			poll.SnapshotId = Snapshot;
+			poll.Profile.SourceBytes = 7;
+			poll.Profile.RetainedBytes = 7;
+			poll.Profile.ReadbackBytes = 7;
+			poll.Profile.TransferBytes = 3;
+			poll.Profile.SourceOperations = 2;
+			poll.Profile.RetainedOperations = 2;
+			poll.Profile.ReadbackOperations = 2;
+			poll.Profile.TransferOperations = 1;
+			poll.Profile.CpuReadbackNanoseconds = 11;
+			poll.Profile.CpuStorageConversionNanoseconds = 13;
+			poll.Profile.StorageConversionBytesPerSecond = 538461538.0;
 			poll.HasCamera = true;
 			poll.CropLeft = 0.125;
 			poll.CropTop = 0.25;
@@ -669,6 +680,22 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(poll["camera"]["lens_distortion_reason"] == "unavailable");
 	CHECK_FALSE(poll["camera"]["jitter_available"]);
 	CHECK(poll["camera"]["jitter_policy"] == "unavailable");
+	const json &profile = poll["profile"];
+	CHECK(profile["source_bytes"] == 7);
+	CHECK(profile["retained_bytes"] == 7);
+	CHECK(profile["readback_bytes"] == 7);
+	CHECK(profile["transfer_bytes"] == 3);
+	CHECK(profile["source_operations"] == 2);
+	CHECK(profile["retained_operations"] == 2);
+	CHECK(profile["readback_operations"] == 2);
+	CHECK(profile["transfer_operations"] == 1);
+	CHECK(profile["cpu_readback_nanoseconds"] == 11);
+	CHECK(profile["cpu_storage_conversion_nanoseconds"] == 13);
+	CHECK(profile["gpu_nanoseconds"].is_null());
+	CHECK(profile["gpu_timing_reason"] == "unavailable/no_completed_gpu_timestamp");
+	CHECK(profile["allocation_bytes"].is_null());
+	CHECK(profile["peak_allocation_bytes"].is_null());
+	CHECK(profile["allocation_reason"] == "unavailable/no_capture_allocator_counter");
 	const json bytes = Called(
 		surface,
 		"get_resource",
