@@ -1528,6 +1528,26 @@ namespace engine::control {
 					failure = Error("validation_failed", "columns, rows and layers must be integers from 1 through 4");
 					return nullptr;
 				}
+				const auto boundary = [](float minimum, float maximum, uint8_t index, uint8_t count) {
+					if (index == 0) return minimum;
+					if (index == count) return maximum;
+					return static_cast<float>(static_cast<double>(minimum) +
+						(static_cast<double>(maximum) - minimum) * static_cast<double>(index) / count);
+				};
+				const auto cellsDistinct = [&](float minimum, float maximum, uint8_t count) {
+					for (uint8_t index = 0; index < count; ++index) {
+						const float width = boundary(minimum, maximum, index + 1, count) -
+							boundary(minimum, maximum, index, count);
+						if (!(static_cast<float>(static_cast<double>(width) * 0.5) > 0.0f)) return false;
+					}
+					return true;
+				};
+				if (!cellsDistinct(sdf.MinimumMetres.X, sdf.MaximumMetres.X, sdf.Columns) ||
+					!cellsDistinct(sdf.MinimumMetres.Y, sdf.MaximumMetres.Y, sdf.Layers) ||
+					!cellsDistinct(sdf.MinimumMetres.Z, sdf.MaximumMetres.Z, sdf.Rows)) {
+					failure = Error("validation_failed", "a signed-distance-field cell half extent rounds to zero");
+					return nullptr;
+				}
 				if (!session.OwnsWorld(request.InstanceId)) { failure = Error("validation_failed", "world_id is not owned by this data-factory session"); return nullptr; }
 				if (!Preconditions(session, request, failure)) return nullptr;
 				const world::DataFactoryReply barrier = session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);

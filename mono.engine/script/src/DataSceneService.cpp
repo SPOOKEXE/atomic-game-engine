@@ -3595,6 +3595,38 @@ namespace engine::script {
 				(static_cast<double>(maximum) - minimum) * (static_cast<double>(index) + 0.5) / count
 			);
 		};
+		const auto boundary = [](float minimum, float maximum, uint8_t index, uint8_t count) {
+			if (index == 0) return minimum;
+			if (index == count) return maximum;
+			return static_cast<float>(
+				static_cast<double>(minimum) +
+				(static_cast<double>(maximum) - minimum) * static_cast<double>(index) / count
+			);
+		};
+		const auto hasExtent = [](float minimum, float maximum) {
+			return static_cast<float>((static_cast<double>(maximum) - minimum) * 0.5) > 0.0f;
+		};
+		for (uint8_t column = 0; column < request.Columns; ++column) {
+			if (!hasExtent(
+					boundary(request.MinimumMetres.X, request.MaximumMetres.X, column, request.Columns),
+					boundary(request.MinimumMetres.X, request.MaximumMetres.X, column + 1, request.Columns)
+				))
+				return {"invalid_argument", Map({{"status", String("invalid_signed_distance_field")}})};
+		}
+		for (uint8_t layer = 0; layer < request.Layers; ++layer) {
+			if (!hasExtent(
+					boundary(request.MinimumMetres.Y, request.MaximumMetres.Y, layer, request.Layers),
+					boundary(request.MinimumMetres.Y, request.MaximumMetres.Y, layer + 1, request.Layers)
+				))
+				return {"invalid_argument", Map({{"status", String("invalid_signed_distance_field")}})};
+		}
+		for (uint8_t row = 0; row < request.Rows; ++row) {
+			if (!hasExtent(
+					boundary(request.MinimumMetres.Z, request.MaximumMetres.Z, row, request.Rows),
+					boundary(request.MinimumMetres.Z, request.MaximumMetres.Z, row + 1, request.Rows)
+				))
+				return {"invalid_argument", Map({{"status", String("invalid_signed_distance_field")}})};
+		}
 		const size_t sampleCount = static_cast<size_t>(request.Columns) * request.Rows * request.Layers;
 		std::array<core::Vector3, MAXIMUM_SAMPLES> probes;
 		for (uint8_t layer = 0; layer < request.Layers; ++layer) {

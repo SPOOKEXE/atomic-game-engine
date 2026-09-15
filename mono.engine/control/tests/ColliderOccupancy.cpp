@@ -227,6 +227,58 @@ TEST_CASE(
 	CHECK(reply.at("cells").at(7).at("filled").is_null());
 }
 
+TEST_CASE("signed distance MCP fences lifecycle and preserves conservative samples", "[control][signed-distance]"
+) {
+	Fixture fixture;
+	const json tools = Tools(fixture.Control);
+	const auto found = std::find_if(tools.begin(), tools.end(), [](const json &tool) {
+		return tool.at("name") == "get_signed_distance_field";
+	});
+	REQUIRE(found != tools.end());
+	CHECK(found->at("inputSchema").at("properties").at("schema_version").at("const") == "signed-distance-field/v1");
+	CHECK(found->at("inputSchema").at("properties").at("columns").at("maximum") == 4);
+	fixture.Worlds.Enter(fixture.Id, [](engine::ecs::Store &store) {
+		PreparePhysicsWorld(store, 4.0f);
+		const Entity collider = store.Create();
+		store.Set(collider, Transform{CFrame{}});
+		store.Set(collider, Collider{});
+		engine::ecs::AttributeValue id;
+		id.Type = engine::ecs::PropertyType::String;
+		id.String = "sdf/box";
+		REQUIRE(engine::ecs::SetAttribute(store, collider, Name("DataFactoryId"), id));
+		SyncBroadphase(store);
+	});
+	json request = fixture.FilledRequest(2, 2, 2);
+	request["schema_version"] = "signed-distance-field/v1";
+	bool failed = false;
+	const json reply = Call(fixture.Control, request, failed, "get_signed_distance_field");
+	CHECK_FALSE(failed);
+	CHECK(reply.at("sign_convention") == "negative_inside_zero_surface_positive_outside");
+	CHECK(reply.at("units") == "metres");
+	CHECK(reply.at("cell_order") == "y_then_z_then_x");
+	REQUIRE(reply.at("samples").size() == 8);
+	CHECK(reply.at("samples").at(0).at("layer") == 0);
+	CHECK(reply.at("samples").at(4).at("layer") == 1);
+	CHECK(reply.at("samples").at(4).at("row") == 0);
+	CHECK(reply.at("samples").at(4).at("column") == 0);
+	CHECK(reply.at("samples").at(0).at("state") == "known");
+	CHECK(reply.at("samples").at(0).at("witness_id") == "sdf/box");
+
+	json collapsed = request;
+	collapsed["minimum_metres"][0] = 1.0e30;
+	collapsed["maximum_metres"][0] = 1.0e30 + 1.0e20;
+	const json invalid = Call(fixture.Control, collapsed, failed, "get_signed_distance_field");
+	CHECK(failed);
+	CHECK(invalid.dump().find("validation_failed") != std::string::npos);
+	for (const char *field : {"tick", "world_epoch", "world_version"}) {
+		json mismatched = request;
+		mismatched["lifecycle"][field] = mismatched["lifecycle"][field].get<uint64_t>() + 1;
+		const json rejected = Call(fixture.Control, mismatched, failed, "get_signed_distance_field");
+		CHECK(failed);
+		CHECK(rejected.dump().find("version_conflict") != std::string::npos);
+	}
+}
+
 TEST_CASE("collider BEV MCP discovery advertises the strict grid schema", "[control][collider-bev]") {
 	Fixture fixture;
 	const json tools = Tools(fixture.Control);

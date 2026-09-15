@@ -242,6 +242,60 @@ TEST_CASE("signed distance preserves authored primitive semantics and refuses un
 	CHECK(answers[0].Why == ColliderSignedDistance::Reason::UnionUncertain);
 }
 
+TEST_CASE("signed distance handles rotated boxes, spheres and finite cylinders", "[physics][query]") {
+	const auto sample = [](const Placed &placed, Vector3 point) {
+		Store store("query.signed-distance-primitive");
+		PreparePhysicsWorld(store, 4.0f);
+		Place(store, placed);
+		Index(store);
+		std::array<ColliderSignedDistance, 1> answer;
+		ColliderSignedDistanceBatch(store, std::array{point}, answer);
+		return answer.front();
+	};
+	const ColliderSignedDistance rotated = sample(
+		Placed{.Extent = Vector3{2.0f, 1.0f, 1.0f}, .Rotation = CFrame::Angles(0.0f, EIGHTH_TURN, 0.0f)},
+		Vector3{0.0f, 0.0f, 0.0f}
+	);
+	CHECK(rotated.Available);
+	CHECK(rotated.DistanceMetres == Approx(-1.0f));
+	CHECK(sample(Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{2.0f, 0.0f, 0.0f}).DistanceMetres == Approx(0.0f));
+	CHECK(sample(Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{3.0f, 0.0f, 0.0f}).DistanceMetres == Approx(1.0f));
+	CHECK(sample(Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder}, Vector3{0.0f, 3.0f, 0.0f}).DistanceMetres == Approx(1.0f));
+	CHECK(sample(Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder}, Vector3{2.0f, 3.0f, 0.0f}).DistanceMetres == Approx(std::sqrt(2.0f)));
+}
+
+TEST_CASE("signed distance refuses unavailable geometry evidence", "[physics][query]") {
+	const auto unavailable = [](const Placed &placed, ColliderSignedDistance::Reason reason) {
+		Store store("query.signed-distance-unavailable");
+		PreparePhysicsWorld(store, 4.0f);
+		Place(store, placed);
+		Index(store);
+		std::array<ColliderSignedDistance, 1> answer;
+		ColliderSignedDistanceBatch(store, std::array{Vector3::Zero}, answer);
+		CHECK_FALSE(answer[0].Available);
+		CHECK(answer[0].Why == reason);
+	};
+	unavailable(Placed{.Shape = ShapeKind::Hull}, ColliderSignedDistance::Reason::BakedGeometryUncertain);
+	unavailable(Placed{.Shape = ShapeKind::Capsule}, ColliderSignedDistance::Reason::UnsupportedGeometry);
+	Store unprepared("query.signed-distance-unprepared");
+	std::array<ColliderSignedDistance, 1> answer;
+	ColliderSignedDistanceBatch(unprepared, std::array{Vector3::Zero}, answer);
+	CHECK(answer[0].Why == ColliderSignedDistance::Reason::PhysicsUnprepared);
+	Store stale("query.signed-distance-stale");
+	PreparePhysicsWorld(stale, 4.0f);
+	const Entity collider = Place(stale, Placed{});
+	Index(stale);
+	stale.Set(collider, Transform{CFrame{Vector3{1.0f, 0.0f, 0.0f}}});
+	ColliderSignedDistanceBatch(stale, std::array{Vector3::Zero}, answer);
+	CHECK(answer[0].Why == ColliderSignedDistance::Reason::PhysicsStale);
+	Store overflow("query.signed-distance-overflow");
+	PreparePhysicsWorld(overflow, 4.0f);
+	for (size_t index = 0; index <= engine::physics::QUERY_CANDIDATE_LIMIT; ++index) Place(overflow, Placed{});
+	Index(overflow);
+	ColliderSignedDistanceBatch(overflow, std::array{Vector3::Zero}, answer);
+	CHECK(answer[0].Why == ColliderSignedDistance::Reason::CandidateOverflow);
+}
+
 TEST_CASE("filled collider occupancy never infers volume from a collider union", "[physics][query]") {
 	Store store("query.filled-occupancy-union");
 	PreparePhysicsWorld(store, 4.0f);
