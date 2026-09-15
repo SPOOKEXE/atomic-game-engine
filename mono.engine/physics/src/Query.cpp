@@ -26,6 +26,7 @@
 #include <engine/spatial/Query.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -182,6 +183,53 @@ namespace engine::physics {
 				};
 				if (!PrimitiveContainsPoint(shape, point)) return false;
 			}
+			return true;
+		}
+
+		bool PrimitiveSignedDistance(
+			const ShapeInstance &shape, const core::Vector3 &point, float &distance
+		) {
+			const core::Vector3 local = shape.Frame.PointToObjectSpace(point);
+			const double x = local.X;
+			const double y = local.Y;
+			const double z = local.Z;
+			const auto length = [](double first, double second, double third = 0.0) {
+				return std::sqrt(first * first + second * second + third * third);
+			};
+			double signedDistance = 0.0;
+			switch (shape.Shape) {
+			case scene::ShapeKind::Box: {
+				const double qx = std::abs(x) - shape.Extent.X;
+				const double qy = std::abs(y) - shape.Extent.Y;
+				const double qz = std::abs(z) - shape.Extent.Z;
+				if (!(shape.Extent.X >= 0.0f) || !(shape.Extent.Y >= 0.0f) ||
+					!(shape.Extent.Z >= 0.0f))
+					return false;
+				signedDistance = length(std::max(qx, 0.0), std::max(qy, 0.0), std::max(qz, 0.0)) +
+							 std::min(std::max({qx, qy, qz}), 0.0);
+				break;
+			}
+			case scene::ShapeKind::Sphere:
+				if (!(shape.Extent.X >= 0.0f)) return false;
+				signedDistance = length(x, y, z) - shape.Extent.X;
+				break;
+			case scene::ShapeKind::Cylinder: {
+				if (!(shape.Extent.X >= 0.0f) || !(shape.Extent.Y >= 0.0f)) return false;
+				const double radial = length(x, z) - shape.Extent.X;
+				const double axial = std::abs(y) - shape.Extent.Y;
+				signedDistance = length(std::max(radial, 0.0), std::max(axial, 0.0)) +
+							 std::min(std::max(radial, axial), 0.0);
+				break;
+			}
+			case scene::ShapeKind::Capsule:
+			case scene::ShapeKind::Hull:
+			case scene::ShapeKind::Mesh:
+				return false;
+			}
+			if (!std::isfinite(signedDistance) || signedDistance < -std::numeric_limits<float>::max() ||
+				signedDistance > std::numeric_limits<float>::max())
+				return false;
+			distance = static_cast<float>(signedDistance);
 			return true;
 		}
 
@@ -648,6 +696,76 @@ namespace engine::physics {
 				answer.Filled = false;
 				answer.WitnessAvailable = false;
 			}
+		}
+	}
+
+	void ColliderSignedDistanceBatch(
+		const ecs::Store &store,
+		std::span<const core::Vector3> probes,
+		std::span<ColliderSignedDistance> results
+	) {
+		const Indexes indexes = IndexesOf(store);
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		const bool stale =
+			prepared != nullptr &&
+			(prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion());
+		const size_t count = std::min(probes.size(), results.size());
+		if (!indexes.Valid || stale) {
+			for (size_t index = 0; index < count; ++index) {
+				results[index] = {};
+				if (stale) results[index].Why = ColliderSignedDistance::Reason::PhysicsStale;
+			}
+			return;
+		}
+
+		std::array<QueryCandidate, QUERY_CANDIDATE_LIMIT> candidates;
+		size_t candidateCount = 0;
+		bool overflowed = false;
+		for (const Index &index : indexes.Entry) {
+			for (size_t record = 0; record < index.Records->size(); ++record) {
+				const QueryCandidate candidate = ResolveCandidate(store, index, record);
+				if (!candidate.Present) continue;
+				if (candidateCount == candidates.size()) {
+					overflowed = true;
+					continue;
+				}
+				candidates[candidateCount++] = candidate;
+			}
+		}
+
+		for (size_t probeIndex = 0; probeIndex < count; ++probeIndex) {
+			ColliderSignedDistance &answer = results[probeIndex];
+			answer = {};
+			const core::Vector3 &probe = probes[probeIndex];
+			if (!std::isfinite(probe.X) || !std::isfinite(probe.Y) || !std::isfinite(probe.Z)) {
+				answer.Why = ColliderSignedDistance::Reason::InvalidProbe;
+				continue;
+			}
+			if (overflowed) {
+				answer.Why = ColliderSignedDistance::Reason::CandidateOverflow;
+				continue;
+			}
+			if (candidateCount != 1) {
+				answer.Why = candidateCount == 0 ? ColliderSignedDistance::Reason::UnsupportedGeometry
+															 : ColliderSignedDistance::Reason::UnionUncertain;
+				continue;
+			}
+			const QueryCandidate &candidate = candidates.front();
+			if (candidate.BakedGeometry || candidate.Shape.Shape == scene::ShapeKind::Hull ||
+				candidate.Shape.Shape == scene::ShapeKind::Mesh) {
+				answer.Why = ColliderSignedDistance::Reason::BakedGeometryUncertain;
+				continue;
+			}
+			float distance = 0.0f;
+			if (!PrimitiveSignedDistance(candidate.Shape, probe, distance)) {
+				answer.Why = ColliderSignedDistance::Reason::UnsupportedGeometry;
+				continue;
+			}
+			answer.Available = true;
+			answer.DistanceMetres = distance;
+			answer.WitnessAvailable = true;
+			answer.Witness = candidate.Owner;
+			answer.Why = ColliderSignedDistance::Reason::None;
 		}
 	}
 

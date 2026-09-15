@@ -143,6 +143,13 @@ if snapshot.physics_observations.world_prepared then
 		rows = 1,
 		layers = 1,
 	})
+	local sdf = DataSceneService:GetSignedDistanceField({
+		minimum_metres = Vector3.new(-1, -1, -1),
+		maximum_metres = Vector3.new(1, 1, 1),
+		columns = 1,
+		rows = 1,
+		layers = 1,
+	})
 	assert(raycast.status == "ok")
 	assert(aabb.status == "ok" and not aabb.overflowed and #aabb.ids <= 64)
 	assert(obb.status == "ok" and not obb.overflowed and #obb.ids <= 64)
@@ -151,6 +158,7 @@ if snapshot.physics_observations.world_prepared then
 	print("DataFactory aabb", #aabb.ids, aabb.overflowed, aabb.provenance)
 	print("DataFactory obb", #obb.ids, obb.overflowed, obb.provenance)
 	print("DataFactory filled occupancy", filled.cell_order, filled.cells[1].state)
+	print("DataFactory signed distance", sdf.sign_convention, sdf.samples[1].state)
 else
 	print("DataFactory queries unavailable", "physics world is not prepared")
 end

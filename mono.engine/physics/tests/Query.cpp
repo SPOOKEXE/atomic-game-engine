@@ -60,6 +60,8 @@ using engine::physics::BroadPhase;
 using engine::physics::ColliderHit;
 using engine::physics::ColliderOccupancy;
 using engine::physics::ColliderOccupancyBatch;
+using engine::physics::ColliderSignedDistance;
+using engine::physics::ColliderSignedDistanceBatch;
 using engine::physics::FilledColliderOccupancy;
 using engine::physics::FilledColliderOccupancyBatch;
 using engine::physics::OverlapBox;
@@ -220,6 +222,24 @@ TEST_CASE("filled collider occupancy proves one solid primitive contains a cell"
 	CHECK(answers[1].Available);
 	CHECK_FALSE(answers[1].Filled);
 	CHECK(answers[1].Complete);
+}
+
+TEST_CASE("signed distance preserves authored primitive semantics and refuses unions", "[physics][query]") {
+	Store store("query.signed-distance");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 1.0f, 1.0f}});
+	Index(store);
+	std::array<ColliderSignedDistance, 2> answers;
+	ColliderSignedDistanceBatch(store, std::array{Vector3::Zero, Vector3{3.0f, 0.0f, 0.0f}}, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].DistanceMetres == Approx(-1.0f));
+	CHECK(answers[1].Available);
+	CHECK(answers[1].DistanceMetres == Approx(1.0f));
+	Place(store, Placed{.Position = Vector3{8.0f, 0.0f, 0.0f}});
+	Index(store);
+	ColliderSignedDistanceBatch(store, std::array{Vector3::Zero, Vector3{3.0f, 0.0f, 0.0f}}, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK(answers[0].Why == ColliderSignedDistance::Reason::UnionUncertain);
 }
 
 TEST_CASE("filled collider occupancy never infers volume from a collider union", "[physics][query]") {

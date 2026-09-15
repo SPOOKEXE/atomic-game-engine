@@ -116,6 +116,30 @@ namespace engine::physics {
 		Reason Why = Reason::PhysicsUnprepared;
 	};
 
+	// One conservative signed-distance answer at a world-space point. Distance is
+	// in metres: negative is strictly inside, zero is on the authored surface,
+	// and positive is outside. Exact values are intentionally limited to one
+	// supported analytic primitive, because a union changes the nearest boundary
+	// and a baked shape has no analytic distance contract here.
+	struct ColliderSignedDistance {
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			CandidateOverflow,
+			BakedGeometryUncertain,
+			UnionUncertain,
+			UnsupportedGeometry,
+			PhysicsStale,
+			InvalidProbe,
+		};
+
+		bool Available = false;
+		float DistanceMetres = 0.0f;
+		bool WitnessAvailable = false;
+		ecs::Entity Witness;
+		Reason Why = Reason::PhysicsUnprepared;
+	};
+
 	// One collider a query found.
 	//
 	// An `ecs::Entity` rather than the `uint64_t` a `core::RayHit` carries.
@@ -264,6 +288,16 @@ namespace engine::physics {
 		const ecs::Store &store,
 		std::span<const core::AABB> probes,
 		std::span<FilledColliderOccupancy> results
+	);
+
+	// Computes exact signed distances only where one authored box, sphere, or
+	// cylinder is the complete geometry evidence. Capsule, hull and mesh shapes,
+	// collider unions, more than QUERY_CANDIDATE_LIMIT colliders, stale indexes,
+	// and unprepared physics report an unavailable reason instead of an estimate.
+	void ColliderSignedDistanceBatch(
+		const ecs::Store &store,
+		std::span<const core::Vector3> probes,
+		std::span<ColliderSignedDistance> results
 	);
 
 	// Finds colliders whose exact shape overlaps an oriented box. The broad phase

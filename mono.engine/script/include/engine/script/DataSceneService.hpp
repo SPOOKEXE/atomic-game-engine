@@ -83,6 +83,16 @@ namespace engine::script {
 		uint8_t Layers = 0;
 	};
 
+	// Samples are taken at voxel centres in deterministic y, z, x order. An
+	// unavailable sample carries a reason instead of a guessed distance.
+	struct DataSceneSignedDistanceFieldRequest {
+		core::Vector3 MinimumMetres;
+		core::Vector3 MaximumMetres;
+		uint8_t Columns = 0;
+		uint8_t Rows = 0;
+		uint8_t Layers = 0;
+	};
+
 	DataSceneResult GetCapabilities(const ecs::Store &store);
 	// Computes a conservative upper bound for the compact JSON representation
 	// used by the MCP adapter. Rejects values the adapter cannot serialize.
@@ -114,6 +124,8 @@ namespace engine::script {
 
 	DataSceneResult ColliderBev(ecs::Store &store, const DataSceneColliderBevRequest &request);
 	DataSceneResult FilledOccupancy(ecs::Store &store, const DataSceneFilledOccupancyRequest &request);
+	DataSceneResult
+	SignedDistanceField(ecs::Store &store, const DataSceneSignedDistanceFieldRequest &request);
 
 	const ServiceSurface &DataSceneServiceSurface();
 }

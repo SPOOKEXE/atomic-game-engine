@@ -2474,7 +2474,34 @@ namespace engine::script {
 			call.ReturnValue(FilledOccupancy(call.World(), request).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 27> DATA_SCENE_METHODS{{
+		void ServiceSignedDistanceField(ScriptCall &call) {
+			ScriptValue value;
+			CodecStatus status = CodecStatus::Ok;
+			if (!call.ReadValue(0, value, status)) {
+				call.ReturnValue(Map({{"status", String("invalid_signed_distance_field")}}));
+				return;
+			}
+			const auto dimension = [](const ScriptValue *field, uint8_t &out) {
+				if (field == nullptr || field->Tag != ValueTag::Number || !std::isfinite(field->Number) ||
+					field->Number != std::floor(field->Number) || field->Number < 1.0 || field->Number > 4.0)
+					return false;
+				out = static_cast<uint8_t>(field->Number);
+				return true;
+			};
+			DataSceneSignedDistanceFieldRequest request;
+			if (!HasOnlyFields(value, {"minimum_metres", "maximum_metres", "columns", "rows", "layers"}) ||
+				!VectorField(value, "minimum_metres", request.MinimumMetres) ||
+				!VectorField(value, "maximum_metres", request.MaximumMetres) ||
+				!dimension(Field(value, "columns"), request.Columns) ||
+				!dimension(Field(value, "rows"), request.Rows) ||
+				!dimension(Field(value, "layers"), request.Layers)) {
+				call.ReturnValue(Map({{"status", String("invalid_signed_distance_field")}}));
+				return;
+			}
+			call.ReturnValue(SignedDistanceField(call.World(), request).Value);
+		}
+
+		constexpr std::array<ServiceMethod, 28> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
@@ -2502,6 +2529,7 @@ namespace engine::script {
 			{"OverlapOBB", ServiceObb},
 			{"GetColliderBev", ServiceColliderBev},
 			{"GetFilledOccupancy", ServiceFilledOccupancy},
+			{"GetSignedDistanceField", ServiceSignedDistanceField},
 		}};
 	}
 
@@ -2537,7 +2565,8 @@ namespace engine::script {
 					 {String("raycast"),
 					  String("aabb_overlap"),
 					  String("obb_overlap"),
-					  String("filled_occupancy")}
+					  String("filled_occupancy"),
+					  String("signed_distance_field")}
 				 )},
 				{"filled_occupancy", Boolean(true)},
 				{"filled_occupancy_schema_version", String("filled-occupancy/v1")},
@@ -2545,6 +2574,10 @@ namespace engine::script {
 				 String(
 					 "one analytic primitive per cell; collider unions, hulls and meshes are not inferred"
 				 )},
+				{"signed_distance_field", Boolean(true)},
+				{"signed_distance_field_schema_version", String("signed-distance-field/v1")},
+				{"signed_distance_field_limitations",
+				 String("exact only for one authored box, sphere or cylinder; unions and baked geometry are unknown")},
 				{"max_raycast_distance_metres", Number(100'000.0)},
 				{"physics_contacts", Boolean(physicsPrepared)},
 				{"physics_contact_impulses", Boolean(physicsPrepared)},
@@ -3539,6 +3572,107 @@ namespace engine::script {
 				{"cells", Array(std::move(cells))},
 			})
 		};
+	}
+
+	DataSceneResult SignedDistanceField(
+		ecs::Store &store, const DataSceneSignedDistanceFieldRequest &request
+	) {
+		constexpr size_t MAXIMUM_SAMPLES = 64;
+		if (request.Columns == 0 || request.Columns > 4 || request.Rows == 0 || request.Rows > 4 ||
+			request.Layers == 0 || request.Layers > 4 ||
+			static_cast<size_t>(request.Columns) * request.Rows * request.Layers > MAXIMUM_SAMPLES ||
+			!std::isfinite(request.MinimumMetres.X) || !std::isfinite(request.MinimumMetres.Y) ||
+			!std::isfinite(request.MinimumMetres.Z) || !std::isfinite(request.MaximumMetres.X) ||
+			!std::isfinite(request.MaximumMetres.Y) || !std::isfinite(request.MaximumMetres.Z) ||
+			request.MinimumMetres.X >= request.MaximumMetres.X ||
+			request.MinimumMetres.Y >= request.MaximumMetres.Y ||
+			request.MinimumMetres.Z >= request.MaximumMetres.Z) {
+			return {"invalid_argument", Map({{"status", String("invalid_signed_distance_field")}})};
+		}
+		const auto centre = [](float minimum, float maximum, uint8_t index, uint8_t count) {
+			return static_cast<float>(
+				static_cast<double>(minimum) +
+				(static_cast<double>(maximum) - minimum) * (static_cast<double>(index) + 0.5) / count
+			);
+		};
+		const size_t sampleCount = static_cast<size_t>(request.Columns) * request.Rows * request.Layers;
+		std::array<core::Vector3, MAXIMUM_SAMPLES> probes;
+		for (uint8_t layer = 0; layer < request.Layers; ++layer) {
+			for (uint8_t row = 0; row < request.Rows; ++row) {
+				for (uint8_t column = 0; column < request.Columns; ++column) {
+					const size_t index =
+						(static_cast<size_t>(layer) * request.Rows + row) * request.Columns + column;
+					probes[index] = {
+						centre(request.MinimumMetres.X, request.MaximumMetres.X, column, request.Columns),
+						centre(request.MinimumMetres.Y, request.MaximumMetres.Y, layer, request.Layers),
+						centre(request.MinimumMetres.Z, request.MaximumMetres.Z, row, request.Rows),
+					};
+				}
+			}
+		}
+		std::unordered_map<std::string, size_t> identities;
+		store.EachEntity([&](ecs::Entity entity) {
+			std::string id;
+			if (StableId(store, entity, id) && id.size() <= MAX_DATA_SCENE_ID_BYTES &&
+				id.find('\0') == std::string::npos && DataSceneUtf8(id))
+				identities[id]++;
+		});
+		std::array<physics::ColliderSignedDistance, MAXIMUM_SAMPLES> distances;
+		physics::ColliderSignedDistanceBatch(
+			store, std::span{probes}.first(sampleCount), std::span{distances}.first(sampleCount)
+		);
+		const auto reason = [](physics::ColliderSignedDistance::Reason value) -> const char * {
+			switch (value) {
+			case physics::ColliderSignedDistance::Reason::None: return "";
+			case physics::ColliderSignedDistance::Reason::PhysicsUnprepared: return "physics_unprepared";
+			case physics::ColliderSignedDistance::Reason::CandidateOverflow: return "candidate_overflow";
+			case physics::ColliderSignedDistance::Reason::BakedGeometryUncertain: return "baked_geometry_uncertain";
+			case physics::ColliderSignedDistance::Reason::UnionUncertain: return "union_uncertain";
+			case physics::ColliderSignedDistance::Reason::UnsupportedGeometry: return "unsupported_geometry";
+			case physics::ColliderSignedDistance::Reason::PhysicsStale: return "physics_stale";
+			case physics::ColliderSignedDistance::Reason::InvalidProbe: return "invalid_probe";
+			}
+			return "unknown";
+		};
+		std::vector<ScriptValue> samples;
+		samples.reserve(sampleCount);
+		for (uint8_t layer = 0; layer < request.Layers; ++layer) {
+			for (uint8_t row = 0; row < request.Rows; ++row) {
+				for (uint8_t column = 0; column < request.Columns; ++column) {
+					const size_t index =
+						(static_cast<size_t>(layer) * request.Rows + row) * request.Columns + column;
+					const physics::ColliderSignedDistance &answer = distances[index];
+					std::string id;
+					const bool witnessAvailable =
+						answer.Available && answer.WitnessAvailable && StableId(store, answer.Witness, id) &&
+						identities[id] == 1;
+					samples.push_back(Map({
+						{"layer", Number(layer)},
+						{"row", Number(row)},
+						{"column", Number(column)},
+						{"point_metres", Array({Number(probes[index].X), Number(probes[index].Y), Number(probes[index].Z)})},
+						{"state", String(answer.Available ? "known" : "unknown")},
+						{"distance_metres", answer.Available ? ScriptValue{Number(answer.DistanceMetres)} : ScriptValue{}},
+						{"reason", answer.Available ? ScriptValue{} : ScriptValue{String(reason(answer.Why))}},
+						{"witness_id", witnessAvailable ? ScriptValue{String(id)} : ScriptValue{}},
+						{"witness_identity_available", Boolean(witnessAvailable)},
+					}));
+				}
+			}
+		}
+		return {"ok", Map({
+			{"status", String("ok")},
+			{"schema_version", String("signed-distance-field/v1")},
+			{"sign_convention", String("negative_inside_zero_surface_positive_outside")},
+			{"units", String("metres")},
+			{"cell_order", String("y_then_z_then_x")},
+			{"sampling", String("cell_centres")},
+			{"supported_primitives", Array({String("box"), String("sphere"), String("cylinder")})},
+			{"minimum_metres", Array({Number(request.MinimumMetres.X), Number(request.MinimumMetres.Y), Number(request.MinimumMetres.Z)})},
+			{"maximum_metres", Array({Number(request.MaximumMetres.X), Number(request.MaximumMetres.Y), Number(request.MaximumMetres.Z)})},
+			{"columns", Number(request.Columns)}, {"rows", Number(request.Rows)}, {"layers", Number(request.Layers)},
+			{"samples", Array(std::move(samples))},
+		})};
 	}
 
 	const ServiceSurface &DataSceneServiceSurface() {
