@@ -90,6 +90,17 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	CHECK(collector.Scenes()[1].Name == Name("Zulu"));
 	CHECK(collector.Scenes()[1].View.Pipeline == Name("zulu-pipeline"));
 	CHECK(collector.Scenes()[1].View.CameraFrame.Position.X == 3);
+	CHECK_FALSE(collector.Scenes()[0].View.CameraTemporalId.empty());
+	CHECK_FALSE(collector.Scenes()[1].View.CameraTemporalId.empty());
+	CHECK(collector.Scenes()[0].View.CameraTemporalId != collector.Scenes()[1].View.CameraTemporalId);
+	worlds.Enter(alpha, [&](Store &store) {
+		const auto *active = store.Resource<scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		CHECK(
+			client::CameraTemporalId(Name("Alpha"), store, active->Entity) ==
+			collector.Scenes()[0].View.CameraTemporalId
+		);
+	});
 	CHECK(collector.Views().size() == 2);
 	CHECK(collector.Views()[0].Instances.data() == collector.Scenes()[0].Frame->Instances.data());
 	REQUIRE(collector.Views()[0].Lights.size() == 1);
@@ -99,7 +110,7 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	std::vector<world::WorldId> submittedWorlds;
 	std::vector<Name> submittedPipelines;
 	const render::FrameResult submitted = collector.SubmitBatch(
-		zulu, collector.Scenes()[1].View, 640, 480, false, {}, [&](std::span<const render::View> batch) {
+		zulu, collector.Scenes()[1].View, 640, 480, false, {}, [&](std::span<render::View> batch) {
 			++submissions;
 			for (const render::View &view : batch) {
 				submittedWorlds.push_back(view.World == alpha.Index ? alpha : zulu);
@@ -115,9 +126,40 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	CHECK(submittedWorlds == std::vector<world::WorldId>{alpha, zulu});
 	CHECK(submittedPipelines == std::vector<Name>{Name("alpha-pipeline"), Name("zulu-pipeline")});
 
+	std::array captureViews{collector.Scenes()[0].View, collector.Scenes()[1].View};
+	size_t preparedCaptures = 0;
+	collector.SubmitBatch(
+		zulu,
+		collector.Scenes()[1].View,
+		captureViews,
+		640,
+		480,
+		false,
+		{},
+		[&](std::span<render::View> captures) {
+			preparedCaptures = captures.size();
+			REQUIRE(captures.size() == 2);
+			CHECK(captures[0].Slot == 1);
+			CHECK(captures[1].Slot == 2);
+			CHECK(captures[0].Target != nullptr);
+			CHECK(captures[1].Target != nullptr);
+			CHECK(captures[0].Target != captures[1].Target);
+			return true;
+		},
+		[](std::span<render::View> batch) {
+			REQUIRE(batch.size() == 4);
+			CHECK(batch[0].Slot == 1);
+			CHECK(batch[1].Slot == 2);
+			CHECK(batch[2].Slot == 3);
+			CHECK(batch.back().Slot == 0);
+			return render::FrameResult{};
+		}
+	);
+	CHECK(preparedCaptures == 2);
+
 	std::vector<const render::SceneTarget *> firstTargets;
 	collector.SubmitBatch(
-		zulu, collector.Scenes()[1].View, 640, 480, true, {}, [&](std::span<const render::View> batch) {
+		zulu, collector.Scenes()[1].View, 640, 480, true, {}, [&](std::span<render::View> batch) {
 			REQUIRE(batch.size() == 2);
 			for (const render::View &view : batch) {
 				REQUIRE(view.Target != nullptr);
@@ -133,13 +175,7 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	CHECK(firstTargets[0] != firstTargets[1]);
 
 	collector.SubmitBatch(
-		retired,
-		collector.Scenes().front().View,
-		800,
-		600,
-		true,
-		{},
-		[&](std::span<const render::View> batch) {
+		retired, collector.Scenes().front().View, 800, 600, true, {}, [&](std::span<render::View> batch) {
 			REQUIRE(batch.size() == 3);
 			for (const render::View &view : batch) {
 				REQUIRE(view.Target != nullptr);
@@ -153,7 +189,7 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	);
 
 	collector.SubmitBatch(
-		zulu, collector.Scenes()[1].View, 0, 0, false, {}, [&](std::span<const render::View> batch) {
+		zulu, collector.Scenes()[1].View, 0, 0, false, {}, [&](std::span<render::View> batch) {
 			REQUIRE(batch.size() == 2);
 			REQUIRE(batch.front().Target != nullptr);
 			CHECK(batch.front().Target->Width == 1);
@@ -172,7 +208,7 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	REQUIRE(collector.Scenes().size() == 1);
 	CHECK(collector.Scenes().front().Name == Name("Zulu"));
 	collector.SubmitBatch(
-		zulu, collector.Scenes().front().View, 320, 180, true, {}, [&](std::span<const render::View> batch) {
+		zulu, collector.Scenes().front().View, 320, 180, true, {}, [&](std::span<render::View> batch) {
 			REQUIRE(batch.size() == 1);
 			REQUIRE(batch.front().Target != nullptr);
 			CHECK(batch.front().Target->Width == 320);

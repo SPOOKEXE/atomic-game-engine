@@ -12,8 +12,10 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/spatial/LayerMask.hpp>
@@ -64,6 +66,7 @@ using engine::physics::ColliderSignedDistance;
 using engine::physics::ColliderSignedDistanceBatch;
 using engine::physics::FilledColliderOccupancy;
 using engine::physics::FilledColliderOccupancyBatch;
+using engine::physics::FindAuthoredNavmeshPath;
 using engine::physics::OverlapBox;
 using engine::physics::OverlapOrientedBox;
 using engine::physics::OverlapSphere;
@@ -74,6 +77,8 @@ using engine::physics::Raycast;
 using engine::physics::ShapeCast;
 using engine::physics::ShapeWorldBounds;
 using engine::physics::SyncBroadphase;
+using engine::scene::AuthoredAffordance;
+using engine::scene::AuthoredAffordanceKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::ShapeKind;
@@ -133,6 +138,35 @@ TEST_CASE("collider occupancy refuses to call an unprepared index free space", "
 	CHECK_FALSE(answers[0].OverlapFound);
 	CHECK_FALSE(answers[0].Complete);
 	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsUnprepared);
+}
+
+TEST_CASE("authored navmesh joins only connected explicit walkable tops", "[physics][query]") {
+	Store store("query.authored-navmesh");
+	PreparePhysicsWorld(store, 4.0f);
+	const auto part = [](Vector3 position, Vector3 size) {
+		return engine::scene::PartDesc{CFrame{position}, size, {}, {}, {}, ShapeKind::Box, false};
+	};
+	const Entity left = engine::scene::MakePart(store, part({0.0f, 0.0f, 0.0f}, {2.0f, 1.0f, 2.0f}));
+	const Entity right = engine::scene::MakePart(store, part({2.0f, 0.0f, 0.0f}, {2.0f, 1.0f, 2.0f}));
+	store.Set<AuthoredAffordance>(left, {Name("navmesh/left"), AuthoredAffordanceKind::Walkable, true});
+	store.Set<AuthoredAffordance>(right, {Name("navmesh/right"), AuthoredAffordanceKind::Walkable, true});
+	Index(store);
+	const auto path = FindAuthoredNavmeshPath(store, {-0.5f, 0.5f, 0.0f}, {2.5f, 0.5f, 0.0f});
+	CHECK(path.Available);
+	CHECK(path.Found);
+	CHECK(path.PointCount == 3);
+	CHECK(path.Points[1].X == Approx(1.0f));
+	const auto beyondZ = FindAuthoredNavmeshPath(store, {-0.5f, 0.5f, 0.0f}, {2.5f, 0.5f, 1.01f});
+	CHECK_FALSE(beyondZ.Found);
+	CHECK(beyondZ.Why == engine::physics::AuthoredNavmeshPath::Reason::EndpointUnavailable);
+
+	const Entity wall = engine::scene::MakePart(store, part({1.0f, 0.75f, 0.0f}, {0.2f, 1.0f, 2.0f}));
+	(void)wall;
+	Index(store);
+	const auto blocked = FindAuthoredNavmeshPath(store, {-0.5f, 0.5f, 0.0f}, {2.5f, 0.5f, 0.0f});
+	CHECK(blocked.Available);
+	CHECK_FALSE(blocked.Found);
+	CHECK(blocked.Why == engine::physics::AuthoredNavmeshPath::Reason::CorridorObstructed);
 }
 
 TEST_CASE("collider occupancy preserves an unlabelled primitive contact", "[physics][query]") {

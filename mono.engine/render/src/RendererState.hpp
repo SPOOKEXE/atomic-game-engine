@@ -75,6 +75,17 @@ namespace engine::render {
 		RetainedGeometry = 1u << 7,
 	};
 
+	struct DataCaptureSource {
+		std::string SnapshotId;
+		core::Name WorldName;
+		core::CFrame CameraFrame;
+		scene::Camera Camera;
+		bool ProjectionAvailable = false;
+		std::array<float, 16> Projection{};
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+	};
+
 	struct Renderer::Impl {
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Device = nullptr;
@@ -139,6 +150,7 @@ namespace engine::render {
 			SemanticIds,
 			PartIds,
 			MeshUv,
+			CameraMotionVectors,
 			LinearDepth,
 			SecondSurfaceZ,
 			SecondSurfaceDepth,
@@ -203,6 +215,9 @@ namespace engine::render {
 					}
 					if (node->Kind == core::Name("forward")) {
 						return output == 1 ? ResourceRole::Depth : ResourceRole::Unknown;
+					}
+					if (node->Kind == core::Name("camera-motion")) {
+						return ResourceRole::CameraMotionVectors;
 					}
 					if (node->Kind == core::Name("depth-linearise")) {
 						const auto *background = node->Parameter(core::Name("background"));
@@ -415,6 +430,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *GBufferPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthPeelPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthLinearPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *CameraMotionPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthComposePipeline = nullptr;
 		bool EnsureDepthCompose();
 		SDL_GPUGraphicsPipeline *ColourComposePipeline = nullptr;
@@ -463,6 +479,7 @@ namespace engine::render {
 			uint32_t LitWidth = 0;
 			uint32_t LitHeight = 0;
 			bool SecondSurface = false;
+			bool CameraMotion = false;
 
 			bool operator==(const PbrDimensions &) const = default;
 		};
@@ -477,6 +494,16 @@ namespace engine::render {
 			SDL_GPUTexture *SemanticIds = nullptr;
 			SDL_GPUTexture *PartIds = nullptr;
 			SDL_GPUTexture *LinearDepth = nullptr;
+			SDL_GPUTexture *CameraMotionVectors = nullptr;
+			glm::mat4 PreviousCameraMotionViewProjection{1.0f};
+			uint64_t PreviousCameraMotionFrame = 0;
+			uint64_t CameraMotionSourceFrame = 0;
+			uint64_t PreviousCameraMotionWorld = 0;
+			core::Name PreviousCameraMotionWorldName;
+			std::string PreviousCameraTemporalId;
+			uint64_t PreviousCameraTemporalSequence = 0;
+			bool CameraMotionHistory = false;
+			bool CameraMotionProduced = false;
 			SDL_GPUTexture *SecondSurfaceZ = nullptr;
 			SDL_GPUTexture *SecondSurfaceDepth = nullptr;
 			SDL_GPUTexture *SecondSurfaceValidity = nullptr;
@@ -1758,17 +1785,11 @@ namespace engine::render {
 		);
 		void ReleaseResidentImageCache();
 		uint64_t NextResourceImageToken = 1;
-		struct DataCaptureSource {
-			std::string SnapshotId;
-			core::Name WorldName;
-			core::CFrame CameraFrame;
-			scene::Camera Camera;
-			bool ProjectionAvailable = false;
-			std::array<float, 16> Projection{};
-			uint32_t Width = 0;
-			uint32_t Height = 0;
-		};
 		DataCaptureSource ActiveDataCaptureSource;
+		// A frame-scope capture may read any physical view target after the batch
+		// has recorded it. Keep its observation facts beside that target rather
+		// than attributing every readback to the batch's final view.
+		std::vector<DataCaptureSource> DataCaptureSources;
 		bool HasShadowCaptureRequest(core::Name pipeline, size_t viewSlot) const;
 		bool EnsureResourceImageTransfer(ResourceImageSlot &slot, uint32_t bytes);
 		void RecordShadowResourceImages(
@@ -1783,6 +1804,7 @@ namespace engine::render {
 		void RecordResourceImages(
 			SDL_GPUCommandBuffer *command,
 			const RenderObservationContext &observation,
+			const DataCaptureSource &captureSource,
 			core::Name pipeline,
 			core::Name node,
 			size_t slot,

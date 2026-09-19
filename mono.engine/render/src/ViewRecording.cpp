@@ -647,6 +647,10 @@ namespace engine::render {
 			for (size_t row = 0; row < 4; ++row)
 				State->ActiveDataCaptureSource.Projection[column * 4 + row] =
 					matrices.Projection[column][row];
+		if (State->DataCaptureSources.size() <= targetSlot) {
+			State->DataCaptureSources.resize(targetSlot + 1);
+		}
+		State->DataCaptureSources[targetSlot] = State->ActiveDataCaptureSource;
 		cameraMatrix = matrices.ViewProjection;
 		if (sharedCaptures) {
 			const auto budget = source.SurfaceBudget.value_or(
@@ -1634,6 +1638,7 @@ namespace engine::render {
 		pbrDimensions.LitWidth = sceneWidth;
 		pbrDimensions.LitHeight = sceneHeight;
 		pbrDimensions.SecondSurface = graphEnabled(core::Name("depth-peel"));
+		pbrDimensions.CameraMotion = graphEnabled(core::Name("camera-motion"));
 		outputDimensions(
 			core::Name("depth-linearise"), 0, pbrDimensions.LinearWidth, pbrDimensions.LinearHeight
 		);
@@ -1649,8 +1654,9 @@ namespace engine::render {
 		const bool needsPbrTargets =
 			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-peel")) ||
 			graphEnabled(core::Name("depth-linearise")) || graphEnabled(core::Name("ssao")) ||
-			graphEnabled(core::Name("deferred-lighting")) || graphEnabled(core::Name("fog")) ||
-			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
+			graphEnabled(core::Name("deferred-lighting")) || graphEnabled(core::Name("camera-motion")) ||
+			graphEnabled(core::Name("fog")) || graphEnabled(core::Name("tonemap")) ||
+			graphEnabled(core::Name("transparent"));
 		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
 		if (!graphTargetsReady) {
 			closePass();

@@ -15,7 +15,6 @@
 #include <limits>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <utility>
 
 namespace engine::render {
@@ -54,6 +53,7 @@ namespace engine::render {
 			if (name == "part_ids") return DataCaptureChannel::PartMask;
 			if (name == "second_surface_depth") return DataCaptureChannel::SecondSurfaceDepth;
 			if (name == "second_surface_validity") return DataCaptureChannel::SecondSurfaceValidity;
+			if (name == "motion_vectors") return DataCaptureChannel::MotionVectors;
 			return std::nullopt;
 		}
 
@@ -289,8 +289,9 @@ namespace engine::render {
 			return channel == DataCaptureChannel::AmbientOcclusion ||
 						   channel == DataCaptureChannel::SecondSurfaceValidity
 					   ? "unorm8"
-				   : scalar == DataCaptureScalar::UNorm8	? "rgba8_unorm"
-				   : channel == DataCaptureChannel::MeshUv	? "rg16_float"
+				   : scalar == DataCaptureScalar::UNorm8 ? "rgba8_unorm"
+				   : channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors
+					   ? "rg16_float"
 				   : scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
 															: "";
 		}
@@ -443,7 +444,8 @@ namespace engine::render {
 				 "semantic_ids",
 				 "part_ids",
 				 "second_surface_depth",
-				 "second_surface_validity"},
+				 "second_surface_validity",
+				 "motion_vectors"},
 			.StorageProfiles = {"lossless", "training_compact"},
 			.TrainingCompactLimitations =
 				{"linear_depth=float32_to_float16_le",
@@ -464,10 +466,13 @@ namespace engine::render {
 			.MaximumHooks = static_cast<uint32_t>(MAX_DATA_FACTORY_HOOKS),
 			.MaximumConnections = static_cast<uint32_t>(MAX_DATA_FACTORY_CONNECTIONS),
 			.MaximumBatches = static_cast<uint32_t>(MAX_DATA_FACTORY_BATCHES),
+			.MaximumCaptureTickets = static_cast<uint32_t>(MAX_CAPTURE_TICKETS),
 			.MaximumReadbackNodes = static_cast<uint32_t>(MAX_DATA_FACTORY_READBACK_NODES),
 			.MaximumRetainedBytes = MAX_DATA_FACTORY_RETAINED_BYTES,
 			.MaximumPendingPumps = MAX_DATA_FACTORY_PENDING_PUMPS,
 			.NamedCameraSelection = true,
+			.SameFrameMultiCamera = true,
+			.MaximumSameFrameCameraViews = static_cast<uint32_t>(MAX_CAPTURE_TICKETS),
 			.MaximumCameraIdBytes = static_cast<uint32_t>(script::MAX_DATA_SCENE_ID_BYTES),
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
@@ -532,6 +537,58 @@ namespace engine::render {
 		entry.Request = request;
 		entry.Reply.StorageProfile = request.StorageProfile;
 		Entries.emplace(ticket, std::move(entry));
+		detail.clear();
+		return true;
+	}
+
+	bool ScriptDataCaptureBridge::QueueGroup(
+		std::string_view instanceId,
+		std::span<const script::DataCaptureBridgeRequest> requests,
+		std::span<uint64_t> tickets,
+		std::string &detail
+	) {
+		std::fill(tickets.begin(), tickets.end(), uint64_t{0});
+		if (requests.size() < 2 || requests.size() != tickets.size()) {
+			detail = "same-frame capture group needs matching request and ticket counts of at least two";
+			return false;
+		}
+		std::lock_guard lock(Mutex);
+		if (requests.size() > MAX_CAPTURE_TICKETS - Entries.size() || NextTicket == 0 || NextGroup == 0) {
+			detail = Entries.size() >= MAX_CAPTURE_TICKETS
+						 ? "capture queue is full; release a terminal capture"
+						 : "capture ticket space exhausted";
+			return false;
+		}
+		const script::DataCaptureBridgeRequest &first = requests.front();
+		if (first.ViewSlot != 0) {
+			detail = "same-frame capture groups require logical view slot 0";
+			return false;
+		}
+		for (size_t index = 0; index < requests.size(); ++index) {
+			const auto &request = requests[index];
+			if (!Valid(instanceId, request) || request.SnapshotId != first.SnapshotId ||
+				request.Pipeline != first.Pipeline || request.CaptureNode != first.CaptureNode ||
+				request.ViewSlot != first.ViewSlot) {
+				detail = "same-frame capture group must share instance, snapshot, pipeline, capture node, "
+						 "and view slot";
+				return false;
+			}
+			for (size_t earlier = 0; earlier < index; ++earlier)
+				if (request.CameraId == requests[earlier].CameraId) {
+					detail = "same-frame capture group requires unique camera ids";
+					return false;
+				}
+		}
+		const uint64_t group = NextGroup++;
+		for (size_t index = 0; index < requests.size(); ++index) {
+			const uint64_t ticket = NextTicket++;
+			Entry entry;
+			entry.Request = requests[index];
+			entry.Reply.StorageProfile = requests[index].StorageProfile;
+			entry.Group = group;
+			Entries.emplace(ticket, std::move(entry));
+			tickets[index] = ticket;
+		}
 		detail.clear();
 		return true;
 	}
@@ -691,10 +748,17 @@ namespace engine::render {
 
 	void ScriptDataCaptureBridge::Cancel(std::string_view instanceId, uint64_t ticket) {
 		std::lock_guard lock(Mutex);
-		if (const auto found = Entries.find(ticket); found != Entries.end() &&
-													 found->second.Request.InstanceId == instanceId &&
-													 !found->second.Terminal)
-			found->second.CancelRequested = true;
+		const auto found = Entries.find(ticket);
+		if (found == Entries.end() || found->second.Request.InstanceId != instanceId ||
+			found->second.Terminal)
+			return;
+		const uint64_t group = found->second.Group;
+		for (auto &[candidate, entry] : Entries) {
+			if (entry.Request.InstanceId != instanceId || entry.Terminal ||
+				(group == 0 ? candidate != ticket : entry.Group != group))
+				continue;
+			entry.CancelRequested = true;
+		}
 	}
 
 	bool ScriptDataCaptureBridge::TeardownInstance(std::string_view instanceId, std::string &detail) {
@@ -741,6 +805,104 @@ namespace engine::render {
 		return true;
 	}
 
+	bool ScriptDataCaptureBridge::PrepareBatch(
+		const View &source, std::vector<View> &views, PreparedBatch *prepared
+	) {
+		views.clear();
+		if (prepared != nullptr) prepared->Views.clear();
+		RefreshCapabilities();
+		if (source.Slot != 0 || source.CaptureGroup != 0 ||
+			!RendererRef.ResolvePipelineIdentity(source.Pipeline))
+			return false;
+
+		std::vector<PendingRequest> pending;
+		uint64_t group = 0;
+		{
+			std::lock_guard lock(Mutex);
+			for (const auto &[ticket, entry] : Entries) {
+				if (entry.Group == 0 || entry.PhysicalViewSlot || entry.Preparing || entry.CancelRequested ||
+					entry.Terminal || entry.Request.InstanceId != source.WorldName.Text() ||
+					!PipelineMatches(entry.Request.Pipeline, source) || entry.Request.ViewSlot != source.Slot)
+					continue;
+				if (group == 0 || entry.Group < group) group = entry.Group;
+			}
+			if (group == 0) return false;
+			for (const auto &[ticket, entry] : Entries)
+				if (entry.Group == group) pending.push_back({.Id = ticket, .Request = entry.Request});
+		}
+		std::sort(
+			pending.begin(), pending.end(), [](const PendingRequest &left, const PendingRequest &right) {
+				return left.Id < right.Id;
+			}
+		);
+		if (pending.size() < 2 || pending.size() > MAX_CAPTURE_TICKETS) return false;
+
+		const world::DataFactoryReply barrier =
+			Session.RenderSnapshotBarrier(source.WorldName.Text(), pending.front().Request.SnapshotId);
+		if (barrier.Status != world::DataFactoryStatus::Ok) {
+			std::lock_guard lock(Mutex);
+			for (const PendingRequest &request : pending)
+				if (auto entry = Entries.find(request.Id); entry != Entries.end()) {
+					entry->second.Reply.Status = "stale_snapshot";
+					entry->second.Reply.SnapshotId = request.Request.SnapshotId;
+					entry->second.Detail = barrier.Detail;
+					entry->second.Terminal = true;
+				}
+			return false;
+		}
+
+		std::vector<View> built;
+		built.reserve(pending.size());
+		for (size_t index = 0; index < pending.size(); ++index) {
+			View capture = source;
+			capture.Slot = index + 1;
+			capture.CaptureGroup = group;
+			capture.SnapshotId = pending[index].Request.SnapshotId;
+			std::string detail;
+			if (!ResolveNamedCamera(Session, capture, pending[index].Request.CameraId, detail)) {
+				std::lock_guard lock(Mutex);
+				for (const PendingRequest &request : pending)
+					if (auto entry = Entries.find(request.Id); entry != Entries.end()) {
+						entry->second.Reply.Status = "invalid";
+						entry->second.Reply.SnapshotId = request.Request.SnapshotId;
+						entry->second.Detail = detail;
+						entry->second.Terminal = true;
+					}
+				return false;
+			}
+			// A named capture mutates the producer camera outside the active-camera
+			// lineage carried by source. It must start without temporal history.
+			if (pending[index].Request.CameraId != "current_view") capture.CameraTemporalId.clear();
+			built.push_back(std::move(capture));
+		}
+		{
+			std::lock_guard lock(Mutex);
+			for (size_t index = 0; index < pending.size(); ++index) {
+				auto entry = Entries.find(pending[index].Id);
+				if (entry == Entries.end() || entry->second.Group != group || entry->second.CancelRequested ||
+					entry->second.Terminal) {
+					return false;
+				}
+			}
+			for (size_t index = 0; index < pending.size(); ++index) {
+				auto entry = Entries.find(pending[index].Id);
+				entry->second.PhysicalViewSlot = index + 1;
+			}
+		}
+		views = std::move(built);
+		if (prepared != nullptr) {
+			prepared->Views.resize(pending.size());
+			for (size_t index = 0; index < pending.size(); ++index)
+				prepared->Views[index].Captures.push_back(pending[index].Id);
+		}
+		return true;
+	}
+
+	void ScriptDataCaptureBridge::AbortPreparedBatch(const PreparedBatch &prepared) {
+		for (const PreparedView &view : prepared.Views)
+			AbortPreparedView(view);
+	}
+
 	bool ScriptDataCaptureBridge::PrepareView(View &view, PreparedView *prepared) {
 		if (prepared != nullptr) *prepared = {};
 		RefreshCapabilities();
@@ -758,7 +920,8 @@ namespace engine::render {
 			for (auto &[id, entry] : Entries) {
 				if (Hooks->Batches.contains(id) || entry.Preparing || entry.CancelRequested ||
 					entry.Terminal || entry.Request.InstanceId != view.WorldName.Text() ||
-					!PipelineMatches(entry.Request.Pipeline, view) || entry.Request.ViewSlot != view.Slot)
+					entry.Group != view.CaptureGroup || !PipelineMatches(entry.Request.Pipeline, view) ||
+					entry.PhysicalViewSlot.value_or(entry.Request.ViewSlot) != view.Slot)
 					continue;
 				pending.push_back({.Id = id, .Request = entry.Request});
 			}

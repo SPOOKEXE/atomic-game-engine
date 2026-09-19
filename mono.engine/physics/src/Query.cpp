@@ -11,12 +11,14 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -962,6 +964,197 @@ namespace engine::physics {
 				answer.ConservativeFallback = hit.ConservativeFallback;
 			}
 		}
+		return answer;
+	}
+
+	AuthoredNavmeshPath FindAuthoredNavmeshPath(
+		ecs::Store &store,
+		const core::Vector3 &start,
+		const core::Vector3 &goal,
+		float verticalToleranceMetres
+	) {
+		ENGINE_PROFILE_CAT("physics.authored-navmesh", core::ProfileCategory::Physics);
+		AuthoredNavmeshPath answer;
+		const auto finite = [](const core::Vector3 &point) {
+			return std::isfinite(point.X) && std::isfinite(point.Y) && std::isfinite(point.Z);
+		};
+		if (!finite(start) || !finite(goal) || !std::isfinite(verticalToleranceMetres) ||
+			verticalToleranceMetres < 0.0f) {
+			answer.Why = AuthoredNavmeshPath::Reason::InvalidProbe;
+			return answer;
+		}
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		if (prepared == nullptr) return answer;
+		if (prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion()) {
+			answer.Why = AuthoredNavmeshPath::Reason::PhysicsStale;
+			return answer;
+		}
+
+		struct Surface {
+			ecs::Entity Owner;
+			float MinimumX;
+			float MaximumX;
+			float MinimumZ;
+			float MaximumZ;
+			float Height;
+		};
+		const ecs::ClassId basePart = ecs::Classes::Find(core::Name("BasePart"));
+		if (!basePart.IsValid()) {
+			answer.Available = true;
+			answer.Why = AuthoredNavmeshPath::Reason::UnsupportedWalkableGeometry;
+			return answer;
+		}
+		std::array<Surface, MAX_AUTHORED_NAVMESH_SURFACES> surfaces;
+		size_t count = 0;
+		bool unsupported = false;
+		store.Each<const scene::Transform, const scene::Collider, const scene::AuthoredAffordance>(
+			[&](ecs::Entity entity,
+				const scene::Transform &transform,
+				const scene::Collider &collider,
+				const scene::AuthoredAffordance &affordance) {
+				if (!affordance.Enabled || affordance.Kind != scene::AuthoredAffordanceKind::Walkable) return;
+				if (!store.IsA(entity, basePart)) {
+					unsupported = true;
+					return;
+				}
+				const core::CFrame &frame = transform.Frame;
+				const bool horizontal = std::abs(frame.QuaternionX) <= 0.0001f &&
+										std::abs(frame.QuaternionY) <= 0.0001f &&
+										std::abs(frame.QuaternionZ) <= 0.0001f &&
+										std::abs(std::abs(frame.QuaternionW) - 1.0f) <= 0.0001f;
+				if (collider.Shape != scene::ShapeKind::Box || !horizontal || !finite(frame.Position) ||
+					!std::isfinite(collider.Extent.X) || !std::isfinite(collider.Extent.Y) ||
+					!std::isfinite(collider.Extent.Z) || collider.Extent.X <= 0.0f ||
+					collider.Extent.Y < 0.0f || collider.Extent.Z <= 0.0f) {
+					unsupported = true;
+					return;
+				}
+				if (count == surfaces.size()) {
+					unsupported = true;
+					return;
+				}
+				surfaces[count++] = {
+					entity,
+					frame.Position.X - collider.Extent.X,
+					frame.Position.X + collider.Extent.X,
+					frame.Position.Z - collider.Extent.Z,
+					frame.Position.Z + collider.Extent.Z,
+					frame.Position.Y + collider.Extent.Y
+				};
+			}
+		);
+		if (unsupported) {
+			answer.Available = true;
+			answer.Why = count == surfaces.size() ? AuthoredNavmeshPath::Reason::SurfaceLimit
+												  : AuthoredNavmeshPath::Reason::UnsupportedWalkableGeometry;
+			return answer;
+		}
+		answer.Available = true;
+		const auto contains = [&](const Surface &surface, const core::Vector3 &point) {
+			return point.X >= surface.MinimumX && point.X <= surface.MaximumX &&
+				   point.Z >= surface.MinimumZ && point.Z <= surface.MaximumZ &&
+				   std::abs(point.Y - surface.Height) <= verticalToleranceMetres;
+		};
+		auto locate = [&](const core::Vector3 &point) -> size_t {
+			for (size_t index = 0; index < count; ++index)
+				if (contains(surfaces[index], point)) return index;
+			return count;
+		};
+		const size_t source = locate(start);
+		const size_t destination = locate(goal);
+		if (source == count || destination == count) {
+			answer.Why = AuthoredNavmeshPath::Reason::EndpointUnavailable;
+			return answer;
+		}
+		std::array<int8_t, MAX_AUTHORED_NAVMESH_SURFACES> parent;
+		parent.fill(-1);
+		std::array<size_t, MAX_AUTHORED_NAVMESH_SURFACES> queue;
+		size_t head = 0;
+		size_t tail = 0;
+		queue[tail++] = source;
+		parent[source] = static_cast<int8_t>(source);
+		const auto adjacent = [](const Surface &left, const Surface &right) {
+			constexpr float epsilon = 0.0001f;
+			if (std::abs(left.Height - right.Height) > epsilon) return false;
+			const bool xEdge = std::abs(left.MaximumX - right.MinimumX) <= epsilon ||
+							   std::abs(right.MaximumX - left.MinimumX) <= epsilon;
+			const bool zEdge = std::abs(left.MaximumZ - right.MinimumZ) <= epsilon ||
+							   std::abs(right.MaximumZ - left.MinimumZ) <= epsilon;
+			return (xEdge &&
+					std::min(left.MaximumZ, right.MaximumZ) > std::max(left.MinimumZ, right.MinimumZ)) ||
+				   (zEdge &&
+					std::min(left.MaximumX, right.MaximumX) > std::max(left.MinimumX, right.MinimumX));
+		};
+		while (head < tail && parent[destination] < 0) {
+			const size_t current = queue[head++];
+			for (size_t next = 0; next < count; ++next) {
+				if (parent[next] >= 0 || !adjacent(surfaces[current], surfaces[next])) continue;
+				parent[next] = static_cast<int8_t>(current);
+				queue[tail++] = next;
+			}
+		}
+		if (parent[destination] < 0) {
+			answer.Why = AuthoredNavmeshPath::Reason::NoPath;
+			return answer;
+		}
+		std::array<size_t, MAX_AUTHORED_NAVMESH_SURFACES> route;
+		size_t routeCount = 0;
+		for (size_t node = destination;; node = static_cast<size_t>(parent[node])) {
+			route[routeCount++] = node;
+			if (node == source) break;
+		}
+		std::reverse(route.begin(), route.begin() + routeCount);
+		std::array<ecs::Entity, MAX_AUTHORED_NAVMESH_SURFACES> routeOwners;
+		for (size_t index = 0; index < routeCount; ++index)
+			routeOwners[index] = surfaces[route[index]].Owner;
+		answer.Points[answer.PointCount++] = {start.X, surfaces[source].Height, start.Z};
+		for (size_t index = 0; index + 1 < routeCount; ++index) {
+			const Surface &left = surfaces[route[index]];
+			const Surface &right = surfaces[route[index + 1]];
+			answer.Points[answer.PointCount++] = {
+				(std::max(left.MinimumX, right.MinimumX) + std::min(left.MaximumX, right.MaximumX)) * 0.5f,
+				left.Height,
+				(std::max(left.MinimumZ, right.MinimumZ) + std::min(left.MaximumZ, right.MinimumZ)) * 0.5f
+			};
+		}
+		answer.Points[answer.PointCount++] = {goal.X, surfaces[destination].Height, goal.Z};
+		// The polygons establish authored surface topology. A route becomes a
+		// traversable answer only after every straight corridor is clear in this
+		// same completed collider snapshot. This is a zero-radius surface route;
+		// an agent clearance policy has not been authored for this API. Every
+		// collider touching the corridor tube must be one of the route's own
+		// supports at the route height. A separate elevated `Walkable` box is still
+		// an obstruction, not permission to pass through it.
+		for (size_t index = 1; index < answer.PointCount; ++index) {
+			const core::Vector3 from = answer.Points[index - 1];
+			const core::Vector3 to = answer.Points[index];
+			const core::AABB corridor{
+				{std::min(from.X, to.X), from.Y, std::min(from.Z, to.Z)},
+				{std::max(from.X, to.X), from.Y + 0.05f, std::max(from.Z, to.Z)}
+			};
+			std::array<ecs::Entity, QUERY_CANDIDATE_LIMIT> candidates;
+			const spatial::QueryResult found =
+				OverlapBox(store, corridor, spatial::LayerMask::All(), std::span<ecs::Entity>{candidates});
+			if (found.Overflowed) {
+				answer.Found = false;
+				answer.PointCount = 0;
+				answer.Why = AuthoredNavmeshPath::Reason::CorridorObstructed;
+				return answer;
+			}
+			for (size_t candidate = 0; candidate < found.Written; ++candidate) {
+				const bool routeSupport =
+					std::find(routeOwners.begin(), routeOwners.begin() + routeCount, candidates[candidate]) !=
+					routeOwners.begin() + routeCount;
+				if (!routeSupport) {
+					answer.Found = false;
+					answer.PointCount = 0;
+					answer.Why = AuthoredNavmeshPath::Reason::CorridorObstructed;
+					return answer;
+				}
+			}
+		}
+		answer.Found = true;
+		answer.Why = AuthoredNavmeshPath::Reason::None;
 		return answer;
 	}
 

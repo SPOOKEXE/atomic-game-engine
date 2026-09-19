@@ -4,20 +4,24 @@
 //
 // @tier L13 · shared
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/control/DataFactoryReadFence.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataSceneService.hpp>
+#include <engine/script/GltfSceneExport.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <string>
 
 namespace engine::control {
@@ -188,6 +192,225 @@ namespace engine::control {
 			if (!id.IsValid()) failure = "no scene called '" + std::string(instance) + "'";
 			return id;
 		}
+
+		inline constexpr size_t MAX_GLTF_EXPORT_REPLY_BYTES = 40u * 1024u;
+
+		inline std::string Base64(std::span<const std::byte> bytes) {
+			static constexpr std::string_view alphabet =
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			std::string encoded;
+			encoded.reserve((bytes.size() + 2) / 3 * 4);
+			for (size_t offset = 0; offset < bytes.size(); offset += 3) {
+				const uint32_t first = std::to_integer<unsigned char>(bytes[offset]);
+				const uint32_t second =
+					offset + 1 < bytes.size() ? std::to_integer<unsigned char>(bytes[offset + 1]) : 0;
+				const uint32_t third =
+					offset + 2 < bytes.size() ? std::to_integer<unsigned char>(bytes[offset + 2]) : 0;
+				const uint32_t group = first << 16 | second << 8 | third;
+				encoded.push_back(alphabet[(group >> 18) & 63]);
+				encoded.push_back(alphabet[(group >> 12) & 63]);
+				encoded.push_back(offset + 1 < bytes.size() ? alphabet[(group >> 6) & 63] : '=');
+				encoded.push_back(offset + 2 < bytes.size() ? alphabet[group & 63] : '=');
+			}
+			return encoded;
+		}
+
+		inline void Word(std::vector<std::byte> &out, uint32_t value) {
+			for (size_t byte = 0; byte < 4; ++byte)
+				out.push_back(static_cast<std::byte>(value >> (byte * 8)));
+		}
+
+		inline size_t Binary(std::vector<std::byte> &out, std::span<const std::byte> bytes) {
+			while (out.size() % 4 != 0)
+				out.push_back(std::byte{});
+			const size_t offset = out.size();
+			out.insert(out.end(), bytes.begin(), bytes.end());
+			return offset;
+		}
+
+		template <class Type>
+		inline size_t BinaryValues(std::vector<std::byte> &out, std::span<Type> values) {
+			return Binary(out, std::as_bytes(values));
+		}
+
+		inline bool
+		Gltf(const script::GltfSceneExport &source, std::vector<std::byte> &out, std::string &failure) {
+			json document{
+				{"asset", {{"version", "2.0"}, {"generator", "Atomic gltf-scene/v1"}}},
+				{"scene", 0},
+				{"scenes", json::array({json::object()})}
+			};
+			json nodes = json::array();
+			json unavailable = json::array();
+			for (const auto &entry : source.Unavailable)
+				unavailable.push_back(
+					{{"stable_id", entry.StableId}, {"feature", entry.Feature}, {"reason", entry.Reason}}
+				);
+			document["extras"] = {
+				{"schema_version", "gltf-scene/v1"},
+				{"tick", source.Tick},
+				{"coordinate_system", "right_handed_y_up"},
+				{"units", "metres"},
+				{"unavailable", std::move(unavailable)}
+			};
+			std::vector<std::byte> binary;
+			auto view = [&](size_t offset, size_t length, uint32_t target) {
+				if (!document.contains("bufferViews")) document["bufferViews"] = json::array();
+				document["bufferViews"].push_back(
+					{{"buffer", 0}, {"byteOffset", offset}, {"byteLength", length}, {"target", target}}
+				);
+				return document["bufferViews"].size() - 1;
+			};
+			auto accessor = [&](size_t bufferView,
+								uint32_t component,
+								size_t count,
+								const char *type,
+								json minimum = nullptr,
+								json maximum = nullptr) {
+				json value{
+					{"bufferView", bufferView}, {"componentType", component}, {"count", count}, {"type", type}
+				};
+				if (!minimum.is_null()) value["min"] = std::move(minimum);
+				if (!maximum.is_null()) value["max"] = std::move(maximum);
+				if (!document.contains("accessors")) document["accessors"] = json::array();
+				document["accessors"].push_back(std::move(value));
+				return document["accessors"].size() - 1;
+			};
+			for (const auto &node : source.Nodes) {
+				const auto &mesh = source.Meshes[node.Mesh].Data;
+				std::vector<float> positions, normals, texcoords;
+				positions.reserve(mesh.Vertices.size() * 3);
+				normals.reserve(mesh.Vertices.size() * 3);
+				texcoords.reserve(mesh.Vertices.size() * 2);
+				for (const auto &vertex : mesh.Vertices) {
+					positions.insert(
+						positions.end(), {vertex.Position[0], vertex.Position[1], vertex.Position[2]}
+					);
+					normals.insert(normals.end(), {vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]});
+					texcoords.insert(texcoords.end(), {vertex.TexCoord[0], vertex.TexCoord[1]});
+				}
+				const size_t positionView =
+					view(BinaryValues(binary, std::span(positions)), positions.size() * sizeof(float), 34962);
+				const size_t normalView =
+					view(BinaryValues(binary, std::span(normals)), normals.size() * sizeof(float), 34962);
+				const size_t texcoordView =
+					view(BinaryValues(binary, std::span(texcoords)), texcoords.size() * sizeof(float), 34962);
+				const size_t indexView = view(
+					BinaryValues(binary, std::span(mesh.Indices)),
+					mesh.Indices.size() * sizeof(uint32_t),
+					34963
+				);
+				const size_t position = accessor(
+					positionView,
+					5126,
+					mesh.Vertices.size(),
+					"VEC3",
+					{mesh.Minimum.X, mesh.Minimum.Y, mesh.Minimum.Z},
+					{mesh.Maximum.X, mesh.Maximum.Y, mesh.Maximum.Z}
+				);
+				const size_t normal = accessor(normalView, 5126, mesh.Vertices.size(), "VEC3");
+				const size_t texcoord = accessor(texcoordView, 5126, mesh.Vertices.size(), "VEC2");
+				const size_t indices = accessor(indexView, 5125, mesh.Indices.size(), "SCALAR");
+				if (!document.contains("materials")) document["materials"] = json::array();
+				const size_t material = document["materials"].size();
+				document["materials"].push_back(
+					{{"pbrMetallicRoughness",
+					  {{"baseColorFactor",
+						{node.Material.BaseColour.R,
+						 node.Material.BaseColour.G,
+						 node.Material.BaseColour.B,
+						 node.Material.Alpha}},
+					   {"metallicFactor", 0.0},
+					   {"roughnessFactor", 1.0}}},
+					 {"alphaMode",
+					  node.Material.AlphaMode == script::GltfExportAlphaMode::Blend ? "BLEND" : "OPAQUE"}}
+				);
+				if (!document.contains("meshes")) document["meshes"] = json::array();
+				const size_t gltfMesh = document["meshes"].size();
+				document["meshes"].push_back(
+					{{"name", source.Meshes[node.Mesh].Name},
+					 {"primitives",
+					  {{{"attributes",
+						 {{"POSITION", position}, {"NORMAL", normal}, {"TEXCOORD_0", texcoord}}},
+						{"indices", indices},
+						{"material", material},
+						{"mode", 4}}}}}
+				);
+				nodes.push_back(
+					{{"name", node.Name},
+					 {"mesh", gltfMesh},
+					 {"translation", {node.Frame.Position.X, node.Frame.Position.Y, node.Frame.Position.Z}},
+					 {"rotation",
+					  {node.Frame.QuaternionX,
+					   node.Frame.QuaternionY,
+					   node.Frame.QuaternionZ,
+					   node.Frame.QuaternionW}},
+					 {"scale", {node.Scale.X, node.Scale.Y, node.Scale.Z}},
+					 {"extras", {{"engine_stable_id", node.StableId}}}}
+				);
+			}
+			for (const auto &camera : source.Cameras) {
+				if (!document.contains("cameras")) document["cameras"] = json::array();
+				const size_t gltfCamera = document["cameras"].size();
+				document["cameras"].push_back(
+					{{"name", camera.Name},
+					 {"type", "perspective"},
+					 {"perspective",
+					  {{"yfov", camera.FieldOfViewRadians},
+					   {"znear", camera.NearPlaneMetres},
+					   {"zfar", camera.FarPlaneMetres}}}}
+				);
+				nodes.push_back(
+					{{"name", camera.Name},
+					 {"camera", gltfCamera},
+					 {"translation",
+					  {camera.Frame.Position.X, camera.Frame.Position.Y, camera.Frame.Position.Z}},
+					 {"rotation",
+					  {camera.Frame.QuaternionX,
+					   camera.Frame.QuaternionY,
+					   camera.Frame.QuaternionZ,
+					   camera.Frame.QuaternionW}},
+					 {"extras", {{"engine_stable_id", camera.StableId}}}}
+				);
+			}
+			if (!nodes.empty()) {
+				document["nodes"] = std::move(nodes);
+				document["scenes"][0]["nodes"] = json::array();
+				for (size_t index = 0; index < document["nodes"].size(); ++index)
+					document["scenes"][0]["nodes"].push_back(index);
+			}
+			if (!binary.empty()) {
+				while (binary.size() % 4 != 0)
+					binary.push_back(std::byte{});
+				document["buffers"] = {{{"byteLength", binary.size()}}};
+			}
+			std::string text = document.dump();
+			while (text.size() % 4 != 0)
+				text.push_back(' ');
+			const size_t binaryChunkBytes = binary.empty() ? 0 : 8 + binary.size();
+			if (12 + 8 + text.size() + binaryChunkBytes > MAX_GLTF_EXPORT_REPLY_BYTES) {
+				failure = "gltf export exceeds the 40 KiB inline response limit";
+				return false;
+			}
+			out.clear();
+			out.reserve(12 + 8 + text.size() + binaryChunkBytes);
+			Word(out, 0x46546C67);
+			Word(out, 2);
+			Word(out, static_cast<uint32_t>(12 + 8 + text.size() + binaryChunkBytes));
+			Word(out, static_cast<uint32_t>(text.size()));
+			Word(out, 0x4E4F534A);
+			out.insert(
+				out.end(),
+				reinterpret_cast<const std::byte *>(text.data()),
+				reinterpret_cast<const std::byte *>(text.data() + text.size())
+			);
+			if (!binary.empty()) {
+				Word(out, static_cast<uint32_t>(binary.size()));
+				Word(out, 0x004E4942);
+				out.insert(out.end(), binary.begin(), binary.end());
+			}
+			return true;
+		}
 	}
 
 	inline void Surface::AddDataSceneTools(
@@ -255,6 +478,59 @@ namespace engine::control {
 				});
 				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
 				return out;
+			}
+		});
+
+		Add(Tool{
+			"export_gltf_scene",
+			"Exports one fenced scene as a bounded glTF 2.0 GLB. The v1 subset contains exact built-in and "
+			"EditableMesh geometry, transforms, base-colour factors and perspective cameras. It reports "
+			"streamed mesh assets and unavailable textures explicitly.",
+			schema,
+			[worlds, session](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object() ||
+					!Options(arguments["options"], {}, session != nullptr, failure))
+					return nullptr;
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(
+						session, instance, arguments["options"], fence, failure
+					))
+					return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
+				if (!failure.empty()) return nullptr;
+				script::GltfSceneExport captured;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					CaptureGltfSceneExport(store, captured, failure);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
+				if (!failure.empty()) return nullptr;
+				std::vector<std::byte> bytes;
+				if (!Gltf(captured, bytes, failure)) return nullptr;
+				const assets::ContentHash hash = assets::Hasher::Of(bytes);
+				json unavailable = json::array();
+				for (const auto &entry : captured.Unavailable)
+					unavailable.push_back(
+						{{"stable_id", entry.StableId}, {"feature", entry.Feature}, {"reason", entry.Reason}}
+					);
+				return {
+					{"status", "ok"},
+					{"schema_version", "gltf-scene/v1"},
+					{"format", "glb"},
+					{"encoding", "base64"},
+					{"data", Base64(bytes)},
+					{"byte_length", bytes.size()},
+					{"hash_algorithm", "blake3-256"},
+					{"hash", hash.ToHex()},
+					{"tick", captured.Tick},
+					{"coordinate_system", "right_handed_y_up"},
+					{"units", "metres"},
+					{"unavailable", std::move(unavailable)},
+					{"inline_byte_limit", MAX_GLTF_EXPORT_REPLY_BYTES}
+				};
 			}
 		});
 

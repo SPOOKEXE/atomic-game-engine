@@ -233,10 +233,18 @@ namespace engine::control {
 				"digest-addressed "
 				"chunks fetched through get_audio_waveform_chunk.",
 				"application/json",
-				[](std::string &) {
+				[bridge](std::string &) {
+					const auto capabilities = bridge->Capabilities();
+					const std::string detail = BridgeText(capabilities.Detail, false)
+												   ? capabilities.Detail
+												   : "invalid audio capture capability detail";
 					return json{
 						{"schema", script::AUDIO_OBSERVATION_SCHEMA},
 						{"contract", "datafactories-docs/audio_observation.py"},
+						{"capture",
+						 {{"available", capabilities.Available},
+						  {"detail", detail},
+						  {"maximum_frames", capabilities.MaximumFrames}}},
 						{"waveform", "external_digest_addressed_chunks"},
 						{"sample_type", "float32"},
 						{"interleaved", true},

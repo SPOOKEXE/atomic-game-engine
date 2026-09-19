@@ -402,6 +402,7 @@ namespace engine::render {
 				std::string_view("last-frame"),
 				std::string_view("blit"),
 				std::string_view("depth-linearise"),
+				std::string_view("camera-motion"),
 				std::string_view("hzb"),
 				std::string_view("ssao"),
 				std::string_view("deferred-lighting"),
@@ -582,6 +583,8 @@ namespace engine::render {
 		SDL_GPUShader *depthPeelFragment = LoadShader("depth-peel.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 2);
 		SDL_GPUShader *depthLinearFragment =
 			LoadShader("depth-linearise.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		SDL_GPUShader *cameraMotionFragment =
+			LoadShader("camera-motion.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		// Nine samplers: the seven G-buffer and shadow inputs plus the two seam
 		// light-field captures - `MAX_SEAM_LIGHTS`, bound last.
@@ -593,8 +596,8 @@ namespace engine::render {
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
-			!depthPeelFragment || !depthLinearFragment || !ssaoFragment || !deferredLightingFragment ||
-			!skyFragment || !volumeFragment || !tonemapFragment) {
+			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
+			!deferredLightingFragment || !skyFragment || !volumeFragment || !tonemapFragment) {
 			return false;
 		}
 
@@ -794,15 +797,16 @@ namespace engine::render {
 
 		if (pbrSupported) {
 			DepthLinearPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R32_FLOAT);
+			CameraMotionPipeline = fullscreen(cameraMotionFragment, SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT);
 			SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			DeferredLightingPipeline =
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
-			if (DepthLinearPipeline == nullptr || SsaoPipeline == nullptr ||
-				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
-				TonemapPipeline == nullptr) {
+			if (DepthLinearPipeline == nullptr || CameraMotionPipeline == nullptr ||
+				SsaoPipeline == nullptr || DeferredLightingPipeline == nullptr || SkyPipeline == nullptr ||
+				VolumePipeline == nullptr || TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 			}
 		}
@@ -1217,6 +1221,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, gbufferFragment);
 		SDL_ReleaseGPUShader(Device, depthPeelFragment);
 		SDL_ReleaseGPUShader(Device, depthLinearFragment);
+		SDL_ReleaseGPUShader(Device, cameraMotionFragment);
 		SDL_ReleaseGPUShader(Device, ssaoFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
 		SDL_ReleaseGPUShader(Device, skyFragment);
@@ -1260,10 +1265,11 @@ namespace engine::render {
 			   PackedTransparentPipeline != nullptr && PackedMeshShadowPipeline != nullptr &&
 			   (!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
-			   (!pbrSupported || (GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
-								  DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
-								  DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
-								  VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
+			   (!pbrSupported ||
+				(GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
+				 DepthLinearPipeline != nullptr && CameraMotionPipeline != nullptr &&
+				 SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
+				 VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
 			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
 									 Lod.Select != nullptr));
 	}

@@ -361,6 +361,7 @@ namespace engine::control {
 				{"seed", {{"type", "integer"}, {"minimum", 0}}},
 				{"tick_rate", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 1000}}},
 				{"checkpoint_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+				{"branch_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 				{"temporal_history", {{"type", "string"}, {"enum", {"preserve"}}}},
 				{"base_snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
@@ -848,6 +849,76 @@ namespace engine::control {
 		Add(
 			capture("checkpoint", "Retains a restorable checkpoint when the host provides rehydration.", true)
 		);
+		Add(Tool{
+			"fork_world",
+			"Forks one retained checkpoint into an isolated, non-presented branch runtime. The parent "
+			"lifecycle revision and checkpoint identity fence the operation.",
+			[] {
+				return Schema(
+					{"instance_id",
+					 "checkpoint_id",
+					 "branch_id",
+					 "expected_tick",
+					 "expected_world_epoch",
+					 "expected_world_version",
+					 "operation_id"},
+					{"instance_id",
+					 "checkpoint_id",
+					 "branch_id",
+					 "expected_tick",
+					 "expected_world_epoch",
+					 "expected_world_version",
+					 "operation_id"}
+				);
+			},
+			[&session, ledger](const json &values, std::string &failure) -> json {
+				Request request;
+				json normalized;
+				if (!Base(values, true, request, normalized, failure) || !Only(
+																			 values,
+																			 {"instance_id",
+																			  "checkpoint_id",
+																			  "branch_id",
+																			  "expected_tick",
+																			  "expected_world_epoch",
+																			  "expected_world_version",
+																			  "operation_id"},
+																			 failure
+																		 ))
+					return nullptr;
+				const json *field = nullptr;
+				std::string branchId;
+				if (!Field(values, "checkpoint_id", field, failure) ||
+					!Text(*field, "checkpoint_id", request.CheckpointId, failure) ||
+					!Field(values, "branch_id", field, failure) ||
+					!Text(*field, "branch_id", branchId, failure))
+					return nullptr;
+				normalized["checkpoint_id"] = request.CheckpointId;
+				normalized["branch_id"] = branchId;
+				normalized["tool"] = "fork_world";
+				json replay;
+				const auto prior =
+					ledger->Replay("fork_world", request.OperationId, normalized.dump(), replay, failure);
+				if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+				if (prior == DataFactoryOperationReplay::Replay) return replay;
+				if (!Preconditions(session, request, failure)) return nullptr;
+				const world::DataFactoryReply reply = session.Fork({
+					.InstanceId = request.InstanceId,
+					.CheckpointId = request.CheckpointId,
+					.BranchId = std::move(branchId),
+					.ExpectedWorldEpoch = request.Epoch,
+					.ExpectedWorldVersion = request.Version,
+					.ExpectedTick = request.Tick,
+				});
+				json result = Reply(reply);
+				if (reply.Status != world::DataFactoryStatus::Ok)
+					failure = Error(
+						world::Describe(reply.Status), reply.Detail.empty() ? "fork refused" : reply.Detail
+					);
+				ledger->Store("fork_world", request.OperationId, normalized.dump(), result, failure);
+				return result;
+			},
+		});
 		if (tools.RenderOnly) {
 			Add(Tool{
 				"render_only",
@@ -1659,6 +1730,139 @@ namespace engine::control {
 				const world::WorldStatus entered = session.UniverseOf().Enter(
 					session.UniverseOf().Find(core::Name(barrier.InstanceId)), [&](ecs::Store &store) {
 						result = data_scene_detail::Result(script::SignedDistanceField(store, sdf), failure);
+					}
+				);
+				if (entered != world::WorldStatus::Ok && failure.empty())
+					failure = Error("validation_failed", "scene is unavailable");
+				if (!failure.empty()) return nullptr;
+				result["world_id"] = barrier.InstanceId;
+				result["lifecycle"] = {
+					{"tick", barrier.Clock.Tick},
+					{"world_epoch", barrier.WorldEpoch},
+					{"world_version", barrier.WorldVersion}
+				};
+				result["snapshot_id"] = request.SnapshotId;
+				return result;
+			}
+		});
+
+		Add(Tool{
+			"get_authored_navmesh_path",
+			"Finds a bounded authored-walkable surface route in one retained paused snapshot. A route is "
+			"returned only for supported authored geometry and a clear zero-radius corridor; every other "
+			"case is explicitly unknown.",
+			[] {
+				const json vector{
+					{"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}
+				};
+				const json lifecycle{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"tick", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_epoch", {{"type", "integer"}, {"minimum", 0}}},
+					  {"world_version", {{"type", "integer"}, {"minimum", 0}}}}},
+					{"required", {"tick", "world_epoch", "world_version"}}
+				};
+				return json{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties",
+					 {{"schema_version", {{"const", "authored-navmesh-path/v1"}}},
+					  {"world_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"lifecycle", lifecycle},
+					  {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					  {"start_metres", vector},
+					  {"goal_metres", vector},
+					  {"vertical_tolerance_metres", {{"type", "number"}, {"minimum", 0}, {"maximum", 10}}}}},
+					{"required",
+					 {"schema_version",
+					  "world_id",
+					  "lifecycle",
+					  "snapshot_id",
+					  "start_metres",
+					  "goal_metres"}}
+				};
+			},
+			[&session](const json &arguments, std::string &failure) -> json {
+				using namespace data_factory_detail;
+				if (!arguments.is_object() || !Only(
+												  arguments,
+												  {"schema_version",
+												   "world_id",
+												   "lifecycle",
+												   "snapshot_id",
+												   "start_metres",
+												   "goal_metres",
+												   "vertical_tolerance_metres"},
+												  failure
+											  ))
+					return nullptr;
+				Request request;
+				const json *field = nullptr;
+				if (!Field(arguments, "schema_version", field, failure) || !field->is_string() ||
+					field->get<std::string>() != "authored-navmesh-path/v1" ||
+					!Field(arguments, "world_id", field, failure) ||
+					!Text(*field, "world_id", request.InstanceId, failure) ||
+					!Field(arguments, "snapshot_id", field, failure) ||
+					!Text(*field, "snapshot_id", request.SnapshotId, failure)) {
+					if (failure.empty())
+						failure =
+							Error("validation_failed", "schema_version must be authored-navmesh-path/v1");
+					return nullptr;
+				}
+				const auto lifecycle = arguments.find("lifecycle");
+				if (lifecycle == arguments.end() || !lifecycle->is_object() ||
+					!Only(*lifecycle, {"tick", "world_epoch", "world_version"}, failure) ||
+					!Field(*lifecycle, "tick", field, failure) ||
+					!UInt(*field, "lifecycle.tick", request.Tick, failure) ||
+					!Field(*lifecycle, "world_epoch", field, failure) ||
+					!UInt(*field, "lifecycle.world_epoch", request.Epoch, failure) ||
+					!Field(*lifecycle, "world_version", field, failure) ||
+					!UInt(*field, "lifecycle.world_version", request.Version, failure)) {
+					if (failure.empty())
+						failure = Error(
+							"validation_failed", "lifecycle requires tick, world_epoch and world_version"
+						);
+					return nullptr;
+				}
+				script::DataSceneNavmeshPathRequest navmesh;
+				if (!arguments.contains("start_metres") || !arguments.contains("goal_metres") ||
+					!FiniteVector(arguments.at("start_metres"), navmesh.StartMetres) ||
+					!FiniteVector(arguments.at("goal_metres"), navmesh.GoalMetres)) {
+					failure =
+						Error("validation_failed", "start_metres and goal_metres must be finite vectors");
+					return nullptr;
+				}
+				if (const auto tolerance = arguments.find("vertical_tolerance_metres");
+					tolerance != arguments.end()) {
+					if (!tolerance->is_number() ||
+						!std::isfinite(navmesh.VerticalToleranceMetres = tolerance->get<float>()) ||
+						navmesh.VerticalToleranceMetres < 0.0f || navmesh.VerticalToleranceMetres > 10.0f) {
+						failure = Error(
+							"validation_failed", "vertical_tolerance_metres must be finite from 0 to 10"
+						);
+						return nullptr;
+					}
+				}
+				if (!session.OwnsWorld(request.InstanceId)) {
+					failure =
+						Error("validation_failed", "world_id is not owned by this data-factory session");
+					return nullptr;
+				}
+				if (!Preconditions(session, request, failure)) return nullptr;
+				const world::DataFactoryReply barrier =
+					session.RenderSnapshotBarrier(request.InstanceId, request.SnapshotId);
+				if (barrier.Status != world::DataFactoryStatus::Ok) {
+					failure = Error(world::Describe(barrier.Status), barrier.Detail);
+					return nullptr;
+				}
+				json result;
+				const world::WorldStatus entered = session.UniverseOf().Enter(
+					session.UniverseOf().Find(core::Name(barrier.InstanceId)), [&](ecs::Store &store) {
+						result = data_scene_detail::Result(
+							script::FindAuthoredNavmeshPath(store, navmesh), failure
+						);
 					}
 				);
 				if (entered != world::WorldStatus::Ok && failure.empty())

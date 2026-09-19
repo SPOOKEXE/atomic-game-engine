@@ -39,9 +39,12 @@ namespace {
 				.MaximumHooks = 14,
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
+				.MaximumCaptureTickets = 6,
 				.MaximumReadbackNodes = 12,
 				.MaximumRetainedBytes = 64u * 1024u * 1024u,
 				.MaximumPendingPumps = 600,
+				.SameFrameMultiCamera = true,
+				.MaximumSameFrameCameraViews = 6,
 				.Detail = "ready",
 			};
 		}
@@ -105,9 +108,12 @@ TEST_CASE("data capture capabilities carry only stable hook facts", "[script][da
 	CHECK(noise->Items.front().Text == "gaussian=rgb_linear_hdr_only");
 	CHECK(Field(*limits, "maximum_connections")->Number == 6.0);
 	CHECK(Field(*limits, "maximum_batches")->Number == 6.0);
+	CHECK(Field(*limits, "maximum_capture_tickets")->Number == 6.0);
 	CHECK(Field(*limits, "maximum_readback_nodes")->Number == 12.0);
 	CHECK(Field(*limits, "maximum_retained_bytes")->Number == 67'108'864.0);
 	CHECK(Field(*limits, "maximum_pending_pumps")->Number == 600.0);
+	CHECK(Field(*limits, "same_frame_multi_camera")->Boolean);
+	CHECK(Field(*limits, "maximum_same_frame_camera_views")->Number == 6.0);
 }
 
 TEST_CASE(

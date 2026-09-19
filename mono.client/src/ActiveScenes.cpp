@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <client/ActiveScenes.hpp>
+#include <string>
 
 namespace client {
 
@@ -14,12 +15,27 @@ namespace client {
 			if (leftName != rightName) return leftName.Text() < rightName.Text();
 			return left.Request.World.Index < right.Request.World.Index;
 		}
+
+	}
+
+	std::string CameraTemporalId(
+		const engine::core::Name &world, const engine::ecs::Store &store, engine::ecs::Entity camera
+	) {
+		const std::string path = store.GetFullName(camera);
+		if (!world.IsValid() || path.empty()) return {};
+		// The store incarnation distinguishes a restored row from an earlier row
+		// with the same authored path. The entity generation distinguishes a new
+		// binding before it can inherit the old camera's renderer history.
+		std::string id = "native/" + std::string(world.Text()) + "/" + path + "/" +
+						 std::to_string(store.Identity()) + "/" + std::to_string(camera.Id);
+		return id.size() <= 256 ? id : std::string{};
 	}
 
 	size_t ActiveSceneCollector::Collect(
 		engine::world::Universe &universe,
 		std::span<const ActiveSceneDemand> requests,
-		const engine::core::Vector2 &extent
+		const engine::core::Vector2 &extent,
+		bool frozen
 	) {
 		Demands.assign(requests.begin(), requests.end());
 		Collected.clear();
@@ -49,39 +65,46 @@ namespace client {
 		presentations.reserve(Demands.size());
 		for (const ActiveSceneDemand &demand : Demands)
 			presentations.push_back(demand.Request);
-		(void)universe.PresentMany(
-			presentations, [&](engine::world::WorldId world, engine::ecs::Store &store) {
-				auto found = std::find_if(Collected.begin(), Collected.end(), [world](const auto &scene) {
-					return scene.World == world;
-				});
-				if (found == Collected.end() || !found->Name.IsValid()) return;
-				ActiveScene &scene = *found;
-				const auto *active = store.Resource<engine::scene::ActiveCamera>();
-				if (active == nullptr || !store.Alive(active->Entity)) return;
-				const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
-				const auto *lens = store.Get<engine::scene::Camera>(active->Entity);
-				if (placement == nullptr || lens == nullptr) return;
+		const auto collect = [&](engine::world::WorldId world, engine::ecs::Store &store) {
+			auto found = std::find_if(Collected.begin(), Collected.end(), [world](const auto &scene) {
+				return scene.World == world;
+			});
+			if (found == Collected.end() || !found->Name.IsValid()) return;
+			ActiveScene &scene = *found;
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			if (active == nullptr || !store.Alive(active->Entity)) return;
+			const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
+			const auto *lens = store.Get<engine::scene::Camera>(active->Entity);
+			if (placement == nullptr || lens == nullptr) return;
 
-				engine::render::CollectWorldView(store, scene.Name, *scene.Frame);
-				scene.View.CameraFrame = placement->Frame;
-				scene.View.Camera = *lens;
-				scene.View.Portals = scene.Frame->Portals;
-				engine::render::CollectWorldCamera(store, scene.View, extent, *scene.CameraLayers);
-				if (!engine::render::BindWorldView(
-						*scene.Frame,
-						*scene.CameraLayers,
-						{.World = world.Index,
-						 .Name = scene.Name,
-						 .Identity = store.Identity(),
-						 .ContentOwner = scene.Name,
-						 .ForeignContentOwners = {},
-						 .Pipeline = scene.Pipeline},
-						scene.View
-					))
-					return;
-				scene.Camera = active->Entity;
-			}
-		);
+			engine::render::CollectWorldView(store, scene.Name, *scene.Frame);
+			scene.View.CameraFrame = placement->Frame;
+			scene.View.Camera = *lens;
+			scene.View.Portals = scene.Frame->Portals;
+			engine::render::CollectWorldCamera(store, scene.View, extent, *scene.CameraLayers);
+			if (!engine::render::BindWorldView(
+					*scene.Frame,
+					*scene.CameraLayers,
+					{.World = world.Index,
+					 .Name = scene.Name,
+					 .Identity = store.Identity(),
+					 .ContentOwner = scene.Name,
+					 .ForeignContentOwners = {},
+					 .Pipeline = scene.Pipeline},
+					scene.View
+				))
+				return;
+			scene.View.CameraTemporalId = CameraTemporalId(scene.Name, store, active->Entity);
+			scene.Camera = active->Entity;
+		};
+		if (frozen) {
+			for (const ActiveScene &scene : Collected)
+				(void)universe.Enter(scene.World, [&](engine::ecs::Store &store) {
+					collect(scene.World, store);
+				});
+		} else {
+			(void)universe.PresentMany(presentations, collect);
+		}
 		std::erase_if(Collected, [](const auto &scene) { return scene.Camera == engine::ecs::NULL_ENTITY; });
 
 		Submitted.reserve(Collected.size());
@@ -93,16 +116,27 @@ namespace client {
 	engine::render::FrameResult ActiveSceneCollector::SubmitBatch(
 		engine::world::WorldId displayedWorld,
 		const engine::render::View &displayedView,
+		std::span<const engine::render::View> captureViews,
 		uint32_t width,
 		uint32_t height,
 		bool offscreenDisplayed,
 		std::span<const engine::render::WorldContentOwner> foreignContentOwners,
-		const std::function<engine::render::FrameResult(std::span<const engine::render::View>)> &submit
+		const std::function<bool(std::span<engine::render::View>)> &prepareCaptures,
+		const std::function<engine::render::FrameResult(std::span<engine::render::View>)> &submit
 	) {
 		BatchTargets.clear();
 		BatchViews.clear();
-		BatchTargets.reserve(Collected.size() + (offscreenDisplayed ? 1 : 0));
-		BatchViews.reserve(Collected.size() + 1);
+		BatchTargets.reserve(captureViews.size() + Collected.size() + (offscreenDisplayed ? 1 : 0));
+		BatchViews.reserve(captureViews.size() + Collected.size() + 1);
+		for (const engine::render::View &capture : captureViews) {
+			BatchTargets.push_back({std::max(width, 1u), std::max(height, 1u)});
+			engine::render::View view = capture;
+			view.Target = &BatchTargets.back();
+			view.Slot = BatchViews.size() + 1;
+			view.ForeignContentOwners = foreignContentOwners;
+			BatchViews.push_back(view);
+		}
+		if (prepareCaptures && !prepareCaptures(std::span(BatchViews).first(captureViews.size()))) return {};
 		for (const ActiveScene &scene : Collected) {
 			if (scene.World == displayedWorld) continue;
 			BatchTargets.push_back({std::max(width, 1u), std::max(height, 1u)});

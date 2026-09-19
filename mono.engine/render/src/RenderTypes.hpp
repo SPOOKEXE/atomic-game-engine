@@ -253,6 +253,15 @@ namespace engine::render {
 		glm::vec4 VolumeCount{};
 	};
 
+	// The two camera transforms that define the bounded reprojection capture.
+	// Object transforms are deliberately absent: this pass reports camera motion
+	// over the current visible opaque or masked depth only.
+	struct CameraMotionUniforms {
+		glm::mat4 InverseViewProjection{1.0f};
+		glm::mat4 PreviousViewProjection{1.0f};
+		glm::vec4 Target{};
+	};
+
 	// Fixed fragment data for one bounded group of world-space image lenses.
 	// Scene colour and linear depth are always the first two sampler slots; a
 	// lens program gets no route to any other resource or render target.

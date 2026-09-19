@@ -21,7 +21,7 @@
 #include <vector>
 
 TEST_SUITE_ID("studio.datafactoryhost")
-TEST_DEPENDS("engine.world.datafactory")
+TEST_DEPENDS("engine.world.data-factory")
 TEST_DEPENDS("engine.control.datascene")
 
 namespace {

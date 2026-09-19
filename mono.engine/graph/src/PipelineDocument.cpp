@@ -891,7 +891,7 @@ namespace engine::graph {
 		ecs::Components::Register<PipelineSet>("graph.PipelineSet");
 	}
 
-	PipelineDocument DefaultPbrDocument() {
+	static PipelineDocument BuildDefaultPbrDocument(bool cameraMotion) {
 		PipelineDocument document;
 
 		const auto resource = [&document](
@@ -964,6 +964,7 @@ namespace engine::graph {
 		resource("part-ids", ResourceKind::Colour, ResourceFormat::R32U);
 		resource("depth", ResourceKind::Depth, ResourceFormat::D24S8);
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F);
+		if (cameraMotion) resource("camera-motion-vectors", ResourceKind::Colour, ResourceFormat::RG16F);
 		resource("second-surface-z", ResourceKind::Depth, ResourceFormat::D24S8);
 		resource("second-surface-depth", ResourceKind::Colour, ResourceFormat::R32F);
 		resource("second-surface-validity", ResourceKind::Colour, ResourceFormat::R8);
@@ -1063,6 +1064,13 @@ namespace engine::graph {
 		node("depth-linearise", NodeScope::View);
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Writes, "linear-depth", "linear");
+		if (cameraMotion) {
+			// The G-buffer already uses all eight portable colour attachments.
+			// Capture computes camera reprojection in a separate pass.
+			node("camera-motion", NodeScope::View);
+			touches(EditKind::Reads, "depth", "depth");
+			touches(EditKind::Writes, "camera-motion-vectors", "velocity");
+		}
 
 		node("ssao", NodeScope::View);
 		touches(EditKind::Reads, "linear-depth", "depth");
@@ -1142,6 +1150,10 @@ namespace engine::graph {
 		touches(EditKind::Reads, "composed-image", "image");
 
 		return document;
+	}
+
+	PipelineDocument DefaultPbrDocument() {
+		return BuildDefaultPbrDocument(false);
 	}
 
 	PipelineDocument RaytraceDemoDocument() {
@@ -1459,7 +1471,7 @@ namespace engine::graph {
 	}
 
 	PipelineDocument DefaultPbrDataCaptureDocument() {
-		PipelineDocument document = DefaultPbrDocument();
+		PipelineDocument document = BuildDefaultPbrDocument(true);
 		document.Record({.Kind = EditKind::Enable, .Name = core::Name("depth-peel"), .Enabled = true});
 		document.Record(
 			{.Kind = EditKind::AddNode,
@@ -1497,6 +1509,17 @@ namespace engine::graph {
 		);
 		document.Record(
 			{.Kind = EditKind::Reads, .Target = core::Name("mesh-uv"), .Key = core::Name("source")}
+		);
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-motion-vectors"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads,
+			 .Target = core::Name("camera-motion-vectors"),
+			 .Key = core::Name("source")}
 		);
 		// SSAO is a half-size R8 screen-space estimate, so it has its own source-only
 		// capture rather than pretending it shares the full-size lit attachment.

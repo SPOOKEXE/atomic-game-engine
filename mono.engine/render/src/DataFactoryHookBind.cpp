@@ -16,28 +16,31 @@
 
 namespace engine::render {
 	RenderObservationContext DataFactoryObservation(
-		const ViewRecording &recording, const graph::RunContext &context, core::Name pipeline, size_t viewSlot
+		const ViewRecording &recording,
+		const graph::RunContext &context,
+		core::Name pipeline,
+		size_t viewSlot,
+		const DataCaptureSource &captureSource
 	) {
 		RenderObservationContext observation;
 		observation.Pipeline = pipeline;
 		observation.Node = context.Name;
-		observation.WorldName = recording.State->ActiveDataCaptureSource.WorldName;
+		observation.WorldName = captureSource.WorldName;
 		observation.ViewSlot = viewSlot;
-		observation.SnapshotId = recording.State->ActiveDataCaptureSource.SnapshotId;
+		observation.SnapshotId = captureSource.SnapshotId;
 		observation.Frame = recording.State->FrameCounter;
 		observation.PipelineRevision = recording.Pipeline != nullptr ? recording.Pipeline->Revision : 0;
-		const glm::mat4 camera = recording.State->ActiveDataCaptureSource.CameraFrame.ToMatrix();
+		const glm::mat4 camera = captureSource.CameraFrame.ToMatrix();
 		for (size_t column = 0; column < 4; ++column)
 			for (size_t row = 0; row < 4; ++row)
 				observation.Camera.WorldFromCamera[column * 4 + row] = camera[column][row];
-		observation.Camera.ProjectionAvailable = recording.State->ActiveDataCaptureSource.ProjectionAvailable;
-		observation.Camera.Projection = recording.State->ActiveDataCaptureSource.Projection;
-		observation.Camera.FieldOfViewRadians =
-			recording.State->ActiveDataCaptureSource.Camera.FieldOfViewRadians;
-		observation.Camera.NearPlane = recording.State->ActiveDataCaptureSource.Camera.NearPlane;
-		observation.Camera.FarPlane = recording.State->ActiveDataCaptureSource.Camera.FarPlane;
-		observation.Camera.Width = recording.State->ActiveDataCaptureSource.Width;
-		observation.Camera.Height = recording.State->ActiveDataCaptureSource.Height;
+		observation.Camera.ProjectionAvailable = captureSource.ProjectionAvailable;
+		observation.Camera.Projection = captureSource.Projection;
+		observation.Camera.FieldOfViewRadians = captureSource.Camera.FieldOfViewRadians;
+		observation.Camera.NearPlane = captureSource.Camera.NearPlane;
+		observation.Camera.FarPlane = captureSource.Camera.FarPlane;
+		observation.Camera.Width = captureSource.Width;
+		observation.Camera.Height = captureSource.Height;
 		const auto nameOf = [&recording](graph::ResourceId resource) {
 			const graph::ResourceDesc *desc = recording.Pipeline->Graph.FindResource(resource);
 			return desc != nullptr ? desc->Name : core::Name{};
@@ -632,8 +635,7 @@ namespace engine::render {
 	}
 
 	void DataFactoryHookBind::RegisterBuiltInDataCaptureHooks() {
-		for (size_t index = 0; index <= static_cast<size_t>(DataCaptureChannel::SecondSurfaceValidity);
-			 ++index) {
+		for (size_t index = 0; index <= static_cast<size_t>(DataCaptureChannel::MotionVectors); ++index) {
 			const auto channel = static_cast<DataCaptureChannel>(index);
 			const std::string name = "data_capture." + std::string(DataCaptureChannelName(channel));
 			(void)RegisterHook({

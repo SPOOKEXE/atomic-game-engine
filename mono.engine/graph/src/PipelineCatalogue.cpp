@@ -407,6 +407,7 @@ namespace engine::graph {
 				 "gbuffer",
 				 "depth-peel",
 				 "depth-linearise",
+				 "camera-motion",
 				 "depth-compose",
 				 "ambient-response",
 				 "ambient-merge",
@@ -774,6 +775,17 @@ namespace engine::graph {
 			 {{"velocity", K::Colour, RG16, true, "Per-pixel screen motion."}},
 			 "Where every pixel was last frame. Feeds temporal resolve and motion blur.",
 			 true},
+
+			{"camera-motion",
+			 "Camera Motion",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, D24, true, "Visible opaque hardware depth."}},
+			 {{"velocity", K::Colour, RG16, true, "Current to preceding camera pixel displacement."}},
+			 "Reprojects visible static opaque or masked geometry through the preceding completed camera. "
+			 "The first frame and a changed viewport extent have no temporal sample.",
+			 false,
+			 "camera-motion.frag"},
 
 			{"transparent",
 			 "Transparent",

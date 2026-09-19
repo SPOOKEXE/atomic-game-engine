@@ -144,6 +144,35 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 }
 
 TEST_CASE(
+	"the data capture document names camera reprojection separately from optical flow",
+	"[graph][data-capture]"
+) {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(
+		Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok
+	);
+	const engine::graph::Node *motion = nullptr;
+	const engine::graph::Node *capture = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("camera-motion")) motion = node;
+		if (node && node->Name == Name("data-capture-motion-vectors")) capture = node;
+	}
+	REQUIRE(motion != nullptr);
+	CHECK(motion->Kind == Name("camera-motion"));
+	CHECK(motion->ReadPorts == std::vector<Name>{Name("depth")});
+	CHECK(motion->WritePorts == std::vector<Name>{Name("velocity")});
+	REQUIRE(capture != nullptr);
+	CHECK(capture->Kind == Name("capture"));
+	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
+	const auto *vectors = graph.FindResource(capture->Reads.front());
+	REQUIRE(vectors != nullptr);
+	CHECK(vectors->Name == Name("camera-motion-vectors"));
+	CHECK(vectors->Format == engine::graph::ResourceFormat::RG16F);
+}
+
+TEST_CASE(
 	"the data capture document reads exact visible mesh UVs as compact half floats", "[graph][data-capture]"
 ) {
 	RenderGraph graph;

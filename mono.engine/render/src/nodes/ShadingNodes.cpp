@@ -372,6 +372,76 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("camera-motion"), [this](const graph::RunContext &context) {
+			if (context.Reads.size() != 1 || context.Writes.size() != 1 || Pbr == nullptr) return false;
+			const auto depth = GraphTexture(context.Reads.front(), context, false);
+			const auto target = GraphTexture(context.Writes.front(), context, true);
+			if (!depth.IsValid() || !target.IsValid() || depth.Format != State->DepthFormat ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT || depth.Width != target.Width ||
+				depth.Height != target.Height)
+				return false;
+			Impl::PbrSlot &pbr = *Pbr;
+			const bool validIdentity = Request.Source != nullptr &&
+									   !Request.Source->CameraTemporalId.empty() &&
+									   Request.Source->CameraTemporalId.size() <= 256 &&
+									   Request.Source->CameraTemporalId.find('\0') == std::string::npos &&
+									   Request.Source->CameraTemporalSequence != 0;
+			const bool history =
+				validIdentity && !Request.Source->CameraCut && pbr.CameraMotionHistory &&
+				pbr.PreviousCameraMotionWorld == Request.Source->World &&
+				pbr.PreviousCameraMotionWorldName == Request.Source->WorldName &&
+				pbr.PreviousCameraTemporalId == Request.Source->CameraTemporalId &&
+				pbr.PreviousCameraTemporalSequence + 1 == Request.Source->CameraTemporalSequence;
+			static int debugMotionSamples = 0;
+			if (Request.Source != nullptr && !Request.Source->CameraTemporalId.empty() &&
+				debugMotionSamples++ < 8)
+				ENGINE_WARN(
+					"motion debug frame {} id {} seq {} cut {} previous {} prevseq {} history {}",
+					State->FrameCounter,
+					Request.Source == nullptr ? "null" : Request.Source->CameraTemporalId,
+					Request.Source == nullptr ? 0 : Request.Source->CameraTemporalSequence,
+					Request.Source == nullptr ? false : Request.Source->CameraCut,
+					pbr.PreviousCameraMotionFrame,
+					pbr.PreviousCameraTemporalSequence,
+					history
+				);
+			CameraMotionUniforms uniforms{
+				Uniforms.InverseViewProjection,
+				history ? pbr.PreviousCameraMotionViewProjection : Matrices.ViewProjection,
+				glm::vec4{
+					float(target.Width),
+					float(target.Height),
+					float(SceneWidth) / float(depth.Width),
+					float(SceneHeight) / float(depth.Height)
+				}
+			};
+			const SDL_GPUTextureSamplerBinding binding{depth.Texture, Sampler};
+			Fullscreen(
+				context.Name,
+				State->CameraMotionPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				std::span(&binding, 1),
+				nullptr,
+				nullptr,
+				SDL_FColor{0, 0, 0, 0},
+				&uniforms,
+				sizeof(uniforms)
+			);
+			pbr.CameraMotionProduced = history;
+			pbr.CameraMotionSourceFrame = history ? pbr.PreviousCameraMotionFrame : 0;
+			pbr.PreviousCameraMotionViewProjection = Matrices.ViewProjection;
+			pbr.PreviousCameraMotionFrame = State->FrameCounter;
+			pbr.PreviousCameraMotionWorld = Request.Source != nullptr ? Request.Source->World : 0;
+			pbr.PreviousCameraMotionWorldName =
+				Request.Source != nullptr ? Request.Source->WorldName : core::Name{};
+			pbr.PreviousCameraTemporalId = validIdentity ? Request.Source->CameraTemporalId : "";
+			pbr.PreviousCameraTemporalSequence = validIdentity ? Request.Source->CameraTemporalSequence : 0;
+			pbr.CameraMotionHistory = true;
+			return true;
+		});
+
 		// The authored depth hierarchy: the same pyramid the occlusion cull
 		// seeds mid-gbuffer, rebuilt here over the *finished* depth so
 		// screen-space consumers walk a pyramid that saw every opaque draw.

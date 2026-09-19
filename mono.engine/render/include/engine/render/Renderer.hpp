@@ -683,6 +683,12 @@ namespace engine::render {
 		// capture only becomes Ready when this exact identity reaches its graph
 		// capture node; an empty value is intentionally not a data-factory frame.
 		std::string SnapshotId;
+		// Identity and ordering supplied by the completed render-sample producer.
+		// Motion capture refuses history when this is empty, a sequence is skipped,
+		// or CameraCut marks a restore, rebinding, or projection discontinuity.
+		std::string CameraTemporalId;
+		uint64_t CameraTemporalSequence = 0;
+		bool CameraCut = false;
 		//@}
 
 		// Explicit clip-space projection for a fitted or portal capture. Uses
@@ -714,6 +720,9 @@ namespace engine::render {
 
 		// Which persistent renderer target bank this view owns.
 		size_t Slot = 0;
+		// Nonzero only for one bridge-coordinated capture group. It keeps a
+		// generated physical slot from admitting an unrelated logical-slot ticket.
+		uint64_t CaptureGroup = 0;
 
 		// A stable key shared only by views of the same logical world.
 		uint64_t World = 0;

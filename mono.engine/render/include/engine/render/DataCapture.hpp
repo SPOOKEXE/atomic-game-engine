@@ -133,7 +133,9 @@ namespace engine::render {
 										: channel == DataCaptureChannel::SecondSurfaceDepth ||
 												channel == DataCaptureChannel::SecondSurfaceValidity
 											? "-second-surface"
-											: "";
+										: channel == DataCaptureChannel::MotionVectors ? "-motion-vectors"
+										: channel == DataCaptureChannel::OpticalFlow   ? "-optical-flow"
+																					   : "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 
@@ -191,6 +193,9 @@ namespace engine::render {
 		// Unavailable state for an unrecognised R8 source.
 		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
 		std::string Provenance;
+		// Renderer-local preceding frame used by a verified camera-motion plane.
+		// It is absent for non-temporal planes and cannot be compared across renderers.
+		std::optional<uint64_t> PreviousCameraMotionFrame;
 		// BLAKE3-256 of Bytes. It is zero until this plane is Ready.
 		assets::ContentHash Hash;
 		std::vector<std::byte> Bytes;

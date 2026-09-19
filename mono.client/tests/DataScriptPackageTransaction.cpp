@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <client/DataFactoryRehydrator.hpp>
 #include <client/Scene.hpp>
 #include <client/WorldSystems.hpp>
 #include <cstddef>
@@ -575,4 +576,112 @@ TEST_CASE(
 	CHECK(result.Ran);
 	CHECK(packageDestroyed);
 	CHECK(discardedAfterDestroy);
+}
+
+TEST_CASE(
+	"client data-factory rehydrator restores a nonzero-tick factory world and binds its fresh runtime",
+	"[client][data-factory]"
+) {
+	Universe worlds;
+	const WorldId world = worlds.Create({.Name = engine::core::Name(INSTANCE_ID)});
+	REQUIRE(world.IsValid());
+	worlds.Enter(world, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+		client::InstallPresentation(store, systems, 16);
+		client::InstallClientWorldSystems(store, systems);
+		REQUIRE(client::EnsureLocalPlayer(store) != engine::ecs::NULL_ENTITY);
+		(void)client::RestoreDefaultCameraMovement(store, systems);
+		(void)client::InstallDefaultCamera(store, systems);
+		REQUIRE(engine::scene::SetViewportSize(store, 640, 480));
+	});
+
+	DataFactorySession session(worlds);
+	client::DataFactoryRuntimeList runtimes;
+	client::DataFactoryRehydrator rehydrator(worlds, runtimes, 16, 640, 480, {}, {});
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrator({
+		.Prepare = [&rehydrator](
+					   Universe &candidate, WorldId candidateWorld, std::string &detail
+				   ) { return rehydrator.Prepare(candidate, candidateWorld, detail); },
+		.Commit = [&rehydrator]() noexcept { rehydrator.Commit(); },
+		.Abort = [&rehydrator]() noexcept { rehydrator.Abort(); },
+	});
+
+	REQUIRE(session.Pause(INSTANCE_ID, DataFactoryPauseScope::AllSystems, 0).Status == DataFactoryStatus::Ok);
+	for (uint64_t tick = 0; tick < 2; ++tick) {
+		const auto before = session.Inspect(INSTANCE_ID);
+		REQUIRE(
+			session.Step(INSTANCE_ID, engine::world::DataFactoryInterval{}, tick, before.WorldVersion)
+				.Status == DataFactoryStatus::Ok
+		);
+	}
+	engine::core::CFrame checkpointCamera;
+	worlds.Enter(world, [&checkpointCamera](const engine::ecs::Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *transform = store.Get<engine::scene::Transform>(active->Entity);
+		REQUIRE(transform != nullptr);
+		checkpointCamera = transform->Frame;
+	});
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint(INSTANCE_ID, checkpoint).Status == DataFactoryStatus::Ok);
+	const auto beforeRestore = session.Inspect(INSTANCE_ID);
+	REQUIRE(
+		session
+			.Step(
+				INSTANCE_ID,
+				engine::world::DataFactoryInterval{},
+				beforeRestore.Clock.Tick,
+				beforeRestore.WorldVersion
+			)
+			.Status == DataFactoryStatus::Ok
+	);
+
+	const auto restored = session.Restore(INSTANCE_ID, checkpoint);
+	REQUIRE(restored.Status == DataFactoryStatus::Ok);
+	CHECK(restored.Clock.Tick == 2);
+	const WorldId restoredWorld = worlds.Find(engine::core::Name(INSTANCE_ID));
+	worlds.Enter(restoredWorld, [checkpointCamera](const engine::ecs::Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *transform = store.Get<engine::scene::Transform>(active->Entity);
+		REQUIRE(transform != nullptr);
+		CHECK(transform->Frame.Position.X == checkpointCamera.Position.X);
+		CHECK(transform->Frame.Position.Y == checkpointCamera.Position.Y);
+		CHECK(transform->Frame.Position.Z == checkpointCamera.Position.Z);
+		CHECK(transform->Frame.QuaternionX == checkpointCamera.QuaternionX);
+		CHECK(transform->Frame.QuaternionY == checkpointCamera.QuaternionY);
+		CHECK(transform->Frame.QuaternionZ == checkpointCamera.QuaternionZ);
+		CHECK(transform->Frame.QuaternionW == checkpointCamera.QuaternionW);
+	});
+	REQUIRE(runtimes.size() == 1);
+	const std::shared_ptr<engine::script::Runtime> restoredRuntime = runtimes.front().second;
+	engine::ecs::Store *restoredStore = nullptr;
+	worlds.Enter(restoredWorld, [&restoredStore](engine::ecs::Store &store) { restoredStore = &store; });
+	CHECK(&runtimes.front().second->World() == restoredStore);
+
+	const auto beforeSeekStep = session.Inspect(INSTANCE_ID);
+	REQUIRE(
+		session
+			.Step(
+				INSTANCE_ID,
+				engine::world::DataFactoryInterval{},
+				beforeSeekStep.Clock.Tick,
+				beforeSeekStep.WorldVersion
+			)
+			.Status == DataFactoryStatus::Ok
+	);
+	const auto beforeSeek = session.Inspect(INSTANCE_ID);
+	const auto sought = session.SeekBackward(INSTANCE_ID, 2, beforeSeek.Clock.Tick, beforeSeek.WorldVersion);
+	REQUIRE(sought.Status == DataFactoryStatus::Ok);
+	CHECK(sought.Clock.Tick == 2);
+	REQUIRE(runtimes.size() == 1);
+	CHECK(runtimes.front().second != restoredRuntime);
+	const WorldId soughtWorld = worlds.Find(engine::core::Name(INSTANCE_ID));
+	engine::ecs::Store *soughtStore = nullptr;
+	worlds.Enter(soughtWorld, [&soughtStore](engine::ecs::Store &store) { soughtStore = &store; });
+	CHECK(&runtimes.front().second->World() == soughtStore);
+
+	std::string barrierSnapshot;
+	REQUIRE(session.Snapshot(INSTANCE_ID, barrierSnapshot).Status == DataFactoryStatus::Ok);
+	CHECK(session.RenderSnapshotBarrier(INSTANCE_ID, barrierSnapshot).Status == DataFactoryStatus::Ok);
 }

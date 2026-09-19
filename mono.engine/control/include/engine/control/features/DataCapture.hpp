@@ -35,6 +35,9 @@ namespace engine::control {
 		inline constexpr size_t MAXIMUM_OPTION_TEXT = 256;
 		inline constexpr size_t MAXIMUM_CHANNEL_NAME = 64;
 		inline constexpr size_t MAXIMUM_CHANNELS = 12;
+		// ScriptDataCaptureBridge owns six retained ticket slots. The MCP bound must
+		// match that admission limit rather than the separate hook-batch limit.
+		inline constexpr size_t MAXIMUM_MULTICAMERA_VIEWS = 6;
 		inline constexpr size_t MAXIMUM_RANGE_BYTES = 1024 * 1024;
 
 		inline std::string Error(std::string_view code, std::string_view detail) {
@@ -205,6 +208,66 @@ namespace engine::control {
 				return false;
 			}
 			request.TemporalHistory = std::move(history);
+			return true;
+		}
+
+		inline bool MultiCameraOptions(
+			const json &options,
+			const json &cameras,
+			std::vector<script::DataCaptureBridgeRequest> &requests,
+			std::string &failure
+		) {
+			if (!Only(
+					options,
+					{"schema_version",
+					 "channels",
+					 "pipeline",
+					 "capture_node",
+					 "temporal_history",
+					 "storage_profile",
+					 "output",
+					 "include_scene_data",
+					 "include_exact_masks",
+					 "coordinate_space",
+					 "noise_mode",
+					 "noise_seed",
+					 "noise_sigma"},
+					failure
+				))
+				return false;
+			if (!cameras.is_array() || cameras.size() < 2 || cameras.size() > MAXIMUM_MULTICAMERA_VIEWS) {
+				failure = Error("validation_failed", "cameras must contain 2 to 6 views");
+				return false;
+			}
+			std::vector<std::string> cameraIds;
+			requests.clear();
+			requests.reserve(cameras.size());
+			for (const json &camera : cameras) {
+				if (!Only(camera, {"camera_id", "view_slot"}, failure)) return false;
+				const json *field = nullptr;
+				std::string cameraId;
+				uint64_t viewSlot = 0;
+				if (!Field(camera, "camera_id", field, failure) ||
+					!OptionText(*field, "camera.camera_id", MAXIMUM_OPTION_TEXT, cameraId, failure) ||
+					!Field(camera, "view_slot", field, failure) ||
+					!UInt(*field, "camera.view_slot", viewSlot, failure) ||
+					viewSlot > std::numeric_limits<uint32_t>::max()) {
+					if (failure.empty())
+						failure = Error("validation_failed", "camera.view_slot must fit uint32");
+					return false;
+				}
+				if (std::find(cameraIds.begin(), cameraIds.end(), cameraId) != cameraIds.end()) {
+					failure = Error("validation_failed", "cameras must use distinct camera_id values");
+					return false;
+				}
+				json oneOptions = options;
+				oneOptions["camera_id"] = cameraId;
+				oneOptions["view_slot"] = viewSlot;
+				script::DataCaptureBridgeRequest request;
+				if (!CaptureBundleOptions(oneOptions, request, failure)) return false;
+				cameraIds.push_back(std::move(cameraId));
+				requests.push_back(std::move(request));
+			}
 			return true;
 		}
 
@@ -781,6 +844,163 @@ namespace engine::control {
 					{"snapshot_id", request.SnapshotId},
 				};
 				ledger->Store("capture_bundle", operation, normalizedText, result, {});
+				return result;
+			},
+		});
+
+		Add(Tool{
+			"capture_multi_camera",
+			"Queues 2 to 6 named camera captures in one renderer frame from one exact paused world "
+			"snapshot. The shared renderer frame does not make simulation stepping atomic.",
+			[] {
+				const json optionProperties{
+					{"schema_version", {{"type", "string"}}},
+					{"channels", {{"type", "array"}, {"minItems", 1}, {"maxItems", MAXIMUM_CHANNELS}}},
+					{"pipeline", {{"type", "string"}}},
+					{"capture_node", {{"type", "string"}}},
+					{"temporal_history", {{"type", "string"}}},
+					{"storage_profile", {{"type", "string"}}},
+					{"output", {{"type", "string"}}},
+					{"include_scene_data", {{"type", "boolean"}}},
+					{"include_exact_masks", {{"type", "boolean"}}},
+					{"coordinate_space", {{"type", "string"}}},
+					{"noise_mode", {{"type", "string"}}},
+					{"noise_seed", {{"type", "integer"}, {"minimum", 0}}},
+					{"noise_sigma", {{"type", "number"}, {"minimum", 0}, {"maximum", 64}}},
+				};
+				return Schema(
+					{{"instance_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"cameras",
+					  {{"type", "array"},
+					   {"minItems", 2},
+					   {"maxItems", MAXIMUM_MULTICAMERA_VIEWS},
+					   {"items", {{"type", "object"}}}}},
+					 {"options",
+					  {{"type", "object"},
+					   {"properties", optionProperties},
+					   {"additionalProperties", false}}},
+					 {"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"expected_tick", {{"type", "integer"}, {"minimum", 0}}},
+					 {"expected_world_epoch", {{"type", "integer"}, {"minimum", 0}}},
+					 {"expected_world_version", {{"type", "integer"}, {"minimum", 0}}}},
+					{"instance_id",
+					 "snapshot_id",
+					 "cameras",
+					 "options",
+					 "operation_id",
+					 "expected_tick",
+					 "expected_world_epoch",
+					 "expected_world_version"}
+				);
+			},
+			[&session, bridge, ledger](const json &values, std::string &failure) -> json {
+				if (!Only(
+						values,
+						{"instance_id",
+						 "snapshot_id",
+						 "cameras",
+						 "options",
+						 "operation_id",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version"},
+						failure
+					))
+					return nullptr;
+				const json *field = nullptr;
+				std::string instance, snapshot, operation;
+				std::vector<script::DataCaptureBridgeRequest> requests;
+				if (!Field(values, "instance_id", field, failure) ||
+					!Text(*field, "instance_id", instance, failure) ||
+					!Field(values, "snapshot_id", field, failure) ||
+					!Text(*field, "snapshot_id", snapshot, failure) ||
+					!Field(values, "operation_id", field, failure) ||
+					!Text(*field, "operation_id", operation, failure) ||
+					!Field(values, "options", field, failure) || !Field(values, "cameras", field, failure))
+					return nullptr;
+				const json &cameras = *field;
+				const json &options = values.at("options");
+				if (!MultiCameraOptions(options, cameras, requests, failure)) return nullptr;
+				for (script::DataCaptureBridgeRequest &request : requests) {
+					request.InstanceId = instance;
+					request.SnapshotId = snapshot;
+				}
+				json normalized = values;
+				normalized["tool"] = "capture_multi_camera";
+				const std::string normalizedText = normalized.dump();
+				json replay;
+				const auto prior =
+					ledger->Replay("capture_multi_camera", operation, normalizedText, replay, failure);
+				if (prior == DataFactoryOperationReplay::Conflict) return nullptr;
+				if (prior == DataFactoryOperationReplay::Replay) return replay;
+				if (!Versions(session, instance, values, failure)) {
+					json result = VersionReply(session, instance);
+					ledger->Store("capture_multi_camera", operation, normalizedText, result, failure);
+					return result;
+				}
+				const script::DataCaptureBridgeCapabilities capabilities = bridge->Capabilities();
+				if (!capabilities.SameFrameMultiCamera) {
+					failure =
+						Error("capability_unsupported", "same-frame multi-camera capture is unavailable");
+					json result = VersionReply(session, instance);
+					ledger->Store("capture_multi_camera", operation, normalizedText, result, failure);
+					return result;
+				}
+				if (requests.size() > capabilities.MaximumCaptureTickets ||
+					requests.size() > capabilities.MaximumSameFrameCameraViews) {
+					failure = Error(
+						"capability_unsupported", "requested camera count exceeds same-frame camera capacity"
+					);
+					json result = VersionReply(session, instance);
+					ledger->Store("capture_multi_camera", operation, normalizedText, result, failure);
+					return result;
+				}
+				for (const script::DataCaptureBridgeRequest &request : requests) {
+					if (request.CameraId != "current_view" && !capabilities.NamedCameraSelection) {
+						failure = Error("capability_unsupported", "named camera selection is unavailable");
+						json result = VersionReply(session, instance);
+						ledger->Store("capture_multi_camera", operation, normalizedText, result, failure);
+						return result;
+					}
+				}
+				std::vector<uint64_t> tickets(requests.size());
+				std::string detail;
+				if (!bridge->QueueGroup(instance, requests, tickets, detail)) {
+					failure = Error(
+						"capture_refused", detail.empty() ? "capture bridge refused camera group" : detail
+					);
+					json result = VersionReply(session, instance);
+					ledger->Store("capture_multi_camera", operation, normalizedText, result, failure);
+					return result;
+				}
+				json captures = json::array();
+				for (size_t index = 0; index < requests.size(); ++index) {
+					const uint64_t ticket = tickets[index];
+					if (ticket == 0 || std::find(tickets.begin(), tickets.begin() + index, ticket) !=
+										   tickets.begin() + index) {
+						for (const uint64_t queued : tickets)
+							if (queued != 0) bridge->Cancel(instance, queued);
+						failure = Error("capture_refused", "capture bridge returned an invalid ticket");
+						json result = VersionReply(session, instance);
+						ledger->Store("capture_multi_camera", operation, normalizedText, result, failure);
+						return result;
+					}
+					const script::DataCaptureBridgeRequest &request = requests[index];
+					captures.push_back(
+						{{"ticket", ticket}, {"camera_id", request.CameraId}, {"view_slot", request.ViewSlot}}
+					);
+				}
+				json result{
+					{"status", "coordinated"},
+					{"atomic", false},
+					{"atomicity", "same_renderer_frame_not_simulation_atomic"},
+					{"same_renderer_frame", true},
+					{"instance_id", instance},
+					{"snapshot_id", snapshot},
+					{"captures", std::move(captures)},
+				};
+				ledger->Store("capture_multi_camera", operation, normalizedText, result, {});
 				return result;
 			},
 		});

@@ -52,6 +52,7 @@
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
 #include <client/DataAudioObservation.hpp>
+#include <client/DataFactoryRehydrator.hpp>
 #include <client/DataFactoryRenderOnly.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
@@ -155,6 +156,7 @@ namespace client {
 		void PumpEvents();
 		void Step();
 		void CaptureFrame(const engine::render::View &view, engine::world::WorldId inputWorld);
+		void StampCameraTemporalSamples(std::span<engine::render::View> views);
 		void SubmitTeleportRequests(double nowSeconds);
 		// Exit code for a run whose heap kept climbing, and for one that was
 		// asked to check and could not.
@@ -594,6 +596,7 @@ namespace client {
 		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
 		uint64_t DataFactoryStoreIdentity = 0;
 		engine::world::WorldId DataFactoryWorld;
+		std::unique_ptr<DataFactoryRehydrator> FactoryRehydrator;
 		std::shared_ptr<DataAudioObservationHost> DataAudio;
 		uint64_t DataAudioEpoch = 0;
 		data_factory_render_only::Queue DataFactoryRenderOnly;
@@ -625,7 +628,7 @@ namespace client {
 		// only line up on the path that fills both. `BuildDemoWorlds` fills one
 		// of them, so an index into the other would have been right until
 		// somebody ran the client without `--game`.
-		std::vector<std::pair<engine::world::WorldId, std::shared_ptr<engine::script::Runtime>>> Runtimes;
+		DataFactoryRuntimeList Runtimes;
 		engine::script::HostCallback DataCaptureDriverCallback;
 		std::optional<uint64_t> DataCaptureDriverTicket;
 		bool DataCaptureDriverCancelling = false;
@@ -878,6 +881,14 @@ namespace client {
 		uint64_t UpdateIterations = 0;
 		uint64_t PresentationOpportunities = 0;
 		uint64_t UnchangedPresentationsSkipped = 0;
+
+		struct CameraTemporalSample {
+			uint64_t WorldEpoch = 0;
+			uint64_t Projection = 0;
+			uint64_t Sequence = 0;
+		};
+		std::unordered_map<std::string, CameraTemporalSample> CameraTemporalSamples;
+		std::unordered_map<size_t, std::string> CameraTemporalSources;
 
 		// The audio device, when one opened. Null runs silently.
 		std::unique_ptr<engine::audio::Device> Sound;

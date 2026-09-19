@@ -1184,7 +1184,8 @@ TEST_CASE(
 	CHECK_FALSE(renderer.RequestResourceImage(absent));
 	absent = request(1);
 	absent.ViewSlot = 3;
-	CHECK_FALSE(renderer.RequestResourceImage(absent));
+	REQUIRE(renderer.RequestResourceImage(absent));
+	REQUIRE(renderer.CancelResourceImage(absent.Token));
 	REQUIRE(renderer.RequestResourceImage(request(99)));
 	REQUIRE(renderer.RequestResourceImage(request(98)));
 	for (uint64_t token = 1; token <= 10; token++) {
@@ -1337,6 +1338,75 @@ TEST_CASE(
 	REQUIRE(renderer.RequestResourceImage(request(21)));
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
 	CHECK(AwaitImages(renderer, 1).front().Status == render::ResourceImageStatus::Ok);
+}
+
+TEST_CASE(
+	"an unpinned frame capture serves every requested view in one batch", "[render][gpu][resourceimage][.]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	InstallImageCapture(renderer);
+
+	render::SceneTarget firstTarget{35, 19};
+	render::SceneTarget secondTarget{65, 37};
+	std::array<render::View, 2> views;
+	views[0].Pipeline = core::Name("image-export-pipeline");
+	views[0].Target = &firstTarget;
+	views[0].Slot = 0;
+	views[0].WorldName = core::Name("capture/first");
+	views[0].SnapshotId = "capture-first";
+	views[0].CameraFrame.Position = {1, 2, 3};
+	views[1].Pipeline = views[0].Pipeline;
+	views[1].Target = &secondTarget;
+	views[1].Slot = 1;
+	views[1].WorldName = core::Name("capture/second");
+	views[1].SnapshotId = "capture-second";
+	views[1].CameraFrame.Position = {4, 5, 6};
+
+	const core::Name capture("image-export");
+	const render::ResourceImageRequest first{
+		.Token = 1,
+		.Pipeline = views[0].Pipeline,
+		.Node = capture,
+		.ViewSlot = views[0].Slot,
+		.ExpectedSnapshotId = views[0].SnapshotId,
+	};
+	const render::ResourceImageRequest second{
+		.Token = 2,
+		.Pipeline = views[1].Pipeline,
+		.Node = capture,
+		.ViewSlot = views[1].Slot,
+		.ExpectedSnapshotId = views[1].SnapshotId,
+	};
+	REQUIRE(renderer.RequestResourceImage(first));
+	REQUIRE(renderer.RequestResourceImage(second));
+
+	render::OverlayImage overlay;
+	const render::FrameResult frame = renderer.Render(views, overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	REQUIRE(frame.Ran(capture));
+	const auto images = AwaitImageGroup(renderer, std::array<uint64_t, 2>{first.Token, second.Token});
+	const auto &firstImage = images[0];
+	const auto &secondImage = images[1];
+	CHECK(firstImage.Status == render::ResourceImageStatus::Ok);
+	CHECK(secondImage.Status == render::ResourceImageStatus::Ok);
+	CHECK(firstImage.Request.ViewSlot == views[0].Slot);
+	CHECK(secondImage.Request.ViewSlot == views[1].Slot);
+	CHECK(firstImage.Width == firstTarget.Width);
+	CHECK(firstImage.Height == firstTarget.Height);
+	CHECK(secondImage.Width == secondTarget.Width);
+	CHECK(secondImage.Height == secondTarget.Height);
+	CHECK(firstImage.SnapshotId == views[0].SnapshotId);
+	CHECK(secondImage.SnapshotId == views[1].SnapshotId);
+	CHECK(firstImage.CameraWorldFromCamera[12] == views[0].CameraFrame.Position.X);
+	CHECK(secondImage.CameraWorldFromCamera[12] == views[1].CameraFrame.Position.X);
+	CHECK(firstImage.CaptureFrame == secondImage.CaptureFrame);
+	REQUIRE(firstImage.Observation);
+	REQUIRE(secondImage.Observation);
+	CHECK(firstImage.Observation->WorldName == views[0].WorldName);
+	CHECK(secondImage.Observation->WorldName == views[1].WorldName);
 }
 
 TEST_CASE("default data capture records source depth and normal planes", "[render][gpu][resourceimage][.]") {

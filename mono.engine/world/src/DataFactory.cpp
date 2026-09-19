@@ -11,6 +11,38 @@
 namespace engine::world {
 
 	namespace {
+		class RehydrationTransaction final {
+		  public:
+			RehydrationTransaction(
+				DataFactoryRehydrate &rehydrate,
+				DataFactoryRehydrateCommit &commit,
+				DataFactoryRehydrateAbort &abort
+			)
+				: Rehydrate(rehydrate), CommitCallback(commit), AbortCallback(abort) {}
+
+			~RehydrationTransaction() {
+				if (Prepared && AbortCallback) AbortCallback();
+			}
+
+			bool Prepare(Universe &candidate, std::string &detail) {
+				Prepared = true;
+				for (const WorldId world : candidate.Worlds())
+					if (!Rehydrate(candidate, world, detail)) return false;
+				return true;
+			}
+
+			void Commit() noexcept {
+				if (CommitCallback) CommitCallback();
+				Prepared = false;
+			}
+
+		  private:
+			DataFactoryRehydrate &Rehydrate;
+			DataFactoryRehydrateCommit &CommitCallback;
+			DataFactoryRehydrateAbort &AbortCallback;
+			bool Prepared = false;
+		};
+
 		bool TimeAt(uint64_t tick, DataFactoryInterval interval, uint64_t &time) {
 			if (interval.Denominator == 0) return false;
 			const uint64_t whole = tick / interval.Denominator;
@@ -35,6 +67,21 @@ namespace engine::world {
 
 	void DataFactorySession::SetRehydrate(DataFactoryRehydrate rehydrate) {
 		Rehydrate = std::move(rehydrate);
+		RehydrateCommit = {};
+		RehydrateAbort = {};
+	}
+
+	void DataFactorySession::SetRehydrator(DataFactoryRehydrator rehydrator) {
+		Rehydrate = std::move(rehydrator.Prepare);
+		RehydrateCommit = std::move(rehydrator.Commit);
+		RehydrateAbort = std::move(rehydrator.Abort);
+	}
+
+	void DataFactorySession::SetForkRehydrator(DataFactoryForkRehydrator rehydrator) {
+		ForkPrepare = std::move(rehydrator.Prepare);
+		ForkCommit = std::move(rehydrator.Commit);
+		ForkAbort = std::move(rehydrator.Abort);
+		ForkRetire = std::move(rehydrator.Retire);
 	}
 
 	void DataFactorySession::SetPauseParticipant(DataFactoryPauseParticipant participant) {
@@ -51,6 +98,10 @@ namespace engine::world {
 
 	void DataFactorySession::SetActionExecutor(DataFactoryActionExecutor executor) {
 		ActionExecutor = std::move(executor);
+	}
+
+	void DataFactorySession::SetReplayActionExecutor(DataFactoryReplayActionExecutor executor) {
+		ReplayActionExecutor = std::move(executor);
 	}
 
 	void DataFactorySession::SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter) {
@@ -136,20 +187,57 @@ namespace engine::world {
 		// factory world until per-world lifecycle revisions exist.
 		if (create && !OwnedWorlds.empty())
 			return replyFor(DataFactoryStatus::ResourceLimit, "this session already owns a factory world");
-		if (!create && (!existing.IsValid() || !OwnedWorlds.contains(request.InstanceId) ||
-						request.ExpectedWorldEpoch != Epoch || request.ExpectedWorldVersion != Version ||
-						request.ExpectedTick != ClockOf(existing).Tick))
+		const bool forked = Forks.contains(request.InstanceId);
+		if (!create && !forked &&
+			(!existing.IsValid() || !OwnedWorlds.contains(request.InstanceId) ||
+			 request.ExpectedWorldEpoch != Epoch || request.ExpectedWorldVersion != Version ||
+			 request.ExpectedTick != ClockOf(existing).Tick))
 			return replyFor(
 				DataFactoryStatus::VersionConflict, "world revision, tick, or ownership is stale"
 			);
-		if (!create && RenderOnlyInFlight(request.InstanceId))
+		if (!create && !forked && RenderOnlyInFlight(request.InstanceId))
 			return replyFor(DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
-		if (!create && !AllSystemsPaused(request.InstanceId))
+		if (!create && !forked && !AllSystemsPaused(request.InstanceId))
 			return replyFor(DataFactoryStatus::NotPaused, "reset and retire require an all_systems pause");
 		if (WorldOperations.size() >= 256)
 			return replyFor(DataFactoryStatus::ResourceLimit, "world operation ledger is full");
 		if (Epoch == UINT64_MAX || Version == UINT64_MAX)
 			return replyFor(DataFactoryStatus::ResourceLimit, "world lifecycle revision exhausted");
+		if (const auto branch = Forks.find(request.InstanceId); branch != Forks.end()) {
+			ForkedWorld &fork = branch->second;
+			const DataFactoryClock clock = ClockOf(*fork.Realm, fork.World);
+			const auto reply = [&](DataFactoryStatus status, std::string detail) {
+				DataFactoryReply result;
+				result.Status = status;
+				result.Detail = std::move(detail);
+				result.InstanceId = request.InstanceId;
+				result.WorldEpoch = fork.Epoch;
+				result.WorldVersion = fork.Version;
+				result.Clock = clock;
+				return result;
+			};
+			if (request.Operation != DataFactoryWorldOperation::Retire)
+				return reply(DataFactoryStatus::VersionConflict, "a fork can only be retired");
+			if (request.ExpectedWorldEpoch != fork.Epoch || request.ExpectedWorldVersion != fork.Version ||
+				request.ExpectedTick != clock.Tick)
+				return reply(DataFactoryStatus::VersionConflict, "branch revision or tick is stale");
+			try {
+				if (ForkRetire) ForkRetire(request.InstanceId);
+			} catch (const std::exception &exception) {
+				return reply(
+					DataFactoryStatus::RestoreIncomplete,
+					std::string("branch retirement finalization threw: ") + exception.what()
+				);
+			} catch (...) {
+				return reply(DataFactoryStatus::RestoreIncomplete, "branch retirement finalization threw");
+			}
+			++fork.Version;
+			DataFactoryReply result = reply(DataFactoryStatus::Ok, "forked world retired");
+			result.Tombstone = true;
+			Forks.erase(branch);
+			WorldOperations.emplace(request.OperationId, WorldOperationRecord{request, result});
+			return result;
+		}
 
 		WorldId world = existing;
 		if (request.Operation == DataFactoryWorldOperation::Retire) {
@@ -270,9 +358,13 @@ namespace engine::world {
 	}
 
 	DataFactoryClock DataFactorySession::ClockOf(WorldId world) const {
+		return ClockOf(Worlds, world);
+	}
+
+	DataFactoryClock DataFactorySession::ClockOf(const Universe &universe, WorldId world) const {
 		DataFactoryClock clock;
-		clock.Tick = Worlds.StatisticsOf(world).Ticks;
-		const double rate = Worlds.SettingsOf(world).TickRate;
+		clock.Tick = universe.StatisticsOf(world).Ticks;
+		const double rate = universe.SettingsOf(world).TickRate;
 		const double rounded = std::round(rate);
 		if (rate > 0.0 && rounded >= 1.0 && rounded <= static_cast<double>(UINT32_MAX) && rate == rounded) {
 			clock.Interval.Denominator = static_cast<uint32_t>(rounded);
@@ -437,6 +529,41 @@ namespace engine::world {
 		uint64_t expectedVersion,
 		std::span<const DataFactoryAction> actions
 	) {
+		if (const auto found = Forks.find(std::string(instanceId)); found != Forks.end()) {
+			ForkedWorld &fork = found->second;
+			const auto reply = [&](DataFactoryStatus status, std::string detail) {
+				DataFactoryReply result;
+				result.Status = status;
+				result.Detail = std::move(detail);
+				result.InstanceId = std::string(instanceId);
+				result.WorldEpoch = fork.Epoch;
+				result.WorldVersion = fork.Version;
+				result.Clock = ClockOf(*fork.Realm, fork.World);
+				return result;
+			};
+			if (RenderOnlyInFlight(instanceId))
+				return reply(DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
+			if (expectedVersion != fork.Version)
+				return reply(DataFactoryStatus::VersionConflict, "expected_world_version does not match");
+			if (ClockOf(*fork.Realm, fork.World).Tick != expectedTick)
+				return reply(
+					DataFactoryStatus::VersionConflict, "expected_tick does not match the completed tick"
+				);
+			const DataFactoryClock clock = ClockOf(*fork.Realm, fork.World);
+			if (interval.NumeratorNanoseconds != clock.Interval.NumeratorNanoseconds ||
+				interval.Denominator != clock.Interval.Denominator)
+				return reply(
+					DataFactoryStatus::ValidationFailed, "dt is not this instance's canonical fixed interval"
+				);
+			if (!actions.empty())
+				return reply(
+					DataFactoryStatus::Unsupported, "fork action delivery is not installed for branch runtime"
+				);
+			if (fork.Realm->StepPaused(fork.World) != WorldStatus::Ok)
+				return reply(DataFactoryStatus::RestoreIncomplete, "the forked world is not suspended");
+			++fork.Version;
+			return reply(DataFactoryStatus::Ok, "simulation uses the engine's declared float fixed delta");
+		}
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
 		if (RenderOnlyInFlight(instanceId))
@@ -473,6 +600,9 @@ namespace engine::world {
 			return Reply(world, DataFactoryStatus::NotPaused, "step requires an all_systems pause");
 		if (!actions.empty() && !ActionExecutor)
 			return Reply(world, DataFactoryStatus::Unsupported, "the host has no action executor");
+		// Keep the validated request order. A replay executor receives this copy,
+		// never a host runtime's private representation of the action batch.
+		std::vector<DataFactoryAction> replayActions(actions.begin(), actions.end());
 		DataFactoryActionCommit commit;
 		if (!actions.empty()) {
 			std::string detail;
@@ -498,13 +628,13 @@ namespace engine::world {
 				"the completed step faulted or the world is not suspended"
 			);
 		}
-		if (actions.empty()) {
+		if (actions.empty() || ReplayActionExecutor) {
 			constexpr size_t MAXIMUM_REPLAY_STEPS = 4096;
-			ReplaySteps.push_back({ReplayGeneration, expectedTick, interval});
+			ReplaySteps.push_back({ReplayGeneration, expectedTick, interval, std::move(replayActions)});
 			if (ReplaySteps.size() > MAXIMUM_REPLAY_STEPS) ReplaySteps.pop_front();
 		} else {
 			// The live host action executor may own script state outside Universe.
-			// Crossing such a step without a replay-safe executor would invent state.
+			// Crossing such a step without a candidate-safe executor would invent state.
 			BeginReplayGeneration();
 		}
 		Version++;
@@ -512,6 +642,16 @@ namespace engine::world {
 	}
 
 	DataFactoryReply DataFactorySession::Inspect(std::string_view instanceId) const {
+		if (const auto found = Forks.find(std::string(instanceId)); found != Forks.end()) {
+			const ForkedWorld &fork = found->second;
+			DataFactoryReply reply;
+			reply.Status = DataFactoryStatus::Ok;
+			reply.InstanceId = std::string(instanceId);
+			reply.WorldEpoch = fork.Epoch;
+			reply.WorldVersion = fork.Version;
+			reply.Clock = ClockOf(*fork.Realm, fork.World);
+			return reply;
+		}
 		const WorldId world = Resolve(instanceId);
 		if (!world.IsValid()) return Reply(world, DataFactoryStatus::ValidationFailed, "unknown instance_id");
 		return Reply(world, DataFactoryStatus::Ok, {});
@@ -588,6 +728,165 @@ namespace engine::world {
 		DataFactoryReply reply = Snapshot(instanceId, checkpointId);
 		if (reply.Status == DataFactoryStatus::Ok)
 			reply.Detail = "checkpoint requires the host rehydrate callback on restore";
+		return reply;
+	}
+
+	DataFactoryReply DataFactorySession::Fork(const DataFactoryForkRequest &request) {
+		const WorldId source = Resolve(request.InstanceId);
+		if (!source.IsValid())
+			return Reply(source, DataFactoryStatus::ValidationFailed, "unknown instance_id");
+		if (request.BranchId.empty() || request.BranchId.size() > 128 ||
+			request.BranchId.find('\0') != std::string::npos)
+			return Reply(
+				source, DataFactoryStatus::ValidationFailed, "branch_id must contain 1 to 128 bytes"
+			);
+		if (request.CheckpointId.empty() || request.CheckpointId.size() > 128 ||
+			request.CheckpointId.find('\0') != std::string::npos)
+			return Reply(
+				source, DataFactoryStatus::ValidationFailed, "checkpoint_id must contain 1 to 128 bytes"
+			);
+		if (request.BranchId == request.InstanceId)
+			return Reply(
+				source, DataFactoryStatus::ValidationFailed, "branch_id must differ from instance_id"
+			);
+		if (request.ExpectedWorldEpoch != Epoch || request.ExpectedWorldVersion != Version ||
+			request.ExpectedTick != ClockOf(source).Tick)
+			return Reply(
+				source,
+				DataFactoryStatus::VersionConflict,
+				"fork precondition does not match the parent world"
+			);
+		if (RenderOnlyInFlight(request.InstanceId))
+			return Reply(source, DataFactoryStatus::VersionConflict, "render-only presentation is in flight");
+		if (!ForkPrepare)
+			return Reply(
+				source,
+				DataFactoryStatus::Unsupported,
+				"fork needs a branch-specific rehydrator so parent runtime state stays isolated"
+			);
+		if (Forks.contains(request.BranchId))
+			return Reply(source, DataFactoryStatus::VersionConflict, "branch_id is already owned");
+		if (Limit == 0 || Forks.size() >= Limit)
+			return Reply(source, DataFactoryStatus::ResourceLimit, "bounded fork retention is full");
+		const auto saved = Checkpoints.find(request.CheckpointId);
+		if (saved == Checkpoints.end())
+			return Reply(source, DataFactoryStatus::StaleSnapshot, "checkpoint is not retained");
+		if (saved->second.Epoch != Epoch)
+			return Reply(
+				source, DataFactoryStatus::StaleSnapshot, "checkpoint is not in the parent world epoch"
+			);
+		if (!saved->second.AllSystemsPaused)
+			return Reply(
+				source,
+				DataFactoryStatus::NotPaused,
+				"fork checkpoint must have been captured at an all_systems pause"
+			);
+		if (saved->second.Epoch == UINT64_MAX)
+			return Reply(source, DataFactoryStatus::ResourceLimit, "fork lifecycle epoch is exhausted");
+		if (LastForkEpoch == UINT64_MAX)
+			return Reply(source, DataFactoryStatus::ResourceLimit, "fork lifecycle epoch is exhausted");
+		const uint64_t forkEpoch = std::max(saved->second.Epoch, LastForkEpoch) + 1;
+
+		auto branch = std::make_unique<Universe>();
+		core::ByteReader reader(saved->second.Bytes);
+		if (!branch->Load(reader) || reader.Remaining() != 0)
+			return Reply(
+				source, DataFactoryStatus::RestoreIncomplete, "checkpoint is incompatible with this engine"
+			);
+		if (branch->Count() != 1)
+			return Reply(
+				source,
+				DataFactoryStatus::RestoreIncomplete,
+				"checkpoint does not contain one isolated source world"
+			);
+		const WorldId forked = branch->Find(core::Name(request.InstanceId));
+		if (!forked.IsValid() || branch->StatisticsOf(forked).Ticks != saved->second.Tick)
+			return Reply(
+				source, DataFactoryStatus::RestoreIncomplete, "checkpoint identity or clock is incompatible"
+			);
+
+		const auto abort = [&] {
+			if (!ForkAbort) return;
+			try {
+				ForkAbort(request.BranchId);
+			} catch (...) {}
+		};
+		std::string detail;
+		bool prepared = false;
+		try {
+			prepared = ForkPrepare(request.BranchId, *branch, forked, detail);
+		} catch (const std::exception &exception) {
+			abort();
+			return Reply(
+				source,
+				DataFactoryStatus::RestoreIncomplete,
+				std::string("branch rehydration threw: ") + exception.what()
+			);
+		} catch (...) {
+			abort();
+			return Reply(
+				source, DataFactoryStatus::RestoreIncomplete, "branch rehydration threw an unknown exception"
+			);
+		}
+		if (!prepared) {
+			abort();
+			return Reply(
+				source,
+				DataFactoryStatus::RestoreIncomplete,
+				detail.empty() ? "branch rehydration failed" : std::move(detail)
+			);
+		}
+		ForkedWorld staged{
+			.Realm = std::move(branch),
+			.World = forked,
+			.Epoch = forkEpoch,
+			.Version = 1,
+		};
+		try {
+			const auto [installed, inserted] = Forks.try_emplace(request.BranchId);
+			if (!inserted)
+				return Reply(source, DataFactoryStatus::VersionConflict, "branch_id is already owned");
+			installed->second = std::move(staged);
+		} catch (const std::bad_alloc &) {
+			abort();
+			return Reply(source, DataFactoryStatus::ResourceLimit, "fork ownership allocation failed");
+		} catch (...) {
+			abort();
+			return Reply(source, DataFactoryStatus::RestoreIncomplete, "fork ownership installation threw");
+		}
+		try {
+			if (ForkCommit) ForkCommit(request.BranchId);
+		} catch (const std::exception &exception) {
+			abort();
+			Forks.erase(request.BranchId);
+			return Reply(
+				source,
+				DataFactoryStatus::RestoreIncomplete,
+				std::string("branch commit threw: ") + exception.what()
+			);
+		} catch (...) {
+			abort();
+			Forks.erase(request.BranchId);
+			return Reply(
+				source, DataFactoryStatus::RestoreIncomplete, "branch commit threw an unknown exception"
+			);
+		}
+
+		DataFactoryReply reply;
+		LastForkEpoch = forkEpoch;
+		reply.Status = DataFactoryStatus::Ok;
+		reply.Detail = "forked retained checkpoint into an isolated branch universe";
+		reply.InstanceId = request.BranchId;
+		reply.WorldEpoch = forkEpoch;
+		reply.WorldVersion = 1;
+		reply.Clock.Tick = saved->second.Tick;
+		const double rate = Forks.at(request.BranchId).Realm->SettingsOf(forked).TickRate;
+		const double rounded = std::round(rate);
+		if (rate > 0.0 && rounded >= 1.0 && rounded <= static_cast<double>(UINT32_MAX) && rate == rounded) {
+			reply.Clock.Interval.Denominator = static_cast<uint32_t>(rounded);
+			reply.Clock.RationalTimeAvailable =
+				TimeAt(reply.Clock.Tick, reply.Clock.Interval, reply.Clock.TimeNanoseconds);
+		}
 		return reply;
 	}
 
@@ -864,13 +1163,14 @@ namespace engine::world {
 			return Reply(
 				live, DataFactoryStatus::RestoreIncomplete, "checkpoint is incompatible with this engine"
 			);
-		for (const WorldId world : candidate.Worlds()) {
-			std::string detail;
-			if (!Rehydrate(candidate, world, detail))
-				return Reply(
-					live, DataFactoryStatus::RestoreIncomplete, detail.empty() ? "rehydration failed" : detail
-				);
-		}
+		RehydrationTransaction rehydration(Rehydrate, RehydrateCommit, RehydrateAbort);
+		std::string rehydrateDetail;
+		if (!rehydration.Prepare(candidate, rehydrateDetail))
+			return Reply(
+				live,
+				DataFactoryStatus::RestoreIncomplete,
+				rehydrateDetail.empty() ? "rehydration failed" : std::move(rehydrateDetail)
+			);
 
 		const PauseState previous = [&] {
 			const auto paused = Paused.find(std::string(instanceId));
@@ -908,6 +1208,10 @@ namespace engine::world {
 		}
 
 		Worlds.ReplaceWith(candidate);
+		// The host prepared state is bound to the candidate stores. Publish it
+		// only after replacement so a refusal above leaves the live host intact.
+		// Commit is an infallible ownership handoff supplied by the product.
+		rehydration.Commit();
 		Epoch++;
 		Version++;
 		BeginReplayGeneration();
@@ -987,6 +1291,13 @@ namespace engine::world {
 			return Reply(
 				live, DataFactoryStatus::StaleSnapshot, "bounded replay history does not cover target_tick"
 			);
+		if (std::ranges::any_of(replay, [](const ReplayStep &step) { return !step.Actions.empty(); }) &&
+			!ReplayActionExecutor)
+			return Reply(
+				live,
+				DataFactoryStatus::StaleSnapshot,
+				"action-bearing replay needs a candidate-safe action executor"
+			);
 
 		core::ByteReader reader(selected->second.Bytes);
 		Universe candidate;
@@ -994,29 +1305,44 @@ namespace engine::world {
 			return Reply(
 				live, DataFactoryStatus::RestoreIncomplete, "checkpoint is incompatible with this engine"
 			);
-		for (const WorldId world : candidate.Worlds()) {
-			std::string detail;
-			if (!Rehydrate(candidate, world, detail))
-				return Reply(
-					live,
-					DataFactoryStatus::RestoreIncomplete,
-					detail.empty() ? "rehydration failed" : std::move(detail)
-				);
-		}
+		RehydrationTransaction rehydration(Rehydrate, RehydrateCommit, RehydrateAbort);
+		std::string rehydrateDetail;
+		if (!rehydration.Prepare(candidate, rehydrateDetail))
+			return Reply(
+				live,
+				DataFactoryStatus::RestoreIncomplete,
+				rehydrateDetail.empty() ? "rehydration failed" : std::move(rehydrateDetail)
+			);
 		const WorldId target = candidate.Find(core::Name(instanceId));
 		if (!target.IsValid() || candidate.StatisticsOf(target).Ticks != selected->second.Tick)
 			return Reply(
 				live, DataFactoryStatus::RestoreIncomplete, "checkpoint identity or clock is incompatible"
 			);
 		for (const ReplayStep &step : replay) {
-			if (!IsCanonicalInterval(target, step.Interval) ||
-				candidate.StepPaused(target) != WorldStatus::Ok)
+			if (!IsCanonicalInterval(target, step.Interval))
+				return Reply(
+					live, DataFactoryStatus::RestoreIncomplete, "fixed-step replay failed in scratch state"
+				);
+			DataFactoryActionCommit replayCommit;
+			if (!step.Actions.empty()) {
+				std::string replayDetail;
+				if (!ReplayActionExecutor(candidate, target, step.Actions, replayCommit, replayDetail) ||
+					!replayCommit)
+					return Reply(
+						live,
+						DataFactoryStatus::RestoreIncomplete,
+						replayDetail.empty() ? "candidate-safe action replay refused"
+											 : std::move(replayDetail)
+					);
+			}
+			if (candidate.StepPaused(target, replayCommit) != WorldStatus::Ok)
 				return Reply(
 					live, DataFactoryStatus::RestoreIncomplete, "fixed-step replay failed in scratch state"
 				);
 		}
 
 		Worlds.ReplaceWith(candidate);
+		rehydration.Commit();
 		Epoch++;
 		Version++;
 		BeginReplayGeneration();
@@ -1121,14 +1447,17 @@ namespace engine::world {
 			return Reply(
 				world, DataFactoryStatus::RestoreIncomplete, "intervention rollback checkpoint is invalid"
 			);
-		for (const WorldId restored : rollback.Worlds()) {
-			std::string rehydrate;
-			if (!Rehydrate(rollback, restored, rehydrate))
-				return Reply(
-					world, DataFactoryStatus::RestoreIncomplete, "intervention rollback rehydration failed"
-				);
-		}
+		RehydrationTransaction rehydration(Rehydrate, RehydrateCommit, RehydrateAbort);
+		std::string rehydrateDetail;
+		if (!rehydration.Prepare(rollback, rehydrateDetail))
+			return Reply(
+				world,
+				DataFactoryStatus::RestoreIncomplete,
+				rehydrateDetail.empty() ? "intervention rollback rehydration failed"
+										: std::move(rehydrateDetail)
+			);
 		Worlds.ReplaceWith(rollback);
+		rehydration.Commit();
 		return Reply(
 			Resolve(instanceId),
 			DataFactoryStatus::ValidationFailed,
@@ -1142,6 +1471,20 @@ namespace engine::world {
 
 	bool DataFactorySession::HasCheckpoint(std::string_view checkpointId) const {
 		return Checkpoints.contains(std::string(checkpointId));
+	}
+
+	bool DataFactorySession::OwnsFork(std::string_view branchId) const {
+		return Forks.contains(std::string(branchId));
+	}
+
+	Universe *DataFactorySession::ForkUniverse(std::string_view branchId) {
+		const auto found = Forks.find(std::string(branchId));
+		return found == Forks.end() ? nullptr : found->second.Realm.get();
+	}
+
+	const Universe *DataFactorySession::ForkUniverse(std::string_view branchId) const {
+		const auto found = Forks.find(std::string(branchId));
+		return found == Forks.end() ? nullptr : found->second.Realm.get();
 	}
 
 	const char *Describe(DataFactoryStatus status) {

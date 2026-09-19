@@ -106,6 +106,7 @@ namespace {
 				.MaximumHooks = 14,
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
+				.MaximumCaptureTickets = 6,
 				.MaximumReadbackNodes = 12,
 				.MaximumRetainedBytes = 64u * 1024u * 1024u,
 				.MaximumPendingPumps = 600,

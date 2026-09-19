@@ -32,6 +32,7 @@
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/spatial/Query.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -377,6 +378,41 @@ namespace engine::physics {
 		ecs::Entity Owner;
 		core::Vector3 Normal;
 	};
+
+	// A bounded path over authored horizontal box-top polygons. The query never
+	// promotes collider geometry to navigation: every retained polygon comes from
+	// an enabled `Walkable` affordance on the same BasePart.
+	inline constexpr size_t MAX_AUTHORED_NAVMESH_SURFACES = 32;
+	inline constexpr size_t MAX_AUTHORED_NAVMESH_POINTS = MAX_AUTHORED_NAVMESH_SURFACES + 2;
+	struct AuthoredNavmeshPath {
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			PhysicsStale,
+			InvalidProbe,
+			UnsupportedWalkableGeometry,
+			SurfaceLimit,
+			EndpointUnavailable,
+			CorridorObstructed,
+			NoPath,
+		};
+
+		bool Available = false;
+		bool Found = false;
+		Reason Why = Reason::PhysicsUnprepared;
+		size_t PointCount = 0;
+		std::array<core::Vector3, MAX_AUTHORED_NAVMESH_POINTS> Points{};
+	};
+
+	// Finds a path over the connected authored walkable surfaces in the completed
+	// physics snapshot. Only horizontal analytic box tops are currently admitted;
+	// slopes, meshes, and rotated boxes answer unknown rather than being flattened.
+	AuthoredNavmeshPath FindAuthoredNavmeshPath(
+		ecs::Store &store,
+		const core::Vector3 &start,
+		const core::Vector3 &goal,
+		float verticalToleranceMetres = 0.25f
+	);
 
 	// Sweeps one collider against the destination's current indexed poses.
 	// Uses collision masks and triggers, including solid non-queryable colliders.

@@ -46,9 +46,14 @@ namespace {
 		int ReadCalls = 0;
 		bool OversizedObservation = false;
 		bool ReturnRequestedWaveform = false;
+		bool CaptureAvailable = true;
+		std::string CaptureDetail = "fake bridge";
+		uint64_t CaptureMaximumFrames = 256;
 
 		engine::script::DataAudioObservationBridgeCapabilities Capabilities() const override {
-			return {.Available = true, .Detail = "fake bridge", .MaximumFrames = 256};
+			return {
+				.Available = CaptureAvailable, .Detail = CaptureDetail, .MaximumFrames = CaptureMaximumFrames
+			};
 		}
 		bool Capture(
 			std::string_view instance,
@@ -177,8 +182,26 @@ TEST_CASE(
 	const json resource = json::parse(metadata->Read(resourceFailure));
 	CHECK(resourceFailure.empty());
 	CHECK(resource.at("contract") == "datafactories-docs/audio_observation.py");
+	CHECK(resource.at("capture").at("available") == true);
+	CHECK(resource.at("capture").at("detail") == "fake bridge");
+	CHECK(resource.at("capture").at("maximum_frames") == 256);
 	CHECK(resource.at("limits").at("events") == engine::script::MAX_AUDIO_OBSERVATION_EVENTS);
 	CHECK(resource.at("waveform_handoff").at("lifetime") == "host_owned_immutable_until_expired");
+
+	bridge->Status = "unavailable";
+	bridge->Detail = "audio device is offline";
+	bridge->CaptureAvailable = false;
+	bridge->CaptureDetail = "audio device is offline";
+	bridge->CaptureMaximumFrames = 0;
+	const json unavailableResource = json::parse(metadata->Read(resourceFailure));
+	CHECK(unavailableResource.at("capture").at("available") == false);
+	CHECK(unavailableResource.at("capture").at("detail") == "audio device is offline");
+	CHECK(unavailableResource.at("capture").at("maximum_frames") == 0);
+
+	bridge->CaptureDetail = std::string(engine::script::MAX_AUDIO_OBSERVATION_STRING_BYTES + 1, 'x');
+	const json boundedResource = json::parse(metadata->Read(resourceFailure));
+	CHECK(boundedResource.at("capture").at("detail") == "invalid audio capture capability detail");
+	CHECK(boundedResource.dump().size() <= engine::script::MAX_AUDIO_OBSERVATION_JSON_BYTES);
 
 	const int captures = bridge->CaptureCalls;
 	const json missing = Call(surface, "get_audio_observation", json::object(), failed);

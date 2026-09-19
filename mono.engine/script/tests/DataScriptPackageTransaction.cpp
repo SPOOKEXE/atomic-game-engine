@@ -12,7 +12,7 @@
 
 TEST_SUITE_ID("engine.script.data-script-package-transaction")
 TEST_DEPENDS("engine.script.data-script-package")
-TEST_DEPENDS("engine.world.datafactory")
+TEST_DEPENDS("engine.world.data-factory")
 
 namespace {
 	class Runtime final : public engine::script::Runtime {

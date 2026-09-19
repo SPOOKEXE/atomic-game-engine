@@ -88,6 +88,7 @@ namespace {
 				.MaximumHooks = 0,
 				.MaximumConnections = 0,
 				.MaximumBatches = 0,
+				.MaximumCaptureTickets = 0,
 				.MaximumReadbackNodes = 0,
 				.MaximumRetainedBytes = 0,
 				.MaximumPendingPumps = 0,

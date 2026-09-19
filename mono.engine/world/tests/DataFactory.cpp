@@ -1,5 +1,6 @@
 #include "DataFactoryRevision.hpp"
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
@@ -10,6 +11,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <limits>
+#include <memory>
+#include <unordered_map>
+#include <vector>
 
 TEST_SUITE_ID("engine.world.data-factory")
 
@@ -19,8 +23,10 @@ using engine::ecs::Entity;
 using engine::ecs::Phase;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
+using engine::world::BusKind;
 using engine::world::DataFactoryAction;
 using engine::world::DataFactoryActionCommit;
+using engine::world::DataFactoryForkRequest;
 using engine::world::DataFactoryInterval;
 using engine::world::DataFactoryPauseScope;
 using engine::world::DataFactoryRenderOnlyRequest;
@@ -37,6 +43,11 @@ using engine::world::WorldSettings;
 using engine::world::WorldState;
 
 namespace {
+	std::vector<std::byte> Bytes(std::string_view text) {
+		const auto *first = reinterpret_cast<const std::byte *>(text.data());
+		return {first, first + text.size()};
+	}
+
 	struct Tally {
 		int Value = 0;
 	};
@@ -725,6 +736,242 @@ TEST_CASE(
 	CHECK(restoredAgain.WorldEpoch == restored.WorldEpoch + 1);
 }
 
+TEST_CASE(
+	"data-factory forks a retained checkpoint into an isolated rehydrated branch", "[world][data-factory]"
+) {
+	Universe universe;
+	const WorldId parent = MakeWorld(universe, "data-factory.fork.parent");
+	BuildCountingWorld(universe, parent);
+	REQUIRE(
+		universe.SetSharedStoreValue(BusKind::DataStore, Name("data-factory.fork.shared"), Bytes("parent")) ==
+		engine::world::BusStatus::Ok
+	);
+	DataFactorySession session(universe, 2);
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.fork.parent", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	const auto paused = session.Inspect("data-factory.fork.parent");
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.fork.parent", checkpoint).Status == DataFactoryStatus::Ok);
+
+	unsigned prepared = 0;
+	unsigned committed = 0;
+	unsigned aborted = 0;
+	session.SetForkRehydrator({
+		.Prepare =
+			[&](std::string_view branchId, Universe &branch, WorldId forked, std::string &) {
+				CHECK((branchId == "data-factory.fork.blue" || branchId == "data-factory.fork.green"));
+				prepared++;
+				branch.Enter(forked, [](Store &, Scheduler &systems) {
+					systems.Add("data-factory.fork.count", Phase::Simulation, [](Store &store) {
+						store.Each<Tally>([](Entity, Tally &tally) { tally.Value++; });
+					});
+				});
+				return true;
+			},
+		.Commit =
+			[&](std::string_view branchId) {
+				CHECK((branchId == "data-factory.fork.blue" || branchId == "data-factory.fork.green"));
+				committed++;
+			},
+		.Abort = [&](std::string_view) { aborted++; },
+	});
+
+	const auto forked = session.Fork({
+		.InstanceId = "data-factory.fork.parent",
+		.CheckpointId = checkpoint,
+		.BranchId = "data-factory.fork.blue",
+		.ExpectedWorldEpoch = paused.WorldEpoch,
+		.ExpectedWorldVersion = paused.WorldVersion,
+		.ExpectedTick = paused.Clock.Tick,
+	});
+	REQUIRE(forked.Status == DataFactoryStatus::Ok);
+	CHECK(forked.InstanceId == "data-factory.fork.blue");
+	CHECK(forked.WorldEpoch == paused.WorldEpoch + 1);
+	CHECK(forked.WorldVersion == 1);
+	CHECK(session.OwnsFork("data-factory.fork.blue"));
+	REQUIRE(session.ForkUniverse("data-factory.fork.blue") != nullptr);
+	CHECK(prepared == 1);
+	CHECK(committed == 1);
+	CHECK(aborted == 0);
+
+	Universe &branch = *session.ForkUniverse("data-factory.fork.blue");
+	const WorldId branchWorld = branch.Find(Name("data-factory.fork.parent"));
+	REQUIRE(branchWorld.IsValid());
+	branch.Enter(branchWorld, [](Store &store) {
+		store.Each<Tally>([](Entity, Tally &tally) { tally.Value += 40; });
+	});
+	REQUIRE(
+		branch.SetSharedStoreValue(BusKind::DataStore, Name("data-factory.fork.shared"), Bytes("branch")) ==
+		engine::world::BusStatus::Ok
+	);
+	CHECK(Count(branch, branchWorld) == 40);
+	CHECK(Count(universe, parent) == 0);
+	std::vector<std::byte> parentValue;
+	std::vector<std::byte> branchValue;
+	REQUIRE(
+		universe.Peek(BusKind::DataStore, Name("data-factory.fork.shared"), &parentValue) ==
+		engine::world::BusStatus::Ok
+	);
+	REQUIRE(
+		branch.Peek(BusKind::DataStore, Name("data-factory.fork.shared"), &branchValue) ==
+		engine::world::BusStatus::Ok
+	);
+	CHECK(parentValue == Bytes("parent"));
+	CHECK(branchValue == Bytes("branch"));
+
+	const auto branchBeforeStep = session.Inspect("data-factory.fork.blue");
+	REQUIRE(branchBeforeStep.Status == DataFactoryStatus::Ok);
+	CHECK(branchBeforeStep.WorldEpoch == forked.WorldEpoch);
+	CHECK(branchBeforeStep.WorldVersion == forked.WorldVersion);
+	const auto stepped = session.Step(
+		"data-factory.fork.blue",
+		DataFactoryInterval{},
+		branchBeforeStep.Clock.Tick,
+		branchBeforeStep.WorldVersion
+	);
+	REQUIRE(stepped.Status == DataFactoryStatus::Ok);
+	CHECK(stepped.WorldVersion == branchBeforeStep.WorldVersion + 1);
+	CHECK(stepped.Clock.Tick == branchBeforeStep.Clock.Tick + 1);
+	const auto retired = session.RetireWorld({
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "data-factory.fork.blue",
+		.ExpectedWorldEpoch = stepped.WorldEpoch,
+		.ExpectedWorldVersion = stepped.WorldVersion,
+		.ExpectedTick = stepped.Clock.Tick,
+		.OperationId = "retire-fork-blue",
+	});
+	REQUIRE(retired.Status == DataFactoryStatus::Ok);
+	CHECK(retired.Tombstone);
+	CHECK_FALSE(session.OwnsFork("data-factory.fork.blue"));
+	CHECK(session.ForkUniverse("data-factory.fork.blue") == nullptr);
+	CHECK(aborted == 0);
+
+	const auto reused = session.Fork({
+		.InstanceId = "data-factory.fork.parent",
+		.CheckpointId = checkpoint,
+		.BranchId = "data-factory.fork.green",
+		.ExpectedWorldEpoch = paused.WorldEpoch,
+		.ExpectedWorldVersion = paused.WorldVersion,
+		.ExpectedTick = paused.Clock.Tick,
+	});
+	REQUIRE(reused.Status == DataFactoryStatus::Ok);
+	CHECK(session.OwnsFork("data-factory.fork.green"));
+}
+
+TEST_CASE("data-factory refuses a fork without branch runtime ownership", "[world][data-factory]") {
+	Universe universe;
+	MakeWorld(universe, "data-factory.fork.refusal");
+	DataFactorySession session(universe);
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.fork.refusal", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.fork.refusal", checkpoint).Status == DataFactoryStatus::Ok);
+	const auto parent = session.Inspect("data-factory.fork.refusal");
+	const auto refused = session.Fork({
+		.InstanceId = "data-factory.fork.refusal",
+		.CheckpointId = checkpoint,
+		.BranchId = "data-factory.fork.unowned",
+		.ExpectedWorldEpoch = parent.WorldEpoch,
+		.ExpectedWorldVersion = parent.WorldVersion,
+		.ExpectedTick = parent.Clock.Tick,
+	});
+	CHECK(refused.Status == DataFactoryStatus::Unsupported);
+	CHECK_FALSE(session.OwnsFork("data-factory.fork.unowned"));
+
+	unsigned aborted = 0;
+	session.SetForkRehydrator({
+		.Prepare =
+			[](std::string_view, Universe &, WorldId, std::string &detail) {
+				detail = "branch host refused installation";
+				return false;
+			},
+		.Commit = {},
+		.Abort = [&](std::string_view) { aborted++; },
+	});
+	const auto rejected = session.Fork({
+		.InstanceId = "data-factory.fork.refusal",
+		.CheckpointId = checkpoint,
+		.BranchId = "data-factory.fork.rejected",
+		.ExpectedWorldEpoch = parent.WorldEpoch,
+		.ExpectedWorldVersion = parent.WorldVersion,
+		.ExpectedTick = parent.Clock.Tick,
+	});
+	CHECK(rejected.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(rejected.Detail == "branch host refused installation");
+	CHECK(aborted == 1);
+	CHECK_FALSE(session.OwnsFork("data-factory.fork.rejected"));
+
+	session.SetForkRehydrator({
+		.Prepare = [](std::string_view, Universe &, WorldId, std::string &) { return true; },
+		.Commit = [](std::string_view) { throw std::runtime_error("deliberate commit failure"); },
+		.Abort = [&](std::string_view) { aborted++; },
+	});
+	const auto commitFailure = session.Fork({
+		.InstanceId = "data-factory.fork.refusal",
+		.CheckpointId = checkpoint,
+		.BranchId = "data-factory.fork.commit-failure",
+		.ExpectedWorldEpoch = parent.WorldEpoch,
+		.ExpectedWorldVersion = parent.WorldVersion,
+		.ExpectedTick = parent.Clock.Tick,
+	});
+	CHECK(commitFailure.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(commitFailure.Detail == "branch commit threw: deliberate commit failure");
+	CHECK(aborted == 2);
+	CHECK_FALSE(session.OwnsFork("data-factory.fork.commit-failure"));
+}
+
+TEST_CASE("data-factory retains a branch when committed retirement cleanup throws", "[world][data-factory]") {
+	Universe universe;
+	MakeWorld(universe, "data-factory.fork.retire-throw");
+	DataFactorySession session(universe);
+	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	REQUIRE(
+		session.Pause("data-factory.fork.retire-throw", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.fork.retire-throw", checkpoint).Status == DataFactoryStatus::Ok);
+	const auto parent = session.Inspect("data-factory.fork.retire-throw");
+	session.SetForkRehydrator({
+		.Prepare = [](std::string_view, Universe &, WorldId, std::string &) { return true; },
+		.Commit = {},
+		.Abort = {},
+		.Retire = [](std::string_view) { throw std::runtime_error("deliberate retirement failure"); },
+	});
+	const auto forked = session.Fork({
+		.InstanceId = "data-factory.fork.retire-throw",
+		.CheckpointId = checkpoint,
+		.BranchId = "data-factory.fork.retire-throw.branch",
+		.ExpectedWorldEpoch = parent.WorldEpoch,
+		.ExpectedWorldVersion = parent.WorldVersion,
+		.ExpectedTick = parent.Clock.Tick,
+	});
+	REQUIRE(forked.Status == DataFactoryStatus::Ok);
+	const auto retired = session.RetireWorld({
+		.Operation = DataFactoryWorldOperation::Retire,
+		.InstanceId = "data-factory.fork.retire-throw.branch",
+		.ExpectedWorldEpoch = forked.WorldEpoch,
+		.ExpectedWorldVersion = forked.WorldVersion,
+		.ExpectedTick = forked.Clock.Tick,
+		.OperationId = "retire-throwing-branch",
+	});
+	CHECK(retired.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(session.OwnsFork("data-factory.fork.retire-throw.branch"));
+	REQUIRE(session.ForkUniverse("data-factory.fork.retire-throw.branch") != nullptr);
+	const auto inspected = session.Inspect("data-factory.fork.retire-throw.branch");
+	CHECK(inspected.Status == DataFactoryStatus::Ok);
+	CHECK(inspected.WorldVersion == forked.WorldVersion);
+}
+
 TEST_CASE("data-factory restores paused checkpoints with rebuilt systems", "[world][data-factory]") {
 	Universe universe;
 	const WorldId world = MakeWorld(universe, "data-factory.roundtrip");
@@ -832,6 +1079,143 @@ TEST_CASE("data-factory backward seek replays contiguous fixed steps in scratch"
 	);
 }
 
+TEST_CASE(
+	"data-factory rehydration commits staged host state after a nonzero-tick restore", "[world][data-factory]"
+) {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.rehydrate-host");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	bool hostRuntimeLive = true;
+	bool hostRuntimePrepared = false;
+	unsigned prepares = 0;
+	unsigned commits = 0;
+	unsigned aborts = 0;
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrator({
+		.Prepare =
+			[&](Universe &candidate, WorldId restored, std::string &) {
+				prepares++;
+				hostRuntimePrepared = true;
+				candidate.Enter(restored, [](Store &, Scheduler &systems) {
+					systems.Add("data-factory.count", Phase::Simulation, [](Store &inner) {
+						inner.Each<Tally>([](Entity, Tally &tally) { tally.Value++; });
+					});
+				});
+				return true;
+			},
+		.Commit =
+			[&] {
+				commits++;
+				hostRuntimeLive = hostRuntimePrepared;
+				hostRuntimePrepared = false;
+			},
+		.Abort =
+			[&] {
+				aborts++;
+				hostRuntimePrepared = false;
+			},
+	});
+
+	REQUIRE(
+		session.Pause("data-factory.rehydrate-host", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	for (uint64_t tick = 0; tick < 2; ++tick) {
+		const auto before = session.Inspect("data-factory.rehydrate-host");
+		REQUIRE(
+			session.Step("data-factory.rehydrate-host", DataFactoryInterval{}, tick, before.WorldVersion)
+				.Status == DataFactoryStatus::Ok
+		);
+	}
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.rehydrate-host", checkpoint).Status == DataFactoryStatus::Ok);
+	const auto before = session.Inspect("data-factory.rehydrate-host");
+	REQUIRE(
+		session.Step("data-factory.rehydrate-host", DataFactoryInterval{}, 2, before.WorldVersion).Status ==
+		DataFactoryStatus::Ok
+	);
+
+	const auto restored = session.Restore("data-factory.rehydrate-host", checkpoint);
+	REQUIRE(restored.Status == DataFactoryStatus::Ok);
+	CHECK(restored.Clock.Tick == 2);
+	CHECK(Count(universe, universe.Find(Name("data-factory.rehydrate-host"))) == 2);
+	CHECK(prepares == 1);
+	CHECK(commits == 1);
+	CHECK(aborts == 0);
+	CHECK(hostRuntimeLive);
+	CHECK_FALSE(hostRuntimePrepared);
+}
+
+TEST_CASE(
+	"data-factory rehydration aborts staged host state when pause reconciliation refuses",
+	"[world][data-factory]"
+) {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.rehydrate-abort");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	bool refuseResume = false;
+	bool liveRuntime = true;
+	bool preparedRuntime = false;
+	unsigned commits = 0;
+	unsigned aborts = 0;
+	session.SetPauseParticipant([&](WorldId, DataFactoryPauseScope scope, bool paused, std::string &) {
+		return scope != DataFactoryPauseScope::AllSystems || paused || !refuseResume;
+	});
+	session.SetRehydrator({
+		.Prepare =
+			[&](Universe &candidate, WorldId restored, std::string &) {
+				preparedRuntime = true;
+				candidate.Enter(restored, [](Store &, Scheduler &systems) {
+					systems.Add("data-factory.count", Phase::Simulation, [](Store &inner) {
+						inner.Each<Tally>([](Entity, Tally &tally) { tally.Value++; });
+					});
+				});
+				return true;
+			},
+		.Commit =
+			[&] {
+				commits++;
+				liveRuntime = preparedRuntime;
+				preparedRuntime = false;
+			},
+		.Abort =
+			[&] {
+				aborts++;
+				preparedRuntime = false;
+			},
+	});
+
+	REQUIRE(
+		session.Pause("data-factory.rehydrate-abort", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	const auto paused = session.Inspect("data-factory.rehydrate-abort");
+	REQUIRE(
+		session.Step("data-factory.rehydrate-abort", DataFactoryInterval{}, 0, paused.WorldVersion).Status ==
+		DataFactoryStatus::Ok
+	);
+	REQUIRE(session.Resume("data-factory.rehydrate-abort", 1).Status == DataFactoryStatus::Ok);
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.rehydrate-abort", checkpoint).Status == DataFactoryStatus::Ok);
+	const auto active = session.Inspect("data-factory.rehydrate-abort");
+	REQUIRE(
+		session.Pause("data-factory.rehydrate-abort", DataFactoryPauseScope::AllSystems, active.Clock.Tick)
+			.Status == DataFactoryStatus::Ok
+	);
+	refuseResume = true;
+	const auto beforeRestore = session.Inspect("data-factory.rehydrate-abort");
+	const auto restored = session.Restore("data-factory.rehydrate-abort", checkpoint);
+	CHECK(restored.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(session.Inspect("data-factory.rehydrate-abort").WorldVersion == beforeRestore.WorldVersion);
+	CHECK(Count(universe, world) == 1);
+	CHECK(commits == 0);
+	CHECK(aborts == 1);
+	CHECK(liveRuntime);
+	CHECK_FALSE(preparedRuntime);
+}
+
 TEST_CASE("data-factory backward seek refuses replay across an action step", "[world][data-factory]") {
 	Universe universe;
 	MakeWorld(universe, "data-factory.seek-action");
@@ -863,6 +1247,196 @@ TEST_CASE("data-factory backward seek refuses replay across an action step", "[w
 		session.SeekBackward("data-factory.seek-action", 0, 1, after.WorldVersion).Status ==
 		DataFactoryStatus::StaleSnapshot
 	);
+}
+
+TEST_CASE(
+	"data-factory backward seek replays ordered action batches in a scratch world", "[world][data-factory]"
+) {
+	struct PendingActions {
+		std::vector<std::string> Names;
+	};
+	const auto installActions = [](Universe &host, WorldId target, std::shared_ptr<PendingActions> pending) {
+		host.Enter(target, [pending = std::move(pending)](Store &, Scheduler &systems) {
+			systems.Add("data-factory.actions", Phase::Simulation, [pending](Store &store) {
+				const int actions = static_cast<int>(pending->Names.size());
+				pending->Names.clear();
+				store.Each<Tally>([actions](Entity, Tally &tally) { tally.Value += actions; });
+			});
+		});
+	};
+
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.seek-actions");
+	BuildCountingWorld(universe, world);
+	const auto livePending = std::make_shared<PendingActions>();
+	installActions(universe, world, livePending);
+	DataFactorySession session(universe);
+	std::unordered_map<Universe *, std::shared_ptr<PendingActions>> candidatePending;
+	std::vector<std::string> replayed;
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrator({
+		.Prepare =
+			[&](Universe &candidate, WorldId target, std::string &) {
+				auto pending = std::make_shared<PendingActions>();
+				candidatePending.emplace(&candidate, pending);
+				candidate.Enter(target, [](Store &, Scheduler &systems) {
+					systems.Add("data-factory.count", Phase::Simulation, [](Store &store) {
+						store.Each<Tally>([](Entity, Tally &tally) { tally.Value++; });
+					});
+				});
+				installActions(candidate, target, std::move(pending));
+				return true;
+			},
+		.Commit = {},
+		.Abort = {},
+	});
+	session.SetActionExecutor([livePending](
+								  Universe &,
+								  WorldId,
+								  std::span<const DataFactoryAction> actions,
+								  DataFactoryActionCommit &commit,
+								  std::string &
+							  ) {
+		std::vector<std::string> names;
+		names.reserve(actions.size());
+		for (const DataFactoryAction &action : actions)
+			names.push_back(action.Name);
+		commit = [livePending, names = std::move(names)]() noexcept { livePending->Names = names; };
+		return true;
+	});
+	session.SetReplayActionExecutor([&candidatePending, &replayed](
+										Universe &candidate,
+										WorldId,
+										std::span<const DataFactoryAction> actions,
+										DataFactoryActionCommit &commit,
+										std::string &detail
+									) {
+		const auto found = candidatePending.find(&candidate);
+		if (found == candidatePending.end()) {
+			detail = "candidate action state is unavailable";
+			return false;
+		}
+		std::vector<std::string> names;
+		names.reserve(actions.size());
+		for (const DataFactoryAction &action : actions) {
+			names.push_back(action.Name);
+			replayed.push_back(action.Name);
+		}
+		commit = [pending = found->second, names = std::move(names)]() noexcept { pending->Names = names; };
+		return true;
+	});
+
+	REQUIRE(
+		session.Pause("data-factory.seek-actions", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	REQUIRE(session.Checkpoint("data-factory.seek-actions", checkpoint).Status == DataFactoryStatus::Ok);
+	const std::array actions{DataFactoryAction{.Name = "first"}, DataFactoryAction{.Name = "second"}};
+	const auto beforeAction = session.Inspect("data-factory.seek-actions");
+	REQUIRE(
+		session
+			.Step("data-factory.seek-actions", DataFactoryInterval{}, 0, beforeAction.WorldVersion, actions)
+			.Status == DataFactoryStatus::Ok
+	);
+	const auto beforeSecond = session.Inspect("data-factory.seek-actions");
+	REQUIRE(
+		session.Step("data-factory.seek-actions", DataFactoryInterval{}, 1, beforeSecond.WorldVersion)
+			.Status == DataFactoryStatus::Ok
+	);
+	CHECK(Count(universe, world) == 4);
+
+	const auto beforeSeek = session.Inspect("data-factory.seek-actions");
+	const auto sought =
+		session.SeekBackward("data-factory.seek-actions", 1, beforeSeek.Clock.Tick, beforeSeek.WorldVersion);
+	REQUIRE(sought.Status == DataFactoryStatus::Ok);
+	CHECK(sought.Clock.Tick == 1);
+	CHECK(sought.WorldVersion == beforeSeek.WorldVersion + 1);
+	CHECK(Count(universe, universe.Find(Name("data-factory.seek-actions"))) == 3);
+	CHECK(replayed == std::vector<std::string>{"first", "second"});
+}
+
+TEST_CASE(
+	"data-factory action replay refusal leaves the live world and revision unchanged", "[world][data-factory]"
+) {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "data-factory.seek-action-refusal");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	bool prepared = false;
+	bool aborted = false;
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	session.SetRehydrator({
+		.Prepare =
+			[&prepared](Universe &candidate, WorldId target, std::string &) {
+				prepared = true;
+				candidate.Enter(target, [](Store &, Scheduler &systems) {
+					systems.Add("data-factory.count", Phase::Simulation, [](Store &store) {
+						store.Each<Tally>([](Entity, Tally &tally) { tally.Value++; });
+					});
+				});
+				return true;
+			},
+		.Commit = {},
+		.Abort =
+			[&] {
+				aborted = prepared;
+				prepared = false;
+			},
+	});
+	session.SetActionExecutor([](Universe &,
+								 WorldId,
+								 std::span<const DataFactoryAction>,
+								 DataFactoryActionCommit &commit,
+								 std::string &) {
+		commit = [] {};
+		return true;
+	});
+	session.SetReplayActionExecutor([](Universe &,
+									   WorldId,
+									   std::span<const DataFactoryAction>,
+									   DataFactoryActionCommit &,
+									   std::string &detail) {
+		detail = "candidate runtime cannot replay this action";
+		return false;
+	});
+
+	REQUIRE(
+		session.Pause("data-factory.seek-action-refusal", DataFactoryPauseScope::AllSystems, 0).Status ==
+		DataFactoryStatus::Ok
+	);
+	std::string checkpoint;
+	REQUIRE(
+		session.Checkpoint("data-factory.seek-action-refusal", checkpoint).Status == DataFactoryStatus::Ok
+	);
+	const auto beforeAction = session.Inspect("data-factory.seek-action-refusal");
+	REQUIRE(
+		session
+			.Step(
+				"data-factory.seek-action-refusal",
+				DataFactoryInterval{},
+				0,
+				beforeAction.WorldVersion,
+				std::array{DataFactoryAction{.Name = "unsafe"}}
+			)
+			.Status == DataFactoryStatus::Ok
+	);
+	const auto beforeSecond = session.Inspect("data-factory.seek-action-refusal");
+	REQUIRE(
+		session.Step("data-factory.seek-action-refusal", DataFactoryInterval{}, 1, beforeSecond.WorldVersion)
+			.Status == DataFactoryStatus::Ok
+	);
+	const auto beforeSeek = session.Inspect("data-factory.seek-action-refusal");
+	const auto refused = session.SeekBackward(
+		"data-factory.seek-action-refusal", 1, beforeSeek.Clock.Tick, beforeSeek.WorldVersion
+	);
+	CHECK(refused.Status == DataFactoryStatus::RestoreIncomplete);
+	CHECK(refused.Detail == "candidate runtime cannot replay this action");
+	CHECK(session.Inspect("data-factory.seek-action-refusal").WorldVersion == beforeSeek.WorldVersion);
+	CHECK(session.Inspect("data-factory.seek-action-refusal").Clock.Tick == beforeSeek.Clock.Tick);
+	CHECK(Count(universe, world) == 2);
+	CHECK(aborted);
+	CHECK_FALSE(prepared);
 }
 
 TEST_CASE(

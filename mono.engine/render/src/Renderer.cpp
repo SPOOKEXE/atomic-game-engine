@@ -854,6 +854,7 @@ namespace engine::render {
 			  State->GBufferPipeline,
 			  State->DepthPeelPipeline,
 			  State->DepthLinearPipeline,
+			  State->CameraMotionPipeline,
 			  State->DepthComposePipeline,
 			  State->ColourComposePipeline,
 			  State->AmbientResponsePipeline,
@@ -2185,6 +2186,9 @@ namespace engine::render {
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return pbr.LinearDepth;
 		}
+		if (role == Impl::ResourceRole::CameraMotionVectors) {
+			return pbr.CameraMotionVectors;
+		}
 		if (role == Impl::ResourceRole::SecondSurfaceZ) {
 			return pbr.SecondSurfaceZ;
 		}
@@ -2499,6 +2503,7 @@ namespace engine::render {
 		const scene::WorldLighting previousLighting = CurrentLighting();
 		State->BatchActive = true;
 		State->DiscardPendingGraphHistoryWrites();
+		State->DataCaptureSources.clear();
 		State->MeshResidencyRecorded = false;
 		State->PreparedScopes.Clear();
 		State->BatchFailed = false;

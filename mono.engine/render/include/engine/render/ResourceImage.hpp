@@ -114,6 +114,9 @@ namespace engine::render {
 		// Set for the built-in second-surface pair. The string names the source
 		// depth format and its exact equality-bias rule.
 		std::string Provenance;
+		// The renderer frame that supplied the preceding verified camera for a
+		// camera-motion capture. Empty means this image carries no temporal fact.
+		std::optional<uint64_t> PreviousCameraMotionFrame;
 		// Owned top-left rows in the native Format, in little-endian order.
 		std::vector<std::byte> Pixels;
 		// Optional declared R32F capture input, copied in the same submission.

@@ -934,10 +934,14 @@ namespace engine::script {
 						 {"maximum_hooks", Number(capabilities.MaximumHooks)},
 						 {"maximum_connections", Number(capabilities.MaximumConnections)},
 						 {"maximum_batches", Number(capabilities.MaximumBatches)},
+						 {"maximum_capture_tickets", Number(capabilities.MaximumCaptureTickets)},
 						 {"maximum_readback_nodes", Number(capabilities.MaximumReadbackNodes)},
 						 {"maximum_retained_bytes", Number(capabilities.MaximumRetainedBytes)},
 						 {"maximum_pending_pumps", Number(capabilities.MaximumPendingPumps)},
 						 {"named_camera_selection", Boolean(capabilities.NamedCameraSelection)},
+						 {"same_frame_multi_camera", Boolean(capabilities.SameFrameMultiCamera)},
+						 {"maximum_same_frame_camera_views",
+						  Number(capabilities.MaximumSameFrameCameraViews)},
 						 {"maximum_camera_id_bytes", Number(capabilities.MaximumCameraIdBytes)},
 					 })},
 					{"reason", String(capabilities.Detail)},
@@ -3840,6 +3844,60 @@ namespace engine::script {
 				{"rows", Number(request.Rows)},
 				{"layers", Number(request.Layers)},
 				{"samples", Array(std::move(samples))},
+			})
+		};
+	}
+
+	DataSceneResult FindAuthoredNavmeshPath(ecs::Store &store, const DataSceneNavmeshPathRequest &request) {
+		const physics::AuthoredNavmeshPath path = physics::FindAuthoredNavmeshPath(
+			store, request.StartMetres, request.GoalMetres, request.VerticalToleranceMetres
+		);
+		const auto reason = [](physics::AuthoredNavmeshPath::Reason value) -> const char * {
+			switch (value) {
+			case physics::AuthoredNavmeshPath::Reason::None:
+				return "";
+			case physics::AuthoredNavmeshPath::Reason::PhysicsUnprepared:
+				return "physics_unprepared";
+			case physics::AuthoredNavmeshPath::Reason::PhysicsStale:
+				return "physics_stale";
+			case physics::AuthoredNavmeshPath::Reason::InvalidProbe:
+				return "invalid_probe";
+			case physics::AuthoredNavmeshPath::Reason::UnsupportedWalkableGeometry:
+				return "unsupported_walkable_geometry";
+			case physics::AuthoredNavmeshPath::Reason::SurfaceLimit:
+				return "surface_limit";
+			case physics::AuthoredNavmeshPath::Reason::EndpointUnavailable:
+				return "endpoint_unavailable";
+			case physics::AuthoredNavmeshPath::Reason::CorridorObstructed:
+				return "corridor_obstructed";
+			case physics::AuthoredNavmeshPath::Reason::NoPath:
+				return "no_path";
+			}
+			return "unknown";
+		};
+		std::vector<ScriptValue> points;
+		points.reserve(path.PointCount);
+		for (size_t index = 0; index < path.PointCount; ++index)
+			points.push_back(Array(
+				{Number(path.Points[index].X), Number(path.Points[index].Y), Number(path.Points[index].Z)}
+			));
+		return {
+			"ok",
+			Map({
+				{"status",
+				 String(
+					 path.Found		  ? "path_found"
+					 : path.Available ? "unknown"
+									  : "unavailable"
+				 )},
+				{"schema_version", String("authored-navmesh-path/v1")},
+				{"units", String("metres")},
+				{"path_found", Boolean(path.Found)},
+				{"reason",
+				 path.Why == physics::AuthoredNavmeshPath::Reason::None ? ScriptValue{}
+																		: String(reason(path.Why))},
+				{"points_metres", Array(std::move(points))},
+				{"supported_walkable_geometry", String("horizontal_analytic_box_tops")},
 			})
 		};
 	}

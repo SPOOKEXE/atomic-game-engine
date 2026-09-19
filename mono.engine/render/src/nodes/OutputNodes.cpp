@@ -487,9 +487,27 @@ namespace engine::render {
 			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 			const std::string *path = node != nullptr ? node->Parameter(core::Name("path")) : nullptr;
 			if (node != nullptr && !context.Reads.empty() && context.Reads.size() <= 6) {
-				const size_t slot = context.View == graph::RunContext::WHOLE_FRAME
-										? node->Integer(core::Name("view"), 0)
-										: recording.Request.TargetSlot;
+				std::vector<size_t> slots;
+				const bool frameCapture = context.View == graph::RunContext::WHOLE_FRAME;
+				const bool pinnedView = frameCapture && node->Parameter(core::Name("view")) != nullptr;
+				if (!frameCapture) {
+					slots.push_back(recording.Request.TargetSlot);
+				} else if (pinnedView) {
+					slots.push_back(node->Integer(core::Name("view"), 0));
+				} else {
+					for (const Impl::ResourceImageSlot &image : State->ResourceImages) {
+						const auto &request = image.Image.Request;
+						if (image.Phase != Impl::ResourceImagePhase::Queued ||
+							request.Pipeline != selectedPipeline->Name || request.Node != context.Name ||
+							std::find(slots.begin(), slots.end(), request.ViewSlot) != slots.end()) {
+							continue;
+						}
+						slots.push_back(request.ViewSlot);
+					}
+					// A capture node can also write an authored file without a resource-image
+					// request. Its historic unpinned binding is physical slot zero.
+					if (slots.empty()) slots.push_back(0);
+				}
 				graph::ResourceId colorId = context.Reads[0], depthId{}, normalId{}, ambientResponseId{},
 								  lightingBaselineId{}, directionalResponseId{};
 				for (size_t i = 0; i < node->ReadPorts.size(); ++i) {
@@ -513,47 +531,55 @@ namespace engine::render {
 				const auto *lightingBaselineDesc = selectedPipeline->Graph.FindResource(lightingBaselineId);
 				const auto *directionalResponseDesc =
 					selectedPipeline->Graph.FindResource(directionalResponseId);
-				const auto source = recording.ResourceTexture(colorId, slot, false);
-				const auto depth =
-					depthDesc ? recording.ResourceTexture(depthId, slot, false) : Impl::NamedTexture{};
-				auto normal =
-					normalDesc ? recording.ResourceTexture(normalId, slot, false) : Impl::NamedTexture{};
-				if (normal.IsValid() && slot < State->PbrSlots.size()) {
-					const auto &pbr = State->PbrSlots[slot];
-					if (normal.Texture == pbr.Normal && source.Width == pbr.Dimensions.ViewWidth &&
-						source.Height == pbr.Dimensions.ViewHeight && normal.Width >= source.Width &&
-						normal.Height >= source.Height) {
-						// Native GBuffer storage is padded; its rendered viewport begins at (0, 0).
-						// Copy that rectangle directly, preserving every packed normal bit.
-						normal.Width = source.Width;
-						normal.Height = source.Height;
+				for (const size_t slot : slots) {
+					const DataCaptureSource &captureSource = slot < State->DataCaptureSources.size()
+																 ? State->DataCaptureSources[slot]
+																 : State->ActiveDataCaptureSource;
+					const auto source = recording.ResourceTexture(colorId, slot, false);
+					const auto depth =
+						depthDesc ? recording.ResourceTexture(depthId, slot, false) : Impl::NamedTexture{};
+					auto normal =
+						normalDesc ? recording.ResourceTexture(normalId, slot, false) : Impl::NamedTexture{};
+					if (normal.IsValid() && slot < State->PbrSlots.size()) {
+						const auto &pbr = State->PbrSlots[slot];
+						if (normal.Texture == pbr.Normal && source.Width == pbr.Dimensions.ViewWidth &&
+							source.Height == pbr.Dimensions.ViewHeight && normal.Width >= source.Width &&
+							normal.Height >= source.Height) {
+							// Native GBuffer storage is padded; its rendered viewport begins at (0, 0).
+							// Copy that rectangle directly, preserving every packed normal bit.
+							normal.Width = source.Width;
+							normal.Height = source.Height;
+						}
 					}
+					const RenderObservationContext observation = DataFactoryObservation(
+						recording, context, selectedPipeline->Name, slot, captureSource
+					);
+					recording.Owner.Hooks().Observe(observation);
+					State->RecordResourceImages(
+						recording.Command,
+						observation,
+						captureSource,
+						selectedPipeline->Name,
+						context.Name,
+						slot,
+						desc != nullptr ? desc->Name : core::Name{},
+						source,
+						depthDesc != nullptr ? depthDesc->Name : core::Name{},
+						depth,
+						normalDesc ? normalDesc->Name : core::Name{},
+						normal,
+						ambientResponseDesc ? ambientResponseDesc->Name : core::Name{},
+						ambientResponseDesc ? recording.ResourceTexture(ambientResponseId, slot, false)
+											: Impl::NamedTexture{},
+						lightingBaselineDesc ? lightingBaselineDesc->Name : core::Name{},
+						lightingBaselineDesc ? recording.ResourceTexture(lightingBaselineId, slot, false)
+											 : Impl::NamedTexture{},
+						directionalResponseDesc ? directionalResponseDesc->Name : core::Name{},
+						directionalResponseDesc
+							? recording.ResourceTexture(directionalResponseId, slot, false)
+							: Impl::NamedTexture{}
+					);
 				}
-				const RenderObservationContext observation =
-					DataFactoryObservation(recording, context, selectedPipeline->Name, slot);
-				recording.Owner.Hooks().Observe(observation);
-				State->RecordResourceImages(
-					recording.Command,
-					observation,
-					selectedPipeline->Name,
-					context.Name,
-					slot,
-					desc != nullptr ? desc->Name : core::Name{},
-					source,
-					depthDesc != nullptr ? depthDesc->Name : core::Name{},
-					depth,
-					normalDesc ? normalDesc->Name : core::Name{},
-					normal,
-					ambientResponseDesc ? ambientResponseDesc->Name : core::Name{},
-					ambientResponseDesc ? recording.ResourceTexture(ambientResponseId, slot, false)
-										: Impl::NamedTexture{},
-					lightingBaselineDesc ? lightingBaselineDesc->Name : core::Name{},
-					lightingBaselineDesc ? recording.ResourceTexture(lightingBaselineId, slot, false)
-										 : Impl::NamedTexture{},
-					directionalResponseDesc ? directionalResponseDesc->Name : core::Name{},
-					directionalResponseDesc ? recording.ResourceTexture(directionalResponseId, slot, false)
-											: Impl::NamedTexture{}
-				);
 			}
 			if (node == nullptr || path == nullptr || path->empty() || authoredCapture.IsValid()) {
 				return true;

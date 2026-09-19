@@ -94,6 +94,14 @@ namespace engine::script {
 		uint8_t Layers = 0;
 	};
 
+	// A bounded path request over explicit authored walkable surfaces. Endpoint
+	// heights may differ from their supporting polygon by this tolerance only.
+	struct DataSceneNavmeshPathRequest {
+		core::Vector3 StartMetres;
+		core::Vector3 GoalMetres;
+		float VerticalToleranceMetres = 0.25f;
+	};
+
 	DataSceneResult GetCapabilities(const ecs::Store &store);
 	// Computes a conservative upper bound for the compact JSON representation
 	// used by the MCP adapter. Rejects values the adapter cannot serialize.
@@ -129,6 +137,7 @@ namespace engine::script {
 	DataSceneResult FilledOccupancy(ecs::Store &store, const DataSceneFilledOccupancyRequest &request);
 	DataSceneResult
 	SignedDistanceField(ecs::Store &store, const DataSceneSignedDistanceFieldRequest &request);
+	DataSceneResult FindAuthoredNavmeshPath(ecs::Store &store, const DataSceneNavmeshPathRequest &request);
 
 	const ServiceSurface &DataSceneServiceSurface();
 }

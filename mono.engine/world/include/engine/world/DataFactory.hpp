@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -130,6 +131,31 @@ namespace engine::world {
 	// callbacks. Without this hook a checkpoint is not restorable state.
 	using DataFactoryRehydrate = std::function<bool(Universe &, WorldId, std::string &)>;
 
+	// Publishes or discards host state prepared alongside a scratch universe.
+	// A runtime binds to the scratch store, so it cannot become visible until
+	// `Universe::ReplaceWith` commits. Abort runs for every failed candidate.
+	using DataFactoryRehydrateCommit = std::function<void()>;
+	using DataFactoryRehydrateAbort = std::function<void()>;
+	struct DataFactoryRehydrator {
+		DataFactoryRehydrate Prepare;
+		DataFactoryRehydrateCommit Commit;
+		DataFactoryRehydrateAbort Abort;
+	};
+
+	// Rebuilds and publishes host state for an isolated fork. Fork preparation
+	// cannot reuse the live-world rehydrator: its commit owns runtime state for
+	// the parent universe. The branch id is the host's stable ownership key.
+	using DataFactoryForkPrepare = std::function<bool(std::string_view, Universe &, WorldId, std::string &)>;
+	using DataFactoryForkCommit = std::function<void(std::string_view)>;
+	using DataFactoryForkAbort = std::function<void(std::string_view)>;
+	using DataFactoryForkRetire = std::function<void(std::string_view)>;
+	struct DataFactoryForkRehydrator {
+		DataFactoryForkPrepare Prepare;
+		DataFactoryForkCommit Commit;
+		DataFactoryForkAbort Abort;
+		DataFactoryForkRetire Retire;
+	};
+
 	// Freezes an external subsystem. `paused` is true for pause and false for
 	// resume. A host advertises a scope only after every relevant participant is
 	// installed through this hook.
@@ -183,6 +209,18 @@ namespace engine::world {
 		std::string Name;
 	};
 
+	// Forks one retained parent checkpoint into a separately owned universe.
+	// BranchId names that isolated runtime. The encoded world keeps its source
+	// name because Universe deliberately has no in-place rename operation.
+	struct DataFactoryForkRequest {
+		std::string InstanceId;
+		std::string CheckpointId;
+		std::string BranchId;
+		uint64_t ExpectedWorldEpoch = 0;
+		uint64_t ExpectedWorldVersion = 0;
+		uint64_t ExpectedTick = 0;
+	};
+
 	// An infallible host commit that runs at the exact paused tick boundary.
 	using DataFactoryActionCommit = std::function<void()>;
 
@@ -193,6 +231,13 @@ namespace engine::world {
 		Universe &, WorldId, std::span<const DataFactoryAction>, DataFactoryActionCommit &, std::string &
 	)>;
 
+	// Replays an accepted action batch against a scratch universe. It must not
+	// inspect or mutate the live host runtime, because a later candidate check
+	// may refuse the seek and discard this universe.
+	using DataFactoryReplayActionExecutor = std::function<bool(
+		Universe &, WorldId, std::span<const DataFactoryAction>, DataFactoryActionCommit &, std::string &
+	)>;
+
 	class DataFactorySession final {
 	  public:
 		explicit DataFactorySession(
@@ -200,10 +245,13 @@ namespace engine::world {
 		);
 
 		void SetRehydrate(DataFactoryRehydrate rehydrate);
+		void SetRehydrator(DataFactoryRehydrator rehydrator);
+		void SetForkRehydrator(DataFactoryForkRehydrator rehydrator);
 		void SetPauseParticipant(DataFactoryPauseParticipant participant);
 		void SetWorldLifecycle(DataFactoryWorldLifecycle lifecycle);
 		void SetInterventionExecutor(DataFactoryInterventionExecutor executor);
 		void SetActionExecutor(DataFactoryActionExecutor executor);
+		void SetReplayActionExecutor(DataFactoryReplayActionExecutor executor);
 		void SetRenderOnlyPresenter(DataFactoryRenderOnlyPresenter presenter);
 
 		DataFactoryReply
@@ -240,9 +288,12 @@ namespace engine::world {
 		DataFactoryRenderOnlyReply CompleteRenderOnly(DataFactoryRenderOnlyCompletion completion);
 		DataFactoryRenderOnlyReply PollRenderOnly(std::string_view instanceId, uint64_t operationId) const;
 		DataFactoryReply Checkpoint(std::string_view instanceId, std::string &checkpointId);
+		// Restores the retained checkpoint into a separately owned universe. The
+		// parent remains byte-for-byte untouched if preparation or validation fails.
+		DataFactoryReply Fork(const DataFactoryForkRequest &request);
 		DataFactoryReply Restore(std::string_view instanceId, std::string_view checkpointId);
-		// Rebuilds an earlier paused state in scratch, then replays only contiguous
-		// action-free fixed steps. Unobserved and action-bearing ticks are barriers.
+		// Rebuilds an earlier paused state in scratch, then replays contiguous
+		// fixed steps. Action-bearing ticks require the candidate-safe executor.
 		DataFactoryReply SeekBackward(
 			std::string_view instanceId, uint64_t targetTick, uint64_t expectedTick, uint64_t expectedVersion
 		);
@@ -266,6 +317,9 @@ namespace engine::world {
 		}
 
 		bool HasCheckpoint(std::string_view checkpointId) const;
+		bool OwnsFork(std::string_view branchId) const;
+		Universe *ForkUniverse(std::string_view branchId);
+		const Universe *ForkUniverse(std::string_view branchId) const;
 		// Product hosts use this to distinguish an MCP-owned world from a compatibility world.
 		bool OwnsWorld(std::string_view instanceId) const;
 		// Control adapters enter a verified lifecycle world through this one owner.
@@ -282,6 +336,7 @@ namespace engine::world {
 
 		WorldId Resolve(std::string_view instanceId) const;
 		DataFactoryClock ClockOf(WorldId world) const;
+		DataFactoryClock ClockOf(const Universe &universe, WorldId world) const;
 		DataFactoryReply Reply(WorldId world, DataFactoryStatus status, std::string detail) const;
 		DataFactoryRenderOnlyReply RenderReply(
 			WorldId world,
@@ -309,12 +364,20 @@ namespace engine::world {
 		uint64_t Version = 0;
 		uint64_t NextCheckpoint = 1;
 		uint64_t NextRenderOnly = 1;
+		uint64_t LastForkEpoch = 1;
 		uint64_t ReplayGeneration = 1;
 		DataFactoryRehydrate Rehydrate;
+		DataFactoryRehydrateCommit RehydrateCommit;
+		DataFactoryRehydrateAbort RehydrateAbort;
+		DataFactoryForkPrepare ForkPrepare;
+		DataFactoryForkCommit ForkCommit;
+		DataFactoryForkAbort ForkAbort;
+		DataFactoryForkRetire ForkRetire;
 		DataFactoryPauseParticipant Participant;
 		DataFactoryWorldLifecycle WorldLifecycle;
 		DataFactoryInterventionExecutor InterventionExecutor;
 		DataFactoryActionExecutor ActionExecutor;
+		DataFactoryReplayActionExecutor ReplayActionExecutor;
 		DataFactoryRenderOnlyPresenter Presenter;
 		struct OwnedWorld {
 			// Retain episode metadata beside ownership until package manifests carry it.
@@ -332,10 +395,18 @@ namespace engine::world {
 		std::deque<uint64_t> RenderOnlyTerminalOrder;
 		std::unordered_map<std::string, DataFactoryCheckpoint> Checkpoints;
 		std::vector<std::string> CheckpointOrder;
+		struct ForkedWorld {
+			std::unique_ptr<Universe> Realm;
+			WorldId World;
+			uint64_t Epoch = 0;
+			uint64_t Version = 0;
+		};
+		std::unordered_map<std::string, ForkedWorld> Forks;
 		struct ReplayStep {
 			uint64_t Generation = 0;
 			uint64_t BeforeTick = 0;
 			DataFactoryInterval Interval;
+			std::vector<DataFactoryAction> Actions;
 		};
 		std::deque<ReplayStep> ReplaySteps;
 		size_t RetainedCheckpointBytes = 0;

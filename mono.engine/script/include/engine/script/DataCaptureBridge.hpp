@@ -6,10 +6,12 @@
 
 #include <engine/script/Codec.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -230,10 +232,17 @@ namespace engine::script {
 		uint32_t MaximumHooks = 0;
 		uint32_t MaximumConnections = 0;
 		uint32_t MaximumBatches = 0;
+		// Queue admission is separately bounded from live hook connections and
+		// readback batches. A coordinated multi-camera request cannot exceed it.
+		uint32_t MaximumCaptureTickets = 0;
 		uint32_t MaximumReadbackNodes = 0;
 		uint64_t MaximumRetainedBytes = 0;
 		uint32_t MaximumPendingPumps = 0;
 		bool NamedCameraSelection = false;
+		// A group records several camera views from one admitted render frame.
+		// It says nothing about physical GPU overlap between those views.
+		bool SameFrameMultiCamera = false;
+		uint32_t MaximumSameFrameCameraViews = 0;
 		uint32_t MaximumCameraIdBytes = 0;
 		std::string Detail;
 	};
@@ -248,6 +257,20 @@ namespace engine::script {
 			uint64_t &ticket,
 			std::string &detail
 		) = 0;
+		// Admits a coordinated camera group atomically. Every request must name
+		// one instance, snapshot, pipeline, capture node, and logical view slot.
+		// Each camera id must be unique. Implementations that do not provide one
+		// render-frame group refuse without writing tickets.
+		virtual bool QueueGroup(
+			std::string_view,
+			std::span<const DataCaptureBridgeRequest>,
+			std::span<uint64_t> tickets,
+			std::string &detail
+		) {
+			std::fill(tickets.begin(), tickets.end(), uint64_t{0});
+			detail = "same-frame multi-camera capture is unavailable";
+			return false;
+		}
 		virtual bool Poll(
 			std::string_view instanceId, uint64_t ticket, DataCaptureBridgePoll &poll, std::string &detail
 		) = 0;

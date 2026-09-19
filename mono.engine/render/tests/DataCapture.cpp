@@ -1071,6 +1071,80 @@ TEST_CASE(
 	REQUIRE(bridge.Release("data-world", currentTicket, detail));
 }
 
+TEST_CASE("cancelling a same-frame camera group unblocks later groups", "[render][data-capture]") {
+	engine::scene::RegisterSceneComponents();
+	engine::world::Universe worlds;
+	const auto world = worlds.Create({.Name = engine::core::Name("data-world")});
+	worlds.Enter(world, [](engine::ecs::Store &store) {
+		auto addCamera = [&](std::string_view id) {
+			const auto camera = store.Create();
+			store.Set(camera, engine::scene::Transform{});
+			store.Set(camera, engine::scene::Camera{});
+			engine::ecs::AttributeValue identity;
+			identity.Type = engine::ecs::PropertyType::String;
+			identity.String = id;
+			REQUIRE(engine::ecs::SetAttribute(store, camera, engine::core::Name("DataFactoryId"), identity));
+		};
+		addCamera("camera/first");
+		addCamera("camera/second");
+	});
+	engine::world::DataFactorySession session(worlds);
+	session.SetPauseParticipant(
+		[world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
+			return candidate == world;
+		}
+	);
+	REQUIRE(
+		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-world", snapshot).Status == engine::world::DataFactoryStatus::Ok);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("same-frame-cancellation-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	auto firstCamera = Request();
+	firstCamera.SnapshotId = snapshot;
+	firstCamera.Pipeline = pipeline.Text();
+	firstCamera.CameraId = "camera/first";
+	auto secondCamera = firstCamera;
+	secondCamera.CameraId = "camera/second";
+	const std::array requests{firstCamera, secondCamera};
+	std::array<uint64_t, 2> cancelledTickets{};
+	std::array<uint64_t, 2> laterTickets{};
+	REQUIRE(bridge.QueueGroup("data-world", requests, cancelledTickets, detail));
+	REQUIRE(bridge.QueueGroup("data-world", requests, laterTickets, detail));
+
+	bridge.Cancel("data-world", cancelledTickets.front());
+	bridge.Pump();
+	engine::script::DataCaptureBridgePoll poll;
+	for (const uint64_t ticket : cancelledTickets) {
+		REQUIRE(bridge.Poll("data-world", ticket, poll, detail));
+		CHECK(poll.Status == "cancelled");
+	}
+	for (const uint64_t ticket : cancelledTickets)
+		REQUIRE(bridge.Release("data-world", ticket, detail));
+
+	std::vector<View> views;
+	ScriptDataCaptureBridge::PreparedBatch prepared;
+	REQUIRE(bridge.PrepareBatch(MutationView(snapshot, pipeline), views, &prepared));
+	REQUIRE(views.size() == laterTickets.size());
+	REQUIRE(prepared.Views.size() == laterTickets.size());
+	for (size_t index = 0; index < laterTickets.size(); ++index)
+		CHECK(prepared.Views[index].Captures == std::vector<uint64_t>{laterTickets[index]});
+	bridge.AbortPreparedBatch(prepared);
+	for (const uint64_t ticket : laterTickets)
+		REQUIRE(bridge.Release("data-world", ticket, detail));
+}
+
 TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data-capture]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
@@ -1082,6 +1156,8 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 		capabilities.Channels.end()
 	);
 	CHECK(capabilities.NamedCameraSelection);
+	CHECK(capabilities.SameFrameMultiCamera);
+	CHECK(capabilities.MaximumSameFrameCameraViews == 6);
 	CHECK(capabilities.MaximumCameraIdBytes == engine::script::MAX_DATA_SCENE_ID_BYTES);
 	const size_t observationHooks = static_cast<size_t>(
 		std::count_if(capabilities.HookRecords.begin(), capabilities.HookRecords.end(), [](const auto &hook) {
@@ -1162,6 +1238,26 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 
 	uint64_t firstTicket = 0;
 	uint64_t secondTicket = 0;
+	std::array<uint64_t, 2> groupTickets{};
+	auto firstCamera = Request();
+	firstCamera.CameraId = "camera/first";
+	auto secondCamera = firstCamera;
+	secondCamera.CameraId = "camera/second";
+	const std::array groupRequests{firstCamera, secondCamera};
+	REQUIRE(first.QueueGroup("data-world", groupRequests, groupTickets, detail));
+	CHECK(groupTickets[0] != 0);
+	CHECK(groupTickets[1] != 0);
+	CHECK(groupTickets[0] != groupTickets[1]);
+	const std::array duplicateRequests{firstCamera, firstCamera};
+	groupTickets = {17, 19};
+	CHECK_FALSE(first.QueueGroup("data-world", duplicateRequests, groupTickets, detail));
+	CHECK(groupTickets == std::array<uint64_t, 2>{});
+	auto nonzeroSlot = groupRequests;
+	nonzeroSlot[0].ViewSlot = 1;
+	nonzeroSlot[1].ViewSlot = 1;
+	groupTickets = {17, 19};
+	CHECK_FALSE(first.QueueGroup("data-world", nonzeroSlot, groupTickets, detail));
+	CHECK(groupTickets == std::array<uint64_t, 2>{});
 	REQUIRE(first.Queue("data-world", Request(), firstTicket, detail));
 	REQUIRE(second.Queue("data-world", Request(), secondTicket, detail));
 	first.Cancel("another-world", firstTicket);

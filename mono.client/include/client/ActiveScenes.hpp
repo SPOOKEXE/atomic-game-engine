@@ -16,9 +16,15 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace client {
+	// Identifies a camera binding across renders while rejecting a replaced store
+	// or a new entity with the same authored path.
+	std::string CameraTemporalId(
+		const engine::core::Name &world, const engine::ecs::Store &store, engine::ecs::Entity camera
+	);
 
 	// One copied active-camera packet, ordered by its world's stable name and
 	// then its process-local handle. `View` borrows the two owned packets below.
@@ -49,11 +55,14 @@ namespace client {
 		// @param universe The worlds and their presentation lanes.
 		// @param requests The product views to collect.
 		// @param extent Pixel extent used by camera-dependent spatial layers.
+		// @param frozen Copies current rows without PreRender. Only an immutable
+		// data-factory capture uses this path after its snapshot barrier.
 		// @return The number of active camera packets collected.
 		size_t Collect(
 			engine::world::Universe &universe,
 			std::span<const ActiveSceneDemand> requests,
-			const engine::core::Vector2 &extent
+			const engine::core::Vector2 &extent,
+			bool frozen = false
 		);
 
 		// Builds one camera batch and invokes its sink exactly once. Offscreen
@@ -62,12 +71,35 @@ namespace client {
 		engine::render::FrameResult SubmitBatch(
 			engine::world::WorldId displayedWorld,
 			const engine::render::View &displayedView,
+			std::span<const engine::render::View> captureViews,
 			uint32_t width,
 			uint32_t height,
 			bool offscreenDisplayed,
 			std::span<const engine::render::WorldContentOwner> foreignContentOwners,
-			const std::function<engine::render::FrameResult(std::span<const engine::render::View>)> &submit
+			const std::function<bool(std::span<engine::render::View>)> &prepareCaptures,
+			const std::function<engine::render::FrameResult(std::span<engine::render::View>)> &submit
 		);
+		engine::render::FrameResult SubmitBatch(
+			engine::world::WorldId displayedWorld,
+			const engine::render::View &displayedView,
+			uint32_t width,
+			uint32_t height,
+			bool offscreenDisplayed,
+			std::span<const engine::render::WorldContentOwner> foreignContentOwners,
+			const std::function<engine::render::FrameResult(std::span<engine::render::View>)> &submit
+		) {
+			return SubmitBatch(
+				displayedWorld,
+				displayedView,
+				{},
+				width,
+				height,
+				offscreenDisplayed,
+				foreignContentOwners,
+				{},
+				submit
+			);
+		}
 
 		// The owned packets in deterministic product order.
 		std::span<const ActiveScene> Scenes() const {

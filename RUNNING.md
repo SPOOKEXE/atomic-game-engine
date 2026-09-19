@@ -3487,12 +3487,31 @@ channel results and `limits`. Each operation entry gives the name of a
 registered callable tool and its `input_schema`. With the data-factory host
 enabled, the registered groups are DataFactory (`lifecycle_inspect`, `pause`,
 `resume`, `step`, `snapshot`, `checkpoint`), DataCapture (`capture`,
-`poll_capture`, `get_resource`, `release_capture`, `cancel_capture`) and
+`capture_multi_camera`, `poll_capture`, `get_resource`, `release_capture`, `cancel_capture`) and
 DataScene (`get_scene_snapshot`, `get_camera_rendering_data`,
-`get_capture_channels`, `get_resources`). Unsupported results are reported
-per host: checkpoint needs a real rehydrator, nonempty step actions need a
-host executor, and capture channels or backends are limited by the active
-render bridge.
+`get_capture_channels`, `get_resources`, `get_authored_navmesh_path`).
+`get_authored_navmesh_path` takes `schema_version: "authored-navmesh-path/v1"`,
+`world_id`, an exact `lifecycle` object with `tick`, `world_epoch` and
+`world_version`, `snapshot_id`, finite three element `start_metres` and
+`goal_metres`, and an optional `vertical_tolerance_metres` from 0 to 10.
+It routes across connected authored `BasePart` surfaces marked `Walkable`,
+using horizontal analytic box tops and a zero-radius point route. The result
+is bound to the supplied lifecycle and retained snapshot. Unsupported or
+stale physics, invalid endpoints, obstructed corridors and routes without
+proof return `unknown` with a reason. The result does not establish global
+navigability. Unsupported results are reported
+per host: checkpoint restore requires a compatible rehydrator and refuses
+non-serializable script VM state, nonempty step actions need a host executor,
+action-bearing backward seeks need a candidate-safe replay executor, and
+capture channels or backends are limited by the active render bridge.
+`capture_multi_camera` accepts 2 to 6 distinct named camera ids
+against one exact paused snapshot. Each camera must request `view_slot: 0`; the
+host maps physical view slots internally. The current bridge allows six capture
+tickets. The cameras are grouped into one `Renderer::Render` frame, so the
+result reports `same_renderer_frame: true`,
+`atomic: false` and `atomicity: "same_renderer_frame_not_simulation_atomic"`.
+The operation only queues the tickets. The caller submits one `render_only` frame,
+then polls every capture ticket.
 
 Requested channel names must be lowercase ASCII identifiers, at most 128 bytes,
 with at most 64 names per request. The active host reports unavailable channels

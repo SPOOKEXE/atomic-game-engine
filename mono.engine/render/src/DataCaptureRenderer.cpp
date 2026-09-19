@@ -21,10 +21,18 @@ namespace engine::render {
 				   channel == DataCaptureChannel::PbrTransmission;
 		}
 
+		bool UnimplementedTemporalFact(DataCaptureChannel channel) {
+			return channel == DataCaptureChannel::OpticalFlow;
+		}
+
 		const char *UnavailableProvenance(DataCaptureChannel channel) {
 			return channel == DataCaptureChannel::PbrSpecular
 					   ? "unavailable/authored_specular_not_in_current_material_model/v1"
-					   : "unavailable/authored_transmission_not_in_current_material_model/v1";
+				   : channel == DataCaptureChannel::PbrTransmission
+					   ? "unavailable/authored_transmission_not_in_current_material_model/v1"
+				   : channel == DataCaptureChannel::MotionVectors
+					   ? "unavailable/camera_reprojection_history_not_verified/v1"
+					   : "unavailable/optical_flow_not_implemented/v1";
 		}
 
 		bool UniqueChannels(std::span<const DataCaptureChannel> channels) {
@@ -60,7 +68,9 @@ namespace engine::render {
 			plane.Channel = channel;
 			plane.Status = DataCaptureStatus::Unsupported;
 			plane.CaptureNode = ticket.CaptureNode;
-			if (AuthoredFactUnavailable(channel)) plane.Provenance = UnavailableProvenance(channel);
+			if (AuthoredFactUnavailable(channel) || channel == DataCaptureChannel::MotionVectors ||
+				channel == DataCaptureChannel::OpticalFlow)
+				plane.Provenance = UnavailableProvenance(channel);
 			return plane;
 		}
 
@@ -220,6 +230,20 @@ namespace engine::render {
 				);
 				if (plane.Status == DataCaptureStatus::Ready) plane.Provenance = image.Provenance;
 				break;
+			case DataCaptureChannel::MotionVectors:
+				primary(
+					core::Name("camera-motion-vectors"),
+					DataCaptureScalar::Float16,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::RG16_Float
+				);
+				if (plane.Status == DataCaptureStatus::Ready)
+					plane.Provenance = "camera_reprojection/v1;components=delta_x_delta_y;units=pixels;"
+									   "surface=visible_static_builtin_opaque_or_masked;object_motion=false;"
+									   "disocclusion=unavailable;camera_history=verified";
+				if (plane.Status == DataCaptureStatus::Ready)
+					plane.PreviousCameraMotionFrame = image.PreviousCameraMotionFrame;
+				break;
 			default:
 				break;
 			}
@@ -262,7 +286,7 @@ namespace engine::render {
 		};
 		std::vector<core::Name> resourceNodes;
 		for (const DataCaptureChannel channel : request.Channels) {
-			if (AuthoredFactUnavailable(channel)) {
+			if (AuthoredFactUnavailable(channel) || UnimplementedTemporalFact(channel)) {
 				queued.ChannelResourceIndices.push_back(NO_DATA_CAPTURE_RESOURCE);
 				continue;
 			}

@@ -7,7 +7,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -191,7 +193,56 @@ namespace {
 				{"layers", layers},
 			};
 		}
+
+		json NavmeshRequest() {
+			json request = FilledRequest(1, 1, 1);
+			request["schema_version"] = "authored-navmesh-path/v1";
+			request.erase("minimum_metres");
+			request.erase("maximum_metres");
+			request.erase("columns");
+			request.erase("rows");
+			request.erase("layers");
+			request["start_metres"] = {-0.5, 0.5, 0.0};
+			request["goal_metres"] = {2.5, 0.5, 0.0};
+			return request;
+		}
 	};
+}
+
+TEST_CASE("authored navmesh MCP is snapshot fenced and keeps unknown routes honest", "[control][navmesh]") {
+	Fixture fixture;
+	fixture.Worlds.Enter(fixture.Id, [](engine::ecs::Store &store) {
+		auto part = [](Vector3 position) {
+			return engine::scene::PartDesc{
+				CFrame{position}, {2, 1, 2}, {}, {}, {}, engine::scene::ShapeKind::Box, false
+			};
+		};
+		const Entity left = engine::scene::MakePart(store, part({0, 0, 0}));
+		const Entity right = engine::scene::MakePart(store, part({2, 0, 0}));
+		store.Set<engine::scene::AuthoredAffordance>(
+			left, {Name("nav/left"), engine::scene::AuthoredAffordanceKind::Walkable, true}
+		);
+		store.Set<engine::scene::AuthoredAffordance>(
+			right, {Name("nav/right"), engine::scene::AuthoredAffordanceKind::Walkable, true}
+		);
+		PreparePhysicsWorld(store, 4.0f);
+		SyncBroadphase(store);
+	});
+	json request = fixture.NavmeshRequest();
+	bool failed = false;
+	const json reply = Call(fixture.Control, request, failed, "get_authored_navmesh_path");
+	CHECK_FALSE(failed);
+	CHECK(reply.at("status") == "path_found");
+	CHECK(reply.at("snapshot_id") == request.at("snapshot_id"));
+	json stale = request;
+	stale["lifecycle"]["world_version"] = stale["lifecycle"]["world_version"].get<uint64_t>() + 1;
+	const json rejected = Call(fixture.Control, stale, failed, "get_authored_navmesh_path");
+	CHECK(failed);
+	CHECK(rejected.dump().find("version_conflict") != std::string::npos);
+	json missing = request;
+	missing["snapshot_id"] = "missing";
+	Call(fixture.Control, missing, failed, "get_authored_navmesh_path");
+	CHECK(failed);
 }
 
 TEST_CASE(

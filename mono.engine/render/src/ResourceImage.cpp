@@ -194,7 +194,8 @@ namespace engine::render {
 						   (request.Delivery != ResourceImageDelivery::Resident || !residentR8Source) &&
 						   (node->Scope == graph::NodeScope::View ||
 							(node->Scope == graph::NodeScope::Frame &&
-							 node->Integer(core::Name("view"), 0) == request.ViewSlot));
+							 (node->Parameter(core::Name("view")) == nullptr ||
+							  node->Integer(core::Name("view"), 0) == request.ViewSlot)));
 				break;
 			}
 			if (!declared) return false;
@@ -454,6 +455,7 @@ namespace engine::render {
 	void Renderer::Impl::RecordResourceImages(
 		SDL_GPUCommandBuffer *command,
 		const RenderObservationContext &observation,
+		const DataCaptureSource &captureSource,
 		core::Name pipeline,
 		core::Name node,
 		size_t viewSlot,
@@ -499,25 +501,25 @@ namespace engine::render {
 				continue;
 			ENGINE_PROFILE("resource image download");
 			if (!request.ExpectedSnapshotId.empty() &&
-				request.ExpectedSnapshotId != ActiveDataCaptureSource.SnapshotId) {
+				request.ExpectedSnapshotId != captureSource.SnapshotId) {
 				slot.Image.Status = ResourceImageStatus::Failed;
 				slot.Phase = ResourceImagePhase::Ready;
 				continue;
 			}
 			slot.Image.CaptureFrame = FrameCounter;
 			slot.Image.Observation = observation;
-			slot.Image.SnapshotId = ActiveDataCaptureSource.SnapshotId;
-			const glm::mat4 camera = ActiveDataCaptureSource.CameraFrame.ToMatrix();
+			slot.Image.SnapshotId = captureSource.SnapshotId;
+			const glm::mat4 camera = captureSource.CameraFrame.ToMatrix();
 			for (size_t column = 0; column < 4; ++column)
 				for (size_t row = 0; row < 4; ++row)
 					slot.Image.CameraWorldFromCamera[column * 4 + row] = camera[column][row];
-			slot.Image.CameraFieldOfViewRadians = ActiveDataCaptureSource.Camera.FieldOfViewRadians;
-			slot.Image.CameraProjectionAvailable = ActiveDataCaptureSource.ProjectionAvailable;
-			slot.Image.CameraProjection = ActiveDataCaptureSource.Projection;
-			slot.Image.CameraNearPlane = ActiveDataCaptureSource.Camera.NearPlane;
-			slot.Image.CameraFarPlane = ActiveDataCaptureSource.Camera.FarPlane;
-			slot.Image.CaptureWidth = ActiveDataCaptureSource.Width;
-			slot.Image.CaptureHeight = ActiveDataCaptureSource.Height;
+			slot.Image.CameraFieldOfViewRadians = captureSource.Camera.FieldOfViewRadians;
+			slot.Image.CameraProjectionAvailable = captureSource.ProjectionAvailable;
+			slot.Image.CameraProjection = captureSource.Projection;
+			slot.Image.CameraNearPlane = captureSource.Camera.NearPlane;
+			slot.Image.CameraFarPlane = captureSource.Camera.FarPlane;
+			slot.Image.CaptureWidth = captureSource.Width;
+			slot.Image.CaptureHeight = captureSource.Height;
 			slot.Image.Resource = resource;
 			const bool builtInOcclusion = resource == core::Name("occlusion") && viewSlot < PbrSlots.size() &&
 										  source.Texture == PbrSlots[viewSlot].Occlusion;
@@ -532,7 +534,24 @@ namespace engine::render {
 											  viewSlot < PbrSlots.size() &&
 											  source.Texture == PbrSlots[viewSlot].SecondSurfaceValidity &&
 											  depth.Texture == PbrSlots[viewSlot].SecondSurfaceDepth;
+			const bool builtInCameraMotion = resource == core::Name("camera-motion-vectors") &&
+											 viewSlot < PbrSlots.size() &&
+											 source.Texture == PbrSlots[viewSlot].CameraMotionVectors;
+			static int debugReadbackMotion = 0;
+			if (resource == core::Name("camera-motion-vectors") && debugReadbackMotion++ < 8)
+				ENGINE_WARN("motion readback debug frame {} slot {} built-in {} produced {} source {} target {}",
+					FrameCounter, viewSlot, builtInCameraMotion,
+					viewSlot < PbrSlots.size() && PbrSlots[viewSlot].CameraMotionProduced,
+					static_cast<const void *>(source.Texture),
+					viewSlot < PbrSlots.size() ? static_cast<const void *>(PbrSlots[viewSlot].CameraMotionVectors) : nullptr);
 			slot.Image.Provenance = builtInSecondSurface ? SecondSurfaceProvenance(DepthFormat) : "";
+			if (builtInCameraMotion && !PbrSlots[viewSlot].CameraMotionProduced) {
+				slot.Image.Status = ResourceImageStatus::Unsupported;
+				slot.Phase = ResourceImagePhase::Ready;
+				continue;
+			}
+			if (builtInCameraMotion)
+				slot.Image.PreviousCameraMotionFrame = PbrSlots[viewSlot].CameraMotionSourceFrame;
 			slot.Image.NormalResource = normalResource;
 			slot.Image.AmbientResponseResource = ambientResponseResource;
 			slot.Image.LightingBaselineResource = lightingBaselineResource;
@@ -554,6 +573,9 @@ namespace engine::render {
 			for (size_t plane = 0; plane < count; ++plane)
 				valid = valid && planes[plane]->IsValid() && planes[plane]->Format == formats[plane] &&
 						planes[plane]->Width == source.Width && planes[plane]->Height == source.Height;
+			if (resource == core::Name("camera-motion-vectors") && debugReadbackMotion <= 8)
+				ENGINE_WARN("motion readback validity supported {} valid {} extent {}x{} format {} count {}",
+					supportedSource, valid, source.Width, source.Height, int(source.Format), count);
 			if (!valid) {
 				const std::array names{
 					resource,

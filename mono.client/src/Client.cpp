@@ -57,6 +57,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <client/Client.hpp>
 #include <client/DataScriptPackage.hpp>
@@ -79,6 +80,30 @@ namespace client {
 	using engine::render::ProfilerTab;
 
 	namespace {
+		uint64_t MixCameraTemporal(uint64_t state, uint64_t value) {
+			return (state ^ value) * 1099511628211ull;
+		}
+
+		uint64_t CameraProjectionSignature(const engine::render::View &view) {
+			uint64_t signature = 1469598103934665603ull;
+			const auto addFloat = [&signature](float value) {
+				signature = MixCameraTemporal(signature, std::bit_cast<uint32_t>(value));
+			};
+			addFloat(view.Camera.FieldOfViewRadians);
+			addFloat(view.Camera.NearPlane);
+			addFloat(view.Camera.FarPlane);
+			signature = MixCameraTemporal(signature, view.Camera.ImageWidth);
+			signature = MixCameraTemporal(signature, view.Camera.ImageHeight);
+			signature = MixCameraTemporal(signature, view.Target == nullptr ? 0 : view.Target->Width);
+			signature = MixCameraTemporal(signature, view.Target == nullptr ? 0 : view.Target->Height);
+			if (!view.Projection) return MixCameraTemporal(signature, 0);
+			signature = MixCameraTemporal(signature, 1);
+			for (size_t column = 0; column < 4; ++column)
+				for (size_t row = 0; row < 4; ++row)
+					addFloat((*view.Projection)[column][row]);
+			return signature;
+		}
+
 		// Parses an exact-length hexadecimal value into `out`.
 		bool ParseHex(std::string_view text, std::span<std::byte> out) {
 			if (text.size() != out.size() * 2) {
@@ -525,6 +550,35 @@ namespace client {
 				};
 			});
 			DataLifecycle = std::make_shared<engine::script::QueuedDataLifecycleBridge>(*DataFactory);
+			FactoryRehydrator = std::make_unique<DataFactoryRehydrator>(
+				*Universe_,
+				Runtimes,
+				Settings.Entities,
+				static_cast<uint32_t>(Settings.Width),
+				static_cast<uint32_t>(Settings.Height),
+				DataCapture,
+				DataLifecycle
+			);
+			DataFactory->SetRehydrator({
+				.Prepare = [this](
+							   auto &candidate, auto world, auto &detail
+						   ) { return FactoryRehydrator->Prepare(candidate, world, detail); },
+				.Commit = [this]() noexcept { FactoryRehydrator->Commit(); },
+				.Abort = [this]() noexcept { FactoryRehydrator->Abort(); },
+			});
+			DataFactory->SetForkRehydrator({
+				.Prepare = [this](
+							   std::string_view branchId,
+							   engine::world::Universe &branch,
+							   engine::world::WorldId world,
+							   std::string &detail
+						   ) { return FactoryRehydrator->PrepareFork(branchId, branch, world, detail); },
+				.Commit = [this](std::string_view branchId) { FactoryRehydrator->CommitFork(branchId); },
+				.Abort =
+					[this](std::string_view branchId) noexcept { FactoryRehydrator->AbortFork(branchId); },
+				.Retire =
+					[this](std::string_view branchId) noexcept { FactoryRehydrator->RetireFork(branchId); },
+			});
 			DataFactory->SetPauseParticipant([this](
 												 engine::world::WorldId world,
 												 engine::world::DataFactoryPauseScope scope,
@@ -2687,6 +2741,40 @@ namespace client {
 		);
 	}
 
+	void Client::StampCameraTemporalSamples(std::span<engine::render::View> views) {
+		for (engine::render::View &view : views) {
+			if (view.CameraTemporalId.empty()) {
+				view.CameraTemporalSequence = 0;
+				view.CameraCut = true;
+				continue;
+			}
+
+			uint64_t worldEpoch = 0;
+			if (DataFactory && view.WorldName.IsValid()) {
+				const auto current = DataFactory->Inspect(view.WorldName.Text());
+				if (current.Status == engine::world::DataFactoryStatus::Ok) worldEpoch = current.WorldEpoch;
+			}
+			const uint64_t projection = CameraProjectionSignature(view);
+			// Each output slot retains its own history. A capture and the displayed
+			// view can sample one camera in one renderer batch without skipping each
+			// other's sequence.
+			const std::string sampleId = view.CameraTemporalId + "/" + std::to_string(view.Slot);
+			auto [found, inserted] = CameraTemporalSamples.try_emplace(sampleId);
+			CameraTemporalSample &sample = found->second;
+			const auto source = CameraTemporalSources.find(view.Slot);
+			const bool rebound =
+				source == CameraTemporalSources.end() || source->second != view.CameraTemporalId;
+			const bool discontinuity = inserted || rebound || sample.WorldEpoch != worldEpoch ||
+									   sample.Projection != projection || sample.Sequence == UINT64_MAX;
+			if (discontinuity) sample.Sequence = 0;
+			view.CameraTemporalSequence = ++sample.Sequence;
+			view.CameraCut = view.CameraCut || discontinuity;
+			sample.WorldEpoch = worldEpoch;
+			sample.Projection = projection;
+			CameraTemporalSources[view.Slot] = view.CameraTemporalId;
+		}
+	}
+
 	void Client::Step() {
 		UpdateIterations++;
 		const engine::render::PresentationSchedule::TimePoint presentationNow =
@@ -2761,6 +2849,7 @@ namespace client {
 		};
 		bool factoryPaused = allSystemsPaused();
 		const bool renderOnlyPending = DataFactoryRenderOnly.Pending();
+		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
 		auto failRenderOnly = [this](std::string detail) {
 			const auto *request = DataFactoryRenderOnly.Request();
 			if (request == nullptr || !DataFactory) return;
@@ -3094,6 +3183,7 @@ namespace client {
 			SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
 		}
 		const ActiveScene *displayedActiveScene = nullptr;
+		std::string displayedCameraTemporalId;
 		std::vector<engine::render::DataCaptureObjectLabel> drawnObjectLabels;
 		std::vector<engine::render::DataCaptureSemanticLabel> drawnSemanticLabels;
 		std::vector<engine::render::DataCapturePartLabel> drawnPartLabels;
@@ -3153,7 +3243,7 @@ namespace client {
 			std::vector<ActiveSceneDemand> presentationDemand;
 			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
-				if (factoryPaused && id == Rendered) continue;
+				if (factoryPaused && id == Rendered && !renderOnlyPending && !capturePending) continue;
 				// **The size of what it is being drawn into has to arrive before
 				// `Present`, for the same reason and in the same breath.**
 				// `aim-surface-cameras` clamps
@@ -3167,12 +3257,16 @@ namespace client {
 				// world nobody is looking at still aims its mirrors, and one
 				// that works only while it happens to be the drawn one is the
 				// kind of difference nothing reports.
-				Universe_->Enter(id, [pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					(void)engine::scene::SetViewportSize(
-						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
-					);
-				});
+				// A frozen factory snapshot is byte-compared at the capture barrier.
+				// Resizing it here would turn a read-only capture into a stale snapshot.
 				if (!(factoryPaused && id == Rendered)) {
+					Universe_->Enter(id, [pixelWidth, pixelHeight](engine::ecs::Store &store) {
+						(void)engine::scene::SetViewportSize(
+							store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
+						);
+					});
+				}
+				if (!(factoryPaused && id == Rendered && !renderOnlyPending && !capturePending)) {
 					presentationDemand.push_back({
 						engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)},
 						installWorldPipeline(id),
@@ -3186,7 +3280,8 @@ namespace client {
 			(void)ActiveScenes.Collect(
 				*Universe_,
 				presentationDemand,
-				engine::core::Vector2{static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)}
+				engine::core::Vector2{static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)},
+				factoryPaused && (renderOnlyPending || capturePending)
 			);
 
 			const auto collectPresentation =
@@ -3245,6 +3340,7 @@ namespace client {
 					// Kept for the replicated view below, which has no camera of its own.
 					ComposedFrame = scene.View.CameraFrame;
 					ComposedCamera = scene.View.Camera;
+					displayedCameraTemporalId = scene.View.CameraTemporalId;
 					if (!ReportedJoin) {
 						displayedActiveScene = &scene;
 						drawnObjectLabels = scene.Frame->ObjectLabels;
@@ -3308,6 +3404,10 @@ namespace client {
 					if (hasCamera) {
 						ComposedFrame = frame;
 						ComposedCamera = camera;
+						if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+							active != nullptr && store.Alive(active->Entity))
+							displayedCameraTemporalId =
+								CameraTemporalId(Universe_->NameOf(Rendered), store, active->Entity);
 					}
 					collectPresentation(Rendered, store, frame.Position);
 				});
@@ -4019,6 +4119,12 @@ namespace client {
 		engine::render::View view;
 		view.CameraFrame = Views.CameraFrame();
 		view.Camera = Views.Camera();
+		view.CameraTemporalId = displayedCameraTemporalId;
+		static int debugClientMotion = 0;
+		if (capturePending && debugClientMotion++ < 4)
+			ENGINE_WARN("motion client debug reported {} scene {} fallback-id {} world {}",
+				ReportedJoin, displayedActiveScene != nullptr, displayedCameraTemporalId,
+				Universe_->NameOf(Rendered).Text());
 		view.Instances = drawn;
 		view.ObjectLabels = drawnObjectLabels;
 		view.SemanticLabels = drawnSemanticLabels;
@@ -4062,8 +4168,17 @@ namespace client {
 		std::optional<engine::render::WorldViewFrame> namedCaptureFrame;
 		std::optional<engine::render::WorldCameraFrame> namedCaptureCamera;
 		bool namedCaptureBound = false;
-		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
-		if (capturePending) {
+		std::vector<engine::render::View> captureViews;
+		engine::render::ScriptDataCaptureBridge::PreparedBatch preparedCaptureBatch;
+		const bool sameFrameCapture =
+			capturePending && DataCapture->PrepareBatch(view, captureViews, &preparedCaptureBatch);
+		std::vector<engine::render::WorldViewFrame> captureFrames(captureViews.size());
+		std::vector<engine::render::WorldCameraFrame> captureCameras(captureViews.size());
+		std::vector<engine::render::InterfacePass> captureInterfaces(captureViews.size());
+		std::vector<engine::render::ScriptDataCaptureBridge::PreparedView> preparedCaptureViews(
+			captureViews.size()
+		);
+		if (capturePending && !sameFrameCapture) {
 			const engine::render::View normalView = view;
 			engine::render::ScriptDataCaptureBridge::PreparedView prepared;
 			const bool namedCapture = DataCapture->PrepareView(view, &prepared);
@@ -4090,6 +4205,10 @@ namespace client {
 				if (namedCaptureBound) {
 					visualLighting = view.Lighting;
 					hook = &Interface;
+					// A named capture can patch the frame, lens, or projection outside the
+					// active-camera binding. It has no producer identity yet, so history
+					// must remain unavailable rather than borrow the displayed camera's.
+					view.CameraTemporalId.clear();
 				} else {
 					view = normalView;
 				}
@@ -4102,6 +4221,9 @@ namespace client {
 		// Delegated producers answer requested cameras and own no viewer endpoints.
 		if (!namedCaptureBound && !PresentationLink &&
 			PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true)) {
+			// This eye may be copied through a portal or taken from another world.
+			// The active-camera source no longer proves its temporal lineage.
+			view.CameraTemporalId.clear();
 			Renderer.SetAnimationTime(AnimationSeconds);
 		} else if (!namedCaptureBound && !PresentationLink && PortalImages && Windowed) {
 			if (!ReportedJoin) {
@@ -4222,6 +4344,7 @@ namespace client {
 		// then redo the entire update before trying again. One frame in flight fell
 		// from the old blocking path's throughput to roughly one third of it.
 		if (!Renderer.WaitForFrame()) {
+			if (sameFrameCapture) DataCapture->AbortPreparedBatch(preparedCaptureBatch);
 			if (renderOnlyPending) failRenderOnly("renderer refused the render-only presentation frame");
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
@@ -4237,6 +4360,7 @@ namespace client {
 					request == nullptr ? 0 : request->OperationId
 				);
 				if (ready.Status != engine::world::DataFactoryStatus::Pending) {
+					if (sameFrameCapture) DataCapture->AbortPreparedBatch(preparedCaptureBatch);
 					DataFactoryRenderOnly.Consume();
 					FrameGraph::EndFrame();
 					ENGINE_PROFILE_FRAME();
@@ -4245,20 +4369,64 @@ namespace client {
 				}
 			}
 			CaptureFrame(view, presentationWorld);
+			static int debugFinalMotion = 0;
+			if (capturePending && debugFinalMotion++ < 4)
+				ENGINE_WARN("motion final view id {} cut {} slot {} named {}", view.CameraTemporalId,
+					view.CameraCut, view.Slot, namedCaptureBound);
 			// Capture cameras are separate from the displayed camera. Each active
 			// world gets an offscreen target and the selected display view stays
 			// last, which is the only view allowed to present to the swapchain.
 			LastFrame = ActiveScenes.SubmitBatch(
 				presentationWorld,
 				view,
+				captureViews,
 				static_cast<uint32_t>(std::max(pixelWidth, 1)),
 				static_cast<uint32_t>(std::max(pixelHeight, 1)),
 				Settings.Headless,
 				ContentBindings,
-				[&](std::span<const engine::render::View> cameraBatch) {
+				[this,
+				 presentationWorld,
+				 &captureFrames,
+				 &captureCameras,
+				 &captureInterfaces,
+				 &preparedCaptureBatch,
+				 &preparedCaptureViews](std::span<engine::render::View> captures) {
+					if (captures.empty()) return true;
+					for (size_t index = 0; index < captures.size(); ++index) {
+						const std::string temporalId = captures[index].CameraTemporalId;
+						const bool bound = BindNamedCapturePresentation(
+							*Universe_,
+							presentationWorld,
+							{.World = captures[index].World,
+							 .Name = captures[index].WorldName,
+							 .Identity = 0,
+							 .ContentOwner = captures[index].ContentOwner,
+							 .ForeignContentOwners = captures[index].ForeignContentOwners,
+							 .Pipeline = captures[index].Pipeline},
+							{static_cast<float>(captures[index].Target->Width),
+							 static_cast<float>(captures[index].Target->Height)},
+							captures[index],
+							captureFrames[index],
+							captureCameras[index],
+							captureInterfaces[index],
+							[] {}
+						);
+						if (!bound) {
+							DataCapture->AbortPreparedBatch(preparedCaptureBatch);
+							return false;
+						}
+						captures[index].CameraTemporalId = temporalId;
+						(void)DataCapture->PrepareView(captures[index], &preparedCaptureViews[index]);
+					}
+					return true;
+				},
+				[&](std::span<engine::render::View> cameraBatch) {
+					StampCameraTemporalSamples(cameraBatch);
 					return Renderer.Render(cameraBatch, Overlay, hook);
 				}
 			);
+			if (sameFrameCapture && !LastFrame.Submitted)
+				DataCapture->AbortPreparedBatch(preparedCaptureBatch);
 			if (renderOnlyPending) {
 				const auto *request = DataFactoryRenderOnly.Request();
 				const bool submitted = LastFrame.Submitted;
