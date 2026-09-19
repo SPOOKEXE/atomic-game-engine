@@ -52,8 +52,10 @@ using engine::world::WorldSettings;
 
 TEST_CASE("active scenes copy valid cameras after one presentation batch", "[client][active-scenes]") {
 	using namespace engine;
+	effects::RegisterEffectComponents();
 	scene::RegisterSceneClasses();
 	gui::RegisterGuiComponents();
+	render::RegisterPresentationComponents();
 	Universe worlds({.Mode = world::ExecutionMode::WorldParallel});
 	const auto zulu = worlds.Create({.Name = Name("Zulu")});
 	const auto alpha = worlds.Create({.Name = Name("Alpha")});
@@ -542,7 +544,9 @@ namespace {
 		return store.FindFirstRoot(name);
 	}
 	WorldId AddWorld(Universe &universe, std::string_view name) {
+		engine::effects::RegisterEffectComponents();
 		engine::scene::RegisterSceneClasses();
+		engine::render::RegisterPresentationComponents();
 
 		WorldSettings settings;
 		settings.Name = Name(name);
