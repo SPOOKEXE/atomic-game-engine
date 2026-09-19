@@ -58,8 +58,12 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] optimise server startup time
 - [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
 
-- [_] test studio and fix found bugs
+- [_] add extensive (freecam) camera tests (like flying through portals)
+- [_] add extensive client character tests
+- [_] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
 - [_] fix lights passing through portals not working
+
+- [_] test studio and fix found bugs
 
 ### v0.26
 
