@@ -15,6 +15,9 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/examples/DemosLoader.hpp>
+#include <engine/examples/Scene.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -35,6 +38,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -2143,13 +2147,16 @@ namespace {
 		engine::render::PortalImageHost Images;
 		std::filesystem::path Directory;
 		bool AuthorityVisual = false;
+		bool AssertResolvedEye = false;
 		WorldId ViewerWorld;
 		Entity ViewerCamera;
 		size_t Frame = 0;
 		size_t ImportedFrames = 0;
 		size_t GreenFrames = 0;
-		explicit PortalWalkImages(Universe &worlds, bool firstPerson, bool authorityVisual)
-			: Images(worlds, Render), AuthorityVisual(authorityVisual) {
+		explicit PortalWalkImages(
+			Universe &worlds, bool firstPerson, bool authorityVisual, bool assertResolvedEye = false
+		)
+			: Images(worlds, Render), AuthorityVisual(authorityVisual), AssertResolvedEye(assertResolvedEye) {
 			REQUIRE(SDL_Init(SDL_INIT_VIDEO));
 			REQUIRE(Render.Initialise(nullptr));
 			REQUIRE(worlds.ConfigurePresentation(700));
@@ -2195,9 +2202,16 @@ namespace {
 				view.CameraFrame = store.Get<scene::Transform>(camera->Entity)->Frame;
 				view.Camera = *store.Get<scene::Camera>(camera->Entity);
 			});
+			const CFrame storedEye = view.CameraFrame;
 			visual = client::ResolveCameraPortalWorld(
 				worlds, link.ReplicaWorld(), visual, view.CameraFrame, view.Camera
 			);
+			if (AssertResolvedEye && Frame >= 27 && Frame <= 80) {
+				CHECK(visual == link.AuthorityWorld());
+				CHECK((view.CameraFrame.Position - storedEye.Position).Magnitude() < .001f);
+				CHECK(view.CameraFrame.LookVector().Dot(storedEye.LookVector()) > .9999f);
+				CHECK(view.CameraFrame.UpVector().Dot(storedEye.UpVector()) > .9999f);
+			}
 			REQUIRE(visual.IsValid());
 			view.World = visual.Index;
 			view.WorldName = worlds.NameOf(visual);
@@ -2488,6 +2502,165 @@ static void WalkPortalReplicas(bool gpu) {
 
 TEST_CASE("player input walks across world replicas and back", "[studio][playlink][portal-walk]") {
 	WalkPortalReplicas(false);
+}
+
+static void WalkTunnelsEastPortal(bool gpu, bool authorityVisual = false, bool diagonal = true) {
+	// Load the shipped scene rather than rebuilding its two panes here. The east
+	// tunnel is the case where a player leaves the visible plain for the remote
+	// interior while their replica camera must stay attached to the same rig.
+	Fixture fixture;
+	std::unique_ptr<PortalWalkImages> images;
+	if (gpu) images = std::make_unique<PortalWalkImages>(fixture.Worlds, false, authorityVisual, true);
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		// This is Editor::PrepareWorld's order. `LoadScene` is deliberately not
+		// used here because it installs the standalone loader's own schedule;
+		// Studio stores the authored script, then BeginRun starts it once.
+		client::InstallPresentation(store, systems, 256);
+		engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+		engine::scene::RegisterOwnershipSystem(systems);
+		REQUIRE(
+			engine::script::MakeScript(store, engine::examples::ExamplePath("Tunnels.luau"), "Tunnels") !=
+			engine::ecs::NULL_ENTITY
+		);
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole{.Server = true, .Client = true, .Studio = true};
+		std::string error;
+		REQUIRE(engine::game::StartWorldScripts(store, systems, limits, error) != nullptr);
+		INFO(error);
+		REQUIRE(error.empty());
+	});
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store) {
+		const Entity floor = store.FindFirstChild(engine::scene::WorkspaceOf(store), "ShortInteriorFloor");
+		REQUIRE(floor != engine::ecs::NULL_ENTITY);
+		const auto *collider = store.Get<engine::scene::Collider>(floor);
+		REQUIRE(collider != nullptr);
+		// The isolated room has no plain below it. Its own floor must therefore
+		// remain a solid collider after the script builds the portal pair.
+		CHECK_FALSE(collider->Trigger);
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	fixture.Step(link, 30);
+
+	Entity root;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *rig =
+			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, link.Player()));
+		REQUIRE(rig != nullptr);
+		root = rig->Root;
+		store.Set(
+			root, Transform{CFrame(diagonal ? Vector3{15.86f, 3.0f, 7.0f} : Vector3{20.0f, 3.0f, 7.0f})}
+		);
+		if (auto *motion = store.GetMutable<engine::scene::Motion>(root)) {
+			motion->Linear = {};
+			motion->Angular = {};
+		}
+	});
+	fixture.Step(link, 8);
+
+	fixture.Worlds.Enter(link.ReplicaWorld(), [diagonal](Store &store) {
+		REQUIRE(client::AimReplicaViewer(store, {}, engine::scene::Camera{}) != engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::FollowOwnCharacter(store));
+		auto *control = store.ResourceMutable<engine::scene::CameraController>();
+		REQUIRE(control != nullptr);
+		control->Mode = engine::scene::CameraMode::Classic;
+		// The route from the spawn at (0, 30) to the east mouth approaches from
+		// the north west. The aligned variant keeps the player in the centre of
+		// the remote corridor after the crossing.
+		control->Angles.Y = diagonal ? -0.60375f : 0.0f;
+		control->Distance = 12.0f;
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+		input->Focused = true;
+		input->Down.Set(engine::scene::KeyCode::W, true);
+	});
+
+	bool crossed = false;
+	bool cameraArmCrossed = false;
+	int crossedTick = -1;
+	Vector3 crossingPosition;
+	float lowestY = 1000.0f;
+	for (int tick = 0; tick < 240 && (!crossed || tick < crossedTick + 60); ++tick) {
+		fixture.Step(link);
+		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
+		if (images) images->Draw(fixture.Worlds, link);
+		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+			const auto *placement = store.Get<Transform>(root);
+			REQUIRE(placement != nullptr);
+			lowestY = std::min(lowestY, placement->Frame.Position.Y);
+			const auto *transit = store.Get<engine::scene::PortalTransit>(root);
+			if (!crossed && transit != nullptr && transit->Serial > 0) {
+				crossed = true;
+				crossedTick = tick;
+				crossingPosition = placement->Frame.Position;
+			}
+		});
+		if (!crossed) continue;
+
+		fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			const auto *rig =
+				store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, link.Player()));
+			REQUIRE(rig != nullptr);
+			CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == rig->Root);
+			const auto *camera = store.Get<Transform>(active->Entity);
+			REQUIRE(camera != nullptr);
+			if (tick > crossedTick) {
+				const auto *rootPose = store.Get<Transform>(rig->Root);
+				const auto *control = store.Resource<engine::scene::CameraController>();
+				REQUIRE(rootPose != nullptr);
+				REQUIRE(control != nullptr);
+				const Vector3 head =
+					rootPose->Frame.Position + control->Basis.UpVector() * control->HeadHeight;
+				const float armDistance =
+					control->OccludedDistance >= 0.0f ? control->OccludedDistance : control->Distance;
+				const Vector3 orbit =
+					engine::scene::CameraOrbit(*control, rootPose->Frame.Position, armDistance).Position;
+				engine::scene::SeamTransform through;
+				cameraArmCrossed =
+					cameraArmCrossed || engine::scene::PortalCrossing(store, head, orbit, through);
+				CHECK(camera->Frame.Position.X > 53.0f);
+				CHECK(camera->Frame.Position.X < 57.0f);
+			}
+		});
+	}
+
+	CHECK(crossed);
+	CHECK_FALSE(cameraArmCrossed);
+	CHECK(crossingPosition.X > 53.9f);
+	CHECK(crossingPosition.X < 54.1f);
+	CHECK(crossingPosition.Z < 13.0f);
+	CHECK(crossingPosition.Z > 12.0f);
+	CHECK(lowestY > 1.0f);
+}
+
+TEST_CASE(
+	"Studio Play keeps the player grounded through the Tunnels east portal",
+	"[studio][playlink][portal][demo]"
+) {
+	WalkTunnelsEastPortal(false);
+}
+
+TEST_CASE(
+	"Studio Play renders the Tunnels east portal while its player crosses",
+	"[studio][gpu][playlink][portal][demo][.]"
+) {
+	WalkTunnelsEastPortal(true, true);
+}
+
+TEST_CASE(
+	"Studio Play keeps the aligned Tunnels portal camera in the interior",
+	"[studio][gpu][playlink][portal][demo][.]"
+) {
+	WalkTunnelsEastPortal(true, true, false);
 }
 TEST_CASE(
 	"portal images follow the walking player through replica handoff", "[studio][gpu][portal-walk-images][.]"

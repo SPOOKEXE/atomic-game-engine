@@ -359,10 +359,23 @@ namespace client {
 		using namespace engine;
 		scene::CameraPortalView history;
 		ecs::Entity camera = ecs::NULL_ENTITY;
+		bool localArmClear = false;
+		bool subjectFollowing = false;
 		universe.Enter(inputWorld, [&](Store &store) {
 			if (const auto *active = store.Resource<scene::ActiveCamera>()) {
 				camera = active->Entity;
 				if (const auto *found = store.Get<scene::CameraPortalView>(camera)) history = *found;
+				const auto *controller = store.Resource<scene::CameraController>();
+				const ecs::Entity subject = scene::CameraSubjectRoot(store, camera);
+				const auto *placement = store.Get<scene::Transform>(subject);
+				if (controller == nullptr || placement == nullptr ||
+					controller->Mode == scene::CameraMode::Scriptable || controller->OccludedDistance < 0.0f)
+					return;
+				subjectFollowing = true;
+				const core::Vector3 head =
+					placement->Frame.Position + controller->Basis.UpVector() * controller->HeadHeight;
+				scene::SeamTransform pane;
+				localArmClear = !scene::PortalCrossing(store, head, eye.Position, pane);
 			}
 		});
 		if (camera == ecs::NULL_ENTITY) return visualWorld;
@@ -372,6 +385,16 @@ namespace client {
 		for (const auto &entry : worlds)
 			if (entry.Id == inputWorld) authored = entry.Authored;
 		if (!authored.IsValid()) return {};
+		const core::CFrame identity;
+		const bool remappedInput =
+			std::abs(history.FromInput.Scale - 1.0f) > .0001f ||
+			(history.FromInput.Place(identity).Position - identity.Position).Magnitude() > .0001f ||
+			std::abs(glm::dot(history.FromInput.Place(identity).Rotation(), identity.Rotation())) < .9999f;
+		// A following eye stopped at a local pane is already in the subject's room.
+		// Do not apply the body's former local seam again while resolving its draw world.
+		if (subjectFollowing && localArmClear && history.Started && history.World == authored.Text() &&
+			remappedInput)
+			history = {};
 		auto resolve = [&](const core::Name &name) {
 			if (name == authored) return visualWorld;
 			return ResolveDestinationWorld(worlds, visualWorld, name);

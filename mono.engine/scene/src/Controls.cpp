@@ -337,19 +337,11 @@ namespace engine::scene {
 			controller->OccludedDistance >= 0.0f ? controller->OccludedDistance : controller->Distance;
 		CFrame pose = CameraOrbit(*controller, subject->Frame.Position, distance);
 
-		// **The arm goes through a portal if one is in the way of it**, and
-		// leaving that out is what makes a hole somebody can walk through look
-		// broken from the outside. The body crosses on the tick its own segment
-		// changes side; the eye is metres behind it and does not, so for as long
-		// as the arm straddles the pane the camera watches its subject from the
-		// room it just left - the character reads as teleporting away and
-		// turning as it goes, which is exactly the report this closes.
-		//
-		// Put through the same map as a body's placement and velocity, so the
-		// eye arrives where the picture in the pane says it should be: behind
-		// the character, on the far side, looking back through the hole. First
-		// person has no arm and therefore no crossing, which is why this is
-		// after the branch above rather than inside it.
+		// Poppercam clips the subject-follow arm before this placement pass. Keep
+		// this crossing as the fallback for callers that do not run Poppercam.
+		// Put the eye through the same map as a body's placement and velocity, so
+		// it arrives behind the character on the far side of the portal.
+		// First person has no arm and therefore no crossing.
 		// Place carries the position with scale and rotates every camera axis,
 		// preserving roll when the arm passes through a tilted seam.
 		SeamTransform carried;

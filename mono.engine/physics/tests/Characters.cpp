@@ -374,16 +374,24 @@ TEST_CASE(
 	CHECK(world.Controller().OccludedDistance < 5.0f);
 }
 
-TEST_CASE("poppercam looks through a portal instead of pulling up to its pane", "[physics][characters]") {
-	// Portal panes keep trigger colliders so contacts still report crossings.
-	// A plain ray sees that glass first and turns a valid camera arm into an
-	// occlusion. The portal-aware query spends the rest of the arm in the far
-	// room and leaves the desired distance alone when nothing there blocks it.
+TEST_CASE("poppercam keeps a following camera on its side of a portal", "[physics][characters]") {
 	Occludable world;
 	world.Portal(5.0f);
 
-	CHECK_FALSE(UpdatePoppercam(world.World));
-	CHECK(world.Controller().OccludedDistance < 0.0f);
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance > 4.0f);
+	CHECK(world.Controller().OccludedDistance < 5.0f);
+}
+
+TEST_CASE("poppercam uses the nearer wall before a portal pane", "[physics][characters]") {
+	Occludable world;
+	const Entity wall = world.Wall(3.0f);
+	world.Portal(5.0f);
+
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance > 2.6f);
+	CHECK(world.Controller().OccludedDistance < 2.8f);
+	CHECK(LocalTransparencyOf(world.World, wall) > 0.0f);
 }
 
 TEST_CASE("clearing the wall restores the setting and un-fades it", "[physics][characters]") {
