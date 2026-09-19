@@ -1152,12 +1152,12 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	// **Short outside, long inside, and it lands in its own subspace.** One stud
 	// into a four stud box arrives in twenty-six studs of isolated corridor.
 	const engine::core::Vector3 entered = step({20.0f, 4.0f, 1.5f}, {20.0f, 4.0f, 0.5f});
-	CHECK(entered.X == Approx(256.0f).margin(1e-3f));
+	CHECK(entered.X == Approx(54.0f).margin(1e-3f));
 	CHECK(entered.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(entered.Z == Approx(12.25f).margin(1e-3f));
 
 	// And out the far end of the box it never left.
-	const engine::core::Vector3 left = step({256.0f, 4.0f, -12.5f}, {256.0f, 4.0f, -13.5f});
+	const engine::core::Vector3 left = step({54.0f, 4.0f, -12.5f}, {54.0f, 4.0f, -13.5f});
 	CHECK(left.X == Approx(20.0f).margin(1e-3f));
 	CHECK(left.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(left.Z == Approx(-1.75f).margin(1e-3f));
