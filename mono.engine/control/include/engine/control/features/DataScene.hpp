@@ -299,10 +299,10 @@ namespace engine::control {
 				{"coordinate_system", "right_handed_y_up"},
 				{"units", "metres"},
 				{"meshes", json::array()},
-					{"textures", json::array()},
-					{"nodes", json::array()},
-					{"cameras", json::array()},
-					{"lights", json::array()}
+				{"textures", json::array()},
+				{"nodes", json::array()},
+				{"cameras", json::array()},
+				{"lights", json::array()}
 			};
 			for (const auto &mesh : source.Meshes) {
 				const uint64_t meshBytes = static_cast<uint64_t>(mesh.Data.Vertices.size()) * 48 +
@@ -425,7 +425,7 @@ namespace engine::control {
 					 {"field_of_view_radians", camera.FieldOfViewRadians},
 					 {"near_plane_metres", camera.NearPlaneMetres},
 					 {"far_plane_metres", camera.FarPlaneMetres}}
-					);
+				);
 			for (const auto &light : source.Lights)
 				manifest["lights"].push_back(
 					{{"stable_id", light.StableId},

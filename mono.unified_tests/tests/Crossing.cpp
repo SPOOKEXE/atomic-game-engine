@@ -127,6 +127,28 @@ TEST_CASE("content published by cdn reaches the client through the server", "[un
 	CHECK(reports.Link->Discarded == 0);
 }
 
+TEST_CASE("a final wire turn delivers content the relay already served", "[unified][content]") {
+	// A fixed-duration diagnostic ends after a world tick. The relay's chunks
+	// are queued after that tick's wire flush, so they need a bounded transport
+	// drain rather than a made-up allowance in the cross-check.
+	Crossing crossing(Small(), Arrangement{.Carrying = Transport::Loopback, .Serving = Content::Relayed});
+	REQUIRE(crossing.Join());
+	crossing.Step();
+
+	const Reports before = crossing.Gather();
+	REQUIRE(before.Relay.has_value());
+	REQUIRE(before.Link.has_value());
+	REQUIRE(before.Relay->Served > before.Link->Completed);
+	CHECK_FALSE(CrossCheck(before).empty());
+
+	REQUIRE(crossing.DrainContent());
+	const Reports after = crossing.Gather();
+	REQUIRE(after.Relay.has_value());
+	REQUIRE(after.Link.has_value());
+	CHECK(after.Link->Completed == after.Relay->Served);
+	CHECK(CrossCheck(after).empty());
+}
+
 TEST_CASE("content survives a link that loses datagrams", "[unified][content]") {
 	// **The arrangement that is more than the sum of its axes.** A route is
 	// several chunks on a reliable, ordered channel; losing one means the

@@ -254,7 +254,7 @@ TEST_CASE("client package tool applies manifest byte budgets before execution", 
 	CHECK(calls == 0);
 }
 
-TEST_CASE("client package tool makes an evicted operation id fresh again", "[client][mcp]") {
+TEST_CASE("client package tool fences new operation ids when its ledger is full", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
 	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
@@ -289,14 +289,18 @@ TEST_CASE("client package tool makes an evicted operation id fresh again", "[cli
 					 }
 	);
 
-	for (unsigned index = 0; index < 257; index++) {
+	for (size_t index = 0; index < engine::control::DataFactoryOperationLedger::MAXIMUM_ENTRIES - 1;
+		 index++) {
 		const json reply = PackageTool(surface).Call(Request("evict-" + std::to_string(index)), failure);
 		REQUIRE(failure.empty());
 		REQUIRE(reply["terminal"] == "completed");
 	}
-	(void)PackageTool(surface).Call(Request("evict-0"), failure);
+	CHECK(PackageTool(surface).Call(Request("evict-new"), failure).is_null());
+	CHECK(failure == "operation_id_capacity: operation ledger is full; retry an existing operation_id");
+	const json replay = PackageTool(surface).Call(Request("fixture"), failure);
 	CHECK(failure.empty());
-	CHECK(calls == 259);
+	CHECK(replay["terminal"] == "completed");
+	CHECK(calls == engine::control::DataFactoryOperationLedger::MAXIMUM_ENTRIES);
 }
 
 TEST_CASE("client package tool returns domain failures as strict value replies", "[client][mcp]") {

@@ -3034,8 +3034,8 @@ namespace client {
 					registered = driver.Callback.Valid();
 				}
 			});
-			const std::optional<engine::script::HostCallback> callback =
-				registered ? std::optional(driver.Callback) : std::nullopt;
+			std::optional<engine::script::HostCallback> callback;
+			if (registered) callback.emplace(driver.Callback);
 			engine::script::Runtime *ownerRuntime = RuntimeOf(Rendered);
 			client::data_capture_driver::State state;
 			bool ownerCleanupPending = false;

@@ -33,7 +33,7 @@ This document consolidates `RENDER_PIPELINE.md`,
 `future-work/OPTIMISATIONS_RENDER.md`, and
 `future-work/materials-and-shaders.md`. Their requirements belong here now.
 [TORNADOSIM.md](TORNADOSIM.md) remains the gameplay demo plan; its render needs
-are included here. The attached checklist and [ROADMAP.md](../ROADMAP.md)
+are included here. The attached checklist and [ROADMAP.md](../../ROADMAP.md)
 v0.24 define the requested work, even where older notes called it future work.
 
 Review covers the whole destination, the phase order, and the explicit policy
@@ -131,7 +131,7 @@ or a checked box without inspecting its implementation and consumer.
 | Presentation damage | `WorldPresentation.cpp::ScenePresentationSignaturesOf`, `PresentationDamage.hpp` | Keep objects, particles, environment and portals separate; UI and diagnostics have separate damage. |
 | Editable content | `scene/EditableMesh.hpp`, existing revision consumers | Reuse world-owned authoring data, mutation revisions and collision rebuild boundaries. |
 | Materials | Legacy AMT1 versions and seven-map material records described by the material plan | Verify each map's current consumers before conversion; translate old content into one schema. |
-| Device tests | [RUNNING.md](../RUNNING.md) documents `[gpu]`, `--gpu-tests`, `Renderer::Initialise(nullptr)` and capture | Extend the real-device harness. Ordinary headless runs do not prove pixels. |
+| Device tests | [RUNNING.md](../../RUNNING.md) documents `[gpu]`, `--gpu-tests`, `Renderer::Initialise(nullptr)` and capture | Extend the real-device harness. Ordinary headless runs do not prove pixels. |
 | Tracing | `PipelineCatalogue.cpp` contains a `raytrace` declaration; search found no corresponding tracer in inspected render node families | Inventory any previous implementation/history before porting. Backend and actual image proof remain required. |
 
 The old render plan records registration, capability checks, custom native

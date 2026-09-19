@@ -679,17 +679,17 @@ namespace engine::render {
 				slot.Image.ReadbackDeviceStagingReservedCapacityBytes = slot.TransferBytes;
 				const uint32_t timingSlot = BatchTimingSlot;
 				CaptureTiming *capture = slot.Image.DataCaptureTimingId != 0
-										? &CaptureTimings[slot.Image.DataCaptureTimingId]
-										: nullptr;
+											 ? &CaptureTimings[slot.Image.DataCaptureTimingId]
+											 : nullptr;
 				if (capture != nullptr && timingSlot >= VulkanTimestamps::SLOTS &&
 					capture->State != CaptureTimingState::Unavailable) {
 					capture->State = CaptureTimingState::Unavailable;
 					capture->Reason = "unavailable/no_capture_gpu_timestamp_slot";
 				}
-				const uint32_t opened = timingSlot < VulkanTimestamps::SLOTS &&
-										slot.Image.DataCaptureTimingId != 0
-									? Timestamps.Mark(command)
-									: VulkanTimestamps::MARKS;
+				const uint32_t opened =
+					timingSlot < VulkanTimestamps::SLOTS && slot.Image.DataCaptureTimingId != 0
+						? Timestamps.Mark(command)
+						: VulkanTimestamps::MARKS;
 				if (capture != nullptr && timingSlot < VulkanTimestamps::SLOTS &&
 					opened >= VulkanTimestamps::MARKS && capture->State != CaptureTimingState::Unavailable) {
 					capture->State = CaptureTimingState::Unavailable;
@@ -720,7 +720,9 @@ namespace engine::render {
 				if (opened < VulkanTimestamps::MARKS) {
 					const uint32_t closed = Timestamps.Mark(command);
 					if (closed < VulkanTimestamps::MARKS) {
-						PendingCaptureTimings[timingSlot].push_back({slot.Image.DataCaptureTimingId, opened, closed});
+						PendingCaptureTimings[timingSlot].push_back(
+							{slot.Image.DataCaptureTimingId, opened, closed}
+						);
 						if (capture != nullptr && capture->State != CaptureTimingState::Unavailable)
 							capture->State = CaptureTimingState::Pending;
 					} else if (capture != nullptr && capture->State != CaptureTimingState::Unavailable) {

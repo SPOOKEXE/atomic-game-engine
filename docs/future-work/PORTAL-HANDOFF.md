@@ -3,7 +3,7 @@
 Updated 2026-09-08. Render work resumed from the committed checkpoint.
 
 - Objective remains product endpoint discovery and continuous, seamless player crossing.
-- Concise status: [ROADMAP](../ROADMAP.md). Detailed design and evidence: [render plan](RENDER-REFACTOR.md) and [task list](RENDER-REFACTOR-TASKS.md).
+- Concise status: [ROADMAP](../../ROADMAP.md). Detailed design and evidence: [render plan](RENDER-REFACTOR.md) and [task list](RENDER-REFACTOR-TASKS.md).
 - The Terrain BVH change, benchmark job and initial handoff were committed as `cbe7a6ed`. The user subsequently explicitly requested committing all remaining working-tree changes together, including earlier changes of uncertain ownership.
 
 ## Verified work

@@ -215,6 +215,15 @@ print(
 	capabilities.physics_observation_schema_version,
 	capabilities.scene_snapshot
 )
+print(
+	"DataFactory affordances",
+	affordances.status,
+	affordances.schema_version,
+	#affordances.affordances,
+	affordances.overflowed,
+	affordances.affordances[1] and affordances.affordances[1].id,
+	affordances.affordances[1] and affordances.affordances[1].kind
+)
 print("DataFactory snapshot", snapshot.tick, #snapshot.entities, snapshot.coverage)
 print(
 	"DataFactory rig keypoint",

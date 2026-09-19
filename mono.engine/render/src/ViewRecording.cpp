@@ -1431,10 +1431,9 @@ namespace engine::render {
 			State->WallTimings.clear();
 			State->DroppedProfileMarks = 0;
 		}
-		const bool sampleGpu =
-			(State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
-			 State->FrameCounter % State->ProfileSampleRate == 0) ||
-			State->BatchCaptureTimingRequested;
+		const bool sampleGpu = (State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
+								State->FrameCounter % State->ProfileSampleRate == 0) ||
+							   State->BatchCaptureTimingRequested;
 		timingSlot = !sampleGpu ? VulkanTimestamps::NO_SLOT
 					 : State->BatchActive
 						 ? (State->BatchFirst ? State->Timestamps.Begin(command) : State->BatchTimingSlot)
@@ -1657,10 +1656,9 @@ namespace engine::render {
 		const bool needsPbrTargets =
 			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-peel")) ||
 			graphEnabled(core::Name("depth-linearise")) || graphEnabled(core::Name("depth-validity")) ||
-			graphEnabled(core::Name("ssao")) ||
-			graphEnabled(core::Name("deferred-lighting")) || graphEnabled(core::Name("camera-motion")) ||
-			graphEnabled(core::Name("fog")) || graphEnabled(core::Name("tonemap")) ||
-			graphEnabled(core::Name("transparent"));
+			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
+			graphEnabled(core::Name("camera-motion")) || graphEnabled(core::Name("fog")) ||
+			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
 		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
 		if (!graphTargetsReady) {
 			closePass();

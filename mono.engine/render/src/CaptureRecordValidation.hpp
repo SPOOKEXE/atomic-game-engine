@@ -115,8 +115,8 @@ namespace engine::render::capture_record_validation {
 
 	inline bool ValidFirstSurfaceProvenance(std::string_view provenance) {
 		return provenance == "first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
-						 "background=0;validity=0_or_255;transparent_geometry=excluded;"
-						 "amodal_ground_truth=false";
+							 "background=0;validity=0_or_255;transparent_geometry=excluded;"
+							 "amodal_ground_truth=false";
 	}
 
 	inline bool ValidFirstSurfaceValidityBytes(std::span<const std::byte> bytes) {

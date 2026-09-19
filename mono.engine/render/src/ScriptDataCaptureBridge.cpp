@@ -297,8 +297,8 @@ namespace engine::render {
 
 		const char *Packing(DataCaptureChannel channel, DataCaptureScalar scalar) {
 			return channel == DataCaptureChannel::AmbientOcclusion ||
-					   channel == DataCaptureChannel::FirstSurfaceValidity ||
-					   channel == DataCaptureChannel::SecondSurfaceValidity
+						   channel == DataCaptureChannel::FirstSurfaceValidity ||
+						   channel == DataCaptureChannel::SecondSurfaceValidity
 					   ? "unorm8"
 				   : scalar == DataCaptureScalar::UNorm8 ? "rgba8_unorm"
 				   : channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors

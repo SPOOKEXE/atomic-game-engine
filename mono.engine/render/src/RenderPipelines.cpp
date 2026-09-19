@@ -807,9 +807,9 @@ namespace engine::render {
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
 			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
-				CameraMotionPipeline == nullptr ||
-				SsaoPipeline == nullptr || DeferredLightingPipeline == nullptr || SkyPipeline == nullptr ||
-				VolumePipeline == nullptr || TonemapPipeline == nullptr) {
+				CameraMotionPipeline == nullptr || SsaoPipeline == nullptr ||
+				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
+				TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 			}
 		}
@@ -1268,12 +1268,11 @@ namespace engine::render {
 			   PackedTransparentPipeline != nullptr && PackedMeshShadowPipeline != nullptr &&
 			   (!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
-			   (!pbrSupported ||
-				(GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
-				 DepthLinearPipeline != nullptr && DepthValidityPipeline != nullptr &&
-				 CameraMotionPipeline != nullptr &&
-				 SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
-				 VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
+			   (!pbrSupported || (GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
+								  DepthLinearPipeline != nullptr && DepthValidityPipeline != nullptr &&
+								  CameraMotionPipeline != nullptr && SsaoPipeline != nullptr &&
+								  DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
+								  VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
 			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
 									 Lod.Select != nullptr));
 	}

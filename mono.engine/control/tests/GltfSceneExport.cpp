@@ -487,9 +487,8 @@ TEST_CASE("raw scene extract preserves portable mesh and source texture sections
 			 .Class = {}}
 		);
 		Identify(store, part, "raw/cube");
-		const auto light = store.CreateInstance(
-			engine::ecs::Classes::Find(engine::core::Name("PointLight")), "raw light"
-		);
+		const auto light =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("PointLight")), "raw light");
 		REQUIRE(store.SetParent(light, part));
 		engine::scene::Light point;
 		point.Colour = {0.25f, 0.5f, 1.0f};
@@ -609,10 +608,7 @@ TEST_CASE("raw scene resource reads keep their source lifecycle fence", "[contro
 	};
 	bool failed = false;
 	const json began = Call(
-		surface,
-		"begin_raw_scene_extract",
-		{{"instance_id", "raw.fenced"}, {"options", options}},
-		failed
+		surface, "begin_raw_scene_extract", {{"instance_id", "raw.fenced"}, {"options", options}}, failed
 	);
 	REQUIRE_FALSE(failed);
 	REQUIRE(

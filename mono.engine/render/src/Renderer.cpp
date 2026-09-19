@@ -200,7 +200,8 @@ namespace engine::render {
 					continue;
 				}
 				const double nanoseconds = VulkanTimestamps::Between(times, marks.Opened, marks.Closed);
-				if (nanoseconds < 0.0 || nanoseconds > static_cast<double>(UINT64_MAX) - capture.Nanoseconds) {
+				if (nanoseconds < 0.0 ||
+					nanoseconds > static_cast<double>(UINT64_MAX) - capture.Nanoseconds) {
 					capture.State = CaptureTimingState::Unavailable;
 					capture.Reason = "unavailable/capture_gpu_timestamp_overflow";
 					continue;
@@ -2553,7 +2554,9 @@ namespace engine::render {
 		State->BatchHeight = height;
 		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
 		State->BatchCaptureTimingRequested = std::any_of(
-			State->ResourceImages.begin(), State->ResourceImages.end(), [&](const Impl::ResourceImageSlot &image) {
+			State->ResourceImages.begin(),
+			State->ResourceImages.end(),
+			[&](const Impl::ResourceImageSlot &image) {
 				if (image.Phase != Impl::ResourceImagePhase::Queued || image.Cancelled ||
 					image.Image.DataCaptureTimingId == 0) {
 					return false;
@@ -2563,7 +2566,8 @@ namespace engine::render {
 					const ResourceImageRequest &request = image.Image.Request;
 					return pipeline != nullptr && pipeline->Name == request.Pipeline &&
 						   view.Slot == request.ViewSlot &&
-						   (request.ExpectedSnapshotId.empty() || request.ExpectedSnapshotId == view.SnapshotId);
+						   (request.ExpectedSnapshotId.empty() ||
+							request.ExpectedSnapshotId == view.SnapshotId);
 				});
 			}
 		);

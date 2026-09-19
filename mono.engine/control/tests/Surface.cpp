@@ -10,8 +10,8 @@
 // `AGENTS.md` says so in those words. These cases open with the storage tools
 // this version added, and cover the shared table around them.
 
-#include <engine/control/Features.hpp>
 #include <engine/control/DataFactoryOperationLedger.hpp>
+#include <engine/control/Features.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
@@ -803,7 +803,10 @@ TEST_CASE(
 		"bundle-valid",
 		CaptureBundleOptions(
 			json::array(
-				{"rgb_linear_hdr", "first_surface_validity", "second_surface_depth", "second_surface_validity"}
+				{"rgb_linear_hdr",
+				 "first_surface_validity",
+				 "second_surface_depth",
+				 "second_surface_validity"}
 			)
 		)
 	);
@@ -847,7 +850,8 @@ TEST_CASE(
 	CHECK(
 		bridge->RequestedChannels() ==
 		std::vector<std::string>{
-			"rgb_linear_hdr", "first_surface_validity", "second_surface_depth", "second_surface_validity"}
+			"rgb_linear_hdr", "first_surface_validity", "second_surface_depth", "second_surface_validity"
+		}
 	);
 	CHECK(Called(surface, "capture_bundle", valid) == queued);
 	CHECK(bridge->QueueCount == 4);
@@ -2189,7 +2193,9 @@ TEST_CASE(
 	CHECK_FALSE(audit["entries"][0].contains("arguments"));
 }
 
-TEST_CASE("full operation ledger refuses a new lifecycle operation before world mutation", "[control][data-factory]") {
+TEST_CASE(
+	"full operation ledger refuses a new lifecycle operation before world mutation", "[control][data-factory]"
+) {
 	Universe universe;
 	engine::world::DataFactorySession session(universe);
 	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {

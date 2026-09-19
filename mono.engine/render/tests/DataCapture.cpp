@@ -238,10 +238,10 @@ TEST_CASE(
 			 render::DataCaptureChannel::PbrEmissive,
 			 render::DataCaptureChannel::ObjectIds,
 			 render::DataCaptureChannel::SemanticMask,
-				 render::DataCaptureChannel::PartMask,
-				 render::DataCaptureChannel::AmbientOcclusion,
-				 render::DataCaptureChannel::FirstSurfaceValidity,
-				 render::DataCaptureChannel::SecondSurfaceDepth,
+			 render::DataCaptureChannel::PartMask,
+			 render::DataCaptureChannel::AmbientOcclusion,
+			 render::DataCaptureChannel::FirstSurfaceValidity,
+			 render::DataCaptureChannel::SecondSurfaceDepth,
 			 render::DataCaptureChannel::SecondSurfaceValidity},
 		.ObjectLabels = {},
 		.SemanticLabels = {},
@@ -272,15 +272,19 @@ TEST_CASE(
 	CHECK(hasNativeResolutionPlane);
 	REQUIRE(firstSurfaceValidity != nullptr);
 	CHECK(firstSurfaceValidity->Scalar == render::DataCaptureScalar::UNorm8);
-	CHECK(firstSurfaceValidity->Provenance ==
-		  "first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
-		  "background=0;validity=0_or_255;transparent_geometry=excluded;amodal_ground_truth=false");
+	CHECK(
+		firstSurfaceValidity->Provenance ==
+		"first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
+		"background=0;validity=0_or_255;transparent_geometry=excluded;amodal_ground_truth=false"
+	);
 	const auto values = std::span(firstSurfaceValidity->Bytes);
 	CHECK(std::find(values.begin(), values.end(), std::byte{255}) != values.end());
 	CHECK(std::find(values.begin(), values.end(), std::byte{0}) != values.end());
 }
 
-TEST_CASE("data capture timestamps its later batch camera while profiling is off", "[render][gpu][data-capture][.]") {
+TEST_CASE(
+	"data capture timestamps its later batch camera while profiling is off", "[render][gpu][data-capture][.]"
+) {
 	using namespace engine;
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
@@ -309,14 +313,17 @@ TEST_CASE("data capture timestamps its later batch camera while profiling is off
 	render::OverlayImage overlay;
 
 	render::DataCaptureTicket ticket;
-	REQUIRE(renderer.QueueDataCapture({.SnapshotId = capture.SnapshotId,
-									 .Pipeline = pipeline,
-									 .CaptureNode = core::Name("data-capture"),
-									 .ViewSlot = capture.Slot,
-									 .Channels = {render::DataCaptureChannel::RgbLinearHdr},
-									 .ObjectLabels = {},
-									 .SemanticLabels = {},
-									 .PartLabels = {}}, ticket));
+	REQUIRE(renderer.QueueDataCapture(
+		{.SnapshotId = capture.SnapshotId,
+		 .Pipeline = pipeline,
+		 .CaptureNode = core::Name("data-capture"),
+		 .ViewSlot = capture.Slot,
+		 .Channels = {render::DataCaptureChannel::RgbLinearHdr},
+		 .ObjectLabels = {},
+		 .SemanticLabels = {},
+		 .PartLabels = {}},
+		ticket
+	));
 	const std::array views{first, capture};
 	REQUIRE(renderer.Render(views, overlay, nullptr, false).Submitted);
 

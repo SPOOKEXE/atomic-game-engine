@@ -162,6 +162,7 @@ namespace engine::scene {
 	//        Replaces whatever was recorded, because a republished mesh may
 	//        name different ones and a merge would leave a sheet listed that
 	//        the geometry no longer wears.
+	// @param skinning  The authored joint indices and weights, when present.
 	// @return `false` for an invalid name.
 	bool RecordMesh(
 		ecs::Store &store,

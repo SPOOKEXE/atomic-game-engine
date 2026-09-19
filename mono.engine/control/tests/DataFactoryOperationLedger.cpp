@@ -41,5 +41,8 @@ TEST_CASE("operation ledger fences accepted IDs when its capacity is exhausted",
 		DataFactoryOperationReplay::Replay
 	);
 	CHECK(result.at("status") == "completed");
-	CHECK(ledger.Recent(DataFactoryOperationLedger::MAXIMUM_ENTRIES).size() == DataFactoryOperationLedger::MAXIMUM_ENTRIES);
+	CHECK(
+		ledger.Recent(DataFactoryOperationLedger::MAXIMUM_ENTRIES).size() ==
+		DataFactoryOperationLedger::MAXIMUM_ENTRIES
+	);
 }

@@ -113,6 +113,7 @@ namespace engine::render {
 		// Source copies are retained only when the host requests export support.
 		//
 		// @param device The GPU device. Kept, not owned.
+		// @param retainSources Keep decoded source copies for export support.
 		// @return `false` when the sampler or the default could not be created.
 		bool Initialise(SDL_GPUDevice *device, bool retainSources = false);
 

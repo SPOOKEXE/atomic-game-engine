@@ -215,10 +215,9 @@ namespace engine::render {
 					ResourceImageFormat::R8_UNorm
 				);
 				if (plane.Status == DataCaptureStatus::Ready)
-					plane.Provenance =
-						"first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
-						"background=0;validity=0_or_255;transparent_geometry=excluded;"
-						"amodal_ground_truth=false";
+					plane.Provenance = "first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
+									   "background=0;validity=0_or_255;transparent_geometry=excluded;"
+									   "amodal_ground_truth=false";
 				break;
 			case DataCaptureChannel::SecondSurfaceDepth:
 				if (image.DepthResource == core::Name("second-surface-depth") && !image.Depth.empty())
@@ -370,8 +369,9 @@ namespace engine::render {
 		}
 
 		if (!ticket.ImagesTaken) {
-			auto completed = ticket.ResourceTokens.empty() ? std::optional<std::vector<ResourceImage>>(std::in_place)
-																	 : TakeResourceImages(ticket.ResourceTokens);
+			auto completed = ticket.ResourceTokens.empty()
+								 ? std::optional<std::vector<ResourceImage>>(std::in_place)
+								 : TakeResourceImages(ticket.ResourceTokens);
 			if (!completed) {
 				poll.Status = DataCaptureStatus::Pending;
 				return poll;
@@ -403,7 +403,8 @@ namespace engine::render {
 		);
 		for (const ResourceImage &image : images) {
 			poll.HostReadbackReservedCapacityBytes += image.ReadbackHostReservedCapacityBytes;
-			poll.DeviceReadbackStagingReservedCapacityBytes += image.ReadbackDeviceStagingReservedCapacityBytes;
+			poll.DeviceReadbackStagingReservedCapacityBytes +=
+				image.ReadbackDeviceStagingReservedCapacityBytes;
 		}
 		if (images.empty()) {
 			poll.Pipeline = ticket.Pipeline;

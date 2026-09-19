@@ -677,7 +677,7 @@ namespace engine::control {
 				}
 				if (!Field(values, "channels", field, failure) || !field->is_array() || field->empty() ||
 					field->size() > MAXIMUM_CHANNELS) {
-				failure = Error("validation_failed", "channels must contain 1 to 13 names");
+					failure = Error("validation_failed", "channels must contain 1 to 13 names");
 					return nullptr;
 				}
 				for (const json &channel : *field) {
