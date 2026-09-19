@@ -217,19 +217,11 @@ Remaining scale and evaluation work:
   7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
   8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
 
-### FUTURE
+### v0.27
 
 - [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
-- [_] /docs/future-work/navigation-ai-system.md
-- [_] pathfinding
-- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
+- [_] do heavy memory, cpu and gpu benchmarking and profiling and see if we can squash data into multi-channel representations, improve computations and memory usage, trade lower precision for tiny visual changes, etc.
 
-- [_] project demos:
-* space engineers asteroids + planets full demo (`docs/FULL-PLANET-DEMO.md`)
-* huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot
-* ai village with daily tasks, occupations, relationships, and things like that (dwarf fortress style - personality, occupation, etc).
-
-QOL:
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
 	switch (mode) {
 	case scene::CameraMode::Classic:
@@ -246,15 +238,32 @@ QOL:
 Same with movement system, needs to be server authoritive but pure-lua so it can be changed.
 When you create a new world/scene, it auto appends the scripts in.
 
-- [_] gtlf default character (unreal style)
-- [_] /docs/future-work/character-system.md
-- [_] /docs/future-work/world-streaming.md
-- [_] /docs/future-work/terrain-system.md
+- [_] breakpoint history list per-script (show each iteration of breakpoint, can see change overtime)
+- [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
+- [_] expose automation tools (AutomationService) like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
+
 - [_] /docs/future-work/physics-expansion.md
-- [_] /docs/future-work/vfx-system.md
-- [_] /docs/future-work/camera-and-cinematics.md
 - [_] /docs/future-work/ui-system.md
+- [_] /docs/future-work/world-streaming.md
+
+### FUTURE
+
+- [_] /docs/future-work/navigation-ai-system.md
+- [_] pathfinding
+- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
+
+- [_] gtlf default character (unreal style)
+- [_] project demos:
+* space engineers asteroids + planets full demo (`docs/FULL-PLANET-DEMO.md`)
+* huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot
+* ai village with daily tasks, occupations, relationships, and things like that (dwarf fortress style - personality, occupation, etc).
+
+- [_] localization support
+- [_] /docs/future-work/terrain-system.md
+- [_] /docs/future-work/character-system.md
+- [_] /docs/future-work/vfx-system.md
 - [_] /docs/future-work/input-system.md
+- [_] /docs/future-work/camera-and-cinematics.md
 - [_] /docs/future-work/prefab-package-system.md
 - [_] /docs/future-work/procedural-generation.md
 - [_] /docs/future-work/session-and-social.md
@@ -278,17 +287,10 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] photoshop file reader and import tool
 - [_] docs/MOBILE.md implementation
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
-- [_] localization support
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
-- [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] VR support (oculus rift s)
 - [_] setup a studio permissions system for: microphone, camera, etc
 - [_] setup a example plugin for mocap with camera point track
-- [_] breakpoint history list per-script (show each iteration of breakpoint, can see change overtime)
-- [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
-- [_] expose automation tools like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
-- [_] expose a AutomationService that does this for you (need to enable it for it to be useable).
 - [_] ECS driven RL agent environments
-- [_] use a spatial algorithms to find hallways and such and use that baked information for things like the LOD, unrendering objects, ambient occulusion, lighting, etc. full node based logic for customisation.
 - [_] Move "roblox files to atomic game files" to a external program - the port tool?
