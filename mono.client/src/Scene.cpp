@@ -359,7 +359,8 @@ namespace client {
 		using namespace engine;
 		scene::CameraPortalView history;
 		ecs::Entity camera = ecs::NULL_ENTITY;
-		bool localArmClear = false;
+		std::optional<scene::SeamTransform> carriedArm;
+		std::optional<core::CFrame> armInput;
 		bool subjectFollowing = false;
 		universe.Enter(inputWorld, [&](Store &store) {
 			if (const auto *active = store.Resource<scene::ActiveCamera>()) {
@@ -369,13 +370,27 @@ namespace client {
 				const ecs::Entity subject = scene::CameraSubjectRoot(store, camera);
 				const auto *placement = store.Get<scene::Transform>(subject);
 				if (controller == nullptr || placement == nullptr ||
-					controller->Mode == scene::CameraMode::Scriptable || controller->OccludedDistance < 0.0f)
+					controller->Mode == scene::CameraMode::Scriptable)
 					return;
 				subjectFollowing = true;
 				const core::Vector3 head =
 					placement->Frame.Position + controller->Basis.UpVector() * controller->HeadHeight;
+				const core::CFrame orbit = scene::CameraOrbit(
+					*controller,
+					placement->Frame.Position,
+					controller->OccludedDistance >= 0.0f ? controller->OccludedDistance : controller->Distance
+				);
 				scene::SeamTransform pane;
-				localArmClear = !scene::PortalCrossing(store, head, eye.Position, pane);
+				if (scene::PortalCrossing(store, head, orbit.Position, pane)) {
+					core::CFrame placed = pane.Place(orbit);
+					(void)scene::ClearOfPanes(store, placed.Position);
+					if ((placed.Position - eye.Position).Magnitude() < .001f &&
+						placed.LookVector().Dot(eye.LookVector()) > .9999f &&
+						placed.UpVector().Dot(eye.UpVector()) > .9999f) {
+						carriedArm = pane;
+						armInput = orbit;
+					}
+				}
 			}
 		});
 		if (camera == ecs::NULL_ENTITY) return visualWorld;
@@ -385,15 +400,19 @@ namespace client {
 		for (const auto &entry : worlds)
 			if (entry.Id == inputWorld) authored = entry.Authored;
 		if (!authored.IsValid()) return {};
-		const core::CFrame identity;
-		const bool remappedInput =
-			std::abs(history.FromInput.Scale - 1.0f) > .0001f ||
-			(history.FromInput.Place(identity).Position - identity.Position).Magnitude() > .0001f ||
-			std::abs(glm::dot(history.FromInput.Place(identity).Rotation(), identity.Rotation())) < .9999f;
-		// A following eye stopped at a local pane is already in the subject's room.
-		// Do not apply the body's former local seam again while resolving its draw world.
-		if (subjectFollowing && localArmClear && history.Started && history.World == authored.Text() &&
-			remappedInput)
+		const auto sameMap = [](const scene::SeamTransform &left, const scene::SeamTransform &right) {
+			const core::CFrame origin;
+			const core::CFrame leftAtOrigin = left.Place(origin);
+			const core::CFrame rightAtOrigin = right.Place(origin);
+			return std::abs(left.Scale - right.Scale) < .0001f &&
+				   (leftAtOrigin.Position - rightAtOrigin.Position).Magnitude() < .001f &&
+				   std::abs(glm::dot(leftAtOrigin.Rotation(), rightAtOrigin.Rotation())) > .9999f;
+		};
+		// A physical blocker in the projected room can shorten the arm before it reaches
+		// the local pane. The resulting eye belongs with its subject, so a retained
+		// route back into that same world would map it through the pane a second time.
+		if (subjectFollowing && !carriedArm && history.Started && history.World == authored.Text() &&
+			!sameMap(history.FromInput, {}))
 			history = {};
 		auto resolve = [&](const core::Name &name) {
 			if (name == authored) return visualWorld;
@@ -401,6 +420,8 @@ namespace client {
 		};
 		std::vector<scene::PortalSeam> seams;
 		for (size_t hop = 0; hop < 8; ++hop) {
+			const core::CFrame &routeInput =
+				carriedArm && sameMap(history.FromInput, *carriedArm) ? armInput.value_or(eye) : eye;
 			const auto selected = history.Started ? resolve(core::Name(history.World)) : visualWorld;
 			if (!selected.IsValid()) {
 				ENGINE_LOG(
@@ -432,7 +453,7 @@ namespace client {
 			} else {
 				universe.Enter(selected, [&](Store &store) { scene::GatherPortalSeams(store, seams); });
 			}
-			const auto step = scene::StepCameraPortalView(history, authored.Text(), eye, seams);
+			const auto step = scene::StepCameraPortalView(history, authored.Text(), routeInput, seams);
 			if (step == scene::CameraPortalStep::Invalid) {
 				ENGINE_LOG(
 					core::LogLevel::Trace,
@@ -440,9 +461,9 @@ namespace client {
 					"camera route invalid step in {} from {} at {},{},{}",
 					history.World,
 					authored.Text(),
-					eye.Position.X,
-					eye.Position.Y,
-					eye.Position.Z
+					routeInput.Position.X,
+					routeInput.Position.Y,
+					routeInput.Position.Z
 				);
 				return {};
 			}
@@ -450,9 +471,13 @@ namespace client {
 				continue;
 			}
 			universe.Enter(inputWorld, [&](Store &store) { store.Set(camera, history); });
-			eye = history.FromInput.Place(eye);
+			// `PlaceCamera` has already mapped a following arm through this seam.
+			// The body view still selects the destination, but mapping the output
+			// again would move the eye through the same portal twice.
 			lens.NearPlane *= history.FromInput.Scale;
 			lens.FarPlane *= history.FromInput.Scale;
+			if (carriedArm && sameMap(history.FromInput, *carriedArm)) return selected;
+			eye = history.FromInput.Place(eye);
 			return selected;
 		}
 		ENGINE_LOG(

@@ -2153,6 +2153,7 @@ namespace {
 		size_t Frame = 0;
 		size_t ImportedFrames = 0;
 		size_t GreenFrames = 0;
+		size_t DestinationFrames = 0;
 		explicit PortalWalkImages(
 			Universe &worlds, bool firstPerson, bool authorityVisual, bool assertResolvedEye = false
 		)
@@ -2185,12 +2186,14 @@ namespace {
 			Render.Shutdown();
 			SDL_QuitSubSystem(SDL_INIT_VIDEO);
 		}
-		void
-		Draw(Universe &worlds, const PlayLink &link, bool expectDestination = false, bool backward = false) {
+		void Draw(
+			Universe &worlds,
+			const PlayLink &link,
+			bool expectDestination = false,
+			bool backward = false,
+			bool checkMarker = false
+		) {
 			using namespace engine;
-			for (auto world : worlds.Worlds()) {
-				if (!worlds.IsRemote(world)) worlds.Present(world, 0, 1);
-			}
 			render::View view;
 			auto visual = AuthorityVisual ? link.AuthorityWorld() : link.ReplicaWorld();
 			render::SceneTarget target{65, 65};
@@ -2202,6 +2205,23 @@ namespace {
 				view.CameraFrame = store.Get<scene::Transform>(camera->Entity)->Frame;
 				view.Camera = *store.Get<scene::Camera>(camera->Entity);
 			});
+			if (AuthorityVisual) {
+				ViewerWorld = visual;
+				worlds.Enter(visual, [&](Store &store) {
+					if (!store.Alive(ViewerCamera)) {
+						ViewerCamera = store.CreateInstance(scene::CameraClass(), "PortalWalkViewer");
+						REQUIRE(ViewerCamera != ecs::NULL_ENTITY);
+						store.Set(ViewerCamera, scene::TransientComponent{});
+						store.SetParent(ViewerCamera, scene::WorkspaceOf(store));
+					}
+					store.Set(ViewerCamera, scene::Transform{view.CameraFrame});
+					store.Set(ViewerCamera, view.Camera);
+					store.SetResource(scene::ActiveCamera{ViewerCamera});
+				});
+			}
+			for (auto world : worlds.Worlds()) {
+				if (!worlds.IsRemote(world)) worlds.Present(world, 0, 1);
+			}
 			const CFrame storedEye = view.CameraFrame;
 			visual = client::ResolveCameraPortalWorld(
 				worlds, link.ReplicaWorld(), visual, view.CameraFrame, view.Camera
@@ -2248,6 +2268,10 @@ namespace {
 			view.JointFrames = drawn.JointFrames;
 			std::vector<render::PortalView> portals;
 			std::vector<render::SurfaceView> surfaces;
+			worlds.Enter(visual, [&](Store &store) {
+				(void)client::CollectPortalViews(store, portals);
+				(void)client::CollectSurfaceViews(store, surfaces, portals, &view);
+			});
 			client::UpdatePortalImages(
 				worlds,
 				Images,
@@ -2300,6 +2324,15 @@ namespace {
 				static_cast<const uint8_t *>(rgba->pixels) + probeY * rgba->pitch + probeX * 4;
 			const bool green = pixel[1] > pixel[0] + 30 && pixel[1] > pixel[2] + 30;
 			GreenFrames += green;
+			size_t destinationPixels = 0;
+			for (int y = 0; y < rgba->h; ++y)
+				for (int x = 0; x < rgba->w; ++x) {
+					const auto *sample = static_cast<const uint8_t *>(rgba->pixels) + y * rgba->pitch + x * 4;
+					const bool marker =
+						sample[0] > sample[1] * 2 && sample[2] > sample[1] * 2 && sample[0] + sample[2] > 120;
+					destinationPixels += marker;
+				}
+			if (checkMarker) DestinationFrames += destinationPixels > 8;
 			INFO(
 				"world " << view.WorldName.Text() << " rgb " << int(pixel[0]) << "," << int(pixel[1]) << ","
 						 << int(pixel[2])
@@ -2504,10 +2537,20 @@ TEST_CASE("player input walks across world replicas and back", "[studio][playlin
 	WalkPortalReplicas(false);
 }
 
-static void WalkTunnelsEastPortal(bool gpu, bool authorityVisual = false, bool diagonal = true) {
-	// Load the shipped scene rather than rebuilding its two panes here. The east
-	// tunnel is the case where a player leaves the visible plain for the remote
-	// interior while their replica camera must stay attached to the same rig.
+static void
+WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, bool shortTunnel = true) {
+	// Load the shipped scene rather than rebuilding its panes. Both tunnel pairs
+	// keep a replica camera attached while their physical walk changes length.
+	struct RestoreAssets {
+		std::filesystem::path Previous;
+		~RestoreAssets() {
+			engine::core::Paths::SetAssetsOverride(Previous);
+		}
+	};
+	const RestoreAssets restoreAssets{engine::core::Paths::Assets()};
+	// The renderer reads its shaders while it starts. The test binary stages those
+	// beside itself; examples are staged under the parent assets directory.
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base());
 	Fixture fixture;
 	std::unique_ptr<PortalWalkImages> images;
 	if (gpu) images = std::make_unique<PortalWalkImages>(fixture.Worlds, false, authorityVisual, true);
@@ -2543,6 +2586,22 @@ static void WalkTunnelsEastPortal(bool gpu, bool authorityVisual = false, bool d
 		// remain a solid collider after the script builds the portal pair.
 		CHECK_FALSE(collider->Trigger);
 	});
+	if (gpu) {
+		fixture.Worlds.Enter(fixture.Authority, [shortTunnel](Store &store) {
+			// This exists only in the GPU fixture. It is visible only from the far side
+			// of the forward portal, so its pixels prove the destination is visible
+			// through the pane before the player body crossed.
+			engine::scene::PartDesc marker;
+			marker.Mesh = Name("walk-marker");
+			marker.Frame = CFrame(shortTunnel ? Vector3{54.0f, 3.0f, 10.0f} : Vector3{-20.0f, 3.0f, -15.5f});
+			marker.Size = {8.0f, 6.0f, .01f};
+			const Entity panel = engine::scene::MakePart(store, marker);
+			store.SetParent(panel, engine::scene::WorkspaceOf(store));
+			store.GetMutable<engine::scene::Collider>(panel)->Trigger = true;
+			store.GetMutable<engine::scene::Visual>(panel)->Tint = engine::core::Color3{1.0f, .02f, .8f};
+			store.GetMutable<engine::scene::SurfaceAppearance>(panel)->ColourMap = Name("walk-white");
+		});
+	}
 
 	PlayLink link;
 	std::string error;
@@ -2555,9 +2614,10 @@ static void WalkTunnelsEastPortal(bool gpu, bool authorityVisual = false, bool d
 			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, link.Player()));
 		REQUIRE(rig != nullptr);
 		root = rig->Root;
-		store.Set(
-			root, Transform{CFrame(diagonal ? Vector3{15.86f, 3.0f, 7.0f} : Vector3{20.0f, 3.0f, 7.0f})}
-		);
+		const Vector3 start = shortTunnel
+								  ? (diagonal ? Vector3{15.86f, 3.0f, 7.0f} : Vector3{20.0f, 3.0f, 7.0f})
+								  : Vector3{-20.0f, 3.0f, 15.5f};
+		store.Set(root, Transform{CFrame(start)});
 		if (auto *motion = store.GetMutable<engine::scene::Motion>(root)) {
 			motion->Linear = {};
 			motion->Angular = {};
@@ -2565,7 +2625,7 @@ static void WalkTunnelsEastPortal(bool gpu, bool authorityVisual = false, bool d
 	});
 	fixture.Step(link, 8);
 
-	fixture.Worlds.Enter(link.ReplicaWorld(), [diagonal](Store &store) {
+	fixture.Worlds.Enter(link.ReplicaWorld(), [diagonal, shortTunnel](Store &store) {
 		REQUIRE(client::AimReplicaViewer(store, {}, engine::scene::Camera{}) != engine::ecs::NULL_ENTITY);
 		REQUIRE(engine::scene::FollowOwnCharacter(store));
 		auto *control = store.ResourceMutable<engine::scene::CameraController>();
@@ -2574,23 +2634,43 @@ static void WalkTunnelsEastPortal(bool gpu, bool authorityVisual = false, bool d
 		// The route from the spawn at (0, 30) to the east mouth approaches from
 		// the north west. The aligned variant keeps the player in the centre of
 		// the remote corridor after the crossing.
-		control->Angles.Y = diagonal ? -0.60375f : 0.0f;
+		control->Angles.Y = shortTunnel && diagonal ? -0.60375f : 0.0f;
 		control->Distance = 12.0f;
 		auto *input = store.ResourceMutable<engine::scene::InputState>();
 		REQUIRE(input != nullptr);
 		input->Focused = true;
 		input->Down.Set(engine::scene::KeyCode::W, true);
 	});
+	if (images) {
+		fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+			auto *control = store.ResourceMutable<engine::scene::CameraController>();
+			REQUIRE(control != nullptr);
+			control->Mode = engine::scene::CameraMode::LockFirstPerson;
+			control->Distance = 0.0f;
+			control->OccludedDistance = -1.0f;
+			REQUIRE(engine::scene::PlaceCamera(store));
+		});
+		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
+		images->Draw(fixture.Worlds, link, false, false, true);
+		fixture.Worlds.Enter(link.ReplicaWorld(), [diagonal, shortTunnel](Store &store) {
+			auto *control = store.ResourceMutable<engine::scene::CameraController>();
+			REQUIRE(control != nullptr);
+			control->Mode = engine::scene::CameraMode::Classic;
+			control->Angles.Y = shortTunnel && diagonal ? -0.60375f : 0.0f;
+			control->Distance = 12.0f;
+			control->OccludedDistance = -1.0f;
+		});
+	}
 
 	bool crossed = false;
-	bool cameraArmCrossed = false;
+	bool cameraArmProjected = false;
 	int crossedTick = -1;
 	Vector3 crossingPosition;
 	float lowestY = 1000.0f;
 	for (int tick = 0; tick < 240 && (!crossed || tick < crossedTick + 60); ++tick) {
 		fixture.Step(link);
 		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
-		if (images) images->Draw(fixture.Worlds, link);
+		if (images) images->Draw(fixture.Worlds, link, false, false, !crossed);
 		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
 			const auto *placement = store.Get<Transform>(root);
 			REQUIRE(placement != nullptr);
@@ -2622,45 +2702,70 @@ static void WalkTunnelsEastPortal(bool gpu, bool authorityVisual = false, bool d
 					rootPose->Frame.Position + control->Basis.UpVector() * control->HeadHeight;
 				const float armDistance =
 					control->OccludedDistance >= 0.0f ? control->OccludedDistance : control->Distance;
-				const Vector3 orbit =
-					engine::scene::CameraOrbit(*control, rootPose->Frame.Position, armDistance).Position;
+				const CFrame orbit =
+					engine::scene::CameraOrbit(*control, rootPose->Frame.Position, armDistance);
 				engine::scene::SeamTransform through;
-				cameraArmCrossed =
-					cameraArmCrossed || engine::scene::PortalCrossing(store, head, orbit, through);
-				CHECK(camera->Frame.Position.X > 53.0f);
-				CHECK(camera->Frame.Position.X < 57.0f);
+				if (engine::scene::PortalCrossing(store, head, orbit.Position, through)) {
+					cameraArmProjected = true;
+					CFrame expected = through.Place(orbit);
+					(void)engine::scene::ClearOfPanes(store, expected.Position);
+					CHECK((camera->Frame.Position - expected.Position).Magnitude() < .001f);
+					CHECK(camera->Frame.LookVector().Dot(expected.LookVector()) > .9999f);
+					CHECK(camera->Frame.UpVector().Dot(expected.UpVector()) > .9999f);
+				}
 			}
 		});
 	}
 
 	CHECK(crossed);
-	CHECK_FALSE(cameraArmCrossed);
-	CHECK(crossingPosition.X > 53.9f);
-	CHECK(crossingPosition.X < 54.1f);
-	CHECK(crossingPosition.Z < 13.0f);
-	CHECK(crossingPosition.Z > 12.0f);
+	CHECK(cameraArmProjected);
+	if (shortTunnel) {
+		CHECK(crossingPosition.X > 53.9f);
+		CHECK(crossingPosition.X < 54.1f);
+		CHECK(crossingPosition.Z < 13.0f);
+		CHECK(crossingPosition.Z > 12.0f);
+	} else {
+		CHECK(crossingPosition.X > -20.1f);
+		CHECK(crossingPosition.X < -19.9f);
+		CHECK(crossingPosition.Z < -13.9f);
+		CHECK(crossingPosition.Z > -14.5f);
+	}
 	CHECK(lowestY > 1.0f);
+	if (images) CHECK(images->DestinationFrames > 3);
 }
 
 TEST_CASE(
 	"Studio Play keeps the player grounded through the Tunnels east portal",
 	"[studio][playlink][portal][demo]"
 ) {
-	WalkTunnelsEastPortal(false);
+	WalkTunnelsPortal(false);
 }
 
 TEST_CASE(
 	"Studio Play renders the Tunnels east portal while its player crosses",
 	"[studio][gpu][playlink][portal][demo][.]"
 ) {
-	WalkTunnelsEastPortal(true, true);
+	WalkTunnelsPortal(true, true);
 }
 
 TEST_CASE(
-	"Studio Play keeps the aligned Tunnels portal camera in the interior",
+	"Studio Play projects the aligned Tunnels camera through its portal",
 	"[studio][gpu][playlink][portal][demo][.]"
 ) {
-	WalkTunnelsEastPortal(true, true, false);
+	WalkTunnelsPortal(true, true, false);
+}
+
+TEST_CASE(
+	"Studio Play projects the camera through the Tunnels west portal", "[studio][playlink][portal][demo]"
+) {
+	WalkTunnelsPortal(false, false, false, false);
+}
+
+TEST_CASE(
+	"Studio Play renders the Tunnels west portal while its player crosses",
+	"[studio][gpu][playlink][portal][demo][.]"
+) {
+	WalkTunnelsPortal(true, true, false, false);
 }
 TEST_CASE(
 	"portal images follow the walking player through replica handoff", "[studio][gpu][portal-walk-images][.]"

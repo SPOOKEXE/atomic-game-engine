@@ -337,10 +337,11 @@ namespace engine::scene {
 			controller->OccludedDistance >= 0.0f ? controller->OccludedDistance : controller->Distance;
 		CFrame pose = CameraOrbit(*controller, subject->Frame.Position, distance);
 
-		// Poppercam clips the subject-follow arm before this placement pass. Keep
-		// this crossing as the fallback for callers that do not run Poppercam.
-		// Put the eye through the same map as a body's placement and velocity, so
-		// it arrives behind the character on the far side of the portal.
+		// The arm goes through a portal if one is in the way of it. A following
+		// eye must reach the same room the pane projects, rather than stopping in
+		// the room its subject just left. Put it through the same map as a body's
+		// placement and velocity, so it arrives behind the character on the far
+		// side of the portal.
 		// First person has no arm and therefore no crossing.
 		// Place carries the position with scale and rotates every camera axis,
 		// preserving roll when the arm passes through a tilted seam.

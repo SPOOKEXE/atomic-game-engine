@@ -240,10 +240,6 @@ namespace engine::physics {
 			return clear();
 		}
 		const core::Vector3 direction = toEye / wanted;
-		scene::PortalHop pane;
-		const bool crossesLocalPane = scene::PortalCrossing(store, head, desired, pane);
-		const float paneDistance = crossesLocalPane ? wanted * pane.Share : wanted;
-
 		// **A loop of single-hit casts rather than a filtered query**, because
 		// `Raycast` refuses a general ignore list by design - see its own
 		// header. Each pass starts just past the last hit, which is the same
@@ -254,8 +250,8 @@ namespace engine::physics {
 		std::optional<ColliderHit> blocking;
 		for (int pass = 0; pass < POPPERCAM_IGNORE_LIMIT && travelled < wanted; pass++) {
 			const core::Ray ray{head + direction * travelled, direction};
-			// Raycast ignores open portal panes and non-colliding stand-ins. The
-			// explicit local pane candidate below can still shorten the camera arm.
+			// Open portal panes and non-colliding stand-ins cannot shorten the camera arm.
+			// Filter in the query so a solid wall behind those volumes remains visible.
 			const auto hit = RaycastThroughPortals(
 				store, ray, wanted - travelled, spatial::LayerMask::All(), subjectRoot, false
 			);
@@ -273,27 +269,23 @@ namespace engine::physics {
 			break;
 		}
 
-		const bool paneWins =
-			crossesLocalPane && (!blocking.has_value() || paneDistance < blocking->Distance);
-		if (!blocking.has_value() && !paneWins) {
+		if (!blocking.has_value()) {
 			return clear();
 		}
 
 		bool changed = false;
-		const float blockerDistance = paneWins ? paneDistance : blocking->Distance;
-		const float occluded = std::max(0.0f, blockerDistance - POPPERCAM_MARGIN);
+		const float occluded = std::max(0.0f, blocking->Distance - POPPERCAM_MARGIN);
 		if (controller->OccludedDistance != occluded) {
 			controller->OccludedDistance = occluded;
 			changed = true;
 		}
 
-		const ecs::Entity faded = paneWins ? ecs::NULL_ENTITY : blocking->Owner;
-		if (state->FadedBlocker != faded) {
+		if (state->FadedBlocker != blocking->Owner) {
 			if (state->FadedBlocker != ecs::NULL_ENTITY) {
 				scene::SetLocalTransparency(store, state->FadedBlocker, 0.0f);
 			}
-			if (faded != ecs::NULL_ENTITY) scene::SetLocalTransparency(store, faded, POPPERCAM_FADE);
-			state->FadedBlocker = faded;
+			scene::SetLocalTransparency(store, blocking->Owner, POPPERCAM_FADE);
+			state->FadedBlocker = blocking->Owner;
 			changed = true;
 		}
 
