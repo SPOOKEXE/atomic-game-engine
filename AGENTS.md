@@ -23,6 +23,7 @@ NEVER USE EM-DASHES.
 - Cannot edit CODE_DOCUMENTING.md
 - Cannot edit CODE_FORMAT.md
 - Cannot edit CODE_QUALITY.md
+- Cannot edit CODE_BAD_PRACTICES.md
 
 Do NOT put random crap in these documents.
 These are critical to AI operations.
@@ -54,7 +55,8 @@ Use codegraph mcp tools to search codebase more effectively.
    up once `just docs` has run, and the tags that are available.
 5. [`docs/CODE_QUALITY.md`](docs/CODE_QUALITY.md) - the checklist a change is
    reviewed against.
-6. `ROADMAP.md` - what version we are on, and therefore what is in scope.
+6. [`docs/CODE_BAD_PRACTICES.md`](docs/CODE_BAD_PRACTICES.md) - avoid these practices
+7. `ROADMAP.md` - what version we are on, and therefore what is in scope.
 
 [`RUNNING.md`](RUNNING.md) is the reference for running anything - the client,
 the server, one test suite, the tools. Read it before inventing a command line.

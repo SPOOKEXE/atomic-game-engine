@@ -196,16 +196,15 @@ Remaining scale and evaluation work:
 - [_] plan a consolidation for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them).
 - [_] update and prune old content in documentation. check each statement, update, remove or replace.
 
+- [_] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
+- [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
 - [_] optimise server startup time
 - [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
 
 ### v0.26
 
-- [_] create a mermaid diagram visualiser (script that iterates and finds all render nodes => generates diagram in markdown in .cache/build/)
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
 - [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
-- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
-- [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
 - [_] go over render system and consolidate/improve hooks, nodes, graph system and visualiser of graph system
 
 - [_] add typed render hooks at proven boundaries. `DataFactoryHookBind` registers and discovers twelve stable read-only data-capture hooks and the synchronous `view.camera` mutation hook. Data capture remains pinned to exact pipeline, revision, view, snapshot and node identity and returns bounded asynchronous readbacks. `view.camera` accepts owned one-shot camera-frame, camera, and projection patches only for an exact installed pipeline revision, world, snapshot, and view slot; conflicts, stale revisions, malformed values, cancellation, and generation reuse are explicit. The renderer copies only the matching view before capture preparation and never calls external code or exposes a mutable view. The release CPU lifecycle benchmark fell from 41.62 to 20.48 microseconds per 64 lifecycles after dispatch stopped copying the full graph snapshot; validated capture planes now take ownership of readback vectors instead of copying them. GPU and readback release profiling plus a second real consumer remain open. A hook is an observer node, declared node output, or this bounded typed pre-view patch, not a second callback graph beside it.
@@ -220,6 +219,7 @@ Remaining scale and evaluation work:
 
 ### FUTURE
 
+- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
 - [_] /docs/future-work/navigation-ai-system.md
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too

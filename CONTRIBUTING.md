@@ -112,7 +112,7 @@ when you care about the numbers.
 
 ## Before you open a pull request
 
-**Work through [`docs/CODE_QUALITY.md`](docs/CODE_QUALITY.md).** That is the
+**Work through [`docs/CODE_QUALITY.md`](docs/CODE_QUALITY.md) and [`docs/CODE_BAD_PRACTICES.md`](docs/CODE_BAD_PRACTICES.md).** That is the
 completion checklist - the mechanical gate first, then the review questions,
 then what the pull request itself has to say.
 
@@ -189,6 +189,7 @@ The short version, and where each part is answered in full:
 | Have you formatted your code correctly? | [1 · The mechanical gate](docs/CODE_QUALITY.md#1--the-mechanical-gate) |
 | Any 'negative' C++ practices? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) - named, one by one |
 | Any 'negative' general practices? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) - likewise |
+| Avoid bad code practices | [`docs/CODE_BAD_PRACTICES.md`](docs/CODE_BAD_PRACTICES.md)
 
 The full checklist also covers the layer stack, the untrusted parsing
 boundaries, thread affinity, and what the pull request itself has to say. Those

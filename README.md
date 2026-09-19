@@ -43,6 +43,7 @@ For demos, refer to [`DEMOS.md`](docs/DEMOS.md) file.
 | [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
 | [docs/CODE_FORMAT.md](docs/CODE_FORMAT.md) | naming, includes, and what a comment is for |
 | [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist - run it before opening one |
+| [docs/CODE_BAD_PRACTICES.md](docs/CODE_BAD_PRACTICES.md) | bad code practices to avoid. |
 | [docs/DEFERRED.md](docs/DEFERRED.md) | deferred items from ROADMAP.md that need to be revisited |
 | [docs/RELEASING.md](docs/RELEASING.md) | the version scheme, and how a tag becomes a download |
 
