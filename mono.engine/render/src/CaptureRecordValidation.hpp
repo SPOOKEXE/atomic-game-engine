@@ -8,6 +8,8 @@
 #include <array>
 #include <limits>
 #include <optional>
+#include <ranges>
+#include <span>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -51,6 +53,7 @@ namespace engine::render::capture_record_validation {
 			: (channel == DataCaptureChannel::SemanticMask || channel == DataCaptureChannel::PartMask)
 				? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::AmbientOcclusion ||
+			   channel == DataCaptureChannel::FirstSurfaceValidity ||
 			   channel == DataCaptureChannel::SecondSurfaceValidity)
 				? scalar == DataCaptureScalar::UNorm8
 			: (channel == DataCaptureChannel::PbrAlbedo || channel == DataCaptureChannel::PbrMaterial)
@@ -58,6 +61,7 @@ namespace engine::render::capture_record_validation {
 				: false;
 		const size_t bytesPerPixel =
 			(channel == DataCaptureChannel::AmbientOcclusion ||
+			 channel == DataCaptureChannel::FirstSurfaceValidity ||
 			 channel == DataCaptureChannel::SecondSurfaceValidity)
 				? 1
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors) ? 4
@@ -106,6 +110,18 @@ namespace engine::render::capture_record_validation {
 		return std::ranges::any_of(prefixes, [&](std::string_view prefix) {
 			return provenance.size() == prefix.size() + suffix.size() && provenance.starts_with(prefix) &&
 				   provenance.ends_with(suffix);
+		});
+	}
+
+	inline bool ValidFirstSurfaceProvenance(std::string_view provenance) {
+		return provenance == "first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
+						 "background=0;validity=0_or_255;transparent_geometry=excluded;"
+						 "amodal_ground_truth=false";
+	}
+
+	inline bool ValidFirstSurfaceValidityBytes(std::span<const std::byte> bytes) {
+		return std::ranges::all_of(bytes, [](std::byte value) {
+			return value == std::byte{0} || value == std::byte{255};
 		});
 	}
 
@@ -158,10 +174,13 @@ namespace engine::render::capture_record_validation {
 		}
 		const size_t stride = MinimumRowStride(plane.Channel, plane.Scalar, plane.Width);
 		const bool validSecondProvenance = ValidSecondSurfaceProvenance(plane.Provenance);
+		const bool validFirstProvenance = ValidFirstSurfaceProvenance(plane.Provenance);
 		if ((plane.Channel == DataCaptureChannel::AmbientOcclusion
 				 ? !plane.AmbientOcclusion || !ValidAmbientOcclusion(*plane.AmbientOcclusion)
 				 : plane.AmbientOcclusion.has_value()) ||
 			(secondSurface ? !validSecondProvenance
+			 : plane.Channel == DataCaptureChannel::FirstSurfaceValidity
+				 ? !validFirstProvenance || !ValidFirstSurfaceValidityBytes(plane.Bytes)
 			 : plane.Channel == DataCaptureChannel::MeshUv
 				 ? plane.Provenance != "authored_mesh_texcoord/"
 									   "v1;components=u_v;units=dimensionless;range=unbounded;interpolation="

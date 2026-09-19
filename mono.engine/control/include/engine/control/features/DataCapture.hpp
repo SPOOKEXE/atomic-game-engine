@@ -34,7 +34,7 @@ namespace engine::control {
 		inline constexpr size_t MAXIMUM_ID = 128;
 		inline constexpr size_t MAXIMUM_OPTION_TEXT = 256;
 		inline constexpr size_t MAXIMUM_CHANNEL_NAME = 64;
-		inline constexpr size_t MAXIMUM_CHANNELS = 12;
+		inline constexpr size_t MAXIMUM_CHANNELS = 13;
 		// ScriptDataCaptureBridge owns six retained ticket slots. The MCP bound must
 		// match that admission limit rather than the separate hook-batch limit.
 		inline constexpr size_t MAXIMUM_MULTICAMERA_VIEWS = 6;
@@ -176,7 +176,7 @@ namespace engine::control {
 			}
 			if (!Field(options, "channels", field, failure) || !field->is_array() || field->empty() ||
 				field->size() > MAXIMUM_CHANNELS) {
-				failure = Error("validation_failed", "options.channels must contain 1 to 12 names");
+				failure = Error("validation_failed", "options.channels must contain 1 to 13 names");
 				return false;
 			}
 			bool hasSecondSurfaceDepth = false;
@@ -677,7 +677,7 @@ namespace engine::control {
 				}
 				if (!Field(values, "channels", field, failure) || !field->is_array() || field->empty() ||
 					field->size() > MAXIMUM_CHANNELS) {
-					failure = Error("validation_failed", "channels must contain 1 to 12 names");
+				failure = Error("validation_failed", "channels must contain 1 to 13 names");
 					return nullptr;
 				}
 				for (const json &channel : *field) {

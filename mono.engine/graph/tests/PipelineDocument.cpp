@@ -92,7 +92,7 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
 	REQUIRE(fromDocument.Shared.size() == 5);
-	REQUIRE(fromDocument.PerView.size() == 19);
+	REQUIRE(fromDocument.PerView.size() == 20);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("mesh-residency"));
@@ -192,6 +192,25 @@ TEST_CASE(
 	REQUIRE(uv != nullptr);
 	CHECK(uv->Name == Name("mesh-uv"));
 	CHECK(uv->Format == engine::graph::ResourceFormat::RG16F);
+}
+
+TEST_CASE("the data capture document records visible opaque or masked coverage", "[graph][data-capture]") {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok);
+	const engine::graph::Node *capture = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("data-capture-first-surface-validity")) capture = node;
+	}
+	REQUIRE(capture != nullptr);
+	CHECK(capture->Kind == Name("capture"));
+	CHECK(capture->Scope == NodeScope::Frame);
+	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
+	const auto *validity = graph.FindResource(capture->Reads.front());
+	REQUIRE(validity != nullptr);
+	CHECK(validity->Name == Name("first-surface-validity"));
+	CHECK(validity->Format == engine::graph::ResourceFormat::R8);
 }
 
 TEST_CASE("the data capture document peels one aligned second surface", "[graph][data-capture]") {
@@ -374,7 +393,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 5);
-	REQUIRE(compiled.PerView.size() == 19);
+	REQUIRE(compiled.PerView.size() == 20);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
@@ -392,15 +411,16 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("surface-capture"));
 	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("gbuffer"));
 	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("depth-linearise"));
-	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("ssao"));
-	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("deferred-lighting"));
-	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("sky"));
-	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("fog"));
-	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("portal-overlay"));
-	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("mirror-overlay"));
-	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("transparent"));
-	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("shader-lenses"));
-	CHECK(graph.Find(compiled.PerView[18])->Kind == Name("tonemap"));
+	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("depth-validity"));
+	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("ssao"));
+	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("deferred-lighting"));
+	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("sky"));
+	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("fog"));
+	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("portal-overlay"));
+	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("mirror-overlay"));
+	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("transparent"));
+	CHECK(graph.Find(compiled.PerView[18])->Kind == Name("shader-lenses"));
+	CHECK(graph.Find(compiled.PerView[19])->Kind == Name("tonemap"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
 	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 

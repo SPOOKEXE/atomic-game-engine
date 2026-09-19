@@ -3,6 +3,7 @@
 #include "RenderFixture.hpp"
 #include "SecondSurfaceDepth.hpp"
 
+#include <engine/assets/Mesh.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/DataCapture.hpp>
@@ -124,6 +125,10 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::SemanticMask)) == "semantic_ids");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::PartMask)) == "part_ids");
 	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::FirstSurfaceValidity)) ==
+		"first_surface_validity"
+	);
+	CHECK(
 		std::string_view(DataCaptureChannelName(DataCaptureChannel::SecondSurfaceDepth)) ==
 		"second_surface_depth"
 	);
@@ -197,11 +202,29 @@ TEST_CASE(
 	const core::Name pipeline("native-resolution-data-capture");
 	REQUIRE(renderer.SetPipeline(pipeline, graph));
 
+	assets::MeshData plane;
+	plane.Vertices = {
+		{{-1, -1, 0}, {0, 0, 1}, {0, 1}},
+		{{1, -1, 0}, {0, 0, 1}, {1, 1}},
+		{{1, 1, 0}, {0, 0, 1}, {1, 0}},
+		{{-1, 1, 0}, {0, 0, 1}, {0, 0}}
+	};
+	plane.Indices = {0, 1, 2, 0, 2, 3};
+	plane.ComputeBounds();
+	const core::Name mesh("first-surface-validity-plane");
+	REQUIRE(renderer.AddMesh(mesh, plane));
+	scene::DrawInstance instance;
+	instance.Source = 1;
+	instance.Mesh = mesh;
+	instance.Frame.Position = {0, 0, -3};
+	instance.HalfExtent = {1, 1, 1};
+	instance.CastShadow = false;
 	render::SceneTarget target{1280, 720};
 	render::View view;
 	view.Pipeline = pipeline;
 	view.Target = &target;
 	view.SnapshotId = "native-resolution-snapshot";
+	view.Instances = std::span(&instance, 1);
 	render::DataCaptureRequest request{
 		.SnapshotId = view.SnapshotId,
 		.Pipeline = pipeline,
@@ -215,9 +238,10 @@ TEST_CASE(
 			 render::DataCaptureChannel::PbrEmissive,
 			 render::DataCaptureChannel::ObjectIds,
 			 render::DataCaptureChannel::SemanticMask,
-			 render::DataCaptureChannel::PartMask,
-			 render::DataCaptureChannel::AmbientOcclusion,
-			 render::DataCaptureChannel::SecondSurfaceDepth,
+				 render::DataCaptureChannel::PartMask,
+				 render::DataCaptureChannel::AmbientOcclusion,
+				 render::DataCaptureChannel::FirstSurfaceValidity,
+				 render::DataCaptureChannel::SecondSurfaceDepth,
 			 render::DataCaptureChannel::SecondSurfaceValidity},
 		.ObjectLabels = {},
 		.SemanticLabels = {},
@@ -238,12 +262,22 @@ TEST_CASE(
 	REQUIRE(poll.Status == render::DataCaptureStatus::Ready);
 	REQUIRE(poll.Planes.size() == request.Channels.size());
 	bool hasNativeResolutionPlane = false;
+	const render::DataCapturePlane *firstSurfaceValidity = nullptr;
 	for (const render::DataCapturePlane &plane : poll.Planes) {
 		CHECK(plane.Status == render::DataCaptureStatus::Ready);
 		hasNativeResolutionPlane =
 			hasNativeResolutionPlane || (plane.Width >= target.Width && plane.Height >= target.Height);
+		if (plane.Channel == render::DataCaptureChannel::FirstSurfaceValidity) firstSurfaceValidity = &plane;
 	}
 	CHECK(hasNativeResolutionPlane);
+	REQUIRE(firstSurfaceValidity != nullptr);
+	CHECK(firstSurfaceValidity->Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(firstSurfaceValidity->Provenance ==
+		  "first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
+		  "background=0;validity=0_or_255;transparent_geometry=excluded;amodal_ground_truth=false");
+	const auto values = std::span(firstSurfaceValidity->Bytes);
+	CHECK(std::find(values.begin(), values.end(), std::byte{255}) != values.end());
+	CHECK(std::find(values.begin(), values.end(), std::byte{0}) != values.end());
 }
 
 TEST_CASE("data capture timestamps its later batch camera while profiling is off", "[render][gpu][data-capture][.]") {
@@ -1304,7 +1338,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			return hook.Access == "observation";
 		})
 	);
-	REQUIRE(observationHooks == 16);
+	REQUIRE(observationHooks == 17);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
 		if (hook.Access != "observation") continue;

@@ -152,6 +152,7 @@ namespace engine::render {
 			MeshUv,
 			CameraMotionVectors,
 			LinearDepth,
+			FirstSurfaceValidity,
 			SecondSurfaceZ,
 			SecondSurfaceDepth,
 			SecondSurfaceValidity,
@@ -225,6 +226,9 @@ namespace engine::render {
 						// texture.
 						return background && *background == "zero" ? ResourceRole::Unknown
 																   : ResourceRole::LinearDepth;
+					}
+					if (node->Kind == core::Name("depth-validity")) {
+						return ResourceRole::FirstSurfaceValidity;
 					}
 					if (node->Kind == core::Name("depth-peel")) {
 						constexpr std::array roles{
@@ -462,6 +466,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *GBufferPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthPeelPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthLinearPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DepthValidityPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *CameraMotionPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthComposePipeline = nullptr;
 		bool EnsureDepthCompose();
@@ -526,6 +531,7 @@ namespace engine::render {
 			SDL_GPUTexture *SemanticIds = nullptr;
 			SDL_GPUTexture *PartIds = nullptr;
 			SDL_GPUTexture *LinearDepth = nullptr;
+			SDL_GPUTexture *FirstSurfaceValidity = nullptr;
 			SDL_GPUTexture *CameraMotionVectors = nullptr;
 			glm::mat4 PreviousCameraMotionViewProjection{1.0f};
 			uint64_t PreviousCameraMotionFrame = 0;

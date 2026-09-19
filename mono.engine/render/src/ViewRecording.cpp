@@ -1656,7 +1656,8 @@ namespace engine::render {
 		);
 		const bool needsPbrTargets =
 			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-peel")) ||
-			graphEnabled(core::Name("depth-linearise")) || graphEnabled(core::Name("ssao")) ||
+			graphEnabled(core::Name("depth-linearise")) || graphEnabled(core::Name("depth-validity")) ||
+			graphEnabled(core::Name("ssao")) ||
 			graphEnabled(core::Name("deferred-lighting")) || graphEnabled(core::Name("camera-motion")) ||
 			graphEnabled(core::Name("fog")) || graphEnabled(core::Name("tonemap")) ||
 			graphEnabled(core::Name("transparent"));

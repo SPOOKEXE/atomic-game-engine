@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -524,20 +525,33 @@ TEST_CASE("raw scene extract preserves portable mesh and source texture sections
 	CHECK(light.at("kind") == "point");
 	CHECK(light.at("brightness_unit") == "engine_brightness");
 	CHECK(light.at("brightness") == 3.0f);
-	const auto end = began.at("byte_length").get<uint64_t>();
-	const json chunk = Call(
-		surface,
-		"get_raw_scene_chunk",
-		{{"instance_id", "raw.scene"},
-		 {"resource_id", began.at("resource_id")},
-		 {"hash", began.at("hash")},
-		 {"byte_begin", 0},
-		 {"byte_end", end},
-		 {"options", json::object()}},
-		failed
-	);
-	REQUIRE_FALSE(failed);
-	const std::vector<std::byte> bytes = Decode(chunk.at("base64").get<std::string>());
+	const uint64_t end = began.at("byte_length").get<uint64_t>();
+	const uint64_t chunkLimit = began.at("chunk_byte_limit").get<uint64_t>();
+	const uint64_t readLimit = std::min<uint64_t>(chunkLimit, 31);
+	REQUIRE(readLimit > 0);
+	REQUIRE(end > readLimit);
+	std::vector<std::byte> bytes;
+	for (uint64_t begin = 0; begin < end;) {
+		const uint64_t next = std::min(end, begin + readLimit);
+		const json chunk = Call(
+			surface,
+			"get_raw_scene_chunk",
+			{{"instance_id", "raw.scene"},
+			 {"resource_id", began.at("resource_id")},
+			 {"hash", began.at("hash")},
+			 {"byte_begin", begin},
+			 {"byte_end", next},
+			 {"options", json::object()}},
+			failed
+		);
+		REQUIRE_FALSE(failed);
+		CHECK(chunk.at("byte_begin") == begin);
+		CHECK(chunk.at("byte_end") == next);
+		const std::vector<std::byte> range = Decode(chunk.at("base64").get<std::string>());
+		CHECK(range.size() == next - begin);
+		bytes.insert(bytes.end(), range.begin(), range.end());
+		begin = next;
+	}
 	CHECK(bytes.size() == end);
 	CHECK(engine::assets::Hasher::Of(bytes).ToHex() == began.at("hash").get<std::string>());
 	const size_t textureOffset = texture.at("byte_offset").get<size_t>();
@@ -562,4 +576,68 @@ TEST_CASE("raw scene extract preserves portable mesh and source texture sections
 		failed
 	);
 	CHECK(failed);
+}
+
+TEST_CASE("raw scene resource reads keep their source lifecycle fence", "[control][rawscene]") {
+	engine::world::Universe universe;
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant(
+		[](engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) { return true; }
+	);
+	const engine::world::DataFactoryWorldRequest create{
+		.Operation = engine::world::DataFactoryWorldOperation::Create,
+		.InstanceId = "raw.fenced",
+		.TickRate = 60.0,
+		.OperationId = "raw-fenced-create",
+	};
+	REQUIRE(session.CreateWorld(create).Status == engine::world::DataFactoryStatus::Ok);
+	const auto world = universe.Find(engine::core::Name("raw.fenced"));
+	REQUIRE(world.IsValid());
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneClasses();
+		const auto part = engine::scene::MakePart(store, {});
+		Identify(store, part, "raw/fenced");
+	});
+	engine::control::Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe, {}, &session)});
+	const auto current = session.Inspect("raw.fenced");
+	REQUIRE(current.Status == engine::world::DataFactoryStatus::Ok);
+	const json options{
+		{"expected_tick", current.Clock.Tick},
+		{"expected_world_epoch", current.WorldEpoch},
+		{"expected_world_version", current.WorldVersion},
+	};
+	bool failed = false;
+	const json began = Call(
+		surface,
+		"begin_raw_scene_extract",
+		{{"instance_id", "raw.fenced"}, {"options", options}},
+		failed
+	);
+	REQUIRE_FALSE(failed);
+	REQUIRE(
+		session.CommitExternalMutation("raw.fenced", current.Clock.Tick, current.WorldVersion).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	const json stale = Call(
+		surface,
+		"get_raw_scene_chunk",
+		{{"instance_id", "raw.fenced"},
+		 {"resource_id", began.at("resource_id")},
+		 {"hash", began.at("hash")},
+		 {"byte_begin", 0},
+		 {"byte_end", 1},
+		 {"options", options}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(stale.at("status") == "version_conflict");
+	const json released = Call(
+		surface,
+		"release_raw_scene_extract",
+		{{"instance_id", "raw.fenced"}, {"resource_id", began.at("resource_id")}},
+		failed
+	);
+	CHECK_FALSE(failed);
+	CHECK(released.at("status") == "released");
 }

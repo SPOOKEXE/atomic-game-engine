@@ -402,6 +402,7 @@ namespace engine::render {
 				std::string_view("last-frame"),
 				std::string_view("blit"),
 				std::string_view("depth-linearise"),
+				std::string_view("depth-validity"),
 				std::string_view("camera-motion"),
 				std::string_view("hzb"),
 				std::string_view("ssao"),
@@ -797,6 +798,7 @@ namespace engine::render {
 
 		if (pbrSupported) {
 			DepthLinearPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R32_FLOAT);
+			DepthValidityPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			CameraMotionPipeline = fullscreen(cameraMotionFragment, SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT);
 			SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			DeferredLightingPipeline =
@@ -804,7 +806,8 @@ namespace engine::render {
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
-			if (DepthLinearPipeline == nullptr || CameraMotionPipeline == nullptr ||
+			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
+				CameraMotionPipeline == nullptr ||
 				SsaoPipeline == nullptr || DeferredLightingPipeline == nullptr || SkyPipeline == nullptr ||
 				VolumePipeline == nullptr || TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
@@ -1267,7 +1270,8 @@ namespace engine::render {
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
 			   (!pbrSupported ||
 				(GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
-				 DepthLinearPipeline != nullptr && CameraMotionPipeline != nullptr &&
+				 DepthLinearPipeline != nullptr && DepthValidityPipeline != nullptr &&
+				 CameraMotionPipeline != nullptr &&
 				 SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
 				 VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
 			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&

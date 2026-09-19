@@ -26,6 +26,10 @@ layout(set = 3, binding = 0) uniform Pass {
 
 void main() {
 	float raw = texture(depthImage, inUv * pass.Target.zw).r;
+	if (pass.Direction.w > 1.5) {
+		outLinear = vec4(raw < 1.0 ? 1.0 : 0.0);
+		return;
+	}
 	float farPlane = pass.Planes.y;
 	float linear = raw >= 1.0
 		? (pass.Direction.w > 0.5 ? 0.0 : farPlane)

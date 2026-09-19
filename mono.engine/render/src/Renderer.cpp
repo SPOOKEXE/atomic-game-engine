@@ -876,6 +876,7 @@ namespace engine::render {
 			  State->GBufferPipeline,
 			  State->DepthPeelPipeline,
 			  State->DepthLinearPipeline,
+			  State->DepthValidityPipeline,
 			  State->CameraMotionPipeline,
 			  State->DepthComposePipeline,
 			  State->ColourComposePipeline,
@@ -2221,6 +2222,9 @@ namespace engine::render {
 		}
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return pbr.LinearDepth;
+		}
+		if (role == Impl::ResourceRole::FirstSurfaceValidity) {
+			return pbr.FirstSurfaceValidity;
 		}
 		if (role == Impl::ResourceRole::CameraMotionVectors) {
 			return pbr.CameraMotionVectors;

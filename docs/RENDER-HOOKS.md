@@ -338,7 +338,7 @@ The manifest records stable names, schema versions, snapshot and frame identity,
 camera facts, dimensions, status, and hashes.
 
 Raw spatial export is separate from this image-observation path. After scene
-generation, an external factory reads the revision-fenced `raw-scene/v1` record
+generation, an external factory reads the revision-fenced `raw-scene/v2` record
 through bounded MCP calls. The record carries stable IDs, transforms, geometry,
 cameras, and explicit unavailable facts. `DataFactoryHookBind` does not prepare,
 transform, save, or train on that data.

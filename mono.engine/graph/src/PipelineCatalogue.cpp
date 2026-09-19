@@ -407,6 +407,7 @@ namespace engine::graph {
 				 "gbuffer",
 				 "depth-peel",
 				 "depth-linearise",
+				 "depth-validity",
 				 "camera-motion",
 				 "depth-compose",
 				 "ambient-response",
@@ -859,6 +860,16 @@ namespace engine::graph {
 			 {{"linear", K::Colour, R32, true, "Linear view-space depth."}},
 			 "Hardware depth to linear float. Cheap as a blit; expensive as a "
 			 "full-screen triangle, which is how most engines do it.",
+			 false,
+			 "depth-linearise.frag"},
+
+			{"depth-validity",
+			 "First surface validity",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, D24, true, "Hardware depth."}},
+			 {{"validity", K::Colour, ResourceFormat::R8, true, "Binary visible opaque or masked coverage."}},
+			 "A binary coverage plane from G-buffer depth. Transparent draws stay excluded.",
 			 false,
 			 "depth-linearise.frag"},
 

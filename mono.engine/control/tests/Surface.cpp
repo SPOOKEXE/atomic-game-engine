@@ -172,7 +172,8 @@ namespace {
 					 "ambient_occlusion",
 					 "object_ids",
 					 "semantic_ids",
-					 "part_ids"},
+					 "part_ids",
+					 "first_surface_validity"},
 				.StorageProfiles = {"lossless", "training_compact"},
 				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
 				.NoiseLimitations = {"gaussian=rgb_linear_hdr_only"},
@@ -191,8 +192,9 @@ namespace {
 						ObservationHook("data_capture.object_ids", "object_ids"),
 						ObservationHook("data_capture.semantic_ids", "semantic_ids"),
 						ObservationHook("data_capture.part_ids", "part_ids"),
+						ObservationHook("data_capture.first_surface_validity", "first_surface_validity"),
 					},
-				.MaximumHooks = 16,
+				.MaximumHooks = 18,
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
 				.MaximumCaptureTickets = 6,
@@ -761,9 +763,10 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			  "part_ids",
 			  "second_surface_depth",
 			  "second_surface_validity",
+			  "first_surface_validity",
 			  "optical_flow"}},
 			{"temporal_history", "preserve"},
-			{"operation_id", "capture-12"},
+			{"operation_id", "capture-14"},
 			{"expected_tick", current.Clock.Tick},
 			{"expected_world_epoch", current.WorldEpoch},
 			{"expected_world_version", current.WorldVersion}
@@ -771,7 +774,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 		overflowFailed
 	);
 	CHECK(overflowFailed);
-	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 12 names");
+	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 13 names");
 }
 
 TEST_CASE(
@@ -799,7 +802,9 @@ TEST_CASE(
 	const json valid = request(
 		"bundle-valid",
 		CaptureBundleOptions(
-			json::array({"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"})
+			json::array(
+				{"rgb_linear_hdr", "first_surface_validity", "second_surface_depth", "second_surface_validity"}
+			)
 		)
 	);
 	const json queued = Called(surface, "capture_bundle", valid);
@@ -841,7 +846,8 @@ TEST_CASE(
 	CHECK(unsupportedCameraReply["error"] == "capability_unsupported: named camera selection is unavailable");
 	CHECK(
 		bridge->RequestedChannels() ==
-		std::vector<std::string>{"rgb_linear_hdr", "second_surface_depth", "second_surface_validity"}
+		std::vector<std::string>{
+			"rgb_linear_hdr", "first_surface_validity", "second_surface_depth", "second_surface_validity"}
 	);
 	CHECK(Called(surface, "capture_bundle", valid) == queued);
 	CHECK(bridge->QueueCount == 4);
@@ -943,14 +949,14 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 	CHECK(reply["status"] == "ok");
 	CHECK(reply["schema_version"] == "data-capture-hooks/v1");
 	REQUIRE(reply["hooks"].is_array());
-	REQUIRE(reply["hooks"].size() == 13);
+	REQUIRE(reply["hooks"].size() == 14);
 	const json &first = reply["hooks"][0];
 	CHECK(first["name"] == "data_capture.rgb_linear_hdr");
 	CHECK(first["schema_version"] == 1);
 	CHECK(first["node_kind"] == "capture");
 	CHECK(first["required"] == true);
 	CHECK(first["channels"] == json::array({"rgb_linear_hdr"}));
-	CHECK(reply["limits"]["maximum_hooks"] == 16);
+	CHECK(reply["limits"]["maximum_hooks"] == 18);
 	CHECK(reply["limits"]["maximum_connections"] == 6);
 	CHECK(reply["limits"]["maximum_batches"] == 6);
 	CHECK(reply["limits"]["maximum_readback_nodes"] == 10);

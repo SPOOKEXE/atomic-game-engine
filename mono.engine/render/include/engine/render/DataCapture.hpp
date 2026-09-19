@@ -101,6 +101,7 @@ namespace engine::render {
 		ObjectIds,
 		SemanticMask,
 		PartMask,
+		FirstSurfaceValidity,
 		SecondSurfaceDepth,
 		SecondSurfaceValidity,
 		MotionVectors,
@@ -130,6 +131,8 @@ namespace engine::render {
 										: channel == DataCaptureChannel::ObjectIds	  ? "-object-ids"
 										: channel == DataCaptureChannel::SemanticMask ? "-semantic-ids"
 										: channel == DataCaptureChannel::PartMask	  ? "-part-ids"
+										: channel == DataCaptureChannel::FirstSurfaceValidity
+											? "-first-surface-validity"
 										: channel == DataCaptureChannel::SecondSurfaceDepth ||
 												channel == DataCaptureChannel::SecondSurfaceValidity
 											? "-second-surface"

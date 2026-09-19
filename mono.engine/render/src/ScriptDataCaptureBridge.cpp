@@ -51,6 +51,7 @@ namespace engine::render {
 			if (name == "object_ids") return DataCaptureChannel::ObjectIds;
 			if (name == "semantic_ids") return DataCaptureChannel::SemanticMask;
 			if (name == "part_ids") return DataCaptureChannel::PartMask;
+			if (name == "first_surface_validity") return DataCaptureChannel::FirstSurfaceValidity;
 			if (name == "second_surface_depth") return DataCaptureChannel::SecondSurfaceDepth;
 			if (name == "second_surface_validity") return DataCaptureChannel::SecondSurfaceValidity;
 			if (name == "motion_vectors") return DataCaptureChannel::MotionVectors;
@@ -296,7 +297,8 @@ namespace engine::render {
 
 		const char *Packing(DataCaptureChannel channel, DataCaptureScalar scalar) {
 			return channel == DataCaptureChannel::AmbientOcclusion ||
-						   channel == DataCaptureChannel::SecondSurfaceValidity
+					   channel == DataCaptureChannel::FirstSurfaceValidity ||
+					   channel == DataCaptureChannel::SecondSurfaceValidity
 					   ? "unorm8"
 				   : scalar == DataCaptureScalar::UNorm8 ? "rgba8_unorm"
 				   : channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors
@@ -452,6 +454,7 @@ namespace engine::render {
 				 "object_ids",
 				 "semantic_ids",
 				 "part_ids",
+				 "first_surface_validity",
 				 "second_surface_depth",
 				 "second_surface_validity",
 				 "motion_vectors"},

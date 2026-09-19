@@ -372,6 +372,35 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("depth-validity"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) return false;
+			const auto depth = recording.GraphTexture(context.Reads.front(), context, false);
+			const auto target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!depth.IsValid() || !target.IsValid() || depth.Format != State->DepthFormat ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R8_UNORM || depth.Width != target.Width ||
+				depth.Height != target.Height || State->DepthValidityPipeline == nullptr)
+				return false;
+
+			PbrUniforms uniforms = recording.Uniforms;
+			// The shared depth shader writes binary R8 when this mode is selected.
+			// G-buffer depth omits blended draws, so the plane remains honest about its scope.
+			uniforms.Direction.w = 2.0f;
+			recording.Fullscreen(
+				context.Name,
+				State->DepthValidityPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				recording.DepthBindings,
+				&uniforms,
+				nullptr,
+				SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f}
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("camera-motion"), [this](const graph::RunContext &context) {
 			if (context.Reads.size() != 1 || context.Writes.size() != 1 || Pbr == nullptr) return false;
 			const auto depth = GraphTexture(context.Reads.front(), context, false);

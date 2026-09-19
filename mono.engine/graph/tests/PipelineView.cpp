@@ -144,6 +144,7 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 	CHECK(Joined(graph, layout, "surface-capture", "mirror-overlay", "mirror-views"));
 	CHECK(Joined(graph, layout, "surface-capture", "portal-overlay", "portal-image"));
 	CHECK(Joined(graph, layout, "gbuffer", "depth-linearise", "depth"));
+	CHECK(Joined(graph, layout, "gbuffer", "depth-validity", "depth"));
 	CHECK(Joined(graph, layout, "fog", "portal-overlay", "volume-lit"));
 	CHECK(Joined(graph, layout, "portal-overlay", "mirror-overlay", "portaled"));
 	CHECK(Joined(graph, layout, "mirror-overlay", "transparent", "mirrored"));

@@ -962,6 +962,14 @@ namespace engine::render {
 				SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
 			};
 		}
+		if (role == Impl::ResourceRole::FirstSurfaceValidity) {
+			return Impl::NamedTexture{
+				slotPbr.FirstSurfaceValidity,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				SDL_GPU_TEXTUREFORMAT_R8_UNORM,
+			};
+		}
 		if (role == Impl::ResourceRole::CameraMotionVectors) {
 			return Impl::NamedTexture{
 				slotPbr.CameraMotionVectors,

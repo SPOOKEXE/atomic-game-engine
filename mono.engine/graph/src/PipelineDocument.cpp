@@ -964,6 +964,7 @@ namespace engine::graph {
 		resource("part-ids", ResourceKind::Colour, ResourceFormat::R32U);
 		resource("depth", ResourceKind::Depth, ResourceFormat::D24S8);
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F);
+		resource("first-surface-validity", ResourceKind::Colour, ResourceFormat::R8);
 		if (cameraMotion) resource("camera-motion-vectors", ResourceKind::Colour, ResourceFormat::RG16F);
 		resource("second-surface-z", ResourceKind::Depth, ResourceFormat::D24S8);
 		resource("second-surface-depth", ResourceKind::Colour, ResourceFormat::R32F);
@@ -1064,6 +1065,10 @@ namespace engine::graph {
 		node("depth-linearise", NodeScope::View);
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Writes, "linear-depth", "linear");
+
+		node("depth-validity", NodeScope::View);
+		touches(EditKind::Reads, "depth", "depth");
+		touches(EditKind::Writes, "first-surface-validity", "validity");
 		if (cameraMotion) {
 			// The G-buffer already uses all eight portable colour attachments.
 			// Capture computes camera reprojection in a separate pass.
@@ -1531,6 +1536,19 @@ namespace engine::graph {
 		);
 		document.Record(
 			{.Kind = EditKind::Reads, .Target = core::Name("occlusion"), .Key = core::Name("source")}
+		);
+		// The G-buffer writes depth only for visible opaque or masked geometry. This
+		// R8 pass keeps background separate from a far-depth surface.
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-first-surface-validity"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads,
+			 .Target = core::Name("first-surface-validity"),
+			 .Key = core::Name("source")}
 		);
 		// Validity is the primary R8 source and depth is its aligned optional R32F plane.
 		// One capture node therefore publishes both without a second render or readback epoch.

@@ -425,6 +425,7 @@ namespace engine::render {
 			  slot.SemanticIds,
 			  slot.PartIds,
 			  slot.LinearDepth,
+			  slot.FirstSurfaceValidity,
 			  slot.CameraMotionVectors,
 			  slot.SecondSurfaceZ,
 			  slot.SecondSurfaceDepth,
@@ -501,6 +502,8 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
 		made.LinearDepth =
 			texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.LinearWidth, dimensions.LinearHeight);
+		made.FirstSurfaceValidity =
+			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.ViewWidth, dimensions.ViewHeight);
 		if (dimensions.CameraMotion)
 			made.CameraMotionVectors =
 				texture(SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT, dimensions.ViewWidth, dimensions.ViewHeight);
@@ -521,6 +524,7 @@ namespace engine::render {
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
 			made.Emissive == nullptr || made.MeshUv == nullptr || made.ObjectIds == nullptr ||
 			made.SemanticIds == nullptr || made.PartIds == nullptr || made.LinearDepth == nullptr ||
+			made.FirstSurfaceValidity == nullptr ||
 			(dimensions.CameraMotion && made.CameraMotionVectors == nullptr) ||
 			(dimensions.SecondSurface &&
 			 (made.SecondSurfaceZ == nullptr || made.SecondSurfaceDepth == nullptr ||

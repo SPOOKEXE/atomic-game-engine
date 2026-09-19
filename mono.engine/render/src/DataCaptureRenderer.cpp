@@ -207,6 +207,19 @@ namespace engine::render {
 					ResourceImageFormat::R32_UInt
 				);
 				break;
+			case DataCaptureChannel::FirstSurfaceValidity:
+				primary(
+					core::Name("first-surface-validity"),
+					DataCaptureScalar::UNorm8,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::R8_UNorm
+				);
+				if (plane.Status == DataCaptureStatus::Ready)
+					plane.Provenance =
+						"first_surface_depth_test/v1;surface=visible_builtin_opaque_or_masked;"
+						"background=0;validity=0_or_255;transparent_geometry=excluded;"
+						"amodal_ground_truth=false";
+				break;
 			case DataCaptureChannel::SecondSurfaceDepth:
 				if (image.DepthResource == core::Name("second-surface-depth") && !image.Depth.empty())
 					Ready(
