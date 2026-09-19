@@ -179,12 +179,12 @@ Remaining scale and evaluation work:
 - [_] Profile release captures with GPU time, allocator peaks, throughput and output quality. Engine tickets already report actual source, readback and retained bytes plus CPU copy and finalization time; the Python workflow reports its own timings.
 - [_] Add multi-image to one-scene and multi-image to multiworld prediction, with explicit model-training execution boundaries.
 
+
+
 ### v0.25
 
+- [_] ensure the MCP system is extract-only from the game engine, and as much processing is done externally where possible (i.e. we pull the data then process/transform it externally). This way we get as much raw data out of the engine possible without much transformation.
 - [_] review over v0.24 and consolidate, improve, tweak, etc.
-
-### v0.25
-
 - [_] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
 - [_] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
 - [_] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
