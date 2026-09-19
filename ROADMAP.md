@@ -201,6 +201,9 @@ Scale into dataset generation, evaluation and inverse tasks:
 - [_] profile release captures for actual engine bytes, allocations, peak memory, timings, throughput and output quality. The sibling Python factory now attaches a bounded client-workflow report with monotonic submit, poll, fetch and finalize timings, actual retained and source bytes, throughput, compression ratio when complete, artifact and chunk counts, quality facts and explicit unavailable engine CPU, GPU and peak-memory fields. Engine capture tickets now report actual pre-transform source and readback bytes, retained bytes, host-transfer bytes and operation counts, completed CPU readback-copy and finalization timings, and finalization throughput. Cancelled and stale tickets count only bytes actually retained, and Luau and MCP expose the same facts. GPU timing, allocator peaks and a measured release capture run remain unavailable, so this does not claim complete release engine profiling.
 - [_] support forward scene-to-modalities and inverse observation-to-scene patches, with rerendered numeric and semantic metrics plus ambiguity masks. The Python factory now validates and freezes bounded source observations, caller-asserted scene patches, retained intervention lifecycle identity, rerendered hypothesis artifacts and exact rational clocks. It computes finite numeric metrics only over jointly valid pixels, semantic intersection-over-union over stable sidecars and ambiguity-mask coverage, with aggregate byte accounting before copies. Patch rows and operation IDs remain unauthenticated caller assertions because the current engine intervention result does not echo them. Engine-driven hypothesis generation, trusted patch attestation and one-call MCP orchestration remain open.
 
+New:
+- [_] multi-image to one scene prediction
+
 Extra:
 - [_] merge flamegraph visuals into the remaining profilers, and add tabs to swap between `Tabular` and `Flamegraph` views.
 
