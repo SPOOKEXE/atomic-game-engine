@@ -202,7 +202,11 @@ Scale into dataset generation, evaluation and inverse tasks:
 - [_] support forward scene-to-modalities and inverse observation-to-scene patches, with rerendered numeric and semantic metrics plus ambiguity masks. The Python factory now validates and freezes bounded source observations, caller-asserted scene patches, retained intervention lifecycle identity, rerendered hypothesis artifacts and exact rational clocks. It computes finite numeric metrics only over jointly valid pixels, semantic intersection-over-union over stable sidecars and ambiguity-mask coverage, with aggregate byte accounting before copies. Patch rows and operation IDs remain unauthenticated caller assertions because the current engine intervention result does not echo them. Engine-driven hypothesis generation, trusted patch attestation and one-call MCP orchestration remain open.
 
 New:
-- [_] multi-image to one scene prediction
+- [_] add multi-world output support
+- [_] multi-image to one scene prediction (world modeling)
+- [_] multi-image to multi-world prediction (world modeling)
+- [_] one scene many characters, shaders, effects, etc prediction
+- [_] many scenes to many characters/shaders/effects prediction
 
 Extra:
 - [_] merge flamegraph visuals into the remaining profilers, and add tabs to swap between `Tabular` and `Flamegraph` views.
@@ -210,14 +214,20 @@ Extra:
 ### v0.25
 
 - [_] review over v0.24 and consolidate, improve, tweak, etc.
-
-- [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
-- [_] update and prune old content in documentation. check each statement, update, remove or replace.
-- [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
-
+- [_] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
+- [_] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
+- [_] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
+- [_] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
+- [_] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
+- [_] consolidate `CODE_ARCH.md`, `CODE_DOCUMENTING.md`, `CODE_FORMAT.md` and `CODE_QUALITY.md`, with small sentences at the start of the file describing what they contain in succinct detail.
 - [_] cleanup documentation and layout
 - [_] review and cleanup render pipeline (plan first)
 - [_] plan a consolidation for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them).
+
+- [_] create a mermaid diagram visualiser (script that iterates and finds all render nodes => generates diagram in markdown in .cache/build/)
+- [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
+- [_] update and prune old content in documentation. check each statement, update, remove or replace.
+- [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
 
 - [_] add typed render hooks at proven boundaries. `DataFactoryHookBind` registers and discovers twelve stable read-only data-capture hooks and the synchronous `view.camera` mutation hook. Data capture remains pinned to exact pipeline, revision, view, snapshot and node identity and returns bounded asynchronous readbacks. `view.camera` accepts owned one-shot camera-frame, camera, and projection patches only for an exact installed pipeline revision, world, snapshot, and view slot; conflicts, stale revisions, malformed values, cancellation, and generation reuse are explicit. The renderer copies only the matching view before capture preparation and never calls external code or exposes a mutable view. The release CPU lifecycle benchmark fell from 41.62 to 20.48 microseconds per 64 lifecycles after dispatch stopped copying the full graph snapshot; validated capture planes now take ownership of readback vectors instead of copying them. GPU and readback release profiling plus a second real consumer remain open. A hook is an observer node, declared node output, or this bounded typed pre-view patch, not a second callback graph beside it.
   1. Inventory the current node output, resource lifetime, GPU submission and asynchronous readback boundaries, then choose one stable post-pass observation point.
@@ -238,21 +248,6 @@ Extra:
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 
-- [_] gtlf default character (unreal style)
-- [_] /docs/future-work/character-system.md
-- [_] /docs/future-work/world-streaming.md
-- [_] /docs/future-work/terrain-system.md
-- [_] /docs/future-work/navigation-ai-system.md
-- [_] /docs/future-work/physics-expansion.md
-- [_] /docs/future-work/vfx-system.md
-- [_] /docs/future-work/camera-and-cinematics.md
-- [_] /docs/future-work/ui-system.md
-- [_] /docs/future-work/input-system.md
-- [_] /docs/future-work/prefab-package-system.md
-- [_] /docs/future-work/procedural-generation.md
-- [_] /docs/future-work/session-and-social.md
-- [_] /docs/future-work/audio-system.md
-
 QOL:
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
 	switch (mode) {
@@ -272,6 +267,21 @@ When you create a new world/scene, it auto appends the scripts in.
 
 ### FUTURE
 
+- [_] gtlf default character (unreal style)
+- [_] /docs/future-work/character-system.md
+- [_] /docs/future-work/world-streaming.md
+- [_] /docs/future-work/terrain-system.md
+- [_] /docs/future-work/navigation-ai-system.md
+- [_] /docs/future-work/physics-expansion.md
+- [_] /docs/future-work/vfx-system.md
+- [_] /docs/future-work/camera-and-cinematics.md
+- [_] /docs/future-work/ui-system.md
+- [_] /docs/future-work/input-system.md
+- [_] /docs/future-work/prefab-package-system.md
+- [_] /docs/future-work/procedural-generation.md
+- [_] /docs/future-work/session-and-social.md
+- [_] /docs/future-work/audio-system.md
+- [_] go over render system and consolidate/improve hooks, nodes, graph system and visualiser of graph system
 - [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
 - [_] maybe consider converting a bunch of custom tools to plugins and have them built-in to studio, or make a plugin pack as a extra release file you can import to a plugins/ folder in ~/Documents/atomic-game-engine/studio/plugins
 - [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
@@ -303,7 +313,7 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] expose automation tools like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
 - [_] expose a AutomationService that does this for you (need to enable it for it to be useable).
 - [_] ECS driven RL agent environments
-- [_] use a spatial walk (octree) to find hallways and such and use that baked information for things like the LOD, unrendering objects, etc. full node based logic for customisation.
+- [_] use a spatial algorithms to find hallways and such and use that baked information for things like the LOD, unrendering objects, ambient occulusion, lighting, etc. full node based logic for customisation.
 
 ### Open Decision
 
