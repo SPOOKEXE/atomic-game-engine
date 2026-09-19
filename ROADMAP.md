@@ -194,6 +194,8 @@ Remaining scale and evaluation work:
 - [_] optimise server startup time
 - [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
 
+- [_] fix lights passing through portals not working
+
 ### v0.26
 
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
