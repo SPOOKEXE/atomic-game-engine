@@ -162,6 +162,18 @@ are source textures or explicit editable images. Readback is for requested
 captures, tests, completed timing queries and bounded asynchronous streaming
 feedback. Same-frame visual decisions do not wait for CPU readback.
 
+### external spatial extraction boundary
+
+An external data factory may pull a revision-fenced raw spatial scene after the
+engine has generated it. That record carries stable IDs, transforms, geometry,
+cameras, and explicit unavailable facts through bounded MCP reads. It is an
+engine export boundary, not a render-thread callback or a new render graph.
+
+The renderer continues to own GPU work, asynchronous image readback, and its
+own resource lifetime. External code owns scene conversion, dataset storage,
+and model training. Do not add file writing, data conversion, or training work
+to a render hook or frame path to serve this use case.
+
 ### optimization evidence to gather first
 
 At `ed588cbf`, `WorldPresentation.cpp::ScenePresentationSignaturesOf` still signs

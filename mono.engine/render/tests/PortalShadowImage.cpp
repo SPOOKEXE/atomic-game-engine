@@ -196,7 +196,7 @@ TEST_CASE("empty source shadow capture clears depth only when requested", "[rend
 }
 
 TEST_CASE(
-	"shadow readback refuses a third full map before exceeding staging capacity",
+	"shadow readback refuses a fifth full map before exceeding staging capacity",
 	"[render][gpu][shadow-image][.]"
 ) {
 	test::FixtureDevice fixture;
@@ -205,8 +205,8 @@ TEST_CASE(
 	Install(renderer);
 	SceneTarget target{33, 29};
 	auto view = MakeView(target, {});
-	const std::array nodes{SHADOW_CAPTURE, SHADOW_CAPTURE, SHADOW_CAPTURE};
-	std::array<uint64_t, 3> tokens{};
+	const std::array nodes{SHADOW_CAPTURE, SHADOW_CAPTURE, SHADOW_CAPTURE, SHADOW_CAPTURE, SHADOW_CAPTURE};
+	std::array<uint64_t, 5> tokens{};
 	REQUIRE(renderer.QueueResourceImages(PIPELINE, nodes, 0, ResourceImageDelivery::CopiedPixels, tokens));
 	OverlayImage overlay;
 	renderer.Render(std::span(&view, 1), overlay, nullptr, false);
@@ -222,7 +222,7 @@ TEST_CASE(
 			++refused;
 		}
 	}
-	CHECK(accepted == 2);
+	CHECK(accepted == 4);
 	CHECK(refused == 1);
 	const auto retry = renderer.QueueResourceImage(PIPELINE, SHADOW_CAPTURE);
 	REQUIRE(retry != 0);

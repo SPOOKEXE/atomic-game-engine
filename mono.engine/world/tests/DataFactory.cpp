@@ -778,6 +778,7 @@ TEST_CASE(
 				committed++;
 			},
 		.Abort = [&](std::string_view) { aborted++; },
+		.Retire = {},
 	});
 
 	const auto forked = session.Fork({
@@ -895,6 +896,7 @@ TEST_CASE("data-factory refuses a fork without branch runtime ownership", "[worl
 			},
 		.Commit = {},
 		.Abort = [&](std::string_view) { aborted++; },
+		.Retire = {},
 	});
 	const auto rejected = session.Fork({
 		.InstanceId = "data-factory.fork.refusal",
@@ -913,6 +915,7 @@ TEST_CASE("data-factory refuses a fork without branch runtime ownership", "[worl
 		.Prepare = [](std::string_view, Universe &, WorldId, std::string &) { return true; },
 		.Commit = [](std::string_view) { throw std::runtime_error("deliberate commit failure"); },
 		.Abort = [&](std::string_view) { aborted++; },
+		.Retire = {},
 	});
 	const auto commitFailure = session.Fork({
 		.InstanceId = "data-factory.fork.refusal",

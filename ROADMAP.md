@@ -145,45 +145,36 @@ Rendering (docs/RENDER-REFACTOR.md) including the consolidated materials, shader
 - [x] make one-camera asynchronous capture retain one aligned ticket with ranged bytes and exact projection metadata for RGB linear HDR, linear depth, packed shading normals, PBR albedo, packed PBR material, PBR emissive, source-only ambient occlusion, object IDs, semantic IDs and part IDs. Integer label captures include bounded dense sidecars from integer labels to stable strings; background and unidentified opaque or masked gbuffer pixels use zero. The ambient-occlusion plane is R8/unorm8 at native half resolution and carries raw bytes, PNG and bounded statistics plus `ssao-provenance/v1`: `estimated`, `cleared_disabled`, `cleared_no_pass` or `unavailable` source state, resolved enabled bool when known, producer frame, 12 shader-shared samples, radius 0.65, no denoiser, no temporal history, background value 1 and explicit unavailable background classification. Cached captures preserve their producer frame; custom R8 remains unavailable. It is not ground truth, shadow visibility, material occlusion or global ambient occlusion. Transparent surfaces, particles and later composited layers do not write the label planes, so final-composite visibility truth remains open.
 - [x] validate RGBA8 buffers as exactly `width*height*4`, including orientation, color space, alpha and copy semantics.
 
-The data-factory contract lives in `datafactories-docs/MCP-ADDITIONS.md`. The engine owns isolated worlds, validated edits, time, observations and captures. The external factory owns recipes, storage, training and evaluation. A capability is exposed when the engine service, MCP schema, typed Python client and independent MCP caller agree on its bounded result and failure cases.
+The data-factory contract lives in `datafactories-docs/MCP-ADDITIONS.md`. The engine owns worlds, time, edits and observations; the external factory owns recipes, storage, training and evaluation. Engine MCP and typed Python agree on bounded results and refusals.
 
-Implemented foundation:
-- [x] Expose versioned MCP discovery, capability limits, structured refusals and idempotent lifecycle mutations. Client, server and Studio advertise their actual subsets; the client hosts the renderer-backed factory tools.
-- [x] Run the isolated-world starter through typed Python and an independent MCP caller. Live verification compared twelve raw planes, hashes, sidecars and exact object, semantic and part masks, then released tickets and retired both worlds.
-- [x] Capture multiple named cameras in one renderer frame with exact identity, asynchronous readback and cancellation-safe cleanup. The Python coordinator also runs bounded, separately isolated worlds.
-- [x] Restore and seek compatible no-script checkpoints through bounded fixed-step replay; `fork_world` creates an isolated branch with fresh revisions. Scripted replay and forks remain open.
-- [x] Export a bounded glTF 2.0 GLB with built-in and EditableMesh geometry, stable IDs, materials and cameras. The live starter export contains three indexed meshes and one camera.
-- [x] Cover replay, no-time-advance rendering, image-label alignment, retry isolation, invalid input and typed versus independent MCP parity with headless and live fixtures.
+Progress: client, server and Studio expose isolated-world lifecycle and versioned discovery; typed Python and independent MCP callers agree on twelve capture planes, and named multicamera capture shares one renderer frame. The final rebuilt release Vulkan default headless run completed a 12-plane capture and retired its world. The default headless data-factory now paces at 60 FPS; at 11 seconds, idle CPU was about 8.7% versus about 100% uncapped, with a longer capped sample at about 3.3%. The broad render check passed all 105/105 cases and 1,690,379 assertions, clearing the earlier one-case failure. The Python sibling full suite passed 604 tests.
+
+- [x] Export a bounded glTF 2.0 GLB subset with built-in, EditableMesh and resident delivered geometry, exact-owner source textures, material runs, stable IDs and cameras. Live typed export covered all seven published meshes and sixteen source sheets in a 249,232,616-byte ranged GLB. Decoded PNG pixels matched all sixteen baked sources, with no unavailable rows in that fixture. Source retention is enabled only for data-factory client runs.
+- [x] Expose bounded `raw-scene/v1` MCP extraction with portable little-endian mesh sections, original source texture bytes, authored material facts, stable IDs, revision fences and BLAKE3-verified ranged reads. The typed Python reader and a direct MCP caller returned identical bytes from a live headless Vulkan world with an EditableImage map. The first resource remains capped at 320 MiB.
+- [x] Convert validated `raw-scene/v1` extracts to a bounded glTF 2.0 GLB subset in sibling `datafactories-docs/raw_scene_gltf.py`. The live `export_raw_scene_gltf_live.py` command creates and retires its owned world, snapshots and fences the raw extract, and emits a verified five-file bundle carrying `engine_version` and `snapshot_id`. The release Vulkan demo produced a 4,576-byte GLB with four nodes, three meshes, one camera and seven explicit losses. Khronos validation after the unused-object fix reported 0 errors, warnings and infos; default loss policy refuses and `--allow-losses` succeeds. Python full suite passed 604 tests after coverage reuse. The writer stages five files in a sibling directory, fsyncs each file and the staging directory, uses Linux `renameat2(RENAME_NOREPLACE)` or a Windows no-replace rename, and refuses safely on unsupported POSIX targets before fsyncing the parent. The concurrent-writer test passed its 16-test suite. A parent-sync failure can leave a published bundle whose durability is unconfirmed. The full external glTF profile remains open.
 
 Remaining service and state work:
-- [_] Finish authentication, permissions, host and observation fences, audit coverage and cancellation across every asynchronous MCP tool; complete thin adapters for remaining engine services.
-- [_] Finish deterministic fixed-tick action and script sequencing, broader input injection, replay-safe scripted actions and a real client rehydrator. Cover ECS, physics warm starts, RNG, schedulers, events, clocks, IDs and pinned assets in checkpoints.
-- [_] Extend compatible restore and isolated forks to scripts and versioned causal edits, including effects outside the edited spatial region.
-- [_] Make step, snapshot and multicamera capture one atomic operation. Extend the same alignment contract to multiworld output; current multicamera shares a frame, while multiworld coordination is separate.
-- [_] Complete the autonomous production workflow and durable artifact lifecycle, including retention, atomic finalization, crash resume and bounded backpressure. The current Python runner already verifies and resumes bounded jobs, chunks and manifests.
-- [_] Finish dynamic navmesh and broader spatial semantics. Snapshot-fenced collider occupancy, filled occupancy, signed distance, BEV and authored affordances are available with explicit unknown results.
-- [_] Batch headless or offscreen GPU scenes with explicit capability, readiness and resource limits.
+
+- [_] Complete MCP host and observation fences, cancellation and remaining thin service adapters.
+- [_] Make step, snapshot and multicamera capture atomic.
+- [_] Complete durable autonomous production with retention, atomic finalization, crash resume and backpressure.
 
 Remaining observation and interop work:
-- [_] Complete the synchronized multimodal bundle beyond the twelve raw planes, exact visible opaque or masked ID masks, second-surface depth and validity, calibrated scene data, spatial queries and SSAO provenance already captured. Keep unavailable and ambiguous facts explicit.
-- [_] Extend segmentation to transparent and final-composite surfaces, exact first-surface validity, amodal masks and per-pixel occlusion or disocclusion cause. The main-view visibility ledger currently reports frustum and draw evidence only.
-- [_] Deliver pixel motion and optical flow with scene cuts, object motion, disocclusion and validity. Temporal pose tracks are available; camera reprojection remains unverified in live capture.
-- [_] Add per-pixel light contribution, shadow attribution, physical photometry and complete PBR shading geometry. Authored lighting observations, albedo, packed material, emissive, normals and UVs are available; separate authored specular and transmission are unavailable.
-- [_] Add isolated per-object layers that reconstruct the composite, including cross-object shadows, lighting, reflections, normals and segmentation.
-- [_] Complete SSR, probe, mirror and portal reflection observations with secondary-view identity, recursion and staleness.
-- [_] Extend interop beyond bounded glTF scene export to streamed mesh geometry, textures, larger resource-backed exports and the declared USD, COCO, YOLO, GeoJSON and WKT profiles.
-- [_] Add the remaining MCP tools and examples for optical flow, lighting contribution and broader interop.
+
+- [_] Complete synchronized multimodal observations with explicit frame identity, bounds, unavailable facts and first-surface validity.
+- [_] Complete object motion and optical flow with scene cuts and validity; extend beyond current static-surface camera reprojection and temporal pose tracks.
+- [_] Complete the full external glTF export profile.
 
 Remaining scale and evaluation work:
-- [_] Extend the Python factory's bounded multimodal, forward and inverse task orchestration to engine-driven hypothesis generation, trusted patch attestation and one-call MCP execution. Existing task manifests, connected holdouts, counterfactuals and rerender metrics are caller-coordinated.
-- [_] Profile release captures with GPU time, allocator peaks, throughput and output quality. Engine tickets already report actual source, readback and retained bytes plus CPU copy and finalization time; the Python workflow reports its own timings.
-- [_] Add multi-image to one-scene and multi-image to multiworld prediction, with explicit model-training execution boundaries.
 
+- [x] Check ticket-specific release Vulkan GPU copy timing and capture transfer accounting. After the capture-specific forced timestamp fix, a live 12-plane release capture measured 1,788,416 ns (1.788 ms) engine-ticket GPU copy time with global profiling off. The prior baseline reason was `no_capture_gpu_timestamp_slot`. The ticket reports 47,109,120 B host readback reserved capacity and 47,155,200 B device staging reserved capacity; these are reserved capacities, not allocator peaks.
+- [x] Measure release capture throughput and compact output quality. The external workflow completed in 1.730641471 s for 47,109,120 source bytes, or 27.220612 MB/s. Compact depth maximum absolute errors were 0.0285186768 m for `linear_depth` and 0.0268325806 m for `second_surface_depth`. The release build and focused render GPU test passed 13 assertions; live output is `.cache/build/release/capture-profile-live-timed-20260920/scene.json`.
+- [_] Profile release allocator peaks, GPU residency and broader GPU work. Allocator peaks and GPU residency remain unavailable; process RSS HWM of 290,672 kB is not an allocator peak.
 
+- [_] Keep a narrow, extract-only MCP boundary for external data factories. After scene generation, expose one revision-fenced raw spatial record with stable IDs, transforms, geometry, cameras and explicit unavailable facts through bounded reads. Scene transformation, dataset storage and model training stay external. Maintain only the bare connector API and contract tests in `datafactories-docs`.
 
 ### v0.25
 
-- [_] ensure the MCP system is extract-only from the game engine, and as much processing is done externally where possible (i.e. we pull the data then process/transform it externally). This way we get as much raw data out of the engine possible without much transformation.
 - [_] review over v0.24 and consolidate, improve, tweak, etc.
 - [_] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
 - [_] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
@@ -196,6 +187,7 @@ Remaining scale and evaluation work:
 - [_] plan a consolidation for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them).
 - [_] update and prune old content in documentation. check each statement, update, remove or replace.
 - [_] create a "sky grid" of floating terrain balls with each one having one of 8 custom made shaders, then have the camera fly forward between the seams. this is a benchmark called BenchmarkSkyGrid.luau built-in demo example. We'll also use this as a performance profiler for editablemesh + terrain + etc.
+- [_] add gpu resource constraining (freezes all other applications right now)
 
 - [_] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
 - [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
@@ -208,6 +200,9 @@ Remaining scale and evaluation work:
 - [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
 - [_] go over render system and consolidate/improve hooks, nodes, graph system and visualiser of graph system
 
+- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
+- [_] do heavy memory, cpu and gpu benchmarking and profiling and see if we can squash data into multi-channel representations, improve computations and memory usage, trade lower precision for tiny visual changes, etc.
+
 - [_] add typed render hooks at proven boundaries. `DataFactoryHookBind` registers and discovers twelve stable read-only data-capture hooks and the synchronous `view.camera` mutation hook. Data capture remains pinned to exact pipeline, revision, view, snapshot and node identity and returns bounded asynchronous readbacks. `view.camera` accepts owned one-shot camera-frame, camera, and projection patches only for an exact installed pipeline revision, world, snapshot, and view slot; conflicts, stale revisions, malformed values, cancellation, and generation reuse are explicit. The renderer copies only the matching view before capture preparation and never calls external code or exposes a mutable view. The release CPU lifecycle benchmark fell from 41.62 to 20.48 microseconds per 64 lifecycles after dispatch stopped copying the full graph snapshot; validated capture planes now take ownership of readback vectors instead of copying them. GPU and readback release profiling plus a second real consumer remain open. A hook is an observer node, declared node output, or this bounded typed pre-view patch, not a second callback graph beside it.
   1. Inventory the current node output, resource lifetime, GPU submission and asynchronous readback boundaries, then choose one stable post-pass observation point.
   2. Give each internal hook an enum value and a stable string name for discovery, manifests and MCP. Never serialize the enum number.
@@ -219,9 +214,6 @@ Remaining scale and evaluation work:
   8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
 
 ### v0.27
-
-- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
-- [_] do heavy memory, cpu and gpu benchmarking and profiling and see if we can squash data into multi-channel representations, improve computations and memory usage, trade lower precision for tiny visual changes, etc.
 
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
 	switch (mode) {

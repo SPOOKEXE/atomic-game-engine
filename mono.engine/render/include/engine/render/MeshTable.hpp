@@ -95,6 +95,14 @@ namespace engine::render {
 		bool IsValid() const;
 	};
 
+	enum class MeshCopyStatus : uint8_t {
+		Copied,
+		Missing,
+		OverLimit,
+		Packed,
+		Invalid,
+	};
+
 	// One registered mesh.
 	//
 	// @client
@@ -320,6 +328,17 @@ namespace engine::render {
 		// @return `true` when `Resolve` would return that mesh rather than the
 		//         default.
 		bool Has(const core::Name &name, core::Name owner = {}) const;
+
+		// Copies exact resident geometry without reading back the GPU. Explicit limits
+		// keep a control request from copying an arbitrarily large content mesh.
+		// Packed runtime meshes have no expanded host vertices and are refused.
+		MeshCopyStatus Copy(
+			const core::Name &name,
+			assets::MeshData &out,
+			size_t vertexLimit,
+			size_t indexLimit,
+			core::Name owner = {}
+		) const;
 
 		// Retires one content owner. Its ranges become reusable after DEFERRED_FRAMES.
 		// Shared entries are retained; an empty owner is refused. Returns entries retired.

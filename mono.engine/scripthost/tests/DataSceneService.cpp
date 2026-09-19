@@ -182,21 +182,23 @@ namespace {
 				.Packing = "RGBA16F",
 				.Provenance = {},
 				.AmbientOcclusion = std::nullopt,
-				.Noise = engine::script::DataCaptureBridgeNoise{
-					.Mode = "gaussian",
-					.Algorithm = "xorshift64star_clt12_q17/v2",
-					.Seed = 17,
-					.Sigma = .25,
-					.SigmaQuantization = "binary64_to_q24_round_to_nearest_ties_to_even/v1",
-					.EffectiveSigmaQ24 = 4194304,
-					.EffectiveSigma = .25,
-					.SeedStatePolicy = "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1",
-					.Order = "after_storage_profile/v1",
-					.ClampPolicy = "finite_rgb_clamped_to_binary16_range[-65504,65504]",
-					.AlphaPolicy = "preserve_exact_binary16",
-					.ValueClassification = "finite",
-					.MaximumAbsoluteError = .25,
-				},
+				.Noise =
+					engine::script::DataCaptureBridgeNoise{
+						.Mode = "gaussian",
+						.Algorithm = "xorshift64star_clt12_q17/v2",
+						.Seed = 17,
+						.Sigma = .25,
+						.SigmaQuantization = "binary64_to_q24_round_to_nearest_ties_to_even/v1",
+						.EffectiveSigmaQ24 = 4194304,
+						.EffectiveSigma = .25,
+						.SeedStatePolicy = "zero_maps_to_0x9e3779b97f4a7c15_else_direct/v1",
+						.Order = "after_storage_profile/v1",
+						.ClampPolicy = "finite_rgb_clamped_to_binary16_range[-65504,65504]",
+						.AlphaPolicy = "preserve_exact_binary16",
+						.ValueClassification = "finite",
+						.MaximumAbsoluteError = .25,
+					},
+				.PreviousCameraMotionFrame = std::nullopt,
 			});
 			poll.Planes.push_back({
 				.Channel = "ambient_occlusion",
@@ -233,6 +235,7 @@ namespace {
 				.Provenance = "ssao_estimator_visibility_factor_not_ground_truth",
 				.AmbientOcclusion = std::nullopt,
 				.Noise = {},
+				.PreviousCameraMotionFrame = std::nullopt,
 			});
 			for (const char *channel : {"object_ids", "semantic_ids", "part_ids"})
 				poll.Planes.push_back({
@@ -270,6 +273,7 @@ namespace {
 					.Provenance = {},
 					.AmbientOcclusion = std::nullopt,
 					.Noise = {},
+					.PreviousCameraMotionFrame = std::nullopt,
 				});
 			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			poll.SemanticLabels = {{1, "fixture/box"}};

@@ -392,19 +392,6 @@ namespace engine::render {
 				pbr.PreviousCameraMotionWorldName == Request.Source->WorldName &&
 				pbr.PreviousCameraTemporalId == Request.Source->CameraTemporalId &&
 				pbr.PreviousCameraTemporalSequence + 1 == Request.Source->CameraTemporalSequence;
-			static int debugMotionSamples = 0;
-			if (Request.Source != nullptr && !Request.Source->CameraTemporalId.empty() &&
-				debugMotionSamples++ < 8)
-				ENGINE_WARN(
-					"motion debug frame {} id {} seq {} cut {} previous {} prevseq {} history {}",
-					State->FrameCounter,
-					Request.Source == nullptr ? "null" : Request.Source->CameraTemporalId,
-					Request.Source == nullptr ? 0 : Request.Source->CameraTemporalSequence,
-					Request.Source == nullptr ? false : Request.Source->CameraCut,
-					pbr.PreviousCameraMotionFrame,
-					pbr.PreviousCameraTemporalSequence,
-					history
-				);
 			CameraMotionUniforms uniforms{
 				Uniforms.InverseViewProjection,
 				history ? pbr.PreviousCameraMotionViewProjection : Matrices.ViewProjection,

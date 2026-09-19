@@ -23,6 +23,8 @@
 //
 // @tier shared
 
+#include <engine/script/GltfSceneExport.hpp>
+
 #include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
@@ -307,7 +309,9 @@ namespace engine::control {
 		void AddDataSceneTools(
 			world::Universe &universe,
 			std::shared_ptr<script::DataCaptureBridge> bridge = {},
-			world::DataFactorySession *session = nullptr
+			world::DataFactorySession *session = nullptr,
+			script::GltfMeshSource meshSource = {},
+			script::GltfTextureSource textureSource = {}
 		);
 		// Copies one camera and selected stable object poses after the lifecycle
 		// session has proven a retained all-systems-paused snapshot is still live.

@@ -57,6 +57,8 @@ namespace engine::graph {
 namespace engine::render {
 	class DataFactoryHookBind;
 	struct PackedMeshData;
+	enum class MeshCopyStatus : uint8_t;
+	enum class TextureCopyStatus : uint8_t;
 	class ShaderLibrary;
 	struct PortalImageBinding;
 	struct PortalShadowImageBinding;
@@ -1373,8 +1375,9 @@ namespace engine::render {
 		// @param framesInFlight How many frames the CPU may queue ahead.
 		//        Clamped to 1..3; ignored when headless, which has no swapchain
 		//        to be ahead of.
+		// @param retainSourceTextures Keep bounded decoded base pixels for factory export.
 		// @return True when the device, pipelines and geometry are ready.
-		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1);
+		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1, bool retainSourceTextures = false);
 
 		// An owned copy of the last successfully submitted visibility snapshot.
 		// A submission is not a claim that pixels survived depth or blending.
@@ -1515,6 +1518,20 @@ namespace engine::render {
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
 		bool AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
+		// Copies a bounded resident mesh for a host-owned export. This never reads
+		// back the GPU or substitutes the fallback mesh for a missing name.
+		MeshCopyStatus CopyMesh(
+			const core::Name &name,
+			assets::MeshData &out,
+			size_t vertexLimit,
+			size_t indexLimit,
+			core::Name owner = {}
+		) const;
+		// Copies a bounded decoded base level for exact owner-scoped export.
+		// This does not read back GPU pixels or substitute another owner's image.
+		TextureCopyStatus CopyTexture(
+			const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner = {}
+		) const;
 
 		// Retires meshes, textures, material/lens/postprocess variants and pending texture
 		// arrivals for one owner. Empty owner preserves shared resources.
@@ -1683,9 +1700,10 @@ namespace engine::render {
 		ReadbackImage Readback() const;
 
 		// Queue one image from an enabled capture node, without waiting for the
-		// device. Six requests/results may be held. Colour captures are bounded
-		// to 512x512; directional shadow captures use PORTAL_SHADOW_EXTENT.
-		// All capture transfers share 32 MiB. A full queue refuses before recording.
+		// device. Six requests/results may be held. Resident colour captures are
+		// bounded to 512x512; copied pixels use the shared 64 MiB staging bound.
+		// Directional shadow captures use PORTAL_SHADOW_EXTENT. A full queue refuses
+		// before recording.
 		// The node must run before a result exists. File captures remain independent.
 		bool RequestResourceImage(const ResourceImageRequest &request);
 

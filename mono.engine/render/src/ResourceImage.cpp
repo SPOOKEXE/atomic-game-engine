@@ -10,6 +10,7 @@
 #include <bit>
 #include <chrono>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace engine::render {
@@ -537,13 +538,6 @@ namespace engine::render {
 			const bool builtInCameraMotion = resource == core::Name("camera-motion-vectors") &&
 											 viewSlot < PbrSlots.size() &&
 											 source.Texture == PbrSlots[viewSlot].CameraMotionVectors;
-			static int debugReadbackMotion = 0;
-			if (resource == core::Name("camera-motion-vectors") && debugReadbackMotion++ < 8)
-				ENGINE_WARN("motion readback debug frame {} slot {} built-in {} produced {} source {} target {}",
-					FrameCounter, viewSlot, builtInCameraMotion,
-					viewSlot < PbrSlots.size() && PbrSlots[viewSlot].CameraMotionProduced,
-					static_cast<const void *>(source.Texture),
-					viewSlot < PbrSlots.size() ? static_cast<const void *>(PbrSlots[viewSlot].CameraMotionVectors) : nullptr);
 			slot.Image.Provenance = builtInSecondSurface ? SecondSurfaceProvenance(DepthFormat) : "";
 			if (builtInCameraMotion && !PbrSlots[viewSlot].CameraMotionProduced) {
 				slot.Image.Status = ResourceImageStatus::Unsupported;
@@ -567,15 +561,14 @@ namespace engine::render {
 				slot.Image.Status = ResourceImageStatus::Unsupported;
 				continue;
 			}
-			bool valid = supportedSource && source.Width <= 512 && source.Height <= 512 &&
+			bool valid = supportedSource &&
+						 (request.Delivery != ResourceImageDelivery::Resident ||
+						  (source.Width <= 512 && source.Height <= 512)) &&
 						 withAmbientResponse == withLightingBaseline && (!withAmbient || withNormal) &&
 						 (!withNormal || withDepth) && (!withDirectional || withAmbient);
 			for (size_t plane = 0; plane < count; ++plane)
 				valid = valid && planes[plane]->IsValid() && planes[plane]->Format == formats[plane] &&
 						planes[plane]->Width == source.Width && planes[plane]->Height == source.Height;
-			if (resource == core::Name("camera-motion-vectors") && debugReadbackMotion <= 8)
-				ENGINE_WARN("motion readback validity supported {} valid {} extent {}x{} format {} count {}",
-					supportedSource, valid, source.Width, source.Height, int(source.Format), count);
 			if (!valid) {
 				const std::array names{
 					resource,
@@ -655,15 +648,61 @@ namespace engine::render {
 			} else {
 				// Each plane has backend-local row and image alignment; owned results have tight rows.
 				std::array<uint32_t, 6> strides{}, offsets{};
-				uint32_t bytes = 0;
+				size_t bytes = 0;
+				bool transferFits = true;
 				for (size_t plane = 0; plane < count; ++plane) {
-					offsets[plane] = (bytes + 511) / 512 * 512;
-					strides[plane] = (source.Width * pixelBytes[plane] + 255) / 256 * 256;
-					bytes = offsets[plane] + strides[plane] * source.Height;
+					if (pixelBytes[plane] == 0 ||
+						source.Width > (MAX_RESOURCE_IMAGE_STAGING_BYTES - 255) / pixelBytes[plane]) {
+						transferFits = false;
+						break;
+					}
+					const size_t stride = (size_t(source.Width) * pixelBytes[plane] + 255) / 256 * 256;
+					if (bytes > MAX_RESOURCE_IMAGE_STAGING_BYTES - 511) {
+						transferFits = false;
+						break;
+					}
+					const size_t offset = (bytes + 511) / 512 * 512;
+					if (source.Height == 0 ||
+						stride > (MAX_RESOURCE_IMAGE_STAGING_BYTES - offset) / source.Height) {
+						transferFits = false;
+						break;
+					}
+					offsets[plane] = static_cast<uint32_t>(offset);
+					strides[plane] = static_cast<uint32_t>(stride);
+					bytes = offset + stride * source.Height;
 				}
-				if (!EnsureResourceImageTransfer(slot, bytes)) continue;
+				if (!transferFits || bytes > std::numeric_limits<uint32_t>::max()) {
+					slot.Image.Status = ResourceImageStatus::Unsupported;
+					continue;
+				}
+				if (!EnsureResourceImageTransfer(slot, static_cast<uint32_t>(bytes))) continue;
+				slot.Image.ReadbackDeviceStagingReservedCapacityBytes = slot.TransferBytes;
+				const uint32_t timingSlot = BatchTimingSlot;
+				CaptureTiming *capture = slot.Image.DataCaptureTimingId != 0
+										? &CaptureTimings[slot.Image.DataCaptureTimingId]
+										: nullptr;
+				if (capture != nullptr && timingSlot >= VulkanTimestamps::SLOTS &&
+					capture->State != CaptureTimingState::Unavailable) {
+					capture->State = CaptureTimingState::Unavailable;
+					capture->Reason = "unavailable/no_capture_gpu_timestamp_slot";
+				}
+				const uint32_t opened = timingSlot < VulkanTimestamps::SLOTS &&
+										slot.Image.DataCaptureTimingId != 0
+									? Timestamps.Mark(command)
+									: VulkanTimestamps::MARKS;
+				if (capture != nullptr && timingSlot < VulkanTimestamps::SLOTS &&
+					opened >= VulkanTimestamps::MARKS && capture->State != CaptureTimingState::Unavailable) {
+					capture->State = CaptureTimingState::Unavailable;
+					capture->Reason = "unavailable/capture_timestamp_mark_exhausted";
+				}
 				auto *copy = SDL_BeginGPUCopyPass(command);
-				if (!copy) continue;
+				if (!copy) {
+					if (capture != nullptr && capture->State != CaptureTimingState::Unavailable) {
+						capture->State = CaptureTimingState::Unavailable;
+						capture->Reason = "unavailable/capture_gpu_copy_pass";
+					}
+					continue;
+				}
 				for (size_t plane = 0; plane < count; ++plane) {
 					SDL_GPUTextureRegion region{};
 					region.texture = planes[plane]->Texture;
@@ -678,6 +717,17 @@ namespace engine::render {
 					SDL_DownloadFromGPUTexture(copy, &region, &destination);
 				}
 				SDL_EndGPUCopyPass(copy);
+				if (opened < VulkanTimestamps::MARKS) {
+					const uint32_t closed = Timestamps.Mark(command);
+					if (closed < VulkanTimestamps::MARKS) {
+						PendingCaptureTimings[timingSlot].push_back({slot.Image.DataCaptureTimingId, opened, closed});
+						if (capture != nullptr && capture->State != CaptureTimingState::Unavailable)
+							capture->State = CaptureTimingState::Pending;
+					} else if (capture != nullptr && capture->State != CaptureTimingState::Unavailable) {
+						capture->State = CaptureTimingState::Unavailable;
+						capture->Reason = "unavailable/capture_timestamp_mark_exhausted";
+					}
+				}
 				slot.TransferStride = strides[0];
 				slot.DepthStride = strides[1];
 				slot.DepthOffset = offsets[1];
@@ -795,6 +845,9 @@ namespace engine::render {
 			slot.Image.Width = slot.Image.Height = slot.Image.RowStride = 0;
 			return;
 		}
+		slot.Image.ReadbackHostReservedCapacityBytes = 0;
+		for (const std::vector<std::byte> *plane : planes)
+			slot.Image.ReadbackHostReservedCapacityBytes += static_cast<uint64_t>(plane->capacity());
 		slot.Image.Status = ResourceImageStatus::Ok;
 		core::Metrics::Count(
 			"render.resource_image.copied_bytes",

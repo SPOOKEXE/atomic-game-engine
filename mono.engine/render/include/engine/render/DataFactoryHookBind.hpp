@@ -21,7 +21,7 @@ namespace engine::render {
 	class Renderer;
 	struct View;
 
-	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 16;
+	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 17;
 	inline constexpr size_t MAX_DATA_FACTORY_CONNECTIONS = 6;
 	inline constexpr size_t MAX_DATA_FACTORY_BATCHES = 6;
 	inline constexpr size_t MAX_DATA_FACTORY_HOOK_CHANNELS = 1;

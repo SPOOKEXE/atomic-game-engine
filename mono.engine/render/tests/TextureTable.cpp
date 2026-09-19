@@ -11,6 +11,58 @@ TEST_DEPENDS("engine.assets.texture")
 
 using namespace engine;
 
+TEST_CASE("texture copies retain only exact owner-scoped base pixels", "[render][texture-copy][gpu][.]") {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	render::TextureTable table;
+	REQUIRE(table.Initialise(device, true));
+	const core::Name name("copy.atex"), first("copy:first"), second("copy:second");
+	assets::TextureData firstImage;
+	firstImage.Width = firstImage.Height = 2;
+	firstImage.Format = assets::TextureFormat::RGBA8_LINEAR;
+	firstImage.Pixels.assign(16, std::byte{17});
+	firstImage.Mips = {{std::byte{99}, std::byte{99}, std::byte{99}, std::byte{99}}};
+	assets::TextureData sentinel;
+	sentinel.Width = sentinel.Height = 1;
+	sentinel.Pixels.assign(4, std::byte{7});
+
+	REQUIRE(table.Add(name, firstImage, first));
+	CHECK(table.Copy(name, sentinel, 16, second) == render::TextureCopyStatus::Missing);
+	CHECK(sentinel.Pixels[0] == std::byte{7});
+	CHECK(table.Copy(name, sentinel, 15, first) == render::TextureCopyStatus::OverLimit);
+	CHECK(sentinel.Pixels[0] == std::byte{7});
+	REQUIRE(table.Copy(name, sentinel, 16, first) == render::TextureCopyStatus::Copied);
+	CHECK(sentinel.Format == assets::TextureFormat::RGBA8_LINEAR);
+	CHECK(sentinel.Pixels == firstImage.Pixels);
+	CHECK(sentinel.Mips.empty());
+
+	assets::TextureData replacement = firstImage;
+	replacement.Pixels.assign(16, std::byte{41});
+	REQUIRE(table.Add(name, replacement, first));
+	REQUIRE(table.Copy(name, sentinel, 16, first) == render::TextureCopyStatus::Copied);
+	CHECK(sentinel.Pixels == replacement.Pixels);
+	REQUIRE(table.Add(name, firstImage, second));
+	REQUIRE(table.Copy(name, sentinel, 16, second) == render::TextureCopyStatus::Copied);
+	CHECK(sentinel.Pixels == firstImage.Pixels);
+	SDL_GPUTextureCreateInfo adoptedInfo{};
+	adoptedInfo.type = SDL_GPU_TEXTURETYPE_2D;
+	adoptedInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+	adoptedInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+	adoptedInfo.width = adoptedInfo.height = adoptedInfo.layer_count_or_depth = adoptedInfo.num_levels = 1;
+	const core::Name adoptedName("adopted.atex");
+	REQUIRE(table.Adopt(adoptedName, SDL_CreateGPUTexture(device, &adoptedInfo), 1, 1, 4, first));
+	CHECK(table.Copy(adoptedName, sentinel, 4, first) == render::TextureCopyStatus::Unsupported);
+	CHECK(sentinel.Pixels == firstImage.Pixels);
+	table.Shutdown();
+	render::TextureTable ordinary;
+	REQUIRE(ordinary.Initialise(device));
+	REQUIRE(ordinary.Add(name, firstImage, first));
+	CHECK(ordinary.Copy(name, sentinel, 16, first) == render::TextureCopyStatus::Unsupported);
+	CHECK(sentinel.Pixels == firstImage.Pixels);
+	ordinary.Shutdown();
+}
+
 TEST_CASE("renderer content retirement preserves other owners", "[render][texture-owner][gpu][.]") {
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();

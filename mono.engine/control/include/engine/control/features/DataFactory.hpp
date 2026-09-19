@@ -495,19 +495,30 @@ namespace engine::control {
 						failure = Error("validation_failed", "arguments must be an object");
 						return nullptr;
 					}
-					const auto allowed =
-						settingsRequired
-							? std::initializer_list<
-								  std::
-									  string_view>{"instance_id", "seed", "tick_rate", "expected_tick", "expected_world_epoch", "expected_world_version", "operation_id"}
-							: std::initializer_list<std::string_view>{
-								  "instance_id",
-								  "expected_tick",
-								  "expected_world_epoch",
-								  "expected_world_version",
-								  "operation_id"
-							  };
-					if (!Only(values, allowed, failure)) return nullptr;
+					if (settingsRequired) {
+						if (!Only(
+								values,
+								{"instance_id",
+								 "seed",
+								 "tick_rate",
+								 "expected_tick",
+								 "expected_world_epoch",
+								 "expected_world_version",
+								 "operation_id"},
+								failure
+							))
+							return nullptr;
+					} else if (!Only(
+								   values,
+								   {"instance_id",
+									"expected_tick",
+									"expected_world_epoch",
+									"expected_world_version",
+									"operation_id"},
+								   failure
+							   )) {
+						return nullptr;
+					}
 					world::DataFactoryWorldRequest request;
 					const json *field = nullptr;
 					if (!Field(values, "instance_id", field, failure) ||

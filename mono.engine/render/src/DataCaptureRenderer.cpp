@@ -282,8 +282,14 @@ namespace engine::render {
 				wantsSemantic ? request.SemanticLabels : std::vector<DataCaptureSemanticLabel>{},
 			.PartLabels = wantsPart ? request.PartLabels : std::vector<DataCapturePartLabel>{},
 			.ChannelResourceIndices = {},
-			.ResourceTokens = {}
+			.ResourceTokens = {},
+			.GpuTimingId = 0,
+			.CompletedImages = {},
+			.ImagesTaken = false,
 		};
+		if (State->NextCaptureTimingId == 0) return false;
+		queued.GpuTimingId = State->NextCaptureTimingId++;
+		State->CaptureTimings.emplace(queued.GpuTimingId, Impl::CaptureTiming{});
 		std::vector<core::Name> resourceNodes;
 		for (const DataCaptureChannel channel : request.Channels) {
 			if (AuthoredFactUnavailable(channel) || UnimplementedTemporalFact(channel)) {
@@ -313,6 +319,11 @@ namespace engine::render {
 				CancelDataCapture(queued);
 				return false;
 			}
+			for (auto &slot : State->ResourceImages)
+				if (slot.Phase != Impl::ResourceImagePhase::Free && slot.Image.Request.Token == token) {
+					slot.Image.DataCaptureTimingId = queued.GpuTimingId;
+					break;
+				}
 			queued.ChannelResourceIndices.push_back(static_cast<uint8_t>(queued.ResourceTokens.size()));
 			queued.ResourceTokens.push_back(token);
 			resourceNodes.push_back(node);
@@ -345,28 +356,55 @@ namespace engine::render {
 			return poll;
 		}
 
-		auto images = ticket.ResourceTokens.empty() ? std::optional<std::vector<ResourceImage>>(std::in_place)
-													: TakeResourceImages(ticket.ResourceTokens);
-		if (images)
-			poll.CpuReadbackNanoseconds = std::accumulate(
-				images->begin(), images->end(), uint64_t{0}, [](uint64_t total, const ResourceImage &image) {
-					return total + image.ReadbackCpuNanoseconds;
-				}
-			);
-		if (!images) {
-			poll.Status = DataCaptureStatus::Pending;
-			return poll;
+		if (!ticket.ImagesTaken) {
+			auto completed = ticket.ResourceTokens.empty() ? std::optional<std::vector<ResourceImage>>(std::in_place)
+																	 : TakeResourceImages(ticket.ResourceTokens);
+			if (!completed) {
+				poll.Status = DataCaptureStatus::Pending;
+				return poll;
+			}
+			ticket.CompletedImages = std::move(*completed);
+			ticket.ImagesTaken = true;
 		}
-		if (images->empty()) {
+		State->CollectTimings();
+		if (const auto timing = State->CaptureTimings.find(ticket.GpuTimingId);
+			timing != State->CaptureTimings.end()) {
+			if (timing->second.State == Impl::CaptureTimingState::Pending) {
+				poll.Status = DataCaptureStatus::Pending;
+				return poll;
+			}
+			if (timing->second.State == Impl::CaptureTimingState::Ready) {
+				poll.GpuNanoseconds = timing->second.Nanoseconds;
+				poll.GpuTimingReason.clear();
+			} else if (timing->second.State == Impl::CaptureTimingState::Unavailable) {
+				poll.GpuTimingReason = timing->second.Reason;
+			} else {
+				poll.GpuTimingReason = "unavailable/no_capture_gpu_commands";
+			}
+		}
+		auto &images = ticket.CompletedImages;
+		poll.CpuReadbackNanoseconds = std::accumulate(
+			images.begin(), images.end(), uint64_t{0}, [](uint64_t total, const ResourceImage &image) {
+				return total + image.ReadbackCpuNanoseconds;
+			}
+		);
+		for (const ResourceImage &image : images) {
+			poll.HostReadbackReservedCapacityBytes += image.ReadbackHostReservedCapacityBytes;
+			poll.DeviceReadbackStagingReservedCapacityBytes += image.ReadbackDeviceStagingReservedCapacityBytes;
+		}
+		if (images.empty()) {
 			poll.Pipeline = ticket.Pipeline;
 			poll.ViewSlot = ticket.ViewSlot;
 			for (const DataCaptureChannel channel : ticket.Channels)
 				poll.Planes.push_back(Plane(channel, ticket));
 			poll.Status = DataCaptureStatus::Unsupported;
+			ticket.ResourceTokens.clear();
 			ticket.ChannelResourceIndices.clear();
+			ticket.CompletedImages.clear();
+			State->CaptureTimings.erase(ticket.GpuTimingId);
 			return poll;
 		}
-		const ResourceImage &image = images->front();
+		const ResourceImage &image = images.front();
 		poll.CaptureFrame = image.CaptureFrame;
 		poll.Pipeline = image.Observation ? image.Observation->Pipeline : ticket.Pipeline;
 		poll.PipelineRevision = image.Observation ? image.Observation->PipelineRevision : 0;
@@ -385,13 +423,13 @@ namespace engine::render {
 		bool correctNodes = true;
 		for (size_t channelIndex = 0; channelIndex < ticket.Channels.size(); ++channelIndex) {
 			if (ticket.ChannelResourceIndices[channelIndex] == NO_DATA_CAPTURE_RESOURCE) continue;
-			const ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[channelIndex]];
+			const ResourceImage &channelImage = images[ticket.ChannelResourceIndices[channelIndex]];
 			correctNodes =
 				correctNodes && channelImage.Observation &&
 				channelImage.Observation->Node == CaptureNode(ticket, ticket.Channels[channelIndex]);
 		}
 		if (image.SnapshotId != ticket.SnapshotId || !image.Observation || !correctNodes ||
-			std::any_of(images->begin(), images->end(), [&](const ResourceImage &item) {
+			std::any_of(images.begin(), images.end(), [&](const ResourceImage &item) {
 				return !capture_record_validation::SameCaptureBundle(image, item) || !item.Observation ||
 					   item.Observation->Pipeline != image.Observation->Pipeline ||
 					   item.Observation->PipelineRevision != image.Observation->PipelineRevision ||
@@ -406,6 +444,8 @@ namespace engine::render {
 			}
 			ticket.ResourceTokens.clear();
 			ticket.ChannelResourceIndices.clear();
+			ticket.CompletedImages.clear();
+			State->CaptureTimings.erase(ticket.GpuTimingId);
 			return poll;
 		}
 		poll.Planes.reserve(ticket.Channels.size());
@@ -416,7 +456,7 @@ namespace engine::render {
 				poll.Planes.push_back(std::move(plane));
 				continue;
 			}
-			ResourceImage &channelImage = (*images)[ticket.ChannelResourceIndices[index]];
+			ResourceImage &channelImage = images[ticket.ChannelResourceIndices[index]];
 			if (channelImage.Status == ResourceImageStatus::Ok) {
 				FillPlane(plane, channelImage);
 			} else if (channelImage.Status == ResourceImageStatus::Failed) {
@@ -454,6 +494,8 @@ namespace engine::render {
 																		 : DataCaptureStatus::Unsupported);
 		ticket.ResourceTokens.clear();
 		ticket.ChannelResourceIndices.clear();
+		ticket.CompletedImages.clear();
+		State->CaptureTimings.erase(ticket.GpuTimingId);
 		return poll;
 	}
 
@@ -463,6 +505,8 @@ namespace engine::render {
 			(void)CancelResourceImage(token);
 		ticket.ResourceTokens.clear();
 		ticket.ChannelResourceIndices.clear();
+		ticket.CompletedImages.clear();
+		State->CaptureTimings.erase(ticket.GpuTimingId);
 		ticket.Cancelled = true;
 	}
 }

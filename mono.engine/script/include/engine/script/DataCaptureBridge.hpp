@@ -122,6 +122,8 @@ namespace engine::script {
 		std::string Provenance;
 		std::optional<DataCaptureBridgeAmbientOcclusion> AmbientOcclusion;
 		std::optional<DataCaptureBridgeNoise> Noise;
+		// Motion is measured against this renderer frame, not the preceding ticket.
+		std::optional<uint64_t> PreviousCameraMotionFrame;
 	};
 	struct DataCaptureBridgeObjectLabel {
 		uint32_t Label = 0;
@@ -145,6 +147,12 @@ namespace engine::script {
 		std::optional<double> FinalizationBytesPerSecond;
 		std::optional<uint64_t> GpuNanoseconds;
 		std::string GpuTimingReason = "unavailable/no_completed_gpu_timestamp";
+		// Ticket-scoped capacity at the renderer's completed-readback boundary.
+		// These fields remain separate because host vector storage and device staging
+		// buffers are unlike pools. Neither is an allocation-event count, allocator
+		// peak, process heap total, or driver memory total.
+		std::optional<uint64_t> HostReadbackReservedCapacityBytes;
+		std::optional<uint64_t> DeviceReadbackStagingReservedCapacityBytes;
 		std::optional<uint64_t> AllocationBytes;
 		std::optional<uint64_t> PeakAllocationBytes;
 		std::string AllocationReason = "unavailable/no_capture_allocator_counter";

@@ -1431,8 +1431,10 @@ namespace engine::render {
 			State->WallTimings.clear();
 			State->DroppedProfileMarks = 0;
 		}
-		const bool sampleGpu = State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
-							   State->FrameCounter % State->ProfileSampleRate == 0;
+		const bool sampleGpu =
+			(State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
+			 State->FrameCounter % State->ProfileSampleRate == 0) ||
+			State->BatchCaptureTimingRequested;
 		timingSlot = !sampleGpu ? VulkanTimestamps::NO_SLOT
 					 : State->BatchActive
 						 ? (State->BatchFirst ? State->Timestamps.Begin(command) : State->BatchTimingSlot)
@@ -1442,6 +1444,7 @@ namespace engine::render {
 		}
 		if ((State->BatchFirst || !State->BatchActive) && timingSlot < VulkanTimestamps::SLOTS) {
 			State->PendingMarks[timingSlot].clear();
+			State->PendingCaptureTimings[timingSlot].clear();
 		}
 		openedMark = VulkanTimestamps::MARKS;
 		timedCommand = command;
@@ -1663,6 +1666,7 @@ namespace engine::render {
 			State->Timestamps.Abandon(timingSlot);
 			if (timingSlot < VulkanTimestamps::SLOTS) {
 				State->PendingMarks[timingSlot].clear();
+				State->AbandonCaptureTimings(timingSlot);
 			}
 			endIncompleteView();
 			return ViewStart::Abandoned;
@@ -2976,6 +2980,7 @@ namespace engine::render {
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();
+					State->AbandonCaptureTimings(timingSlot);
 				}
 				if (capture != nullptr) {
 					gpu::ReleaseTransferBuffer(State->Device, capture);

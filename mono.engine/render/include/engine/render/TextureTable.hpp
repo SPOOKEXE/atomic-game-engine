@@ -75,6 +75,15 @@ namespace engine::render {
 		return TextureChoice::Missing;
 	}
 
+	// The outcome of copying a render-owned decoded base level for export.
+	enum class TextureCopyStatus : uint8_t {
+		Copied,
+		Missing,
+		OverLimit,
+		Unsupported,
+		Invalid,
+	};
+
 	// The textures a renderer can sample.
 	// Names are scoped by an optional content owner. An empty owner is the shared
 	// namespace; scoped lookups never fall back to another owner or shared content.
@@ -88,6 +97,12 @@ namespace engine::render {
 		// Bounds device memory reachable from content.
 		static constexpr size_t MAXIMUM_BYTES = 512u * 1024u * 1024u;
 
+		// A source copy exists only for exact owner-scoped export. The individual
+		// and aggregate limits keep decoded CPU pixels from becoming a second,
+		// unbounded residency cache beside device memory.
+		static constexpr size_t MAXIMUM_COPY_BYTES = 16u * 1024u * 1024u;
+		static constexpr size_t MAXIMUM_RETAINED_COPY_BYTES = 256u * 1024u * 1024u;
+
 		TextureTable() = default;
 		~TextureTable();
 
@@ -95,10 +110,11 @@ namespace engine::render {
 		TextureTable &operator=(const TextureTable &) = delete;
 
 		// Takes the device, creates the shared sampler and uploads the default.
+		// Source copies are retained only when the host requests export support.
 		//
 		// @param device The GPU device. Kept, not owned.
 		// @return `false` when the sampler or the default could not be created.
-		bool Initialise(SDL_GPUDevice *device);
+		bool Initialise(SDL_GPUDevice *device, bool retainSources = false);
 
 		// Releases every texture and the sampler.
 		void Shutdown();
@@ -265,6 +281,12 @@ namespace engine::render {
 		// Returns false for an absent name and leaves `format` alone.
 		bool FormatOf(const core::Name &name, assets::TextureFormat &format, core::Name owner = {}) const;
 
+		// Copies only the decoded base level retained by `Add`. This never reads
+		// device memory and never falls back across content owners. Refusal leaves
+		// `out` unchanged.
+		TextureCopyStatus
+		Copy(const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner = {}) const;
+
 		// Where this texture's current cell sits, for a sheet that animates.
 		//
 		// **The identity for anything that is not a sheet**, so a caller applies
@@ -351,6 +373,12 @@ namespace engine::render {
 			uint8_t FlipbookSide = 0;
 			uint8_t FlipbookFrames = 0;
 			float FlipbookFrameRate = 0.0f;
+
+			// The decoded base level is retained for exact host-owned export. Mips
+			// stay device-only: the export seam promises source pixels, not a second
+			// unbounded copy of every upload chain.
+			std::vector<std::byte> SourcePixels;
+			TextureCopyStatus CopyStatus = TextureCopyStatus::Unsupported;
 		};
 
 		// Creates one device texture and fills it, widening `R8` on the way.
@@ -371,7 +399,8 @@ namespace engine::render {
 		SDL_GPUTexture *Upload(const assets::TextureData &image, std::string_view label, size_t &bytes);
 
 		// One entry from an upload and the image it came from. See the body.
-		static Entry Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image);
+		static Entry
+		Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image, bool retainSource);
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUSampler *SharedSampler = nullptr;
@@ -397,5 +426,7 @@ namespace engine::render {
 		std::unordered_set<uint64_t> Awaiting;
 
 		size_t UploadedBytes = 0;
+		size_t RetainedCopyBytes = 0;
+		bool RetainSources = false;
 	};
 }

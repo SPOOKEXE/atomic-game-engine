@@ -4893,7 +4893,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 			return hook.Kind == render::RenderHookKind::DataCapture;
 		})
 	);
-	REQUIRE(observationHookCount == 15);
+	REQUIRE(observationHookCount == 16);
 	REQUIRE(observationHookCount + 1 == render::MAX_DATA_FACTORY_HOOKS);
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",

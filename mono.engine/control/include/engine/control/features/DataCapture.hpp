@@ -378,7 +378,7 @@ namespace engine::control {
 			} else if (plane.Channel == "shading_normal") {
 				dtype = "uint32";
 				packing = "UNorm10A2";
-			} else if (plane.Channel == "mesh_uv") {
+			} else if (plane.Channel == "mesh_uv" || plane.Channel == "motion_vectors") {
 				shape.push_back(2);
 				dtype = "float16";
 			}
@@ -450,6 +450,8 @@ namespace engine::control {
 				{"provenance", plane.Provenance.empty() ? json(nullptr) : json(plane.Provenance)},
 				{"ambient_occlusion", ambientOcclusion(plane.AmbientOcclusion)},
 				{"noise", noise(plane.Noise)},
+				{"previous_camera_motion_frame",
+				 plane.PreviousCameraMotionFrame ? json(*plane.PreviousCameraMotionFrame) : json(nullptr)},
 				{"row_stride", plane.RowStride},
 				{"colour_space", plane.ColourSpace},
 				{"origin", plane.Origin}
@@ -507,6 +509,14 @@ namespace engine::control {
 				  {"gpu_nanoseconds",
 				   reply.Profile.GpuNanoseconds ? json(*reply.Profile.GpuNanoseconds) : json(nullptr)},
 				  {"gpu_timing_reason", reply.Profile.GpuTimingReason},
+				  {"host_readback_reserved_capacity_bytes",
+				   reply.Profile.HostReadbackReservedCapacityBytes
+					   ? json(*reply.Profile.HostReadbackReservedCapacityBytes)
+					   : json(nullptr)},
+				  {"device_readback_staging_reserved_capacity_bytes",
+				   reply.Profile.DeviceReadbackStagingReservedCapacityBytes
+					   ? json(*reply.Profile.DeviceReadbackStagingReservedCapacityBytes)
+					   : json(nullptr)},
 				  {"allocation_bytes",
 				   reply.Profile.AllocationBytes ? json(*reply.Profile.AllocationBytes) : json(nullptr)},
 				  {"peak_allocation_bytes",

@@ -29,6 +29,7 @@ using engine::assets::BuiltinMesh;
 using engine::assets::MakeBuiltin;
 using engine::assets::MeshData;
 using engine::core::Name;
+using engine::render::MeshCopyStatus;
 using engine::render::MeshEntry;
 using engine::render::MeshTable;
 
@@ -143,6 +144,53 @@ TEST_CASE("mesh owners isolate replacement and defer retired range reuse", "[ren
 	CHECK(table.DropOwner(firstOwner) == 2);
 	table.Shutdown();
 	CHECK(table.Count() == 0);
+}
+
+TEST_CASE("resident mesh copies keep geometry, material runs and content owners", "[render][meshtable]") {
+	MeshTable table;
+	const Name asset("export.mesh"), firstOwner("export.first"), secondOwner("export.second");
+	MeshData first = MakeBuiltin(BuiltinMesh::Cube);
+	engine::assets::Submesh run;
+	run.FirstIndex = 0;
+	run.IndexCount = 6;
+	run.Texture = "export/sheet.atex";
+	run.BaseColour[0] = 0.25f;
+	run.BaseColour[3] = 0.75f;
+	first.Submeshes.push_back(run);
+	REQUIRE(table.Add(asset, first, firstOwner));
+	const MeshData second = Offset(first, 3.0f);
+	REQUIRE(table.Add(asset, second, secondOwner));
+
+	MeshData copied;
+	REQUIRE(
+		table.Copy(asset, copied, first.Vertices.size(), first.Indices.size(), firstOwner) ==
+		MeshCopyStatus::Copied
+	);
+	CHECK(copied.Vertices[0].Position[0] == first.Vertices[0].Position[0]);
+	CHECK(copied.Indices == first.Indices);
+	REQUIRE(copied.Submeshes.size() == 1);
+	CHECK(copied.Submeshes[0].FirstIndex == 0);
+	CHECK(copied.Submeshes[0].IndexCount == 6);
+	CHECK(copied.Submeshes[0].Texture == "export/sheet.atex");
+	CHECK(copied.Submeshes[0].BaseColour[0] == 0.25f);
+	CHECK(copied.Submeshes[0].BaseColour[3] == 0.75f);
+	CHECK(
+		table.Copy(asset, copied, first.Vertices.size() - 1, first.Indices.size(), firstOwner) ==
+		MeshCopyStatus::OverLimit
+	);
+	CHECK(
+		table.Copy(asset, copied, first.Vertices.size(), first.Indices.size(), Name("absent")) ==
+		MeshCopyStatus::Missing
+	);
+	CHECK(copied.Indices == first.Indices);
+	REQUIRE(
+		table.Copy(asset, copied, second.Vertices.size(), second.Indices.size(), secondOwner) ==
+		MeshCopyStatus::Copied
+	);
+	CHECK(copied.Vertices[0].Position[0] == second.Vertices[0].Position[0]);
+	const auto packed = PackedTriangle();
+	REQUIRE(table.AddPacked(Name("export.packed"), packed, firstOwner));
+	CHECK(table.Copy(Name("export.packed"), copied, 3, 3, firstOwner) == MeshCopyStatus::Packed);
 }
 
 TEST_CASE("a burst of arrivals is one pending delta, not one per mesh", "[render][meshtable]") {

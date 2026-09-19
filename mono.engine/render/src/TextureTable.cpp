@@ -24,8 +24,9 @@ namespace engine::render {
 		Shutdown();
 	}
 
-	bool TextureTable::Initialise(SDL_GPUDevice *device) {
+	bool TextureTable::Initialise(SDL_GPUDevice *device, bool retainSources) {
 		Device = device;
+		RetainSources = retainSources;
 		if (Device == nullptr) {
 			return false;
 		}
@@ -130,6 +131,8 @@ namespace engine::render {
 		SharedSampler = nullptr;
 		NearestSampler = nullptr;
 		UploadedBytes = 0;
+		RetainedCopyBytes = 0;
+		RetainSources = false;
 		Device = nullptr;
 	}
 
@@ -234,14 +237,15 @@ namespace engine::render {
 		return texture;
 	}
 
-	TextureTable::Entry
-	TextureTable::Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image) {
+	TextureTable::Entry TextureTable::Describe(
+		SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image, bool retainSource
+	) {
 		// **One description, because there are two call sites.** `Add` replaces
 		// an entry or inserts one, and two aggregate initialisers is two places
 		// to forget a field - which is exactly how the sheet layout would go
 		// missing on a *replaced* texture only, so an animation would play until
 		// a publisher re-published it and then stop.
-		return Entry{
+		Entry entry{
 			.Texture = texture,
 			.Bytes = bytes,
 			.Width = image.Width,
@@ -250,7 +254,14 @@ namespace engine::render {
 			.FlipbookSide = image.FlipbookSide,
 			.FlipbookFrames = image.FlipbookFrames,
 			.FlipbookFrameRate = image.FlipbookFrameRate,
+			.SourcePixels = {},
+			.CopyStatus = TextureCopyStatus::Unsupported,
 		};
+		if (retainSource) {
+			entry.SourcePixels = image.Pixels;
+			entry.CopyStatus = TextureCopyStatus::Copied;
+		}
+		return entry;
 	}
 
 	FlipbookCell TextureTable::CellOf(const core::Name &name, double seconds, core::Name owner) const {
@@ -298,6 +309,11 @@ namespace engine::render {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
 			return false;
 		}
+		const auto existing = Textures.find(TextureKey(name, owner));
+		const size_t oldCopyBytes = existing == Textures.end() ? 0 : existing->second.SourcePixels.size();
+		const bool sourceTooLarge = image.Pixels.size() > MAXIMUM_COPY_BYTES;
+		const bool retainedOverLimit =
+			image.Pixels.size() > MAXIMUM_RETAINED_COPY_BYTES - (RetainedCopyBytes - oldCopyBytes);
 
 		size_t uploadBytes = 0;
 		SDL_GPUTexture *texture = Upload(image, name.Text(), uploadBytes);
@@ -306,7 +322,7 @@ namespace engine::render {
 		}
 
 		// Release the old texture only after the replacement upload succeeds.
-		const auto existing = Textures.find(TextureKey(name, owner));
+		const bool retainSource = RetainSources && !sourceTooLarge && !retainedOverLimit;
 		if (existing != Textures.end()) {
 			gpu::ReleaseTexture(Device, existing->second.Texture);
 
@@ -315,9 +331,20 @@ namespace engine::render {
 			// replaced textures drifted up until the ceiling refused an upload
 			// that would have fit.
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
-			existing->second = Describe(texture, uploadBytes, image);
+			existing->second = Describe(texture, uploadBytes, image, retainSource);
 		} else {
-			Textures.emplace(TextureKey(name, owner), Describe(texture, uploadBytes, image));
+			Textures.emplace(TextureKey(name, owner), Describe(texture, uploadBytes, image, retainSource));
+		}
+		Entry &entry = Textures.find(TextureKey(name, owner))->second;
+		RetainedCopyBytes -= oldCopyBytes;
+		if (!RetainSources) {
+			entry.CopyStatus = TextureCopyStatus::Unsupported;
+		} else if (sourceTooLarge) {
+			entry.CopyStatus = TextureCopyStatus::OverLimit;
+		} else if (retainedOverLimit) {
+			entry.CopyStatus = TextureCopyStatus::Unsupported;
+		} else {
+			RetainedCopyBytes += entry.SourcePixels.size();
 		}
 
 		UploadedBytes += uploadBytes;
@@ -361,6 +388,28 @@ namespace engine::render {
 		return true;
 	}
 
+	TextureCopyStatus TextureTable::Copy(
+		const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner
+	) const {
+		if (!name.IsValid()) return TextureCopyStatus::Missing;
+		const auto found = Textures.find(TextureKey(name, owner));
+		if (found == Textures.end()) return TextureCopyStatus::Missing;
+		const Entry &entry = found->second;
+		if (entry.CopyStatus != TextureCopyStatus::Copied) return entry.CopyStatus;
+		if (entry.SourcePixels.size() > byteLimit) return TextureCopyStatus::OverLimit;
+		assets::TextureData copied;
+		copied.Width = entry.Width;
+		copied.Height = entry.Height;
+		copied.Format = entry.Format;
+		copied.Pixels = entry.SourcePixels;
+		copied.FlipbookSide = entry.FlipbookSide;
+		copied.FlipbookFrames = entry.FlipbookFrames;
+		copied.FlipbookFrameRate = entry.FlipbookFrameRate;
+		if (!copied.IsValid()) return TextureCopyStatus::Invalid;
+		out = std::move(copied);
+		return TextureCopyStatus::Copied;
+	}
+
 	bool TextureTable::Adopt(
 		const core::Name &name,
 		SDL_GPUTexture *texture,
@@ -387,6 +436,7 @@ namespace engine::render {
 		entry.Bytes = bytes;
 		entry.Width = width;
 		entry.Height = height;
+		entry.CopyStatus = TextureCopyStatus::Unsupported;
 
 		// No flipbook fields: a rendered picture is one frame by construction,
 		// and claiming a grid would make `FlipbookCell` walk cells that are not
@@ -396,6 +446,7 @@ namespace engine::render {
 		if (existing != Textures.end()) {
 			gpu::ReleaseTexture(Device, existing->second.Texture);
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
+			RetainedCopyBytes -= std::min(RetainedCopyBytes, existing->second.SourcePixels.size());
 			existing->second = entry;
 		} else {
 			Textures.emplace(TextureKey(name, owner), entry);
@@ -445,6 +496,7 @@ namespace engine::render {
 
 		gpu::ReleaseTexture(Device, found->second.Texture);
 		UploadedBytes -= std::min(UploadedBytes, found->second.Bytes);
+		RetainedCopyBytes -= std::min(RetainedCopyBytes, found->second.SourcePixels.size());
 		Textures.erase(found);
 		return true;
 	}
@@ -456,6 +508,7 @@ namespace engine::render {
 			if (uint32_t(pair.first >> 32) != ownerId) return false;
 			gpu::ReleaseTexture(Device, pair.second.Texture);
 			UploadedBytes -= std::min(UploadedBytes, pair.second.Bytes);
+			RetainedCopyBytes -= std::min(RetainedCopyBytes, pair.second.SourcePixels.size());
 			return true;
 		});
 	}

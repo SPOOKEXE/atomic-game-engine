@@ -13,7 +13,13 @@ namespace engine::control {
 		std::string &failure
 	) const {
 		const auto found = Entries.find(std::string(operationId));
-		if (found == Entries.end()) return DataFactoryOperationReplay::Fresh;
+		if (found == Entries.end()) {
+			if (Entries.size() >= MAXIMUM_ENTRIES) {
+				failure = "operation_id_capacity: operation ledger is full; retry an existing operation_id";
+				return DataFactoryOperationReplay::Conflict;
+			}
+			return DataFactoryOperationReplay::Fresh;
+		}
 		if (found->second.Tool != tool || found->second.Arguments != arguments) {
 			failure = "operation_id_conflict: operation_id was already used with different tool or arguments";
 			return DataFactoryOperationReplay::Conflict;
@@ -30,16 +36,12 @@ namespace engine::control {
 		nlohmann::json result,
 		std::string failure
 	) {
-		if (Entries.contains(operationId)) return;
+		if (Entries.contains(operationId) || Entries.size() >= MAXIMUM_ENTRIES) return;
 		Order.push_back(operationId);
 		Entries.emplace(
 			std::move(operationId),
 			Entry{std::move(tool), std::move(arguments), std::move(result), std::move(failure)}
 		);
-		while (Order.size() > MAXIMUM_ENTRIES) {
-			Entries.erase(Order.front());
-			Order.pop_front();
-		}
 	}
 
 	void DataFactoryOperationLedger::Update(

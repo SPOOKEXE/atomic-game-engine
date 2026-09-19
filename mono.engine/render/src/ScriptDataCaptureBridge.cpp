@@ -154,8 +154,11 @@ namespace engine::render {
 			size_t matchingIdentities = 0;
 			std::optional<scene::Camera> selectedCamera;
 			std::optional<core::CFrame> selectedFrame;
+			std::optional<ecs::Entity> selectedEntity;
+			uint64_t storeIdentity = 0;
 			const world::WorldStatus status =
 				session.UniverseOf().Enter(session.UniverseOf().Find(view.WorldName), [&](ecs::Store &store) {
+					storeIdentity = store.Identity();
 					store.EachEntity([&](ecs::Entity entity) {
 						ecs::AttributeValue identity;
 						if (!ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identity) ||
@@ -167,6 +170,7 @@ namespace engine::render {
 						if (camera && transform) {
 							selectedCamera = *camera;
 							selectedFrame = transform->Frame;
+							selectedEntity = entity;
 						}
 					});
 				});
@@ -181,6 +185,11 @@ namespace engine::render {
 				return false;
 			view.CameraFrame = *selectedFrame;
 			view.Camera = *selectedCamera;
+			// A named camera has its own producer lineage. The store incarnation and
+			// entity generation prevent a restored or replaced camera from inheriting it.
+			view.CameraTemporalId = "named/" + std::string(view.WorldName.Text()) + "/" +
+									std::to_string(storeIdentity) + "/" + std::to_string(selectedEntity->Id);
+			if (view.CameraTemporalId.size() > 256) view.CameraTemporalId.clear();
 			return true;
 		}
 
@@ -870,9 +879,6 @@ namespace engine::render {
 					}
 				return false;
 			}
-			// A named capture mutates the producer camera outside the active-camera
-			// lineage carried by source. It must start without temporal history.
-			if (pending[index].Request.CameraId != "current_view") capture.CameraTemporalId.clear();
 			built.push_back(std::move(capture));
 		}
 		{
@@ -1522,6 +1528,11 @@ namespace engine::render {
 			reply.SnapshotId = captured.SnapshotId;
 			reply.CaptureFrame = captured.CaptureFrame;
 			reply.Profile.CpuReadbackNanoseconds = captured.CpuReadbackNanoseconds;
+			reply.Profile.HostReadbackReservedCapacityBytes = captured.HostReadbackReservedCapacityBytes;
+			reply.Profile.DeviceReadbackStagingReservedCapacityBytes =
+				captured.DeviceReadbackStagingReservedCapacityBytes;
+			reply.Profile.GpuNanoseconds = captured.GpuNanoseconds;
+			reply.Profile.GpuTimingReason = captured.GpuTimingReason;
 			for (const SourceDescriptor &source : sources)
 				if (source.ByteSize != 0) {
 					reply.Profile.SourceBytes += source.ByteSize;
@@ -1573,7 +1584,8 @@ namespace engine::render {
 					 .Packing = Packing(plane.Channel, plane.Scalar),
 					 .Provenance = plane.Provenance.empty() ? Provenance(plane.Channel) : plane.Provenance,
 					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion),
-					 .Noise = std::move(noises[index])}
+					 .Noise = std::move(noises[index]),
+					 .PreviousCameraMotionFrame = plane.PreviousCameraMotionFrame}
 				);
 				if (!plane.Bytes.empty()) {
 					if (totalBytes > RETAINED_BYTE_LIMIT ||

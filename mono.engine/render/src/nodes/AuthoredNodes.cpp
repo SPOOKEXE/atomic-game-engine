@@ -421,6 +421,7 @@ namespace engine::render {
 				State->Timestamps.Abandon(laterReset);
 				if (laterReset < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[laterReset].clear();
+					State->AbandonCaptureTimings(laterReset);
 					State->TimingSequence[laterReset] = 0;
 				}
 				timingSlot = State->Timestamps.Begin(dispatchCommand, laterReset);
@@ -459,6 +460,7 @@ namespace engine::render {
 					State->Timestamps.Abandon(timingSlot);
 					if (timingSlot < VulkanTimestamps::SLOTS) {
 						State->PendingMarks[timingSlot].clear();
+						State->AbandonCaptureTimings(timingSlot);
 					}
 					timingSlot = VulkanTimestamps::NO_SLOT;
 					if (State->BatchActive) {
@@ -521,6 +523,7 @@ namespace engine::render {
 					State->Timestamps.Abandon(timingSlot);
 					if (timingSlot < VulkanTimestamps::SLOTS) {
 						State->PendingMarks[timingSlot].clear();
+						State->AbandonCaptureTimings(timingSlot);
 					}
 					State->DiscardPendingGraphHistoryWrites(dispatchCommand);
 					return false;

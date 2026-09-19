@@ -1441,6 +1441,14 @@ namespace engine::script {
 				{"gpu_nanoseconds",
 				 profile.GpuNanoseconds ? String(Decimal(*profile.GpuNanoseconds)) : ScriptValue{}},
 				{"gpu_timing_reason", String(profile.GpuTimingReason)},
+				{"host_readback_reserved_capacity_bytes",
+				 profile.HostReadbackReservedCapacityBytes
+					 ? String(Decimal(*profile.HostReadbackReservedCapacityBytes))
+					 : ScriptValue{}},
+				{"device_readback_staging_reserved_capacity_bytes",
+				 profile.DeviceReadbackStagingReservedCapacityBytes
+					 ? String(Decimal(*profile.DeviceReadbackStagingReservedCapacityBytes))
+					 : ScriptValue{}},
 				{"allocation_bytes",
 				 profile.AllocationBytes ? String(Decimal(*profile.AllocationBytes)) : ScriptValue{}},
 				{"peak_allocation_bytes",

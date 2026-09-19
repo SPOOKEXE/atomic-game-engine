@@ -35,8 +35,9 @@ namespace engine::control {
 	// silently become a different action after an agent changes tools.
 	class DataFactoryOperationLedger final {
 	  public:
-		// The ledger retains the newest 256 identifiers. Once an identifier is
-		// evicted, a later request with that identifier is a fresh operation.
+		// Every accepted identifier remains fenced for this surface lifetime.
+		// Admission refuses a new identifier once this bound is reached, rather
+		// than forgetting an older lifecycle operation and allowing it to recur.
 		static constexpr size_t MAXIMUM_ENTRIES = 256;
 
 		DataFactoryOperationReplay Replay(

@@ -476,9 +476,20 @@ TEST_CASE(
 	source.Pipeline = PIPELINE;
 	source.DirectionalShadowBounds = core::AABB{{10, 9, -20}, {11, 10, -19}};
 	const std::array nodes{
-		SHADOW, COLOUR_CAPTURE, COLOUR_CAPTURE, COLOUR_CAPTURE, COLOUR_CAPTURE, COLOUR_CAPTURE
+		SHADOW,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
+		COLOUR_CAPTURE,
 	};
-	std::array<uint64_t, 6> tokens{};
+	std::array<uint64_t, 12> tokens{};
 	REQUIRE(renderer.QueueResourceImages(PIPELINE, nodes, 0, ResourceImageDelivery::CopiedPixels, tokens));
 	CHECK(renderer.QueueResourceImage(PIPELINE, COLOUR_CAPTURE, 0) == 0);
 	OverlayImage overlay;

@@ -37,6 +37,8 @@
 #include <engine/parallel/Settings.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/render/DebugText.hpp>
+#include <engine/render/MeshTable.hpp>
+#include <engine/render/TextureTable.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
@@ -238,11 +240,16 @@ namespace client {
 				return false;
 			}
 		}
-		// A capture producer has no swapchain wait to pace its service frames.
+		// A headless data-factory host has no swapchain wait to pace idle service
+		// frames. Keep its normal idle path near the simulation rate, while an
+		// explicit uncapped request keeps its existing rate selection.
+		constexpr uint32_t DATA_FACTORY_HEADLESS_FRAME_RATE = 60;
 		Presentations.SetRate(
 			Settings.PresentationSession != 0
 				? (Settings.MaximumFrameRate != 0 ? Settings.MaximumFrameRate : 60)
-				: (Settings.Uncapped ? Settings.MaximumFrameRate : 0)
+				: (Settings.DataFactory && Settings.Headless && !Settings.Uncapped
+					   ? DATA_FACTORY_HEADLESS_FRAME_RATE
+					   : (Settings.Uncapped ? Settings.MaximumFrameRate : 0))
 		);
 
 		// **Said at startup rather than at the first refusal**, so "my texture
@@ -286,7 +293,9 @@ namespace client {
 
 		// Null when headless, which is what puts the renderer in that mode - the
 		// same call the editor makes, for the same reason.
-		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
+		if (!Renderer.Initialise(
+				Window, static_cast<uint32_t>(Settings.FramesInFlight), Settings.DataFactory
+			)) {
 			return false;
 		}
 
@@ -1166,9 +1175,56 @@ namespace client {
 					std::array{engine::control::features::DataCapture(*DataFactory, DataCapture)}
 				);
 				ControlSurface.Enable(
-					std::array{
-						engine::control::features::DataScene(*Universe_, DataCapture, DataFactory.get())
-					}
+					std::array{engine::control::features::DataScene(
+						*Universe_,
+						DataCapture,
+						DataFactory.get(),
+						[this](std::string_view world, std::string_view name, engine::assets::MeshData &out) {
+							const auto status = Renderer.CopyMesh(
+								engine::core::Name(name),
+								out,
+								engine::script::MAX_GLTF_EXPORT_VERTICES,
+								engine::script::MAX_GLTF_EXPORT_INDICES,
+								engine::core::Name(world)
+							);
+							switch (status) {
+							case engine::render::MeshCopyStatus::Copied:
+								return engine::script::GltfMeshSourceStatus::Available;
+							case engine::render::MeshCopyStatus::OverLimit:
+								return engine::script::GltfMeshSourceStatus::OverLimit;
+							case engine::render::MeshCopyStatus::Packed:
+								return engine::script::GltfMeshSourceStatus::Unsupported;
+							case engine::render::MeshCopyStatus::Invalid:
+								return engine::script::GltfMeshSourceStatus::Invalid;
+							case engine::render::MeshCopyStatus::Missing:
+								return engine::script::GltfMeshSourceStatus::Missing;
+							}
+							return engine::script::GltfMeshSourceStatus::Unsupported;
+						},
+						[this](
+							std::string_view world, std::string_view name, engine::assets::TextureData &out
+						) {
+							const auto status = Renderer.CopyTexture(
+								engine::core::Name(name),
+								out,
+								engine::script::MAX_GLTF_EXPORT_SOURCE_TEXTURE_BYTES,
+								engine::core::Name(world)
+							);
+							switch (status) {
+							case engine::render::TextureCopyStatus::Copied:
+								return engine::script::GltfTextureSourceStatus::Available;
+							case engine::render::TextureCopyStatus::OverLimit:
+								return engine::script::GltfTextureSourceStatus::OverLimit;
+							case engine::render::TextureCopyStatus::Unsupported:
+								return engine::script::GltfTextureSourceStatus::Unsupported;
+							case engine::render::TextureCopyStatus::Invalid:
+								return engine::script::GltfTextureSourceStatus::Invalid;
+							case engine::render::TextureCopyStatus::Missing:
+								return engine::script::GltfTextureSourceStatus::Missing;
+							}
+							return engine::script::GltfTextureSourceStatus::Unsupported;
+						}
+					)}
 				);
 				ControlSurface.Enable(
 					std::array{engine::control::features::TemporalSample(*Universe_, *DataFactory)}
@@ -3125,7 +3181,8 @@ namespace client {
 			if (!renderingActive && renderOnlyPending)
 				failRenderOnly("renderer did not provide a presentation frame");
 			if (renderingActive && !presentationDue && !renderOnlyPending &&
-				(Settings.Uncapped || PresentationLink) && Presentations.Rate() > 0) {
+				(Settings.Uncapped || PresentationLink || (Settings.DataFactory && Settings.Headless)) &&
+				Presentations.Rate() > 0) {
 				// Keep simulation and services independent from a lower presentation
 				// rate, but do not poll a future image deadline millions of times a
 				// second. The short ceiling preserves sub-frame input and network
@@ -4120,11 +4177,6 @@ namespace client {
 		view.CameraFrame = Views.CameraFrame();
 		view.Camera = Views.Camera();
 		view.CameraTemporalId = displayedCameraTemporalId;
-		static int debugClientMotion = 0;
-		if (capturePending && debugClientMotion++ < 4)
-			ENGINE_WARN("motion client debug reported {} scene {} fallback-id {} world {}",
-				ReportedJoin, displayedActiveScene != nullptr, displayedCameraTemporalId,
-				Universe_->NameOf(Rendered).Text());
 		view.Instances = drawn;
 		view.ObjectLabels = drawnObjectLabels;
 		view.SemanticLabels = drawnSemanticLabels;
@@ -4205,10 +4257,8 @@ namespace client {
 				if (namedCaptureBound) {
 					visualLighting = view.Lighting;
 					hook = &Interface;
-					// A named capture can patch the frame, lens, or projection outside the
-					// active-camera binding. It has no producer identity yet, so history
-					// must remain unavailable rather than borrow the displayed camera's.
-					view.CameraTemporalId.clear();
+					// The bridge selected the named camera's own temporal identity.
+					// Keep it across this presentation bind for history validation.
 				} else {
 					view = normalView;
 				}
@@ -4369,10 +4419,6 @@ namespace client {
 				}
 			}
 			CaptureFrame(view, presentationWorld);
-			static int debugFinalMotion = 0;
-			if (capturePending && debugFinalMotion++ < 4)
-				ENGINE_WARN("motion final view id {} cut {} slot {} named {}", view.CameraTemporalId,
-					view.CameraCut, view.Slot, namedCaptureBound);
 			// Capture cameras are separate from the displayed camera. Each active
 			// world gets an offscreen target and the selected display view stays
 			// last, which is the only view allowed to present to the swapchain.

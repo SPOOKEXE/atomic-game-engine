@@ -185,6 +185,20 @@ namespace {
 	};
 }
 
+TEST_CASE("motion capture plane keeps its two-component wire shape", "[control][data-capture]") {
+	engine::script::DataCaptureBridgePlane plane;
+	plane.Channel = "motion_vectors";
+	plane.Status = "ready";
+	plane.Width = 4;
+	plane.Height = 3;
+	plane.Scalar = "float16";
+	plane.PreviousCameraMotionFrame = 7;
+	const json encoded = engine::control::data_capture_detail::Plane(plane, "snapshot-1");
+	CHECK(encoded.at("shape") == json::array({3, 4, 2}));
+	CHECK(encoded.at("dtype") == "float16");
+	CHECK(encoded.at("previous_camera_motion_frame") == 7);
+}
+
 TEST_CASE(
 	"multi-camera capture shares a renderer frame without atomically stepping", "[control][data-capture]"
 ) {

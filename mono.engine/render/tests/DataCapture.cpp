@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cmath>
@@ -178,6 +179,126 @@ TEST_CASE("data capture camera convention records the engine projection", "[rend
 	CHECK(convention.DepthZeroToOne);
 	CHECK(convention.ProjectionIsColumnMajor);
 	CHECK(convention.MetresPerWorldUnit == 1.0f);
+}
+
+TEST_CASE(
+	"native-resolution data-factory capture retains every starter plane", "[render][gpu][data-capture][.]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("native-resolution-data-capture");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+
+	render::SceneTarget target{1280, 720};
+	render::View view;
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.SnapshotId = "native-resolution-snapshot";
+	render::DataCaptureRequest request{
+		.SnapshotId = view.SnapshotId,
+		.Pipeline = pipeline,
+		.CaptureNode = core::Name("data-capture"),
+		.Channels =
+			{render::DataCaptureChannel::RgbLinearHdr,
+			 render::DataCaptureChannel::LinearDepth,
+			 render::DataCaptureChannel::ShadingNormal,
+			 render::DataCaptureChannel::PbrAlbedo,
+			 render::DataCaptureChannel::PbrMaterial,
+			 render::DataCaptureChannel::PbrEmissive,
+			 render::DataCaptureChannel::ObjectIds,
+			 render::DataCaptureChannel::SemanticMask,
+			 render::DataCaptureChannel::PartMask,
+			 render::DataCaptureChannel::AmbientOcclusion,
+			 render::DataCaptureChannel::SecondSurfaceDepth,
+			 render::DataCaptureChannel::SecondSurfaceValidity},
+		.ObjectLabels = {},
+		.SemanticLabels = {},
+		.PartLabels = {},
+	};
+	render::DataCaptureTicket ticket;
+	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+
+	render::DataCapturePoll poll;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	do {
+		poll = renderer.PollDataCapture(ticket);
+		if (poll.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
+	} while (poll.Status == render::DataCaptureStatus::Pending &&
+			 std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == render::DataCaptureStatus::Ready);
+	REQUIRE(poll.Planes.size() == request.Channels.size());
+	bool hasNativeResolutionPlane = false;
+	for (const render::DataCapturePlane &plane : poll.Planes) {
+		CHECK(plane.Status == render::DataCaptureStatus::Ready);
+		hasNativeResolutionPlane =
+			hasNativeResolutionPlane || (plane.Width >= target.Width && plane.Height >= target.Height);
+	}
+	CHECK(hasNativeResolutionPlane);
+}
+
+TEST_CASE("data capture timestamps its later batch camera while profiling is off", "[render][gpu][data-capture][.]") {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("data-capture-gpu-timing");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	renderer.SetProfiling(render::ProfilingTier::Off);
+
+	render::SceneTarget firstTarget{64, 64};
+	render::SceneTarget captureTarget{64, 64};
+	render::View first;
+	first.Pipeline = pipeline;
+	first.Target = &firstTarget;
+	first.Slot = 1;
+	render::View capture;
+	capture.Pipeline = pipeline;
+	capture.Target = &captureTarget;
+	capture.Slot = 2;
+	capture.SnapshotId = "gpu-timing-snapshot";
+	render::OverlayImage overlay;
+
+	render::DataCaptureTicket ticket;
+	REQUIRE(renderer.QueueDataCapture({.SnapshotId = capture.SnapshotId,
+									 .Pipeline = pipeline,
+									 .CaptureNode = core::Name("data-capture"),
+									 .ViewSlot = capture.Slot,
+									 .Channels = {render::DataCaptureChannel::RgbLinearHdr},
+									 .ObjectLabels = {},
+									 .SemanticLabels = {},
+									 .PartLabels = {}}, ticket));
+	const std::array views{first, capture};
+	REQUIRE(renderer.Render(views, overlay, nullptr, false).Submitted);
+
+	render::DataCapturePoll poll;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	do {
+		poll = renderer.PollDataCapture(ticket);
+		if (poll.Status == render::DataCaptureStatus::Pending) SDL_Delay(1);
+	} while (poll.Status == render::DataCaptureStatus::Pending &&
+			 std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == render::DataCaptureStatus::Ready);
+	REQUIRE(poll.GpuNanoseconds);
+	CHECK(*poll.GpuNanoseconds > 0);
+	CHECK(poll.GpuTimingReason.empty());
+	CHECK(poll.HostReadbackReservedCapacityBytes > 0);
+	CHECK(poll.DeviceReadbackStagingReservedCapacityBytes > 0);
 }
 
 TEST_CASE("capture bundle alignment includes every camera and extent field", "[render][data-capture]") {
@@ -1057,6 +1178,7 @@ TEST_CASE(
 	ScriptDataCaptureBridge::PreparedView prepared;
 	CHECK(bridge.PrepareView(namedView, &prepared));
 	CHECK(namedView.SnapshotId == firstSnapshot);
+	CHECK_FALSE(namedView.CameraTemporalId.empty());
 	REQUIRE(prepared.Captures == std::vector<uint64_t>{namedTicket});
 	bridge.AbortPreparedView(prepared);
 	engine::script::DataCaptureBridgePoll cancelled;
@@ -1122,6 +1244,14 @@ TEST_CASE("cancelling a same-frame camera group unblocks later groups", "[render
 	std::array<uint64_t, 2> laterTickets{};
 	REQUIRE(bridge.QueueGroup("data-world", requests, cancelledTickets, detail));
 	REQUIRE(bridge.QueueGroup("data-world", requests, laterTickets, detail));
+	// Physical slot one belongs to the first prepared group view. An ordinary
+	// logical-slot-one request must not attach to it merely because the numbers
+	// match.
+	auto ordinary = firstCamera;
+	ordinary.CameraId = "camera/ordinary";
+	ordinary.ViewSlot = 1;
+	uint64_t ordinaryTicket = 0;
+	REQUIRE(bridge.Queue("data-world", ordinary, ordinaryTicket, detail));
 
 	bridge.Cancel("data-world", cancelledTickets.front());
 	bridge.Pump();
@@ -1138,11 +1268,21 @@ TEST_CASE("cancelling a same-frame camera group unblocks later groups", "[render
 	REQUIRE(bridge.PrepareBatch(MutationView(snapshot, pipeline), views, &prepared));
 	REQUIRE(views.size() == laterTickets.size());
 	REQUIRE(prepared.Views.size() == laterTickets.size());
+	CHECK_FALSE(views[0].CameraTemporalId.empty());
+	CHECK_FALSE(views[1].CameraTemporalId.empty());
+	CHECK(views[0].CameraTemporalId != views[1].CameraTemporalId);
 	for (size_t index = 0; index < laterTickets.size(); ++index)
 		CHECK(prepared.Views[index].Captures == std::vector<uint64_t>{laterTickets[index]});
+	ScriptDataCaptureBridge::PreparedView firstPrepared;
+	REQUIRE(bridge.PrepareView(views[0], &firstPrepared));
+	CHECK(firstPrepared.Captures == std::vector<uint64_t>{laterTickets[0]});
+	bridge.AbortPreparedView(firstPrepared);
 	bridge.AbortPreparedBatch(prepared);
 	for (const uint64_t ticket : laterTickets)
 		REQUIRE(bridge.Release("data-world", ticket, detail));
+	bridge.Cancel("data-world", ordinaryTicket);
+	bridge.Pump();
+	REQUIRE(bridge.Release("data-world", ordinaryTicket, detail));
 }
 
 TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data-capture]") {
@@ -1164,7 +1304,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			return hook.Access == "observation";
 		})
 	);
-	REQUIRE(observationHooks == 15);
+	REQUIRE(observationHooks == 16);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
 		if (hook.Access != "observation") continue;

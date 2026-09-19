@@ -750,6 +750,51 @@ namespace engine::render {
 	bool MeshTable::Has(const core::Name &name, core::Name owner) const {
 		return name.IsValid() && Entries.find(MeshKey(name, owner)) != Entries.end();
 	}
+
+	MeshCopyStatus MeshTable::Copy(
+		const core::Name &name, assets::MeshData &out, size_t vertexLimit, size_t indexLimit, core::Name owner
+	) const {
+		if (!name.IsValid()) return MeshCopyStatus::Missing;
+		const auto found = Entries.find(MeshKey(name, owner));
+		if (found == Entries.end()) return MeshCopyStatus::Missing;
+		const MeshEntry &entry = found->second;
+		if (entry.Packed) return MeshCopyStatus::Packed;
+		if (entry.VertexCount > vertexLimit || entry.Whole.IndexCount > indexLimit)
+			return MeshCopyStatus::OverLimit;
+		if (entry.Whole.VertexOffset < 0 ||
+			static_cast<size_t>(entry.Whole.VertexOffset) + entry.VertexCount > HostVertices.size() ||
+			static_cast<size_t>(entry.Whole.FirstIndex) + entry.Whole.IndexCount > HostIndices.size() ||
+			entry.Runs.size() != entry.Textures.size() || entry.Runs.size() != entry.Colours.size())
+			return MeshCopyStatus::Invalid;
+		assets::MeshData copied;
+		const size_t vertexAt = static_cast<size_t>(entry.Whole.VertexOffset);
+		const size_t indexAt = entry.Whole.FirstIndex;
+		copied.Vertices.assign(
+			HostVertices.begin() + static_cast<ptrdiff_t>(vertexAt),
+			HostVertices.begin() + static_cast<ptrdiff_t>(vertexAt + entry.VertexCount)
+		);
+		copied.Indices.assign(
+			HostIndices.begin() + static_cast<ptrdiff_t>(indexAt),
+			HostIndices.begin() + static_cast<ptrdiff_t>(indexAt + entry.Whole.IndexCount)
+		);
+		copied.JointCount = entry.JointCount;
+		for (size_t index = 0; index < entry.Runs.size(); ++index) {
+			const MeshRange &run = entry.Runs[index];
+			if (run.FirstIndex < indexAt || run.FirstIndex - indexAt > entry.Whole.IndexCount ||
+				run.IndexCount > entry.Whole.IndexCount - (run.FirstIndex - indexAt))
+				return MeshCopyStatus::Invalid;
+			assets::Submesh submesh;
+			submesh.FirstIndex = run.FirstIndex - entry.Whole.FirstIndex;
+			submesh.IndexCount = run.IndexCount;
+			submesh.Texture = std::string(entry.Textures[index].Text());
+			std::copy(entry.Colours[index].begin(), entry.Colours[index].end(), submesh.BaseColour);
+			copied.Submeshes.push_back(std::move(submesh));
+		}
+		copied.ComputeBounds();
+		if (!copied.IsValid()) return MeshCopyStatus::Invalid;
+		out = std::move(copied);
+		return MeshCopyStatus::Copied;
+	}
 	size_t MeshTable::DropOwner(core::Name owner) {
 		if (!owner.IsValid()) return 0;
 		return std::erase_if(Entries, [&](const auto &pair) {

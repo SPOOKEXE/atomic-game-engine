@@ -217,6 +217,9 @@ namespace engine::render {
 		// by one capture node share a single GPU readback.
 		std::vector<uint8_t> ChannelResourceIndices;
 		std::vector<uint64_t> ResourceTokens;
+		uint64_t GpuTimingId = 0;
+		std::vector<ResourceImage> CompletedImages;
+		bool ImagesTaken = false;
 		bool Cancelled = false;
 	};
 
@@ -237,9 +240,18 @@ namespace engine::render {
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
 		std::vector<DataCapturePartLabel> PartLabels;
 		std::vector<DataCapturePlane> Planes;
-		// CPU time spent taking completed readback images into this poll. GPU time
-		// is deliberately absent because this path has no completed timestamp query.
+		// CPU time spent taking completed readback images into this poll.
 		std::optional<uint64_t> CpuReadbackNanoseconds;
+		// Sum of the completed ticket's ResourceImage owned-vector capacities. It
+		// excludes later storage transforms and is neither a process heap total nor
+		// an allocator high-water mark.
+		uint64_t HostReadbackReservedCapacityBytes = 0;
+		// Sum of the tracked GPU transfer-buffer capacities reserved by the ticket's
+		// unique copied images while their downloads were recorded. It can include a
+		// buffer reused from an earlier ticket and is not a driver memory total.
+		uint64_t DeviceReadbackStagingReservedCapacityBytes = 0;
+		std::optional<uint64_t> GpuNanoseconds;
+		std::string GpuTimingReason = "unavailable/no_completed_gpu_timestamp";
 	};
 
 	const char *DataCaptureChannelName(DataCaptureChannel channel);

@@ -189,11 +189,32 @@ namespace engine::render {
 					static_cast<float>(microseconds / 1000.0)
 				);
 			}
+			for (const CaptureTimingMarks &marks : PendingCaptureTimings[slot]) {
+				auto found = CaptureTimings.find(marks.Id);
+				if (found == CaptureTimings.end()) continue;
+				CaptureTiming &capture = found->second;
+				if (capture.State == CaptureTimingState::Unavailable) continue;
+				if (marks.Opened >= count || marks.Closed >= count || marks.Closed <= marks.Opened) {
+					capture.State = CaptureTimingState::Unavailable;
+					capture.Reason = "unavailable/invalid_capture_gpu_timestamp";
+					continue;
+				}
+				const double nanoseconds = VulkanTimestamps::Between(times, marks.Opened, marks.Closed);
+				if (nanoseconds < 0.0 || nanoseconds > static_cast<double>(UINT64_MAX) - capture.Nanoseconds) {
+					capture.State = CaptureTimingState::Unavailable;
+					capture.Reason = "unavailable/capture_gpu_timestamp_overflow";
+					continue;
+				}
+				capture.Nanoseconds += static_cast<uint64_t>(nanoseconds);
+				capture.State = CaptureTimingState::Ready;
+				capture.Reason.clear();
+			}
 
 			if (publish) {
 				ResolvedTimingSequence = TimingSequence[slot];
 			}
 			PendingMarks[slot].clear();
+			PendingCaptureTimings[slot].clear();
 			TimingSequence[slot] = 0;
 		}
 	}
@@ -555,7 +576,7 @@ namespace engine::render {
 		std::abort();
 	}
 
-	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight) {
+	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight, bool retainSourceTextures) {
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
 		// whoever owns the object and initialised by whoever owns the window -
@@ -571,6 +592,7 @@ namespace engine::render {
 		// was right while an offscreen target did not exist and stopped being
 		// right at v0.7.
 		State->Window = window;
+		State->RetainSourceTextures = retainSourceTextures;
 		State->StageProbe.Configure();
 
 		// One backend on every platform. Apple packages MoltenVK beside the
@@ -1209,6 +1231,20 @@ namespace engine::render {
 		if (!State->Meshes.Add(name, mesh, owner)) return false;
 		++State->ResourceEpoch;
 		return true;
+	}
+
+	MeshCopyStatus Renderer::CopyMesh(
+		const core::Name &name, assets::MeshData &out, size_t vertexLimit, size_t indexLimit, core::Name owner
+	) const {
+		return State != nullptr ? State->Meshes.Copy(name, out, vertexLimit, indexLimit, owner)
+								: MeshCopyStatus::Missing;
+	}
+
+	TextureCopyStatus Renderer::CopyTexture(
+		const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner
+	) const {
+		return State != nullptr ? State->Textures.Copy(name, out, byteLimit, owner)
+								: TextureCopyStatus::Missing;
 	}
 
 	bool Renderer::AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner) {
@@ -2512,6 +2548,21 @@ namespace engine::render {
 		State->BatchWidth = width;
 		State->BatchHeight = height;
 		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+		State->BatchCaptureTimingRequested = std::any_of(
+			State->ResourceImages.begin(), State->ResourceImages.end(), [&](const Impl::ResourceImageSlot &image) {
+				if (image.Phase != Impl::ResourceImagePhase::Queued || image.Cancelled ||
+					image.Image.DataCaptureTimingId == 0) {
+					return false;
+				}
+				return std::any_of(views.begin(), views.end(), [&](const View &view) {
+					const Impl::NamedPipeline *const pipeline = State->PipelineFor(view.Pipeline);
+					const ResourceImageRequest &request = image.Image.Request;
+					return pipeline != nullptr && pipeline->Name == request.Pipeline &&
+						   view.Slot == request.ViewSlot &&
+						   (request.ExpectedSnapshotId.empty() || request.ExpectedSnapshotId == view.SnapshotId);
+				});
+			}
+		);
 
 		std::vector<ViewMutationIdentity> restorations;
 		size_t position = 0;
@@ -2649,6 +2700,7 @@ namespace engine::render {
 			State->Timestamps.Abandon(State->BatchTimingSlot);
 			if (State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
 				State->PendingMarks[State->BatchTimingSlot].clear();
+				State->AbandonCaptureTimings(State->BatchTimingSlot);
 			}
 			const bool submitted = State->SubmitSceneCommand(State->BatchCommand);
 			frame.Submitted = submitted;
@@ -2679,6 +2731,7 @@ namespace engine::render {
 		State->BatchWidth = 0;
 		State->BatchHeight = 0;
 		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+		State->BatchCaptureTimingRequested = false;
 		return frame;
 	}
 

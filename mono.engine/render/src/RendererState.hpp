@@ -295,6 +295,10 @@ namespace engine::render {
 		uint32_t BatchWidth = 0;
 		uint32_t BatchHeight = 0;
 		uint32_t BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+		// A capture ticket needs a copy-pass timestamp even while normal profiler
+		// sampling is off. Calculated for the complete submitted batch so a later
+		// camera cannot miss the query begun by its first camera.
+		bool BatchCaptureTimingRequested = false;
 
 		// Later-transfer command buffer for previews and file captures. Owned HDR
 		// exports copy at their declared graph read in the main buffer, before
@@ -349,9 +353,23 @@ namespace engine::render {
 			uint32_t Opened = VulkanTimestamps::MARKS;
 			uint32_t Closed = VulkanTimestamps::MARKS;
 		};
+		struct CaptureTimingMarks {
+			uint64_t Id = 0;
+			uint32_t Opened = VulkanTimestamps::MARKS;
+			uint32_t Closed = VulkanTimestamps::MARKS;
+		};
+		enum class CaptureTimingState : uint8_t { AwaitingRecord, Pending, Ready, Unavailable };
+		struct CaptureTiming {
+			CaptureTimingState State = CaptureTimingState::AwaitingRecord;
+			uint64_t Nanoseconds = 0;
+			std::string Reason = "unavailable/no_completed_gpu_timestamp";
+		};
 
 		VulkanTimestamps Timestamps;
 		std::array<std::vector<PassMarks>, VulkanTimestamps::SLOTS> PendingMarks;
+		std::array<std::vector<CaptureTimingMarks>, VulkanTimestamps::SLOTS> PendingCaptureTimings;
+		std::unordered_map<uint64_t, CaptureTiming> CaptureTimings;
+		uint64_t NextCaptureTimingId = 1;
 		std::array<uint64_t, VulkanTimestamps::SLOTS> TimingSequence{};
 		uint64_t NextTimingSequence = 1;
 		uint64_t ResolvedTimingSequence = 0;
@@ -389,6 +407,20 @@ namespace engine::render {
 		}
 
 		void CollectTimings();
+
+		// A failed command buffer has no query result to collect. Every ticket that
+		// recorded a mark in it must become explicitly unavailable instead of
+		// waiting for a slot that was abandoned.
+		void AbandonCaptureTimings(uint32_t slot) {
+			if (slot >= VulkanTimestamps::SLOTS) return;
+			for (const CaptureTimingMarks &marks : PendingCaptureTimings[slot]) {
+				auto found = CaptureTimings.find(marks.Id);
+				if (found == CaptureTimings.end()) continue;
+				found->second.State = CaptureTimingState::Unavailable;
+				found->second.Reason = "unavailable/capture_gpu_timestamp_abandoned";
+			}
+			PendingCaptureTimings[slot].clear();
+		}
 
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrOpaquePipeline = nullptr;
@@ -934,6 +966,7 @@ namespace engine::render {
 		// Every mesh and texture available to the renderer.
 		MeshTable Meshes;
 		TextureTable Textures;
+		bool RetainSourceTextures = false;
 		// Named resources can change without changing any submitted draw row.
 		// Active view scope for native environment, particle and ribbon texture bindings.
 		core::Name ActiveContentOwner;

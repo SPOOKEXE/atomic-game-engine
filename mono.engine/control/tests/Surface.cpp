@@ -11,6 +11,7 @@
 // this version added, and cover the shared table around them.
 
 #include <engine/control/Features.hpp>
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
@@ -249,6 +250,8 @@ namespace {
 			poll.Profile.CpuReadbackNanoseconds = 11;
 			poll.Profile.CpuFinalizationNanoseconds = 13;
 			poll.Profile.FinalizationBytesPerSecond = 538461538.0;
+			poll.Profile.HostReadbackReservedCapacityBytes = 12;
+			poll.Profile.DeviceReadbackStagingReservedCapacityBytes = 16;
 			poll.HasCamera = true;
 			poll.CropLeft = 0.125;
 			poll.CropTop = 0.25;
@@ -303,7 +306,8 @@ namespace {
 						 .AlphaPolicy = "preserve_exact_binary16",
 						 .ValueClassification = "finite",
 						 .MaximumAbsoluteError = .25,
-					 }},
+					 },
+				 .PreviousCameraMotionFrame = std::nullopt},
 				{.Channel = "ambient_occlusion",
 				 .Status = "ready",
 				 .Resource = "capture/1/ambient_occlusion",
@@ -348,7 +352,8 @@ namespace {
 						 .BackgroundValue = 1.0,
 						 .BackgroundClassification = "unavailable"
 					 },
-				 .Noise = {}}
+				 .Noise = {},
+				 .PreviousCameraMotionFrame = std::nullopt}
 			};
 			if (UnavailableAmbientOcclusion)
 				poll.Planes[1].AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{
@@ -695,6 +700,8 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(profile["finalization_bytes_per_second"] == 538461538.0);
 	CHECK(profile["gpu_nanoseconds"].is_null());
 	CHECK(profile["gpu_timing_reason"] == "unavailable/no_completed_gpu_timestamp");
+	CHECK(profile["host_readback_reserved_capacity_bytes"] == 12);
+	CHECK(profile["device_readback_staging_reserved_capacity_bytes"] == 16);
 	CHECK(profile["allocation_bytes"].is_null());
 	CHECK(profile["peak_allocation_bytes"].is_null());
 	CHECK(profile["allocation_reason"] == "unavailable/no_capture_allocator_counter");
@@ -2174,4 +2181,43 @@ TEST_CASE(
 	CHECK(audit["entries"][0]["operation_id"] == "shared-id");
 	CHECK(audit["entries"][0]["status"] == "ok");
 	CHECK_FALSE(audit["entries"][0].contains("arguments"));
+}
+
+TEST_CASE("full operation ledger refuses a new lifecycle operation before world mutation", "[control][data-factory]") {
+	Universe universe;
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	const json accepted{
+		{"instance_id", "ledger-existing"},
+		{"seed", 7u},
+		{"tick_rate", 60.0},
+		{"operation_id", "ledger-existing-create"},
+	};
+	const json created = Called(surface, "world_create", accepted);
+	REQUIRE(created["status"] == "ok");
+	for (size_t index = 1; index < engine::control::DataFactoryOperationLedger::MAXIMUM_ENTRIES; ++index) {
+		surface.DataFactoryOperations()->Store(
+			"pause", "ledger-fill-" + std::to_string(index), "{}", {{"status", "ok"}}, {}
+		);
+	}
+
+	bool failed = false;
+	CHECK(Called(surface, "world_create", accepted, failed) == created);
+	CHECK_FALSE(failed);
+	const json refused = Called(
+		surface,
+		"world_create",
+		{{"instance_id", "ledger-refused"},
+		 {"seed", 8u},
+		 {"tick_rate", 60.0},
+		 {"operation_id", "ledger-new-create"}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(refused["error"].get<std::string>().starts_with("operation_id_capacity:"));
+	CHECK_FALSE(universe.Find(Name("ledger-refused")).IsValid());
 }

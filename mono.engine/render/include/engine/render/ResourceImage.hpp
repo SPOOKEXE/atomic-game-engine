@@ -62,8 +62,9 @@ namespace engine::render {
 		std::optional<float> BackgroundValue;
 		std::optional<AmbientOcclusionBackgroundClassification> BackgroundClassification;
 	};
-	// Transfer allocations retained by all capture slots share this bound.
-	inline constexpr size_t MAX_RESOURCE_IMAGE_STAGING_BYTES = 32 * 1024 * 1024;
+	// Transfer allocations retained by all capture slots share this bound. It
+	// matches one retained data-factory capture at its native 1280x720 extent.
+	inline constexpr size_t MAX_RESOURCE_IMAGE_STAGING_BYTES = 64 * 1024 * 1024;
 	struct ResourceShadowCapture {
 		// Empty sources have canonical zero SourceBounds, not the native fitting fallback.
 		bool SourceEmpty = false;
@@ -75,6 +76,7 @@ namespace engine::render {
 
 	struct ResourceImage {
 		ResourceImageRequest Request;
+		uint64_t DataCaptureTimingId = 0;
 		// Present for the built-in data-capture observation hook. The value is
 		// copied before GPU work is submitted and survives asynchronous completion.
 		std::optional<RenderObservationContext> Observation;
@@ -88,6 +90,14 @@ namespace engine::render {
 		// Measured after the fence was observed complete, around mapping and
 		// copying this image's transfer planes into owned CPU bytes.
 		uint64_t ReadbackCpuNanoseconds = 0;
+		// Sum of the six readback vectors' element capacities once collection has
+		// completed. This is ticket-scoped owned vector storage, not a process heap
+		// counter or an allocator peak.
+		uint64_t ReadbackHostReservedCapacityBytes = 0;
+		// Capacity of the tracked GPU transfer buffer assigned to this copied image
+		// while it was recorded. Reused buffers report their reserved capacity but
+		// do not claim that this image created an allocation.
+		uint64_t ReadbackDeviceStagingReservedCapacityBytes = 0;
 		// Filled at the capture node from the View that produced these bytes. It
 		// is empty for ordinary renderer clients that do not establish a data
 		// snapshot barrier.

@@ -16,11 +16,15 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -194,6 +198,259 @@ namespace engine::control {
 		}
 
 		inline constexpr size_t MAX_GLTF_EXPORT_REPLY_BYTES = 40u * 1024u;
+		inline constexpr size_t MAX_GLTF_EXPORT_BYTES = 320u * 1024u * 1024u;
+		inline constexpr size_t MAX_GLTF_EXPORT_RESOURCES = 2;
+		inline constexpr size_t MAX_GLTF_EXPORT_READ_BYTES = 1024u * 1024u;
+
+		struct GltfResource {
+			std::string Id;
+			std::string Instance;
+			uint64_t Tick = 0;
+			uint64_t WorldEpoch = 0;
+			uint64_t WorldVersion = 0;
+			std::string Hash;
+			std::vector<std::byte> Bytes;
+		};
+
+		struct GltfResources {
+			std::mutex Mutex;
+			uint64_t NextId = 1;
+			std::vector<GltfResource> Entries;
+		};
+
+		inline constexpr size_t MAX_RAW_SCENE_BYTES = 320u * 1024u * 1024u;
+		inline constexpr size_t MAX_RAW_SCENE_RESOURCES = 2;
+		inline constexpr size_t MAX_RAW_SCENE_READ_BYTES = 1024u * 1024u;
+
+		struct RawSceneResource {
+			std::string Id;
+			std::string Instance;
+			uint64_t Tick = 0;
+			uint64_t WorldEpoch = 0;
+			uint64_t WorldVersion = 0;
+			std::string Hash;
+			std::vector<std::byte> Bytes;
+		};
+
+		struct RawSceneResources {
+			std::mutex Mutex;
+			uint64_t NextId = 1;
+			std::vector<RawSceneResource> Entries;
+		};
+
+		inline void RawWord(std::vector<std::byte> &out, uint32_t value) {
+			for (size_t byte = 0; byte < 4; ++byte)
+				out.push_back(static_cast<std::byte>(value >> (byte * 8)));
+		}
+
+		inline void RawShort(std::vector<std::byte> &out, uint16_t value) {
+			out.push_back(static_cast<std::byte>(value));
+			out.push_back(static_cast<std::byte>(value >> 8));
+		}
+
+		inline void RawFloat(std::vector<std::byte> &out, float value) {
+			RawWord(out, std::bit_cast<uint32_t>(value));
+		}
+
+		inline const char *RawTextureFormat(assets::TextureFormat format) {
+			switch (format) {
+			case assets::TextureFormat::RGBA8:
+			case assets::TextureFormat::RGBA8_LINEAR:
+				return "rgba8_unorm";
+			case assets::TextureFormat::R8:
+				return "r8_unorm";
+			}
+			return "unknown";
+		}
+
+		inline json RawMaterial(const script::GltfExportMaterial &material) {
+			const auto source = [](std::optional<size_t> index) -> json {
+				return index ? json(*index) : json(nullptr);
+			};
+			return {
+				{"base_colour", {material.BaseColour.R, material.BaseColour.G, material.BaseColour.B}},
+				{"alpha", material.Alpha},
+				{"alpha_mode",
+				 material.AlphaMode == script::GltfExportAlphaMode::Blend  ? "blend"
+				 : material.AlphaMode == script::GltfExportAlphaMode::Mask ? "mask"
+																		   : "opaque"},
+				{"alpha_cutoff", material.AlphaCutoff},
+				{"roughness", material.RoughnessFactor},
+				{"metalness", material.MetalnessFactor},
+				{"emissive_factor",
+				 {material.EmissiveFactor.R, material.EmissiveFactor.G, material.EmissiveFactor.B}},
+				{"pixelated", material.Pixelated},
+				{"source_colour_texture", source(material.SourceColourTexture)},
+				{"source_normal_texture", source(material.SourceNormalTexture)},
+				{"source_occlusion_texture", source(material.SourceOcclusionTexture)},
+				{"source_emissive_texture", source(material.SourceEmissiveTexture)},
+				{"source_roughness_texture", source(material.SourceRoughnessTexture)},
+				{"source_metalness_texture", source(material.SourceMetalnessTexture)},
+				{"source_height_texture", source(material.SourceHeightTexture)},
+				{"source_alpha_mode", material.SourceAlphaMode},
+				{"source_shader", material.SourceShader.empty() ? json(nullptr) : json(material.SourceShader)}
+			};
+		}
+
+		inline bool
+		RawScene(const script::GltfSceneExport &source, std::vector<std::byte> &bytes, json &manifest) {
+			bytes.clear();
+			manifest = {
+				{"coordinate_system", "right_handed_y_up"},
+				{"units", "metres"},
+				{"meshes", json::array()},
+					{"textures", json::array()},
+					{"nodes", json::array()},
+					{"cameras", json::array()},
+					{"lights", json::array()}
+			};
+			for (const auto &mesh : source.Meshes) {
+				const uint64_t meshBytes = static_cast<uint64_t>(mesh.Data.Vertices.size()) * 48 +
+										   static_cast<uint64_t>(mesh.Data.Indices.size()) * 4;
+				if (meshBytes > MAX_RAW_SCENE_BYTES - bytes.size()) return false;
+				const size_t vertexOffset = bytes.size();
+				for (const assets::MeshVertex &vertex : mesh.Data.Vertices) {
+					for (float value : vertex.Position)
+						RawFloat(bytes, value);
+					for (float value : vertex.Normal)
+						RawFloat(bytes, value);
+					for (float value : vertex.TexCoord)
+						RawFloat(bytes, value);
+					for (uint16_t value : vertex.Joints)
+						RawShort(bytes, value);
+					for (uint16_t value : vertex.Weights)
+						RawShort(bytes, value);
+				}
+				const size_t indexOffset = bytes.size();
+				for (uint32_t index : mesh.Data.Indices)
+					RawWord(bytes, index);
+				if (bytes.size() > MAX_RAW_SCENE_BYTES) return false;
+				json runs = json::array();
+				for (const assets::Submesh &run : mesh.Data.Submeshes)
+					runs.push_back(
+						{{"first_index", run.FirstIndex},
+						 {"index_count", run.IndexCount},
+						 {"material", run.Material},
+						 {"texture", run.Texture},
+						 {"base_colour", run.BaseColour}}
+					);
+				manifest["meshes"].push_back(
+					{{"name", mesh.Name},
+					 {"joint_count", mesh.Data.JointCount},
+					 {"vertex_section",
+					  {{"byte_offset", vertexOffset},
+					   {"byte_length", indexOffset - vertexOffset},
+					   {"count", mesh.Data.Vertices.size()},
+					   {"stride", 48},
+					   {"endianness", "little"},
+					   {"attributes",
+						json::array(
+							{{{"name", "position"},
+							  {"format", "float32"},
+							  {"components", 3},
+							  {"byte_offset", 0}},
+							 {{"name", "normal"},
+							  {"format", "float32"},
+							  {"components", 3},
+							  {"byte_offset", 12}},
+							 {{"name", "texcoord0"},
+							  {"format", "float32"},
+							  {"components", 2},
+							  {"byte_offset", 24}},
+							 {{"name", "joints0"},
+							  {"format", "uint16"},
+							  {"components", 4},
+							  {"byte_offset", 32}},
+							 {{"name", "weights0"},
+							  {"format", "unorm16"},
+							  {"components", 4},
+							  {"byte_offset", 40}}}
+						)}}},
+					 {"index_section",
+					  {{"byte_offset", indexOffset},
+					   {"byte_length", bytes.size() - indexOffset},
+					   {"count", mesh.Data.Indices.size()},
+					   {"format", "uint32"},
+					   {"endianness", "little"}}},
+					 {"submeshes", std::move(runs)}}
+				);
+			}
+			for (const auto &texture : source.SourceTextures) {
+				if (texture.Pixels.size() > MAX_RAW_SCENE_BYTES - bytes.size()) return false;
+				const size_t offset = bytes.size();
+				bytes.insert(bytes.end(), texture.Pixels.begin(), texture.Pixels.end());
+				manifest["textures"].push_back(
+					{{"name", texture.Name},
+					 {"byte_offset", offset},
+					 {"byte_length", texture.Pixels.size()},
+					 {"width", texture.Width},
+					 {"height", texture.Height},
+					 {"format", RawTextureFormat(texture.Format)},
+					 {"color_space", assets::IsSRGB(texture.Format) ? "srgb" : "linear"},
+					 {"row_order", "top_to_bottom"},
+					 {"alpha", texture.Format == assets::TextureFormat::R8 ? "none" : "straight"}}
+				);
+			}
+			for (const auto &node : source.Nodes) {
+				json sourceRuns = json::array();
+				for (std::optional<size_t> texture : node.SourceSubmeshColourTextures)
+					sourceRuns.push_back(texture ? json(*texture) : json(nullptr));
+				manifest["nodes"].push_back(
+					{{"stable_id", node.StableId},
+					 {"name", node.Name},
+					 {"mesh", node.Mesh},
+					 {"visible", node.Visible},
+					 {"position", {node.Frame.Position.X, node.Frame.Position.Y, node.Frame.Position.Z}},
+					 {"rotation",
+					  {node.Frame.QuaternionX,
+					   node.Frame.QuaternionY,
+					   node.Frame.QuaternionZ,
+					   node.Frame.QuaternionW}},
+					 {"scale", {node.Scale.X, node.Scale.Y, node.Scale.Z}},
+					 {"material", RawMaterial(node.Material)},
+					 {"submesh_colour_textures", std::move(sourceRuns)}}
+				);
+			}
+			for (const auto &camera : source.Cameras)
+				manifest["cameras"].push_back(
+					{{"stable_id", camera.StableId},
+					 {"name", camera.Name},
+					 {"position",
+					  {camera.Frame.Position.X, camera.Frame.Position.Y, camera.Frame.Position.Z}},
+					 {"rotation",
+					  {camera.Frame.QuaternionX,
+					   camera.Frame.QuaternionY,
+					   camera.Frame.QuaternionZ,
+					   camera.Frame.QuaternionW}},
+					 {"field_of_view_radians", camera.FieldOfViewRadians},
+					 {"near_plane_metres", camera.NearPlaneMetres},
+					 {"far_plane_metres", camera.FarPlaneMetres}}
+					);
+			for (const auto &light : source.Lights)
+				manifest["lights"].push_back(
+					{{"stable_id", light.StableId},
+					 {"name", light.Name},
+					 {"kind", "point"},
+					 {"position", {light.Position.X, light.Position.Y, light.Position.Z}},
+					 {"colour", {light.Colour.R, light.Colour.G, light.Colour.B}},
+					 {"brightness", light.Brightness},
+					 {"brightness_unit", "engine_brightness"},
+					 {"range_metres", light.Range}}
+				);
+			return manifest.dump().size() <= MAXIMUM_RESULT_BYTES;
+		}
+
+		inline bool
+		GltfText(const json &value, std::string_view name, std::string &out, std::string &failure) {
+			if (!value.is_string() || value.get_ref<const std::string &>().empty() ||
+				value.get_ref<const std::string &>().size() > 256 ||
+				value.get_ref<const std::string &>().find('\0') != std::string::npos) {
+				failure = std::string(name) + " must be text of at most 256 bytes";
+				return false;
+			}
+			out = value.get<std::string>();
+			return true;
+		}
 
 		inline std::string Base64(std::span<const std::byte> bytes) {
 			static constexpr std::string_view alphabet =
@@ -233,6 +490,87 @@ namespace engine::control {
 			return Binary(out, std::as_bytes(values));
 		}
 
+		inline void PngWord(std::vector<std::byte> &out, uint32_t value) {
+			for (int shift = 24; shift >= 0; shift -= 8)
+				out.push_back(static_cast<std::byte>(value >> shift));
+		}
+
+		inline void
+		PngChunk(std::vector<std::byte> &out, const char (&type)[5], std::span<const std::byte> payload) {
+			static const auto crcTable = [] {
+				std::array<uint32_t, 256> table{};
+				for (uint32_t index = 0; index < table.size(); ++index) {
+					uint32_t value = index;
+					for (size_t bit = 0; bit < 8; ++bit)
+						value = (value >> 1) ^ ((value & 1) != 0 ? 0xEDB88320u : 0u);
+					table[index] = value;
+				}
+				return table;
+			}();
+			PngWord(out, static_cast<uint32_t>(payload.size()));
+			uint32_t crc = 0xFFFFFFFFu;
+			for (size_t index = 0; index < 4; ++index) {
+				const auto value = static_cast<uint8_t>(type[index]);
+				out.push_back(static_cast<std::byte>(value));
+				crc = (crc >> 8) ^ crcTable[(crc ^ value) & 0xFFu];
+			}
+			for (const std::byte value : payload) {
+				out.push_back(value);
+				crc = (crc >> 8) ^ crcTable[(crc ^ std::to_integer<uint8_t>(value)) & 0xFFu];
+			}
+			PngWord(out, crc ^ 0xFFFFFFFFu);
+		}
+
+		inline bool Png(const script::GltfExportTexture &image, std::vector<std::byte> &out) {
+			const uint64_t pixels = static_cast<uint64_t>(image.Width) * image.Height;
+			if (image.Width == 0 || image.Height == 0 || pixels > script::MAX_GLTF_EXPORT_TEXTURE_BYTES / 4 ||
+				image.Pixels.size() != pixels * 4)
+				return false;
+			std::vector<std::byte> rows;
+			rows.reserve(image.Pixels.size() + image.Height);
+			for (uint32_t row = 0; row < image.Height; ++row) {
+				rows.push_back(std::byte{});
+				const size_t begin = static_cast<size_t>(row) * image.Width * 4;
+				for (size_t pixel = begin; pixel < begin + static_cast<size_t>(image.Width) * 4; ++pixel)
+					rows.push_back(static_cast<std::byte>(image.Pixels[pixel]));
+			}
+			std::vector<std::byte> compressed{std::byte{0x78}, std::byte{0x01}};
+			for (size_t offset = 0; offset < rows.size();) {
+				const uint16_t length = static_cast<uint16_t>(std::min<size_t>(65535, rows.size() - offset));
+				compressed.push_back(offset + length == rows.size() ? std::byte{1} : std::byte{});
+				compressed.push_back(static_cast<std::byte>(length));
+				compressed.push_back(static_cast<std::byte>(length >> 8));
+				compressed.push_back(static_cast<std::byte>(~length));
+				compressed.push_back(static_cast<std::byte>((~length) >> 8));
+				compressed.insert(compressed.end(), rows.begin() + offset, rows.begin() + offset + length);
+				offset += length;
+			}
+			uint32_t a = 1, b = 0;
+			for (const std::byte value : rows) {
+				a = (a + std::to_integer<uint8_t>(value)) % 65521;
+				b = (b + a) % 65521;
+			}
+			PngWord(compressed, (b << 16) | a);
+			out = {
+				std::byte{0x89},
+				std::byte{0x50},
+				std::byte{0x4E},
+				std::byte{0x47},
+				std::byte{0x0D},
+				std::byte{0x0A},
+				std::byte{0x1A},
+				std::byte{0x0A}
+			};
+			std::vector<std::byte> header;
+			PngWord(header, image.Width);
+			PngWord(header, image.Height);
+			header.insert(header.end(), {std::byte{8}, std::byte{6}, std::byte{}, std::byte{}, std::byte{}});
+			PngChunk(out, "IHDR", header);
+			PngChunk(out, "IDAT", compressed);
+			PngChunk(out, "IEND", {});
+			return true;
+		}
+
 		inline bool
 		Gltf(const script::GltfSceneExport &source, std::vector<std::byte> &out, std::string &failure) {
 			json document{
@@ -254,11 +592,11 @@ namespace engine::control {
 				{"unavailable", std::move(unavailable)}
 			};
 			std::vector<std::byte> binary;
-			auto view = [&](size_t offset, size_t length, uint32_t target) {
+			auto view = [&](size_t offset, size_t length, std::optional<uint32_t> target) {
 				if (!document.contains("bufferViews")) document["bufferViews"] = json::array();
-				document["bufferViews"].push_back(
-					{{"buffer", 0}, {"byteOffset", offset}, {"byteLength", length}, {"target", target}}
-				);
+				json descriptor{{"buffer", 0}, {"byteOffset", offset}, {"byteLength", length}};
+				if (target) descriptor["target"] = *target;
+				document["bufferViews"].push_back(std::move(descriptor));
 				return document["bufferViews"].size() - 1;
 			};
 			auto accessor = [&](size_t bufferView,
@@ -266,18 +604,71 @@ namespace engine::control {
 								size_t count,
 								const char *type,
 								json minimum = nullptr,
-								json maximum = nullptr) {
+								json maximum = nullptr,
+								size_t byteOffset = 0) {
 				json value{
 					{"bufferView", bufferView}, {"componentType", component}, {"count", count}, {"type", type}
 				};
 				if (!minimum.is_null()) value["min"] = std::move(minimum);
 				if (!maximum.is_null()) value["max"] = std::move(maximum);
+				if (byteOffset != 0) value["byteOffset"] = byteOffset;
 				if (!document.contains("accessors")) document["accessors"] = json::array();
 				document["accessors"].push_back(std::move(value));
 				return document["accessors"].size() - 1;
 			};
+			if (!source.Textures.empty()) {
+				document["images"] = json::array();
+				document["textures"] = json::array();
+				document["samplers"] = json::array(
+					{{{"magFilter", 9729}, {"minFilter", 9729}, {"wrapS", 10497}, {"wrapT", 10497}},
+					 {{"magFilter", 9728}, {"minFilter", 9728}, {"wrapS", 10497}, {"wrapT", 10497}}}
+				);
+				for (const auto &texture : source.Textures) {
+					std::vector<std::byte> png;
+					if (!Png(texture, png)) {
+						failure = "gltf export texture is invalid";
+						return false;
+					}
+					const size_t bufferView = view(Binary(binary, png), png.size(), {});
+					const size_t image = document["images"].size();
+					document["images"].push_back(
+						{{"name", texture.Name}, {"bufferView", bufferView}, {"mimeType", "image/png"}}
+					);
+					for (size_t sampler = 0; sampler < 2; ++sampler)
+						document["textures"].push_back({{"source", image}, {"sampler", sampler}});
+				}
+			}
 			for (const auto &node : source.Nodes) {
+				if (node.Mesh >= source.Meshes.size()) {
+					failure = "gltf export mesh index is invalid";
+					return false;
+				}
+				for (const auto &index :
+					 {node.Material.ColourTexture,
+					  node.Material.NormalTexture,
+					  node.Material.OcclusionTexture,
+					  node.Material.EmissiveTexture,
+					  node.Material.MetallicRoughnessTexture}) {
+					if (index && *index >= source.Textures.size()) {
+						failure = "gltf export texture index is invalid";
+						return false;
+					}
+				}
+				const auto textureRef = [&](std::optional<size_t> index) {
+					return json{{"index", *index * 2 + static_cast<size_t>(node.Material.Pixelated)}};
+				};
 				const auto &mesh = source.Meshes[node.Mesh].Data;
+				if (!node.SubmeshColourTextures.empty() &&
+					node.SubmeshColourTextures.size() != mesh.Submeshes.size()) {
+					failure = "gltf export submesh texture count is invalid";
+					return false;
+				}
+				for (const auto &index : node.SubmeshColourTextures) {
+					if (index && *index >= source.Textures.size()) {
+						failure = "gltf export submesh texture index is invalid";
+						return false;
+					}
+				}
 				std::vector<float> positions, normals, texcoords;
 				positions.reserve(mesh.Vertices.size() * 3);
 				normals.reserve(mesh.Vertices.size() * 3);
@@ -310,31 +701,95 @@ namespace engine::control {
 				);
 				const size_t normal = accessor(normalView, 5126, mesh.Vertices.size(), "VEC3");
 				const size_t texcoord = accessor(texcoordView, 5126, mesh.Vertices.size(), "VEC2");
-				const size_t indices = accessor(indexView, 5125, mesh.Indices.size(), "SCALAR");
 				if (!document.contains("materials")) document["materials"] = json::array();
-				const size_t material = document["materials"].size();
-				document["materials"].push_back(
-					{{"pbrMetallicRoughness",
-					  {{"baseColorFactor",
-						{node.Material.BaseColour.R,
-						 node.Material.BaseColour.G,
-						 node.Material.BaseColour.B,
-						 node.Material.Alpha}},
-					   {"metallicFactor", 0.0},
-					   {"roughnessFactor", 1.0}}},
-					 {"alphaMode",
-					  node.Material.AlphaMode == script::GltfExportAlphaMode::Blend ? "BLEND" : "OPAQUE"}}
-				);
+				json pbr{
+					{"baseColorFactor",
+					 {node.Material.BaseColour.R,
+					  node.Material.BaseColour.G,
+					  node.Material.BaseColour.B,
+					  node.Material.Alpha}},
+					{"metallicFactor", node.Material.MetalnessFactor},
+					{"roughnessFactor", node.Material.RoughnessFactor}
+				};
+				if (node.Material.ColourTexture)
+					pbr["baseColorTexture"] = textureRef(node.Material.ColourTexture);
+				if (node.Material.MetallicRoughnessTexture)
+					pbr["metallicRoughnessTexture"] = textureRef(node.Material.MetallicRoughnessTexture);
+				json materialRecord{{"pbrMetallicRoughness", std::move(pbr)}};
+				switch (node.Material.AlphaMode) {
+				case script::GltfExportAlphaMode::Opaque:
+					materialRecord["alphaMode"] = "OPAQUE";
+					break;
+				case script::GltfExportAlphaMode::Mask:
+					materialRecord["alphaMode"] = "MASK";
+					materialRecord["alphaCutoff"] = node.Material.AlphaCutoff;
+					break;
+				case script::GltfExportAlphaMode::Blend:
+					materialRecord["alphaMode"] = "BLEND";
+					break;
+				}
+				if (node.Material.NormalTexture)
+					materialRecord["normalTexture"] = textureRef(node.Material.NormalTexture);
+				if (node.Material.OcclusionTexture)
+					materialRecord["occlusionTexture"] = textureRef(node.Material.OcclusionTexture);
+				if (node.Material.EmissiveTexture) {
+					materialRecord["emissiveTexture"] = textureRef(node.Material.EmissiveTexture);
+					materialRecord["emissiveFactor"] = {
+						node.Material.EmissiveFactor.R,
+						node.Material.EmissiveFactor.G,
+						node.Material.EmissiveFactor.B
+					};
+				}
+				json primitives = json::array();
+				const auto primitive = [&](uint32_t first,
+										   uint32_t count,
+										   const assets::Submesh *run,
+										   std::optional<size_t> runTexture) {
+					json ownMaterial = materialRecord;
+					if (runTexture)
+						ownMaterial["pbrMetallicRoughness"]["baseColorTexture"] = textureRef(runTexture);
+					if (run != nullptr) {
+						ownMaterial["pbrMetallicRoughness"]["baseColorFactor"] = {
+							node.Material.BaseColour.R * run->BaseColour[0],
+							node.Material.BaseColour.G * run->BaseColour[1],
+							node.Material.BaseColour.B * run->BaseColour[2],
+							node.Material.Alpha * run->BaseColour[3]
+						};
+						if (ownMaterial["alphaMode"] == "OPAQUE" && run->BaseColour[3] < 1.0f)
+							ownMaterial["alphaMode"] = "BLEND";
+						if (!run->Material.empty()) ownMaterial["name"] = run->Material;
+					}
+					const size_t materialIndex = document["materials"].size();
+					document["materials"].push_back(std::move(ownMaterial));
+					const size_t indices = accessor(
+						indexView, 5125, count, "SCALAR", nullptr, nullptr, static_cast<size_t>(first) * 4
+					);
+					primitives.push_back(
+						{{"attributes",
+						  {{"POSITION", position}, {"NORMAL", normal}, {"TEXCOORD_0", texcoord}}},
+						 {"indices", indices},
+						 {"material", materialIndex},
+						 {"mode", 4}}
+					);
+				};
+				if (mesh.Submeshes.empty()) {
+					primitive(0, static_cast<uint32_t>(mesh.Indices.size()), nullptr, {});
+				} else {
+					for (size_t index = 0; index < mesh.Submeshes.size(); ++index) {
+						const auto &run = mesh.Submeshes[index];
+						primitive(
+							run.FirstIndex,
+							run.IndexCount,
+							&run,
+							node.SubmeshColourTextures.empty() ? std::optional<size_t>{}
+															   : node.SubmeshColourTextures[index]
+						);
+					}
+				}
 				if (!document.contains("meshes")) document["meshes"] = json::array();
 				const size_t gltfMesh = document["meshes"].size();
 				document["meshes"].push_back(
-					{{"name", source.Meshes[node.Mesh].Name},
-					 {"primitives",
-					  {{{"attributes",
-						 {{"POSITION", position}, {"NORMAL", normal}, {"TEXCOORD_0", texcoord}}},
-						{"indices", indices},
-						{"material", material},
-						{"mode", 4}}}}}
+					{{"name", source.Meshes[node.Mesh].Name}, {"primitives", std::move(primitives)}}
 				);
 				nodes.push_back(
 					{{"name", node.Name},
@@ -388,8 +843,8 @@ namespace engine::control {
 			while (text.size() % 4 != 0)
 				text.push_back(' ');
 			const size_t binaryChunkBytes = binary.empty() ? 0 : 8 + binary.size();
-			if (12 + 8 + text.size() + binaryChunkBytes > MAX_GLTF_EXPORT_REPLY_BYTES) {
-				failure = "gltf export exceeds the 40 KiB inline response limit";
+			if (12 + 8 + text.size() + binaryChunkBytes > MAX_GLTF_EXPORT_BYTES) {
+				failure = "gltf export exceeds the 320 MiB resource limit";
 				return false;
 			}
 			out.clear();
@@ -416,9 +871,13 @@ namespace engine::control {
 	inline void Surface::AddDataSceneTools(
 		world::Universe &universe,
 		std::shared_ptr<script::DataCaptureBridge> bridge,
-		world::DataFactorySession *session
+		world::DataFactorySession *session,
+		script::GltfMeshSource meshSource,
+		script::GltfTextureSource textureSource
 	) {
 		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
+		auto gltfResources = std::make_shared<data_scene_detail::GltfResources>();
+		auto rawSceneResources = std::make_shared<data_scene_detail::RawSceneResources>();
 		auto schema = [session] {
 			json options{{"type", "object"}};
 			if (session != nullptr) {
@@ -483,11 +942,14 @@ namespace engine::control {
 
 		Add(Tool{
 			"export_gltf_scene",
-			"Exports one fenced scene as a bounded glTF 2.0 GLB. The v1 subset contains exact built-in and "
-			"EditableMesh geometry, transforms, base-colour factors and perspective cameras. It reports "
-			"streamed mesh assets and unavailable textures explicitly.",
+			"Exports one fenced scene as a bounded glTF 2.0 GLB. Results above 40 KiB use a retained "
+			"resource with ranged reads and explicit release. The v1 subset contains built-in, EditableMesh "
+			"and bounded resident mesh geometry, source image maps, material runs and perspective cameras. "
+			"Unavailable source facts are listed explicitly.",
 			schema,
-			[worlds, session](const json &arguments, std::string &failure) -> json {
+			[worlds, session, gltfResources, meshSource, textureSource](
+				const json &arguments, std::string &failure
+			) -> json {
 				using namespace data_scene_detail;
 				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
 					!arguments["options"].is_object() ||
@@ -504,7 +966,7 @@ namespace engine::control {
 				if (!failure.empty()) return nullptr;
 				script::GltfSceneExport captured;
 				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-					CaptureGltfSceneExport(store, captured, failure);
+					CaptureGltfSceneExport(store, captured, failure, meshSource, textureSource);
 				});
 				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
 				if (!failure.empty()) return nullptr;
@@ -516,12 +978,10 @@ namespace engine::control {
 					unavailable.push_back(
 						{{"stable_id", entry.StableId}, {"feature", entry.Feature}, {"reason", entry.Reason}}
 					);
-				return {
+				json reply{
 					{"status", "ok"},
 					{"schema_version", "gltf-scene/v1"},
 					{"format", "glb"},
-					{"encoding", "base64"},
-					{"data", Base64(bytes)},
 					{"byte_length", bytes.size()},
 					{"hash_algorithm", "blake3-256"},
 					{"hash", hash.ToHex()},
@@ -531,6 +991,345 @@ namespace engine::control {
 					{"unavailable", std::move(unavailable)},
 					{"inline_byte_limit", MAX_GLTF_EXPORT_REPLY_BYTES}
 				};
+				if (bytes.size() <= MAX_GLTF_EXPORT_REPLY_BYTES) {
+					reply["encoding"] = "base64";
+					reply["data"] = Base64(bytes);
+					return reply;
+				}
+				std::lock_guard lock(gltfResources->Mutex);
+				if (gltfResources->Entries.size() == MAX_GLTF_EXPORT_RESOURCES ||
+					gltfResources->NextId == 0) {
+					failure = "gltf export resource capacity reached";
+					return nullptr;
+				}
+				const std::string resourceId = "gltf/" + std::to_string(gltfResources->NextId++);
+				gltfResources->Entries.push_back(
+					{.Id = resourceId,
+					 .Instance = instance,
+					 .Tick = session == nullptr ? captured.Tick
+												: arguments["options"]["expected_tick"].get<uint64_t>(),
+					 .WorldEpoch = session == nullptr
+									   ? 0
+									   : arguments["options"]["expected_world_epoch"].get<uint64_t>(),
+					 .WorldVersion = session == nullptr
+										 ? 0
+										 : arguments["options"]["expected_world_version"].get<uint64_t>(),
+					 .Hash = hash.ToHex(),
+					 .Bytes = std::move(bytes)}
+				);
+				reply["encoding"] = "resource";
+				reply["data"] = nullptr;
+				reply["resource_id"] = resourceId;
+				reply["resource_byte_limit"] = MAX_GLTF_EXPORT_BYTES;
+				return reply;
+			}
+		});
+
+		Add(Tool{
+			"get_gltf_scene_chunk",
+			"Returns up to one MiB from a retained glTF export at its original world revision.",
+			[schema] {
+				json result = schema();
+				result["properties"]["resource_id"] = {{"type", "string"}};
+				result["properties"]["hash"] = {{"type", "string"}};
+				result["properties"]["byte_begin"] = {{"type", "integer"}, {"minimum", 0}};
+				result["properties"]["byte_end"] = {{"type", "integer"}, {"minimum", 1}};
+				for (const char *field : {"resource_id", "hash", "byte_begin", "byte_end"})
+					result["required"].push_back(field);
+				return result;
+			},
+			[worlds, session, gltfResources](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(
+						arguments,
+						{"instance_id", "resource_id", "hash", "byte_begin", "byte_end", "options"},
+						failure
+					) ||
+					!arguments.contains("options") || !arguments["options"].is_object() ||
+					!Options(arguments["options"], {}, session != nullptr, failure))
+					return nullptr;
+				std::string instance, resource, digest;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure) ||
+					!GltfText(arguments.value("resource_id", json{}), "resource_id", resource, failure) ||
+					!GltfText(arguments.value("hash", json{}), "hash", digest, failure))
+					return nullptr;
+				const json &beginValue = arguments.value("byte_begin", json{});
+				const json &endValue = arguments.value("byte_end", json{});
+				if (!beginValue.is_number_unsigned() || !endValue.is_number_unsigned()) {
+					failure = "gltf byte range must use unsigned integers";
+					return nullptr;
+				}
+				const uint64_t begin = beginValue.get<uint64_t>();
+				const uint64_t end = endValue.get<uint64_t>();
+				if (end <= begin || end - begin > MAX_GLTF_EXPORT_READ_BYTES) {
+					failure = "gltf byte range is invalid";
+					return nullptr;
+				}
+				json fence;
+				if (!data_factory_read_fence::Validate(
+						session, instance, arguments["options"], fence, failure
+					))
+					return fence;
+				if (!worlds->Find(core::Name(instance)).IsValid()) {
+					failure = "gltf instance is unavailable";
+					return nullptr;
+				}
+				std::lock_guard lock(gltfResources->Mutex);
+				const auto found = std::find_if(
+					gltfResources->Entries.begin(),
+					gltfResources->Entries.end(),
+					[&](const GltfResource &entry) {
+						return entry.Id == resource && entry.Instance == instance;
+					}
+				);
+				if (found == gltfResources->Entries.end() || found->Hash != digest ||
+					end > found->Bytes.size() ||
+					(session != nullptr &&
+					 (found->Tick != arguments["options"]["expected_tick"].get<uint64_t>() ||
+					  found->WorldEpoch != arguments["options"]["expected_world_epoch"].get<uint64_t>() ||
+					  found->WorldVersion !=
+						  arguments["options"]["expected_world_version"].get<uint64_t>()))) {
+					failure = "gltf resource is unavailable at this revision";
+					return nullptr;
+				}
+				return {
+					{"resource_id", resource},
+					{"hash", digest},
+					{"byte_begin", begin},
+					{"byte_end", end},
+					{"base64", Base64(std::span(found->Bytes).subspan(begin, end - begin))}
+				};
+			}
+		});
+
+		Add(Tool{
+			"release_gltf_scene",
+			"Releases one retained glTF export, including after its world revision changes.",
+			[] {
+				return json{
+					{"type", "object"},
+					{"properties",
+					 {{"instance_id", {{"type", "string"}}}, {"resource_id", {{"type", "string"}}}}},
+					{"required", json::array({"instance_id", "resource_id"})},
+					{"additionalProperties", false}
+				};
+			},
+			[gltfResources](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "resource_id"}, failure)) return nullptr;
+				std::string instance, resource;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure) ||
+					!GltfText(arguments.value("resource_id", json{}), "resource_id", resource, failure))
+					return nullptr;
+				std::lock_guard lock(gltfResources->Mutex);
+				const auto found = std::find_if(
+					gltfResources->Entries.begin(),
+					gltfResources->Entries.end(),
+					[&](const GltfResource &entry) {
+						return entry.Id == resource && entry.Instance == instance;
+					}
+				);
+				if (found == gltfResources->Entries.end()) {
+					failure = "gltf resource is unavailable";
+					return nullptr;
+				}
+				gltfResources->Entries.erase(found);
+				return {{"status", "released"}, {"resource_id", resource}};
+			}
+		});
+
+		Add(Tool{
+			"begin_raw_scene_extract",
+			"Captures one fenced scene as portable raw mesh and texture sections with an inline manifest.",
+			schema,
+			[worlds, session, rawSceneResources, meshSource, textureSource](
+				const json &arguments, std::string &failure
+			) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "options"}, failure) || !arguments.contains("options") ||
+					!arguments["options"].is_object() ||
+					!Options(arguments["options"], {}, session != nullptr, failure))
+					return nullptr;
+				std::string instance;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure)) return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(
+						session, instance, arguments["options"], fence, failure
+					))
+					return fence;
+				const world::WorldId id = World(*worlds, instance, failure);
+				if (!failure.empty()) return nullptr;
+				script::GltfSceneExport captured;
+				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
+					CaptureGltfSceneExport(store, captured, failure, meshSource, textureSource, true);
+				});
+				if (status != world::WorldStatus::Ok && failure.empty())
+					failure = "resource_unavailable: scene is unavailable";
+				if (!failure.empty()) return nullptr;
+				std::vector<std::byte> bytes;
+				json manifest;
+				if (!RawScene(captured, bytes, manifest)) {
+					failure = "resource_too_large: raw scene bytes or manifest exceed the extraction limit";
+					return nullptr;
+				}
+				const assets::ContentHash hash = assets::Hasher::Of(bytes);
+				std::lock_guard lock(rawSceneResources->Mutex);
+				if (rawSceneResources->Entries.size() == MAX_RAW_SCENE_RESOURCES ||
+					rawSceneResources->NextId == 0) {
+					failure = "resource_capacity: raw scene resource capacity reached";
+					return nullptr;
+				}
+				const std::string resource = "raw-scene/" + std::to_string(rawSceneResources->NextId);
+				const uint64_t tick = session == nullptr
+										  ? captured.Tick
+										  : arguments["options"]["expected_tick"].get<uint64_t>();
+				const uint64_t epoch =
+					session == nullptr ? 0 : arguments["options"]["expected_world_epoch"].get<uint64_t>();
+				const uint64_t version =
+					session == nullptr ? 0 : arguments["options"]["expected_world_version"].get<uint64_t>();
+				json unavailable = json::array();
+				for (const auto &entry : captured.Unavailable)
+					unavailable.push_back(
+						{{"stable_id", entry.StableId}, {"feature", entry.Feature}, {"reason", entry.Reason}}
+					);
+				json reply{
+					{"status", "ok"},
+					{"schema_version", "raw-scene/v2"},
+					{"encoding", "resource"},
+					{"resource_id", resource},
+					{"instance_id", instance},
+					{"tick", tick},
+					{"world_epoch", epoch},
+					{"world_version", version},
+					{"byte_length", bytes.size()},
+					{"hash_algorithm", "blake3-256"},
+					{"hash", hash.ToHex()},
+					{"chunk_byte_limit", MAX_RAW_SCENE_READ_BYTES},
+					{"resource_byte_limit", MAX_RAW_SCENE_BYTES},
+					{"manifest", std::move(manifest)},
+					{"unavailable", std::move(unavailable)}
+				};
+				if (reply.dump().size() > MAXIMUM_RESULT_BYTES) {
+					failure = "resource_too_large: raw scene reply exceeds the response limit";
+					return nullptr;
+				}
+				rawSceneResources->Entries.push_back(
+					{resource, instance, tick, epoch, version, hash.ToHex(), std::move(bytes)}
+				);
+				rawSceneResources->NextId++;
+				return reply;
+			}
+		});
+
+		Add(Tool{
+			"get_raw_scene_chunk",
+			"Returns up to one MiB from a retained raw scene extract at its original world revision.",
+			[schema] {
+				json result = schema();
+				result["properties"]["resource_id"] = {{"type", "string"}};
+				result["properties"]["hash"] = {{"type", "string"}};
+				result["properties"]["byte_begin"] = {{"type", "integer"}, {"minimum", 0}};
+				result["properties"]["byte_end"] = {{"type", "integer"}, {"minimum", 1}};
+				for (const char *field : {"resource_id", "hash", "byte_begin", "byte_end"})
+					result["required"].push_back(field);
+				return result;
+			},
+			[worlds, session, rawSceneResources](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(
+						arguments,
+						{"instance_id", "resource_id", "hash", "byte_begin", "byte_end", "options"},
+						failure
+					) ||
+					!arguments.contains("options") || !arguments["options"].is_object() ||
+					!Options(arguments["options"], {}, session != nullptr, failure))
+					return nullptr;
+				std::string instance, resource, digest;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure) ||
+					!GltfText(arguments.value("resource_id", json{}), "resource_id", resource, failure) ||
+					!GltfText(arguments.value("hash", json{}), "hash", digest, failure))
+					return nullptr;
+				const json &beginValue = arguments.value("byte_begin", json{});
+				const json &endValue = arguments.value("byte_end", json{});
+				if (!beginValue.is_number_unsigned() || !endValue.is_number_unsigned()) {
+					failure = "validation_failed: byte range must use unsigned integers";
+					return nullptr;
+				}
+				const uint64_t begin = beginValue.get<uint64_t>(), end = endValue.get<uint64_t>();
+				if (end <= begin || end - begin > MAX_RAW_SCENE_READ_BYTES) {
+					failure = "validation_failed: byte range is invalid";
+					return nullptr;
+				}
+				json fence;
+				if (!data_factory_read_fence::Validate(
+						session, instance, arguments["options"], fence, failure
+					))
+					return fence;
+				if (!worlds->Find(core::Name(instance)).IsValid()) {
+					failure = "resource_unavailable: scene is unavailable";
+					return nullptr;
+				}
+				std::lock_guard lock(rawSceneResources->Mutex);
+				const auto found = std::find_if(
+					rawSceneResources->Entries.begin(),
+					rawSceneResources->Entries.end(),
+					[&](const RawSceneResource &entry) {
+						return entry.Id == resource && entry.Instance == instance;
+					}
+				);
+				if (found == rawSceneResources->Entries.end() || found->Hash != digest ||
+					end > found->Bytes.size() ||
+					(session != nullptr &&
+					 (found->Tick != arguments["options"]["expected_tick"].get<uint64_t>() ||
+					  found->WorldEpoch != arguments["options"]["expected_world_epoch"].get<uint64_t>() ||
+					  found->WorldVersion !=
+						  arguments["options"]["expected_world_version"].get<uint64_t>()))) {
+					failure = "resource_unavailable: raw scene resource is unavailable at this revision";
+					return nullptr;
+				}
+				return {
+					{"resource_id", resource},
+					{"hash", digest},
+					{"byte_begin", begin},
+					{"byte_end", end},
+					{"base64", Base64(std::span(found->Bytes).subspan(begin, end - begin))}
+				};
+			}
+		});
+
+		Add(Tool{
+			"release_raw_scene_extract",
+			"Releases one retained raw scene extract, including after its world revision changes.",
+			[] {
+				return json{
+					{"type", "object"},
+					{"properties",
+					 {{"instance_id", {{"type", "string"}}}, {"resource_id", {{"type", "string"}}}}},
+					{"required", json::array({"instance_id", "resource_id"})},
+					{"additionalProperties", false}
+				};
+			},
+			[rawSceneResources](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "resource_id"}, failure)) return nullptr;
+				std::string instance, resource;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure) ||
+					!GltfText(arguments.value("resource_id", json{}), "resource_id", resource, failure))
+					return nullptr;
+				std::lock_guard lock(rawSceneResources->Mutex);
+				const auto found = std::find_if(
+					rawSceneResources->Entries.begin(),
+					rawSceneResources->Entries.end(),
+					[&](const RawSceneResource &entry) {
+						return entry.Id == resource && entry.Instance == instance;
+					}
+				);
+				if (found == rawSceneResources->Entries.end()) {
+					failure = "resource_unavailable: raw scene resource is unavailable";
+					return nullptr;
+				}
+				rawSceneResources->Entries.erase(found);
+				return {{"status", "released"}, {"resource_id", resource}};
 			}
 		});
 
@@ -920,11 +1719,20 @@ namespace engine::control {
 		inline Feature DataScene(
 			world::Universe &universe,
 			std::shared_ptr<script::DataCaptureBridge> bridge = {},
-			world::DataFactorySession *session = nullptr
+			world::DataFactorySession *session = nullptr,
+			script::GltfMeshSource meshSource = {},
+			script::GltfTextureSource textureSource = {}
 		) {
-			return Feature{"data_scene", [&universe, bridge = std::move(bridge), session](Surface &surface) {
-							   surface.AddDataSceneTools(universe, bridge, session);
-						   }};
+			return Feature{
+				"data_scene",
+				[&universe,
+				 bridge = std::move(bridge),
+				 session,
+				 meshSource = std::move(meshSource),
+				 textureSource = std::move(textureSource)](Surface &surface) {
+					surface.AddDataSceneTools(universe, bridge, session, meshSource, textureSource);
+				}
+			};
 		}
 	}
 }
