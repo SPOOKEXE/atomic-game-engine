@@ -80,11 +80,12 @@ local ENTRY = 1
 local LONG_X = -20
 local SHORT_X = 20
 
--- Far enough beside the playable plain that the isolated interior cannot cast,
--- collide, or appear in either tunnel's ordinary view. Keeping its floor at the
--- world's ordinary ground level also keeps every portal-local vertical measure
--- identical at the entrance and destination.
-local SUBSPACE_X = 256
+-- The isolated interior starts five studs beyond the playable plain. That is
+-- enough separation for its shell to have no physical contact with the plain,
+-- while keeping every authored position inside the 64-stud replicated world
+-- range. Its floor stays at the world's ordinary ground level, so portal-local
+-- vertical measures agree at the entrance and destination.
+local SUBSPACE_X = 54
 
 local PANE_THICKNESS = 0.25
 
@@ -128,7 +129,7 @@ local INSIDE = GROUND_LIFT * 2
 
 -- The plain everything stands on. **Black**, so the only bright things in the
 -- picture are the ones placed to be recognised.
-block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5 + GROUND_LIFT, 0), DARK)
+block("Ground", Vector3.new(90, 1, 90), Vector3.new(0, -0.5 + GROUND_LIFT, 0), DARK)
 
 -- A tunnel: floor, ceiling and two side walls, open at both ends along Z.
 --
@@ -299,7 +300,9 @@ lamp("LongSouthLamp", Vector3.new(LONG_X, HEIGHT - 0.5, -SKIP - 1), 40)
 
 for index = 0, 2 do
 	local z = -SPLICE + 3 + index * ((SPLICE - 3) * 2 / 2)
-	lamp("ShortInteriorLamp" .. index, Vector3.new(SUBSPACE_X, HEIGHT - 0.5, z), 44)
+	-- Three overlapping pools cover the interior without reaching the east
+	-- tunnel on the plain.
+	lamp("ShortInteriorLamp" .. index, Vector3.new(SUBSPACE_X, HEIGHT - 0.5, z), 24)
 end
 
 lamp("ShortLamp", Vector3.new(SHORT_X, HEIGHT - 0.5, 0), 40)

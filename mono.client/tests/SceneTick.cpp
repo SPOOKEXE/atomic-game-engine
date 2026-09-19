@@ -36,6 +36,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Wire.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
@@ -48,6 +49,7 @@
 #include <NamedCaptureView.hpp>
 #include <algorithm>
 #include <client/Scene.hpp>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
@@ -538,6 +540,59 @@ TEST_CASE("a scripted NPC is integrated and crosses a portal in a standalone cli
 	const auto *transit = session.World.Get<engine::scene::PortalTransit>(root);
 	REQUIRE(transit != nullptr);
 	CHECK(transit->Serial >= 1u);
+}
+
+TEST_CASE("the tunnels remote portal destination fits the replicated world", "[demo][portal]") {
+	// The east tunnel's destination used to sit at x=256. A remote player
+	// crossing into it was encoded at the world's 64-stud wire edge, which
+	// detached the camera from the character. Keep the authored remote room,
+	// including the objects that can become a portal crosser, inside the same
+	// range that a replicated transform can represent.
+	Session session("Tunnels.luau");
+	const float limit = engine::scene::WIRE_POSITION_HALF_EXTENT_METRES;
+	const auto insideWireRange = [limit](const engine::core::Vector3 position) {
+		return std::abs(position.X) <= limit && std::abs(position.Y) <= limit &&
+			   std::abs(position.Z) <= limit;
+	};
+
+	const engine::ecs::Entity remotePane = InWorkspace(session.World, "ShortInteriorNorth");
+	REQUIRE(remotePane != engine::ecs::NULL_ENTITY);
+	const Transform *const destination = session.World.Get<Transform>(remotePane);
+	REQUIRE(destination != nullptr);
+	const engine::scene::Bounds *const destinationBounds =
+		session.World.Get<engine::scene::Bounds>(remotePane);
+	REQUIRE(destinationBounds != nullptr);
+	CHECK(insideWireRange(destination->Frame.Position));
+
+	const engine::ecs::Entity eastPane = InWorkspace(session.World, "ShortNorth");
+	REQUIRE(eastPane != engine::ecs::NULL_ENTITY);
+	engine::ecs::Entity portal = engine::ecs::NULL_ENTITY;
+	session.World.EachChild(eastPane, [&](engine::ecs::Entity child) {
+		if (portal == engine::ecs::NULL_ENTITY &&
+			session.World.Get<engine::scene::Portal>(child) != nullptr) {
+			portal = child;
+		}
+	});
+	REQUIRE(portal != engine::ecs::NULL_ENTITY);
+	CHECK(session.World.Get<engine::scene::Portal>(portal)->Destination == remotePane);
+
+	const engine::ecs::Entity ground = InWorkspace(session.World, "Ground");
+	REQUIRE(ground != engine::ecs::NULL_ENTITY);
+	const engine::scene::Bounds *const groundBounds = session.World.Get<engine::scene::Bounds>(ground);
+	REQUIRE(groundBounds != nullptr);
+	CHECK(destination->Frame.Position.X - destinationBounds->HalfExtent.X > groundBounds->HalfExtent.X);
+
+	session.World.Each<const Transform, const engine::scene::Bounds>(
+		[&](engine::ecs::Entity, const Transform &transform, const engine::scene::Bounds &bounds) {
+			const engine::core::Vector3 minimum = transform.Frame.Position - bounds.HalfExtent;
+			const engine::core::Vector3 maximum = transform.Frame.Position + bounds.HalfExtent;
+			CHECK(insideWireRange(minimum));
+			CHECK(insideWireRange(maximum));
+		}
+	);
+	session.World.Each<const Transform>([&](engine::ecs::Entity, const Transform &transform) {
+		CHECK(insideWireRange(transform.Frame.Position));
+	});
 }
 
 TEST_CASE("the hallway camera and NPC cross portals in a standalone client", "[demo][portal]") {
