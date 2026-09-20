@@ -10,6 +10,7 @@
 // Part III is the argument.
 
 #include "PortalImageSampling.hpp"
+#include "SeamLightSelection.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -32,11 +33,22 @@ namespace engine::render {
 		const auto &lightUniforms = SceneLights;
 		const auto &lightViewProjection = LightViewProjection;
 		auto *const command = Command;
+		struct Candidate {
+			const PortalView *Portal = nullptr;
+			SeamLightProjector Projector;
+			float ScreenCoverage = 0.0f;
+			float InfluenceDistance = 0.0f;
+		};
+		std::array<Candidate, MAX_SEAM_LIGHT_TARGETS> candidates;
+		size_t candidateCount = 0;
+		const graph::Frustum viewFrustum = graph::Frustum::FromViewProjection(Matrices.ViewProjection);
 		// Supplemental local-light and emissive radiance arriving from the far room.
 		// Ambient, sky and the shared world sun already illuminate the receiver;
 		// including them here would add the same global illumination twice.
 		// Transformed directional/sky transport needs a separate lighting model.
-		// Probes are viewer-independent: a doorway emits even behind the camera.
+		// Candidate fields are chosen from spill volume intersection rather than
+		// doorway visibility, so a mouth outside the picture still lights ground
+		// that is inside it.
 		for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 			if (portalOf[slot] == nullptr) {
 				continue;
@@ -46,14 +58,55 @@ namespace engine::render {
 				continue;
 			}
 
-			// The authored mouth determines the receiving half-space. Deriving it
-			// from the viewer would flip the light pool when the camera crosses.
-			const core::Vector3 outward = portal.Normal;
+			for (size_t side = 0; side < SEAM_LIGHT_SIDES; side++) {
+				const core::Vector3 outward = portal.Normal * (side == 0 ? 1.0f : -1.0f);
+				const float reach =
+					2.0f * std::max(portal.First.Magnitude() + portal.Second.Magnitude(), 1.0f);
+				const SeamLightProjector projector{
+					.Centre = portal.Centre,
+					.Outward = outward,
+					.First = portal.First,
+					.Second = portal.Second,
+					.Range = reach,
+					.Index = slot * SEAM_LIGHT_SIDES + side,
+				};
+				if (!SeamLightMayAffect(projector, viewFrustum)) {
+					continue;
+				}
+				candidates[candidateCount++] = {
+					.Portal = &portal,
+					.Projector = projector,
+					.ScreenCoverage = SeamLightScreenCoverage(projector, Matrices.ViewProjection),
+					.InfluenceDistance = SeamLightInfluenceDistanceSquared(
+						projector, State->VisibleInstances, State->DrawOrder, Request.CameraFrame.Position
+					),
+				};
+			}
+		}
+		std::sort(
+			candidates.begin(),
+			candidates.begin() + static_cast<std::ptrdiff_t>(candidateCount),
+			[](const Candidate &left, const Candidate &right) {
+				if (left.InfluenceDistance != right.InfluenceDistance)
+					return left.InfluenceDistance < right.InfluenceDistance;
+				if (left.ScreenCoverage != right.ScreenCoverage)
+					return left.ScreenCoverage > right.ScreenCoverage;
+				return left.Projector.Index < right.Projector.Index;
+			}
+		);
 
-			// Far enough off the plane that the oblique clip below stays
-			// in front of the eye: the bias is derived from this same
-			// distance, and a plane that lands behind the camera inverts
-			// the frustum and captures nothing.
+		// A field is captured only when its bounded spill can reach the main
+		// camera frustum. This is not a mouth-FOV test: an offscreen doorway stays
+		// when its light pool reaches visible ground.
+		for (size_t candidateIndex = 0; candidateIndex < std::min(candidateCount, MAX_SEAM_LIGHTS);
+			 candidateIndex++) {
+			const Candidate &candidate = candidates[candidateIndex];
+			const PortalView &portal = *candidate.Portal;
+			const SeamLightProjector &projector = candidate.Projector;
+			const core::Vector3 &outward = projector.Outward;
+
+			// Far enough off the plane that the oblique clip below stays in front
+			// of the eye. The bias comes from this same distance.
 			constexpr float STAND_OFF = 0.5f;
 			const core::Vector3 standPosition = portal.Centre + outward * STAND_OFF;
 			const core::Vector3 upAxis = std::abs(outward.Y) > 0.99f ? core::Vector3{0.0f, 0.0f, 1.0f}
@@ -61,20 +114,15 @@ namespace engine::render {
 			const core::CFrame stand = core::CFrame::LookAt(standPosition, standPosition - outward, upAxis);
 			const core::CFrame placed = portal.Warp.Place(stand);
 
-			// Wide and square: the capture is a light probe of a room,
-			// not a picture, and a narrow lens would miss the lamps
-			// standing beside the doorway.
+			// Wide and square: the capture is a light probe of a room, not a
+			// picture, and a narrow lens would miss lamps beside the doorway.
 			scene::Camera captureCamera = drawCamera;
 			captureCamera.FieldOfViewRadians = 1.9f;
 			captureCamera.NearPlane = 0.05f;
 			const glm::mat4 captureProjection = scene::ResolveCamera(placed, captureCamera, 1.0f).Projection;
 
-			// The same backward-pointing clip as `subCameraFor`, so the
-			// wall the far mouth is set into does not fill the capture.
-			// The bias is the stand-in eye's own seam distance rather
-			// than the viewer's - `PortalClipBias` halves it, keeping
-			// the plane in front of an eye the viewer's bias could put
-			// it behind.
+			// The backward-pointing clip keeps the wall containing the far mouth
+			// out of the capture rather than letting it fill the probe.
 			const core::Vector3 clipNormal = portal.Warp.Rotate(outward) * -1.0f;
 			const core::Vector3 clipPoint =
 				portal.Warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(STAND_OFF);
@@ -85,7 +133,7 @@ namespace engine::render {
 
 			Impl::SeamLightTarget *seamLight = State->EnsureSeamLight(
 				targetSlot,
-				slot,
+				projector.Index,
 				colour == WorldColourTarget::Hdr ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
 												 : State->ColourFormat()
 			);
@@ -101,13 +149,10 @@ namespace engine::render {
 				0.0f,
 				1.0f
 			};
-
 			const SDL_FColor voidColour{0.0f, 0.0f, 0.0f, 1.0f};
-
 			SDL_GPURenderPass *const pass = OpenScenePass(
 				seamLight->Colour, seamLight->Depth, false, &seamViewport, lightUniforms, &voidColour, colour
 			);
-
 			const FrameUniforms captureUniforms{
 				captureMatrices.ViewProjection,
 				lightViewProjection,
@@ -122,22 +167,18 @@ namespace engine::render {
 			voidLighting.Ambient = glm::vec4{0.0f};
 			voidLighting.OutdoorAmbient = glm::vec4{0.0f};
 			voidLighting.Direct = glm::vec4{0.0f};
-			// No fog in a light probe: what falls to distance falls to
-			// the void the clear already painted.
+			// No fog in a light probe: what falls to distance falls to the void
+			// the clear already painted.
 			voidLighting.Fog = glm::vec4{1.0e6f, 1.0e6f + 1.0f, 0.0f, 0.0f};
 
 			DrawWorldInto(pass, voidLighting, portal.TagFilter);
 			DrawBlendedInto(pass, captureUniforms, voidLighting, portal.TagFilter, false, colour);
-
 			SDL_EndGPURenderPass(pass);
 
 			seamLight->Centre = glm::vec4{portal.Centre.X, portal.Centre.Y, portal.Centre.Z, 1.0f};
-
-			// The spill reaches about a doorway's span into the room:
-			// past that the window falloff has taken it below anything
-			// the ambient does not already cover.
-			const float reach = 2.0f * std::max(portal.First.Magnitude() + portal.Second.Magnitude(), 1.0f);
-			seamLight->Outward = glm::vec4{outward.X, outward.Y, outward.Z, reach};
+			// The spill reaches about a doorway's span into the room: past that the
+			// window falloff has taken it below anything the ambient does not cover.
+			seamLight->Outward = glm::vec4{outward.X, outward.Y, outward.Z, projector.Range};
 			seamLight->First = glm::vec4{portal.First.X, portal.First.Y, portal.First.Z, 0.0f};
 			seamLight->Second = glm::vec4{portal.Second.X, portal.Second.Y, portal.Second.Z, 0.0f};
 			seamLight->Ready = true;

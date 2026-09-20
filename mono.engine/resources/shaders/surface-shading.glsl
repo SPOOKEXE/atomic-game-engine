@@ -331,7 +331,7 @@ layout(set = 3, binding = 1) uniform Lights {
 } lights;
 
 // How many holes may carry a shadow in one frame. `render::MAX_PORTAL_BEAMS`.
-#define MAX_BEAMS 4
+#define MAX_BEAMS 6
 
 // One hole's beam, and what a far-side fragment has to go through to read it.
 //

@@ -80,6 +80,54 @@ namespace engine::render {
 	}
 
 	namespace {
+		struct LightInfluence {
+			bool MissesFrustum = false;
+			float ReceiverDistance = 0.0f;
+			float ReceiverCentreDistance = 0.0f;
+			float EyeDistance = 0.0f;
+		};
+
+		LightInfluence LightInfluenceDistance(
+			const SceneLight &light,
+			const core::Vector3 &eye,
+			std::span<const core::AABB> receivers,
+			const graph::Frustum *frustum
+		) {
+			// The GPU only sees a light where its range reaches a receiver. Ordering
+			// by its centre drops a far portal copy even when its sphere reaches
+			// visible geometry, so measure from the sphere's nearest receiver point.
+			float nearest = receivers.empty()
+								? std::max((light.Position - eye).Magnitude() - light.Range, 0.0f)
+								: std::numeric_limits<float>::infinity();
+			float nearestCentre = receivers.empty() ? (light.Position - eye).Magnitude()
+													: std::numeric_limits<float>::infinity();
+			for (const core::AABB &receiver : receivers) {
+				nearest = std::min(
+					nearest,
+					std::max(
+						(light.Position - receiver.ClosestPoint(light.Position)).Magnitude() - light.Range,
+						0.0f
+					)
+				);
+				nearestCentre = std::min(nearestCentre, (light.Position - receiver.Centre()).Magnitude());
+			}
+			return {
+				.MissesFrustum = frustum != nullptr && !frustum->Intersects(light.Position, light.Range),
+				.ReceiverDistance = nearest,
+				.ReceiverCentreDistance = nearestCentre,
+				.EyeDistance = (light.Position - eye).Magnitude(),
+			};
+		}
+
+		bool LightInfluenceBefore(const LightInfluence &left, const LightInfluence &right) {
+			if (left.MissesFrustum != right.MissesFrustum) return !left.MissesFrustum;
+			if (left.ReceiverDistance != right.ReceiverDistance)
+				return left.ReceiverDistance < right.ReceiverDistance;
+			if (left.ReceiverCentreDistance != right.ReceiverCentreDistance)
+				return left.ReceiverCentreDistance < right.ReceiverCentreDistance;
+			return left.EyeDistance < right.EyeDistance;
+		}
+
 		bool BytewiseLess(std::string_view left, std::string_view right) {
 			return std::lexicographical_compare(
 				left.begin(), left.end(), right.begin(), right.end(), [](char a, char b) {
@@ -1421,7 +1469,13 @@ namespace engine::render {
 		return frame.Batches.size();
 	}
 
-	size_t CollectLights(ecs::Store &store, const core::Vector3 &eye, std::vector<SceneLight> &lights) {
+	size_t CollectLights(
+		ecs::Store &store,
+		const core::Vector3 &eye,
+		std::span<const core::AABB> receivers,
+		const graph::Frustum *frustum,
+		std::vector<SceneLight> &lights
+	) {
 		lights.clear();
 
 		store.Each<const scene::Light>([&](ecs::Entity entity, const scene::Light &bulb) {
@@ -1461,17 +1515,24 @@ namespace engine::render {
 		}
 
 		if (lights.size() > MAX_SCENE_LIGHTS) {
-			std::partial_sort(
-				lights.begin(),
-				lights.begin() + MAX_SCENE_LIGHTS,
-				lights.end(),
-				[&eye](const SceneLight &left, const SceneLight &right) {
-					const core::Vector3 leftOffset = left.Position - eye;
-					const core::Vector3 rightOffset = right.Position - eye;
-					return leftOffset.Dot(leftOffset) < rightOffset.Dot(rightOffset);
-				}
-			);
-			lights.resize(MAX_SCENE_LIGHTS);
+			static thread_local std::vector<LightInfluence> influences;
+			static thread_local std::vector<size_t> order;
+			static thread_local std::vector<SceneLight> selected;
+			influences.resize(lights.size());
+			order.resize(lights.size());
+			for (size_t index = 0; index < lights.size(); index++) {
+				influences[index] = LightInfluenceDistance(lights[index], eye, receivers, frustum);
+				order[index] = index;
+			}
+			std::stable_sort(order.begin(), order.end(), [&](size_t left, size_t right) {
+				return LightInfluenceBefore(influences[left], influences[right]);
+			});
+			selected.clear();
+			selected.reserve(MAX_SCENE_LIGHTS);
+			for (size_t index = 0; index < MAX_SCENE_LIGHTS; index++) {
+				selected.push_back(lights[order[index]]);
+			}
+			lights.assign(selected.begin(), selected.end());
 		}
 
 		return lights.size();

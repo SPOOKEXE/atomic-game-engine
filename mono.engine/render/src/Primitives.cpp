@@ -6,23 +6,23 @@
 namespace engine::render {
 
 	AtlasQuadrant BeamQuadrant(uint32_t index, uint32_t resolution) {
-		const uint32_t slot = index % 4u;
-		const auto half = static_cast<float>(resolution / 2u);
+		const uint32_t slot = index % 6u;
+		const auto tile = static_cast<float>(resolution);
 
 		AtlasQuadrant quadrant;
-		quadrant.X = static_cast<float>(slot % 2u) * half;
-		quadrant.Y = static_cast<float>(slot / 2u) * half;
-		quadrant.Width = half;
-		quadrant.Height = half;
+		quadrant.X = static_cast<float>(slot % 2u) * tile;
+		quadrant.Y = static_cast<float>(slot / 2u) * tile;
+		quadrant.Width = tile;
+		quadrant.Height = tile;
 
 		// The lookup window is the same rectangle in 0..1, and it is derived from
 		// the texel one rather than written out again - a beam whose viewport and
 		// whose window disagreed would draw into one quadrant and sample another.
 		quadrant.Window = glm::vec4{
 			0.5f,
-			0.5f,
+			1.0f / 3.0f,
 			static_cast<float>(slot % 2u) * 0.5f,
-			static_cast<float>(slot / 2u) * 0.5f,
+			static_cast<float>(slot / 2u) / 3.0f,
 		};
 		return quadrant;
 	}

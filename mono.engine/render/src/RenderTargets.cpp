@@ -895,12 +895,10 @@ namespace engine::render {
 		info.format = DepthFormat;
 		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
-		// **The world map's resolution for the whole atlas**, so one beam gets a
-		// quarter of it in each direction. A beam covers one doorway rather than
-		// a scene, so a quarter of the texels over a hundredth of the area is
-		// several times the density the world map has.
-		info.width = SHADOW_RESOLUTION;
-		info.height = SHADOW_RESOLUTION;
+		// Six fixed 1024px tiles: Tunnels has six mouths, and a rectangular atlas
+		// keeps each one independent without spending a sampler per doorway.
+		info.width = PORTAL_BEAM_COLUMNS * PORTAL_BEAM_RESOLUTION;
+		info.height = PORTAL_BEAM_ROWS * PORTAL_BEAM_RESOLUTION;
 		info.layer_count_or_depth = 1;
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -1310,7 +1308,7 @@ namespace engine::render {
 
 	Renderer::Impl::SeamLightTarget *
 	Renderer::Impl::EnsureSeamLight(size_t viewport, size_t index, SDL_GPUTextureFormat format) {
-		if (index >= scene::MAX_SURFACES) {
+		if (index >= MAX_SEAM_LIGHT_TARGETS) {
 			return nullptr;
 		}
 

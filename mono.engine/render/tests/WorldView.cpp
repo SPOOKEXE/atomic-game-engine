@@ -2,6 +2,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/graph/Frustum.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -439,4 +440,52 @@ TEST_CASE(
 	CHECK(store.Resource<scene::ActiveCamera>()->Entity == active);
 	CHECK(store.Get<scene::Transform>(active)->Frame.Position == activeFrame.Position);
 	CHECK(store.Get<scene::Transform>(active)->Frame.Rotation() == activeFrame.Rotation());
+}
+
+TEST_CASE(
+	"light collection keeps an offscreen light that reaches visible receivers", "[render][world-view]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("light-influence-order");
+	const auto workspace = scene::InstallServices(store);
+
+	// These sixteen lights fill the device budget, but none reaches the visible
+	// receiver below.
+	for (size_t index = 0; index < render::MAX_SCENE_LIGHTS; index++) {
+		const auto anchor = PartAt(store, {float(index), 0.0f, 0.0f});
+		REQUIRE(store.SetParent(anchor, workspace));
+		const auto bulb = store.CreateInstance(ecs::Classes::Find(core::Name("PointLight")), "distractor");
+		REQUIRE(store.SetParent(bulb, anchor));
+		auto distractor = *store.Get<scene::Light>(bulb);
+		distractor.Range = 0.01f;
+		store.Set(bulb, distractor);
+	}
+
+	// This is the shape of a light copied through a portal: its source sits well
+	// outside the view while its radius still reaches a floor tile in the view.
+	const auto carriedAnchor = PartAt(store, {50.0f, 0.0f, -100.0f});
+	REQUIRE(store.SetParent(carriedAnchor, workspace));
+	const auto carried = store.CreateInstance(ecs::Classes::Find(core::Name("PointLight")), "carried");
+	REQUIRE(store.SetParent(carried, carriedAnchor));
+	auto light = *store.Get<scene::Light>(carried);
+	light.Range = 50.0f;
+	store.Set(carried, light);
+
+	std::vector<render::SceneLight> lights;
+	// The giant floor intersects every light sphere. Centre distance must break
+	// that zero-distance tie deterministically in favour of the carried light.
+	const std::array receivers{
+		core::AABB::FromCentre({0.0f, 0.0f, -100.0f}, {1.0f, 1.0f, 1.0f}),
+		core::AABB::FromCentre({0.0f, 0.0f, -100.0f}, {100.0f, 1.0f, 100.0f}),
+	};
+	const scene::Camera camera;
+	const core::CFrame eye = core::CFrame::LookAt({}, {0.0f, 0.0f, -1.0f});
+	const graph::Frustum frustum =
+		graph::Frustum::FromViewProjection(scene::ResolveCamera(eye, camera, 1.0f).ViewProjection);
+	REQUIRE(render::CollectLights(store, {}, receivers, &frustum, lights) == render::MAX_SCENE_LIGHTS);
+	CHECK(lights.front().Position.X == 50.0f);
+	CHECK(lights.front().Position.Z == -100.0f);
+	CHECK(std::any_of(lights.begin(), lights.end(), [](const render::SceneLight &candidate) {
+		return candidate.Position.X == 50.0f && candidate.Position.Z == -100.0f && candidate.Range == 50.0f;
+	}));
 }

@@ -9,8 +9,10 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/graph/Frustum.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -240,13 +242,30 @@ namespace engine::render {
 	// Collects and orders the lights relevant to one camera.
 	//
 	// Lights without a parent transform are skipped. Same-world portal copies
-	// are included, then the result is capped to MAX_SCENE_LIGHTS nearest first.
+	// are included, then the result is capped by distance from their influence
+	// volume to visible receiver bounds. An empty receiver span falls back to
+	// the camera point for callers that do not own a view.
 	//
 	// @param store The world being presented.
-	// @param eye The camera position used for ordering.
+	// @param eye The camera position used when no visible receiver is supplied.
+	// @param receivers Visible world-space receiver bounds used for ordering.
+	// @param frustum Optional camera frustum used to prioritize visible light influence.
 	// @param lights Cleared and filled, preserving capacity.
 	// @return The number of lights written.
-	size_t CollectLights(ecs::Store &store, const core::Vector3 &eye, std::vector<SceneLight> &lights);
+	size_t CollectLights(
+		ecs::Store &store,
+		const core::Vector3 &eye,
+		std::span<const core::AABB> receivers,
+		const graph::Frustum *frustum,
+		std::vector<SceneLight> &lights
+	);
+
+	// Convenience for collectors outside a camera view. The camera point is the
+	// only available receiver, so view-aware callers should use the overload.
+	inline size_t
+	CollectLights(ecs::Store &store, const core::Vector3 &eye, std::vector<SceneLight> &lights) {
+		return CollectLights(store, eye, {}, nullptr, lights);
+	}
 
 	// Builds one renderer key for an authored profile in one world.
 	//

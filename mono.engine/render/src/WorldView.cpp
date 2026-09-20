@@ -3,17 +3,20 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/graph/Cull.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldView.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 
 #include <algorithm>
+#include <optional>
 
 namespace engine::render {
 	bool PrepareWorldShaders(
@@ -190,7 +193,24 @@ namespace engine::render {
 		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame
 	) {
 		ENGINE_PROFILE_CAT("world camera collect", core::ProfileCategory::Render);
-		CollectLights(store, view.CameraFrame.Position, frame.Lights);
+		static thread_local std::vector<uint32_t> visible;
+		static thread_local std::vector<core::AABB> receivers;
+		std::optional<graph::Frustum> frustum;
+		receivers.clear();
+		if (extent.X > 0.0f && extent.Y > 0.0f) {
+			const scene::CameraMatrices matrices =
+				view.Projection ? scene::ResolveSurfaceCamera(view.CameraFrame, *view.Projection)
+								: scene::ResolveCamera(view.CameraFrame, view.Camera, extent.X / extent.Y);
+			frustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
+			graph::Cull(view.Instances, *frustum, visible);
+			receivers.reserve(visible.size());
+			for (const uint32_t index : visible) {
+				receivers.push_back(graph::BoundsOf(view.Instances[index]));
+			}
+		}
+		CollectLights(
+			store, view.CameraFrame.Position, receivers, frustum ? &*frustum : nullptr, frame.Lights
+		);
 		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &view);
 		effects::BuildRibbons(store, view.CameraFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
 		const gui::Screen screen{extent.X, extent.Y};

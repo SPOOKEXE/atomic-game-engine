@@ -7,6 +7,7 @@
 // samplers, pushes the uniforms and sets the viewport, so a node added here
 // cannot forget the scissor and scribble outside its own rectangle.
 
+#include "../SeamLightSelection.hpp"
 #include "../SsaoSettings.hpp"
 #include "ViewRecording.hpp"
 
@@ -623,8 +624,8 @@ namespace engine::render {
 			// `lightingBindings`, because the capture textures are made inside
 			// the portal-capture node this same frame - the graph's
 			// portal-light edge is what guarantees that node has already run.
-			// The nearest ready mouths win the two slots; empty slots stay
-			// zeroed in `uniforms` and bind the fallback texel.
+			// Ready spill fields reaching visible receivers win the two slots, nearest
+			// receiver first. Empty slots stay zeroed in `uniforms` and bind the fallback texel.
 			// **The size comes from the type, not from `lightingBindings.size()`.**
 			// That call is `constexpr` and never reads the object, so GCC and
 			// Clang fold it - but the object itself cannot be `constexpr`, since
@@ -638,28 +639,48 @@ namespace engine::render {
 			std::array<SDL_GPUTextureSamplerBinding, SPILL_BINDINGS> spillBindings{};
 			std::copy(lightingBindings.begin(), lightingBindings.end(), spillBindings.begin());
 
-			std::array<const Impl::SeamLightTarget *, scene::MAX_SURFACES> ready{};
+			std::array<const Impl::SeamLightTarget *, MAX_SEAM_LIGHT_TARGETS> ready{};
 			size_t readyCount = 0;
+			const graph::Frustum receiverFrustum =
+				graph::Frustum::FromViewProjection(recording.Matrices.ViewProjection);
+			const auto projectorOf = [&](const Impl::SeamLightTarget *candidate) {
+				return SeamLightProjector{
+					.Centre = {candidate->Centre.x, candidate->Centre.y, candidate->Centre.z},
+					.Outward = {candidate->Outward.x, candidate->Outward.y, candidate->Outward.z},
+					.First = {candidate->First.x, candidate->First.y, candidate->First.z},
+					.Second = {candidate->Second.x, candidate->Second.y, candidate->Second.z},
+					.Range = candidate->Outward.w,
+					.Index = static_cast<size_t>(candidate - bank.SeamLights),
+				};
+			};
 			if (graphEnabled(core::Name("portal-capture"))) {
 				for (const Impl::SeamLightTarget &seamLight : bank.SeamLights) {
-					if (seamLight.Ready) {
+					if (seamLight.Ready && SeamLightMayAffect(projectorOf(&seamLight), receiverFrustum)) {
 						ready[readyCount++] = &seamLight;
 					}
 				}
 			}
-			const auto distanceTo = [&](const Impl::SeamLightTarget *candidate) {
-				const core::Vector3 offset{
-					candidate->Centre.x - cameraFrame.Position.X,
-					candidate->Centre.y - cameraFrame.Position.Y,
-					candidate->Centre.z - cameraFrame.Position.Z,
-				};
-				return offset.Dot(offset);
-			};
 			std::sort(
 				ready.begin(),
 				ready.begin() + static_cast<std::ptrdiff_t>(readyCount),
 				[&](const Impl::SeamLightTarget *left, const Impl::SeamLightTarget *right) {
-					return distanceTo(left) < distanceTo(right);
+					const SeamLightProjector leftProjector = projectorOf(left);
+					const SeamLightProjector rightProjector = projectorOf(right);
+					const float leftDistance = SeamLightInfluenceDistanceSquared(
+						leftProjector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+					);
+					const float rightDistance = SeamLightInfluenceDistanceSquared(
+						rightProjector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+					);
+					if (leftDistance != rightDistance) {
+						return leftDistance < rightDistance;
+					}
+					const float leftCoverage =
+						SeamLightScreenCoverage(leftProjector, recording.Matrices.ViewProjection);
+					const float rightCoverage =
+						SeamLightScreenCoverage(rightProjector, recording.Matrices.ViewProjection);
+					return leftCoverage == rightCoverage ? leftProjector.Index < rightProjector.Index
+														 : leftCoverage > rightCoverage;
 				}
 			);
 

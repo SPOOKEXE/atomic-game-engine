@@ -173,11 +173,18 @@ namespace engine::render {
 
 	// How many portal mouths may project their light field in one frame.
 	//
-	// **Two, which is one pair, and it is the prototype's budget.** Each is
-	// a sampler binding and four vec4s in `PbrUniforms`, both spelled out in
-	// `deferred-lighting.frag` - the three counts move together. The nearest
-	// mouths win, so a corridor of pairs lights the one the viewer is at.
+	// **Two receiver fields, not one pair, and it is the prototype's budget.**
+	// Each is a sampler binding and four vec4s in `PbrUniforms`, both spelled out
+	// in `deferred-lighting.frag` - the three counts move together. Candidates
+	// rank by receiver influence first, then projected coverage, so nearest mouths
+	// do not automatically win.
 	constexpr size_t MAX_SEAM_LIGHTS = 2;
+
+	// Each mouth needs a capture for both receiver half-spaces. The final pass
+	// still binds only `MAX_SEAM_LIGHTS` fields, after choosing the side that can
+	// reach the current view.
+	constexpr size_t SEAM_LIGHT_SIDES = 2;
+	constexpr size_t MAX_SEAM_LIGHT_TARGETS = scene::MAX_SURFACES * SEAM_LIGHT_SIDES;
 
 	// The side of one seam light-field capture, in texels.
 	//
@@ -308,15 +315,13 @@ namespace engine::render {
 		glm::vec4 Parameters[3]{};
 	};
 
-	// How many holes may transport a shadow in one frame.
-	//
-	// **Four, in one 2x2 atlas, chosen by which holes are nearest the eye.**
-	// Every fragment tests every beam, so the count is a cost per pixel and
-	// not per hole; four is what a corridor needs and is two matrix products
-	// and a tap each. Anything past it is logged rather than dropped
-	// silently - a shadow that stops crossing when a fifth pane comes on
-	// screen reads as the feature not working.
-	constexpr uint32_t MAX_PORTAL_BEAMS = 4;
+	// Six Tunnels mouths fit in one 2x3 atlas. Every fragment tests every live
+	// beam, so this remains a hard per-pixel budget; larger scenes choose the
+	// beams whose volumes reach visible receivers.
+	constexpr uint32_t MAX_PORTAL_BEAMS = 6;
+	constexpr uint32_t PORTAL_BEAM_COLUMNS = 2;
+	constexpr uint32_t PORTAL_BEAM_ROWS = 3;
+	constexpr uint32_t PORTAL_BEAM_RESOLUTION = 1024;
 
 	// What `opaque.frag` needs to look a fragment up in one hole's beam.
 	//
@@ -342,7 +347,7 @@ namespace engine::render {
 		// Where this beam sits in the atlas: xy the scale, zw the offset.
 		glm::vec4 Region[MAX_PORTAL_BEAMS];
 
-		// x: how many of the four are in use.
+		// x: how many beam slots are in use.
 		glm::vec4 Count{0.0f, 0.0f, 0.0f, 0.0f};
 	};
 

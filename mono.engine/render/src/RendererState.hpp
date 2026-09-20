@@ -2171,11 +2171,11 @@ namespace engine::render {
 		SDL_GPUTexture *ShadowTexture = nullptr;
 		SDL_GPUSampler *ShadowSampler = nullptr;
 
-		// The beams: up to four holes' worth of shadow, in one 2x2 atlas.
+		// The beams: up to six holes' worth of shadow, in one 2x3 atlas.
 		//
-		// **One texture rather than four, because a fragment binds samplers and
-		// not maps.** Every fragment tests every live beam, so four textures
-		// would be four more samplers on every draw in the frame to serve a
+		// **One texture rather than six, because a fragment binds samplers and
+		// not maps.** Every fragment tests every live beam, so six textures
+		// would be six more samplers on every draw in the frame to serve a
 		// handful of pixels near a doorway. The atlas costs one sub-rectangle per
 		// beam in the uniform and one viewport per beam in the pass.
 		SDL_GPUTexture *BeamTexture = nullptr;
@@ -2446,8 +2446,8 @@ namespace engine::render {
 			MirrorTarget Targets[scene::MAX_SURFACES];
 		};
 
-		// One portal mouth's light-field capture: the room its seam opens onto,
-		// rendered against a lit void from a stand-in eye at the mouth.
+		// One portal mouth-side's light-field capture, rendered against a lit void
+		// from a stand-in eye in that receiving half-space.
 		//
 		// **The seam's geometry travels with the texture**, because the capture
 		// and the projection are two passes reading one record - a projector fed
@@ -2497,11 +2497,11 @@ namespace engine::render {
 			// passes size their targets differently - see `MirrorTarget`.
 			std::vector<MirrorLevel> Mirrors;
 
-			// The seam light-field captures, one per mouth slot. Fixed at
-			// `SEAM_LIGHT_RESOLUTION` rather than pooled by level: a mouth
-			// captures its far room once per frame however deep the picture
-			// recursion goes.
-			SeamLightTarget SeamLights[scene::MAX_SURFACES];
+			// The seam light-field captures, one for each side of each mouth slot.
+			// Fixed at `SEAM_LIGHT_RESOLUTION` rather than pooled by level: each
+			// receiving half-space captures its far room once per frame however
+			// deep the picture recursion goes.
+			SeamLightTarget SeamLights[MAX_SEAM_LIGHT_TARGETS];
 
 			// What the last frame drawn into this bank reached, which is what an
 			// automatic depth reads.
@@ -2618,7 +2618,7 @@ namespace engine::render {
 			SDL_GPUTextureFormat format
 		);
 
-		// One mouth's light-field capture pair, at `SEAM_LIGHT_RESOLUTION`.
+		// One mouth-side's light-field capture pair, at `SEAM_LIGHT_RESOLUTION`.
 		//
 		// @return `null` when either texture could not be made, which loses the
 		//         mouth's spill for the frame rather than the frame.

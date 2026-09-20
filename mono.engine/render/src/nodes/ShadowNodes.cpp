@@ -7,6 +7,7 @@
 // there is no order in which a graph could run one without the other and be
 // right. `graph::FitPortalLight` is the derivation.
 
+#include "PortalBeamSelection.hpp"
 #include "Primitives.hpp"
 #include "ViewRecording.hpp"
 
@@ -191,15 +192,15 @@ namespace engine::render {
 			if (havePortals && haveShadow && State->EnsureBeams()) {
 				ENGINE_PROFILE_CAT("portal beams", core::ProfileCategory::Render);
 
-				// The receiver holes nearest the eye, because every fragment tests
-				// every live beam and four is what a corridor needs. A directional
-				// beam starts at `Pane` and arrives at `Partner`; ranking the source
-				// drops the incoming beam for the room the eye is actually in when
-				// several pairs compete for the budget.
+				// Every fragment tests every live beam, so the count remains bounded.
+				// Rank a beam by the visible receivers in its mapped volume instead
+				// of by the doorway position. A doorway outside the eye can still cast
+				// onto visible ground.
 				struct Beam {
 					const PortalView *Pane = nullptr;
 					const PortalView *Partner = nullptr;
-					float Distance = 0.0f;
+					glm::mat4 Light{1.0f};
+					PortalBeamRank Rank;
 				};
 
 				Beam ordered[scene::MAX_SURFACES];
@@ -220,17 +221,41 @@ namespace engine::render {
 						continue;
 					}
 
-					ordered[candidates++] = Beam{
-						portal,
-						partner,
-						scene::RectangleDistance(
-							partner->Centre, partner->First, partner->Second, cameraFrame.Position
-						)
+					const core::Vector3 sun{State->Sun.x, State->Sun.y, State->Sun.z};
+					const glm::mat4 light = graph::FitPortalLight(
+						sceneBounds, portal->Centre, portal->First, portal->Second, partner->Warp.Rotate(sun)
+					);
+					const PortalBeamProjector projector{
+						.Back = partner->Warp,
+						.PlaneNormal = portal->Normal,
+						.PlaneOffset = portal->Normal.Dot(portal->Centre),
+						.Light = light,
 					};
+					float influence = PortalBeamInfluenceDistanceSquared(
+						projector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+					);
+					if (!std::isfinite(influence)) {
+						// A visible portal can show a child view whose receivers did not
+						// survive the main camera cull. Keep its beam as a conservative
+						// fallback so the child view does not lose transported occlusion.
+						for (const uint32_t row : State->DrawOrder) {
+							if (row < State->VisibleInstances.size() &&
+								State->VisibleInstances[row].Surface == portal->Index) {
+								const float distance = scene::RectangleDistance(
+									portal->Centre, portal->First, portal->Second, cameraFrame.Position
+								);
+								influence = distance * distance;
+								break;
+							}
+						}
+					}
+					if (!std::isfinite(influence)) continue;
+					ordered[candidates++] =
+						Beam{portal, partner, light, {static_cast<uint32_t>(slot), influence}};
 				}
 
 				std::sort(ordered, ordered + candidates, [](const Beam &left, const Beam &right) {
-					return left.Distance < right.Distance;
+					return PortalBeamRanksBefore(left.Rank, right.Rank);
 				});
 
 				if (candidates > State->MaximumBeamCandidatesWarned) {
@@ -239,7 +264,7 @@ namespace engine::render {
 					// not working at all, which is a much harder thing to look for
 					// than a line saying which holes were left out.
 					ENGINE_WARN(
-						"{} holes could carry a shadow and only {} may; the farther ones do not",
+						"{} portal beams reach visible receivers and only {} may run",
 						candidates,
 						MAX_PORTAL_BEAMS
 					);
@@ -250,17 +275,11 @@ namespace engine::render {
 
 				for (uint32_t index = 0; index < live; index++) {
 					const Beam &beam = ordered[index];
-					const core::Vector3 sun{State->Sun.x, State->Sun.y, State->Sun.z};
-
 					// The receiver is carried from the far room back into this
 					// pane's chart by the partner's warp. Its light ray has to take
 					// that same rotation. Mapping only the position makes a turned
 					// portal cast the right silhouette in the wrong direction.
-					const core::Vector3 beamDirection = beam.Partner->Warp.Rotate(sun);
-
-					State->Beams.Light[index] = graph::FitPortalLight(
-						sceneBounds, beam.Pane->Centre, beam.Pane->First, beam.Pane->Second, beamDirection
-					);
+					State->Beams.Light[index] = beam.Light;
 
 					State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
 
@@ -276,7 +295,7 @@ namespace engine::render {
 					// and they were written out three times until v0.19 - see
 					// `BeamQuadrant`, which `tests/Primitives.cpp` checks tiles
 					// the atlas exactly.
-					const AtlasQuadrant quadrant = BeamQuadrant(index, SHADOW_RESOLUTION);
+					const AtlasQuadrant quadrant = BeamQuadrant(index, PORTAL_BEAM_RESOLUTION);
 					State->Beams.Region[index] = quadrant.Window;
 
 					SDL_GPUDepthStencilTargetInfo beamTarget{};

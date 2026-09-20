@@ -1068,6 +1068,23 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "LongFloor"))->HalfExtent.Z == Approx(16.0f));
 	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "ShortFloor"))->HalfExtent.Z == Approx(2.0f));
 
+	const auto lampRange = [&store](const char *name) {
+		const Entity fitting = InScene(store, name);
+		const Entity bulb = store.FindFirstChild(fitting, "Bulb");
+		REQUIRE(bulb != engine::ecs::NULL_ENTITY);
+		const auto *light = store.Get<engine::scene::Light>(bulb);
+		REQUIRE(light != nullptr);
+		return light->Range;
+	};
+
+	// Each lamp reaches its one-stud stub, while the pair cannot span the solid
+	// skip between them.
+	const float northRange = lampRange("LongNorthLamp");
+	const float southRange = lampRange("LongSouthLamp");
+	CHECK(northRange > zOf("LongNorthLamp") - zOf("LongSkipNorth"));
+	CHECK(southRange > zOf("LongSkipSouth") - zOf("LongSouthLamp"));
+	CHECK(northRange + southRange < zOf("LongNorthLamp") - zOf("LongSouthLamp"));
+
 	// And the panes, which are what a body measures. The west tunnel's walk is
 	// its two stubs; the east tunnel's is its two studs plus its isolated
 	// interior.

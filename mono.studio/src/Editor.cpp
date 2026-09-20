@@ -8,6 +8,7 @@
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/graph/Cull.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -60,6 +61,7 @@
 #include <imgui.h>
 #include <mutex>
 #include <network/Advert.hpp>
+#include <optional>
 #include <sstream>
 #include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
@@ -2447,12 +2449,28 @@ namespace studio {
 						engine::effects::RibbonRuns(store);
 					RibbonRuns.assign(runs.begin(), runs.end());
 
-					// **Ordered from the eye, which is why this needs the camera
-					// and the three above do not.** The renderer takes sixteen
-					// and a world may hold any number; which sixteen is a scene
-					// question and distance is the answer that is right more
-					// often than it is wrong.
-					(void)engine::render::CollectLights(store, eye.Position, Lights);
+					// Lights are selected against the culled receiver rows, so an
+					// offscreen portal copy stays when its range reaches visible geometry.
+					static thread_local std::vector<uint32_t> visibleLightRows;
+					static thread_local std::vector<engine::core::AABB> lightReceivers;
+					std::optional<engine::graph::Frustum> lightFrustum;
+					lightReceivers.clear();
+					if (target.IsValid() && target.Width > 0 && target.Height > 0) {
+						const auto matrices = engine::scene::ResolveCamera(
+							eye, lens, static_cast<float>(target.Width) / static_cast<float>(target.Height)
+						);
+						const engine::graph::Frustum frustum =
+							engine::graph::Frustum::FromViewProjection(matrices.ViewProjection);
+						lightFrustum = frustum;
+						engine::graph::Cull(DrawnInstances, frustum, visibleLightRows);
+						lightReceivers.reserve(visibleLightRows.size());
+						for (const uint32_t row : visibleLightRows) {
+							lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
+						}
+					}
+					(void)engine::render::CollectLights(
+						store, eye.Position, lightReceivers, lightFrustum ? &*lightFrustum : nullptr, Lights
+					);
 				}
 
 				// **How deep this world's mirrors go, pushed with the world that

@@ -292,11 +292,10 @@ local function lamp(name: string, at: Vector3, range: number)
 	bulb.Parent = fitting
 end
 
--- One over each of the west tunnel's stubs, and three down the isolated
--- interior. A corridor you cannot see the end of is a corridor whose length
--- you cannot judge, which is the whole demonstration.
-lamp("LongNorthLamp", Vector3.new(LONG_X, HEIGHT - 0.5, SKIP + 1), 40)
-lamp("LongSouthLamp", Vector3.new(LONG_X, HEIGHT - 0.5, -SKIP - 1), 40)
+-- One over each of the west tunnel's one-stud stubs, and three down the
+-- isolated interior. Keep the west lamps local so they cannot light the skip.
+lamp("LongNorthLamp", Vector3.new(LONG_X, HEIGHT - 0.5, SKIP + 1), 14)
+lamp("LongSouthLamp", Vector3.new(LONG_X, HEIGHT - 0.5, -SKIP - 1), 14)
 
 for index = 0, 2 do
 	local z = -SPLICE + 3 + index * ((SPLICE - 3) * 2 / 2)

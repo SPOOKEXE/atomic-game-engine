@@ -2,6 +2,7 @@
 // list has neither portals nor seam clipping and supplies the image reference.
 #include "RenderFixture.hpp"
 #include "RenderTypes.hpp"
+#include "SeamLightSelection.hpp"
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Paths.hpp>
@@ -358,6 +359,87 @@ namespace {
 }
 
 TEST_CASE(
+	"seam light selection keeps receiver-side fields ahead of an eye-side decoy",
+	"[render][portal-light-selection]"
+) {
+	using namespace engine;
+	using core::CFrame;
+	const CFrame eye = CFrame::LookAt({0, 0, -3}, {0, 0, 3});
+	scene::Camera camera;
+	camera.FieldOfViewRadians = 1.9f;
+	camera.NearPlane = .05f;
+	camera.FarPlane = 32;
+	const scene::CameraMatrices matrices = scene::ResolveCamera(eye, camera, 1.0f);
+	const graph::Frustum frustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
+
+	std::array<scene::DrawInstance, 2> instances;
+	// The source list also holds this giant offscreen floor. DrawOrder must keep
+	// it from making every field appear to reach the receiver.
+	instances[0].Frame.Position = {7, 0, 3};
+	instances[0].HalfExtent = {.5f, .5f, .05f};
+	instances[1].Frame.Position = {};
+	instances[1].HalfExtent = {100, 100, .05f};
+	const std::array<uint32_t, 1> receiverRows{0};
+	const std::array<render::SeamLightProjector, 6> fields{{
+		{.Centre = {0, 0, 0},
+		 .Outward = {0, 0, -1},
+		 .First = {1, 0, 0},
+		 .Second = {0, 1, 0},
+		 .Range = 4,
+		 .Index = 0},
+		{.Centre = {1, 0, 0},
+		 .Outward = {0, 0, -1},
+		 .First = {1, 0, 0},
+		 .Second = {0, 1, 0},
+		 .Range = 4,
+		 .Index = 1},
+		{.Centre = {2, 0, 0},
+		 .Outward = {0, 0, -1},
+		 .First = {1, 0, 0},
+		 .Second = {0, 1, 0},
+		 .Range = 4,
+		 .Index = 2},
+		{.Centre = {3, 0, 0},
+		 .Outward = {0, 0, -1},
+		 .First = {1, 0, 0},
+		 .Second = {0, 1, 0},
+		 .Range = 4,
+		 .Index = 3},
+		{.Centre = {4, 0, 0},
+		 .Outward = {0, 0, -1},
+		 .First = {1, 0, 0},
+		 .Second = {0, 1, 0},
+		 .Range = 4,
+		 .Index = 4},
+		{.Centre = {7, 0, 0},
+		 .Outward = {0, 0, 1},
+		 .First = {1, 0, 0},
+		 .Second = {0, 1, 0},
+		 .Range = 4,
+		 .Index = 5},
+	}};
+	for (const auto &field : fields)
+		CHECK(render::SeamLightMayAffect(field, frustum));
+
+	std::array<render::SeamLightProjector, 6> ranked = fields;
+	std::sort(ranked.begin(), ranked.end(), [&](const auto &left, const auto &right) {
+		const float leftDistance =
+			render::SeamLightInfluenceDistanceSquared(left, instances, receiverRows, eye.Position);
+		const float rightDistance =
+			render::SeamLightInfluenceDistanceSquared(right, instances, receiverRows, eye.Position);
+		if (leftDistance != rightDistance) return leftDistance < rightDistance;
+		const float leftCoverage = render::SeamLightScreenCoverage(left, matrices.ViewProjection);
+		const float rightCoverage = render::SeamLightScreenCoverage(right, matrices.ViewProjection);
+		return leftCoverage != rightCoverage ? leftCoverage > rightCoverage : left.Index < right.Index;
+	});
+	CHECK(ranked[0].Index == 5);
+	CHECK(
+		render::SeamLightInfluenceDistanceSquared(fields[0], instances, receiverRows, eye.Position) >
+		render::SeamLightInfluenceDistanceSquared(fields[5], instances, receiverRows, eye.Position)
+	);
+}
+
+TEST_CASE(
 	"a Humanoid player camera walks through rolled scaled portal pixels", "[render][gpu][portal-character][.]"
 ) {
 	const bool firstPerson = GENERATE(false, true);
@@ -457,9 +539,10 @@ TEST_CASE(
 	"[render][gpu][portal-radiance][.]"
 ) {
 	const int destinationSource = GENERATE(0, 1, 2, 3);
+	const float receivingSide = GENERATE(-1.0f, 1.0f);
 	// Emission uses an authored 0..16 UNORM8 intensity. Choose an exact step.
 	constexpr float EMISSION = 128.0f / 255.0f;
-	CAPTURE(destinationSource);
+	CAPTURE(destinationSource, receivingSide);
 	FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
@@ -488,11 +571,11 @@ TEST_CASE(
 		rows[index].Tint = {1, 1, 1};
 		rows[index].CastShadow = false;
 	}
-	rows[0].Frame.Position = {0, 0, 3};
+	rows[0].Frame.Position = {0, 0, 3 * receivingSide};
 	rows[0].HalfExtent = {10, 10, .01f};
 	rows[1].HalfExtent = {4, 4, .01f};
 	rows[1].Surface = 0;
-	rows[2].Frame.Position = {100, 0, destinationSource == 3 ? 3.0f : -3.0f};
+	rows[2].Frame.Position = {100, 0, (destinationSource == 3 ? 3.0f : -3.0f) * receivingSide};
 	rows[2].HalfExtent = {10, 10, .01f};
 	if (destinationSource == 1) {
 		rows[2].Tint = {};
@@ -500,7 +583,9 @@ TEST_CASE(
 		rows[2].EmissiveTint = {1, 0, 0};
 		rows[2].EmissiveStrength = EMISSION;
 	}
-	const render::SceneLight destinationLight{.Position = {100, 0, -1}, .Range = 8, .Colour = {1, 0, 0}};
+	const render::SceneLight destinationLight{
+		.Position = {100, 0, -1 * receivingSide}, .Range = 8, .Colour = {1, 0, 0}
+	};
 	render::PortalView portal;
 	portal.Normal = {0, 0, 1};
 	portal.First = {4, 0, 0};
@@ -518,13 +603,13 @@ TEST_CASE(
 		view.Target = &target;
 		view.Instances = std::span(rows).first(destinationSource ? 3 : 2);
 		if (destinationSource == 2) view.Lights = std::span(&destinationLight, 1);
-		view.CameraFrame = CFrame::LookAt({0, 0, 1}, {0, 0, 3});
+		view.CameraFrame = CFrame::LookAt({0, 0, receivingSide}, {0, 0, 3 * receivingSide});
 		view.Camera.NearPlane = .1f;
 		view.Camera.FarPlane = 32;
 		view.OverrideLighting = true;
 		view.Lighting.Ambient = {.25f, .25f, .25f};
 		view.Lighting.Direct = destinationSource == 3 ? core::Color3{.3f, 0, 0} : core::Color3{};
-		if (destinationSource == 3) view.Lighting.Direction = {0, 0, 1};
+		if (destinationSource == 3) view.Lighting.Direction = {0, 0, receivingSide};
 	}
 	views[1].Portals = std::span(&portal, 1);
 	std::vector<float> directReference;
@@ -595,7 +680,7 @@ TEST_CASE(
 		CheckImage(
 			renderer,
 			std::string(index ? "portal-radiance-source-" : "portal-radiance-control-") +
-				std::to_string(destinationSource),
+				std::to_string(destinationSource) + (receivingSide > 0 ? "-front" : "-back"),
 			"lens-b",
 			"white albedo=1 ambient=.25 direct=0; destination source=" + std::to_string(destinationSource) +
 				"\n" + graph::Write(document),
@@ -603,6 +688,33 @@ TEST_CASE(
 			{target.Width, target.Height, ImageFormat::Rgba32Float, std::as_bytes(std::span(observed))},
 			tolerance
 		);
+	}
+	if (destinationSource == 2) {
+		// The next frame has no portal. Every side target must be cleared before
+		// deferred lighting binds its fields, or the just-captured remote red
+		// light leaks into an ordinary frame.
+		views[1].Portals = {};
+		views[1].Lights = {};
+		constexpr uint64_t STALE_CAPTURE = 3;
+		REQUIRE(renderer.RequestResourceImage({STALE_CAPTURE, pipelineName, captureName, 0}));
+		renderer.Render(std::span(&views[1], 1), overlay, nullptr, false);
+		std::optional<render::ResourceImage> stale;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (!stale && std::chrono::steady_clock::now() < deadline) {
+			stale = renderer.TakeResourceImage(STALE_CAPTURE);
+			if (!stale) SDL_Delay(1);
+		}
+		REQUIRE(stale.has_value());
+		REQUIRE(stale->Status == render::ResourceImageStatus::Ok);
+		const size_t byte = 18 * stale->RowStride + 32 * 8;
+		const uint16_t half = std::to_integer<uint16_t>(stale->Pixels[byte]) |
+							  (std::to_integer<uint16_t>(stale->Pixels[byte + 1]) << 8);
+		const int exponent = (half >> 10) & 31;
+		REQUIRE((half & 0x8000) == 0);
+		REQUIRE(exponent < 31);
+		const float red = exponent == 0 ? std::ldexp(static_cast<float>(half & 1023), -24)
+										: std::ldexp(1.0f + (half & 1023) / 1024.0f, exponent - 15);
+		CHECK(std::abs(red - .25f) < 1.0f / 4096);
 	}
 }
 
