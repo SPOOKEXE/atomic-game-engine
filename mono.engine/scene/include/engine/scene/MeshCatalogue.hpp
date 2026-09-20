@@ -29,6 +29,7 @@
 // @tier L7 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/Vector3.hpp>
 
 #include <array>
 #include <cstddef>
@@ -90,6 +91,9 @@ namespace engine::scene {
 		// a `Name` is already an integer in this process and hashing the
 		// integer skips the registry lock that comparing text would take.
 		std::unordered_map<uint32_t, uint32_t> Triangles;
+
+		// Authored object-space extents, keyed like triangles.
+		std::unordered_map<uint32_t, core::Vector3> Sizes;
 
 		// How many triangles a mesh has, or zero when this world has not been
 		// told.
@@ -173,7 +177,8 @@ namespace engine::scene {
 		const core::Name &mesh,
 		uint32_t triangles,
 		std::span<const core::Name> sheets = {},
-		const MeshSkinning &skinning = {}
+		const MeshSkinning &skinning = {},
+		core::Vector3 size = {}
 	);
 
 	// Copies the exact skinning source for a mesh. Returns false when this world
@@ -203,4 +208,7 @@ namespace engine::scene {
 	// @param mesh  The mesh's name.
 	// @return The count, or zero.
 	uint32_t TrianglesOf(const ecs::Store &store, const core::Name &mesh);
+
+	// Authored object-space size, or zero before content arrives.
+	core::Vector3 MeshSizeOf(const ecs::Store &store, const core::Name &mesh);
 }

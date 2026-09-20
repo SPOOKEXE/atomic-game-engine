@@ -212,6 +212,10 @@ namespace engine::script {
 			call.ReturnValue(record);
 		}
 
+		void GetMeshSize(ScriptCall &call) {
+			call.ReturnVector3(scene::MeshSizeOf(call.World(), core::Name(call.AsString(0))));
+		}
+
 		// `ContentService:GetTriangleCount(mesh)`
 		//
 		// The same number `MeshPart.TrianglesCount` gives, asked about a mesh
@@ -223,10 +227,11 @@ namespace engine::script {
 			);
 		}
 
-		constexpr std::array<ServiceMethod, 6> CONTENT_METHODS{{
+		constexpr std::array<ServiceMethod, 7> CONTENT_METHODS{{
 			{"GetMeshes", GetMeshes},
 			{"GetPublishedMeshes", GetPublishedMeshes},
 			{"GetMeshTextures", GetMeshTextures},
+			{"GetMeshSize", GetMeshSize},
 			{"GetTextures", GetTextures},
 			{"GetFlipbook", GetFlipbook},
 			{"GetTriangleCount", GetTriangleCount},

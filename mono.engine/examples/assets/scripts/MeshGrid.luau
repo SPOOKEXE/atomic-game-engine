@@ -209,7 +209,9 @@ local function buildCell(mesh: string)
 	-- version that carried literals.
 	part.MeshId = mesh
 
-	part.Size = Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
+	local bounds = ContentService:GetMeshSize(mesh)
+	local longest = math.max(bounds.X, bounds.Y, bounds.Z)
+	part.Size = if longest > 0 then bounds * (MODEL_SIZE / longest) else Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
 
 	-- **Both halves named, and that is the point of this line.** A `MeshPart`
 	-- that sets only `MeshId` shows whatever each of its submeshes recorded at

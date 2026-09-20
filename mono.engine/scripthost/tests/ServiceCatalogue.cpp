@@ -328,6 +328,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		 {"GetMeshes",
 		  "GetPublishedMeshes",
 		  "GetMeshTextures",
+		  "GetMeshSize",
 		  "GetTextures",
 		  "GetFlipbook",
 		  "GetTriangleCount"},

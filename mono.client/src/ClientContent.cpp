@@ -379,9 +379,11 @@ namespace client {
 						engine::game::AddCollisionShapes(arrived, name, mesh);
 					}
 
+					const engine::core::Vector3 size = mesh.Maximum - mesh.Minimum;
+
 					const auto record =
-						[&name, triangles, &sheets, &skinning, &arrived](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles, sheets, skinning);
+						[&name, triangles, &sheets, &skinning, &arrived, size](engine::ecs::Store &store) {
+							engine::scene::RecordMesh(store, name, triangles, sheets, skinning, size);
 							engine::game::MergeCollisionShapes(store, arrived);
 						};
 

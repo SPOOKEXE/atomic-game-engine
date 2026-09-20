@@ -31,7 +31,7 @@ namespace engine::scene {
 		const core::Name &mesh,
 		uint32_t triangles,
 		std::span<const core::Name> sheets,
-		const MeshSkinning &skinning
+		const MeshSkinning &skinning, core::Vector3 size
 	) {
 		if (!mesh.IsValid()) {
 			return false;
@@ -57,6 +57,7 @@ namespace engine::scene {
 		// "known to be empty" state would be a distinction nothing can act on.
 		MeshCatalogue &catalogue = MeshesOf(store);
 		catalogue.Triangles[mesh.Id()] = triangles;
+		catalogue.Sizes[mesh.Id()] = size;
 
 		// **Replaced rather than merged**, for the reason the header gives: a
 		// republished mesh may name different sheets, and a merge would leave a
@@ -93,6 +94,13 @@ namespace engine::scene {
 			out.assign(sheets.begin(), sheets.end());
 		}
 		return out.size();
+	}
+
+	core::Vector3 MeshSizeOf(const ecs::Store &store, const core::Name &mesh) {
+		const MeshCatalogue *catalogue = store.Resource<MeshCatalogue>();
+		if (catalogue == nullptr || !mesh.IsValid()) return {};
+		const auto found = catalogue->Sizes.find(mesh.Id());
+		return found == catalogue->Sizes.end() ? core::Vector3{} : found->second;
 	}
 
 	uint32_t TrianglesOf(const ecs::Store &store, const core::Name &mesh) {
