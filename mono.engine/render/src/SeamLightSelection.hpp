@@ -140,4 +140,23 @@ namespace engine::render {
 		return nearest;
 	}
 
+	// A field that still reaches the camera keeps its capture slot. Replacing a
+	// live field on a tiny rank change makes its whole spill disappear for a
+	// frame, while retiring it after it leaves the frustum is visually harmless.
+	inline bool SeamLightCaptureBefore(
+		bool leftReady,
+		float leftDistance,
+		float leftCoverage,
+		size_t leftIndex,
+		bool rightReady,
+		float rightDistance,
+		float rightCoverage,
+		size_t rightIndex
+	) {
+		if (leftReady != rightReady) return leftReady;
+		if (leftDistance != rightDistance) return leftDistance < rightDistance;
+		if (leftCoverage != rightCoverage) return leftCoverage > rightCoverage;
+		return leftIndex < rightIndex;
+	}
+
 }

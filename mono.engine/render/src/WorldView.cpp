@@ -208,9 +208,7 @@ namespace engine::render {
 				receivers.push_back(graph::BoundsOf(view.Instances[index]));
 			}
 		}
-		CollectLights(
-			store, view.CameraFrame.Position, receivers, frustum ? &*frustum : nullptr, frame.Lights
-		);
+		CollectLights(store, view.CameraFrame.Position, receivers, frame.Lights);
 		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &view);
 		effects::BuildRibbons(store, view.CameraFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
 		const gui::Screen screen{extent.X, extent.Y};

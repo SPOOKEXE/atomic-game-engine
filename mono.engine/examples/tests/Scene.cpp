@@ -2697,9 +2697,10 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 
 TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples][scene]") {
 	// **What a scene gets wrong about portal lighting is placement, and it is
-	// silent.** The transport itself is `engine::render::CollectLights`' and
-	// `mono.client/tests/PortalLighting.cpp` asserts it; what belongs here is
-	// that the two shipped scenes hand that pass what it needs - a linked pair
+	// silent.** The transport is the renderer's seam-light capture, and
+	// `mono.client/tests/PortalLighting.cpp` asserts its eligible portal views;
+	// what belongs here is that the two shipped scenes hand that pass what it
+	// needs - a linked pair
 	// of mouths, every lamp inside its own seam's reach, and a world dark
 	// enough that a capture of the far room measures transported light rather
 	// than the sun. A lamp authored a stud out of range would load, render,

@@ -437,6 +437,11 @@ TEST_CASE(
 		render::SeamLightInfluenceDistanceSquared(fields[0], instances, receiverRows, eye.Position) >
 		render::SeamLightInfluenceDistanceSquared(fields[5], instances, receiverRows, eye.Position)
 	);
+
+	// A live field stays assigned while its spill reaches the view, even when a
+	// nearby candidate wins the instantaneous influence score by a tiny amount.
+	CHECK(render::SeamLightCaptureBefore(true, 1.01f, .5f, 0, false, 1.0f, .6f, 1));
+	CHECK_FALSE(render::SeamLightCaptureBefore(false, 1.01f, .5f, 0, false, 1.0f, .6f, 1));
 }
 
 TEST_CASE(

@@ -33,9 +33,21 @@ namespace engine::render {
 		const auto &lightUniforms = SceneLights;
 		const auto &lightViewProjection = LightViewProjection;
 		auto *const command = Command;
+		Impl::SurfaceBank &bank = *Bank;
+		const auto matchesProjector = [](const Impl::SeamLightTarget &field,
+										 const SeamLightProjector &projector) {
+			return field.Ready && field.Centre.x == projector.Centre.X &&
+				   field.Centre.y == projector.Centre.Y && field.Centre.z == projector.Centre.Z &&
+				   field.Outward.x == projector.Outward.X && field.Outward.y == projector.Outward.Y &&
+				   field.Outward.z == projector.Outward.Z && field.Outward.w == projector.Range &&
+				   field.First.x == projector.First.X && field.First.y == projector.First.Y &&
+				   field.First.z == projector.First.Z && field.Second.x == projector.Second.X &&
+				   field.Second.y == projector.Second.Y && field.Second.z == projector.Second.Z;
+		};
 		struct Candidate {
 			const PortalView *Portal = nullptr;
 			SeamLightProjector Projector;
+			bool WasReady = false;
 			float ScreenCoverage = 0.0f;
 			float InfluenceDistance = 0.0f;
 		};
@@ -76,6 +88,7 @@ namespace engine::render {
 				candidates[candidateCount++] = {
 					.Portal = &portal,
 					.Projector = projector,
+					.WasReady = matchesProjector(bank.SeamLights[projector.Index], projector),
 					.ScreenCoverage = SeamLightScreenCoverage(projector, Matrices.ViewProjection),
 					.InfluenceDistance = SeamLightInfluenceDistanceSquared(
 						projector, State->VisibleInstances, State->DrawOrder, Request.CameraFrame.Position
@@ -87,23 +100,30 @@ namespace engine::render {
 			candidates.begin(),
 			candidates.begin() + static_cast<std::ptrdiff_t>(candidateCount),
 			[](const Candidate &left, const Candidate &right) {
-				if (left.InfluenceDistance != right.InfluenceDistance)
-					return left.InfluenceDistance < right.InfluenceDistance;
-				if (left.ScreenCoverage != right.ScreenCoverage)
-					return left.ScreenCoverage > right.ScreenCoverage;
-				return left.Projector.Index < right.Projector.Index;
+				return SeamLightCaptureBefore(
+					left.WasReady,
+					left.InfluenceDistance,
+					left.ScreenCoverage,
+					left.Projector.Index,
+					right.WasReady,
+					right.InfluenceDistance,
+					right.ScreenCoverage,
+					right.Projector.Index
+				);
 			}
 		);
 
 		// A field is captured only when its bounded spill can reach the main
 		// camera frustum. This is not a mouth-FOV test: an offscreen doorway stays
 		// when its light pool reaches visible ground.
+		std::array<bool, MAX_SEAM_LIGHT_TARGETS> selected{};
 		for (size_t candidateIndex = 0; candidateIndex < std::min(candidateCount, MAX_SEAM_LIGHTS);
 			 candidateIndex++) {
 			const Candidate &candidate = candidates[candidateIndex];
 			const PortalView &portal = *candidate.Portal;
 			const SeamLightProjector &projector = candidate.Projector;
 			const core::Vector3 &outward = projector.Outward;
+			selected[projector.Index] = true;
 
 			// Far enough off the plane that the oblique clip below stays in front
 			// of the eye. The bias comes from this same distance.
@@ -183,6 +203,9 @@ namespace engine::render {
 			seamLight->Second = glm::vec4{portal.Second.X, portal.Second.Y, portal.Second.Z, 0.0f};
 			seamLight->Ready = true;
 		}
+		for (size_t index = 0; index < MAX_SEAM_LIGHT_TARGETS; index++) {
+			if (!selected[index]) bank.SeamLights[index].Ready = false;
+		}
 		return true;
 	}
 
@@ -225,13 +248,6 @@ namespace engine::render {
 
 			enterNamedPass(context.Name);
 			State->RecordPortalImports(command, *recording.Request.Source, targetSlot);
-
-			// Last frame's light fields are for mouths that may be gone - a
-			// disabled `Portal` reaches here as no `PortalView` at all, and its
-			// spill has to go out with it. See `SeamLightTarget::Ready`.
-			for (Impl::SeamLightTarget &seamLight : bank.SeamLights) {
-				seamLight.Ready = false;
-			}
 
 			// --- the portal capture ----------------------------------------------
 			//
@@ -607,6 +623,12 @@ namespace engine::render {
 
 				if (!recording.CaptureSeamLights(WorldColourTarget::Display)) {
 					return false;
+				}
+			} else {
+				// No capture can name these fields this frame. Retire them together so
+				// a disabled portal cannot leave a previous room lighting the view.
+				for (Impl::SeamLightTarget &seamLight : bank.SeamLights) {
+					seamLight.Ready = false;
 				}
 			}
 			return true;

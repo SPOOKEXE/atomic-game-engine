@@ -2450,10 +2450,9 @@ namespace studio {
 					RibbonRuns.assign(runs.begin(), runs.end());
 
 					// Lights are selected against the culled receiver rows, so an
-					// offscreen portal copy stays when its range reaches visible geometry.
+					// offscreen local light stays when its range reaches visible geometry.
 					static thread_local std::vector<uint32_t> visibleLightRows;
 					static thread_local std::vector<engine::core::AABB> lightReceivers;
-					std::optional<engine::graph::Frustum> lightFrustum;
 					lightReceivers.clear();
 					if (target.IsValid() && target.Width > 0 && target.Height > 0) {
 						const auto matrices = engine::scene::ResolveCamera(
@@ -2461,16 +2460,13 @@ namespace studio {
 						);
 						const engine::graph::Frustum frustum =
 							engine::graph::Frustum::FromViewProjection(matrices.ViewProjection);
-						lightFrustum = frustum;
 						engine::graph::Cull(DrawnInstances, frustum, visibleLightRows);
 						lightReceivers.reserve(visibleLightRows.size());
 						for (const uint32_t row : visibleLightRows) {
 							lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
 						}
 					}
-					(void)engine::render::CollectLights(
-						store, eye.Position, lightReceivers, lightFrustum ? &*lightFrustum : nullptr, Lights
-					);
+					(void)engine::render::CollectLights(store, eye.Position, lightReceivers, Lights);
 				}
 
 				// **How deep this world's mirrors go, pushed with the world that

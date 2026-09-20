@@ -478,11 +478,7 @@ TEST_CASE(
 		core::AABB::FromCentre({0.0f, 0.0f, -100.0f}, {1.0f, 1.0f, 1.0f}),
 		core::AABB::FromCentre({0.0f, 0.0f, -100.0f}, {100.0f, 1.0f, 100.0f}),
 	};
-	const scene::Camera camera;
-	const core::CFrame eye = core::CFrame::LookAt({}, {0.0f, 0.0f, -1.0f});
-	const graph::Frustum frustum =
-		graph::Frustum::FromViewProjection(scene::ResolveCamera(eye, camera, 1.0f).ViewProjection);
-	REQUIRE(render::CollectLights(store, {}, receivers, &frustum, lights) == render::MAX_SCENE_LIGHTS);
+	REQUIRE(render::CollectLights(store, {}, receivers, lights) == render::MAX_SCENE_LIGHTS);
 	CHECK(lights.front().Position.X == 50.0f);
 	CHECK(lights.front().Position.Z == -100.0f);
 	CHECK(std::any_of(lights.begin(), lights.end(), [](const render::SceneLight &candidate) {

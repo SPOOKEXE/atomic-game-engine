@@ -81,20 +81,16 @@ namespace engine::render {
 
 	namespace {
 		struct LightInfluence {
-			bool MissesFrustum = false;
 			float ReceiverDistance = 0.0f;
 			float ReceiverCentreDistance = 0.0f;
 			float EyeDistance = 0.0f;
 		};
 
 		LightInfluence LightInfluenceDistance(
-			const SceneLight &light,
-			const core::Vector3 &eye,
-			std::span<const core::AABB> receivers,
-			const graph::Frustum *frustum
+			const SceneLight &light, const core::Vector3 &eye, std::span<const core::AABB> receivers
 		) {
 			// The GPU only sees a light where its range reaches a receiver. Ordering
-			// by its centre drops a far portal copy even when its sphere reaches
+			// by its centre drops a far light even when its sphere reaches
 			// visible geometry, so measure from the sphere's nearest receiver point.
 			float nearest = receivers.empty()
 								? std::max((light.Position - eye).Magnitude() - light.Range, 0.0f)
@@ -112,7 +108,6 @@ namespace engine::render {
 				nearestCentre = std::min(nearestCentre, (light.Position - receiver.Centre()).Magnitude());
 			}
 			return {
-				.MissesFrustum = frustum != nullptr && !frustum->Intersects(light.Position, light.Range),
 				.ReceiverDistance = nearest,
 				.ReceiverCentreDistance = nearestCentre,
 				.EyeDistance = (light.Position - eye).Magnitude(),
@@ -120,7 +115,6 @@ namespace engine::render {
 		}
 
 		bool LightInfluenceBefore(const LightInfluence &left, const LightInfluence &right) {
-			if (left.MissesFrustum != right.MissesFrustum) return !left.MissesFrustum;
 			if (left.ReceiverDistance != right.ReceiverDistance)
 				return left.ReceiverDistance < right.ReceiverDistance;
 			if (left.ReceiverCentreDistance != right.ReceiverCentreDistance)
@@ -1473,7 +1467,6 @@ namespace engine::render {
 		ecs::Store &store,
 		const core::Vector3 &eye,
 		std::span<const core::AABB> receivers,
-		const graph::Frustum *frustum,
 		std::vector<SceneLight> &lights
 	) {
 		lights.clear();
@@ -1492,28 +1485,6 @@ namespace engine::render {
 			lights.push_back(light);
 		});
 
-		// Transport local lights through same-world portals once. Copies are not
-		// recursively copied because the fixed light budget would become geometric.
-		static thread_local std::vector<scene::PortalSeam> seams;
-		if (scene::GatherPortalSeams(store, seams) > 0) {
-			const size_t own = lights.size();
-			for (size_t index = 0; index < own; index++) {
-				for (const scene::PortalSeam &seam : seams) {
-					if (seam.Crosses ||
-						scene::SeamDistance(seam, lights[index].Position) >= lights[index].Range) {
-						continue;
-					}
-
-					const scene::SeamTransform through = scene::SeamMapping(seam);
-					SceneLight copy = lights[index];
-					copy.Position = through.Point(lights[index].Position);
-					copy.Range = through.Length(lights[index].Range);
-					copy.Direction = through.Rotate(lights[index].Direction);
-					lights.push_back(copy);
-				}
-			}
-		}
-
 		if (lights.size() > MAX_SCENE_LIGHTS) {
 			static thread_local std::vector<LightInfluence> influences;
 			static thread_local std::vector<size_t> order;
@@ -1521,7 +1492,7 @@ namespace engine::render {
 			influences.resize(lights.size());
 			order.resize(lights.size());
 			for (size_t index = 0; index < lights.size(); index++) {
-				influences[index] = LightInfluenceDistance(lights[index], eye, receivers, frustum);
+				influences[index] = LightInfluenceDistance(lights[index], eye, receivers);
 				order[index] = index;
 			}
 			std::stable_sort(order.begin(), order.end(), [&](size_t left, size_t right) {

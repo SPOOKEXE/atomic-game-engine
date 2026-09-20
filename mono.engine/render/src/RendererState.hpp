@@ -2454,9 +2454,10 @@ namespace engine::render {
 		// a rectangle the capture was not taken at throws another room's light
 		// onto this one's floor, at an angle nothing authored.
 		//
-		// `Ready` is cleared at the top of every portal pass rather than
-		// trusted, for `MirrorTarget::Ready`'s reason: a mouth that was disabled
-		// or walked away from must not go on projecting last frame's rooms.
+		// `Ready` is retired after each portal pass when its spill no longer
+		// reaches the camera or its mouth disappears. Live fields keep their
+		// slots through small camera moves, so the fixed capture budget cannot
+		// blink a whole light pool on a ranking tie.
 		struct SeamLightTarget {
 			SDL_GPUTexture *Colour = nullptr;
 			SDL_GPUTexture *Depth = nullptr;
