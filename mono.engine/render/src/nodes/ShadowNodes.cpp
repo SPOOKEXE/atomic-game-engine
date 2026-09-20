@@ -197,9 +197,7 @@ namespace engine::render {
 				// of by the doorway position. A doorway outside the eye can still cast
 				// onto visible ground.
 				struct Beam {
-					const PortalView *Pane = nullptr;
-					const PortalView *Partner = nullptr;
-					glm::mat4 Light{1.0f};
+					PortalBeamProjector Projector;
 					PortalBeamRank Rank;
 				};
 
@@ -212,25 +210,16 @@ namespace engine::render {
 						continue;
 					}
 
-					// **A pane with no partner in this frame's set carries nothing**,
-					// because the map back is the partner's own warp - one map per
-					// pane, and a pair's two are each other's inverse. Deriving an
-					// inverse here would be a second arithmetic to get wrong.
+					// The partner is the source aperture in the mapped chart. A pane
+					// without that aperture cannot carry source-side occlusion.
 					const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
 					if (partner == nullptr) {
 						continue;
 					}
 
 					const core::Vector3 sun{State->Sun.x, State->Sun.y, State->Sun.z};
-					const glm::mat4 light = graph::FitPortalLight(
-						sceneBounds, portal->Centre, portal->First, portal->Second, partner->Warp.Rotate(sun)
-					);
-					const PortalBeamProjector projector{
-						.Back = partner->Warp,
-						.PlaneNormal = portal->Normal,
-						.PlaneOffset = portal->Normal.Dot(portal->Centre),
-						.Light = light,
-					};
+					const PortalBeamProjector projector =
+						PortalBeamFromPair(*portal, *partner, sceneBounds, sun);
 					float influence = PortalBeamInfluenceDistanceSquared(
 						projector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
 					);
@@ -250,8 +239,7 @@ namespace engine::render {
 						}
 					}
 					if (!std::isfinite(influence)) continue;
-					ordered[candidates++] =
-						Beam{portal, partner, light, {static_cast<uint32_t>(slot), influence}};
+					ordered[candidates++] = Beam{projector, {static_cast<uint32_t>(slot), influence}};
 				}
 
 				std::sort(ordered, ordered + candidates, [](const Beam &left, const Beam &right) {
@@ -276,18 +264,17 @@ namespace engine::render {
 				for (uint32_t index = 0; index < live; index++) {
 					const Beam &beam = ordered[index];
 					// The receiver is carried from the far room back into this
-					// pane's chart by the partner's warp. Its light ray has to take
-					// that same rotation. Mapping only the position makes a turned
-					// portal cast the right silhouette in the wrong direction.
-					State->Beams.Light[index] = beam.Light;
+					// pane's source chart by this pane's warp. The light matrix and
+					// source casters are both in that chart.
+					State->Beams.Light[index] = beam.Projector.Light;
 
-					State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
+					State->Beams.Back[index] = scene::SeamMatrix(beam.Projector.Back);
 
 					State->Beams.Plane[index] = glm::vec4{
-						beam.Pane->Normal.X,
-						beam.Pane->Normal.Y,
-						beam.Pane->Normal.Z,
-						beam.Pane->Normal.Dot(beam.Pane->Centre)
+						beam.Projector.PlaneNormal.X,
+						beam.Projector.PlaneNormal.Y,
+						beam.Projector.PlaneNormal.Z,
+						beam.Projector.PlaneOffset
 					};
 
 					// **The quadrant, once.** The lookup window, the viewport and

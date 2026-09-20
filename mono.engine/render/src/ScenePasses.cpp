@@ -732,7 +732,8 @@ namespace engine::render {
 		const LightUniforms *passLights,
 		SDL_FColor clear,
 		const void *rawUniforms,
-		size_t rawUniformBytes
+		size_t rawUniformBytes,
+		const BeamUniforms *passBeams
 	) {
 		FrameResult &result = Result;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -756,6 +757,9 @@ namespace engine::render {
 		}
 		if (passLights != nullptr) {
 			SDL_PushGPUFragmentUniformData(command, 1, passLights, sizeof(*passLights));
+		}
+		if (passBeams != nullptr) {
+			SDL_PushGPUFragmentUniformData(command, 2, passBeams, sizeof(*passBeams));
 		}
 		const SDL_GPUViewport viewport{
 			0.0f, 0.0f, static_cast<float>(passWidth), static_cast<float>(passHeight), 0.0f, 1.0f

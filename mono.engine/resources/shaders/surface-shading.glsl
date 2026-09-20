@@ -24,7 +24,8 @@ layout(set = 2, binding = 2) uniform sampler2D colourMap;
 // front of a hole darkens the floor beyond it. Taking the darker of the two is
 // what makes that coherent with one global sun; adding a second contribution
 // would double-light every floor near a doorway.
-layout(set = 2, binding = 3) uniform sampler2D beamMap;
+#define PORTAL_BEAM_SAMPLER_BINDING 3
+#include "portal-shadow-beams.glsl"
 layout(set = 2, binding = 4) uniform sampler2D normalMap;
 layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
 layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
@@ -330,80 +331,6 @@ layout(set = 3, binding = 1) uniform Lights {
 	vec4 Count;
 } lights;
 
-// How many holes may carry a shadow in one frame. `render::MAX_PORTAL_BEAMS`.
-#define MAX_BEAMS 6
-
-// One hole's beam, and what a far-side fragment has to go through to read it.
-//
-// **The casters are left in the near room and the receiver is mapped back**,
-// which is the whole reason this costs two matrix products rather than a second
-// copy of the world. `Back` carries a fragment from the far side of a hole to
-// the near side; `Plane` is what says it was on the far side to begin with; and
-// `Light` is the beam's own matrix, fitted to the pane's rectangle so that the
-// frustum *is* the aperture - a fragment the beam does not reach projects
-// outside `0..1`, which the range check below already reads as lit.
-layout(set = 3, binding = 2) uniform Beams {
-	mat4 Light[MAX_BEAMS];
-	mat4 Back[MAX_BEAMS];
-
-	// xyz the near pane's normal, w its offset along it.
-	vec4 Plane[MAX_BEAMS];
-
-	// xy the scale into the atlas, zw the offset.
-	vec4 Region[MAX_BEAMS];
-
-	// x: how many are in use.
-	vec4 Count;
-} beams;
-
-// How much of the sun reaches this fragment through the holes in the world.
-//
-// One, meaning unshadowed, for every fragment in every scene with no portal in
-// it - the loop ends at its first test.
-float BeamFactor() {
-	float lit = 1.0;
-
-	int count = int(beams.Count.x);
-	for (int index = 0; index < MAX_BEAMS; index++) {
-		if (index >= count) {
-			break;
-		}
-
-		// **Behind the near pane's face is the far side**, which is where a
-		// fragment has to have come from for this beam to say anything about it.
-		// A fragment already in the near room is shadowed by the world's own map
-		// and would otherwise be shadowed twice.
-		vec4 back = beams.Back[index] * vec4(inWorldPosition, 1.0);
-		vec3 near = back.xyz / max(back.w, 1e-6);
-
-		if (dot(near, beams.Plane[index].xyz) <= beams.Plane[index].w) {
-			continue;
-		}
-
-		vec4 lightPosition = beams.Light[index] * vec4(near, 1.0);
-		vec3 projected = lightPosition.xyz / max(lightPosition.w, 1e-6);
-		if (projected.z > 1.0 || projected.z < 0.0) {
-			continue;
-		}
-
-		// The same convention the world map's lookup uses, then folded into this
-		// beam's quadrant of the atlas.
-		vec2 uv = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
-		if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-			continue;
-		}
-
-		vec2 atlas = uv * beams.Region[index].xy + beams.Region[index].zw;
-
-		// **One tap, where the world map takes four.** A beam's edge is the
-		// hole's own rim, which is a hard edge in the geometry as well - a soft
-		// one there would read as the hole being out of focus.
-		float closest = texture(beamMap, atlas).r;
-		lit = min(lit, (projected.z - 0.0025) <= closest ? 1.0 : 0.0);
-	}
-
-	return lit;
-}
 
 // What the local lights add at this fragment.
 //
@@ -616,7 +543,7 @@ void shadeSurface() {
 	// **The darker of the two, never the sum.** The world's map says what this
 	// room's own geometry blocks and a beam says what the room through a hole
 	// blocks; light that fails either test does not arrive.
-	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
+	float shadow = min(ShadowFactor(normal, toLight), PortalBeamFactor(inWorldPosition));
 	vec3 viewDirection = normalize(lighting.Eye.xyz - inWorldPosition);
 	vec3 halfway = normalize(viewDirection + toLight);
 	vec3 baseReflectance = mix(vec3(0.04), albedo, metalness);

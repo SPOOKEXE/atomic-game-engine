@@ -2520,7 +2520,9 @@ namespace engine::render {
 		// high-water mark is bounded by `scene::MAX_SURFACES`.
 		struct SurfaceBank {
 			SurfaceCapturePlan CapturePlan;
+			std::vector<effects::RibbonVertex> CaptureRibbonSource;
 			std::vector<effects::RibbonVertex> CaptureRibbons;
+			std::vector<effects::RibbonRun> CaptureRibbonRuns;
 			std::vector<CaptureBlendSlot> CaptureBlendOrder;
 			SurfaceSlotState Surfaces[scene::MAX_SURFACES];
 

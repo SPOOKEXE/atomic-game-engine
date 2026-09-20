@@ -7,7 +7,7 @@
 -- world's one directional light, and the map between two panes is a rotation -
 -- so the far half's shadow comes out turned by that rotation relative to the
 -- near half's. Standing in the hole you see one body with two shadows pointing
--- different ways, and no shadow crossing the seam at all.
+-- different ways, with the near half's occlusion carried across the seam.
 --
 -- ## What to look at
 --
@@ -17,17 +17,16 @@
 -- shadow that is wrong is wrong by ninety degrees rather than by something that
 -- has to be measured.
 --
--- Three things are worth checking and they fail independently:
+-- Three things are worth checking:
 --
 --   1. **The near half's shadow.** Cast by the real body against the world's
 --      light. This one has always been right.
 --   2. **The far half's shadow.** Cast by the clone, against the same light,
 --      which is what makes it point the wrong way. `scene::AppendPortalClones`
 --      is where the clone is made.
---   3. **A shadow crossing the seam.** A caster on one side of a hole should
---      shadow the floor on the other, and does not - there is one shadow map,
---      fitted once to the whole scene from one direction, so light through a
---      hole is not modelled at all.
+--   3. **A shadow crossing the seam.** A caster on one side of a hole shadows
+--      the floor on the other when the sun ray crosses the aperture. The beam
+--      map carries that occlusion through the seam and turns it with the pair.
 --
 -- ## Why the body is not anchored
 --
@@ -38,6 +37,7 @@
 -- floor under gravity, which is also what a character does.
 
 local WORLD = workspace
+local Lighting = game:GetService("Lighting")
 
 local ROOM = 40 -- how far a floor reaches from its middle
 local TILE = 5
@@ -53,6 +53,12 @@ local RED_A = Color3.fromRGB(200, 25, 30)
 local RED_B = Color3.fromRGB(140, 15, 20)
 local PANE = Color3.new(0.55, 0.57, 0.62)
 local CRATE = Color3.fromRGB(240, 205, 40)
+
+-- The beam travels through the near pane toward the far room. A shadow scene
+-- needs that path: the default sun travels away from this aperture, so it
+-- cannot cast onto the red floor through it.
+Lighting.ClockTime = 11
+Lighting.GeographicLatitude = -30
 
 local function block(name: string, size: Vector3, at: CFrame, colour: Color3): Part
 	local part = Instance.new("Part")
@@ -144,10 +150,16 @@ crate.Parent = WORLD
 -- correct one looks like on this floor, in this light, at this time of day.
 block("Control", Vector3.new(3, 6, 3), CFrame.new(Vector3.new(-14, 3, 12)), CRATE)
 
+-- Entirely on the source side and tall enough that its upper silhouette reaches
+-- the aperture before the downward sun reaches the floor. It makes the
+-- transported shadow separate from the straddler's locally cloned shadow.
+block("ThroughCaster", Vector3.new(5, 10, 3), CFrame.new(Vector3.new(-2, 5.25, -3)), CRATE)
+
 -- --- light -----------------------------------------------------------------
 --
 -- A lamp over each room. The shadow this scene is about is cast by the world's
--- directional light rather than by these - `render` fits one shadow map to the
+-- directional light rather than by these. `Lighting` aims it through the near
+-- pane, and `render` fits one shadow map to the
 -- whole scene from `SUN_DIRECTION` - so these are here to make the floors
 -- readable and not to cast anything.
 local function lamp(name: string, at: Vector3)

@@ -26,6 +26,7 @@
 // @tier L8 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/Vector2.hpp>
@@ -378,6 +379,20 @@ namespace engine::effects {
 		std::span<const RibbonRun> runs,
 		const core::Vector3 &eye,
 		std::vector<RibbonVertex> &output
+	);
+
+	// Cuts transient ribbon strips at one portal pane and maps only the far-side
+	// fragments into the portal capture's coordinate space. Trail history stays
+	// untouched because this operates on the frame-local generated stream.
+	bool ProjectRibbonsThroughPortal(
+		std::span<const RibbonVertex> source,
+		std::span<const RibbonRun> runs,
+		const core::Vector3 &centre,
+		const core::Vector3 &normal,
+		const core::CFrame &mapping,
+		float scale,
+		std::vector<RibbonVertex> &vertices,
+		std::vector<RibbonRun> &projectedRuns
 	);
 
 	// The vertices `BuildRibbons` produced.

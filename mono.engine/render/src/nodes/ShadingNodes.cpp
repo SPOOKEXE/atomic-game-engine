@@ -518,10 +518,22 @@ namespace engine::render {
 										std::span<const SDL_GPUTextureSamplerBinding> bindings,
 										const PbrUniforms *passUniforms,
 										const LightUniforms *passLights,
-										SDL_FColor clear
+										SDL_FColor clear,
+										const BeamUniforms *passBeams = nullptr
 									) {
 				recording.Fullscreen(
-					name, pipeline, target, passWidth, passHeight, bindings, passUniforms, passLights, clear
+					name,
+					pipeline,
+					target,
+					passWidth,
+					passHeight,
+					bindings,
+					passUniforms,
+					passLights,
+					clear,
+					nullptr,
+					0,
+					passBeams
 				);
 			};
 
@@ -609,10 +621,22 @@ namespace engine::render {
 										std::span<const SDL_GPUTextureSamplerBinding> bindings,
 										const PbrUniforms *passUniforms,
 										const LightUniforms *passLights,
-										SDL_FColor clear
+										SDL_FColor clear,
+										const BeamUniforms *passBeams = nullptr
 									) {
 				recording.Fullscreen(
-					name, pipeline, target, passWidth, passHeight, bindings, passUniforms, passLights, clear
+					name,
+					pipeline,
+					target,
+					passWidth,
+					passHeight,
+					bindings,
+					passUniforms,
+					passLights,
+					clear,
+					nullptr,
+					0,
+					passBeams
 				);
 			};
 
@@ -635,7 +659,7 @@ namespace engine::render {
 			// expression`. `tuple_size_v` asks the type and never mentions the
 			// object at all.
 			constexpr size_t SPILL_BINDINGS =
-				std::tuple_size_v<std::remove_cvref_t<decltype(lightingBindings)>> + MAX_SEAM_LIGHTS;
+				std::tuple_size_v<std::remove_cvref_t<decltype(lightingBindings)>> + MAX_SEAM_LIGHTS + 1;
 			std::array<SDL_GPUTextureSamplerBinding, SPILL_BINDINGS> spillBindings{};
 			std::copy(lightingBindings.begin(), lightingBindings.end(), spillBindings.begin());
 
@@ -690,7 +714,7 @@ namespace engine::render {
 			}
 
 			for (size_t slot = 0; slot < chosen.size(); slot++) {
-				SDL_GPUTextureSamplerBinding &binding = spillBindings[lightingBindings.size() + slot];
+				SDL_GPUTextureSamplerBinding &binding = spillBindings[7 + slot];
 				if (chosen[slot] != nullptr) {
 					uniforms.SeamCentre[slot] = chosen[slot]->Centre;
 					uniforms.SeamOutward[slot] = chosen[slot]->Outward;
@@ -705,6 +729,10 @@ namespace engine::render {
 					binding = SDL_GPUTextureSamplerBinding{State->FallbackTexture, sampler};
 				}
 			}
+			spillBindings.back() = SDL_GPUTextureSamplerBinding{
+				State->BeamTexture != nullptr ? State->BeamTexture : State->FallbackTexture,
+				State->ShadowSampler != nullptr ? State->ShadowSampler : sampler,
+			};
 
 			const auto *node = Pipeline->Graph.Find(context.Node);
 			if (!node) return false;
@@ -812,6 +840,7 @@ namespace engine::render {
 				);
 				SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
 				SDL_PushGPUFragmentUniformData(Command, 1, &lightUniforms, sizeof(lightUniforms));
+				SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
 				const SDL_GPUViewport viewport{0, 0, float(baseline.Width), float(baseline.Height), 0, 1};
 				const SDL_Rect scissor{0, 0, int(baseline.Width), int(baseline.Height)};
 				SDL_SetGPUViewport(pass, &viewport);
@@ -839,7 +868,8 @@ namespace engine::render {
 				spillBindings,
 				&uniforms,
 				&lightUniforms,
-				SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f}
+				SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f},
+				&State->Beams
 			);
 			return true;
 		});

@@ -106,10 +106,32 @@ namespace engine::render {
 						depth = mirror->Depth;
 					}
 				}
-				if (RibbonCount > 0) {
-					if (!effects::FaceRibbonVertices(
+				std::span<const effects::RibbonRun> ribbonRuns = Request.RibbonRuns;
+				if (RibbonCount > 0 && entry.Kind == SurfaceCaptureKind::Portal) {
+					const PortalView &portal = Request.Portals[entry.Source];
+					if (portal.Partner < 0 || size_t(portal.Partner) >= Request.Portals.size()) {
+						return false;
+					}
+					const PortalView &partner = Request.Portals[portal.Partner];
+					if (!effects::ProjectRibbonsThroughPortal(
 							Request.RibbonVertices,
 							Request.RibbonRuns,
+							partner.Centre,
+							partner.Normal,
+							core::CFrame{},
+							1.0f,
+							bank.CaptureRibbonSource,
+							bank.CaptureRibbonRuns
+						)) {
+						return false;
+					}
+					ribbonRuns = bank.CaptureRibbonRuns;
+				}
+				if (RibbonCount > 0) {
+					if (!effects::FaceRibbonVertices(
+							entry.Kind == SurfaceCaptureKind::Portal ? std::span(bank.CaptureRibbonSource)
+																	 : Request.RibbonVertices,
+							ribbonRuns,
 							entry.Frame.Position,
 							bank.CaptureRibbons
 						) ||
@@ -306,7 +328,7 @@ namespace engine::render {
 						pass,
 						entry.Matrices.ViewProjection,
 						entry.Frame,
-						Request.RibbonRuns,
+						ribbonRuns,
 						Result.Triangles,
 						WorldColourTarget::Hdr
 					);

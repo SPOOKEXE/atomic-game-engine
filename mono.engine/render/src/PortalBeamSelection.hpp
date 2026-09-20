@@ -7,6 +7,8 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/graph/Shadow.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <glm/mat4x4.hpp>
@@ -26,6 +28,22 @@ namespace engine::render {
 		float PlaneOffset = 0.0f;
 		glm::mat4 Light{1.0f};
 	};
+
+	// The visible pane maps destination receivers into its partner's source chart.
+	// Its depth map renders the unmodified source casters through that partner aperture.
+	inline PortalBeamProjector PortalBeamFromPair(
+		const PortalView &pane,
+		const PortalView &partner,
+		const core::AABB &sceneBounds,
+		const core::Vector3 &sun
+	) {
+		return {
+			.Back = pane.Warp,
+			.PlaneNormal = partner.Normal,
+			.PlaneOffset = partner.Normal.Dot(partner.Centre),
+			.Light = graph::FitPortalLight(sceneBounds, partner.Centre, partner.First, partner.Second, sun),
+		};
+	}
 
 	struct PortalBeamRank {
 		uint32_t Slot = 0;

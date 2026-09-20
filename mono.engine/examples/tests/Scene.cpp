@@ -1929,11 +1929,8 @@ namespace {
 	constexpr std::string_view PLANET_CHUNK_PREFIX = "PlanetChunk_Haven_";
 	constexpr std::string_view PLANET_MESH_PREFIX = "PlanetMesh_Haven_";
 	constexpr size_t PLANET_PATCH_RESOLUTION = 17;
-	constexpr size_t PLANET_PATCH_VERTICES =
-		PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION + 4 * (PLANET_PATCH_RESOLUTION - 1);
-	constexpr size_t PLANET_PATCH_INDICES =
-		(PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6 +
-		4 * (PLANET_PATCH_RESOLUTION - 1) * 6;
+	constexpr size_t PLANET_PATCH_VERTICES = PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION;
+	constexpr size_t PLANET_PATCH_INDICES = (PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6;
 
 	size_t PlanetChunks(Store &store) {
 		size_t chunks = 0;
@@ -2098,8 +2095,8 @@ TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", 
 		REQUIRE(selection != nullptr);
 		CHECK(selection->Shader == Name("PlanetSurface"));
 
-		// The skirt vertices follow the 17 by 17 surface grid. The surface stays
-		// outside the base radius and every cell faces away from the origin.
+		// The stitched surface stays outside the base radius and each cell
+		// faces away from the origin.
 		const engine::core::Vector3 centre = transform->Frame.Position;
 		for (size_t vertex = 0; vertex < PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION; vertex++) {
 			const float radius = (mesh.Positions[vertex] + centre).Magnitude();
@@ -2182,9 +2179,7 @@ TEST_CASE("the planet is a pure function of its seed and tick", "[examples][scen
 	CHECK(first == second);
 }
 
-TEST_CASE(
-	"the PBR shader material demo binds every map to every mesh shader route", "[examples][scene][pbr]"
-) {
+TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples][scene][pbr]") {
 	const StagedAssets assets;
 
 	Store store("pbr.shader.material");
@@ -2195,16 +2190,17 @@ TEST_CASE(
 	INFO(error);
 	REQUIRE(loaded);
 
-	// The renderer owns material resolution, so the generic scene loader leaves
-	// it unscheduled. Resolve once here to inspect the same derived draw inputs
-	// the client's pre-render phase consumes.
-	REQUIRE(engine::scene::ResolveMaterials(store) == 3);
-
-	// Light transforms happen in the normal tick path, so let the other scene
-	// systems settle before checking the authored light rows.
+	// Each relief mesh commits through the deterministic editable-mesh barrier,
+	// so advance past the four authored transactions before inspecting their
+	// bound material routes.
 	for (size_t tick = 0; tick < 4; tick++) {
 		systems.Tick(store, 1.0f / 60.0f);
 	}
+
+	// The renderer owns material resolution, so the generic scene loader leaves
+	// it unscheduled. Resolve once here to inspect the same derived draw inputs
+	// the client's pre-render phase consumes.
+	REQUIRE(engine::scene::ResolveMaterials(store) == 0);
 
 	const std::array maps{
 		"PbrDemo_Colour",
@@ -2221,10 +2217,36 @@ TEST_CASE(
 		REQUIRE(image != engine::ecs::NULL_ENTITY);
 		const auto *editable = store.Get<engine::scene::EditableImage>(image);
 		REQUIRE(editable != nullptr);
-		CHECK(editable->Width == 64);
-		CHECK(editable->Height == 64);
+		CHECK(editable->Width == 256);
+		CHECK(editable->Height == 256);
 		CHECK(editable->Revision > 0);
+		if (index < 4) {
+			const auto stonePixel = editable->Pixels.begin() + (160 * 256 + 160) * 4;
+			CHECK_FALSE(std::equal(editable->Pixels.begin(), editable->Pixels.begin() + 4, stonePixel));
+		}
 		contentIds[index] = engine::scene::EditableImageContentName(store, image);
+	}
+
+	for (const char *meshName : {"DefaultPbr_ReliefMesh", "WarmStonePbr_ReliefMesh"}) {
+		const Entity meshEntity = InScene(store, meshName);
+		REQUIRE(meshEntity != engine::ecs::NULL_ENTITY);
+		const auto *mesh = store.Get<engine::scene::EditableMesh>(meshEntity);
+		REQUIRE(mesh != nullptr);
+		CHECK(mesh->Positions.size() == 85 * 113);
+		CHECK(mesh->Indices.size() == 84 * 112 * 6);
+		const auto radius = [](const engine::core::Vector3 &point) { return point.Magnitude(); };
+		const auto [minimum, maximum] = std::minmax_element(
+			mesh->Positions.begin(), mesh->Positions.end(), [&](const auto &left, const auto &right) {
+				return radius(left) < radius(right);
+			}
+		);
+		REQUIRE(minimum != mesh->Positions.end());
+		REQUIRE(maximum != mesh->Positions.end());
+		CHECK(radius(*maximum) - radius(*minimum) > 0.07f);
+		const auto &a = mesh->Positions[mesh->Indices[29 * 3]];
+		const auto &b = mesh->Positions[mesh->Indices[29 * 3 + 1]];
+		const auto &c = mesh->Positions[mesh->Indices[29 * 3 + 2]];
+		CHECK((b - a).Cross(c - a).Dot(a) > 0.0f);
 	}
 
 	const auto mapsOf = [&](const char *partName) {
@@ -2248,39 +2270,17 @@ TEST_CASE(
 	REQUIRE(defaultAppearance != nullptr);
 	CHECK(!defaultAppearance->Shader.IsValid());
 
-	for (const auto &[partName, shader] : std::array{
-			 std::pair{"ToonPbrTexture", "toon"},
-			 std::pair{"UnlitPbrTexture", "unlit"},
-			 std::pair{"RuntimeShaderMaps", "PbrMapSampler"},
-		 }) {
+	for (const char *partName : {"CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
 		const Entity part = mapsOf(partName);
 		const auto *appearance = store.Get<engine::scene::SurfaceAppearance>(part);
 		REQUIRE(appearance != nullptr);
-		CHECK(appearance->Shader == Name(shader));
-	}
-
-	const engine::scene::ShaderText sampler = engine::scene::ShaderTextOf(store, Name("PbrMapSampler"));
-	REQUIRE(sampler.Found);
-	for (const char *samplerName :
-		 {"colourMap",
-		  "normalMap",
-		  "roughnessMap",
-		  "occlusionMap",
-		  "heightMap",
-		  "metalnessMap",
-		  "emissiveMap"}) {
-		CHECK(sampler.Code.find(samplerName) != std::string::npos);
-	}
-	// Keep the runtime shader's light and shadow paths present in the authored
-	// source so changes do not silently remove them.
-	for (const char *lightingTerm :
-		 {"LocalLight", "LightRows[48]", "DirectionalShadow", "inLightPosition.w <= 0.0"}) {
-		CHECK(sampler.Code.find(lightingTerm) != std::string::npos);
+		CHECK_FALSE(appearance->Shader.IsValid());
 	}
 
 	for (const auto &[lampName, kind, brightness] : std::array{
-			 std::tuple{"CoolPointLamp", engine::scene::LightKind::Point, 280.0f},
-			 std::tuple{"WarmSpotLamp", engine::scene::LightKind::Spot, 520.0f},
+			 std::tuple{"CoolPointLamp", engine::scene::LightKind::Point, 260.0f},
+			 std::tuple{"WarmSpotLamp", engine::scene::LightKind::Spot, 100.0f},
+			 std::tuple{"StoneFillLamp", engine::scene::LightKind::Point, 110.0f},
 		 }) {
 		const Entity lamp = InScene(store, lampName);
 		REQUIRE(lamp != engine::ecs::NULL_ENTITY);

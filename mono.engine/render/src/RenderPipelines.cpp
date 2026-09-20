@@ -587,10 +587,10 @@ namespace engine::render {
 		SDL_GPUShader *cameraMotionFragment =
 			LoadShader("camera-motion.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
-		// Nine samplers: the seven G-buffer and shadow inputs plus the two seam
-		// light-field captures - `MAX_SEAM_LIGHTS`, bound last.
+		// Ten samplers: the seven G-buffer and shadow inputs, two seam light
+		// captures, then the portal shadow beam atlas.
 		SDL_GPUShader *deferredLightingFragment =
-			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
+			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
@@ -1486,7 +1486,7 @@ namespace engine::render {
 	bool Renderer::Impl::EnsureDeferredLightingBaseline() {
 		if (DeferredLightingBaselinePipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
+		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription targets[2]{};
 			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -1512,7 +1512,8 @@ namespace engine::render {
 	bool Renderer::Impl::EnsureDeferredLightingDirectional() {
 		if (DeferredLightingDirectionalPipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		auto *fragment = LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
+		auto *fragment =
+			LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription targets[3]{};
 			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;

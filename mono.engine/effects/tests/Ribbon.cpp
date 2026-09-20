@@ -340,3 +340,26 @@ TEST_CASE(
 	CHECK_FALSE(effects::FaceRibbonVertices(original.Vertices, original.Runs, {}, child));
 	CHECK(child.front().Position == beforeRefusal);
 }
+
+TEST_CASE("portal ribbon projection cuts a transient strip at the seam", "[effects][ribbon][portal]") {
+	using namespace engine;
+	std::vector<effects::RibbonVertex> source;
+	for (float depth : {1.0f, -1.0f, -2.0f}) {
+		source.push_back({{-.5f, 0, depth}, {0, 0}, 0xffffffff});
+		source.push_back({{.5f, 0, depth}, {0, 1}, 0xffffffff});
+	}
+	effects::RibbonRun run;
+	run.Count = static_cast<uint32_t>(source.size());
+	std::vector<effects::RibbonVertex> projected;
+	std::vector<effects::RibbonRun> runs;
+	REQUIRE(
+		effects::ProjectRibbonsThroughPortal(
+			source, {&run, 1}, {}, core::Vector3::ZAxis, core::CFrame{}, 1, projected, runs
+		)
+	);
+	REQUIRE(runs.size() == 1);
+	CHECK(runs.front().First == 0);
+	CHECK(runs.front().Count == 6);
+	CHECK(projected.front().Position.Z == Catch::Approx(0.0f));
+	CHECK(projected.back().Position.Z == Catch::Approx(-2.0f));
+}

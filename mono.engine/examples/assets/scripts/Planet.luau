@@ -16,13 +16,11 @@
 -- The surface follows the layered simple, ridged and crater filters from
 -- Sebastian Lague's procedural planet series. The series deliberately stops
 -- short of LOD; this demo continues its cube-face split into a bounded quadtree
--- per body and gives each leaf a radial skirt so adjacent levels cannot expose
--- the background.
+-- per body and stitches each fine/coarse border to the coarse edge it meets.
 --
--- **What this does not prove.** The skirts plus snapped coarse edges below hide
--- T-junctions; they are not the 16-pattern stitched transition set the plan
--- requires before calling any surface crack-free. The geometric error is a span
--- heuristic, not the bounded estimator. The single `AtmosphereProcedural` is
+-- **What this does not prove.** The edge stitch below only covers neighbours one
+-- depth apart; balancing is what keeps that restriction true. The geometric
+-- error is a span heuristic, not the bounded estimator. The single `AtmosphereProcedural` is
 -- driven from the terran body; the giant and the moon share the sky it makes.
 -- The ocean is visual only: it does not collide, and the swash is foam
 -- oscillating at the waterline rather than water running up the beach mesh.
@@ -66,8 +64,9 @@ local AUTO_RESEED_TICK = 3600
 local RESEED_SEED = 55555
 
 -- Chunk-boundary overlay. One SelectionBox per live leaf, coloured by depth, so
--- a screenshot shows the quadtree the camera asked for.
-local OVERLAY_ENABLED = true
+-- a screenshot shows the quadtree the camera asked for. It is off in the demo
+-- because its always-on-top lines obscure the very surface being inspected.
+local OVERLAY_ENABLED = false
 
 type NoiseLayer = {
 	Kind: "Simple" | "Ridged" | "Crater",
@@ -468,11 +467,14 @@ local function FaceEnabled(face: Face): boolean
 		or (FACE_RENDER_MASK == "Back" and face.Name == "NZ")
 end
 
-local function FaceOfDirection(direction: Vector3): Face
+-- Finds the owner of an unprojected cube point. Cube-face adjacency must stay
+-- in this domain: applying `Spherify` first warps the coordinates, so dividing
+-- that direction by a new face normal does not recover the neighbouring cell.
+local function FaceOfCube(cube: Vector3): Face
 	local best = faces[1]
-	local bestDot = direction:Dot(best.LocalUp)
+	local bestDot = cube:Dot(best.LocalUp)
 	for index = 2, #faces do
-		local dot = direction:Dot(faces[index].LocalUp)
+		local dot = cube:Dot(faces[index].LocalUp)
 		if dot > bestDot then
 			bestDot = dot
 			best = faces[index]
@@ -481,13 +483,12 @@ local function FaceOfDirection(direction: Vector3): Face
 	return best
 end
 
-local function UvOnFace(face: Face, direction: Vector3): (number, number)
-	local denom = direction:Dot(face.LocalUp)
+local function UvOnCubeFace(face: Face, cube: Vector3): (number, number)
+	local denom = cube:Dot(face.LocalUp)
 	if math.abs(denom) < 1e-6 then
 		return 0, 0
 	end
-	local cube = direction * (1 / denom)
-	return cube:Dot(face.AxisA), cube:Dot(face.AxisB)
+	return cube:Dot(face.AxisA) / denom, cube:Dot(face.AxisB) / denom
 end
 
 local function DirectionAt(face: Face, u: number, v: number): Vector3
@@ -610,12 +611,6 @@ void main() {
 	vec3 lit = albedo * inColour.rgb * inSurfaceColour;
 	lit *= lighting.Ambient.rgb + lighting.Direct.rgb * lambert;
 	lit += vec3(oceanGlint);
-	// Night-side settlements: a deterministic cell hash over the biome/height
-	// UV, lit only where the sun is down and the ground is land.
-	float night = smoothstep(0.05, -0.15, lambert);
-	vec2 cell = floor(inTexCoord * vec2(240.0, 90.0));
-	float sparkle = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-	lit += vec3(1.0, 0.75, 0.45) * (night * land * step(0.86, sparkle) * 0.9);
 	outColour = vec4(lit, max(inColour.a, lighting.Flags.w));
 }
 ]]
@@ -883,9 +878,8 @@ local function NeighbourCell(node: Node, edge: string): (Face, number, number)
 		sv = node.V0 + node.Size * 1.02
 	end
 	local cube = node.Face.LocalUp + node.Face.AxisA * su + node.Face.AxisB * sv
-	local direction = Spherify(cube)
-	local owner = FaceOfDirection(direction)
-	local uu, vv = UvOnFace(owner, direction)
+	local owner = FaceOfCube(cube)
+	local uu, vv = UvOnCubeFace(owner, cube)
 	local cells = 2 ^ node.Depth
 	local cell = 2 / cells
 	local x = math.clamp(math.floor((uu + 1) / cell), 0, cells - 1)
@@ -1057,18 +1051,18 @@ local function ChunkGeometry(
 		end
 	end
 
-	-- Coarse-edge snapping: where the neighbour is a level coarser, odd edge
-	-- vertices sit on the smooth field while the neighbour draws the straight
-	-- segment between its own corners. Pulling them to the segment midpoint
-	-- trades a small geometric error for a watertight join; the radial skirt
-	-- below backs it up rather than being the whole answer.
+	-- Coarse-edge stitching: where the neighbour is a level coarser, odd edge
+	-- vertices must agree with its straight edge in every interpolated channel.
+	-- Moving only position makes the mesh watertight but leaves a lighting or LUT
+	-- discontinuity. The midpoint values are exactly what the coarse triangle
+	-- interpolates at the T-junction, so both sides shade and texture as one.
 	local function snapEdgeVertex(id: number, prevId: number, nextId: number)
 		local prev = rawVertices[prevId + 1]
 		local next = rawVertices[nextId + 1]
 		rawVertices[id + 1] = {
 			Position = (prev.Position + next.Position) * 0.5,
-			Normal = rawVertices[id + 1].Normal,
-			UV = rawVertices[id + 1].UV,
+			Normal = (prev.Normal + next.Normal).Unit,
+			UV = (prev.UV + next.UV) * 0.5,
 		}
 	end
 
@@ -1110,47 +1104,6 @@ local function ChunkGeometry(
 			table.insert(indices, d)
 			table.insert(indices, c)
 		end
-	end
-
-	-- One counter-clockwise perimeter, without duplicated corners. Its inset
-	-- copy makes a small radial wall beneath the patch and hides T-junctions
-	-- where a fine leaf meets a coarse one.
-	local skirtDepth = if body.GasGiant then 0.8 else 1.5
-	local perimeter: { number } = {}
-	for x = 0, nodeResolution - 1 do
-		table.insert(perimeter, x)
-	end
-	for y = 1, nodeResolution - 1 do
-		table.insert(perimeter, y * nodeResolution + nodeResolution - 1)
-	end
-	for x = nodeResolution - 2, 0, -1 do
-		table.insert(perimeter, (nodeResolution - 1) * nodeResolution + x)
-	end
-	for y = nodeResolution - 2, 1, -1 do
-		table.insert(perimeter, y * nodeResolution)
-	end
-
-	local skirt: { number } = {}
-	for _, outerId in perimeter do
-		local outer = rawVertices[outerId + 1]
-		table.insert(
-			skirt,
-			addVertex(outer.Position - outer.Normal * skirtDepth, outer.Normal, outer.UV)
-		)
-	end
-
-	for index = 1, #perimeter do
-		local following = index % #perimeter + 1
-		local outer0 = perimeter[index]
-		local outer1 = perimeter[following]
-		local inner0 = skirt[index]
-		local inner1 = skirt[following]
-		table.insert(indices, outer0)
-		table.insert(indices, inner0)
-		table.insert(indices, outer1)
-		table.insert(indices, outer1)
-		table.insert(indices, inner0)
-		table.insert(indices, inner1)
 	end
 
 	local centre = (lowest + highest) * 0.5
@@ -1468,8 +1421,10 @@ workspace.CurrentCamera = eye
 
 Lighting.Brightness = 0.75
 Lighting.ClockTime = 14.5
-Lighting.Ambient = Color3.fromRGB(18, 23, 34)
-Lighting.OutdoorAmbient = Color3.fromRGB(28, 34, 48)
+-- A planet tour reaches its nightward side. Keep enough cool fill to inspect
+-- terrain and LOD joins there while the directional sun still shapes the day.
+Lighting.Ambient = Color3.fromRGB(48, 58, 76)
+Lighting.OutdoorAmbient = Color3.fromRGB(58, 68, 88)
 Lighting.FogColor = Color3.fromRGB(4, 7, 16)
 Lighting.FogStart = 380
 Lighting.FogEnd = 950

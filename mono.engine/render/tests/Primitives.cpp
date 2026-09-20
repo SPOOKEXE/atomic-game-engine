@@ -32,6 +32,7 @@ using engine::render::BeamQuadrant;
 using engine::render::BillboardQuad;
 using engine::render::CanvasFacesViewer;
 using engine::render::CanvasPixelsPerStud;
+using engine::render::PortalBeamFromPair;
 using engine::render::PortalBeamInfluenceDistanceSquared;
 using engine::render::PortalBeamMappedBounds;
 using engine::render::PortalBeamProjector;
@@ -165,6 +166,36 @@ TEST_CASE("portal beam receiver bounds rotate once through a seam", "[render][pr
 	REQUIRE(mapped.Maximum.X == Approx(expected.Maximum.X));
 	REQUIRE(mapped.Maximum.Y == Approx(expected.Maximum.Y));
 	REQUIRE(mapped.Maximum.Z == Approx(expected.Maximum.Z));
+}
+
+TEST_CASE("portal beam projects destination receivers through the source aperture", "[render][primitives]") {
+	engine::render::PortalView destination;
+	destination.Centre = {80.0f, 6.0f, 0.0f};
+	destination.Normal = {1.0f, 0.0f, 0.0f};
+	destination.First = {0.0f, 0.0f, 5.0f};
+	destination.Second = {0.0f, 6.0f, 0.0f};
+	destination.Warp.Frame.Position = {-80.0f, 0.0f, 0.0f};
+	engine::render::PortalView source;
+	source.Centre = {0.0f, 6.0f, 0.0f};
+	source.Normal = {0.0f, 0.0f, 1.0f};
+	source.First = {5.0f, 0.0f, 0.0f};
+	source.Second = {0.0f, 6.0f, 0.0f};
+	const engine::core::AABB bounds{{-100.0f, -10.0f, -100.0f}, {100.0f, 20.0f, 100.0f}};
+	const PortalBeamProjector projector =
+		PortalBeamFromPair(destination, source, bounds, {0.0f, -1.0f, 1.0f});
+
+	const Vector3 mapped = projector.Back.Point(destination.Centre + Vector3{0.0f, 0.0f, 2.0f});
+	REQUIRE(mapped.X == Approx(0.0f));
+	REQUIRE(mapped.Y == Approx(6.0f));
+	REQUIRE(mapped.Z == Approx(2.0f));
+	REQUIRE(projector.PlaneNormal == source.Normal);
+	REQUIRE(projector.PlaneOffset == Approx(source.Normal.Dot(source.Centre)));
+
+	const glm::vec4 caster = projector.Light * glm::vec4{0.0f, 4.0f, -2.0f, 1.0f};
+	REQUIRE(std::abs(caster.x / caster.w) <= 1.0f);
+	REQUIRE(std::abs(caster.y / caster.w) <= 1.0f);
+	REQUIRE(caster.z / caster.w >= 0.0f);
+	REQUIRE(caster.z / caster.w <= 1.0f);
 }
 
 TEST_CASE("seven portal beams retain the offscreen aperture that reaches the view", "[render][primitives]") {

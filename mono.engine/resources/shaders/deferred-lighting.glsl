@@ -19,6 +19,9 @@ layout(set = 2, binding = 6) uniform sampler2D shadowImage;
 layout(set = 2, binding = 7) uniform sampler2D seamLightA;
 layout(set = 2, binding = 8) uniform sampler2D seamLightB;
 
+#define PORTAL_BEAM_SAMPLER_BINDING 9
+#include "portal-shadow-beams.glsl"
+
 layout(set = 3, binding = 0) uniform Pass {
 	mat4 InverseViewProjection;
 	mat4 LightViewProjection;
@@ -196,7 +199,7 @@ vec4 ShadeDeferred(out vec4 directionalResponse) {
 	vec3 ambient = AmbientRadiance(albedo.rgb, metalness, normal, pass.Ambient.rgb,
 		pass.OutdoorAmbient.rgb, occlusion);
 	vec3 unshadowedDirect = (diffuse * lambert + specular) * pass.Direct.rgb;
-	float shadowVisibility = ShadowFactor(world, normal, toLight);
+	float shadowVisibility = min(ShadowFactor(world, normal, toLight), PortalBeamFactor(world));
 	vec3 direct = unshadowedDirect * shadowVisibility;
 	vec3 lit = ambient + direct + LocalLight(world, normal, diffuse) + emissive +
 			   SeamSpill(0, world, normal, albedo.rgb) + SeamSpill(1, world, normal, albedo.rgb);

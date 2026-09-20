@@ -166,18 +166,23 @@ nozzle.CanCollide = false
 
 local sparks = Instance.new("ParticleEmitter")
 sparks.Name = "Through"
-sparks.Rate = 200
-sparks.Lifetime = NumberRange.new(1.0, 1.4)
+-- **Large enough to measure through the far pane.** The renderer carries points
+-- through this seam on the GPU, but the old half-stud sprites occupied only a
+-- few pixels in an 800 by 450 capture. These are deliberately a bright plume,
+-- not a production effect: `capture-portal-seam.sh` counts them as the proof
+-- that the projected image contains particles from the near room.
+sparks.Rate = 320
+sparks.Lifetime = NumberRange.new(1.4, 1.8)
 sparks.Speed = NumberRange.new(1, 2)
 sparks.SpreadAngle = Vector2.new(10, 10)
 
 -- **Driven at the hole rather than aimed at it.** An emitter's own speed is
 -- outward from its shape; the acceleration is what carries a plume in a
 -- direction, and +Z is straight through the pane six studs away.
-sparks.Acceleration = Vector3.new(0, 0, 26)
+sparks.Acceleration = Vector3.new(0, 0, 16)
 sparks.Size = NumberSequence.new({
-	NumberSequenceKeypoint.new(0, 0.5),
-	NumberSequenceKeypoint.new(1, 0.9),
+	NumberSequenceKeypoint.new(0, 2.4),
+	NumberSequenceKeypoint.new(1, 3.2),
 })
 sparks.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 60, 220)),
@@ -213,9 +218,10 @@ elseif WHICH == "front" then
 	-- around it - at `z = -16` square on, the eye stands *inside* the control.
 	viewpoint = CFrame.lookAt(Vector3.new(-13, 8, -13), Vector3.new(0, 4, 0))
 elseif WHICH == "far" then
-	-- The far room, looking back at its own pane, where the copy is the half
-	-- you can see and the original is what the hole shows.
-	viewpoint = CFrame.lookAt(Vector3.new(GAP + 13, 8, 13), Vector3.new(GAP - 10, 4, 0))
+	-- Close enough that the projected plume covers measurable pixels. The far
+	-- room has no emitter, so every magenta pixel in this view was projected
+	-- through its own pane from the near room.
+	viewpoint = CFrame.lookAt(Vector3.new(GAP + 6, 6, 8), Vector3.new(GAP - 10, 4, 0))
 end
 
 if viewpoint ~= nil then

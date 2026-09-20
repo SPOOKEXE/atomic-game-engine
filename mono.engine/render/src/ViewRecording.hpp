@@ -521,7 +521,8 @@ namespace engine::render {
 			const LightUniforms *passLights,
 			SDL_FColor clear,
 			const void *rawUniforms = nullptr,
-			size_t rawUniformBytes = 0
+			size_t rawUniformBytes = 0,
+			const BeamUniforms *passBeams = nullptr
 		);
 
 		// The renderer-owned texture a named resource role resolves to.
