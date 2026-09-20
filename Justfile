@@ -1101,6 +1101,11 @@ client-smoke: (build "client")
         || { echo "FAIL: the button was pressed and its Activated never reached the script"; tail -20 "$log"; exit 1; }
     echo "client ok - pressed a button with no display and the script heard it"
 
+# Capture the shipped GUI compositor at two sizes and compare click-driven
+# status changes. The report keeps the BMPs beside the build for human review.
+ui-check: (build "client")
+    PRESET={{preset}} ./scripts/demos/ui-visual-check.sh
+
 # Run the client to a frame budget and check the process actually ends.
 #
 # **A hang is the one failure a `TEST_CASE` cannot report**, which is why this

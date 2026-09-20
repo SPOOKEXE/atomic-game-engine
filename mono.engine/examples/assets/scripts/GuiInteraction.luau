@@ -3,8 +3,9 @@
 --
 -- The regular Interface scene exercises layout and physical text entry in a
 -- large composition. This keeps the interaction contract small enough that a
--- screenshot and the on-screen counters answer the narrower question: can
--- labels and images render, and do both button classes call their handlers?
+-- screenshot and the on-screen state answer the narrower question: can labels
+-- and images render, do both button classes call their handlers, and does a
+-- TextBox reflect focus and typed text?
 
 local screen = Instance.new("ScreenGui")
 screen.Name = "GuiInteractionDemo"
@@ -166,6 +167,17 @@ detail.TextXAlignment = Enum.TextXAlignment.Left
 detail.TextYAlignment = Enum.TextYAlignment.Top
 detail.Parent = panel
 
+local eventStatus = Instance.new("TextLabel")
+eventStatus.Name = "EventStatus"
+eventStatus.Position = UDim2.new(0, 194, 0, 354)
+eventStatus.Size = UDim2.new(1, -218, 0, 32)
+eventStatus.BackgroundTransparency = 1
+eventStatus.Text = "READY"
+eventStatus.TextColor3 = CYAN
+eventStatus.TextSize = 14
+eventStatus.TextXAlignment = Enum.TextXAlignment.Left
+eventStatus.Parent = panel
+
 local textClicks = 0
 local imageClicks = 0
 
@@ -173,14 +185,40 @@ local function refreshStatus()
 	status.Text = string.format("PASS  TextButton %d   ImageButton %d", textClicks, imageClicks)
 end
 
+local function showEvent(name)
+	eventStatus.Text = name
+end
+
 textButton.Activated:Connect(function()
 	textClicks += 1
 	refreshStatus()
+	showEvent("TextButton activated")
 end)
 
 imageButton.Activated:Connect(function()
 	imageClicks += 1
 	refreshStatus()
+	showEvent("ImageButton activated")
+end)
+
+textButton.MouseEnter:Connect(function()
+	showEvent("TextButton hover")
+end)
+
+textButton.MouseButton1Down:Connect(function()
+	showEvent("TextButton down")
+end)
+
+textButton.MouseButton1Up:Connect(function()
+	showEvent("TextButton up")
+end)
+
+textBox.Focused:Connect(function()
+	showEvent("TextBox focused")
+end)
+
+textBox.FocusLost:Connect(function()
+	showEvent("TextBox focus lost")
 end)
 
 -- The scene fails loudly if a property reaches the wrong component. The
@@ -194,3 +232,4 @@ assert(textBox.Text == "TextBox component", "TextBox did not retain text")
 textButton:EmulateClick()
 imageButton:EmulateClick()
 assert(textClicks == 1 and imageClicks == 1, "a button did not emulate its click")
+showEvent("READY")

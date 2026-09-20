@@ -18,10 +18,13 @@
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/InterfacePass.hpp>
@@ -64,6 +67,9 @@ TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.input")
 TEST_DEPENDS("engine.gui.services")
+TEST_DEPENDS("engine.gui.compile")
+TEST_DEPENDS("engine.gui.input")
+TEST_DEPENDS("engine.gui.typing")
 TEST_DEPENDS("engine.game.roundtrip")
 
 using Catch::Approx;
@@ -95,6 +101,7 @@ namespace {
 	struct Session {
 		Store World{"integration"};
 		Scheduler Systems;
+		std::shared_ptr<engine::script::Runtime> Scripts;
 
 		explicit Session(std::string_view scene = "Rings.luau") {
 			engine::parallel::Jobs::Start(2);
@@ -107,9 +114,10 @@ namespace {
 			engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
 
 			const bool built = client::BuildScriptedWorld(
-				World, Systems, engine::examples::ExamplePath(std::string(scene)), ENTITIES
+				World, Systems, engine::examples::ExamplePath(std::string(scene)), ENTITIES, &Scripts
 			);
 			REQUIRE(built);
+			REQUIRE(Scripts != nullptr);
 		}
 
 		~Session() {
@@ -155,6 +163,136 @@ namespace {
 		});
 		return found;
 	}
+
+	engine::ecs::Entity FirstGuiElement(Store &store, std::string_view name) {
+		engine::ecs::Entity found = engine::ecs::NULL_ENTITY;
+		store.Each<const engine::gui::Element>([&](engine::ecs::Entity entity, const engine::gui::Element &) {
+			if (found == engine::ecs::NULL_ENTITY &&
+				store.InstanceNameOf(entity) == engine::core::Name(name)) {
+				found = entity;
+			}
+		});
+		return found;
+	}
+
+	const engine::gui::DrawCommand *
+	CommandFor(const engine::gui::DrawList &list, engine::ecs::Entity source) {
+		const auto found =
+			std::find_if(list.Commands.begin(), list.Commands.end(), [source](const auto &command) {
+				return command.Source == source;
+			});
+		return found == list.Commands.end() ? nullptr : &*found;
+	}
+
+	const engine::gui::DrawCommand *
+	TextCommandFor(const engine::gui::DrawList &list, engine::ecs::Entity source) {
+		const auto found =
+			std::find_if(list.Commands.begin(), list.Commands.end(), [source](const auto &command) {
+				return command.Source == source && command.Kind == engine::gui::DrawKind::Text;
+			});
+		return found == list.Commands.end() ? nullptr : &*found;
+	}
+}
+
+TEST_CASE("GuiInteraction routes client controls into visible scripted state", "[client][gui][scripting]") {
+	Session session("GuiInteraction.luau");
+	Store &store = session.World;
+
+	const engine::ecs::Entity textButton = FirstGuiElement(store, "TextButton");
+	const engine::ecs::Entity imageButton = FirstGuiElement(store, "ImageButton");
+	const engine::ecs::Entity textBox = FirstGuiElement(store, "TextBox");
+	const engine::ecs::Entity status = FirstGuiElement(store, "InteractionStatus");
+	const engine::ecs::Entity eventStatus = FirstGuiElement(store, "EventStatus");
+	REQUIRE(textButton != engine::ecs::NULL_ENTITY);
+	REQUIRE(imageButton != engine::ecs::NULL_ENTITY);
+	REQUIRE(textBox != engine::ecs::NULL_ENTITY);
+	REQUIRE(status != engine::ecs::NULL_ENTITY);
+	REQUIRE(eventStatus != engine::ecs::NULL_ENTITY);
+
+	engine::gui::CompileRequest request;
+	request.Display = {.Width = 1280.0f, .Height = 720.0f};
+	request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
+	const auto *local = store.Resource<engine::scene::LocalPlayer>();
+	REQUIRE(local != nullptr);
+	request.Viewer = local->Instance;
+
+	engine::gui::Compiled compiled;
+	engine::gui::Router router;
+	const auto frame = [&](engine::core::Vector2 position, bool down) {
+		request.Hovered = router.Hovered();
+		request.Pressed = router.Pressed();
+		REQUIRE(engine::gui::Layout(store, request.Display) > 0);
+		compiled.Rebuild(store, request);
+
+		engine::gui::Pointer pointer;
+		pointer.Position = position;
+		pointer.Down = down;
+		pointer.Inside = true;
+		pointer.ScreenOnly = true;
+		session.Scripts->DeliverGuiEvents(router.Update(store, compiled.Commands(), pointer));
+		session.Tick(1);
+	};
+	const auto centre = [&](engine::ecs::Entity element) {
+		const auto *resolved = store.Get<engine::gui::Resolved>(element);
+		REQUIRE(resolved != nullptr);
+		return resolved->AbsolutePosition + resolved->AbsoluteSize * 0.5f;
+	};
+
+	// The compiled rectangles are the render and hit-test contract. The button
+	// centres below come from them, so a stale or displaced visual cannot pass
+	// by routing against a hand-written coordinate.
+	frame({0.0f, 0.0f}, false);
+	for (const engine::ecs::Entity element : {textButton, imageButton, textBox}) {
+		const auto *resolved = store.Get<engine::gui::Resolved>(element);
+		const auto *command = CommandFor(compiled.Commands(), element);
+		REQUIRE(resolved != nullptr);
+		REQUIRE(command != nullptr);
+		CHECK(command->Bounds.Min == resolved->AbsolutePosition);
+		CHECK(command->Bounds.Size() == resolved->AbsoluteSize);
+	}
+
+	frame(centre(textButton), false);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextButton hover");
+	frame(centre(textButton), true);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextButton down");
+	frame(centre(textButton), false);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextButton activated");
+	CHECK(store.Get<engine::gui::Label>(status)->Text == "PASS  TextButton 2   ImageButton 1");
+
+	frame(centre(imageButton), false);
+	frame(centre(imageButton), true);
+	frame(centre(imageButton), false);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "ImageButton activated");
+	CHECK(store.Get<engine::gui::Label>(status)->Text == "PASS  TextButton 2   ImageButton 2");
+
+	frame(centre(textBox), false);
+	frame(centre(textBox), true);
+	CHECK(engine::gui::FocusedTextBox(store) == textBox);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextBox focused");
+
+	engine::gui::Typing typing;
+	typing.Text = " checked";
+	const engine::gui::TypeResult typed = engine::gui::Type(store, typing);
+	CHECK(typed.Instance == textBox);
+	CHECK(typed.Changed);
+	CHECK(store.Get<engine::gui::Label>(textBox)->Text == "TextBox component checked");
+
+	request.Hovered = router.Hovered();
+	request.Pressed = router.Pressed();
+	REQUIRE(engine::gui::Layout(store, request.Display) > 0);
+	REQUIRE(compiled.Rebuild(store, request));
+	const auto *text = TextCommandFor(compiled.Commands(), textBox);
+	REQUIRE(text != nullptr);
+	CHECK(text->Text == "TextBox component checked");
+
+	// `Type` owns the string write and has no artificial GUI event. Moving the
+	// pointer outside the canvas proves the router, rather than a direct focus
+	// mutation, releases the keyboard and delivers the script's focus-lost signal.
+	frame(centre(textBox), false);
+	frame({0.0f, 0.0f}, false);
+	frame({0.0f, 0.0f}, true);
+	CHECK(engine::gui::FocusedTextBox(store) == engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextBox focus lost");
 }
 
 TEST_CASE("data capture driver ticket transition is paused, strict, and terminal", "[client][data-capture]") {
