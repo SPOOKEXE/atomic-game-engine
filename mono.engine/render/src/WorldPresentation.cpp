@@ -354,10 +354,6 @@ namespace engine::render {
 		signature = FoldPresentation(signature, view.World);
 		signature = FoldPresentation(signature, view.WorldName.Id());
 		signature = FoldPresentation(signature, ContentOwnerSignature(view));
-		// The device advances particle positions, but a changed particle frame can
-		// also carry a new emitter block. Keep the scene recording live until that
-		// block has been staged instead of reusing the frame from before it existed.
-		signature = FoldPresentation(signature, view.ParticleRevision);
 		signature = FoldPresentation(signature, view.ParticleLayoutRevision);
 		signature = FoldPresentation(signature, view.ParticleResidentRevision);
 		signature = FoldPresentation(signature, view.Particles.size());
