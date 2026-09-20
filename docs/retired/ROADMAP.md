@@ -2872,3 +2872,21 @@ as datatypes? we can do a 3D and 2D vector field and particles can read directly
 - [x] shadows projecting through portals
 - [x] pbr demo upgrade
 - [x] fix more portal light culling issues (tunnels demo)
+- [x] jobs.join.assigned breakdown addition
+- [x] objects under scene image cascaded cache fixes for paused simulations
+- [x] meshgrid aspect ratio fixes
+- [x] huge gpu asset textures tweaks/fixes
+- [x] teamcreate testing and fixes
+- [x] selection boxes, selecting and mutation fixes
+- [x] bigger skygrid demo
+- [x] profiler unaccounted block fixes
+- [x] physics profiler fixed
+- [x] thermal mirror shader purple fix
+- [x] mesh persistence fix
+- [x] magic demo flash fix
+- [x] adornment tests and fixes
+- [x] particle flipbooks fixed
+- [x] ui scroll fixes
+- [x] adornment mouse events
+- [x] optimisations over new render pipeline
+- [x] editablemesh input fixes
