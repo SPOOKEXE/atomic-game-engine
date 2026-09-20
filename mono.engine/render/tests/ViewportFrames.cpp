@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <vector>
 
 using engine::core::Name;
@@ -64,8 +65,18 @@ TEST_CASE(
 	render::ViewportFrames frames;
 	REQUIRE(frames.Render(fixture.Render, store, commands, 1, firstOwner) == 1);
 	const auto capture = [&](Name owner) {
-		REQUIRE(frames.Render(fixture.Render, store, commands, 1, owner) == 1);
-		CHECK(frames.Resolve(viewport).Texture != nullptr);
+		void *const previous = frames.Resolve(viewport).Texture;
+		render::InterfaceImage frameImage;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (std::chrono::steady_clock::now() < deadline) {
+			REQUIRE(frames.Render(fixture.Render, store, commands, 1, owner) == 1);
+			frameImage = frames.Resolve(viewport);
+			if (frameImage.Texture != nullptr && frameImage.Texture != previous) break;
+			SDL_Delay(1);
+		}
+		INFO("viewport frame did not complete before the deadline");
+		REQUIRE(frameImage.Texture != nullptr);
+		REQUIRE(frameImage.Texture != previous);
 		return render::test::CaptureResource(
 			fixture.Render, Name("albedo"), 1, 64, 64, render::test::ImageFormat::Rgba8Unorm
 		);

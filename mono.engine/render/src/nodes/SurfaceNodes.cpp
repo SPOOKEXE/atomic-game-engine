@@ -115,23 +115,22 @@ namespace engine::render {
 							return candidate.Index == portal.Partner;
 						}
 					);
-					if (partner != Request.Portals.end()) {
-						if (!effects::ProjectRibbonsThroughPortal(
-								Request.RibbonVertices,
-								Request.RibbonRuns,
-								partner->Centre,
-								// The far aperture's capture-facing half-space is opposite its outward
-								// normal.
-								partner->Normal * -1.0f,
-								core::CFrame{},
-								1.0f,
-								bank.CaptureRibbonSource,
-								bank.CaptureRibbonRuns
-							)) {
-							return false;
-						}
-						ribbonRuns = bank.CaptureRibbonRuns;
+					if (partner == Request.Portals.end()) return false;
+					if (!effects::ProjectRibbonsThroughPortal(
+							Request.RibbonVertices,
+							Request.RibbonRuns,
+							partner->Centre,
+							// The far aperture's capture-facing half-space is opposite its outward
+							// normal.
+							partner->Normal * -1.0f,
+							core::CFrame{},
+							1.0f,
+							bank.CaptureRibbonSource,
+							bank.CaptureRibbonRuns
+						)) {
+						return false;
 					}
+					ribbonRuns = bank.CaptureRibbonRuns;
 				}
 				if (RibbonCount > 0) {
 					if (!effects::FaceRibbonVertices(
