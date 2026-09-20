@@ -241,8 +241,23 @@ namespace engine::replication {
 		//
 		// @param tick   The tick the pose is the state of.
 		// @param entity Whose pose it is.
+		// A cumulative coordinate chart for a pose. Hosts use this for a body
+		// carried between discontinuous spaces, while ordinary replicated poses
+		// leave it absent.
+		struct Chart {
+			core::CFrame Frame;
+			float Scale = 1.0f;
+			uint32_t Serial = 0;
+		};
+
 		// @param frame  Where it was.
-		void Record(uint64_t tick, ecs::Entity entity, const core::CFrame &frame);
+		// @param chart  The pose's cumulative coordinate chart, when it has one.
+		void Record(
+			uint64_t tick,
+			ecs::Entity entity,
+			const core::CFrame &frame,
+			const std::optional<Chart> &chart = std::nullopt
+		);
 
 		// Moves the render position on by one frame.
 		//
@@ -452,6 +467,7 @@ namespace engine::replication {
 		struct Pose {
 			uint64_t Tick = 0;
 			core::CFrame Frame;
+			std::optional<Chart> CoordinateChart;
 		};
 
 		// One entity's history, as a ring so that recording a tick is a write

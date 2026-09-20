@@ -1863,6 +1863,7 @@ namespace engine::render {
 		State->SlotShadowDetail.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
 		State->SlotTags.resize(uploadCount);
+		State->SlotRig.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
 		State->SlotSeamLight.resize(uploadCount);
 		State->SlotInstanceKey.resize(sceneCount);
@@ -1896,6 +1897,7 @@ namespace engine::render {
 													instance.SeamNormal.MagnitudeSquared() > 0.0f;
 				State->SlotShader[drawSlot] = instance.Shader;
 				State->SlotTags[drawSlot] = instance.TagMask;
+				State->SlotRig[drawSlot] = instance.Rig;
 				State->SlotSeam[drawSlot] = glm::vec4{
 					instance.SeamNormal.X,
 					instance.SeamNormal.Y,
@@ -2086,6 +2088,7 @@ namespace engine::render {
 						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
 						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
 						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
+						State->SlotRig[drawSlot] = State->SlotRig[sceneSlot];
 						State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
 						State->SlotSeamLight[drawSlot] = State->SlotSeamLight[sceneSlot];
 					}

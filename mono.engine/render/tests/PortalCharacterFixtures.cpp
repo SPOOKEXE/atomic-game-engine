@@ -372,14 +372,18 @@ TEST_CASE(
 	const scene::CameraMatrices matrices = scene::ResolveCamera(eye, camera, 1.0f);
 	const graph::Frustum frustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
 
-	std::array<scene::DrawInstance, 2> instances;
+	std::array<scene::DrawInstance, 3> instances;
 	// The source list also holds this giant offscreen floor. DrawOrder must keep
 	// it from making every field appear to reach the receiver.
 	instances[0].Frame.Position = {7, 0, 3};
 	instances[0].HalfExtent = {.5f, .5f, .05f};
 	instances[1].Frame.Position = {};
 	instances[1].HalfExtent = {100, 100, .05f};
+	instances[2].Frame.Position = {0, 0, -3};
+	instances[2].HalfExtent = {.5f, .5f, .05f};
+	instances[2].Rig = 91;
 	const std::array<uint32_t, 1> receiverRows{0};
+	const std::array<uint32_t, 2> receiverRowsWithCharacter{0, 2};
 	const std::array<render::SeamLightProjector, 6> fields{{
 		{.Centre = {0, 0, 0},
 		 .Outward = {0, 0, -1},
@@ -437,11 +441,22 @@ TEST_CASE(
 		render::SeamLightInfluenceDistanceSquared(fields[0], instances, receiverRows, eye.Position) >
 		render::SeamLightInfluenceDistanceSquared(fields[5], instances, receiverRows, eye.Position)
 	);
+	CHECK(
+		render::SeamLightStaticInfluenceDistanceSquared(
+			fields[0], instances, receiverRowsWithCharacter, eye.Position
+		) == render::SeamLightInfluenceDistanceSquared(fields[0], instances, receiverRows, eye.Position)
+	);
 
 	// A live field stays assigned while its spill reaches the view, even when a
 	// nearby candidate wins the instantaneous influence score by a tiny amount.
 	CHECK(render::SeamLightCaptureBefore(true, 1.01f, .5f, 0, false, 1.0f, .6f, 1));
 	CHECK_FALSE(render::SeamLightCaptureBefore(false, 1.01f, .5f, 0, false, 1.0f, .6f, 1));
+
+	// The probe feeds an outgoing light field, while the ordinary portal image
+	// still carries the player. A rig must not turn into a light blocker merely
+	// because it stands between the aperture camera and a ceiling lamp.
+	CHECK(render::SeamLightCaptureIncludes(0));
+	CHECK_FALSE(render::SeamLightCaptureIncludes(91));
 }
 
 TEST_CASE(
@@ -545,9 +560,10 @@ TEST_CASE(
 ) {
 	const int destinationSource = GENERATE(0, 1, 2, 3);
 	const float receivingSide = GENERATE(-1.0f, 1.0f);
+	const bool characterBlocker = destinationSource == 2 && GENERATE(false, true);
 	// Emission uses an authored 0..16 UNORM8 intensity. Choose an exact step.
 	constexpr float EMISSION = 128.0f / 255.0f;
-	CAPTURE(destinationSource, receivingSide);
+	CAPTURE(destinationSource, receivingSide, characterBlocker);
 	FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
@@ -568,7 +584,7 @@ TEST_CASE(
 	core::Name offender;
 	REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
 	REQUIRE(renderer.SetPipeline(pipelineName, graph));
-	std::array<scene::DrawInstance, 3> rows;
+	std::array<scene::DrawInstance, 4> rows;
 	for (size_t index = 0; index < rows.size(); index++) {
 		rows[index].Source = index + 1;
 		rows[index].Mesh = CUBE;
@@ -582,6 +598,13 @@ TEST_CASE(
 	rows[1].Surface = 0;
 	rows[2].Frame.Position = {100, 0, (destinationSource == 3 ? 3.0f : -3.0f) * receivingSide};
 	rows[2].HalfExtent = {10, 10, .01f};
+	// This body stands directly between the portal probe and the destination's
+	// red-lit receiver. It remains visible in normal portal imagery, but seam
+	// radiance must not blink when a player crosses that sight line.
+	rows[3].Frame.Position = {100, 0, -1.8f * receivingSide};
+	rows[3].HalfExtent = {4, 4, .25f};
+	rows[3].Tint = {};
+	rows[3].Rig = 777;
 	if (destinationSource == 1) {
 		rows[2].Tint = {};
 		rows[2].EmissiveMap = WHITE;
@@ -606,7 +629,7 @@ TEST_CASE(
 		view.WorldName = core::Name(index ? "radiance.with-portal" : "radiance.control");
 		view.Pipeline = pipelineName;
 		view.Target = &target;
-		view.Instances = std::span(rows).first(destinationSource ? 3 : 2);
+		view.Instances = std::span(rows).first(destinationSource ? 3 + characterBlocker : 2);
 		if (destinationSource == 2) view.Lights = std::span(&destinationLight, 1);
 		view.CameraFrame = CFrame::LookAt({0, 0, receivingSide}, {0, 0, 3 * receivingSide});
 		view.Camera.NearPlane = .1f;

@@ -422,6 +422,47 @@ TEST_CASE("what is drawn is interpolated between two received ticks", "[client][
 	}
 }
 
+TEST_CASE(
+	"a replicated portal crossing interpolates in its destination chart", "[client][replication][portal]"
+) {
+	Replica replica;
+	const Entity entity = replica.Spawn();
+
+	// The body has no transit state before its first crossing. The authority
+	// creates it while moving the body through a portal one hundred metres away.
+	// The two visual endpoints are adjacent after that chart transition, despite
+	// their raw world positions not being.
+	for (uint64_t tick = 1; tick <= 12; ++tick) {
+		replica.Receive(tick, entity, static_cast<float>(tick));
+		replica.DrawFrames(FRAMES_PER_TICK);
+	}
+
+	replica.World.Set(
+		entity, engine::scene::PortalTransit{.Frame = CFrame(Vector3{100.0f, 0.0f, 0.0f}), .Serial = 1}
+	);
+	const Entity limb = replica.Spawn();
+	replica.World.Set(limb, engine::scene::CharacterLimb{.Root = entity, .Offset = CFrame(Vector3{2, 0, 0})});
+	replica.Receive(13, entity, 113.0f);
+
+	auto *buffer = replica.World.ResourceMutable<SnapshotBuffer>();
+	REQUIRE(buffer != nullptr);
+	while (buffer->RenderTick() < 12.5) {
+		replica.Draw();
+	}
+
+	// A raw blend would put this at about 62.5, visibly racing through the
+	// space between mouths. Mapping tick 12 through the new chart keeps it
+	// alongside tick 13 at the exit.
+	CHECK(replica.Drawn() > 112.0f);
+	CHECK(replica.Drawn() < 113.0f);
+	const auto &instances = replica.Instances();
+	const auto drawnLimb = std::find_if(instances.begin(), instances.end(), [limb](const auto &instance) {
+		return instance.Source == limb.Id;
+	});
+	REQUIRE(drawnLimb != instances.end());
+	CHECK(drawnLimb->Frame.Position.X == Approx(replica.Drawn() + 2.0f));
+}
+
 TEST_CASE("nothing interpolated reaches the store", "[client][replication]") {
 	// **The negative test, and the one that matters.** The interpolated pose
 	// exists for exactly as long as it takes to become a `DrawInstance`. A

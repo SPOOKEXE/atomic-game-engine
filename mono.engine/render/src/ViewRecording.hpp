@@ -473,7 +473,12 @@ namespace engine::render {
 		// @param pass          The open pass.
 		// @param plainLighting Its per-draw lighting.
 		// @param filter        The tag filter this view draws through.
-		void DrawWorldInto(SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter);
+		void DrawWorldInto(
+			SDL_GPURenderPass *pass,
+			const LightingUniforms &plainLighting,
+			uint32_t filter,
+			bool omitCharacters = false
+		);
 
 		// The blended tail, minus the panes in it.
 		//
@@ -490,7 +495,8 @@ namespace engine::render {
 			const LightingUniforms &plainLighting,
 			uint32_t filter,
 			bool panesFollow,
-			WorldColourTarget target = WorldColourTarget::Display
+			WorldColourTarget target = WorldColourTarget::Display,
+			bool omitCharacters = false
 		);
 
 		// One fullscreen triangle into a colour target, named as a graph node.

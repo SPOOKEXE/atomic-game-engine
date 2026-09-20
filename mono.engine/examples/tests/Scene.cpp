@@ -1243,6 +1243,74 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
 }
 
+TEST_CASE("tunnel drifters stay local while switching portal legs", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("tunnels.drifters");
+	Scheduler systems;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Tunnels.luau"), error));
+	INFO(error);
+
+	const std::array<std::array<std::string_view, 3>, 4> routes{{
+		{"LongDrifter", "LongDrifterLeg2", {}},
+		{"ShortDrifter", "ShortDrifterLeg2", "ShortDrifterLeg3"},
+		{"LongLantern", "LongLanternLeg2", {}},
+		{"ShortLantern", "ShortLanternLeg2", "ShortLanternLeg3"},
+	}};
+	std::array<std::array<Entity, 3>, 4> bodies{}, bulbs{};
+	for (size_t route = 0; route < routes.size(); ++route) {
+		for (size_t leg = 0; leg < routes[route].size(); ++leg) {
+			if (routes[route][leg].empty()) continue;
+			bodies[route][leg] = InScene(store, routes[route][leg]);
+			REQUIRE(bodies[route][leg] != engine::ecs::NULL_ENTITY);
+			REQUIRE(store.Get<engine::scene::Visual>(bodies[route][leg]) != nullptr);
+			REQUIRE(store.Get<engine::scene::Transform>(bodies[route][leg]) != nullptr);
+			REQUIRE(store.Get<engine::scene::PreviousTransform>(bodies[route][leg]) != nullptr);
+			if (route >= 2) {
+				bulbs[route][leg] = store.FindFirstChild(bodies[route][leg], "Bulb");
+				REQUIRE(bulbs[route][leg] != engine::ecs::NULL_ENTITY);
+				REQUIRE(store.Get<engine::scene::Light>(bulbs[route][leg]) != nullptr);
+			}
+		}
+	}
+	bool longCrossed = false, longReturned = false, shortCrossed = false, shortThirdLeg = false;
+	bool oneVisiblePerRoute = true, lampsMatchBodies = true;
+	float largestStep = 0.0f;
+	for (size_t tick = 0; tick < 430; ++tick) {
+		systems.Tick(store, 1.0f / 60.0f);
+		for (size_t route = 0; route < routes.size(); ++route) {
+			size_t visible = 0;
+			for (size_t leg = 0; leg < routes[route].size(); ++leg) {
+				const Entity body = bodies[route][leg];
+				if (body == engine::ecs::NULL_ENTITY) continue;
+				const auto *visual = store.Get<engine::scene::Visual>(body);
+				if (route >= 2) {
+					lampsMatchBodies &=
+						store.Get<engine::scene::Light>(bulbs[route][leg])->Enabled == visual->Visible;
+				}
+				if (!visual->Visible) continue;
+				++visible;
+				if (route == 0 && leg == 1) longCrossed = true;
+				if (route == 0 && leg == 0 && longCrossed) longReturned = true;
+				if (route == 1 && leg == 1) shortCrossed = true;
+				if (route == 1 && leg == 2) shortThirdLeg = true;
+				const auto *current = store.Get<engine::scene::Transform>(body);
+				const auto *previous = store.Get<engine::scene::PreviousTransform>(body);
+				largestStep =
+					std::max(largestStep, (current->Frame.Position - previous->Frame.Position).Magnitude());
+			}
+			oneVisiblePerRoute &= visible == 1;
+		}
+	}
+	CHECK(oneVisiblePerRoute);
+	CHECK(lampsMatchBodies);
+	CHECK(largestStep < 0.2f);
+	CHECK(longCrossed);
+	CHECK(longReturned);
+	CHECK(shortCrossed);
+	CHECK(shortThirdLeg);
+}
+
 TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") {
 	// **A demonstration you cannot walk down demonstrates nothing**, and this
 	// one was blocked by its own props: the two drifting blocks travelled each

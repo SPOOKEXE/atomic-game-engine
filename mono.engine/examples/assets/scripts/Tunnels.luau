@@ -329,11 +329,9 @@ lamp("PlainLampSouth", Vector3.new(0, 14, -22), 90)
 -- is an unanchored one, which falls. These blocks are anchored, `CanCollide`
 -- false, and walk a route this file spells out.
 --
--- What the route spells out is exactly what a seam would have done: every pair
--- here is one pane facing +Z and its partner facing -Z with no rotation between
--- them, so each hop is a pure translation and a leg boundary sits on the pane
--- plane. The cost of doing it by hand is the one frame of pop as the block
--- changes ends - a real crosser is drawn straddling the seam and this is not.
+-- Each route leg keeps its own part. Reusing one part across the disconnected
+-- legs makes presentation interpolate it across the space between portal mouths.
+-- The active part changes at the pane while each part's own motion stays local.
 
 type Leg = {
 	From: Vector3,
@@ -356,15 +354,15 @@ local function routeLength(route: { Leg }): number
 end
 
 -- Where a route is `distance` studs along it, the legs being consumed in order.
-local function placeAlong(route: { Leg }, distance: number): Vector3
+local function placeAlong(route: { Leg }, distance: number): (Vector3, number)
 	for index = 1, #route do
 		local part = route[index]
 		if distance <= part.Length then
-			return part.From + part.Direction * distance
+			return part.From + part.Direction * distance, index
 		end
 		distance -= part.Length
 	end
-	return route[#route].To
+	return route[#route].To, #route
 end
 
 local DRIFT_SPEED = 6 -- studs a second, about a walk
@@ -404,28 +402,32 @@ local LANTERN_BRIGHTNESS = 45
 -- would only ever show the southbound crossing, and half the point of a pair of
 -- portals is that the walk works both ways.
 local function drifter(name: string, colour: Color3, route: { Leg }, range: number?)
-	local body = block(name, DRIFT_SIZE, route[1].From, colour)
-	body.CanCollide = false
+	local bodies: { Part } = {}
+	local bulbs: { PointLight } = {}
+	for index, segment in route do
+		local body = block(if index == 1 then name else name .. "Leg" .. tostring(index), DRIFT_SIZE, segment.From, colour)
+		body.CanCollide = false
+		body.Visible = index == 1
+		bodies[index] = body
 
-	-- **A lamp on the block is what makes a drifter a lighting test rather than
-	-- a timing one.** The fixed lamps above prove a pane carries a *static*
-	-- light; one that crosses a pane proves it carries a light whose position
-	-- moves on the far side of a seam, which is the case a surface camera has to
-	-- re-place every frame. Nil leaves the block unlit, which is what the two
-	-- timing drifters want - a lamp riding them would wash out the stripes they
-	-- are read against.
-	if range ~= nil then
-		local bulb = Instance.new("PointLight")
-		bulb.Name = "Bulb"
-		bulb.Color = colour
-		bulb.Brightness = LANTERN_BRIGHTNESS
-		bulb.Range = range
-		bulb.Parent = body
+		-- The lit pair moves its active lamp with the active part. An inactive
+		-- leg must not illuminate a room just because its body is hidden.
+		if range ~= nil then
+			local bulb = Instance.new("PointLight")
+			bulb.Name = "Bulb"
+			bulb.Color = colour
+			bulb.Brightness = LANTERN_BRIGHTNESS
+			bulb.Range = range
+			bulb.Enabled = index == 1
+			bulb.Parent = body
+			bulbs[index] = bulb
+		end
 	end
 
 	local total = routeLength(route)
 	local travelled = 0
 	local heading = 1
+	local activeLeg = 1
 
 	RunService.Heartbeat:Connect(function(deltaTime: number)
 		travelled += DRIFT_SPEED * deltaTime * heading
@@ -438,7 +440,17 @@ local function drifter(name: string, colour: Color3, route: { Leg }, range: numb
 			heading = 1
 		end
 
-		body.CFrame = CFrame.new(placeAlong(route, travelled))
+		local at, nextLeg = placeAlong(route, travelled)
+		if nextLeg ~= activeLeg then
+			bodies[activeLeg].Visible = false
+			bodies[nextLeg].Visible = true
+			if range ~= nil then
+				bulbs[activeLeg].Enabled = false
+				bulbs[nextLeg].Enabled = true
+			end
+			activeLeg = nextLeg
+		end
+		bodies[activeLeg].CFrame = CFrame.new(at)
 	end)
 end
 

@@ -373,7 +373,16 @@ namespace client {
 						return;
 					}
 
-					std::optional<CFrame> interpolated = buffer->Sample(entity);
+					const auto *limb = store.Get<engine::scene::CharacterLimb>(entity);
+					std::optional<CFrame> interpolated;
+					if (limb != nullptr) {
+						interpolated = buffer->Sample(limb->Root);
+						if (interpolated.has_value()) {
+							interpolated = *interpolated * limb->Offset;
+						}
+					} else {
+						interpolated = buffer->Sample(entity);
+					}
 					const std::optional<CFrame> predicted = PredictedFrame(store, entity, presented);
 					if (predicted.has_value()) {
 						interpolated = predicted;
@@ -417,7 +426,7 @@ namespace client {
 						// replicated character in one piece. Optional like
 						// the two above it, and for the same reason: most
 						// rows are not a limb of anything.
-						store.Get<engine::scene::CharacterLimb>(entity),
+						limb,
 						store.Get<engine::scene::AutoMeshLOD>(entity),
 						store.Get<engine::scene::CustomMeshLOD>(entity),
 						store.Get<engine::scene::RenderEffects>(entity)
@@ -715,8 +724,18 @@ namespace client {
 		}
 		buffer->RecordTick(tick);
 
-		store.Each<const Transform>([buffer, tick](Entity entity, const Transform &transform) {
-			buffer->Record(tick, entity, transform.Frame);
+		store.Each<const Transform>([buffer, tick, &store](Entity entity, const Transform &transform) {
+			const auto *transit = store.Get<engine::scene::PortalTransit>(entity);
+			if (transit == nullptr) {
+				buffer->Record(tick, entity, transform.Frame);
+				return;
+			}
+			buffer->Record(
+				tick,
+				entity,
+				transform.Frame,
+				SnapshotBuffer::Chart{transit->Frame, transit->Scale, transit->Serial}
+			);
 		});
 
 		// The rows now hold one complete received tick. Index them once here,

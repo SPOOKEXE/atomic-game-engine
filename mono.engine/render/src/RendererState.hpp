@@ -1100,6 +1100,10 @@ namespace engine::render {
 		// Each slot's tag mask, for the surface passes that filter by one.
 		std::vector<uint32_t> SlotTags;
 
+		// A nonzero rig belongs to a character. Seam-light probes omit these rows so
+		// a nearby player cannot become an accidental occluder for portal transport.
+		std::vector<uint64_t> SlotRig;
+
 		// The half-space each slot keeps, as a world plane: xyz the unit normal,
 		// w the offset, and a zero normal for "whole".
 		//
@@ -2745,6 +2749,7 @@ namespace engine::render {
 		enum class SlotSelection : uint8_t {
 			All,
 			LodOnly,
+			CharacterFree,
 		};
 
 		// Issues the draws for one contiguous run of instance-buffer slots.

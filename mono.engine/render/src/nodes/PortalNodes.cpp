@@ -90,7 +90,7 @@ namespace engine::render {
 					.Projector = projector,
 					.WasReady = matchesProjector(bank.SeamLights[projector.Index], projector),
 					.ScreenCoverage = SeamLightScreenCoverage(projector, Matrices.ViewProjection),
-					.InfluenceDistance = SeamLightInfluenceDistanceSquared(
+					.InfluenceDistance = SeamLightStaticInfluenceDistanceSquared(
 						projector, State->VisibleInstances, State->DrawOrder, Request.CameraFrame.Position
 					),
 				};
@@ -191,8 +191,10 @@ namespace engine::render {
 			// the clear already painted.
 			voidLighting.Fog = glm::vec4{1.0e6f, 1.0e6f + 1.0f, 0.0f, 0.0f};
 
-			DrawWorldInto(pass, voidLighting, portal.TagFilter);
-			DrawBlendedInto(pass, captureUniforms, voidLighting, portal.TagFilter, false, colour);
+			// The field represents stable far-room radiance at the aperture. Characters
+			// are rendered in the ordinary portal image, but must not mask a lamp here.
+			DrawWorldInto(pass, voidLighting, portal.TagFilter, true);
+			DrawBlendedInto(pass, captureUniforms, voidLighting, portal.TagFilter, false, colour, true);
 			SDL_EndGPURenderPass(pass);
 
 			seamLight->Centre = glm::vec4{portal.Centre.X, portal.Centre.Y, portal.Centre.Z, 1.0f};

@@ -30,6 +30,12 @@ namespace engine::render {
 		size_t Index = 0;
 	};
 
+	// A seam-light image transports stable room radiance, not a character's
+	// momentary silhouette. Normal portal pictures still draw every rig.
+	inline bool SeamLightCaptureIncludes(uint64_t rig) {
+		return rig == 0;
+	}
+
 	// Encloses the shader's one-sided expanding window. At the far plane each
 	// half-axis has grown by `Range`, matching `SeamSpill`'s 45-degree spread.
 	inline core::AABB SeamLightSpillBounds(const SeamLightProjector &projector) {
@@ -117,6 +123,27 @@ namespace engine::render {
 			nearest = std::min(nearest, SeamLightBoundsDistanceSquared(spill, graph::BoundsOf(receiver)));
 		}
 		return nearest;
+	}
+
+	// A portal field carries stable room radiance. Characters can move through a
+	// spill volume in one frame, so they must not decide which bounded field wins
+	// the capture budget.
+	inline float SeamLightStaticInfluenceDistanceSquared(
+		const SeamLightProjector &projector,
+		std::span<const scene::DrawInstance> instances,
+		std::span<const uint32_t> receiverIndices,
+		const core::Vector3 &eye
+	) {
+		const core::AABB spill = SeamLightSpillBounds(projector);
+		float nearest = std::numeric_limits<float>::infinity();
+		for (const uint32_t receiverIndex : receiverIndices) {
+			if (receiverIndex >= instances.size() || !SeamLightCaptureIncludes(instances[receiverIndex].Rig))
+				continue;
+			nearest = std::min(
+				nearest, SeamLightBoundsDistanceSquared(spill, graph::BoundsOf(instances[receiverIndex]))
+			);
+		}
+		return std::isfinite(nearest) ? nearest : SeamLightBoundsDistanceSquared(spill, core::AABB{eye, eye});
 	}
 
 	// DrawOrder retains the culled rows into the source instance array. Ranking

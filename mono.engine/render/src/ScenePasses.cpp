@@ -660,7 +660,7 @@ namespace engine::render {
 	}
 
 	void ViewRecording::DrawWorldInto(
-		SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter
+		SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter, bool omitCharacters
 	) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
@@ -680,7 +680,9 @@ namespace engine::render {
 				nullptr,
 				State->SurfaceSampler,
 				filter,
-				result.Triangles
+				result.Triangles,
+				nullptr,
+				omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
 			);
 		}
 	}
@@ -691,7 +693,8 @@ namespace engine::render {
 		const LightingUniforms &plainLighting,
 		uint32_t filter,
 		bool panesFollow,
-		WorldColourTarget target
+		WorldColourTarget target,
+		bool omitCharacters
 	) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
@@ -728,7 +731,9 @@ namespace engine::render {
 			nullptr,
 			State->SurfaceSampler,
 			filter,
-			result.Triangles
+			result.Triangles,
+			nullptr,
+			omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
 		);
 	}
 

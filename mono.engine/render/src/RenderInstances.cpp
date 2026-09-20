@@ -10,6 +10,7 @@
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
+#include "SeamLightSelection.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
@@ -434,6 +435,10 @@ namespace engine::render {
 		};
 
 		uint32_t slot = first;
+		const auto selected = [&](uint32_t candidate) {
+			return selection != SlotSelection::CharacterFree ||
+				   (candidate < SlotRig.size() && SeamLightCaptureIncludes(SlotRig[candidate]));
+		};
 		while (slot < first + count) {
 			// **A filtered-out slot ends the run and is stepped over.** The draw
 			// list is not re-ordered for it: the order is shared by every view
@@ -442,7 +447,7 @@ namespace engine::render {
 			// instead of the world. The cost is a run break wherever an excluded
 			// instance sits between two included ones, which is a draw call and
 			// not a wrong picture.
-			if (!scene::MatchesTags(SlotTags[slot], tagFilter)) {
+			if (!scene::MatchesTags(SlotTags[slot], tagFilter) || !selected(slot)) {
 				slot++;
 				continue;
 			}
@@ -552,7 +557,8 @@ namespace engine::render {
 			bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;
 			const bool plainShadow = simpleShadow && base == ShadowPipeline && indirect == nullptr &&
 									 !shader.IsValid() && SlotLod[slot] == NO_LOD_DRAW;
-			while (slot + run < first + count && scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
+			while (slot + run < first + count && scene::MatchesTags(SlotTags[slot + run], tagFilter) &&
+				   selected(slot + run)) {
 				const uint32_t next = slot + run;
 				const bool samePlainShadow = plainShadow && SlotShadowDetail[next] == 0 &&
 											 !SlotShader[next].IsValid() && SlotLod[next] == NO_LOD_DRAW &&
