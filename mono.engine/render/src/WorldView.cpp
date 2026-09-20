@@ -157,12 +157,13 @@ namespace engine::render {
 
 	void CollectWorldView(ecs::Store &store, core::Name owner, WorldViewFrame &frame) {
 		ENGINE_PROFILE_CAT("world view collect", core::ProfileCategory::Render);
-		frame.Name = owner;
-		frame.Identity = store.Identity();
 		const ecs::WorldTime time = store.Time();
 		// A collected packet can be rebound for another camera while its source
-		// world is paused. Only a new world tick carries time to the device pool.
-		const bool advanced = frame.Name == owner && frame.Identity == store.Identity() && time.Tick != frame.Tick;
+		// world is paused. Only a new source or world tick carries time to the device pool.
+		const bool advanced =
+			frame.Name != owner || frame.Identity != store.Identity() || time.Tick != frame.Tick;
+		frame.Name = owner;
+		frame.Identity = store.Identity();
 		frame.Tick = time.Tick;
 		frame.Seconds = time.Elapsed;
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;

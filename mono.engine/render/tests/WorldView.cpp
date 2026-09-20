@@ -257,6 +257,15 @@ TEST_CASE("world view owns a published replica pose and particle inputs", "[rend
 	CHECK(frame.Lighting.Ambient == core::Color3(.2f, .3f, .4f));
 	CHECK(frame.Particles.Batches[0].Block == frame.Particles.Blocks.data());
 	CHECK(frame.Name == core::Name("source"));
+	{
+		ecs::Store replacement("observed-source");
+		scene::InstallServices(replacement);
+		replacement.AdvanceTick(.1f);
+		replacement.AdvanceTick(.1f);
+		REQUIRE(replacement.Time().Tick == frame.Tick);
+		render::CollectWorldView(replacement, core::Name("source"), frame);
+		CHECK(frame.ParticleDelta == replacement.Time().Delta);
+	}
 
 	ecs::Store empty("empty-destination");
 	scene::InstallServices(empty);
