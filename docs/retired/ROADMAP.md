@@ -2869,3 +2869,6 @@ as datatypes? we can do a 3D and 2D vector field and particles can read directly
 - [x] fix tunnels demo camera not projecting in portals and attaching to character properly
 - [x] Studio Play uses separate server and client cameras and viewport render slots. The server view keeps its free camera and excludes the client HUD across focus changes. Frame-scoped graph composites refresh for the selected viewport, and a live Bladeborne check verifies distinct captures and independent server camera motion.
 - [x] rendering optimisations post new render pipeline
+- [x] shadows projecting through portals
+- [x] pbr demo upgrade
+- [x] fix more portal light culling issues (tunnels demo)
