@@ -26,6 +26,16 @@ local selectionBox = adorn(Instance.new("SelectionBox"), target("SelectionBoxTar
 selectionBox.LineThickness = 0.08
 selectionBox.SurfaceColor3 = blue
 selectionBox.SurfaceTransparency = 0.8
+selectionBox.InteractionEnabled = true
+selectionBox.OnMouse1Down:Connect(function()
+	print("adornments: selection box mouse 1 down")
+end)
+selectionBox.OnMouse1Changed:Connect(function(x: number, y: number)
+	print("adornments: selection box mouse 1 moved", x, y)
+end)
+selectionBox.OnMouse1Up:Connect(function()
+	print("adornments: selection box mouse 1 up")
+end)
 
 local selectionSphere = adorn(Instance.new("SelectionSphere"), target("SelectionSphereTarget", Vector3.new(-4, 5, 0)), orange)
 selectionSphere.LineThickness = 0.06

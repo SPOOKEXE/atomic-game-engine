@@ -524,6 +524,7 @@ namespace client {
 		// holds the hover and the press across frames.
 		engine::gui::Router InterfaceRouter;
 		engine::render::AdornmentPointerRouter AdornmentRouter;
+		engine::render::AdornmentGeometry ClientAdornments;
 		engine::render::FrameStatistics Statistics;
 
 		client::Actions Actions;

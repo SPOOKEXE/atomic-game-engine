@@ -1510,9 +1510,15 @@ declare extern type Instance with
 	MouseButton1Click: GuiSignal
 	MouseButton1Down: GuiSignal
 	MouseButton1Up: GuiSignal
+	OnMouse1Down: GuiSignal
+	OnMouse1Up: GuiSignal
+	OnMouse1Changed: PointerSignal
 	MouseButton2Click: GuiSignal
 	MouseButton2Down: GuiSignal
 	MouseButton2Up: GuiSignal
+	OnMouse2Down: GuiSignal
+	OnMouse2Up: GuiSignal
+	OnMouse2Changed: PointerSignal
 	InputBegan: GuiSignal
 	InputEnded: GuiSignal
 	MouseEnter: PointerSignal
@@ -2192,6 +2198,7 @@ declare extern type PVAdornment extends GuiBase3d with
 	Adornee: Instance
 	AlwaysOnTop: boolean
 	Color3: Color3
+	InteractionEnabled: boolean
 	Transparency: number
 	Visible: boolean
 	ZIndex: number

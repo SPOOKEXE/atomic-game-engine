@@ -61,6 +61,7 @@
 #include <array>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <client/Client.hpp>
 #include <client/DataScriptPackage.hpp>
 #include <client/DataScriptPackageTransaction.hpp>
@@ -68,6 +69,7 @@
 #include <client/WorldSystems.hpp>
 #include <cstddef>
 #include <fstream>
+#include <glm/vec4.hpp>
 #include <network/SessionKey.hpp>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -3723,6 +3725,49 @@ namespace client {
 			if (redraw && WaitingForPortalViews()) {
 				Overlay.Fill(0, 0, pixelWidth, 16, 0, 0, 0, 255);
 				engine::render::DebugText::Draw(Overlay, 4, 4, "Loading portals", 255, 255, 255, 1);
+			}
+
+			// The CPU overlay is already composited after the world image. Reuse it
+			// while it is otherwise empty, which gives game adornments a visible
+			// client path without inventing a second line pipeline beside Studio's.
+			if (!Overlay.HasContent() && Rendered.IsValid()) {
+				Universe_->Enter(Rendered, [this](engine::ecs::Store &store) { ClientAdornments.Build(store); });
+				if (!ClientAdornments.Lines().empty() && pixelWidth > 0 && pixelHeight > 0) {
+					const engine::scene::CameraMatrices camera = engine::scene::ResolveCamera(
+						Views.CameraFrame(), Views.Camera(), static_cast<float>(pixelWidth) / static_cast<float>(pixelHeight)
+					);
+					const auto project = [&](const engine::core::Vector3 &point, int &x, int &y) {
+						const glm::vec4 clip = camera.ViewProjection * glm::vec4(point.X, point.Y, point.Z, 1.0f);
+						if (clip.w <= 0.0f) return false;
+						const float inverse = 1.0f / clip.w;
+						x = static_cast<int>((clip.x * inverse * 0.5f + 0.5f) * static_cast<float>(pixelWidth));
+						y = static_cast<int>((0.5f - clip.y * inverse * 0.5f) * static_cast<float>(pixelHeight));
+						return true;
+					};
+					size_t segments = 0;
+					for (const engine::render::AdornmentLine &line : ClientAdornments.Lines()) {
+						if (segments == 2048) break;
+						int fromX = 0;
+						int fromY = 0;
+						int toX = 0;
+						int toY = 0;
+						if (!project(line.From, fromX, fromY) || !project(line.To, toX, toY)) continue;
+						const int steps = std::max(std::abs(toX - fromX), std::abs(toY - fromY));
+						if (steps > 8192) continue;
+						segments++;
+						const uint8_t red = static_cast<uint8_t>(std::clamp(line.Colour.R, 0.0f, 1.0f) * 255.0f);
+						const uint8_t green = static_cast<uint8_t>(std::clamp(line.Colour.G, 0.0f, 1.0f) * 255.0f);
+						const uint8_t blue = static_cast<uint8_t>(std::clamp(line.Colour.B, 0.0f, 1.0f) * 255.0f);
+						const uint8_t alpha = static_cast<uint8_t>(std::clamp(1.0f - line.Transparency, 0.0f, 1.0f) * 255.0f);
+						for (int step = 0; step <= steps; step++) {
+							const float t = steps == 0 ? 0.0f : static_cast<float>(step) / static_cast<float>(steps);
+							Overlay.Blend(
+								static_cast<int>(std::lround(fromX + (toX - fromX) * t)),
+								static_cast<int>(std::lround(fromY + (toY - fromY) * t)), 1, 1, red, green, blue, alpha
+							);
+						}
+					}
+				}
 			}
 		}
 

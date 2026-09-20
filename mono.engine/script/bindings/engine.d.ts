@@ -1268,9 +1268,15 @@ declare interface Instance {
 	readonly MouseButton1Click: GuiSignal;
 	readonly MouseButton1Down: GuiSignal;
 	readonly MouseButton1Up: GuiSignal;
+	readonly OnMouse1Down: GuiSignal;
+	readonly OnMouse1Up: GuiSignal;
+	readonly OnMouse1Changed: PointerSignal;
 	readonly MouseButton2Click: GuiSignal;
 	readonly MouseButton2Down: GuiSignal;
 	readonly MouseButton2Up: GuiSignal;
+	readonly OnMouse2Down: GuiSignal;
+	readonly OnMouse2Up: GuiSignal;
+	readonly OnMouse2Changed: PointerSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
 	readonly MouseEnter: PointerSignal;
@@ -1905,6 +1911,7 @@ declare interface PVAdornment extends GuiBase3d {
 	Adornee: Instance;
 	AlwaysOnTop: boolean;
 	Color3: Color3;
+	InteractionEnabled: boolean;
 	Transparency: number;
 	Visible: boolean;
 	ZIndex: number;
