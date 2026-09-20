@@ -121,6 +121,7 @@
 #include <vector>
 
 struct SDL_Window;
+union SDL_Event;
 struct ImGuiInputTextCallbackData;
 
 // **Forward-declared rather than including imgui here.** `Editor.hpp` is
@@ -908,7 +909,9 @@ namespace studio {
 		// @return The frame number to request a capture on.
 		int64_t CaptureAtFrame() const;
 
-		void PumpEvents();
+		// Handles an event taken by the bounded idle wait before draining the rest
+		// of SDL's queue, preserving native event order.
+		void PumpEvents(const SDL_Event *first = nullptr);
 		void Simulate(float frameSeconds);
 		void Present(float frameSeconds);
 

@@ -92,6 +92,13 @@ namespace studio {
 		// thousand lines are the ones anybody reads.
 		constexpr size_t OUTPUT_LIMIT = 1024;
 
+		// A stopped editor has no simulation clock to advance, but its control
+		// socket and plugins still need a turn. Native input wakes immediately;
+		// a running world gets a much shorter periodic wake to retain its tick
+		// cadence while an idle editor can yield for longer.
+		constexpr Sint32 MAXIMUM_RUNNING_EVENT_WAIT_MILLISECONDS = 1;
+		constexpr Sint32 MAXIMUM_IDLE_EVENT_WAIT_MILLISECONDS = 8;
+
 		// The name a brand-new game and its first world take.
 		constexpr std::string_view DEFAULT_GAME = "Untitled";
 		constexpr std::string_view DEFAULT_WORLD = "Start";
@@ -1038,6 +1045,27 @@ namespace studio {
 					presentationDue = Presentations.Due(engine::render::PresentationSchedule::Clock::now());
 				}
 
+				std::optional<SDL_Event> waitedEvent;
+				if (!presentationDue && !Settings.Headless && FactoryHost == nullptr) {
+					const auto remaining =
+						Presentations.Remaining(engine::render::PresentationSchedule::Clock::now());
+					const auto milliseconds =
+						std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count();
+					if (milliseconds > 0) {
+						const Sint32 maximumWait = AnyRunning() ? MAXIMUM_RUNNING_EVENT_WAIT_MILLISECONDS
+																: MAXIMUM_IDLE_EVENT_WAIT_MILLISECONDS;
+						// SDL removes the event it wakes for. Keep it and give it to
+						// PumpEvents first, before it drains events queued after it.
+						ENGINE_PROFILE_CAT("event wait", engine::core::ProfileCategory::Idle);
+						SDL_Event event;
+						if (SDL_WaitEventTimeout(
+								&event, static_cast<Sint32>(std::min<int64_t>(milliseconds, maximumWait))
+							)) {
+							waitedEvent = event;
+						}
+					}
+				}
+
 				bool renderingActive = false;
 				if (presentationDue) {
 					ENGINE_PROFILE_CAT("frame deadline", engine::core::ProfileCategory::Idle);
@@ -1062,7 +1090,7 @@ namespace studio {
 					PresentationDeltaSeconds += delta;
 				}
 
-				PumpEvents();
+				PumpEvents(waitedEvent ? &*waitedEvent : nullptr);
 
 				// **Between input and simulation**, which is where a person's click
 				// would have landed. A tool that starts a world or writes a property
@@ -1185,7 +1213,7 @@ namespace studio {
 		}
 	}
 
-	void Editor::PumpEvents() {
+	void Editor::PumpEvents(const SDL_Event *first) {
 		ENGINE_PROFILE("pump events");
 		PlayedInput->Translator.BeginFrame();
 
@@ -1202,8 +1230,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE("poll events");
 
-			SDL_Event event;
-			while (SDL_PollEvent(&event)) {
+			auto process = [this, &sawInput](const SDL_Event &event) {
 				if (event.type == SDL_EVENT_JOYSTICK_ADDED) {
 					if (SDL_IsGamepad(event.jdevice.which)) {
 						if (SDL_Gamepad *gamepad = SDL_OpenGamepad(event.jdevice.which); gamepad != nullptr) {
@@ -1307,6 +1334,15 @@ namespace studio {
 					event.window.windowID == SDL_GetWindowID(Window)) {
 					Running = false;
 				}
+			};
+
+			if (first != nullptr) {
+				process(*first);
+			}
+
+			SDL_Event event;
+			while (SDL_PollEvent(&event)) {
+				process(event);
 			}
 		}
 

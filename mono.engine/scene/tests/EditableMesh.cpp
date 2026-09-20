@@ -324,17 +324,38 @@ namespace {
 		(void)AddTriangle(store, mesh, 1, 2, 3);
 		return mesh;
 	}
+
+	Entity DemandMeshCollision(
+		Store &store, Entity mesh, engine::scene::ShapeKind shape = engine::scene::ShapeKind::Mesh
+	) {
+		engine::scene::Collider collider;
+		collider.Shape = shape;
+		collider.Geometry = EditableMeshContentName(store, mesh);
+		const Entity part = store.Create();
+		store.Set(part, collider);
+		return part;
+	}
 }
 
-TEST_CASE("a run-time mesh gets a hull and a soup", "[scene][editablemesh]") {
+TEST_CASE("a visual-only run-time mesh has no collision bake", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision");
+	(void)MakeQuad(store);
+
+	// A MeshPart's MeshId is visual data. It does not make a collision request.
+	CHECK(engine::scene::CollisionShapesOf(store) == nullptr);
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+	CHECK(engine::scene::CollisionShapesOf(store) == nullptr);
+}
+
+TEST_CASE("a run-time mesh gets a soup when a collider names it", "[scene][editablemesh]") {
 	engine::scene::RegisterSceneComponents();
 
 	Store store("editablemesh.collision");
 	const Entity mesh = MakeQuad(store);
 	const Name name = EditableMeshContentName(store, mesh);
-
-	// Nothing until something bakes, which is the state the report was about.
-	CHECK(engine::scene::CollisionShapesOf(store) == nullptr);
+	DemandMeshCollision(store, mesh);
 
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
 
@@ -358,17 +379,13 @@ TEST_CASE("a hull is baked for the part that asks for one", "[scene][editablemes
 	const Entity mesh = MakeQuad(store);
 	const Name name = EditableMeshContentName(store, mesh);
 
-	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
-	REQUIRE(engine::scene::CollisionShapesOf(store)->FindHull(name) == nullptr);
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 0);
+	REQUIRE(engine::scene::CollisionShapesOf(store) == nullptr);
 
 	// A part switched to `Hull` after its mesh was baked. The revision has not
 	// moved, so the test that decides whether to bake cannot be "has this
 	// changed" - it is "is a hull wanted and missing".
-	const Entity part = store.Create();
-	engine::scene::Collider collider;
-	collider.Shape = engine::scene::ShapeKind::Hull;
-	collider.Geometry = name;
-	store.Set(part, collider);
+	DemandMeshCollision(store, mesh, engine::scene::ShapeKind::Hull);
 
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
 
@@ -387,6 +404,7 @@ TEST_CASE("a mesh whose revision has not moved is not rebaked", "[scene][editabl
 
 	Store store("editablemesh.collision.steady");
 	const Entity mesh = MakeQuad(store);
+	DemandMeshCollision(store, mesh);
 
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
 
@@ -404,6 +422,7 @@ TEST_CASE("rebaking one editable mesh keeps unrelated collision storage resident
 
 	Store store("editablemesh.collision.resident");
 	const Entity editable = MakeQuad(store);
+	DemandMeshCollision(store, editable);
 	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
 
 	const Name staticName("editablemesh.static-neighbour");
@@ -437,6 +456,7 @@ TEST_CASE("a missing editable triangle mesh rebakes despite a matching revision"
 	Store store("editablemesh.collision.missing-mesh");
 	const Entity mesh = MakeQuad(store);
 	const Name name = EditableMeshContentName(store, mesh);
+	DemandMeshCollision(store, mesh);
 	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
 
 	// The revision ledger describes what was baked, not what remains resident.
@@ -454,6 +474,9 @@ TEST_CASE("changed mesh collision is baked as one deterministic batch", "[scene]
 
 	Store store("editablemesh.collision.batch");
 	const std::array meshes{MakeQuad(store), MakeQuad(store), MakeQuad(store)};
+	for (const Entity mesh : meshes) {
+		DemandMeshCollision(store, mesh);
+	}
 
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == meshes.size());
 	const engine::scene::CollisionShapes *shapes = engine::scene::CollisionShapesOf(store);
@@ -476,6 +499,7 @@ TEST_CASE("editable collision canonicalizes an unordered terrain ledger", "[scen
 	std::array<Entity, 64> meshes;
 	for (Entity &mesh : meshes) {
 		mesh = MakeQuad(store);
+		DemandMeshCollision(store, mesh);
 	}
 	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == meshes.size());
 
@@ -497,6 +521,7 @@ TEST_CASE("a mesh that is gone takes its shapes with it", "[scene][editablemesh]
 	Store store("editablemesh.collision.forget");
 	const Entity mesh = MakeQuad(store);
 	const Name name = EditableMeshContentName(store, mesh);
+	DemandMeshCollision(store, mesh);
 
 	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
 	REQUIRE(engine::scene::CollisionShapesOf(store)->FindMesh(name) != nullptr);
@@ -516,12 +541,42 @@ TEST_CASE("a mesh that is gone takes its shapes with it", "[scene][editablemesh]
 	CHECK(shapes->HullCount() == 0);
 }
 
+TEST_CASE("editable collision follows collider demand removal and return", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.demand");
+	const Entity mesh = MakeQuad(store);
+	const Name name = EditableMeshContentName(store, mesh);
+	const Entity part = DemandMeshCollision(store, mesh);
+
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	REQUIRE(engine::scene::CollisionShapesOf(store)->FindMesh(name) != nullptr);
+
+	// Changing the collider to a box removes the mesh demand and its resident soup.
+	auto *collider = store.GetMutable<engine::scene::Collider>(part);
+	REQUIRE(collider != nullptr);
+	collider->Shape = engine::scene::ShapeKind::Box;
+	collider->Geometry = {};
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	CHECK(engine::scene::CollisionShapesOf(store)->FindMesh(name) == nullptr);
+	CHECK(store.Resource<engine::scene::EditableMeshCollision>()->Rows.empty());
+
+	// A later hull demand rebuilds both the common soup and the requested hull.
+	collider->Shape = engine::scene::ShapeKind::Hull;
+	collider->Geometry = name;
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	const auto *shapes = engine::scene::CollisionShapesOf(store);
+	REQUIRE(shapes->FindMesh(name) != nullptr);
+	REQUIRE(shapes->FindHull(name) != nullptr);
+}
+
 TEST_CASE("an incomplete replacement does not retain a destroyed mesh collision", "[scene][editablemesh]") {
 	engine::scene::RegisterSceneComponents();
 
 	Store store("editablemesh.collision.incomplete-replacement");
 	const Entity oldMesh = MakeQuad(store);
 	const Name oldName = EditableMeshContentName(store, oldMesh);
+	DemandMeshCollision(store, oldMesh);
 	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
 	REQUIRE(engine::scene::CollisionShapesOf(store)->FindMesh(oldName) != nullptr);
 
@@ -537,6 +592,7 @@ TEST_CASE("a mesh with no triangles yet bakes nothing", "[scene][editablemesh]")
 
 	Store store("editablemesh.collision.empty");
 	const Entity mesh = MakeEditableMesh(store);
+	DemandMeshCollision(store, mesh);
 	(void)AddVertex(store, mesh, Vector3{0.0f, 0.0f, 0.0f});
 
 	// Vertices added and no triangle yet is the ordinary state right after

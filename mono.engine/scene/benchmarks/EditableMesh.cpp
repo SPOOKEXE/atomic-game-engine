@@ -4,6 +4,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/CollisionShapes.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Bench.hpp>
@@ -15,6 +16,13 @@
 TEST_SUITE_ID("engine.scene.bench.editablemesh")
 
 namespace {
+	void DemandMeshCollision(engine::ecs::Store &store, engine::ecs::Entity mesh) {
+		engine::scene::Collider collider;
+		collider.Shape = engine::scene::ShapeKind::Mesh;
+		collider.Geometry = engine::scene::EditableMeshContentName(store, mesh);
+		store.Set(store.Create(), collider);
+	}
+
 	engine::ecs::Store &StaticMeshWorld() {
 		static engine::ecs::Store store("bench.editablemesh.static");
 		static const bool ready = [] {
@@ -41,6 +49,7 @@ namespace {
 			engine::scene::EditableMesh mesh;
 			mesh.Positions.push_back(engine::core::Vector3{});
 			store.Set(entity, std::move(mesh));
+			DemandMeshCollision(store, entity);
 
 			engine::scene::CollisionShapes shapes;
 			for (uint32_t index = 0; index < 2'000; index++) {
@@ -124,6 +133,7 @@ namespace {
 				mesh.Alphas = geometry.Alphas;
 				mesh.Indices = geometry.Indices;
 				world.Scene.Set(entity, std::move(mesh));
+				DemandMeshCollision(world.Scene, entity);
 			}
 
 			engine::scene::CollisionShapes shapes;
@@ -159,6 +169,7 @@ namespace {
 				mesh.Alphas = geometry.Alphas;
 				mesh.Indices = geometry.Indices;
 				world.Scene.Set(entity, std::move(mesh));
+				DemandMeshCollision(world.Scene, entity);
 			}
 
 			engine::scene::CollisionShapes shapes;

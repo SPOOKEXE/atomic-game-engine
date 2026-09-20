@@ -1123,7 +1123,10 @@ namespace studio {
 			view.OwnerFilter == ProfileOwner::All ? view.Spans : view.FilteredSpans;
 
 		const char *millisecondsFormat = frameMs < 1.0f ? "%.3f" : "%.2f";
-		ImGui::Text(frameMs < 1.0f ? "%.3f ms" : "%.2f ms", static_cast<double>(frameMs));
+		// The graph closes once per update-loop iteration. Presentation may span
+		// several of those iterations while the presentation schedule is waiting
+		// for its next opportunity, so this duration is not the inverse of FPS.
+		ImGui::Text(frameMs < 1.0f ? "update %.3f ms" : "update %.2f ms", static_cast<double>(frameMs));
 		ImGui::SameLine();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		if (frameMs < 1.0f) {
@@ -1140,6 +1143,29 @@ namespace studio {
 				static_cast<double>(idleMs),
 				static_cast<double>(view.UnmarkedMilliseconds)
 			);
+		}
+		ImGui::PopStyleColor();
+
+		if (Statistics.HasSamples()) {
+			const engine::render::FrameSummary presentation = Statistics.Summarise();
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::Text(
+				"present %.2f ms / %.0f fps",
+				static_cast<double>(presentation.CurrentMilliseconds),
+				static_cast<double>(presentation.Current)
+			);
+			ImGui::PopStyleColor();
+		}
+
+		ImGui::SameLine();
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		if (VerticalSync) {
+			ImGui::TextUnformatted("present cap display (vsync)");
+		} else if (const float cap = PacingCeiling(); cap > 0.0f) {
+			ImGui::Text("present cap %.0f fps", static_cast<double>(cap));
+		} else {
+			ImGui::TextUnformatted("present cap unlimited");
 		}
 		ImGui::PopStyleColor();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());

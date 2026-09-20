@@ -373,8 +373,8 @@ namespace engine::scene {
 		std::vector<Baked> Rows;
 	};
 
-	// Bakes a collision hull and triangle mesh for every `EditableMesh` whose
-	// geometry has changed, and forgets the shapes of meshes that are gone.
+	// Bakes collision geometry only for `EditableMesh` values a `Collider` names,
+	// and forgets shapes whose mesh is gone or no longer named.
 	//
 	// **The engine gap this closes**: a script that built geometry built
 	// something that could be seen and not touched. `client::
@@ -389,10 +389,10 @@ namespace engine::scene {
 	// matters most: the server is the machine that decides where anybody is
 	// standing, and it has no uploader at all.
 	//
-	// Revision-tracked, because baking is quickhull plus a triangle soup and a
-	// streamed world builds a mesh a frame. A mesh whose revision has not moved
-	// takes one canonical-ledger pass and a binary revision lookup, with no
-	// geometry rebuild.
+	// Revision-tracked and demand-driven, because baking is quickhull plus a
+	// triangle soup and a streamed visual world can build a mesh a frame. A
+	// mesh with no collider naming it allocates no collision storage; adding a
+	// matching `Mesh` or `Hull` collider makes the next refresh bake it.
 	//
 	// Call it wherever the geometry is settled and before physics reads it -
 	// which for every host in this repository is once a tick.

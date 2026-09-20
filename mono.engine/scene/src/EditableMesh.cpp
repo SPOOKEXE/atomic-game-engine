@@ -248,36 +248,52 @@ namespace engine::scene {
 			return found != ledger->Rows.end() && found->Instance == instance ? &*found : nullptr;
 		}
 
-		// Whether any collider in the world names `geometry` as a convex hull.
-		//
-		// The list is gathered once per refresh and only when something asks,
-		// which is what `wanted` being an optional says. A world holds a
-		// handful of distinct shapes however many parts use them - the whole
-		// point of naming them is that they are shared - so the search is over
-		// single digits.
-		bool
-		WantsHull(ecs::Store &store, std::optional<std::vector<core::Name>> &wanted, core::Name geometry) {
-			if (!wanted.has_value()) {
-				wanted.emplace();
+		struct CollisionDemand {
+			core::Name Geometry;
+			bool Hull = false;
+		};
+
+		// Gather the shapes physics can actually resolve through an editable mesh.
+		// A visual MeshId has no collision meaning, so a visual-only streamed mesh
+		// must not allocate a triangle soup just because it became drawable. The
+		// canonical table makes a many-chunk world O(meshes log colliders), rather
+		// than one linear collider walk per mesh.
+		const CollisionDemand *DemandFor(
+			ecs::Store &store, std::optional<std::vector<CollisionDemand>> &demand, core::Name geometry
+		) {
+			if (!demand.has_value()) {
+				demand.emplace();
 				store.Each<const Collider>([&](ecs::Entity, const Collider &collider) {
-					if (collider.Shape != ShapeKind::Hull || !collider.Geometry.IsValid()) {
+					if (!collider.Geometry.IsValid() ||
+						(collider.Shape != ShapeKind::Mesh && collider.Shape != ShapeKind::Hull)) {
 						return;
 					}
-					for (const core::Name &already : *wanted) {
-						if (already == collider.Geometry) {
-							return;
-						}
-					}
-					wanted->push_back(collider.Geometry);
+					demand->push_back(CollisionDemand{collider.Geometry, collider.Shape == ShapeKind::Hull});
 				});
+				std::sort(
+					demand->begin(),
+					demand->end(),
+					[](const CollisionDemand &left, const CollisionDemand &right) {
+						return left.Geometry < right.Geometry;
+					}
+				);
+				size_t unique = 0;
+				for (const CollisionDemand current : *demand) {
+					if (unique != 0 && (*demand)[unique - 1].Geometry == current.Geometry) {
+						(*demand)[unique - 1].Hull = (*demand)[unique - 1].Hull || current.Hull;
+					} else {
+						(*demand)[unique++] = current;
+					}
+				}
+				demand->resize(unique);
 			}
 
-			for (const core::Name &name : *wanted) {
-				if (name == geometry) {
-					return true;
+			const auto found = std::lower_bound(
+				demand->begin(), demand->end(), geometry, [](const CollisionDemand &known, core::Name name) {
+					return known.Geometry < name;
 				}
-			}
-			return false;
+			);
+			return found != demand->end() && found->Geometry == geometry ? &*found : nullptr;
 		}
 	}
 
@@ -292,7 +308,7 @@ namespace engine::scene {
 		}
 		const EditableMeshCollision *heldBaked = heldLedger;
 		const CollisionShapes *heldShapes = CollisionShapesOf(store);
-		std::optional<std::vector<core::Name>> fastWanted;
+		std::optional<std::vector<CollisionDemand>> fastDemand;
 		size_t retained = 0;
 		bool dirty = false;
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
@@ -300,8 +316,13 @@ namespace engine::scene {
 			if (!name.IsValid()) {
 				return;
 			}
+			const CollisionDemand *demand = DemandFor(store, fastDemand, name);
 			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
 			retained += known != nullptr ? 1u : 0u;
+			if (demand == nullptr) {
+				dirty = dirty || known != nullptr;
+				return;
+			}
 
 			const bool hasTriangles = !mesh.Positions.empty() && mesh.Indices.size() >= 3;
 			if (known == nullptr) {
@@ -319,7 +340,7 @@ namespace engine::scene {
 				dirty = true;
 				return;
 			}
-			if (WantsHull(store, fastWanted, name) && heldShapes->FindHull(name) == nullptr) {
+			if (demand->Hull && heldShapes->FindHull(name) == nullptr) {
 				dirty = true;
 			}
 		});
@@ -342,10 +363,9 @@ namespace engine::scene {
 		};
 		std::vector<CollisionBuild> builds;
 
-		// Which geometry names a collider asks for as a hull, gathered on the
-		// first mesh that needs the answer and not before - a world with no
-		// script-built geometry in it must not pay a walk of every collider.
-		std::optional<std::vector<core::Name>> wanted;
+		// Gather collision demand on the first editable mesh only. Worlds with
+		// no script-built geometry skip the collider walk entirely.
+		std::optional<std::vector<CollisionDemand>> demanded;
 
 		// What is in the world this call, so the sweep below can tell a mesh
 		// that was destroyed from one that simply did not change.
@@ -360,6 +380,10 @@ namespace engine::scene {
 				return;
 			}
 
+			const CollisionDemand *demand = DemandFor(store, demanded, name);
+			if (demand == nullptr) {
+				return;
+			}
 			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
 
 			// The steady state: one binary revision lookup after the bounded
@@ -371,7 +395,7 @@ namespace engine::scene {
 			// bake below for why a hull is not built until it is asked for.
 			if (known != nullptr && known->Revision == mesh.Revision && heldShapes != nullptr &&
 				heldShapes->FindMesh(name) != nullptr &&
-				(heldShapes->FindHull(name) != nullptr || !WantsHull(store, wanted, name))) {
+				(heldShapes->FindHull(name) != nullptr || !demand->Hull)) {
 				seen.push_back(EditableMeshCollision::Baked{instance.Id, mesh.Revision});
 				return;
 			}
@@ -394,7 +418,7 @@ namespace engine::scene {
 				return;
 			}
 
-			// **The soup always and the hull only when something names one**,
+			// **The soup for every demanded shape and the hull only when asked**,
 			// which is the difference between this being affordable and not.
 			// Measured with the bench preset on a terrain chunk of 4,225 points
 			// beside 2,000 resident shapes: the full refresh costs 0.885 ms. A
@@ -412,7 +436,7 @@ namespace engine::scene {
 				CollisionBuild{
 					.Name = name,
 					.Source = &mesh,
-					.WantsHull = WantsHull(store, wanted, name),
+					.WantsHull = demand->Hull,
 					.Mesh = {},
 					.Hull = {},
 				}
