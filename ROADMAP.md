@@ -126,6 +126,7 @@ When you create a new world/scene, it auto appends the scripts in.
 * space engineers asteroids + planets full demo (`docs/FULL-PLANET-DEMO.md`)
 * huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot
 * ai village with daily tasks, occupations, relationships, and things like that (dwarf fortress style - personality, occupation, etc).
+* floating islands with village houses on them with bridges connecting them together, floating above clouds, minecraft-like
 
 - [_] localization support
 - [_] /docs/future-work/terrain-system.md
