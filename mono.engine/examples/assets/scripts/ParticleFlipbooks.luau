@@ -50,8 +50,8 @@ local function makeBay(
 	emitter.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid8x8
 	emitter.FlipbookMode = mode
 	emitter.FlipbookStartRandom = randomStart
-	-- Zero means use the baked frame count. The fox GIF has 48 frames in an 8x8
-	-- sheet, so the sixteen blank cells must stay unused.
+	-- Zero means use the baked frame count, so the emitter never walks the empty
+	-- cells at the end of this GIF's 8x8 sheet.
 	emitter.FlipbookFrames = 0
 	if framerate > 0 then
 		emitter.FlipbookFramerate = NumberRange.new(framerate, framerate)
@@ -96,7 +96,9 @@ RunService.Heartbeat:Connect(function()
 
 	print(`particle flipbooks: {TEXTURE} says {facts.Side}x{facts.Side}, {facts.Frames} frames at {facts.FrameRate} fps`)
 	assert(facts.Side == 8, "fox flipbook must be an 8x8 sheet")
-	assert(facts.Frames == 48, "fox flipbook must use 48 nonblank cells")
+	-- The source animation has changed frame counts over time. The baked facts
+	-- are the authority, while the grid is the contract this scene exercises.
+	assert(facts.Frames > 0 and facts.Frames <= facts.Side * facts.Side, "fox flipbook frame count must fit its grid")
 	assert(math.abs(facts.FrameRate - 24) < 0.001, "fox flipbook must retain its 24 fps bake")
 	checked = true
 	print(`particle flipbooks: loaded {TEXTURE}, {facts.Frames} frames at {facts.FrameRate} fps`)

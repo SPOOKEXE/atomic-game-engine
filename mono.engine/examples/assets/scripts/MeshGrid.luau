@@ -37,18 +37,15 @@
 --
 -- ## Run it
 --
---     assetc --input ART --output content --no-copy --model-size 1
+--     assetc --input ART --output content --no-copy
 --     cdn --publish content --store store --signing-key HEX
 --     client --cdn dir:store --publisher-key PUBLIC --script MeshGrid.luau \
 --            --entities 2048
 --
--- **`--model-size 1` is load-bearing and easy to get wrong.** A `MeshPart`'s
--- `Size` multiplies the mesh's own coordinates rather than fitting the mesh
--- into a box, so a model baked at `--model-size 4` and given `Size = 4` draws
--- sixteen metres across and overlaps its neighbours. Baking imports as *unit*
--- meshes makes them behave exactly like the built-ins, and then `Size` means
--- metres for every part in the scene rather than metres for some and a
--- multiplier for others.
+-- **`MeshPart.Size` is the displayed box.** The renderer maps each mesh's own
+-- bounds into that box, so imports baked with the default `--model-size 4` and
+-- unit-sized built-ins both occupy the same four-metre cell here. An imported
+-- model's bake scale therefore cannot make it overlap its neighbours.
 --
 -- **`--entities` is also the view channel's byte ceiling**, and this scene is
 -- large. Leave it at the default and the channel refuses to publish anything,
@@ -126,11 +123,9 @@ local BUILTIN: { string } = {
 local COLUMNS = 3
 local SPACING = 7
 
--- How tall a model stands, in metres. **This is metres only because the bake
--- was `--model-size 1`** - see the header. `assetc` fitted every import's
--- longest axis to one and centred it, so this number scales a unit mesh the
--- same way it scales a built-in cube, and a 2M-triangle wizard ends up the same
--- height as a low-poly fox.
+-- How tall and wide the mesh's bounding box is, in metres. `MeshPart.Size`
+-- maps any authored bounds into this box, so a 2M-triangle wizard ends up the
+-- same size as a low-poly fox.
 local MODEL_SIZE = 4
 
 local PEDESTAL_HEIGHT = 0.6
