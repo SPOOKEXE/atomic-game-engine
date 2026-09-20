@@ -41,11 +41,10 @@ TEST_CASE("small emitters share full compute groups instead of padding per emitt
 	CHECK(ParticleWorkgroups(65) == 2);
 }
 
-TEST_CASE("an uncapped redraw does not advance a resident particle revision twice", "[render][particles]") {
-	CHECK(ParticleStepDelta(40, 40, 1.0f / 60.0f, 0.0f) == 0.0f);
-	CHECK(ParticleStepDelta(40, 41, 1.0f / 60.0f, 0.0f) == 1.0f / 60.0f);
-	CHECK(ParticleStepDelta(41, 41, 1.0f / 60.0f, 0.025f) == 0.025f);
-	CHECK(ParticleStepDelta(40, 41, 1.0f / 60.0f, 0.025f) == 0.025f + 1.0f / 60.0f);
+TEST_CASE("a particle presentation consumes its accumulated simulation time", "[render][particles]") {
+	CHECK(ParticleStepDelta(1.0f / 60.0f, 0.0f) == 1.0f / 60.0f);
+	CHECK(ParticleStepDelta(1.0f / 60.0f, 0.025f) == 0.025f + 1.0f / 60.0f);
+	CHECK(ParticleStepDelta(0.0f, 0.0f) == 0.0f);
 }
 
 TEST_CASE("particle draw plan survives device steps until its host bound expires", "[render][particles]") {

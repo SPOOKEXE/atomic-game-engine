@@ -1065,8 +1065,13 @@ namespace engine::render {
 			!ActiveParticleWorld->PreparedRevisionValid ||
 			ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision ||
 			ActiveParticleWorld->PreparedBatches.size() != batches.size();
+		// A resident pool still has to advance when no authored emitter value did.
+		// `PreparedFrame` above limits this to one dispatch for this world each
+		// renderer frame, while ParticleDelta carries all simulation time owed since
+		// that dispatch. Revision-only refresh left static emitters frozen forever.
 		const bool refresh = rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
-							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision;
+							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision ||
+							 view.ParticleDelta > 0.0f;
 		if (!refresh) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
 			ParticleSpans = ActiveParticleWorld->PreparedSpans;
@@ -1356,8 +1361,6 @@ namespace engine::render {
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
 		Particles.Delta = ParticleStepDelta(
-			ActiveParticleWorld->PreparedRevision,
-			view.ParticleRevision,
 			view.ParticleDelta,
 			ActiveParticleWorld->CarriedDelta
 		);

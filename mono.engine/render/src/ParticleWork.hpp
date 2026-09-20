@@ -87,12 +87,11 @@ namespace engine::render {
 		return (workItems + 63u) / 64u;
 	}
 
-	// A presented revision advances the resident pool once. Rendering the same
-	// revision again only reuses its output, while a failed submission carries
-	// the unsubmitted time without charging the same revision twice.
-	constexpr float ParticleStepDelta(
-		uint64_t preparedRevision, uint64_t presentedRevision, float presentedDelta, float carriedDelta
-	) {
-		return carriedDelta + (preparedRevision == presentedRevision ? 0.0f : presentedDelta);
+	// A submitted presentation advances the resident pool by the time the host
+	// accumulated since its last submission. `PrepareParticles` prevents another
+	// dispatch for the same world in one renderer frame; a source revision only
+	// describes authored inputs and must not freeze a static emitter.
+	constexpr float ParticleStepDelta(float presentedDelta, float carriedDelta) {
+		return carriedDelta + presentedDelta;
 	}
 }

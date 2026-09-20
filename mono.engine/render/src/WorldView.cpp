@@ -160,9 +160,12 @@ namespace engine::render {
 		frame.Name = owner;
 		frame.Identity = store.Identity();
 		const ecs::WorldTime time = store.Time();
+		// A collected packet can be rebound for another camera while its source
+		// world is paused. Only a new world tick carries time to the device pool.
+		const bool advanced = frame.Name == owner && frame.Identity == store.Identity() && time.Tick != frame.Tick;
 		frame.Tick = time.Tick;
 		frame.Seconds = time.Elapsed;
-		frame.ParticleDelta = time.Delta;
+		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
 		frame.Lighting = scene::LightingOf(store);
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||

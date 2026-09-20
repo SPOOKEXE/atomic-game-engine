@@ -243,6 +243,11 @@ TEST_CASE("world view owns a published replica pose and particle inputs", "[rend
 		CHECK(frame.Tick == store.Time().Tick);
 		CHECK(frame.Seconds == store.Time().Elapsed);
 		CHECK(frame.ParticleDelta == store.Time().Delta);
+		store.AdvanceTick(.1f);
+		render::CollectWorldView(store, core::Name("source"), frame);
+		CHECK(frame.ParticleDelta == store.Time().Delta);
+		render::CollectWorldView(store, core::Name("source"), frame);
+		CHECK(frame.ParticleDelta == 0.0f);
 	}
 	// Store destruction must not invalidate the render packet.
 	REQUIRE(frame.Instances.size() == 1);
