@@ -189,29 +189,29 @@ vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
 
 // The heat ramp `Thermal` reads luminance through.
 //
-// Five stops, black through blue, magenta, red and yellow to white - the ramp
-// every thermal camera ships with, because it is the one that keeps its
-// ordering legible to somebody who has never seen one before.
+// Five stops, black through red, orange and yellow to white. Purple reads as a
+// missing-texture diagnostic in this engine, so it is a poor colour for a heat
+// range even though some false-colour palettes use it.
 vec3 ThermalRamp(float level) {
 	if (level < 0.12) {
-		return mix(vec3(0.0), vec3(0.0, 0.05, 0.42), smoothstep(0.0, 0.12, level));
+		return mix(vec3(0.0), vec3(0.35, 0.0, 0.0), smoothstep(0.0, 0.12, level));
 	}
 	if (level < 0.32) {
 		return mix(
-			vec3(0.0, 0.05, 0.42), vec3(0.58, 0.0, 0.72), smoothstep(0.12, 0.32, level)
+			vec3(0.35, 0.0, 0.0), vec3(0.92, 0.08, 0.0), smoothstep(0.12, 0.32, level)
 		);
 	}
 	if (level < 0.54) {
 		return mix(
-			vec3(0.58, 0.0, 0.72), vec3(0.96, 0.04, 0.04), smoothstep(0.32, 0.54, level)
+			vec3(0.92, 0.08, 0.0), vec3(1.0, 0.48, 0.0), smoothstep(0.32, 0.54, level)
 		);
 	}
 	if (level < 0.78) {
 		return mix(
-			vec3(0.96, 0.04, 0.04), vec3(1.0, 0.86, 0.02), smoothstep(0.54, 0.78, level)
+			vec3(1.0, 0.48, 0.0), vec3(1.0, 0.90, 0.04), smoothstep(0.54, 0.78, level)
 		);
 	}
-	return mix(vec3(1.0, 0.86, 0.02), vec3(1.0), smoothstep(0.78, 1.0, level));
+	return mix(vec3(1.0, 0.90, 0.04), vec3(1.0), smoothstep(0.78, 1.0, level));
 }
 
 float MirrorVignette(float edge, float inner, float outer) {
