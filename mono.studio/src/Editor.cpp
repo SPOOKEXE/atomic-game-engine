@@ -2860,6 +2860,12 @@ namespace studio {
 			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
 		);
 		damage.Overlay = Overlay.IsDirty();
+		// A selection is an overlay change, but the compositor cannot rebuild its
+		// overlay pass from a scene target that this frame did not retain. Keep the
+		// scene current whenever the editor changes its selection furniture.
+		if (damage.Overlay) {
+			damage.Scene = true;
+		}
 		const engine::render::PresentationCacheApplicability cacheApplicability{
 			.Objects = !view.Instances.empty() || view.Grid.Enabled,
 			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
