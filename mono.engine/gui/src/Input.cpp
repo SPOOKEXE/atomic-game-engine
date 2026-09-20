@@ -107,6 +107,7 @@ namespace engine::gui {
 			const Element *element = store.Get<Element>(instance);
 
 			const bool takes = store.IsA(instance, ButtonClass()) || store.Get<Entry>(instance) != nullptr ||
+							   store.Get<NodeCanvasLink>(instance) != nullptr ||
 							   (element != nullptr && element->Active);
 			if (!takes) {
 				return Reach::Through;
@@ -154,7 +155,13 @@ namespace engine::gui {
 				// an upright rectangle - which is what the painter does and what the
 				// hit test therefore has to agree with.
 				const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, point);
-				if (!command.Bounds.Contains(local) || !command.Clip.Contains(point)) {
+				core::Rect hitBounds = command.Bounds;
+				if (store.Get<NodeCanvasLink>(command.Source) != nullptr && hitBounds.Height() < 8.0f) {
+					const float padding = (8.0f - hitBounds.Height()) * 0.5f;
+					hitBounds.Min.Y -= padding;
+					hitBounds.Max.Y += padding;
+				}
+				if (!hitBounds.Contains(local) || !command.Clip.Contains(point)) {
 					continue;
 				}
 

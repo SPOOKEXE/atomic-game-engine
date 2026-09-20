@@ -142,6 +142,17 @@ local secondLink = canvas:Connect(transformOutput, displayInput)
 secondLink.Name = "RemapToPreview"
 secondLink.LineColor3 = FLOW
 
+-- Right-click a wire to remove it. The wire is a drawn link, so its signal
+-- follows the same picked instance as the port buttons.
+local function enableWireRemoval(link: NodeCanvasLink)
+	link.MouseButton2Click:Connect(function()
+		link:Destroy()
+	end)
+end
+
+enableWireRemoval(firstLink)
+enableWireRemoval(secondLink)
+
 -- Click an output, then an input, to route a validated wire through the
 -- canvas. The canvas still refuses mismatched types and cycles.
 local pendingOutput: NodeCanvasPort? = nil
@@ -151,7 +162,8 @@ local function connectFrom(port: NodeCanvasPort)
 		if port.Direction == Enum.NodePortDirection.Output then
 			pendingOutput = port
 		elseif pendingOutput then
-			canvas:Connect(pendingOutput, port)
+			local link = canvas:Connect(pendingOutput, port)
+			enableWireRemoval(link)
 			pendingOutput = nil
 		end
 	end)
