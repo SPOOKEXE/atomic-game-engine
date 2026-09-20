@@ -174,13 +174,16 @@ namespace client {
 		// Set only by the data-factory collector from the authored attribute.
 		// It survives teardown until the final completed audio block is copied.
 		std::string ObservationId;
+		// Generation of the source-observation cache.
 		uint64_t ObservationGeneration = 0;
 	};
 
 	// A scene-owned audio source and the player node currently standing in for
 	// it. The numeric node never leaves the client boundary.
 	struct AudioObservationSourceBinding {
+		// Stable audio-observation source ID exported to the data-factory bridge.
 		std::string SourceId;
+		// Player entity associated with this record.
 		engine::audio::NodeId Player;
 	};
 
@@ -265,6 +268,7 @@ namespace client {
 			std::vector<AudioObservationSourceBinding> &sources,
 			std::string &detail
 		);
+		// Advances source-observation state after the bridge has copied the current record.
 		void ConsumeObservationSources();
 
 		// How many commands this stage could not post, over its life.

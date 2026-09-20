@@ -245,6 +245,7 @@ namespace client {
 
 		// Supervised rendering of one game world over an inherited control channel.
 		std::string PresentationWorld;
+		// Supervised rendering session identifier.
 		uint64_t PresentationSession = 0;
 
 		// `host:port` of a server to replicate from. Empty means run the local

@@ -45,7 +45,9 @@ namespace engine::spatial {
 	// Logical storage owned by one chunk partition.
 	// @since v0.22
 	struct ChunkMapStats {
+		// Bytes currently owned by this structure.
 		size_t LiveBytes = 0;
+		// Bytes retained by this structure for reuse.
 		size_t RetainedBytes = 0;
 	};
 

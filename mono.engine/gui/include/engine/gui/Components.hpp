@@ -491,12 +491,16 @@ namespace engine::gui {
 
 		// Canvas pixels per screen pixel. The router keeps this in range.
 		float Zoom = 1.0f;
+		// Lowest allowed node-canvas zoom factor.
 		float MinimumZoom = 0.25f;
+		// Highest allowed node-canvas zoom factor.
 		float MaximumZoom = 2.0f;
 
 		// Distance between optional background grid lines in canvas pixels.
 		float GridSize = 32.0f;
+		// Whether the node canvas draws its optional background grid.
 		bool GridVisible = true;
+		// Explicit padding retained in the serialized node-canvas view state.
 		uint8_t Reserved[3] = {};
 	};
 
@@ -508,21 +512,32 @@ namespace engine::gui {
 	//
 	// @since v0.23
 	struct NodeCanvasNode {
+		// Stable node identity referenced by groups and links.
 		core::Name Id;
+		// Stable node-type name used to select its editor presentation.
 		core::Name Type;
+		// User-visible title rendered by this GUI control.
 		std::string Title;
 
 		// A disabled node is execution policy. Bypass has a declared local input
 		// and output so a runtime can preserve a graph's data flow deliberately.
 		bool Enabled = true;
+		// How a node routes values while bypassed.
 		NodeBypassMode BypassMode = NodeBypassMode::None;
+		// Explicit padding retained in the serialized node-canvas node layout.
 		uint8_t Reserved[2] = {};
+		// Input port forwarded while this node is bypassed.
 		core::Name BypassInput;
+		// Output port receiving the bypassed input value.
 		core::Name BypassOutput;
 
+		// Minimum node rectangle size in canvas pixels.
 		core::Vector2 MinimumSize{80.0f, 48.0f};
+		// Whether users may resize this node in the canvas editor.
 		bool Resizable = true;
+		// Arrangement of input ports in the node canvas.
 		InputPortLayout InputLayout = InputPortLayout::Manual;
+		// Explicit padding retained after InputLayout in the serialized node layout.
 		uint8_t LayoutReserved[2] = {};
 	};
 
@@ -534,10 +549,15 @@ namespace engine::gui {
 	//
 	// @since v0.23
 	struct NodeCanvasGroup {
+		// Stable group identity used by the node-canvas layout.
 		core::Name Id;
+		// User-visible caption rendered by this GUI layout element.
 		std::string Title;
+		// Inset between the group border and member nodes, in canvas pixels.
 		core::Vector2 Padding{16.0f, 16.0f};
+		// Layout mode used to place the canvas element.
 		NodeGroupLayout Layout = NodeGroupLayout::Manual;
+		// Explicit padding retained in the serialized node-canvas group layout.
 		uint8_t Reserved[3] = {};
 	};
 
@@ -546,9 +566,13 @@ namespace engine::gui {
 	//
 	// @since v0.23
 	struct NodeCanvasPort {
+		// Stable port identity within its owning node.
 		core::Name Id;
+		// Stable value-type name used to validate compatible links.
 		core::Name ValueType;
+		// Whether this port accepts or produces a value.
 		NodePortDirection Direction = NodePortDirection::Input;
+		// Node edge where the port is drawn.
 		NodePortEdge Edge = NodePortEdge::Top;
 
 		// Zero permits every wire; one retains the usual socket replacement
@@ -566,18 +590,28 @@ namespace engine::gui {
 	//
 	// @since v0.23
 	struct NodeCanvasLink {
+		// Source node identity for this drawn link.
 		core::Name FromNode;
+		// Source port identity for this drawn link.
 		core::Name FromPort;
+		// Direction expected from the source port when validating the link.
 		NodePortDirection FromDirection = NodePortDirection::Output;
+		// Explicit padding retained after the source direction in the wire form.
 		uint8_t FromReserved[3] = {};
+		// Destination node identity for this drawn link.
 		core::Name ToNode;
+		// Destination port identity for this drawn link.
 		core::Name ToPort;
+		// Direction expected from the destination port when validating the link.
 		NodePortDirection ToDirection = NodePortDirection::Input;
+		// Explicit padding retained after the destination direction in the wire form.
 		uint8_t ToReserved[3] = {};
 
 		// The renderer uses this for every segment that makes up the wire.
 		core::Color3 LineColor{0.75f, 0.75f, 0.75f};
+		// Link alpha in the node canvas.
 		float LineTransparency = 0.0f;
+		// Link width in display pixels.
 		float LineThickness = 2.0f;
 	};
 

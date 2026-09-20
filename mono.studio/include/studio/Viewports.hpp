@@ -96,7 +96,9 @@ namespace studio {
 	//
 	// @since v0.23
 	struct ViewportTargetSize {
+		// Target width in pixels.
 		uint32_t Width = 1;
+		// Target height in pixels.
 		uint32_t Height = 1;
 	};
 

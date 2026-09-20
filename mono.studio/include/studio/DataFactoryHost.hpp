@@ -17,6 +17,7 @@
 
 namespace studio {
 
+	// Data Factory Host Callbacks declaration.
 	struct DataFactoryHostCallbacks {
 		std::function<bool(
 			engine::world::DataFactoryWorldOperation,
@@ -25,13 +26,17 @@ namespace studio {
 			bool,
 			std::string &
 		)>
+			// Lifecycle used by this object.
 			Lifecycle;
 		std::function<bool(engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &)>
+			// Pause used by this object.
 			Pause;
+		// Whether rehydrate.
 		std::function<bool(engine::world::Universe &, engine::world::WorldId, std::string &)> Rehydrate;
 		std::function<engine::script::DataScriptPackageTransactionDependencies(
 			engine::world::Universe &, engine::world::DataFactorySession &
 		)>
+			// Package dependencies used by this object.
 			PackageDependencies = {};
 	};
 
@@ -41,16 +46,20 @@ namespace studio {
 	class DataFactoryHost final {
 	  public:
 		bool
+		// Builds the lifecycle session and installs host callbacks for this universe.
 		Start(engine::world::Universe &universe, DataFactoryHostCallbacks callbacks, std::string &detail);
+		// Adds data-factory control rows whose availability matches renderer state.
 		void InstallTools(engine::control::Surface &surface, bool rendererReady);
 
 		// Advances the isolated factory universe only while its lifecycle has resumed it.
 		bool Tick(float frameSeconds);
 
+		// Returns the mutable lifecycle session while this host remains started.
 		engine::world::DataFactorySession *Session() {
 			return Lifecycle.get();
 		}
 
+		// Returns the lifecycle session for read-only host inspection.
 		const engine::world::DataFactorySession *Session() const {
 			return Lifecycle.get();
 		}

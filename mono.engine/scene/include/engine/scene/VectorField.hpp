@@ -24,12 +24,19 @@ namespace engine::scene {
 	// A finite field over the local XZ plane. `Vector` is its constant term;
 	// `Radial` and `Tangential` add position-dependent terms around its origin.
 	struct VectorField2D {
+		// Constant XZ vector added at every sampled point.
 		core::Vector2 Vector;
+		// Finite local XZ half-extent; zero on an axis leaves it unbounded.
 		core::Vector2 HalfExtent;
+		// Outward vector strength proportional to distance from the origin.
 		float Radial = 0.0f;
+		// Orbiting vector strength proportional to distance from the origin.
 		float Tangential = 0.0f;
+		// Positive edge-fade width in normalized field space.
 		float Falloff = 0.0f;
+		// Whether bounds and terms rotate with the field's transform.
 		bool LocalSpace = true;
+		// Explicit padding retained for component layout stability.
 		uint8_t Reserved[3] = {};
 	};
 
@@ -37,13 +44,21 @@ namespace engine::scene {
 	// the tangential term and defaults to up, which makes an authored vortex a
 	// normal field rather than a specialised effect.
 	struct VectorField3D {
+		// Constant three-dimensional vector added at every sampled point.
 		core::Vector3 Vector;
+		// Finite local half-extent; zero on an axis leaves it unbounded.
 		core::Vector3 HalfExtent;
+		// Normalized axis around which the tangential term orbits.
 		core::Vector3 Axis{0.0f, 1.0f, 0.0f};
+		// Outward vector strength proportional to radial distance.
 		float Radial = 0.0f;
+		// Orbiting vector strength around Axis.
 		float Tangential = 0.0f;
+		// Positive edge-fade width in normalized field space.
 		float Falloff = 0.0f;
+		// Whether bounds and terms rotate with the field transform.
 		bool LocalSpace = true;
+		// Explicit padding retained for component layout stability.
 		uint8_t Reserved[3] = {};
 	};
 
@@ -51,15 +66,25 @@ namespace engine::scene {
 	// refreshes. It contains no store pointer, so a particle block can sample it
 	// for every particle without returning to ECS storage.
 	struct VectorFieldSample {
+		// World transform used to convert a sample point into field space.
 		core::CFrame Frame;
+		// Constant three-dimensional vector term.
 		core::Vector3 Vector;
+		// Resolved finite half-extent in field space.
 		core::Vector3 HalfExtent;
+		// Resolved orbit axis for the tangential term.
 		core::Vector3 Axis{0.0f, 1.0f, 0.0f};
+		// Entity that supplied this retained sample, or null when absent.
 		ecs::Entity Source = ecs::NULL_ENTITY;
+		// Resolved radial vector strength.
 		float Radial = 0.0f;
+		// Resolved tangential vector strength.
 		float Tangential = 0.0f;
+		// Resolved normalized edge-fade width.
 		float Falloff = 0.0f;
+		// Whether sampling uses the field's local orientation.
 		bool LocalSpace = true;
+		// Whether sampling ignores the local vertical axis.
 		bool TwoDimensional = false;
 	};
 

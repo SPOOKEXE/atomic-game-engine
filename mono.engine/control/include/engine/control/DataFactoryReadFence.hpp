@@ -16,6 +16,7 @@ namespace engine::control::data_factory_read_fence {
 
 	using nlohmann::json;
 
+	// Reads an unsigned lifecycle counter without narrowing it.
 	inline bool UInt(const json &value, std::string_view name, uint64_t &out, std::string &failure) {
 		if (!value.is_number_unsigned()) {
 			failure = "validation_failed: " + std::string(name) + " must be an unsigned integer";
@@ -25,6 +26,7 @@ namespace engine::control::data_factory_read_fence {
 		return true;
 	}
 
+	// Extracts the bounded scene identity shared by session-bound read tools.
 	inline bool InstanceId(const json &arguments, std::string &out, std::string &failure) {
 		const auto field = arguments.find("instance_id");
 		if (field == arguments.end() || !field->is_string()) {
@@ -39,10 +41,12 @@ namespace engine::control::data_factory_read_fence {
 		return true;
 	}
 
+	// Recognizes the three fields that bind a read to one completed world revision.
 	inline bool IsExpectedRevisionField(std::string_view name) {
 		return name == "expected_tick" || name == "expected_world_epoch" || name == "expected_world_version";
 	}
 
+	// Serializes the lifecycle revision currently observed by the factory session.
 	inline json Current(const world::DataFactoryReply &reply) {
 		return {
 			{"instance_id", reply.InstanceId},
@@ -52,6 +56,7 @@ namespace engine::control::data_factory_read_fence {
 		};
 	}
 
+	// Confirms session ownership and rejects reads whose expected revision is no longer current.
 	inline bool Validate(
 		world::DataFactorySession *session,
 		std::string_view instanceId,

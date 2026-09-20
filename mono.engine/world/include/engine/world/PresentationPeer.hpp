@@ -3,10 +3,13 @@
 #include <engine/world/Universe.hpp>
 
 namespace engine::world {
+	// Presentation channels admitted for one authenticated peer.
 	struct PresentationPeerChannels {
+		// Exact consumer channel names the peer may receive.
 		std::vector<std::string> Consumers;
 		// Slash-terminated prefixes permit viewport subchannels of a consumer.
 		std::vector<std::string> ConsumerPrefixes;
+		// Producer channel names the peer may publish.
 		std::vector<std::string> Producers;
 	};
 
@@ -15,18 +18,24 @@ namespace engine::world {
 	// receipts through process hosts. The universe outlives the peer.
 	class PresentationPeer {
 	  public:
+		// Reserves this connection's reply slots on a host-owned world.
 		PresentationPeer(
 			Universe &universe, WorldId world, uint32_t firstSlot, PresentationPeerChannels channels
 		);
 		~PresentationPeer();
 		PresentationPeer(const PresentationPeer &) = delete;
 		PresentationPeer &operator=(const PresentationPeer &) = delete;
+		// Replaces the peer's authenticated endpoint directory.
 		PresentationStatus Apply(const PresentationDirectory &directory);
+		// Admits an incoming message only for a mapped live endpoint.
 		PresentationStatus Accept(const PresentationMessage &message);
 		// Exact live receipt ownership for the server's authenticated connection lookup.
 		bool OwnsReceipt(const PresentationAddress &alias) const;
+		// Drains messages waiting to return to this peer.
 		std::vector<PresentationMessage> Take();
+		// Returns the endpoint aliases currently advertised to the peer.
 		PresentationDirectory Routes() const;
+		// Retires all endpoint aliases and queued peer traffic.
 		void Close();
 
 	  private:

@@ -9,6 +9,7 @@
 
 namespace engine::control {
 
+	// Product callback that runs a verified package after this adapter validates MCP input.
 	using DataScriptPackageExecutor =
 		std::function<engine::script::DataScriptResult(const engine::script::DataScriptRequest &)>;
 

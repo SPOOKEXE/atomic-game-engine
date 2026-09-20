@@ -29,19 +29,28 @@ namespace client {
 	// One copied active-camera packet, ordered by its world's stable name and
 	// then its process-local handle. `View` borrows the two owned packets below.
 	struct ActiveScene {
+		// Stable identifier for world.
 		engine::world::WorldId World;
+		// Stable identifier for name.
 		engine::core::Name Name;
+		// Stable identifier for pipeline.
 		engine::core::Name Pipeline;
+		// Entity associated with camera.
 		engine::ecs::Entity Camera;
+		// Coordinate frame associated with this record.
 		std::unique_ptr<engine::render::WorldViewFrame> Frame;
+		// Camera-layer frame owned by the active scene.
 		std::unique_ptr<engine::render::WorldCameraFrame> CameraLayers;
+		// Render view that borrows the scene frames.
 		engine::render::View View;
 	};
 
 	// One product presentation request with the renderer key already selected
 	// on the driver thread. The key is copied into the packet on its world lane.
 	struct ActiveSceneDemand {
+		// Presentation request copied from the world lane.
 		engine::world::Presentation Request;
+		// Stable identifier for pipeline.
 		engine::core::Name Pipeline;
 	};
 
@@ -79,6 +88,7 @@ namespace client {
 			const std::function<bool(std::span<engine::render::View>)> &prepareCaptures,
 			const std::function<engine::render::FrameResult(std::span<engine::render::View>)> &submit
 		);
+		// Forwards one displayed view without capture views or a capture-preparation callback.
 		engine::render::FrameResult SubmitBatch(
 			engine::world::WorldId displayedWorld,
 			const engine::render::View &displayedView,

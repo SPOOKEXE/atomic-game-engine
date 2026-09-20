@@ -190,6 +190,7 @@ namespace engine::assets {
 		// Static control-flow instruction estimate.
 		uint32_t ControlFlowInstructions = 0;
 		//@}
+		// Optimizations kept in their declared order.
 		std::vector<ShaderOptimization> Optimizations;
 		// One SPIR-V payload and optionally one MSL payload, sorted by backend spelling.
 		std::vector<ShaderPayload> Payloads;

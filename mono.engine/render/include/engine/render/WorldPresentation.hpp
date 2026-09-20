@@ -52,11 +52,17 @@ namespace engine::render {
 	struct DrawList {
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
+		// Stable object identities indexed by captured object-id values.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		// Stable semantic identities indexed by captured class values.
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		// Stable part identities indexed by captured part-id values.
 		std::vector<DataCapturePartLabel> PartLabels;
+		// False when ObjectLabels cannot describe this draw list completely.
 		bool ObjectLabelsValid = true;
+		// False when SemanticLabels cannot describe this draw list completely.
 		bool SemanticLabelsValid = true;
+		// False when PartLabels cannot describe this draw list completely.
 		bool PartLabelsValid = true;
 
 		// Joint transforms for those instances, flattened into one allocation.
@@ -70,11 +76,17 @@ namespace engine::render {
 		// Monotonic source epochs last inspected by CollectInstances. These are
 		// derived cache state and deliberately do not cross snapshots.
 		std::array<uint64_t, 14> SourceRevisions{};
+		// Entity count used to size the cached source rows.
 		size_t SourceEntityCount = 0;
+		// Number of skeletons represented by the cached source rows.
 		size_t SkeletonCount = 0;
+		// Number of bones represented by the cached joint palette.
 		size_t BoneCount = 0;
+		// Whether source rows are ready for collection.
 		bool SourcesReady = false;
+		// Whether the draw list was built from interpolated tick state.
 		bool HasInterpolation = false;
+		// Whether any source rows use a visibility filter.
 		bool HasFilteredSources = false;
 	};
 
@@ -197,6 +209,7 @@ namespace engine::render {
 	//
 	// @param store The world being presented.
 	void CollectInstances(ecs::Store &store);
+	// Rebuilds the draw list using the requested completed-tick time policy.
 	void CollectInstances(ecs::Store &store, DrawCollectionTime time);
 
 	// Rebuilds the flat joint palette and assigns each skinned draw row its run.

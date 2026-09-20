@@ -14,8 +14,11 @@ namespace engine::script {
 
 	// The state that turns fixed world ticks into script updates.
 	struct ScriptClock {
+		// Fixed script-update frequency derived from the world's tick rate, in hertz.
 		double Rate = 0.0;
+		// Fractional elapsed script-update time awaiting the next callback, in seconds.
 		double Accumulator = 0.0;
+		// Last world tick incorporated into Accumulator; max before the first update.
 		uint64_t ObservedTick = std::numeric_limits<uint64_t>::max();
 	};
 

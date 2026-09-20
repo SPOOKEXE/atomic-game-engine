@@ -16,14 +16,19 @@
 
 namespace engine::examples {
 
+	// Distinguishes source-script demos from authored-world demos.
 	enum class DemoKind {
 		Script,
 		World,
 	};
 
+	// One discovered runnable demo and its load path.
 	struct DemoEntry {
+		// User-visible demo name derived from its staged file.
 		std::string Name;
+		// Load path selected for this demo.
 		DemoKind Kind = DemoKind::Script;
+		// Staged file to load when this demo is selected.
 		std::filesystem::path Path;
 	};
 
@@ -33,6 +38,7 @@ namespace engine::examples {
 		// Uses the staged demo root when root is empty.
 		explicit DemosLoader(std::filesystem::path root = {});
 
+		// Returns the staged root searched for script and world demos.
 		const std::filesystem::path &Root() const;
 
 		// The directory that owns one kind of demo.

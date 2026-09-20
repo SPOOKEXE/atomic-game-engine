@@ -55,7 +55,9 @@ namespace engine::render {
 
 	// A copied world-space collector placement, independent of later camera preparation.
 	struct SpatialCollector {
+		// Entity owning the world-space interface collector.
 		ecs::Entity Collector;
+		// Resolved canvas size and placement for that entity.
 		gui::SpatialCanvas Canvas;
 	};
 

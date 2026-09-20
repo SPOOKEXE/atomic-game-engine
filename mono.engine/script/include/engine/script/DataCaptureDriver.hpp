@@ -10,7 +10,9 @@
 #include <engine/script/Host.hpp>
 
 namespace engine::script {
+	// VM-owned callback retained by the host for one world's capture barrier.
 	struct DataCaptureDriver {
+		// VM-owned callback handle.
 		HostCallback Callback;
 	};
 }

@@ -10,22 +10,36 @@
 #include <vector>
 
 namespace engine::control::features {
+	// One renderer decision for an entity in the completed view submission.
 	struct VisibilityObservationReply {
+		// Name of the world containing Entity when this decision was recorded.
 		std::string World;
+		// Process-local ECS entity value used only to filter this reply.
 		uint64_t Entity = 0;
+		// Renderer visibility state after culling and submission decisions.
 		std::string State;
+		// Specific culling or submission path that produced State.
 		std::string Cause;
 	};
+	// Immutable batch of visibility decisions for one rendered view.
 	struct VisibilitySnapshotReply {
+		// Render frame number that produced the observations.
 		uint64_t Frame = 0;
+		// Renderer view slot associated with Frame.
 		size_t ViewSlot = 0;
+		// Name of the world rendered by this view.
 		std::string World;
+		// False when collection was invalidated before the view completed.
 		bool Valid = false;
+		// Number of observations omitted because the renderer's bounded buffer filled.
 		size_t Dropped = 0;
+		// True when Dropped is an exact count rather than a lower bound.
 		bool DroppedExact = true;
+		// Per-entity decisions retained from the completed view.
 		std::vector<VisibilityObservationReply> Observations;
 	};
 
+	// Installs a read-only view of the most recent renderer-owned visibility snapshot.
 	inline Feature VisibilityObservations(std::function<VisibilitySnapshotReply()> snapshot) {
 		return {
 			.Name = "visibility-observations", .Install = [snapshot = std::move(snapshot)](Surface &surface) {

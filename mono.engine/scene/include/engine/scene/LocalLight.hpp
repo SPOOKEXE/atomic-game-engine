@@ -18,6 +18,7 @@ namespace engine::ecs {
 namespace engine::scene {
 	struct Light;
 
+	// Reason an authored light cannot produce a renderer source row.
 	enum class LocalLightRejection : uint8_t {
 		None,
 		Disabled,
@@ -30,10 +31,15 @@ namespace engine::scene {
 	// The renderer's source row before portal duplication and the camera light cap.
 	// Colour has brightness folded in because that is the RGB the renderer consumes.
 	struct ResolvedLocalLight {
+		// World-space emission origin.
 		core::Vector3 Position{};
+		// World-space direction for a spot or surface light.
 		core::Vector3 Direction{};
+		// Linear RGB emission with brightness already applied.
 		core::Color3 Colour{};
+		// Hard illumination cutoff in metres.
 		float Range = 0.0f;
+		// Cosine of the spot or surface cone half-angle.
 		float ConeCosine = -1.0f;
 	};
 
@@ -43,5 +49,6 @@ namespace engine::scene {
 		const ecs::Store &store, ecs::Entity entity, const Light &light, ResolvedLocalLight &resolved
 	);
 
+	// Returns a stable diagnostic name for a rejection reason.
 	const char *Describe(LocalLightRejection rejection);
 }

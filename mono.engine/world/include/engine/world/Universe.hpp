@@ -784,16 +784,26 @@ namespace engine::world {
 		// Host-control presentation API. Call outside tick batches on the driver
 		// thread. Session numbers are assigned by host control, never by a world.
 		bool ConfigurePresentation(uint64_t session, const PresentationLimits &limits = {});
+		// Opens a named presentation endpoint for a local world.
 		PresentationOpen OpenPresentation(WorldId world, core::Name channel);
+		// Returns a locally admitted presentation endpoint receipt.
 		PresentationAddress LookupPresentation(WorldId world, std::string_view channel) const;
+		// Returns this host's complete local presentation directory.
 		PresentationDirectory LocalPresentationDirectory() const;
+		// Returns presentation routes available to one local consumer.
 		PresentationDirectory PresentationRoutesFor(core::Name consumer) const;
+		// Applies authenticated presentation routes supplied by the driver.
 		PresentationStatus AcceptPresentationRoutesFromDriver(const PresentationDirectory &directory);
+		// Withdraws a retired remote host and its queued presentation traffic.
 		void RetirePresentationHost(core::Name host);
+		// Applies a newer complete presentation directory from a remote host.
 		PresentationStatus
 		ApplyPresentationDirectory(core::Name host, const PresentationDirectory &directory);
+		// Registers one trusted remote presentation endpoint.
 		PresentationStatus RegisterRemotePresentation(core::Name host, const PresentationAddress &address);
+		// Closes a locally opened presentation endpoint.
 		PresentationStatus ClosePresentation(const PresentationAddress &address);
+		// Routes a local world's presentation payload through its endpoint receipts.
 		PresentationStatus SendPresentation(
 			WorldId source,
 			const PresentationAddress &from,
@@ -801,12 +811,17 @@ namespace engine::world {
 			uint64_t correlation,
 			std::span<const std::byte> payload
 		);
+		// Admits presentation traffic from an authenticated remote host.
 		PresentationStatus IngestPresentation(core::Name host, const PresentationMessage &message);
 		// For a host receiving verified traffic on its trusted driver link.
 		PresentationStatus AcceptPresentationFromDriver(const PresentationMessage &message);
+		// Transfers all inbound presentation messages for an endpoint.
 		std::vector<PresentationMessage> TakePresentation(const PresentationAddress &address);
+		// Transfers presentation messages queued for remote hosts.
 		std::vector<PresentationOutbound> TakePresentationOutbound();
+		// Returns retained presentation queue bytes and message count.
 		PresentationQueueSize PresentationQueueUsage() const;
+		// Returns cumulative presentation ownership-transfer counts.
 		PresentationTraffic PresentationTrafficCounts() const;
 
 		// Host-owned phase handshake. Begin charges fixed frame time once and returns
@@ -814,16 +829,25 @@ namespace engine::world {
 		// requests, serves destinations, applies a complete reply set, then resumes
 		// Simulation. Empty local rounds are legal when another host owes more.
 		bool HasTickExchangeEndpoints() const;
+		// Opens a joined exchange frame and returns local catch-up rounds.
 		int BeginTickExchangeFrame(float frameSeconds);
+		// Begins the input phase for the next joined exchange round.
 		bool BeginTickExchangeRound();
+		// Collects locally produced requests for the open exchange round.
 		bool CollectTickExchangeRequests(std::vector<TickExchangeRequest> &requests);
+		// Serves requests on their destination lanes and appends replies.
 		bool ServeTickExchangeRequests(
 			std::span<const TickExchangeRequest> requests, std::vector<TickExchangeReply> &replies
 		);
+		// Applies a complete reply set on each source lane.
 		bool ApplyTickExchangeReplies(std::span<const TickExchangeReply> replies);
+		// Completes the current round and restores simulation phase.
 		bool FinishTickExchangeRound();
+		// Closes a completed exchange frame.
 		bool EndTickExchangeFrame();
+		// Cancels an incomplete frame and restores normal ticking.
 		void CancelTickExchangeFrame();
+		// Reports whether a host-owned exchange frame is open.
 		bool TickExchangeFrameOpen() const;
 
 	  private:

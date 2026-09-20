@@ -244,7 +244,9 @@ namespace engine::graph {
 		ReadWrite,
 	};
 
+	// Returns the stable text token used to serialize this resource access mode.
 	const char *Describe(ResourceAccess access);
+	// Parses a serialized resource access token into its enum value.
 	bool ParseResourceAccess(std::string_view text, ResourceAccess &out);
 
 	// The transfer function used for colour channels. Data resources normally
@@ -255,7 +257,9 @@ namespace engine::graph {
 		SRGB,
 	};
 
+	// Returns the stable text token used to serialize this colour space.
 	const char *Describe(ResourceColourSpace space);
+	// Parses a serialized resource colour-space token into its enum value.
 	bool ParseResourceColourSpace(std::string_view text, ResourceColourSpace &out);
 
 	// How the alpha channel is interpreted when one exists.
@@ -266,7 +270,9 @@ namespace engine::graph {
 		Premultiplied,
 	};
 
+	// Returns the stable text token used to serialize this alpha representation.
 	const char *Describe(ResourceAlphaSpace space);
+	// Parses a serialized resource alpha-space token into its enum value.
 	bool ParseResourceAlphaSpace(std::string_view text, ResourceAlphaSpace &out);
 
 	// How long storage must survive. External and History resources cannot be
@@ -277,7 +283,9 @@ namespace engine::graph {
 		History,
 	};
 
+	// Returns the stable text token used to serialize this resource lifetime.
 	const char *Describe(ResourceLifetime lifetime);
+	// Parses a serialized resource lifetime token into its enum value.
 	bool ParseResourceLifetime(std::string_view text, ResourceLifetime &out);
 
 	// How often a node runs.
@@ -389,19 +397,29 @@ namespace engine::graph {
 		// one-sample resources written before the compositor contract grew these
 		// fields.
 		ResourceAccess Access = ResourceAccess::Automatic;
+		// Multisample count for the resource.
 		uint32_t Samples = 1;
+		// Texture depth in texels.
 		uint32_t Depth = 1;
+		// Texture array-layer count.
 		uint32_t Layers = 1;
+		// First mip level covered by the view.
 		uint32_t FirstMip = 0;
+		// Number of mip levels covered by the view.
 		uint32_t MipCount = 1;
+		// Colour interpretation of image texels.
 		ResourceColourSpace ColourSpace = ResourceColourSpace::Automatic;
+		// Alpha interpretation of image texels.
 		ResourceAlphaSpace AlphaSpace = ResourceAlphaSpace::Automatic;
+		// Bytes between consecutive buffer elements.
 		uint32_t BufferStride = 0;
 
 		// Owner and generation make retained history unambiguous across worlds
 		// and restores. An invalid owner means the graph's current scope.
 		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		// Stable identifier for owner.
 		core::Name Owner{};
+		// Generation used to invalidate stale history.
 		uint32_t HistoryGeneration = 0;
 
 		// The size this resolves to for a view of a given size.

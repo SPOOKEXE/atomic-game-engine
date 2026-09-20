@@ -13,7 +13,9 @@ namespace engine::scene {
 	// The matched points of a single-handle accessory. The hierarchy records
 	// whether it is equipped; the handle is carried by CharacterLimb, not a joint.
 	struct Accessory {
+		// Attachment beneath the accessory's Handle part.
 		ecs::Entity HandleAttachment = ecs::NULL_ENTITY;
+		// Attachment beneath the character limb or root that receives the Handle.
 		ecs::Entity CharacterAttachment = ecs::NULL_ENTITY;
 	};
 

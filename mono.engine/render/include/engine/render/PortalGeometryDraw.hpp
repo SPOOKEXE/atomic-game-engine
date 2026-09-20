@@ -12,9 +12,13 @@ namespace engine::scene {
 	struct SeamTransform;
 }
 namespace engine::render {
+	// Body rows split across a portal mouth with a shared joint palette.
 	struct PortalBodyDraws {
+		// Rows remaining on the source side of the mouth.
 		std::vector<scene::DrawInstance> Near;
+		// Rows mapped through to the destination side.
 		std::vector<scene::DrawInstance> Far;
+		// Joint poses referenced by either row set.
 		std::vector<core::CFrame> Joints;
 	};
 	// Selected ordinary body rows only. The source half keeps dot(position, normal) >= offset;
@@ -31,13 +35,19 @@ namespace engine::render {
 		PortalBodyDraws &out
 	);
 
+	// Primary-eye row selection produced while importing portal geometry.
 	struct PortalDrawSelection {
+		// Player identity used to find copied body rows.
 		std::string_view Player;
 		// Indices into the appended destination draw list, for its primary eye only.
 		std::vector<uint32_t> Hidden;
+		// Number of imported rows added to the destination list.
 		size_t Appended = 0;
+		// Number of native body rows replaced by imported copies.
 		size_t Replaced = 0;
+		// Account authorized for retained-body exclusion, if any.
 		std::string_view RetainedBodyPlayer{};
+		// Imported row indices belonging to the authorized retained body.
 		std::vector<uint32_t> RetainedBodyRows{};
 	};
 	// The caller authorizes the account first. Native/held rigs resolve in this

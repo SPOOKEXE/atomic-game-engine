@@ -99,11 +99,17 @@ namespace engine::scene {
 	//
 	// @since v0.25
 	struct AutoMeshLOD {
+		// Published coarse artifacts for levels one through three.
 		core::Name Meshes[LOD_LEVELS - 1];
+		// Retained triangle fractions used to generate each coarse artifact.
 		float Ratios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
+		// Per-level projected-pixels-per-triangle target; zero uses the default.
 		float TargetQuadArea = 0.0f;
+		// Bake algorithm that produced the coarse artifacts.
 		LodStrategy Strategy = LodStrategy::Decimated;
+		// Number of valid levels including the base Visual mesh.
 		uint8_t Levels = LOD_LEVELS;
+		// Explicit padding retained for the serialized component layout.
 		uint8_t Reserved[2] = {};
 	};
 
@@ -116,10 +122,15 @@ namespace engine::scene {
 	//
 	// @since v0.25
 	struct CustomMeshLOD {
+		// Authored artifact overrides for levels one through three.
 		core::Name Meshes[LOD_LEVELS - 1];
+		// Per-level retained triangle fractions; zero inherits automatic settings.
 		float Ratios[LOD_LEVELS - 1] = {};
+		// Projected-pixels-per-triangle target; zero inherits automatic settings.
 		float TargetQuadArea = 0.0f;
+		// Number of valid levels including the base Visual mesh.
 		uint8_t Levels = LOD_LEVELS;
+		// Explicit padding retained for the serialized component layout.
 		uint8_t Reserved[3] = {};
 	};
 

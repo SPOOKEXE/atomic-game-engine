@@ -15,9 +15,13 @@ namespace engine::scene {
 
 	// One authored affordance record on a BasePart.
 	struct AuthoredAffordance {
+		// Stable author-assigned affordance identity.
 		core::Name Id;
+		// Gameplay semantic exported for this part.
 		AuthoredAffordanceKind Kind = AuthoredAffordanceKind::None;
+		// Whether this affordance currently participates in queries.
 		bool Enabled = false;
+		// Explicit padding omitted by the affordance wire form.
 		uint8_t Reserved[2]{};
 	};
 }

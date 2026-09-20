@@ -12,15 +12,20 @@ namespace engine::render {
 	// Host policy resolves authored destination names to the correct player replica.
 	// Remote endpoints must already be authenticated and registered with the universe.
 	struct PortalImageDestination {
+		// Authored world name used by the source portal.
 		core::Name Authored;
+		// Resolved world instance that produces the image.
 		world::WorldId World;
 	};
 
 	// Borrowed only during SubmitEye. The body world can differ from the reply
 	// owner while a successor waits; the camera is already in the destination.
 	struct PortalEyeGeometrySource {
+		// World whose copied rows describe the eye's body.
 		world::WorldId World;
+		// Body draw rows copied during SubmitEye.
 		std::span<const scene::DrawInstance> Instances;
+		// Joint poses referenced by the copied body rows.
 		std::span<const core::CFrame> JointFrames;
 	};
 
@@ -29,6 +34,7 @@ namespace engine::render {
 	// object; remove worlds/viewports before destroying their associated state.
 	class PortalImageHost {
 	  public:
+		// Monotonic clock used for capture leases and request expiry.
 		using Time = PortalImageInbox::Time;
 		// A supplied library outlives this host; otherwise all producers share a host-owned one.
 		PortalImageHost(
@@ -56,13 +62,16 @@ namespace engine::render {
 		void SetContentOwner(
 			world::WorldId world, core::Name owner, std::span<const WorldContentOwner> foreign = {}
 		);
+		// Requests a destination's latest seam topology through the shared host.
 		bool RequestTopology(world::WorldId source, world::WorldId destination, Time now);
+		// Borrows unexpired topology for a destination, if available.
 		const PortalTopologySnapshot *Topology(world::WorldId destination, Time now) const;
 		// Service an inherited, trusted driver link outside world ticks. False means
 		// stop or disconnect; the caller ends its product loop before another tick.
 		bool PumpDriverLink(world::HostLink &link);
 		// Trusted connection adapter: creates and retires remote route worlds.
 		world::PresentationStatus AcceptDriverRoutes(const world::PresentationDirectory &directory);
+		// Submits admitted portal demands after resolving authored destinations.
 		size_t Submit(
 			world::WorldId source,
 			size_t viewSlot,
@@ -90,6 +99,7 @@ namespace engine::render {
 		Pump(float frameSeconds, float alpha, Time now, bool destinationPresented = false);
 		// Render a view to submit queued groups even when displayed pixels are cached.
 		bool HasPendingUploads() const;
+		// Borrows the latest accepted image for a viewport portal, or zero.
 		uint64_t Image(size_t viewSlot, core::Name portal) const;
 		// Render current destination-space body rows against this portal's accepted layers.
 		// The host owns the result until replacement, expiry or viewport/world removal.
@@ -103,13 +113,16 @@ namespace engine::render {
 		// Complete is delivered once. Its image is borrowed from the host, which owns
 		// it until composition replacement or viewport/world retirement.
 		PortalTreeCompositionProgress PollBodyComposition(uint64_t job, Time now);
+		// Cancels a queued or active body-composition job.
 		void CancelBodyComposition(uint64_t job);
 
 		// Pull and retain immutable source shadows using this admitted reference
 		// body only for directional fitting. It does not retain a display pose.
 		PortalTreeCompositionStatus
 		BeginBodyPreparation(core::Name portal, const View &referenceBody, Time now, uint64_t &preparation);
+		// Polls shadow preparation until completion or refusal.
 		PortalTreeCompositionProgress PollBodyPreparation(uint64_t preparation, Time now);
+		// Cancels an active shadow-preparation job.
 		void CancelBodyPreparation(uint64_t preparation);
 		// Copies the newest body only after preparation completes. The renderer
 		// rechecks every fitted shadow domain before recording this pose.
@@ -119,10 +132,13 @@ namespace engine::render {
 		// pose until this FIFO ticket is ready, then supplies current data below.
 		PortalTreeCompositionStatus
 		QueueBodyPreparation(core::Name portal, size_t viewSlot, Time now, uint64_t &ticket);
+		// Polls the FIFO preparation ticket without borrowing the body pose.
 		PortalTreeCompositionProgress PollBodyPreparationTicket(uint64_t ticket, Time now);
+		// Starts preparation once the FIFO ticket has been admitted.
 		PortalTreeCompositionStatus BeginQueuedBodyPreparation(
 			uint64_t ticket, const View &referenceBody, Time now, uint64_t &preparation
 		);
+		// Withdraws a queued preparation ticket.
 		void CancelBodyPreparationTicket(uint64_t ticket);
 		// Releases reusable source maps so another FIFO ticket may prepare. A composed
 		// image remains displayed until its normal portal retirement.
@@ -136,8 +152,11 @@ namespace engine::render {
 		// Call after authenticated route replacement when the carrying connection
 		// changes. Retained images and topology keep their original expiry times.
 		void RestartRequests();
+		// Retires images and jobs owned by one viewport.
 		void RemoveViewport(size_t viewSlot);
+		// Retires producer and destination state for one world.
 		void RemoveWorld(world::WorldId world);
+		// Retires all cached images, routes and pending jobs.
 		void Clear();
 
 	  private:

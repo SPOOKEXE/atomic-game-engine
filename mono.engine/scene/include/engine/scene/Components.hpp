@@ -122,8 +122,11 @@ namespace engine::scene {
 	//
 	// @since v0.15
 	struct PortalTransit {
+		// Cumulative rigid portal map applied to the body.
 		core::CFrame Frame;
+		// Cumulative similarity scale applied about world origin.
 		float Scale = 1.0f;
+		// Monotonic crossing count for presenting hosts.
 		uint32_t Serial = 0;
 	};
 
@@ -1096,8 +1099,11 @@ namespace engine::scene {
 	// A camera's authored follow target. Automatic cameras follow the local
 	// player's humanoid; assigning CameraSubject selects an explicit target.
 	struct CameraSubject {
+		// Explicit entity followed by the camera.
 		ecs::Entity Target{};
+		// Whether the local player's humanoid supplies Target.
 		bool Automatic = true;
+		// Explicit padding for deterministic component snapshots.
 		uint8_t Reserved[7] = {};
 	};
 

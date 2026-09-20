@@ -216,13 +216,18 @@ namespace engine::world {
 	// @since v0.20
 	std::vector<HostPlan> PlanHostsAcross(const std::vector<WorldSettings> &worlds, uint32_t hosts);
 
-	// A presentation message attributed to the connection that supplied it.
+	// A complete presentation directory attributed to the connection that supplied it.
 	struct HostPresentationDirectory {
+		// Authenticated host that advertised the directory.
 		core::Name Host;
+		// Complete endpoint directory received from that host.
 		PresentationDirectory Directory;
 	};
+	// A presentation message attributed to its authenticated host connection.
 	struct HostPresentation {
+		// Host that supplied the message.
 		core::Name Host;
+		// Owned message awaiting the driver's presentation pump.
 		PresentationMessage Message;
 	};
 
@@ -309,11 +314,17 @@ namespace engine::world {
 		// Presentation has separate byte and message bounds and is never taken
 		// by the simulation traffic drain. Refused messages are counted.
 		std::vector<HostPresentation> TakePresentationTraffic();
+		// Transfers received host directories, leaving no retained copies.
 		std::vector<HostPresentationDirectory> TakePresentationDirectories();
+		// Transfers hosts whose presentation session was replaced or disconnected.
 		std::vector<core::Name> TakeReplacedPresentationHosts();
+		// Reports whether a connected host requested a route-directory update.
 		bool WantsPresentationRoutes(core::Name host) const;
+		// Queues a route directory for a connected host's next link pump.
 		bool PublishPresentationRoutes(core::Name host, const PresentationDirectory &directory);
+		// Queues one bounded presentation message for a connected host.
 		bool SendPresentation(core::Name host, const PresentationMessage &message);
+		// Returns messages refused by presentation link admission or transport.
 		uint64_t PresentationDropped() const {
 			return PresentationRefused;
 		}
@@ -322,9 +333,11 @@ namespace engine::world {
 		// a pending command for the same frame. Replies are checked against this
 		// link's world ownership and exact pending phase before they become visible.
 		bool SendTickExchange(core::Name host, const TickExchangeCommand &command);
+		// Transfers the completed exchange result for one host, when available.
 		std::optional<TickExchangeResult> TakeTickExchange(core::Name host);
 		// Retires an unresponsive phase participant. Poll owns restart policy.
 		void CloseLink(core::Name host);
+		// Returns exchange commands or results refused by link admission.
 		uint64_t TickExchangeDropped() const {
 			return ExchangeRefused;
 		}

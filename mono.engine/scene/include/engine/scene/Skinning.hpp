@@ -172,9 +172,13 @@ namespace engine::scene {
 	// frame is in the named joint's local coordinates. The exported world frame
 	// is derived from that joint's current pose and is never stored twice.
 	struct RigKeypoint {
+		// Stable authored label for this semantic rig point.
 		core::Name Keypoint;
+		// Point pose in the selected joint's local coordinates.
 		core::CFrame Frame;
+		// Mesh-local skeleton joint that owns Frame.
 		uint16_t Joint = NO_JOINT;
+		// Explicit padding retained for the serialized keypoint layout.
 		uint8_t Reserved[2] = {};
 	};
 

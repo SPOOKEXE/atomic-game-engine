@@ -75,6 +75,7 @@ namespace engine::spatial {
 	std::optional<core::RayHit>
 	Raycast(const HashGrid &grid, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All());
 
+	// Finds the nearest matching DynamicBvh proxy hit by the ray.
 	std::optional<core::RayHit> Raycast(
 		const DynamicBvh &tree, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All()
 	);
@@ -98,6 +99,7 @@ namespace engine::spatial {
 		LayerMask mask,
 		std::span<core::RayHit> hits
 	);
+	// Writes nearest-first DynamicBvh ray hits into the caller-owned span.
 	QueryResult RaycastAll(
 		const DynamicBvh &tree,
 		const core::Ray &ray,
@@ -116,6 +118,7 @@ namespace engine::spatial {
 	QueryResult
 	OverlapBox(const HashGrid &grid, const core::AABB &box, LayerMask mask, std::span<uint64_t> found);
 	QueryResult
+	// Writes DynamicBvh proxy IDs whose bounds overlap the world-space box.
 	OverlapBox(const DynamicBvh &tree, const core::AABB &box, LayerMask mask, std::span<uint64_t> found);
 
 	// Finds overlapping proxy boxes whose opaque id is greater than a cutoff.
@@ -159,6 +162,7 @@ namespace engine::spatial {
 		LayerMask mask,
 		std::span<uint64_t> found
 	);
+	// Writes DynamicBvh proxy IDs whose bounds come within the sphere radius.
 	QueryResult OverlapSphere(
 		const DynamicBvh &tree,
 		const core::Vector3 &centre,
@@ -213,6 +217,7 @@ namespace engine::spatial {
 		uint64_t minimumExclusive,
 		std::span<uint64_t> found
 	);
+	// Writes DynamicBvh proxy IDs met by the swept axis-aligned box.
 	QueryResult ShapeCast(
 		const DynamicBvh &tree,
 		const core::AABB &box,

@@ -83,17 +83,22 @@ namespace engine::control {
 	// The host reports capture readiness through this small value rather than
 	// discovery reaching into a renderer from the MCP thread.
 	struct DataCaptureAvailability {
+		// Whether the host has a capture bridge ready to accept tickets.
 		bool Available = false;
+		// Render channel names the current host can capture.
 		std::vector<std::string> Channels;
+		// Host supplied reason when capture is unavailable or constrained.
 		std::string Detail;
 	};
 
 	// The lifecycle rows a host can support. A headless host omits renderer
 	// dependent rows so discovery lists only callable operations.
 	struct DataFactoryToolSet {
+		// True when the host may expose only tools that require a renderer.
 		bool RenderOnly = true;
 	};
 
+	// Host callback that serializes the current frame graph or explains why it cannot.
 	using RenderGraphProvider = std::function<nlohmann::json(const nlohmann::json &, std::string &)>;
 
 	// Something a client may read without calling a tool.
@@ -197,8 +202,11 @@ namespace engine::control {
 		// Supplies the host-owned capture readiness snapshot used by `negotiate`.
 		// No provider means this surface has no capture host.
 		void SetDataCaptureAvailabilityProvider(std::function<DataCaptureAvailability()> provider);
+		// Returns the latest readiness snapshot from the host-owned capture provider.
 		DataCaptureAvailability CaptureAvailability() const;
+		// Sets the host callback used to answer render graph requests.
 		void SetRenderGraphProvider(RenderGraphProvider provider);
+		// Borrows the current render graph callback; it is empty until a host registers one.
 		const RenderGraphProvider &RenderGraph() const;
 
 		// The one replay and audit ledger shared by all installed data-factory
@@ -301,6 +309,7 @@ namespace engine::control {
 
 		// Installs lifecycle tools backed by one host-owned data-factory session.
 		void AddDataFactoryTools(world::DataFactorySession &session, DataFactoryToolSet tools = {});
+		// Installs ticket submission, polling, byte reads, and release tools for the supplied bridge.
 		void AddDataCaptureTools(
 			world::DataFactorySession &session, std::shared_ptr<script::DataCaptureBridge> bridge
 		);
@@ -316,6 +325,7 @@ namespace engine::control {
 		// Copies one camera and selected stable object poses after the lifecycle
 		// session has proven a retained all-systems-paused snapshot is still live.
 		void AddTemporalSampleTools(world::Universe &universe, world::DataFactorySession &session);
+		// Installs rig export tools, optionally fencing reads to a data-factory session revision.
 		void AddRigExportTools(world::Universe &universe, world::DataFactorySession *session = nullptr);
 
 		// Adds one resource. Later rows win, as `Add` does.

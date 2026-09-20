@@ -331,6 +331,8 @@ namespace engine::scene {
 	// @since v0.18
 	bool ClearEditableMesh(ecs::Store &store, ecs::Entity instance);
 
+	// Updates mesh export packing after validating supported vertex attributes.
+	// Leaves editable geometry unchanged and advances both packing and mesh revisions.
 	bool SetEditableMeshPacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing);
 
 	// The `EditableMesh` class id, registering the tree if nobody has yet.

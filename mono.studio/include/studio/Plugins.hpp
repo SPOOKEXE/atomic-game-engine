@@ -191,6 +191,7 @@ namespace studio {
 		PlaytestClient = 1u << 2,
 	};
 
+	// Bit mask of editor contexts in which a plugin may run.
 	using PluginRunTargets = uint8_t;
 
 	// Target mask helpers and stable manifest text.
@@ -440,6 +441,7 @@ namespace studio {
 
 		// Toggle and dropdown changes use this callback. A button uses `OnClick`.
 		engine::script::HostCallback OnChanged;
+		// Native callback for a toggle or dropdown change.
 		std::function<void(engine::script::HostArguments)> NativeOnChanged;
 
 		// The plugin's defaults. A person's toolbar layout may override both.
@@ -662,7 +664,9 @@ namespace studio {
 		Both = (1u << 0) | (1u << 1),
 	};
 
+	// Bit mask of script languages accepted by one binding.
 	using PluginBindingLanguages = uint8_t;
+	// Native implementation invoked for a registered script binding.
 	using PluginBindingFunction =
 		std::function<bool(engine::script::HostArguments, engine::script::HostValue &, std::string &)>;
 
@@ -676,16 +680,21 @@ namespace studio {
 
 		PluginBindingScope(const PluginBindingScope &) = delete;
 		PluginBindingScope &operator=(const PluginBindingScope &) = delete;
+		// Transfers ownership of registered bindings and leaves the source closed.
 		PluginBindingScope(PluginBindingScope &&other) noexcept;
+		// Replaces this scope's registrations, closing its previous scope first.
 		PluginBindingScope &operator=(PluginBindingScope &&other) noexcept;
 
 		[[nodiscard]] bool
+		// Registers one language-filtered binding until this scope closes.
 		Add(std::string name,
 			PluginBindingFunction function,
 			std::string &error,
 			PluginBindingLanguages languages =
 				static_cast<PluginBindingLanguages>(PluginBindingLanguage::Luau));
+		// Removes every binding registered through this scope.
 		void Close();
+		// Reports whether this scope still owns active registrations.
 		bool IsOpen() const;
 
 	  private:
@@ -701,6 +710,7 @@ namespace studio {
 	// @since v0.21
 	class PluginBindingRegistry {
 	  public:
+		// Creates a registry restricted to one plugin execution target.
 		explicit PluginBindingRegistry(PluginRunTarget target = PluginRunTarget::Studio);
 
 		PluginBindingRegistry(const PluginBindingRegistry &) = delete;
@@ -708,8 +718,11 @@ namespace studio {
 		PluginBindingRegistry(PluginBindingRegistry &&) = delete;
 		PluginBindingRegistry &operator=(PluginBindingRegistry &&) = delete;
 
+		// Opens an RAII scope for a plugin instance's registrations.
 		PluginBindingScope OpenScope();
+		// Returns binding names callable by the requested script language.
 		std::vector<std::string> Names(engine::script::Language language) const;
+		// Invokes a named binding and returns its script-visible result or failure.
 		bool Call(
 			engine::script::Language language,
 			std::string_view name,
@@ -717,7 +730,9 @@ namespace studio {
 			engine::script::HostValue &result,
 			std::string &failure
 		) const;
+		// Installs the callback fired after the visible binding set changes.
 		void OnChanged(std::function<void()> changed);
+		// Returns the monotonic revision used to refresh binding consumers.
 		uint64_t Revision() const;
 
 	  private:
@@ -730,30 +745,50 @@ namespace studio {
 	// execution context selected by `Manifest.Runs`.
 	// @since v0.21
 	struct CppPluginContext;
+	// Native callback that initializes one plugin instance.
 	using CppPluginOpen = std::function<bool(CppPluginContext &, std::string &)>;
+	// Native callback that releases one plugin instance's resources.
 	using CppPluginClose = std::function<void(CppPluginContext &)>;
+	// Native per-frame callback for an active plugin instance.
 	using CppPluginHeartbeat = std::function<bool(CppPluginContext &, float, std::string &)>;
 
+	// Manifest and lifecycle callbacks supplied by a native plugin library.
 	struct CppPluginDefinition {
+		// Metadata that selects contexts and default plugin presentation.
 		PluginManifest Manifest;
+		// Callback invoked when Studio creates a plugin instance.
 		CppPluginOpen Open;
+		// Callback invoked before Studio destroys a plugin instance.
 		CppPluginClose Close;
+		// Periodic callback while the instance remains active.
 		CppPluginHeartbeat Heartbeat;
 	};
 
+	// Studio-owned services exposed to one native plugin callback.
 	struct CppPluginContext {
+		// Editor that owns this plugin instance.
 		Editor *Owner = nullptr;
+		// ECS store for the plugin's current world role.
 		engine::ecs::Store *WorldStore = nullptr;
+		// Process-local world handle valid while the callback runs.
 		engine::world::WorldId World;
+		// Studio, edit-world, or playtest context receiving the plugin.
 		PluginRunTarget Target = PluginRunTarget::Studio;
+		// Plugin toolbar and widget state owned by the host.
 		PluginPresentation *Presentation = nullptr;
+		// Script-visible functions registered for this instance.
 		PluginBindingScope *Bindings = nullptr;
 	};
 
+	// Native plugin instance and the state Studio owns around it.
 	struct LoadedCppPlugin : PluginPresentation {
+		// Registered callbacks and metadata copied into this instance.
 		CppPluginDefinition Definition;
+		// Instance-owned script binding scope.
 		PluginBindingScope Bindings;
+		// Callback context pointing at this instance's host resources.
 		CppPluginContext Context;
+		// Number of lifecycle or heartbeat failures for this instance.
 		size_t Faults = 0;
 	};
 
@@ -761,13 +796,19 @@ namespace studio {
 	// role. Kept by pointer because binding scopes retain its registry address.
 	// @since v0.21
 	struct PluginRuntimeSet {
+		// Creates the bindings and plugin storage for one world role.
 		PluginRuntimeSet(PluginRunTarget target, engine::world::WorldId world);
 		~PluginRuntimeSet();
 
+		// Process-local world handle that owns these plugin instances.
 		engine::world::WorldId World;
+		// World role receiving this set's plugin instances.
 		PluginRunTarget Target = PluginRunTarget::Studio;
+		// Registry shared by bindings for this world role.
 		PluginBindingRegistry Bindings;
+		// Native plugin instances in registration order.
 		std::vector<LoadedCppPlugin> Cpp;
+		// Script plugin instances in manifest order.
 		std::vector<LoadedPlugin> Scripts;
 	};
 
@@ -781,10 +822,14 @@ namespace studio {
 
 		CppPluginRegistration(const CppPluginRegistration &) = delete;
 		CppPluginRegistration &operator=(const CppPluginRegistration &) = delete;
+		// Transfers registry registration ownership and closes the source handle.
 		CppPluginRegistration(CppPluginRegistration &&other) noexcept;
+		// Replaces this registration and unregisters its previous entry first.
 		CppPluginRegistration &operator=(CppPluginRegistration &&other) noexcept;
 
+		// Unregisters the native plugin definition if this handle remains open.
 		void Close();
+		// Reports whether this handle still owns a registry entry.
 		bool IsOpen() const;
 
 	  private:
@@ -793,8 +838,11 @@ namespace studio {
 		uint64_t Id = 0;
 	};
 
+	// Validates and registers a native plugin definition, returning its RAII handle.
 	[[nodiscard]] CppPluginRegistration RegisterCppPlugin(CppPluginDefinition definition, std::string &error);
+	// Returns registered native definitions in deterministic registration order.
 	std::vector<CppPluginDefinition> RegisteredCppPlugins();
+	// Returns the revision consumers use to detect native registry changes.
 	uint64_t CppPluginRegistryRevision();
 
 	// The allowed width range of one script-created toolbar control.

@@ -206,11 +206,17 @@ namespace engine::scene {
 	//
 	// @since v0.22
 	struct JointInstance {
+		// First connected part entity.
 		ecs::Entity Part0;
+		// Second connected part entity.
 		ecs::Entity Part1;
+		// Joint frame expressed in Part0 local space.
 		core::CFrame C0;
+		// Joint frame expressed in Part1 local space.
 		core::CFrame C1;
+		// Whether the joint participates in constraint resolution.
 		bool Enabled = true;
+		// Explicit padding retained for the fixed joint record layout.
 		uint8_t Reserved[7] = {};
 	};
 
@@ -222,9 +228,13 @@ namespace engine::scene {
 	//
 	// @since v0.22
 	struct WeldConstraint {
+		// First part held at a fixed relative transform.
 		ecs::Entity Part0;
+		// Second part held at a fixed relative transform.
 		ecs::Entity Part1;
+		// Whether the weld is active for the current constraint solve.
 		bool Enabled = true;
+		// Explicit padding retained for the weld component layout.
 		uint8_t Reserved[7] = {};
 	};
 

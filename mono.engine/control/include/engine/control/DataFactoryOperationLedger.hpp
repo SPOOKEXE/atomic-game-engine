@@ -24,9 +24,13 @@ namespace engine::control {
 
 	// One bounded, redacted audit row for a data-factory operation.
 	struct DataFactoryOperationAudit {
+		// MCP tool name that consumed OperationId.
 		std::string Tool;
+		// Caller supplied idempotency key retained for this surface lifetime.
 		std::string OperationId;
+		// Terminal status reported by the operation's most recent result.
 		std::string Status;
+		// True when the tool returned a refusal instead of an accepted outcome.
 		bool Refused = false;
 	};
 
@@ -40,6 +44,7 @@ namespace engine::control {
 		// than forgetting an older lifecycle operation and allowing it to recur.
 		static constexpr size_t MAXIMUM_ENTRIES = 256;
 
+		// Replays a prior result only when tool name and canonical arguments match its key.
 		DataFactoryOperationReplay Replay(
 			std::string_view tool,
 			std::string_view operationId,
@@ -48,6 +53,7 @@ namespace engine::control {
 			std::string &failure
 		) const;
 
+		// Claims an operation key and saves its canonical request, result, and failure text.
 		void Store(
 			std::string tool,
 			std::string operationId,
@@ -60,6 +66,7 @@ namespace engine::control {
 		// the canonical request that owns its operation identifier.
 		void Update(std::string_view operationId, nlohmann::json result, std::string failure);
 
+		// Returns at most maximum newest-first redacted audit rows.
 		std::vector<DataFactoryOperationAudit> Recent(size_t maximum) const;
 
 	  private:

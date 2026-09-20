@@ -3,11 +3,16 @@
 #include <engine/render/PortalShadowImage.hpp>
 
 namespace engine::render {
+	// Consecutive depth samples encoded together in one packed block.
 	inline constexpr size_t PORTAL_SHADOW_PACKED_BLOCK_SAMPLES = 64;
+	// Number of blocks in a complete portal shadow image.
 	inline constexpr size_t PORTAL_SHADOW_PACKED_BLOCK_COUNT =
 		PORTAL_SHADOW_BYTES / 4 / PORTAL_SHADOW_PACKED_BLOCK_SAMPLES;
+	// Two descriptor words precede each packed sample block.
 	inline constexpr size_t PORTAL_SHADOW_PACKED_DESCRIPTOR_WORDS = PORTAL_SHADOW_PACKED_BLOCK_COUNT * 2;
+	// Low descriptor bits reserved for the absolute payload word offset.
 	inline constexpr uint32_t PORTAL_SHADOW_PACKED_OFFSET_MASK = (1u << 26) - 1;
+	// Upper bound on packed bytes, including descriptors and uncompressed samples.
 	inline constexpr size_t PORTAL_SHADOW_PACKED_MAX_BYTES =
 		PORTAL_SHADOW_BYTES + PORTAL_SHADOW_PACKED_DESCRIPTOR_WORDS * 4;
 

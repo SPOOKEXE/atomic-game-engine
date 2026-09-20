@@ -15,12 +15,17 @@
 namespace engine::scene {
 	struct SeamTransform;
 
+	// Camera state copied through a portal until a destination camera resumes it.
 	struct CameraContinuation {
+		// Authored lens settings copied into the destination camera.
 		Camera Lens;
+		// Eye pose mapped through the portal seam.
 		core::CFrame Frame;
 		// TransitSubject is null and the transit baseline is empty in captured values.
 		CameraController Control;
+		// Whether the destination camera resumes automatic subject following.
 		bool Automatic = true;
+		// Portal-view state retained across the world transition.
 		CameraPortalView PortalView;
 		// Explicit null differs from automatic follow awaiting a subject.
 		bool SubjectCleared = false;
@@ -28,19 +33,44 @@ namespace engine::scene {
 
 	// Local presentation identities. These handles stay in their replica store.
 	struct CameraCharacterHold {
-		ecs::Entity SourcePlayer, SourceModel, SourceRoot, SourceHumanoid, SourceCamera, SourceSubject;
-		ecs::Entity Player, Model, Root, Humanoid;
+		// Source player identity retained while replica rows retire.
+		ecs::Entity SourcePlayer;
+		// Source character model identity.
+		ecs::Entity SourceModel;
+		// Source character root identity.
+		ecs::Entity SourceRoot;
+		// Source humanoid identity.
+		ecs::Entity SourceHumanoid;
+		// Source camera identity.
+		ecs::Entity SourceCamera;
+		// Source camera-subject identity.
+		ecs::Entity SourceSubject;
+		// Destination player identity after replication arrives.
+		ecs::Entity Player;
+		// Destination character model identity.
+		ecs::Entity Model;
+		// Destination character root identity.
+		ecs::Entity Root;
+		// Destination humanoid identity.
+		ecs::Entity Humanoid;
+		// Whether the held camera resumes automatic subject following.
 		bool Automatic = true;
+		// Whether the held destination identities are currently selected.
 		bool Active = false;
+		// Explicit padding retained for the local hold record layout.
 		uint8_t Reserved[6]{};
 	};
 
 	// Last presented pose, owned by the replica while its source rows retire.
 	// Local only; snapshot restoration discards this derived geometry.
 	struct CameraBodyPose {
+		// Source root whose final pose this record preserves.
 		ecs::Entity SourceRoot{};
+		// Last presented world pose of SourceRoot.
 		core::CFrame RootFrame;
+		// Owned draw rows from the final presentation frame.
 		std::vector<DrawInstance> Rows;
+		// Owned joint poses aligned with the copied skin rows.
 		std::vector<core::CFrame> Joints;
 	};
 

@@ -81,6 +81,7 @@ namespace engine::scene {
 		// Cumulative subject map last observed, used to consume several crossings
 		// between presentations without losing the intermediate rotations or scale.
 		core::CFrame TransitFrame;
+		// Cumulative portal similarity scale seen by this viewer.
 		float TransitScale = 1.0f;
 
 		// Local pitch (X) and yaw (Y), in radians, relative to Basis.
@@ -155,8 +156,11 @@ namespace engine::scene {
 		// LatchCameraInput use this consumer-owned latch instead of the latest
 		// raw input sample. Script input queries still see that raw sample.
 		core::Vector2 PendingTurn;
+		// Wheel movement accumulated until the next camera update.
 		float PendingWheel = 0.0f;
+		// Whether PendingTurn came from the latched pointer path.
 		bool BufferedPointer = false;
+		// Explicit padding for deterministic controller snapshots.
 		uint8_t PointerReserved[3] = {};
 
 		// Which of the subject's portal crossings this camera has already

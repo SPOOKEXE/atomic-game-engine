@@ -56,6 +56,7 @@ namespace engine::scene {
 		// The existing animation format permits four million 32-byte baked keys.
 		static constexpr size_t MAXIMUM_BYTES = 128u * 1024u * 1024u + 2048u;
 
+		// Serialized AAN1 clip bytes, limited by MAXIMUM_BYTES and owned by this world.
 		std::vector<std::byte> Data;
 
 		// Bumped whenever Data changes so presentation decodes at most once per edit.

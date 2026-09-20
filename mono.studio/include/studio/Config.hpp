@@ -279,8 +279,11 @@ namespace studio {
 
 		// Plain HTTP provider connection. Ignored while the file provider is selected.
 		std::string DataStoreHttpEndpoint = "127.0.0.1:8080";
+		// Host name used when the HTTP data-store provider is selected.
 		std::string DataStoreHttpHost = "localhost";
+		// URL path prefix under which the HTTP data-store provider exposes stores.
 		std::string DataStoreHttpPrefix = "/datastores/";
+		// Authorization value sent with HTTP data-store requests when configured.
 		std::string DataStoreHttpAuthorization;
 
 		// The external application used by source tabs and its executable override.

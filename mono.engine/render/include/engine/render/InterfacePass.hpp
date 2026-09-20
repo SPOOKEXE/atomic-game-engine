@@ -235,10 +235,13 @@ namespace engine::render {
 		) override;
 
 		bool SupportsWorldLayers() const override;
+		// Reports whether any world-space interface mesh is ready to draw.
 		bool HasWorldOverlay() const override;
+		// Returns the number of prepared world-space interface batches.
 		size_t WorldBatchCount() const override {
 			return Mesh.Batches().size();
 		}
+		// Records one prepared interface batch into the active render pass.
 		uint32_t RecordWorldBatch(const WorldInterfaceCapture &capture, size_t batch) override;
 
 		bool AffectsScene() const override {

@@ -14,7 +14,7 @@
 //
 // This is what `Material = None` draws as, and it is a real texture: the colour
 // map of ambientCG's **Plastic 013 A**, CC0, box-filtered to a 64-pixel tile.
-// `THIRD_PARTY_NOTICES.md` carries the entry.
+// `docs/THIRD_PARTY_NOTICES.md` carries the entry.
 //
 // ## Why it is compiled in rather than fetched
 //

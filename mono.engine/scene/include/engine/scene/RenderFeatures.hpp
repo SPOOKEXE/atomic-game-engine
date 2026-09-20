@@ -35,8 +35,10 @@ namespace engine::scene {
 		PostProcessing = 1u << 11u,
 	};
 
+	// Bit mask containing every stable feature bit this scene format recognises.
 	inline constexpr uint32_t ALL_RENDER_FEATURES = (1u << 12u) - 1u;
 
+	// Returns the persisted bit value used by feature masks and GPU rows.
 	constexpr uint32_t FeatureBit(RenderFeature feature) {
 		return static_cast<uint32_t>(feature);
 	}
@@ -46,7 +48,9 @@ namespace engine::scene {
 	//
 	// @since v0.24
 	struct RenderFeaturePolicy {
+		// Authored feature requests that override inherited policy.
 		uint32_t Enable = 0;
+		// Authored feature refusals that override every lower-precedence request.
 		uint32_t Disable = 0;
 	};
 
@@ -60,10 +64,14 @@ namespace engine::scene {
 	// the selected renderer path supports. Refused contains authored requests
 	// removed by support and is suitable for diagnostics without a GPU readback.
 	struct ResolvedRenderFeatures {
+		// Requested bits supported by the selected renderer path.
 		uint32_t Enabled = 0;
+		// Requested bits removed because the renderer path cannot support them.
 		uint32_t Refused = 0;
 	};
 
+	// Resolves world, camera and instance policy, then separates supported requests
+	// from requests rejected by the selected renderer path.
 	constexpr ResolvedRenderFeatures ResolveRenderFeatures(
 		uint32_t defaults,
 		RenderFeaturePolicy world,
@@ -88,22 +96,34 @@ namespace engine::scene {
 		PostProcess = 1,
 	};
 
+	// Maximum graph-effect attachments carried by one visual item.
 	inline constexpr size_t MAX_RENDER_EFFECT_ATTACHMENTS = 4;
 
+	// One stable graph-node attachment resolved with a visual item.
 	struct RenderEffectAttachment {
+		// Stable graph-node name resolved by the selected render pipeline.
 		core::Name Node;
+		// Per-item selection bits passed to the attached graph node.
 		uint32_t SelectionMask = UINT32_MAX;
+		// Stable order among attachments at the same render stage.
 		uint32_t Order = 0;
+		// Authored attachment revision for cache invalidation.
 		uint32_t Revision = 0;
+		// Compute or post-process phase that runs this attachment.
 		RenderEffectStage Stage = RenderEffectStage::PostProcess;
+		// Whether this authored attachment contributes graph work.
 		bool Enabled = true;
+		// Explicit padding retained for snapshot and GPU-row layout.
 		uint8_t Reserved[2] = {};
 	};
 
 	// Optional ECS column placed only on visuals that attach graph work.
 	struct RenderEffects {
+		// Owned fixed-capacity attachment records.
 		std::array<RenderEffectAttachment, MAX_RENDER_EFFECT_ATTACHMENTS> Attachments{};
+		// Number of leading attachment records that are valid.
 		uint8_t Count = 0;
+		// Explicit padding retained for the ECS component layout.
 		uint8_t Reserved[7] = {};
 	};
 }

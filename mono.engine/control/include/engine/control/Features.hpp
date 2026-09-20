@@ -16,6 +16,7 @@
 
 namespace engine::control::features {
 
+	// Installs the host-supplied render graph endpoint without world dependencies.
 	inline Feature RenderGraph() {
 		return Feature{"render_graph", [](Surface &surface) { RenderGraph(surface); }};
 	}

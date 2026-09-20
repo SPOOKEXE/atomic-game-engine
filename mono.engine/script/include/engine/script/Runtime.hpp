@@ -76,10 +76,10 @@ namespace engine::script {
 		// Whether this host simulates authoritatively.
 		bool Server = true;
 
-		// Whether this host presents.
+		// Whether this host presents a client view.
 		bool Client = false;
 
-		// Whether this is the editor.
+		// Whether this host is the Studio editor and may expose editor-only services.
 		//
 		// **Defaults to false, deliberately.** v0.6's roadmap line says so in
 		// as many words, and the reason is that a script guarding editor-only
@@ -137,7 +137,7 @@ namespace engine::script {
 		Automatic = 1u << 15,
 	};
 
-	// Combines independently grantable capabilities.
+	// Combines two capability masks without changing either input.
 	constexpr ScriptCapabilities operator|(ScriptCapabilities left, ScriptCapabilities right) {
 		return static_cast<ScriptCapabilities>(static_cast<uint16_t>(left) | static_cast<uint16_t>(right));
 	}
@@ -215,6 +215,7 @@ namespace engine::script {
 		// Host-owned, runtime-scoped adapters. They are never process globals and
 		// service calls may only enqueue work for their owning host thread.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
+		// Host-owned lifecycle adapter for copied package and world state.
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 		// The most memory one VM may hold, in bytes.
 		//
@@ -250,7 +251,7 @@ namespace engine::script {
 		// replay-check` would stop being byte-identical between machines.
 		//
 		// Luau has no queue of its own and ignores this. Zero disables the
-		// check.
+		// Zero disables the queue bound for hosts with another job limit.
 		//
 		// @since v0.19
 		uint64_t JobBudget = 100u * 1000u;
@@ -265,6 +266,7 @@ namespace engine::script {
 		// role and origin above. Supplying an explicit set never adds implicit
 		// grants, so a host can construct a genuinely narrower sandbox.
 		ScriptCapabilities Capabilities = ScriptCapabilities::Automatic;
+		// Whether this runtime may execute package code without world scripts.
 		bool PackageOnly = false;
 
 		// Resolves an automatic profile or returns the explicitly granted set.
@@ -299,8 +301,11 @@ namespace engine::script {
 	//
 	// @since v0.22
 	struct ScriptProfileFrame {
+		// Source file or chunk name retained for this sampled frame.
 		std::string_view Source;
+		// Function name at the sampled instruction.
 		std::string_view Function;
+		// One-based source line, or zero when the VM has no line.
 		int Line = 0;
 	};
 
@@ -312,25 +317,39 @@ namespace engine::script {
 	//
 	// @since v0.22
 	struct ScriptProfileNode {
+		// Index of the parent node in `Tree`, or UINT32_MAX for the root.
 		uint32_t Parent = UINT32_MAX;
+		// Owned source name copied into the bounded profile tree.
 		std::string Source;
+		// Owned function name represented by this call tree node.
 		std::string Function;
+		// One-based leaf line, or zero for a function-level parent node.
 		int Line = 0;
+		// Number of times this node became the active call path.
 		uint64_t Calls = 0;
+		// Number of instruction samples attributed to this node.
 		uint64_t Samples = 0;
+		// Inclusive self time charged to this node, in nanoseconds.
 		uint64_t SelfNanoseconds = 0;
+		// Allocation bytes charged to this node while it was active.
 		uint64_t AllocatedBytes = 0;
+		// Number of yields observed while this node was active.
 		uint64_t Yields = 0;
 
 		// Native calls made while this source leaf was current. A binding that
 		// returned a coroutine yield is kept apart here so the folds view can
 		// show what parked the script without guessing from a later resume.
 		struct Binding {
+			// Script-visible name.
 			std::string Name;
+			// Number of native calls made through this binding.
 			uint64_t Calls = 0;
+			// Total native time for this binding, in nanoseconds.
 			uint64_t Nanoseconds = 0;
+			// Number of those calls that yielded back to the host.
 			uint64_t Yields = 0;
 		};
+		// Native bindings called while this node's source leaf was active.
 		std::vector<Binding> Bindings;
 	};
 
@@ -344,24 +363,35 @@ namespace engine::script {
 	// @since v0.22
 	class ScriptProfiler {
 	  public:
+		// Hard cap on retained call tree nodes per profiling session.
 		static constexpr size_t MAXIMUM_NODES = 4096;
 
+		// Enables collection when true and stops new samples when false.
 		void SetEnabled(bool enabled);
+		// Reports whether new VM samples are currently retained.
 		bool Enabled() const {
 			return Collecting;
 		}
 
+		// Starts tracking one VM execution on `thread` at the supplied timestamp.
 		void Begin(const void *thread, uint64_t nanoseconds, const void *parentThread = nullptr);
+		// Attributes one VM stack sample and timestamp to the active execution.
 		void Sample(const void *thread, std::span<const ScriptProfileFrame> stack, uint64_t nanoseconds);
+		// Ends the execution and records whether it yielded at the boundary.
 		void End(const void *thread, uint64_t nanoseconds, bool yielded);
+		// Charges an allocation delta in bytes to the active source leaf.
 		void RecordAllocation(size_t bytes);
+		// Records native binding time and yield state for the active source leaf.
 		void RecordBinding(const void *thread, std::string_view name, uint64_t nanoseconds, bool yielded);
+		// Drops all retained nodes, counters, and active execution state.
 		void Clear();
 
+		// Returns the retained call tree until the next `Clear` or profile update.
 		std::span<const ScriptProfileNode> Nodes() const {
 			return Tree;
 		}
 
+		// Returns how many nodes were refused after `MAXIMUM_NODES` was reached.
 		size_t DroppedNodes() const {
 			return Dropped;
 		}
@@ -545,7 +575,7 @@ namespace engine::script {
 			return PendingGuiEvents.size();
 		}
 
-		// Which VM this is.
+		// Identifies the language adapter hosting this runtime.
 		//
 		// @return The language.
 		virtual Language Which() const = 0;
@@ -655,10 +685,12 @@ namespace engine::script {
 			return HasCapabilities(ScriptCapabilitiesValue, required);
 		}
 
+		// Reports whether this runtime is restricted to package execution.
 		bool IsPackageOnly() const {
 			return PackageOnly;
 		}
 
+		// Reports whether queued work allows this runtime to be discarded.
 		bool CanDiscardForWorldSwap() const {
 			return WorldSwapDiscardable && PendingGuiEvents.empty() && PendingSettingsMenuActions.empty() &&
 				   PendingTeleportResults.empty();
@@ -787,10 +819,12 @@ namespace engine::script {
 			ScriptProfile.SetEnabled(enabled);
 		}
 
+		// Returns mutable profiling state for host-side presentation or reset.
 		ScriptProfiler &Profile() {
 			return ScriptProfile;
 		}
 
+		// Returns the current profiling snapshot without permitting mutation.
 		const ScriptProfiler &Profile() const {
 			return ScriptProfile;
 		}
@@ -817,9 +851,11 @@ namespace engine::script {
 			return Breakpoints;
 		}
 
+		// Returns the host-owned capture adapter, or an empty pointer when absent.
 		const std::shared_ptr<DataCaptureBridge> &CaptureBridge() const {
 			return DataCapture;
 		}
+		// Returns the host-owned lifecycle adapter, or an empty pointer when absent.
 		const std::shared_ptr<DataLifecycleBridge> &LifecycleBridge() const {
 			return DataLifecycle;
 		}
@@ -847,9 +883,13 @@ namespace engine::script {
 
 		// The resolved grants. `Automatic` never survives construction.
 		ScriptCapabilities ScriptCapabilitiesValue = ScriptCapabilities::None;
+		// Host-owned adapter used for bounded renderer capture requests.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
+		// Host-owned adapter used for copied package lifecycle operations.
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		// True when this runtime is restricted to package execution.
 		bool PackageOnly = false;
+		// Prevents discard after work has crossed the world-swap boundary.
 		void MarkWorldSwapUsed() {
 			WorldSwapDiscardable = false;
 		}
@@ -884,6 +924,7 @@ namespace engine::script {
 		// Authority answers waiting for the next script barrier, in network order.
 		// The client admits only ids in its bounded outbox before adding one here.
 		std::vector<TeleportResult> PendingTeleportResults;
+		// True until a world swap makes this runtime's state non-discardable.
 		bool WorldSwapDiscardable = true;
 
 		// Where execution should be reported from. Read through `Debug`.

@@ -17,18 +17,27 @@ namespace engine::ecs {
 }
 
 namespace engine::render {
+	// Clip data indexed for animation playback in one world.
 	struct AnimationCatalogue {
+		// A streamed clip and the revision last seen by the renderer.
 		struct BufferedClip {
+			// Source revision used to avoid reloading an unchanged clip.
 			uint32_t Revision = 0;
+			// Whether this entry has completed a load attempt.
 			bool Loaded = false;
+			// Decoded clip, absent when the source was unavailable.
 			std::optional<assets::AnimationData> Clip;
 		};
 
+		// Decoded clips indexed by interned animation name.
 		std::unordered_map<uint32_t, assets::AnimationData> Clips;
+		// Per-entity clip load state while content arrives.
 		std::unordered_map<ecs::Entity, BufferedClip> Buffers;
 	};
 
+	// Registers decoded clip data under a stable animation name.
 	bool RecordAnimation(ecs::Store &store, const core::Name &name, const assets::AnimationData &clip);
+	// Finds a registered clip by name, or null when absent.
 	const assets::AnimationData *FindAnimation(const ecs::Store &store, const core::Name &name);
 
 	// Samples every playing track and writes the resulting local bone poses.

@@ -46,6 +46,7 @@ namespace engine::render {
 	//         right after `Instance.new("EditableMesh")`.
 	// @since v0.18
 	engine::assets::MeshData BuildMeshData(const engine::scene::EditableMesh &mesh);
+	// Packs the editable mesh streams for GPU upload without a device.
 	PackedMeshData BuildPackedMeshData(const engine::scene::EditableMesh &mesh);
 	// Uploads every `scene::EditableMesh` whose revision has moved since the
 	// last call.
@@ -69,16 +70,21 @@ namespace engine::render {
 		// Forget device upload stamps when a world or residency owner retires.
 		// This does not release resources; Renderer owns their lifetime.
 		void ForgetWorld(uint64_t identity);
+		// Forgets upload stamps for one residency owner without releasing meshes.
 		void ForgetOwner(core::Name owner);
 
 	  private:
 		struct UploadScope {
 			uint64_t World = 0;
 			core::Name Owner;
+			// Source revisions that jointly determine the uploaded mesh bytes.
 			struct Revision {
+				// Editable vertex and index revision last uploaded.
 				uint32_t Mesh = 0;
+				// Mesh packing policy revision last uploaded.
 				uint32_t Packing = 0;
 
+				// Compares both upload-relevant revisions.
 				bool operator==(const Revision &) const = default;
 			};
 			std::unordered_map<uint64_t, Revision> Revisions;

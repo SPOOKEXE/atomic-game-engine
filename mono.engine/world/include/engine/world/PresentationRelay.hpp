@@ -12,6 +12,7 @@ namespace engine::world {
 	// The universe must outlive the relay. Pump outside world tick batches.
 	class PresentationRelay {
 	  public:
+		// Delegates selected world channels to one authenticated child session.
 		PresentationRelay(
 			Universe &universe, WorldId world, uint64_t childSession, std::vector<std::string> channels
 		);
@@ -21,10 +22,13 @@ namespace engine::world {
 		// Nonblocking. False retires delegated endpoints; the caller retires the child.
 		// An open coordinated frame defers traffic and disconnect cleanup until its end.
 		bool Pump(HostLink &child);
+		// Closes delegated routes and clears traffic retained by this relay.
 		void Close();
+		// Counts messages rejected by route or queue admission.
 		uint64_t Refused() const {
 			return Refusals;
 		}
+		// Reports current message and byte use of the relay's bounded queue.
 		PresentationQueueSize Queued() const {
 			return PendingSize;
 		}

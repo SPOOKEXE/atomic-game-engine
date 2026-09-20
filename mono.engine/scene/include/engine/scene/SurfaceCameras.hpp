@@ -475,9 +475,13 @@ namespace engine::scene {
 	// Local presentation indices, independent of the active camera. Disabled
 	// and edge-on cameras retain their position; overflow receives -1.
 	struct SurfaceSlot {
+		// Surface camera entity assigned this presentation slot.
 		ecs::Entity Camera{};
+		// Part that owns the surface camera.
 		ecs::Entity Part{};
+		// Stable local slot index, or -1 when the slot overflowed.
 		int16_t Index = -1;
+		// Explicit storage padding omitted from serialized presentation data.
 		std::array<std::byte, 6> Padding{};
 	};
 
@@ -792,9 +796,13 @@ namespace engine::scene {
 	// Local presentation history for the predicted body. The source still owns
 	// its rows while admission to another world is pending.
 	struct PortalBodyView {
+		// Predicted body root whose crossing history is retained.
 		ecs::Entity Root{};
+		// Root position before the last presented crossing test.
 		core::Vector3 Previous{};
+		// Source portal normal at the recorded entry point.
 		core::Vector3 EntryNormal{};
+		// Seam currently crossed while admission to the destination is pending.
 		std::optional<PortalSeam> Crossing{};
 	};
 

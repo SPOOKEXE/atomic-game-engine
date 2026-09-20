@@ -16,9 +16,13 @@
 namespace engine::render {
 	class Renderer;
 
+	// One derived mesh level and the worlds that requested it.
 	struct AutomaticMeshLodArtifact {
+		// Content name shared by matching source meshes.
 		core::Name Name;
+		// Host-side mesh bytes awaiting renderer upload.
 		assets::MeshData Data;
+		// Worlds that should retain this derived level.
 		std::vector<world::WorldId> Worlds;
 	};
 

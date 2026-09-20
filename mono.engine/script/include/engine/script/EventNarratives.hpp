@@ -5,6 +5,7 @@
 #include <cstdint>
 
 namespace engine::script {
+	// Version required by the canonical event-narrative bundle stored in a world.
 	inline constexpr uint32_t EVENT_NARRATIVE_SCHEMA_VERSION = 1;
 
 	// The ECS serialization sweep writes a default-constructed resource, so its
@@ -22,6 +23,7 @@ namespace engine::script {
 	// VM-neutral ScriptValue after validation, so both language adapters and the
 	// MCP boundary observe the same canonical record shape.
 	struct EventNarratives {
+		// Validated versioned map of narrative records retained with this world.
 		ScriptValue Bundle = EmptyEventNarrativeBundle();
 	};
 }

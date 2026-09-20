@@ -29,15 +29,21 @@ namespace engine::control {
 	using nlohmann::json;
 
 	namespace temporal_sample_detail {
+		// Byte limit shared by the instance and retained snapshot identifiers.
 		inline constexpr size_t MAXIMUM_INSTANCE_OR_SNAPSHOT_ID = 128;
+		// Byte limit for authored stable IDs used to select the camera and objects.
 		inline constexpr size_t MAXIMUM_STABLE_ID = script::MAX_DATA_SCENE_ID_BYTES;
+		// Maximum object poses returned alongside the selected camera pose.
 		inline constexpr size_t MAXIMUM_OBJECTS = script::MAX_CAMERA_OBJECT_OBSERVATIONS;
+		// JSON byte budget for one temporal sample reply.
 		inline constexpr size_t MAXIMUM_RESPONSE_BYTES = 64u * 1024u;
 
+		// Joins a stable error code with a human-readable validation detail.
 		inline std::string Error(std::string_view code, std::string_view detail) {
 			return std::string(code) + ": " + std::string(detail);
 		}
 
+		// Verifies an identifier has no malformed, overlong, or surrogate UTF-8 sequence.
 		inline bool Utf8(std::string_view value) {
 			for (size_t index = 0; index < value.size();) {
 				const uint8_t first = static_cast<uint8_t>(value[index++]);
@@ -61,6 +67,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Reads a nonempty, NUL-free UTF-8 identifier within its caller supplied byte limit.
 		inline bool Text(
 			const json &value, std::string_view name, size_t maximum, std::string &out, std::string &failure
 		) {
@@ -79,6 +86,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Reads a nonnegative JSON integer without narrowing its world revision value.
 		inline bool UInt(const json &value, std::string_view name, uint64_t &out, std::string &failure) {
 			if (!value.is_number_unsigned()) {
 				failure = Error("validation_failed", std::string(name) + " must be an unsigned integer");
@@ -88,6 +96,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Borrows a required request member so its type can be checked by the caller.
 		inline bool Field(const json &values, std::string_view name, const json *&out, std::string &failure) {
 			const auto found = values.find(std::string(name));
 			if (found == values.end()) {
@@ -98,6 +107,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Rejects fields outside the temporal-sample wire request.
 		inline bool Only(const json &values, std::string &failure) {
 			if (!values.is_object()) {
 				failure = Error("validation_failed", "arguments must be an object");
@@ -141,6 +151,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Writes a rigid world transform as position and unit quaternion JSON arrays.
 		inline json Frame(const core::CFrame &frame) {
 			return {
 				{"position", {frame.Position.X, frame.Position.Y, frame.Position.Z}},
@@ -148,6 +159,7 @@ namespace engine::control {
 			};
 		}
 
+		// Reads the authored data-scene ID that remains stable across ECS entity allocation.
 		inline bool StableId(const ecs::Store &store, ecs::Entity entity, std::string &out) {
 			ecs::AttributeValue value;
 			if (!ecs::GetAttribute(store, entity, core::Name(script::DATA_SCENE_ID_ATTRIBUTE), value) ||
@@ -356,6 +368,7 @@ namespace engine::control {
 	}
 
 	namespace features {
+		// Registers snapshot-bound camera and object pose sampling for a data-factory session.
 		inline Feature TemporalSample(world::Universe &universe, world::DataFactorySession &session) {
 			return Feature{"temporal_sample", [&universe, &session](Surface &surface) {
 							   surface.AddTemporalSampleTools(universe, session);

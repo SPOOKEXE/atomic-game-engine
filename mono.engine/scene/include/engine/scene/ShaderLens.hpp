@@ -53,25 +53,37 @@ namespace engine::scene {
 		// Later values compose over earlier ones when lenses overlap.
 		int32_t Priority = 0;
 
+		// Authored boundary geometry; currently only a sphere is valid.
 		LensShape Shape = LensShape::Sphere;
+		// Whether this lens is included in the resolved presentation snapshot.
 		bool Enabled = true;
+		// Explicit padding retained for the authored component layout.
 		uint8_t Reserved[2] = {};
 	};
 
 	// A value-only lens record handed across the world-presentation boundary.
 	struct ShaderLensState {
+		// World transform of the resolved lens boundary.
 		core::CFrame Frame;
+		// Stable lens-program name resolved by the renderer.
 		core::Name Shader;
 		// A stable local tie-breaker for equal priority and shader names. It never
 		// leaves the world; the renderer only uses it to make bounded selection
 		// repeatable while an author has overlapping lenses.
 		uint64_t EntityId = 0;
+		// Resolved outer sphere radius in world metres.
 		float Radius = 0.0f;
+		// Resolved opaque-core radius in world metres.
 		float InnerRadius = 0.0f;
+		// Resolved normalized edge transition.
 		float Falloff = 0.0f;
+		// Resolved shader-independent intensity.
 		float Strength = 0.0f;
+		// Resolved view-ray rotation rate in radians per second.
 		float Spin = 0.0f;
+		// Composition order for overlapping lenses.
 		int32_t Priority = 0;
+		// Resolved boundary geometry.
 		LensShape Shape = LensShape::Sphere;
 	};
 

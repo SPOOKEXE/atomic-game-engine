@@ -329,7 +329,9 @@ namespace engine::render {
 		// ImportedImage is a renderer-local generation handle. ImagePortal names
 		// the authored entrance. ExternalImage stays true while an image is absent.
 		bool ExternalImage = false;
+		// Generation handle of the accepted imported image, or zero.
 		uint64_t ImportedImage = 0;
+		// Authored portal key used to resolve that imported image.
 		core::Name ImagePortal;
 
 		// The slot of the hole at the far end of this one, or -1 for none.
@@ -633,7 +635,9 @@ namespace engine::render {
 
 	// Render-local binding from an authored world to its admitted content session.
 	struct WorldContentOwner {
+		// Stable name of the world that authored the content references.
 		core::Name World;
+		// Content residency namespace admitted for that world.
 		core::Name Owner;
 	};
 
@@ -651,13 +655,16 @@ namespace engine::render {
 		uint64_t EyeImage = 0;
 		// Nearest first, sharing EyeImageKey and the base image's capture identity.
 		std::array<uint64_t, 2> EyeTransparentImages{};
+		// Premultiplied world-space interface layer over the eye image.
 		uint64_t EyeSpatialOverlayImage = 0;
+		// Stable portal key shared by every eye-image layer.
 		core::Name EyeImageKey;
 
 		// Primary-eye body selection. Rig is a local root handle; Player is the
 		// stable account identity used to resolve that root in another world.
 		// Secondary views and shadow casters retain these rows.
 		uint64_t EyeRig = 0;
+		// Stable account identity of the first-person player, when known.
 		std::optional<int64_t> EyePlayer;
 		// Sorted indices into Instances. Import selection has no local ECS handle.
 		std::span<const uint32_t> EyeHiddenRows;
@@ -700,6 +707,7 @@ namespace engine::render {
 
 		// Copied lens captures keep their accepted time without changing world clocks.
 		std::optional<float> LensTimeSeconds;
+		// Residency namespace for copied lens shaders and textures.
 		std::optional<core::Name> LensContentOwner;
 		// A retained captured program group, independent of authored world content.
 		uint64_t LensPrograms = 0;
@@ -738,8 +746,10 @@ namespace engine::render {
 		// Unbound worlds retain the shared namespace for callers without scoped content.
 		// Built-in assets always use shared residency.
 		core::Name ContentOwner;
+		// Borrowed owner mappings for draw rows copied from other worlds.
 		std::span<const WorldContentOwner> ForeignContentOwners;
 
+		// Resolves a copied row's source world to its content residency owner.
 		core::Name ContentOwnerOf(core::Name sourceWorld) const {
 			if (!sourceWorld.IsValid() || sourceWorld == WorldName) return ContentOwner;
 			for (const WorldContentOwner &binding : ForeignContentOwners) {
@@ -754,9 +764,12 @@ namespace engine::render {
 		// Optional request-owned limits for recursive image work. Pixels excludes
 		// the primary view and is shared by portal and mirror captures.
 		struct SurfaceCaptureBudget {
+			// Remaining nested capture depth.
 			uint32_t Depth = 0;
+			// Remaining offscreen pixel allowance.
 			uint64_t Pixels = 0;
 		};
+		// Limits shared by recursive portal and surface captures, if set.
 		std::optional<SurfaceCaptureBudget> SurfaceBudget;
 
 		// Borrowed transparent and lighting work for this view.
@@ -974,13 +987,22 @@ namespace engine::render {
 	// One prepared spatial batch rendered into caller-owned RGBA16F/D32F scratch
 	// attachments. Device handles stay local to the frame-owning renderer.
 	struct WorldInterfaceCapture {
+		// Opaque handle to the active GPU command buffer.
 		void *Command = nullptr;
+		// Opaque handle to the open render pass.
 		void *Pass = nullptr;
+		// Transform from world space into this attachment's clip space.
 		glm::mat4 ViewProjection{1};
+		// Camera pose used for world-space interface placement.
 		core::CFrame Camera;
+		// Ambient light colour applied to interface geometry.
 		core::Color3 Ambient;
+		// Direction of sunlight used by interface shading.
 		core::Vector3 Sun;
-		uint32_t Width = 0, Height = 0;
+		// Scratch attachment width in pixels.
+		uint32_t Width = 0;
+		// Scratch attachment height in pixels.
+		uint32_t Height = 0;
 	};
 
 	// A layer that records into this renderer's frame.
@@ -1027,12 +1049,15 @@ namespace engine::render {
 		virtual bool SupportsWorldLayers() const {
 			return !AffectsScene();
 		}
+		// Reports whether a prepared world-space overlay must be recorded.
 		virtual bool HasWorldOverlay() const {
 			return false;
 		}
+		// Returns the number of prepared world-space batches.
 		virtual size_t WorldBatchCount() const {
 			return 0;
 		}
+		// Records one world-space batch and returns its submitted draw count.
 		virtual uint32_t RecordWorldBatch(const WorldInterfaceCapture &, size_t) {
 			return 0;
 		}
@@ -1304,9 +1329,13 @@ namespace engine::render {
 	// A row is one `GpuInstance`, so `StagedBytes` is exact transfer payload.
 	// @client
 	struct AssetResidencyStatistics {
+		// Asset whose instance residency is being measured.
 		core::Name Name;
+		// Instance rows already resident on the device.
 		uint32_t ResidentInstances = 0;
+		// Instance rows included in the latest staged delta.
 		uint32_t StagedInstances = 0;
+		// Bytes in that staged instance delta.
 		uint64_t StagedBytes = 0;
 	};
 
@@ -1317,18 +1346,27 @@ namespace engine::render {
 	  public:
 		// A bounded, device-free description of one installed render graph.
 		struct RenderGraphSnapshot {
+			// Stable name of the installed pipeline.
 			core::Name Pipeline;
+			// Revision of the installed graph description.
 			uint64_t Revision = 0;
+			// Authored graph copied for inspection.
 			graph::RenderGraph Graph;
+			// Validated graph used to schedule node execution.
 			graph::CompiledGraph Compiled;
+			// Dependency order selected for execution.
 			graph::ExecutionSchedule Schedule;
+			// Reuse plan for transient graph resources.
 			graph::ResourceAliasPlan Aliases;
+			// Runtime profile recorded for this pipeline.
 			graph::PipelineProfile Profile;
 		};
 		// The installed identity used by render-owned one-shot work. Invalid and
 		// missing view names resolve through the same fallback as Render.
 		struct PipelineIdentity {
+			// Resolved installed pipeline name.
 			core::Name Name;
+			// Revision of that pipeline when the work was admitted.
 			uint64_t Revision = 0;
 		};
 		// Creates an uninitialised renderer with no GPU resources.
@@ -1404,7 +1442,9 @@ namespace engine::render {
 		// Shares import CPU/GPU budgets; refusal preserves the input.
 		uint64_t
 		QueuePackedPortalShadowImage(const PortalShadowImageBinding &binding, PortalShadowImage &&image);
+		// Reports whether an accepted shadow image has finished device upload.
 		bool IsPortalShadowImageReady(uint64_t handle) const;
+		// Retires a shadow-image handle and its resident resources.
 		bool DropPortalShadowImage(uint64_t handle);
 
 		// Queue a complete copied set into new slots, retaining previous imports.
@@ -1429,9 +1469,11 @@ namespace engine::render {
 		// Leases keep the original charged images, without extending transport deadlines.
 		// The lease owner must hard Drop on endpoint or authorization retirement.
 		uint64_t AcquirePortalCaptureTreeLease(uint64_t token);
+		// Releases one independently owned tree lease.
 		void ReleasePortalCaptureTreeLease(uint64_t lease);
 		// Release the original import owner. Hard Drop revokes every lease as well.
 		void ReleasePortalCaptureTree(uint64_t token);
+		// Revokes the import owner and all leases for a captured tree.
 		void DropPortalCaptureTree(uint64_t token);
 
 		// Compose destination-space opaque body rows against an accepted room group.
@@ -1450,7 +1492,9 @@ namespace engine::render {
 		// Invalid responses preserve the pending request; only Poll transfers a completed image.
 		PortalTreeCompositionStatus
 		BeginPortalCaptureTreeComposition(uint64_t tree, const View &rootBody, uint64_t &job);
+		// Transfers completed composition progress and its image once.
 		PortalTreeCompositionProgress PollPortalCaptureTreeComposition(uint64_t job);
+		// Supplies an owned source shadow image to a waiting tree job.
 		PortalTreeCompositionStatus AcceptPortalCaptureTreeShadow(uint64_t job, PortalShadowImage &&image);
 		// The host authenticates the manifest envelope. Assembly bytes share all portal import
 		// CPU admission; mismatched metadata is refused before allocation. One node assembles at a time.
@@ -1460,7 +1504,9 @@ namespace engine::render {
 		// retries without replaying tiles. Only Poll transfers a completed composition image.
 		PortalTreeCompositionStatus
 		AcceptPortalCaptureTreeShadowTile(uint64_t job, uint32_t node, std::span<const std::byte> packet);
+		// Retries composition from a complete assembled shadow map.
 		PortalTreeCompositionStatus CommitPortalCaptureTreeShadowAssembly(uint64_t job, uint32_t node);
+		// Cancels pending requests and owned work for a composition job.
 		void CancelPortalCaptureTreeComposition(uint64_t job);
 
 		// Two independently leased preparations admit every source shadow before a pose is copied.
@@ -1469,7 +1515,9 @@ namespace engine::render {
 		// checked during preparation; exact all-node body/domain agreement is checked at pose Begin.
 		PortalTreeCompositionStatus
 		BeginPortalCaptureTreePreparation(uint64_t tree, const View &referenceBody, uint64_t &preparation);
+		// Reports upload completion and next missing shadow request.
 		PortalTreeCompositionProgress PollPortalCaptureTreePreparation(uint64_t preparation);
+		// Supplies a complete source shadow image to a preparation.
 		PortalTreeCompositionStatus
 		AcceptPortalPreparedShadow(uint64_t preparation, PortalShadowImage &&image);
 		// The preparation equivalents assemble one authenticated source map before its
@@ -1477,10 +1525,13 @@ namespace engine::render {
 		PortalTreeCompositionStatus BeginPortalCaptureTreePreparationShadowAssembly(
 			uint64_t preparation, const PortalShadowSnapshot &manifest
 		);
+		// Adds an authenticated tile to the preparation's current source map.
 		PortalTreeCompositionStatus AcceptPortalPreparedShadowTile(
 			uint64_t preparation, uint32_t node, std::span<const std::byte> packet
 		);
+		// Admits a fully assembled source map without replaying its tiles.
 		PortalTreeCompositionStatus CommitPortalPreparedShadowAssembly(uint64_t preparation, uint32_t node);
+		// Cancels one shadow-preparation lease and its pending uploads.
 		void CancelPortalCaptureTreePreparation(uint64_t preparation);
 		// Reuses prepared GPU maps with one latest-pose snapshot and one final queue fence.
 		// Existing composition Poll/Cancel APIs own completion; source maps remain reusable.
@@ -1489,6 +1540,7 @@ namespace engine::render {
 
 		// Invalidates one owned image at an owning-thread frame boundary.
 		bool DropPortalImage(uint64_t handle);
+		// Reports current CPU and GPU budgets used by imported portal images.
 		PortalImageImportUsage PortalImageUsage() const;
 
 		// Releases GPU residency owned by one world while keeping shared content
@@ -1517,6 +1569,7 @@ namespace engine::render {
 		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		// Uploads validated, prepacked mesh streams under one content owner.
 		bool AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
 		// Copies a bounded resident mesh for a host-owned export. This never reads
 		// back the GPU or substitutes the fallback mesh for a missing name.
@@ -1641,6 +1694,7 @@ namespace engine::render {
 		std::optional<RenderGraphSnapshot>
 		DescribePipeline(core::Name name, uint32_t viewWidth, uint32_t viewHeight) const;
 
+		// Resolves a requested graph name through the same fallback as Render.
 		std::optional<PipelineIdentity> ResolvePipelineIdentity(core::Name requested) const;
 
 		// Removes every named graph.
@@ -1778,6 +1832,7 @@ namespace engine::render {
 		// Render-owned hook state. Script and world adapters use it through their
 		// implementation files; no hook type crosses those public boundaries.
 		DataFactoryHookBind &Hooks();
+		// Borrows render-owned hook state for inspection.
 		const DataFactoryHookBind &Hooks() const;
 
 		// GPU execution time and CPU command-recording wall time for each
@@ -2224,6 +2279,7 @@ namespace engine::render {
 		// Retain immutable captured lens programs independently of world replica residency.
 		// Zero means empty input or refusal. Matching live name/hash sets share a token.
 		uint64_t RetainPortalLensPrograms(const PortalCaptureLenses &lenses);
+		// Drops one reference to a retained captured lens-program group.
 		void ReleasePortalLensPrograms(uint64_t token);
 
 		// Reconciles one owner's device programs against current accepted modules.

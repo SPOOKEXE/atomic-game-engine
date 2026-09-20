@@ -35,36 +35,62 @@ namespace engine::scene {
 	// today, but the bounds, extinction and scattering terms are resource data
 	// rather than renderer-specific cloud controls.
 	struct Volume {
+		// Scattered light colour before density and extinction are applied.
 		core::Color3 Colour{0.82f, 0.86f, 0.92f};
+		// Local half-size in metres for the box or ellipsoid boundary.
 		core::Vector3 HalfExtent{12.0f, 8.0f, 12.0f};
+		// Base participating-medium density in local volume space.
 		float Density = 0.18f;
+		// Per-distance light loss through the medium.
 		float Extinction = 0.45f;
+		// Edge density fade, where zero keeps a hard authored boundary.
 		float Falloff = 0.0f;
+		// Local-space frequency of procedural density variation.
 		float NoiseScale = 0.18f;
+		// Amplitude of procedural density variation.
 		float NoiseStrength = 0.7f;
+		// Maximum view-ray integration steps through this volume.
 		uint32_t Steps = 24;
+		// Maximum shadow-ray integration steps through this volume.
 		uint32_t ShadowSteps = 8;
+		// Stable procedural-noise seed.
 		uint32_t Seed = 1;
+		// Boundary geometry used to test local volume membership.
 		VolumeShape Shape = VolumeShape::Box;
+		// Whether the volume contributes to resolved presentation state.
 		bool Enabled = true;
+		// Explicit padding retained for the fixed presentation record layout.
 		uint8_t Reserved[2] = {};
 	};
 
 	// The fixed-size snapshot a renderer receives for one authored volume.
 	// `Frame` remains an engine value, not a pointer into the world.
 	struct VolumeState {
+		// World transform of the authored local boundary.
 		core::CFrame Frame;
+		// Resolved scattered-light colour.
 		core::Color3 Colour{0.82f, 0.86f, 0.92f};
+		// Resolved local half-size in metres.
 		core::Vector3 HalfExtent{12.0f, 8.0f, 12.0f};
+		// Resolved base medium density.
 		float Density = 0.18f;
+		// Resolved per-distance light loss.
 		float Extinction = 0.45f;
+		// Resolved edge density fade.
 		float Falloff = 0.0f;
+		// Resolved procedural density frequency.
 		float NoiseScale = 0.18f;
+		// Resolved procedural density amplitude.
 		float NoiseStrength = 0.7f;
+		// Resolved view-ray integration limit.
 		uint32_t Steps = 24;
+		// Resolved shadow-ray integration limit.
 		uint32_t ShadowSteps = 8;
+		// Resolved stable procedural-noise seed.
 		uint32_t Seed = 1;
+		// Resolved boundary geometry.
 		VolumeShape Shape = VolumeShape::Box;
+		// Whether this snapshot slot contains an enabled volume.
 		bool Enabled = false;
 	};
 

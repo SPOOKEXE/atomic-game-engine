@@ -25,7 +25,7 @@
 // origin, and they still do; all three carry exactly what they carried before.
 // What the swap buys is that a program linking `core` and neither `net` nor
 // `assets` no longer drags a hash library in behind `Random::Float`, and that
-// `THIRD_PARTY_NOTICES.md` no longer owes an entry to the module every other
+// `docs/THIRD_PARTY_NOTICES.md` no longer owes an entry to the module every other
 // module depends on. `docs/retired/DEFERRED.md` D00004 has the measurements.
 //
 // **Every seeded stream moved when this changed.** `Random.new(seed)` in both

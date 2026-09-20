@@ -680,6 +680,7 @@ namespace studio {
 		// tab while another document is in front, rather than becoming output for
 		// whichever script happens to be selected next.
 		std::string Diagnostics;
+		// Whether checked.
 		bool Checked = false;
 	};
 
@@ -3083,6 +3084,7 @@ namespace studio {
 		// universe's owner thread.
 		void PumpWorldImport();
 
+		// True while the asynchronous world-import preparation still owns staged input.
 		bool WorldImportInProgress() const;
 
 		// Adds another game's worlds to this universe, keeping what is here.
@@ -3275,6 +3277,7 @@ namespace studio {
 		//
 		// @param world The world whose resident storage is no longer needed.
 		void ReleaseWorldResidency(WorldId world);
+		// Releases renderer targets, GUI compilation, and viewport state retained for one world.
 		void ReleaseWorldPresentation(WorldId world);
 
 		// Stops one local play client after releasing its replica's residency.
@@ -3362,7 +3365,9 @@ namespace studio {
 
 		// Enables this product's ordered engine and studio feature list once.
 		void EnableControlFeatures();
+		// Starts the editor-owned data-factory host and registers its control features.
 		bool StartDataFactoryHost();
+		// Rebuilds client-owned runtime state required before a restored factory world is published.
 		bool PrepareDataFactoryWorld(engine::world::Universe &universe, WorldId world, std::string &detail);
 
 		// The editor's own tools, added on top of the shared ones.
@@ -3427,14 +3432,18 @@ namespace studio {
 			bool DownProcessed = false;
 			//@}
 		};
+		// Selected pending control key.
 		std::optional<ControlKey> PendingControlKey;
 
 		// Text storage must outlive the queued SDL event, whose payload is a
 		// pointer. It is released after the event crosses the frame loop.
 		struct ControlText {
+			// Owned UTF-8 text whose storage remains valid until SDL consumes the queued event.
 			std::string Text;
+			// Whether processed.
 			bool Processed = false;
 		};
+		// Selected pending control text.
 		std::optional<ControlText> PendingControlText;
 
 		// What this editor was started with.
@@ -3573,7 +3582,9 @@ namespace studio {
 		// wherever this object was declared. Same reason `client::Client` holds
 		// its own that way.
 		std::unique_ptr<engine::world::Universe> Universe;
+		// Selected portal images.
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
+		// Selected factory host.
 		std::unique_ptr<DataFactoryHost> FactoryHost;
 
 		// Undo and redo. Held the same way and for a narrower version of the
@@ -4698,6 +4709,7 @@ namespace studio {
 			// Which panel it started in, so turning to another mid-drag does
 			// not retarget it.
 			size_t Viewport = 0;
+			// Stable identifier for world.
 			WorldId World;
 
 			// The part that was taken hold of. The rest of the selection is
@@ -4723,26 +4735,40 @@ namespace studio {
 		// marquee. Keeping its origin at press time prevents a later panel from
 		// inferring a different gesture after the pointer has already moved.
 		struct ViewportGesture {
+			// Whether this state is currently active.
 			bool Active = false;
+			// Whether dragging.
 			bool Dragging = false;
+			// Viewport receiving the pointer when this gesture began.
 			size_t Viewport = 0;
+			// Stable identifier for world.
 			WorldId World;
+			// Selected start.
 			glm::vec2 Start{0.0f};
+			// Monotonic timestamp at which the pointer gesture began.
 			double StartedAt = 0.0;
+			// Whether add.
 			bool Add = false;
 		};
+		// Active click, drag, or marquee state for the studio viewport surface.
 		ViewportGesture SurfaceGesture;
 
 		// Reused transient outline geometry. It is editor draw preparation, never
 		// world state, and retains capacity across viewport frames.
 		struct SelectionOutlineBatch {
+			// Entry declaration.
 			struct Entry {
+				// Coordinate frame associated with this record.
 				engine::core::CFrame Frame{};
+				// Vector value for half extent.
 				engine::core::Vector3 HalfExtent{};
+				// Corners kept in their declared order.
 				std::array<engine::core::Vector3, 8> Corners{};
 			};
+			// Entries kept in their declared order.
 			std::vector<Entry> Entries;
 		};
+		// Reused line geometry for the current selection outlines.
 		SelectionOutlineBatch OutlineBatch;
 
 		// Whether a dragged part turns to sit flat on what it lands on.
@@ -5542,27 +5568,47 @@ namespace studio {
 
 		// Last-tick solver topology and measured frame-graph stages. See `DrawPhysicsSolver`.
 		bool ShowPhysicsSolver = false;
+		// Profiler Snapshot declaration.
 		struct ProfilerSnapshot {
+			// Whether paused.
 			bool Paused = false;
+			// Total wall-clock milliseconds represented by the captured profiler frame.
 			float FrameMilliseconds = 0.0f;
+			// Captured frame milliseconds outside any named profiler span.
 			float UnmarkedMilliseconds = 0.0f;
+			// Number of profiler spans discarded because the retained frame buffer filled.
 			size_t Dropped = 0;
+			// Spans kept in their declared order.
 			std::vector<DiagnosticSpan> Spans;
 		};
+		// Last completed frame's physics profiler snapshot for the diagnostics panel.
 		ProfilerSnapshot PhysicsProfiler;
+		// Content Asset Profile declaration.
 		struct ContentAssetProfile {
+			// Interned content name whose residency is summarized by this row.
 			engine::core::Name Name;
+			// Asset category used to group this residency record.
 			engine::assets::AssetKind Kind = engine::assets::AssetKind::Unknown;
+			// Compressed content bytes fetched from the selected origin.
 			uint64_t PulledBytes = 0;
+			// Bytes occupied by decoded data before CPU or GPU residency accounting.
 			uint64_t DecodedBytes = 0;
+			// Bytes retained in CPU-side content caches.
 			uint64_t CpuResidentBytes = 0;
+			// Logical bytes retained in GPU resources for this asset.
 			uint64_t GpuResidentBytes = 0;
+			// Number of updates.
 			uint32_t Updates = 0;
+			// Number of failures.
 			uint32_t Failures = 0;
+			// Number of resident instances.
 			uint32_t ResidentInstances = 0;
+			// Number of staged instances.
 			uint32_t StagedInstances = 0;
+			// Bytes held in staging buffers before the asset becomes resident.
 			uint64_t StagedBytes = 0;
 		};
+		// Number of content asset profiles.
 		std::unordered_map<uint32_t, ContentAssetProfile> ContentAssetProfiles;
 
 		// Whether each node editor is open. Closed by default: they are for
@@ -5769,6 +5815,7 @@ namespace studio {
 
 		// What is moving to and from the origins. See `DrawNetwork`.
 		bool ShowNetwork = false;
+		// Last completed frame's network profiler snapshot for the diagnostics panel.
 		ProfilerSnapshot NetworkProfiler;
 
 		// The control surface's own panel. See `DrawControl`.
@@ -6011,10 +6058,15 @@ namespace studio {
 		// Native and script plugins have separate ownership. `Plugins` is only
 		// the stable presentation order consumed by the toolbar and manager.
 		PluginBindingRegistry StudioPluginBindings;
+		// Cpp plugins kept in their declared order.
 		std::vector<LoadedCppPlugin> CppPlugins;
+		// Script plugins kept in their declared order.
 		std::vector<LoadedPlugin> ScriptPlugins;
+		// Plugins kept in their declared order.
 		std::vector<PluginPresentation *> Plugins;
+		// Playtest plugin sets kept in their declared order.
 		std::vector<std::unique_ptr<PluginRuntimeSet>> PlaytestPluginSets;
+		// Latest seen cpp plugin registry revision observed by this object.
 		uint64_t SeenCppPluginRegistryRevision = 0;
 
 		// What the port field holds while somebody is editing it.
@@ -6099,7 +6151,9 @@ namespace studio {
 		// Whether source samples are shown as their call hierarchy rather than a
 		// sortable flat table, and which source the folds window narrows to.
 		bool ScriptProfileHierarchy = false;
+		// Whether show script folds.
 		bool ShowScriptFolds = false;
+		// Script profile source kept in their declared order.
 		std::array<char, 256> ScriptProfileSource{};
 
 		// Which native bindings a script called in the last completed frame.
@@ -6358,6 +6412,7 @@ namespace studio {
 		//
 		// @since v0.18
 		struct HeapView {
+			// Valid Sort Column values.
 			enum class SortColumn : uint8_t {
 				Tag,
 				Live,
@@ -6395,9 +6450,13 @@ namespace studio {
 			int Interval = 3;
 			// Optional exact retained window. Zero keeps the selected preset.
 			int WindowMilliseconds = 0;
+			// Selected mode.
 			DiagnosticAggregation Mode = DiagnosticAggregation::Latest;
+			// Duration in seconds for last sample.
 			double LastSampleSeconds = -1.0;
+			// Selected sort.
 			SortColumn Sort = SortColumn::Live;
+			// Whether sort ascending.
 			bool SortAscending = false;
 		};
 

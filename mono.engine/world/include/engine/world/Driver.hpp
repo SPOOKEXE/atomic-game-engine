@@ -51,6 +51,7 @@ namespace engine::world {
 		// All supervised hosts must run the phase-controlled loop when enabled.
 		// Waiting happens only on the driver thread, with a monotonic deadline.
 		bool CoordinateHostTicks = false;
+		// Maximum wait for one coordinated host round, in seconds.
 		double TickExchangeSeconds = 1.0;
 	};
 
@@ -81,17 +82,24 @@ namespace engine::world {
 
 		// Hosts restarted by this barrier.
 		size_t Restarted = 0;
+		// Whether this barrier failed to complete a coordinated host round.
 		bool TickExchangeFailed = false;
 	};
 
 	// One explicit presentation pump. Counts queue admission and transport refusal,
 	// not successful GPU work or application-level acknowledgement.
 	struct PresentationPumpResult {
+		// Messages admitted to bounded outgoing queues.
 		uint64_t Accepted = 0;
+		// Payload bytes admitted to outgoing queues.
 		uint64_t AcceptedPayloadBytes = 0;
+		// Messages refused by queue or route admission.
 		uint64_t Refused = 0;
+		// Messages handed to presentation links.
 		uint64_t Sent = 0;
+		// Payload bytes handed to presentation links.
 		uint64_t SentPayloadBytes = 0;
+		// Messages lost when a link was unavailable.
 		uint64_t Dropped = 0;
 	};
 

@@ -321,6 +321,7 @@ namespace engine::effects {
 
 		// Whether a child view reorients the sampled beam strip towards its own eye.
 		bool FaceCamera = false;
+		// Reserves representation space for future use.
 		uint8_t Reserved = 0;
 	};
 

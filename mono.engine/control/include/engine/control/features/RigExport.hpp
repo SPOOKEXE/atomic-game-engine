@@ -16,7 +16,9 @@
 namespace engine::control {
 	using nlohmann::json;
 	namespace rig_export_detail {
+		// Maximum pretty-printed JSON bytes returned for one data-rig/v1 export.
 		inline constexpr size_t MAXIMUM_BYTES = 4u * 1024u * 1024u;
+		// Converts VM-neutral values to JSON, preserving unsigned fields named by the rig schema.
 		inline bool Convert(
 			const script::ScriptValue &source, json &destination, size_t depth, std::string_view field = {}
 		) {
@@ -67,6 +69,7 @@ namespace engine::control {
 				return false;
 			}
 		}
+		// Converts one script result and rejects it when its serialized reply exceeds the MCP budget.
 		inline bool Result(const script::ScriptValue &source, json &destination) {
 			if (!Convert(source, destination, 0) || destination.dump(2).size() > MAXIMUM_BYTES) {
 				destination = nullptr;
@@ -74,6 +77,7 @@ namespace engine::control {
 			}
 			return true;
 		}
+		// Rejects fields outside the top-level rig-export request shape.
 		inline bool Only(const json &arguments, std::string &failure) {
 			if (!arguments.is_object()) {
 				failure = "arguments must be an object";
@@ -88,10 +92,12 @@ namespace engine::control {
 			}
 			return true;
 		}
+		// Recognizes export selectors and lifecycle fields required by a session-bound read.
 		inline bool Option(std::string_view name, bool requireRevision) {
 			return name == "entity_ids" || name == "limit" ||
 				   (requireRevision && data_factory_read_fence::IsExpectedRevisionField(name));
 		}
+		// Resolves the caller's stable instance name before entering its world.
 		inline world::WorldId
 		World(world::Universe &universe, std::string_view instance, std::string &failure) {
 			const world::WorldId id = universe.Find(core::Name(instance));
@@ -223,6 +229,7 @@ namespace engine::control {
 		});
 	}
 	namespace features {
+		// Registers bounded rig export, optionally fenced to the supplied session revision.
 		inline Feature RigExport(world::Universe &universe, world::DataFactorySession *session = nullptr) {
 			return Feature{"rig-export", [&universe, session](Surface &surface) {
 							   surface.AddRigExportTools(universe, session);

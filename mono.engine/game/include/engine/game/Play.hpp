@@ -104,12 +104,16 @@ namespace engine::game {
 	// Handles belong to this connection's replicated world, never to the previous
 	// portal world. The authenticated connection defines the input session.
 	struct PlayerMotion {
+		// Player entity associated with this record.
 		ecs::Entity Player;
+		// Root entity associated with this record.
 		ecs::Entity Root;
+		// Authoritative or transferred motion sample.
 		script::PortalTransferMotion Motion;
 	};
 	// Uses the shared completed-motion codec; a rejected decode leaves out untouched.
 	std::vector<std::byte> EncodePlayerMotion(const PlayerMotion &sample);
+	// Decodes one completed-motion payload without changing out on rejection.
 	bool DecodePlayerMotion(std::span<const std::byte> bytes, PlayerMotion &out);
 	// Call after the world tick, with the authority's consumed input frontier.
 	std::optional<PlayerMotion>
@@ -138,8 +142,11 @@ namespace engine::game {
 	//
 	// @since v0.23
 	struct TeleportRequest {
+		// Client-generated request identity used to pair this request with its reply.
 		uint64_t Id = 0;
+		// Destination place name requested by the client.
 		std::string Place;
+		// Opaque client payload copied unchanged to the destination place.
 		std::vector<std::byte> Data;
 	};
 
@@ -147,8 +154,11 @@ namespace engine::game {
 	//
 	// @since v0.23
 	struct TeleportRequestResult {
+		// Request identity copied from the client request this result resolves.
 		uint64_t Id = 0;
+		// Admission decision returned to the player.
 		TeleportRequestDecision Decision = TeleportRequestDecision::NotProcessed;
+		// Human-readable admission outcome returned to the requesting player.
 		std::string Message;
 	};
 

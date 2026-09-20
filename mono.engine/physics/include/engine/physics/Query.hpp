@@ -75,6 +75,7 @@ namespace engine::physics {
 	// that space is free when physics was never prepared or its candidate walk
 	// overflowed.
 	struct ColliderOccupancy {
+		// Valid Reason values.
 		enum class Reason : uint8_t {
 			None,
 			PhysicsUnprepared,
@@ -84,11 +85,17 @@ namespace engine::physics {
 			InvalidProbe,
 		};
 
+		// Whether the requested query result is available.
 		bool Available = false;
+		// Whether overlap found.
 		bool OverlapFound = false;
+		// Whether witness available.
 		bool WitnessAvailable = false;
+		// Point witnessing the reported query result.
 		ecs::Entity Witness;
+		// Whether the result covers all requested data.
 		bool Complete = false;
+		// Reason this query result is unavailable or incomplete.
 		Reason Why = Reason::PhysicsUnprepared;
 	};
 
@@ -99,6 +106,7 @@ namespace engine::physics {
 	// is decisive, even if another candidate is baked or only touches the cell.
 	// Without that proof, candidate evidence is unknown rather than empty.
 	struct FilledColliderOccupancy {
+		// Valid Reason values.
 		enum class Reason : uint8_t {
 			None,
 			PhysicsUnprepared,
@@ -109,11 +117,17 @@ namespace engine::physics {
 			InvalidProbe,
 		};
 
+		// Whether the requested query result is available.
 		bool Available = false;
+		// Whether filled.
 		bool Filled = false;
+		// Whether witness available.
 		bool WitnessAvailable = false;
+		// Point witnessing the reported query result.
 		ecs::Entity Witness;
+		// Whether the result covers all requested data.
 		bool Complete = false;
+		// Reason this query result is unavailable or incomplete.
 		Reason Why = Reason::PhysicsUnprepared;
 	};
 
@@ -123,6 +137,7 @@ namespace engine::physics {
 	// supported analytic primitive, because a union changes the nearest boundary
 	// and a baked shape has no analytic distance contract here.
 	struct ColliderSignedDistance {
+		// Valid Reason values.
 		enum class Reason : uint8_t {
 			None,
 			PhysicsUnprepared,
@@ -134,10 +149,15 @@ namespace engine::physics {
 			InvalidProbe,
 		};
 
+		// Whether the requested query result is available.
 		bool Available = false;
+		// Signed distance in metres.
 		float DistanceMetres = 0.0f;
+		// Whether witness available.
 		bool WitnessAvailable = false;
+		// Point witnessing the reported query result.
 		ecs::Entity Witness;
+		// Reason this query result is unavailable or incomplete.
 		Reason Why = Reason::PhysicsUnprepared;
 	};
 
@@ -370,12 +390,19 @@ namespace engine::physics {
 		spatial::LayerMask mask,
 		std::span<ecs::Entity> found
 	);
+	// Placement Sweep declaration.
 	struct PlacementSweep {
+		// Whether the result covers all requested data.
 		bool Complete = false;
+		// Whether the sweep encountered a blocking collider.
 		bool Hit = false;
+		// Whether conservative fallback.
 		bool ConservativeFallback = false;
+		// First impact fraction along the requested sweep.
 		float Fraction = 1;
+		// Entity associated with owner.
 		ecs::Entity Owner;
+		// Contact or sweep surface normal.
 		core::Vector3 Normal;
 	};
 
@@ -383,8 +410,11 @@ namespace engine::physics {
 	// promotes collider geometry to navigation: every retained polygon comes from
 	// an enabled `Walkable` affordance on the same BasePart.
 	inline constexpr size_t MAX_AUTHORED_NAVMESH_SURFACES = 32;
+	// Maxauthorednavmeshpoints used by this object.
 	inline constexpr size_t MAX_AUTHORED_NAVMESH_POINTS = MAX_AUTHORED_NAVMESH_SURFACES + 2;
+	// Authored Navmesh Path declaration.
 	struct AuthoredNavmeshPath {
+		// Valid Reason values.
 		enum class Reason : uint8_t {
 			None,
 			PhysicsUnprepared,
@@ -397,10 +427,15 @@ namespace engine::physics {
 			NoPath,
 		};
 
+		// Whether the requested query result is available.
 		bool Available = false;
+		// Whether the requested path was found.
 		bool Found = false;
+		// Reason this query result is unavailable or incomplete.
 		Reason Why = Reason::PhysicsUnprepared;
+		// Number of point count.
 		size_t PointCount = 0;
+		// Points kept in their declared order.
 		std::array<core::Vector3, MAX_AUTHORED_NAVMESH_POINTS> Points{};
 	};
 

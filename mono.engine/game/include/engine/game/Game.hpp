@@ -144,8 +144,11 @@ namespace engine::game {
 	//
 	// @since v0.21
 	struct UniverseDataStore {
+		// Whether this feature is enabled.
 		bool Enabled = false;
+		// Persistence backend selected by the deployed universe manifest.
 		std::string Backend = "binary";
+		// Root entity associated with this record.
 		std::filesystem::path Root = "stores";
 	};
 

@@ -177,7 +177,9 @@ namespace engine::core {
 	// One retained sampler reading with inclusive bytes for each tracked node.
 	// The vector is bounded by `MAXIMUM_TRACKED_NODES` and ordered by node index.
 	struct HeapHistorySnapshot {
+		// Latest authoritative player-motion sample.
 		HeapSample Sample;
+		// Memory footprint in bytes for inclusive.
 		std::vector<int64_t> InclusiveBytes;
 	};
 

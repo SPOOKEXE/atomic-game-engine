@@ -19,6 +19,7 @@
 
 namespace engine::scene {
 
+	// Numeric encodings available for compact editable presentation copies.
 	enum class EditablePackingFormat : uint8_t {
 		Float32,
 		Float16,
@@ -32,6 +33,7 @@ namespace engine::scene {
 		Boolean,
 	};
 
+	// Vertex attributes to which an editable packing policy applies.
 	enum class EditablePackingAttribute : uint8_t {
 		Position = 1 << 0,
 		Normal = 1 << 1,
@@ -40,6 +42,7 @@ namespace engine::scene {
 		Alpha = 1 << 4,
 	};
 
+	// Combines two authored attribute-selection bits.
 	constexpr uint8_t operator|(EditablePackingAttribute left, EditablePackingAttribute right) {
 		return static_cast<uint8_t>(left) | static_cast<uint8_t>(right);
 	}
@@ -48,17 +51,24 @@ namespace engine::scene {
 	// formats linearly map [Minimum, Maximum] to their complete code range;
 	// nearest ties choose the even code, and values outside the range saturate.
 	struct EditablePacking {
+		// Bit set of vertex semantics this policy compacts.
 		uint8_t Attributes = 0;
+		// Encoding used for every selected attribute value.
 		EditablePackingFormat Format = EditablePackingFormat::Float32;
+		// Lower endpoint for normalized integer encoding.
 		float Minimum = 0.0f;
+		// Upper endpoint for normalized integer encoding.
 		float Maximum = 1.0f;
+		// Authored revision used to invalidate derived packed copies.
 		uint32_t Revision = 0;
 
+		// Reports whether this policy selects attributes and changes their encoding.
 		bool Enabled() const {
 			return Attributes != 0 && Format != EditablePackingFormat::Float32;
 		}
 	};
 
+	// Returns the persistent text spelling for an encoding.
 	inline constexpr std::string_view EditablePackingFormatName(EditablePackingFormat format) {
 		switch (format) {
 		case EditablePackingFormat::Float32:
@@ -85,6 +95,7 @@ namespace engine::scene {
 		return {};
 	}
 
+	// Parses one persistent encoding spelling without changing format on failure.
 	inline bool ParseEditablePackingFormat(std::string_view text, EditablePackingFormat &format) {
 		for (const EditablePackingFormat candidate :
 			 {EditablePackingFormat::Float32,
@@ -105,6 +116,7 @@ namespace engine::scene {
 		return false;
 	}
 
+	// Returns exact packed bytes for a count of scalar values.
 	inline size_t EditablePackedByteCount(EditablePackingFormat format, size_t values) {
 		switch (format) {
 		case EditablePackingFormat::Float32:
@@ -127,6 +139,7 @@ namespace engine::scene {
 	}
 
 	namespace detail {
+		// Rounds a finite scalar with ties selecting the even integer code.
 		inline uint32_t RoundEven(float value) {
 			const float low = std::floor(value);
 			const float fraction = value - low;
@@ -135,6 +148,7 @@ namespace engine::scene {
 			return static_cast<uint32_t>(low) + (static_cast<uint32_t>(low) & 1u);
 		}
 
+		// Encodes one float into IEEE 754 binary16 bits.
 		inline uint16_t FloatToHalf(float value) {
 			const uint32_t bits = std::bit_cast<uint32_t>(value);
 			const uint32_t sign = (bits >> 16) & 0x8000u;
@@ -152,6 +166,7 @@ namespace engine::scene {
 			);
 		}
 
+		// Decodes IEEE 754 binary16 bits into a float.
 		inline float HalfToFloat(uint16_t value) {
 			const uint32_t sign = static_cast<uint32_t>(value & 0x8000u) << 16;
 			uint32_t exponent = (value >> 10) & 0x1fu;
@@ -169,6 +184,7 @@ namespace engine::scene {
 			return std::bit_cast<float>(bits);
 		}
 
+		// Decodes one E4M3FN byte into a float.
 		inline float Float8ToFloat(uint8_t value) {
 			const float sign = (value & 0x80u) == 0 ? 1.0f : -1.0f;
 			const uint8_t exponent = (value >> 3) & 0x0fu;
@@ -179,6 +195,7 @@ namespace engine::scene {
 				   std::ldexp(1.0f + static_cast<float>(mantissa) / 8.0f, static_cast<int>(exponent) - 7);
 		}
 
+		// Encodes one finite float into an E4M3FN byte.
 		inline uint8_t FloatToFloat8(float value) {
 			if (!std::isfinite(value)) value = std::copysign(448.0f, value);
 			uint8_t best = 0;
@@ -195,6 +212,7 @@ namespace engine::scene {
 		}
 	}
 
+	// Packs scalar values under one policy into an owned byte vector.
 	inline bool PackEditableValues(
 		std::span<const float> values, const EditablePacking &policy, std::vector<std::byte> &out
 	) {
@@ -273,6 +291,7 @@ namespace engine::scene {
 		return true;
 	}
 
+	// Decodes an exact scalar count from a policy-compatible byte vector.
 	inline bool UnpackEditableValues(
 		std::span<const std::byte> packed,
 		size_t count,

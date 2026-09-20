@@ -46,21 +46,31 @@ namespace engine::world {
 	// Exact child-visible to parent-visible endpoint tuples, supplied by host control.
 	// arch-crossing
 	struct PresentationEndpointBinding {
+		// Receipt used by the child-side endpoint.
 		PresentationAddress Local;
+		// Receipt published to the parent-side directory.
 		PresentationAddress Published;
+		// Compares both endpoint receipts in the translation pair.
 		bool operator==(const PresentationEndpointBinding &) const = default;
 	};
 	// Newer empty arrays withdraw bindings. Return aliases never grant producer exports.
 	// The two arrays together contain at most MAX_PRESENTATION_DIRECTORY entries.
 	// arch-crossing
 	struct PresentationBindings {
+		// Child session that owns this complete binding set.
 		uint64_t Session = 0;
+		// Monotonic revision within Session.
 		uint64_t Revision = 0;
+		// Child producer receipts translated into parent-visible receipts.
 		std::vector<PresentationEndpointBinding> Exports;
+		// Parent reply receipts translated back to child-visible receipts.
 		std::vector<PresentationEndpointBinding> Returns;
+		// Compares the complete binding snapshot.
 		bool operator==(const PresentationBindings &) const = default;
 	};
+	// Encodes a complete binding snapshot for trusted host control.
 	bool WritePresentationBindings(core::ByteWriter &writer, const PresentationBindings &bindings);
+	// Decodes a complete binding snapshot without partial output on failure.
 	bool ReadPresentationBindings(core::ByteReader &reader, PresentationBindings &bindings);
 
 	// What a frame is.
@@ -192,9 +202,13 @@ namespace engine::world {
 
 		// Exactly one message when Signal is Presentation; otherwise unused.
 		PresentationMessage Presentation;
+		// Complete endpoint directory carried by PresentationDirectory.
 		PresentationDirectory Directory;
+		// Child-to-parent endpoint receipt translations.
 		PresentationBindings Bindings;
+		// Driver phase command carried by TickExchangeCommand.
 		TickExchangeCommand ExchangeCommand;
+		// Host phase result carried by TickExchangeResult.
 		TickExchangeResult ExchangeResult;
 	};
 
@@ -269,7 +283,9 @@ namespace engine::world {
 		// Publish changed local endpoints before image traffic. A full queue leaves
 		// the version unsent so the next pump retries the current directory.
 		bool PublishPresentationDirectory(const PresentationDirectory &directory);
+		// Publishes driver-selected remote routes to the child host.
 		bool PublishPresentationRoutes(const PresentationDirectory &directory);
+		// Publishes child and parent endpoint translations for this session.
 		bool PublishPresentationBindings(const PresentationBindings &bindings);
 
 		// Sends what the buses answered, for a host's worlds.

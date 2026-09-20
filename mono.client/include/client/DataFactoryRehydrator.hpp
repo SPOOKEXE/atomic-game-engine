@@ -21,6 +21,7 @@ namespace engine::script {
 }
 
 namespace client {
+	// Type used for Data Factory Runtime List.
 	using DataFactoryRuntimeList =
 		std::vector<std::pair<engine::world::WorldId, std::shared_ptr<engine::script::Runtime>>>;
 
@@ -29,6 +30,7 @@ namespace client {
 	// rehydration before a candidate can replace the live world.
 	class DataFactoryRehydrator final {
 	  public:
+		// Builds the client-side transaction that stages replacement factory worlds.
 		DataFactoryRehydrator(
 			engine::world::Universe &worlds,
 			DataFactoryRuntimeList &runtimes,
@@ -39,8 +41,11 @@ namespace client {
 			std::shared_ptr<engine::script::QueuedDataLifecycleBridge> lifecycle
 		);
 
+		// Stages candidate world resources before the factory atomically swaps them in.
 		bool Prepare(engine::world::Universe &candidate, engine::world::WorldId world, std::string &detail);
+		// Publishes the prepared replacement world and releases staging state.
 		void Commit() noexcept;
+		// Discards staged replacement state after a failed rehydration.
 		void Abort() noexcept;
 
 		// A fork owns an isolated Universe, so its VM ownership cannot share the
@@ -54,8 +59,11 @@ namespace client {
 			engine::world::WorldId world,
 			std::string &detail
 		);
+		// Publishes the prepared fork identified by branchId.
 		void CommitFork(std::string_view branchId);
+		// Discards a fork that did not reach a publishable state.
 		void AbortFork(std::string_view branchId) noexcept;
+		// Removes a published fork after its factory lease ends.
 		void RetireFork(std::string_view branchId) noexcept;
 
 	  private:

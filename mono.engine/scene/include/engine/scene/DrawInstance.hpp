@@ -287,7 +287,9 @@ namespace engine::scene {
 		// Snapshot-local data-capture label. Zero is background or an entity
 		// without an authored DataFactoryId.
 		uint32_t ObjectLabel = 0;
+		// Semantic capture label assigned to this drawable.
 		uint32_t SemanticLabel = 0;
+		// Part capture label assigned to this drawable.
 		uint32_t PartLabel = 0;
 
 		// Which synthetic form of `Source` this row is, or zero for the entity
@@ -309,10 +311,15 @@ namespace engine::scene {
 		// Four authored LOD levels, with level zero held in Mesh. Selection is a
 		// per-view GPU result, so this snapshot carries inputs and no chosen level.
 		core::Name LodMeshes[LOD_LEVELS - 1];
+		// Screen-area ratios selecting each lower LOD.
 		float LodRatios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
+		// Target projected quad area for automatic LOD choice.
 		float LodTargetQuadArea = 0.0f;
+		// Rule used to interpret the LOD inputs.
 		LodStrategy LodStrategyMode = LodStrategy::None;
+		// Number of valid levels including Mesh.
 		uint8_t LodLevels = 1;
+		// Explicit padding omitted by the draw-list wire form.
 		uint8_t LodReserved[2] = {};
 
 		// Graph nodes attached to this visual. The pipeline owns shader source and

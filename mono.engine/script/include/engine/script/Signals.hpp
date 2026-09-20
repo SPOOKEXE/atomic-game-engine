@@ -391,7 +391,7 @@ namespace engine::script {
 	// @since v0.6
 	class SignalTable {
 	  public:
-		// Adds a connection.
+		// Registers a VM callback for one signal subject and returns its monotonic handle.
 		//
 		// @param kind     Which signal.
 		// @param subject  The instance, or `NULL_ENTITY` for a world signal.
@@ -468,6 +468,7 @@ namespace engine::script {
 		// @param released Appended with every callable the table held.
 		void Clear(std::vector<CallbackRef> &released);
 
+		// Reports whether no live or deferred-retirement connections remain.
 		bool Empty() const {
 			return Owners.empty();
 		}

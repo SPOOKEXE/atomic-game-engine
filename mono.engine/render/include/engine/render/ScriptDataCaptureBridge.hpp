@@ -16,27 +16,39 @@
 #include <vector>
 
 namespace engine::render {
+	// Adapts script capture tickets to renderer readbacks and the world snapshot barrier.
 	class ScriptDataCaptureBridge final : public script::DataCaptureBridge {
 	  public:
+		// Renderer work armed for one prepared view.
 		struct PreparedView {
+			// Capture tickets to cancel if the view cannot be submitted.
 			std::vector<uint64_t> Captures;
+			// Camera mutation tickets tied to this view.
 			std::vector<uint64_t> CameraMutations;
 		};
+		// Prepared views that must be aborted together on submission failure.
 		struct PreparedBatch {
+			// Per-view tickets in the coordinated capture group.
 			std::vector<PreparedView> Views;
 		};
+		// Borrows a world session and its renderer for this bridge's lifetime.
 		ScriptDataCaptureBridge(world::DataFactorySession &session, Renderer &renderer);
 		~ScriptDataCaptureBridge() override;
+		// Reports the channels and camera hooks this renderer can service.
 		script::DataCaptureBridgeCapabilities Capabilities() const override;
+		// Queues one copied capture request and returns its bridge ticket.
 		bool
 		Queue(std::string_view, const script::DataCaptureBridgeRequest &, uint64_t &, std::string &) override;
+		// Queues a coordinated group whose views must share one completed frame.
 		bool QueueGroup(
 			std::string_view,
 			std::span<const script::DataCaptureBridgeRequest>,
 			std::span<uint64_t>,
 			std::string &
 		) override;
+		// Polls a ticket without transferring its retained plane bytes.
 		bool Poll(std::string_view, uint64_t, script::DataCaptureBridgePoll &, std::string &) override;
+		// Copies a bounded range of one completed plane into caller-owned bytes.
 		bool ReadPlane(
 			std::string_view,
 			uint64_t,
@@ -46,14 +58,18 @@ namespace engine::render {
 			std::vector<std::byte> &,
 			std::string &
 		) override;
+		// Releases terminal ticket state and retained plane bytes.
 		bool Release(std::string_view, uint64_t, std::string &) override;
 		// Cancels every nonterminal member of a same-frame camera group. The owner
 		// pump publishes each affected ticket as cancelled before it can block a later group.
 		void Cancel(std::string_view, uint64_t) override;
+		// Queues a named camera change for the next prepared capture view.
 		bool QueueViewCameraMutation(
 			std::string_view, const script::ViewCameraMutationRequest &, uint64_t &, std::string &
 		) override;
+		// Requests cancellation of a queued view-camera mutation.
 		void CancelViewCameraMutation(std::string_view, uint64_t) override;
+		// Polls the mutation ticket for an applied or terminal outcome.
 		bool PollViewCameraMutation(
 			std::string_view, uint64_t, script::ViewCameraMutationPoll &, std::string &
 		) override;
@@ -65,11 +81,14 @@ namespace engine::render {
 		// Builds one offscreen view per coordinated camera request. The caller owns
 		// targets and world packets, then calls PrepareView for every returned view.
 		bool PrepareBatch(const View &source, std::vector<View> &views, PreparedBatch *prepared = nullptr);
+		// Cancels all capture and mutation tickets armed for a failed batch.
 		void AbortPreparedBatch(const PreparedBatch &prepared);
 		// Cancels capture and camera work prepared for this exact view. A host uses
 		// this when it cannot bind the rebuilt world packet that the capture needs.
 		void AbortPreparedView(const PreparedView &prepared);
+		// Advances queued captures and publishes completed readbacks.
 		void Pump();
+		// Reports whether tickets still need renderer or session work.
 		bool HasPending() const;
 
 	  private:

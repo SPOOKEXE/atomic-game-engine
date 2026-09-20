@@ -31,11 +31,15 @@ namespace engine::render {
 	// Both hooks borrow their resources for the duration of one render call.
 	class WorldViewInterface : public FrameOverlayHook {
 	  public:
+		// Combines borrowed spatial and screen overlay recorders.
 		WorldViewInterface(FrameOverlayHook *spatial, FrameOverlayHook *screen);
 		bool Prepare(void *commandBuffer) override;
 		bool SupportsWorldLayers() const override;
+		// Reports whether the spatial hook has world-space content.
 		bool HasWorldOverlay() const override;
+		// Returns the number of spatial batches ready to record.
 		size_t WorldBatchCount() const override;
+		// Records one spatial interface batch into the active pass.
 		uint32_t RecordWorldBatch(const WorldInterfaceCapture &capture, size_t batch) override;
 		uint32_t RecordWorld(
 			void *commandBuffer,
@@ -66,43 +70,72 @@ namespace engine::render {
 		WorldViewFrame(const WorldViewFrame &) = delete;
 		WorldViewFrame &operator=(const WorldViewFrame &) = delete;
 
+		// Published name of the source world.
 		core::Name Name;
+		// Live store identity that authorizes this packet.
 		uint64_t Identity = 0;
+		// Simulation tick represented by this packet.
 		uint64_t Tick = 0;
+		// Elapsed world time at Tick, in seconds.
 		double Seconds = 0;
+		// Camera-independent lighting copied from the world.
 		scene::WorldLighting Lighting;
+		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
+		// Object labels for capture output.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		// Semantic labels for capture output.
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		// Part labels for capture output.
 		std::vector<DataCapturePartLabel> PartLabels;
+		// Whether ObjectLabels was produced without overflow.
 		bool ObjectLabelsValid = true;
+		// Whether SemanticLabels was produced without overflow.
 		bool SemanticLabelsValid = true;
+		// Whether PartLabels was produced without overflow.
 		bool PartLabelsValid = true;
+		// Skin joint frames referenced by skinned instances.
 		std::vector<core::CFrame> Joints;
+		// Surface slots requested by the world.
 		std::vector<scene::SurfaceSlot> Slots;
+		// Portal seams visible in this presentation packet.
 		std::vector<scene::PortalSeam> Seams;
+		// Portal views collected from the world.
 		std::vector<PortalView> Portals;
+		// Detached particle data owned by this packet.
 		ParticleFrame Particles;
 	};
 
 	// One camera's light selection, surface demand, facing ribbons and spatial
 	// interface commands.
 	struct WorldCameraFrame {
+		// Lights selected for this camera.
 		std::vector<SceneLight> Lights;
+		// Surface views demanded by this camera.
 		std::vector<SurfaceView> Surfaces;
+		// Camera-facing ribbon geometry.
 		effects::RibbonBuffer Ribbons;
+		// Compiled game interface for this camera.
 		gui::Compiled Compiled;
+		// World-space interface commands.
 		gui::DrawList SpatialCommands;
+		// Collectors that own spatial interface resources.
 		std::vector<SpatialCollector> SpatialCollectors;
 	};
 
 	// The live presentation owner authorizes a retained packet by name and store identity.
 	struct WorldViewBinding {
+		// Live store identity that authorizes the binding.
 		uint64_t World = 0;
+		// Published name of the bound world.
 		core::Name Name;
+		// Store incarnation expected by the binding.
 		uint64_t Identity = 0;
+		// Content namespace used for local asset resolution.
 		core::Name ContentOwner;
+		// Additional content namespaces visible to the view.
 		std::span<const WorldContentOwner> ForeignContentOwners;
+		// Render pipeline selected for this view.
 		core::Name Pipeline;
 	};
 

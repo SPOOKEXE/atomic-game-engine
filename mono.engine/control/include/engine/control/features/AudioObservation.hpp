@@ -26,12 +26,15 @@ namespace engine::control {
 	using nlohmann::json;
 
 	namespace audio_observation_detail {
+		// Maximum binary waveform range returned through one JSON response.
 		inline constexpr size_t MAXIMUM_READ_BYTES = script::MAX_AUDIO_OBSERVATION_JSON_BYTES;
 
+		// Joins a stable error code with bridge or validation detail.
 		inline std::string Error(std::string_view code, std::string_view detail) {
 			return std::string(code) + ": " + std::string(detail);
 		}
 
+		// Reads a required, NUL-free wire string within the caller supplied byte limit.
 		inline bool Text(
 			const json &value, std::string_view field, size_t limit, std::string &out, std::string &failure
 		) {
@@ -47,6 +50,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Reads an unsigned JSON count, sample index, or revision without narrowing it.
 		inline bool UInt(const json &value, std::string_view field, uint64_t &out, std::string &failure) {
 			if (!value.is_number_unsigned()) {
 				failure = Error("validation_failed", std::string(field) + " must be an unsigned integer");
@@ -56,21 +60,25 @@ namespace engine::control {
 			return true;
 		}
 
+		// Applies the bridge's byte and text rules to a host-provided field.
 		inline bool BridgeText(std::string_view value, bool nonempty = true) {
 			return script::IsDataAudioObservationText(
 				value, script::MAX_AUDIO_OBSERVATION_STRING_BYTES, nonempty
 			);
 		}
 
+		// Limits bridge result states to the statuses exported by audio_observation/v1.
 		inline bool Status(std::string_view value) {
 			return value == "ok" || value == "unavailable" || value == "resource_limit" ||
 				   value == "invalid_data";
 		}
 
+		// Enforces the JSON byte budget before content crosses the MCP surface.
 		inline bool FitsSurfaceContent(const json &value) {
 			return value.dump(2).size() <= script::MAX_AUDIO_OBSERVATION_JSON_BYTES;
 		}
 
+		// Rejects fields outside the request shape, including revision fields without a session fence.
 		inline bool Only(
 			const json &value,
 			std::initializer_list<std::string_view> allowed,
@@ -92,6 +100,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Encodes copied waveform bytes for the JSON-only tool reply.
 		inline std::string Base64(std::span<const std::byte> bytes) {
 			static constexpr std::array alphabet{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
 												 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
@@ -116,6 +125,7 @@ namespace engine::control {
 			return encoded;
 		}
 
+		// Serializes a sample-aligned bridge record while leaving waveform storage host-owned.
 		inline json Record(const script::DataAudioObservation &observation) {
 			json chunks = json::array();
 			for (const auto &chunk : observation.Waveform.Chunks)
@@ -188,6 +198,7 @@ namespace engine::control {
 			};
 		}
 
+		// Builds the closed request schema and adds revision fences for session-bound reads.
 		inline json Schema(world::DataFactorySession *session) {
 			json properties{
 				{"instance_id",
@@ -216,6 +227,7 @@ namespace engine::control {
 	// Deliberately a free installer until a product registers the feature in its
 	// own surface list. That keeps this lower-layer slice independent of
 	// Surface.hpp and of any product's audio ownership.
+	// Installs audio record and chunk readers; bridge ownership remains with the product.
 	inline void AddDataAudioObservationTools(
 		Surface &surface,
 		world::Universe &universe,
@@ -447,6 +459,7 @@ namespace engine::control {
 	}
 
 	namespace features {
+		// Registers the bridge-backed audio observation feature on a control surface.
 		inline Feature DataAudioObservation(
 			world::Universe &universe,
 			std::shared_ptr<script::DataAudioObservationBridge> bridge,

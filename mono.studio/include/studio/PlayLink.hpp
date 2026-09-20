@@ -72,7 +72,9 @@ namespace studio {
 
 	// Host-local lookup result. Neither handle is sent to the other world.
 	struct PortalLinkArrival {
+		// Stable identifier for world.
 		engine::world::WorldId World;
+		// Player entity associated with this record.
 		engine::ecs::Entity Player;
 	};
 
@@ -175,9 +177,11 @@ namespace studio {
 		// Observe before replacing the replica's departing body. A portal receipt
 		// remains authoritative while the destination finishes its commit.
 		void ObservePortalTransfer(engine::world::Universe &universe);
+		// Borrows the latest authoritative portal receipt while arrival is in progress.
 		const std::optional<engine::script::PortalTransferReceipt> &PortalTransfer() const {
 			return PortalTransfer_;
 		}
+		// Finds the local replica arrival associated with the retained portal receipt.
 		std::optional<PortalLinkArrival> FindPortalArrival(engine::world::Universe &universe) const;
 		// Resolves the exact receipt and carries the viewer's camera to the new rig.
 		// Failure leaves the departing link running and creates no replacement body.

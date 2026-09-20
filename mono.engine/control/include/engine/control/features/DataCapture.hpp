@@ -31,19 +31,26 @@ namespace engine::control {
 	using nlohmann::json;
 
 	namespace data_capture_detail {
+		// Maximum UTF-8 byte length for instance, snapshot, and capture ticket identifiers.
 		inline constexpr size_t MAXIMUM_ID = 128;
+		// Maximum byte length for profile and pipeline names supplied in a capture request.
 		inline constexpr size_t MAXIMUM_OPTION_TEXT = 256;
+		// Maximum byte length for one requested render channel name.
 		inline constexpr size_t MAXIMUM_CHANNEL_NAME = 64;
+		// Largest channel set accepted for one capture ticket.
 		inline constexpr size_t MAXIMUM_CHANNELS = 13;
 		// ScriptDataCaptureBridge owns six retained ticket slots. The MCP bound must
 		// match that admission limit rather than the separate hook-batch limit.
 		inline constexpr size_t MAXIMUM_MULTICAMERA_VIEWS = 6;
+		// Largest byte range copied from a retained plane in one MCP response.
 		inline constexpr size_t MAXIMUM_RANGE_BYTES = 1024 * 1024;
 
+		// Joins a machine-readable failure code and its bridge supplied detail.
 		inline std::string Error(std::string_view code, std::string_view detail) {
 			return std::string(code) + ": " + std::string(detail);
 		}
 
+		// Reads a nonempty, NUL-free identifier bounded by MAXIMUM_ID bytes.
 		inline bool Text(const json &value, std::string_view name, std::string &out, std::string &failure) {
 			if (!value.is_string()) {
 				failure = Error("validation_failed", std::string(name) + " must be a string");
@@ -57,6 +64,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Reads a nonempty, NUL-free option string using its field-specific byte limit.
 		inline bool OptionText(
 			const json &value, std::string_view name, size_t maximum, std::string &out, std::string &failure
 		) {
@@ -75,11 +83,15 @@ namespace engine::control {
 			return true;
 		}
 
+		// Reads an unsigned JSON number without narrowing it.
 		inline bool UInt(const json &value, std::string_view name, uint64_t &out, std::string &failure);
+		// Borrows a required member from the request object for later type validation.
 		inline bool Field(const json &values, std::string_view name, const json *&out, std::string &failure);
+		// Rejects fields outside the named wire request shape.
 		inline bool
 		Only(const json &values, std::initializer_list<std::string_view> names, std::string &failure);
 
+		// Validates one camera's base profile and writes the bridge-owned capture request.
 		inline bool CaptureBundleOptions(
 			const json &options, script::DataCaptureBridgeRequest &request, std::string &failure
 		) {
@@ -211,6 +223,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Expands distinct camera and view-slot pairs into independently retainable capture requests.
 		inline bool MultiCameraOptions(
 			const json &options,
 			const json &cameras,
@@ -271,6 +284,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Reads an unsigned JSON number without narrowing it.
 		inline bool UInt(const json &value, std::string_view name, uint64_t &out, std::string &failure) {
 			if (!value.is_number_unsigned()) {
 				failure = Error("validation_failed", std::string(name) + " must be an unsigned integer");
@@ -280,6 +294,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Borrows a required member from the request object for later type validation.
 		inline bool Field(const json &values, std::string_view name, const json *&out, std::string &failure) {
 			const auto found = values.find(std::string(name));
 			if (found == values.end()) {
@@ -290,6 +305,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Rejects fields outside the named wire request shape.
 		inline bool
 		Only(const json &values, std::initializer_list<std::string_view> names, std::string &failure) {
 			if (!values.is_object()) {
@@ -305,6 +321,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Ensures the requested capture observes the current completed tick, epoch, and world version.
 		inline bool Versions(
 			world::DataFactorySession &session,
 			std::string_view instance,
@@ -333,6 +350,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Reports the lifecycle revision callers must echo before submitting a capture.
 		inline json VersionReply(world::DataFactorySession &session, std::string_view instance) {
 			const world::DataFactoryReply current = session.Inspect(instance);
 			return {
@@ -343,6 +361,7 @@ namespace engine::control {
 			};
 		}
 
+		// Encodes retained binary bytes for the JSON-only MCP transport.
 		inline std::string Base64(std::span<const std::byte> bytes) {
 			static constexpr std::array alphabet{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
 												 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
@@ -367,6 +386,7 @@ namespace engine::control {
 			return encoded;
 		}
 
+		// Converts bridge plane metadata into the public record while retaining source provenance.
 		inline json Plane(const script::DataCaptureBridgePlane &plane, std::string_view snapshot) {
 			const uint64_t byteSize = plane.ByteSize;
 			json shape{plane.Height, plane.Width};
@@ -458,6 +478,7 @@ namespace engine::control {
 			};
 		}
 
+		// Serializes a ticket poll, including only scene sidecars that fit the response budget.
 		inline json PollReply(uint64_t ticket, const script::DataCaptureBridgePoll &reply) {
 			json planes = json::array();
 			for (const auto &plane : reply.Planes)
@@ -564,6 +585,7 @@ namespace engine::control {
 			};
 		}
 
+		// Wraps tool-specific fields in the closed JSON object schema used by this surface.
 		inline json Schema(json properties, json required) {
 			return {
 				{"type", "object"},
@@ -1354,6 +1376,7 @@ namespace engine::control {
 }
 
 namespace engine::control::features {
+	// Installs the ticketed capture tools backed by the supplied product-owned bridge.
 	inline Feature
 	DataCapture(world::DataFactorySession &session, std::shared_ptr<script::DataCaptureBridge> bridge) {
 		return Feature{"data_capture", [&session, bridge = std::move(bridge)](Surface &surface) {

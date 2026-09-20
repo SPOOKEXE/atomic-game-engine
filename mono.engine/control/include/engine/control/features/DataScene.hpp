@@ -33,12 +33,15 @@ namespace engine::control {
 	using nlohmann::json;
 
 	namespace data_scene_detail {
+		// Maximum recursive array or map depth accepted in a script result.
 		inline constexpr size_t MAXIMUM_DEPTH = 16;
+		// Maximum serialized JSON bytes returned by one data-scene call.
 		inline constexpr size_t MAXIMUM_RESULT_BYTES = script::MAX_DATA_SCENE_JSON_RESPONSE_BYTES;
 		// Script numbers are doubles. Keep a whole value as an integer only while
 		// every signed integer in this range is represented exactly by that double.
 		inline constexpr double MAXIMUM_EXACT_JSON_INTEGER = 9'007'199'254'740'991.0;
 
+		// Rejects unknown top-level scene arguments before any host-side action is selected.
 		inline bool Only(const json &value, std::initializer_list<const char *> names, std::string &failure) {
 			if (!value.is_object()) {
 				failure = "arguments must be an object";
@@ -57,6 +60,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Rejects unknown options while optionally admitting the common read-fence fields.
 		inline bool Options(
 			const json &value,
 			std::initializer_list<const char *> names,
@@ -81,15 +85,18 @@ namespace engine::control {
 			return true;
 		}
 
+		// Charges encoded response bytes against the fixed data-scene reply budget.
 		inline bool Spend(size_t &bytes, size_t amount) {
 			if (amount > MAXIMUM_RESULT_BYTES - bytes) return false;
 			bytes += amount;
 			return true;
 		}
 
+		// Accepts only finite scalar values representable by scene JSON.
 		inline bool Finite(float value) {
 			return std::isfinite(value);
 		}
+		// Parses a finite three-element JSON vector into engine coordinates.
 		inline bool Vector(const json &value, core::Vector3 &out) {
 			if (!value.is_array() || value.size() != 3) return false;
 			for (const auto &item : value)
@@ -98,6 +105,7 @@ namespace engine::control {
 			return Finite(out.X) && Finite(out.Y) && Finite(out.Z);
 		}
 
+		// Converts a script return value into bounded JSON without lossy integer coercion.
 		inline bool
 		JsonValue(const script::ScriptValue &source, json &destination, size_t depth, size_t &bytes) {
 			if (depth > MAXIMUM_DEPTH) return false;
@@ -175,6 +183,7 @@ namespace engine::control {
 			return false;
 		}
 
+		// Converts a script data-scene result into a bounded host reply and propagates script failure text.
 		inline json Result(const script::DataSceneResult &result, std::string &failure) {
 			json converted;
 			size_t bytes = 0;
@@ -190,6 +199,7 @@ namespace engine::control {
 			return converted;
 		}
 
+		// Resolves a stable scene name to a live universe world id.
 		inline world::WorldId
 		World(world::Universe &universe, std::string_view instance, std::string &failure) {
 			const world::WorldId id = universe.Find(core::Name(instance));
@@ -197,61 +207,96 @@ namespace engine::control {
 			return id;
 		}
 
+		// Maximum JSON reply bytes describing a retained glTF export.
 		inline constexpr size_t MAX_GLTF_EXPORT_REPLY_BYTES = 40u * 1024u;
+		// Maximum retained glTF payload bytes per export.
 		inline constexpr size_t MAX_GLTF_EXPORT_BYTES = 320u * 1024u * 1024u;
+		// Maximum glTF export payloads retained for host reads.
 		inline constexpr size_t MAX_GLTF_EXPORT_RESOURCES = 2;
+		// Maximum bytes returned by one glTF resource read.
 		inline constexpr size_t MAX_GLTF_EXPORT_READ_BYTES = 1024u * 1024u;
 
+		// One retained glTF export payload and the exact world revision that produced it.
 		struct GltfResource {
+			// Opaque host-facing resource id allocated by GltfResources.
 			std::string Id;
+			// Stable source world name.
 			std::string Instance;
+			// Completed source tick captured by this export.
 			uint64_t Tick = 0;
+			// Source world epoch captured by this export.
 			uint64_t WorldEpoch = 0;
+			// Source world version captured by this export.
 			uint64_t WorldVersion = 0;
+			// Content hash exposed to readers for integrity checking.
 			std::string Hash;
+			// Owned glTF bytes retained until the host reads or expires the resource.
 			std::vector<std::byte> Bytes;
 		};
 
+		// Mutex-protected bounded ownership table for retained glTF exports.
 		struct GltfResources {
+			// Protects id allocation and retained resource ownership.
 			std::mutex Mutex;
+			// Next opaque resource id, never derived from a world handle.
 			uint64_t NextId = 1;
+			// Retained export payloads available to host resource reads.
 			std::vector<GltfResource> Entries;
 		};
 
+		// Maximum retained raw-scene payload bytes per export.
 		inline constexpr size_t MAX_RAW_SCENE_BYTES = 320u * 1024u * 1024u;
+		// Maximum raw-scene payloads retained for host reads.
 		inline constexpr size_t MAX_RAW_SCENE_RESOURCES = 2;
+		// Maximum bytes returned by one raw-scene resource read.
 		inline constexpr size_t MAX_RAW_SCENE_READ_BYTES = 1024u * 1024u;
 
+		// One retained raw-scene export payload and its exact source-world revision.
 		struct RawSceneResource {
+			// Opaque host-facing resource id allocated by RawSceneResources.
 			std::string Id;
+			// Stable source world name.
 			std::string Instance;
+			// Completed source tick captured by this export.
 			uint64_t Tick = 0;
+			// Source world epoch captured by this export.
 			uint64_t WorldEpoch = 0;
+			// Source world version captured by this export.
 			uint64_t WorldVersion = 0;
+			// Content hash exposed to readers for integrity checking.
 			std::string Hash;
+			// Owned raw scene bytes retained until the host reads or expires the resource.
 			std::vector<std::byte> Bytes;
 		};
 
+		// Mutex-protected bounded ownership table for retained raw-scene exports.
 		struct RawSceneResources {
+			// Protects id allocation and retained resource ownership.
 			std::mutex Mutex;
+			// Next opaque resource id, never derived from a world handle.
 			uint64_t NextId = 1;
+			// Retained raw-scene payloads available to host resource reads.
 			std::vector<RawSceneResource> Entries;
 		};
 
+		// Appends one little-endian unsigned 32-bit word to the raw-scene payload.
 		inline void RawWord(std::vector<std::byte> &out, uint32_t value) {
 			for (size_t byte = 0; byte < 4; ++byte)
 				out.push_back(static_cast<std::byte>(value >> (byte * 8)));
 		}
 
+		// Appends one little-endian unsigned 16-bit word to the raw-scene payload.
 		inline void RawShort(std::vector<std::byte> &out, uint16_t value) {
 			out.push_back(static_cast<std::byte>(value));
 			out.push_back(static_cast<std::byte>(value >> 8));
 		}
 
+		// Appends an IEEE-754 float bit pattern in little-endian order.
 		inline void RawFloat(std::vector<std::byte> &out, float value) {
 			RawWord(out, std::bit_cast<uint32_t>(value));
 		}
 
+		// Maps supported engine texture formats to raw-scene manifest spellings.
 		inline const char *RawTextureFormat(assets::TextureFormat format) {
 			switch (format) {
 			case assets::TextureFormat::RGBA8:
@@ -263,6 +308,7 @@ namespace engine::control {
 			return "unknown";
 		}
 
+		// Serializes one exported material and its source-texture provenance.
 		inline json RawMaterial(const script::GltfExportMaterial &material) {
 			const auto source = [](std::optional<size_t> index) -> json {
 				return index ? json(*index) : json(nullptr);
@@ -292,6 +338,7 @@ namespace engine::control {
 			};
 		}
 
+		// Writes raw mesh and texture bytes plus a right-handed metre manifest for one exported scene.
 		inline bool
 		RawScene(const script::GltfSceneExport &source, std::vector<std::byte> &bytes, json &manifest) {
 			bytes.clear();
@@ -440,6 +487,7 @@ namespace engine::control {
 			return manifest.dump().size() <= MAXIMUM_RESULT_BYTES;
 		}
 
+		// Reads one bounded non-NUL glTF resource id or instance name.
 		inline bool
 		GltfText(const json &value, std::string_view name, std::string &out, std::string &failure) {
 			if (!value.is_string() || value.get_ref<const std::string &>().empty() ||
@@ -452,6 +500,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Encodes binary resource bytes for JSON-only host replies.
 		inline std::string Base64(std::span<const std::byte> bytes) {
 			static constexpr std::string_view alphabet =
 				"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -472,11 +521,13 @@ namespace engine::control {
 			return encoded;
 		}
 
+		// Appends a little-endian 32-bit word to a glTF binary chunk.
 		inline void Word(std::vector<std::byte> &out, uint32_t value) {
 			for (size_t byte = 0; byte < 4; ++byte)
 				out.push_back(static_cast<std::byte>(value >> (byte * 8)));
 		}
 
+		// Four-byte aligns and appends binary glTF data, returning its chunk offset.
 		inline size_t Binary(std::vector<std::byte> &out, std::span<const std::byte> bytes) {
 			while (out.size() % 4 != 0)
 				out.push_back(std::byte{});
@@ -486,15 +537,18 @@ namespace engine::control {
 		}
 
 		template <class Type>
+		// Appends a contiguous typed span as an aligned binary glTF buffer view.
 		inline size_t BinaryValues(std::vector<std::byte> &out, std::span<Type> values) {
 			return Binary(out, std::as_bytes(values));
 		}
 
+		// Appends one big-endian unsigned 32-bit word required by PNG chunks.
 		inline void PngWord(std::vector<std::byte> &out, uint32_t value) {
 			for (int shift = 24; shift >= 0; shift -= 8)
 				out.push_back(static_cast<std::byte>(value >> shift));
 		}
 
+		// Appends one CRC-protected PNG chunk with its four-byte type code.
 		inline void
 		PngChunk(std::vector<std::byte> &out, const char (&type)[5], std::span<const std::byte> payload) {
 			static const auto crcTable = [] {
@@ -521,6 +575,7 @@ namespace engine::control {
 			PngWord(out, crc ^ 0xFFFFFFFFu);
 		}
 
+		// Encodes one exported source texture as a bounded PNG payload.
 		inline bool Png(const script::GltfExportTexture &image, std::vector<std::byte> &out) {
 			const uint64_t pixels = static_cast<uint64_t>(image.Width) * image.Height;
 			if (image.Width == 0 || image.Height == 0 || pixels > script::MAX_GLTF_EXPORT_TEXTURE_BYTES / 4 ||
@@ -571,6 +626,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Builds a self-contained glTF document from one captured scene export.
 		inline bool
 		Gltf(const script::GltfSceneExport &source, std::vector<std::byte> &out, std::string &failure) {
 			json document{
@@ -1716,6 +1772,7 @@ namespace engine::control {
 	}
 
 	namespace features {
+		// Registers read-only scene inspection, export, and bounded physics-query tools for one universe.
 		inline Feature DataScene(
 			world::Universe &universe,
 			std::shared_ptr<script::DataCaptureBridge> bridge = {},

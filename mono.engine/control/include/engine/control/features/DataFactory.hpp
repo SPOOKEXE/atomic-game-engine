@@ -34,9 +34,12 @@ namespace engine::control {
 	using nlohmann::json;
 
 	namespace data_factory_detail {
+		// Maximum UTF-8 byte length for client-supplied instance and operation ids.
 		inline constexpr size_t MAXIMUM_ID = 128;
+		// Maximum deterministic action names accepted by one step request.
 		inline constexpr size_t MAXIMUM_ACTIONS = 32;
 
+		// Converts a physics occupancy refusal into the stable control error code.
 		inline const char *OccupancyReason(physics::ColliderOccupancy::Reason reason) {
 			switch (reason) {
 			case physics::ColliderOccupancy::Reason::None:
@@ -55,6 +58,7 @@ namespace engine::control {
 			return "unknown";
 		}
 
+		// Parses exactly three finite JSON numbers into an engine vector.
 		inline bool FiniteVector(const json &value, core::Vector3 &out) {
 			if (!value.is_array() || value.size() != 3) return false;
 			for (const json &part : value)
@@ -63,6 +67,7 @@ namespace engine::control {
 			return std::isfinite(out.X) && std::isfinite(out.Y) && std::isfinite(out.Z);
 		}
 
+		// Checks finite nonzero extents so a probe box has no inverted or collapsed axis.
 		inline bool StrictFiniteBox(const core::Vector3 &minimum, const core::Vector3 &maximum) {
 			const auto validAxis = [](float low, float high) {
 				const double centre = (static_cast<double>(low) + static_cast<double>(high)) * 0.5;
@@ -76,6 +81,7 @@ namespace engine::control {
 				   validAxis(minimum.Z, maximum.Z);
 		}
 
+		// Validates canonical UTF-8 for occupancy diagnostic text returned to the host.
 		inline bool OccupancyUtf8(std::string_view value) {
 			for (size_t index = 0; index < value.size();) {
 				const uint8_t first = static_cast<uint8_t>(value[index++]);
@@ -99,27 +105,44 @@ namespace engine::control {
 			return true;
 		}
 
+		// Parsed optimistic-concurrency request shared by data-factory tool handlers.
 		struct Request {
+			// Factory instance selected by the host.
 			std::string InstanceId;
+			// Idempotency key shared by retries of one host operation.
 			std::string OperationId;
+			// Checkpoint selected for lifecycle operations.
 			std::string CheckpointId;
+			// Snapshot selected for fork or restore operations.
 			std::string SnapshotId;
+			// Requested render-history policy for render-only operations.
 			std::string TemporalHistory;
+			// Completed tick the host expects before mutation.
 			uint64_t Tick = 0;
+			// World incarnation the host expects before mutation.
 			uint64_t Epoch = 0;
+			// World lifecycle version the host expects before mutation.
 			uint64_t Version = 0;
+			// Tick targeted by a seek or capture operation.
 			uint64_t TargetTick = 0;
+			// Rational interval used by deterministic step operations.
 			world::DataFactoryInterval Interval;
+			// Pause scope required before lifecycle operations.
 			world::DataFactoryPauseScope Scope = world::DataFactoryPauseScope::AllSystems;
+			// Parent snapshot required by a fork operation.
 			std::string BaseSnapshotId;
+			// Conditional property changes applied by an intervention.
 			std::vector<world::DataFactoryIntervention> Changes;
+			// Deterministic action names requested for the next step.
 			std::vector<world::DataFactoryAction> Actions;
 		};
 
+		// Formats a stable machine code and human detail as one tool failure string.
 		inline std::string Error(std::string_view code, std::string_view detail) {
 			return std::string(code) + ": " + std::string(detail);
 		}
 
+		// Serializes completed world lifecycle state without exposing session pointers.
 		inline json Reply(const world::DataFactoryReply &reply) {
 			return json{
 				{"status", world::Describe(reply.Status)},
@@ -136,6 +159,7 @@ namespace engine::control {
 			};
 		}
 
+		// Converts an asynchronous render-only reply into submitted or pending host status.
 		inline void
 		RenderOnlyReply(const world::DataFactoryRenderOnlyReply &reply, json &result, std::string &failure) {
 			result = Reply(reply);
@@ -157,6 +181,7 @@ namespace engine::control {
 			);
 		}
 
+		// Reads one bounded non-NUL identifier string and names validation failures by field.
 		inline bool Text(const json &value, std::string_view name, std::string &out, std::string &failure) {
 			if (!value.is_string()) {
 				failure = Error("validation_failed", std::string(name) + " must be a string");
@@ -181,6 +206,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Locates a required object field while preserving its JSON value for typed parsing.
 		inline bool Field(const json &values, std::string_view name, const json *&out, std::string &failure) {
 			const auto found = values.find(std::string(name));
 			if (found == values.end()) {
@@ -191,6 +217,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Refuses unrecognised request members so clients cannot silently misspell controls.
 		inline bool
 		Only(const json &values, std::initializer_list<std::string_view> names, std::string &failure) {
 			for (auto field = values.begin(); field != values.end(); ++field) {
@@ -202,6 +229,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Parses the shared instance identity and optimistic concurrency fence into Request.
 		inline bool Base(
 			const json &values,
 			bool operationRequired,
@@ -242,6 +270,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Parses a positive rational simulation interval in nanoseconds.
 		inline bool Interval(const json &values, Request &request, json &normalized, std::string &failure) {
 			const json *field = nullptr;
 			if (!Field(values, "dt_ns", field, failure) || !field->is_object() ||
@@ -273,6 +302,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Parses optional bounded deterministic action names for a single step.
 		inline bool Actions(const json &values, Request &request, json &normalized, std::string &failure) {
 			const auto found = values.find("actions");
 			if (found == values.end()) {
@@ -295,6 +325,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Converts a JSON scalar into a typed intervention value without coercion.
 		inline bool
 		InterventionValue(const json &value, world::DataFactoryInterventionValue &out, std::string &failure) {
 			if (value.is_null())
@@ -320,6 +351,7 @@ namespace engine::control {
 			return true;
 		}
 
+		// Verifies the live session still matches the request's tick, epoch, and version fence.
 		inline bool
 		Preconditions(world::DataFactorySession &session, const Request &request, std::string &failure) {
 			const world::DataFactoryReply current = session.Inspect(request.InstanceId);
@@ -342,12 +374,14 @@ namespace engine::control {
 			return true;
 		}
 
+		// Adds a retirement tombstone only to world lifecycle replies that retired an instance.
 		inline json WorldReply(const world::DataFactoryReply &reply, bool retired) {
 			json result = Reply(reply);
 			if (retired) result["tombstone"] = reply.Tombstone;
 			return result;
 		}
 
+		// Builds a closed JSON schema from the selected optional and required request fields.
 		inline json Schema(
 			std::initializer_list<std::string_view> optional, std::initializer_list<std::string_view> required
 		) {

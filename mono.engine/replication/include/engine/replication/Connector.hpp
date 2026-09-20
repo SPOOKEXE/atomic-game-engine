@@ -252,6 +252,7 @@ namespace engine::replication {
 		void UsePoseAcknowledgements() {
 			PoseAcknowledgements = true;
 		}
+		// Latest input sequence covered by accepted client prediction.
 		uint64_t PredictionCoverage() const {
 			return Prediction_.CoveredThrough();
 		}

@@ -78,6 +78,7 @@ namespace engine::scene {
 		// Store incarnation and generation-bearing entity, local to this process.
 		// Replacing a source or restoring a snapshot can reuse its revision.
 		uint64_t StoreIdentity = 0;
+		// Entity that supplied Code within StoreIdentity, or null when Found is false.
 		ecs::Entity Source = ecs::NULL_ENTITY;
 
 		// The script's revision, or zero when there is no script.

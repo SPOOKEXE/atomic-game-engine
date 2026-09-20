@@ -10,8 +10,10 @@
 #include <string>
 
 namespace client::data_factory_render_only {
+	// Queue declaration.
 	class Queue final {
 	  public:
+		// Accepts one validated render-only request when no prior request is pending.
 		bool Enqueue(const engine::world::DataFactoryRenderOnlyRequest &request, std::string &detail) {
 			if (request.TemporalHistory != engine::world::DataFactoryTemporalHistory::Preserve) {
 				detail = "reset and disable temporal history require renderer-local history support";
@@ -26,14 +28,17 @@ namespace client::data_factory_render_only {
 			return true;
 		}
 
+		// True while a render-only request still owns the queue slot.
 		bool Pending() const {
 			return Pending_.has_value();
 		}
 
+		// Borrows the pending request until Consume clears it.
 		const engine::world::DataFactoryRenderOnlyRequest *Request() const {
 			return Pending_ ? &*Pending_ : nullptr;
 		}
 
+		// Releases the queue slot after the renderer has handled its request.
 		void Consume() {
 			Pending_.reset();
 		}
@@ -44,6 +49,7 @@ namespace client::data_factory_render_only {
 			return !Pending_;
 		}
 
+		// Returns zero while capture freezes particle advancement for the pending request.
 		float ParticleDelta(float accumulatedSeconds) const {
 			return Pending_ ? 0.0f : accumulatedSeconds;
 		}

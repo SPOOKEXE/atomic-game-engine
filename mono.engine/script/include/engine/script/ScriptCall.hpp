@@ -205,6 +205,7 @@ namespace engine::script {
 		// requests only, so a script call cannot touch renderer-owned state.
 		virtual const std::shared_ptr<DataCaptureBridge> &DataCapture() const = 0;
 
+		// Returns the host bridge that owns asynchronous data-lifecycle requests.
 		virtual const std::shared_ptr<DataLifecycleBridge> &DataLifecycle() const = 0;
 
 		// Every tween this VM has made.

@@ -50,7 +50,9 @@ namespace engine::scene {
 	// One vertex's authored skin palette references. Joint numbers are local to
 	// the mesh's named skeleton palette, never process-local entity IDs.
 	struct MeshSkinningVertex {
+		// Four mesh-local skeleton-palette indices influencing this vertex.
 		std::array<uint16_t, 4> Joints{};
+		// Corresponding uint16-normalized influence weights.
 		std::array<uint16_t, 4> Weights{};
 	};
 	static_assert(sizeof(MeshSkinningVertex) == 16);
@@ -59,6 +61,7 @@ namespace engine::scene {
 	// the exact uint16 normalization the renderer consumes, so data export never
 	// has to reconstruct weights from a pose or a GPU buffer.
 	struct MeshSkinning {
+		// Number of joints in the mesh-local skeleton palette.
 		uint16_t JointCount = 0;
 
 		// The full mesh source count. It remains exact when `Vertices` retains
@@ -66,6 +69,7 @@ namespace engine::scene {
 		// rather than silently returning a partial skin.
 		uint32_t VertexCount = 0;
 
+		// Retained prefix of source vertex palette references and weights.
 		std::vector<MeshSkinningVertex> Vertices;
 	};
 

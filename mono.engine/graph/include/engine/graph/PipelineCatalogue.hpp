@@ -309,6 +309,7 @@ namespace engine::graph {
 		// Storage policy for outputs whose kind does not imply one. History nodes
 		// state how many successful generations their backend may read.
 		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		// History reads used by this object.
 		uint32_t HistoryReads = 0;
 	};
 

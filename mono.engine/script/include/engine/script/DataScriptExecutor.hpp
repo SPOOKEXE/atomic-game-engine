@@ -16,31 +16,48 @@ namespace engine::script {
 	// Bytes supplied beside a package manifest. They are copied at the host
 	// boundary, then verified against the manifest before a runtime sees them.
 	struct DataScriptAssetInput {
+		// Manifest-relative asset path whose digest is declared by the package.
 		std::string Path;
+		// Caller-owned asset bytes verified against the path's declared BLAKE3 digest.
 		std::vector<std::byte> Bytes;
 	};
 
+	// A data-script execution request.
 	struct DataScriptRequest {
+		// Data-factory instance identifier.
 		std::string InstanceId;
+		// Untrusted version-one package manifest to parse before execution.
 		std::string Manifest;
+		// Source bytes whose digest must match the parsed package manifest.
 		std::string Source;
+		// Digest-addressed package assets.
 		std::vector<DataScriptAssetInput> Assets;
 
 		// Kept for callers that already send the source address. When present it
 		// must agree with the package's source_hash, so it cannot become a second
 		// authority for the same bytes.
 		std::string SourceHash;
+		// Script-visible name.
 		std::string Name = "mcp";
+		// Live-world tick required before the package may begin.
 		uint64_t ExpectedTick = 0;
+		// World incarnation required before the package may begin.
 		uint64_t ExpectedEpoch = 0;
+		// World state version required before the package may begin.
 		uint64_t ExpectedVersion = 0;
 	};
 
+	// A data-script execution result.
 	struct DataScriptResult {
+		// Host lifecycle reply describing admission, execution, or rollback.
 		world::DataFactoryReply Lifecycle;
+		// Verified package manifest.
 		std::optional<DataScriptPackage> Package;
+		// True after the runner was invoked with a verified package.
 		bool Ran = false;
+		// True when the scratch-world result was committed to the live world.
 		bool Atomic = false;
+		// Failure diagnostic.
 		std::string Error;
 	};
 
@@ -49,15 +66,21 @@ namespace engine::script {
 	// `ExecuteDataScript` returns.
 	class DataScriptPackageContext final {
 	  public:
+		// Borrows a verified package and its host-supplied assets for one run.
 		DataScriptPackageContext(
 			const DataScriptPackage &package, std::span<const DataScriptAssetInput> inputs
 		)
 			: Package(&package), Inputs(inputs) {}
 
+		// Checks whether this capability is granted.
 		bool Can(ScriptCapabilities capability) const;
+		// Finds a declared scalar parameter by its script-visible name.
 		const DataScriptScalar *Parameter(std::string_view name) const;
+		// Returns verified asset bytes for a declared manifest-relative path.
 		std::optional<std::span<const std::byte>> Asset(std::string_view path) const;
+		// Derives the package's deterministic uint64 stream for a stable name.
 		uint64_t SeedStream(std::string_view name) const;
+		// Returns the verified package manifest borrowed by this execution context.
 		const DataScriptPackage &Manifest() const {
 			return *Package;
 		}
@@ -67,10 +90,14 @@ namespace engine::script {
 		std::span<const DataScriptAssetInput> Inputs;
 	};
 
+	// A data-script package run result.
 	struct DataScriptPackageRunResult {
+		// Runner completion state used to decide commit or rollback.
 		enum class State : uint8_t { Completed, Deferred, Failed };
 
+		// Terminal state returned by the VM runner.
 		State Terminal = State::Failed;
+		// Failure diagnostic.
 		std::string Error;
 	};
 

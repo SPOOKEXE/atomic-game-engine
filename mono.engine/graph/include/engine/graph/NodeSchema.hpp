@@ -26,24 +26,32 @@ namespace engine::graph {
 
 	// Stable, serialized value type identifiers.
 	inline constexpr std::string_view VALUE_TYPE_ANY = "any";
+	// Serialized value-type token for boolean ports.
 	inline constexpr std::string_view VALUE_TYPE_BOOLEAN = "boolean";
+	// Serialized value-type token for image ports.
 	inline constexpr std::string_view VALUE_TYPE_IMAGE = "image";
+	// Serialized value-type token for numeric ports.
 	inline constexpr std::string_view VALUE_TYPE_NUMBER = "number";
+	// Serialized value-type token for string ports.
 	inline constexpr std::string_view VALUE_TYPE_STRING = "string";
 
 	// A serialized payload for a schema type the scalar node set does not own.
 	// It stays copyable and device-free, so an image or a custom node-set value
 	// can cross an execution boundary without a host pointer.
 	struct NodeOpaqueValue {
+		// Serialized type token that tells the runtime how to interpret Bytes.
 		std::string ValueType;
+		// Memory footprint in bytes for bytes.
 		std::vector<std::byte> Bytes;
 
+		// Compares the serialized type token and opaque payload bytes.
 		auto operator<=>(const NodeOpaqueValue &) const = default;
 	};
 
 	// Values the built-in logical and scalar nodes can execute without a host
 	// adapter, plus opaque serialized values for image and custom node sets.
 	using NodeValue = std::variant<std::monostate, double, bool, std::string, NodeOpaqueValue>;
+	// Type used for Node Values.
 	using NodeValues = std::unordered_map<std::string, NodeValue>;
 
 	// Whether a port receives or produces a value.
@@ -64,17 +72,25 @@ namespace engine::graph {
 	// A stable named input or output. Zero means an input may have unlimited
 	// links. Outputs are fan-out by default and ignore this field.
 	struct NodePortSchema {
+		// Node-local port identifier used by authored wires.
 		std::string Id;
+		// Serialized value type accepted or produced by this port.
 		std::string ValueType;
+		// Whether this port accepts or produces a value.
 		NodePortDirection Direction = NodePortDirection::Input;
+		// Configured limit for connections.
 		size_t MaxConnections = 1;
+		// Value used when an optional port is disconnected.
 		NodeValue DefaultValue{};
+		// Whether optional.
 		bool Optional = false;
 	};
 
 	// A safe route a node may use while it is bypassed.
 	struct NodeBypassMapping {
+		// Input port that receives the bypassed value.
 		std::string Input;
+		// Output port that forwards the bypassed value.
 		std::string Output;
 	};
 
@@ -104,15 +120,21 @@ namespace engine::graph {
 	};
 
 	struct NodeSchema;
+	// Type used for Node Evaluator.
 	using NodeEvaluator =
 		std::function<bool(const NodeSchema &, const NodeValues &, NodeValues &, std::string &)>;
 
 	// The durable declaration for one node type.
 	struct NodeSchema {
+		// Stable schema identifier used by authored node instances.
 		std::string Id;
+		// Human-readable title presented by graph editing tools.
 		std::string Title;
+		// Ports kept in their declared order.
 		std::vector<NodePortSchema> Ports;
+		// Bypass mappings kept in their declared order.
 		std::vector<NodeBypassMapping> BypassMappings;
+		// Callback that evaluates this node kind.
 		NodeEvaluator Evaluate;
 	};
 
@@ -123,7 +145,7 @@ namespace engine::graph {
 	// Checks whether a type has a built-in scalar payload representation.
 	bool HasBuiltinValueRepresentation(std::string_view valueType);
 
-	// Performs the connection-time type check. A source `any` is accepted but
+	// Checks port types at connection time. A source `any` is accepted but
 	// must be checked against the actual value by the execution runtime.
 	NodeTypeCompatibility ComparePortTypes(std::string_view source, std::string_view destination);
 
@@ -144,14 +166,18 @@ namespace engine::graph {
 	// from local declarations then safely handed to a graph runtime.
 	class NodeSchemaRegistry {
 	  public:
+		// Validates and registers one schema under its stable identifier.
 		NodeSchemaStatus Add(NodeSchema schema, std::string *reason = nullptr);
 
+		// Borrows the registered schema for an identifier, or null when unknown.
 		const NodeSchema *Find(std::string_view id) const;
 
+		// Borrows every registered schema in registration order.
 		std::span<const NodeSchema> All() const {
 			return Schemas;
 		}
 
+		// Number of registered schemas.
 		size_t Count() const {
 			return Schemas.size();
 		}

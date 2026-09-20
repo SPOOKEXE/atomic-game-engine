@@ -146,16 +146,27 @@ namespace engine::graph {
 
 		// `AddResource`'s executable compositor contract.
 		ResourceAccess Access = ResourceAccess::Automatic;
+		// Multisample count for the resource.
 		uint32_t Samples = 1;
+		// Texture depth in texels.
 		uint32_t Depth = 1;
+		// Texture array-layer count.
 		uint32_t Layers = 1;
+		// First mip level covered by the view.
 		uint32_t FirstMip = 0;
+		// Number of mip levels covered by the view.
 		uint32_t MipCount = 1;
+		// Colour interpretation of image texels.
 		ResourceColourSpace ColourSpace = ResourceColourSpace::Automatic;
+		// Alpha interpretation of image texels.
 		ResourceAlphaSpace AlphaSpace = ResourceAlphaSpace::Automatic;
+		// Bytes between consecutive buffer elements.
 		uint32_t BufferStride = 0;
+		// Resource lifetime policy in the graph.
 		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		// Stable identifier for owner.
 		core::Name Owner{};
+		// Generation used to invalidate stale history.
 		uint32_t HistoryGeneration = 0;
 
 		// `Reads` and `Writes`: which resource, by name.

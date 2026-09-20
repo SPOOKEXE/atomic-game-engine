@@ -101,6 +101,7 @@ namespace engine::render {
 		// and aggregate limits keep decoded CPU pixels from becoming a second,
 		// unbounded residency cache beside device memory.
 		static constexpr size_t MAXIMUM_COPY_BYTES = 16u * 1024u * 1024u;
+		// Total budget for retained owner-scoped source copies, in bytes.
 		static constexpr size_t MAXIMUM_RETAINED_COPY_BYTES = 256u * 1024u * 1024u;
 
 		TextureTable() = default;

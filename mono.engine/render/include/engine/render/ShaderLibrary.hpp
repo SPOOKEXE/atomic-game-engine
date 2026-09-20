@@ -86,6 +86,7 @@ namespace engine::render {
 		// Resolution owner and last attempted entity, including its generation.
 		// Same-name sources can share a revision across entities or stores.
 		uint64_t StoreIdentity = 0;
+		// Entity whose shader source was last compiled or rejected.
 		ecs::Entity AttemptSource = ecs::NULL_ENTITY;
 
 		// Last attempted source revision, including a failure. Gates retries so

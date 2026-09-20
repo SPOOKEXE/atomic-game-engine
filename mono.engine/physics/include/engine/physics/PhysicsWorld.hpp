@@ -47,24 +47,37 @@ namespace engine::physics {
 
 	// A direct WeldConstraint's captured relative frame.
 	struct WeldPose {
+		// Entity associated with owner.
 		ecs::Entity Owner;
+		// Entity associated with part0.
 		ecs::Entity Part0;
+		// Entity associated with part1.
 		ecs::Entity Part1;
+		// Coordinate frame for part0 to part1.
 		core::CFrame Part0ToPart1;
 	};
 
 	// One active rigid edge and one part in the resolved assembly graph.
 	struct RigidEdge {
+		// Entity associated with owner.
 		ecs::Entity Owner;
+		// Entity associated with part0.
 		ecs::Entity Part0;
+		// Entity associated with part1.
 		ecs::Entity Part1;
+		// Coordinate frame for part0 to part1.
 		core::CFrame Part0ToPart1;
 	};
 
+	// Rigid Node declaration.
 	struct RigidNode {
+		// Entity associated with part.
 		ecs::Entity Part;
+		// Root entity associated with this record.
 		ecs::Entity Root;
+		// Coordinate frame associated with this record.
 		core::CFrame Frame;
+		// Whether placed.
 		bool Placed = false;
 	};
 
@@ -96,11 +109,17 @@ namespace engine::physics {
 	// One continuous-collision candidate ordered by its absolute tick fraction.
 	// @since v0.23
 	struct ContinuousImpactEvent {
+		// First impact fraction along the requested sweep.
 		float Fraction = 1.0f;
+		// Bite fraction used by this object.
 		float BiteFraction = 0.0f;
+		// First triangle or child index for this node.
 		uint32_t First = 0;
+		// Second used by this object.
 		uint32_t Second = 0;
+		// Whether dynamic.
 		bool Dynamic = false;
+		// Whether reswept.
 		bool Reswept = false;
 	};
 
@@ -518,7 +537,9 @@ namespace engine::physics {
 
 	// One entry in the pair-sorted merge the solver consumes.
 	struct SolverManifoldIndex {
+		// Index used by this object.
 		size_t Index = 0;
+		// Whether speculative.
 		bool Speculative = false;
 	};
 
@@ -644,6 +665,7 @@ namespace engine::physics {
 
 		// Retained anchors, of which the first `PointCount` are live.
 		PersistentContactPoint Points[ContactManifold::MAXIMUM_POINTS];
+		// Number of point count.
 		uint8_t PointCount = 0;
 	};
 
@@ -686,7 +708,9 @@ namespace engine::physics {
 	// Live bytes are current useful rows; retained bytes are reusable capacity.
 	// @since v0.22
 	struct PhysicsMemoryBytes {
+		// Bytes currently owned by this structure.
 		size_t LiveBytes = 0;
+		// Bytes retained by this structure for reuse.
 		size_t RetainedBytes = 0;
 	};
 
@@ -697,13 +721,20 @@ namespace engine::physics {
 	// records, pair workspaces, and query scratch around those indexes.
 	// @since v0.22
 	struct PhysicsMemoryStats {
+		// Broadphase buffers used by this object.
 		PhysicsMemoryBytes BroadphaseBuffers;
+		// Dynamic grid used by this object.
 		PhysicsMemoryBytes DynamicGrid;
+		// Static grid used by this object.
 		PhysicsMemoryBytes StaticGrid;
+		// Dynamic tree used by this object.
 		PhysicsMemoryBytes DynamicTree;
+		// Solver used by this object.
 		PhysicsMemoryBytes Solver;
+		// Persistent used by this object.
 		PhysicsMemoryBytes Persistent;
 
+		// Returns bytes held by broadphase proxy and pair-cache allocations.
 		PhysicsMemoryBytes Broadphase() const {
 			return {
 				BroadphaseBuffers.LiveBytes + DynamicGrid.LiveBytes + StaticGrid.LiveBytes +
@@ -713,6 +744,7 @@ namespace engine::physics {
 			};
 		}
 
+		// Sums all tracked physics allocation categories.
 		PhysicsMemoryBytes Total() const {
 			const PhysicsMemoryBytes broadphase = Broadphase();
 			return {

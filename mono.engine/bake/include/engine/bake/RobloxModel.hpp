@@ -153,6 +153,7 @@ namespace engine::bake {
 
 	// Variable storage keeps ordinary imported properties compact. Conversion bounds the keypoint count.
 	using RobloxNumberSequence = std::vector<core::NumberKeypoint>;
+	// Type used for Roblox Color Sequence.
 	using RobloxColorSequence = std::vector<core::ColorKeypoint>;
 
 	// One property's value as the file spelled it.
@@ -290,9 +291,13 @@ namespace engine::bake {
 		// The exact spelling found in the file.
 		std::string Uri;
 
+		// Asset category inferred from the Roblox property value.
 		RobloxAssetKind Kind = RobloxAssetKind::Unknown;
+		// Slash-separated authored path of the Roblox instance owning this asset reference.
 		std::string InstancePath;
+		// Roblox class name of the instance owning this asset reference.
 		std::string ClassName;
+		// Serialized Roblox property whose value referenced the asset.
 		std::string PropertyName;
 	};
 
@@ -300,8 +305,11 @@ namespace engine::bake {
 	//
 	// @since v0.22
 	struct RobloxScript {
+		// Slash-separated authored path of the Roblox script instance.
 		std::string InstancePath;
+		// Roblox class name used to interpret the script instance.
 		std::string ClassName;
+		// Original Luau source text extracted from the Roblox script property.
 		std::string Source;
 	};
 
@@ -310,10 +318,15 @@ namespace engine::bake {
 	//
 	// @since v0.22
 	struct RobloxLostProperty {
+		// Slash-separated authored path of the instance with an unsupported property.
 		std::string InstancePath;
+		// Roblox class name that declared the unsupported property.
 		std::string ClassName;
+		// Roblox property skipped during conversion.
 		std::string PropertyName;
+		// Source Roblox type name that could not be represented by the importer.
 		std::string RobloxType;
+		// Reason this operation produced its reported state.
 		std::string Reason;
 	};
 
@@ -340,7 +353,9 @@ namespace engine::bake {
 		// Analysis collected while decoding. These rows are kept separate from
 		// `Notes` so Studio can filter and map them without parsing prose.
 		std::vector<RobloxAssetReference> Assets;
+		// Scripts kept in their declared order.
 		std::vector<RobloxScript> Scripts;
+		// Lost properties kept in their declared order.
 		std::vector<RobloxLostProperty> LostProperties;
 	};
 

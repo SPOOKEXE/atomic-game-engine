@@ -14,16 +14,24 @@
 #include <vector>
 
 namespace engine::render {
+	// Borrowed endpoint identity used to correlate portal messages.
 	using PortalEndpointView = PortalCaptureTreeEndpointView;
 
+	// Bounds for pending requests and retained completed images.
 	struct PortalInboxLimits {
+		// Maximum requests awaiting a reply.
 		size_t PendingCount = 16;
+		// Maximum completed images retained for extraction.
 		size_t HeldCount = 16;
+		// Total owned bytes allowed for pending requests.
 		size_t PendingBytes = 64 * 1024;
+		// Total owned bytes allowed for retained completed images.
 		size_t HeldBytes = 16 * 1024 * 1024;
+		// Deadline from issue to terminal reply.
 		std::chrono::milliseconds Timeout{1000};
 	};
 
+	// Outcome of issuing, accepting, or expiring a portal message.
 	enum class PortalInboxStatus {
 		Issued,
 		Accepted,
@@ -39,29 +47,47 @@ namespace engine::render {
 		Exhausted
 	};
 
+	// The request bytes produced by successful inbox admission.
 	struct PortalIssueResult {
+		// Admission outcome.
 		PortalInboxStatus Status = PortalInboxStatus::Invalid;
+		// Request with its inbox-assigned correlation key.
 		PortalImageRequest Request;
+		// Encoded request payload for transport.
 		std::vector<std::byte> Wire;
+		// Failure detail when Status is not Issued.
 		std::string Error;
 	};
 
+	// A terminal producer failure retained for an outstanding request.
 	struct PortalFailureCompletion {
+		// Request identity matched against the pending entry.
 		PortalExchangeKey Key;
+		// Producer-reported terminal image status.
 		PortalImageStatus Status = PortalImageStatus::Failed;
+		// Producer diagnostic for the failure.
 		std::string Diagnostic;
 	};
 
+	// Result of authenticating and admitting a producer reply.
 	struct PortalAcceptResult {
+		// Acceptance outcome.
 		PortalInboxStatus Status = PortalInboxStatus::Invalid;
+		// Terminal failure copied from a valid failure reply.
 		std::optional<PortalFailureCompletion> Failure;
+		// Rejection detail when the reply was not accepted.
 		std::string Error;
 	};
 
+	// Current resource consumption against PortalInboxLimits.
 	struct PortalInboxUsage {
+		// Current number of pending requests.
 		size_t PendingCount = 0;
+		// Bytes owned by pending requests.
 		size_t PendingBytes = 0;
+		// Current number of retained completed images.
 		size_t HeldCount = 0;
+		// Bytes owned by retained completed images.
 		size_t HeldBytes = 0;
 	};
 
@@ -69,7 +95,9 @@ namespace engine::render {
 	// Byte limits count owned text/pixels and lens records; record counts bound other metadata.
 	class PortalImageInbox {
 	  public:
+		// Steady-clock timestamp used for issue and expiry deadlines.
 		using Time = std::chrono::steady_clock::time_point;
+		// Creates an empty inbox using validated resource limits.
 		explicit PortalImageInbox(PortalInboxLimits limits = {});
 
 		// RequestId is assigned here. Same camera/seam revisions return Busy while pending.
@@ -98,17 +126,23 @@ namespace engine::render {
 		// Each extractor leaves images belonging to the other profile untouched.
 		std::optional<PortalImageReply>
 		Take(PortalEndpointView local, PortalEndpointView remote, std::string_view portal, Time now);
+		// Transfers a completed ordered-layer capture out of the inbox.
 		std::optional<PortalImageLayerSet>
 		TakeLayers(PortalEndpointView local, PortalEndpointView remote, std::string_view portal, Time now);
+		// Transfers a completed recursive capture tree out of the inbox.
 		std::optional<PortalCaptureTree>
 		TakeTree(PortalEndpointView local, PortalEndpointView remote, std::string_view portal, Time now);
+		// Expires requests and completed images whose deadlines have passed.
 		bool Expire(Time now);
 		// Rolls back an unsent request without discarding the previous accepted image.
 		bool CancelRequest(uint64_t requestId);
+		// Drops requests and images associated with an endpoint incarnation.
 		void InvalidateEndpoint(PortalEndpointView endpoint);
+		// Drops requests and images for one local portal key.
 		void InvalidatePortal(PortalEndpointView local, std::string_view portal);
 		// Request IDs never reset, including across Clear, so a delayed reply cannot become current again.
 		void Clear();
+		// Returns a snapshot of resource use against PortalInboxLimits.
 		PortalInboxUsage Usage() const;
 
 	  private:

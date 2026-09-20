@@ -22,25 +22,41 @@ namespace engine::spatial {
 
 	// What the dynamic hierarchy retained after its last synchronisation.
 	struct DynamicBvhStats {
+		// Number of proxy count.
 		size_t ProxyCount = 0;
+		// Number of escaped leaves.
 		size_t EscapedLeaves = 0;
+		// Number of refitted leaves.
 		size_t RefittedLeaves = 0;
+		// Number of reinserted leaves.
 		size_t ReinsertedLeaves = 0;
+		// Number of rebuilds.
 		size_t Rebuilds = 0;
+		// Number of quality rebuilds.
 		size_t QualityRebuilds = 0;
+		// Number of cached pairs.
 		size_t CachedPairs = 0;
+		// Cache nodes visited used by this object.
 		size_t CacheNodesVisited = 0;
+		// Whether pair cache available.
 		bool PairCacheAvailable = true;
+		// Bytes currently owned by this structure.
 		size_t LiveBytes = 0;
+		// Bytes retained by this structure for reuse.
 		size_t RetainedBytes = 0;
+		// Target height in pixels.
 		size_t Height = 0;
 	};
 
 	// What a sync would change, computed without mutating the hierarchy.
 	struct DynamicBvhPreflight {
+		// Whether compatible.
 		bool Compatible = false;
+		// Number of escaped leaves.
 		size_t EscapedLeaves = 0;
+		// Host-owned pointer for source.
 		const Proxy *Source = nullptr;
+		// Latest generation observed by this object.
 		uint64_t Generation = 0;
 	};
 
@@ -76,10 +92,12 @@ namespace engine::spatial {
 		// Empties the tree while keeping all retained allocations.
 		void Clear();
 
+		// Number of live proxy leaves currently indexed by this tree.
 		size_t ProxyCount() const {
 			return Proxies.size();
 		}
 
+		// Returns topology and traversal counters for the current tree.
 		DynamicBvhStats Stats() const;
 
 		// Visits every exact unordered leaf pair once. BroadPhase uses this

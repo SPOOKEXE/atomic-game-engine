@@ -110,11 +110,13 @@ namespace engine::scene {
 		// placed `Volume` instances while the world was entered and are safe to
 		// retain across the renderer boundary.
 		std::array<VolumeState, MAX_SCENE_VOLUMES> Volumes{};
+		// Number of leading entries in Volumes selected for this presentation frame.
 		size_t VolumeCount = 0;
 
 		// World-space screen effects selected while the world is entered. As with
 		// volumes, this remains authored data until it is copied for presentation.
 		std::array<ShaderLensState, MAX_SCENE_SHADER_LENSES> ShaderLenses{};
+		// Number of leading entries in ShaderLenses selected for this presentation frame.
 		size_t ShaderLensCount = 0;
 	};
 

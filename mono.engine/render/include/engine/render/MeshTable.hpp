@@ -53,13 +53,19 @@ namespace engine::render {
 	// bounds and surface metric are built once at admission, so a view can make a
 	// device-side LOD decision without reading mesh vertices back from the GPU.
 	struct MeshCluster {
+		// Indexed submesh range represented by this cluster.
 		MeshRange Range;
+		// Cluster bounds centre in mesh space.
 		core::Vector3 Centre;
+		// Cluster bounds half extent in mesh space.
 		core::Vector3 Extent;
+		// Surface area used by device-side LOD selection.
 		float SurfaceArea = 0.0f;
+		// Material run associated with Range.
 		uint32_t Material = std::numeric_limits<uint32_t>::max();
 	};
 
+	// Scalar representation of one packed vertex stream.
 	enum class PackedMeshFormat : uint32_t {
 		Float32,
 		Float16,
@@ -73,28 +79,46 @@ namespace engine::render {
 		Boolean,
 	};
 
+	// Layout and quantization range of one packed vertex attribute stream.
 	struct PackedMeshStream {
+		// Byte range within PackedMeshData::Vertices.
 		uint32_t ByteOffset = 0;
+		// Number of bytes occupied by this stream.
 		uint32_t ByteCount = 0;
+		// Attribute values stored in this stream.
 		uint32_t ValueCount = 0;
+		// Scalar components per attribute value.
 		uint32_t Components = 0;
+		// Scalar encoding used for each component.
 		PackedMeshFormat Format = PackedMeshFormat::Float32;
+		// Decoding range for normalized packed values.
 		float Minimum = 0.0f;
+		// Upper decoding range for normalized packed values.
 		float Maximum = 1.0f;
 	};
 
+	// Packed mesh bytes and metadata admitted without expanding vertices.
 	struct PackedMeshData {
+		// Packed vertex attribute bytes.
 		std::vector<std::byte> Vertices;
+		// Triangle indexes into the packed vertex rows.
 		std::vector<uint32_t> Indices;
+		// Material ranges within Indices.
 		std::vector<assets::Submesh> Submeshes;
+		// Layout of position, normal, and texture streams.
 		std::array<PackedMeshStream, 3> Streams;
+		// Mesh-space axis-aligned bounds.
 		core::Vector3 Minimum;
+		// Mesh-space axis-aligned bounds maximum.
 		core::Vector3 Maximum;
+		// Number of vertex rows addressed by Indices.
 		uint32_t VertexCount = 0;
 
+		// Checks stream ranges, counts, and submesh indexes.
 		bool IsValid() const;
 	};
 
+	// Outcome of copying resident mesh data to CPU-owned storage.
 	enum class MeshCopyStatus : uint8_t {
 		Copied,
 		Missing,
@@ -161,9 +185,13 @@ namespace engine::render {
 		// Number of palette entries a skinned instance must provide.
 		uint16_t JointCount = 0;
 
+		// Whether this entry uses the packed-vertex buffer.
 		bool Packed = false;
+		// First packed byte owned by this entry.
 		uint32_t PackedByteOffset = 0;
+		// Number of packed bytes owned by this entry.
 		uint32_t PackedByteCount = 0;
+		// Packed attribute layouts used to decode this entry.
 		std::array<PackedMeshStream, 3> PackedStreams;
 	};
 
@@ -231,6 +259,7 @@ namespace engine::render {
 		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh or a table that would overflow.
 		bool Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		// Registers validated packed geometry without expanding its vertex attributes.
 		bool AddPacked(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
 
 		// Uploads whatever `Add` has accumulated.

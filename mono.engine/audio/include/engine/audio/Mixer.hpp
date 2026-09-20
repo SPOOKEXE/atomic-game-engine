@@ -78,18 +78,27 @@ namespace engine::audio {
 	// translated to a stable source name by the observation boundary before the
 	// record leaves the process.
 	struct AppliedAudioCommand {
+		// Command kind applied by the mixer.
 		CommandKind Kind = CommandKind::None;
+		// Stable identifier for target.
 		NodeId Target;
+		// Stable identifier for related.
 		NodeId Related;
+		// Sample clock position requested by the game tick.
 		uint64_t RequestedSample = 0;
+		// Sample clock position where the mixer applied the command.
 		uint64_t AppliedSample = 0;
+		// Frame offset within the observed audio block.
 		size_t OffsetFrames = 0;
 	};
 
 	// A player that reached the end of its source during the latest block.
 	struct FinishedAudioSource {
+		// Stable identifier for source.
 		NodeId Source;
+		// Sample clock position where the source completed.
 		uint64_t AtSample = 0;
+		// Frame offset within the observed audio block.
 		size_t OffsetFrames = 0;
 	};
 

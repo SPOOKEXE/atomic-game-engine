@@ -342,7 +342,9 @@ namespace engine::world {
 
 		// Internal joined-round slices used by the Universe exchange coordinator.
 		bool BeginExchangeRound(bool firstInBatch);
+		// Commits the joined exchange round before simulation resumes.
 		bool FinishExchangeRound();
+		// Abandons the open exchange round without applying partial replies.
 		void CancelExchangeRound();
 
 		// Whether a tick that should be published has run since this was last

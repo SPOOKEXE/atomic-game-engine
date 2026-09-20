@@ -31,10 +31,13 @@ namespace client {
 		const std::function<void(const engine::world::DataFactoryReply &)> &observe
 	);
 
+	// Data Audio Observation Host declaration.
 	class DataAudioObservationHost final : public engine::script::DataAudioObservationBridge {
 	  public:
+		// Type used for Inspect.
 		using Inspect = std::function<engine::world::DataFactoryReply(std::string_view)>;
 
+		// Builds a bridge host that uses inspect to fence records to factory lifecycle revisions.
 		explicit DataAudioObservationHost(Inspect inspect = {});
 
 		// Copies one completed null-device block and its scene labels. Replacing
@@ -49,7 +52,9 @@ namespace client {
 			bool complete = true
 		);
 
+		// Reports whether this host can produce sample-aligned copied audio observations.
 		engine::script::DataAudioObservationBridgeCapabilities Capabilities() const override;
+		// Copies the current observation for instanceId into a bridge result.
 		bool Capture(
 			std::string_view instanceId,
 			engine::script::DataAudioObservationBridgeResult &result,
@@ -65,12 +70,15 @@ namespace client {
 			std::string &detail
 		) override;
 
+		// Discards cached audio observation state for one destroyed or reset instance.
 		void Clear(std::string_view instanceId);
+		// Drops cached records whose lifecycle revision differs from clock.
 		void InvalidateUnless(const engine::world::DataFactoryReply &clock);
 
 		// The caller owns the null mixer. This state converts completed fixed
 		// simulation ticks to exact audio frames without consulting presentation.
 		void ResetTickClock(const engine::world::DataFactoryReply &clock, uint32_t sampleRate);
+		// Advances each retained observation by exact sample frames elapsed between ticks.
 		std::vector<size_t> AdvanceFrames(const engine::world::DataFactoryReply &clock, uint32_t sampleRate);
 
 	  private:
