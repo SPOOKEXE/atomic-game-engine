@@ -244,7 +244,11 @@ TEST_CASE("a script can read what a mesh is wearing", "[scripting][content]") {
 	Store store = Fresh("content_mesh_textures");
 
 	const std::array<Name, 3> worn{Name("skins/body.atex"), Name("skins/eyes.atex"), Name("skins/body.atex")};
-	REQUIRE(engine::scene::RecordMesh(store, Name("props/hero.amesh"), 4200, worn, {}, engine::core::Vector3{2.0f, 6.0f, 1.0f}));
+	REQUIRE(
+		engine::scene::RecordMesh(
+			store, Name("props/hero.amesh"), 4200, worn, {}, engine::core::Vector3{2.0f, 6.0f, 1.0f}
+		)
+	);
 
 	// A submesh that names nothing is an ordinary thing - a model with one
 	// untextured run - and it crosses as an empty string rather than as a hole,

@@ -79,8 +79,8 @@ namespace engine::ecs {
 			}
 			const auto previous = registry.ByName.find(registered.Id());
 			const auto requested = registry.ByName.find(name.Id());
-			if (previous != registry.ByName.end() && previous->second.Owner == &slot && previous->second.Automatic &&
-				requested == registry.ByName.end()) {
+			if (previous != registry.ByName.end() && previous->second.Owner == &slot &&
+				previous->second.Automatic && requested == registry.ByName.end()) {
 				// An automatic name is a fallback, so the module that owns the type
 				// may still give it its stable serialized name after an early read.
 				// Keep the id because archetypes may already carry it.

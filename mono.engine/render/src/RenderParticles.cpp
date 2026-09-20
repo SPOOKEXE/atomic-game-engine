@@ -1383,10 +1383,14 @@ namespace engine::render {
 			ActiveParticleWorld->CarriedDelta = Particles.Delta;
 			ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
 			std::fill(
-				Particles.ParamRevision.begin(), Particles.ParamRevision.end(), ParticlePool::UNUPLOADED_REVISION
+				Particles.ParamRevision.begin(),
+				Particles.ParamRevision.end(),
+				ParticlePool::UNUPLOADED_REVISION
 			);
 			std::fill(
-				Particles.CurveRevision.begin(), Particles.CurveRevision.end(), ParticlePool::UNUPLOADED_REVISION
+				Particles.CurveRevision.begin(),
+				Particles.CurveRevision.end(),
+				ParticlePool::UNUPLOADED_REVISION
 			);
 			return {};
 		}
