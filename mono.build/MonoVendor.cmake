@@ -741,7 +741,7 @@ add_library(Vendor::blake3 ALIAS blake3)
 # **BSD-3-Clause, not GPLv2.** Upstream is dual-licensed and ships both texts:
 # LICENSE is the BSD one and COPYING is GPLv2. We take BSD. That is not a
 # preference - GPLv2 would be incompatible with shipping this in a game binary
-# under MPL-2.0, and the choice is recorded in THIRD_PARTY_NOTICES.md rather
+# under MPL-2.0, and the choice is recorded in docs/THIRD_PARTY_NOTICES.md rather
 # than left for somebody to infer from two files in a submodule.
 if(NOT EXISTS "${MONO_VENDOR}/zstd/build/cmake/CMakeLists.txt")
 	message(FATAL_ERROR "mono.vendor/zstd is missing. Run `just setup`.")

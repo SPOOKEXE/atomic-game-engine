@@ -106,7 +106,7 @@ foreach(root IN ITEMS
 	# cleanup; nothing links it any more, so the entry goes rather than sitting
 	# as a stale line an EXISTS guard would silently skip.
 	"${CMAKE_SOURCE_DIR}/SECURITY.md"
-	"${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+	"${CMAKE_SOURCE_DIR}/docs/THIRD_PARTY_NOTICES.md"
 	"${CMAKE_SOURCE_DIR}/docs"
 	# The one file, not the tree. AGENTS.md and CONTRIBUTING.md both link to
 	# this README, so leaving it out means two dangling links rather than a

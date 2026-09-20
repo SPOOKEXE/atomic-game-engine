@@ -193,7 +193,7 @@ esac
 
 # The licence travels with the binaries or the licence is not served. MPL-2.0
 # and the vendored notices both.
-cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$root/README.md" "$work/$name/"
+cp "$root/LICENSE" "$root/docs/THIRD_PARTY_NOTICES.md" "$root/README.md" "$work/$name/"
 
 printf '%s\n' "$version" > "$work/$name/VERSION"
 

@@ -142,7 +142,7 @@ that depends on directory traversal order.
    — pin a release branch, not a default one that moves.
 2. Configure it in `mono.build/MonoVendor.cmake`, with `EXCLUDE_FROM_ALL` if it
    has unconditional install rules.
-3. Add a line to `THIRD_PARTY_NOTICES.md`.
+3. Add a line to `docs/THIRD_PARTY_NOTICES.md`.
 4. Check the licence is compatible with MPL-2.0 before any of the above.
 
 A shallow clone plus a superproject-pinned SHA is fast *and* reproducible. Both
