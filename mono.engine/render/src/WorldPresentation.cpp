@@ -711,12 +711,14 @@ namespace engine::render {
 
 		size_t UpdateDrawFrames(Store &store, DrawList &drawList, float alpha, size_t grain) {
 			std::atomic_bool hasInterpolation = false;
+			std::atomic_bool sourceOrderChanged = false;
 			DrawInstance *const out = drawList.Instances.data();
 			const size_t capacity = drawList.Instances.size();
-			const auto write = [out, capacity, alpha, &hasInterpolation](
+			const auto write = [out, capacity, alpha, &hasInterpolation, &sourceOrderChanged](
 								   size_t base,
 								   size_t first,
 								   size_t rows,
+								   const Entity *entities,
 								   const Transform *transforms,
 								   const PreviousTransform *previous
 							   ) {
@@ -727,6 +729,10 @@ namespace engine::render {
 				rows = std::min(rows, capacity - at);
 				bool foundInterpolation = false;
 				for (size_t row = 0; row < rows; row++) {
+					if (out[at + row].Source != entities[row].Id) {
+						sourceOrderChanged.store(true, std::memory_order_relaxed);
+						continue;
+					}
 					const bool moving = !SameFrame(previous[row].Frame, transforms[row].Frame);
 					foundInterpolation |= moving;
 					out[at + row].Frame = moving ? previous[row].Frame.NLerp(transforms[row].Frame, alpha)
@@ -748,10 +754,11 @@ namespace engine::render {
 										 const LocalTransparency>()
 									 .With<Rendered>()
 									 .Without<CharacterLimb>()
-									 .EachBatchParallel(
+									 .EachBatchEntitiesParallel(
 										 [&write](
 											 size_t first,
 											 size_t rows,
+											 const Entity *entities,
 											 const Transform *transforms,
 											 const PreviousTransform *previous,
 											 const Bounds *,
@@ -759,7 +766,7 @@ namespace engine::render {
 											 const SurfaceAppearance *,
 											 const Tags *,
 											 const LocalTransparency *
-										 ) { write(0, first, rows, transforms, previous); },
+										 ) { write(0, first, rows, entities, transforms, previous); },
 										 grain
 									 );
 			const size_t rigged = store
@@ -773,10 +780,11 @@ namespace engine::render {
 										  const LocalTransparency,
 										  const CharacterLimb>()
 									  .With<Rendered>()
-									  .EachBatchParallel(
+									  .EachBatchEntitiesParallel(
 										  [&write, loose](
 											  size_t first,
 											  size_t rows,
+											  const Entity *entities,
 											  const Transform *transforms,
 											  const PreviousTransform *previous,
 											  const Bounds *,
@@ -785,11 +793,13 @@ namespace engine::render {
 											  const Tags *,
 											  const LocalTransparency *,
 											  const CharacterLimb *
-										  ) { write(loose, first, rows, transforms, previous); },
+										  ) { write(loose, first, rows, entities, transforms, previous); },
 										  grain
 									  );
 			drawList.HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
-			return loose + rigged;
+			// The pose path preserves all other fields of each cached row. A query
+			// order change invalidates that positional join, so rebuild every row.
+			return sourceOrderChanged.load(std::memory_order_relaxed) ? 0 : loose + rigged;
 		}
 	}
 

@@ -470,6 +470,45 @@ TEST_CASE("pose-only presentation preserves static draw metadata", "[render][pre
 	CHECK_FALSE(drawList->HasInterpolation);
 }
 
+TEST_CASE(
+	"pose updates retain source identity after cached row order changes", "[render][presentation][cache]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("draw-source-order");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity first = scene::MakePart(store, scene::PartDesc{});
+	const ecs::Entity second = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(store.SetParent(first, workspace));
+	REQUIRE(store.SetParent(second, workspace));
+	auto firstFrame = *store.Get<scene::Transform>(first);
+	auto secondFrame = *store.Get<scene::Transform>(second);
+	firstFrame.Frame.Position.X = 1.0f;
+	secondFrame.Frame.Position.X = 9.0f;
+	store.Set(first, firstFrame);
+	store.Set(second, secondFrame);
+	REQUIRE(scene::SyncRendered(store) == 2);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	const auto *draw = store.Resource<render::DrawList>();
+	REQUIRE(draw != nullptr);
+	REQUIRE(draw->Instances.size() == 2);
+
+	// A cached source order can drift from the current query order. A pose-only
+	// update must detect that mismatch before writing frames onto other parts.
+	auto *mutableDraw = store.ResourceMutable<render::DrawList>();
+	std::swap(mutableDraw->Instances[0], mutableDraw->Instances[1]);
+	firstFrame.Frame.Position.X = 2.0f;
+	store.Set(first, firstFrame);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	REQUIRE(draw->Instances.size() == 2);
+	for (const auto &row : draw->Instances) {
+		if (row.Source == first.Id) CHECK(row.Frame.Position.X == 2.0f);
+		if (row.Source == second.Id) CHECK(row.Frame.Position.X == 9.0f);
+	}
+}
+
 TEST_CASE("optional LOD and effect rows reach the cached draw list", "[render][presentation][lod]") {
 	using namespace engine;
 	scene::RegisterSceneClasses();
