@@ -2057,11 +2057,11 @@ namespace studio {
 		// every frame and the panel count only changes when somebody opens one.
 		Candidates.clear();
 
-		if (ShowViewport) {
+		if (ShowViewport && WorldTarget.IsValid()) {
 			Candidates.push_back(0);
 		}
 		for (size_t index = 0; index < Extras.size(); index++) {
-			if (Extras[index].Open) {
+			if (Extras[index].Open && Extras[index].Target.IsValid()) {
 				Candidates.push_back(index + 1);
 			}
 		}

@@ -1216,9 +1216,10 @@ namespace studio {
 		// acts from outside `Universe::Enter` - the rule at the top of
 		// `Editor.hpp`. `DrawViewportOverlays` runs it after the camera moves,
 		// which is also when the projection it needs is correct.
-		if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
-			SurfaceGesture.Active && SurfaceGesture.Viewport == index &&
-			SurfaceGesture.World == ViewportWorld(index) && !SurfaceGesture.Dragging) {
+		if (CurrentTool != ToolMode::None && ImGui::IsItemDeactivated() &&
+			ImGui::IsMouseReleased(ImGuiMouseButton_Left) && SurfaceGesture.Active &&
+			SurfaceGesture.Viewport == index && SurfaceGesture.World == ViewportWorld(index) &&
+			!SurfaceGesture.Dragging) {
 			const ImVec2 at = ImGui::GetIO().MousePos;
 			if (ImGui::GetIO().KeyAlt) {
 				PendingCursor.Viewport = index;
@@ -1261,7 +1262,7 @@ namespace studio {
 			ImGui::SetWindowFocus();
 			EditThroughViewport(index);
 
-			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+			if (CurrentTool != ToolMode::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 				const ImVec2 at = ImGui::GetIO().MousePos;
 				SurfaceGesture = ViewportGesture{
 					.Active = true,

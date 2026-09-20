@@ -193,7 +193,10 @@ namespace engine::render {
 		SceneSlot::RetainedFrame &frame = scene.Retained[selected];
 		if (frame.Texture == nullptr || frame.Width != scene.Width || frame.Height != scene.Height) {
 			if (frame.Texture != nullptr) {
-				gpu::ReleaseTexture(Device, frame.Texture);
+				// `PollSceneFrames` can publish this image after Studio recorded its
+				// draw list and before this resize selects the retained frame again.
+				// Keep that already-bound image alive through the host pass.
+				RetiredScenes.push_back(frame.Texture);
 				frame.Texture = nullptr;
 			}
 

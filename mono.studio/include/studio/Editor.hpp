@@ -136,6 +136,7 @@ struct ImGuiTableSortSpecs;
 
 namespace studio {
 	struct ComponentPanelProbe;
+	struct ToolsProbe;
 	struct ViewportCameraProbe;
 	struct PlayedInputAdapter;
 	class DataFactoryHost;
@@ -902,6 +903,7 @@ namespace studio {
 
 	  private:
 		friend struct ComponentPanelProbe;
+		friend struct ToolsProbe;
 		friend struct ViewportCameraProbe;
 
 		// --- the frame ------------------------------------------------------
@@ -4492,6 +4494,10 @@ namespace studio {
 		//
 		// @since v0.7
 		enum class ToolMode : uint8_t {
+			// Leaves viewport presses for the running game's interface. Studio
+			// does not select, drag, or offer handles in this mode.
+			None,
+
 			// No handles. A click selects and nothing else, which is what you
 			// want while placing the camera or reading a scene.
 			Select,

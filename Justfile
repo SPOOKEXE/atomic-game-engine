@@ -1218,8 +1218,8 @@ heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes I
 # Drag the editor's window and check it is still alive afterwards.
 #
 # **The one bug class a headless run cannot reach.** The viewport shows last
-# frame's scene texture, so resizing the panel means the renderer frees a
-# texture the interface has already recorded a bind of - a use-after-free
+# frame's scene texture, so resizing the panel can replace a scene or retained
+# frame texture the interface has already recorded a bind of - a use-after-free
 # inside SDL's Vulkan backend, with nothing of ours on the stack. It needs a
 # real window, a real swapchain and a window manager, which is exactly what
 # `--headless` does not have.

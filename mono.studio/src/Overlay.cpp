@@ -961,7 +961,7 @@ namespace studio {
 		// other operation.
 		const ToolMode mode = Dragging.Axis >= 0 ? Dragging.Mode : CurrentTool;
 
-		if (mode == ToolMode::Select) {
+		if (mode == ToolMode::None || mode == ToolMode::Select) {
 			return false;
 		}
 
@@ -1462,6 +1462,7 @@ namespace studio {
 							}
 
 							case ToolMode::Select:
+							case ToolMode::None:
 								break;
 							}
 
@@ -1990,6 +1991,13 @@ namespace studio {
 	}
 
 	void Editor::PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel) {
+		// A pick can be queued before a toolbar press in the same frame. Check
+		// again at execution so putting the tool down cannot select through a
+		// running game's interface.
+		if (CurrentTool == ToolMode::None) {
+			return;
+		}
+
 		const WorldId shown = ViewportWorld(viewport);
 		if (!shown.IsValid() || Universe == nullptr) {
 			return;
