@@ -2795,8 +2795,7 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "PlayerListTestCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	store.Set<engine::scene::Transform>(
-		camera,
-		engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 7.0f, -18.0f})}
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 7.0f, -18.0f})}
 	);
 	store.SetResource(ActiveCamera{camera});
 
