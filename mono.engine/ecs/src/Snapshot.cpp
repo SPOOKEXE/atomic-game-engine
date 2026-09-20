@@ -405,6 +405,7 @@ namespace engine::ecs {
 		}
 
 		// --- bring every incoming entity into line ---
+		const ComponentId dirtyBits = Components::Of<DirtyBits>();
 		for (const Entity entity : incoming) {
 			const EntityId key = EntityId::Of(entity);
 
@@ -444,7 +445,10 @@ namespace engine::ecs {
 			if (here.Archetype != EntityLocation::NO_ARCHETYPE) {
 				const ComponentSet &held = state.Tables[here.Archetype].Set();
 				for (const ComponentId id : held.Ids()) {
-					if (!wanted.Contains(id)) {
+					// DirtyBits belongs to the receiving store's observation policy.
+					// A sender that does not observe this entity's components omits it,
+					// but removing it here would immediately be undone by Tracked().
+					if (id != dirtyBits && !wanted.Contains(id)) {
 						RemoveComponent(state, entity, id);
 					}
 				}

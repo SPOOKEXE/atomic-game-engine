@@ -186,6 +186,27 @@ TEST_CASE("overlay mode leaves what the sender did not mention", "[ecs]") {
 	REQUIRE(replica.Get<Spot>(entities[4])->X == 4.0f);
 }
 
+TEST_CASE("overlay preserves receiver dirty tracking", "[ecs]") {
+	// DirtyBits is derived from the receiver's observed components. A sender
+	// that does not observe Spot omits it from the snapshot, but that must not
+	// turn the receiver's tracked table into a self-relocation.
+	Store authority("authority");
+	const Entity entity = authority.Create();
+	authority.Set<Spot>(entity, Spot{1.0f});
+
+	Store replica("replica");
+	replica.Observe<Spot>();
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Authoritative));
+	REQUIRE(replica.Has<engine::ecs::DirtyBits>(entity));
+
+	authority.Set<Spot>(entity, Spot{2.0f});
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Overlay));
+
+	REQUIRE(replica.Alive(entity));
+	REQUIRE(replica.Has<engine::ecs::DirtyBits>(entity));
+	REQUIRE(replica.Get<Spot>(entity)->X == 2.0f);
+}
+
 TEST_CASE("the same partial snapshot read as authoritative empties the rest", "[ecs]") {
 	// The mode is the whole difference, on identical bytes. Sending a delta and
 	// reading it as full state is the mistake `ApplyMode` exists to make

@@ -106,6 +106,14 @@ namespace engine::ecs {
 	}
 
 	void Relocate(StoreState &state, uint32_t index, EntityLocation from, uint32_t toTable) {
+		if (from.Archetype == toTable) {
+			// Tracking columns are derived from the requested component set. A
+			// removal can therefore resolve back to this table when it only drops
+			// DirtyBits, which has to preserve the row rather than move it into
+			// itself and then remove its source.
+			return;
+		}
+
 		Archetype &destination = state.Tables[toTable];
 		const Entity entity = EntityId::Pack(index, state.Directory.Generation(index));
 
