@@ -145,6 +145,15 @@ namespace studio {
 			}
 		}
 
+		// Cameras made by a server viewport belong to that viewport alone. The
+		// transient tag is intentionally absent from the component table, but
+		// that alone would still admit the camera's instance, transform and lens
+		// into a joining client's snapshot. Filter the entity before structure and
+		// component replication so each replica keeps only its predicted viewer.
+		Server.SetInterest([](engine::replication::ClientId, engine::ecs::Entity entity, const Store &store) {
+			return !store.Has<engine::scene::TransientComponent>(entity);
+		});
+
 		Handle = Server.Admit();
 
 		// **A player and a body in the authority, and the identity in the

@@ -19,6 +19,7 @@
 #include <engine/gui/NodeCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
@@ -2389,6 +2390,66 @@ TEST_CASE("the terrain stream follows the camera that is actually active", "[exa
 	// otherwise the world visibly builds far away and then deletes that work.
 	CHECK(InScene(store, "Terrain_1_0") == engine::ecs::NULL_ENTITY);
 	CHECK(InScene(store, "Terrain_0_1") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("terrain places existing and arriving characters on its spawn", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("terrain.players");
+	Scheduler systems;
+	engine::scene::RegisterSceneClasses();
+	engine::scene::InstallServices(store);
+
+	const Entity existing = engine::scene::AddPlayer(store, "Existing");
+	REQUIRE(existing != engine::ecs::NULL_ENTITY);
+	const Entity existingCharacter = engine::scene::LoadCharacter(
+		store, existing, engine::core::CFrame(engine::core::Vector3{480.0f, 120.0f, -320.0f})
+	);
+	REQUIRE(existingCharacter != engine::ecs::NULL_ENTITY);
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Terrain.luau"), error));
+	const Entity pad = InScene(store, "SpawnLocation");
+	REQUIRE(pad != engine::ecs::NULL_ENTITY);
+
+	const auto checkPlacement = [&](Entity character) {
+		const Entity root = store.FindFirstChild(character, "HumanoidRootPart");
+		REQUIRE(root != engine::ecs::NULL_ENTITY);
+		const auto *rootFrame = store.Get<engine::scene::Transform>(root);
+		const auto *rootBounds = store.Get<engine::scene::Bounds>(root);
+		const auto *padFrame = store.Get<engine::scene::Transform>(pad);
+		const auto *padBounds = store.Get<engine::scene::Bounds>(pad);
+		REQUIRE(rootFrame != nullptr);
+		REQUIRE(rootBounds != nullptr);
+		REQUIRE(padFrame != nullptr);
+		REQUIRE(padBounds != nullptr);
+		CHECK(rootFrame->Frame.Position.X == Approx(padFrame->Frame.Position.X));
+		CHECK(rootFrame->Frame.Position.Z == Approx(padFrame->Frame.Position.Z));
+		CHECK(
+			rootFrame->Frame.Position.Y ==
+			Approx(padFrame->Frame.Position.Y + padBounds->HalfExtent.Y + rootBounds->HalfExtent.Y)
+		);
+	};
+
+	// The scene visits the player that existed before its script began.
+	checkPlacement(existingCharacter);
+
+	const Entity arriving = engine::scene::AddPlayer(store, "Arriving");
+	REQUIRE(arriving != engine::ecs::NULL_ENTITY);
+	const Entity arrivingCharacter = engine::scene::LoadCharacter(
+		store, arriving, engine::core::CFrame(engine::core::Vector3{-400.0f, 90.0f, 280.0f})
+	);
+	REQUIRE(arrivingCharacter != engine::ecs::NULL_ENTITY);
+
+	// `PlayerAdded` attaches `CharacterAdded`, then observes the character that
+	// admission already created in the same tick.
+	systems.Tick(store, 1.0f / 60.0f);
+	checkPlacement(arrivingCharacter);
+
+	size_t characters = 0;
+	store.Each<const engine::scene::Character>([&](Entity, const engine::scene::Character &) {
+		characters++;
+	});
+	CHECK(characters == 2);
 }
 
 TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {

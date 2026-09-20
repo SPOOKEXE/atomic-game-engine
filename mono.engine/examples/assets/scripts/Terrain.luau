@@ -630,12 +630,12 @@ Lighting.FogColor = Color3.fromRGB(178, 200, 218)
 Lighting.FogStart = VIEW * CHUNK * 0.8
 Lighting.FogEnd = VIEW * CHUNK * 1.35
 
--- --- somebody to walk it ---------------------------------------------------
+-- --- a spawn for joining players -------------------------------------------
 --
--- **A spawn on the surface, not at the origin.** `LoadCharacter` puts a
--- character at whatever `scene::FindSpawn` finds, and a spawn left at `y = 0`
--- in a field that swings sixty studs either way is a character either buried in
--- a hill or dropped off one. The pad sits on the field's own height at the
+-- **A spawn on the surface, not at the origin.** The server puts an admitted
+-- player at whatever `scene::FindSpawn` finds, and a spawn left at `y = 0` in a
+-- field that swings sixty studs either way is a character either buried in a
+-- hill or dropped off one. The pad sits on the field's own height at the
 -- origin, and the character stands on the pad.
 -- **Somewhere flat, found rather than assumed.** The field is 91% walkable and
 -- the origin is not guaranteed to be part of it: a character dropped onto a
@@ -684,20 +684,53 @@ pad.Parent = workspace
 
 local Players = game:GetService("Players")
 
-local walker = Instance.new("Player")
-walker.Name = "Surveyor"
-walker.Parent = Players
-walker:LoadCharacter()
+-- **The demo never invents an occupant.** A dedicated server has no player
+-- until a client completes admission, and creating `Surveyor` here made an
+-- empty server look occupied. Each real character is placed on the pad after
+-- its authority creates it; this script never calls `LoadCharacter` itself.
+local function PlaceCharacter(character: Instance)
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root == nil then
+		return
+	end
 
--- **Walking it needs a host that installs the physics pipeline**, which is the
--- note `StressPhysics.luau` gives at more length and for the same reason: a
--- client registers the *character* systems only, so a scripted client world
--- integrates nothing and the body stands wherever it was put. The studio's Play
--- and `just host --game` both solve, and there the character walks and the
--- world streams around it.
+	-- **The pad carries the feet and the root carries the centre.** Deriving the
+	-- offset from both parts makes a changed rig still stand on the pad, rather
+	-- than teaching this scene a second copy of either height. `PoseCharacters`
+	-- owns the limbs and follows this root on the next simulation pass.
+	local targetRoot = CFrame.new(pad.Position + Vector3.new(0, (pad.Size.Y + root.Size.Y) * 0.5, 0))
+	root.CFrame = targetRoot
+end
+
+local function WatchPlayer(player: Instance)
+	-- `CharacterAdded` covers each respawn. The direct lookup covers a player
+	-- whose character existed before this scene's script started.
+	player.CharacterAdded:Connect(function(character: Instance)
+		PlaceCharacter(character)
+	end)
+
+	local existing = workspace:FindFirstChild(player.Name)
+	if existing ~= nil then
+		PlaceCharacter(existing)
+	end
+end
+
+Players.PlayerAdded:Connect(WatchPlayer)
+for _, player in Players:GetPlayers() do
+	WatchPlayer(player)
+end
+
+-- Once somebody joins, their authoritative character gives the streamer the
+-- same subject it had before.
 local function CharacterRoot(): Instance?
-	local model = workspace:FindFirstChild("Surveyor")
-	return if model ~= nil then model:FindFirstChild("HumanoidRootPart") else nil
+	for _, player in Players:GetPlayers() do
+		local model = workspace:FindFirstChild(player.Name)
+		local root = if model ~= nil then model:FindFirstChild("HumanoidRootPart") else nil
+		if root ~= nil then
+			return root
+		end
+	end
+	return nil
 end
 
 -- --- the camera ------------------------------------------------------------
@@ -960,6 +993,6 @@ end)
 print(
 	`terrain: endless field, chunks of {CHUNK} studs, {VIEW} chunks each way `
 		.. `({(VIEW * 2 + 1) * CHUNK} studs across), `
-		.. `character spawned at {string.format("%.0f", spawnX)},{string.format("%.0f", spawnZ)} `
+		.. `join spawn at {string.format("%.0f", spawnX)},{string.format("%.0f", spawnZ)} `
 		.. `y={string.format("%.1f", SPAWN_HEIGHT)}`
 )

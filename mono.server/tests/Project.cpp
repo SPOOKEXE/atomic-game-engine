@@ -196,6 +196,31 @@ TEST_CASE("server runs the shipped Bladeborne world with server role only", "[se
 	host.Shutdown();
 }
 
+TEST_CASE("Terrain starts a server empty until a client is admitted", "[server][project][script]") {
+	const auto demo =
+		engine::examples::DemosLoader().Find(engine::examples::DemoKind::Script, "Terrain.luau");
+	REQUIRE(demo.has_value());
+
+	server::Server host;
+	REQUIRE(host.Initialise(Headless(demo->Path)));
+	REQUIRE(host.Run().Ticks == 1);
+	host.Worlds().Enter(host.Primary(), [](engine::ecs::Store &store) {
+		const engine::ecs::Entity players = engine::scene::PlayersOf(store);
+		REQUIRE(players != engine::ecs::NULL_ENTITY);
+
+		size_t occupants = 0;
+		store.EachChild(players, [&](engine::ecs::Entity child) {
+			if (store.IsA(child, engine::scene::PlayerClass())) occupants++;
+		});
+		CHECK(occupants == 0);
+
+		const engine::ecs::Entity workspace = store.FindFirstRoot("Workspace");
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(workspace, "Surveyor") == engine::ecs::NULL_ENTITY);
+	});
+	host.Shutdown();
+}
+
 TEST_CASE("server uses one live DataStore declared by the universe", "[server][project][datastore]") {
 	Tree tree("universe-datastore");
 	engine::world::Universe universe;

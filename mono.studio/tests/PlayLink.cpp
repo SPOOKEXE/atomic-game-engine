@@ -224,6 +224,67 @@ TEST_CASE("each play client starts with its own predicted camera", "[studio][pla
 	});
 }
 
+TEST_CASE("server and client viewport cameras stay local through a play link", "[studio][playlink][camera]") {
+	Fixture fixture;
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store) { engine::scene::InstallServices(store); });
+
+	studio::ViewportCameraPose serverPose = studio::DefaultViewportCamera();
+	serverPose.Frame.Position = Vector3{31.0f, 17.0f, -9.0f};
+	Entity serverCamera;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		serverCamera = studio::CreateRuntimeCamera(store, "ServerCamera", serverPose);
+	});
+	REQUIRE(serverCamera != engine::ecs::NULL_ENTITY);
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 1"));
+	fixture.Step(link, 32);
+
+	Entity clientCamera;
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
+		clientCamera = studio::RuntimeCameraOf(store);
+		REQUIRE(clientCamera != engine::ecs::NULL_ENTITY);
+		CHECK_FALSE(store.Alive(serverCamera));
+		CHECK(store.Get<Transform>(clientCamera)->Frame.Position != serverPose.Frame.Position);
+	});
+
+	// Viewport cameras can also be created after the replica has joined, such
+	// as when focus returns to a panel. They must be filtered from the live
+	// structure update just like the server camera in the initial snapshot.
+	studio::ViewportCameraPose focusedPose = studio::DefaultViewportCamera();
+	focusedPose.Frame.Position = Vector3{8.0f, 41.0f, -16.0f};
+	Entity focusedCamera;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		focusedCamera = studio::CreateRuntimeCamera(store, "FocusedServerCamera", focusedPose);
+	});
+	REQUIRE(focusedCamera != engine::ecs::NULL_ENTITY);
+	fixture.Step(link, 4);
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
+		CHECK_FALSE(store.Alive(focusedCamera));
+		CHECK(store.Get<Transform>(clientCamera)->Frame.Position != focusedPose.Frame.Position);
+	});
+
+	const Vector3 serverMoved{47.0f, 3.0f, 12.0f};
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		store.Set(serverCamera, Transform{CFrame(serverMoved)});
+	});
+	fixture.Step(link, 4);
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
+		CHECK(store.Get<Transform>(clientCamera)->Frame.Position != serverMoved);
+	});
+
+	const Vector3 clientMoved{-14.0f, 22.0f, 5.0f};
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		store.Set(clientCamera, Transform{CFrame(clientMoved)});
+	});
+	fixture.Step(link, 4);
+	fixture.Worlds.Enter(fixture.Authority, [&](const Store &store) {
+		CHECK(store.Get<Transform>(serverCamera)->Frame.Position == serverMoved);
+		CHECK(store.Get<Transform>(serverCamera)->Frame.Position != clientMoved);
+	});
+}
+
 TEST_CASE("the client view is marked as somebody else's world, both ways", "[studio][playlink]") {
 	Fixture fixture;
 	PlayLink link;
