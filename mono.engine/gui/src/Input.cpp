@@ -406,7 +406,20 @@ namespace engine::gui {
 			if (!(low > 0.0f) || !(high > 0.0f)) {
 				return graph;
 			}
-			canvas->Zoom = std::clamp(canvas->Zoom * std::pow(1.1f, notches), low, high);
+			const float previousZoom = canvas->Zoom;
+			const float zoom = std::clamp(previousZoom * std::pow(1.1f, notches), low, high);
+			if (!(zoom > 0.0f) || zoom == previousZoom) {
+				return graph;
+			}
+
+			const Vector2 relative{point.X - bounds.Min.X, point.Y - bounds.Min.Y};
+			// Keep the canvas coordinate below the pointer fixed. Scaling around the
+			// canvas origin makes nodes and their labels slide away under the cursor.
+			canvas->Pan = Vector2{
+				canvas->Pan.X + relative.X / previousZoom - relative.X / zoom,
+				canvas->Pan.Y + relative.Y / previousZoom - relative.Y / zoom,
+			};
+			canvas->Zoom = zoom;
 			return graph;
 		}
 

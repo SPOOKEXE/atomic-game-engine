@@ -698,6 +698,8 @@ TEST_CASE("a wheel zooms a node canvas inside its bounds", "[gui][input]") {
 	pointer.Wheel = 1.0f;
 	Send(world, pointer);
 	CHECK(world.Data.Get<NodeCanvas>(canvas)->Zoom == Approx(1.1f));
+	CHECK(world.Data.Get<NodeCanvas>(canvas)->Pan.X == Approx(60.0f - 60.0f / 1.1f));
+	CHECK(world.Data.Get<NodeCanvas>(canvas)->Pan.Y == Approx(40.0f - 40.0f / 1.1f));
 
 	pointer.Wheel = 100.0f;
 	Send(world, pointer);

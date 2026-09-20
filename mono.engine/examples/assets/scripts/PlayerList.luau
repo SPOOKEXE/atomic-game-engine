@@ -1,5 +1,5 @@
 --!strict
--- Who is in this game, drawn from `Players` and held open with TAB.
+-- Who is in this game, drawn from `Players` and kept visible while it changes.
 --
 -- **The first scene in this repository that reads the player list at all.**
 -- `scene::AddPlayer` got its first production caller at v0.15 - before that
@@ -25,30 +25,13 @@
 -- So a dedicated server hosting this scene keeps every connected client's list
 -- up to date, and no client sees another's panel.
 --
--- ## Where TAB works, and where it does not yet
---
--- The rows are the host's business; the *toggle* is the viewer's, and only a
--- host that has a keyboard can answer it. `RunService:IsClient()` is the
--- question - it is about the host rather than the world, which is exactly the
--- distinction wanted here.
---
--- - **A studio Play run and a single-player client** have both a player and a
---   keyboard, so TAB holds the panel open and releasing it puts it away.
--- - **A dedicated server** has no keyboard at all. It leaves every panel
---   *shown*, because a list that is permanently hidden is indistinguishable
---   from one that is broken - and this is stated here rather than left as a
---   silent no-op.
---
--- **What it would take to hold TAB on a networked client** is a script running
--- in the replica, and `mono.client` runs none - `docs/DEFERRED.md` `D00122`
--- records that, and it is the same missing piece that stops `ReplicatedFirst`'s
--- scripts running before the rest of the tree arrives. The moment a client runs
--- scripts out of its replica, the two branches below collapse into one.
+-- The panel is always visible. Its state belongs to the player list, so camera
+-- and character input cannot hide it.
 --
 -- ## Running it
 --
 --     SCENE=PlayerList.luau scripts/demos/run-local-server.sh 4
---     ./client --script PlayerList.luau           # TAB works, one local player
+--     ./client --script PlayerList.luau           # one local player
 --
 -- The server is what makes it worth looking at: four clients means four names,
 -- and each one appearing and vanishing as a process starts and stops. A
@@ -59,7 +42,6 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local workspace = game:GetService("Workspace")
 
 -- The palette, in one place, for `Interface.luau`'s reason: a literal colour at
@@ -353,56 +335,6 @@ end)
 -- before the scripts start.
 refreshEverybody()
 
--- --- the toggle --------------------------------------------------------------
-
-local shown = not RunService:IsClient()
-
-local function setShown(value: boolean)
-	shown = value
-	-- Over the panels rather than over the players, because a panel is what has
-	-- a `ScreenGui` and there is exactly one per player.
-	for _, rows in panels do
-		local card = rows.Parent :: Frame?
-		if card then
-			local screen = card.Parent :: ScreenGui?
-			if screen then
-				screen.Enabled = value
-			end
-		end
-	end
-end
-
-if RunService:IsClient() then
-	-- A viewer. TAB holds the list open, which is the behaviour every game with
-	-- one has trained people to expect - press-to-toggle leaves it on screen
-	-- when somebody meant to glance.
-	setShown(false)
-
-	UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
-		if gameProcessed then
-			return
-		end
-		if input.KeyCode == Enum.KeyCode.Tab then
-			setShown(true)
-		end
-	end)
-
-	UserInputService.InputEnded:Connect(function(input: InputObject, _gameProcessed: boolean)
-		-- **No `gameProcessed` guard on the release.** A key that went down
-		-- unprocessed and came up while a `TextButton` happened to be under the
-		-- pointer would otherwise never be released, and the panel would stay
-		-- open for ever with nothing to close it.
-		if input.KeyCode == Enum.KeyCode.Tab then
-			setShown(false)
-		end
-	end)
-else
-	-- No keyboard here, so there is nothing to hold. Left shown rather than
-	-- hidden: a panel that is permanently invisible is indistinguishable from
-	-- one that is broken.
-	setShown(true)
-end
-
 -- **Kept in step on a clock as well as on the signals**, and the reason is the
 -- one this scene exists to demonstrate: a player's *container* is made when
 -- they join and their `PlayerGui` may not exist on the tick `PlayerAdded`
@@ -427,9 +359,5 @@ RunService.Heartbeat:Connect(function(delta: number)
 
 	if missing then
 		refreshEverybody()
-
-		-- A panel built after the toggle was decided starts in the same state as
-		-- the others, including one created while TAB is held.
-		setShown(shown)
 	end
 end)

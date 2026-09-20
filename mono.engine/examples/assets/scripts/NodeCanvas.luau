@@ -101,6 +101,7 @@ local function makePort(
 	port.Edge = edge
 	port.Position = UDim2.new(0, x, 0, y)
 	port.Size = UDim2.new(0, 14, 0, 14)
+	port.Active = true
 	port.BackgroundColor3 = colour
 	port.BorderSizePixel = 0
 	port.Parent = node
@@ -140,6 +141,25 @@ firstLink.LineThickness = 3
 local secondLink = canvas:Connect(transformOutput, displayInput)
 secondLink.Name = "RemapToPreview"
 secondLink.LineColor3 = FLOW
+
+-- Click an output, then an input, to route a validated wire through the
+-- canvas. The canvas still refuses mismatched types and cycles.
+local pendingOutput: NodeCanvasPort? = nil
+
+local function connectFrom(port: NodeCanvasPort)
+	port.MouseButton1Click:Connect(function()
+		if port.Direction == Enum.NodePortDirection.Output then
+			pendingOutput = port
+		elseif pendingOutput then
+			canvas:Connect(pendingOutput, port)
+			pendingOutput = nil
+		end
+	end)
+end
+
+for _, port in { sourceOutput, transformInput, transformOutput, displayInput } do
+	connectFrom(port)
+end
 
 -- The graph owns no VM callbacks. Regular instance signals are the callback
 -- boundary, so editor movement can decide when to recalculate group geometry
