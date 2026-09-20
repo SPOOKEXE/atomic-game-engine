@@ -502,8 +502,10 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
 		made.LinearDepth =
 			texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.LinearWidth, dimensions.LinearHeight);
-		made.FirstSurfaceValidity =
-			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.ViewWidth, dimensions.ViewHeight);
+		if (dimensions.FirstSurfaceValidity) {
+			made.FirstSurfaceValidity =
+				texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.ViewWidth, dimensions.ViewHeight);
+		}
 		if (dimensions.CameraMotion)
 			made.CameraMotionVectors =
 				texture(SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT, dimensions.ViewWidth, dimensions.ViewHeight);
@@ -524,7 +526,7 @@ namespace engine::render {
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
 			made.Emissive == nullptr || made.MeshUv == nullptr || made.ObjectIds == nullptr ||
 			made.SemanticIds == nullptr || made.PartIds == nullptr || made.LinearDepth == nullptr ||
-			made.FirstSurfaceValidity == nullptr ||
+			(dimensions.FirstSurfaceValidity && made.FirstSurfaceValidity == nullptr) ||
 			(dimensions.CameraMotion && made.CameraMotionVectors == nullptr) ||
 			(dimensions.SecondSurface &&
 			 (made.SecondSurfaceZ == nullptr || made.SecondSurfaceDepth == nullptr ||
@@ -833,21 +835,20 @@ namespace engine::render {
 		}
 		const graph::NodeScope scope = ResourceScope(pipeline, resource);
 		const core::Name name = GraphTargetName(pipeline, desc->Name);
+		// Count the whole table before replacing an entry. Stopping at the match
+		// misses later buffers and lets repeated graph edits exceed the budget.
 		uint64_t total = 0;
+		GraphBuffer *entry = nullptr;
 		for (GraphBuffer &buffer : GraphBuffers) {
-			if (buffer.Pipeline != pipeline.Name || buffer.Resource != name || buffer.Scope != scope ||
-				buffer.Owner != owner) {
+			if (buffer.Pipeline == pipeline.Name && buffer.Resource == name && buffer.Scope == scope &&
+				buffer.Owner == owner) {
+				entry = &buffer;
+			} else {
 				total += buffer.Bytes;
-				continue;
 			}
-			if (buffer.Buffer != nullptr && buffer.Bytes == bytes && buffer.Usage == usage)
-				return buffer.Buffer;
-			if (buffer.Buffer != nullptr) gpu::ReleaseBuffer(Device, buffer.Buffer);
-			buffer.Buffer = nullptr;
-			buffer.Bytes = 0;
-			buffer.Usage = usage;
-			break;
 		}
+		if (entry != nullptr && entry->Buffer != nullptr && entry->Bytes == bytes && entry->Usage == usage)
+			return entry->Buffer;
 		if (total + bytes > MAX_GRAPH_BUFFER_TOTAL_BYTES) {
 			ENGINE_WARN(
 				"graph buffers for '{}' exceed the {} byte budget",
@@ -856,13 +857,11 @@ namespace engine::render {
 			);
 			return nullptr;
 		}
-		GraphBuffer *entry = nullptr;
-		for (GraphBuffer &buffer : GraphBuffers) {
-			if (buffer.Pipeline == pipeline.Name && buffer.Resource == name && buffer.Scope == scope &&
-				buffer.Owner == owner) {
-				entry = &buffer;
-				break;
-			}
+		if (entry != nullptr) {
+			if (entry->Buffer != nullptr) gpu::ReleaseBuffer(Device, entry->Buffer);
+			entry->Buffer = nullptr;
+			entry->Bytes = 0;
+			entry->Usage = usage;
 		}
 		if (entry == nullptr) {
 			GraphBuffers.push_back(GraphBuffer{pipeline.Name, name, scope, owner});

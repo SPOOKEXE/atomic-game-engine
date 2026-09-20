@@ -515,6 +515,7 @@ namespace engine::render {
 			uint32_t OcclusionHeight = 0;
 			uint32_t LitWidth = 0;
 			uint32_t LitHeight = 0;
+			bool FirstSurfaceValidity = false;
 			bool SecondSurface = false;
 			bool CameraMotion = false;
 
@@ -628,6 +629,9 @@ namespace engine::render {
 		};
 
 		std::vector<GraphTarget> GraphTargets;
+		// A world-scoped graph owner uses a process-local id. Keep its stable name
+		// so ForgetWorld cannot retire another world's resources on a bad match.
+		std::unordered_map<uint64_t, core::Name> GraphWorldNames;
 
 		// A history image becomes readable only after the command buffer that wrote
 		// it has entered the queue. Batched views share one command buffer, so this

@@ -269,6 +269,29 @@ TEST_CASE("one changed entity dirties one resident row", "[render][residency]") 
 	CHECK(ranges[0].Count == 1);
 }
 
+TEST_CASE("separated edits preserve their narrow resident upload ranges", "[render][residency]") {
+	InstanceResidency rows;
+	rows.BeginFrame();
+	const uint32_t first = rows.Upsert(Key(1), Row(1.0f));
+	rows.Upsert(Key(2), Row(2.0f));
+	const uint32_t last = rows.Upsert(Key(3), Row(3.0f));
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	rows.Upsert(Key(1), Row(4.0f));
+	rows.Upsert(Key(2), Row(2.0f));
+	rows.Upsert(Key(3), Row(5.0f));
+	rows.EndFrame();
+
+	const std::span<const InstanceUploadRange> ranges = rows.DirtyRanges();
+	REQUIRE(ranges.size() == 2);
+	CHECK(ranges[0].First == first);
+	CHECK(ranges[0].Count == 1);
+	CHECK(ranges[1].First == last);
+	CHECK(ranges[1].Count == 1);
+}
+
 TEST_CASE("membership edits do not shift surviving rows", "[render][residency]") {
 	InstanceResidency rows;
 	rows.BeginFrame();

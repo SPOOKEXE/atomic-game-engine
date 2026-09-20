@@ -186,6 +186,7 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	CHECK(frame.Submitted);
 	CHECK(frame.ComputeDispatches > 0);
 	CHECK(frame.Particles == block.Capacity);
+	CHECK(renderer.ResourceTexture(core::Name("first-surface-validity"), view.Slot) == nullptr);
 
 	const render::GpuMemoryStatistics particleResident = renderer.MemoryStatistics();
 	CHECK(particleResident.Buffers > released.Buffers);
@@ -216,10 +217,18 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	CHECK(renderer.TextureHandle(captureName) == nullptr);
 	CHECK(renderer.MemoryStatistics().Textures + 1 == texturesBeforeDrop);
 
+	const core::Name skyHistory("environment-sky");
+	REQUIRE(renderer.ResourceTexture(skyHistory, view.Slot) != nullptr);
+	const uint64_t texturesBeforeWorldDrop = renderer.MemoryStatistics().Textures;
+	renderer.ForgetWorld(view.World, core::Name("other-world"));
+	CHECK(renderer.ResourceTexture(skyHistory, view.Slot) != nullptr);
+	CHECK(renderer.MemoryStatistics().Textures == texturesBeforeWorldDrop);
 	renderer.ForgetWorld(view.World, view.WorldName);
 	const render::GpuMemoryStatistics worldReleased = renderer.MemoryStatistics();
 	CHECK(worldReleased.Buffers < particleResident.Buffers);
 	CHECK(worldReleased.BufferBytes < particleResident.BufferBytes);
+	CHECK(worldReleased.Textures < texturesBeforeWorldDrop);
+	CHECK(renderer.ResourceTexture(skyHistory, view.Slot) == nullptr);
 
 	renderer.Shutdown();
 	CHECK(renderer.MemoryStatistics().LiveBytes == 0);

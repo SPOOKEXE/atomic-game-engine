@@ -24,7 +24,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <optional>
 #include <vector>
 
 namespace engine::render {
@@ -42,21 +41,6 @@ namespace engine::render {
 		}
 		SurfacePixelsUsed += pixels;
 		return true;
-	}
-
-	namespace {
-		std::optional<InstanceUploadRange> BulkRange(std::span<const InstanceUploadRange> ranges) {
-			if (ranges.empty()) {
-				return std::nullopt;
-			}
-			uint32_t first = ranges.front().First;
-			uint32_t last = first + ranges.front().Count;
-			for (const InstanceUploadRange &range : ranges) {
-				first = std::min(first, range.First);
-				last = std::max(last, range.First + range.Count);
-			}
-			return InstanceUploadRange{first, last - first};
-		}
 	}
 
 	const graph::Node *ViewRecording::GraphNode(core::Name kind) const {
@@ -259,13 +243,13 @@ namespace engine::render {
 				SDL_EndGPUCopyPass(copy);
 				return false;
 			}
-			if (const auto range = BulkRange(world->Instances.DirtyRanges())) {
-				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(GpuInstance));
+			for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
+				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(GpuInstance));
 				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
 				const SDL_GPUBufferRegion destination{
 					State->InstanceBuffer,
 					offset,
-					range->Count * static_cast<uint32_t>(sizeof(GpuInstance)),
+					range.Count * static_cast<uint32_t>(sizeof(GpuInstance)),
 				};
 				// Queue order protects unchanged resident rows. Cycling here would
 				// select fresh storage and discard every row this partial copy omits.
@@ -273,13 +257,13 @@ namespace engine::render {
 				uploadedBytes += destination.size;
 			}
 
-			if (const auto range = BulkRange(target.ResidentIndices.DirtyRanges())) {
-				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(uint32_t));
+			for (const InstanceUploadRange &range : target.ResidentIndices.DirtyRanges()) {
+				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(uint32_t));
 				const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, offset};
 				const SDL_GPUBufferRegion destination{
 					State->InstanceIndexBuffer,
 					offset,
-					range->Count * static_cast<uint32_t>(sizeof(uint32_t)),
+					range.Count * static_cast<uint32_t>(sizeof(uint32_t)),
 				};
 				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 				uploadedBytes += destination.size;
@@ -1094,6 +1078,9 @@ namespace engine::render {
 		}
 
 		if (make) {
+			if (scope == graph::NodeScope::World) {
+				State->GraphWorldNames[owner] = Request.Source->WorldName;
+			}
 			// Graph images ultimately feed this view's output target. Using the
 			// Studio swapchain here makes an offscreen interface draw in one
 			// coordinate space while its pixel scissors are applied in another.
@@ -1112,6 +1099,9 @@ namespace engine::render {
 		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer) return nullptr;
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, Request.World);
+		if (make && scope == graph::NodeScope::World) {
+			State->GraphWorldNames[owner] = Request.Source->WorldName;
+		}
 		return make ? State->EnsureGraphBuffer(*selectedPipeline, resource, owner, SceneWidth, SceneHeight)
 					: State->FindGraphBuffer(*selectedPipeline, desc->Name, scope, owner);
 	}

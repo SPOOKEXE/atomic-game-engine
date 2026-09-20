@@ -2144,6 +2144,7 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::ReleaseAllGraphState() {
+		GraphWorldNames.clear();
 		if (Tessellation.Plans != nullptr) gpu::ReleaseBuffer(Device, Tessellation.Plans);
 		if (Tessellation.Transfer != nullptr) gpu::ReleaseTransferBuffer(Device, Tessellation.Transfer);
 		if (Tessellation.Compute != nullptr) SDL_ReleaseGPUComputePipeline(Device, Tessellation.Compute);

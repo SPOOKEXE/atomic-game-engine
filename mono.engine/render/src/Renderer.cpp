@@ -1124,6 +1124,26 @@ namespace engine::render {
 				State->ReleasePortalShadow(image);
 			}
 		}
+		// World-scoped graph resources use the world id as their owner. Retire
+		// them at the same idle boundary as resident instance and particle rows;
+		// otherwise each discarded world leaves its history images on the device.
+		const auto graphWorld = State->GraphWorldNames.find(world);
+		if (graphWorld != State->GraphWorldNames.end() && graphWorld->second == name) {
+			std::erase_if(State->PendingGraphHistoryWrites, [world](const auto &write) {
+				return write.Scope == graph::NodeScope::World && write.Owner == world;
+			});
+			std::erase_if(State->GraphTargets, [this, world](const auto &target) {
+				if (target.Scope != graph::NodeScope::World || target.Owner != world) return false;
+				if (target.Texture != nullptr) gpu::ReleaseTexture(State->Device, target.Texture);
+				return true;
+			});
+			std::erase_if(State->GraphBuffers, [this, world](const auto &buffer) {
+				if (buffer.Scope != graph::NodeScope::World || buffer.Owner != world) return false;
+				if (buffer.Buffer != nullptr) gpu::ReleaseBuffer(State->Device, buffer.Buffer);
+				return true;
+			});
+			State->GraphWorldNames.erase(graphWorld);
+		}
 
 		const auto sameWorld = [world, name](const auto &resident) {
 			return resident.Id == world && resident.Name == name;

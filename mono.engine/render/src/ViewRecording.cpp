@@ -41,21 +41,16 @@ namespace engine::render {
 
 	namespace {
 		template <typename Value>
-		void StageBulk(
+		void StageRanges(
 			Value *destination, std::span<const InstanceUploadRange> ranges, std::span<const Value> source
 		) {
-			if (ranges.empty()) {
-				return;
-			}
-			uint32_t first = ranges.front().First;
-			uint32_t last = first + ranges.front().Count;
 			for (const InstanceUploadRange &range : ranges) {
-				first = std::min(first, range.First);
-				last = std::max(last, range.First + range.Count);
+				std::memcpy(
+					destination + range.First,
+					source.data() + range.First,
+					static_cast<size_t>(range.Count) * sizeof(Value)
+				);
 			}
-			std::memcpy(
-				destination + first, source.data() + first, static_cast<size_t>(last - first) * sizeof(Value)
-			);
 		}
 	}
 
@@ -1639,6 +1634,7 @@ namespace engine::render {
 		pbrDimensions.OcclusionHeight = sceneHeight;
 		pbrDimensions.LitWidth = sceneWidth;
 		pbrDimensions.LitHeight = sceneHeight;
+		pbrDimensions.FirstSurfaceValidity = graphEnabled(core::Name("depth-validity"));
 		pbrDimensions.SecondSurface = graphEnabled(core::Name("depth-peel"));
 		pbrDimensions.CameraMotion = graphEnabled(core::Name("camera-motion"));
 		outputDimensions(
@@ -2441,7 +2437,7 @@ namespace engine::render {
 					return;
 				}
 				auto *staged = static_cast<uint32_t *>(mapped);
-				StageBulk<uint32_t>(staged, target.ResidentIndices.DirtyRanges(), target.InstanceIndices);
+				StageRanges<uint32_t>(staged, target.ResidentIndices.DirtyRanges(), target.InstanceIndices);
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceIndexTransfer);
 			} else {
 				target.ResidentIndices.Acknowledge();
@@ -2456,7 +2452,7 @@ namespace engine::render {
 				}
 				auto *rows = static_cast<GpuInstance *>(mapped);
 				const std::span<const GpuInstance> packed = residency.PackedRows();
-				StageBulk<GpuInstance>(rows, residency.DirtyRanges(), packed);
+				StageRanges<GpuInstance>(rows, residency.DirtyRanges(), packed);
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 			}
 			haveInstances = true;

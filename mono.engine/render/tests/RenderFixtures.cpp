@@ -625,7 +625,7 @@ TEST_CASE("static scene residency stays bounded and settles after edits", "[rend
 	view.Instances = instances;
 	const auto oneRow = render();
 	INFO("one changed row uploaded " << oneRow.UploadedBytes << " bytes");
-	CHECK(oneRow.UploadedBytes > 0);
+	REQUIRE(oneRow.UploadedBytes > 0);
 	for (size_t frame = 0; frame < 8; ++frame) {
 		checkSettled(warm);
 	}
@@ -636,7 +636,7 @@ TEST_CASE("static scene residency stays bounded and settles after edits", "[rend
 	view.Instances = instances;
 	const auto distantRows = render();
 	INFO("two distant changed rows uploaded " << distantRows.UploadedBytes << " bytes");
-	CHECK(distantRows.UploadedBytes > oneRow.UploadedBytes);
+	CHECK(distantRows.UploadedBytes == oneRow.UploadedBytes * 2);
 	for (size_t frame = 0; frame < 8; ++frame) {
 		checkSettled(warm);
 	}

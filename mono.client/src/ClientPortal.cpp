@@ -520,6 +520,7 @@ namespace client {
 		});
 		Views.Untrack(world);
 		if (PortalImages) PortalImages->RemoveWorld(world);
+		Renderer.ForgetWorld(world.Index, Universe_->NameOf(world));
 		Shaders.DropOwner(Universe_->NameOf(world));
 		Interface.DropContentOwner(Universe_->NameOf(world));
 		Renderer.DropContentOwner(Universe_->NameOf(world));
