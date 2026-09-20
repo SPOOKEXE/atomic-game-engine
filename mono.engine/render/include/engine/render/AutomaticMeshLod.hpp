@@ -13,6 +13,10 @@
 #include <span>
 #include <vector>
 
+namespace engine::ecs {
+	class Store;
+}
+
 namespace engine::render {
 	class Renderer;
 
@@ -30,6 +34,9 @@ namespace engine::render {
 	//
 	// Matching inputs share one artifact. This function only reads world state
 	// and builds host data, so callers can test planning without a GPU.
+	std::vector<AutomaticMeshLodArtifact>
+	BuildAutomaticMeshLods(ecs::Store &store, const core::Name &base, const assets::MeshData &mesh);
+
 	std::vector<AutomaticMeshLodArtifact> BuildAutomaticMeshLods(
 		world::Universe &universe,
 		std::span<const world::WorldId> worlds,
@@ -46,4 +53,50 @@ namespace engine::render {
 		std::span<const core::Name> owners,
 		std::span<const AutomaticMeshLodArtifact> artifacts
 	);
+
+	class AutomaticMeshLodUploader {
+	  public:
+		size_t
+		Refresh(ecs::Store &store, Renderer &renderer, core::Name owner = {}, bool includeEditable = true);
+		size_t RefreshSource(
+			ecs::Store &store,
+			Renderer &renderer,
+			const core::Name &base,
+			const assets::MeshData &mesh,
+			core::Name owner = {}
+		);
+		void ForgetWorld(uint64_t identity);
+		void ForgetOwner(core::Name owner);
+
+	  private:
+		struct Source {
+			core::Name Base;
+			std::vector<core::Name> Artifacts;
+			bool Changed = true;
+		};
+		struct Scope {
+			uint64_t World = 0;
+			core::Name Owner;
+			std::vector<Source> Sources;
+		};
+		size_t RefreshStored(
+			ecs::Store &store,
+			Renderer &renderer,
+			Source &source,
+			const std::vector<core::Name> &wanted,
+			core::Name owner
+		);
+		bool ResolveSource(
+			ecs::Store &store,
+			Renderer &renderer,
+			const Source &source,
+			core::Name owner,
+			assets::MeshData &out
+		);
+		bool RetainsArtifact(core::Name owner, core::Name artifact) const;
+		void ReleaseArtifacts(
+			ecs::Store &store, Renderer &renderer, core::Name owner, std::span<const core::Name> artifacts
+		);
+		std::vector<Scope> Scopes;
+	};
 }

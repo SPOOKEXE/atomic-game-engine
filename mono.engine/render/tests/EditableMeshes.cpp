@@ -6,6 +6,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -73,6 +75,53 @@ TEST_CASE("editable mesh uploads follow store and owner lifetimes", "[render][gp
 	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
 	CHECK(uploader.Refresh(first, fixture.Render, core::Name("editable:rebound")) == 1);
 	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+}
+
+TEST_CASE(
+	"editable mesh uploads also publish its automatic decimated ladder", "[render][gpu][editable-lod][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("editable.lod");
+	const ecs::Entity mesh = store.CreateInstance(scene::EditableMeshClass(), "mesh");
+	for (uint32_t y = 0; y <= 4; y++) {
+		for (uint32_t x = 0; x <= 4; x++) {
+			REQUIRE(scene::AddVertex(store, mesh, {float(x), 0.0f, float(y)}));
+		}
+	}
+	for (uint32_t y = 0; y < 4; y++) {
+		for (uint32_t x = 0; x < 4; x++) {
+			const uint32_t a = y * 5 + x;
+			REQUIRE(scene::AddTriangle(store, mesh, a, a + 1, a + 5));
+			REQUIRE(scene::AddTriangle(store, mesh, a + 1, a + 6, a + 5));
+		}
+	}
+	const core::Name base = scene::EditableMeshContentName(store, mesh);
+	const ecs::Entity part = store.Create();
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::AutoMeshLOD policy;
+	policy.Levels = 3;
+	policy.Ratios[0] = 0.5f;
+	policy.Ratios[1] = 0.25f;
+	store.Set(part, policy);
+	const core::Name owner("editable-lod-owner");
+	render::EditableMeshUploader uploader;
+	CHECK(uploader.RefreshLods(store, fixture.Render, owner) == 0);
+	CHECK(scene::TrianglesOf(store, base) == 0);
+	REQUIRE(uploader.Refresh(store, fixture.Render, owner) == 3);
+	const core::Name first = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	const core::Name second = scene::AutoMeshLodArtifactName(base, 2, 0.25f);
+	CHECK(scene::TrianglesOf(store, base) == 32);
+	CHECK(scene::TrianglesOf(store, first) < 32);
+	CHECK(scene::TrianglesOf(store, second) < scene::TrianglesOf(store, first));
+
+	REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 5));
+	CHECK(uploader.Refresh(store, fixture.Render, owner) == 3);
+	CHECK(scene::TrianglesOf(store, base) == 33);
 }
 
 TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[render][editablemeshes]") {

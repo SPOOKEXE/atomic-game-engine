@@ -811,4 +811,20 @@ namespace engine::render {
 		});
 	}
 
+	bool MeshTable::Drop(const core::Name &name, core::Name owner) {
+		if (!name.IsValid()) return false;
+		const auto found = Entries.find(MeshKey(name, owner));
+		if (found == Entries.end()) return false;
+		const MeshEntry &entry = found->second;
+		if (entry.Packed)
+			Release(FreePackedBytes, entry.PackedByteOffset, entry.PackedByteCount, Generation);
+		else
+			Release(
+				FreeVertices, static_cast<size_t>(entry.Whole.VertexOffset), entry.VertexCount, Generation
+			);
+		Release(FreeIndices, entry.Whole.FirstIndex, entry.Whole.IndexCount, Generation);
+		Entries.erase(found);
+		return true;
+	}
+
 }

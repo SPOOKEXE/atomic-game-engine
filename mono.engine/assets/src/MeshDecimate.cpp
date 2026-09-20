@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,61 @@ namespace engine::assets {
 
 		bool Degenerate(const Triangle &triangle) {
 			return triangle[0] == triangle[1] || triangle[1] == triangle[2] || triangle[2] == triangle[0];
+		}
+
+		struct FaceAdjacency {
+			std::vector<size_t> Offsets;
+			std::vector<size_t> Faces;
+
+			std::span<const size_t> ForVertex(uint32_t vertex) const {
+				return std::span(Faces).subspan(Offsets[vertex], Offsets[vertex + 1] - Offsets[vertex]);
+			}
+		};
+
+		FaceAdjacency BuildFaceAdjacency(size_t vertexCount, const std::vector<Triangle> &triangles) {
+			FaceAdjacency adjacency;
+			adjacency.Offsets.resize(vertexCount + 1);
+			for (const Triangle &triangle : triangles) {
+				adjacency.Offsets[triangle[0] + 1]++;
+				if (triangle[1] != triangle[0]) adjacency.Offsets[triangle[1] + 1]++;
+				if (triangle[2] != triangle[0] && triangle[2] != triangle[1])
+					adjacency.Offsets[triangle[2] + 1]++;
+			}
+			for (size_t vertex = 1; vertex < adjacency.Offsets.size(); vertex++) {
+				adjacency.Offsets[vertex] += adjacency.Offsets[vertex - 1];
+			}
+			adjacency.Faces.resize(adjacency.Offsets.back());
+			std::vector<size_t> next = adjacency.Offsets;
+			for (size_t face = 0; face < triangles.size(); face++) {
+				const Triangle &triangle = triangles[face];
+				adjacency.Faces[next[triangle[0]]++] = face;
+				if (triangle[1] != triangle[0]) adjacency.Faces[next[triangle[1]]++] = face;
+				if (triangle[2] != triangle[0] && triangle[2] != triangle[1])
+					adjacency.Faces[next[triangle[2]]++] = face;
+			}
+			return adjacency;
+		}
+
+		template <typename Callback>
+		void ForEachIncidentFace(
+			const FaceAdjacency &adjacency, uint32_t left, uint32_t right, Callback callback
+		) {
+			const std::span<const size_t> leftFaces = adjacency.ForVertex(left);
+			const std::span<const size_t> rightFaces = adjacency.ForVertex(right);
+			size_t leftIndex = 0;
+			size_t rightIndex = 0;
+			while (leftIndex < leftFaces.size() || rightIndex < rightFaces.size()) {
+				if (rightIndex == rightFaces.size() ||
+					(leftIndex < leftFaces.size() && leftFaces[leftIndex] < rightFaces[rightIndex])) {
+					callback(leftFaces[leftIndex++]);
+				} else if (leftIndex == leftFaces.size() || rightFaces[rightIndex] < leftFaces[leftIndex]) {
+					callback(rightFaces[rightIndex++]);
+				} else {
+					callback(leftFaces[leftIndex]);
+					leftIndex++;
+					rightIndex++;
+				}
+			}
 		}
 
 		std::array<float, 3> FaceVector(
@@ -70,17 +126,18 @@ namespace engine::assets {
 			const std::vector<MeshVertex> &vertices,
 			const std::vector<Triangle> &triangles,
 			const std::vector<uint32_t> &owners,
+			const FaceAdjacency &adjacency,
 			uint32_t owner,
 			uint32_t left,
 			uint32_t right
 		) {
 			float area = 0.0f;
-			for (size_t index = 0; index < triangles.size(); index++) {
+			ForEachIncidentFace(adjacency, left, right, [&](size_t index) {
 				if (owners[index] == owner &&
 					(HasVertex(triangles[index], left) || HasVertex(triangles[index], right))) {
 					area += std::sqrt(FaceAreaSquared(vertices, triangles[index]));
 				}
-			}
+			});
 			return area;
 		}
 
@@ -88,6 +145,7 @@ namespace engine::assets {
 			const std::vector<MeshVertex> &vertices,
 			const std::vector<Triangle> &triangles,
 			const std::vector<uint32_t> &owners,
+			const FaceAdjacency &adjacency,
 			uint32_t owner,
 			uint32_t left,
 			uint32_t right
@@ -96,22 +154,24 @@ namespace engine::assets {
 			for (size_t axis = 0; axis < 3; axis++)
 				merged[axis] = (vertices[left].Position[axis] + vertices[right].Position[axis]) * 0.5f;
 
-			for (size_t index = 0; index < triangles.size(); index++) {
+			bool preserves = true;
+			ForEachIncidentFace(adjacency, left, right, [&](size_t index) {
+				if (!preserves) return;
 				if (owners[index] != owner ||
 					(!HasVertex(triangles[index], left) && !HasVertex(triangles[index], right)))
-					continue;
+					return;
 				Triangle after = triangles[index];
 				for (uint32_t &vertex : after)
 					if (vertex == right) vertex = left;
-				if (Degenerate(after)) continue;
+				if (Degenerate(after)) return;
 
 				const auto beforeFace = FaceVector(vertices, triangles[index]);
 				const auto afterFace = FaceVector(vertices, after, left, merged);
 				const float alignment = beforeFace[0] * afterFace[0] + beforeFace[1] * afterFace[1] +
 										beforeFace[2] * afterFace[2];
-				if (!(alignment > 0.0f)) return false;
-			}
-			return true;
+				if (!(alignment > 0.0f)) preserves = false;
+			});
+			return preserves;
 		}
 
 		void MergeVertex(MeshVertex &into, const MeshVertex &other) {
@@ -138,12 +198,15 @@ namespace engine::assets {
 			std::vector<Triangle> &triangles,
 			const std::vector<uint32_t> &owners,
 			uint32_t submesh,
+			size_t &count,
 			size_t target,
 			MeshReduction reduction
 		) {
+			const FaceAdjacency adjacency = BuildFaceAdjacency(vertices.size(), triangles);
 			float bestCost = std::numeric_limits<float>::infinity();
 			uint32_t bestLeft = 0;
 			uint32_t bestRight = 0;
+			size_t bestRemoved = 0;
 			bool found = false;
 
 			for (size_t index = 0; index < triangles.size(); index++) {
@@ -162,41 +225,41 @@ namespace engine::assets {
 						continue;
 					}
 					size_t edgeUses = 0;
-					for (size_t other = 0; other < triangles.size(); other++) {
-						if (owners[other] == submesh && HasVertex(triangles[other], left) &&
-							HasVertex(triangles[other], right))
+					size_t removed = 0;
+					const std::span<const size_t> leftFaces = adjacency.ForVertex(left);
+					const std::span<const size_t> rightFaces = adjacency.ForVertex(right);
+					size_t leftFace = 0;
+					size_t rightFace = 0;
+					while (leftFace < leftFaces.size() && rightFace < rightFaces.size()) {
+						if (leftFaces[leftFace] < rightFaces[rightFace]) {
+							leftFace++;
+							continue;
+						}
+						if (rightFaces[rightFace] < leftFaces[leftFace]) {
+							rightFace++;
+							continue;
+						}
+						const size_t other = leftFaces[leftFace++];
+						rightFace++;
+						if (owners[other] == submesh) {
 							edgeUses++;
+							removed += Degenerate(triangles[other]) ? 0u : 1u;
+						}
 					}
-					if (edgeUses < 2 || !PreservesWinding(vertices, triangles, owners, submesh, left, right))
+					if (edgeUses < 2 ||
+						!PreservesWinding(vertices, triangles, owners, adjacency, submesh, left, right))
 						continue;
 
 					// A shared vertex may belong to another material run. Moving it
 					// would alter that run without accounting for its triangles.
 					bool local = true;
-					for (size_t other = 0; other < triangles.size(); other++) {
-						if (owners[other] != submesh &&
-							(HasVertex(triangles[other], left) || HasVertex(triangles[other], right))) {
-							local = false;
-							break;
-						}
-					}
+					ForEachIncidentFace(adjacency, left, right, [&](size_t other) {
+						if (owners[other] != submesh) local = false;
+					});
 					if (!local) {
 						continue;
 					}
-					size_t remaining = 0;
-					for (size_t other = 0; other < triangles.size(); other++) {
-						if (owners[other] != submesh) {
-							continue;
-						}
-						Triangle after = triangles[other];
-						for (uint32_t &vertex : after) {
-							if (vertex == right) {
-								vertex = left;
-							}
-						}
-						remaining += Degenerate(after) ? 0u : 1u;
-					}
-					if (remaining < target) {
+					if (count - removed < target) {
 						continue;
 					}
 
@@ -205,13 +268,14 @@ namespace engine::assets {
 						// The product ranks a collapse by its geometric error and by
 						// the expected projected area it disturbs. A large face must
 						// not disappear merely because one of its edges is short.
-						cost *= SurfaceCost(vertices, triangles, owners, submesh, left, right);
+						cost *= SurfaceCost(vertices, triangles, owners, adjacency, submesh, left, right);
 					}
 					if (!found || cost < bestCost ||
 						(cost == bestCost && std::pair(left, right) < std::pair(bestLeft, bestRight))) {
 						bestCost = cost;
 						bestLeft = left;
 						bestRight = right;
+						bestRemoved = removed;
 						found = true;
 					}
 				}
@@ -228,6 +292,7 @@ namespace engine::assets {
 					}
 				}
 			}
+			count -= bestRemoved;
 			return true;
 		}
 	}
@@ -283,12 +348,7 @@ namespace engine::assets {
 				if (count == 0) continue;
 				const size_t target = std::max<size_t>(1, static_cast<size_t>(std::floor(count * ratio)));
 				while (count > target &&
-					   CollapseOne(vertices, triangles, owners, submesh, target, reduction)) {
-					count = 0;
-					for (size_t index = 0; index < triangles.size(); index++) {
-						count += owners[index] == submesh && !Degenerate(triangles[index]) ? 1u : 0u;
-					}
-				}
+					   CollapseOne(vertices, triangles, owners, submesh, count, target, reduction)) {}
 				if (count > target) {
 					// A boundary, skin or material seam can leave no legal collapse. Keep
 					// the largest faces so the fallback removes the least visible area.

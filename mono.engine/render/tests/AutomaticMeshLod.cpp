@@ -1,7 +1,11 @@
+#include "RenderFixture.hpp"
+
 #include <engine/assets/Builtin.hpp>
 #include <engine/render/AutomaticMeshLod.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -10,6 +14,132 @@
 TEST_SUITE_ID("engine.render.automaticmeshlod")
 TEST_DEPENDS("engine.assets.mesh-decimate")
 TEST_DEPENDS("engine.scene.levelofdetail")
+
+namespace {
+	engine::assets::MeshData Grid(uint32_t cells) {
+		engine::assets::MeshData mesh;
+		for (uint32_t y = 0; y <= cells; y++) {
+			for (uint32_t x = 0; x <= cells; x++) {
+				mesh.Vertices.push_back({{float(x), 0.0f, float(y)}, {0.0f, 1.0f, 0.0f}, {}});
+			}
+		}
+		for (uint32_t y = 0; y < cells; y++) {
+			for (uint32_t x = 0; x < cells; x++) {
+				const uint32_t a = y * (cells + 1) + x;
+				mesh.Indices.insert(
+					mesh.Indices.end(), {a, a + 1, a + cells + 1, a + 1, a + cells + 2, a + cells + 1}
+				);
+			}
+		}
+		mesh.ComputeBounds();
+		return mesh;
+	}
+}
+
+TEST_CASE("automatic LOD decimates the editable-demo triangle count", "[render][lod][automatic]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("lod.editable-demo");
+	const core::Name base("editable-mesh://lod-demo");
+	const ecs::Entity part = store.Create();
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::AutoMeshLOD policy;
+	policy.Strategy = scene::LodStrategy::Decimated;
+	policy.Levels = 3;
+	policy.Ratios[0] = 0.35f;
+	policy.Ratios[1] = 0.12f;
+	store.Set(part, policy);
+
+	const assets::MeshData source = Grid(8);
+	REQUIRE(source.Indices.size() / 3 == 128);
+	const auto artifacts = render::BuildAutomaticMeshLods(store, base, source);
+	REQUIRE(artifacts.size() == 2);
+	CHECK(artifacts[0].Data.Indices.size() / 3 < 128);
+	CHECK(artifacts[1].Data.Indices.size() / 3 < artifacts[0].Data.Indices.size() / 3);
+	CHECK(artifacts[0].Name == scene::AutoMeshLodArtifactName(base, 1, 0.35f));
+	CHECK(artifacts[1].Name == scene::AutoMeshLodArtifactName(base, 2, 0.12f));
+}
+
+TEST_CASE(
+	"automatic LOD uploader registers and replaces built-in levels", "[render][gpu][lod][automatic][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("lod.builtin-upload");
+	const core::Name base(assets::BuiltinName(assets::BuiltinMesh::Sphere));
+	const ecs::Entity part = store.Create();
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::AutoMeshLOD policy;
+	policy.Strategy = scene::LodStrategy::Decimated;
+	policy.Levels = 3;
+	policy.Ratios[0] = 0.35f;
+	policy.Ratios[1] = 0.12f;
+	store.Set(part, policy);
+
+	render::EditableMeshUploader uploader;
+	REQUIRE(uploader.RefreshLods(store, fixture.Render) == 2);
+	const core::Name first = scene::AutoMeshLodArtifactName(base, 1, 0.35f);
+	const core::Name second = scene::AutoMeshLodArtifactName(base, 2, 0.12f);
+	const uint32_t baseTriangles = scene::TrianglesOf(store, base);
+	const uint32_t firstTriangles = scene::TrianglesOf(store, first);
+	const uint32_t secondTriangles = scene::TrianglesOf(store, second);
+	CHECK(baseTriangles > firstTriangles);
+	CHECK(firstTriangles > secondTriangles);
+
+	auto *edited = store.GetMutable<scene::AutoMeshLOD>(part);
+	REQUIRE(edited != nullptr);
+	edited->Ratios[0] = 0.5f;
+	CHECK(uploader.RefreshLods(store, fixture.Render) == 2);
+	const core::Name replacement = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	CHECK(scene::TrianglesOf(store, replacement) > firstTriangles);
+}
+
+TEST_CASE(
+	"automatic LOD uploader retains shared-owner levels until every world releases them",
+	"[render][gpu][lod][automatic][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store first("studio.lod.first"), second("studio.lod.second");
+	const core::Name base(assets::BuiltinName(assets::BuiltinMesh::Sphere));
+	const core::Name artifact = scene::AutoMeshLodArtifactName(base, 1, 0.35f);
+	const auto addPolicy = [&](ecs::Store &store) {
+		const ecs::Entity part = store.Create();
+		scene::Visual visual;
+		visual.Mesh = base;
+		store.Set(part, visual);
+		scene::AutoMeshLOD policy;
+		policy.Strategy = scene::LodStrategy::Decimated;
+		policy.Levels = 2;
+		policy.Ratios[0] = 0.35f;
+		store.Set(part, policy);
+		return part;
+	};
+	const ecs::Entity firstPart = addPolicy(first);
+	const ecs::Entity secondPart = addPolicy(second);
+
+	render::EditableMeshUploader uploader;
+	REQUIRE(uploader.RefreshLods(first, fixture.Render) == 1);
+	CHECK(uploader.RefreshLods(second, fixture.Render) == 1);
+	core::Vector3 extent;
+	REQUIRE(fixture.Render.MeshExtentOf(artifact, extent));
+
+	first.Remove<scene::AutoMeshLOD>(firstPart);
+	CHECK(uploader.RefreshLods(first, fixture.Render) == 0);
+	CHECK(fixture.Render.MeshExtentOf(artifact, extent));
+
+	second.Remove<scene::AutoMeshLOD>(secondPart);
+	CHECK(uploader.RefreshLods(second, fixture.Render) == 0);
+	CHECK_FALSE(fixture.Render.MeshExtentOf(artifact, extent));
+}
 
 TEST_CASE("automatic mesh LOD planning builds and shares real artifacts", "[render][lod][automatic]") {
 	using namespace engine;

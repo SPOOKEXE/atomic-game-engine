@@ -11,6 +11,7 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/render/AutomaticMeshLod.hpp>
 #include <engine/render/MeshTable.hpp>
 
 #include <cstddef>
@@ -66,6 +67,9 @@ namespace engine::render {
 		// @param owner The residency namespace for generated content names.
 		// @return How many meshes were built and handed to the renderer.
 		size_t Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner = {});
+		// Refreshes automatic LODs for built-in and resident mesh sources.
+		size_t
+		RefreshLods(engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner = {});
 
 		// Forget device upload stamps when a world or residency owner retires.
 		// This does not release resources; Renderer owns their lifetime.
@@ -90,5 +94,6 @@ namespace engine::render {
 			std::unordered_map<uint64_t, Revision> Revisions;
 		};
 		std::vector<UploadScope> Scopes;
+		AutomaticMeshLodUploader Lods;
 	};
 }

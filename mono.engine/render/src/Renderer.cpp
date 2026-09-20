@@ -1255,6 +1255,12 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::DropMesh(const core::Name &name, core::Name owner) {
+		if (State == nullptr || !State->Meshes.Drop(name, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
+	}
+
 	MeshCopyStatus Renderer::CopyMesh(
 		const core::Name &name, assets::MeshData &out, size_t vertexLimit, size_t indexLimit, core::Name owner
 	) const {

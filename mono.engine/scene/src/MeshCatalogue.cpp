@@ -78,6 +78,18 @@ namespace engine::scene {
 		return true;
 	}
 
+	bool ForgetMesh(ecs::Store &store, const core::Name &mesh) {
+		if (!mesh.IsValid()) return false;
+		MeshCatalogue *catalogue = store.ResourceMutable<MeshCatalogue>();
+		if (catalogue == nullptr) return false;
+		const uint32_t id = mesh.Id();
+		const size_t removed = catalogue->Triangles.erase(id);
+		catalogue->Sizes.erase(id);
+		catalogue->Textures.erase(id);
+		catalogue->Skinning.erase(id);
+		return removed != 0;
+	}
+
 	bool SkinningOf(const ecs::Store &store, const core::Name &mesh, MeshSkinning &out) {
 		out = {};
 		if (!mesh.IsValid()) return false;

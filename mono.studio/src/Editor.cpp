@@ -2299,6 +2299,25 @@ namespace studio {
 					// viewport uses the same per-panel camera only while the authority
 					// prepares its camera-dependent surface views.
 					EnsureViewerCamera(viewport, visual, eye, lens, runtimeVisual ? NULL_ENTITY : follow);
+
+					if (!IsReplicaWorld(shown)) {
+						// `EnsureViewerCamera` leaves an authored lens intact. Read it
+						// back before building this panel's target and projection,
+						// otherwise the rendered view keeps the default lens from before
+						// the camera was prepared and FieldOfView appears to have no
+						// effect. A replica panel instead owns its lens through its local
+						// runtime camera; this generated authority camera only prepares
+						// that world's surface views.
+						Universe->Enter(visual, [&](Store &store) {
+							const ViewerCamera &viewer = Viewers[viewport];
+							if (viewer.World != visual || !store.Alive(viewer.Instance)) {
+								return;
+							}
+							if (const auto *component = store.Get<engine::scene::Camera>(viewer.Instance)) {
+								lens = *component;
+							}
+						});
+					}
 				}
 
 				// The requested panel extent belongs to this camera resource. Write
@@ -2625,6 +2644,9 @@ namespace studio {
 						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
 						if (!clientPresentation || ClientSettings.EnableEditableMeshes) {
 							VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						} else {
+							VisualResourceRevision +=
+								EditableMeshes.RefreshLods(store, Renderer) > 0 ? 1u : 0u;
 						}
 					}
 					{

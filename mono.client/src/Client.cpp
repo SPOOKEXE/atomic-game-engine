@@ -3864,8 +3864,9 @@ namespace client {
 		const auto prepareEditable = [&](engine::world::WorldId world) {
 			const auto owner = Universe_->NameOf(world);
 			Universe_->Enter(world, [&](engine::ecs::Store &store) {
-				const auto meshes =
-					Settings.EnableEditableMeshes ? EditableMeshes.Refresh(store, Renderer, owner) : 0;
+				const auto meshes = Settings.EnableEditableMeshes
+										? EditableMeshes.Refresh(store, Renderer, owner)
+										: EditableMeshes.RefreshLods(store, Renderer, owner);
 				const auto images =
 					Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
 				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;

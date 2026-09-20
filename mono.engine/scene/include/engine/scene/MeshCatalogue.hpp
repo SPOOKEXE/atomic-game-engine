@@ -181,6 +181,8 @@ namespace engine::scene {
 		const MeshSkinning &skinning = {},
 		core::Vector3 size = {}
 	);
+	// Removes metadata for a resource retired from this world's residency.
+	bool ForgetMesh(ecs::Store &store, const core::Name &mesh);
 
 	// Copies the exact skinning source for a mesh. Returns false when this world
 	// has not received that mesh; a successful empty result means an observed

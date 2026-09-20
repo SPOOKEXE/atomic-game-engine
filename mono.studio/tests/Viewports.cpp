@@ -27,10 +27,62 @@
 #include <memory>
 #include <numbers>
 #include <studio/Editor.hpp>
+#include <studio/PlayLink.hpp>
 #include <studio/Viewports.hpp>
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static bool Initialise(Editor &editor, size_t viewports) {
+			Options options;
+			options.Headless = true;
+			options.StartViewports = viewports;
+			return editor.Initialise(options);
+		}
+
+		static void Present(Editor &editor, size_t viewport) {
+			editor.PresentViewport(viewport, 1.0f / 60.0f);
+		}
+
+		static void SetFieldOfView(Editor &editor, size_t viewport, float fieldOfView) {
+			const auto &viewer = editor.Viewers[viewport];
+			bool updated = false;
+			editor.Universe->Enter(viewer.World, [&](engine::ecs::Store &store) {
+				if (auto *camera = store.GetMutable<engine::scene::Camera>(viewer.Instance)) {
+					camera->FieldOfViewRadians = fieldOfView;
+					updated = true;
+				}
+			});
+			REQUIRE(updated);
+		}
+
+		static float PresentedFieldOfView(const Editor &editor, size_t viewport) {
+			return editor.Overlays[viewport].PresentedFieldOfView;
+		}
+
+		static engine::world::WorldId StartPlay(Editor &editor) {
+			REQUIRE(editor.BeginRun(editor.Active, RunMode::Play));
+			REQUIRE_FALSE(editor.Runs.empty());
+			REQUIRE_FALSE(editor.Runs.back().Links.empty());
+			REQUIRE(editor.Runs.back().Links.front() != nullptr);
+			return editor.Runs.back().Links.front()->ReplicaWorld();
+		}
+
+		static void Show(Editor &editor, engine::world::WorldId world) {
+			editor.Active = world;
+		}
+
+		static void SetReplicaFieldOfView(Editor &editor, engine::world::WorldId world, float fieldOfView) {
+			bool updated = false;
+			editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+				const engine::ecs::Entity camera = RuntimeCameraOf(store);
+				if (auto *lens = store.GetMutable<engine::scene::Camera>(camera)) {
+					lens->FieldOfViewRadians = fieldOfView;
+					updated = true;
+				}
+			});
+			REQUIRE(updated);
+		}
+
 		static std::array<engine::ecs::Entity, 2> CreateTwo(Editor &editor, engine::world::WorldId world) {
 			editor.Viewers.resize(2);
 			const ViewportCameraPose pose = DefaultViewportCamera();
@@ -140,6 +192,47 @@ TEST_CASE("editor viewports keep generated cameras and follows separate", "[stud
 
 	studio::ViewportCameraProbe::SetFollows(editor, cameras[0], cameras[1]);
 	CHECK(studio::ViewportCameraProbe::Follows(editor) == cameras);
+}
+
+TEST_CASE(
+	"authored field of view reaches each viewport render projection", "[studio][viewports][camera][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 2));
+
+	// The first presentation creates the generated camera for each panel. A
+	// field edited on either camera must be the field the next render projects
+	// through, rather than the free-camera default captured before preparation.
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::Present(editor, 1);
+	studio::ViewportCameraProbe::SetFieldOfView(editor, 0, 0.61f);
+	studio::ViewportCameraProbe::SetFieldOfView(editor, 1, 1.19f);
+
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::Present(editor, 1);
+
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 1) == 1.19f);
+}
+
+TEST_CASE(
+	"a replica viewport retains its local camera field of view", "[studio][viewports][camera][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const WorldId replica = studio::ViewportCameraProbe::StartPlay(editor);
+	studio::ViewportCameraProbe::Show(editor, replica);
+
+	// Presenting a client view creates an authority viewer for its surface
+	// cameras. Its lens must not replace the replica's runtime camera lens when
+	// the authority is the visual world.
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::SetReplicaFieldOfView(editor, replica, 0.61f);
+	studio::ViewportCameraProbe::SetFieldOfView(editor, 0, 1.19f);
+
+	studio::ViewportCameraProbe::Present(editor, 0);
+
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
 }
 
 TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewports][render]") {

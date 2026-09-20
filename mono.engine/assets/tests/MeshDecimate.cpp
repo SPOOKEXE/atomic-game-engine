@@ -36,6 +36,28 @@ namespace {
 		data.ComputeBounds();
 		return data;
 	}
+
+	engine::assets::MeshData Grid(size_t cells) {
+		engine::assets::MeshData data;
+		for (size_t row = 0; row <= cells; row++) {
+			for (size_t column = 0; column <= cells; column++) {
+				data.Vertices.push_back(At(static_cast<float>(column), 0.0f, static_cast<float>(row)));
+			}
+		}
+		for (size_t row = 0; row < cells; row++) {
+			for (size_t column = 0; column < cells; column++) {
+				const uint32_t topLeft = static_cast<uint32_t>(row * (cells + 1) + column);
+				const uint32_t topRight = topLeft + 1;
+				const uint32_t bottomLeft = topLeft + static_cast<uint32_t>(cells + 1);
+				const uint32_t bottomRight = bottomLeft + 1;
+				data.Indices.insert(
+					data.Indices.end(), {topLeft, topRight, bottomRight, topLeft, bottomRight, bottomLeft}
+				);
+			}
+		}
+		data.ComputeBounds();
+		return data;
+	}
 }
 
 TEST_CASE("mesh decimation is deterministic and keeps a valid material run", "[assets][mesh-decimate]") {
@@ -91,6 +113,32 @@ TEST_CASE("an automatic mesh ladder publishes independent valid mesh data", "[as
 
 	std::array<MeshData, 2> wrongSize;
 	CHECK_FALSE(BuildMeshLodLadder(source, ratios, wrongSize));
+}
+
+TEST_CASE(
+	"mesh decimation handles a shared 1152-triangle grid deterministically", "[assets][mesh-decimate]"
+) {
+	using namespace engine::assets;
+	const MeshData source = Grid(24);
+	const std::array ratios{0.5f, 0.25f};
+	std::array<MeshData, 2> first;
+	std::array<MeshData, 2> second;
+
+	REQUIRE(BuildMeshLodLadder(source, ratios, first));
+	REQUIRE(BuildMeshLodLadder(source, ratios, second));
+	for (size_t level = 0; level < first.size(); level++) {
+		REQUIRE(first[level].IsValid());
+		CHECK(first[level].Indices.size() == source.Indices.size() * ratios[level]);
+		CHECK(first[level].Indices == second[level].Indices);
+		REQUIRE(first[level].Vertices.size() == second[level].Vertices.size());
+		for (size_t vertex = 0; vertex < first[level].Vertices.size(); vertex++) {
+			const MeshVertex &left = first[level].Vertices[vertex];
+			const MeshVertex &right = second[level].Vertices[vertex];
+			CHECK(std::equal(std::begin(left.Position), std::end(left.Position), std::begin(right.Position)));
+			CHECK(std::equal(std::begin(left.Normal), std::end(left.Normal), std::begin(right.Normal)));
+			CHECK(std::equal(std::begin(left.TexCoord), std::end(left.TexCoord), std::begin(right.TexCoord)));
+		}
+	}
 }
 
 TEST_CASE("mesh decimation preserves partial material runs and uncovered faces", "[assets][mesh-decimate]") {

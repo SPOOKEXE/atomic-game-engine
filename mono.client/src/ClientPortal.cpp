@@ -139,8 +139,9 @@ namespace client {
 			storeIdentity = store.Identity();
 			const auto images =
 				Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
-			const auto meshes =
-				Settings.EnableEditableMeshes ? EditableMeshes.Refresh(store, Renderer, owner) : 0;
+			const auto meshes = Settings.EnableEditableMeshes
+									? EditableMeshes.Refresh(store, Renderer, owner)
+									: EditableMeshes.RefreshLods(store, Renderer, owner);
 			const bool shaders = render::PrepareWorldShaders(
 				store, owner, Shaders, Renderer, &packet.Interface, Settings.EnablePostProcessing
 			);

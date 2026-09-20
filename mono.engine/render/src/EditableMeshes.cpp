@@ -346,17 +346,24 @@ namespace engine::render {
 			if (accepted) {
 				uploadedRevisions[entity.Id] = revision;
 				uploaded++;
+				uploaded += Lods.RefreshSource(store, renderer, name, built, owner);
 			}
 		});
 
-		return uploaded;
+		return uploaded + Lods.Refresh(store, renderer, owner);
+	}
+
+	size_t EditableMeshUploader::RefreshLods(ecs::Store &store, Renderer &renderer, core::Name owner) {
+		return Lods.Refresh(store, renderer, owner, false);
 	}
 	void EditableMeshUploader::ForgetWorld(uint64_t identity) {
 		std::erase_if(Scopes, [identity](const UploadScope &scope) { return scope.World == identity; });
+		Lods.ForgetWorld(identity);
 	}
 
 	void EditableMeshUploader::ForgetOwner(core::Name owner) {
 		std::erase_if(Scopes, [owner](const UploadScope &scope) { return scope.Owner == owner; });
+		Lods.ForgetOwner(owner);
 	}
 
 }

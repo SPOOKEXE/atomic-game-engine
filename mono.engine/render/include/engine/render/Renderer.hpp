@@ -1574,6 +1574,9 @@ namespace engine::render {
 		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		// Retires one mesh in `owner` without releasing that owner's unrelated resources.
+		// Its storage follows MeshTable's deferred-frame reuse rule.
+		bool DropMesh(const core::Name &name, core::Name owner = {});
 		// Uploads validated, prepacked mesh streams under one content owner.
 		bool AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
 		// Copies a bounded resident mesh for a host-owned export. This never reads

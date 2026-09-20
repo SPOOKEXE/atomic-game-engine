@@ -372,6 +372,9 @@ namespace engine::render {
 		// Retires one content owner. Its ranges become reusable after DEFERRED_FRAMES.
 		// Shared entries are retained; an empty owner is refused. Returns entries retired.
 		size_t DropOwner(core::Name owner);
+		// Releases one exact owner-scoped entry. Its host ranges remain unavailable
+		// until the deferred-frame window closes, like replacement storage.
+		bool Drop(const core::Name &name, core::Name owner);
 
 		// How many meshes are registered.
 		size_t Count() const {
