@@ -49,6 +49,11 @@ namespace engine::graph {
 			ExecutionQueue Queue = ExecutionQueue::Graphics;
 		};
 
+		struct OrdinalRange {
+			size_t First = 0;
+			size_t Count = 0;
+		};
+
 		uint8_t ScopeRank(NodeScope scope) {
 			switch (scope) {
 			case NodeScope::World:
@@ -81,30 +86,22 @@ namespace engine::graph {
 			return resource.Bytes(width, height);
 		}
 
-		std::vector<size_t> InstancesFor(
+		OrdinalRange InstancesFor(
 			ResourceDomain domain, const PlannedInvocation &invocation, size_t worldCount, size_t viewCount
 		) {
 			switch (domain) {
 			case ResourceDomain::World:
 				if (invocation.Scope == NodeScope::Frame) {
-					std::vector<size_t> instances(worldCount);
-					for (size_t index = 0; index < worldCount; index++) {
-						instances[index] = index;
-					}
-					return instances;
+					return {.Count = worldCount};
 				}
-				return {invocation.World};
+				return {.First = invocation.World, .Count = 1};
 			case ResourceDomain::View:
 				if (invocation.Scope == NodeScope::Frame) {
-					std::vector<size_t> instances(viewCount);
-					for (size_t index = 0; index < viewCount; index++) {
-						instances[index] = index;
-					}
-					return instances;
+					return {.Count = viewCount};
 				}
-				return {invocation.View};
+				return {.First = invocation.View, .Count = 1};
 			case ResourceDomain::Frame:
-				return {0};
+				return {.Count = 1};
 			}
 			return {};
 		}
@@ -230,15 +227,16 @@ namespace engine::graph {
 						}
 
 						const uint64_t bytes = BytesOf(*resource, width, height);
-						const std::vector<size_t> instances =
+						const OrdinalRange instances =
 							InstancesFor(domain, invocation, distinctWorlds.size(), worlds.size());
 						if (write) {
-							invocation.WriteBytes += bytes * instances.size();
+							invocation.WriteBytes += bytes * instances.Count;
 						} else {
-							invocation.ReadBytes += bytes * instances.size();
+							invocation.ReadBytes += bytes * instances.Count;
 						}
 
-						for (const size_t ordinal : instances) {
+						for (size_t ordinal = instances.First; ordinal < instances.First + instances.Count;
+							 ordinal++) {
 							const ResourceInstance instance{id, domain, ordinal};
 							const auto owner = owners.find(instance);
 							if (owner != owners.end() && owner->second.Queue != invocation.Scheduled.Queue) {

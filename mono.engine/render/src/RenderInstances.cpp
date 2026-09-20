@@ -175,7 +175,7 @@ namespace engine::render {
 			SDL_PushGPUVertexUniformData(command, 1, &descriptor, sizeof(descriptor));
 			return true;
 		};
-		if (lighting == nullptr) {
+		const auto resetShadowUniforms = [&] {
 			const SDL_GPUTextureSamplerBinding defaultSampler{
 				Textures.Default() != nullptr ? Textures.Default() : FallbackTexture,
 				Textures.Sampler(),
@@ -183,6 +183,10 @@ namespace engine::render {
 			SDL_BindGPUFragmentSamplers(pass, 0, &defaultSampler, 1);
 			const ShadowUniforms defaultUniforms;
 			SDL_PushGPUFragmentUniformData(command, 0, &defaultUniforms, sizeof(defaultUniforms));
+		};
+		bool shadowUniformsDirty = false;
+		if (lighting == nullptr) {
+			resetShadowUniforms();
 		}
 
 		// One draw for one range of one mesh, over `run` consecutive instances.
@@ -197,6 +201,10 @@ namespace engine::render {
 							  bool tallyTriangles) {
 			if (range.IndexCount == 0) {
 				return;
+			}
+			if (lighting == nullptr && simpleShadow && shadowUniformsDirty) {
+				resetShadowUniforms();
+				shadowUniformsDirty = false;
 			}
 
 			const core::Name textureOwner = TextureContentOwner(texture, SlotContentOwner[slot]);
@@ -389,6 +397,7 @@ namespace engine::render {
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+				shadowUniformsDirty = true;
 			}
 
 			if (forcedArguments != nullptr) {
@@ -541,8 +550,17 @@ namespace engine::render {
 
 			uint32_t run = 1;
 			bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;
-			while (slot + run < first + count && SlotsShareRun(slot, slot + run) &&
-				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
+			const bool plainShadow = simpleShadow && base == ShadowPipeline && indirect == nullptr &&
+									 !shader.IsValid() && SlotLod[slot] == NO_LOD_DRAW;
+			while (slot + run < first + count && scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
+				const uint32_t next = slot + run;
+				const bool samePlainShadow = plainShadow && SlotShadowDetail[next] == 0 &&
+											 !SlotShader[next].IsValid() && SlotLod[next] == NO_LOD_DRAW &&
+											 SlotMesh[next] == mesh &&
+											 SlotContentOwner[next] == SlotContentOwner[slot];
+				if (!samePlainShadow && !SlotsShareRun(slot, next)) {
+					break;
+				}
 				simpleShadow = simpleShadow && SlotShadowDetail[slot + run] == 0;
 				run++;
 			}

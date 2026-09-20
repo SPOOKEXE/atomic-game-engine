@@ -150,6 +150,49 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("a frame consumer visits every world and view resource instance", "[graph][execution-plan]") {
+	RenderGraph graph;
+	const ResourceId worldOutput = Resource(graph, "world", ResourceKind::Storage, ResourceFormat::R32F);
+	const ResourceId viewOutput = Resource(graph, "view", ResourceKind::Colour, ResourceFormat::RGBA8);
+
+	Node world = NodeOf("prepare", NodeScope::World);
+	world.Writes = {worldOutput};
+	world.Parameters = {{Name("queue"), "compute"}};
+	const NodeId worldId = graph.AddNode(world);
+	Node view = NodeOf("draw", NodeScope::View);
+	view.Writes = {viewOutput};
+	view.Parameters = {{Name("queue"), "compute"}};
+	const NodeId viewId = graph.AddNode(view);
+	Node frame = NodeOf("present", NodeScope::Frame);
+	frame.Reads = {worldOutput, viewOutput};
+	frame.Parameters = {{Name("queue"), "graphics"}};
+	const NodeId frameId = graph.AddNode(frame);
+
+	const ExecutionSchedule schedule = Schedule(graph);
+	const std::array<uint64_t, 3> worlds = {4, 8, 4};
+	FrameExecutionPlan plan;
+	Name offender;
+	REQUIRE(PlanFrame(graph, schedule, worlds, 16, 16, plan, offender) == ExecutionPlanStatus::Ok);
+	CHECK(plan.ReadBytes == 5 * 1024);
+	REQUIRE(plan.Transfers.size() == 5);
+	for (size_t index = 0; index < 2; index++) {
+		const QueueTransfer &transfer = plan.Transfers[index];
+		CHECK(transfer.Resource == worldOutput);
+		CHECK(transfer.Producer == worldId);
+		CHECK(transfer.Consumer == frameId);
+		CHECK(transfer.View == RunContext::WHOLE_FRAME);
+		CHECK(transfer.World == index);
+	}
+	for (size_t index = 0; index < 3; index++) {
+		const QueueTransfer &transfer = plan.Transfers[index + 2];
+		CHECK(transfer.Resource == viewOutput);
+		CHECK(transfer.Producer == viewId);
+		CHECK(transfer.Consumer == frameId);
+		CHECK(transfer.View == index);
+		CHECK(transfer.World == RunContext::WHOLE_FRAME);
+	}
+}
+
 TEST_CASE("a headless plan still invokes world and frame work", "[graph][execution-plan]") {
 	RenderGraph graph;
 	const ResourceId shadow = Resource(graph, "shadow", ResourceKind::Depth, ResourceFormat::D32F);

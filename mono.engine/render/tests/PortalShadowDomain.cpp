@@ -1,5 +1,6 @@
 #include "RenderFixture.hpp"
 
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/testing/Suite.hpp>
@@ -9,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.portalshadowdomain")
 
@@ -87,6 +89,91 @@ TEST_CASE("split shadow casters share the complete native raster domain", "[rend
 	CHECK(separatelyFitted != source);
 	view.Instances = rows;
 	CHECK(render() == native);
+}
+
+TEST_CASE("plain shadow casters batch across alternating materials", "[render][gpu][shadow-domain][.]") {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	const auto addMaterial = [&](const char *name, uint32_t rgba) {
+		assets::TextureData texture;
+		texture.Width = texture.Height = 1;
+		for (size_t channel = 0; channel < 4; channel++) {
+			texture.Pixels.push_back(std::byte((rgba >> (channel * 8)) & 255u));
+		}
+		REQUIRE(fixture.Render.AddTexture(core::Name(name), texture));
+	};
+	addMaterial("material.first", 0xFF0000FFu);
+	addMaterial("material.second", 0xFF00FF00u);
+	std::array<scene::DrawInstance, 3> rows;
+	for (size_t index = 0; index < rows.size(); index++) {
+		rows[index].Source = index + 1;
+		rows[index].Frame.Position = {static_cast<float>(index) - 1.0f, 0.0f, -4.0f};
+		rows[index].HalfExtent = {.35f, .5f, .3f};
+		rows[index].CastShadow = true;
+		rows[index].Texture = core::Name("material.first");
+	}
+	SceneTarget target{65, 37};
+	View view;
+	view.Target = &target;
+	view.Instances = rows;
+	view.OverrideLighting = true;
+	view.Lighting.Direction = core::Vector3{-.8f, -.3f, -.6f}.Unit();
+	OverlayImage overlay;
+	const auto render = [&] {
+		const FrameResult result = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(result.Ran(core::Name("shadow")));
+		return std::pair{result.DrawCalls, ShadowSamples(fixture.Render)};
+	};
+	const auto uniform = render();
+	rows[1].Texture = core::Name("material.second");
+	const auto alternating = render();
+	// The two opaque material runs remain, while the built-in shadow pass has
+	// one draw for all three casters.
+	CHECK(alternating.first == uniform.first + 2);
+	CHECK(alternating.second == uniform.second);
+}
+
+TEST_CASE(
+	"a plain caster resets shadow uniforms after a detailed caster", "[render][gpu][shadow-domain][.]"
+) {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	std::array<scene::DrawInstance, 2> rows;
+	rows[0].Source = 1;
+	rows[0].Frame.Position = {-0.7f, 0.0f, -4.0f};
+	rows[0].HalfExtent = {.45f, .6f, .3f};
+	rows[0].CastShadow = true;
+	rows[0].SeamNormal = {1.0f, 0.0f, 0.0f};
+	rows[1].Source = 2;
+	rows[1].Frame.Position = {0.9f, 0.0f, -4.0f};
+	rows[1].HalfExtent = {.4f, .55f, .3f};
+	rows[1].CastShadow = true;
+	SceneTarget target{65, 37};
+	View view;
+	view.Target = &target;
+	view.Instances = rows;
+	view.OverrideLighting = true;
+	view.Lighting.Direction = core::Vector3{-.8f, -.3f, -.6f}.Unit();
+	OverlayImage overlay;
+	const auto render = [&] {
+		REQUIRE(
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("shadow"))
+		);
+		return ShadowSamples(fixture.Render);
+	};
+	const auto combined = render();
+	view.DirectionalShadowBounds = graph::BoundsOfAll(rows);
+	view.Instances = std::span(rows).first(1);
+	const auto detailed = render();
+	view.Instances = std::span(rows).last(1);
+	const auto plain = render();
+	REQUIRE(combined.size() == detailed.size());
+	REQUIRE(combined.size() == plain.size());
+	size_t mismatches = 0;
+	for (size_t pixel = 0; pixel < combined.size(); pixel++) {
+		mismatches += combined[pixel] != std::min(detailed[pixel], plain[pixel]);
+	}
+	CHECK(mismatches == 0);
 }
 
 TEST_CASE(
