@@ -889,7 +889,7 @@ TEST_CASE("scene cache causes are signed independently", "[render][presentation]
 }
 
 TEST_CASE(
-	"particle visibility ignores simulation time but notices camera and resident changes",
+	"particle visibility notices simulation time, camera, and resident changes",
 	"[render][presentation][cache]"
 ) {
 	engine::render::View view;
@@ -901,7 +901,7 @@ TEST_CASE(
 
 	const uint64_t original = engine::render::ParticleVisibilitySignature(view);
 	view.ParticleRevision++;
-	CHECK(engine::render::ParticleVisibilitySignature(view) == original);
+	CHECK(engine::render::ParticleVisibilitySignature(view) != original);
 
 	view.CameraFrame.Position.X = 1.0f;
 	CHECK(engine::render::ParticleVisibilitySignature(view) != original);

@@ -170,15 +170,22 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	view.World = 71;
 	view.WorldName = core::Name("headless-gpu-world");
 	view.Pipeline = pipelineName;
-	view.Particles = particles;
 	view.ParticleRevision = 1;
 	view.ParticleLayoutRevision = 1;
 	view.ParticleResidentRevision = 1;
 	view.ParticleDelta = 1.0f / 60.0f;
-	view.ParticleBlocks = 1;
-	view.ParticlePool = block.Capacity;
 
 	render::OverlayImage overlay;
+	// A world can publish its initial empty particle snapshot before the first
+	// emitter claims a block. The next frame must stage that block even though
+	// both snapshots begin their revision counters at one.
+	const std::array<render::View, 1> emptyViews{view};
+	const render::FrameResult emptyFrame = renderer.Render(emptyViews, overlay, nullptr, false);
+	CHECK(emptyFrame.Particles == 0);
+
+	view.Particles = particles;
+	view.ParticleBlocks = 1;
+	view.ParticlePool = block.Capacity;
 	const core::Name inspectedResource("albedo");
 	renderer.Inspect(inspectedResource, 0);
 	const std::array<render::View, 1> views{view};

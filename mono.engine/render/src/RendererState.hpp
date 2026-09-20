@@ -55,6 +55,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1519,9 +1520,11 @@ namespace engine::render {
 			// record itself**, because comparing the record means reading both
 			// copies of ninety-six bytes for every emitter every frame - which at
 			// a hundred thousand of them is most of the traffic the counter exists
-			// to avoid. Zero means "never told", which is what a block index
-			// nobody has claimed yet reads as.
+			// to avoid. `EmitterBlock` revisions begin at zero, so the sentinel
+			// must be outside that initial value or a new block would never reach
+			// its device table.
 			//@{
+			static constexpr uint32_t UNUPLOADED_REVISION = std::numeric_limits<uint32_t>::max();
 			std::vector<uint32_t> ParamRevision;
 			std::vector<uint32_t> CurveRevision;
 			//@}
@@ -1957,8 +1960,16 @@ namespace engine::render {
 					if (world.StateInitialisationPending) {
 						world.Pool.Slots = 0;
 					}
-					std::fill(world.Pool.ParamRevision.begin(), world.Pool.ParamRevision.end(), 0);
-					std::fill(world.Pool.CurveRevision.begin(), world.Pool.CurveRevision.end(), 0);
+					std::fill(
+						world.Pool.ParamRevision.begin(),
+						world.Pool.ParamRevision.end(),
+						ParticlePool::UNUPLOADED_REVISION
+					);
+					std::fill(
+						world.Pool.CurveRevision.begin(),
+						world.Pool.CurveRevision.end(),
+						ParticlePool::UNUPLOADED_REVISION
+					);
 				}
 				world.PendingDelta = 0.0f;
 				world.SubmissionPending = false;

@@ -621,8 +621,8 @@ namespace engine::render {
 		Particles.EmitterRuntime = emitterRuntime;
 		Particles.EmitterRuntimeStaging = runtimeStaging;
 		Particles.TableRows = rows;
-		Particles.ParamRevision.assign(rows, 0);
-		Particles.CurveRevision.assign(rows, 0);
+		Particles.ParamRevision.assign(rows, ParticlePool::UNUPLOADED_REVISION);
+		Particles.CurveRevision.assign(rows, ParticlePool::UNUPLOADED_REVISION);
 		Particles.CullRecords.resize(rows);
 		return true;
 	}
@@ -1061,8 +1061,11 @@ namespace engine::render {
 			return {};
 		}
 
-		const bool refresh = !ActiveParticleWorld->PreparedRevisionValid ||
-							 ActiveParticleWorld->ResidentRefreshPending ||
+		const bool rebuildLayout =
+			!ActiveParticleWorld->PreparedRevisionValid ||
+			ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision ||
+			ActiveParticleWorld->PreparedBatches.size() != batches.size();
+		const bool refresh = rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
 							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision;
 		if (!refresh) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
@@ -1076,8 +1079,6 @@ namespace engine::render {
 			ActiveParticleWorld->PreparedFrame = FrameCounter;
 			return {ActiveParticleWorld->PreparedCount, 0};
 		}
-		const bool rebuildLayout = !ActiveParticleWorld->PreparedRevisionValid ||
-								   ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision;
 		const bool refreshResident =
 			rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
 			ActiveParticleWorld->PreparedResidentRevision != view.ParticleResidentRevision;
@@ -1381,8 +1382,12 @@ namespace engine::render {
 			ActiveParticleWorld->PreparedRevisionValid = false;
 			ActiveParticleWorld->CarriedDelta = Particles.Delta;
 			ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
-			std::fill(Particles.ParamRevision.begin(), Particles.ParamRevision.end(), 0);
-			std::fill(Particles.CurveRevision.begin(), Particles.CurveRevision.end(), 0);
+			std::fill(
+				Particles.ParamRevision.begin(), Particles.ParamRevision.end(), ParticlePool::UNUPLOADED_REVISION
+			);
+			std::fill(
+				Particles.CurveRevision.begin(), Particles.CurveRevision.end(), ParticlePool::UNUPLOADED_REVISION
+			);
 			return {};
 		}
 		Particles.SimulatedSeconds += std::max(static_cast<double>(Particles.Delta), 0.0);
