@@ -98,6 +98,11 @@ TEST_CASE("stable command ids resolve without relying on enum order", "[studio][
 	const Keybind *play = Keybinds::Find("run.play");
 	REQUIRE(play != nullptr);
 	CHECK(play->Bound == Action::Play);
+
+	const Keybind *preferences = Keybinds::Find("panel.preferences");
+	REQUIRE(preferences != nullptr);
+	CHECK(preferences->Bound == Action::ShowPreferences);
+	CHECK_FALSE(preferences->Keys.IsBound());
 	CHECK(Keybinds::Find("command.that.does.not.exist") == nullptr);
 }
 

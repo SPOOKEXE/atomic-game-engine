@@ -127,6 +127,12 @@ namespace studio {
 			 Scope::Global,
 			 {}},
 			{Action::ShowHeap, "panel.heap", "Heap", "Show where the memory went", Scope::Global, {}},
+			{Action::ShowPreferences,
+			 "panel.preferences",
+			 "Preferences",
+			 "Show or hide Studio preferences",
+			 Scope::Global,
+			 {}},
 
 			{Action::CommandPalette,
 			 "panel.palette",

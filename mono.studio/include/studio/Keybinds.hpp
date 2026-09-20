@@ -64,6 +64,7 @@ namespace studio {
 		ShowStatistics,
 		ShowFrameGraph,
 		ShowHeap,
+		ShowPreferences,
 
 		// The four manipulators.
 		//

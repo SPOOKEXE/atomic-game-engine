@@ -209,6 +209,11 @@ namespace studio {
 		Operators.Add({Action::ShowHeap, "Heap", "Show where the memory went", always, [this] {
 						   ShowHeap = true;
 					   }});
+		Operators.Add({Action::ShowPreferences,
+						   "Preferences",
+						   "Show or hide Studio preferences",
+						   always,
+						   [this] { ShowSettings = !ShowSettings; }});
 
 		Operators.Add({Action::CommandPalette, "Command Palette", "Find and run any command", always, [this] {
 						   ShowPalette = !ShowPalette;
