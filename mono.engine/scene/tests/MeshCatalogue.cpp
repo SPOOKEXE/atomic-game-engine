@@ -74,6 +74,17 @@ TEST_CASE("a recorded mesh reports its triangles", "[scene][meshcatalogue]") {
 	CHECK(TrianglesOf(store, Name("catalogue_test/fox.amesh")) == 9);
 }
 
+TEST_CASE("a recorded mesh reports authored bounds", "[scene][meshcatalogue]") {
+	Store store = Fresh("mesh_catalogue_test.bounds");
+	const Name mesh("catalogue_test/character.amesh");
+	REQUIRE(RecordMesh(store, mesh, 12, {}, {}, engine::core::Vector3{2.0f, 6.0f, 1.0f}));
+	const engine::core::Vector3 size = engine::scene::MeshSizeOf(store, mesh);
+	CHECK(size.X == 2.0f);
+	CHECK(size.Y == 6.0f);
+	CHECK(size.Z == 1.0f);
+	CHECK(engine::scene::MeshSizeOf(store, Name()).MagnitudeSquared() == 0.0f);
+}
+
 TEST_CASE("an unknown mesh is zero rather than a guess", "[scene][meshcatalogue]") {
 	Store store = Fresh("mesh_catalogue_test.unknown");
 	REQUIRE(RecordMesh(store, Name("catalogue_test/known.amesh"), 4));

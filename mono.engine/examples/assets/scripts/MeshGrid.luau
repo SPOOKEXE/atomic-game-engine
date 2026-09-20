@@ -499,6 +499,13 @@ RunService.Heartbeat:Connect(function()
 
 
 	local meshes = everyMesh()
+	for mesh, cell in pairs(placed) do
+		local bounds = ContentService:GetMeshSize(mesh)
+		local longest = math.max(bounds.X, bounds.Y, bounds.Z)
+		if longest > 0 then
+			cell.Part.Size = bounds * (MODEL_SIZE / longest)
+		end
+	end
 	if #meshes == known then
 		return
 	end

@@ -2600,6 +2600,8 @@ declare interface ContentService {
 	// its slot as an empty string.
 	GetMeshTextures(mesh: string): string[];
 
+	GetMeshSize(mesh: string): Vector3;
+
 	GetTextures(): string[];
 
 	// Null for a still image and for a texture this world has not been told

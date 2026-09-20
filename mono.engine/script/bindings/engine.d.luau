@@ -2968,6 +2968,9 @@ declare extern type ContentService with
 	-- character wearing one sheet all over.
 	function GetMeshTextures(self, mesh: string): { string }
 
+	-- Authored object-space mesh dimensions, or zero before content arrives.
+	function GetMeshSize(self, mesh: string): Vector3
+
 	-- Every texture registered in this world, sorted.
 	function GetTextures(self): { string }
 
