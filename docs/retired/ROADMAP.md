@@ -2890,3 +2890,6 @@ as datatypes? we can do a 3D and 2D vector field and particles can read directly
 - [x] adornment mouse events
 - [x] optimisations over new render pipeline
 - [x] editablemesh input fixes
+- [x] show active LOD and view LOD debug radius
+- [x] active LOD readonly value
+- [x] preferences for LOD radius distances
