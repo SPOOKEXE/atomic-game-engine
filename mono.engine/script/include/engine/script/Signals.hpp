@@ -175,8 +175,8 @@ namespace engine::script {
 		GuiMouseButton1Changed,
 		//@}
 
-		// The virtual secondary-button route. The physical router currently owns
-		// one primary pointer, so only virtual controls can produce these.
+		// The secondary-button route. Interactive adornments and virtual controls
+		// both produce these beside their respective capture paths.
 		//@{
 		GuiMouseButton2Click,
 		GuiMouseButton2Down,
