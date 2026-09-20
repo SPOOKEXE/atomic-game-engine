@@ -200,7 +200,8 @@ namespace engine::assets {
 			uint32_t submesh,
 			size_t &count,
 			size_t target,
-			MeshReduction reduction
+			MeshReduction reduction,
+			std::stop_token stop
 		) {
 			const FaceAdjacency adjacency = BuildFaceAdjacency(vertices.size(), triangles);
 			float bestCost = std::numeric_limits<float>::infinity();
@@ -210,6 +211,7 @@ namespace engine::assets {
 			bool found = false;
 
 			for (size_t index = 0; index < triangles.size(); index++) {
+				if (stop.stop_requested()) return false;
 				if (owners[index] != submesh || Degenerate(triangles[index])) {
 					continue;
 				}
@@ -286,6 +288,7 @@ namespace engine::assets {
 			}
 			MergeVertex(vertices[bestLeft], vertices[bestRight]);
 			for (Triangle &triangle : triangles) {
+				if (stop.stop_requested()) return false;
 				for (uint32_t &index : triangle) {
 					if (index == bestRight) {
 						index = bestLeft;
@@ -298,7 +301,9 @@ namespace engine::assets {
 	}
 
 	namespace {
-		bool Reduce(const MeshData &source, float ratio, MeshData &out, MeshReduction reduction) {
+		bool Reduce(
+			const MeshData &source, float ratio, MeshData &out, MeshReduction reduction, std::stop_token stop
+		) {
 			if (&source == &out || !source.IsValid() || !(ratio > 0.0f) || ratio > 1.0f) {
 				return false;
 			}
@@ -341,14 +346,16 @@ namespace engine::assets {
 
 			std::vector<MeshVertex> vertices = source.Vertices;
 			for (uint32_t submesh = 0; submesh < runCount; submesh++) {
+				if (stop.stop_requested()) return false;
 				size_t count = 0;
 				for (size_t index = 0; index < triangles.size(); index++) {
 					count += owners[index] == submesh && !Degenerate(triangles[index]) ? 1u : 0u;
 				}
 				if (count == 0) continue;
 				const size_t target = std::max<size_t>(1, static_cast<size_t>(std::floor(count * ratio)));
-				while (count > target &&
-					   CollapseOne(vertices, triangles, owners, submesh, count, target, reduction)) {}
+				while (!stop.stop_requested() && count > target &&
+					   CollapseOne(vertices, triangles, owners, submesh, count, target, reduction, stop)) {}
+				if (stop.stop_requested()) return false;
 				if (count > target) {
 					// A boundary, skin or material seam can leave no legal collapse. Keep
 					// the largest faces so the fallback removes the least visible area.
@@ -403,11 +410,19 @@ namespace engine::assets {
 	}
 
 	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out) {
-		return Reduce(source, ratio, out, MeshReduction::Decimation);
+		return DecimateMesh(source, ratio, out, {});
+	}
+
+	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop) {
+		return Reduce(source, ratio, out, MeshReduction::Decimation, stop);
 	}
 
 	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out) {
-		return Reduce(source, ratio, out, MeshReduction::SurfaceArea);
+		return ReduceMesh(source, ratio, out, {});
+	}
+
+	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop) {
+		return Reduce(source, ratio, out, MeshReduction::SurfaceArea, stop);
 	}
 
 	bool BuildMeshLodLadder(const MeshData &source, std::span<const float> ratios, std::span<MeshData> out) {

@@ -7,10 +7,16 @@
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <mutex>
 #include <span>
+#include <stop_token>
+#include <thread>
 #include <vector>
 
 namespace engine::ecs {
@@ -69,22 +75,53 @@ namespace engine::render {
 		void ForgetOwner(core::Name owner);
 
 	  private:
+		struct Request {
+			core::Name Name;
+			float Ratio = 0.0f;
+			scene::LodStrategy Strategy = scene::LodStrategy::None;
+			bool operator==(const Request &) const = default;
+		};
+		struct Job {
+			uint64_t World = 0;
+			core::Name Owner;
+			core::Name Base;
+			uint64_t Generation = 0;
+			std::mutex Guard;
+			std::vector<AutomaticMeshLodArtifact> Result;
+			bool Ready = false;
+			std::jthread Worker;
+		};
+		struct Queued {
+			uint64_t Ticket = 0;
+			uint64_t Generation = 0;
+			assets::MeshData Mesh;
+			std::vector<Request> Requests;
+		};
 		struct Source {
 			core::Name Base;
 			std::vector<core::Name> Artifacts;
+			std::vector<Request> Requested;
 			bool Changed = true;
+			uint64_t Generation = 0;
+			std::unique_ptr<Queued> Next;
 		};
 		struct Scope {
 			uint64_t World = 0;
 			core::Name Owner;
 			std::vector<Source> Sources;
 		};
+		static std::vector<Request> Requests(ecs::Store &store, core::Name base);
+		static std::vector<AutomaticMeshLodArtifact>
+		Build(const assets::MeshData &mesh, std::span<const Request> requests, std::stop_token stop);
+		void Start(uint64_t world, core::Name owner, Source &source);
+		size_t Collect(ecs::Store &store, Renderer &renderer);
 		size_t RefreshStored(
 			ecs::Store &store,
 			Renderer &renderer,
 			Source &source,
-			const std::vector<core::Name> &wanted,
-			core::Name owner
+			const std::vector<Request> &wanted,
+			core::Name owner,
+			const assets::MeshData *provided = nullptr
 		);
 		bool ResolveSource(
 			ecs::Store &store,
@@ -98,5 +135,8 @@ namespace engine::render {
 			ecs::Store &store, Renderer &renderer, core::Name owner, std::span<const core::Name> artifacts
 		);
 		std::vector<Scope> Scopes;
+		std::unique_ptr<Job> Active;
+		std::vector<std::unique_ptr<Job>> Completed;
+		uint64_t NextTicket = 0;
 	};
 }

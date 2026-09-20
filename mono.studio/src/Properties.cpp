@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <imgui.h>
 #include <optional>
@@ -51,6 +52,42 @@ namespace studio {
 	using engine::game::WriteProperty;
 
 	namespace {
+
+		bool IsAutomaticLodRatio(std::string_view spelling) {
+			return spelling == "AutoLod1Ratio" || spelling == "AutoLod2Ratio" || spelling == "AutoLod3Ratio";
+		}
+
+		bool DrawAutomaticLodRatio(float &value) {
+			ImGuiStorage *storage = ImGui::GetStateStorage();
+			const ImGuiID valueId = ImGui::GetID("##v");
+			const ImGuiID activeId = ImGui::GetID("##auto-lod-active");
+			const bool wasActive = storage->GetBool(activeId, false);
+			float pending = wasActive ? storage->GetFloat(valueId, value) : value;
+			const float previous = pending;
+			const bool changed =
+				ImGui::SliderFloat("##v", &pending, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+			if (changed) {
+				const float previousStep = std::round(previous / 0.05f) * 0.05f;
+				pending = std::clamp(std::round(pending / 0.05f) * 0.05f, 0.0f, 1.0f);
+				if (ImGui::IsItemFocused() && pending == previousStep) {
+					const bool right = ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) ||
+									   ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, true);
+					const bool left = ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true) ||
+									  ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, true);
+					if (right != left) {
+						pending = std::clamp(previousStep + (right ? 0.05f : -0.05f), 0.0f, 1.0f);
+					}
+				}
+			}
+			const bool active = ImGui::IsItemActive();
+			storage->SetFloat(valueId, pending);
+			storage->SetBool(activeId, active);
+			if (!wasActive || active || !ImGui::IsItemDeactivatedAfterEdit()) {
+				return false;
+			}
+			value = pending;
+			return true;
+		}
 
 		bool ReadSchemaValue(const void *component, const FieldDescriptor &field, PropertyValue &value) {
 			alignas(8) std::array<std::byte, 8> scratch{};
@@ -957,7 +994,17 @@ namespace studio {
 						break;
 
 					case PropertyType::Float:
-						wrote = ImGui::DragFloat("##v", &changed.Float, StepFor(changed.Float));
+						if (IsAutomaticLodRatio(descriptor->Spelling)) {
+							// The pending drag belongs to the selected world and primary
+							// entity. A new selection must not inherit an old mouse-up.
+							ImGui::PushID(SelectionWorld.Index);
+							ImGui::PushID(primary->Id);
+							wrote = DrawAutomaticLodRatio(changed.Float);
+							ImGui::PopID();
+							ImGui::PopID();
+						} else {
+							wrote = ImGui::DragFloat("##v", &changed.Float, StepFor(changed.Float));
+						}
 						break;
 
 					case PropertyType::Double:

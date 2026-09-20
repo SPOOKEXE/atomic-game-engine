@@ -9,6 +9,7 @@
 #include <engine/assets/Mesh.hpp>
 
 #include <span>
+#include <stop_token>
 
 namespace engine::assets {
 	// How a generated mesh ladder ranks legal reductions.
@@ -34,6 +35,9 @@ namespace engine::assets {
 	// @return `false` for an invalid input, ratio, alias, or a mesh that cannot
 	//         retain at least one triangle in every populated submesh.
 	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out);
+	// As above, but stops before publishing an incomplete mesh when the caller
+	// supersedes an interactive bake.
+	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop);
 
 	// Produces a coarser mesh by removing the least visible surface first.
 	//
@@ -43,6 +47,7 @@ namespace engine::assets {
 	// the large faces that will occupy the most screen space across views while
 	// retaining the same winding, material, and skinning guards as DecimateMesh.
 	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out);
+	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop);
 
 	// Builds every generated mesh in one LOD ladder from the same base mesh.
 	//

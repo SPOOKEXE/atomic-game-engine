@@ -116,6 +116,18 @@ TEST_CASE("an automatic mesh ladder publishes independent valid mesh data", "[as
 }
 
 TEST_CASE(
+	"mesh decimation refuses zero and retains one face for a tiny positive ratio", "[assets][mesh-decimate]"
+) {
+	using namespace engine::assets;
+	const MeshData source = QuadPair();
+	MeshData output;
+	CHECK_FALSE(DecimateMesh(source, 0.0f, output));
+	REQUIRE(DecimateMesh(source, 0.000001f, output));
+	CHECK(output.IsValid());
+	CHECK(output.Indices.size() == 3);
+}
+
+TEST_CASE(
 	"mesh decimation handles a shared 1152-triangle grid deterministically", "[assets][mesh-decimate]"
 ) {
 	using namespace engine::assets;

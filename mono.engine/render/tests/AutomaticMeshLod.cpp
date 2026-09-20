@@ -11,6 +11,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <thread>
+
 TEST_SUITE_ID("engine.render.automaticmeshlod")
 TEST_DEPENDS("engine.assets.mesh-decimate")
 TEST_DEPENDS("engine.scene.levelofdetail")
@@ -33,6 +36,15 @@ namespace {
 		}
 		mesh.ComputeBounds();
 		return mesh;
+	}
+
+	template <typename Uploader>
+	size_t RefreshUntil(Uploader &uploader, engine::ecs::Store &store, engine::render::Renderer &renderer) {
+		for (size_t attempt = 0; attempt < 3000; attempt++) {
+			if (const size_t uploaded = uploader.Refresh(store, renderer); uploaded != 0) return uploaded;
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		return 0;
 	}
 }
 
@@ -83,7 +95,7 @@ TEST_CASE(
 	store.Set(part, policy);
 
 	render::EditableMeshUploader uploader;
-	REQUIRE(uploader.RefreshLods(store, fixture.Render) == 2);
+	REQUIRE(RefreshUntil(uploader, store, fixture.Render) == 2);
 	const core::Name first = scene::AutoMeshLodArtifactName(base, 1, 0.35f);
 	const core::Name second = scene::AutoMeshLodArtifactName(base, 2, 0.12f);
 	const uint32_t baseTriangles = scene::TrianglesOf(store, base);
@@ -95,7 +107,7 @@ TEST_CASE(
 	auto *edited = store.GetMutable<scene::AutoMeshLOD>(part);
 	REQUIRE(edited != nullptr);
 	edited->Ratios[0] = 0.5f;
-	CHECK(uploader.RefreshLods(store, fixture.Render) == 2);
+	CHECK(RefreshUntil(uploader, store, fixture.Render) == 2);
 	const core::Name replacement = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
 	CHECK(scene::TrianglesOf(store, replacement) > firstTriangles);
 }
@@ -127,8 +139,8 @@ TEST_CASE(
 	const ecs::Entity secondPart = addPolicy(second);
 
 	render::EditableMeshUploader uploader;
-	REQUIRE(uploader.RefreshLods(first, fixture.Render) == 1);
-	CHECK(uploader.RefreshLods(second, fixture.Render) == 1);
+	REQUIRE(RefreshUntil(uploader, first, fixture.Render) == 1);
+	CHECK(RefreshUntil(uploader, second, fixture.Render) == 1);
 	core::Vector3 extent;
 	REQUIRE(fixture.Render.MeshExtentOf(artifact, extent));
 
@@ -139,6 +151,43 @@ TEST_CASE(
 	second.Remove<scene::AutoMeshLOD>(secondPart);
 	CHECK(uploader.RefreshLods(second, fixture.Render) == 0);
 	CHECK_FALSE(fixture.Render.MeshExtentOf(artifact, extent));
+}
+
+TEST_CASE(
+	"automatic LOD ignores stale jobs and zero releases published artifacts",
+	"[render][gpu][lod][automatic][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("lod.async-boundary");
+	const core::Name base("lod.async-source");
+	const ecs::Entity part = store.Create();
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::AutoMeshLOD policy;
+	policy.Levels = 2;
+	policy.Ratios[0] = 0.5f;
+	store.Set(part, policy);
+
+	render::AutomaticMeshLodUploader uploader;
+	const assets::MeshData source = Grid(8);
+	REQUIRE(uploader.RefreshSource(store, fixture.Render, base, source) == 0);
+	REQUIRE(RefreshUntil(uploader, store, fixture.Render) == 1);
+	const core::Name published = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	core::Vector3 extent;
+	REQUIRE(fixture.Render.MeshExtentOf(published, extent));
+
+	auto *edited = store.GetMutable<scene::AutoMeshLOD>(part);
+	REQUIRE(edited != nullptr);
+	edited->Ratios[0] = 0.000001f;
+	CHECK(uploader.RefreshSource(store, fixture.Render, base, source) == 0);
+	edited->Ratios[0] = 0.0f;
+	CHECK(uploader.Refresh(store, fixture.Render) == 0);
+	CHECK_FALSE(fixture.Render.MeshExtentOf(published, extent));
+	CHECK_FALSE(fixture.Render.MeshExtentOf(scene::AutoMeshLodArtifactName(base, 1, 0.000001f), extent));
 }
 
 TEST_CASE("automatic mesh LOD planning builds and shares real artifacts", "[render][lod][automatic]") {
