@@ -68,6 +68,7 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `gui.Adornment` | 32 | 8 | yes | yes | . | . | The half of a 3D adornment this module owns: which instance a `SelectionBox` or handle adornment is drawn around, in what colour, and whether it draws. |
+| `gui.AdornmentInteraction` | 4 | 1 | yes | yes | . | . | Opt-in pointer input for a 3D adornment. The renderer marks its geometry pickable only while enabled, so decorative adornments never steal scene input. |
 | `gui.ArcHandlesShape` | 4 | 4 | yes | yes | . | . | The axis mask drawn by an `ArcHandles` instance. |
 | `gui.AspectRatio` | 8 | 4 | yes | yes | . | . | `UIAspectRatioConstraint`: forces the parent element's resolved size to a width-over-height ratio, derived from whichever axis dominates. |
 | `gui.Background` | 36 | 4 | yes | yes | . | . | The box a `GuiObject` draws for itself: fill colour and transparency, plus the border's colour, thickness and inset mode. |
@@ -185,7 +186,7 @@ state until v0.19.
 | `scene.LocalTransparency` | 4 | 4 | yes | . | . | . | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching. |
 | `scene.MaterialCatalogue` | 80 | 8 | yes | . | . | . | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved. |
 | `scene.MaterialRef` | 8 | 4 | yes | . | . | . | On a `Material` instance: which material asset it names and which shader draws the parts wearing it. `ResolveMaterials` reads it onto every such part. |
-| `scene.MeshCatalogue` | 168 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
+| `scene.MeshCatalogue` | 224 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
 | `scene.Motion` | 24 | 4 | yes | yes | . | 12 | Linear and angular velocity in world space. Physics integrates it every tick for every body carrying `Simulated`; gravity and the control pass write it. |
 | `scene.NetworkOwner` | 8 | 8 | yes | yes | . | . | Which `Player` simulates this body; a null handle means the server does. `ReclaimAbandonedOwnership` scans it every tick and clears owners that have gone. |
 | `scene.NumberValue` | 8 | 8 | yes | yes | . | . | The double-precision number stored by a `NumberValue` instance. |
@@ -276,4 +277,4 @@ state until v0.19.
 
 ---
 
-199 components registered by the engine, 0 without a purpose line.
+200 components registered by the engine, 0 without a purpose line.
