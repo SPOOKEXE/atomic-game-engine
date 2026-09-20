@@ -109,23 +109,29 @@ namespace engine::render {
 				std::span<const effects::RibbonRun> ribbonRuns = Request.RibbonRuns;
 				if (RibbonCount > 0 && entry.Kind == SurfaceCaptureKind::Portal) {
 					const PortalView &portal = Request.Portals[entry.Source];
-					if (portal.Partner < 0 || size_t(portal.Partner) >= Request.Portals.size()) {
-						return false;
+					// Partner identifies a surface slot, while Portals is not slot-indexed.
+					const auto partner = std::find_if(
+						Request.Portals.begin(), Request.Portals.end(), [&](const PortalView &candidate) {
+							return candidate.Index == portal.Partner;
+						}
+					);
+					if (partner != Request.Portals.end()) {
+						if (!effects::ProjectRibbonsThroughPortal(
+								Request.RibbonVertices,
+								Request.RibbonRuns,
+								partner->Centre,
+								// The far aperture's capture-facing half-space is opposite its outward
+								// normal.
+								partner->Normal * -1.0f,
+								core::CFrame{},
+								1.0f,
+								bank.CaptureRibbonSource,
+								bank.CaptureRibbonRuns
+							)) {
+							return false;
+						}
+						ribbonRuns = bank.CaptureRibbonRuns;
 					}
-					const PortalView &partner = Request.Portals[portal.Partner];
-					if (!effects::ProjectRibbonsThroughPortal(
-							Request.RibbonVertices,
-							Request.RibbonRuns,
-							partner.Centre,
-							partner.Normal,
-							core::CFrame{},
-							1.0f,
-							bank.CaptureRibbonSource,
-							bank.CaptureRibbonRuns
-						)) {
-						return false;
-					}
-					ribbonRuns = bank.CaptureRibbonRuns;
 				}
 				if (RibbonCount > 0) {
 					if (!effects::FaceRibbonVertices(

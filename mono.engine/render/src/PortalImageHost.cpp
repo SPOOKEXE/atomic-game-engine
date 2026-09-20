@@ -1025,7 +1025,13 @@ namespace engine::render {
 		if (!token || !state.Clock(now)) return {};
 		state.AdvanceBody(now);
 		if (!state.BodyJob || state.BodyJob->Token != token) return {};
-		PortalTreeCompositionProgress progress{.Status = state.BodyJob->Status};
+		// The host owns retries while its capture lease is valid, so callers only need
+		// to distinguish a completed image from a refused composition.
+		PortalTreeCompositionProgress progress{
+			.Status = state.BodyJob->Status == PortalTreeCompositionStatus::BudgetExceeded
+						  ? PortalTreeCompositionStatus::Pending
+						  : state.BodyJob->Status
+		};
 		if (state.BodyJob->Stage == Impl::BodyStage::Complete) {
 			progress.Status = PortalTreeCompositionStatus::Complete;
 			progress.Image = state.BodyJob->Image;
@@ -1104,7 +1110,11 @@ namespace engine::render {
 		);
 		if (found != state.PreparedBodies.end()) return {.Status = PortalTreeCompositionStatus::Complete};
 		if (state.BodyJob && (state.BodyJob->Token == token || state.BodyJob->PreparationToken == token))
-			return {.Status = state.BodyJob->Status};
+			return {
+				.Status = state.BodyJob->Status == PortalTreeCompositionStatus::BudgetExceeded
+							  ? PortalTreeCompositionStatus::Pending
+							  : state.BodyJob->Status
+			};
 		return {};
 	}
 	void PortalImageHost::CancelBodyPreparation(uint64_t token) {
