@@ -2088,13 +2088,14 @@ namespace studio {
 			canvas.PointerX,
 			canvas.PointerY,
 		};
-		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+		const bool selected = FocusedIsViewport && FocusedViewport == index;
+		pointer.Down = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
 		pointer.ScreenOnly = true;
 
 		// The same notches the client hands over, so a `ScrollingFrame` moves by
 		// the same amount in the editor as in the game. `pointer.Inside` below
 		// is what stops a wheel meant for a docked panel reaching the world.
-		pointer.Wheel = ImGui::GetIO().MouseWheel;
+		pointer.Wheel = selected ? ImGui::GetIO().MouseWheel : 0.0f;
 
 		// **imgui owns the mouse whenever it is over its own chrome**, and a
 		// panel docked over the viewport is exactly that. Without this the
@@ -2117,7 +2118,7 @@ namespace studio {
 		// on the way past.
 		const bool driving = viewport != nullptr ? viewport->Active : ViewportActive;
 
-		pointer.Inside = (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
+		pointer.Inside = selected && (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
 						 ImGui::IsMouseHoveringRect(
 							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
 						 );
@@ -2175,10 +2176,9 @@ namespace studio {
 			// world is invisible to imgui, so that flag is false exactly when
 			// this should run.
 			//
-			// **Only for the panel in front, and only while the keyboard is
-			// actually in it.** With two viewports open both route their own
-			// pointer, so a character typed once would otherwise arrive twice in
-			// two different scenes.
+			// **Only for the selected panel, and only while the keyboard is
+			// actually in it.** The same selection gate routes pointer input, so
+			// text and pointer events stay with one viewport.
 			//
 			// `FocusedIsViewport` as well as `FocusedViewport`, and the header on
 			// the pair says why: the index keeps naming the last viewport when

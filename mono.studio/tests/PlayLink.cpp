@@ -1384,6 +1384,19 @@ namespace {
 			ImGui::NewFrame();
 			Open = true;
 		}
+
+		void HoldPointer(bool down, float wheel) {
+			if (Open) {
+				ImGui::EndFrame();
+				Open = false;
+			}
+			ImGui::NewFrame();
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+			ImGui::GetIO().AddMouseWheelEvent(0.0f, wheel);
+			ImGui::EndFrame();
+			ImGui::NewFrame();
+			Open = true;
+		}
 	};
 }
 
@@ -1459,10 +1472,9 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 
 	frame.HoldKey(ImGuiKey_W, true);
 
-	// Hovered, which is what a pointer over the panel gives it. Not focused and
-	// not active: the pointer alone has to be enough, because that is the rule
-	// `DriveCamera` resolves the target with.
-	CHECK(editor.DrivePlayer(replica, true, false, false));
+	// Selection owns the keyboard. Pointer ownership adds mouse input, but a
+	// hovered panel cannot make a client walk until that viewport is selected.
+	CHECK(editor.DrivePlayer(replica, true, false, true));
 
 	editor.Universe->Enter(replica, [](Store &store) {
 		const auto *input = store.Resource<engine::scene::InputState>();
@@ -1478,13 +1490,40 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 		CHECK(engine::scene::ReadMoveIntent(store).Direction.Magnitude() > 0.5f);
 	});
 
-	// **And the panel that is not being pointed at drives nobody.** Two client
-	// views in one editor must not both walk on one keyboard - the second would
-	// be a character somebody is not looking at, moving on a key meant for the
-	// first.
+	// A selected viewport keeps the keyboard while the pointer moves elsewhere,
+	// but it must not receive that other panel's buttons or wheel.
+	frame.HoldPointer(true, 1.0f);
+	CHECK(editor.DrivePlayer(replica, false, false, true));
+	editor.Universe->Enter(replica, [](Store &store) {
+		const auto *input = store.Resource<engine::scene::InputState>();
+		REQUIRE(input != nullptr);
+		CHECK(input->Buttons == 0);
+		CHECK(input->WheelDelta == 0.0f);
+	});
+
+	// Clearing selection releases held input and any press edges that have not
+	// reached a simulation tick yet.
+	editor.Universe->Enter(replica, [](Store &store) {
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+		REQUIRE(input != nullptr);
+		REQUIRE(controllers != nullptr);
+		input->Pressed.Set(engine::scene::KeyCode::Space, true);
+		input->PressedButtons = 1;
+		controllers->Slots[0].Buttons = 1;
+		controllers->Slots[0].PressedButtons = 1;
+	});
 	CHECK_FALSE(editor.DrivePlayer(replica, false, false, false));
 	editor.Universe->Enter(replica, [](Store &store) {
-		CHECK_FALSE(store.Resource<engine::scene::InputState>()->Focused);
+		const auto *input = store.Resource<engine::scene::InputState>();
+		const auto *controllers = store.Resource<engine::scene::ControllerState>();
+		REQUIRE(input != nullptr);
+		REQUIRE(controllers != nullptr);
+		CHECK_FALSE(input->Focused);
+		CHECK_FALSE(input->Pressed.Has(engine::scene::KeyCode::Space));
+		CHECK(input->PressedButtons == 0);
+		CHECK(controllers->Slots[0].Buttons == 0);
+		CHECK(controllers->Slots[0].PressedButtons == 0);
 	});
 
 	// A world that is not a client's is never played, whatever is held over it:
@@ -1496,21 +1535,10 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 	engine::parallel::Jobs::Stop();
 }
 
-TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]") {
-	// **The bug this exists for did not stop the keyboard reaching the client -
-	// it stopped it staying there.** `Editor::DriveCamera` picks the panel a
-	// gesture means from `Hovered || Active || Panning` and used to hand only
-	// the first two on, so a panel chosen *because* it was panning arrived at
-	// `DrivePlayer` looking untouched: it took the frame, decided it was not
-	// being driven, and wiped the keys. `Panning` survives a middle-drag
-	// released off the picture, so the state is sticky - the character got a
-	// move direction on a fraction of the ticks and, because
-	// `scene::StepCharacters` replaces horizontal velocity rather than adding
-	// to it, went nowhere at all.
-	//
-	// The other half is the panels nobody visited. One `DrivePlayer` call a
-	// frame left every other client world holding the last keys it was given,
-	// which is a second character walking for ever on a released key.
+TEST_CASE("only the selected client viewport receives input", "[studio][playlink]") {
+	// Hovering or panning another viewport must not redirect input away from
+	// the selected client. The unselected world is still visited to release
+	// anything it received before selection moved.
 	Frame frame;
 
 	studio::Editor editor;
@@ -1578,12 +1606,11 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 	editor.Extras[1].Open = true;
 	editor.Extras[1].World = second;
 
-	// **The pointer is in the first panel and the second is stuck panning**,
-	// which is the state a middle-drag released outside the picture leaves. The
-	// search below must still choose the panel under the pointer, and the stuck
-	// one must be told it has nothing rather than being handed the frame.
+	// The pointer is in the first panel and the second has a drag in progress.
 	editor.Extras[0].Hovered = true;
 	editor.Extras[1].Panning = true;
+	editor.FocusedViewport = 1;
+	editor.FocusedIsViewport = true;
 
 	const auto intentIn = [&editor](WorldId world) {
 		float magnitude = 0.0f;
@@ -1606,10 +1633,18 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 	CHECK_FALSE(stuck);
 	CHECK(idle < 0.01f);
 
-	// **And the pointer moving to the stuck panel hands it over rather than
-	// finding it already holding the frame.** `Panning` counts as the pointer
-	// being there, which is what the target search has always meant by it.
+	// Moving the pointer over the second viewport does not hand the keyboard to
+	// it. The first remains selected until the person explicitly selects another
+	// viewport.
 	editor.Extras[0].Hovered = false;
+	editor.DriveCamera();
+
+	CHECK(intentIn(first).first > 0.5f);
+	CHECK(intentIn(second).first < 0.01f);
+
+	// Selection changes ownership. The first world releases its held key on the
+	// same frame that the second starts receiving it.
+	editor.FocusedViewport = 2;
 	editor.DriveCamera();
 
 	CHECK(intentIn(second).first > 0.5f);
@@ -1618,6 +1653,7 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 	// Nothing under the pointer and no viewport focused: everybody lets go.
 	// Alt-tabbing away while holding W must not leave a character walking.
 	editor.Extras[1].Panning = false;
+	editor.FocusedIsViewport = false;
 	editor.DriveCamera();
 
 	CHECK(intentIn(first).first < 0.01f);

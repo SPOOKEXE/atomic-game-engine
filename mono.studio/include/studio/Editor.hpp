@@ -1387,14 +1387,17 @@ namespace studio {
 		// what `studio.playlink` gives it.
 		//
 		// @param world   The world the viewport is showing.
-		// @param hovered Whether the pointer is over the panel.
+		// @param pointer Whether this selected panel owns the pointer.
 		// @param active  Whether a drag started in it is still held.
-		// @param focused Whether the keyboard is in it.
+		// @param selected Whether this viewport has keyboard and controller input.
 		// @return `true` when this took the frame, so the free camera must not.
 	  public:
-		bool DrivePlayer(WorldId world, bool hovered, bool active, bool focused);
+		bool DrivePlayer(WorldId world, bool pointer, bool active, bool selected);
 
 	  private:
+		// Releases every played world's transient input while a modal owns the editor.
+		void ReleaseViewportInput();
+
 		// Adds a client to whatever run the given world belongs to.
 		//
 		// **What turns Run into Play one player at a time.** A `RunMode::Server`
