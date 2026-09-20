@@ -1815,8 +1815,17 @@ namespace studio {
 				return;
 			}
 
-			if (auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance)) {
-				transform->Frame = eye;
+			// Read first: mutable access marks the row changed even when the eye is unchanged.
+			const auto *current = store.Get<engine::scene::Transform>(viewer.Instance);
+			const bool cameraMoved = current == nullptr || current->Frame.Position != eye.Position ||
+									 current->Frame.QuaternionX != eye.QuaternionX ||
+									 current->Frame.QuaternionY != eye.QuaternionY ||
+									 current->Frame.QuaternionZ != eye.QuaternionZ ||
+									 current->Frame.QuaternionW != eye.QuaternionW;
+			if (cameraMoved) {
+				if (auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance)) {
+					transform->Frame = eye;
+				}
 			}
 
 			// **The lens only while it is still the editor's**, which is the
