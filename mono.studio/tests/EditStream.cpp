@@ -816,7 +816,9 @@ TEST_CASE("a disconnected host clears the guest's stale peer presence", "[studio
 	// relay `PresenceGone`. The guest must expire its cached peer view when
 	// the transport declares the session dead.
 	session.HostStream.reset();
-	for (size_t tick = 0; tick < 48 && session.GuestStream->Connected(); ++tick) {
+	// QUIC's negotiated idle deadline is 20 seconds. Advance past it instead
+	// of assuming the datagram link's shorter deadline applies here too.
+	for (size_t tick = 0; tick < 96 && session.GuestStream->Connected(); ++tick) {
 		session.Now += 0.25;
 		session.GuestStream->Pump(session.Now);
 	}
