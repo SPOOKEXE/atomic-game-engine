@@ -25,6 +25,7 @@
 #include <array>
 #include <cmath>
 #include <imgui.h>
+#include <limits>
 #include <optional>
 #include <string>
 #include <studio/Editor.hpp>
@@ -664,6 +665,29 @@ namespace studio {
 				const ImU32 outline = engine::ui::AccentColour();
 
 				for (const SelectionOutlineBatch::Entry &selected : selectionOutlines) {
+					glm::vec2 minimum{std::numeric_limits<float>::max()};
+					glm::vec2 maximum{-std::numeric_limits<float>::max()};
+					bool projected = true;
+					for (const Vector3 &corner : selected.Corners) {
+						glm::vec2 point{};
+						if (!panel.WorldToPanel(corner, point)) {
+							projected = false;
+							break;
+						}
+						minimum = glm::min(minimum, point);
+						maximum = glm::max(maximum, point);
+					}
+					// At this size a 3D wireframe covers the part's few visible
+					// pixels and makes its material appear to change colour.
+					if (projected && (maximum.x - minimum.x < 30.0f || maximum.y - minimum.y < 30.0f)) {
+						constexpr float margin = 3.0f;
+						list->AddRect(
+							ImVec2(minimum.x - margin, minimum.y - margin),
+							ImVec2(maximum.x + margin, maximum.y + margin),
+							outline
+						);
+						continue;
+					}
 
 					// The eight corners of the oriented box, joined as
 					// twelve edges. An axis-aligned box round an oriented
