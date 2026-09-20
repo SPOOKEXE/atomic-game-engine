@@ -66,9 +66,9 @@
 // @tier L12 · client
 
 #include <engine/assets/Signature.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/core/types/Vector3.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/world/Universe.hpp>
@@ -185,6 +185,7 @@ namespace studio {
 		// A collaborator's transient view and selection. Unlike a waypoint this
 		// never enters document history or undo.
 		Presence = 7,
+		PresenceGone = 8,
 	};
 
 	// One message, whichever kind it is.
@@ -200,7 +201,7 @@ namespace studio {
 		// `Request`, `Release` and `Granted`.
 		InstancePath Subject;
 
-		// `Welcome`.
+		// `Welcome`, `Presence` and `PresenceGone`.
 		EditorId Holder = HOST_EDITOR;
 
 		// `Locks`.
@@ -431,7 +432,9 @@ namespace studio {
 		bool Publish(uint64_t waypoint, std::span<const Command> commands, double nowSeconds);
 
 		void PublishPresence(const RemotePresence &presence, double nowSeconds);
-		std::span<const RemotePresence> RemotePresences() const { return Presences; }
+		std::span<const RemotePresence> RemotePresences() const {
+			return Presences;
+		}
 
 		// Carries what is waiting, in both directions.
 		//

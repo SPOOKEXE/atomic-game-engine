@@ -24,6 +24,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -47,11 +49,11 @@ using engine::world::WorldId;
 using engine::world::WorldSettings;
 using studio::Command;
 using studio::CommandLog;
-using studio::EditRecord;
+using studio::DecodeMessage;
 using studio::EditFrame;
 using studio::EditMessage;
+using studio::EditRecord;
 using studio::EditStream;
-using studio::DecodeMessage;
 using studio::EncodeMessage;
 using studio::FinishOperation;
 using studio::HOST_EDITOR;
@@ -232,6 +234,7 @@ namespace {
 TEST_CASE("presence preserves named peer view and an empty selection", "[studio][editstream][presence]") {
 	EditMessage sent;
 	sent.Kind = EditFrame::Presence;
+	sent.Holder = 3;
 	sent.DisplayName = "Avery";
 	sent.PresenceWorld = "Scene";
 	sent.PresencePosition = Vector3{4.0f, 5.0f, 6.0f};
@@ -239,10 +242,22 @@ TEST_CASE("presence preserves named peer view and an empty selection", "[studio]
 	const auto received = DecodeMessage(EncodeMessage(sent));
 	REQUIRE(received);
 	CHECK(received->Kind == EditFrame::Presence);
+	CHECK(received->Holder == 3);
 	CHECK(received->DisplayName == "Avery");
 	CHECK(received->PresenceWorld == "Scene");
 	CHECK((received->PresencePosition == Vector3{4.0f, 5.0f, 6.0f}));
 	CHECK(received->PresenceSelection.empty());
+
+	EditMessage gone;
+	gone.Kind = EditFrame::PresenceGone;
+	gone.Holder = 3;
+	const auto removed = DecodeMessage(EncodeMessage(gone));
+	REQUIRE(removed);
+	CHECK(removed->Kind == EditFrame::PresenceGone);
+	CHECK(removed->Holder == 3);
+
+	sent.PresencePosition.X = std::numeric_limits<float>::quiet_NaN();
+	CHECK_FALSE(DecodeMessage(EncodeMessage(sent)));
 }
 
 // --- the identity -------------------------------------------------------------
@@ -719,6 +734,43 @@ TEST_CASE("a guest learns which editor it is", "[studio][editstream]") {
 	CHECK(crowd.FirstStream->Self() != HOST_EDITOR);
 	CHECK(crowd.SecondStream->Self() != HOST_EDITOR);
 	CHECK(crowd.FirstStream->Self() != crowd.SecondStream->Self());
+}
+
+TEST_CASE("presence keeps distinct identities across host and two guests", "[studio][editstream][presence]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	studio::RemotePresence first;
+	first.DisplayName = "First";
+	first.World = "Scene";
+	first.Position = Vector3{1.0f, 2.0f, 3.0f};
+	crowd.FirstStream->PublishPresence(first, crowd.Now);
+	studio::RemotePresence second;
+	second.DisplayName = "Second";
+	second.World = "Scene";
+	second.Position = Vector3{4.0f, 5.0f, 6.0f};
+	crowd.SecondStream->PublishPresence(second, crowd.Now);
+	studio::RemotePresence host;
+	host.DisplayName = "Host";
+	host.World = "Scene";
+	crowd.HostStream->PublishPresence(host, crowd.Now);
+	crowd.Settle();
+
+	REQUIRE(crowd.HostStream->RemotePresences().size() == 2);
+	REQUIRE(crowd.FirstStream->RemotePresences().size() == 2);
+	REQUIRE(crowd.SecondStream->RemotePresences().size() == 2);
+	const auto find = [](std::span<const studio::RemotePresence> peers, studio::EditorId editor) {
+		return std::find_if(peers.begin(), peers.end(), [editor](const auto &peer) {
+			return peer.Editor == editor;
+		});
+	};
+	const auto firstPeers = crowd.FirstStream->RemotePresences();
+	const auto secondPeers = crowd.SecondStream->RemotePresences();
+	CHECK(find(firstPeers, crowd.SecondStream->Self()) != firstPeers.end());
+	CHECK(find(firstPeers, HOST_EDITOR) != firstPeers.end());
+	CHECK(find(secondPeers, crowd.FirstStream->Self()) != secondPeers.end());
+	CHECK(find(secondPeers, HOST_EDITOR) != secondPeers.end());
 }
 
 TEST_CASE("two editors on one model take turns and both land", "[studio][editstream]") {

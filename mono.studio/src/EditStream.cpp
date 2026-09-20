@@ -1,10 +1,12 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <string_view>
 #include <studio/EditStream.hpp>
 #include <utility>
@@ -55,7 +57,7 @@ namespace studio {
 
 		// The frame version. Refused when unknown, for the reason every other
 		// format here gives: a reader that guesses mis-parses hostile bytes.
-		constexpr uint16_t EDIT_VERSION = 1;
+		constexpr uint16_t EDIT_VERSION = 2;
 
 		// The most records one waypoint may carry.
 		//
@@ -230,6 +232,7 @@ namespace studio {
 			break;
 
 		case EditFrame::Welcome:
+		case EditFrame::PresenceGone:
 			writer.WriteUInt32(message.Holder);
 			break;
 
@@ -245,6 +248,7 @@ namespace studio {
 			break;
 
 		case EditFrame::Presence:
+			writer.WriteUInt32(message.Holder);
 			writer.WriteString(message.DisplayName);
 			writer.WriteString(message.PresenceWorld);
 			writer.WriteFloat(message.PresencePosition.X);
@@ -275,7 +279,7 @@ namespace studio {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(EditFrame::Presence)) {
+		if (reader.Failed() || kind > static_cast<uint8_t>(EditFrame::PresenceGone)) {
 			return std::nullopt;
 		}
 
@@ -292,6 +296,7 @@ namespace studio {
 			break;
 
 		case EditFrame::Welcome:
+		case EditFrame::PresenceGone:
 			message.Holder = reader.ReadUInt32();
 			break;
 
@@ -327,12 +332,17 @@ namespace studio {
 		}
 
 		case EditFrame::Presence:
+			message.Holder = reader.ReadUInt32();
 			message.DisplayName = reader.ReadString();
 			message.PresenceWorld = reader.ReadString();
 			message.PresencePosition.X = reader.ReadFloat();
 			message.PresencePosition.Y = reader.ReadFloat();
 			message.PresencePosition.Z = reader.ReadFloat();
 			if (!ReadPath(reader, message.PresenceSelection)) return std::nullopt;
+			if (message.DisplayName.size() > 128 || message.PresenceWorld.size() > 256 ||
+				!std::isfinite(message.PresencePosition.X) || !std::isfinite(message.PresencePosition.Y) ||
+				!std::isfinite(message.PresencePosition.Z))
+				return std::nullopt;
 			break;
 
 		case EditFrame::Waypoint:
@@ -689,6 +699,7 @@ namespace studio {
 		if (!Connected()) return;
 		EditMessage message;
 		message.Kind = EditFrame::Presence;
+		message.Holder = Me;
 		message.DisplayName = presence.DisplayName;
 		message.PresenceWorld = presence.World;
 		message.PresencePosition = presence.Position;
@@ -771,6 +782,10 @@ namespace studio {
 			return held.second == client;
 		});
 		if (member != Members.end()) {
+			EditMessage gone;
+			gone.Kind = EditFrame::PresenceGone;
+			gone.Holder = member->first;
+			Broadcast(EncodeMessage(gone), engine::core::Clock::Seconds(), client);
 			std::erase_if(Presences, [editor = member->first](const RemotePresence &presence) {
 				return presence.Editor == editor;
 			});
@@ -889,20 +904,39 @@ namespace studio {
 
 		case EditFrame::Presence: {
 			RemotePresence presence;
-			presence.Editor = sender;
+			presence.Editor = Server != nullptr ? sender : message->Holder;
+			if (presence.Editor == Me) return;
 			presence.DisplayName = message->DisplayName;
 			presence.World = message->PresenceWorld;
 			presence.Position = message->PresencePosition;
 			presence.Selection = message->PresenceSelection;
 			presence.UpdatedAtSeconds = nowSeconds;
-			const auto found = std::find_if(Presences.begin(), Presences.end(), [sender](const RemotePresence &held) {
-				return held.Editor == sender;
-			});
-			if (found == Presences.end()) Presences.push_back(std::move(presence));
-			else *found = std::move(presence);
-			if (Server != nullptr) Broadcast(payload, nowSeconds, from);
+			const auto found = std::find_if(
+				Presences.begin(), Presences.end(), [editor = presence.Editor](const RemotePresence &held) {
+					return held.Editor == editor;
+				}
+			);
+			if (found == Presences.end())
+				Presences.push_back(std::move(presence));
+			else
+				*found = std::move(presence);
+			if (Server != nullptr) {
+				EditMessage relay = *message;
+				relay.Holder = sender;
+				Broadcast(EncodeMessage(relay), nowSeconds, from);
+			}
 			return;
 		}
+
+		case EditFrame::PresenceGone:
+			if (Server != nullptr) {
+				Tally.Malformed++;
+				return;
+			}
+			std::erase_if(Presences, [editor = message->Holder](const RemotePresence &presence) {
+				return presence.Editor == editor;
+			});
+			return;
 
 		case EditFrame::Request: {
 			if (Server == nullptr) {
