@@ -171,6 +171,7 @@ namespace engine::scene {
 	//        name different ones and a merge would leave a sheet listed that
 	//        the geometry no longer wears.
 	// @param skinning  The authored joint indices and weights, when present.
+	// @param size      Finite nonnegative object-space extent, or zero when unknown.
 	// @return `false` for an invalid name.
 	bool RecordMesh(
 		ecs::Store &store,

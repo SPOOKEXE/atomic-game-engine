@@ -42,10 +42,9 @@
 --     client --cdn dir:store --publisher-key PUBLIC --script MeshGrid.luau \
 --            --entities 2048
 --
--- **`MeshPart.Size` is the displayed box.** The renderer maps each mesh's own
--- bounds into that box, so imports baked with the default `--model-size 4` and
--- unit-sized built-ins both occupy the same four-metre cell here. An imported
--- model's bake scale therefore cannot make it overlap its neighbours.
+-- **`MeshPart.Size` is the displayed box.** Imported meshes use their authored
+-- bounds to fit their longest axis into four metres while keeping the other
+-- axes proportional. The box is updated when the mesh arrives from the store.
 --
 -- **`--entities` is also the view channel's byte ceiling**, and this scene is
 -- large. Leave it at the default and the channel refuses to publish anything,
@@ -123,9 +122,8 @@ local BUILTIN: { string } = {
 local COLUMNS = 3
 local SPACING = 7
 
--- How tall and wide the mesh's bounding box is, in metres. `MeshPart.Size`
--- maps any authored bounds into this box, so a 2M-triangle wizard ends up the
--- same size as a low-poly fox.
+-- Maximum displayed axis in metres. A narrow character stays narrow instead
+-- of being stretched to fill a cube.
 local MODEL_SIZE = 4
 
 local PEDESTAL_HEIGHT = 0.6
@@ -173,7 +171,7 @@ local turntables: { { Part: MeshPart, Rate: number } } = {}
 
 -- What is on the plate already, keyed by mesh name, so a mesh that arrives
 -- twice is not built twice.
-local placed: { [string]: { Part: MeshPart, Pedestal: Part } } = {}
+local placed: { [string]: { Part: MeshPart, Pedestal: Part, Sized: boolean } } = {}
 local placedCount = 0
 
 -- A label for a cell, from the name the publisher gave it.
@@ -188,6 +186,20 @@ local function labelFor(mesh: string): string
 		return string.sub(mesh, slash + 1)
 	end
 	return mesh
+end
+
+local function displayedSize(bounds: Vector3): Vector3?
+	local longest = math.max(bounds.X, bounds.Y, bounds.Z)
+	if longest <= 0 then
+		return nil
+	end
+	local scale = MODEL_SIZE / longest
+	local minimum = 0.05
+	return Vector3.new(
+		math.max(bounds.X * scale, minimum),
+		math.max(bounds.Y * scale, minimum),
+		math.max(bounds.Z * scale, minimum)
+	)
 end
 
 -- Builds one cell. Position is applied separately, because a cell's place
@@ -209,9 +221,8 @@ local function buildCell(mesh: string)
 	-- version that carried literals.
 	part.MeshId = mesh
 
-	local bounds = ContentService:GetMeshSize(mesh)
-	local longest = math.max(bounds.X, bounds.Y, bounds.Z)
-	part.Size = if longest > 0 then bounds * (MODEL_SIZE / longest) else Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
+	local size = displayedSize(ContentService:GetMeshSize(mesh))
+	part.Size = size or Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
 
 	-- **Both halves named, and that is the point of this line.** A `MeshPart`
 	-- that sets only `MeshId` shows whatever each of its submeshes recorded at
@@ -243,7 +254,7 @@ local function buildCell(mesh: string)
 
 	part:AddTag("Imported")
 
-	placed[mesh] = { Part = part, Pedestal = pedestal }
+	placed[mesh] = { Part = part, Pedestal = pedestal, Sized = size ~= nil }
 
 	table.insert(turntables, {
 		Part = part,
@@ -268,7 +279,7 @@ local function layout(names: { string })
 		if cell then
 			local at = cellPosition(index)
 			cell.Pedestal.CFrame = CFrame.new(at + Vector3.new(0, PEDESTAL_HEIGHT / 2, 0))
-			cell.Part.CFrame = CFrame.new(at + Vector3.new(0, PEDESTAL_HEIGHT + MODEL_SIZE / 2, 0))
+			cell.Part.CFrame = CFrame.new(at + Vector3.new(0, PEDESTAL_HEIGHT + cell.Part.Size.Y / 2, 0))
 		end
 	end
 end
@@ -499,14 +510,21 @@ RunService.Heartbeat:Connect(function()
 
 
 	local meshes = everyMesh()
+	local resized = false
 	for mesh, cell in pairs(placed) do
-		local bounds = ContentService:GetMeshSize(mesh)
-		local longest = math.max(bounds.X, bounds.Y, bounds.Z)
-		if longest > 0 then
-			cell.Part.Size = bounds * (MODEL_SIZE / longest)
+		if not cell.Sized then
+			local size = displayedSize(ContentService:GetMeshSize(mesh))
+			if size then
+				cell.Part.Size = size
+				cell.Sized = true
+				resized = true
+			end
 		end
 	end
 	if #meshes == known then
+		if resized then
+			layout(meshes)
+		end
 		return
 	end
 	known = #meshes

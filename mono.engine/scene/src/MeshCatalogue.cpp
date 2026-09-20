@@ -1,6 +1,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 
+#include <cmath>
+
 namespace engine::scene {
 
 	uint32_t MeshCatalogue::Find(const core::Name &mesh) const {
@@ -31,11 +33,15 @@ namespace engine::scene {
 		const core::Name &mesh,
 		uint32_t triangles,
 		std::span<const core::Name> sheets,
-		const MeshSkinning &skinning, core::Vector3 size
+		const MeshSkinning &skinning,
+		core::Vector3 size
 	) {
 		if (!mesh.IsValid()) {
 			return false;
 		}
+		if (!std::isfinite(size.X) || !std::isfinite(size.Y) || !std::isfinite(size.Z) || size.X < 0 ||
+			size.Y < 0 || size.Z < 0)
+			return false;
 		if (skinning.Vertices.size() > MAXIMUM_RETAINED_SKINNING_VERTICES ||
 			skinning.VertexCount < skinning.Vertices.size() ||
 			(skinning.VertexCount <= MAXIMUM_RETAINED_SKINNING_VERTICES &&

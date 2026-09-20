@@ -1,10 +1,8 @@
 // The catalogue behind `MeshPart.TrianglesCount`.
 //
-// Two things here fail silently if they are wrong, and they are what these
-// pin. A read-only property that is quietly writable is a script able to lie
-// about content it does not own; and a getter that *acquires* the resource
-// mutates the world from inside a read, which is a structural change during
-// iteration on the first frame and on every part in the scene.
+// A read-only property that is quietly writable lets a script lie about
+// content it does not own. A getter that acquires the resource mutates the
+// world from inside a read. Both fail silently without these checks.
 
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -19,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <limits>
 #include <vector>
 
 TEST_SUITE_ID("engine.scene.meshcatalogue")
@@ -83,6 +82,11 @@ TEST_CASE("a recorded mesh reports authored bounds", "[scene][meshcatalogue]") {
 	CHECK(size.Y == 6.0f);
 	CHECK(size.Z == 1.0f);
 	CHECK(engine::scene::MeshSizeOf(store, Name()).MagnitudeSquared() == 0.0f);
+	CHECK_FALSE(RecordMesh(store, mesh, 12, {}, {}, engine::core::Vector3{-1.0f, 6.0f, 1.0f}));
+	CHECK_FALSE(RecordMesh(
+		store, mesh, 12, {}, {}, engine::core::Vector3{std::numeric_limits<float>::quiet_NaN(), 6.0f, 1.0f}
+	));
+	CHECK(engine::scene::MeshSizeOf(store, mesh).X == 2.0f);
 }
 
 TEST_CASE("an unknown mesh is zero rather than a guess", "[scene][meshcatalogue]") {
