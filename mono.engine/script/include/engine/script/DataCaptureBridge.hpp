@@ -340,17 +340,17 @@ namespace engine::script {
 		struct Camera {
 			// Vertical camera field of view in radians.
 			float FieldOfViewRadians = 0.0f;
-		// Near clipping distance in world units.
+			// Near clipping distance in world units.
 			float NearPlane = 0.0f;
-		// Far clipping distance in world units.
+			// Far clipping distance in world units.
 			float FarPlane = 0.0f;
-		// Maximum image width accepted by the mutation, in pixels.
+			// Maximum image width accepted by the mutation, in pixels.
 			uint32_t MaxImageWidth = 0;
-		// Maximum image height accepted by the mutation, in pixels.
+			// Maximum image height accepted by the mutation, in pixels.
 			uint32_t MaxImageHeight = 0;
-		// Requested image width in pixels.
+			// Requested image width in pixels.
 			uint32_t ImageWidth = 0;
-		// Requested image height in pixels.
+			// Requested image height in pixels.
 			uint32_t ImageHeight = 0;
 		};
 		// Optional camera lens settings.
