@@ -636,6 +636,9 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("output-image"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
+			if (!recording.Request.Damage.SceneImage() && !recording.UploadOverlay) {
+				return true;
+			}
 			Impl *const State = recording.State;
 			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
 			const size_t targetSlot = recording.Request.TargetSlot;

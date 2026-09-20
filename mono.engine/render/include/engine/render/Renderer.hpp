@@ -2426,6 +2426,10 @@ namespace engine::render {
 			FrameOverlayHook *hostOverlayHook = nullptr
 		);
 
+		// Increments when Render starts recording a graph frame. Hosts that issue
+		// nested renders use it to invalidate frame-scoped source assumptions.
+		uint64_t RenderGeneration() const;
+
 		// The newest completed texture for that scene slot.
 		//
 		// **Slots exist because an editor has more than one viewport.** A game

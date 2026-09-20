@@ -947,6 +947,10 @@ namespace studio {
 		// - it just has no panels to draw over the top.
 		void PresentWorld(float frameSeconds);
 
+		// Records one scheduler-selected panel. Its identity is an input so focus
+		// changes cannot redirect the camera or output target it owns.
+		void PresentViewport(size_t viewport, float frameSeconds);
+
 		// --- the interface ---------------------------------------------------
 
 		void DrawInterface();
@@ -4348,7 +4352,7 @@ namespace studio {
 		// could name it - which `ViewportState::Title` now supplies per panel.
 		// The frame rate divides by the number of *open* panels, so the cost of
 		// the fourth is the same as the cost of the second and it is the person
-		// opening them who decides to pay it. See `DrawingViewport`.
+		// opening them who decides to pay it. See `PresentWorld`.
 		std::vector<ViewportState> Extras;
 
 		// A panel's own camera instance, and the world it was minted in.
@@ -4380,7 +4384,7 @@ namespace studio {
 			std::optional<engine::scene::Camera> Lens;
 		};
 
-		// Indexed the way `DrawingViewport` is: 0 is the main panel, 1.. are the
+		// Indexed by viewport slot: 0 is the main panel, 1.. are the
 		// extras, so a panel index is a subscript rather than a branch.
 		std::vector<ViewerCamera> Viewers;
 
@@ -5299,22 +5303,16 @@ namespace studio {
 			return Active;
 		}
 
-		// **Which viewport the renderer draws this frame.** `Renderer::Render`
-		// owns the whole frame - it acquires the swapchain, records the
-		// interface and presents - so it draws one world per call. Two panels
-		// therefore take turns: each keeps its own target and its own texture,
-		// and shows the most recent frame drawn into it.
-		//
-		// The cost is that N open viewports refresh at a *fraction* of the frame
-		// rate each - a sixtieth of a second still goes by, but any one panel
-		// is redrawn every N frames. That is honest for an editor watching
-		// several worlds tick and it is not the end state: drawing them all in
-		// one frame is a change to `Render` to take a list of views.
-		size_t DrawingViewport = 0;
-
 		// Where the rotation is up to, over the *open* panels rather than over
 		// all of them.
 		size_t RoundRobin = 0;
+
+		// The slot whose frame-scoped graph resources were last composed. The
+		// graph shares those resources between Studio's sequential render calls,
+		// so a different slot must rebuild its scene and interface layers before
+		// it may reuse the composite.
+		std::optional<size_t> LastGraphViewport;
+		uint64_t LastGraphRenderGeneration = 0;
 
 		// A requested scene capture has to receive a frame from its named panel,
 		// even when the last frames of a bounded headless run fall on previews.

@@ -2161,6 +2161,10 @@ namespace engine::render {
 		return scene.Retained[scene.PublishedFrame].Result;
 	}
 
+	uint64_t Renderer::RenderGeneration() const {
+		return State ? State->RenderGeneration : 0;
+	}
+
 	void *Renderer::ResourceTexture(core::Name resource, size_t slot) const {
 		if (State == nullptr || !resource.IsValid()) {
 			return nullptr;
@@ -2562,6 +2566,7 @@ namespace engine::render {
 		}
 
 		const scene::WorldLighting previousLighting = CurrentLighting();
+		++State->RenderGeneration;
 		State->BatchActive = true;
 		State->DiscardPendingGraphHistoryWrites();
 		State->DataCaptureSources.clear();

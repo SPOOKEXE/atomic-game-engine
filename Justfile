@@ -1229,6 +1229,14 @@ heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes I
 studio-resize: (build "studio")
     ./scripts/studio-resize-test.sh ./{{build}}/studio/studio
 
+# Server and client Play panels must retain different renderer slots after
+# focus moves between the docked halves. The script owns a private X display,
+# then retains both scene BMPs and host captures under the selected build.
+#
+# It is not part of `just check`: it requires X11, a Vulkan device and xdotool.
+studio-viewport-isolation: (build "studio")
+    ./scripts/studio-viewport-isolation-test.sh ./{{build}}/studio/studio
+
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")
     ./{{build}}/server/server {{args}}

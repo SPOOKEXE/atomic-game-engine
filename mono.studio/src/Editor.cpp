@@ -2038,23 +2038,9 @@ namespace studio {
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {
-		// **Which panel this frame draws.** `Renderer::Render` owns the whole
-		// frame - swapchain, interface, present - so it draws one world per
-		// call. With both viewports open they take turns: each holds its own
-		// target and shows the last texture drawn into it, so each refreshes at
-		// half the frame rate. Drawing both in one frame means `Render` taking
-		// a list of views, which is a change to the shared renderer and is
-		// tracked separately.
-		// **Round-robin over whatever is open.** `Renderer::Render` owns the
-		// whole frame - swapchain, interface, present - so it draws one world
-		// per call, and N open panels therefore take turns. Each keeps its own
-		// target and shows the last texture drawn into it.
-		//
-		// Skipping the closed ones matters, and matters more the more panels
-		// exist: rotating through every slot with one panel open would redraw
-		// that panel once per slot for no reason.
-		// **Reused between frames rather than built fresh**, because this runs
-		// every frame and the panel count only changes when somebody opens one.
+		// The scheduler chooses a slot once, then hands that immutable identity to
+		// the presentation path. Window focus only affects input routing, never
+		// which target or camera a render call owns.
 		Candidates.clear();
 
 		if (ShowViewport && WorldTarget.IsValid()) {
@@ -2066,25 +2052,6 @@ namespace studio {
 			}
 		}
 
-		// **The asset preview is one more slot in the rotation, and it took
-		// every frame instead.** It used to be tested before the loop and
-		// `return` on success - and because a hovered row re-asks for its
-		// preview on every frame it is hovered, that early return fired on
-		// *every* frame too. `Renderer::Render` owns the swapchain and the
-		// present, so the editor's own chrome was never drawn for as long as the
-		// cursor rested on a mesh: the whole window went black and came back the
-		// moment the pointer moved away.
-		//
-		// The comment that used to sit here said the cost was "a hovered row's
-		// worth of frames rather than a permanent share of the rotation". That
-		// was the intent and the code did the opposite - it took the whole
-		// rotation and left nothing for the panels.
-		//
-		// As a candidate it gets one turn in N like everything else, so a
-		// hovered preview refreshes at a share of the frame rate and the editor
-		// keeps drawing. A preview refreshing at a third of 120 fps is forty
-		// updates a second on a thing being looked at, which is not something an
-		// eye can see; a window that stops being drawn is.
 		if (!PreviewWanted.empty()) {
 			Candidates.push_back(PreviewSlot());
 		}
@@ -2107,30 +2074,21 @@ namespace studio {
 			}
 		}
 
+		size_t viewport = 0;
 		if (PendingSceneCaptureViewport.has_value() &&
 			std::find(Candidates.begin(), Candidates.end(), *PendingSceneCaptureViewport) !=
 				Candidates.end()) {
-			// A capture is consumed by the panel that renders it. Keep its panel
-			// selected until the renderer writes the file instead of letting a
-			// preview take the last bounded frame.
-			DrawingViewport = *PendingSceneCaptureViewport;
+			viewport = *PendingSceneCaptureViewport;
 		} else if (Candidates.empty()) {
-			// Nothing to draw into. The frame still runs - the chrome is drawn
-			// and presented - so the editor does not freeze when every viewport
-			// is closed.
-			DrawingViewport = 0;
+			viewport = 0;
 		} else {
 			RoundRobin = (RoundRobin + 1) % Candidates.size();
-			DrawingViewport = Candidates[RoundRobin];
+			viewport = Candidates[RoundRobin];
 		}
 
 		PrepareControlScreenshot();
 
-		// **This frame belongs to the preview**, and it is spent the same way a
-		// viewport spends one: `Render` owns the swapchain, so whichever slot the
-		// rotation picked gets the whole call. The difference from what this used
-		// to do is only that it had to be *picked*.
-		if (DrawingViewport == PreviewSlot()) {
+		if (viewport == PreviewSlot()) {
 			if (RenderPreviewSlot()) {
 				PreviewWanted.clear();
 				return;
@@ -2140,10 +2098,17 @@ namespace studio {
 			// entry that has gone. Fall through to the first viewport rather than
 			// spending the frame on nothing.
 			PreviewWanted.clear();
-			DrawingViewport = Candidates.size() > 1 ? Candidates[0] : 0;
+			viewport = Candidates.size() > 1 ? Candidates[0] : 0;
 		}
 
-		ViewportState *extra = ExtraAt(DrawingViewport);
+		PresentViewport(viewport, frameSeconds);
+	}
+
+	void Editor::PresentViewport(size_t viewport, float frameSeconds) {
+		ENGINE_PROFILE_DYNAMIC(
+			"viewport", std::string_view(ViewportTitle(viewport)), engine::core::ProfileCategory::Render
+		);
+		ViewportState *extra = ExtraAt(viewport);
 		const bool drawingSecond = extra != nullptr;
 
 		// **The second panel defaults to a *different* world, not to the active
@@ -2289,7 +2254,7 @@ namespace studio {
 					client::ResolveCameraPortalWorld(*Universe, shown, visual, eye, lens, PortalImages.get());
 			}
 			if (visual.IsValid() && Universe->IsRemote(visual)) {
-				ReleaseViewerCamera(DrawingViewport);
+				ReleaseViewerCamera(viewport);
 			} else if (visual.IsValid()) {
 				const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
 				if (runtimeVisual) {
@@ -2308,9 +2273,7 @@ namespace studio {
 					// An edit viewport owns this generated camera outright. A client
 					// viewport uses the same per-panel camera only while the authority
 					// prepares its camera-dependent surface views.
-					EnsureViewerCamera(
-						DrawingViewport, visual, eye, lens, runtimeVisual ? NULL_ENTITY : follow
-					);
+					EnsureViewerCamera(viewport, visual, eye, lens, runtimeVisual ? NULL_ENTITY : follow);
 				}
 
 				// The requested panel extent belongs to this camera resource. Write
@@ -2375,8 +2338,8 @@ namespace studio {
 		// Remember the exact eye the texture below is rendered from. A hosted
 		// client may have moved its camera during `PreRender`; recording the eye
 		// before that phase would project overlays through the previous room.
-		if (DrawingViewport < Overlays.size()) {
-			OverlaySlot &slot = Overlays[DrawingViewport];
+		if (viewport < Overlays.size()) {
+			OverlaySlot &slot = Overlays[viewport];
 			slot.PresentedFrame = eye;
 			slot.PresentedFieldOfView = lens.FieldOfViewRadians;
 			slot.Presented = true;
@@ -2680,19 +2643,19 @@ namespace studio {
 				// The interface is client-local even when its scene is authority-backed.
 				// It is submitted from the replica store before that store boundary
 				// closes; only copied draw rows leave the boundary.
-				if (viewportGuiPresent && DrawingViewport < GuiLists.size() && target.IsValid()) {
+				if (viewportGuiPresent && viewport < GuiLists.size() && target.IsValid()) {
 					(void)ViewportImages.Render(
-						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
+						Renderer, store, GuiLists[viewport].Commands(), PreviewSlot() + 1
 					);
 					// Canvas points and target pixels differ on a scaled display.
 					GameInterface.Submit(
-						GuiLists[DrawingViewport].Commands(),
-						GuiLists[DrawingViewport].Commands().CanvasSize,
+						GuiLists[viewport].Commands(),
+						GuiLists[viewport].Commands().CanvasSize,
 						engine::core::Vector2{
 							static_cast<float>(target.Width), static_cast<float>(target.Height)
 						},
 						store,
-						GuiLists[DrawingViewport].Signature()
+						GuiLists[viewport].Signature()
 					);
 				}
 
@@ -2727,7 +2690,7 @@ namespace studio {
 		// names. Moving either after presentation makes the surface view one frame
 		// stale.
 		//
-		// **`DrawingViewport` below chooses the surface textures as well as the
+		// **`viewport` below chooses the surface textures as well as the
 		// scene target, and the mirrors need it to.** The views collected above
 		// were aimed from *this* panel's eye a few lines ago - the aim is world
 		// state and one panel draws per frame, so it is correct at the moment it
@@ -2769,7 +2732,7 @@ namespace studio {
 			view.RibbonRuns = RibbonRuns;
 			view.Lights = Lights;
 			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
-			view.Slot = DrawingViewport;
+			view.Slot = viewport;
 			view.Portals = Portals;
 			view.Pipeline = selectedPipeline;
 			view.World = visual.IsValid() ? visual.Index : 0;
@@ -2831,17 +2794,17 @@ namespace studio {
 			view.Portals = Portals;
 			view.Surfaces = Surfaces;
 		} else if (PortalImages) {
-			PortalImages->RemoveViewport(DrawingViewport);
+			PortalImages->RemoveViewport(viewport);
 			PortalImages->Pump(frameSeconds, 1, std::chrono::steady_clock::now());
 			Renderer.SetAnimationTime(AnimationSeconds);
 		}
 
 		const uint64_t animationSignature = Renderer.TextureAnimationSignature(AnimationSeconds);
-		const bool gameInterfacePresent = viewportGuiPresent && DrawingViewport < GuiLists.size() &&
-										  !GuiLists[DrawingViewport].Commands().Commands.empty();
+		const bool gameInterfacePresent = viewportGuiPresent && viewport < GuiLists.size() &&
+										  !GuiLists[viewport].Commands().Commands.empty();
 		const uint64_t gameInterfaceSignature =
 			gameInterfacePresent
-				? engine::scene::MixSignature(GuiLists[DrawingViewport].Signature(), animationSignature)
+				? engine::scene::MixSignature(GuiLists[viewport].Signature(), animationSignature)
 				: 0;
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
 		{
@@ -2866,11 +2829,11 @@ namespace studio {
 			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
 		};
 		engine::render::PresentationDamage damage =
-			ViewportPresentations[DrawingViewport].Inspect(presentationSignatures);
+			ViewportPresentations[viewport].Inspect(presentationSignatures);
 		const bool particleLayerPresent = !view.Particles.empty();
 		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
 		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
-		auto &particleVisibility = ViewportParticleVisibility[DrawingViewport];
+		auto &particleVisibility = ViewportParticleVisibility[viewport];
 		particleVisibility.Refine(
 			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
 		);
@@ -2887,6 +2850,15 @@ namespace studio {
 		};
 		const bool diagnosticFrame =
 			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
+		const bool graphSourceChanged = !LastGraphViewport.has_value() || *LastGraphViewport != viewport ||
+										LastGraphRenderGeneration != Renderer.RenderGeneration();
+		if (graphSourceChanged) {
+			// Graph image resources are frame-scoped while Studio records one panel
+			// per render call. A host-only update must not copy the prior panel's
+			// composed image into this slot.
+			damage.Scene = true;
+			damage.GameInterface = true;
+		}
 		if (diagnosticFrame) {
 			damage.Scene = true;
 			damage.GameInterface = true;
@@ -2896,9 +2868,7 @@ namespace studio {
 		const bool visualChanged = damage.Any();
 		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
 		if (!visualChanged) {
-			ViewportPresentations[DrawingViewport].CacheProfile().Record(
-				damage, true, false, cacheApplicability
-			);
+			ViewportPresentations[viewport].CacheProfile().Record(damage, true, false, cacheApplicability);
 		}
 		if (!visualChanged && !particleDeviceStep) {
 			return;
@@ -2913,11 +2883,15 @@ namespace studio {
 				&Interface
 			);
 		}
+		if (LastFrame.Submitted) {
+			LastGraphViewport = viewport;
+			LastGraphRenderGeneration = Renderer.RenderGeneration();
+		}
 		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
-			ViewportPresentations[DrawingViewport].CacheProfile().Record(
+			ViewportPresentations[viewport].CacheProfile().Record(
 				damage, true, LastFrame.PortalPasses > 0, cacheApplicability
 			);
-			ViewportPresentations[DrawingViewport].Commit(presentationSignatures);
+			ViewportPresentations[viewport].Commit(presentationSignatures);
 			if (damage.Scene) {
 				particleVisibility.Commit(
 					particleVisibilitySignature, LastFrame.ParticlesDrawn > 0 || ribbonLayerPresent
@@ -2927,7 +2901,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("frame result", engine::core::ProfileCategory::Render);
 			if (shown.IsValid()) {
-				RenderPipelineRenderedSlots[shown.Index] = DrawingViewport;
+				RenderPipelineRenderedSlots[shown.Index] = viewport;
 			}
 
 			// **Presented, or simply drawn when there is nowhere to present.**

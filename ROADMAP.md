@@ -62,7 +62,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add extensive (freecam) camera tests (like flying through portals)
 - [_] add extensive client character tests
 - [_] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
-- [x] Studio Play uses separate server and client runtime cameras, per-viewport editor cameras, and a server free camera that survives refocus. Server Play hides the game HUD; client HUD remains. Focused suites and live Bladeborne viewport checks pass.
+- [x] Studio Play uses separate server and client cameras and viewport render slots. The server view keeps its free camera and excludes the client HUD across focus changes. Frame-scoped graph composites refresh for the selected viewport, and a live Bladeborne check verifies distinct captures and independent server camera motion.
 - [_] fix lights passing through portals not working
 
 - [_] test studio and fix found bugs

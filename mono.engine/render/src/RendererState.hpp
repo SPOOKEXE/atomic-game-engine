@@ -114,6 +114,7 @@ namespace engine::render {
 		};
 
 		uint64_t PipelineRevision = 0;
+		uint64_t RenderGeneration = 0;
 		std::optional<NamedPipeline> EngineDefault;
 		std::vector<NamedPipeline> NamedPipelines;
 		core::Name ActiveGraph;

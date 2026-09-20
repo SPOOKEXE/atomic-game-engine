@@ -385,6 +385,9 @@ namespace studio {
 		if (bounds == PreviewMeshBounds.end()) {
 			return false;
 		}
+		ENGINE_PROFILE_DYNAMIC(
+			"preview", std::string_view(PreviewWanted), engine::core::ProfileCategory::Render
+		);
 
 		// A preview is not part of the world that last used the renderer. Clear
 		// its post-process pipeline so a colour-grading script cannot tint every
