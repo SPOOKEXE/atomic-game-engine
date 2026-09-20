@@ -45,6 +45,7 @@ TEST_CASE("every component this program registers obeys the serialisation rules"
 	engine::replication::RegisterReplicationComponents();
 	engine::world::RegisterMailboxTypes();
 	client::RegisterClientComponents();
+	CHECK(engine::ecs::Components::Find(engine::core::Name("client.PortalInputHistory")).IsValid());
 
 	// **Scene classes as well as scene components**, because declaring a class
 	// is what first reaches for several of the types this asks about, and a

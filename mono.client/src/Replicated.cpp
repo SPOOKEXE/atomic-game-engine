@@ -474,6 +474,18 @@ namespace client {
 		}
 	}
 
+	void RegisterClientPredictionComponents() {
+		engine::ecs::Components::Register<LocalPlayerPrediction>(
+			"client.LocalPlayerPrediction", WriteLocalPlayerPredictions, ReadLocalPlayerPredictions
+		);
+		engine::ecs::Components::Register<PortalInputHistory>(
+			"client.PortalInputHistory", WritePortalInputHistories, ReadPortalInputHistories
+		);
+		engine::ecs::Components::Register<NativePlayerPrediction>(
+			"client.NativePlayerPrediction", WriteNativePredictions, ReadNativePredictions
+		);
+	}
+
 	std::shared_ptr<engine::script::Runtime>
 	BuildReplicatedWorld(Store &store, Scheduler &scheduler, const InterpolationSettings &interpolation) {
 		// Register snapshot component names before applying one.
@@ -516,16 +528,7 @@ namespace client {
 
 		// Register client resources before their component ids are minted.
 		RegisterClientComponents();
-		engine::ecs::Components::Register<LocalPlayerPrediction>(
-			"client.LocalPlayerPrediction", WriteLocalPlayerPredictions, ReadLocalPlayerPredictions
-		);
-
-		engine::ecs::Components::Register<PortalInputHistory>(
-			"client.PortalInputHistory", WritePortalInputHistories, ReadPortalInputHistories
-		);
-		engine::ecs::Components::Register<NativePlayerPrediction>(
-			"client.NativePlayerPrediction", WriteNativePredictions, ReadNativePredictions
-		);
+		RegisterClientPredictionComponents();
 
 		// **And the replication module's own, which nothing was doing.** A
 		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,

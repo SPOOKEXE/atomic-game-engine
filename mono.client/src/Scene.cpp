@@ -44,6 +44,7 @@
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
+#include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <cmath>
 #include <fstream>
@@ -1181,6 +1182,7 @@ namespace client {
 		engine::render::RegisterPresentationComponents();
 		engine::ecs::Components::Register<FallbackCameraState>("client.FallbackCameraState");
 		engine::ecs::Components::Register<FallbackCameraMarker>("client.FallbackCameraMarker");
+		RegisterClientPredictionComponents();
 	}
 
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {

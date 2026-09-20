@@ -89,6 +89,10 @@
 #include <span>
 
 namespace client {
+	// Register transient prediction resources before the client seals its
+	// component table. Local scripted worlds can inspect the same resources as
+	// replicated worlds during capture.
+	void RegisterClientPredictionComponents();
 
 	// Client-local state for the one character a connection may predict.
 	//
