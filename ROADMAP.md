@@ -40,6 +40,7 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.25
 
 - [_] review over v0.24 and consolidate, improve, tweak, etc.
+- [_] improve atomic-game-engine build file usage sizes. Takes over 120GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc.
 - [_] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
 - [_] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
 - [_] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
