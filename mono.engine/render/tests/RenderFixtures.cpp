@@ -575,6 +575,73 @@ TEST_CASE("graph images replace stale geometry after edits and camera motion", "
 	}
 }
 
+TEST_CASE("static scene residency stays bounded and settles after edits", "[render][gpu][fixture][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallFixture(fixture.Render);
+	std::array planes{
+		Plane{-.70f, -.35f, 4, .09f, .09f, 0xFF0000FFu},
+		Plane{-.50f, -.25f, 4, .09f, .09f, 0xFF00FF00u},
+		Plane{-.30f, -.15f, 4, .09f, .09f, 0xFFFF0000u},
+		Plane{-.10f, -.05f, 4, .09f, .09f, 0xFFFFFF00u},
+		Plane{.10f, .05f, 4, .09f, .09f, 0xFFFF00FFu},
+		Plane{.30f, .15f, 4, .09f, .09f, 0xFF00FFFFu},
+		Plane{.50f, .25f, 4, .09f, .09f, 0xFFFFFFFFu},
+		Plane{.70f, .35f, 4, .09f, .09f, 0xFF8080FFu},
+	};
+	auto instances = DrawPlanes(planes);
+	render::SceneTarget target{79, 53};
+	render::View view;
+	view.World = 907;
+	view.WorldName = core::Name("fixture.residency");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Instances = instances;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32;
+	render::OverlayImage overlay;
+	const auto render = [&] { return fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false); };
+	const auto checkSettled = [&](const render::GpuMemoryStatistics &baseline) {
+		const auto frame = render();
+		CHECK(frame.UploadedBytes == 0);
+		const auto memory = fixture.Render.MemoryStatistics();
+		CHECK(memory.BufferAllocations == baseline.BufferAllocations);
+		CHECK(memory.TransferBufferAllocations == baseline.TransferBufferAllocations);
+		CHECK(memory.TextureAllocations == baseline.TextureAllocations);
+	};
+
+	// Cycle every in-flight instance-index version before sampling a quiet scene.
+	for (size_t frame = 0; frame < 8; ++frame) {
+		REQUIRE(render().Submitted);
+	}
+	const auto warm = fixture.Render.MemoryStatistics();
+	for (size_t frame = 0; frame < 8; ++frame) {
+		checkSettled(warm);
+	}
+
+	planes[1].X += .12f;
+	instances = DrawPlanes(planes);
+	view.Instances = instances;
+	const auto oneRow = render();
+	INFO("one changed row uploaded " << oneRow.UploadedBytes << " bytes");
+	CHECK(oneRow.UploadedBytes > 0);
+	for (size_t frame = 0; frame < 8; ++frame) {
+		checkSettled(warm);
+	}
+
+	planes[0].Y += .11f;
+	planes.back().Y -= .11f;
+	instances = DrawPlanes(planes);
+	view.Instances = instances;
+	const auto distantRows = render();
+	INFO("two distant changed rows uploaded " << distantRows.UploadedBytes << " bytes");
+	CHECK(distantRows.UploadedBytes > oneRow.UploadedBytes);
+	for (size_t frame = 0; frame < 8; ++frame) {
+		checkSettled(warm);
+	}
+}
+
 TEST_CASE("pinhole reference has known coverage and rejects clipped planes", "[render][fixture-math]") {
 	scene::Camera camera;
 	camera.FieldOfViewRadians = 1.5707963267948966f;
