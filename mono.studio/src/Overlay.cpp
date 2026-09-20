@@ -7,6 +7,8 @@
 // `DriveCamera` instead of where the panel drew, and `studio/Projection.hpp` for
 // the arithmetic and the two traps it exists to avoid.
 
+#include "LodPreview.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Typing.hpp>
@@ -30,7 +32,6 @@
 #include <optional>
 #include <string>
 #include <studio/Editor.hpp>
-#include <studio/LodPreview.hpp>
 #include <studio/Viewports.hpp>
 #include <unordered_set>
 #include <vector>

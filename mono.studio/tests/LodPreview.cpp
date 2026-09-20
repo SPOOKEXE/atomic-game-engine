@@ -1,5 +1,7 @@
 // The inspector reports the focused viewport's LOD choice without storing it in ECS.
 
+#include "LodPreview.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -11,7 +13,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <studio/LodPreview.hpp>
 #include <studio/Projection.hpp>
 
 TEST_SUITE_ID("studio.lodpreview")

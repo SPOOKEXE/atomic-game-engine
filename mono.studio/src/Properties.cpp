@@ -1,3 +1,4 @@
+#include "LodPreview.hpp"
 #include "PropertyWidgets.hpp"
 
 #include <engine/ecs/Classes.hpp>
@@ -18,7 +19,6 @@
 #include <optional>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
-#include <studio/LodPreview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/PropertySelection.hpp>
 #include <studio/Widgets.hpp>

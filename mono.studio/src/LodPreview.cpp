@@ -1,3 +1,5 @@
+#include "LodPreview.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
@@ -8,7 +10,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <studio/LodPreview.hpp>
 #include <studio/Projection.hpp>
 
 namespace studio {
