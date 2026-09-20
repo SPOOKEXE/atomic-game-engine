@@ -41,10 +41,10 @@ namespace engine::ecs {
 		// spelling of the type and a different compiler may spell it
 		// differently.
 		//
-		// **Register explicitly before the type is first used.** `Of<T>()`
-		// registers under the automatic name, and a later explicit
-		// registration of the same type under a different name aborts rather
-		// than silently leaving two names for one thing.
+		// **Register explicitly during startup.** `Of<T>()` falls back to the
+		// compiler name when an early read gets there first; a later explicit
+		// registration promotes that same id and replaces its descriptor. Doing
+		// it at startup still fixes registration order before worlds tick.
 		//
 		// @param name The stable name to register under.
 		// @return The dense id for `T`.
@@ -131,11 +131,11 @@ namespace engine::ecs {
 		// The id `T` already holds, registering nothing.
 		//
 		// **The form to reach for on a path that must not decide a type's
-		// name.** `Of<T>()` registers under the compiler-spelled name when it
-		// finds nothing, and that name then loses to an explicit registration
-		// - but only by aborting, because a type cannot have two. So a call
-		// made *before* startup names the type is a call that decides the name
-		// wrongly and takes the process with it later.
+		// name.** `Of<T>()` registers under the compiler-spelled fallback when
+		// it finds nothing. Its owner can later promote that same id to the
+		// stable explicit name, but a path that only needs to inspect existing
+		// registration should still use this function rather than choosing a
+		// name by accident.
 		//
 		// The gap is not theoretical: `Store::Destroy` asks whether the row it
 		// is freeing sits in a tree, and it is reachable long before anything

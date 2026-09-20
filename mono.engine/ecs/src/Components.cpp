@@ -83,8 +83,10 @@ namespace engine::ecs {
 				previous->second.Automatic && requested == registry.ByName.end()) {
 				// An automatic name is a fallback, so the module that owns the type
 				// may still give it its stable serialized name after an early read.
-				// Keep the id because archetypes may already carry it.
-				registry.Descriptors[slot.Index].Name = name;
+				// Keep the id because archetypes may already carry it. The descriptor
+				// itself still has to become the explicit one, or a custom serializer
+				// or wire form would be lost behind the automatic raw descriptor.
+				registry.Descriptors[slot.Index] = descriptor;
 				registry.ByName.erase(previous);
 				registry.ByName.emplace(name.Id(), TypeEntry{slot, &slot, false});
 				return slot;

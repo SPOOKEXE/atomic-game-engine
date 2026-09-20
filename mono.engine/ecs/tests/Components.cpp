@@ -129,6 +129,32 @@ TEST_CASE("an automatic registration yields to an explicit one", "[ecs]") {
 	CHECK(Components::Describe(explicitly).Name == Name("test.automatic-first"));
 	CHECK(Components::Find(Name("test.automatic-first")) == explicitly);
 	CHECK_FALSE(Components::Find(Name(TypeNameOf<AutomaticFirst>())).IsValid());
+
+	struct AutomaticCustom {
+		Name Surface;
+	};
+	const ComponentId automaticCustom = Components::Of<AutomaticCustom>();
+	const ComponentId explicitCustom = Components::Register<AutomaticCustom>(
+		"test.automatic-custom",
+		[](ByteWriter &writer, const void *source, size_t count) {
+			const auto *values = static_cast<const AutomaticCustom *>(source);
+			for (size_t index = 0; index < count; index++) writer.WriteName(values[index].Surface);
+		},
+		[](ByteReader &reader, void *destination, size_t count) {
+			auto *values = static_cast<AutomaticCustom *>(destination);
+			for (size_t index = 0; index < count; index++) values[index].Surface = reader.ReadName();
+		}
+	);
+	REQUIRE(explicitCustom == automaticCustom);
+	const AutomaticCustom source[]{AutomaticCustom{Name("test.automatic-custom.surface")}};
+	ByteWriter writer;
+	Components::Describe(explicitCustom).Write(writer, source, 1);
+	CHECK(writer.Size() > sizeof(Name));
+	AutomaticCustom restored;
+	ByteReader reader(writer.Bytes());
+	Components::Describe(explicitCustom).Read(reader, &restored, 1);
+	CHECK(reader.AtEnd());
+	CHECK(restored.Surface == source[0].Surface);
 }
 
 TEST_CASE("a name looks up without registering", "[ecs]") {
