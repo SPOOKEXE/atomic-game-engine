@@ -69,6 +69,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
 - [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
+- [_] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors.
 
 - [_] test studio and fix found bugs
 
