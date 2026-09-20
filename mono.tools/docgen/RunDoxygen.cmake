@@ -17,16 +17,17 @@ cmake_minimum_required(VERSION 3.24)
 
 file(MAKE_DIRECTORY "${OUTPUT}")
 
-# Lines in a log, counted without building a CMake list - a warning quoting C++
-# can contain a semicolon, and `foreach(IN LISTS)` would split one line into two.
+# Nonempty lines in a log, counted as characters rather than CMake list entries:
+# a warning quoting C++ can contain a semicolon, which is a CMake list separator.
 function(_mono_count_lines path out_count)
 	set(${out_count} 0 PARENT_SCOPE)
 	if(NOT EXISTS "${path}")
 		return()
 	endif()
 	file(READ "${path}" raw)
-	string(REGEX MATCHALL "[^\n]+" lines "${raw}")
-	list(LENGTH lines n)
+	string(REGEX REPLACE "[^\n]+" "x" markers "${raw}")
+	string(REGEX REPLACE "[^x]" "" markers "${markers}")
+	string(LENGTH "${markers}" n)
 	set(${out_count} ${n} PARENT_SCOPE)
 endfunction()
 

@@ -73,9 +73,12 @@ TOC_INCLUDE_HEADINGS   = 2
 # merely untidy.
 EXCLUDE                = @MONO_DOCS_EXCLUDE@
 
+# The custom-node example is a private render-suite fixture. It builds against
+# the public API but is not itself part of that API.
 EXCLUDE_PATTERNS       = */tests/* \
                          */src/* \
                          */app/* \
+                         */mono.engine/render/examples/* \
                          */.cache/* \
                          */CLAUDE.md
 
