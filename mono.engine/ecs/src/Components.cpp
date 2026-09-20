@@ -23,6 +23,7 @@ namespace engine::ecs {
 		struct TypeEntry {
 			ComponentId Id;
 			const void *Owner = nullptr;
+			bool Automatic = false;
 		};
 
 		struct TypeRegistry {
@@ -76,6 +77,18 @@ namespace engine::ecs {
 			if (automatic || registered == name) {
 				return slot;
 			}
+			const auto previous = registry.ByName.find(registered.Id());
+			const auto requested = registry.ByName.find(name.Id());
+			if (previous != registry.ByName.end() && previous->second.Owner == &slot && previous->second.Automatic &&
+				requested == registry.ByName.end()) {
+				// An automatic name is a fallback, so the module that owns the type
+				// may still give it its stable serialized name after an early read.
+				// Keep the id because archetypes may already carry it.
+				registry.Descriptors[slot.Index].Name = name;
+				registry.ByName.erase(previous);
+				registry.ByName.emplace(name.Id(), TypeEntry{slot, &slot, false});
+				return slot;
+			}
 
 			ENGINE_ERROR(
 				"component '{}' is already registered as '{}'. A type has one name; "
@@ -127,7 +140,7 @@ namespace engine::ecs {
 
 		const ComponentId id{static_cast<uint32_t>(registry.Descriptors.size())};
 		registry.Descriptors.push_back(descriptor);
-		registry.ByName.emplace(name.Id(), TypeEntry{id, &slot});
+		registry.ByName.emplace(name.Id(), TypeEntry{id, &slot, automatic});
 		slot = id;
 
 		return id;

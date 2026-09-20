@@ -113,9 +113,9 @@ TEST_CASE("one type has one id, whatever it is asked for by", "[ecs]") {
 }
 
 TEST_CASE("an automatic registration yields to an explicit one", "[ecs]") {
-	// Order matters the other way round too: a type used before it was named
-	// keeps the automatic id, and asking for it by the automatic name still
-	// works. What must never happen is a second id.
+	// A read can happen before its owning module reaches startup. The automatic
+	// name is only a fallback, so the later explicit registration replaces it
+	// without changing the id an already-created resource uses.
 	struct AutomaticFirst {
 		int Value = 0;
 	};
@@ -123,10 +123,12 @@ TEST_CASE("an automatic registration yields to an explicit one", "[ecs]") {
 	const ComponentId automatically = Components::Of<AutomaticFirst>();
 	const size_t before = Components::Count();
 
-	// Registering the *same* automatic name again is idempotent.
-	const ComponentId same = Components::Register<AutomaticFirst>(TypeNameOf<AutomaticFirst>());
-	REQUIRE(same == automatically);
+	const ComponentId explicitly = Components::Register<AutomaticFirst>("test.automatic-first");
+	REQUIRE(explicitly == automatically);
 	REQUIRE(Components::Count() == before);
+	CHECK(Components::Describe(explicitly).Name == Name("test.automatic-first"));
+	CHECK(Components::Find(Name("test.automatic-first")) == explicitly);
+	CHECK_FALSE(Components::Find(Name(TypeNameOf<AutomaticFirst>())).IsValid());
 }
 
 TEST_CASE("a name looks up without registering", "[ecs]") {
