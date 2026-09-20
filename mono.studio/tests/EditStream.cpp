@@ -48,7 +48,11 @@ using engine::world::WorldSettings;
 using studio::Command;
 using studio::CommandLog;
 using studio::EditRecord;
+using studio::EditFrame;
+using studio::EditMessage;
 using studio::EditStream;
+using studio::DecodeMessage;
+using studio::EncodeMessage;
 using studio::FinishOperation;
 using studio::HOST_EDITOR;
 using studio::InstancePath;
@@ -223,6 +227,22 @@ namespace {
 		Fixture(const Fixture &) = delete;
 		Fixture &operator=(const Fixture &) = delete;
 	};
+}
+
+TEST_CASE("presence preserves named peer view and an empty selection", "[studio][editstream][presence]") {
+	EditMessage sent;
+	sent.Kind = EditFrame::Presence;
+	sent.DisplayName = "Avery";
+	sent.PresenceWorld = "Scene";
+	sent.PresencePosition = Vector3{4.0f, 5.0f, 6.0f};
+
+	const auto received = DecodeMessage(EncodeMessage(sent));
+	REQUIRE(received);
+	CHECK(received->Kind == EditFrame::Presence);
+	CHECK(received->DisplayName == "Avery");
+	CHECK(received->PresenceWorld == "Scene");
+	CHECK((received->PresencePosition == Vector3{4.0f, 5.0f, 6.0f}));
+	CHECK(received->PresenceSelection.empty());
 }
 
 // --- the identity -------------------------------------------------------------
