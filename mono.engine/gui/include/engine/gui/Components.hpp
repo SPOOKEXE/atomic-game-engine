@@ -1743,6 +1743,12 @@ namespace engine::gui {
 		uint8_t Reserved[2] = {};
 	};
 
+	// Opts an adornment into pointer hit testing.
+	struct AdornmentInteraction {
+		bool Enabled = false;
+		uint8_t Reserved[3] = {};
+	};
+
 	// The box a `SelectionBox` draws.
 	//
 	// Separate from `Adornment` because the handle adornments carry none of it:

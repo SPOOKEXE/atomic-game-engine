@@ -176,6 +176,7 @@ scene.WorldBounds | Resource: how far the world reaches from the origin on each 
 ## `gui`
 
 gui.Adornment | The half of a 3D adornment this module owns: which instance a `SelectionBox` or handle adornment is drawn around, in what colour, and whether it draws.
+gui.AdornmentInteraction | Opt-in pointer input for a 3D adornment. The renderer marks its geometry pickable only while enabled, so decorative adornments never steal scene input.
 gui.AspectRatio | `UIAspectRatioConstraint`: forces the parent element's resolved size to a width-over-height ratio, derived from whichever axis dominates.
 gui.Background | The box a `GuiObject` draws for itself: fill colour and transparency, plus the border's colour, thickness and inset mode.
 gui.Billboard | What a `BillboardGui` adds: the adornee it hangs off, its stud and extents offsets, lighting, and the distance past which it stops drawing.

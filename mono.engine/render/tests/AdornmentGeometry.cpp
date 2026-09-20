@@ -29,6 +29,7 @@ TEST_DEPENDS("engine.gui.adornments")
 
 using Catch::Approx;
 using engine::core::CFrame;
+using engine::core::Ray;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -99,6 +100,25 @@ TEST_CASE("a selection box is the twelve edges of its adornee", "[render][adornm
 		std::abs(geometry.Lines()[0].To.Y),
 	});
 	CHECK(reach > 2.0f);
+}
+
+TEST_CASE("only opted-in adornments answer a ray pick", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.pick");
+	const Entity part = world.Part(Vector3::Zero, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity box = world.Adorn("SelectionBox", part);
+
+	AdornmentGeometry geometry;
+	const Ray ray{Vector3{1.01f, 1.01f, 5.0f}, Vector3{0.0f, 0.0f, -1.0f}};
+	geometry.Build(world.Data);
+	CHECK_FALSE(geometry.Pick(ray, 0.05f));
+
+	world.Data.Set(box, engine::gui::AdornmentInteraction{.Enabled = true});
+	geometry.Build(world.Data);
+	const auto hit = geometry.Pick(ray, 0.05f);
+	REQUIRE(hit);
+	CHECK(hit->Source == box);
+	CHECK(hit->Distance == Approx(3.998f).margin(0.01f));
+	CHECK_FALSE(geometry.Pick(Ray{Vector3{5.0f, 5.0f, 5.0f}, Vector3{0.0f, 0.0f, -1.0f}}, 0.05f));
 }
 
 TEST_CASE("a rotated part gets a rotated box", "[render][adornmentgeometry]") {

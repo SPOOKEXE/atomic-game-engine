@@ -36,10 +36,13 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Entity.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace engine::ecs {
@@ -52,6 +55,7 @@ namespace engine::render {
 	//
 	// @since v0.8
 	struct AdornmentLine {
+		ecs::Entity Source;
 		// The two ends and what colour to draw between them.
 		//@{
 		core::Vector3 From;
@@ -80,6 +84,12 @@ namespace engine::render {
 		// a selection box a wall hides is a selection box that does not say what
 		// is selected, which is the one thing it is for.
 		bool AlwaysOnTop = true;
+		bool Interactive = false;
+	};
+
+	struct AdornmentHit {
+		ecs::Entity Source;
+		float Distance = 0.0f;
 	};
 
 	// One filled face, in world space.
@@ -142,6 +152,8 @@ namespace engine::render {
 		const std::vector<AdornmentFace> &Faces() const {
 			return Fills;
 		}
+
+		std::optional<AdornmentHit> Pick(const core::Ray &ray, float radius) const;
 
 	  private:
 		void AddBox(

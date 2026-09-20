@@ -224,6 +224,10 @@ namespace engine::render {
 			const CFrame frame = PresentedFrame(store, adornee, *transform, alpha);
 
 			AdornmentLine style;
+			style.Source = adornment;
+			if (const gui::AdornmentInteraction *interaction = store.Get<gui::AdornmentInteraction>(adornment)) {
+				style.Interactive = interaction->Enabled;
+			}
 			style.Colour = state->Color;
 			style.Transparency = state->Transparency;
 			style.AlwaysOnTop = state->AlwaysOnTop;
@@ -330,5 +334,47 @@ namespace engine::render {
 			constexpr float SWELL = 1.002f;
 			AddBox(frame, bounds->HalfExtent * SWELL, style, fills ? &fill : nullptr);
 		});
+	}
+
+	std::optional<AdornmentHit> AdornmentGeometry::Pick(const core::Ray &ray, float radius) const {
+		if (!(radius >= 0.0f)) {
+			return std::nullopt;
+		}
+
+		std::optional<AdornmentHit> found;
+		const float limit = radius * radius;
+		for (const AdornmentLine &line : Segments) {
+			if (!line.Interactive) {
+				continue;
+			}
+
+			const Vector3 segment = line.To - line.From;
+			const Vector3 offset = ray.Origin - line.From;
+			const float rayLength = ray.Direction.Dot(ray.Direction);
+			const float segmentLength = segment.Dot(segment);
+			if (!(rayLength > 0.0f) || !(segmentLength > 0.0f)) {
+				continue;
+			}
+
+			const float together = ray.Direction.Dot(segment);
+			const float rayOffset = ray.Direction.Dot(offset);
+			const float segmentOffset = segment.Dot(offset);
+			const float denominator = rayLength * segmentLength - together * together;
+			float rayDistance = denominator > 0.0f
+								? (together * segmentOffset - segmentLength * rayOffset) / denominator
+								: 0.0f;
+			rayDistance = std::max(rayDistance, 0.0f);
+			const float segmentFraction = std::clamp(
+				(together * rayDistance + segmentOffset) / segmentLength, 0.0f, 1.0f
+			);
+			rayDistance = std::max((together * segmentFraction - rayOffset) / rayLength, 0.0f);
+			const Vector3 separation =
+				ray.Origin + ray.Direction * rayDistance - (line.From + segment * segmentFraction);
+			if (separation.Dot(separation) > limit || (found && rayDistance >= found->Distance)) {
+				continue;
+			}
+			found = AdornmentHit{line.Source, rayDistance};
+		}
+		return found;
 	}
 }
