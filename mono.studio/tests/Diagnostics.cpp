@@ -141,6 +141,26 @@ TEST_CASE("physics profiler retains the last Slide reading between physics ticks
 	CHECK(captured.front().Milliseconds == prior.front().Milliseconds);
 }
 
+TEST_CASE("assigned join tooltip lists each reported world once", "[studio][diagnostics]") {
+	const std::vector<DiagnosticSpan> spans{
+		{.Name = "tick exchange input", .Depth = 0},
+		{.Name = "jobs.join.assigned", .Depth = 1, .Parent = 0, .Milliseconds = 8.0f},
+		{.Name = "exchange worlds (pinned workers)",
+		 .Depth = 1,
+		 .Parent = 0,
+		 .Milliseconds = 12.0f,
+		 .Reported = true},
+		{.Name = "server", .Depth = 2, .Parent = 2, .Milliseconds = 7.0f, .Reported = true},
+		{.Name = "ecs.systems", .Depth = 3, .Parent = 3, .Milliseconds = 6.0f, .Reported = true},
+		{.Name = "client", .Depth = 2, .Parent = 2, .Milliseconds = 5.0f, .Reported = true},
+	};
+	const auto worlds = studio::AssignedJoinWorlds(spans, 1);
+	REQUIRE(worlds.size() == 2);
+	CHECK(worlds[0].Name == "server");
+	CHECK(worlds[1].Name == "client");
+	CHECK(studio::AssignedJoinWorlds(spans, 0).empty());
+}
+
 TEST_CASE("studio profiling macros submit studio ownership", "[studio][diagnostics]") {
 	FrameGraph::SetEnabled(true);
 	FrameGraph::BeginFrame();

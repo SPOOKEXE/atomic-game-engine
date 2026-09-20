@@ -853,7 +853,9 @@ namespace engine::world {
 	  private:
 		// Returns whether the body ran on workers. The caller owns any worker
 		// timing report, after the join has made its measurements safe to read.
-		bool DispatchExchangeWorlds(const std::function<void(size_t)> &body);
+		bool DispatchExchangeWorlds(
+			const std::function<void(size_t)> &body, std::span<float> worldMilliseconds = {}
+		);
 		void CompleteExchangeFrame();
 		enum class ExchangePhase : uint8_t { Closed, BetweenRounds, Input, Collected, Applied };
 		ExchangePhase ExchangeStage = ExchangePhase::Closed;

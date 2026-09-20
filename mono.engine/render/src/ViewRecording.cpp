@@ -310,6 +310,7 @@ namespace engine::render {
 				height = State->BatchHeight;
 			}
 		} else if (present) {
+			ENGINE_PROFILE_CAT("begin frame", core::ProfileCategory::Render);
 			if (!State->BeginFrame()) {
 				return ViewStart::Abandoned;
 			}
@@ -355,8 +356,11 @@ namespace engine::render {
 		// dropping the frame. A caller asking for a texture and getting a frame
 		// it did not expect can see that something is wrong; one that gets no
 		// frame at all sees a frozen editor.
-		offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
-					State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+		{
+			ENGINE_PROFILE_CAT("ensure scene target", core::ProfileCategory::Render);
+			offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
+						State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+		}
 
 		if (State->Headless() && !offscreen) {
 			// The target could not be allocated. Headless has no window to fall
@@ -1655,7 +1659,11 @@ namespace engine::render {
 			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
 			graphEnabled(core::Name("camera-motion")) || graphEnabled(core::Name("fog")) ||
 			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
-		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
+		bool graphTargetsReady = true;
+		if (needsPbrTargets) {
+			ENGINE_PROFILE_CAT("ensure pbr targets", core::ProfileCategory::Render);
+			graphTargetsReady = State->EnsurePbr(targetSlot, pbrDimensions);
+		}
 		if (!graphTargetsReady) {
 			closePass();
 			State->Timestamps.Abandon(timingSlot);
@@ -1829,6 +1837,7 @@ namespace engine::render {
 	// touches the device queue: the copy pass it stages for is submitted by
 	// `RecordUploads`, which is what the `delta-upload` node calls.
 	void ViewRecording::PackInstances() {
+		ENGINE_PROFILE_CAT("pack instances", core::ProfileCategory::Render);
 		Impl *const State = this->State;
 		const core::CFrame &cameraFrame = Request.CameraFrame;
 		const uint32_t uploadCount = UploadCount;

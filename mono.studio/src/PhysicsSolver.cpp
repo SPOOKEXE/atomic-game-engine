@@ -87,6 +87,10 @@ namespace studio {
 			PhysicsProfiler.UnmarkedMilliseconds,
 			PhysicsProfiler.Dropped
 		);
+		ImGui::TextDisabled(
+			"simulation and ecs.systems are inclusive stage times. They include scripts, scene work "
+			"and other systems; the physics rows show only the measured physics share."
+		);
 
 		if (Universe == nullptr || !Active.IsValid())
 			ImGui::TextDisabled("no active world");

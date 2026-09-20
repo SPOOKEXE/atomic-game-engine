@@ -140,6 +140,22 @@ TEST_CASE("visibility observation overflow reports saturation honestly", "[rende
 	CHECK_FALSE(snapshot.DroppedExact);
 }
 
+TEST_CASE("overflow observations count distinct sources across repeated variants", "[render][visibility]") {
+	engine::render::VisibilityObservations observations;
+	observations.Begin(1, 0, engine::core::Name("overflow.variants"));
+	for (uint64_t entity = 1; entity <= engine::render::MAX_VISIBILITY_OBSERVATIONS; entity++)
+		observations.Observe(Instance(entity));
+	for (uint64_t entity = engine::render::MAX_VISIBILITY_OBSERVATIONS + 1;
+		 entity <= engine::render::MAX_VISIBILITY_OBSERVATIONS + 2000;
+		 entity++) {
+		observations.Observe(Instance(entity));
+		observations.Observe(Instance(entity));
+	}
+	const auto snapshot = observations.Snapshot();
+	CHECK(snapshot.Dropped == 2000);
+	CHECK(snapshot.DroppedExact);
+}
+
 TEST_CASE("visibility observations preserve completed empty submissions", "[render][visibility]") {
 	engine::render::VisibilityObservations observations;
 	observations.Begin(12, 5, engine::core::Name("empty.world"));

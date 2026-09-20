@@ -13,6 +13,8 @@
 // menu, and they read exactly the same `core::FrameGraph` the client's overlay
 // does - the data is shared even though the drawing is not.
 
+#include "ProfilerFlame.hpp"
+
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -1574,6 +1576,7 @@ namespace studio {
 
 			ImDrawList *draw = ImGui::GetWindowDrawList();
 			const DiagnosticSpan *hovered = nullptr;
+			uint32_t hoveredSource = FrameGraph::NO_PARENT;
 			uint32_t clickedSource = FrameGraph::NO_PARENT;
 
 			const auto drawSpan = [&](size_t index) {
@@ -1600,9 +1603,9 @@ namespace studio {
 
 				if (ImGui::IsMouseHoveringRect(upper, lower)) {
 					hovered = &span;
+					hoveredSource = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
 					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-						clickedSource =
-							focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
+						clickedSource = hoveredSource;
 					}
 					draw->AddRect(upper, lower, engine::ui::BrightColour());
 				}
@@ -1674,6 +1677,15 @@ namespace studio {
 					hovered->Reported ? "   (reported from another thread)" : ""
 				);
 				ImGui::PopStyleColor();
+				if (hovered->Name == "jobs.join.assigned") {
+					const std::vector<DiagnosticSpan> worlds = AssignedJoinWorlds(graphSpans, hoveredSource);
+					if (!worlds.empty()) {
+						ImGui::Separator();
+						ImGui::TextUnformatted("worker worlds (producer time)");
+						for (const DiagnosticSpan &world : worlds)
+							ImGui::Text("%s  %.3f ms", world.Name.c_str(), world.Milliseconds);
+					}
+				}
 				ImGui::EndTooltip();
 			}
 

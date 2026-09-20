@@ -1908,7 +1908,15 @@ namespace studio {
 		// is ignored outright rather than blended with. A capture run is compared
 		// against another capture run, and a clock that is *mostly* reproducible
 		// produces a diff nobody can attribute - see `Options::FixedAnimationStep`.
-		AnimationSeconds += Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
+		// A paused run keeps the image it had at the pause boundary. Advancing the
+		// shared texture clock here would invalidate its scene cache even though
+		// the world, camera and authored objects have not changed.
+		const bool allRunsPaused =
+			!Runs.empty() &&
+			std::all_of(Runs.begin(), Runs.end(), [](const WorldRun &run) { return run.Paused; });
+		if (!allRunsPaused)
+			AnimationSeconds +=
+				Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
 		Renderer.SetAnimationTime(AnimationSeconds);
 
 		// **The frame graph is only collected while it is being read.**

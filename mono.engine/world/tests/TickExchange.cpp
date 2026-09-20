@@ -256,6 +256,19 @@ TEST_CASE("parallel endpoint exchange reports each physics worker stage once", "
 
 	const RecordedTree parallel = capture(world::ExecutionMode::WorldParallel);
 	CHECK(countPhysics(parallel) == 4);
+	bool measuredExchangeWorlds = false;
+	for (size_t index = 0; index < parallel.Names.size(); ++index) {
+		if (parallel.Names[index] != "exchange worlds (pinned workers)") continue;
+		bool sourceReported = false;
+		bool destinationReported = false;
+		for (size_t child = index + 1; child < parallel.Names.size(); child++) {
+			if (parallel.Parents[child] != index || !parallel.Reported[child]) continue;
+			sourceReported |= parallel.Names[child] == "phase-source";
+			destinationReported |= parallel.Names[child] == "phase-destination";
+		}
+		measuredExchangeWorlds |= sourceReported && destinationReported;
+	}
+	CHECK(measuredExchangeWorlds);
 	for (size_t index = 0; index < parallel.Names.size(); ++index) {
 		if (parallel.Names[index] == "physics.profile-step") {
 			CHECK(parallel.Reported[index]);

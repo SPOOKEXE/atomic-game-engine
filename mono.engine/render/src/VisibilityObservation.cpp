@@ -48,6 +48,7 @@ namespace engine::render {
 		Dropped = 0;
 		DroppedExact = true;
 		Index.fill(-1);
+		OverflowIndex.fill(-1);
 	}
 
 	void VisibilityObservations::Invalidate() {
@@ -57,6 +58,7 @@ namespace engine::render {
 		Dropped = 0;
 		DroppedExact = true;
 		Index.fill(-1);
+		OverflowIndex.fill(-1);
 		ViewWorld = {};
 		Frame = 0;
 		ViewSlot = 0;
@@ -79,14 +81,25 @@ namespace engine::render {
 			if (rowIndex < 0) {
 				if (!create) return nullptr;
 				if (Count == Rows.size()) {
-					for (size_t omitted = 0; omitted < OverflowCount; omitted++)
-						if (Overflow[omitted].World == world && Overflow[omitted].Entity == instance.Source)
+					size_t overflowSlot = Hash(world, instance.Source) % OverflowIndex.size();
+					for (size_t omitted = 0; omitted < OverflowIndex.size(); omitted++) {
+						const int32_t existing = OverflowIndex[overflowSlot];
+						if (existing < 0) {
+							if (OverflowCount == Overflow.size()) {
+								DroppedExact = false;
+								return nullptr;
+							}
+							Overflow[OverflowCount] = VisibilityObservation{world, instance.Source};
+							OverflowIndex[overflowSlot] = static_cast<int32_t>(OverflowCount++);
+							Dropped++;
 							return nullptr;
-					if (OverflowCount < Overflow.size())
-						Overflow[OverflowCount++] = VisibilityObservation{world, instance.Source};
-					else
-						DroppedExact = false;
-					if (DroppedExact) Dropped++;
+						}
+						if (Overflow[static_cast<size_t>(existing)].World == world &&
+							Overflow[static_cast<size_t>(existing)].Entity == instance.Source)
+							return nullptr;
+						overflowSlot = (overflowSlot + 1) % OverflowIndex.size();
+					}
+					DroppedExact = false;
 					return nullptr;
 				}
 				Rows[Count] = VisibilityObservation{world, instance.Source};

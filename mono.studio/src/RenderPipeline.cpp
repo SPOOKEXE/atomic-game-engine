@@ -700,6 +700,9 @@ namespace studio {
 			}
 			return;
 		}
+		if (RenderPipelineWorld != Active || RenderPipelineGraph.Nodes().empty()) {
+			LoadRenderPipeline(Active, {});
+		}
 		if (!ImGui::Begin("Pipeline Profile", &ShowPipelineProfile)) {
 			ImGui::End();
 			return;

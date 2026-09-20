@@ -67,8 +67,8 @@ namespace engine::render {
 		std::vector<VisibilityObservation> Observations;
 	};
 
-	// Fixed rows and an open-addressed index keep duplicate variants attached to
-	// their source entity without a quadratic search.
+	// Fixed rows and open-addressed indices keep duplicate variants attached to
+	// their source entity, including after the observation limit is reached.
 	class VisibilityObservations {
 	  public:
 		// Starts recording one view submission.
@@ -98,6 +98,7 @@ namespace engine::render {
 		std::array<VisibilityObservation, MAX_VISIBILITY_OBSERVATIONS> Rows{};
 		std::array<int32_t, INDEX_CAPACITY> Index{};
 		std::array<VisibilityObservation, MAX_VISIBILITY_OBSERVATIONS> Overflow{};
+		std::array<int32_t, INDEX_CAPACITY> OverflowIndex{};
 		size_t Count = 0;
 		size_t OverflowCount = 0;
 		size_t Dropped = 0;
