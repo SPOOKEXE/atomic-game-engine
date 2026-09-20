@@ -68,6 +68,7 @@
 #include <engine/assets/Signature.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/world/Universe.hpp>
@@ -180,6 +181,10 @@ namespace studio {
 		// not wait for the next change to see who is where.
 		Hello = 5,
 		Welcome = 6,
+
+		// A collaborator's transient view and selection. Unlike a waypoint this
+		// never enters document history or undo.
+		Presence = 7,
 	};
 
 	// One message, whichever kind it is.
@@ -205,6 +210,22 @@ namespace studio {
 		// guest, and a lease stamped with it would look already lapsed or
 		// eternal depending on which machine booted first.
 		std::vector<Lease> Locks;
+
+		// `Presence`. World and instance identities are names for the same
+		// reason edit records use them, while the position is presentation only.
+		std::string DisplayName;
+		std::string PresenceWorld;
+		engine::core::Vector3 PresencePosition{};
+		InstancePath PresenceSelection;
+	};
+
+	struct RemotePresence {
+		EditorId Editor = HOST_EDITOR;
+		std::string DisplayName;
+		std::string World;
+		engine::core::Vector3 Position{};
+		InstancePath Selection;
+		double UpdatedAtSeconds = 0.0;
 	};
 
 	// Encodes one waypoint's records.
@@ -409,6 +430,9 @@ namespace studio {
 		// @return Whether it went.
 		bool Publish(uint64_t waypoint, std::span<const Command> commands, double nowSeconds);
 
+		void PublishPresence(const RemotePresence &presence, double nowSeconds);
+		std::span<const RemotePresence> RemotePresences() const { return Presences; }
+
 		// Carries what is waiting, in both directions.
 		//
 		// @param nowSeconds The current time.
@@ -529,6 +553,7 @@ namespace studio {
 		// Which client each editor id belongs to, so a grant can be addressed.
 		// Host only.
 		std::vector<std::pair<EditorId, engine::replication::ClientId>> Members;
+		std::vector<RemotePresence> Presences;
 
 		// Domain-separated identities derived from a private invitation key.
 		// The listener and connector borrow these. Declaring the identities first

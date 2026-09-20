@@ -244,6 +244,15 @@ namespace studio {
 			}
 			break;
 
+		case EditFrame::Presence:
+			writer.WriteString(message.DisplayName);
+			writer.WriteString(message.PresenceWorld);
+			writer.WriteFloat(message.PresencePosition.X);
+			writer.WriteFloat(message.PresencePosition.Y);
+			writer.WriteFloat(message.PresencePosition.Z);
+			WritePath(writer, message.PresenceSelection);
+			break;
+
 		case EditFrame::Waypoint:
 			WriteRecords(writer, message.Records);
 			break;
@@ -266,7 +275,7 @@ namespace studio {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(EditFrame::Welcome)) {
+		if (reader.Failed() || kind > static_cast<uint8_t>(EditFrame::Presence)) {
 			return std::nullopt;
 		}
 
@@ -316,6 +325,15 @@ namespace studio {
 			}
 			break;
 		}
+
+		case EditFrame::Presence:
+			message.DisplayName = reader.ReadString();
+			message.PresenceWorld = reader.ReadString();
+			message.PresencePosition.X = reader.ReadFloat();
+			message.PresencePosition.Y = reader.ReadFloat();
+			message.PresencePosition.Z = reader.ReadFloat();
+			if (!ReadPath(reader, message.PresenceSelection)) return std::nullopt;
+			break;
 
 		case EditFrame::Waypoint:
 			if (!ReadRecords(reader, message.Records)) {
@@ -667,6 +685,22 @@ namespace studio {
 		return true;
 	}
 
+	void EditStream::PublishPresence(const RemotePresence &presence, double nowSeconds) {
+		if (!Connected()) return;
+		EditMessage message;
+		message.Kind = EditFrame::Presence;
+		message.DisplayName = presence.DisplayName;
+		message.PresenceWorld = presence.World;
+		message.PresencePosition = presence.Position;
+		message.PresenceSelection = presence.Selection;
+		const std::vector<std::byte> payload = EncodeMessage(message);
+		if (Server != nullptr) {
+			Broadcast(payload, nowSeconds);
+		} else if (Client != nullptr) {
+			(void)Client->SendUser(payload, nowSeconds);
+		}
+	}
+
 	void EditStream::Grant(EditorId editor, const InstancePath &path, double nowSeconds) {
 		if (Server == nullptr) {
 			return;
@@ -733,7 +767,15 @@ namespace studio {
 	}
 
 	void EditStream::Forget(engine::replication::ClientId client) {
-		std::erase_if(Members, [client](const auto &member) { return member.second == client; });
+		const auto member = std::find_if(Members.begin(), Members.end(), [client](const auto &held) {
+			return held.second == client;
+		});
+		if (member != Members.end()) {
+			std::erase_if(Presences, [editor = member->first](const RemotePresence &presence) {
+				return presence.Editor == editor;
+			});
+			Members.erase(member);
+		}
 	}
 
 	size_t EditStream::Broadcast(
@@ -842,6 +884,23 @@ namespace studio {
 			locks.Kind = EditFrame::Locks;
 			locks.Locks.assign(Holds.Held().begin(), Holds.Held().end());
 			Server->SendTo(from, EncodeMessage(locks), nowSeconds);
+			return;
+		}
+
+		case EditFrame::Presence: {
+			RemotePresence presence;
+			presence.Editor = sender;
+			presence.DisplayName = message->DisplayName;
+			presence.World = message->PresenceWorld;
+			presence.Position = message->PresencePosition;
+			presence.Selection = message->PresenceSelection;
+			presence.UpdatedAtSeconds = nowSeconds;
+			const auto found = std::find_if(Presences.begin(), Presences.end(), [sender](const RemotePresence &held) {
+				return held.Editor == sender;
+			});
+			if (found == Presences.end()) Presences.push_back(std::move(presence));
+			else *found = std::move(presence);
+			if (Server != nullptr) Broadcast(payload, nowSeconds, from);
 			return;
 		}
 
