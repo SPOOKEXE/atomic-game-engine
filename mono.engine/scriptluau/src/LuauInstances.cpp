@@ -1067,8 +1067,8 @@ namespace engine::script {
 			case gui::EventKind::MouseButton1Changed:
 			case gui::EventKind::MouseButton2Changed: {
 				const SignalKind kind = event.Kind == gui::EventKind::MouseButton1Changed
-					? SignalKind::GuiMouseButton1Changed
-					: SignalKind::GuiMouseButton2Changed;
+											? SignalKind::GuiMouseButton1Changed
+											: SignalKind::GuiMouseButton2Changed;
 				lua_pushnumber(state, event.Position.X);
 				lua_pushnumber(state, event.Position.Y);
 				note(FireSignal(state, kind, event.Instance, 2));

@@ -205,7 +205,8 @@ namespace engine::render {
 	// the adornment where the button went down.
 	class AdornmentPointerRouter {
 	  public:
-		std::span<const gui::GuiEvent> Update(ecs::Store &store, const AdornmentPointer &pointer, float radius);
+		std::span<const gui::GuiEvent>
+		Update(ecs::Store &store, const AdornmentPointer &pointer, float radius);
 
 		void Forget();
 
