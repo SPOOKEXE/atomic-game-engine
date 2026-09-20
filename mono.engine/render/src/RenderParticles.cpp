@@ -1360,10 +1360,7 @@ namespace engine::render {
 		Particles.WorkUpdates = rebuildLayout ? written : 0;
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
-		Particles.Delta = ParticleStepDelta(
-			view.ParticleDelta,
-			ActiveParticleWorld->CarriedDelta
-		);
+		Particles.Delta = ParticleStepDelta(view.ParticleDelta, ActiveParticleWorld->CarriedDelta);
 
 		Particles.SeamCount = 0;
 		if (!view.ParticleSeams.empty()) {
