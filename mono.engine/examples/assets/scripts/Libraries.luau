@@ -142,6 +142,13 @@ for _, box in after.boxes do
 
 	local surface = SURFACES[box.surface]
 	part.Color = Color3.new(surface.color.r, surface.color.g, surface.color.b)
+	if box.surface == Terrain.HeightField.SurfaceWater then
+		-- Water is a one-block surface above the seabed. Keep moved parts visible
+		-- beneath it instead of replacing their appearance with an opaque blue box.
+		part.Transparency = 0.8
+		part.CastShadow = false
+		part.CanCollide = false
+	end
 	part.Parent = workspace
 end
 
