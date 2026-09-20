@@ -528,7 +528,6 @@ namespace client {
 
 		// Register client resources before their component ids are minted.
 		RegisterClientComponents();
-		RegisterClientPredictionComponents();
 
 		// **And the replication module's own, which nothing was doing.** A
 		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,
