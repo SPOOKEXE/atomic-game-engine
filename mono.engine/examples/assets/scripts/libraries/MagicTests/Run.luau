@@ -14,9 +14,10 @@ local dataSpecs = {
 	require(script.Parent.Specs.ArcChain),
 	require(script.Parent.Specs.StatusContent),
 	require(script.Parent.Specs.TerrainField),
+	require(script.Parent.Specs.TerrainRuntime),
 }
 
-local EXPECTED_DATA_TEST_COUNT = 215
+local EXPECTED_DATA_TEST_COUNT = 216
 
 local Run = {}
 
@@ -74,12 +75,13 @@ local function loadTerrain(terrainRoot: Instance?): any
 	}
 end
 
-function Run.data(coreRoot: Instance, terrainRoot: Instance?): any
+function Run.data(coreRoot: Instance, terrainRoot: Instance?, terrainRuntimeRoot: Instance?): any
 	local harness = Harness.new("data-only")
 	local core = loadCore(coreRoot)
 	local terrain = loadTerrain(terrainRoot)
+	local terrainRuntime = if terrainRuntimeRoot == nil then nil else require(terrainRuntimeRoot)
 	for _, spec in ipairs(dataSpecs) do
-		spec(harness, core, Fixtures, terrain)
+		spec(harness, core, Fixtures, terrain, terrainRuntime)
 	end
 	harness:suite("harness contracts", function(h: any)
 		h:test("assertNear rejects nonfinite values and invalid tolerances", function()

@@ -68,6 +68,11 @@ export type Builder = typeof(setmetatable(
 		-- craters land on it.
 		_queue: { { number } },
 		_queued: { [string]: boolean },
+		-- Geometry is prepared under the per-frame budget, then all chunks
+		-- touched by the pending edits publish together. A crater never grows in
+		-- visible chunk-sized steps.
+		_staged: { [string]: any },
+		_publication: number,
 	},
 	TerrainRuntime
 ))
@@ -292,6 +297,8 @@ function TerrainRuntime.new(field: any, size: number, container: Instance?): Bui
 		_loaded = 0,
 		_queue = {},
 		_queued = {},
+		_staged = {},
+		_publication = 0,
 	}, TerrainRuntime) :: any
 end
 
@@ -332,7 +339,7 @@ function TerrainRuntime.release(self: Builder, part: BasePart)
 	self._pool[self._poolCount] = part
 end
 
--- Builds a chunk, or rebuilds it in place if it already exists.
+-- Publishes one already-prepared chunk, or builds a new visible chunk.
 --
 -- **A rebuild moves the old parts into their new shape rather than taking them
 -- away and putting new ones back.** The two are the same boxes give or take a
@@ -345,12 +352,10 @@ end
 -- hundred parts going false and true again is two hundred property writes and
 -- two hundred rows moving between archetypes, for parts that were visible
 -- before and after. Only the difference in box count is pooled now.
-function TerrainRuntime.build(self: Builder, cx: number, cz: number)
+function TerrainRuntime.publish(self: Builder, cx: number, cz: number, chunk: any)
 	local key = chunkKey(cx, cz)
 	local previous = self._chunks[key]
 	local reusable = if previous ~= nil then previous.count else 0
-
-	local chunk = Chunker.build(self.field, cx, cz, self.size)
 
 	local parts: { BasePart } = {}
 	for index = 1, chunk.count do
@@ -388,6 +393,27 @@ function TerrainRuntime.build(self: Builder, cx: number, cz: number)
 	if previous == nil then
 		self._loaded += 1
 	end
+end
+
+-- Builds a chunk for initial loading. Rebuilds prepare through `pump` so their
+-- visible parts are not changed one chunk at a time.
+function TerrainRuntime.build(self: Builder, cx: number, cz: number)
+	self:publish(cx, cz, Chunker.build(self.field, cx, cz, self.size))
+end
+
+-- Commits every prepared chunk as one publication. Preparing geometry is the
+-- expensive work. The property writes here are deliberately kept together so
+-- the renderer sees either the old terrain or the fully carved terrain.
+function TerrainRuntime.publishStaged(self: Builder)
+	if next(self._staged) == nil then
+		return
+	end
+
+	for _, staged in self._staged do
+		self:publish(staged.cx, staged.cz, staged.chunk)
+	end
+	self._staged = {}
+	self._publication += 1
 end
 
 function TerrainRuntime.unload(self: Builder, cx: number, cz: number)
@@ -449,6 +475,10 @@ function TerrainRuntime.applyEdit(self: Builder, edit: any): number
 		-- one crater's radius used to rebuild the same chunk twice in a row,
 		-- with the first result thrown away unseen.
 		local key = chunkKey(pair[1], pair[2])
+		-- A newly landed crater changes the geometry a previous pass prepared.
+		-- Drop that stale prepared data and prepare this chunk again against the
+		-- complete edit list before any visible part changes.
+		self._staged[key] = nil
 		if self._queued[key] then
 			continue
 		end
@@ -460,7 +490,8 @@ function TerrainRuntime.applyEdit(self: Builder, edit: any): number
 	return queued
 end
 
--- Rebuilds at most `budget` queued chunks, oldest first.
+-- Prepares at most `budget` queued chunks, oldest first, then publishes the
+-- complete pending edit batch when every chunk is ready.
 --
 -- **Called once a frame by whoever owns the beat**, which is the only place that
 -- knows what a frame can afford. A budget of one keeps the worst frame to one
@@ -481,11 +512,20 @@ function TerrainRuntime.pump(self: Builder, budget: number): number
 			break
 		end
 
-		self._queued[chunkKey(pair[1], pair[2])] = nil
+		local key = chunkKey(pair[1], pair[2])
+		self._queued[key] = nil
 		if self:isLoaded(pair[1], pair[2]) then
-			self:build(pair[1], pair[2])
+			self._staged[key] = {
+				cx = pair[1],
+				cz = pair[2],
+				chunk = Chunker.build(self.field, pair[1], pair[2], self.size),
+			}
 			rebuilt += 1
 		end
+	end
+
+	if #self._queue == 0 then
+		self:publishStaged()
 	end
 
 	return rebuilt
@@ -583,6 +623,7 @@ function TerrainRuntime.stats(self: Builder): { [string]: number }
 		idle = self._poolCount,
 		created = self._created,
 		destroyed = self._destroyed,
+		publication = self._publication,
 	}
 end
 

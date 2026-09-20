@@ -15,7 +15,7 @@
 -- form also takes a required timeout, so the line could not have gone back
 -- verbatim in any case.
 --
--- The count is 215 now. **The 183 are still the parity check and the 32 since
+-- The count is 216 now. **The 183 are still the parity check and the 33 since
 -- are not**: those cover `Noise`'s simplex, Worley and derivative samplers and
 -- the `NoiseMap` grids, which were written in this tree and never ran in Studio.
 -- The distinction matters only if the port is ever re-checked against its
@@ -52,10 +52,11 @@ local Modules = script :: any
 
 local MagicCore = Modules.MagicCore
 local TerrainCore = Modules.TerrainCore
+local TerrainRuntime = Modules.TerrainRuntime
 
 local Run = require(Modules.MagicTests.Run)
 
-local report = Run.data(MagicCore, TerrainCore)
+local report = Run.data(MagicCore, TerrainCore, TerrainRuntime)
 
 print(report.summary)
 

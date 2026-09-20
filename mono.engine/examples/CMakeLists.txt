@@ -188,6 +188,7 @@ set(scene_libraries
 	MagicTests/MagicCore
 	MagicTests/MagicTests
 	MagicTests/TerrainCore
+	MagicTests/TerrainRuntime
 	Libraries/MagicCore
 	Libraries/TerrainCore)
 
