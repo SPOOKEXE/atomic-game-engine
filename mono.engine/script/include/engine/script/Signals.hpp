@@ -172,6 +172,7 @@ namespace engine::script {
 		//@{
 		GuiMouseButton1Down,
 		GuiMouseButton1Up,
+		GuiMouseButton1Changed,
 		//@}
 
 		// The virtual secondary-button route. The physical router currently owns
@@ -180,6 +181,7 @@ namespace engine::script {
 		GuiMouseButton2Click,
 		GuiMouseButton2Down,
 		GuiMouseButton2Up,
+		GuiMouseButton2Changed,
 		//@}
 
 		// `guiObject.MouseEnter` - the pointer entered its rectangle.

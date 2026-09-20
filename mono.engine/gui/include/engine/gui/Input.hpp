@@ -110,6 +110,23 @@ namespace engine::gui {
 		// is what makes a drag off a button and back a single interaction.
 		InputEnded,
 
+		// Secondary button equivalents of `InputBegan` and `InputEnded`.
+		//
+		// Kept separate because a 3D adornment can capture both buttons at once,
+		// and a receiver must know which gesture ended without asking a device
+		// whose state may already have advanced to the next frame.
+		//@{
+		MouseButton2Began,
+		MouseButton2Ended,
+		//@}
+
+		// Motion while a captured adornment button remains down. Unlike
+		// `MouseMoved`, each kind names the button that owns the capture.
+		//@{
+		MouseButton1Changed,
+		MouseButton2Changed,
+		//@}
+
 		// The button went down and came up on the same element.
 		//
 		// **A separate event rather than a flag on `InputEnded`**, because it

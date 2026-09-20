@@ -4423,6 +4423,7 @@ namespace studio {
 		// reason. Editor state, not world state: nobody replicates where a
 		// mouse is.
 		std::vector<engine::gui::Router> GuiRouters;
+		std::vector<engine::render::AdornmentPointerRouter> AdornmentRouters;
 
 		// The world each viewport router was last allowed to address. A router
 		// remembers a press across frames, so moving a panel to another world must

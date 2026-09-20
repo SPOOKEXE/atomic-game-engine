@@ -1045,6 +1045,29 @@ namespace engine::script {
 				note(FireJsSignal(context, SignalKind::GuiMouseButton1Up, event.Instance, 0, nullptr));
 				break;
 
+			case gui::EventKind::MouseButton2Began:
+				note(FireJsSignal(context, SignalKind::GuiMouseButton2Down, event.Instance, 0, nullptr));
+				break;
+
+			case gui::EventKind::MouseButton2Ended:
+				note(FireJsSignal(context, SignalKind::GuiMouseButton2Up, event.Instance, 0, nullptr));
+				break;
+
+			case gui::EventKind::MouseButton1Changed:
+			case gui::EventKind::MouseButton2Changed: {
+				const SignalKind kind = event.Kind == gui::EventKind::MouseButton1Changed
+					? SignalKind::GuiMouseButton1Changed
+					: SignalKind::GuiMouseButton2Changed;
+				JSValue arguments[2] = {
+					JS_NewFloat64(context, static_cast<double>(event.Position.X)),
+					JS_NewFloat64(context, static_cast<double>(event.Position.Y)),
+				};
+				note(FireJsSignal(context, kind, event.Instance, 2, arguments));
+				JS_FreeValue(context, arguments[0]);
+				JS_FreeValue(context, arguments[1]);
+				break;
+			}
+
 			case gui::EventKind::Activated:
 				note(FireJsSignal(context, SignalKind::GuiActivated, event.Instance, 0, nullptr));
 				break;
@@ -1195,11 +1218,17 @@ namespace engine::script {
 			JS_CGETSET_DEF("MouseButton1Click", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
 			JS_CGETSET_DEF("MouseButton1Down", InstanceTreeSignal<SignalKind::GuiMouseButton1Down>, nullptr),
 			JS_CGETSET_DEF("MouseButton1Up", InstanceTreeSignal<SignalKind::GuiMouseButton1Up>, nullptr),
+			JS_CGETSET_DEF("OnMouse1Down", InstanceTreeSignal<SignalKind::GuiMouseButton1Down>, nullptr),
+			JS_CGETSET_DEF("OnMouse1Up", InstanceTreeSignal<SignalKind::GuiMouseButton1Up>, nullptr),
+			JS_CGETSET_DEF("OnMouse1Changed", InstanceTreeSignal<SignalKind::GuiMouseButton1Changed>, nullptr),
 			JS_CGETSET_DEF(
 				"MouseButton2Click", InstanceTreeSignal<SignalKind::GuiMouseButton2Click>, nullptr
 			),
 			JS_CGETSET_DEF("MouseButton2Down", InstanceTreeSignal<SignalKind::GuiMouseButton2Down>, nullptr),
 			JS_CGETSET_DEF("MouseButton2Up", InstanceTreeSignal<SignalKind::GuiMouseButton2Up>, nullptr),
+			JS_CGETSET_DEF("OnMouse2Down", InstanceTreeSignal<SignalKind::GuiMouseButton2Down>, nullptr),
+			JS_CGETSET_DEF("OnMouse2Up", InstanceTreeSignal<SignalKind::GuiMouseButton2Up>, nullptr),
+			JS_CGETSET_DEF("OnMouse2Changed", InstanceTreeSignal<SignalKind::GuiMouseButton2Changed>, nullptr),
 
 			JS_CGETSET_DEF("InputBegan", InstanceTreeSignal<SignalKind::GuiInputBegan>, nullptr),
 			JS_CGETSET_DEF("InputEnded", InstanceTreeSignal<SignalKind::GuiInputEnded>, nullptr),

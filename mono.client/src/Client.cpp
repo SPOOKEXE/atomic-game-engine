@@ -3818,6 +3818,7 @@ namespace client {
 
 			engine::gui::CompileRequest request;
 			std::span<const engine::gui::GuiEvent> interfaceEvents;
+			std::span<const engine::gui::GuiEvent> adornmentEvents;
 
 			// **What Return did, which the router cannot produce.** Releasing the
 			// focus with a key is not a press, so nothing is picked and
@@ -3982,6 +3983,32 @@ namespace client {
 
 				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
 
+				// World adornments use the same window pointer after screen and spatial
+				// UI have had first refusal. Their hit geometry is resolved against the
+				// camera that will draw this frame, so a press and its visible outline
+				// agree at every window size.
+				if ((interfaceEvents.empty() ||
+					 (!Input.State().IsButtonDown(engine::scene::MouseButton::Left) &&
+					  !Input.State().IsButtonDown(engine::scene::MouseButton::Right))) &&
+					request.Display.Width > 0.0f && request.Display.Height > 0.0f) {
+					const float aspect = request.Display.Width / request.Display.Height;
+					const float slope = std::tan(Views.Camera().FieldOfViewRadians * 0.5f);
+					const float x = (2.0f * Input.State().MousePosition.X / request.Display.Width - 1.0f) *
+						aspect * slope;
+					const float y = (1.0f - 2.0f * Input.State().MousePosition.Y / request.Display.Height) * slope;
+					engine::render::AdornmentPointer adornment;
+					adornment.Ray = engine::core::Ray{
+						Views.CameraFrame().Position,
+						Views.CameraFrame().VectorToWorldSpace(engine::core::Vector3{x, y, -1.0f}).Unit(),
+					};
+					adornment.Position = Input.State().MousePosition;
+					adornment.PrimaryDown = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+					adornment.SecondaryDown = Input.State().IsButtonDown(engine::scene::MouseButton::Right);
+					adornment.Moved = Input.State().MouseDelta != engine::core::Vector2::Zero;
+					adornment.Inside = pointer.Inside;
+					adornmentEvents = AdornmentRouter.Update(store, adornment, 0.1f);
+				}
+
 				// **After the router, because this frame's press is what may have
 				// changed it.** A click that lands on a box has to reach the
 				// window on the frame it happened, or the first character somebody
@@ -4015,7 +4042,7 @@ namespace client {
 			// **Outside the world's lock, because it reaches a VM.** The span
 			// points into the router's own vector, which is a member and is only
 			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
-			if (!typedEvents.empty() || !interfaceEvents.empty()) {
+			if (!typedEvents.empty() || !interfaceEvents.empty() || !adornmentEvents.empty()) {
 				if (engine::script::Runtime *runtime = RuntimeOf(interfaceWorld); runtime != nullptr) {
 					// Typing first, because it happened first - the keystroke is
 					// applied above the routing for the reason stated there.
@@ -4024,6 +4051,9 @@ namespace client {
 					}
 					if (!interfaceEvents.empty()) {
 						runtime->DeliverGuiEvents(interfaceEvents);
+					}
+					if (!adornmentEvents.empty()) {
+						runtime->DeliverGuiEvents(adornmentEvents);
 					}
 				}
 			}

@@ -377,4 +377,48 @@ namespace engine::render {
 		}
 		return found;
 	}
+
+	std::span<const gui::GuiEvent>
+	AdornmentPointerRouter::Update(Store &store, const AdornmentPointer &pointer, float radius) {
+		Events.clear();
+		Geometry.Build(store);
+		const std::optional<AdornmentHit> hit = pointer.Inside ? Geometry.Pick(pointer.Ray, radius) : std::nullopt;
+		const auto emit = [&](gui::EventKind kind, Entity instance) {
+			if (instance != ecs::NULL_ENTITY) {
+				Events.push_back(gui::GuiEvent{kind, instance, pointer.Position, core::Vector2::Zero});
+			}
+		};
+
+		if (pointer.PrimaryDown && !WasPrimaryDown) {
+			Primary = hit ? hit->Source : ecs::NULL_ENTITY;
+			emit(gui::EventKind::InputBegan, Primary);
+		} else if (pointer.PrimaryDown && WasPrimaryDown && pointer.Moved) {
+			emit(gui::EventKind::MouseButton1Changed, Primary);
+		} else if (!pointer.PrimaryDown && WasPrimaryDown) {
+			emit(gui::EventKind::InputEnded, Primary);
+			Primary = ecs::NULL_ENTITY;
+		}
+
+		if (pointer.SecondaryDown && !WasSecondaryDown) {
+			Secondary = hit ? hit->Source : ecs::NULL_ENTITY;
+			emit(gui::EventKind::MouseButton2Began, Secondary);
+		} else if (pointer.SecondaryDown && WasSecondaryDown && pointer.Moved) {
+			emit(gui::EventKind::MouseButton2Changed, Secondary);
+		} else if (!pointer.SecondaryDown && WasSecondaryDown) {
+			emit(gui::EventKind::MouseButton2Ended, Secondary);
+			Secondary = ecs::NULL_ENTITY;
+		}
+
+		WasPrimaryDown = pointer.PrimaryDown;
+		WasSecondaryDown = pointer.SecondaryDown;
+		return Events;
+	}
+
+	void AdornmentPointerRouter::Forget() {
+		Primary = ecs::NULL_ENTITY;
+		Secondary = ecs::NULL_ENTITY;
+		WasPrimaryDown = false;
+		WasSecondaryDown = false;
+		Events.clear();
+	}
 }

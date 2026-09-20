@@ -39,10 +39,12 @@
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/gui/Input.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace engine::ecs {
@@ -90,6 +92,16 @@ namespace engine::render {
 	struct AdornmentHit {
 		ecs::Entity Source;
 		float Distance = 0.0f;
+	};
+
+	// The host-provided state of a pointer over a world view.
+	struct AdornmentPointer {
+		core::Ray Ray;
+		core::Vector2 Position;
+		bool PrimaryDown = false;
+		bool SecondaryDown = false;
+		bool Moved = false;
+		bool Inside = true;
 	};
 
 	// One filled face, in world space.
@@ -184,5 +196,25 @@ namespace engine::render {
 
 		std::vector<AdornmentLine> Segments;
 		std::vector<AdornmentFace> Fills;
+	};
+
+	// Turns one world-space pointer into script-facing adornment events.
+	//
+	// Capture belongs here beside the ray hit test: hosts own camera projection,
+	// but client and Studio must agree that an up and a drag continue to reach
+	// the adornment where the button went down.
+	class AdornmentPointerRouter {
+	  public:
+		std::span<const gui::GuiEvent> Update(ecs::Store &store, const AdornmentPointer &pointer, float radius);
+
+		void Forget();
+
+	  private:
+		AdornmentGeometry Geometry;
+		ecs::Entity Primary;
+		ecs::Entity Secondary;
+		bool WasPrimaryDown = false;
+		bool WasSecondaryDown = false;
+		std::vector<gui::GuiEvent> Events;
 	};
 }

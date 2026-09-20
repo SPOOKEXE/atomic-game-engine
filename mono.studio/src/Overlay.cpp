@@ -2114,6 +2114,7 @@ namespace studio {
 		}
 		if (GuiRouterWorlds[index] != shown) {
 			GuiRouters[index].Forget();
+			AdornmentRouters[index].Forget();
 			GuiRouterWorlds[index] = shown;
 		}
 		const ViewportGuiSource source = ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown));
@@ -2187,6 +2188,7 @@ namespace studio {
 						 ImGui::IsMouseHoveringRect(
 							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
 						 );
+		const PanelProjection adornmentPanel = ProjectionFor(index);
 
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
@@ -2222,6 +2224,25 @@ namespace studio {
 			const std::span<const engine::gui::GuiEvent> produced =
 				GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
 			events.assign(produced.begin(), produced.end());
+
+			// The image-space ray uses the same projection that draws the overlay.
+			// UI owns the pointer first, then a visible adornment may capture either
+			// mouse button until its matching release.
+			if ((events.empty() ||
+				 (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseDown(ImGuiMouseButton_Right))) && selected) {
+				if (adornmentPanel.IsValid()) {
+					engine::render::AdornmentPointer adornment;
+					adornment.Ray = adornmentPanel.PanelToRay(glm::vec2(mouse.x, mouse.y));
+					adornment.Position = pointer.Position;
+					adornment.PrimaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+					adornment.SecondaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Right);
+					adornment.Moved = ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f;
+					adornment.Inside = adornmentPanel.ContainsPanel(glm::vec2(mouse.x, mouse.y));
+					const std::span<const engine::gui::GuiEvent> routed =
+						AdornmentRouters[index].Update(store, adornment, 0.1f);
+					events.insert(events.end(), routed.begin(), routed.end());
+				}
+			}
 
 			// **Typing, which this panel routed clicks for and never delivered.**
 			// A `TextBox` in a studio viewport took focus from a click, showed a

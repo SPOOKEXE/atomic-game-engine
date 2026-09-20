@@ -494,6 +494,7 @@ namespace studio {
 		ViewportPresentations.resize(1 + extras);
 		ViewportParticleVisibility.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
+		AdornmentRouters.resize(1 + extras);
 		GuiRouterWorlds.resize(1 + extras);
 
 		// **"Viewport 2" upwards, and the main panel is "Viewport 1".** The

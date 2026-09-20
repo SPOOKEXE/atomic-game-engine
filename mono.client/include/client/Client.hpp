@@ -28,6 +28,7 @@
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
+#include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/ShaderLibrary.hpp>
@@ -522,6 +523,7 @@ namespace client {
 		// Where the pointer is, for the world's own interface. Long-lived: it
 		// holds the hover and the press across frames.
 		engine::gui::Router InterfaceRouter;
+		engine::render::AdornmentPointerRouter AdornmentRouter;
 		engine::render::FrameStatistics Statistics;
 
 		client::Actions Actions;
