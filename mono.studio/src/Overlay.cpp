@@ -789,6 +789,36 @@ namespace studio {
 				}
 			}
 
+			if (shown.IsValid() && Team != nullptr && Team->Edits() != nullptr) {
+				const ImU32 remoteColour = IM_COL32(255, 180, 70, 230);
+				for (const RemotePresence &remote : Team->Edits()->RemotePresences()) {
+					if (remote.World != Universe->NameOf(shown).Text()) continue;
+
+					glm::vec2 at{};
+					if (panel.WorldToPanel(remote.Position, at)) {
+						const ImVec2 point(at.x, at.y);
+						list->AddTriangleFilled(
+							ImVec2(point.x, point.y - 9.0f), ImVec2(point.x - 6.0f, point.y + 5.0f),
+							ImVec2(point.x + 6.0f, point.y + 5.0f), remoteColour
+						);
+						list->AddText(ImVec2(point.x + 9.0f, point.y - 8.0f), remoteColour, remote.DisplayName.c_str());
+					}
+
+					if (remote.Selection.empty()) continue;
+					Universe->Enter(shown, [&](Store &store) {
+						const Entity selected = ResolvePath(store, remote.Selection);
+						const auto *transform = store.Get<engine::scene::Transform>(selected);
+						const auto *bounds = store.Get<engine::scene::Bounds>(selected);
+						glm::vec2 minimum{};
+						glm::vec2 maximum{};
+						if (transform != nullptr && bounds != nullptr &&
+							ProjectBoxBounds(panel, transform->Frame, bounds->HalfExtent, minimum, maximum)) {
+							list->AddRect(ImVec2(minimum.x, minimum.y), ImVec2(maximum.x, maximum.y), remoteColour, 0.0f, 0, 1.5f);
+						}
+					});
+				}
+			}
+
 			list->PopClipRect();
 		}
 	}
