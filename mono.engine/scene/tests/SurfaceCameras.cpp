@@ -3030,6 +3030,49 @@ TEST_CASE("the far half of a body reaches the picture in the pane", "[scene][sur
 	CHECK(plan.Reflected < plan.Opaque);
 }
 
+TEST_CASE("a static prop stays whole through a local portal", "[scene][surfacecameras]") {
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	const Entity prop =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "StaticProp");
+	engine::scene::DrawInstance row;
+	row.Source = prop.Id;
+	row.Frame = CFrame(Vector3{0.0f, 0.0f, -0.1f});
+	row.HalfExtent = Vector3{0.5f, 1.0f, 0.5f};
+
+	std::vector<engine::scene::DrawInstance> drawn{row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	REQUIRE(drawn.size() == 2);
+	CHECK(drawn[0].SeamNormal == Vector3{});
+	CHECK(drawn[1].SeamNormal == Vector3{});
+
+	// A simulated body transfers at a fixed tick, so only its transition keeps
+	// complementary halves. The static branch must not widen that path.
+	mirror.World.Set<engine::scene::Simulated>(prop, {});
+	drawn = {row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	CHECK(drawn[0].SeamNormal != Vector3{});
+	CHECK(drawn[1].SeamNormal != Vector3{});
+
+	// Anchored scripts can move a Transform without making a physics body. Their
+	// presentation still has a tick-to-tick path, so it keeps the same cut while
+	// it crosses a pane.
+	mirror.World.Remove<engine::scene::Simulated>(prop);
+	mirror.World.Set<Transform>(prop, Transform{CFrame(Vector3{0.0f, 0.0f, -0.1f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		prop, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, -0.2f})}
+	);
+	drawn = {row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	CHECK(drawn[0].SeamNormal != Vector3{});
+	CHECK(drawn[1].SeamNormal != Vector3{});
+}
+
 TEST_CASE("a hole's camera stands where its own map says", "[scene][surfacecameras]") {
 	// **Two derivations of one map, and they were allowed to disagree.**
 	// `scene::SeamMapping` is the single statement of what a hole does to what

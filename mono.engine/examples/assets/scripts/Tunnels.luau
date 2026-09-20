@@ -88,6 +88,7 @@ local SHORT_X = 20
 local SUBSPACE_X = 54
 
 local PANE_THICKNESS = 0.25
+local PANE_FACE = PANE_THICKNESS / 2
 
 local SURFACE_SIZE = Vector3.new(1024, 1024)
 
@@ -331,7 +332,10 @@ lamp("PlainLampSouth", Vector3.new(0, 14, -22), 90)
 --
 -- Each route leg keeps its own part. Reusing one part across the disconnected
 -- legs makes presentation interpolate it across the space between portal mouths.
--- The active part changes at the pane while each part's own motion stays local.
+-- The active part changes at the pane face, where the renderer cuts a crossing
+-- body, while each part's own motion stays local. The slab centre is behind one
+-- face and ahead of the other, so handing off there leaves one fixed tick with
+-- neither local part reaching the actual aperture.
 
 type Leg = {
 	From: Vector3,
@@ -460,10 +464,10 @@ end
 drifter("LongDrifter", LONG_MARK, {
 	leg(
 		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, LONG / 2 + 6),
-		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, SKIP)
+		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, SKIP + PANE_FACE)
 	),
 	leg(
-		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, -SKIP),
+		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, -SKIP - PANE_FACE),
 		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, -(LONG / 2 + 6))
 	),
 })
@@ -474,14 +478,14 @@ drifter("LongDrifter", LONG_MARK, {
 drifter("ShortDrifter", SHORT_MARK, {
 	leg(
 		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, SHORT / 2 + 6),
-		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, ENTRY)
+		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, ENTRY + PANE_FACE)
 	),
 	leg(
-		Vector3.new(SUBSPACE_X + DRIFT_SIDE, DRIFT_Y, SPLICE),
-		Vector3.new(SUBSPACE_X + DRIFT_SIDE, DRIFT_Y, -SPLICE)
+		Vector3.new(SUBSPACE_X + DRIFT_SIDE, DRIFT_Y, SPLICE - PANE_FACE),
+		Vector3.new(SUBSPACE_X + DRIFT_SIDE, DRIFT_Y, -SPLICE + PANE_FACE)
 	),
 	leg(
-		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, -ENTRY),
+		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, -ENTRY - PANE_FACE),
 		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, -(SHORT / 2 + 6))
 	),
 })
@@ -505,10 +509,10 @@ drifter("ShortDrifter", SHORT_MARK, {
 drifter("LongLantern", LONG_MARK, {
 	leg(
 		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, -(LONG / 2 + 6)),
-		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, -SKIP)
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, -SKIP - PANE_FACE)
 	),
 	leg(
-		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, SKIP),
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, SKIP + PANE_FACE),
 		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, LONG / 2 + 6)
 	),
 }, LANTERN_RANGE)
@@ -516,14 +520,14 @@ drifter("LongLantern", LONG_MARK, {
 drifter("ShortLantern", SHORT_MARK, {
 	leg(
 		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, -(SHORT / 2 + 6)),
-		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, -ENTRY)
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, -ENTRY - PANE_FACE)
 	),
 	leg(
-		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, -SPLICE),
-		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, SPLICE)
+		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, -SPLICE + PANE_FACE),
+		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, SPLICE - PANE_FACE)
 	),
 	leg(
-		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, ENTRY),
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, ENTRY + PANE_FACE),
 		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, SHORT / 2 + 6)
 	),
 }, LANTERN_RANGE)

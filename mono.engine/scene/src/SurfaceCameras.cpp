@@ -2547,16 +2547,30 @@ namespace engine::scene {
 					continue;
 				}
 
-				// **The near half is cut whether or not the far half belongs
-				// here**, and that split is the whole of what a crossing seam
-				// needs from this pass. A cross-world copy goes into the *other*
-				// world's list, which only a host holding the universe can
-				// assemble - but the body poking out of the back of the glass is
-				// a row right here, and leaving it whole is a body drawn twice
-				// over: whole in the room it is leaving and whole again in the
-				// room it is entering, meeting nowhere.
-				out[index].SeamNormal = cut.NearNormal;
-				out[index].SeamOffset = cut.NearOffset;
+				// A simulated body crosses on its next fixed tick, so complementary
+				// halves fill the two rooms only while it is in the doorway. Static
+				// scenery has no ownership transfer. A scripted anchored part can still
+				// move by writing Transform, so its previous transform keeps it on the
+				// moving path as well. Cutting only a fixed prop by its centre makes a
+				// portal-facing view clip the rest of it at the far mouth.
+				const ecs::Entity body{out[index].Rig != 0 ? out[index].Rig : out[index].Source};
+				const Transform *const current = body ? store.Get<Transform>(body) : nullptr;
+				const PreviousTransform *const previous = body ? store.Get<PreviousTransform>(body) : nullptr;
+				const bool scriptMoving = current != nullptr && previous != nullptr &&
+										  (current->Frame.Position != previous->Frame.Position ||
+										   current->Frame.QuaternionX != previous->Frame.QuaternionX ||
+										   current->Frame.QuaternionY != previous->Frame.QuaternionY ||
+										   current->Frame.QuaternionZ != previous->Frame.QuaternionZ ||
+										   current->Frame.QuaternionW != previous->Frame.QuaternionW);
+				const bool staticLocal = !seam.Crosses && out[index].Rig == 0 && body && store.Alive(body) &&
+										 !store.Has<Simulated>(body) && !scriptMoving;
+				if (!staticLocal) {
+					out[index].SeamNormal = cut.NearNormal;
+					out[index].SeamOffset = cut.NearOffset;
+				} else {
+					ghost.SeamNormal = {};
+					ghost.SeamOffset = 0.0f;
+				}
 
 				if (!seam.Crosses) {
 					out.push_back(ghost);

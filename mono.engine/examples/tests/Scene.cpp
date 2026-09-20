@@ -1275,12 +1275,28 @@ TEST_CASE("tunnel drifters stay local while switching portal legs", "[examples][
 		}
 	}
 	bool longCrossed = false, longReturned = false, shortCrossed = false, shortThirdLeg = false;
-	bool oneVisiblePerRoute = true, lampsMatchBodies = true;
+	bool oneVisiblePerRoute = true, lampsMatchBodies = true, faceHandoffs = true;
 	float largestStep = 0.0f;
+	// These are the source and destination face positions at each route seam.
+	// The scripted blocks switch local parts here because portal cuts use the
+	// face, rather than the centre, of the quarter-stud pane slab.
+	struct Handoff {
+		float From;
+		float To;
+	};
+	const std::array<std::array<Handoff, 2>, 4> handoffs{
+		std::array<Handoff, 2>{Handoff{14.125f, -14.125f}, Handoff{}},
+		std::array<Handoff, 2>{Handoff{1.125f, 12.875f}, Handoff{-12.875f, -1.125f}},
+		std::array<Handoff, 2>{Handoff{-14.125f, 14.125f}, Handoff{}},
+		std::array<Handoff, 2>{Handoff{-1.125f, -12.875f}, Handoff{12.875f, 1.125f}},
+	};
+	std::array<size_t, 4> activeLeg{};
+	constexpr float MAX_HANDOFF_DISTANCE = 6.0f / 60.0f + 1.0e-3f;
 	for (size_t tick = 0; tick < 430; ++tick) {
 		systems.Tick(store, 1.0f / 60.0f);
 		for (size_t route = 0; route < routes.size(); ++route) {
 			size_t visible = 0;
+			size_t visibleLeg = 0;
 			for (size_t leg = 0; leg < routes[route].size(); ++leg) {
 				const Entity body = bodies[route][leg];
 				if (body == engine::ecs::NULL_ENTITY) continue;
@@ -1291,6 +1307,7 @@ TEST_CASE("tunnel drifters stay local while switching portal legs", "[examples][
 				}
 				if (!visual->Visible) continue;
 				++visible;
+				visibleLeg = leg;
 				if (route == 0 && leg == 1) longCrossed = true;
 				if (route == 0 && leg == 0 && longCrossed) longReturned = true;
 				if (route == 1 && leg == 1) shortCrossed = true;
@@ -1301,10 +1318,23 @@ TEST_CASE("tunnel drifters stay local while switching portal legs", "[examples][
 					std::max(largestStep, (current->Frame.Position - previous->Frame.Position).Magnitude());
 			}
 			oneVisiblePerRoute &= visible == 1;
+			if (visible == 1 && visibleLeg != activeLeg[route]) {
+				const size_t seam = std::min(visibleLeg, activeLeg[route]);
+				const Handoff &handoff = handoffs[route][seam];
+				const bool forward = visibleLeg > activeLeg[route];
+				const auto *from = store.Get<engine::scene::Transform>(bodies[route][activeLeg[route]]);
+				const auto *to = store.Get<engine::scene::Transform>(bodies[route][visibleLeg]);
+				const float expectedFrom = forward ? handoff.From : handoff.To;
+				const float expectedTo = forward ? handoff.To : handoff.From;
+				faceHandoffs &= std::abs(from->Frame.Position.Z - expectedFrom) <= MAX_HANDOFF_DISTANCE;
+				faceHandoffs &= std::abs(to->Frame.Position.Z - expectedTo) <= MAX_HANDOFF_DISTANCE;
+				activeLeg[route] = visibleLeg;
+			}
 		}
 	}
 	CHECK(oneVisiblePerRoute);
 	CHECK(lampsMatchBodies);
+	CHECK(faceHandoffs);
 	CHECK(largestStep < 0.2f);
 	CHECK(longCrossed);
 	CHECK(longReturned);
