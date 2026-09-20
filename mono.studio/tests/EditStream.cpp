@@ -773,6 +773,58 @@ TEST_CASE("presence keeps distinct identities across host and two guests", "[stu
 	CHECK(find(secondPeers, HOST_EDITOR) != secondPeers.end());
 }
 
+TEST_CASE("a peer clearing its selection clears the remote selection box", "[studio][editstream][presence]") {
+	Fixture jobs;
+	Session session;
+	REQUIRE(session.Connect());
+
+	session.Host.Insert(session.Host.Workspace(), "Selected");
+	session.Settle();
+
+	studio::RemotePresence presence;
+	presence.DisplayName = "Host";
+	presence.World = "Scene";
+	presence.Position = Vector3{1.0f, 2.0f, 3.0f};
+	presence.Selection = {"Workspace", "Selected"};
+	session.HostStream->PublishPresence(presence, session.Now);
+	session.Settle();
+
+	REQUIRE(session.GuestStream->RemotePresences().size() == 1);
+	CHECK(session.GuestStream->RemotePresences().front().Selection == presence.Selection);
+
+	presence.Selection.clear();
+	session.HostStream->PublishPresence(presence, session.Now);
+	session.Settle();
+
+	REQUIRE(session.GuestStream->RemotePresences().size() == 1);
+	CHECK(session.GuestStream->RemotePresences().front().Selection.empty());
+}
+
+TEST_CASE("a disconnected host clears the guest's stale peer presence", "[studio][editstream][presence]") {
+	Fixture jobs;
+	Session session;
+	REQUIRE(session.Connect());
+
+	studio::RemotePresence presence;
+	presence.DisplayName = "Host";
+	presence.World = "Scene";
+	session.HostStream->PublishPresence(presence, session.Now);
+	session.Settle();
+	REQUIRE(session.GuestStream->RemotePresences().size() == 1);
+
+	// Destroying the listener is a host that quit without another editor to
+	// relay `PresenceGone`. The guest must expire its cached peer view when
+	// the transport declares the session dead.
+	session.HostStream.reset();
+	for (size_t tick = 0; tick < 48 && session.GuestStream->Connected(); ++tick) {
+		session.Now += 0.25;
+		session.GuestStream->Pump(session.Now);
+	}
+
+	CHECK_FALSE(session.GuestStream->Connected());
+	CHECK(session.GuestStream->RemotePresences().empty());
+}
+
 TEST_CASE("two editors on one model take turns and both land", "[studio][editstream]") {
 	Fixture jobs;
 	Crowd crowd;

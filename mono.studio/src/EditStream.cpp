@@ -613,7 +613,7 @@ namespace studio {
 		// A host needs nobody's permission to edit its own document.
 		// A guest is connected only after the host's edit-stream welcome. Transport
 		// admission alone does not prove a private host accepted its identity.
-		return Server != nullptr || (Client != nullptr && Me != HOST_EDITOR);
+		return Server != nullptr || (Client != nullptr && Client->Live() && Me != HOST_EDITOR);
 	}
 
 	size_t EditStream::Editors() const {
@@ -1060,6 +1060,18 @@ namespace studio {
 			}
 
 			Client->Advance(nowSeconds);
+
+			if (!Client->Live()) {
+				// **A view is true only while the session that supplied it exists.**
+				// `Admitted` deliberately remains historical in `Connector`, so it
+				// cannot decide whether the name and selection we last saw are still
+				// somebody at the other end. Dropping them here removes stale arrows
+				// and selection boxes while a reconnect starts with a fresh welcome.
+				Me = HOST_EDITOR;
+				Greeted = false;
+				Presences.clear();
+				Holds.Adopt({});
+			}
 		}
 	}
 }
