@@ -1108,7 +1108,21 @@ namespace studio {
 					// null check and nothing else - which is a useful thing for the
 					// graph to say out loud.
 					ENGINE_PROFILE_CAT("team create", engine::core::ProfileCategory::Network);
-					Team->Pump(engine::core::Clock::Seconds());
+					const double now = engine::core::Clock::Seconds();
+					Team->Pump(now);
+					if (EditStream *stream = Team->Edits(); stream != nullptr && now >= TeamPresenceAt) {
+						RemotePresence presence;
+						presence.DisplayName = TeamNameField[0] == '\0' ? "Studio" : TeamNameField;
+						const WorldId world = ViewportWorld(FocusedViewport);
+						presence.World = world.IsValid() ? Universe->NameOf(world).Text() : std::string();
+						const ViewportState *view = ExtraAt(FocusedViewport);
+						presence.Position = view != nullptr ? view->Frame.Position : CameraFrame.Position;
+						if (world.IsValid() && !Selection.empty()) {
+							Universe->Enter(world, [&](Store &store) { presence.Selection = PathOf(store, Selection.front()); });
+						}
+						stream->PublishPresence(presence, now);
+						TeamPresenceAt = now + 0.1;
+					}
 				}
 
 				// **Beside the control surface and for its reason**, which the

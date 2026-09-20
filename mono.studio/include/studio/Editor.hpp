@@ -5915,6 +5915,7 @@ namespace studio {
 		// Held by pointer because it borrows the command log and the universe,
 		// and both are built during `Initialise` rather than at construction.
 		std::unique_ptr<TeamCreate> Team;
+		double TeamPresenceAt = 0.0;
 
 		// What the team-create fields hold while somebody is editing them.
 		// Kept on the editor rather than static inside the draw, for
