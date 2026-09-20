@@ -368,6 +368,8 @@ namespace engine::gui {
 		Entity graph;
 		int32_t graphOrder = 0;
 		int32_t graphDepth = 0;
+		Vector2 graphOrigin;
+		Vector2 graphPoint;
 		store.Each<const NodeCanvas, const Resolved>(
 			[&](Entity node, const NodeCanvas &, const Resolved &resolved) {
 				if (!resolved.Rendered) {
@@ -380,8 +382,8 @@ namespace engine::gui {
 						resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
 					},
 				};
-				if (!bounds.Contains(Unrotated(resolved.AbsoluteRotation, bounds, point)) ||
-					!resolved.Clip.Contains(point)) {
+				const Vector2 unrotated = Unrotated(resolved.AbsoluteRotation, bounds, point);
+				if (!bounds.Contains(unrotated) || !resolved.Clip.Contains(point)) {
 					return;
 				}
 				if (graph == NULL_ENTITY || resolved.Order > graphOrder ||
@@ -389,6 +391,8 @@ namespace engine::gui {
 					graph = node;
 					graphOrder = resolved.Order;
 					graphDepth = resolved.Depth;
+					graphOrigin = resolved.AbsolutePosition;
+					graphPoint = unrotated;
 				}
 			}
 		);
@@ -412,7 +416,7 @@ namespace engine::gui {
 				return graph;
 			}
 
-			const Vector2 relative{point.X - bounds.Min.X, point.Y - bounds.Min.Y};
+			const Vector2 relative{graphPoint.X - graphOrigin.X, graphPoint.Y - graphOrigin.Y};
 			// Keep the canvas coordinate below the pointer fixed. Scaling around the
 			// canvas origin makes nodes and their labels slide away under the cursor.
 			canvas->Pan = Vector2{
