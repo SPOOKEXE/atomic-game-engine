@@ -78,6 +78,9 @@ namespace engine::render {
 		uint64_t Tick = 0;
 		// Elapsed world time at Tick, in seconds.
 		double Seconds = 0;
+		// Fixed simulation duration represented by this packet. The particle
+		// device step consumes it once when this revision reaches the renderer.
+		float ParticleDelta = 0.0f;
 		// Camera-independent lighting copied from the world.
 		scene::WorldLighting Lighting;
 		// Renderable instances in presentation order.

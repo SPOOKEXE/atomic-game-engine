@@ -142,6 +142,7 @@ namespace engine::render {
 		view.ParticleLayoutRevision = frame.Particles.LayoutRevision;
 		view.ParticleResidentRevision = frame.Particles.ResidentRevision;
 		view.ParticlePool = frame.Particles.Pool;
+		view.ParticleDelta = frame.ParticleDelta;
 		view.ParticleBlocks = frame.Particles.BlockCount;
 		view.Portals = frame.Portals;
 		view.EyeImage = 0;
@@ -158,8 +159,10 @@ namespace engine::render {
 		ENGINE_PROFILE_CAT("world view collect", core::ProfileCategory::Render);
 		frame.Name = owner;
 		frame.Identity = store.Identity();
-		frame.Tick = store.Time().Tick;
-		frame.Seconds = store.Time().Elapsed;
+		const ecs::WorldTime time = store.Time();
+		frame.Tick = time.Tick;
+		frame.Seconds = time.Elapsed;
+		frame.ParticleDelta = time.Delta;
 		frame.Lighting = scene::LightingOf(store);
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||

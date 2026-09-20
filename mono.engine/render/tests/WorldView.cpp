@@ -242,6 +242,7 @@ TEST_CASE("world view owns a published replica pose and particle inputs", "[rend
 		CHECK(frame.Identity == store.Identity());
 		CHECK(frame.Tick == store.Time().Tick);
 		CHECK(frame.Seconds == store.Time().Elapsed);
+		CHECK(frame.ParticleDelta == store.Time().Delta);
 	}
 	// Store destruction must not invalidate the render packet.
 	REQUIRE(frame.Instances.size() == 1);
@@ -272,6 +273,7 @@ TEST_CASE(
 	frame.Name = core::Name("packet-owner");
 	frame.Identity = ownerStore.Identity();
 	frame.Seconds = 3.5;
+	frame.ParticleDelta = 1.0f / 30.0f;
 	frame.Instances.emplace_back();
 	frame.Instances.front().Frame.Position = {1, 2, -3};
 	frame.Joints.emplace_back(core::Vector3{4, 5, 6});
@@ -339,6 +341,7 @@ TEST_CASE(
 	CHECK(view.Lights.data() == camera.Lights.data());
 	CHECK(view.OverrideLighting);
 	CHECK(view.Lighting.Ambient == frame.Lighting.Ambient);
+	CHECK(view.ParticleDelta == frame.ParticleDelta);
 	CHECK(view.CameraFrame.Position == before.CameraFrame.Position);
 	CHECK(view.CameraFrame.Rotation() == before.CameraFrame.Rotation());
 	CHECK(view.Camera.FieldOfViewRadians == before.Camera.FieldOfViewRadians);

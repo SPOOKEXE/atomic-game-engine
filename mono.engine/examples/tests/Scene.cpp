@@ -2792,6 +2792,13 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	const Entity second = engine::scene::AddPlayer(store, "Player2");
 	REQUIRE(first != engine::ecs::NULL_ENTITY);
 	REQUIRE(second != engine::ecs::NULL_ENTITY);
+	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "PlayerListTestCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		camera,
+		engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 7.0f, -18.0f})}
+	);
+	store.SetResource(ActiveCamera{camera});
 
 	std::string error;
 	const bool loaded = LoadScene(store, systems, ExamplePath("PlayerList.luau"), error);
@@ -2803,6 +2810,18 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	for (int tick = 0; tick < 70; tick++) {
 		systems.Tick(store, 1.0f / 60.0f);
 	}
+
+	// Camera motion used to be coupled to the list's visibility. Move the live
+	// camera through the same transform row the controls system writes, then let
+	// the scene run another tick before inspecting both private player layers.
+	const ActiveCamera *active = store.Resource<ActiveCamera>();
+	REQUIRE(active != nullptr);
+	REQUIRE(active->Entity != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		active->Entity,
+		engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{18.0f, 9.0f, -24.0f})}
+	);
+	systems.Tick(store, 1.0f / 60.0f);
 
 	// One panel per player, in that player's own container - not two in one, and
 	// not one shared.
