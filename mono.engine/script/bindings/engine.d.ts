@@ -2600,6 +2600,7 @@ declare interface ContentService {
 	// its slot as an empty string.
 	GetMeshTextures(mesh: string): string[];
 
+	// Authored object-space mesh dimensions, or zero before content arrives.
 	GetMeshSize(mesh: string): Vector3;
 
 	GetTextures(): string[];

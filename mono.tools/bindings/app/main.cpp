@@ -1559,6 +1559,9 @@ declare extern type ContentService with
 	-- character wearing one sheet all over.
 	function GetMeshTextures(self, mesh: string): { string }
 
+	-- Authored object-space mesh dimensions, or zero before content arrives.
+	function GetMeshSize(self, mesh: string): Vector3
+
 	-- Every texture registered in this world, sorted.
 	function GetTextures(self): { string }
 
@@ -2395,9 +2398,15 @@ declare task: {
 				out << "\tMouseButton1Click: GuiSignal\n";
 				out << "\tMouseButton1Down: GuiSignal\n";
 				out << "\tMouseButton1Up: GuiSignal\n";
+				out << "\tOnMouse1Down: GuiSignal\n";
+				out << "\tOnMouse1Up: GuiSignal\n";
+				out << "\tOnMouse1Changed: PointerSignal\n";
 				out << "\tMouseButton2Click: GuiSignal\n";
 				out << "\tMouseButton2Down: GuiSignal\n";
 				out << "\tMouseButton2Up: GuiSignal\n";
+				out << "\tOnMouse2Down: GuiSignal\n";
+				out << "\tOnMouse2Up: GuiSignal\n";
+				out << "\tOnMouse2Changed: PointerSignal\n";
 
 				out << "\tInputBegan: GuiSignal\n";
 				out << "\tInputEnded: GuiSignal\n";
@@ -3446,6 +3455,9 @@ declare interface ContentService {
 	// its slot as an empty string.
 	GetMeshTextures(mesh: string): string[];
 
+	// Authored object-space mesh dimensions, or zero before content arrives.
+	GetMeshSize(mesh: string): Vector3;
+
 	GetTextures(): string[];
 
 	// Null for a still image and for a texture this world has not been told
@@ -4058,9 +4070,15 @@ declare const task: {
 				out << "\treadonly MouseButton1Click: GuiSignal;\n";
 				out << "\treadonly MouseButton1Down: GuiSignal;\n";
 				out << "\treadonly MouseButton1Up: GuiSignal;\n";
+				out << "\treadonly OnMouse1Down: GuiSignal;\n";
+				out << "\treadonly OnMouse1Up: GuiSignal;\n";
+				out << "\treadonly OnMouse1Changed: PointerSignal;\n";
 				out << "\treadonly MouseButton2Click: GuiSignal;\n";
 				out << "\treadonly MouseButton2Down: GuiSignal;\n";
 				out << "\treadonly MouseButton2Up: GuiSignal;\n";
+				out << "\treadonly OnMouse2Down: GuiSignal;\n";
+				out << "\treadonly OnMouse2Up: GuiSignal;\n";
+				out << "\treadonly OnMouse2Changed: PointerSignal;\n";
 
 				out << "\treadonly InputBegan: GuiSignal;\n";
 				out << "\treadonly InputEnded: GuiSignal;\n";
