@@ -225,7 +225,8 @@ namespace engine::render {
 
 			AdornmentLine style;
 			style.Source = adornment;
-			if (const gui::AdornmentInteraction *interaction = store.Get<gui::AdornmentInteraction>(adornment)) {
+			if (const gui::AdornmentInteraction *interaction =
+					store.Get<gui::AdornmentInteraction>(adornment)) {
 				style.Interactive = interaction->Enabled;
 			}
 			style.Colour = state->Color;
@@ -361,12 +362,11 @@ namespace engine::render {
 			const float segmentOffset = segment.Dot(offset);
 			const float denominator = rayLength * segmentLength - together * together;
 			float rayDistance = denominator > 0.0f
-								? (together * segmentOffset - segmentLength * rayOffset) / denominator
-								: 0.0f;
+									? (together * segmentOffset - segmentLength * rayOffset) / denominator
+									: 0.0f;
 			rayDistance = std::max(rayDistance, 0.0f);
-			const float segmentFraction = std::clamp(
-				(together * rayDistance + segmentOffset) / segmentLength, 0.0f, 1.0f
-			);
+			const float segmentFraction =
+				std::clamp((together * rayDistance + segmentOffset) / segmentLength, 0.0f, 1.0f);
 			rayDistance = std::max((together * segmentFraction - rayOffset) / rayLength, 0.0f);
 			const Vector3 separation =
 				ray.Origin + ray.Direction * rayDistance - (line.From + segment * segmentFraction);
@@ -382,7 +382,8 @@ namespace engine::render {
 	AdornmentPointerRouter::Update(Store &store, const AdornmentPointer &pointer, float radius) {
 		Events.clear();
 		Geometry.Build(store);
-		const std::optional<AdornmentHit> hit = pointer.Inside ? Geometry.Pick(pointer.Ray, radius) : std::nullopt;
+		const std::optional<AdornmentHit> hit =
+			pointer.Inside ? Geometry.Pick(pointer.Ray, radius) : std::nullopt;
 		const auto emit = [&](gui::EventKind kind, Entity instance) {
 			if (instance != ecs::NULL_ENTITY) {
 				Events.push_back(gui::GuiEvent{kind, instance, pointer.Position, core::Vector2::Zero});

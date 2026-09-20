@@ -2228,15 +2228,17 @@ namespace studio {
 			// The image-space ray uses the same projection that draws the overlay.
 			// UI owns the pointer first, then a visible adornment may capture either
 			// mouse button until its matching release.
-			if ((events.empty() ||
-				 (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseDown(ImGuiMouseButton_Right))) && selected) {
+			if ((events.empty() || (!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+									!ImGui::IsMouseDown(ImGuiMouseButton_Right))) &&
+				selected) {
 				if (adornmentPanel.IsValid()) {
 					engine::render::AdornmentPointer adornment;
 					adornment.Ray = adornmentPanel.PanelToRay(glm::vec2(mouse.x, mouse.y));
 					adornment.Position = pointer.Position;
 					adornment.PrimaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
 					adornment.SecondaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Right);
-					adornment.Moved = ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f;
+					adornment.Moved =
+						ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f;
 					adornment.Inside = adornmentPanel.ContainsPanel(glm::vec2(mouse.x, mouse.y));
 					const std::span<const engine::gui::GuiEvent> routed =
 						AdornmentRouters[index].Update(store, adornment, 0.1f);

@@ -21,6 +21,7 @@
 #include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
+#include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/EditableImages.hpp>
 #include <engine/render/EditableMeshes.hpp>
@@ -28,7 +29,6 @@
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
-#include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/ShaderLibrary.hpp>
