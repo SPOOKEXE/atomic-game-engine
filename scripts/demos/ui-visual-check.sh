@@ -21,12 +21,17 @@ cmake --build "$build" --target client
 
 client="$build/client/client"
 scene="$build/assets/examples/scripts/GuiInteraction.luau"
+text_scene="$build/assets/examples/scripts/UiTextVisual.luau"
 if [ ! -x "$client" ]; then
 	echo "no client at $client" >&2
 	exit 1
 fi
 if [ ! -f "$scene" ]; then
 	echo "no staged UI scene at $scene" >&2
+	exit 1
+fi
+if [ ! -f "$text_scene" ]; then
+	echo "no staged text UI scene at $text_scene" >&2
 	exit 1
 fi
 
@@ -75,6 +80,8 @@ capture baseline-1280 1280 720
 capture text-button-1280 1280 720 TextButton
 capture image-button-1280 1280 720 ImageButton
 capture interface-1280 1280 720 "" "$build/assets/examples/scripts/Interface.luau"
+capture text-960 960 540 "" "$text_scene"
+capture text-1280 1280 720 "" "$text_scene"
 
 python3 "$here/ui-visual-report.py" "$out"
 echo "ui visual check ok - review $out/report.html"

@@ -24,6 +24,10 @@ BORDER = (76, 92, 115)
 BLACK = (0, 0, 0)
 CHECKER_MAGENTA = (206, 65, 111)
 CHECKER_GRAY = (78, 78, 84)
+CYAN = (92, 224, 232)
+ORANGE = (255, 157, 78)
+PURPLE = (190, 132, 255)
+YELLOW = (255, 226, 92)
 
 
 def close(pixel, expected, tolerance=18):
@@ -36,6 +40,12 @@ def count_close(image, box, colour, tolerance=18):
 
 def panel_box(width, height):
     return ((width - 620) // 2, (height - 410) // 2, 620, 410)
+
+
+def responsive_panel_box(width, height):
+    panel_width = round(width * 0.72)
+    panel_height = round(height * 0.62)
+    return ((width - panel_width) // 2, (height - panel_height) // 2, panel_width, panel_height)
 
 
 def inspect(path):
@@ -103,12 +113,132 @@ def interaction_differences(before, after):
     }
 
 
-def write_report(directory, rows, deltas, review_rows):
-    for row in rows + review_rows:
+def glyph_bounds(image, box, colour, tolerance=64):
+    pixels = image.load()
+    found = []
+    for y in range(box[1], box[3]):
+        for x in range(box[0], box[2]):
+            if close(pixels[x, y], colour, tolerance):
+                found.append((x, y))
+    if not found:
+        return None
+    xs, ys = zip(*found)
+    return [min(xs), min(ys), max(xs) + 1, max(ys) + 1]
+
+
+def inspect_text(path):
+    image = Image.open(path).convert("RGB")
+    width, height = image.size
+    left, top, panel_width, panel_height = responsive_panel_box(width, height)
+    right = left + panel_width
+    bottom = top + panel_height
+    if width < 700 or height < 500:
+        raise AssertionError(f"{path.name}: capture is too small for the text UI demo")
+
+    panel = (left + 8, top + 8, left + 120, top + 80)
+    rich = (
+        left + 28,
+        top + round(panel_height * 0.20),
+        right - 28,
+        top + round(panel_height * 0.38),
+    )
+    regular = (
+        left + 28,
+        top + round(panel_height * 0.42),
+        left + round(panel_width * 0.45) - 34,
+        top + round(panel_height * 0.54),
+    )
+    code = (
+        left + round(panel_width * 0.45),
+        top + round(panel_height * 0.42),
+        right - 28,
+        top + round(panel_height * 0.54),
+    )
+    scaled = (left + 40, top + round(panel_height * 0.61) + 10, right - 40, bottom - 10)
+
+    panel_pixels = count_close(image, panel, PANEL)
+    cyan = glyph_bounds(image, rich, CYAN)
+    orange = glyph_bounds(image, rich, ORANGE)
+    purple = glyph_bounds(image, rich, PURPLE)
+    regular_cyan = glyph_bounds(image, regular, CYAN)
+    code_purple = glyph_bounds(image, code, PURPLE)
+    scaled_yellow = glyph_bounds(image, scaled, YELLOW)
+    checks = {
+        "panel_fill": panel_pixels >= 4000,
+        "rich_cyan_bold": cyan is not None,
+        "rich_orange_italic": orange is not None,
+        "rich_code_face": purple is not None,
+        "regular_font_face": regular_cyan is not None,
+        "code_font_face": code_purple is not None,
+        "text_scaled": scaled_yellow is not None,
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    if failed:
+        raise AssertionError(f"{path.name}: failed {', '.join(failed)}")
+
+    return {
+        "file": path.name,
+        "size": [width, height],
+        "panel": [left, top, panel_width, panel_height],
+        "panel_fill_pixels": panel_pixels,
+        "rich_cyan_bounds": cyan,
+        "rich_orange_bounds": orange,
+        "rich_code_bounds": purple,
+        "regular_font_bounds": regular_cyan,
+        "code_font_bounds": code_purple,
+        "scaled_bounds": scaled_yellow,
+        "checks": checks,
+    }
+
+
+def scaled_growth(small, large):
+    small_bounds = small["scaled_bounds"]
+    large_bounds = large["scaled_bounds"]
+    small_width = small_bounds[2] - small_bounds[0]
+    small_height = small_bounds[3] - small_bounds[1]
+    large_width = large_bounds[2] - large_bounds[0]
+    large_height = large_bounds[3] - large_bounds[1]
+    width_ratio = large_width / small_width
+    height_ratio = large_height / small_height
+    # The scene's box grows by 4/3. Leave room for font hinting while proving
+    # that drawn glyphs, not just the panel, grew with the viewport.
+    if width_ratio < 1.15 or height_ratio < 1.15:
+        raise AssertionError(
+            f"TextScaled glyphs did not grow with the viewport "
+            f"(width={width_ratio:.3f}, height={height_ratio:.3f})"
+        )
+    return {"width_ratio": width_ratio, "height_ratio": height_ratio}
+
+
+def font_shape_difference(row):
+    regular = row["regular_font_bounds"]
+    code = row["code_font_bounds"]
+    regular_width = regular[2] - regular[0]
+    code_width = code[2] - code[0]
+    width_ratio = code_width / regular_width
+    # The two labels draw the identical short string at the same point size.
+    # A ratio close to one means the backend ignored Font and painted the same
+    # glyph shapes twice. Inter and JetBrains Mono have distinct advance widths.
+    if abs(width_ratio - 1.0) < 0.04:
+        raise AssertionError(
+            f"{row['file']}: regular and code glyph widths are too similar "
+            f"({regular_width}px versus {code_width}px)"
+        )
+    return {"regular_width": regular_width, "code_width": code_width, "code_to_regular_width": width_ratio}
+
+
+def write_report(directory, rows, deltas, review_rows, text_rows, text_growth, font_shapes):
+    for row in rows + review_rows + text_rows:
         preview = Path(row["file"]).with_suffix(".png").name
         Image.open(directory / row["file"]).convert("RGB").save(directory / preview)
         row["preview"] = preview
-    report = {"captures": rows, "status_deltas": deltas}
+    report = {
+        "captures": rows,
+        "status_deltas": deltas,
+        "text_captures": text_rows,
+        "text_scaled_growth": text_growth,
+        "font_shape_difference": font_shapes,
+    }
     (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     figures = "\n".join(
         "<figure><a href=\"{file}\"><img src=\"{preview}\" alt=\"{file}\"></a>"
@@ -121,6 +251,13 @@ def write_report(directory, rows, deltas, review_rows):
         "<figure><a href=\"{file}\"><img src=\"{preview}\" alt=\"{file}\"></a>"
         "<figcaption>{label}</figcaption></figure>".format(**row)
         for row in review_rows
+    )
+    text_figures = "\n".join(
+        "<figure><a href=\"{file}\"><img src=\"{preview}\" alt=\"{file}\"></a>"
+        "<figcaption>{file}: rich text colours, face labels, and TextScaled</figcaption></figure>".format(
+            **row
+        )
+        for row in text_rows
     )
     delta_lines = "".join(
         f"<li>{html.escape(name)}: {counts['counter']} changed counter pixels, "
@@ -139,6 +276,15 @@ def write_report(directory, rows, deltas, review_rows):
         + "<h2>Broader UI demo</h2><p>This still is for visual review. Its adaptive layout has no narrow "
         "pixel assertion.</p>"
         + review_figures
+        + "<h2>Text, rich text, and scaling</h2><p>Coloured rich-text runs and regular/code face labels all "
+        "have visible glyph pixels. TextScaled glyph bounds grew from the 960px capture by "
+        f"{text_growth['width_ratio']:.2f}x wide and {text_growth['height_ratio']:.2f}x tall at 1280px.</p>"
+        + (
+            f"<p>The same Sphinx 01 string is {font_shapes['text-1280']['regular_width']}px "
+            f"in the regular face and {font_shapes['text-1280']['code_width']}px "
+            "in the code face at 1280px.</p>"
+        )
+        + text_figures
         + "</main>\n"
     )
 
@@ -165,8 +311,28 @@ def main(directory):
     if not review_path.is_file():
         raise SystemExit(f"missing review capture: {review_path}")
     review_rows = [{"file": review_path.name, "label": "Interface.luau at 1280x720"}]
-    write_report(directory, rows, deltas, review_rows)
-    print(json.dumps({"status_deltas": deltas, "report": str(directory / "report.html")}, indent=2))
+    text_paths = [directory / "text-960.bmp", directory / "text-1280.bmp"]
+    for path in text_paths:
+        if not path.is_file():
+            raise SystemExit(f"missing text capture: {path}")
+    text_rows = [inspect_text(path) for path in text_paths]
+    text_growth = scaled_growth(text_rows[0], text_rows[1])
+    font_shapes = {
+        Path(row["file"]).stem: font_shape_difference(row)
+        for row in text_rows
+    }
+    write_report(directory, rows, deltas, review_rows, text_rows, text_growth, font_shapes)
+    print(
+        json.dumps(
+            {
+                "status_deltas": deltas,
+                "text_scaled_growth": text_growth,
+                "font_shape_difference": font_shapes,
+                "report": str(directory / "report.html"),
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":
