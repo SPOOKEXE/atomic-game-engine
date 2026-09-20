@@ -211,7 +211,7 @@ namespace studio {
 					   }});
 
 		Operators.Add({Action::CommandPalette, "Command Palette", "Find and run any command", always, [this] {
-						   ShowPalette = true;
+						   ShowPalette = !ShowPalette;
 					   }});
 
 		Operators.Add(
@@ -260,6 +260,11 @@ namespace studio {
 
 		if (!ImGui::BeginPopup("##palette")) {
 			ShowPalette = false;
+			return;
+		}
+		if (!ShowPalette) {
+			ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
 			return;
 		}
 

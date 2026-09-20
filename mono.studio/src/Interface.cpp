@@ -1635,8 +1635,10 @@ namespace studio {
 			// one. It is still in View as well, because it is still a panel and
 			// `DrawViewMenu` is the guaranteed way back to any of them.
 			if (ImGui::MenuItem("Preferences...", nullptr, ShowSettings)) {
-				ShowSettings = true;
-				ImGui::SetWindowFocus(SETTINGS);
+				ShowSettings = !ShowSettings;
+				if (ShowSettings) {
+					ImGui::SetWindowFocus(SETTINGS);
+				}
 			}
 
 			ImGui::EndMenu();
@@ -1856,7 +1858,7 @@ namespace studio {
 		}
 
 		if (Keybinds::Fired(Action::CommandPalette)) {
-			ShowPalette = true;
+			ShowPalette = !ShowPalette;
 		}
 
 		// **Through the table, not through the method.** A shortcut that called
