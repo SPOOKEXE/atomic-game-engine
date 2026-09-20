@@ -138,11 +138,13 @@ TEST_CASE("an automatic registration yields to an explicit one", "[ecs]") {
 		"test.automatic-custom",
 		[](ByteWriter &writer, const void *source, size_t count) {
 			const auto *values = static_cast<const AutomaticCustom *>(source);
-			for (size_t index = 0; index < count; index++) writer.WriteName(values[index].Surface);
+			for (size_t index = 0; index < count; index++)
+				writer.WriteName(values[index].Surface);
 		},
 		[](ByteReader &reader, void *destination, size_t count) {
 			auto *values = static_cast<AutomaticCustom *>(destination);
-			for (size_t index = 0; index < count; index++) values[index].Surface = reader.ReadName();
+			for (size_t index = 0; index < count; index++)
+				values[index].Surface = reader.ReadName();
 		}
 	);
 	REQUIRE(explicitCustom == automaticCustom);
