@@ -147,6 +147,24 @@ TEST_CASE("an opaque list keeps the order the world produced", "[scene][drawinst
 	CHECK(order == std::vector<uint32_t>{0, 1, 2, 3, 4});
 }
 
+TEST_CASE("ordering a steady draw list reuses its output storage", "[scene][drawinstance]") {
+	// A renderer owns one order vector per view and orders it every frame. The
+	// pointer makes that contract observable: keeping capacity avoids a frame
+	// allocation without weakening any ordering rule.
+	std::vector<DrawInstance> instances(3);
+	instances[1].Transparency = 0.5f;
+	instances[1].Frame = CFrame{Vector3{4.0f, 0.0f, 0.0f}};
+
+	std::vector<uint32_t> order;
+	order.reserve(instances.size());
+	order.resize(instances.size());
+	const uint32_t *const storage = order.data();
+
+	CHECK(engine::scene::OrderForDrawing(instances, Vector3::Zero, order) == 2);
+	CHECK(order.data() == storage);
+	CHECK(order == std::vector<uint32_t>{0, 2, 1});
+}
+
 TEST_CASE("transparent instances move to the back, farthest first", "[scene][drawinstance]") {
 	// A blended fragment mixes with what is already in the target, so a near
 	// pane drawn before a far one blends the far one *into* a pixel that should

@@ -506,7 +506,7 @@ namespace engine::scene {
 	//
 	// @param instances The draw list.
 	// @param eye       Where the view is, in world space.
-	// @param order     Filled in with indices into `instances`. Cleared first.
+	// @param order     Resized and filled with indices into `instances`.
 	// @return How many indices at the front of `order` name opaque instances.
 	size_t OrderForDrawing(
 		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
@@ -526,7 +526,7 @@ namespace engine::scene {
 	// @param instances The whole draw list, which the indices are into.
 	// @param from      Which of them to order.
 	// @param eye       Where the view is, in world space.
-	// @param order     Filled with a permutation of `from`. Cleared first.
+	// @param order     Resized and filled with a permutation of `from`.
 	// @return How many at the front of `order` name opaque instances.
 	size_t OrderSubset(
 		std::span<const DrawInstance> instances,

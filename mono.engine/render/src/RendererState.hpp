@@ -1245,6 +1245,31 @@ namespace engine::render {
 			// Two vec4 per candidate, already in the layout the cull reads -
 			// see occlusion-cull.comp.
 			std::vector<glm::vec4> CandidatePairs;
+
+			// Scratch stays with the plan because one recording builds many slot
+			// runs. Clearing it between runs keeps its largest observed run ready
+			// for the next view without publishing it to a pass.
+			std::vector<uint32_t> EarlyRows;
+			std::vector<uint32_t> LateRows;
+
+			// A view consumes the payload until submission, then the next view may
+			// reuse its storage. Assignment from an empty plan discarded all of
+			// these capacities before every view and made the plan regrow them.
+			void Reset() {
+				Active = false;
+				RunCount = 0;
+				ArgCount = 0;
+				CandidateCount = 0;
+				EarlyTotal = 0;
+				RunEarly.clear();
+				RunCandidates.clear();
+				RunFirstSlot.clear();
+				EarlyInstances.clear();
+				LateInstances.clear();
+				CandidatePairs.clear();
+				EarlyRows.clear();
+				LateRows.clear();
+			}
 		};
 		OcclusionPlan OcclusionFrame;
 

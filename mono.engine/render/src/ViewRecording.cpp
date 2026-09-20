@@ -2151,7 +2151,7 @@ namespace engine::render {
 		// definition, so swapping rows inside one changes no run
 		// boundary and no other pass's picture - an opaque draw
 		// is order-independent under the depth test.
-		State->OcclusionFrame = Impl::OcclusionPlan{};
+		State->OcclusionFrame.Reset();
 		if (occlusionCulling && plainOpaque > 0) {
 			ENGINE_PROFILE_CAT("occlusion plan", core::ProfileCategory::Render);
 			Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
@@ -2169,8 +2169,8 @@ namespace engine::render {
 			const auto base = static_cast<uint32_t>(cameraBase);
 			const uint32_t opaqueEnd = base + plainOpaque;
 
-			std::vector<uint32_t> earlyRows;
-			std::vector<uint32_t> lateRows;
+			std::vector<uint32_t> &earlyRows = occlusionPlan.EarlyRows;
+			std::vector<uint32_t> &lateRows = occlusionPlan.LateRows;
 			uint32_t slot = base;
 			while (slot < opaqueEnd) {
 				uint32_t run = 1;
