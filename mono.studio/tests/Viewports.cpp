@@ -97,9 +97,9 @@ TEST_CASE("each viewport has an explicit game UI owner", "[studio][viewports][gu
 	// Two edit viewports may both author the template. A client viewport owns
 	// its PlayerGui, while the running server view has neither UI nor input.
 	CHECK(ViewportGuiSourceFor(false, false) == ViewportGuiSource::StarterGui);
-	CHECK(ViewportGuiSourceFor(false, false) == ViewportGuiSource::StarterGui);
 	CHECK(ViewportGuiSourceFor(false, true) == ViewportGuiSource::PlayerGui);
 	CHECK(ViewportGuiSourceFor(true, false) == ViewportGuiSource::None);
+	CHECK(ViewportGuiSourceFor(true, true) == ViewportGuiSource::PlayerGui);
 }
 
 TEST_CASE("runtime worlds keep separate generated cameras", "[studio][viewports][camera]") {

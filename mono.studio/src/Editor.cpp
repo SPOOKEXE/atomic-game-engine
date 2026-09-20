@@ -2226,11 +2226,10 @@ namespace studio {
 			});
 		}
 
-		// A running world owns its camera independently of the viewport that
-		// happens to display it. The generated server camera and each predicted
-		// client camera are created at run startup, so presentation only reads
-		// them instead of making one world borrow another's eye.
-		if (runtimeWorld) {
+		// A replica owns its own camera, while the server panel keeps its free
+		// camera. The latter is editor session state, so it must survive a window
+		// focus change instead of being replaced with the server script camera.
+		if (IsReplicaWorld(shown)) {
 			Universe->Enter(shown, [&](Store &store) {
 				const Entity camera = RuntimeCameraOf(store);
 				if (camera == NULL_ENTITY) {
@@ -2305,7 +2304,7 @@ namespace studio {
 					});
 				}
 
-				if (!runtimeVisual || visual != shown) {
+				if (!runtimeVisual || visual != shown || !IsReplicaWorld(shown)) {
 					// An edit viewport owns this generated camera outright. A client
 					// viewport uses the same per-panel camera only while the authority
 					// prepares its camera-dependent surface views.
@@ -2673,12 +2672,15 @@ namespace studio {
 			Particles.Clear();
 		}
 
+		const bool viewportGuiPresent =
+			shown.IsValid() &&
+			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) != ViewportGuiSource::None;
 		if (shown.IsValid()) {
 			Universe->Enter(shown, [&](Store &store) {
 				// The interface is client-local even when its scene is authority-backed.
 				// It is submitted from the replica store before that store boundary
 				// closes; only copied draw rows leave the boundary.
-				if (DrawingViewport < GuiLists.size() && target.IsValid()) {
+				if (viewportGuiPresent && DrawingViewport < GuiLists.size() && target.IsValid()) {
 					(void)ViewportImages.Render(
 						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
 					);
@@ -2835,8 +2837,8 @@ namespace studio {
 		}
 
 		const uint64_t animationSignature = Renderer.TextureAnimationSignature(AnimationSeconds);
-		const bool gameInterfacePresent =
-			DrawingViewport < GuiLists.size() && !GuiLists[DrawingViewport].Commands().Commands.empty();
+		const bool gameInterfacePresent = viewportGuiPresent && DrawingViewport < GuiLists.size() &&
+										  !GuiLists[DrawingViewport].Commands().Commands.empty();
 		const uint64_t gameInterfaceSignature =
 			gameInterfacePresent
 				? engine::scene::MixSignature(GuiLists[DrawingViewport].Signature(), animationSignature)
@@ -2904,7 +2906,11 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
 			LastFrame = Renderer.Render(
-				std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
+				std::span<const engine::render::View>(&view, 1),
+				Overlay,
+				gameInterfacePresent ? &GameInterface : nullptr,
+				true,
+				&Interface
 			);
 		}
 		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
