@@ -51,6 +51,7 @@
 #include <DataCaptureDriver.hpp>
 #include <NamedCaptureView.hpp>
 #include <algorithm>
+#include <array>
 #include <client/Scene.hpp>
 #include <cmath>
 #include <filesystem>
@@ -1268,10 +1269,44 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		display.Width = 1920.0f;
 		display.Height = 1080.0f;
 		CHECK(engine::gui::Layout(store, display) > 0);
+		engine::gui::CompileRequest request;
+		request.Display = display;
+		request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
+		request.Viewer = localPlayer;
+		engine::gui::Compiled compiled;
+		REQUIRE(compiled.Rebuild(store, request));
+		const bool opaqueScreenCover =
+			std::ranges::any_of(compiled.Commands().Commands, [&](const auto &command) {
+				return command.Kind == engine::gui::DrawKind::Rectangle && command.Transparency == 0.0f &&
+					   command.Bounds.Min.X <= 0.0f && command.Bounds.Min.Y <= 0.0f &&
+					   command.Bounds.Max.X >= display.Width && command.Bounds.Max.Y >= display.Height;
+			});
+		CHECK_FALSE(opaqueScreenCover);
+
 		const engine::ecs::Entity ability = FirstNamedDescendant(store, liveHud, "Ability1");
 		REQUIRE(ability != engine::ecs::NULL_ENTITY);
 		const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(ability);
 		REQUIRE(placed != nullptr);
 		CHECK(placed->Rendered);
+
+		systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+		const engine::render::DrawList *drawList = store.Resource<engine::render::DrawList>();
+		REQUIRE(drawList != nullptr);
+		for (const std::string_view name : std::array{
+				 "ArenaFloor",
+				 "CentralDais",
+				 "NorthMarker",
+				 "SouthMarker",
+				 "WestBlade",
+				 "EastBlade",
+				 "PlayerSpawn",
+				 "ServerProfileMarker",
+			 }) {
+			const engine::ecs::Entity part = FirstNamedDescendant(store, arena, name);
+			REQUIRE(part != engine::ecs::NULL_ENTITY);
+			CHECK(std::ranges::any_of(drawList->Instances, [part](const DrawInstance &instance) {
+				return instance.Source == part.Id;
+			}));
+		}
 	});
 }
