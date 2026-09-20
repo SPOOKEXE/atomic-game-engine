@@ -16,6 +16,7 @@
 #include <client/Replicated.hpp>
 #include <string>
 #include <studio/PlayLink.hpp>
+#include <studio/Viewports.hpp>
 #include <vector>
 
 namespace studio {
@@ -116,6 +117,21 @@ namespace studio {
 				(void)client::BuildReplicatedWorld(store, systems, interpolation);
 			}
 		);
+
+		// Each client owns a predicted camera before any replica script can ask
+		// for `workspace.CurrentCamera`. It is local to this replica and cannot
+		// collide with the server's generated runtime camera.
+		const ViewportCameraPose initialCamera = DefaultViewportCamera();
+		bool cameraCreated = false;
+		universe.Enter(replica, [&](Store &store) {
+			cameraCreated =
+				client::AimReplicaViewer(store, initialCamera.Frame, {}) != engine::ecs::NULL_ENTITY;
+		});
+		if (!cameraCreated) {
+			error = "could not create the client runtime camera";
+			(void)universe.Destroy(replica);
+			return false;
+		}
 
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {

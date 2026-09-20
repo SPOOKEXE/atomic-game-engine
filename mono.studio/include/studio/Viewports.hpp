@@ -23,11 +23,13 @@
 // @tier L13 · client
 
 #include <engine/core/types/CFrame.hpp>
+#include <engine/ecs/Entity.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 
 namespace engine::ecs {
@@ -141,6 +143,28 @@ namespace studio {
 	//
 	// @since v0.19
 	ViewportCameraPose DefaultViewportCamera();
+
+	// Creates this Studio run's camera in one authoritative world and makes it
+	// the world camera. Runtime cameras are transient, so Play starts with an
+	// eye without putting one into the authored snapshot.
+	//
+	// @param store The running server world.
+	// @param name  The generated instance name.
+	// @param pose  The initial runtime camera placement.
+	// @return The new camera, or `NULL_ENTITY` when the world has no workspace.
+	// @since v0.25
+	engine::ecs::Entity
+	CreateRuntimeCamera(engine::ecs::Store &store, std::string_view name, const ViewportCameraPose &pose);
+
+	// Finds this world's usable current camera. Each runtime world owns a
+	// separate `ActiveCamera`; a viewport only reads the one belonging to the
+	// world it is presenting.
+	//
+	// @param store The world to inspect.
+	// @return Its active camera when it has a camera and transform, otherwise
+	//         `NULL_ENTITY`.
+	// @since v0.25
+	engine::ecs::Entity RuntimeCameraOf(const engine::ecs::Store &store);
 
 	// Carries a free viewport camera through the first portal crossed by its
 	// movement. A free camera is editor state rather than a simulated body, so

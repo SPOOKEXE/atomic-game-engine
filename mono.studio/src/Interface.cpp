@@ -704,6 +704,7 @@ namespace studio {
 				CameraYaw,
 				CameraPitch,
 				CameraSpeed,
+				FollowCamera,
 				ViewportHovered,
 				ViewportActive,
 				ViewportPanning,
@@ -728,6 +729,7 @@ namespace studio {
 			view->Yaw,
 			view->Pitch,
 			view->Speed,
+			view->Follow,
 			view->Hovered,
 			view->Active,
 			view->Panning,
@@ -749,6 +751,7 @@ namespace studio {
 		float &yaw,
 		float &pitch,
 		float &speed,
+		Entity &follow,
 		bool hovered,
 		bool active,
 		bool &panning,
@@ -777,8 +780,8 @@ namespace studio {
 		// would turn a camera nobody asked it to turn - or worse, appear to do
 		// nothing because the scene's camera keeps overriding the eye every
 		// frame. Discoverable without a menu: you fly, you are flying.
-		if (looking && FollowCamera != engine::ecs::NULL_ENTITY) {
-			FollowCamera = engine::ecs::NULL_ENTITY;
+		if (looking && follow != engine::ecs::NULL_ENTITY) {
+			follow = engine::ecs::NULL_ENTITY;
 			Say("back to the editor camera");
 		}
 

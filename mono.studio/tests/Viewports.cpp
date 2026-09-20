@@ -17,14 +17,39 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <memory>
 #include <numbers>
+#include <studio/Editor.hpp>
 #include <studio/Viewports.hpp>
+
+namespace studio {
+	struct ViewportCameraProbe {
+		static std::array<engine::ecs::Entity, 2> CreateTwo(Editor &editor, engine::world::WorldId world) {
+			editor.Viewers.resize(2);
+			const ViewportCameraPose pose = DefaultViewportCamera();
+			editor.EnsureViewerCamera(0, world, pose.Frame, {}, engine::ecs::NULL_ENTITY);
+			editor.EnsureViewerCamera(1, world, pose.Frame, {}, engine::ecs::NULL_ENTITY);
+			return {editor.Viewers[0].Instance, editor.Viewers[1].Instance};
+		}
+
+		static void SetFollows(Editor &editor, engine::ecs::Entity main, engine::ecs::Entity extra) {
+			editor.Extras.resize(1);
+			editor.FollowCamera = main;
+			editor.Extras[0].Follow = extra;
+		}
+
+		static std::array<engine::ecs::Entity, 2> Follows(const Editor &editor) {
+			return {editor.FollowCamera, editor.Extras[0].Follow};
+		}
+	};
+}
 
 TEST_SUITE_ID("studio.viewports")
 
@@ -33,10 +58,12 @@ using studio::CameraRelativeMovement;
 using studio::CanvasForViewport;
 using studio::CarryViewportCamera;
 using studio::ChooseViewportFor;
+using studio::CreateRuntimeCamera;
 using studio::DefaultViewportCamera;
 using studio::NO_VIEWPORT;
 using studio::PanelView;
 using studio::ResolveViewportTargetSize;
+using studio::RuntimeCameraOf;
 using studio::SnapViewportCameraDirection;
 using studio::ViewportCameraMemory;
 using studio::ViewportCameraPose;
@@ -73,6 +100,46 @@ TEST_CASE("each viewport has an explicit game UI owner", "[studio][viewports][gu
 	CHECK(ViewportGuiSourceFor(false, false) == ViewportGuiSource::StarterGui);
 	CHECK(ViewportGuiSourceFor(false, true) == ViewportGuiSource::PlayerGui);
 	CHECK(ViewportGuiSourceFor(true, false) == ViewportGuiSource::None);
+}
+
+TEST_CASE("runtime worlds keep separate generated cameras", "[studio][viewports][camera]") {
+	engine::scene::RegisterSceneClasses();
+	engine::ecs::Store server("viewport_runtime_server");
+	engine::ecs::Store client("viewport_runtime_client");
+	engine::scene::InstallServices(server);
+	engine::scene::InstallServices(client);
+
+	ViewportCameraPose serverPose = DefaultViewportCamera();
+	serverPose.Frame.Position = {10.0f, 20.0f, 30.0f};
+	ViewportCameraPose clientPose = DefaultViewportCamera();
+	clientPose.Frame.Position = {-10.0f, 4.0f, 8.0f};
+
+	const engine::ecs::Entity serverCamera = CreateRuntimeCamera(server, "ServerCamera", serverPose);
+	const engine::ecs::Entity clientCamera = CreateRuntimeCamera(client, "ClientCamera", clientPose);
+	REQUIRE(serverCamera != engine::ecs::NULL_ENTITY);
+	REQUIRE(clientCamera != engine::ecs::NULL_ENTITY);
+	CHECK(RuntimeCameraOf(server) == serverCamera);
+	CHECK(RuntimeCameraOf(client) == clientCamera);
+	CHECK(server.Get<engine::scene::Transform>(serverCamera)->Frame.Position == serverPose.Frame.Position);
+	CHECK(client.Get<engine::scene::Transform>(clientCamera)->Frame.Position == clientPose.Frame.Position);
+	CHECK(server.Get<engine::scene::TransientComponent>(serverCamera) != nullptr);
+	CHECK(client.Get<engine::scene::TransientComponent>(clientCamera) != nullptr);
+}
+
+TEST_CASE("editor viewports keep generated cameras and follows separate", "[studio][viewports][camera]") {
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	const WorldId world = editor.Universe->Create({.Name = engine::core::Name("ViewportCameraWorld")});
+	editor.Universe->Enter(world, [](engine::ecs::Store &store) { engine::scene::InstallServices(store); });
+
+	const auto cameras = studio::ViewportCameraProbe::CreateTwo(editor, world);
+	REQUIRE(cameras[0] != engine::ecs::NULL_ENTITY);
+	REQUIRE(cameras[1] != engine::ecs::NULL_ENTITY);
+	CHECK(cameras[0] != cameras[1]);
+
+	studio::ViewportCameraProbe::SetFollows(editor, cameras[0], cameras[1]);
+	CHECK(studio::ViewportCameraProbe::Follows(editor) == cameras);
 }
 
 TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewports][render]") {

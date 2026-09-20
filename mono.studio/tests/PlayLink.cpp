@@ -60,6 +60,7 @@
 #include <optional>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/Viewports.hpp>
 #include <utility>
 
 TEST_SUITE_ID("studio.playlink")
@@ -193,6 +194,36 @@ TEST_CASE("a play link gives the run a second world", "[studio][playlink]") {
 	CHECK(fixture.Worlds.NameOf(link.ReplicaWorld()) != fixture.Worlds.NameOf(fixture.Authority));
 }
 
+TEST_CASE("each play client starts with its own predicted camera", "[studio][playlink][camera]") {
+	Fixture fixture;
+	PlayLink first;
+	PlayLink second;
+	std::string error;
+	REQUIRE(first.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 1"));
+	error = "earlier failure";
+	REQUIRE(second.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 2"));
+
+	engine::ecs::Entity firstCamera;
+	engine::ecs::Entity secondCamera;
+	fixture.Worlds.Enter(first.ReplicaWorld(), [&](const Store &store) {
+		firstCamera = studio::RuntimeCameraOf(store);
+	});
+	fixture.Worlds.Enter(second.ReplicaWorld(), [&](const Store &store) {
+		secondCamera = studio::RuntimeCameraOf(store);
+	});
+	CHECK(firstCamera != engine::ecs::NULL_ENTITY);
+	CHECK(secondCamera != engine::ecs::NULL_ENTITY);
+
+	// Handles are local to their stores, so equal numbers would not mean shared
+	// state. Move one and ensure the other client's camera remains untouched.
+	fixture.Worlds.Enter(first.ReplicaWorld(), [&](Store &store) {
+		store.Set(firstCamera, Transform{CFrame(Vector3{3.0f, 2.0f, 1.0f})});
+	});
+	fixture.Worlds.Enter(second.ReplicaWorld(), [&](const Store &store) {
+		CHECK(store.Get<Transform>(secondCamera)->Frame.Position != Vector3{3.0f, 2.0f, 1.0f});
+	});
+}
+
 TEST_CASE("the client view is marked as somebody else's world, both ways", "[studio][playlink]") {
 	Fixture fixture;
 	PlayLink link;
@@ -243,7 +274,7 @@ TEST_CASE("what the server holds arrives on the client", "[studio][playlink]") {
 
 	const studio::LinkReport &report = link.Report();
 	CHECK(report.ServerEntities == 2);
-	CHECK(report.ClientEntities == 2);
+	CHECK(report.ClientEntities == 3);
 
 	// **One message, and that is the assertion rather than a disappointment.**
 	// This world has no systems in it, so once the join has landed nothing
@@ -446,13 +477,10 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 		CHECK(store.ParentOf(reflection) == pane);
 	});
 
-	// **Aimed from a camera the client made for itself.** A replica may not mint
-	// an authoritative entity, so this comes out of the predicted range - and it
-	// has to exist before `AimSurfaceCameras` will do anything, because a mirror
-	// with no viewer has no reflection to compute rather than a default one.
+	// **Aimed from the predicted camera created with this client.** A replica
+	// may not mint an authoritative entity, so the call below reuses its local
+	// camera and changes only its requested placement.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
-		CHECK(engine::scene::AimSurfaceCameras(store) == 0);
-
 		const Entity viewer =
 			client::AimReplicaViewer(store, CFrame(Vector3{0.0f, 0.0f, 20.0f}), engine::scene::Camera{});
 		REQUIRE(viewer != engine::ecs::NULL_ENTITY);
@@ -884,8 +912,10 @@ TEST_CASE("what the server holds arrives on every client", "[studio][playlink]")
 		PlayLink::StepMany(fixture.Worlds, links);
 	}
 
-	CHECK(first.Report().ClientEntities == first.Report().ServerEntities);
-	CHECK(second.Report().ClientEntities == second.Report().ServerEntities);
+	// Each replica also owns its predicted runtime camera. It is deliberately
+	// local, so replication's report counts one more entity than the authority.
+	CHECK(first.Report().ClientEntities == first.Report().ServerEntities + 1);
+	CHECK(second.Report().ClientEntities == second.Report().ServerEntities + 1);
 	CHECK(first.Report().ClientEntities > 0);
 	CHECK(second.Report().ClientEntities > 0);
 

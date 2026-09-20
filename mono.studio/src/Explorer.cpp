@@ -197,14 +197,18 @@ namespace studio {
 				}
 			}
 
-			// **Only for a camera, and only for the world being viewed.**
+			// **Only for a camera, and only for the focused viewport's world.**
 			// Looking through a camera in a world the viewport is not showing
 			// would move the eye to somewhere the panel cannot draw.
 			const ClassId cameraClass = Classes::Find(Name("Camera"));
-			if (cameraClass.IsValid() && store.IsA(instance, cameraClass) && world == Active) {
-				const bool following = FollowCamera == instance;
+			if (cameraClass.IsValid() && store.IsA(instance, cameraClass) &&
+				world == ViewportWorld(FocusedViewport)) {
+				ViewportState *viewport = ExtraAt(FocusedViewport);
+				Entity &follow = viewport != nullptr ? viewport->Follow : FollowCamera;
+				const bool following = follow == instance;
 				if (ImGui::MenuItem(following ? "Stop Looking Through" : "Look Through Camera")) {
 					PendingLookThrough = following ? NULL_ENTITY : instance;
+					PendingLookThroughViewport = FocusedViewport;
 					PendingLookThroughSet = true;
 				}
 			}
@@ -1351,11 +1355,13 @@ namespace studio {
 
 		if (PendingLookThroughSet) {
 			PendingLookThroughSet = false;
-			FollowCamera = PendingLookThrough;
+			ViewportState *viewport = ExtraAt(PendingLookThroughViewport);
+			Entity &follow = viewport != nullptr ? viewport->Follow : FollowCamera;
+			follow = PendingLookThrough;
 			PendingLookThrough = NULL_ENTITY;
 
-			Say(FollowCamera == NULL_ENTITY ? "back to the editor camera"
-											: "looking through the scene's camera - right-drag to fly");
+			Say(follow == NULL_ENTITY ? "back to the editor camera"
+									  : "looking through the scene's camera - right-drag to fly");
 		}
 
 		if (PendingZoomWorld.IsValid()) {

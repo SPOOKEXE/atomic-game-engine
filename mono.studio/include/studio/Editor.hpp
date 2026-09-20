@@ -136,6 +136,7 @@ struct ImGuiTableSortSpecs;
 
 namespace studio {
 	struct ComponentPanelProbe;
+	struct ViewportCameraProbe;
 	struct PlayedInputAdapter;
 	class DataFactoryHost;
 
@@ -901,6 +902,7 @@ namespace studio {
 
 	  private:
 		friend struct ComponentPanelProbe;
+		friend struct ViewportCameraProbe;
 
 		// --- the frame ------------------------------------------------------
 
@@ -1471,6 +1473,7 @@ namespace studio {
 			float &yaw,
 			float &pitch,
 			float &speed,
+			Entity &follow,
 			bool hovered,
 			bool active,
 			bool &panning,
@@ -6520,10 +6523,12 @@ namespace studio {
 		WorldId PendingRenameWorld;
 		std::string PendingRenameTo;
 		//@}
-		// A camera to look through, and whether the menu asked at all - the two
-		// are separate because "look through nothing" is a real request.
+		// A camera to look through, which viewport owns that request, and whether
+		// the menu asked at all. The two flags are separate because "look through
+		// nothing" is a real request.
 		//@{
 		Entity PendingLookThrough;
+		size_t PendingLookThroughViewport = 0;
 		bool PendingLookThroughSet = false;
 		//@}
 

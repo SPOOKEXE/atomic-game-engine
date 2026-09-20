@@ -2165,6 +2165,7 @@ namespace studio {
 		const WorldId shown =
 			drawingWorld ? (drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active)
 						 : WorldId{};
+		const bool runtimeWorld = shown.IsValid() && (IsRunning(shown) || IsReplicaWorld(shown));
 		WorldId visual = VisualWorldOf(shown);
 		if (!visual.IsValid() && LastPostProcessShader.IsValid()) {
 			Renderer.ClearPostProcessShader();
@@ -2184,7 +2185,7 @@ namespace studio {
 		float reach = drawingSecond ? extra->Speed : CameraSpeed;
 
 		const Entity follow = drawingSecond ? extra->Follow : FollowCamera;
-		if (follow != NULL_ENTITY && shown.IsValid()) {
+		if (!runtimeWorld && follow != NULL_ENTITY && shown.IsValid()) {
 			bool followed = false;
 			Universe->Enter(shown, [&](Store &store) {
 				if (!store.Alive(follow)) {
@@ -2215,13 +2216,28 @@ namespace studio {
 		// A followed camera brings its own field of view and clip planes: those
 		// are its properties, and looking through it while ignoring them would
 		// be looking through something else.
-		if (follow != NULL_ENTITY && shown.IsValid()) {
+		if (!runtimeWorld && follow != NULL_ENTITY && shown.IsValid()) {
 			Universe->Enter(shown, [&](Store &store) {
 				if (store.Alive(follow)) {
 					if (const auto *component = store.Get<engine::scene::Camera>(follow)) {
 						lens = *component;
 					}
 				}
+			});
+		}
+
+		// A running world owns its camera independently of the viewport that
+		// happens to display it. The generated server camera and each predicted
+		// client camera are created at run startup, so presentation only reads
+		// them instead of making one world borrow another's eye.
+		if (runtimeWorld) {
+			Universe->Enter(shown, [&](Store &store) {
+				const Entity camera = RuntimeCameraOf(store);
+				if (camera == NULL_ENTITY) {
+					return;
+				}
+				eye = store.Get<engine::scene::Transform>(camera)->Frame;
+				lens = *store.Get<engine::scene::Camera>(camera);
 			});
 		}
 
@@ -2236,49 +2252,11 @@ namespace studio {
 		target.Width = targetSize.Width;
 		target.Height = targetSize.Height;
 
-		// PreRender runs whether or not the simulation did: it is the phase
-		// that turns state into something to draw, and an edited world's state
-		// changes without a tick.
-		// **A replica is given this viewport's eye before it presents.** It has
-		// no camera of its own - an authoritative entity minted in a replica
-		// would collide with one the authority minted - so `AimReplicaViewer`
-		// puts a predicted one there and names it `ActiveCamera`.
-		//
-		// Before `Present`, because `aim-surface-cameras` runs in `PreRender`
-		// and reflects through whatever `ActiveCamera` names. Setting the eye
-		// afterwards aims every mirror at where the viewport was last frame,
-		// which is a reflection that lags the camera by one frame and reads as
-		// a mirror that is not tracking.
-		if (shown.IsValid() && IsReplicaWorld(shown)) {
-			Universe->Enter(shown, [&](Store &store) {
-				const Entity camera = client::AimReplicaViewer(store, eye, lens);
-
-				// **And read it back, which is what makes a client view a
-				// client's view.** A replica with a character places its own
-				// camera - `replica-camera` turns it with the mouse and sits it
-				// behind the body - and `AimReplicaViewer` steps aside when it
-				// does. Continuing to draw from `eye` would show the editor's
-				// free camera looking at a world somebody is walking around in,
-				// which is the picture this panel exists not to be.
-				//
-				// With no character the two are the same value, because `eye` is
-				// what `AimReplicaViewer` just wrote - so this folds both cases
-				// into one read rather than a condition.
-				if (store.Alive(camera)) {
-					if (const auto *placement = store.Get<engine::scene::Transform>(camera)) {
-						eye = placement->Frame;
-					}
-					if (const auto *found = store.Get<engine::scene::Camera>(camera)) {
-						lens = *found;
-					}
-				}
-			});
-		}
-
 		// The replica still presents its local camera, predicted rows and UI. The
 		// authority is then presented from that resolved eye and supplies the one
 		// shared visual scene. Presenting is PreRender only, so this does not tick
 		// either world twice.
+		std::optional<engine::scene::ActiveCamera> restoreRuntimeCamera;
 		{
 			ENGINE_PROFILE_CAT("present views", engine::core::ProfileCategory::ECS);
 			if (shown.IsValid() && shown != visual) {
@@ -2314,10 +2292,27 @@ namespace studio {
 			if (visual.IsValid() && Universe->IsRemote(visual)) {
 				ReleaseViewerCamera(DrawingViewport);
 			} else if (visual.IsValid()) {
-				// The authority receives the final client eye before its own
-				// `PreRender`, where surface cameras and the draw list are built.
-				// An authored world takes the editor eye through the same path.
-				EnsureViewerCamera(DrawingViewport, visual, eye, lens, follow);
+				const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
+				if (runtimeVisual) {
+					// A viewport's aspect and a client panel's presentation eye are
+					// frame-local facts. Restore the runtime camera after PreRender so
+					// server scripts and other client panels keep their own state.
+					Universe->Enter(visual, [&](Store &store) {
+						if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+							active != nullptr) {
+							restoreRuntimeCamera = *active;
+						}
+					});
+				}
+
+				if (!runtimeVisual || visual != shown) {
+					// An edit viewport owns this generated camera outright. A client
+					// viewport uses the same per-panel camera only while the authority
+					// prepares its camera-dependent surface views.
+					EnsureViewerCamera(
+						DrawingViewport, visual, eye, lens, runtimeVisual ? NULL_ENTITY : follow
+					);
+				}
 
 				// The requested panel extent belongs to this camera resource. Write
 				// it after `EnsureViewerCamera`, which replaces the whole resource,
@@ -2372,6 +2367,9 @@ namespace studio {
 					PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual))
 				);
 			}
+		}
+		if (restoreRuntimeCamera.has_value() && visual.IsValid() && !Universe->IsRemote(visual)) {
+			Universe->Enter(visual, [&](Store &store) { store.SetResource(*restoreRuntimeCamera); });
 		}
 
 		const bool remoteEye = visual.IsValid() && Universe->IsRemote(visual);
@@ -4924,6 +4922,20 @@ namespace studio {
 		WorldRun run;
 		run.World = world;
 		run.Mode = mode;
+		std::string failure;
+
+		// The runtime starts with its own transient camera after the snapshot, so
+		// scripts never borrow an authored camera and Stop cannot restore it.
+		const ViewportCameraPose runtimePose = DefaultViewportCamera();
+		Universe->Enter(world, [&](Store &store) {
+			if (CreateRuntimeCamera(store, "ServerCamera", runtimePose) == NULL_ENTITY) {
+				failure = "could not create the server runtime camera";
+			}
+		});
+		if (!failure.empty()) {
+			ENGINE_ERROR("play: {}", failure);
+			return false;
+		}
 
 		// A run always starts running. Carrying a pause across Stop and Play
 		// would be a game that came up frozen for a reason nobody could see.
@@ -4942,8 +4954,6 @@ namespace studio {
 		if (Commands != nullptr) {
 			Commands->Clear();
 		}
-
-		std::string failure;
 
 		// **Through `game::StartWorldScripts`, which is the same call a
 		// dedicated server makes.** What "running a game" means has to be one
