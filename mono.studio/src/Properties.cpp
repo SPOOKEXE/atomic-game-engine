@@ -18,6 +18,8 @@
 #include <optional>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
+#include <studio/LodPreview.hpp>
+#include <studio/Projection.hpp>
 #include <studio/PropertySelection.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
@@ -1370,6 +1372,12 @@ namespace studio {
 		std::optional<PropertyEdit> propertyEdit;
 		CollectionTagEdit tagEdit;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		std::optional<PanelProjection> focusedProjection;
+		if (FocusedViewport < Overlays.size() && ViewportWorld(FocusedViewport) == SelectionWorld) {
+			// ProjectionFor may enter a replica world. Finish that work before the
+			// inspector enters its selected world, because Universe::Enter forbids nesting.
+			focusedProjection = ProjectionFor(FocusedViewport);
+		}
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			const Entity instance = Selection.front();
@@ -1565,6 +1573,31 @@ namespace studio {
 							}
 							ImGui::EndDisabled();
 							ImGui::PopID();
+						}
+						const bool automaticLod = component == Components::Of<engine::scene::AutoMeshLOD>();
+						const bool customLod = component == Components::Of<engine::scene::CustomMeshLOD>();
+						if (automaticLod ||
+							(customLod && store.Get<engine::scene::AutoMeshLOD>(instance) == nullptr)) {
+							ImGui::TableNextRow();
+							ImGui::TableSetColumnIndex(0);
+							ImGui::AlignTextToFramePadding();
+							ImGui::TextUnformatted("ActiveLOD");
+							ImGui::TableSetColumnIndex(1);
+							if (!focusedProjection) {
+								ImGui::TextDisabled("unavailable");
+							} else {
+								const auto active = ActiveLodForViewport(
+									store,
+									instance,
+									*focusedProjection,
+									{Prefs.LOD1Distance, Prefs.LOD2Distance, Prefs.LOD3Distance}
+								);
+								if (active) {
+									ImGui::TextDisabled("%u", static_cast<unsigned>(*active));
+								} else {
+									ImGui::TextDisabled("unavailable");
+								}
+							}
 						}
 						ImGui::EndTable();
 					}

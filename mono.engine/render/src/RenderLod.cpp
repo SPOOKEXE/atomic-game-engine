@@ -10,6 +10,7 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace engine::render {
 
@@ -121,7 +122,13 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::DispatchLodSelection(
-		SDL_GPUCommandBuffer *command, const glm::mat4 &viewProjection, uint32_t width, uint32_t height
+		SDL_GPUCommandBuffer *command,
+		const glm::mat4 &viewProjection,
+		core::Vector3 eye,
+		std::array<float, 3> minimumDistances,
+		bool cullOffscreen,
+		uint32_t width,
+		uint32_t height
 	) {
 		Lod.Ready = false;
 		if (LodFrame.Selections.empty()) {
@@ -146,6 +153,8 @@ namespace engine::render {
 			glm::mat4 ViewProjection;
 			glm::uvec4 Counts;
 			glm::vec4 Viewport;
+			glm::vec4 Eye;
+			glm::vec4 Distances;
 		} uniforms{
 			viewProjection,
 			{static_cast<uint32_t>(LodFrame.Selections.size()),
@@ -153,7 +162,14 @@ namespace engine::render {
 			 0u,
 			 0u},
 			{static_cast<float>(width), static_cast<float>(height), 0.0f, 0.0f},
+			{eye.X, eye.Y, eye.Z, cullOffscreen ? 1.0f : 0.0f},
+			{minimumDistances[0], minimumDistances[1], minimumDistances[2], 0.0f},
 		};
+		if (!(minimumDistances[0] > 0.0f) || !std::isfinite(minimumDistances[0]) ||
+			!std::isfinite(minimumDistances[1]) || !std::isfinite(minimumDistances[2]) ||
+			minimumDistances[0] >= minimumDistances[1] || minimumDistances[1] >= minimumDistances[2]) {
+			uniforms.Distances.x = -1.0f;
+		}
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (uniforms.Counts.y + 63u) / 64u, 1, 1);
 		SDL_EndGPUComputePass(pass);

@@ -383,6 +383,11 @@ namespace engine::render {
 			objects = FoldPresentation(objects, view.EyeRig);
 			objects = FoldPresentationSpan(objects, view.EyeHiddenRows);
 			objects = FoldPresentation(objects, view.Pipeline.Id());
+			objects = FoldPresentationSpan(
+				objects,
+				std::span<const float>(view.LodMinimumDistances.data(), view.LodMinimumDistances.size())
+			);
+			objects = FoldPresentation(objects, view.EnableLODCulling ? 1u : 0u);
 			// GroundGrid has padding after Enabled. Hash its visible fields so a
 			// fresh View with identical authored values keeps the same cache key.
 			objects = FoldGroundGrid(objects, view.Grid);

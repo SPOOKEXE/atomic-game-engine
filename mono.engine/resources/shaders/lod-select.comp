@@ -37,6 +37,8 @@ layout(set = 2, binding = 0) uniform View {
 	mat4 ViewProjection;
 	uvec4 Counts;
 	vec4 Viewport;
+	vec4 Eye;
+	vec4 Distances;
 } view;
 
 float ProjectedArea(Selection selection) {
@@ -85,6 +87,14 @@ void main() {
 			}
 		}
 	}
+	if (view.Distances.x > 0.0) {
+		float distance = length(selection.CentreTarget.xyz - view.Eye.xyz);
+		uint eligible = 0u;
+		if (distance >= view.Distances.x) eligible = 1u;
+		if (distance >= view.Distances.y) eligible = 2u;
+		if (distance >= view.Distances.z) eligible = 3u;
+		chosen = min(chosen, eligible);
+	}
 
 	Selection clusterSelection = selection;
 	clusterSelection.CentreTarget.xyz = cluster.CentreArea.xyz;
@@ -92,6 +102,6 @@ void main() {
 	float clusterArea = ProjectedArea(clusterSelection);
 	// A selected level owns full coverage. Without parent mappings, a cluster
 	// cannot use its own area target without leaving holes in that level.
-	bool visible = clusterArea > 0.0 && !isnan(clusterArea);
+	bool visible = view.Eye.w == 0.0 || (clusterArea > 0.0 && !isnan(clusterArea));
 	arguments.words[cluster.Draw.z * 5u + 1u] = chosen == cluster.Draw.y && visible ? 1u : 0u;
 }

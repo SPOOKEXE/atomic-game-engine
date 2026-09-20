@@ -5042,6 +5042,14 @@ namespace studio {
 		// @since v0.17
 		bool ShowColliders = false;
 
+		// Whether the viewport labels visible mesh instances with their selected
+		// level of detail.
+		bool ShowActiveLod = false;
+
+		// Whether the viewport shows the ground rings for the configured LOD
+		// distances.
+		bool ShowLodDebugRadii = false;
+
 		// Which shape the collider view draws.
 		//
 		// **Because a part has three of them and only one is in force.** A

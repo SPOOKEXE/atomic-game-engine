@@ -254,6 +254,20 @@ namespace studio {
 		// property or a running world's simulation state.
 		bool ShowParticleEmitters = true;
 
+		// Whether Studio asks its renderer to cull clusters outside the current
+		// level-of-detail range. The renderer remains responsible for its
+		// projected-area choice inside that range.
+		bool EnableLODCulling = true;
+
+		// The ordered distance caps for the renderer's LOD levels, in studs.
+		// They stay in preferences because they tune the editor's view rather than
+		// the authored world.
+		//@{
+		float LOD1Distance = 30.0f;
+		float LOD2Distance = 60.0f;
+		float LOD3Distance = 120.0f;
+		//@}
+
 		// Whether Studio loads and saves the durable DataStore through the local
 		// provider. Off by default so opening an authored world cannot write
 		// external state without somebody choosing a location first.

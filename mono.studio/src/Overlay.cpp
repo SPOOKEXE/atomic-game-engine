@@ -13,6 +13,7 @@
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/spatial/HashGrid.hpp>
@@ -29,7 +30,9 @@
 #include <optional>
 #include <string>
 #include <studio/Editor.hpp>
+#include <studio/LodPreview.hpp>
 #include <studio/Viewports.hpp>
+#include <unordered_set>
 #include <vector>
 
 namespace studio {
@@ -153,6 +156,63 @@ namespace studio {
 			}
 			const float linear = 1.0f - distanceSquared / reachSquared;
 			return linear * linear;
+		}
+
+		void DrawActiveLodLabels(
+			Store &store,
+			ImDrawList *list,
+			const PanelProjection &panel,
+			const std::array<float, 3> &distanceBands
+		) {
+			std::unordered_set<uint32_t> editableMeshes;
+			store.Each<const engine::scene::EditableMesh>([&](Entity entity, const auto &) {
+				const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
+				if (name.IsValid()) {
+					editableMeshes.insert(name.Id());
+				}
+			});
+
+			store.Each<
+				const engine::scene::Transform,
+				const engine::scene::Bounds,
+				const engine::scene::Visual>([&](Entity entity,
+												 const engine::scene::Transform &transform,
+												 const engine::scene::Bounds &bounds,
+												 const engine::scene::Visual &visual) {
+				if (!visual.Visible || editableMeshes.find(visual.Mesh.Id()) == editableMeshes.end()) {
+					return;
+				}
+				const std::optional<uint8_t> active =
+					ActiveLodForViewport(store, entity, panel, distanceBands);
+				if (!active.has_value()) {
+					return;
+				}
+
+				glm::vec2 minimum{};
+				glm::vec2 maximum{};
+				if (!ProjectBoxBounds(panel, transform.Frame, bounds.HalfExtent, minimum, maximum)) {
+					return;
+				}
+				const glm::vec2 imageMaximum = panel.ImageMin + panel.ImageSize;
+				if (maximum.x < panel.ImageMin.x || maximum.y < panel.ImageMin.y ||
+					minimum.x > imageMaximum.x || minimum.y > imageMaximum.y) {
+					return;
+				}
+
+				const std::string label = "Active LOD " + std::to_string(*active);
+				const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+				const float maxX = std::max(panel.ImageMin.x, imageMaximum.x - textSize.x - 10.0f);
+				const float maxY = std::max(panel.ImageMin.y, imageMaximum.y - textSize.y - 8.0f);
+				const float x = std::clamp(minimum.x, panel.ImageMin.x, maxX);
+				const float y = std::clamp(minimum.y - textSize.y - 8.0f, panel.ImageMin.y, maxY);
+				list->AddRectFilled(
+					ImVec2(x, y),
+					ImVec2(x + textSize.x + 10.0f, y + textSize.y + 8.0f),
+					IM_COL32(0, 0, 0, 205),
+					3.0f
+				);
+				list->AddText(ImVec2(x + 5.0f, y + 4.0f), IM_COL32(255, 235, 150, 255), label.c_str());
+			});
 		}
 	}
 
@@ -476,6 +536,16 @@ namespace studio {
 
 			DrawColliderOutlines(index, panel);
 			DrawAdornments(index, panel);
+			if (ShowActiveLod && Universe != nullptr) {
+				const std::array<float, 3> distanceBands{
+					Prefs.LOD1Distance,
+					Prefs.LOD2Distance,
+					Prefs.LOD3Distance,
+				};
+				Universe->Enter(ViewportWorld(index), [&](Store &store) {
+					DrawActiveLodLabels(store, list, panel, distanceBands);
+				});
+			}
 
 			// **`PushClipRect` is a scissor, not a reject.** It stops the pixels
 			// reaching the explorer and does nothing about the vertices: an
@@ -532,6 +602,55 @@ namespace studio {
 			// `Edit` for it and mode alone would never exclude it.
 			const WorldId shown = ViewportWorld(index);
 			const bool authoring = !IsReplicaWorld(shown);
+
+			if (ShowLodDebugRadii) {
+				// These rings are screen-space guides for the distance preferences.
+				// They are centred beneath the camera so the three thresholds remain
+				// readable while orbiting instead of becoming world geometry.
+				const Vector3 centre{panel.Eye.X, 0.0f, panel.Eye.Z};
+				const float distances[3] = {Prefs.LOD1Distance, Prefs.LOD2Distance, Prefs.LOD3Distance};
+				for (size_t level = 0; level < 3; level++) {
+					const float radius = distances[level];
+					if (!(radius > 0.0f) || !std::isfinite(radius)) {
+						continue;
+					}
+
+					constexpr int RING_STEPS = 48;
+					glm::vec2 previous{};
+					bool havePrevious = false;
+					for (int step = 0; step <= RING_STEPS; step++) {
+						const float angle =
+							6.2831853f * static_cast<float>(step) / static_cast<float>(RING_STEPS);
+						const Vector3 point =
+							centre + Vector3{std::cos(angle) * radius, 0.0f, std::sin(angle) * radius};
+						glm::vec2 screen{};
+						if (!panel.WorldToPanel(point, screen)) {
+							havePrevious = false;
+							continue;
+						}
+						if (havePrevious) {
+							list->AddLine(
+								ImVec2(previous.x, previous.y),
+								ImVec2(screen.x, screen.y),
+								IM_COL32(120, 190, 255, 145),
+								1.0f
+							);
+						}
+						previous = screen;
+						havePrevious = true;
+					}
+
+					glm::vec2 label{};
+					if (panel.WorldToPanel(centre + Vector3{radius, 0.0f, 0.0f}, label)) {
+						static constexpr const char *LABELS[3] = {"LOD1", "LOD2", "LOD3"};
+						list->AddText(
+							ImVec2(label.x + 4.0f, label.y - 8.0f),
+							IM_COL32(150, 210, 255, 210),
+							LABELS[level]
+						);
+					}
+				}
+			}
 
 			// **The overlay copy is the always-on-top one, and it is drawn only
 			// while a handle is held.** The renderer draws the grid the rest of

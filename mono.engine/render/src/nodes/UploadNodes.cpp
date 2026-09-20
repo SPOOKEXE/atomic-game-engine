@@ -44,7 +44,15 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("select-lod"), [this](const graph::RunContext &context) {
 			EnterNamedPass(context.Name);
-			return State->DispatchLodSelection(Command, Frame.ViewProjection, SceneWidth, SceneHeight);
+			return State->DispatchLodSelection(
+				Command,
+				Frame.ViewProjection,
+				Request.CameraFrame.Position,
+				Request.Source->LodMinimumDistances,
+				Request.Source->EnableLODCulling,
+				SceneWidth,
+				SceneHeight
+			);
 		});
 	}
 }

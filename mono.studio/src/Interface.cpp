@@ -1417,6 +1417,9 @@ namespace studio {
 		}
 		ImGui::EndDisabled();
 
+		ImGui::MenuItem("Show Active LOD", nullptr, &ShowActiveLod);
+		ImGui::MenuItem("LOD Debug Radii", nullptr, &ShowLodDebugRadii);
+
 		ImGui::Separator();
 
 		const auto setEveryPanel = [this](bool open) {

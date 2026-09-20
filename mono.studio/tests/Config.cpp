@@ -137,6 +137,10 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.Scale = 1.25f;
 	written.ShowGrid = false;
 	written.ShowParticleEmitters = false;
+	written.EnableLODCulling = false;
+	written.LOD1Distance = 24.0f;
+	written.LOD2Distance = 48.0f;
+	written.LOD3Distance = 96.0f;
 	written.DataStoreEnabled = true;
 	written.DataStoreRoot = "/tmp/atomic-stores";
 	written.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Live;
@@ -164,6 +168,10 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	CHECK(read.Scale == 1.25f);
 	CHECK_FALSE(read.ShowGrid);
 	CHECK_FALSE(read.ShowParticleEmitters);
+	CHECK_FALSE(read.EnableLODCulling);
+	CHECK(read.LOD1Distance == 24.0f);
+	CHECK(read.LOD2Distance == 48.0f);
+	CHECK(read.LOD3Distance == 96.0f);
 	CHECK(read.DataStoreEnabled);
 	CHECK(read.DataStoreRoot == "/tmp/atomic-stores");
 	CHECK(read.DataStoreEnvironment == engine::world::SharedStoreEnvironment::Live);
@@ -281,7 +289,8 @@ TEST_CASE("a hand-edited preference is clamped rather than obeyed", "[studio][co
 	// Every one of these is one typo away in a file this format exists to let
 	// somebody edit. A scale of zero is a window nobody can read.
 	scratch.Write(
-		"preferences.json", R"({"scale": 0.0, "gridStep": -4.0, "rotationStep": -1.0, "controlPort": 99999})"
+		"preferences.json",
+		R"({"scale": 0.0, "gridStep": -4.0, "rotationStep": -1.0, "controlPort": 99999, "lod1Distance": 90.0, "lod2Distance": 60.0, "lod3Distance": -1.0})"
 	);
 
 	Preferences preferences;
@@ -293,6 +302,22 @@ TEST_CASE("a hand-edited preference is clamped rather than obeyed", "[studio][co
 	CHECK(preferences.SnapDistance > 0.0f);
 	CHECK(preferences.SnapDegrees > 0.0f);
 	CHECK(preferences.ControlPort == 65535);
+	CHECK(preferences.LOD1Distance == 30.0f);
+	CHECK(preferences.LOD2Distance == 60.0f);
+	CHECK(preferences.LOD3Distance == 120.0f);
+}
+
+TEST_CASE("LOD distance caps must be positive and ordered", "[studio][config]") {
+	Scratch scratch;
+	scratch.Write(
+		"preferences.json", R"({"lod1Distance": 0.0, "lod2Distance": 60.0, "lod3Distance": 120.0})"
+	);
+
+	Preferences preferences;
+	REQUIRE(preferences.Load());
+	CHECK(preferences.LOD1Distance == 30.0f);
+	CHECK(preferences.LOD2Distance == 60.0f);
+	CHECK(preferences.LOD3Distance == 120.0f);
 }
 
 TEST_CASE("a field of the wrong type falls back rather than throwing", "[studio][config]") {

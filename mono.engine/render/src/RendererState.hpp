@@ -1186,7 +1186,13 @@ namespace engine::render {
 
 		bool EnsureLodResources(uint32_t selections, uint32_t instances, uint32_t arguments);
 		bool DispatchLodSelection(
-			SDL_GPUCommandBuffer *command, const glm::mat4 &viewProjection, uint32_t width, uint32_t height
+			SDL_GPUCommandBuffer *command,
+			const glm::mat4 &viewProjection,
+			core::Vector3 eye,
+			std::array<float, 3> minimumDistances,
+			bool cullOffscreen,
+			uint32_t width,
+			uint32_t height
 		);
 		void ReleaseLod();
 

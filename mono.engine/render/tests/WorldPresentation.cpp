@@ -555,6 +555,20 @@ TEST_CASE("optional LOD and effect rows reach the cached draw list", "[render][p
 	CHECK(drawList->Instances[0].Effects.Attachments[0].Node == Name("posterise"));
 }
 
+TEST_CASE("LOD view settings invalidate the object image", "[render][presentation][lod]") {
+	using namespace engine;
+	const std::array instances{scene::DrawInstance{}};
+	render::View view;
+	view.Instances = instances;
+	const auto signature = [&] { return render::ScenePresentationSignaturesOf(view, {}).Objects; };
+	const uint64_t original = signature();
+	view.LodMinimumDistances = {30.0f, 60.0f, 120.0f};
+	const uint64_t distance = signature();
+	CHECK(distance != original);
+	view.EnableLODCulling = false;
+	CHECK(signature() != distance);
+}
+
 TEST_CASE("a draw list flattens each rig palette beside its instance", "[render][presentation][skinning]") {
 	engine::scene::RegisterSceneClasses();
 	engine::render::RegisterPresentationComponents();
