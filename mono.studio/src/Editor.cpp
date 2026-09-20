@@ -1118,7 +1118,9 @@ namespace studio {
 						const ViewportState *view = ExtraAt(FocusedViewport);
 						presence.Position = view != nullptr ? view->Frame.Position : CameraFrame.Position;
 						if (world.IsValid() && !Selection.empty()) {
-							Universe->Enter(world, [&](Store &store) { presence.Selection = PathOf(store, Selection.front()); });
+							Universe->Enter(world, [&](Store &store) {
+								presence.Selection = PathOf(store, Selection.front());
+							});
 						}
 						stream->PublishPresence(presence, now);
 						TeamPresenceAt = now + 0.1;

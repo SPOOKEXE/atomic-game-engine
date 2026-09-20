@@ -798,10 +798,14 @@ namespace studio {
 					if (panel.WorldToPanel(remote.Position, at)) {
 						const ImVec2 point(at.x, at.y);
 						list->AddTriangleFilled(
-							ImVec2(point.x, point.y - 9.0f), ImVec2(point.x - 6.0f, point.y + 5.0f),
-							ImVec2(point.x + 6.0f, point.y + 5.0f), remoteColour
+							ImVec2(point.x, point.y - 9.0f),
+							ImVec2(point.x - 6.0f, point.y + 5.0f),
+							ImVec2(point.x + 6.0f, point.y + 5.0f),
+							remoteColour
 						);
-						list->AddText(ImVec2(point.x + 9.0f, point.y - 8.0f), remoteColour, remote.DisplayName.c_str());
+						list->AddText(
+							ImVec2(point.x + 9.0f, point.y - 8.0f), remoteColour, remote.DisplayName.c_str()
+						);
 					}
 
 					if (remote.Selection.empty()) continue;
@@ -813,7 +817,14 @@ namespace studio {
 						glm::vec2 maximum{};
 						if (transform != nullptr && bounds != nullptr &&
 							ProjectBoxBounds(panel, transform->Frame, bounds->HalfExtent, minimum, maximum)) {
-							list->AddRect(ImVec2(minimum.x, minimum.y), ImVec2(maximum.x, maximum.y), remoteColour, 0.0f, 0, 1.5f);
+							list->AddRect(
+								ImVec2(minimum.x, minimum.y),
+								ImVec2(maximum.x, maximum.y),
+								remoteColour,
+								0.0f,
+								0,
+								1.5f
+							);
 						}
 					});
 				}
