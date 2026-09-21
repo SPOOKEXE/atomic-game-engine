@@ -3534,6 +3534,10 @@ declare interface DataSceneService {
 	GetSignedDistanceField(request: unknown): Record<string, unknown>;
 	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
 }
+)TS"
+		// Split for MSVC's 16380-byte literal cap. Keep the declaration text
+		// adjacent so the generated TypeScript remains byte-identical.
+		R"TS(
 
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
