@@ -8,6 +8,7 @@
 #include <engine/core/Log.hpp>
 
 #include <lualib.h>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -245,14 +246,14 @@ namespace engine::script {
 				lua_unref(state, scope.ErrorHandler);
 				scope.ErrorHandler = 0;
 			}
+			scope.~ScopePayload();
 			return 0;
 		}
 
 		int ScopeNew(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
 			void *memory = lua_newuserdatatagged(state, sizeof(ScopePayload), TAG_SCOPE);
-			auto *scope = static_cast<ScopePayload *>(memory);
-			*scope = ScopePayload{};
+			auto *scope = new (memory) ScopePayload{};
 			scope->Handle = context.Scopes.Create();
 			luaL_getmetatable(state, "Scope");
 			lua_setmetatable(state, -2);

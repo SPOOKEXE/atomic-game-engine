@@ -1356,6 +1356,14 @@ TEST_CASE(
 		invalidAdoption.Kind = game::PortalSessionKind::LeaseAdopted;
 		++invalidAdoption.Claim.DestinationIncarnation;
 		adoption(invalidAdoption);
+		const auto pendingRequests = host.Worlds().TakePresentation(endpoint.Address);
+		for (const auto &pendingRequest : pendingRequests) {
+			game::PortalSessionMessage request;
+			REQUIRE(game::DecodePortalSession(pendingRequest.Payload, request));
+			CHECK(request.Kind == game::PortalSessionKind::LeaseRequest);
+			CHECK(request.Claim == route.Claim);
+			CHECK(request.Attempt == route.Attempt);
+		}
 		const auto renewalAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(5100);
 		while (std::chrono::steady_clock::now() < renewalAt) {
 			poll();

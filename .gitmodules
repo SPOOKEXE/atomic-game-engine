@@ -4,27 +4,8 @@
 ; shallow = true keeps `just setup` to a single commit per vendor. The exact
 ; commit is still pinned by the superproject, so a clone is reproducible.
 
-; The window, the input and the GPU abstraction. Pinned to the `release-3.4.14`
-; tag rather than to the head of its branch, because the version is a number
-; documents quote and a branch head is not one.
-;
-; **Moved 3.2.31 to 3.4.14 at v0.15, and nothing in this repository changed with
-; it.** All 219 SDL symbols the engine names still exist - checked against the
-; 3.4 headers rather than by building and hoping - so the bump is additive. What
-; it buys is `SDL_GetGPUDeviceProperties` (device and driver name, version and
-; info, for a probe that currently has none) and the GPU device-creation feature
-; toggles that let a device be made on hardware missing clip distance, depth
-; clamping or anisotropy.
-;
-; **It does not buy a GPU timestamp query, and that was checked rather than
-; hoped for**: 3.4.14's `SDL_gpu.h` still has no timestamp, no query pool and no
-; `SDL_GPUQuery`. `docs/DEFERRED.md` D00046 is blocked on exactly that and is
-; unmoved by this.
-;
-; One new configure warning comes with it and it is honest: 3.4 warns when
-; `libdecor-0` is absent, which 3.2 checked for silently. Wayland window
-; decorations on GNOME and Weston want it; an X11 session does not care. Install
-; `libdecor-0-dev` to silence it rather than turning the feature off.
+; The window, input and GPU abstraction. Pinned to the `release-3.4.16` tag so
+; references use a stable version while the superproject records its exact SHA.
 [submodule "mono.vendor/sdl"]
 	path = mono.vendor/sdl
 	url = https://github.com/libsdl-org/SDL.git
@@ -136,33 +117,8 @@
 	url = https://github.com/facebook/zstd.git
 	branch = release
 	shallow = true
-; Luau is vendored ahead of its consumer. Nothing links it until v0.6 runs a
-; script; MonoVendor.cmake adds it EXCLUDE_FROM_ALL so it costs a clone and no
-; build time until then. `v05.md` open question 3 is what this answers, and it
-; is answered early because the bindings manifest generates Luau type
-; declarations and those are written against a value model rather than in the
-; abstract.
-;
-; master, because Luau tags releases rather than publishing a release branch -
-; the same situation as glm and the cryptopp pair above, and the superproject
-; pins the SHA regardless.
-;
-; **Held at luau-lsp's revision deliberately, and this is the one submodule that
-; is not simply "as new as possible".** It is pinned to the same commit as
-; `mono.vendor/luau-lsp/luau`, so the language server in an editor and
-; `mono.tools/scriptcheck` in `just typecheck` type-check against one Luau and
-; cannot disagree about the language.
-;
-; **What sets the number is luau-lsp, not us.** It is `fd83819b`, one commit
-; before the 0.734 tag, which is what luau-lsp `d5df9af` - "Sync to upstream Luau
-; 0.733" - pins. `just luau-lsp` asserts the two match rather than trusting this
-; comment, and `docs/DEFERRED.md` D00019 carries the reopen trigger: bump both
-; the day luau-lsp syncs again.
-;
-; It was 0.731 from v0.7 to v0.15, held there because 0.732 removed the
-; `ConstraintSolver::reportError` overloads luau-lsp called in
-; `src/platform/roblox/RobloxLuauExt.cpp`. Upstream did that work, so the ceiling
-; that argument describes is gone rather than raised.
+; Luau is pinned to the commit nested by luau-lsp 1.70.0, currently 0.739.
+; `just luau-lsp` checks that the editor and `just typecheck` use this same VM.
 [submodule "mono.vendor/luau"]
 	path = mono.vendor/luau
 	url = https://github.com/luau-lang/luau.git
@@ -185,45 +141,11 @@
 	url = https://github.com/quickjs-ng/quickjs.git
 	branch = master
 	shallow = true
-; luau-lsp is the editor's language server, and it is the one vendor this build
-; never compiles. `update = none` is why `just setup` walks past it: setup's
-; contract is what a fresh clone needs *before it can configure*, and nothing
-; here needs a language server to configure. `just luau-lsp` clones and builds
-; it on demand, for whoever wants completion in an editor.
-;
-; **It brings its own Luau, and that is the reason it is built in a tree of its
-; own rather than added to ours.** Its CMakeLists does `add_subdirectory(luau)`
-; against a submodule pinned to its own commit, which declares `Luau.Ast`,
-; `Luau.Analysis` and `Luau.VM` - the same target names `mono.vendor/luau`
-; already gives us. Adding it to this build fails at configure time with "another
-; target with the same name already exists", and there is no flag that makes it
-; consume an existing Luau.
-;
-; **The two Luaus are pinned to the same commit**, so the editor and
-; `just typecheck` type-check against one language rather than two. That is a
-; constraint on `mono.vendor/luau` as much as on this one - see its entry - and
-; `just luau-lsp` asserts it instead of trusting either comment.
-;
-; The revision is luau-lsp's: whatever its nested `luau` pins is what both trees
-; build against, because it is the tree that cannot follow upstream freely. That
-; was 0.731 for eight versions - 0.732 removed the
-; `ConstraintSolver::reportError` overloads it calls in
-; `src/platform/roblox/RobloxLuauExt.cpp` - and `d5df9af` is upstream doing that
-; work. `docs/DEFERRED.md` D00019 holds the reopen trigger.
-;
-; Pinned to a commit on `main` rather than to the 1.69.0 tag, because that tag
-; carries an older Luau still: matching the engine matters more here than
-; matching a release number.
-;
-; **It is also the one vendor that is patched, and the patch never touches this
-; working tree.** `scripts/vendor-tree.sh` archives the commit pinned here into
-; `.cache/vendor/luau-lsp` and applies `mono.vendor/patches/luau-lsp/*.patch`
-; there; the submodule stays exactly as cloned, so a superproject `git status` is
-; clean and a `git submodule update` has nothing to revert. It was applied here
-; once, and a permanently modified submodule in every status - one `git commit
-; -a` away from a pointer nobody meant to move - is why it is not any more.
-; `mono.vendor/AGENTS.md` argues the shape and says why it does not generalise
-; to a vendor the engine links.
+; luau-lsp is built on demand because it is an editor tool. It embeds Luau, whose
+; target names conflict with the engine's copy, so it builds in its own tree.
+; `update = none` keeps `just setup` from cloning it. `just luau-lsp` clones it,
+; verifies the nested Luau SHA, then builds a patched archive without modifying
+; this submodule.
 [submodule "mono.vendor/luau-lsp"]
 	path = mono.vendor/luau-lsp
 	url = https://github.com/JohnnyMorganz/luau-lsp.git
@@ -331,6 +253,7 @@
 	url = https://github.com/ngtcp2/ngtcp2.git
 	branch = main
 	shallow = true
+; MoltenVK is pinned to the latest stable v1.4.2 release tag, not moving main head.
 [submodule "mono.vendor/moltenvk"]
 	path = mono.vendor/moltenvk
 	url = https://github.com/KhronosGroup/MoltenVK.git
