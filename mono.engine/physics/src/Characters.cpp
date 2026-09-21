@@ -5,6 +5,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -94,6 +95,20 @@ namespace engine::physics {
 		// and about a real step; two - Roblox's - lets a body walk onto things
 		// it visibly should not.
 		constexpr float CHARACTER_STEP_HEIGHT = 1.0f;
+
+		// Keep the two relations distinguishable in the frame graph. Walking the
+		// cached plans is cheaper than counting them first when a populated world
+		// would otherwise traverse each relation twice.
+		void LinkCharacters(ecs::Store &store) {
+			{
+				ENGINE_PROFILE_CAT("character.link.players", core::ProfileCategory::Physics);
+				(void)scene::LinkPlayerCharacters(store);
+			}
+			{
+				ENGINE_PROFILE_CAT("character.link.orphans", core::ProfileCategory::Physics);
+				(void)scene::ReclaimOrphanedCharacters(store);
+			}
+		}
 	}
 
 	size_t GroundCharacters(ecs::Store &store) {
@@ -922,8 +937,6 @@ namespace engine::physics {
 		// model with no `Character` on it, and `client::SubmitMove` refuses to
 		// send a single key press because it cannot find one.
 		scheduler.Add("character.link", ecs::Phase::PreSimulation, [](ecs::Store &store) {
-			(void)scene::LinkPlayerCharacters(store);
-
 			// **And the reverse, which is the same concern and was nobody's
 			// job.** `LinkPlayerCharacters` releases a player whose model was
 			// destroyed; this destroys a model whose player was. A character is
@@ -934,7 +947,7 @@ namespace engine::physics {
 			// Composed rather than a second `Add`, for the reason
 			// `character.control` below gives at length: these operations share
 			// storage and form one indivisible system.
-			(void)scene::ReclaimOrphanedCharacters(store);
+			LinkCharacters(store);
 		});
 
 		// **Wake, ground and step are one system, and that is the whole fix.**

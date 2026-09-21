@@ -5,6 +5,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 
@@ -24,6 +25,70 @@ namespace engine::render {
 			uint16_t Index = NO_SURFACE_CAPTURE;
 			SurfaceCaptureKind Kind = SurfaceCaptureKind::Mirror;
 		};
+
+		uint64_t MixCaptureFloat(uint64_t signature, float value) {
+			return scene::MixSignature(signature, std::bit_cast<uint32_t>(value));
+		}
+
+		uint64_t MixCaptureVector(uint64_t signature, const core::Vector3 &value) {
+			signature = MixCaptureFloat(signature, value.X);
+			signature = MixCaptureFloat(signature, value.Y);
+			return MixCaptureFloat(signature, value.Z);
+		}
+
+		uint64_t MixCaptureFrame(uint64_t signature, const core::CFrame &value) {
+			signature = MixCaptureVector(signature, value.Position);
+			signature = MixCaptureFloat(signature, value.QuaternionX);
+			signature = MixCaptureFloat(signature, value.QuaternionY);
+			signature = MixCaptureFloat(signature, value.QuaternionZ);
+			return MixCaptureFloat(signature, value.QuaternionW);
+		}
+
+		uint64_t MixCaptureMatrix(uint64_t signature, const glm::mat4 &value) {
+			for (int column = 0; column < 4; ++column)
+				for (int row = 0; row < 4; ++row)
+					signature = MixCaptureFloat(signature, value[column][row]);
+			return signature;
+		}
+	}
+
+	uint64_t SurfaceCaptureSignature(const SurfaceCaptureRequest &request) {
+		ENGINE_PROFILE_CAT("surface capture signature", core::ProfileCategory::Render);
+		uint64_t signature = 0;
+		signature = MixCaptureFrame(signature, request.Frame);
+		signature = MixCaptureMatrix(signature, request.Projection);
+		signature = scene::MixSignature(signature, request.PixelBudget);
+		signature = scene::MixSignature(signature, request.Width);
+		signature = scene::MixSignature(signature, request.Height);
+		signature = scene::MixSignature(signature, request.Depth);
+		signature = scene::MixSignature(signature, request.Mirrors.size());
+		for (const SurfaceView &mirror : request.Mirrors) {
+			signature = scene::MixSignature(signature, static_cast<uint16_t>(mirror.Index));
+			signature = MixCaptureFrame(signature, mirror.Frame);
+			signature = MixCaptureVector(signature, mirror.PaneCentre);
+			signature = MixCaptureVector(signature, mirror.PaneNormal);
+			signature = MixCaptureVector(signature, mirror.PaneFirst);
+			signature = MixCaptureVector(signature, mirror.PaneSecond);
+			signature = MixCaptureFloat(signature, mirror.PaneNear);
+			signature = MixCaptureFloat(signature, mirror.PaneFar);
+			signature = MixCaptureMatrix(signature, mirror.Projection);
+			signature = scene::MixSignature(signature, mirror.Width);
+			signature = scene::MixSignature(signature, mirror.Height);
+		}
+		signature = scene::MixSignature(signature, request.Portals.size());
+		for (const PortalView &portal : request.Portals) {
+			signature = scene::MixSignature(signature, static_cast<uint16_t>(portal.Index));
+			signature = scene::MixSignature(signature, portal.ExternalImage);
+			signature = scene::MixSignature(signature, static_cast<uint8_t>(portal.Partner));
+			signature = MixCaptureVector(signature, portal.Centre);
+			signature = MixCaptureVector(signature, portal.Normal);
+			signature = MixCaptureVector(signature, portal.First);
+			signature = MixCaptureVector(signature, portal.Second);
+			signature = MixCaptureFrame(signature, portal.Warp.Frame);
+			signature = MixCaptureVector(signature, portal.Warp.Origin);
+			signature = MixCaptureFloat(signature, portal.Warp.Scale);
+		}
+		return signature;
 	}
 
 	bool OrderCaptureTransparency(

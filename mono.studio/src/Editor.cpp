@@ -2500,18 +2500,29 @@ namespace studio {
 					// and a `ParticleBatch` points at a block the world may reclaim
 					// the moment the tick resumes. Copying the batches alone would
 					// copy the pointers.
-					(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
+					{
+						ENGINE_PROFILE_CAT("effect particles", engine::core::ProfileCategory::Render);
+						(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
+					}
 					particleFrameCollected = true;
-					Particles.Detach();
+					{
+						ENGINE_PROFILE_CAT("effect particles detach", engine::core::ProfileCategory::Render);
+						Particles.Detach();
+					}
 
-					const std::span<const engine::effects::RibbonVertex> vertices =
-						engine::effects::RibbonStream(store);
-					RibbonVertices.assign(vertices.begin(), vertices.end());
+					{
+						ENGINE_PROFILE_CAT("effect ribbons", engine::core::ProfileCategory::Render);
+						const std::span<const engine::effects::RibbonVertex> vertices =
+							engine::effects::RibbonStream(store);
+						RibbonVertices.assign(vertices.begin(), vertices.end());
 
-					const std::span<const engine::effects::RibbonRun> runs =
-						engine::effects::RibbonRuns(store);
-					RibbonRuns.assign(runs.begin(), runs.end());
+						const std::span<const engine::effects::RibbonRun> runs =
+							engine::effects::RibbonRuns(store);
+						RibbonRuns.assign(runs.begin(), runs.end());
+					}
 
+					{
+						ENGINE_PROFILE_CAT("effect lights", engine::core::ProfileCategory::Render);
 					// Lights are selected against the culled receiver rows, so an
 					// offscreen local light stays when its range reaches visible geometry.
 					static thread_local std::vector<uint32_t> visibleLightRows;
@@ -2530,6 +2541,7 @@ namespace studio {
 						}
 					}
 					(void)engine::render::CollectLights(store, eye.Position, lightReceivers, Lights);
+					}
 				}
 
 				// **How deep this world's mirrors go, pushed with the world that
@@ -2940,7 +2952,7 @@ namespace studio {
 			// A retained image that prevents submission is a skipped opportunity,
 			// not a cache read. Count hits only when this presentation actually asks
 			// the renderer to reuse those layers.
-			ViewportPresentations[viewport].CacheProfile().Record(damage, true, false, cacheApplicability);
+			ViewportPresentations[viewport].CacheProfile().Record(damage, true, false, false, cacheApplicability);
 		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
@@ -2958,7 +2970,11 @@ namespace studio {
 		}
 		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
 			ViewportPresentations[viewport].CacheProfile().Record(
-				damage, true, LastFrame.PortalPasses > 0, cacheApplicability
+				damage,
+				true,
+				LastFrame.PortalPasses > 0,
+				LastFrame.SurfaceCapturePlanWrite,
+				cacheApplicability
 			);
 			ViewportPresentations[viewport].Commit(presentationSignatures);
 			if (damage.Scene) {

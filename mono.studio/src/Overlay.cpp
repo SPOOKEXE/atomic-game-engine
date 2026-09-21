@@ -10,6 +10,7 @@
 #include "LodPreview.hpp"
 
 #include <engine/ecs/Store.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/render/SpatialCanvas.hpp>
@@ -371,8 +372,11 @@ namespace studio {
 		// nothing does: `DriveCamera` ran earlier in the `camera` span and this
 		// function only draws.
 		std::vector<PanelProjection> projections(Overlays.size());
-		for (size_t index = 0; index < Overlays.size(); index++) {
-			projections[index] = ProjectionFor(index);
+		{
+			ENGINE_PROFILE_CAT("overlay projections", engine::core::ProfileCategory::Render);
+			for (size_t index = 0; index < Overlays.size(); index++) {
+				projections[index] = ProjectionFor(index);
+			}
 		}
 		const auto cancelSurfaceGesture = [this]() {
 			if (SurfaceDragging.Active && SurfaceDragging.Moved && SurfaceDragging.World.IsValid() &&
@@ -389,12 +393,15 @@ namespace studio {
 			SurfaceGesture = ViewportGesture{};
 			BoxSelection = BoxSelectionAction{};
 		};
-		if (SurfaceGesture.Active) {
-			const size_t viewport = SurfaceGesture.Viewport;
-			if (viewport >= Overlays.size() || !Overlays[viewport].Drawn ||
-				Overlays[viewport].List == nullptr || !projections[viewport].IsValid() ||
-				ViewportWorld(viewport) != SurfaceGesture.World)
-				cancelSurfaceGesture();
+		{
+			ENGINE_PROFILE_CAT("overlay gesture state", engine::core::ProfileCategory::Render);
+			if (SurfaceGesture.Active) {
+				const size_t viewport = SurfaceGesture.Viewport;
+				if (viewport >= Overlays.size() || !Overlays[viewport].Drawn ||
+					Overlays[viewport].List == nullptr || !projections[viewport].IsValid() ||
+					ViewportWorld(viewport) != SurfaceGesture.World)
+					cancelSurfaceGesture();
+			}
 		}
 
 		// **The gizmo goes first, and it can swallow the pending pick.** A
@@ -404,47 +411,49 @@ namespace studio {
 		// `DriveCamera`. So the click is recorded there and adjudicated here.
 		bool overHandle = false;
 
-		for (size_t index = 0; index < Overlays.size(); index++) {
-			if (!Overlays[index].Drawn || Overlays[index].List == nullptr) {
-				continue;
-			}
+		{
+			ENGINE_PROFILE_CAT("overlay gizmos", engine::core::ProfileCategory::Render);
+			for (size_t index = 0; index < Overlays.size(); index++) {
+				if (!Overlays[index].Drawn || Overlays[index].List == nullptr) {
+					continue;
+				}
 
-			const PanelProjection &panel = projections[index];
-			if (!panel.IsValid()) {
-				continue;
-			}
+				const PanelProjection &panel = projections[index];
+				if (!panel.IsValid()) {
+					continue;
+				}
 
-			if (DrawGizmo(index, panel) && index == PendingPick.Viewport) {
-				overHandle = true;
+				if (DrawGizmo(index, panel) && index == PendingPick.Viewport) {
+					overHandle = true;
+				}
+				DrawDirectionGizmo(index, panel);
+				DrawCursor(index, panel);
 			}
-			DrawDirectionGizmo(index, panel);
-			DrawCursor(index, panel);
-
-			// **After the gizmo, and it declines while a handle is held.** Both
-			// write placements, and two of them running against one selection
-			// is two answers to where it is.
 		}
 
-		if (PendingPick.Wanted) {
-			const PendingPickAction pick = PendingPick;
-			PendingPick = PendingPickAction{};
+		{
+			ENGINE_PROFILE_CAT("overlay picking", engine::core::ProfileCategory::Render);
+			if (PendingPick.Wanted) {
+				const PendingPickAction pick = PendingPick;
+				PendingPick = PendingPickAction{};
 
 			// The bound check replaces the one `ProjectionFor` used to make on
 			// the pick's behalf, now that the projection arrives as an argument
 			// rather than being fetched by index inside.
-			if (!overHandle && pick.Viewport < projections.size()) {
-				PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add, projections[pick.Viewport]);
+				if (!overHandle && pick.Viewport < projections.size()) {
+					PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add, projections[pick.Viewport]);
+				}
 			}
-		}
 
-		if (PendingCursor.Wanted) {
-			const PendingCursorAction cursor = PendingCursor;
-			PendingCursor = PendingCursorAction{};
-			if (cursor.Viewport < projections.size() && ShowCursor) {
-				const Ray ray = projections[cursor.Viewport].PanelToRay(glm::vec2(cursor.X, cursor.Y));
-				Vector3 point;
-				if (IntersectRayPlane(Vector3::Zero, Vector3::YAxis, ray, point)) {
-					CursorPosition = point;
+			if (PendingCursor.Wanted) {
+				const PendingCursorAction cursor = PendingCursor;
+				PendingCursor = PendingCursorAction{};
+				if (cursor.Viewport < projections.size() && ShowCursor) {
+					const Ray ray = projections[cursor.Viewport].PanelToRay(glm::vec2(cursor.X, cursor.Y));
+					Vector3 point;
+					if (IntersectRayPlane(Vector3::Zero, Vector3::YAxis, ray, point)) {
+						CursorPosition = point;
+					}
 				}
 			}
 		}
@@ -458,31 +467,39 @@ namespace studio {
 		// Outside the projection loop below, because a `ScreenGui` has no
 		// camera: it is laid out against the panel rectangle and nothing else,
 		// so a panel whose camera cannot be resolved still draws its UI.
-		for (size_t index = 0; index < Overlays.size(); index++) {
-			DrawViewportGui(index, projections[index]);
+		{
+			ENGINE_PROFILE_CAT("overlay game gui", engine::core::ProfileCategory::Render);
+			for (size_t index = 0; index < Overlays.size(); index++) {
+				DrawViewportGui(index, projections[index]);
+			}
 		}
 
 		// Gestures mutate selection and transforms. Finish every viewport's input
 		// pass before gathering outlines, so a picked or moved object is projected
 		// from its current geometry in this same frame.
-		for (size_t index = 0; index < Overlays.size(); index++) {
-			OverlaySlot &slot = Overlays[index];
-			if (!slot.Drawn || slot.List == nullptr || !projections[index].IsValid()) {
-				continue;
+		{
+			ENGINE_PROFILE_CAT("overlay gestures", engine::core::ProfileCategory::Render);
+			for (size_t index = 0; index < Overlays.size(); index++) {
+				OverlaySlot &slot = Overlays[index];
+				if (!slot.Drawn || slot.List == nullptr || !projections[index].IsValid()) {
+					continue;
+				}
+					slot.List->PushClipRect(
+						ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
+					);
+					const bool movingSelection = DragOnSurface(index, projections[index]);
+					if (!movingSelection) {
+						DragSelectionBox(index, projections[index]);
+					}
+					slot.List->PopClipRect();
 			}
-			slot.List->PushClipRect(
-				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
-			);
-			const bool movingSelection = DragOnSurface(index, projections[index]);
-			if (!movingSelection) {
-				DragSelectionBox(index, projections[index]);
-			}
-			slot.List->PopClipRect();
 		}
 
 		std::vector<SelectionOutlineBatch::Entry> &selectionOutlines = OutlineBatch.Entries;
 		selectionOutlines.clear();
-		if (SelectionWorld.IsValid() && !Selection.empty() && Universe != nullptr) {
+		{
+			ENGINE_PROFILE_CAT("overlay selection outlines", engine::core::ProfileCategory::Render);
+			if (SelectionWorld.IsValid() && !Selection.empty() && Universe != nullptr) {
 			// Gather after the input pass. Every viewport projects the same current
 			// geometry, rather than each rebuilding corners from the world.
 			if (selectionOutlines.capacity() < Selection.size()) selectionOutlines.reserve(Selection.size());
@@ -503,12 +520,15 @@ namespace studio {
 							outline.Corners[corner] = outline.Frame.PointToWorldSpace(local);
 						}
 						selectionOutlines.push_back(std::move(outline));
+						}
 					}
-				}
-			});
+				});
+			}
 		}
 
-		for (size_t index = 0; index < Overlays.size(); index++) {
+		{
+			ENGINE_PROFILE_CAT("overlay drawing", engine::core::ProfileCategory::Render);
+			for (size_t index = 0; index < Overlays.size(); index++) {
 			OverlaySlot &slot = Overlays[index];
 			if (!slot.Drawn || slot.List == nullptr) {
 				continue;
@@ -939,7 +959,8 @@ namespace studio {
 				}
 			}
 
-			list->PopClipRect();
+				list->PopClipRect();
+			}
 		}
 	}
 

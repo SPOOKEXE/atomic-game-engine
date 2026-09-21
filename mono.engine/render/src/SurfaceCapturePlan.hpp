@@ -70,4 +70,7 @@ namespace engine::render {
 	// Failure clears the partial plan before any target can be allocated. The
 	// entry ceiling also bounds work for tiny images with many visible apertures.
 	SurfaceCaptureStatus PlanSurfaceCaptures(const SurfaceCaptureRequest &request, SurfaceCapturePlan &plan);
+
+	// The inputs PlanSurfaceCaptures reads, as a stable per-view cache key.
+	uint64_t SurfaceCaptureSignature(const SurfaceCaptureRequest &request);
 }

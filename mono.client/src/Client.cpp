@@ -3161,15 +3161,24 @@ namespace client {
 			// writes to a store, which put the link's cost in the same bar as
 			// the systems and made a bad connection read as a slow game.
 			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::Network);
-			PollServer(engine::core::Clock::Seconds(), renderingActive && presentationDue);
-			if (ReportedJoin && Replicated != inputReplica)
-				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) { WriteInput(store); });
+			{
+				ENGINE_PROFILE_CAT("replication.poll", engine::core::ProfileCategory::Network);
+				PollServer(engine::core::Clock::Seconds(), renderingActive && presentationDue);
+			}
+			{
+				ENGINE_PROFILE_CAT("replication.input", engine::core::ProfileCategory::Network);
+				if (ReportedJoin && Replicated != inputReplica)
+					Universe_->Enter(Replicated, [this](engine::ecs::Store &store) { WriteInput(store); });
+			}
 
 			// **After the poll, so a move is stamped with the tick this client
 			// has just finished receiving** - a submission tagged with a tick
 			// the server has not reached is one it rewinds against nothing.
-			SubmitMove(engine::core::Clock::Seconds());
-			SubmitTeleportRequests(engine::core::Clock::Seconds());
+			{
+				ENGINE_PROFILE_CAT("replication.submit", engine::core::ProfileCategory::Network);
+				SubmitMove(engine::core::Clock::Seconds());
+				SubmitTeleportRequests(engine::core::Clock::Seconds());
+			}
 		}
 
 		// After the tick and the replica's apply, so what a script set this
@@ -4488,7 +4497,7 @@ namespace client {
 			damage.Any() || PresentationInvalidated || capturePending || renderOnlyPending;
 		const bool particleDeviceStep = particleLayerPresent && particleDelta > 0.0f;
 		if (!visualChanged) {
-			PresentationDamage.CacheProfile().Record(damage, false, false, cacheApplicability);
+			PresentationDamage.CacheProfile().Record(damage, false, false, false, cacheApplicability);
 			UnchangedPresentationsSkipped++;
 		}
 		if (!visualChanged && !particleDeviceStep) {
@@ -4605,7 +4614,11 @@ namespace client {
 		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
 			PresentationDamage.CacheProfile().Record(
-				damage, false, LastFrame.PortalPasses > 0, cacheApplicability
+				damage,
+				false,
+				LastFrame.PortalPasses > 0,
+				LastFrame.SurfaceCapturePlanWrite,
+				cacheApplicability
 			);
 			PresentationDamage.Commit(presentationSignatures);
 			if (damage.Scene) {

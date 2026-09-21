@@ -1158,6 +1158,11 @@ namespace engine::render {
 		// A requested visible subcapture could not fit its depth or pixel limit.
 		bool SurfaceBudgetExceeded = false;
 
+		// Whether this frame rebuilt the retained plan for mirror and portal
+		// surface captures. The cache diagnostics use this to distinguish a
+		// stable camera hit from a descriptor or camera change.
+		bool SurfaceCapturePlanWrite = false;
+
 		// How many ribbon vertices were submitted this frame.
 		//
 		// Two per segment, so a beam is twenty-two and a trail is at most

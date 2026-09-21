@@ -1,4 +1,5 @@
 #include "SurfaceCapturePlan.hpp"
+#include "SurfaceCaptureCache.hpp"
 
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
@@ -51,6 +52,33 @@ namespace {
 			Request.PixelBudget = 256;
 		}
 	};
+}
+
+TEST_CASE("surface capture cache reuses only an unchanged retained scene", "[render][surface-capture-plan]") {
+	using namespace engine::render;
+	MixedCaptures scene;
+	SurfaceCaptureCache cache;
+	const uint64_t signature = SurfaceCaptureSignature(scene.Request);
+	CHECK(cache.NeedsRefresh(signature));
+
+	cache.Commit(signature, 512, false);
+	CHECK_FALSE(cache.NeedsRefresh(signature));
+	CHECK(cache.Pixels == 512);
+	CHECK_FALSE(cache.BudgetExceeded);
+
+	scene.Request.Frame.Position.X = 1.0f;
+	CHECK(cache.NeedsRefresh(SurfaceCaptureSignature(scene.Request)));
+	scene.Request.Frame.Position.X = 0.0f;
+	scene.Request.Width++;
+	CHECK(cache.NeedsRefresh(SurfaceCaptureSignature(scene.Request)));
+	scene.Request.Width--;
+	scene.Portals[0].Centre.Z += 1.0f;
+	CHECK(cache.NeedsRefresh(SurfaceCaptureSignature(scene.Request)));
+
+	const uint64_t changedSignature = SurfaceCaptureSignature(scene.Request);
+	cache.Commit(changedSignature, 0, true);
+	CHECK_FALSE(cache.NeedsRefresh(changedSignature));
+	CHECK(cache.BudgetExceeded);
 }
 
 TEST_CASE(

@@ -891,26 +891,38 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("reuse draw list", engine::core::ProfileCategory::Simulation);
 			drawList->Instances.resize(drawList->BaseInstanceCount);
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
-			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
-			AssignObjectLabels(store, *drawList);
-			AssignAuthoredLabels(
-				store,
-				*drawList,
-				"DataFactorySemanticId",
-				drawList->SemanticLabels,
-				drawList->SemanticLabelsValid,
-				&scene::DrawInstance::SemanticLabel,
-				true
-			);
-			AssignAuthoredLabels(
-				store,
-				*drawList,
-				"DataFactoryPartId",
-				drawList->PartLabels,
-				drawList->PartLabelsValid,
-				&scene::DrawInstance::PartLabel,
-				false
-			);
+			{
+				ENGINE_PROFILE_CAT("reuse draw list.seams", engine::core::ProfileCategory::Simulation);
+				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+			}
+			{
+				ENGINE_PROFILE_CAT("reuse draw list.object labels", engine::core::ProfileCategory::Simulation);
+				AssignObjectLabels(store, *drawList);
+			}
+			{
+				ENGINE_PROFILE_CAT("reuse draw list.semantic labels", engine::core::ProfileCategory::Simulation);
+				AssignAuthoredLabels(
+					store,
+					*drawList,
+					"DataFactorySemanticId",
+					drawList->SemanticLabels,
+					drawList->SemanticLabelsValid,
+					&scene::DrawInstance::SemanticLabel,
+					true
+				);
+			}
+			{
+				ENGINE_PROFILE_CAT("reuse draw list.part labels", engine::core::ProfileCategory::Simulation);
+				AssignAuthoredLabels(
+					store,
+					*drawList,
+					"DataFactoryPartId",
+					drawList->PartLabels,
+					drawList->PartLabelsValid,
+					&scene::DrawInstance::PartLabel,
+					false
+				);
+			}
 			return;
 		}
 		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
@@ -1347,6 +1359,7 @@ namespace engine::render {
 
 	size_t
 	CollectParticleBatches(ecs::Store &store, ParticleFrame &frame, const ParticleBatchSelection &selection) {
+		ENGINE_PROFILE_CAT("collect particle batches", core::ProfileCategory::Render);
 		auto *system = store.ResourceMutable<effects::ParticleSystem>();
 		const core::Name sourceWorld(store.Name());
 		const uint64_t sourceRevision = system == nullptr ? 0 : system->PresentationRevision;
@@ -1356,6 +1369,7 @@ namespace engine::render {
 			frame.SourceLayoutRevision == sourceLayoutRevision &&
 			frame.SourceResidentRevision == sourceResidentRevision &&
 			frame.SourceSelection == selection.Name && frame.SourceSelectionRevision == selection.Revision) {
+			ENGINE_PROFILE_CAT("collect effects.reuse", core::ProfileCategory::Render);
 			return frame.Batches.size();
 		}
 
@@ -1398,26 +1412,30 @@ namespace engine::render {
 
 		// Flatten portals once per frame. Particle positions live on the device,
 		// so the seam crosses this boundary and the per-particle decision does not.
-		static thread_local std::vector<scene::PortalSeam> seams;
-		if (scene::GatherPortalSeams(store, seams) > 0) {
-			for (const scene::PortalSeam &seam : seams) {
-				if (seam.Crosses) {
-					continue;
-				}
+		{
+			ENGINE_PROFILE_CAT("collect effects.seams", core::ProfileCategory::Render);
+			static thread_local std::vector<scene::PortalSeam> seams;
+			if (scene::GatherPortalSeams(store, seams) > 0) {
+				for (const scene::PortalSeam &seam : seams) {
+					if (seam.Crosses) {
+						continue;
+					}
 
-				const scene::SeamTransform map = scene::SeamMapping(seam);
-				ParticleSeam flat;
-				flat.Centre = seam.Centre;
-				flat.Normal = seam.Normal;
-				flat.First = seam.First;
-				flat.Second = seam.Second;
-				flat.Mapping = map.Frame;
-				flat.Scale = map.Scale;
-				frame.Seams.push_back(flat);
+					const scene::SeamTransform map = scene::SeamMapping(seam);
+					ParticleSeam flat;
+					flat.Centre = seam.Centre;
+					flat.Normal = seam.Normal;
+					flat.First = seam.First;
+					flat.Second = seam.Second;
+					flat.Mapping = map.Frame;
+					flat.Scale = map.Scale;
+					frame.Seams.push_back(flat);
+				}
 			}
 		}
 
 		if (!rebuildLayout && refreshResident) {
+			ENGINE_PROFILE_CAT("collect effects.resident", core::ProfileCategory::Render);
 			for (size_t at = 0; at < frame.Batches.size(); at++) {
 				ParticleBatch &batch = frame.Batches[at];
 				assert(batch.Index < system->Blocks.size());
@@ -1443,6 +1461,7 @@ namespace engine::render {
 		// block only owns resident simulation state. This walk is a layout rebuild,
 		// not a simulation-revision cost: unchanged emitters retain this ordered
 		// metadata while changed block values refresh around it.
+		ENGINE_PROFILE_CAT("collect effects.layout", core::ProfileCategory::Render);
 		store.Each<const effects::ParticleEmitter, const effects::EmitterSlot>(
 			[&](ecs::Entity entity,
 				const effects::ParticleEmitter &emitter,

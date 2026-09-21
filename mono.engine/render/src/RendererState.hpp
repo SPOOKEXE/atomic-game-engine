@@ -23,6 +23,7 @@
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
 #include "ShaderBinary.hpp"
+#include "SurfaceCaptureCache.hpp"
 #include "SurfaceCapturePlan.hpp"
 #include "Tessellation.hpp"
 #include "VulkanTimestamps.hpp"
@@ -2539,6 +2540,7 @@ namespace engine::render {
 		// high-water mark is bounded by `scene::MAX_SURFACES`.
 		struct SurfaceBank {
 			SurfaceCapturePlan CapturePlan;
+			SurfaceCaptureCache CaptureCache;
 			std::vector<effects::RibbonVertex> CaptureRibbonSource;
 			std::vector<effects::RibbonVertex> CaptureRibbons;
 			std::vector<effects::RibbonRun> CaptureRibbonRuns;

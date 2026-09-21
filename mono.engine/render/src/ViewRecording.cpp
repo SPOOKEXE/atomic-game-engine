@@ -660,34 +660,47 @@ namespace engine::render {
 			portalLevels = budget.Depth;
 			uint64_t lightPixels = 0;
 			for (const auto &portal : portals) {
-				if (!portal.ExternalImage) {
-					lightPixels += uint64_t(SEAM_LIGHT_RESOLUTION) * SEAM_LIGHT_RESOLUTION;
-				}
+				if (!portal.ExternalImage) lightPixels += uint64_t(SEAM_LIGHT_RESOLUTION) * SEAM_LIGHT_RESOLUTION;
 			}
-			const SurfaceCaptureRequest captureRequest{
+			const uint64_t capturePixels = lightPixels <= budget.Pixels ? budget.Pixels - lightPixels : 0;
+			const SurfaceCaptureRequest keyedCaptureRequest{
 				.Mirrors = surfaces,
 				.Portals = portals,
 				.Frame = cameraFrame,
 				.Projection = Matrices.Projection,
-				.PixelBudget = lightPixels <= budget.Pixels ? budget.Pixels - lightPixels : 0,
+				.PixelBudget = capturePixels,
 				.Width = sceneWidth,
 				.Height = sceneHeight,
 				.Depth = budget.Depth
 			};
-			const auto captureStatus = PlanSurfaceCaptures(captureRequest, bank.CapturePlan);
-			if (captureStatus == SurfaceCaptureStatus::Invalid) {
-				EndIncompleteView();
-				return ViewStart::Abandoned;
-			}
-			result.SurfaceBudgetExceeded = lightPixels > budget.Pixels ||
-										   (lightPixels > 0 && budget.Depth == 0) ||
-										   captureStatus == SurfaceCaptureStatus::BudgetExceeded;
-			if (result.SurfaceBudgetExceeded) {
-				bank.CapturePlan.Entries.clear();
-				bank.CapturePlan.Postorder.clear();
-				bank.CapturePlan.Roots.fill(NO_SURFACE_CAPTURE);
+			const uint64_t captureSignature = SurfaceCaptureSignature(keyedCaptureRequest);
+			if (bank.CaptureCache.NeedsRefresh(captureSignature)) {
+				result.SurfaceCapturePlanWrite = true;
+				const auto captureStatus = PlanSurfaceCaptures(keyedCaptureRequest, bank.CapturePlan);
+				if (captureStatus == SurfaceCaptureStatus::Invalid) {
+					EndIncompleteView();
+					return ViewStart::Abandoned;
+				}
+				result.SurfaceBudgetExceeded = lightPixels > budget.Pixels ||
+											   (lightPixels > 0 && budget.Depth == 0) ||
+											   captureStatus == SurfaceCaptureStatus::BudgetExceeded;
+				if (result.SurfaceBudgetExceeded) {
+					bank.CapturePlan.Entries.clear();
+					bank.CapturePlan.Postorder.clear();
+					bank.CapturePlan.Roots.fill(NO_SURFACE_CAPTURE);
+				}
+				bank.CaptureCache.Commit(
+					captureSignature,
+					result.SurfaceBudgetExceeded ? 0 : bank.CapturePlan.Pixels + lightPixels,
+					result.SurfaceBudgetExceeded
+				);
 			} else {
-				SurfacePixelsUsed = bank.CapturePlan.Pixels + lightPixels;
+				result.SurfaceBudgetExceeded = bank.CaptureCache.BudgetExceeded;
+			}
+			if (!result.SurfaceBudgetExceeded) {
+				SurfacePixelsUsed = bank.CaptureCache.Pixels;
+			} else {
+				SurfacePixelsUsed = 0;
 			}
 		}
 

@@ -1072,12 +1072,22 @@ namespace studio {
 					// Structural matching keeps repeated world and phase trees
 					// separate. Matching only name and depth collapses all of their
 					// bars onto one time range.
-					AccumulateDiagnosticSpans(live, view.Summed);
-
-					view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
-					view.SummedIdleMilliseconds += FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
-					view.SummedUnmarkedMilliseconds += FrameGraph::UnmarkedMilliseconds();
-					view.SummedDropped += FrameGraph::Dropped();
+					{
+						ENGINE_PROFILE_CAT(
+							"frame graph.average.spans", engine::core::ProfileCategory::Engine
+						);
+						AccumulateDiagnosticSpans(live, view.Summed);
+					}
+					{
+						ENGINE_PROFILE_CAT(
+							"frame graph.average.scalars", engine::core::ProfileCategory::Engine
+						);
+						view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
+						view.SummedIdleMilliseconds +=
+							FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+						view.SummedUnmarkedMilliseconds += FrameGraph::UnmarkedMilliseconds();
+						view.SummedDropped += FrameGraph::Dropped();
+					}
 					view.Frames++;
 				} else if (view.Mode != DiagnosticAggregation::Latest) {
 					const float frame = FrameGraph::FrameMilliseconds();
