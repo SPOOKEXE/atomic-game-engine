@@ -269,10 +269,16 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 	INFO(error);
 	REQUIRE(error.empty());
 
-	// SetGeometry yields once per relief mesh. The local PlayLink budget moves
-	// 128 KiB a tick, so this also bounds a complete 4.5 MiB procedural scene
-	// arriving to less than 1.6 seconds at the editor's 60 Hz tick rate.
-	fixture.Step(link, 96);
+	// The local link is deliberately quicker than a network join, but delivery
+	// happens on Studio's frame thread. Bound one frame to 48 packets, 48 KiB of
+	// payload and at most 50 KiB including packet framing:
+	// a large join remains smooth while this 4.5 MiB scene still arrives in a
+	// few seconds rather than several dozen.
+	for (int frame = 0; frame < 192; ++frame) {
+		fixture.Step(link);
+		CHECK(link.Report().Messages <= 48);
+		CHECK(link.Report().Bytes <= 50 * 1024);
+	}
 
 	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
 		const std::array maps{
@@ -326,6 +332,42 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 			);
 		}
 	});
+}
+
+TEST_CASE(
+	"studio play keeps its player camera through the non-euclidean preview", "[studio][playlink][camera]"
+) {
+	const RestoreAssets restoreAssets;
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base());
+	Fixture fixture;
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+	StartStudioAuthorityDemo(fixture, "NonEuclidean.luau");
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	INFO(error);
+	REQUIRE(error.empty());
+
+	for (int frame = 0; frame < 192; ++frame) {
+		fixture.Step(link);
+	}
+	fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
+
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		const auto *character =
+			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, link.Player()));
+		REQUIRE(active != nullptr);
+		REQUIRE(character != nullptr);
+		const auto *subject = store.Get<engine::scene::CameraSubject>(active->Entity);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Automatic);
+		CHECK(subject->Target == character->Humanoid);
+		CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == character->Root);
+	});
+
+	link.Stop(fixture.Worlds);
 }
 
 TEST_CASE(

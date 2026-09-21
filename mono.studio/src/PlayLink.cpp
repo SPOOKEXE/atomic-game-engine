@@ -28,13 +28,13 @@ namespace studio {
 
 		engine::replication::AuthoritySettings StudioLinkSettings() {
 			engine::replication::AuthoritySettings settings;
-			// PlayLink hands bytes directly to the replica in this process. The
-			// network defaults deliberately stream a join at 8 KiB per tick, which
-			// left a 1.75 MiB procedural image blank for several seconds even
-			// though no transport, congestion, or peer had to be protected here.
-			settings.ChunksPerTick = 128;
-			settings.MessagesPerTick = 128;
-			settings.BytesPerTick = 128 * 1024;
+			// The replica is local, but `StepMany` decodes every admitted message on
+			// Studio's frame thread. A join gets six times the normal chunk budget so
+			// procedural content still arrives promptly, while one frame cannot turn
+			// into 128 snapshot applications just because no socket is involved.
+			settings.ChunksPerTick = 48;
+			settings.MessagesPerTick = 48;
+			settings.BytesPerTick = 48 * 1024;
 			return settings;
 		}
 
