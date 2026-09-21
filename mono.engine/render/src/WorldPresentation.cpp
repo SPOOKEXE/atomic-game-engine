@@ -664,12 +664,15 @@ namespace engine::render {
 			const auto drawable = [&store](Entity entity) { return DrawableSource(store, entity); };
 
 			// Pose columns only affect the interpolated frame or the skin palette.
-			// Their monotonic epoch is enough: walking every changed transform and
-			// asking eight membership questions per row cost more than updating the
-			// packed frame columns it was trying to avoid.
-			changes.Pose |= SourceRevisionAdvanced<Transform>(store, drawList, TRANSFORM_REVISION);
-			changes.Pose |=
-				SourceRevisionAdvanced<PreviousTransform>(store, drawList, PREVIOUS_TRANSFORM_REVISION);
+			// A camera orbit writes `Transform` every frame but the camera has no
+			// draw row. Treating the component epoch as enough rebuilt every terrain
+			// row in Magic merely because its eye moved. The changed walk is normally
+			// one camera and a few projectiles, so filtering it at the source is
+			// cheaper than refreshing thousands of static draw rows.
+			changes.Pose |= SourceRevisionChanged<Transform>(store, drawList, TRANSFORM_REVISION, drawable);
+			changes.Pose |= SourceRevisionChanged<PreviousTransform>(
+				store, drawList, PREVIOUS_TRANSFORM_REVISION, drawable
+			);
 			changes.Full |= SourceRevisionChanged<Bounds>(store, drawList, BOUNDS_REVISION, drawable);
 			changes.Full |= SourceRevisionChanged<Visual>(store, drawList, VISUAL_REVISION, drawable);
 			changes.Full |=

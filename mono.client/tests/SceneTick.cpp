@@ -994,6 +994,35 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[dem
 	REQUIRE(instances->Value == Approx(static_cast<double>(ENTITIES)));
 }
 
+TEST_CASE("the magic camera orbit does not rebuild static terrain draw rows", "[client][magic][profile]") {
+	Session session("Magic.luau");
+
+	// The first frame establishes the rendered tag and cached source rows. The
+	// scene's first cast is delayed, so its next beat changes only the Camera's
+	// transform as it orbits the 5k-plus terrain parts.
+	session.Tick(1);
+	REQUIRE(session.Drawn().size() > 500);
+
+	FrameGraph::SetEnabled(true);
+	FrameGraph::BeginFrame();
+	session.Tick(1);
+	FrameGraph::EndFrame();
+
+	const auto spans = FrameGraph::Spans();
+	FrameGraph::SetEnabled(false);
+	const auto named = [&spans](std::string_view name) {
+		return std::any_of(spans.begin(), spans.end(), [name](const auto &span) {
+			return span.Name == name;
+		});
+	};
+
+	// A global Transform epoch is not enough to invalidate visible rows. The
+	// old path refreshed every terrain instance here because the eye moved.
+	CHECK(named("reuse draw list"));
+	CHECK_FALSE(named("update draw frames"));
+	CHECK_FALSE(named("sync rendered.walk"));
+}
+
 TEST_CASE("the panels render a real tick's data", "[demo]") {
 	Session session;
 
