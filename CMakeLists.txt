@@ -266,7 +266,9 @@ set(MONO_SHADER_STAGE "${CMAKE_BINARY_DIR}/shaderstage")
 # targets only. target_compile_options land after CMAKE_CXX_FLAGS_<CONFIG> on the
 # command line, so the optimisation level chosen here wins over the build type's.
 if(MSVC)
-	set(MONO_COMPILE_OPTIONS /W4 /permissive-)
+	# Unity translation units can exceed COFF's default section count before
+	# their source size becomes a useful reason to split the owning module.
+	set(MONO_COMPILE_OPTIONS /W4 /permissive- /bigobj)
 	if(MONO_WERROR)
 		list(APPEND MONO_COMPILE_OPTIONS /WX)
 	endif()

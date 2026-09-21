@@ -491,6 +491,18 @@ namespace engine::render {
 	}
 
 	struct PortalImageSource::Impl {
+		Impl(
+			world::Universe &universe,
+			Renderer &renderer,
+			world::WorldId world,
+			world::PresentationAddress replies,
+			PortalInboxLimits limits,
+			PortalResidentImages *resident,
+			PortalImageSourceDelivery delivery
+		)
+			: Universe(universe), Render(renderer), World(world), Replies(std::move(replies)), Inbox(limits),
+			  Limits(limits), Resident(resident), Delivery(delivery), ViewSlot(ReplySlot(Replies.Channel)) {}
+
 		world::Universe &Universe;
 		Renderer &Render;
 		world::WorldId World;
@@ -781,14 +793,7 @@ namespace engine::render {
 	)
 		: State(
 			  std::make_unique<Impl>(
-				  universe,
-				  renderer,
-				  world,
-				  std::move(replies),
-				  PortalImageInbox(limits),
-				  limits,
-				  resident,
-				  delivery
+				  universe, renderer, world, std::move(replies), limits, resident, delivery
 			  )
 		  ) {}
 	PortalImageSource::~PortalImageSource() {
@@ -1645,6 +1650,17 @@ namespace engine::render {
 	}
 
 	struct PortalImageProducer::Impl {
+		Impl(
+			world::Universe &universe,
+			Renderer &renderer,
+			world::WorldId world,
+			world::PresentationAddress requests,
+			core::Name ownerName,
+			PortalResidentImages *resident
+		)
+			: Universe(universe), Render(renderer), World(world), Requests(std::move(requests)),
+			  OwnerName(ownerName), Resident(resident), ContentOwner(OwnerName) {}
+
 		world::Universe &Universe;
 		Renderer &Render;
 		world::WorldId World;
