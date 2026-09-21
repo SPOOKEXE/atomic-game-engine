@@ -159,7 +159,7 @@ state until v0.19.
 | `scene.CameraBodyPose` | 88 | 8 | yes | . | . | . | Local last-presented body rows, joint palette and root pose retained while a replica's source rows retire. |
 | `scene.CameraCharacterHold` | 88 | 8 | yes | yes | . | . | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending. |
 | `scene.CameraController` | 144 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - orbit angles and distance, zoom and sensitivity limits, camera mode, the poppercam distance override, and the resolved subject's observed portal transit. |
-| `scene.CameraPortalView` | 176 | 8 | yes | . | . | . | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses. |
+| `scene.CameraPortalView` | 232 | 8 | yes | . | . | . | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses. |
 | `scene.CameraSubject` | 16 | 8 | yes | yes | . | . | The camera's follow target, chosen explicitly or automatically from the local player's Humanoid. Each camera keeps its own selection before and after becoming current. |
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |
@@ -200,7 +200,7 @@ state until v0.19.
 | `scene.PlayerTeam` | 8 | 8 | yes | yes | . | . | On a `Player`: which `Team` instance it belongs to. A player on no team simply has no row. |
 | `scene.PlayersService` | 24 | 8 | yes | yes | . | . | On the single `Players` service instance: the admission cap, the next auto-assigned user id, the default respawn delay, and whether characters load automatically. |
 | `scene.Portal` | 16 | 8 | yes | . | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
-| `scene.PortalBodyView` | 168 | 8 | yes | . | yes | . | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes. |
+| `scene.PortalBodyView` | 232 | 8 | yes | . | . | . | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes. |
 | `scene.PortalProxy` | 8 | 8 | yes | yes | . | . | A piece of the far room, made and unmade inside a single tick, so a body standing in a portal has the other side's floor under it. Never replicated. |
 | `scene.PortalTransit` | 36 | 4 | yes | yes | . | . | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body. |
 | `scene.PortalTransitSeen` | 4 | 4 | yes | yes | . | . | Which `PortalTransit::Serial` this viewer has already snapped its interpolation for, so one crossing is corrected once and never twice. |
