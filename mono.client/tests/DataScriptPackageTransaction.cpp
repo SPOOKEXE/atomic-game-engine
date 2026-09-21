@@ -654,7 +654,7 @@ TEST_CASE(
 		CHECK(transform->Frame.QuaternionW == checkpointCamera.QuaternionW);
 	});
 	REQUIRE(runtimes.size() == 1);
-	const std::shared_ptr<engine::script::Runtime> restoredRuntime = runtimes.front().second;
+	const std::weak_ptr<engine::script::Runtime> restoredRuntime = runtimes.front().second;
 	engine::ecs::Store *restoredStore = nullptr;
 	worlds.Enter(restoredWorld, [&restoredStore](engine::ecs::Store &store) { restoredStore = &store; });
 	CHECK(&runtimes.front().second->World() == restoredStore);
@@ -675,7 +675,7 @@ TEST_CASE(
 	REQUIRE(sought.Status == DataFactoryStatus::Ok);
 	CHECK(sought.Clock.Tick == 2);
 	REQUIRE(runtimes.size() == 1);
-	CHECK(runtimes.front().second != restoredRuntime);
+	CHECK(restoredRuntime.expired());
 	const WorldId soughtWorld = worlds.Find(engine::core::Name(INSTANCE_ID));
 	engine::ecs::Store *soughtStore = nullptr;
 	worlds.Enter(soughtWorld, [&soughtStore](engine::ecs::Store &store) { soughtStore = &store; });
