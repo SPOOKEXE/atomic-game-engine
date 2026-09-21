@@ -260,6 +260,7 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 	automatic.Meshes[1] = core::Name("registration_test.auto-quarter");
 	automatic.Ratios[1] = 0.2f;
 	automatic.TargetQuadArea = 7.0f;
+	automatic.Billboard = core::Name("registration_test.auto-impostor");
 	automatic.Strategy = scene::LodStrategy::Reduced;
 	automatic.Levels = 3;
 	source.Set(entity, automatic);
@@ -267,6 +268,7 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 	custom.Meshes[0] = core::Name("registration_test.custom-half");
 	custom.Ratios[0] = 0.4f;
 	custom.TargetQuadArea = 11.0f;
+	custom.Billboard = core::Name("registration_test.custom-impostor");
 	custom.Levels = 4;
 	source.Set(entity, custom);
 	scene::LODSettings settings;
@@ -293,12 +295,14 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 	CHECK(automaticBack->Meshes[1].Text() == "registration_test.auto-quarter");
 	CHECK(automaticBack->Ratios[1] == 0.2f);
 	CHECK(automaticBack->TargetQuadArea == 7.0f);
+	CHECK(automaticBack->Billboard.Text() == "registration_test.auto-impostor");
 	CHECK(automaticBack->Strategy == scene::LodStrategy::Reduced);
 	CHECK(automaticBack->Levels == 3);
 	CHECK(customBack->Meshes[0].Text() == "registration_test.custom-half");
 	CHECK_FALSE(customBack->Meshes[1].IsValid());
 	CHECK(customBack->Ratios[0] == 0.4f);
 	CHECK(customBack->TargetQuadArea == 11.0f);
+	CHECK(customBack->Billboard.Text() == "registration_test.custom-impostor");
 	CHECK(customBack->Levels == 4);
 	CHECK(settingsBack->MinimumDistances[0] == 17.0f);
 	CHECK(settingsBack->MinimumDistances[1] == 43.0f);

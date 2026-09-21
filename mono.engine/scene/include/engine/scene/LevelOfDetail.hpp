@@ -94,8 +94,8 @@ namespace engine::scene {
 	//
 	// The bake path owns `Meshes`. Keeping the published names beside its inputs makes
 	// a save self-contained and lets a renderer use the artifacts without recreating
-	// geometry during a frame. A missing artifact ends the automatic ladder unless a
-	// custom component supplies that level.
+	// geometry during a frame. A missing artifact ends the mesh ladder unless a
+	// custom component supplies that level or a final billboard is authored.
 	//
 	// @since v0.25
 	struct LODAuto {
@@ -105,6 +105,8 @@ namespace engine::scene {
 		float Ratios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
 		// Per-level projected-pixels-per-triangle target; zero uses the default.
 		float TargetQuadArea = 0.0f;
+		// Texture drawn on a camera-facing quad at the last resolved LOD level.
+		core::Name Billboard;
 		// Bake algorithm that produced the coarse artifacts.
 		LodStrategy Strategy = LodStrategy::Decimated;
 		// Number of valid levels including the base Visual mesh.
@@ -128,6 +130,8 @@ namespace engine::scene {
 		float Ratios[LOD_LEVELS - 1] = {};
 		// Projected-pixels-per-triangle target; zero inherits automatic settings.
 		float TargetQuadArea = 0.0f;
+		// Authored billboard override. An invalid name inherits `LODAuto::Billboard`.
+		core::Name Billboard;
 		// Number of valid levels including the base Visual mesh.
 		uint8_t Levels = LOD_LEVELS;
 		// Explicit padding retained for the serialized component layout.
@@ -160,8 +164,8 @@ namespace engine::scene {
 		// Storing it here as well would be the second copy of a fact the part
 		// already carries, and repointing `MeshId` would leave it behind - the
 		// failure `Visual::Fitted` exists to make impossible one file along. An
-		// invalid name ends the ladder, so a part with one coarse level fills one
-		// slot.
+		// invalid name ends the mesh ladder; an authored billboard may fill the
+		// final slot without a coarse mesh.
 		core::Name Meshes[LOD_LEVELS - 1];
 
 		// What fraction of the base mesh's triangles each level keeps.
@@ -180,6 +184,10 @@ namespace engine::scene {
 		// Zero means `DEFAULT_TARGET_QUAD_AREA`, so a component an author never
 		// touched still selects rather than never advancing past level zero.
 		float TargetQuadArea = 0.0f;
+
+		// The texture for the coarsest level. The renderer substitutes it for
+		// that level's mesh when the texture is resident.
+		core::Name Billboard;
 
 		// Where the coarser levels came from.
 		LodStrategy Strategy = LodStrategy::None;
@@ -207,7 +215,7 @@ namespace engine::scene {
 	// @param base      The source mesh the automatic artifacts came from.
 	// @param automatic Generated artifacts and generation options, or null.
 	// @param custom    Authored per-level overrides, or null.
-	// @return A contiguous ladder. Strategy is `None` when no coarse level exists.
+	// @return A contiguous ladder. Strategy is `None` without a coarse mesh or billboard.
 	LevelOfDetail ResolveMeshLOD(const core::Name &base, const LODAuto *automatic, const LODCustom *custom);
 
 	// Resolves explicitly named artifacts when a caller has no base mesh.

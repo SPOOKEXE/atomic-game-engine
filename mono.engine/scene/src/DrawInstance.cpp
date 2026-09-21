@@ -144,6 +144,7 @@ namespace engine::scene {
 				a = MixSignature(a, Pair(instance.LodMeshes[level].Id(), BitsOf(instance.LodRatios[level])));
 				b = MixSignature(b, Pair(BitsOf(instance.LodMinimumDistances[level]), level));
 			}
+			a = MixSignature(a, Pair(instance.LodBillboard.Id(), 0u));
 			c = MixSignature(
 				c, Pair(BitsOf(instance.LodTargetQuadArea), static_cast<uint32_t>(instance.LodStrategyMode))
 			);

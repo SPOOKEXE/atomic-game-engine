@@ -18,6 +18,7 @@
 #include "DisplayColour.hpp"
 #include "SurfaceScale.hpp"
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
@@ -2174,7 +2175,15 @@ namespace engine::render {
 				levels[0] = State->SlotMesh[slot];
 				uint32_t levelCount = 1;
 				const uint32_t wanted = std::clamp<uint32_t>(instance.LodLevels, 1u, scene::LOD_LEVELS);
-				for (uint32_t level = 1; level < wanted; ++level) {
+				const core::Name billboard = instance.LodBillboard;
+				const core::Name billboardOwner =
+					Impl::TextureContentOwner(billboard, State->SlotContentOwner[slot]);
+				const bool billboardResident =
+					billboard.IsValid() && State->Textures.Find(billboard, billboardOwner) != nullptr;
+				const MeshEntry *billboardMesh = nullptr;
+				scene::DrawInstance billboardInstance;
+				const uint32_t meshLimit = billboardResident ? wanted - 1 : wanted;
+				for (uint32_t level = 1; level < meshLimit; ++level) {
 					const core::Name name = instance.LodMeshes[level - 1];
 					const core::Name owner = Impl::MeshContentOwner(name, State->SlotContentOwner[slot]);
 					if (!name.IsValid() || !State->Meshes.Has(name, owner)) {
@@ -2183,12 +2192,31 @@ namespace engine::render {
 					levels[level] = &State->Meshes.Resolve(name, owner);
 					levelCount++;
 				}
+				if (billboardResident && levelCount < wanted) {
+					billboardMesh = &State->Meshes.Resolve(
+						core::Name(assets::BuiltinName(assets::BuiltinMesh::Billboard))
+					);
+					billboardInstance = instance;
+					billboardInstance.Frame = core::CFrame::FromMatrix(
+						instance.Frame.Position, cameraFrame.RightVector(), -cameraFrame.LookVector()
+					);
+					billboardInstance.HalfExtent.Z = instance.HalfExtent.Y;
+					billboardInstance.Texture = billboard;
+					billboardInstance.Alpha = scene::AlphaMode::Transparency;
+					// The final page is a real textured plane. The preceding mesh remains
+					// selected when the authored texture has not become resident.
+					levels[levelCount] = levels[levelCount - 1];
+					levelCount++;
+				}
 				const uint32_t draw = static_cast<uint32_t>(State->LodFrame.Draws.size());
 				if (AppendAuthoredLod(
 						State->LodFrame,
 						slot,
 						instance,
-						std::span<const MeshEntry *const>(levels.data(), levelCount)
+						std::span<const MeshEntry *const>(levels.data(), levelCount),
+						billboardResident ? billboard : core::Name{},
+						billboardMesh,
+						billboardResident ? &billboardInstance : nullptr
 					)) {
 					State->SlotLod[slot] = draw;
 				}

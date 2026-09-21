@@ -1751,6 +1751,31 @@ namespace engine::scene {
 			return property;
 		}
 
+		template <class Component> PropertyDescriptor LodBillboardProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<core::Name *>(out) = lod == nullptr ? core::Name{} : lod->Billboard;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Billboard = *static_cast<const core::Name *>(value);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
 		template <size_t Level> PropertyDescriptor LodDistanceProperty(const char *name) {
 			static_assert(Level > 0 && Level < LOD_LEVELS);
 			PropertyDescriptor property;
@@ -3410,6 +3435,7 @@ namespace engine::scene {
 			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 2>("Lod2Ratio"));
 			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 3>("Lod3Ratio"));
 			ecs::Classes::Computed(meshPart, LodTargetQuadAreaProperty<LODAuto>("LodTargetQuadArea"));
+			ecs::Classes::Computed(meshPart, LodBillboardProperty<LODCustom>("LodBillboardTexture"));
 			ecs::Classes::Computed(meshPart, LodDistanceProperty<1>("Lod1Distance"));
 			ecs::Classes::Computed(meshPart, LodDistanceProperty<2>("Lod2Distance"));
 			ecs::Classes::Computed(meshPart, LodDistanceProperty<3>("Lod3Distance"));
@@ -3422,6 +3448,7 @@ namespace engine::scene {
 					 LodRatioProperty<LODAuto, 2>("AutoLod2Ratio"),
 					 LodRatioProperty<LODAuto, 3>("AutoLod3Ratio"),
 					 LodTargetQuadAreaProperty<LODAuto>("AutoLodTargetQuadArea"),
+					 LodBillboardProperty<LODAuto>("AutoLodBillboardTexture"),
 					 LodLevelsProperty<LODAuto>("AutoLodLevels"),
 					 AutoLodStrategyProperty(),
 					 LodMeshProperty<LODCustom, 1>("CustomLod1MeshId"),
@@ -3431,6 +3458,7 @@ namespace engine::scene {
 					 LodRatioProperty<LODCustom, 2>("CustomLod2Ratio"),
 					 LodRatioProperty<LODCustom, 3>("CustomLod3Ratio"),
 					 LodTargetQuadAreaProperty<LODCustom>("CustomLodTargetQuadArea"),
+					 LodBillboardProperty<LODCustom>("CustomLodBillboardTexture"),
 					 LodLevelsProperty<LODCustom>("CustomLodLevels"),
 				 }) {
 				ecs::Classes::Computed(meshPart, property);

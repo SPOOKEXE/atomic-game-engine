@@ -317,6 +317,8 @@ namespace engine::scene {
 		// Four authored LOD levels, with level zero held in Mesh. Selection is a
 		// per-view GPU result, so this snapshot carries inputs and no chosen level.
 		core::Name LodMeshes[LOD_LEVELS - 1];
+		// A camera-facing textured impostor for the final LOD level.
+		core::Name LodBillboard;
 		// Screen-area ratios selecting each lower LOD.
 		float LodRatios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
 		// Target projected quad area for automatic LOD choice.
@@ -338,7 +340,7 @@ namespace engine::scene {
 		uint16_t SkinCount = 0;
 
 		// Keeps the flat payload free of implicit tail padding.
-		uint16_t SkinReserved[3] = {};
+		uint16_t SkinReserved[5] = {};
 	};
 
 	// Copies optional LOD and graph-effect state into an existing draw row.
@@ -362,6 +364,7 @@ namespace engine::scene {
 				instance.LodMeshes[level] = lod.Meshes[level];
 				instance.LodRatios[level] = lod.Ratios[level];
 			}
+			instance.LodBillboard = lod.Billboard;
 			instance.LodTargetQuadArea = lod.TargetQuadArea;
 			instance.LodStrategyMode = lod.Strategy;
 			instance.LodLevels = std::clamp<uint8_t>(lod.Levels, 1u, static_cast<uint8_t>(LOD_LEVELS));

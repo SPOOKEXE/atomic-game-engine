@@ -96,12 +96,24 @@ namespace {
 		BuiltinMesh::Sphere,
 		BuiltinMesh::Cylinder,
 		BuiltinMesh::SkinnedWedge,
+		BuiltinMesh::Billboard,
 	};
 
-	// The plane is the one built-in that is a surface rather than a solid, so
-	// it is the one the manifold and containment checks skip.
+	// The two quads are surfaces rather than solids, so the manifold and
+	// containment checks skip them.
 	bool IsSolid(BuiltinMesh mesh) {
-		return mesh != BuiltinMesh::Plane;
+		return mesh != BuiltinMesh::Plane && mesh != BuiltinMesh::Billboard;
+	}
+}
+
+TEST_CASE("the billboard maps texture V from its negative Z edge", "[assets][builtin]") {
+	const MeshData billboard = MakeBuiltin(BuiltinMesh::Billboard);
+	for (const MeshVertex &vertex : billboard.Vertices) {
+		if (vertex.Position[2] < 0.0f) {
+			CHECK(vertex.TexCoord[1] == 0.0f);
+		} else {
+			CHECK(vertex.TexCoord[1] == 1.0f);
+		}
 	}
 }
 

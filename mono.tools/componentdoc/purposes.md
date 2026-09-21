@@ -104,8 +104,8 @@ scene.Humanoid | The character controller's state: move direction, walk and jump
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.
 scene.LightingService | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude.
-scene.LODAuto | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target.
-scene.LODCustom | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.LODAuto` artifact and valid slots take precedence.
+scene.LODAuto | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, projected quad-area target, and optional final billboard texture.
+scene.LODCustom | Per-level authored mesh overrides and an optional final billboard texture. Nil fields inherit the matching `scene.LODAuto` field and valid fields take precedence.
 scene.LODSettings | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances.
 scene.RenderEffects | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state.
 scene.LocalPlayer | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property.

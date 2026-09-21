@@ -1,10 +1,11 @@
 #pragma once
 
-// Host data for one GPU-authored mesh LOD choice.
+// Host data for one GPU-selected mesh or billboard LOD choice.
 //
 // Each level is packed against its own mesh bounds before upload. Its immutable
 // mesh clusters become indirect commands, then the compute pass chooses one
-// resident level and enables only that level's cluster commands. The result
+// resident level and enables only that level's cluster commands. A final
+// authored billboard uses a camera-facing quad and its own texture. The result
 // remains on the device, so meshes with different authored centres and extents
 // still fill the same scene Bounds without a CPU readback.
 
@@ -148,6 +149,7 @@ namespace engine::render {
 		uint32_t FirstArgument = 0;
 		uint32_t ArgumentCount = 0;
 		uint32_t Row = 0;
+		core::Name Texture;
 	};
 
 	struct LodDrawRange {
@@ -215,7 +217,10 @@ namespace engine::render {
 		LodPlan &plan,
 		uint32_t slot,
 		const scene::DrawInstance &instance,
-		std::span<const MeshEntry *const> meshes
+		std::span<const MeshEntry *const> meshes,
+		core::Name billboard = {},
+		const MeshEntry *billboardMesh = nullptr,
+		const scene::DrawInstance *billboardInstance = nullptr
 	) {
 		const uint32_t levelCount =
 			static_cast<uint32_t>(std::min(meshes.size(), static_cast<size_t>(scene::LOD_LEVELS)));
@@ -249,11 +254,16 @@ namespace engine::render {
 		};
 
 		for (uint32_t level = 0; level < levelCount; ++level) {
-			const MeshEntry &mesh = *meshes[level];
+			const bool isBillboard =
+				billboard.IsValid() && billboardMesh != nullptr && level == levelCount - 1;
+			const MeshEntry &mesh = isBillboard ? *billboardMesh : *meshes[level];
+			const scene::DrawInstance &levelInstance =
+				isBillboard && billboardInstance != nullptr ? *billboardInstance : instance;
+			const glm::mat3 levelRotation{levelInstance.Frame.ToMatrix()};
 			const uint32_t row = static_cast<uint32_t>(plan.Instances.size());
 			const uint32_t firstArgument = static_cast<uint32_t>(plan.Commands.size());
 
-			plan.Instances.push_back(ToGpu(instance, mesh));
+			plan.Instances.push_back(ToGpu(levelInstance, mesh));
 			plan.Indices.push_back(row);
 			plan.SkinOffsets.push_back(
 				instance.SkinCount != 0 && mesh.JointCount == instance.SkinCount
@@ -290,11 +300,12 @@ namespace engine::render {
 					glm::vec3(
 						instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z
 					) +
-					rotation *
+					levelRotation *
 						((localCentre - glm::vec3(mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z)) * scale);
-				const glm::vec3 clusterExtent = glm::abs(rotation[0]) * (localExtent.x * std::abs(scale.x)) +
-												glm::abs(rotation[1]) * (localExtent.y * std::abs(scale.y)) +
-												glm::abs(rotation[2]) * (localExtent.z * std::abs(scale.z));
+				const glm::vec3 clusterExtent =
+					glm::abs(levelRotation[0]) * (localExtent.x * std::abs(scale.x)) +
+					glm::abs(levelRotation[1]) * (localExtent.y * std::abs(scale.y)) +
+					glm::abs(levelRotation[2]) * (localExtent.z * std::abs(scale.z));
 				plan.Clusters.push_back({
 					{centre, cluster == nullptr ? 0.0f : cluster->SurfaceArea},
 					{clusterExtent, static_cast<float>(level)},
@@ -316,7 +327,7 @@ namespace engine::render {
 			}
 
 			const uint32_t argumentCount = static_cast<uint32_t>(plan.Commands.size()) - firstArgument;
-			draw.Levels[level] = {&mesh, firstArgument, argumentCount, row};
+			draw.Levels[level] = {&mesh, firstArgument, argumentCount, row, levelInstance.Texture};
 			selection.Triangles[level] = std::max(mesh.Whole.IndexCount / 3u, 1u);
 			selection.FirstArguments[level] = firstArgument;
 			selection.ArgumentCounts[level] = argumentCount;

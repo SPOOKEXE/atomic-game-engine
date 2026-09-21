@@ -83,7 +83,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
 
-- [_] LOD system billboard render support
+- [x] LOD system billboard render support
 
 - [_] /docs/future-work/ui-system.md
 

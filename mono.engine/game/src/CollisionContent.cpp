@@ -72,10 +72,10 @@ namespace engine::game {
 	}
 
 	void AddBuiltinCollisionShapes(scene::CollisionShapes &into) {
-		// **Baked once per process, not once per call.** The six are generated
+		// **Baked once per process, not once per call.** The built-ins are generated
 		// from a description rather than read, and a studio with four viewports
 		// on four worlds would otherwise run quickhull twenty-four times to
-		// produce the same six hulls.
+		// produce the same hulls.
 		//
 		// A function-local static rather than a namespace one, so the work
 		// happens on the first thread that asks rather than during static

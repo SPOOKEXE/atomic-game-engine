@@ -1,5 +1,6 @@
 // Authored mesh LOD host layout and mesh-bound fitting.
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -83,6 +84,47 @@ TEST_CASE("an authored ladder packs every mesh against the same part bounds", "[
 		CHECK(plan.Instances[level].Scale.z * mesh[level].Extent.Z == Approx(4.0f));
 		CHECK(plan.Indices[level] == level);
 		CHECK(plan.SkinOffsets[level] == 17);
+	}
+}
+
+TEST_CASE("a resident billboard replaces the final LOD mesh and texture", "[render][lod]") {
+	DrawInstance instance;
+	instance.LodStrategyMode = LodStrategy::Authored;
+	instance.LodLevels = 2;
+	instance.HalfExtent = Vector3(3.0f, 2.0f, 5.0f);
+	MeshEntry mesh = Mesh(Vector3(), Vector3(1.0f, 1.0f, 1.0f), 12, 0);
+	MeshEntry plane = Mesh(Vector3(), Vector3(1.0f, 0.0f, 1.0f), 2, 36);
+	DrawInstance billboard = instance;
+	billboard.HalfExtent.Z = instance.HalfExtent.Y;
+	billboard.Texture = engine::core::Name("lod_test.impostor");
+	const std::array<const MeshEntry *, 2> levels = {&mesh, &mesh};
+
+	LodPlan plan;
+	REQUIRE(AppendAuthoredLod(plan, 7, instance, levels, billboard.Texture, &plane, &billboard));
+	CHECK(plan.Draws[0].Levels[0].Mesh == &mesh);
+	CHECK(plan.Draws[0].Levels[1].Mesh == &plane);
+	CHECK(plan.Draws[0].Levels[1].Texture == billboard.Texture);
+	CHECK(plan.Selections[0].Triangles[1] == 2);
+	CHECK(plan.Instances[1].Scale.x == Approx(3.0f));
+	CHECK(plan.Instances[1].Scale.z == Approx(2.0f));
+
+	LodPlan fallback;
+	REQUIRE(AppendAuthoredLod(fallback, 7, instance, levels));
+	CHECK(fallback.Draws[0].Levels[1].Mesh == &mesh);
+	CHECK_FALSE(fallback.Draws[0].Levels[1].Texture.IsValid());
+}
+
+TEST_CASE("a billboard texture's top edge faces the camera up direction", "[render][lod]") {
+	const engine::assets::MeshData billboard =
+		engine::assets::MakeBuiltin(engine::assets::BuiltinMesh::Billboard);
+	const CFrame camera;
+	const CFrame frame = CFrame::FromMatrix(Vector3(), camera.RightVector(), -camera.LookVector());
+
+	CHECK(frame.VectorToWorldSpace(Vector3{0.0f, 0.0f, -1.0f}).Y == Approx(1.0f));
+	for (const engine::assets::MeshVertex &vertex : billboard.Vertices) {
+		if (vertex.TexCoord[1] == 0.0f) {
+			CHECK(vertex.Position[2] < 0.0f);
+		}
 	}
 }
 

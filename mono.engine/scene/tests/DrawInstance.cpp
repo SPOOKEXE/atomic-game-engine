@@ -641,6 +641,7 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.SkinCount = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.ObjectLabel = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.LodMeshes[0] = Name("drawinstance_test.Lod"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodBillboard = Name("drawinstance_test.Impostor"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.LodRatios[0] = 0.25f; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.LodMinimumDistances[0] = 20.0f; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.LodTargetQuadArea = 8.0f; }) != unchanged);

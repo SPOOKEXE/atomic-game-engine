@@ -64,6 +64,8 @@ TEST_CASE("custom mesh levels override automatic levels and nil falls back", "[s
 	custom.Ratios[0] = 0.4f;
 	custom.Ratios[2] = 0.1f;
 	custom.TargetQuadArea = 16.0f;
+	automatic.Billboard = Name("lod_test.auto-impostor");
+	custom.Billboard = Name("lod_test.custom-impostor");
 
 	const LevelOfDetail resolved = ResolveMeshLOD(&automatic, &custom);
 	CHECK(resolved.Strategy == LodStrategy::Authored);
@@ -75,6 +77,28 @@ TEST_CASE("custom mesh levels override automatic levels and nil falls back", "[s
 	CHECK(resolved.Ratios[1] == 0.2f);
 	CHECK(resolved.Ratios[2] == 0.1f);
 	CHECK(resolved.TargetQuadArea == 16.0f);
+	CHECK(resolved.Billboard == custom.Billboard);
+}
+
+TEST_CASE("automatic billboard resolves when custom leaves it nil", "[scene][lod]") {
+	LODAuto automatic;
+	automatic.Meshes[0] = Name("lod_test.auto-half");
+	automatic.Billboard = Name("lod_test.auto-impostor");
+	LODCustom custom;
+	custom.Meshes[0] = Name("lod_test.custom-half");
+
+	const LevelOfDetail resolved = ResolveMeshLOD(&automatic, &custom);
+	CHECK(resolved.Billboard == automatic.Billboard);
+}
+
+TEST_CASE("a billboard alone supplies the final lod level", "[scene][lod]") {
+	LODAuto automatic;
+	automatic.Billboard = Name("lod_test.impostor-only");
+
+	const LevelOfDetail resolved = ResolveMeshLOD(&automatic, nullptr);
+	CHECK(resolved.Strategy == LodStrategy::Decimated);
+	CHECK(resolved.Levels == 2);
+	CHECK(resolved.Billboard == automatic.Billboard);
 }
 
 TEST_CASE("automatic mesh lod works without custom overrides", "[scene][lod]") {

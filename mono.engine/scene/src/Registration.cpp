@@ -242,6 +242,7 @@ namespace engine::scene {
 					writer.WriteFloat(ladder.Ratios[level]);
 				}
 				writer.WriteFloat(ladder.TargetQuadArea);
+				writer.WriteName(ladder.Billboard);
 				writer.WriteUInt8(static_cast<uint8_t>(ladder.Strategy));
 				writer.WriteUInt8(ladder.Levels);
 			}
@@ -256,6 +257,7 @@ namespace engine::scene {
 					writer.WriteFloat(ladder.Ratios[level]);
 				}
 				writer.WriteFloat(ladder.TargetQuadArea);
+				writer.WriteName(ladder.Billboard);
 				writer.WriteUInt8(ladder.Levels);
 			}
 		}
@@ -313,6 +315,7 @@ namespace engine::scene {
 					ladder.Ratios[level] = reader.ReadFloat();
 				}
 				ladder.TargetQuadArea = reader.ReadFloat();
+				ladder.Billboard = reader.ReadName();
 
 				// Clamped on read rather than trusted, because a strategy past the
 				// end of the enum is a `switch` falling through to whatever the
@@ -335,6 +338,7 @@ namespace engine::scene {
 					ladder.Ratios[level] = reader.ReadFloat();
 				}
 				ladder.TargetQuadArea = reader.ReadFloat();
+				ladder.Billboard = reader.ReadName();
 				ladder.Levels = reader.ReadUInt8();
 			}
 		}

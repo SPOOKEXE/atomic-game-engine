@@ -70,7 +70,7 @@ namespace engine::game {
 	// @param mesh The geometry, in the part's object space.
 	void AddCollisionShapes(scene::CollisionShapes &into, core::Name name, const assets::MeshData &mesh);
 
-	// Bakes the six built-in meshes into a table.
+	// Bakes the built-in meshes into a table.
 	//
 	// **Every host wants these, because a built-in is there before any content
 	// is.** `assets::MakeBuiltin` generates them rather than shipping files, so
@@ -78,7 +78,7 @@ namespace engine::game {
 	// which meant a `MeshPart` set to `Cube` with a hull collider resolved to
 	// nothing on every host including the client.
 	//
-	// The six are baked once per process and copied in after that.
+	// They are baked once per process and copied in after that.
 	//
 	// @param into The table.
 	void AddBuiltinCollisionShapes(scene::CollisionShapes &into);
@@ -129,7 +129,7 @@ namespace engine::game {
 	// @param from The table to read.
 	void MergeCollisionShapes(scene::CollisionShapes &into, const scene::CollisionShapes &from);
 
-	// Bakes the six built-in meshes into a world.
+	// Bakes the built-in meshes into a world.
 	//
 	// The one call every host makes, whatever else it has: see
 	// `AddBuiltinCollisionShapes` for why a built-in needs one at all. Cheap and
