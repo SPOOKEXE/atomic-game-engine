@@ -16,6 +16,8 @@ namespace {
 		scene::CameraPortalMouth mouth;
 		mouth.Name = "Workspace/Door/Portal";
 		mouth.DestinationWorld = "Far";
+		mouth.PanePath = "Workspace/Door";
+		mouth.FarPath = "Workspace/FarDoor";
 		mouth.First = {2, 0, 0};
 		mouth.Second = {0, 3, 0};
 		mouth.Up = {0, 1, 0};
@@ -73,6 +75,8 @@ TEST_CASE("owned camera topology drives the same scaled crossing", "[scene][came
 	back.Scale = 1 / seam.Scale;
 	back.Crosses = true;
 	back.DestinationWorld = core::Name("Near");
+	back.PanePath = "Workspace/FarDoor";
+	back.FarPath = "Workspace/Door";
 	back.Pane = ecs::Entity{123};
 	back.Camera = ecs::Entity{456};
 	scene::CameraPortalMouth exit;
@@ -113,6 +117,8 @@ TEST_CASE("camera topology accepts its maximum complete snapshot", "[scene][came
 		entry.Name = std::to_string(index);
 		entry.Name.resize(256, 'm');
 		entry.DestinationWorld.assign(256, 'd');
+		entry.PanePath.assign(256, 'p');
+		entry.FarPath.assign(256, 'f');
 	}
 	std::vector<std::byte> bytes;
 	std::string error;
@@ -147,7 +153,7 @@ TEST_CASE(
 		bytes.push_back(std::byte{0});
 	}
 	SECTION("unsupported version") {
-		bytes[4] = std::byte{2};
+		bytes[4] = std::byte{3};
 	}
 	SECTION("reserved bits") {
 		bytes[6] = std::byte{1};

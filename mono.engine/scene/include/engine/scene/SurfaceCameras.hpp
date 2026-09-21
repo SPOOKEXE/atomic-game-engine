@@ -181,6 +181,7 @@
 #include <cstddef>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace engine::ecs {
@@ -723,6 +724,13 @@ namespace engine::scene {
 		ecs::Entity Far = ecs::NULL_ENTITY;
 		// Local camera identity lets copied presentation inputs share slot ordering.
 		ecs::Entity Camera = ecs::NULL_ENTITY;
+		//@}
+
+		// Stable full instance paths preserve a same-world route after local entity
+		// handles have been dropped for a continuation or topology copy.
+		//@{
+		std::string PanePath;
+		std::string FarPath;
 		//@}
 
 		// How much bigger the far pane is than this one.

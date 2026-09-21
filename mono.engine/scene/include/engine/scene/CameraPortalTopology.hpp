@@ -14,7 +14,7 @@ namespace engine::scene {
 	// Maximum foreign portal crossings advertised by one world snapshot.
 	inline constexpr size_t MAX_CAMERA_PORTAL_SEAMS = 256;
 	// Maximum encoded bytes accepted for one world topology snapshot.
-	inline constexpr size_t MAX_CAMERA_PORTAL_TOPOLOGY_BYTES = 256 * 1024;
+	inline constexpr size_t MAX_CAMERA_PORTAL_TOPOLOGY_BYTES = 512 * 1024;
 
 	// Owned crossing data. Local pane, camera and surface identities stay home.
 	struct CameraPortalMouth {
@@ -22,6 +22,11 @@ namespace engine::scene {
 		std::string Name;
 		// Stable destination-world name carried across hosts.
 		std::string DestinationWorld;
+		// Full instance paths identify the exact two mouths within worlds that
+		// contain several portals with the same destination.
+		std::string PanePath;
+		// Full instance path of the paired mouth in the destination world.
+		std::string FarPath;
 		// Source mouth centre in world-space XYZ metres.
 		std::array<float, 3> Centre{};
 		// Unit outward normal of the source mouth plane.

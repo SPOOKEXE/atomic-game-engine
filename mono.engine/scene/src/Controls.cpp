@@ -126,6 +126,7 @@ namespace engine::scene {
 		if (controller == nullptr || active == nullptr) {
 			return false;
 		}
+		if (controller->Mode == CameraMode::Scriptable) return false;
 		const ecs::Entity subject = CameraSubjectRoot(store, active->Entity);
 		const PortalTransit *went = store.Get<PortalTransit>(subject);
 		if (controller->TransitSubject != subject) {

@@ -919,6 +919,8 @@ namespace engine::scene {
 				seam.Pane = store.ParentOf(entity);
 				seam.Camera = entity;
 				seam.Far = portal.Destination;
+				seam.PanePath = store.GetFullName(seam.Pane);
+				seam.FarPath = store.GetFullName(seam.Far);
 				seam.Surface = camera.Surface;
 				seam.TagFilter = camera.TagFilter;
 				seam.Crosses = portal.DestinationWorld.IsValid();

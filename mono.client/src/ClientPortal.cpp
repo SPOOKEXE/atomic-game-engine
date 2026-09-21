@@ -230,8 +230,10 @@ namespace client {
 			const auto *held = store.Resource<scene::CameraCharacterHold>();
 			retainedCharacter = held && held->Active;
 		});
-		if (!ReportedJoin || !PortalImages) return false;
-		bool tracked = Windowed;
+		if ((!ReportedJoin && Settings.CaptureSequence.empty()) || !PortalImages) return false;
+		// Captures are presentation output, not a separate camera path. Let the
+		// capture sequence exercise the same portal route as the interactive view.
+		bool tracked = Windowed || !Settings.CaptureSequence.empty();
 		if (!tracked)
 			Universe_->Enter(inputWorld, [&](ecs::Store &store) {
 				const auto *active = store.Resource<scene::ActiveCamera>();

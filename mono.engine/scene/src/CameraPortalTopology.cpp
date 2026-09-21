@@ -20,8 +20,9 @@ namespace engine::scene {
 			return true;
 		}
 		bool Valid(const CameraPortalMouth &mouth) {
-			if (!Text(mouth.Name) || !Text(mouth.DestinationWorld) || !Finite(mouth.Centre) ||
-				!Finite(mouth.Normal) || !Finite(mouth.First) || !Finite(mouth.Second) || !Finite(mouth.Up) ||
+			if (!Text(mouth.Name) || !Text(mouth.DestinationWorld) || !Text(mouth.PanePath) ||
+				!Text(mouth.FarPath) || !Finite(mouth.Centre) || !Finite(mouth.Normal) ||
+				!Finite(mouth.First) || !Finite(mouth.Second) || !Finite(mouth.Up) ||
 				!Finite(mouth.Destination) || !std::isfinite(mouth.Scale) || mouth.Scale <= 0)
 				return false;
 			const auto normal = Vector(mouth.Normal);
@@ -86,6 +87,8 @@ namespace engine::scene {
 		CameraPortalMouth mouth;
 		mouth.Name = name;
 		mouth.DestinationWorld = seam.DestinationWorld.Text();
+		mouth.PanePath = seam.PanePath;
+		mouth.FarPath = seam.FarPath;
 		mouth.Centre = {seam.Centre.X, seam.Centre.Y, seam.Centre.Z};
 		mouth.Normal = {seam.Normal.X, seam.Normal.Y, seam.Normal.Z};
 		mouth.First = {seam.First.X, seam.First.Y, seam.First.Z};
@@ -109,7 +112,7 @@ namespace engine::scene {
 		if (!Valid(topology)) return Refuse(error);
 		core::ByteWriter writer;
 		writer.WriteUInt32(MAGIC);
-		writer.WriteUInt16(1);
+		writer.WriteUInt16(2);
 		writer.WriteUInt16(0);
 		writer.WriteString(topology.World);
 		writer.WriteUInt64(topology.Revision);
@@ -117,6 +120,8 @@ namespace engine::scene {
 		for (const auto &mouth : topology.Mouths) {
 			writer.WriteString(mouth.Name);
 			writer.WriteString(mouth.DestinationWorld);
+			writer.WriteString(mouth.PanePath);
+			writer.WriteString(mouth.FarPath);
 			Write(writer, mouth.Centre);
 			Write(writer, mouth.Normal);
 			Write(writer, mouth.First);
@@ -136,20 +141,22 @@ namespace engine::scene {
 	) {
 		if (bytes.size() > MAX_CAMERA_PORTAL_TOPOLOGY_BYTES) return Refuse(error);
 		core::ByteReader reader(bytes);
-		if (reader.ReadUInt32() != MAGIC || reader.ReadUInt16() != 1 || reader.ReadUInt16() != 0)
+		if (reader.ReadUInt32() != MAGIC || reader.ReadUInt16() != 2 || reader.ReadUInt16() != 0)
 			return Refuse(error);
 		CameraPortalTopology topology;
 		topology.World = ReadText(reader);
 		topology.Revision = reader.ReadUInt64();
 		const auto count = reader.ReadUInt32();
-		// Each entry needs two nonempty strings, 23 floats and one policy byte.
-		if (reader.Failed() || count > MAX_CAMERA_PORTAL_SEAMS || count > reader.Remaining() / 103)
+		// Each entry needs four nonempty strings, 23 floats and one policy byte.
+		if (reader.Failed() || count > MAX_CAMERA_PORTAL_SEAMS || count > reader.Remaining() / 105)
 			return Refuse(error);
 		topology.Mouths.reserve(count);
 		for (uint32_t index = 0; index < count; ++index) {
 			CameraPortalMouth mouth;
 			mouth.Name = ReadText(reader);
 			mouth.DestinationWorld = ReadText(reader);
+			mouth.PanePath = ReadText(reader);
+			mouth.FarPath = ReadText(reader);
 			Read(reader, mouth.Centre);
 			Read(reader, mouth.Normal);
 			Read(reader, mouth.First);
@@ -184,6 +191,8 @@ namespace engine::scene {
 			seam.Destination =
 				core::CFrame({pose[0], pose[1], pose[2]}, glm::quat(pose[6], pose[3], pose[4], pose[5]));
 			seam.DestinationWorld = core::Name(mouth.DestinationWorld);
+			seam.PanePath = mouth.PanePath;
+			seam.FarPath = mouth.FarPath;
 			seam.Scale = mouth.Scale;
 			seam.Crosses = true;
 			seam.Bidirectional = mouth.Bidirectional;

@@ -267,8 +267,10 @@ TEST_CASE(
 	REQUIRE(producer.ConfigurePresentation(456));
 	const auto install = [](Universe &worlds, WorldId world, bool reverse) {
 		worlds.Enter(world, [&](Store &store) {
-			const auto pane = store.CreateInstance(ecs::Classes::Find(Name("Part")), "Door");
-			const auto standIn = store.CreateInstance(ecs::Classes::Find(Name("Part")), "StandIn");
+			const auto pane =
+				store.CreateInstance(ecs::Classes::Find(Name("Part")), reverse ? "StandIn" : "Door");
+			const auto standIn =
+				store.CreateInstance(ecs::Classes::Find(Name("Part")), reverse ? "Door" : "StandIn");
 			const core::CFrame front;
 			const auto back =
 				core::CFrame(Vector3{0, 0, -.2f}) * core::CFrame::Angles(0, 3.14159265358979323846f, 0);

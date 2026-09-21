@@ -213,6 +213,7 @@ namespace client {
 			const Entity camera = store.Create();
 			store.Set<Transform>(camera, Transform{});
 			store.Set<engine::scene::Camera>(camera, engine::scene::Camera{});
+			store.Set<engine::scene::CameraSubject>(camera, {});
 			store.Set<FallbackCameraMarker>(camera, FallbackCameraMarker{});
 			return camera;
 		}
@@ -409,20 +410,18 @@ namespace client {
 				   (leftAtOrigin.Position - rightAtOrigin.Position).Magnitude() < .001f &&
 				   std::abs(glm::dot(leftAtOrigin.Rotation(), rightAtOrigin.Rotation())) > .9999f;
 		};
-		// A physical blocker in the projected room can shorten the arm before it reaches
-		// the local pane. The resulting eye belongs with its subject, so a retained
-		// route back into that same world would map it through the pane a second time.
-		if (subjectFollowing && !carriedArm && history.Started && history.World == authored.Text() &&
-			!sameMap(history.FromInput, {}))
+		// A physical blocker can shorten a local arm before it reaches a pane. With no
+		// active route that eye belongs with its subject, rather than a stale projection.
+		if (subjectFollowing && !carriedArm && history.Route.empty() && history.Started &&
+			history.World == authored.Text() && !sameMap(history.FromInput, {}))
 			history = {};
 		auto resolve = [&](const core::Name &name) {
 			if (name == authored) return visualWorld;
 			return ResolveDestinationWorld(worlds, visualWorld, name);
 		};
 		std::vector<scene::PortalSeam> seams;
-		for (size_t hop = 0; hop < 8; ++hop) {
-			const core::CFrame &routeInput =
-				carriedArm && sameMap(history.FromInput, *carriedArm) ? armInput.value_or(eye) : eye;
+		const core::CFrame authoredInput = armInput.value_or(eye);
+		for (size_t hop = 0; hop < scene::MAX_CAMERA_PORTAL_ROUTE_HOPS; ++hop) {
 			const auto selected = history.Started ? resolve(core::Name(history.World)) : visualWorld;
 			if (!selected.IsValid()) {
 				ENGINE_LOG(
@@ -454,7 +453,8 @@ namespace client {
 			} else {
 				universe.Enter(selected, [&](Store &store) { scene::GatherPortalSeams(store, seams); });
 			}
-			const auto step = scene::StepCameraPortalView(history, authored.Text(), routeInput, seams);
+			const size_t routeDepth = history.Route.size();
+			const auto step = scene::StepCameraPortalView(history, authored.Text(), authoredInput, seams);
 			if (step == scene::CameraPortalStep::Invalid) {
 				ENGINE_LOG(
 					core::LogLevel::Trace,
@@ -462,23 +462,34 @@ namespace client {
 					"camera route invalid step in {} from {} at {},{},{}",
 					history.World,
 					authored.Text(),
-					routeInput.Position.X,
-					routeInput.Position.Y,
-					routeInput.Position.Z
+					authoredInput.Position.X,
+					authoredInput.Position.Y,
+					authoredInput.Position.Z
 				);
 				return {};
 			}
 			if (step == scene::CameraPortalStep::Crossed) {
+				// A return consumes its exact top-of-stack seam. Reusing the same
+				// authored sample in another hop would immediately feed the returned
+				// eye into a neighbouring same-world mouth.
+				if (history.Route.size() < routeDepth) {
+					const auto returned = resolve(core::Name(history.World));
+					if (!returned.IsValid()) return {};
+					universe.Enter(inputWorld, [&](Store &store) { store.Set(camera, history); });
+					lens.NearPlane *= history.FromInput.Scale;
+					lens.FarPlane *= history.FromInput.Scale;
+					eye = history.FromInput.Place(authoredInput);
+					return returned;
+				}
 				continue;
 			}
 			universe.Enter(inputWorld, [&](Store &store) { store.Set(camera, history); });
-			// `PlaceCamera` has already mapped a following arm through this seam.
-			// The body view still selects the destination, but mapping the output
-			// again would move the eye through the same portal twice.
+			// `PlaceCamera` may already have mapped a following arm. The route is
+			// evaluated from that immutable authored arm, so its map produces the
+			// same eye instead of applying a second crossing to the rendered pose.
 			lens.NearPlane *= history.FromInput.Scale;
 			lens.FarPlane *= history.FromInput.Scale;
-			if (carriedArm && sameMap(history.FromInput, *carriedArm)) return selected;
-			eye = history.FromInput.Place(eye);
+			eye = history.FromInput.Place(authoredInput);
 			return selected;
 		}
 		ENGINE_LOG(
@@ -846,6 +857,7 @@ namespace client {
 			// speeds.
 			scheduler.Add("camera-control", Phase::PreRender, [](Store &world) {
 				(void)engine::scene::UpdateCameraControl(world);
+				(void)engine::scene::FollowOwnCharacter(world);
 
 				// **Between the two, and that is the whole reason it is not a
 				// separate scheduler entry.** It has to run after

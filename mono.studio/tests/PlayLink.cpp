@@ -41,6 +41,7 @@
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Wire.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
@@ -89,15 +90,14 @@ namespace {
 	// How far a position may move by crossing, and it is not a fudge factor.
 	//
 	// **A pose is quantised on the wire and this is the documented bound**:
-	// `D00015` (a) puts position on a fixed-point grid of +-64 m in 32767 steps
-	// each way, which is 0.977 mm per axis anywhere in the world. Asserting
-	// equality here was the first thing this file got wrong, and it failed with
-	// 1.000030518 against 1.0 - which is the wire working exactly as specified.
+	// the position grid has a 3.125 cm per-axis error. A three-dimensional
+	// comparison needs the square root of three times that; 1.75 is a small,
+	// constexpr-safe upper bound.
 	//
 	// Stated as the engine's own bound rather than as whatever the run happened
 	// to produce: a tolerance fitted to an observed error stops being a check
 	// the moment the grid changes.
-	constexpr float WIRE_MILLIMETRES = 0.002f;
+	constexpr float WIRE_POSITION_TOLERANCE_METRES = engine::scene::WIRE_POSITION_ERROR_METRES * 1.75f;
 
 	// A universe with one authored world in it, as the editor would have.
 	struct Fixture {
@@ -279,14 +279,12 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 		CHECK(link.Report().Messages <= 48);
 		CHECK(link.Report().Bytes <= 50 * 1024);
 	}
-
 	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
 		const std::array maps{
 			"PbrDemo_Colour",
 			"PbrDemo_Normal",
 			"PbrDemo_Roughness",
 			"PbrDemo_Occlusion",
-			"PbrDemo_Height",
 			"PbrDemo_Metalness",
 			"PbrDemo_Emissive",
 		};
@@ -325,11 +323,13 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 					appearance->NormalMap,
 					appearance->RoughnessMap,
 					appearance->OcclusionMap,
-					appearance->HeightMap,
 					appearance->MetalnessMap,
 					appearance->EmissiveMap,
 				} == mapContent
 			);
+			// Relief comes from the EditableMesh. The demo deliberately does not
+			// publish a separate height texture alongside that geometry.
+			CHECK_FALSE(appearance->HeightMap.IsValid());
 		}
 	});
 }
@@ -354,6 +354,10 @@ TEST_CASE(
 	}
 	fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
 
+	Entity root;
+	CFrame authorityInitialRoot;
+	CFrame initialRoot;
+	CFrame initialCamera;
 	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
 		const auto *active = store.Resource<engine::scene::ActiveCamera>();
 		const auto *character =
@@ -365,6 +369,56 @@ TEST_CASE(
 		CHECK(subject->Automatic);
 		CHECK(subject->Target == character->Humanoid);
 		CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == character->Root);
+		root = character->Root;
+		initialRoot = store.Get<Transform>(root)->Frame;
+		initialCamera = store.Get<Transform>(active->Entity)->Frame;
+		CHECK((initialCamera.Position - initialRoot.Position).Magnitude() <= 12.1f);
+	});
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		authorityInitialRoot = store.Get<Transform>(root)->Frame;
+	});
+
+	// The spawn is deliberately beyond the former +-64 m wire edge. Rendering
+	// the authority world through a camera whose replica root was clamped there
+	// made the view look detached even though CameraSubject metadata was right.
+	CHECK(authorityInitialRoot.Position.X > 64.0f);
+	CHECK(
+		(initialRoot.Position - authorityInitialRoot.Position).Magnitude() <= WIRE_POSITION_TOLERANCE_METRES
+	);
+
+	// A camera subject can survive while its rendered pose is stale. Move the
+	// authority body after the initial snapshot and require the local viewer to
+	// follow the received root across several presentation frames.
+	const Vector3 displacement{-6.0f, 0.0f, -3.0f};
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		store.Set(
+			root,
+			Transform{CFrame{authorityInitialRoot.Position + displacement, authorityInitialRoot.Rotation()}}
+		);
+	});
+	fixture.Step(link, 8);
+	CFrame authorityMovedRoot;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		authorityMovedRoot = store.Get<Transform>(root)->Frame;
+	});
+	for (int frame = 0; frame < 4; ++frame) {
+		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
+	}
+
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const CFrame replicatedRoot = store.Get<Transform>(root)->Frame;
+		const CFrame movedCamera = store.Get<Transform>(active->Entity)->Frame;
+		CHECK(
+			(replicatedRoot.Position - authorityMovedRoot.Position).Magnitude() <=
+			WIRE_POSITION_TOLERANCE_METRES
+		);
+		const Vector3 rootMovement = replicatedRoot.Position - initialRoot.Position;
+		const Vector3 cameraMovement = movedCamera.Position - initialCamera.Position;
+		CHECK(rootMovement.Magnitude() > 5.0f);
+		CHECK((cameraMovement - rootMovement).Magnitude() <= WIRE_POSITION_TOLERANCE_METRES * 3.0f);
+		CHECK((movedCamera.Position - replicatedRoot.Position).Magnitude() <= 12.1f);
 	});
 
 	link.Stop(fixture.Worlds);
@@ -543,8 +597,8 @@ TEST_CASE("what the server holds arrives on the client", "[studio][playlink]") {
 
 	REQUIRE(nearX.has_value());
 	REQUIRE(farX.has_value());
-	CHECK_THAT(*nearX, Catch::Matchers::WithinAbs(1.0f, WIRE_MILLIMETRES));
-	CHECK_THAT(*farX, Catch::Matchers::WithinAbs(9.0f, WIRE_MILLIMETRES));
+	CHECK_THAT(*nearX, Catch::Matchers::WithinAbs(1.0f, WIRE_POSITION_TOLERANCE_METRES));
+	CHECK_THAT(*farX, Catch::Matchers::WithinAbs(9.0f, WIRE_POSITION_TOLERANCE_METRES));
 
 	const studio::LinkReport &report = link.Report();
 	CHECK(report.ServerEntities == 2);
@@ -576,7 +630,7 @@ TEST_CASE("a value written after the join crosses too", "[studio][playlink]") {
 
 	const std::optional<float> joined = fixture.ReplicaX(link, entity);
 	REQUIRE(joined.has_value());
-	CHECK_THAT(*joined, Catch::Matchers::WithinAbs(0.0f, WIRE_MILLIMETRES));
+	CHECK_THAT(*joined, Catch::Matchers::WithinAbs(0.0f, WIRE_POSITION_TOLERANCE_METRES));
 
 	// **Through `Set`, because that is what marks it.** A system writing through
 	// `Each`'s mutable reference marks nothing dirty - v0.3 wrote that up as one
@@ -594,7 +648,7 @@ TEST_CASE("a value written after the join crosses too", "[studio][playlink]") {
 	// for ever rather than by anything reporting an error.
 	const std::optional<float> moved = fixture.ReplicaX(link, entity);
 	REQUIRE(moved.has_value());
-	CHECK_THAT(*moved, Catch::Matchers::WithinAbs(42.0f, WIRE_MILLIMETRES));
+	CHECK_THAT(*moved, Catch::Matchers::WithinAbs(42.0f, WIRE_POSITION_TOLERANCE_METRES));
 
 	// A delta was built, sent and applied in full - which is what moves
 	// `Applied` off the snapshot's tick, and the only unambiguous evidence that
@@ -1024,7 +1078,7 @@ TEST_CASE(
 		const CFrame expected = through.Place(original->Frame);
 		const auto checkFrame = [&] {
 			const CFrame actual = store.Get<Transform>(active->Entity)->Frame;
-			CHECK((actual.Position - expected.Position).Magnitude() < 3 * WIRE_MILLIMETRES);
+			CHECK((actual.Position - expected.Position).Magnitude() < 3 * WIRE_POSITION_TOLERANCE_METRES);
 			CHECK((actual.LookVector() - expected.LookVector()).Magnitude() < 0.0001f);
 			CHECK((actual.UpVector() - expected.UpVector()).Magnitude() < 0.0001f);
 		};
@@ -1090,7 +1144,10 @@ TEST_CASE(
 			(void)UpdateCameraControl(store);
 			REQUIRE(PlaceCamera(store));
 			const auto actual = store.Get<Transform>(active->Entity)->Frame;
-			CHECK((actual.Position - returningCamera->Frame.Position).Magnitude() < 6 * WIRE_MILLIMETRES);
+			CHECK(
+				(actual.Position - returningCamera->Frame.Position).Magnitude() <
+				6 * WIRE_POSITION_TOLERANCE_METRES
+			);
 			CHECK((actual.LookVector() - returningCamera->Frame.LookVector()).Magnitude() < 0.0001f);
 			CHECK((actual.UpVector() - returningCamera->Frame.UpVector()).Magnitude() < 0.0001f);
 		});

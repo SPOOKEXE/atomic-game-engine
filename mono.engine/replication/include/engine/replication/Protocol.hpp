@@ -110,7 +110,11 @@ namespace engine::replication {
 	// exists to remove, arriving anyway. Refused at the door instead: this is
 	// also the number `network::Advert::Protocol` carries, so two builds that
 	// disagree here do not appear joinable in a browser either.
-	inline constexpr uint16_t PROTOCOL_VERSION = 12;
+	// **13 - transform positions widened from +-64 m to +-2048 m while keeping
+	// their ten-byte shape.** A peer on the old grid would decode the same
+	// sixteen-bit codes at different coordinates, so the unchanged length is
+	// exactly why the version has to reject the mismatch at admission.
+	inline constexpr uint16_t PROTOCOL_VERSION = 13;
 
 	// Which half of a join a snapshot chunk belongs to.
 	//
