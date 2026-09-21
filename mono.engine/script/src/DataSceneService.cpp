@@ -1366,6 +1366,20 @@ namespace engine::script {
 			planes.reserve(poll.Planes.size());
 			for (const DataCaptureBridgePlane &plane : poll.Planes) {
 				ScriptValue noise;
+				ScriptValue packed;
+				if (plane.Packed) {
+					std::vector<ScriptValue> components;
+					components.reserve(plane.Packed->Components.size());
+					for (const DataCaptureBridgePackedComponent &component : plane.Packed->Components)
+						components.push_back(Map({
+							{"source_channel", String(component.SourceChannel)},
+							{"source_component", Number(component.SourceComponent)},
+						}));
+					packed = Map({
+						{"schema_version", String("data-capture-packed-rgba32f/v1")},
+						{"components", Array(std::move(components))},
+					});
+				}
 				if (plane.Noise) {
 					const DataCaptureBridgeNoise &value = *plane.Noise;
 					noise = Map({
@@ -1417,6 +1431,8 @@ namespace engine::script {
 					{"packing", String(plane.Packing)},
 					{"provenance", String(plane.Provenance)},
 					{"noise", std::move(noise)},
+					{"packed", std::move(packed)},
+					{"resampling", plane.Resampling.empty() ? ScriptValue{} : String(plane.Resampling)},
 				}));
 			}
 			const DataCaptureBridgeProfile &profile = poll.Profile;

@@ -212,6 +212,25 @@ TEST_CASE("a material round-trips its metalness map", "[assets]") {
 	CHECK(read.MetalnessMap == written.MetalnessMap);
 }
 
+TEST_CASE("a material round-trips selected packed PBR channels", "[assets]") {
+	MaterialData written;
+	written.PackedPbrMap = "metal/ormh.atex";
+	written.OcclusionChannel = 0;
+	written.RoughnessChannel = 1;
+	written.MetalnessChannel = 2;
+
+	ByteWriter writer;
+	REQUIRE(Material::Write(writer, written));
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	REQUIRE(Material::Read(reader, read));
+	CHECK(read.PackedPbrMap == written.PackedPbrMap);
+	CHECK(read.OcclusionChannel == 0);
+	CHECK(read.RoughnessChannel == 1);
+	CHECK(read.MetalnessChannel == 2);
+	CHECK(read.HeightChannel == 255);
+}
+
 TEST_CASE("a version 3 material is one with no metalness map", "[assets]") {
 	ByteWriter writer;
 	writer.WriteUInt32(Material::MAGIC);

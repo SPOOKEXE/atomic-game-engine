@@ -974,6 +974,11 @@ namespace engine::scene {
 				writer.WriteFloat(appearances[index].EmissiveTint.B);
 				writer.WriteFloat(appearances[index].EmissiveStrength);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Resample));
+				writer.WriteName(appearances[index].PackedPbrMap);
+				writer.WriteUInt8(appearances[index].RoughnessChannel);
+				writer.WriteUInt8(appearances[index].OcclusionChannel);
+				writer.WriteUInt8(appearances[index].HeightChannel);
+				writer.WriteUInt8(appearances[index].MetalnessChannel);
 			}
 		}
 
@@ -1041,8 +1046,17 @@ namespace engine::scene {
 				appearances[index].EmissiveStrength = reader.ReadFloat();
 				const uint8_t resample = reader.ReadUInt8();
 				appearances[index].Resample = resample <= static_cast<uint8_t>(SurfaceResampleMode::Pixelated)
-												  ? static_cast<SurfaceResampleMode>(resample)
-												  : SurfaceResampleMode::Default;
+											  ? static_cast<SurfaceResampleMode>(resample)
+											  : SurfaceResampleMode::Default;
+				appearances[index].PackedPbrMap = reader.ReadName();
+				auto channel = [&reader]() {
+					const uint8_t value = reader.ReadUInt8();
+					return value <= 3 || value == 255 ? value : uint8_t{255};
+				};
+				appearances[index].RoughnessChannel = channel();
+				appearances[index].OcclusionChannel = channel();
+				appearances[index].HeightChannel = channel();
+				appearances[index].MetalnessChannel = channel();
 			}
 		}
 

@@ -123,6 +123,12 @@ namespace engine::scene {
 		// What the surface emits on its own, independent of any light.
 		core::Name Emissive = {};
 
+		core::Name PackedPbr = {};
+		uint8_t RoughnessChannel = 255;
+		uint8_t OcclusionChannel = 255;
+		uint8_t HeightChannel = 255;
+		uint8_t MetalnessChannel = 255;
+
 		// Whether this names anything at all.
 		//
 		// @return `true` when any map is set. A material naming none is a real
@@ -130,7 +136,7 @@ namespace engine::scene {
 		//         catalogue knows this material" rather than "it is usable".
 		bool IsValid() const {
 			return Colour.IsValid() || Normal.IsValid() || Roughness.IsValid() || Occlusion.IsValid() ||
-				   Height.IsValid() || Metalness.IsValid() || Emissive.IsValid();
+				   Height.IsValid() || Metalness.IsValid() || Emissive.IsValid() || PackedPbr.IsValid();
 		}
 	};
 

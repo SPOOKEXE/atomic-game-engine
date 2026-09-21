@@ -39,6 +39,8 @@ namespace engine::render {
 			return "motion_vectors";
 		case DataCaptureChannel::OpticalFlow:
 			return "optical_flow";
+		case DataCaptureChannel::PackedGpu:
+			return "packed_gpu";
 		}
 		return "unknown";
 	}

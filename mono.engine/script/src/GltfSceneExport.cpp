@@ -253,7 +253,7 @@ namespace engine::script {
 		std::unordered_map<uint32_t, ImageSource> imageSources;
 		std::unordered_map<uint32_t, size_t> sourceTextureIndexes;
 		std::map<std::pair<uint32_t, bool>, size_t> textureIndexes;
-		std::map<std::pair<uint32_t, uint32_t>, size_t> packedIndexes;
+		std::map<std::array<uint32_t, 4>, size_t> packedIndexes;
 		size_t textureBytes = 0;
 		size_t sourceTextureBytes = 0;
 		size_t geometryBytes = 0;
@@ -502,7 +502,8 @@ namespace engine::script {
 				}
 				const ImageSource *colour = nullptr, *normal = nullptr, *occlusion = nullptr;
 				const ImageSource *emissive = nullptr, *roughness = nullptr, *metalness = nullptr,
-								  *height = nullptr;
+								  *height = nullptr, *packedPbr = nullptr;
+				uint8_t roughnessChannel = 0, occlusionChannel = 0, metalnessChannel = 0;
 				std::string textureReason;
 				if (extractOnly) {
 					auto sourceMap = [&](core::Name name, const ImageSource *&image) {
@@ -519,6 +520,7 @@ namespace engine::script {
 					sourceMap(surface->RoughnessMap, roughness);
 					sourceMap(surface->MetalnessMap, metalness);
 					sourceMap(surface->HeightMap, height);
+					sourceMap(surface->PackedPbrMap, packedPbr);
 				} else if (!imageOf(surface->ColourMap, colour, textureReason) ||
 						   !imageOf(surface->NormalMap, normal, textureReason) ||
 						   !imageOf(surface->OcclusionMap, occlusion, textureReason) ||
@@ -529,6 +531,30 @@ namespace engine::script {
 					captured.Unavailable.push_back({id, "appearance", std::move(textureReason)});
 					continue;
 				}
+				if (!extractOnly && !imageOf(surface->PackedPbrMap, packedPbr, textureReason)) {
+					captured.Unavailable.push_back({id, "appearance", std::move(textureReason)});
+					continue;
+				}
+				if (packedPbr != nullptr) {
+					if (surface->RoughnessChannel < 4) {
+						roughness = packedPbr;
+						roughnessChannel = surface->RoughnessChannel;
+					}
+					if (surface->OcclusionChannel < 4) {
+						occlusion = packedPbr;
+						occlusionChannel = surface->OcclusionChannel;
+					}
+					if (surface->MetalnessChannel < 4) {
+						metalness = packedPbr;
+						metalnessChannel = surface->MetalnessChannel;
+					}
+				}
+				const core::Name roughnessName =
+					packedPbr != nullptr && surface->RoughnessChannel < 4 ? surface->PackedPbrMap : surface->RoughnessMap;
+				const core::Name occlusionName =
+					packedPbr != nullptr && surface->OcclusionChannel < 4 ? surface->PackedPbrMap : surface->OcclusionMap;
+				const core::Name metalnessName =
+					packedPbr != nullptr && surface->MetalnessChannel < 4 ? surface->PackedPbrMap : surface->MetalnessMap;
 				if (!extractOnly && roughness != nullptr && metalness != nullptr &&
 					(roughness->Width != metalness->Width || roughness->Height != metalness->Height)) {
 					captured.Unavailable.push_back(
@@ -539,10 +565,10 @@ namespace engine::script {
 				if (extractOnly) {
 					material.SourceColourTexture = addSourceImage(surface->ColourMap, colour);
 					material.SourceNormalTexture = addSourceImage(surface->NormalMap, normal);
-					material.SourceOcclusionTexture = addSourceImage(surface->OcclusionMap, occlusion);
+					material.SourceOcclusionTexture = addSourceImage(occlusionName, occlusion);
 					material.SourceEmissiveTexture = addSourceImage(surface->EmissiveMap, emissive);
-					material.SourceRoughnessTexture = addSourceImage(surface->RoughnessMap, roughness);
-					material.SourceMetalnessTexture = addSourceImage(surface->MetalnessMap, metalness);
+					material.SourceRoughnessTexture = addSourceImage(roughnessName, roughness);
+					material.SourceMetalnessTexture = addSourceImage(metalnessName, metalness);
 					material.SourceHeightTexture = addSourceImage(surface->HeightMap, height);
 					material.SourceShader =
 						surface->Shader.IsValid() ? std::string(surface->Shader.Text()) : "";
@@ -617,17 +643,27 @@ namespace engine::script {
 					const auto &image = imageSources.at(name.Id());
 					addedBytes += static_cast<size_t>(image.Width) * image.Height * 4;
 				}
-				const auto pair = std::pair{
-					surface->RoughnessMap.IsValid() ? surface->RoughnessMap.Id() : core::Name::INVALID,
-					surface->MetalnessMap.IsValid() ? surface->MetalnessMap.Id() : core::Name::INVALID
+				// The combined glTF texture depends on the effective source and lane of
+				// each semantic. Two packed maps, or two selector pairs on one map,
+				// cannot share a generated image.
+				const std::array pair{
+					roughnessName.IsValid() ? roughnessName.Id() : core::Name::INVALID,
+					static_cast<uint32_t>(roughnessChannel),
+					metalnessName.IsValid() ? metalnessName.Id() : core::Name::INVALID,
+					static_cast<uint32_t>(metalnessChannel),
 				};
 				const bool newPacked =
 					(roughness != nullptr || metalness != nullptr) && !packedIndexes.contains(pair);
+				const bool swizzleOcclusion =
+					packedPbr != nullptr && surface->OcclusionChannel < 4 && occlusionChannel != 0;
 				if (newPacked) {
 					const auto *shape = roughness != nullptr ? roughness : metalness;
 					addedBytes += static_cast<size_t>(shape->Width) * shape->Height * 4;
 				}
-				if (newImages.size() + static_cast<size_t>(newPacked) >
+				if (swizzleOcclusion) {
+					addedBytes += static_cast<size_t>(packedPbr->Width) * packedPbr->Height * 4;
+				}
+				if (newImages.size() + static_cast<size_t>(newPacked) + static_cast<size_t>(swizzleOcclusion) >
 						MAX_GLTF_EXPORT_TEXTURES - captured.Textures.size() ||
 					addedBytes > MAX_GLTF_EXPORT_TEXTURE_BYTES - textureBytes) {
 					captured.Unavailable.push_back({id, "appearance", "texture_export_limit"});
@@ -635,7 +671,27 @@ namespace engine::script {
 				}
 				material.ColourTexture = addImage(surface->ColourMap, colour, "colour", true);
 				material.NormalTexture = addImage(surface->NormalMap, normal, "normal", false);
-				material.OcclusionTexture = addImage(surface->OcclusionMap, occlusion, "occlusion", false);
+				if (swizzleOcclusion) {
+					GltfExportTexture packedOcclusion;
+					packedOcclusion.Name = id + "/occlusion";
+					packedOcclusion.Width = packedPbr->Width;
+					packedOcclusion.Height = packedPbr->Height;
+					packedOcclusion.Pixels.resize(static_cast<size_t>(packedPbr->Width) * packedPbr->Height * 4);
+					for (size_t pixel = 0; pixel < static_cast<size_t>(packedPbr->Width) * packedPbr->Height; ++pixel) {
+						packedOcclusion.Pixels[pixel * 4] = ExportChannel(*packedPbr, pixel, occlusionChannel, false);
+						packedOcclusion.Pixels[pixel * 4 + 1] = 0;
+						packedOcclusion.Pixels[pixel * 4 + 2] = 0;
+						packedOcclusion.Pixels[pixel * 4 + 3] = 255;
+					}
+					material.OcclusionTexture = captured.Textures.size();
+					textureBytes += packedOcclusion.Pixels.size();
+					captured.Textures.push_back(std::move(packedOcclusion));
+				} else {
+					material.OcclusionTexture = addImage(
+						packedPbr != nullptr && surface->OcclusionChannel < 4 ? surface->PackedPbrMap : surface->OcclusionMap,
+						occlusion, "occlusion", false
+					);
+				}
 				material.EmissiveTexture = addImage(surface->EmissiveMap, emissive, "emissive", true);
 				if (roughness != nullptr || metalness != nullptr) {
 					if (const auto found = packedIndexes.find(pair); found != packedIndexes.end()) {
@@ -651,9 +707,9 @@ namespace engine::script {
 							 ++pixel) {
 							packed.Pixels[pixel * 4] = 255;
 							packed.Pixels[pixel * 4 + 1] =
-								roughness != nullptr ? ExportChannel(*roughness, pixel, 0, false) : 255;
+								roughness != nullptr ? ExportChannel(*roughness, pixel, roughnessChannel, false) : 255;
 							packed.Pixels[pixel * 4 + 2] =
-								metalness != nullptr ? ExportChannel(*metalness, pixel, 0, false) : 255;
+								metalness != nullptr ? ExportChannel(*metalness, pixel, metalnessChannel, false) : 255;
 							packed.Pixels[pixel * 4 + 3] = 255;
 						}
 						material.MetallicRoughnessTexture = captured.Textures.size();

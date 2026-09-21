@@ -431,6 +431,49 @@ TEST_CASE("a material's metalness map is rewritten to the baked texture", "[asse
 	);
 }
 
+TEST_CASE("a packed PBR material defaults to ORM and accepts channel selectors", "[assetc][bake]") {
+	const Scratch scratch("material-packed-pbr");
+	scratch.Write("materials/orm.bmp", BMP);
+	scratch.Write(
+		"materials/packed.mat",
+		std::string_view("packed_pbr = orm.bmp\npacked_roughness = a\npacked_height = none\n")
+	);
+	const Report report = Baked(scratch, Settings{});
+	REQUIRE(report.Failures == 0);
+	const auto material = ReadMaterial(scratch.Out() / "materials/packed.amat");
+	CHECK(material.PackedPbrMap == "materials/orm.atex");
+	CHECK(material.OcclusionChannel == 0);
+	CHECK(material.RoughnessChannel == 3);
+	CHECK(material.MetalnessChannel == 2);
+	CHECK(material.HeightChannel == 255);
+
+	// The bytes are numeric values for each semantic, so this texture must
+	// reach the PBR sampler without sRGB conversion of its selected channels.
+	const auto packed = ReadTexture(scratch.Out() / "materials/orm.atex");
+	CHECK(packed.Format == engine::assets::TextureFormat::RGBA8_LINEAR);
+
+	// Studio rebakes a single selected file. It still discovers this material
+	// reference, so the standalone texture gets the same numeric format.
+	Settings only;
+	only.Only = "materials/orm.bmp";
+	REQUIRE(Baked(scratch, only).Failures == 0);
+	CHECK(ReadTexture(scratch.Out() / "materials/orm.atex").Format == engine::assets::TextureFormat::RGBA8_LINEAR);
+}
+
+TEST_CASE("a display and packed PBR map cannot share one source texture", "[assetc][bake]") {
+	const Scratch scratch("material-packed-pbr-ambiguous");
+	scratch.Write("materials/shared.bmp", BMP);
+	scratch.Write(
+		"materials/ambiguous.mat", std::string_view("color = shared.bmp\npacked_pbr = shared.bmp\n")
+	);
+
+	// A `.atex` has one sampler colour space. Refusing this source prevents a
+	// base-colour reader and a PBR reader from silently disagreeing about G/B.
+	const Report report = Baked(scratch, Settings{});
+	REQUIRE(report.Failures == 1);
+	CHECK_FALSE(fs::exists(scratch.Out() / "materials/shared.atex"));
+}
+
 TEST_CASE("a material's reference cannot escape the input tree", "[assetc][bake]") {
 	// The same refusal a model's texture reference gets, and for the same
 	// reason: a name that resolves outside the tree names something no publisher

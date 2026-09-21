@@ -199,6 +199,19 @@ TEST_CASE("motion capture plane keeps its two-component wire shape", "[control][
 	CHECK(encoded.at("previous_camera_motion_frame") == 7);
 }
 
+TEST_CASE("GPU packed capture plane keeps its four float32 wire lanes", "[control][data-capture]") {
+	engine::script::DataCaptureBridgePlane plane;
+	plane.Channel = "packed_gpu";
+	plane.Status = "ready";
+	plane.Width = 4;
+	plane.Height = 3;
+	plane.Scalar = "float32";
+	plane.Packing = "rgba32_float";
+	const json encoded = engine::control::data_capture_detail::Plane(plane, "snapshot-1");
+	CHECK(encoded.at("shape") == json::array({3, 4, 4}));
+	CHECK(encoded.at("dtype") == "float32");
+}
+
 TEST_CASE(
 	"multi-camera capture shares a renderer frame without atomically stepping", "[control][data-capture]"
 ) {

@@ -38,6 +38,7 @@ layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
+layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -57,7 +58,12 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Eye;
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
+	vec4 PackedPbrChannels;
 } lighting;
+
+float PackedPbrValue(vec2 uv, float channel) {
+	return texture(packedPbrMap, uv)[int(channel + 0.5)];
+}
 
 #include "opaque-eligibility.glsl"
 
@@ -77,6 +83,11 @@ void main() {
 		: vec3(0.0);
 	float metalness =
 		lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, surface.cellUv).r : 0.0;
+	if (lighting.MaterialExtra.y > 0.5) {
+		if (lighting.PackedPbrChannels.x < 4.0) roughness = PackedPbrValue(surface.cellUv, lighting.PackedPbrChannels.x);
+		if (lighting.PackedPbrChannels.y < 4.0) materialOcclusion = PackedPbrValue(surface.cellUv, lighting.PackedPbrChannels.y);
+		if (lighting.PackedPbrChannels.w < 4.0) metalness = PackedPbrValue(surface.cellUv, lighting.PackedPbrChannels.w);
+	}
 
 	vec3 mappedColour = surface.colour.rgb * lighting.BaseColour.rgb;
 	vec3 albedo = inColour.rgb * mappedColour * inSurfaceColour;

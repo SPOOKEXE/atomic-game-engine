@@ -163,6 +163,11 @@ namespace engine::render {
 		// enable and disable masks. The resident instance supplies the final layer
 		// in the vertex shader, so material feature choice never needs CPU readback.
 		glm::uvec4 RenderFeatures{};
+
+		// Appended so authored shaders that already declare `RenderFeatures` keep
+		// its layout. Channel selectors are roughness, occlusion, height,
+		// metalness, with R=0 through A=3.
+		glm::vec4 PackedPbrChannels{0.0f, 0.0f, 0.0f, 0.0f};
 	};
 
 	struct ShadowUniforms {

@@ -505,6 +505,11 @@ namespace client {
 					.Height = engine::core::Name(material.HeightMap),
 					.Metalness = engine::core::Name(material.MetalnessMap),
 					.Emissive = engine::core::Name(material.EmissiveMap),
+					.PackedPbr = engine::core::Name(material.PackedPbrMap),
+					.RoughnessChannel = material.RoughnessChannel,
+					.OcclusionChannel = material.OcclusionChannel,
+					.HeightChannel = material.HeightChannel,
+					.MetalnessChannel = material.MetalnessChannel,
 				};
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and

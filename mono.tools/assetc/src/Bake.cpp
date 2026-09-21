@@ -218,6 +218,11 @@ namespace assetc {
 			std::string Roughness;
 			std::string Occlusion;
 			std::string Height;
+			std::string PackedPbr;
+			std::string PackedRoughness;
+			std::string PackedOcclusion;
+			std::string PackedHeight;
+			std::string PackedMetalness;
 			std::string Emissive;
 			std::string Metalness;
 		};
@@ -272,6 +277,16 @@ namespace assetc {
 					out.Emissive = value;
 				} else if (key == "metalness") {
 					out.Metalness = value;
+				} else if (key == "packed_pbr") {
+					out.PackedPbr = value;
+				} else if (key == "packed_roughness") {
+					out.PackedRoughness = value;
+				} else if (key == "packed_occlusion") {
+					out.PackedOcclusion = value;
+				} else if (key == "packed_height") {
+					out.PackedHeight = value;
+				} else if (key == "packed_metalness") {
+					out.PackedMetalness = value;
 				}
 			}
 			return out;
@@ -335,6 +350,38 @@ namespace assetc {
 			sources.push_back(Slashed(fs::relative(entry.path(), settings.Input).generic_string()));
 		}
 		std::sort(sources.begin(), sources.end());
+
+		// Material references decide a texture's sampling intent. Keep this full
+		// list before `Only` filters the output so rebaking one named PBR map later
+		// preserves the same linear format as a whole-tree bake.
+		const std::vector<std::string> allSources = sources;
+		std::set<std::string> numericTextures;
+		std::set<std::string> displayTextures;
+		for (const std::string &materialSource : allSources) {
+			if (!IsMaterial(ExtensionOf(materialSource))) {
+				continue;
+			}
+
+			const MaterialKeys keys = MaterialKeysOf(ReadFile(settings.Input / materialSource));
+			const size_t slash = materialSource.find_last_of('/');
+			const std::string directory =
+				slash == std::string::npos ? std::string() : materialSource.substr(0, slash);
+			const auto record = [&directory](
+				const std::string &named, std::set<std::string> &textures
+			) {
+				std::string resolved;
+				if (!named.empty() && Resolve(directory, named, resolved)) {
+					textures.insert(std::move(resolved));
+				}
+			};
+			record(keys.Colour, displayTextures);
+			record(keys.Emissive, displayTextures);
+			for (const std::string *named : {
+				 &keys.Normal, &keys.Roughness, &keys.Occlusion, &keys.Height, &keys.Metalness, &keys.PackedPbr
+			}) {
+				record(*named, numericTextures);
+			}
+		}
 
 		// **After the sort, so a filtered run and a whole one agree about what
 		// a source is.** Filtering the walk instead would work today and would
@@ -413,6 +460,7 @@ namespace assetc {
 					{&keys.Height, &material.HeightMap},
 					{&keys.Emissive, &material.EmissiveMap},
 					{&keys.Metalness, &material.MetalnessMap},
+					{&keys.PackedPbr, &material.PackedPbrMap},
 				};
 
 				for (const auto &[named, into] : maps) {
@@ -429,6 +477,28 @@ namespace assetc {
 						// state - `assets/Material.hpp` - so this is a material
 						// that draws the default rather than a failed row.
 						baked.Failure = "a map is outside the input tree";
+						report.Failures++;
+					}
+				}
+				if (!material.PackedPbrMap.empty()) {
+					const auto channel = [](const std::string &text, uint8_t fallback) {
+						if (text.empty()) return fallback;
+						if (text == "r") return uint8_t{0};
+						if (text == "g") return uint8_t{1};
+						if (text == "b") return uint8_t{2};
+						if (text == "a") return uint8_t{3};
+						if (text == "none") return uint8_t{255};
+						return uint8_t{254};
+					};
+					// `packed_pbr` alone is conventional ORM: AO/R, roughness/G,
+					// metalness/B. Selectors make every other channel order explicit.
+					material.RoughnessChannel = channel(keys.PackedRoughness, 1);
+					material.OcclusionChannel = channel(keys.PackedOcclusion, 0);
+					material.HeightChannel = channel(keys.PackedHeight, 255);
+					material.MetalnessChannel = channel(keys.PackedMetalness, 2);
+					if (material.RoughnessChannel == 254 || material.OcclusionChannel == 254 ||
+						material.HeightChannel == 254 || material.MetalnessChannel == 254) {
+						baked.Failure = "a packed PBR channel must be r, g, b, a, or none";
 						report.Failures++;
 					}
 				}
@@ -462,6 +532,13 @@ namespace assetc {
 			}
 
 			const bool vector = image && IsVector(extension);
+			const bool numericTexture = image && numericTextures.contains(relative);
+			if (image && numericTexture && displayTextures.contains(relative)) {
+				baked.Failure = "a texture cannot be both display colour and numeric material data";
+				report.Failures++;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
 
 			engine::bake::Graph graph;
 			engine::bake::NodeId source = graph.AddSource(relative, bytes);
@@ -718,12 +795,40 @@ namespace assetc {
 				tail = mipmap;
 			}
 
-			const engine::bake::NodeId write = graph.AddWrite(baked.Output);
-			graph.Connect(tail, write);
+			// The graph owns pixel transforms while material references supply the
+			// sampling intent. A numeric map therefore leaves the graph as the same
+			// RGBA bytes with a linear texture format before serialization.
+			if (!numericTexture) {
+				const engine::bake::NodeId write = graph.AddWrite(baked.Output);
+				graph.Connect(tail, write);
+			}
 
 			if (!graph.Run(graphFailure)) {
 				baked.Failure = graphFailure;
 				report.Failures++;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
+
+			if (numericTexture) {
+				const engine::bake::Payload &output = graph.Output(tail);
+				if (output.Kind != engine::bake::PayloadKind::Texture) {
+					baked.Failure = "the pipeline did not produce a texture";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				engine::assets::TextureData texture = output.Texture;
+				texture.Format = engine::assets::TextureFormat::RGBA8_LINEAR;
+				engine::core::ByteWriter writer;
+				if (!engine::assets::Texture::Write(writer, texture)) {
+					baked.Failure = "the pipeline produced a texture the format cannot hold";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				baked.Kind = AssetKind::Texture;
+				Emit(settings, report, baked, writer.Bytes());
 				report.Assets.push_back(std::move(baked));
 				continue;
 			}

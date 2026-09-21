@@ -13,7 +13,7 @@
 
 namespace engine::render {
 	namespace {
-		constexpr size_t MAX_DATA_CAPTURE_CHANNELS = static_cast<size_t>(DataCaptureChannel::OpticalFlow) + 1;
+		constexpr size_t MAX_DATA_CAPTURE_CHANNELS = static_cast<size_t>(DataCaptureChannel::PackedGpu) + 1;
 		constexpr uint8_t NO_DATA_CAPTURE_RESOURCE = UINT8_MAX;
 
 		bool AuthoredFactUnavailable(DataCaptureChannel channel) {
@@ -241,6 +241,17 @@ namespace engine::render {
 					ResourceImageFormat::R8_UNorm
 				);
 				if (plane.Status == DataCaptureStatus::Ready) plane.Provenance = image.Provenance;
+				break;
+			case DataCaptureChannel::PackedGpu:
+				primary(
+					core::Name("packed-gpu"),
+					DataCaptureScalar::Float32,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::RGBA32_Float
+				);
+				if (plane.Status == DataCaptureStatus::Ready)
+					plane.Provenance =
+						"render_graph_pack_channels/v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r";
 				break;
 			case DataCaptureChannel::MotionVectors:
 				primary(

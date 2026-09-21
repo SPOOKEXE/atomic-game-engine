@@ -113,6 +113,25 @@ TEST_CASE("every PBR map resolves onto the surface appearance", "[scene][materia
 	CHECK(MaterialMaps{.Metalness = maps.Metalness}.IsValid());
 }
 
+TEST_CASE("a packed material retains only its selected PBR semantics", "[scene][materials]") {
+	Store store = Fresh("materials.packed");
+	const MaterialMaps maps{
+		.PackedPbr = Name("pbr-orm"), .RoughnessChannel = 1, .OcclusionChannel = 0, .MetalnessChannel = 2,
+	};
+	const Name asset("materials/packed.amat");
+	REQUIRE(RecordMaterial(store, asset, maps));
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Packed");
+	Dress(store, part, asset);
+	REQUIRE(ResolveMaterials(store) == 1);
+	const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(part);
+	REQUIRE(appearance != nullptr);
+	CHECK(appearance->PackedPbrMap == maps.PackedPbr);
+	CHECK(appearance->RoughnessChannel == 1);
+	CHECK(appearance->OcclusionChannel == 0);
+	CHECK(appearance->MetalnessChannel == 2);
+	CHECK(appearance->HeightChannel == 255);
+}
+
 TEST_CASE("a material nobody recorded resolves to nothing", "[scene][materials]") {
 	Store store = Fresh("materials.unknown");
 

@@ -22,7 +22,7 @@ namespace engine::render {
 	struct View;
 
 	// Maximum registered hook capabilities owned by one renderer.
-	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 18;
+	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 19;
 	// Maximum live client connections to hook capabilities.
 	inline constexpr size_t MAX_DATA_FACTORY_CONNECTIONS = 6;
 	// Maximum admitted readback batches awaiting completion.

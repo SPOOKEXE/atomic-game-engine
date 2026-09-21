@@ -429,6 +429,10 @@ namespace engine::render {
 				captured = ResourceImageFormat::R32_UInt;
 				bytes = 4;
 				return true;
+			case SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT:
+				captured = ResourceImageFormat::RGBA32_Float;
+				bytes = 16;
+				return true;
 			default:
 				return false;
 			}
@@ -444,6 +448,8 @@ namespace engine::render {
 			case ResourceImageFormat::RG16_Float:
 				return 2;
 			case ResourceImageFormat::R32_UInt:
+				return 4;
+			case ResourceImageFormat::RGBA32_Float:
 				return 4;
 			case ResourceImageFormat::Unknown:
 				return 0;

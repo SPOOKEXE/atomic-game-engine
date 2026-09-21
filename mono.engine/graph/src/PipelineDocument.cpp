@@ -1540,6 +1540,42 @@ namespace engine::graph {
 		document.Record(
 			{.Kind = EditKind::Reads, .Target = core::Name("occlusion"), .Key = core::Name("source")}
 		);
+		// The packed target is capture-only: native depth and material facts stay available
+		// independently, while this resource provides an opt-in GPU RGBA32F readback.
+		document.Record(
+			{.Kind = EditKind::AddResource,
+			 .Name = core::Name("packed-gpu"),
+			 .Resource = ResourceKind::Colour,
+			 .Format = ResourceFormat::RGBA32F}
+		);
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-pack-channels"),
+			 .NodeKind = core::Name("pack-channels"),
+			 .Scope = NodeScope::Frame}
+		);
+		for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 4>{
+				 {{"linear-depth", "r"}, {"occlusion", "g"}, {"material", "b"}, {"material", "a"}}
+			 })
+			document.Record(
+				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
+			);
+		document.Record(
+			{.Kind = EditKind::Writes, .Target = core::Name("packed-gpu"), .Key = core::Name("packed")}
+		);
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("r-component"), .Value = "0"});
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("g-component"), .Value = "0"});
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("b-component"), .Value = "0"});
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("a-component"), .Value = "2"});
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-packed-gpu"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads, .Target = core::Name("packed-gpu"), .Key = core::Name("source")}
+		);
 		// The G-buffer writes depth only for visible opaque or masked geometry. This
 		// R8 pass keeps background separate from a far-depth surface.
 		document.Record(

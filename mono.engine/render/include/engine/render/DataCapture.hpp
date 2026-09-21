@@ -115,6 +115,8 @@ namespace engine::render {
 		SecondSurfaceValidity,
 		MotionVectors,
 		OpticalFlow,
+		// Explicit RGBA32F render-graph packing, with four documented retained lanes.
+		PackedGpu,
 	};
 
 	// Lifecycle and terminal outcomes of a capture channel.
@@ -152,7 +154,8 @@ namespace engine::render {
 				? "-second-surface"
 			: channel == DataCaptureChannel::MotionVectors ? "-motion-vectors"
 			: channel == DataCaptureChannel::OpticalFlow   ? "-optical-flow"
-														   : "";
+			: channel == DataCaptureChannel::PackedGpu     ? "-packed-gpu"
+															   : "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 

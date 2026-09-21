@@ -274,6 +274,12 @@ namespace engine::render {
 				SDL_GPUTexture *const height = dataMap(SlotHeightMap[slot]);
 				SDL_GPUTexture *const metalness = dataMap(SlotMetalnessMap[slot]);
 				SDL_GPUTexture *const emissive = dataMap(SlotEmissiveMap[slot]);
+				// A missing packed map must leave each semantic on its legacy map or
+				// scalar. Treating the missing marker as data would overwrite all of
+				// them with magenta-channel values.
+				SDL_GPUTexture *const packedPbr = Textures.Find(
+					SlotPackedPbrMap[slot], TextureContentOwner(SlotPackedPbrMap[slot], SlotContentOwner[slot])
+				);
 				SDL_GPUSampler *const materialSampler =
 					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()
 																				: Textures.Sampler();
@@ -305,8 +311,12 @@ namespace engine::render {
 					{emissive != nullptr ? emissive : FallbackTexture, materialSampler},
 					{height != nullptr ? height : FallbackTexture, materialSampler},
 					{metalness != nullptr ? metalness : FallbackTexture, materialSampler},
+					{packedPbr != nullptr ? packedPbr : FallbackTexture, materialSampler},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 10);
+				// Authored shaders retain their documented ten sampler contract. The
+				// engine PBR shader alone declares the appended packed-map sampler.
+				const uint32_t samplerCount = SlotShader[slot].IsValid() ? 10u : 11u;
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, samplerCount);
 
 				LightingUniforms uniforms = *lighting;
 
@@ -323,7 +333,10 @@ namespace engine::render {
 				uniforms.Surface = glm::vec4{
 					sampled != nullptr ? 1.0f : 0.0f,
 					0.0f,
-					height != nullptr ? 1.0f : 0.0f,
+					height != nullptr ||
+							(packedPbr != nullptr && SlotPackedPbrChannels[slot].z < 4.0f)
+						? 1.0f
+						: 0.0f,
 					0.04f,
 				};
 				uniforms.Material = glm::vec4{
@@ -332,7 +345,10 @@ namespace engine::render {
 					occlusion != nullptr ? 1.0f : 0.0f,
 					emissive != nullptr ? 1.0f : 0.0f,
 				};
-				uniforms.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				uniforms.MaterialExtra = glm::vec4{
+					metalness != nullptr ? 1.0f : 0.0f, packedPbr != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f
+				};
+				uniforms.PackedPbrChannels = SlotPackedPbrChannels[slot];
 
 				// **The cell is per draw, not per instance**, which is the whole
 				// simplification: a sheet plays on the clock rather than on

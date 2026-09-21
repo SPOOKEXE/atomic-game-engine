@@ -102,6 +102,11 @@ namespace engine::scene {
 				appearance->HeightMap = maps.Height;
 				appearance->MetalnessMap = maps.Metalness;
 				appearance->EmissiveMap = maps.Emissive;
+				appearance->PackedPbrMap = maps.PackedPbr;
+				appearance->RoughnessChannel = maps.RoughnessChannel;
+				appearance->OcclusionChannel = maps.OcclusionChannel;
+				appearance->HeightChannel = maps.HeightChannel;
+				appearance->MetalnessChannel = maps.MetalnessChannel;
 			}
 
 			// **From the material instance and not from the catalogue**, which
@@ -162,6 +167,11 @@ namespace engine::scene {
 				appearance->HeightMap = core::Name{};
 				appearance->MetalnessMap = core::Name{};
 				appearance->EmissiveMap = core::Name{};
+				appearance->PackedPbrMap = core::Name{};
+				appearance->RoughnessChannel = 255;
+				appearance->OcclusionChannel = 255;
+				appearance->HeightChannel = 255;
+				appearance->MetalnessChannel = 255;
 
 				// **And the shader with them**, for the same reason: a part
 				// whose material was deleted would otherwise go on being drawn

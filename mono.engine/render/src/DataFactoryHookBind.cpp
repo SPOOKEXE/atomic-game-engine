@@ -90,7 +90,7 @@ namespace engine::render {
 				return false;
 			for (size_t index = 0; index < spec.ChannelCount; ++index) {
 				if (static_cast<size_t>(spec.Channels[index]) >
-					static_cast<size_t>(DataCaptureChannel::OpticalFlow))
+					static_cast<size_t>(DataCaptureChannel::PackedGpu))
 					return false;
 				for (size_t previous = 0; previous < index; ++previous)
 					if (spec.Channels[previous] == spec.Channels[index]) return false;
@@ -635,8 +635,9 @@ namespace engine::render {
 	}
 
 	void DataFactoryHookBind::RegisterBuiltInDataCaptureHooks() {
-		for (size_t index = 0; index <= static_cast<size_t>(DataCaptureChannel::MotionVectors); ++index) {
+		for (size_t index = 0; index <= static_cast<size_t>(DataCaptureChannel::PackedGpu); ++index) {
 			const auto channel = static_cast<DataCaptureChannel>(index);
+			if (channel == DataCaptureChannel::OpticalFlow) continue;
 			const std::string name = "data_capture." + std::string(DataCaptureChannelName(channel));
 			(void)RegisterHook({
 				.Name = core::Name(name),

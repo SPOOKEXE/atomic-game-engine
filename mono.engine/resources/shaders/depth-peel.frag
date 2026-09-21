@@ -25,6 +25,7 @@ layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
+layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -44,7 +45,12 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Eye;
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
+	vec4 PackedPbrChannels;
 } lighting;
+
+float PackedPbrValue(vec2 uv, float channel) {
+	return texture(packedPbrMap, uv)[int(channel + 0.5)];
+}
 
 layout(set = 3, binding = 1) uniform Peel {
 	// xyz and offset convert world position to camera-forward metres.

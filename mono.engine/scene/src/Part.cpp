@@ -3352,6 +3352,11 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::OcclusionMap>(meshPart, "OcclusionMap");
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
+			ecs::Classes::Property<&SurfaceAppearance::PackedPbrMap>(meshPart, "PackedPbrMap");
+			ecs::Classes::Property<&SurfaceAppearance::RoughnessChannel>(meshPart, "PackedRoughnessChannel");
+			ecs::Classes::Property<&SurfaceAppearance::OcclusionChannel>(meshPart, "PackedOcclusionChannel");
+			ecs::Classes::Property<&SurfaceAppearance::HeightChannel>(meshPart, "PackedHeightChannel");
+			ecs::Classes::Property<&SurfaceAppearance::MetalnessChannel>(meshPart, "PackedMetalnessChannel");
 			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 1>("Lod1MeshId"));
 			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 2>("Lod2MeshId"));
 			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 3>("Lod3MeshId"));

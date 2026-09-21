@@ -1,5 +1,6 @@
 #include "CaptureRecordValidation.hpp"
 #include "DataCaptureCompact.hpp"
+#include "DataCapturePacking.hpp"
 #include "RenderFixture.hpp"
 #include "SecondSurfaceDepth.hpp"
 
@@ -23,6 +24,7 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <string_view>
 #include <thread>
@@ -142,6 +144,83 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 		std::string_view(DataCaptureChannelName(DataCaptureChannel::PbrTransmission)) == "pbr_transmission"
 	);
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::MeshUv)) == "mesh_uv");
+}
+
+TEST_CASE("packed capture planes retain depth and resample scalar sources", "[render][data-capture]") {
+	DataCapturePlane depth;
+	depth.Channel = DataCaptureChannel::LinearDepth;
+	depth.Status = DataCaptureStatus::Ready;
+	depth.Width = 2;
+	depth.Height = 2;
+	depth.RowStride = 8;
+	depth.Scalar = DataCaptureScalar::Float32;
+	depth.Bytes.resize(16);
+	const std::array depthValues{1.25f, 2.5f, 3.75f, 5.0f};
+	for (size_t index = 0; index < depthValues.size(); ++index)
+		std::memcpy(depth.Bytes.data() + index * sizeof(float), &depthValues[index], sizeof(float));
+
+	DataCapturePlane occlusion;
+	occlusion.Channel = DataCaptureChannel::AmbientOcclusion;
+	occlusion.Status = DataCaptureStatus::Ready;
+	occlusion.Width = 1;
+	occlusion.Height = 1;
+	occlusion.RowStride = 1;
+	occlusion.Scalar = DataCaptureScalar::UNorm8;
+	occlusion.Bytes = {std::byte{128}};
+
+	DataCapturePlane material;
+	material.Channel = DataCaptureChannel::PbrMaterial;
+	material.Status = DataCaptureStatus::Ready;
+	material.Width = 2;
+	material.Height = 2;
+	material.RowStride = 8;
+	material.Scalar = DataCaptureScalar::UNorm8;
+	material.Bytes = {
+		std::byte{10}, std::byte{20}, std::byte{30}, std::byte{40},
+		std::byte{50}, std::byte{60}, std::byte{70}, std::byte{80},
+		std::byte{90}, std::byte{100}, std::byte{110}, std::byte{120},
+		std::byte{130}, std::byte{140}, std::byte{150}, std::byte{160},
+	};
+	const std::array<const DataCapturePlane *, 4> planes{&depth, &occlusion, &material, &material};
+	std::array components{
+		engine::script::DataCaptureBridgePackedComponent{"linear_depth", 0},
+		engine::script::DataCaptureBridgePackedComponent{"ambient_occlusion", 0},
+		engine::script::DataCaptureBridgePackedComponent{"pbr_material", 0},
+		engine::script::DataCaptureBridgePackedComponent{"pbr_material", 2},
+	};
+	data_capture_packing::Result packed;
+	std::string rejection;
+	REQUIRE(data_capture_packing::PackRgba32F(planes, components, packed, rejection));
+	CHECK(packed.Width == 2);
+	CHECK(packed.Height == 2);
+	CHECK(packed.Bytes.size() == 64);
+	for (size_t index = 0; index < depthValues.size(); ++index) {
+		float packedDepth = 0.0f;
+		std::memcpy(&packedDepth, packed.Bytes.data() + index * 16, sizeof(packedDepth));
+		CHECK(std::bit_cast<uint32_t>(packedDepth) == std::bit_cast<uint32_t>(depthValues[index]));
+		float packedAo = 0.0f;
+		std::memcpy(&packedAo, packed.Bytes.data() + index * 16 + 4, sizeof(packedAo));
+		CHECK(packedAo == 128.0f / 255.0f);
+	}
+	float roughness = 0.0f;
+	float materialOcclusion = 0.0f;
+	std::memcpy(&roughness, packed.Bytes.data() + 2 * 16 + 8, sizeof(roughness));
+	std::memcpy(&materialOcclusion, packed.Bytes.data() + 2 * 16 + 12, sizeof(materialOcclusion));
+	CHECK(roughness == 90.0f / 255.0f);
+	CHECK(materialOcclusion == 110.0f / 255.0f);
+	components[0].SourceComponent = 1;
+	CHECK_FALSE(data_capture_packing::PackRgba32F(planes, components, packed, rejection));
+	CHECK(rejection == "unsupported_source_layout");
+	DataCapturePlane oversized = depth;
+	oversized.Width = 8193;
+	oversized.Height = 8193;
+	oversized.RowStride = 4;
+	const std::array<const DataCapturePlane *, 4> oversizedPlanes{
+		&oversized, &oversized, &oversized, &oversized
+	};
+	components[0].SourceComponent = 0;
+	CHECK_FALSE(data_capture_packing::PackRgba32F(oversizedPlanes, components, packed, rejection));
+	CHECK(rejection == "packed_plane_size_overflow");
 }
 
 TEST_CASE("object label sidecars require bounded UTF-8 labels", "[render][data-capture]") {
@@ -280,6 +359,92 @@ TEST_CASE(
 	const auto values = std::span(firstSurfaceValidity->Bytes);
 	CHECK(std::find(values.begin(), values.end(), std::byte{255}) != values.end());
 	CHECK(std::find(values.begin(), values.end(), std::byte{0}) != values.end());
+}
+
+TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gpu][data-capture][.]") {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("bridge-packed-data-capture");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+
+	world::Universe worlds;
+	const world::WorldId world = worlds.Create({.Name = core::Name("data-world")});
+	world::DataFactorySession session(worlds);
+	session.SetPauseParticipant(
+		[world](world::WorldId candidate, world::DataFactoryPauseScope, bool, std::string &) {
+			return candidate == world;
+		}
+	);
+	REQUIRE(session.Pause("data-world", world::DataFactoryPauseScope::AllSystems, 0).Status == world::DataFactoryStatus::Ok);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-world", snapshot).Status == world::DataFactoryStatus::Ok);
+	ScriptDataCaptureBridge bridge(session, renderer);
+	script::DataCaptureBridgeRequest request{
+		.InstanceId = "data-world",
+		.SnapshotId = snapshot,
+		.Pipeline = std::string(pipeline.Text()),
+		.CaptureNode = "data-capture",
+		.Channels = {"linear_depth", "ambient_occlusion", "pbr_material", "packed_gpu"},
+		.TemporalHistory = "preserve",
+	};
+	request.PackedPlanes.push_back({
+		.Name = "depth_ao_roughness",
+		.Components = {{{"linear_depth", 0}, {"ambient_occlusion", 0}, {"pbr_material", 0}, {"pbr_material", 2}}},
+	});
+	uint64_t ticket = 0;
+	std::string detail;
+	REQUIRE(bridge.Queue("data-world", request, ticket, detail));
+	render::SceneTarget target{64, 64};
+	render::View view;
+	view.WorldName = core::Name("data-world");
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.SnapshotId = snapshot;
+	bridge.PrepareView(view);
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+
+	script::DataCaptureBridgePoll poll;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	do {
+		bridge.Pump();
+		REQUIRE(bridge.Poll("data-world", ticket, poll, detail));
+		if (poll.Status == "pending") SDL_Delay(1);
+	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == "ready");
+	const auto packed = std::ranges::find_if(poll.Planes, [](const script::DataCaptureBridgePlane &plane) {
+		return plane.Channel == "packed/depth_ao_roughness";
+	});
+	REQUIRE(packed != poll.Planes.end());
+	CHECK(packed->Scalar == "float32");
+	CHECK(packed->Packing == "rgba32_float");
+	CHECK(packed->Resampling == "pixel_center_nearest/v1");
+	REQUIRE(packed->Packed);
+	CHECK(packed->Packed->Components[0].SourceChannel == "linear_depth");
+	const auto gpuPacked = std::ranges::find_if(poll.Planes, [](const script::DataCaptureBridgePlane &plane) {
+		return plane.Channel == "packed_gpu";
+	});
+	REQUIRE(gpuPacked != poll.Planes.end());
+	CHECK(gpuPacked->Scalar == "float32");
+	CHECK(gpuPacked->Packing == "rgba32_float");
+	CHECK(gpuPacked->Provenance ==
+		  "render_graph_pack_channels/v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r");
+	std::vector<std::byte> bytes, gpuBytes;
+	REQUIRE(bridge.ReadPlane("data-world", ticket, packed->Resource, 0, packed->ByteSize, bytes, detail));
+	REQUIRE(bridge.ReadPlane("data-world", ticket, gpuPacked->Resource, 0, gpuPacked->ByteSize, gpuBytes, detail));
+	CHECK(bytes.size() == packed->ByteSize);
+	CHECK(packed->RowStride == packed->Width * 16);
+	CHECK(gpuPacked->RowStride == gpuPacked->Width * 16);
+	CHECK(gpuBytes == bytes);
+	REQUIRE(bridge.Release("data-world", ticket, detail));
 }
 
 TEST_CASE(
@@ -1345,7 +1510,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			return hook.Access == "observation";
 		})
 	);
-	REQUIRE(observationHooks == 17);
+	REQUIRE(observationHooks == 18);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
 		if (hook.Access != "observation") continue;

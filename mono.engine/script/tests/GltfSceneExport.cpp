@@ -133,6 +133,61 @@ TEST_CASE("glTF scene export retains editable material maps and names unsupporte
 	CHECK(exported.Unavailable[0].Reason == "surface_height_or_shader_unavailable");
 }
 
+TEST_CASE("glTF scene export swizzles packed PBR channels into glTF's fixed layout", "[script][gltf]") {
+	engine::scene::RegisterSceneClasses();
+	engine::ecs::Store store("script.gltf.packed-pbr");
+	const auto image = store.CreateInstance(engine::scene::EditableImageClass(), "Packed");
+	REQUIRE(engine::scene::ResizeEditableImage(store, image, 1, 1));
+	const std::array packedPixels{std::byte{90}, std::byte{30}, std::byte{70}, std::byte{200}};
+	REQUIRE(engine::scene::EditableImageFromBuffer(
+		store, image, packedPixels
+	));
+	const auto part = engine::scene::MakePart(store, {});
+	Identify(store, part, "scene/packed-pbr");
+	store.Set(
+		part,
+		engine::scene::SurfaceAppearance{
+			.PackedPbrMap = engine::scene::EditableImageContentName(store, image),
+			.RoughnessChannel = 2,
+			.OcclusionChannel = 1,
+			.MetalnessChannel = 3,
+		}
+	);
+
+	const auto alternate = engine::scene::MakePart(store, {});
+	Identify(store, alternate, "scene/packed-pbr-alternate");
+	store.Set(
+		alternate,
+		engine::scene::SurfaceAppearance{
+			.PackedPbrMap = engine::scene::EditableImageContentName(store, image),
+			.RoughnessChannel = 0,
+			.MetalnessChannel = 1,
+		}
+	);
+
+	engine::script::GltfSceneExport exported;
+	std::string failure;
+	REQUIRE(engine::script::CaptureGltfSceneExport(store, exported, failure));
+	REQUIRE(exported.Nodes.size() == 2);
+	bool selected = false;
+	bool alternateSelected = false;
+	for (const auto &node : exported.Nodes) {
+		REQUIRE(node.Material.MetallicRoughnessTexture);
+		const auto &pixels = exported.Textures[*node.Material.MetallicRoughnessTexture].Pixels;
+		if (pixels == std::vector<uint8_t>{255, 70, 200, 255}) {
+			selected = true;
+			REQUIRE(node.Material.OcclusionTexture);
+			CHECK(exported.Textures[*node.Material.OcclusionTexture].Pixels == std::vector<uint8_t>{30, 0, 0, 255});
+		} else if (pixels == std::vector<uint8_t>{255, 90, 30, 255}) {
+			alternateSelected = true;
+		} else {
+			FAIL("unexpected packed metallic-roughness texture");
+		}
+	}
+	CHECK(selected);
+	CHECK(alternateSelected);
+}
+
 TEST_CASE("glTF scene export rejects invalid camera and geometry transforms", "[script][gltf]") {
 	engine::scene::RegisterSceneClasses();
 	engine::ecs::Store store("script.gltf.invalid-transform");

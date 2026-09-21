@@ -38,7 +38,9 @@ OpaqueSurfaceSample SampleEligibleOpaqueSurface() {
 	if ((result.features & FEATURE_DISPLACEMENT) != 0u && lighting.Surface.z > 0.5) {
 		mat3 tangentFrame = CotangentFrame(normalize(inNormal), inWorldPosition, result.cellUv);
 		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
-		float height = texture(heightMap, result.cellUv).r - 0.5;
+		float height = lighting.MaterialExtra.y > 0.5 && lighting.PackedPbrChannels.z < 4.0
+			? PackedPbrValue(result.cellUv, lighting.PackedPbrChannels.z) - 0.5
+			: texture(heightMap, result.cellUv).r - 0.5;
 		float grazing = max(abs(tangentEye.z), 0.2);
 		result.localUv = fract(result.localUv - tangentEye.xy * (height * lighting.Surface.w / grazing));
 		result.cellUv = result.localUv * lighting.Flipbook.x + lighting.Flipbook.yz;

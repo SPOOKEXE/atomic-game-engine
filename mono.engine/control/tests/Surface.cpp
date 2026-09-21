@@ -219,6 +219,7 @@ namespace {
 			CameraId = request.CameraId;
 			ViewSlot = request.ViewSlot;
 			Channels = request.Channels;
+			PackedPlanes = request.PackedPlanes;
 			IncludeSceneData = request.IncludeSceneData;
 			StorageProfile = request.StorageProfile;
 			NoiseMode = request.NoiseMode;
@@ -443,6 +444,9 @@ namespace {
 		const std::string &RequestedCameraId() const {
 			return CameraId;
 		}
+		const std::vector<engine::script::DataCaptureBridgePackedPlane> &RequestedPackedPlanes() const {
+			return PackedPlanes;
+		}
 		void UseUnavailableAmbientOcclusion() {
 			UnavailableAmbientOcclusion = true;
 		}
@@ -463,6 +467,7 @@ namespace {
 		std::string CaptureNode;
 		std::string CameraId;
 		std::vector<std::string> Channels;
+		std::vector<engine::script::DataCaptureBridgePackedPlane> PackedPlanes;
 		uint64_t ViewSlot = 0;
 		bool Queued = false;
 		bool UnavailableAmbientOcclusion = false;
@@ -619,8 +624,17 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			  "pbr_emissive",
 			  "ambient_occlusion",
 			  "object_ids",
-			  "semantic_ids",
-			  "part_ids"}},
+				  "semantic_ids",
+				  "part_ids"}},
+			{"packed_planes",
+			 json::array({
+				 {{"name", "depth_ao_roughness"},
+				  {"components",
+				   {{{"source_channel", "linear_depth"}, {"source_component", 0}},
+					{{"source_channel", "ambient_occlusion"}, {"source_component", 0}},
+					{{"source_channel", "pbr_material"}, {"source_component", 0}},
+					{{"source_channel", "pbr_material"}, {"source_component", 2}}}}}
+			 })},
 			{"temporal_history", "preserve"},
 			{"operation_id", "capture-1"},
 			{"expected_tick", current.Clock.Tick},
@@ -629,6 +643,9 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 		}
 	);
 	CHECK(capture["status"] == "queued");
+	REQUIRE(bridge->RequestedPackedPlanes().size() == 1);
+	CHECK(bridge->RequestedPackedPlanes().front().Name == "depth_ao_roughness");
+	CHECK(bridge->RequestedPackedPlanes().front().Components[2].SourceChannel == "pbr_material");
 	CHECK(
 		bridge->RequestedChannels() == std::vector<std::string>{
 										   "rgb_linear_hdr",
@@ -764,7 +781,9 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			  "second_surface_depth",
 			  "second_surface_validity",
 			  "first_surface_validity",
-			  "optical_flow"}},
+			  "optical_flow",
+			  "motion_vectors",
+			  "packed_gpu"}},
 			{"temporal_history", "preserve"},
 			{"operation_id", "capture-14"},
 			{"expected_tick", current.Clock.Tick},
@@ -774,7 +793,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 		overflowFailed
 	);
 	CHECK(overflowFailed);
-	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 13 names");
+	CHECK(overflow["error"] == "validation_failed: channels must contain 1 to 15 names");
 }
 
 TEST_CASE(

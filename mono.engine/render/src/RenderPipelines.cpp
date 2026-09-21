@@ -232,6 +232,51 @@ namespace engine::render {
 						}
 						if (baseline) needs.Formats.push_back(graph::ResourceFormat::RGBA32F);
 					}
+					if (node->Kind == core::Name("pack-channels")) {
+						const std::array ports{"r", "g", "b", "a"};
+						if (node->Reads.size() != ports.size() || node->Writes.size() != 1 ||
+							node->ReadPorts.size() != ports.size() || node->WritePorts != std::vector{core::Name("packed")}) {
+							offender = node->Name;
+							reason = "pack-channels needs r, g, b and a inputs plus one packed output";
+							return false;
+						}
+						const auto sampleable = [](graph::ResourceFormat format) {
+							return format != graph::ResourceFormat::R32U && format != graph::ResourceFormat::D24S8 &&
+								   format != graph::ResourceFormat::D32F && format != graph::ResourceFormat::BC1_SRGB &&
+								   format != graph::ResourceFormat::BC3 && format != graph::ResourceFormat::BC5 &&
+								   format != graph::ResourceFormat::BC7_SRGB;
+						};
+						for (size_t index = 0; index < ports.size(); ++index) {
+							if (node->ReadPorts[index] != core::Name(ports[index]) ||
+								std::find(node->Reads.begin(), node->Reads.end(), node->Writes.front()) != node->Reads.end()) {
+								offender = node->Name;
+								reason = "pack-channels input cannot alias its output";
+								return false;
+							}
+							const graph::ResourceDesc *source = pipeline.FindResource(node->Reads[index]);
+							const std::string *component =
+								node->Parameter(core::Name(std::string(ports[index]) + "-component"));
+							if (component != nullptr &&
+								(component->size() != 1 || (*component)[0] < '0' || (*component)[0] > '3')) {
+								offender = node->Name;
+								reason = "pack-channels component must be an integer from 0 through 3";
+								return false;
+							}
+							const uint32_t selected = component == nullptr ? 0 : uint32_t((*component)[0] - '0');
+							if (source == nullptr || !sampleable(source->Format) || selected >= graph::ChannelCount(source->Format)) {
+								offender = node->Name;
+								reason = "pack-channels selector exceeds source components or source is not float sampled";
+								return false;
+							}
+						}
+						const graph::ResourceDesc *target = pipeline.FindResource(node->Writes.front());
+						if (target == nullptr || target->Format != graph::ResourceFormat::RGBA32F) {
+							offender = node->Name;
+							reason = "pack-channels output must be RGBA32F";
+							return false;
+						}
+						needs.Formats.push_back(graph::ResourceFormat::RGBA32F);
+					}
 					if (node->Kind == core::Name("blit")) {
 						if (node->Reads.size() != 1 || node->Writes.size() != 1) {
 							offender = node->Name;
@@ -569,7 +614,7 @@ namespace engine::render {
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
-			10,
+			11,
 			3
 		);
 
@@ -580,13 +625,15 @@ namespace engine::render {
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
-		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 1);
-		SDL_GPUShader *depthPeelFragment = LoadShader("depth-peel.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 2);
+		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 1);
+		SDL_GPUShader *depthPeelFragment = LoadShader("depth-peel.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 2);
 		SDL_GPUShader *depthLinearFragment =
 			LoadShader("depth-linearise.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *cameraMotionFragment =
 			LoadShader("camera-motion.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+		SDL_GPUShader *packChannelsFragment =
+			LoadShader("pack-channels.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
 		// Ten samplers: the seven G-buffer and shadow inputs, two seam light
 		// captures, then the portal shadow beam atlas.
 		SDL_GPUShader *deferredLightingFragment =
@@ -597,7 +644,7 @@ namespace engine::render {
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
-			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
+			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment || !packChannelsFragment ||
 			!deferredLightingFragment || !skyFragment || !volumeFragment || !tonemapFragment) {
 			return false;
 		}
@@ -774,6 +821,12 @@ namespace engine::render {
 			}
 		}
 		const bool pbrSupported = GBufferPipeline != nullptr;
+		const bool packChannelsSupported = SDL_GPUTextureSupportsFormat(
+			Device,
+			SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,
+			SDL_GPU_TEXTURETYPE_2D,
+			SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET
+		);
 
 		SDL_GPUColorTargetDescription depthPeelTargets[2]{};
 		depthPeelTargets[0].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
@@ -809,6 +862,8 @@ namespace engine::render {
 			DepthValidityPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			CameraMotionPipeline = fullscreen(cameraMotionFragment, SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT);
 			SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
+			if (packChannelsSupported)
+				PackChannelsPipeline = fullscreen(packChannelsFragment, SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT);
 			DeferredLightingPipeline =
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
@@ -1238,6 +1293,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, depthLinearFragment);
 		SDL_ReleaseGPUShader(Device, cameraMotionFragment);
 		SDL_ReleaseGPUShader(Device, ssaoFragment);
+		SDL_ReleaseGPUShader(Device, packChannelsFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
 		SDL_ReleaseGPUShader(Device, skyFragment);
 		SDL_ReleaseGPUShader(Device, tonemapFragment);
@@ -1295,7 +1351,7 @@ namespace engine::render {
 			AdditiveParticleLayerColourPipeline && RibbonLayerPipeline && RibbonLayerColourPipeline &&
 			AdditiveRibbonLayerColourPipeline)
 			return true;
-		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 12, 4);
+		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 13, 4);
 		auto *particleVertex = LoadShader("particle.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		auto *particleFragment = LoadShader("particle-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
 		auto *ribbonVertex = LoadShader("ribbon.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);

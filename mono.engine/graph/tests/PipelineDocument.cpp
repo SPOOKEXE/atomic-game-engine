@@ -143,6 +143,35 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 	CHECK(occlusion->Divisor == 2);
 }
 
+TEST_CASE("the data capture document exposes a GPU packed RGBA32F target", "[graph][data-capture]") {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(
+		Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok
+	);
+	const engine::graph::Node *pack = nullptr;
+	const engine::graph::Node *capture = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("data-capture-pack-channels")) pack = node;
+		if (node && node->Name == Name("data-capture-packed-gpu")) capture = node;
+	}
+	REQUIRE(pack != nullptr);
+	CHECK(pack->Kind == Name("pack-channels"));
+	CHECK(pack->ReadPorts == std::vector<Name>{Name("r"), Name("g"), Name("b"), Name("a")});
+	CHECK(pack->WritePorts == std::vector<Name>{Name("packed")});
+	CHECK(pack->Integer(Name("r-component"), 9) == 0);
+	CHECK(pack->Integer(Name("g-component"), 9) == 0);
+	CHECK(pack->Integer(Name("b-component"), 9) == 0);
+	CHECK(pack->Integer(Name("a-component"), 9) == 2);
+	const auto *packed = graph.FindResource(pack->Writes.front());
+	REQUIRE(packed != nullptr);
+	CHECK(packed->Name == Name("packed-gpu"));
+	CHECK(packed->Format == engine::graph::ResourceFormat::RGBA32F);
+	REQUIRE(capture != nullptr);
+	CHECK(capture->Reads == std::vector{pack->Writes.front()});
+}
+
 TEST_CASE(
 	"the data capture document names camera reprojection separately from optical flow",
 	"[graph][data-capture]"

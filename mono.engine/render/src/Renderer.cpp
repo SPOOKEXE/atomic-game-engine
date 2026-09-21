@@ -900,6 +900,7 @@ namespace engine::render {
 			  State->InterfaceLayerPipeline,
 			  State->InterfaceLayerColourPipeline,
 			  State->SsaoPipeline,
+			  State->PackChannelsPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
 			  State->VolumePipeline,

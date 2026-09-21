@@ -944,6 +944,11 @@ namespace engine::scene {
 		// What this surface emits with no light on it. Invalid means nothing,
 		// which is what almost every surface emits.
 		core::Name EmissiveMap = {};
+		core::Name PackedPbrMap = {};
+		uint8_t RoughnessChannel = 255;
+		uint8_t OcclusionChannel = 255;
+		uint8_t HeightChannel = 255;
+		uint8_t MetalnessChannel = 255;
 		//@}
 
 		// Which shader this surface is drawn with, or invalid for the engine's.

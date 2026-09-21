@@ -494,6 +494,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *InterfaceLayerColourPipeline = nullptr;
 		bool EnsureInterfaceLayer();
 		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackChannelsPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
@@ -1095,6 +1096,8 @@ namespace engine::render {
 		std::vector<core::Name> SlotHeightMap;
 		std::vector<core::Name> SlotMetalnessMap;
 		std::vector<core::Name> SlotEmissiveMap;
+		std::vector<core::Name> SlotPackedPbrMap;
+		std::vector<glm::vec4> SlotPackedPbrChannels;
 		std::vector<scene::SurfaceResampleMode> SlotResample;
 		// Whether a shadow run needs per-material alpha or seam state.
 		std::vector<uint8_t> SlotShadowDetail;
@@ -1309,6 +1312,8 @@ namespace engine::render {
 				   SlotHeightMap[next] == SlotHeightMap[slot] &&
 				   SlotMetalnessMap[next] == SlotMetalnessMap[slot] &&
 				   SlotEmissiveMap[next] == SlotEmissiveMap[slot] &&
+				   SlotPackedPbrMap[next] == SlotPackedPbrMap[slot] &&
+				   glm::all(glm::equal(SlotPackedPbrChannels[next], SlotPackedPbrChannels[slot])) &&
 				   SlotResample[next] == SlotResample[slot] && SlotShader[next] == SlotShader[slot] &&
 				   SlotSeam[next] == SlotSeam[slot] && SlotSeamLight[next] == SlotSeamLight[slot];
 		}

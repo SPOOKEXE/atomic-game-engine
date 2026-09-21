@@ -38,7 +38,7 @@ namespace engine::control {
 		// Maximum byte length for one requested render channel name.
 		inline constexpr size_t MAXIMUM_CHANNEL_NAME = 64;
 		// Largest channel set accepted for one capture ticket.
-		inline constexpr size_t MAXIMUM_CHANNELS = 13;
+		inline constexpr size_t MAXIMUM_CHANNELS = 15;
 		// ScriptDataCaptureBridge owns six retained ticket slots. The MCP bound must
 		// match that admission limit rather than the separate hook-batch limit.
 		inline constexpr size_t MAXIMUM_MULTICAMERA_VIEWS = 6;
@@ -188,7 +188,7 @@ namespace engine::control {
 			}
 			if (!Field(options, "channels", field, failure) || !field->is_array() || field->empty() ||
 				field->size() > MAXIMUM_CHANNELS) {
-				failure = Error("validation_failed", "options.channels must contain 1 to 13 names");
+				failure = Error("validation_failed", "options.channels must contain 1 to 15 names");
 				return false;
 			}
 			bool hasSecondSurfaceDepth = false;
@@ -395,6 +395,9 @@ namespace engine::control {
 			if (plane.Channel == "rgb_linear_hdr") {
 				shape.push_back(4);
 				dtype = "float16";
+			} else if (plane.Packed || plane.Channel == "packed_gpu") {
+				shape.push_back(4);
+				dtype = "float32";
 			} else if (plane.Channel == "shading_normal") {
 				dtype = "uint32";
 				packing = "UNorm10A2";
@@ -440,6 +443,14 @@ namespace engine::control {
 					 value->MaximumAbsoluteError ? json(*value->MaximumAbsoluteError) : json(nullptr)},
 				};
 			};
+			json packed = nullptr;
+			if (plane.Packed) {
+				packed = {{"schema_version", "data-capture-packed-rgba32f/v1"}, {"components", json::array()}};
+				for (const auto &component : plane.Packed->Components)
+					packed["components"].push_back(
+						{{"source_channel", component.SourceChannel}, {"source_component", component.SourceComponent}}
+					);
+			}
 			return {
 				{"channel", plane.Channel},
 				{"status", plane.Status},
@@ -470,6 +481,8 @@ namespace engine::control {
 				{"provenance", plane.Provenance.empty() ? json(nullptr) : json(plane.Provenance)},
 				{"ambient_occlusion", ambientOcclusion(plane.AmbientOcclusion)},
 				{"noise", noise(plane.Noise)},
+				{"packed", std::move(packed)},
+				{"resampling", plane.Resampling.empty() ? json(nullptr) : json(plane.Resampling)},
 				{"previous_camera_motion_frame",
 				 plane.PreviousCameraMotionFrame ? json(*plane.PreviousCameraMotionFrame) : json(nullptr)},
 				{"row_stride", plane.RowStride},
@@ -585,6 +598,27 @@ namespace engine::control {
 			};
 		}
 
+		// Describes one explicit four-lane RGBA32F capture output for tool discovery.
+		inline json PackedPlaneSchema() {
+			json component{{"type", "object"}, {"additionalProperties", false}};
+			component["required"] = {"source_channel", "source_component"};
+			component["properties"] = {
+				{"source_channel", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}},
+				{"source_component", {{"type", "integer"}, {"minimum", 0}, {"maximum", 3}}},
+			};
+			json result{{"type", "object"}, {"additionalProperties", false}};
+			result["required"] = {"name", "components"};
+			result["properties"] = {
+				{"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}},
+				{"components",
+				 {{"type", "array"},
+				  {"minItems", 4},
+				  {"maxItems", 4},
+				  {"items", std::move(component)}}},
+			};
+			return result;
+		}
+
 		// Wraps tool-specific fields in the closed JSON object schema used by this surface.
 		inline json Schema(json properties, json required) {
 			return {
@@ -628,6 +662,10 @@ namespace engine::control {
 					   {"minItems", 1},
 					   {"maxItems", MAXIMUM_CHANNELS},
 					   {"items", {{"type", "string"}}}}},
+					 {"packed_planes",
+					  {{"type", "array"},
+					   {"maxItems", script::MAX_DATA_CAPTURE_PACKED_PLANES},
+					   {"items", PackedPlaneSchema()}}},
 					 {"temporal_history", {{"type", "string"}, {"enum", {"preserve"}}}},
 					 {"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"expected_tick", {{"type", "integer"}, {"minimum", 0}}},
@@ -656,6 +694,7 @@ namespace engine::control {
 						 "camera_id",
 						 "view_slot",
 						 "channels",
+						 "packed_planes",
 						 "temporal_history",
 						 "operation_id",
 						 "expected_tick",
@@ -699,13 +738,49 @@ namespace engine::control {
 				}
 				if (!Field(values, "channels", field, failure) || !field->is_array() || field->empty() ||
 					field->size() > MAXIMUM_CHANNELS) {
-					failure = Error("validation_failed", "channels must contain 1 to 13 names");
+					failure = Error("validation_failed", "channels must contain 1 to 15 names");
 					return nullptr;
 				}
 				for (const json &channel : *field) {
 					std::string name;
 					if (!Text(channel, "channel", name, failure)) return nullptr;
 					request.Channels.push_back(std::move(name));
+				}
+				if (const auto packed = values.find("packed_planes"); packed != values.end()) {
+					if (!packed->is_array() || packed->size() > script::MAX_DATA_CAPTURE_PACKED_PLANES) {
+						failure = Error("validation_failed", "packed_planes must contain at most three outputs");
+						return nullptr;
+					}
+					for (const json &entry : *packed) {
+						if (!entry.is_object() || !Only(entry, {"name", "components"}, failure)) return nullptr;
+						const json *name = nullptr;
+						const json *components = nullptr;
+						if (!Field(entry, "name", name, failure) || !Field(entry, "components", components, failure) ||
+							!components->is_array() || components->size() != 4) {
+							failure = Error("validation_failed", "packed plane requires four components");
+							return nullptr;
+						}
+						script::DataCaptureBridgePackedPlane definition;
+						if (!OptionText(*name, "packed_planes.name", MAXIMUM_CHANNEL_NAME, definition.Name, failure))
+							return nullptr;
+						for (size_t lane = 0; lane < definition.Components.size(); ++lane) {
+							const json &component = (*components)[lane];
+							const json *source = nullptr;
+							const json *sourceComponent = nullptr;
+							uint64_t index = 0;
+							if (!component.is_object() || !Only(component, {"source_channel", "source_component"}, failure) ||
+								!Field(component, "source_channel", source, failure) ||
+								!OptionText(*source, "packed_planes.source_channel", MAXIMUM_CHANNEL_NAME,
+									definition.Components[lane].SourceChannel, failure) ||
+								!Field(component, "source_component", sourceComponent, failure) ||
+								!UInt(*sourceComponent, "packed_planes.source_component", index, failure) || index > 3) {
+								failure = Error("validation_failed", "packed source component must be 0 through 3");
+								return nullptr;
+							}
+							definition.Components[lane].SourceComponent = static_cast<uint8_t>(index);
+						}
+						request.PackedPlanes.push_back(std::move(definition));
+					}
 				}
 				json normalized = values;
 				normalized["tool"] = "capture";

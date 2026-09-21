@@ -269,6 +269,8 @@ namespace engine::render {
 					entry.Instance >= State->SlotHeightMap.size() ||
 					entry.Instance >= State->SlotMetalnessMap.size() ||
 					entry.Instance >= State->SlotEmissiveMap.size() ||
+					entry.Instance >= State->SlotPackedPbrMap.size() ||
+					entry.Instance >= State->SlotPackedPbrChannels.size() ||
 					entry.Instance >= State->SlotSeam.size() || entry.Instance >= State->SlotSeamLight.size())
 					continue;
 				const MeshEntry *mesh = State->SlotMesh[entry.Instance];
@@ -301,6 +303,14 @@ namespace engine::render {
 				SDL_GPUTexture *height = dataMap(State->SlotHeightMap[entry.Instance]);
 				SDL_GPUTexture *metalness = dataMap(State->SlotMetalnessMap[entry.Instance]);
 				SDL_GPUTexture *emissive = dataMap(State->SlotEmissiveMap[entry.Instance]);
+				// Keep legacy semantic maps active while the packed texture is still
+				// loading or is absent. `dataMap` would turn that state into a marker.
+				SDL_GPUTexture *packedPbr = State->Textures.Find(
+					State->SlotPackedPbrMap[entry.Instance],
+					State->TextureContentOwner(
+						State->SlotPackedPbrMap[entry.Instance], State->SlotContentOwner[entry.Instance]
+					)
+				);
 				SDL_GPUSampler *sampler =
 					State->SlotResample[entry.Instance] == scene::SurfaceResampleMode::Pixelated
 						? State->Textures.PixelSampler()
@@ -323,21 +333,24 @@ namespace engine::render {
 					{occlusion != nullptr ? occlusion : State->FallbackTexture, sampler},
 					{emissive != nullptr ? emissive : State->FallbackTexture, sampler},
 					{height != nullptr ? height : State->FallbackTexture, sampler},
-					{metalness != nullptr ? metalness : State->FallbackTexture, sampler}
+					{metalness != nullptr ? metalness : State->FallbackTexture, sampler},
+					{packedPbr != nullptr ? packedPbr : State->FallbackTexture, sampler}
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 10);
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 11);
 				LightingUniforms material = Lighting;
 				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
 				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
 				material.Surface =
-					glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, height != nullptr ? 1.0f : 0.0f, 0.04f};
+					glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f,
+						height != nullptr || (packedPbr != nullptr && State->SlotPackedPbrChannels[entry.Instance].z < 4.0f) ? 1.0f : 0.0f, 0.04f};
 				material.Material = glm::vec4{
 					normal != nullptr ? 1.0f : 0.0f,
 					roughness != nullptr ? 1.0f : 0.0f,
 					occlusion != nullptr ? 1.0f : 0.0f,
 					emissive != nullptr ? 1.0f : 0.0f,
 				};
-				material.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				material.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, packedPbr != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f};
+				material.PackedPbrChannels = State->SlotPackedPbrChannels[entry.Instance];
 				const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
 				material.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				material.SeamPlane = State->SlotSeam[entry.Instance];
@@ -865,7 +878,7 @@ namespace engine::render {
 						phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
 						Impl::PipelineFamily::Other
 					);
-					SDL_BindGPUFragmentSamplers(pass, 10, bounds, 2);
+					SDL_BindGPUFragmentSamplers(pass, 11, bounds, 2);
 					State->BindInstanceBuffers(pass);
 					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);

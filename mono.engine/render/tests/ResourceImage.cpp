@@ -4236,6 +4236,11 @@ TEST_CASE(
 	white.Format = assets::TextureFormat::RGBA8;
 	white.Pixels.assign(4, std::byte{255});
 	REQUIRE(renderer.AddTexture(core::Name("object-id-white"), white));
+	assets::TextureData packedPbr;
+	packedPbr.Width = packedPbr.Height = 1;
+	packedPbr.Format = assets::TextureFormat::RGBA8_LINEAR;
+	packedPbr.Pixels = {std::byte{64}, std::byte{128}, std::byte{192}, std::byte{255}};
+	REQUIRE(renderer.AddTexture(core::Name("object-id-orm"), packedPbr));
 	assets::TextureData alphaSplit;
 	alphaSplit.Width = 2;
 	alphaSplit.Height = 1;
@@ -4298,6 +4303,12 @@ TEST_CASE(
 	scene::DrawInstance packedFront = packed;
 	packedFront.Source = 6;
 	packedFront.Frame.Position = {1, 0, -3};
+	packedFront.PackedPbrMap = core::Name("object-id-orm");
+	packedFront.RoughnessChannel = 2;
+	packedFront.OcclusionChannel = 1;
+	packedFront.MetalnessChannel = 0;
+	// Height remains absent: ORM alpha must not make this plane displace.
+	packedFront.HeightChannel = 255;
 	const std::array rows{labelled, transparentFront, nativeRear, unlabelled, centreRear, packedFront};
 	view.Instances = rows;
 	render::DataCaptureRequest request{
@@ -4448,7 +4459,14 @@ TEST_CASE(
 	for (size_t pixel = 0; pixel < captured.Planes[7].Width * captured.Planes[7].Height; ++pixel) {
 		const uint32_t label = objectIds.ReadUInt32();
 		if (label == 1) ++labelledPixels;
-		if (label == 2) ++packedPixels;
+		if (label == 2) {
+			++packedPixels;
+			const size_t material = pixel * 4;
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material]) == 192);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 1]) == 64);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 2]) == 128);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 3]) == 0);
+		}
 		if (label == 0) ++zeroPixels;
 		if (pixel ==
 			(captured.Planes[1].Height / 2) * captured.Planes[1].Width + captured.Planes[1].Width / 2)
@@ -4893,7 +4911,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 			return hook.Kind == render::RenderHookKind::DataCapture;
 		})
 	);
-	REQUIRE(observationHookCount == 17);
+	REQUIRE(observationHookCount == 18);
 	REQUIRE(observationHookCount + 1 == render::MAX_DATA_FACTORY_HOOKS);
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",

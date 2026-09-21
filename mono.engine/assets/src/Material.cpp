@@ -6,7 +6,11 @@ namespace engine::assets {
 		if (!data.IsValid() || data.ColourMap.size() > MAXIMUM_NAME || data.NormalMap.size() > MAXIMUM_NAME ||
 			data.RoughnessMap.size() > MAXIMUM_NAME || data.OcclusionMap.size() > MAXIMUM_NAME ||
 			data.HeightMap.size() > MAXIMUM_NAME || data.EmissiveMap.size() > MAXIMUM_NAME ||
-			data.MetalnessMap.size() > MAXIMUM_NAME) {
+			data.MetalnessMap.size() > MAXIMUM_NAME || data.PackedPbrMap.size() > MAXIMUM_NAME ||
+			(data.RoughnessChannel > 3 && data.RoughnessChannel != 255) ||
+			(data.OcclusionChannel > 3 && data.OcclusionChannel != 255) ||
+			(data.HeightChannel > 3 && data.HeightChannel != 255) ||
+			(data.MetalnessChannel > 3 && data.MetalnessChannel != 255)) {
 			return false;
 		}
 
@@ -25,6 +29,11 @@ namespace engine::assets {
 		writer.WriteString(data.HeightMap);
 		writer.WriteString(data.EmissiveMap);
 		writer.WriteString(data.MetalnessMap);
+		writer.WriteString(data.PackedPbrMap);
+		writer.WriteUInt8(data.RoughnessChannel);
+		writer.WriteUInt8(data.OcclusionChannel);
+		writer.WriteUInt8(data.HeightChannel);
+		writer.WriteUInt8(data.MetalnessChannel);
 		return true;
 	}
 
@@ -61,6 +70,8 @@ namespace engine::assets {
 		std::string_view height;
 		std::string_view emissive;
 		std::string_view metalness;
+		std::string_view packedPbr;
+		uint8_t roughnessChannel = 255, occlusionChannel = 255, heightChannel = 255, metalnessChannel = 255;
 		if (version >= 2) {
 			normal = reader.ReadString();
 			roughness = reader.ReadString();
@@ -90,6 +101,20 @@ namespace engine::assets {
 				return false;
 			}
 		}
+		if (version >= 5) {
+			packedPbr = reader.ReadString();
+			roughnessChannel = reader.ReadUInt8();
+			occlusionChannel = reader.ReadUInt8();
+			heightChannel = reader.ReadUInt8();
+			metalnessChannel = reader.ReadUInt8();
+			if (reader.Failed() || packedPbr.size() > MAXIMUM_NAME ||
+				(roughnessChannel > 3 && roughnessChannel != 255) ||
+				(occlusionChannel > 3 && occlusionChannel != 255) ||
+				(heightChannel > 3 && heightChannel != 255) ||
+				(metalnessChannel > 3 && metalnessChannel != 255)) {
+				return false;
+			}
+		}
 
 		out.ColourMap.assign(colour);
 		out.NormalMap.assign(normal);
@@ -98,6 +123,11 @@ namespace engine::assets {
 		out.HeightMap.assign(height);
 		out.EmissiveMap.assign(emissive);
 		out.MetalnessMap.assign(metalness);
+		out.PackedPbrMap.assign(packedPbr);
+		out.RoughnessChannel = roughnessChannel;
+		out.OcclusionChannel = occlusionChannel;
+		out.HeightChannel = heightChannel;
+		out.MetalnessChannel = metalnessChannel;
 		return true;
 	}
 }

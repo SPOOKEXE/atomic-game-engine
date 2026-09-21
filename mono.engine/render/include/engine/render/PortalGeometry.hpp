@@ -26,10 +26,11 @@ namespace engine::render {
 		std::string Name;
 		// Canonical account identity, empty when the row has no known player owner.
 		std::string Player;
-		// Mesh, colour, normal, roughness, occlusion, height, metalness, emission, shader.
-		// Content names in mesh, colour, normal, roughness, occlusion, height, metalness, emission, shader
+		// Mesh, colour, normal, roughness, occlusion, height, metalness, emission, packed PBR, shader.
+		// Content names in mesh, colour, normal, roughness, occlusion, height, metalness, emission, packed PBR, shader
 		// order.
-		std::array<std::string, 9> Assets;
+		std::array<std::string, 10> Assets;
+		std::array<uint8_t, 4> PackedPbrChannels{255, 255, 255, 255};
 		// Row pose expressed in the destination frame.
 		PortalGeometryPose Pose{0, 0, 0, 0, 0, 0, 1};
 		// Axis-aligned half-size in destination-frame metres.

@@ -105,6 +105,11 @@ namespace engine::scene {
 		core::Name HeightMap;
 		core::Name MetalnessMap;
 		core::Name EmissiveMap;
+		core::Name PackedPbrMap;
+		uint8_t RoughnessChannel = 255;
+		uint8_t OcclusionChannel = 255;
+		uint8_t HeightChannel = 255;
+		uint8_t MetalnessChannel = 255;
 		//@}
 
 		// Which shader draws this instance, or invalid for the engine's own.
@@ -451,6 +456,11 @@ namespace engine::scene {
 			instance.HeightMap = appearance->HeightMap;
 			instance.MetalnessMap = appearance->MetalnessMap;
 			instance.EmissiveMap = appearance->EmissiveMap;
+			instance.PackedPbrMap = appearance->PackedPbrMap;
+			instance.RoughnessChannel = appearance->RoughnessChannel;
+			instance.OcclusionChannel = appearance->OcclusionChannel;
+			instance.HeightChannel = appearance->HeightChannel;
+			instance.MetalnessChannel = appearance->MetalnessChannel;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

@@ -2,8 +2,8 @@
 #extension GL_GOOGLE_include_directive : require
 #include "surface-shading.glsl"
 
-layout(set = 2, binding = 10) uniform sampler2D opaqueZ;
-layout(set = 2, binding = 11) uniform sampler2D previousZ;
+layout(set = 2, binding = 11) uniform sampler2D opaqueZ;
+layout(set = 2, binding = 12) uniform sampler2D previousZ;
 layout(set = 3, binding = 3, std140) uniform LayerCapture {
 	vec4 Eye;
 	vec4 Forward;

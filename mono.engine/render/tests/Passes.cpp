@@ -758,3 +758,62 @@ TEST_CASE("a renderer is owned by one thread", "[render]") {
 	// is a comparison and never a claim.
 	CHECK(renderer.IsOnOwningThread());
 }
+
+TEST_CASE("pack-channels admits native scalar lanes and rejects impossible selectors", "[render][graph]") {
+	using engine::graph::Node;
+	using engine::graph::NodeParameter;
+	using engine::graph::NodeScope;
+	using engine::graph::ResourceFormat;
+	using engine::graph::ResourceKind;
+
+	const auto make = [](ResourceFormat greenFormat, std::string greenComponent, bool consumePacked = false) {
+		RenderGraph graph;
+		const auto depth = graph.AddResource(
+			{.Name = Name("depth"), .Kind = ResourceKind::Colour, .Format = ResourceFormat::R32F, .External = true}
+		);
+		const auto green = graph.AddResource(
+			{.Name = Name("green"), .Kind = ResourceKind::Colour, .Format = greenFormat, .External = true}
+		);
+		const auto material = graph.AddResource(
+			{.Name = Name("material"), .Kind = ResourceKind::Colour, .Format = ResourceFormat::RGBA8, .External = true}
+		);
+		const auto packed = graph.AddResource(
+			{.Name = Name("packed"), .Kind = ResourceKind::Colour, .Format = ResourceFormat::RGBA32F}
+		);
+		graph.AddNode({
+			.Name = Name("pack"),
+			.Kind = Name("pack-channels"),
+			.Reads = {depth, green, material, material},
+			.ReadPorts = {Name("r"), Name("g"), Name("b"), Name("a")},
+			.Writes = {packed},
+			.WritePorts = {Name("packed")},
+			.Scope = NodeScope::View,
+			.Parameters = {
+				{.Key = Name("r-component"), .Value = "0"},
+				{.Key = Name("g-component"), .Value = std::move(greenComponent)},
+				{.Key = Name("b-component"), .Value = "0"},
+				{.Key = Name("a-component"), .Value = "2"},
+			},
+		});
+		if (consumePacked) {
+			const auto sampled = graph.AddResource(
+				{.Name = Name("sampled"), .Kind = ResourceKind::Colour, .Format = ResourceFormat::RGBA16F}
+			);
+			graph.AddNode({
+				.Name = Name("sample-packed"),
+				.Kind = Name("blit"),
+				.Reads = {packed},
+				.ReadPorts = {Name("source")},
+				.Writes = {sampled},
+				.WritePorts = {Name("colour")},
+				.Scope = NodeScope::View,
+			});
+		}
+		return graph;
+	};
+
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("pack-valid"), make(ResourceFormat::R8, "0", true)));
+	CHECK_FALSE(renderer.SetPipeline(Name("pack-r8-component"), make(ResourceFormat::R8, "1")));
+	CHECK_FALSE(renderer.SetPipeline(Name("pack-uint"), make(ResourceFormat::R32U, "0")));
+}

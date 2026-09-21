@@ -17,6 +17,24 @@
 #include <vector>
 
 namespace engine::script {
+	// Maximum derived RGBA32F outputs retained by one capture ticket.
+	inline constexpr size_t MAX_DATA_CAPTURE_PACKED_PLANES = 3;
+	// Selects one component from a named completed capture channel.
+	struct DataCaptureBridgePackedComponent {
+		// Channel whose retained bytes supply this packed component.
+		std::string SourceChannel;
+		// Zero-based component index in the retained source plane's pixel packing.
+		uint8_t SourceComponent = 0;
+	};
+
+	// Describes one opt-in RGBA32F plane assembled from completed capture channels.
+	struct DataCaptureBridgePackedPlane {
+		// Stable ticket-local output name. It becomes the returned plane channel name.
+		std::string Name;
+		// Source selection for output R, G, B, and A in that order.
+		std::array<DataCaptureBridgePackedComponent, 4> Components;
+	};
+
 	// A copied request exchanged with the capture host.
 	struct DataCaptureBridgeRequest {
 		// Data-factory instance identifier.
@@ -49,6 +67,9 @@ namespace engine::script {
 		// The renderer copies a scene sidecar only after its retained-snapshot
 		// barrier succeeds. This flag asks for that bounded copied observation.
 		bool IncludeSceneData = false;
+		// Optional derived outputs assembled after their source planes complete. The
+		// original channel planes remain available alongside every packed plane.
+		std::vector<DataCaptureBridgePackedPlane> PackedPlanes;
 	};
 
 	// A scene observation retained with one capture ticket. The lifecycle values
@@ -190,6 +211,12 @@ namespace engine::script {
 		std::optional<DataCaptureBridgeNoise> Noise;
 		// Motion is measured against this renderer frame, not the preceding ticket.
 		std::optional<uint64_t> PreviousCameraMotionFrame;
+		// Present for a derived RGBA32F plane and records the source selected for
+		// each output component.
+		std::optional<DataCaptureBridgePackedPlane> Packed;
+		// Pixel-center nearest-neighbour resampling used by a packed plane, or empty
+		// when this is a native capture plane.
+		std::string Resampling;
 	};
 	// A copied object label exchanged with the capture host.
 	struct DataCaptureBridgeObjectLabel {

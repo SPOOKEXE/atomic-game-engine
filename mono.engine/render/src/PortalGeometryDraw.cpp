@@ -243,12 +243,16 @@ namespace engine::render {
 				draw.HeightMap,
 				draw.MetalnessMap,
 				draw.EmissiveMap,
+				draw.PackedPbrMap,
 				draw.Shader
 			};
 			for (size_t index = 0; index < names.size(); ++index) {
 				row.Assets[index] = names[index].Text();
 			}
 			row.Pose = Pose(draw.Frame);
+			row.PackedPbrChannels = {
+				draw.RoughnessChannel, draw.OcclusionChannel, draw.HeightChannel, draw.MetalnessChannel
+			};
 			row.HalfExtent = Vector(draw.HalfExtent);
 			row.Tint = Colour(draw.Tint);
 			row.SurfaceColour = Colour(draw.SurfaceColour);
@@ -387,11 +391,16 @@ namespace engine::render {
 				&draw.HeightMap,
 				&draw.MetalnessMap,
 				&draw.EmissiveMap,
+				&draw.PackedPbrMap,
 				&draw.Shader
 			};
 			for (size_t index = 0; index < fields.size(); ++index) {
 				*fields[index] = core::Name(row.Assets[index]);
 			}
+			draw.RoughnessChannel = row.PackedPbrChannels[0];
+			draw.OcclusionChannel = row.PackedPbrChannels[1];
+			draw.HeightChannel = row.PackedPbrChannels[2];
+			draw.MetalnessChannel = row.PackedPbrChannels[3];
 			for (size_t index = 0; index < ALPHA.size(); ++index) {
 				if (row.Alpha == ALPHA[index]) {
 					draw.Alpha = static_cast<scene::AlphaMode>(index);

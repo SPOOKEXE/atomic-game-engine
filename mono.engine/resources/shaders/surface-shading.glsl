@@ -32,6 +32,7 @@ layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
+layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -107,7 +108,12 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: 1 when a metalness map is present.
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
+	vec4 PackedPbrChannels;
 } lighting;
+
+float PackedPbrValue(vec2 uv, float channel) {
+	return texture(packedPbrMap, uv)[int(channel + 0.5)];
+}
 
 const uint FEATURE_EMISSION = 1u << 2u;
 const uint FEATURE_DISPLACEMENT = 1u << 9u;
@@ -478,7 +484,9 @@ void shadeSurface() {
 	if ((features & FEATURE_DISPLACEMENT) != 0u && lighting.Surface.z > 0.5) {
 		mat3 tangentFrame = CotangentFrame(normal, inWorldPosition, cellUv);
 		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
-		float height = texture(heightMap, cellUv).r - 0.5;
+		float height = lighting.MaterialExtra.y > 0.5 && lighting.PackedPbrChannels.z < 4.0
+			? PackedPbrValue(cellUv, lighting.PackedPbrChannels.z) - 0.5
+			: texture(heightMap, cellUv).r - 0.5;
 		float grazing = max(abs(tangentEye.z), 0.2);
 		localUv = fract(localUv - tangentEye.xy * (height * lighting.Surface.w / grazing));
 		cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
@@ -502,6 +510,11 @@ void shadeSurface() {
 		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
 		: vec3(0.0);
 	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;
+	if (lighting.MaterialExtra.y > 0.5) {
+		if (lighting.PackedPbrChannels.x < 4.0) roughness = PackedPbrValue(cellUv, lighting.PackedPbrChannels.x);
+		if (lighting.PackedPbrChannels.y < 4.0) occlusion = PackedPbrValue(cellUv, lighting.PackedPbrChannels.y);
+		if (lighting.PackedPbrChannels.w < 4.0) metalness = PackedPbrValue(cellUv, lighting.PackedPbrChannels.w);
+	}
 	metalness = clamp(metalness, 0.0, 1.0);
 
 	// Cut-out before anything else is computed. A hair card is authored as a

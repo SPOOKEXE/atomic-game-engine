@@ -13,7 +13,8 @@ namespace engine::render {
 		struct BorrowedGeometryRow {
 			std::string_view Name;
 			std::string_view Player;
-			std::array<std::string_view, 9> Assets;
+			std::array<std::string_view, 10> Assets;
+			std::array<uint8_t, 4> PackedPbrChannels{255, 255, 255, 255};
 			PortalGeometryPose Pose{0, 0, 0, 0, 0, 0, 1};
 			std::array<float, 3> HalfExtent{.5f, .5f, .5f};
 			std::array<float, 3> Tint{1, 1, 1};
@@ -77,6 +78,8 @@ namespace engine::render {
 					return false;
 				}
 			}
+			for (const uint8_t channel : row.PackedPbrChannels)
+				if (channel > 3 && channel != 255) return false;
 			return true;
 		}
 		bool Valid(const PortalGeometry &geometry) {
@@ -131,6 +134,7 @@ namespace engine::render {
 			for (const auto &asset : row.Assets) {
 				writer.WriteString(asset);
 			}
+			for (const uint8_t channel : row.PackedPbrChannels) writer.WriteUInt8(channel);
 			GeometryFloats(writer, row.Pose);
 			GeometryFloats(writer, row.HalfExtent);
 			GeometryFloats(writer, row.Tint);
@@ -195,6 +199,7 @@ namespace engine::render {
 						return false;
 					}
 				}
+				for (uint8_t &channel : row.PackedPbrChannels) channel = reader.ReadUInt8();
 				GeometryFloats(reader, row.Pose);
 				GeometryFloats(reader, row.HalfExtent);
 				GeometryFloats(reader, row.Tint);
@@ -217,7 +222,7 @@ namespace engine::render {
 				row.JointCount = reader.ReadUInt32();
 				if (reader.Failed() || !ValidRow(row, joints)) return false;
 				measure.MetadataBytes +=
-					row.Name.size() + row.Player.size() + row.Alpha.size() + row.Resample.size();
+					row.Name.size() + row.Player.size() + row.Alpha.size() + row.Resample.size() + row.PackedPbrChannels.size();
 				for (const auto &asset : row.Assets)
 					measure.MetadataBytes += asset.size();
 				if constexpr (StoreRows) geometry->Rows[index] = std::move(row);

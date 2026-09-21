@@ -1900,6 +1900,8 @@ namespace engine::render {
 		State->SlotHeightMap.resize(uploadCount);
 		State->SlotMetalnessMap.resize(uploadCount);
 		State->SlotEmissiveMap.resize(uploadCount);
+		State->SlotPackedPbrMap.resize(uploadCount);
+		State->SlotPackedPbrChannels.resize(uploadCount);
 		State->SlotResample.resize(uploadCount);
 		State->SlotShadowDetail.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
@@ -1933,6 +1935,13 @@ namespace engine::render {
 				State->SlotHeightMap[drawSlot] = instance.HeightMap;
 				State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
 				State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
+				State->SlotPackedPbrMap[drawSlot] = instance.PackedPbrMap;
+				State->SlotPackedPbrChannels[drawSlot] = glm::vec4{
+					static_cast<float>(instance.RoughnessChannel),
+					static_cast<float>(instance.OcclusionChannel),
+					static_cast<float>(instance.HeightChannel),
+					static_cast<float>(instance.MetalnessChannel),
+				};
 				State->SlotResample[drawSlot] = instance.Resample;
 				State->SlotShadowDetail[drawSlot] = instance.Alpha != scene::AlphaMode::Opaque ||
 													instance.SeamNormal.MagnitudeSquared() > 0.0f;
@@ -2125,6 +2134,8 @@ namespace engine::render {
 						State->SlotHeightMap[drawSlot] = State->SlotHeightMap[sceneSlot];
 						State->SlotMetalnessMap[drawSlot] = State->SlotMetalnessMap[sceneSlot];
 						State->SlotEmissiveMap[drawSlot] = State->SlotEmissiveMap[sceneSlot];
+						State->SlotPackedPbrMap[drawSlot] = State->SlotPackedPbrMap[sceneSlot];
+						State->SlotPackedPbrChannels[drawSlot] = State->SlotPackedPbrChannels[sceneSlot];
 						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
 						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
 						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];

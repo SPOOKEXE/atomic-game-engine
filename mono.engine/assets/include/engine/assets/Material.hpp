@@ -65,14 +65,10 @@ namespace engine::assets {
 		// the shader falls back to the geometric normal. Refusing a material for
 		// an absent map would make the ordinary case unrepresentable.
 		//
-		// **Names rather than packed channels.** Roughness, occlusion and height
-		// are single-channel and an engine that cared most about bandwidth would
-		// pack the three into one RGB texture. The sources do not: ambientCG,
-		// Poly Haven and cgbookcase each publish them separately, so packing
-		// would be a bake step that has to run before anything can be looked at,
-		// and a mismatch between packed and unpacked would be invisible until it
-		// rendered. Separate names now; packing is a bake decision that can be
-		// made later without changing what a material *is*.
+		// **Separate names remain useful.** Sources may publish each numeric map
+		// separately, while `PackedPbrMap` below represents authored ORM and other
+		// channel layouts. An absent packed selector keeps the named map or scalar
+		// default, so an author chooses each semantic independently.
 		//@{
 		std::string NormalMap;
 		std::string RoughnessMap;
@@ -91,6 +87,15 @@ namespace engine::assets {
 
 		// Per-texel metalness. Absent means dielectric.
 		std::string MetalnessMap;
+
+		// One RGBA texture may supply scalar PBR maps. The channel values are
+		// R=0 through A=3. 255 leaves that semantic on its separate map or its
+		// scalar default, so an ORM texture need not invent a height channel.
+		std::string PackedPbrMap;
+		uint8_t RoughnessChannel = 255;
+		uint8_t OcclusionChannel = 255;
+		uint8_t HeightChannel = 255;
+		uint8_t MetalnessChannel = 255;
 		//@}
 
 		// Whether this describes a material at all.
@@ -118,11 +123,11 @@ namespace engine::assets {
 
 		// The version. Bumped when the layout changes, never reused.
 		//
-		// **4 adds metalness, 3 adds emissive, 2 added the other four, and 1 still reads.** A version 1 file
+		// **5 adds packed PBR channels, 4 adds metalness, 3 adds emissive, 2 added the other four, and 1 still reads.** A version 1 file
 		// is a colour map and nothing else, which is exactly a material whose other four names are empty - so
 		// the older format is not a special case to translate, it is the newer one with four absent fields.
 		// That is what makes reading it a branch on how many strings to expect rather than a second parser.
-		static constexpr uint16_t VERSION = 4;
+		static constexpr uint16_t VERSION = 5;
 
 		// The longest asset name this will read.
 		//
