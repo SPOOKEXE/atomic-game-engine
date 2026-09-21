@@ -154,8 +154,8 @@ namespace engine::render {
 				? "-second-surface"
 			: channel == DataCaptureChannel::MotionVectors ? "-motion-vectors"
 			: channel == DataCaptureChannel::OpticalFlow   ? "-optical-flow"
-			: channel == DataCaptureChannel::PackedGpu     ? "-packed-gpu"
-															   : "";
+			: channel == DataCaptureChannel::PackedGpu	   ? "-packed-gpu"
+														   : "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 

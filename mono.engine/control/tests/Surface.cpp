@@ -624,17 +624,17 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			  "pbr_emissive",
 			  "ambient_occlusion",
 			  "object_ids",
-				  "semantic_ids",
-				  "part_ids"}},
+			  "semantic_ids",
+			  "part_ids"}},
 			{"packed_planes",
-			 json::array({
-				 {{"name", "depth_ao_roughness"},
-				  {"components",
-				   {{{"source_channel", "linear_depth"}, {"source_component", 0}},
-					{{"source_channel", "ambient_occlusion"}, {"source_component", 0}},
-					{{"source_channel", "pbr_material"}, {"source_component", 0}},
-					{{"source_channel", "pbr_material"}, {"source_component", 2}}}}}
-			 })},
+			 json::array(
+				 {{{"name", "depth_ao_roughness"},
+				   {"components",
+					{{{"source_channel", "linear_depth"}, {"source_component", 0}},
+					 {{"source_channel", "ambient_occlusion"}, {"source_component", 0}},
+					 {{"source_channel", "pbr_material"}, {"source_component", 0}},
+					 {{"source_channel", "pbr_material"}, {"source_component", 2}}}}}}
+			 )},
 			{"temporal_history", "preserve"},
 			{"operation_id", "capture-1"},
 			{"expected_tick", current.Clock.Tick},

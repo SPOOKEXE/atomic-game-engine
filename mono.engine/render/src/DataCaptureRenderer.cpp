@@ -250,8 +250,8 @@ namespace engine::render {
 					ResourceImageFormat::RGBA32_Float
 				);
 				if (plane.Status == DataCaptureStatus::Ready)
-					plane.Provenance =
-						"render_graph_pack_channels/v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r";
+					plane.Provenance = "render_graph_pack_channels/"
+									   "v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r";
 				break;
 			case DataCaptureChannel::MotionVectors:
 				primary(

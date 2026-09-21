@@ -457,7 +457,10 @@ TEST_CASE("a packed PBR material defaults to ORM and accepts channel selectors",
 	Settings only;
 	only.Only = "materials/orm.bmp";
 	REQUIRE(Baked(scratch, only).Failures == 0);
-	CHECK(ReadTexture(scratch.Out() / "materials/orm.atex").Format == engine::assets::TextureFormat::RGBA8_LINEAR);
+	CHECK(
+		ReadTexture(scratch.Out() / "materials/orm.atex").Format ==
+		engine::assets::TextureFormat::RGBA8_LINEAR
+	);
 }
 
 TEST_CASE("a display and packed PBR map cannot share one source texture", "[assetc][bake]") {

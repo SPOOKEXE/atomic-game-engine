@@ -301,8 +301,7 @@ namespace engine::graph {
 				spec.Params.push_back(NumberParam("angle", "Direction degrees", "0", -360.0, 360.0));
 			}
 			if (spec.Kind == core::Name("pack-channels")) {
-				for (const auto &[name, label] :
-					 std::initializer_list<std::pair<const char *, const char *>>{
+				for (const auto &[name, label] : std::initializer_list<std::pair<const char *, const char *>>{
 						 {"r-component", "R component"},
 						 {"g-component", "G component"},
 						 {"b-component", "B component"},
@@ -498,7 +497,8 @@ namespace engine::graph {
 				 "capture",
 				 "shadow-capture"}
 			);
-			spec.FlexibleScope = spec.Kind == core::Name("dispatch") || spec.Kind == core::Name("pack-channels");
+			spec.FlexibleScope =
+				spec.Kind == core::Name("dispatch") || spec.Kind == core::Name("pack-channels");
 			spec.Needs.Compute = spec.Queue == ExecutionQueue::Compute;
 			spec.Needs.StorageTextures =
 				std::any_of(
@@ -1521,7 +1521,8 @@ namespace engine::graph {
 			  {"b", K::Texture, F::RGBA8, true, "Retained source plane for output B."},
 			  {"a", K::Texture, F::RGBA8, true, "Retained source plane for output A."}},
 			 {{"packed", K::Colour, F::RGBA32F, true, "Four selected source components as float32."}},
-			 "Copies one selected component from each native texture into RGBA32F. The R input sets the output extent; "
+			 "Copies one selected component from each native texture into RGBA32F. The R input sets the "
+			 "output extent; "
 			 "each source uses pixel-center nearest selection.",
 			 false,
 			 "pack-channels.frag"},

@@ -366,9 +366,7 @@ namespace assetc {
 			const size_t slash = materialSource.find_last_of('/');
 			const std::string directory =
 				slash == std::string::npos ? std::string() : materialSource.substr(0, slash);
-			const auto record = [&directory](
-				const std::string &named, std::set<std::string> &textures
-			) {
+			const auto record = [&directory](const std::string &named, std::set<std::string> &textures) {
 				std::string resolved;
 				if (!named.empty() && Resolve(directory, named, resolved)) {
 					textures.insert(std::move(resolved));
@@ -376,9 +374,13 @@ namespace assetc {
 			};
 			record(keys.Colour, displayTextures);
 			record(keys.Emissive, displayTextures);
-			for (const std::string *named : {
-				 &keys.Normal, &keys.Roughness, &keys.Occlusion, &keys.Height, &keys.Metalness, &keys.PackedPbr
-			}) {
+			for (const std::string *named :
+				 {&keys.Normal,
+				  &keys.Roughness,
+				  &keys.Occlusion,
+				  &keys.Height,
+				  &keys.Metalness,
+				  &keys.PackedPbr}) {
 				record(*named, numericTextures);
 			}
 		}

@@ -340,16 +340,24 @@ namespace engine::render {
 				LightingUniforms material = Lighting;
 				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
 				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
-				material.Surface =
-					glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f,
-						height != nullptr || (packedPbr != nullptr && State->SlotPackedPbrChannels[entry.Instance].z < 4.0f) ? 1.0f : 0.0f, 0.04f};
+				material.Surface = glm::vec4{
+					sampled != nullptr ? 1.0f : 0.0f,
+					0.0f,
+					height != nullptr ||
+							(packedPbr != nullptr && State->SlotPackedPbrChannels[entry.Instance].z < 4.0f)
+						? 1.0f
+						: 0.0f,
+					0.04f
+				};
 				material.Material = glm::vec4{
 					normal != nullptr ? 1.0f : 0.0f,
 					roughness != nullptr ? 1.0f : 0.0f,
 					occlusion != nullptr ? 1.0f : 0.0f,
 					emissive != nullptr ? 1.0f : 0.0f,
 				};
-				material.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, packedPbr != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f};
+				material.MaterialExtra = glm::vec4{
+					metalness != nullptr ? 1.0f : 0.0f, packedPbr != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f
+				};
 				material.PackedPbrChannels = State->SlotPackedPbrChannels[entry.Instance];
 				const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
 				material.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};

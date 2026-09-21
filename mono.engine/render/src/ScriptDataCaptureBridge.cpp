@@ -84,7 +84,8 @@ namespace engine::render {
 					return false;
 				for (const auto &component : packed.Components)
 					if (!Text(component.SourceChannel, 64) || component.SourceComponent > 3 ||
-						std::ranges::find(request.Channels, component.SourceChannel) == request.Channels.end())
+						std::ranges::find(request.Channels, component.SourceChannel) ==
+							request.Channels.end())
 						return false;
 				for (size_t second = first + 1; second < request.PackedPlanes.size(); ++second)
 					if (packed.Name == request.PackedPlanes[second].Name) return false;
@@ -318,9 +319,9 @@ namespace engine::render {
 				   : scalar == DataCaptureScalar::UNorm8 ? "rgba8_unorm"
 				   : channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors
 					   ? "rg16_float"
-				   : scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
+				   : scalar == DataCaptureScalar::UNorm10A2	  ? "unorm10a2"
 				   : channel == DataCaptureChannel::PackedGpu ? "rgba32_float"
-															: "";
+															  : "";
 		}
 
 		bool Compactible(DataCaptureChannel channel) {
@@ -1576,7 +1577,8 @@ namespace engine::render {
 			packedOutputs.reserve(storedRequest.PackedPlanes.size());
 			size_t nativeBytes = 0;
 			for (const DataCapturePlane &plane : captured.Planes) {
-				if (nativeBytes > RETAINED_BYTE_LIMIT || plane.Bytes.size() > RETAINED_BYTE_LIMIT - nativeBytes) {
+				if (nativeBytes > RETAINED_BYTE_LIMIT ||
+					plane.Bytes.size() > RETAINED_BYTE_LIMIT - nativeBytes) {
 					nativeBytes = RETAINED_BYTE_LIMIT + 1;
 					break;
 				}
@@ -1588,9 +1590,11 @@ namespace engine::render {
 				bool missingSource = false;
 				bool compactedDepth = false;
 				for (size_t lane = 0; lane < definition.Components.size(); ++lane) {
-					const auto match = std::ranges::find_if(captured.Planes, [&](const DataCapturePlane &plane) {
-						return definition.Components[lane].SourceChannel == DataCaptureChannelName(plane.Channel);
-					});
+					const auto match =
+						std::ranges::find_if(captured.Planes, [&](const DataCapturePlane &plane) {
+							return definition.Components[lane].SourceChannel ==
+								   DataCaptureChannelName(plane.Channel);
+						});
 					if (match == captured.Planes.end()) {
 						missingSource = true;
 						break;
@@ -1601,9 +1605,10 @@ namespace engine::render {
 						compactedDepth = true;
 				}
 				PackedOutput output{.Definition = definition, .Image = {}, .Rejection = {}};
-				const size_t pixels = sourcePlanes[0] == nullptr
-							  ? 0
-							  : static_cast<size_t>(sourcePlanes[0]->Width) * sourcePlanes[0]->Height;
+				const size_t pixels =
+					sourcePlanes[0] == nullptr
+						? 0
+						: static_cast<size_t>(sourcePlanes[0]->Width) * sourcePlanes[0]->Height;
 				if (missingSource)
 					output.Rejection = "requested_source_missing";
 				else if (compactedDepth)
@@ -1617,9 +1622,10 @@ namespace engine::render {
 				if (output.Rejection.empty()) packedBudget -= output.Image.Bytes.size();
 				packedOutputs.push_back(std::move(output));
 			}
-			if (std::ranges::any_of(packedOutputs, [](const PackedOutput &output) {
-				return !output.Rejection.empty();
-			}) && reply.Status == "ready")
+			if (std::ranges::any_of(
+					packedOutputs, [](const PackedOutput &output) { return !output.Rejection.empty(); }
+				) &&
+				reply.Status == "ready")
 				reply.Status = "partial";
 			bool objectIdsReady = false;
 			bool semanticIdsReady = false;
@@ -1682,7 +1688,8 @@ namespace engine::render {
 			for (PackedOutput &output : packedOutputs) {
 				const std::string resource = PackedResourceId(ticket.first, output.Definition.Name);
 				const bool ready = output.Rejection.empty();
-				const assets::ContentHash hash = ready ? assets::Hasher::Of(output.Image.Bytes) : assets::ContentHash{};
+				const assets::ContentHash hash =
+					ready ? assets::Hasher::Of(output.Image.Bytes) : assets::ContentHash{};
 				reply.Planes.push_back(
 					{.Channel = "packed/" + output.Definition.Name,
 					 .Status = ready ? "ready" : "unsupported",
@@ -1706,7 +1713,7 @@ namespace engine::render {
 					 .Origin = "top_left",
 					 .Packing = "rgba32_float",
 					 .Provenance = ready ? "derived/explicit_channel_pack_rgba32f/v1"
-									 : "unavailable/explicit_channel_pack_" + output.Rejection + "/v1",
+										 : "unavailable/explicit_channel_pack_" + output.Rejection + "/v1",
 					 .Packed = output.Definition,
 					 .Resampling = "pixel_center_nearest/v1"}
 				);

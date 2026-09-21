@@ -46,8 +46,7 @@ namespace engine::render::capture_record_validation {
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors)
 				? scalar == DataCaptureScalar::Float16
 			: (channel == DataCaptureChannel::LinearDepth ||
-			   channel == DataCaptureChannel::SecondSurfaceDepth ||
-			   channel == DataCaptureChannel::PackedGpu)
+			   channel == DataCaptureChannel::SecondSurfaceDepth || channel == DataCaptureChannel::PackedGpu)
 				? scalar == DataCaptureScalar::Float32
 			: channel == DataCaptureChannel::ShadingNormal ? scalar == DataCaptureScalar::UNorm10A2
 			: channel == DataCaptureChannel::ObjectIds	   ? scalar == DataCaptureScalar::UInt32
@@ -66,7 +65,7 @@ namespace engine::render::capture_record_validation {
 			 channel == DataCaptureChannel::SecondSurfaceValidity)
 				? 1
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors) ? 4
-			: channel == DataCaptureChannel::PackedGpu ? 16
+			: channel == DataCaptureChannel::PackedGpu												  ? 16
 			: scalar == DataCaptureScalar::Float16													  ? 8
 																									  : 4;
 		return valid && width > 0 && bytesPerPixel <= std::numeric_limits<size_t>::max() / width
@@ -189,8 +188,8 @@ namespace engine::render::capture_record_validation {
 									   "perspective_correct;surface=visible_builtin_opaque_or_masked;"
 									   "validity=both_float16_components_finite"
 			 : plane.Channel == DataCaptureChannel::PackedGpu
-				 ? plane.Provenance !=
-						"render_graph_pack_channels/v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r"
+				 ? plane.Provenance != "render_graph_pack_channels/"
+									   "v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r"
 			 : plane.Channel == DataCaptureChannel::MotionVectors
 				 ? plane.Provenance != "camera_reprojection/v1;components=delta_x_delta_y;units=pixels;"
 									   "surface=visible_static_builtin_opaque_or_masked;object_motion=false;"

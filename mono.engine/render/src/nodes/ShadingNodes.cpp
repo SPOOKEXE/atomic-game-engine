@@ -313,10 +313,12 @@ namespace engine::render {
 			std::array<Impl::NamedTexture, 4> inputs;
 			std::array<uint32_t, 4> components{};
 			for (size_t index = 0; index < ports.size(); ++index) {
-				const auto found = std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(ports[index]));
+				const auto found =
+					std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(ports[index]));
 				if (found == node->ReadPorts.end()) return false;
 				inputs[index] = GraphTexture(context.Reads[found - node->ReadPorts.begin()], context, false);
-				const std::string *value = node->Parameter(core::Name(std::string(ports[index]) + "-component"));
+				const std::string *value =
+					node->Parameter(core::Name(std::string(ports[index]) + "-component"));
 				if (value != nullptr && (value->size() != 1 || (*value)[0] < '0' || (*value)[0] > '3'))
 					return false;
 				components[index] = value == nullptr ? 0 : uint32_t((*value)[0] - '0');
@@ -330,7 +332,8 @@ namespace engine::render {
 			for (const Impl::NamedTexture &input : inputs)
 				if (input.Texture == output.Texture) return false;
 			std::array<SDL_GPUTextureSamplerBinding, 4> bindings;
-			for (size_t index = 0; index < inputs.size(); ++index) bindings[index] = {inputs[index].Texture, Sampler};
+			for (size_t index = 0; index < inputs.size(); ++index)
+				bindings[index] = {inputs[index].Texture, Sampler};
 			Fullscreen(
 				context.Name,
 				State->PackChannelsPipeline,

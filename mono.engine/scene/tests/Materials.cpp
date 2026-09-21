@@ -116,7 +116,10 @@ TEST_CASE("every PBR map resolves onto the surface appearance", "[scene][materia
 TEST_CASE("a packed material retains only its selected PBR semantics", "[scene][materials]") {
 	Store store = Fresh("materials.packed");
 	const MaterialMaps maps{
-		.PackedPbr = Name("pbr-orm"), .RoughnessChannel = 1, .OcclusionChannel = 0, .MetalnessChannel = 2,
+		.PackedPbr = Name("pbr-orm"),
+		.RoughnessChannel = 1,
+		.OcclusionChannel = 0,
+		.MetalnessChannel = 2,
 	};
 	const Name asset("materials/packed.amat");
 	REQUIRE(RecordMaterial(store, asset, maps));

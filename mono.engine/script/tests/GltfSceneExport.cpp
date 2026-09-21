@@ -139,9 +139,7 @@ TEST_CASE("glTF scene export swizzles packed PBR channels into glTF's fixed layo
 	const auto image = store.CreateInstance(engine::scene::EditableImageClass(), "Packed");
 	REQUIRE(engine::scene::ResizeEditableImage(store, image, 1, 1));
 	const std::array packedPixels{std::byte{90}, std::byte{30}, std::byte{70}, std::byte{200}};
-	REQUIRE(engine::scene::EditableImageFromBuffer(
-		store, image, packedPixels
-	));
+	REQUIRE(engine::scene::EditableImageFromBuffer(store, image, packedPixels));
 	const auto part = engine::scene::MakePart(store, {});
 	Identify(store, part, "scene/packed-pbr");
 	store.Set(
@@ -177,7 +175,10 @@ TEST_CASE("glTF scene export swizzles packed PBR channels into glTF's fixed layo
 		if (pixels == std::vector<uint8_t>{255, 70, 200, 255}) {
 			selected = true;
 			REQUIRE(node.Material.OcclusionTexture);
-			CHECK(exported.Textures[*node.Material.OcclusionTexture].Pixels == std::vector<uint8_t>{30, 0, 0, 255});
+			CHECK(
+				exported.Textures[*node.Material.OcclusionTexture].Pixels ==
+				std::vector<uint8_t>{30, 0, 0, 255}
+			);
 		} else if (pixels == std::vector<uint8_t>{255, 90, 30, 255}) {
 			alternateSelected = true;
 		} else {

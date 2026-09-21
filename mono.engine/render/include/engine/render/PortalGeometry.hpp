@@ -27,8 +27,8 @@ namespace engine::render {
 		// Canonical account identity, empty when the row has no known player owner.
 		std::string Player;
 		// Mesh, colour, normal, roughness, occlusion, height, metalness, emission, packed PBR, shader.
-		// Content names in mesh, colour, normal, roughness, occlusion, height, metalness, emission, packed PBR, shader
-		// order.
+		// Content names in mesh, colour, normal, roughness, occlusion, height, metalness, emission, packed
+		// PBR, shader order.
 		std::array<std::string, 10> Assets;
 		std::array<uint8_t, 4> PackedPbrChannels{255, 255, 255, 255};
 		// Row pose expressed in the destination frame.

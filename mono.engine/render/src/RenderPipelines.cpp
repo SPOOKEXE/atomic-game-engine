@@ -235,20 +235,25 @@ namespace engine::render {
 					if (node->Kind == core::Name("pack-channels")) {
 						const std::array ports{"r", "g", "b", "a"};
 						if (node->Reads.size() != ports.size() || node->Writes.size() != 1 ||
-							node->ReadPorts.size() != ports.size() || node->WritePorts != std::vector{core::Name("packed")}) {
+							node->ReadPorts.size() != ports.size() ||
+							node->WritePorts != std::vector{core::Name("packed")}) {
 							offender = node->Name;
 							reason = "pack-channels needs r, g, b and a inputs plus one packed output";
 							return false;
 						}
 						const auto sampleable = [](graph::ResourceFormat format) {
-							return format != graph::ResourceFormat::R32U && format != graph::ResourceFormat::D24S8 &&
-								   format != graph::ResourceFormat::D32F && format != graph::ResourceFormat::BC1_SRGB &&
-								   format != graph::ResourceFormat::BC3 && format != graph::ResourceFormat::BC5 &&
+							return format != graph::ResourceFormat::R32U &&
+								   format != graph::ResourceFormat::D24S8 &&
+								   format != graph::ResourceFormat::D32F &&
+								   format != graph::ResourceFormat::BC1_SRGB &&
+								   format != graph::ResourceFormat::BC3 &&
+								   format != graph::ResourceFormat::BC5 &&
 								   format != graph::ResourceFormat::BC7_SRGB;
 						};
 						for (size_t index = 0; index < ports.size(); ++index) {
 							if (node->ReadPorts[index] != core::Name(ports[index]) ||
-								std::find(node->Reads.begin(), node->Reads.end(), node->Writes.front()) != node->Reads.end()) {
+								std::find(node->Reads.begin(), node->Reads.end(), node->Writes.front()) !=
+									node->Reads.end()) {
 								offender = node->Name;
 								reason = "pack-channels input cannot alias its output";
 								return false;
@@ -262,10 +267,13 @@ namespace engine::render {
 								reason = "pack-channels component must be an integer from 0 through 3";
 								return false;
 							}
-							const uint32_t selected = component == nullptr ? 0 : uint32_t((*component)[0] - '0');
-							if (source == nullptr || !sampleable(source->Format) || selected >= graph::ChannelCount(source->Format)) {
+							const uint32_t selected =
+								component == nullptr ? 0 : uint32_t((*component)[0] - '0');
+							if (source == nullptr || !sampleable(source->Format) ||
+								selected >= graph::ChannelCount(source->Format)) {
 								offender = node->Name;
-								reason = "pack-channels selector exceeds source components or source is not float sampled";
+								reason = "pack-channels selector exceeds source components or source is not "
+										 "float sampled";
 								return false;
 							}
 						}
@@ -644,8 +652,9 @@ namespace engine::render {
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
-			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment || !packChannelsFragment ||
-			!deferredLightingFragment || !skyFragment || !volumeFragment || !tonemapFragment) {
+			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
+			!packChannelsFragment || !deferredLightingFragment || !skyFragment || !volumeFragment ||
+			!tonemapFragment) {
 			return false;
 		}
 
@@ -863,7 +872,8 @@ namespace engine::render {
 			CameraMotionPipeline = fullscreen(cameraMotionFragment, SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT);
 			SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			if (packChannelsSupported)
-				PackChannelsPipeline = fullscreen(packChannelsFragment, SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT);
+				PackChannelsPipeline =
+					fullscreen(packChannelsFragment, SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT);
 			DeferredLightingPipeline =
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);

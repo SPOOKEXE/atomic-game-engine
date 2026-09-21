@@ -176,10 +176,22 @@ TEST_CASE("packed capture planes retain depth and resample scalar sources", "[re
 	material.RowStride = 8;
 	material.Scalar = DataCaptureScalar::UNorm8;
 	material.Bytes = {
-		std::byte{10}, std::byte{20}, std::byte{30}, std::byte{40},
-		std::byte{50}, std::byte{60}, std::byte{70}, std::byte{80},
-		std::byte{90}, std::byte{100}, std::byte{110}, std::byte{120},
-		std::byte{130}, std::byte{140}, std::byte{150}, std::byte{160},
+		std::byte{10},
+		std::byte{20},
+		std::byte{30},
+		std::byte{40},
+		std::byte{50},
+		std::byte{60},
+		std::byte{70},
+		std::byte{80},
+		std::byte{90},
+		std::byte{100},
+		std::byte{110},
+		std::byte{120},
+		std::byte{130},
+		std::byte{140},
+		std::byte{150},
+		std::byte{160},
 	};
 	const std::array<const DataCapturePlane *, 4> planes{&depth, &occlusion, &material, &material};
 	std::array components{
@@ -383,7 +395,10 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 			return candidate == world;
 		}
 	);
-	REQUIRE(session.Pause("data-world", world::DataFactoryPauseScope::AllSystems, 0).Status == world::DataFactoryStatus::Ok);
+	REQUIRE(
+		session.Pause("data-world", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
 	std::string snapshot;
 	REQUIRE(session.Snapshot("data-world", snapshot).Status == world::DataFactoryStatus::Ok);
 	ScriptDataCaptureBridge bridge(session, renderer);
@@ -397,7 +412,9 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 	};
 	request.PackedPlanes.push_back({
 		.Name = "depth_ao_roughness",
-		.Components = {{{"linear_depth", 0}, {"ambient_occlusion", 0}, {"pbr_material", 0}, {"pbr_material", 2}}},
+		.Components = {
+			{{"linear_depth", 0}, {"ambient_occlusion", 0}, {"pbr_material", 0}, {"pbr_material", 2}}
+		},
 	});
 	uint64_t ticket = 0;
 	std::string detail;
@@ -435,11 +452,15 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 	REQUIRE(gpuPacked != poll.Planes.end());
 	CHECK(gpuPacked->Scalar == "float32");
 	CHECK(gpuPacked->Packing == "rgba32_float");
-	CHECK(gpuPacked->Provenance ==
-		  "render_graph_pack_channels/v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r");
+	CHECK(
+		gpuPacked->Provenance ==
+		"render_graph_pack_channels/v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r"
+	);
 	std::vector<std::byte> bytes, gpuBytes;
 	REQUIRE(bridge.ReadPlane("data-world", ticket, packed->Resource, 0, packed->ByteSize, bytes, detail));
-	REQUIRE(bridge.ReadPlane("data-world", ticket, gpuPacked->Resource, 0, gpuPacked->ByteSize, gpuBytes, detail));
+	REQUIRE(
+		bridge.ReadPlane("data-world", ticket, gpuPacked->Resource, 0, gpuPacked->ByteSize, gpuBytes, detail)
+	);
 	CHECK(bytes.size() == packed->ByteSize);
 	CHECK(packed->RowStride == packed->Width * 16);
 	CHECK(gpuPacked->RowStride == gpuPacked->Width * 16);

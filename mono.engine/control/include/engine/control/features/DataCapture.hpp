@@ -445,10 +445,13 @@ namespace engine::control {
 			};
 			json packed = nullptr;
 			if (plane.Packed) {
-				packed = {{"schema_version", "data-capture-packed-rgba32f/v1"}, {"components", json::array()}};
+				packed = {
+					{"schema_version", "data-capture-packed-rgba32f/v1"}, {"components", json::array()}
+				};
 				for (const auto &component : plane.Packed->Components)
 					packed["components"].push_back(
-						{{"source_channel", component.SourceChannel}, {"source_component", component.SourceComponent}}
+						{{"source_channel", component.SourceChannel},
+						 {"source_component", component.SourceComponent}}
 					);
 			}
 			return {
@@ -603,7 +606,8 @@ namespace engine::control {
 			json component{{"type", "object"}, {"additionalProperties", false}};
 			component["required"] = {"source_channel", "source_component"};
 			component["properties"] = {
-				{"source_channel", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}},
+				{"source_channel",
+				 {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}},
 				{"source_component", {{"type", "integer"}, {"minimum", 0}, {"maximum", 3}}},
 			};
 			json result{{"type", "object"}, {"additionalProperties", false}};
@@ -611,10 +615,7 @@ namespace engine::control {
 			result["properties"] = {
 				{"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}},
 				{"components",
-				 {{"type", "array"},
-				  {"minItems", 4},
-				  {"maxItems", 4},
-				  {"items", std::move(component)}}},
+				 {{"type", "array"}, {"minItems", 4}, {"maxItems", 4}, {"items", std::move(component)}}},
 			};
 			return result;
 		}
@@ -748,33 +749,46 @@ namespace engine::control {
 				}
 				if (const auto packed = values.find("packed_planes"); packed != values.end()) {
 					if (!packed->is_array() || packed->size() > script::MAX_DATA_CAPTURE_PACKED_PLANES) {
-						failure = Error("validation_failed", "packed_planes must contain at most three outputs");
+						failure =
+							Error("validation_failed", "packed_planes must contain at most three outputs");
 						return nullptr;
 					}
 					for (const json &entry : *packed) {
-						if (!entry.is_object() || !Only(entry, {"name", "components"}, failure)) return nullptr;
+						if (!entry.is_object() || !Only(entry, {"name", "components"}, failure))
+							return nullptr;
 						const json *name = nullptr;
 						const json *components = nullptr;
-						if (!Field(entry, "name", name, failure) || !Field(entry, "components", components, failure) ||
-							!components->is_array() || components->size() != 4) {
+						if (!Field(entry, "name", name, failure) ||
+							!Field(entry, "components", components, failure) || !components->is_array() ||
+							components->size() != 4) {
 							failure = Error("validation_failed", "packed plane requires four components");
 							return nullptr;
 						}
 						script::DataCaptureBridgePackedPlane definition;
-						if (!OptionText(*name, "packed_planes.name", MAXIMUM_CHANNEL_NAME, definition.Name, failure))
+						if (!OptionText(
+								*name, "packed_planes.name", MAXIMUM_CHANNEL_NAME, definition.Name, failure
+							))
 							return nullptr;
 						for (size_t lane = 0; lane < definition.Components.size(); ++lane) {
 							const json &component = (*components)[lane];
 							const json *source = nullptr;
 							const json *sourceComponent = nullptr;
 							uint64_t index = 0;
-							if (!component.is_object() || !Only(component, {"source_channel", "source_component"}, failure) ||
+							if (!component.is_object() ||
+								!Only(component, {"source_channel", "source_component"}, failure) ||
 								!Field(component, "source_channel", source, failure) ||
-								!OptionText(*source, "packed_planes.source_channel", MAXIMUM_CHANNEL_NAME,
-									definition.Components[lane].SourceChannel, failure) ||
+								!OptionText(
+									*source,
+									"packed_planes.source_channel",
+									MAXIMUM_CHANNEL_NAME,
+									definition.Components[lane].SourceChannel,
+									failure
+								) ||
 								!Field(component, "source_component", sourceComponent, failure) ||
-								!UInt(*sourceComponent, "packed_planes.source_component", index, failure) || index > 3) {
-								failure = Error("validation_failed", "packed source component must be 0 through 3");
+								!UInt(*sourceComponent, "packed_planes.source_component", index, failure) ||
+								index > 3) {
+								failure =
+									Error("validation_failed", "packed source component must be 0 through 3");
 								return nullptr;
 							}
 							definition.Components[lane].SourceComponent = static_cast<uint8_t>(index);

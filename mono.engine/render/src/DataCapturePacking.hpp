@@ -68,33 +68,36 @@ namespace engine::render::data_capture_packing {
 	}
 
 	inline size_t ComponentBytes(DataCaptureScalar scalar) {
-		return scalar == DataCaptureScalar::UNorm8 ? 1
-			 : scalar == DataCaptureScalar::Float16 ? 2
-		 : scalar == DataCaptureScalar::Float32 ? 4
-											 : 0;
+		return scalar == DataCaptureScalar::UNorm8	  ? 1
+			   : scalar == DataCaptureScalar::Float16 ? 2
+			   : scalar == DataCaptureScalar::Float32 ? 4
+													  : 0;
 	}
 
 	inline bool PixelComponent(
 		const DataCapturePlane &plane, uint32_t column, uint32_t row, uint8_t component, float &value
 	) {
-		if (column >= plane.Width || row >= plane.Height || plane.Width == 0 || plane.Height == 0) return false;
+		if (column >= plane.Width || row >= plane.Height || plane.Width == 0 || plane.Height == 0)
+			return false;
 		const size_t pixelBytes = ComponentCount(plane) * ComponentBytes(plane.Scalar);
 		const size_t rowOffset = static_cast<size_t>(row) * plane.RowStride;
 		const size_t pixelOffset = rowOffset + static_cast<size_t>(column) * pixelBytes;
 		if (pixelBytes == 0 || plane.RowStride < static_cast<size_t>(plane.Width) * pixelBytes ||
-			rowOffset > plane.Bytes.size() ||
-			pixelBytes > plane.Bytes.size() - rowOffset || pixelOffset > plane.Bytes.size() ||
-			pixelBytes > plane.Bytes.size() - pixelOffset)
+			rowOffset > plane.Bytes.size() || pixelBytes > plane.Bytes.size() - rowOffset ||
+			pixelOffset > plane.Bytes.size() || pixelBytes > plane.Bytes.size() - pixelOffset)
 			return false;
 		switch (plane.Scalar) {
 		case DataCaptureScalar::UNorm8:
 			if (component >= pixelBytes) return false;
-			value = static_cast<float>(std::to_integer<uint8_t>(plane.Bytes[pixelOffset + component])) / 255.0f;
+			value =
+				static_cast<float>(std::to_integer<uint8_t>(plane.Bytes[pixelOffset + component])) / 255.0f;
 			return true;
 		case DataCaptureScalar::Float16: {
 			if (component >= pixelBytes / 2 || pixelBytes % 2 != 0) return false;
 			uint16_t bits = 0;
-			std::memcpy(&bits, plane.Bytes.data() + pixelOffset + static_cast<size_t>(component) * 2, sizeof(bits));
+			std::memcpy(
+				&bits, plane.Bytes.data() + pixelOffset + static_cast<size_t>(component) * 2, sizeof(bits)
+			);
 			value = Float16ToFloat32(bits);
 			return true;
 		}
@@ -146,13 +149,16 @@ namespace engine::render::data_capture_packing {
 						(static_cast<uint64_t>(row) * 2 + 1) * source.Height / (result.Height * 2)
 					);
 					float value = 0.0f;
-					if (!PixelComponent(source, sourceColumn, sourceRow, components[lane].SourceComponent, value)) {
+					if (!PixelComponent(
+							source, sourceColumn, sourceRow, components[lane].SourceComponent, value
+						)) {
 						rejection = "unsupported_source_layout";
 						result = {};
 						return false;
 					}
 					std::memcpy(
-						result.Bytes.data() + (static_cast<size_t>(row) * result.Width + column) * 16 + lane * 4,
+						result.Bytes.data() + (static_cast<size_t>(row) * result.Width + column) * 16 +
+							lane * 4,
 						&value,
 						sizeof(value)
 					);

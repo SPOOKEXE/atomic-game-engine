@@ -769,13 +769,19 @@ TEST_CASE("pack-channels admits native scalar lanes and rejects impossible selec
 	const auto make = [](ResourceFormat greenFormat, std::string greenComponent, bool consumePacked = false) {
 		RenderGraph graph;
 		const auto depth = graph.AddResource(
-			{.Name = Name("depth"), .Kind = ResourceKind::Colour, .Format = ResourceFormat::R32F, .External = true}
+			{.Name = Name("depth"),
+			 .Kind = ResourceKind::Colour,
+			 .Format = ResourceFormat::R32F,
+			 .External = true}
 		);
 		const auto green = graph.AddResource(
 			{.Name = Name("green"), .Kind = ResourceKind::Colour, .Format = greenFormat, .External = true}
 		);
 		const auto material = graph.AddResource(
-			{.Name = Name("material"), .Kind = ResourceKind::Colour, .Format = ResourceFormat::RGBA8, .External = true}
+			{.Name = Name("material"),
+			 .Kind = ResourceKind::Colour,
+			 .Format = ResourceFormat::RGBA8,
+			 .External = true}
 		);
 		const auto packed = graph.AddResource(
 			{.Name = Name("packed"), .Kind = ResourceKind::Colour, .Format = ResourceFormat::RGBA32F}

@@ -1046,8 +1046,8 @@ namespace engine::scene {
 				appearances[index].EmissiveStrength = reader.ReadFloat();
 				const uint8_t resample = reader.ReadUInt8();
 				appearances[index].Resample = resample <= static_cast<uint8_t>(SurfaceResampleMode::Pixelated)
-											  ? static_cast<SurfaceResampleMode>(resample)
-											  : SurfaceResampleMode::Default;
+												  ? static_cast<SurfaceResampleMode>(resample)
+												  : SurfaceResampleMode::Default;
 				appearances[index].PackedPbrMap = reader.ReadName();
 				auto channel = [&reader]() {
 					const uint8_t value = reader.ReadUInt8();

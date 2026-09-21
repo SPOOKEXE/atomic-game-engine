@@ -549,12 +549,15 @@ namespace engine::script {
 						metalnessChannel = surface->MetalnessChannel;
 					}
 				}
-				const core::Name roughnessName =
-					packedPbr != nullptr && surface->RoughnessChannel < 4 ? surface->PackedPbrMap : surface->RoughnessMap;
-				const core::Name occlusionName =
-					packedPbr != nullptr && surface->OcclusionChannel < 4 ? surface->PackedPbrMap : surface->OcclusionMap;
-				const core::Name metalnessName =
-					packedPbr != nullptr && surface->MetalnessChannel < 4 ? surface->PackedPbrMap : surface->MetalnessMap;
+				const core::Name roughnessName = packedPbr != nullptr && surface->RoughnessChannel < 4
+													 ? surface->PackedPbrMap
+													 : surface->RoughnessMap;
+				const core::Name occlusionName = packedPbr != nullptr && surface->OcclusionChannel < 4
+													 ? surface->PackedPbrMap
+													 : surface->OcclusionMap;
+				const core::Name metalnessName = packedPbr != nullptr && surface->MetalnessChannel < 4
+													 ? surface->PackedPbrMap
+													 : surface->MetalnessMap;
 				if (!extractOnly && roughness != nullptr && metalness != nullptr &&
 					(roughness->Width != metalness->Width || roughness->Height != metalness->Height)) {
 					captured.Unavailable.push_back(
@@ -663,7 +666,8 @@ namespace engine::script {
 				if (swizzleOcclusion) {
 					addedBytes += static_cast<size_t>(packedPbr->Width) * packedPbr->Height * 4;
 				}
-				if (newImages.size() + static_cast<size_t>(newPacked) + static_cast<size_t>(swizzleOcclusion) >
+				if (newImages.size() + static_cast<size_t>(newPacked) +
+							static_cast<size_t>(swizzleOcclusion) >
 						MAX_GLTF_EXPORT_TEXTURES - captured.Textures.size() ||
 					addedBytes > MAX_GLTF_EXPORT_TEXTURE_BYTES - textureBytes) {
 					captured.Unavailable.push_back({id, "appearance", "texture_export_limit"});
@@ -676,9 +680,13 @@ namespace engine::script {
 					packedOcclusion.Name = id + "/occlusion";
 					packedOcclusion.Width = packedPbr->Width;
 					packedOcclusion.Height = packedPbr->Height;
-					packedOcclusion.Pixels.resize(static_cast<size_t>(packedPbr->Width) * packedPbr->Height * 4);
-					for (size_t pixel = 0; pixel < static_cast<size_t>(packedPbr->Width) * packedPbr->Height; ++pixel) {
-						packedOcclusion.Pixels[pixel * 4] = ExportChannel(*packedPbr, pixel, occlusionChannel, false);
+					packedOcclusion.Pixels.resize(
+						static_cast<size_t>(packedPbr->Width) * packedPbr->Height * 4
+					);
+					for (size_t pixel = 0; pixel < static_cast<size_t>(packedPbr->Width) * packedPbr->Height;
+						 ++pixel) {
+						packedOcclusion.Pixels[pixel * 4] =
+							ExportChannel(*packedPbr, pixel, occlusionChannel, false);
 						packedOcclusion.Pixels[pixel * 4 + 1] = 0;
 						packedOcclusion.Pixels[pixel * 4 + 2] = 0;
 						packedOcclusion.Pixels[pixel * 4 + 3] = 255;
@@ -688,8 +696,11 @@ namespace engine::script {
 					captured.Textures.push_back(std::move(packedOcclusion));
 				} else {
 					material.OcclusionTexture = addImage(
-						packedPbr != nullptr && surface->OcclusionChannel < 4 ? surface->PackedPbrMap : surface->OcclusionMap,
-						occlusion, "occlusion", false
+						packedPbr != nullptr && surface->OcclusionChannel < 4 ? surface->PackedPbrMap
+																			  : surface->OcclusionMap,
+						occlusion,
+						"occlusion",
+						false
 					);
 				}
 				material.EmissiveTexture = addImage(surface->EmissiveMap, emissive, "emissive", true);
@@ -707,9 +718,13 @@ namespace engine::script {
 							 ++pixel) {
 							packed.Pixels[pixel * 4] = 255;
 							packed.Pixels[pixel * 4 + 1] =
-								roughness != nullptr ? ExportChannel(*roughness, pixel, roughnessChannel, false) : 255;
+								roughness != nullptr
+									? ExportChannel(*roughness, pixel, roughnessChannel, false)
+									: 255;
 							packed.Pixels[pixel * 4 + 2] =
-								metalness != nullptr ? ExportChannel(*metalness, pixel, metalnessChannel, false) : 255;
+								metalness != nullptr
+									? ExportChannel(*metalness, pixel, metalnessChannel, false)
+									: 255;
 							packed.Pixels[pixel * 4 + 3] = 255;
 						}
 						material.MetallicRoughnessTexture = captured.Textures.size();

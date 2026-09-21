@@ -134,7 +134,8 @@ namespace engine::render {
 			for (const auto &asset : row.Assets) {
 				writer.WriteString(asset);
 			}
-			for (const uint8_t channel : row.PackedPbrChannels) writer.WriteUInt8(channel);
+			for (const uint8_t channel : row.PackedPbrChannels)
+				writer.WriteUInt8(channel);
 			GeometryFloats(writer, row.Pose);
 			GeometryFloats(writer, row.HalfExtent);
 			GeometryFloats(writer, row.Tint);
@@ -199,7 +200,8 @@ namespace engine::render {
 						return false;
 					}
 				}
-				for (uint8_t &channel : row.PackedPbrChannels) channel = reader.ReadUInt8();
+				for (uint8_t &channel : row.PackedPbrChannels)
+					channel = reader.ReadUInt8();
 				GeometryFloats(reader, row.Pose);
 				GeometryFloats(reader, row.HalfExtent);
 				GeometryFloats(reader, row.Tint);
@@ -221,8 +223,8 @@ namespace engine::render {
 				row.FirstJoint = reader.ReadUInt32();
 				row.JointCount = reader.ReadUInt32();
 				if (reader.Failed() || !ValidRow(row, joints)) return false;
-				measure.MetadataBytes +=
-					row.Name.size() + row.Player.size() + row.Alpha.size() + row.Resample.size() + row.PackedPbrChannels.size();
+				measure.MetadataBytes += row.Name.size() + row.Player.size() + row.Alpha.size() +
+										 row.Resample.size() + row.PackedPbrChannels.size();
 				for (const auto &asset : row.Assets)
 					measure.MetadataBytes += asset.size();
 				if constexpr (StoreRows) geometry->Rows[index] = std::move(row);

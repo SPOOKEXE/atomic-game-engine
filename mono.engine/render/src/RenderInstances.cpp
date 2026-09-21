@@ -278,7 +278,8 @@ namespace engine::render {
 				// scalar. Treating the missing marker as data would overwrite all of
 				// them with magenta-channel values.
 				SDL_GPUTexture *const packedPbr = Textures.Find(
-					SlotPackedPbrMap[slot], TextureContentOwner(SlotPackedPbrMap[slot], SlotContentOwner[slot])
+					SlotPackedPbrMap[slot],
+					TextureContentOwner(SlotPackedPbrMap[slot], SlotContentOwner[slot])
 				);
 				SDL_GPUSampler *const materialSampler =
 					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()
@@ -333,8 +334,7 @@ namespace engine::render {
 				uniforms.Surface = glm::vec4{
 					sampled != nullptr ? 1.0f : 0.0f,
 					0.0f,
-					height != nullptr ||
-							(packedPbr != nullptr && SlotPackedPbrChannels[slot].z < 4.0f)
+					height != nullptr || (packedPbr != nullptr && SlotPackedPbrChannels[slot].z < 4.0f)
 						? 1.0f
 						: 0.0f,
 					0.04f,
