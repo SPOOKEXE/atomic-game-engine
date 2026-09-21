@@ -9,8 +9,8 @@
 
 #include "LodPreview.hpp"
 
-#include <engine/ecs/Store.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/render/SpatialCanvas.hpp>
@@ -442,9 +442,9 @@ namespace studio {
 				const PendingPickAction pick = PendingPick;
 				PendingPick = PendingPickAction{};
 
-			// The bound check replaces the one `ProjectionFor` used to make on
-			// the pick's behalf, now that the projection arrives as an argument
-			// rather than being fetched by index inside.
+				// The bound check replaces the one `ProjectionFor` used to make on
+				// the pick's behalf, now that the projection arrives as an argument
+				// rather than being fetched by index inside.
 				if (!overHandle && pick.Viewport < projections.size()) {
 					PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add, projections[pick.Viewport]);
 				}
@@ -489,14 +489,14 @@ namespace studio {
 				if (!slot.Drawn || slot.List == nullptr || !projections[index].IsValid()) {
 					continue;
 				}
-					slot.List->PushClipRect(
-						ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
-					);
-					const bool movingSelection = DragOnSurface(index, projections[index]);
-					if (!movingSelection) {
-						DragSelectionBox(index, projections[index]);
-					}
-					slot.List->PopClipRect();
+				slot.List->PushClipRect(
+					ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
+				);
+				const bool movingSelection = DragOnSurface(index, projections[index]);
+				if (!movingSelection) {
+					DragSelectionBox(index, projections[index]);
+				}
+				slot.List->PopClipRect();
 			}
 		}
 
@@ -505,26 +505,27 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("overlay selection outlines", engine::core::ProfileCategory::Render);
 			if (SelectionWorld.IsValid() && !Selection.empty() && Universe != nullptr) {
-			// Gather after the input pass. Every viewport projects the same current
-			// geometry, rather than each rebuilding corners from the world.
-			if (selectionOutlines.capacity() < Selection.size()) selectionOutlines.reserve(Selection.size());
-			Universe->Enter(SelectionWorld, [&](Store &store) {
-				for (const Entity instance : Selection) {
-					const auto *transform = store.Get<engine::scene::Transform>(instance);
-					const auto *bounds = store.Get<engine::scene::Bounds>(instance);
-					if (store.Alive(instance) && transform != nullptr && bounds != nullptr) {
-						SelectionOutlineBatch::Entry outline{
-							.Frame = transform->Frame, .HalfExtent = bounds->HalfExtent
-						};
-						for (int corner = 0; corner < 8; corner++) {
-							const Vector3 local{
-								(corner & 1) ? outline.HalfExtent.X : -outline.HalfExtent.X,
-								(corner & 2) ? outline.HalfExtent.Y : -outline.HalfExtent.Y,
-								(corner & 4) ? outline.HalfExtent.Z : -outline.HalfExtent.Z,
+				// Gather after the input pass. Every viewport projects the same current
+				// geometry, rather than each rebuilding corners from the world.
+				if (selectionOutlines.capacity() < Selection.size())
+					selectionOutlines.reserve(Selection.size());
+				Universe->Enter(SelectionWorld, [&](Store &store) {
+					for (const Entity instance : Selection) {
+						const auto *transform = store.Get<engine::scene::Transform>(instance);
+						const auto *bounds = store.Get<engine::scene::Bounds>(instance);
+						if (store.Alive(instance) && transform != nullptr && bounds != nullptr) {
+							SelectionOutlineBatch::Entry outline{
+								.Frame = transform->Frame, .HalfExtent = bounds->HalfExtent
 							};
-							outline.Corners[corner] = outline.Frame.PointToWorldSpace(local);
-						}
-						selectionOutlines.push_back(std::move(outline));
+							for (int corner = 0; corner < 8; corner++) {
+								const Vector3 local{
+									(corner & 1) ? outline.HalfExtent.X : -outline.HalfExtent.X,
+									(corner & 2) ? outline.HalfExtent.Y : -outline.HalfExtent.Y,
+									(corner & 4) ? outline.HalfExtent.Z : -outline.HalfExtent.Z,
+								};
+								outline.Corners[corner] = outline.Frame.PointToWorldSpace(local);
+							}
+							selectionOutlines.push_back(std::move(outline));
 						}
 					}
 				});
@@ -534,435 +535,448 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("overlay drawing", engine::core::ProfileCategory::Render);
 			for (size_t index = 0; index < Overlays.size(); index++) {
-			OverlaySlot &slot = Overlays[index];
-			if (!slot.Drawn || slot.List == nullptr) {
-				continue;
-			}
-
-			const PanelProjection &panel = projections[index];
-			if (!panel.IsValid()) {
-				continue;
-			}
-
-			ImDrawList *list = slot.List;
-
-			// **Clipped to the panel, or the grid draws over the explorer.** A
-			// draw list is the window's, and a line projected off the edge is
-			// still a line in it.
-			list->PushClipRect(
-				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
-			);
-
-			DrawColliderOutlines(index, panel);
-			DrawAdornments(index, panel);
-			if (ShowActiveLod && Universe != nullptr) {
-				const std::array<float, 3> distanceBands = LodMinimumDistances(Prefs);
-				Universe->Enter(ViewportWorld(index), [&](Store &store) {
-					DrawActiveLodLabels(store, list, panel, distanceBands);
-				});
-			}
-
-			// **`PushClipRect` is a scissor, not a reject.** It stops the pixels
-			// reaching the explorer and does nothing about the vertices: an
-			// `AddLine` for a segment entirely off the side of the panel still
-			// builds its geometry, still grows the draw list, and is still
-			// walked again by `ImGui::Render` in `ui.end`. The grid alone
-			// submits a hundred and sixty-three segments per viewport per frame
-			// - more than every panel in the editor put together - and a camera
-			// looking along the ground has most of them off one edge.
-			//
-			// A trivial reject: both ends past the same edge means no part of
-			// the segment is inside, so nothing visible can be dropped. A
-			// segment that straddles the panel is kept whatever its endpoints
-			// are, which is why this tests the edges separately rather than
-			// testing whether either end is inside.
-			const float leftEdge = slot.X;
-			const float rightEdge = slot.X + slot.Width;
-			const float topEdge = slot.Y;
-			const float bottomEdge = slot.Y + slot.Height;
-
-			const auto segment = [&](Vector3 from, Vector3 to, ImU32 colour, float thickness) {
-				glm::vec2 a{};
-				glm::vec2 b{};
-				if (!panel.ProjectSegment(from, to, a, b)) {
-					return;
-				}
-				if ((a.x < leftEdge && b.x < leftEdge) || (a.x > rightEdge && b.x > rightEdge) ||
-					(a.y < topEdge && b.y < topEdge) || (a.y > bottomEdge && b.y > bottomEdge)) {
-					return;
-				}
-				list->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, b.y), colour, thickness);
-			};
-
-			// **Not over a client replica.** The grid is authoring furniture:
-			// it says where the origin is and how big a metre is while you are
-			// placing things. A replica panel is the one picture in this editor
-			// that is exactly what a player sees, so editor furniture drawn on
-			// it makes "does this look right" impossible to answer from the
-			// picture in front of you.
-			//
-			// **Running is not the same as being a player's view.** `Server` and
-			// `Play` still simulate a world the author owns and keeps placing
-			// things in, and Roblox's studio keeps its grid through both for the
-			// same reason. The author who wants the clean picture turns
-			// `ShowGrid` off, which is one click and already exists - the mode
-			// does not need to decide it for them.
-			//
-			// Per scene rather than per universe, like everything else about
-			// the transport: with two viewports on two worlds, one may be a
-			// replica while the other is authored, and the authored one keeps
-			// its grid.
-			//
-			// A replica carries no run record of its own, so `ModeOf` answers
-			// `Edit` for it and mode alone would never exclude it.
-			const WorldId shown = ViewportWorld(index);
-			const bool authoring = !IsReplicaWorld(shown);
-
-			if (ShowLodDebugRadii) {
-				// These rings are screen-space guides for the distance preferences.
-				// They are centred beneath the camera so the three thresholds remain
-				// readable while orbiting instead of becoming world geometry.
-				const Vector3 centre{panel.Eye.X, 0.0f, panel.Eye.Z};
-				const std::array<float, 3> distances = LodMinimumDistances(Prefs);
-				for (size_t level = 0; level < 3; level++) {
-					const float radius = distances[level];
-					if (!(radius > 0.0f) || !std::isfinite(radius)) {
-						continue;
-					}
-
-					constexpr int RING_STEPS = 48;
-					glm::vec2 previous{};
-					bool havePrevious = false;
-					for (int step = 0; step <= RING_STEPS; step++) {
-						const float angle =
-							6.2831853f * static_cast<float>(step) / static_cast<float>(RING_STEPS);
-						const Vector3 point =
-							centre + Vector3{std::cos(angle) * radius, 0.0f, std::sin(angle) * radius};
-						glm::vec2 screen{};
-						if (!panel.WorldToPanel(point, screen)) {
-							havePrevious = false;
-							continue;
-						}
-						if (havePrevious) {
-							list->AddLine(
-								ImVec2(previous.x, previous.y),
-								ImVec2(screen.x, screen.y),
-								IM_COL32(120, 190, 255, 145),
-								1.0f
-							);
-						}
-						previous = screen;
-						havePrevious = true;
-					}
-
-					glm::vec2 label{};
-					if (panel.WorldToPanel(centre + Vector3{radius, 0.0f, 0.0f}, label)) {
-						static constexpr const char *LABELS[3] = {"LOD1", "LOD2", "LOD3"};
-						list->AddText(
-							ImVec2(label.x + 4.0f, label.y - 8.0f),
-							IM_COL32(150, 210, 255, 210),
-							LABELS[level]
-						);
-					}
-				}
-			}
-
-			// **The overlay copy is the always-on-top one, and it is drawn only
-			// while a handle is held.** The renderer draws the grid the rest of
-			// the time - see `ConfigureGroundGrid` - where it is a plane with
-			// its own depth and the geometry in front of it hides it. That is
-			// the right way round for looking at a scene and the wrong way
-			// round for placing something in it: a part being dragged sits on
-			// the grid and would hide the very lines somebody is lining it up
-			// against.
-			//
-			// A handle held anywhere counts, not one held in this panel. A drag
-			// is watched from whichever viewport shows the axis best, and a
-			// grid that changed in one panel and not the other would be two
-			// answers to one question.
-			const bool dragged = Dragging.Axis >= 0 || SurfaceDragging.Active;
-
-			if (ShowGrid && authoring && dragged) {
-				const Vector3 eye = panel.Eye;
-				const float gridStep = GridSettings.Step;
-				const int gridMajor = static_cast<int>(GridSettings.Major);
-				const int gridRadius = static_cast<int>(std::ceil(GridSettings.Reach / gridStep));
-				const int gridDense = std::min(GRID_DENSE, gridRadius);
-				const float gridOriginX = GridSettings.Offset.X;
-				const float gridOriginZ = GridSettings.Offset.Z;
-				const float originX = gridOriginX + SnapDown(eye.X - gridOriginX, gridStep);
-				const float originZ = gridOriginZ + SnapDown(eye.Z - gridOriginZ, gridStep);
-				const float reach = GridSettings.Reach;
-
-				// One line, cut into pieces, each faded by where its own middle
-				// is. See `GRID_PIECES` and `GridFade` for why a whole line
-				// cannot do this.
-				//
-				// `along` is the axis the line runs down and `across` is the
-				// coordinate that picks the line, so the same lambda draws both
-				// directions and there is one copy of the fading to be wrong in.
-				const auto fadedLine = [&](float across, bool alongZ) {
-					const float gridOrigin = alongZ ? gridOriginX : gridOriginZ;
-					const bool major = IsMajorLine(across, gridOrigin, gridStep, gridMajor);
-					const float centre = alongZ ? originZ : originX;
-					const float span = (2.0f * reach) / static_cast<float>(GRID_PIECES);
-
-					for (int piece = 0; piece < GRID_PIECES; piece++) {
-						const float start = centre - reach + span * static_cast<float>(piece);
-						const float end = start + span;
-						const float middle = (start + end) * 0.5f;
-
-						const float dx = alongZ ? across - eye.X : middle - eye.X;
-						const float dz = alongZ ? middle - eye.Z : across - eye.Z;
-						const float fade = GridFade(dx, dz, reach);
-						if (fade <= 0.0f) {
-							continue;
-						}
-
-						const Vector3 from =
-							alongZ ? Vector3{across, 0.0f, start} : Vector3{start, 0.0f, across};
-						const Vector3 to = alongZ ? Vector3{across, 0.0f, end} : Vector3{end, 0.0f, across};
-						segment(
-							from,
-							to,
-							GridColour(
-								fade, major, GridSettings.Colour, GridSettings.Alpha, GridSettings.Strength
-							),
-							GRID_THICKNESS
-						);
-					}
-				};
-
-				for (int step = -gridRadius; step <= gridRadius; step++) {
-					const float offset = static_cast<float>(step) * gridStep;
-					const float x = originX + offset;
-					const float z = originZ + offset;
-					const bool majorX = IsMajorLine(x, gridOriginX, gridStep, gridMajor);
-					const bool majorZ = IsMajorLine(z, gridOriginZ, gridStep, gridMajor);
-
-					// **The axes are drawn separately below, so the two lines
-					// that would sit under them are skipped.** Drawing both
-					// leaves a grey line showing through a coloured one, which
-					// reads as the axis being the wrong colour.
-					// Past the dense band, only the heavy lines continue. See
-					// `GRID_DENSE`.
-					if (std::abs(step) > gridDense && !majorX && !majorZ) {
-						continue;
-					}
-
-					if (std::abs(x - gridOriginX) > 0.001f && (std::abs(step) <= gridDense || majorX)) {
-						fadedLine(x, true);
-					}
-					if (std::abs(z - gridOriginZ) > 0.001f && (std::abs(step) <= gridDense || majorZ)) {
-						fadedLine(z, false);
-					}
+				OverlaySlot &slot = Overlays[index];
+				if (!slot.Drawn || slot.List == nullptr) {
+					continue;
 				}
 
-				// The origin axes, in the conventional colours: X red, Z blue.
-				// Y is not drawn along the ground because it is not on it -
-				// a vertical line at the origin instead, so "up" has a mark.
-				const float reachAxis = reach;
-				segment(
-					Vector3{originX - reachAxis, 0.0f, gridOriginZ},
-					Vector3{originX + reachAxis, 0.0f, gridOriginZ},
-					ImGui::GetColorU32(ImVec4(
-						GridSettings.AxisX.R,
-						GridSettings.AxisX.G,
-						GridSettings.AxisX.B,
-						GridSettings.AxisAlpha * GridSettings.Strength
-					)),
-					AXIS_THICKNESS
+				const PanelProjection &panel = projections[index];
+				if (!panel.IsValid()) {
+					continue;
+				}
+
+				ImDrawList *list = slot.List;
+
+				// **Clipped to the panel, or the grid draws over the explorer.** A
+				// draw list is the window's, and a line projected off the edge is
+				// still a line in it.
+				list->PushClipRect(
+					ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
 				);
-				segment(
-					Vector3{gridOriginX, 0.0f, originZ - reachAxis},
-					Vector3{gridOriginX, 0.0f, originZ + reachAxis},
-					ImGui::GetColorU32(ImVec4(
-						GridSettings.AxisZ.R,
-						GridSettings.AxisZ.G,
-						GridSettings.AxisZ.B,
-						GridSettings.AxisAlpha * GridSettings.Strength
-					)),
-					AXIS_THICKNESS
-				);
-				segment(
-					Vector3{gridOriginX, 0.0f, gridOriginZ},
-					Vector3{gridOriginX, gridStep, gridOriginZ},
-					ImGui::GetColorU32(ImVec4(0.45f, 0.85f, 0.40f, 0.65f)),
-					AXIS_THICKNESS
-				);
-			}
 
-			// The selection, boxed. **Drawn per panel rather than once**,
-			// because two viewports showing the same world both have to show it
-			// and they have different projections.
-			if (shown.IsValid() && shown == SelectionWorld && !selectionOutlines.empty()) {
-				const ImU32 outline = engine::ui::AccentColour();
-
-				for (const SelectionOutlineBatch::Entry &selected : selectionOutlines) {
-					glm::vec2 minimum{std::numeric_limits<float>::max()};
-					glm::vec2 maximum{-std::numeric_limits<float>::max()};
-					bool projected = true;
-					for (const Vector3 &corner : selected.Corners) {
-						glm::vec2 point{};
-						if (!panel.WorldToPanel(corner, point)) {
-							projected = false;
-							break;
-						}
-						minimum = glm::min(minimum, point);
-						maximum = glm::max(maximum, point);
-					}
-					// At this size a 3D wireframe covers the part's few visible
-					// pixels and makes its material appear to change colour.
-					if (projected && (maximum.x - minimum.x < 30.0f || maximum.y - minimum.y < 30.0f)) {
-						constexpr float margin = 3.0f;
-						list->AddRect(
-							ImVec2(minimum.x - margin, minimum.y - margin),
-							ImVec2(maximum.x + margin, maximum.y + margin),
-							outline
-						);
-						continue;
-					}
-
-					// The eight corners of the oriented box, joined as
-					// twelve edges. An axis-aligned box round an oriented
-					// part would be a box that does not touch it.
-					const Vector3 half = selected.HalfExtent;
-					static constexpr int EDGES[12][2] = {
-						{0, 1},
-						{1, 3},
-						{3, 2},
-						{2, 0},
-						{4, 5},
-						{5, 7},
-						{7, 6},
-						{6, 4},
-						{0, 4},
-						{1, 5},
-						{2, 6},
-						{3, 7}
-					};
-
-					for (const auto &edge : EDGES) {
-						segment(selected.Corners[edge[0]], selected.Corners[edge[1]], outline, 1.5f);
-					}
-
-					if (!ShowFacing) {
-						continue;
-					}
-
-					// --- which way it is facing ------------------------
-					//
-					// **A box says nothing about its orientation.** Two
-					// parts sitting identically may be turned a quarter
-					// apart, and nothing in the outline distinguishes them
-					// - which matters the moment anything is placed by
-					// script, welded, or driven along its own look.
-					//
-					// So: a line out of the front face to a ball, and a
-					// ring round the ball with an arrow at the point that
-					// is up. The line is the look and the arrow is the
-					// roll, which together are the whole of the rotation a
-					// person can act on.
-					const Vector3 look = selected.Frame.LookVector();
-					const Vector3 up = selected.Frame.UpVector();
-
-					// In metres and proportional to the part, unlike the
-					// gizmo's pixels: this is a property of the thing being
-					// looked at rather than a control being aimed at, so it
-					// should grow with the part and shrink into the
-					// distance exactly as the part does.
-					const float reach = std::max({half.X, half.Y, half.Z, 0.05f}) * FACING_REACH;
-
-					const Vector3 face = selected.Frame.Position + look * half.Z;
-					const Vector3 ballAt = face + look * reach;
-
-					segment(face, ballAt, FACING_LOOK, 2.0f);
-
-					glm::vec2 ball{};
-					if (!panel.WorldToPanel(ballAt, ball)) {
-						continue;
-					}
-					list->AddCircleFilled(ImVec2(ball.x, ball.y), 4.5f, FACING_LOOK);
-
-					// The ring lies in the plane the look is normal to, so
-					// it reads as a collar round the line rather than as a
-					// second circle floating beside it.
-					const Vector3 side = look.Cross(up).Unit();
-					const float ringRadius = reach * 0.42f;
-
-					constexpr int RING = 24;
-					glm::vec2 previous{};
-					bool havePrevious = false;
-					for (int step = 0; step <= RING; step++) {
-						const float angle = 6.2831853f * static_cast<float>(step) / static_cast<float>(RING);
-						const Vector3 at = ballAt + up * (std::cos(angle) * ringRadius) +
-										   side * (std::sin(angle) * ringRadius);
-
-						glm::vec2 screen{};
-						if (!panel.WorldToPanel(at, screen)) {
-							havePrevious = false;
-							continue;
-						}
-						if (havePrevious) {
-							list->AddLine(
-								ImVec2(previous.x, previous.y), ImVec2(screen.x, screen.y), FACING_UP, 1.5f
-							);
-						}
-						previous = screen;
-						havePrevious = true;
-					}
-
-					// The head sits where the ring is highest and points
-					// away from the ball, so "which way is up" is answered
-					// by one glance rather than by counting.
-					const Vector3 tip = ballAt + up * (ringRadius * 1.55f);
-					const Vector3 base = ballAt + up * ringRadius;
-					segment(base, tip, FACING_UP, 2.0f);
-					segment(tip, base + side * (ringRadius * 0.42f), FACING_UP, 2.0f);
-					segment(tip, base - side * (ringRadius * 0.42f), FACING_UP, 2.0f);
-				}
-			}
-
-			if (shown.IsValid() && Team != nullptr && Team->Edits() != nullptr) {
-				const ImU32 remoteColour = IM_COL32(255, 180, 70, 230);
-				for (const RemotePresence &remote : Team->Edits()->RemotePresences()) {
-					if (remote.World != Universe->NameOf(shown).Text()) continue;
-
-					glm::vec2 at{};
-					if (panel.WorldToPanel(remote.Position, at)) {
-						const ImVec2 point(at.x, at.y);
-						list->AddTriangleFilled(
-							ImVec2(point.x, point.y - 9.0f),
-							ImVec2(point.x - 6.0f, point.y + 5.0f),
-							ImVec2(point.x + 6.0f, point.y + 5.0f),
-							remoteColour
-						);
-						list->AddText(
-							ImVec2(point.x + 9.0f, point.y - 8.0f), remoteColour, remote.DisplayName.c_str()
-						);
-					}
-
-					if (remote.Selection.empty()) continue;
-					Universe->Enter(shown, [&](Store &store) {
-						const Entity selected = ResolvePath(store, remote.Selection);
-						const auto *transform = store.Get<engine::scene::Transform>(selected);
-						const auto *bounds = store.Get<engine::scene::Bounds>(selected);
-						glm::vec2 minimum{};
-						glm::vec2 maximum{};
-						if (transform != nullptr && bounds != nullptr &&
-							ProjectBoxBounds(panel, transform->Frame, bounds->HalfExtent, minimum, maximum)) {
-							list->AddRect(
-								ImVec2(minimum.x, minimum.y),
-								ImVec2(maximum.x, maximum.y),
-								remoteColour,
-								0.0f,
-								0,
-								1.5f
-							);
-						}
+				DrawColliderOutlines(index, panel);
+				DrawAdornments(index, panel);
+				if (ShowActiveLod && Universe != nullptr) {
+					const std::array<float, 3> distanceBands = LodMinimumDistances(Prefs);
+					Universe->Enter(ViewportWorld(index), [&](Store &store) {
+						DrawActiveLodLabels(store, list, panel, distanceBands);
 					});
 				}
-			}
+
+				// **`PushClipRect` is a scissor, not a reject.** It stops the pixels
+				// reaching the explorer and does nothing about the vertices: an
+				// `AddLine` for a segment entirely off the side of the panel still
+				// builds its geometry, still grows the draw list, and is still
+				// walked again by `ImGui::Render` in `ui.end`. The grid alone
+				// submits a hundred and sixty-three segments per viewport per frame
+				// - more than every panel in the editor put together - and a camera
+				// looking along the ground has most of them off one edge.
+				//
+				// A trivial reject: both ends past the same edge means no part of
+				// the segment is inside, so nothing visible can be dropped. A
+				// segment that straddles the panel is kept whatever its endpoints
+				// are, which is why this tests the edges separately rather than
+				// testing whether either end is inside.
+				const float leftEdge = slot.X;
+				const float rightEdge = slot.X + slot.Width;
+				const float topEdge = slot.Y;
+				const float bottomEdge = slot.Y + slot.Height;
+
+				const auto segment = [&](Vector3 from, Vector3 to, ImU32 colour, float thickness) {
+					glm::vec2 a{};
+					glm::vec2 b{};
+					if (!panel.ProjectSegment(from, to, a, b)) {
+						return;
+					}
+					if ((a.x < leftEdge && b.x < leftEdge) || (a.x > rightEdge && b.x > rightEdge) ||
+						(a.y < topEdge && b.y < topEdge) || (a.y > bottomEdge && b.y > bottomEdge)) {
+						return;
+					}
+					list->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, b.y), colour, thickness);
+				};
+
+				// **Not over a client replica.** The grid is authoring furniture:
+				// it says where the origin is and how big a metre is while you are
+				// placing things. A replica panel is the one picture in this editor
+				// that is exactly what a player sees, so editor furniture drawn on
+				// it makes "does this look right" impossible to answer from the
+				// picture in front of you.
+				//
+				// **Running is not the same as being a player's view.** `Server` and
+				// `Play` still simulate a world the author owns and keeps placing
+				// things in, and Roblox's studio keeps its grid through both for the
+				// same reason. The author who wants the clean picture turns
+				// `ShowGrid` off, which is one click and already exists - the mode
+				// does not need to decide it for them.
+				//
+				// Per scene rather than per universe, like everything else about
+				// the transport: with two viewports on two worlds, one may be a
+				// replica while the other is authored, and the authored one keeps
+				// its grid.
+				//
+				// A replica carries no run record of its own, so `ModeOf` answers
+				// `Edit` for it and mode alone would never exclude it.
+				const WorldId shown = ViewportWorld(index);
+				const bool authoring = !IsReplicaWorld(shown);
+
+				if (ShowLodDebugRadii) {
+					// These rings are screen-space guides for the distance preferences.
+					// They are centred beneath the camera so the three thresholds remain
+					// readable while orbiting instead of becoming world geometry.
+					const Vector3 centre{panel.Eye.X, 0.0f, panel.Eye.Z};
+					const std::array<float, 3> distances = LodMinimumDistances(Prefs);
+					for (size_t level = 0; level < 3; level++) {
+						const float radius = distances[level];
+						if (!(radius > 0.0f) || !std::isfinite(radius)) {
+							continue;
+						}
+
+						constexpr int RING_STEPS = 48;
+						glm::vec2 previous{};
+						bool havePrevious = false;
+						for (int step = 0; step <= RING_STEPS; step++) {
+							const float angle =
+								6.2831853f * static_cast<float>(step) / static_cast<float>(RING_STEPS);
+							const Vector3 point =
+								centre + Vector3{std::cos(angle) * radius, 0.0f, std::sin(angle) * radius};
+							glm::vec2 screen{};
+							if (!panel.WorldToPanel(point, screen)) {
+								havePrevious = false;
+								continue;
+							}
+							if (havePrevious) {
+								list->AddLine(
+									ImVec2(previous.x, previous.y),
+									ImVec2(screen.x, screen.y),
+									IM_COL32(120, 190, 255, 145),
+									1.0f
+								);
+							}
+							previous = screen;
+							havePrevious = true;
+						}
+
+						glm::vec2 label{};
+						if (panel.WorldToPanel(centre + Vector3{radius, 0.0f, 0.0f}, label)) {
+							static constexpr const char *LABELS[3] = {"LOD1", "LOD2", "LOD3"};
+							list->AddText(
+								ImVec2(label.x + 4.0f, label.y - 8.0f),
+								IM_COL32(150, 210, 255, 210),
+								LABELS[level]
+							);
+						}
+					}
+				}
+
+				// **The overlay copy is the always-on-top one, and it is drawn only
+				// while a handle is held.** The renderer draws the grid the rest of
+				// the time - see `ConfigureGroundGrid` - where it is a plane with
+				// its own depth and the geometry in front of it hides it. That is
+				// the right way round for looking at a scene and the wrong way
+				// round for placing something in it: a part being dragged sits on
+				// the grid and would hide the very lines somebody is lining it up
+				// against.
+				//
+				// A handle held anywhere counts, not one held in this panel. A drag
+				// is watched from whichever viewport shows the axis best, and a
+				// grid that changed in one panel and not the other would be two
+				// answers to one question.
+				const bool dragged = Dragging.Axis >= 0 || SurfaceDragging.Active;
+
+				if (ShowGrid && authoring && dragged) {
+					const Vector3 eye = panel.Eye;
+					const float gridStep = GridSettings.Step;
+					const int gridMajor = static_cast<int>(GridSettings.Major);
+					const int gridRadius = static_cast<int>(std::ceil(GridSettings.Reach / gridStep));
+					const int gridDense = std::min(GRID_DENSE, gridRadius);
+					const float gridOriginX = GridSettings.Offset.X;
+					const float gridOriginZ = GridSettings.Offset.Z;
+					const float originX = gridOriginX + SnapDown(eye.X - gridOriginX, gridStep);
+					const float originZ = gridOriginZ + SnapDown(eye.Z - gridOriginZ, gridStep);
+					const float reach = GridSettings.Reach;
+
+					// One line, cut into pieces, each faded by where its own middle
+					// is. See `GRID_PIECES` and `GridFade` for why a whole line
+					// cannot do this.
+					//
+					// `along` is the axis the line runs down and `across` is the
+					// coordinate that picks the line, so the same lambda draws both
+					// directions and there is one copy of the fading to be wrong in.
+					const auto fadedLine = [&](float across, bool alongZ) {
+						const float gridOrigin = alongZ ? gridOriginX : gridOriginZ;
+						const bool major = IsMajorLine(across, gridOrigin, gridStep, gridMajor);
+						const float centre = alongZ ? originZ : originX;
+						const float span = (2.0f * reach) / static_cast<float>(GRID_PIECES);
+
+						for (int piece = 0; piece < GRID_PIECES; piece++) {
+							const float start = centre - reach + span * static_cast<float>(piece);
+							const float end = start + span;
+							const float middle = (start + end) * 0.5f;
+
+							const float dx = alongZ ? across - eye.X : middle - eye.X;
+							const float dz = alongZ ? middle - eye.Z : across - eye.Z;
+							const float fade = GridFade(dx, dz, reach);
+							if (fade <= 0.0f) {
+								continue;
+							}
+
+							const Vector3 from =
+								alongZ ? Vector3{across, 0.0f, start} : Vector3{start, 0.0f, across};
+							const Vector3 to =
+								alongZ ? Vector3{across, 0.0f, end} : Vector3{end, 0.0f, across};
+							segment(
+								from,
+								to,
+								GridColour(
+									fade,
+									major,
+									GridSettings.Colour,
+									GridSettings.Alpha,
+									GridSettings.Strength
+								),
+								GRID_THICKNESS
+							);
+						}
+					};
+
+					for (int step = -gridRadius; step <= gridRadius; step++) {
+						const float offset = static_cast<float>(step) * gridStep;
+						const float x = originX + offset;
+						const float z = originZ + offset;
+						const bool majorX = IsMajorLine(x, gridOriginX, gridStep, gridMajor);
+						const bool majorZ = IsMajorLine(z, gridOriginZ, gridStep, gridMajor);
+
+						// **The axes are drawn separately below, so the two lines
+						// that would sit under them are skipped.** Drawing both
+						// leaves a grey line showing through a coloured one, which
+						// reads as the axis being the wrong colour.
+						// Past the dense band, only the heavy lines continue. See
+						// `GRID_DENSE`.
+						if (std::abs(step) > gridDense && !majorX && !majorZ) {
+							continue;
+						}
+
+						if (std::abs(x - gridOriginX) > 0.001f && (std::abs(step) <= gridDense || majorX)) {
+							fadedLine(x, true);
+						}
+						if (std::abs(z - gridOriginZ) > 0.001f && (std::abs(step) <= gridDense || majorZ)) {
+							fadedLine(z, false);
+						}
+					}
+
+					// The origin axes, in the conventional colours: X red, Z blue.
+					// Y is not drawn along the ground because it is not on it -
+					// a vertical line at the origin instead, so "up" has a mark.
+					const float reachAxis = reach;
+					segment(
+						Vector3{originX - reachAxis, 0.0f, gridOriginZ},
+						Vector3{originX + reachAxis, 0.0f, gridOriginZ},
+						ImGui::GetColorU32(ImVec4(
+							GridSettings.AxisX.R,
+							GridSettings.AxisX.G,
+							GridSettings.AxisX.B,
+							GridSettings.AxisAlpha * GridSettings.Strength
+						)),
+						AXIS_THICKNESS
+					);
+					segment(
+						Vector3{gridOriginX, 0.0f, originZ - reachAxis},
+						Vector3{gridOriginX, 0.0f, originZ + reachAxis},
+						ImGui::GetColorU32(ImVec4(
+							GridSettings.AxisZ.R,
+							GridSettings.AxisZ.G,
+							GridSettings.AxisZ.B,
+							GridSettings.AxisAlpha * GridSettings.Strength
+						)),
+						AXIS_THICKNESS
+					);
+					segment(
+						Vector3{gridOriginX, 0.0f, gridOriginZ},
+						Vector3{gridOriginX, gridStep, gridOriginZ},
+						ImGui::GetColorU32(ImVec4(0.45f, 0.85f, 0.40f, 0.65f)),
+						AXIS_THICKNESS
+					);
+				}
+
+				// The selection, boxed. **Drawn per panel rather than once**,
+				// because two viewports showing the same world both have to show it
+				// and they have different projections.
+				if (shown.IsValid() && shown == SelectionWorld && !selectionOutlines.empty()) {
+					const ImU32 outline = engine::ui::AccentColour();
+
+					for (const SelectionOutlineBatch::Entry &selected : selectionOutlines) {
+						glm::vec2 minimum{std::numeric_limits<float>::max()};
+						glm::vec2 maximum{-std::numeric_limits<float>::max()};
+						bool projected = true;
+						for (const Vector3 &corner : selected.Corners) {
+							glm::vec2 point{};
+							if (!panel.WorldToPanel(corner, point)) {
+								projected = false;
+								break;
+							}
+							minimum = glm::min(minimum, point);
+							maximum = glm::max(maximum, point);
+						}
+						// At this size a 3D wireframe covers the part's few visible
+						// pixels and makes its material appear to change colour.
+						if (projected && (maximum.x - minimum.x < 30.0f || maximum.y - minimum.y < 30.0f)) {
+							constexpr float margin = 3.0f;
+							list->AddRect(
+								ImVec2(minimum.x - margin, minimum.y - margin),
+								ImVec2(maximum.x + margin, maximum.y + margin),
+								outline
+							);
+							continue;
+						}
+
+						// The eight corners of the oriented box, joined as
+						// twelve edges. An axis-aligned box round an oriented
+						// part would be a box that does not touch it.
+						const Vector3 half = selected.HalfExtent;
+						static constexpr int EDGES[12][2] = {
+							{0, 1},
+							{1, 3},
+							{3, 2},
+							{2, 0},
+							{4, 5},
+							{5, 7},
+							{7, 6},
+							{6, 4},
+							{0, 4},
+							{1, 5},
+							{2, 6},
+							{3, 7}
+						};
+
+						for (const auto &edge : EDGES) {
+							segment(selected.Corners[edge[0]], selected.Corners[edge[1]], outline, 1.5f);
+						}
+
+						if (!ShowFacing) {
+							continue;
+						}
+
+						// --- which way it is facing ------------------------
+						//
+						// **A box says nothing about its orientation.** Two
+						// parts sitting identically may be turned a quarter
+						// apart, and nothing in the outline distinguishes them
+						// - which matters the moment anything is placed by
+						// script, welded, or driven along its own look.
+						//
+						// So: a line out of the front face to a ball, and a
+						// ring round the ball with an arrow at the point that
+						// is up. The line is the look and the arrow is the
+						// roll, which together are the whole of the rotation a
+						// person can act on.
+						const Vector3 look = selected.Frame.LookVector();
+						const Vector3 up = selected.Frame.UpVector();
+
+						// In metres and proportional to the part, unlike the
+						// gizmo's pixels: this is a property of the thing being
+						// looked at rather than a control being aimed at, so it
+						// should grow with the part and shrink into the
+						// distance exactly as the part does.
+						const float reach = std::max({half.X, half.Y, half.Z, 0.05f}) * FACING_REACH;
+
+						const Vector3 face = selected.Frame.Position + look * half.Z;
+						const Vector3 ballAt = face + look * reach;
+
+						segment(face, ballAt, FACING_LOOK, 2.0f);
+
+						glm::vec2 ball{};
+						if (!panel.WorldToPanel(ballAt, ball)) {
+							continue;
+						}
+						list->AddCircleFilled(ImVec2(ball.x, ball.y), 4.5f, FACING_LOOK);
+
+						// The ring lies in the plane the look is normal to, so
+						// it reads as a collar round the line rather than as a
+						// second circle floating beside it.
+						const Vector3 side = look.Cross(up).Unit();
+						const float ringRadius = reach * 0.42f;
+
+						constexpr int RING = 24;
+						glm::vec2 previous{};
+						bool havePrevious = false;
+						for (int step = 0; step <= RING; step++) {
+							const float angle =
+								6.2831853f * static_cast<float>(step) / static_cast<float>(RING);
+							const Vector3 at = ballAt + up * (std::cos(angle) * ringRadius) +
+											   side * (std::sin(angle) * ringRadius);
+
+							glm::vec2 screen{};
+							if (!panel.WorldToPanel(at, screen)) {
+								havePrevious = false;
+								continue;
+							}
+							if (havePrevious) {
+								list->AddLine(
+									ImVec2(previous.x, previous.y),
+									ImVec2(screen.x, screen.y),
+									FACING_UP,
+									1.5f
+								);
+							}
+							previous = screen;
+							havePrevious = true;
+						}
+
+						// The head sits where the ring is highest and points
+						// away from the ball, so "which way is up" is answered
+						// by one glance rather than by counting.
+						const Vector3 tip = ballAt + up * (ringRadius * 1.55f);
+						const Vector3 base = ballAt + up * ringRadius;
+						segment(base, tip, FACING_UP, 2.0f);
+						segment(tip, base + side * (ringRadius * 0.42f), FACING_UP, 2.0f);
+						segment(tip, base - side * (ringRadius * 0.42f), FACING_UP, 2.0f);
+					}
+				}
+
+				if (shown.IsValid() && Team != nullptr && Team->Edits() != nullptr) {
+					const ImU32 remoteColour = IM_COL32(255, 180, 70, 230);
+					for (const RemotePresence &remote : Team->Edits()->RemotePresences()) {
+						if (remote.World != Universe->NameOf(shown).Text()) continue;
+
+						glm::vec2 at{};
+						if (panel.WorldToPanel(remote.Position, at)) {
+							const ImVec2 point(at.x, at.y);
+							list->AddTriangleFilled(
+								ImVec2(point.x, point.y - 9.0f),
+								ImVec2(point.x - 6.0f, point.y + 5.0f),
+								ImVec2(point.x + 6.0f, point.y + 5.0f),
+								remoteColour
+							);
+							list->AddText(
+								ImVec2(point.x + 9.0f, point.y - 8.0f),
+								remoteColour,
+								remote.DisplayName.c_str()
+							);
+						}
+
+						if (remote.Selection.empty()) continue;
+						Universe->Enter(shown, [&](Store &store) {
+							const Entity selected = ResolvePath(store, remote.Selection);
+							const auto *transform = store.Get<engine::scene::Transform>(selected);
+							const auto *bounds = store.Get<engine::scene::Bounds>(selected);
+							glm::vec2 minimum{};
+							glm::vec2 maximum{};
+							if (transform != nullptr && bounds != nullptr &&
+								ProjectBoxBounds(
+									panel, transform->Frame, bounds->HalfExtent, minimum, maximum
+								)) {
+								list->AddRect(
+									ImVec2(minimum.x, minimum.y),
+									ImVec2(maximum.x, maximum.y),
+									remoteColour,
+									0.0f,
+									0,
+									1.5f
+								);
+							}
+						});
+					}
+				}
 
 				list->PopClipRect();
 			}

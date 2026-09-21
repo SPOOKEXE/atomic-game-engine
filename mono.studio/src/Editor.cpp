@@ -2526,24 +2526,26 @@ namespace studio {
 
 					{
 						ENGINE_PROFILE_CAT("effect lights", engine::core::ProfileCategory::Render);
-					// Lights are selected against the culled receiver rows, so an
-					// offscreen local light stays when its range reaches visible geometry.
-					static thread_local std::vector<uint32_t> visibleLightRows;
-					static thread_local std::vector<engine::core::AABB> lightReceivers;
-					lightReceivers.clear();
-					if (target.IsValid() && target.Width > 0 && target.Height > 0) {
-						const auto matrices = engine::scene::ResolveCamera(
-							eye, lens, static_cast<float>(target.Width) / static_cast<float>(target.Height)
-						);
-						const engine::graph::Frustum frustum =
-							engine::graph::Frustum::FromViewProjection(matrices.ViewProjection);
-						engine::graph::Cull(DrawnInstances, frustum, visibleLightRows);
-						lightReceivers.reserve(visibleLightRows.size());
-						for (const uint32_t row : visibleLightRows) {
-							lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
+						// Lights are selected against the culled receiver rows, so an
+						// offscreen local light stays when its range reaches visible geometry.
+						static thread_local std::vector<uint32_t> visibleLightRows;
+						static thread_local std::vector<engine::core::AABB> lightReceivers;
+						lightReceivers.clear();
+						if (target.IsValid() && target.Width > 0 && target.Height > 0) {
+							const auto matrices = engine::scene::ResolveCamera(
+								eye,
+								lens,
+								static_cast<float>(target.Width) / static_cast<float>(target.Height)
+							);
+							const engine::graph::Frustum frustum =
+								engine::graph::Frustum::FromViewProjection(matrices.ViewProjection);
+							engine::graph::Cull(DrawnInstances, frustum, visibleLightRows);
+							lightReceivers.reserve(visibleLightRows.size());
+							for (const uint32_t row : visibleLightRows) {
+								lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
+							}
 						}
-					}
-					(void)engine::render::CollectLights(store, eye.Position, lightReceivers, Lights);
+						(void)engine::render::CollectLights(store, eye.Position, lightReceivers, Lights);
 					}
 				}
 
@@ -2955,7 +2957,9 @@ namespace studio {
 			// A retained image that prevents submission is a skipped opportunity,
 			// not a cache read. Count hits only when this presentation actually asks
 			// the renderer to reuse those layers.
-			ViewportPresentations[viewport].CacheProfile().Record(damage, true, false, false, cacheApplicability);
+			ViewportPresentations[viewport].CacheProfile().Record(
+				damage, true, false, false, cacheApplicability
+			);
 		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);

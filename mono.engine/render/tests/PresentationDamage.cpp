@@ -249,8 +249,10 @@ TEST_CASE("surface capture plan writes cascade through the presentation", "[rend
 	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote());
 
 	tracker.CacheProfile().Record(PresentationDamage{}, true, false, false);
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::SurfaceCapturePlan)].Last ==
-		  engine::render::PresentationCacheActivity::Decision::Hit);
+	CHECK(
+		activities[static_cast<size_t>(PresentationCacheLayer::SurfaceCapturePlan)].Last ==
+		engine::render::PresentationCacheActivity::Decision::Hit
+	);
 }
 
 TEST_CASE("absent portal layers are not reported as cache hits", "[render][presentation][cache]") {

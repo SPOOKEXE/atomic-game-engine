@@ -896,11 +896,15 @@ namespace engine::render {
 				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 			}
 			{
-				ENGINE_PROFILE_CAT("reuse draw list.object labels", engine::core::ProfileCategory::Simulation);
+				ENGINE_PROFILE_CAT(
+					"reuse draw list.object labels", engine::core::ProfileCategory::Simulation
+				);
 				AssignObjectLabels(store, *drawList);
 			}
 			{
-				ENGINE_PROFILE_CAT("reuse draw list.semantic labels", engine::core::ProfileCategory::Simulation);
+				ENGINE_PROFILE_CAT(
+					"reuse draw list.semantic labels", engine::core::ProfileCategory::Simulation
+				);
 				AssignAuthoredLabels(
 					store,
 					*drawList,

@@ -1,6 +1,5 @@
-#include <engine/render/Overlay.hpp>
-
 #include <engine/core/Profiling.hpp>
+#include <engine/render/Overlay.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -209,9 +208,10 @@ namespace engine::render {
 		{
 			ENGINE_PROFILE_CAT("overlay fill rows", core::ProfileCategory::Render);
 			for (int row = top + 1; row < bottom; row++) {
-				uint8_t *destination = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
-													static_cast<size_t>(left)) *
-													   BYTES_PER_PIXEL;
+				uint8_t *destination =
+					Pixels.data() +
+					(static_cast<size_t>(row) * static_cast<size_t>(Width) + static_cast<size_t>(left)) *
+						BYTES_PER_PIXEL;
 				std::memcpy(destination, first, span);
 			}
 		}

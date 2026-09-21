@@ -1,4 +1,5 @@
 #include "SurfaceCapturePlan.hpp"
+
 #include "SurfaceCaptureCache.hpp"
 
 #include <engine/scene/SurfaceCameras.hpp>

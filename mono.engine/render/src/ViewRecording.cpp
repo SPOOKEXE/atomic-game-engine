@@ -660,7 +660,8 @@ namespace engine::render {
 			portalLevels = budget.Depth;
 			uint64_t lightPixels = 0;
 			for (const auto &portal : portals) {
-				if (!portal.ExternalImage) lightPixels += uint64_t(SEAM_LIGHT_RESOLUTION) * SEAM_LIGHT_RESOLUTION;
+				if (!portal.ExternalImage)
+					lightPixels += uint64_t(SEAM_LIGHT_RESOLUTION) * SEAM_LIGHT_RESOLUTION;
 			}
 			const uint64_t capturePixels = lightPixels <= budget.Pixels ? budget.Pixels - lightPixels : 0;
 			const SurfaceCaptureRequest keyedCaptureRequest{
