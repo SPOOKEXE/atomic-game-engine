@@ -982,6 +982,7 @@ namespace engine::render {
 		MeshTable Meshes;
 		TextureTable Textures;
 		bool RetainSourceTextures = false;
+		size_t TextureBudgetBytes = TextureTable::MAXIMUM_BYTES;
 		// Named resources can change without changing any submitted draw row.
 		// Active view scope for native environment, particle and ribbon texture bindings.
 		core::Name ActiveContentOwner;

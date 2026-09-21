@@ -19,8 +19,11 @@
 
 #include <engine/render/ProfilerTab.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,6 +31,17 @@ namespace client {
 
 	// Command-line configuration copied into Client during Initialise.
 	struct Options {
+		// Converts an explicit command-line MiB capacity into bytes. Zero and
+		// overflow are refused so the default budget cannot be disabled by error.
+		static std::optional<size_t> TextureBudgetBytesForMiB(int64_t mebibytes) {
+			constexpr size_t MEBIBYTE = 1024u * 1024u;
+			if (mebibytes <= 0 ||
+				static_cast<uint64_t>(mebibytes) > std::numeric_limits<size_t>::max() / MEBIBYTE) {
+				return std::nullopt;
+			}
+			return static_cast<size_t>(mebibytes) * MEBIBYTE;
+		}
+
 		// The loopback MCP port, or -1 when the control surface is disabled.
 		int ControlPort = -1;
 
@@ -148,6 +162,10 @@ namespace client {
 		//
 		// @since v0.18
 		int FramesInFlight = 1;
+
+		// Texture-table capacity for this run. Zero preserves the renderer's
+		// normal safety limit; a command-line measurement may request more.
+		size_t TextureBudgetBytes = 0;
 
 		// The maximum presentation rate, or zero for every update.
 		//

@@ -309,8 +309,16 @@ namespace client {
 
 		// Null when headless, which is what puts the renderer in that mode - the
 		// same call the editor makes, for the same reason.
+		if (Settings.TextureBudgetBytes != 0) {
+			ENGINE_INFO(
+				"texture table: {} MiB capacity requested", Settings.TextureBudgetBytes / (1024u * 1024u)
+			);
+		}
 		if (!Renderer.Initialise(
-				Window, static_cast<uint32_t>(Settings.FramesInFlight), Settings.DataFactory
+				Window,
+				static_cast<uint32_t>(Settings.FramesInFlight),
+				Settings.DataFactory,
+				Settings.TextureBudgetBytes
 			)) {
 			return false;
 		}

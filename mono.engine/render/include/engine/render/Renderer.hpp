@@ -1436,8 +1436,15 @@ namespace engine::render {
 		//        Clamped to 1..3; ignored when headless, which has no swapchain
 		//        to be ahead of.
 		// @param retainSourceTextures Keep bounded decoded base pixels for factory export.
+		// @param textureBudgetBytes Content texture capacity. Zero keeps the normal
+		//        `TextureTable::MAXIMUM_BYTES` safety limit.
 		// @return True when the device, pipelines and geometry are ready.
-		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1, bool retainSourceTextures = false);
+		bool Initialise(
+			SDL_Window *window,
+			uint32_t framesInFlight = 1,
+			bool retainSourceTextures = false,
+			size_t textureBudgetBytes = 0
+		);
 
 		// An owned copy of the last successfully submitted visibility snapshot.
 		// A submission is not a claim that pixels survived depth or blending.

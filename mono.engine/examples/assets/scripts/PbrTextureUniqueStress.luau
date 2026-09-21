@@ -5,7 +5,7 @@
 -- for about 6.25 GiB of RGBA8 pixel storage before renderer allocations, so
 -- this scene is a memory and upload benchmark, not a normal sample scene.
 --
---     client --script PbrTextureUniqueStress.luau
+--     client --texture-budget-mib 9216 --script PbrTextureUniqueStress.luau
 
 local Lighting = game:GetService("Lighting")
 

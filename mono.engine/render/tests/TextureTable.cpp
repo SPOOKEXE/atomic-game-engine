@@ -11,6 +11,28 @@ TEST_DEPENDS("engine.assets.texture")
 
 using namespace engine;
 
+TEST_CASE("texture table capacity is defaulted and enforced per renderer", "[render][texture-budget][gpu][.]") {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+
+	render::TextureTable defaultTable;
+	REQUIRE(defaultTable.Initialise(device));
+	CHECK(defaultTable.CapacityBytes() == render::TextureTable::MAXIMUM_BYTES);
+	const size_t builtInBytes = defaultTable.Bytes();
+	defaultTable.Shutdown();
+
+	render::TextureTable limited;
+	REQUIRE(limited.Initialise(device, false, builtInBytes + 4));
+	CHECK(limited.CapacityBytes() == builtInBytes + 4);
+	assets::TextureData pixel;
+	pixel.Width = pixel.Height = 1;
+	pixel.Pixels.assign(4, std::byte{0});
+	REQUIRE(limited.Add(core::Name("first"), pixel));
+	CHECK_FALSE(limited.Add(core::Name("second"), pixel));
+	limited.Shutdown();
+}
+
 TEST_CASE("texture copies retain only exact owner-scoped base pixels", "[render][texture-copy][gpu][.]") {
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();

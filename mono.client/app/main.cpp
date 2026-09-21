@@ -74,6 +74,11 @@ int main(int argc, char **argv) {
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
+	arguments.Value(
+		"texture-budget-mib",
+		"N",
+		"Texture-table capacity in MiB. Default 512; raise only for an explicit residency benchmark"
+	);
 	arguments.Flag("headless", "Run with no window (needs --frames except for --data-factory)");
 	arguments.Flag(
 		"data-factory",
@@ -268,6 +273,15 @@ int main(int argc, char **argv) {
 	options.Uncapped = options.Uncapped || arguments.Has("uncapped");
 	options.FramesInFlight =
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
+	if (arguments.Has("texture-budget-mib")) {
+		const int64_t requestedMiB = arguments.GetInteger("texture-budget-mib", 0);
+		const auto textureBudget = client::Options::TextureBudgetBytesForMiB(requestedMiB);
+		if (!textureBudget) {
+			std::fprintf(stderr, "--texture-budget-mib must fit in a positive byte count.\n");
+			return 2;
+		}
+		options.TextureBudgetBytes = *textureBudget;
+	}
 	options.Headless = arguments.Has("headless");
 
 	// Ordinary headless runs need a frame budget. A presentation host instead

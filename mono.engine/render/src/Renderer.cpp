@@ -577,7 +577,9 @@ namespace engine::render {
 		std::abort();
 	}
 
-	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight, bool retainSourceTextures) {
+	bool Renderer::Initialise(
+		SDL_Window *window, uint32_t framesInFlight, bool retainSourceTextures, size_t textureBudgetBytes
+	) {
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
 		// whoever owns the object and initialised by whoever owns the window -
@@ -594,6 +596,8 @@ namespace engine::render {
 		// right at v0.7.
 		State->Window = window;
 		State->RetainSourceTextures = retainSourceTextures;
+		State->TextureBudgetBytes =
+			textureBudgetBytes == 0 ? TextureTable::MAXIMUM_BYTES : textureBudgetBytes;
 		State->StageProbe.Configure();
 
 		// One backend on every platform. Apple packages MoltenVK beside the

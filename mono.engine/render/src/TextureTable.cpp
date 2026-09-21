@@ -24,9 +24,10 @@ namespace engine::render {
 		Shutdown();
 	}
 
-	bool TextureTable::Initialise(SDL_GPUDevice *device, bool retainSources) {
+	bool TextureTable::Initialise(SDL_GPUDevice *device, bool retainSources, size_t maximumBytes) {
 		Device = device;
 		RetainSources = retainSources;
+		MaximumBytes = maximumBytes == 0 ? MAXIMUM_BYTES : maximumBytes;
 		if (Device == nullptr) {
 			return false;
 		}
@@ -305,7 +306,7 @@ namespace engine::render {
 		for (const std::vector<std::byte> &level : image.Mips) {
 			bytes += level.size();
 		}
-		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
+		if (UploadedBytes > MaximumBytes || bytes > MaximumBytes - UploadedBytes) {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
 			return false;
 		}
@@ -426,7 +427,7 @@ namespace engine::render {
 		// texture.** The alternative - release the old entry and then discover
 		// there is no room - would drop a working picture to make space for one
 		// that is not going in.
-		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
+		if (UploadedBytes > MaximumBytes || bytes > MaximumBytes - UploadedBytes) {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
 			return false;
 		}

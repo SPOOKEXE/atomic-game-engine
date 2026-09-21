@@ -115,8 +115,12 @@ namespace engine::render {
 		//
 		// @param device The GPU device. Kept, not owned.
 		// @param retainSources Keep decoded source copies for export support.
+		// @param maximumBytes Capacity for content textures. Zero uses
+		//                     `MAXIMUM_BYTES`.
 		// @return `false` when the sampler or the default could not be created.
-		bool Initialise(SDL_GPUDevice *device, bool retainSources = false);
+		bool Initialise(
+			SDL_GPUDevice *device, bool retainSources = false, size_t maximumBytes = MAXIMUM_BYTES
+		);
 
 		// Releases every texture and the sampler.
 		void Shutdown();
@@ -345,6 +349,11 @@ namespace engine::render {
 			return UploadedBytes;
 		}
 
+		// Content texture capacity for this table, in bytes.
+		size_t CapacityBytes() const {
+			return MaximumBytes;
+		}
+
 	  private:
 		// One registered texture and what it cost.
 		//
@@ -428,6 +437,7 @@ namespace engine::render {
 		std::unordered_set<uint64_t> Awaiting;
 
 		size_t UploadedBytes = 0;
+		size_t MaximumBytes = MAXIMUM_BYTES;
 		size_t RetainedCopyBytes = 0;
 		bool RetainSources = false;
 	};
