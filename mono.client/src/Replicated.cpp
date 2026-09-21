@@ -427,8 +427,9 @@ namespace client {
 						// the two above it, and for the same reason: most
 						// rows are not a limb of anything.
 						limb,
-						store.Get<engine::scene::AutoMeshLOD>(entity),
-						store.Get<engine::scene::CustomMeshLOD>(entity),
+						store.Get<engine::scene::LODAuto>(entity),
+						store.Get<engine::scene::LODCustom>(entity),
+						store.Get<engine::scene::LODSettings>(entity),
 						store.Get<engine::scene::RenderEffects>(entity)
 					);
 					if (!(instance.Transparency >= 1.0f)) {

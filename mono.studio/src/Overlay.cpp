@@ -2384,7 +2384,22 @@ namespace studio {
 			// resolved here rather than once for the world.
 			//
 			// Before `Rebuild`, which runs the layout inside itself.
-			engine::render::ResolveSpatialCanvases(store, request.Display);
+			const ViewportState *diagnosticViewport = ExtraAt(index);
+			const ViewportDiagnostics &diagnostics =
+				diagnosticViewport != nullptr ? diagnosticViewport->Diagnostics : MainViewportDiagnostics;
+			if (diagnostics.FrustumLocked) {
+				engine::scene::Camera camera;
+				if (const auto *active = store.Resource<engine::scene::ActiveCamera>(); active != nullptr) {
+					if (const auto *found = store.Get<engine::scene::Camera>(active->Entity)) {
+						camera = *found;
+					}
+				}
+				engine::render::ResolveSpatialCanvases(
+					store, request.Display, &camera, &diagnostics.FrozenFrustum
+				);
+			} else {
+				engine::render::ResolveSpatialCanvases(store, request.Display);
+			}
 			GuiLists[index].Rebuild(store, request);
 			(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
 			if (engine::gui::PickScreen(store, GuiLists[index].Commands(), pointer.Position) == NULL_ENTITY) {

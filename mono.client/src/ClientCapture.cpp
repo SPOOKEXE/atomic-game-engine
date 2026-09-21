@@ -99,7 +99,9 @@ namespace client {
 				{"scope",
 				 capture->Binding.ExpectedScope == render::PortalImageScope::CompleteWorld
 					 ? "complete-world"
-					 : "opaque-lighting"},
+					 : capture->Binding.ExpectedScope == render::PortalImageScope::SeamRadiance
+						 ? "seam-radiance"
+						 : "opaque-lighting"},
 				{"width", capture->Width},
 				{"height", capture->Height},
 			};
