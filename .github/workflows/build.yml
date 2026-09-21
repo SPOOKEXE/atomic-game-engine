@@ -192,6 +192,11 @@ jobs:
           brew install ninja ccache
           scripts/fetch-moltenvk.sh
 
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: choco install ccache --yes --no-progress
+
       # The pinned TypeScript, and it is not optional here even though the build
       # treats it as optional.
       #
@@ -227,11 +232,6 @@ jobs:
       # is not meant to, because the point is to start from whatever the last
       # build left behind.
       #
-      # **Not Windows.** ccache does work with MSVC, but only where debug info
-      # is `/Z7` rather than `/Zi`, and this workflow's own comments record that
-      # the Windows build compiles and has never shipped. Adding a caching layer
-      # with a compiler-flag precondition to the one platform nobody runs is how
-      # an optional build becomes a flaky one.
       # **Pinned rather than left to ccache's default, because the default is not
       # the same path on every runner.** ccache resolves its directory from
       # `XDG_CACHE_HOME` on Linux and from `~/Library/Caches` on macOS, and a
@@ -257,7 +257,6 @@ jobs:
       # "workflow file issue". The `$RUNNER_TEMP` variable is the same value and
       # is readable in any step.
       - name: Pin the compiler cache directory
-        if: runner.os != 'Windows'
         shell: bash
         run: echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
 
@@ -266,8 +265,7 @@ jobs:
       # both would be two builds evicting each other's entries all day and
       # reporting a hit rate that never recovers.
       - name: Restore the compiler cache
-        if: runner.os != 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/ccache
           key: ccache-${{ matrix.platform }}-${{ matrix.flavour }}-${{ github.sha }}
@@ -284,7 +282,6 @@ jobs:
       # reaches - and a cache that silently began evicting would show up below
       # as a hit rate that fell and stayed fallen.
       - name: Configure the compiler cache
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           ccache --set-config max_size=2G
@@ -296,17 +293,6 @@ jobs:
         run: |
           cmake --preset ${{ matrix.preset }}
           cmake --build --preset ${{ matrix.preset }}
-
-      # **Always, and not only on failure.** A cache that stopped being used is
-      # indistinguishable from one that never was, which is the argument
-      # `CMakeLists.txt` makes where it reports an absent cache rather than
-      # staying quiet. A hit rate that falls to zero and stays there is a
-      # regression worth seeing in a green build.
-      - name: What the compiler cache did
-        if: runner.os != 'Windows'
-        continue-on-error: true
-        shell: bash
-        run: ccache --show-stats --verbose
 
       # The repository's own Windows entry point rather than a marketplace
       # action that sets the same variables. Every preset generates for Ninja,
@@ -320,6 +306,26 @@ jobs:
         run: |
           set PRESET=${{ matrix.preset }}
           scripts\build-windows.bat
+
+      # **Always, including after a failed compile.** A cache that stopped being
+      # used is indistinguishable from one that never was. Failure statistics
+      # also show whether a partially completed build produced useful entries.
+      - name: What the compiler cache did
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: ccache --show-stats --verbose
+
+      # The combined cache action only saves after success. Separate restore
+      # and save steps retain completed objects when a later source fails, which
+      # is especially important while bringing a new platform build online.
+      - name: Save the compiler cache
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.platform }}-${{ matrix.flavour }}-${{ github.sha }}
 
       # **Why a build failed, when the machine that failed is not one anybody can
       # log into.** CMake records every `try_compile` it ran - the source, the

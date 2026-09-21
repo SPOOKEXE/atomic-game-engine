@@ -1,3 +1,4 @@
+#include <engine/core/Chars.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/Schedule.hpp>
 
@@ -232,7 +233,7 @@ namespace studio {
 
 		double ParsedNumber(std::string_view text, double fallback) {
 			double value = fallback;
-			const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+			const auto parsed = engine::core::FromChars(text.data(), text.data() + text.size(), value);
 			return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() && std::isfinite(value)
 					   ? value
 					   : fallback;
