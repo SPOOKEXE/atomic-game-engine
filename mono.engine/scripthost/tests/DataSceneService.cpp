@@ -199,6 +199,8 @@ namespace {
 						.MaximumAbsoluteError = .25,
 					},
 				.PreviousCameraMotionFrame = std::nullopt,
+				.Packed = std::nullopt,
+				.Resampling = {},
 			});
 			poll.Planes.push_back({
 				.Channel = "ambient_occlusion",
@@ -236,6 +238,8 @@ namespace {
 				.AmbientOcclusion = std::nullopt,
 				.Noise = {},
 				.PreviousCameraMotionFrame = std::nullopt,
+				.Packed = std::nullopt,
+				.Resampling = {},
 			});
 			for (const char *channel : {"object_ids", "semantic_ids", "part_ids"})
 				poll.Planes.push_back({
@@ -274,6 +278,8 @@ namespace {
 					.AmbientOcclusion = std::nullopt,
 					.Noise = {},
 					.PreviousCameraMotionFrame = std::nullopt,
+					.Packed = std::nullopt,
+					.Resampling = {},
 				});
 			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			poll.SemanticLabels = {{1, "fixture/box"}};
