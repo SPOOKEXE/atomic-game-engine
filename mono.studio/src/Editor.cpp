@@ -1,3 +1,4 @@
+#include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -5,8 +6,11 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/examples/DemosLoader.hpp>
+#include <engine/examples/PackagedAssets.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/graph/Cull.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -21,6 +25,7 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -28,10 +33,13 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL.h>
@@ -55,7 +63,10 @@
 #include <fstream>
 #include <imgui.h>
 #include <mutex>
+#include <network/Advert.hpp>
+#include <optional>
 #include <sstream>
+#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
@@ -83,6 +94,13 @@ namespace studio {
 		// at sixty ticks a second fills memory in an afternoon - and the last
 		// thousand lines are the ones anybody reads.
 		constexpr size_t OUTPUT_LIMIT = 1024;
+
+		// A stopped editor has no simulation clock to advance, but its control
+		// socket and plugins still need a turn. Native input wakes immediately;
+		// a running world gets a much shorter periodic wake to retain its tick
+		// cadence while an idle editor can yield for longer.
+		constexpr Sint32 MAXIMUM_RUNNING_EVENT_WAIT_MILLISECONDS = 1;
+		constexpr Sint32 MAXIMUM_IDLE_EVENT_WAIT_MILLISECONDS = 8;
 
 		// The name a brand-new game and its first world take.
 		constexpr std::string_view DEFAULT_GAME = "Untitled";
@@ -466,6 +484,11 @@ namespace studio {
 
 	void Editor::ResizeViewports(size_t extras) {
 		const size_t previous = Extras.size();
+		if (PortalImages && previous != extras) {
+			for (size_t slot = std::min(previous, extras) + 1; slot <= previous + 1; ++slot) {
+				PortalImages->RemoveViewport(slot);
+			}
+		}
 
 		Extras.resize(extras);
 		Viewers.resize(1 + extras);
@@ -474,6 +497,8 @@ namespace studio {
 		ViewportPresentations.resize(1 + extras);
 		ViewportParticleVisibility.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
+		AdornmentRouters.resize(1 + extras);
+		GuiRouterWorlds.resize(1 + extras);
 
 		// **"Viewport 2" upwards, and the main panel is "Viewport 1".** The
 		// numbering is what a person reads in the View menu and what the saved
@@ -589,6 +614,10 @@ namespace studio {
 			ENGINE_INFO("assets from {}", Settings.Assets.string());
 		}
 
+		if (!SDL_SetAppMetadata("Atomic Studio", nullptr, "atomic-studio")) {
+			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
+		}
+
 		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
@@ -604,6 +633,16 @@ namespace studio {
 			if (!Window) {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
+			}
+
+			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
+			if (icon == nullptr) {
+				ENGINE_WARN("SDL_LoadPNG icon: {}", SDL_GetError());
+			} else {
+				if (!SDL_SetWindowIcon(Window, icon)) {
+					ENGINE_WARN("SDL_SetWindowIcon: {}", SDL_GetError());
+				}
+				SDL_DestroySurface(icon);
 			}
 		}
 
@@ -730,6 +769,7 @@ namespace studio {
 		engine::scene::RegisterSceneClasses();
 		engine::gui::RegisterGuiClasses();
 		engine::script::ScriptClass();
+		LoadPackagedExampleAssets();
 
 		// **Before any world is built, which is what the header asks for.** A
 		// resource is keyed by a component id too, so one registered lazily by
@@ -753,14 +793,36 @@ namespace studio {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		if (!Universe->ConfigurePresentation(1)) {
+			Say("could not configure portal image transport", LogLevel::Error);
+			return false;
+		}
+		PortalImages = std::make_unique<engine::render::PortalImageHost>(*Universe, Renderer);
 		Commands = std::make_unique<CommandLog>(*Universe);
 		Team = std::make_unique<TeamCreate>(*Commands, *Universe);
 		InstallHistoryWatcher();
+		if (Settings.DataFactory) {
+			if (!Settings.Game.empty() || !Settings.RojoProject.empty() ||
+				Settings.StartIn != RunMode::Edit) {
+				ENGINE_ERROR("--data-factory requires an empty Studio universe in edit mode");
+				return false;
+			}
+			if (Settings.ControlPort < 0) {
+				ENGINE_ERROR("--data-factory requires --mcp-port");
+				return false;
+			}
+			if (!StartDataFactoryHost()) {
+				return false;
+			}
+		}
 
 		// After both, because several polls read them.
 		RegisterOperators();
 
-		if (!Settings.Game.empty()) {
+		if (Settings.DataFactory) {
+			GameName = Name(DEFAULT_GAME);
+			UniverseNameDraft = std::string(GameName.Text());
+		} else if (!Settings.Game.empty()) {
 			if (!OpenGame(Settings.Game)) {
 				// Not fatal. An editor that refused to start because of one bad
 				// file is an editor you cannot use to fix that file.
@@ -850,7 +912,7 @@ namespace studio {
 
 		// **After the game is loaded**, so the first thing a client can ask
 		// about is a universe that has its worlds rather than an empty one.
-		StartControl();
+		if (!StartControl() && Settings.DataFactory) return false;
 
 		// **After the universe exists and before the first frame**, because a
 		// plugin holds a `Store &` and there has to be one. Reloaded whenever
@@ -928,6 +990,7 @@ namespace studio {
 
 		// Before the universe, because it holds a reference to it.
 		Commands.reset();
+		PortalImages.reset();
 		Universe.reset();
 
 		// Detached before the sink is dropped. The logger is process-wide and
@@ -1001,6 +1064,27 @@ namespace studio {
 					presentationDue = Presentations.Due(engine::render::PresentationSchedule::Clock::now());
 				}
 
+				std::optional<SDL_Event> waitedEvent;
+				if (!presentationDue && !Settings.Headless && FactoryHost == nullptr) {
+					const auto remaining =
+						Presentations.Remaining(engine::render::PresentationSchedule::Clock::now());
+					const auto milliseconds =
+						std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count();
+					if (milliseconds > 0) {
+						const Sint32 maximumWait = AnyRunning() ? MAXIMUM_RUNNING_EVENT_WAIT_MILLISECONDS
+																: MAXIMUM_IDLE_EVENT_WAIT_MILLISECONDS;
+						// SDL removes the event it wakes for. Keep it and give it to
+						// PumpEvents first, before it drains events queued after it.
+						ENGINE_PROFILE_CAT("event wait", engine::core::ProfileCategory::Idle);
+						SDL_Event event;
+						if (SDL_WaitEventTimeout(
+								&event, static_cast<Sint32>(std::min<int64_t>(milliseconds, maximumWait))
+							)) {
+							waitedEvent = event;
+						}
+					}
+				}
+
 				bool renderingActive = false;
 				if (presentationDue) {
 					ENGINE_PROFILE_CAT("frame deadline", engine::core::ProfileCategory::Idle);
@@ -1025,7 +1109,7 @@ namespace studio {
 					PresentationDeltaSeconds += delta;
 				}
 
-				PumpEvents();
+				PumpEvents(waitedEvent ? &*waitedEvent : nullptr);
 
 				// **Between input and simulation**, which is where a person's click
 				// would have landed. A tool that starts a world or writes a property
@@ -1043,7 +1127,23 @@ namespace studio {
 					// null check and nothing else - which is a useful thing for the
 					// graph to say out loud.
 					ENGINE_PROFILE_CAT("team create", engine::core::ProfileCategory::Network);
-					Team->Pump(engine::core::Clock::Seconds());
+					const double now = engine::core::Clock::Seconds();
+					Team->Pump(now);
+					if (EditStream *stream = Team->Edits(); stream != nullptr && now >= TeamPresenceAt) {
+						RemotePresence presence;
+						presence.DisplayName = TeamNameField[0] == '\0' ? "Studio" : TeamNameField;
+						const WorldId world = ViewportWorld(FocusedViewport);
+						presence.World = world.IsValid() ? Universe->NameOf(world).Text() : std::string();
+						const ViewportState *view = ExtraAt(FocusedViewport);
+						presence.Position = view != nullptr ? view->Frame.Position : CameraFrame.Position;
+						if (world.IsValid() && !Selection.empty()) {
+							Universe->Enter(world, [&](Store &store) {
+								presence.Selection = PathOf(store, Selection.front());
+							});
+						}
+						stream->PublishPresence(presence, now);
+						TeamPresenceAt = now + 0.1;
+					}
 				}
 
 				// **Beside the control surface and for its reason**, which the
@@ -1148,7 +1248,7 @@ namespace studio {
 		}
 	}
 
-	void Editor::PumpEvents() {
+	void Editor::PumpEvents(const SDL_Event *first) {
 		ENGINE_PROFILE("pump events");
 		PlayedInput->Translator.BeginFrame();
 
@@ -1165,8 +1265,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE("poll events");
 
-			SDL_Event event;
-			while (SDL_PollEvent(&event)) {
+			auto process = [this, &sawInput](const SDL_Event &event) {
 				if (event.type == SDL_EVENT_JOYSTICK_ADDED) {
 					if (SDL_IsGamepad(event.jdevice.which)) {
 						if (SDL_Gamepad *gamepad = SDL_OpenGamepad(event.jdevice.which); gamepad != nullptr) {
@@ -1270,6 +1369,15 @@ namespace studio {
 					event.window.windowID == SDL_GetWindowID(Window)) {
 					Running = false;
 				}
+			};
+
+			if (first != nullptr) {
+				process(*first);
+			}
+
+			SDL_Event event;
+			while (SDL_PollEvent(&event)) {
+				process(event);
 			}
 		}
 
@@ -1287,6 +1395,11 @@ namespace studio {
 		// which - see `studio::PresentationAlpha` for what reading it wrong
 		// did.
 		Advancing = false;
+
+		if (FactoryHost != nullptr) {
+			Advancing = FactoryHost->Tick(frameSeconds);
+			return;
+		}
 
 		if (!AnyRunning()) {
 			// **A world being edited does not tick, and that is deliberate.**
@@ -1501,15 +1614,16 @@ namespace studio {
 			return;
 		}
 
-		// **Located with `ExamplePath` and filed under a relative name**, and
+		// **Located with `DemosLoader` and filed under a relative name**, and
 		// the two are different on purpose. The scenes stage into
-		// `<stage>/assets/examples` while `Paths::Assets()` is each program's
-		// own directory - a layout mismatch `ExamplePath` already knows how to
+		// `<stage>/assets/examples/scripts` while `Paths::Assets()` is each program's
+		// own directory - a layout mismatch `DemosLoader` already knows how to
 		// bridge - so finding the file needs its fallback. What goes *into* the
 		// world is the short name, because an absolute path from this machine
 		// would be written into the save file.
-		const Name PATH(std::string("examples/") + std::string(file));
-		const Name located(engine::examples::ExamplePath(std::string(file)));
+		const Name PATH(std::string("examples/scripts/") + std::string(file));
+		const engine::examples::DemosLoader demos;
+		const Name located(demos.Resolve(engine::examples::DemoKind::Script, file).string());
 
 		// **Read now and filed into the world**, rather than left as a path for
 		// the runtime to resolve later. `ReadSource` looks in the cache before
@@ -1555,7 +1669,12 @@ namespace studio {
 		(void)engine::examples::MountSceneLibraries(store, script, file);
 	}
 
-	bool Editor::AddExampleWorld(std::string_view file) {
+	bool Editor::AddExampleWorld(const engine::examples::DemoEntry &demo) {
+		if (demo.Kind == engine::examples::DemoKind::World) {
+			return ImportWorldFile(demo.Path);
+		}
+
+		const std::string_view file = demo.Name;
 		// The stem, because "StressMirrors" is a scene and "StressMirrors.luau"
 		// is a file. What goes into the world is still the full name - see the
 		// `InstallExampleScript` call below - so nothing downstream has to guess
@@ -1631,6 +1750,9 @@ namespace studio {
 	}
 
 	void Editor::ReleaseViewerCamera(size_t viewport) {
+		if (PortalImages) {
+			PortalImages->RemoveViewport(viewport);
+		}
 		if (viewport >= Viewers.size()) {
 			return;
 		}
@@ -1764,8 +1886,17 @@ namespace studio {
 				return;
 			}
 
-			if (auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance)) {
-				transform->Frame = eye;
+			// Read first: mutable access marks the row changed even when the eye is unchanged.
+			const auto *current = store.Get<engine::scene::Transform>(viewer.Instance);
+			const bool cameraMoved = current == nullptr || current->Frame.Position != eye.Position ||
+									 current->Frame.QuaternionX != eye.QuaternionX ||
+									 current->Frame.QuaternionY != eye.QuaternionY ||
+									 current->Frame.QuaternionZ != eye.QuaternionZ ||
+									 current->Frame.QuaternionW != eye.QuaternionW;
+			if (cameraMoved) {
+				if (auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance)) {
+					transform->Frame = eye;
+				}
 			}
 
 			// **The lens only while it is still the editor's**, which is the
@@ -1812,7 +1943,15 @@ namespace studio {
 		// is ignored outright rather than blended with. A capture run is compared
 		// against another capture run, and a clock that is *mostly* reproducible
 		// produces a diff nobody can attribute - see `Options::FixedAnimationStep`.
-		AnimationSeconds += Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
+		// A paused run keeps the image it had at the pause boundary. Advancing the
+		// shared texture clock here would invalidate its scene cache even though
+		// the world, camera and authored objects have not changed.
+		const bool allRunsPaused =
+			!Runs.empty() &&
+			std::all_of(Runs.begin(), Runs.end(), [](const WorldRun &run) { return run.Paused; });
+		if (!allRunsPaused)
+			AnimationSeconds +=
+				Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
 		Renderer.SetAnimationTime(AnimationSeconds);
 
 		// **The frame graph is only collected while it is being read.**
@@ -1829,8 +1968,8 @@ namespace studio {
 		// which is exactly what `profile_frame` did until it had a flag of its
 		// own to set.
 		engine::core::FrameGraph::SetEnabled(
-			ShowFrameGraph || ShowScriptProfile || ShowScripting || ControlWantsProfile ||
-			!Settings.ProfileSnapshot.empty()
+			ShowFrameGraph || ShowScriptProfile || ShowScripting || ShowPhysicsSolver || ShowNetwork ||
+			ControlWantsProfile || !Settings.ProfileSnapshot.empty()
 		);
 
 		// The source profiler is opt-in at the VM boundary. It uses Luau's step
@@ -1885,7 +2024,7 @@ namespace studio {
 		}
 
 		// **Resolved through the survey rather than by comparing names**, and it
-		// is the same correction `client::AttachForeignSurfaces` needed: a
+		// is the same correction `client::AppendForeignPortalClones` needs: a
 		// replica is registered as `"<world> (client 1)"` while the pane in it
 		// still names `"<world>"`, so a straight name comparison presented
 		// nothing and the attach that follows read a draw list nobody had built
@@ -1942,53 +2081,20 @@ namespace studio {
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {
-		// **Which panel this frame draws.** `Renderer::Render` owns the whole
-		// frame - swapchain, interface, present - so it draws one world per
-		// call. With both viewports open they take turns: each holds its own
-		// target and shows the last texture drawn into it, so each refreshes at
-		// half the frame rate. Drawing both in one frame means `Render` taking
-		// a list of views, which is a change to the shared renderer and is
-		// tracked separately.
-		// **Round-robin over whatever is open.** `Renderer::Render` owns the
-		// whole frame - swapchain, interface, present - so it draws one world
-		// per call, and N open panels therefore take turns. Each keeps its own
-		// target and shows the last texture drawn into it.
-		//
-		// Skipping the closed ones matters, and matters more the more panels
-		// exist: rotating through every slot with one panel open would redraw
-		// that panel once per slot for no reason.
-		// **Reused between frames rather than built fresh**, because this runs
-		// every frame and the panel count only changes when somebody opens one.
+		// The scheduler chooses a slot once, then hands that immutable identity to
+		// the presentation path. Window focus only affects input routing, never
+		// which target or camera a render call owns.
 		Candidates.clear();
 
-		if (ShowViewport) {
+		if (ShowViewport && WorldTarget.IsValid()) {
 			Candidates.push_back(0);
 		}
 		for (size_t index = 0; index < Extras.size(); index++) {
-			if (Extras[index].Open) {
+			if (Extras[index].Open && Extras[index].Target.IsValid()) {
 				Candidates.push_back(index + 1);
 			}
 		}
 
-		// **The asset preview is one more slot in the rotation, and it took
-		// every frame instead.** It used to be tested before the loop and
-		// `return` on success - and because a hovered row re-asks for its
-		// preview on every frame it is hovered, that early return fired on
-		// *every* frame too. `Renderer::Render` owns the swapchain and the
-		// present, so the editor's own chrome was never drawn for as long as the
-		// cursor rested on a mesh: the whole window went black and came back the
-		// moment the pointer moved away.
-		//
-		// The comment that used to sit here said the cost was "a hovered row's
-		// worth of frames rather than a permanent share of the rotation". That
-		// was the intent and the code did the opposite - it took the whole
-		// rotation and left nothing for the panels.
-		//
-		// As a candidate it gets one turn in N like everything else, so a
-		// hovered preview refreshes at a share of the frame rate and the editor
-		// keeps drawing. A preview refreshing at a third of 120 fps is forty
-		// updates a second on a thing being looked at, which is not something an
-		// eye can see; a window that stops being drawn is.
 		if (!PreviewWanted.empty()) {
 			Candidates.push_back(PreviewSlot());
 		}
@@ -2011,30 +2117,21 @@ namespace studio {
 			}
 		}
 
+		size_t viewport = 0;
 		if (PendingSceneCaptureViewport.has_value() &&
 			std::find(Candidates.begin(), Candidates.end(), *PendingSceneCaptureViewport) !=
 				Candidates.end()) {
-			// A capture is consumed by the panel that renders it. Keep its panel
-			// selected until the renderer writes the file instead of letting a
-			// preview take the last bounded frame.
-			DrawingViewport = *PendingSceneCaptureViewport;
+			viewport = *PendingSceneCaptureViewport;
 		} else if (Candidates.empty()) {
-			// Nothing to draw into. The frame still runs - the chrome is drawn
-			// and presented - so the editor does not freeze when every viewport
-			// is closed.
-			DrawingViewport = 0;
+			viewport = 0;
 		} else {
 			RoundRobin = (RoundRobin + 1) % Candidates.size();
-			DrawingViewport = Candidates[RoundRobin];
+			viewport = Candidates[RoundRobin];
 		}
 
 		PrepareControlScreenshot();
 
-		// **This frame belongs to the preview**, and it is spent the same way a
-		// viewport spends one: `Render` owns the swapchain, so whichever slot the
-		// rotation picked gets the whole call. The difference from what this used
-		// to do is only that it had to be *picked*.
-		if (DrawingViewport == PreviewSlot()) {
+		if (viewport == PreviewSlot()) {
 			if (RenderPreviewSlot()) {
 				PreviewWanted.clear();
 				return;
@@ -2044,10 +2141,17 @@ namespace studio {
 			// entry that has gone. Fall through to the first viewport rather than
 			// spending the frame on nothing.
 			PreviewWanted.clear();
-			DrawingViewport = Candidates.size() > 1 ? Candidates[0] : 0;
+			viewport = Candidates.size() > 1 ? Candidates[0] : 0;
 		}
 
-		ViewportState *extra = ExtraAt(DrawingViewport);
+		PresentViewport(viewport, frameSeconds);
+	}
+
+	void Editor::PresentViewport(size_t viewport, float frameSeconds) {
+		ENGINE_PROFILE_DYNAMIC(
+			"viewport", std::string_view(ViewportTitle(viewport)), engine::core::ProfileCategory::Render
+		);
+		ViewportState *extra = ExtraAt(viewport);
 		const bool drawingSecond = extra != nullptr;
 
 		// **The second panel defaults to a *different* world, not to the active
@@ -2069,7 +2173,8 @@ namespace studio {
 		const WorldId shown =
 			drawingWorld ? (drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active)
 						 : WorldId{};
-		const WorldId visual = VisualWorldOf(shown);
+		const bool runtimeWorld = shown.IsValid() && (IsRunning(shown) || IsReplicaWorld(shown));
+		WorldId visual = VisualWorldOf(shown);
 		if (!visual.IsValid() && LastPostProcessShader.IsValid()) {
 			Renderer.ClearPostProcessShader();
 			LastPostProcessShader = {};
@@ -2088,7 +2193,7 @@ namespace studio {
 		float reach = drawingSecond ? extra->Speed : CameraSpeed;
 
 		const Entity follow = drawingSecond ? extra->Follow : FollowCamera;
-		if (follow != NULL_ENTITY && shown.IsValid()) {
+		if (!runtimeWorld && follow != NULL_ENTITY && shown.IsValid()) {
 			bool followed = false;
 			Universe->Enter(shown, [&](Store &store) {
 				if (!store.Alive(follow)) {
@@ -2119,13 +2224,27 @@ namespace studio {
 		// A followed camera brings its own field of view and clip planes: those
 		// are its properties, and looking through it while ignoring them would
 		// be looking through something else.
-		if (follow != NULL_ENTITY && shown.IsValid()) {
+		if (!runtimeWorld && follow != NULL_ENTITY && shown.IsValid()) {
 			Universe->Enter(shown, [&](Store &store) {
 				if (store.Alive(follow)) {
 					if (const auto *component = store.Get<engine::scene::Camera>(follow)) {
 						lens = *component;
 					}
 				}
+			});
+		}
+
+		// A replica owns its own camera, while the server panel keeps its free
+		// camera. The latter is editor session state, so it must survive a window
+		// focus change instead of being replaced with the server script camera.
+		if (IsReplicaWorld(shown)) {
+			Universe->Enter(shown, [&](Store &store) {
+				const Entity camera = RuntimeCameraOf(store);
+				if (camera == NULL_ENTITY) {
+					return;
+				}
+				eye = store.Get<engine::scene::Transform>(camera)->Frame;
+				lens = *store.Get<engine::scene::Camera>(camera);
 			});
 		}
 
@@ -2140,49 +2259,11 @@ namespace studio {
 		target.Width = targetSize.Width;
 		target.Height = targetSize.Height;
 
-		// PreRender runs whether or not the simulation did: it is the phase
-		// that turns state into something to draw, and an edited world's state
-		// changes without a tick.
-		// **A replica is given this viewport's eye before it presents.** It has
-		// no camera of its own - an authoritative entity minted in a replica
-		// would collide with one the authority minted - so `AimReplicaViewer`
-		// puts a predicted one there and names it `ActiveCamera`.
-		//
-		// Before `Present`, because `aim-surface-cameras` runs in `PreRender`
-		// and reflects through whatever `ActiveCamera` names. Setting the eye
-		// afterwards aims every mirror at where the viewport was last frame,
-		// which is a reflection that lags the camera by one frame and reads as
-		// a mirror that is not tracking.
-		if (shown.IsValid() && IsReplicaWorld(shown)) {
-			Universe->Enter(shown, [&](Store &store) {
-				const Entity camera = client::AimReplicaViewer(store, eye, lens);
-
-				// **And read it back, which is what makes a client view a
-				// client's view.** A replica with a character places its own
-				// camera - `replica-camera` turns it with the mouse and sits it
-				// behind the body - and `AimReplicaViewer` steps aside when it
-				// does. Continuing to draw from `eye` would show the editor's
-				// free camera looking at a world somebody is walking around in,
-				// which is the picture this panel exists not to be.
-				//
-				// With no character the two are the same value, because `eye` is
-				// what `AimReplicaViewer` just wrote - so this folds both cases
-				// into one read rather than a condition.
-				if (store.Alive(camera)) {
-					if (const auto *placement = store.Get<engine::scene::Transform>(camera)) {
-						eye = placement->Frame;
-					}
-					if (const auto *found = store.Get<engine::scene::Camera>(camera)) {
-						lens = *found;
-					}
-				}
-			});
-		}
-
 		// The replica still presents its local camera, predicted rows and UI. The
 		// authority is then presented from that resolved eye and supplies the one
 		// shared visual scene. Presenting is PreRender only, so this does not tick
 		// either world twice.
+		std::optional<engine::scene::ActiveCamera> restoreRuntimeCamera;
 		{
 			ENGINE_PROFILE_CAT("present views", engine::core::ProfileCategory::ECS);
 			if (shown.IsValid() && shown != visual) {
@@ -2211,11 +2292,51 @@ namespace studio {
 				});
 			}
 
-			if (visual.IsValid()) {
-				// The authority receives the final client eye before its own
-				// `PreRender`, where surface cameras and the draw list are built.
-				// An authored world takes the editor eye through the same path.
-				EnsureViewerCamera(DrawingViewport, visual, eye, lens, follow);
+			if (shown.IsValid() && IsReplicaWorld(shown)) {
+				visual =
+					client::ResolveCameraPortalWorld(*Universe, shown, visual, eye, lens, PortalImages.get());
+			}
+			if (visual.IsValid() && Universe->IsRemote(visual)) {
+				ReleaseViewerCamera(viewport);
+			} else if (visual.IsValid()) {
+				const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
+				if (runtimeVisual) {
+					// A viewport's aspect and a client panel's presentation eye are
+					// frame-local facts. Restore the runtime camera after PreRender so
+					// server scripts and other client panels keep their own state.
+					Universe->Enter(visual, [&](Store &store) {
+						if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+							active != nullptr) {
+							restoreRuntimeCamera = *active;
+						}
+					});
+				}
+
+				if (!runtimeVisual || visual != shown || !IsReplicaWorld(shown)) {
+					// An edit viewport owns this generated camera outright. A client
+					// viewport uses the same per-panel camera only while the authority
+					// prepares its camera-dependent surface views.
+					EnsureViewerCamera(viewport, visual, eye, lens, runtimeVisual ? NULL_ENTITY : follow);
+
+					if (!IsReplicaWorld(shown)) {
+						// `EnsureViewerCamera` leaves an authored lens intact. Read it
+						// back before building this panel's target and projection,
+						// otherwise the rendered view keeps the default lens from before
+						// the camera was prepared and FieldOfView appears to have no
+						// effect. A replica panel instead owns its lens through its local
+						// runtime camera; this generated authority camera only prepares
+						// that world's surface views.
+						Universe->Enter(visual, [&](Store &store) {
+							const ViewerCamera &viewer = Viewers[viewport];
+							if (viewer.World != visual || !store.Alive(viewer.Instance)) {
+								return;
+							}
+							if (const auto *component = store.Get<engine::scene::Camera>(viewer.Instance)) {
+								lens = *component;
+							}
+						});
+					}
+				}
 
 				// The requested panel extent belongs to this camera resource. Write
 				// it after `EnsureViewerCamera`, which replaces the whole resource,
@@ -2271,22 +2392,27 @@ namespace studio {
 				);
 			}
 		}
+		if (restoreRuntimeCamera.has_value() && visual.IsValid() && !Universe->IsRemote(visual)) {
+			Universe->Enter(visual, [&](Store &store) { store.SetResource(*restoreRuntimeCamera); });
+		}
 
+		const bool remoteEye = visual.IsValid() && Universe->IsRemote(visual);
 		// Remember the exact eye the texture below is rendered from. A hosted
 		// client may have moved its camera during `PreRender`; recording the eye
 		// before that phase would project overlays through the previous room.
-		if (DrawingViewport < Overlays.size()) {
-			OverlaySlot &slot = Overlays[DrawingViewport];
+		if (viewport < Overlays.size()) {
+			OverlaySlot &slot = Overlays[viewport];
 			slot.PresentedFrame = eye;
 			slot.PresentedFieldOfView = lens.FieldOfViewRadians;
+			// `visual` can be a replica's authority while this viewport's camera
+			// belongs to the replica. Match `ViewportWorld` in ProjectionFor.
+			slot.PresentedWorld = shown;
 			slot.Presented = true;
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
 		std::vector<engine::core::CFrame> jointFrames;
-		std::vector<engine::core::CFrame> foreignJointFrames;
 		DrawnInstances.clear();
-		ForeignInstances.clear();
 
 		// **Cleared before the world is asked, not inside the ask.** A viewport
 		// with no world would otherwise keep whatever the last world it drew
@@ -2306,7 +2432,7 @@ namespace studio {
 		const bool clientPresentation = visual.IsValid() && ModeOf(visual) == RunMode::Play;
 		const bool particlesEnabled =
 			ShowParticleEmitters && (!clientPresentation || ClientSettings.EnableParticles);
-		if (visual.IsValid()) {
+		if (visual.IsValid() && !remoteEye) {
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
 				// Lighting is authored per world and Studio presents worlds without
@@ -2381,24 +2507,50 @@ namespace studio {
 					// and a `ParticleBatch` points at a block the world may reclaim
 					// the moment the tick resumes. Copying the batches alone would
 					// copy the pointers.
-					(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
+					{
+						ENGINE_PROFILE_CAT("effect particles", engine::core::ProfileCategory::Render);
+						(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
+					}
 					particleFrameCollected = true;
-					Particles.Detach();
+					{
+						ENGINE_PROFILE_CAT("effect particles detach", engine::core::ProfileCategory::Render);
+						Particles.Detach();
+					}
 
-					const std::span<const engine::effects::RibbonVertex> vertices =
-						engine::effects::RibbonStream(store);
-					RibbonVertices.assign(vertices.begin(), vertices.end());
+					{
+						ENGINE_PROFILE_CAT("effect ribbons", engine::core::ProfileCategory::Render);
+						const std::span<const engine::effects::RibbonVertex> vertices =
+							engine::effects::RibbonStream(store);
+						RibbonVertices.assign(vertices.begin(), vertices.end());
 
-					const std::span<const engine::effects::RibbonRun> runs =
-						engine::effects::RibbonRuns(store);
-					RibbonRuns.assign(runs.begin(), runs.end());
+						const std::span<const engine::effects::RibbonRun> runs =
+							engine::effects::RibbonRuns(store);
+						RibbonRuns.assign(runs.begin(), runs.end());
+					}
 
-					// **Ordered from the eye, which is why this needs the camera
-					// and the three above do not.** The renderer takes sixteen
-					// and a world may hold any number; which sixteen is a scene
-					// question and distance is the answer that is right more
-					// often than it is wrong.
-					(void)engine::render::CollectLights(store, eye.Position, Lights);
+					{
+						ENGINE_PROFILE_CAT("effect lights", engine::core::ProfileCategory::Render);
+						// Lights are selected against the culled receiver rows, so an
+						// offscreen local light stays when its range reaches visible geometry.
+						static thread_local std::vector<uint32_t> visibleLightRows;
+						static thread_local std::vector<engine::core::AABB> lightReceivers;
+						lightReceivers.clear();
+						if (target.IsValid() && target.Width > 0 && target.Height > 0) {
+							const auto matrices = engine::scene::ResolveCamera(
+								eye,
+								lens,
+								static_cast<float>(target.Width) / static_cast<float>(target.Height)
+							);
+							const engine::graph::Frustum frustum =
+								engine::graph::Frustum::FromViewProjection(matrices.ViewProjection);
+							engine::graph::Cull(DrawnInstances, frustum, visibleLightRows);
+							lightReceivers.reserve(visibleLightRows.size());
+							for (const uint32_t row : visibleLightRows) {
+								lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
+							}
+						}
+						(void)engine::render::CollectLights(store, eye.Position, lightReceivers, Lights);
+					}
 				}
 
 				// **How deep this world's mirrors go, pushed with the world that
@@ -2452,20 +2604,17 @@ namespace studio {
 						VisualResourceRevision++;
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
-							if (module == nullptr) {
+							// A removed source has no accepted module. Drop its device
+							// state; failed edits keep accepted words in ShaderLibrary.
+							if (module == nullptr || !module->Error.empty()) {
 								(void)Renderer.DropShader(shader);
-								if (shader == wantedPostProcess) {
+								if (shader == LastPostProcessShader) {
 									Renderer.ClearPostProcessShader();
 									LastPostProcessShader = {};
 								}
-								continue;
-							}
-
-							// A diagnostic and not a fatal, which is
-							// `render/AGENTS.md`'s rule for a shader somebody is
-							// writing. The part goes on drawing with the engine's.
-							if (!module->Error.empty()) {
-								ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
+								if (module != nullptr) {
+									ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
+								}
 								continue;
 							}
 
@@ -2530,6 +2679,9 @@ namespace studio {
 						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
 						if (!clientPresentation || ClientSettings.EnableEditableMeshes) {
 							VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						} else {
+							VisualResourceRevision +=
+								EditableMeshes.RefreshLods(store, Renderer) > 0 ? 1u : 0u;
 						}
 					}
 					{
@@ -2565,28 +2717,31 @@ namespace studio {
 			Particles.Clear();
 		}
 
+		const bool viewportGuiPresent =
+			shown.IsValid() &&
+			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) != ViewportGuiSource::None;
 		if (shown.IsValid()) {
 			Universe->Enter(shown, [&](Store &store) {
 				// The interface is client-local even when its scene is authority-backed.
 				// It is submitted from the replica store before that store boundary
 				// closes; only copied draw rows leave the boundary.
-				if (DrawingViewport < GuiLists.size() && target.IsValid()) {
+				if (viewportGuiPresent && viewport < GuiLists.size() && target.IsValid()) {
 					(void)ViewportImages.Render(
-						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
+						Renderer, store, GuiLists[viewport].Commands(), PreviewSlot() + 1
 					);
 					// Canvas points and target pixels differ on a scaled display.
 					GameInterface.Submit(
-						GuiLists[DrawingViewport].Commands(),
-						GuiLists[DrawingViewport].Commands().CanvasSize,
+						GuiLists[viewport].Commands(),
+						GuiLists[viewport].Commands().CanvasSize,
 						engine::core::Vector2{
 							static_cast<float>(target.Width), static_cast<float>(target.Height)
 						},
 						store,
-						GuiLists[DrawingViewport].Signature()
+						GuiLists[viewport].Signature()
 					);
 				}
 
-				if (shown != visual) {
+				if (shown != visual && !remoteEye) {
 					if (const auto *list = store.Resource<engine::render::DrawList>()) {
 						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
 						AppendReplicaVisualInstances(
@@ -2601,61 +2756,12 @@ namespace studio {
 			});
 		}
 
-		if (visual.IsValid()) {
-
-			// **The far world draws itself first, and this is the step that was
-			// missing.** `Universe::Present` is what runs `PreRender`, and
-			// `PreRender` is where `collect-instances` builds a world's
-			// `render::DrawList` - so a world builds a draw list exactly when
-			// somebody presents it, and until now the only world presented for a
-			// panel was the one the panel shows.
-			//
-			// A cross-world portal names a scene that is usually *not* on
-			// screen. Its list was therefore whatever it held the last time it
-			// was looked at directly: empty for a world nobody had opened, which
-			// `AttachForeignSurfaces` reads as "nothing published yet" and skips
-			// - leaving the pane showing this world, which is a mirror and is
-			// exactly the "the other side does not render" report. Or, worse,
-			// stale: a still photograph of the far world taken whenever it was
-			// last in a panel, which is the one thing `ImmersivePortals.luau`
-			// holds both worlds awake to avoid.
-			//
-			// **So the destination is presented, and it is presented here.** The
-			// far world renders itself, in its own pass, from its own camera -
-			// and what crosses to this panel is the result rather than the
-			// responsibility. `Present` runs no simulation, so this neither
-			// ticks the far world nor decides anything about it; it asks it for
-			// this frame's picture.
-			//
-			// Immediately before the attach, because the attach reads exactly
-			// what this produces - and outside the `Enter` above, for the reason
-			// the attach gives.
+		const size_t portalSourceRows = DrawnInstances.size();
+		if (visual.IsValid() && !remoteEye) {
+			// Foreground clones need destination presentation before they join this
+			// world's rows. The image host reuses those completed presentations.
 			PresentPortalDestinations(visual, frameSeconds);
-
-			// **Outside the `Enter`, because it enters other worlds.** A portal
-			// naming another scene needs that scene's draw list, and
-			// `Universe::Enter` is not re-entrant - so this is the one step that
-			// has to happen once the source store has been let go of. It fills
-			// `foreign` with the far world's instances and points the surface at
-			// a range of it; a frame with no cross-world portal in it clears
-			// `foreign` and touches nothing else.
-			//
-			// **`drawn` goes in beside it, because a hole has two mouths.** The
-			// far side of anybody standing in *this* world's pane belongs in the
-			// picture the pane shows; the near side of anybody standing in the
-			// *far* world's pane back to here belongs in this room, in front of
-			// the pane, and so on the end of this world's own rows. The second
-			// of those is what a cross-world portal was missing, and missing it
-			// is what made one draw only from A into B and never back.
-			(void)client::AttachForeignSurfaces(
-				*Universe,
-				visual,
-				DrawnInstances,
-				ForeignInstances,
-				Surfaces,
-				&jointFrames,
-				&foreignJointFrames
-			);
+			(void)client::AppendForeignPortalClones(*Universe, visual, DrawnInstances, &jointFrames);
 
 			instances = &DrawnInstances;
 		}
@@ -2666,7 +2772,7 @@ namespace studio {
 		// names. Moving either after presentation makes the surface view one frame
 		// stale.
 		//
-		// **`DrawingViewport` below chooses the surface textures as well as the
+		// **`viewport` below chooses the surface textures as well as the
 		// scene target, and the mirrors need it to.** The views collected above
 		// were aimed from *this* panel's eye a few lines ago - the aim is world
 		// state and one panel draws per frame, so it is correct at the moment it
@@ -2708,11 +2814,11 @@ namespace studio {
 			view.RibbonRuns = RibbonRuns;
 			view.Lights = Lights;
 			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
-			view.Slot = DrawingViewport;
-			view.Foreign = ForeignInstances;
-			view.ForeignJointFrames = foreignJointFrames;
+			view.Slot = viewport;
 			view.Portals = Portals;
 			view.Pipeline = selectedPipeline;
+			view.LodMinimumDistances = LodMinimumDistances(Prefs);
+			view.EnableLODCulling = Prefs.EnableLODCulling;
 			view.World = visual.IsValid() ? visual.Index : 0;
 			view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
 
@@ -2734,12 +2840,57 @@ namespace studio {
 			Renderer.SetUntextured(ShowColliders && ColliderHideTextures);
 		}
 
+		if (PortalImages && drawingWorld && remoteEye && shown.IsValid() && target.IsValid()) {
+			engine::render::View remote;
+			remote.CameraFrame = eye;
+			remote.Camera = lens;
+			remote.Target = view.Target;
+			remote.Slot = view.Slot;
+			remote.LodMinimumDistances = view.LodMinimumDistances;
+			remote.EnableLODCulling = view.EnableLODCulling;
+			const auto now = std::chrono::steady_clock::now();
+			(void)PortalImages->SubmitEye(
+				shown,
+				{Universe->NameOf(visual), visual},
+				remote,
+				{.Width = static_cast<uint32_t>(target.Width),
+				 .Height = static_cast<uint32_t>(target.Height)},
+				now
+			);
+			PortalImages->Pump(frameSeconds, 1, now);
+			remote.EyeImage = PortalImages->Image(remote.Slot, remote.EyeImageKey);
+			view = std::move(remote);
+			Renderer.SetAnimationTime(AnimationSeconds);
+		} else if (PortalImages && drawingWorld && visual.IsValid() && target.IsValid()) {
+			auto sourceView = view;
+			sourceView.Instances = std::span(DrawnInstances).first(portalSourceRows);
+			client::UpdatePortalImages(
+				*Universe,
+				*PortalImages,
+				visual,
+				sourceView,
+				{.Width = static_cast<uint32_t>(target.Width),
+				 .Height = static_cast<uint32_t>(target.Height)},
+				Portals,
+				Surfaces,
+				PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual)),
+				std::chrono::steady_clock::now()
+			);
+			Renderer.SetAnimationTime(AnimationSeconds);
+			view.Portals = Portals;
+			view.Surfaces = Surfaces;
+		} else if (PortalImages) {
+			PortalImages->RemoveViewport(viewport);
+			PortalImages->Pump(frameSeconds, 1, std::chrono::steady_clock::now());
+			Renderer.SetAnimationTime(AnimationSeconds);
+		}
+
 		const uint64_t animationSignature = Renderer.TextureAnimationSignature(AnimationSeconds);
-		const bool gameInterfacePresent =
-			DrawingViewport < GuiLists.size() && !GuiLists[DrawingViewport].Commands().Commands.empty();
+		const bool gameInterfacePresent = viewportGuiPresent && viewport < GuiLists.size() &&
+										  !GuiLists[viewport].Commands().Commands.empty();
 		const uint64_t gameInterfaceSignature =
 			gameInterfacePresent
-				? engine::scene::MixSignature(GuiLists[DrawingViewport].Signature(), animationSignature)
+				? engine::scene::MixSignature(GuiLists[viewport].Signature(), animationSignature)
 				: 0;
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
 		{
@@ -2754,6 +2905,7 @@ namespace studio {
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
 					.Untextured = ShowColliders && ColliderHideTextures,
+					.Wireframe = Renderer.Wireframe(),
 				}
 			);
 		}
@@ -2764,11 +2916,11 @@ namespace studio {
 			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
 		};
 		engine::render::PresentationDamage damage =
-			ViewportPresentations[DrawingViewport].Inspect(presentationSignatures);
+			ViewportPresentations[viewport].Inspect(presentationSignatures);
 		const bool particleLayerPresent = !view.Particles.empty();
 		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
 		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
-		auto &particleVisibility = ViewportParticleVisibility[DrawingViewport];
+		auto &particleVisibility = ViewportParticleVisibility[viewport];
 		particleVisibility.Refine(
 			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
 		);
@@ -2777,7 +2929,7 @@ namespace studio {
 			.Objects = !view.Instances.empty() || view.Grid.Enabled,
 			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
 			.Environment = engine::render::EnvironmentLayerPresent(visualLighting),
-			.Portals = !view.Portals.empty() || !view.Surfaces.empty(),
+			.Portals = view.EyeImageKey.IsValid() || !view.Portals.empty() || !view.Surfaces.empty(),
 			.GameInterface = gameInterfacePresent,
 			.HostInterface = true,
 			.ViewportGeometry = drawingWorld && target.IsValid(),
@@ -2785,6 +2937,15 @@ namespace studio {
 		};
 		const bool diagnosticFrame =
 			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
+		const bool graphSourceChanged = !LastGraphViewport.has_value() || *LastGraphViewport != viewport ||
+										LastGraphRenderGeneration != Renderer.RenderGeneration();
+		if (graphSourceChanged) {
+			// Graph image resources are frame-scoped while Studio records one panel
+			// per render call. A host-only update must not copy the prior panel's
+			// composed image into this slot.
+			damage.Scene = true;
+			damage.GameInterface = true;
+		}
 		if (diagnosticFrame) {
 			damage.Scene = true;
 			damage.GameInterface = true;
@@ -2793,25 +2954,45 @@ namespace studio {
 		view.Damage = damage;
 		const bool visualChanged = damage.Any();
 		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
-		if (!visualChanged) {
-			ViewportPresentations[DrawingViewport].CacheProfile().Record(
-				damage, true, false, cacheApplicability
-			);
-		}
 		if (!visualChanged && !particleDeviceStep) {
 			return;
+		}
+		if (!visualChanged) {
+			// A retained image that prevents submission is a skipped opportunity,
+			// not a cache read. Count hits only when this presentation actually asks
+			// the renderer to reuse those layers.
+			ViewportPresentations[viewport].CacheProfile().Record(
+				damage, true, false, false, cacheApplicability
+			);
 		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
 			LastFrame = Renderer.Render(
-				std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
+				std::span<const engine::render::View>(&view, 1),
+				Overlay,
+				gameInterfacePresent ? &GameInterface : nullptr,
+				true,
+				&Interface
 			);
 		}
+		if (ViewportResults.size() <= viewport) {
+			ViewportResults.resize(viewport + 1);
+		}
+		ViewportResults[viewport].Triangles =
+			UpdateSceneTriangleCount(ViewportResults[viewport].Triangles, LastFrame, damage.Scene);
+		if (LastFrame.Submitted) {
+			LastGraphViewport = viewport;
+			LastGraphRenderGeneration = Renderer.RenderGeneration();
+		}
 		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
-			ViewportPresentations[DrawingViewport].CacheProfile().Record(
-				damage, true, LastFrame.PortalPasses > 0, cacheApplicability
+			ViewportPresentations[viewport].CacheProfile().Record(
+				damage,
+				true,
+				LastFrame.PortalPasses > 0,
+				LastFrame.SurfaceCapturePlanWrite,
+				cacheApplicability
 			);
-			ViewportPresentations[DrawingViewport].Commit(presentationSignatures);
+			ViewportPresentations[viewport].Commit(presentationSignatures);
 			if (damage.Scene) {
 				particleVisibility.Commit(
 					particleVisibilitySignature, LastFrame.ParticlesDrawn > 0 || ribbonLayerPresent
@@ -2821,7 +3002,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("frame result", engine::core::ProfileCategory::Render);
 			if (shown.IsValid()) {
-				RenderPipelineRenderedSlots[shown.Index] = DrawingViewport;
+				RenderPipelineRenderedSlots[shown.Index] = viewport;
 			}
 
 			// **Presented, or simply drawn when there is nowhere to present.**
@@ -3001,11 +3182,6 @@ namespace studio {
 	// --- the game ----------------------------------------------------------
 
 	void Editor::PrepareWorld(Store &store, Scheduler &systems) {
-		// `FitPendingParts` reads these stamps instead of walking every visual in
-		// every frame. Observe while the world is being prepared, before later
-		// writes would otherwise make enabling observation reshape its rows.
-		store.Observe<engine::scene::Visual>();
-
 		// The client's half. A world with no draw list renders as an empty
 		// frame, which reads as a broken renderer rather than as a missing
 		// system.
@@ -3116,34 +3292,229 @@ namespace studio {
 	}
 
 	void Editor::PrepareWorldIn(WorldId id) {
-		// `WorldId` reuses its index. A new world in this slot must scan once,
-		// rather than inherit the old world's content-fit watermark.
-		ContentFitScans.erase(id.Index);
-
 		// Read outside the borrow, because the settings belong to the universe
 		// and the store being prepared cannot answer for them.
 		const double physicsTickRate = Universe->SettingsOf(id).PhysicsTickRate;
 		const double scriptTickRate = Universe->SettingsOf(id).ScriptTickRate;
-
-		Universe->Enter(id, [this, physicsTickRate, scriptTickRate](Store &store, Scheduler &systems) {
-			PrepareWorld(store, systems);
-
-			// After `PrepareWorld`, because that is what gives the world the
-			// clock this writes to.
-			engine::physics::SetPhysicsTickRate(store, physicsTickRate);
-			engine::script::SetScriptTickRate(store, scriptTickRate);
-
-			// **The meshes this session has already taken in.** Content arrives
-			// into the worlds that are open at the time, so a world created or
-			// opened afterwards holds parts naming a mesh whose shape it has
-			// never heard of - and a collider that cannot resolve its geometry
-			// falls back to the part's bound in silence. `ContentShapes` is the
-			// same argument `ContentMeshFacts` makes, one layer down.
-			engine::game::MergeCollisionShapes(store, ContentShapes);
-			for (const auto &[name, animation] : ContentAnimationFacts) {
-				(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
-			}
+		uint64_t portalIncarnation = 0;
+		Universe->Enter(id, [&](const Store &store) {
+			portalIncarnation = engine::script::PortalTransferIncarnation(store);
 		});
+		if (portalIncarnation == 0) {
+			// Host setup supplies entropy once. Snapshots retain this token, while
+			// a recreated world receives a new one even when its name/index is reused.
+			const auto session = network::SessionId::Draw();
+			engine::core::ByteReader bytes(session.Value);
+			portalIncarnation = bytes.ReadUInt64();
+			if (portalIncarnation == 0) {
+				Say("could not assign a portal world incarnation", LogLevel::Error);
+			}
+		}
+
+		Universe->Enter(
+			id, [this, physicsTickRate, scriptTickRate, portalIncarnation](Store &store, Scheduler &systems) {
+				PrepareWorld(store, systems);
+				if (portalIncarnation != 0 &&
+					!engine::script::ConfigurePortalTransfers(store, portalIncarnation)) {
+					ENGINE_ERROR("could not configure portal transfers for '{}'", store.Name());
+				}
+
+				// After `PrepareWorld`, because that is what gives the world the
+				// clock this writes to.
+				engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+				engine::script::SetScriptTickRate(store, scriptTickRate);
+
+				ApplyKnownContentFacts(store);
+			}
+		);
+	}
+
+	void Editor::ApplyKnownContentFacts(Store &store) const {
+		// Content arrives while worlds are open, but worlds can be loaded,
+		// restored, or created for a Play client afterwards. Keep the renderer's
+		// pixels and each world's runtime facts in the same session state.
+		engine::game::MergeCollisionShapes(store, ContentShapes);
+		for (const auto &[name, mesh] : ContentMeshFacts) {
+			engine::scene::RecordMesh(store, engine::core::Name::FromId(name), mesh.Triangles, mesh.Sheets);
+		}
+		for (const auto &[name, animation] : ContentAnimationFacts) {
+			(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
+		}
+		for (const auto &[name, facts] : ContentTextureFacts) {
+			(void)engine::scene::RecordTexture(store, engine::core::Name::FromId(name), facts);
+		}
+	}
+
+	void Editor::LoadPackagedExampleAssets() {
+		for (const engine::examples::PackagedAsset &asset : engine::examples::PackagedAssets()) {
+			const engine::assets::AssetKind kind = engine::assets::KindOfName(asset.Name);
+			if (kind != engine::assets::AssetKind::Texture && kind != engine::assets::AssetKind::Mesh)
+				continue;
+
+			std::ifstream input(asset.Path, std::ios::binary);
+			const std::vector<char> raw(
+				(std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>()
+			);
+			if (!input.good() && !input.eof()) {
+				ENGINE_WARN("examples: packaged asset '{}' could not be read", asset.Path.string());
+				continue;
+			}
+			RegisterBakedAsset({reinterpret_cast<const std::byte *>(raw.data()), raw.size()}, asset.Name);
+		}
+	}
+
+	bool
+	Editor::PrepareDataFactoryWorld(engine::world::Universe &universe, WorldId world, std::string &detail) {
+		if (!world.IsValid()) {
+			detail = "Studio could not identify the factory world";
+			return false;
+		}
+		const engine::world::WorldSettings settings = universe.SettingsOf(world);
+		bool prepared = false;
+		if (universe.Enter(
+				world,
+				[this, &prepared, &settings](Store &store, Scheduler &systems) {
+					PrepareWorld(store, systems);
+					engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
+					engine::script::SetScriptTickRate(store, settings.ScriptTickRate);
+					prepared = true;
+				}
+			) != WorldStatus::Ok ||
+			!prepared) {
+			detail = "Studio could not prepare the factory world";
+			return false;
+		}
+		return true;
+	}
+
+	bool Editor::StartDataFactoryHost() {
+		FactoryHost = std::make_unique<DataFactoryHost>();
+		std::string detail;
+		const bool started = FactoryHost->Start(
+			*Universe,
+			DataFactoryHostCallbacks{
+				.Lifecycle =
+					[this](
+						engine::world::DataFactoryWorldOperation operation,
+						engine::world::Universe &universe,
+						WorldId world,
+						bool committed,
+						std::string &failure
+					) {
+						if (committed) {
+							if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+								Active = {};
+								SelectionWorld = {};
+								ClearSelection();
+							} else {
+								// Replacement committed before stale presentation is released.
+								// A candidate refusal leaves the old renderer, portal and particle
+								// residency untouched.
+								if (operation == engine::world::DataFactoryWorldOperation::Reset)
+									ReleaseWorldPresentation(world);
+								Active = world;
+								SelectionWorld = world;
+								ClearSelection();
+							}
+							return true;
+						}
+						if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+							if (Renderer.CapturePending() || !ControlScreenshots.empty()) {
+								failure = "Studio must drain pending captures before factory retirement";
+								return false;
+							}
+							ReleaseWorldResidency(world);
+							return true;
+						}
+						return PrepareDataFactoryWorld(universe, world, failure);
+					},
+				.Pause =
+					[this](
+						WorldId world,
+						engine::world::DataFactoryPauseScope scope,
+						bool paused,
+						std::string &failure
+					) {
+						if (!world.IsValid()) {
+							failure = "Studio does not own this factory world";
+							return false;
+						}
+						if (scope != engine::world::DataFactoryPauseScope::PhysicsOnly) return true;
+						if (Universe->Enter(world, [paused](Store &store) {
+								engine::physics::SetPhysicsPaused(store, paused);
+							}) != WorldStatus::Ok) {
+							failure = "Studio could not apply the factory physics pause";
+							return false;
+						}
+						return true;
+					},
+				.Rehydrate = [this](
+								 engine::world::Universe &universe, WorldId world, std::string &failure
+							 ) { return PrepareDataFactoryWorld(universe, world, failure); },
+				.PackageDependencies =
+					[this](engine::world::Universe &universe, engine::world::DataFactorySession &session) {
+						return engine::script::DataScriptPackageTransactionDependencies{
+							.Universe = universe,
+							.Session = session,
+							.RuntimeOf = [this](WorldId world) -> engine::script::Runtime * {
+								const WorldRun *const run = RunOf(world);
+								return run == nullptr ? nullptr : run->Runtime.get();
+							},
+							.DiscardRuntime =
+								[this](WorldId world) {
+									(void)world;
+									CommandHost.Vm.reset();
+									CommandHost.Surface.reset();
+									CommandWorld = {};
+									StudioPluginBindings.OnChanged({});
+									Plugins.clear();
+									ScriptPlugins.clear();
+									StopCppPlugins(CppPlugins);
+								},
+							.MakeRuntime =
+								[](Store &store, const engine::script::RuntimeLimits &limits) {
+									return engine::script::MakeRuntime(
+										store, engine::script::Language::Luau, limits
+									);
+								},
+							.RunPackage = engine::script::RunDataScriptPackage,
+							.InstallSystems = [](Store &, engine::ecs::Scheduler &) {},
+							.PrepareWorld =
+								[this](engine::world::Universe &universe, WorldId world, std::string &error) {
+									return PrepareDataFactoryWorld(universe, world, error);
+								},
+							.Preflight =
+								[this](WorldId world, std::string &error) {
+									if (RunOf(world) == nullptr) return true;
+									error = "active_script_runtime_unsupported";
+									return false;
+								},
+							.AfterSwap =
+								[this](WorldId world) {
+									ReleaseWorldPresentation(world);
+									Active = world;
+									SelectionWorld = world;
+									ClearSelection();
+									LoadPlugins();
+								},
+							.Admit =
+								[](std::string_view source, std::string_view entry, std::string &error) {
+									return engine::script::CheckDataScriptPackageSource(
+										engine::script::Language::Luau, source, entry, error
+									);
+								},
+							.Role = {true, true, true},
+							.Present = true
+						};
+					},
+			},
+			detail
+		);
+		if (!started) {
+			FactoryHost.reset();
+			ENGINE_ERROR("Studio data-factory host: {}", detail);
+		}
+		return started;
 	}
 
 	void Editor::NewGame() {
@@ -3343,6 +3714,9 @@ namespace studio {
 		engine::game::GameInfo info;
 		std::string error;
 
+		if (PortalImages) {
+			PortalImages->Clear();
+		}
 		if (!engine::game::LoadGame(*Universe, path, info, error)) {
 			const std::vector<WorldId> remaining = Universe->Worlds();
 			if (std::find(remaining.begin(), remaining.end(), Active) == remaining.end()) {
@@ -4649,6 +5023,20 @@ namespace studio {
 		WorldRun run;
 		run.World = world;
 		run.Mode = mode;
+		std::string failure;
+
+		// The runtime starts with its own transient camera after the snapshot, so
+		// scripts never borrow an authored camera and Stop cannot restore it.
+		const ViewportCameraPose runtimePose = DefaultViewportCamera();
+		Universe->Enter(world, [&](Store &store) {
+			if (CreateRuntimeCamera(store, "ServerCamera", runtimePose) == NULL_ENTITY) {
+				failure = "could not create the server runtime camera";
+			}
+		});
+		if (!failure.empty()) {
+			ENGINE_ERROR("play: {}", failure);
+			return false;
+		}
 
 		// A run always starts running. Carrying a pause across Stop and Play
 		// would be a game that came up frozen for a reason nobody could see.
@@ -4667,8 +5055,6 @@ namespace studio {
 		if (Commands != nullptr) {
 			Commands->Clear();
 		}
-
-		std::string failure;
 
 		// **Through `game::StartWorldScripts`, which is the same call a
 		// dedicated server makes.** What "running a game" means has to be one
@@ -4738,14 +5124,18 @@ namespace studio {
 		return true;
 	}
 
-	void Editor::ReleaseWorldResidency(WorldId world) {
-		if (Universe == nullptr || !world.IsValid()) {
-			return;
+	void Editor::ReleaseWorldPresentation(WorldId world) {
+		if (PortalImages) {
+			PortalImages->RemoveWorld(world);
 		}
+		if (Universe == nullptr || !world.IsValid()) return;
+		Renderer.ForgetWorld(world.Index, Universe->NameOf(world));
+	}
 
-		const Name name = Universe->NameOf(world);
+	void Editor::ReleaseWorldResidency(WorldId world) {
+		if (Universe == nullptr || !world.IsValid()) return;
+		ReleaseWorldPresentation(world);
 		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
-		Renderer.ForgetWorld(world.Index, name);
 	}
 
 	void Editor::StopPlayLink(PlayLink &link) {

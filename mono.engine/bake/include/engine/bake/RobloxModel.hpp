@@ -46,12 +46,12 @@
 //   `Float64`;
 // - `UDim`, `UDim2`, `Vector2`, `Vector3`, `Color3`, `Color3uint8`, `Rect` and
 //   `NumberRange`;
+// - `NumberSequence` and `ColorSequence`, bounded to the engine keypoint capacity;
 // - `CFrame`, whole - position *and* rotation;
 // - `SharedString`, resolved out of the file's own table.
 //
 // **Refused by name:** `Enum` and `Ref`, which are numbers naming somebody
-// else's table; `NumberSequence`, `ColorSequence`, `PhysicalProperties`, `Font`
-// and everything else the format carries.
+// else's table; `PhysicalProperties`, `Font` and everything else the format carries.
 //
 // The XML container spells the same subset differently and reads exactly it:
 // `CoordinateFrame` is the `CFrame`, `Rect2D` is the `Rect`, `token` is the
@@ -86,6 +86,7 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/NumberRange.hpp>
 #include <engine/core/types/Rect.hpp>
+#include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -145,7 +146,15 @@ namespace engine::bake {
 
 		// `NumberRange`.
 		NumberRange,
+
+		NumberSequence,
+		ColorSequence,
 	};
+
+	// Variable storage keeps ordinary imported properties compact. Conversion bounds the keypoint count.
+	using RobloxNumberSequence = std::vector<core::NumberKeypoint>;
+	// Type used for Roblox Color Sequence.
+	using RobloxColorSequence = std::vector<core::ColorKeypoint>;
 
 	// One property's value as the file spelled it.
 	//
@@ -159,7 +168,7 @@ namespace engine::bake {
 	//
 	// A place can hold tens of millions of properties at once. Keeping only the
 	// active payload makes this row 40 bytes on the supported toolchains instead
-	// of carrying twelve mostly empty fields in every property.
+	// of carrying mostly empty fields in every property.
 	//
 	// @since v0.15
 	class RobloxValue {
@@ -192,7 +201,9 @@ namespace engine::bake {
 			core::UDim,
 			core::UDim2,
 			core::Rect,
-			core::NumberRange>;
+			core::NumberRange,
+			RobloxNumberSequence,
+			RobloxColorSequence>;
 
 		static_assert(std::is_same_v<std::variant_alternative_t<0, Storage>, bool>);
 		static_assert(std::is_same_v<std::variant_alternative_t<1, Storage>, int64_t>);
@@ -206,7 +217,9 @@ namespace engine::bake {
 		static_assert(std::is_same_v<std::variant_alternative_t<9, Storage>, core::UDim2>);
 		static_assert(std::is_same_v<std::variant_alternative_t<10, Storage>, core::Rect>);
 		static_assert(std::is_same_v<std::variant_alternative_t<11, Storage>, core::NumberRange>);
-		static_assert(std::variant_size_v<Storage> == static_cast<size_t>(RobloxValueKind::NumberRange) + 1);
+		static_assert(
+			std::variant_size_v<Storage> == static_cast<size_t>(RobloxValueKind::ColorSequence) + 1
+		);
 
 		Storage Payload = false;
 	};
@@ -278,9 +291,13 @@ namespace engine::bake {
 		// The exact spelling found in the file.
 		std::string Uri;
 
+		// Asset category inferred from the Roblox property value.
 		RobloxAssetKind Kind = RobloxAssetKind::Unknown;
+		// Slash-separated authored path of the Roblox instance owning this asset reference.
 		std::string InstancePath;
+		// Roblox class name of the instance owning this asset reference.
 		std::string ClassName;
+		// Serialized Roblox property whose value referenced the asset.
 		std::string PropertyName;
 	};
 
@@ -288,8 +305,11 @@ namespace engine::bake {
 	//
 	// @since v0.22
 	struct RobloxScript {
+		// Slash-separated authored path of the Roblox script instance.
 		std::string InstancePath;
+		// Roblox class name used to interpret the script instance.
 		std::string ClassName;
+		// Original Luau source text extracted from the Roblox script property.
 		std::string Source;
 	};
 
@@ -298,10 +318,15 @@ namespace engine::bake {
 	//
 	// @since v0.22
 	struct RobloxLostProperty {
+		// Slash-separated authored path of the instance with an unsupported property.
 		std::string InstancePath;
+		// Roblox class name that declared the unsupported property.
 		std::string ClassName;
+		// Roblox property skipped during conversion.
 		std::string PropertyName;
+		// Source Roblox type name that could not be represented by the importer.
 		std::string RobloxType;
+		// Reason this operation produced its reported state.
 		std::string Reason;
 	};
 
@@ -328,7 +353,9 @@ namespace engine::bake {
 		// Analysis collected while decoding. These rows are kept separate from
 		// `Notes` so Studio can filter and map them without parsing prose.
 		std::vector<RobloxAssetReference> Assets;
+		// Scripts kept in their declared order.
 		std::vector<RobloxScript> Scripts;
+		// Lost properties kept in their declared order.
 		std::vector<RobloxLostProperty> LostProperties;
 	};
 

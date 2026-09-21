@@ -338,6 +338,11 @@ namespace engine::ecs {
 		// owns) are the three today.
 		bool Writable = true;
 
+		// Allows runtime writes on live, client-owned predicted instances in a
+		// replica. The setter must not mutate authority-owned rows through references.
+		// Store::SetProperty enforces both this opt-in and the predicted index range.
+		bool PredictedWritable = false;
+
 		// False for a property a *script* may not touch, in either direction.
 		//
 		// **A different question from `Writable`, and the difference is who is
@@ -393,6 +398,11 @@ namespace engine::ecs {
 		//
 		// @return `false` when the entity cannot take it.
 		bool (*Set)(Store &store, Entity instance, const void *value) = nullptr;
+
+		// Restores a reference during document loading or clone remapping.
+		// Validates the target like Set, while preserving separately authored
+		// selection state. Null uses the ordinary setter.
+		bool (*RestoreReference)(Store &store, Entity instance, const void *value) = nullptr;
 
 		// Resolves a prerequisite named by a value arriving from a document.
 		//

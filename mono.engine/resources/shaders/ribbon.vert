@@ -36,6 +36,7 @@ layout(set = 1, binding = 0) uniform Frame {
 
 layout(location = 0) out vec2 outTexCoord;
 layout(location = 1) out vec4 outColour;
+layout(location = 2) out vec3 outWorldPosition;
 
 void main() {
 	outTexCoord = inCoordinate;
@@ -52,5 +53,6 @@ void main() {
 	// front of the geometry it is attached to without being moved where its
 	// endpoints are.
 	vec3 world = inPosition - frame.CameraForward.xyz * frame.Options.x;
+	outWorldPosition = world;
 	gl_Position = frame.ViewProjection * vec4(world, 1.0);
 }

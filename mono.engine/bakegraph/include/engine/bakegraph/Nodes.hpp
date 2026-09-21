@@ -85,6 +85,24 @@ namespace engine::bake {
 		//
 		// @since v0.14
 		Rasterize,
+
+		// Reduce a mesh to a stated fraction of its triangles.
+		//
+		// Appended because these ordinals are part of the pipeline format.
+		Decimate,
+
+		// Mark an already-arranged RGBA atlas as a flipbook.
+		//
+		// Static atlas sources such as PNG carry pixels but no animation facts.
+		// This node supplies the square grid, populated cells and rate without
+		// changing those pixels. It is deliberately separate from `Retime`: the
+		// latter corrects an imported animation, while this gives an ordinary
+		// texture its first flipbook identity.
+		//
+		// Appended because these ordinals are part of the pipeline format.
+		//
+		// @since v0.24
+		Flipbook,
 	};
 
 	// A node's handle.

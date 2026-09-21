@@ -36,6 +36,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -62,7 +63,16 @@ namespace engine::core {
 		// Creates an empty writer, optionally reserving space up front.
 		//
 		// @param reserveBytes Capacity to allocate immediately, or zero for none.
-		explicit ByteWriter(size_t reserveBytes = 0);
+		// @param maximumBytes Hard output limit, or the largest size_t for no limit.
+		// @throws std::length_error when the reserve exceeds the limit.
+		explicit ByteWriter(
+			size_t reserveBytes = 0, size_t maximumBytes = std::numeric_limits<size_t>::max()
+		);
+
+		// Bytes still permitted before this writer refuses without allocating.
+		size_t Remaining() const {
+			return Maximum - Buffer.size();
+		}
 
 		// Drops the contents and keeps the capacity.
 		//
@@ -207,6 +217,8 @@ namespace engine::core {
 
 	  private:
 		std::vector<std::byte> Buffer;
+		size_t Maximum = std::numeric_limits<size_t>::max();
+		void Ensure(size_t bytes) const;
 	};
 
 	// Reads back what ByteWriter produced, and refuses to be led anywhere else.

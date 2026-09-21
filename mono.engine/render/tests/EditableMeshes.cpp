@@ -1,19 +1,21 @@
-// Converting `scene::EditableMesh`'s raw arrays into `assets::MeshData`.
-//
-// **The device-free half, and the only half this codebase unit-tests.**
-// `engine::render::EditableMeshUploader::Refresh` calls into `render::Renderer`
-// itself, which nothing here can assert against without a GPU -
-// `render::ShaderLibrary`'s tests draw the identical line for the identical
-// reason. This pins the conversion: what a mesh built one triangle at a time
-// looks like once it is in the format `render::MeshTable::Add` takes.
+// Host conversion and device upload checks for editable resource ownership.
+
+#include "RenderFixture.hpp"
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <chrono>
+#include <thread>
 
 TEST_SUITE_ID("engine.render.editablemeshes")
 TEST_DEPENDS("engine.scene.editablemesh")
@@ -23,6 +25,127 @@ using engine::core::Color3;
 using engine::core::Vector2;
 using engine::core::Vector3;
 using engine::scene::EditableMesh;
+
+TEST_CASE("editable mesh uploads follow store and owner lifetimes", "[render][gpu][editable-owner][.]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store first("editable.first"), second("editable.second");
+	const auto firstMesh = first.CreateInstance(scene::EditableMeshClass(), "mesh");
+	const auto secondMesh = second.CreateInstance(scene::EditableMeshClass(), "mesh");
+	REQUIRE(firstMesh == secondMesh);
+	const auto triangle = [](ecs::Store &store, ecs::Entity mesh, float size) {
+		REQUIRE(scene::AddVertex(store, mesh, {0, 0, 0}));
+		REQUIRE(scene::AddVertex(store, mesh, {size, 0, 0}));
+		REQUIRE(scene::AddVertex(store, mesh, {0, size, 0}));
+		REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 2));
+	};
+	triangle(first, firstMesh, 2);
+	triangle(second, secondMesh, 4);
+	const core::Name firstOwner("editable:first"), secondOwner("editable:second");
+	const auto name = scene::EditableMeshContentName(first, firstMesh);
+	CHECK(name == scene::EditableMeshContentName(second, secondMesh));
+	render::EditableMeshUploader uploader;
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 1);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	scene::EditablePacking packing;
+	packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position);
+	packing.Format = scene::EditablePackingFormat::Unsigned8;
+	REQUIRE(scene::SetEditableMeshPacking(first, firstMesh, packing));
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	auto *heldPacking = first.GetMutable<scene::EditableMesh>(firstMesh);
+	REQUIRE(heldPacking != nullptr);
+	const uint32_t meshRevision = heldPacking->Revision;
+	heldPacking->Packing.Maximum = 2.0f;
+	heldPacking->Packing.Revision++;
+	CHECK(heldPacking->Revision == meshRevision);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	core::Vector3 extent;
+	REQUIRE(fixture.Render.MeshExtentOf(name, extent, firstOwner));
+	CHECK(extent.X == Approx(1));
+	REQUIRE(fixture.Render.MeshExtentOf(name, extent, secondOwner));
+	CHECK(extent.X == Approx(2));
+	CHECK_FALSE(fixture.Render.MeshExtentOf(name, extent));
+	uploader.ForgetWorld(first.Identity());
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	fixture.Render.DropContentOwner(firstOwner);
+	uploader.ForgetOwner(firstOwner);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	CHECK(uploader.Refresh(first, fixture.Render, core::Name("editable:rebound")) == 1);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+}
+
+TEST_CASE(
+	"editable mesh uploads also publish its automatic decimated ladder", "[render][gpu][editable-lod][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("editable.lod");
+	const ecs::Entity mesh = store.CreateInstance(scene::EditableMeshClass(), "mesh");
+	for (uint32_t y = 0; y <= 4; y++) {
+		for (uint32_t x = 0; x <= 4; x++) {
+			REQUIRE(scene::AddVertex(store, mesh, {float(x), 0.0f, float(y)}));
+		}
+	}
+	for (uint32_t y = 0; y < 4; y++) {
+		for (uint32_t x = 0; x < 4; x++) {
+			const uint32_t a = y * 5 + x;
+			REQUIRE(scene::AddTriangle(store, mesh, a, a + 1, a + 5));
+			REQUIRE(scene::AddTriangle(store, mesh, a + 1, a + 6, a + 5));
+		}
+	}
+	const core::Name base = scene::EditableMeshContentName(store, mesh);
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::AutoMeshLOD policy;
+	policy.Levels = 3;
+	policy.Ratios[0] = 0.5f;
+	policy.Ratios[1] = 0.25f;
+	store.Set(part, policy);
+	const core::Name owner("editable-lod-owner");
+	render::EditableMeshUploader uploader;
+	CHECK(uploader.RefreshLods(store, fixture.Render, owner) == 0);
+	CHECK(scene::TrianglesOf(store, base) == 0);
+	const core::Name first = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	const core::Name second = scene::AutoMeshLodArtifactName(base, 2, 0.25f);
+	size_t initialUploads = 0;
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, second) == 0; attempt++) {
+		initialUploads += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(initialUploads == 3);
+	CHECK(scene::TrianglesOf(store, base) == 32);
+	CHECK(scene::TrianglesOf(store, first) < 32);
+	CHECK(scene::TrianglesOf(store, second) <= scene::TrianglesOf(store, first));
+
+	const float editedRatio = 0.4f;
+	REQUIRE(store.SetProperty(part, core::Name("AutoLod1Ratio"), &editedRatio, sizeof(editedRatio)));
+	const core::Name replacement = scene::AutoMeshLodArtifactName(base, 1, editedRatio);
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, replacement) == 0; attempt++) {
+		(void)uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(scene::TrianglesOf(store, replacement) > scene::TrianglesOf(store, first));
+	CHECK(scene::TrianglesOf(store, first) == 0);
+
+	REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 5));
+	size_t geometryUploads = 0;
+	for (size_t attempt = 0; attempt < 3000 && geometryUploads < 3; attempt++) {
+		geometryUploads += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(geometryUploads == 3);
+	CHECK(scene::TrianglesOf(store, base) == 33);
+}
 
 TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[render][editablemeshes]") {
 	EditableMesh mesh;
@@ -181,4 +304,67 @@ TEST_CASE("an empty mesh converts to an empty, invalid MeshData", "[render][edit
 	CHECK(built.Indices.empty());
 	CHECK(built.Submeshes.empty());
 	CHECK_FALSE(built.IsValid());
+}
+
+namespace {
+	EditableMesh PackingTriangle() {
+		EditableMesh mesh;
+		mesh.Positions = {Vector3{}, Vector3{1, 0, 0}, Vector3{0, 1, 0}};
+		mesh.Normals.assign(3, Vector3{0, 0, 1});
+		mesh.UVs = {Vector2{}, Vector2{1, 0}, Vector2{0, 1}};
+		mesh.Colours.assign(3, Color3{0.2f, 0.4f, 0.6f});
+		mesh.Alphas.assign(3, 0.3f);
+		mesh.Indices = {0, 1, 2};
+		mesh.Packing.Format = engine::scene::EditablePackingFormat::Unsigned4;
+		return mesh;
+	}
+}
+
+TEST_CASE("every editable mesh attribute has an explicit packed result", "[render][editablemeshes]") {
+	EditableMesh mesh = PackingTriangle();
+	for (const auto attribute :
+		 {engine::scene::EditablePackingAttribute::Position,
+		  engine::scene::EditablePackingAttribute::Normal,
+		  engine::scene::EditablePackingAttribute::UV}) {
+		mesh.Packing.Attributes = static_cast<uint8_t>(attribute);
+		const auto packed = engine::render::BuildPackedMeshData(mesh);
+		REQUIRE(packed.IsValid());
+		const size_t selected = attribute == engine::scene::EditablePackingAttribute::Position ? 0
+								: attribute == engine::scene::EditablePackingAttribute::Normal ? 1
+																							   : 2;
+		CHECK(packed.Streams[selected].Format == engine::render::PackedMeshFormat::Unsigned4);
+		for (size_t stream = 0; stream < packed.Streams.size(); ++stream)
+			if (stream != selected)
+				CHECK(packed.Streams[stream].Format == engine::render::PackedMeshFormat::Float32);
+	}
+
+	mesh.Packing.Attributes =
+		engine::scene::EditablePackingAttribute::Colour | engine::scene::EditablePackingAttribute::Alpha;
+	const auto packed = engine::render::BuildPackedMeshData(mesh);
+	REQUIRE(packed.IsValid());
+	REQUIRE(packed.Submeshes.size() == 1);
+	CHECK(packed.Submeshes[0].BaseColour[0] == Approx(3.0f / 15.0f));
+	CHECK(packed.Submeshes[0].BaseColour[3] == Approx(1.0f - 4.0f / 15.0f));
+}
+
+TEST_CASE("packed editable streams keep odd codec tails", "[render][editablemeshes]") {
+	EditableMesh mesh = PackingTriangle();
+	mesh.Packing.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
+	for (const auto &[format, expected] : std::array{
+			 std::pair{engine::scene::EditablePackingFormat::Float16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Float8E4M3FN, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed8, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned8, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed4, size_t{5}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned4, size_t{5}},
+			 std::pair{engine::scene::EditablePackingFormat::Boolean, size_t{2}},
+		 }) {
+		mesh.Packing.Format = format;
+		const auto packed = engine::render::BuildPackedMeshData(mesh);
+		REQUIRE(packed.IsValid());
+		CHECK(packed.Streams[0].ByteCount == expected);
+		CHECK(packed.Vertices.size() < mesh.Positions.size() * sizeof(engine::assets::MeshVertex));
+	}
 }

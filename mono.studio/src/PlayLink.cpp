@@ -3,6 +3,7 @@
 #include <engine/game/Play.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/replication/Defaults.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -15,6 +16,7 @@
 #include <client/Replicated.hpp>
 #include <string>
 #include <studio/PlayLink.hpp>
+#include <studio/Viewports.hpp>
 #include <vector>
 
 namespace studio {
@@ -24,6 +26,18 @@ namespace studio {
 		using engine::ecs::Store;
 		using engine::replication::ChangeDetection;
 
+		engine::replication::AuthoritySettings StudioLinkSettings() {
+			engine::replication::AuthoritySettings settings;
+			// The replica is local, but `StepMany` decodes every admitted message on
+			// Studio's frame thread. A join gets six times the normal chunk budget so
+			// procedural content still arrives promptly, while one frame cannot turn
+			// into 128 snapshot applications just because no socket is involved.
+			settings.ChunksPerTick = 48;
+			settings.MessagesPerTick = 48;
+			settings.BytesPerTick = 48 * 1024;
+			return settings;
+		}
+
 		size_t PosedEntities(Store &store) {
 			size_t count = 0;
 			store.Each<const engine::scene::Transform>(
@@ -32,6 +46,8 @@ namespace studio {
 			return count;
 		}
 	}
+
+	PlayLink::PlayLink() : Server(StudioLinkSettings()) {}
 
 	bool PlayLink::Start(
 		engine::world::Universe &universe,
@@ -52,9 +68,29 @@ namespace studio {
 		}
 
 		const Name authorityName = universe.NameOf(authority);
+		if (!authorityName.IsValid()) {
+			error = "the authority world no longer exists";
+			return false;
+		}
+		if (adopt != engine::ecs::NULL_ENTITY) {
+			bool valid = false;
+			universe.Enter(authority, [&](const Store &store) {
+				valid = store.Alive(adopt) && store.IsA(adopt, engine::scene::PlayerClass());
+			});
+			if (!valid) {
+				error = "the arriving player no longer exists in the authority world";
+				return false;
+			}
+		}
 
 		engine::world::WorldSettings settings;
-		settings.Name = Name(std::string(authorityName.Text()) + " (" + std::string(label) + ")");
+		const std::string replicaName = std::string(authorityName.Text()) + " (" + std::string(label) + ")";
+		settings.Name = Name(replicaName);
+		// Display labels can coincide when players arrive from different worlds.
+		// Each link still owns a distinct replica, including its destruction.
+		for (size_t suffix = 2; universe.Find(settings.Name).IsValid(); ++suffix) {
+			settings.Name = Name(replicaName + " " + std::to_string(suffix));
+		}
 
 		// Interpolation delay is measured against the authority's tick rate.
 		settings.TickRate = tickRate;
@@ -62,7 +98,7 @@ namespace studio {
 
 		engine::world::WorldStatus status = engine::world::WorldStatus::Ok;
 		const engine::world::WorldId replica = universe.Create(settings, &status);
-		if (!replica.IsValid()) {
+		if (!replica.IsValid() || status != engine::world::WorldStatus::Ok) {
 			error = "could not create the client view: " + std::string(Describe(status));
 			return false;
 		}
@@ -96,6 +132,21 @@ namespace studio {
 			}
 		);
 
+		// Each client owns a predicted camera before any replica script can ask
+		// for `workspace.CurrentCamera`. It is local to this replica and cannot
+		// collide with the server's generated runtime camera.
+		const ViewportCameraPose initialCamera = DefaultViewportCamera();
+		bool cameraCreated = false;
+		universe.Enter(replica, [&](Store &store) {
+			cameraCreated =
+				client::AimReplicaViewer(store, initialCamera.Frame, {}) != engine::ecs::NULL_ENTITY;
+		});
+		if (!cameraCreated) {
+			error = "could not create the client runtime camera";
+			(void)universe.Destroy(replica);
+			return false;
+		}
+
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {
 			Server.Replicate(Name(component.Name), component.Detection);
@@ -107,6 +158,15 @@ namespace studio {
 				Server.SuppressWhenTagged(Name(component.Name), Name(component.Suppressor));
 			}
 		}
+
+		// Cameras made by a server viewport belong to that viewport alone. The
+		// transient tag is intentionally absent from the component table, but
+		// that alone would still admit the camera's instance, transform and lens
+		// into a joining client's snapshot. Filter the entity before structure and
+		// component replication so each replica keeps only its predicted viewer.
+		Server.SetInterest([](engine::replication::ClientId, engine::ecs::Entity entity, const Store &store) {
+			return !store.Has<engine::scene::TransientComponent>(entity);
+		});
 
 		Handle = Server.Admit();
 
@@ -130,7 +190,7 @@ namespace studio {
 			// teleport rebuilt them there from the arriving payload; admitting a
 			// second would put the same person in twice, which is the one thing
 			// following a teleport must not do.
-			if (adopt != engine::ecs::NULL_ENTITY && store.Alive(adopt)) {
+			if (adopt != engine::ecs::NULL_ENTITY) {
 				Player_ = adopt;
 				return;
 			}
@@ -177,6 +237,110 @@ namespace studio {
 		return true;
 	}
 
+	void PlayLink::ObservePortalTransfer(engine::world::Universe &universe) {
+		if (!IsRunning() || Player_ == engine::ecs::NULL_ENTITY) {
+			return;
+		}
+		std::optional<engine::script::PortalTransferReceipt> receipt;
+		universe.Enter(Authority_, [&](const Store &store) {
+			receipt = engine::script::PortalTransferOfPlayer(store, Player_);
+		});
+		if (!receipt.has_value()) {
+			return;
+		}
+		const bool first = !PortalTransfer_.has_value() || PortalTransfer_->Id != receipt->Id;
+		if (first) {
+			DepartingCamera_.reset();
+		}
+		if (receipt->Stage == engine::script::PortalTransferStage::Refused) {
+			DepartingCamera_.reset();
+		} else if (first || receipt->Stage == engine::script::PortalTransferStage::Preparing) {
+			universe.Enter(Replica_, [&](const Store &store) {
+				const auto *active = store.Resource<engine::scene::ActiveCamera>();
+				const auto *character =
+					store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, Player_));
+				if (active != nullptr && character != nullptr &&
+					engine::scene::CameraSubjectRoot(store, active->Entity) == character->Root) {
+					DepartingCamera_ = engine::scene::CaptureCameraContinuation(store);
+				}
+			});
+		}
+		PortalTransfer_ = std::move(receipt);
+	}
+
+	std::optional<PortalLinkArrival> PlayLink::FindPortalArrival(engine::world::Universe &universe) const {
+		if (!PortalTransfer_.has_value() ||
+			PortalTransfer_->Stage == engine::script::PortalTransferStage::Refused) {
+			return std::nullopt;
+		}
+		const auto destination = universe.Find(Name(PortalTransfer_->DestinationWorld));
+		if (!destination.IsValid() || destination == Authority_ || universe.IsRemote(destination)) {
+			return std::nullopt;
+		}
+		engine::ecs::Entity player;
+		universe.Enter(destination, [&](const Store &store) {
+			player = engine::script::PortalTransferPlayer(store, PortalTransfer_->Id);
+		});
+		if (player == engine::ecs::NULL_ENTITY) {
+			return std::nullopt;
+		}
+		return PortalLinkArrival{destination, player};
+	}
+
+	bool PlayLink::StartAfterPortal(
+		engine::world::Universe &universe, const PlayLink &departing, double tickRate, std::string &error
+	) {
+		const auto arrival = departing.FindPortalArrival(universe);
+		if (!arrival.has_value()) {
+			error = "the exact portal transfer has not arrived";
+			return false;
+		}
+		auto camera = departing.DepartingCamera_;
+		if (camera.has_value() &&
+			!engine::scene::MapCameraContinuation(*camera, departing.PortalTransfer_->Through)) {
+			error = "the portal camera could not be mapped";
+			return false;
+		}
+		if (!Start(universe, arrival->World, tickRate, error, departing.PlayerName_, arrival->Player)) {
+			return false;
+		}
+		ArrivingCamera_ = std::move(camera);
+		if (ArrivingCamera_.has_value()) {
+			universe.Enter(Replica_, [&](Store &store) {
+				(void)client::AimReplicaViewer(store, ArrivingCamera_->Frame, ArrivingCamera_->Lens);
+			});
+		}
+		return true;
+	}
+
+	std::unique_ptr<PlayLink>
+	PlayLink::AdvancePortalArrival(engine::world::Universe &universe, double tickRate, std::string &error) {
+		error.clear();
+		const auto arrival = FindPortalArrival(universe);
+		if (PortalSuccessor_ && (!arrival || arrival->World != PortalSuccessor_->AuthorityWorld() ||
+								 arrival->Player != PortalSuccessor_->Player())) {
+			PortalSuccessor_->Stop(universe);
+			PortalSuccessor_.reset();
+			error = "the portal destination no longer contains this arrival";
+			return {};
+		}
+		if (!PortalSuccessor_) {
+			if (!arrival) {
+				return {};
+			}
+			auto next = std::make_unique<PlayLink>();
+			if (!next->StartAfterPortal(universe, *this, tickRate, error)) {
+				return {};
+			}
+			PortalSuccessor_ = std::move(next);
+		}
+		PortalSuccessor_->Step(universe);
+		if (!PortalSuccessor_->Client.Joined() || PortalSuccessor_->ArrivingCamera_) {
+			return {};
+		}
+		return std::move(PortalSuccessor_);
+	}
+
 	void PlayLink::Step(engine::world::Universe &universe) {
 		PlayLink *link = this;
 		StepMany(universe, std::span<PlayLink *const>(&link, 1));
@@ -206,6 +370,7 @@ namespace studio {
 				if (link == nullptr || !link->IsRunning()) {
 					continue;
 				}
+				link->ObservePortalTransfer(universe);
 
 				Pending &step = pending.emplace_back();
 				step.Link = link;
@@ -286,6 +451,18 @@ namespace studio {
 					step.Report.Applied = link.Client.Applied();
 					step.Report.ClientEntities = PosedEntities(store);
 					client::RecordReplicatedTick(store, step.Report.Applied);
+					if (link.ArrivingCamera_.has_value()) {
+						const auto *active = store.Resource<engine::scene::ActiveCamera>();
+						const auto *character = store.Get<engine::scene::Character>(
+							engine::scene::CharacterOf(store, link.Player_)
+						);
+						if (active != nullptr && character != nullptr &&
+							engine::scene::ApplyCameraContinuation(
+								store, active->Entity, character->Humanoid, *link.ArrivingCamera_
+							)) {
+							link.ArrivingCamera_.reset();
+						}
+					}
 				});
 
 				const std::vector<std::byte> acknowledgement = link.Client.Acknowledge();
@@ -303,6 +480,10 @@ namespace studio {
 	void PlayLink::Stop(engine::world::Universe &universe) {
 		if (!IsRunning()) {
 			return;
+		}
+		if (PortalSuccessor_) {
+			PortalSuccessor_->Stop(universe);
+			PortalSuccessor_.reset();
 		}
 
 		// **The player goes before the world it is a player of.** Destroying the
@@ -325,6 +506,9 @@ namespace studio {
 		Replica_ = engine::world::WorldId{};
 		Authority_ = engine::world::WorldId{};
 		Last = LinkReport{};
+		PortalTransfer_.reset();
+		DepartingCamera_.reset();
+		ArrivingCamera_.reset();
 
 		universe.Destroy(replica);
 

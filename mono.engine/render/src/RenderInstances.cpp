@@ -10,6 +10,7 @@
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
+#include "SeamLightSelection.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
@@ -28,14 +29,42 @@
 #include <vector>
 
 namespace engine::render {
-	void Renderer::Impl::BindInstanceBuffers(SDL_GPURenderPass *pass, SDL_GPUBuffer *indices) {
+
+	void Renderer::Impl::RecordVisibilityDraw(uint32_t first, uint32_t count) {
+		const uint32_t sceneCount = static_cast<uint32_t>(SceneInstances.size());
+		// Scene slots feed shadows, mirrors, portals, and surfaces. The camera
+		// rows start after them, so only they describe this view's main output.
+		if (first < sceneCount) return;
+		for (uint32_t slot = first; slot < first + count; slot++) {
+			const uint32_t source = slot - sceneCount;
+			const uint32_t index = source < DrawOrder.size() ? DrawOrder[source] : sceneCount;
+			if (index < SceneInstances.size()) VisibilityWorking.Submitted(SceneInstances[index]);
+		}
+	}
+	void Renderer::Impl::RecordVisibilityCandidate(uint32_t first, uint32_t count) {
+		const uint32_t sceneCount = static_cast<uint32_t>(SceneInstances.size());
+		if (first < sceneCount) return;
+		for (uint32_t slot = first; slot < first + count; slot++) {
+			const uint32_t source = slot - sceneCount;
+			const uint32_t index = source < DrawOrder.size() ? DrawOrder[source] : sceneCount;
+			if (index < SceneInstances.size()) VisibilityWorking.GpuIndirectCandidate(SceneInstances[index]);
+		}
+	}
+
+	void Renderer::Impl::RecordVisibilityCandidates(std::span<const scene::DrawInstance> instances) {
+		for (const scene::DrawInstance &instance : instances)
+			VisibilityWorking.GpuIndirectCandidate(instance);
+	}
+	void Renderer::Impl::BindInstanceBuffers(
+		SDL_GPURenderPass *pass, SDL_GPUBuffer *indices, SDL_GPUBuffer *instances, SDL_GPUBuffer *skinOffsets
+	) {
 		const SDL_GPUBufferBinding vertices{Meshes.Vertices(), 0};
 		SDL_BindGPUVertexBuffers(pass, 0, &vertices, 1);
 
 		SDL_GPUBuffer *const storage[] = {
-			InstanceBuffer,
+			instances != nullptr ? instances : InstanceBuffer,
 			indices != nullptr ? indices : InstanceIndexBuffer,
-			SkinOffsetBuffer,
+			skinOffsets != nullptr ? skinOffsets : SkinOffsetBuffer,
 			JointBuffer,
 		};
 		SDL_BindGPUVertexStorageBuffers(pass, 0, storage, 4);
@@ -53,7 +82,9 @@ namespace engine::render {
 		SDL_GPUSampler *surfaceSampler,
 		uint32_t tagFilter,
 		uint64_t &triangles,
-		const IndirectPhase *indirect
+		const IndirectPhase *indirect,
+		SlotSelection selection,
+		VisibilityPass visibilityPass
 	) {
 		if (count == 0 || first + count > SlotMesh.size()) {
 			return 0;
@@ -83,7 +114,70 @@ namespace engine::render {
 		// call somebody else's fragment shader.
 		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
 		SDL_GPUGraphicsPipeline *bound = base;
-		if (lighting == nullptr) {
+		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *native) {
+			if (native == OpaquePipeline) return PackedOpaquePipeline;
+			if (native == ForwardPipeline) return PackedForwardPipeline;
+			if (native == TransparentPipeline) return PackedTransparentPipeline;
+			if (native == WireframeOpaquePipeline) return PackedWireframeOpaquePipeline;
+			if (native == WireframeTransparentPipeline) return PackedWireframeTransparentPipeline;
+			if (native == HdrOpaquePipeline) return PackedHdrOpaquePipeline;
+			if (native == HdrTransparentPipeline) return PackedHdrTransparentPipeline;
+			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
+			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
+			if (native == GBufferPipeline) return PackedGBufferPipeline;
+			if (native == WireframeGBufferPipeline) return PackedWireframeGBufferPipeline;
+			if (native == DepthPeelPipeline) return PackedDepthPeelPipeline;
+			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
+			if (native == TransparentLayerPipeline) return PackedTransparentLayerPipeline;
+			if (native == TransparentLayerColourPipeline) return PackedTransparentLayerColourPipeline;
+			return static_cast<SDL_GPUGraphicsPipeline *>(nullptr);
+		};
+		struct PackedDescriptor {
+			std::array<uint32_t, 4> Position;
+			std::array<uint32_t, 4> Normal;
+			std::array<uint32_t, 4> UV;
+			std::array<float, 4> PositionRange;
+			std::array<float, 4> NormalRange;
+			std::array<float, 4> UVRange;
+		};
+		const auto bindMesh = [&](const MeshEntry &mesh,
+								  SDL_GPUGraphicsPipeline *native,
+								  const core::Name &shader,
+								  core::Name owner) {
+			SDL_GPUGraphicsPipeline *want = native;
+			if (mesh.Packed) {
+				SDL_GPUGraphicsPipeline *variant = WireframeMode ? nullptr : PackedVariantFor(shader, owner);
+				want = variant != nullptr ? variant : packedPipeline(base);
+			}
+			if (want == nullptr) return false;
+			if (want != bound) {
+				SDL_BindGPUGraphicsPipeline(pass, want);
+				bound = want;
+			}
+			if (!mesh.Packed) return true;
+			SDL_GPUBuffer *packed = Meshes.PackedVertices();
+			if (packed == nullptr) return false;
+			SDL_BindGPUVertexStorageBuffers(pass, 4, &packed, 1);
+			const auto words = [](const PackedMeshStream &stream) {
+				return std::array<uint32_t, 4>{
+					stream.ByteOffset,
+					stream.ValueCount,
+					static_cast<uint32_t>(stream.Format),
+					stream.Components,
+				};
+			};
+			const PackedDescriptor descriptor{
+				words(mesh.PackedStreams[0]),
+				words(mesh.PackedStreams[1]),
+				words(mesh.PackedStreams[2]),
+				{mesh.PackedStreams[0].Minimum, mesh.PackedStreams[0].Maximum, 0.0f, 0.0f},
+				{mesh.PackedStreams[1].Minimum, mesh.PackedStreams[1].Maximum, 0.0f, 0.0f},
+				{mesh.PackedStreams[2].Minimum, mesh.PackedStreams[2].Maximum, 0.0f, 0.0f},
+			};
+			SDL_PushGPUVertexUniformData(command, 1, &descriptor, sizeof(descriptor));
+			return true;
+		};
+		const auto resetShadowUniforms = [&] {
 			const SDL_GPUTextureSamplerBinding defaultSampler{
 				Textures.Default() != nullptr ? Textures.Default() : FallbackTexture,
 				Textures.Sampler(),
@@ -91,6 +185,10 @@ namespace engine::render {
 			SDL_BindGPUFragmentSamplers(pass, 0, &defaultSampler, 1);
 			const ShadowUniforms defaultUniforms;
 			SDL_PushGPUFragmentUniformData(command, 0, &defaultUniforms, sizeof(defaultUniforms));
+		};
+		bool shadowUniformsDirty = false;
+		if (lighting == nullptr) {
+			resetShadowUniforms();
 		}
 
 		// One draw for one range of one mesh, over `run` consecutive instances.
@@ -99,11 +197,19 @@ namespace engine::render {
 							  const std::array<float, 4> &colour,
 							  uint32_t slot,
 							  uint32_t run,
-							  bool simpleShadow) {
+							  bool simpleShadow,
+							  SDL_GPUBuffer *forcedArguments,
+							  uint32_t forcedArgument,
+							  bool tallyTriangles) {
 			if (range.IndexCount == 0) {
 				return;
 			}
+			if (lighting == nullptr && simpleShadow && shadowUniformsDirty) {
+				resetShadowUniforms();
+				shadowUniformsDirty = false;
+			}
 
+			const core::Name textureOwner = TextureContentOwner(texture, SlotContentOwner[slot]);
 			if (lighting != nullptr) {
 				// **The default, not the fallback texel, and not "do not
 				// sample".** A drawable naming no texture is not a drawable with
@@ -125,9 +231,10 @@ namespace engine::render {
 				// coming*. `ChooseTexture` is the rule and carries the argument;
 				// it is a free function so a suite can state it without a
 				// device.
-				SDL_GPUTexture *const found = Textures.Find(texture);
-				const TextureChoice choice =
-					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
+				SDL_GPUTexture *const found = Textures.Find(texture, textureOwner);
+				const TextureChoice choice = ChooseTexture(
+					found != nullptr, texture.IsValid(), Textures.Expecting(texture, textureOwner)
+				);
 
 				// **Untextured draws the default and not the named image**, and
 				// it is one substitution rather than a second pipeline family
@@ -149,11 +256,13 @@ namespace engine::render {
 						// exactly what makes a shape hard to see.
 						return static_cast<SDL_GPUTexture *>(nullptr);
 					}
-					SDL_GPUTexture *foundMap = Textures.Find(name);
+					SDL_GPUTexture *foundMap =
+						Textures.Find(name, TextureContentOwner(name, SlotContentOwner[slot]));
 					if (foundMap != nullptr) {
 						return foundMap;
 					}
-					if (name.IsValid() && !Textures.Expecting(name)) {
+					if (name.IsValid() &&
+						!Textures.Expecting(name, TextureContentOwner(name, SlotContentOwner[slot]))) {
 						return Textures.Missing();
 					}
 					return static_cast<SDL_GPUTexture *>(nullptr);
@@ -231,7 +340,7 @@ namespace engine::render {
 				// the same frame. A per-instance phase is a real feature and is a
 				// different one - `effects::FlipbookLayout` already has it for
 				// particles, where the cell is a function of a particle's age.
-				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
+				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 
 				// **The clock is stamped here and the effect arrives from the
@@ -270,9 +379,10 @@ namespace engine::render {
 				// discards on the same test `opaque.frag` makes. It also binds the
 				// colour map so a clipped surface casts its authored silhouette, but
 				// still needs only the compact shadow block rather than all lighting.
-				SDL_GPUTexture *const found = Textures.Find(texture);
-				const TextureChoice choice =
-					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
+				SDL_GPUTexture *const found = Textures.Find(texture, textureOwner);
+				const TextureChoice choice = ChooseTexture(
+					found != nullptr, texture.IsValid(), Textures.Expecting(texture, textureOwner)
+				);
 				SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? found
 												: choice == TextureChoice::Missing ? Textures.Missing()
 																				   : Textures.Default();
@@ -286,12 +396,21 @@ namespace engine::render {
 				ShadowUniforms uniforms;
 				uniforms.Plane = SlotSeam[slot];
 				uniforms.Material.x = colour[3];
-				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
+				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+				shadowUniformsDirty = true;
 			}
 
-			if (indirect != nullptr) {
+			if (forcedArguments != nullptr) {
+				SDL_DrawGPUIndexedPrimitivesIndirect(
+					pass,
+					forcedArguments,
+					forcedArgument * static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
+					1
+				);
+				if (visibilityPass == VisibilityPass::MainCamera) RecordVisibilityCandidate(slot, run);
+			} else if (indirect != nullptr) {
 				// The counts live on the GPU. `run` here is the phase's upper
 				// bound, so the triangle tally can only overcount what the
 				// cull discarded - an estimate is honest for a number whose
@@ -308,12 +427,19 @@ namespace engine::render {
 				SDL_DrawGPUIndexedPrimitives(
 					pass, range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot
 				);
+				if (visibilityPass == VisibilityPass::MainCamera) RecordVisibilityDraw(slot, run);
 			}
 			calls++;
-			triangles += static_cast<uint64_t>(range.IndexCount / 3) * run;
+			if (tallyTriangles) {
+				triangles += static_cast<uint64_t>(range.IndexCount / 3) * run;
+			}
 		};
 
 		uint32_t slot = first;
+		const auto selected = [&](uint32_t candidate) {
+			return selection != SlotSelection::CharacterFree ||
+				   (candidate < SlotRig.size() && SeamLightCaptureIncludes(SlotRig[candidate]));
+		};
 		while (slot < first + count) {
 			// **A filtered-out slot ends the run and is stepped over.** The draw
 			// list is not re-ordered for it: the order is shared by every view
@@ -322,7 +448,94 @@ namespace engine::render {
 			// instead of the world. The cost is a run break wherever an excluded
 			// instance sits between two included ones, which is a draw call and
 			// not a wrong picture.
-			if (!scene::MatchesTags(SlotTags[slot], tagFilter)) {
+			if (!scene::MatchesTags(SlotTags[slot], tagFilter) || !selected(slot)) {
+				slot++;
+				continue;
+			}
+
+			const uint32_t lodIndex = slot < SlotLod.size() ? SlotLod[slot] : NO_LOD_DRAW;
+			const bool lod =
+				Lod.Ready && lodIndex < LodFrame.Draws.size() && LodFrame.Draws[lodIndex].Slot == slot;
+			if (selection == SlotSelection::LodOnly && !lod) {
+				slot++;
+				continue;
+			}
+			if (lod) {
+				const MeshEntry *const baseMesh = SlotMesh[slot];
+				if (indirect != nullptr) {
+					// The ordinary occlusion plan still owns one run entry for this
+					// slot. Advance over it, then draw the selected level once after
+					// the early and late phases have completed.
+					argument += DrawArgumentCount(*baseMesh);
+					slotRun++;
+					slot++;
+					continue;
+				}
+
+				const core::Name shader = SlotShader[slot];
+				if (ActiveFamily == PipelineFamily::DepthPeel && shader.IsValid()) {
+					slot++;
+					continue;
+				}
+				bool resolvedBeforeGBuffer = false;
+				if (!baseMesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
+					const auto authored =
+						ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
+					resolvedBeforeGBuffer =
+						authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
+				}
+				if (resolvedBeforeGBuffer) {
+					slot++;
+					continue;
+				}
+
+				SDL_GPUGraphicsPipeline *const wanted =
+					WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
+				SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
+
+				BindInstanceBuffers(pass, Lod.Indices, Lod.Instances, Lod.SkinOffsets);
+				const LodDraw &draw = LodFrame.Draws[lodIndex];
+				const uint32_t selectedLevel =
+					lodIndex < Lod.SelectedLevels.size() ? Lod.SelectedLevels[lodIndex] : 0;
+				const bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;
+				for (uint32_t level = 0; level < draw.LevelCount; ++level) {
+					const LodDrawLevel &levelDraw = draw.Levels[level];
+					const MeshEntry &mesh = *levelDraw.Mesh;
+					if (!bindMesh(mesh, native, shader, SlotContentOwner[slot])) continue;
+					uint32_t lodArgument = levelDraw.FirstArgument;
+					const auto issue = [&](const LodDrawRange &cluster) {
+						const MeshRange &range = cluster.Range;
+						if (range.IndexCount == 0) {
+							return;
+						}
+						const bool material = cluster.Material < mesh.Textures.size();
+						const core::Name texture =
+							SlotTexture[slot].IsValid()
+								? SlotTexture[slot]
+								: (material ? mesh.Textures[cluster.Material] : core::Name{});
+						const std::array<float, 4> colour =
+							material ? mesh.Colours[cluster.Material] : std::array<float, 4>{1, 1, 1, 1};
+						emit(
+							range,
+							texture,
+							colour,
+							slot,
+							1,
+							simpleShadow,
+							Lod.Arguments,
+							lodArgument++,
+							level == selectedLevel
+						);
+					};
+					for (const LodDrawRange &cluster : draw.Clusters[level]) {
+						issue(cluster);
+					}
+				}
+				BindInstanceBuffers(pass);
+				slot++;
+				continue;
+			}
+			if (selection == SlotSelection::LodOnly) {
 				slot++;
 				continue;
 			}
@@ -339,11 +552,25 @@ namespace engine::render {
 			// data maps, the shader, the seam plane and its light all join the
 			// mesh and the texture in what ends a run.
 			const core::Name shader = SlotShader[slot];
+			if (ActiveFamily == PipelineFamily::DepthPeel && shader.IsValid()) {
+				slot++;
+				continue;
+			}
 
 			uint32_t run = 1;
 			bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;
-			while (slot + run < first + count && SlotsShareRun(slot, slot + run) &&
-				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
+			const bool plainShadow = simpleShadow && base == ShadowPipeline && indirect == nullptr &&
+									 !shader.IsValid() && SlotLod[slot] == NO_LOD_DRAW;
+			while (slot + run < first + count && scene::MatchesTags(SlotTags[slot + run], tagFilter) &&
+				   selected(slot + run)) {
+				const uint32_t next = slot + run;
+				const bool samePlainShadow = plainShadow && SlotShadowDetail[next] == 0 &&
+											 !SlotShader[next].IsValid() && SlotLod[next] == NO_LOD_DRAW &&
+											 SlotMesh[next] == mesh &&
+											 SlotContentOwner[next] == SlotContentOwner[slot];
+				if (!samePlainShadow && !SlotsShareRun(slot, next)) {
+					break;
+				}
 				simpleShadow = simpleShadow && SlotShadowDetail[slot + run] == 0;
 				run++;
 			}
@@ -356,7 +583,13 @@ namespace engine::render {
 				indirect != nullptr
 					? (slotRun < indirect->RunDraws->size() ? (*indirect->RunDraws)[slotRun] : 0u)
 					: run;
-			if (indirect != nullptr && phaseInstances == 0) {
+			bool resolvedBeforeGBuffer = false;
+			if (!mesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
+				const auto authored = ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
+				resolvedBeforeGBuffer =
+					authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
+			}
+			if (resolvedBeforeGBuffer || (indirect != nullptr && phaseInstances == 0)) {
 				argument += DrawArgumentCount(*mesh);
 				slotRun++;
 				slot += run;
@@ -366,16 +599,28 @@ namespace engine::render {
 			// **Bound per run and only where it changes.** A scene with no
 			// custom shaders never enters this branch, and one where every part
 			// wears the same one binds twice: once here and once on the way out.
-			SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader);
-			SDL_GPUGraphicsPipeline *const want = wanted != nullptr ? wanted : base;
-			if (want != bound && want != nullptr) {
-				SDL_BindGPUGraphicsPipeline(pass, want);
-				bound = want;
+			SDL_GPUGraphicsPipeline *const wanted =
+				WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
+			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
+			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot])) {
+				slotRun++;
+				slot += run;
+				continue;
 			}
 
 			if (mesh->Runs.empty()) {
 				// A mesh with no materials of its own - every built-in.
-				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, phaseInstances, simpleShadow);
+				emit(
+					mesh->Whole,
+					texture,
+					{1.0f, 1.0f, 1.0f, 1.0f},
+					slot,
+					phaseInstances,
+					simpleShadow,
+					nullptr,
+					0,
+					true
+				);
 			} else {
 				for (size_t index = 0; index < mesh->Runs.size(); index++) {
 					// **The instance's texture wins when it has one.** That is
@@ -388,7 +633,10 @@ namespace engine::render {
 						mesh->Colours[index],
 						slot,
 						phaseInstances,
-						simpleShadow
+						simpleShadow,
+						nullptr,
+						0,
+						true
 					);
 				}
 			}
@@ -409,7 +657,7 @@ namespace engine::render {
 		// The built-in meshes and the sampler every texture shares. What used
 		// to be an unconditional upload of one cube is now a table that starts
 		// with six shapes and grows as content arrives.
-		if (!Meshes.Initialise(Device) || !Textures.Initialise(Device)) {
+		if (!Meshes.Initialise(Device) || !Textures.Initialise(Device, RetainSourceTextures)) {
 			return false;
 		}
 

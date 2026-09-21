@@ -1,4 +1,8 @@
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <algorithm>
@@ -10,6 +14,28 @@ namespace studio {
 	using engine::core::CFrame;
 	using engine::core::Vector3;
 	using engine::world::WorldId;
+
+	bool ViewportDirectionControls::WireframeContains(float x, float y) const {
+		return x >= WireframeLeft && x <= WireframeRight && y >= WireframeTop && y <= WireframeBottom;
+	}
+
+	ViewportDirectionControls
+	ResolveViewportDirectionControls(float panelX, float panelY, float panelWidth, float interfaceScale) {
+		const float scale = std::max(interfaceScale, 0.01f);
+		ViewportDirectionControls controls;
+		controls.Radius = 28.0f * scale;
+		controls.GimbalPadding = 18.0f * scale;
+		controls.CentreX = panelX + panelWidth - controls.Radius - 20.0f * scale;
+		controls.CentreY = panelY + controls.Radius + 20.0f * scale;
+
+		const float buttonWidth = 88.0f * scale;
+		const float buttonHeight = 24.0f * scale;
+		controls.WireframeLeft = controls.CentreX - buttonWidth * 0.5f;
+		controls.WireframeTop = controls.CentreY + controls.Radius + controls.GimbalPadding + 6.0f * scale;
+		controls.WireframeRight = controls.WireframeLeft + buttonWidth;
+		controls.WireframeBottom = controls.WireframeTop + buttonHeight;
+		return controls;
+	}
 
 	ViewportTargetSize ResolveViewportTargetSize(
 		uint32_t panelWidth,
@@ -44,6 +70,43 @@ namespace studio {
 		pose.Pitch = angles.X;
 		pose.Yaw = angles.Y;
 		return pose;
+	}
+
+	engine::ecs::Entity
+	CreateRuntimeCamera(engine::ecs::Store &store, std::string_view name, const ViewportCameraPose &pose) {
+		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
+		if (workspace == engine::ecs::NULL_ENTITY) {
+			return engine::ecs::NULL_ENTITY;
+		}
+
+		const engine::ecs::Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
+		if (camera == engine::ecs::NULL_ENTITY) {
+			return camera;
+		}
+
+		store.SetParent(camera, workspace);
+		store.Set(camera, engine::scene::TransientComponent{});
+		store.Set(camera, engine::scene::Transform{pose.Frame});
+
+		engine::scene::ActiveCamera active;
+		if (const auto *existing = store.Resource<engine::scene::ActiveCamera>(); existing != nullptr) {
+			active = *existing;
+		}
+		active.Entity = camera;
+		store.SetResource(active);
+		return camera;
+	}
+
+	engine::ecs::Entity RuntimeCameraOf(const engine::ecs::Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		if (active == nullptr || active->Entity == engine::ecs::NULL_ENTITY || !store.Alive(active->Entity)) {
+			return engine::ecs::NULL_ENTITY;
+		}
+		if (store.Get<engine::scene::Camera>(active->Entity) == nullptr ||
+			store.Get<engine::scene::Transform>(active->Entity) == nullptr) {
+			return engine::ecs::NULL_ENTITY;
+		}
+		return active->Entity;
 	}
 
 	bool CarryViewportCamera(engine::ecs::Store &store, const CFrame &previous, ViewportCameraPose &pose) {
@@ -124,6 +187,13 @@ namespace studio {
 			pointerX - panelX,
 			pointerY - panelY,
 		};
+	}
+
+	ViewportGuiSource ViewportGuiSourceFor(bool running, bool clientView) {
+		if (clientView) {
+			return ViewportGuiSource::PlayerGui;
+		}
+		return running ? ViewportGuiSource::None : ViewportGuiSource::StarterGui;
 	}
 
 	size_t

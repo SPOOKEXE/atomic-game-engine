@@ -45,12 +45,17 @@ namespace engine::assets {
 	//
 	// @since v0.8
 	enum class TextureFormat : uint8_t {
-		// Eight bits per channel, red-green-blue-alpha, non-premultiplied.
-		// What an interface image is and what a colour texture is.
+		// Eight bits per channel, red-green-blue-alpha, non-premultiplied sRGB.
+		// What an interface image and a base-colour texture are. Sampling converts
+		// RGB into linear working values while alpha remains linear.
 		RGBA8 = 0,
 
 		// One channel. A mask, a coverage sheet, a height field.
 		R8 = 1,
+
+		// The same RGBA byte layout without sRGB decoding. Material data maps,
+		// normals, roughness, metallic and other numeric fields use this.
+		RGBA8_LINEAR = 2,
 	};
 
 	// How many bytes one pixel of a format takes.
@@ -59,6 +64,11 @@ namespace engine::assets {
 	// @return The stride of a single pixel.
 	constexpr uint32_t BytesPerPixel(TextureFormat format) {
 		return format == TextureFormat::R8 ? 1u : 4u;
+	}
+
+	// Whether the device sampler must decode this texture from sRGB.
+	constexpr bool IsSRGB(TextureFormat format) {
+		return format == TextureFormat::RGBA8;
 	}
 
 	// One axis of a mip level, halving and stopping at one.

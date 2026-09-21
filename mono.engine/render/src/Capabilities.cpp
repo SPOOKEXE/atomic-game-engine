@@ -14,12 +14,38 @@ namespace engine::render {
 		if (needs.IndirectDraws && !caps.HasIndirectDraws) {
 			return {CapabilityStatus::MissingIndirectDraws};
 		}
+		if (caps.MaxColourTargets < needs.ColourTargets) {
+			return {CapabilityStatus::InsufficientColourTargets};
+		}
 		for (const graph::ResourceFormat format : needs.Formats) {
 			if (std::find(caps.Formats.begin(), caps.Formats.end(), format) == caps.Formats.end()) {
 				return {CapabilityStatus::MissingFormat, format};
 			}
 		}
 		return {};
+	}
+
+	uint32_t SupportedRenderFeatures(const DeviceCaps &caps) {
+		if (caps.Formats.empty()) {
+			return 0;
+		}
+
+		uint32_t supported = scene::FeatureBit(scene::RenderFeature::Shadows) |
+							 scene::FeatureBit(scene::RenderFeature::AmbientOcclusion) |
+							 scene::FeatureBit(scene::RenderFeature::Emission) |
+							 scene::FeatureBit(scene::RenderFeature::Reflections) |
+							 scene::FeatureBit(scene::RenderFeature::Refraction) |
+							 scene::FeatureBit(scene::RenderFeature::MotionVectors) |
+							 scene::FeatureBit(scene::RenderFeature::TwoSided) |
+							 scene::FeatureBit(scene::RenderFeature::Displacement) |
+							 scene::FeatureBit(scene::RenderFeature::PostProcessing);
+		if (caps.HasCompute && caps.HasStorageTextures) {
+			supported |= scene::FeatureBit(scene::RenderFeature::ComputeEffects);
+		}
+		if (caps.HasCompute && caps.HasIndirectDraws) {
+			supported |= scene::FeatureBit(scene::RenderFeature::OcclusionCulling);
+		}
+		return supported;
 	}
 
 	const char *Describe(CapabilityStatus status) {
@@ -32,6 +58,8 @@ namespace engine::render {
 			return "the device cannot write storage textures";
 		case CapabilityStatus::MissingIndirectDraws:
 			return "the device has no indexed indirect draw support";
+		case CapabilityStatus::InsufficientColourTargets:
+			return "the device has too few simultaneous colour targets";
 		case CapabilityStatus::MissingFormat:
 			return "the device does not support a required texture format";
 		}
@@ -54,10 +82,12 @@ namespace engine::render {
 		full.Compute = true;
 		full.StorageTextures = true;
 		full.IndirectDraws = true;
+		full.ColourTargets = 8;
 		full.Formats = {
 			graph::ResourceFormat::RGBA8,
 			graph::ResourceFormat::RGBA8_SRGB,
 			graph::ResourceFormat::RGB10A2,
+			graph::ResourceFormat::RG16F,
 			graph::ResourceFormat::RGBA16F,
 			graph::ResourceFormat::R32F,
 			graph::ResourceFormat::D24S8,

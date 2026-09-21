@@ -60,6 +60,14 @@ trivial = true
 serialisable = true
 
 [[components]]
+name = "world.TickExchangeEndpoints"
+kind = "Data"
+size = 24
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
 name = "world.Outbox"
 kind = "Data"
 size = 40
@@ -142,7 +150,7 @@ serialisable = true
 [[components]]
 name = "scene.RigidBody"
 kind = "Data"
-size = 16
+size = 40
 alignment = 4
 trivial = true
 serialisable = true
@@ -182,7 +190,7 @@ serialisable = true
 [[components]]
 name = "scene.Visual"
 kind = "Data"
-size = 32
+size = 40
 alignment = 4
 trivial = true
 serialisable = true
@@ -230,9 +238,25 @@ serialisable = true
 [[components]]
 name = "scene.Camera"
 kind = "Data"
-size = 28
+size = 36
 alignment = 4
 trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.CameraSubject"
+kind = "Data"
+size = 16
+alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.CameraPortalView"
+kind = "Data"
+size = 176
+alignment = 8
+trivial = false
 serialisable = true
 
 [[components]]
@@ -294,7 +318,7 @@ serialisable = true
 [[components]]
 name = "scene.LightingService"
 kind = "Data"
-size = 56
+size = 64
 alignment = 4
 trivial = true
 serialisable = true
@@ -326,7 +350,7 @@ serialisable = true
 [[components]]
 name = "scene.EditableMesh"
 kind = "Data"
-size = 160
+size = 176
 alignment = 8
 trivial = false
 serialisable = true
@@ -334,7 +358,7 @@ serialisable = true
 [[components]]
 name = "scene.EditableImage"
 kind = "Data"
-size = 40
+size = 56
 alignment = 8
 trivial = false
 serialisable = true
@@ -388,6 +412,30 @@ trivial = true
 serialisable = true
 
 [[components]]
+name = "scene.CameraCharacterHold"
+kind = "Data"
+size = 88
+alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.CameraBodyPose"
+kind = "Data"
+size = 88
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
+name = "scene.PortalBodyView"
+kind = "Data"
+size = 168
+alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
 name = "scene.InputState"
 kind = "Data"
 size = 56
@@ -414,7 +462,7 @@ serialisable = true
 [[components]]
 name = "scene.CameraController"
 kind = "Data"
-size = 64
+size = 144
 alignment = 8
 trivial = true
 serialisable = true
@@ -430,7 +478,7 @@ serialisable = true
 [[components]]
 name = "scene.MeshCatalogue"
 kind = "Data"
-size = 112
+size = 168
 alignment = 8
 trivial = false
 serialisable = true
@@ -534,7 +582,7 @@ serialisable = true
 [[components]]
 name = "scene.PortalTransit"
 kind = "Data"
-size = 8
+size = 36
 alignment = 4
 trivial = true
 serialisable = true
@@ -628,6 +676,14 @@ trivial = true
 serialisable = true
 
 [[components]]
+name = "scene.Accessory"
+kind = "Data"
+size = 16
+alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
 name = "scene.PlayerNetworkComponent"
 kind = "Data"
 size = 4
@@ -638,7 +694,7 @@ serialisable = true
 [[components]]
 name = "scene.Skeleton"
 kind = "Data"
-size = 8
+size = 12
 alignment = 4
 trivial = true
 serialisable = true
@@ -647,6 +703,14 @@ serialisable = true
 name = "scene.Bone"
 kind = "Data"
 size = 116
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.RigKeypoint"
+kind = "Data"
+size = 36
 alignment = 4
 trivial = true
 serialisable = true
@@ -684,9 +748,25 @@ trivial = true
 serialisable = true
 
 [[components]]
-name = "scene.LevelOfDetail"
+name = "scene.AutoMeshLOD"
 kind = "Data"
 size = 32
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.CustomMeshLOD"
+kind = "Data"
+size = 32
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.RenderEffects"
+kind = "Data"
+size = 88
 alignment = 4
 trivial = true
 serialisable = true
@@ -711,6 +791,14 @@ serialisable = true
 name = "scene.Clouds"
 kind = "Data"
 size = 36
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.Volume"
+kind = "Data"
+size = 60
 alignment = 4
 trivial = true
 serialisable = true
@@ -824,6 +912,46 @@ name = "scene.WeldConstraint"
 kind = "Data"
 size = 24
 alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.VectorField2D"
+kind = "Data"
+size = 32
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.VectorField3D"
+kind = "Data"
+size = 52
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.ShaderLens"
+kind = "Data"
+size = 32
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.Gravity"
+kind = "Data"
+size = 12
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "scene.AuthoredAffordance"
+kind = "Data"
+size = 8
+alignment = 4
 trivial = true
 serialisable = true
 
@@ -1188,6 +1316,46 @@ trivial = true
 serialisable = true
 
 [[components]]
+name = "gui.NodeCanvas"
+kind = "Data"
+size = 28
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "gui.NodeCanvasNode"
+kind = "Data"
+size = 64
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
+name = "gui.NodeCanvasGroup"
+kind = "Data"
+size = 56
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
+name = "gui.NodeCanvasPort"
+kind = "Data"
+size = 16
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
+name = "gui.NodeCanvasLink"
+kind = "Data"
+size = 44
+alignment = 4
+trivial = true
+serialisable = true
+
+[[components]]
 name = "physics.PhysicsWorld"
 kind = "Data"
 size = 10632
@@ -1204,9 +1372,17 @@ trivial = true
 serialisable = true
 
 [[components]]
+name = "physics.CopiedContactCache"
+kind = "Data"
+size = 32
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
 name = "physics.PhysicsClock"
 kind = "Data"
-size = 48
+size = 56
 alignment = 8
 trivial = true
 serialisable = true
@@ -1214,7 +1390,7 @@ serialisable = true
 [[components]]
 name = "effects.ParticleEmitter"
 kind = "Data"
-size = 1296
+size = 1300
 alignment = 4
 trivial = true
 serialisable = true
@@ -1262,7 +1438,7 @@ serialisable = true
 [[components]]
 name = "effects.ParticleSystem"
 kind = "Data"
-size = 376
+size = 400
 alignment = 8
 trivial = false
 serialisable = true
@@ -1335,6 +1511,62 @@ serialisable = true
 name = "script.ScriptClock"
 kind = "Data"
 size = 24
+alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
+name = "script.DataCaptureDriver"
+kind = "Data"
+size = 8
+alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
+name = "script.EventNarratives"
+kind = "Data"
+size = 152
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
+name = "script.TeleportRequestHandler"
+kind = "Data"
+size = 8
+alignment = 8
+trivial = true
+serialisable = true
+
+[[components]]
+name = "script.TeleportRequestOutbox"
+kind = "Data"
+size = 56
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
+name = "script.PortalContactRequests"
+kind = "Data"
+size = 32
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
+name = "script.PortalTransfers"
+kind = "Data"
+size = 104
+alignment = 8
+trivial = false
+serialisable = true
+
+[[components]]
+name = "script.PortalPlayerInput"
+kind = "Data"
+size = 2136
 alignment = 8
 trivial = true
 serialisable = true
@@ -1451,10 +1683,197 @@ writable = true
 scriptable = true
 
 [[classes]]
+name = "VectorField2D"
+creatable = true
+parent = "PVInstance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.Pivot", "scene.VectorField2D"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Orientation"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PivotOffset"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Vector"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Bounds"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Radial"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Tangential"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Falloff"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LocalSpace"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
+name = "VectorField3D"
+creatable = true
+parent = "PVInstance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.Pivot", "scene.VectorField3D"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Orientation"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PivotOffset"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Vector"
+type = "Vector3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Bounds"
+type = "Vector3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Axis"
+type = "Vector3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Radial"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Tangential"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Falloff"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LocalSpace"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
 name = "BasePart"
 creatable = false
 parent = "PVInstance"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.AuthoredAffordance"]
 
 [[classes.properties]]
 name = "Parent"
@@ -1520,6 +1939,28 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "AffordanceId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AffordanceKind"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AuthoredAffordanceKind"
+
+[[classes.properties]]
+name = "AffordanceEnabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "Anchored"
 type = "Bool"
 kind = "Structural"
@@ -1537,6 +1978,34 @@ scriptable = true
 name = "Visible"
 type = "Bool"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ComputeEffectNode"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PostProcessEffectNode"
+type = "Name"
+kind = "Structural"
 writable = true
 scriptable = true
 
@@ -1687,7 +2156,7 @@ scriptable = true
 name = "Part"
 creatable = true
 parent = "BasePart"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.AuthoredAffordance"]
 
 [[classes.properties]]
 name = "Parent"
@@ -1753,6 +2222,28 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "AffordanceId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AffordanceKind"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AuthoredAffordanceKind"
+
+[[classes.properties]]
+name = "AffordanceEnabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "Anchored"
 type = "Bool"
 kind = "Structural"
@@ -1770,6 +2261,34 @@ scriptable = true
 name = "Visible"
 type = "Bool"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ComputeEffectNode"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PostProcessEffectNode"
+type = "Name"
+kind = "Structural"
 writable = true
 scriptable = true
 
@@ -1920,7 +2439,7 @@ scriptable = true
 name = "SpawnLocation"
 creatable = true
 parent = "Part"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.SpawnLocation"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.SpawnLocation", "scene.AuthoredAffordance"]
 
 [[classes.properties]]
 name = "Parent"
@@ -1986,6 +2505,28 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "AffordanceId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AffordanceKind"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AuthoredAffordanceKind"
+
+[[classes.properties]]
+name = "AffordanceEnabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "Anchored"
 type = "Bool"
 kind = "Structural"
@@ -2003,6 +2544,34 @@ scriptable = true
 name = "Visible"
 type = "Bool"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ComputeEffectNode"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PostProcessEffectNode"
+type = "Name"
+kind = "Structural"
 writable = true
 scriptable = true
 
@@ -2226,6 +2795,54 @@ writable = true
 scriptable = true
 
 [[classes]]
+name = "BreakGroup"
+creatable = true
+parent = "Model"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.Pivot"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Orientation"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PivotOffset"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
 name = "WorldRoot"
 creatable = false
 parent = "Model"
@@ -2377,10 +2994,58 @@ writable = true
 scriptable = true
 
 [[classes]]
+name = "Accessory"
+creatable = true
+parent = "Model"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.Pivot", "scene.Accessory"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Orientation"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PivotOffset"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
 name = "MeshPart"
 creatable = true
 parent = "BasePart"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.AuthoredAffordance"]
 
 [[classes.properties]]
 name = "Parent"
@@ -2446,6 +3111,28 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "AffordanceId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AffordanceKind"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AuthoredAffordanceKind"
+
+[[classes.properties]]
+name = "AffordanceEnabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "Anchored"
 type = "Bool"
 kind = "Structural"
@@ -2463,6 +3150,34 @@ scriptable = true
 name = "Visible"
 type = "Bool"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ComputeEffectNode"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PostProcessEffectNode"
+type = "Name"
+kind = "Structural"
 writable = true
 scriptable = true
 
@@ -2662,6 +3377,175 @@ scriptable = true
 name = "EmissiveMap"
 type = "Name"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod1MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod2MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod3MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod1Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod2Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod3Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LodTargetQuadArea"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod1MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod2MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod3MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod1Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod2Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod3Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLodTargetQuadArea"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLodLevels"
+type = "Int32"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLodStrategy"
+type = "Enum"
+kind = "Structural"
+writable = true
+scriptable = true
+enum_name = "AutoMeshLODStrategy"
+
+[[classes.properties]]
+name = "CustomLod1MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod2MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod3MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod1Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod2Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod3Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLodTargetQuadArea"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLodLevels"
+type = "Int32"
+kind = "Structural"
 writable = true
 scriptable = true
 
@@ -2676,7 +3560,7 @@ scriptable = true
 name = "SkinnedMeshPart"
 creatable = true
 parent = "MeshPart"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.Skeleton"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.Skeleton", "scene.AuthoredAffordance"]
 
 [[classes.properties]]
 name = "Parent"
@@ -2742,6 +3626,28 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "AffordanceId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AffordanceKind"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AuthoredAffordanceKind"
+
+[[classes.properties]]
+name = "AffordanceEnabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "Anchored"
 type = "Bool"
 kind = "Structural"
@@ -2759,6 +3665,34 @@ scriptable = true
 name = "Visible"
 type = "Bool"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ComputeEffectNode"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PostProcessEffectNode"
+type = "Name"
+kind = "Structural"
 writable = true
 scriptable = true
 
@@ -2958,6 +3892,175 @@ scriptable = true
 name = "EmissiveMap"
 type = "Name"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod1MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod2MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod3MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod1Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod2Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Lod3Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LodTargetQuadArea"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod1MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod2MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod3MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod1Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod2Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLod3Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLodTargetQuadArea"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLodLevels"
+type = "Int32"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AutoLodStrategy"
+type = "Enum"
+kind = "Structural"
+writable = true
+scriptable = true
+enum_name = "AutoMeshLODStrategy"
+
+[[classes.properties]]
+name = "CustomLod1MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod2MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod3MeshId"
+type = "Name"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod1Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod2Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLod3Ratio"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLodTargetQuadArea"
+type = "Float"
+kind = "Structural"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CustomLodLevels"
+type = "Int32"
+kind = "Structural"
 writable = true
 scriptable = true
 
@@ -2986,7 +4089,7 @@ scriptable = true
 name = "Camera"
 creatable = true
 parent = "PVInstance"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Camera", "scene.Pivot"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Camera", "scene.CameraSubject", "scene.Pivot"]
 
 [[classes.properties]]
 name = "Parent"
@@ -3038,6 +4141,20 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "CameraSubject"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CameraSubjectAutomatic"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "NearPlaneZ"
 type = "Float"
 kind = "Field"
@@ -3076,6 +4193,20 @@ scriptable = true
 name = "ImageHeight"
 type = "Int32"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
 writable = true
 scriptable = true
 
@@ -3090,7 +4221,7 @@ scriptable = true
 name = "SurfaceCamera"
 creatable = true
 parent = "Camera"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.SurfaceCamera", "scene.Camera", "scene.Pivot"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.SurfaceCamera", "scene.Camera", "scene.CameraSubject", "scene.Pivot"]
 
 [[classes.properties]]
 name = "Parent"
@@ -3142,6 +4273,20 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "CameraSubject"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CameraSubjectAutomatic"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "NearPlaneZ"
 type = "Float"
 kind = "Field"
@@ -3180,6 +4325,20 @@ scriptable = true
 name = "ImageHeight"
 type = "Int32"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
 writable = true
 scriptable = true
 
@@ -3231,7 +4390,7 @@ scriptable = true
 name = "Portal"
 creatable = true
 parent = "SurfaceCamera"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.SurfaceCamera", "scene.Camera", "scene.Pivot", "scene.Portal"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.SurfaceCamera", "scene.Camera", "scene.CameraSubject", "scene.Pivot", "scene.Portal"]
 
 [[classes.properties]]
 name = "Parent"
@@ -3283,6 +4442,20 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "CameraSubject"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CameraSubjectAutomatic"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "NearPlaneZ"
 type = "Float"
 kind = "Field"
@@ -3321,6 +4494,20 @@ scriptable = true
 name = "ImageHeight"
 type = "Int32"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
 writable = true
 scriptable = true
 
@@ -3459,6 +4646,26 @@ writable = true
 scriptable = true
 
 [[classes]]
+name = "SoundGroup"
+creatable = true
+parent = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
 name = "Attachment"
 creatable = true
 parent = "Instance"
@@ -3557,6 +4764,13 @@ scriptable = true
 name = "Name"
 type = "Name"
 kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RootPart"
+type = "Reference"
+kind = "Computed"
 writable = true
 scriptable = true
 
@@ -4154,6 +5368,47 @@ name = "TransformedWorldCFrame"
 type = "CFrame"
 kind = "Computed"
 writable = false
+scriptable = true
+
+[[classes]]
+name = "RigKeypoint"
+creatable = true
+parent = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.RigKeypoint"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "KeypointId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Joint"
+type = "Int32"
+kind = "Computed"
+writable = true
 scriptable = true
 
 [[classes]]
@@ -4838,6 +6093,377 @@ enum_name = "CloudComputeShader"
 [[classes.properties]]
 name = "ComputeEnabled"
 type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
+name = "Volume"
+creatable = true
+parent = "PVInstance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.Pivot", "scene.Volume"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Orientation"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PivotOffset"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Color"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Bounds"
+type = "Vector3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Density"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Extinction"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Falloff"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NoiseScale"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NoiseStrength"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Steps"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ShadowSteps"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Seed"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Shape"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "VolumeShape"
+
+[[classes.properties]]
+name = "Enabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
+name = "ShaderLens"
+creatable = true
+parent = "PVInstance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.Pivot", "scene.ShaderLens"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Orientation"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PivotOffset"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Shader"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Radius"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "InnerRadius"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Falloff"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Strength"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Spin"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Priority"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Shape"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "LensShape"
+
+[[classes.properties]]
+name = "Enabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
+name = "GravitationalLens"
+creatable = true
+parent = "ShaderLens"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.Pivot", "scene.ShaderLens"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CFrame"
+type = "CFrame"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Orientation"
+type = "Vector3"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PivotOffset"
+type = "CFrame"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Shader"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Radius"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "InnerRadius"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Falloff"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Strength"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Spin"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Priority"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Shape"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "LensShape"
+
+[[classes.properties]]
+name = "Enabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "HorizonRadius"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "WarpRadius"
+type = "Float"
 kind = "Field"
 writable = true
 scriptable = true
@@ -6119,6 +7745,20 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "RenderFeatureEnableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "RenderFeatureDisableMask"
+type = "Int32"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "PostProcessShader"
 type = "Name"
 kind = "Resource"
@@ -6267,6 +7907,41 @@ scriptable = true
 
 [[classes]]
 name = "StarterGui"
+creatable = false
+parent = "Service"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Scope"
+type = "Enum"
+kind = "Computed"
+writable = true
+scriptable = true
+enum_name = "ServiceScope"
+
+[[classes.properties]]
+name = "Fixture"
+type = "Bool"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes]]
+name = "ChangeHistoryService"
 creatable = false
 parent = "Service"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"]
@@ -6697,6 +8372,40 @@ writable = false
 scriptable = true
 
 [[classes]]
+name = "LensShader"
+creatable = true
+parent = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.ShaderSource"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Source"
+type = "String"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Revision"
+type = "Int32"
+kind = "Field"
+writable = false
+scriptable = true
+
+[[classes]]
 name = "EditableMesh"
 creatable = true
 parent = "Instance"
@@ -6737,6 +8446,34 @@ kind = "Field"
 writable = false
 scriptable = true
 
+[[classes.properties]]
+name = "PackingFormat"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PackingAttributes"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PackingMinimum"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PackingMaximum"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
 [[classes]]
 name = "EditableImage"
 creatable = true
@@ -6769,6 +8506,34 @@ name = "ContentId"
 type = "Name"
 kind = "Field"
 writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "PackingFormat"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PackingAttributes"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PackingMinimum"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "PackingMaximum"
+type = "Float"
+kind = "Field"
+writable = true
 scriptable = true
 
 [[classes]]
@@ -8777,6 +10542,1119 @@ name = "AbsoluteWindowSize"
 type = "Vector2"
 kind = "Computed"
 writable = false
+scriptable = true
+
+[[classes]]
+name = "NodeCanvas"
+creatable = true
+parent = "Frame"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvas"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AbsolutePosition"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteSize"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteRotation"
+type = "Float"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Size"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AnchorPoint"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Rotation"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ZIndex"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LayoutOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Visible"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ClipsDescendants"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Active"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Selectable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Interactable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionUp"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionDown"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionLeft"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionRight"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionImageObject"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SizeConstraint"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "SizeConstraint"
+
+[[classes.properties]]
+name = "AutomaticSize"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AutomaticSize"
+
+[[classes.properties]]
+name = "BackgroundColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BackgroundTransparency"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderSizePixel"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderMode"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "BorderMode"
+
+[[classes.properties]]
+name = "CanvasPosition"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Zoom"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "MinimumZoom"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "MaximumZoom"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "GridSize"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "GridVisible"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
+name = "NodeCanvasNode"
+creatable = true
+parent = "Frame"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasNode"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AbsolutePosition"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteSize"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteRotation"
+type = "Float"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Size"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AnchorPoint"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Rotation"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ZIndex"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LayoutOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Visible"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ClipsDescendants"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Active"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Selectable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Interactable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionUp"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionDown"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionLeft"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionRight"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionImageObject"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SizeConstraint"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "SizeConstraint"
+
+[[classes.properties]]
+name = "AutomaticSize"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AutomaticSize"
+
+[[classes.properties]]
+name = "BackgroundColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BackgroundTransparency"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderSizePixel"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderMode"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "BorderMode"
+
+[[classes.properties]]
+name = "NodeId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NodeType"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Title"
+type = "String"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Enabled"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BypassMode"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "NodeBypassMode"
+
+[[classes.properties]]
+name = "BypassInput"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BypassOutput"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "MinimumSize"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Resizable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "InputPortLayout"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "InputPortLayout"
+
+[[classes]]
+name = "NodeCanvasGroup"
+creatable = true
+parent = "Frame"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasGroup"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AbsolutePosition"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteSize"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteRotation"
+type = "Float"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Size"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AnchorPoint"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Rotation"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ZIndex"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LayoutOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Visible"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ClipsDescendants"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Active"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Selectable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Interactable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionUp"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionDown"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionLeft"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionRight"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionImageObject"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SizeConstraint"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "SizeConstraint"
+
+[[classes.properties]]
+name = "AutomaticSize"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AutomaticSize"
+
+[[classes.properties]]
+name = "BackgroundColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BackgroundTransparency"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderSizePixel"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderMode"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "BorderMode"
+
+[[classes.properties]]
+name = "GroupId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Title"
+type = "String"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Padding"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Layout"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "NodeGroupLayout"
+
+[[classes]]
+name = "NodeCanvasPort"
+creatable = true
+parent = "GuiObject"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasPort"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AbsolutePosition"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteSize"
+type = "Vector2"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "AbsoluteRotation"
+type = "Float"
+kind = "Computed"
+writable = false
+scriptable = true
+
+[[classes.properties]]
+name = "Position"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Size"
+type = "UDim2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "AnchorPoint"
+type = "Vector2"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Rotation"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ZIndex"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LayoutOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Visible"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ClipsDescendants"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Active"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Selectable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Interactable"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionUp"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionDown"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionLeft"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "NextSelectionRight"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionImageObject"
+type = "Reference"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SelectionOrder"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SizeConstraint"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "SizeConstraint"
+
+[[classes.properties]]
+name = "AutomaticSize"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "AutomaticSize"
+
+[[classes.properties]]
+name = "BackgroundColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BackgroundTransparency"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderSizePixel"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "BorderMode"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "BorderMode"
+
+[[classes.properties]]
+name = "PortId"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ValueType"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Direction"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "NodePortDirection"
+
+[[classes.properties]]
+name = "Edge"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "NodePortEdge"
+
+[[classes.properties]]
+name = "MaxConnections"
+type = "Int32"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
+name = "NodeCanvasLink"
+creatable = true
+parent = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.NodeCanvasLink"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "FromNode"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "FromPort"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "FromDirection"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "NodePortDirection"
+
+[[classes.properties]]
+name = "ToNode"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ToPort"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "ToDirection"
+type = "Enum"
+kind = "Field"
+writable = true
+scriptable = true
+enum_name = "NodePortDirection"
+
+[[classes.properties]]
+name = "LineColor3"
+type = "Color3"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LineTransparency"
+type = "Float"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "LineThickness"
+type = "Float"
+kind = "Field"
+writable = true
 scriptable = true
 
 [[classes]]
@@ -12871,6 +15749,46 @@ writable = true
 scriptable = true
 
 [[classes]]
+name = "RemoteEvent"
+creatable = true
+parent = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
+name = "BindableEvent"
+creatable = true
+parent = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"]
+
+[[classes.properties]]
+name = "Parent"
+type = "Reference"
+kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "Name"
+type = "Name"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes]]
 name = "ParticleEmitter"
 creatable = true
 parent = "Instance"
@@ -13123,6 +16041,13 @@ scriptable = true
 
 [[classes.properties]]
 name = "Additive"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "SoftParticles"
 type = "Bool"
 kind = "Field"
 writable = true

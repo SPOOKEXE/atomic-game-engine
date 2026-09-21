@@ -107,6 +107,10 @@ namespace engine::graph {
 
 		// One line for a tooltip. Empty is allowed and reads as no tooltip.
 		std::string Summary{};
+
+		// Output consumed inside this node, such as a chain intermediate or depth attachment.
+		// Its allocation stays visible even when no later node reads it.
+		bool InternalUse = false;
 	};
 
 	// Where a kind belongs in the add menu.
@@ -207,6 +211,9 @@ namespace engine::graph {
 		// Benefits from timestamps but remains runnable without them.
 		bool TimestampsUseful = false;
 
+		// Simultaneous colour attachments required by this node.
+		uint32_t ColourTargets = 0;
+
 		// Colour formats that must be creatable.
 		std::vector<ResourceFormat> Formats;
 
@@ -298,6 +305,12 @@ namespace engine::graph {
 		//
 		// @since v0.11
 		std::string DefaultShader;
+
+		// Storage policy for outputs whose kind does not imply one. History nodes
+		// state how many successful generations their backend may read.
+		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		// History reads used by this object.
+		uint32_t HistoryReads = 0;
 	};
 
 	// Whether a wire from an output of kind `from` may land in an input of kind

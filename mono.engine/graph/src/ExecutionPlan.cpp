@@ -49,6 +49,11 @@ namespace engine::graph {
 			ExecutionQueue Queue = ExecutionQueue::Graphics;
 		};
 
+		struct OrdinalRange {
+			size_t First = 0;
+			size_t Count = 0;
+		};
+
 		uint8_t ScopeRank(NodeScope scope) {
 			switch (scope) {
 			case NodeScope::World:
@@ -78,41 +83,25 @@ namespace engine::graph {
 		}
 
 		uint64_t BytesOf(const ResourceDesc &resource, uint32_t width, uint32_t height) {
-			if (resource.Kind == ResourceKind::Camera || resource.Kind == ResourceKind::Entities) {
-				return 0;
-			}
-			uint32_t resolvedWidth = 0;
-			uint32_t resolvedHeight = 0;
-			resource.Resolve(width, height, resolvedWidth, resolvedHeight);
-			return (static_cast<uint64_t>(resolvedWidth) * resolvedHeight * BitsPerPixel(resource.Format) +
-					7) /
-				   8;
+			return resource.Bytes(width, height);
 		}
 
-		std::vector<size_t> InstancesFor(
+		OrdinalRange InstancesFor(
 			ResourceDomain domain, const PlannedInvocation &invocation, size_t worldCount, size_t viewCount
 		) {
 			switch (domain) {
 			case ResourceDomain::World:
 				if (invocation.Scope == NodeScope::Frame) {
-					std::vector<size_t> instances(worldCount);
-					for (size_t index = 0; index < worldCount; index++) {
-						instances[index] = index;
-					}
-					return instances;
+					return {.Count = worldCount};
 				}
-				return {invocation.World};
+				return {.First = invocation.World, .Count = 1};
 			case ResourceDomain::View:
 				if (invocation.Scope == NodeScope::Frame) {
-					std::vector<size_t> instances(viewCount);
-					for (size_t index = 0; index < viewCount; index++) {
-						instances[index] = index;
-					}
-					return instances;
+					return {.Count = viewCount};
 				}
-				return {invocation.View};
+				return {.First = invocation.View, .Count = 1};
 			case ResourceDomain::Frame:
-				return {0};
+				return {.Count = 1};
 			}
 			return {};
 		}
@@ -231,21 +220,23 @@ namespace engine::graph {
 						}
 						const ResourceDomain domain = domains[id.Value - 1];
 						if ((domain == ResourceDomain::View && invocation.Scope == NodeScope::World) ||
-							(domain == ResourceDomain::Frame && invocation.Scope != NodeScope::Frame)) {
+							(write && domain == ResourceDomain::Frame &&
+							 invocation.Scope != NodeScope::Frame)) {
 							offender = resource->Name;
 							return ExecutionPlanStatus::InvalidScopeAccess;
 						}
 
 						const uint64_t bytes = BytesOf(*resource, width, height);
-						const std::vector<size_t> instances =
+						const OrdinalRange instances =
 							InstancesFor(domain, invocation, distinctWorlds.size(), worlds.size());
 						if (write) {
-							invocation.WriteBytes += bytes * instances.size();
+							invocation.WriteBytes += bytes * instances.Count;
 						} else {
-							invocation.ReadBytes += bytes * instances.size();
+							invocation.ReadBytes += bytes * instances.Count;
 						}
 
-						for (const size_t ordinal : instances) {
+						for (size_t ordinal = instances.First; ordinal < instances.First + instances.Count;
+							 ordinal++) {
 							const ResourceInstance instance{id, domain, ordinal};
 							const auto owner = owners.find(instance);
 							if (owner != owners.end() && owner->second.Queue != invocation.Scheduled.Queue) {
@@ -257,7 +248,9 @@ namespace engine::graph {
 									.To = invocation.Scheduled.Queue,
 									.View =
 										domain == ResourceDomain::View ? ordinal : RunContext::WHOLE_FRAME,
-									.World = domain == ResourceDomain::World ? ordinal : invocation.World,
+									.World = domain == ResourceDomain::Frame   ? RunContext::WHOLE_FRAME
+											 : domain == ResourceDomain::World ? ordinal
+																			   : invocation.World,
 									.Bytes = bytes,
 								});
 								out.QueueTransferBytes += bytes;

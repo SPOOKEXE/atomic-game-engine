@@ -835,7 +835,8 @@ namespace engine::physics {
 			const ShapeInstance &second,
 			const core::Vector3 &secondLinear,
 			const core::Vector3 &secondAngular,
-			float seconds
+			float seconds,
+			bool permitSeparatingContact
 		) {
 			ConvexSweep answer;
 			if (!(seconds > 0.0f)) {
@@ -847,6 +848,19 @@ namespace engine::physics {
 			const float angularBound =
 				firstAngular.Magnitude() * firstRadius + secondAngular.Magnitude() * secondRadius;
 			const core::Vector3 relativeLinear = firstLinear - secondLinear;
+			if (permitSeparatingContact && angularBound == 0 && first.Shape == scene::ShapeKind::Box &&
+				second.Shape == scene::ShapeKind::Box) {
+				// A separating face plane stays separating under tangent translation,
+				// even when the closest feature later changes to a clipped floor edge.
+				for (const auto &shape : {first, second})
+					for (const auto &axis : shape.Axis) {
+						const float offset = (first.Frame.Position - second.Frame.Position).Dot(axis);
+						const float gap =
+							std::abs(offset) - ProjectionRadius(first, axis) - ProjectionRadius(second, axis);
+						const float outward = relativeLinear.Dot(axis) * (offset < 0 ? -1.f : 1.f);
+						if (gap >= -CONVEX_EPSILON && outward >= 0) return answer;
+					}
+			}
 			float elapsed = 0.0f;
 			core::Vector3 lastNormal = core::Vector3::YAxis;
 			core::Vector3 lastPosition;
@@ -876,6 +890,17 @@ namespace engine::physics {
 					}
 				}
 				if (gap.Overlapping) {
+					if (permitSeparatingContact && elapsed == 0) {
+						const auto contact = PenetrationBetween(placedFirst, placedSecond);
+						const float normalTurn =
+							firstAngular.Cross(contact.Normal).Magnitude() * firstRadius +
+							secondAngular.Cross(contact.Normal).Magnitude() * secondRadius;
+						// Placement may continue along an existing supporting plane. Test
+						// this per convex pair so a mesh floor cannot hide a later wall.
+						if (contact.Overlapping && contact.Normal.MagnitudeSquared() > CONVEX_EPSILON &&
+							relativeLinear.Dot(contact.Normal) + normalTurn <= CONVEX_EPSILON)
+							return answer;
+					}
 					answer.Hit = true;
 					answer.Fraction = std::clamp(elapsed / seconds, 0.0f, 1.0f);
 					answer.Position = gap.OnSecond;
@@ -1069,11 +1094,19 @@ namespace engine::physics {
 		const ShapeInstance &second,
 		const core::Vector3 &secondLinear,
 		const core::Vector3 &secondAngular,
-		float seconds
+		float seconds,
+		bool permitSeparatingContact
 	) {
 		if (second.Shape != scene::ShapeKind::Mesh) {
 			return SweepConvexMotionOnly(
-				first, firstLinear, firstAngular, second, secondLinear, secondAngular, seconds
+				first,
+				firstLinear,
+				firstAngular,
+				second,
+				secondLinear,
+				secondAngular,
+				seconds,
+				permitSeparatingContact
 			);
 		}
 
@@ -1117,7 +1150,14 @@ namespace engine::physics {
 				second.Frame, core::Vector3::Zero, scene::ShapeKind::Hull, &triangle, nullptr
 			};
 			const ConvexSweep hit = SweepConvexMotionOnly(
-				first, firstLinear, firstAngular, placed, core::Vector3::Zero, core::Vector3::Zero, seconds
+				first,
+				firstLinear,
+				firstAngular,
+				placed,
+				core::Vector3::Zero,
+				core::Vector3::Zero,
+				seconds,
+				permitSeparatingContact
 			);
 			if (hit.Hit && (!answer.Hit || hit.Fraction < answer.Fraction ||
 							(hit.Fraction == answer.Fraction && reached[at] < nearest))) {

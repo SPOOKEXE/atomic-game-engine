@@ -18,11 +18,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <unordered_map>
 #include <vector>
 
 struct SDL_GPUBuffer;
+struct SDL_GPUCommandBuffer;
 struct SDL_GPUDevice;
 
 namespace engine::render {
@@ -43,6 +45,86 @@ namespace engine::render {
 		//
 		// Draw calls apply this offset, so uploaded mesh indices stay unchanged.
 		int32_t VertexOffset = 0;
+	};
+
+	// An immutable, material-local page of a resident mesh.
+	//
+	// Pages bound indirect work without changing the source index stream. Their
+	// bounds and surface metric are built once at admission, so a view can make a
+	// device-side LOD decision without reading mesh vertices back from the GPU.
+	struct MeshCluster {
+		// Indexed submesh range represented by this cluster.
+		MeshRange Range;
+		// Cluster bounds centre in mesh space.
+		core::Vector3 Centre;
+		// Cluster bounds half extent in mesh space.
+		core::Vector3 Extent;
+		// Surface area used by device-side LOD selection.
+		float SurfaceArea = 0.0f;
+		// Material run associated with Range.
+		uint32_t Material = std::numeric_limits<uint32_t>::max();
+	};
+
+	// Scalar representation of one packed vertex stream.
+	enum class PackedMeshFormat : uint32_t {
+		Float32,
+		Float16,
+		Float8E4M3FN,
+		Signed16,
+		Unsigned16,
+		Signed8,
+		Unsigned8,
+		Signed4,
+		Unsigned4,
+		Boolean,
+	};
+
+	// Layout and quantization range of one packed vertex attribute stream.
+	struct PackedMeshStream {
+		// Byte range within PackedMeshData::Vertices.
+		uint32_t ByteOffset = 0;
+		// Number of bytes occupied by this stream.
+		uint32_t ByteCount = 0;
+		// Attribute values stored in this stream.
+		uint32_t ValueCount = 0;
+		// Scalar components per attribute value.
+		uint32_t Components = 0;
+		// Scalar encoding used for each component.
+		PackedMeshFormat Format = PackedMeshFormat::Float32;
+		// Decoding range for normalized packed values.
+		float Minimum = 0.0f;
+		// Upper decoding range for normalized packed values.
+		float Maximum = 1.0f;
+	};
+
+	// Packed mesh bytes and metadata admitted without expanding vertices.
+	struct PackedMeshData {
+		// Packed vertex attribute bytes.
+		std::vector<std::byte> Vertices;
+		// Triangle indexes into the packed vertex rows.
+		std::vector<uint32_t> Indices;
+		// Material ranges within Indices.
+		std::vector<assets::Submesh> Submeshes;
+		// Layout of position, normal, and texture streams.
+		std::array<PackedMeshStream, 3> Streams;
+		// Mesh-space axis-aligned bounds.
+		core::Vector3 Minimum;
+		// Mesh-space axis-aligned bounds maximum.
+		core::Vector3 Maximum;
+		// Number of vertex rows addressed by Indices.
+		uint32_t VertexCount = 0;
+
+		// Checks stream ranges, counts, and submesh indexes.
+		bool IsValid() const;
+	};
+
+	// Outcome of copying resident mesh data to CPU-owned storage.
+	enum class MeshCopyStatus : uint8_t {
+		Copied,
+		Missing,
+		OverLimit,
+		Packed,
+		Invalid,
 	};
 
 	// One registered mesh.
@@ -66,6 +148,9 @@ namespace engine::render {
 		std::vector<core::Name> Textures;
 		std::vector<std::array<float, 4>> Colours;
 		//@}
+
+		// Immutable cluster pages built with this residency entry.
+		std::vector<MeshCluster> Clusters;
 
 		// The middle of the mesh's own bounding box, in mesh space.
 		//
@@ -99,6 +184,15 @@ namespace engine::render {
 
 		// Number of palette entries a skinned instance must provide.
 		uint16_t JointCount = 0;
+
+		// Whether this entry uses the packed-vertex buffer.
+		bool Packed = false;
+		// First packed byte owned by this entry.
+		uint32_t PackedByteOffset = 0;
+		// Number of packed bytes owned by this entry.
+		uint32_t PackedByteCount = 0;
+		// Packed attribute layouts used to decode this entry.
+		std::array<PackedMeshStream, 3> PackedStreams;
 	};
 
 	// The meshes a renderer can draw.
@@ -148,7 +242,9 @@ namespace engine::render {
 		// Releases the buffers.
 		void Shutdown();
 
-		// Registers a mesh, replacing one of the same name.
+		// Registers a mesh, replacing one of the same name and content owner.
+		// Empty owner selects shared content. Scoped queries never search other owners;
+		// Resolve returns the built-in fallback when the scoped name is absent.
 		//
 		// The bytes are kept on the host until `Flush`, so a burst of arrivals
 		// costs one upload rather than one each.
@@ -160,8 +256,11 @@ namespace engine::render {
 		//
 		// @param name The name a `DrawInstance` will ask for.
 		// @param mesh The geometry. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh or a table that would overflow.
-		bool Add(const core::Name &name, const assets::MeshData &mesh);
+		bool Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		// Registers validated packed geometry without expanding its vertex attributes.
+		bool AddPacked(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
 
 		// Uploads whatever `Add` has accumulated.
 		//
@@ -178,6 +277,14 @@ namespace engine::render {
 		//         had, so a failed upload is a frame drawn with the old
 		//         geometry rather than with none.
 		bool Flush();
+
+		// Records this frame's pending mesh-residency delta into the command buffer
+		// owned by the render graph. A quiet node still advances the deferred-run
+		// clock, because retirement is measured in rendered frames.
+		//
+		// @param command The frame command buffer that consumes the resident rows.
+		// @return `false` when a device allocation or transfer operation failed.
+		bool Record(SDL_GPUCommandBuffer *command);
 
 		// How many device uploads have happened.
 		//
@@ -199,6 +306,9 @@ namespace engine::render {
 		}
 		size_t PendingIndexCount() const {
 			return Total(DirtyIndices);
+		}
+		size_t PendingPackedByteCount() const {
+			return Total(DirtyPackedBytes);
 		}
 
 		// How many host slots are owned by nobody, waiting to be reused.
@@ -223,20 +333,48 @@ namespace engine::render {
 		size_t HostIndexCount() const {
 			return HostIndices.size();
 		}
+		size_t HostPackedByteCount() const {
+			return HostPackedVertices.size();
+		}
+		size_t PackedResidentBytes() const {
+			return PackedCapacity;
+		}
+		size_t UploadedPackedBytes() const {
+			return PackedUploadBytes;
+		}
 		//@}
 		//@}
 
 		// The entry for a name, or the default when the name is unknown.
 		//
 		// Unknown names resolve to the fallback mesh; this never returns null.
-		const MeshEntry &Resolve(const core::Name &name) const;
+		const MeshEntry &Resolve(const core::Name &name, core::Name owner = {}) const;
 
 		// Whether a name has been registered.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` when `Resolve` would return that mesh rather than the
 		//         default.
-		bool Has(const core::Name &name) const;
+		bool Has(const core::Name &name, core::Name owner = {}) const;
+
+		// Copies exact resident geometry without reading back the GPU. Explicit limits
+		// keep a control request from copying an arbitrarily large content mesh.
+		// Packed runtime meshes have no expanded host vertices and are refused.
+		MeshCopyStatus Copy(
+			const core::Name &name,
+			assets::MeshData &out,
+			size_t vertexLimit,
+			size_t indexLimit,
+			core::Name owner = {}
+		) const;
+
+		// Retires one content owner. Its ranges become reusable after DEFERRED_FRAMES.
+		// Shared entries are retained; an empty owner is refused. Returns entries retired.
+		size_t DropOwner(core::Name owner);
+		// Releases one exact owner-scoped entry. Its host ranges remain unavailable
+		// until the deferred-frame window closes, like replacement storage.
+		bool Drop(const core::Name &name, core::Name owner);
 
 		// How many meshes are registered.
 		size_t Count() const {
@@ -251,19 +389,25 @@ namespace engine::render {
 		SDL_GPUBuffer *Indices() const {
 			return IndexBuffer;
 		}
+		SDL_GPUBuffer *PackedVertices() const {
+			return PackedVertexBuffer;
+		}
 		//@}
 
 	  private:
-		bool Upload();
+		bool Upload(SDL_GPUCommandBuffer *command);
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUBuffer *VertexBuffer = nullptr;
 		SDL_GPUBuffer *IndexBuffer = nullptr;
+		SDL_GPUBuffer *PackedVertexBuffer = nullptr;
 
 		// What is on the device, so a growth is a re-create rather than a
 		// re-create every time.
 		size_t VertexCapacity = 0;
 		size_t IndexCapacity = 0;
+		size_t PackedCapacity = 0;
+		size_t PackedUploadBytes = 0;
 
 		// Device uploads performed. See `UploadCount`.
 		size_t Uploads = 0;
@@ -302,6 +446,7 @@ namespace engine::render {
 		//@{
 		std::vector<FreeBlock> FreeVertices;
 		std::vector<FreeBlock> FreeIndices;
+		std::vector<FreeBlock> FreePackedBytes;
 		//@}
 
 		// What `Add` has written that `Upload` has not sent, in offset order.
@@ -312,6 +457,7 @@ namespace engine::render {
 		//@{
 		std::vector<Span> DirtyVertices;
 		std::vector<Span> DirtyIndices;
+		std::vector<Span> DirtyPackedBytes;
 		//@}
 
 		// Takes `count` contiguous slots from a free list, or `NOWHERE`.
@@ -336,7 +482,8 @@ namespace engine::render {
 
 		std::vector<assets::MeshVertex> HostVertices;
 		std::vector<uint32_t> HostIndices;
-		std::unordered_map<uint32_t, MeshEntry> Entries;
+		std::vector<std::byte> HostPackedVertices;
+		std::unordered_map<uint64_t, MeshEntry> Entries;
 		MeshEntry Fallback;
 		bool Dirty = false;
 	};

@@ -55,8 +55,11 @@ using engine::physics::PreparedWorldMutable;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::RegisterPhysicsComponents;
 using engine::physics::RegisterPhysicsSystems;
+using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
+using engine::scene::RigidBody;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 
 namespace {
@@ -218,6 +221,41 @@ TEST_CASE("a scheduled tick integrates before it indexes", "[physics][pipeline]"
 	store.Each<const Transform, const Motion>([](Entity, const Transform &transform, const Motion &) {
 		CHECK(transform.Frame.Position.X == Approx(0.0f).margin(0.02));
 	});
+}
+
+TEST_CASE("a kinematic body keeps its script placement through a physics tick", "[physics][pipeline]") {
+	// The Magic projectile has this shape. It is in the dynamic index so moving
+	// it never invalidates static terrain, but a contact must not make physics
+	// correct a placement owned by script.
+	Store store("pipeline.kinematic-placement");
+	PreparePhysicsWorld(store, 1.0f);
+
+	const CFrame placement{Vector3{3.0f, 2.0f, -1.0f}};
+	const Entity projectile = store.Create();
+	store.Set<Transform>(projectile, Transform{placement});
+	Collider projectileCollider;
+	projectileCollider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+	store.Set<Collider>(projectile, projectileCollider);
+	store.Set<RigidBody>(projectile, RigidBody{.Kind = BodyKind::Kinematic});
+	store.Set<Simulated>(projectile, Simulated{});
+	store.Set<Motion>(projectile, Motion{});
+
+	const Entity terrain = store.Create();
+	store.Set<Transform>(terrain, Transform{CFrame{Vector3{3.0f, 1.4f, -1.0f}}});
+	Collider terrainCollider;
+	terrainCollider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+	store.Set<Collider>(terrain, terrainCollider);
+
+	Scheduler scheduler;
+	RegisterPhysicsSystems(scheduler);
+	scheduler.Tick(store, TICK);
+
+	const Vector3 &after = store.Get<Transform>(projectile)->Frame.Position;
+	CHECK(after.X == Approx(placement.Position.X));
+	CHECK(after.Y == Approx(placement.Position.Y));
+	CHECK(after.Z == Approx(placement.Position.Z));
+	CHECK(store.Resource<PhysicsWorld>()->DynamicColliders() == 1);
+	CHECK(store.Resource<PhysicsWorld>()->StaticColliders() == 1);
 }
 
 TEST_CASE("two runs of one scene tick to identical bytes", "[physics][pipeline]") {

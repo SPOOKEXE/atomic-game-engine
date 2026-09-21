@@ -123,8 +123,11 @@ using engine::physics::PhysicsWorld;
 using engine::physics::PipelineInternals;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::SyncBroadphase;
+using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
+using engine::scene::RigidBody;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 using engine::spatial::HashGrid;
 using engine::spatial::LayerMask;
@@ -284,6 +287,70 @@ namespace broadphase_bench {
 
 		built.emplace_back(std::make_pair(count, cellSize), std::move(store));
 		return *built.back().second;
+	}
+
+	// A static scene plus one externally driven collider. The Magic scene has
+	// this shape: moving its visual proxy must not pay to rebuild its terrain.
+	struct KinematicScene {
+		std::unique_ptr<Store> Storage;
+		Entity Projectile;
+	};
+
+	KinematicScene &KinematicWorld() {
+		static KinematicScene scene;
+		if (scene.Storage != nullptr) {
+			return scene;
+		}
+
+		scene.Storage = std::make_unique<Store>("physics.bench.kinematic");
+		Store &world = *scene.Storage;
+		PreparePhysicsWorld(world, 4.0f);
+		for (size_t index = 0; index < 4000; index++) {
+			const Entity entity = world.Create();
+			const Vector3 position{static_cast<float>(index % 200), 0.0f, static_cast<float>(index / 200)};
+			world.Set<Transform>(entity, Transform{CFrame{position}});
+			Collider collider;
+			collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+			world.Set<Collider>(entity, collider);
+		}
+		scene.Projectile = world.Create();
+		world.Set<Transform>(scene.Projectile, Transform{});
+		world.Set<Collider>(scene.Projectile, Collider{});
+		world.Set<Simulated>(scene.Projectile, Simulated{});
+		world.Set<Motion>(scene.Projectile, Motion{});
+		world.Set<RigidBody>(scene.Projectile, RigidBody{.Kind = BodyKind::Kinematic});
+		SyncBroadphase(world);
+		world.ClearChanges();
+		return scene;
+	}
+
+	// The same fixture before a script-owned collider gains its kinematic proxy.
+	// It is intentionally separate from the forced-dirty row below: this writes
+	// the projectile transform exactly as MagicRuntime does, so the measured gap
+	// is the static-index rebuild caused by that one write.
+	KinematicScene &ScriptedStaticWorld() {
+		static KinematicScene scene;
+		if (scene.Storage != nullptr) {
+			return scene;
+		}
+
+		scene.Storage = std::make_unique<Store>("physics.bench.scripted-static");
+		Store &world = *scene.Storage;
+		PreparePhysicsWorld(world, 4.0f);
+		for (size_t index = 0; index < 4000; index++) {
+			const Entity entity = world.Create();
+			const Vector3 position{static_cast<float>(index % 200), 0.0f, static_cast<float>(index / 200)};
+			world.Set<Transform>(entity, Transform{CFrame{position}});
+			Collider collider;
+			collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+			world.Set<Collider>(entity, collider);
+		}
+		scene.Projectile = world.Create();
+		world.Set<Transform>(scene.Projectile, Transform{});
+		world.Set<Collider>(scene.Projectile, Collider{});
+		SyncBroadphase(world);
+		world.ClearChanges();
+		return scene;
 	}
 
 	size_t PairCount(const Store &store) {
@@ -640,6 +707,30 @@ BENCH("Sync with the static index rebuilt too · 4000 colliders", 50) {
 		store.ResourceMutable<PhysicsWorld>()->MarkStaticDirty();
 		SyncBroadphase(store);
 		Consume(store.Resource<PhysicsWorld>()->StaticColliders());
+	}
+}
+
+BENCH("Kinematic motion · sync + 4000 static colliders", 50) {
+	KinematicScene &scene = KinematicWorld();
+	Store &store = *scene.Storage;
+	for (int pass = 0; pass < 50; pass++) {
+		store.Set<Transform>(
+			scene.Projectile, Transform{CFrame{Vector3{static_cast<float>(pass), 0.0f, 0.0f}}}
+		);
+		SyncBroadphase(store);
+		Consume(store.Resource<PhysicsWorld>()->StaticRebuilds());
+	}
+}
+
+BENCH("Scripted static motion · sync + 4000 static colliders", 50) {
+	KinematicScene &scene = ScriptedStaticWorld();
+	Store &store = *scene.Storage;
+	for (int pass = 0; pass < 50; pass++) {
+		store.Set<Transform>(
+			scene.Projectile, Transform{CFrame{Vector3{static_cast<float>(pass), 0.0f, 0.0f}}}
+		);
+		SyncBroadphase(store);
+		Consume(store.Resource<PhysicsWorld>()->StaticRebuilds());
 	}
 }
 

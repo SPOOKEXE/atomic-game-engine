@@ -451,6 +451,7 @@ namespace engine::gui {
 
 		// The 3D branch, at the end for the reason the rule above gives.
 		ecs::Components::Register<Adornment>("gui.Adornment");
+		ecs::Components::Register<AdornmentInteraction>("gui.AdornmentInteraction");
 		ecs::Components::Register<SelectionOutline>("gui.SelectionOutline");
 		ecs::Components::Register<HandleShape>("gui.HandleShape");
 

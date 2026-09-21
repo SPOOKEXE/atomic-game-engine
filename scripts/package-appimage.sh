@@ -80,8 +80,10 @@ done
 
 # The icon has to sit at the AppDir root under the name the .desktop file's
 # Icon= key gives, and again as .DirIcon for file managers that show one before
-# anything is mounted. appimagetool warns about a missing .DirIcon and then
-# produces an image nothing displays an icon for, which is easy to not notice.
+# anything is mounted. The atomic-$program.desktop filename matches the SDL app
+# metadata identifier, so Wayland shells can associate a packaged window with
+# this icon. appimagetool warns about a missing .DirIcon and then produces an
+# image nothing displays an icon for, which is easy to not notice.
 cp "$root/assets/small-icon.png" "$appdir/atomic-$program.png"
 cp "$root/assets/small-icon.png" "$appdir/.DirIcon"
 
@@ -115,11 +117,21 @@ arch=$(uname -m)
 
 # appimagetool is itself an AppImage, and GitHub runners have no FUSE. The
 # extract-and-run flag unpacks it to a temporary directory instead of mounting,
-# which is the supported answer and not a workaround.
-tool=$work/appimagetool
-curl -fsSL -o "$tool" \
-	"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
-chmod +x "$tool"
+# which is the supported answer and not a workaround. The release packager
+# supplies one shared downloaded tool for its three isolated image builds;
+# standalone calls retain the self-contained download path.
+tool=${APPIMAGETOOL:-}
+if [ -n "$tool" ]; then
+	if [ ! -x "$tool" ]; then
+		echo "APPIMAGETOOL is not executable: $tool" >&2
+		exit 1
+	fi
+else
+	tool=$work/appimagetool
+	curl -fsSL -o "$tool" \
+		"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
+	chmod +x "$tool"
+fi
 
 mkdir -p "$outdir"
 output="$outdir/atomic-$program-$version-linux-$arch.AppImage"

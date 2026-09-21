@@ -68,6 +68,8 @@ namespace engine::world {
 			return "world has no name";
 		case WorldStatus::WrongThread:
 			return "wrong thread";
+		case WorldStatus::Faulted:
+			return "faulted";
 		}
 		return "?";
 	}

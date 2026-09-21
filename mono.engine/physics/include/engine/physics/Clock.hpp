@@ -61,9 +61,14 @@ namespace engine::physics {
 		// world that never says otherwise wants - and what every world in this
 		// repository is.
 		//
-		// The one number that survives a save file. Everything below is derived
-		// from it and from the ticks that have run since.
+		// Saved with the execution state below so a paused checkpoint restores
+		// the same physics phase without a catch-up step.
 		double Rate = 0.0;
+
+		// Whether this world's physics pipeline is frozen. The world and script
+		// clocks continue while this is set, but no accumulator time is charged
+		// or caught up when it is cleared.
+		bool Paused = false;
 
 		// Simulated seconds accumulated and not yet spent on a step.
 		double Accumulator = 0.0;
@@ -119,6 +124,14 @@ namespace engine::physics {
 	//                       NaN - reads as zero, and anything above
 	//                       `MAXIMUM_RATE` is held there.
 	void SetPhysicsTickRate(ecs::Store &store, double stepsPerSecond);
+
+	// Freezes or resumes only the prepared world's physics pipeline. Resuming
+	// does not charge the time spent paused, so a long pause cannot cause a
+	// catch-up burst.
+	void SetPhysicsPaused(ecs::Store &store, bool paused);
+
+	// Whether this prepared world's physics pipeline is frozen.
+	bool IsPhysicsPaused(const ecs::Store &store);
 
 	// How often this world steps its physics.
 	//

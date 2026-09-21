@@ -21,6 +21,8 @@
 // them, and a person decides. `docs/CODE_QUALITY.md`'s rule about attaching a
 // number to an algorithm change is what this exists to serve.
 
+#include "BenchmarkReport.hpp"
+
 #include <engine/core/Arguments.hpp>
 
 #include <algorithm>
@@ -55,17 +57,7 @@ namespace {
 	// machine swallows the signal and every run would report something.
 	constexpr double NOTABLE = 0.05;
 
-	// One measured benchmark.
-	struct Measurement {
-		std::string Suite;
-		std::string Name;
-		uint64_t Nanoseconds = 0;
-		uint64_t Spread = 0;
-		uint64_t Iterations = 0;
-
-		// What one iteration is - `call` or `item`. See `BenchUnit`.
-		std::string Unit;
-	};
+	using benchrunner::Measurement;
 
 	std::vector<std::string> Split(const std::string &text, char separator) {
 		std::vector<std::string> fields;
@@ -134,25 +126,7 @@ namespace {
 			return false;
 		}
 
-		std::istringstream lines(result.Output);
-		std::string line;
-		while (std::getline(lines, line)) {
-			const auto fields = Split(line, '\t');
-			// bench <TAB> suite <TAB> ns <TAB> spread <TAB> samples <TAB> iterations <TAB> unit <TAB> name
-			if (fields.size() < 8 || fields[0] != "bench") {
-				continue;
-			}
-
-			Measurement measurement;
-			measurement.Suite = fields[1];
-			measurement.Nanoseconds = std::strtoull(fields[2].c_str(), nullptr, 10);
-			measurement.Spread = std::strtoull(fields[3].c_str(), nullptr, 10);
-			measurement.Iterations = std::strtoull(fields[5].c_str(), nullptr, 10);
-			measurement.Unit = fields[6];
-			measurement.Name = fields[7];
-			into.push_back(std::move(measurement));
-		}
-		return true;
+		return benchrunner::ParseBenchmarkReport(result.Output, suite.Id, into, output);
 	}
 
 	// Nanoseconds, in whatever unit reads without counting zeroes.

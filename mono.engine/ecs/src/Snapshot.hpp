@@ -78,7 +78,8 @@ namespace engine::ecs {
 	// @param state  The live world to reconcile.
 	// @param reader The snapshot to apply.
 	// @param mode   What to do with entities the snapshot does not mention.
+	// @param clock  Whether to restore the incoming clock or retain local time.
 	// @return `false` when the snapshot could not be read, in which case
 	//         nothing was touched.
-	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode);
+	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode, ApplyClock clock);
 }

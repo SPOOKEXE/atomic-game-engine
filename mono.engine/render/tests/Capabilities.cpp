@@ -1,3 +1,4 @@
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Capabilities.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -24,6 +25,10 @@ namespace engine::render::tests {
 		CHECK(CheckCapabilities(caps, needs).Status == CapabilityStatus::MissingIndirectDraws);
 		caps.HasIndirectDraws = true;
 
+		needs.ColourTargets = 1;
+		CHECK(CheckCapabilities(caps, needs).Status == CapabilityStatus::InsufficientColourTargets);
+		caps.MaxColourTargets = 1;
+
 		needs.Formats = {graph::ResourceFormat::RGBA16F};
 		const CapabilityCheck missingFormat = CheckCapabilities(caps, needs);
 		CHECK(missingFormat.Status == CapabilityStatus::MissingFormat);
@@ -42,13 +47,35 @@ namespace engine::render::tests {
 		CHECK(CheckCapabilities(caps, needs).Accepted());
 	}
 
+	TEST_CASE("render feature support follows device requirements", "[render][capabilities]") {
+		DeviceCaps caps;
+		CHECK(SupportedRenderFeatures(caps) == 0);
+
+		caps.Formats.push_back(graph::ResourceFormat::RGBA8);
+		uint32_t supported = SupportedRenderFeatures(caps);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::Shadows)) != 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::PostProcessing)) != 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::ComputeEffects)) == 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::OcclusionCulling)) == 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::RayTracing)) == 0);
+
+		caps.HasCompute = true;
+		caps.HasStorageTextures = true;
+		caps.HasIndirectDraws = true;
+		supported = SupportedRenderFeatures(caps);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::ComputeEffects)) != 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::OcclusionCulling)) != 0);
+	}
+
 	TEST_CASE("default pipeline tiers retain exact fallthrough causes", "[render][capabilities]") {
 		DeviceCaps caps;
 		caps.HasIndirectDraws = true;
+		caps.MaxColourTargets = 8;
 		caps.Formats = {
 			graph::ResourceFormat::RGBA8,
 			graph::ResourceFormat::RGBA8_SRGB,
 			graph::ResourceFormat::RGB10A2,
+			graph::ResourceFormat::RG16F,
 			graph::ResourceFormat::RGBA16F,
 			graph::ResourceFormat::R32F,
 			graph::ResourceFormat::D24S8,
@@ -61,11 +88,40 @@ namespace engine::render::tests {
 		CHECK(tierB.Fallthrough[0].Tier == DefaultPipelineTier::A);
 		CHECK(tierB.Fallthrough[0].Cause.Status == CapabilityStatus::MissingCompute);
 
+		caps.HasCompute = true;
+		caps.HasStorageTextures = true;
+		caps.MaxColourTargets = 7;
+		const PipelineTierDecision limitedTargets = ChooseDefaultPipeline(caps);
+		CHECK(limitedTargets.Tier == DefaultPipelineTier::C);
+		REQUIRE(limitedTargets.Fallthrough.size() == 2);
+		CHECK(limitedTargets.Fallthrough[0].Cause.Status == CapabilityStatus::InsufficientColourTargets);
+		CHECK(limitedTargets.Fallthrough[1].Cause.Status == CapabilityStatus::InsufficientColourTargets);
+
+		caps.MaxColourTargets = 8;
+		caps.Formats.erase(std::find(caps.Formats.begin(), caps.Formats.end(), graph::ResourceFormat::RG16F));
+		const PipelineTierDecision missingUvFormat = ChooseDefaultPipeline(caps);
+		CHECK(missingUvFormat.Tier == DefaultPipelineTier::C);
+		REQUIRE(missingUvFormat.Fallthrough.size() == 2);
+		CHECK(missingUvFormat.Fallthrough[0].Cause.Status == CapabilityStatus::MissingFormat);
+		CHECK(missingUvFormat.Fallthrough[0].Cause.Format == graph::ResourceFormat::RG16F);
+		CHECK(missingUvFormat.Fallthrough[1].Cause.Status == CapabilityStatus::MissingFormat);
+
+		caps.Formats.push_back(graph::ResourceFormat::RG16F);
 		caps.HasIndirectDraws = false;
 		const PipelineTierDecision tierC = ChooseDefaultPipeline(caps);
 		CHECK(tierC.Tier == DefaultPipelineTier::C);
 		REQUIRE(tierC.Fallthrough.size() == 2);
 		CHECK(tierC.Fallthrough[1].Tier == DefaultPipelineTier::B);
 		CHECK(tierC.Fallthrough[1].Cause.Status == CapabilityStatus::MissingIndirectDraws);
+	}
+
+	TEST_CASE("the non-compute default removes environment compute producers", "[render][capabilities]") {
+		const graph::PipelineDocument reduced = graph::DefaultPbrTierBDocument();
+		for (const graph::Edit &edit : reduced.Edits()) {
+			CHECK(edit.Name != core::Name("environment-sky"));
+			CHECK(edit.Name != core::Name("environment-clouds"));
+			CHECK(edit.NodeKind != core::Name("skybox-compute"));
+			CHECK(edit.NodeKind != core::Name("clouds-compute"));
+		}
 	}
 }

@@ -29,6 +29,8 @@
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/ComputeJobs.hpp>
+#include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
@@ -54,6 +56,7 @@
 #include <vector>
 
 namespace engine::script {
+	class DataScriptPackageContext;
 
 	// Everything one Luau runtime needs, hung off the state rather than a
 	// static.
@@ -65,6 +68,7 @@ namespace engine::script {
 	//
 	// @since v0.6
 	struct LuauContext {
+		const DataScriptPackageContext *Package = nullptr;
 		// One C closure the runtime owns and names for binding profiling.
 		//
 		// A Luau function pointer has no portable conversion to data, so the
@@ -92,6 +96,10 @@ namespace engine::script {
 
 		// The services and host seams this runtime may reach.
 		ScriptCapabilities Access = ScriptCapabilities::None;
+
+		// Installed by the host, never shared through a process-global registry.
+		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;
@@ -650,7 +658,9 @@ namespace engine::script {
 	// @param state The VM.
 	// @param phase Which set to install.
 	// @since v0.15
-	void InstallLuauServices(lua_State *state, ServiceAvailability phase, ScriptCapabilities access);
+	void InstallLuauServices(
+		lua_State *state, ServiceAvailability phase, ScriptCapabilities access, bool packageOnly = false
+	);
 
 	// Installs the `InputObject` metatable, and pushes one.
 	//

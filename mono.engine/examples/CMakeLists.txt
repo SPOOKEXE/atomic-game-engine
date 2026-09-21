@@ -14,9 +14,8 @@
 # camera and a draw list, a server adds neither, and neither of those belongs to
 # the scene.
 #
-# The `.luau` and `.ts` files in this directory are the scenes themselves. They
-# are staged into the assets tree so that `ExamplePath` resolves from any
-# working directory.
+# The demo sources live under `assets/scripts`; authored worlds live under
+# `assets/worlds`. Both are staged into the assets tree for `DemosLoader`.
 mono_add_library(examples
 	TIER shared
 	DEPS
@@ -37,6 +36,7 @@ mono_add_library(examples
 		# "'ParticleEmitter' is not a registered class" out of its heartbeat in
 		# every program but the client, which registered them on its own path.
 		Engine::effects
+		Engine::graph
 
 		Engine::script
 
@@ -50,9 +50,9 @@ mono_add_library(examples
 # Staged rather than referenced in place: a program started from anywhere finds
 # them, and `--assets` moves them with everything else.
 file(GLOB example_scenes CONFIGURE_DEPENDS
-	"${CMAKE_CURRENT_SOURCE_DIR}/*.luau"
-	"${CMAKE_CURRENT_SOURCE_DIR}/*.js"
-	"${CMAKE_CURRENT_SOURCE_DIR}/*.ts")
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.luau"
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.js"
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.ts")
 
 # **A `.ts` file is staged as stripped JavaScript, not copied.**
 #
@@ -93,12 +93,12 @@ foreach(scene IN LISTS example_scenes)
 		# JavaScript in a file whose extension claims otherwise, and the next
 		# person to open it would be reading a lie.
 		get_filename_component(scene_stem "${scene}" NAME_WE)
-		set(staged "${MONO_STAGE_ROOT}/assets/examples/${scene_stem}.js")
-		set(staged_map "${MONO_STAGE_ROOT}/assets/examples/${scene_stem}.js.map")
+		set(staged "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_stem}.js")
+		set(staged_map "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_stem}.js.map")
 
 		add_custom_command(
 			OUTPUT "${staged}" "${staged_map}"
-			COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples"
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/scripts"
 			COMMAND "${_mono_tsc}"
 				--target ES2020
 				--module ESNext
@@ -137,7 +137,7 @@ foreach(scene IN LISTS example_scenes)
 				# answers to one question, and the worse one.
 				--noResolve
 				--noCheck
-				--outDir "${MONO_STAGE_ROOT}/assets/examples"
+				--outDir "${MONO_STAGE_ROOT}/assets/examples/scripts"
 				"${scene}"
 			DEPENDS "${scene}"
 			COMMENT "Transpiling example scene ${scene_name}"
@@ -148,20 +148,20 @@ foreach(scene IN LISTS example_scenes)
 	endif()
 
 	add_custom_command(
-		OUTPUT "${MONO_STAGE_ROOT}/assets/examples/${scene_name}"
-		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples"
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${scene}" "${MONO_STAGE_ROOT}/assets/examples/${scene_name}"
+		OUTPUT "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_name}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/scripts"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${scene}" "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_name}"
 		DEPENDS "${scene}"
 		COMMENT "Staging example scene ${scene_name}"
 		VERBATIM)
-	list(APPEND staged_scenes "${MONO_STAGE_ROOT}/assets/examples/${scene_name}")
+	list(APPEND staged_scenes "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_name}")
 endforeach()
 
 # The Luau modules a scene owns, staged under that scene's own name.
 #
 # **One copy in the repository and a copy per scene in the stage**, which is the
 # split that keeps both halves honest. `MagicCore` is byte-identical to the Rojo
-# project it came from and three scenes use it, so three directories in `lib/`
+# project it came from and three scenes use it, so three source copies
 # would be three things to keep in step and they would stop agreeing the first
 # time one was edited in a hurry. What the *runtime* wants is the opposite: a
 # scene's modules under that scene's `Script`, so a world that never opens
@@ -178,8 +178,8 @@ endforeach()
 # flattening the way the scene glob does would leave `require` unable to find a
 # single sibling.
 #
-# `<scene>/<library>`, one pair per line. A scene that needs no modules is
-# absent, which is every scene but three.
+# `<scene>/<library>`, one pair per line. A script demo with no modules is
+# absent.
 set(scene_libraries
 	Magic/MagicCore
 	Magic/MagicRuntime
@@ -188,9 +188,9 @@ set(scene_libraries
 	MagicTests/MagicCore
 	MagicTests/MagicTests
 	MagicTests/TerrainCore
+	MagicTests/TerrainRuntime
 	Libraries/MagicCore
-	Libraries/TerrainCore
-	BladeborneDemo/BladeborneDemo)
+	Libraries/TerrainCore)
 
 foreach(pair IN LISTS scene_libraries)
 	string(REPLACE "/" ";" parts "${pair}")
@@ -198,15 +198,15 @@ foreach(pair IN LISTS scene_libraries)
 	list(GET parts 1 library_name)
 
 	file(GLOB_RECURSE library_files CONFIGURE_DEPENDS
-		"${CMAKE_CURRENT_SOURCE_DIR}/lib/${library_name}/*.luau")
+		"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/libraries/${library_name}/*.luau")
 
 	if(NOT library_files)
-		message(FATAL_ERROR "examples: ${scene_name} names lib/${library_name}, which holds no .luau files")
+		message(FATAL_ERROR "examples: ${scene_name} names assets/scripts/libraries/${library_name}, which holds no .luau files")
 	endif()
 
 	foreach(library IN LISTS library_files)
-		file(RELATIVE_PATH library_relative "${CMAKE_CURRENT_SOURCE_DIR}/lib" "${library}")
-		set(library_staged "${MONO_STAGE_ROOT}/assets/examples/${scene_name}/${library_relative}")
+		file(RELATIVE_PATH library_relative "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/libraries" "${library}")
+		set(library_staged "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_name}/${library_relative}")
 		get_filename_component(library_directory "${library_staged}" DIRECTORY)
 
 		add_custom_command(
@@ -218,6 +218,58 @@ foreach(pair IN LISTS scene_libraries)
 			VERBATIM)
 		list(APPEND staged_scenes "${library_staged}")
 	endforeach()
+endforeach()
+
+file(GLOB example_worlds CONFIGURE_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/worlds/*.aworld")
+
+foreach(world IN LISTS example_worlds)
+	get_filename_component(world_name "${world}" NAME)
+	set(world_staged "${MONO_STAGE_ROOT}/assets/examples/worlds/${world_name}")
+	add_custom_command(
+		OUTPUT "${world_staged}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/worlds"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${world}" "${world_staged}"
+		DEPENDS "${world}"
+		COMMENT "Staging example world ${world_name}"
+		VERBATIM)
+	list(APPEND staged_scenes "${world_staged}")
+endforeach()
+
+# A packaged example texture is an ordinary baked asset, not a developer-local
+# CDN import. The authored RGBA8 atlas keeps soft alpha edges; the explicit
+# layout records animation metadata that a still PNG cannot carry itself.
+set(flipbook_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects/fox_dance.png")
+set(flipbook_staged "${MONO_STAGE_ROOT}/assets/examples/effects/fox_dance.atex")
+add_custom_command(
+	OUTPUT "${flipbook_staged}"
+	COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/effects"
+	COMMAND $<TARGET_FILE:assetc>
+		--input "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects"
+		--output "${MONO_STAGE_ROOT}/assets/examples/effects"
+		--flipbook-side 8
+		--flipbook-frames 64
+		--flipbook-fps 24
+		--quiet
+	DEPENDS assetc "${flipbook_source}"
+	COMMENT "Baking packaged particle flipbook"
+	VERBATIM)
+list(APPEND staged_scenes "${flipbook_staged}")
+
+file(GLOB example_pipelines CONFIGURE_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/pipelines/*.pipeline")
+
+foreach(pipeline IN LISTS example_pipelines)
+	get_filename_component(pipeline_name "${pipeline}" NAME)
+	set(pipeline_staged "${MONO_STAGE_ROOT}/assets/examples/pipelines/${pipeline_name}")
+	add_custom_command(
+		OUTPUT "${pipeline_staged}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/pipelines"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${pipeline}" "${pipeline_staged}"
+		DEPENDS "${pipeline}"
+		COMMENT "Staging example render pipeline ${pipeline_name}"
+		VERBATIM)
+	list(APPEND staged_scenes "${pipeline_staged}")
 endforeach()
 
 if(staged_scenes)

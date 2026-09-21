@@ -147,6 +147,24 @@ TEST_CASE("an opaque list keeps the order the world produced", "[scene][drawinst
 	CHECK(order == std::vector<uint32_t>{0, 1, 2, 3, 4});
 }
 
+TEST_CASE("ordering a steady draw list reuses its output storage", "[scene][drawinstance]") {
+	// A renderer owns one order vector per view and orders it every frame. The
+	// pointer makes that contract observable: keeping capacity avoids a frame
+	// allocation without weakening any ordering rule.
+	std::vector<DrawInstance> instances(3);
+	instances[1].Transparency = 0.5f;
+	instances[1].Frame = CFrame{Vector3{4.0f, 0.0f, 0.0f}};
+
+	std::vector<uint32_t> order;
+	order.reserve(instances.size());
+	order.resize(instances.size());
+	const uint32_t *const storage = order.data();
+
+	CHECK(engine::scene::OrderForDrawing(instances, Vector3::Zero, order) == 2);
+	CHECK(order.data() == storage);
+	CHECK(order == std::vector<uint32_t>{0, 2, 1});
+}
+
 TEST_CASE("transparent instances move to the back, farthest first", "[scene][drawinstance]") {
 	// A blended fragment mixes with what is already in the target, so a near
 	// pane drawn before a far one blends the far one *into* a pixel that should
@@ -621,6 +639,7 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinFirst = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinCount = 1; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.ObjectLabel = 1; }) != unchanged);
 
 	// A rotation with the same position, because the quaternion is four floats
 	// that a position-only hash would miss entirely - and a mirror on a
@@ -716,22 +735,30 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	const engine::core::Name loaded("tree.amesh");
 	const engine::core::Name missing("rock.amesh");
 
-	std::vector<DrawInstance> instances(3);
-	instances[0].Mesh = loaded;
+	std::vector<DrawInstance> instances(4);
+	instances[0].Mesh = missing;
+	instances[1].Mesh = loaded;
 
 	// **No mesh named at all - an ordinary `Part`.** This one is kept, because
 	// the renderer's default cube is what a part *is* rather than a stand-in for
 	// something that has not arrived.
-	instances[1].Mesh = engine::core::Name{};
+	instances[2].Mesh = engine::core::Name{};
 
-	instances[2].Mesh = missing;
+	instances[3].Mesh = missing;
 
 	std::vector<DrawInstance> drawable;
+	const std::array<uint32_t, 4> marked{0, 2, 3, 99};
+	std::vector<uint32_t> retained{42};
 	engine::scene::KeepLoaded(
-		instances, [&loaded](const engine::core::Name &mesh) { return mesh == loaded; }, drawable
+		instances,
+		[&loaded](const DrawInstance &row) { return row.Mesh == loaded; },
+		drawable,
+		marked,
+		&retained
 	);
 
 	REQUIRE(drawable.size() == 2);
+	CHECK(retained == std::vector<uint32_t>{1});
 	CHECK(drawable[0].Mesh == loaded);
 	CHECK_FALSE(drawable[1].Mesh.IsValid());
 
@@ -741,6 +768,28 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	for (const DrawInstance &instance : drawable) {
 		CHECK(instance.Mesh != missing);
 	}
+	engine::scene::KeepLoaded({}, [](const DrawInstance &) { return false; }, drawable, marked, &retained);
+	CHECK(drawable.empty());
+	CHECK(retained.empty());
+}
+
+TEST_CASE("mesh residency filtering preserves the source world", "[scene][drawinstance]") {
+	const engine::core::Name mesh("same.mesh"), loadedWorld("loaded.world");
+	std::array<DrawInstance, 2> instances;
+	instances[0].Mesh = instances[1].Mesh = mesh;
+	instances[0].SourceWorld = loadedWorld;
+	instances[1].SourceWorld = engine::core::Name("pending.world");
+	std::vector<DrawInstance> drawable;
+	engine::scene::KeepLoaded(
+		instances,
+		[&](const DrawInstance &row) {
+			CHECK(row.Mesh == mesh);
+			return row.SourceWorld == loadedWorld;
+		},
+		drawable
+	);
+	REQUIRE(drawable.size() == 1);
+	CHECK(drawable[0].SourceWorld == loadedWorld);
 }
 
 TEST_CASE("a mesh arriving makes its parts appear without anything else changing", "[scene][drawinstance]") {
@@ -755,11 +804,11 @@ TEST_CASE("a mesh arriving makes its parts appear without anything else changing
 
 	// Before the content lands, nothing naming it draws - which is what makes a
 	// half-loaded scene read as "still loading" rather than as a field of cubes.
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return false; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return false; }, drawable);
 	CHECK(drawable.empty());
 
 	// And after, every one of them does, in the order the world produced them.
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return true; }, drawable);
 	CHECK(drawable.size() == instances.size());
 }
 
@@ -776,15 +825,15 @@ TEST_CASE("filtering keeps its buffer across calls", "[scene][drawinstance]") {
 	}
 	std::vector<DrawInstance> drawable;
 
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return true; }, drawable);
 	const size_t capacity = drawable.capacity();
 	REQUIRE(capacity >= 64);
 
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return false; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return false; }, drawable);
 	CHECK(drawable.empty());
 	CHECK(drawable.capacity() == capacity);
 
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return true; }, drawable);
 	CHECK(drawable.size() == 64);
 	CHECK(drawable.capacity() == capacity);
 }

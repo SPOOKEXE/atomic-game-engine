@@ -194,6 +194,7 @@ namespace engine::gui {
 		void Invalidate() {
 			Stamp = 0;
 			Fresh = false;
+			NoCollectors = false;
 		}
 
 	  private:
@@ -206,6 +207,8 @@ namespace engine::gui {
 		// zero. Without it, a world whose scan genuinely hashes to zero would
 		// be treated as already compiled and would draw nothing, forever.
 		bool Fresh = false;
+		// Whether the last request proved the store had no layer collectors.
+		bool NoCollectors = false;
 	};
 
 	// Every shader an `ImageLabel` or `ImageButton` in this world names,

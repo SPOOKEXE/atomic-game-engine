@@ -2,7 +2,7 @@
 #
 # The mesh grid, end to end: bake, publish, fetch, draw.
 #
-# `mono.engine/examples/MeshGrid.luau` needs content that has been baked and
+# `mono.engine/examples/assets/scripts/MeshGrid.luau` needs content that has been baked and
 # signed, so running it with `--script` alone shows nine fallback cubes. This
 # does the three steps in front of it, with the flags that matter already set.
 #
@@ -90,7 +90,7 @@ exec "$build/client/client" \
 	--cdn "dir:$store" \
 	--publisher-key "$publisher" \
 	--content-cache "$work/cache" \
-	--script "$root/mono.engine/examples/MeshGrid.luau" \
+	--script "$root/mono.engine/examples/assets/scripts/MeshGrid.luau" \
 	--entities 2048 \
 	"${pacing[@]}" \
 	"$@"

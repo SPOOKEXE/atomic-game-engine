@@ -117,7 +117,7 @@
 ; cryptopp/sources.cmake rather than a glob, so a Crypto++ bump that adds or
 ; renames a .cpp needs the matching cryptopp-cmake commit or the library quietly
 ; loses a file. Bump both or neither, and re-run the file-list comparison
-; recorded in THIRD_PARTY_NOTICES.md.
+; recorded in docs/THIRD_PARTY_NOTICES.md.
 ;
 ; master on both, because neither publishes a release branch - the same
 ; situation as glm above, and the superproject pins the SHA regardless.

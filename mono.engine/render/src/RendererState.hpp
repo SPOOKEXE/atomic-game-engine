@@ -1,5 +1,9 @@
 #pragma once
 
+#include "FramePreparation.hpp"
+#include "GraphHistory.hpp"
+#include "PortalCaptureTreeWork.hpp"
+
 // `Renderer::Impl` - every device object the renderer owns, and the operations
 // over them.
 //
@@ -13,10 +17,15 @@
 #include "GpuHeap.hpp"
 #include "IndexResidency.hpp"
 #include "InstanceResidency.hpp"
+#include "LodSelection.hpp"
 #include "ParticleWork.hpp"
+#include "RenderStageProbe.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
 #include "ShaderBinary.hpp"
+#include "SurfaceCaptureCache.hpp"
+#include "SurfaceCapturePlan.hpp"
+#include "Tessellation.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
@@ -27,10 +36,15 @@
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/MeshTable.hpp>
+#include <engine/render/PortalCaptureTreeImport.hpp>
+#include <engine/render/PortalImageImport.hpp>
+#include <engine/render/PortalShadowImageImport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/TextureTable.hpp>
+#include <engine/render/VisibilityObservation.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_video.h>
@@ -42,6 +56,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -49,10 +64,34 @@
 #include <vector>
 
 namespace engine::render {
+	// Which half of the two-pass transparent-layer capture a draw records.
+	enum class TransparentLayerPhase : uint8_t { None, Nearest, Colour };
+	enum RetainedNodeFamily : uint16_t {
+		RetainedUpload = 1u << 0,
+		RetainedShadow = 1u << 1,
+		RetainedMirror = 1u << 2,
+		RetainedPortal = 1u << 3,
+		RetainedSurface = 1u << 4,
+		RetainedAuthored = 1u << 5,
+		RetainedShading = 1u << 6,
+		RetainedGeometry = 1u << 7,
+	};
+
+	struct DataCaptureSource {
+		std::string SnapshotId;
+		core::Name WorldName;
+		core::CFrame CameraFrame;
+		scene::Camera Camera;
+		bool ProjectionAvailable = false;
+		std::array<float, 16> Projection{};
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+	};
 
 	struct Renderer::Impl {
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Device = nullptr;
+		RenderStageProbe StageProbe;
 		DeviceCaps Caps;
 
 		struct NamedPipeline {
@@ -60,6 +99,12 @@ namespace engine::render {
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
 			std::vector<graph::NodeId> EntityNodes;
+			// Nodes that must still execute while scene inputs are retained. This
+			// includes output/custom nodes and the forward closure from history.
+			std::vector<uint8_t> RetainedNodes;
+			// Built-in handler families represented in RetainedNodes, computed once
+			// when the pipeline is installed so cached frames do no graph scans.
+			uint16_t RetainedFamilies = 0;
 			graph::ExecutionSchedule Schedule;
 			graph::ResourceAliasPlan Aliases;
 
@@ -67,11 +112,16 @@ namespace engine::render {
 			// which command buffer class records each node, and its order is the
 			// frame's submission order on SDL's one unified queue.
 			std::vector<graph::PlannedCommandBuffer> Buffers;
+			uint64_t Revision = 0;
 		};
 
+		uint64_t PipelineRevision = 0;
+		uint64_t RenderGeneration = 0;
 		std::optional<NamedPipeline> EngineDefault;
 		std::vector<NamedPipeline> NamedPipelines;
 		core::Name ActiveGraph;
+		VisibilityObservations VisibilityWorking;
+		VisibilitySnapshot VisibilityCompleted;
 
 		const NamedPipeline *PipelineFor(core::Name name) const {
 			if (!name.IsValid()) {
@@ -99,13 +149,20 @@ namespace engine::render {
 			Normal,
 			Material,
 			Emissive,
+			ObjectIds,
+			SemanticIds,
+			PartIds,
+			MeshUv,
+			CameraMotionVectors,
 			LinearDepth,
+			FirstSurfaceValidity,
+			SecondSurfaceZ,
+			SecondSurfaceDepth,
+			SecondSurfaceValidity,
 			Occlusion,
 			Lit,
 			SkyLit,
 			VolumeLit,
-			LensA,
-			LensB,
 		};
 
 		ResourceRole RoleFor(core::Name resource) const {
@@ -129,6 +186,12 @@ namespace engine::render {
 					if (node->Kind == core::Name("last-frame")) {
 						return ResourceRole::PreviousFrame;
 					}
+					if (node->Kind == core::Name("surface-capture")) {
+						constexpr std::array roles{
+							ResourceRole::Surface, ResourceRole::PortalImage, ResourceRole::PortalLight
+						};
+						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
+					}
 					if (node->Kind == core::Name("mirror-capture")) {
 						return ResourceRole::Surface;
 					}
@@ -146,6 +209,10 @@ namespace engine::render {
 							ResourceRole::Normal,
 							ResourceRole::Material,
 							ResourceRole::Emissive,
+							ResourceRole::MeshUv,
+							ResourceRole::ObjectIds,
+							ResourceRole::SemanticIds,
+							ResourceRole::PartIds,
 							ResourceRole::Depth,
 						};
 						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
@@ -153,23 +220,42 @@ namespace engine::render {
 					if (node->Kind == core::Name("forward")) {
 						return output == 1 ? ResourceRole::Depth : ResourceRole::Unknown;
 					}
+					if (node->Kind == core::Name("camera-motion")) {
+						return ResourceRole::CameraMotionVectors;
+					}
 					if (node->Kind == core::Name("depth-linearise")) {
-						return ResourceRole::LinearDepth;
+						const auto *background = node->Parameter(core::Name("background"));
+						// Exported zero-background depth must not overwrite lighting's far-background
+						// texture.
+						return background && *background == "zero" ? ResourceRole::Unknown
+																   : ResourceRole::LinearDepth;
+					}
+					if (node->Kind == core::Name("depth-validity")) {
+						return ResourceRole::FirstSurfaceValidity;
+					}
+					if (node->Kind == core::Name("depth-peel")) {
+						constexpr std::array roles{
+							ResourceRole::SecondSurfaceZ,
+							ResourceRole::SecondSurfaceDepth,
+							ResourceRole::SecondSurfaceValidity,
+						};
+						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
 					}
 					if (node->Kind == core::Name("ssao")) {
 						return ResourceRole::Occlusion;
 					}
 					if (node->Kind == core::Name("deferred-lighting")) {
-						return ResourceRole::Lit;
+						return output < node->WritePorts.size() &&
+									   (node->WritePorts[output] == core::Name("lighting-baseline") ||
+										node->WritePorts[output] == core::Name("directional-response"))
+								   ? ResourceRole::Unknown
+								   : ResourceRole::Lit;
 					}
 					if (node->Kind == core::Name("sky")) {
 						return ResourceRole::SkyLit;
 					}
-					if (node->Kind == core::Name("volumetrics")) {
+					if (node->Kind == core::Name("fog")) {
 						return ResourceRole::VolumeLit;
-					}
-					if (node->Kind == core::Name("shader-lenses")) {
-						return ResourceRole::LensB;
 					}
 				}
 			}
@@ -204,6 +290,10 @@ namespace engine::render {
 		bool BatchFirst = false;
 		bool BatchFinal = false;
 		bool BatchShared = false;
+		// All worlds share mesh buffers, so the residency node records at most
+		// one delta for one submitted frame.
+		bool MeshResidencyRecorded = false;
+		FramePreparation PreparedScopes;
 		bool BatchFailed = false;
 		size_t BatchViewIndex = 0;
 		size_t BatchWorldIndex = 0;
@@ -212,10 +302,14 @@ namespace engine::render {
 		uint32_t BatchWidth = 0;
 		uint32_t BatchHeight = 0;
 		uint32_t BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+		// A capture ticket needs a copy-pass timestamp even while normal profiler
+		// sampling is off. Calculated for the complete submitted batch so a later
+		// camera cannot miss the query begun by its first camera.
+		bool BatchCaptureTimingRequested = false;
 
-		// The traffic plan's later-transfer command buffer: every download this
-		// frame records - resource previews and captures - lands here rather
-		// than in the main buffer, and it is submitted after the main buffer.
+		// Later-transfer command buffer for previews and file captures. Owned HDR
+		// exports copy at their declared graph read in the main buffer, before
+		// resource alias reuse; those share the scene submission fence instead.
 		// SDL's one unified queue executes submissions in order, so the copies
 		// read the frame's finished images without a fence between the two.
 		// Physical overlap is not available on that queue; the split is the
@@ -266,9 +360,23 @@ namespace engine::render {
 			uint32_t Opened = VulkanTimestamps::MARKS;
 			uint32_t Closed = VulkanTimestamps::MARKS;
 		};
+		struct CaptureTimingMarks {
+			uint64_t Id = 0;
+			uint32_t Opened = VulkanTimestamps::MARKS;
+			uint32_t Closed = VulkanTimestamps::MARKS;
+		};
+		enum class CaptureTimingState : uint8_t { AwaitingRecord, Pending, Ready, Unavailable };
+		struct CaptureTiming {
+			CaptureTimingState State = CaptureTimingState::AwaitingRecord;
+			uint64_t Nanoseconds = 0;
+			std::string Reason = "unavailable/no_completed_gpu_timestamp";
+		};
 
 		VulkanTimestamps Timestamps;
 		std::array<std::vector<PassMarks>, VulkanTimestamps::SLOTS> PendingMarks;
+		std::array<std::vector<CaptureTimingMarks>, VulkanTimestamps::SLOTS> PendingCaptureTimings;
+		std::unordered_map<uint64_t, CaptureTiming> CaptureTimings;
+		uint64_t NextCaptureTimingId = 1;
 		std::array<uint64_t, VulkanTimestamps::SLOTS> TimingSequence{};
 		uint64_t NextTimingSequence = 1;
 		uint64_t ResolvedTimingSequence = 0;
@@ -307,13 +415,44 @@ namespace engine::render {
 
 		void CollectTimings();
 
-		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
-		SDL_GPUGraphicsPipeline *ForwardPipeline = nullptr;
+		// A failed command buffer has no query result to collect. Every ticket that
+		// recorded a mark in it must become explicitly unavailable instead of
+		// waiting for a slot that was abandoned.
+		void AbandonCaptureTimings(uint32_t slot) {
+			if (slot >= VulkanTimestamps::SLOTS) return;
+			for (const CaptureTimingMarks &marks : PendingCaptureTimings[slot]) {
+				auto found = CaptureTimings.find(marks.Id);
+				if (found == CaptureTimings.end()) continue;
+				found->second.State = CaptureTimingState::Unavailable;
+				found->second.Reason = "unavailable/capture_gpu_timestamp_abandoned";
+			}
+			PendingCaptureTimings[slot].clear();
+		}
 
-		// The two above, redrawn as lines. See where they are created for why
-		// there are two objects and not a bindable state.
+		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrWireframeOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrWireframeTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *ForwardPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedForwardPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedGBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedWireframeGBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedDepthPeelPipeline = nullptr;
+
+		// The forward and deferred geometry families, redrawn as lines. See where
+		// they are created for why these are objects and not bindable state.
 		SDL_GPUGraphicsPipeline *WireframeOpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *WireframeTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *WireframeGBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedWireframeOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedWireframeTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrWireframeOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrWireframeTransparentPipeline = nullptr;
 
 		// Whether `BindPipeline` should hand out the pair above instead of the
 		// ordinary two. Off unless a caller has asked - `Renderer::
@@ -330,24 +469,45 @@ namespace engine::render {
 		// blended tail stay on the forward family below because their projected
 		// images and ordering are not representable by one G-buffer pixel.
 		SDL_GPUGraphicsPipeline *GBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DepthPeelPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthLinearPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DepthValidityPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *CameraMotionPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DepthComposePipeline = nullptr;
+		bool EnsureDepthCompose();
+		SDL_GPUGraphicsPipeline *ColourComposePipeline = nullptr;
+		bool EnsureColourCompose();
+		SDL_GPUGraphicsPipeline *TransparentLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *TransparentLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedTransparentLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedTransparentLayerColourPipeline = nullptr;
+		// Effect variants share the mesh peeler's D32 choice, then replay colour
+		// with each effect's ordinary alpha or additive blend rule.
+		SDL_GPUGraphicsPipeline *ParticleLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *ParticleLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AdditiveParticleLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *RibbonLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *RibbonLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AdditiveRibbonLayerColourPipeline = nullptr;
+		bool EnsureTransparentLayer();
+		SDL_GPUGraphicsPipeline *InterfaceLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *InterfaceLayerColourPipeline = nullptr;
+		bool EnsureInterfaceLayer();
 		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
-		SDL_GPUComputePipeline *EnvironmentCompute = nullptr;
+		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
+		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
 
-		// `TonemapPipeline`'s replacement, when a world has asked for one -
-		// see `Renderer::SetPostProcessShader`. Null is the ordinary state,
-		// and the "tonemap" graph node falls back to `TonemapPipeline`
-		// whenever it is.
-		SDL_GPUGraphicsPipeline *PostProcessPipeline = nullptr;
-
-		// Which name `PostProcessPipeline` was built for, so `Renderer::
-		// PostProcessShaderName` can answer without a second field to keep
-		// in step.
-		core::Name PostProcessShaderName;
+		// Each owner selects one grade. Missing owners use the engine tonemap.
+		struct PostProcessVariant {
+			core::Name Shader;
+			assets::ContentHash CodeHash;
+			SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+		};
+		std::unordered_map<uint32_t, PostProcessVariant> PostProcessPipelines;
 
 		struct PbrDimensions {
 			uint32_t TargetWidth = 0;
@@ -360,6 +520,9 @@ namespace engine::render {
 			uint32_t OcclusionHeight = 0;
 			uint32_t LitWidth = 0;
 			uint32_t LitHeight = 0;
+			bool FirstSurfaceValidity = false;
+			bool SecondSurface = false;
+			bool CameraMotion = false;
 
 			bool operator==(const PbrDimensions &) const = default;
 		};
@@ -369,15 +532,31 @@ namespace engine::render {
 			SDL_GPUTexture *Normal = nullptr;
 			SDL_GPUTexture *Material = nullptr;
 			SDL_GPUTexture *Emissive = nullptr;
+			SDL_GPUTexture *MeshUv = nullptr;
+			SDL_GPUTexture *ObjectIds = nullptr;
+			SDL_GPUTexture *SemanticIds = nullptr;
+			SDL_GPUTexture *PartIds = nullptr;
 			SDL_GPUTexture *LinearDepth = nullptr;
+			SDL_GPUTexture *FirstSurfaceValidity = nullptr;
+			SDL_GPUTexture *CameraMotionVectors = nullptr;
+			glm::mat4 PreviousCameraMotionViewProjection{1.0f};
+			uint64_t PreviousCameraMotionFrame = 0;
+			uint64_t CameraMotionSourceFrame = 0;
+			uint64_t PreviousCameraMotionWorld = 0;
+			core::Name PreviousCameraMotionWorldName;
+			std::string PreviousCameraTemporalId;
+			uint64_t PreviousCameraTemporalSequence = 0;
+			bool CameraMotionHistory = false;
+			bool CameraMotionProduced = false;
+			SDL_GPUTexture *SecondSurfaceZ = nullptr;
+			SDL_GPUTexture *SecondSurfaceDepth = nullptr;
+			SDL_GPUTexture *SecondSurfaceValidity = nullptr;
 			SDL_GPUTexture *Occlusion = nullptr;
+			// Kept with the allocation so a graph cache hit retains the frame that
+			// actually produced this occlusion image.
+			AmbientOcclusionProvenance OcclusionProvenance;
 			SDL_GPUTexture *Lit = nullptr;
 			SDL_GPUTexture *SkyLit = nullptr;
-			// Allocated with the PBR targets because a lens group may be enabled on
-			// any frame. The bypass path still writes LensB, because the graph
-			// declares it as the node output and a later node may sample it.
-			SDL_GPUTexture *LensA = nullptr;
-			SDL_GPUTexture *LensB = nullptr;
 			PbrDimensions Dimensions;
 		};
 
@@ -393,24 +572,37 @@ namespace engine::render {
 		bool EnsurePbr(size_t slot, const PbrDimensions &dimensions);
 		void ReleasePbr(PbrSlot &slot);
 
-		// One generated environment per world, shared by every camera that draws
-		// it. The texture is regenerated only when the selected authored provider
-		// or one of its six resident source handles changes.
+		// Graph-owned history images hold each world's sky and cloud layers. This
+		// cache only records their completed content signatures, so regeneration
+		// is skipped until an authored provider or resident source handle changes.
 		struct EnvironmentTarget {
-			uint64_t World = 0;
-			uint64_t Signature = 0;
-			uint64_t LastUsedFrame = 0;
-			SDL_GPUTexture *Texture = nullptr;
+			SDL_GPUTexture *SkyTarget = nullptr;
+			SDL_GPUTexture *CloudTarget = nullptr;
+			GraphHistoryGeneration Sky;
+			GraphHistoryGeneration Cloud;
 		};
 
 		std::vector<EnvironmentTarget> Environments;
-		SDL_GPUTexture *EnsureEnvironment(
-			uint64_t world,
+		bool RecordEnvironmentSkybox(
 			const scene::Environment &environment,
 			SDL_GPUCommandBuffer *command,
+			SDL_GPUTexture *destination,
+			uint32_t width,
+			uint32_t height,
+			uint32_t &dispatches
+		);
+		bool RecordEnvironmentClouds(
+			const scene::Environment &environment,
+			SDL_GPUCommandBuffer *command,
+			SDL_GPUTexture *source,
+			SDL_GPUTexture *destination,
+			uint32_t width,
+			uint32_t height,
 			uint32_t &dispatches
 		);
 		void ReleaseEnvironments();
+		void CommitEnvironmentWrites(SDL_GPUCommandBuffer *command);
+		void DiscardEnvironmentWrites(SDL_GPUCommandBuffer *command = nullptr);
 
 		struct NamedTexture {
 			SDL_GPUTexture *Texture = nullptr;
@@ -437,9 +629,58 @@ namespace engine::render {
 			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+			uint64_t HistorySignature = 0;
+			bool HistoryReady = false;
 		};
 
 		std::vector<GraphTarget> GraphTargets;
+		// A world-scoped graph owner uses a process-local id. Keep its stable name
+		// so ForgetWorld cannot retire another world's resources on a bad match.
+		std::unordered_map<uint64_t, core::Name> GraphWorldNames;
+
+		// A history image becomes readable only after the command buffer that wrote
+		// it has entered the queue. Batched views share one command buffer, so this
+		// state belongs to the renderer rather than one view recording.
+		struct PendingGraphHistoryWrite {
+			const NamedPipeline *Pipeline = nullptr;
+			SDL_GPUCommandBuffer *Command = nullptr;
+			core::Name Resource;
+			graph::NodeScope Scope = graph::NodeScope::Frame;
+			uint64_t Owner = 0;
+			uint64_t Signature = 0;
+			bool Submitted = false;
+		};
+
+		std::vector<PendingGraphHistoryWrite> PendingGraphHistoryWrites;
+
+		// Buffer resources use the same ownership key as images. A graph can name
+		// the same buffer in several views without letting one view overwrite another.
+		struct GraphBuffer {
+			core::Name Pipeline;
+			core::Name Resource;
+			graph::NodeScope Scope = graph::NodeScope::Frame;
+			uint64_t Owner = 0;
+			SDL_GPUBuffer *Buffer = nullptr;
+			uint32_t Bytes = 0;
+			SDL_GPUBufferUsageFlags Usage = 0;
+		};
+
+		// Authored buffers are transient scratch. These caps bound a document before
+		// one unchecked width, height and stride turn into an unbounded allocation.
+		static constexpr uint64_t MAX_GRAPH_BUFFER_BYTES = 64u * 1024u * 1024u;
+		static constexpr uint64_t MAX_GRAPH_BUFFER_TOTAL_BYTES = 256u * 1024u * 1024u;
+		std::vector<GraphBuffer> GraphBuffers;
+
+		struct TessellationState {
+			SDL_GPUBuffer *Plans = nullptr;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			SDL_GPUComputePipeline *Compute = nullptr;
+			uint32_t Capacity = 0;
+			uint32_t Count = 0;
+			bool Fallback = false;
+			std::vector<GpuTessellationPlan> Entries;
+		};
+		TessellationState Tessellation;
 
 		struct ResourcePreviewTarget {
 			ResourcePreviewRoute Route;
@@ -457,8 +698,50 @@ namespace engine::render {
 		NamedTexture FindGraphTarget(
 			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 		) const;
+		NamedTexture FindGraphHistoryForRead(
+			const NamedPipeline &pipeline,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner,
+			uint64_t signature
+		) const;
+		NamedTexture FindCurrentGraphHistoryWrite(
+			const NamedPipeline &pipeline,
+			SDL_GPUCommandBuffer *readCommand,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner
+		) const;
+		void CommitGraphHistoryWrite(
+			const NamedPipeline &pipeline,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner,
+			uint64_t signature
+		);
+		void StageGraphHistoryWrite(
+			const NamedPipeline &pipeline,
+			SDL_GPUCommandBuffer *command,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner,
+			uint64_t signature
+		);
+		void CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command);
+		void DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command = nullptr);
+		void ClearSubmittedGraphHistoryWrites();
 		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
+			const NamedPipeline &pipeline,
+			graph::ResourceId resource,
+			uint64_t owner,
+			uint32_t viewWidth,
+			uint32_t viewHeight
+		);
+		SDL_GPUBuffer *FindGraphBuffer(
+			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+		) const;
+		SDL_GPUBuffer *EnsureGraphBuffer(
 			const NamedPipeline &pipeline,
 			graph::ResourceId resource,
 			uint64_t owner,
@@ -469,7 +752,7 @@ namespace engine::render {
 		struct GraphRasterPipeline {
 			core::Name Pipeline;
 			core::Name Node;
-			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			std::vector<SDL_GPUTextureFormat> Formats;
 			uint32_t Samplers = 0;
 			SDL_GPUGraphicsPipeline *Handle = nullptr;
 		};
@@ -479,6 +762,8 @@ namespace engine::render {
 			core::Name Node;
 			uint32_t Samplers = 0;
 			uint32_t Storage = 0;
+			uint32_t ReadStorage = 0;
+			uint32_t Uniforms = 0;
 			uint32_t LocalX = 1;
 			uint32_t LocalY = 1;
 			uint32_t LocalZ = 1;
@@ -501,7 +786,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *GraphRasterFor(
 			const NamedPipeline &pipeline,
 			const graph::Node &node,
-			SDL_GPUTextureFormat format,
+			std::span<const SDL_GPUTextureFormat> formats,
 			uint32_t samplers
 		);
 		SDL_GPUComputePipeline *GraphComputeFor(
@@ -509,6 +794,8 @@ namespace engine::render {
 			const graph::Node &node,
 			uint32_t samplers,
 			uint32_t storage,
+			uint32_t readStorage,
+			uint32_t uniforms,
 			uint32_t localX,
 			uint32_t localY,
 			uint32_t localZ
@@ -538,10 +825,8 @@ namespace engine::render {
 		// everything else identical. The vertex layout, the depth state and the
 		// blend state are the renderer's and stay the renderer's.
 		//
-		// **Two pipelines and not one**, because blend state is baked into a
-		// pipeline: a toon-shaded pane and a toon-shaded wall are two objects on
-		// every modern API, exactly as `OpaquePipeline` and `TransparentPipeline`
-		// already are.
+		// Blend state and attachment format are baked into each pipeline, so
+		// opaque and transparent draws each have display and HDR variants.
 		//
 		// **The shadow pass has no variant and must not grow one.** It writes
 		// depth and no colour, so a fragment shader that computed a colour would
@@ -552,17 +837,50 @@ namespace engine::render {
 		// pass wants, and this table becomes the backend that answers - so do
 		// not grow a second way to describe a frame here in the meantime.
 		struct ShaderVariant {
+			assets::ContentHash CodeHash;
 			SDL_GPUShader *Fragment = nullptr;
 			SDL_GPUGraphicsPipeline *Opaque = nullptr;
 			SDL_GPUGraphicsPipeline *Transparent = nullptr;
+			SDL_GPUGraphicsPipeline *HdrOpaque = nullptr;
+			SDL_GPUGraphicsPipeline *HdrTransparent = nullptr;
+			SDL_GPUGraphicsPipeline *PackedOpaque = nullptr;
+			SDL_GPUGraphicsPipeline *PackedTransparent = nullptr;
+			SDL_GPUGraphicsPipeline *PackedHdrOpaque = nullptr;
+			SDL_GPUGraphicsPipeline *PackedHdrTransparent = nullptr;
 		};
 
-		// Keyed by `core::Name::Id`, matching `MeshTable::Entries`.
-		std::unordered_map<uint32_t, ShaderVariant> ShaderVariants;
+		// A material name resolves within its residency owner.
+		static uint64_t ShaderVariantKey(core::Name name, core::Name owner) {
+			return (uint64_t(owner.Id()) << 32) | name.Id();
+		}
+		std::unordered_map<uint64_t, ShaderVariant> ShaderVariants;
 
 		// Lens pipelines are separate from material variants because their fixed
 		// fragment interface samples scene images rather than material textures.
-		std::unordered_map<uint32_t, SDL_GPUGraphicsPipeline *> LensPipelines;
+		struct LensVariant {
+			assets::ContentHash CodeHash;
+			SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+		};
+		std::unordered_map<uint64_t, LensVariant> LensPipelines;
+		struct PortalLensProgramBinding {
+			core::Name Shader;
+			assets::ContentHash Hash;
+			SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+			bool operator==(const PortalLensProgramBinding &other) const {
+				return Shader == other.Shader && Hash == other.Hash;
+			}
+		};
+		struct PortalLensProgramGroup {
+			uint64_t Token = 0;
+			size_t References = 0;
+			std::vector<PortalLensProgramBinding> Bindings;
+		};
+		// Captured programs have independent residency from authored world namespaces.
+		std::array<PortalLensProgramGroup, 256> PortalLensPrograms;
+		SDL_GPUGraphicsPipeline *CreateLensPipeline(core::Name name, std::span<const uint32_t> spirv);
+
+		// Failed material, lens and grade attempts are bounded by current owner demand.
+		std::array<std::unordered_map<uint64_t, assets::ContentHash>, 3> ShaderRefusals;
 
 		// The opaque vertex shader, kept rather than released.
 		//
@@ -573,6 +891,7 @@ namespace engine::render {
 		// from the file would be two objects for one shader, free to disagree
 		// the day `opaque.vert` changes shape.
 		SDL_GPUShader *OpaqueVertexShader = nullptr;
+		SDL_GPUShader *PackedOpaqueVertexShader = nullptr;
 
 		// The two descriptors a variant is derived from, kept whole.
 		//
@@ -597,8 +916,12 @@ namespace engine::render {
 			// Anything with no variants: the shadow, overlay, particle and
 			// ribbon passes. A slot's shader is ignored while one is bound.
 			Other,
+			GBuffer,
+			DepthPeel,
 			Opaque,
 			Transparent,
+			HdrOpaque,
+			HdrTransparent,
 		};
 
 		PipelineFamily ActiveFamily = PipelineFamily::Other;
@@ -634,6 +957,7 @@ namespace engine::render {
 		// Kept on the state rather than made per frame, so a steady scene stops
 		// allocating after its first one - the rule every buffer here follows.
 		std::vector<scene::DrawInstance> Drawable;
+		std::vector<uint32_t> DrawableHidden;
 
 		// The same, for the rows belonging to *other* worlds - see `Render`'s
 		// `foreign` argument. A separate buffer rather than a tail on `Drawable`
@@ -657,6 +981,14 @@ namespace engine::render {
 		// Every mesh and texture available to the renderer.
 		MeshTable Meshes;
 		TextureTable Textures;
+		bool RetainSourceTextures = false;
+		// Named resources can change without changing any submitted draw row.
+		// Active view scope for native environment, particle and ribbon texture bindings.
+		core::Name ActiveContentOwner;
+		static core::Name MeshContentOwner(core::Name name, core::Name owner);
+		static core::Name TextureContentOwner(core::Name name, core::Name owner);
+
+		uint64_t ResourceEpoch = 0;
 
 		// How long animation has been running, as the caller measures it.
 		//
@@ -755,6 +1087,7 @@ namespace engine::render {
 		// often than it reads them.
 		std::vector<const MeshEntry *> SlotMesh;
 		std::vector<core::Name> SlotTexture;
+		std::vector<core::Name> SlotContentOwner;
 		std::vector<core::Name> SlotNormalMap;
 		std::vector<core::Name> SlotRoughnessMap;
 		std::vector<core::Name> SlotOcclusionMap;
@@ -776,6 +1109,10 @@ namespace engine::render {
 		// Each slot's tag mask, for the surface passes that filter by one.
 		std::vector<uint32_t> SlotTags;
 
+		// A nonzero rig belongs to a character. Seam-light probes omit these rows so
+		// a nearby player cannot become an accidental occluder for portal transport.
+		std::vector<uint64_t> SlotRig;
+
 		// The half-space each slot keeps, as a world plane: xyz the unit normal,
 		// w the offset, and a zero normal for "whole".
 		//
@@ -793,6 +1130,7 @@ namespace engine::render {
 		std::vector<glm::vec4> SlotSeamLight;
 		std::vector<InstanceKey> SlotInstanceKey;
 		std::vector<uint8_t> SlotInstanceCurrent;
+		std::vector<uint32_t> SlotLod;
 
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
@@ -824,6 +1162,44 @@ namespace engine::render {
 			core::Name Name;
 		};
 		std::vector<PendingInstanceUpload> PendingInstanceUploads;
+
+		// --- authored mesh LOD -----------------------------------------------
+		//
+		// One compact set per view. Host code packs each level against its own
+		// mesh bounds. The compute node chooses the level by projected pixel area
+		// and enables only that level's indexed indirect commands.
+		struct LodState {
+			SDL_GPUComputePipeline *Select = nullptr;
+			SDL_GPUBuffer *Selections = nullptr;
+			SDL_GPUBuffer *Clusters = nullptr;
+			SDL_GPUBuffer *Instances = nullptr;
+			SDL_GPUBuffer *Indices = nullptr;
+			SDL_GPUBuffer *SkinOffsets = nullptr;
+			SDL_GPUBuffer *Arguments = nullptr;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			uint32_t SelectionCapacity = 0;
+			uint32_t ClusterCapacity = 0;
+			uint32_t InstanceCapacity = 0;
+			uint32_t ArgumentCapacity = 0;
+			uint32_t TransferCapacity = 0;
+			// CPU mirror of the selected pages for FrameResult's triangle estimate.
+			std::vector<uint8_t> SelectedLevels;
+			bool Ready = false;
+		};
+		LodState Lod;
+		LodPlan LodFrame;
+
+		bool EnsureLodResources(uint32_t selections, uint32_t instances, uint32_t arguments);
+		bool DispatchLodSelection(
+			SDL_GPUCommandBuffer *command,
+			const glm::mat4 &viewProjection,
+			core::Vector3 eye,
+			std::array<float, 3> minimumDistances,
+			bool cullOffscreen,
+			uint32_t width,
+			uint32_t height
+		);
+		void ReleaseLod();
 
 		// --- occlusion culling ------------------------------------------------
 		//
@@ -885,9 +1261,36 @@ namespace engine::render {
 			std::vector<uint32_t> RunEarly;
 			std::vector<uint32_t> RunCandidates;
 			std::vector<uint32_t> RunFirstSlot;
+			std::vector<scene::DrawInstance> EarlyInstances;
+			std::vector<scene::DrawInstance> LateInstances;
 			// Two vec4 per candidate, already in the layout the cull reads -
 			// see occlusion-cull.comp.
 			std::vector<glm::vec4> CandidatePairs;
+
+			// Scratch stays with the plan because one recording builds many slot
+			// runs. Clearing it between runs keeps its largest observed run ready
+			// for the next view without publishing it to a pass.
+			std::vector<uint32_t> EarlyRows;
+			std::vector<uint32_t> LateRows;
+
+			// A view consumes the payload until submission, then the next view may
+			// reuse its storage. Assignment from an empty plan discarded all of
+			// these capacities before every view and made the plan regrow them.
+			void Reset() {
+				Active = false;
+				RunCount = 0;
+				ArgCount = 0;
+				CandidateCount = 0;
+				EarlyTotal = 0;
+				RunEarly.clear();
+				RunCandidates.clear();
+				RunFirstSlot.clear();
+				EarlyInstances.clear();
+				LateInstances.clear();
+				CandidatePairs.clear();
+				EarlyRows.clear();
+				LateRows.clear();
+			}
 		};
 		OcclusionPlan OcclusionFrame;
 
@@ -896,7 +1299,9 @@ namespace engine::render {
 		// `DrawSlots` walks with and the occlusion plan must walk with, or the
 		// plan's argument order names the wrong runs.
 		bool SlotsShareRun(uint32_t slot, uint32_t next) const {
-			return SlotMesh[next] == SlotMesh[slot] && SlotTexture[next] == SlotTexture[slot] &&
+			return SlotLod[next] == SlotLod[slot] && SlotMesh[next] == SlotMesh[slot] &&
+				   SlotTexture[next] == SlotTexture[slot] &&
+				   SlotContentOwner[next] == SlotContentOwner[slot] &&
 				   SlotNormalMap[next] == SlotNormalMap[slot] &&
 				   SlotRoughnessMap[next] == SlotRoughnessMap[slot] &&
 				   SlotOcclusionMap[next] == SlotOcclusionMap[slot] &&
@@ -936,7 +1341,9 @@ namespace engine::render {
 		// additive emitter's particles need no back-to-front sort at all; at half a
 		// million particles that is the difference between sorting and not.
 		SDL_GPUGraphicsPipeline *ParticlePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrParticlePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AdditiveParticlePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrAdditiveParticlePipeline = nullptr;
 
 		// Shared programs for every world's particle pool. The state and output
 		// buffers are world-owned below; the shaders carry no world state.
@@ -1006,7 +1413,9 @@ namespace engine::render {
 		// function of where its endpoints are and that is resolved on the CPU
 		// where a test can reach it - `ribbon.vert` carries the argument.
 		SDL_GPUGraphicsPipeline *RibbonPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrRibbonPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AdditiveRibbonPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrAdditiveRibbonPipeline = nullptr;
 
 		SDL_GPUBuffer *RibbonBuffer = nullptr;
 		SDL_GPUTransferBuffer *RibbonTransfer = nullptr;
@@ -1039,7 +1448,9 @@ namespace engine::render {
 			const glm::mat4 &viewProjection,
 			const core::CFrame &eye,
 			std::span<const effects::RibbonRun> runs,
-			uint64_t &triangles
+			uint64_t &triangles,
+			WorldColourTarget target = WorldColourTarget::Display,
+			TransparentLayerPhase layer = TransparentLayerPhase::None
 		);
 
 		// This frame's groups, and the batch order they were built from.
@@ -1120,9 +1531,11 @@ namespace engine::render {
 			// record itself**, because comparing the record means reading both
 			// copies of ninety-six bytes for every emitter every frame - which at
 			// a hundred thousand of them is most of the traffic the counter exists
-			// to avoid. Zero means "never told", which is what a block index
-			// nobody has claimed yet reads as.
+			// to avoid. `EmitterBlock` revisions begin at zero, so the sentinel
+			// must be outside that initial value or a new block would never reach
+			// its device table.
 			//@{
+			static constexpr uint32_t UNUPLOADED_REVISION = std::numeric_limits<uint32_t>::max();
 			std::vector<uint32_t> ParamRevision;
 			std::vector<uint32_t> CurveRevision;
 			//@}
@@ -1276,7 +1689,9 @@ namespace engine::render {
 			const core::CFrame &eye,
 			uint64_t &triangles,
 			uint32_t &particlesDrawn,
-			uint32_t &culled
+			uint32_t &culled,
+			WorldColourTarget target = WorldColourTarget::Display,
+			TransparentLayerPhase layer = TransparentLayerPhase::None
 		);
 
 		// Chosen once so pipelines and depth textures use one supported format.
@@ -1299,6 +1714,7 @@ namespace engine::render {
 		// cost `RetiredScenes` exists to avoid paying even once.
 		struct SceneSlot {
 			static constexpr size_t RETAINED_FRAMES = 3;
+			uint64_t ContentSignature = 0;
 			static constexpr uint32_t NO_RETAINED_FRAME = UINT32_MAX;
 
 			// Stable mesh and resident identities beside a retained viewport.
@@ -1393,10 +1809,107 @@ namespace engine::render {
 			uint32_t Frame = 0;
 			uint64_t Sequence = 0;
 		};
+		// One data-factory capture keeps its logical planes together. Shared
+		// capture nodes reduce thirteen resource-backed logical planes to at most
+		// ten deduplicated per-batch readback nodes. This is separate from the
+		// twelve-slot global resident-image capacity below.
+		static constexpr size_t RESOURCE_IMAGE_CAPACITY = 12;
+		static_assert(
+			MAX_DATA_FACTORY_READBACK_NODES <= RESOURCE_IMAGE_CAPACITY,
+			"data-factory readbacks must fit the renderer resource-image capacity"
+		);
 		struct PendingSceneSubmission {
 			SDL_GPUFence *Fence = nullptr;
 			std::vector<StagedSceneFrame> Frames;
+			std::array<uint32_t, RESOURCE_IMAGE_CAPACITY> Images{};
+			uint32_t ImageCount = 0;
 		};
+
+		enum class ResourceImagePhase : uint8_t { Free, Queued, Recorded, Submitted, Ready };
+		struct ResourceImageSlot {
+			ResourceImagePhase Phase = ResourceImagePhase::Free;
+			ResourceImage Image;
+			SDL_GPUTexture *Resident = nullptr;
+			SDL_GPUTexture *ResidentDepth = nullptr;
+			SDL_GPUTexture *ResidentNormal = nullptr;
+			SDL_GPUTexture *ResidentAmbientResponse = nullptr;
+			SDL_GPUTexture *ResidentLightingBaseline = nullptr;
+			SDL_GPUTexture *ResidentDirectionalResponse = nullptr;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			uint32_t TransferBytes = 0;
+			uint32_t TransferStride = 0;
+			uint32_t DepthStride = 0;
+			uint32_t DepthOffset = 0;
+			uint32_t NormalStride = 0, NormalOffset = 0;
+			uint32_t AmbientResponseStride = 0, AmbientResponseOffset = 0;
+			uint32_t LightingBaselineStride = 0, LightingBaselineOffset = 0;
+			uint32_t DirectionalResponseStride = 0, DirectionalResponseOffset = 0;
+			bool Cancelled = false;
+		};
+		// Bounded copied-image requests. The default data-factory capture has
+		// thirteen logical planes, with shared resources deduplicated to ten
+		// per-batch nodes. The global resident-image capacity remains twelve.
+		std::array<ResourceImageSlot, RESOURCE_IMAGE_CAPACITY> ResourceImages;
+		struct ResidentImagePair {
+			SDL_GPUTexture *Colour = nullptr;
+			SDL_GPUTexture *Depth = nullptr;
+			SDL_GPUTexture *Normal = nullptr;
+			SDL_GPUTexture *AmbientResponse = nullptr;
+			SDL_GPUTexture *LightingBaseline = nullptr;
+			SDL_GPUTexture *DirectionalResponse = nullptr;
+			uint32_t Width = 0, Height = 0;
+		};
+		std::array<ResidentImagePair, 4> ResidentImageCache{};
+		size_t NextResidentCache = 0;
+		bool ReuseResidentImage(
+			ResourceImageSlot &slot,
+			uint32_t width,
+			uint32_t height,
+			bool depth,
+			bool normal,
+			bool ambient = false,
+			bool directional = false
+		);
+		void ReleaseResidentImageCache();
+		uint64_t NextResourceImageToken = 1;
+		DataCaptureSource ActiveDataCaptureSource;
+		// A frame-scope capture may read any physical view target after the batch
+		// has recorded it. Keep its observation facts beside that target rather
+		// than attributing every readback to the batch's final view.
+		std::vector<DataCaptureSource> DataCaptureSources;
+		bool HasShadowCaptureRequest(core::Name pipeline, size_t viewSlot) const;
+		bool EnsureResourceImageTransfer(ResourceImageSlot &slot, uint32_t bytes);
+		void RecordShadowResourceImages(
+			SDL_GPUCommandBuffer *command,
+			core::Name pipeline,
+			core::Name node,
+			size_t viewSlot,
+			core::Name resource,
+			const NamedTexture &source,
+			const ResourceShadowCapture &metadata
+		);
+		void RecordResourceImages(
+			SDL_GPUCommandBuffer *command,
+			const RenderObservationContext &observation,
+			const DataCaptureSource &captureSource,
+			core::Name pipeline,
+			core::Name node,
+			size_t slot,
+			core::Name resource,
+			const NamedTexture &source,
+			core::Name depthResource,
+			const NamedTexture &depth,
+			core::Name normalResource,
+			const NamedTexture &normal,
+			core::Name ambientResponseResource,
+			const NamedTexture &ambientResponse,
+			core::Name lightingBaselineResource,
+			const NamedTexture &lightingBaseline,
+			core::Name directionalResponseResource,
+			const NamedTexture &directionalResponse
+		);
+		void CollectResourceImage(uint32_t slot);
+		void ReleaseResidentImage(ResourceImageSlot &slot);
 		std::vector<StagedSceneFrame> StagedSceneFrames;
 		std::vector<PendingSceneSubmission> PendingSceneSubmissions;
 		uint64_t NextSceneSequence = 1;
@@ -1458,8 +1971,16 @@ namespace engine::render {
 					if (world.StateInitialisationPending) {
 						world.Pool.Slots = 0;
 					}
-					std::fill(world.Pool.ParamRevision.begin(), world.Pool.ParamRevision.end(), 0);
-					std::fill(world.Pool.CurveRevision.begin(), world.Pool.CurveRevision.end(), 0);
+					std::fill(
+						world.Pool.ParamRevision.begin(),
+						world.Pool.ParamRevision.end(),
+						ParticlePool::UNUPLOADED_REVISION
+					);
+					std::fill(
+						world.Pool.CurveRevision.begin(),
+						world.Pool.CurveRevision.end(),
+						ParticlePool::UNUPLOADED_REVISION
+					);
 				}
 				world.PendingDelta = 0.0f;
 				world.SubmissionPending = false;
@@ -1701,14 +2222,16 @@ namespace engine::render {
 		// buffer** the colour pass binds, which is what makes a shadow map one
 		// more draw over data that is already on the device.
 		SDL_GPUGraphicsPipeline *ShadowPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedMeshShadowPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedShadowPipeline = nullptr;
 		SDL_GPUTexture *ShadowTexture = nullptr;
 		SDL_GPUSampler *ShadowSampler = nullptr;
 
-		// The beams: up to four holes' worth of shadow, in one 2x2 atlas.
+		// The beams: up to six holes' worth of shadow, in one 2x3 atlas.
 		//
-		// **One texture rather than four, because a fragment binds samplers and
-		// not maps.** Every fragment tests every live beam, so four textures
-		// would be four more samplers on every draw in the frame to serve a
+		// **One texture rather than six, because a fragment binds samplers and
+		// not maps.** Every fragment tests every live beam, so six textures
+		// would be six more samplers on every draw in the frame to serve a
 		// handful of pixels near a doorway. The atlas costs one sub-rectangle per
 		// beam in the uniform and one viewport per beam in the pass.
 		SDL_GPUTexture *BeamTexture = nullptr;
@@ -1729,6 +2252,7 @@ namespace engine::render {
 		struct SurfaceSlotState {
 			SDL_GPUTexture *Texture[2] = {nullptr, nullptr};
 			SDL_GPUTexture *Depth = nullptr;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
 
@@ -1800,16 +2324,89 @@ namespace engine::render {
 			uint64_t Signature = 0;
 		};
 
-		// Every surface a viewport owns.
-		//
-		// **Indexed by surface number, and never released short of shutdown.**
-		// A slot is allocated the first time an index is rendered and then kept,
-		// which is deliberate rather than lax: the studio round-robins its
-		// viewports, so one frame draws a world full of mirrors and the next
-		// draws one with none. Releasing on absence would destroy and recreate
-		// every surface texture on alternate frames, which is the same
-		// reallocation `SCENE_TARGET_BLOCK` exists to avoid one layer up. The
-		// high-water mark is bounded by `scene::MAX_SURFACES`.
+		// Owned foreign radiance, queued on the CPU and accepted after graph submission.
+		struct ImportedPortalImage {
+			uint64_t Handle = 0;
+			uint64_t LayerSet = 0;
+			uint8_t LayerSetCount = 0;
+			PortalImageBinding Binding;
+			assets::ContentHash PixelHash;
+			assets::ContentHash DepthHash;
+			assets::ContentHash NormalHash;
+			assets::ContentHash AmbientResponseHash;
+			assets::ContentHash LightingBaselineHash;
+			assets::ContentHash DirectionalResponseHash;
+			std::optional<uint64_t> CaptureTick;
+			uint64_t ContentRevision = 0;
+			uint64_t LightingRevision = 0;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			SDL_GPUTexture *Texture = nullptr;
+			SDL_GPUTexture *DepthTexture = nullptr;
+			SDL_GPUTexture *NormalTexture = nullptr;
+			SDL_GPUTexture *AmbientResponseTexture = nullptr;
+			SDL_GPUTexture *LightingBaselineTexture = nullptr;
+			SDL_GPUTexture *DirectionalResponseTexture = nullptr;
+			size_t TextureBytes = 0;
+			uint32_t TextureWidth = 0;
+			uint32_t TextureHeight = 0;
+			std::vector<std::byte> Pending;
+			std::vector<std::byte> PendingDepth;
+			std::vector<std::byte> PendingNormal;
+			std::vector<std::byte> PendingAmbientResponse;
+			std::vector<std::byte> PendingLightingBaseline;
+			std::vector<std::byte> PendingDirectionalResponse;
+			SDL_GPUCommandBuffer *Recorded = nullptr;
+			bool Ready = false;
+		};
+		std::array<ImportedPortalImage, MAX_IMPORTED_PORTAL_IMAGES> ImportedPortals;
+		struct ImportedPortalShadow {
+			uint64_t Handle = 0;
+			PortalShadowImageBinding Binding;
+			std::vector<std::byte> Pending;
+			SDL_GPUTexture *Texture = nullptr;
+			std::vector<uint32_t> PackedPending;
+			SDL_GPUBuffer *Packed = nullptr;
+			SDL_GPUTransferBuffer *Staging = nullptr;
+			bool DedicatedStaging = false;
+			size_t GpuBytes = 0;
+			SDL_GPUCommandBuffer *Recorded = nullptr;
+			bool Ready = false;
+		};
+		std::array<ImportedPortalShadow, MAX_PORTAL_CAPTURE_TREE_NODES * 2> ImportedPortalShadows;
+		ImportedPortalShadow *FindPortalShadow(uint64_t handle);
+		const ImportedPortalShadow *FindPortalShadow(uint64_t handle) const;
+		bool ValidPortalShadowView(const View &view, const glm::mat4 &lightProjection) const;
+		bool RecordPortalShadowImport(SDL_GPUCommandBuffer *command, ImportedPortalShadow &image);
+		void FinishPortalShadowImports(SDL_GPUCommandBuffer *command, bool submitted);
+		void ReleasePortalShadow(ImportedPortalShadow &image);
+		std::array<ImportedPortalCaptureTree, MAX_IMPORTED_PORTAL_CAPTURE_TREES> ImportedPortalTrees;
+		PortalTreeCompositionJob PortalTreeJob;
+		std::array<PortalPreparedTree, 2> PortalPreparedTrees;
+		uint64_t NextPortalPreparation = 1;
+		PortalPreparedTree *FindPortalPreparedTree(uint64_t token);
+		void ReapPortalPreparedTrees(Renderer &renderer);
+		void CancelPortalPreparedTrees(Renderer &renderer, uint64_t tree);
+		PortalTreeCompositionStatus UploadPortalPreparedShadow(PortalPreparedTree &prepared);
+		void ReleasePortalPreparedShadowAssembly(PortalPreparedTree &prepared);
+
+		void ReleasePortalTreeShadowAssembly();
+		uint64_t NextPortalTreeJob = 1;
+
+		SDL_GPUTransferBuffer *PortalImportStaging = nullptr;
+		// This buffer shares the aggregate staging budget with per-shadow buffers,
+		// but its capacity is independent of their combined charge.
+		size_t PortalImportStagingBytes = 0;
+		PortalImageImportUsage PortalImportUsage;
+		void ReportPortalImportUsage();
+		void CacheResidentImage(ImportedPortalImage &image);
+		void ReleasePortalImport(ImportedPortalImage &image, bool keepResidentCache = false);
+		void RecordPortalImports(SDL_GPUCommandBuffer *command, const View &view, size_t viewSlot);
+		void FinishPortalImports(SDL_GPUCommandBuffer *command, bool submitted);
+		ImportedPortalImage *FindPortalImport(
+			const View &view, size_t viewSlot, const PortalView &portal, SDL_GPUCommandBuffer *command
+		);
+
 		// One level of one portal's recursion: the picture seen through that hole
 		// from the camera the level above stands at.
 		//
@@ -1877,6 +2474,7 @@ namespace engine::render {
 		struct MirrorTarget {
 			SDL_GPUTexture *Colour = nullptr;
 			SDL_GPUTexture *Depth = nullptr;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
 
@@ -1904,20 +2502,22 @@ namespace engine::render {
 			MirrorTarget Targets[scene::MAX_SURFACES];
 		};
 
-		// One portal mouth's light-field capture: the room its seam opens onto,
-		// rendered against a lit void from a stand-in eye at the mouth.
+		// One portal mouth-side's light-field capture, rendered against a lit void
+		// from a stand-in eye in that receiving half-space.
 		//
 		// **The seam's geometry travels with the texture**, because the capture
 		// and the projection are two passes reading one record - a projector fed
 		// a rectangle the capture was not taken at throws another room's light
 		// onto this one's floor, at an angle nothing authored.
 		//
-		// `Ready` is cleared at the top of every portal pass rather than
-		// trusted, for `MirrorTarget::Ready`'s reason: a mouth that was disabled
-		// or walked away from must not go on projecting last frame's rooms.
+		// `Ready` is retired after each portal pass when its spill no longer
+		// reaches the camera or its mouth disappears. Live fields keep their
+		// slots through small camera moves, so the fixed capture budget cannot
+		// blink a whole light pool on a ranking tie.
 		struct SeamLightTarget {
 			SDL_GPUTexture *Colour = nullptr;
 			SDL_GPUTexture *Depth = nullptr;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
 			bool Ready = false;
@@ -1930,7 +2530,23 @@ namespace engine::render {
 			glm::vec4 Second{};
 		};
 
+		// Every surface a viewport owns.
+		//
+		// **Indexed by surface number, and never released short of shutdown.**
+		// A slot is allocated the first time an index is rendered and then kept,
+		// which is deliberate rather than lax: the studio round-robins its
+		// viewports, so one frame draws a world full of mirrors and the next
+		// draws one with none. Releasing on absence would destroy and recreate
+		// every surface texture on alternate frames, which is the same
+		// reallocation `SCENE_TARGET_BLOCK` exists to avoid one layer up. The
+		// high-water mark is bounded by `scene::MAX_SURFACES`.
 		struct SurfaceBank {
+			SurfaceCapturePlan CapturePlan;
+			SurfaceCaptureCache CaptureCache;
+			std::vector<effects::RibbonVertex> CaptureRibbonSource;
+			std::vector<effects::RibbonVertex> CaptureRibbons;
+			std::vector<effects::RibbonRun> CaptureRibbonRuns;
+			std::vector<CaptureBlendSlot> CaptureBlendOrder;
 			SurfaceSlotState Surfaces[scene::MAX_SURFACES];
 
 			// **Grown to the depth actually reached**, so a world with no holes
@@ -1941,11 +2557,11 @@ namespace engine::render {
 			// passes size their targets differently - see `MirrorTarget`.
 			std::vector<MirrorLevel> Mirrors;
 
-			// The seam light-field captures, one per mouth slot. Fixed at
-			// `SEAM_LIGHT_RESOLUTION` rather than pooled by level: a mouth
-			// captures its far room once per frame however deep the picture
-			// recursion goes.
-			SeamLightTarget SeamLights[scene::MAX_SURFACES];
+			// The seam light-field captures, one for each side of each mouth slot.
+			// Fixed at `SEAM_LIGHT_RESOLUTION` rather than pooled by level: each
+			// receiving half-space captures its far room once per frame however
+			// deep the picture recursion goes.
+			SeamLightTarget SeamLights[MAX_SEAM_LIGHT_TARGETS];
 
 			// What the last frame drawn into this bank reached, which is what an
 			// automatic depth reads.
@@ -1992,6 +2608,16 @@ namespace engine::render {
 		SDL_GPUSampler *SurfaceSampler = nullptr;
 
 		bool EnsureShadow();
+		bool EnsureAmbientComposition();
+		bool EnsureDirectionalCorrection();
+		bool EnsureDeferredLightingBaseline();
+		bool EnsureDeferredLightingDirectional();
+		SDL_GPUGraphicsPipeline *AmbientResponsePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DeferredLightingBaselinePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DeferredLightingDirectionalPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AmbientMergePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AmbientCorrectPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DirectionalCorrectPipeline = nullptr;
 
 		// The beam atlas, made on the frame a hole first transports a shadow.
 		//
@@ -2013,7 +2639,9 @@ namespace engine::render {
 		// of a pane wrapping to the far side of the picture.
 		bool EnsureSurfaceSampler();
 
-		bool EnsureSurface(size_t viewport, size_t index, uint32_t width, uint32_t height);
+		bool EnsureSurface(
+			size_t viewport, size_t index, uint32_t width, uint32_t height, SDL_GPUTextureFormat format
+		);
 
 		// One portal level's colour and depth, at the size of the attachment the
 		// level above draws into.
@@ -2041,14 +2669,22 @@ namespace engine::render {
 		//
 		// @return `null` when either texture could not be made, which drops that
 		//         level to a flat pane for the frame rather than the frame.
-		MirrorTarget *
-		EnsureMirror(size_t viewport, uint32_t level, size_t index, uint32_t width, uint32_t height);
+		MirrorTarget *EnsureMirror(
+			size_t viewport,
+			uint32_t level,
+			size_t index,
+			uint32_t width,
+			uint32_t height,
+			SDL_GPUTextureFormat format
+		);
 
-		// One mouth's light-field capture pair, at `SEAM_LIGHT_RESOLUTION`.
+		// One mouth-side's light-field capture pair, at `SEAM_LIGHT_RESOLUTION`.
 		//
 		// @return `null` when either texture could not be made, which loses the
 		//         mouth's spill for the frame rather than the frame.
-		SeamLightTarget *EnsureSeamLight(size_t viewport, size_t index);
+		SeamLightTarget *EnsureSeamLight(
+			size_t viewport, size_t index, SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_INVALID
+		);
 
 		// One opaque white texel, bound wherever a real texture is missing.
 		//
@@ -2117,7 +2753,7 @@ namespace engine::render {
 		// which reads as a sorting bug.
 		void BindPipeline(SDL_GPURenderPass *pass, SDL_GPUGraphicsPipeline *pipeline, PipelineFamily family);
 
-		// Builds the two pipelines a named fragment shader draws through.
+		// Builds the display and HDR pipelines a named fragment shader draws through.
 		//
 		// Replaces whatever was registered under the name, releasing it first.
 		//
@@ -2125,10 +2761,10 @@ namespace engine::render {
 		// @param spirv The module. Must declare the sampler and uniform slots
 		//              `opaque.frag` does - see `Renderer::AddShader`.
 		// @return `false` when the shader or either pipeline could not be built.
-		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv);
+		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner);
 
 		// Releases one variant's shader and pipelines.
-		void DropShaderVariant(const core::Name &name);
+		void DropShaderVariant(const core::Name &name, core::Name owner);
 
 		// Releases every variant. Called from `Shutdown`.
 		void ReleaseShaderVariants();
@@ -2137,7 +2773,14 @@ namespace engine::render {
 		//
 		// @return The pipeline, or null for no shader, an unknown one, or a
 		//         family with no variants.
-		SDL_GPUGraphicsPipeline *VariantFor(const core::Name &shader) const;
+		SDL_GPUGraphicsPipeline *VariantFor(const core::Name &shader, core::Name owner) const;
+		SDL_GPUGraphicsPipeline *PackedVariantFor(const core::Name &shader, core::Name owner) const;
+
+		enum class SlotSelection : uint8_t {
+			All,
+			LodOnly,
+			CharacterFree,
+		};
 
 		// Issues the draws for one contiguous run of instance-buffer slots.
 		//
@@ -2166,6 +2809,8 @@ namespace engine::render {
 		// @param surfaceSampler  Its sampler.
 		// @param triangles  Incremented by what was actually drawn.
 		// @return How many draw calls were issued.
+		enum class VisibilityPass : uint8_t { Secondary, MainCamera };
+
 		uint32_t DrawSlots(
 			SDL_GPUCommandBuffer *command,
 			SDL_GPURenderPass *pass,
@@ -2178,11 +2823,22 @@ namespace engine::render {
 			SDL_GPUSampler *surfaceSampler,
 			uint32_t tagFilter,
 			uint64_t &triangles,
-			const IndirectPhase *indirect = nullptr
+			const IndirectPhase *indirect = nullptr,
+			SlotSelection selection = SlotSelection::All,
+			VisibilityPass visibilityPass = VisibilityPass::Secondary
 		);
 
+		void RecordVisibilityDraw(uint32_t first, uint32_t count);
+		void RecordVisibilityCandidate(uint32_t first, uint32_t count);
+		void RecordVisibilityCandidates(std::span<const scene::DrawInstance> instances);
+
 		// Binds mesh vertices plus the resident rows and one ordered index stream.
-		void BindInstanceBuffers(SDL_GPURenderPass *pass, SDL_GPUBuffer *indices = nullptr);
+		void BindInstanceBuffers(
+			SDL_GPURenderPass *pass,
+			SDL_GPUBuffer *indices = nullptr,
+			SDL_GPUBuffer *instances = nullptr,
+			SDL_GPUBuffer *skinOffsets = nullptr
+		);
 
 		bool CreateGeometry();
 		bool EnsureInstanceCapacity(

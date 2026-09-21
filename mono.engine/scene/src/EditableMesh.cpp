@@ -1,3 +1,5 @@
+#include "EditablePackingProperties.hpp"
+
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/FrameGraph.hpp>
@@ -14,6 +16,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -195,41 +198,102 @@ namespace engine::scene {
 			ecs::Classes::Computed(editableMesh, VertexCountProperty());
 			ecs::Classes::Computed(editableMesh, TriangleCountProperty());
 			ecs::Classes::Computed(editableMesh, MeshContentIdProperty());
+			for (auto &property : detail::PackingProperties<EditableMesh, SetEditableMeshPacking>())
+				ecs::Classes::Computed(editableMesh, std::move(property));
 			return editableMesh;
 		}
 	}
 
 	namespace {
-		// Whether any collider in the world names `geometry` as a convex hull.
-		//
-		// The list is gathered once per refresh and only when something asks,
-		// which is what `wanted` being an optional says. A world holds a
-		// handful of distinct shapes however many parts use them - the whole
-		// point of naming them is that they are shared - so the search is over
-		// single digits.
 		bool
-		WantsHull(ecs::Store &store, std::optional<std::vector<core::Name>> &wanted, core::Name geometry) {
-			if (!wanted.has_value()) {
-				wanted.emplace();
+		BakedBefore(const EditableMeshCollision::Baked &left, const EditableMeshCollision::Baked &right) {
+			return left.Instance < right.Instance;
+		}
+
+		// The collision ledger can outlive content streaming, so terrain worlds
+		// routinely hold hundreds of rows. Keep its derived representation sorted
+		// before every lookup. Normal refreshes already publish this order, while
+		// this repair also makes a restored or tool-authored ledger safe to search.
+		void CanonicalizeBakedRows(EditableMeshCollision &ledger) {
+			if (std::is_sorted(ledger.Rows.begin(), ledger.Rows.end(), BakedBefore) &&
+				std::adjacent_find(
+					ledger.Rows.begin(), ledger.Rows.end(), [](const auto &left, const auto &right) {
+						return left.Instance == right.Instance;
+					}
+				) == ledger.Rows.end()) {
+				return;
+			}
+			std::stable_sort(ledger.Rows.begin(), ledger.Rows.end(), BakedBefore);
+			ledger.Rows.erase(
+				std::unique(
+					ledger.Rows.begin(),
+					ledger.Rows.end(),
+					[](const auto &left, const auto &right) { return left.Instance == right.Instance; }
+				),
+				ledger.Rows.end()
+			);
+		}
+
+		const EditableMeshCollision::Baked *
+		FindBaked(const EditableMeshCollision *ledger, uint64_t instance) {
+			if (ledger == nullptr) {
+				return nullptr;
+			}
+			const auto found = std::lower_bound(
+				ledger->Rows.begin(),
+				ledger->Rows.end(),
+				instance,
+				[](const EditableMeshCollision::Baked &row, uint64_t value) { return row.Instance < value; }
+			);
+			return found != ledger->Rows.end() && found->Instance == instance ? &*found : nullptr;
+		}
+
+		struct CollisionDemand {
+			core::Name Geometry;
+			bool Hull = false;
+		};
+
+		// Gather the shapes physics can actually resolve through an editable mesh.
+		// A visual MeshId has no collision meaning, so a visual-only streamed mesh
+		// must not allocate a triangle soup just because it became drawable. The
+		// canonical table makes a many-chunk world O(meshes log colliders), rather
+		// than one linear collider walk per mesh.
+		const CollisionDemand *DemandFor(
+			ecs::Store &store, std::optional<std::vector<CollisionDemand>> &demand, core::Name geometry
+		) {
+			if (!demand.has_value()) {
+				demand.emplace();
 				store.Each<const Collider>([&](ecs::Entity, const Collider &collider) {
-					if (collider.Shape != ShapeKind::Hull || !collider.Geometry.IsValid()) {
+					if (!collider.Geometry.IsValid() ||
+						(collider.Shape != ShapeKind::Mesh && collider.Shape != ShapeKind::Hull)) {
 						return;
 					}
-					for (const core::Name &already : *wanted) {
-						if (already == collider.Geometry) {
-							return;
-						}
-					}
-					wanted->push_back(collider.Geometry);
+					demand->push_back(CollisionDemand{collider.Geometry, collider.Shape == ShapeKind::Hull});
 				});
+				std::sort(
+					demand->begin(),
+					demand->end(),
+					[](const CollisionDemand &left, const CollisionDemand &right) {
+						return left.Geometry < right.Geometry;
+					}
+				);
+				size_t unique = 0;
+				for (const CollisionDemand current : *demand) {
+					if (unique != 0 && (*demand)[unique - 1].Geometry == current.Geometry) {
+						(*demand)[unique - 1].Hull = (*demand)[unique - 1].Hull || current.Hull;
+					} else {
+						(*demand)[unique++] = current;
+					}
+				}
+				demand->resize(unique);
 			}
 
-			for (const core::Name &name : *wanted) {
-				if (name == geometry) {
-					return true;
+			const auto found = std::lower_bound(
+				demand->begin(), demand->end(), geometry, [](const CollisionDemand &known, core::Name name) {
+					return known.Geometry < name;
 				}
-			}
-			return false;
+			);
+			return found != demand->end() && found->Geometry == geometry ? &*found : nullptr;
 		}
 	}
 
@@ -238,26 +302,26 @@ namespace engine::scene {
 		// whole terrain chunks, and copying them merely to discover that every
 		// revision is already resident made a stopped editable scene cost
 		// milliseconds on every presentation.
-		const EditableMeshCollision *heldBaked = store.Resource<EditableMeshCollision>();
+		EditableMeshCollision *heldLedger = store.ResourceMutable<EditableMeshCollision>();
+		if (heldLedger != nullptr) {
+			CanonicalizeBakedRows(*heldLedger);
+		}
+		const EditableMeshCollision *heldBaked = heldLedger;
 		const CollisionShapes *heldShapes = CollisionShapesOf(store);
-		std::optional<std::vector<core::Name>> fastWanted;
-		size_t live = 0;
+		std::optional<std::vector<CollisionDemand>> fastDemand;
+		size_t retained = 0;
 		bool dirty = false;
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
 			const core::Name name = EditableMeshContentName(store, instance);
 			if (!name.IsValid()) {
 				return;
 			}
-			live++;
-
-			const EditableMeshCollision::Baked *known = nullptr;
-			if (heldBaked != nullptr) {
-				for (const EditableMeshCollision::Baked &row : heldBaked->Rows) {
-					if (row.Instance == instance.Id) {
-						known = &row;
-						break;
-					}
-				}
+			const CollisionDemand *demand = DemandFor(store, fastDemand, name);
+			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
+			retained += known != nullptr ? 1u : 0u;
+			if (demand == nullptr) {
+				dirty = dirty || known != nullptr;
+				return;
 			}
 
 			const bool hasTriangles = !mesh.Positions.empty() && mesh.Indices.size() >= 3;
@@ -272,33 +336,24 @@ namespace engine::scene {
 				dirty = true;
 				return;
 			}
-			if (WantsHull(store, fastWanted, name) &&
-				(heldShapes == nullptr || heldShapes->FindHull(name) == nullptr)) {
+			if (heldShapes == nullptr || heldShapes->FindMesh(name) == nullptr) {
+				dirty = true;
+				return;
+			}
+			if (demand->Hull && heldShapes->FindHull(name) == nullptr) {
 				dirty = true;
 			}
 		});
-		if (heldBaked != nullptr && heldBaked->Rows.size() != live) {
+		// Count matching identities instead of all live meshes. An incomplete
+		// replacement has no shape yet, but it must not make a destroyed mesh's
+		// ledger row look retained merely because the two totals happen to match.
+		if (heldBaked != nullptr && heldBaked->Rows.size() != retained) {
 			dirty = true;
 		}
 		if (!dirty) {
 			return 0;
 		}
 
-		// **Both tables are read and written whole, which is what a resource
-		// is.** `Store::SetResource` replaces, so the work below builds the two
-		// and writes them back once - and a world with no `EditableMesh` in it
-		// touches neither.
-		EditableMeshCollision baked;
-		if (const EditableMeshCollision *held = store.Resource<EditableMeshCollision>()) {
-			baked = *held;
-		}
-
-		CollisionShapes shapes;
-		if (const CollisionShapes *held = CollisionShapesOf(store)) {
-			shapes = *held;
-		}
-
-		size_t changed = 0;
 		struct CollisionBuild {
 			core::Name Name;
 			const EditableMesh *Source = nullptr;
@@ -308,14 +363,16 @@ namespace engine::scene {
 		};
 		std::vector<CollisionBuild> builds;
 
-		// Which geometry names a collider asks for as a hull, gathered on the
-		// first mesh that needs the answer and not before - a world with no
-		// script-built geometry in it must not pay a walk of every collider.
-		std::optional<std::vector<core::Name>> wanted;
+		// Gather collision demand on the first editable mesh only. Worlds with
+		// no script-built geometry skip the collider walk entirely.
+		std::optional<std::vector<CollisionDemand>> demanded;
 
 		// What is in the world this call, so the sweep below can tell a mesh
 		// that was destroyed from one that simply did not change.
 		std::vector<EditableMeshCollision::Baked> seen;
+		if (heldBaked != nullptr) {
+			seen.reserve(heldBaked->Rows.size());
+		}
 
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
 			const core::Name name = EditableMeshContentName(store, instance);
@@ -323,22 +380,22 @@ namespace engine::scene {
 				return;
 			}
 
-			uint32_t *known = nullptr;
-			for (EditableMeshCollision::Baked &row : baked.Rows) {
-				if (row.Instance == instance.Id) {
-					known = &row.Revision;
-					break;
-				}
+			const CollisionDemand *demand = DemandFor(store, demanded, name);
+			if (demand == nullptr) {
+				return;
 			}
+			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
 
-			// The steady state: an integer compare, which is
+			// The steady state: one binary revision lookup after the bounded
+			// ledger canonicalization pass, which is
 			// `EditableMeshUploader::Refresh`'s decision and its reason.
 			//
 			// **Unless a hull is wanted and is not there**, which is a part
 			// switched to `ShapeKind::Hull` after its mesh was baked. See the
 			// bake below for why a hull is not built until it is asked for.
-			if (known != nullptr && *known == mesh.Revision &&
-				(shapes.FindHull(name) != nullptr || !WantsHull(store, wanted, name))) {
+			if (known != nullptr && known->Revision == mesh.Revision && heldShapes != nullptr &&
+				heldShapes->FindMesh(name) != nullptr &&
+				(heldShapes->FindHull(name) != nullptr || !demand->Hull)) {
 				seen.push_back(EditableMeshCollision::Baked{instance.Id, mesh.Revision});
 				return;
 			}
@@ -361,10 +418,11 @@ namespace engine::scene {
 				return;
 			}
 
-			// **The soup always and the hull only when something names one**,
+			// **The soup for every demanded shape and the hull only when asked**,
 			// which is the difference between this being affordable and not.
-			// Measured on a terrain chunk of 4,225 points: the triangle soup
-			// costs 1.3 ms and quickhull costs 7.3 ms, and a heightfield's
+			// Measured with the bench preset on a terrain chunk of 4,225 points
+			// beside 2,000 resident shapes: the full refresh costs 0.885 ms. A
+			// quickhull alone cost 7.3 ms in the same terrain fixture, and a heightfield's
 			// convex hull is a dome over its summit that no collider in that
 			// scene will ever ask for. `game::AddCollisionShapes` bakes both
 			// because a delivered mesh is baked once at load; this runs on the
@@ -378,7 +436,7 @@ namespace engine::scene {
 				CollisionBuild{
 					.Name = name,
 					.Source = &mesh,
-					.WantsHull = WantsHull(store, wanted, name),
+					.WantsHull = demand->Hull,
 					.Mesh = {},
 					.Hull = {},
 				}
@@ -411,42 +469,57 @@ namespace engine::scene {
 				"editable collision workers", core::ProfileCategory::Physics, collisionTiming.BusyMilliseconds
 			);
 		}
-		for (CollisionBuild &build : builds) {
-			shapes.SetMesh(build.Name, std::move(build.Mesh));
-			if (build.WantsHull) {
-				shapes.SetHull(build.Name, std::move(build.Hull));
-			}
-			changed++;
-		}
-
 		// **The shapes of meshes that are gone, dropped here.** A streamed
 		// world creates and destroys a mesh per chunk, and a table that only
 		// grew would hold a hull and a triangle soup for every chunk anybody
 		// ever walked past. Nothing can name them again: the content name
 		// carries the entity's generation, so even a reused id mints a new one.
-		for (const EditableMeshCollision::Baked &was : baked.Rows) {
-			bool alive = false;
-			for (const EditableMeshCollision::Baked &now : seen) {
-				if (now.Instance == was.Instance) {
-					alive = true;
-					break;
+		// `Store::Each` has no ordering contract. Sort once at the owner-thread
+		// barrier, then merge the two ledgers instead of checking every old row
+		// against every live mesh. A terrain with N retained chunks used to make
+		// this housekeeping O(N squared) even when no worker had any geometry to
+		// build.
+		std::sort(seen.begin(), seen.end(), BakedBefore);
+		std::vector<core::Name> forgotten;
+		if (heldBaked != nullptr) {
+			size_t live = 0;
+			for (const EditableMeshCollision::Baked &was : heldBaked->Rows) {
+				while (live < seen.size() && seen[live].Instance < was.Instance) {
+					live++;
+				}
+				if (live == seen.size() || seen[live].Instance != was.Instance) {
+					forgotten.emplace_back("editable-mesh://" + std::to_string(was.Instance));
 				}
 			}
-			if (alive) {
-				continue;
-			}
-
-			shapes.Forget(core::Name("editable-mesh://" + std::to_string(was.Instance)));
-			changed++;
 		}
+
+		const size_t changed = builds.size() + forgotten.size();
 
 		if (changed == 0) {
 			return 0;
 		}
 
+		// Commit after every worker has joined. Keeping the resident shape table
+		// in place avoids copying every unchanged terrain BVH just to replace one
+		// chunk. The ECS still owns the only table and observes the whole edit at
+		// this owner-thread barrier.
+		if (store.Resource<CollisionShapes>() == nullptr) {
+			store.SetResource(CollisionShapes{});
+		}
+		CollisionShapes *shapes = store.ResourceMutable<CollisionShapes>();
+		for (CollisionBuild &build : builds) {
+			shapes->SetMesh(build.Name, std::move(build.Mesh));
+			if (build.WantsHull) {
+				shapes->SetHull(build.Name, std::move(build.Hull));
+			}
+		}
+		for (const core::Name name : forgotten) {
+			shapes->Forget(name);
+		}
+
+		EditableMeshCollision baked;
 		baked.Rows = std::move(seen);
 		store.SetResource(std::move(baked));
-		store.SetResource(std::move(shapes));
 		return changed;
 	}
 
@@ -671,6 +744,30 @@ namespace engine::scene {
 		mesh->Alphas.clear();
 		mesh->Indices.clear();
 		mesh->Signature = 0;
+		mesh->Revision++;
+		return true;
+	}
+
+	bool SetEditableMeshPacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing) {
+		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
+		constexpr uint8_t attributes = static_cast<uint8_t>(EditablePackingAttribute::Position) |
+									   static_cast<uint8_t>(EditablePackingAttribute::Normal) |
+									   static_cast<uint8_t>(EditablePackingAttribute::UV) |
+									   static_cast<uint8_t>(EditablePackingAttribute::Colour) |
+									   static_cast<uint8_t>(EditablePackingAttribute::Alpha);
+		if (mesh == nullptr ||
+			static_cast<uint8_t>(packing.Format) > static_cast<uint8_t>(EditablePackingFormat::Boolean) ||
+			(packing.Attributes & ~attributes) != 0 || !std::isfinite(packing.Minimum) ||
+			!std::isfinite(packing.Maximum) || packing.Maximum < packing.Minimum)
+			return false;
+		if (mesh->Packing.Attributes == packing.Attributes && mesh->Packing.Format == packing.Format &&
+			mesh->Packing.Minimum == packing.Minimum && mesh->Packing.Maximum == packing.Maximum)
+			return true;
+		mesh->Packing.Attributes = packing.Attributes;
+		mesh->Packing.Format = packing.Format;
+		mesh->Packing.Minimum = packing.Minimum;
+		mesh->Packing.Maximum = packing.Maximum;
+		mesh->Packing.Revision++;
 		mesh->Revision++;
 		return true;
 	}

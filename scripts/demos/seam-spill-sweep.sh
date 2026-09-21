@@ -61,7 +61,7 @@ standoff=${STANDOFF:--30}
 cmake -S "$root" --preset "$preset" > /dev/null
 cmake --build "$build" --target client > /dev/null
 
-source="$build/assets/examples/$scene.luau"
+source="$build/assets/examples/scripts/$scene.luau"
 if [ ! -f "$source" ]; then
 	echo "no staged scene at $source" >&2
 	exit 1

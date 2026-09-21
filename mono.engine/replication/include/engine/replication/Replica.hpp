@@ -105,6 +105,11 @@ namespace engine::replication {
 			return Applied_;
 		}
 
+		// Client input clock acknowledged by the latest complete world update.
+		uint64_t ConsumedInput() const {
+			return ConsumedInput_;
+		}
+
 		// Whether the joining snapshot has finished arriving and been applied.
 		//
 		// @return `true` once the world is usable.
@@ -308,6 +313,7 @@ namespace engine::replication {
 		// A ring would be a second thing to keep in step for an answer that is
 		// never fresher.
 		struct Parts {
+			uint64_t ConsumedInput = 0;
 			// The tick being counted, and whether one is being counted at all.
 			uint64_t Tick = 0;
 			bool Counting = false;
@@ -390,12 +396,13 @@ namespace engine::replication {
 		// hundred rows and almost none of them defer.
 		static constexpr size_t MAXIMUM_DEFERRED = 4096;
 
-		// Notes one part's arrival and says whether its tick is now held whole.
+		// Tracks received parts, counting only fully applied parts toward acknowledgement.
 		//
-		// @param delta The part that has just been applied.
+		// @param delta The part that has just arrived.
+		// @param applied Whether every value in this part was applied.
 		// @return `true` when every part the sender emitted for that tick is
-		//         here, so the tick may be acknowledged.
-		bool Count(const replication::Delta &delta);
+		//         applied, so the tick may be acknowledged.
+		bool Count(const replication::Delta &delta, bool applied);
 
 		// The snapshot being reassembled. Sized from the total the first chunk
 		// declares, and every later chunk is checked against it.
@@ -419,6 +426,7 @@ namespace engine::replication {
 		std::vector<Arrival> Arriving_;
 		Parts Counting;
 		uint64_t Applied_ = 0;
+		uint64_t ConsumedInput_ = 0;
 		bool Joined_ = false;
 		bool Prefaced_ = false;
 

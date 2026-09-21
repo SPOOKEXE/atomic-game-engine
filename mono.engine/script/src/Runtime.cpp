@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
@@ -14,6 +15,13 @@
 #endif
 
 namespace engine::script {
+
+	DataScriptPackageRunResult
+	Runtime::RunDataScriptPackage(const DataScriptPackageContext &, std::string_view, std::string_view) {
+		return {
+			.Terminal = DataScriptPackageRunResult::State::Failed, .Error = "runtime has no package executor"
+		};
+	}
 
 	namespace {
 		// Windows faults raised by a VM extension are structured exceptions, not
@@ -235,6 +243,7 @@ namespace engine::script {
 	}
 
 	void Runtime::DeliverGuiEvents(std::span<const gui::GuiEvent> events) {
+		if (!events.empty()) MarkWorldSwapUsed();
 		// **Appended rather than assigned**, because a host may poll more than
 		// one canvas between beats. The studio compiles and routes one
 		// `gui::Router` per viewport panel - a panel *is* a canvas - so two
@@ -246,12 +255,37 @@ namespace engine::script {
 
 	void Runtime::DeliverSettingsMenuAction(core::Name action) {
 		if (action.IsValid()) {
+			MarkWorldSwapUsed();
 			PendingSettingsMenuActions.push_back(action);
 		}
 	}
 
+	bool Runtime::PrepareSettingsMenuActions(std::span<const core::Name> actions) {
+		if (std::any_of(actions.begin(), actions.end(), [](const core::Name action) {
+				return !action.IsValid();
+			})) {
+			return false;
+		}
+		if (actions.empty()) return true;
+		if (actions.size() > PendingSettingsMenuActions.max_size() - PendingSettingsMenuActions.size())
+			return false;
+		try {
+			PendingSettingsMenuActions.reserve(PendingSettingsMenuActions.size() + actions.size());
+			return true;
+		} catch (...) {
+			return false;
+		}
+	}
+
+	void Runtime::CommitSettingsMenuActions(std::span<const core::Name> actions) noexcept {
+		if (actions.empty()) return;
+		MarkWorldSwapUsed();
+		PendingSettingsMenuActions.insert(PendingSettingsMenuActions.end(), actions.begin(), actions.end());
+	}
+
 	void Runtime::DeliverTeleportResult(TeleportResult result) {
 		if (result.Id != 0) {
+			MarkWorldSwapUsed();
 			PendingTeleportResults.push_back(std::move(result));
 		}
 	}
@@ -283,6 +317,7 @@ namespace engine::script {
 		ScriptCosts.reserve(scripts.size());
 
 		for (const ecs::Entity instance : scripts) {
+			MarkWorldSwapUsed();
 			// Recorded whether or not it is new: this call starts everything it
 			// finds, and what the record is for is stopping `RunNewScripts` from
 			// starting the same instance a second time.
@@ -354,6 +389,7 @@ namespace engine::script {
 		std::string firstError;
 
 		for (const ecs::Entity instance : wanted) {
+			MarkWorldSwapUsed();
 			if (!RememberStarted(instance)) {
 				continue;
 			}
@@ -373,6 +409,22 @@ namespace engine::script {
 
 			if (ok) {
 				started++;
+				continue;
+			}
+
+			// A replica can receive the script instance before the observed
+			// `Program` row that carries its source. Do not turn that temporary
+			// gap into a permanent disabled tag; the next arrival pass must retry
+			// the instance once the row is present.
+			if (Store.AdoptOnly() && Store.Get<Program>(instance) == nullptr) {
+				const auto found = std::find_if(
+					StartedScripts.begin(), StartedScripts.end(), [instance](ecs::Entity started) {
+						return started.Id == instance.Id;
+					}
+				);
+				if (found != StartedScripts.end()) {
+					StartedScripts.erase(found);
+				}
 				continue;
 			}
 

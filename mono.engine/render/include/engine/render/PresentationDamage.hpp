@@ -129,6 +129,7 @@ namespace engine::render {
 		Particles,
 		Environment,
 		PortalInputs,
+		SurfaceCapturePlan,
 		PortalHistory,
 		SceneImage,
 		GameInterface,
@@ -156,6 +157,7 @@ namespace engine::render {
 		PresentationCacheLayerInfo{"particles", 0},
 		PresentationCacheLayerInfo{"environment", 0},
 		PresentationCacheLayerInfo{"portal inputs", 0},
+		PresentationCacheLayerInfo{"surface capture plan", 1},
 		PresentationCacheLayerInfo{"portal history", 1},
 		PresentationCacheLayerInfo{"scene image", 1},
 		PresentationCacheLayerInfo{"game interface", 1},
@@ -220,10 +222,12 @@ namespace engine::render {
 			const PresentationDamage &damage,
 			bool studio,
 			bool portalHistoryWrite = false,
+			bool surfaceCapturePlanWrite = false,
 			const PresentationCacheApplicability &applicable = {}
 		) {
 			const bool sceneImage = damage.Scene || damage.Objects || damage.Particles ||
-									damage.Environment || damage.Portals || portalHistoryWrite;
+									damage.Environment || damage.Portals || surfaceCapturePlanWrite ||
+									portalHistoryWrite;
 			const bool gameComposition =
 				sceneImage || damage.GameInterface || damage.Viewport || damage.Overlay;
 			const bool studioComposition = studio && (gameComposition || damage.HostInterface);
@@ -233,6 +237,7 @@ namespace engine::render {
 				damage.Particles,
 				damage.Environment,
 				damage.Portals,
+				surfaceCapturePlanWrite,
 				portalHistoryWrite,
 				sceneImage,
 				damage.GameInterface,
@@ -247,6 +252,7 @@ namespace engine::render {
 				applicable.Objects,
 				applicable.Particles,
 				applicable.Environment,
+				applicable.Portals,
 				applicable.Portals,
 				applicable.Portals,
 				true,

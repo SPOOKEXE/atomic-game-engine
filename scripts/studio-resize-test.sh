@@ -7,10 +7,11 @@
 # shows *last frame's* scene texture - imgui records its draw lists before the
 # renderer runs, so there is no other texture to show. On the frame the panel
 # changes size, the order is: the interface records a bind of the old texture,
-# `EnsureScene` notices the new size, and then those draw lists are replayed.
-# Releasing the old texture in the middle of that hands SDL's Vulkan backend a
-# freed `TextureContainer`, and it segfaults in `VULKAN_BindFragmentSamplers`
-# with nothing on the stack from this repository above SDL.
+# `EnsureScene` or `RetainSceneFrame` notices the new size, and then those draw
+# lists are replayed. Releasing the old texture in the middle of that hands
+# SDL's Vulkan backend a freed `TextureContainer`, and it segfaults in
+# `VULKAN_BindFragmentSamplers` with nothing on the stack from this repository
+# above SDL.
 #
 # Reproducing it needs a real window, a real swapchain and a window manager
 # delivering a size change per motion event. That is not something a headless

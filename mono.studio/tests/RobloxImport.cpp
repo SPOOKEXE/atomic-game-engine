@@ -13,8 +13,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <span>
 #include <sstream>
 #include <string>
 #include <studio/Config.hpp>
@@ -301,6 +304,205 @@ TEST_CASE("a missing roblox class can map to an engine class", "[studio][robloxi
 	CHECK(report.FolderFallbackClasses.empty());
 }
 
+TEST_CASE(
+	"roblox substitutions preserve spatial part values and report approximations", "[studio][robloximport]"
+) {
+	engine::scene::EnsureClassTree();
+	engine::bake::RobloxModel model;
+	for (const std::string_view sourceClass :
+		 {"Seat", "VehicleSeat", "TrussPart", "WedgePart", "CornerWedgePart", "UnionOperation"}) {
+		engine::bake::RobloxInstance source;
+		source.ClassName = std::string(sourceClass);
+		source.Name = std::string(sourceClass);
+		engine::bake::RobloxValue size;
+		size.Set(engine::core::Vector3{0.125f, 3.25f, 0.03125f});
+		source.Properties.push_back({"Size", std::move(size)});
+		engine::bake::RobloxValue frame;
+		frame.Set(engine::core::CFrame(engine::core::Vector3{4.0f, -2.0f, 0.5f}));
+		source.Properties.push_back({"CFrame", std::move(frame)});
+		engine::bake::RobloxValue color;
+		color.Set(engine::core::Color3{0.25f, 0.5f, 0.75f});
+		source.Properties.push_back({"Color", std::move(color)});
+		model.Roots.push_back(std::move(source));
+	}
+	engine::bake::RobloxInstance container;
+	container.ClassName = "Folder";
+	container.Name = "Container";
+	engine::bake::RobloxInstance hat;
+	hat.ClassName = "Hat";
+	hat.Name = "Hat";
+	container.Children.push_back(std::move(hat));
+	model.Roots.push_back(std::move(container));
+
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model);
+	CHECK(analysis.MissingClasses.empty());
+	REQUIRE(analysis.Substitutions.size() == 7);
+
+	engine::ecs::Store store("roblox-substitutions");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Substitutions.size() == analysis.Substitutions.size());
+	const engine::ecs::Entity containerEntity = store.FindFirstRoot("Container");
+	REQUIRE(containerEntity != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity accessory = store.FindFirstChild(containerEntity, "Hat");
+	REQUIRE(accessory != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(accessory) == engine::ecs::Classes::Find(engine::core::Name("Accessory")));
+	for (const std::string_view sourceClass :
+		 {"Seat", "VehicleSeat", "TrussPart", "WedgePart", "CornerWedgePart", "UnionOperation"}) {
+		const engine::ecs::Entity instance = store.FindFirstRoot(sourceClass);
+		REQUIRE(instance != engine::ecs::NULL_ENTITY);
+		CHECK(store.ClassOf(instance) == engine::scene::PartClass());
+		const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(instance);
+		const engine::scene::Collider *collider = store.Get<engine::scene::Collider>(instance);
+		REQUIRE(bounds != nullptr);
+		REQUIRE(collider != nullptr);
+		engine::core::Vector3 size;
+		REQUIRE(store.GetProperty(instance, engine::core::Name("Size"), &size, sizeof(size)));
+		CHECK(size == engine::core::Vector3{0.125f, 3.25f, 0.03125f});
+		CHECK(bounds->HalfExtent == engine::core::Vector3{0.0625f, 1.625f, 0.015625f});
+		CHECK(collider->Extent == bounds->HalfExtent);
+		const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(instance);
+		REQUIRE(visual != nullptr);
+		CHECK(visual->Tint == engine::core::Color3{0.25f, 0.5f, 0.75f});
+		engine::core::CFrame frame;
+		REQUIRE(store.GetProperty(instance, engine::core::Name("CFrame"), &frame, sizeof(frame)));
+		CHECK(frame.Position == engine::core::Vector3{4.0f, -2.0f, 0.5f});
+	}
+}
+
+TEST_CASE("roblox native and explicit class mappings take precedence", "[studio][robloximport]") {
+	engine::scene::EnsureClassTree();
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance native;
+	native.ClassName = "MeshPart";
+	native.Name = "Native";
+	model.Roots.push_back(std::move(native));
+	engine::bake::RobloxInstance explicitMapping;
+	explicitMapping.ClassName = "Seat";
+	explicitMapping.Name = "Explicit";
+	model.Roots.push_back(std::move(explicitMapping));
+	const studio::RobloxClassMappings mappings{{"MeshPart", "Part"}, {"Seat", "MeshPart"}};
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model, mappings);
+	REQUIRE(analysis.Substitutions.empty());
+	engine::ecs::Store store("roblox-class-precedence");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, mappings, report, error));
+	CHECK(
+		store.ClassOf(store.FindFirstRoot("Native")) ==
+		engine::ecs::Classes::Find(engine::core::Name("MeshPart"))
+	);
+	CHECK(
+		store.ClassOf(store.FindFirstRoot("Explicit")) ==
+		engine::ecs::Classes::Find(engine::core::Name("MeshPart"))
+	);
+	CHECK(report.Substitutions.empty());
+}
+
+TEST_CASE(
+	"roblox sky faces and surface appearances map to supported parent properties", "[studio][robloximport]"
+) {
+	engine::scene::EnsureClassTree();
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance sky;
+	sky.ClassName = "Sky";
+	sky.Name = "Sky";
+	for (const auto &[source, target] : std::array<std::pair<std::string_view, std::string_view>, 6>{{
+			 {"SkyboxFt", "front.atex"},
+			 {"SkyboxBk", "back.atex"},
+			 {"SkyboxLf", "left.atex"},
+			 {"SkyboxRt", "right.atex"},
+			 {"SkyboxUp", "up.atex"},
+			 {"SkyboxDn", "down.atex"},
+		 }}) {
+		engine::bake::RobloxValue value;
+		value.Set(std::string(target));
+		sky.Properties.push_back({std::string(source), std::move(value)});
+	}
+	model.Roots.push_back(std::move(sky));
+
+	engine::bake::RobloxInstance mesh;
+	mesh.ClassName = "MeshPart";
+	mesh.Name = "Mesh";
+	engine::bake::RobloxValue size;
+	size.Set(engine::core::Vector3{0.125f, 3.25f, 0.03125f});
+	mesh.Properties.push_back({"Size", std::move(size)});
+	engine::bake::RobloxValue meshId;
+	meshId.Set(std::string("mesh.amesh"));
+	mesh.Properties.push_back({"MeshId", std::move(meshId)});
+	engine::bake::RobloxInstance appearance;
+	appearance.ClassName = "SurfaceAppearance";
+	appearance.Name = "Appearance";
+	for (const auto &[name, value] : std::array<std::pair<std::string_view, std::string_view>, 4>{{
+			 {"ColorMap", "colour.atex"},
+			 {"NormalMap", "normal.atex"},
+			 {"RoughnessMap", "rough.atex"},
+			 {"MetalnessMap", "metal.atex"},
+		 }}) {
+		engine::bake::RobloxValue property;
+		property.Set(std::string(value));
+		appearance.Properties.push_back({std::string(name), std::move(property)});
+	}
+	engine::bake::RobloxValue color;
+	color.Set(engine::core::Color3{0.1f, 0.2f, 0.3f});
+	appearance.Properties.push_back({"Color", std::move(color)});
+	engine::bake::RobloxValue unsupported;
+	unsupported.Set(std::string("ignored"));
+	appearance.Properties.push_back({"Unsupported", std::move(unsupported)});
+	mesh.Children.push_back(std::move(appearance));
+	model.Roots.push_back(std::move(mesh));
+
+	engine::ecs::Store store("roblox-sky-surface");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	const engine::ecs::Entity skybox = store.FindFirstRoot("Sky");
+	REQUIRE(skybox != engine::ecs::NULL_ENTITY);
+	for (const auto &[name, expected] : std::array<std::pair<std::string_view, std::string_view>, 6>{{
+			 {"Front", "front.atex"},
+			 {"Back", "back.atex"},
+			 {"Left", "left.atex"},
+			 {"Right", "right.atex"},
+			 {"Up", "up.atex"},
+			 {"Down", "down.atex"},
+		 }}) {
+		engine::core::Name actual;
+		REQUIRE(store.GetProperty(skybox, engine::core::Name(std::string(name)), &actual, sizeof(actual)));
+		CHECK(actual == engine::core::Name(std::string(expected)));
+	}
+	const engine::ecs::Entity meshPart = store.FindFirstRoot("Mesh");
+	REQUIRE(meshPart != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(meshPart, "Appearance") == engine::ecs::NULL_ENTITY);
+	const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(meshPart);
+	const engine::scene::Collider *collider = store.Get<engine::scene::Collider>(meshPart);
+	REQUIRE(bounds != nullptr);
+	REQUIRE(collider != nullptr);
+	engine::core::Vector3 fullSize;
+	REQUIRE(store.GetProperty(meshPart, engine::core::Name("Size"), &fullSize, sizeof(fullSize)));
+	CHECK(fullSize == engine::core::Vector3{0.125f, 3.25f, 0.03125f});
+	CHECK(bounds->HalfExtent == engine::core::Vector3{0.0625f, 1.625f, 0.015625f});
+	CHECK(collider->Extent == bounds->HalfExtent);
+	const auto readName = [&](std::string_view name) {
+		engine::core::Name value;
+		REQUIRE(store.GetProperty(meshPart, engine::core::Name(std::string(name)), &value, sizeof(value)));
+		return value;
+	};
+	CHECK(readName("TextureID") == engine::core::Name("colour.atex"));
+	CHECK(readName("NormalMap") == engine::core::Name("normal.atex"));
+	CHECK(readName("RoughnessMap") == engine::core::Name("rough.atex"));
+	CHECK(readName("MetalnessMap") == engine::core::Name("metal.atex"));
+	engine::core::Color3 surface;
+	REQUIRE(store.GetProperty(meshPart, engine::core::Name("SurfaceColor"), &surface, sizeof(surface)));
+	CHECK(surface == engine::core::Color3{0.1f, 0.2f, 0.3f});
+	CHECK(report.Instances == 3);
+	REQUIRE(report.SkippedProperties.size() == 1);
+	CHECK(report.SkippedProperties[0].ClassName == "SurfaceAppearance");
+	CHECK(report.SkippedProperties[0].PropertyName == "Unsupported");
+	REQUIRE(report.Substitutions.size() == 2);
+	CHECK(report.Substitutions[1].SourceClass == "SurfaceAppearance");
+}
+
 TEST_CASE("roblox UI endpoints import without a folder fallback", "[studio][robloximport]") {
 	engine::bake::RobloxModel model;
 	for (const std::string_view className :
@@ -513,7 +715,7 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 			<Item class="Part" referent="RBX0">
 				<Properties>
 					<string name="Name">Block</string>
-					<Vector3 name="Size"><X>8</X><Y>3</Y><Z>2</Z></Vector3>
+					<Vector3 name="size"><X>0.125</X><Y>3.25</Y><Z>0.03125</Z></Vector3>
 					<Color3uint8 name="Color">4294901760</Color3uint8>
 					<float name="Transparency">0.375</float>
 					<string name="CollisionGroup">Ground</string>
@@ -570,15 +772,16 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 		REQUIRE(block != engine::ecs::NULL_ENTITY);
 		const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(block);
 		REQUIRE(bounds != nullptr);
-		CHECK(bounds->HalfExtent == engine::core::Vector3{4.0f, 1.5f, 1.0f});
+		CHECK(bounds->HalfExtent == engine::core::Vector3{0.0625f, 1.625f, 0.015625f});
+		const engine::scene::Collider *collider = store.Get<engine::scene::Collider>(block);
+		REQUIRE(collider != nullptr);
+		CHECK(collider->Extent == bounds->HalfExtent);
 		const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(block);
 		REQUIRE(visual != nullptr);
 		CHECK(visual->Tint == engine::core::Color3{1.0f, 0.0f, 0.0f});
 		CHECK(visual->Transparency == 0.375f);
 		const uint32_t group = engine::spatial::CollisionGroups::IndexOf(engine::core::Name("Ground"));
 		REQUIRE(group != engine::spatial::NO_GROUP);
-		const engine::scene::Collider *collider = store.Get<engine::scene::Collider>(block);
-		REQUIRE(collider != nullptr);
 		CHECK(collider->Layer.Bits == engine::spatial::LayerMask::Only(group).Bits);
 		CHECK(collider->Mask.Bits == engine::spatial::CollisionGroups::MaskFor(group).Bits);
 
@@ -613,4 +816,88 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 			engine::ecs::Classes::Find(engine::core::Name("SoundGroup"))
 		);
 	});
+}
+
+TEST_CASE("roblox import preserves integers and rejects unrepresentable numbers", "[studio][robloximport]") {
+	engine::scene::EnsureClassTree();
+	engine::ecs::Store store("roblox-numbers");
+	engine::bake::RobloxModel model;
+	const auto add = [&](std::string name, auto number) {
+		engine::bake::RobloxInstance node;
+		node.ClassName = "IntValue";
+		node.Name = std::move(name);
+		engine::bake::RobloxValue value;
+		value.Set(number);
+		node.Properties.push_back({"Value", value});
+		model.Roots.push_back(std::move(node));
+	};
+	add("Precise", int64_t{9007199254740993});
+	add("Maximum", std::numeric_limits<int64_t>::max());
+	add("Minimum", std::numeric_limits<int64_t>::min());
+	add("Overflow", 9223372036854775808.0);
+	add("Fraction", 1.5);
+	add("NotFinite", std::numeric_limits<double>::infinity());
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Properties == 3);
+	const auto integer = [&](const char *name) {
+		int64_t value = 0;
+		REQUIRE(
+			store.GetProperty(store.FindFirstRoot(name), engine::core::Name("Value"), &value, sizeof(value))
+		);
+		return value;
+	};
+	CHECK(integer("Precise") == 9007199254740993);
+	CHECK(integer("Maximum") == std::numeric_limits<int64_t>::max());
+	CHECK(integer("Minimum") == std::numeric_limits<int64_t>::min());
+	CHECK(integer("Overflow") == 0);
+	CHECK(integer("Fraction") == 0);
+	CHECK(integer("NotFinite") == 0);
+}
+
+TEST_CASE("roblox particle sequences reach their authored properties", "[studio][robloximport]") {
+	const std::string xml =
+		R"xml(<roblox version="4"><Item class="ParticleEmitter" referent="RBX0"><Properties>
+		<string name="Name">Emitter</string>
+		<NumberSequence name="Size">0 2 0.5 0.5 4 1 1 0 0</NumberSequence>
+		<ColorSequence name="Color">0 1 0 0 0 1 0 0 1 0</ColorSequence>
+	</Properties></Item></roblox>)xml";
+	engine::bake::RobloxModel model;
+	std::string error;
+	REQUIRE(engine::bake::ReadRobloxFile(std::as_bytes(std::span(xml.data(), xml.size())), model, error));
+	REQUIRE(model.LostProperties.empty());
+	engine::ecs::Store store("roblox-sequences");
+	studio::RobloxImportResult report;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Properties == 2);
+	const auto emitter = store.FindFirstRoot("Emitter");
+	engine::core::NumberSequence size;
+	REQUIRE(store.GetProperty(emitter, engine::core::Name("Size"), &size, sizeof(size)));
+	REQUIRE(size.Count == 3);
+	CHECK(size.Keypoints[1] == engine::core::NumberKeypoint{0.5f, 4.0f, 1.0f});
+	engine::core::ColorSequence colour;
+	REQUIRE(store.GetProperty(emitter, engine::core::Name("Color"), &colour, sizeof(colour)));
+	REQUIRE(colour.Count == 2);
+	CHECK(colour.Keypoints[1] == engine::core::ColorKeypoint{1.0f, {0.0f, 0.0f, 1.0f}});
+}
+
+TEST_CASE(
+	"roblox import refuses invalid sequences without changing their authored order", "[studio][robloximport]"
+) {
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance emitter;
+	emitter.Name = "Emitter";
+	emitter.ClassName = "ParticleEmitter";
+	engine::bake::RobloxValue size;
+	size.Set(engine::bake::RobloxNumberSequence{{0, 1}, {0.75f, 2}, {0.5f, 3}, {1, 4}});
+	emitter.Properties.push_back({"Size", size});
+	model.Roots.push_back(std::move(emitter));
+	engine::ecs::Store store("roblox-invalid-sequences");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Properties == 0);
+	REQUIRE(report.SkippedProperties.size() == 1);
+	CHECK(report.SkippedProperties[0].PropertyName == "Size");
 }

@@ -55,6 +55,25 @@ namespace engine::graph {
 			return spec->Category == NodeCategory::Output || spec->Category == NodeCategory::Interface;
 		}
 
+		bool UsedInside(const Node &node, ResourceId resource) {
+			const auto *spec = NodeCatalogue::Find(node.Kind);
+			if (!spec) return false;
+			for (size_t index = 0; index < node.Writes.size(); ++index) {
+				if (node.Writes[index] != resource) continue;
+				if (index < node.WritePorts.size() && node.WritePorts[index].IsValid()) {
+					const auto port = std::find_if(
+						spec->Outputs.begin(), spec->Outputs.end(), [&](const PortSpec &candidate) {
+							return candidate.Name == node.WritePorts[index];
+						}
+					);
+					if (port != spec->Outputs.end() && port->InternalUse) return true;
+				} else if (index < spec->Outputs.size() && spec->Outputs[index].InternalUse) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// The format a node's slot declares, by position in its reads or writes.
 		//
 		// Returns false for an unregistered kind or a position past the end,
@@ -191,6 +210,7 @@ namespace engine::graph {
 			// nobody reads is two mistakes, and marking only one of them leaves
 			// the other looking fine.
 			for (const size_t writer : wrote) {
+				if (UsedInside(*rows[writer].Body, resource)) continue;
 				found.push_back(
 					Diagnostic{
 						DiagnosticKind::DeadResource,
@@ -253,6 +273,7 @@ namespace engine::graph {
 			for (size_t index = 0; index + 1 < wrote.size(); index++) {
 				const size_t first = wrote[index];
 				const size_t next = wrote[index + 1];
+				if (UsedInside(*rows[first].Body, resource)) continue;
 
 				// A pass that reads what it writes is refining it, not
 				// replacing it - `transparent` blending over `colour` is the

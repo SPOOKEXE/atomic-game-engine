@@ -2236,13 +2236,16 @@ namespace studio {
 				return;
 			}
 			PluginButton &button = toolbar.Buttons[location.Item];
-			const std::string &tooltip = button.Tooltip;
+			const PluginControlKind kind = button.Kind;
+			// A callback may unload its plugin. Keep the post-callback UI state
+			// outside that plugin's toolbar storage before it can be invalidated.
+			const std::string tooltip = button.Tooltip;
 
 			ImGui::PushID(location.Key.c_str());
-			if (button.Kind == PluginControlKind::Builtin) {
+			if (kind == PluginControlKind::Builtin) {
 				DrawBuiltinStudioTool(button.Builtin);
 			} else {
-				if (button.Kind == PluginControlKind::Button) {
+				if (kind == PluginControlKind::Button) {
 					const bool pressed =
 						button.Active
 							? ImGui::Selectable(
@@ -2256,7 +2259,7 @@ namespace studio {
 							InvokePlugin(*script, button.OnClick, false);
 						}
 					}
-				} else if (button.Kind == PluginControlKind::Toggle) {
+				} else if (kind == PluginControlKind::Toggle) {
 					const bool before = button.Active;
 					ImGui::Checkbox(location.ControlLabel.c_str(), &button.Active);
 					if (before != button.Active) {
@@ -2268,7 +2271,7 @@ namespace studio {
 							InvokePlugin(*script, button.OnChanged, false, arguments);
 						}
 					}
-				} else if (button.Kind == PluginControlKind::Dropdown) {
+				} else if (kind == PluginControlKind::Dropdown) {
 					ImGui::SetNextItemWidth(location.Width);
 					const char *preview = button.Selected < button.Options.size()
 											  ? button.Options[button.Selected].c_str()
@@ -2295,7 +2298,7 @@ namespace studio {
 						}
 						ImGui::EndCombo();
 					}
-				} else if (button.Kind == PluginControlKind::Label) {
+				} else if (kind == PluginControlKind::Label) {
 					ImGui::TextUnformatted(button.Name.c_str());
 				}
 			}
@@ -2305,7 +2308,7 @@ namespace studio {
 			if (!tooltip.empty() && hovered) {
 				ImGui::SetTooltip("%s", tooltip.c_str());
 			}
-			if ((button.Kind == PluginControlKind::Toggle || button.Kind == PluginControlKind::Label) &&
+			if ((kind == PluginControlKind::Toggle || kind == PluginControlKind::Label) &&
 				location.Width > renderedWidth) {
 				ImGui::SameLine(0.0f, 0.0f);
 				ImGui::Dummy(ImVec2(location.Width - renderedWidth, ImGui::GetFrameHeight()));

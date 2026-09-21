@@ -26,7 +26,12 @@ namespace engine::render {
 			});
 		}
 
-		frameNodes.Set(core::Name("upload-instances"), [this](const graph::RunContext &context) {
+		frameNodes.Set(core::Name("mesh-residency"), [this](const graph::RunContext &context) {
+			EnterNamedPass(context.Name);
+			return RecordMeshResidency();
+		});
+
+		frameNodes.Set(core::Name("delta-upload"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
@@ -35,6 +40,19 @@ namespace engine::render {
 
 			enterNamedPass(context.Name);
 			return recordUploads();
+		});
+
+		frameNodes.Set(core::Name("select-lod"), [this](const graph::RunContext &context) {
+			EnterNamedPass(context.Name);
+			return State->DispatchLodSelection(
+				Command,
+				Frame.ViewProjection,
+				Request.CameraFrame.Position,
+				Request.Source->LodMinimumDistances,
+				Request.Source->EnableLODCulling,
+				SceneWidth,
+				SceneHeight
+			);
 		});
 	}
 }

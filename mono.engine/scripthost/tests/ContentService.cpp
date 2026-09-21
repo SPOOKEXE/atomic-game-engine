@@ -244,7 +244,11 @@ TEST_CASE("a script can read what a mesh is wearing", "[scripting][content]") {
 	Store store = Fresh("content_mesh_textures");
 
 	const std::array<Name, 3> worn{Name("skins/body.atex"), Name("skins/eyes.atex"), Name("skins/body.atex")};
-	REQUIRE(engine::scene::RecordMesh(store, Name("props/hero.amesh"), 4200, worn));
+	REQUIRE(
+		engine::scene::RecordMesh(
+			store, Name("props/hero.amesh"), 4200, worn, {}, engine::core::Vector3{2.0f, 6.0f, 1.0f}
+		)
+	);
 
 	// A submesh that names nothing is an ordinary thing - a model with one
 	// untextured run - and it crosses as an empty string rather than as a hole,
@@ -259,6 +263,8 @@ TEST_CASE("a script can read what a mesh is wearing", "[scripting][content]") {
 	REQUIRE(runtime != nullptr);
 
 	MustRun(*runtime, R"(
+		local size = ContentService:GetMeshSize("props/hero.amesh")
+		assert(size.X == 2 and size.Y == 6 and size.Z == 1, "authored mesh bounds arrive")
 		local worn = ContentService:GetMeshTextures("props/hero.amesh")
 		assert(#worn == 3, "one entry per submesh, got " .. #worn)
 

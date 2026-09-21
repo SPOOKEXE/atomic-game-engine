@@ -260,7 +260,7 @@ namespace engine::script {
 	// **Absolute paths, and that is not incidental.** `ReadSource` resolves a
 	// relative `Source` against `core::Paths::Assets()`, which defaults to the
 	// running program's own directory - while a staged library sits in a
-	// *sibling* of it. `examples::ExamplePath` documents that mismatch and works
+	// *sibling* of it. `examples::DemosLoader` documents that mismatch and works
 	// around it by looking in both places; a `Source` cannot, because it is one
 	// name. Resolving here, once, where the directory is already known, keeps
 	// the layout out of every file that gets mounted.

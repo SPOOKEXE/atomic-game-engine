@@ -7,10 +7,12 @@
 // there is no order in which a graph could run one without the other and be
 // right. `graph::FitPortalLight` is the derivation.
 
+#include "PortalBeamSelection.hpp"
 #include "Primitives.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -37,14 +39,46 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
-
 			enterNamedPass(context.Name);
 			if (!haveShadow) {
-				return true;
+				return recording.Request.Source->ImportedDirectionalShadow == 0;
 			}
-			if (!recordUploads()) {
-				return false;
+			const bool seeded = recording.Request.Source->ImportedDirectionalShadow != 0;
+			if (seeded) {
+				auto *source = State->FindPortalShadow(recording.Request.Source->ImportedDirectionalShadow);
+				if (!source || !State->RecordPortalShadowImport(command, *source)) return false;
+				ENGINE_PROFILE("portal shadow seed");
+				if (source->Packed) {
+					if (!State->PackedShadowPipeline) return false;
+					SDL_GPUDepthStencilTargetInfo target{};
+					target.texture = State->ShadowTexture;
+					target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+					target.store_op = SDL_GPU_STOREOP_STORE;
+					target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					target.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					// Prepared nodes reuse this scratch in queue order until one final fence.
+					target.cycle = State->PortalTreeJob.Prepared == 0;
+					auto *decode = SDL_BeginGPURenderPass(command, nullptr, 0, &target);
+					if (!decode) return false;
+					State->BindPipeline(decode, State->PackedShadowPipeline, Impl::PipelineFamily::Other);
+					SDL_BindGPUFragmentStorageBuffers(decode, 0, &source->Packed, 1);
+					SDL_DrawGPUPrimitives(decode, 3, 1, 0, 0);
+					SDL_EndGPURenderPass(decode);
+					++result.DrawCalls;
+					core::Metrics::Count("render.portal_shadow.packed_seed_bytes", source->GpuBytes);
+				} else {
+					auto *copy = SDL_BeginGPUCopyPass(command);
+					if (!copy) return false;
+					SDL_GPUTextureLocation from{}, to{};
+					from.texture = source->Texture;
+					to.texture = State->ShadowTexture;
+					SDL_CopyGPUTextureToTexture(
+						copy, &from, &to, SHADOW_RESOLUTION, SHADOW_RESOLUTION, 1, false
+					);
+					SDL_EndGPUCopyPass(copy);
+				}
+				core::Metrics::Count("render.portal_shadow.seed_bytes", PORTAL_SHADOW_BYTES);
+				core::Metrics::Count("render.portal_shadow.seeds", 1);
 			}
 
 			{
@@ -56,26 +90,28 @@ namespace engine::render {
 					ENGINE_PROFILE_CAT("shadow setup", core::ProfileCategory::Render);
 					shadowTarget.texture = State->ShadowTexture;
 					shadowTarget.clear_depth = 1.0f;
-					shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+					shadowTarget.load_op = seeded ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
 
 					// **Stored, unlike the colour pass's depth.** This one is read by
 					// the next pass, which is the entire point of rendering it.
 					shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
 					shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 					shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-					shadowTarget.cycle = true;
+					shadowTarget.cycle = !seeded;
 
 					pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
-					State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
-
-					State->BindInstanceBuffers(pass);
-
-					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-					SDL_PushGPUVertexUniformData(
-						command, 0, &lightViewProjection, sizeof(lightViewProjection)
-					);
+					if (!pass) return false;
+					if (!seeded) core::Metrics::Count("render.shadow.clears", 1);
+					// Empty source captures need a clear without nonexistent instance buffers.
+					if (reflectedCasters > 0 || surfaceCasters > 0) {
+						State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+						State->BindInstanceBuffers(pass);
+						const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+						SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+						SDL_PushGPUVertexUniformData(
+							command, 0, &lightViewProjection, sizeof(lightViewProjection)
+						);
+					}
 				}
 
 				// **Only the opaque part of the scene casts**, and of that only what
@@ -156,15 +192,13 @@ namespace engine::render {
 			if (havePortals && haveShadow && State->EnsureBeams()) {
 				ENGINE_PROFILE_CAT("portal beams", core::ProfileCategory::Render);
 
-				// The receiver holes nearest the eye, because every fragment tests
-				// every live beam and four is what a corridor needs. A directional
-				// beam starts at `Pane` and arrives at `Partner`; ranking the source
-				// drops the incoming beam for the room the eye is actually in when
-				// several pairs compete for the budget.
+				// Every fragment tests every live beam, so the count remains bounded.
+				// Rank a beam by the visible receivers in its mapped volume instead
+				// of by the doorway position. A doorway outside the eye can still cast
+				// onto visible ground.
 				struct Beam {
-					const PortalView *Pane = nullptr;
-					const PortalView *Partner = nullptr;
-					float Distance = 0.0f;
+					PortalBeamProjector Projector;
+					PortalBeamRank Rank;
 				};
 
 				Beam ordered[scene::MAX_SURFACES];
@@ -176,26 +210,40 @@ namespace engine::render {
 						continue;
 					}
 
-					// **A pane with no partner in this frame's set carries nothing**,
-					// because the map back is the partner's own warp - one map per
-					// pane, and a pair's two are each other's inverse. Deriving an
-					// inverse here would be a second arithmetic to get wrong.
+					// The partner is the source aperture in the mapped chart. A pane
+					// without that aperture cannot carry source-side occlusion.
 					const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
 					if (partner == nullptr) {
 						continue;
 					}
 
-					ordered[candidates++] = Beam{
-						portal,
-						partner,
-						scene::RectangleDistance(
-							partner->Centre, partner->First, partner->Second, cameraFrame.Position
-						)
-					};
+					const core::Vector3 sun{State->Sun.x, State->Sun.y, State->Sun.z};
+					const PortalBeamProjector projector =
+						PortalBeamFromPair(*portal, *partner, sceneBounds, sun);
+					float influence = PortalBeamInfluenceDistanceSquared(
+						projector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+					);
+					if (!std::isfinite(influence)) {
+						// A visible portal can show a child view whose receivers did not
+						// survive the main camera cull. Keep its beam as a conservative
+						// fallback so the child view does not lose transported occlusion.
+						for (const uint32_t row : State->DrawOrder) {
+							if (row < State->VisibleInstances.size() &&
+								State->VisibleInstances[row].Surface == portal->Index) {
+								const float distance = scene::RectangleDistance(
+									portal->Centre, portal->First, portal->Second, cameraFrame.Position
+								);
+								influence = distance * distance;
+								break;
+							}
+						}
+					}
+					if (!std::isfinite(influence)) continue;
+					ordered[candidates++] = Beam{projector, {static_cast<uint32_t>(slot), influence}};
 				}
 
 				std::sort(ordered, ordered + candidates, [](const Beam &left, const Beam &right) {
-					return left.Distance < right.Distance;
+					return PortalBeamRanksBefore(left.Rank, right.Rank);
 				});
 
 				if (candidates > State->MaximumBeamCandidatesWarned) {
@@ -204,7 +252,7 @@ namespace engine::render {
 					// not working at all, which is a much harder thing to look for
 					// than a line saying which holes were left out.
 					ENGINE_WARN(
-						"{} holes could carry a shadow and only {} may; the farther ones do not",
+						"{} portal beams reach visible receivers and only {} may run",
 						candidates,
 						MAX_PORTAL_BEAMS
 					);
@@ -215,25 +263,18 @@ namespace engine::render {
 
 				for (uint32_t index = 0; index < live; index++) {
 					const Beam &beam = ordered[index];
-					const core::Vector3 sun{State->Sun.x, State->Sun.y, State->Sun.z};
-
 					// The receiver is carried from the far room back into this
-					// pane's chart by the partner's warp. Its light ray has to take
-					// that same rotation. Mapping only the position makes a turned
-					// portal cast the right silhouette in the wrong direction.
-					const core::Vector3 beamDirection = beam.Partner->Warp.Rotate(sun);
+					// pane's source chart by this pane's warp. The light matrix and
+					// source casters are both in that chart.
+					State->Beams.Light[index] = beam.Projector.Light;
 
-					State->Beams.Light[index] = graph::FitPortalLight(
-						sceneBounds, beam.Pane->Centre, beam.Pane->First, beam.Pane->Second, beamDirection
-					);
-
-					State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
+					State->Beams.Back[index] = scene::SeamMatrix(beam.Projector.Back);
 
 					State->Beams.Plane[index] = glm::vec4{
-						beam.Pane->Normal.X,
-						beam.Pane->Normal.Y,
-						beam.Pane->Normal.Z,
-						beam.Pane->Normal.Dot(beam.Pane->Centre)
+						beam.Projector.PlaneNormal.X,
+						beam.Projector.PlaneNormal.Y,
+						beam.Projector.PlaneNormal.Z,
+						beam.Projector.PlaneOffset
 					};
 
 					// **The quadrant, once.** The lookup window, the viewport and
@@ -241,7 +282,7 @@ namespace engine::render {
 					// and they were written out three times until v0.19 - see
 					// `BeamQuadrant`, which `tests/Primitives.cpp` checks tiles
 					// the atlas exactly.
-					const AtlasQuadrant quadrant = BeamQuadrant(index, SHADOW_RESOLUTION);
+					const AtlasQuadrant quadrant = BeamQuadrant(index, PORTAL_BEAM_RESOLUTION);
 					State->Beams.Region[index] = quadrant.Window;
 
 					SDL_GPUDepthStencilTargetInfo beamTarget{};

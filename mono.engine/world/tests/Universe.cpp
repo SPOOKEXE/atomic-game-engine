@@ -6,6 +6,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -707,6 +708,8 @@ TEST_CASE("presentation keeps each world on its physical-core lane", "[world][pa
 	std::thread::id secondTickThread;
 	std::thread::id firstPresentationThread;
 	std::thread::id secondPresentationThread;
+	std::thread::id firstCollectionThread;
+	std::thread::id secondCollectionThread;
 	std::atomic<unsigned> arrived{0};
 	std::atomic<bool> release{false};
 
@@ -740,12 +743,17 @@ TEST_CASE("presentation keeps each world on its physical-core lane", "[world][pa
 		Presentation{first, 1.0f / 60.0f, 0.25f},
 		Presentation{second, 1.0f / 60.0f, 0.75f},
 	};
-	REQUIRE(universe.PresentMany(requests) == 2);
+	REQUIRE(universe.PresentMany(requests, [&](WorldId world, Store &) {
+		if (world == first) firstCollectionThread = std::this_thread::get_id();
+		if (world == second) secondCollectionThread = std::this_thread::get_id();
+	}) == 2);
 	CHECK(firstPresentationThread == firstTickThread);
 	CHECK(secondPresentationThread == secondTickThread);
 	CHECK(firstPresentationThread != std::this_thread::get_id());
 	CHECK(secondPresentationThread != std::this_thread::get_id());
 	CHECK(firstPresentationThread != secondPresentationThread);
+	CHECK(firstCollectionThread == firstPresentationThread);
+	CHECK(secondCollectionThread == secondPresentationThread);
 
 	universe.Enter(first, [](Store &store) { CHECK(store.Time().Alpha == 0.25f); });
 	universe.Enter(second, [](Store &store) { CHECK(store.Time().Alpha == 0.75f); });
@@ -1030,6 +1038,58 @@ TEST_CASE("change bits survive the ticks between two published ones", "[world]")
 	}
 
 	CHECK(changed == 1);
+}
+
+TEST_CASE("a publication includes changes from every tick in its batch", "[world][replication-batch]") {
+	const bool coordinated = GENERATE(false, true);
+	CAPTURE(coordinated);
+	Universe universe;
+	const auto id = universe.Create(Named("replication.batch", 60));
+	Entity subject{};
+	universe.Enter(id, [&](Store &store, Scheduler &systems) {
+		store.Observe<universe_test::Tracked>();
+		subject = store.Create();
+		store.Set(subject, universe_test::Tracked{});
+		systems.Add("write-first-tick", Phase::Simulation, [subject](Store &world) {
+			if (world.Time().Tick == 1) world.GetMutable<universe_test::Tracked>(subject)->Value = 17;
+		});
+	});
+	const auto advance = [&] {
+		if (!coordinated) {
+			universe.Tick(1.0f / 30);
+			return;
+		}
+		REQUIRE(universe.BeginTickExchangeFrame(1.0f / 30) == 2);
+		for (int round = 0; round < 2; ++round) {
+			REQUIRE(universe.BeginTickExchangeRound());
+			std::vector<engine::world::TickExchangeRequest> requests;
+			std::vector<engine::world::TickExchangeReply> replies;
+			REQUIRE(universe.CollectTickExchangeRequests(requests));
+			REQUIRE(universe.ServeTickExchangeRequests(requests, replies));
+			REQUIRE(universe.ApplyTickExchangeReplies(replies));
+			REQUIRE(universe.FinishTickExchangeRound());
+		}
+		REQUIRE(universe.EndTickExchangeFrame());
+	};
+	advance();
+	CHECK(universe.StatisticsOf(id).Ticks == 2);
+	REQUIRE(universe.TakeReplicationTick(id));
+	universe.Enter(id, [&](Store &store) {
+		size_t changed = 0;
+		store.EachChanged<universe_test::Tracked>([&](Entity entity, const universe_test::Tracked &value) {
+			CHECK(entity == subject);
+			CHECK(value.Value == 17);
+			++changed;
+		});
+		CHECK(changed == 1);
+	});
+	advance();
+	REQUIRE(universe.TakeReplicationTick(id));
+	universe.Enter(id, [&](Store &store) {
+		size_t changed = 0;
+		store.EachChanged<universe_test::Tracked>([&](Entity, const universe_test::Tracked &) { ++changed; });
+		CHECK(changed == 0);
+	});
 }
 
 TEST_CASE("a replication rate that is not a number publishes every tick", "[world]") {

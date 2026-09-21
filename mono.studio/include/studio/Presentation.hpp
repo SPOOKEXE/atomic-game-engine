@@ -74,6 +74,14 @@ namespace studio {
 		engine::ecs::Store &store, float delta, bool worldRunning, bool renderingEnabled
 	);
 
+	// Carries the most recent submitted scene triangle tally across retained
+	// redraws. A cached redraw records no geometry, so its zero is work done
+	// this frame rather than the visible scene's current triangle count.
+	inline uint64_t
+	UpdateSceneTriangleCount(uint64_t current, const engine::render::FrameResult &redraw, bool sceneRedrawn) {
+		return sceneRedrawn && redraw.Submitted ? redraw.Triangles : current;
+	}
+
 	// The slowly sampled values printed in Studio's always-visible status bar.
 	//
 	// The source counters change every frame even when the visible scene and

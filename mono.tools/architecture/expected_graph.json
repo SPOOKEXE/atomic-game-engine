@@ -164,8 +164,18 @@
       "tier": "shared",
       "layer": 13,
       "links": [
+        "assets",
+        "collision",
         "core",
-        "parallel"
+        "ecs",
+        "effects",
+        "gui",
+        "parallel",
+        "physics",
+        "scene",
+        "script",
+        "spatial",
+        "world"
       ]
     },
     "core": {
@@ -238,6 +248,7 @@
         "core",
         "ecs",
         "effects",
+        "graph",
         "gui",
         "parallel",
         "physics",
@@ -319,11 +330,14 @@
         "gui",
         "msl",
         "parallel",
+        "physics",
         "render",
         "resources",
         "scene",
+        "script",
         "spatial",
-        "ui"
+        "ui",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -418,9 +432,12 @@
         "gui",
         "msl",
         "parallel",
+        "physics",
         "resources",
         "scene",
-        "spatial"
+        "script",
+        "spatial",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -642,10 +659,13 @@
         "gui",
         "msl",
         "parallel",
+        "physics",
         "render",
         "resources",
         "scene",
-        "spatial"
+        "script",
+        "spatial",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -704,13 +724,22 @@
       "tier": "shared",
       "links": [
         "assets",
+        "collision",
         "control",
         "core",
         "delivery",
         "discord",
+        "ecs",
+        "effects",
+        "gui",
         "net",
         "network",
-        "parallel"
+        "parallel",
+        "physics",
+        "scene",
+        "script",
+        "spatial",
+        "world"
       ],
       "requires": "MONO_BUILD_CDN"
     },
@@ -762,11 +791,14 @@
         "gui",
         "msl",
         "parallel",
+        "physics",
         "render",
         "resources",
         "scene",
+        "script",
         "spatial",
-        "ui"
+        "ui",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },

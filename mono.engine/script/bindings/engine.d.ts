@@ -458,6 +458,8 @@ declare namespace Enum {
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
 	interface AtmosphereProceduralShader extends EnumItem { readonly __enum: "AtmosphereProceduralShader"; }
+	interface AuthoredAffordanceKind extends EnumItem { readonly __enum: "AuthoredAffordanceKind"; }
+	interface AutoMeshLODStrategy extends EnumItem { readonly __enum: "AutoMeshLODStrategy"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface Axis extends EnumItem { readonly __enum: "Axis"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
@@ -545,6 +547,17 @@ declare namespace Enum {
 		readonly Thin: AtmosphereProceduralShader;
 		readonly Mars: AtmosphereProceduralShader;
 		readonly Alien: AtmosphereProceduralShader;
+	};
+	const AuthoredAffordanceKind: {
+		readonly None: AuthoredAffordanceKind;
+		readonly Walkable: AuthoredAffordanceKind;
+		readonly Climbable: AuthoredAffordanceKind;
+		readonly Interactable: AuthoredAffordanceKind;
+		readonly Cover: AuthoredAffordanceKind;
+	};
+	const AutoMeshLODStrategy: {
+		readonly Decimated: AutoMeshLODStrategy;
+		readonly Reduced: AutoMeshLODStrategy;
 	};
 	const AutomaticSize: {
 		readonly None: AutomaticSize;
@@ -1201,6 +1214,8 @@ declare interface Instance {
 	Equals(other: Instance): boolean;
 	GetPlayerFromCharacter(character: Instance): Instance | undefined;
 	LoadCharacter(): Instance | undefined;
+	AddAccessory(accessory: Instance): boolean;
+	CutTo(frame: CFrame): boolean;
 	KeepWorldAwake(reason: string): void;
 	LetWorldSleep(): void;
 	IsKeepingWorldAwake(): boolean;
@@ -1208,9 +1223,13 @@ declare interface Instance {
 	GetNetworkOwner(): Instance | null;
 	GetLinearVelocity(): Vector3;
 	GetAngularVelocity(): Vector3;
+	GetAppliedForce(): Vector3;
+	GetAppliedTorque(): Vector3;
 	SetLinearVelocity(velocity: Vector3): void;
 	SetAngularVelocity(velocity: Vector3): void;
 	ApplyImpulse(impulse: Vector3): void;
+	SetAppliedForce(force: Vector3): void;
+	SetAppliedTorque(torque: Vector3): void;
 	Break(): number;
 	SetLocalTransparency(value: number): void;
 	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;
@@ -1231,6 +1250,11 @@ declare interface Instance {
 	DrawRectangle(position: Vector2, size: Vector2, colour: Color3, transparency?: number): boolean;
 	DrawLine(from: Vector2, to: Vector2, colour: Color3, transparency?: number): boolean;
 	DrawCircle(centre: Vector2, radius: number, colour: Color3, transparency?: number): boolean;
+	/** Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight alpha.
+	 * FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a length mismatch.
+	 * Buffers above the 64 MiB image ceiling raise before the image changes. */
+	ToBuffer(): ArrayBuffer;
+	FromBuffer(buffer: ArrayBuffer): boolean;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };
@@ -1244,9 +1268,15 @@ declare interface Instance {
 	readonly MouseButton1Click: GuiSignal;
 	readonly MouseButton1Down: GuiSignal;
 	readonly MouseButton1Up: GuiSignal;
+	readonly OnMouse1Down: GuiSignal;
+	readonly OnMouse1Up: GuiSignal;
+	readonly OnMouse1Changed: PointerSignal;
 	readonly MouseButton2Click: GuiSignal;
 	readonly MouseButton2Down: GuiSignal;
 	readonly MouseButton2Up: GuiSignal;
+	readonly OnMouse2Down: GuiSignal;
+	readonly OnMouse2Up: GuiSignal;
+	readonly OnMouse2Changed: PointerSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
 	readonly MouseEnter: PointerSignal;
@@ -1293,6 +1323,9 @@ declare interface VectorField3D extends PVInstance {
 }
 
 declare interface BasePart extends PVInstance {
+	AffordanceEnabled: boolean;
+	AffordanceId: string;
+	AffordanceKind: Enum.AuthoredAffordanceKind;
 	AlphaCutoff: number;
 	AlphaMode: Enum.AlphaMode;
 	Anchored: boolean;
@@ -1304,16 +1337,21 @@ declare interface BasePart extends PVInstance {
 	CollisionGroup: string;
 	CollisionShape: Enum.ShapeKind;
 	Color: Color3;
+	ComputeEffectNode: string;
 	CustomPhysicalProperties: boolean;
 	Density: number;
 	Elasticity: number;
 	EmissiveStrength: number;
 	EmissiveTint: Color3;
 	Friction: number;
+	Kinematic: boolean;
 	LinearDamping: number;
 	readonly LocalTransparency: number;
 	Locked: boolean;
 	readonly Mass: number;
+	PostProcessEffectNode: string;
+	RenderFeatureDisableMask: number;
+	RenderFeatureEnableMask: number;
 	ResampleMode: Enum.ResamplerMode;
 	Size: Vector3;
 	SurfaceColor: Color3;
@@ -1347,9 +1385,36 @@ declare interface Tool extends Model {
 	Grip: CFrame;
 }
 
+declare interface Accessory extends Model {
+}
+
 declare interface MeshPart extends BasePart {
+	AutoLod1MeshId: string;
+	AutoLod1Ratio: number;
+	AutoLod2MeshId: string;
+	AutoLod2Ratio: number;
+	AutoLod3MeshId: string;
+	AutoLod3Ratio: number;
+	AutoLodLevels: number;
+	AutoLodStrategy: Enum.AutoMeshLODStrategy;
+	AutoLodTargetQuadArea: number;
+	CustomLod1MeshId: string;
+	CustomLod1Ratio: number;
+	CustomLod2MeshId: string;
+	CustomLod2Ratio: number;
+	CustomLod3MeshId: string;
+	CustomLod3Ratio: number;
+	CustomLodLevels: number;
+	CustomLodTargetQuadArea: number;
 	EmissiveMap: string;
 	HeightMap: string;
+	Lod1MeshId: string;
+	Lod1Ratio: number;
+	Lod2MeshId: string;
+	Lod2Ratio: number;
+	Lod3MeshId: string;
+	Lod3Ratio: number;
+	LodTargetQuadArea: number;
 	MeshId: string;
 	MetalnessMap: string;
 	NormalMap: string;
@@ -1365,6 +1430,8 @@ declare interface SkinnedMeshPart extends MeshPart {
 }
 
 declare interface Camera extends PVInstance {
+	CameraSubject: Instance;
+	CameraSubjectAutomatic: boolean;
 	FarPlaneZ: number;
 	FieldOfView: number;
 	ImageHeight: number;
@@ -1372,6 +1439,8 @@ declare interface Camera extends PVInstance {
 	MaxImageHeight: number;
 	MaxImageWidth: number;
 	NearPlaneZ: number;
+	RenderFeatureDisableMask: number;
+	RenderFeatureEnableMask: number;
 	SurfaceSize: Vector3;
 }
 
@@ -1423,6 +1492,7 @@ declare interface Humanoid extends Instance {
 	JumpPower: number;
 	MaxHealth: number;
 	MoveDirection: Vector3;
+	RootPart: Instance;
 	WalkSpeed: number;
 }
 
@@ -1490,6 +1560,12 @@ declare interface Bone extends Instance {
 	RestCFrame: CFrame;
 	Transform: CFrame;
 	readonly TransformedWorldCFrame: CFrame;
+}
+
+declare interface RigKeypoint extends Instance {
+	CFrame: CFrame;
+	Joint: number;
+	KeypointId: string;
 }
 
 declare interface AnimationBuffer extends Instance {
@@ -1684,12 +1760,20 @@ declare interface LensShader extends Instance {
 
 declare interface EditableMesh extends Instance {
 	readonly ContentId: string;
+	PackingAttributes: number;
+	PackingFormat: string;
+	PackingMaximum: number;
+	PackingMinimum: number;
 	readonly TriangleCount: number;
 	readonly VertexCount: number;
 }
 
 declare interface EditableImage extends Instance {
 	readonly ContentId: string;
+	PackingAttributes: number;
+	PackingFormat: string;
+	PackingMaximum: number;
+	PackingMinimum: number;
 	readonly Size: Vector2;
 }
 
@@ -1828,6 +1912,7 @@ declare interface PVAdornment extends GuiBase3d {
 	Adornee: Instance;
 	AlwaysOnTop: boolean;
 	Color3: Color3;
+	InteractionEnabled: boolean;
 	Transparency: number;
 	Visible: boolean;
 	ZIndex: number;
@@ -2337,6 +2422,8 @@ declare interface Lighting extends Service {
 	GeographicLatitude: number;
 	OutdoorAmbient: Color3;
 	PostProcessShader: string;
+	RenderFeatureDisableMask: number;
+	RenderFeatureEnableMask: number;
 }
 
 declare interface ReplicatedFirst extends Service {
@@ -2514,6 +2601,9 @@ declare interface ContentService {
 	// its slot as an empty string.
 	GetMeshTextures(mesh: string): string[];
 
+	// Authored object-space mesh dimensions, or zero before content arrives.
+	GetMeshSize(mesh: string): Vector3;
+
 	GetTextures(): string[];
 
 	// Null for a still image and for a texture this world has not been told
@@ -2536,6 +2626,61 @@ declare interface ComputeService {
 		originY?: number
 	): Promise<number[]>;
 }
+
+interface DataSceneOptions {
+	SchemaVersion: "data-scene-options/v1";
+	Channels: string[];
+	CameraId: string;
+	Pipeline: string;
+	CaptureNode: string;
+	ViewSlot: number;
+	TemporalHistory: "preserve";
+	StorageProfile: "lossless" | "training_compact";
+	Output: "raw_planes";
+	IncludeSceneData: boolean;
+	IncludeExactMasks: false;
+	CoordinateSpace: "world_camera_image";
+	NoiseMode: "none" | "gaussian";
+	NoiseSeed: number;
+	NoiseSigma: number;
+}
+
+// Read-only ECS observations. The result records are intentionally typed as
+// unknown-shaped maps while negotiated capture and lifecycle adapters evolve.
+declare interface DataSceneService {
+	GetCapabilities(): Record<string, unknown>;
+	GetSceneSnapshot(limit?: number): Record<string, unknown>;
+	GetCameraRenderingData(camera: Instance, objectLimit?: number): Record<string, unknown>;
+	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
+	GetCaptureChannels(): Record<string, unknown>;
+	Capture(request: unknown): Record<string, unknown>;
+	SubmitViewCameraMutation(request: unknown): Record<string, unknown>;
+	CancelViewCameraMutation(ticket: string): Record<string, unknown>;
+	PollViewCameraMutation(ticket: string): Record<string, unknown>;
+	CreateOptions(): DataSceneOptions;
+	CaptureBundle(snapshotId: string, options: DataSceneOptions): Record<string, unknown>;
+	PollCapture(ticket: string): Record<string, unknown>;
+	CancelCapture(ticket: string): Record<string, unknown>;
+	GetCaptureBuffer(ticket: string, resource: string, offset: number, maximumBytes: number): ArrayBuffer;
+	ReleaseCapture(ticket: string): Record<string, unknown>;
+	SetCaptureDriver(driver: ((snapshotId: string, ticket?: string) => Record<string, unknown>) | null): Record<string, unknown>;
+	// A render_only lifecycle request reaches submitted after frame-command submission.
+	// GPU readback readiness is not part of this lifecycle surface.
+	RequestLifecycle(request: unknown): Record<string, unknown>;
+	PollLifecycle(ticket: string): Record<string, unknown>;
+	ReleaseLifecycle(ticket: string): Record<string, unknown>;
+	GetResources(): Record<string, unknown>;
+	SetEventNarratives(bundle: unknown): Record<string, unknown>;
+	GetEventNarratives(): Record<string, unknown>;
+	Raycast(request: unknown): Record<string, unknown>;
+	OverlapAABB(request: unknown): Record<string, unknown>;
+	OverlapOBB(request: unknown): Record<string, unknown>;
+	GetColliderBev(request: unknown): Record<string, unknown>;
+	GetFilledOccupancy(request: unknown): Record<string, unknown>;
+	GetSignedDistanceField(request: unknown): Record<string, unknown>;
+	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
+}
+
 
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
@@ -2717,6 +2862,7 @@ declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
 declare const ComputeService: ComputeService;
+declare const DataSceneService: DataSceneService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
@@ -2815,6 +2961,7 @@ declare const game: {
 		(service: "Teams"): Teams;
 		(service: "RunService"): RunService;
 		(service: "ComputeService"): ComputeService;
+		(service: "DataSceneService"): DataSceneService;
 		(service: "MessagingService"): MessagingService;
 		(service: "TeleportService"): TeleportService;
 		(service: "MemoryStoreService"): MemoryStoreService;
@@ -2842,6 +2989,7 @@ declare const Instance: {
 		(className: "BreakGroup", parent?: Instance): BreakGroup;
 		(className: "WorldModel", parent?: Instance): WorldModel;
 		(className: "Tool", parent?: Instance): Tool;
+		(className: "Accessory", parent?: Instance): Accessory;
 		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "SkinnedMeshPart", parent?: Instance): SkinnedMeshPart;
 		(className: "Camera", parent?: Instance): Camera;
@@ -2866,6 +3014,7 @@ declare const Instance: {
 		(className: "ObjectValue", parent?: Instance): ObjectValue;
 		(className: "Vector3Value", parent?: Instance): Vector3Value;
 		(className: "Bone", parent?: Instance): Bone;
+		(className: "RigKeypoint", parent?: Instance): RigKeypoint;
 		(className: "AnimationBuffer", parent?: Instance): AnimationBuffer;
 		(className: "Animation", parent?: Instance): Animation;
 		(className: "Animator", parent?: Instance): Animator;

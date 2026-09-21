@@ -255,7 +255,18 @@ namespace engine::script {
 				return Context.Role;
 			}
 
+			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
+				return Context.DataCapture;
+			}
+
+			const std::shared_ptr<DataLifecycleBridge> &DataLifecycle() const override {
+				return Context.DataLifecycle;
+			}
+
 			TweenTable &Tweens() override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not create tweens");
+				}
 				return Context.Tweens;
 			}
 
@@ -527,6 +538,9 @@ namespace engine::script {
 			}
 
 			CallbackRef RetainCallback(size_t index) override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not retain callbacks");
+				}
 				luaL_checktype(State, Slot(index), LUA_TFUNCTION);
 
 				lua_pushvalue(State, Slot(index));
@@ -540,6 +554,9 @@ namespace engine::script {
 			}
 
 			HostCallback RetainHostCallback(size_t index) override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not register host callbacks");
+				}
 				luaL_checktype(State, Slot(index), LUA_TFUNCTION);
 
 				lua_pushvalue(State, Slot(index));
@@ -560,6 +577,9 @@ namespace engine::script {
 			}
 
 			void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not retain callbacks");
+				}
 				Context.Signals.MarkOnce(Context.Signals.Connect(kind, subject, callback));
 			}
 
@@ -772,10 +792,16 @@ namespace engine::script {
 			}
 
 			void Await(uint64_t ticket) override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not suspend");
+				}
 				Suspend(Context.AwaitedTickets, ticket);
 			}
 
 			void AwaitChild(uint64_t waiter) override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not suspend");
+				}
 				// **The same suspension under a different key, which is the whole
 				// of what a second resume source costs this adapter.** What
 				// differs is only who comes back for the thread -
@@ -785,12 +811,18 @@ namespace engine::script {
 			}
 
 			void AwaitEditableMesh(scene::EditableMeshGeometry geometry) override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not suspend");
+				}
 				const uint64_t ticket =
 					Context.EditableMeshes.Submit(*Context.World, Self, std::move(geometry));
 				Suspend(Context.AwaitedEditableMeshes, ticket);
 			}
 
 			void AwaitCompute(uint64_t ticket) override {
+				if (Context.Package != nullptr) {
+					Raise("data-script packages may not suspend");
+				}
 				Suspend(Context.AwaitedComputations, ticket);
 			}
 

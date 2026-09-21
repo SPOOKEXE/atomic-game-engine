@@ -99,7 +99,39 @@ build target="":
     if [ ! -f {{build}}/build.ninja ] || [ CMakePresets.json -nt {{build}}/CMakeCache.txt ]; then
         cmake --preset {{preset}} > /dev/null
     fi
+    # ccache appends one comment-delimited outcome per compiler call. Keeping the
+    # log in the build tree makes its cumulative history match this preset rather
+    # than mixing debug, release and unrelated checkouts. ccache runs from the
+    # build directory, so this must be absolute.
+    export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
     cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
+
+# Report one selected build's Ninja edges and cumulative ccache outcomes. The
+# build status remains authoritative: a partial Ninja log is still useful after
+# a failed compile, but profiling must never turn that failure into success.
+build-profile target="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f {{build}}/build.ninja ] || [ CMakePresets.json -nt {{build}}/CMakeCache.txt ]; then
+        cmake --preset {{preset}} > /dev/null
+    fi
+    export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
+    set +e
+    cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
+    build_status=$?
+    python3 scripts/build-profile.py --build-dir "{{build}}" --stats-log "$CCACHE_STATSLOG"
+    profile_status=$?
+    set -e
+    if [ "$build_status" -ne 0 ]; then
+        exit "$build_status"
+    fi
+    exit "$profile_status"
+
+# The profiler is standalone so it can inspect a build before an engine tool
+# exists. Its synthetic fixtures cover Ninja timing, grouping, ccache outcomes
+# and unity-source attribution.
+build-profile-check:
+    python3 scripts/tests/build_profile_test.py
 
 # One program and only its dependencies.
 client: (build "client")
@@ -118,6 +150,149 @@ test-all *args: (test "--all" args)
 # What the runner would run, and why, without running anything.
 test-list: build
     ./{{build}}/tools/testrunner --build {{build}} --list
+
+# Real offscreen render cases through the existing Catch suite. A requested
+# unsupported backend fails instead of silently measuring Vulkan under its name.
+render-check filter="[render][gpu]" backend="vulkan": (build "test_render")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{backend}}" != "vulkan" ]; then
+        echo "render-check: backend '{{backend}}' is not implemented by Renderer::Initialise" >&2
+        exit 2
+    fi
+    export MONO_RENDER_REVISION="$(git describe --always --dirty)"
+    ./{{build}}/tests/test_render "{{filter}}"
+
+# Whole camera-batch signature costs, with unchanged rows and one-row edits.
+render-preparation-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_render
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --baseline .cache/build/bench/render-baseline.tsv --filter engine.render.bench.world-presentation --all --samples {{samples}}
+
+# Data-capture hook dispatch through the real renderer without opening a device.
+data-capture-hook-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_render
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.render.bench.data-capture-hooks --all --samples {{samples}}
+
+# The normal benchmark runner reports only wall time. This GPU suite also emits
+# CPU recording, Vulkan timestamp, residency, allocation, cache and transfer
+# counters, so invoke its selected suite directly in the optimized preset.
+gpu-texture-atlas-bench samples="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    # SDL cannot safely unwind a command buffer that stopped completing. The
+    # process boundary owns this timeout, so a hung driver cannot strand the
+    # benchmark in Renderer shutdown while it releases in-flight resources.
+    if ! MONO_GPU_ATLAS_REPORT=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-texture-atlas --samples {{samples}}; then
+        echo "gpu-texture-atlas-bench failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
+
+# Builds the device-owning benchmark without running it, then proves every
+# compiled resource shader was staged beside that benchmark.
+check-bench-render-shaders:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    shopt -s nullglob
+    compiled=(.cache/build/bench/shaderstage/resources/*)
+    if [ "${#compiled[@]}" -eq 0 ]; then
+        echo "FAIL: bench shader check found no compiled resource shaders" >&2
+        exit 1
+    fi
+    for shader in "${compiled[@]}"; do
+        test -f ".cache/build/bench/bench/shaders/resources/$(basename "$shader")" \
+            || (echo "FAIL: bench_render did not stage $(basename "$shader")" >&2 && exit 1)
+    done
+    echo "bench_render stages renderer shaders without opening a device"
+
+# Integrated release measurement for the medium render demo. Each run writes
+# the frame tree and heap/GPU report before teardown, then prints the report
+# rows needed to compare cold and warm frames across active camera batches.
+medium-render-profile seconds="15":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset profile > /dev/null
+    cmake --build --preset profile --target client
+    mkdir -p .cache/medium-render-profile
+    profile_build=".cache/build/profile"
+    script="$profile_build/assets/examples/scripts/RenderFeaturesDemo.luau"
+    pipeline="$profile_build/assets/examples/pipelines/RenderFeatures.pipeline"
+    previous_draw_calls=0
+    for cameras in 1 2 8; do
+        base=".cache/medium-render-profile/cameras-$cameras"
+        rm -f "$base-frame.txt" "$base-heap.txt" "$base.log"
+        timeout $(( {{seconds}} + 120 )) "$profile_build/client/client" \
+            --headless --uncapped --frames 1000000000 --profile-seconds {{seconds}} \
+            --width 1280 --height 720 --worlds "$cameras" --view-spacing 0 \
+            --script "$script" --render-pipeline "$pipeline" \
+            --profile-snapshot "$base-frame.txt" --heap-report "$base-heap.txt" \
+            > "$base.log" 2>&1
+        test -s "$base-frame.txt"
+        test -s "$base-heap.txt"
+        grep -Eq '^window +[1-9][0-9]* frames ' "$base-frame.txt"
+
+        # A header-only capture can be produced after an empty run. Require a
+        # measured frame and real tracked allocation volume before reporting it.
+        awk '$1 == "frame" && $2 == "ms" && $3 == "mean" && $4 + 0 > 0 { found = 1 } END { exit !found }' "$base-frame.txt"
+        grep -q '^gpu logical heap$' "$base-heap.txt"
+        ! grep -q 'not compiled in' "$base-heap.txt"
+        awk '
+            $0 == "gpu logical heap" { in_gpu_heap = 1; next }
+            in_gpu_heap && $1 == "allocated" && $2 + 0 > 0 { found = 1 }
+            END { exit !found }
+        ' "$base-heap.txt"
+        # The headless product must submit scene work. A valid heap alone can
+        # come from renderer startup, so require submitted draws, their GPU
+        # timestamp span, and the resident-row upload path as separate proof.
+        draw_calls="$(awk '
+            /triangle\(s\) in [0-9]+ draw call\(s\) at the busiest frame/ {
+                for (field = 1; field < NF; field++) {
+                    if ($field == "in" && $(field + 2) == "draw") value = $(field + 1)
+                }
+            }
+            END { if (value == "") exit 1; print value }
+        ' "$base.log")"
+        test "$draw_calls" -gt "$previous_draw_calls"
+        previous_draw_calls="$draw_calls"
+        grep -q 'gpu timestamps enabled' "$base.log"
+        grep -Eq '^gpu [[:graph:]]+' "$base-frame.txt"
+        grep -Eq '[1-9][0-9]* of [1-9][0-9]* resident instance chunk\(s\)' "$base.log"
+        # RenderFeaturesDemo's three authored nodes prove this run used the
+        # staged document rather than the default PBR fallback.
+        grep -q 'demo-compute' "$base-frame.txt"
+        grep -q 'demo-post' "$base-frame.txt"
+        grep -q 'demo-fxaa' "$base-frame.txt"
+        echo "medium-render-profile cameras=$cameras"
+        grep -E "gpu heap:|gpu memory:|cache|upload|download|timestamp" "$base.log" || true
+        grep -E "^(frame|span|category)" "$base-frame.txt" || true
+    done
+
+# Coverage-guided parsing of cooked shader bytes; no graphics stack or device.
+shader-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/shader-fuzz"
+    cmake --preset cdn -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_SHADER=ON
+    cmake --build "$fuzz_build" --target fuzz_shader -j 4
+    mkdir -p "$fuzz_build/fuzz/corpus" "$fuzz_build/fuzz/artifacts"
+    "$fuzz_build/fuzz/fuzz_shader" --write-seeds "$fuzz_build/fuzz/corpus"
+    "$fuzz_build/fuzz/fuzz_shader" "$fuzz_build/fuzz/corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/artifacts/"
+
+# Coverage-guided parsing of owned cross-world presentation messages.
+presentation-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/shader-fuzz"
+    cmake --preset cdn -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_PRESENTATION=ON
+    cmake --build "$fuzz_build" --target fuzz_presentation -j 4
+    mkdir -p "$fuzz_build/fuzz/presentation-corpus" "$fuzz_build/fuzz/presentation-artifacts"
+    "$fuzz_build/fuzz/fuzz_presentation" --write-seeds "$fuzz_build/fuzz/presentation-corpus"
+    "$fuzz_build/fuzz/fuzz_presentation" "$fuzz_build/fuzz/presentation-corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/presentation-artifacts/"
 
 # Measure the benchmark suites a change could have affected.
 #
@@ -143,10 +318,44 @@ bench *args:
 # Every benchmark, whatever changed.
 bench-all *args: (bench "--all" args)
 
+# Portal reply encoding and decoding, per complete batch. No GPU or process transport.
+# Run the binary directly so measurements stay on the terminal.
+portal-exchange-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-exchange --samples {{samples}}
+
+# Five-plane CPU codec cost, raw/compressed decoding and automatic roundtrips.
+# Each reported call is one complete 1/2/8-view batch; output stays on the terminal.
+portal-ambient-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
+
+# Six-plane CPU codec at 255x255; setup also verifies raw 256x256 wire refusal.
+portal-directional-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    MONO_PORTAL_CODEC_DIRECTIONAL=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
+
+# Opt-in existing FrameGraph hierarchy, once during benchmark setup for each codec path.
+# Normal timed samples run after collection is disabled; no profile files are written.
+portal-ambient-profile samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    MONO_PORTAL_CODEC_PROFILE=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
+
 # The Luau boundary rows, including the complete async compute lifecycle. Keep
 # this explicit because a binding benchmark is useful while working on the VM
 # without running every benchmark in the repository.
 script-binding-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scriptluau
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
+
+# Repeated public ParticleEmitter:Emit calls plus one enabled-emitter tick. This
+# is the Luau boundary row for the ECS burst queue, measured in the bench preset.
+particle-emit-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_scriptluau
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
@@ -165,6 +374,13 @@ parallel-grid-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_spatial bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.hashgrid --all --samples {{samples}}
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.broadphase --all --samples {{samples}}
+
+# A script-owned moving proxy beside static terrain. This guards the broadphase
+# split used by the Magic projectile runtime without launching a renderer.
+kinematic-broadphase-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.broadphase --all --samples {{samples}}
 
 # Constraint graph scheduling rows: independent active stacks, sparse sleeping
@@ -193,6 +409,12 @@ triangle-bvh-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_collision
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.collision.bench.triangle-bvh --all --samples {{samples}}
+
+# Terrain-sized editable collision rebuilds across the worker dispatch floor.
+terrain-collision-build-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scene
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scene.bench.editablemesh --all --samples {{samples}}
 
 # Rotational and dynamic-pair time-of-impact walks. Output remains on the
 # terminal and no benchmark file is made.
@@ -638,7 +860,7 @@ bindings-check: (build "bindings")
 typecheck: (build "scriptcheck")
     #!/usr/bin/env bash
     set -euo pipefail
-    ./{{build}}/tools/scriptcheck mono.engine/examples/*.luau
+    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau
 
     if command -v bun > /dev/null; then
         bun install --silent
@@ -670,7 +892,7 @@ typecheck: (build "scriptcheck")
 # 11 minutes of CPU, 39 s wall on 24 cores, once. Afterwards the dependency is a
 # no-op.
 typecheck-editor: luau-lsp
-    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
+    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau
     @echo "typecheck-editor ok - every example agrees with the language server"
 
 # The editor, with its control surface open for a Model Context Protocol client.
@@ -799,8 +1021,8 @@ luau-lsp:
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
 # strictest configuration this repository has - which is also what the hook
 # runs, so a push is held to the strictest configuration by default.
-check: format-check em-dash-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
-    @echo "check ok - format, em dashes, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+check: format-check em-dash-check build-profile-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+    @echo "check ok - format, em dashes, build profile, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.
 #
@@ -882,7 +1104,6 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
 # world and every gui event the router produced was delivered nowhere. The
 # router was right, the events were right, and the last hop was missing.
 #
-# Not part of `just check`: it needs a GPU, for `studio-smoke`'s reason.
 # **In `just check` since v0.19, and the reason is the component table.** The
 # programs seal it after start-up, so a component registered during a tick now
 # aborts rather than quietly taking an id that depends on which world got there
@@ -897,7 +1118,7 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
 client-smoke: (build "client")
     #!/usr/bin/env bash
     set -euo pipefail
-    scene="{{build}}/assets/examples/Interface.luau"
+    scene="{{build}}/assets/examples/scripts/Interface.luau"
     test -f "$scene" || { echo "FAIL: no staged scene at $scene"; exit 1; }
     log=$(mktemp)
     trap 'rm -f "$log"' EXIT
@@ -918,6 +1139,11 @@ client-smoke: (build "client")
     grep -q "interface: swatch 3 activated" "$log" \
         || { echo "FAIL: the button was pressed and its Activated never reached the script"; tail -20 "$log"; exit 1; }
     echo "client ok - pressed a button with no display and the script heard it"
+
+# Capture the shipped GUI compositor at two sizes and compare click-driven
+# status changes. The report keeps the BMPs beside the build for human review.
+ui-check: (build "client")
+    PRESET={{preset}} ./scripts/demos/ui-visual-check.sh
 
 # Run the client to a frame budget and check the process actually ends.
 #
@@ -995,7 +1221,7 @@ heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes I
     mkdir -p .cache
     failed=""
     for scene in {{scenes}}; do
-        path="{{build}}/assets/examples/$scene.luau"
+        path="{{build}}/assets/examples/scripts/$scene.luau"
         if [ ! -f "$path" ]; then
             echo "FAIL: no staged scene at $path"
             exit 1
@@ -1031,8 +1257,8 @@ heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes I
 # Drag the editor's window and check it is still alive afterwards.
 #
 # **The one bug class a headless run cannot reach.** The viewport shows last
-# frame's scene texture, so resizing the panel means the renderer frees a
-# texture the interface has already recorded a bind of - a use-after-free
+# frame's scene texture, so resizing the panel can replace a scene or retained
+# frame texture the interface has already recorded a bind of - a use-after-free
 # inside SDL's Vulkan backend, with nothing of ours on the stack. It needs a
 # real window, a real swapchain and a window manager, which is exactly what
 # `--headless` does not have.
@@ -1041,6 +1267,14 @@ heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes I
 # a display and `xdotool`, not only a GPU.
 studio-resize: (build "studio")
     ./scripts/studio-resize-test.sh ./{{build}}/studio/studio
+
+# Server and client Play panels must retain different renderer slots after
+# focus moves between the docked halves. The script owns a private X display,
+# then retains both scene BMPs and host captures under the selected build.
+#
+# It is not part of `just check`: it requires X11, a Vulkan device and xdotool.
+studio-viewport-isolation: (build "studio")
+    ./scripts/studio-viewport-isolation-test.sh ./{{build}}/studio/studio
 
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")
@@ -1536,3 +1770,7 @@ clean:
 # Everything derived, including the test cache.
 clean-all:
     rm -rf .cache
+# PBR demo-sized automatic LOD build latency.
+bench-mesh-lod samples="5":
+    cmake --build --preset bench --target bench_assets
+    ./.cache/build/bench/bench/bench_assets --suite engine.assets.bench.mesh-decimate --samples {{samples}}

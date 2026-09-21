@@ -203,7 +203,9 @@ namespace engine::script {
 		case PropertyType::Name:
 			// Text, never the interned id - the number means a different
 			// string in the next process.
-			return JS_NewString(context, static_cast<const Name *>(bytes)->Text().data());
+			return static_cast<const Name *>(bytes)->IsValid()
+					   ? JS_NewString(context, static_cast<const Name *>(bytes)->Text().data())
+					   : JS_NULL;
 		case PropertyType::String:
 			// **Never reached, and refused rather than handled**, exactly as
 			// the Luau side refuses it: the caller takes a `std::string`
@@ -303,6 +305,12 @@ namespace engine::script {
 			// what actually serves this type.
 			return false;
 		case PropertyType::Name: {
+			// Null resets an optional interned name. Luau accepts nil at the same
+			// boundary, so a value read as absent can be written back unchanged.
+			if (JS_IsNull(value) || JS_IsUndefined(value)) {
+				*static_cast<Name *>(out) = Name{};
+				return true;
+			}
 			const char *text = JS_ToCString(context, value);
 			if (text == nullptr) {
 				return false;
@@ -1652,7 +1660,7 @@ namespace engine::script {
 		// `JS_PreventExtensions` before it reaches a script, so
 		// `workspace.CurrentCamera = view` did not add a property, did not throw
 		// outside strict mode, and did not aim the camera.
-		// `mono.engine/examples/Mirrors-1-world.ts` has been writing it since it
+		// `mono.engine/examples/assets/scripts/Mirrors-1-world.ts` has been writing it since it
 		// was ported from the Luau file.
 		//
 		// Installed on the world object rather than on a prototype, for the

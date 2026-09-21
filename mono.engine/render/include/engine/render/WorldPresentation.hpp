@@ -9,8 +9,10 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/render/DataCapture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -29,7 +31,19 @@ namespace engine::ecs {
 	class Store;
 }
 
+namespace engine::scene {
+	struct SurfaceSlot;
+}
+
 namespace engine::render {
+
+	// Selects the active first-person Humanoid body, including a held camera's
+	// original rig. Clears both selections for other camera modes or subjects.
+	void SelectFirstPersonBody(const ecs::Store &store, View &view);
+
+	// Resolves EyePlayer against this world's current player-character links.
+	// Missing or ambiguous identities clear EyeRig; held camera copies are omitted.
+	void ResolveEyeBody(ecs::Store &store, View &view);
 
 	// What one world publishes for a presentation host to draw.
 	//
@@ -39,6 +53,18 @@ namespace engine::render {
 	struct DrawList {
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
+		// Stable object identities indexed by captured object-id values.
+		std::vector<DataCaptureObjectLabel> ObjectLabels;
+		// Stable semantic identities indexed by captured class values.
+		std::vector<DataCaptureSemanticLabel> SemanticLabels;
+		// Stable part identities indexed by captured part-id values.
+		std::vector<DataCapturePartLabel> PartLabels;
+		// False when ObjectLabels cannot describe this draw list completely.
+		bool ObjectLabelsValid = true;
+		// False when SemanticLabels cannot describe this draw list completely.
+		bool SemanticLabelsValid = true;
+		// False when PartLabels cannot describe this draw list completely.
+		bool PartLabelsValid = true;
 
 		// Joint transforms for those instances, flattened into one allocation.
 		std::vector<core::CFrame> JointFrames;
@@ -50,12 +76,18 @@ namespace engine::render {
 
 		// Monotonic source epochs last inspected by CollectInstances. These are
 		// derived cache state and deliberately do not cross snapshots.
-		std::array<uint64_t, 11> SourceRevisions{};
+		std::array<uint64_t, 14> SourceRevisions{};
+		// Entity count used to size the cached source rows.
 		size_t SourceEntityCount = 0;
+		// Number of skeletons represented by the cached source rows.
 		size_t SkeletonCount = 0;
+		// Number of bones represented by the cached joint palette.
 		size_t BoneCount = 0;
+		// Whether source rows are ready for collection.
 		bool SourcesReady = false;
+		// Whether the draw list was built from interpolated tick state.
 		bool HasInterpolation = false;
+		// Whether any source rows use a visibility filter.
 		bool HasFilteredSources = false;
 	};
 
@@ -70,6 +102,7 @@ namespace engine::render {
 		uint32_t SurfaceLimit = 0;
 		core::Name PostProcess;
 		bool Untextured = false;
+		bool Wireframe = false;
 		//@}
 	};
 
@@ -166,6 +199,10 @@ namespace engine::render {
 		//@}
 	};
 
+	// The regular presentation packet interpolates between completed ticks. A
+	// data-factory snapshot instead renders the current completed tick exactly.
+	enum class DrawCollectionTime : uint8_t { Interpolated, CurrentTick };
+
 	// Rebuilds the world-owned draw list from visible scene rows.
 	//
 	// Interpolation and device-neutral draw payload construction happen once
@@ -174,6 +211,8 @@ namespace engine::render {
 	//
 	// @param store The world being presented.
 	void CollectInstances(ecs::Store &store);
+	// Rebuilds the draw list using the requested completed-tick time policy.
+	void CollectInstances(ecs::Store &store, DrawCollectionTime time);
 
 	// Rebuilds the flat joint palette and assigns each skinned draw row its run.
 	// Useful to both the live-world and replicated collectors.
@@ -202,14 +241,42 @@ namespace engine::render {
 
 	// Collects and orders the lights relevant to one camera.
 	//
-	// Lights without a parent transform are skipped. Same-world portal copies
-	// are included, then the result is capped to MAX_SCENE_LIGHTS nearest first.
+	// Lights without a parent transform are skipped, then the result is capped
+	// by distance from their influence volume to visible receiver bounds. Portal
+	// transport is captured as a bounded seam light field by the render graph,
+	// keeping a wide local lamp from multiplying into point lights at every mouth.
+	// An empty receiver span falls back to the camera point for callers that do
+	// not own a view.
 	//
 	// @param store The world being presented.
-	// @param eye The camera position used for ordering.
+	// @param eye The camera position used when no visible receiver is supplied.
+	// @param receivers Visible world-space receiver bounds used for ordering.
 	// @param lights Cleared and filled, preserving capacity.
 	// @return The number of lights written.
-	size_t CollectLights(ecs::Store &store, const core::Vector3 &eye, std::vector<SceneLight> &lights);
+	size_t CollectLights(
+		ecs::Store &store,
+		const core::Vector3 &eye,
+		std::span<const core::AABB> receivers,
+		std::vector<SceneLight> &lights
+	);
+
+	// Convenience for collectors outside a camera view. The camera point is the
+	// only available receiver, so view-aware callers should use the overload.
+	inline size_t
+	CollectLights(ecs::Store &store, const core::Vector3 &eye, std::vector<SceneLight> &lights) {
+		return CollectLights(store, eye, {}, lights);
+	}
+
+	// Builds one renderer key for an authored profile in one world.
+	//
+	// A runtime pipeline is local to one world even when several worlds select
+	// the same authored profile. Diagnostic and capture callers must derive this
+	// key from the world they have already validated.
+	//
+	// @param profile The authored profile name.
+	// @param world The stable world number that owns the runtime graph.
+	// @return The renderer key for this profile in that one world.
+	core::Name WorldPipelineKey(core::Name profile, uint64_t world);
 
 	// Installs one universe rendering profile under a world-qualified key.
 	//
@@ -230,4 +297,25 @@ namespace engine::render {
 	//
 	// Idempotent. Call before any store first asks for DrawList's component id.
 	void RegisterPresentationComponents();
+	// Copies shared seam geometry and traversal mappings for local portal captures.
+	size_t CollectPortalViews(
+		ecs::Store &store, std::vector<PortalView> &portals, std::span<const scene::SurfaceSlot> slots = {}
+	);
+
+	// Applies request-local slots to copied rows from this world only. Rows from
+	// foreign presentation messages retain their independently owned indices.
+	void ApplySurfaceSlots(
+		std::span<scene::DrawInstance> instances, std::span<const scene::SurfaceSlot> slots, core::Name world
+	);
+
+	// Copies surface views in entity order. An explicit viewer derives mirror
+	// frames through scene::ReflectCamera without changing the active camera.
+	size_t CollectSurfaceViews(
+		ecs::Store &store,
+		std::vector<SurfaceView> &views,
+		std::span<const PortalView> portals = {},
+		const View *viewer = nullptr,
+		std::span<const scene::SurfaceSlot> slots = {}
+	);
+
 }

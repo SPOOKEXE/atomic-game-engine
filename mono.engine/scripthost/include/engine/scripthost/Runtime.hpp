@@ -15,6 +15,7 @@
 // @tier L11 · shared
 // @since v0.19
 
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Language.hpp>
 #include <engine/script/Runtime.hpp>
 
@@ -34,4 +35,19 @@ namespace engine::script {
 	// @return The runtime.
 	std::unique_ptr<Runtime>
 	MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits = {});
+
+	// The production package runner. It stays above both adapters so the
+	// executor remains VM-neutral while every package takes the adapter path.
+	DataScriptPackageRunResult RunDataScriptPackage(
+		Runtime &runtime,
+		const DataScriptPackageContext &context,
+		std::string_view source,
+		std::string_view entry
+	);
+
+	// Checks package source through the adapter selected by `language`. It is
+	// separate from execution so callers can refuse before copying a live world.
+	bool CheckDataScriptPackageSource(
+		Language language, std::string_view source, std::string_view entry, std::string &error
+	);
 }

@@ -32,7 +32,9 @@
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/spatial/Query.hpp>
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 
@@ -67,6 +69,97 @@ namespace engine::physics {
 	// than quietly answering from a prefix - a truncated overlap read as "and
 	// nothing more" is a contact that never happens.
 	inline constexpr size_t QUERY_CANDIDATE_LIMIT = 256;
+
+	// A conservative collider occupancy answer for one finite AABB. It is
+	// deliberately separate from `OverlapBox`: an empty overlap list cannot say
+	// that space is free when physics was never prepared or its candidate walk
+	// overflowed.
+	struct ColliderOccupancy {
+		// Valid Reason values.
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			CandidateOverflow,
+			BakedGeometryUncertain,
+			PhysicsStale,
+			InvalidProbe,
+		};
+
+		// Whether the requested query result is available.
+		bool Available = false;
+		// Whether overlap found.
+		bool OverlapFound = false;
+		// Whether witness available.
+		bool WitnessAvailable = false;
+		// Point witnessing the reported query result.
+		ecs::Entity Witness;
+		// Whether the result covers all requested data.
+		bool Complete = false;
+		// Reason this query result is unavailable or incomplete.
+		Reason Why = Reason::PhysicsUnprepared;
+	};
+
+	// A conservative filled-volume answer for one finite AABB. `Filled` means
+	// one queryable analytic primitive contains every corner of the probe, hence
+	// the complete probe because the supported primitives are convex. It does
+	// not infer coverage from a union of colliders. One supported analytic proof
+	// is decisive, even if another candidate is baked or only touches the cell.
+	// Without that proof, candidate evidence is unknown rather than empty.
+	struct FilledColliderOccupancy {
+		// Valid Reason values.
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			CandidateOverflow,
+			BakedGeometryUncertain,
+			UnprovenCoverage,
+			PhysicsStale,
+			InvalidProbe,
+		};
+
+		// Whether the requested query result is available.
+		bool Available = false;
+		// Whether filled.
+		bool Filled = false;
+		// Whether witness available.
+		bool WitnessAvailable = false;
+		// Point witnessing the reported query result.
+		ecs::Entity Witness;
+		// Whether the result covers all requested data.
+		bool Complete = false;
+		// Reason this query result is unavailable or incomplete.
+		Reason Why = Reason::PhysicsUnprepared;
+	};
+
+	// One conservative signed-distance answer at a world-space point. Distance is
+	// in metres: negative is strictly inside, zero is on the authored surface,
+	// and positive is outside. Exact values are intentionally limited to one
+	// supported analytic primitive, because a union changes the nearest boundary
+	// and a baked shape has no analytic distance contract here.
+	struct ColliderSignedDistance {
+		// Valid Reason values.
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			CandidateOverflow,
+			BakedGeometryUncertain,
+			UnionUncertain,
+			UnsupportedGeometry,
+			PhysicsStale,
+			InvalidProbe,
+		};
+
+		// Whether the requested query result is available.
+		bool Available = false;
+		// Signed distance in metres.
+		float DistanceMetres = 0.0f;
+		// Whether witness available.
+		bool WitnessAvailable = false;
+		// Point witnessing the reported query result.
+		ecs::Entity Witness;
+		// Reason this query result is unavailable or incomplete.
+		Reason Why = Reason::PhysicsUnprepared;
+	};
 
 	// One collider a query found.
 	//
@@ -125,13 +218,15 @@ namespace engine::physics {
 	//                    this, and a span would put an allocation and a loop on
 	//                    the inner test for a case nobody has.
 	// @return The nearest hit, or nothing. There is no "invalid hit".
+	// @param includeTriggers False for solid obstruction queries such as camera arms.
 	// @threadsafe
 	std::optional<ColliderHit> Raycast(
 		const ecs::Store &store,
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask = spatial::LayerMask::All(),
-		ecs::Entity ignore = ecs::Entity{}
+		ecs::Entity ignore = ecs::Entity{},
+		bool includeTriggers = true
 	);
 
 	// The same, carrying on out of the far side of any portal in the way.
@@ -172,6 +267,7 @@ namespace engine::physics {
 	// @param ignore      The caster, skipped on the near side only. Whatever it
 	//                    is, it is not on the far side of the hole.
 	// @return The nearest hit either side, or nothing.
+	// @param includeTriggers Whether trigger colliders can obstruct either ray segment.
 	// @threadsafe
 	// @since v0.15
 	std::optional<ColliderHit> RaycastThroughPortals(
@@ -179,7 +275,8 @@ namespace engine::physics {
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask = spatial::LayerMask::All(),
-		ecs::Entity ignore = ecs::Entity{}
+		ecs::Entity ignore = ecs::Entity{},
+		bool includeTriggers = true
 	);
 
 	// Finds every collider whose exact shape overlaps an axis-aligned box.
@@ -192,6 +289,46 @@ namespace engine::physics {
 	// @threadsafe
 	spatial::QueryResult OverlapBox(
 		const ecs::Store &store, const core::AABB &box, spatial::LayerMask mask, std::span<ecs::Entity> found
+	);
+
+	// Tests up to a caller-bounded batch of world-space AABBs. Contact includes
+	// boundary contact, as the physics narrow phase does. This reports collider
+	// contact only, not whether an AABB is filled volume. A mesh or hull candidate
+	// makes a negative answer incomplete so missing baked geometry cannot turn
+	// into a false free-space claim.
+	void ColliderOccupancyBatch(
+		const ecs::Store &store, std::span<const core::AABB> probes, std::span<ColliderOccupancy> results
+	);
+
+	// Tests whether one analytic collider completely fills each probe AABB.
+	// Baked hull and mesh candidates, candidate overflow, an unprepared world,
+	// and a stale physics index make a negative answer unavailable. A positive
+	// answer is settled even if another candidate is uncertain because one solid
+	// primitive already proves the whole cell filled.
+	void FilledColliderOccupancyBatch(
+		const ecs::Store &store,
+		std::span<const core::AABB> probes,
+		std::span<FilledColliderOccupancy> results
+	);
+
+	// Computes exact signed distances only where one authored box, sphere, or
+	// cylinder is the complete geometry evidence. Capsule, hull and mesh shapes,
+	// collider unions, more than QUERY_CANDIDATE_LIMIT colliders, stale indexes,
+	// and unprepared physics report an unavailable reason instead of an estimate.
+	void ColliderSignedDistanceBatch(
+		const ecs::Store &store,
+		std::span<const core::Vector3> probes,
+		std::span<ColliderSignedDistance> results
+	);
+
+	// Finds colliders whose exact shape overlaps an oriented box. The broad phase
+	// uses its conservative world bound; the final admission is narrow phase.
+	spatial::QueryResult OverlapOrientedBox(
+		const ecs::Store &store,
+		const core::CFrame &frame,
+		const core::Vector3 &halfExtent,
+		spatial::LayerMask mask,
+		std::span<ecs::Entity> found
 	);
 
 	// Finds every collider whose exact shape overlaps a sphere.
@@ -253,4 +390,77 @@ namespace engine::physics {
 		spatial::LayerMask mask,
 		std::span<ecs::Entity> found
 	);
+	// Placement Sweep declaration.
+	struct PlacementSweep {
+		// Whether the result covers all requested data.
+		bool Complete = false;
+		// Whether the sweep encountered a blocking collider.
+		bool Hit = false;
+		// Whether conservative fallback.
+		bool ConservativeFallback = false;
+		// First impact fraction along the requested sweep.
+		float Fraction = 1;
+		// Entity associated with owner.
+		ecs::Entity Owner;
+		// Contact or sweep surface normal.
+		core::Vector3 Normal;
+	};
+
+	// A bounded path over authored horizontal box-top polygons. The query never
+	// promotes collider geometry to navigation: every retained polygon comes from
+	// an enabled `Walkable` affordance on the same BasePart.
+	inline constexpr size_t MAX_AUTHORED_NAVMESH_SURFACES = 32;
+	// Maxauthorednavmeshpoints used by this object.
+	inline constexpr size_t MAX_AUTHORED_NAVMESH_POINTS = MAX_AUTHORED_NAVMESH_SURFACES + 2;
+	// Authored Navmesh Path declaration.
+	struct AuthoredNavmeshPath {
+		// Valid Reason values.
+		enum class Reason : uint8_t {
+			None,
+			PhysicsUnprepared,
+			PhysicsStale,
+			InvalidProbe,
+			UnsupportedWalkableGeometry,
+			SurfaceLimit,
+			EndpointUnavailable,
+			CorridorObstructed,
+			NoPath,
+		};
+
+		// Whether the requested query result is available.
+		bool Available = false;
+		// Whether the requested path was found.
+		bool Found = false;
+		// Reason this query result is unavailable or incomplete.
+		Reason Why = Reason::PhysicsUnprepared;
+		// Number of point count.
+		size_t PointCount = 0;
+		// Points kept in their declared order.
+		std::array<core::Vector3, MAX_AUTHORED_NAVMESH_POINTS> Points{};
+	};
+
+	// Finds a path over the connected authored walkable surfaces in the completed
+	// physics snapshot. Only horizontal analytic box tops are currently admitted;
+	// slopes, meshes, and rotated boxes answer unknown rather than being flattened.
+	AuthoredNavmeshPath FindAuthoredNavmeshPath(
+		ecs::Store &store,
+		const core::Vector3 &start,
+		const core::Vector3 &goal,
+		float verticalToleranceMetres = 0.25f
+	);
+
+	// Sweeps one collider against the destination's current indexed poses.
+	// Uses collision masks and triggers, including solid non-queryable colliders.
+	// A missing index or exhausted candidate bound is incomplete, never a clear path.
+	// blockingOnly skips separating/tangent translation contacts when sliding.
+	PlacementSweep SweepPlacement(
+		const ecs::Store &store,
+		const scene::Collider &collider,
+		const core::CFrame &from,
+		const core::Vector3 &displacement,
+		const core::Vector3 &angularDisplacement,
+		ecs::Entity ignore = ecs::NULL_ENTITY,
+		bool blockingOnly = false
+	);
+
 }

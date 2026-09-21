@@ -335,6 +335,18 @@ namespace engine::world {
 		// @tick
 		void Tick(int ticks);
 
+		// Runs one manually requested boundary while the world remains suspended.
+		// The normal idle accumulator is bypassed, but systems still receive this
+		// world's active fixed simulation delta.
+		void TickPaused();
+
+		// Internal joined-round slices used by the Universe exchange coordinator.
+		bool BeginExchangeRound(bool firstInBatch);
+		// Commits the joined exchange round before simulation resumes.
+		bool FinishExchangeRound();
+		// Abandons the open exchange round without applying partial replies.
+		void CancelExchangeRound();
+
 		// Whether a tick that should be published has run since this was last
 		// asked, clearing the answer.
 		//
@@ -397,6 +409,9 @@ namespace engine::world {
 		}
 
 	  private:
+		void PrepareTick(bool firstInBatch);
+		void CommitTick();
+		bool ExchangeOpen = false;
 		// Charges one tick to the replication clock.
 		//
 		// @return `true` when this tick is one that should be published.

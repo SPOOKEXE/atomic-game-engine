@@ -258,6 +258,45 @@ namespace studio {
 		// worse than one saying so.
 		ImGui::TextDisabled("interface and renderer share one frame today, so the two act as");
 		ImGui::TextDisabled("ceilings on it rather than as separate clocks");
+
+		ImGui::SeparatorText("Level of detail");
+		ImGui::Checkbox("Enable LOD culling", &Prefs.EnableLODCulling);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Skip mesh LOD clusters outside the viewport.");
+		}
+		ImGui::TextDisabled("Distances force coarser LODs while preserving the projected-area choice.");
+
+		constexpr float LOD_DISTANCE_GAP = 0.001f;
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+		ImGui::DragFloat(
+			"LOD 1 distance",
+			&Prefs.LOD1Distance,
+			1.0f,
+			LOD_DISTANCE_GAP,
+			Prefs.LOD2Distance - LOD_DISTANCE_GAP,
+			"%.1f studs",
+			ImGuiSliderFlags_AlwaysClamp
+		);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+		ImGui::DragFloat(
+			"LOD 2 distance",
+			&Prefs.LOD2Distance,
+			1.0f,
+			Prefs.LOD1Distance + LOD_DISTANCE_GAP,
+			Prefs.LOD3Distance - LOD_DISTANCE_GAP,
+			"%.1f studs",
+			ImGuiSliderFlags_AlwaysClamp
+		);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+		ImGui::DragFloat(
+			"LOD 3 distance",
+			&Prefs.LOD3Distance,
+			1.0f,
+			Prefs.LOD2Distance + LOD_DISTANCE_GAP,
+			0.0f,
+			"%.1f studs",
+			ImGuiSliderFlags_AlwaysClamp
+		);
 	}
 
 	void Editor::DrawAppearanceSettings() {

@@ -39,7 +39,10 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -282,6 +285,14 @@ namespace engine::scene {
 		// and makes visibility a separate index stream.
 		uint64_t Source = 0;
 
+		// Snapshot-local data-capture label. Zero is background or an entity
+		// without an authored DataFactoryId.
+		uint32_t ObjectLabel = 0;
+		// Semantic capture label assigned to this drawable.
+		uint32_t SemanticLabel = 0;
+		// Part capture label assigned to this drawable.
+		uint32_t PartLabel = 0;
+
 		// Which synthetic form of `Source` this row is, or zero for the entity
 		// itself. A portal half uses the pane entity, so the original and its copy
 		// can both be resident without claiming the same slot.
@@ -295,12 +306,65 @@ namespace engine::scene {
 		// per row.
 		core::Name SourceWorld;
 
+		// Authored feature masks copied onto the resident GPU instance row.
+		RenderFeaturePolicy RenderFeatures;
+
+		// Four authored LOD levels, with level zero held in Mesh. Selection is a
+		// per-view GPU result, so this snapshot carries inputs and no chosen level.
+		core::Name LodMeshes[LOD_LEVELS - 1];
+		// Screen-area ratios selecting each lower LOD.
+		float LodRatios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
+		// Target projected quad area for automatic LOD choice.
+		float LodTargetQuadArea = 0.0f;
+		// Rule used to interpret the LOD inputs.
+		LodStrategy LodStrategyMode = LodStrategy::None;
+		// Number of valid levels including Mesh.
+		uint8_t LodLevels = 1;
+		// Explicit padding omitted by the draw-list wire form.
+		uint8_t LodReserved[2] = {};
+
+		// Graph nodes attached to this visual. The pipeline owns shader source and
+		// parameters; the instance only selects stable node names.
+		RenderEffects Effects;
+
 		// Number of consecutive transforms this drawable owns in the palette.
 		uint16_t SkinCount = 0;
 
 		// Keeps the flat payload free of implicit tail padding.
 		uint16_t SkinReserved = 0;
 	};
+
+	// Copies optional LOD and graph-effect state into an existing draw row.
+	//
+	// @param instance  The row to update.
+	// @param automatic Optional automatically produced mesh ladder.
+	// @param custom    Optional per-level authored overrides. Valid meshes win;
+	//                  nil entries fall back to `automatic`.
+	// @param effects   Optional graph-node attachments for this visual.
+	// @since v0.24
+	inline void ApplyDrawRenderState(
+		DrawInstance &instance,
+		const AutoMeshLOD *automatic,
+		const CustomMeshLOD *custom,
+		const RenderEffects *effects
+	) {
+		const LevelOfDetail lod = ResolveMeshLOD(instance.Mesh, automatic, custom);
+		if (lod.Strategy != LodStrategy::None) {
+			for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+				instance.LodMeshes[level] = lod.Meshes[level];
+				instance.LodRatios[level] = lod.Ratios[level];
+			}
+			instance.LodTargetQuadArea = lod.TargetQuadArea;
+			instance.LodStrategyMode = lod.Strategy;
+			instance.LodLevels = std::clamp<uint8_t>(lod.Levels, 1u, static_cast<uint8_t>(LOD_LEVELS));
+		}
+		if (effects != nullptr) {
+			instance.Effects = *effects;
+			instance.Effects.Count = std::min<uint8_t>(
+				instance.Effects.Count, static_cast<uint8_t>(MAX_RENDER_EFFECT_ATTACHMENTS)
+			);
+		}
+	}
 
 	// Fills the fields a collector reads straight off the world's components.
 	//
@@ -340,6 +404,10 @@ namespace engine::scene {
 	//                   limb of one character names the same root, which is the
 	//                   grouping a portal seam needs; a row without one is its
 	//                   own body. See `DrawInstance::Rig`.
+	// @param automatic  Optional automatically produced mesh ladder.
+	// @param custom     Optional per-level authored overrides. Valid meshes win;
+	//                   nil entries fall back to `automatic`.
+	// @param effects    Optional graph-node attachments for this visual.
 	// @return The instance to publish.
 	// @since v0.15
 	inline DrawInstance MakeDrawInstance(
@@ -350,13 +418,17 @@ namespace engine::scene {
 		const Tags *tags,
 		uint64_t source,
 		const LocalTransparency *local = nullptr,
-		const CharacterLimb *limb = nullptr
+		const CharacterLimb *limb = nullptr,
+		const AutoMeshLOD *automatic = nullptr,
+		const CustomMeshLOD *custom = nullptr,
+		const RenderEffects *effects = nullptr
 	) {
 		DrawInstance instance;
 		instance.Frame = frame;
 		instance.HalfExtent = bounds.HalfExtent;
 		instance.Tint = visual.Tint;
 		instance.Mesh = visual.Mesh;
+		instance.RenderFeatures = visual.RenderFeatures;
 
 		if (appearance != nullptr) {
 			instance.SurfaceColour = appearance->Colour;
@@ -396,6 +468,7 @@ namespace engine::scene {
 		if (limb != nullptr) {
 			instance.Rig = limb->Root.Id;
 		}
+		ApplyDrawRenderState(instance, automatic, custom, effects);
 
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;
@@ -434,7 +507,7 @@ namespace engine::scene {
 	//
 	// @param instances The draw list.
 	// @param eye       Where the view is, in world space.
-	// @param order     Filled in with indices into `instances`. Cleared first.
+	// @param order     Resized and filled with indices into `instances`.
 	// @return How many indices at the front of `order` name opaque instances.
 	size_t OrderForDrawing(
 		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
@@ -454,7 +527,7 @@ namespace engine::scene {
 	// @param instances The whole draw list, which the indices are into.
 	// @param from      Which of them to order.
 	// @param eye       Where the view is, in world space.
-	// @param order     Filled with a permutation of `from`. Cleared first.
+	// @param order     Resized and filled with a permutation of `from`.
 	// @return How many at the front of `order` name opaque instances.
 	size_t OrderSubset(
 		std::span<const DrawInstance> instances,
@@ -529,19 +602,35 @@ namespace engine::scene {
 	// instance in the hottest pass of the frame.
 	//
 	// @param instances What the world produced.
-	// @param resident  Called as `resident(const core::Name &)` for each named
-	//                  mesh. `true` when the renderer holds it.
+	// @param resident  Called as `resident(const DrawInstance &)` for each named
+	//                  mesh, including its source world. `true` when it is held.
 	// @param out       Cleared, then filled with what may be drawn.
+	// @param marked    Sorted original indices whose filtered positions are needed.
+	// @param retained Cleared and filled with marked indices into out, when supplied.
 	// @since v0.12
 	template <class Resident>
-	void
-	KeepLoaded(std::span<const DrawInstance> instances, Resident resident, std::vector<DrawInstance> &out) {
+	void KeepLoaded(
+		std::span<const DrawInstance> instances,
+		Resident resident,
+		std::vector<DrawInstance> &out,
+		std::span<const uint32_t> marked = {},
+		std::vector<uint32_t> *retained = nullptr
+	) {
 		out.clear();
 		out.reserve(instances.size());
-
-		for (const DrawInstance &instance : instances) {
-			if (instance.Mesh.IsValid() && !resident(instance.Mesh)) {
-				continue;
+		if (retained) {
+			retained->clear();
+			retained->reserve(marked.size());
+		}
+		size_t nextMark = 0;
+		for (size_t index = 0; index < instances.size(); ++index) {
+			const DrawInstance &instance = instances[index];
+			if (instance.Mesh.IsValid() && !resident(instance)) continue;
+			if (retained) {
+				while (nextMark < marked.size() && marked[nextMark] < index)
+					++nextMark;
+				if (nextMark < marked.size() && marked[nextMark] == index)
+					retained->push_back(static_cast<uint32_t>(out.size()));
 			}
 			out.push_back(instance);
 		}

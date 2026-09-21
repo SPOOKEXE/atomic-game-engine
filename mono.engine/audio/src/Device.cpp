@@ -47,9 +47,19 @@ namespace engine::audio {
 				return Engine.Clock();
 			}
 
+			bool SetPaused(bool paused) override {
+				Suspended = paused;
+				return true;
+			}
+
+			bool Paused() const override {
+				return Suspended;
+			}
+
 			void Close() override {}
 
 			size_t Advance(size_t blocks) override {
+				if (Suspended) return 0;
 				size_t frames = 0;
 				for (size_t index = 0; index < blocks; ++index) {
 					Engine.Render(Block);
@@ -66,6 +76,7 @@ namespace engine::audio {
 			AudioFormat Shape;
 			AudioMixer Engine;
 			SampleBuffer Block;
+			bool Suspended = false;
 		};
 
 		class SdlDevice final : public Device {
@@ -91,6 +102,25 @@ namespace engine::audio {
 
 			uint64_t Rendered() const override {
 				return Frames.load(std::memory_order_relaxed);
+			}
+
+			bool SetPaused(bool paused) override {
+				if (Stream == nullptr) return false;
+				if (paused == Paused()) return true;
+				if (paused) {
+					if (!SDL_PauseAudioStreamDevice(Stream)) return false;
+					// SDL invokes Feed with this stream locked. Locking it after the
+					// pause waits for an in-flight callback, establishing the owner
+					// barrier before a frozen factory capture is published.
+					if (!SDL_LockAudioStream(Stream)) return false;
+					SDL_UnlockAudioStream(Stream);
+					return true;
+				}
+				return SDL_ResumeAudioStreamDevice(Stream);
+			}
+
+			bool Paused() const override {
+				return Stream == nullptr || SDL_AudioStreamDevicePaused(Stream);
 			}
 
 			void Close() override {

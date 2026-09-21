@@ -48,6 +48,14 @@
       }
     },
     {
+      "name": "profile",
+      "inherits": "release",
+      "displayName": "profile - release optimisation with heap tracking",
+      "cacheVariables": {
+        "MONO_HEAP_PROFILE": "ON"
+      }
+    },
+    {
       "name": "server",
       "inherits": "base",
       "displayName": "server \u2014 no client program, and therefore no graphics stack",
@@ -154,6 +162,10 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "profile",
+      "configurePreset": "profile"
     },
     {
       "name": "server",

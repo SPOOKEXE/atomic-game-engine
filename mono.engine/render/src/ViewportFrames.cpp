@@ -38,7 +38,10 @@ namespace engine::render {
 							store.Get<scene::Tags>(child),
 							child.Id,
 							nullptr,
-							store.Get<scene::CharacterLimb>(child)
+							store.Get<scene::CharacterLimb>(child),
+							store.Get<scene::AutoMeshLOD>(child),
+							store.Get<scene::CustomMeshLOD>(child),
+							store.Get<scene::RenderEffects>(child)
 						)
 					);
 				}
@@ -55,7 +58,7 @@ namespace engine::render {
 	}
 
 	size_t ViewportFrames::Render(
-		Renderer &renderer, ecs::Store &store, const gui::DrawList &list, size_t firstSlot
+		Renderer &renderer, ecs::Store &store, const gui::DrawList &list, size_t firstSlot, core::Name owner
 	) {
 		Entries.clear();
 		std::vector<std::vector<scene::DrawInstance>> instances;
@@ -117,6 +120,7 @@ namespace engine::render {
 			// world-scoped shadow work must not be shared.
 			view.World = command.Source.Id;
 			view.WorldName = core::Name("render.viewport-frame");
+			view.ContentOwner = owner;
 			view.Lighting = baseLighting;
 			view.Lighting.Direction = viewport->LightDirection;
 			view.Lighting.Ambient = viewport->Ambient;

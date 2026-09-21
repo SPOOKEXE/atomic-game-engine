@@ -6,6 +6,8 @@
 // only where the loop would otherwise measure world construction instead.
 
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -65,6 +67,28 @@ namespace {
 		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
 		return workspace != engine::ecs::NULL_ENTITY &&
 			   store.FindFirstChild(workspace, "Complete") != engine::ecs::NULL_ENTITY;
+	}
+
+	// Runs the public Luau method before one ordinary particle tick. The script
+	// uses an enabled emitter as well as explicit bursts, so the measured refresh
+	// covers the queued boundary requests and continuous emission together.
+	bool RunParticleEmitterBurst(Store &store) {
+		engine::effects::RegisterEffectClasses();
+		engine::effects::InstallParticles(store, 4'096);
+
+		store.ClearChanges();
+		if (!Run(store, R"(
+			local emitter = Instance.new('ParticleEmitter')
+			emitter.Enabled = true
+			for index = 1, 10000 do
+				emitter:Emit(1)
+			end
+		)")) {
+			return false;
+		}
+
+		engine::effects::RefreshEmitters(store);
+		return engine::effects::StepParticles(store, 1.0f / 60.0f).Live > 0;
 	}
 }
 
@@ -159,6 +183,14 @@ BENCH("C++ to Luau · 10000 signal connection lifecycles", 20) {
 				? 1
 				: 0
 		);
+	}
+}
+
+BENCH("C++ to Luau · 10000 ParticleEmitter Emit calls and enabled tick", 20) {
+	Prepare();
+	for (int pass = 0; pass < 20; pass++) {
+		Store store("bench.luau.particle_emit");
+		Consume(RunParticleEmitterBurst(store) ? 1 : 0);
 	}
 }
 

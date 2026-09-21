@@ -1249,3 +1249,63 @@ TEST_CASE("an open channel survives a snapshot", "[world]") {
 	REQUIRE(replies.size() == 1);
 	CHECK(replies[0].Status == BusStatus::Ok);
 }
+
+TEST_CASE(
+	"host delivery survives its next barrier and a snapshot before that barrier", "[world][host-delivery]"
+) {
+	UniverseSettings settings;
+	settings.Federated = true;
+	settings.ChannelQueueLimit = 2;
+	settings.ChannelsPerWorld = 7;
+	Universe source(settings);
+	const auto target = source.Create(Named("target"));
+	Delivery delivered;
+	delivered.Bus = BusKind::Channel;
+	delivered.Key = Name("owned-channel");
+	delivered.From = Name("remote-source");
+	delivered.Payload = Bytes("copied authority state");
+	REQUIRE(source.Deliver(Name("target"), delivered));
+	delivered.Payload = Bytes("second");
+	REQUIRE(source.Deliver(Name("target"), delivered));
+	CHECK_FALSE(source.Deliver(Name("target"), delivered));
+	engine::core::ByteWriter snapshot;
+	REQUIRE(source.Save(snapshot));
+	Universe restored;
+	engine::core::ByteReader reader(snapshot.Bytes());
+	REQUIRE(restored.Load(reader));
+	CHECK(restored.Settings().Federated);
+	CHECK(restored.Settings().ChannelQueueLimit == 2);
+	CHECK(restored.Settings().ChannelsPerWorld == 7);
+	engine::core::ByteWriter copied;
+	REQUIRE(restored.Save(copied));
+	CHECK(std::ranges::equal(snapshot.Bytes(), copied.Bytes()));
+	for (auto *worlds : {&source, &restored}) {
+		std::vector<std::string> arrived;
+		OnTick(*worlds, worlds->Find(Name("target")), [&](Postbox &box) {
+			for (const auto &message : box.Deliveries())
+				arrived.push_back(Text(message.Payload));
+		});
+		worlds->Tick(1.0f / 60);
+		REQUIRE(arrived == std::vector<std::string>{"copied authority state", "second"});
+		worlds->Tick(1.0f / 60);
+		CHECK(arrived.size() == 2);
+	}
+	CHECK(source.Destroy(target) == engine::world::WorldStatus::Ok);
+	CHECK_FALSE(source.Deliver(Name("target"), delivered));
+}
+
+TEST_CASE("staged deliveries cannot reach a world recreated under the same name", "[world][host-delivery]") {
+	Universe worlds;
+	const auto previous = worlds.Create(Named("target"));
+	Delivery delivered;
+	delivered.Payload = Bytes("old incarnation");
+	REQUIRE(worlds.Deliver(Name("target"), delivered));
+	REQUIRE(worlds.Destroy(previous) == engine::world::WorldStatus::Ok);
+	const auto replacement = worlds.Create(Named("target"));
+	size_t arrivals = 0;
+	OnTick(worlds, replacement, [&](Postbox &box) { arrivals += box.Deliveries().size(); });
+	worlds.Tick(1.0f / 60);
+	CHECK(arrivals == 0);
+	delivered.Payload.resize(16 * 1024 * 1024);
+	CHECK_FALSE(worlds.Deliver(Name("target"), delivered));
+}

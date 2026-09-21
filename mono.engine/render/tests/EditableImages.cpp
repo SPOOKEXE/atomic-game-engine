@@ -1,12 +1,12 @@
-// Converting `scene::EditableImage`'s raw pixels into `assets::TextureData`.
-//
-// **The device-free half** - `render/tests/EditableMeshes.cpp`'s own header
-// carries the full argument for why this and not `EditableImageUploader::
-// Refresh` is what gets a unit suite.
+// Host conversion and device upload checks for editable resource ownership.
+
+#include "RenderFixture.hpp"
 
 #include <engine/assets/Texture.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/render/EditableImages.hpp>
 #include <engine/scene/EditableImage.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,6 +15,67 @@ TEST_SUITE_ID("engine.render.editableimages")
 TEST_DEPENDS("engine.scene.editableimage")
 
 using engine::scene::EditableImage;
+
+TEST_CASE("editable image uploads follow store and owner lifetimes", "[render][gpu][editable-owner][.]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store first("editable.first"), second("editable.second");
+	const auto firstImage = first.CreateInstance(scene::EditableImageClass(), "image");
+	const auto secondImage = second.CreateInstance(scene::EditableImageClass(), "image");
+	REQUIRE(firstImage == secondImage);
+	EditableImage small, large;
+	small.Width = small.Height = 2;
+	small.Pixels.assign(16, 255);
+	large.Width = large.Height = 4;
+	large.Pixels.assign(64, 127);
+	first.Set(firstImage, small);
+	second.Set(secondImage, large);
+	const core::Name firstOwner("editable:first"), secondOwner("editable:second");
+	const auto name = scene::EditableImageContentName(first, firstImage);
+	CHECK(name == scene::EditableImageContentName(second, secondImage));
+	render::EditableImageUploader uploader;
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 1);
+	const auto secondHandle = fixture.Render.TextureHandle(name, secondOwner);
+	REQUIRE(secondHandle != nullptr);
+	CHECK(fixture.Render.TextureHandle(name, firstOwner) != secondHandle);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	auto *unsupported = first.GetMutable<scene::EditableImage>(firstImage);
+	REQUIRE(unsupported != nullptr);
+	unsupported->Packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Colour);
+	unsupported->Packing.Format = scene::EditablePackingFormat::Unsigned4;
+	unsupported->Packing.Revision++;
+	void *const beforeRefusal = fixture.Render.TextureHandle(name, firstOwner);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+	CHECK(fixture.Render.TextureHandle(name, firstOwner) == beforeRefusal);
+	const uint32_t unsupportedRevision = unsupported->Packing.Revision;
+	unsupported->Packing = {};
+	unsupported->Packing.Revision = unsupportedRevision + 1;
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	uint32_t width = 0, height = 0;
+	REQUIRE(fixture.Render.TextureSize(name, width, height, firstOwner));
+	CHECK(width == 2);
+	REQUIRE(fixture.Render.TextureSize(name, width, height, secondOwner));
+	CHECK(width == 4);
+	CHECK(fixture.Render.TextureHandle(name) == nullptr);
+	REQUIRE(scene::ResizeEditableImage(first, firstImage, 8, 8));
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(fixture.Render.TextureHandle(name, secondOwner) == secondHandle);
+	uploader.ForgetWorld(first.Identity());
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	fixture.Render.DropContentOwner(firstOwner);
+	uploader.ForgetOwner(firstOwner);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	// A store can also move to a new residency owner without changing its pixels.
+	CHECK(uploader.Refresh(first, fixture.Render, core::Name("editable:rebound")) == 1);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+}
 
 TEST_CASE("a fresh EditableImage converts to a valid, matching TextureData", "[render][editableimages]") {
 	EditableImage image;
@@ -41,4 +102,29 @@ TEST_CASE("the pixel bytes cross unchanged", "[render][editableimages]") {
 	REQUIRE(built.Pixels.size() == image.Pixels.size());
 	CHECK(static_cast<uint8_t>(built.Pixels[0]) == 200);
 	CHECK(static_cast<uint8_t>(built.Pixels[7]) == 77);
+}
+
+TEST_CASE("compact image policies report unsupported storage before upload", "[render][editableimages]") {
+	EditableImage image;
+	image.Packing.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Colour);
+	image.Packing.Format = engine::scene::EditablePackingFormat::Unsigned4;
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::UnsupportedFormat
+	);
+	image.Packing.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::UnsupportedAttributes
+	);
+	image.Packing.Attributes = 0;
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::UnsupportedAttributes
+	);
+	image.Packing = {};
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::NativeRGBA8
+	);
 }

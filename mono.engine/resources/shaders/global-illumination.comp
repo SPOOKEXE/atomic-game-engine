@@ -1,0 +1,38 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D albedo;
+layout(set = 0, binding = 1) uniform sampler2D normal;
+layout(set = 0, binding = 2) uniform sampler2D material;
+layout(set = 0, binding = 3) uniform sampler2D depth;
+layout(set = 0, binding = 4) uniform sampler2D occlusion;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D indirect;
+layout(set = 2, binding = 0, std140) uniform Pass {
+	mat4 vp;
+	mat4 ivp;
+	vec4 target;
+	vec4 view;
+	uvec4 features;
+} pass;
+layout(set = 2, binding = 1, std140) uniform Trace {
+	vec4 trace;
+	uvec4 inputs;
+} options;
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, ivec2(pass.target.xy)))) return;
+	vec2 uv = (vec2(pixel) + 0.5) * pass.target.zw;
+	vec3 surfaceNormal = texture(normal, uv).xyz * 2.0 - 1.0;
+	float visibility = texture(occlusion, uv).r;
+	float roughness = texture(material, uv).r;
+	float distanceFade = clamp(1.0 - texture(depth, uv).r / max(options.trace.y, 0.1), 0.0, 1.0);
+	float skyWeight = max(surfaceNormal.y, 0.0);
+	int rays = clamp(int(options.trace.x), 1, 64);
+	float estimate = 0.0;
+	for (int ray = 0; ray < rays; ++ray) {
+		vec2 offset = vec2(float(ray), float(ray) * 0.61803399);
+		estimate += 0.75 + 0.5 * fract(sin(dot(uv * pass.target.xy + pass.view.xx + offset, vec2(12.9898, 78.233))) * 43758.5453);
+	}
+	vec3 bounce = texture(albedo, uv).rgb * visibility * distanceFade * mix(0.08, 0.22, skyWeight) * estimate / float(rays);
+	imageStore(indirect, pixel, vec4(bounce * (1.0 - roughness * 0.5), 1.0));
+}

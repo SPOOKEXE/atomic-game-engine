@@ -698,6 +698,8 @@ TEST_CASE("a wheel zooms a node canvas inside its bounds", "[gui][input]") {
 	pointer.Wheel = 1.0f;
 	Send(world, pointer);
 	CHECK(world.Data.Get<NodeCanvas>(canvas)->Zoom == Approx(1.1f));
+	CHECK(world.Data.Get<NodeCanvas>(canvas)->Pan.X == Approx(60.0f - 60.0f / 1.1f));
+	CHECK(world.Data.Get<NodeCanvas>(canvas)->Pan.Y == Approx(40.0f - 40.0f / 1.1f));
 
 	pointer.Wheel = 100.0f;
 	Send(world, pointer);
@@ -709,6 +711,34 @@ TEST_CASE("a wheel zooms a node canvas inside its bounds", "[gui][input]") {
 	pointer.Wheel = 1.0f;
 	Send(world, pointer);
 	CHECK(world.Data.Get<NodeCanvas>(canvas)->Zoom == Approx(1.5f));
+}
+
+TEST_CASE("a drawn node link takes pointer input along its rotated wire", "[gui][input][nodecanvas]") {
+	World world("gui_input.node_canvas_link");
+	const Entity link = world.Make("NodeCanvasLink");
+
+	DrawList list;
+	DrawCommand segment;
+	segment.Source = link;
+	segment.Bounds = engine::core::Rect{Vector2{40.0f, 98.5f}, Vector2{160.0f, 101.5f}};
+	segment.Clip = engine::core::Rect{Vector2{0.0f, 0.0f}, Vector2{200.0f, 200.0f}};
+	segment.Rotation = 45.0f;
+	list.Commands.push_back(segment);
+
+	CHECK(Pick(world.Data, list, Vector2{100.0f, 100.0f}) == link);
+	CHECK(Pick(world.Data, list, Vector2{110.0f, 110.0f}) == link);
+	CHECK(Pick(world.Data, list, Vector2{110.0f, 120.0f}) == NULL_ENTITY);
+
+	Pointer pointer;
+	pointer.Position = Vector2{110.0f, 110.0f};
+	pointer.Down = true;
+	const auto pressed = world.Route.Update(world.Data, list, pointer);
+	CHECK(world.Route.Pressed() == link);
+	CHECK(world.Has(std::vector<GuiEvent>(pressed.begin(), pressed.end()), EventKind::InputBegan, link));
+
+	pointer.Down = false;
+	const auto released = world.Route.Update(world.Data, list, pointer);
+	CHECK(world.Has(std::vector<GuiEvent>(released.begin(), released.end()), EventKind::Activated, link));
 }
 
 TEST_CASE("dragging a scroll bar moves the canvas and presses nothing", "[gui][input]") {

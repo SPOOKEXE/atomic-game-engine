@@ -24,6 +24,7 @@
 #include <engine/graph/EntityFlow.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -33,27 +34,23 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <sstream>
 #include <vector>
 
 namespace engine::render {
 
 	namespace {
 		template <typename Value>
-		void StageBulk(
+		void StageRanges(
 			Value *destination, std::span<const InstanceUploadRange> ranges, std::span<const Value> source
 		) {
-			if (ranges.empty()) {
-				return;
-			}
-			uint32_t first = ranges.front().First;
-			uint32_t last = first + ranges.front().Count;
 			for (const InstanceUploadRange &range : ranges) {
-				first = std::min(first, range.First);
-				last = std::max(last, range.First + range.Count);
+				std::memcpy(
+					destination + range.First,
+					source.data() + range.First,
+					static_cast<size_t>(range.Count) * sizeof(Value)
+				);
 			}
-			std::memcpy(
-				destination + first, source.data() + first, static_cast<size_t>(last - first) * sizeof(Value)
-			);
 		}
 	}
 
@@ -61,8 +58,36 @@ namespace engine::render {
 		ENGINE_PROFILE_CAT("ViewRecording::Begin", core::ProfileCategory::Render);
 
 		Request = request;
+		SurfacePixelsUsed = 0;
 		Instances = request.Instances;
 		Foreign = request.Foreign;
+		if (request.Source->DirectionalShadowBounds) {
+			const auto &bounds = *request.Source->DirectionalShadowBounds;
+			const auto finite = [](const core::Vector3 &point) {
+				return std::isfinite(point.X) && std::isfinite(point.Y) && std::isfinite(point.Z);
+			};
+			if (!finite(bounds.Minimum) || !finite(bounds.Maximum) || bounds.Minimum.X > bounds.Maximum.X ||
+				bounds.Minimum.Y > bounds.Maximum.Y || bounds.Minimum.Z > bounds.Maximum.Z ||
+				!finite(bounds.Size()) || !finite(bounds.Centre()) ||
+				!std::isfinite(bounds.Size().Magnitude())) {
+				ENGINE_WARN("view {} has invalid directional shadow bounds", request.TargetSlot);
+				return ViewStart::Abandoned;
+			}
+		}
+		if (request.Source->Projection) {
+			const glm::mat4 &projection = *request.Source->Projection;
+			bool finite = true;
+			for (int column = 0; column < 4; column++) {
+				for (int row = 0; row < 4; row++) {
+					finite = finite && std::isfinite(projection[column][row]);
+				}
+			}
+			const float determinant = glm::determinant(projection);
+			if (!finite || !std::isfinite(determinant) || determinant == 0.0f) {
+				ENGINE_WARN("view {} has an invalid fitted projection", request.TargetSlot);
+				return ViewStart::Abandoned;
+			}
+		}
 
 		// **The names the body below works in, bound to what the recording
 		// keeps.** Each one *is* the member rather than a copy of it, which is
@@ -80,6 +105,49 @@ namespace engine::render {
 		const SceneTarget *const sceneTarget = Request.Target;
 		const size_t targetSlot = Request.TargetSlot;
 		const View &source = *Request.Source;
+		State->ActiveContentOwner = source.ContentOwner;
+		ContentSignature = scene::MixSignature(State->ResourceEpoch, source.ContentOwner.Id());
+		ContentSignature =
+			scene::MixSignature(ContentSignature, source.LensContentOwner.value_or(source.ContentOwner).Id());
+		ContentSignature = scene::MixSignature(ContentSignature, source.LensPrograms);
+		ContentSignature = scene::MixSignature(ContentSignature, source.LensTimeSeconds.has_value());
+		if (source.LensTimeSeconds)
+			ContentSignature =
+				scene::MixSignature(ContentSignature, std::bit_cast<uint32_t>(*source.LensTimeSeconds));
+		ContentSignature = scene::MixSignature(ContentSignature, source.DirectionalShadowBounds.has_value());
+		if (source.DirectionalShadowBounds) {
+			const auto &bounds = *source.DirectionalShadowBounds;
+			for (float component :
+				 {bounds.Minimum.X,
+				  bounds.Minimum.Y,
+				  bounds.Minimum.Z,
+				  bounds.Maximum.X,
+				  bounds.Maximum.Y,
+				  bounds.Maximum.Z})
+				ContentSignature = scene::MixSignature(ContentSignature, std::bit_cast<uint32_t>(component));
+		}
+		ContentSignature = scene::MixSignature(ContentSignature, source.World);
+		ContentSignature = scene::MixSignature(ContentSignature, source.WorldName.Id());
+		// Replacing a graph releases its targets even when world inputs stay unchanged.
+		if (const auto *installed = State->PipelineFor(Request.Pipeline))
+			ContentSignature = scene::MixSignature(ContentSignature, installed->Revision);
+		for (const WorldContentOwner &binding : source.ForeignContentOwners) {
+			ContentSignature = scene::MixSignature(ContentSignature, binding.World.Id());
+			ContentSignature = scene::MixSignature(ContentSignature, binding.Owner.Id());
+		}
+		if (State->SlotAt(targetSlot).ContentSignature != ContentSignature) {
+			Request.Damage.Scene = true;
+			Request.Damage.Objects = true;
+			Request.Damage.Environment = true;
+			Request.Damage.Particles = true;
+			Request.Damage.Portals = true;
+			State->SlotAt(targetSlot).InstanceSourcesReady = false;
+		}
+
+		if (State->HasShadowCaptureRequest(Request.Pipeline, Request.TargetSlot) ||
+			Request.Source->ImportedDirectionalShadow != 0)
+			Request.Damage.Scene = true;
+
 		const std::span<const effects::RibbonVertex> ribbonVertices = Request.RibbonVertices;
 		const std::span<const SceneLight> lights = Request.Lights;
 		const std::span<const PortalView> portals = Request.Portals;
@@ -161,7 +229,6 @@ namespace engine::render {
 		auto &sampler = Sampler;
 		auto &depthBindings = DepthBindings;
 		auto &lightingBindings = LightingBindings;
-		auto &tonemapBindings = TonemapBindings;
 		auto &particleCount = ParticleCount;
 		auto &ribbonCount = RibbonCount;
 		auto &uploadOverlay = UploadOverlay;
@@ -227,7 +294,9 @@ namespace engine::render {
 		// the draw uses throws away exactly the geometry the smaller one exists
 		// to keep.
 		drawCamera = camera;
-		drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
+		if (!source.Projection) {
+			drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
+		}
 
 		// **Claimed here only if the caller did not claim it first.** `WaitForFrame`
 		// is what a latency-sensitive loop calls before it reads its input; a
@@ -241,6 +310,7 @@ namespace engine::render {
 				height = State->BatchHeight;
 			}
 		} else if (present) {
+			ENGINE_PROFILE_CAT("begin frame", core::ProfileCategory::Render);
 			if (!State->BeginFrame()) {
 				return ViewStart::Abandoned;
 			}
@@ -286,8 +356,11 @@ namespace engine::render {
 		// dropping the frame. A caller asking for a texture and getting a frame
 		// it did not expect can see that something is wrong; one that gets no
 		// frame at all sees a frozen editor.
-		offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
-					State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+		{
+			ENGINE_PROFILE_CAT("ensure scene target", core::ProfileCategory::Render);
+			offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
+						State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+		}
 
 		if (State->Headless() && !offscreen) {
 			// The target could not be allocated. Headless has no window to fall
@@ -377,10 +450,17 @@ namespace engine::render {
 		{
 			ENGINE_PROFILE_CAT("filter unloaded", core::ProfileCategory::Render);
 
+			State->DrawableHidden.clear();
 			scene::KeepLoaded(
 				instances,
-				[State](const core::Name &mesh) { return State->Meshes.Has(mesh); },
-				State->Drawable
+				[State, &source](const scene::DrawInstance &row) {
+					return State->Meshes.Has(
+						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+					);
+				},
+				State->Drawable,
+				source.EyeHiddenRows,
+				source.EyeHiddenRows.empty() ? nullptr : &State->DrawableHidden
 			);
 
 			// **The other worlds pay the same toll.** A destination whose meshes
@@ -389,7 +469,11 @@ namespace engine::render {
 			// place a viewer cannot walk over and check.
 			scene::KeepLoaded(
 				foreign,
-				[State](const core::Name &mesh) { return State->Meshes.Has(mesh); },
+				[State, &source](const scene::DrawInstance &row) {
+					return State->Meshes.Has(
+						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+					);
+				},
 				State->DrawableForeign
 			);
 		}
@@ -463,8 +547,13 @@ namespace engine::render {
 		// samples it cannot disagree about how many levels there are.** The top
 		// level is `portalLevels - 1`, which is the index the transparent surface
 		// composition reads.
-		portalLevels = std::min(State->PortalDepth, MAX_PORTAL_DEPTH);
+		portalLevels = std::min(
+			Request.Source != nullptr && Request.Source->SurfaceBudget ? Request.Source->SurfaceBudget->Depth
+																	   : State->PortalDepth,
+			MAX_PORTAL_DEPTH
+		);
 
+		const bool sharedCaptures = GraphEnabled(core::Name("surface-capture"));
 		for (const SurfaceView &view : surfaces) {
 			if (view.Index < 0 || static_cast<size_t>(view.Index) >= scene::MAX_SURFACES) {
 				ENGINE_WARN(
@@ -548,7 +637,74 @@ namespace engine::render {
 		}
 
 		const float cameraAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-		cameraMatrix = scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect).ViewProjection;
+		matrices = source.Projection ? scene::ResolveSurfaceCamera(cameraFrame, *source.Projection)
+									 : scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect);
+		State->ActiveDataCaptureSource.ProjectionAvailable = true;
+		State->ActiveDataCaptureSource.Width = sceneWidth;
+		State->ActiveDataCaptureSource.Height = sceneHeight;
+		for (size_t column = 0; column < 4; ++column)
+			for (size_t row = 0; row < 4; ++row)
+				State->ActiveDataCaptureSource.Projection[column * 4 + row] =
+					matrices.Projection[column][row];
+		if (State->DataCaptureSources.size() <= targetSlot) {
+			State->DataCaptureSources.resize(targetSlot + 1);
+		}
+		State->DataCaptureSources[targetSlot] = State->ActiveDataCaptureSource;
+		cameraMatrix = matrices.ViewProjection;
+		if (sharedCaptures) {
+			const auto budget = source.SurfaceBudget.value_or(
+				View::SurfaceCaptureBudget{
+					std::max(portalLevels, std::max(1u, State->SurfaceBounces)), UINT64_MAX
+				}
+			);
+			portalLevels = budget.Depth;
+			uint64_t lightPixels = 0;
+			for (const auto &portal : portals) {
+				if (!portal.ExternalImage)
+					lightPixels += uint64_t(SEAM_LIGHT_RESOLUTION) * SEAM_LIGHT_RESOLUTION;
+			}
+			const uint64_t capturePixels = lightPixels <= budget.Pixels ? budget.Pixels - lightPixels : 0;
+			const SurfaceCaptureRequest keyedCaptureRequest{
+				.Mirrors = surfaces,
+				.Portals = portals,
+				.Frame = cameraFrame,
+				.Projection = Matrices.Projection,
+				.PixelBudget = capturePixels,
+				.Width = sceneWidth,
+				.Height = sceneHeight,
+				.Depth = budget.Depth
+			};
+			const uint64_t captureSignature = SurfaceCaptureSignature(keyedCaptureRequest);
+			if (bank.CaptureCache.NeedsRefresh(captureSignature)) {
+				result.SurfaceCapturePlanWrite = true;
+				const auto captureStatus = PlanSurfaceCaptures(keyedCaptureRequest, bank.CapturePlan);
+				if (captureStatus == SurfaceCaptureStatus::Invalid) {
+					EndIncompleteView();
+					return ViewStart::Abandoned;
+				}
+				result.SurfaceBudgetExceeded = lightPixels > budget.Pixels ||
+											   (lightPixels > 0 && budget.Depth == 0) ||
+											   captureStatus == SurfaceCaptureStatus::BudgetExceeded;
+				if (result.SurfaceBudgetExceeded) {
+					bank.CapturePlan.Entries.clear();
+					bank.CapturePlan.Postorder.clear();
+					bank.CapturePlan.Roots.fill(NO_SURFACE_CAPTURE);
+				}
+				bank.CaptureCache.Commit(
+					captureSignature,
+					result.SurfaceBudgetExceeded ? 0 : bank.CapturePlan.Pixels + lightPixels,
+					result.SurfaceBudgetExceeded
+				);
+			} else {
+				result.SurfaceBudgetExceeded = bank.CaptureCache.BudgetExceeded;
+			}
+			if (!result.SurfaceBudgetExceeded) {
+				SurfacePixelsUsed = bank.CaptureCache.Pixels;
+			} else {
+				SurfacePixelsUsed = 0;
+			}
+		}
+
 		bool sceneBoundsReady = false;
 
 		graph::EntityFlow &entityFlow = State->GraphEntities;
@@ -558,10 +714,16 @@ namespace engine::render {
 		graph::Viewpoint fallbackViewpoint;
 		fallbackViewpoint.Frame = cameraFrame;
 		fallbackViewpoint.Lens = drawCamera;
+		fallbackViewpoint.Projection = matrices.ViewProjection;
+		fallbackViewpoint.Fitted = true;
 
 		size_t visibleCount = instances.size();
 		opaqueCount = 0;
 		core::Name orderedEntities;
+		State->VisibilityWorking.Begin(State->FrameCounter, Request.TargetSlot, Request.Source->WorldName);
+		for (const scene::DrawInstance &instance : instances) {
+			State->VisibilityWorking.Observe(instance);
+		}
 
 		// **The whole CPU half of the pipeline, and it had no span.** Frustum
 		// culling, distance culling, tag filtering and the draw-order sort all
@@ -576,6 +738,16 @@ namespace engine::render {
 				if (node == nullptr) {
 					continue;
 				}
+				std::span<const uint32_t> frustumInput;
+				if (node->Kind == core::Name("cull-frustum")) {
+					for (const graph::ResourceId resource : node->Reads) {
+						const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+						if (desc != nullptr && desc->Kind == graph::ResourceKind::Entities) {
+							frustumInput = entityFlow.Get(desc->Name);
+							break;
+						}
+					}
+				}
 				const auto started = std::chrono::steady_clock::now();
 				const graph::EntityNodeRun run = graph::RunEntityNode(
 					selectedPipeline->Graph,
@@ -588,6 +760,19 @@ namespace engine::render {
 				);
 				if (!run.Handled) {
 					continue;
+				}
+				if (!frustumInput.empty() && run.Output.IsValid()) {
+					const std::span<const uint32_t> survivors = entityFlow.Get(run.Output);
+					size_t survivor = 0;
+					for (const uint32_t candidate : frustumInput) {
+						if (survivor < survivors.size() && survivors[survivor] == candidate) {
+							survivor++;
+							continue;
+						}
+						if (candidate < instances.size()) {
+							State->VisibilityWorking.FrustumCulled(instances[candidate]);
+						}
+					}
 				}
 				if (run.BoundedAll) {
 					sceneBounds = run.Bounds;
@@ -615,7 +800,55 @@ namespace engine::render {
 			State->VisibleInstances.assign(instances.begin(), instances.end());
 			State->DrawOrder.assign(ordered.begin(), ordered.end());
 		}
-		visibleCount = ordered.size();
+		const auto isEyeBody = [&source](const scene::DrawInstance &row) {
+			const bool ownWorld = !row.SourceWorld.IsValid() || row.SourceWorld == source.WorldName;
+			return source.EyeRig != 0 && ownWorld && row.Variant == 0 &&
+				   (row.Rig == source.EyeRig || row.Source == source.EyeRig);
+		};
+		if (source.EyeRig != 0 || !source.EyeHiddenRows.empty()) {
+			ENGINE_PROFILE_CAT("eye body selection", core::ProfileCategory::Render);
+			size_t kept = 0, opaqueKept = 0;
+			for (size_t index = 0; index < State->DrawOrder.size(); ++index) {
+				const uint32_t rowIndex = State->DrawOrder[index];
+				if (rowIndex >= instances.size()) continue;
+				const auto &row = instances[rowIndex];
+				if (std::binary_search(State->DrawableHidden.begin(), State->DrawableHidden.end(), rowIndex))
+					continue;
+				if (isEyeBody(row)) continue;
+				State->DrawOrder[kept++] = rowIndex;
+				opaqueKept += index < opaqueCount;
+			}
+			State->DrawOrder.resize(kept);
+			opaqueCount = opaqueKept;
+		}
+		visibleCount = State->DrawOrder.size();
+
+		DirectionalShadowBounds = source.DirectionalShadowBounds.value_or(sceneBounds);
+		if (!source.DirectionalShadowBounds && (source.EyeRig != 0 || !source.EyeHiddenRows.empty())) {
+			// The first-person body does not draw or cast in its own view. Keeping
+			// it in the fitted domain still moves the shadow raster with the eye,
+			// which is visible as fast crawling in an otherwise static world.
+			bool haveCaster = false;
+			for (size_t index = 0; index < instances.size(); ++index) {
+				if (std::binary_search(
+						State->DrawableHidden.begin(),
+						State->DrawableHidden.end(),
+						static_cast<uint32_t>(index)
+					) ||
+					isEyeBody(instances[index]))
+					continue;
+				const core::AABB bounds = graph::BoundsOf(instances[index]);
+				DirectionalShadowBounds = haveCaster ? DirectionalShadowBounds.Union(bounds) : bounds;
+				haveCaster = true;
+			}
+		}
+		if (source.DirectionalShadowBounds && !instances.empty() &&
+			(!DirectionalShadowBounds.Contains(sceneBounds.Minimum) ||
+			 !DirectionalShadowBounds.Contains(sceneBounds.Maximum))) {
+			ENGINE_WARN("view {} has directional shadow bounds smaller than its scene", request.TargetSlot);
+			endIncompleteView();
+			return ViewStart::Abandoned;
+		}
 
 		// **Fitted to the whole draw list, not to what survived culling.** A
 		// caster outside the camera's frustum still shadows into it, so the
@@ -626,9 +859,29 @@ namespace engine::render {
 		//
 		// The graph cull only changes what the view draws. Shadows still fit the
 		// whole world so an off-screen caster cannot disappear from the map.
-		lightViewProjection =
-			graph::FitDirectionalLight(sceneBounds, core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z});
+		// Split source/body views supply the same enclosing domain for the same raster grid.
+		lightViewProjection = graph::FitDirectionalLight(
+			DirectionalShadowBounds,
+			core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+			SHADOW_RESOLUTION
+		);
+		if (source.DirectionalShadowBounds) {
+			for (size_t column = 0; column < 4; ++column)
+				for (size_t row = 0; row < 4; ++row)
+					if (!std::isfinite(lightViewProjection[column][row])) {
+						ENGINE_WARN("view {} has an invalid directional shadow fit", request.TargetSlot);
+						endIncompleteView();
+						return ViewStart::Abandoned;
+					}
+		}
 		transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
+		if (source.ImportedDirectionalShadow &&
+			(!graphEnabled(core::Name("shadow")) ||
+			 !State->ValidPortalShadowView(source, lightViewProjection))) {
+			ENGINE_WARN("view {} has a mismatched imported directional shadow", request.TargetSlot);
+			endIncompleteView();
+			return ViewStart::Abandoned;
+		}
 
 		// **Surface instances moved to the back of the opaque head**, so the
 		// camera range is three contiguous runs - plain opaque, then mirrors,
@@ -761,6 +1014,16 @@ namespace engine::render {
 		// shows a second simulation and a camera parented to the world has no
 		// face, so neither can be descended into and neither reports a depth.
 		const graph::Node *mirrorCapture = graphNode(core::Name("mirror-capture"));
+		MirrorFormat = State->ColourFormat();
+		if (mirrorCapture != nullptr) {
+			for (const auto resource : mirrorCapture->Writes) {
+				const auto *desc = selectedPipeline->Graph.FindResource(resource);
+				if (desc != nullptr && desc->Format == graph::ResourceFormat::RGBA16F) {
+					MirrorFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+					break;
+				}
+			}
+		}
 		const uint32_t mirrorDepthLimit = std::clamp(
 			mirrorCapture != nullptr ? mirrorCapture->Integer(core::Name("max-recursion"), MAX_SURFACE_DEPTH)
 									 : MAX_SURFACE_DEPTH,
@@ -774,6 +1037,10 @@ namespace engine::render {
 							 ? std::min(State->SurfaceBounces, mirrorDepthLimit)
 							 : (anyPane ? scene::NextSurfaceBounces(bank.Bounces, mirrorDepthLimit)
 										: std::min(scene::DEFAULT_SURFACE_BOUNCES, mirrorDepthLimit));
+
+		if (Request.Source != nullptr && Request.Source->SurfaceBudget) {
+			surfaceBounces = std::min(surfaceBounces, std::max(1u, Request.Source->SurfaceBudget->Depth));
+		}
 
 		// What this frame reaches, which the next one reads back out of the bank.
 		//
@@ -836,7 +1103,7 @@ namespace engine::render {
 		// does, so a mirror the player has turned away from goes stale rather
 		// than blank - which is the failure nobody notices, and the point of
 		// ranking by coverage in the first place.
-		if (acceptedCount > State->SurfaceLimit) {
+		if (!sharedCaptures && acceptedCount > State->SurfaceLimit) {
 			size_t ranked[scene::MAX_SURFACES];
 			for (size_t index = 0; index < acceptedCount; index++) {
 				ranked[index] = index;
@@ -882,6 +1149,21 @@ namespace engine::render {
 
 			for (size_t index = 0; index < acceptedCount; index++) {
 				const AcceptedView &view = accepted[index];
+				if (sharedCaptures) {
+					const uint16_t root = bank.CapturePlan.Roots[view.Index];
+					if (root != NO_SURFACE_CAPTURE) {
+						const auto &capture = bank.CapturePlan.Entries[root];
+						if (State->EnsureSurface(
+								targetSlot, view.Index, capture.Width, capture.Height, MirrorFormat
+							)) {
+							accepted[liveCount++] = view;
+						} else {
+							EndIncompleteView();
+							return ViewStart::Abandoned;
+						}
+					}
+					continue;
+				}
 
 				// **Sized to what the pane covers, not to what was authored.** The
 				// authored size is a floor and the screen is a ceiling; between them
@@ -899,8 +1181,25 @@ namespace engine::render {
 					current
 				);
 
+				if (Request.Source != nullptr && Request.Source->SurfaceBudget) {
+					if (!surfaceVisible[view.Index]) {
+						continue;
+					}
+					// A failed resize may retain the old pair. Reserve its extent too,
+					// so keeping it cannot silently exceed the capture budget.
+					const uint32_t budgetWidth = std::max(view.View->Width * scale, sized.Width);
+					const uint32_t budgetHeight = std::max(view.View->Height * scale, sized.Height);
+					if (!AdmitSurfaceCapture(budgetWidth, budgetHeight, 1)) {
+						continue;
+					}
+				}
+
 				if (State->EnsureSurface(
-						targetSlot, view.Index, view.View->Width * scale, view.View->Height * scale
+						targetSlot,
+						view.Index,
+						view.View->Width * scale,
+						view.View->Height * scale,
+						MirrorFormat
 					)) {
 					accepted[liveCount++] = view;
 				}
@@ -942,7 +1241,18 @@ namespace engine::render {
 		if (wantSurface) {
 			ENGINE_PROFILE_CAT("surface signature", core::ProfileCategory::Render);
 
-			surfaceSignature = scene::SignatureOf(instances);
+			// Reuse the presentation boundary's complete view inputs, including
+			// lighting and fitted surface cameras, rather than signing rows alone.
+			ScenePresentationState mirrorInputs{};
+			mirrorInputs.Lighting = Owner.CurrentLighting();
+			mirrorInputs.Animation = Owner.TextureAnimationSignature(State->AnimationSeconds);
+			// Primary-eye exclusion cannot change a secondary camera's pixels.
+			auto surfaceSource = source;
+			surfaceSource.EyeRig = 0;
+			surfaceSource.EyePlayer.reset();
+			surfaceSource.EyeHiddenRows = {};
+			surfaceSignature = ScenePresentationSignature(surfaceSource, mirrorInputs);
+			surfaceSignature = scene::MixSignature(surfaceSignature, ContentSignature);
 
 			// **And how deep the mirrors are being drawn, which is an input to
 			// every one of them.** A surface pass draws the *other* panes, so a
@@ -1004,10 +1314,15 @@ namespace engine::render {
 				// surface must draw *once* as soon as something can see it, or
 				// a pane walked up to shows its own tint for up to an interval
 				// before the picture appears.
-				const bool changed = !state.Ready || state.Signature != surfaceSignature;
+				// These live draw streams have no complete retained-input epoch here.
+				// A present stream must refresh even while geometry and camera are still.
+				const bool liveStream =
+					gameInterfaceHook != nullptr || !Request.Particles.empty() || !Request.RibbonRuns.empty();
+				const bool changed = !state.Ready || state.Signature != surfaceSignature || liveStream;
 				const bool due = DueToDraw(state.Drawn, accepted[index].View->FPS, frameSeconds);
 
-				accepted[index].Refresh = surfaceVisible[accepted[index].Index] && changed && due;
+				accepted[index].Refresh =
+					(sharedCaptures || surfaceVisible[accepted[index].Index]) && changed && due;
 
 				refreshCount += accepted[index].Refresh ? 1u : 0u;
 			}
@@ -1151,8 +1466,9 @@ namespace engine::render {
 			State->WallTimings.clear();
 			State->DroppedProfileMarks = 0;
 		}
-		const bool sampleGpu = State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
-							   State->FrameCounter % State->ProfileSampleRate == 0;
+		const bool sampleGpu = (State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
+								State->FrameCounter % State->ProfileSampleRate == 0) ||
+							   State->BatchCaptureTimingRequested;
 		timingSlot = !sampleGpu ? VulkanTimestamps::NO_SLOT
 					 : State->BatchActive
 						 ? (State->BatchFirst ? State->Timestamps.Begin(command) : State->BatchTimingSlot)
@@ -1162,6 +1478,7 @@ namespace engine::render {
 		}
 		if ((State->BatchFirst || !State->BatchActive) && timingSlot < VulkanTimestamps::SLOTS) {
 			State->PendingMarks[timingSlot].clear();
+			State->PendingCaptureTimings[timingSlot].clear();
 		}
 		openedMark = VulkanTimestamps::MARKS;
 		timedCommand = command;
@@ -1173,14 +1490,16 @@ namespace engine::render {
 		ribbonCount = 0;
 		{
 			ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
+			const bool effectsVisible =
+				graphEnabled(core::Name("transparent")) || graphEnabled(core::Name("transparent-layer"));
 			const Impl::ParticlePreparation prepared =
-				graphEnabled(core::Name("transparent")) ? State->PrepareParticles(source, command, timingSlot)
-														: Impl::ParticlePreparation{};
+				effectsVisible ? State->PrepareParticles(source, command, timingSlot)
+							   : Impl::ParticlePreparation{};
 			particleCount = prepared.Count;
 			result.ComputeDispatches += prepared.Dispatches;
 			result.Particles = particleCount;
 
-			ribbonCount = graphEnabled(core::Name("transparent")) ? State->PrepareRibbons(ribbonVertices) : 0;
+			ribbonCount = effectsVisible ? State->PrepareRibbons(ribbonVertices) : 0;
 			result.RibbonVertices = ribbonCount;
 		}
 
@@ -1197,9 +1516,13 @@ namespace engine::render {
 		// A scene whose opaque geometry all opted out of casting skips the pass
 		// rather than clearing a depth target nothing writes to - and the
 		// colour pass then samples a shadow map that was never rendered, which
-		// is what `FrameResult::Ran` exists to make visible.
-		haveShadow = graphEnabled(core::Name("shadow")) && haveInstances && sceneCount > 0 &&
-					 (reflectedCasters > 0 || surfaceCasters > 0) && State->EnsureShadow();
+		// is what `FrameResult::Ran` exists to make visible. An explicit capture still
+		// clears the empty map, so stale casters cannot enter its returned depth.
+		const bool captureShadow = State->HasShadowCaptureRequest(pipeline, request.TargetSlot);
+		haveShadow = graphEnabled(core::Name("shadow")) &&
+					 (captureShadow || source.ImportedDirectionalShadow != 0 ||
+					  (haveInstances && sceneCount > 0 && (reflectedCasters > 0 || surfaceCasters > 0))) &&
+					 State->EnsureShadow();
 
 		// Builds the per-draw block from world lighting and the camera used by
 		// this pass. Fog is eye-relative, so a reflected or portal sub-view must
@@ -1213,8 +1536,11 @@ namespace engine::render {
 		// once a mirror, surface or portal render pass is open. Headless frames
 		// still draw into capture targets; a hook that has no backend declines in
 		// `Prepare` itself.
-		drawInterface = Request.Damage.GameInterface && graphEnabled(core::Name("interface")) &&
-						gameInterfaceHook != nullptr && gameInterfaceHook->Prepare(command);
+		drawInterface =
+			(Request.Damage.GameInterface || Request.Damage.Scene) &&
+			(graphEnabled(core::Name("interface")) || graphEnabled(core::Name("transparent-layer")) ||
+			 graphEnabled(core::Name("spatial-overlay"))) &&
+			gameInterfaceHook != nullptr && gameInterfaceHook->Prepare(command);
 		drawHostOverlay =
 			swapchain != nullptr && hostOverlayHook != nullptr && hostOverlayHook->Prepare(command);
 
@@ -1300,9 +1626,8 @@ namespace engine::render {
 		depthTarget.texture = offscreen ? State->SlotAt(targetSlot).Depth : State->DepthTexture;
 		depthTarget.clear_depth = 1.0f;
 		depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-		// Nothing reads depth after the pass, so there is no reason to write it
-		// back out to memory.
-		depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+		// Graph consumers sample the completed opaque depth after the gbuffer pass.
+		depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 		depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 		depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 		depthTarget.cycle = true;
@@ -1312,27 +1637,33 @@ namespace engine::render {
 		// The material-producing head and its explicit consumers. Projected
 		// surfaces and blended geometry are submitted by the graph's transparent
 		// node over the finished image.
-		const auto outputDimensions =
-			[&](core::Name kind, size_t output, uint32_t &outWidth, uint32_t &outHeight) {
-				outWidth = sceneWidth;
-				outHeight = sceneHeight;
-				const graph::Node *node = nullptr;
-				for (uint32_t value = 1; value <= selectedPipeline->Graph.Count(); value++) {
-					const graph::Node *candidate = selectedPipeline->Graph.Find(graph::NodeId{value});
-					if (candidate != nullptr && candidate->Kind == kind) {
-						node = candidate;
-						break;
-					}
+		const auto outputDimensions = [&](core::Name kind,
+										  size_t output,
+										  uint32_t &outWidth,
+										  uint32_t &outHeight,
+										  core::Name port = {}) {
+			outWidth = sceneWidth;
+			outHeight = sceneHeight;
+			const graph::Node *node = nullptr;
+			for (uint32_t value = 1; value <= selectedPipeline->Graph.Count(); value++) {
+				const graph::Node *candidate = selectedPipeline->Graph.Find(graph::NodeId{value});
+				if (candidate != nullptr && candidate->Kind == kind) {
+					node = candidate;
+					break;
 				}
-				if (node == nullptr || output >= node->Writes.size()) {
-					return;
-				}
-				const graph::ResourceDesc *resource =
-					selectedPipeline->Graph.FindResource(node->Writes[output]);
-				if (resource != nullptr) {
-					resource->Resolve(sceneWidth, sceneHeight, outWidth, outHeight);
-				}
-			};
+			}
+			if (node == nullptr) return;
+			if (port.IsValid()) {
+				const auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
+				if (found == node->WritePorts.end()) return;
+				output = static_cast<size_t>(found - node->WritePorts.begin());
+			}
+			if (output >= node->Writes.size()) return;
+			const graph::ResourceDesc *resource = selectedPipeline->Graph.FindResource(node->Writes[output]);
+			if (resource != nullptr) {
+				resource->Resolve(sceneWidth, sceneHeight, outWidth, outHeight);
+			}
+		};
 		pbrDimensions.TargetWidth = targetWidth;
 		pbrDimensions.TargetHeight = targetHeight;
 		pbrDimensions.ViewWidth = sceneWidth;
@@ -1343,22 +1674,38 @@ namespace engine::render {
 		pbrDimensions.OcclusionHeight = sceneHeight;
 		pbrDimensions.LitWidth = sceneWidth;
 		pbrDimensions.LitHeight = sceneHeight;
+		pbrDimensions.FirstSurfaceValidity = graphEnabled(core::Name("depth-validity"));
+		pbrDimensions.SecondSurface = graphEnabled(core::Name("depth-peel"));
+		pbrDimensions.CameraMotion = graphEnabled(core::Name("camera-motion"));
 		outputDimensions(
 			core::Name("depth-linearise"), 0, pbrDimensions.LinearWidth, pbrDimensions.LinearHeight
 		);
 		outputDimensions(core::Name("ssao"), 0, pbrDimensions.OcclusionWidth, pbrDimensions.OcclusionHeight);
-		outputDimensions(core::Name("deferred-lighting"), 0, pbrDimensions.LitWidth, pbrDimensions.LitHeight);
+		// Optional lighting outputs do not choose the primary colour extent.
+		outputDimensions(
+			core::Name("deferred-lighting"),
+			0,
+			pbrDimensions.LitWidth,
+			pbrDimensions.LitHeight,
+			core::Name("colour")
+		);
 		const bool needsPbrTargets =
-			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-linearise")) ||
+			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-peel")) ||
+			graphEnabled(core::Name("depth-linearise")) || graphEnabled(core::Name("depth-validity")) ||
 			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
-			graphEnabled(core::Name("volumetrics")) || graphEnabled(core::Name("tonemap")) ||
-			graphEnabled(core::Name("transparent"));
-		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
+			graphEnabled(core::Name("camera-motion")) || graphEnabled(core::Name("fog")) ||
+			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
+		bool graphTargetsReady = true;
+		if (needsPbrTargets) {
+			ENGINE_PROFILE_CAT("ensure pbr targets", core::ProfileCategory::Render);
+			graphTargetsReady = State->EnsurePbr(targetSlot, pbrDimensions);
+		}
 		if (!graphTargetsReady) {
 			closePass();
 			State->Timestamps.Abandon(timingSlot);
 			if (timingSlot < VulkanTimestamps::SLOTS) {
 				State->PendingMarks[timingSlot].clear();
+				State->AbandonCaptureTimings(timingSlot);
 			}
 			endIncompleteView();
 			return ViewStart::Abandoned;
@@ -1366,8 +1713,6 @@ namespace engine::render {
 		Pbr = &State->PbrAt(targetSlot);
 		Impl::PbrSlot &pbr = *Pbr;
 		viewTarget = colourTarget.texture;
-		const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-		matrices = scene::ResolveCamera(cameraFrame, drawCamera, aspect);
 
 		// Named here because the transparent node reads it and that lambda has
 		// a `source` of its own - a texture, not this view.
@@ -1398,6 +1743,8 @@ namespace engine::render {
 		uniforms.Direct = State->Direct;
 		uniforms.Eye =
 			glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
+		const core::Vector3 forward = cameraFrame.LookVector();
+		uniforms.CameraDepth = glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(cameraFrame.Position)};
 		uniforms.FogColour = glm::vec4{
 			WorkingFromDisplay(State->FogColour.r),
 			WorkingFromDisplay(State->FogColour.g),
@@ -1454,7 +1801,8 @@ namespace engine::render {
 		LensPassData.InverseViewProjection = uniforms.InverseViewProjection;
 		LensPassData.Target = uniforms.Target;
 		LensPassData.Eye = uniforms.Eye;
-		LensPassData.TimeCount.x = static_cast<float>(frameSeconds);
+		LensPassData.CameraDepth = uniforms.CameraDepth;
+		LensPassData.TimeCount.x = Request.Source->LensTimeSeconds.value_or(static_cast<float>(frameSeconds));
 		const graph::Frustum lensFrustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
 		for (size_t index = 0; index < currentLighting.ShaderLensCount; index++) {
 			const scene::ShaderLensState &lens = currentLighting.ShaderLenses[index];
@@ -1510,8 +1858,6 @@ namespace engine::render {
 			},
 		};
 
-		tonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.SkyLit, sampler}};
-
 		return ViewStart::Recording;
 	}
 	// The instance rows, the slot tables beside them, and the occlusion plan
@@ -1525,8 +1871,9 @@ namespace engine::render {
 	//
 	// **A private phase of `Begin` rather than a node**, because nothing here
 	// touches the device queue: the copy pass it stages for is submitted by
-	// `RecordUploads`, which is what the `upload-instances` node calls.
+	// `RecordUploads`, which is what the `delta-upload` node calls.
 	void ViewRecording::PackInstances() {
+		ENGINE_PROFILE_CAT("pack instances", core::ProfileCategory::Render);
 		Impl *const State = this->State;
 		const core::CFrame &cameraFrame = Request.CameraFrame;
 		const uint32_t uploadCount = UploadCount;
@@ -1546,6 +1893,7 @@ namespace engine::render {
 
 		State->SlotMesh.resize(uploadCount);
 		State->SlotTexture.resize(uploadCount);
+		State->SlotContentOwner.resize(uploadCount);
 		State->SlotNormalMap.resize(uploadCount);
 		State->SlotRoughnessMap.resize(uploadCount);
 		State->SlotOcclusionMap.resize(uploadCount);
@@ -1556,11 +1904,15 @@ namespace engine::render {
 		State->SlotShadowDetail.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
 		State->SlotTags.resize(uploadCount);
+		State->SlotRig.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
 		State->SlotSeamLight.resize(uploadCount);
 		State->SlotInstanceKey.resize(sceneCount);
 		State->SlotInstanceCurrent.resize(sceneCount);
+		State->SlotLod.assign(uploadCount, NO_LOD_DRAW);
 		State->SceneSlotOfSource.resize(ownCount);
+		State->LodFrame.Clear();
+		State->Lod.Ready = false;
 		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
 		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
 		bool sourceOrderRetained = false;
@@ -1574,6 +1926,7 @@ namespace engine::render {
 			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry *mesh) {
 				State->SlotMesh[drawSlot] = mesh;
 				State->SlotTexture[drawSlot] = instance.Texture;
+				State->SlotContentOwner[drawSlot] = Request.Source->ContentOwnerOf(instance.SourceWorld);
 				State->SlotNormalMap[drawSlot] = instance.NormalMap;
 				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
 				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
@@ -1585,6 +1938,7 @@ namespace engine::render {
 													instance.SeamNormal.MagnitudeSquared() > 0.0f;
 				State->SlotShader[drawSlot] = instance.Shader;
 				State->SlotTags[drawSlot] = instance.TagMask;
+				State->SlotRig[drawSlot] = instance.Rig;
 				State->SlotSeam[drawSlot] = glm::vec4{
 					instance.SeamNormal.X,
 					instance.SeamNormal.Y,
@@ -1598,7 +1952,10 @@ namespace engine::render {
 							   const scene::DrawInstance &instance,
 							   uint32_t fallback,
 							   const Impl::SceneSlot::InstanceSourceRow *cached = nullptr) {
-			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
+			const MeshEntry &mesh = State->Meshes.Resolve(
+				instance.Mesh,
+				Impl::MeshContentOwner(instance.Mesh, Request.Source->ContentOwnerOf(instance.SourceWorld))
+			);
 			writeMetadata(drawSlot, instance, &mesh);
 
 			InstanceKey &key = State->SlotInstanceKey[drawSlot];
@@ -1761,6 +2118,7 @@ namespace engine::render {
 						target.InstanceIndices[drawSlot] = target.InstanceIndices[sceneSlot];
 						State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
 						State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
+						State->SlotContentOwner[drawSlot] = State->SlotContentOwner[sceneSlot];
 						State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
 						State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
 						State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
@@ -1771,6 +2129,7 @@ namespace engine::render {
 						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
 						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
 						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
+						State->SlotRig[drawSlot] = State->SlotRig[sceneSlot];
 						State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
 						State->SlotSeamLight[drawSlot] = State->SlotSeamLight[sceneSlot];
 					}
@@ -1780,6 +2139,48 @@ namespace engine::render {
 				parallel::Jobs::For(
 					State->DrawOrder.size(), CAMERA_ROWS_GRAIN, mapCameraRows, CAMERA_ROWS_PARALLEL_MINIMUM
 				);
+			}
+		}
+
+		{
+			ENGINE_PROFILE_CAT("build authored lod", core::ProfileCategory::Render);
+			const auto instanceAt = [&](uint32_t slot) -> const scene::DrawInstance & {
+				if (slot < ownCount) {
+					return State->SceneInstances[State->SceneOrder[slot]];
+				}
+				if (slot < sceneCount) {
+					return State->SceneInstances[slot];
+				}
+				return State->SceneInstances[State->DrawOrder[slot - cameraBase]];
+			};
+			for (uint32_t slot = 0; slot < uploadCount; ++slot) {
+				const scene::DrawInstance &instance = instanceAt(slot);
+				if (instance.LodStrategyMode == scene::LodStrategy::None || instance.LodLevels < 2) {
+					continue;
+				}
+
+				std::array<const MeshEntry *, scene::LOD_LEVELS> levels{};
+				levels[0] = State->SlotMesh[slot];
+				uint32_t levelCount = 1;
+				const uint32_t wanted = std::clamp<uint32_t>(instance.LodLevels, 1u, scene::LOD_LEVELS);
+				for (uint32_t level = 1; level < wanted; ++level) {
+					const core::Name name = instance.LodMeshes[level - 1];
+					const core::Name owner = Impl::MeshContentOwner(name, State->SlotContentOwner[slot]);
+					if (!name.IsValid() || !State->Meshes.Has(name, owner)) {
+						break;
+					}
+					levels[level] = &State->Meshes.Resolve(name, owner);
+					levelCount++;
+				}
+				const uint32_t draw = static_cast<uint32_t>(State->LodFrame.Draws.size());
+				if (AppendAuthoredLod(
+						State->LodFrame,
+						slot,
+						instance,
+						std::span<const MeshEntry *const>(levels.data(), levelCount)
+					)) {
+					State->SlotLod[slot] = draw;
+				}
 			}
 		}
 
@@ -1794,7 +2195,7 @@ namespace engine::render {
 		// definition, so swapping rows inside one changes no run
 		// boundary and no other pass's picture - an opaque draw
 		// is order-independent under the depth test.
-		State->OcclusionFrame = Impl::OcclusionPlan{};
+		State->OcclusionFrame.Reset();
 		if (occlusionCulling && plainOpaque > 0) {
 			ENGINE_PROFILE_CAT("occlusion plan", core::ProfileCategory::Render);
 			Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
@@ -1812,8 +2213,8 @@ namespace engine::render {
 			const auto base = static_cast<uint32_t>(cameraBase);
 			const uint32_t opaqueEnd = base + plainOpaque;
 
-			std::vector<uint32_t> earlyRows;
-			std::vector<uint32_t> lateRows;
+			std::vector<uint32_t> &earlyRows = occlusionPlan.EarlyRows;
+			std::vector<uint32_t> &lateRows = occlusionPlan.LateRows;
 			uint32_t slot = base;
 			while (slot < opaqueEnd) {
 				uint32_t run = 1;
@@ -1857,8 +2258,14 @@ namespace engine::render {
 					const float away = std::max(glm::distance(centre, eye), 0.01f);
 					if (widest >= away * OCCLUDER_SCORE) {
 						earlyRows.push_back(residentSlot);
+						occlusionPlan.EarlyInstances.push_back(
+							State->SceneInstances[State->DrawOrder[at - base]]
+						);
 					} else {
 						lateRows.push_back(residentSlot);
+						occlusionPlan.LateInstances.push_back(
+							State->SceneInstances[State->DrawOrder[at - base]]
+						);
 						occlusionPlan.CandidatePairs.emplace_back(centre, std::bit_cast<float>(runIndex));
 						occlusionPlan.CandidatePairs.emplace_back(extent, std::bit_cast<float>(residentSlot));
 					}
@@ -1927,16 +2334,20 @@ namespace engine::render {
 		target.SkinOffsetSignature = skinOffsetSignature;
 		target.SkinOffsetsReady = true;
 
-		target.JointWords.assign(std::max<size_t>(State->SceneJointFrames.size() * 5, 5), 0);
+		target.JointWords.assign(
+			std::max<size_t>(State->SceneJointFrames.size() * GPU_JOINT_WORDS, GPU_JOINT_WORDS), 0
+		);
 		for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
 			const core::CFrame &frame = State->SceneJointFrames[index];
 			const PackedRotation rotation = PackRotation(frame.Rotation());
-			const size_t word = index * 5;
+			const size_t word = index * GPU_JOINT_WORDS;
 			target.JointWords[word] = std::bit_cast<uint32_t>(frame.Position.X);
 			target.JointWords[word + 1] = std::bit_cast<uint32_t>(frame.Position.Y);
 			target.JointWords[word + 2] = std::bit_cast<uint32_t>(frame.Position.Z);
 			target.JointWords[word + 3] = rotation.Words[0];
 			target.JointWords[word + 4] = rotation.Words[1];
+			target.JointWords[word + 5] = rotation.Words[2];
+			target.JointWords[word + 6] = rotation.Words[3];
 		}
 		uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
 		for (const uint32_t word : target.JointWords) {
@@ -2071,7 +2482,7 @@ namespace engine::render {
 					return;
 				}
 				auto *staged = static_cast<uint32_t *>(mapped);
-				StageBulk<uint32_t>(staged, target.ResidentIndices.DirtyRanges(), target.InstanceIndices);
+				StageRanges<uint32_t>(staged, target.ResidentIndices.DirtyRanges(), target.InstanceIndices);
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceIndexTransfer);
 			} else {
 				target.ResidentIndices.Acknowledge();
@@ -2086,10 +2497,59 @@ namespace engine::render {
 				}
 				auto *rows = static_cast<GpuInstance *>(mapped);
 				const std::span<const GpuInstance> packed = residency.PackedRows();
-				StageBulk<GpuInstance>(rows, residency.DirtyRanges(), packed);
+				StageRanges<GpuInstance>(rows, residency.DirtyRanges(), packed);
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 			}
 			haveInstances = true;
+
+			if (!State->LodFrame.Selections.empty()) {
+				LodPlan &lod = State->LodFrame;
+				if (!State->EnsureLodResources(
+						static_cast<uint32_t>(lod.Selections.size()),
+						static_cast<uint32_t>(lod.Instances.size()),
+						static_cast<uint32_t>(lod.Commands.size())
+					)) {
+					lod.Clear();
+				} else {
+					void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->Lod.Transfer, true);
+					if (mapped == nullptr) {
+						ENGINE_ERROR("lod staging: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+						lod.Clear();
+					} else {
+						const LodTransferLayout layout = TransferLayoutOf(lod);
+						auto *bytes = static_cast<uint8_t *>(mapped);
+						std::memcpy(
+							bytes + layout.Selections,
+							lod.Selections.data(),
+							lod.Selections.size() * sizeof(GpuLodSelection)
+						);
+						std::memcpy(
+							bytes + layout.Clusters,
+							lod.Clusters.data(),
+							lod.Clusters.size() * sizeof(GpuLodCluster)
+						);
+						std::memcpy(
+							bytes + layout.Instances,
+							lod.Instances.data(),
+							lod.Instances.size() * sizeof(GpuInstance)
+						);
+						std::memcpy(
+							bytes + layout.Indices, lod.Indices.data(), lod.Indices.size() * sizeof(uint32_t)
+						);
+						std::memcpy(
+							bytes + layout.SkinOffsets,
+							lod.SkinOffsets.data(),
+							lod.SkinOffsets.size() * sizeof(uint32_t)
+						);
+						std::memcpy(
+							bytes + layout.Arguments,
+							lod.Commands.data(),
+							lod.Commands.size() * sizeof(SDL_GPUIndexedIndirectDrawCommand)
+						);
+						SDL_UnmapGPUTransferBuffer(State->Device, State->Lod.Transfer);
+					}
+				}
+			}
 
 			// Stage what the cull reads and the indirect draws consume. Its
 			// own transfer rather than a tail on the instance one, so the
@@ -2234,34 +2694,133 @@ namespace engine::render {
 		profile.Begin = [this](const graph::RunContext &context) { BeginNodeProfile(context); };
 		profile.End = [this](const graph::RunContext &context) { return EndNodeProfile(context); };
 		GraphRunner frameRunner(frameNodes, State->ProfileTier, std::move(profile));
+
+		struct RetainedRunner final : graph::NodeRunner {
+			GraphRunner &Inner;
+			std::function<bool(const graph::RunContext &)> Enabled;
+			RetainedRunner(GraphRunner &inner, decltype(Enabled) enabled)
+				: Inner(inner), Enabled(std::move(enabled)) {}
+			bool Run(const graph::RunContext &context) override {
+				return !Enabled || Enabled(context) ? Inner.Run(context) : true;
+			}
+		};
+		RetainedRunner retained(frameRunner, [this](const graph::RunContext &context) {
+			if (Request.Damage.Scene) return true;
+			return context.Node.Value != 0 && context.Node.Value <= Pipeline->RetainedNodes.size() &&
+				   Pipeline->RetainedNodes[context.Node.Value - 1] != 0;
+		});
+
+		struct ProbedRunner final : graph::NodeRunner {
+			graph::NodeRunner &Inner;
+			std::function<void(const graph::RunContext &, bool, bool)> Probe;
+			ProbedRunner(graph::NodeRunner &inner, decltype(Probe) probe)
+				: Inner(inner), Probe(std::move(probe)) {}
+			bool Run(const graph::RunContext &context) override {
+				Probe(context, true, true);
+				const bool accepted = Inner.Run(context);
+				Probe(context, false, accepted);
+				return accepted;
+			}
+		};
+		ProbedRunner probed(
+			retained, [this, State](const graph::RunContext &context, bool before, bool accepted) {
+				if (!State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)) return;
+				ClosePass();
+				const auto save = [&](const Impl::NamedTexture &texture, std::string_view resource) {
+					std::ostringstream metadata;
+					metadata << "\"pipeline\":" << RenderStageProbe::Quote(Pipeline->Name.Text())
+							 << ",\"stage\":" << RenderStageProbe::Quote(context.Name.Text())
+							 << ",\"resource\":" << RenderStageProbe::Quote(resource)
+							 << ",\"world\":" << RenderStageProbe::Quote(Request.Source->WorldName.Text())
+							 << ",\"view_slot\":" << Request.TargetSlot
+							 << ",\"eye_handle\":" << Request.Source->EyeImage
+							 << ",\"stage_ran\":" << (Result.Ran(context.Name) ? "true" : "false")
+							 << ",\"camera_position\":[" << Request.Source->CameraFrame.Position.X << ","
+							 << Request.Source->CameraFrame.Position.Y << ","
+							 << Request.Source->CameraFrame.Position.Z << "]"
+							 << ",\"before\":" << (before ? "true" : "false")
+							 << ",\"node_accepted\":" << (accepted ? "true" : "false");
+					State->StageProbe.Record(
+						State->Device,
+						Command,
+						State->FrameCounter,
+						metadata.str(),
+						texture.Texture,
+						texture.Width,
+						texture.Height,
+						texture.Format,
+						std::string(context.Name.Text()) + " / " + std::string(resource)
+					);
+				};
+				if (before) {
+					if (context.Kind != core::Name("eye-image")) return;
+					for (const auto &image : State->ImportedPortals)
+						if (image.Handle != 0 && image.Handle == Request.Source->EyeImage)
+							save(
+								{image.Texture,
+								 image.Width,
+								 image.Height,
+								 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT},
+								"imported-eye-input"
+							);
+					return;
+				}
+				if (context.Writes.empty()) save({}, "no-image-output");
+				for (const auto resource : context.Writes) {
+					const auto *description = Pipeline->Graph.FindResource(resource);
+					save(
+						GraphTexture(resource, context, false),
+						description ? description->Name.Text() : "unknown"
+					);
+				}
+			}
+		);
+		graph::NodeRunner &runner = State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)
+										? static_cast<graph::NodeRunner &>(probed)
+										: retained;
 		bool dispatched = false;
 		if (State->BatchActive) {
+			const bool frameSetup =
+				Request.Damage.Scene && State->PreparedScopes.NeedsFrame(selectedPipeline);
+			const bool isolatedShadow = Request.Source->ImportedDirectionalShadow != 0 ||
+										Request.Source->DirectionalShadowBounds.has_value() ||
+										State->HasShadowCaptureRequest(Request.Pipeline, Request.TargetSlot);
+			const bool worldSetup =
+				Request.Damage.Scene
+					? (isolatedShadow || State->PreparedScopes.NeedsWorld(selectedPipeline, world))
+					: State->BatchShared;
 			dispatched = selectedPipeline->Graph.ExecuteView(
 				selectedPipeline->Compiled,
-				frameRunner,
+				runner,
 				State->BatchViewIndex,
 				State->BatchWorldIndex,
-				State->BatchShared
+				worldSetup,
+				frameSetup
 			);
+			State->PreparedScopes.Complete(selectedPipeline, world, dispatched && Request.Damage.Scene);
+			if (isolatedShadow && dispatched && Request.Damage.Scene)
+				State->PreparedScopes.InvalidateWorld(selectedPipeline, world);
 			if (dispatched && State->BatchFinal) {
-				dispatched = selectedPipeline->Graph.ExecuteFinal(selectedPipeline->Compiled, frameRunner);
+				dispatched = selectedPipeline->Graph.ExecuteFinal(selectedPipeline->Compiled, runner);
 			}
 		} else {
 			const uint64_t worlds[] = {world};
-			dispatched = selectedPipeline->Graph.Execute(selectedPipeline->Compiled, frameRunner, worlds);
+			dispatched = selectedPipeline->Graph.Execute(selectedPipeline->Compiled, runner, worlds);
 		}
 		State->DroppedProfileMarks += frameRunner.DroppedProfileMarks();
 		if (!dispatched) {
+			const core::Name failed =
+				frameRunner.Rejected().IsValid() ? frameRunner.Rejected() : frameRunner.Unhandled();
 			ENGINE_ERROR(
-				"render graph '{}' refused while executing '{}'",
-				selectedPipeline->Name.Text(),
-				frameRunner.Unhandled().Text()
+				"render graph '{}' refused while executing '{}'", selectedPipeline->Name.Text(), failed.Text()
 			);
 			closePass();
 			State->BatchFailed = State->BatchActive;
 			endIncompleteView();
 			return;
 		}
+
+		State->SlotAt(targetSlot).ContentSignature = ContentSignature;
 
 		closePass();
 
@@ -2452,12 +3011,19 @@ namespace engine::render {
 				ENGINE_PROFILE_CAT("submit.scene", core::ProfileCategory::Render);
 				sceneSubmitted = State->SubmitSceneCommand(command);
 			}
+			result.Submitted = sceneSubmitted;
 			if (!sceneSubmitted) {
+				State->VisibilityWorking.Invalidate();
+				State->VisibilityCompleted = {};
+				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteResidentUploads(false);
+				State->DiscardPendingGraphHistoryWrites(command);
+				State->ClearSubmittedGraphHistoryWrites();
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();
+					State->AbandonCaptureTimings(timingSlot);
 				}
 				if (capture != nullptr) {
 					gpu::ReleaseTransferBuffer(State->Device, capture);
@@ -2465,9 +3031,12 @@ namespace engine::render {
 				State->DropDownloads();
 				return;
 			}
+			State->VisibilityCompleted = State->VisibilityWorking.Snapshot();
 			{
 				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
 				State->CompleteResidentUploads(true);
+				State->CommitPendingGraphHistoryWrites(command);
+				State->ClearSubmittedGraphHistoryWrites();
 			}
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {

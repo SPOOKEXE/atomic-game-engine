@@ -13,6 +13,8 @@
 // menu, and they read exactly the same `core::FrameGraph` the client's overlay
 // does - the data is shared even though the drawing is not.
 
+#include "ProfilerFlame.hpp"
+
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -27,6 +29,7 @@
 #include <cstdio>
 #include <imgui.h>
 #include <iterator>
+#include <limits>
 #include <studio/Diagnostics.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
@@ -34,6 +37,63 @@
 #include <vector>
 
 namespace studio {
+	bool ShouldReplaceDiagnosticSnapshot(
+		DiagnosticAggregation mode, bool hasSelected, float selectedMilliseconds, float candidateMilliseconds
+	) {
+		if (!hasSelected || mode == DiagnosticAggregation::Latest) {
+			return true;
+		}
+		if (mode == DiagnosticAggregation::Maximum) {
+			return candidateMilliseconds > selectedMilliseconds;
+		}
+		return mode == DiagnosticAggregation::Minimum && candidateMilliseconds < selectedMilliseconds;
+	}
+
+	bool SelectHeapHistorySnapshot(
+		std::span<const engine::core::HeapHistorySnapshot> snapshots,
+		DiagnosticAggregation mode,
+		engine::core::HeapHistorySnapshot &selected
+	) {
+		if (snapshots.empty()) {
+			return false;
+		}
+
+		if (mode == DiagnosticAggregation::Average) {
+			selected = {};
+			selected.Sample.Seconds = snapshots.back().Sample.Seconds;
+			for (const engine::core::HeapHistorySnapshot &snapshot : snapshots) {
+				selected.Sample.LiveBytes += snapshot.Sample.LiveBytes;
+				selected.Sample.LiveBlocks += snapshot.Sample.LiveBlocks;
+				selected.InclusiveBytes.resize(
+					std::max(selected.InclusiveBytes.size(), snapshot.InclusiveBytes.size())
+				);
+				for (size_t node = 0; node < snapshot.InclusiveBytes.size(); node++) {
+					selected.InclusiveBytes[node] += snapshot.InclusiveBytes[node];
+				}
+			}
+			const int64_t count = static_cast<int64_t>(snapshots.size());
+			selected.Sample.LiveBytes /= count;
+			selected.Sample.LiveBlocks /= count;
+			for (int64_t &bytes : selected.InclusiveBytes) {
+				bytes /= count;
+			}
+			return true;
+		}
+
+		size_t chosen = snapshots.size() - 1;
+		if (mode != DiagnosticAggregation::Latest) {
+			for (size_t index = 0; index < snapshots.size(); index++) {
+				const bool maximum = mode == DiagnosticAggregation::Maximum;
+				if ((maximum && snapshots[index].Sample.LiveBytes > snapshots[chosen].Sample.LiveBytes) ||
+					(!maximum && snapshots[index].Sample.LiveBytes < snapshots[chosen].Sample.LiveBytes)) {
+					chosen = index;
+				}
+			}
+		}
+		selected = snapshots[chosen];
+		return true;
+	}
+
 	std::string_view
 	DescribeDiagnosticSpan(std::string_view name, engine::core::ProfileCategory category, bool reported) {
 		if (name == "unaccounted") {
@@ -110,6 +170,52 @@ namespace studio {
 	void AccumulateDiagnosticSpans(
 		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
 	) {
+		// Retained because averaging runs every frame while the panel is open.
+		// It maps the previous frame's source indices to their rows in `totals`.
+		static thread_local std::vector<uint32_t> targets;
+		static thread_local const std::vector<DiagnosticSpan> *targetTotals = nullptr;
+
+		const auto accumulate = [](const engine::core::FrameSpan &source, DiagnosticSpan &target) {
+			target.StartMilliseconds += source.StartMilliseconds;
+			target.Milliseconds += source.Milliseconds;
+			target.SelfMilliseconds += source.SelfMilliseconds;
+			target.IdleMilliseconds += source.IdleMilliseconds;
+			target.Occurrences++;
+		};
+
+		// The common case is the same recorded tree on every frame. Reuse its
+		// source-to-total mapping, so an intermittent row retained in `totals`
+		// does not force a hash-table rebuild for every smaller later frame.
+		if (targetTotals == &totals && targets.size() == frame.size()) {
+			bool sameStructure = true;
+			for (size_t index = 0; index < frame.size(); index++) {
+				const engine::core::FrameSpan &source = frame[index];
+				const uint32_t targetIndex = targets[index];
+				if (targetIndex >= totals.size()) {
+					sameStructure = false;
+					break;
+				}
+				if (source.Parent < index && targets[source.Parent] >= totals.size()) {
+					sameStructure = false;
+					break;
+				}
+				const uint32_t parent =
+					source.Parent < index ? targets[source.Parent] : engine::core::FrameGraph::NO_PARENT;
+				const DiagnosticSpan &target = totals[targetIndex];
+				if (target.Name != source.Name || target.Depth != source.Depth || target.Parent != parent ||
+					target.Owner != source.Owner) {
+					sameStructure = false;
+					break;
+				}
+			}
+			if (sameStructure) {
+				for (size_t index = 0; index < frame.size(); index++) {
+					accumulate(frame[index], totals[targets[index]]);
+				}
+				return;
+			}
+		}
+
 		struct SiblingKey {
 			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
 			std::string_view Name;
@@ -138,10 +244,8 @@ namespace studio {
 			}
 		};
 
-		// Retained because averaging runs every frame while the panel is open.
 		// The previous pair of linear searches made N spans cost N squared and
 		// turned a granular particle or server capture into profiler lag.
-		static thread_local std::vector<uint32_t> targets;
 		static thread_local std::unordered_map<SiblingKey, uint32_t, SiblingHash> ordinals;
 		static thread_local std::unordered_map<StructuralKey, uint32_t, StructuralHash> targetByKey;
 
@@ -200,17 +304,14 @@ namespace studio {
 			}
 
 			targets[index] = targetIndex;
-			target->StartMilliseconds += source.StartMilliseconds;
-			target->Milliseconds += source.Milliseconds;
-			target->SelfMilliseconds += source.SelfMilliseconds;
-			target->IdleMilliseconds += source.IdleMilliseconds;
-			target->Occurrences++;
+			accumulate(source, *target);
 		}
 
 		// Keys borrow names from `totals` and `frame`. Keep the buckets between
 		// frames, but never keep those borrowed views after either owner can move.
 		ordinals.clear();
 		targetByKey.clear();
+		targetTotals = &totals;
 	}
 
 	void FilterDiagnosticSpans(
@@ -559,6 +660,10 @@ namespace studio {
 
 		constexpr std::array<const char *, 6> FRAME_GRAPH_INTERVAL_NAMES{
 			"every frame", "250 ms", "500 ms", "1 s", "2 s", "5 s"
+		};
+		constexpr std::array<double, 5> HEAP_INTERVALS{0.0, 5.0, 30.0, 60.0, 300.0};
+		constexpr std::array<const char *, 5> HEAP_INTERVAL_NAMES{
+			"latest sample", "5 s", "30 s", "1 min", "5 min"
 		};
 
 		// A colour per category, so a flame graph is readable as shape rather
@@ -932,6 +1037,8 @@ namespace studio {
 			view.SummedUnmarkedMilliseconds = 0.0f;
 			view.SummedDropped = 0;
 			view.Frames = 0;
+			view.Extreme.clear();
+			view.HasExtreme = false;
 		};
 
 		// **The graph pauses itself on the frame the rule fired**, which is the
@@ -960,18 +1067,41 @@ namespace studio {
 				view.PublishedFrames = 1;
 				forget();
 			} else {
-				if (view.Average) {
+				if (view.Mode == DiagnosticAggregation::Average) {
 					ENGINE_PROFILE_CAT("frame graph.average", engine::core::ProfileCategory::Engine);
 					// Structural matching keeps repeated world and phase trees
 					// separate. Matching only name and depth collapses all of their
 					// bars onto one time range.
-					AccumulateDiagnosticSpans(live, view.Summed);
-
-					view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
-					view.SummedIdleMilliseconds += FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
-					view.SummedUnmarkedMilliseconds += FrameGraph::UnmarkedMilliseconds();
-					view.SummedDropped += FrameGraph::Dropped();
+					{
+						ENGINE_PROFILE_CAT(
+							"frame graph.average.spans", engine::core::ProfileCategory::Engine
+						);
+						AccumulateDiagnosticSpans(live, view.Summed);
+					}
+					{
+						ENGINE_PROFILE_CAT(
+							"frame graph.average.scalars", engine::core::ProfileCategory::Engine
+						);
+						view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
+						view.SummedIdleMilliseconds +=
+							FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+						view.SummedUnmarkedMilliseconds += FrameGraph::UnmarkedMilliseconds();
+						view.SummedDropped += FrameGraph::Dropped();
+					}
 					view.Frames++;
+				} else if (view.Mode != DiagnosticAggregation::Latest) {
+					const float frame = FrameGraph::FrameMilliseconds();
+					if (ShouldReplaceDiagnosticSnapshot(
+							view.Mode, view.HasExtreme, view.ExtremeFrameMilliseconds, frame
+						)) {
+						snapshot(view.Extreme);
+						view.ExtremeFrameMilliseconds = frame;
+						view.ExtremeIdleMilliseconds =
+							FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+						view.ExtremeUnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
+						view.ExtremeDropped = FrameGraph::Dropped();
+						view.HasExtreme = true;
+					}
 				}
 
 				// **Also on the first frame the panel is open**, whatever the
@@ -979,15 +1109,24 @@ namespace studio {
 				// reads as a panel that does not work.
 				if (now >= view.NextPublish || view.Spans.empty()) {
 					ENGINE_PROFILE_CAT("frame graph.publish", engine::core::ProfileCategory::Engine);
-					if (view.Average && view.Frames > 0) {
+					if (view.Mode == DiagnosticAggregation::Average && view.Frames > 0) {
 						const float frames = static_cast<float>(view.Frames);
 						view.Spans = view.Summed;
 						FinishDiagnosticAverage(view.Spans, view.Frames);
 						view.FrameMilliseconds = view.SummedFrameMilliseconds / frames;
 						view.IdleMilliseconds = view.SummedIdleMilliseconds / frames;
 						view.UnmarkedMilliseconds = view.SummedUnmarkedMilliseconds / frames;
-						view.Dropped = view.SummedDropped / view.Frames;
+						// A window with one lost span is partial even when its per-frame
+						// mean rounds to zero. Keep the window total for that warning.
+						view.Dropped = view.SummedDropped;
 						view.PublishedFrames = view.Frames;
+					} else if (view.HasExtreme) {
+						view.Spans = view.Extreme;
+						view.FrameMilliseconds = view.ExtremeFrameMilliseconds;
+						view.IdleMilliseconds = view.ExtremeIdleMilliseconds;
+						view.UnmarkedMilliseconds = view.ExtremeUnmarkedMilliseconds;
+						view.Dropped = view.ExtremeDropped;
+						view.PublishedFrames = 1;
 					} else {
 						snapshot(view.Spans);
 						readScalars();
@@ -1037,7 +1176,10 @@ namespace studio {
 			view.OwnerFilter == ProfileOwner::All ? view.Spans : view.FilteredSpans;
 
 		const char *millisecondsFormat = frameMs < 1.0f ? "%.3f" : "%.2f";
-		ImGui::Text(frameMs < 1.0f ? "%.3f ms" : "%.2f ms", static_cast<double>(frameMs));
+		// The graph closes once per update-loop iteration. Presentation may span
+		// several of those iterations while the presentation schedule is waiting
+		// for its next opportunity, so this duration is not the inverse of FPS.
+		ImGui::Text(frameMs < 1.0f ? "update %.3f ms" : "update %.2f ms", static_cast<double>(frameMs));
 		ImGui::SameLine();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		if (frameMs < 1.0f) {
@@ -1054,6 +1196,29 @@ namespace studio {
 				static_cast<double>(idleMs),
 				static_cast<double>(view.UnmarkedMilliseconds)
 			);
+		}
+		ImGui::PopStyleColor();
+
+		if (Statistics.HasSamples()) {
+			const engine::render::FrameSummary presentation = Statistics.Summarise();
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::Text(
+				"present %.2f ms / %.0f fps",
+				static_cast<double>(presentation.CurrentMilliseconds),
+				static_cast<double>(presentation.Current)
+			);
+			ImGui::PopStyleColor();
+		}
+
+		ImGui::SameLine();
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		if (VerticalSync) {
+			ImGui::TextUnformatted("present cap display (vsync)");
+		} else if (const float cap = PacingCeiling(); cap > 0.0f) {
+			ImGui::Text("present cap %.0f fps", static_cast<double>(cap));
+		} else {
+			ImGui::TextUnformatted("present cap unlimited");
 		}
 		ImGui::PopStyleColor();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
@@ -1144,19 +1309,29 @@ namespace studio {
 
 		ImGui::SameLine();
 
-		// **Disabled at "every frame", because there is nothing to average
-		// over.** Greyed rather than hidden: a control that disappears when a
+		// **Disabled at "every frame", because there is no interval to select
+		// from.** Greyed rather than hidden: a control that disappears when a
 		// neighbouring one changes is a control nobody finds again.
 		ImGui::BeginDisabled(interval <= 0.0f);
-		ImGui::Checkbox("average", &view.Average);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
+		constexpr std::array<const char *, 4> MODE_NAMES{"latest", "average", "max", "min"};
+		const auto mode = static_cast<size_t>(view.Mode);
+		if (ImGui::BeginCombo("mode", MODE_NAMES[mode])) {
+			for (size_t index = 0; index < MODE_NAMES.size(); index++) {
+				if (ImGui::Selectable(MODE_NAMES[index], index == mode)) {
+					view.Mode = static_cast<DiagnosticAggregation>(index);
+					forget();
+				}
+			}
+			ImGui::EndCombo();
+		}
 		ImGui::EndDisabled();
 
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"On: every frame in the interval is summed and the mean is shown, so a\n"
-				"span's number is what it typically costs.\n"
-				"Off: the interval simply decides how often the panel takes a new sample,\n"
-				"and what is shown is one real frame - including the unlucky ones."
+				"Latest takes the current frame. Average builds a structural mean.\n"
+				"Max and Min select one complete frame by total frame time, preserving\n"
+				"the actual hierarchy instead of combining unrelated bars."
 			);
 		}
 
@@ -1173,7 +1348,7 @@ namespace studio {
 				ImGui::TextUnformatted("- paused");
 			}
 			ImGui::PopStyleColor();
-		} else if (interval > 0.0f && view.Average) {
+		} else if (interval > 0.0f && view.Mode == DiagnosticAggregation::Average) {
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text("- mean of %u frame(s)", view.PublishedFrames);
@@ -1195,7 +1370,11 @@ namespace studio {
 		const size_t dropped = view.Dropped;
 		if (dropped > 0) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::Text("%zu spans dropped - off-thread, too deep, or past the buffer", dropped);
+			ImGui::Text(
+				"%zu spans dropped in this %u-frame window - off-thread, too deep, or past the buffer",
+				dropped,
+				view.PublishedFrames
+			);
 			ImGui::PopStyleColor();
 		}
 
@@ -1445,9 +1624,13 @@ namespace studio {
 			const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 			const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
 			const float graphHeight = rowHeight * static_cast<float>(visibleRowCount);
+			const ImVec2 graphLower(origin.x + graphWidth, origin.y + graphHeight);
+			const bool mouseInGraph = ImGui::IsMouseHoveringRect(origin, graphLower);
+			const float labelMinimumWidth = engine::ui::Scaled(34.0f);
 
 			ImDrawList *draw = ImGui::GetWindowDrawList();
 			const DiagnosticSpan *hovered = nullptr;
+			uint32_t hoveredSource = FrameGraph::NO_PARENT;
 			uint32_t clickedSource = FrameGraph::NO_PARENT;
 
 			const auto drawSpan = [&](size_t index) {
@@ -1472,18 +1655,18 @@ namespace studio {
 					span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
 				draw->AddRectFilled(upper, lower, colour);
 
-				if (ImGui::IsMouseHoveringRect(upper, lower)) {
+				if (mouseInGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
 					hovered = &span;
+					hoveredSource = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
 					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-						clickedSource =
-							focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
+						clickedSource = hoveredSource;
 					}
 					draw->AddRect(upper, lower, engine::ui::BrightColour());
 				}
 
 				// Only where the label fits. Text clipped mid-word is noise, and a
 				// flame graph is read as shape first.
-				if (width > engine::ui::Scaled(34.0f)) {
+				if (width > labelMinimumWidth) {
 					draw->PushClipRect(upper, lower, true);
 					draw->AddText(
 						ImVec2(left + 3.0f, top + 1.0f),
@@ -1548,6 +1731,15 @@ namespace studio {
 					hovered->Reported ? "   (reported from another thread)" : ""
 				);
 				ImGui::PopStyleColor();
+				if (hovered->Name == "jobs.join.assigned") {
+					const std::vector<DiagnosticSpan> worlds = AssignedJoinWorlds(graphSpans, hoveredSource);
+					if (!worlds.empty()) {
+						ImGui::Separator();
+						ImGui::TextUnformatted("worker worlds (producer time)");
+						for (const DiagnosticSpan &world : worlds)
+							ImGui::Text("%s  %.3f ms", world.Name.c_str(), world.Milliseconds);
+					}
+				}
 				ImGui::EndTooltip();
 			}
 
@@ -1569,38 +1761,43 @@ namespace studio {
 				ImGui::TableSetupScrollFreeze(0, 1);
 				ImGui::TableHeadersRow();
 
-				for (const DiagnosticSpan &span : spans) {
-					ImGui::TableNextRow();
+				ImGuiListClipper clipper;
+				clipper.Begin(static_cast<int>(spans.size()), ImGui::GetTextLineHeightWithSpacing());
+				while (clipper.Step()) {
+					for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; index++) {
+						const DiagnosticSpan &span = spans[static_cast<size_t>(index)];
+						ImGui::TableNextRow();
 
-					ImGui::TableSetColumnIndex(0);
-					ImGui::Indent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
-					ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
-					ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+						ImGui::TableSetColumnIndex(0);
+						ImGui::Indent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+						ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
+						ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
 
-					const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
-					const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
+						const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
+						const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
 
-					ImGui::TableSetColumnIndex(1);
-					ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
+						ImGui::TableSetColumnIndex(1);
+						ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
 
-					ImGui::TableSetColumnIndex(2);
-					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-					if (span.IdleMilliseconds > 0.0001f) {
-						ImGui::Text(millisecondsFormat, static_cast<double>(span.IdleMilliseconds));
-					} else {
-						ImGui::TextUnformatted("-");
-					}
-					ImGui::PopStyleColor();
-
-					ImGui::TableSetColumnIndex(3);
-					// The expensive rows in the warning colour, so the thing worth
-					// looking at is the thing that catches the eye.
-					if (share >= 25.0f) {
-						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-						ImGui::Text("%.1f%%", static_cast<double>(share));
+						ImGui::TableSetColumnIndex(2);
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+						if (span.IdleMilliseconds > 0.0001f) {
+							ImGui::Text(millisecondsFormat, static_cast<double>(span.IdleMilliseconds));
+						} else {
+							ImGui::TextUnformatted("-");
+						}
 						ImGui::PopStyleColor();
-					} else {
-						ImGui::Text("%.1f%%", static_cast<double>(share));
+
+						ImGui::TableSetColumnIndex(3);
+						// The expensive rows in the warning colour, so the thing worth
+						// looking at is the thing that catches the eye.
+						if (share >= 25.0f) {
+							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+							ImGui::Text("%.1f%%", static_cast<double>(share));
+							ImGui::PopStyleColor();
+						} else {
+							ImGui::Text("%.1f%%", static_cast<double>(share));
+						}
 					}
 				}
 
@@ -1659,25 +1856,111 @@ namespace studio {
 		// panel and the readings cannot drift apart.
 		HeapView &view = HeapState;
 		const std::vector<engine::core::HeapSample> history = engine::core::HeapProfile::History();
-		if (history.size() != view.Plot.size()) {
+		if (!history.empty() && history.back().Seconds != view.LastSampleSeconds) {
 			constexpr int64_t TREE_FLOOR = 16 * 1024;
 			constexpr int64_t GROWTH_FLOOR = 256 * 1024;
+			const int chosen = std::clamp(view.Interval, 0, static_cast<int>(HEAP_INTERVALS.size()) - 1);
+			const double presetWindow = HEAP_INTERVALS[static_cast<size_t>(chosen)];
+			const double window = view.WindowMilliseconds > 0
+									  ? static_cast<double>(view.WindowMilliseconds) / 1000.0
+									  : presetWindow;
+			const double snapshotWindow = window > 0.0 ? window : std::numeric_limits<double>::epsilon();
+			const std::vector<engine::core::HeapHistorySnapshot> snapshots =
+				engine::core::HeapProfile::HistorySnapshots(snapshotWindow);
+			if (snapshots.empty()) {
+				view.LastSampleSeconds = -1.0;
+			} else {
+				const double newest = snapshots.back().Sample.Seconds;
+				engine::core::HeapHistorySnapshot selected;
+				if (!SelectHeapHistorySnapshot(snapshots, view.Mode, selected)) {
+					view.LastSampleSeconds = -1.0;
+				} else {
+					std::vector<int64_t> bytes = selected.InclusiveBytes;
 
-			view.Totals = engine::core::HeapProfile::Totals();
-			view.Rows = engine::core::HeapProfile::TreeRows(TREE_FLOOR);
-			view.Growth = engine::core::HeapProfile::Growth(0.0, GROWTH_FLOOR);
-			view.HistorySeconds = engine::core::HeapProfile::HistorySeconds();
+					view.Totals = engine::core::HeapProfile::Totals();
+					view.Totals.LiveBytes = selected.Sample.LiveBytes;
+					view.Totals.LiveBlocks = selected.Sample.LiveBlocks;
+					std::vector<int64_t> children(bytes.size());
+					for (size_t child = 1; child < bytes.size(); child++) {
+						const uint32_t parent =
+							engine::core::HeapProfile::Node(static_cast<uint32_t>(child)).Parent;
+						if (parent < children.size()) children[parent] += bytes[child];
+					}
+					view.Rows = engine::core::HeapProfile::TreeRows(0);
+					for (engine::core::HeapTreeRow &row : view.Rows) {
+						if (row.Node >= bytes.size()) {
+							row.InclusiveBytes = row.SelfBytes = 0;
+							continue;
+						}
+						row.InclusiveBytes = bytes[row.Node];
+						row.SelfBytes = row.InclusiveBytes - children[row.Node];
+					}
+					std::erase_if(view.Rows, [treeFloor = TREE_FLOOR](const auto &row) {
+						return row.InclusiveBytes < treeFloor;
+					});
+					if (window > 0.0 && snapshots.size() >= 2) {
+						view.Growth = engine::core::HeapProfile::Growth(window, GROWTH_FLOOR);
+					} else {
+						view.Growth.clear();
+					}
+					view.HistorySeconds = engine::core::HeapProfile::HistorySeconds();
+					view.LastSampleSeconds = newest;
 
-			view.Plot.clear();
-			view.Plot.reserve(history.size());
-			for (const engine::core::HeapSample &sample : history) {
-				view.Plot.push_back(static_cast<float>(sample.LiveBytes) / (1024.0f * 1024.0f));
+					view.Plot.clear();
+					view.Plot.reserve(history.size());
+					for (const engine::core::HeapSample &sample : history) {
+						view.Plot.push_back(static_cast<float>(sample.LiveBytes) / (1024.0f * 1024.0f));
+					}
+				}
 			}
 		}
 
 		const engine::core::HeapTotals &totals = view.Totals;
+		const int heapInterval = std::clamp(view.Interval, 0, static_cast<int>(HEAP_INTERVALS.size()) - 1);
+		constexpr std::array<const char *, 4> HEAP_MODE_NAMES{"latest", "average", "max", "min"};
+		ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
+		const std::string windowPreview = view.WindowMilliseconds > 0
+											  ? std::to_string(view.WindowMilliseconds) + " ms"
+											  : HEAP_INTERVAL_NAMES[static_cast<size_t>(heapInterval)];
+		if (ImGui::BeginCombo("window", windowPreview.c_str())) {
+			for (int index = 0; index < static_cast<int>(HEAP_INTERVALS.size()); index++) {
+				if (ImGui::Selectable(
+						HEAP_INTERVAL_NAMES[static_cast<size_t>(index)], index == heapInterval
+					)) {
+					view.Interval = index;
+					view.WindowMilliseconds = 0;
+					view.LastSampleSeconds = -1.0;
+				}
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(100.0f));
+		if (ImGui::InputInt("ms", &view.WindowMilliseconds, 100, 1000)) {
+			view.WindowMilliseconds = std::max(view.WindowMilliseconds, 0);
+			view.LastSampleSeconds = -1.0;
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Exact retained window in milliseconds. Zero uses the selected preset; samples remain one "
+				"second apart."
+			);
+		}
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
+		const size_t heapMode = static_cast<size_t>(view.Mode);
+		if (ImGui::BeginCombo("mode", HEAP_MODE_NAMES[heapMode])) {
+			for (size_t index = 0; index < HEAP_MODE_NAMES.size(); index++) {
+				if (ImGui::Selectable(HEAP_MODE_NAMES[index], index == heapMode)) {
+					view.Mode = static_cast<DiagnosticAggregation>(index);
+					view.LastSampleSeconds = -1.0;
+				}
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::TextDisabled("samples arrive once a second; a shorter window uses the newest sample");
 		ImGui::Text(
-			"%s live in %" PRId64 " blocks   peak %s   headers %s",
+			"%s selected live in %" PRId64 " blocks   process peak %s   headers %s",
 			FormatBytes(static_cast<double>(totals.LiveBytes)).c_str(),
 			totals.LiveBlocks,
 			FormatBytes(static_cast<double>(totals.PeakBytes)).c_str(),
@@ -1730,7 +2013,7 @@ namespace studio {
 				FLT_MAX,
 				ImVec2(-1.0f, ImGui::GetTextLineHeight() * 6.0f)
 			);
-			ImGui::Text("live MiB over the last %.0f s, sampled once a second", view.HistorySeconds);
+			ImGui::Text("live MiB over %.0f s retained history, sampled once a second", view.HistorySeconds);
 			if (view.GpuPlot.size() >= 2) {
 				ImGui::PlotLines(
 					"##gpuheaplive",
@@ -1802,7 +2085,7 @@ namespace studio {
 			ImGui::TableSetupColumn("Tag", ImGuiTableColumnFlags_WidthStretch, 3.0f);
 			ImGui::TableSetupColumn("Live", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 			ImGui::TableSetupColumn("Self", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-			ImGui::TableSetupColumn("Blocks", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+			ImGui::TableSetupColumn("Blocks (latest)", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 			ImGui::TableSetupColumn("Growth", ImGuiTableColumnFlags_WidthStretch, 1.2f);
 			ImGui::TableHeadersRow();
 			if (ImGuiTableSortSpecs *sort = ImGui::TableGetSortSpecs(); sort != nullptr && sort->SpecsDirty) {

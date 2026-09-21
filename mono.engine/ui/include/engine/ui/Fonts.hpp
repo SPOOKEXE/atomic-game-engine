@@ -10,7 +10,7 @@
 // both now.
 //
 // **Four families, all libre, all vendored.** `mono.vendor/fonts/` holds the
-// files and their licences, and `THIRD_PARTY_NOTICES.md` records them. They are
+// files and their licences, and `docs/THIRD_PARTY_NOTICES.md` records them. They are
 // variable fonts used at their default instance - which for all four is the
 // regular weight, and is what a UI wants. Real weight axes need a rasteriser
 // that drives them, and stb_truetype does not.

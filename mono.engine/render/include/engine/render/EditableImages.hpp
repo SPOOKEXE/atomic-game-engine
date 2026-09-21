@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::assets {
 	struct TextureData;
@@ -31,6 +32,18 @@ namespace engine::scene {
 }
 
 namespace engine::render {
+	// TextureTable currently samples only native RGBA8/R8 content. Keeping this
+	// result explicit prevents an authored compact image policy from silently
+	// changing channel interpretation while the renderer still uploads RGBA8.
+	enum class EditableImagePackingSupport : uint8_t {
+		NativeRGBA8,
+		UnsupportedFormat,
+		UnsupportedAttributes,
+	};
+
+	// Reports whether TextureTable can upload this image without changing its packing.
+	EditableImagePackingSupport EditableImagePackingSupportOf(const engine::scene::EditableImage &image);
+
 	// Converts the raw pixel buffer into the format `render::TextureTable`
 	// takes.
 	//
@@ -53,16 +66,38 @@ namespace engine::render {
 	  public:
 		// Walks every `EditableImage` and uploads whichever have changed.
 		//
-		// **Never removes a texture an instance stopped existing for** -
-		// `render::TextureTable` has no eviction, `EditableMeshUploader::
-		// Refresh`'s own reason applies unchanged.
+		// The owner scopes the generated content names as well as upload tracking.
+		// Use distinct owners for worlds whose editable entity handles can collide.
+		// Destroying an entity retains its last uploaded resource until owner retirement.
 		//
 		// @param store    The world being drawn.
 		// @param renderer The device to upload to.
+		// @param owner The residency namespace for generated content names.
 		// @return How many textures were built and handed to the renderer.
-		size_t Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer);
+		size_t Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner = {});
+
+		// Forget device upload stamps when a world or residency owner retires.
+		// This does not release resources; Renderer owns their lifetime.
+		void ForgetWorld(uint64_t identity);
+		// Forgets upload stamps for one residency owner without releasing textures.
+		void ForgetOwner(core::Name owner);
 
 	  private:
-		std::unordered_map<uint64_t, uint32_t> Uploaded;
+		struct UploadScope {
+			uint64_t World = 0;
+			core::Name Owner;
+			// Source revisions that jointly determine the uploaded image bytes.
+			struct Revision {
+				// Editable pixel revision last uploaded.
+				uint32_t Image = 0;
+				// Image packing policy revision last uploaded.
+				uint32_t Packing = 0;
+
+				// Compares both upload-relevant revisions.
+				bool operator==(const Revision &) const = default;
+			};
+			std::unordered_map<uint64_t, Revision> Revisions;
+		};
+		std::vector<UploadScope> Scopes;
 	};
 }

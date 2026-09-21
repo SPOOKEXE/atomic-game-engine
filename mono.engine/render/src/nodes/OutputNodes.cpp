@@ -11,7 +11,9 @@
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -20,6 +22,233 @@
 namespace engine::render {
 
 	void ViewRecording::RegisterOutputNodes(NodeTable &frameNodes) {
+		frameNodes.Set(core::Name("spatial-overlay"), [this](const graph::RunContext &context) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (!node || context.Writes.size() != 2) return false;
+			const auto resolve = [&](core::Name port) {
+				const auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
+				return found == node->WritePorts.end()
+						   ? Impl::NamedTexture{}
+						   : GraphTexture(context.Writes[found - node->WritePorts.begin()], context, true);
+			};
+			const auto colour = resolve(core::Name("colour")), depth = resolve(core::Name("z"));
+			if (!colour.IsValid() || !depth.IsValid() ||
+				colour.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT || colour.Width != depth.Width ||
+				colour.Height != depth.Height)
+				return false;
+			EnterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo target{};
+			target.texture = colour.Texture;
+			target.load_op = SDL_GPU_LOADOP_CLEAR;
+			target.store_op = SDL_GPU_STOREOP_STORE;
+			target.cycle = true;
+			SDL_GPUDepthStencilTargetInfo z{};
+			z.texture = depth.Texture;
+			z.clear_depth = 1;
+			z.load_op = SDL_GPU_LOADOP_CLEAR;
+			z.store_op = SDL_GPU_STOREOP_DONT_CARE;
+			z.cycle = true;
+			auto *pass = SDL_BeginGPURenderPass(Command, &target, 1, &z);
+			if (!pass) return false;
+			const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
+			SDL_SetGPUViewport(pass, &viewport);
+			if (DrawInterface && Request.GameInterfaceHook) {
+				const auto lighting = LightingAt(Request.CameraFrame.Position, 0, 0);
+				Result.DrawCalls += Request.GameInterfaceHook->RecordWorld(
+					Command,
+					pass,
+					Matrices.ViewProjection,
+					Request.CameraFrame,
+					{lighting.Ambient.x, lighting.Ambient.y, lighting.Ambient.z},
+					{lighting.Direction.x, lighting.Direction.y, lighting.Direction.z},
+					colour.Width,
+					colour.Height,
+					true,
+					WorldColourTarget::Hdr
+				);
+			}
+			SDL_EndGPURenderPass(pass);
+			core::Metrics::Count(
+				"render.spatial_overlay.output_bytes", uint64_t(colour.Width) * colour.Height * 8
+			);
+			return true;
+		});
+
+		frameNodes.Set(core::Name("eye-image"), [this](const graph::RunContext &context) {
+			EnterNamedPass(context.Name);
+			if (Request.Source == nullptr || context.Writes.empty() || context.Writes.size() > 6)
+				return false;
+			const auto &view = *Request.Source;
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (node == nullptr) return false;
+			const auto *layer = node->Parameter(core::Name("layer"));
+			const bool spatialOverlay = layer && *layer == "spatial-overlay";
+			const uint8_t layerIndex = layer && *layer == "transparent-0"	? 1
+									   : layer && *layer == "transparent-1" ? 2
+									   : spatialOverlay						? 3
+																			: 0;
+			static_assert(
+				std::tuple_size_v<decltype(view.EyeTransparentImages)> == MAX_PORTAL_TRANSPARENT_LAYERS
+			);
+			const auto handle = spatialOverlay	  ? view.EyeSpatialOverlayImage
+								: layerIndex == 0 ? view.EyeImage
+												  : view.EyeTransparentImages[layerIndex - 1];
+			const auto *scope = node->Parameter(core::Name("scope"));
+			const auto expectedScope = scope && *scope == "opaque-lighting" ? PortalImageScope::OpaqueLighting
+																			: PortalImageScope::CompleteWorld;
+			const auto *projection = node->Parameter(core::Name("projection"));
+			const auto expectedProjection = projection && *projection == "seam" ? PortalImageProjection::Seam
+																				: PortalImageProjection::Eye;
+			graph::ResourceId colourId = context.Writes.front(), depthId{}, normalId{}, responseId{},
+							  baselineId{}, directionalId{};
+			for (size_t i = 0; i < node->WritePorts.size(); ++i) {
+				if (node->WritePorts[i] == core::Name("depth"))
+					depthId = context.Writes[i];
+				else if (node->WritePorts[i] == core::Name("normal"))
+					normalId = context.Writes[i];
+				else if (node->WritePorts[i] == core::Name("ambient-response"))
+					responseId = context.Writes[i];
+				else if (node->WritePorts[i] == core::Name("lighting-baseline"))
+					baselineId = context.Writes[i];
+				else if (node->WritePorts[i] == core::Name("directional-response"))
+					directionalId = context.Writes[i];
+				else if (node->WritePorts[i] == core::Name("colour"))
+					colourId = context.Writes[i];
+			}
+			const auto target = GraphTexture(colourId, context, true);
+			if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
+			const bool paired = depthId.IsValid();
+			const bool directional = directionalId.IsValid();
+			const bool ambient = normalId.IsValid() || responseId.IsValid() || baselineId.IsValid();
+			if (directional && !ambient) return false;
+			if (ambient && (!normalId.IsValid() || !responseId.IsValid() || !baselineId.IsValid() ||
+							!paired || layerIndex != 0))
+				return false;
+			const auto normal = ambient ? GraphTexture(normalId, context, true) : Impl::NamedTexture{};
+			const auto response = ambient ? GraphTexture(responseId, context, true) : Impl::NamedTexture{};
+			const auto baseline = ambient ? GraphTexture(baselineId, context, true) : Impl::NamedTexture{};
+			if (ambient && (!normal.IsValid() || !response.IsValid() || !baseline.IsValid() ||
+							baseline.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+							baseline.Width != target.Width || baseline.Height != target.Height ||
+							normal.Format != SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM ||
+							response.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+							normal.Width != target.Width || normal.Height != target.Height ||
+							response.Width != target.Width || response.Height != target.Height))
+				return false;
+			const auto directionalResponse =
+				directional ? GraphTexture(directionalId, context, true) : Impl::NamedTexture{};
+			if (directional &&
+				(!directionalResponse.IsValid() ||
+				 directionalResponse.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+				 directionalResponse.Width != target.Width || directionalResponse.Height != target.Height))
+				return false;
+			if (spatialOverlay ? paired : (layerIndex != 0 && !paired)) return false;
+			const auto depth = paired ? GraphTexture(depthId, context, true) : Impl::NamedTexture{};
+			if (paired && (!depth.IsValid() || depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+						   depth.Width != target.Width || depth.Height != target.Height))
+				return false;
+			State->RecordPortalImports(Command, view, Request.TargetSlot);
+			for (const auto &image : State->ImportedPortals) {
+				const auto &owner = image.Binding;
+				if (handle == 0 || image.Handle != handle || owner.Layer != layerIndex ||
+					owner.World != view.World || owner.WorldName != view.WorldName ||
+					owner.ViewSlot != Request.TargetSlot || owner.Portal != view.EyeImageKey ||
+					owner.ExpectedProjection != expectedProjection || owner.ExpectedScope != expectedScope ||
+					image.Texture == nullptr || (!image.Ready && image.Recorded != Command))
+					continue;
+				if (layerIndex != 0) {
+					const auto base = std::find_if(
+						State->ImportedPortals.begin(),
+						State->ImportedPortals.end(),
+						[&](const auto &candidate) {
+							return candidate.Handle != 0 && candidate.Handle == view.EyeImage;
+						}
+					);
+					if (base == State->ImportedPortals.end() || base->Binding.Layer != 0 ||
+						base->Binding.World != owner.World || base->Binding.WorldName != owner.WorldName ||
+						base->Binding.ViewSlot != owner.ViewSlot || base->Binding.Portal != owner.Portal ||
+						base->Binding.Index != owner.Index || base->LayerSet != image.LayerSet ||
+						base->Binding.Expected != owner.Expected ||
+						base->Binding.ExpectedScope != owner.ExpectedScope ||
+						base->Binding.ExpectedProjection != owner.ExpectedProjection ||
+						base->Binding.Sampling != owner.Sampling || base->Width != image.Width ||
+						base->Height != image.Height || base->ContentRevision != image.ContentRevision ||
+						base->LightingRevision != image.LightingRevision ||
+						(!base->Ready && base->Recorded != Command))
+						return false;
+				}
+				if (directional && !image.DirectionalResponseTexture) return false;
+				if (paired && image.DepthTexture == nullptr) return false;
+				if (ambient && (!image.NormalTexture || !image.AmbientResponseTexture ||
+								!image.LightingBaselineTexture || image.Width != target.Width ||
+								image.Height != target.Height))
+					return false;
+				SDL_GPUBlitInfo blit{};
+				blit.source.texture = image.Texture;
+				blit.source.w = image.Width;
+				blit.source.h = image.Height;
+				blit.destination.texture = target.Texture;
+				blit.destination.w = target.Width;
+				blit.destination.h = target.Height;
+				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				// Paired samples describe one surface; color filtering across depths breaks occlusion.
+				blit.filter = paired ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+				blit.cycle = true;
+				SDL_BlitGPUTexture(Command, &blit);
+				if (paired) {
+					blit.source.texture = image.DepthTexture;
+					blit.destination.texture = depth.Texture;
+					blit.filter = SDL_GPU_FILTER_NEAREST;
+					SDL_BlitGPUTexture(Command, &blit);
+				}
+				if (ambient) {
+					blit.source.texture = image.NormalTexture;
+					blit.destination.texture = normal.Texture;
+					SDL_BlitGPUTexture(Command, &blit);
+					blit.source.texture = image.AmbientResponseTexture;
+					blit.destination.texture = response.Texture;
+					SDL_BlitGPUTexture(Command, &blit);
+					blit.source.texture = image.LightingBaselineTexture;
+					blit.destination.texture = baseline.Texture;
+					SDL_BlitGPUTexture(Command, &blit);
+				}
+				if (directional) {
+					blit.source.texture = image.DirectionalResponseTexture;
+					blit.destination.texture = directionalResponse.Texture;
+					SDL_BlitGPUTexture(Command, &blit);
+				}
+				core::Metrics::Count(
+					"render.eye_image.blits",
+					directional ? 6
+					: ambient	? 5
+					: paired	? 2
+								: 1
+				);
+				core::Metrics::Count(
+					"render.eye_image.output_bytes",
+					uint64_t(target.Width) * target.Height *
+						(directional ? 64
+						 : ambient	 ? 48
+						 : paired	 ? 12
+									 : 8)
+				);
+				return true;
+			}
+			if (paired || spatialOverlay) return false;
+			// A stale or wrong-owner image must not leave the last room visible.
+			SDL_GPUColorTargetInfo clear{};
+			clear.texture = target.Texture;
+			clear.clear_color = {0, 0, 0, 1};
+			clear.load_op = SDL_GPU_LOADOP_CLEAR;
+			clear.store_op = SDL_GPU_STOREOP_STORE;
+			clear.cycle = true;
+			auto *pass = SDL_BeginGPURenderPass(Command, &clear, 1, nullptr);
+			if (pass == nullptr) return false;
+			SDL_EndGPURenderPass(pass);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("interface"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			if (!recording.Request.Damage.GameInterface) {
@@ -79,7 +308,6 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
 			const auto graphTexture =
 				[&recording](graph::ResourceId resource, const graph::RunContext &runContext, bool make) {
 					return recording.GraphTexture(resource, runContext, make);
@@ -117,9 +345,6 @@ namespace engine::render {
 			}
 
 			if (haveOverlay) {
-				if (!recordUploads()) {
-					return false;
-				}
 				ENGINE_PROFILE_CAT("debug image overlay", core::ProfileCategory::Render);
 				drawOverlayImage(State->OverlayTexture, target, SDL_GPU_LOADOP_LOAD);
 			}
@@ -207,6 +432,41 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("shadow-capture"), [this](const graph::RunContext &context) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (!node || context.Reads.size() != 1 || !context.Writes.empty() ||
+				node->Scope != graph::NodeScope::View)
+				return false;
+			const auto *desc = Pipeline->Graph.FindResource(context.Reads.front());
+			if (!desc) return false;
+			ResourceShadowCapture metadata;
+			metadata.SourceEmpty = Instances.empty();
+			metadata.SourceBounds = metadata.SourceEmpty ? core::AABB{} : SceneBounds;
+			if (const auto *seed = State->FindPortalShadow(Request.Source->ImportedDirectionalShadow);
+				seed && !seed->Binding.ExpectedSnapshot.SourceEmpty) {
+				const auto &bounds = seed->Binding.ExpectedSnapshot.SourceBounds;
+				const core::AABB source{{bounds[0], bounds[1], bounds[2]}, {bounds[3], bounds[4], bounds[5]}};
+				metadata.SourceBounds = metadata.SourceEmpty ? source : metadata.SourceBounds.Union(source);
+				metadata.SourceEmpty = false;
+			}
+			metadata.DomainBounds = DirectionalShadowBounds;
+			for (size_t column = 0; column < 4; ++column)
+				for (size_t row = 0; row < 4; ++row)
+					metadata.LightViewProjection[column * 4 + row] = LightViewProjection[column][row];
+			EnterNamedPass(context.Name);
+			State->RecordShadowResourceImages(
+				Command,
+				Pipeline->Name,
+				node->Name,
+				Request.TargetSlot,
+				desc->Name,
+				HaveShadow && Request.Damage.Scene ? GraphTexture(context.Reads.front(), context, false)
+												   : Impl::NamedTexture{},
+				metadata
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("capture"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
@@ -226,6 +486,101 @@ namespace engine::render {
 			enterNamedPass(context.Name);
 			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 			const std::string *path = node != nullptr ? node->Parameter(core::Name("path")) : nullptr;
+			if (node != nullptr && !context.Reads.empty() && context.Reads.size() <= 6) {
+				std::vector<size_t> slots;
+				const bool frameCapture = context.View == graph::RunContext::WHOLE_FRAME;
+				const bool pinnedView = frameCapture && node->Parameter(core::Name("view")) != nullptr;
+				if (!frameCapture) {
+					slots.push_back(recording.Request.TargetSlot);
+				} else if (pinnedView) {
+					slots.push_back(node->Integer(core::Name("view"), 0));
+				} else {
+					for (const Impl::ResourceImageSlot &image : State->ResourceImages) {
+						const auto &request = image.Image.Request;
+						if (image.Phase != Impl::ResourceImagePhase::Queued ||
+							request.Pipeline != selectedPipeline->Name || request.Node != context.Name ||
+							std::find(slots.begin(), slots.end(), request.ViewSlot) != slots.end()) {
+							continue;
+						}
+						slots.push_back(request.ViewSlot);
+					}
+					// A capture node can also write an authored file without a resource-image
+					// request. Its historic unpinned binding is physical slot zero.
+					if (slots.empty()) slots.push_back(0);
+				}
+				graph::ResourceId colorId = context.Reads[0], depthId{}, normalId{}, ambientResponseId{},
+								  lightingBaselineId{}, directionalResponseId{};
+				for (size_t i = 0; i < node->ReadPorts.size(); ++i) {
+					if (node->ReadPorts[i] == core::Name("depth"))
+						depthId = context.Reads[i];
+					else if (node->ReadPorts[i] == core::Name("normal"))
+						normalId = context.Reads[i];
+					else if (node->ReadPorts[i] == core::Name("ambient-response"))
+						ambientResponseId = context.Reads[i];
+					else if (node->ReadPorts[i] == core::Name("lighting-baseline"))
+						lightingBaselineId = context.Reads[i];
+					else if (node->ReadPorts[i] == core::Name("directional-response"))
+						directionalResponseId = context.Reads[i];
+					else
+						colorId = context.Reads[i];
+				}
+				const auto *desc = selectedPipeline->Graph.FindResource(colorId);
+				const auto *depthDesc = selectedPipeline->Graph.FindResource(depthId);
+				const auto *normalDesc = selectedPipeline->Graph.FindResource(normalId);
+				const auto *ambientResponseDesc = selectedPipeline->Graph.FindResource(ambientResponseId);
+				const auto *lightingBaselineDesc = selectedPipeline->Graph.FindResource(lightingBaselineId);
+				const auto *directionalResponseDesc =
+					selectedPipeline->Graph.FindResource(directionalResponseId);
+				for (const size_t slot : slots) {
+					const DataCaptureSource &captureSource = slot < State->DataCaptureSources.size()
+																 ? State->DataCaptureSources[slot]
+																 : State->ActiveDataCaptureSource;
+					const auto source = recording.ResourceTexture(colorId, slot, false);
+					const auto depth =
+						depthDesc ? recording.ResourceTexture(depthId, slot, false) : Impl::NamedTexture{};
+					auto normal =
+						normalDesc ? recording.ResourceTexture(normalId, slot, false) : Impl::NamedTexture{};
+					if (normal.IsValid() && slot < State->PbrSlots.size()) {
+						const auto &pbr = State->PbrSlots[slot];
+						if (normal.Texture == pbr.Normal && source.Width == pbr.Dimensions.ViewWidth &&
+							source.Height == pbr.Dimensions.ViewHeight && normal.Width >= source.Width &&
+							normal.Height >= source.Height) {
+							// Native GBuffer storage is padded; its rendered viewport begins at (0, 0).
+							// Copy that rectangle directly, preserving every packed normal bit.
+							normal.Width = source.Width;
+							normal.Height = source.Height;
+						}
+					}
+					const RenderObservationContext observation = DataFactoryObservation(
+						recording, context, selectedPipeline->Name, slot, captureSource
+					);
+					recording.Owner.Hooks().Observe(observation);
+					State->RecordResourceImages(
+						recording.Command,
+						observation,
+						captureSource,
+						selectedPipeline->Name,
+						context.Name,
+						slot,
+						desc != nullptr ? desc->Name : core::Name{},
+						source,
+						depthDesc != nullptr ? depthDesc->Name : core::Name{},
+						depth,
+						normalDesc ? normalDesc->Name : core::Name{},
+						normal,
+						ambientResponseDesc ? ambientResponseDesc->Name : core::Name{},
+						ambientResponseDesc ? recording.ResourceTexture(ambientResponseId, slot, false)
+											: Impl::NamedTexture{},
+						lightingBaselineDesc ? lightingBaselineDesc->Name : core::Name{},
+						lightingBaselineDesc ? recording.ResourceTexture(lightingBaselineId, slot, false)
+											 : Impl::NamedTexture{},
+						directionalResponseDesc ? directionalResponseDesc->Name : core::Name{},
+						directionalResponseDesc
+							? recording.ResourceTexture(directionalResponseId, slot, false)
+							: Impl::NamedTexture{}
+					);
+				}
+			}
 			if (node == nullptr || path == nullptr || path->empty() || authoredCapture.IsValid()) {
 				return true;
 			}
@@ -252,7 +607,9 @@ namespace engine::render {
 				}
 				State->GraphCaptureFrames[*path] = State->FrameCounter;
 			}
-			for (const graph::ResourceId resource : context.Reads) {
+			for (size_t read = 0; read < context.Reads.size(); ++read) {
+				if (read < node->ReadPorts.size() && node->ReadPorts[read] == core::Name("depth")) continue;
+				const auto resource = context.Reads[read];
 				const Impl::NamedTexture source = graphTexture(resource, context, false);
 				if (!source.IsValid()) {
 					continue;
@@ -279,6 +636,9 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("output-image"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
+			if (!recording.Request.Damage.SceneImage() && !recording.UploadOverlay) {
+				return true;
+			}
 			Impl *const State = recording.State;
 			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
 			const size_t targetSlot = recording.Request.TargetSlot;

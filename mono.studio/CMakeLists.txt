@@ -63,11 +63,9 @@ mono_add_library(studio
 		# rather than something this program owns.
 		Engine::game
 
-		# The example scenes, for `ExamplePath` alone - a new place comes up
-		# with the mirror script in it, and finding that file is the one thing
-		# this needs. **Not `LoadScene`**: the editor installs the example as a
-		# `Script` instance and lets Play run it, rather than building its
-		# geometry behind an author's back.
+		# The example tree, for `DemosLoader` to list and resolve script and world
+		# demos. **Not `LoadScene`**: the editor installs a script example as a
+		# `Script` instance and imports authored worlds, then lets Play run them.
 		Engine::examples
 
 		# L12, `client`. The renderer, and the interface layer that records into
@@ -186,7 +184,7 @@ mono_add_program(studio
 #
 # **Staged as stripped JavaScript, exactly as the examples are**, and for the
 # reason `script/Runtime.hpp` has always given: the engine loads what a toolchain
-# emitted and does not compile TypeScript itself. `mono.engine/examples`'s own
+# emitted and does not compile TypeScript itself. `mono.engine/examples/assets/scripts`'s own
 # staging carries the argument at length; this is the second caller of it.
 #
 # These are not yet the editor's panels. `mono.studio` keeps Dear ImGui until the

@@ -8,6 +8,7 @@
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/render/DebugPanels.hpp>
@@ -15,6 +16,7 @@
 
 #include <cctype>
 #include <client/Client.hpp>
+#include <client/Scene.hpp>
 #include <client/Settings.hpp>
 #include <cstdio>
 #include <discord/Settings.hpp>
@@ -72,7 +74,16 @@ int main(int argc, char **argv) {
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
-	arguments.Flag("headless", "Run with no window (needs --frames)");
+	arguments.Flag("headless", "Run with no window (needs --frames except for --data-factory)");
+	arguments.Flag(
+		"data-factory",
+		"Enable the single-world paused data-factory capture host; runs until stopped unless --frames is "
+		"given"
+	);
+	arguments.Value(
+		"presentation-world", "NAME", "Serve one game world's portal images on an inherited driver link"
+	);
+	arguments.Value("presentation-session", "N", "Fresh driver-assigned session for the presentation host");
 	arguments.Value("max-fps", "N", "Cap presentation FPS. Needs --uncapped; 0 presents every update");
 	arguments.Flag("verbose", "Log at trace level");
 	// Value-taking and absent by default. The conventional number remains in
@@ -107,7 +118,10 @@ int main(int argc, char **argv) {
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems, counters or heap");
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
-	arguments.Value("game", "PATH", "Game file to play single-player (.agame)");
+	arguments.Value("game", "PATH", "Game or world file to play single-player (.agame or .aworld)");
+	arguments.Value(
+		"render-pipeline", "FILE", "Pipeline document for every demo world; incompatible with --game"
+	);
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
@@ -164,6 +178,10 @@ int main(int argc, char **argv) {
 		"capture",
 		"PATH",
 		"Write a BMP of the scene near the end of the run. Needs --frames; renders offscreen"
+	);
+
+	arguments.Value(
+		"capture-sequence", "DIR", "Write each rendered frame as BMP and camera-state JSON. Needs --frames"
 	);
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -224,6 +242,16 @@ int main(int argc, char **argv) {
 	options.EnableParticles = options.EnableParticles && !arguments.Has("disable-particles");
 	options.EnablePostProcessing = options.EnablePostProcessing && !arguments.Has("disable-post-processing");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
+	options.DataFactory = arguments.Has("data-factory");
+	if (auto world = arguments.Get("presentation-world")) options.PresentationWorld = *world;
+	if (arguments.Has("presentation-session")) {
+		const auto session = arguments.GetInteger("presentation-session", 0);
+		if (session <= 0) {
+			std::fprintf(stderr, "--presentation-session must be positive.\n");
+			return 2;
+		}
+		options.PresentationSession = static_cast<uint64_t>(session);
+	}
 	if (arguments.Has("mcp-port")) {
 		options.ControlPort =
 			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_CLIENT_PORT));
@@ -242,11 +270,10 @@ int main(int argc, char **argv) {
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	options.Headless = arguments.Has("headless");
 
-	// **Refused rather than run**, because a headless client has no window to
-	// close: without a frame budget it would render forever with nothing on
-	// screen to say so, on a machine somebody has probably walked away from.
-	// The studio's `--headless` carries the same requirement.
-	if (options.Headless && options.MaximumFrames < 0) {
+	// Ordinary headless runs need a frame budget. A presentation host instead
+	// ends with its inherited driver link, which startup requires before running.
+	if (options.Headless && options.MaximumFrames < 0 && options.PresentationSession == 0 &&
+		!options.DataFactory) {
 		std::fprintf(stderr, "--headless needs --frames N: there is no window to close.\n");
 		return 2;
 	}
@@ -284,6 +311,9 @@ int main(int argc, char **argv) {
 			ENGINE_WARN("--game and --script were both given; playing the game file");
 			options.ScriptPath.clear();
 		}
+	}
+	if (auto pipeline = arguments.Get("render-pipeline")) {
+		options.RenderPipelineFile = std::filesystem::path(*pipeline);
 	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
@@ -360,6 +390,9 @@ int main(int argc, char **argv) {
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);
 	}
+	if (auto sequence = arguments.Get("capture-sequence")) {
+		options.CaptureSequence = std::filesystem::path(*sequence);
+	}
 	if (auto sound = arguments.Get("sound")) {
 		options.SoundPath = std::filesystem::path(*sound);
 	}
@@ -405,6 +438,12 @@ int main(int argc, char **argv) {
 		ENGINE_ERROR("client failed to start");
 		return 1;
 	}
+	if (options.DataFactory) {
+		// An empty data-factory host does not load a game or create a presentation
+		// world, so neither normal registration path runs before the table seals.
+		engine::game::RegisterGameClasses();
+		client::RegisterClientComponents();
+	}
 
 	// **The component table closes here, and this is what makes the determinism
 	// promise real rather than intended.** Registration order fixes component
@@ -415,10 +454,10 @@ int main(int argc, char **argv) {
 	// test, which meant the guarantee `just determinism` and `just replay-check`
 	// rest on was not switched on in any shipped binary.
 	//
-	// **After `Initialise`, because that is what registers everything.** Every
-	// module's `Register*Components` runs during start-up, and a `Store`'s
-	// constructor registers the instance components on the way past. Sealing
-	// before that would close an empty table.
+	// **After `Initialise`, so startup scripts retain their registration
+	// window.** Every normal startup path registers its components there. The
+	// empty data-factory host has no game or presentation world, so it registers
+	// its game and client types explicitly just above before the table closes.
 	//
 	// **A script that declares a component after this gets a clean refusal, not
 	// a crash.** `Schemas::Register` checks `Components::Sealed()` and returns

@@ -66,6 +66,7 @@
 // @tier L12 · client
 
 #include <engine/assets/Signature.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Connector.hpp>
@@ -180,6 +181,11 @@ namespace studio {
 		// not wait for the next change to see who is where.
 		Hello = 5,
 		Welcome = 6,
+
+		// A collaborator's transient view and selection. Unlike a waypoint this
+		// never enters document history or undo.
+		Presence = 7,
+		PresenceGone = 8,
 	};
 
 	// One message, whichever kind it is.
@@ -195,7 +201,7 @@ namespace studio {
 		// `Request`, `Release` and `Granted`.
 		InstancePath Subject;
 
-		// `Welcome`.
+		// `Welcome`, `Presence` and `PresenceGone`.
 		EditorId Holder = HOST_EDITOR;
 
 		// `Locks`.
@@ -205,6 +211,40 @@ namespace studio {
 		// guest, and a lease stamped with it would look already lapsed or
 		// eternal depending on which machine booted first.
 		std::vector<Lease> Locks;
+
+		// `Presence`. World and instance identities are names for the same
+		// reason edit records use them, while the position is presentation only.
+		std::string DisplayName;
+
+		// The world containing the presence update.
+		std::string PresenceWorld;
+
+		// The position associated with the presence update.
+		engine::core::Vector3 PresencePosition{};
+
+		// The selected instance path associated with the presence update.
+		InstancePath PresenceSelection;
+	};
+
+	// The latest cursor and selection state published by another editor.
+	struct RemotePresence {
+		// The session id of the editor publishing this state.
+		EditorId Editor = HOST_EDITOR;
+
+		// The display name shown beside the remote cursor.
+		std::string DisplayName;
+
+		// The world containing the remote editor's selection.
+		std::string World;
+
+		// The remote editor's camera or cursor position in that world.
+		engine::core::Vector3 Position{};
+
+		// The selected instance path, if one is selected.
+		InstancePath Selection;
+
+		// The sender's timestamp for this presence update, in seconds.
+		double UpdatedAtSeconds = 0.0;
 	};
 
 	// Encodes one waypoint's records.
@@ -409,6 +449,19 @@ namespace studio {
 		// @return Whether it went.
 		bool Publish(uint64_t waypoint, std::span<const Command> commands, double nowSeconds);
 
+		// Publishes this editor's transient cursor and selection state.
+		//
+		// @param presence The state to publish.
+		// @param nowSeconds The current time in seconds.
+		void PublishPresence(const RemotePresence &presence, double nowSeconds);
+
+		// Returns the most recent presence state received from remote editors.
+		//
+		// @return The retained remote presence records.
+		std::span<const RemotePresence> RemotePresences() const {
+			return Presences;
+		}
+
 		// Carries what is waiting, in both directions.
 		//
 		// @param nowSeconds The current time.
@@ -529,6 +582,7 @@ namespace studio {
 		// Which client each editor id belongs to, so a grant can be addressed.
 		// Host only.
 		std::vector<std::pair<EditorId, engine::replication::ClientId>> Members;
+		std::vector<RemotePresence> Presences;
 
 		// Domain-separated identities derived from a private invitation key.
 		// The listener and connector borrow these. Declaring the identities first

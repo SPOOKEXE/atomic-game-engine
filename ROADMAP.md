@@ -37,102 +37,123 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.23.1
-
-- [x] CTRL+Z to undo, CTRL+SHIFT+Z to redo, add keybind options
-- [x] when i double click on a world, it should open a viewport if no existing viewports are open
-- [x] fix roblox importer, parts have no size, color is not kept, etc (bladeborne and furry rng demo aworld)
-- [x] bladeborne demo shows content.fit under content is 20+ms alone. fix issue
-- [x] also check how signatures handle content.fit items because that grows to 10ms in scenes that have heavy custom assets (e.g. invalid assets => should not spam signature)
-- [x] [studio] import failed: 'MeshPart.CollisionGroup' refused the value 'Ground'  (Editor.cpp:5116)
-- [x] add a per-asset profiler called `Asset Profiler` for cdn items so we can see who takes up the most memory and that allows us to debug why. hooks into pulling the data on CPU, storing it in memory, checking for item updates for GPU, and pushing to GPU for render (resident instances, sending delta updates to resident, etc)
-- [x] when i select a script in the explorer, it deselects and collapses the entire explorer
-- [x] CTRL+F script search
-- [x] when script opens (from double click or such) and no script editor is open, open it over the first viewport in full screen as a full tab
-- [x] Triage launcher/net/loadtest headers
-- [x] Triage cdn/client headers
-- [x] Triage ecs/graph/gui/bake headers
-- [x] Triage net/audio/ui/misc headers
-- [x] Triage physics headers
-- [x] Triage render headers
-- [x] Triage studio headers
-- [x] add a set of `physics solver simulation` visualisations for each set of solver capabilities. this way we can see whats going on.
-- [x] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
-- [x] deferred.md update, cleanup and work we can do now
-- [x] security audit, fuzzy tests, bound tests, etc.
-- [x] go through each underlying system and check we fully test them. lifecycles, allocations, deallocations, crash handling, error handling, fuzzy, bounds, etc.
-- [x] atomic engine icon
-
-new demos:
-- [x] port TornadoSim as a demo scene in the engine (/home/declan/Documents/GitHub/TornadoSim). Do a run of what features we need and what we can use in the engine, we want to try make this demo PURE LUAU! We can create new libraries, components, etc, but make a list first and prioritise pure-scripting over specific engine features for tornado stuff.
-| Kinematic debris is not enough | Expose velocity and impulse through existing physics bodies. |
-| Particle emitters cannot follow the field shape | Add a generic field-sampling particle force, not a tornado-specific renderer. |
-| The scene needs dense cloud self-shadowing | Add a generic volume resource and render node. |
-| The scene needs large destruction | Build reusable script-facing break groups before a damage system. |
-as datatypes? we can do a 3D and 2D vector field and particles can read directly from it based on their position or local position from a select position, add auto clamp to bounds or falloff, etc. Can expose velocity/impuse as well.
-- [x] blackhole simulator (warp space, warp visual, etc)
-- [x] user interface (copy bladeborne's for demo?), luau scripting and such. pure code that creates all the ui (using Fusion.luau, setup a modulescrpt that the code requires for example, can rewrite with fake player data).
-- [x] update DEMOS.md with GIFs uploaded to repository
-- [x] quadsphere, quadtree planet
-
-- [_] add icon pack to studio?
-
-### v0.24
-
-- [_] /docs/future-work/character-system.md
-- [_] gtlf default character (unreal style)
-
 ### v0.25
 
-- [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
-- [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
-- [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc. - per-mesh capability flags are per-instance visual state and belong in the GPU-resident row, so a compute pass can branch on them without a CPU readback
-- [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system. - the residency and delta upload are a node too, so the sweep and the GPU-resident work are the same refactor rather than two passes over the same files
-- [_] port semi-real raytrace and path-trace as part of nodes
-- [_] make demo render pipelines with semi-real raytrace and path-trace
-- [_] add compute shaders / postprocessing shaders to all visual items as a additional node to attach (render pipeline pulls and residents shaders on gpu when active)
-- [_] (dynamic) ambient occulusion, emissivity, mipmapping, occulusion culling (bbox first, extra after), sRGB handle, proper PBR with tests, tesselation, add Fog/Clouds/Skybox compute shader support, screen-space, global illumination, displacement maps (make it rendering only but not physical) - "rendering only but not physical" is exactly the transform/visual split the GPU-resident set draws, so all of this is GPU-side state with no CPU mirror to keep in step
-- [_] more blender-like render pipeline ideas and build-out
-- [_] render pipeline nodes for above
-- [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
-- [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
-- [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
-- [_] different antialiasing choices as render nodes
-- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
+- [_] review over v0.24 and consolidate, improve, tweak, etc.
+- [_] improve atomic-game-engine build file usage sizes. Takes over 120GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc.
+- [_] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
+- [_] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
+- [_] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
+- [_] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
+- [_] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
+- [_] consolidate/improve `CONTRIBUTING.md`, `SECURITY.md`, `docs/THIRD_PARTY_NOTICES.md`, `CODE_ARCH.md`, `CODE_DOCUMENTING.md`, `CODE_FORMAT.md` and `CODE_QUALITY.md`, with small sentences at the start of the file describing what they contain in succinct detail.
+- [_] cleanup documentation and layout
+- [_] review and cleanup render pipeline (plan first)
+- [_] plan a consolidation for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them).
+- [_] update and prune old content in documentation. check each statement, update, remove or replace.
+- [_] create a "sky grid" of floating terrain balls with each one having one of 8 custom made shaders, then have the camera fly forward between the seams. this is a benchmark called BenchmarkSkyGrid.luau built-in demo example. We'll also use this as a performance profiler for editablemesh + terrain + etc.
+- [_] add gpu resource constraining (freezes all other applications right now)
+- [_] check LOD is cleaned up when the mesh changes / is deleted / LOD properties are changed so they release and are recomputed
+- [_] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations.
+- [_] create two stress test demos: 100 unique 4k textures on material spheres with PBR (like the PBR demo), and 1 unique 4k texture on material spheres with PBR. tests instancing (for 1 duplicate item) and mem/compute usage for the uniques.
+- [_] add a "light path visualiser" that shows a visualisation of the spatial casting of light emitters so i can see what path they take, what they hit, etc. basically blue for empty space it travels, red for end of light, orange for pass-through or reflections.
+- [_] fix multi-select multi-property editing (when i select multiple objects, it should check all objects for the same component and value im editing and match them).
+
+- [_] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
+- [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
+- [_] optimise server startup time
+- [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
+
+- [_] add extensive (freecam) camera tests (like flying through portals)
+- [_] add extensive client character tests
+- [_] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
+- [_] fix lights passing through portals not working
+- [_] fix portals so they are seamless. really plan out how to make them seamless and how to handle "standing in the middle" so objects are visually there on both sides of the portal with no seam especially during movement (and how to make replication seamless too)
+
+- [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground")
+- [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
+- [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
+- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
+- [_] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors.
+
+- [_] test studio and fix found bugs
 
 ### v0.26
 
-- [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
-- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
-- [_] pathfinding
-- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
+- [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
+- [_] go over render system and consolidate/improve hooks, nodes, graph system and visualiser of graph system
 
-- [_] /docs/future-work/world-streaming.md
-- [_] /docs/future-work/terrain-system.md
-- [_] /docs/future-work/navigation-ai-system.md
+- [_] do heavy memory, cpu and gpu benchmarking and profiling and see if we can squash data into multi-channel representations, improve computations and memory usage, trade lower precision for tiny visual changes, etc.
+
+- [_] add typed render hooks at proven boundaries. `DataFactoryHookBind` registers and discovers twelve stable read-only data-capture hooks and the synchronous `view.camera` mutation hook. Data capture remains pinned to exact pipeline, revision, view, snapshot and node identity and returns bounded asynchronous readbacks. `view.camera` accepts owned one-shot camera-frame, camera, and projection patches only for an exact installed pipeline revision, world, snapshot, and view slot; conflicts, stale revisions, malformed values, cancellation, and generation reuse are explicit. The renderer copies only the matching view before capture preparation and never calls external code or exposes a mutable view. The release CPU lifecycle benchmark fell from 41.62 to 20.48 microseconds per 64 lifecycles after dispatch stopped copying the full graph snapshot; validated capture planes now take ownership of readback vectors instead of copying them. GPU and readback release profiling plus a second real consumer remain open. A hook is an observer node, declared node output, or this bounded typed pre-view patch, not a second callback graph beside it.
+  1. Inventory the current node output, resource lifetime, GPU submission and asynchronous readback boundaries, then choose one stable post-pass observation point.
+  2. Give each internal hook an enum value and a stable string name for discovery, manifests and MCP. Never serialize the enum number.
+  3. Give each hook its own typed immutable context. Do not use a generic `any` bag or an inheritance tree. A context states its valid lifetime, thread, resource access and unavailable fields.
+  4. Keep observation non-blocking and read-only. GPU hooks append bounded records or schedule bounded asynchronous readback; the client polls completed records later. They never wait for the CPU or call arbitrary external code from the render thread.
+  5. Apply render changes through CPU-owned scene or graph state before submission, then upload the normal delta. The bounded `view.camera` patch is the named exception: it is a synchronously consumed value record, not an observation callback.
+  6. Make the existing data-capture resource observation the first consumer. Expose supported hook names and limits through capability discovery, then verify snapshot, camera, frame, crop and resource identity remain aligned.
+  7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
+  8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
+
+### v0.27
+
+- [_] ```const char *CameraModeName(scene::CameraMode mode) {
+	switch (mode) {
+	case scene::CameraMode::Classic:
+		return "classic";
+	case scene::CameraMode::LockFirstPerson:
+		return "lock_first_person";
+	case scene::CameraMode::ShiftLock:
+		return "shift_lock";
+	case scene::CameraMode::Scriptable:
+		return "scriptable";
+	}
+	return "unknown";
+}``` move all character management code to a "PlayerModule" script called CameraController.
+Same with movement system, needs to be server authoritive but pure-lua so it can be changed.
+When you create a new world/scene, it auto appends the scripts in.
+
+- [_] breakpoint history list per-script (show each iteration of breakpoint, can see change overtime)
+- [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
+- [_] expose automation tools (AutomationService) like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
+
 - [_] /docs/future-work/physics-expansion.md
-- [_] /docs/future-work/vfx-system.md
-- [_] /docs/future-work/camera-and-cinematics.md
 - [_] /docs/future-work/ui-system.md
-- [_] /docs/future-work/input-system.md
-- [_] /docs/future-work/prefab-package-system.md
-- [_] /docs/future-work/materials-and-shaders.md
-- [_] /docs/future-work/procedural-generation.md
-- [_] /docs/future-work/session-and-social.md
-- [_] /docs/future-work/audio-system.md
+- [_] /docs/future-work/world-streaming.md
 
 ### FUTURE
 
+- [_] /docs/future-work/navigation-ai-system.md
+- [_] pathfinding
+- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
+
+- [_] gtlf default character (unreal style)
+- [_] project demos:
+* space engineers asteroids + planets full demo (`docs/FULL-PLANET-DEMO.md`)
+* huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot
+* ai village with daily tasks, occupations, relationships, and things like that (dwarf fortress style - personality, occupation, etc).
+* floating islands with village houses on them with bridges connecting them together, floating above clouds, minecraft-like
+
+- [_] localization support
+- [_] /docs/future-work/terrain-system.md
+- [_] /docs/future-work/character-system.md
+- [_] /docs/future-work/vfx-system.md
+- [_] /docs/future-work/input-system.md
+- [_] /docs/future-work/camera-and-cinematics.md
+- [_] /docs/future-work/prefab-package-system.md
+- [_] /docs/future-work/procedural-generation.md
+- [_] /docs/future-work/session-and-social.md
+- [_] /docs/future-work/audio-system.md
 - [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
 - [_] maybe consider converting a bunch of custom tools to plugins and have them built-in to studio, or make a plugin pack as a extra release file you can import to a plugins/ folder in ~/Documents/atomic-game-engine/studio/plugins
 - [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
+- [_] full procedural terrain studio tools
 - [_] unity porting tools / unity shop
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
 - [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
 - [_] built-in whiteboxing tools (planning) for building (plugin)
-- [_] full procedural terrain studio tools
 - [_] full ui feature buildout + custom
 - [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
 - [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well, css as well. "virtual container" that makes/simulates the instances?
@@ -142,20 +163,12 @@ as datatypes? we can do a 3D and 2D vector field and particles can read directly
 - [_] photoshop file reader and import tool
 - [_] docs/MOBILE.md implementation
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
-- [_] localization support
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
-- [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] VR support (oculus rift s)
 - [_] setup a studio permissions system for: microphone, camera, etc
 - [_] setup a example plugin for mocap with camera point track
-- [_] breakpoint history list per-script (show each iteration of breakpoint, can see change overtime)
-- [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
-- [_] expose automation tools like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
-- [_] expose a AutomationService that does this for you (need to enable it for it to be useable).
 - [_] ECS driven RL agent environments
-- [_] use a spatial walk (octree) to find hallways and such and use that baked information for things like the LOD, unrendering objects, etc. full node based logic for customisation.
+- [_] Move "roblox files to atomic game files" to a external program - the port tool?
 
-### Open Decision
-
-1. Move "roblox files to atomic game files" to a external program? The port tool.
+- [_] idea: for the LOD system, could we move mesh details into a normal map as part of the LOD? this way we can have a 'performance mode' that focuses on using this method instead of pure mesh data to show the details (even if it looks slightly uglier)

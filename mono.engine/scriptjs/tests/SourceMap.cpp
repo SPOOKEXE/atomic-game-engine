@@ -239,19 +239,18 @@ TEST_CASE("a TypeScript scene that throws names its own line", "[script][sourcem
 }
 
 TEST_CASE("the build's own transpile emits a map this reader understands", "[script][sourcemap]") {
-	// The staged twin of `mono.engine/examples/Mirrors-4-worlds.ts`, which
+	// The staged twin of `mono.engine/examples/assets/scripts/Mirrors-4-worlds.ts`, which
 	// exists only where `tsc` was available at configure time. **The point of
 	// this case is that the hand-written maps above cannot go stale silently**:
 	// they are this suite's model of what the toolchain emits, and a real map is
 	// what says the model is still right.
 	//
-	// Looked for in both places for `examples::ExamplePath`'s reason - the
-	// scenes stage into a sibling of `Paths::Assets()` rather than into it -
-	// spelled out here rather than depending on `examples` from `script`.
+	// The examples stage under the program's assets tree. This stays spelled out
+	// here rather than adding an `examples` dependency to `scriptjs`.
 	const std::string name = "Mirrors-4-worlds.js.map";
-	std::filesystem::path staged = engine::core::Paths::Assets() / "examples" / name;
+	std::filesystem::path staged = engine::core::Paths::Assets() / "examples" / "scripts" / name;
 	if (!std::filesystem::exists(staged)) {
-		staged = engine::core::Paths::Base().parent_path() / "assets" / "examples" / name;
+		staged = engine::core::Paths::Base().parent_path() / "assets" / "examples" / "scripts" / name;
 	}
 
 	if (!std::filesystem::exists(staged)) {

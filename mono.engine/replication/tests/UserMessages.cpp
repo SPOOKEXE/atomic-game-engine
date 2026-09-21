@@ -50,6 +50,36 @@ using engine::replication::MessageKind;
 using namespace replication_wire;
 
 namespace {
+	class BackpressuredTransport final : public Transport {
+	  public:
+		explicit BackpressuredTransport(Transport &wire) : Wire(wire) {}
+		bool RefuseReliable = true;
+		size_t Refusals = 0;
+		engine::net::TransportStatus
+		Send(const engine::net::Endpoint &to, std::span<const std::byte> bytes) override {
+			if (RefuseReliable &&
+				engine::net::Packet::PeekChannel(bytes) == engine::net::ChannelKind::Reliable) {
+				++Refusals;
+				return engine::net::TransportStatus::Full;
+			}
+			return Wire.Send(to, bytes);
+		}
+		Inbound Receive(std::vector<std::byte> &bytes) override {
+			return Wire.Receive(bytes);
+		}
+		engine::net::Endpoint Local() const override {
+			return Wire.Local();
+		}
+		bool Open() const override {
+			return Wire.Open();
+		}
+		void Close() override {
+			Wire.Close();
+		}
+
+	  private:
+		Transport &Wire;
+	};
 	std::vector<std::byte> Bytes(std::string_view text) {
 		std::vector<std::byte> bytes;
 		bytes.reserve(text.size());
@@ -128,6 +158,65 @@ namespace {
 	};
 }
 
+TEST_CASE(
+	"client identity retries before application messages under backpressure",
+	"[replication][identity-backpressure]"
+) {
+	auto wires = MakeLoopbackTransport(2);
+	BackpressuredTransport sending(*wires[1]);
+	std::array<std::byte, 32> seed{};
+	seed.fill(std::byte{0x27});
+	const auto key = engine::assets::SigningKey::FromSeed(seed);
+	REQUIRE(key.has_value());
+	engine::replication::ListenerSettings serving;
+	serving.Wire = engine::net::WireMode::Datagram;
+	Listener server(*wires[0], serving);
+	server.RequireClientIdentity(true);
+	engine::replication::ConnectorSettings connecting;
+	connecting.Advertised = engine::net::WireMode::Datagram;
+	connecting.ClientIdentity = &*key;
+	Connector client(sending, wires[0]->Local(), 0, connecting);
+	Store replica("identity-retry");
+	double now = 0;
+	auto tick = [&] {
+		now += 1.0 / 60.0;
+		client.Poll(replica, now);
+		server.Poll(now);
+		server.Advance(now);
+		server.Flush(now);
+		client.Advance(now);
+	};
+	for (size_t step = 0; step < 128 && !client.Admitted(); ++step)
+		tick();
+	REQUIRE(client.Admitted());
+	REQUIRE(sending.Refusals > 0);
+	CHECK_FALSE(client.SendUser(Bytes("fresh"), now));
+	sending.RefuseReliable = false;
+	size_t heard = 0;
+	server.OnUserMessage([&](ClientId peer, std::span<const std::byte> bytes) {
+		CHECK(server.IdentityOf(peer) == key->Public());
+		CHECK(Text(bytes) == "fresh");
+		++heard;
+	});
+	bool sent = false;
+	for (size_t step = 0; step < 128; ++step) {
+		tick();
+		if (!sent) sent = client.SendUser(Bytes("fresh"), now);
+	}
+	CHECK(sent);
+	CHECK(heard == 1);
+	sending.RefuseReliable = true;
+	CHECK_FALSE(client.SendUser(Bytes("not accepted"), now));
+	sending.RefuseReliable = false;
+	sent = false;
+	for (size_t step = 0; step < 128; ++step) {
+		tick();
+		if (!sent) sent = client.SendUser(Bytes("fresh"), now);
+	}
+	CHECK(sent);
+	CHECK(heard == 2);
+}
+
 TEST_CASE("a message crosses from a client to its server", "[replication][user]") {
 	Pair pair;
 	REQUIRE(pair.Admit());
@@ -152,6 +241,18 @@ TEST_CASE("a message crosses from a client to its server", "[replication][user]"
 	// of the switch, so the message would look delivered and the counter would
 	// climb.
 	CHECK(pair.Server->Authority().Stats().Refused == 0);
+}
+
+TEST_CASE("an admitted connector reports a later transport timeout", "[replication][user]") {
+	Pair pair;
+	REQUIRE(pair.Admit());
+	REQUIRE(pair.Client->Live());
+	pair.Transports[0]->Close();
+	pair.Now += 11;
+	pair.Client->Advance(pair.Now);
+	CHECK(pair.Client->Admitted());
+	CHECK_FALSE(pair.Client->Live());
+	CHECK_FALSE(pair.Client->SendUser(Bytes("after timeout"), pair.Now));
 }
 
 TEST_CASE("a message crosses from a server to its client", "[replication][user]") {

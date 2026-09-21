@@ -2,8 +2,14 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/core/Paths.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Project.hpp>
+#include <engine/physics/Clock.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -110,6 +116,111 @@ TEST_CASE("server loads a multi-file universe directly", "[server][project]") {
 	host.Shutdown();
 }
 
+TEST_CASE("server hosts one authored world with server role scripts", "[server][project][world]") {
+	Tree tree("world");
+	engine::world::Universe authored;
+	const engine::world::WorldId world =
+		authored.Create({.Name = engine::core::Name("Standalone"), .TickRate = 30.0});
+	REQUIRE(world.IsValid());
+	authored.Enter(world, [](engine::ecs::Store &store) {
+		const engine::ecs::Entity serverScript = engine::script::MakeScript(store, "server.luau", "Server");
+		const engine::ecs::Entity clientScript =
+			engine::script::MakeScript(store, "client.luau", "Client", true);
+		REQUIRE(serverScript != engine::ecs::NULL_ENTITY);
+		REQUIRE(clientScript != engine::ecs::NULL_ENTITY);
+
+		engine::script::SourceCache programs;
+		programs.Set(
+			engine::core::Name("server.luau"),
+			"local marker = Instance.new(\"Part\")\n"
+			"marker.Name = \"ServerRan\"\n"
+			"marker.Parent = workspace\n"
+		);
+		programs.Set(
+			engine::core::Name("client.luau"),
+			"local marker = Instance.new(\"Part\")\n"
+			"marker.Name = \"ClientRan\"\n"
+			"marker.Parent = workspace\n"
+		);
+		store.SetResource(programs);
+	});
+
+	std::string error;
+	const fs::path path = tree.Root / "standalone.aworld";
+	REQUIRE(engine::game::ExportWorld(authored, world, path, error));
+
+	server::Server host;
+	REQUIRE(host.Initialise(Headless(path)));
+	CHECK(host.Worlds().Worlds().size() == 1);
+	CHECK(host.Worlds().NameOf(host.Primary()) == engine::core::Name("Standalone"));
+	host.Worlds().Enter(host.Primary(), [](engine::ecs::Store &store) {
+		const engine::ecs::Entity workspace = store.FindFirstRoot("Workspace");
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(workspace, "ServerRan") != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(workspace, "ClientRan") == engine::ecs::NULL_ENTITY);
+		CHECK(engine::physics::PhysicsClockOf(store) != nullptr);
+	});
+	CHECK(host.Run().Ticks == 1);
+	host.Shutdown();
+}
+
+TEST_CASE("server runs the shipped Bladeborne world with server role only", "[server][project][world]") {
+	const auto demo =
+		engine::examples::DemosLoader().Find(engine::examples::DemoKind::World, "BladeborneDemo.aworld");
+	REQUIRE(demo.has_value());
+
+	server::Server host;
+	REQUIRE(host.Initialise(Headless(demo->Path)));
+	REQUIRE(host.Worlds().Worlds().size() == 1);
+	host.Worlds().Enter(host.Primary(), [](engine::ecs::Store &store) {
+		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
+		REQUIRE(sources != nullptr);
+		CHECK(sources->Count() == 14);
+
+		const engine::ecs::Entity workspace = store.FindFirstRoot("Workspace");
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity arena = store.FindFirstChild(workspace, "BladeborneArena");
+		REQUIRE(arena != engine::ecs::NULL_ENTITY);
+		size_t serverMarkers = 0;
+		store.EachChild(arena, [&](engine::ecs::Entity child) {
+			if (store.InstanceNameOf(child) == engine::core::Name("ServerProfileMarker")) {
+				serverMarkers++;
+			}
+		});
+		CHECK(serverMarkers == 1);
+
+		const engine::ecs::Entity starterGui = store.FindFirstRoot("StarterGui");
+		REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(starterGui, "BladeborneHUD") == engine::ecs::NULL_ENTITY);
+	});
+	host.Shutdown();
+}
+
+TEST_CASE("Terrain starts a server empty until a client is admitted", "[server][project][script]") {
+	const auto demo =
+		engine::examples::DemosLoader().Find(engine::examples::DemoKind::Script, "Terrain.luau");
+	REQUIRE(demo.has_value());
+
+	server::Server host;
+	REQUIRE(host.Initialise(Headless(demo->Path)));
+	REQUIRE(host.Run().Ticks == 1);
+	host.Worlds().Enter(host.Primary(), [](engine::ecs::Store &store) {
+		const engine::ecs::Entity players = engine::scene::PlayersOf(store);
+		REQUIRE(players != engine::ecs::NULL_ENTITY);
+
+		size_t occupants = 0;
+		store.EachChild(players, [&](engine::ecs::Entity child) {
+			if (store.IsA(child, engine::scene::PlayerClass())) occupants++;
+		});
+		CHECK(occupants == 0);
+
+		const engine::ecs::Entity workspace = store.FindFirstRoot("Workspace");
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(workspace, "Surveyor") == engine::ecs::NULL_ENTITY);
+	});
+	host.Shutdown();
+}
+
 TEST_CASE("server uses one live DataStore declared by the universe", "[server][project][datastore]") {
 	Tree tree("universe-datastore");
 	engine::world::Universe universe;
@@ -189,6 +300,36 @@ TEST_CASE("shared project loading preserves monolithic game support", "[server][
 	REQUIRE(host.Initialise(Headless(game)));
 	CHECK(host.Worlds().Find(engine::core::Name("Hosted")).IsValid());
 	host.Shutdown();
+}
+
+TEST_CASE(
+	"saved project driver leaves assigned worlds to their host", "[server][project][project-placement]"
+) {
+	using namespace engine;
+	const auto program = core::Paths::Base().parent_path() / "server" / core::Paths::Program("server");
+	if (!fs::exists(program)) SKIP("build the server program before this test");
+	Tree tree("placement");
+	world::Universe authored;
+	REQUIRE(authored.Create({.Name = core::Name("remote")}).IsValid());
+	REQUIRE(authored.Create({.Name = core::Name("local")}).IsValid());
+	const auto path = tree.Root / "placement.agame";
+	std::string error;
+	REQUIRE(game::SaveGame(authored, core::Name("placement"), path, error));
+	auto options = Headless(path);
+	options.TickRate = 60;
+	options.HostProgram = program;
+	options.RemoteWorlds = {"remote"};
+	options.ControlPort = -1;
+	server::Server driver;
+	REQUIRE(driver.Initialise(options));
+	CHECK(driver.Worlds().NameOf(driver.Primary()) == core::Name("local"));
+	CHECK_FALSE(driver.Worlds().IsRemote(driver.Primary()));
+	const auto remote = driver.Worlds().Find(core::Name("remote"));
+	REQUIRE(remote.IsValid());
+	CHECK(driver.Worlds().IsRemote(remote));
+	CHECK(driver.Run().Ticks == 1);
+	CHECK_FALSE(driver.Hosts()->Statistics().TickExchangeFailed);
+	driver.Shutdown();
 }
 
 TEST_CASE("server owns and hosts a self-contained Project ZIP", "[server][project]") {

@@ -37,6 +37,9 @@ namespace engine::script {
 		// comparing them would find them different.
 		int GetService(lua_State *state) {
 			const char *name = luaL_checkstring(state, 2);
+			if (UpvalueContext(state).Package != nullptr && std::string_view(name) != "Workspace") {
+				luaL_errorL(state, "data-script packages may not use services");
+			}
 
 			// **`Workspace` before the globals, because its global is spelled
 			// differently.** Roblox's is `workspace`, lowercase, and a script

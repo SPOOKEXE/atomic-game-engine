@@ -109,4 +109,4 @@ echo
 echo "published to $published"
 echo "run a scene against it with:"
 echo "  $build/client/client --cdn dir:$published --cdn dir:$store_root/processed \\"
-echo "    --script $build/assets/examples/Particles.luau"
+echo "    --script $build/assets/examples/scripts/Particles.luau"

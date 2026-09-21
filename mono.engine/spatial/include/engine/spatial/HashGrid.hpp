@@ -65,7 +65,9 @@ namespace engine::spatial {
 	// retained bytes describe its reusable high-water capacity.
 	// @since v0.22
 	struct HashGridStats {
+		// Bytes currently owned by this structure.
 		size_t LiveBytes = 0;
+		// Bytes retained by this structure for reuse.
 		size_t RetainedBytes = 0;
 	};
 
@@ -92,10 +94,14 @@ namespace engine::spatial {
 		// the fork-join contract explicit at this module boundary.
 		// @since v0.22
 		struct RangeDispatcher {
+			// Type used for Body.
 			using Body = void (*)(void *bodyContext, size_t begin, size_t end);
+			// Type used for Dispatch.
 			using Dispatch = void (*)(void *context, size_t count, Body body, void *bodyContext);
 
+			// Opaque callback context passed to the range dispatcher.
 			void *Context = nullptr;
+			// Callback invoked for each dispatched range.
 			Dispatch Run = nullptr;
 		};
 
@@ -175,6 +181,7 @@ namespace engine::spatial {
 		// oversized rebuild was +255.0% and grow/shrink was +71.10%, admitted costs
 		// when the hierarchy cannot prune or retained storage must be reconstructed.
 		static constexpr size_t HIERARCHY_LEVEL_COUNT = 5;
+		// Cell-size multiplier between hash-grid hierarchy levels.
 		static constexpr float HIERARCHY_SCALE = 8.0f;
 
 		// Constructs an empty grid.

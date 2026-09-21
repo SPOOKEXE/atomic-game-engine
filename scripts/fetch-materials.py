@@ -16,7 +16,7 @@ mistake `AGENTS.md` names. Two steps:
 ## The three sources
 
 All three are CC0 - public domain, no attribution required - which is the only
-reason this script exists in this repository at all. `THIRD_PARTY_NOTICES.md`
+reason this script exists in this repository at all. `docs/THIRD_PARTY_NOTICES.md`
 carries the entry anyway, because "no attribution required" is a licence term
 and not a reason to leave the provenance of six gigabytes unrecorded.
 

@@ -41,6 +41,7 @@ using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
+using engine::physics::ClipCharacterVelocity;
 using engine::physics::GroundCharacters;
 using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
@@ -168,6 +169,94 @@ TEST_CASE("a sleeping character is woken by intent and by falling", "[physics][c
 	CHECK(world.World.Get<Motion>(world.Root) != nullptr);
 }
 
+TEST_CASE("a character clips against a wall it already overlaps at a shoulder", "[physics][characters]") {
+	// The pillar overlaps the root's front-right corner, but the knee ray runs
+	// down its centreline and therefore cannot see it. The character sweep
+	// starts in the overlap, so this exercises the zero-fraction path directly.
+	Standing world;
+
+	PartDesc pillar;
+	pillar.Frame = CFrame(Vector3{1.05f, 3.0f, 0.55f});
+	pillar.Size = Vector3{0.2f, 6.0f, 0.2f};
+	pillar.Simulated = false;
+	const Entity wall = MakePart(world.World, pillar);
+	world.World.SetParent(wall, engine::scene::WorkspaceOf(world.World));
+	engine::physics::SyncBroadphase(world.World);
+	engine::physics::BroadPhase(world.World);
+
+	world.World.AdvanceTick(1.0f / 60.0f);
+	Motion *motion = world.World.GetMutable<Motion>(world.Root);
+	REQUIRE(motion != nullptr);
+	motion->Linear = Vector3{0.0f, 0.0f, 16.0f};
+
+	REQUIRE(ClipCharacterVelocity(world.World) == 1);
+	CHECK(motion->Linear.Z == Catch::Approx(0.0f));
+}
+
+TEST_CASE("initial overlaps clip only incoming character motion", "[physics][characters]") {
+	struct Case {
+		Vector3 Centre;
+		Vector3 Size;
+		Vector3 Outward;
+	};
+	const Case cases[] = {
+		{{1.15f, 3.0f, 0.5f}, {0.4f, 6.0f, 0.4f}, {-1.0f, 0.0f, 0.0f}},
+		{{-1.15f, 3.0f, 0.5f}, {0.4f, 6.0f, 0.4f}, {1.0f, 0.0f, 0.0f}},
+		{{1.05f, 3.0f, 0.55f}, {0.2f, 6.0f, 0.2f}, {0.0f, 0.0f, -1.0f}},
+		{{1.05f, 3.0f, -0.55f}, {0.2f, 6.0f, 0.2f}, {0.0f, 0.0f, 1.0f}},
+	};
+
+	for (size_t index = 0; index < std::size(cases); index++) {
+		const Case &item = cases[index];
+		CAPTURE(index);
+		auto clip = [&](Vector3 linear, Vector3 &result) {
+			Standing world;
+			PartDesc pillar;
+			pillar.Frame = CFrame(item.Centre);
+			pillar.Size = item.Size;
+			pillar.Simulated = false;
+			const Entity wall = MakePart(world.World, pillar);
+			world.World.SetParent(wall, engine::scene::WorkspaceOf(world.World));
+			engine::physics::SyncBroadphase(world.World);
+			engine::physics::BroadPhase(world.World);
+			world.World.AdvanceTick(1.0f / 60.0f);
+			Motion *motion = world.World.GetMutable<Motion>(world.Root);
+			REQUIRE(motion != nullptr);
+			motion->Linear = linear;
+			const size_t clipped = ClipCharacterVelocity(world.World);
+			result = motion->Linear;
+			return clipped;
+		};
+
+		const Vector3 inward = item.Outward * -16.0f;
+		const Vector3 tangent =
+			std::abs(item.Outward.X) > 0.0f ? Vector3{0.0f, 0.0f, -4.0f} : Vector3{-4.0f, 0.0f, 0.0f};
+		Vector3 result;
+		CHECK(clip(inward, result) == 1);
+		CHECK(result.Magnitude() < 1e-4f);
+		CHECK(clip(tangent, result) == 0);
+		CHECK((result - tangent).Magnitude() < 1e-4f);
+		CHECK(clip(item.Outward * 16.0f, result) == 0);
+		CHECK((result - item.Outward * 16.0f).Magnitude() < 1e-4f);
+		CHECK(clip(inward + tangent, result) == 1);
+		CHECK((result - tangent).Magnitude() < 1e-4f);
+	}
+}
+
+TEST_CASE("a shallow floor overlap does not clip a character walk", "[physics][characters]") {
+	Standing world;
+	world.World.GetMutable<Transform>(world.Root)->Frame.Position.Y -= 0.01f;
+	engine::physics::SyncBroadphase(world.World);
+	engine::physics::BroadPhase(world.World);
+	world.World.AdvanceTick(1.0f / 60.0f);
+	Motion *motion = world.World.GetMutable<Motion>(world.Root);
+	REQUIRE(motion != nullptr);
+	motion->Linear = Vector3{16.0f, 0.0f, 0.0f};
+
+	CHECK(ClipCharacterVelocity(world.World) == 0);
+	CHECK(motion->Linear.X == Catch::Approx(16.0f));
+}
+
 namespace {
 	// A subject at the origin, a camera looking at it from ten metres back
 	// along +Z (yaw zero, per `PlaceCamera`'s own convention), and nothing
@@ -193,7 +282,7 @@ namespace {
 			World.SetResource(ActiveCamera{Eye});
 
 			CameraController controller;
-			controller.Subject = Subject;
+			World.Set(Eye, engine::scene::CameraSubject{.Target = Subject});
 			controller.Distance = 10.0f;
 			controller.HeadHeight = 0.0f;
 			World.SetResource(controller);
@@ -266,6 +355,25 @@ TEST_CASE("a wall between the eye and its subject is pulled in front of and fade
 	CHECK(LocalTransparencyOf(world.World, world.Subject) == 0.0f);
 }
 
+TEST_CASE(
+	"a humanoid camera occludes through its root and ignores its own body",
+	"[physics][characters][humanoid-camera]"
+) {
+	Occludable world;
+	const Entity humanoid = world.World.CreateInstance(engine::scene::HumanoidClass(), "Humanoid");
+	world.World.GetMutable<engine::scene::Humanoid>(humanoid)->RootPart = world.Subject;
+	REQUIRE(
+		world.World.SetProperty(world.Eye, engine::core::Name("CameraSubject"), &humanoid, sizeof(humanoid))
+	);
+	world.Reindex();
+	CHECK_FALSE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance < 0.0f);
+	world.Wall(5.0f);
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance > 4.0f);
+	CHECK(world.Controller().OccludedDistance < 5.0f);
+}
+
 TEST_CASE("poppercam looks through a portal instead of pulling up to its pane", "[physics][characters]") {
 	// Portal panes keep trigger colliders so contacts still report crossings.
 	// A plain ray sees that glass first and turns a valid camera arm into an
@@ -322,4 +430,44 @@ TEST_CASE("first person and a scripted camera are left alone", "[physics][charac
 	controller->Mode = CameraMode::Scriptable;
 	CHECK_FALSE(UpdatePoppercam(world.World));
 	CHECK(controller->OccludedDistance < 0.0f);
+}
+
+TEST_CASE(
+	"poppercam follows a rolled camera basis around a humanoid root",
+	"[physics][characters][camera-continuation]"
+) {
+	Occludable world;
+	const Entity humanoid = world.World.CreateInstance(engine::scene::HumanoidClass(), "Humanoid");
+	world.World.GetMutable<Humanoid>(humanoid)->RootPart = world.Subject;
+	world.World.Set(world.Eye, engine::scene::CameraSubject{.Target = humanoid});
+	const CFrame rotation = CFrame::Angles(0.7f, -0.8f, 1.1f);
+	auto &controller = *world.World.ResourceMutable<CameraController>();
+	controller.Basis = rotation;
+	controller.HeadHeight = 1.5f;
+	const Entity wall = world.Wall(5.0f);
+	auto *placement = world.World.GetMutable<Transform>(wall);
+	placement->Frame = rotation * CFrame(Vector3{0, 1.5f, 5});
+	world.Reindex();
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance == Catch::Approx(4.75f).margin(0.0001f));
+	REQUIRE(engine::scene::PlaceCamera(world.World));
+	const Vector3 expected = rotation.PointToWorldSpace(Vector3{0, 1.5f, 4.75f});
+	CHECK((world.World.Get<Transform>(world.Eye)->Frame.Position - expected).Magnitude() < 0.0001f);
+}
+
+TEST_CASE(
+	"camera obstruction skips trigger volumes but finds the solid wall behind",
+	"[physics][characters][camera-trigger]"
+) {
+	Occludable world;
+	const auto trigger = world.Wall(2);
+	world.World.GetMutable<engine::scene::Collider>(trigger)->Trigger = true;
+	world.Reindex();
+	CHECK_FALSE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance < 0);
+	const auto wall = world.Wall(5);
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance == Catch::Approx(4.75f));
+	CHECK(LocalTransparencyOf(world.World, trigger) == 0);
+	CHECK(LocalTransparencyOf(world.World, wall) == Catch::Approx(.6f));
 }

@@ -20,6 +20,7 @@
 // `tools/call` almost always succeeds at the protocol level with `isError` set,
 // and the text says what went wrong.
 
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
 
 #include <nlohmann/json.hpp>
@@ -57,7 +58,8 @@ namespace engine::control {
 	}
 
 	Surface::Surface(std::string name, std::string purpose)
-		: Name(std::move(name)), Purpose(std::move(purpose)) {}
+		: Name(std::move(name)), Purpose(std::move(purpose)),
+		  FactoryOperations(std::make_shared<DataFactoryOperationLedger>()) {}
 
 	void Surface::Add(Tool tool) {
 		for (Tool &existing : Tools) {
@@ -75,6 +77,29 @@ namespace engine::control {
 				feature.Install(*this);
 			}
 		}
+	}
+
+	void Surface::SetDataCaptureAvailabilityProvider(std::function<DataCaptureAvailability()> provider) {
+		CaptureAvailabilityProvider = std::move(provider);
+	}
+
+	DataCaptureAvailability Surface::CaptureAvailability() const {
+		if (!CaptureAvailabilityProvider) {
+			return {
+				.Available = false,
+				.Channels = {},
+				.Detail = "capture channels are not implemented by this host"
+			};
+		}
+		return CaptureAvailabilityProvider();
+	}
+
+	void Surface::SetRenderGraphProvider(RenderGraphProvider provider) {
+		RenderGraphProviderCallback = std::move(provider);
+	}
+
+	const RenderGraphProvider &Surface::RenderGraph() const {
+		return RenderGraphProviderCallback;
 	}
 
 	void Surface::AddResource(Resource resource) {
@@ -254,7 +279,15 @@ namespace engine::control {
 				}
 
 				if (!failure.empty()) {
-					return Result(id, Content(json{{"error", failure}}, true)).dump();
+					// Refusals may carry recovery data, such as the current world
+					// versions for a stale write. Keep that object while marking the
+					// transport result as an error so a client can act on it.
+					if (!payload.is_object()) {
+						payload = json{{"error", failure}};
+					} else if (!payload.contains("error")) {
+						payload["error"] = failure;
+					}
+					return Result(id, Content(std::move(payload), true)).dump();
 				}
 				return Result(id, Content(std::move(payload))).dump();
 			}

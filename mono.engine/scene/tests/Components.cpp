@@ -39,6 +39,7 @@ using engine::scene::ObjectValue;
 using engine::scene::Portal;
 using engine::scene::PreviousTransform;
 using engine::scene::Rendered;
+using engine::scene::RenderFeaturePolicy;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
@@ -91,7 +92,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(Bounds) == sizeof(Vector3));
 	CHECK(sizeof(Motion) == 2 * sizeof(Vector3));
 	CHECK(sizeof(Surface) == sizeof(Name));
-	CHECK(sizeof(Camera) == 7 * sizeof(float));
+	CHECK(sizeof(Camera) == 7 * sizeof(float) + sizeof(RenderFeaturePolicy));
 	// **`ImageTransparency` widened this one and the two bytes it needed came
 	// out of the named padding**, which is the same trade `Visual` records
 	// above: a float needs four-byte alignment, so it could not sit in the three
@@ -149,7 +150,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// And so is an effect, which is what let it come out of the reserve.
 	CHECK(sizeof(SurfaceEffect) == sizeof(uint8_t));
 
-	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + sizeof(BodyKind) + 3);
+	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + 2 * sizeof(Vector3) + sizeof(BodyKind) + 3);
 	// **`Geometry` widened this by exactly its own four bytes at v0.17**, and
 	// could not have been paid for out of the reserve: a `core::Name` needs
 	// four-byte alignment and the reserve is a two-byte tail after a pair of
@@ -184,8 +185,8 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// purpose. This line is what makes the *next* growth visible in a diff
 	// rather than discovered in a profile.
 	CHECK(
-		sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(int16_t) +
-							  3 * sizeof(bool) + sizeof(Visual::Reserved)
+		sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(RenderFeaturePolicy) + sizeof(float) +
+							  sizeof(int16_t) + 3 * sizeof(bool) + sizeof(Visual::Reserved)
 	);
 
 	CHECK(sizeof(Rendered) == sizeof(uint8_t) + 3);
@@ -227,12 +228,14 @@ TEST_CASE("a default body is dynamic and unit mass", "[scene][components]") {
 	// expressed to the ECS by the row losing its `Motion` - the archetype move
 	// itself. A flag on this row would be that same state a second time, and
 	// readable only by making the visit the move exists to avoid.
-	STATIC_REQUIRE(sizeof(RigidBody) == 16);
+	STATIC_REQUIRE(sizeof(RigidBody) == 40);
 
 	// Damping defaults to a vacuum rather than to a guess, so a scene that
 	// wants drag has to say so and one that does not is not silently slowed.
 	CHECK(body.LinearDamping == 0.0f);
 	CHECK(body.AngularDamping == 0.0f);
+	CHECK(body.AppliedForce == Vector3::Zero);
+	CHECK(body.AppliedTorque == Vector3::Zero);
 }
 
 TEST_CASE("a default collider is a solid box on layer one", "[scene][components]") {

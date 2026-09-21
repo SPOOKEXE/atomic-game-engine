@@ -29,6 +29,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -131,6 +132,10 @@ namespace engine::scene {
 
 		// Which latitude the sun's arc is computed for, in degrees.
 		float GeographicLatitude = 41.733f;
+
+		// World defaults for render features. Cameras and visual instances may
+		// override individual bits without changing these authored values.
+		RenderFeaturePolicy RenderFeatures;
 	};
 
 	// What `Players` holds that no other service does.

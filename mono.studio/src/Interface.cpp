@@ -446,7 +446,7 @@ namespace studio {
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
 			Skinned("Asset Profiler", [&] { DrawAssetProfiler(); });
-			Skinned("Physics Solver", [&] { DrawPhysicsSolver(); });
+			Skinned("Physics Profiler", [&] { DrawPhysicsSolver(); });
 			Skinned("DataStores", [&] { DrawDataStores(); });
 			Skinned("CDN", [&] { DrawCdn(); });
 			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
@@ -499,7 +499,9 @@ namespace studio {
 
 		{
 			ENGINE_PROFILE_CAT("camera", engine::core::ProfileCategory::Render);
-			if (!ShowClientSettings) {
+			if (ShowClientSettings) {
+				ReleaseViewportInput();
+			} else {
 				DriveCamera();
 			}
 		}
@@ -571,44 +573,12 @@ namespace studio {
 	}
 
 	void Editor::DriveCamera() {
-		// **The pointer decides first, and focus decides when the pointer is
-		// nowhere.** One camera driver for every panel rather than a copy each:
-		// the rules - right-drag to look, middle-drag to pan, wheel to dolly, F
-		// to frame, WASD to fly - are the same in all of them.
-		//
-		// The order is the whole of it. A viewport under the pointer is the one a
-		// mouse gesture means, whichever panel was last clicked; a viewport with
-		// the keyboard in it is the one WASD means, wherever the pointer has
-		// wandered off to. Asking the pointer first and falling back to focus
-		// gives both without either overriding the other.
-		//
-		// **Which panel, resolved once, then driven once.** This was four call
-		// sites of an eight-argument function spread over four early returns -
-		// and two of them were provably the same call, one passing a computed
-		// expression and the other a hard-coded `true` for the same value. A
-		// ninth parameter would have meant four more edits, and the signature
-		// grew by one the last time it was touched.
+		// **Selection owns a viewport's input.** Pointer movement may continue a
+		// drag that started in the selected panel, but hovering another panel must
+		// never redirect keyboard, controller, mouse or wheel input into it.
 		constexpr size_t NONE = ~size_t{0};
 		size_t target = NONE;
-
-		for (size_t index = 1; index <= Extras.size(); index++) {
-			const ViewportState &view = Extras[index - 1];
-			if (view.Open && (view.Hovered || view.Active || view.Panning)) {
-				target = index;
-				break;
-			}
-		}
-
-		if (target == NONE && (ViewportHovered || ViewportActive || ViewportPanning)) {
-			target = 0;
-		}
-
-		// Nothing under the pointer, so the keyboard's panel gets the frame -
-		// but only if the keyboard is genuinely in a viewport. `FocusedViewport`
-		// alone still names one after a click into the properties panel, which is
-		// right for the transport readout and wrong here. See
-		// `ResolveFocusedViewport`, which runs earlier this frame.
-		if (target == NONE && FocusedIsViewport) {
+		if (FocusedIsViewport) {
 			ViewportState *focused = ExtraAt(FocusedViewport);
 			if (focused == nullptr || focused->Open) {
 				target = FocusedViewport;
@@ -625,32 +595,9 @@ namespace studio {
 		// The free camera is skipped entirely rather than driven as well: two
 		// things moving on one key is the state where neither works.
 		//
-		// **Every client viewport is visited, and at most one of them is
-		// driven.** This used to call `DrivePlayer` for the target panel alone,
-		// which was wrong twice over.
-		//
-		// The first is what it did to the *other* panels: `scene::InputState` is
-		// a resource on each client world and it has to be maintained every
-		// frame the way a real client maintains its own. A panel nobody visited
-		// kept the last keys it was given, so a second client view walked for
-		// ever on a key released in the first, and alt-tabbing out of the editor
-		// left whoever was moving still moving.
-		//
-		// The second is what it did to the target: the search above accepts a
-		// panel that is `Panning`, and the call passed only `hovered` and
-		// `active` on. So a panel selected *because* it was panning arrived here
-		// looking like a panel nobody was touching - it took the frame, decided
-		// it was not being driven, and cleared the keys it had just been given.
-		// `Panning` stays set when a middle-drag is released off the picture, so
-		// from then on that client viewport erased its own keyboard every frame:
-		// the character had a move direction on a fraction of the ticks, and
-		// since `scene::StepCharacters` *replaces* horizontal velocity rather
-		// than accumulating it, that reads as a character that does not move at
-		// all. Which is exactly how it was reported.
-		//
-		// Passing `false` for every panel but the target is what keeps the "at
-		// most one walks" rule that made a single call site look right: the
-		// others are not skipped, they are told they have nothing.
+		// Every client world is visited once per frame. Worlds outside an open
+		// viewport are released below, so a held key cannot outlive closing its
+		// panel or moving focus elsewhere.
 		const WorldId driven = target == NONE ? WorldId{} : ViewportWorld(target);
 
 		size_t played = NONE;
@@ -667,20 +614,50 @@ namespace studio {
 			// arrive here as "not the target" and clear the very keys the target
 			// had just been given. `scene::InputState` is per world and not per
 			// panel; releasing it has to be a statement about the world.
+			const WorldId world = ViewportWorld(index);
 			const bool mine = index == target;
-			if (!mine && ViewportWorld(index) == driven) {
+			if (!mine && world == driven) {
+				continue;
+			}
+			bool alreadyOpen = false;
+			for (size_t earlier = 0; earlier < index; earlier++) {
+				const ViewportState *previous = ExtraAt(earlier);
+				if ((previous == nullptr ? ShowViewport : previous->Open) &&
+					ViewportWorld(earlier) == world) {
+					alreadyOpen = true;
+					break;
+				}
+			}
+			if (!mine && alreadyOpen) {
 				continue;
 			}
 			const bool pointer =
 				panel != nullptr ? panel->Hovered || panel->Panning : ViewportHovered || ViewportPanning;
 
 			if (DrivePlayer(
-					ViewportWorld(index),
-					mine && pointer,
-					mine && (panel != nullptr ? panel->Active : ViewportActive),
-					mine && FocusedIsViewport && FocusedViewport == index
+					world, mine && pointer, mine && (panel != nullptr ? panel->Active : ViewportActive), mine
 				)) {
 				played = index;
+			}
+		}
+
+		// A client can outlive the panel that was showing it. Closed viewports do
+		// not enter the loop above, but their worlds still need a release so a
+		// held key or controller button cannot survive closing the panel.
+		const auto hasOpenViewport = [&](WorldId world) {
+			for (size_t index = 0; index <= Extras.size(); index++) {
+				const ViewportState *panel = ExtraAt(index);
+				if ((panel == nullptr ? ShowViewport : panel->Open) && ViewportWorld(index) == world) {
+					return true;
+				}
+			}
+			return false;
+		};
+		for (WorldRun &run : Runs) {
+			for (const std::unique_ptr<PlayLink> &link : run.Links) {
+				if (link != nullptr && !hasOpenViewport(link->ReplicaWorld())) {
+					(void)DrivePlayer(link->ReplicaWorld(), false, false, false);
+				}
 			}
 		}
 
@@ -704,6 +681,7 @@ namespace studio {
 				CameraYaw,
 				CameraPitch,
 				CameraSpeed,
+				FollowCamera,
 				ViewportHovered,
 				ViewportActive,
 				ViewportPanning,
@@ -728,6 +706,7 @@ namespace studio {
 			view->Yaw,
 			view->Pitch,
 			view->Speed,
+			view->Follow,
 			view->Hovered,
 			view->Active,
 			view->Panning,
@@ -749,6 +728,7 @@ namespace studio {
 		float &yaw,
 		float &pitch,
 		float &speed,
+		Entity &follow,
 		bool hovered,
 		bool active,
 		bool &panning,
@@ -777,8 +757,8 @@ namespace studio {
 		// would turn a camera nobody asked it to turn - or worse, appear to do
 		// nothing because the scene's camera keeps overriding the eye every
 		// frame. Discoverable without a menu: you fly, you are flying.
-		if (looking && FollowCamera != engine::ecs::NULL_ENTITY) {
-			FollowCamera = engine::ecs::NULL_ENTITY;
+		if (looking && follow != engine::ecs::NULL_ENTITY) {
+			follow = engine::ecs::NULL_ENTITY;
 			Say("back to the editor camera");
 		}
 
@@ -1143,7 +1123,12 @@ namespace studio {
 		if (ViewportResults.size() <= index) {
 			ViewportResults.resize(index + 1);
 		}
+		// The completed retained frame is intentionally older than the result of
+		// the redraw Studio just submitted. Keep the live scene tally beside its
+		// viewport rather than rolling it back while that image waits on its fence.
+		const uint64_t triangles = ViewportResults[index].Triangles;
 		ViewportResults[index] = Renderer.SceneFrameResult(index);
+		ViewportResults[index].Triangles = triangles;
 		ViewportImageRect imageRect{glm::vec2(0.0f), glm::vec2(size.x, size.y)};
 		if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
 			// Keep the last complete frame visible while the new target is being
@@ -1191,6 +1176,8 @@ namespace studio {
 			slot.Y = origin.y + imageRect.Min.y;
 			slot.Width = imageRect.Size.x;
 			slot.Height = imageRect.Size.y;
+			slot.RenderWidth = extent.DrawnWidth > 0 ? extent.DrawnWidth : target.Width;
+			slot.RenderHeight = extent.DrawnHeight > 0 ? extent.DrawnHeight : target.Height;
 			slot.Drawn = true;
 		}
 
@@ -1213,8 +1200,10 @@ namespace studio {
 		// acts from outside `Universe::Enter` - the rule at the top of
 		// `Editor.hpp`. `DrawViewportOverlays` runs it after the camera moves,
 		// which is also when the projection it needs is correct.
-		if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
-			!ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left)) {
+		if (CurrentTool != ToolMode::None && ImGui::IsItemDeactivated() &&
+			ImGui::IsMouseReleased(ImGuiMouseButton_Left) && SurfaceGesture.Active &&
+			SurfaceGesture.Viewport == index && SurfaceGesture.World == ViewportWorld(index) &&
+			!SurfaceGesture.Dragging) {
 			const ImVec2 at = ImGui::GetIO().MousePos;
 			if (ImGui::GetIO().KeyAlt) {
 				PendingCursor.Viewport = index;
@@ -1256,6 +1245,18 @@ namespace studio {
 			(ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
 			EditThroughViewport(index);
+
+			if (CurrentTool != ToolMode::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+				const ImVec2 at = ImGui::GetIO().MousePos;
+				SurfaceGesture = ViewportGesture{
+					.Active = true,
+					.Viewport = index,
+					.World = ViewportWorld(index),
+					.Start = glm::vec2(at.x, at.y),
+					.StartedAt = ImGui::GetTime(),
+					.Add = ImGui::GetIO().KeyCtrl,
+				};
+			}
 
 			// Held for the rest of the frame so a later panel's stale
 			// `IsWindowFocused` cannot take it back. See the note above.
@@ -1344,8 +1345,7 @@ namespace studio {
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		ImGui::MenuItem("Asset Profiler", nullptr, &ShowAssetProfiler);
-		ImGui::MenuItem("Physics Solver", nullptr, &ShowPhysicsSolver);
-		ImGui::MenuItem("CDN", nullptr, &ShowCdn);
+		ImGui::MenuItem("CDN Config", nullptr, &ShowCdn);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
 		ImGui::SeparatorText("Script");
@@ -1359,10 +1359,11 @@ namespace studio {
 		ImGui::SeparatorText("Render");
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
+		ImGui::MenuItem("Physics Profiler", nullptr, &ShowPhysicsSolver);
 
 		ImGui::SeparatorText("Engine");
-		ImGui::MenuItem("DataStore", nullptr, &ShowDatasets);
-		ImGui::MenuItem("DataStores", nullptr, &ShowDataStores);
+		ImGui::MenuItem("DataStore Config", nullptr, &ShowDatasets);
+		ImGui::MenuItem("DataStore Editor", nullptr, &ShowDataStores);
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
@@ -1422,6 +1423,9 @@ namespace studio {
 			ImGui::EndMenu();
 		}
 		ImGui::EndDisabled();
+
+		ImGui::MenuItem("Show Active LOD", nullptr, &ShowActiveLod);
+		ImGui::MenuItem("LOD Debug Radii", nullptr, &ShowLodDebugRadii);
 
 		ImGui::Separator();
 
@@ -1641,8 +1645,10 @@ namespace studio {
 			// one. It is still in View as well, because it is still a panel and
 			// `DrawViewMenu` is the guaranteed way back to any of them.
 			if (ImGui::MenuItem("Preferences...", nullptr, ShowSettings)) {
-				ShowSettings = true;
-				ImGui::SetWindowFocus(SETTINGS);
+				ShowSettings = !ShowSettings;
+				if (ShowSettings) {
+					ImGui::SetWindowFocus(SETTINGS);
+				}
 			}
 
 			ImGui::EndMenu();
@@ -1862,7 +1868,7 @@ namespace studio {
 		}
 
 		if (Keybinds::Fired(Action::CommandPalette)) {
-			ShowPalette = true;
+			ShowPalette = !ShowPalette;
 		}
 
 		// **Through the table, not through the method.** A shortcut that called

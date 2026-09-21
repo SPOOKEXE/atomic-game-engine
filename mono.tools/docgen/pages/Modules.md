@@ -47,6 +47,7 @@ a module that exists is listed. Run `just docs-pages` after adding one;
 - @subpage md_mono_8engine_2replication_2AGENTS
 - @subpage md_mono_8engine_2ui_2AGENTS
 - @subpage md_mono_8engine_2control_2AGENTS
+- @subpage md_mono_8engine_2control_2docs_2MCP
 - @subpage md_mono_8cdn_2AGENTS
 - @subpage md_mono_8cdn_2docs_2index
 - @subpage md_mono_8client_2AGENTS

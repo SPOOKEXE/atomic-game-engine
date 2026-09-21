@@ -118,6 +118,12 @@ namespace engine::bake {
 
 		// A wire from one node's output to another's input.
 		Connect,
+
+		// A `Decimate` node. Appended because operation ordinals are durable.
+		AddDecimate,
+
+		// A `Flipbook` node. Appended because operation ordinals are durable.
+		AddFlipbook,
 	};
 
 	// A stable, human-readable name for an operation kind.
@@ -143,7 +149,7 @@ namespace engine::bake {
 
 		// For `AddNode`, which node. Ignored otherwise.
 		//
-		// `Source`, `Builtin`, `Fit`, `Scale`, `Resize`, `Retime` and `Write`
+		// `Source`, `Builtin`, `Fit`, `Scale`, `Resize`, `Retime`, `Decimate` and `Write`
 		// are refused here - each has its own operation kind, because each
 		// carries a parameter this field cannot.
 		NodeKind Node = NodeKind::Import;
@@ -154,13 +160,20 @@ namespace engine::bake {
 		// `AddScale`'s per-axis multiplier.
 		core::Vector3 Amount{1.0f, 1.0f, 1.0f};
 
-		// `AddFit`'s target size in metres, or `AddRetime`'s frames a second.
+		// `AddFit`'s target size in metres, `AddRetime`'s frames a second,
+		// `AddDecimate`'s retained triangle fraction, or `AddFlipbook`'s rate.
 		float Number = 0.0f;
 
 		// `AddResize`'s target, in pixels.
 		//@{
 		uint32_t Width = 0;
 		uint32_t Height = 0;
+		//@}
+
+		// `AddFlipbook`'s grid side and populated-cell count.
+		//@{
+		uint32_t Side = 0;
+		uint32_t Frames = 0;
 		//@}
 
 		// `Connect`'s endpoints, as one-based positions among the *node*

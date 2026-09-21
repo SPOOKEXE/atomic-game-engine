@@ -307,8 +307,9 @@ namespace engine::graph {
 			if (engineGraph.FindResource(name) == nullptr &&
 				!engineGraph.AddResource({
 					.Name = name,
-					.Lifetime = resource->External ? EngineResourceLifetime::Persistent
-												   : EngineResourceLifetime::Tick,
+					.Lifetime = resource->External || resource->Lifetime != ResourceLifetime::Transient
+									? EngineResourceLifetime::Persistent
+									: EngineResourceLifetime::Tick,
 					.External = resource->External,
 				})) {
 				offender = name;

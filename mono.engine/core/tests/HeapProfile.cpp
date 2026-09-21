@@ -282,6 +282,10 @@ TEST_CASE("sampling records a history and turning it on clears it", "[heap]") {
 
 	const std::vector<HeapSample> history = HeapProfile::History();
 	REQUIRE(history.size() == 5);
+	const auto snapshots = HeapProfile::HistorySnapshots();
+	REQUIRE(snapshots.size() == history.size());
+	CHECK(snapshots.back().Sample.Seconds == history.back().Seconds);
+	CHECK(snapshots.back().InclusiveBytes.size() <= HeapProfile::MAXIMUM_TRACKED_NODES);
 	REQUIRE(HeapProfile::HistorySeconds() > 0.0);
 	for (size_t index = 1; index < history.size(); index++) {
 		REQUIRE(history[index].Seconds >= history[index - 1].Seconds);
@@ -293,6 +297,8 @@ TEST_CASE("sampling records a history and turning it on clears it", "[heap]") {
 	HeapProfile::SetSamplingEnabled(false);
 	HeapProfile::SetSamplingEnabled(true);
 	REQUIRE(HeapProfile::History().empty());
+	HeapProfile::ResetHistory();
+	CHECK(HeapProfile::HistorySnapshots(5.0).empty());
 	HeapProfile::SetSamplingEnabled(false);
 }
 

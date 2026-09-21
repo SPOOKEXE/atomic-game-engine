@@ -5,8 +5,10 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
@@ -28,6 +30,7 @@ using engine::ecs::ClassId;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
+using engine::scene::BodyKind;
 using engine::scene::Bounds;
 using engine::scene::Collider;
 using engine::scene::LocalTransparencyOf;
@@ -432,6 +435,37 @@ TEST_CASE("CanQuery controls participation in spatial queries", "[scene][part]")
 	CHECK_FALSE(store.Get<Collider>(part)->CanQuery);
 }
 
+TEST_CASE("Kinematic gives a script-owned part a dynamic broadphase proxy", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	CHECK(Read<bool>(store, part, "Anchored"));
+	CHECK_FALSE(Read<bool>(store, part, "Kinematic"));
+	CHECK_FALSE(store.Has<Motion>(part));
+
+	REQUIRE(Write(store, part, "Kinematic", true));
+	CHECK_FALSE(Read<bool>(store, part, "Anchored"));
+	CHECK(Read<bool>(store, part, "Kinematic"));
+	CHECK(store.Has<Simulated>(part));
+	CHECK(store.Has<Motion>(part));
+	CHECK(store.Get<RigidBody>(part)->Kind == BodyKind::Kinematic);
+	CHECK(store.Get<Motion>(part)->Linear == Vector3::Zero);
+
+	// `Anchored` owns the Simulated/Motion pair. Re-applying it intentionally
+	// removes the kinematic proxy, so scripts enable Kinematic after Anchored.
+	REQUIRE(Write(store, part, "Anchored", true));
+	CHECK(Read<bool>(store, part, "Anchored"));
+	CHECK_FALSE(Read<bool>(store, part, "Kinematic"));
+	CHECK_FALSE(store.Has<Motion>(part));
+
+	REQUIRE(Write(store, part, "Kinematic", true));
+	REQUIRE(Write(store, part, "Kinematic", false));
+	CHECK_FALSE(Read<bool>(store, part, "Kinematic"));
+	CHECK_FALSE(Read<bool>(store, part, "Anchored"));
+	CHECK(store.Has<Motion>(part));
+	CHECK(store.Get<RigidBody>(part)->Kind == BodyKind::Dynamic);
+}
+
 TEST_CASE("a replica refuses a property write", "[scene][part]") {
 	Store store("property_test");
 	const Entity part = MakePart(store, PartDesc{});
@@ -653,6 +687,66 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	CHECK_FALSE(store.GetProperty(part, Name("ColorMap"), &unused, sizeof(unused)));
 }
 
+TEST_CASE(
+	"visual render policy, authored LOD, and effect nodes use the property surface", "[scene][part][lod]"
+) {
+	using namespace engine::scene;
+	Store store("meshpart_render_policy");
+	RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(Classes::Find(Name("MeshPart")), "LodProp");
+	REQUIRE(part != NULL_ENTITY);
+
+	const uint32_t everyBit = UINT32_MAX;
+	const uint32_t shadows = FeatureBit(RenderFeature::Shadows);
+	REQUIRE(Write(store, part, "RenderFeatureEnableMask", everyBit));
+	REQUIRE(Write(store, part, "RenderFeatureDisableMask", shadows));
+	CHECK(Read<uint32_t>(store, part, "RenderFeatureEnableMask") == ALL_RENDER_FEATURES);
+	CHECK(Read<uint32_t>(store, part, "RenderFeatureDisableMask") == shadows);
+
+	REQUIRE(Write(store, part, "AutoLod1MeshId", Name("lod/auto-half.amesh")));
+	REQUIRE(Write(store, part, "AutoLod2MeshId", Name("lod/auto-quarter.amesh")));
+	REQUIRE(Write(store, part, "CustomLod1MeshId", Name("lod/custom-half.amesh")));
+	REQUIRE(Write(store, part, "CustomLod2MeshId", Name{}));
+	REQUIRE(Write(store, part, "Lod1Ratio", 1.5f));
+	REQUIRE(Write(store, part, "Lod2Ratio", -0.5f));
+	REQUIRE(Write(store, part, "LodTargetQuadArea", -4.0f));
+	const AutoMeshLOD *automatic = store.Get<AutoMeshLOD>(part);
+	const CustomMeshLOD *custom = store.Get<CustomMeshLOD>(part);
+	REQUIRE(automatic != nullptr);
+	REQUIRE(custom != nullptr);
+	CHECK(automatic->Meshes[0] == Name("lod/auto-half.amesh"));
+	CHECK(automatic->Meshes[1] == Name("lod/auto-quarter.amesh"));
+	CHECK(automatic->Ratios[0] == 1.0f);
+	CHECK(automatic->Ratios[1] == 0.0f);
+	CHECK(automatic->TargetQuadArea == 0.0f);
+	CHECK(custom->Meshes[0] == Name("lod/custom-half.amesh"));
+	CHECK_FALSE(custom->Meshes[1].IsValid());
+
+	const LevelOfDetail resolved = ResolveMeshLOD(automatic, custom);
+	CHECK(resolved.Strategy == LodStrategy::Authored);
+	CHECK(resolved.Levels == 3);
+	CHECK(resolved.Meshes[0] == Name("lod/custom-half.amesh"));
+	CHECK(resolved.Meshes[1] == Name("lod/auto-quarter.amesh"));
+
+	REQUIRE(Write(store, part, "ComputeEffectNode", Name("waves")));
+	REQUIRE(Write(store, part, "PostProcessEffectNode", Name("outline")));
+	const RenderEffects *effects = store.Get<RenderEffects>(part);
+	REQUIRE(effects != nullptr);
+	CHECK(effects->Count == 2);
+	CHECK(effects->Attachments[0].Node == Name("waves"));
+	CHECK(effects->Attachments[0].Stage == RenderEffectStage::Compute);
+	CHECK(effects->Attachments[0].Enabled);
+	CHECK(effects->Attachments[1].Node == Name("outline"));
+	CHECK(effects->Attachments[1].Stage == RenderEffectStage::PostProcess);
+	CHECK(effects->Attachments[1].Enabled);
+
+	const Entity camera = store.CreateInstance(Classes::Find(Name("Camera")), "View");
+	REQUIRE(camera != NULL_ENTITY);
+	REQUIRE(Write(store, camera, "RenderFeatureEnableMask", shadows));
+	CHECK(Read<uint32_t>(store, camera, "RenderFeatureEnableMask") == shadows);
+}
+
 TEST_CASE("a SkinnedMeshPart exposes the skeleton it always carries", "[scene][part]") {
 	Store store("skinned_mesh_part_test");
 	RegisterSceneClasses();
@@ -671,6 +765,31 @@ TEST_CASE("a SkinnedMeshPart exposes the skeleton it always carries", "[scene][p
 	CHECK(Read<int32_t>(store, rig, "JointCount") == 1);
 	CHECK_FALSE(Write(store, rig, "JointCount", int32_t{-1}));
 	CHECK_FALSE(Write(store, rig, "JointCount", int32_t{engine::scene::MAX_JOINTS + 1}));
+}
+
+TEST_CASE("a RigKeypoint joint uses minus one to clear its optional rig slot", "[scene][part]") {
+	Store store("rig_keypoint_joint_property_test");
+	RegisterSceneClasses();
+
+	const Entity keypoint = store.CreateInstance(engine::scene::RigKeypointClass(), "Wrist");
+	REQUIRE(keypoint != NULL_ENTITY);
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{-1}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{-2}));
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{0}));
+
+	const Entity rig = store.CreateInstance(Classes::Find(Name("Part")), "Rig");
+	REQUIRE(rig != NULL_ENTITY);
+	store.Set(rig, engine::scene::Skeleton{Name("test.rig"), 2, {}});
+	REQUIRE(store.SetParent(keypoint, rig));
+
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{1}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == 1);
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{2}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == 1);
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{-1}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
 }
 
 TEST_CASE("a plain Part names no mesh and no texture", "[scene][part]") {

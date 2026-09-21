@@ -235,6 +235,7 @@ namespace engine::physics {
 	// Angular reach is bounded by each shape's farthest point from its origin.
 	// This makes every advance a lower bound on the time of impact even when the
 	// nearest features change while the shapes turn.
+	// permitSeparatingContact lets placement probes continue along supporting surfaces.
 	ConvexSweep SweepConvexMotion(
 		const ShapeInstance &first,
 		const core::Vector3 &firstLinear,
@@ -242,6 +243,7 @@ namespace engine::physics {
 		const ShapeInstance &second,
 		const core::Vector3 &secondLinear,
 		const core::Vector3 &secondAngular,
-		float seconds
+		float seconds,
+		bool permitSeparatingContact = false
 	);
 }

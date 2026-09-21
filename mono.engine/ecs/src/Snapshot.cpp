@@ -39,7 +39,10 @@ namespace engine::ecs {
 		// Built into a scratch buffer first, because the component table has to
 		// be written before the things that refer to it and is only complete
 		// once they have been walked.
-		core::ByteWriter body;
+		// The component table needs a second pass, but it must share the outer
+		// checkpoint budget so a hostile world cannot allocate an unbounded body
+		// before the outer writer gets a chance to refuse it.
+		core::ByteWriter body(0, writer.Remaining());
 
 		body.WriteUInt32(static_cast<uint32_t>(state.Tables.size()));
 		for (const Archetype &table : state.Tables) {
@@ -157,6 +160,7 @@ namespace engine::ecs {
 			writer.WriteBool(state.Directory.Live(index));
 		}
 
+		state.Directory.WriteAllocationState(writer);
 		writer.WriteRaw(body.Bytes().data(), body.Size());
 		return true;
 	}
@@ -245,6 +249,11 @@ namespace engine::ecs {
 			return false;
 		}
 		state.Directory.FinishRestore(static_cast<size_t>(issued), static_cast<size_t>(predicted));
+		if (!state.Directory.ReadAllocationState(reader)) {
+			ENGINE_ERROR("store '{}': snapshot has invalid allocation state.", name);
+			ClearWorld(state);
+			return false;
+		}
 
 		const uint32_t tableCount = reader.ReadUInt32();
 		for (uint32_t index = 0; index < tableCount && !reader.Failed(); index++) {
@@ -333,7 +342,7 @@ namespace engine::ecs {
 		return true;
 	}
 
-	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode) {
+	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode, ApplyClock clock) {
 		// Read into a scratch world first, so a corrupt snapshot cannot leave
 		// the live one half-merged. The live world is only touched once the
 		// whole thing has parsed.
@@ -396,6 +405,7 @@ namespace engine::ecs {
 		}
 
 		// --- bring every incoming entity into line ---
+		const ComponentId dirtyBits = Components::Of<DirtyBits>();
 		for (const Entity entity : incoming) {
 			const EntityId key = EntityId::Of(entity);
 
@@ -435,7 +445,10 @@ namespace engine::ecs {
 			if (here.Archetype != EntityLocation::NO_ARCHETYPE) {
 				const ComponentSet &held = state.Tables[here.Archetype].Set();
 				for (const ComponentId id : held.Ids()) {
-					if (!wanted.Contains(id)) {
+					// DirtyBits belongs to the receiving store's observation policy.
+					// A sender that does not observe this entity's components omits it,
+					// but removing it here would immediately be undone by Tracked().
+					if (id != dirtyBits && !wanted.Contains(id)) {
 						RemoveComponent(state, entity, id);
 					}
 				}
@@ -448,7 +461,9 @@ namespace engine::ecs {
 		}
 
 		// --- resources and the clock ---
+		const ComponentId time = Components::Of<WorldTime>();
 		for (const auto &entry : scratch.Resources.Entries()) {
+			if (clock == ApplyClock::PreserveLocal && entry.Index == time.Index) continue;
 			SetResourceValue(state, ComponentId{entry.Index}, entry.Storage.At(0));
 		}
 

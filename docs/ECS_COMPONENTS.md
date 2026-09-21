@@ -45,7 +45,7 @@ state until v0.19.
 | `effects.Decal` | 28 | 4 | yes | . | . | . | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
 | `effects.ParticleEmitter` | 1300 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
-| `effects.ParticleSystem` | 392 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
+| `effects.ParticleSystem` | 400 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Texture` | 44 | 4 | yes | . | . | . | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order. |
 | `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
@@ -68,6 +68,7 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `gui.Adornment` | 32 | 8 | yes | yes | . | . | The half of a 3D adornment this module owns: which instance a `SelectionBox` or handle adornment is drawn around, in what colour, and whether it draws. |
+| `gui.AdornmentInteraction` | 4 | 1 | yes | yes | . | . | Opt-in pointer input for a 3D adornment. The renderer marks its geometry pickable only while enabled, so decorative adornments never steal scene input. |
 | `gui.ArcHandlesShape` | 4 | 4 | yes | yes | . | . | The axis mask drawn by an `ArcHandles` instance. |
 | `gui.AspectRatio` | 8 | 4 | yes | yes | . | . | `UIAspectRatioConstraint`: forces the parent element's resolved size to a width-over-height ratio, derived from whichever axis dominates. |
 | `gui.Background` | 36 | 4 | yes | yes | . | . | The box a `GuiObject` draws for itself: fill colour and transparency, plus the border's colour, thickness and inset mode. |
@@ -122,7 +123,8 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
-| `physics.PhysicsClock` | 48 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
+| `physics.CopiedContactCache` | 32 | 8 | yes | . | . | . | Per-tick copied contact geometry and pre-step body poses used for portal collision correction. |
+| `physics.PhysicsClock` | 56 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
 | `physics.PhysicsWorld` | 10632 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
 | `physics.PoppercamState` | 8 | 8 | yes | yes | . | . | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else. |
 
@@ -136,6 +138,7 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
+| `scene.Accessory` | 16 | 8 | yes | yes | . | . | On an accessory: the matching handle and character attachment references. The hierarchy determines equip state; the pose pass carries its handle as one CharacterLimb. |
 | `scene.ActiveCamera` | 16 | 8 | yes | yes | . | . | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`. |
 | `scene.AnimationBuffer` | 32 | 8 | yes | . | . | . | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit. |
 | `scene.AnimationClip` | 16 | 8 | yes | . | . | . | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
@@ -145,13 +148,19 @@ state until v0.19.
 | `scene.AtmosphereProcedural` | 24 | 4 | yes | . | . | . | Extra scattering controls on an `AtmosphereProcedural` instance: planet and atmosphere scale, Rayleigh and Mie strength, and bounded integration quality for the resident environment compute pass. |
 | `scene.Attachment` | 56 | 4 | yes | yes | . | . | A named point on a part: the authored local `Frame` plus the `WorldFrame` every host recomposes each tick. The cache puts an emitter and a lamp where their part is, and its reported write is what signals a change. |
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
+| `scene.AuthoredAffordance` | 8 | 4 | yes | . | . | . | Explicit bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry. |
+| `scene.AutoMeshLOD` | 32 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
 | `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
 | `scene.BoolValue` | 4 | 1 | yes | yes | . | . | The boolean stored by a `BoolValue` instance. |
 | `scene.Bounds` | 12 | 4 | yes | yes | . | . | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it. |
 | `scene.CFrameValue` | 28 | 4 | yes | yes | . | . | The coordinate frame stored by a `CFrameValue` instance. |
-| `scene.Camera` | 28 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
-| `scene.CameraController` | 64 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override. |
+| `scene.Camera` | 36 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
+| `scene.CameraBodyPose` | 88 | 8 | yes | . | . | . | Local last-presented body rows, joint palette and root pose retained while a replica's source rows retire. |
+| `scene.CameraCharacterHold` | 88 | 8 | yes | yes | . | . | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending. |
+| `scene.CameraController` | 144 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - orbit angles and distance, zoom and sensitivity limits, camera mode, the poppercam distance override, and the resolved subject's observed portal transit. |
+| `scene.CameraPortalView` | 232 | 8 | yes | . | . | . | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses. |
+| `scene.CameraSubject` | 16 | 8 | yes | yes | . | . | The camera's follow target, chosen explicitly or automatically from the local player's Humanoid. Each camera keeps its own selection before and after becoming current. |
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |
 | `scene.CharacterLimb` | 40 | 8 | yes | yes | . | . | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick. |
@@ -162,21 +171,22 @@ state until v0.19.
 | `scene.Color3Value` | 12 | 4 | yes | yes | . | . | The colour stored by a `Color3Value` instance. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
-| `scene.EditableImage` | 40 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with their width and height, plus a revision the client watches to know when to re-upload the texture. |
-| `scene.EditableMesh` | 160 | 8 | yes | . | . | . | Script-built geometry: positions, normals, UVs, colours, alphas and indices, plus a revision the client watches to know when to re-upload the mesh. |
+| `scene.CustomMeshLOD` | 32 | 4 | yes | . | . | . | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.AutoMeshLOD` artifact and valid slots take precedence. |
+| `scene.EditableImage` | 56 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes. |
+| `scene.EditableMesh` | 176 | 8 | yes | . | . | . | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
+| `scene.Gravity` | 12 | 4 | yes | yes | . | . | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
 | `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
 | `scene.JointInstance` | 80 | 8 | yes | yes | . | . | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld. |
-| `scene.LevelOfDetail` | 32 | 4 | yes | . | . | . | The coarser versions of a part's geometry: up to three extra mesh names, the triangle fraction each keeps, how the levels were produced, and the projected area per triangle `SelectLevel` targets. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
-| `scene.LightingService` | 56 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
+| `scene.LightingService` | 64 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
 | `scene.LocalPlayer` | 8 | 8 | yes | yes | . | . | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property. |
 | `scene.LocalTransparency` | 4 | 4 | yes | . | . | . | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching. |
 | `scene.MaterialCatalogue` | 80 | 8 | yes | . | . | . | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved. |
 | `scene.MaterialRef` | 8 | 4 | yes | . | . | . | On a `Material` instance: which material asset it names and which shader draws the parts wearing it. `ResolveMaterials` reads it onto every such part. |
-| `scene.MeshCatalogue` | 112 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
+| `scene.MeshCatalogue` | 224 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
 | `scene.Motion` | 24 | 4 | yes | yes | . | 12 | Linear and angular velocity in world space. Physics integrates it every tick for every body carrying `Simulated`; gravity and the control pass write it. |
 | `scene.NetworkOwner` | 8 | 8 | yes | yes | . | . | Which `Player` simulates this body; a null handle means the server does. `ReclaimAbandonedOwnership` scans it every tick and clears owners that have gone. |
 | `scene.NumberValue` | 8 | 8 | yes | yes | . | . | The double-precision number stored by a `NumberValue` instance. |
@@ -189,21 +199,24 @@ state until v0.19.
 | `scene.PlayerRespawn` | 8 | 8 | yes | yes | . | . | Present only between losing a character and gaining the next, and holds the tick `UpdateRespawns` will spawn the replacement on. |
 | `scene.PlayerTeam` | 8 | 8 | yes | yes | . | . | On a `Player`: which `Team` instance it belongs to. A player on no team simply has no row. |
 | `scene.PlayersService` | 24 | 8 | yes | yes | . | . | On the single `Players` service instance: the admission cap, the next auto-assigned user id, the default respawn delay, and whether characters load automatically. |
-| `scene.Portal` | 16 | 8 | yes | yes | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
+| `scene.Portal` | 16 | 8 | yes | . | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
+| `scene.PortalBodyView` | 232 | 8 | yes | . | . | . | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes. |
 | `scene.PortalProxy` | 8 | 8 | yes | yes | . | . | A piece of the far room, made and unmade inside a single tick, so a body standing in a portal has the other side's floor under it. Never replicated. |
-| `scene.PortalTransit` | 8 | 4 | yes | yes | . | . | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body. |
+| `scene.PortalTransit` | 36 | 4 | yes | yes | . | . | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body. |
 | `scene.PortalTransitSeen` | 4 | 4 | yes | yes | . | . | Which `PortalTransit::Serial` this viewer has already snapped its interpolation for, so one crossing is corrected once and never twice. |
 | `scene.PostProcessing` | 4 | 4 | yes | . | . | . | Resource: the fragment shader that replaces the engine's own tonemap for this world. An invalid name leaves the default pass in place. |
 | `scene.PreviousTransform` | 28 | 4 | yes | yes | . | . | Where `Transform::Frame` stood when the current tick began. The presentation pass blends between the two so drawing stays smooth between ticks. |
 | `scene.PublishedCatalogue` | 24 | 8 | yes | . | . | . | Resource: the published mesh names in manifest order, as the content pump saw them. It backs `ContentService:GetPublishedMeshes`. |
+| `scene.RenderEffects` | 88 | 4 | yes | . | . | . | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state. |
 | `scene.Rendered` | 4 | 1 | yes | yes | . | . | Marks exactly the entities a draw list should contain, added and removed only by `SyncRendered`; the `Mark` byte is that walk's own scratch and is zero between passes. |
 | `scene.RenderedSignature` | 16 | 8 | yes | . | . | . | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved. |
-| `scene.RigidBody` | 16 | 4 | yes | yes | . | . | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact. |
+| `scene.RigKeypoint` | 36 | 4 | yes | . | . | . | One authored named semantic point under a skeleton: its joint slot and joint-local frame. The data-rig export derives its current world frame from the named joint pose. |
+| `scene.RigidBody` | 40 | 4 | yes | yes | . | . | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact. |
 | `scene.Service` | 4 | 1 | yes | yes | . | . | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup. |
 | `scene.ShaderLens` | 32 | 4 | yes | . | . | . | A placed spherical HDR image-warp region. Its lens shader name and numeric controls are authored world data; the renderer resolves a bounded value snapshot before presentation. |
 | `scene.ShaderSource` | 40 | 8 | yes | . | . | . | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild. |
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
-| `scene.Skeleton` | 8 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
+| `scene.Skeleton` | 12 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
 | `scene.SkyboxCompute` | 52 | 4 | yes | . | . | . | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture. |
 | `scene.SkyboxTextures` | 28 | 4 | yes | . | . | . | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded. |
 | `scene.Sound` | 20 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
@@ -228,7 +241,7 @@ state until v0.19.
 | `scene.Vector3Value` | 12 | 4 | yes | yes | . | . | The vector stored by a `Vector3Value` instance. |
 | `scene.VectorField2D` | 32 | 4 | yes | yes | . | . | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
 | `scene.VectorField3D` | 52 | 4 | yes | yes | . | . | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
-| `scene.Visual` | 32 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
+| `scene.Visual` | 40 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
 | `scene.Volume` | 60 | 4 | yes | yes | . | . | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer. |
 | `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
@@ -238,9 +251,14 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `script.CodeSourceContainerSelector` | 1 | 1 | yes | yes | . | . | Which language container the script actually runs, and the one part of the script trio a game may set at run time. Absent means Luau. |
+| `script.DataCaptureDriver` | 8 | 8 | yes | . | . | . | Per-world singleton holding the scene's retained data-capture callback. The client invokes it only at a paused capture barrier, and snapshot restore clears the VM-local handle. |
 | `script.Disabled` | 0 | 1 | . | . | . | . | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all. |
+| `script.EventNarratives` | 152 | 8 | yes | . | . | . | Per-world canonical bundle of validated script-declared narrative records, retained for data-scene reads and checkpoint serialization. |
 | `script.JavaScriptSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column. |
 | `script.LuaSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference. |
+| `script.PortalContactRequests` | 32 | 8 | yes | . | . | . | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts. |
+| `script.PortalPlayerInput` | 2136 | 8 | yes | . | yes | . | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue. |
+| `script.PortalTransfers` | 104 | 8 | yes | . | . | . | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages. |
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
 | `script.SourceCache` | 32 | 8 | yes | . | . | . | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap. |
@@ -255,7 +273,8 @@ state until v0.19.
 | `world.Inbox` | 24 | 8 | yes | . | . | . | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to. |
 | `world.Outbox` | 40 | 8 | yes | . | . | . | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them. |
 | `world.Replica` | 12 | 4 | yes | . | yes | . | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus. |
+| `world.TickExchangeEndpoints` | 24 | 8 | yes | . | . | . | Named tick-exchange channels opened by this world, with incarnations retained across snapshots to reject stale deliveries. |
 
 ---
 
-181 components registered by the engine, 0 without a purpose line.
+200 components registered by the engine, 0 without a purpose line.

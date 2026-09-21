@@ -20,6 +20,8 @@
 // beat time to a script would be a guess with a number's confidence. The panel
 // says so rather than letting a reader assume otherwise.
 
+#include "TimelineBar.hpp"
+
 #include <engine/core/FrameGraph.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Fonts.hpp>
@@ -789,11 +791,11 @@ namespace studio {
 		for (const FrameSpan *span : spans) {
 			const uint32_t depth = span->Depth >= shallowest ? span->Depth - shallowest : 0;
 			rows = std::max(rows, depth + 1);
-			const float left =
-				origin.x + std::clamp((span->StartMilliseconds - first) * scale, 0.0f, graphWidth);
-			const float right = std::clamp(
-				left + std::max(span->Milliseconds * scale, 1.0f), left + 1.0f, origin.x + graphWidth
+			const TimelineBar bar = FitTimelineBar(
+				(span->StartMilliseconds - first) * scale, span->Milliseconds * scale, graphWidth
 			);
+			const float left = origin.x + bar.Left;
+			const float right = origin.x + bar.Right;
 			const float top = origin.y + static_cast<float>(depth) * rowHeight;
 			const ImVec2 upper(left, top);
 			const ImVec2 lower(right, top + rowHeight);

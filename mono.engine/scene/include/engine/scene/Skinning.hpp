@@ -159,6 +159,27 @@ namespace engine::scene {
 		// Explicit padding, for the reason `Components.hpp` opens with: this
 		// component's object representation reaches a file.
 		uint8_t Reserved[2] = {};
+
+		// Cumulative uniform scale of authored bone and clip-local translations.
+		// Palettes remove it before the instance size applies it to mesh vertices.
+		float PoseScale = 1.0f;
+	};
+
+	// One authored semantic point relative to a skeleton joint.
+	//
+	// The point is an instance under its rig, rather than a list hidden on the
+	// skeleton, so an author can name, save and inspect each training label. Its
+	// frame is in the named joint's local coordinates. The exported world frame
+	// is derived from that joint's current pose and is never stored twice.
+	struct RigKeypoint {
+		// Stable authored label for this semantic rig point.
+		core::Name Keypoint;
+		// Point pose in the selected joint's local coordinates.
+		core::CFrame Frame;
+		// Mesh-local skeleton joint that owns Frame.
+		uint16_t Joint = NO_JOINT;
+		// Explicit padding retained for the serialized keypoint layout.
+		uint8_t Reserved[2] = {};
 	};
 
 	// Fills every `Bone::WorldFrame` under every `Skeleton`.
@@ -231,4 +252,9 @@ namespace engine::scene {
 	//
 	// @return The class id.
 	ecs::ClassId BoneClass();
+
+	// The `RigKeypoint` class id, registering the scene tree on first call.
+	//
+	// @return The class id.
+	ecs::ClassId RigKeypointClass();
 }

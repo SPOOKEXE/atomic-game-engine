@@ -210,6 +210,11 @@ namespace engine::replication {
 		// @return `true` when nothing new would be recorded for it.
 		bool Holds(uint64_t tick) const;
 
+		// Records a fully applied tick even when it contains no pose rows.
+		// Zero means the joining snapshot has not landed. Duplicate/older ticks
+		// leave the clock unchanged; Record also calls this for ordinary poses.
+		void RecordTick(uint64_t tick);
+
 		// Records where one entity was at one tick.
 		//
 		// **A pose per entity per tick, taken from the world after the tick was
@@ -236,8 +241,28 @@ namespace engine::replication {
 		//
 		// @param tick   The tick the pose is the state of.
 		// @param entity Whose pose it is.
+		// A cumulative coordinate chart for a pose. Hosts use this for a body
+		// carried between discontinuous spaces, while ordinary replicated poses
+		// leave it absent.
+		struct Chart {
+			// The pose in the chart's coordinate space.
+			core::CFrame Frame;
+			// The cumulative scale applied by the chart.
+			float Scale = 1.0f;
+			// The chart revision used to identify matching spaces.
+			uint32_t Serial = 0;
+		};
+
+		// @param tick   The authoritative simulation tick that produced the pose.
+		// @param entity The entity the pose belongs to.
 		// @param frame  Where it was.
-		void Record(uint64_t tick, ecs::Entity entity, const core::CFrame &frame);
+		// @param chart  The pose's cumulative coordinate chart, when it has one.
+		void Record(
+			uint64_t tick,
+			ecs::Entity entity,
+			const core::CFrame &frame,
+			const std::optional<Chart> &chart = std::nullopt
+		);
 
 		// Moves the render position on by one frame.
 		//
@@ -447,6 +472,7 @@ namespace engine::replication {
 		struct Pose {
 			uint64_t Tick = 0;
 			core::CFrame Frame;
+			std::optional<Chart> CoordinateChart;
 		};
 
 		// One entity's history, as a ring so that recording a tick is a write

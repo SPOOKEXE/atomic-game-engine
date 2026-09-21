@@ -2,9 +2,10 @@
 #
 # Runs any staged Luau or TypeScript example through one launcher.
 #
-# Scene sources live in `mono.engine/examples`. TypeScript scenes are staged as
-# JavaScript, so an explicit `.ts` name is translated to its emitted `.js` name.
-# A bare stem means Luau. With no scene, the client opens Rings.luau.
+# Script scenes are staged under `examples/scripts`; authored worlds are under
+# `examples/worlds`. TypeScript scenes are staged as JavaScript, so an explicit
+# `.ts` name is translated to its emitted `.js` name. A bare stem means Luau.
+# With no scene, the client opens Rings.luau.
 #
 #   scripts/demos/run-demo.sh Terrain --stats
 #   scripts/demos/run-demo.sh Mirrors-1-world.ts --stats

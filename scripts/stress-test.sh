@@ -45,7 +45,7 @@ mkdir -p "$out"
 
 server="$build/server/server"
 harness="$build/tools/loadtest"
-scene="$build/assets/examples/$sceneName"
+scene="$build/assets/examples/scripts/$sceneName"
 
 for needed in "$server" "$harness" "$scene"; do
 	test -e "$needed" || { echo "FAIL: nothing at $needed - build first"; exit 1; }

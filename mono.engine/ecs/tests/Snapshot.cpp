@@ -307,6 +307,71 @@ TEST_CASE("the free list comes back, so restored worlds allocate alike", "[ecs]"
 	REQUIRE(after != entities[5]);
 }
 
+TEST_CASE(
+	"snapshot replay preserves future allocation order and unused page generations",
+	"[ecs][snapshot][allocation]"
+) {
+	Store source("allocation-replay");
+	std::vector<Entity> authority, predicted;
+	int replayAllocations = 20;
+	for (int index = 0; index < 8; ++index) {
+		authority.push_back(source.Create());
+		predicted.push_back(source.CreatePredicted());
+	}
+	SECTION("LIFO free slots") {
+		source.Destroy(authority[2]);
+		source.Destroy(authority[5]);
+		source.Destroy(predicted[1]);
+		source.Destroy(predicted[6]);
+	}
+	SECTION("new slots after loading over an existing world") {}
+	SECTION("unissued holes below an adopted index stay byte exact") {
+		REQUIRE(source.CreateAt(Entity{(uint64_t{9} << 32) | 30}));
+		REQUIRE(source.CreateAt(Entity{(uint64_t{9} << 32) | (engine::ecs::SparseSet::PREDICTED_BASE + 30)}));
+		replayAllocations = 40;
+	}
+	SECTION("released pages remember their source epoch") {
+		for (Entity entity : authority)
+			source.Destroy(entity);
+		for (Entity entity : predicted)
+			source.Destroy(entity);
+		(void)source.Create();
+		(void)source.CreatePredicted();
+	}
+	SECTION("released large pages keep their epoch when reached again") {
+		std::vector<Entity> extra;
+		for (uint32_t index = 8; index < engine::ecs::SparseSet::FIRST_PAGE_SIZE + 8; ++index) {
+			extra.push_back(source.Create());
+			extra.push_back(source.CreatePredicted());
+		}
+		for (Entity entity : extra) {
+			source.Destroy(entity);
+		}
+		replayAllocations = static_cast<int>(engine::ecs::SparseSet::FIRST_PAGE_SIZE + 20);
+	}
+	Store restored("previous-world");
+	for (int index = 0; index < 12; ++index) {
+		(void)restored.Create();
+		(void)restored.CreatePredicted();
+	}
+	REQUIRE(Transfer(source, restored));
+	ByteWriter original, roundtrip;
+	REQUIRE(source.Save(original));
+	REQUIRE(restored.Save(roundtrip));
+	CHECK(
+		std::equal(
+			original.Bytes().begin(),
+			original.Bytes().end(),
+			roundtrip.Bytes().begin(),
+			roundtrip.Bytes().end()
+		)
+	);
+	for (int index = 0; index < replayAllocations; ++index) {
+		CHECK(restored.Create() == source.Create());
+		CHECK(restored.CreatePredicted() == source.CreatePredicted());
+	}
+}
+
 TEST_CASE("resources and the clock come back", "[ecs]") {
 	Store source("source");
 	source.SetResource(Score{42});
@@ -718,4 +783,39 @@ TEST_CASE("clear empties the world but leaves a clock", "[ecs]") {
 	// A world with no clock is one where every system has to check for one.
 	REQUIRE(store.Time().Tick == 0);
 	REQUIRE(store.HasResource<engine::ecs::WorldTime>());
+}
+
+TEST_CASE("snapshot application can retain the receiving clock", "[ecs][snapshot-clock]") {
+	using engine::ecs::ApplyClock;
+	using engine::ecs::ApplyMode;
+	for (const auto mode : {ApplyMode::Overlay, ApplyMode::Authoritative}) {
+		for (const auto clock : {ApplyClock::RestoreSnapshot, ApplyClock::PreserveLocal}) {
+			Store source("clock.source");
+			const Entity entity = source.Create();
+			source.Set<Spot>(entity, Spot{17.0f, 0.0f});
+			source.AdvanceTick(0.5f);
+			ByteWriter snapshot;
+			source.Save(snapshot);
+
+			Store receiver("clock.receiver");
+			for (int tick = 0; tick < 11; ++tick)
+				receiver.AdvanceTick(0.25f);
+			receiver.SetFrame(0.125f, 0.5f);
+			const auto local = receiver.Time();
+			const auto expected = clock == ApplyClock::PreserveLocal ? local : source.Time();
+			ByteReader broken(snapshot.Bytes().first(snapshot.Bytes().size() / 2));
+			REQUIRE_FALSE(receiver.Apply(broken, mode, clock));
+			CHECK(receiver.Time().Tick == local.Tick);
+			CHECK(receiver.Time().Elapsed == local.Elapsed);
+
+			ByteReader valid(snapshot.Bytes());
+			REQUIRE(receiver.Apply(valid, mode, clock));
+			CHECK(receiver.Get<Spot>(entity)->X == 17.0f);
+			CHECK(receiver.Time().Tick == expected.Tick);
+			CHECK(receiver.Time().Elapsed == expected.Elapsed);
+			CHECK(receiver.Time().Delta == expected.Delta);
+			CHECK(receiver.Time().FrameDelta == expected.FrameDelta);
+			CHECK(receiver.Time().Alpha == expected.Alpha);
+		}
+	}
 }

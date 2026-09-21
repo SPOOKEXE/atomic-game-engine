@@ -240,7 +240,8 @@ namespace engine::ui {
 			const core::Vector3 &sun,
 			uint32_t width,
 			uint32_t height,
-			bool alwaysOnTop
+			bool alwaysOnTop,
+			render::WorldColourTarget target = render::WorldColourTarget::Display
 		) override;
 
 		// Records this frame's draw lists. See `FrameOverlayHook`.

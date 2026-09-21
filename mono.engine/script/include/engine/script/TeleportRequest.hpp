@@ -24,22 +24,31 @@ namespace engine::ecs {
 namespace engine::script {
 	class Runtime;
 
+	// Authority outcomes for one teleport request.
 	enum class TeleportRequestDecision : uint8_t {
 		NotProcessed,
 		Denied,
 		Processed,
 	};
 
+	// Returns the stable script-visible spelling of an authority outcome.
 	std::string_view TeleportRequestDecisionName(TeleportRequestDecision decision);
 
+	// Client or authority request to move one player to a named place.
 	struct TeleportRequest {
+		// Player whose authority or replica initiated the request.
 		ecs::Entity Player;
+		// Destination place name.
 		std::string Place;
+		// VM-neutral serialized value.
 		ScriptValue Data;
 	};
 
+	// Authority response delivered to the requesting script.
 	struct TeleportRequestResult {
+		// Authority outcome that determines whether the request proceeds.
 		TeleportRequestDecision Decision = TeleportRequestDecision::NotProcessed;
+		// Human-readable refusal detail supplied by the authority.
 		std::string Message;
 	};
 
@@ -47,27 +56,38 @@ namespace engine::script {
 	// `Id` is retained until this arrives, so an unsolicited or repeated network
 	// reply cannot call a script.
 	struct TeleportResult {
+		// Locally assigned request id used to reject unsolicited replies.
 		uint64_t Id = 0;
+		// Authority decision.
 		TeleportRequestDecision Decision = TeleportRequestDecision::NotProcessed;
+		// Authority message.
 		std::string Message;
 	};
 
 	// The one callback assigned to a world's TeleportService.
 	struct TeleportRequestHandler {
+		// VM-owned callback handle.
 		HostCallback Callback;
 	};
 
 	// A client-local request waiting for `Connector::SendUser`. It is separate
 	// from the authority handler because a replica may ask but may never act.
 	struct PendingTeleportRequest {
+		// Stable identifier.
 		uint64_t Id = 0;
+		// Destination place name.
 		std::string Place;
+		// VM-neutral serialized value.
 		std::vector<std::byte> Data;
 	};
 
+	// A teleport  request outbox value.
 	struct TeleportRequestOutbox {
+		// Requests awaiting transport.
 		std::vector<PendingTeleportRequest> Pending;
+		// Awaiting results.
 		std::vector<uint64_t> AwaitingResults;
+		// Next local request identifier.
 		uint64_t NextId = 1;
 	};
 
@@ -81,8 +101,11 @@ namespace engine::script {
 		ecs::Store &store, std::string_view place, const ScriptValue &data, std::string &failure
 	);
 
+	// Returns client requests that still need connector transport.
 	std::span<const PendingTeleportRequest> PendingTeleportRequests(const ecs::Store &store);
+	// Moves queued requests into the result-waiting set after transport accepts them.
 	void MarkTeleportRequestSent(ecs::Store &store);
+	// Accepts teleport result.
 	bool AcceptTeleportResult(ecs::Store &store, uint64_t id);
 
 	// Queues an authoritative teleport and removes the player only after the

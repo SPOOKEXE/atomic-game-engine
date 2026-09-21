@@ -9,6 +9,7 @@
 #include <engine/assets/Animation.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
@@ -32,6 +33,7 @@
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -882,6 +884,27 @@ TEST_CASE("javascript reaches the same enum through its own spelling", "[scripti
 	CHECK_FALSE(runtime->Run("Instance.new('Part').AlphaMode = Enum.EasingStyle.Linear;"));
 }
 
+TEST_CASE("an absent name property round trips through both languages", "[scripting][name]") {
+	RegisterClasses();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store(language == Language::Luau ? "name_nil_luau" : "name_null_js");
+		const auto runtime = MakeRuntime(store, language);
+		const char *source = language == Language::Luau ? R"(
+			local part = Instance.new('MeshPart')
+			part.MeshId = 'engine.Cube'
+			part.MeshId = nil
+			assert(part.MeshId == nil, 'nil name did not round-trip')
+		)"
+														: R"(
+			const part = Instance.new('MeshPart');
+			part.MeshId = 'engine.Cube';
+			part.MeshId = null;
+			if (part.MeshId !== null) throw new Error('null name did not round-trip');
+		)";
+		MustRun(*runtime, source);
+	}
+}
+
 TEST_CASE("surface appearance properties bind in both languages", "[scripting][surface]") {
 	RegisterClasses();
 
@@ -1380,6 +1403,69 @@ TEST_CASE("a script paints an image and reads its size back", "[scripting]") {
 	)");
 }
 
+TEST_CASE("both script languages copy editable image RGBA buffers", "[scripting][editableimage]") {
+	RegisterClasses();
+	engine::scene::EditableImageClass();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store(language == Language::Luau ? "editable_image_buffer_luau" : "editable_image_buffer_js");
+		const auto runtime = MakeRuntime(store, language);
+		const char *source = language == Language::Luau ? R"(
+			local image = Instance.new("EditableImage")
+			image.Name = "BufferedImage"
+			assert(image:Resize(2, 2), "Resize was refused")
+			local source = buffer.create(16)
+			for offset = 0, 15 do
+				buffer.writeu8(source, offset, offset)
+			end
+			assert(image:FromBuffer(source), "FromBuffer refused RGBA8 pixels")
+			buffer.writeu8(source, 0, 255)
+			local copy = image:ToBuffer()
+			assert(typeof(copy) == "buffer" and buffer.len(copy) == 16, "ToBuffer did not return a tight buffer")
+			assert(buffer.readu8(copy, 0) == 0 and buffer.readu8(copy, 3) == 3, "FromBuffer changed RGBA order")
+			assert(buffer.readu8(copy, 8) == 8 and buffer.readu8(copy, 11) == 11, "FromBuffer changed row order")
+			buffer.writeu8(copy, 3, 255)
+			assert(buffer.readu8(image:ToBuffer(), 3) == 3, "ToBuffer aliased image pixels")
+			assert(not image:FromBuffer(buffer.create(15)), "FromBuffer accepted a short buffer")
+			assert(not image:FromBuffer(buffer.create(17)), "FromBuffer accepted a long buffer")
+			assert(not pcall(function() image:FromBuffer("not a buffer") end), "FromBuffer accepted a string")
+			image.Parent = workspace
+		)"
+														: R"(
+			const image = Instance.new('EditableImage');
+			image.Name = 'BufferedImage';
+			if (!image.Resize(2, 2)) throw new Error('Resize was refused');
+			const source = new Uint8Array(16);
+			for (let offset = 0; offset < source.length; offset++) source[offset] = offset;
+			if (!image.FromBuffer(source.buffer)) throw new Error('FromBuffer refused RGBA8 pixels');
+			source[0] = 255;
+			const copy = new Uint8Array(image.ToBuffer());
+			if (copy.length !== 16) throw new Error('ToBuffer did not return a tight buffer');
+			if (copy[0] !== 0 || copy[3] !== 3 || copy[8] !== 8 || copy[11] !== 11) {
+				throw new Error('FromBuffer changed RGBA or row order');
+			}
+			copy[3] = 255;
+			if (new Uint8Array(image.ToBuffer())[3] !== 3) throw new Error('ToBuffer aliased image pixels');
+			if (image.FromBuffer(new ArrayBuffer(15)) || image.FromBuffer(new ArrayBuffer(17))) {
+				throw new Error('FromBuffer accepted the wrong byte count');
+			}
+			let acceptedString = false;
+			try { image.FromBuffer('not a buffer'); acceptedString = true; } catch (_) {}
+			if (acceptedString) throw new Error('FromBuffer accepted a string');
+			image.Parent = workspace;
+		)";
+		MustRun(*runtime, source);
+
+		const Entity image = InScene(store, "BufferedImage");
+		const auto *pixels = store.Get<engine::scene::EditableImage>(image);
+		REQUIRE(pixels != nullptr);
+		CHECK(pixels->Pixels[0] == 0);
+		CHECK(pixels->Pixels[3] == 3);
+		CHECK(pixels->Pixels[8] == 8);
+		CHECK(pixels->Pixels[11] == 11);
+		CHECK(pixels->Revision == 2);
+	}
+}
+
 TEST_CASE("DrawRectangle refuses an instance that is not an EditableImage", "[scripting]") {
 	RegisterClasses();
 	Store store("script_test");
@@ -1605,6 +1691,110 @@ TEST_CASE("client scripts add ESC menu actions and receive their activation", "[
 					: "if (!SettingsService.RemoveMenuAction('respawn')) throw new Error('remove failed');\n"
 			);
 			CHECK(engine::gui::SettingsMenuActionsOf(store).empty());
+		}
+	}
+}
+
+TEST_CASE("data-factory actions commit at one paused script tick", "[scripting][settings][data-factory]") {
+	RegisterClasses();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		SECTION(language == Language::Luau ? "luau" : "javascript") {
+			engine::world::Universe universe;
+			engine::world::WorldSettings settings;
+			settings.Name = engine::core::Name("script-actions");
+			const engine::world::WorldId world = universe.Create(settings);
+			REQUIRE(world.IsValid());
+
+			std::shared_ptr<Runtime> runtime;
+			universe.Enter(world, [&](Store &store, engine::ecs::Scheduler &systems) {
+				RuntimeLimits limits;
+				limits.Role = HostRole::OfClient();
+				runtime = MakeRuntime(store, language, limits);
+				REQUIRE(runtime != nullptr);
+				MustRun(
+					*runtime,
+					language == Language::Luau ? R"(
+							local activated = SettingsService:SetMenuAction('respawn', 'Respawn Character')
+							activated:Connect(function(name) workspace.Name = workspace.Name .. name end)
+						)"
+											   : R"(
+							const activated = SettingsService.SetMenuAction('respawn', 'Respawn Character');
+							activated.Connect((name) => { workspace.Name += name; });
+						)"
+				);
+				systems.Add(
+					"script-actions-heartbeat", engine::ecs::Phase::Simulation, [runtime](Store &inner) {
+						if (!runtime->Heartbeat(inner.Time().Delta))
+							throw std::runtime_error(runtime->LastError());
+					}
+				);
+			});
+
+			engine::world::DataFactorySession session(universe);
+			session.SetPauseParticipant(
+				[](engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+					return true;
+				}
+			);
+			session.SetActionExecutor([&](engine::world::Universe &host,
+										  engine::world::WorldId target,
+										  std::span<const engine::world::DataFactoryAction> actions,
+										  engine::world::DataFactoryActionCommit &commit,
+										  std::string &detail) {
+				std::vector<engine::core::Name> accepted;
+				bool valid = host.Enter(target, [&](const Store &store) {
+					const auto available = engine::gui::SettingsMenuActionsOf(store);
+					for (const engine::world::DataFactoryAction &action : actions) {
+						const engine::core::Name id(action.Name);
+						if (std::ranges::find(available, id, &engine::gui::SettingsMenuAction::Id) ==
+							available.end()) {
+							detail = "unsupported action: " + action.Name;
+							return;
+						}
+						accepted.push_back(id);
+					}
+				}) == engine::world::WorldStatus::Ok;
+				if (!valid || accepted.size() != actions.size()) return false;
+				if (!runtime->PrepareSettingsMenuActions(accepted)) {
+					detail = "runtime could not reserve action batch";
+					return false;
+				}
+				commit = [runtime, actions = std::move(accepted)]() noexcept {
+					runtime->CommitSettingsMenuActions(actions);
+				};
+				return true;
+			});
+
+			REQUIRE(
+				session.Pause("script-actions", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+				engine::world::DataFactoryStatus::Ok
+			);
+			const engine::world::DataFactoryAction action{"respawn"};
+			REQUIRE(
+				session.Step("script-actions", {}, 0, 1, std::span(&action, 1)).Status ==
+				engine::world::DataFactoryStatus::Ok
+			);
+			CHECK(universe.StatisticsOf(world).Ticks == 1);
+			universe.Enter(world, [](const Store &store) {
+				const Entity workspace = engine::scene::WorkspaceOf(store);
+				CHECK(store.InstanceNameOf(workspace) == engine::core::Name("Workspacerespawn"));
+			});
+
+			// A non-suspended target is refused before it can consume a manual
+			// barrier. The executor still prepares its deferred batch, so this also
+			// proves that a rejected step does not run the commit.
+			REQUIRE(
+				universe.SetState(world, engine::world::WorldState::Active) == engine::world::WorldStatus::Ok
+			);
+			CHECK(
+				session.Step("script-actions", {}, 1, 2, std::span(&action, 1)).Status ==
+				engine::world::DataFactoryStatus::RestoreIncomplete
+			);
+			CHECK(universe.StatisticsOf(world).Ticks == 1);
+			universe.Enter(world, [](const Store &store) {
+				const Entity workspace = engine::scene::WorkspaceOf(store);
+				CHECK(store.InstanceNameOf(workspace) == engine::core::Name("Workspacerespawn"));
+			});
 		}
 	}
 }

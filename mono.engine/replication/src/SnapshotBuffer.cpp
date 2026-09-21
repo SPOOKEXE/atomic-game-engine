@@ -58,22 +58,8 @@ namespace engine::replication {
 		}
 	}
 
-	void SnapshotBuffer::Record(uint64_t tick, ecs::Entity entity, const core::CFrame &frame) {
-		if (tick == 0) {
-			// Zero is what `Replica::Applied` reads before the joining snapshot
-			// has landed, so it names no state at all.
-			return;
-		}
-
-		// **The two exclusions, and they are the same rule stated twice.** An
-		// entity in the predicted range was minted by this client and the server
-		// has never heard of it; the nominated one is the local player, which is
-		// run ahead precisely so the input does not feel delayed. Delaying either
-		// is the lag prediction exists to remove, put straight back.
-		if (entity == Predicted_ || ecs::Store::IsPredicted(entity)) {
-			return;
-		}
-
+	void SnapshotBuffer::RecordTick(uint64_t tick) {
+		if (tick == 0) return;
 		if (!Started || tick > Newest_) {
 			if (!Started) {
 				// The clock starts a full delay behind, rather than at the tick
@@ -110,6 +96,27 @@ namespace engine::replication {
 			Stats_.Ticks++;
 			Prune();
 		}
+	}
+
+	void SnapshotBuffer::Record(
+		uint64_t tick, ecs::Entity entity, const core::CFrame &frame, const std::optional<Chart> &chart
+	) {
+		if (tick == 0) {
+			// Zero is what `Replica::Applied` reads before the joining snapshot
+			// has landed, so it names no state at all.
+			return;
+		}
+
+		// **The two exclusions, and they are the same rule stated twice.** An
+		// entity in the predicted range was minted by this client and the server
+		// has never heard of it; the nominated one is the local player, which is
+		// run ahead precisely so the input does not feel delayed. Delaying either
+		// is the lag prediction exists to remove, put straight back.
+		if (entity == Predicted_ || ecs::Store::IsPredicted(entity)) {
+			return;
+		}
+
+		if (!Started || tick > Newest_) RecordTick(tick);
 
 		Track &track = Tracks[entity];
 		if (track.Ring.empty()) {
@@ -123,7 +130,7 @@ namespace engine::replication {
 			return;
 		}
 
-		track.Ring[track.Head] = Pose{tick, frame};
+		track.Ring[track.Head] = Pose{tick, frame, chart};
 		track.Head = (track.Head + 1) % track.Ring.size();
 		track.Count = std::min(track.Count + 1, track.Ring.size());
 	}
@@ -258,12 +265,32 @@ namespace engine::replication {
 			const double span = static_cast<double>(after.Tick) - static_cast<double>(before.Tick);
 			const double alpha = (RenderTicks - static_cast<double>(before.Tick)) / span;
 
+			core::CFrame mapped = before.Frame;
+			const Chart beforeChart = before.CoordinateChart.value_or(Chart{});
+			if (after.CoordinateChart && beforeChart.Serial != after.CoordinateChart->Serial &&
+				beforeChart.Scale > 0.0f && after.CoordinateChart->Scale > 0.0f) {
+				// Raw positions on either side of a chart transition may be rooms
+				// apart. Move the older endpoint through the same cumulative-map
+				// delta before blending, so the interpolation stays at the exit.
+				const float scale = after.CoordinateChart->Scale / beforeChart.Scale;
+				const auto rotation =
+					after.CoordinateChart->Frame.Rotation() * glm::conjugate(beforeChart.Frame.Rotation());
+				const core::CFrame rotationFrame(core::Vector3::Zero, rotation);
+				const auto position = after.CoordinateChart->Frame.Position -
+									  rotationFrame.VectorToWorldSpace(beforeChart.Frame.Position * scale);
+				const core::CFrame through(position, rotation);
+				mapped = core::CFrame(
+					through.PointToWorldSpace(before.Frame.Position * scale),
+					rotation * before.Frame.Rotation()
+				);
+			}
+
 			Stats_.Interpolated++;
 
 			// NLerp rather than Lerp, for the reason `CFrame` gives: consecutive
 			// received ticks are a few degrees apart at most, where the two agree
 			// to well under a pixel and one of them costs an `acos`.
-			return before.Frame.NLerp(after.Frame, static_cast<float>(alpha));
+			return mapped.NLerp(after.Frame, static_cast<float>(alpha));
 		}
 
 		// Unreachable while the two guards above hold, and cheaper to answer than

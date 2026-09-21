@@ -23,7 +23,10 @@
 //
 // @tier shared
 
+#include <engine/script/GltfSceneExport.hpp>
+
 #include <functional>
+#include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
@@ -31,11 +34,17 @@
 
 namespace engine::world {
 	class Universe;
+	class DataFactorySession;
+}
+
+namespace engine::script {
+	class DataCaptureBridge;
 }
 
 namespace engine::control {
 
 	class Surface;
+	class DataFactoryOperationLedger;
 
 	// One named group of tools, resources, or prompts a program elects to
 	// expose. The installer runs immediately and is not retained.
@@ -70,6 +79,27 @@ namespace engine::control {
 		// distinction MCP draws so a model can read the reason and try again.
 		std::function<nlohmann::json(const nlohmann::json &arguments, std::string &failure)> Call;
 	};
+
+	// The host reports capture readiness through this small value rather than
+	// discovery reaching into a renderer from the MCP thread.
+	struct DataCaptureAvailability {
+		// Whether the host has a capture bridge ready to accept tickets.
+		bool Available = false;
+		// Render channel names the current host can capture.
+		std::vector<std::string> Channels;
+		// Host supplied reason when capture is unavailable or constrained.
+		std::string Detail;
+	};
+
+	// The lifecycle rows a host can support. A headless host omits renderer
+	// dependent rows so discovery lists only callable operations.
+	struct DataFactoryToolSet {
+		// True when the host may expose only tools that require a renderer.
+		bool RenderOnly = true;
+	};
+
+	// Host callback that serializes the current frame graph or explains why it cannot.
+	using RenderGraphProvider = std::function<nlohmann::json(const nlohmann::json &, std::string &)>;
 
 	// Something a client may read without calling a tool.
 	//
@@ -169,6 +199,23 @@ namespace engine::control {
 		// @since v0.20
 		void Enable(std::span<const Feature> features);
 
+		// Supplies the host-owned capture readiness snapshot used by `negotiate`.
+		// No provider means this surface has no capture host.
+		void SetDataCaptureAvailabilityProvider(std::function<DataCaptureAvailability()> provider);
+		// Returns the latest readiness snapshot from the host-owned capture provider.
+		DataCaptureAvailability CaptureAvailability() const;
+		// Sets the host callback used to answer render graph requests.
+		void SetRenderGraphProvider(RenderGraphProvider provider);
+		// Borrows the current render graph callback; it is empty until a host registers one.
+		const RenderGraphProvider &RenderGraph() const;
+
+		// The one replay and audit ledger shared by all installed data-factory
+		// mutation tools. It is surface-local because MCP clients do not share
+		// authority across host processes.
+		std::shared_ptr<DataFactoryOperationLedger> DataFactoryOperations() const {
+			return FactoryOperations;
+		}
+
 		// Installs the tools any program with worlds can answer.
 		//
 		// **The class tree and the storage under it, which are two views of one
@@ -251,6 +298,35 @@ namespace engine::control {
 		//
 		// @since v0.19
 		void AddBuildTools();
+
+		// Installs pure capability and schema discovery for an external data
+		// factory. The result reports this surface's registered tools, while
+		// proposed operations and limits with no implementation stay explicitly
+		// unsupported rather than becoming promises by name alone.
+		//
+		// @since v0.24
+		void AddDiscoveryTools();
+
+		// Installs lifecycle tools backed by one host-owned data-factory session.
+		void AddDataFactoryTools(world::DataFactorySession &session, DataFactoryToolSet tools = {});
+		// Installs ticket submission, polling, byte reads, and release tools for the supplied bridge.
+		void AddDataCaptureTools(
+			world::DataFactorySession &session, std::shared_ptr<script::DataCaptureBridge> bridge
+		);
+
+		// Installs read-only data-scene observations for worlds owned by `universe`.
+		void AddDataSceneTools(
+			world::Universe &universe,
+			std::shared_ptr<script::DataCaptureBridge> bridge = {},
+			world::DataFactorySession *session = nullptr,
+			script::GltfMeshSource meshSource = {},
+			script::GltfTextureSource textureSource = {}
+		);
+		// Copies one camera and selected stable object poses after the lifecycle
+		// session has proven a retained all-systems-paused snapshot is still live.
+		void AddTemporalSampleTools(world::Universe &universe, world::DataFactorySession &session);
+		// Installs rig export tools, optionally fencing reads to a data-factory session revision.
+		void AddRigExportTools(world::Universe &universe, world::DataFactorySession *session = nullptr);
 
 		// Adds one resource. Later rows win, as `Add` does.
 		//
@@ -349,6 +425,9 @@ namespace engine::control {
 		std::string Name;
 		std::string Purpose;
 		std::vector<Tool> Tools;
+		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
+		RenderGraphProvider RenderGraphProviderCallback;
+		std::shared_ptr<DataFactoryOperationLedger> FactoryOperations;
 		std::vector<Resource> Resources;
 		std::vector<Prompt> Prompts;
 		bool Profiling = false;

@@ -180,6 +180,7 @@ namespace engine::physics {
 	// A lattice needs at least three waves before its eliminated border work pays
 	// for the fixed colour barriers.
 	inline constexpr size_t SOLVER_COLOR_MIN_WAVES = 3;
+	// Solvercolorminblocksperwave used by this object.
 	inline constexpr size_t SOLVER_COLOR_MIN_BLOCKS_PER_WAVE = 4;
 	// Below this many rows, the fixed colour-wave barriers do not repay their
 	// setup. The rejected decision is still cached by the exact topology key.
@@ -200,12 +201,15 @@ namespace engine::physics {
 	//
 	// @since v0.22
 	inline constexpr size_t SOLVER_ISLAND_MINIMUM = 4;
+	// Configured limit for solverislandmaximum.
 	inline constexpr size_t SOLVER_ISLAND_MAXIMUM = 1024;
 	// A huge active world already has enough chunk work. Its full exact graph is
 	// expensive to rebuild while contact pairs churn, so it retains the proven
 	// chunk path before allocating or walking island state.
 	inline constexpr size_t SOLVER_ISLAND_DISCOVERY_MAXIMUM_BODIES = 8192;
+	// Solverislandlargestsharenumerator used by this object.
 	inline constexpr size_t SOLVER_ISLAND_LARGEST_SHARE_NUMERATOR = 1;
+	// Solverislandlargestsharedenominator used by this object.
 	inline constexpr size_t SOLVER_ISLAND_LARGEST_SHARE_DENOMINATOR = 2;
 
 	// How many sweeps a worker does over its own group before rejoining.

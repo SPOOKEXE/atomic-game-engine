@@ -29,11 +29,14 @@ TEST_DEPENDS("engine.gui.adornments")
 
 using Catch::Approx;
 using engine::core::CFrame;
+using engine::core::Ray;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::render::AdornmentGeometry;
 using engine::render::AdornmentLine;
+using engine::render::AdornmentPointer;
+using engine::render::AdornmentPointerRouter;
 
 namespace {
 	struct World {
@@ -99,6 +102,68 @@ TEST_CASE("a selection box is the twelve edges of its adornee", "[render][adornm
 		std::abs(geometry.Lines()[0].To.Y),
 	});
 	CHECK(reach > 2.0f);
+}
+
+TEST_CASE("only opted-in adornments answer a ray pick", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.pick");
+	const Entity part = world.Part(Vector3::Zero, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity box = world.Adorn("SelectionBox", part);
+
+	AdornmentGeometry geometry;
+	const Ray ray{Vector3{1.01f, 1.01f, 5.0f}, Vector3{0.0f, 0.0f, -1.0f}};
+	geometry.Build(world.Data);
+	CHECK_FALSE(geometry.Pick(ray, 0.05f));
+
+	world.Data.Set(box, engine::gui::AdornmentInteraction{.Enabled = true});
+	geometry.Build(world.Data);
+	const auto hit = geometry.Pick(ray, 0.05f);
+	REQUIRE(hit);
+	CHECK(hit->Source == box);
+	CHECK(hit->Distance == Approx(3.998f).margin(0.01f));
+	CHECK_FALSE(geometry.Pick(Ray{Vector3{5.0f, 5.0f, 5.0f}, Vector3{0.0f, 0.0f, -1.0f}}, 0.05f));
+}
+
+TEST_CASE("an adornment captures each mouse button until it is released", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.pointer");
+	const Entity part = world.Part(Vector3::Zero, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity box = world.Adorn("SelectionBox", part);
+	world.Data.Set(box, engine::gui::AdornmentInteraction{.Enabled = true});
+
+	AdornmentPointerRouter router;
+	AdornmentPointer pointer;
+	pointer.Ray = Ray{Vector3{1.01f, 1.01f, 5.0f}, Vector3{0.0f, 0.0f, -1.0f}};
+	pointer.PrimaryDown = true;
+	const auto down = router.Update(world.Data, pointer, 0.05f);
+	REQUIRE(down.size() == 1);
+	CHECK(down[0].Kind == engine::gui::EventKind::InputBegan);
+	CHECK(down[0].Instance == box);
+
+	pointer.Moved = true;
+	pointer.Ray = Ray{Vector3{5.0f, 5.0f, 5.0f}, Vector3{0.0f, 0.0f, -1.0f}};
+	const auto changed = router.Update(world.Data, pointer, 0.05f);
+	REQUIRE(changed.size() == 1);
+	CHECK(changed[0].Kind == engine::gui::EventKind::MouseButton1Changed);
+	CHECK(changed[0].Instance == box);
+
+	pointer.PrimaryDown = false;
+	pointer.Moved = false;
+	const auto up = router.Update(world.Data, pointer, 0.05f);
+	REQUIRE(up.size() == 1);
+	CHECK(up[0].Kind == engine::gui::EventKind::InputEnded);
+	CHECK(up[0].Instance == box);
+
+	pointer.SecondaryDown = true;
+	pointer.Ray = Ray{Vector3{1.01f, 1.01f, 5.0f}, Vector3{0.0f, 0.0f, -1.0f}};
+	const auto rightDown = router.Update(world.Data, pointer, 0.05f);
+	REQUIRE(rightDown.size() == 1);
+	CHECK(rightDown[0].Kind == engine::gui::EventKind::MouseButton2Began);
+	CHECK(rightDown[0].Instance == box);
+
+	pointer.SecondaryDown = false;
+	const auto rightUp = router.Update(world.Data, pointer, 0.05f);
+	REQUIRE(rightUp.size() == 1);
+	CHECK(rightUp[0].Kind == engine::gui::EventKind::MouseButton2Ended);
+	CHECK(rightUp[0].Instance == box);
 }
 
 TEST_CASE("a rotated part gets a rotated box", "[render][adornmentgeometry]") {

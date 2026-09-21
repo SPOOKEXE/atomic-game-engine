@@ -7,8 +7,11 @@
 // is what can be: that each scene builds the *inputs* those passes need, in the
 // world, through the same bindings a game would use.
 
+#include <engine/assets/Texture.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -18,6 +21,7 @@
 #include <engine/gui/NodeCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
@@ -30,7 +34,12 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataCaptureDriver.hpp>
+#include <engine/script/EventNarratives.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -40,6 +49,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <numbers>
 #include <string>
@@ -66,6 +76,96 @@ using engine::scene::Visual;
 using engine::scene::WorldBounds;
 
 namespace {
+	class DemoCaptureBridge final : public engine::script::DataCaptureBridge {
+	  public:
+		enum class ReadBehavior : uint8_t { Exact, Empty, Overlong };
+
+		explicit DemoCaptureBridge(ReadBehavior behavior = ReadBehavior::Exact) : Behavior(behavior) {}
+
+		engine::script::DataCaptureBridgeCapabilities Capabilities() const override {
+			return {
+				.Available = true,
+				.Channels = {"rgb_linear_hdr"},
+				.StorageProfiles = {"lossless"},
+				.TrainingCompactLimitations = {},
+				.NoiseLimitations = {},
+				.HookRecords = {},
+				.MaximumHooks = 0,
+				.MaximumConnections = 0,
+				.MaximumBatches = 0,
+				.MaximumCaptureTickets = 0,
+				.MaximumReadbackNodes = 0,
+				.MaximumRetainedBytes = 0,
+				.MaximumPendingPumps = 0,
+				.NamedCameraSelection = false,
+				.MaximumCameraIdBytes = 0,
+				.Detail = "fixture",
+			};
+		}
+		bool Queue(
+			std::string_view owner,
+			const engine::script::DataCaptureBridgeRequest &request,
+			uint64_t &ticket,
+			std::string &
+		) override {
+			Owner = std::string(owner);
+			if (request.InstanceId != owner) return false;
+			ticket = 77;
+			return true;
+		}
+		bool Poll(
+			std::string_view owner,
+			uint64_t ticket,
+			engine::script::DataCaptureBridgePoll &poll,
+			std::string &
+		) override {
+			if (owner != Owner || ticket != 77) return false;
+			poll.Status = "ready";
+			poll.SnapshotId = "snapshot-test";
+			engine::script::DataCaptureBridgePlane plane;
+			plane.Channel = "rgb_linear_hdr";
+			plane.Status = "ready";
+			plane.Resource = "capture/77/rgb_linear_hdr";
+			plane.ByteSize = PayloadBytes;
+			poll.Planes.push_back(std::move(plane));
+			return true;
+		}
+		bool ReadPlane(
+			std::string_view owner,
+			uint64_t ticket,
+			std::string_view resource,
+			size_t offset,
+			size_t maximum,
+			std::vector<std::byte> &bytes,
+			std::string &
+		) override {
+			if (owner != Owner || ticket != 77 || resource != "capture/77/rgb_linear_hdr" ||
+				offset != ExpectedOffset || maximum == 0 || offset >= PayloadBytes)
+				return false;
+			size_t copied = std::min(maximum, PayloadBytes - offset);
+			if (Behavior == ReadBehavior::Empty) copied = 0;
+			if (Behavior == ReadBehavior::Overlong) copied++;
+			bytes.assign(copied, std::byte{1});
+			ExpectedOffset += copied;
+			ReadCount++;
+			Read = true;
+			return true;
+		}
+		bool Release(std::string_view owner, uint64_t ticket, std::string &) override {
+			Released = owner == Owner && ticket == 77 && Read && ExpectedOffset == PayloadBytes;
+			return Released;
+		}
+		void Cancel(std::string_view, uint64_t) override {}
+		bool Read = false;
+		bool Released = false;
+		size_t ReadCount = 0;
+
+	  private:
+		std::string Owner;
+		static constexpr size_t PayloadBytes = 65537;
+		ReadBehavior Behavior;
+		size_t ExpectedOffset = 0;
+	};
 
 	// Where a script's content lives now.
 	//
@@ -272,6 +372,104 @@ TEST_CASE("the rings scene builds and moves itself", "[examples][scene]") {
 	// for.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 5.0f);
+}
+
+TEST_CASE("the data factory capture request runs without a heartbeat", "[examples][scene][data]") {
+	const StagedAssets assets;
+
+	Store store("data-factory");
+	Scheduler systems;
+	auto bridge = std::make_shared<DemoCaptureBridge>();
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
+	limits.DataCapture = bridge;
+	std::shared_ptr<engine::script::Runtime> runtime;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("DataFactoryAdvancedDemo.luau"), error, &runtime, &limits));
+	REQUIRE(runtime != nullptr);
+	const auto *narratives = store.Resource<engine::script::EventNarratives>();
+	REQUIRE(narratives != nullptr);
+	REQUIRE(narratives->Bundle.Tag == engine::script::ValueTag::Map);
+	const auto records = std::find_if(
+		narratives->Bundle.Entries.begin(), narratives->Bundle.Entries.end(), [](const auto &entry) {
+			return entry.first == "records";
+		}
+	);
+	REQUIRE(records != narratives->Bundle.Entries.end());
+	REQUIRE(records->second.Tag == engine::script::ValueTag::Array);
+	CHECK(records->second.Items.size() == 3);
+	const auto field = [](const engine::script::ScriptValue &value,
+						  std::string_view name) -> const engine::script::ScriptValue * {
+		for (const auto &[key, item] : value.Entries)
+			if (key == name) return &item;
+		return nullptr;
+	};
+	const auto *observation = field(records->second.Items[0], "temporal_reference");
+	const auto *hidden = field(records->second.Items[1], "knowledge_state");
+	const auto *prediction = field(records->second.Items[2], "temporal_reference");
+	const auto *hiddenEvidence = field(records->second.Items[1], "evidence_ids");
+	REQUIRE(observation != nullptr);
+	REQUIRE(hidden != nullptr);
+	REQUIRE(prediction != nullptr);
+	REQUIRE(hiddenEvidence != nullptr);
+	CHECK(observation->Text == "observation");
+	CHECK(hidden->Text == "simulator_hidden");
+	CHECK(hiddenEvidence->Tag == engine::script::ValueTag::Array);
+	CHECK(hiddenEvidence->Items.empty());
+	CHECK(prediction->Text == "prediction");
+	const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
+	REQUIRE(driver != nullptr);
+	engine::script::HostValue snapshot(engine::script::HostTag::String);
+	snapshot.Text = "snapshot-test";
+	engine::script::HostValue none(engine::script::HostTag::Nil);
+	engine::script::HostValue queued;
+	REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, none}, queued));
+	engine::script::HostValue ticket(engine::script::HostTag::String);
+	ticket.Text = "77";
+	engine::script::HostValue ready;
+	REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, ticket}, ready));
+	bool copied = false;
+	for (const auto &[name, value] : ready.Entries)
+		if (name == "copied_payload_bytes" && value.Tag == engine::script::HostTag::Number &&
+			value.Number == 65537)
+			copied = true;
+	CHECK(copied);
+	CHECK(bridge->Read);
+	CHECK(bridge->ReadCount == 2);
+	std::string detail;
+	CHECK(bridge->Release("data-factory", 77, detail));
+	CHECK(bridge->Released);
+}
+
+TEST_CASE("the data factory demo rejects invalid capture chunks", "[examples][scene][data]") {
+	const StagedAssets assets;
+
+	for (const auto behavior :
+		 {DemoCaptureBridge::ReadBehavior::Empty, DemoCaptureBridge::ReadBehavior::Overlong}) {
+		Store store("data-factory-invalid-chunk");
+		Scheduler systems;
+		auto bridge = std::make_shared<DemoCaptureBridge>(behavior);
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		limits.DataCapture = bridge;
+		std::shared_ptr<engine::script::Runtime> runtime;
+		std::string error;
+		REQUIRE(
+			LoadScene(store, systems, ExamplePath("DataFactoryAdvancedDemo.luau"), error, &runtime, &limits)
+		);
+		REQUIRE(runtime != nullptr);
+		const auto *driver = store.Resource<engine::script::DataCaptureDriver>();
+		REQUIRE(driver != nullptr);
+		engine::script::HostValue snapshot(engine::script::HostTag::String);
+		snapshot.Text = "snapshot-test";
+		engine::script::HostValue none(engine::script::HostTag::Nil);
+		engine::script::HostValue queued;
+		REQUIRE(runtime->Invoke(driver->Callback, std::array{snapshot, none}, queued));
+		engine::script::HostValue ticket(engine::script::HostTag::String);
+		ticket.Text = "77";
+		engine::script::HostValue result;
+		CHECK_FALSE(runtime->Invoke(driver->Callback, std::array{snapshot, ticket}, result));
+	}
 }
 
 TEST_CASE("the animation scene builds rigs around one procedural buffer", "[examples][scene][animation]") {
@@ -717,16 +915,14 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// neither has a hand-written jump that can conceal this arithmetic.
 	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
 
-	// **Watched by a camera, because a player is a body and an eye.** The yaw is
-	// where a player's view direction actually lives, so a pair that turns a
-	// corner has to turn it - a body that comes out walking north under a camera
-	// still pointing west is the view snapping to a wall on the frame you cross,
-	// and W walking you sideways from then on. West is a yaw of a quarter turn
-	// under `PlaceCamera`'s convention.
+	// A camera follows the same body. West starts at a local yaw of a quarter
+	// turn; crossing the corner must carry its reference axes north so the next
+	// forward input still follows the route.
 	engine::scene::CameraController watching;
-	watching.Subject = walker;
+	store.Set(sceneCamera, engine::scene::CameraSubject{.Target = walker, .Automatic = false});
 	watching.Angles = engine::core::Vector2{0.0f, std::numbers::pi_v<float> / 2.0f};
 	store.SetResource(watching);
+	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
 
 	store.Set<engine::scene::Transform>(
 		walker, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 6.0f, 20.0f})}
@@ -793,13 +989,13 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	CHECK(store.Get<engine::scene::PortalTransit>(walker)->Serial == 1u);
 	CHECK(engine::scene::FollowPortalTransit(store));
 
-	// A yaw of zero is north, which is the way the walk carries on.
-	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+	// The carried basis faces north while retaining the user's local orbit angle.
+	CHECK(engine::scene::CameraHeading(*store.Resource<engine::scene::CameraController>()).Z < -0.999f);
 
 	// **Once, however many times it is asked.** A camera that turned again on
 	// the next frame would spin a quarter turn per frame for ever.
 	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
-	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+	CHECK(engine::scene::CameraHeading(*store.Resource<engine::scene::CameraController>()).Z < -0.999f);
 }
 
 TEST_CASE("the hallway camera and character enter its long tunnel", "[examples][scene]") {
@@ -876,6 +1072,23 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	// The two shells, end to end. These are what an eye on the plain measures.
 	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "LongFloor"))->HalfExtent.Z == Approx(16.0f));
 	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "ShortFloor"))->HalfExtent.Z == Approx(2.0f));
+
+	const auto lampRange = [&store](const char *name) {
+		const Entity fitting = InScene(store, name);
+		const Entity bulb = store.FindFirstChild(fitting, "Bulb");
+		REQUIRE(bulb != engine::ecs::NULL_ENTITY);
+		const auto *light = store.Get<engine::scene::Light>(bulb);
+		REQUIRE(light != nullptr);
+		return light->Range;
+	};
+
+	// Each lamp reaches its one-stud stub, while the pair cannot span the solid
+	// skip between them.
+	const float northRange = lampRange("LongNorthLamp");
+	const float southRange = lampRange("LongSouthLamp");
+	CHECK(northRange > zOf("LongNorthLamp") - zOf("LongSkipNorth"));
+	CHECK(southRange > zOf("LongSkipSouth") - zOf("LongSouthLamp"));
+	CHECK(northRange + southRange < zOf("LongNorthLamp") - zOf("LongSouthLamp"));
 
 	// And the panes, which are what a body measures. The west tunnel's walk is
 	// its two stubs; the east tunnel's is its two studs plus its isolated
@@ -961,12 +1174,12 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	// **Short outside, long inside, and it lands in its own subspace.** One stud
 	// into a four stud box arrives in twenty-six studs of isolated corridor.
 	const engine::core::Vector3 entered = step({20.0f, 4.0f, 1.5f}, {20.0f, 4.0f, 0.5f});
-	CHECK(entered.X == Approx(256.0f).margin(1e-3f));
+	CHECK(entered.X == Approx(54.0f).margin(1e-3f));
 	CHECK(entered.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(entered.Z == Approx(12.25f).margin(1e-3f));
 
 	// And out the far end of the box it never left.
-	const engine::core::Vector3 left = step({256.0f, 4.0f, -12.5f}, {256.0f, 4.0f, -13.5f});
+	const engine::core::Vector3 left = step({54.0f, 4.0f, -12.5f}, {54.0f, 4.0f, -13.5f});
 	CHECK(left.X == Approx(20.0f).margin(1e-3f));
 	CHECK(left.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(left.Z == Approx(-1.75f).margin(1e-3f));
@@ -1033,6 +1246,104 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 		CHECK(store.Get<engine::scene::Camera>(camera) != nullptr);
 	}
 	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("tunnel drifters stay local while switching portal legs", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("tunnels.drifters");
+	Scheduler systems;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Tunnels.luau"), error));
+	INFO(error);
+
+	const std::array<std::array<std::string_view, 3>, 4> routes{{
+		{"LongDrifter", "LongDrifterLeg2", {}},
+		{"ShortDrifter", "ShortDrifterLeg2", "ShortDrifterLeg3"},
+		{"LongLantern", "LongLanternLeg2", {}},
+		{"ShortLantern", "ShortLanternLeg2", "ShortLanternLeg3"},
+	}};
+	std::array<std::array<Entity, 3>, 4> bodies{}, bulbs{};
+	for (size_t route = 0; route < routes.size(); ++route) {
+		for (size_t leg = 0; leg < routes[route].size(); ++leg) {
+			if (routes[route][leg].empty()) continue;
+			bodies[route][leg] = InScene(store, routes[route][leg]);
+			REQUIRE(bodies[route][leg] != engine::ecs::NULL_ENTITY);
+			REQUIRE(store.Get<engine::scene::Visual>(bodies[route][leg]) != nullptr);
+			REQUIRE(store.Get<engine::scene::Transform>(bodies[route][leg]) != nullptr);
+			REQUIRE(store.Get<engine::scene::PreviousTransform>(bodies[route][leg]) != nullptr);
+			if (route >= 2) {
+				bulbs[route][leg] = store.FindFirstChild(bodies[route][leg], "Bulb");
+				REQUIRE(bulbs[route][leg] != engine::ecs::NULL_ENTITY);
+				REQUIRE(store.Get<engine::scene::Light>(bulbs[route][leg]) != nullptr);
+			}
+		}
+	}
+	bool longCrossed = false, longReturned = false, shortCrossed = false, shortThirdLeg = false;
+	bool oneVisiblePerRoute = true, lampsMatchBodies = true, faceHandoffs = true;
+	float largestStep = 0.0f;
+	// These are the source and destination face positions at each route seam.
+	// The scripted blocks switch local parts here because portal cuts use the
+	// face, rather than the centre, of the quarter-stud pane slab.
+	struct Handoff {
+		float From;
+		float To;
+	};
+	const std::array<std::array<Handoff, 2>, 4> handoffs{
+		std::array<Handoff, 2>{Handoff{14.125f, -14.125f}, Handoff{}},
+		std::array<Handoff, 2>{Handoff{1.125f, 12.875f}, Handoff{-12.875f, -1.125f}},
+		std::array<Handoff, 2>{Handoff{-14.125f, 14.125f}, Handoff{}},
+		std::array<Handoff, 2>{Handoff{-1.125f, -12.875f}, Handoff{12.875f, 1.125f}},
+	};
+	std::array<size_t, 4> activeLeg{};
+	constexpr float MAX_HANDOFF_DISTANCE = 6.0f / 60.0f + 1.0e-3f;
+	for (size_t tick = 0; tick < 430; ++tick) {
+		systems.Tick(store, 1.0f / 60.0f);
+		for (size_t route = 0; route < routes.size(); ++route) {
+			size_t visible = 0;
+			size_t visibleLeg = 0;
+			for (size_t leg = 0; leg < routes[route].size(); ++leg) {
+				const Entity body = bodies[route][leg];
+				if (body == engine::ecs::NULL_ENTITY) continue;
+				const auto *visual = store.Get<engine::scene::Visual>(body);
+				if (route >= 2) {
+					lampsMatchBodies &=
+						store.Get<engine::scene::Light>(bulbs[route][leg])->Enabled == visual->Visible;
+				}
+				if (!visual->Visible) continue;
+				++visible;
+				visibleLeg = leg;
+				if (route == 0 && leg == 1) longCrossed = true;
+				if (route == 0 && leg == 0 && longCrossed) longReturned = true;
+				if (route == 1 && leg == 1) shortCrossed = true;
+				if (route == 1 && leg == 2) shortThirdLeg = true;
+				const auto *current = store.Get<engine::scene::Transform>(body);
+				const auto *previous = store.Get<engine::scene::PreviousTransform>(body);
+				largestStep =
+					std::max(largestStep, (current->Frame.Position - previous->Frame.Position).Magnitude());
+			}
+			oneVisiblePerRoute &= visible == 1;
+			if (visible == 1 && visibleLeg != activeLeg[route]) {
+				const size_t seam = std::min(visibleLeg, activeLeg[route]);
+				const Handoff &handoff = handoffs[route][seam];
+				const bool forward = visibleLeg > activeLeg[route];
+				const auto *from = store.Get<engine::scene::Transform>(bodies[route][activeLeg[route]]);
+				const auto *to = store.Get<engine::scene::Transform>(bodies[route][visibleLeg]);
+				const float expectedFrom = forward ? handoff.From : handoff.To;
+				const float expectedTo = forward ? handoff.To : handoff.From;
+				faceHandoffs &= std::abs(from->Frame.Position.Z - expectedFrom) <= MAX_HANDOFF_DISTANCE;
+				faceHandoffs &= std::abs(to->Frame.Position.Z - expectedTo) <= MAX_HANDOFF_DISTANCE;
+				activeLeg[route] = visibleLeg;
+			}
+		}
+	}
+	CHECK(oneVisiblePerRoute);
+	CHECK(lampsMatchBodies);
+	CHECK(faceHandoffs);
+	CHECK(largestStep < 0.2f);
+	CHECK(longCrossed);
+	CHECK(longReturned);
+	CHECK(shortCrossed);
+	CHECK(shortThirdLeg);
 }
 
 TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") {
@@ -1298,84 +1609,6 @@ TEST_CASE("the node canvas scene builds a typed grouped graph", "[examples][scen
 	CHECK(first->FromNode == Name("noise"));
 	CHECK(first->ToNode == Name("remap"));
 	CHECK(first->LineColor.R == Approx(110.0f / 255.0f));
-}
-
-TEST_CASE("the fantasy HUD scene mounts Fusion and builds its local player state", "[examples][scene][gui]") {
-	const StagedAssets assets;
-
-	Store store("bladeborne_demo");
-	Scheduler systems;
-
-	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("BladeborneDemo.luau"), error);
-	INFO(error);
-	REQUIRE(loaded);
-
-	// The scene owns both modules. No global library is required for an authored
-	// game interface to use the declarative builder or replace its fixture data.
-	const Entity holder = InScene(store, "BladeborneDemo");
-	REQUIRE(holder != engine::ecs::NULL_ENTITY);
-	const Entity modules = store.FindFirstChild(holder, "BladeborneDemo");
-	REQUIRE(modules != engine::ecs::NULL_ENTITY);
-	CHECK(store.ClassOf(modules) == engine::script::ModuleScriptClass());
-	CHECK(store.ClassOf(store.FindFirstChild(modules, "Fusion")) == engine::script::ModuleScriptClass());
-	CHECK(store.ClassOf(store.FindFirstChild(modules, "DemoData")) == engine::script::ModuleScriptClass());
-	CHECK(store.ClassOf(store.FindFirstChild(modules, "HUDCommon")) == engine::script::ModuleScriptClass());
-	const Entity widgets = store.FindFirstChild(modules, "Widgets");
-	REQUIRE(widgets != engine::ecs::NULL_ENTITY);
-	CHECK(
-		store.ClassOf(store.FindFirstChild(widgets, "OnscreenWidget")) == engine::script::ModuleScriptClass()
-	);
-	CHECK(
-		store.ClassOf(store.FindFirstChild(widgets, "OnscreenButtons")) == engine::script::ModuleScriptClass()
-	);
-	CHECK(
-		store.ClassOf(store.FindFirstChild(widgets, "MinimapWidget")) == engine::script::ModuleScriptClass()
-	);
-	CHECK(
-		store.ClassOf(store.FindFirstChild(widgets, "TopRightQuestsWidget")) ==
-		engine::script::ModuleScriptClass()
-	);
-	CHECK(
-		store.ClassOf(store.FindFirstChild(widgets, "HotbarWidget")) == engine::script::ModuleScriptClass()
-	);
-	CHECK(store.ClassOf(store.FindFirstChild(widgets, "MusicWidget")) == engine::script::ModuleScriptClass());
-	CHECK(store.ClassOf(store.FindFirstChild(widgets, "TabWidget")) == engine::script::ModuleScriptClass());
-
-	Entity hud = engine::ecs::NULL_ENTITY;
-	store.Each<const engine::gui::Layer>([&](Entity entity, const engine::gui::Layer &) {
-		if (hud == engine::ecs::NULL_ENTITY && store.InstanceNameOf(entity) == Name("BladeborneHUD")) {
-			hud = entity;
-		}
-	});
-	REQUIRE(hud != engine::ecs::NULL_ENTITY);
-	CHECK(CountElements(store, "Ability1") == 1);
-	CHECK(CountElements(store, "Ability2") == 1);
-	CHECK(CountElements(store, "Ability3") == 1);
-	CHECK(CountElements(store, "Ability4") == 1);
-	CHECK(CountElements(store, "Ability5") == 1);
-	CHECK(CountElements(store, "Ability6") == 1);
-	CHECK(CountElements(store, "Minimap") == 1);
-	CHECK(CountElements(store, "QuestCard") == 1);
-	CHECK(CountElements(store, "HotbarSlot1") == 2);
-	CHECK(CountElements(store, "HotbarSlot12") == 2);
-
-	const Entity playerName = FirstElement(store, "PlayerName");
-	REQUIRE(playerName != engine::ecs::NULL_ENTITY);
-	const engine::gui::Label *name = store.Get<engine::gui::Label>(playerName);
-	REQUIRE(name != nullptr);
-	CHECK(name->Text.find("SPOOK") != std::string::npos);
-
-	engine::gui::Screen display;
-	display.Width = 1920.0f;
-	display.Height = 1080.0f;
-	CHECK(engine::gui::Layout(store, display) > 0);
-
-	const Entity ability = FirstElement(store, "Ability1");
-	REQUIRE(ability != engine::ecs::NULL_ENTITY);
-	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(ability);
-	REQUIRE(placed != nullptr);
-	CHECK(placed->Rendered);
 }
 
 TEST_CASE("the gui interaction scene mounts labels, images, and emulated buttons", "[examples][scene][gui]") {
@@ -1697,14 +1930,11 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 }
 
 namespace {
-	constexpr std::string_view PLANET_CHUNK_PREFIX = "PlanetChunk_";
-	constexpr std::string_view PLANET_MESH_PREFIX = "PlanetMesh_";
+	constexpr std::string_view PLANET_CHUNK_PREFIX = "PlanetChunk_Haven_";
+	constexpr std::string_view PLANET_MESH_PREFIX = "PlanetMesh_Haven_";
 	constexpr size_t PLANET_PATCH_RESOLUTION = 17;
-	constexpr size_t PLANET_PATCH_VERTICES =
-		PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION + 4 * (PLANET_PATCH_RESOLUTION - 1);
-	constexpr size_t PLANET_PATCH_INDICES =
-		(PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6 +
-		4 * (PLANET_PATCH_RESOLUTION - 1) * 6;
+	constexpr size_t PLANET_PATCH_VERTICES = PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION;
+	constexpr size_t PLANET_PATCH_INDICES = (PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6;
 
 	size_t PlanetChunks(Store &store) {
 		size_t chunks = 0;
@@ -1811,10 +2041,9 @@ TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", 
 	const size_t chunks = PlanetChunks(store);
 	CHECK(chunks > 6);
 	CHECK(chunks <= 6 * 64);
-	CHECK(PlanetChunksAtDepth(store, 2) > 0);
 	CHECK(PlanetChunksAtDepth(store, 3) > 0);
 
-	const Entity lutEntity = InScene(store, "PlanetColourLUT");
+	const Entity lutEntity = InScene(store, "PlanetColourLUT_Haven");
 	REQUIRE(lutEntity != engine::ecs::NULL_ENTITY);
 	const auto *lut = store.Get<engine::scene::EditableImage>(lutEntity);
 	REQUIRE(lut != nullptr);
@@ -1833,6 +2062,11 @@ TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", 
 													  const engine::scene::EditableMesh &mesh) {
 		const std::string_view meshName = store.InstanceNameOf(entity).Text();
 		if (!meshName.starts_with(PLANET_MESH_PREFIX)) {
+			return;
+		}
+		// The selector may retire a queued leaf after its mesh row was created.
+		// Only a completed mesh belongs to a current visible chunk.
+		if (mesh.Positions.empty()) {
 			return;
 		}
 
@@ -1865,8 +2099,8 @@ TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", 
 		REQUIRE(selection != nullptr);
 		CHECK(selection->Shader == Name("PlanetSurface"));
 
-		// The skirt vertices follow the 17 by 17 surface grid. The surface stays
-		// outside the base radius and every cell faces away from the origin.
+		// The stitched surface stays outside the base radius and each cell
+		// faces away from the origin.
 		const engine::core::Vector3 centre = transform->Frame.Position;
 		for (size_t vertex = 0; vertex < PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION; vertex++) {
 			const float radius = (mesh.Positions[vertex] + centre).Magnitude();
@@ -1915,10 +2149,10 @@ TEST_CASE("the planet quadtree follows the active camera", "[examples][scene][pl
 	size_t farPositiveZ = 0;
 	store.Each<const Visual>([&](Entity entity, const Visual &) {
 		const std::string_view name = store.InstanceNameOf(entity).Text();
-		if (name.starts_with("PlanetChunk_NZ_D3_")) {
+		if (name.starts_with(std::string(PLANET_CHUNK_PREFIX) + "NZ_D3_")) {
 			nearNegativeZ++;
 		}
-		if (name.starts_with("PlanetChunk_PZ_D3_")) {
+		if (name.starts_with(std::string(PLANET_CHUNK_PREFIX) + "PZ_D3_")) {
 			farPositiveZ++;
 		}
 	});
@@ -1949,9 +2183,7 @@ TEST_CASE("the planet is a pure function of its seed and tick", "[examples][scen
 	CHECK(first == second);
 }
 
-TEST_CASE(
-	"the PBR shader material demo binds every map to every mesh shader route", "[examples][scene][pbr]"
-) {
+TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples][scene][pbr]") {
 	const StagedAssets assets;
 
 	Store store("pbr.shader.material");
@@ -1962,23 +2194,23 @@ TEST_CASE(
 	INFO(error);
 	REQUIRE(loaded);
 
-	// The renderer owns material resolution, so the generic scene loader leaves
-	// it unscheduled. Resolve once here to inspect the same derived draw inputs
-	// the client's pre-render phase consumes.
-	REQUIRE(engine::scene::ResolveMaterials(store) == 3);
-
-	// Light transforms happen in the normal tick path, so let the other scene
-	// systems settle before checking the authored light rows.
+	// Each relief mesh commits through the deterministic editable-mesh barrier,
+	// so advance past the four authored transactions before inspecting their
+	// bound material routes.
 	for (size_t tick = 0; tick < 4; tick++) {
 		systems.Tick(store, 1.0f / 60.0f);
 	}
+
+	// The renderer owns material resolution, so the generic scene loader leaves
+	// it unscheduled. Resolve once here to inspect the same derived draw inputs
+	// the client's pre-render phase consumes.
+	REQUIRE(engine::scene::ResolveMaterials(store) == 0);
 
 	const std::array maps{
 		"PbrDemo_Colour",
 		"PbrDemo_Normal",
 		"PbrDemo_Roughness",
 		"PbrDemo_Occlusion",
-		"PbrDemo_Height",
 		"PbrDemo_Metalness",
 		"PbrDemo_Emissive",
 	};
@@ -1988,10 +2220,47 @@ TEST_CASE(
 		REQUIRE(image != engine::ecs::NULL_ENTITY);
 		const auto *editable = store.Get<engine::scene::EditableImage>(image);
 		REQUIRE(editable != nullptr);
-		CHECK(editable->Width == 64);
-		CHECK(editable->Height == 64);
+		CHECK(editable->Width == 256);
+		CHECK(editable->Height == 256);
 		CHECK(editable->Revision > 0);
+		if (index < 4) {
+			const auto stonePixel = editable->Pixels.begin() + (160 * 256 + 160) * 4;
+			CHECK_FALSE(std::equal(editable->Pixels.begin(), editable->Pixels.begin() + 4, stonePixel));
+		}
 		contentIds[index] = engine::scene::EditableImageContentName(store, image);
+	}
+
+	for (const char *meshName :
+		 {"DefaultPbr_ReliefMesh",
+		  "CoolStonePbr_ReliefMesh",
+		  "FillStonePbr_ReliefMesh",
+		  "WarmStonePbr_ReliefMesh"}) {
+		const Entity meshEntity = InScene(store, meshName);
+		REQUIRE(meshEntity != engine::ecs::NULL_ENTITY);
+		const auto *mesh = store.Get<engine::scene::EditableMesh>(meshEntity);
+		REQUIRE(mesh != nullptr);
+		CHECK(mesh->Positions.size() == 85 * 113);
+		CHECK(mesh->Indices.size() == 84 * 112 * 6);
+		const auto radius = [](const engine::core::Vector3 &point) { return point.Magnitude(); };
+		const auto [minimum, maximum] = std::minmax_element(
+			mesh->Positions.begin(), mesh->Positions.end(), [&](const auto &left, const auto &right) {
+				return radius(left) < radius(right);
+			}
+		);
+		REQUIRE(minimum != mesh->Positions.end());
+		REQUIRE(maximum != mesh->Positions.end());
+		CHECK(radius(*maximum) - radius(*minimum) > 0.07f);
+		const auto &a = mesh->Positions[mesh->Indices[29 * 3]];
+		const auto &b = mesh->Positions[mesh->Indices[29 * 3 + 1]];
+		const auto &c = mesh->Positions[mesh->Indices[29 * 3 + 2]];
+		CHECK((b - a).Cross(c - a).Dot(a) > 0.0f);
+	}
+
+	for (const char *partName : {"DefaultPbr", "CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
+		const Entity part = InScene(store, partName);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const auto *lod = store.Get<engine::scene::AutoMeshLOD>(part);
+		CHECK(lod == nullptr);
 	}
 
 	const auto mapsOf = [&](const char *partName) {
@@ -2003,9 +2272,9 @@ TEST_CASE(
 		CHECK(appearance->NormalMap == contentIds[1]);
 		CHECK(appearance->RoughnessMap == contentIds[2]);
 		CHECK(appearance->OcclusionMap == contentIds[3]);
-		CHECK(appearance->HeightMap == contentIds[4]);
-		CHECK(appearance->MetalnessMap == contentIds[5]);
-		CHECK(appearance->EmissiveMap == contentIds[6]);
+		CHECK_FALSE(appearance->HeightMap.IsValid());
+		CHECK(appearance->MetalnessMap == contentIds[4]);
+		CHECK(appearance->EmissiveMap == contentIds[5]);
 		CHECK(appearance->EmissiveStrength == Approx(2.2f));
 		return part;
 	};
@@ -2015,33 +2284,17 @@ TEST_CASE(
 	REQUIRE(defaultAppearance != nullptr);
 	CHECK(!defaultAppearance->Shader.IsValid());
 
-	for (const auto &[partName, shader] : std::array{
-			 std::pair{"ToonPbrTexture", "toon"},
-			 std::pair{"UnlitPbrTexture", "unlit"},
-			 std::pair{"RuntimeShaderMaps", "PbrMapSampler"},
-		 }) {
+	for (const char *partName : {"CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
 		const Entity part = mapsOf(partName);
 		const auto *appearance = store.Get<engine::scene::SurfaceAppearance>(part);
 		REQUIRE(appearance != nullptr);
-		CHECK(appearance->Shader == Name(shader));
-	}
-
-	const engine::scene::ShaderText sampler = engine::scene::ShaderTextOf(store, Name("PbrMapSampler"));
-	REQUIRE(sampler.Found);
-	for (const char *samplerName :
-		 {"colourMap",
-		  "normalMap",
-		  "roughnessMap",
-		  "occlusionMap",
-		  "heightMap",
-		  "metalnessMap",
-		  "emissiveMap"}) {
-		CHECK(sampler.Code.find(samplerName) != std::string::npos);
+		CHECK_FALSE(appearance->Shader.IsValid());
 	}
 
 	for (const auto &[lampName, kind, brightness] : std::array{
-			 std::tuple{"CoolPointLamp", engine::scene::LightKind::Point, 280.0f},
-			 std::tuple{"WarmSpotLamp", engine::scene::LightKind::Spot, 520.0f},
+			 std::tuple{"CoolPointLamp", engine::scene::LightKind::Point, 260.0f},
+			 std::tuple{"WarmSpotLamp", engine::scene::LightKind::Spot, 100.0f},
+			 std::tuple{"StoneFillLamp", engine::scene::LightKind::Point, 110.0f},
 		 }) {
 		const Entity lamp = InScene(store, lampName);
 		REQUIRE(lamp != engine::ecs::NULL_ENTITY);
@@ -2058,6 +2311,42 @@ TEST_CASE(
 		});
 		CHECK(found);
 	}
+}
+
+TEST_CASE("the packaged particle flipbook resolves without a CDN", "[examples][scene][particles]") {
+	const StagedAssets assets;
+	const std::filesystem::path path = engine::core::Paths::Assets() / "examples/effects/fox_dance.atex";
+	std::ifstream input(path, std::ios::binary | std::ios::ate);
+	REQUIRE(input.good());
+	const size_t size = static_cast<size_t>(input.tellg());
+	std::vector<std::byte> bytes(size);
+	input.seekg(0);
+	input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	REQUIRE(input.good());
+
+	engine::assets::TextureData atlas;
+	engine::core::ByteReader reader(bytes);
+	REQUIRE(engine::assets::Texture::Read(reader, atlas));
+	CHECK(atlas.IsFlipbook());
+	CHECK(atlas.FlipbookSide == 8);
+	CHECK(atlas.FlipbookFrames == 64);
+	CHECK(atlas.FlipbookFrameRate == Approx(24.0f).margin(0.1f));
+
+	Store store("particle.flipbook.packaged");
+	Scheduler systems;
+	std::shared_ptr<engine::script::Runtime> runtime;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("ParticleFlipbooks.luau"), error, &runtime));
+	REQUIRE(runtime != nullptr);
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store,
+			Name("effects/fox_dance.atex"),
+			{.Side = atlas.FlipbookSide, .Frames = atlas.FlipbookFrames, .FrameRate = atlas.FlipbookFrameRate}
+		)
+	);
+	systems.Tick(store, 1.0f / 60.0f);
+	CHECK(runtime->LastError().empty());
 }
 
 TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][scene]") {
@@ -2181,6 +2470,66 @@ TEST_CASE("the terrain stream follows the camera that is actually active", "[exa
 	// otherwise the world visibly builds far away and then deletes that work.
 	CHECK(InScene(store, "Terrain_1_0") == engine::ecs::NULL_ENTITY);
 	CHECK(InScene(store, "Terrain_0_1") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("terrain places existing and arriving characters on its spawn", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("terrain.players");
+	Scheduler systems;
+	engine::scene::RegisterSceneClasses();
+	engine::scene::InstallServices(store);
+
+	const Entity existing = engine::scene::AddPlayer(store, "Existing");
+	REQUIRE(existing != engine::ecs::NULL_ENTITY);
+	const Entity existingCharacter = engine::scene::LoadCharacter(
+		store, existing, engine::core::CFrame(engine::core::Vector3{480.0f, 120.0f, -320.0f})
+	);
+	REQUIRE(existingCharacter != engine::ecs::NULL_ENTITY);
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Terrain.luau"), error));
+	const Entity pad = InScene(store, "SpawnLocation");
+	REQUIRE(pad != engine::ecs::NULL_ENTITY);
+
+	const auto checkPlacement = [&](Entity character) {
+		const Entity root = store.FindFirstChild(character, "HumanoidRootPart");
+		REQUIRE(root != engine::ecs::NULL_ENTITY);
+		const auto *rootFrame = store.Get<engine::scene::Transform>(root);
+		const auto *rootBounds = store.Get<engine::scene::Bounds>(root);
+		const auto *padFrame = store.Get<engine::scene::Transform>(pad);
+		const auto *padBounds = store.Get<engine::scene::Bounds>(pad);
+		REQUIRE(rootFrame != nullptr);
+		REQUIRE(rootBounds != nullptr);
+		REQUIRE(padFrame != nullptr);
+		REQUIRE(padBounds != nullptr);
+		CHECK(rootFrame->Frame.Position.X == Approx(padFrame->Frame.Position.X));
+		CHECK(rootFrame->Frame.Position.Z == Approx(padFrame->Frame.Position.Z));
+		CHECK(
+			rootFrame->Frame.Position.Y ==
+			Approx(padFrame->Frame.Position.Y + padBounds->HalfExtent.Y + rootBounds->HalfExtent.Y)
+		);
+	};
+
+	// The scene visits the player that existed before its script began.
+	checkPlacement(existingCharacter);
+
+	const Entity arriving = engine::scene::AddPlayer(store, "Arriving");
+	REQUIRE(arriving != engine::ecs::NULL_ENTITY);
+	const Entity arrivingCharacter = engine::scene::LoadCharacter(
+		store, arriving, engine::core::CFrame(engine::core::Vector3{-400.0f, 90.0f, 280.0f})
+	);
+	REQUIRE(arrivingCharacter != engine::ecs::NULL_ENTITY);
+
+	// `PlayerAdded` attaches `CharacterAdded`, then observes the character that
+	// admission already created in the same tick.
+	systems.Tick(store, 1.0f / 60.0f);
+	checkPlacement(arrivingCharacter);
+
+	size_t characters = 0;
+	store.Each<const engine::scene::Character>([&](Entity, const engine::scene::Character &) {
+		characters++;
+	});
+	CHECK(characters == 2);
 }
 
 TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
@@ -2493,6 +2842,12 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	const Entity second = engine::scene::AddPlayer(store, "Player2");
 	REQUIRE(first != engine::ecs::NULL_ENTITY);
 	REQUIRE(second != engine::ecs::NULL_ENTITY);
+	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "PlayerListTestCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 7.0f, -18.0f})}
+	);
+	store.SetResource(ActiveCamera{camera});
 
 	std::string error;
 	const bool loaded = LoadScene(store, systems, ExamplePath("PlayerList.luau"), error);
@@ -2504,6 +2859,18 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	for (int tick = 0; tick < 70; tick++) {
 		systems.Tick(store, 1.0f / 60.0f);
 	}
+
+	// Camera motion used to be coupled to the list's visibility. Move the live
+	// camera through the same transform row the controls system writes, then let
+	// the scene run another tick before inspecting both private player layers.
+	const ActiveCamera *active = store.Resource<ActiveCamera>();
+	REQUIRE(active != nullptr);
+	REQUIRE(active->Entity != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		active->Entity,
+		engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{18.0f, 9.0f, -24.0f})}
+	);
+	systems.Tick(store, 1.0f / 60.0f);
 
 	// One panel per player, in that player's own container - not two in one, and
 	// not one shared.
@@ -2557,9 +2924,10 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 
 TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples][scene]") {
 	// **What a scene gets wrong about portal lighting is placement, and it is
-	// silent.** The transport itself is `engine::render::CollectLights`' and
-	// `mono.client/tests/PortalLighting.cpp` asserts it; what belongs here is
-	// that the two shipped scenes hand that pass what it needs - a linked pair
+	// silent.** The transport is the renderer's seam-light capture, and
+	// `mono.client/tests/PortalLighting.cpp` asserts its eligible portal views;
+	// what belongs here is that the two shipped scenes hand that pass what it
+	// needs - a linked pair
 	// of mouths, every lamp inside its own seam's reach, and a world dark
 	// enough that a capture of the far room measures transported light rather
 	// than the sun. A lamp authored a stud out of range would load, render,

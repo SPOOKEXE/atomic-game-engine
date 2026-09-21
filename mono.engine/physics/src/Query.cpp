@@ -1,19 +1,24 @@
 #include "ContactPairs.hpp"
+#include "ConvexQuery.hpp"
 #include "PipelineInternals.hpp"
 #include "ShapeRay.hpp"
 #include "ShapeSupport.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -23,9 +28,11 @@
 #include <engine/spatial/Query.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -76,9 +83,12 @@ namespace engine::physics {
 			ecs::Entity Owner;
 			ShapeInstance Shape;
 			bool Present = false;
+			bool BakedGeometry = false;
 		};
 
-		QueryCandidate ResolveCandidate(const ecs::Store &store, const Index &index, uint64_t id) {
+		QueryCandidate ResolveCandidate(
+			const ecs::Store &store, const Index &index, uint64_t id, bool requireQueryable = true
+		) {
 			const std::vector<ColliderRecord> &records = *index.Records;
 			const auto at = static_cast<size_t>(id);
 			if (at >= records.size()) {
@@ -91,7 +101,7 @@ namespace engine::physics {
 			if (transform == nullptr || collider == nullptr) {
 				return QueryCandidate{};
 			}
-			if (!collider->CanQuery) {
+			if (requireQueryable && !collider->CanQuery) {
 				return QueryCandidate{};
 			}
 
@@ -125,6 +135,7 @@ namespace engine::physics {
 				owner,
 				ShapeInstance{transform->Frame, collider->Extent, collider->Shape, hull, mesh},
 				true,
+				collider->Shape == scene::ShapeKind::Hull || collider->Shape == scene::ShapeKind::Mesh,
 			};
 		}
 
@@ -134,6 +145,91 @@ namespace engine::physics {
 				return false;
 			}
 			found[result.Written++] = entity;
+			return true;
+		}
+
+		bool PrimitiveContainsPoint(const ShapeInstance &shape, const core::Vector3 &point) {
+			const core::Vector3 local = shape.Frame.PointToObjectSpace(point);
+			const double x = local.X;
+			const double y = local.Y;
+			const double z = local.Z;
+			const double radius = shape.Extent.X;
+			switch (shape.Shape) {
+			case scene::ShapeKind::Box:
+				return std::abs(x) <= static_cast<double>(shape.Extent.X) &&
+					   std::abs(y) <= static_cast<double>(shape.Extent.Y) &&
+					   std::abs(z) <= static_cast<double>(shape.Extent.Z);
+			case scene::ShapeKind::Sphere:
+				return x * x + y * y + z * z <= radius * radius;
+			case scene::ShapeKind::Cylinder:
+				return std::abs(y) <= static_cast<double>(shape.Extent.Y) && x * x + z * z <= radius * radius;
+			case scene::ShapeKind::Capsule: {
+				const double axis =
+					std::clamp(y, -static_cast<double>(shape.Extent.Y), static_cast<double>(shape.Extent.Y));
+				const double offsetY = y - axis;
+				return x * x + offsetY * offsetY + z * z <= radius * radius;
+			}
+			case scene::ShapeKind::Hull:
+			case scene::ShapeKind::Mesh:
+				return false;
+			}
+			return false;
+		}
+
+		bool PrimitiveContainsBox(const ShapeInstance &shape, const core::AABB &box) {
+			for (uint8_t corner = 0; corner < 8; ++corner) {
+				const core::Vector3 point{
+					(corner & 1) == 0 ? box.Minimum.X : box.Maximum.X,
+					(corner & 2) == 0 ? box.Minimum.Y : box.Maximum.Y,
+					(corner & 4) == 0 ? box.Minimum.Z : box.Maximum.Z,
+				};
+				if (!PrimitiveContainsPoint(shape, point)) return false;
+			}
+			return true;
+		}
+
+		bool
+		PrimitiveSignedDistance(const ShapeInstance &shape, const core::Vector3 &point, float &distance) {
+			const core::Vector3 local = shape.Frame.PointToObjectSpace(point);
+			const double x = local.X;
+			const double y = local.Y;
+			const double z = local.Z;
+			const auto length = [](double first, double second, double third = 0.0) {
+				return std::sqrt(first * first + second * second + third * third);
+			};
+			double signedDistance = 0.0;
+			switch (shape.Shape) {
+			case scene::ShapeKind::Box: {
+				const double qx = std::abs(x) - shape.Extent.X;
+				const double qy = std::abs(y) - shape.Extent.Y;
+				const double qz = std::abs(z) - shape.Extent.Z;
+				if (!(shape.Extent.X >= 0.0f) || !(shape.Extent.Y >= 0.0f) || !(shape.Extent.Z >= 0.0f))
+					return false;
+				signedDistance = length(std::max(qx, 0.0), std::max(qy, 0.0), std::max(qz, 0.0)) +
+								 std::min(std::max({qx, qy, qz}), 0.0);
+				break;
+			}
+			case scene::ShapeKind::Sphere:
+				if (!(shape.Extent.X >= 0.0f)) return false;
+				signedDistance = length(x, y, z) - shape.Extent.X;
+				break;
+			case scene::ShapeKind::Cylinder: {
+				if (!(shape.Extent.X >= 0.0f) || !(shape.Extent.Y >= 0.0f)) return false;
+				const double radial = length(x, z) - shape.Extent.X;
+				const double axial = std::abs(y) - shape.Extent.Y;
+				signedDistance = length(std::max(radial, 0.0), std::max(axial, 0.0)) +
+								 std::min(std::max(radial, axial), 0.0);
+				break;
+			}
+			case scene::ShapeKind::Capsule:
+			case scene::ShapeKind::Hull:
+			case scene::ShapeKind::Mesh:
+				return false;
+			}
+			if (!std::isfinite(signedDistance) || signedDistance < -std::numeric_limits<float>::max() ||
+				signedDistance > std::numeric_limits<float>::max())
+				return false;
+			distance = static_cast<float>(signedDistance);
 			return true;
 		}
 
@@ -288,7 +384,8 @@ namespace engine::physics {
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask,
-		ecs::Entity ignore
+		ecs::Entity ignore,
+		bool includeTriggers
 	) {
 		const Indexes indexes = IndexesOf(store);
 		if (!indexes.Valid) {
@@ -315,6 +412,7 @@ namespace engine::physics {
 				if (!candidate.Present) {
 					continue;
 				}
+				if (!includeTriggers && store.Get<scene::Collider>(candidate.Owner)->Trigger) continue;
 
 				// **Skipped rather than nearest-then-compared**, which is the
 				// whole reason this parameter exists: a caster standing inside
@@ -345,9 +443,10 @@ namespace engine::physics {
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask,
-		ecs::Entity ignore
+		ecs::Entity ignore,
+		bool includeTriggers
 	) {
-		std::optional<ColliderHit> blocking = Raycast(store, ray, maxDistance, mask, ignore);
+		std::optional<ColliderHit> blocking = Raycast(store, ray, maxDistance, mask, ignore, includeTriggers);
 
 		if (maxDistance <= 0.0f) {
 			return blocking;
@@ -420,7 +519,8 @@ namespace engine::physics {
 		// onto the far one's, so the continuation starts at zero distance from it
 		// and every portal ray would report the destination's own glass as the
 		// first thing beyond the hole.
-		std::optional<ColliderHit> far = Raycast(store, beyond, beyondDistance, mask, hop.Far);
+		std::optional<ColliderHit> far =
+			Raycast(store, beyond, beyondDistance, mask, hop.Far, includeTriggers);
 		if (!far) {
 			return blocking;
 		}
@@ -437,6 +537,248 @@ namespace engine::physics {
 	) {
 		const ShapeInstance volume{core::CFrame{box.Centre()}, box.Size() * 0.5f, scene::ShapeKind::Box};
 		return OverlapExact(store, volume, box, mask, found);
+	}
+
+	void ColliderOccupancyBatch(
+		const ecs::Store &store, std::span<const core::AABB> probes, std::span<ColliderOccupancy> results
+	) {
+		const Indexes indexes = IndexesOf(store);
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		const bool stale =
+			prepared != nullptr &&
+			(prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion());
+		const size_t count = std::min(probes.size(), results.size());
+		for (size_t probeIndex = 0; probeIndex < count; ++probeIndex) {
+			ColliderOccupancy &answer = results[probeIndex];
+			answer = {};
+			if (!indexes.Valid || stale) {
+				if (stale) answer.Why = ColliderOccupancy::Reason::PhysicsStale;
+				continue;
+			}
+
+			answer.Available = true;
+			answer.Complete = true;
+			answer.Why = ColliderOccupancy::Reason::None;
+			const core::AABB &box = probes[probeIndex];
+			const auto resolveAxis = [](float minimum, float maximum, float &centre, float &extent) {
+				const double resolvedCentre =
+					(static_cast<double>(minimum) + static_cast<double>(maximum)) * 0.5;
+				const double resolvedExtent =
+					(static_cast<double>(maximum) - static_cast<double>(minimum)) * 0.5;
+				if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum ||
+					!std::isfinite(resolvedCentre) || !std::isfinite(resolvedExtent) ||
+					resolvedCentre < -std::numeric_limits<float>::max() ||
+					resolvedCentre > std::numeric_limits<float>::max() ||
+					resolvedExtent > std::numeric_limits<float>::max()) {
+					return false;
+				}
+				centre = static_cast<float>(resolvedCentre);
+				extent = static_cast<float>(resolvedExtent);
+				return true;
+			};
+			core::Vector3 centre;
+			core::Vector3 extent;
+			if (!resolveAxis(box.Minimum.X, box.Maximum.X, centre.X, extent.X) ||
+				!resolveAxis(box.Minimum.Y, box.Maximum.Y, centre.Y, extent.Y) ||
+				!resolveAxis(box.Minimum.Z, box.Maximum.Z, centre.Z, extent.Z)) {
+				answer.Available = false;
+				answer.Complete = false;
+				answer.Why = ColliderOccupancy::Reason::InvalidProbe;
+				continue;
+			}
+			const ShapeInstance volume{core::CFrame{centre}, extent, scene::ShapeKind::Box};
+			uint64_t candidates[QUERY_CANDIDATE_LIMIT];
+			for (const Index &index : indexes.Entry) {
+				const spatial::QueryResult found =
+					QueryOverlap(index, box, spatial::LayerMask::All(), std::span<uint64_t>{candidates});
+				if (found.Overflowed) {
+					answer.Complete = false;
+					answer.Why = ColliderOccupancy::Reason::CandidateOverflow;
+				}
+				for (size_t candidateIndex = 0; candidateIndex < found.Written; ++candidateIndex) {
+					const QueryCandidate candidate =
+						ResolveCandidate(store, index, candidates[candidateIndex]);
+					if (!candidate.Present) continue;
+					const scene::Collider *collider = store.Get<scene::Collider>(candidate.Owner);
+					if (collider == nullptr) continue;
+					if (collider->Shape == scene::ShapeKind::Hull ||
+						collider->Shape == scene::ShapeKind::Mesh) {
+						// Broadphase overlap is enough to make a negative answer unsafe.
+						answer.Complete = false;
+						if (answer.Why == ColliderOccupancy::Reason::None)
+							answer.Why = ColliderOccupancy::Reason::BakedGeometryUncertain;
+						continue;
+					}
+					if (!ContactBetween(volume, candidate.Shape).Touching) continue;
+					answer.OverlapFound = true;
+					if (!answer.WitnessAvailable) {
+						answer.WitnessAvailable = true;
+						answer.Witness = candidate.Owner;
+					}
+				}
+			}
+		}
+	}
+
+	void FilledColliderOccupancyBatch(
+		const ecs::Store &store,
+		std::span<const core::AABB> probes,
+		std::span<FilledColliderOccupancy> results
+	) {
+		const Indexes indexes = IndexesOf(store);
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		const bool stale =
+			prepared != nullptr &&
+			(prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion());
+		const size_t count = std::min(probes.size(), results.size());
+		for (size_t probeIndex = 0; probeIndex < count; ++probeIndex) {
+			FilledColliderOccupancy &answer = results[probeIndex];
+			answer = {};
+			if (!indexes.Valid || stale) {
+				if (stale) answer.Why = FilledColliderOccupancy::Reason::PhysicsStale;
+				continue;
+			}
+
+			const core::AABB &box = probes[probeIndex];
+			if (!std::isfinite(box.Minimum.X) || !std::isfinite(box.Minimum.Y) ||
+				!std::isfinite(box.Minimum.Z) || !std::isfinite(box.Maximum.X) ||
+				!std::isfinite(box.Maximum.Y) || !std::isfinite(box.Maximum.Z) ||
+				box.Minimum.X >= box.Maximum.X || box.Minimum.Y >= box.Maximum.Y ||
+				box.Minimum.Z >= box.Maximum.Z) {
+				answer.Why = FilledColliderOccupancy::Reason::InvalidProbe;
+				continue;
+			}
+
+			answer.Available = true;
+			answer.Complete = true;
+			answer.Why = FilledColliderOccupancy::Reason::None;
+			uint64_t candidates[QUERY_CANDIDATE_LIMIT];
+			bool candidateEvidence = false;
+			bool positiveProof = false;
+			for (const Index &index : indexes.Entry) {
+				const spatial::QueryResult found =
+					QueryOverlap(index, box, spatial::LayerMask::All(), std::span<uint64_t>{candidates});
+				if (found.Overflowed) {
+					candidateEvidence = true;
+					answer.Complete = false;
+					answer.Why = FilledColliderOccupancy::Reason::CandidateOverflow;
+				}
+				for (size_t candidateIndex = 0; candidateIndex < found.Written; ++candidateIndex) {
+					candidateEvidence = true;
+					const QueryCandidate candidate =
+						ResolveCandidate(store, index, candidates[candidateIndex]);
+					if (!candidate.Present) continue;
+					if (candidate.BakedGeometry || candidate.Shape.Shape == scene::ShapeKind::Hull ||
+						candidate.Shape.Shape == scene::ShapeKind::Mesh) {
+						answer.Complete = false;
+						answer.Why = FilledColliderOccupancy::Reason::BakedGeometryUncertain;
+						continue;
+					}
+					if (!PrimitiveContainsBox(candidate.Shape, box) || positiveProof) continue;
+
+					// A complete analytic containment proof cannot be invalidated by a
+					// second collider. The query asks whether the cell is filled, not
+					// which collider owns every point in it.
+					positiveProof = true;
+					answer.WitnessAvailable = true;
+					answer.Witness = candidate.Owner;
+				}
+			}
+			if (positiveProof) {
+				answer.Filled = true;
+				answer.Complete = true;
+				answer.Why = FilledColliderOccupancy::Reason::None;
+			} else if (candidateEvidence) {
+				answer.Complete = false;
+				if (answer.Why == FilledColliderOccupancy::Reason::None)
+					answer.Why = FilledColliderOccupancy::Reason::UnprovenCoverage;
+			} else {
+				answer.Filled = false;
+				answer.WitnessAvailable = false;
+			}
+		}
+	}
+
+	void ColliderSignedDistanceBatch(
+		const ecs::Store &store,
+		std::span<const core::Vector3> probes,
+		std::span<ColliderSignedDistance> results
+	) {
+		const Indexes indexes = IndexesOf(store);
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		const bool stale =
+			prepared != nullptr &&
+			(prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion());
+		const size_t count = std::min(probes.size(), results.size());
+		if (!indexes.Valid || stale) {
+			for (size_t index = 0; index < count; ++index) {
+				results[index] = {};
+				if (stale) results[index].Why = ColliderSignedDistance::Reason::PhysicsStale;
+			}
+			return;
+		}
+
+		std::array<QueryCandidate, QUERY_CANDIDATE_LIMIT> candidates;
+		size_t candidateCount = 0;
+		bool overflowed = false;
+		for (const Index &index : indexes.Entry) {
+			for (size_t record = 0; record < index.Records->size(); ++record) {
+				const QueryCandidate candidate = ResolveCandidate(store, index, record);
+				if (!candidate.Present) continue;
+				if (candidateCount == candidates.size()) {
+					overflowed = true;
+					continue;
+				}
+				candidates[candidateCount++] = candidate;
+			}
+		}
+
+		for (size_t probeIndex = 0; probeIndex < count; ++probeIndex) {
+			ColliderSignedDistance &answer = results[probeIndex];
+			answer = {};
+			const core::Vector3 &probe = probes[probeIndex];
+			if (!std::isfinite(probe.X) || !std::isfinite(probe.Y) || !std::isfinite(probe.Z)) {
+				answer.Why = ColliderSignedDistance::Reason::InvalidProbe;
+				continue;
+			}
+			if (overflowed) {
+				answer.Why = ColliderSignedDistance::Reason::CandidateOverflow;
+				continue;
+			}
+			if (candidateCount != 1) {
+				answer.Why = candidateCount == 0 ? ColliderSignedDistance::Reason::UnsupportedGeometry
+												 : ColliderSignedDistance::Reason::UnionUncertain;
+				continue;
+			}
+			const QueryCandidate &candidate = candidates.front();
+			if (candidate.BakedGeometry || candidate.Shape.Shape == scene::ShapeKind::Hull ||
+				candidate.Shape.Shape == scene::ShapeKind::Mesh) {
+				answer.Why = ColliderSignedDistance::Reason::BakedGeometryUncertain;
+				continue;
+			}
+			float distance = 0.0f;
+			if (!PrimitiveSignedDistance(candidate.Shape, probe, distance)) {
+				answer.Why = ColliderSignedDistance::Reason::UnsupportedGeometry;
+				continue;
+			}
+			answer.Available = true;
+			answer.DistanceMetres = distance;
+			answer.WitnessAvailable = true;
+			answer.Witness = candidate.Owner;
+			answer.Why = ColliderSignedDistance::Reason::None;
+		}
+	}
+
+	spatial::QueryResult OverlapOrientedBox(
+		const ecs::Store &store,
+		const core::CFrame &frame,
+		const core::Vector3 &halfExtent,
+		spatial::LayerMask mask,
+		std::span<ecs::Entity> found
+	) {
+		if (!(halfExtent.X >= 0.0f) || !(halfExtent.Y >= 0.0f) || !(halfExtent.Z >= 0.0f)) return {};
+		const ShapeInstance volume{frame, halfExtent, scene::ShapeKind::Box};
+		return OverlapExact(store, volume, core::OrientedBoxBounds(frame, halfExtent), mask, found);
 	}
 
 	spatial::QueryResult OverlapSphere(
@@ -554,4 +896,266 @@ namespace engine::physics {
 		}
 		return result;
 	}
+	PlacementSweep SweepPlacement(
+		const ecs::Store &store,
+		const scene::Collider &collider,
+		const core::CFrame &from,
+		const core::Vector3 &displacement,
+		const core::Vector3 &angularDisplacement,
+		ecs::Entity ignore,
+		bool blockingOnly
+	) {
+		ENGINE_PROFILE_CAT("physics.placement-sweep", core::ProfileCategory::Physics);
+		PlacementSweep answer;
+		const auto finite = [](const core::Vector3 &v) {
+			return std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z);
+		};
+		const auto rotation = from.Rotation();
+		const float norm = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
+						   rotation.w * rotation.w;
+		if (!finite(from.Position) || !finite(displacement) || !finite(angularDisplacement) ||
+			!std::isfinite(norm) || std::abs(norm - 1) > .001f || collider.Shape >= scene::ShapeKind::Mesh)
+			return answer;
+		const Indexes indexes = IndexesOf(store);
+		if (!indexes.Valid) return answer;
+		const auto *baked = scene::CollisionShapesOf(store);
+		const auto *hull =
+			baked && collider.Shape == scene::ShapeKind::Hull ? baked->FindHull(collider.Geometry) : nullptr;
+		const ShapeInstance moving{from, collider.Extent, collider.Shape, hull, nullptr};
+		const auto ended = Advanced(from, displacement, angularDisplacement, 1);
+		const ShapeInstance arrived{ended, collider.Extent, collider.Shape, hull, nullptr};
+		const auto initial = ShapeReach(moving);
+		const auto extent = initial.Size();
+		if (!finite(initial.Minimum) || !finite(initial.Maximum) || extent.X < 0 || extent.Y < 0 ||
+			extent.Z < 0 || extent.MagnitudeSquared() == 0)
+			return answer;
+		const auto final = ShapeReach(arrived);
+		const float radius = std::max(
+			(initial.Minimum - from.Position).Magnitude(), (initial.Maximum - from.Position).Magnitude()
+		);
+		const float turn = angularDisplacement.Magnitude() * radius;
+		const core::Vector3 margin{turn, turn, turn};
+		const auto envelope = initial.Union(final);
+		const core::AABB reach{envelope.Minimum - margin, envelope.Maximum + margin};
+		uint64_t candidates[QUERY_CANDIDATE_LIMIT];
+		answer.Complete = true;
+		for (const auto &index : indexes.Entry) {
+			const auto found = QueryOverlap(index, reach, collider.Mask, candidates);
+			if (found.Overflowed) answer.Complete = false;
+			for (size_t at = 0; at < found.Written; ++at) {
+				const auto candidate = ResolveCandidate(store, index, candidates[at], false);
+				if (!candidate.Present || candidate.Owner == ignore) continue;
+				const auto *other = store.Get<scene::Collider>(candidate.Owner);
+				if (other == nullptr || other->Trigger || !other->Mask.Overlaps(collider.Layer)) continue;
+				const auto hit = SweepConvexMotion(
+					moving, displacement, angularDisplacement, candidate.Shape, {}, {}, 1, true
+				);
+				if (blockingOnly && !hit.ConservativeFallback &&
+					angularDisplacement.MagnitudeSquared() < 1e-12f && displacement.Dot(hit.Normal) >= -1e-6f)
+					continue;
+				if (!hit.Hit || (answer.Hit &&
+								 (hit.Fraction > answer.Fraction || (hit.Fraction == answer.Fraction &&
+																	 candidate.Owner.Id >= answer.Owner.Id))))
+					continue;
+				answer.Hit = true;
+				answer.Fraction = hit.Fraction;
+				answer.Owner = candidate.Owner;
+				answer.Normal = hit.Normal;
+				answer.ConservativeFallback = hit.ConservativeFallback;
+			}
+		}
+		return answer;
+	}
+
+	AuthoredNavmeshPath FindAuthoredNavmeshPath(
+		ecs::Store &store,
+		const core::Vector3 &start,
+		const core::Vector3 &goal,
+		float verticalToleranceMetres
+	) {
+		ENGINE_PROFILE_CAT("physics.authored-navmesh", core::ProfileCategory::Physics);
+		AuthoredNavmeshPath answer;
+		const auto finite = [](const core::Vector3 &point) {
+			return std::isfinite(point.X) && std::isfinite(point.Y) && std::isfinite(point.Z);
+		};
+		if (!finite(start) || !finite(goal) || !std::isfinite(verticalToleranceMetres) ||
+			verticalToleranceMetres < 0.0f) {
+			answer.Why = AuthoredNavmeshPath::Reason::InvalidProbe;
+			return answer;
+		}
+		const PhysicsWorld *prepared = PreparedWorld(store);
+		if (prepared == nullptr) return answer;
+		if (prepared->StaticDirty() || store.ChangeVersion() != prepared->BroadphaseChangeVersion()) {
+			answer.Why = AuthoredNavmeshPath::Reason::PhysicsStale;
+			return answer;
+		}
+
+		struct Surface {
+			ecs::Entity Owner;
+			float MinimumX;
+			float MaximumX;
+			float MinimumZ;
+			float MaximumZ;
+			float Height;
+		};
+		const ecs::ClassId basePart = ecs::Classes::Find(core::Name("BasePart"));
+		if (!basePart.IsValid()) {
+			answer.Available = true;
+			answer.Why = AuthoredNavmeshPath::Reason::UnsupportedWalkableGeometry;
+			return answer;
+		}
+		std::array<Surface, MAX_AUTHORED_NAVMESH_SURFACES> surfaces;
+		size_t count = 0;
+		bool unsupported = false;
+		store.Each<const scene::Transform, const scene::Collider, const scene::AuthoredAffordance>(
+			[&](ecs::Entity entity,
+				const scene::Transform &transform,
+				const scene::Collider &collider,
+				const scene::AuthoredAffordance &affordance) {
+				if (!affordance.Enabled || affordance.Kind != scene::AuthoredAffordanceKind::Walkable) return;
+				if (!store.IsA(entity, basePart)) {
+					unsupported = true;
+					return;
+				}
+				const core::CFrame &frame = transform.Frame;
+				const bool horizontal = std::abs(frame.QuaternionX) <= 0.0001f &&
+										std::abs(frame.QuaternionY) <= 0.0001f &&
+										std::abs(frame.QuaternionZ) <= 0.0001f &&
+										std::abs(std::abs(frame.QuaternionW) - 1.0f) <= 0.0001f;
+				if (collider.Shape != scene::ShapeKind::Box || !horizontal || !finite(frame.Position) ||
+					!std::isfinite(collider.Extent.X) || !std::isfinite(collider.Extent.Y) ||
+					!std::isfinite(collider.Extent.Z) || collider.Extent.X <= 0.0f ||
+					collider.Extent.Y < 0.0f || collider.Extent.Z <= 0.0f) {
+					unsupported = true;
+					return;
+				}
+				if (count == surfaces.size()) {
+					unsupported = true;
+					return;
+				}
+				surfaces[count++] = {
+					entity,
+					frame.Position.X - collider.Extent.X,
+					frame.Position.X + collider.Extent.X,
+					frame.Position.Z - collider.Extent.Z,
+					frame.Position.Z + collider.Extent.Z,
+					frame.Position.Y + collider.Extent.Y
+				};
+			}
+		);
+		if (unsupported) {
+			answer.Available = true;
+			answer.Why = count == surfaces.size() ? AuthoredNavmeshPath::Reason::SurfaceLimit
+												  : AuthoredNavmeshPath::Reason::UnsupportedWalkableGeometry;
+			return answer;
+		}
+		answer.Available = true;
+		const auto contains = [&](const Surface &surface, const core::Vector3 &point) {
+			return point.X >= surface.MinimumX && point.X <= surface.MaximumX &&
+				   point.Z >= surface.MinimumZ && point.Z <= surface.MaximumZ &&
+				   std::abs(point.Y - surface.Height) <= verticalToleranceMetres;
+		};
+		auto locate = [&](const core::Vector3 &point) -> size_t {
+			for (size_t index = 0; index < count; ++index)
+				if (contains(surfaces[index], point)) return index;
+			return count;
+		};
+		const size_t source = locate(start);
+		const size_t destination = locate(goal);
+		if (source == count || destination == count) {
+			answer.Why = AuthoredNavmeshPath::Reason::EndpointUnavailable;
+			return answer;
+		}
+		std::array<int8_t, MAX_AUTHORED_NAVMESH_SURFACES> parent;
+		parent.fill(-1);
+		std::array<size_t, MAX_AUTHORED_NAVMESH_SURFACES> queue;
+		size_t head = 0;
+		size_t tail = 0;
+		queue[tail++] = source;
+		parent[source] = static_cast<int8_t>(source);
+		const auto adjacent = [](const Surface &left, const Surface &right) {
+			constexpr float epsilon = 0.0001f;
+			if (std::abs(left.Height - right.Height) > epsilon) return false;
+			const bool xEdge = std::abs(left.MaximumX - right.MinimumX) <= epsilon ||
+							   std::abs(right.MaximumX - left.MinimumX) <= epsilon;
+			const bool zEdge = std::abs(left.MaximumZ - right.MinimumZ) <= epsilon ||
+							   std::abs(right.MaximumZ - left.MinimumZ) <= epsilon;
+			return (xEdge &&
+					std::min(left.MaximumZ, right.MaximumZ) > std::max(left.MinimumZ, right.MinimumZ)) ||
+				   (zEdge &&
+					std::min(left.MaximumX, right.MaximumX) > std::max(left.MinimumX, right.MinimumX));
+		};
+		while (head < tail && parent[destination] < 0) {
+			const size_t current = queue[head++];
+			for (size_t next = 0; next < count; ++next) {
+				if (parent[next] >= 0 || !adjacent(surfaces[current], surfaces[next])) continue;
+				parent[next] = static_cast<int8_t>(current);
+				queue[tail++] = next;
+			}
+		}
+		if (parent[destination] < 0) {
+			answer.Why = AuthoredNavmeshPath::Reason::NoPath;
+			return answer;
+		}
+		std::array<size_t, MAX_AUTHORED_NAVMESH_SURFACES> route;
+		size_t routeCount = 0;
+		for (size_t node = destination;; node = static_cast<size_t>(parent[node])) {
+			route[routeCount++] = node;
+			if (node == source) break;
+		}
+		std::reverse(route.begin(), route.begin() + routeCount);
+		std::array<ecs::Entity, MAX_AUTHORED_NAVMESH_SURFACES> routeOwners;
+		for (size_t index = 0; index < routeCount; ++index)
+			routeOwners[index] = surfaces[route[index]].Owner;
+		answer.Points[answer.PointCount++] = {start.X, surfaces[source].Height, start.Z};
+		for (size_t index = 0; index + 1 < routeCount; ++index) {
+			const Surface &left = surfaces[route[index]];
+			const Surface &right = surfaces[route[index + 1]];
+			answer.Points[answer.PointCount++] = {
+				(std::max(left.MinimumX, right.MinimumX) + std::min(left.MaximumX, right.MaximumX)) * 0.5f,
+				left.Height,
+				(std::max(left.MinimumZ, right.MinimumZ) + std::min(left.MaximumZ, right.MinimumZ)) * 0.5f
+			};
+		}
+		answer.Points[answer.PointCount++] = {goal.X, surfaces[destination].Height, goal.Z};
+		// The polygons establish authored surface topology. A route becomes a
+		// traversable answer only after every straight corridor is clear in this
+		// same completed collider snapshot. This is a zero-radius surface route;
+		// an agent clearance policy has not been authored for this API. Every
+		// collider touching the corridor tube must be one of the route's own
+		// supports at the route height. A separate elevated `Walkable` box is still
+		// an obstruction, not permission to pass through it.
+		for (size_t index = 1; index < answer.PointCount; ++index) {
+			const core::Vector3 from = answer.Points[index - 1];
+			const core::Vector3 to = answer.Points[index];
+			const core::AABB corridor{
+				{std::min(from.X, to.X), from.Y, std::min(from.Z, to.Z)},
+				{std::max(from.X, to.X), from.Y + 0.05f, std::max(from.Z, to.Z)}
+			};
+			std::array<ecs::Entity, QUERY_CANDIDATE_LIMIT> candidates;
+			const spatial::QueryResult found =
+				OverlapBox(store, corridor, spatial::LayerMask::All(), std::span<ecs::Entity>{candidates});
+			if (found.Overflowed) {
+				answer.Found = false;
+				answer.PointCount = 0;
+				answer.Why = AuthoredNavmeshPath::Reason::CorridorObstructed;
+				return answer;
+			}
+			for (size_t candidate = 0; candidate < found.Written; ++candidate) {
+				const bool routeSupport =
+					std::find(routeOwners.begin(), routeOwners.begin() + routeCount, candidates[candidate]) !=
+					routeOwners.begin() + routeCount;
+				if (!routeSupport) {
+					answer.Found = false;
+					answer.PointCount = 0;
+					answer.Why = AuthoredNavmeshPath::Reason::CorridorObstructed;
+					return answer;
+				}
+			}
+		}
+		answer.Found = true;
+		answer.Why = AuthoredNavmeshPath::Reason::None;
+		return answer;
+	}
+
 }

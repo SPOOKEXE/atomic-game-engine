@@ -5,7 +5,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <studio/RenderPipelineGraph.hpp>
+#include <utility>
 
 TEST_SUITE_ID("studio.renderpipelinegraph")
 TEST_DEPENDS("engine.graph.pipelinedocument")
@@ -17,11 +19,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 26);
+	CHECK(canvas.Nodes().size() == 29);
 
-	// The final two links carry the lit colour and depth into the sky pass. Pin
-	// them by name below so this count reads as a checksum rather than a mystery.
-	CHECK(canvas.Links().size() == 54);
+	// The environment compute stages add three links before the lit colour and
+	// depth enter the sky pass. Pin the stages below so this remains a checksum.
+	CHECK(canvas.Links().size() == 58);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -34,6 +36,24 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		}
 	}
 	CHECK(sawSsao);
+	const auto depthPeel =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.depth-peel";
+		});
+	REQUIRE(depthPeel != canvas.Nodes().end());
+	CHECK_FALSE(depthPeel->Widgets.at("enabled").Flag);
+	CHECK(canvas.LinkInto(depthPeel->Id, "first-depth") != nullptr);
+	const auto meshResidency =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.mesh-residency";
+		});
+	REQUIRE(meshResidency != canvas.Nodes().end());
+	const auto deltaUpload =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.delta-upload";
+		});
+	REQUIRE(deltaUpload != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(deltaUpload->Id, "meshes") != nullptr);
 	const auto shaderLenses =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.shader-lenses";
@@ -41,15 +61,15 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	REQUIRE(shaderLenses != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(shaderLenses->Id, "colour") != nullptr);
 	CHECK(canvas.LinkInto(shaderLenses->Id, "depth") != nullptr);
-	const auto mirrorCapture =
+	const auto surfaceCapture =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.mirror-capture";
+			return node.Type == "render.pass.surface-capture";
 		});
-	REQUIRE(mirrorCapture != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(mirrorCapture->Id, "last-frame") != nullptr);
-	CHECK(canvas.LinkInto(mirrorCapture->Id, "world-state") != nullptr);
-	CHECK(mirrorCapture->Widgets.at("feedback").Text == "last-frame");
-	CHECK(mirrorCapture->Widgets.at("max-recursion").Number == 3.0);
+	REQUIRE(surfaceCapture != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "world-state") != nullptr);
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "shadow") != nullptr);
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "entities") != nullptr);
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "instances") != nullptr);
 	const auto deferredLighting =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.deferred-lighting";
@@ -98,10 +118,89 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	}
 }
 
+TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][pipeline][compositor]") {
+	studio::RegisterRenderPipelineNodeTypes();
+	const PipelineDocument basis = engine::graph::CompositorDemoDocument();
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+
+	const auto byLabel = [](nodegraph::Graph &graph, std::string_view label) -> nodegraph::Node * {
+		const auto found = std::find_if(graph.Nodes().begin(), graph.Nodes().end(), [&](const auto &node) {
+			return node.Label == label;
+		});
+		return found == graph.Nodes().end() ? nullptr : &*found;
+	};
+	nodegraph::Node *exposure = byLabel(canvas, "grade-exposure");
+	nodegraph::Node *hsv = byLabel(canvas, "grade-hsv");
+	nodegraph::Node *transform = byLabel(canvas, "frame-transform");
+	nodegraph::Node *blur = byLabel(canvas, "blur-x");
+	REQUIRE(exposure != nullptr);
+	REQUIRE(hsv != nullptr);
+	REQUIRE(transform != nullptr);
+	REQUIRE(blur != nullptr);
+	exposure->Widgets["exposure"].Number = -2.5;
+	exposure->Widgets["contrast"].Number = 1.125;
+	exposure->Widgets["gamma"].Number = 100.0;
+	hsv->Widgets["hue"].Number = -45.25;
+	transform->Widgets["translate-x"].Number = -0.125;
+	transform->Widgets["rotation"].Number = -30.5;
+	blur->Widgets["radius"].Number = 100.0;
+
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	PipelineDocument reloadedDocument;
+	engine::core::Name offender;
+	REQUIRE(Read(Write(saved), reloadedDocument, offender) == PipelineDocumentStatus::Ok);
+
+	nodegraph::Graph reloaded;
+	REQUIRE(studio::LoadRenderPipelineGraph(reloadedDocument, reloaded, error));
+	exposure = byLabel(reloaded, "grade-exposure");
+	hsv = byLabel(reloaded, "grade-hsv");
+	transform = byLabel(reloaded, "frame-transform");
+	blur = byLabel(reloaded, "blur-x");
+	REQUIRE(exposure != nullptr);
+	REQUIRE(hsv != nullptr);
+	REQUIRE(transform != nullptr);
+	REQUIRE(blur != nullptr);
+	CHECK(exposure->Widgets.at("exposure").Number == -2.5);
+	CHECK(exposure->Widgets.at("contrast").Number == 1.125);
+	CHECK(exposure->Widgets.at("gamma").Number == 8.0);
+	CHECK(hsv->Widgets.at("hue").Number == -45.25);
+	CHECK(transform->Widgets.at("translate-x").Number == -0.125);
+	CHECK(transform->Widgets.at("rotation").Number == -30.5);
+	CHECK(blur->Widgets.at("radius").Number == 32.0);
+}
+
 TEST_CASE(
-	"mirror feedback and its bounded recursion are saved as node policy", "[studio][pipeline][mirror]"
+	"an authored mirror capture keeps its feedback policy through a canvas round trip",
+	"[studio][pipeline][mirror]"
 ) {
-	const PipelineDocument basis = DefaultPbrDocument();
+	PipelineDocument basis = DefaultPbrDocument();
+	basis.Record({.Kind = EditKind::Enable, .Name = engine::core::Name("surface-capture"), .Enabled = false});
+	basis.Record(
+		{.Kind = EditKind::AddNode,
+		 .Name = engine::core::Name("mirror-capture.policy"),
+		 .NodeKind = engine::core::Name("mirror-capture"),
+		 .Scope = NodeScope::View}
+	);
+	for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 5>{{
+			 {"last-frame", "last-frame"},
+			 {"world-entities", "world-state"},
+			 {"shadow", "shadow"},
+			 {"ordered-entities", "entities"},
+			 {"view-instances", "instances"},
+		 }}) {
+		basis.Record(
+			{.Kind = EditKind::Reads, .Target = engine::core::Name(resource), .Key = engine::core::Name(port)}
+		);
+	}
+	basis.Record(
+		{.Kind = EditKind::Writes,
+		 .Target = engine::core::Name("mirror-views"),
+		 .Key = engine::core::Name("surface")}
+	);
+
 	nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));

@@ -66,8 +66,12 @@ namespace engine::graph {
 			return "RGBA16F";
 		case ResourceFormat::R32F:
 			return "R32F";
+		case ResourceFormat::R32U:
+			return "R32U";
 		case ResourceFormat::RG32F:
 			return "RG32F";
+		case ResourceFormat::RGBA32F:
+			return "RGBA32F";
 		case ResourceFormat::D24S8:
 			return "D24S8";
 		case ResourceFormat::D32F:
@@ -118,12 +122,15 @@ namespace engine::graph {
 		case ResourceFormat::RG11B10F:
 		case ResourceFormat::RG16F:
 		case ResourceFormat::R32F:
+		case ResourceFormat::R32U:
 		case ResourceFormat::D24S8:
 		case ResourceFormat::D32F:
 			return 32;
 		case ResourceFormat::RGBA16F:
 		case ResourceFormat::RG32F:
 			return 64;
+		case ResourceFormat::RGBA32F:
+			return 128;
 		}
 		return 32;
 	}
@@ -133,6 +140,7 @@ namespace engine::graph {
 		case ResourceFormat::R8:
 		case ResourceFormat::R16F:
 		case ResourceFormat::R32F:
+		case ResourceFormat::R32U:
 		case ResourceFormat::D24S8:
 		case ResourceFormat::D32F:
 			return 1;
@@ -150,6 +158,7 @@ namespace engine::graph {
 		case ResourceFormat::RGBA16F:
 		case ResourceFormat::BC3:
 		case ResourceFormat::BC7_SRGB:
+		case ResourceFormat::RGBA32F:
 			return 4;
 		}
 		return 4;
@@ -157,6 +166,108 @@ namespace engine::graph {
 
 	bool HasAlpha(ResourceFormat format) {
 		return ChannelCount(format) == 4;
+	}
+
+	const char *Describe(ResourceAccess access) {
+		switch (access) {
+		case ResourceAccess::Automatic:
+			return "auto";
+		case ResourceAccess::Read:
+			return "read";
+		case ResourceAccess::Write:
+			return "write";
+		case ResourceAccess::ReadWrite:
+			return "read-write";
+		}
+		return "?";
+	}
+
+	bool ParseResourceAccess(std::string_view text, ResourceAccess &out) {
+		for (const ResourceAccess candidate :
+			 {ResourceAccess::Automatic,
+			  ResourceAccess::Read,
+			  ResourceAccess::Write,
+			  ResourceAccess::ReadWrite}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const char *Describe(ResourceColourSpace space) {
+		switch (space) {
+		case ResourceColourSpace::Automatic:
+			return "auto";
+		case ResourceColourSpace::Linear:
+			return "linear";
+		case ResourceColourSpace::SRGB:
+			return "srgb";
+		}
+		return "?";
+	}
+
+	bool ParseResourceColourSpace(std::string_view text, ResourceColourSpace &out) {
+		for (const ResourceColourSpace candidate :
+			 {ResourceColourSpace::Automatic, ResourceColourSpace::Linear, ResourceColourSpace::SRGB}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const char *Describe(ResourceAlphaSpace space) {
+		switch (space) {
+		case ResourceAlphaSpace::Automatic:
+			return "auto";
+		case ResourceAlphaSpace::Opaque:
+			return "opaque";
+		case ResourceAlphaSpace::Straight:
+			return "straight";
+		case ResourceAlphaSpace::Premultiplied:
+			return "premultiplied";
+		}
+		return "?";
+	}
+
+	bool ParseResourceAlphaSpace(std::string_view text, ResourceAlphaSpace &out) {
+		for (const ResourceAlphaSpace candidate :
+			 {ResourceAlphaSpace::Automatic,
+			  ResourceAlphaSpace::Opaque,
+			  ResourceAlphaSpace::Straight,
+			  ResourceAlphaSpace::Premultiplied}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const char *Describe(ResourceLifetime lifetime) {
+		switch (lifetime) {
+		case ResourceLifetime::Transient:
+			return "transient";
+		case ResourceLifetime::External:
+			return "external";
+		case ResourceLifetime::History:
+			return "history";
+		}
+		return "?";
+	}
+
+	bool ParseResourceLifetime(std::string_view text, ResourceLifetime &out) {
+		for (const ResourceLifetime candidate :
+			 {ResourceLifetime::Transient, ResourceLifetime::External, ResourceLifetime::History}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void ResourceDesc::Resolve(
@@ -175,12 +286,36 @@ namespace engine::graph {
 		outHeight = std::max(1u, viewHeight / by);
 	}
 
+	uint64_t ResourceDesc::Bytes(uint32_t viewWidth, uint32_t viewHeight) const {
+		if (Kind == ResourceKind::Camera || Kind == ResourceKind::Entities) return 0;
+		uint32_t resolvedWidth = 0;
+		uint32_t resolvedHeight = 0;
+		Resolve(viewWidth, viewHeight, resolvedWidth, resolvedHeight);
+		if (Kind == ResourceKind::Buffer && BufferStride != 0) {
+			return static_cast<uint64_t>(resolvedWidth) * resolvedHeight * BufferStride;
+		}
+
+		uint64_t pixels = 0;
+		uint32_t mipWidth = std::max(1u, resolvedWidth >> FirstMip);
+		uint32_t mipHeight = std::max(1u, resolvedHeight >> FirstMip);
+		uint32_t mipDepth = std::max(1u, Depth >> FirstMip);
+		for (uint32_t mip = 0; mip < MipCount; mip++) {
+			pixels += static_cast<uint64_t>(mipWidth) * mipHeight * mipDepth * Layers;
+			mipWidth = std::max(1u, mipWidth / 2);
+			mipHeight = std::max(1u, mipHeight / 2);
+			mipDepth = std::max(1u, mipDepth / 2);
+		}
+		return (pixels * Samples * BitsPerPixel(Format) + 7) / 8;
+	}
+
 	namespace {
 		// Where a resource is written, and by which sort of node.
 		struct Producer {
 			bool Written = false;
 			bool ByShared = false;
 			bool ByPerView = false;
+			bool ByWorld = false;
+			bool ByFrame = false;
 		};
 	}
 
@@ -194,6 +329,10 @@ namespace engine::graph {
 			return "a node neither reads nor writes";
 		case GraphStatus::UnknownResource:
 			return "a node names a resource this graph does not hold";
+		case GraphStatus::ReadAccessDenied:
+			return "a node reads a write-only resource";
+		case GraphStatus::WriteAccessDenied:
+			return "a node writes a read-only resource";
 		case GraphStatus::ReadsBeforeWrite:
 			return "a node reads something nothing earlier wrote";
 		case GraphStatus::TooManyNodes:
@@ -202,12 +341,17 @@ namespace engine::graph {
 			return "a shared node sits between two per-view nodes";
 		case GraphStatus::SharedWriteConflict:
 			return "a per-view node writes what a shared node writes";
+		case GraphStatus::FrameReadsWorld:
+			return "frame setup reads a resource written per world";
+		case GraphStatus::FrameWorldWriteConflict:
+			return "frame and world nodes write the same resource";
 		}
 		return "unknown";
 	}
 
 	ResourceId RenderGraph::AddResource(const ResourceDesc &desc) {
-		if (!desc.Name.IsValid()) {
+		if (!desc.Name.IsValid() || desc.Samples == 0 || desc.Depth == 0 || desc.Layers == 0 ||
+			desc.MipCount == 0 || desc.FirstMip > 31 || desc.MipCount > 32 - desc.FirstMip) {
 			return {};
 		}
 
@@ -224,7 +368,9 @@ namespace engine::graph {
 			}
 		}
 
-		Resources.push_back(desc);
+		ResourceDesc stored = desc;
+		stored.External = stored.External || stored.Lifetime != ResourceLifetime::Transient;
+		Resources.push_back(std::move(stored));
 		return ResourceId{static_cast<uint32_t>(Resources.size())};
 	}
 
@@ -327,15 +473,25 @@ namespace engine::graph {
 			}
 
 			for (const ResourceId resource : node.Reads) {
-				if (FindResource(resource) == nullptr) {
+				const ResourceDesc *desc = FindResource(resource);
+				if (desc == nullptr) {
 					offender = node.Name;
 					return GraphStatus::UnknownResource;
 				}
+				if (desc->Access == ResourceAccess::Write) {
+					offender = desc->Name;
+					return GraphStatus::ReadAccessDenied;
+				}
 			}
 			for (const ResourceId resource : node.Writes) {
-				if (FindResource(resource) == nullptr) {
+				const ResourceDesc *desc = FindResource(resource);
+				if (desc == nullptr) {
 					offender = node.Name;
 					return GraphStatus::UnknownResource;
+				}
+				if (desc->Access == ResourceAccess::Read) {
+					offender = desc->Name;
+					return GraphStatus::WriteAccessDenied;
 				}
 			}
 		}
@@ -351,15 +507,41 @@ namespace engine::graph {
 			for (const ResourceId resource : node.Writes) {
 				Producer &producer = producers[resource.Value];
 				producer.Written = true;
+				producer.ByWorld = producer.ByWorld || node.Scope == NodeScope::World;
+				producer.ByFrame = producer.ByFrame || node.Scope == NodeScope::Frame;
 				(RunsPerView(node.Scope) ? producer.ByPerView : producer.ByShared) = true;
 			}
 		}
 
 		for (const auto &[value, producer] : producers) {
+			if (producer.ByWorld && producer.ByFrame) {
+				const ResourceDesc *desc = FindResource(ResourceId{value});
+				offender = desc != nullptr ? desc->Name : core::Name{};
+				return GraphStatus::FrameWorldWriteConflict;
+			}
 			if (producer.ByShared && producer.ByPerView) {
 				const ResourceDesc *desc = FindResource(ResourceId{value});
 				offender = desc != nullptr ? desc->Name : core::Name{};
 				return GraphStatus::SharedWriteConflict;
+			}
+		}
+
+		for (const Node &node : Nodes) {
+			if (!node.Enabled) {
+				continue;
+			}
+			if (node.Scope == NodeScope::View) {
+				break;
+			}
+			if (node.Scope != NodeScope::Frame) {
+				continue;
+			}
+			for (const ResourceId resource : node.Reads) {
+				const auto producer = producers.find(resource.Value);
+				if (producer != producers.end() && producer->second.ByWorld) {
+					offender = node.Name;
+					return GraphStatus::FrameReadsWorld;
+				}
 			}
 		}
 
@@ -513,7 +695,7 @@ namespace engine::graph {
 				if (worlds[view] != distinct[world]) {
 					continue;
 				}
-				if (!ExecuteView(compiled, runner, view, world, shared)) {
+				if (!ExecuteView(compiled, runner, view, world, shared, shared && world == 0)) {
 					return false;
 				}
 				shared = false;
@@ -521,7 +703,7 @@ namespace engine::graph {
 
 			// A world with no views still runs its shared work: a headless host
 			// presenting nothing still has a world to light.
-			if (shared && !ExecuteView(compiled, runner, RunContext::WHOLE_FRAME, world, true)) {
+			if (shared && !ExecuteView(compiled, runner, RunContext::WHOLE_FRAME, world, true, world == 0)) {
 				return false;
 			}
 		}
@@ -543,13 +725,16 @@ namespace engine::graph {
 	}
 
 	bool RenderGraph::ExecuteView(
-		const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared
+		const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared, bool frame
 	) const {
+		if (frame && !shared) {
+			return false;
+		}
 		// **Shared first, and that ordering is the whole partition.** Every
 		// shared node produces something the per-view nodes may read - a shadow
 		// map is the case this was built for - so running them after would have
 		// each view sampling a target written for the frame after it.
-		if (shared && !RunBlock(compiled.Shared, runner, RunContext::WHOLE_FRAME, world)) {
+		if (shared && !RunBlock(compiled.Shared, runner, RunContext::WHOLE_FRAME, world, frame)) {
 			return false;
 		}
 
@@ -567,7 +752,7 @@ namespace engine::graph {
 	}
 
 	bool RenderGraph::RunBlock(
-		const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world
+		const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world, bool frame
 	) const {
 		for (const NodeId id : block) {
 			const Node *node = Find(id);
@@ -580,13 +765,16 @@ namespace engine::graph {
 				);
 				continue;
 			}
+			if (node->Scope == NodeScope::Frame && !frame) {
+				continue;
+			}
 
 			RunContext context;
 			context.Node = id;
 			context.Name = node->Name;
 			context.Kind = node->Kind;
 			context.View = view;
-			context.World = world;
+			context.World = node->Scope == NodeScope::Frame ? RunContext::WHOLE_FRAME : world;
 			context.Reads = node->Reads;
 			context.Writes = node->Writes;
 

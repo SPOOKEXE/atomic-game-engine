@@ -83,12 +83,13 @@ mono_add_library(client
 		# L9, `shared`. The VM-free half of the script layer, and the one this
 		# directory compiles against: `client/Client.hpp` and
 		# `client/Replicated.hpp` both name `script::Runtime` in a public header
-		# because a client owns one VM per world. **`Engine::scripthost` is
-		# deliberately absent** - nothing here calls `MakeRuntime`; the worlds
-		# are opened through `Engine::examples` and `Engine::game`, which are
-		# above the adapters and name the factory themselves. Undeclared until
-		# v0.19, arriving through `Engine::examples`.
+		# because a client owns one VM per world.
 		Engine::script
+
+		# A data-script package is a client-only control action. Its fresh Luau
+		# runtime is opened through the neutral factory, never by this module
+		# naming an adapter directly.
+		Engine::scripthost
 
 		# L12, `shared`. `--script` builds the scene by running a Luau file
 		# instead of the C++ loop in Demo.cpp. The VM itself is private to that
@@ -96,9 +97,9 @@ mono_add_library(client
 		# client can run a game file" and nothing about which language it is in.
 		Engine::examples
 
-		# L12, `shared`. `--game FILE.agame` plays a universe authored in the
-		# studio, single-player. **Not `Mono::server`**: loading a game file and
-		# running its scripts as both roles needs the format and the VM and
+		# L12, `shared`. `--game` plays an `.agame` universe or one `.aworld`
+		# authored in the studio, single-player. **Not `Mono::server`**: loading
+		# either format and running its scripts as both roles needs the format and the VM and
 		# nothing else, so the tier escape reserved below is still not declared.
 		Engine::game
 
@@ -122,7 +123,7 @@ mono_add_library(client
 	# signature is the same fact `input/CMakeLists.txt` states for `Translate.hpp`.
 	# If `Engine::input` ever stops being public about SDL, this line becomes
 	# `VENDOR_PUBLIC` in the same commit.
-	VENDOR SDL3::SDL3
+	VENDOR SDL3::SDL3 Vendor::json
 )
 
 mono_add_program(client
@@ -149,3 +150,7 @@ mono_add_program(client
 	# because nothing here hosts a server - and an escape that is not currently
 	# needed is an escape somebody will eventually use for something else.
 )
+
+if(TARGET test_client)
+	add_dependencies(test_client client)
+endif()

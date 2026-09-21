@@ -77,6 +77,33 @@ TEST_CASE("a point straight ahead lands in the middle of the image", "[studio][p
 	CHECK_THAT(point.y, WithinAbs(200.0f, PIXEL));
 }
 
+TEST_CASE(
+	"a narrow FOV picker follows the rendered target rather than the panel aspect", "[studio][projection]"
+) {
+	Camera camera;
+	camera.FieldOfViewRadians = 0.5061455f; // 29 degrees.
+	const CFrame frame(Vector3{2.0f, 1.0f, 3.0f});
+	const CameraMatrices matrices = engine::scene::ResolveCamera(frame, camera, 1920.0f / 1080.0f);
+
+	PanelProjection panel;
+	panel.Matrix = matrices.ViewProjection;
+	panel.Eye = frame.Position;
+	panel.ImageMin = {100.0f, 60.0f};
+	panel.ImageSize = {720.0f, 540.0f};
+	panel.RenderSize = {1920.0f, 1080.0f};
+	panel.Near = camera.NearPlane;
+
+	const Vector3 object{5.0f, 1.5f, -12.0f};
+	glm::vec2 screen{};
+	REQUIRE(panel.WorldToPanel(object, screen));
+	CHECK(panel.ContainsPanel(screen));
+
+	const Ray picked = panel.PanelToRay(screen);
+	const Vector3 expected = (object - frame.Position).Unit();
+	CHECK(picked.Origin == frame.Position);
+	CHECK(picked.Direction.Dot(expected) > 0.9999f);
+}
+
 TEST_CASE("the image rect is what panel space maps onto, not the panel", "[studio][projection]") {
 	// **The trap.** The same camera, the same world point, drawn into a
 	// sub-rect that starts 60 across and 25 down - the projected point has to

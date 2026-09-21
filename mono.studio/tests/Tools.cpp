@@ -22,7 +22,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <imgui.h>
 #include <optional>
+#include <studio/Editor.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.tools")
@@ -40,7 +42,77 @@ using engine::scene::Bounds;
 using engine::scene::Transform;
 using engine::scene::Visual;
 
+namespace studio {
+	struct ToolsProbe {
+		static void Draw(Editor &editor, BuiltinStudioTool tool) {
+			editor.DrawingBuiltinTool = tool;
+			editor.DrawHomeTools();
+		}
+
+		static bool IsInactive(const Editor &editor) {
+			return editor.CurrentTool == Editor::ToolMode::None;
+		}
+
+		static bool IsSelect(const Editor &editor) {
+			return editor.CurrentTool == Editor::ToolMode::Select;
+		}
+
+		static void SetMove(Editor &editor) {
+			editor.CurrentTool = Editor::ToolMode::Move;
+		}
+	};
+}
+
 namespace {
+	class Context {
+	  public:
+		Context() {
+			IMGUI_CHECKVERSION();
+			Handle = ImGui::CreateContext();
+			ImGuiIO &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2(1280.0f, 720.0f);
+			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.LogFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+		}
+
+		~Context() {
+			ImGui::DestroyContext(Handle);
+		}
+
+		Context(const Context &) = delete;
+		Context &operator=(const Context &) = delete;
+
+	  private:
+		ImGuiContext *Handle = nullptr;
+	};
+
+	ImVec2 DrawTool(studio::Editor &editor, studio::BuiltinStudioTool tool, ImVec2 mouse, bool down) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 120.0f), ImGuiCond_Always);
+		ImGui::Begin("Tools test");
+		studio::ToolsProbe::Draw(editor, tool);
+		const ImVec2 minimum = ImGui::GetItemRectMin();
+		const ImVec2 maximum = ImGui::GetItemRectMax();
+		ImGui::End();
+		ImGui::Render();
+		return ImVec2((minimum.x + maximum.x) * 0.5f, (minimum.y + maximum.y) * 0.5f);
+	}
+
+	void ClickTool(studio::Editor &editor, studio::BuiltinStudioTool tool) {
+		const ImVec2 point = DrawTool(editor, tool, ImVec2(-1.0f, -1.0f), false);
+		DrawTool(editor, tool, point, false);
+		DrawTool(editor, tool, point, true);
+		DrawTool(editor, tool, point, false);
+	}
+
 	// A part at a place, one stud on a side.
 	Entity Place(Store &store, const char *name, float z) {
 		const Entity part = store.CreateInstance(engine::scene::PartClass(), name);
@@ -88,6 +160,26 @@ namespace {
 		const std::optional<engine::core::RayHit> hit = engine::spatial::Raycast(grid, ray, 1000.0f);
 		return hit.has_value() ? Entity(hit->Id) : NULL_ENTITY;
 	}
+}
+
+TEST_CASE("active toolbar tools can leave the viewport to the running game", "[studio][tools][viewport]") {
+	Context context;
+	studio::Editor editor;
+
+	// The first Select press removes Studio's selection and drag mode while the
+	// viewport surface stays active for subsequent game UI presses.
+	REQUIRE(studio::ToolsProbe::IsSelect(editor));
+	ClickTool(editor, studio::BuiltinStudioTool::SelectMode);
+	CHECK(studio::ToolsProbe::IsInactive(editor));
+
+	// Selecting it again restores direct Studio selection. Any active gizmo
+	// also toggles off from its own button, so one click always provides the
+	// way to return a Play viewport to its game UI.
+	ClickTool(editor, studio::BuiltinStudioTool::SelectMode);
+	CHECK(studio::ToolsProbe::IsSelect(editor));
+	studio::ToolsProbe::SetMove(editor);
+	ClickTool(editor, studio::BuiltinStudioTool::MoveMode);
+	CHECK(studio::ToolsProbe::IsInactive(editor));
 }
 
 TEST_CASE("Locked is a property that survives a write and a read", "[studio][tools]") {

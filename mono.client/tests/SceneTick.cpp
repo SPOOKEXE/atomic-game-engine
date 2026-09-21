@@ -15,25 +15,45 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/Game.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Input.hpp>
+#include <engine/gui/Layout.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/InterfacePass.hpp>
+#include <engine/render/WorldPresentation.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Wire.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <DataCaptureDriver.hpp>
+#include <NamedCaptureView.hpp>
 #include <algorithm>
+#include <array>
 #include <client/Scene.hpp>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
@@ -48,6 +68,10 @@ TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.input")
 TEST_DEPENDS("engine.gui.services")
+TEST_DEPENDS("engine.gui.compile")
+TEST_DEPENDS("engine.gui.input")
+TEST_DEPENDS("engine.gui.typing")
+TEST_DEPENDS("engine.game.roundtrip")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -78,6 +102,7 @@ namespace {
 	struct Session {
 		Store World{"integration"};
 		Scheduler Systems;
+		std::shared_ptr<engine::script::Runtime> Scripts;
 
 		explicit Session(std::string_view scene = "Rings.luau") {
 			engine::parallel::Jobs::Start(2);
@@ -90,9 +115,10 @@ namespace {
 			engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
 
 			const bool built = client::BuildScriptedWorld(
-				World, Systems, engine::examples::ExamplePath(std::string(scene)), ENTITIES
+				World, Systems, engine::examples::ExamplePath(std::string(scene)), ENTITIES, &Scripts
 			);
 			REQUIRE(built);
+			REQUIRE(Scripts != nullptr);
 		}
 
 		~Session() {
@@ -119,6 +145,426 @@ namespace {
 		return workspace == engine::ecs::NULL_ENTITY ? engine::ecs::NULL_ENTITY
 													 : store.FindFirstChild(workspace, name);
 	}
+
+	size_t CountNamedDescendants(Store &store, engine::ecs::Entity root, std::string_view name) {
+		size_t found = 0;
+		store.EachDescendant(root, [&](engine::ecs::Entity entity) {
+			if (store.InstanceNameOf(entity) == engine::core::Name(name)) found++;
+		});
+		return found;
+	}
+
+	engine::ecs::Entity FirstNamedDescendant(Store &store, engine::ecs::Entity root, std::string_view name) {
+		engine::ecs::Entity found = engine::ecs::NULL_ENTITY;
+		store.EachDescendant(root, [&](engine::ecs::Entity entity) {
+			if (found == engine::ecs::NULL_ENTITY &&
+				store.InstanceNameOf(entity) == engine::core::Name(name)) {
+				found = entity;
+			}
+		});
+		return found;
+	}
+
+	engine::ecs::Entity FirstGuiElement(Store &store, std::string_view name) {
+		engine::ecs::Entity found = engine::ecs::NULL_ENTITY;
+		store.Each<const engine::gui::Element>([&](engine::ecs::Entity entity, const engine::gui::Element &) {
+			if (found == engine::ecs::NULL_ENTITY &&
+				store.InstanceNameOf(entity) == engine::core::Name(name)) {
+				found = entity;
+			}
+		});
+		return found;
+	}
+
+	const engine::gui::DrawCommand *
+	CommandFor(const engine::gui::DrawList &list, engine::ecs::Entity source) {
+		const auto found =
+			std::find_if(list.Commands.begin(), list.Commands.end(), [source](const auto &command) {
+				return command.Source == source;
+			});
+		return found == list.Commands.end() ? nullptr : &*found;
+	}
+
+	const engine::gui::DrawCommand *
+	TextCommandFor(const engine::gui::DrawList &list, engine::ecs::Entity source) {
+		const auto found =
+			std::find_if(list.Commands.begin(), list.Commands.end(), [source](const auto &command) {
+				return command.Source == source && command.Kind == engine::gui::DrawKind::Text;
+			});
+		return found == list.Commands.end() ? nullptr : &*found;
+	}
+}
+
+TEST_CASE("GuiInteraction routes client controls into visible scripted state", "[client][gui][scripting]") {
+	Session session("GuiInteraction.luau");
+	Store &store = session.World;
+
+	const engine::ecs::Entity textButton = FirstGuiElement(store, "TextButton");
+	const engine::ecs::Entity imageButton = FirstGuiElement(store, "ImageButton");
+	const engine::ecs::Entity textBox = FirstGuiElement(store, "TextBox");
+	const engine::ecs::Entity status = FirstGuiElement(store, "InteractionStatus");
+	const engine::ecs::Entity eventStatus = FirstGuiElement(store, "EventStatus");
+	REQUIRE(textButton != engine::ecs::NULL_ENTITY);
+	REQUIRE(imageButton != engine::ecs::NULL_ENTITY);
+	REQUIRE(textBox != engine::ecs::NULL_ENTITY);
+	REQUIRE(status != engine::ecs::NULL_ENTITY);
+	REQUIRE(eventStatus != engine::ecs::NULL_ENTITY);
+
+	engine::gui::CompileRequest request;
+	request.Display = {.Width = 1280.0f, .Height = 720.0f};
+	request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
+	const auto *local = store.Resource<engine::scene::LocalPlayer>();
+	REQUIRE(local != nullptr);
+	request.Viewer = local->Instance;
+
+	engine::gui::Compiled compiled;
+	engine::gui::Router router;
+	const auto frame = [&](engine::core::Vector2 position, bool down) {
+		request.Hovered = router.Hovered();
+		request.Pressed = router.Pressed();
+		REQUIRE(engine::gui::Layout(store, request.Display) > 0);
+		compiled.Rebuild(store, request);
+
+		engine::gui::Pointer pointer;
+		pointer.Position = position;
+		pointer.Down = down;
+		pointer.Inside = true;
+		pointer.ScreenOnly = true;
+		session.Scripts->DeliverGuiEvents(router.Update(store, compiled.Commands(), pointer));
+		session.Tick(1);
+	};
+	const auto centre = [&](engine::ecs::Entity element) {
+		const auto *resolved = store.Get<engine::gui::Resolved>(element);
+		REQUIRE(resolved != nullptr);
+		return resolved->AbsolutePosition + resolved->AbsoluteSize * 0.5f;
+	};
+
+	// The compiled rectangles are the render and hit-test contract. The button
+	// centres below come from them, so a stale or displaced visual cannot pass
+	// by routing against a hand-written coordinate.
+	frame({0.0f, 0.0f}, false);
+	for (const engine::ecs::Entity element : {textButton, imageButton, textBox}) {
+		const auto *resolved = store.Get<engine::gui::Resolved>(element);
+		const auto *command = CommandFor(compiled.Commands(), element);
+		REQUIRE(resolved != nullptr);
+		REQUIRE(command != nullptr);
+		CHECK(command->Bounds.Min == resolved->AbsolutePosition);
+		CHECK(command->Bounds.Size() == resolved->AbsoluteSize);
+	}
+
+	frame(centre(textButton), false);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextButton hover");
+	frame(centre(textButton), true);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextButton down");
+	frame(centre(textButton), false);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextButton activated");
+	CHECK(store.Get<engine::gui::Label>(status)->Text == "PASS  TextButton 2   ImageButton 1");
+
+	frame(centre(imageButton), false);
+	frame(centre(imageButton), true);
+	frame(centre(imageButton), false);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "ImageButton activated");
+	CHECK(store.Get<engine::gui::Label>(status)->Text == "PASS  TextButton 2   ImageButton 2");
+
+	frame(centre(textBox), false);
+	frame(centre(textBox), true);
+	CHECK(engine::gui::FocusedTextBox(store) == textBox);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextBox focused");
+
+	engine::gui::Typing typing;
+	typing.Text = " checked";
+	const engine::gui::TypeResult typed = engine::gui::Type(store, typing);
+	CHECK(typed.Instance == textBox);
+	CHECK(typed.Changed);
+	CHECK(store.Get<engine::gui::Label>(textBox)->Text == "TextBox component checked");
+
+	request.Hovered = router.Hovered();
+	request.Pressed = router.Pressed();
+	REQUIRE(engine::gui::Layout(store, request.Display) > 0);
+	REQUIRE(compiled.Rebuild(store, request));
+	const auto *text = TextCommandFor(compiled.Commands(), textBox);
+	REQUIRE(text != nullptr);
+	CHECK(text->Text == "TextBox component checked");
+
+	// `Type` owns the string write and has no artificial GUI event. Moving the
+	// pointer outside the canvas proves the router, rather than a direct focus
+	// mutation, releases the keyboard and delivers the script's focus-lost signal.
+	frame(centre(textBox), false);
+	frame({0.0f, 0.0f}, false);
+	frame({0.0f, 0.0f}, true);
+	CHECK(engine::gui::FocusedTextBox(store) == engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextBox focus lost");
+}
+
+TEST_CASE("data capture driver ticket transition is paused, strict, and terminal", "[client][data-capture]") {
+	using namespace client::data_capture_driver;
+	State state;
+	const engine::script::HostCallback callback{1};
+	CHECK(Transition(state, false, callback, nullptr) == Action::None);
+	CHECK(Transition(state, true, callback, nullptr) == Action::None);
+	engine::script::HostValue queued(engine::script::HostTag::Map);
+	engine::script::HostValue status(engine::script::HostTag::String);
+	status.Text = "queued";
+	engine::script::HostValue ticket(engine::script::HostTag::String);
+	ticket.Text = "7";
+	queued.Entries.emplace_back("status", std::move(status));
+	queued.Entries.emplace_back("ticket", std::move(ticket));
+	CHECK(Transition(state, true, callback, &queued) == Action::None);
+	REQUIRE(state.Ticket == 7);
+	CHECK(Transition(state, true, callback, &queued) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	state.Ticket = 7;
+	engine::script::HostValue pending(engine::script::HostTag::Map);
+	engine::script::HostValue pendingStatus(engine::script::HostTag::String);
+	pendingStatus.Text = "pending";
+	pending.Entries.emplace_back("status", std::move(pendingStatus));
+	CHECK(Transition(state, true, callback, &pending) == Action::None);
+	state.Ticket.reset();
+	CHECK(Transition(state, true, callback, &pending) == Action::Invalid);
+	queued.Entries[1].second.Text = "18446744073709551616";
+	CHECK(Transition(state, true, callback, &queued) == Action::Invalid);
+	queued.Entries[1].second.Text = "7";
+	state.Ticket = 7;
+	for (const std::string_view terminal :
+		 {"ready", "partial", "cancelled", "error", "failed", "unsupported", "invalid", "stale_snapshot"}) {
+		engine::script::HostValue result(engine::script::HostTag::Map);
+		engine::script::HostValue terminalStatus(engine::script::HostTag::String);
+		terminalStatus.Text = terminal;
+		result.Entries.emplace_back("status", std::move(terminalStatus));
+		CHECK(Transition(state, true, callback, &result) == Action::Release);
+		CHECK(state.Ticket == 7);
+		state.Ticket = 7;
+	}
+	engine::script::HostValue malformed(engine::script::HostTag::String);
+	CHECK(Transition(state, true, callback, &malformed) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	CHECK(Transition(state, false, callback, nullptr) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	state.Ticket = 7;
+	engine::script::HostValue unknown(engine::script::HostTag::Map);
+	engine::script::HostValue unknownStatus(engine::script::HostTag::String);
+	unknownStatus.Text = "wat";
+	unknown.Entries.emplace_back("status", std::move(unknownStatus));
+	CHECK(Transition(state, true, callback, &unknown) == Action::None);
+	CHECK(state.Cancelling);
+	state.Cancelling = false;
+	state.Ticket = 7;
+	CHECK(Transition(state, true, engine::script::HostCallback{2}, nullptr) == Action::None);
+	CHECK(state.Cancelling);
+	CHECK(Transition(state, true, std::nullopt, nullptr) == Action::None);
+	engine::script::HostValue cancelled(engine::script::HostTag::Map);
+	engine::script::HostValue cancelledStatus(engine::script::HostTag::String);
+	cancelledStatus.Text = "cancelled";
+	cancelled.Entries.emplace_back("status", std::move(cancelledStatus));
+	CHECK(Transition(state, true, std::nullopt, &cancelled) == Action::Release);
+	CHECK(state.Ticket == 7);
+	engine::script::HostValue richReady(engine::script::HostTag::Map);
+	engine::script::HostValue richStatus(engine::script::HostTag::String);
+	richStatus.Text = "ready";
+	engine::script::HostValue planes(engine::script::HostTag::Array);
+	richReady.Entries.emplace_back("status", std::move(richStatus));
+	richReady.Entries.emplace_back("planes", std::move(planes));
+	CHECK(Transition(state, true, callback, &richReady) == Action::Release);
+
+	const int firstOwner = 1;
+	const int secondOwner = 2;
+	State owners;
+	CHECK(Transition(owners, true, callback, nullptr, &firstOwner) == Action::None);
+	CHECK(Transition(owners, true, callback, &queued, &firstOwner) == Action::None);
+	CHECK(Transition(owners, true, callback, nullptr, &secondOwner) == Action::None);
+	CHECK(owners.Cancelling);
+	CHECK(owners.Ticket == 7);
+
+	State cleanup{callback, 9, true};
+	bool cancelSent = false;
+	int cancels = 0;
+	int pumps = 0;
+	int releases = 0;
+	std::string bridgeStatus = "pending";
+	bool releaseAccepted = false;
+	auto cancel = [&](uint64_t ticket) {
+		CHECK(ticket == 9);
+		cancels++;
+	};
+	auto pump = [&] { pumps++; };
+	auto poll = [&](uint64_t ticket) {
+		CHECK(ticket == 9);
+		return bridgeStatus;
+	};
+	auto release = [&](uint64_t ticket) {
+		CHECK(ticket == 9);
+		releases++;
+		return releaseAccepted;
+	};
+	CHECK_FALSE(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(cancels == 1);
+	CHECK(pumps == 1);
+	CHECK(releases == 0);
+	CHECK_FALSE(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(cancels == 1);
+	CHECK(pumps == 2);
+	bridgeStatus = "cancelled";
+	CHECK_FALSE(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(releases == 1);
+	CHECK(cleanup.Ticket == 9);
+	releaseAccepted = true;
+	CHECK(AdvanceCancellation(cleanup, cancelSent, cancel, pump, poll, release));
+	CHECK(releases == 2);
+	CHECK_FALSE(cleanup.Ticket.has_value());
+	CHECK_FALSE(cleanup.Cancelling);
+
+	State invokeFailure{callback, 9};
+	engine::script::HostValue noResult;
+	CHECK(Transition(invokeFailure, true, callback, &noResult) == Action::None);
+	CHECK(invokeFailure.Cancelling);
+	State noTicketFailure;
+	noTicketFailure.Callback = callback;
+	CHECK(Transition(noTicketFailure, true, callback, &noResult) == Action::Invalid);
+	CHECK_FALSE(noTicketFailure.Cancelling);
+	CHECK(Transition(noTicketFailure, true, callback, &queued) == Action::None);
+	CHECK(noTicketFailure.Ticket == 7);
+}
+
+TEST_CASE(
+	"named capture views rebuild the camera cache and leave the next view normal", "[client][data-capture]"
+) {
+	Session session;
+	Store &store = session.World;
+	const auto workspace = engine::scene::WorkspaceOf(store);
+	engine::scene::PartDesc portalPart;
+	portalPart.Frame.Position = {0, 0, -8};
+	portalPart.Size = {2, 2, .1f};
+	const auto portalPane = engine::scene::MakePart(store, portalPart);
+	portalPart.Frame.Position = {8, 0, -8};
+	const auto portalDestination = engine::scene::MakePart(store, portalPart);
+	portalPart.Frame.Position = {-8, 0, -8};
+	const auto mirrorPane = engine::scene::MakePart(store, portalPart);
+	REQUIRE(store.SetParent(portalPane, workspace));
+	REQUIRE(store.SetParent(portalDestination, workspace));
+	REQUIRE(store.SetParent(mirrorPane, workspace));
+	const auto portalCamera =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "PortalCamera");
+	REQUIRE(store.SetParent(portalCamera, portalPane));
+	auto portalSurface = *store.Get<engine::scene::SurfaceCamera>(portalCamera);
+	portalSurface.Surface = -1;
+	store.Set(portalCamera, portalSurface);
+	engine::scene::Portal portal;
+	portal.Destination = portalDestination;
+	store.Set(portalCamera, portal);
+	const auto mirrorCamera =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "MirrorCamera");
+	REQUIRE(store.SetParent(mirrorCamera, mirrorPane));
+	auto mirrorSurface = *store.Get<engine::scene::SurfaceCamera>(mirrorCamera);
+	mirrorSurface.Surface = -1;
+	store.Set(mirrorCamera, mirrorSurface);
+	const auto billboard = store.CreateInstance(engine::gui::GuiClass("BillboardGui"), "CaptureLabel");
+	REQUIRE(store.SetParent(billboard, mirrorPane));
+	engine::gui::Billboard label;
+	label.Size = {2, 0, 2, 0};
+	store.Set(billboard, label);
+	const auto panel = store.CreateInstance(engine::gui::GuiClass("Frame"), "Panel");
+	REQUIRE(store.SetParent(panel, billboard));
+	engine::gui::Element element;
+	element.Size = {1, 0, 1, 0};
+	store.Set(panel, element);
+	store.Set(panel, engine::gui::Background{});
+	const auto camera = store.Create();
+	store.Set(camera, Transform{engine::core::CFrame(engine::core::Vector3{8, 0, 0})});
+	Camera lens;
+	lens.FieldOfViewRadians = 0.8f;
+	store.Set(camera, lens);
+
+	engine::render::View normal;
+	normal.World = 1;
+	normal.WorldName = engine::core::Name("named-capture");
+	normal.Pipeline = engine::core::Name("capture-pipeline");
+	normal.CameraFrame = engine::core::CFrame(engine::core::Vector3{-4, 0, 0});
+	normal.Camera.FieldOfViewRadians = 0.4f;
+	normal.Grid.Enabled = true;
+	const auto normalSignature = engine::render::ScenePresentationSignature(normal, {});
+
+	engine::render::View capture = normal;
+	capture.CameraFrame = store.Get<Transform>(camera)->Frame;
+	capture.Camera = *store.Get<Camera>(camera);
+	engine::render::WorldViewFrame frame;
+	engine::render::WorldCameraFrame cameraFrame;
+	engine::render::InterfacePass namedInterface;
+	REQUIRE(
+		client::BindNamedCapturePresentation(
+			store,
+			{.World = capture.World,
+			 .Name = capture.WorldName,
+			 .Identity = store.Identity(),
+			 .ContentOwner = capture.WorldName,
+			 .ForeignContentOwners = {},
+			 .Pipeline = capture.Pipeline},
+			{64, 64},
+			capture,
+			frame,
+			cameraFrame,
+			namedInterface,
+			[] {}
+		)
+	);
+	CHECK(capture.CameraFrame.Position.X == Approx(8));
+	CHECK(capture.Camera.FieldOfViewRadians == Approx(0.8f));
+	REQUIRE(capture.Portals.size() == 1);
+	CHECK(capture.Portals.data() == frame.Portals.data());
+	CHECK(capture.Portals[0].Index == 0);
+	CHECK(capture.Portals[0].Centre.X == Approx(0));
+	REQUIRE(capture.Surfaces.size() == 1);
+	CHECK(capture.Surfaces.data() == cameraFrame.Surfaces.data());
+	CHECK(capture.Surfaces[0].Index == 1);
+	CHECK(capture.Surfaces[0].PaneCentre.X == Approx(-8));
+	REQUIRE_FALSE(cameraFrame.SpatialCommands.Commands.empty());
+	CHECK(cameraFrame.SpatialCommands.Commands[0].Collector == billboard);
+	CHECK(namedInterface.AffectsScene());
+	CHECK(engine::render::ScenePresentationSignature(capture, {}) != normalSignature);
+	CHECK(engine::render::ScenePresentationSignature(normal, {}) == normalSignature);
+	int aborted = 0;
+	engine::render::View refused = capture;
+	CHECK_FALSE(
+		client::BindNamedCaptureWorldView(
+			store,
+			{.World = capture.World,
+			 .Name = capture.WorldName,
+			 .Identity = store.Identity() + 1,
+			 .ContentOwner = capture.WorldName,
+			 .ForeignContentOwners = {},
+			 .Pipeline = capture.Pipeline},
+			{64, 64},
+			refused,
+			frame,
+			cameraFrame,
+			[&aborted] { aborted++; }
+		)
+	);
+	CHECK(aborted == 1);
+	CHECK(refused.CameraFrame.Position.X == Approx(8));
+
+	engine::world::Universe worlds;
+	aborted = 0;
+	CHECK_FALSE(
+		client::BindNamedCaptureWorldView(
+			worlds,
+			{},
+			{.World = capture.World,
+			 .Name = capture.WorldName,
+			 .Identity = 0,
+			 .ContentOwner = capture.WorldName,
+			 .ForeignContentOwners = {},
+			 .Pipeline = capture.Pipeline},
+			{64, 64},
+			refused,
+			frame,
+			cameraFrame,
+			[&aborted] { aborted++; }
+		)
+	);
+	CHECK(aborted == 1);
 }
 
 TEST_CASE("a built scene produces one instance per entity", "[demo]") {
@@ -233,6 +679,59 @@ TEST_CASE("a scripted NPC is integrated and crosses a portal in a standalone cli
 	const auto *transit = session.World.Get<engine::scene::PortalTransit>(root);
 	REQUIRE(transit != nullptr);
 	CHECK(transit->Serial >= 1u);
+}
+
+TEST_CASE("the tunnels remote portal destination fits the replicated world", "[demo][portal]") {
+	// The east tunnel's destination used to sit at x=256. A remote player
+	// crossing into it was encoded at the world's 64-stud wire edge, which
+	// detached the camera from the character. Keep the authored remote room,
+	// including the objects that can become a portal crosser, inside the same
+	// range that a replicated transform can represent.
+	Session session("Tunnels.luau");
+	const float limit = engine::scene::WIRE_POSITION_HALF_EXTENT_METRES;
+	const auto insideWireRange = [limit](const engine::core::Vector3 position) {
+		return std::abs(position.X) <= limit && std::abs(position.Y) <= limit &&
+			   std::abs(position.Z) <= limit;
+	};
+
+	const engine::ecs::Entity remotePane = InWorkspace(session.World, "ShortInteriorNorth");
+	REQUIRE(remotePane != engine::ecs::NULL_ENTITY);
+	const Transform *const destination = session.World.Get<Transform>(remotePane);
+	REQUIRE(destination != nullptr);
+	const engine::scene::Bounds *const destinationBounds =
+		session.World.Get<engine::scene::Bounds>(remotePane);
+	REQUIRE(destinationBounds != nullptr);
+	CHECK(insideWireRange(destination->Frame.Position));
+
+	const engine::ecs::Entity eastPane = InWorkspace(session.World, "ShortNorth");
+	REQUIRE(eastPane != engine::ecs::NULL_ENTITY);
+	engine::ecs::Entity portal = engine::ecs::NULL_ENTITY;
+	session.World.EachChild(eastPane, [&](engine::ecs::Entity child) {
+		if (portal == engine::ecs::NULL_ENTITY &&
+			session.World.Get<engine::scene::Portal>(child) != nullptr) {
+			portal = child;
+		}
+	});
+	REQUIRE(portal != engine::ecs::NULL_ENTITY);
+	CHECK(session.World.Get<engine::scene::Portal>(portal)->Destination == remotePane);
+
+	const engine::ecs::Entity ground = InWorkspace(session.World, "Ground");
+	REQUIRE(ground != engine::ecs::NULL_ENTITY);
+	const engine::scene::Bounds *const groundBounds = session.World.Get<engine::scene::Bounds>(ground);
+	REQUIRE(groundBounds != nullptr);
+	CHECK(destination->Frame.Position.X - destinationBounds->HalfExtent.X > groundBounds->HalfExtent.X);
+
+	session.World.Each<const Transform, const engine::scene::Bounds>(
+		[&](engine::ecs::Entity, const Transform &transform, const engine::scene::Bounds &bounds) {
+			const engine::core::Vector3 minimum = transform.Frame.Position - bounds.HalfExtent;
+			const engine::core::Vector3 maximum = transform.Frame.Position + bounds.HalfExtent;
+			CHECK(insideWireRange(minimum));
+			CHECK(insideWireRange(maximum));
+		}
+	);
+	session.World.Each<const Transform>([&](engine::ecs::Entity, const Transform &transform) {
+		CHECK(insideWireRange(transform.Frame.Position));
+	});
 }
 
 TEST_CASE("the hallway camera and NPC cross portals in a standalone client", "[demo][portal]") {
@@ -495,6 +994,35 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[dem
 	REQUIRE(instances->Value == Approx(static_cast<double>(ENTITIES)));
 }
 
+TEST_CASE("the magic camera orbit does not rebuild static terrain draw rows", "[client][magic][profile]") {
+	Session session("Magic.luau");
+
+	// The first frame establishes the rendered tag and cached source rows. The
+	// scene's first cast is delayed, so its next beat changes only the Camera's
+	// transform as it orbits the 5k-plus terrain parts.
+	session.Tick(1);
+	REQUIRE(session.Drawn().size() > 500);
+
+	FrameGraph::SetEnabled(true);
+	FrameGraph::BeginFrame();
+	session.Tick(1);
+	FrameGraph::EndFrame();
+
+	const auto spans = FrameGraph::Spans();
+	FrameGraph::SetEnabled(false);
+	const auto named = [&spans](std::string_view name) {
+		return std::any_of(spans.begin(), spans.end(), [name](const auto &span) {
+			return span.Name == name;
+		});
+	};
+
+	// A global Transform epoch is not enough to invalidate visible rows. The
+	// old path refreshed every terrain instance here because the eye moved.
+	CHECK(named("reuse draw list"));
+	CHECK_FALSE(named("update draw frames"));
+	CHECK_FALSE(named("sync rendered.walk"));
+}
+
 TEST_CASE("the panels render a real tick's data", "[demo]") {
 	Session session;
 
@@ -704,4 +1232,110 @@ TEST_CASE("a scripted client sees a local player and draws its completed PlayerG
 
 	std::filesystem::remove(scene);
 	engine::parallel::Jobs::Stop();
+}
+
+TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client][world][gui]") {
+	engine::parallel::Jobs::Start(2);
+	struct StopJobs {
+		~StopJobs() {
+			engine::parallel::Jobs::Stop();
+		}
+	} stopJobs;
+
+	const auto demo =
+		engine::examples::DemosLoader().Find(engine::examples::DemoKind::World, "BladeborneDemo.aworld");
+	REQUIRE(demo.has_value());
+
+	engine::world::Universe universe;
+	std::string error;
+	const engine::world::WorldId id =
+		engine::game::ImportWorld(universe, demo->Path, engine::core::Name{}, error);
+	INFO(error);
+	REQUIRE(id.IsValid());
+
+	std::shared_ptr<engine::script::Runtime> runtime;
+	universe.Enter(id, [&](Store &store, Scheduler &systems) {
+		client::InstallPresentation(store, systems);
+		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
+		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
+
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		runtime = engine::game::StartWorldScripts(
+			store, systems, limits, error, nullptr, universe.SettingsOf(id).ScriptTickRate
+		);
+		INFO(error);
+		REQUIRE(error.empty());
+		REQUIRE(runtime != nullptr);
+		REQUIRE(runtime->Costs().size() == 3);
+		CHECK(std::ranges::all_of(runtime->Costs(), &engine::script::ScriptCost::Completed));
+
+		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
+		REQUIRE(sources != nullptr);
+		CHECK(sources->Count() == 14);
+
+		const engine::ecs::Entity arena = InWorkspace(store, "BladeborneArena");
+		REQUIRE(arena != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, arena, "ServerProfileMarker") == 1);
+
+		const engine::ecs::Entity starterGui = store.FindFirstRoot(engine::gui::STARTER_GUI);
+		REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity templateHud = store.FindFirstChild(starterGui, "BladeborneHUD");
+		REQUIRE(templateHud != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, templateHud, "Ability1") == 1);
+		CHECK(CountNamedDescendants(store, templateHud, "Minimap") == 1);
+
+		CHECK(engine::gui::ResetPlayerGui(store, localPlayer) == 1);
+		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
+		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity liveHud = store.FindFirstChild(playerGui, "BladeborneHUD");
+		REQUIRE(liveHud != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, liveHud, "Ability1") == 1);
+		CHECK(CountNamedDescendants(store, liveHud, "Minimap") == 1);
+		CHECK(CountNamedDescendants(store, liveHud, "HotbarSlot1") == 2);
+
+		engine::gui::Screen display;
+		display.Width = 1920.0f;
+		display.Height = 1080.0f;
+		CHECK(engine::gui::Layout(store, display) > 0);
+		engine::gui::CompileRequest request;
+		request.Display = display;
+		request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
+		request.Viewer = localPlayer;
+		engine::gui::Compiled compiled;
+		REQUIRE(compiled.Rebuild(store, request));
+		const bool opaqueScreenCover =
+			std::ranges::any_of(compiled.Commands().Commands, [&](const auto &command) {
+				return command.Kind == engine::gui::DrawKind::Rectangle && command.Transparency == 0.0f &&
+					   command.Bounds.Min.X <= 0.0f && command.Bounds.Min.Y <= 0.0f &&
+					   command.Bounds.Max.X >= display.Width && command.Bounds.Max.Y >= display.Height;
+			});
+		CHECK_FALSE(opaqueScreenCover);
+
+		const engine::ecs::Entity ability = FirstNamedDescendant(store, liveHud, "Ability1");
+		REQUIRE(ability != engine::ecs::NULL_ENTITY);
+		const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(ability);
+		REQUIRE(placed != nullptr);
+		CHECK(placed->Rendered);
+
+		systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+		const engine::render::DrawList *drawList = store.Resource<engine::render::DrawList>();
+		REQUIRE(drawList != nullptr);
+		for (const std::string_view name : std::array{
+				 "ArenaFloor",
+				 "CentralDais",
+				 "NorthMarker",
+				 "SouthMarker",
+				 "WestBlade",
+				 "EastBlade",
+				 "PlayerSpawn",
+				 "ServerProfileMarker",
+			 }) {
+			const engine::ecs::Entity part = FirstNamedDescendant(store, arena, name);
+			REQUIRE(part != engine::ecs::NULL_ENTITY);
+			CHECK(std::ranges::any_of(drawList->Instances, [part](const DrawInstance &instance) {
+				return instance.Source == part.Id;
+			}));
+		}
+	});
 }

@@ -144,8 +144,11 @@ namespace engine::game {
 	//
 	// @since v0.21
 	struct UniverseDataStore {
+		// Whether this feature is enabled.
 		bool Enabled = false;
+		// Persistence backend selected by the deployed universe manifest.
 		std::string Backend = "binary";
+		// Root entity associated with this record.
 		std::filesystem::path Root = "stores";
 	};
 
@@ -396,6 +399,7 @@ namespace engine::game {
 	//                    run, which is the only ordering that lets a breakpoint
 	//                    on a script's top level fire at all - that code has
 	//                    already executed by the time this returns.
+	// @param scriptTickRate Fixed script heartbeat rate, or zero to use the world rate.
 	// @return The runtime, which is never null.
 	std::shared_ptr<script::Runtime> StartWorldScripts(
 		ecs::Store &store,

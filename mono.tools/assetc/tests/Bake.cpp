@@ -251,6 +251,34 @@ TEST_CASE("a baked texture carries its mip chain", "[assetc][bake]") {
 	CHECK(small.LevelCount() == 1);
 }
 
+TEST_CASE("a static atlas is baked with flipbook metadata", "[assetc][bake]") {
+	const Scratch scratch("static-flipbook");
+	scratch.Write("effects/atlas.bmp", BMP);
+
+	Settings settings;
+	settings.FlipbookSide = 2;
+	settings.FlipbookFrames = 3;
+	settings.FlipbookFps = 24.0f;
+	const Report report = Baked(scratch, settings);
+
+	REQUIRE(report.Failures == 0);
+	const engine::assets::TextureData atlas = ReadTexture(scratch.Out() / "effects/atlas.atex");
+	CHECK(atlas.FlipbookSide == 2);
+	CHECK(atlas.FlipbookFrames == 3);
+	CHECK(atlas.FlipbookFrameRate == Catch::Approx(24.0f));
+
+	SECTION("incomplete or unsupported atlas settings refuse the run") {
+		Settings invalid;
+		invalid.FlipbookSide = 3;
+		invalid.FlipbookFrames = 1;
+		invalid.FlipbookFps = 24.0f;
+		std::string failure;
+		const Report refused = assetc::Bake(invalid, failure);
+		CHECK(refused.Assets.empty());
+		CHECK(failure.find("static flipbook") != std::string::npos);
+	}
+}
+
 TEST_CASE("a bake can be asked for no chain at all", "[assetc][bake]") {
 	const Scratch scratch("nomips");
 	scratch.Write("tex/floor.bmp", BMP);

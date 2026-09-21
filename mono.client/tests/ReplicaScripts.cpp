@@ -272,6 +272,33 @@ TEST_CASE("a script that arrived is started once and not once per tick", "[clien
 	CHECK(replica.Log() == "x");
 }
 
+TEST_CASE("a replica retries a LocalScript whose program arrives later", "[client][replication][scripting]") {
+	Replica replica;
+	replica.Arrive();
+
+	const Entity mine = replica.ContainerOf(replica.Local, engine::scene::PLAYER_SCRIPTS_NAME);
+	const Entity pending = engine::script::MakeScript(replica.World, "Delayed.luau", "Delayed", true);
+	REQUIRE(pending != NULL_ENTITY);
+	REQUIRE(replica.World.SetParent(pending, mine));
+
+	// The instance can arrive in a snapshot before the observed string row.
+	replica.Adopt();
+	replica.Tick();
+	CHECK(replica.World.Get<engine::script::Disabled>(pending) == nullptr);
+
+	// The connector now supplies the missing row. It must be retried rather
+	// than left disabled by the earlier filesystem miss.
+	replica.World.SetAdoptOnly(false);
+	replica.World.Set(
+		pending, engine::script::Program{Name("Delayed.luau"), std::string(NOTE) + "note('delayed ')\n"}
+	);
+	replica.World.SetAdoptOnly(true);
+	replica.Tick();
+
+	CHECK(replica.Log() == "delayed ");
+	CHECK(replica.World.Get<engine::script::Disabled>(pending) == nullptr);
+}
+
 TEST_CASE("a press on a TextButton in a replica reaches its script", "[client][replication][scripting]") {
 	Replica replica;
 	replica.Arrive();

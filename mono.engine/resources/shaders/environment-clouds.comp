@@ -1,0 +1,118 @@
+#version 450
+
+// Composites clouds over a completed sky. Keeping this separate from the sky
+// build makes each graph node a real GPU stage and lets a profile attribute the
+// expensive volume loop to clouds rather than to a generic environment pass.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D skyImage;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D cloudImage;
+
+layout(set = 2, binding = 0) uniform Environment {
+	vec4 Zenith;
+	vec4 Horizon;
+	vec4 Ground;
+	vec4 SunDirection;
+	vec4 AtmosphereColour;
+	vec4 AtmosphereDecay;
+	vec4 Atmosphere;
+	vec4 AtmosphereCompute;
+	vec4 CloudColour;
+	vec4 Clouds;
+	vec4 CloudCompute;
+	vec4 CloudMotion;
+	uvec4 Modes;
+	uvec4 Counts;
+	uvec4 Shaders;
+} source;
+
+uint Hash(uint value) {
+	value ^= value >> 16;
+	value *= 0x7feb352du;
+	value ^= value >> 15;
+	value *= 0x846ca68bu;
+	return value ^ (value >> 16);
+}
+
+float Random(ivec3 cell, uint seed) {
+	uint word = uint(cell.x) * 0x8da6b343u ^ uint(cell.y) * 0xd8163841u ^
+		uint(cell.z) * 0xcb1ab31fu ^ seed;
+	return float(Hash(word)) / 4294967295.0;
+}
+
+float Noise(vec3 position, uint seed) {
+	ivec3 cell = ivec3(floor(position));
+	vec3 local = fract(position);
+	local = local * local * (3.0 - 2.0 * local);
+	float z0 = mix(
+		mix(Random(cell, seed), Random(cell + ivec3(1, 0, 0), seed), local.x),
+		mix(Random(cell + ivec3(0, 1, 0), seed), Random(cell + ivec3(1, 1, 0), seed), local.x),
+		local.y
+	);
+	float z1 = mix(
+		mix(Random(cell + ivec3(0, 0, 1), seed), Random(cell + ivec3(1, 0, 1), seed), local.x),
+		mix(Random(cell + ivec3(0, 1, 1), seed), Random(cell + ivec3(1, 1, 1), seed), local.x),
+		local.y
+	);
+	return mix(z0, z1, local.z);
+}
+
+float Fbm(vec3 position, uint seed, float detail) {
+	float value = 0.0;
+	float weight = 0.5;
+	for (uint octave = 0u; octave < 5u; octave++) {
+		value += Noise(position, seed + octave * 977u) * weight;
+		position *= 2.03;
+		weight *= mix(0.35, 0.58, detail);
+	}
+	return value;
+}
+
+vec3 ApplyClouds(vec3 colour, vec3 direction) {
+	if (source.Modes.z == 0u || direction.y <= -0.03) return colour;
+	vec2 windDirection = source.Clouds.zw;
+	windDirection = dot(windDirection, windDirection) > 0.0 ? normalize(windDirection) : vec2(1.0, 0.0);
+	vec2 wind = windDirection * source.CloudMotion.x * source.CloudMotion.y * 0.001;
+	float cellSize = max(source.CloudCompute.x, 0.001);
+	float density = 0.0;
+	if (source.Modes.z == 1u) {
+		vec3 point = direction * 8.0 / cellSize + vec3(wind.x, 0.0, wind.y);
+		if (source.Shaders.z == 1u) point.y *= 0.18;
+		else if (source.Shaders.z == 3u) point = floor(point * 1.5) / 1.5;
+		density = Fbm(point, source.Counts.y, source.CloudCompute.y);
+	} else {
+		uint steps = clamp(source.Counts.w, 1u, 64u);
+		for (uint stepIndex = 0u; stepIndex < 64u; stepIndex++) {
+			if (stepIndex >= steps) break;
+			float along = (float(stepIndex) + 0.5) / float(steps);
+			float shell = source.CloudCompute.z + along * source.CloudCompute.w;
+			vec3 point = direction * (10.0 + shell * 24.0) / cellSize + vec3(wind.x, 0.0, wind.y);
+			if (source.Shaders.z == 1u) point.y *= 0.18;
+			else if (source.Shaders.z == 3u) point = floor(point * 1.5) / 1.5;
+			density += Fbm(point, source.Counts.y, source.CloudCompute.y) / float(steps);
+		}
+	}
+	float coverage = 1.0 - source.Clouds.x;
+	float alpha = smoothstep(coverage, min(coverage + 0.24, 1.0), density) * source.Clouds.y;
+	alpha *= smoothstep(-0.03, 0.12, direction.y);
+	vec3 cloudColour = source.CloudColour.rgb;
+	if (source.Modes.z == 2u && source.Shaders.z == 2u) {
+		cloudColour *= vec3(0.32, 0.36, 0.45);
+		alpha = min(alpha * 1.45, 1.0);
+	}
+	return mix(colour, cloudColour, clamp(alpha, 0.0, 1.0));
+}
+
+void main() {
+	ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = imageSize(cloudImage);
+	if (any(greaterThanEqual(texel, size))) return;
+	vec2 uv = (vec2(texel) + 0.5) / vec2(size);
+	const float pi = 3.14159265358979323846;
+	float longitude = (uv.x * 2.0 - 1.0) * pi;
+	float latitude = (0.5 - uv.y) * pi;
+	vec3 direction = vec3(cos(latitude) * sin(longitude), sin(latitude), cos(latitude) * cos(longitude));
+	vec3 colour = texture(skyImage, uv).rgb;
+	imageStore(cloudImage, texel, vec4(max(ApplyClouds(colour, direction), vec3(0.0)), 1.0));
+}

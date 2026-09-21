@@ -1,6 +1,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Accessories.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -834,10 +836,19 @@ namespace engine::scene {
 		}
 
 		const Character *character = store.Get<Character>(CharacterOf(store, local->Instance));
-		const ecs::Entity wanted = character == nullptr ? ecs::NULL_ENTITY : character->Root;
+		ecs::Entity wanted = ecs::NULL_ENTITY;
+		if (character != nullptr) {
+			const Humanoid *humanoid = store.Get<Humanoid>(character->Humanoid);
+			wanted = humanoid != nullptr && store.Has<Transform>(humanoid->RootPart) ? character->Humanoid
+																					 : character->Root;
+		}
 
-		auto *camera = store.ResourceMutable<CameraController>();
-		if (camera == nullptr || camera->Subject == wanted) {
+		const auto *camera = store.Resource<CameraController>();
+		const ActiveCamera *active = store.Resource<ActiveCamera>();
+		const CameraSubject *selection =
+			active == nullptr ? nullptr : store.Get<CameraSubject>(active->Entity);
+		if (camera == nullptr || selection == nullptr || !selection->Automatic ||
+			selection->Target == wanted) {
 			return false;
 		}
 
@@ -849,7 +860,8 @@ namespace engine::scene {
 			return false;
 		}
 
-		camera->Subject = wanted;
+		store.GetMutable<CameraSubject>(active->Entity)->Target = wanted;
+		(void)FollowPortalTransit(store);
 		return true;
 	}
 
@@ -860,6 +872,7 @@ namespace engine::scene {
 		// would place every held tool one frame behind its own arm. See the
 		// declaration for why it is here rather than in a system of its own.
 		(void)UpdateToolGrips(store);
+		(void)UpdateAccessoryAttachments(store);
 
 		size_t placed = 0;
 

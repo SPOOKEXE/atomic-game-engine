@@ -54,6 +54,33 @@ namespace engine::scene {
 			return ServiceScope::Shared;
 		}
 
+		template <auto Mask> PropertyDescriptor LightingRenderFeatureMaskProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(uint32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<LightingServiceComponent>()});
+			property.Writes = property.Reads;
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				const LightingServiceComponent *lighting = store.Get<LightingServiceComponent>(instance);
+				if (lighting == nullptr) {
+					return false;
+				}
+				*static_cast<uint32_t *>(out) = (lighting->RenderFeatures.*Mask) & ALL_RENDER_FEATURES;
+				return true;
+			};
+			property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+				LightingServiceComponent *lighting = store.GetMutable<LightingServiceComponent>(instance);
+				if (lighting == nullptr) {
+					return false;
+				}
+				lighting->RenderFeatures.*Mask = *static_cast<const uint32_t *>(value) & ALL_RENDER_FEATURES;
+				return true;
+			};
+			return property;
+		}
+
 		// Scope, as a name rather than as a byte.
 		//
 		// Computed rather than a plain field, because the stored form is a
@@ -957,6 +984,14 @@ namespace engine::scene {
 			Classes::Property<&LightingServiceComponent::FogEnd>(lighting, "FogEnd");
 			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
 				lighting, "GeographicLatitude"
+			);
+			Classes::Computed(
+				lighting,
+				LightingRenderFeatureMaskProperty<&RenderFeaturePolicy::Enable>("RenderFeatureEnableMask")
+			);
+			Classes::Computed(
+				lighting,
+				LightingRenderFeatureMaskProperty<&RenderFeaturePolicy::Disable>("RenderFeatureDisableMask")
 			);
 			Classes::Computed(lighting, PostProcessShaderProperty());
 

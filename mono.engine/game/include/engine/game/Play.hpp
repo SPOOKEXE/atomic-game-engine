@@ -2,8 +2,8 @@
 
 // What a host and one of its clients say to each other while playing.
 //
-// Two messages, one in each direction, and both exist because the replicated
-// state cannot carry them.
+// Per-client messages carry requests and facts that ordinary replicated
+// components cannot express, including a pose tied to one client's input clock.
 //
 // **Down: which `Player` is yours.** `scene::LocalPlayer` has existed since
 // v0.10 with a comment explaining that it is empty on a server and holds this
@@ -34,6 +34,7 @@
 
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/script/PortalTransfer.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -92,7 +93,31 @@ namespace engine::game {
 		//
 		// @since v0.23
 		TeleportResult = 8,
+
+		// Explicit fresh admission and authenticated portal continuation.
+		PortalSession = 9,
+
+		// A completed own-player pose paired with this connection's input clock.
+		PlayerMotion = 10,
 	};
+
+	// Handles belong to this connection's replicated world, never to the previous
+	// portal world. The authenticated connection defines the input session.
+	struct PlayerMotion {
+		// Player entity associated with this record.
+		ecs::Entity Player;
+		// Root entity associated with this record.
+		ecs::Entity Root;
+		// Authoritative or transferred motion sample.
+		script::PortalTransferMotion Motion;
+	};
+	// Uses the shared completed-motion codec; a rejected decode leaves out untouched.
+	std::vector<std::byte> EncodePlayerMotion(const PlayerMotion &sample);
+	// Decodes one completed-motion payload without changing out on rejection.
+	bool DecodePlayerMotion(std::span<const std::byte> bytes, PlayerMotion &out);
+	// Call after the world tick, with the authority's consumed input frontier.
+	std::optional<PlayerMotion>
+	CapturePlayerMotion(const ecs::Store &store, ecs::Entity player, uint64_t consumedInput);
 
 	// The decision a server-side `TeleportService.TeleportRequested` handler
 	// returns. Only `Processed` permits the server to perform the teleport.
@@ -117,8 +142,11 @@ namespace engine::game {
 	//
 	// @since v0.23
 	struct TeleportRequest {
+		// Client-generated request identity used to pair this request with its reply.
 		uint64_t Id = 0;
+		// Destination place name requested by the client.
 		std::string Place;
+		// Opaque client payload copied unchanged to the destination place.
 		std::vector<std::byte> Data;
 	};
 
@@ -126,8 +154,11 @@ namespace engine::game {
 	//
 	// @since v0.23
 	struct TeleportRequestResult {
+		// Request identity copied from the client request this result resolves.
 		uint64_t Id = 0;
+		// Admission decision returned to the player.
 		TeleportRequestDecision Decision = TeleportRequestDecision::NotProcessed;
+		// Human-readable admission outcome returned to the requesting player.
 		std::string Message;
 	};
 
@@ -164,6 +195,10 @@ namespace engine::game {
 		// "jumping" every tick: the humanoid only leaves the ground when the
 		// host's own `Grounded` says it may.
 		bool Jump = false;
+
+		// Seconds per input-clock tick, independent of host physics cadence.
+		// Zero denotes unavailable timing; timed network clients supply this.
+		double StepSeconds = 0;
 	};
 
 	// Packs a join notice.
@@ -203,8 +238,9 @@ namespace engine::game {
 	// @param store  The world holding the player.
 	// @param player The `Player` instance.
 	// @param move   What they asked for, already normalised by the decoder.
-	// @return `false` when that player has no character to move.
-	bool ApplyMoveInput(ecs::Store &store, ecs::Entity player, const MoveInput &move);
+	// @param inputTick Originating client tick; zero for unstamped local control.
+	// @return Whether applied locally or queued for the player's portal transfer.
+	bool ApplyMoveInput(ecs::Store &store, ecs::Entity player, const MoveInput &move, uint64_t inputTick = 0);
 
 	// Packs a move input.
 	//
@@ -215,8 +251,8 @@ namespace engine::game {
 	// Unpacks a move input.
 	//
 	// **Refuses a payload of any other length**, which is what keeps it apart
-	// from `examples::Shot` on the same channel: a shot is seven floats and
-	// untagged, and a decoder that only checked the first byte would eventually
+	// from `examples::Shot` on the same channel: a shot is untagged,
+	// and a decoder that only checked the first byte would eventually
 	// read one as a move.
 	//
 	// **The direction is not trusted.** A client may send any three floats; the

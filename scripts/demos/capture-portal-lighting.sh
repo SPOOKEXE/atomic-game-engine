@@ -39,7 +39,7 @@ capture() {
 	local scene="$1"
 	local view="$2"
 
-	local source="$build/assets/examples/$scene.luau"
+	local source="$build/assets/examples/scripts/$scene.luau"
 	if [ ! -f "$source" ]; then
 		echo "no staged scene at $source" >&2
 		exit 1

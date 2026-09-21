@@ -165,11 +165,20 @@ namespace engine::replication {
 			return false;
 		}
 
-		net::PacketHeader header = Link_.NextHeader(channel);
+		net::PacketHeader header;
+		if (channel == net::ChannelKind::Reliable && UnsentReliableSequence) {
+			header.Channel = channel;
+			header.Sequence = *UnsentReliableSequence;
+		} else {
+			header = Link_.NextHeader(channel);
+		}
 
 		header = Receiver.Acknowledging(header);
 
 		if (!Transmit(header, payload, nowSeconds)) {
+			// A refused send creates no reliable packet. Reuse its sequence so
+			// the receiver never waits for a hole that cannot be retransmitted.
+			if (channel == net::ChannelKind::Reliable) UnsentReliableSequence = header.Sequence;
 			return false;
 		}
 
@@ -180,6 +189,7 @@ namespace engine::replication {
 		Owed = false;
 
 		if (channel == net::ChannelKind::Reliable) {
+			UnsentReliableSequence.reset();
 			Sender.Track(header.Sequence, payload, nowSeconds);
 		}
 		return true;

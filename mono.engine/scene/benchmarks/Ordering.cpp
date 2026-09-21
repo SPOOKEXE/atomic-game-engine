@@ -245,6 +245,40 @@ BENCH_PER_ITEM("PartitionCasters · 10k opaque instances", 10'000) {
 	Consume(PartitionCasters(instances, order));
 }
 
+BENCH_PER_ITEM("PartitionCasters · 10k instances, all cast", 10'000) {
+	static const std::vector<DrawInstance> instances = [] {
+		std::vector<DrawInstance> made = SceneOf(10'000, 0, 0);
+		for (DrawInstance &instance : made) {
+			instance.CastShadow = true;
+		}
+		return made;
+	}();
+
+	std::vector<uint32_t> &order = Order();
+	order.resize(instances.size());
+	for (uint32_t index = 0; index < order.size(); index++) {
+		order[index] = index;
+	}
+	Consume(PartitionCasters(instances, order));
+}
+
+BENCH_PER_ITEM("PartitionCasters · 10k instances, none cast", 10'000) {
+	static const std::vector<DrawInstance> instances = [] {
+		std::vector<DrawInstance> made = SceneOf(10'000, 0, 0);
+		for (DrawInstance &instance : made) {
+			instance.CastShadow = false;
+		}
+		return made;
+	}();
+
+	std::vector<uint32_t> &order = Order();
+	order.resize(instances.size());
+	for (uint32_t index = 0; index < order.size(); index++) {
+		order[index] = index;
+	}
+	Consume(PartitionCasters(instances, order));
+}
+
 BENCH_PER_ITEM("PartitionSurfaces · 10k instances with no mirror", 10'000) {
 	// **The early-out row.** No instance shows a surface, so this must return
 	// without touching the order and without allocating. It should be a linear

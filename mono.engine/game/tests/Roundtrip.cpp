@@ -9,7 +9,9 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -20,6 +22,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -1195,4 +1198,149 @@ TEST_CASE("a renamed world keeps its handle and its place", "[game][roundtrip]")
 	CHECK(universe.NameOf(worlds[0]) == Name("First"));
 	CHECK(universe.NameOf(worlds[1]) == Name("Centre"));
 	CHECK(universe.NameOf(worlds[2]) == Name("Last"));
+}
+
+TEST_CASE(
+	"camera follow selection survives documents and internal clone remapping",
+	"[game][roundtrip][camera-subject]"
+) {
+	const bool humanoidTarget = GENERATE(false, true);
+	RegisterEverything();
+	Universe universe;
+	const WorldId world = AddWorld(universe, "CameraSelection");
+	universe.Enter(world, [humanoidTarget](Store &store) {
+		const Entity workspace = engine::scene::InstallServices(store);
+		const Entity group = store.CreateInstance(engine::scene::ModelClass(), "Rig");
+		store.SetParent(group, workspace);
+		const Entity root = store.CreateInstance(engine::scene::PartClass(), "Root");
+		store.SetParent(root, group);
+		const Entity subject =
+			humanoidTarget ? store.CreateInstance(engine::scene::HumanoidClass(), "Subject") : root;
+		if (humanoidTarget) {
+			store.SetParent(subject, group);
+			REQUIRE(store.SetProperty(subject, Name("RootPart"), &root, sizeof(root)));
+		}
+		for (const bool automatic : {false, true}) {
+			for (const bool selected : {false, true}) {
+				const std::string name =
+					std::string(automatic ? "Automatic" : "Explicit") + (selected ? "Target" : "Nil");
+				const Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
+				store.SetParent(camera, group);
+				const Entity target = selected ? subject : NULL_ENTITY;
+				REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &target, sizeof(target)));
+				REQUIRE(
+					store.SetProperty(camera, Name("CameraSubjectAutomatic"), &automatic, sizeof(automatic))
+				);
+			}
+		}
+		std::string restoreError;
+		const Entity documentCopy = engine::game::ReadInstanceDocument(
+			store, engine::game::WriteInstanceDocument(store, group), workspace, restoreError
+		);
+		REQUIRE(documentCopy != NULL_ENTITY);
+		for (const Entity clone : {store.CloneInstance(group), documentCopy}) {
+			REQUIRE(clone != NULL_ENTITY);
+			const Entity clonedRoot = ChildNamed(store, clone, "Root");
+			const Entity clonedSubject = humanoidTarget ? ChildNamed(store, clone, "Subject") : clonedRoot;
+			for (const bool automatic : {false, true}) {
+				for (const bool selected : {false, true}) {
+					const std::string name =
+						std::string(automatic ? "Automatic" : "Explicit") + (selected ? "Target" : "Nil");
+					const auto *selection =
+						store.Get<engine::scene::CameraSubject>(ChildNamed(store, clone, name));
+					REQUIRE(selection != nullptr);
+					CHECK(selection->Automatic == automatic);
+					CHECK(selection->Target == (selected ? clonedSubject : NULL_ENTITY));
+					CHECK(
+						engine::scene::CameraSubjectRoot(store, ChildNamed(store, clone, name)) ==
+						(selected ? clonedRoot : NULL_ENTITY)
+					);
+				}
+			}
+			store.DestroyInstance(clone);
+		}
+	});
+	std::string error;
+	const std::string document = engine::game::WriteWorldDocument(universe, world, error);
+	REQUIRE_FALSE(document.empty());
+	const WorldId copy = engine::game::ReadWorldDocument(universe, document, Name("Copy"), error);
+	REQUIRE(copy.IsValid());
+	universe.Enter(copy, [humanoidTarget](Store &store) {
+		const Entity group = ChildNamed(store, store.FindFirstRoot("Workspace"), "Rig");
+		const Entity root = ChildNamed(store, group, "Root");
+		REQUIRE(root != NULL_ENTITY);
+		const Entity subject = humanoidTarget ? ChildNamed(store, group, "Subject") : root;
+		for (const bool automatic : {false, true}) {
+			for (const bool selected : {false, true}) {
+				const std::string name =
+					std::string(automatic ? "Automatic" : "Explicit") + (selected ? "Target" : "Nil");
+				const auto *selection =
+					store.Get<engine::scene::CameraSubject>(ChildNamed(store, group, name));
+				REQUIRE(selection != nullptr);
+				CHECK(selection->Automatic == automatic);
+				CHECK(selection->Target == (selected ? subject : NULL_ENTITY));
+				CHECK(
+					engine::scene::CameraSubjectRoot(store, ChildNamed(store, group, name)) ==
+					(selected ? root : NULL_ENTITY)
+				);
+			}
+		}
+	});
+}
+
+TEST_CASE(
+	"documents refuse known reference properties with invalid target types",
+	"[game][roundtrip][camera-subject]"
+) {
+	RegisterEverything();
+	for (const bool camera : {false, true}) {
+		const std::string className = camera ? "Camera" : "Humanoid";
+		const std::string propertyName = camera ? "CameraSubject" : "RootPart";
+		const std::string body =
+			"<Item class=\"Model\" name=\"Rig\" id=\"1\"><Item class=\"" + className +
+			"\" name=\"Subject\" id=\"2\"><Property name=\"" + propertyName +
+			"\">3</Property></Item><Item class=\"Instance\" name=\"InvalidTarget\" id=\"3\" /></Item>";
+		std::string error;
+		Store store("invalid-reference");
+		CHECK(
+			engine::game::ReadInstanceDocument(
+				store, "<Instance format=\"3\">" + body + "</Instance>", NULL_ENTITY, error
+			) == NULL_ENTITY
+		);
+		CHECK(error.find(className + "." + propertyName) != std::string::npos);
+		CHECK(error.find("refused") != std::string::npos);
+		Universe universe;
+		error.clear();
+		CHECK_FALSE(
+			engine::game::ReadWorldDocument(
+				universe, "<World format=\"3\" name=\"Invalid\">" + body + "</World>", Name("Invalid"), error
+			)
+				.IsValid()
+		);
+		CHECK(error.find(className + "." + propertyName) != std::string::npos);
+		CHECK(error.find("refused") != std::string::npos);
+		CHECK(universe.Count() == 0);
+		// A missing document-local id is still recoverable and keeps the default.
+		std::string dangling = body;
+		const size_t targetId = dangling.find("id=\"3\"");
+		REQUIRE(targetId != std::string::npos);
+		dangling.replace(targetId, 6, "id=\"4\"");
+		error.clear();
+		CHECK(
+			engine::game::ReadInstanceDocument(
+				store, "<Instance format=\"3\">" + dangling + "</Instance>", NULL_ENTITY, error
+			) != NULL_ENTITY
+		);
+		CHECK(error.empty());
+		CHECK(
+			engine::game::ReadWorldDocument(
+				universe,
+				"<World format=\"3\" name=\"Dangling\">" + dangling + "</World>",
+				Name("Dangling"),
+				error
+			)
+				.IsValid()
+		);
+		CHECK(error.empty());
+	}
 }

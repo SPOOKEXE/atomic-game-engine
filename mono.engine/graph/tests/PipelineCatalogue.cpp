@@ -157,12 +157,32 @@ TEST_CASE("every output can land somewhere", "[graph][catalogue]") {
 
 TEST_CASE("the default PBR frame's kinds and material ports are registered", "[graph][catalogue]") {
 	Kinds();
-	for (const char *name :
-		 {"world",			"shadow",	  "camera",			  "last-frame",		"entities",
-		  "cull-frustum",	"order-draw", "upload-instances", "mirror-capture", "portal-capture",
-		  "portal-tonemap", "gbuffer",	  "depth-linearise",  "ssao",			"deferred-lighting",
-		  "shader-lenses",	"tonemap",	  "portal-overlay",	  "mirror-overlay", "transparent",
-		  "present",		"overlay",	  "interface",		  "output-image"}) {
+	for (const char *name : {"world",
+							 "shadow",
+							 "camera",
+							 "last-frame",
+							 "entities",
+							 "cull-frustum",
+							 "order-draw",
+							 "mesh-residency",
+							 "delta-upload",
+							 "select-lod",
+							 "mirror-capture",
+							 "portal-capture",
+							 "portal-tonemap",
+							 "gbuffer",
+							 "depth-linearise",
+							 "ssao",
+							 "deferred-lighting",
+							 "shader-lenses",
+							 "tonemap",
+							 "portal-overlay",
+							 "mirror-overlay",
+							 "transparent",
+							 "present",
+							 "overlay",
+							 "interface",
+							 "output-image"}) {
 		INFO("kind: " << name);
 		CHECK(NodeCatalogue::Find(Name(name)) != nullptr);
 	}
@@ -174,12 +194,63 @@ TEST_CASE("the default PBR frame's kinds and material ports are registered", "[g
 	CHECK(std::any_of(gbuffer->Outputs.begin(), gbuffer->Outputs.end(), [](const PortSpec &port) {
 		return port.Name == Name("emissive");
 	}));
+	CHECK(std::any_of(gbuffer->Outputs.begin(), gbuffer->Outputs.end(), [](const PortSpec &port) {
+		return port.Name == Name("mesh-uv") && port.Format == engine::graph::ResourceFormat::RG16F;
+	}));
+	CHECK(gbuffer->Needs.ColourTargets == 8);
+	REQUIRE(gbuffer->Outputs.size() == 9);
+	CHECK(gbuffer->Outputs[4].Name == Name("mesh-uv"));
+	CHECK(gbuffer->Outputs[5].Name == Name("object-ids"));
+	CHECK(gbuffer->Outputs[6].Name == Name("semantic-ids"));
+	CHECK(gbuffer->Outputs[7].Name == Name("part-ids"));
+	CHECK(gbuffer->Outputs[8].Name == Name("depth"));
 	CHECK(std::any_of(lighting->Inputs.begin(), lighting->Inputs.end(), [](const PortSpec &port) {
 		return port.Name == Name("emissive");
 	}));
 	CHECK(std::any_of(lighting->Inputs.begin(), lighting->Inputs.end(), [](const PortSpec &port) {
 		return port.Name == Name("occlusion");
 	}));
+	const NodeKindSpec *history = NodeCatalogue::Find(Name("last-frame"));
+	REQUIRE(history != nullptr);
+	CHECK(history->Lifetime == engine::graph::ResourceLifetime::History);
+	CHECK(history->HistoryReads == 1);
+}
+
+TEST_CASE(
+	"hard-render nodes declare compute contracts and renderer backends", "[graph][catalogue][tracing]"
+) {
+	Kinds();
+	for (const char *name : {"tessellate", "global-illumination", "raytrace", "pathtrace"}) {
+		const NodeKindSpec *spec = NodeCatalogue::Find(Name(name));
+		REQUIRE(spec != nullptr);
+		CHECK(spec->Queue == engine::graph::ExecutionQueue::Compute);
+		CHECK(spec->Needs.Compute);
+		CHECK(spec->BuiltInBackend);
+		if (std::string_view(name) == "tessellate") {
+			REQUIRE(spec->Outputs.size() == 3);
+			for (const PortSpec &port : spec->Outputs)
+				CHECK(port.Kind == engine::graph::ResourceKind::Buffer);
+		} else {
+			REQUIRE(spec->Outputs.size() == 1);
+			CHECK(spec->Outputs.front().Kind == engine::graph::ResourceKind::Storage);
+		}
+		CHECK(spec->DefaultShader == std::string(name) + ".comp");
+	}
+	for (const char *name : {"global-illumination", "raytrace", "pathtrace"}) {
+		REQUIRE(NodeCatalogue::Find(Name(name)) != nullptr);
+		CHECK(NodeCatalogue::Find(Name(name))->Needs.StorageTextures);
+	}
+
+	const NodeKindSpec *raytrace = NodeCatalogue::Find(Name("raytrace"));
+	REQUIRE(raytrace != nullptr);
+	const auto input = [raytrace](std::string_view name) -> const PortSpec * {
+		for (const PortSpec &port : raytrace->Inputs)
+			if (port.Name.Text() == name) return &port;
+		return nullptr;
+	};
+	REQUIRE(input("scene") != nullptr);
+	REQUIRE(input("indirect") != nullptr);
+	CHECK_FALSE(input("indirect")->Required);
 }
 
 TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][catalogue]") {
@@ -197,18 +268,23 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	};
 
 	ports("world", 0, 1);
-	ports("shadow", 1, 1);
+	ports("shadow", 2, 1);
 	ports("camera", 0, 1);
 	ports("last-frame", 0, 1);
 	ports("entities", 0, 1);
 	ports("cull-frustum", 2, 1);
 	ports("order-draw", 2, 1);
-	ports("upload-instances", 1, 1);
+	ports("mesh-residency", 0, 1);
+	ports("delta-upload", 2, 1);
+	ports("select-lod", 2, 1);
 	ports("mirror-capture", 5, 1);
+	ports("surface-capture", 4, 3);
 	ports("portal-capture", 3, 2);
 	ports("portal-tonemap", 1, 1);
-	ports("gbuffer", 3, 5);
+	ports("gbuffer", 3, 8);
+	ports("depth-peel", 3, 3);
 	ports("depth-linearise", 1, 1);
+	ports("depth-validity", 1, 1);
 	ports("ssao", 2, 1);
 	ports("deferred-lighting", 8, 1);
 	ports("tonemap", 1, 1);
@@ -262,6 +338,58 @@ TEST_CASE("execution and parameter metadata live on the catalogue row", "[graph]
 	CHECK(mode->Widget == ParameterWidget::Select);
 	CHECK(mode->Default == "target");
 	CHECK(mode->Options == std::vector<std::string>{"target", "groups"});
+}
+
+TEST_CASE("antialiasing choices are executable graph nodes", "[graph][catalogue][antialiasing]") {
+	Kinds();
+
+	for (const char *name : {"fxaa", "taa", "smaa-edges", "smaa-blend", "smaa-resolve"}) {
+		const NodeKindSpec *spec = NodeCatalogue::Find(Name(name));
+		INFO("kind: " << name);
+		REQUIRE(spec != nullptr);
+		CHECK(spec->BuiltInBackend);
+		CHECK(spec->Queue == engine::graph::ExecutionQueue::Graphics);
+		CHECK_FALSE(spec->DefaultShader.empty());
+	}
+
+	const NodeKindSpec *taa = NodeCatalogue::Find(Name("taa"));
+	REQUIRE(taa != nullptr);
+	CHECK(taa->Inputs.size() == 3);
+	CHECK(taa->Outputs.size() == 2);
+}
+
+TEST_CASE(
+	"compositor basics have executable shaders and authored controls", "[graph][catalogue][compositor]"
+) {
+	Kinds();
+
+	for (const char *name : {"exposure-grade", "hsv", "mix", "transform-crop", "blur"}) {
+		const NodeKindSpec *spec = NodeCatalogue::Find(Name(name));
+		INFO("kind: " << name);
+		REQUIRE(spec != nullptr);
+		CHECK(spec->BuiltInBackend);
+		CHECK(spec->Repeatable);
+		CHECK(spec->Queue == engine::graph::ExecutionQueue::Graphics);
+		CHECK_FALSE(spec->DefaultShader.empty());
+		CHECK_FALSE(spec->Params.empty());
+	}
+
+	const NodeKindSpec *mix = NodeCatalogue::Find(Name("mix"));
+	REQUIRE(mix != nullptr);
+	REQUIRE(mix->Inputs.size() == 2);
+	const auto operation = std::find_if(mix->Params.begin(), mix->Params.end(), [](const auto &parameter) {
+		return parameter.Name == Name("operation");
+	});
+	REQUIRE(operation != mix->Params.end());
+	CHECK(operation->Default == "alpha-over");
+	CHECK(operation->Options.back() == "alpha-over");
+
+	const NodeKindSpec *transform = NodeCatalogue::Find(Name("transform-crop"));
+	REQUIRE(transform != nullptr);
+	CHECK(transform->Params.size() == 10);
+	const NodeKindSpec *blur = NodeCatalogue::Find(Name("blur"));
+	REQUIRE(blur != nullptr);
+	CHECK(blur->Inputs.size() == 1);
 }
 
 TEST_CASE("parameter schemas have unique names and valid defaults", "[graph][catalogue]") {

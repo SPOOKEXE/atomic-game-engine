@@ -68,6 +68,9 @@ int main(int argc, char **argv) {
 		"force-serial-compute",
 		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
 	);
+	arguments.Value(
+		"test-portal-fault-report", "PATH", "Test only: append fired portal fault markers to PATH"
+	);
 
 	// The control surface. Off unless asked for - see `Options::ControlPort`.
 	// The number is read from the one constant rather than written here, so the
@@ -77,6 +80,10 @@ int main(int argc, char **argv) {
 		"PORT",
 		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " +
 			std::to_string(engine::control::DEFAULT_SERVER_PORT) + ")"
+	);
+	arguments.Flag(
+		"data-factory",
+		"Start an isolated headless data-factory host; scenes are created and retired through MCP"
 	);
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
@@ -92,17 +99,32 @@ int main(int argc, char **argv) {
 		"N|never|immediate",
 		"Manage world lifetime: suspend after N seconds, never (24/7), or as soon as empty"
 	);
-	arguments.Value("game", "PATH", "Game file to host (v0.5+)");
+	arguments.Value("game", "PATH", "Game, world, or script project to host");
 	arguments.Value("record", "PATH", "Write a recording of this run");
 	arguments.Value("replay", "PATH", "Replay a recording instead of simulating");
 	arguments.Value("override-assets-directory", "DIR", "Read staged data from here");
 	arguments.Value("datastore-root", "DIR", "Persist DataStore under this root");
 	arguments.Value("datastore-environment", "mock|live", "Select the isolated DataStore environment");
 	arguments.Value("host", "NAME", "Run as a supervised host under a driver, with this name");
+	arguments.Flag("host-tick-exchange", "Use driver-controlled tick phases for a supervised host");
 	arguments.Value("world", "NAME", "A world this host was granted (repeatable, host mode only)");
 	arguments.Value("remote-world", "NAME", "Place this world in a supervised host process (repeatable)");
 	arguments.Value("worlds-per-host", "N", "Shared worlds per host process (default 8)");
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
+	arguments.Value(
+		"presentation-program",
+		"PATH",
+		"Client executable to launch for live portal images on each listening host"
+	);
+	arguments.Value(
+		"test-restart-presentation-world",
+		"NAME",
+		"Test only: restart this world's portal image producer on its first portal lease"
+	);
+	arguments.Flag(
+		"test-drop-next-portal-crossed-acknowledgement",
+		"Test only: lose the next inbound portal-crossing acknowledgement"
+	);
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("physical-core", "N", "Physical-core slot assigned by a supervising driver");
 	arguments.Value("process-index", "N", "Stable child index assigned by a supervising driver");
@@ -258,6 +280,7 @@ int main(int argc, char **argv) {
 		options.ControlPort =
 			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_SERVER_PORT));
 	}
+	options.DataFactory = options.DataFactory || arguments.Has("data-factory");
 	options.Chatter = options.Chatter || arguments.Has("chatter");
 
 	if (auto store = arguments.Get("content-store")) {
@@ -328,6 +351,7 @@ int main(int argc, char **argv) {
 	}
 	if (auto host = arguments.Get("host")) {
 		options.HostName = std::string(*host);
+		options.HostTickExchange = arguments.Has("host-tick-exchange");
 		for (const std::string_view world : arguments.GetAll("world")) {
 			options.HostWorlds.emplace_back(world);
 		}
@@ -344,6 +368,15 @@ int main(int argc, char **argv) {
 	if (auto program = arguments.Get("host-program")) {
 		options.HostProgram = std::filesystem::path(*program);
 	}
+	if (auto program = arguments.Get("presentation-program")) {
+		options.PresentationProgram = std::filesystem::absolute(std::filesystem::path(*program));
+	}
+	if (auto world = arguments.Get("test-restart-presentation-world")) {
+		options.TestRestartPresentationWorld = std::string(*world);
+	}
+	options.TestDropNextPortalCrossedAcknowledgement =
+		arguments.Has("test-drop-next-portal-crossed-acknowledgement");
+	if (auto report = arguments.Get("test-portal-fault-report")) options.TestPortalFaultReport = *report;
 	options.Processes = static_cast<uint32_t>(arguments.GetInteger("processes", options.Processes));
 	if (arguments.Has("physical-core")) {
 		options.PhysicalCore =
@@ -423,9 +456,9 @@ int main(int argc, char **argv) {
 	std::signal(SIGINT, OnInterrupt);
 	std::signal(SIGTERM, OnInterrupt);
 
-	host.Run();
+	const server::RunSummary summary = host.Run();
 
 	Running = nullptr;
 	host.Shutdown();
-	return 0;
+	return summary.Failed ? 1 : 0;
 }

@@ -197,14 +197,18 @@ namespace studio {
 				}
 			}
 
-			// **Only for a camera, and only for the world being viewed.**
+			// **Only for a camera, and only for the focused viewport's world.**
 			// Looking through a camera in a world the viewport is not showing
 			// would move the eye to somewhere the panel cannot draw.
 			const ClassId cameraClass = Classes::Find(Name("Camera"));
-			if (cameraClass.IsValid() && store.IsA(instance, cameraClass) && world == Active) {
-				const bool following = FollowCamera == instance;
+			if (cameraClass.IsValid() && store.IsA(instance, cameraClass) &&
+				world == ViewportWorld(FocusedViewport)) {
+				ViewportState *viewport = ExtraAt(FocusedViewport);
+				Entity &follow = viewport != nullptr ? viewport->Follow : FollowCamera;
+				const bool following = follow == instance;
 				if (ImGui::MenuItem(following ? "Stop Looking Through" : "Look Through Camera")) {
 					PendingLookThrough = following ? NULL_ENTITY : instance;
+					PendingLookThroughViewport = FocusedViewport;
 					PendingLookThroughSet = true;
 				}
 			}
@@ -552,6 +556,10 @@ namespace studio {
 				// indentation, so the tree does not jump as the field opens and
 				// closes - and it keeps the clipper's rows uniform, which is
 				// what lets it skip by arithmetic.
+				// The trailing insert control is submitted later on this row. The
+				// tree node must release its full-width hit box so that control can
+				// own a click in the overlap.
+				ImGui::SetNextItemAllowOverlap();
 				ImGui::TreeNodeEx("##node", flags, "%s", renaming ? "" : row.Text);
 
 				// **Everything that asks about "the last item" happens here,
@@ -563,6 +571,14 @@ namespace studio {
 				// which is the good version of this mistake.
 				const bool toggled = ImGui::IsItemToggledOpen();
 				const bool hovered = ImGui::IsItemHovered();
+				const ImVec2 rowMin = ImGui::GetItemRectMin();
+				const float insertButtonSize = ImGui::GetFrameHeight();
+				const float insertButtonX =
+					ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - insertButtonSize;
+				const bool insertButtonHovered = ImGui::IsMouseHoveringRect(
+					ImVec2(insertButtonX, rowMin.y),
+					ImVec2(insertButtonX + insertButtonSize, rowMin.y + insertButtonSize)
+				);
 
 				if (toggled) {
 					const auto found = std::find(tree.Open.begin(), tree.Open.end(), row.Instance);
@@ -665,8 +681,8 @@ namespace studio {
 				// that happened to reuse an ImGui tree id could open the wrong picker
 				// and leave the tree node handling the click as an expand/collapse.
 				ImGui::PushID(static_cast<int>(row.Instance.Id));
-				if (hovered) {
-					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
+				if (hovered || insertButtonHovered) {
+					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - insertButtonSize);
 					if (ImGui::SmallButton("+##insert-hover")) {
 						ImGui::OpenPopup("##insert-hover-popup");
 					}
@@ -1351,11 +1367,13 @@ namespace studio {
 
 		if (PendingLookThroughSet) {
 			PendingLookThroughSet = false;
-			FollowCamera = PendingLookThrough;
+			ViewportState *viewport = ExtraAt(PendingLookThroughViewport);
+			Entity &follow = viewport != nullptr ? viewport->Follow : FollowCamera;
+			follow = PendingLookThrough;
 			PendingLookThrough = NULL_ENTITY;
 
-			Say(FollowCamera == NULL_ENTITY ? "back to the editor camera"
-											: "looking through the scene's camera - right-drag to fly");
+			Say(follow == NULL_ENTITY ? "back to the editor camera"
+									  : "looking through the scene's camera - right-drag to fly");
 		}
 
 		if (PendingZoomWorld.IsValid()) {

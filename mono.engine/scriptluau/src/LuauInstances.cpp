@@ -232,11 +232,11 @@ namespace engine::script {
 				PushSignal(state, SignalKind::GuiActivated, instance);
 				return 1;
 			}
-			if (name == "MouseButton1Down") {
+			if (name == "MouseButton1Down" || name == "OnMouse1Down") {
 				PushSignal(state, SignalKind::GuiMouseButton1Down, instance);
 				return 1;
 			}
-			if (name == "MouseButton1Up") {
+			if (name == "MouseButton1Up" || name == "OnMouse1Up") {
 				PushSignal(state, SignalKind::GuiMouseButton1Up, instance);
 				return 1;
 			}
@@ -244,11 +244,11 @@ namespace engine::script {
 				PushSignal(state, SignalKind::GuiMouseButton2Click, instance);
 				return 1;
 			}
-			if (name == "MouseButton2Down") {
+			if (name == "MouseButton2Down" || name == "OnMouse2Down") {
 				PushSignal(state, SignalKind::GuiMouseButton2Down, instance);
 				return 1;
 			}
-			if (name == "MouseButton2Up") {
+			if (name == "MouseButton2Up" || name == "OnMouse2Up") {
 				PushSignal(state, SignalKind::GuiMouseButton2Up, instance);
 				return 1;
 			}
@@ -270,6 +270,14 @@ namespace engine::script {
 			}
 			if (name == "MouseMoved") {
 				PushSignal(state, SignalKind::GuiMouseMoved, instance);
+				return 1;
+			}
+			if (name == "OnMouse1Changed") {
+				PushSignal(state, SignalKind::GuiMouseButton1Changed, instance);
+				return 1;
+			}
+			if (name == "OnMouse2Changed") {
+				PushSignal(state, SignalKind::GuiMouseButton2Changed, instance);
 				return 1;
 			}
 
@@ -651,6 +659,10 @@ namespace engine::script {
 			*static_cast<int64_t *>(out) = static_cast<int64_t>(luaL_checknumber(state, index));
 			return true;
 		case PropertyType::Name:
+			if (lua_isnil(state, index)) {
+				*static_cast<Name *>(out) = Name{};
+				return true;
+			}
 			*static_cast<Name *>(out) = Name(luaL_checkstring(state, index));
 			return true;
 		case PropertyType::String:
@@ -1043,6 +1055,25 @@ namespace engine::script {
 				note(FireSignal(state, SignalKind::GuiInputEnded, event.Instance, 0));
 				note(FireSignal(state, SignalKind::GuiMouseButton1Up, event.Instance, 0));
 				break;
+
+			case gui::EventKind::MouseButton2Began:
+				note(FireSignal(state, SignalKind::GuiMouseButton2Down, event.Instance, 0));
+				break;
+
+			case gui::EventKind::MouseButton2Ended:
+				note(FireSignal(state, SignalKind::GuiMouseButton2Up, event.Instance, 0));
+				break;
+
+			case gui::EventKind::MouseButton1Changed:
+			case gui::EventKind::MouseButton2Changed: {
+				const SignalKind kind = event.Kind == gui::EventKind::MouseButton1Changed
+											? SignalKind::GuiMouseButton1Changed
+											: SignalKind::GuiMouseButton2Changed;
+				lua_pushnumber(state, event.Position.X);
+				lua_pushnumber(state, event.Position.Y);
+				note(FireSignal(state, kind, event.Instance, 2));
+				break;
+			}
 
 			case gui::EventKind::Activated:
 				note(FireSignal(state, SignalKind::GuiActivated, event.Instance, 0));

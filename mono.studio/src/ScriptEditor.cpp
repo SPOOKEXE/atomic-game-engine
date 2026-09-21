@@ -1,3 +1,4 @@
+#include "CompletionChoice.hpp"
 #include "ExternalEditor.hpp"
 #include "ScriptFieldWindow.hpp"
 
@@ -790,8 +791,7 @@ namespace studio {
 		if (textChanged || asked) {
 			ScriptPopupChoice = 0;
 		} else {
-			ScriptPopupChoice =
-				std::clamp(ScriptPopupChoice, 0, static_cast<int>(ScriptCompletions.size()) - 1);
+			ScriptPopupChoice = ClampCompletionChoice(ScriptPopupChoice, ScriptCompletions.size());
 		}
 	}
 

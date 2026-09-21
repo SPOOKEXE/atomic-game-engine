@@ -225,6 +225,7 @@ namespace loadtest {
 		// The one fact a replica cannot derive - it arrives as a per-client user
 		// message rather than as replicated state.
 		engine::ecs::Entity Mine;
+		bool FreshAdmissionSent = false;
 
 		Stage Stage_ = Stage::Dialling;
 

@@ -124,6 +124,20 @@ TEST_CASE("a null device renders on demand and never on its own", "[audio][devic
 	CHECK(device->Rendered() == BLOCK * 5);
 }
 
+TEST_CASE("a paused null device preserves its sample clock", "[audio][device]") {
+	std::unique_ptr<NullDevice> device = OpenNullDevice(Settings());
+	device->Advance(1);
+	const uint64_t before = device->Rendered();
+	device->SetPaused(true);
+	CHECK(device->Paused());
+	CHECK(device->Advance(4) == 0);
+	CHECK(device->Rendered() == before);
+	device->SetPaused(false);
+	CHECK_FALSE(device->Paused());
+	CHECK(device->Advance(1) == BLOCK);
+	CHECK(device->Rendered() == before + BLOCK);
+}
+
 TEST_CASE("a null device with nothing playing is silent", "[audio][device]") {
 	std::unique_ptr<NullDevice> device = OpenNullDevice(Settings());
 	device->Advance(3);

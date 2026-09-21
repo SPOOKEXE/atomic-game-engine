@@ -1,3 +1,4 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -5,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -32,6 +34,58 @@ namespace store_test {
 }
 
 using namespace store_test;
+
+TEST_CASE("store incarnation separates lifetime and snapshot identities", "[ecs][source-identity]") {
+	Store first("identity");
+	Store second("identity");
+	REQUIRE(first.Identity() != 0);
+	REQUIRE(first.Identity() != second.Identity());
+	engine::core::ByteWriter firstImage;
+	engine::core::ByteWriter secondImage;
+	REQUIRE(first.Save(firstImage));
+	REQUIRE(second.Save(secondImage));
+	CHECK(std::ranges::equal(firstImage.Bytes(), secondImage.Bytes()));
+
+	std::optional<Store> reused(std::in_place, "identity");
+	const uint64_t original = reused->Identity();
+	const Store *address = &*reused;
+	reused.reset();
+	reused.emplace("identity");
+	CHECK(&*reused == address);
+	CHECK(reused->Identity() != original);
+	const uint64_t beforeWrite = reused->Identity();
+	const Entity entity = reused->Create();
+	reused->Set<Tag>(entity, Tag{3});
+	CHECK(reused->Identity() == beforeWrite);
+	reused->Clear();
+	CHECK(reused->Identity() != beforeWrite);
+
+	for (const int operation : {0, 1, 2}) {
+		INFO("snapshot operation=" << operation);
+		const uint64_t before = second.Identity();
+		engine::core::ByteReader reader(firstImage.Bytes());
+		REQUIRE(
+			(operation == 0	  ? second.Load(reader)
+			 : operation == 1 ? second.LoadContents(reader)
+							  : second.Apply(reader, engine::ecs::ApplyMode::Authoritative))
+		);
+		CHECK(second.Identity() != before);
+		CHECK(second.Identity() != first.Identity());
+	}
+	for (const int operation : {0, 1, 2}) {
+		INFO("failed snapshot operation=" << operation);
+		const Entity live = second.Create();
+		const uint64_t before = second.Identity();
+		engine::core::ByteReader reader(std::span<const std::byte>{});
+		CHECK_FALSE(
+			(operation == 0	  ? second.Load(reader)
+			 : operation == 1 ? second.LoadContents(reader)
+							  : second.Apply(reader, engine::ecs::ApplyMode::Authoritative))
+		);
+		CHECK((second.Identity() == before) == (operation == 2));
+		CHECK(second.Alive(live) == (operation == 2));
+	}
+}
 
 TEST_CASE("a fresh store has no entities of ours", "[ecs]") {
 	Store store("test");

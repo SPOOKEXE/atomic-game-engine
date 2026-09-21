@@ -1,3 +1,4 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/SparseSet.hpp>
 #include <engine/testing/Suite.hpp>
@@ -565,6 +566,65 @@ TEST_CASE("a restore reproduces both regions exactly", "[ecs]") {
 	// each side lands where it did before.
 	REQUIRE(restored.Allocate(EntityRange::Authoritative) == dropped);
 	REQUIRE(restored.Allocate(EntityRange::Predicted) == SparseSet::PREDICTED_BASE + 1);
+}
+
+TEST_CASE(
+	"allocator metadata rejects corrupt free lists and bounded lengths atomically",
+	"[ecs][snapshot][allocation]"
+) {
+	using engine::core::ByteReader;
+	using engine::core::ByteWriter;
+	SparseSet restored;
+	for (uint32_t index = 0; index < 4; ++index) {
+		restored.Restore(index, 3, index < 2);
+		restored.Restore(SparseSet::PREDICTED_BASE + index, 7, index < 2);
+	}
+	restored.FinishRestore(4, 4);
+	ByteWriter before;
+	restored.WriteAllocationState(before);
+	std::vector<std::byte> invalid(before.Bytes().begin(), before.Bytes().end());
+	const auto replace = [&](size_t offset, uint32_t value) {
+		ByteWriter word;
+		word.WriteUInt32(value);
+		std::copy(word.Bytes().begin(), word.Bytes().end(), invalid.begin() + offset);
+	};
+	SECTION("page count beyond the addressable region") {
+		replace(0, UINT32_MAX);
+	}
+	SECTION("missing resident page epoch") {
+		replace(0, 0);
+	}
+	SECTION("free count beyond the stream") {
+		replace(8, UINT32_MAX);
+	}
+	SECTION("missing free slot") {
+		replace(8, 1);
+	}
+	SECTION("free list names a live slot") {
+		replace(12, 0);
+	}
+	SECTION("free list crosses regions") {
+		replace(12, SparseSet::PREDICTED_BASE + 3);
+	}
+	SECTION("free list names an unissued slot") {
+		replace(12, 4);
+	}
+	SECTION("free list repeats a slot") {
+		replace(12, 2);
+	}
+	SECTION("second region is truncated") {
+		invalid.pop_back();
+	}
+	ByteReader reader(invalid);
+	CHECK_FALSE(restored.ReadAllocationState(reader));
+	ByteWriter after;
+	restored.WriteAllocationState(after);
+	CHECK(
+		std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin(), after.Bytes().end())
+	);
+	CHECK(restored.LiveCount() == 4);
+	CHECK(restored.Allocate() == 2);
+	CHECK(restored.Allocate(EntityRange::Predicted) == SparseSet::PREDICTED_BASE + 2);
 }
 
 TEST_CASE("adopting one index only moves its own region's high-water mark", "[ecs]") {

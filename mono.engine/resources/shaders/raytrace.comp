@@ -1,0 +1,58 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "projection.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D scene;
+layout(set = 0, binding = 1) uniform sampler2D depth;
+layout(set = 0, binding = 2) uniform sampler2D normal;
+layout(set = 0, binding = 3) uniform sampler2D material;
+layout(set = 0, binding = 4) uniform sampler2D indirect;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D reflection;
+layout(set = 2, binding = 0, std140) uniform Pass {
+	mat4 vp;
+	mat4 ivp;
+	vec4 target;
+	vec4 view;
+	uvec4 features;
+	vec4 eye;
+	vec4 cameraDepth;
+} pass;
+layout(set = 2, binding = 1, std140) uniform Trace {
+	vec4 trace;
+	uvec4 inputs;
+} options;
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, ivec2(pass.target.xy)))) return;
+	vec2 uv = (vec2(pixel) + 0.5) * pass.target.zw;
+	vec3 surfaceNormal = normalize(texture(normal, uv).xyz * 2.0 - 1.0);
+	float originDepth = texture(depth, uv).r;
+	float maxDistance = max(options.trace.y, 0.1);
+	float thickness = max(options.trace.z, 0.001);
+	int steps = clamp(int(options.trace.x), 1, 512);
+	vec3 origin = WorldAtLinearDepth(pass.ivp, pass.cameraDepth, uv, originDepth);
+	vec3 direction = normalize(reflect(normalize(origin - pass.eye.xyz), surfaceNormal));
+	vec2 hit = uv;
+	bool hitValid = false;
+	for (int index = 1; index <= steps; ++index) {
+		float distance = maxDistance * float(index) / float(steps);
+		vec4 projected = pass.vp * vec4(origin + direction * distance, 1.0);
+		if (projected.w <= 0.0) break;
+		vec3 ndc = projected.xyz / projected.w;
+		vec2 candidate = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+		if (any(lessThan(candidate, vec2(0.0))) || any(greaterThan(candidate, vec2(1.0)))) break;
+		float candidateDepth = texture(depth, candidate).r;
+		vec3 candidateWorld = WorldAtLinearDepth(pass.ivp, pass.cameraDepth, candidate, candidateDepth);
+		if (length(candidateWorld - (origin + direction * distance)) <= thickness) {
+			hit = candidate;
+			hitValid = true;
+			break;
+		}
+	}
+	float reflectivity = 1.0 - texture(material, uv).r;
+	vec3 traced = hitValid ? texture(scene, hit).rgb : texture(indirect, uv).rgb;
+	vec3 fallback = texture(indirect, uv).rgb;
+	imageStore(reflection, pixel, vec4(mix(fallback, traced, reflectivity), hitValid ? 1.0 : 0.0));
+}

@@ -264,6 +264,18 @@ namespace engine::game {
 			uint32_t Target = 0;
 		};
 
+		bool RestoreDocumentReference(
+			Store &store, const PendingReference &reference, Entity target, std::string &error
+		) {
+			if (store.RestoreReference(reference.Instance, reference.Property, target)) {
+				return true;
+			}
+			const auto &owner = Classes::Describe(store.ClassOf(reference.Instance));
+			error = "'" + std::string(owner.Name.Text()) + "." + std::string(reference.Property.Text()) +
+					"' refused reference to instance " + std::to_string(reference.Target);
+			return false;
+		}
+
 		bool ReadInstance(
 			const XmlDocument &document,
 			const XmlElement &element,
@@ -1016,7 +1028,9 @@ namespace engine::game {
 			}
 
 			const Entity target = found->second;
-			store.SetProperty(reference.Instance, reference.Property, &target, sizeof(Entity));
+			if (!RestoreDocumentReference(store, reference, target, error)) {
+				return false;
+			}
 		}
 
 		return true;
@@ -1861,7 +1875,9 @@ namespace engine::game {
 			}
 
 			const Entity target = found->second;
-			store.SetProperty(reference.Instance, reference.Property, &target, sizeof(Entity));
+			if (!RestoreDocumentReference(store, reference, target, error)) {
+				return NULL_ENTITY;
+			}
 		}
 
 		const auto found = byId.find(rootId);

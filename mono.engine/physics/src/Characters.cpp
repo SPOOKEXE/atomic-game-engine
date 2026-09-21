@@ -1,9 +1,11 @@
+#include "ContactPairs.hpp"
 #include "ConvexQuery.hpp"
 #include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -93,6 +95,20 @@ namespace engine::physics {
 		// and about a real step; two - Roblox's - lets a body walk onto things
 		// it visibly should not.
 		constexpr float CHARACTER_STEP_HEIGHT = 1.0f;
+
+		// Keep the two relations distinguishable in the frame graph. Walking the
+		// cached plans is cheaper than counting them first when a populated world
+		// would otherwise traverse each relation twice.
+		void LinkCharacters(ecs::Store &store) {
+			{
+				ENGINE_PROFILE_CAT("character.link.players", core::ProfileCategory::Physics);
+				(void)scene::LinkPlayerCharacters(store);
+			}
+			{
+				ENGINE_PROFILE_CAT("character.link.orphans", core::ProfileCategory::Physics);
+				(void)scene::ReclaimOrphanedCharacters(store);
+			}
+		}
 	}
 
 	size_t GroundCharacters(ecs::Store &store) {
@@ -220,34 +236,17 @@ namespace engine::physics {
 			return clear();
 		}
 
-		const scene::Transform *subject = store.Get<scene::Transform>(controller->Subject);
+		const ecs::Entity subjectRoot = scene::CameraSubjectRoot(store, active->Entity);
+		const scene::Transform *subject = store.Get<scene::Transform>(subjectRoot);
 		if (subject == nullptr) {
 			return clear();
 		}
 
-		// The same arithmetic `PlaceCamera` uses to find where the eye wants
-		// to be, repeated here rather than shared - that function is `scene`
-		// and takes no query, and duplicating four lines of trigonometry is
-		// cheaper than a callback for what the query decides. The ray query
-		// follows one portal seam when the camera arm crosses its pane, so a
-		// trigger collider that keeps crossings observable does not become an
-		// invisible camera wall. The ordinary case pays only the failed seam
-		// lookup.
+		// Share the unoccluded orbit with placement, including portal-carried roll.
 		const core::Vector3 head =
-			subject->Frame.Position + core::Vector3{0.0f, controller->HeadHeight, 0.0f};
-		const float pitch = controller->Angles.X;
-		const float yaw = controller->Angles.Y;
-		const core::Vector3 forward{
-			-std::sin(yaw) * std::cos(pitch),
-			std::sin(pitch),
-			-std::cos(yaw) * std::cos(pitch),
-		};
-
-		core::Vector3 desired = head - forward * controller->Distance;
-		if (controller->Mode == scene::CameraMode::ShiftLock) {
-			const core::Vector3 side{std::cos(yaw), 0.0f, -std::sin(yaw)};
-			desired = desired + side * controller->ShoulderOffset;
-		}
+			subject->Frame.Position + controller->Basis.UpVector() * controller->HeadHeight;
+		const core::Vector3 desired =
+			scene::CameraOrbit(*controller, subject->Frame.Position, controller->Distance).Position;
 
 		const core::Vector3 toEye = desired - head;
 		const float wanted = toEye.Magnitude();
@@ -256,7 +255,6 @@ namespace engine::physics {
 			return clear();
 		}
 		const core::Vector3 direction = toEye / wanted;
-
 		// **A loop of single-hit casts rather than a filtered query**, because
 		// `Raycast` refuses a general ignore list by design - see its own
 		// header. Each pass starts just past the last hit, which is the same
@@ -267,8 +265,10 @@ namespace engine::physics {
 		std::optional<ColliderHit> blocking;
 		for (int pass = 0; pass < POPPERCAM_IGNORE_LIMIT && travelled < wanted; pass++) {
 			const core::Ray ray{head + direction * travelled, direction};
+			// Open portal panes and non-colliding stand-ins cannot shorten the camera arm.
+			// Filter in the query so a solid wall behind those volumes remains visible.
 			const auto hit = RaycastThroughPortals(
-				store, ray, wanted - travelled, spatial::LayerMask::All(), controller->Subject
+				store, ray, wanted - travelled, spatial::LayerMask::All(), subjectRoot, false
 			);
 			if (!hit.has_value()) {
 				break;
@@ -289,7 +289,6 @@ namespace engine::physics {
 		}
 
 		bool changed = false;
-
 		const float occluded = std::max(0.0f, blocking->Distance - POPPERCAM_MARGIN);
 		if (controller->OccludedDistance != occluded) {
 			controller->OccludedDistance = occluded;
@@ -828,24 +827,29 @@ namespace engine::physics {
 						continue;
 					}
 
-					// **A hit at fraction zero is an overlap that already
-					// existed, and its normal cannot be trusted.** A character
-					// resting on a floor penetrates it by the solver's slop
-					// every tick, so the sweep starts inside it and reports
-					// contact immediately - with whichever face of the slab the
-					// algorithm reached, which measured as the floor's *-X side*
-					// while the character walked +X along the top of it. Clipping
-					// on that cancels the walk against the ground it is standing
-					// on, and a character that could not phase through a wall
-					// could not move at all.
-					//
-					// Resolving an existing overlap is position correction's
-					// job. What this pass is for is the other question: is the
-					// step about to *enter* something. That is a hit strictly
-					// along the travel, so a zero fraction is skipped rather
-					// than taken as the earliest.
-					if (hit.Fraction <= 1e-4f) {
-						continue;
+					float fraction = hit.Fraction;
+					core::Vector3 hitNormal = hit.Normal;
+					if (fraction <= 1e-4f) {
+						// A sweep starts inside both a wall overlap and the solver's
+						// floor slop. Its fallback normal is merely the opposite of
+						// travel, so narrowphase supplies the outward contact normal.
+						const ContactSolution overlap = ContactBetween(moving, fixed);
+						if (!overlap.Touching) {
+							continue;
+						}
+
+						const core::Vector3 outward = overlap.Normal * -1.0f;
+						if (outward.Y > MINIMUM_WALKABLE_NORMAL) {
+							continue;
+						}
+
+						const core::Vector3 horizontal{motion->Linear.X, 0.0f, motion->Linear.Z};
+						if (horizontal.Dot(outward) >= 0.0f) {
+							continue;
+						}
+
+						fraction = 0.0f;
+						hitNormal = outward;
 					}
 
 					// **Ground is not a wall, and telling them apart is what
@@ -861,14 +865,14 @@ namespace engine::physics {
 					// projection onto the face and the snap onto it. This pass
 					// is for the other question: is the step about to enter
 					// something it has to go around.
-					if (hit.Normal.Y > MINIMUM_WALKABLE_NORMAL) {
+					if (hitNormal.Y > MINIMUM_WALKABLE_NORMAL) {
 						continue;
 					}
 
-					if (!blocked || hit.Fraction < earliest ||
-						(hit.Fraction == earliest && other.Owner.Id < against.Id)) {
-						earliest = hit.Fraction;
-						normal = hit.Normal;
+					if (!blocked || fraction < earliest ||
+						(fraction == earliest && other.Owner.Id < against.Id)) {
+						earliest = fraction;
+						normal = hitNormal;
 						against = other.Owner;
 						blocked = true;
 					}
@@ -933,8 +937,6 @@ namespace engine::physics {
 		// model with no `Character` on it, and `client::SubmitMove` refuses to
 		// send a single key press because it cannot find one.
 		scheduler.Add("character.link", ecs::Phase::PreSimulation, [](ecs::Store &store) {
-			(void)scene::LinkPlayerCharacters(store);
-
 			// **And the reverse, which is the same concern and was nobody's
 			// job.** `LinkPlayerCharacters` releases a player whose model was
 			// destroyed; this destroys a model whose player was. A character is
@@ -945,7 +947,7 @@ namespace engine::physics {
 			// Composed rather than a second `Add`, for the reason
 			// `character.control` below gives at length: these operations share
 			// storage and form one indivisible system.
-			(void)scene::ReclaimOrphanedCharacters(store);
+			LinkCharacters(store);
 		});
 
 		// **Wake, ground and step are one system, and that is the whole fix.**
@@ -977,6 +979,7 @@ namespace engine::physics {
 			"character.control",
 			ecs::Phase::PreSimulation,
 			[](ecs::Store &store) {
+				if (IsPhysicsPaused(store)) return;
 				(void)WakeMovingCharacters(store);
 				(void)GroundCharacters(store);
 
@@ -1021,6 +1024,7 @@ namespace engine::physics {
 		// The composition argument below applies to systems that read each
 		// other's writes within a phase, and this reads nobody's.
 		scheduler.Add("portal.open", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)scene::OpenPortals(store);
 		});
 
@@ -1031,10 +1035,12 @@ namespace engine::physics {
 		// broadphase, which is in `Simulation`, so a proxy is indexed on the tick
 		// it exists for.
 		scheduler.Add("portal.ghost", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)GhostPortalBodies(store);
 		});
 
 		scheduler.Add("character.portal", ecs::Phase::PostSimulation, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)scene::CrossPortals(store);
 		});
 
@@ -1050,6 +1056,7 @@ namespace engine::physics {
 		);
 
 		scheduler.Add("character.pose", ecs::Phase::PreRender, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)scene::PoseCharacters(store);
 		});
 	}

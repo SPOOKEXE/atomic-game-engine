@@ -149,7 +149,7 @@ namespace engine::graph {
 		return visible.size();
 	}
 
-	glm::mat4 FitDirectionalLight(const core::AABB &bounds, const core::Vector3 &direction) {
+	glm::mat4 FitDirectionalLight(const core::AABB &bounds, const core::Vector3 &direction, uint32_t texels) {
 		const float length = direction.Magnitude();
 		if (length <= 0.0f) {
 			// The identity shadows nothing, which is the conservative answer: a
@@ -161,24 +161,44 @@ namespace engine::graph {
 		}
 
 		const core::Vector3 forward = direction / length;
-		const glm::vec3 centre = ToGlm(bounds.Centre());
+		glm::vec3 centre = ToGlm(bounds.Centre());
 
 		// The radius of the scene's bounding sphere, which is what makes the
 		// fit **rotation-invariant**: a box fitted axis by axis changes size as
 		// the light turns, and a shadow map that resizes every frame makes its
 		// edges crawl. The sphere does not care which way the light points.
-		const float radius = std::max(bounds.Size().Magnitude() * 0.5f, 1.0e-3f);
-
-		// Placed a full radius back from the centre, so nothing that casts is
-		// behind the near plane. Not "far enough": exactly the distance that
-		// makes the near plane touch the sphere.
-		const glm::vec3 eye = centre - ToGlm(forward) * radius;
+		float radius = std::max(bounds.Size().Magnitude() * 0.5f, 1.0e-3f);
 
 		// An up vector that is not the light direction. Straight down is the
 		// ordinary case for a sun, and `lookAt` with parallel arguments
 		// produces a matrix full of NaN rather than an error.
 		const glm::vec3 up =
 			std::abs(forward.Y) > 0.99f ? glm::vec3{0.0f, 0.0f, 1.0f} : glm::vec3{0.0f, 1.0f, 0.0f};
+
+		if (texels != 0) {
+			// A per-frame exact fit turns a moving eye rig into a moving raster
+			// grid. Round the radius in light-map-sized steps, then pad it for the
+			// half-texel centre snap below so no corner is clipped at a grid edge.
+			const float texelCount = static_cast<float>(texels);
+			const float logRadius = std::log2(radius);
+			const float radiusStep = 2.0f / texelCount;
+			radius = std::exp2(std::ceil(logRadius / radiusStep) * radiusStep);
+			radius /= 1.0f - std::sqrt(0.5f) * 2.0f / texelCount;
+
+			// `lookAt` supplies a stable light basis. Snap the target in that basis,
+			// not in world X/Z, because an oblique sun's texels are oblique too.
+			const glm::mat3 lightBasis = glm::mat3(glm::lookAt(-ToGlm(forward), glm::vec3{}, up));
+			glm::vec3 lightCentre = lightBasis * centre;
+			const float texelSize = radius * 2.0f / texelCount;
+			lightCentre.x = std::round(lightCentre.x / texelSize) * texelSize;
+			lightCentre.y = std::round(lightCentre.y / texelSize) * texelSize;
+			centre = glm::transpose(lightBasis) * lightCentre;
+		}
+
+		// Placed a full radius back from the centre, so nothing that casts is
+		// behind the near plane. Not "far enough": exactly the distance that
+		// makes the near plane touch the sphere.
+		const glm::vec3 eye = centre - ToGlm(forward) * radius;
 
 		const glm::mat4 view = glm::lookAt(eye, centre, up);
 

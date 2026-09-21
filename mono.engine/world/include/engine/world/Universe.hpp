@@ -34,7 +34,9 @@
 #include <engine/world/Bus.hpp>
 #include <engine/world/Enums.hpp>
 #include <engine/world/Postbox.hpp>
+#include <engine/world/PresentationBus.hpp>
 #include <engine/world/SharedStores.hpp>
+#include <engine/world/TickExchange.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstddef>
@@ -469,6 +471,32 @@ namespace engine::world {
 		// @tick
 		void Tick(float frameSeconds);
 
+		// Whether a driver tick or paused manual tick is currently running.
+		// Control adapters use this to refuse work that cannot reach a new
+		// boundary without running host validation inside a world tick.
+		bool TickInFlight() const {
+			return Ticking;
+		}
+
+		// Runs one normal same-universe barrier, then advances one suspended local
+		// world by one completed simulation tick.
+		//
+		// This is the control-plane counterpart to `Tick`: a paused episode must
+		// not depend on a frame-duration accumulator to reach its next boundary.
+		// It deliberately leaves the world suspended afterwards. The barrier still
+		// applies traffic for every world in this universe, so bus effects remain
+		// causal and its diagnostics describe the actual boundary.
+		//
+		// `boundary` runs after controls have drained and the target has been
+		// revalidated as suspended, immediately before its tick. It is for
+		// infallible host commits that must not leak when that barrier removed or
+		// resumed the target.
+		//
+		// @param id The paused local world to advance.
+		// @param boundary An optional infallible commit at the tick boundary.
+		// @return `Ok`, `NoSuchWorld`, or `WrongThread` when it is not suspended.
+		WorldStatus StepPaused(WorldId id, const std::function<void()> &boundary = {});
+
 		// Runs one world's presentation phase on its stable execution lane.
 		//
 		// Separate from Tick because a client renders one world while the rest
@@ -499,9 +527,15 @@ namespace engine::world {
 		// of derived world state.
 		//
 		// @param requests Value-only presentation requests.
+		// @param collect Called on each world's presentation lane after PreRender.
+		//                It must copy only that world's data and must not call
+		//                back into the universe.
 		// @return The number of local worlds presented.
 		// @tick
-		size_t PresentMany(std::span<const Presentation> requests);
+		size_t PresentMany(
+			std::span<const Presentation> requests,
+			const std::function<void(WorldId, ecs::Store &)> &collect = {}
+		);
 
 		// Runs `body` against a world's storage, on the driver thread.
 		//
@@ -668,6 +702,15 @@ namespace engine::world {
 		// @return `false` on a corrupt, truncated or wrong-version snapshot.
 		bool Load(core::ByteReader &reader);
 
+		// Replaces this universe's state with a fully loaded candidate.
+		//
+		// `Load` clears its target on a malformed stream. A checkpoint host loads
+		// and rehydrates a scratch universe first, then commits it through this
+		// door so a refusal cannot destroy the live episode.
+		//
+		// Both universes must be idle and owned by the calling driver thread.
+		void ReplaceWith(Universe &candidate);
+
 		// The bus traffic applied at the most recent barrier.
 		//
 		// This is what a recording records. Stamped with `From` and ordered
@@ -695,7 +738,7 @@ namespace engine::world {
 		//
 		// @param world    The world to deliver to.
 		// @param delivery What arrived for it.
-		// @return `false` for an unknown world.
+		// @return `false` for an unknown world or the staged message/byte bound.
 		bool Deliver(core::Name world, const Delivery &delivery);
 
 		// Hands the driver what a host's worlds posted.
@@ -730,7 +773,7 @@ namespace engine::world {
 		std::vector<RemoteDelivery> TakeOutbound();
 
 		// The snapshot format this build writes and accepts.
-		static constexpr uint32_t SNAPSHOT_VERSION = 5;
+		static constexpr uint32_t SNAPSHOT_VERSION = 6;
 
 		// Reports whether the caller is the driver thread.
 		//
@@ -738,7 +781,89 @@ namespace engine::world {
 		// @threadsafe
 		bool IsOnDriverThread() const;
 
+		// Host-control presentation API. Call outside tick batches on the driver
+		// thread. Session numbers are assigned by host control, never by a world.
+		bool ConfigurePresentation(uint64_t session, const PresentationLimits &limits = {});
+		// Opens a named presentation endpoint for a local world.
+		PresentationOpen OpenPresentation(WorldId world, core::Name channel);
+		// Returns a locally admitted presentation endpoint receipt.
+		PresentationAddress LookupPresentation(WorldId world, std::string_view channel) const;
+		// Returns this host's complete local presentation directory.
+		PresentationDirectory LocalPresentationDirectory() const;
+		// Returns presentation routes available to one local consumer.
+		PresentationDirectory PresentationRoutesFor(core::Name consumer) const;
+		// Applies authenticated presentation routes supplied by the driver.
+		PresentationStatus AcceptPresentationRoutesFromDriver(const PresentationDirectory &directory);
+		// Withdraws a retired remote host and its queued presentation traffic.
+		void RetirePresentationHost(core::Name host);
+		// Applies a newer complete presentation directory from a remote host.
+		PresentationStatus
+		ApplyPresentationDirectory(core::Name host, const PresentationDirectory &directory);
+		// Registers one trusted remote presentation endpoint.
+		PresentationStatus RegisterRemotePresentation(core::Name host, const PresentationAddress &address);
+		// Closes a locally opened presentation endpoint.
+		PresentationStatus ClosePresentation(const PresentationAddress &address);
+		// Routes a local world's presentation payload through its endpoint receipts.
+		PresentationStatus SendPresentation(
+			WorldId source,
+			const PresentationAddress &from,
+			const PresentationAddress &to,
+			uint64_t correlation,
+			std::span<const std::byte> payload
+		);
+		// Admits presentation traffic from an authenticated remote host.
+		PresentationStatus IngestPresentation(core::Name host, const PresentationMessage &message);
+		// For a host receiving verified traffic on its trusted driver link.
+		PresentationStatus AcceptPresentationFromDriver(const PresentationMessage &message);
+		// Transfers all inbound presentation messages for an endpoint.
+		std::vector<PresentationMessage> TakePresentation(const PresentationAddress &address);
+		// Transfers presentation messages queued for remote hosts.
+		std::vector<PresentationOutbound> TakePresentationOutbound();
+		// Returns retained presentation queue bytes and message count.
+		PresentationQueueSize PresentationQueueUsage() const;
+		// Returns cumulative presentation ownership-transfer counts.
+		PresentationTraffic PresentationTrafficCounts() const;
+
+		// Host-owned phase handshake. Begin charges fixed frame time once and returns
+		// the number of local catch-up rounds. Every round joins Input, collects
+		// requests, serves destinations, applies a complete reply set, then resumes
+		// Simulation. Empty local rounds are legal when another host owes more.
+		bool HasTickExchangeEndpoints() const;
+		// Opens a joined exchange frame and returns local catch-up rounds.
+		int BeginTickExchangeFrame(float frameSeconds);
+		// Begins the input phase for the next joined exchange round.
+		bool BeginTickExchangeRound();
+		// Collects locally produced requests for the open exchange round.
+		bool CollectTickExchangeRequests(std::vector<TickExchangeRequest> &requests);
+		// Serves requests on their destination lanes and appends replies.
+		bool ServeTickExchangeRequests(
+			std::span<const TickExchangeRequest> requests, std::vector<TickExchangeReply> &replies
+		);
+		// Applies a complete reply set on each source lane.
+		bool ApplyTickExchangeReplies(std::span<const TickExchangeReply> replies);
+		// Completes the current round and restores simulation phase.
+		bool FinishTickExchangeRound();
+		// Closes a completed exchange frame.
+		bool EndTickExchangeFrame();
+		// Cancels an incomplete frame and restores normal ticking.
+		void CancelTickExchangeFrame();
+		// Reports whether a host-owned exchange frame is open.
+		bool TickExchangeFrameOpen() const;
+
 	  private:
+		// Returns whether the body ran on workers. The caller owns any worker
+		// timing report, after the join has made its measurements safe to read.
+		bool DispatchExchangeWorlds(
+			const std::function<void(size_t)> &body, std::span<float> worldMilliseconds = {}
+		);
+		void CompleteExchangeFrame();
+		enum class ExchangePhase : uint8_t { Closed, BetweenRounds, Input, Collected, Applied };
+		ExchangePhase ExchangeStage = ExchangePhase::Closed;
+		unsigned ExchangeRound = 0;
+		unsigned ExchangeRounds = 0;
+		uint64_t ExchangeStarted = 0;
+		std::vector<uint8_t> ExchangeParticipants;
+		std::vector<TickExchangeRequest> ExchangeRequests;
 		// A structural change waiting for the barrier.
 		struct Control {
 			enum class Kind : uint8_t { Create, Destroy, SetState, Recover };
@@ -760,6 +885,8 @@ namespace engine::world {
 		const World *Reach(WorldId id) const;
 		void RequireDriverThread(const char *what) const;
 
+		WorldId FindPresentationWorld(std::string_view name) const;
+		PresentationBus PresentationMessages;
 		UniverseSettings Settings_;
 		UniverseStatistics Stats;
 

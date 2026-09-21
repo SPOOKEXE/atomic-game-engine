@@ -125,6 +125,26 @@ TEST_CASE("failed presentation does not consume its damage", "[render][presentat
 }
 
 TEST_CASE(
+	"a committed named camera packet invalidates the restored normal camera packet",
+	"[render][presentation][damage]"
+) {
+	PresentationDamageTracker tracker;
+	PresentationSignatures normal = Settled();
+	PresentationSignatures named = normal;
+	named.Scene.Objects++;
+	named.Scene.Portals++;
+	named.GameInterface++;
+	tracker.Commit(normal);
+	CHECK(tracker.Inspect(named).Scene);
+	tracker.Commit(named);
+	const PresentationDamage restored = tracker.Inspect(normal);
+	CHECK(restored.Scene);
+	CHECK(restored.Objects);
+	CHECK(restored.Portals);
+	CHECK(restored.GameInterface);
+}
+
+TEST_CASE(
 	"scene source causes remain separate before their image cascades", "[render][presentation][cache]"
 ) {
 	PresentationDamageTracker tracker;
@@ -216,12 +236,31 @@ TEST_CASE(
 	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote());
 }
 
+TEST_CASE("surface capture plan writes cascade through the presentation", "[render][presentation][cache]") {
+	PresentationDamageTracker tracker;
+	tracker.Commit(Settled());
+
+	tracker.CacheProfile().Record(PresentationDamage{}, true, false, true);
+	const auto activities = tracker.CacheProfile().Activities();
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::SurfaceCapturePlan)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::SceneImage)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::GameComposition)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::StudioComposition)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote());
+
+	tracker.CacheProfile().Record(PresentationDamage{}, true, false, false);
+	CHECK(
+		activities[static_cast<size_t>(PresentationCacheLayer::SurfaceCapturePlan)].Last ==
+		engine::render::PresentationCacheActivity::Decision::Hit
+	);
+}
+
 TEST_CASE("absent portal layers are not reported as cache hits", "[render][presentation][cache]") {
 	PresentationDamageTracker tracker;
 	PresentationCacheApplicability applicable;
 	applicable.Portals = false;
 
-	tracker.CacheProfile().Record(PresentationDamage{}, true, false, applicable);
+	tracker.CacheProfile().Record(PresentationDamage{}, true, false, false, applicable);
 
 	const auto activities = tracker.CacheProfile().Activities();
 	for (const PresentationCacheLayer layer :
@@ -245,7 +284,7 @@ TEST_CASE("absent source layers never inflate hit rates", "[render][presentation
 	applicable.HostInterface = false;
 
 	for (size_t frame = 0; frame < 128; frame++) {
-		tracker.CacheProfile().Record(PresentationDamage{}, true, false, applicable);
+		tracker.CacheProfile().Record(PresentationDamage{}, true, false, false, applicable);
 	}
 
 	const auto activities = tracker.CacheProfile().Activities();

@@ -23,6 +23,7 @@ NEVER USE EM-DASHES.
 - Cannot edit CODE_DOCUMENTING.md
 - Cannot edit CODE_FORMAT.md
 - Cannot edit CODE_QUALITY.md
+- Cannot edit CODE_BAD_PRACTICES.md
 
 Do NOT put random crap in these documents.
 These are critical to AI operations.
@@ -54,7 +55,8 @@ Use codegraph mcp tools to search codebase more effectively.
    up once `just docs` has run, and the tags that are available.
 5. [`docs/CODE_QUALITY.md`](docs/CODE_QUALITY.md) - the checklist a change is
    reviewed against.
-6. `ROADMAP.md` - what version we are on, and therefore what is in scope.
+6. [`docs/CODE_BAD_PRACTICES.md`](docs/CODE_BAD_PRACTICES.md) - avoid these practices
+7. `ROADMAP.md` - what version we are on, and therefore what is in scope.
 
 [`RUNNING.md`](RUNNING.md) is the reference for running anything - the client,
 the server, one test suite, the tools. Read it before inventing a command line.
@@ -410,3 +412,13 @@ the one that gets believed.
   improve confidence, either ask the user before running it or defer it to the final verification stage.
   At that stage, ask the user for approval. If they decline, report the skipped check clearly.
 - Security is important, but not should be over-indexed on. If you think something should be audited, especially new items, add to ROADMAP.md under current work version.
+- Setting up demo scenes as tests is significantly more useful then trying to compute with numbers for visual aspects. e.g. flying through portals, checking lighting, shadow and object visuals of different object types like MeshParts, Parts, EditableMeshes, etc.
+
+---
+
+## CHATGPT MODEL RULES
+
+Specifically for orchestrating models with Codex (chatgpt models) - Astra or Sol, primarily Sol.
+
+You must spawn luna subagents for quick edits, terra agents for implementation, and review by READING with Sol then modifying with terra. Astra is only for complex one-shot reading.
+You want to minimize astra output tokens but contain enough detail for the dumber models to get right, and minimise agent actions and context size for Astra as it is significantly costly.

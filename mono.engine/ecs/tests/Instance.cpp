@@ -1512,3 +1512,23 @@ TEST_CASE("parenting survives an only child freed without unlinking", "[ecs][ins
 	REQUIRE(children == std::vector<Entity>{added});
 	REQUIRE(store.ParentOf(added) == parent);
 }
+
+TEST_CASE(
+	"reference restoration preserves ordinary setter and authority guards",
+	"[ecs][instance][reference-restore]"
+) {
+	const Tree &tree = ClassTree();
+	Store store("restore-reference");
+	const Entity part = store.CreateInstance(tree.Part, "Part");
+	const Entity target = store.CreateInstance(tree.Part, "Target");
+	REQUIRE(store.RestoreReference(part, Name("Target"), target));
+	CHECK(store.Get<Link>(part)->Target == target);
+	CHECK_FALSE(store.RestoreReference(part, Name("Name"), target));
+	CHECK_FALSE(store.RestoreReference(part, Name("Missing"), target));
+	CHECK_FALSE(store.RestoreReference(NULL_ENTITY, Name("Target"), target));
+	REQUIRE(store.RestoreReference(part, Name("Target"), NULL_ENTITY));
+	CHECK(store.Get<Link>(part)->Target == NULL_ENTITY);
+	store.SetAdoptOnly(true);
+	CHECK_FALSE(store.RestoreReference(part, Name("Target"), target));
+	CHECK(store.Get<Link>(part)->Target == NULL_ENTITY);
+}

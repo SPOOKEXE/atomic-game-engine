@@ -40,7 +40,7 @@ mkdir -p "$out"
 capture() {
 	local view="$1"
 
-	local source="$build/assets/examples/Tunnels.luau"
+	local source="$build/assets/examples/scripts/Tunnels.luau"
 	if [ ! -f "$source" ]; then
 		echo "no staged scene at $source" >&2
 		exit 1

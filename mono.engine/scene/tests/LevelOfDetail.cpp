@@ -15,6 +15,8 @@
 TEST_SUITE_ID("engine.scene.levelofdetail")
 
 using engine::core::Name;
+using engine::scene::AutoMeshLOD;
+using engine::scene::CustomMeshLOD;
 using engine::scene::DEFAULT_TARGET_QUAD_AREA;
 using engine::scene::LevelMesh;
 using engine::scene::LevelOfDetail;
@@ -22,6 +24,7 @@ using engine::scene::LevelTriangles;
 using engine::scene::LOD_LEVELS;
 using engine::scene::LodStrategy;
 using engine::scene::MeshCatalogue;
+using engine::scene::ResolveMeshLOD;
 using engine::scene::SelectLevel;
 
 namespace {
@@ -44,6 +47,77 @@ namespace {
 		ladder.Levels = LOD_LEVELS;
 		return ladder;
 	}
+}
+
+TEST_CASE("custom mesh levels override automatic levels and nil falls back", "[scene][lod]") {
+	AutoMeshLOD automatic;
+	automatic.Meshes[0] = Name("lod_test.auto-half");
+	automatic.Meshes[1] = Name("lod_test.auto-quarter");
+	automatic.Meshes[2] = Name("lod_test.auto-eighth");
+	automatic.Ratios[0] = 0.45f;
+	automatic.Ratios[1] = 0.2f;
+	automatic.TargetQuadArea = 8.0f;
+
+	CustomMeshLOD custom;
+	custom.Meshes[0] = Name("lod_test.custom-half");
+	custom.Meshes[2] = Name("lod_test.custom-eighth");
+	custom.Ratios[0] = 0.4f;
+	custom.Ratios[2] = 0.1f;
+	custom.TargetQuadArea = 16.0f;
+
+	const LevelOfDetail resolved = ResolveMeshLOD(&automatic, &custom);
+	CHECK(resolved.Strategy == LodStrategy::Authored);
+	CHECK(resolved.Levels == LOD_LEVELS);
+	CHECK(resolved.Meshes[0] == custom.Meshes[0]);
+	CHECK(resolved.Meshes[1] == automatic.Meshes[1]);
+	CHECK(resolved.Meshes[2] == custom.Meshes[2]);
+	CHECK(resolved.Ratios[0] == 0.4f);
+	CHECK(resolved.Ratios[1] == 0.2f);
+	CHECK(resolved.Ratios[2] == 0.1f);
+	CHECK(resolved.TargetQuadArea == 16.0f);
+}
+
+TEST_CASE("automatic mesh lod works without custom overrides", "[scene][lod]") {
+	AutoMeshLOD automatic;
+	automatic.Meshes[0] = Name("lod_test.auto-half-only");
+	automatic.Meshes[1] = Name("lod_test.auto-quarter-only");
+	automatic.Levels = 3;
+	automatic.Strategy = LodStrategy::Reduced;
+
+	const LevelOfDetail resolved = ResolveMeshLOD(&automatic, nullptr);
+	CHECK(resolved.Strategy == LodStrategy::Reduced);
+	CHECK(resolved.Levels == 3);
+	CHECK(resolved.Meshes[0] == automatic.Meshes[0]);
+	CHECK(resolved.Meshes[1] == automatic.Meshes[1]);
+	CHECK_FALSE(resolved.Meshes[2].IsValid());
+}
+
+TEST_CASE("blank automatic levels resolve to their generated artifact names", "[scene][lod]") {
+	AutoMeshLOD automatic;
+	automatic.Ratios[0] = 0.5f;
+	automatic.Ratios[1] = 0.25f;
+	automatic.Levels = 3;
+	CustomMeshLOD custom;
+	custom.Meshes[1] = Name("lod_test.authored-quarter");
+	custom.Ratios[1] = 0.2f;
+	custom.Levels = 3;
+
+	const LevelOfDetail resolved = ResolveMeshLOD(BaseMesh(), &automatic, &custom);
+	CHECK(resolved.Levels == 3);
+	CHECK(resolved.Meshes[0] == engine::scene::AutoMeshLodArtifactName(BaseMesh(), 1, 0.5f));
+	CHECK(resolved.Meshes[1] == custom.Meshes[1]);
+}
+
+TEST_CASE("custom-only lod does not dereference an absent automatic component", "[scene][lod]") {
+	CustomMeshLOD custom;
+	custom.Meshes[0] = Name("lod_test.custom-only");
+	custom.Ratios[0] = 0.5f;
+	custom.Levels = 2;
+
+	const LevelOfDetail resolved = ResolveMeshLOD(nullptr, &custom);
+	CHECK(resolved.Strategy == LodStrategy::Authored);
+	CHECK(resolved.Levels == 2);
+	CHECK(resolved.Meshes[0] == custom.Meshes[0]);
 }
 
 TEST_CASE("a part that fills the screen stays at level zero", "[scene][lod]") {
@@ -162,6 +236,19 @@ TEST_CASE("an authored level's triangles come from the catalogue", "[scene][lod]
 	catalogue.Triangles[coarse.Id()] = 900;
 	CHECK(LevelTriangles(ladder, catalogue, BaseMesh(), 1) == 900);
 	CHECK(LevelMesh(ladder, BaseMesh(), 1) == coarse);
+}
+
+TEST_CASE("a decimated artifact uses its published triangle count", "[scene][lod]") {
+	const Name coarse("lod_test.StatueDecimated");
+	MeshCatalogue catalogue = CatalogueWith(10000);
+	catalogue.Triangles[coarse.Id()] = 1400;
+
+	LevelOfDetail ladder = DecimatedLadder();
+	ladder.Meshes[0] = coarse;
+	ladder.Ratios[0] = 0.5f;
+
+	CHECK(LevelMesh(ladder, BaseMesh(), 1) == coarse);
+	CHECK(LevelTriangles(ladder, catalogue, BaseMesh(), 1) == 1400);
 }
 
 TEST_CASE("level zero is the base mesh and is not stored twice", "[scene][lod]") {

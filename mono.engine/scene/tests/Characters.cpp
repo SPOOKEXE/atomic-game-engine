@@ -13,6 +13,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -69,12 +70,15 @@ namespace {
 	// the two control resources a client would have left behind.
 	struct World {
 		Store Store_{"characters-test"};
+		Entity Eye;
 
 		World() {
 			engine::scene::RegisterSceneClasses();
 			engine::scene::InstallServices(Store_);
 			Store_.SetResource(InputState{});
 			Store_.SetResource(engine::scene::CameraController{});
+			Eye = Store_.CreateInstance(engine::scene::CameraClass(), "Eye");
+			Store_.SetResource(engine::scene::ActiveCamera{Eye});
 		}
 
 		InputState &Input() {
@@ -233,7 +237,9 @@ TEST_CASE("a keyboard drives one character and never somebody else's", "[scene][
 	// **The camera is aimed by a rule and not by the spawn**, so it follows the
 	// local player's body and is not stolen by the second character to load.
 	CHECK(engine::scene::FollowOwnCharacter(store));
-	CHECK(store.Resource<engine::scene::CameraController>()->Subject == store.Get<Character>(myModel)->Root);
+	CHECK(
+		store.Get<engine::scene::CameraSubject>(world.Eye)->Target == store.Get<Character>(myModel)->Humanoid
+	);
 	CHECK(!engine::scene::FollowOwnCharacter(store));
 
 	world.Input().Down.Set(KeyCode::W, true);
@@ -324,7 +330,7 @@ TEST_CASE("Player.Character is the one hook a game needs", "[scene][characters]"
 	// The camera and the keyboard both find it now, and neither was told
 	// anything beyond the assignment above.
 	CHECK(engine::scene::FollowOwnCharacter(store));
-	CHECK(store.Resource<engine::scene::CameraController>()->Subject == root);
+	CHECK(store.Get<engine::scene::CameraSubject>(world.Eye)->Target == humanoid);
 
 	world.Input().Down.Set(KeyCode::W, true);
 	CHECK(UpdateCharacterControl(store) == 1);
@@ -342,7 +348,7 @@ TEST_CASE("Player.Character is the one hook a game needs", "[scene][characters]"
 
 	// The camera lets go of a body nobody drives rather than staying on it.
 	CHECK(engine::scene::FollowOwnCharacter(store));
-	CHECK(store.Resource<engine::scene::CameraController>()->Subject == NULL_ENTITY);
+	CHECK(store.Get<engine::scene::CameraSubject>(world.Eye)->Target == NULL_ENTITY);
 
 	// **A model with no humanoid is refused where the mistake is made.** The
 	// alternative is a player pointing at furniture and a W key that silently

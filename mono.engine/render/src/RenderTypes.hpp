@@ -113,8 +113,7 @@ namespace engine::render {
 
 		// x: which `scene::SurfaceEffect` the projected image goes through.
 		// y: the animation clock, for the effects that move.
-		// zw: unused, and named so the struct's size is stated rather than
-		//     implied.
+		// z: encode radiance for a display attachment. w: unused.
 		//
 		// **A field of its own rather than the spare lanes in `Surface` or
 		// `Flipbook`.** Both of those are rewritten wholesale per submesh by
@@ -159,6 +158,11 @@ namespace engine::render {
 
 		// x: whether a metalness map is present.
 		glm::vec4 MaterialExtra{0.0f, 0.0f, 0.0f, 0.0f};
+
+		// x: device-supported bits. y: world defaults after policy. z/w: camera
+		// enable and disable masks. The resident instance supplies the final layer
+		// in the vertex shader, so material feature choice never needs CPU readback.
+		glm::uvec4 RenderFeatures{};
 	};
 
 	struct ShadowUniforms {
@@ -169,11 +173,18 @@ namespace engine::render {
 
 	// How many portal mouths may project their light field in one frame.
 	//
-	// **Two, which is one pair, and it is the prototype's budget.** Each is
-	// a sampler binding and four vec4s in `PbrUniforms`, both spelled out in
-	// `deferred-lighting.frag` - the three counts move together. The nearest
-	// mouths win, so a corridor of pairs lights the one the viewer is at.
+	// **Two receiver fields, not one pair, and it is the prototype's budget.**
+	// Each is a sampler binding and four vec4s in `PbrUniforms`, both spelled out
+	// in `deferred-lighting.frag` - the three counts move together. Candidates
+	// rank by receiver influence first, then projected coverage, so nearest mouths
+	// do not automatically win.
 	constexpr size_t MAX_SEAM_LIGHTS = 2;
+
+	// Each mouth needs a capture for both receiver half-spaces. The final pass
+	// still binds only `MAX_SEAM_LIGHTS` fields, after choosing the side that can
+	// reach the current view.
+	constexpr size_t SEAM_LIGHT_SIDES = 2;
+	constexpr size_t MAX_SEAM_LIGHT_TARGETS = scene::MAX_SURFACES * SEAM_LIGHT_SIDES;
 
 	// The side of one seam light-field capture, in texels.
 	//
@@ -216,6 +227,8 @@ namespace engine::render {
 		glm::vec4 OutdoorAmbient{};
 		glm::vec4 Direct{};
 		glm::vec4 Eye{};
+		// Dot with a homogeneous world point gives its axial camera depth.
+		glm::vec4 CameraDepth{};
 		glm::vec4 FogColour{};
 		glm::vec4 Fog{};
 		glm::vec4 Shadow{};
@@ -247,6 +260,15 @@ namespace engine::render {
 		glm::vec4 VolumeCount{};
 	};
 
+	// The two camera transforms that define the bounded reprojection capture.
+	// Object transforms are deliberately absent: this pass reports camera motion
+	// over the current visible opaque or masked depth only.
+	struct CameraMotionUniforms {
+		glm::mat4 InverseViewProjection{1.0f};
+		glm::mat4 PreviousViewProjection{1.0f};
+		glm::vec4 Target{};
+	};
+
 	// Fixed fragment data for one bounded group of world-space image lenses.
 	// Scene colour and linear depth are always the first two sampler slots; a
 	// lens program gets no route to any other resource or render target.
@@ -266,28 +288,40 @@ namespace engine::render {
 			glm::vec4 SpinPriority{};
 		};
 		LensUniform Lenses[scene::MAX_SCENE_SHADER_LENSES]{};
+		// Appended after the fixed lens array so existing lens programs retain
+		// their six-member prefix and their lens-array offset.
+		glm::vec4 CameraDepth{};
 	};
 
-	// Slot zero for an authored fullscreen fragment shader. The contract is
-	// intentionally small and stable: target size, reciprocal size, frame
-	// time, and the active camera matrices. Inputs remain sampler slots in the
-	// order the node declares them.
+	// Slot zero for an authored raster shader or an authored compute node whose
+	// `uniforms` parameter is `view`. Target is width, height and reciprocals.
+	// View is animation seconds, field of view, aspect and resident instance
+	// count. Inputs remain sampler slots in the order the node declares them.
 	struct GraphPassUniforms {
 		glm::mat4 ViewProjection{1.0f};
 		glm::mat4 InverseViewProjection{1.0f};
 		glm::vec4 Target{};
 		glm::vec4 View{};
+		glm::vec4 Eye{};
+		glm::vec4 CameraDepth{};
+
+		// x: device-supported bits. y: defaults after world policy.
+		// z/w: camera enable and disable masks. A shader applies the instance
+		// masks last, preserving authored instance precedence entirely on GPU.
+		glm::uvec4 RenderFeatures{};
+
+		// Built-in compositor settings. Custom authored shaders may use these as
+		// three generic vec4 values after the stable view prefix.
+		glm::vec4 Parameters[3]{};
 	};
 
-	// How many holes may transport a shadow in one frame.
-	//
-	// **Four, in one 2x2 atlas, chosen by which holes are nearest the eye.**
-	// Every fragment tests every beam, so the count is a cost per pixel and
-	// not per hole; four is what a corridor needs and is two matrix products
-	// and a tap each. Anything past it is logged rather than dropped
-	// silently - a shadow that stops crossing when a fifth pane comes on
-	// screen reads as the feature not working.
-	constexpr uint32_t MAX_PORTAL_BEAMS = 4;
+	// Six Tunnels mouths fit in one 2x3 atlas. Every fragment tests every live
+	// beam, so this remains a hard per-pixel budget; larger scenes choose the
+	// beams whose volumes reach visible receivers.
+	constexpr uint32_t MAX_PORTAL_BEAMS = 6;
+	constexpr uint32_t PORTAL_BEAM_COLUMNS = 2;
+	constexpr uint32_t PORTAL_BEAM_ROWS = 3;
+	constexpr uint32_t PORTAL_BEAM_RESOLUTION = 1024;
 
 	// What `opaque.frag` needs to look a fragment up in one hole's beam.
 	//
@@ -313,7 +347,7 @@ namespace engine::render {
 		// Where this beam sits in the atlas: xy the scale, zw the offset.
 		glm::vec4 Region[MAX_PORTAL_BEAMS];
 
-		// x: how many of the four are in use.
+		// x: how many beam slots are in use.
 		glm::vec4 Count{0.0f, 0.0f, 0.0f, 0.0f};
 	};
 
@@ -433,10 +467,14 @@ namespace engine::render {
 			return SDL_GPU_TEXTUREFORMAT_R16_FLOAT;
 		case graph::ResourceFormat::RG16F:
 			return SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
+		case graph::ResourceFormat::RGBA32F:
+			return SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
 		case graph::ResourceFormat::RGBA16F:
 			return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 		case graph::ResourceFormat::R32F:
 			return SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+		case graph::ResourceFormat::R32U:
+			return SDL_GPU_TEXTUREFORMAT_R32_UINT;
 		case graph::ResourceFormat::RG32F:
 			return SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT;
 		case graph::ResourceFormat::D24S8:

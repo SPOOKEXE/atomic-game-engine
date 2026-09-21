@@ -858,7 +858,7 @@ one for its authority. A game is a script, not a compiled artefact; the studio
 opens an authored game file:
 
 ```sh
-just run --script .cache/build/dev/assets/examples/Rings.luau
+just run --script .cache/build/dev/assets/examples/scripts/Rings.luau
 server --game My.agame --tick-rate 60
 ```
 
@@ -876,7 +876,7 @@ JavaScript during the build when the pinned compiler is available, with a
 `.js.map` beside each one - **so a script that throws names the line in the
 `.ts` you wrote** rather than a line in the generated file. Stripping types
 shifts everything below a multi-line annotation upward, so the two rarely agree.
-`mono.engine/examples/` holds the demo scenes, each written twice - once in each
+`mono.engine/examples/assets/scripts/` holds the script demos, each written twice - once in each
 language, doing the same thing - so that the binding surface is exercised from
 both.
 
@@ -892,7 +892,7 @@ already offer New World:
 Picking one adds a world named after the file and puts the scene in it as a
 `Script` in `ServerScriptService`, so nothing is built until Play runs it and
 Stop takes it away again. The list walks the staged directory rather than a
-hand-kept table, so a scene added to `mono.engine/examples/` is there after a
+hand-kept table, so a scene added to `mono.engine/examples/assets/scripts/` is there after a
 build.
 
 It is refused while anything is running, for the reason New World is: the
@@ -935,7 +935,7 @@ before quoting one.
 
 ### Shared Luau libraries
 
-`mono.engine/examples/lib/` holds Luau *libraries* rather than scenes. Every
+`mono.engine/examples/assets/scripts/libraries/` holds Luau *libraries* rather than scenes. Every
 directory under it is staged with its structure intact and mirrored into
 `ReplicatedStorage` as a tree of `ModuleScript` instances before any scene runs,
 so a script finds `ReplicatedStorage.MagicCore` the way it would in a Rojo place.
@@ -956,9 +956,9 @@ own tests here. `MagicRuntime` and `TerrainRuntime` are this engine's, because
 that is the only layer that names an instance.
 
 ```sh
-just run --script .cache/build/dev/assets/examples/Magic.luau      # spells cratering terrain
-just run --script .cache/build/dev/assets/examples/Libraries.luau  # libraries, loaded and exercised
-just run --script .cache/build/dev/assets/examples/MagicTests.luau # their tests, in this VM
+just run --script .cache/build/dev/assets/examples/scripts/Magic.luau      # spells cratering terrain
+just run --script .cache/build/dev/assets/examples/scripts/Libraries.luau  # libraries, loaded and exercised
+just run --script .cache/build/dev/assets/examples/scripts/MagicTests.luau # their tests, in this VM
 ```
 
 **`MagicRuntime` draws everything the Roblox original draws.** A
@@ -1090,8 +1090,9 @@ sources are transpiled to staged `.js` files when the pinned TypeScript compiler
 is available. `atomic` is still not a target or a recipe.
 
 The example sources are real scenes, not placeholders. The default client scene
-is `Rings.luau`; staged examples live under
-`.cache/build/<preset>/assets/examples/` after a build. A missing TypeScript
+is `Rings.luau`; staged script demos live under
+`.cache/build/<preset>/assets/examples/scripts/` and authored worlds under
+`.cache/build/<preset>/assets/examples/worlds/` after a build. A missing TypeScript
 compiler skips JavaScript twins and leaves Luau scenes available.
 
 ---
@@ -1116,7 +1117,7 @@ example, so seeing one is a command rather than a path to look up:
 
 | Script | Scene |
 |---|---|
-| `run-demo` | the default scripted scene - `mono.engine/examples/Rings.luau` |
+| `run-demo` | the default scripted scene - `examples/scripts/Rings.luau` |
 | `run-rings` | orbiting, spinning parts - the loading path |
 | `run-skygrid` | a lattice of blocks in empty sky |
 | `run-terrain` | 16384² voxel terrain, streamed around a camera |
@@ -1471,6 +1472,7 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --publisher-key HEX              Pin the content publisher
 --sound PATH                     Loop a .wav or .mp3
 --capture PATH                   Write a BMP near the end; needs --frames
+--capture-sequence DIR           Write each frame as BMP + camera JSON; needs --frames
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
 --profile-snapshot PATH          Write a frame-graph snapshot when the run ends
@@ -1503,6 +1505,237 @@ simulated, its scripts run with both roles true, and there is no socket and no
 server library involved - single-player is the format and a VM, not a server
 hosted in this process. Given both `--game` and `--script`, the game file wins
 and the client says so rather than choosing quietly.
+
+For a supervised portal image producer, the driver launches `client` with
+`--game PATH --headless --frames N --presentation-world NAME
+--presentation-session SESSION` and an inherited `ProcessChannel`.
+The session must be positive and fresh for each host lifetime. The selected
+world must exist in the game. Only that world runs locally; the other world
+names remain remote routes.
+For a live producer, replace `--game PATH` with
+`--connect HOST:PORT --server-key PUBLIC_KEY`. This renders an authenticated
+replica under `--presentation-world NAME`, without a local demo, fresh player,
+movement messages or audio device. It advertises only after the snapshot joins,
+and withdraws the endpoint if the source session ends. Game-file and live-source
+arguments are mutually exclusive. Trusted driver directories supply remote world
+names that were not part of the replica.
+It advertises its image endpoint, accepts trusted driver route updates and
+serves HDR requests between ticks. Stop or channel disconnect ends the loop.
+These flags require a supervising process, so a standalone shell invocation
+without the inherited channel fails startup.
+Supervised producers may use `--frames -1`: their driver link and replication
+source bound their lifetime. Ordinary headless clients still need a frame budget.
+
+A listening Server can own this launch with `--presentation-program PATH`, where
+PATH is the staged Client executable. The option also passes to remote world
+hosts. Each listening host launches one live producer, pins its server identity,
+grants its temporary client identity through restricted admission, and advertises
+the delegated image/topology endpoints through its own presentation directory.
+The producer consumes one replication connection slot. Shutdown or producer
+failure withdraws its endpoints; there is no automatic producer restart yet.
+Omitting the option keeps the Server deployment independent of a graphics stack.
+Supervised hosts load saved projects by their granted world names; ungranted
+worlds stay remote and run no local scripts.
+
+Ordinary connected Clients discover image/topology routes through their existing
+authenticated play connection. Server grants private return channels per player
+and withdraws them on disconnect. Control/session endpoints stay out of the player
+presentation directory. No additional Client flag is needed. Presentation streams
+are bounded to 64 frames and 32 MiB per direction, with at most 16 player streams
+per Server. A successor connection replaces the old Client route directory.
+An exited or disconnected image producer is reaped and restarted with a fresh
+identity and session. Its old endpoints are withdrawn before retrying. Repeated
+failures back off from one second to 30 seconds; 30 seconds connected resets that
+delay. Server shutdown cancels pending retries.
+Once joined, Client displays the replica's own camera and unshifted draw rows;
+`--view-spacing` remains for composing local worlds before a play connection joins.
+Portal surfaces, lighting and image requests follow the joined world through
+successor adoption. The `[portal-successor]` process test checks discovery and a
+decoded seam-image request alongside the six session handoff outcomes. It does
+not compare the pixels of a complete physical crossing.
+
+Build `client` and `test_client`, then run
+`.cache/build/dev/tests/test_client '[presentation-host]'` for the actual
+process-channel GPU check. It covers saved and live worlds, changed lighting
+pixels, source-session loss and driver shutdown. It uses an isolated configuration
+and game under the build's tests directory.
+Build `server` too and run `test_client '[server-presentation-host]'` for the
+Server-owned launch and relay check. It covers restricted admission, seam and eye
+images, a saved project with an ungranted world, Stop and driver disconnect.
+The player-connection cases discover routes, receive topology and a fragmented
+128 KiB image over authenticated UDP, and recover after a missing-endpoint request.
+The consumer in this fixture is a CPU Connector; it does not verify a complete
+standalone Client walk through the portal.
+On POSIX, the player/seam case also expires its first producer, observes endpoint
+withdrawal and receives another image from its replacement over the same player
+connection. A retired-receipt request must not close that connection. The Windows
+case does not inject this producer lifetime limit.
+
+Run `test_client '[portal-product-walk]'` for the combined physical round trip.
+It uses the real Client, a listening Server, its supervised destination and both
+image producers. SDL keyboard events drive entry and return; the test requires
+both Client session adoptions. Its saved game runs both worlds at 30 Hz and then
+60 Hz against the listening driver's 30 Hz cadence, with both trailing and
+scroll-selected first-person cameras. Replicated LocalScripts sample the local
+character's Humanoid camera subject on Heartbeat before entry, after adoption
+and after return. Each stage checks zoom while stationary before resuming movement;
+a moving predicted camera and the delayed authoritative body are different samples.
+Missing services and retired characters are outside this sample window.
+When trace logging is compiled in, the fixture checks actual move submissions
+for increasing ticks in each connection, including updates between presentations.
+Right-button mouse motion must also change the observed camera direction during
+both legs. Mouse events follow captured frames, including the missing-rig gap;
+the accumulated control yaw must not reset at adoption. Each camera/rate case
+runs with automatic follow and with a LocalScript explicitly assigning the
+Humanoid to `CameraSubject`. Each combination runs both a stop-at-adoption case
+and a case holding its movement key for 12 destination submissions, for 16
+scenarios total. Held-key captures add `-held` before `-frames` and require moving
+native prediction on both legs. Capture metadata includes `subject_automatic` so
+the explicit case cannot silently exercise automatic follow instead. Only this
+property opts into runtime writes on a live predicted camera; authority-owned
+cameras and ordinary replica properties remain protected. Each case records 600
+frames at a 60 Hz presentation limit, checking
+every BMP and its matching camera metadata. Every frame after the initial
+Humanoid binding must contain visible scene pixels. The fixture's default camera
+far plane must survive binding and both handoffs.
+Every foreign-eye frame must have an image, and every ready whole-eye image must
+show the fixture's floor pixel, catching missing replies and images bound to a
+different world or draw slot. The final eye
+must return to `server.world`. Source-world portal-surface continuity remains a
+separate check.
+The 128 x 128 sequences are at
+`tests/portal-client-walk-{30,60}-{first,third}-frames/` under the build directory.
+Explicit-subject sequences add `-explicit` before `-frames`.
+Capture metadata records `submitted_move_tick`, `replication_applied_tick` and
+`unconfirmed_inputs`. `predicted_root` remains the immediately reconciled replay
+baseline; `presented_predicted_root` is the shared fractional body/camera pose.
+Small positional corrections blend out over 100 ms of presentation time.
+Larger ones use at most half walking speed and settle within one second;
+corrections beyond that bound snap to authority. Remaining offset/time are
+recorded separately. The held movement gate measures
+the displayed pose. Authority, replay coverage and input acknowledgements are
+never delayed by this presentation correction. Its vector maps through the
+portal on adoption; stopped movement still settles, and unchanged authority
+poses do not restart the correction timer. Input submissions must keep advancing through Proceed and
+source retirement; the client's input clock is separate from the server's world
+clock. Protocol 12 carries explicit consumed-input acknowledgements, so Client
+and Server must be rebuilt together.
+The product Client keeps submitted input ticks monotonic across adoption.
+`input_local_epoch` and `input_sequence_epoch` show how the current replica's
+clock maps onto that timeline; the replica's own `tick` is unchanged. The walk
+checks increasing submissions across connections as well as within each one.
+Portal host movement uses the PPT5 bus envelope and carries the originating
+client input stamp through control assignment and acknowledgement. All portal
+hosts must use the same build. `AcknowledgedInputTick` in a transfer receipt
+confirms destination control assignment; the separate optional `Motion` sample
+contains a completed destination tick, input stamp, root pose and prediction
+movement state. The sample is captured after physics and animation and is decoded
+atomically. Motion samples also carry `SimulationSeconds`, the completed
+world clock copied with the pose, independently of the acknowledged input stamp.
+The shared motion codec has grown by eight bytes; rebuild all Clients and
+Servers together. Held and native replay use this clock to keep acknowledged input duration
+separate from integrated world time. The mapping survives adoption. When authority advances beyond all recorded input time, reconciliation accepts
+its completed pose and rebases the uncovered interval onto that pose. It does
+not wait indefinitely for a slow client clock. Unacknowledged control and jump
+edges remain active even when their integration interval is already covered.
+The authenticated source session forwards newer completed samples
+under the accepted transfer claim. `portal_handoff.completed_motion` records
+those accepted by the client, and the product walk requires them in both
+directions. Pending handoffs replay retained submitted moves against these
+samples using each move's recorded prediction duration. `portal_input_history`
+reports retained count, coverage, last submission, applied sample ticks and
+discarded inputs. `prediction_authority_world` identifies the destination when
+its sample supplies the held prediction baseline. Run
+`test_client '[portal-product-camera-clear]'` for four offscreen round trips
+with a LocalScript clearing CameraSubject during source retirement, then an R
+key restoring Humanoid follow after adoption. It checks the cleared pose across
+the switch and completes the return.
+Run `test_client '[portal-product-image-handoff]'` for the 30/60 Hz third-person
+fixed-eye adoption checks. A blue destination floor distinguishes the far side
+from the orange source floor; the check requires blue pixels to survive the
+local-to-remote image switch. Keep representative before/after captures when
+inspecting a failure, and remove redundant image conversions after review. This
+check does not prove character appearance parity or absence of black frames
+while the eye itself crosses the portal.
+Run `test_client '[portal-input-history]'` for scaled-seam replay, history coverage
+and snapshot lifetime checks. Client adoption carries the mapped presentation
+onto the accepted destination rig and ignores older authority updates. The walk
+requires prediction on each adoption frame. Body and Humanoid-follow camera use
+a shared fractional prediction pose; adoption carries its phase between local
+clocks without changing replay coverage. `test_client '[prediction]'` covers
+fractional body/camera movement, replay duration and scaled-seam phase continuity. Native destination correction can
+still jump later; these gates do not establish seamless movement.
+For control timing, run the walk with
+`ATOMIC_ENGINE_LOG_LEVEL='info,portal-input=trace'`. The opt-in `portal-input`
+category logs forwarded and native assignments with destination incarnation,
+player, input tick, world tick, step duration, direction and root position.
+In the product Server, forwarded assignment runs before that world tick's
+physics, while native assignment runs after physics and first affects the next
+tick. Keep the final assignment for each physics tick when comparing held
+controls; several received inputs may overwrite one another before a step.
+These traces do not measure release cost or prove visual continuity.
+`MoveInput::StepSeconds` carries seconds per client input tick separately from
+host physics duration. Product Client fills it from its simulation clock; zero
+means unavailable timing for callers with no such clock. Negative and nonfinite
+values are rejected. The move payload is now 22 bytes, and forwarded PPT5 moves
+preserve duration through retries and same-build snapshots. Rebuild Client and
+Server together. Timed native portal controls now use a 64-entry queue on the authority Player.
+Its clock is anchored to the last forwarded physics assignment. Controls for the
+same physics tick coalesce while preserving jump edges. Pending input can lead
+by at most one second or one physics step, whichever is longer. Untimed local
+control cancels the queue; invalid or changed clock rates are refused. The
+completed pose reports physics-applied input while this queue is active.
+`test_game '[portal-input-schedule]'` checks timing, acknowledgement, capacity,
+snapshot restore, rig replacement and return transfer. The `route=scheduled`
+trace is pre-physics, like forwarded assignment. Adoption now carries the receipt-validated source history into the new
+connector's bounded prediction buffer, mapping movement into destination space.
+The connector resends this history before newer input and retains its unsent
+suffix through local budget refusal. A matching applied pose can retire inputs
+already handled by the source. Run `test_replication '[input-continuation]'` for
+both wire modes with tight budgets and early applied-pose retirement. Actual
+network loss/reordering and reconnect stress still need broader coverage;
+held-movement camera cadence and the first destination-pose correction remain
+open.
+Server also sends `PlayMessage::PlayerMotion`, pairing a completed own-player
+pose with that connection's input frontier, using physics-applied input for the native portal queue. This uses the same bounded
+motion codec but a distinct message from the old source portal receipt. Client
+prediction after adoption now uses these atomic samples, retaining unconfirmed
+inputs until a matching pose is applied. `native_prediction` reports received
+and applied pose/input ticks; `prediction_covered_through` exposes retained-input
+coverage. Samples wait for the matching root component, and cannot acknowledge
+an uncovered input prefix or replace prediction with a nonfinite replay result.
+`test_game '[player-motion]'` checks the
+codec; `test_server 'a client is told which player*'` checks real owning-client
+delivery and a native input stamp distinct from the world tick. Build target
+`server` explicitly before running process tests; rebuilding `test_server`
+alone does not relink the program they launch.
+Shots carry their rendered authoritative fractional tick separately from the
+input sequence. The 36-byte shot payload requires matching rebuilt Client and
+Server binaries. Run `test_examples '[shooting]'` for the codec and
+`test_server "a client's click is a shot*"` for current and historical target
+views with an independent input sequence. Zero or out-of-history view time uses
+present state; this check does not verify shots across a pending portal handoff.
+While a handoff is pending, `portal_handoff` records Proceed, Crossed, Resume,
+Ready and Commit alongside destination character count and accepted-rig presence.
+An unassigned destination character is only an availability diagnostic; it is
+not evidence that this player's transfer receipt has been accepted.
+`retained_character` identifies the local four-instance camera hold. Its stored
+pose is `retained_root`, never `authoritative_root`; `predicted_root` records the
+advancing presentation pose. `prediction_authority_tick` and `predicted_velocity`
+identify that prediction's baseline and current motion. During a handoff,
+`destination_applied_tick` identifies the successor replica's completed update;
+`through`, `through_origin` and `through_scale` map source poses into destination
+coordinates for comparison with `accepted_root`. These are distinct clocks and
+poses, not proof that forwarded input has advanced destination physics.
+The walk requires moving retained prediction to advance when input advances.
+This is a GPU check and does not yet compare every displayed camera or pixel
+across the seam.
+Run `test_server '[portal-product-walk]'` for the CPU saved-game round trip at
+both world rates over QUIC and datagram. It requires the transferred character
+rig before Commit on entry and return, with its Humanoid health preserved.
+Run `test_replication '[applied-order]'` for deterministic reordered structure,
+multipart acknowledgement and bounded recovery checks. `[replica-clock]` verifies
+that joins and resnapshots preserve local simulation and presentation time.
 
 ### The heap *(v0.18)*
 
@@ -1733,9 +1966,19 @@ off.
 Needs `--frames`, because the capture is requested one frame before the last so
 that it is written by the next and the run still ends when it was told to.
 
+Use `--capture-sequence DIR --frames N` to record every rendered frame as
+`0.bmp` / `0.json` through `N-1.bmp` / `N-1.json`. The JSON records the actual
+submitted camera, controller angles/basis, input and eye worlds, portal mapping, Humanoid subject and
+authoritative/predicted character roots when available. Portal entries record
+the sampled image handle, authored key and aperture geometry. World names may be local
+replica aliases; the eye history records its authored world name.
+The frame budget must be positive, and `--capture` cannot be combined with this
+flag. Each capture waits for GPU readback and writes files, so use this for
+visual diagnosis, not performance measurements.
+
 ```sh
 just run --frames 60 --entities 2048 \
-  --script .cache/build/dev/assets/examples/Meshes.luau \
+  --script .cache/build/dev/assets/examples/scripts/Meshes.luau \
   --cdn dir:store --publisher-key PUBLIC --capture meshes.bmp
 ```
 
@@ -2026,10 +2269,10 @@ found it in a browser opens on the right stack and pays no refusal at all. A
 typed-in address has no advert, so that client pays one round trip when the
 server is on the old stack.
 
-`--transport quic` needs no `--identity-key`: a QUIC handshake needs an identity
-whether or not anybody pinned one, so a server without a key draws an ephemeral
-one for the run and says so. That authenticates nobody, exactly as an unsigned
-`Welcome` on the datagram stack does. The next section is how to fix that.
+Both transports use `--identity-key` when supplied. Otherwise the server draws
+an ephemeral signing identity for the run and logs its public key. A client must
+pin that public key through trusted discovery or configuration to identify the
+server. Portal lease routes carry the destination's public key for this purpose.
 
 ---
 
@@ -2040,7 +2283,7 @@ server --listen 9000 --identity-key $SEED     # 64 hex characters, an Ed25519 se
 client --connect HOST:9000 --server-key $PUB  # the public half the server logs
 ```
 
-**Without these two the exchange authenticates nobody.** It is encrypted, so a
+**Without a trusted server-key pin the exchange identifies nobody.** It is encrypted, so a
 listener on the path learns nothing; but whoever *carries* the two key-exchange
 messages can substitute their own key, hold one session with each side and read
 everything. `net/Handshake.hpp` has said so since v0.3.
@@ -2641,11 +2884,11 @@ shared by every instance, so a `Play` there would be a method on every `Part` in
 the world. Roblox has this property too and `sound.Playing = true` is what it
 means.
 
-There is a working one in `mono.engine/examples/Terrain.luau`:
+There is a working one in `mono.engine/examples/assets/scripts/Terrain.luau`:
 
 ```sh
 cdn --publish ./content --store ./store --signing-key HEX   # content/audio/*.mp3
-just run --script .cache/build/dev/assets/examples/Terrain.luau \
+just run --script .cache/build/dev/assets/examples/scripts/Terrain.luau \
     --cdn dir:./store --publisher-key PUBLIC
 ```
 
@@ -2731,6 +2974,43 @@ including the GPU cases, with `Renderer::Initialise(nullptr)`: a real device,
 shader compiler, pipelines, compute queues, offscreen targets, captures and
 readbacks, but no window or swapchain. A missing or broken device fails the run
 instead of silently skipping coverage.
+
+For the render module alone, `just render-check` builds and runs the existing
+Catch suite's GPU cases. `just render-check '[fixture]'` selects the analytic
+projection/depth fixtures; other Catch filters work in the same argument.
+The optional second argument is the backend, currently `vulkan`. Requesting an
+unimplemented backend fails explicitly. A missing device fails the tests.
+
+Fixtures compare named graph images against independent CPU pinhole rays, with
+odd/non-square targets, padded transfer rows, depth overlap, clipping, edits and
+camera motion. Failure bundles go beside the test binary under
+`render-failures/<fixture>/<resource>/`: inputs and graph, device/driver, shader
+hashes, exact expected/actual bytes, preview images and a mismatch mask. Float
+depth previews share the reference depth scale; raw files preserve precision.
+The recipe records the source revision, including a dirty marker.
+
+`just render-preparation-bench 5` measures whole camera batches signing unchanged
+world rows and one-row edits in the optimized `bench` preset. It is a CPU
+preparation baseline, not GPU or full-frame timing. Cache/baseline paths stay
+under `.cache/build/bench`; results print to the terminal.
+
+`just shader-fuzz 10000` builds the real cooked shader parser with Clang
+libFuzzer, AddressSanitizer and UndefinedBehaviorSanitizer, then runs a bounded
+mutation campaign from three generated transport seeds. It checks transactional
+refusal and canonical round trips. A seed is transport-valid metadata and does
+not certify an executable shader. This headless target creates no device.
+Pass a different Clang C++ executable as the second argument if needed, with
+`CC` naming its matching C compiler. The dedicated build, corpus and crash
+artifacts stay under `.cache/build/shader-fuzz/`. `-max_len=65536` bounds this
+routine campaign; the asset suite separately checks the 64 MiB container cap.
+
+`just presentation-fuzz 10000` instruments the actual cross-world presentation
+message parser with the same sanitizers. It checks canonical message round trips
+and transactional refusal of malformed envelopes. It shares the Clang build
+tree above, with separate `presentation-corpus` and `presentation-artifacts`
+directories under `fuzz/`. Run the two fuzz recipes sequentially because both
+configure that build tree. This campaign uses the same 64 KiB mutation bound;
+the world suite separately checks maximum payload sizes and queue pressure.
 
 ```
 --build DIR   A configured build directory
@@ -3029,7 +3309,7 @@ The server it points at is an ordinary `server` with three flags that exist for
 this:
 
 ```sh
-server --game .cache/build/release/assets/examples/Stress.luau \
+server --game .cache/build/release/assets/examples/scripts/Stress.luau \
        --listen 45100 --max-clients 216 --profile-out run.folded
 ```
 
@@ -3086,12 +3366,12 @@ just typecheck
 ```
 
 Top-level `.luau` examples are checked by the repository's Luau checker. The
-TypeScript check covers `.ts` files under `mono.engine/examples/` and
+TypeScript check covers `.ts` files under `mono.engine/examples/assets/scripts/` and
 `mono.studio/panels/`. Nested Luau libraries are exercised by their own scene
 tests but are not included by the current `just typecheck` glob. Directly:
 
 ```sh
-./.cache/build/dev/tools/scriptcheck mono.engine/examples/*.luau
+./.cache/build/dev/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau
 ./node_modules/.bin/tsc --noEmit
 ```
 
@@ -3106,7 +3386,7 @@ just typecheck-editor      # builds luau-lsp if needed, then analyzes every exam
 Directly, once the tool is built:
 
 ```sh
-./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
+./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau
 ```
 
 **It is in `just check`, and 1.5 s of it.** What is not free is the first
@@ -3157,12 +3437,12 @@ only be a format for bun and npm to disagree about.
 
 ## Driving the engine from outside - `--mcp-port`
 
-The `server` and `studio` programs can open a socket that answers **Model
+The `client`, `server` and `studio` programs can open a socket that answers **Model
 Context Protocol**, so a language model or a script can watch them and steer
 them: list scenes, read and write properties, start and stop a world, read the
 log and the metrics, ask what a module is allowed to link, type-check a script,
-and start a test run. The client, unified harness and content origin do not
-currently register `--mcp-port`.
+and start a test run. The client adds the data-factory lifecycle, scene and
+capture tools when started with `--data-factory`.
 
 **It is off unless you ask.** Read
 [SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
@@ -3172,25 +3452,76 @@ never be enabled on a host in front of players.
 ```sh
 just mcp                                  # the editor, port 8738
 server --mcp-port 8734 --game My.agame    # a dedicated server
+client --data-factory --mcp-port 8736     # a local data-factory host
 ```
 
-The port is yours to choose; the defaults exist so the two supported programs on
+The port is yours to choose; the defaults exist so the three supported programs on
 one machine do not collide:
 
 | Program | Port | What it exposes |
 |---|---|---|
 | `server` | 8734 | its worlds, who is connected, and what the game socket has done |
+| `client` | 8736 | local data-factory lifecycle, scene observations and capture tools |
 | `studio` | 8738 | worlds, plus selection, Play and the output panel |
 
-Both also answer the tools that are about the repository rather than about the
+All three also answer the tools that are about the repository rather than about the
 program - the module graph, the class table, the log and the test runner - and
-both serve resources and prompts. `--mcp-port` always takes a number; the ports
+all three serve resources and prompts. `--mcp-port` always takes a number; the ports
 above are conventions, and `engine::control::DEFAULT_PORT` and
-`DEFAULT_SERVER_PORT` are where they are written down. `.mcp.json` and the `just
+`DEFAULT_SERVER_PORT` and `DEFAULT_CLIENT_PORT` are where they are written down. `.mcp.json` and the `just
 mcp` recipe are checked against that header at configure time, so a fourth copy
 of the number cannot quietly disagree.
 
 ### What is on the surface
+
+`negotiate` is the pure capability discovery call. It accepts an object; the
+version fields are optional, but when present they must both be `"1"`:
+
+```json
+{"contract_version":"1","schema_version":"1","requested_channels":["rgb","depth"]}
+```
+
+Its result contains `contract_version`, `schema_version`, the current
+`engine_version`, `operations`, `unsupported_operations`, the requested
+channel results and `limits`. Each operation entry gives the name of a
+registered callable tool and its `input_schema`. With the data-factory host
+enabled, the registered groups are DataFactory (`lifecycle_inspect`, `pause`,
+`resume`, `step`, `snapshot`, `checkpoint`), DataCapture (`capture`,
+`capture_multi_camera`, `poll_capture`, `get_resource`, `release_capture`, `cancel_capture`) and
+DataScene (`get_scene_snapshot`, `get_camera_rendering_data`,
+`get_capture_channels`, `get_resources`, `get_authored_navmesh_path`).
+`get_authored_navmesh_path` takes `schema_version: "authored-navmesh-path/v1"`,
+`world_id`, an exact `lifecycle` object with `tick`, `world_epoch` and
+`world_version`, `snapshot_id`, finite three element `start_metres` and
+`goal_metres`, and an optional `vertical_tolerance_metres` from 0 to 10.
+It routes across connected authored `BasePart` surfaces marked `Walkable`,
+using horizontal analytic box tops and a zero-radius point route. The result
+is bound to the supplied lifecycle and retained snapshot. Unsupported or
+stale physics, invalid endpoints, obstructed corridors and routes without
+proof return `unknown` with a reason. The result does not establish global
+navigability. Unsupported results are reported
+per host: checkpoint restore requires a compatible rehydrator and refuses
+non-serializable script VM state, nonempty step actions need a host executor,
+action-bearing backward seeks need a candidate-safe replay executor, and
+capture channels or backends are limited by the active render bridge.
+`capture_multi_camera` accepts 2 to 6 distinct named camera ids
+against one exact paused snapshot. Each camera must request `view_slot: 0`; the
+host maps physical view slots internally. The current bridge allows six capture
+tickets. The cameras are grouped into one `Renderer::Render` frame, so the
+result reports `same_renderer_frame: true`,
+`atomic: false` and `atomicity: "same_renderer_frame_not_simulation_atomic"`.
+The operation only queues the tickets. The caller submits one `render_only` frame,
+then polls every capture ticket.
+
+Requested channel names must be lowercase ASCII identifiers, at most 128 bytes,
+with at most 64 names per request. The active host reports unavailable channels
+and data-factory budgets explicitly. The limits include
+`script_bytes`, `entities`, `pixels`, `image_bytes`, `checkpoint_bytes`,
+`readbacks_in_flight`, `render_recursion`, `operation_time` and `resource_ttl`.
+`headless_cpu` and `offscreen_gpu` are explicitly unsupported with
+`not declared by this control host`. An unsupported version returns
+`capability_unsupported: ...`; non-object and malformed requests return a
+failed tool result with the validation reason.
 
 **About this program.** `engine_info` first, always. Then `world_list`,
 `world_tree`, `instance_get`, `instance_set`, `component_list`, `entity_query`,
@@ -3244,6 +3575,10 @@ with nothing to set up. Another program is one more entry:
 		"atomic-server": {
 			"command": ".cache/build/dev/tools/mcpbridge",
 			"args": ["--port", "8734"]
+		},
+		"atomic-client": {
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8736"]
 		}
 	}
 }
@@ -3578,17 +3913,17 @@ gives a scene where one model fills the sky. `--max-texture 2048` shrinks
 anything larger, because a character pack routinely carries several 4096-pixel
 sheets and four of those is a hundred megabytes of video memory.
 
-**`--model-size` and `MeshPart.Size` multiply - they do not override.** A part's
-`Size` scales the mesh's own coordinates, exactly as it scales the unit cube a
-built-in shape is; it does not fit the mesh into a box of that size. So a model
-baked at `--model-size 4` and given `Size = Vector3.new(4, 4, 4)` draws *sixteen
-metres* across, and the symptom is a grid of models overlapping their
-neighbours rather than anything that looks like a scale setting.
+**`MeshPart.Size` is the rendered box.** When a mesh has a nonzero extent on
+every axis, the renderer stretches each axis independently so its bounds fill
+the authored `Size`. A model baked at `--model-size 4` and given
+`Size = Vector3.new(4, 4, 4)` therefore draws four metres across, not sixteen.
+`--model-size` changes the baked geometry without multiplying the rendered
+extent in that case.
 
-Bake imports with `--model-size 1` when a scene sets sizes in metres. That makes
-an import behave exactly like a built-in, so one number means one thing across
-the whole scene. `mono.engine/examples/MeshGrid.luau` is a worked example, and
-its header says the same thing at the point of use.
+Bake imports with `--model-size 1` when a scene needs to preserve the source
+mesh geometry. `MeshPart.Size` still gives the visible extent, so one size
+means one thing across the whole scene. `mono.engine/examples/assets/scripts/MeshGrid.luau`
+is a worked example, and its header says the same thing at the point of use.
 
 **`MeshPart.TrianglesCount` is how a script checks a mesh arrived.** It reports
 how many triangles the world found behind that part's `MeshId`, and it is

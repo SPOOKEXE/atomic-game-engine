@@ -98,6 +98,11 @@ TEST_CASE("a rigid chain propagates from one stable root", "[physics][welds]") {
 
 	CHECK(world.Store.Get<scene::Transform>(second)->Frame.Position.X == 12.0f);
 	CHECK(world.Store.Get<scene::Transform>(third)->Frame.Position.X == 15.0f);
+	const physics::PhysicsWorld &physicsWorld = *world.Store.Resource<physics::PhysicsWorld>();
+	CHECK(physicsWorld.RigidAssemblyRoot(first) == first);
+	CHECK(physicsWorld.RigidAssemblyRoot(second) == first);
+	CHECK(physicsWorld.RigidAssemblyRoot(third) == first);
+	CHECK(physicsWorld.RigidAssemblyRoot(ecs::NULL_ENTITY) == ecs::NULL_ENTITY);
 }
 
 TEST_CASE("disabled and internally connected links produce no constraint collision", "[physics][welds]") {

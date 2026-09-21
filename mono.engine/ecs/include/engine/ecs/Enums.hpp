@@ -88,6 +88,12 @@ namespace engine::ecs {
 		Authoritative,
 	};
 
+	// Applying replicated state must not rewind the receiving world's scheduler clock.
+	enum class ApplyClock : uint8_t {
+		RestoreSnapshot,
+		PreserveLocal,
+	};
+
 	// Returns a stable, human-readable name for an apply mode.
 	//
 	// @param mode The mode to name.

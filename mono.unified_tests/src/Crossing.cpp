@@ -518,6 +518,37 @@ namespace unified {
 		return Replica_.Joined();
 	}
 
+	bool Crossing::DrainContent(int limit) {
+		if (Relay_ == nullptr || ServerSide == nullptr) {
+			return true;
+		}
+
+		for (int attempt = 0; attempt < limit; attempt++) {
+			// A route the relay accepted after the tick's wire flush has to take
+			// one more transport turn to reach the client. Advance only the wire's
+			// clock here: publishing another world tick would create another route.
+			Now += 1.0 / Options.TickRate;
+
+			Report report;
+			CarryOverWire(report);
+
+			std::vector<engine::delivery::RelayAnswer> finished;
+			Link_->Collect(finished);
+			if (!finished.empty()) {
+				Asking = false;
+			}
+
+			Relay_->Pump([this](engine::replication::ClientId, std::span<const std::byte> payload) {
+				return SendUser(*ServerSide, payload);
+			});
+
+			if (Link_->Assembling() == 0 && Relay_->Busy() == 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void Crossing::Drain(engine::net::Transport &transport, engine::replication::SessionPort &into) {
 		std::vector<std::byte> datagram;
 		while (transport.Receive(datagram).Status == engine::net::TransportStatus::Ok) {

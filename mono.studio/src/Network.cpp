@@ -23,6 +23,7 @@
 // resolution an interactive panel is read at.
 
 #include "AssetProfiler.hpp"
+#include "ProfilerFlame.hpp"
 
 #include <engine/assets/Animation.hpp>
 #include <engine/assets/Builtin.hpp>
@@ -67,49 +68,6 @@ namespace studio {
 		// five hundred assets has to become five hundred assets arriving over a
 		// second, not one frame that never returns.
 		constexpr size_t REQUESTS_PER_PUMP = 4;
-
-		// Fits one part to resident mesh proportions. Callers choose the mesh
-		// lookup strategy, so a burst can scan a world once instead of once per
-		// mesh that happened to arrive in the same frame.
-		void FitPartToMesh(
-			engine::ecs::Store &store,
-			engine::ecs::Entity entity,
-			const engine::scene::Visual &visual,
-			const engine::scene::Bounds &bounds,
-			const engine::core::Name &mesh,
-			const engine::core::Vector3 &extent
-		) {
-			const float longest = std::max({extent.X, extent.Y, extent.Z});
-			if (visual.Mesh != mesh || visual.Fitted == mesh || longest <= 1e-6f) {
-				return;
-			}
-
-			// The part keeps the size it has along its longest axis. The mesh supplies
-			// its proportions, so replacing geometry cannot unexpectedly rescale a scene.
-			const float span = std::max({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
-			if (span <= 1e-6f) {
-				return;
-			}
-
-			const float unit = span / longest;
-			// `Each` exposes columns directly. Take tracked rows only after every
-			// guard, so the renderer and retained presentation see a real change.
-			engine::scene::Bounds *fittedBounds = store.GetMutable<engine::scene::Bounds>(entity);
-			engine::scene::Visual *fittedVisual = store.GetMutable<engine::scene::Visual>(entity);
-			if (fittedBounds == nullptr || fittedVisual == nullptr) {
-				return;
-			}
-
-			fittedBounds->HalfExtent = engine::core::Vector3{
-				extent.X * unit,
-				extent.Y * unit,
-				extent.Z * unit,
-			};
-			fittedVisual->Fitted = mesh;
-		}
-	}
-
-	namespace {
 		// A byte count somebody can read at a glance.
 		//
 		// **Powers of 1024 under decimal names**, matching `cdn::ReadableRate` and
@@ -144,6 +102,84 @@ namespace studio {
 			if (note != nullptr && ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("%s", note);
 			}
+		}
+
+		bool IsDeliverySpan(const engine::core::FrameSpan &span) {
+			if (span.Category == engine::core::ProfileCategory::Network) return true;
+			return span.Category == engine::core::ProfileCategory::Assets &&
+				   (span.Name.starts_with("delivery::") || span.Name.starts_with("delivery.") ||
+					span.Name.starts_with("content."));
+		}
+
+		void CaptureNetwork(std::vector<DiagnosticSpan> &into) {
+			const auto &spans = engine::core::FrameGraph::Spans();
+			into.clear();
+			into.reserve(spans.size());
+			std::vector<uint32_t> kept(spans.size(), engine::core::FrameGraph::NO_PARENT);
+			for (size_t index = 0; index < spans.size(); ++index) {
+				const engine::core::FrameSpan &source = spans[index];
+				if (!IsDeliverySpan(source)) continue;
+				uint32_t parent = source.Parent;
+				while (parent < index && kept[parent] == engine::core::FrameGraph::NO_PARENT)
+					parent = spans[parent].Parent;
+				const uint32_t retainedParent =
+					parent < index ? kept[parent] : engine::core::FrameGraph::NO_PARENT;
+				into.push_back(
+					DiagnosticSpan{
+						.Name = std::string(source.Name),
+						.Depth = retainedParent == engine::core::FrameGraph::NO_PARENT
+									 ? 0
+									 : into[retainedParent].Depth + 1,
+						.Parent = retainedParent,
+						.StartMilliseconds = source.StartMilliseconds,
+						.Milliseconds = source.Milliseconds,
+						.SelfMilliseconds = source.SelfMilliseconds,
+						.IdleMilliseconds = source.IdleMilliseconds,
+						.Category = source.Category,
+						.Owner = source.Owner,
+						.Reported = source.Reported
+					}
+				);
+				kept[index] = static_cast<uint32_t>(into.size() - 1);
+			}
+		}
+
+		void DrawNetworkFlame(const std::vector<DiagnosticSpan> &spans, float capturedFrame) {
+			if (spans.empty()) {
+				ImGui::TextDisabled("no network or delivery spans recorded yet");
+				return;
+			}
+			const float frame = std::max(capturedFrame, 0.001f);
+			std::vector<DiagnosticSpan> measured;
+			MeasuredProfilerSpans(spans, measured);
+			std::vector<uint32_t> rows;
+			const uint32_t rowCount = LayoutDiagnosticRows(measured, rows);
+			const ImVec2 origin = ImGui::GetCursorScreenPos();
+			const float width = ImGui::GetContentRegionAvail().x;
+			constexpr float HEIGHT = 20.0f;
+			ImDrawList *draw = ImGui::GetWindowDrawList();
+			for (size_t index = 0; index < measured.size(); ++index) {
+				const DiagnosticSpan &span = measured[index];
+				const float left = origin.x + std::clamp(span.StartMilliseconds / frame, 0.0f, 1.0f) * width;
+				const float right =
+					origin.x +
+					std::clamp((span.StartMilliseconds + span.Milliseconds) / frame, 0.0f, 1.0f) * width;
+				const float top = origin.y + static_cast<float>(rows[index]) * HEIGHT;
+				const ImVec2 min(left, top);
+				const ImVec2 max(std::max(left + 1.0f, right), top + HEIGHT - 2.0f);
+				draw->AddRectFilled(min, max, IM_COL32(72, 150, 230, 220));
+				draw->PushClipRect(min, max, true);
+				draw->AddText(ImVec2(left + 3.0f, top + 2.0f), IM_COL32_WHITE, span.Name.c_str());
+				draw->PopClipRect();
+				if (ImGui::IsMouseHoveringRect(min, max))
+					ImGui::SetTooltip("%s\n%.3f ms measured", span.Name.c_str(), span.Milliseconds);
+			}
+			ImGui::Dummy(ImVec2(width, static_cast<float>(rowCount) * HEIGHT));
+			for (const DiagnosticSpan &span : spans)
+				if (span.Reported)
+					ImGui::TextDisabled(
+						"reported worker: %s, %.3f ms measured", span.Name.c_str(), span.Milliseconds
+					);
 		}
 	}
 
@@ -283,11 +319,10 @@ namespace studio {
 	void Editor::PumpContent(double frameSeconds) {
 		ContentSeconds += frameSeconds;
 
-		// **Five spans rather than one, because "content costs 0.1 ms in an idle
+		// **Content timing scopes rather than one, because "content costs 0.1 ms in an idle
 		// editor" is not an answer.** The things under here are a delivery
 		// client polling a socket, a demand scan over every world's instances, a
-		// decode-and-upload of whatever arrived, a walk over parts waiting for a
-		// mesh to size them against, and an upload queue - and in an editor with
+		// decode-and-upload of whatever arrived and an upload queue - and in an editor with
 		// nothing downloading they cost very different amounts for very
 		// different reasons. One bar labelled `content` could only say that the
 		// total was small and non-zero, which is exactly the reading that
@@ -305,15 +340,6 @@ namespace studio {
 			DrainContent();
 		}
 		PumpAssetExport();
-
-		// **Outside the `ContentClient` guard on purpose.** A part can meet an
-		// already-loaded mesh in a process with no delivery client at all - a
-		// built-in, a duplicate, an undo - and those are exactly the cases the
-		// arrival-driven fit never saw.
-		{
-			ENGINE_PROFILE_CAT("content.fit", engine::core::ProfileCategory::Assets);
-			FitPendingParts();
-		}
 
 		if (ContentUploads) {
 			ENGINE_PROFILE_CAT("content.upload", engine::core::ProfileCategory::Assets);
@@ -359,8 +385,8 @@ namespace studio {
 		// catalogue filled for one would leave `TrianglesCount` answering zero
 		// in the others for no reason anybody could see.
 		// `EachWorld` rather than `Worlds`, which returns the list by value: this
-		// runs several times a frame between the content pump and the fit pass,
-		// and each call was a heap allocation for a list it walked once.
+		// runs several times a frame between content work, and each call was a
+		// heap allocation for a list it walked once.
 		Universe->EachWorld([this, &body](engine::world::WorldId world) {
 			Universe->Enter(world, [&body](engine::ecs::Store &store) { body(store); });
 		});
@@ -494,13 +520,8 @@ namespace studio {
 						name, footprint.DecodedBytes, footprint.CpuResidentBytes, footprint.GpuResidentBytes
 					);
 					VisualResourceRevision++;
-					ContentMeshRevision++;
 					ContentMeshes++;
 					ContentResident.Remember(name, asset->Kind, asset->Root);
-
-					// `FitPendingParts` consumes this arrival after intake completes. A
-					// batch can contain many meshes, so fitting here would rescan every
-					// world once per mesh before the batch's one revision-gated scan.
 
 					// **The sheets its submeshes name, recorded where they are
 					// readable.** They live inside the mesh file, so this is the
@@ -539,10 +560,8 @@ namespace studio {
 					});
 
 					// **Kept, because a world can arrive after a mesh does.**
-					// The line above tells the worlds that are open now; one
-					// created or opened later has parts naming this mesh and a
-					// catalogue that has never heard of it. `FitPendingParts`
-					// is what tells it, out of this.
+					// `PrepareWorldIn` gives a newly created or restored world these
+					// facts before its scripts or property panel read them.
 					ContentMeshFacts[name.Id()] = RegisteredMesh{triangles, sheets};
 				} else {
 					RecordContentAssetFailure(name);
@@ -550,6 +569,15 @@ namespace studio {
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
 				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
+					const engine::scene::FlipbookFacts facts{
+						.Side = image.FlipbookSide,
+						.Frames = image.FlipbookFrames,
+						.FrameRate = image.FlipbookFrameRate,
+					};
+					ContentTextureFacts[name.Id()] = facts;
+					EachOpenWorld([&](engine::ecs::Store &store) {
+						(void)engine::scene::RecordTexture(store, name, facts);
+					});
 					const AssetFootprint footprint = TextureFootprint(image);
 					RecordContentAssetFootprint(
 						name, footprint.DecodedBytes, footprint.CpuResidentBytes, footprint.GpuResidentBytes
@@ -653,142 +681,6 @@ namespace studio {
 				ContentMaterials,
 				ContentAnimations
 			);
-		}
-	}
-
-	void Editor::FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent) {
-		if (!mesh.IsValid()) {
-			return;
-		}
-
-		EachOpenWorld([&mesh, &extent](engine::ecs::Store &store) {
-			store.Each<const engine::scene::Visual, const engine::scene::Bounds>(
-				[&](engine::ecs::Entity entity,
-					const engine::scene::Visual &visual,
-					const engine::scene::Bounds &bounds) {
-					FitPartToMesh(store, entity, visual, bounds, mesh, extent);
-				}
-			);
-		});
-	}
-
-	void Editor::FitPendingParts() {
-		if (Universe == nullptr) {
-			return;
-		}
-
-		// **Gathered first, applied second.** `MeshExtentOf` is the renderer's
-		// and `Each` is inside `Universe::Enter`, so asking the renderer from
-		// within the walk would be reaching out of a scoped store - the rule at
-		// the top of `Editor.hpp`. It is also a walk that writes, and the names
-		// are what decide whether anything is written at all.
-		std::vector<engine::core::Name> waiting;
-
-		Universe->EachWorld([this, &waiting](engine::world::WorldId world) {
-			Universe->Enter(world, [this, world, &waiting](engine::ecs::Store &store) {
-				const ContentFitScanState state{
-					.VisualVersion = store.ComponentChangeVersion<engine::scene::Visual>(),
-					.VisualCount = store.CountMatching<engine::scene::Visual>(),
-					.MeshVersion = ContentMeshRevision,
-				};
-				const auto scanned = ContentFitScans.find(world.Index);
-				if (scanned != ContentFitScans.end() && scanned->second == state) {
-					return;
-				}
-				ContentFitScans[world.Index] = state;
-
-				store.Each<const engine::scene::Visual>(
-					[&waiting, &store](engine::ecs::Entity, const engine::scene::Visual &visual) {
-						if (!visual.Mesh.IsValid()) {
-							return;
-						}
-
-						// **Two reasons a mesh is pending, and the second is not the
-						// first.** A part that has never been fitted needs the shape; a
-						// world whose catalogue has never heard of the mesh needs the
-						// facts. They come apart when a world is loaded from a file -
-						// `Visual::Fitted` is saved with the part, so a reopened place
-						// is fully fitted and knows no triangle counts at all.
-						const bool unfitted = visual.Fitted != visual.Mesh;
-						const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
-						if (!unfitted && !unknown) {
-							return;
-						}
-
-						if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
-							waiting.push_back(visual.Mesh);
-						}
-					}
-				);
-			});
-		});
-
-		struct ResidentMesh {
-			engine::core::Name Name;
-			engine::core::Vector3 Extent;
-		};
-		std::unordered_map<uint32_t, ResidentMesh> resident;
-		resident.reserve(waiting.size());
-		for (const engine::core::Name &mesh : waiting) {
-			// **Only a mesh the renderer holds.** A part naming one that has not
-			// arrived - or never will - is left alone rather than fitted to
-			// nothing, which is what keeps a misspelled `MeshId` a fallback cube
-			// instead of a part collapsed to zero.
-			engine::core::Vector3 extent;
-			if (!Renderer.MeshExtentOf(mesh, extent)) {
-				continue;
-			}
-			resident.emplace(mesh.Id(), ResidentMesh{mesh, extent});
-		}
-
-		// A delivered bundle commonly contains a whole character or prop set. Walk
-		// each affected world once for that batch, rather than once for every mesh.
-		if (!resident.empty()) {
-			Universe->EachWorld([this, &resident](engine::world::WorldId world) {
-				Universe->Enter(world, [&resident](engine::ecs::Store &store) {
-					store.Each<const engine::scene::Visual, const engine::scene::Bounds>(
-						[&store, &resident](
-							engine::ecs::Entity entity,
-							const engine::scene::Visual &visual,
-							const engine::scene::Bounds &bounds
-						) {
-							const auto found = resident.find(visual.Mesh.Id());
-							if (found != resident.end()) {
-								FitPartToMesh(
-									store, entity, visual, bounds, found->second.Name, found->second.Extent
-								);
-							}
-						}
-					);
-				});
-			});
-		}
-
-		for (const auto &entry : resident) {
-			const engine::core::Name &mesh = entry.second.Name;
-
-			// **And tell any world that has not heard of it.** The catalogue is
-			// written at intake into the worlds that were open then, so a world
-			// created or opened afterwards holds parts naming a mesh it knows
-			// nothing about: `TrianglesCount` reads zero for ever while the
-			// geometry draws perfectly, which is the properties panel appearing
-			// never to update.
-			//
-			// Guarded on the count rather than written unconditionally, so this
-			// is a lookup per pending mesh rather than a write per frame - and
-			// so a republish, which *does* go through the intake path, is not
-			// overwritten here with what this cached.
-			const auto known = ContentMeshFacts.find(mesh.Id());
-			if (known == ContentMeshFacts.end()) {
-				continue;
-			}
-
-			EachOpenWorld([&mesh, &known](engine::ecs::Store &store) {
-				if (engine::scene::TrianglesOf(store, mesh) != 0) {
-					return;
-				}
-				engine::scene::RecordMesh(store, mesh, known->second.Triangles, known->second.Sheets);
-			});
 		}
 	}
 
@@ -1075,7 +967,19 @@ namespace studio {
 			NetworkRow("Up", PerSecond(rates.UpPerSecond), "bytes sent to write origins");
 
 			if (ContentClient) {
-				NetworkRow("In flight", std::to_string(ContentClient->Outstanding()) + " request(s)");
+				const engine::delivery::RequestDiagnostics diagnostics = ContentClient->Diagnostics();
+				NetworkRow(
+					"Waiting",
+					std::to_string(diagnostics.Pending) + " request(s)",
+					"requests waiting on a manifest, source, local read, or verification"
+				);
+				NetworkRow(
+					"Active wire",
+					std::to_string(diagnostics.TransportActive) + " fetch(es)",
+					"only transport handles the delivery client still reports pending"
+				);
+				NetworkRow("Ready", std::to_string(diagnostics.Ready) + " unconsumed request(s)");
+				NetworkRow("Failed", std::to_string(diagnostics.Failed) + " unconsumed request(s)");
 			}
 			if (ContentUploads) {
 				NetworkRow("Queued", std::to_string(ContentUploads->Remaining()) + " upload(s)");
@@ -1085,6 +989,66 @@ namespace studio {
 
 		if (rates.WindowSeconds <= 0.0) {
 			ImGui::TextDisabled("no window yet - rates appear after a second of samples");
+		}
+
+		ImGui::SeparatorText("Network profiler");
+		if (!NetworkProfiler.Paused) {
+			CaptureNetwork(NetworkProfiler.Spans);
+			NetworkProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
+			NetworkProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
+			NetworkProfiler.Dropped = engine::core::FrameGraph::Dropped();
+		}
+		if (ImGui::Button(NetworkProfiler.Paused ? "Resume capture" : "Pause capture"))
+			NetworkProfiler.Paused = !NetworkProfiler.Paused;
+		ImGui::SameLine();
+		if (ImGui::Button("Snapshot timings")) {
+			CaptureNetwork(NetworkProfiler.Spans);
+			NetworkProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
+			NetworkProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
+			NetworkProfiler.Dropped = engine::core::FrameGraph::Dropped();
+		}
+		ImGui::TextDisabled(
+			"frame %.3f ms, unmarked %.3f ms, %zu dropped",
+			NetworkProfiler.FrameMilliseconds,
+			NetworkProfiler.UnmarkedMilliseconds,
+			NetworkProfiler.Dropped
+		);
+		if (ImGui::BeginTabBar("network profile")) {
+			if (ImGui::BeginTabItem("Stages")) {
+				if (ImGui::BeginTable(
+						"network stages", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+					)) {
+					ImGui::TableSetupColumn("stage", ImGuiTableColumnFlags_WidthStretch);
+					ImGui::TableSetupColumn("inclusive ms");
+					ImGui::TableSetupColumn("self ms");
+					ImGui::TableSetupColumn("idle ms");
+					ImGui::TableHeadersRow();
+					for (const DiagnosticSpan &span : NetworkProfiler.Spans) {
+						ImGui::TableNextRow();
+						ImGui::TableNextColumn();
+						ImGui::Indent(12.0f * static_cast<float>(span.Depth));
+						ImGui::TextUnformatted(span.Name.c_str());
+						ImGui::Unindent(12.0f * static_cast<float>(span.Depth));
+						if (span.Reported) {
+							ImGui::SameLine();
+							ImGui::TextDisabled("reported worker work");
+						}
+						ImGui::TableNextColumn();
+						ImGui::Text("%.3f", span.Milliseconds);
+						ImGui::TableNextColumn();
+						ImGui::Text("%.3f", span.SelfMilliseconds);
+						ImGui::TableNextColumn();
+						ImGui::Text("%.3f", span.IdleMilliseconds);
+					}
+					ImGui::EndTable();
+				}
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Flame graph")) {
+				DrawNetworkFlame(NetworkProfiler.Spans, NetworkProfiler.FrameMilliseconds);
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
 		}
 
 		// --- downloading ------------------------------------------------------

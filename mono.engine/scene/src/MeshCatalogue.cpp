@@ -1,6 +1,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 
+#include <cmath>
+
 namespace engine::scene {
 
 	uint32_t MeshCatalogue::Find(const core::Name &mesh) const {
@@ -27,10 +29,32 @@ namespace engine::scene {
 	}
 
 	bool RecordMesh(
-		ecs::Store &store, const core::Name &mesh, uint32_t triangles, std::span<const core::Name> sheets
+		ecs::Store &store,
+		const core::Name &mesh,
+		uint32_t triangles,
+		std::span<const core::Name> sheets,
+		const MeshSkinning &skinning,
+		core::Vector3 size
 	) {
 		if (!mesh.IsValid()) {
 			return false;
+		}
+		if (!std::isfinite(size.X) || !std::isfinite(size.Y) || !std::isfinite(size.Z) || size.X < 0 ||
+			size.Y < 0 || size.Z < 0)
+			return false;
+		if (skinning.Vertices.size() > MAXIMUM_RETAINED_SKINNING_VERTICES ||
+			skinning.VertexCount < skinning.Vertices.size() ||
+			(skinning.VertexCount <= MAXIMUM_RETAINED_SKINNING_VERTICES &&
+			 skinning.VertexCount != skinning.Vertices.size()))
+			return false;
+		for (const MeshSkinningVertex &vertex : skinning.Vertices) {
+			uint32_t total = 0;
+			for (size_t influence = 0; influence < vertex.Weights.size(); ++influence) {
+				total += vertex.Weights[influence];
+				if (vertex.Weights[influence] != 0 && vertex.Joints[influence] >= skinning.JointCount)
+					return false;
+			}
+			if (total != 0 && total != UINT16_MAX) return false;
 		}
 
 		// A count of zero is stored rather than rejected. It reads back
@@ -39,6 +63,7 @@ namespace engine::scene {
 		// "known to be empty" state would be a distinction nothing can act on.
 		MeshCatalogue &catalogue = MeshesOf(store);
 		catalogue.Triangles[mesh.Id()] = triangles;
+		catalogue.Sizes[mesh.Id()] = size;
 
 		// **Replaced rather than merged**, for the reason the header gives: a
 		// republished mesh may name different sheets, and a merge would leave a
@@ -49,6 +74,30 @@ namespace engine::scene {
 		// names no sheet at all, and leaving a stale entry there would be the
 		// same lie one layer along.
 		catalogue.Textures[mesh.Id()].assign(sheets.begin(), sheets.end());
+		catalogue.Skinning[mesh.Id()] = skinning;
+		return true;
+	}
+
+	bool ForgetMesh(ecs::Store &store, const core::Name &mesh) {
+		if (!mesh.IsValid()) return false;
+		MeshCatalogue *catalogue = store.ResourceMutable<MeshCatalogue>();
+		if (catalogue == nullptr) return false;
+		const uint32_t id = mesh.Id();
+		const size_t removed = catalogue->Triangles.erase(id);
+		catalogue->Sizes.erase(id);
+		catalogue->Textures.erase(id);
+		catalogue->Skinning.erase(id);
+		return removed != 0;
+	}
+
+	bool SkinningOf(const ecs::Store &store, const core::Name &mesh, MeshSkinning &out) {
+		out = {};
+		if (!mesh.IsValid()) return false;
+		const MeshCatalogue *catalogue = store.Resource<MeshCatalogue>();
+		if (catalogue == nullptr) return false;
+		const auto found = catalogue->Skinning.find(mesh.Id());
+		if (found == catalogue->Skinning.end()) return false;
+		out = found->second;
 		return true;
 	}
 
@@ -63,6 +112,13 @@ namespace engine::scene {
 			out.assign(sheets.begin(), sheets.end());
 		}
 		return out.size();
+	}
+
+	core::Vector3 MeshSizeOf(const ecs::Store &store, const core::Name &mesh) {
+		const MeshCatalogue *catalogue = store.Resource<MeshCatalogue>();
+		if (catalogue == nullptr || !mesh.IsValid()) return {};
+		const auto found = catalogue->Sizes.find(mesh.Id());
+		return found == catalogue->Sizes.end() ? core::Vector3{} : found->second;
 	}
 
 	uint32_t TrianglesOf(const ecs::Store &store, const core::Name &mesh) {

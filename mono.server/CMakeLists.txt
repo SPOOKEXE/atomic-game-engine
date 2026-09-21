@@ -17,6 +17,7 @@ mono_add_library(server
 		Engine::ecs
 		Engine::world
 		Engine::datastore
+		Engine::scripthost
 
 		# L13, `shared`. The Model Context Protocol surface, opened only when
 		# `--mcp-port` asks for it.
@@ -85,7 +86,7 @@ mono_add_library(server
 		# includes is one its build file should say out loud.
 		Mono::discord
 
-		# L10, `shared`. What a game file is. `--game FILE.agame` hosts a
+		# L10, `shared`. What a game or world file is. `--game` hosts an
 		# universe of worlds authored in the studio; the same module the studio
 		# wrote it with reads it back, which is what keeps one description of
 		# the format.

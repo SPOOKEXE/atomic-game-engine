@@ -29,8 +29,26 @@ using engine::assets::BuiltinMesh;
 using engine::assets::MakeBuiltin;
 using engine::assets::MeshData;
 using engine::core::Name;
+using engine::render::MeshCopyStatus;
 using engine::render::MeshEntry;
 using engine::render::MeshTable;
+
+namespace {
+	engine::render::PackedMeshData PackedTriangle() {
+		engine::render::PackedMeshData mesh;
+		mesh.VertexCount = 3;
+		mesh.Indices = {0, 1, 2};
+		mesh.Minimum = {0, 0, 0};
+		mesh.Maximum = {1, 1, 0};
+		mesh.Vertices.resize(20);
+		mesh.Streams = {
+			engine::render::PackedMeshStream{0, 5, 9, 3, engine::render::PackedMeshFormat::Unsigned4, 0, 1},
+			engine::render::PackedMeshStream{8, 5, 9, 3, engine::render::PackedMeshFormat::Unsigned4, 0, 1},
+			engine::render::PackedMeshStream{16, 3, 6, 2, engine::render::PackedMeshFormat::Unsigned4, 0, 1},
+		};
+		return mesh;
+	}
+}
 
 namespace {
 	// A mesh with a box that is not the unit one, so `Extent` and `Centre` are
@@ -59,6 +77,120 @@ TEST_CASE("adding a mesh registers it without touching the device", "[render][me
 	CHECK(table.UploadCount() == 0);
 	CHECK(table.PendingVertexCount() == cube.Vertices.size());
 	CHECK(table.PendingIndexCount() == cube.Indices.size());
+	const MeshEntry &entry = table.Resolve(Name("test.Cube"));
+	REQUIRE(entry.Clusters.size() == 1);
+	CHECK(entry.Clusters[0].Range.IndexCount == cube.Indices.size());
+	CHECK(entry.Clusters[0].SurfaceArea > 0.0f);
+	CHECK(entry.Clusters[0].Material == std::numeric_limits<uint32_t>::max());
+}
+
+TEST_CASE(
+	"packed mesh bytes stay compact through host residency and upload planning", "[render][meshtable]"
+) {
+	MeshTable table;
+	const auto packed = PackedTriangle();
+	REQUIRE(packed.IsValid());
+	REQUIRE(table.AddPacked(Name("test.Packed"), packed));
+	CHECK(table.PendingVertexCount() == 0);
+	CHECK(table.PendingPackedByteCount() == packed.Vertices.size());
+	CHECK(table.HostPackedByteCount() == packed.Vertices.size());
+	CHECK(table.HostPackedByteCount() < packed.VertexCount * sizeof(engine::assets::MeshVertex));
+	CHECK(table.PackedResidentBytes() == 0);
+	CHECK(table.UploadedPackedBytes() == 0);
+	const MeshEntry &entry = table.Resolve(Name("test.Packed"));
+	CHECK(entry.Packed);
+	CHECK(entry.Whole.VertexOffset == 0);
+	CHECK(entry.PackedStreams[1].ByteOffset == 8);
+}
+
+TEST_CASE("mesh owners isolate replacement and defer retired range reuse", "[render][meshtable]") {
+	MeshTable table;
+	const Name asset("owner-test.mesh"), firstOwner("owner-test.first"), secondOwner("owner-test.second");
+	const MeshData cube = MakeBuiltin(BuiltinMesh::Cube);
+	REQUIRE(table.Add(asset, cube));
+	REQUIRE(table.Add(asset, Offset(cube, 2), firstOwner));
+	REQUIRE(table.Add(asset, Offset(cube, 4), secondOwner));
+	CHECK(table.Count() == 3);
+	CHECK(table.Resolve(asset).Centre.X == Approx(0));
+	CHECK(table.Resolve(asset, firstOwner).Centre.X == Approx(2));
+	CHECK(table.Resolve(asset, secondOwner).Centre.X == Approx(4));
+	CHECK_FALSE(table.Has(asset, Name("owner-test.absent")));
+	CHECK(&table.Resolve(asset, Name("owner-test.absent")) == &table.Resolve(Name()));
+	CHECK_FALSE(table.Add(asset, MeshData{}, firstOwner));
+	CHECK(table.Resolve(asset, firstOwner).Centre.X == Approx(2));
+	REQUIRE(table.Add(asset, Offset(cube, 6), firstOwner));
+	CHECK(table.Count() == 3);
+	CHECK(table.Resolve(asset, firstOwner).Centre.X == Approx(6));
+	CHECK(table.Resolve(asset, secondOwner).Centre.X == Approx(4));
+	CHECK(table.Resolve(asset).Centre.X == Approx(0));
+	CHECK(table.DropOwner(Name()) == 0);
+	CHECK(table.DropOwner(firstOwner) == 1);
+	CHECK(table.DropOwner(firstOwner) == 0);
+	CHECK_FALSE(table.Has(asset, firstOwner));
+	CHECK(table.Has(asset, secondOwner));
+	CHECK(table.Has(asset));
+	CHECK(table.FreeVertexCount() == 2 * cube.Vertices.size());
+	CHECK(table.FreeIndexCount() == 2 * cube.Indices.size());
+
+	const size_t before = table.HostVertexCount();
+	REQUIRE(table.Add(asset, cube, firstOwner));
+	CHECK(table.HostVertexCount() == before + cube.Vertices.size());
+	for (size_t frame = 0; frame < MeshTable::DEFERRED_FRAMES; ++frame)
+		table.Flush();
+	const size_t aged = table.HostVertexCount();
+	REQUIRE(table.Add(Name("owner-test.next"), cube, firstOwner));
+	CHECK(table.HostVertexCount() == aged);
+	CHECK(table.Resolve(asset, secondOwner).Centre.X == Approx(4));
+	CHECK(table.DropOwner(firstOwner) == 2);
+	table.Shutdown();
+	CHECK(table.Count() == 0);
+}
+
+TEST_CASE("resident mesh copies keep geometry, material runs and content owners", "[render][meshtable]") {
+	MeshTable table;
+	const Name asset("export.mesh"), firstOwner("export.first"), secondOwner("export.second");
+	MeshData first = MakeBuiltin(BuiltinMesh::Cube);
+	engine::assets::Submesh run;
+	run.FirstIndex = 0;
+	run.IndexCount = 6;
+	run.Texture = "export/sheet.atex";
+	run.BaseColour[0] = 0.25f;
+	run.BaseColour[3] = 0.75f;
+	first.Submeshes.push_back(run);
+	REQUIRE(table.Add(asset, first, firstOwner));
+	const MeshData second = Offset(first, 3.0f);
+	REQUIRE(table.Add(asset, second, secondOwner));
+
+	MeshData copied;
+	REQUIRE(
+		table.Copy(asset, copied, first.Vertices.size(), first.Indices.size(), firstOwner) ==
+		MeshCopyStatus::Copied
+	);
+	CHECK(copied.Vertices[0].Position[0] == first.Vertices[0].Position[0]);
+	CHECK(copied.Indices == first.Indices);
+	REQUIRE(copied.Submeshes.size() == 1);
+	CHECK(copied.Submeshes[0].FirstIndex == 0);
+	CHECK(copied.Submeshes[0].IndexCount == 6);
+	CHECK(copied.Submeshes[0].Texture == "export/sheet.atex");
+	CHECK(copied.Submeshes[0].BaseColour[0] == 0.25f);
+	CHECK(copied.Submeshes[0].BaseColour[3] == 0.75f);
+	CHECK(
+		table.Copy(asset, copied, first.Vertices.size() - 1, first.Indices.size(), firstOwner) ==
+		MeshCopyStatus::OverLimit
+	);
+	CHECK(
+		table.Copy(asset, copied, first.Vertices.size(), first.Indices.size(), Name("absent")) ==
+		MeshCopyStatus::Missing
+	);
+	CHECK(copied.Indices == first.Indices);
+	REQUIRE(
+		table.Copy(asset, copied, second.Vertices.size(), second.Indices.size(), secondOwner) ==
+		MeshCopyStatus::Copied
+	);
+	CHECK(copied.Vertices[0].Position[0] == second.Vertices[0].Position[0]);
+	const auto packed = PackedTriangle();
+	REQUIRE(table.AddPacked(Name("export.packed"), packed, firstOwner));
+	CHECK(table.Copy(Name("export.packed"), copied, 3, 3, firstOwner) == MeshCopyStatus::Packed);
 }
 
 TEST_CASE("a burst of arrivals is one pending delta, not one per mesh", "[render][meshtable]") {

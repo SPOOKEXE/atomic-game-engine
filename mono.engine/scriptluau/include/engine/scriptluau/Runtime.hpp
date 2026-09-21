@@ -18,6 +18,8 @@
 #include <engine/script/Runtime.hpp>
 
 #include <memory>
+#include <string>
+#include <string_view>
 
 namespace engine::ecs {
 	class Store;
@@ -31,4 +33,10 @@ namespace engine::script {
 	// @param limits What bounds a script.
 	// @return The runtime.
 	std::unique_ptr<Runtime> MakeLuauRuntime(ecs::Store &store, const RuntimeLimits &limits = {});
+
+	// Type-checks one bounded package source under the package-only vocabulary.
+	// The check never opens a VM or reaches a world, so a refusal can happen
+	// before a caller begins an atomic world transaction.
+	bool
+	CheckLuauDataScriptPackageSource(std::string_view source, std::string_view entry, std::string &error);
 }

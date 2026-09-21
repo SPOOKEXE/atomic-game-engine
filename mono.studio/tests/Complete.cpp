@@ -11,6 +11,8 @@
 // names handed to this file are names a VM actually installs. This covers what
 // is done with them.
 
+#include "CompletionChoice.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
@@ -40,6 +42,17 @@ using studio::CompletionQuery;
 using studio::CompletionSources;
 using studio::InsertableClasses;
 using studio::ScanBackwards;
+
+TEST_CASE("completion selection survives a caret move to no suggestions", "[studio][complete]") {
+	const std::string text = "print(\"hello\")";
+	const auto suggestions = CompleteAt(text, 10, CompletionSources{});
+	REQUIRE(suggestions.empty());
+	CHECK(studio::ClampCompletionChoice(0, suggestions.size()) == 0);
+	CHECK(studio::ClampCompletionChoice(5, suggestions.size()) == 0);
+	CHECK(studio::ClampCompletionChoice(5, 3) == 2);
+	CHECK(studio::ClampCompletionChoice(1, 3) == 1);
+	CHECK(studio::ClampCompletionChoice(-1, 3) == 0);
+}
 
 namespace {
 

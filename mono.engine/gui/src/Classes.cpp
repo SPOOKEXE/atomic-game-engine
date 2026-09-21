@@ -515,7 +515,7 @@ namespace engine::gui {
 			// `PVAdornment` is Roblox's name for "an adornment about a
 			// `BasePart`", and the `Adornee` lives here rather than on
 			// `GuiBase3d` because that is where Roblox puts it.
-			const std::array adornment{Components::Of<Adornment>()};
+			const std::array adornment{Components::Of<Adornment>(), Components::Of<AdornmentInteraction>()};
 			const ClassId pvAdornment = Classes::Register("PVAdornment", guiBase3d, adornment);
 			Classes::SetCreatable(pvAdornment, false);
 
@@ -1016,6 +1016,7 @@ namespace engine::gui {
 			Classes::Property<&Adornment::Visible>(pvAdornment, "Visible");
 			Classes::Property<&Adornment::AlwaysOnTop>(pvAdornment, "AlwaysOnTop");
 			Classes::Property<&Adornment::ZIndex>(pvAdornment, "ZIndex");
+			Classes::Property<&AdornmentInteraction::Enabled>(pvAdornment, "InteractionEnabled");
 
 			Classes::Property<&HandleShape::Offset>(handleAdornment, "CFrame");
 			Classes::Property<&HandleShape::SizeRelativeOffset>(handleAdornment, "SizeRelativeOffset");

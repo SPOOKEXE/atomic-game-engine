@@ -98,6 +98,101 @@ TEST_CASE("queue transfers are tracked per world resource instance", "[graph][ex
 	CHECK(plan.QueueTransferBytes == 2048);
 }
 
+TEST_CASE(
+	"frame setup keeps one resource through world and view consumers", "[graph][execution-plan][frame-prefix]"
+) {
+	RenderGraph graph;
+	const ResourceId resident = Resource(graph, "resident", ResourceKind::Storage, ResourceFormat::R32F);
+	const ResourceId worldOutput = Resource(graph, "world", ResourceKind::Storage, ResourceFormat::R32F);
+	const ResourceId viewOutput = Resource(graph, "view", ResourceKind::Colour, ResourceFormat::RGBA8);
+	Node upload = NodeOf("upload", NodeScope::Frame);
+	upload.Writes = {resident};
+	upload.Parameters = {{Name("queue"), "transfer"}};
+	const NodeId uploadId = graph.AddNode(upload);
+	Node world = NodeOf("prepare", NodeScope::World);
+	world.Reads = {resident};
+	world.Writes = {worldOutput};
+	world.Parameters = {{Name("queue"), "compute"}};
+	const NodeId worldId = graph.AddNode(world);
+	Node view = NodeOf("draw", NodeScope::View);
+	view.Reads = {resident};
+	view.Writes = {viewOutput};
+	view.Parameters = {{Name("queue"), "graphics"}};
+	const NodeId viewId = graph.AddNode(view);
+	Node rewrite = NodeOf("rewrite", NodeScope::Frame);
+	rewrite.Writes = {resident};
+	rewrite.Parameters = {{Name("queue"), "transfer"}};
+	const NodeId rewriteId = graph.AddNode(rewrite);
+
+	const ExecutionSchedule schedule = Schedule(graph);
+	const std::array<uint64_t, 3> worlds = {4, 8, 4};
+	FrameExecutionPlan plan;
+	Name offender;
+	REQUIRE(PlanFrame(graph, schedule, worlds, 16, 16, plan, offender) == ExecutionPlanStatus::Ok);
+	REQUIRE(plan.Waves.size() == 4);
+	CHECK(plan.Waves[0].Invocations.size() == 1);
+	CHECK(plan.Waves[1].Invocations.size() == 2);
+	CHECK(plan.Waves[2].Invocations.size() == 3);
+	CHECK(plan.Waves[3].Invocations.size() == 1);
+	CHECK(plan.ReadBytes == 5 * 1024);
+	CHECK(plan.WriteBytes == 7 * 1024);
+	REQUIRE(plan.Transfers.size() == 3);
+	CHECK(plan.Transfers[0].Producer == uploadId);
+	CHECK(plan.Transfers[0].Consumer == worldId);
+	CHECK(plan.Transfers[1].Producer == worldId);
+	CHECK(plan.Transfers[1].Consumer == viewId);
+	CHECK(plan.Transfers[2].Producer == viewId);
+	CHECK(plan.Transfers[2].Consumer == rewriteId);
+	for (const QueueTransfer &transfer : plan.Transfers) {
+		CHECK(transfer.Resource == resident);
+		CHECK(transfer.View == RunContext::WHOLE_FRAME);
+		CHECK(transfer.World == RunContext::WHOLE_FRAME);
+	}
+}
+
+TEST_CASE("a frame consumer visits every world and view resource instance", "[graph][execution-plan]") {
+	RenderGraph graph;
+	const ResourceId worldOutput = Resource(graph, "world", ResourceKind::Storage, ResourceFormat::R32F);
+	const ResourceId viewOutput = Resource(graph, "view", ResourceKind::Colour, ResourceFormat::RGBA8);
+
+	Node world = NodeOf("prepare", NodeScope::World);
+	world.Writes = {worldOutput};
+	world.Parameters = {{Name("queue"), "compute"}};
+	const NodeId worldId = graph.AddNode(world);
+	Node view = NodeOf("draw", NodeScope::View);
+	view.Writes = {viewOutput};
+	view.Parameters = {{Name("queue"), "compute"}};
+	const NodeId viewId = graph.AddNode(view);
+	Node frame = NodeOf("present", NodeScope::Frame);
+	frame.Reads = {worldOutput, viewOutput};
+	frame.Parameters = {{Name("queue"), "graphics"}};
+	const NodeId frameId = graph.AddNode(frame);
+
+	const ExecutionSchedule schedule = Schedule(graph);
+	const std::array<uint64_t, 3> worlds = {4, 8, 4};
+	FrameExecutionPlan plan;
+	Name offender;
+	REQUIRE(PlanFrame(graph, schedule, worlds, 16, 16, plan, offender) == ExecutionPlanStatus::Ok);
+	CHECK(plan.ReadBytes == 5 * 1024);
+	REQUIRE(plan.Transfers.size() == 5);
+	for (size_t index = 0; index < 2; index++) {
+		const QueueTransfer &transfer = plan.Transfers[index];
+		CHECK(transfer.Resource == worldOutput);
+		CHECK(transfer.Producer == worldId);
+		CHECK(transfer.Consumer == frameId);
+		CHECK(transfer.View == RunContext::WHOLE_FRAME);
+		CHECK(transfer.World == index);
+	}
+	for (size_t index = 0; index < 3; index++) {
+		const QueueTransfer &transfer = plan.Transfers[index + 2];
+		CHECK(transfer.Resource == viewOutput);
+		CHECK(transfer.Producer == viewId);
+		CHECK(transfer.Consumer == frameId);
+		CHECK(transfer.View == index);
+		CHECK(transfer.World == RunContext::WHOLE_FRAME);
+	}
+}
+
 TEST_CASE("a headless plan still invokes world and frame work", "[graph][execution-plan]") {
 	RenderGraph graph;
 	const ResourceId shadow = Resource(graph, "shadow", ResourceKind::Depth, ResourceFormat::D32F);

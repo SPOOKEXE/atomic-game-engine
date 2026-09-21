@@ -10,10 +10,16 @@
 // @tier shared
 
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/RenderGraph.hpp>
 
 #include <utility>
 
 namespace engine::control::features {
+
+	// Installs the host-supplied render graph endpoint without world dependencies.
+	inline Feature RenderGraph() {
+		return Feature{"render_graph", [](Surface &surface) { RenderGraph(surface); }};
+	}
 
 	// The checked module graph and layer rules.
 	inline Feature Architecture() {
@@ -28,6 +34,12 @@ namespace engine::control::features {
 	// The asynchronous test runner tools.
 	inline Feature Build() {
 		return Feature{"build", [](Surface &surface) { surface.AddBuildTools(); }};
+	}
+
+	// Pure discovery for the data-factory contract. `negotiate` reads the
+	// registry when called, so product rows may arrive before or after it.
+	inline Feature Discovery() {
+		return Feature{"discovery", [](Surface &surface) { surface.AddDiscoveryTools(); }};
 	}
 
 	// Architecture and checkout-backed context resources.

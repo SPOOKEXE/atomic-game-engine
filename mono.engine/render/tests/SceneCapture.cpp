@@ -170,21 +170,30 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	view.World = 71;
 	view.WorldName = core::Name("headless-gpu-world");
 	view.Pipeline = pipelineName;
-	view.Particles = particles;
 	view.ParticleRevision = 1;
 	view.ParticleLayoutRevision = 1;
 	view.ParticleResidentRevision = 1;
 	view.ParticleDelta = 1.0f / 60.0f;
-	view.ParticleBlocks = 1;
-	view.ParticlePool = block.Capacity;
 
 	render::OverlayImage overlay;
+	// A world can publish its initial empty particle snapshot before the first
+	// emitter claims a block. The next frame must stage that block even though
+	// both snapshots begin their revision counters at one.
+	const std::array<render::View, 1> emptyViews{view};
+	const render::FrameResult emptyFrame = renderer.Render(emptyViews, overlay, nullptr, false);
+	CHECK(emptyFrame.Particles == 0);
+
+	view.Particles = particles;
+	view.ParticleBlocks = 1;
+	view.ParticlePool = block.Capacity;
 	const core::Name inspectedResource("albedo");
 	renderer.Inspect(inspectedResource, 0);
 	const std::array<render::View, 1> views{view};
 	const render::FrameResult frame = renderer.Render(views, overlay, nullptr, false);
+	CHECK(frame.Submitted);
 	CHECK(frame.ComputeDispatches > 0);
 	CHECK(frame.Particles == block.Capacity);
+	CHECK(renderer.ResourceTexture(core::Name("first-surface-validity"), view.Slot) == nullptr);
 
 	const render::GpuMemoryStatistics particleResident = renderer.MemoryStatistics();
 	CHECK(particleResident.Buffers > released.Buffers);
@@ -215,10 +224,18 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	CHECK(renderer.TextureHandle(captureName) == nullptr);
 	CHECK(renderer.MemoryStatistics().Textures + 1 == texturesBeforeDrop);
 
+	const core::Name skyHistory("environment-sky");
+	REQUIRE(renderer.ResourceTexture(skyHistory, view.Slot) != nullptr);
+	const uint64_t texturesBeforeWorldDrop = renderer.MemoryStatistics().Textures;
+	renderer.ForgetWorld(view.World, core::Name("other-world"));
+	CHECK(renderer.ResourceTexture(skyHistory, view.Slot) != nullptr);
+	CHECK(renderer.MemoryStatistics().Textures == texturesBeforeWorldDrop);
 	renderer.ForgetWorld(view.World, view.WorldName);
 	const render::GpuMemoryStatistics worldReleased = renderer.MemoryStatistics();
 	CHECK(worldReleased.Buffers < particleResident.Buffers);
 	CHECK(worldReleased.BufferBytes < particleResident.BufferBytes);
+	CHECK(worldReleased.Textures < texturesBeforeWorldDrop);
+	CHECK(renderer.ResourceTexture(skyHistory, view.Slot) == nullptr);
 
 	renderer.Shutdown();
 	CHECK(renderer.MemoryStatistics().LiveBytes == 0);

@@ -35,13 +35,13 @@
 
 namespace engine::render {
 
-	// One slot's share of a square atlas, in texels and in the 0..1 window a
+	// One slot's share of the 2x3 beam atlas, in texels and in the 0..1 window a
 	// shader looks the atlas up through.
 	//
 	// **Both, from one function, because the two used to be written out
 	// separately three lines apart.** The portal beam pass set a viewport, a
-	// scissor and a `Beams.Region` uniform from the same `index % 2` and
-	// `index / 2`, so a change to the packing had to be made in three places and
+	// scissor and a `Beams.Region` uniform from the same tile index, so a change
+	// to the packing had to be made in three places and
 	// a beam that disagreed with its own lookup samples a neighbour's depth -
 	// which reads as a shadow crossing the wrong doorway.
 	struct AtlasQuadrant {
@@ -56,15 +56,14 @@ namespace engine::render {
 		glm::vec4 Window{0.0f, 0.0f, 0.0f, 0.0f};
 	};
 
-	// Which quadrant of a square atlas one slot occupies.
+	// Which tile of the portal beam atlas one slot occupies.
 	//
-	// Two by two in reading order: slot 0 top-left, 1 top-right, 2 bottom-left,
-	// 3 bottom-right. An index past the fourth wraps, because the caller has
-	// already clamped its count and a quadrant is better than a viewport off the
-	// edge of the texture.
+	// Two by three in reading order. An index past the sixth wraps, because the
+	// caller has already clamped its count and a tile is better than a viewport
+	// off the edge of the texture.
 	//
-	// @param index      Which slot, 0..3.
-	// @param resolution The atlas' side in texels.
+	// @param index      Which slot, 0..5.
+	// @param resolution One tile's side in texels.
 	// @return The quadrant, in texels and as a lookup window.
 	AtlasQuadrant BeamQuadrant(uint32_t index, uint32_t resolution);
 

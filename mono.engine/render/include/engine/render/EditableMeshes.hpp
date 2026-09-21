@@ -11,9 +11,12 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/render/AutomaticMeshLod.hpp>
+#include <engine/render/MeshTable.hpp>
 
 #include <cstddef>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::assets {
 	struct MeshData;
@@ -35,13 +38,8 @@ namespace engine::render {
 	// Converts the raw arrays into the format `render::MeshTable::Add`
 	// takes.
 	//
-	// **Free and device-free, for `render::ShaderLibrary`'s own reason** -
-	// "no device anywhere in this file" is what lets a route be tested
-	// without a GPU, and this is the half of the conversion that has no
-	// business needing one. `EditableMeshUploader::Refresh` is the other
-	// half, and it is not tested the same way: nothing in this codebase
-	// unit-tests a call into `render::Renderer` itself, because there is
-	// nothing to assert against without a device.
+	// Conversion is device-free and covered by host tests. Upload ownership
+	// is checked separately with a real renderer and device.
 	//
 	// @param mesh The world's own copy.
 	// @return The converted geometry. `IsValid()` is false for a mesh with
@@ -49,35 +47,53 @@ namespace engine::render {
 	//         right after `Instance.new("EditableMesh")`.
 	// @since v0.18
 	engine::assets::MeshData BuildMeshData(const engine::scene::EditableMesh &mesh);
+	// Packs the editable mesh streams for GPU upload without a device.
+	PackedMeshData BuildPackedMeshData(const engine::scene::EditableMesh &mesh);
 	// Uploads every `scene::EditableMesh` whose revision has moved since the
 	// last call.
 	//
-	// **One instance per presentation host, matching `ShaderLibrary`'s reason.** The
-	// ledger it keeps - which revision was last uploaded, per entity - is
-	// what turns a per-frame walk into an integer compare for the steady
-	// case, exactly as `ShaderSource::Revision` does for a compiled shader.
+	// One instance per renderer tracks revisions separately for each store and
+	// owner, so switching presented worlds preserves their upload stamps.
 	class EditableMeshUploader {
 	  public:
 		// Walks every `EditableMesh` and uploads whichever have changed.
 		//
-		// **Never removes a mesh an instance stopped existing for.**
-		// `render::MeshTable`'s own header says why: eviction is not
-		// supported there at all, so a part naming a destroyed
-		// `EditableMesh`'s content id keeps drawing whatever was last
-		// uploaded under that name, harmlessly, for the life of the process
-		// - the same fate an ordinary published mesh has if the part that
-		// named it is the only thing that goes away.
+		// The owner scopes the generated content names as well as upload tracking.
+		// Use distinct owners for worlds whose editable entity handles can collide.
+		// Destroying an entity retains its last uploaded resource until owner retirement.
 		//
 		// @param store    The world being drawn.
 		// @param renderer The device to upload to.
+		// @param owner The residency namespace for generated content names.
 		// @return How many meshes were built and handed to the renderer.
-		size_t Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer);
+		size_t Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner = {});
+		// Refreshes automatic LODs for built-in and resident mesh sources.
+		size_t
+		RefreshLods(engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner = {});
+
+		// Forget device upload stamps when a world or residency owner retires.
+		// This does not release resources; Renderer owns their lifetime.
+		void ForgetWorld(uint64_t identity);
+		// Forgets upload stamps for one residency owner without releasing meshes.
+		void ForgetOwner(core::Name owner);
 
 	  private:
-		// Keyed by `ecs::Entity::Id`, matching every other entity-keyed
-		// ledger in this codebase - the generation is part of the key, so an
-		// index the allocator reuses after a destroy never reads as already
-		// uploaded.
-		std::unordered_map<uint64_t, uint32_t> Uploaded;
+		struct UploadScope {
+			uint64_t World = 0;
+			core::Name Owner;
+			// Source revisions that jointly determine the uploaded mesh bytes.
+			struct Revision {
+				// Editable vertex and index revision last uploaded.
+				uint32_t Mesh = 0;
+				// Mesh packing policy revision last uploaded.
+				uint32_t Packing = 0;
+
+				// Compares both upload-relevant revisions.
+				bool operator==(const Revision &) const = default;
+			};
+			std::unordered_map<uint64_t, Revision> Revisions;
+		};
+		std::vector<UploadScope> Scopes;
+		AutomaticMeshLodUploader Lods;
 	};
 }

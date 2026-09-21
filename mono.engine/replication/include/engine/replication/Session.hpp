@@ -296,6 +296,7 @@ namespace engine::replication {
 		net::Endpoint Peer_;
 		net::Link Link_;
 		net::ReliableSender Sender;
+		std::optional<uint16_t> UnsentReliableSequence;
 		net::ReliableReceiver Receiver;
 
 		// Whether a reliable payload has been accepted and not yet

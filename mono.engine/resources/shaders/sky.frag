@@ -17,6 +17,7 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 OutdoorAmbient;
 	vec4 Direct;
 	vec4 Eye;
+	vec4 CameraDepth;
 	vec4 FogColour;
 	vec4 Fog;
 	vec4 Shadow;

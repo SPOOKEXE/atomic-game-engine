@@ -471,13 +471,11 @@ TEST_CASE("dead-reckoned error grows with time rather than with the grid", "[sce
 		previousWorst = worst;
 	}
 
-	// **The horizon is the equality, not a preference.** Half a step of the
-	// velocity grid over a quarter of a second is half a step of the position
-	// grid, because the step counts cancel and 64 m over 256 m/s is what is
-	// left. Exact in a float: both are a division by the same integer scaled by
-	// a power of two.
+	// The wider position grid covers authored worlds without making local
+	// velocity coarser. The presentation cap therefore keeps the extra
+	// dead-reckoning error well below the decoded-position error.
 	CHECK(
-		engine::scene::WIRE_LINEAR_ERROR_METRES_PER_SECOND * engine::scene::WIRE_DEAD_RECKON_SECONDS ==
+		engine::scene::WIRE_LINEAR_ERROR_METRES_PER_SECOND * engine::scene::WIRE_DEAD_RECKON_SECONDS <
 		engine::scene::WIRE_POSITION_ERROR_METRES
 	);
 	CHECK(engine::scene::WIRE_DEAD_RECKON_SECONDS == 0.25f);

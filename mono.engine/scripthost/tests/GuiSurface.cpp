@@ -575,6 +575,76 @@ TEST_CASE("the collector and the service carry what an author sets", "[scripting
 	}
 }
 
+TEST_CASE("a script-authored rich scaled label reaches one styled draw command", "[scripting][guisurface]") {
+	// This is the boundary a UI author actually uses: the VM writes the text
+	// properties, layout chooses the drawn size, and compile carries one plain
+	// string plus style ranges to the renderer. Each stage alone has narrower
+	// cases; this one catches a property that is bound but never reaches pixels.
+	for (const Language language : LANGUAGES) {
+		INFO((language == Language::Luau ? "luau" : "javascript"));
+
+		Interface world("guisurface.rich_scaled_text");
+		const Entity label = world.Box("TextLabel", "Status", 20.0f, 20.0f, 120.0f, 32.0f);
+		REQUIRE(label != NULL_ENTITY);
+
+		const auto runtime = MakeRuntime(world.Data, language);
+		REQUIRE(runtime != nullptr);
+
+		const std::string source =
+			language == Language::Luau
+				? "local label = game:GetService('Players').LocalPlayer:FindFirstChild('Status', true)\n"
+				  "label.Font = Enum.Font.Code\n"
+				  "label.RichText = true\n"
+				  "label.TextScaled = true\n"
+				  "label.TextSize = 48\n"
+				  "label.Text = '<font color=\"#80FF20\">fit <b>this label</b></font>'\n"
+				: "let label = game.GetService('Players').LocalPlayer.FindFirstChild('Status', true)\n"
+				  "label.Font = Enum.Font.Code\n"
+				  "label.RichText = true\n"
+				  "label.TextScaled = true\n"
+				  "label.TextSize = 48\n"
+				  "label.Text = '<font color=\"#80FF20\">fit <b>this label</b></font>'\n";
+
+		INFO(source);
+		const bool ran = runtime->Run(source.c_str());
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+
+		world.Compile();
+
+		const engine::gui::Label *authored = world.Data.Get<engine::gui::Label>(label);
+		const engine::gui::Resolved *resolved = world.Data.Get<engine::gui::Resolved>(label);
+		REQUIRE(authored != nullptr);
+		REQUIRE(resolved != nullptr);
+		CHECK(authored->Font == engine::gui::FontFace::Code);
+		CHECK(authored->Rich);
+		CHECK(authored->Scaled);
+		CHECK(authored->Size == 48);
+		CHECK(resolved->TextSize > 0);
+		CHECK(resolved->TextSize < authored->Size);
+		CHECK(resolved->TextBounds.X <= resolved->AbsoluteSize.X);
+		CHECK(resolved->TextBounds.Y <= resolved->AbsoluteSize.Y);
+
+		const engine::gui::DrawCommand *run = nullptr;
+		size_t runs = 0;
+		for (const engine::gui::DrawCommand &command : world.List.Commands().Commands) {
+			if (command.Source == label && command.Kind == engine::gui::DrawKind::Text) {
+				run = &command;
+				runs++;
+			}
+		}
+
+		REQUIRE(run != nullptr);
+		CHECK(runs == 1);
+		CHECK(run->Text == "fit this label");
+		CHECK(run->TextSize == resolved->TextSize);
+		CHECK(run->Font == engine::gui::FontFace::Code);
+		REQUIRE(run->Spans.size() == 2);
+		CHECK(run->Spans[0].Font == engine::gui::FontFace::Code);
+		CHECK(run->Spans[1].Font == engine::gui::FontFace::Bold);
+	}
+}
+
 TEST_CASE(
 	"a text box's focus signals fire from a real pointer, in both languages", "[scripting][guisurface]"
 ) {

@@ -20,7 +20,9 @@
 
 namespace engine::script {
 
-	void InstallLuauServices(lua_State *state, ServiceAvailability phase, ScriptCapabilities access) {
+	void InstallLuauServices(
+		lua_State *state, ServiceAvailability phase, ScriptCapabilities access, bool packageOnly
+	) {
 		// **The mailbox types, before the services that need them, and this is
 		// not a formality.** A `Postbox` is a view over two resources, and
 		// reading one on a store that never registered them mints them under the
@@ -37,6 +39,12 @@ namespace engine::script {
 		}
 
 		for (const ServiceRow &row : ServiceRows(phase)) {
+			// A data-script package completes in its submitting call. Services may
+			// retain callbacks or schedule work at a later barrier, so packages use
+			// the ECS world surface without installing any service surface.
+			if (packageOnly) {
+				continue;
+			}
 			if (!Permits(row.Definition, access)) {
 				continue;
 			}

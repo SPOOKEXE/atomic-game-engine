@@ -89,7 +89,7 @@ namespace studio {
 		}
 	}
 
-	bool Editor::DrivePlayer(WorldId world, bool hovered, bool active, bool focused) {
+	bool Editor::DrivePlayer(WorldId world, bool pointer, bool active, bool selected) {
 		if (!world.IsValid() || !IsReplicaWorld(world)) {
 			return false;
 		}
@@ -102,7 +102,8 @@ namespace studio {
 		// is true exactly when the viewport is the thing being used. Typing in
 		// the script editor must not walk a character; clicking the picture must
 		// not stop it.
-		const bool driving = (hovered || active || focused) && !io.WantTextInput;
+		const bool driving = selected && !io.WantTextInput;
+		const bool ownsPointer = driving && (pointer || active);
 
 		bool drove = false;
 
@@ -131,13 +132,19 @@ namespace studio {
 
 			// **`Focused` means "this panel has the input", not "the window
 			// does".** A studio with two client views must have at most one of
-			// them walking, and the panel under the pointer is the one somebody
-			// means - `scene::UpdateCharacterControl` reads this flag and stops
+			// them walking, and the selected panel is the one somebody means -
+			// `scene::UpdateCharacterControl` reads this flag and stops
 			// the character dead when it is false, which is exactly the wanted
 			// behaviour for the other panel.
 			input->Focused = driving;
 
 			if (!driving) {
+				input->Pressed = {};
+				input->PressedButtons = 0;
+				if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+					controllers != nullptr) {
+					*controllers = {};
+				}
 				return;
 			}
 
@@ -151,7 +158,7 @@ namespace studio {
 			// Turning needs the right button held, which is `scene::
 			// UpdateCameraControl`'s rule and not this file's - it is repeated
 			// here only in the sense that the button state is forwarded.
-			if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+			if (ownsPointer && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
 				input->Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Right));
 				input->MouseDelta = {io.MouseDelta.x, io.MouseDelta.y};
 				input->LastSource = engine::scene::InputSource::MouseButton2;
@@ -163,13 +170,13 @@ namespace studio {
 			// a place where aiming worked and shooting silently did not - which
 			// is the class of divergence `just client-smoke` exists to catch, one
 			// input along.
-			if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			if (ownsPointer && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 				input->Buttons |= static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Left));
 				input->LastSource = engine::scene::InputSource::MouseButton1;
 			}
 
-			input->WheelDelta = io.MouseWheel;
-			if (io.MouseWheel != 0.0f) {
+			input->WheelDelta = ownsPointer ? io.MouseWheel : 0.0f;
+			if (input->WheelDelta != 0.0f) {
 				input->LastSource = engine::scene::InputSource::MouseWheel;
 			}
 
@@ -205,6 +212,16 @@ namespace studio {
 		});
 
 		return drove;
+	}
+
+	void Editor::ReleaseViewportInput() {
+		for (WorldRun &run : Runs) {
+			for (const std::unique_ptr<PlayLink> &link : run.Links) {
+				if (link != nullptr) {
+					(void)DrivePlayer(link->ReplicaWorld(), false, false, false);
+				}
+			}
+		}
 	}
 
 	Editor::WorldRun *Editor::RunOwning(WorldId world) {
@@ -251,6 +268,7 @@ namespace studio {
 		}
 
 		const WorldId replica = link->ReplicaWorld();
+		Universe->Enter(replica, [this](engine::ecs::Store &store) { ApplyKnownContentFacts(store); });
 
 		// **One generated split per client.** The first opens beside the panel
 		// whose transport started Play. Later clients open beside the previous
@@ -385,6 +403,10 @@ namespace studio {
 				if (link == nullptr || !link->IsRunning() || link->PlayerName().empty()) {
 					continue;
 				}
+				link->ObservePortalTransfer(*Universe);
+				const bool portalTransfer =
+					link->PortalTransfer().has_value() &&
+					link->PortalTransfer()->Stage != engine::script::PortalTransferStage::Refused;
 
 				// **Still here is the ordinary answer and it costs one lookup.**
 				// A teleport is rare and this runs every frame per client, so
@@ -397,7 +419,7 @@ namespace studio {
 
 				bool gone = false;
 				Universe->Enter(living, [&](Store &store) { gone = !store.Alive(link->Player()); });
-				if (!gone) {
+				if (!gone && !portalTransfer) {
 					link->Missing() = 0;
 					continue;
 				}
@@ -421,7 +443,22 @@ namespace studio {
 				// the same name.
 				WorldId destination;
 				Entity landed;
-				for (const WorldId candidate : Universe->Worlds()) {
+				std::unique_ptr<PlayLink> moved;
+				std::string error;
+				if (portalTransfer) {
+					// A receipt identifies one arrival even when several players have
+					// the same label. Commit retries may outlive the legacy frame limit.
+					moved = link->AdvancePortalArrival(*Universe, Settings.TickRate, error);
+					if (!moved) {
+						if (!error.empty()) {
+							Say("could not follow " + name + ": " + error, engine::core::LogLevel::Error);
+						}
+						continue;
+					}
+					destination = moved->AuthorityWorld();
+					landed = moved->Player();
+				}
+				for (const WorldId candidate : portalTransfer ? std::vector<WorldId>{} : Universe->Worlds()) {
 					if (candidate == living || IsReplicaWorld(candidate) || Universe->IsRemote(candidate)) {
 						continue;
 					}
@@ -494,21 +531,25 @@ namespace studio {
 					continue;
 				}
 
-				// **Stopped before the new one starts, and the old player is
-				// already gone** - so `PlayLink::Stop`'s own destroy finds
-				// nothing to destroy, which is exactly right: the teleport did
-				// it, in the world that was allowed to.
-				StopPlayLink(*link);
-
-				auto moved = std::make_unique<PlayLink>();
-				std::string error;
-				if (!moved->Start(*Universe, destination, Settings.TickRate, error, name, landed)) {
-					Say("could not follow " + name + ": " + error, engine::core::LogLevel::Error);
-					link.reset();
+				if (!portalTransfer) {
+					moved = std::make_unique<PlayLink>();
+					if (!moved->Start(*Universe, destination, Settings.TickRate, error, name, landed)) {
+						moved.reset();
+					}
+				}
+				if (!moved) {
+					if (!error.empty()) {
+						Say("could not follow " + name + ": " + error, engine::core::LogLevel::Error);
+					}
 					continue;
 				}
+				// The new portal replica already holds its initial snapshot and camera.
+				StopPlayLink(*link);
 
 				const WorldId replica = moved->ReplicaWorld();
+				Universe->Enter(replica, [this](engine::ecs::Store &store) {
+					ApplyKnownContentFacts(store);
+				});
 				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 
 				// The panel that was showing them follows too, or the author

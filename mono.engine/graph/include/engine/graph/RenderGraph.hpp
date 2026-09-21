@@ -171,7 +171,9 @@ namespace engine::graph {
 		// Full floats, for depth a pass has linearised and for reductions.
 		//@{
 		R32F,
+		R32U,
 		RG32F,
+		RGBA32F,
 		//@}
 
 		// Depth, with and without a stencil channel.
@@ -232,6 +234,59 @@ namespace engine::graph {
 	// @param format The format.
 	// @return Whether a fourth channel exists.
 	bool HasAlpha(ResourceFormat format);
+
+	// How graph work may reach a resource. Automatic preserves the usage
+	// inferred from its kind and wires for older documents.
+	enum class ResourceAccess : uint8_t {
+		Automatic,
+		Read,
+		Write,
+		ReadWrite,
+	};
+
+	// Returns the stable text token used to serialize this resource access mode.
+	const char *Describe(ResourceAccess access);
+	// Parses a serialized resource access token into its enum value.
+	bool ParseResourceAccess(std::string_view text, ResourceAccess &out);
+
+	// The transfer function used for colour channels. Data resources normally
+	// keep Automatic or Linear; authored display images may state SRGB.
+	enum class ResourceColourSpace : uint8_t {
+		Automatic,
+		Linear,
+		SRGB,
+	};
+
+	// Returns the stable text token used to serialize this colour space.
+	const char *Describe(ResourceColourSpace space);
+	// Parses a serialized resource colour-space token into its enum value.
+	bool ParseResourceColourSpace(std::string_view text, ResourceColourSpace &out);
+
+	// How the alpha channel is interpreted when one exists.
+	enum class ResourceAlphaSpace : uint8_t {
+		Automatic,
+		Opaque,
+		Straight,
+		Premultiplied,
+	};
+
+	// Returns the stable text token used to serialize this alpha representation.
+	const char *Describe(ResourceAlphaSpace space);
+	// Parses a serialized resource alpha-space token into its enum value.
+	bool ParseResourceAlphaSpace(std::string_view text, ResourceAlphaSpace &out);
+
+	// How long storage must survive. External and History resources cannot be
+	// placed in the transient alias pool.
+	enum class ResourceLifetime : uint8_t {
+		Transient,
+		External,
+		History,
+	};
+
+	// Returns the stable text token used to serialize this resource lifetime.
+	const char *Describe(ResourceLifetime lifetime);
+	// Parses a serialized resource lifetime token into its enum value.
+	bool ParseResourceLifetime(std::string_view text, ResourceLifetime &out);
 
 	// How often a node runs.
 	//
@@ -338,6 +393,35 @@ namespace engine::graph {
 		// resource written before this field existed still means "the view".
 		uint32_t Divisor = 1;
 
+		// Explicit usage and allocation shape. Defaults preserve the one-layer,
+		// one-sample resources written before the compositor contract grew these
+		// fields.
+		ResourceAccess Access = ResourceAccess::Automatic;
+		// Multisample count for the resource.
+		uint32_t Samples = 1;
+		// Texture depth in texels.
+		uint32_t Depth = 1;
+		// Texture array-layer count.
+		uint32_t Layers = 1;
+		// First mip level covered by the view.
+		uint32_t FirstMip = 0;
+		// Number of mip levels covered by the view.
+		uint32_t MipCount = 1;
+		// Colour interpretation of image texels.
+		ResourceColourSpace ColourSpace = ResourceColourSpace::Automatic;
+		// Alpha interpretation of image texels.
+		ResourceAlphaSpace AlphaSpace = ResourceAlphaSpace::Automatic;
+		// Bytes between consecutive buffer elements.
+		uint32_t BufferStride = 0;
+
+		// Owner and generation make retained history unambiguous across worlds
+		// and restores. An invalid owner means the graph's current scope.
+		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		// Stable identifier for owner.
+		core::Name Owner{};
+		// Generation used to invalidate stale history.
+		uint32_t HistoryGeneration = 0;
+
 		// The size this resolves to for a view of a given size.
 		//
 		// **Here rather than in the renderer**, because it is the answer an
@@ -351,6 +435,9 @@ namespace engine::graph {
 		//                   target is not something a driver accepts.
 		// @param outHeight  Filled in.
 		void Resolve(uint32_t viewWidth, uint32_t viewHeight, uint32_t &outWidth, uint32_t &outHeight) const;
+
+		// Logical payload bytes for the complete declared shape.
+		uint64_t Bytes(uint32_t viewWidth, uint32_t viewHeight) const;
 	};
 
 	// A handle to a resource in one graph.
@@ -521,6 +608,10 @@ namespace engine::graph {
 		// A node names a resource this graph does not hold.
 		UnknownResource,
 
+		// A read or write contradicts the resource's explicit access contract.
+		ReadAccessDenied,
+		WriteAccessDenied,
+
 		// A node reads something nothing earlier wrote.
 		//
 		// **Earlier is the whole of it.** Declaration order is the execution
@@ -550,6 +641,12 @@ namespace engine::graph {
 		// node's work is silently discarded - which looks like the shared pass
 		// not running at all.
 		SharedWriteConflict,
+
+		// Frame setup cannot retain a result produced separately for each world.
+		FrameReadsWorld,
+
+		// Frame and world writes cannot share storage without an explicit copy.
+		FrameWorldWriteConflict,
 	};
 
 	// A stable, human-readable name for a status.
@@ -560,10 +657,9 @@ namespace engine::graph {
 
 	// A graph compiled to an order.
 	//
-	// **Three lists rather than one with a flag**, so an executor loops rather
-	// than branches. Holding one list and testing a bool per node per view would
-	// put the partition decision inside the hot loop, where it is re-answered
-	// every frame for an answer that changes only when the graph is edited.
+	// Three ordered blocks keep setup, camera work and final composition apart.
+	// Setup retains authored order across frame and world nodes; frame nodes
+	// run only on the pipeline's first setup, world nodes on each world's setup.
 	//
 	// The frame is `Shared`, then `PerView` once for each view, then `Final`.
 	//
@@ -581,7 +677,7 @@ namespace engine::graph {
 	//
 	// @since v0.11
 	struct CompiledGraph {
-		// The nodes that run once, before any view.
+		// Setup in authored order: once per frame or world according to scope.
 		std::vector<NodeId> Shared;
 
 		// The nodes that run once per view, in order.
@@ -757,9 +853,16 @@ namespace engine::graph {
 		//                 several views of one world through one pipeline passes
 		//                 `true` for the first and `false` after - that is what
 		//                 makes a shadow map per world rather than per view.
+		// @param frame    Whether this is the first setup for this pipeline in
+		//                 the frame. Requires `shared`; later worlds pass false.
 		// @return `false` when the runner abandoned the frame.
 		bool ExecuteView(
-			const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared
+			const CompiledGraph &compiled,
+			NodeRunner &runner,
+			size_t view,
+			size_t world,
+			bool shared,
+			bool frame
 		) const;
 
 		// The frame's own block, once, after every view.
@@ -798,8 +901,10 @@ namespace engine::graph {
 	  private:
 		std::vector<Node> Nodes;
 		// Runs one compiled block, telling every node which view and world it is
-		// for. What all three `Execute` entry points are made of.
-		bool RunBlock(const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world) const;
+		// for. Frame setup can be skipped after its first execution.
+		bool RunBlock(
+			const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world, bool frame = true
+		) const;
 
 		std::vector<ResourceDesc> Resources;
 	};

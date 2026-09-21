@@ -111,6 +111,23 @@ TEST_CASE("a document builds the graph it describes", "[bake]") {
 	CHECK(failure.empty());
 }
 
+TEST_CASE("a decimate operation builds a parameterized mesh node", "[bake][graphdocument]") {
+	Document document;
+	document.Record(Builtin("engine.Cube"));
+	Operation decimate;
+	decimate.Kind = OperationKind::AddDecimate;
+	decimate.Number = 0.5f;
+	document.Record(std::move(decimate));
+	document.Record(Wire(1, 2));
+
+	Graph graph;
+	std::string offender;
+	REQUIRE(Build(document, graph, nullptr, offender) == DocumentStatus::Ok);
+	std::string failure;
+	REQUIRE(graph.Run(failure));
+	CHECK(graph.Output(engine::bake::NodeId{2}).Mesh.IsValid());
+}
+
 TEST_CASE("a wire naming a node the document does not hold is refused", "[bake]") {
 	Document document;
 	document.Record(Builtin("engine.Cube"));

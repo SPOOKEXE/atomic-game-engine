@@ -741,7 +741,7 @@ add_library(Vendor::blake3 ALIAS blake3)
 # **BSD-3-Clause, not GPLv2.** Upstream is dual-licensed and ships both texts:
 # LICENSE is the BSD one and COPYING is GPLv2. We take BSD. That is not a
 # preference - GPLv2 would be incompatible with shipping this in a game binary
-# under MPL-2.0, and the choice is recorded in THIRD_PARTY_NOTICES.md rather
+# under MPL-2.0, and the choice is recorded in docs/THIRD_PARTY_NOTICES.md rather
 # than left for somebody to infer from two files in a submodule.
 if(NOT EXISTS "${MONO_VENDOR}/zstd/build/cmake/CMakeLists.txt")
 	message(FATAL_ERROR "mono.vendor/zstd is missing. Run `just setup`.")
@@ -890,15 +890,16 @@ mono_vendor_system(Luau.VM Luau.Compiler Luau.Ast Luau.Common Luau.Bytecode
 add_library(Vendor::luau_vm ALIAS Luau.VM)
 add_library(Vendor::luau_compiler ALIAS Luau.Compiler)
 
-# **`Luau.Analysis` is the type checker, and the tool this waited for now
-# exists.** The note here said it would get an alias when something wanted to
-# check the generated declaration files; `mono.tools/scriptcheck` is that thing,
-# and `just typecheck` is what runs it.
+# **`Luau.Analysis` is the type checker.** `mono.tools/scriptcheck` checks
+# repository scripts against generated declarations, while `scriptluau` checks
+# a bounded package-only source before a client starts its scratch-world
+# transaction. `just typecheck` remains the repository-wide declaration gate.
 #
-# **Not linked by `Engine::script`, and that separation is the point.** Nothing a
-# game binary contains type-checks anything - a shipped runtime compiles bytecode
-# and runs it. This is a build-time consumer only, which is why the alias sits
-# beside the two the runtime uses rather than among them.
+# **Not linked by `Engine::script`, and that separation is the point.** Normal
+# game-script execution compiles bytecode and runs it. Package admission is the
+# one runtime consumer: it type-checks source before that source can copy or
+# mutate a world. The alias sits beside the compiler and VM aliases because all
+# three are Luau-specific dependencies.
 #
 # Upstream's `luau-analyze` CLI would have been the obvious answer and cannot be:
 # it has no flag for loading a definition file, so it can only check against the

@@ -1,10 +1,8 @@
 // The catalogue behind `MeshPart.TrianglesCount`.
 //
-// Two things here fail silently if they are wrong, and they are what these
-// pin. A read-only property that is quietly writable is a script able to lie
-// about content it does not own; and a getter that *acquires* the resource
-// mutates the world from inside a read, which is a structural change during
-// iteration on the first frame and on every part in the scene.
+// A read-only property that is quietly writable lets a script lie about
+// content it does not own. A getter that acquires the resource mutates the
+// world from inside a read. Both fail silently without these checks.
 
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -19,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <limits>
 #include <vector>
 
 TEST_SUITE_ID("engine.scene.meshcatalogue")
@@ -29,6 +28,7 @@ using engine::ecs::Store;
 using engine::scene::MeshCatalogue;
 using engine::scene::MeshesOf;
 using engine::scene::RecordMesh;
+using engine::scene::SkinningOf;
 using engine::scene::TrianglesOf;
 using engine::scene::Visual;
 
@@ -73,6 +73,22 @@ TEST_CASE("a recorded mesh reports its triangles", "[scene][meshcatalogue]") {
 	CHECK(TrianglesOf(store, Name("catalogue_test/fox.amesh")) == 9);
 }
 
+TEST_CASE("a recorded mesh reports authored bounds", "[scene][meshcatalogue]") {
+	Store store = Fresh("mesh_catalogue_test.bounds");
+	const Name mesh("catalogue_test/character.amesh");
+	REQUIRE(RecordMesh(store, mesh, 12, {}, {}, engine::core::Vector3{2.0f, 6.0f, 1.0f}));
+	const engine::core::Vector3 size = engine::scene::MeshSizeOf(store, mesh);
+	CHECK(size.X == 2.0f);
+	CHECK(size.Y == 6.0f);
+	CHECK(size.Z == 1.0f);
+	CHECK(engine::scene::MeshSizeOf(store, Name()).MagnitudeSquared() == 0.0f);
+	CHECK_FALSE(RecordMesh(store, mesh, 12, {}, {}, engine::core::Vector3{-1.0f, 6.0f, 1.0f}));
+	CHECK_FALSE(RecordMesh(
+		store, mesh, 12, {}, {}, engine::core::Vector3{std::numeric_limits<float>::quiet_NaN(), 6.0f, 1.0f}
+	));
+	CHECK(engine::scene::MeshSizeOf(store, mesh).X == 2.0f);
+}
+
 TEST_CASE("an unknown mesh is zero rather than a guess", "[scene][meshcatalogue]") {
 	Store store = Fresh("mesh_catalogue_test.unknown");
 	REQUIRE(RecordMesh(store, Name("catalogue_test/known.amesh"), 4));
@@ -83,6 +99,27 @@ TEST_CASE("an unknown mesh is zero rather than a guess", "[scene][meshcatalogue]
 	// to be the same answer rather than a lookup on a null id.
 	CHECK(TrianglesOf(store, Name()) == 0);
 	CHECK_FALSE(RecordMesh(store, Name(), 4));
+}
+
+TEST_CASE("mesh skinning retains only the exportable prefix", "[scene][meshcatalogue]") {
+	Store store = Fresh("mesh_catalogue_test.skinning_bound");
+	const Name mesh("catalogue_test/skinned.amesh");
+	engine::scene::MeshSkinning prefix;
+	prefix.JointCount = 1;
+	prefix.VertexCount = static_cast<uint32_t>(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	prefix.Vertices.resize(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES);
+	REQUIRE(RecordMesh(store, mesh, 1, {}, prefix));
+
+	engine::scene::MeshSkinning copied;
+	REQUIRE(SkinningOf(store, mesh, copied));
+	CHECK(copied.VertexCount == engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	CHECK(copied.Vertices.size() == engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES);
+
+	engine::scene::MeshSkinning tooLarge;
+	tooLarge.JointCount = 1;
+	tooLarge.VertexCount = static_cast<uint32_t>(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	tooLarge.Vertices.resize(engine::scene::MAXIMUM_RETAINED_SKINNING_VERTICES + 1);
+	CHECK_FALSE(RecordMesh(store, Name("catalogue_test/too-large.amesh"), 1, {}, tooLarge));
 }
 
 TEST_CASE("reading a count never creates the resource", "[scene][meshcatalogue]") {

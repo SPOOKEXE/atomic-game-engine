@@ -32,11 +32,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${lights_header}
 
 # The instance row's word count, declared once in C++ and given to the shader.
 #
-# `occlusion-cull.comp` copies a survivor's instance row into the late buffer
-# word by word, so it has to know how many words a row is - and unlike the two
-# other consumers of that stride, no C++ compiler can check this one. A row that
-# grew would keep building and would copy eight ninths of each survivor, which
-# draws as geometry smeared across the scene.
+# instance.glsl checks its resident row layout against this C++ stride.
+# Occlusion compacts slot indices and does not copy instance rows.
 #
 # **Named `GPU_INSTANCE_WORDS` and not `INSTANCE_WORDS`, and the build found out
 # why.** A define here is passed to *every* shader in the module, and
@@ -58,7 +55,7 @@ file(STRINGS "${instance_header}" instance_words_line
 if(NOT instance_words_line MATCHES "=[ \t]*([0-9]+)")
 	message(FATAL_ERROR
 		"resources: could not read GPU_INSTANCE_WORDS from ${instance_header}.\n"
-		"  occlusion-cull.comp is given the instance stride from there. If that "
+		"  instance.glsl is given the instance stride from there. If that "
 		"declaration moved or changed shape, update this regex in the same commit.")
 endif()
 set(instance_words "${CMAKE_MATCH_1}")
@@ -68,10 +65,35 @@ set(instance_words "${CMAKE_MATCH_1}")
 # value read at the last configure.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${instance_header}")
 
+file(STRINGS "${instance_header}" joint_words_line
+	REGEX "inline constexpr size_t GPU_JOINT_WORDS")
+if(NOT joint_words_line MATCHES "=[ \t]*([0-9]+)")
+	message(FATAL_ERROR "resources: could not read GPU_JOINT_WORDS from ${instance_header}")
+endif()
+set(joint_words "${CMAKE_MATCH_1}")
+
+# SSAO settings are renderer-owned constants. Reading them here gives every
+# built-in shader the same values the capture provenance reports.
+set(ssao_header "${CMAKE_SOURCE_DIR}/mono.engine/render/src/SsaoSettings.hpp")
+file(STRINGS "${ssao_header}" ssao_samples_line REGEX "inline constexpr uint32_t SSAO_SAMPLE_COUNT")
+if(NOT ssao_samples_line MATCHES "=[ \t]*([0-9]+)")
+	message(FATAL_ERROR "resources: could not read SSAO_SAMPLE_COUNT from ${ssao_header}")
+endif()
+set(ssao_sample_count "${CMAKE_MATCH_1}")
+file(STRINGS "${ssao_header}" ssao_radius_line REGEX "inline constexpr float SSAO_RADIUS_WORLD_UNITS")
+if(NOT ssao_radius_line MATCHES "=[ \t]*([0-9]+(\\.[0-9]+)?)f")
+	message(FATAL_ERROR "resources: could not read SSAO_RADIUS_WORLD_UNITS from ${ssao_header}")
+endif()
+set(ssao_radius_world_units "${CMAKE_MATCH_1}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ssao_header}")
+
 mono_add_library(resources
 	SHADER_DEFINES
 		MAX_LIGHTS=${max_scene_lights}
 		GPU_INSTANCE_WORDS=${instance_words}
+		GPU_JOINT_WORDS=${joint_words}
+		SSAO_SAMPLE_COUNT=${ssao_sample_count}
+		SSAO_RADIUS_WORLD_UNITS=${ssao_radius_world_units}
 
 	TIER client
 	DEPS Engine::core

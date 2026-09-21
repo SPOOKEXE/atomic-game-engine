@@ -22,6 +22,8 @@
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/ComputeJobs.hpp>
+#include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Runtime.hpp>
@@ -32,12 +34,14 @@
 #include <engine/script/Tweens.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <quickjs.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace engine::script {
+	class DataScriptPackageContext;
 
 	// One neutral service property installed in this VM, and the service it is
 	// on.
@@ -59,6 +63,7 @@ namespace engine::script {
 	//
 	// @since v0.5
 	struct JsContext {
+		const DataScriptPackageContext *Package = nullptr;
 		ecs::Store *World = nullptr;
 
 		// What the host is, for `RunService.IsServer()` and friends.
@@ -66,6 +71,10 @@ namespace engine::script {
 
 		// The services this runtime may reach.
 		ScriptCapabilities Access = ScriptCapabilities::None;
+
+		// Installed by the host after bindings exist, one bridge per runtime.
+		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 
 		// The program surface installed for plugin runtimes.
 		HostSurface *Host = nullptr;

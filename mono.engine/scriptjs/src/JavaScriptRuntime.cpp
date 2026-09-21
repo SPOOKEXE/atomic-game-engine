@@ -5,6 +5,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptjs/Runtime.hpp>
@@ -126,6 +127,106 @@ namespace engine::script {
 			// asking first whether the chunk was TypeScript.
 			return MapStackFrames(message);
 		}
+
+		JSValue PackageDeferred(JSContext *context, JSValueConst, int, JSValueConst *) {
+			return JS_ThrowTypeError(context, "data-script packages may not schedule deferred work");
+		}
+
+		JSValue PackageSeedStream(JSContext *context, JSValueConst, int count, JSValueConst *values) {
+			const auto *package = JsOf(context).Package;
+			if (package == nullptr) return JS_ThrowTypeError(context, "Package is unavailable");
+			if (count != 1) return JS_ThrowTypeError(context, "Package.seedStream expects one name");
+			const char *name = JS_ToCString(context, values[0]);
+			if (name == nullptr) return JS_EXCEPTION;
+			const uint64_t seed = package->SeedStream(name);
+			JS_FreeCString(context, name);
+			const std::string value = std::to_string(seed);
+			return JS_NewStringLen(context, value.data(), value.size());
+		}
+
+		JSValue PackageAsset(JSContext *context, JSValueConst, int count, JSValueConst *values) {
+			const auto *package = JsOf(context).Package;
+			if (package == nullptr) return JS_ThrowTypeError(context, "Package is unavailable");
+			if (count != 1) return JS_ThrowTypeError(context, "Package.asset expects one path");
+			const char *path = JS_ToCString(context, values[0]);
+			if (path == nullptr) return JS_EXCEPTION;
+			const auto bytes = package->Asset(path);
+			JS_FreeCString(context, path);
+			if (!bytes) return JS_ThrowTypeError(context, "Package asset is not declared");
+			return JS_NewArrayBufferCopy(
+				context, reinterpret_cast<const uint8_t *>(bytes->data()), bytes->size()
+			);
+		}
+
+		void SetFrozen(JSContext *context, JSValue object, const char *name, JSValue value) {
+			JS_DefinePropertyValueStr(context, object, name, value, JS_PROP_ENUMERABLE);
+		}
+
+		void OpenDataPackage(JSContext *context) {
+			const auto *package = JsOf(context).Package;
+			if (package == nullptr) return;
+			JSValue global = JS_GetGlobalObject(context);
+			JSValue value = JS_NewObject(context);
+			const std::string seed = std::to_string(package->Manifest().Seed);
+			SetFrozen(context, value, "seed", JS_NewStringLen(context, seed.data(), seed.size()));
+			JSValue parameters = JS_NewObject(context);
+			for (const DataScriptParameter &parameter : package->Manifest().Parameters) {
+				switch (parameter.Value.Type) {
+				case DataScriptScalar::Kind::Boolean:
+					SetFrozen(
+						context,
+						parameters,
+						parameter.Name.c_str(),
+						JS_NewBool(context, parameter.Value.Boolean)
+					);
+					break;
+				case DataScriptScalar::Kind::Integer: {
+					const std::string integer = std::to_string(parameter.Value.Integer);
+					SetFrozen(
+						context,
+						parameters,
+						parameter.Name.c_str(),
+						JS_NewStringLen(context, integer.data(), integer.size())
+					);
+				} break;
+				case DataScriptScalar::Kind::Number:
+					SetFrozen(
+						context,
+						parameters,
+						parameter.Name.c_str(),
+						JS_NewFloat64(context, parameter.Value.Number)
+					);
+					break;
+				case DataScriptScalar::Kind::String:
+					SetFrozen(
+						context,
+						parameters,
+						parameter.Name.c_str(),
+						JS_NewStringLen(context, parameter.Value.String.data(), parameter.Value.String.size())
+					);
+					break;
+				}
+			}
+			JS_FreezeObject(context, parameters);
+			SetFrozen(context, value, "parameters", parameters);
+			SetFrozen(
+				context, value, "seedStream", JS_NewCFunction(context, PackageSeedStream, "seedStream", 1)
+			);
+			SetFrozen(context, value, "asset", JS_NewCFunction(context, PackageAsset, "asset", 1));
+			JS_FreezeObject(context, value);
+			JS_DefinePropertyValueStr(context, global, "Package", value, JS_PROP_ENUMERABLE);
+			const JSAtom promise = JS_NewAtom(context, "Promise");
+			JS_DeleteProperty(context, global, promise, 0);
+			JS_FreeAtom(context, promise);
+
+			JSValue task = JS_NewObject(context);
+			for (const char *name : {"wait", "defer", "delay", "spawn"})
+				SetFrozen(context, task, name, JS_NewCFunction(context, PackageDeferred, name, 0));
+			JS_FreezeObject(context, task);
+			JS_DefinePropertyValueStr(context, global, "task", task, JS_PROP_ENUMERABLE);
+			JS_FreeValue(context, global);
+		}
+
 	}
 
 	JavaScriptRuntime::JavaScriptRuntime(ecs::Store &store, const RuntimeLimits &limits)
@@ -188,6 +289,8 @@ namespace engine::script {
 		// again rather than assuming it was fixed.
 
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
+		JsOf(Context).DataCapture = limits.DataCapture;
+		JsOf(Context).DataLifecycle = limits.DataLifecycle;
 		OpenJsSurface(Context);
 		OpenJsScopes(Context);
 
@@ -306,6 +409,7 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
+		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
@@ -327,12 +431,14 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Run(std::string_view source, std::string_view name) {
+		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
 		}
 
 		Error.clear();
+		OpenDataPackage(Context);
 
 		// A fresh budget for this chunk, and the counter keeps running. The
 		// chunk and every reaction it queues share what is set here, which is
@@ -377,6 +483,19 @@ namespace engine::script {
 		// differ between two runs of one recording.
 		JS_RunGC(Vm);
 		return true;
+	}
+
+	DataScriptPackageRunResult JavaScriptRuntime::RunDataScriptPackage(
+		const DataScriptPackageContext &context, std::string_view source, std::string_view entry
+	) {
+		MarkWorldSwapUsed();
+		(void)context;
+		(void)source;
+		(void)entry;
+		return {
+			.Terminal = DataScriptPackageRunResult::State::Failed,
+			.Error = "javascript data-script packages are unsupported"
+		};
 	}
 
 	bool JavaScriptRuntime::RunInstance(ecs::Entity instance) {

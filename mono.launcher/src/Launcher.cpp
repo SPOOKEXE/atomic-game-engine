@@ -36,6 +36,10 @@ namespace launcher {
 			engine::core::Paths::SetAssetsOverride(Settings.Assets);
 		}
 
+		if (!SDL_SetAppMetadata("Atomic", nullptr, "atomic-launcher")) {
+			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
+		}
+
 		if (!SDL_Init(SDL_INIT_VIDEO)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
@@ -69,6 +73,16 @@ namespace launcher {
 			if (Window == nullptr) {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
+			}
+
+			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
+			if (icon == nullptr) {
+				ENGINE_WARN("SDL_LoadPNG icon: {}", SDL_GetError());
+			} else {
+				if (!SDL_SetWindowIcon(Window, icon)) {
+					ENGINE_WARN("SDL_SetWindowIcon: {}", SDL_GetError());
+				}
+				SDL_DestroySurface(icon);
 			}
 		}
 

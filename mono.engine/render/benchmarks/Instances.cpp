@@ -7,9 +7,9 @@
 // before an upload is staged.
 //
 // On the 24-thread development machine in the `bench` preset, ten thousand
-// steady rows measured 37 ns each to pack and 17 ns each to upsert after
-// packing. Exact source reuse measured 13 ns each, removing about 76 per cent
-// of the former unchanged-row path. The whole-row `memcmp` is 3 ns, which is
+// steady rows measured 25 ns each to pack and 17 ns each to upsert after
+// packing across three samples. Exact source reuse measured 16 ns each.
+// The whole-row `memcmp` is 3 ns, which is
 // why the cache compares exact bytes instead of maintaining a second hash.
 
 #include <engine/core/Name.hpp>

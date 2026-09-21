@@ -199,6 +199,7 @@ namespace engine::render {
 		scene::CameraMatrices Matrices;
 		glm::mat4 LightViewProjection{1.0f};
 		core::AABB SceneBounds;
+		core::AABB DirectionalShadowBounds;
 
 		// The draw list after `scene::KeepLoaded`, and the other worlds' rows
 		// behind it.
@@ -242,6 +243,7 @@ namespace engine::render {
 		bool Claimed[scene::MAX_SURFACES] = {};
 		bool WantSurface = false;
 		uint64_t SurfaceSignature = 0;
+		uint64_t ContentSignature = 0;
 		size_t RefreshCount = 0;
 		core::Vector3 SceneEye;
 		double FrameSeconds = 0.0;
@@ -261,6 +263,7 @@ namespace engine::render {
 		// How deep the mirrors go this frame, and what the descent found.
 		uint32_t SurfaceBounces = 1;
 		uint32_t MirrorLevels = 0;
+		SDL_GPUTextureFormat MirrorFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
 		bool MirrorHistory = true;
 		bool SurfaceVisible[scene::MAX_SURFACES] = {};
 		float SurfaceCoverage[scene::MAX_SURFACES] = {};
@@ -308,7 +311,6 @@ namespace engine::render {
 		// contents are this frame's textures.
 		std::array<SDL_GPUTextureSamplerBinding, 1> DepthBindings{};
 		std::array<SDL_GPUTextureSamplerBinding, 7> LightingBindings{};
-		std::array<SDL_GPUTextureSamplerBinding, 1> TonemapBindings{};
 
 		// The interface hooks, once each has agreed to draw. `Prepare` opens a
 		// copy pass, so it has to have run before any render pass is open.
@@ -386,12 +388,25 @@ namespace engine::render {
 		// @return Always `true`; a CPU node cannot fail the frame here.
 		bool FinishCpuNode(const graph::RunContext &context);
 
-		// Records the frame's staged uploads, once. Every node that draws
+		// Records the frame's dynamic deltas, once. Every node that draws
 		// instances, ribbons or the overlay calls it first.
 		//
 		// @return `false` when a map or copy pass failed, which
 		//         fails the frame rather than drawing from a stale buffer.
+		// Debits one actual recursive render before targets are allocated or drawn.
+		bool AdmitSurfaceCapture(uint32_t width, uint32_t height, uint32_t depth);
+		uint64_t SurfacePixelsUsed = 0;
+
 		bool RecordUploads();
+
+		// Makes packed world rows, scene order, and skin data readable by the
+		// shared shadow node. The delta node calls this too when another camera
+		// reuses the world's shared work.
+		bool RecordWorldResidency();
+
+		// Records pending mesh and world-row residency through the graph-owned
+		// command buffer.
+		bool RecordMeshResidency();
 
 		// Builds the per-draw lighting block from world lighting and the camera
 		// a pass is drawing from.
@@ -449,7 +464,8 @@ namespace engine::render {
 			bool cycle,
 			const SDL_GPUViewport *viewport,
 			const LightUniforms &passLights,
-			const SDL_FColor *clearColour = nullptr
+			const SDL_FColor *clearColour = nullptr,
+			WorldColourTarget target = WorldColourTarget::Display
 		);
 
 		// The world minus every pane, drawn into whatever pass is open.
@@ -457,7 +473,12 @@ namespace engine::render {
 		// @param pass          The open pass.
 		// @param plainLighting Its per-draw lighting.
 		// @param filter        The tag filter this view draws through.
-		void DrawWorldInto(SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter);
+		void DrawWorldInto(
+			SDL_GPURenderPass *pass,
+			const LightingUniforms &plainLighting,
+			uint32_t filter,
+			bool omitCharacters = false
+		);
 
 		// The blended tail, minus the panes in it.
 		//
@@ -473,7 +494,9 @@ namespace engine::render {
 			const FrameUniforms &frame,
 			const LightingUniforms &plainLighting,
 			uint32_t filter,
-			bool panesFollow
+			bool panesFollow,
+			WorldColourTarget target = WorldColourTarget::Display,
+			bool omitCharacters = false
 		);
 
 		// One fullscreen triangle into a colour target, named as a graph node.
@@ -498,7 +521,8 @@ namespace engine::render {
 			const LightUniforms *passLights,
 			SDL_FColor clear,
 			const void *rawUniforms = nullptr,
-			size_t rawUniformBytes = 0
+			size_t rawUniformBytes = 0,
+			const BeamUniforms *passBeams = nullptr
 		);
 
 		// The renderer-owned texture a named resource role resolves to.
@@ -514,7 +538,18 @@ namespace engine::render {
 		// @param selectedSlot Which viewport's copy.
 		// @param make         Whether to allocate one that does not exist.
 		// @return The texture, or an invalid one.
-		Impl::NamedTexture ResourceTexture(graph::ResourceId resource, size_t selectedSlot, bool make);
+		Impl::NamedTexture ResourceTexture(
+			graph::ResourceId resource,
+			size_t selectedSlot,
+			bool make,
+			SDL_GPUCommandBuffer *readCommand = nullptr
+		);
+
+		// The buffer backing a graph resource, allocating it when asked.
+		SDL_GPUBuffer *ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make);
+
+		// The selected slot has to be shared by graph target allocation and history writes.
+		size_t GraphTextureSlot(const graph::RunContext &context) const;
 
 		// `ResourceTexture` for the viewport this node names, or this view's.
 		//
@@ -522,15 +557,27 @@ namespace engine::render {
 		// @param context  What the graph decided this invocation is.
 		// @param make     Whether to allocate one that does not exist.
 		// @return The texture, or an invalid one.
-		Impl::NamedTexture
-		GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make);
+		Impl::NamedTexture GraphTexture(
+			graph::ResourceId resource,
+			const graph::RunContext &context,
+			bool make,
+			SDL_GPUCommandBuffer *readCommand = nullptr
+		);
+
+		// Marks successful history writers as readable by later nodes in this command
+		// buffer. Submission still decides when that generation becomes temporal history.
+		void StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command);
+
+		// `ResourceBuffer` for the viewport this node names, or this view's.
+		SDL_GPUBuffer *GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make);
 
 		// The fragment samplers for everything a node reads, in read order. An
 		// absent image binds the fallback texel rather than nothing.
 		//
 		// @param context What the graph decided this invocation is.
 		// @return The bindings.
-		std::vector<SDL_GPUTextureSamplerBinding> TextureBindings(const graph::RunContext &context);
+		std::vector<SDL_GPUTextureSamplerBinding>
+		TextureBindings(const graph::RunContext &context, SDL_GPUCommandBuffer *readCommand = nullptr);
 
 		// Copies one image into another through the image pipeline.
 		//
@@ -557,7 +604,7 @@ namespace engine::render {
 
 		// Fills the occlusion image with "nothing is occluded", for a graph that
 		// lights without having authored an `ssao` node.
-		void ClearOcclusion();
+		void ClearOcclusion(AmbientOcclusionSourceState sourceState, bool enabled);
 
 		// --- the node families ---------------------------------------------
 		//
@@ -572,7 +619,7 @@ namespace engine::render {
 		//              this recording nor the graph run, and in practice both
 		//              belong to the same `Renderer::RenderView` call.
 
-		// `upload-instances`, and the CPU stages that resolve before it.
+		// `mesh-residency`, `delta-upload`, and the CPU stages that resolve before them.
 		void RegisterUploadNodes(NodeTable &nodes);
 
 		// `shadow`, which is the sun's map and the portal beam atlas beside it.
@@ -586,6 +633,8 @@ namespace engine::render {
 		// recursion through a hole, its display copy, and the mouths drawn over
 		// the frame.
 		void RegisterPortalNodes(NodeTable &nodes);
+		void RegisterSurfaceNodes(NodeTable &nodes);
+		bool CaptureSeamLights(WorldColourTarget colour);
 
 		// `gbuffer` and `transparent`: the material head and the ordered tail.
 		void RegisterGeometryNodes(NodeTable &nodes);
@@ -618,4 +667,14 @@ namespace engine::render {
 		// Whether the frame's uploads have already been recorded.
 		bool UploadsRecorded = false;
 	};
+
+	// Copies the current recording into the render hook's owned observation
+	// value. This is outside ViewRecording so asynchronous capture has one owner.
+	RenderObservationContext DataFactoryObservation(
+		const ViewRecording &recording,
+		const graph::RunContext &context,
+		core::Name pipeline,
+		size_t viewSlot,
+		const DataCaptureSource &captureSource
+	);
 }

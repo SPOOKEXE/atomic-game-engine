@@ -144,6 +144,24 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      # shaderc's DEPS pins every fetched revision.  Keep only that source tree
+      # between runners, keyed by both its manifest and the sync program that
+      # interprets it.  The tree has no compiled objects, so each platform can
+      # safely restore the same dependency shape only within its own cache.
+      - name: Restore shaderc dependencies
+        id: shaderc-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            mono.vendor/shaderc/third_party/abseil_cpp
+            mono.vendor/shaderc/third_party/effcee
+            mono.vendor/shaderc/third_party/googletest
+            mono.vendor/shaderc/third_party/glslang
+            mono.vendor/shaderc/third_party/re2
+            mono.vendor/shaderc/third_party/spirv-headers
+            mono.vendor/shaderc/third_party/spirv-tools
+          key: shaderc-deps-${{ runner.os }}-${{ hashFiles('mono.vendor/shaderc/DEPS', 'mono.vendor/shaderc/utils/git-sync-deps') }}
+
       # shaderc pins glslang, SPIRV-Tools and SPIRV-Headers in its own DEPS file
       # rather than as submodules, so the checkout above leaves its third_party/
       # empty and the client configure stops in MonoVendor.cmake. Same step
@@ -162,6 +180,22 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: python mono.vendor\shaderc\utils\git-sync-deps
+
+      # Save before the expensive configure and compile path.  A later failure
+      # must not make the next run fetch the exact same pinned source again.
+      - name: Save shaderc dependencies
+        if: steps.shaderc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            mono.vendor/shaderc/third_party/abseil_cpp
+            mono.vendor/shaderc/third_party/effcee
+            mono.vendor/shaderc/third_party/googletest
+            mono.vendor/shaderc/third_party/glslang
+            mono.vendor/shaderc/third_party/re2
+            mono.vendor/shaderc/third_party/spirv-headers
+            mono.vendor/shaderc/third_party/spirv-tools
+          key: shaderc-deps-${{ runner.os }}-${{ hashFiles('mono.vendor/shaderc/DEPS', 'mono.vendor/shaderc/utils/git-sync-deps') }}
 
       # SDL picks its backends at configure time from what it finds. A runner
       # without these produces a client that builds and then opens no window,
@@ -192,6 +226,11 @@ jobs:
           brew install ninja ccache
           scripts/fetch-moltenvk.sh
 
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: choco install ccache --yes --no-progress
+
       # The pinned TypeScript, and it is not optional here even though the build
       # treats it as optional.
       #
@@ -206,32 +245,39 @@ jobs:
       # `install` rather than `ci`: package.json pins typescript to an exact
       # version and there is no package-lock.json to honour. The repository's
       # bun.lock is for `bun`, and npm is what every runner image already has.
+      - name: Restore the TypeScript transpiler
+        id: typescript-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: node_modules
+          key: typescript-${{ runner.os }}-${{ hashFiles('package.json') }}
+
       - name: Install the TypeScript transpiler
+        if: steps.typescript-cache.outputs.cache-hit != 'true'
         shell: bash
         run: npm install --no-audit --no-fund
 
-      # **A cold build here is 3508 CPU-seconds and a warm one is 197.** The
-      # compiler cache is wired in `CMakeLists.txt` and used automatically once
-      # `ccache` is on PATH, which the dependency steps above now arrange - but
-      # a runner is a fresh machine every time, so without somewhere to keep the
-      # cache between runs every CI build is the cold number.
+      - name: Save the TypeScript transpiler
+        if: steps.typescript-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: node_modules
+          key: typescript-${{ runner.os }}-${{ hashFiles('package.json') }}
+
+      # The compiler cache is wired in `CMakeLists.txt` and used automatically
+      # once `ccache` is on PATH, which the dependency steps above now arrange.
+      # A hosted runner is fresh every time, so a cache restore is the only way
+      # a later build can reuse the completed work from an earlier one.
       #
       # **`actions/cache` rather than a marketplace ccache action**, for the
       # reason the Windows build step gives about vcvars: a first-party
       # mechanism whose behaviour is written down here beats one whose is
       # written down somewhere else.
       #
-      # The key carries the run's own SHA so every run writes a fresh entry, and
-      # `restore-keys` falls back to the most recent entry for this platform.
-      # That is the standard rolling-cache shape: an exact hit never happens and
-      # is not meant to, because the point is to start from whatever the last
-      # build left behind.
+      # The key carries the run and attempt, so a retry writes its completed
+      # objects rather than finding the previous attempt's immutable key. The
+      # restore prefix finds the most recent cache for this platform and flavour.
       #
-      # **Not Windows.** ccache does work with MSVC, but only where debug info
-      # is `/Z7` rather than `/Zi`, and this workflow's own comments record that
-      # the Windows build compiles and has never shipped. Adding a caching layer
-      # with a compiler-flag precondition to the one platform nobody runs is how
-      # an optional build becomes a flaky one.
       # **Pinned rather than left to ccache's default, because the default is not
       # the same path on every runner.** ccache resolves its directory from
       # `XDG_CACHE_HOME` on Linux and from `~/Library/Caches` on macOS, and a
@@ -256,21 +302,24 @@ jobs:
       # parse, and the whole workflow fails in zero seconds saying only
       # "workflow file issue". The `$RUNNER_TEMP` variable is the same value and
       # is readable in any step.
-      - name: Pin the compiler cache directory
-        if: runner.os != 'Windows'
+      - name: Pin compiler-cache paths
         shell: bash
-        run: echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+        run: |
+          mkdir -p "$RUNNER_TEMP/ccache-profile"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_STATSLOG=$RUNNER_TEMP/ccache-profile/ccache-stats.log" >> "$GITHUB_ENV"
 
       # **Keyed by flavour as well as platform.** The two flavours compile the
       # same files with different flags, so they share no objects; one key for
       # both would be two builds evicting each other's entries all day and
       # reporting a hit rate that never recovers.
       - name: Restore the compiler cache
-        if: runner.os != 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/ccache
-          key: ccache-${{ matrix.platform }}-${{ matrix.flavour }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ccache
+            ${{ runner.temp }}/ccache-profile
+          key: ccache-${{ matrix.platform }}-${{ matrix.flavour }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ccache-${{ matrix.platform }}-${{ matrix.flavour }}-
 
@@ -284,7 +333,6 @@ jobs:
       # reaches - and a cache that silently began evicting would show up below
       # as a hit rate that fell and stayed fallen.
       - name: Configure the compiler cache
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           ccache --set-config max_size=2G
@@ -295,18 +343,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cmake --preset ${{ matrix.preset }}
-          cmake --build --preset ${{ matrix.preset }}
-
-      # **Always, and not only on failure.** A cache that stopped being used is
-      # indistinguishable from one that never was, which is the argument
-      # `CMakeLists.txt` makes where it reports an absent cache rather than
-      # staying quiet. A hit rate that falls to zero and stays there is a
-      # regression worth seeing in a green build.
-      - name: What the compiler cache did
-        if: runner.os != 'Windows'
-        continue-on-error: true
-        shell: bash
-        run: ccache --show-stats --verbose
+          cmake --build --preset ${{ matrix.preset }} --target client studio server cdn launcher
 
       # The repository's own Windows entry point rather than a marketplace
       # action that sets the same variables. Every preset generates for Ninja,
@@ -319,7 +356,58 @@ jobs:
         shell: cmd
         run: |
           set PRESET=${{ matrix.preset }}
-          scripts\build-windows.bat
+          scripts\build-windows.bat client studio server cdn launcher
+
+      # **Always, including after a failed compile.** A cache that stopped being
+      # used is indistinguishable from one that never was. Failure statistics
+      # also show whether a partially completed build produced useful entries.
+      - name: What the compiler cache did
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: ccache --show-stats --verbose
+
+      # The combined cache action only saves after success. Separate restore
+      # and save steps retain completed objects when a later source fails, which
+      # is especially important while bringing a new platform build online.
+      - name: Save the compiler cache
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/ccache
+            ${{ runner.temp }}/ccache-profile
+          key: ccache-${{ matrix.platform }}-${{ matrix.flavour }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # The ccache stats log names each translation unit, so this keeps the
+      # per-file hit and miss history visible even when the build failed.
+      - name: Profile build cache behavior
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            python scripts/build-profile.py \
+              --build-dir .cache/build/${{ matrix.preset }} \
+              --stats-log "$CCACHE_STATSLOG"
+          else
+            python3 scripts/build-profile.py \
+              --build-dir .cache/build/${{ matrix.preset }} \
+              --stats-log "$CCACHE_STATSLOG"
+          fi
+
+      - name: Upload raw build-profile logs
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-profile-${{ matrix.platform }}-${{ matrix.flavour }}
+          path: |
+            .cache/build/${{ matrix.preset }}/.ninja_log
+            ${{ runner.temp }}/ccache-profile/ccache-stats.log
+          include-hidden-files: true
+          if-no-files-found: warn
 
       # **Why a build failed, when the machine that failed is not one anybody can
       # log into.** CMake records every `try_compile` it ran - the source, the

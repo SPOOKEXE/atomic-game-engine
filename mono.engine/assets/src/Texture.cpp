@@ -86,7 +86,7 @@ namespace engine::assets {
 		}
 
 		const uint8_t format = reader.ReadUInt8();
-		if (format > static_cast<uint8_t>(TextureFormat::R8)) {
+		if (format > static_cast<uint8_t>(TextureFormat::RGBA8_LINEAR)) {
 			// **Range-checked before the cast**, for `ReadMessage`'s reason: a
 			// cast of an out-of-range byte produces a value no switch handles,
 			// and every consumer downstream then reads something the type says

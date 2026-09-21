@@ -1559,6 +1559,9 @@ declare extern type ContentService with
 	-- character wearing one sheet all over.
 	function GetMeshTextures(self, mesh: string): { string }
 
+	-- Authored object-space mesh dimensions, or zero before content arrives.
+	function GetMeshSize(self, mesh: string): Vector3
+
 	-- Every texture registered in this world, sorted.
 	function GetTextures(self): { string }
 
@@ -1584,6 +1587,62 @@ declare extern type ComputeService with
 		context: "Serial" | "Threaded" | "Processed"?,
 		originY: number?
 	): { number }
+end
+
+-- A copied, non-parented capture request. CameraId is `current_view` or a
+-- stable DataFactoryId for a Camera, never a live Instance reference.
+export type DataSceneOptions = {
+	SchemaVersion: "data-scene-options/v1",
+	Channels: { string },
+	CameraId: string,
+	Pipeline: string,
+	CaptureNode: string,
+	ViewSlot: number,
+	TemporalHistory: "preserve",
+	StorageProfile: "lossless" | "training_compact",
+	Output: "raw_planes",
+	IncludeSceneData: boolean,
+	IncludeExactMasks: false,
+	CoordinateSpace: "world_camera_image",
+	NoiseMode: "none" | "gaussian",
+	NoiseSeed: number,
+	NoiseSigma: number,
+}
+
+-- Read-only ECS observations for a data factory. Returned records are copies;
+-- entities without a unique DataFactoryId string are intentionally omitted.
+declare extern type DataSceneService with
+	function GetCapabilities(self): any
+	function GetSceneSnapshot(self, limit: number?): any
+	function GetCameraRenderingData(self, camera: Instance, objectLimit: number?): any
+	function GetEditableImageMetadata(self, image: Instance): any
+	function GetCaptureChannels(self): any
+	function Capture(self, request: any): any
+	function SubmitViewCameraMutation(self, request: any): any
+	function CancelViewCameraMutation(self, ticket: string): any
+	function PollViewCameraMutation(self, ticket: string): any
+	function CreateOptions(self): DataSceneOptions
+	function CaptureBundle(self, snapshotId: string, options: DataSceneOptions): any
+	function PollCapture(self, ticket: string): any
+	function CancelCapture(self, ticket: string): any
+	function GetCaptureBuffer(self, ticket: string, resource: string, offset: number, maximumBytes: number): buffer
+	function ReleaseCapture(self, ticket: string): any
+	function SetCaptureDriver(self, driver: ((snapshotId: string, ticket: string?) -> any)?): any
+	-- A render_only lifecycle request reaches submitted after frame-command submission.
+	-- GPU readback readiness is not part of this lifecycle surface.
+	function RequestLifecycle(self, request: any): any
+	function PollLifecycle(self, ticket: string): any
+	function ReleaseLifecycle(self, ticket: string): any
+	function GetResources(self): any
+	function SetEventNarratives(self, bundle: any): any
+	function GetEventNarratives(self): any
+	function Raycast(self, request: any): any
+	function OverlapAABB(self, request: any): any
+	function OverlapOBB(self, request: any): any
+	function GetColliderBev(self, request: any): any
+	function GetFilledOccupancy(self, request: any): any
+	function GetSignedDistanceField(self, request: any): any
+	function GetAuthoredAffordances(self, request: any): any
 end
 
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.
@@ -1789,6 +1848,7 @@ declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
 declare ComputeService: ComputeService
+declare DataSceneService: DataSceneService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
@@ -2008,6 +2068,15 @@ declare task: {
 					continue;
 				}
 
+				// A Name always reads as text, while nil on write clears it to an
+				// invalid Name. Keep those two directions distinct so scripts can
+				// express an empty authored slot without weakening every read.
+				if (property.Writable && property.Type == PropertyType::Name) {
+					out << "\tread " << property.Name.Text() << ": string\n";
+					out << "\twrite " << property.Name.Text() << ": string?\n";
+					continue;
+				}
+
 				out << "\t";
 
 				// **`read` is Luau's `readonly`, and without it the two
@@ -2191,6 +2260,8 @@ declare task: {
 				out << "\tfunction Equals(self, other: Instance): boolean\n";
 				out << "\tfunction GetPlayerFromCharacter(self, character: Instance): Instance?\n";
 				out << "\tfunction LoadCharacter(self): Instance?\n";
+				out << "\tfunction AddAccessory(self, accessory: Instance): boolean\n";
+				out << "\tfunction CutTo(self, frame: CFrame): boolean\n";
 
 				out << "\tfunction KeepWorldAwake(self, reason: string): ()\n";
 				out << "\tfunction LetWorldSleep(self): ()\n";
@@ -2199,9 +2270,13 @@ declare task: {
 				out << "\tfunction GetNetworkOwner(self): Instance?\n";
 				out << "\tfunction GetLinearVelocity(self): Vector3\n";
 				out << "\tfunction GetAngularVelocity(self): Vector3\n";
+				out << "\tfunction GetAppliedForce(self): Vector3\n";
+				out << "\tfunction GetAppliedTorque(self): Vector3\n";
 				out << "\tfunction SetLinearVelocity(self, velocity: Vector3): ()\n";
 				out << "\tfunction SetAngularVelocity(self, velocity: Vector3): ()\n";
 				out << "\tfunction ApplyImpulse(self, impulse: Vector3): ()\n";
+				out << "\tfunction SetAppliedForce(self, force: Vector3): ()\n";
+				out << "\tfunction SetAppliedTorque(self, torque: Vector3): ()\n";
 				out << "\tfunction Break(self): number\n";
 
 				// **The one door onto `LocalTransparency`, for the same reason
@@ -2265,6 +2340,13 @@ declare task: {
 					   "number?): boolean\n";
 				out << "\tfunction DrawCircle(self, centre: Vector2, radius: number, colour: Color3, "
 					   "transparency: number?): boolean\n";
+				out << "\t-- Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight "
+					   "alpha.\n";
+				out << "\t-- FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a "
+					   "length mismatch.\n";
+				out << "\t-- Buffers above the 64 MiB image ceiling raise before the image changes.\n";
+				out << "\tfunction ToBuffer(self): buffer\n";
+				out << "\tfunction FromBuffer(self, buffer: buffer): boolean\n";
 
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
@@ -2316,9 +2398,15 @@ declare task: {
 				out << "\tMouseButton1Click: GuiSignal\n";
 				out << "\tMouseButton1Down: GuiSignal\n";
 				out << "\tMouseButton1Up: GuiSignal\n";
+				out << "\tOnMouse1Down: GuiSignal\n";
+				out << "\tOnMouse1Up: GuiSignal\n";
+				out << "\tOnMouse1Changed: PointerSignal\n";
 				out << "\tMouseButton2Click: GuiSignal\n";
 				out << "\tMouseButton2Down: GuiSignal\n";
 				out << "\tMouseButton2Up: GuiSignal\n";
+				out << "\tOnMouse2Down: GuiSignal\n";
+				out << "\tOnMouse2Up: GuiSignal\n";
+				out << "\tOnMouse2Changed: PointerSignal\n";
 
 				out << "\tInputBegan: GuiSignal\n";
 				out << "\tInputEnded: GuiSignal\n";
@@ -2518,6 +2606,7 @@ declare task: {
 		out << "\tTeleportService: TeleportService,\n";
 		out << "\tContentService: ContentService,\n";
 		out << "\tComputeService: ComputeService,\n";
+		out << "\tDataSceneService: DataSceneService,\n";
 		out << "\tCollectionService: CollectionService,\n";
 		out << "\tHttpService: HttpService,\n";
 		out << "\tCrossWorldService: CrossWorldService,\n";
@@ -3366,6 +3455,9 @@ declare interface ContentService {
 	// its slot as an empty string.
 	GetMeshTextures(mesh: string): string[];
 
+	// Authored object-space mesh dimensions, or zero before content arrives.
+	GetMeshSize(mesh: string): Vector3;
+
 	GetTextures(): string[];
 
 	// Null for a still image and for a texture this world has not been told
@@ -3388,6 +3480,64 @@ declare interface ComputeService {
 		originY?: number
 	): Promise<number[]>;
 }
+
+interface DataSceneOptions {
+	SchemaVersion: "data-scene-options/v1";
+	Channels: string[];
+	CameraId: string;
+	Pipeline: string;
+	CaptureNode: string;
+	ViewSlot: number;
+	TemporalHistory: "preserve";
+	StorageProfile: "lossless" | "training_compact";
+	Output: "raw_planes";
+	IncludeSceneData: boolean;
+	IncludeExactMasks: false;
+	CoordinateSpace: "world_camera_image";
+	NoiseMode: "none" | "gaussian";
+	NoiseSeed: number;
+	NoiseSigma: number;
+}
+
+// Read-only ECS observations. The result records are intentionally typed as
+// unknown-shaped maps while negotiated capture and lifecycle adapters evolve.
+declare interface DataSceneService {
+	GetCapabilities(): Record<string, unknown>;
+	GetSceneSnapshot(limit?: number): Record<string, unknown>;
+	GetCameraRenderingData(camera: Instance, objectLimit?: number): Record<string, unknown>;
+	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
+	GetCaptureChannels(): Record<string, unknown>;
+	Capture(request: unknown): Record<string, unknown>;
+	SubmitViewCameraMutation(request: unknown): Record<string, unknown>;
+	CancelViewCameraMutation(ticket: string): Record<string, unknown>;
+	PollViewCameraMutation(ticket: string): Record<string, unknown>;
+	CreateOptions(): DataSceneOptions;
+	CaptureBundle(snapshotId: string, options: DataSceneOptions): Record<string, unknown>;
+	PollCapture(ticket: string): Record<string, unknown>;
+	CancelCapture(ticket: string): Record<string, unknown>;
+	GetCaptureBuffer(ticket: string, resource: string, offset: number, maximumBytes: number): ArrayBuffer;
+	ReleaseCapture(ticket: string): Record<string, unknown>;
+	SetCaptureDriver(driver: ((snapshotId: string, ticket?: string) => Record<string, unknown>) | null): Record<string, unknown>;
+	// A render_only lifecycle request reaches submitted after frame-command submission.
+	// GPU readback readiness is not part of this lifecycle surface.
+	RequestLifecycle(request: unknown): Record<string, unknown>;
+	PollLifecycle(ticket: string): Record<string, unknown>;
+	ReleaseLifecycle(ticket: string): Record<string, unknown>;
+	GetResources(): Record<string, unknown>;
+	SetEventNarratives(bundle: unknown): Record<string, unknown>;
+	GetEventNarratives(): Record<string, unknown>;
+	Raycast(request: unknown): Record<string, unknown>;
+	OverlapAABB(request: unknown): Record<string, unknown>;
+	OverlapOBB(request: unknown): Record<string, unknown>;
+	GetColliderBev(request: unknown): Record<string, unknown>;
+	GetFilledOccupancy(request: unknown): Record<string, unknown>;
+	GetSignedDistanceField(request: unknown): Record<string, unknown>;
+	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
+}
+)TS"
+		// Split for MSVC's 16380-byte literal cap. Keep the declaration text
+		// adjacent so the generated TypeScript remains byte-identical.
+		R"TS(
 
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
@@ -3569,6 +3719,7 @@ declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
 declare const ComputeService: ComputeService;
+declare const DataSceneService: DataSceneService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
@@ -3834,6 +3985,8 @@ declare const task: {
 				out << "\tEquals(other: Instance): boolean;\n";
 				out << "\tGetPlayerFromCharacter(character: Instance): Instance | undefined;\n";
 				out << "\tLoadCharacter(): Instance | undefined;\n";
+				out << "\tAddAccessory(accessory: Instance): boolean;\n";
+				out << "\tCutTo(frame: CFrame): boolean;\n";
 
 				out << "\tKeepWorldAwake(reason: string): void;\n";
 				out << "\tLetWorldSleep(): void;\n";
@@ -3842,9 +3995,13 @@ declare const task: {
 				out << "\tGetNetworkOwner(): Instance | null;\n";
 				out << "\tGetLinearVelocity(): Vector3;\n";
 				out << "\tGetAngularVelocity(): Vector3;\n";
+				out << "\tGetAppliedForce(): Vector3;\n";
+				out << "\tGetAppliedTorque(): Vector3;\n";
 				out << "\tSetLinearVelocity(velocity: Vector3): void;\n";
 				out << "\tSetAngularVelocity(velocity: Vector3): void;\n";
 				out << "\tApplyImpulse(impulse: Vector3): void;\n";
+				out << "\tSetAppliedForce(force: Vector3): void;\n";
+				out << "\tSetAppliedTorque(torque: Vector3): void;\n";
 				out << "\tBreak(): number;\n";
 
 				// The one door onto `LocalTransparency`, matching the Luau half
@@ -3881,6 +4038,13 @@ declare const task: {
 					   "boolean;\n";
 				out << "\tDrawCircle(centre: Vector2, radius: number, colour: Color3, transparency?: "
 					   "number): boolean;\n";
+				out << "\t/** Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight "
+					   "alpha.\n";
+				out << "\t * FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a "
+					   "length mismatch.\n";
+				out << "\t * Buffers above the 64 MiB image ceiling raise before the image changes. */\n";
+				out << "\tToBuffer(): ArrayBuffer;\n";
+				out << "\tFromBuffer(buffer: ArrayBuffer): boolean;\n";
 
 				// Attributes, matching the Luau half. The union is the same
 				// closed set and for the same reason.
@@ -3910,9 +4074,15 @@ declare const task: {
 				out << "\treadonly MouseButton1Click: GuiSignal;\n";
 				out << "\treadonly MouseButton1Down: GuiSignal;\n";
 				out << "\treadonly MouseButton1Up: GuiSignal;\n";
+				out << "\treadonly OnMouse1Down: GuiSignal;\n";
+				out << "\treadonly OnMouse1Up: GuiSignal;\n";
+				out << "\treadonly OnMouse1Changed: PointerSignal;\n";
 				out << "\treadonly MouseButton2Click: GuiSignal;\n";
 				out << "\treadonly MouseButton2Down: GuiSignal;\n";
 				out << "\treadonly MouseButton2Up: GuiSignal;\n";
+				out << "\treadonly OnMouse2Down: GuiSignal;\n";
+				out << "\treadonly OnMouse2Up: GuiSignal;\n";
+				out << "\treadonly OnMouse2Changed: PointerSignal;\n";
 
 				out << "\treadonly InputBegan: GuiSignal;\n";
 				out << "\treadonly InputEnded: GuiSignal;\n";
@@ -4043,6 +4213,7 @@ declare const task: {
 		}
 		out << "\t\t(service: \"RunService\"): RunService;\n";
 		out << "\t\t(service: \"ComputeService\"): ComputeService;\n";
+		out << "\t\t(service: \"DataSceneService\"): DataSceneService;\n";
 		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
 		out << "\t\t(service: \"TeleportService\"): TeleportService;\n";
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";

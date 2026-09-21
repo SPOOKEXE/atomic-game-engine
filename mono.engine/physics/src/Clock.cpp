@@ -4,6 +4,7 @@
 #include <engine/physics/Clock.hpp>
 
 #include <algorithm>
+#include <limits>
 
 namespace engine::physics {
 
@@ -31,6 +32,20 @@ namespace engine::physics {
 		// world has already been charged for - dropping it is a world that
 		// silently skips forward whenever an author touches a slider.
 		clock->Rate = SanePhysicsRate(stepsPerSecond);
+	}
+
+	void SetPhysicsPaused(ecs::Store &store, bool paused) {
+		PhysicsClock *clock = PreparedClockMutable(store);
+		if (clock == nullptr) return;
+		clock->Paused = paused;
+		clock->Owed = 0;
+		clock->Stepping = false;
+		clock->StepInTick = 0;
+	}
+
+	bool IsPhysicsPaused(const ecs::Store &store) {
+		const PhysicsClock *clock = PreparedClock(store);
+		return clock != nullptr && clock->Paused;
 	}
 
 	double PhysicsTickRate(const ecs::Store &store) {
@@ -62,6 +77,11 @@ namespace engine::physics {
 		const float tick = store.Time().Delta;
 
 		clock->StepInTick = 0;
+		clock->Stepping = false;
+		if (clock->Paused) {
+			clock->Owed = 0;
+			return;
+		}
 
 		if (!(clock->Rate > 0.0)) {
 			// Following the world, which is one step of exactly the tick. Kept
@@ -78,21 +98,27 @@ namespace engine::physics {
 		clock->Accumulator += static_cast<double>(tick);
 
 		const double interval = 1.0 / clock->Rate;
-		auto owed = static_cast<int32_t>(clock->Accumulator / interval);
-		if (owed <= 0) {
+		const double owedSeconds = clock->Accumulator / interval;
+		if (!(owedSeconds > 0.0)) {
 			clock->Owed = 0;
 			return;
 		}
-
-		if (owed > PhysicsClock::MAXIMUM_STEPS_PER_TICK) {
-			// Dropped rather than carried, exactly as `FixedTimestep::Advance`
-			// drops ticks and for the same spiral.
-			clock->DroppedSteps += static_cast<uint64_t>(owed - PhysicsClock::MAXIMUM_STEPS_PER_TICK);
-			owed = PhysicsClock::MAXIMUM_STEPS_PER_TICK;
+		if (!std::isfinite(owedSeconds) ||
+			owedSeconds >= static_cast<double>(PhysicsClock::MAXIMUM_STEPS_PER_TICK + 1)) {
+			const uint64_t owed = owedSeconds >= static_cast<double>(std::numeric_limits<uint64_t>::max())
+									  ? std::numeric_limits<uint64_t>::max()
+									  : static_cast<uint64_t>(owedSeconds);
+			const uint64_t dropped =
+				owed > PhysicsClock::MAXIMUM_STEPS_PER_TICK ? owed - PhysicsClock::MAXIMUM_STEPS_PER_TICK : 0;
+			clock->DroppedSteps = std::numeric_limits<uint64_t>::max() - clock->DroppedSteps < dropped
+									  ? std::numeric_limits<uint64_t>::max()
+									  : clock->DroppedSteps + dropped;
 			clock->Accumulator = 0.0;
-		} else {
-			clock->Accumulator -= owed * interval;
+			clock->Owed = PhysicsClock::MAXIMUM_STEPS_PER_TICK;
+			return;
 		}
+		auto owed = static_cast<int32_t>(owedSeconds);
+		clock->Accumulator -= owed * interval;
 
 		clock->Owed = owed;
 	}
@@ -100,6 +126,11 @@ namespace engine::physics {
 	bool BeginPhysicsStep(ecs::Store &store) {
 		PhysicsClock *clock = PreparedClockMutable(store);
 		if (clock == nullptr) {
+			return false;
+		}
+		if (clock->Paused) {
+			clock->Owed = 0;
+			clock->Stepping = false;
 			return false;
 		}
 

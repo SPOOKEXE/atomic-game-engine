@@ -122,6 +122,8 @@ namespace engine::scene {
 			// the same image", and a texture swap, a tag change or an alpha mode
 			// change all produce a different one.
 			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
+			d = MixSignature(d, Pair(instance.ObjectLabel, instance.SemanticLabel));
+			d = MixSignature(d, Pair(instance.PartLabel, 0u));
 			c = MixSignature(
 				c,
 				Pair(
@@ -188,22 +190,56 @@ namespace engine::scene {
 		return CombineLanes(lanes);
 	}
 
+	namespace {
+		// Restores source order before the stable sort. Both whole-list and
+		// subset ordering reach this point, so this is the one place equal
+		// transparent distances keep their recorded order.
+		void SortTransparent(
+			std::span<const DrawInstance> instances, const core::Vector3 &eye, std::span<uint32_t> transparent
+		) {
+			std::reverse(transparent.begin(), transparent.end());
+			std::stable_sort(transparent.begin(), transparent.end(), [&](uint32_t left, uint32_t right) {
+				const float far = std::numeric_limits<float>::max();
+				const float leftDistance =
+					left < instances.size() ? (instances[left].Frame.Position - eye).MagnitudeSquared() : far;
+				const float rightDistance = right < instances.size()
+												? (instances[right].Frame.Position - eye).MagnitudeSquared()
+												: far;
+				return leftDistance > rightDistance;
+			});
+		}
+	}
+
 	size_t OrderForDrawing(
 		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
 	) {
-		// **Every instance, which is what this always meant.** The body moved to
-		// `OrderSubset` when the culling became graph nodes and a pass started
-		// being handed a list rather than the whole world; the sort itself is
-		// unchanged and is deliberately not written twice - see the comment on
-		// the reverse, which is there because a test caught it.
+		// **Every instance, which is what this always meant.** This is written
+		// directly rather than first making an identity list and then asking
+		// `OrderSubset` to copy it: the renderer keeps this vector per view, and
+		// that second list discarded its reserved storage every frame.
 		order.resize(instances.size());
+
+		// The opaque head is filled forward and the transparent tail backward,
+		// exactly as `OrderSubset` does. Every index here is valid by construction,
+		// unlike a subset supplied by a culling graph.
+		size_t opaque = 0;
+		size_t transparent = instances.size();
 		for (size_t index = 0; index < instances.size(); index++) {
-			order[index] = static_cast<uint32_t>(index);
+			if (IsTransparent(instances[index])) {
+				order[--transparent] = static_cast<uint32_t>(index);
+			} else {
+				order[opaque++] = static_cast<uint32_t>(index);
+			}
 		}
 
-		std::vector<uint32_t> ordered;
-		const size_t opaque = OrderSubset(instances, order, eye, ordered);
-		order = std::move(ordered);
+		if (opaque == instances.size()) {
+			return opaque;
+		}
+
+		// Filling the tail backwards reverses equal-distance entries. Restore
+		// their world order before the stable sort, which only keeps the order it
+		// was given.
+		SortTransparent(instances, eye, std::span<uint32_t>(order).subspan(opaque));
 		return opaque;
 	}
 
@@ -262,22 +298,7 @@ namespace engine::scene {
 		// was backwards. Reversing here is what makes "equal distances keep
 		// world order" true, and that is what makes a recording of a scene with
 		// coincident transparent faces replay.
-		std::reverse(order.begin() + static_cast<ptrdiff_t>(opaque), order.end());
-
-		// Farthest first. Squared distance, because the square root is monotonic
-		// and cannot change an ordering - and this runs over every transparent
-		// instance every frame per view.
-		std::stable_sort(
-			order.begin() + static_cast<ptrdiff_t>(opaque), order.end(), [&](uint32_t left, uint32_t right) {
-				const float far = std::numeric_limits<float>::max();
-				const float leftDistance =
-					left < instances.size() ? (instances[left].Frame.Position - eye).MagnitudeSquared() : far;
-				const float rightDistance = right < instances.size()
-												? (instances[right].Frame.Position - eye).MagnitudeSquared()
-												: far;
-				return leftDistance > rightDistance;
-			}
-		);
+		SortTransparent(instances, eye, std::span<uint32_t>(order).subspan(opaque));
 
 		return opaque;
 	}
@@ -286,6 +307,18 @@ namespace engine::scene {
 		const auto casts = [instances](uint32_t index) {
 			return index < instances.size() && instances[index].CastShadow;
 		};
+
+		// A uniform run is already partitioned. `stable_partition` reserves a
+		// temporary even when it cannot move an entry, and all-shadow and
+		// no-shadow passes are common enough to make that allocation visible.
+		// These short-circuit at the first opposite entry, so a mixed run reaches
+		// its stable partition without paying a complete counting pass first.
+		if (std::all_of(order.begin(), order.end(), casts)) {
+			return order.size();
+		}
+		if (std::none_of(order.begin(), order.end(), casts)) {
+			return 0;
+		}
 
 		return static_cast<size_t>(
 			std::distance(order.begin(), std::stable_partition(order.begin(), order.end(), casts))

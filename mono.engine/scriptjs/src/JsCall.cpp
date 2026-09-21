@@ -183,6 +183,14 @@ namespace engine::script {
 				return JsOf(Context).Role;
 			}
 
+			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
+				return JsOf(Context).DataCapture;
+			}
+
+			const std::shared_ptr<DataLifecycleBridge> &DataLifecycle() const override {
+				return JsOf(Context).DataLifecycle;
+			}
+
 			TweenTable &Tweens() override {
 				return JsOf(Context).Tweens;
 			}

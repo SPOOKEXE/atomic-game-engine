@@ -7,11 +7,9 @@
 // in one takes that process rather than the server. The driver keeps the buses,
 // the directory and the recording; the host keeps worlds and ticks them.
 //
-// **The protocol is small on purpose.** Four kinds of frame, none of them a
-// request that expects an answer, because a driver that blocked waiting for a
-// host would have handed that host the power to stop the universe. Everything
-// here is fire-and-forget in exactly the way `Postbox` already is - a world
-// posting to a bus does not wait either, and for the same reason.
+// Bus traffic and presentation are asynchronous. Tick exchange carries explicit
+// phase commands and replies so copied contact data arrives before integration.
+// The link never blocks; the driver owns the phase deadline and cancellation.
 //
 //     driver                                   host
 //       Traffic  ───────── envelopes ────────▶   applied at the host's barrier
@@ -35,6 +33,8 @@
 #include <engine/core/Name.hpp>
 #include <engine/parallel/Channel.hpp>
 #include <engine/world/Bus.hpp>
+#include <engine/world/PresentationBus.hpp>
+#include <engine/world/TickExchangeHost.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -43,8 +43,37 @@
 
 namespace engine::world {
 
+	// Exact child-visible to parent-visible endpoint tuples, supplied by host control.
+	// arch-crossing
+	struct PresentationEndpointBinding {
+		// Receipt used by the child-side endpoint.
+		PresentationAddress Local;
+		// Receipt published to the parent-side directory.
+		PresentationAddress Published;
+		// Compares both endpoint receipts in the translation pair.
+		bool operator==(const PresentationEndpointBinding &) const = default;
+	};
+	// Newer empty arrays withdraw bindings. Return aliases never grant producer exports.
+	// The two arrays together contain at most MAX_PRESENTATION_DIRECTORY entries.
+	// arch-crossing
+	struct PresentationBindings {
+		// Child session that owns this complete binding set.
+		uint64_t Session = 0;
+		// Monotonic revision within Session.
+		uint64_t Revision = 0;
+		// Child producer receipts translated into parent-visible receipts.
+		std::vector<PresentationEndpointBinding> Exports;
+		// Parent reply receipts translated back to child-visible receipts.
+		std::vector<PresentationEndpointBinding> Returns;
+		// Compares the complete binding snapshot.
+		bool operator==(const PresentationBindings &) const = default;
+	};
+	// Encodes a complete binding snapshot for trusted host control.
+	bool WritePresentationBindings(core::ByteWriter &writer, const PresentationBindings &bindings);
+	// Decodes a complete binding snapshot without partial output on failure.
+	bool ReadPresentationBindings(core::ByteReader &reader, PresentationBindings &bindings);
+
 	// What a frame is.
-	//
 	// @since v0.2
 	enum class HostSignal : uint8_t {
 		// Host to driver: the worlds are built and the first tick is due.
@@ -82,6 +111,17 @@ namespace engine::world {
 		// stopped simulating, and something outside the host has to be able to
 		// say so.
 		Faulted,
+
+		// Presentation-only owned bytes, pumped outside simulation mailboxes.
+		Presentation,
+		PresentationDirectory,
+		PresentationRoutes,
+
+		// Driver to host and host to driver, respectively. Separate codecs reject
+		// commands presented as results, even when their frame identifiers match.
+		TickExchangeCommand,
+		TickExchangeResult,
+		PresentationBindings,
 	};
 
 	// Returns a stable, human-readable name for a signal.
@@ -159,6 +199,17 @@ namespace engine::world {
 
 		// What a `Deliveries` frame carries.
 		std::vector<HostDelivery> Deliveries;
+
+		// Exactly one message when Signal is Presentation; otherwise unused.
+		PresentationMessage Presentation;
+		// Complete endpoint directory carried by PresentationDirectory.
+		PresentationDirectory Directory;
+		// Child-to-parent endpoint receipt translations.
+		PresentationBindings Bindings;
+		// Driver phase command carried by TickExchangeCommand.
+		TickExchangeCommand ExchangeCommand;
+		// Host phase result carried by TickExchangeResult.
+		TickExchangeResult ExchangeResult;
 	};
 
 	// Writes a frame.
@@ -227,6 +278,16 @@ namespace engine::world {
 		// @return `false` when there was something to send and it could not be.
 		bool SendTraffic(std::span<const Envelope> traffic);
 
+		// One bounded message per frame, avoiding aggregate image-size overflow.
+		bool SendPresentation(const PresentationMessage &message);
+		// Publish changed local endpoints before image traffic. A full queue leaves
+		// the version unsent so the next pump retries the current directory.
+		bool PublishPresentationDirectory(const PresentationDirectory &directory);
+		// Publishes driver-selected remote routes to the child host.
+		bool PublishPresentationRoutes(const PresentationDirectory &directory);
+		// Publishes child and parent endpoint translations for this session.
+		bool PublishPresentationBindings(const PresentationBindings &bindings);
+
 		// Sends what the buses answered, for a host's worlds.
 		//
 		// Empty sends nothing, for the same reason `SendTraffic` does.
@@ -235,11 +296,11 @@ namespace engine::world {
 		// @return `false` when there was something to send and it could not be.
 		bool SendDeliveries(std::span<const HostDelivery> deliveries);
 
-		// Takes every frame waiting.
+		// Takes a bounded batch of waiting frames.
 		//
-		// Drained in full rather than one per call, because the caller is a
-		// barrier that runs once a tick and a backlog left behind is a backlog
-		// that grows.
+		// At most 64 transport frames, stopping before another read once 32 MiB
+		// have been consumed. Remaining frames stay queued for the next pump;
+		// a continuously publishing peer cannot monopolise the host thread.
 		//
 		// @param frames Appended to. Not cleared, so a caller may accumulate.
 		// @return The number of frames taken.
@@ -267,6 +328,7 @@ namespace engine::world {
 		}
 
 	  private:
+		bool PublishDirectory(const PresentationDirectory &directory, bool routes);
 		std::unique_ptr<parallel::Channel> Channel_;
 		core::Name Name_;
 
@@ -275,5 +337,11 @@ namespace engine::world {
 
 		uint64_t Dropped_ = 0;
 		uint64_t Malformed_ = 0;
+		uint64_t PublishedDirectorySession = 0;
+		uint64_t PublishedDirectoryRevision = 0;
+		uint64_t PublishedRoutesSession = 0;
+		uint64_t PublishedRoutesRevision = 0;
+		uint64_t PublishedBindingsSession = 0;
+		uint64_t PublishedBindingsRevision = 0;
 	};
 }

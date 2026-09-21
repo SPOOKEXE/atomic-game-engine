@@ -6,9 +6,9 @@
 
 namespace engine::render {
 	namespace {
-		// The catalogue currently has 33 built-in handlers. Three spare slots keep
+		// The catalogue currently has 38 built-in handlers. Two spare slots keep
 		// the common custom-node case in the same allocation.
-		constexpr size_t BUILT_IN_NODE_CAPACITY = 36;
+		constexpr size_t BUILT_IN_NODE_CAPACITY = 40;
 	}
 
 	NodeTable::NodeTable() {
@@ -88,7 +88,9 @@ namespace engine::render {
 		};
 
 		if (!profile) {
-			return submit();
+			const bool accepted = submit();
+			if (!accepted && !RejectedNode.IsValid()) RejectedNode = context.Name;
+			return accepted;
 		}
 
 		// **One span per node, here rather than in each handler.** The handlers
@@ -104,6 +106,8 @@ namespace engine::render {
 		// would answer with one bar for both. `core::Name` interns for the life
 		// of the process, so the stable form is right and nothing is copied.
 		ENGINE_PROFILE_DYNAMIC_STABLE("graph node", context.Name.Text(), core::ProfileCategory::Render);
-		return submit();
+		const bool accepted = submit();
+		if (!accepted && !RejectedNode.IsValid()) RejectedNode = context.Name;
+		return accepted;
 	}
 }

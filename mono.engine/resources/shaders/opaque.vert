@@ -37,6 +37,10 @@ layout(location = 5) out vec3 outWorldPosition;
 layout(location = 6) flat out uint outAppearance;
 layout(location = 7) flat out vec3 outSurfaceColour;
 layout(location = 8) flat out vec4 outEmission;
+layout(location = 9) flat out uvec2 outFeaturePolicy;
+layout(location = 10) flat out uint outObjectLabel;
+layout(location = 11) flat out uint outSemanticLabel;
+layout(location = 12) flat out uint outPartLabel;
 
 void main() {
 	// **No model matrix is built.** The instance row carries the rotation, the
@@ -57,6 +61,10 @@ void main() {
 	outAppearance = InstanceAppearance(instance);
 	outSurfaceColour = InstanceSurfaceColour(instance);
 	outEmission = InstanceEmission(instance);
+	outFeaturePolicy = uvec2(InstanceFeatureEnable(instance), InstanceFeatureDisable(instance));
+	outObjectLabel = InstanceObjectLabel(instance);
+	outSemanticLabel = InstanceSemanticLabel(instance);
+	outPartLabel = InstancePartLabel(instance);
 
 	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
 	outWorldPosition = world.xyz;

@@ -494,3 +494,297 @@ TEST_CASE("a host that has never reported a cost reports zero, not a guess", "[w
 
 	REQUIRE(pair.Driver->StatusOf(Name("host.one")).Milliseconds == 0.0f);
 }
+
+TEST_CASE("host phase frames preserve codec bounds and direction", "[world][host-exchange]") {
+	for (bool command : {true, false}) {
+		HostFrame frame;
+		frame.Signal = command ? HostSignal::TickExchangeCommand : HostSignal::TickExchangeResult;
+		frame.ExchangeCommand.Frame = 3;
+		frame.ExchangeCommand.FrameSeconds = 1.0f / 60;
+		frame.ExchangeResult.Frame = 3;
+		frame.ExchangeResult.Success = true;
+		frame.ExchangeResult.Rounds = 1;
+		ByteWriter writer;
+		WriteHostFrame(writer, frame);
+		REQUIRE_FALSE(writer.Empty());
+		ByteReader reader(writer.Bytes());
+		HostFrame read;
+		REQUIRE(ReadHostFrame(reader, read));
+		CHECK(read.Signal == frame.Signal);
+		CHECK((command ? read.ExchangeCommand.Frame : read.ExchangeResult.Frame) == 3);
+		for (size_t count = 0; count < writer.Size(); count++) {
+			ByteReader truncated(writer.Bytes().first(count));
+			HostFrame sentinel;
+			sentinel.Tick = 97;
+			CHECK_FALSE(ReadHostFrame(truncated, sentinel));
+			CHECK(sentinel.Tick == 97);
+		}
+		std::vector<std::byte> confused(writer.Bytes().begin(), writer.Bytes().end());
+		confused[4] = static_cast<std::byte>(
+			command ? HostSignal::TickExchangeResult : HostSignal::TickExchangeCommand
+		);
+		ByteReader wrongDirection(confused);
+		CHECK_FALSE(ReadHostFrame(wrongDirection, read));
+		const auto size = writer.Size();
+		frame.ExchangeCommand.Frame = frame.ExchangeResult.Frame = 0;
+		WriteHostFrame(writer, frame);
+		CHECK(writer.Size() == size);
+	}
+}
+
+TEST_CASE(
+	"supervisor phase replies belong to the pending command and connected host", "[world][host-exchange]"
+) {
+	using namespace engine::world;
+	Supervised pair;
+	const Name host("host.one");
+	TickExchangeCommand command;
+	command.Operation = TickExchangeOperation::Collect;
+	command.Frame = 7;
+	REQUIRE_FALSE(pair.Driver->SendTickExchange(Name("missing"), command));
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	REQUIRE_FALSE(pair.Driver->SendTickExchange(host, command));
+	std::vector<HostFrame> received;
+	REQUIRE(pair.Host->Receive(received) == 1);
+	CHECK(received.front().ExchangeCommand.Frame == 7);
+	CHECK(received.front().Signal == HostSignal::TickExchangeCommand);
+	HostFrame response;
+	response.Signal = HostSignal::TickExchangeResult;
+	response.Host = Name("somebody.else");
+	auto &result = response.ExchangeResult;
+	result.Operation = command.Operation;
+	result.Frame = command.Frame;
+	result.Success = true;
+	result.Requests.push_back({{"not.owned", "elsewhere", "contacts", 1, 2, 3}, {}});
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE_FALSE(pair.Driver->TakeTickExchange(host));
+	result.Requests.front().Stamp.SourceWorld = "lobby";
+	result.Round = 1;
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE_FALSE(pair.Driver->TakeTickExchange(host));
+	result.Round = 0;
+	REQUIRE(pair.Host->Send(response));
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE_FALSE(pair.Driver->TakeTickExchange(Name("somebody.else")));
+	const auto accepted = pair.Driver->TakeTickExchange(host);
+	REQUIRE(accepted);
+	REQUIRE(accepted->Requests.size() == 1);
+	CHECK(accepted->Requests.front().Stamp.SourceWorld == "lobby");
+	CHECK(pair.Driver->TickExchangeDropped() == 3);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+
+	command.Operation = TickExchangeOperation::Serve;
+	command.Requests.push_back({{"elsewhere", "not.owned", "contacts", 1, 2, 3}, {}});
+	REQUIRE_FALSE(pair.Driver->SendTickExchange(host, command));
+	command.Requests.front().Stamp.DestinationWorld = "arena";
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	result.Operation = command.Operation;
+	result.Requests.clear();
+	result.Replies.push_back({command.Requests.front().Stamp, 2, 3, TickExchangeStatus::Complete, {}});
+	result.Replies.front().Stamp.Sequence++;
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	result.Replies.front().Stamp = command.Requests.front().Stamp;
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE(pair.Driver->TakeTickExchange(host));
+	CHECK(pair.Driver->TickExchangeDropped() == 4);
+	command.Operation = TickExchangeOperation::Apply;
+	command.Requests.clear();
+	command.Replies = result.Replies;
+	CHECK_FALSE(pair.Driver->SendTickExchange(host, command));
+}
+
+TEST_CASE(
+	"phase cancellation supersedes lost replies and link replacement discards old state",
+	"[world][host-exchange]"
+) {
+	using namespace engine::world;
+	Supervised pair;
+	const Name host("host.one");
+	TickExchangeCommand command;
+	command.Frame = 11;
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	HostFrame old;
+	old.Signal = HostSignal::TickExchangeResult;
+	old.ExchangeResult.Frame = 11;
+	old.ExchangeResult.Success = true;
+	command.Operation = TickExchangeOperation::Cancel;
+	command.Frame = 12;
+	CHECK_FALSE(pair.Driver->SendTickExchange(host, command));
+	command.Frame = 11;
+	command.Round = 9;
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	REQUIRE(pair.Host->Send(old));
+	pair.Driver->Pump(1.0);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	HostFrame cancelled;
+	cancelled.Signal = HostSignal::TickExchangeResult;
+	cancelled.ExchangeResult.Operation = TickExchangeOperation::Cancel;
+	cancelled.ExchangeResult.Frame = 11;
+	cancelled.ExchangeResult.Round = 9;
+	cancelled.ExchangeResult.Success = true;
+	REQUIRE(pair.Host->Send(cancelled));
+	pair.Driver->Pump(1.0);
+	auto [driverEnd, hostEnd] = MakeLocalChannel();
+	REQUIRE(pair.Driver->Attach(host, std::move(driverEnd)));
+	pair.Host = std::make_unique<HostLink>(std::move(hostEnd), host);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	REQUIRE(pair.Host->Send(cancelled));
+	pair.Driver->Pump(1.0);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	command = {};
+	command.Frame = 1;
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	old.ExchangeResult.Frame = 1;
+	REQUIRE(pair.Host->Send(old));
+	pair.Driver->Pump(1.0);
+	REQUIRE(pair.Driver->TakeTickExchange(host));
+	CHECK(pair.Driver->TickExchangeDropped() == 2);
+}
+
+TEST_CASE(
+	"presentation bindings preserve exact tuples and reject malformed snapshots transactionally",
+	"[world][hostlink]"
+) {
+	using namespace engine::world;
+	const PresentationEndpointBinding exported{{"far", "images", 200, 2}, {"far", "images", 100, 8}};
+	const PresentationEndpointBinding returned{
+		{"$presentation-return.0", "reply", 100, 9}, {"far", "reply", 100, 9}
+	};
+	const PresentationBindings expected{100, 3, {exported}, {returned}};
+	ByteWriter writer;
+	REQUIRE(WritePresentationBindings(writer, expected));
+	PresentationBindings decoded;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(ReadPresentationBindings(reader, decoded));
+	CHECK(decoded == expected);
+	CHECK(reader.Remaining() == 0);
+	for (size_t length = 0; length < writer.Size(); ++length) {
+		ByteReader truncated(writer.Bytes().first(length));
+		CHECK_FALSE(ReadPresentationBindings(truncated, decoded));
+		CHECK(decoded == expected);
+	}
+	SECTION("duplicate local tuple") {
+		auto invalid = expected;
+		auto duplicate = exported;
+		duplicate.Published.Generation++;
+		invalid.Exports.push_back(duplicate);
+		ByteWriter refused;
+		CHECK_FALSE(WritePresentationBindings(refused, invalid));
+		CHECK(refused.Size() == 0);
+	}
+	SECTION("duplicate public tuple") {
+		auto invalid = expected;
+		auto duplicate = exported;
+		duplicate.Local.Generation++;
+		invalid.Exports.push_back(duplicate);
+		ByteWriter refused;
+		CHECK_FALSE(WritePresentationBindings(refused, invalid));
+	}
+	SECTION("aggregate count rejected before endpoints") {
+		ByteWriter invalid;
+		invalid.WriteUInt32(0x31424250u);
+		invalid.WriteUInt64(100);
+		invalid.WriteUInt64(4);
+		invalid.WriteUInt32(MAX_PRESENTATION_DIRECTORY);
+		invalid.WriteUInt32(1);
+		ByteReader input(invalid.Bytes());
+		CHECK_FALSE(ReadPresentationBindings(input, decoded));
+		CHECK(decoded == expected);
+	}
+	SECTION("invalid endpoint") {
+		auto invalid = expected;
+		invalid.Returns[0].Published.Generation = 0;
+		ByteWriter refused;
+		CHECK_FALSE(WritePresentationBindings(refused, invalid));
+	}
+	HostFrame frame;
+	frame.Signal = HostSignal::PresentationBindings;
+	frame.Bindings = expected;
+	ByteWriter framed;
+	WriteHostFrame(framed, frame);
+	HostFrame received;
+	ByteReader framedInput(framed.Bytes());
+	REQUIRE(ReadHostFrame(framedInput, received));
+	CHECK(received.Signal == HostSignal::PresentationBindings);
+	CHECK(received.Bindings == expected);
+}
+
+TEST_CASE(
+	"presentation bindings retry the latest revision and deliver empty withdrawals", "[world][hostlink]"
+) {
+	using namespace engine::world;
+	auto [first, second] = MakeLocalChannel({1024, 1024});
+	HostLink sender(std::move(first)), receiver(std::move(second));
+	PresentationBindings bindings{100, 1, {{{"far", "images", 200, 2}, {"far", "images", 100, 8}}}, {}};
+	while (sender.Heartbeat(1)) {}
+	CHECK_FALSE(sender.PublishPresentationBindings(bindings));
+	std::vector<HostFrame> frames;
+	receiver.Receive(frames);
+	bindings.Revision = 2;
+	bindings.Exports[0].Published.Generation++;
+	REQUIRE(sender.PublishPresentationBindings(bindings));
+	REQUIRE(sender.PublishPresentationBindings(bindings));
+	frames.clear();
+	receiver.Receive(frames);
+	REQUIRE(frames.size() == 1);
+	CHECK(frames[0].Bindings == bindings);
+	bindings.Revision = 1;
+	CHECK_FALSE(sender.PublishPresentationBindings(bindings));
+	bindings.Revision = 3;
+	bindings.Exports.clear();
+	REQUIRE(sender.PublishPresentationBindings(bindings));
+	frames.clear();
+	receiver.Receive(frames);
+	REQUIRE(frames.size() == 1);
+	CHECK(frames[0].Bindings == bindings);
+}
+
+TEST_CASE(
+	"presentation bindings refuse cross-kind local ambiguity while preserving identity mappings",
+	"[world][hostlink]"
+) {
+	using namespace engine::world;
+	const PresentationAddress local{"far", "images", 200, 2};
+	const PresentationAddress publicExport{"far", "images", 100, 8};
+	const PresentationAddress publicReturn{"near", "images", 100, 9};
+	const PresentationBindings ambiguous{100, 1, {{local, publicExport}}, {{local, publicReturn}}};
+	ByteWriter refused;
+	refused.WriteUInt8(42);
+	CHECK_FALSE(WritePresentationBindings(refused, ambiguous));
+	REQUIRE(refused.Size() == 1);
+	CHECK(refused.Bytes()[0] == std::byte{42});
+
+	// Build the conflicting wire directly, independently of the rejecting encoder.
+	ByteWriter wire;
+	wire.WriteUInt32(0x31424250u);
+	wire.WriteUInt64(100);
+	wire.WriteUInt64(1);
+	wire.WriteUInt32(1);
+	wire.WriteUInt32(1);
+	for (const auto &endpoint : {local, publicExport, local, publicReturn}) {
+		wire.WriteString(endpoint.World);
+		wire.WriteString(endpoint.Channel);
+		wire.WriteUInt64(endpoint.Session);
+		wire.WriteUInt64(endpoint.Generation);
+	}
+	const PresentationBindings identity{100, 2, {{local, local}}, {{publicReturn, publicReturn}}};
+	auto decoded = identity;
+	ByteReader reader(wire.Bytes());
+	CHECK_FALSE(ReadPresentationBindings(reader, decoded));
+	CHECK(reader.Failed());
+	CHECK(decoded == identity);
+
+	ByteWriter valid;
+	REQUIRE(WritePresentationBindings(valid, identity));
+	ByteReader validReader(valid.Bytes());
+	decoded = {};
+	REQUIRE(ReadPresentationBindings(validReader, decoded));
+	CHECK(decoded == identity);
+	CHECK(validReader.Remaining() == 0);
+}

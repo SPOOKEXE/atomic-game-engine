@@ -14,6 +14,8 @@
 // own draws look like once it is, and those were written out twice side by side
 // before v0.15, so every bug in one was available to the other.
 
+#include "GraphHistory.hpp"
+#include "SsaoSettings.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -22,24 +24,23 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <optional>
 #include <vector>
 
 namespace engine::render {
 
-	namespace {
-		std::optional<InstanceUploadRange> BulkRange(std::span<const InstanceUploadRange> ranges) {
-			if (ranges.empty()) {
-				return std::nullopt;
-			}
-			uint32_t first = ranges.front().First;
-			uint32_t last = first + ranges.front().Count;
-			for (const InstanceUploadRange &range : ranges) {
-				first = std::min(first, range.First);
-				last = std::max(last, range.First + range.Count);
-			}
-			return InstanceUploadRange{first, last - first};
+	bool ViewRecording::AdmitSurfaceCapture(uint32_t width, uint32_t height, uint32_t depth) {
+		if (Request.Source == nullptr || !Request.Source->SurfaceBudget) {
+			return true;
 		}
+		const auto &budget = *Request.Source->SurfaceBudget;
+		const uint64_t pixels = uint64_t(width) * height;
+		if (depth > budget.Depth || SurfacePixelsUsed > budget.Pixels ||
+			pixels > budget.Pixels - SurfacePixelsUsed) {
+			Result.SurfaceBudgetExceeded = true;
+			return false;
+		}
+		SurfacePixelsUsed += pixels;
+		return true;
 	}
 
 	const graph::Node *ViewRecording::GraphNode(core::Name kind) const {
@@ -51,6 +52,9 @@ namespace engine::render {
 			if (node != nullptr && node->Enabled && node->Kind == kind) {
 				return node;
 			}
+		}
+		if (kind == core::Name("mirror-capture") || kind == core::Name("portal-capture")) {
+			return GraphNode(core::Name("surface-capture"));
 		}
 		return nullptr;
 	}
@@ -79,9 +83,21 @@ namespace engine::render {
 		if (State->BatchActive) {
 			// The batch owner drops any recorded downloads with the frame.
 			State->BatchFailed = true;
+			State->VisibilityWorking.Invalidate();
+			State->VisibilityCompleted = {};
 		} else {
-			State->CompleteResidentUploads(SDL_SubmitGPUCommandBuffer(command));
+			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
+			if (submitted) {
+				State->CommitPendingGraphHistoryWrites(command);
+				State->ClearSubmittedGraphHistoryWrites();
+			} else {
+				State->DiscardPendingGraphHistoryWrites(command);
+				State->ClearSubmittedGraphHistoryWrites();
+			}
+			State->CompleteResidentUploads(submitted);
 			State->DropDownloads();
+			State->VisibilityWorking.Invalidate();
+			State->VisibilityCompleted = {};
 		}
 	}
 
@@ -160,7 +176,7 @@ namespace engine::render {
 		if (scheduled != nullptr &&
 			(scheduled->Queue == graph::ExecutionQueue::Graphics ||
 			 scheduled->Queue == graph::ExecutionQueue::Transfer) &&
-			node->Kind != core::Name("upload-instances")) {
+			node->Kind != core::Name("mesh-residency") && node->Kind != core::Name("delta-upload")) {
 			mainGpuWorkRecorded = true;
 		}
 		if (std::find(result.Nodes.begin(), result.Nodes.end(), name) == result.Nodes.end()) {
@@ -199,6 +215,98 @@ namespace engine::render {
 		return true;
 	}
 
+	bool ViewRecording::RecordWorldResidency() {
+		Impl *const State = this->State;
+		FrameResult &result = Result;
+		if (State == nullptr || Command == nullptr) return false;
+
+		Impl::SceneSlot &target = State->SlotAt(State->ActiveSlot);
+		const bool uploadInstances =
+			HaveInstances && (State->ActiveInstanceWorld == nullptr ||
+							  State->ActiveInstanceWorld->Instances.DirtyCount() > 0 ||
+							  target.ResidentIndices.DirtyCount() > 0);
+		const bool uploadSkinOffsets = HaveInstances && target.SkinOffsetsDirty;
+		const bool uploadJointWords = HaveInstances && target.JointWordsDirty;
+		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords) return true;
+
+		ENGINE_PROFILE_CAT("record world residency", core::ProfileCategory::Render);
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Command);
+		if (copy == nullptr) {
+			ENGINE_ERROR("upload world residency: SDL_BeginGPUCopyPass: {}", SDL_GetError());
+			return false;
+		}
+
+		uint64_t uploadedBytes = 0;
+		if (uploadInstances) {
+			Impl::InstanceWorld *const world = State->ActiveInstanceWorld;
+			if (world == nullptr) {
+				SDL_EndGPUCopyPass(copy);
+				return false;
+			}
+			for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
+				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(GpuInstance));
+				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
+				const SDL_GPUBufferRegion destination{
+					State->InstanceBuffer,
+					offset,
+					range.Count * static_cast<uint32_t>(sizeof(GpuInstance)),
+				};
+				// Queue order protects unchanged resident rows. Cycling here would
+				// select fresh storage and discard every row this partial copy omits.
+				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+				uploadedBytes += destination.size;
+			}
+
+			for (const InstanceUploadRange &range : target.ResidentIndices.DirtyRanges()) {
+				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(uint32_t));
+				const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, offset};
+				const SDL_GPUBufferRegion destination{
+					State->InstanceIndexBuffer,
+					offset,
+					range.Count * static_cast<uint32_t>(sizeof(uint32_t)),
+				};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+				uploadedBytes += destination.size;
+			}
+		}
+
+		if (uploadSkinOffsets) {
+			const SDL_GPUTransferBufferLocation source{State->SkinOffsetTransfer, 0};
+			const SDL_GPUBufferRegion destination{
+				State->SkinOffsetBuffer,
+				0,
+				static_cast<uint32_t>(target.SkinOffsets.size() * sizeof(uint32_t)),
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+			uploadedBytes += destination.size;
+		}
+
+		if (uploadJointWords) {
+			const SDL_GPUTransferBufferLocation source{State->JointTransfer, 0};
+			const SDL_GPUBufferRegion destination{
+				State->JointBuffer,
+				0,
+				static_cast<uint32_t>(target.JointWords.size() * sizeof(uint32_t)),
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+			uploadedBytes += destination.size;
+		}
+
+		SDL_EndGPUCopyPass(copy);
+		if (uploadInstances && State->ActiveInstanceWorld != nullptr &&
+			State->ActiveInstanceWorld->Instances.DirtyCount() > 0) {
+			State->TrackInstanceUpload(*State->ActiveInstanceWorld);
+			State->ActiveInstanceWorld->Instances.AcknowledgeDirty();
+		}
+		if (uploadInstances && target.ResidentIndices.DirtyCount() > 0) {
+			target.ResidentIndices.Acknowledge();
+		}
+		if (uploadSkinOffsets) target.SkinOffsetsDirty = false;
+		if (uploadJointWords) target.JointWordsDirty = false;
+		result.UploadedBytes += uploadedBytes;
+		return true;
+	}
+
 	bool ViewRecording::RecordUploads() {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
@@ -212,17 +320,11 @@ namespace engine::render {
 		if (uploadsRecorded) {
 			return true;
 		}
+		if (!RecordWorldResidency()) return false;
 
-		Impl::SceneSlot &target = State->SlotAt(State->ActiveSlot);
-		const bool uploadInstances =
-			haveInstances && (State->ActiveInstanceWorld == nullptr ||
-							  State->ActiveInstanceWorld->Instances.DirtyCount() > 0 ||
-							  target.ResidentIndices.DirtyCount() > 0);
-		const bool uploadSkinOffsets = haveInstances && target.SkinOffsetsDirty;
-		const bool uploadJointWords = haveInstances && target.JointWordsDirty;
 		const bool uploadOcclusion = haveInstances && State->OcclusionFrame.Active;
-		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords && !uploadOcclusion &&
-			!uploadOverlay && particleCount == 0 && ribbonCount == 0) {
+		const bool uploadLod = haveInstances && !State->LodFrame.Selections.empty();
+		if (!uploadOcclusion && !uploadLod && !uploadOverlay && particleCount == 0 && ribbonCount == 0) {
 			uploadsRecorded = true;
 			return true;
 		}
@@ -265,59 +367,45 @@ namespace engine::render {
 		}
 
 		uint64_t uploadedBytes = 0;
-		if (uploadInstances) {
-			Impl::InstanceWorld *const world = State->ActiveInstanceWorld;
-			if (world == nullptr) {
-				SDL_EndGPUCopyPass(copy);
-				return false;
-			}
-			if (const auto range = BulkRange(world->Instances.DirtyRanges())) {
-				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(GpuInstance));
-				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
-				const SDL_GPUBufferRegion destination{
-					State->InstanceBuffer,
-					offset,
-					range->Count * static_cast<uint32_t>(sizeof(GpuInstance)),
-				};
-				// Queue order protects unchanged resident rows. Cycling here would
-				// select fresh storage and discard every row this partial copy omits.
-				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
-				uploadedBytes += destination.size;
-			}
-
-			if (const auto range = BulkRange(target.ResidentIndices.DirtyRanges())) {
-				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(uint32_t));
-				const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, offset};
-				const SDL_GPUBufferRegion destination{
-					State->InstanceIndexBuffer,
-					offset,
-					range->Count * static_cast<uint32_t>(sizeof(uint32_t)),
-				};
-				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
-				uploadedBytes += destination.size;
-			}
-		}
-
-		if (uploadSkinOffsets) {
-			const SDL_GPUTransferBufferLocation skinSource{State->SkinOffsetTransfer, 0};
-			const SDL_GPUBufferRegion skinDestination{
-				State->SkinOffsetBuffer,
-				0,
-				static_cast<uint32_t>(target.SkinOffsets.size() * sizeof(uint32_t)),
+		if (uploadLod) {
+			const LodPlan &lod = State->LodFrame;
+			const LodTransferLayout layout = TransferLayoutOf(lod);
+			const auto stage = [&](SDL_GPUBuffer *buffer, uint32_t sourceOffset, uint32_t bytes) {
+				const SDL_GPUTransferBufferLocation source{State->Lod.Transfer, sourceOffset};
+				const SDL_GPUBufferRegion destination{buffer, 0, bytes};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				uploadedBytes += bytes;
 			};
-			SDL_UploadToGPUBuffer(copy, &skinSource, &skinDestination, true);
-			uploadedBytes += skinDestination.size;
-		}
-
-		if (uploadJointWords) {
-			const SDL_GPUTransferBufferLocation jointSource{State->JointTransfer, 0};
-			const SDL_GPUBufferRegion jointDestination{
-				State->JointBuffer,
-				0,
-				static_cast<uint32_t>(target.JointWords.size() * sizeof(uint32_t)),
-			};
-			SDL_UploadToGPUBuffer(copy, &jointSource, &jointDestination, true);
-			uploadedBytes += jointDestination.size;
+			stage(
+				State->Lod.Selections,
+				layout.Selections,
+				static_cast<uint32_t>(lod.Selections.size() * sizeof(GpuLodSelection))
+			);
+			stage(
+				State->Lod.Clusters,
+				layout.Clusters,
+				static_cast<uint32_t>(lod.Clusters.size() * sizeof(GpuLodCluster))
+			);
+			stage(
+				State->Lod.Instances,
+				layout.Instances,
+				static_cast<uint32_t>(lod.Instances.size() * sizeof(GpuInstance))
+			);
+			stage(
+				State->Lod.Indices,
+				layout.Indices,
+				static_cast<uint32_t>(lod.Indices.size() * sizeof(uint32_t))
+			);
+			stage(
+				State->Lod.SkinOffsets,
+				layout.SkinOffsets,
+				static_cast<uint32_t>(lod.SkinOffsets.size() * sizeof(uint32_t))
+			);
+			stage(
+				State->Lod.Arguments,
+				layout.Arguments,
+				static_cast<uint32_t>(lod.Commands.size() * sizeof(SDL_GPUIndexedIndirectDrawCommand))
+			);
 		}
 
 		// The occlusion plan's five buffers, in the order its staging wrote
@@ -387,21 +475,6 @@ namespace engine::render {
 		}
 
 		SDL_EndGPUCopyPass(copy);
-		if (uploadInstances && State->ActiveInstanceWorld != nullptr &&
-			State->ActiveInstanceWorld->Instances.DirtyCount() > 0) {
-			State->TrackInstanceUpload(*State->ActiveInstanceWorld);
-			State->ActiveInstanceWorld->Instances.AcknowledgeDirty();
-		}
-		if (uploadInstances && target.ResidentIndices.DirtyCount() > 0) {
-			target.ResidentIndices.Acknowledge();
-		}
-		if (uploadSkinOffsets) {
-			target.SkinOffsetsDirty = false;
-		}
-		if (uploadJointWords) {
-			target.JointWordsDirty = false;
-		}
-
 		// The copy is in the frame's main command buffer, before every draw that
 		// reads it. This keeps a render batch one submission and makes the graph's
 		// GPU timestamps measure the transfer rather than two adjacent marks in a
@@ -414,6 +487,15 @@ namespace engine::render {
 		result.UploadedBytes += uploadedBytes;
 		uploadsRecorded = true;
 		return true;
+	}
+
+	bool ViewRecording::RecordMeshResidency() {
+		if (State == nullptr || Command == nullptr) return false;
+		if (!State->MeshResidencyRecorded) {
+			if (!State->Meshes.Record(Command)) return false;
+			State->MeshResidencyRecorded = true;
+		}
+		return RecordWorldResidency();
 	}
 
 	LightingUniforms ViewRecording::LightingFrom(
@@ -463,6 +545,12 @@ namespace engine::render {
 		};
 		lighting.Fog = glm::vec4{worldLighting.FogStart, worldLighting.FogEnd, 0.0f, 0.0f};
 		lighting.Eye = glm::vec4{eye.X, eye.Y, eye.Z, 0.0f};
+		lighting.RenderFeatures = glm::uvec4{
+			SupportedRenderFeatures(State->Caps),
+			scene::ApplyRenderFeaturePolicy(scene::ALL_RENDER_FEATURES, worldLighting.RenderFeatures),
+			DrawCamera.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES,
+			DrawCamera.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES,
+		};
 		return lighting;
 	}
 
@@ -486,7 +574,8 @@ namespace engine::render {
 		bool cycle,
 		const SDL_GPUViewport *viewport,
 		const LightUniforms &passLights,
-		const SDL_FColor *clearColour
+		const SDL_FColor *clearColour,
+		WorldColourTarget target
 	) {
 		Impl *const State = this->State;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -540,7 +629,11 @@ namespace engine::render {
 		// there are none, because a stale block from a previous frame would
 		// shadow through a hole that is no longer there.
 		SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
-		State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+		State->BindPipeline(
+			pass,
+			target == WorldColourTarget::Hdr ? State->HdrOpaquePipeline : State->OpaquePipeline,
+			target == WorldColourTarget::Hdr ? Impl::PipelineFamily::HdrOpaque : Impl::PipelineFamily::Opaque
+		);
 
 		State->BindInstanceBuffers(pass);
 
@@ -551,7 +644,7 @@ namespace engine::render {
 	}
 
 	void ViewRecording::DrawWorldInto(
-		SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter
+		SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter, bool omitCharacters
 	) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
@@ -571,7 +664,9 @@ namespace engine::render {
 				nullptr,
 				State->SurfaceSampler,
 				filter,
-				result.Triangles
+				result.Triangles,
+				nullptr,
+				omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
 			);
 		}
 	}
@@ -581,7 +676,9 @@ namespace engine::render {
 		const FrameUniforms &frame,
 		const LightingUniforms &plainLighting,
 		uint32_t filter,
-		bool panesFollow
+		bool panesFollow,
+		WorldColourTarget target,
+		bool omitCharacters
 	) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
@@ -592,7 +689,12 @@ namespace engine::render {
 
 		const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
 		if (blendedPlain > 0 || (panesFollow && plan.TransparentSurfaces > 0)) {
-			State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
+			State->BindPipeline(
+				pass,
+				target == WorldColourTarget::Hdr ? State->HdrTransparentPipeline : State->TransparentPipeline,
+				target == WorldColourTarget::Hdr ? Impl::PipelineFamily::HdrTransparent
+												 : Impl::PipelineFamily::Transparent
+			);
 		}
 
 		if (blendedPlain == 0) {
@@ -613,7 +715,9 @@ namespace engine::render {
 			nullptr,
 			State->SurfaceSampler,
 			filter,
-			result.Triangles
+			result.Triangles,
+			nullptr,
+			omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
 		);
 	}
 
@@ -628,7 +732,8 @@ namespace engine::render {
 		const LightUniforms *passLights,
 		SDL_FColor clear,
 		const void *rawUniforms,
-		size_t rawUniformBytes
+		size_t rawUniformBytes,
+		const BeamUniforms *passBeams
 	) {
 		FrameResult &result = Result;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -652,6 +757,9 @@ namespace engine::render {
 		}
 		if (passLights != nullptr) {
 			SDL_PushGPUFragmentUniformData(command, 1, passLights, sizeof(*passLights));
+		}
+		if (passBeams != nullptr) {
+			SDL_PushGPUFragmentUniformData(command, 2, passBeams, sizeof(*passBeams));
 		}
 		const SDL_GPUViewport viewport{
 			0.0f, 0.0f, static_cast<float>(passWidth), static_cast<float>(passHeight), 0.0f, 1.0f
@@ -698,6 +806,9 @@ namespace engine::render {
 			return texture;
 		}
 		if (role == Impl::ResourceRole::Depth) {
+			if (slot == targetSlot) {
+				return Impl::NamedTexture{DepthTarget.texture, sceneWidth, sceneHeight, State->DepthFormat};
+			}
 			if (slot < State->SceneSlots.size()) {
 				const Impl::SceneSlot &scene = State->SceneSlots[slot];
 				return Impl::NamedTexture{
@@ -720,7 +831,7 @@ namespace engine::render {
 				surface.Ready ? surface.Texture[surface.Slot] : nullptr,
 				surface.Width,
 				surface.Height,
-				State->ColourFormat(),
+				surface.Format,
 			};
 		}
 		if (role == Impl::ResourceRole::PortalImage && slot < State->SurfaceBanks.size()) {
@@ -735,7 +846,7 @@ namespace engine::render {
 						texture,
 						portal.Width,
 						portal.Height,
-						State->ColourFormat(),
+						SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 					};
 				}
 			}
@@ -763,7 +874,7 @@ namespace engine::render {
 						seamLight.Colour,
 						seamLight.Width,
 						seamLight.Height,
-						State->ColourFormat(),
+						seamLight.Format,
 					};
 				}
 			}
@@ -804,12 +915,84 @@ namespace engine::render {
 				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 			};
 		}
+		if (role == Impl::ResourceRole::MeshUv) {
+			return Impl::NamedTexture{
+				slotPbr.MeshUv,
+				slotPbr.Dimensions.TargetWidth,
+				slotPbr.Dimensions.TargetHeight,
+				SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::ObjectIds) {
+			return Impl::NamedTexture{
+				slotPbr.ObjectIds,
+				slotPbr.Dimensions.TargetWidth,
+				slotPbr.Dimensions.TargetHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_UINT,
+			};
+		}
+		if (role == Impl::ResourceRole::SemanticIds) {
+			return Impl::NamedTexture{
+				slotPbr.SemanticIds,
+				slotPbr.Dimensions.TargetWidth,
+				slotPbr.Dimensions.TargetHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_UINT,
+			};
+		}
+		if (role == Impl::ResourceRole::PartIds) {
+			return Impl::NamedTexture{
+				slotPbr.PartIds,
+				slotPbr.Dimensions.TargetWidth,
+				slotPbr.Dimensions.TargetHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_UINT,
+			};
+		}
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return Impl::NamedTexture{
 				slotPbr.LinearDepth,
 				slotPbr.Dimensions.LinearWidth,
 				slotPbr.Dimensions.LinearHeight,
 				SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::FirstSurfaceValidity) {
+			return Impl::NamedTexture{
+				slotPbr.FirstSurfaceValidity,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				SDL_GPU_TEXTUREFORMAT_R8_UNORM,
+			};
+		}
+		if (role == Impl::ResourceRole::CameraMotionVectors) {
+			return Impl::NamedTexture{
+				slotPbr.CameraMotionVectors,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceZ) {
+			return Impl::NamedTexture{
+				slotPbr.SecondSurfaceZ,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				State->DepthFormat,
+			};
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceDepth) {
+			return Impl::NamedTexture{
+				slotPbr.SecondSurfaceDepth,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceValidity) {
+			return Impl::NamedTexture{
+				slotPbr.SecondSurfaceValidity,
+				slotPbr.Dimensions.ViewWidth,
+				slotPbr.Dimensions.ViewHeight,
+				SDL_GPU_TEXTUREFORMAT_R8_UNORM,
 			};
 		}
 		if (role == Impl::ResourceRole::Occlusion) {
@@ -844,27 +1027,12 @@ namespace engine::render {
 				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 			};
 		}
-		if (role == Impl::ResourceRole::LensA) {
-			return Impl::NamedTexture{
-				slotPbr.LensA,
-				slotPbr.Dimensions.LitWidth,
-				slotPbr.Dimensions.LitHeight,
-				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
-			};
-		}
-		if (role == Impl::ResourceRole::LensB) {
-			return Impl::NamedTexture{
-				slotPbr.LensB,
-				slotPbr.Dimensions.LitWidth,
-				slotPbr.Dimensions.LitHeight,
-				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
-			};
-		}
 		return texture;
 	}
 
-	Renderer::Impl::NamedTexture
-	ViewRecording::ResourceTexture(graph::ResourceId resource, size_t selectedSlot, bool make) {
+	Renderer::Impl::NamedTexture ViewRecording::ResourceTexture(
+		graph::ResourceId resource, size_t selectedSlot, bool make, SDL_GPUCommandBuffer *readCommand
+	) {
 		Impl *const State = this->State;
 		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
 		SDL_GPUTexture *const swapchain = Swapchain;
@@ -874,6 +1042,7 @@ namespace engine::render {
 		const uint32_t sceneHeight = SceneHeight;
 		const uint64_t world = Request.World;
 
+		SDL_GPUCommandBuffer *const selectedCommand = readCommand != nullptr ? readCommand : Command;
 		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
 		if (desc == nullptr) {
 			return Impl::NamedTexture{};
@@ -883,9 +1052,26 @@ namespace engine::render {
 			return fixed;
 		}
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
-		const uint64_t owner = scope == graph::NodeScope::View	  ? static_cast<uint64_t>(selectedSlot)
-							   : scope == graph::NodeScope::World ? world
-																  : 0;
+		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, world);
+		if (GraphHistoryReadNeedsValidation(*desc, make)) {
+			const Impl::NamedTexture current = State->FindCurrentGraphHistoryWrite(
+				*selectedPipeline, selectedCommand, desc->Name, scope, owner
+			);
+			const GraphHistoryReadSource source = SelectGraphHistoryRead(current.IsValid(), Request.Damage);
+			if (source == GraphHistoryReadSource::CurrentProducer) {
+				return current;
+			}
+			if (source == GraphHistoryReadSource::Unavailable) {
+				return {};
+			}
+			return State->FindGraphHistoryForRead(
+				*selectedPipeline,
+				desc->Name,
+				scope,
+				owner,
+				GraphHistorySignature(ContentSignature, Matrices, SceneWidth, SceneHeight)
+			);
+		}
 		if (desc->External) {
 			if (desc->Name == core::Name("window")) {
 				return Impl::NamedTexture{swapchain, width, height, State->ColourFormat()};
@@ -896,6 +1082,9 @@ namespace engine::render {
 		}
 
 		if (make) {
+			if (scope == graph::NodeScope::World) {
+				State->GraphWorldNames[owner] = Request.Source->WorldName;
+			}
 			// Graph images ultimately feed this view's output target. Using the
 			// Studio swapchain here makes an offscreen interface draw in one
 			// coordinate space while its pixel scissors are applied in another.
@@ -908,20 +1097,64 @@ namespace engine::render {
 		return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
 	}
 
-	Renderer::Impl::NamedTexture
-	ViewRecording::GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make) {
+	SDL_GPUBuffer *ViewRecording::ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make) {
 		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
-		const size_t targetSlot = Request.TargetSlot;
+		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer) return nullptr;
+		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
+		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, Request.World);
+		if (make && scope == graph::NodeScope::World) {
+			State->GraphWorldNames[owner] = Request.Source->WorldName;
+		}
+		return make ? State->EnsureGraphBuffer(*selectedPipeline, resource, owner, SceneWidth, SceneHeight)
+					: State->FindGraphBuffer(*selectedPipeline, desc->Name, scope, owner);
+	}
 
+	size_t ViewRecording::GraphTextureSlot(const graph::RunContext &context) const {
+		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
 		const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 		const bool selectsView = context.View == graph::RunContext::WHOLE_FRAME && node != nullptr &&
 								 node->Parameter(core::Name("view")) != nullptr;
-		const size_t selectedSlot = selectsView ? node->Integer(core::Name("view"), 0) : targetSlot;
-		return ResourceTexture(resource, selectedSlot, make);
+		return selectsView ? node->Integer(core::Name("view"), 0) : Request.TargetSlot;
+	}
+
+	Renderer::Impl::NamedTexture ViewRecording::GraphTexture(
+		graph::ResourceId resource,
+		const graph::RunContext &context,
+		bool make,
+		SDL_GPUCommandBuffer *readCommand
+	) {
+		return ResourceTexture(resource, GraphTextureSlot(context), make, readCommand);
+	}
+
+	void ViewRecording::StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command) {
+		// Any history producer recorded in the main buffer is a dependency boundary:
+		// a separate command submitted first could otherwise read unqueued pixels.
+		if (command == Command) MainGpuWorkRecorded = true;
+		for (const graph::ResourceId resource : context.Writes) {
+			const graph::ResourceDesc *desc = Pipeline->Graph.FindResource(resource);
+			if (desc == nullptr || desc->Lifetime != graph::ResourceLifetime::History) {
+				continue;
+			}
+			const graph::NodeScope scope = State->ResourceScope(*Pipeline, resource);
+			State->StageGraphHistoryWrite(
+				*Pipeline,
+				command,
+				desc->Name,
+				scope,
+				GraphHistoryOwner(scope, GraphTextureSlot(context), Request.World),
+				GraphHistorySignature(ContentSignature, Matrices, SceneWidth, SceneHeight)
+			);
+		}
+	}
+
+	SDL_GPUBuffer *
+	ViewRecording::GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make) {
+		return ResourceBuffer(resource, GraphTextureSlot(context), make);
 	}
 
 	std::vector<SDL_GPUTextureSamplerBinding>
-	ViewRecording::TextureBindings(const graph::RunContext &context) {
+	ViewRecording::TextureBindings(const graph::RunContext &context, SDL_GPUCommandBuffer *readCommand) {
 		Impl *const State = this->State;
 		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
 
@@ -932,7 +1165,11 @@ namespace engine::render {
 				desc->Kind == graph::ResourceKind::Camera || desc->Kind == graph::ResourceKind::Entities) {
 				continue;
 			}
-			Impl::NamedTexture source = GraphTexture(resource, context, false);
+			if (State->SurfaceSampler == nullptr && !State->EnsureSurfaceSampler()) {
+				bindings.clear();
+				return bindings;
+			}
+			Impl::NamedTexture source = GraphTexture(resource, context, false, readCommand);
 			bindings.push_back(
 				SDL_GPUTextureSamplerBinding{
 					source.IsValid() ? source.Texture : State->FallbackTexture,
@@ -1040,7 +1277,7 @@ namespace engine::render {
 		return true;
 	}
 
-	void ViewRecording::ClearOcclusion() {
+	void ViewRecording::ClearOcclusion(AmbientOcclusionSourceState sourceState, bool enabled) {
 		Impl::PbrSlot &pbr = *Pbr;
 		SDL_GPUCommandBuffer *const command = Command;
 
@@ -1052,5 +1289,30 @@ namespace engine::render {
 		clearAo.cycle = true;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &clearAo, 1, nullptr);
 		SDL_EndGPURenderPass(pass);
+
+		pbr.OcclusionProvenance = {
+			.SourceState = sourceState,
+			.ProducerFrame = sourceState == AmbientOcclusionSourceState::ClearedDisabled ||
+									 sourceState == AmbientOcclusionSourceState::ClearedNoPass
+								 ? std::optional<uint64_t>(State->FrameCounter)
+								 : std::nullopt,
+			.Enabled = enabled,
+			.SampleCount = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+							   ? std::optional<uint32_t>(SSAO_SAMPLE_COUNT)
+							   : std::nullopt,
+			.RadiusWorldUnits = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+									? std::optional<float>(SSAO_RADIUS_WORLD_UNITS)
+									: std::nullopt,
+			.Denoiser = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+							? std::optional<AmbientOcclusionDenoiser>(AmbientOcclusionDenoiser::None)
+							: std::nullopt,
+			.TemporalHistory = sourceState == AmbientOcclusionSourceState::ClearedDisabled
+								   ? std::optional<AmbientOcclusionTemporalHistory>(
+										 AmbientOcclusionTemporalHistory::Disabled
+									 )
+								   : std::nullopt,
+			.BackgroundValue = 1.0f,
+			.BackgroundClassification = AmbientOcclusionBackgroundClassification::Unavailable
+		};
 	}
 }

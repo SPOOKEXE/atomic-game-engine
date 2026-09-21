@@ -60,9 +60,12 @@ using engine::physics::PhysicsWorld;
 using engine::physics::PipelineInternals;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::SyncBroadphase;
+using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
+using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 using engine::spatial::HashGrid;
 using engine::spatial::LayerMask;
@@ -581,6 +584,39 @@ TEST_CASE("a collider that gains a motion leaves the static index", "[physics][b
 	CHECK(WorldOf(store).DynamicColliders() == 1);
 	CHECK(WorldOf(store).StaticColliders() == 0);
 	CHECK(WorldOf(store).Pairs().empty());
+}
+
+TEST_CASE("a scripted kinematic collider does not rebuild static geometry", "[physics][broadphase]") {
+	// A kinematic body keeps the established awake-body archetype for the
+	// dynamic broadphase, while its body kind keeps it immovable in contacts.
+	// This is the state the Magic projectile runtime uses instead of rewriting
+	// the static index every frame.
+	Store store("broadphase.kinematic");
+	PreparePhysicsWorld(store, UNIT_CELL);
+
+	const Entity projectile = Place(store, Placed{"projectile", Vector3::Zero, false});
+	Place(store, Placed{"terrain", Vector3{0.0f, -0.6f, 0.0f}, false});
+	store.Set<Simulated>(projectile, Simulated{});
+	store.Set<Motion>(projectile, Motion{});
+	store.Set<RigidBody>(projectile, RigidBody{.Kind = BodyKind::Kinematic});
+
+	Step(store);
+	const uint64_t settled = WorldOf(store).StaticRebuilds();
+	REQUIRE(WorldOf(store).DynamicColliders() == 1);
+	REQUIRE(WorldOf(store).StaticColliders() == 1);
+	// A World clears frame-local change bits before systems run. Do the same in
+	// this direct system test so initial terrain construction cannot be mistaken
+	// for a new static transform on every later sync.
+	store.ClearChanges();
+
+	for (int tick = 0; tick < 60; tick++) {
+		store.Set<Transform>(projectile, Transform{CFrame{Vector3{static_cast<float>(tick), 0.0f, 0.0f}}});
+		Step(store);
+	}
+
+	CHECK(WorldOf(store).StaticRebuilds() == settled);
+	CHECK(WorldOf(store).DynamicColliders() == 1);
+	CHECK(WorldOf(store).StaticColliders() == 1);
 }
 
 TEST_CASE("marking the static set dirty forces one rebuild", "[physics][broadphase]") {

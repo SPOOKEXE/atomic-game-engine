@@ -309,12 +309,13 @@ namespace engine::effects {
 	}
 
 	size_t BuildRibbons(ecs::Store &store, const Vector3 &eye, float elapsed) {
-		ENGINE_PROFILE_CAT("build ribbons", core::ProfileCategory::Simulation);
-
 		auto *buffer = store.ResourceMutable<RibbonBuffer>();
-		if (buffer == nullptr) {
-			return 0;
-		}
+		return buffer == nullptr ? 0 : BuildRibbons(store, eye, elapsed, *buffer);
+	}
+
+	size_t BuildRibbons(ecs::Store &store, const Vector3 &eye, float elapsed, RibbonBuffer &output) {
+		ENGINE_PROFILE_CAT("build ribbons", core::ProfileCategory::Simulation);
+		auto *buffer = &output;
 
 		// Cleared rather than resized, because the vertex count is a function of
 		// how many ribbons doubled back this frame and no count is known ahead of
@@ -338,6 +339,7 @@ namespace engine::effects {
 			run.Texture = beam.Texture;
 			run.ZOffset = beam.ZOffset;
 			run.Additive = beam.Additive;
+			run.FaceCamera = beam.FaceCamera;
 			if (run.Count >= 4) {
 				buffer->Runs.push_back(run);
 			} else {
@@ -419,6 +421,110 @@ namespace engine::effects {
 		core::Metrics::SetGauge("effects.ribbon.runs", static_cast<double>(buffer->Runs.size()));
 		core::Metrics::SetGauge("effects.ribbon.vertices", static_cast<double>(buffer->Vertices.size()));
 		return buffer->Runs.size();
+	}
+
+	bool FaceRibbonVertices(
+		std::span<const RibbonVertex> source,
+		std::span<const RibbonRun> runs,
+		const Vector3 &eye,
+		std::vector<RibbonVertex> &output
+	) {
+		ENGINE_PROFILE("face ribbon vertices");
+		for (const auto &run : runs) {
+			if (uint64_t(run.First) + run.Count > source.size() ||
+				(run.FaceCamera && (run.Count < 4 || run.Count % 2 != 0))) {
+				return false;
+			}
+		}
+		if (source.data() == output.data() && source.size() != output.size()) {
+			return false;
+		}
+		if (source.data() != output.data()) {
+			output.assign(source.begin(), source.end());
+		}
+		for (const auto &run : runs) {
+			if (!run.FaceCamera) {
+				continue;
+			}
+			Vector3 previous;
+			for (uint32_t index = 0; index < run.Count; index += 2) {
+				const uint32_t at = run.First + index;
+				const Vector3 centre = (source[at].Position + source[at + 1].Position) * .5f;
+				const Vector3 along = index == 0
+										  ? (source[at + 2].Position + source[at + 3].Position) * .5f - centre
+										  : centre - previous;
+				previous = centre;
+				const float halfWidth = (source[at].Position - source[at + 1].Position).Magnitude() * .5f;
+				const Vector3 offset = SideVector(along, (eye - centre).Unit()) * halfWidth;
+				output[at].Position = centre + offset;
+				output[at + 1].Position = centre - offset;
+			}
+		}
+		return true;
+	}
+
+	bool ProjectRibbonsThroughPortal(
+		std::span<const RibbonVertex> source,
+		std::span<const RibbonRun> runs,
+		const Vector3 &centre,
+		const Vector3 &normal,
+		const CFrame &mapping,
+		float scale,
+		std::vector<RibbonVertex> &vertices,
+		std::vector<RibbonRun> &projectedRuns
+	) {
+		vertices.clear();
+		projectedRuns.clear();
+		if (normal.Magnitude() < 1e-5f || !(scale > 0.0f)) return false;
+		const auto map = [&](RibbonVertex vertex) {
+			vertex.Position = mapping.PointToWorldSpace(centre + (vertex.Position - centre) * scale);
+			return vertex;
+		};
+		const auto blend = [](const RibbonVertex &a, const RibbonVertex &b, float t) {
+			RibbonVertex result = a;
+			result.Position = a.Position + (b.Position - a.Position) * t;
+			result.Coordinate = a.Coordinate + (b.Coordinate - a.Coordinate) * t;
+			return result;
+		};
+		for (const RibbonRun &run : runs) {
+			if (uint64_t(run.First) + run.Count > source.size() || run.Count < 4 || run.Count % 2 != 0)
+				return false;
+			const uint32_t first = static_cast<uint32_t>(vertices.size());
+			bool active = false;
+			for (uint32_t at = 0; at < run.Count; at += 2) {
+				const auto &top = source[run.First + at];
+				const auto &bottom = source[run.First + at + 1];
+				const float depth = ((top.Position + bottom.Position) * .5f - centre).Dot(normal);
+				if (at > 0) {
+					const auto &previousTop = source[run.First + at - 2];
+					const auto &previousBottom = source[run.First + at - 1];
+					const float previousDepth =
+						((previousTop.Position + previousBottom.Position) * .5f - centre).Dot(normal);
+					if ((previousDepth < 0.0f) != (depth < 0.0f)) {
+						const float t = previousDepth / (previousDepth - depth);
+						vertices.push_back(map(blend(previousTop, top, t)));
+						vertices.push_back(map(blend(previousBottom, bottom, t)));
+					}
+				}
+				if (depth < 0.0f) {
+					vertices.push_back(map(top));
+					vertices.push_back(map(bottom));
+					active = true;
+				} else if (active) {
+					break;
+				}
+			}
+			const uint32_t count = static_cast<uint32_t>(vertices.size()) - first;
+			if (count >= 4) {
+				auto mapped = run;
+				mapped.First = first;
+				mapped.Count = count;
+				projectedRuns.push_back(mapped);
+			} else {
+				vertices.resize(first);
+			}
+		}
+		return true;
 	}
 
 	std::span<const RibbonVertex> RibbonStream(const ecs::Store &store) {

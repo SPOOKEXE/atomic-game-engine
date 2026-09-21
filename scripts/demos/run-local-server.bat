@@ -45,8 +45,8 @@ set "server=%build%\server\server.exe"
 
 REM The staged copy, not the source - a demo that ran the source tree would work
 REM here and nowhere a staged tree was copied to.
-set "staged=%build%\client\assets\examples\%SCENE%"
-if not exist "%staged%" set "staged=%build%\assets\examples\%SCENE%"
+set "staged=%build%\client\assets\examples\scripts\%SCENE%"
+if not exist "%staged%" set "staged=%build%\assets\examples\scripts\%SCENE%"
 if not exist "%staged%" (
 	echo no staged scene at %staged% 1>&2
 	exit /b 1

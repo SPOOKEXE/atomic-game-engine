@@ -158,6 +158,15 @@ namespace engine::render {
 	}
 
 	size_t ResolveSpatialCanvases(Store &store, const gui::Screen &screen) {
+		return ResolveSpatialCanvases(store, screen, nullptr, nullptr);
+	}
+
+	size_t ResolveSpatialCanvases(
+		Store &store,
+		const gui::Screen &screen,
+		const scene::Camera *requestedCamera,
+		const core::CFrame *requestedFrame
+	) {
 		// **Collected before anything is written**, which is `gui::Layout`'s own
 		// argument in as many words: adding `SpatialCanvas` to a collector that
 		// has never had one moves its row between archetypes, and moving a row
@@ -179,8 +188,13 @@ namespace engine::render {
 		core::CFrame eyeFrame;
 		bool hasCamera = false;
 
-		if (const scene::ActiveCamera *active = store.Resource<scene::ActiveCamera>();
-			active != nullptr && active->Entity != ecs::NULL_ENTITY) {
+		if (requestedCamera != nullptr && requestedFrame != nullptr) {
+			fieldOfView = requestedCamera->FieldOfViewRadians;
+			eye = requestedFrame->Position;
+			eyeFrame = *requestedFrame;
+			hasCamera = true;
+		} else if (const scene::ActiveCamera *active = store.Resource<scene::ActiveCamera>();
+				   active != nullptr && active->Entity != ecs::NULL_ENTITY) {
 			const scene::Camera *camera = store.Get<scene::Camera>(active->Entity);
 			const scene::Transform *frame = store.Get<scene::Transform>(active->Entity);
 

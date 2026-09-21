@@ -7,7 +7,8 @@
 namespace engine::world {
 
 	Driver::Driver(const DriverSettings &settings)
-		: Settings_(settings), Universe_(settings.Universe), Supervisor_(settings.Hosts) {}
+		: Settings_(settings), Universe_(settings.Universe), LocalExchange(Universe_),
+		  Supervisor_(settings.Hosts) {}
 
 	Driver::~Driver() {
 		Stop();
@@ -82,7 +83,10 @@ namespace engine::world {
 		}
 
 		// --- 3. one barrier, local and remote worlds together ---
-		Universe_.Tick(frameSeconds);
+		if (Settings_.CoordinateHostTicks)
+			Stats.TickExchangeFailed = !TickHosts(frameSeconds, now);
+		else
+			Universe_.Tick(frameSeconds);
 
 		// --- 4. what the barrier decided for worlds that live elsewhere ---
 		const std::vector<RemoteDelivery> outbound = Universe_.TakeOutbound();
@@ -136,6 +140,55 @@ namespace engine::world {
 				);
 			}
 		}
+	}
+
+	PresentationPumpResult Driver::PumpPresentation(double now) {
+		ENGINE_PROFILE_CAT("Driver::PumpPresentation", core::ProfileCategory::Render);
+		PresentationPumpResult result;
+		(void)Supervisor_.Pump(now);
+		const uint64_t totalDrops = Supervisor_.PresentationDropped();
+		result.Dropped = totalDrops - ObservedPresentationDrops;
+		ObservedPresentationDrops = totalDrops;
+		for (const auto host : Supervisor_.TakeReplacedPresentationHosts()) {
+			Universe_.RetirePresentationHost(host);
+		}
+		for (const auto &host : Supervisor_.Hosts()) {
+			if (!host.Linked) Universe_.RetirePresentationHost(host.Name);
+		}
+		for (const auto &incoming : Supervisor_.TakePresentationDirectories()) {
+			if (Universe_.ApplyPresentationDirectory(incoming.Host, incoming.Directory) !=
+				PresentationStatus::Ok) {
+				result.Refused++;
+			}
+		}
+		for (const HostPresentation &incoming : Supervisor_.TakePresentationTraffic()) {
+			if (Universe_.IngestPresentation(incoming.Host, incoming.Message) == PresentationStatus::Ok) {
+				result.Accepted++;
+				result.AcceptedPayloadBytes += incoming.Message.Payload.size();
+			} else {
+				result.Refused++;
+			}
+		}
+		bool routesReady = true;
+		for (const auto &host : Supervisor_.Hosts()) {
+			if (Supervisor_.WantsPresentationRoutes(host.Name)) {
+				routesReady = Supervisor_.PublishPresentationRoutes(
+								  host.Name, Universe_.PresentationRoutesFor(host.Name)
+							  ) &&
+							  routesReady;
+			}
+		}
+		// Keep the bounded image queue owned by the bus until route control is queued first.
+		if (!routesReady) return result;
+		for (const PresentationOutbound &outbound : Universe_.TakePresentationOutbound()) {
+			if (Supervisor_.SendPresentation(outbound.Host, outbound.Message)) {
+				result.Sent++;
+				result.SentPayloadBytes += outbound.Message.Payload.size();
+			} else {
+				result.Dropped++;
+			}
+		}
+		return result;
 	}
 
 	WorldStatus Driver::Present(WorldId id, float frameSeconds, float alpha) {

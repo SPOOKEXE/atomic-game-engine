@@ -10,12 +10,15 @@
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
+#include "RendererTestHooks.hpp"
 #include "ShaderBinary.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
@@ -27,6 +30,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <span>
 #include <string>
@@ -36,8 +40,41 @@
 namespace engine::render {
 
 	namespace {
+		std::atomic_bool ForceGBufferPipelineFailureForTests = false;
+
 		// Keep the GPU vertex layout identical to the asset vertex layout.
 		using Vertex = assets::MeshVertex;
+
+		bool DependsOnKind(
+			const graph::RenderGraph &pipeline,
+			graph::NodeId consumer,
+			core::Name required,
+			std::unordered_set<uint32_t> &visited
+		) {
+			if (!consumer.IsValid() || !visited.insert(consumer.Value).second) return false;
+			const graph::Node *node = pipeline.Find(consumer);
+			if (node == nullptr || !node->Enabled) return false;
+			if (node->Kind == required) return true;
+
+			for (const graph::ResourceId resource : node->Reads) {
+				graph::NodeId producer;
+				for (uint32_t value = 1; value < consumer.Value; value++) {
+					const graph::Node *candidate = pipeline.Find(graph::NodeId{value});
+					if (candidate != nullptr && candidate->Enabled &&
+						std::find(candidate->Writes.begin(), candidate->Writes.end(), resource) !=
+							candidate->Writes.end()) {
+						producer = graph::NodeId{value};
+					}
+				}
+				if (DependsOnKind(pipeline, producer, required, visited)) return true;
+			}
+			return false;
+		}
+
+		bool DependsOnKind(const graph::RenderGraph &pipeline, graph::NodeId consumer, core::Name required) {
+			std::unordered_set<uint32_t> visited;
+			return DependsOnKind(pipeline, consumer, required, visited);
+		}
 
 		bool CompileRenderPipeline(
 			const graph::RenderGraph &pipeline,
@@ -62,6 +99,7 @@ namespace engine::render {
 			// Resource edges, not canvas or declaration position, own execution.
 			// SDL records each dependency wave serially, preserving the schedule on a
 			// backend that exposes one portable command stream.
+			const std::vector<graph::NodeId> setup = compiled.Shared;
 			compiled.Shared.clear();
 			compiled.PerView.clear();
 			compiled.Final.clear();
@@ -81,7 +119,11 @@ namespace engine::render {
 						compiled.PerView.push_back(scheduled.Node);
 						break;
 					case graph::NodeScope::Frame:
-						compiled.Final.push_back(scheduled.Node);
+						if (std::find(setup.begin(), setup.end(), scheduled.Node) != setup.end()) {
+							compiled.Shared.push_back(scheduled.Node);
+						} else {
+							compiled.Final.push_back(scheduled.Node);
+						}
 						break;
 					}
 				}
@@ -114,7 +156,82 @@ namespace engine::render {
 						reason = "the render catalogue has no declaration for this kind";
 						return false;
 					}
+					if (node->Kind == core::Name("shadow") &&
+						!DependsOnKind(pipeline, scheduled.Node, core::Name("mesh-residency"))) {
+						offender = node->Name;
+						reason = "shadow work has no graph dependency on mesh-residency";
+						return false;
+					}
+					if (node->Kind == core::Name("delta-upload") &&
+						!DependsOnKind(pipeline, scheduled.Node, core::Name("mesh-residency"))) {
+						offender = node->Name;
+						reason = "delta-upload has no graph dependency on mesh-residency";
+						return false;
+					}
+					const bool consumesInstanceUploads =
+						node->Kind == core::Name("select-lod") ||
+						node->Kind == core::Name("surface-capture") ||
+						node->Kind == core::Name("mirror-capture") ||
+						node->Kind == core::Name("portal-capture") || node->Kind == core::Name("gbuffer") ||
+						node->Kind == core::Name("depth-peel") || node->Kind == core::Name("forward") ||
+						node->Kind == core::Name("portal-overlay") ||
+						node->Kind == core::Name("mirror-overlay") ||
+						node->Kind == core::Name("transparent") ||
+						node->Kind == core::Name("transparent-layer");
+					if (consumesInstanceUploads &&
+						!DependsOnKind(pipeline, scheduled.Node, core::Name("delta-upload"))) {
+						offender = node->Name;
+						reason = "draw work has no graph dependency on delta-upload";
+						return false;
+					}
+					if (node->Kind == core::Name("raster") || node->Kind == core::Name("dispatch")) {
+						const std::string *attachment = node->Parameter(core::Name("attachment"));
+						if (attachment != nullptr && *attachment == "visual" &&
+							(node->Reads.size() != 1 || node->Writes.size() != 1)) {
+							offender = node->Name;
+							reason = "a visual attachment needs one source and one target for inactive "
+									 "pass-through";
+							return false;
+						}
+					}
 					graph::NodeRequirements needs = spec->Needs;
+					if (node->Kind == core::Name("ambient-correct")) {
+						size_t shadowInputs = 0;
+						for (const char *port :
+							 {"directional-response", "room-depth", "room-normal", "shadow"})
+							shadowInputs +=
+								std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(port)) !=
+								node->ReadPorts.end();
+						if (shadowInputs != 0 && shadowInputs != 4) {
+							offender = node->Name;
+							reason = "directional correction requires response, room depth, room normal and "
+									 "shadow together";
+							return false;
+						}
+					}
+					if (node->Kind == core::Name("deferred-lighting")) {
+						for (size_t output = 0; output < node->Writes.size(); ++output) {
+							const auto later = node->Writes.begin() + static_cast<std::ptrdiff_t>(output + 1);
+							if (std::find(later, node->Writes.end(), node->Writes[output]) !=
+								node->Writes.end()) {
+								offender = node->Name;
+								reason = "deferred-lighting outputs require distinct resources";
+								return false;
+							}
+						}
+						const auto hasOutput = [&](const char *name) {
+							return std::find(
+									   node->WritePorts.begin(), node->WritePorts.end(), core::Name(name)
+								   ) != node->WritePorts.end();
+						};
+						const bool baseline = hasOutput("lighting-baseline");
+						if (hasOutput("directional-response") && !baseline) {
+							offender = node->Name;
+							reason = "directional-response requires lighting-baseline";
+							return false;
+						}
+						if (baseline) needs.Formats.push_back(graph::ResourceFormat::RGBA32F);
+					}
 					if (node->Kind == core::Name("blit")) {
 						if (node->Reads.size() != 1 || node->Writes.size() != 1) {
 							offender = node->Name;
@@ -148,7 +265,10 @@ namespace engine::render {
 							return false;
 						}
 					}
-					if (seen.contains(node->Kind.Id()) && !spec->Repeatable) {
+					const std::string *background = node->Parameter(core::Name("background"));
+					const bool separateDepth = node->Kind == core::Name("depth-linearise") &&
+											   background != nullptr && *background == "zero";
+					if (seen.contains(node->Kind.Id()) && !spec->Repeatable && !separateDepth) {
 						offender = node->Name;
 						reason = "this render node kind may appear only once";
 						return false;
@@ -158,7 +278,10 @@ namespace engine::render {
 						reason = "this backend node cannot run at the authored scope";
 						return false;
 					}
-					seen.insert(node->Kind.Id());
+					// Zero-background exports own graph targets; lighting depth remains a singleton.
+					if (!separateDepth) {
+						seen.insert(node->Kind.Id());
+					}
 					if (const std::string *queue = node->Parameter(core::Name("queue"));
 						queue != nullptr && *queue != "auto" && *queue != graph::Describe(spec->Queue)) {
 						offender = node->Name;
@@ -218,6 +341,138 @@ namespace engine::render {
 				}
 			}
 			return nodes;
+		}
+
+		struct RetainedNodePlan {
+			std::vector<uint8_t> Nodes;
+			uint16_t Families = 0;
+		};
+
+		template <size_t Size> bool KindIn(core::Name kind, const std::array<std::string_view, Size> &kinds) {
+			return std::find(kinds.begin(), kinds.end(), kind.Text()) != kinds.end();
+		}
+
+		uint16_t RetainedFamiliesOf(const graph::RenderGraph &pipeline, std::span<const uint8_t> retained) {
+			static constexpr std::array uploadKinds{
+				std::string_view("world"),
+				std::string_view("camera"),
+				std::string_view("entities"),
+				std::string_view("cull-frustum"),
+				std::string_view("cull-distance"),
+				std::string_view("filter-tag"),
+				std::string_view("order-draw"),
+				std::string_view("mesh-residency"),
+				std::string_view("delta-upload"),
+				std::string_view("select-lod")
+			};
+			static constexpr std::array shadowKinds{std::string_view("shadow")};
+			static constexpr std::array mirrorKinds{
+				std::string_view("mirror-capture"), std::string_view("mirror-overlay")
+			};
+			static constexpr std::array portalKinds{
+				std::string_view("portal-capture"),
+				std::string_view("portal-tonemap"),
+				std::string_view("portal-overlay")
+			};
+			static constexpr std::array surfaceKinds{std::string_view("surface-capture")};
+			static constexpr std::array authoredKinds{
+				std::string_view("raster"),
+				std::string_view("fxaa"),
+				std::string_view("taa"),
+				std::string_view("smaa-edges"),
+				std::string_view("smaa-blend"),
+				std::string_view("smaa-resolve"),
+				std::string_view("exposure-grade"),
+				std::string_view("hsv"),
+				std::string_view("mix"),
+				std::string_view("transform-crop"),
+				std::string_view("blur"),
+				std::string_view("dispatch"),
+				std::string_view("tessellate"),
+				std::string_view("global-illumination"),
+				std::string_view("raytrace"),
+				std::string_view("pathtrace")
+			};
+			static constexpr std::array shadingKinds{
+				std::string_view("ambient-response"),
+				std::string_view("ambient-merge"),
+				std::string_view("ambient-correct"),
+				std::string_view("colour-compose"),
+				std::string_view("depth-compose"),
+				std::string_view("last-frame"),
+				std::string_view("blit"),
+				std::string_view("depth-linearise"),
+				std::string_view("depth-validity"),
+				std::string_view("camera-motion"),
+				std::string_view("hzb"),
+				std::string_view("ssao"),
+				std::string_view("deferred-lighting"),
+				std::string_view("skybox-compute"),
+				std::string_view("clouds-compute"),
+				std::string_view("sky"),
+				std::string_view("fog"),
+				std::string_view("shader-lenses"),
+				std::string_view("tonemap")
+			};
+			static constexpr std::array geometryKinds{
+				std::string_view("tessellate"),
+				std::string_view("tessellated-draw"),
+				std::string_view("forward"),
+				std::string_view("gbuffer"),
+				std::string_view("depth-peel"),
+				std::string_view("transparent-layer"),
+				std::string_view("transparent")
+			};
+
+			uint16_t families = 0;
+			for (uint32_t value = 1; value <= pipeline.Count(); ++value) {
+				if (value > retained.size() || retained[value - 1] == 0) continue;
+				const graph::Node *node = pipeline.Find(graph::NodeId{value});
+				if (node == nullptr) continue;
+				if (KindIn(node->Kind, uploadKinds)) families |= RetainedUpload;
+				if (KindIn(node->Kind, shadowKinds)) families |= RetainedShadow;
+				if (KindIn(node->Kind, mirrorKinds)) families |= RetainedMirror;
+				if (KindIn(node->Kind, portalKinds)) families |= RetainedPortal;
+				if (KindIn(node->Kind, surfaceKinds)) families |= RetainedSurface;
+				if (KindIn(node->Kind, authoredKinds)) families |= RetainedAuthored;
+				if (KindIn(node->Kind, shadingKinds)) families |= RetainedShading;
+				if (KindIn(node->Kind, geometryKinds)) families |= RetainedGeometry;
+			}
+			return families;
+		}
+
+		RetainedNodePlan
+		RetainedNodesOf(const graph::RenderGraph &pipeline, std::span<const core::Name> customKinds) {
+			std::vector<uint8_t> retained(pipeline.Count(), 0);
+			std::vector<uint8_t> liveResources(pipeline.ResourceCount() + 1, 0);
+
+			bool changed = true;
+			while (changed) {
+				changed = false;
+				for (uint32_t value = 1; value <= pipeline.Count(); ++value) {
+					const graph::Node *node = pipeline.Find(graph::NodeId{value});
+					if (node == nullptr || !node->Enabled || retained[value - 1] != 0) continue;
+					const graph::NodeKindSpec *kind = graph::NodeCatalogue::Find(node->Kind);
+					const bool output = kind != nullptr && kind->Category == graph::NodeCategory::Output;
+					const bool custom =
+						std::find(customKinds.begin(), customKinds.end(), node->Kind) != customKinds.end();
+					// Path tracing advances its accumulation even when the scene is unchanged.
+					// Other history resources are caches and do not make their writers temporal.
+					const bool temporal = node->Kind == core::Name("pathtrace");
+					const bool consumesLive =
+						std::any_of(node->Reads.begin(), node->Reads.end(), [&](graph::ResourceId resource) {
+							return resource.Value < liveResources.size() &&
+								   liveResources[resource.Value] != 0;
+						});
+					if (!output && !custom && !temporal && !consumesLive) continue;
+					retained[value - 1] = 1;
+					changed = true;
+					for (const graph::ResourceId resource : node->Writes) {
+						if (resource.Value < liveResources.size()) liveResources[resource.Value] = 1;
+					}
+				}
+			}
+			return {retained, RetainedFamiliesOf(pipeline, retained)};
 		}
 	}
 
@@ -299,6 +554,8 @@ namespace engine::render {
 
 	bool Renderer::Impl::CreatePipelines() {
 		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 4);
+		SDL_GPUShader *packedOpaqueVertex =
+			LoadShader("packed-opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 2, 5);
 
 		// **Two samplers now: the shadow map and the surface.** The count is
 		// part of the shader object rather than of the pipeline, so a mismatch
@@ -317,24 +574,30 @@ namespace engine::render {
 		);
 
 		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 4);
+		SDL_GPUShader *packedShadowVertex =
+			LoadShader("packed-shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 2, 5);
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 1);
+		SDL_GPUShader *depthPeelFragment = LoadShader("depth-peel.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 2);
 		SDL_GPUShader *depthLinearFragment =
 			LoadShader("depth-linearise.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		SDL_GPUShader *cameraMotionFragment =
+			LoadShader("camera-motion.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
-		// Nine samplers: the seven G-buffer and shadow inputs plus the two seam
-		// light-field captures - `MAX_SEAM_LIGHTS`, bound last.
+		// Ten samplers: the seven G-buffer and shadow inputs, two seam light
+		// captures, then the portal shadow beam atlas.
 		SDL_GPUShader *deferredLightingFragment =
-			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
+			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
-		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
-			!imageFragment || !overlayFragment || !gbufferFragment || !depthLinearFragment || !ssaoFragment ||
+		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
+			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
+			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
 			!deferredLightingFragment || !skyFragment || !volumeFragment || !tonemapFragment) {
 			return false;
 		}
@@ -432,10 +695,10 @@ namespace engine::render {
 		// `ActivePipeline` and `ActiveFamily` correct for `DrawSlots`'
 		// restore - see its own header - so a family-keyed substitution there
 		// reaches the screen pass, the surface pass and every mirror without
-		// a second line anywhere else. A part with its own `ShaderScript`
-		// keeps its own shader even so: `DrawSlots` binds a variant by name
-		// over whatever `BindPipeline` left active, and a debug view is not
-		// the place to override an author's own material.
+		// a second line anywhere else. `DrawSlots` also suppresses authored
+		// shader variants while this mode is active. Wireframe is a geometry
+		// inspection view, so a material shader must not fill the triangles the
+		// view is meant to expose.
 		//
 		// **Failure here is a diagnostic and a feature quietly unavailable,
 		// never a reason `CreatePipelines` itself fails.** `fillModeNonSolid`
@@ -455,23 +718,74 @@ namespace engine::render {
 		const auto hasFormat = [this](graph::ResourceFormat format) {
 			return std::find(Caps.Formats.begin(), Caps.Formats.end(), format) != Caps.Formats.end();
 		};
-		const bool pbrSupported = Caps.MaxColourTargets >= 4 && hasFormat(graph::ResourceFormat::RGBA16F) &&
-								  hasFormat(graph::ResourceFormat::R32F);
+		const bool pbrFormatsSupported =
+			hasFormat(graph::ResourceFormat::RGBA16F) && hasFormat(graph::ResourceFormat::RG16F) &&
+			hasFormat(graph::ResourceFormat::R32F) && hasFormat(graph::ResourceFormat::R32U);
+		const bool hdrSupported = hasFormat(graph::ResourceFormat::RGBA16F);
+		SDL_GPUColorTargetDescription hdrTarget = opaqueTarget;
+		hdrTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		if (hdrSupported) {
+			SDL_GPUGraphicsPipelineCreateInfo hdrOpaque = opaque;
+			hdrOpaque.target_info.color_target_descriptions = &hdrTarget;
+			HdrOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
+			hdrOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			hdrOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			HdrWireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
+		}
 
-		SDL_GPUColorTargetDescription gbufferTargets[4]{};
+		SDL_GPUColorTargetDescription gbufferTargets[8]{};
 		gbufferTargets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
 		gbufferTargets[1].format = SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
 		gbufferTargets[2].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		gbufferTargets[3].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		gbufferTargets[4].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
+		gbufferTargets[5].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
+		gbufferTargets[6].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
+		gbufferTargets[7].format = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
 
 		SDL_GPUGraphicsPipelineCreateInfo gbuffer = opaque;
 		gbuffer.fragment_shader = gbufferFragment;
 		gbuffer.target_info.color_target_descriptions = gbufferTargets;
-		gbuffer.target_info.num_color_targets = 4;
-		if (pbrSupported) {
-			GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+		gbuffer.target_info.num_color_targets = 8;
+		if (pbrFormatsSupported) {
+			const bool forceFailure = ForceGBufferPipelineFailureForTests.load(std::memory_order_relaxed);
+			if (forceFailure) {
+				ENGINE_INFO("gbuffer pipeline probe forced unavailable for test");
+			} else {
+				GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+			}
 			if (GBufferPipeline == nullptr) {
-				ENGINE_ERROR("gbuffer pipeline: {}", SDL_GetError());
+				if (forceFailure) {
+					ENGINE_WARN("gbuffer pipeline unavailable: test fault injection");
+				} else {
+					ENGINE_WARN("gbuffer pipeline unavailable: {}", SDL_GetError());
+				}
+			} else {
+				// This is the only portable proof that all eight formats bind together.
+				Caps.MaxColourTargets = 8;
+
+				SDL_GPUGraphicsPipelineCreateInfo wireframeGBuffer = gbuffer;
+				wireframeGBuffer.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+				wireframeGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+				WireframeGBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &wireframeGBuffer);
+				if (WireframeGBufferPipeline == nullptr) {
+					ENGINE_WARN("wireframe gbuffer pipeline unavailable: {}", SDL_GetError());
+				}
+			}
+		}
+		const bool pbrSupported = GBufferPipeline != nullptr;
+
+		SDL_GPUColorTargetDescription depthPeelTargets[2]{};
+		depthPeelTargets[0].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+		depthPeelTargets[1].format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+		SDL_GPUGraphicsPipelineCreateInfo depthPeel = opaque;
+		depthPeel.fragment_shader = depthPeelFragment;
+		depthPeel.target_info.color_target_descriptions = depthPeelTargets;
+		depthPeel.target_info.num_color_targets = 2;
+		if (pbrSupported) {
+			DepthPeelPipeline = SDL_CreateGPUGraphicsPipeline(Device, &depthPeel);
+			if (DepthPeelPipeline == nullptr) {
+				ENGINE_ERROR("depth peel pipeline: {}", SDL_GetError());
 			}
 		}
 
@@ -492,13 +806,16 @@ namespace engine::render {
 
 		if (pbrSupported) {
 			DepthLinearPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R32_FLOAT);
+			DepthValidityPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
+			CameraMotionPipeline = fullscreen(cameraMotionFragment, SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT);
 			SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			DeferredLightingPipeline =
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
-			if (DepthLinearPipeline == nullptr || SsaoPipeline == nullptr ||
+			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
+				CameraMotionPipeline == nullptr || SsaoPipeline == nullptr ||
 				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
 				TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
@@ -564,6 +881,18 @@ namespace engine::render {
 		if (!TransparentPipeline) {
 			ENGINE_ERROR("transparent pipeline: {}", SDL_GetError());
 		}
+		if (hdrSupported) {
+			SDL_GPUColorTargetDescription hdrBlended = blendedTarget;
+			hdrBlended.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo hdrTransparent = transparent;
+			hdrTransparent.target_info.color_target_descriptions = &hdrBlended;
+			HdrTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrTransparent);
+			hdrTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			HdrWireframeTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrTransparent);
+			if (HdrOpaquePipeline == nullptr || HdrTransparentPipeline == nullptr) {
+				ENGINE_ERROR("HDR scene pipeline: {}", SDL_GetError());
+			}
+		}
 
 		// **The grid, which is the transparent state with no vertex input.** It
 		// blends like a transparent surface, tests depth like one and writes
@@ -602,6 +931,48 @@ namespace engine::render {
 			ENGINE_WARN("wireframe transparent pipeline unavailable: {}", SDL_GetError());
 		}
 
+		const auto packedPipeline = [&](SDL_GPUGraphicsPipelineCreateInfo info, SDL_GPUShader *vertex) {
+			info.vertex_shader = vertex;
+			info.vertex_input_state = SDL_GPUVertexInputState{};
+			return SDL_CreateGPUGraphicsPipeline(Device, &info);
+		};
+		PackedOpaquePipeline = packedPipeline(opaque, packedOpaqueVertex);
+		PackedForwardPipeline = packedPipeline(forward, packedOpaqueVertex);
+		PackedWireframeOpaquePipeline = packedPipeline(wireframeOpaque, packedOpaqueVertex);
+		PackedTransparentPipeline = packedPipeline(transparent, packedOpaqueVertex);
+		PackedWireframeTransparentPipeline = packedPipeline(wireframeTransparent, packedOpaqueVertex);
+		PackedMeshShadowPipeline = packedPipeline(shadow, packedShadowVertex);
+		if (hdrSupported) {
+			SDL_GPUGraphicsPipelineCreateInfo packedHdrOpaque = opaque;
+			packedHdrOpaque.target_info.color_target_descriptions = &hdrTarget;
+			PackedHdrOpaquePipeline = packedPipeline(packedHdrOpaque, packedOpaqueVertex);
+			packedHdrOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			packedHdrOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			PackedHdrWireframeOpaquePipeline = packedPipeline(packedHdrOpaque, packedOpaqueVertex);
+			SDL_GPUColorTargetDescription packedHdrBlended = blendedTarget;
+			packedHdrBlended.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo packedHdrTransparent = transparent;
+			packedHdrTransparent.target_info.color_target_descriptions = &packedHdrBlended;
+			PackedHdrTransparentPipeline = packedPipeline(packedHdrTransparent, packedOpaqueVertex);
+			packedHdrTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			PackedHdrWireframeTransparentPipeline = packedPipeline(packedHdrTransparent, packedOpaqueVertex);
+		}
+		if (pbrSupported) {
+			PackedGBufferPipeline = packedPipeline(gbuffer, packedOpaqueVertex);
+			SDL_GPUGraphicsPipelineCreateInfo packedWireframeGBuffer = gbuffer;
+			packedWireframeGBuffer.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			packedWireframeGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			PackedWireframeGBufferPipeline = packedPipeline(packedWireframeGBuffer, packedOpaqueVertex);
+			PackedDepthPeelPipeline = packedPipeline(depthPeel, packedOpaqueVertex);
+		}
+		if (PackedOpaquePipeline == nullptr || PackedForwardPipeline == nullptr ||
+			PackedTransparentPipeline == nullptr || PackedMeshShadowPipeline == nullptr ||
+			(pbrSupported && (PackedGBufferPipeline == nullptr || PackedDepthPeelPipeline == nullptr)) ||
+			(hdrSupported &&
+			 (PackedHdrOpaquePipeline == nullptr || PackedHdrTransparentPipeline == nullptr))) {
+			ENGINE_ERROR("packed editable mesh pipeline: {}", SDL_GetError());
+		}
+
 		// --- what a variant is derived from ---------------------------------
 		//
 		// The two descriptors above, copied whole with their arrays, so a shader
@@ -628,6 +999,8 @@ namespace engine::render {
 		// The vertex stage is kept rather than released with the others below,
 		// because a variant built after this function has run needs it.
 		OpaqueVertexShader = opaqueVertex;
+		PackedOpaqueVertexShader = packedOpaqueVertex;
+		SDL_ReleaseGPUShader(Device, packedShadowVertex);
 		VariantsReady = true;
 
 		// --- particles ------------------------------------------------------
@@ -723,6 +1096,11 @@ namespace engine::render {
 				ENGINE_ERROR("additive particle pipeline: {}", SDL_GetError());
 			}
 
+			particleTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			additiveTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			HdrParticlePipeline = SDL_CreateGPUGraphicsPipeline(Device, &particle);
+			HdrAdditiveParticlePipeline = SDL_CreateGPUGraphicsPipeline(Device, &additive);
+
 			SDL_ReleaseGPUShader(Device, particleVertex);
 			SDL_ReleaseGPUShader(Device, particleFragment);
 		}
@@ -796,6 +1174,11 @@ namespace engine::render {
 				ENGINE_ERROR("additive ribbon pipeline: {}", SDL_GetError());
 			}
 
+			ribbonTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			additiveRibbon.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			HdrRibbonPipeline = SDL_CreateGPUGraphicsPipeline(Device, &ribbon);
+			HdrAdditiveRibbonPipeline = SDL_CreateGPUGraphicsPipeline(Device, &additive);
+
 			SDL_ReleaseGPUShader(Device, ribbonVertex);
 			SDL_ReleaseGPUShader(Device, ribbonFragment);
 		}
@@ -851,7 +1234,9 @@ namespace engine::render {
 		// released in `Shutdown` instead** - see `OpaqueVertexShader`.
 		SDL_ReleaseGPUShader(Device, opaqueFragment);
 		SDL_ReleaseGPUShader(Device, gbufferFragment);
+		SDL_ReleaseGPUShader(Device, depthPeelFragment);
 		SDL_ReleaseGPUShader(Device, depthLinearFragment);
+		SDL_ReleaseGPUShader(Device, cameraMotionFragment);
 		SDL_ReleaseGPUShader(Device, ssaoFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
 		SDL_ReleaseGPUShader(Device, skyFragment);
@@ -868,6 +1253,7 @@ namespace engine::render {
 		// world, and the validation path refuses `culling = "occlusion"`
 		// documents with the failure named rather than the client dying here.
 		if (Caps.HasCompute) {
+			Lod.Select = LoadComputePipeline("lod-select.comp", 0, 2, 0, 1, 64, 1);
 			Occlusion.Seed = LoadComputePipeline("hzb-seed.comp", 1, 0, 1, 0, 8, 8);
 			Occlusion.Reduce = LoadComputePipeline("hzb-reduce.comp", 1, 0, 1, 0, 8, 8);
 			Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 2, 0, 2, 64, 1);
@@ -880,7 +1266,8 @@ namespace engine::render {
 			ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
 			ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
 			ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
-			EnvironmentCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
+			EnvironmentSkyCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
+			EnvironmentCloudCompute = LoadComputePipeline("environment-clouds.comp", 1, 0, 1, 0, 8, 8);
 		}
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
@@ -889,12 +1276,389 @@ namespace engine::render {
 		// for something a scene may not even use. `DrawParticles` checks for null
 		// and draws nothing, with the error already in the log above.
 		return OpaquePipeline != nullptr && ForwardPipeline != nullptr && TransparentPipeline != nullptr &&
+			   PackedOpaquePipeline != nullptr && PackedForwardPipeline != nullptr &&
+			   PackedTransparentPipeline != nullptr && PackedMeshShadowPipeline != nullptr &&
+			   (!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
-			   (!pbrSupported ||
-				(GBufferPipeline != nullptr && DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
-				 DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && VolumePipeline != nullptr &&
-				 TonemapPipeline != nullptr)) &&
-			   (!Caps.HasCompute || EnvironmentCompute != nullptr);
+			   (!pbrSupported || (GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
+								  DepthLinearPipeline != nullptr && DepthValidityPipeline != nullptr &&
+								  CameraMotionPipeline != nullptr && SsaoPipeline != nullptr &&
+								  DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
+								  VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
+			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
+									 Lod.Select != nullptr));
+	}
+
+	bool Renderer::Impl::EnsureTransparentLayer() {
+		if (TransparentLayerPipeline && TransparentLayerColourPipeline && PackedTransparentLayerPipeline &&
+			PackedTransparentLayerColourPipeline && ParticleLayerPipeline && ParticleLayerColourPipeline &&
+			AdditiveParticleLayerColourPipeline && RibbonLayerPipeline && RibbonLayerColourPipeline &&
+			AdditiveRibbonLayerColourPipeline)
+			return true;
+		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 12, 4);
+		auto *particleVertex = LoadShader("particle.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		auto *particleFragment = LoadShader("particle-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
+		auto *ribbonVertex = LoadShader("ribbon.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		auto *ribbonFragment = LoadShader("ribbon-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
+		if (!fragment || !particleVertex || !particleFragment || !ribbonVertex || !ribbonFragment) {
+			for (auto *shader : {fragment, particleVertex, particleFragment, ribbonVertex, ribbonFragment})
+				if (shader) SDL_ReleaseGPUShader(Device, shader);
+			return false;
+		}
+		auto info = VariantOpaqueInfo;
+		info.vertex_shader = OpaqueVertexShader;
+		info.fragment_shader = fragment;
+		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		SDL_GPUColorTargetDescription targets[1]{};
+		targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		info.target_info.color_target_descriptions = targets;
+		info.target_info.num_color_targets = 1;
+		auto *nearest = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		// Replay every fragment at the chosen depth with the ordinary blend state.
+		// No depth attachment may suppress coincident fragments in this pass.
+		targets[0].blend_state = VariantBlendedTarget.blend_state;
+		info.target_info.num_color_targets = 1;
+		info.target_info.has_depth_stencil_target = false;
+		info.depth_stencil_state.enable_depth_test = false;
+		info.depth_stencil_state.enable_depth_write = false;
+		auto *colour = nearest ? SDL_CreateGPUGraphicsPipeline(Device, &info) : nullptr;
+		info.vertex_shader = PackedOpaqueVertexShader;
+		info.vertex_input_state = SDL_GPUVertexInputState{};
+		auto *packedColour = colour ? SDL_CreateGPUGraphicsPipeline(Device, &info) : nullptr;
+		targets[0].blend_state = {};
+		info.target_info.has_depth_stencil_target = true;
+		info.depth_stencil_state.enable_depth_test = true;
+		info.depth_stencil_state.enable_depth_write = true;
+		auto *packedNearest = packedColour ? SDL_CreateGPUGraphicsPipeline(Device, &info) : nullptr;
+
+		const SDL_GPUVertexBufferDescription particleBuffers[] = {
+			{0, sizeof(effects::ParticleInstance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
+		};
+		const SDL_GPUVertexAttribute particleAttributes[] = {
+			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::ParticleInstance, Position)},
+			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Size)},
+			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, RotationAndCell)},
+			{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Colour)},
+			{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Slot)},
+		};
+		SDL_GPUColorTargetDescription particleTarget{};
+		particleTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		SDL_GPUGraphicsPipelineCreateInfo particle{};
+		particle.vertex_shader = particleVertex;
+		particle.fragment_shader = particleFragment;
+		particle.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+		particle.vertex_input_state.vertex_buffer_descriptions = particleBuffers;
+		particle.vertex_input_state.num_vertex_buffers = 1;
+		particle.vertex_input_state.vertex_attributes = particleAttributes;
+		particle.vertex_input_state.num_vertex_attributes = 5;
+		particle.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+		particle.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		particle.depth_stencil_state.enable_depth_test = true;
+		particle.depth_stencil_state.enable_depth_write = true;
+		particle.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+		particle.target_info.color_target_descriptions = &particleTarget;
+		particle.target_info.num_color_targets = 1;
+		particle.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		particle.target_info.has_depth_stencil_target = true;
+		auto *particleNearest = packedNearest ? SDL_CreateGPUGraphicsPipeline(Device, &particle) : nullptr;
+
+		particleTarget.blend_state.enable_blend = true;
+		particleTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+		particleTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		particleTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		particleTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		particleTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		particleTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		particle.target_info.has_depth_stencil_target = false;
+		particle.depth_stencil_state.enable_depth_test = false;
+		particle.depth_stencil_state.enable_depth_write = false;
+		auto *particleColour = particleNearest ? SDL_CreateGPUGraphicsPipeline(Device, &particle) : nullptr;
+		particleTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		particleTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		auto *particleAdditive = particleColour ? SDL_CreateGPUGraphicsPipeline(Device, &particle) : nullptr;
+
+		const SDL_GPUVertexBufferDescription ribbonBuffers[] = {
+			{0, sizeof(effects::RibbonVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0},
+		};
+		const SDL_GPUVertexAttribute ribbonAttributes[] = {
+			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::RibbonVertex, Position)},
+			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(effects::RibbonVertex, Coordinate)},
+			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::RibbonVertex, Colour)},
+		};
+		SDL_GPUColorTargetDescription ribbonTarget{};
+		ribbonTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		SDL_GPUGraphicsPipelineCreateInfo ribbon{};
+		ribbon.vertex_shader = ribbonVertex;
+		ribbon.fragment_shader = ribbonFragment;
+		ribbon.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+		ribbon.vertex_input_state.vertex_buffer_descriptions = ribbonBuffers;
+		ribbon.vertex_input_state.num_vertex_buffers = 1;
+		ribbon.vertex_input_state.vertex_attributes = ribbonAttributes;
+		ribbon.vertex_input_state.num_vertex_attributes = 3;
+		ribbon.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+		ribbon.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		ribbon.depth_stencil_state.enable_depth_test = true;
+		ribbon.depth_stencil_state.enable_depth_write = true;
+		ribbon.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+		ribbon.target_info.color_target_descriptions = &ribbonTarget;
+		ribbon.target_info.num_color_targets = 1;
+		ribbon.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		ribbon.target_info.has_depth_stencil_target = true;
+		auto *ribbonNearest = particleAdditive ? SDL_CreateGPUGraphicsPipeline(Device, &ribbon) : nullptr;
+
+		ribbonTarget.blend_state.enable_blend = true;
+		ribbonTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+		ribbonTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		ribbonTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		ribbonTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		ribbonTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		ribbonTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		ribbon.target_info.has_depth_stencil_target = false;
+		ribbon.depth_stencil_state.enable_depth_test = false;
+		ribbon.depth_stencil_state.enable_depth_write = false;
+		auto *ribbonColour = ribbonNearest ? SDL_CreateGPUGraphicsPipeline(Device, &ribbon) : nullptr;
+		ribbonTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		ribbonTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		auto *ribbonAdditive = ribbonColour ? SDL_CreateGPUGraphicsPipeline(Device, &ribbon) : nullptr;
+
+		for (auto *shader : {fragment, particleVertex, particleFragment, ribbonVertex, ribbonFragment})
+			SDL_ReleaseGPUShader(Device, shader);
+		const std::array built{
+			nearest,
+			colour,
+			packedNearest,
+			packedColour,
+			particleNearest,
+			particleColour,
+			particleAdditive,
+			ribbonNearest,
+			ribbonColour,
+			ribbonAdditive
+		};
+		if (std::any_of(built.begin(), built.end(), [](auto *pipeline) { return pipeline == nullptr; })) {
+			for (auto *pipeline : built)
+				if (pipeline) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+			return false;
+		}
+		TransparentLayerPipeline = nearest;
+		TransparentLayerColourPipeline = colour;
+		PackedTransparentLayerPipeline = packedNearest;
+		PackedTransparentLayerColourPipeline = packedColour;
+		ParticleLayerPipeline = particleNearest;
+		ParticleLayerColourPipeline = particleColour;
+		AdditiveParticleLayerColourPipeline = particleAdditive;
+		RibbonLayerPipeline = ribbonNearest;
+		RibbonLayerColourPipeline = ribbonColour;
+		AdditiveRibbonLayerColourPipeline = ribbonAdditive;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureInterfaceLayer() {
+		if (InterfaceLayerPipeline && InterfaceLayerColourPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("interface-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
+		SDL_GPUGraphicsPipeline *nearest = nullptr, *colour = nullptr;
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription targets[1]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 1;
+			info.target_info.has_depth_stencil_target = true;
+			info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+			info.depth_stencil_state.enable_depth_test = true;
+			info.depth_stencil_state.enable_depth_write = true;
+			info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+			nearest = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			targets[0].blend_state = VariantBlendedTarget.blend_state;
+			targets[0].blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			info.target_info.num_color_targets = 1;
+			info.target_info.has_depth_stencil_target = false;
+			info.depth_stencil_state.enable_depth_test = false;
+			info.depth_stencil_state.enable_depth_write = false;
+			colour = nearest ? SDL_CreateGPUGraphicsPipeline(Device, &info) : nullptr;
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		if (!nearest || !colour) {
+			if (nearest) SDL_ReleaseGPUGraphicsPipeline(Device, nearest);
+			if (colour) SDL_ReleaseGPUGraphicsPipeline(Device, colour);
+			return false;
+		}
+		InterfaceLayerPipeline = nearest;
+		InterfaceLayerColourPipeline = colour;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureDeferredLightingBaseline() {
+		if (DeferredLightingBaselinePipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription targets[2]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			targets[1].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 2;
+			DeferredLightingBaselinePipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (DeferredLightingBaselinePipeline == nullptr) {
+				ENGINE_ERROR("deferred lighting baseline pipeline: {}", SDL_GetError());
+			}
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return DeferredLightingBaselinePipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureDeferredLightingDirectional() {
+		if (DeferredLightingDirectionalPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment =
+			LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription targets[3]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			targets[1].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			targets[2].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 3;
+			DeferredLightingDirectionalPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (DeferredLightingDirectionalPipeline == nullptr) {
+				ENGINE_ERROR("deferred lighting directional pipeline: {}", SDL_GetError());
+			}
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return DeferredLightingDirectionalPipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureDirectionalCorrection() {
+		if (DirectionalCorrectPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("ambient-directional-correct.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 1);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+			DirectionalCorrectPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return DirectionalCorrectPipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureAmbientComposition() {
+		if (AmbientResponsePipeline && AmbientMergePipeline && AmbientCorrectPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		if (!vertex) return false;
+		const auto make = [&](const char *shader,
+							  uint32_t samplers,
+							  uint32_t uniforms,
+							  std::span<const SDL_GPUTextureFormat> formats) {
+			auto *fragment = LoadShader(shader, SDL_GPU_SHADERSTAGE_FRAGMENT, samplers, uniforms);
+			if (!fragment) return static_cast<SDL_GPUGraphicsPipeline *>(nullptr);
+			std::array<SDL_GPUColorTargetDescription, 2> targets{};
+			for (size_t index = 0; index < formats.size(); ++index)
+				targets[index].format = formats[index];
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets.data();
+			info.target_info.num_color_targets = formats.size();
+			auto *pipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			SDL_ReleaseGPUShader(Device, fragment);
+			return pipeline;
+		};
+		const std::array responseFormats{SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT};
+		const std::array mergeFormats{
+			SDL_GPU_TEXTUREFORMAT_R32_FLOAT, SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM
+		};
+		const std::array colourFormats{SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT};
+		auto *response = make("ambient-response.frag", 5, 1, responseFormats);
+		auto *merge = make("ambient-merge.frag", 4, 1, mergeFormats);
+		auto *correct = make("ambient-correct.frag", 3, 0, colourFormats);
+		SDL_ReleaseGPUShader(Device, vertex);
+		if (!response || !merge || !correct) {
+			for (auto *pipeline : {response, merge, correct})
+				if (pipeline) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+			return false;
+		}
+		AmbientResponsePipeline = response;
+		AmbientMergePipeline = merge;
+		AmbientCorrectPipeline = correct;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureDepthCompose() {
+		if (DepthComposePipeline != nullptr) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("depth-compose.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
+		if (vertex != nullptr && fragment != nullptr) {
+			SDL_GPUColorTargetDescription targets[2]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			targets[1].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 2;
+			DepthComposePipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex != nullptr) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment != nullptr) SDL_ReleaseGPUShader(Device, fragment);
+		return DepthComposePipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureColourCompose() {
+		if (ColourComposePipeline != nullptr) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("colour-compose.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 0);
+		if (vertex != nullptr && fragment != nullptr) {
+			SDL_GPUColorTargetDescription targets[1]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 1;
+			ColourComposePipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex != nullptr) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment != nullptr) SDL_ReleaseGPUShader(Device, fragment);
+		return ColourComposePipeline != nullptr;
 	}
 
 	void Renderer::Impl::BindPipeline(
@@ -911,6 +1675,13 @@ namespace engine::render {
 				pipeline = WireframeOpaquePipeline;
 			} else if (family == PipelineFamily::Transparent && WireframeTransparentPipeline != nullptr) {
 				pipeline = WireframeTransparentPipeline;
+			} else if (family == PipelineFamily::HdrOpaque && HdrWireframeOpaquePipeline != nullptr) {
+				pipeline = HdrWireframeOpaquePipeline;
+			} else if (family == PipelineFamily::HdrTransparent &&
+					   HdrWireframeTransparentPipeline != nullptr) {
+				pipeline = HdrWireframeTransparentPipeline;
+			} else if (family == PipelineFamily::GBuffer && WireframeGBufferPipeline != nullptr) {
+				pipeline = WireframeGBufferPipeline;
 			}
 		}
 
@@ -919,8 +1690,11 @@ namespace engine::render {
 		ActiveFamily = family;
 	}
 
-	bool Renderer::Impl::AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv) {
-		if (!name.IsValid() || spirv.empty() || !VariantsReady || OpaqueVertexShader == nullptr) {
+	bool Renderer::Impl::AddShaderVariant(
+		const core::Name &name, std::span<const uint32_t> spirv, core::Name owner
+	) {
+		if (!name.IsValid() || spirv.empty() || !VariantsReady || OpaqueVertexShader == nullptr ||
+			PackedOpaqueVertexShader == nullptr) {
 			return false;
 		}
 
@@ -983,12 +1757,36 @@ namespace engine::render {
 		variant.Fragment = fragment;
 		variant.Opaque = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
 		variant.Transparent = SDL_CreateGPUGraphicsPipeline(Device, &blended);
+		SDL_GPUGraphicsPipelineCreateInfo packedOpaque = opaque;
+		packedOpaque.vertex_shader = PackedOpaqueVertexShader;
+		packedOpaque.vertex_input_state = SDL_GPUVertexInputState{};
+		SDL_GPUGraphicsPipelineCreateInfo packedBlended = blended;
+		packedBlended.vertex_shader = PackedOpaqueVertexShader;
+		packedBlended.vertex_input_state = SDL_GPUVertexInputState{};
+		variant.PackedOpaque = SDL_CreateGPUGraphicsPipeline(Device, &packedOpaque);
+		variant.PackedTransparent = SDL_CreateGPUGraphicsPipeline(Device, &packedBlended);
+		if (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr) {
+			SDL_GPUColorTargetDescription hdrOpaque = VariantOpaqueTarget;
+			hdrOpaque.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUColorTargetDescription hdrBlended = VariantBlendedTarget;
+			hdrBlended.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			opaque.target_info.color_target_descriptions = &hdrOpaque;
+			blended.target_info.color_target_descriptions = &hdrBlended;
+			packedOpaque.target_info.color_target_descriptions = &hdrOpaque;
+			packedBlended.target_info.color_target_descriptions = &hdrBlended;
+			variant.HdrOpaque = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
+			variant.HdrTransparent = SDL_CreateGPUGraphicsPipeline(Device, &blended);
+			variant.PackedHdrOpaque = SDL_CreateGPUGraphicsPipeline(Device, &packedOpaque);
+			variant.PackedHdrTransparent = SDL_CreateGPUGraphicsPipeline(Device, &packedBlended);
+		}
 
-		// **Both or neither.** A variant with one pipeline would draw a wall
-		// toon-shaded and the pane in front of it with the engine's shader,
-		// which reads as the material not applying to glass rather than as a
-		// pipeline that failed to build.
-		if (variant.Opaque == nullptr || variant.Transparent == nullptr) {
+		// All supported families or none: a partial variant would change the
+		// material when it becomes transparent or appears through a portal.
+		if (variant.Opaque == nullptr || variant.Transparent == nullptr || variant.PackedOpaque == nullptr ||
+			variant.PackedTransparent == nullptr ||
+			(HdrOpaquePipeline != nullptr &&
+			 (variant.HdrOpaque == nullptr || variant.HdrTransparent == nullptr ||
+			  variant.PackedHdrOpaque == nullptr || variant.PackedHdrTransparent == nullptr))) {
 			ENGINE_ERROR("shader '{}' pipeline: {}", name.Text(), SDL_GetError());
 			if (variant.Opaque != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(Device, variant.Opaque);
@@ -996,6 +1794,18 @@ namespace engine::render {
 			if (variant.Transparent != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(Device, variant.Transparent);
 			}
+			if (variant.HdrOpaque != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, variant.HdrOpaque);
+			}
+			if (variant.HdrTransparent != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, variant.HdrTransparent);
+			}
+			for (auto *pipeline :
+				 {variant.PackedOpaque,
+				  variant.PackedTransparent,
+				  variant.PackedHdrOpaque,
+				  variant.PackedHdrTransparent})
+				if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
 			SDL_ReleaseGPUShader(Device, fragment);
 			return false;
 		}
@@ -1003,13 +1813,14 @@ namespace engine::render {
 		// Replacing is the ordinary case: an author editing a `ShaderScript`
 		// bumps its revision every keystroke that lands, and the library hands
 		// the new words straight back here.
-		DropShaderVariant(name);
-		ShaderVariants[name.Id()] = variant;
+		DropShaderVariant(name, owner);
+		variant.CodeHash = assets::Hasher::Of(std::as_bytes(spirv));
+		ShaderVariants[ShaderVariantKey(name, owner)] = variant;
 		return true;
 	}
 
-	void Renderer::Impl::DropShaderVariant(const core::Name &name) {
-		const auto found = ShaderVariants.find(name.Id());
+	void Renderer::Impl::DropShaderVariant(const core::Name &name, core::Name owner) {
+		const auto found = ShaderVariants.find(ShaderVariantKey(name, owner));
 		if (found == ShaderVariants.end()) {
 			return;
 		}
@@ -1020,6 +1831,18 @@ namespace engine::render {
 		// free inside the driver.
 		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.Opaque);
 		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.Transparent);
+		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedOpaque);
+		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedTransparent);
+		if (found->second.HdrOpaque != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.HdrOpaque);
+		}
+		if (found->second.HdrTransparent != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.HdrTransparent);
+		}
+		if (found->second.PackedHdrOpaque != nullptr)
+			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedHdrOpaque);
+		if (found->second.PackedHdrTransparent != nullptr)
+			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedHdrTransparent);
 		SDL_ReleaseGPUShader(Device, found->second.Fragment);
 		ShaderVariants.erase(found);
 	}
@@ -1028,6 +1851,18 @@ namespace engine::render {
 		for (auto &entry : ShaderVariants) {
 			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.Opaque);
 			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.Transparent);
+			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedOpaque);
+			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedTransparent);
+			if (entry.second.HdrOpaque != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.HdrOpaque);
+			}
+			if (entry.second.HdrTransparent != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.HdrTransparent);
+			}
+			if (entry.second.PackedHdrOpaque != nullptr)
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedHdrOpaque);
+			if (entry.second.PackedHdrTransparent != nullptr)
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedHdrTransparent);
 			SDL_ReleaseGPUShader(Device, entry.second.Fragment);
 		}
 		ShaderVariants.clear();
@@ -1036,10 +1871,14 @@ namespace engine::render {
 			SDL_ReleaseGPUShader(Device, OpaqueVertexShader);
 			OpaqueVertexShader = nullptr;
 		}
+		if (PackedOpaqueVertexShader != nullptr) {
+			SDL_ReleaseGPUShader(Device, PackedOpaqueVertexShader);
+			PackedOpaqueVertexShader = nullptr;
+		}
 		VariantsReady = false;
 	}
 
-	SDL_GPUGraphicsPipeline *Renderer::Impl::VariantFor(const core::Name &shader) const {
+	SDL_GPUGraphicsPipeline *Renderer::Impl::VariantFor(const core::Name &shader, core::Name owner) const {
 		if (!shader.IsValid() || ShaderVariants.empty()) {
 			return nullptr;
 		}
@@ -1050,7 +1889,7 @@ namespace engine::render {
 		// that vanished until it did would be a worse symptom than one drawn
 		// plainly. The name being wrong rather than late is reported by
 		// `ShaderLibrary`, where the world can still be asked about it.
-		const auto found = ShaderVariants.find(shader.Id());
+		const auto found = ShaderVariants.find(ShaderVariantKey(shader, owner));
 		if (found == ShaderVariants.end()) {
 			return nullptr;
 		}
@@ -1060,8 +1899,36 @@ namespace engine::render {
 			return found->second.Opaque;
 		case PipelineFamily::Transparent:
 			return found->second.Transparent;
+		case PipelineFamily::HdrOpaque:
+			return found->second.HdrOpaque;
+		case PipelineFamily::HdrTransparent:
+			return found->second.HdrTransparent;
 		case PipelineFamily::Other:
+		case PipelineFamily::GBuffer:
+		case PipelineFamily::DepthPeel:
 			break;
+		}
+		return nullptr;
+	}
+
+	SDL_GPUGraphicsPipeline *
+	Renderer::Impl::PackedVariantFor(const core::Name &shader, core::Name owner) const {
+		if (!shader.IsValid()) return nullptr;
+		const auto found = ShaderVariants.find(ShaderVariantKey(shader, owner));
+		if (found == ShaderVariants.end()) return nullptr;
+		switch (ActiveFamily) {
+		case PipelineFamily::Opaque:
+			return found->second.PackedOpaque;
+		case PipelineFamily::Transparent:
+			return found->second.PackedTransparent;
+		case PipelineFamily::HdrOpaque:
+			return found->second.PackedHdrOpaque;
+		case PipelineFamily::HdrTransparent:
+			return found->second.PackedHdrTransparent;
+		case PipelineFamily::Other:
+		case PipelineFamily::GBuffer:
+		case PipelineFamily::DepthPeel:
+			return nullptr;
 		}
 		return nullptr;
 	}
@@ -1074,13 +1941,22 @@ namespace engine::render {
 		const std::string *source = node.Parameter(core::Name("source"));
 		if (source == nullptr || source->empty()) {
 			const std::string *shader = node.Parameter(core::Name("shader"));
-			if (shader == nullptr || shader->empty()) {
+			std::string_view shaderName = shader != nullptr ? std::string_view(*shader) : std::string_view{};
+			if (shaderName.empty()) {
+				const graph::NodeKindSpec *spec = graph::NodeCatalogue::Find(node.Kind);
+				if (spec != nullptr) {
+					shaderName = spec->DefaultShader;
+				}
+			}
+			if (shaderName.empty()) {
 				ENGINE_WARN("'{}' has no shader or GLSL source, so it records no work", node.Name.Text());
 				return false;
 			}
-			bytes = ReadFile(resources::Shader(*shader, Binary.Form));
+			bytes = ReadFile(resources::Shader(shaderName, Binary.Form));
 			if (bytes.empty()) {
-				ENGINE_WARN("'{}' names shader '{}' but no staged module exists", node.Name.Text(), *shader);
+				ENGINE_WARN(
+					"'{}' names shader '{}' but no staged module exists", node.Name.Text(), shaderName
+				);
 				return false;
 			}
 			return true;
@@ -1111,10 +1987,15 @@ namespace engine::render {
 	}
 
 	SDL_GPUGraphicsPipeline *Renderer::Impl::GraphRasterFor(
-		const NamedPipeline &pipeline, const graph::Node &node, SDL_GPUTextureFormat format, uint32_t samplers
+		const NamedPipeline &pipeline,
+		const graph::Node &node,
+		std::span<const SDL_GPUTextureFormat> formats,
+		uint32_t samplers
 	) {
 		for (const GraphRasterPipeline &entry : GraphRasterPipelines) {
-			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name && entry.Format == format &&
+			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name &&
+				entry.Formats.size() == formats.size() &&
+				std::equal(entry.Formats.begin(), entry.Formats.end(), formats.begin()) &&
 				entry.Samplers == samplers) {
 				return entry.Handle;
 			}
@@ -1147,17 +2028,19 @@ namespace engine::render {
 		}
 
 		SDL_GPUGraphicsPipeline *built = nullptr;
-		if (vertex != nullptr && fragment != nullptr) {
-			SDL_GPUColorTargetDescription target{};
-			target.format = format;
+		if (vertex != nullptr && fragment != nullptr && !formats.empty()) {
+			std::vector<SDL_GPUColorTargetDescription> targets(formats.size());
+			for (size_t index = 0; index < formats.size(); ++index) {
+				targets[index].format = formats[index];
+			}
 			SDL_GPUGraphicsPipelineCreateInfo info{};
 			info.vertex_shader = vertex;
 			info.fragment_shader = fragment;
 			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			info.target_info.color_target_descriptions = &target;
-			info.target_info.num_color_targets = 1;
+			info.target_info.color_target_descriptions = targets.data();
+			info.target_info.num_color_targets = static_cast<uint32_t>(targets.size());
 			built = SDL_CreateGPUGraphicsPipeline(Device, &info);
 			if (built == nullptr) {
 				ENGINE_WARN("raster pipeline for '{}': {}", node.Name.Text(), SDL_GetError());
@@ -1169,7 +2052,9 @@ namespace engine::render {
 		if (fragment != nullptr) {
 			SDL_ReleaseGPUShader(Device, fragment);
 		}
-		GraphRasterPipelines.push_back({pipeline.Name, node.Name, format, samplers, built});
+		GraphRasterPipelines.push_back(
+			{pipeline.Name, node.Name, std::vector(formats.begin(), formats.end()), samplers, built}
+		);
 		return built;
 	}
 
@@ -1178,14 +2063,16 @@ namespace engine::render {
 		const graph::Node &node,
 		uint32_t samplers,
 		uint32_t storage,
+		uint32_t readStorage,
+		uint32_t uniforms,
 		uint32_t localX,
 		uint32_t localY,
 		uint32_t localZ
 	) {
 		for (const GraphComputePipeline &entry : GraphComputePipelines) {
 			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name && entry.Samplers == samplers &&
-				entry.Storage == storage && entry.LocalX == localX && entry.LocalY == localY &&
-				entry.LocalZ == localZ) {
+				entry.Storage == storage && entry.ReadStorage == readStorage && entry.Uniforms == uniforms &&
+				entry.LocalX == localX && entry.LocalY == localY && entry.LocalZ == localZ) {
 				return entry.Handle;
 			}
 		}
@@ -1203,7 +2090,9 @@ namespace engine::render {
 			info.entrypoint = entryPoint.c_str();
 			info.format = Binary.Format;
 			info.num_samplers = samplers;
+			info.num_readonly_storage_buffers = readStorage;
 			info.num_readwrite_storage_textures = storage;
+			info.num_uniform_buffers = uniforms;
 			info.threadcount_x = localX;
 			info.threadcount_y = localY;
 			info.threadcount_z = localZ;
@@ -1213,7 +2102,16 @@ namespace engine::render {
 			}
 		}
 		GraphComputePipelines.push_back(
-			{pipeline.Name, node.Name, samplers, storage, localX, localY, localZ, built}
+			{pipeline.Name,
+			 node.Name,
+			 samplers,
+			 storage,
+			 readStorage,
+			 uniforms,
+			 localX,
+			 localY,
+			 localZ,
+			 built}
 		);
 		return built;
 	}
@@ -1231,6 +2129,12 @@ namespace engine::render {
 				gpu::ReleaseTexture(Device, target.Texture);
 			}
 			GraphTargets.erase(GraphTargets.begin() + static_cast<ptrdiff_t>(index - 1));
+		}
+		for (size_t index = GraphBuffers.size(); index > 0; index--) {
+			GraphBuffer &buffer = GraphBuffers[index - 1];
+			if (buffer.Pipeline != pipeline) continue;
+			if (buffer.Buffer != nullptr && Device != nullptr) gpu::ReleaseBuffer(Device, buffer.Buffer);
+			GraphBuffers.erase(GraphBuffers.begin() + static_cast<ptrdiff_t>(index - 1));
 		}
 		for (size_t index = GraphRasterPipelines.size(); index > 0; index--) {
 			GraphRasterPipeline &entry = GraphRasterPipelines[index - 1];
@@ -1255,8 +2159,16 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::ReleaseAllGraphState() {
+		GraphWorldNames.clear();
+		if (Tessellation.Plans != nullptr) gpu::ReleaseBuffer(Device, Tessellation.Plans);
+		if (Tessellation.Transfer != nullptr) gpu::ReleaseTransferBuffer(Device, Tessellation.Transfer);
+		if (Tessellation.Compute != nullptr) SDL_ReleaseGPUComputePipeline(Device, Tessellation.Compute);
+		Tessellation = {};
 		while (!GraphTargets.empty()) {
 			ReleaseGraphState(GraphTargets.back().Pipeline);
+		}
+		while (!GraphBuffers.empty()) {
+			ReleaseGraphState(GraphBuffers.back().Pipeline);
 		}
 		while (!GraphRasterPipelines.empty()) {
 			ReleaseGraphState(GraphRasterPipelines.back().Pipeline);
@@ -1301,27 +2213,112 @@ namespace engine::render {
 			installed.Graph = pipeline;
 			installed.Compiled = std::move(compiled);
 			installed.EntityNodes = EntityNodesOf(installed.Graph, installed.Compiled);
+			RetainedNodePlan retained = RetainedNodesOf(installed.Graph, customKinds);
+			installed.RetainedNodes = std::move(retained.Nodes);
+			installed.RetainedFamilies = retained.Families;
 			installed.Aliases = graph::BuildResourceAliases(installed.Graph, installed.Compiled);
 			installed.Buffers = graph::PlanCommandBuffers(schedule);
 			installed.Schedule = std::move(schedule);
+			installed.Revision = ++State->PipelineRevision;
 			return true;
 		}
 
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
+		RetainedNodePlan retained = RetainedNodesOf(pipeline, customKinds);
 		State->NamedPipelines.push_back(
 			Impl::NamedPipeline{
 				name,
 				pipeline,
 				std::move(compiled),
 				std::move(entityNodes),
+				std::move(retained.Nodes),
+				retained.Families,
 				std::move(schedule),
 				std::move(aliases),
 				std::move(buffers),
 			}
 		);
+		State->NamedPipelines.back().Revision = ++State->PipelineRevision;
 		return true;
+	}
+
+	std::optional<Renderer::RenderGraphSnapshot>
+	Renderer::DescribePipeline(core::Name name, uint32_t viewWidth, uint32_t viewHeight) const {
+		RequireOwningThread("DescribePipeline");
+		if (State == nullptr || !name.IsValid() || viewWidth == 0 || viewHeight == 0 || viewWidth > 16384 ||
+			viewHeight > 16384) {
+			return std::nullopt;
+		}
+		const auto boundedName = [](core::Name value, bool required) {
+			return (!required || value.IsValid()) &&
+				   (!value.IsValid() || (!value.Text().empty() && value.Text().size() <= 128));
+		};
+		const Impl::NamedPipeline *installed = nullptr;
+		for (const Impl::NamedPipeline &candidate : State->NamedPipelines) {
+			if (candidate.Name == name) {
+				installed = &candidate;
+				break;
+			}
+		}
+		if (installed == nullptr && State->EngineDefault && State->EngineDefault->Name == name) {
+			installed = &*State->EngineDefault;
+		}
+		if (installed == nullptr || !boundedName(installed->Name, true) || installed->Graph.Count() > 256 ||
+			installed->Graph.ResourceCount() > 512) {
+			return std::nullopt;
+		}
+		for (uint32_t value = 1; value <= installed->Graph.Count(); ++value) {
+			const graph::Node *node = installed->Graph.Find(graph::NodeId{value});
+			if (node == nullptr || !boundedName(node->Name, true) || !boundedName(node->Kind, true)) {
+				return std::nullopt;
+			}
+			for (const core::Name port : node->ReadPorts) {
+				if (!boundedName(port, false)) {
+					return std::nullopt;
+				}
+			}
+			for (const core::Name port : node->WritePorts) {
+				if (!boundedName(port, false)) {
+					return std::nullopt;
+				}
+			}
+		}
+		for (uint32_t value = 1; value <= installed->Graph.ResourceCount(); ++value) {
+			const graph::ResourceDesc *resource = installed->Graph.FindResource(graph::ResourceId{value});
+			if (resource == nullptr || !boundedName(resource->Name, true) ||
+				!boundedName(resource->Owner, false)) {
+				return std::nullopt;
+			}
+		}
+		return RenderGraphSnapshot{
+			.Pipeline = installed->Name,
+			.Revision = installed->Revision,
+			.Graph = installed->Graph,
+			.Compiled = installed->Compiled,
+			.Schedule = installed->Schedule,
+			.Aliases = installed->Aliases,
+			.Profile = graph::ProfilePipeline(installed->Graph, installed->Compiled, viewWidth, viewHeight),
+		};
+	}
+
+	std::optional<Renderer::PipelineIdentity> Renderer::ResolvePipelineIdentity(core::Name requested) const {
+		RequireOwningThread("ResolvePipelineIdentity");
+		if (State == nullptr) return std::nullopt;
+		const Impl::NamedPipeline *installed = State->PipelineFor(requested);
+		if (installed == nullptr || !installed->Name.IsValid() || installed->Revision == 0)
+			return std::nullopt;
+		return PipelineIdentity{.Name = installed->Name, .Revision = installed->Revision};
+	}
+
+	bool Renderer::HasPipelineRevision(core::Name name, uint64_t revision) const {
+		RequireOwningThread("HasPipelineRevision");
+		if (State == nullptr || !name.IsValid() || revision == 0) return false;
+		for (const Impl::NamedPipeline &candidate : State->NamedPipelines)
+			if (candidate.Name == name) return candidate.Revision == revision;
+		return State->EngineDefault && State->EngineDefault->Name == name &&
+			   State->EngineDefault->Revision == revision;
 	}
 
 	bool Renderer::InstallNodeHandler(core::Name kind, NodeHandler handler, NodeHandlerLifecycle lifecycle) {
@@ -1411,23 +2408,43 @@ namespace engine::render {
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
+		const std::vector<core::Name> noCustomKinds;
+		RetainedNodePlan retained = RetainedNodesOf(pipeline, noCustomKinds);
 		State->EngineDefault = Impl::NamedPipeline{
 			core::Name("Engine Default"),
 			pipeline,
 			std::move(compiled),
 			std::move(entityNodes),
+			std::move(retained.Nodes),
+			retained.Families,
 			std::move(schedule),
 			std::move(aliases),
 			std::move(buffers)
 		};
+		State->EngineDefault->Revision = ++State->PipelineRevision;
 		return true;
 	}
 
-	Renderer::Renderer() : State(std::make_unique<Impl>()), Owner(std::this_thread::get_id()) {
+	Renderer::Renderer()
+		: State(std::make_unique<Impl>()), HookBind(std::make_unique<DataFactoryHookBind>(*this)),
+		  Owner(std::this_thread::get_id()) {
 		(void)InstallEngineDefault(graph::DefaultPbrDocument());
+		HookBind->RegisterBuiltInDataCaptureHooks();
+		HookBind->RegisterBuiltInViewMutationHooks();
+	}
+
+	void test_support::SetForceGBufferPipelineFailure(bool enabled) {
+		ForceGBufferPipelineFailureForTests.store(enabled, std::memory_order_relaxed);
 	}
 
 	Renderer::~Renderer() {
 		Shutdown();
+	}
+
+	DataFactoryHookBind &Renderer::Hooks() {
+		return *HookBind;
+	}
+	const DataFactoryHookBind &Renderer::Hooks() const {
+		return *HookBind;
 	}
 }

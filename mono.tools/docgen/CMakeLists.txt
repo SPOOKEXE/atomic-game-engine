@@ -106,7 +106,7 @@ foreach(root IN ITEMS
 	# cleanup; nothing links it any more, so the entry goes rather than sitting
 	# as a stale line an EXISTS guard would silently skip.
 	"${CMAKE_SOURCE_DIR}/SECURITY.md"
-	"${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+	"${CMAKE_SOURCE_DIR}/docs/THIRD_PARTY_NOTICES.md"
 	"${CMAKE_SOURCE_DIR}/docs"
 	# The one file, not the tree. AGENTS.md and CONTRIBUTING.md both link to
 	# this README, so leaving it out means two dangling links rather than a
@@ -212,6 +212,10 @@ file(GLOB MONO_INCLUDE_ROOTS
 	"${CMAKE_SOURCE_DIR}/mono.client/include"
 	"${CMAKE_SOURCE_DIR}/mono.server/include"
 	"${CMAKE_SOURCE_DIR}/mono.cdn/include"
+	"${CMAKE_SOURCE_DIR}/mono.network/include"
+	"${CMAKE_SOURCE_DIR}/mono.launcher/include"
+	"${CMAKE_SOURCE_DIR}/mono.discord/include"
+	"${CMAKE_SOURCE_DIR}/mono.unified_tests/include"
 	# The editor, and the node graph library beside it. `mono.studio/nodegraph`
 	# was `mono.engine/nodegraph` until v0.19 and was covered by the engine glob
 	# above; without this line its headers would show `<mono.studio/nodegraph/

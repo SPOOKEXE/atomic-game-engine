@@ -54,6 +54,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/scene/EditablePacking.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -99,6 +100,11 @@ namespace engine::scene {
 		// outside - `render/AGENTS.md`'s winding rule, unchanged for a mesh
 		// built in code.
 		std::vector<uint32_t> Indices;
+
+		// Presentation-only attribute encoding. The canonical arrays above remain
+		// authoritative for editing, saves and collision; the render adapter makes
+		// a compact copy and decodes it at its boundary.
+		EditablePacking Packing;
 
 		// A content signature computed by a bulk geometry commit. Zero means the
 		// incremental editing API changed an array and the signature has not been
@@ -325,6 +331,10 @@ namespace engine::scene {
 	// @since v0.18
 	bool ClearEditableMesh(ecs::Store &store, ecs::Entity instance);
 
+	// Updates mesh export packing after validating supported vertex attributes.
+	// Leaves editable geometry unchanged and advances both packing and mesh revisions.
+	bool SetEditableMeshPacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing);
+
 	// The `EditableMesh` class id, registering the tree if nobody has yet.
 	//
 	// @return The class id.
@@ -356,14 +366,15 @@ namespace engine::scene {
 			uint32_t Revision = 0;
 		};
 
-		// **A vector and a linear scan, for `CollisionShapes`' own reason** -
-		// a world holds a handful of these, and the walk that reads it is
-		// already walking every `EditableMesh` in the world.
+		// Sorted by complete entity id. A streamed terrain can retain hundreds
+		// of editable chunks, so `RefreshEditableMeshCollision` uses binary
+		// lookup and a merge sweep rather than turning its steady-state ledger
+		// maintenance into quadratic work.
 		std::vector<Baked> Rows;
 	};
 
-	// Bakes a collision hull and triangle mesh for every `EditableMesh` whose
-	// geometry has changed, and forgets the shapes of meshes that are gone.
+	// Bakes collision geometry only for `EditableMesh` values a `Collider` names,
+	// and forgets shapes whose mesh is gone or no longer named.
 	//
 	// **The engine gap this closes**: a script that built geometry built
 	// something that could be seen and not touched. `client::
@@ -378,9 +389,10 @@ namespace engine::scene {
 	// matters most: the server is the machine that decides where anybody is
 	// standing, and it has no uploader at all.
 	//
-	// Revision-tracked, because baking is quickhull plus a triangle soup and a
-	// streamed world builds a mesh a frame. A mesh whose revision has not moved
-	// costs one integer compare.
+	// Revision-tracked and demand-driven, because baking is quickhull plus a
+	// triangle soup and a streamed visual world can build a mesh a frame. A
+	// mesh with no collider naming it allocates no collision storage; adding a
+	// matching `Mesh` or `Hull` collider makes the next refresh bake it.
 	//
 	// Call it wherever the geometry is settled and before physics reads it -
 	// which for every host in this repository is once a tick.

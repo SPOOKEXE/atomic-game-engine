@@ -208,6 +208,13 @@ namespace studio {
 		// How big that rectangle is, in the same space as `ImageMin`.
 		glm::vec2 ImageSize{1.0f, 1.0f};
 
+		// Pixel extent of the render target which produced the image. This is
+		// intentionally separate from `ImageSize`: a high-DPI target or a camera
+		// image ceiling can have a different pixel count while its completed image
+		// is fitted into the same panel rectangle. LOD area uses these pixels;
+		// screen-space overlays use `ImageSize`.
+		glm::vec2 RenderSize{0.0f, 0.0f};
+
 		// The camera's near clipping distance, matching `scene::Camera`.
 		//
 		// **Used as the clip plane for `ProjectSegment`, and an epsilon will not

@@ -1,57 +1,77 @@
-#include <engine/assets/Animation.hpp>
-#include <engine/assets/ContentForm.hpp>
-#include <engine/assets/Manifest.hpp>
-#include <engine/assets/Material.hpp>
+#include "DataCaptureDriver.hpp"
+#include "DataFactoryPausedPresentation.hpp"
+#include "NamedCaptureView.hpp"
+
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
+#include <engine/control/features/AudioObservation.hpp>
+#include <engine/control/features/DataCapture.hpp>
+#include <engine/control/features/DataFactory.hpp>
+#include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/RigExport.hpp>
 #include <engine/control/features/Script.hpp>
+#include <engine/control/features/TemporalSample.hpp>
 #include <engine/control/features/Universe.hpp>
+#include <engine/control/features/VisibilityObservation.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Ribbon.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Shooting.hpp>
-#include <engine/game/CollisionContent.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSession.hpp>
+#include <engine/game/Project.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/SettingsMenu.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 #include <engine/parallel/Settings.hpp>
-#include <engine/render/Animation.hpp>
+#include <engine/physics/Clock.hpp>
+#include <engine/render/DebugText.hpp>
+#include <engine/render/MeshTable.hpp>
+#include <engine/render/TextureTable.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
-#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
-#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
-#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/TeleportRequest.hpp>
+#include <engine/scripthost/Runtime.hpp>
+#include <engine/world/HostLink.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
+#include <glm/vec4.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <client/Client.hpp>
-#include <client/ContentDemand.hpp>
+#include <client/DataScriptPackage.hpp>
+#include <client/DataScriptPackageTransaction.hpp>
 #include <client/Replicated.hpp>
+#include <client/WorldSystems.hpp>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
+#include <network/SessionKey.hpp>
+#include <nlohmann/json.hpp>
 #include <thread>
 #include <type_traits>
 
@@ -64,6 +84,30 @@ namespace client {
 	using engine::render::ProfilerTab;
 
 	namespace {
+		uint64_t MixCameraTemporal(uint64_t state, uint64_t value) {
+			return (state ^ value) * 1099511628211ull;
+		}
+
+		uint64_t CameraProjectionSignature(const engine::render::View &view) {
+			uint64_t signature = 1469598103934665603ull;
+			const auto addFloat = [&signature](float value) {
+				signature = MixCameraTemporal(signature, std::bit_cast<uint32_t>(value));
+			};
+			addFloat(view.Camera.FieldOfViewRadians);
+			addFloat(view.Camera.NearPlane);
+			addFloat(view.Camera.FarPlane);
+			signature = MixCameraTemporal(signature, view.Camera.ImageWidth);
+			signature = MixCameraTemporal(signature, view.Camera.ImageHeight);
+			signature = MixCameraTemporal(signature, view.Target == nullptr ? 0 : view.Target->Width);
+			signature = MixCameraTemporal(signature, view.Target == nullptr ? 0 : view.Target->Height);
+			if (!view.Projection) return MixCameraTemporal(signature, 0);
+			signature = MixCameraTemporal(signature, 1);
+			for (size_t column = 0; column < 4; ++column)
+				for (size_t row = 0; row < 4; ++row)
+					addFloat((*view.Projection)[column][row]);
+			return signature;
+		}
+
 		// Parses an exact-length hexadecimal value into `out`.
 		bool ParseHex(std::string_view text, std::span<std::byte> out) {
 			if (text.size() != out.size() * 2) {
@@ -162,7 +206,53 @@ namespace client {
 
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
-		Presentations.SetRate(Settings.Uncapped ? Settings.MaximumFrameRate : 0);
+		SubmittedMoveTick = 0;
+		InputLocalEpoch = InputSequenceEpoch = 0;
+		if (!Settings.RenderPipelineFile.empty()) {
+			if (!Settings.GameFile.empty()) {
+				ENGINE_ERROR("--render-pipeline applies to demo worlds; --game owns its rendering profiles");
+				return false;
+			}
+			std::string error;
+			if (!LoadRenderPipelineFile(
+					Settings.RenderPipelineFile, RenderingProfiles, PipelineSelected, error
+				)) {
+				ENGINE_ERROR(
+					"--render-pipeline '{}' failed: {}", Settings.RenderPipelineFile.string(), error
+				);
+				return false;
+			}
+			ENGINE_INFO("demo render pipeline from {}", Settings.RenderPipelineFile.string());
+		}
+		if (!Settings.CaptureSequence.empty()) {
+			if (Settings.MaximumFrames <= 0 || !Settings.Capture.empty()) {
+				ENGINE_ERROR(
+					"capture-sequence needs a positive frame budget and cannot be combined with capture"
+				);
+				return false;
+			}
+			std::error_code error;
+			std::filesystem::create_directories(Settings.CaptureSequence, error);
+			if (error) {
+				ENGINE_ERROR(
+					"cannot create capture directory '{}': {}",
+					Settings.CaptureSequence.string(),
+					error.message()
+				);
+				return false;
+			}
+		}
+		// A headless data-factory host has no swapchain wait to pace idle service
+		// frames. Keep its normal idle path near the simulation rate, while an
+		// explicit uncapped request keeps its existing rate selection.
+		constexpr uint32_t DATA_FACTORY_HEADLESS_FRAME_RATE = 60;
+		Presentations.SetRate(
+			Settings.PresentationSession != 0
+				? (Settings.MaximumFrameRate != 0 ? Settings.MaximumFrameRate : 60)
+				: (Settings.DataFactory && Settings.Headless && !Settings.Uncapped
+					   ? DATA_FACTORY_HEADLESS_FRAME_RATE
+					   : (Settings.Uncapped ? Settings.MaximumFrameRate : 0))
+		);
 
 		// **Said at startup rather than at the first refusal**, so "my texture
 		// never arrives" and "this client was told not to fetch GIFs" are one
@@ -185,6 +275,10 @@ namespace client {
 			ENGINE_INFO("scene from {}", Settings.ScriptPath);
 		}
 
+		if (!SDL_SetAppMetadata("Atomic Client", nullptr, "atomic-client")) {
+			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
+		}
+
 		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
@@ -201,11 +295,23 @@ namespace client {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
 			}
+
+			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
+			if (icon == nullptr) {
+				ENGINE_WARN("SDL_LoadPNG icon: {}", SDL_GetError());
+			} else {
+				if (!SDL_SetWindowIcon(Window, icon)) {
+					ENGINE_WARN("SDL_SetWindowIcon: {}", SDL_GetError());
+				}
+				SDL_DestroySurface(icon);
+			}
 		}
 
 		// Null when headless, which is what puts the renderer in that mode - the
 		// same call the editor makes, for the same reason.
-		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
+		if (!Renderer.Initialise(
+				Window, static_cast<uint32_t>(Settings.FramesInFlight), Settings.DataFactory
+			)) {
 			return false;
 		}
 
@@ -250,23 +356,435 @@ namespace client {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe_ = std::make_unique<engine::world::Universe>(interactiveWorlds);
-
-		if (!Settings.GameFile.empty()) {
-			if (!LoadGameFile()) {
+		if (Settings.DataFactory) {
+			if (Settings.Worlds != 1 || !Settings.ConnectAddress.empty() ||
+				Settings.PresentationSession != 0 || !Settings.PresentationWorld.empty()) {
+				ENGINE_ERROR("--data-factory requires one local world with no replica or presentation host");
 				return false;
 			}
-		} else if (!BuildDemoWorlds()) {
+			DataFactory = std::make_unique<engine::world::DataFactorySession>(*Universe_);
+			DataAudio = std::make_shared<DataAudioObservationHost>([this](std::string_view instanceId) {
+				return DataFactory ? DataFactory->Inspect(instanceId) : engine::world::DataFactoryReply{};
+			});
+			DataCapture = std::make_shared<engine::render::ScriptDataCaptureBridge>(*DataFactory, Renderer);
+			ControlSurface.SetRenderGraphProvider([this](
+													  const nlohmann::json &arguments, std::string &failure
+												  ) {
+				const std::string instance = arguments.at("instance_id").get<std::string>();
+				const auto current = DataFactory->Inspect(instance);
+				if (current.Status != engine::world::DataFactoryStatus::Ok) {
+					failure = "unavailable: " + current.Detail;
+					return nlohmann::json(nullptr);
+				}
+				if (current.WorldEpoch != arguments.at("expected_world_epoch").get<uint64_t>() ||
+					current.WorldVersion != arguments.at("expected_world_version").get<uint64_t>()) {
+					failure = "version_conflict: world revision changed";
+					return nlohmann::json(nullptr);
+				}
+				const uint64_t viewWidth = arguments.at("view_width").get<uint64_t>();
+				const uint64_t viewHeight = arguments.at("view_height").get<uint64_t>();
+				if (viewWidth == 0 || viewHeight == 0 || viewWidth > 16384 || viewHeight > 16384) {
+					failure = "validation_failed: view dimensions are outside the bounded view size";
+					return nlohmann::json(nullptr);
+				}
+				const engine::world::WorldId instanceWorld = Universe_->Find(engine::core::Name(instance));
+				if (!DataFactoryWorld.IsValid() || instanceWorld != DataFactoryWorld ||
+					Universe_->NameOf(instanceWorld).Text() != instance) {
+					failure = "unavailable: the validated factory world has no current presentation pipeline";
+					return nlohmann::json(nullptr);
+				}
+				const engine::core::Name requested(arguments.at("pipeline").get<std::string>());
+				const engine::core::Name runtime =
+					engine::render::WorldPipelineKey(requested, instanceWorld.Index);
+				const auto graph = Renderer.DescribePipeline(
+					runtime, static_cast<uint32_t>(viewWidth), static_cast<uint32_t>(viewHeight)
+				);
+				if (!graph) {
+					failure = "unavailable: pipeline is not installed";
+					return nlohmann::json(nullptr);
+				}
+				const auto resourceName = [&](engine::graph::ResourceId id) -> nlohmann::json {
+					const auto *resource = graph->Graph.FindResource(id);
+					return resource == nullptr ? nlohmann::json(nullptr)
+											   : nlohmann::json(resource->Name.Text());
+				};
+				const auto bindings = [&](const std::vector<engine::graph::ResourceId> &resources,
+										  const std::vector<engine::core::Name> &ports) {
+					nlohmann::json values = nlohmann::json::array();
+					for (size_t index = 0; index < resources.size(); ++index) {
+						values.push_back(
+							{{"resource", resourceName(resources[index])},
+							 {"port",
+							  index < ports.size() && ports[index].IsValid()
+								  ? nlohmann::json(ports[index].Text())
+								  : nlohmann::json(nullptr)}}
+						);
+					}
+					return values;
+				};
+				const auto profileFor =
+					[&](engine::graph::ResourceId id) -> const engine::graph::ProfileResource * {
+					const auto found = std::find_if(
+						graph->Profile.Resources.begin(),
+						graph->Profile.Resources.end(),
+						[id](const auto &row) { return row.Id == id; }
+					);
+					return found == graph->Profile.Resources.end() ? nullptr : &*found;
+				};
+				nlohmann::json nodes = nlohmann::json::array();
+				for (uint32_t value = 1; value <= graph->Graph.Count(); ++value) {
+					const auto *node = graph->Graph.Find(engine::graph::NodeId{value});
+					if (node != nullptr) {
+						std::vector<std::string> dependencies;
+						const auto current = std::find_if(
+							graph->Profile.Passes.begin(),
+							graph->Profile.Passes.end(),
+							[value](const auto &pass) { return pass.Node.Value == value; }
+						);
+						if (current != graph->Profile.Passes.end()) {
+							for (const engine::graph::ResourceId read : node->Reads) {
+								const engine::graph::Node *producer = nullptr;
+								for (auto pass = graph->Profile.Passes.begin(); pass != current; ++pass) {
+									const auto *candidate = graph->Graph.Find(pass->Node);
+									if (candidate != nullptr &&
+										std::find(candidate->Writes.begin(), candidate->Writes.end(), read) !=
+											candidate->Writes.end()) {
+										producer = candidate;
+									}
+								}
+								if (producer != nullptr &&
+									std::find(
+										dependencies.begin(), dependencies.end(), producer->Name.Text()
+									) == dependencies.end()) {
+									dependencies.emplace_back(producer->Name.Text());
+								}
+							}
+						}
+						nodes.push_back(
+							{{"name", node->Name.Text()},
+							 {"kind", node->Kind.Text()},
+							 {"scope", engine::graph::Describe(node->Scope)},
+							 {"enabled", node->Enabled},
+							 {"reads", bindings(node->Reads, node->ReadPorts)},
+							 {"writes", bindings(node->Writes, node->WritePorts)},
+							 {"depends_on", dependencies}}
+						);
+					}
+				}
+				nlohmann::json resources = nlohmann::json::array();
+				for (uint32_t value = 1; value <= graph->Graph.ResourceCount(); ++value) {
+					const engine::graph::ResourceId id{value};
+					const auto *resource = graph->Graph.FindResource(id);
+					const auto *profile = profileFor(id);
+					if (resource != nullptr && profile != nullptr) {
+						const engine::graph::ResourceId allocation = graph->Aliases.AllocationOf(id);
+						const char *lifetime = engine::graph::Describe(resource->Lifetime);
+						resources.push_back(
+							{{"name", resource->Name.Text()},
+							 {"kind", engine::graph::Describe(resource->Kind)},
+							 {"format", engine::graph::Describe(resource->Format)},
+							 {"external", resource->External},
+							 {"width", profile->Width},
+							 {"height", profile->Height},
+							 {"logical_bytes", profile->Bytes},
+							 {"declared_width", resource->Width},
+							 {"declared_height", resource->Height},
+							 {"divisor", resource->Divisor},
+							 {"access", engine::graph::Describe(resource->Access)},
+							 {"samples", resource->Samples},
+							 {"depth", resource->Depth},
+							 {"layers", resource->Layers},
+							 {"first_mip", resource->FirstMip},
+							 {"mip_count", resource->MipCount},
+							 {"colour_space", engine::graph::Describe(resource->ColourSpace)},
+							 {"alpha_space", engine::graph::Describe(resource->AlphaSpace)},
+							 {"buffer_stride", resource->BufferStride},
+							 {"lifetime",
+							  std::string_view(lifetime) == "?" ? nlohmann::json(nullptr)
+																: nlohmann::json(lifetime)},
+							 {"owner",
+							  resource->Owner.IsValid() ? nlohmann::json(resource->Owner.Text())
+														: nlohmann::json(nullptr)},
+							 {"history_generation", resource->HistoryGeneration},
+							 {"first_write",
+							  profile->FirstWrite == engine::graph::ProfileResource::NEVER
+								  ? nlohmann::json(nullptr)
+								  : nlohmann::json(profile->FirstWrite)},
+							 {"last_read",
+							  profile->LastRead == engine::graph::ProfileResource::NEVER
+								  ? nlohmann::json(nullptr)
+								  : nlohmann::json(profile->LastRead)},
+							 {"alias_owner",
+							  allocation.IsValid() ? resourceName(allocation) : nlohmann::json(nullptr)}}
+						);
+					}
+				}
+				nlohmann::json compiled = nlohmann::json::array();
+				for (size_t index = 0; index < graph->Profile.Passes.size(); ++index) {
+					const auto &pass = graph->Profile.Passes[index];
+					compiled.push_back(
+						{{"index", index},
+						 {"name", pass.Name.Text()},
+						 {"kind", pass.Kind.Text()},
+						 {"band", engine::graph::Describe(pass.Where)}}
+					);
+				}
+				nlohmann::json waves = nlohmann::json::array();
+				for (const auto &wave : graph->Schedule.Waves) {
+					nlohmann::json entries = nlohmann::json::array();
+					for (const auto &scheduled : wave.Nodes) {
+						const auto *node = graph->Graph.Find(scheduled.Node);
+						if (node != nullptr)
+							entries.push_back(
+								{{"node", node->Name.Text()},
+								 {"queue", engine::graph::Describe(scheduled.Queue)},
+								 {"async_eligible", scheduled.AsyncEligible},
+								 {"dispatch", {scheduled.GroupsX, scheduled.GroupsY, scheduled.GroupsZ}}}
+							);
+					}
+					waves.push_back({{"concurrent", wave.Concurrent}, {"nodes", std::move(entries)}});
+				}
+				return nlohmann::json{
+					{"schema", "render_graph/v1"},
+					{"status", "ok"},
+					{"instance_id", instance},
+					{"world_epoch", current.WorldEpoch},
+					{"world_version", current.WorldVersion},
+					{"lifecycle",
+					 {{"tick", current.Clock.Tick},
+					  {"time_ns", current.Clock.TimeNanoseconds},
+					  {"rational_time_available", current.Clock.RationalTimeAvailable}}},
+					{"pipeline", graph->Pipeline.Text()},
+					{"pipeline_revision", graph->Revision},
+					{"provenance", "installed_graph_static_description"},
+					{"dimensions",
+					 {{"width", arguments.at("view_width")}, {"height", arguments.at("view_height")}}},
+					{"nodes", std::move(nodes)},
+					{"resources", std::move(resources)},
+					{"compiled_passes", std::move(compiled)},
+					{"schedule", std::move(waves)},
+					{"budget_estimates",
+					 {{"total_logical_bytes", graph->Profile.TotalBytes},
+					  {"allocated_logical_bytes", graph->Profile.AllocatedBytes},
+					  {"peak_live_bytes", graph->Profile.PeakBytes}}},
+					{"unavailable",
+					 {{"actual_timings", "not measured by the installed graph"},
+					  {"driver_residency", "logical bytes do not report driver heap residency"},
+					  {"physical_overlap", "async eligibility does not prove device overlap"},
+					  {"historical_snapshot_identity", "the graph carries no captured snapshot identity"}}}
+				};
+			});
+			DataLifecycle = std::make_shared<engine::script::QueuedDataLifecycleBridge>(*DataFactory);
+			FactoryRehydrator = std::make_unique<DataFactoryRehydrator>(
+				*Universe_,
+				Runtimes,
+				Settings.Entities,
+				static_cast<uint32_t>(Settings.Width),
+				static_cast<uint32_t>(Settings.Height),
+				DataCapture,
+				DataLifecycle
+			);
+			DataFactory->SetRehydrator({
+				.Prepare = [this](
+							   auto &candidate, auto world, auto &detail
+						   ) { return FactoryRehydrator->Prepare(candidate, world, detail); },
+				.Commit = [this]() noexcept { FactoryRehydrator->Commit(); },
+				.Abort = [this]() noexcept { FactoryRehydrator->Abort(); },
+			});
+			DataFactory->SetForkRehydrator({
+				.Prepare = [this](
+							   std::string_view branchId,
+							   engine::world::Universe &branch,
+							   engine::world::WorldId world,
+							   std::string &detail
+						   ) { return FactoryRehydrator->PrepareFork(branchId, branch, world, detail); },
+				.Commit = [this](std::string_view branchId) { FactoryRehydrator->CommitFork(branchId); },
+				.Abort =
+					[this](std::string_view branchId) noexcept { FactoryRehydrator->AbortFork(branchId); },
+				.Retire =
+					[this](std::string_view branchId) noexcept { FactoryRehydrator->RetireFork(branchId); },
+			});
+			DataFactory->SetPauseParticipant([this](
+												 engine::world::WorldId world,
+												 engine::world::DataFactoryPauseScope scope,
+												 bool paused,
+												 std::string &detail
+											 ) {
+				if (!Settings.DataFactory || !world.IsValid() || (Rendered.IsValid() && world != Rendered)) {
+					detail = "client data-factory mode supports only its local world";
+					return false;
+				}
+				if (scope == engine::world::DataFactoryPauseScope::PhysicsOnly) {
+					Universe_->Enter(world, [paused](engine::ecs::Store &store) {
+						engine::physics::SetPhysicsPaused(store, paused);
+					});
+					return true;
+				}
+				if (Sound == nullptr) return true;
+				const bool before = Sound->Paused();
+				if (Sound->SetPaused(paused)) return true;
+				(void)Sound->SetPaused(before);
+				detail = "audio device could not establish the pause barrier";
+				return false;
+			});
+			DataFactory->SetActionExecutor([this](
+											   engine::world::Universe &universe,
+											   engine::world::WorldId world,
+											   std::span<const engine::world::DataFactoryAction> actions,
+											   engine::world::DataFactoryActionCommit &commit,
+											   std::string &detail
+										   ) {
+				if (!Settings.DataFactory || !world.IsValid() || (Rendered.IsValid() && world != Rendered)) {
+					detail = "client data-factory mode supports only its local world";
+					return false;
+				}
+				const auto found = std::ranges::find_if(Runtimes, [world](const auto &entry) {
+					return entry.first == world;
+				});
+				if (found == Runtimes.end() || found->second == nullptr) {
+					detail = "the factory world has no script runtime";
+					return false;
+				}
+
+				std::vector<engine::core::Name> accepted;
+				accepted.reserve(actions.size());
+				bool valid = true;
+				if (universe.Enter(
+						world,
+						[&](const engine::ecs::Store &store) {
+							const auto available = engine::gui::SettingsMenuActionsOf(store);
+							for (const engine::world::DataFactoryAction &action : actions) {
+								const engine::core::Name id(action.Name);
+								if (std::ranges::find(available, id, &engine::gui::SettingsMenuAction::Id) ==
+									available.end()) {
+									detail = "unsupported action: " + action.Name;
+									valid = false;
+									return;
+								}
+								accepted.push_back(id);
+							}
+						}
+					) != engine::world::WorldStatus::Ok ||
+					!valid)
+					return false;
+				if (!found->second->PrepareSettingsMenuActions(accepted)) {
+					detail = "the script runtime cannot reserve the action batch";
+					return false;
+				}
+
+				// The universe calls this only after its paused-world revalidation,
+				// immediately before the fixed tick that drains the script barrier.
+				commit = [runtime = found->second, actions = std::move(accepted)]() noexcept {
+					runtime->CommitSettingsMenuActions(actions);
+				};
+				return true;
+			});
+			DataFactory->SetWorldLifecycle([this](
+											   engine::world::DataFactoryWorldOperation operation,
+											   engine::world::Universe &universe,
+											   engine::world::WorldId world,
+											   bool committed,
+											   std::string &detail
+										   ) {
+				if (committed) {
+					if (operation == engine::world::DataFactoryWorldOperation::Reset && DataCapture &&
+						world.IsValid()) {
+						std::string ignored;
+						(void)DataCapture->TeardownInstance(universe.NameOf(world).Text(), ignored);
+					}
+					(void)ReconcileDataFactoryWorlds();
+					return true;
+				}
+				if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+					if (!world.IsValid()) {
+						detail = "client could not identify factory world for retirement";
+						return false;
+					}
+					const std::string instance(universe.NameOf(world).Text());
+					if (DataCapture && !DataCapture->TeardownInstance(instance, detail)) return false;
+					if (DataCaptureDriverWorld == world) {
+						DataCaptureDriverCallback = {};
+						DataCaptureDriverTicket.reset();
+						DataCaptureDriverSnapshot.clear();
+						DataCaptureDriverWorld = {};
+						DataCaptureDriverRuntime = nullptr;
+					}
+					return true;
+				}
+				if (!world.IsValid()) {
+					detail = "client could not prepare factory world state";
+					return false;
+				}
+				const engine::world::WorldSettings settings = universe.SettingsOf(world);
+				bool installed = false;
+				if (universe.Enter(
+						world,
+						[this,
+						 &installed,
+						 &settings](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							InstallPresentation(store, systems, Settings.Entities);
+							InstallClientWorldSystems(store, systems, settings.PhysicsTickRate);
+							if (EnsureLocalPlayer(store) == engine::ecs::NULL_ENTITY) return;
+							(void)RestoreDefaultCameraMovement(store, systems);
+							(void)InstallDefaultCamera(store, systems);
+							if (!engine::scene::SetViewportSize(
+									store,
+									static_cast<uint32_t>(Settings.Width),
+									static_cast<uint32_t>(Settings.Height)
+								))
+								return;
+							installed = true;
+						}
+					) != engine::world::WorldStatus::Ok ||
+					!installed) {
+					detail = "client could not prepare factory world state";
+					return false;
+				}
+				return true;
+			});
+			DataFactory->SetRenderOnlyPresenter(
+				[this](const engine::world::DataFactoryRenderOnlyRequest &request, std::string &detail) {
+					if (!Settings.DataFactory || !Rendered.IsValid() ||
+						request.InstanceId != Universe_->NameOf(Rendered).Text()) {
+						detail = "client data-factory mode supports only its rendered local world";
+						return false;
+					}
+					return DataFactoryRenderOnly.Enqueue(request, detail);
+				}
+			);
+			RenderingProfiles.Set(
+				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
+			);
+		}
+		if (!Universe_->ConfigurePresentation(
+				Settings.PresentationSession == 0 ? 1 : Settings.PresentationSession
+			)) {
+			ENGINE_ERROR("could not configure portal image transport");
 			return false;
+		}
+		PortalImages = std::make_unique<engine::render::PortalImageHost>(
+			*Universe_, Renderer, &Shaders, Settings.EnablePostProcessing
+		);
+
+		const bool replicaProducer = Settings.PresentationSession != 0 && !Settings.ConnectAddress.empty();
+		// A live producer owns only its received replica, without a local demo.
+		if (!replicaProducer) {
+			if (!Settings.GameFile.empty()) {
+				if (!LoadGameFile()) return false;
+			} else if (!(Settings.DataFactory && Settings.ScriptPath.empty()) && !BuildDemoWorlds()) {
+				return false;
+			}
 		}
 
 		// The first is the one the panels report on and the one the composed
 		// camera comes from. A client draws one world's worth of camera however
 		// many it composites.
-		Rendered = Simulated.front();
+		if (!Simulated.empty()) Rendered = Simulated.front();
 
 		if (!BeginConnecting()) {
 			return false;
 		}
+		if (replicaProducer) Rendered = Replicated;
 
 		if (Simulated.size() > 1) {
 			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", Simulated.size(), Settings.ViewSpacing);
@@ -292,23 +810,95 @@ namespace client {
 				"MONO_HEAP_PROFILE=ON, the dev preset, or the -dev archive of this release."
 			);
 		}
-		return FinishStartup();
+		return FinishStartup() && InitialisePresentationHost();
+	}
+
+	bool Client::InitialisePresentationHost() {
+		if (Settings.PresentationSession == 0 && Settings.PresentationWorld.empty()) return true;
+		const bool replica = !Settings.ConnectAddress.empty();
+		if (Settings.PresentationSession == 0 || Settings.PresentationWorld.empty() || !Settings.Headless ||
+			(replica ? !Settings.GameFile.empty() || Settings.ServerKey.empty()
+					 : Settings.GameFile.empty())) {
+			ENGINE_ERROR(
+				"presentation hosting requires a session, world and --headless with either --game "
+				"or a pinned --connect and --server-key"
+			);
+			return false;
+		}
+		auto channel = engine::parallel::AdoptInheritedChannel();
+		if (!channel) {
+			ENGINE_ERROR("presentation hosting requires an inherited driver channel");
+			return false;
+		}
+		PresentationLink = std::make_unique<engine::world::HostLink>(std::move(channel));
+		PresentationHostReady = false;
+		return true;
+	}
+
+	bool Client::PumpPresentationHost() {
+		if (!PresentationLink) return true;
+		if (Connection && (Connection->Rejected() || (Connection->Admitted() && !Connection->Live()))) {
+			PortalImages->Clear();
+			(void)PresentationLink->PublishPresentationDirectory(Universe_->LocalPresentationDirectory());
+			return false;
+		}
+		if (!PresentationHostReady && (!Connection || Connection->Joined())) {
+			const auto world = Universe_->Find(engine::core::Name(Settings.PresentationWorld));
+			if (PortalImages->Serve(world).Session == 0) return false;
+			engine::world::HostFrame ready;
+			ready.Signal = engine::world::HostSignal::Ready;
+			PresentationHostReady = PresentationLink->Send(ready);
+		}
+		return PortalImages->PumpDriverLink(*PresentationLink);
 	}
 
 	bool Client::LoadGameFile() {
 		engine::game::GameInfo info;
 		std::string error;
 
-		if (!engine::game::LoadGame(*Universe_, Settings.GameFile, info, error)) {
+		const engine::game::ProjectKind kind = engine::game::ClassifyProject(Settings.GameFile);
+		if (kind == engine::game::ProjectKind::WorldFile) {
+			const engine::world::WorldId imported =
+				engine::game::ImportWorld(*Universe_, Settings.GameFile, engine::core::Name{}, error);
+			if (!imported.IsValid()) {
+				ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
+				return false;
+			}
+			info.Name = Universe_->NameOf(imported);
+		} else if (!engine::game::LoadGame(*Universe_, Settings.GameFile, info, error)) {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
 			return false;
 		}
 		RenderingProfiles = std::move(info.RenderingProfiles);
+		if (Settings.DataFactory) {
+			RenderingProfiles.Set(
+				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
+			);
+		}
 
-		const auto worlds = Universe_->Worlds();
+		auto worlds = Universe_->Worlds();
 		if (worlds.empty()) {
 			ENGINE_ERROR("--game '{}' holds no worlds", Settings.GameFile.string());
 			return false;
+		}
+		if (Settings.DataFactory && worlds.size() != 1) {
+			ENGINE_ERROR("--data-factory requires a game with exactly one local world");
+			return false;
+		}
+		if (!Settings.PresentationWorld.empty()) {
+			const auto selected = Universe_->Find(engine::core::Name(Settings.PresentationWorld));
+			if (!selected.IsValid()) {
+				ENGINE_ERROR("presentation world '{}' is absent from the game", Settings.PresentationWorld);
+				return false;
+			}
+			for (const auto id : worlds) {
+				if (id == selected) continue;
+				const auto settings = Universe_->SettingsOf(id);
+				Universe_->Destroy(id);
+				if (!Universe_->CreateRemote(settings, engine::core::Name("presentation-driver")).IsValid())
+					return false;
+			}
+			worlds = {selected};
 		}
 
 		// **Both halves, in one process.** A single-player run is a server and
@@ -317,13 +907,16 @@ namespace client {
 		// a game's `Script` and its `LocalScript` both run here.
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
+		limits.DataCapture = DataCapture;
+		limits.DataLifecycle = DataLifecycle;
 
 		for (const engine::world::WorldId id : worlds) {
-			const double scriptTickRate = Universe_->SettingsOf(id).ScriptTickRate;
+			const engine::world::WorldSettings worldSettings = Universe_->SettingsOf(id);
 			std::string failure;
 
 			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				InstallPresentation(store, systems, Settings.Entities);
+				InstallClientWorldSystems(store, systems, worldSettings.PhysicsTickRate);
 				const engine::ecs::Entity localPlayer = EnsureLocalPlayer(store);
 				if (localPlayer == engine::ecs::NULL_ENTITY) {
 					failure = "could not establish the single-player client";
@@ -334,7 +927,9 @@ namespace client {
 				// its own keeps it - see `InstallDefaultCamera`.
 				Runtimes.emplace_back(
 					id,
-					engine::game::StartWorldScripts(store, systems, limits, failure, nullptr, scriptTickRate)
+					engine::game::StartWorldScripts(
+						store, systems, limits, failure, nullptr, worldSettings.ScriptTickRate
+					)
 				);
 				(void)engine::gui::ResetPlayerGui(store, localPlayer);
 				InstallDefaultCamera(store, systems);
@@ -355,7 +950,16 @@ namespace client {
 	}
 
 	bool Client::BuildDemoWorlds() {
+		if (Settings.DataFactory) {
+			RenderingProfiles.Set(
+				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
+			);
+		}
 		const uint32_t worlds = std::max(1u, Settings.Worlds);
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		limits.DataCapture = DataCapture;
+		limits.DataLifecycle = DataLifecycle;
 		for (uint32_t index = 0; index < worlds; index++) {
 			engine::world::WorldSettings world;
 
@@ -367,6 +971,7 @@ namespace client {
 				index == 0 ? std::string("client.world") : "client.world." + std::to_string(index)
 			);
 			world.TickRate = Settings.TickRate;
+			world.RenderingProfile = PipelineSelected;
 
 			const engine::world::WorldId id = Universe_->Create(world);
 			if (!id.IsValid()) {
@@ -375,19 +980,25 @@ namespace client {
 			}
 
 			// The scripted path is the only demo-world implementation.
-			const std::string scenePath = Settings.ScriptPath.empty()
-											  ? engine::examples::ExamplePath("Rings.luau")
-											  : Settings.ScriptPath;
+			const engine::examples::DemosLoader demos;
+			std::filesystem::path defaultDemo =
+				demos.Resolve(engine::examples::DemoKind::Script, "Rings.luau");
+			if (defaultDemo.empty()) {
+				defaultDemo = demos.Directory(engine::examples::DemoKind::Script) / "Rings.luau";
+			}
+			const std::string scenePath =
+				Settings.ScriptPath.empty() ? defaultDemo.string() : Settings.ScriptPath;
 
 			bool scripted = true;
 			std::shared_ptr<engine::script::Runtime> runtime;
 			Universe_->Enter(
 				id,
-				[this, &scripted, &scenePath, &runtime](
+				[this, &scripted, &scenePath, &runtime, &limits](
 					engine::ecs::Store &store, engine::ecs::Scheduler &systems
 				) {
 					// Do not present a partially built world.
-					scripted = BuildScriptedWorld(store, systems, scenePath, Settings.Entities, &runtime);
+					scripted =
+						BuildScriptedWorld(store, systems, scenePath, Settings.Entities, &runtime, &limits);
 				}
 			);
 
@@ -413,6 +1024,70 @@ namespace client {
 		}
 
 		return true;
+	}
+
+	bool Client::PublishDataFactoryWorld(engine::world::WorldId world) {
+		if (!world.IsValid()) return false;
+		uint64_t identity = 0;
+		bool viewportReady = false;
+		if (Universe_->Enter(
+				world,
+				[this, &identity, &viewportReady](engine::ecs::Store &store) {
+					identity = store.Identity();
+					viewportReady = engine::scene::SetViewportSize(
+						store, static_cast<uint32_t>(Settings.Width), static_cast<uint32_t>(Settings.Height)
+					);
+				}
+			) != engine::world::WorldStatus::Ok ||
+			!viewportReady)
+			return false;
+		Views.Track(world, Universe_->NameOf(world), Settings.Entities);
+		Simulated.push_back(world);
+		Rendered = world;
+		DataFactoryWorld = world;
+		DataFactoryStoreIdentity = identity;
+		return true;
+	}
+
+	void Client::RemoveDataFactoryWorld(engine::world::WorldId world) {
+		if (!DataFactoryWorld.IsValid() || world != DataFactoryWorld) return;
+		Views.Untrack(world);
+		std::erase(Simulated, world);
+		std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
+		std::erase_if(InstalledWorldPipelines, [world](const auto &entry) { return entry.World == world; });
+		if (Rendered == world) Rendered = {};
+		DataFactoryStoreIdentity = 0;
+		DataFactoryWorld = {};
+		if (DataCaptureDriverWorld == world) {
+			DataCaptureDriverCallback = {};
+			DataCaptureDriverTicket.reset();
+			DataCaptureDriverSnapshot.clear();
+			DataCaptureDriverWorld = {};
+			DataCaptureDriverRuntime = nullptr;
+		}
+	}
+
+	bool Client::ReconcileDataFactoryWorlds() {
+		if (!DataFactory) return true;
+		engine::world::WorldId owned;
+		for (const engine::world::WorldId world : Universe_->Worlds()) {
+			if (DataFactory->OwnsWorld(Universe_->NameOf(world).Text())) {
+				owned = world;
+				break;
+			}
+		}
+		if (!owned.IsValid()) {
+			if (DataFactoryWorld.IsValid()) RemoveDataFactoryWorld(DataFactoryWorld);
+			return true;
+		}
+		uint64_t identity = 0;
+		if (Universe_->Enter(owned, [&identity](engine::ecs::Store &store) {
+				identity = store.Identity();
+			}) != engine::world::WorldStatus::Ok)
+			return false;
+		if (DataFactoryWorld == owned && identity == DataFactoryStoreIdentity) return true;
+		if (DataFactoryWorld.IsValid()) RemoveDataFactoryWorld(DataFactoryWorld);
+		return PublishDataFactoryWorld(owned);
 	}
 
 	bool Client::FinishStartup() {
@@ -452,8 +1127,146 @@ namespace client {
 				engine::control::features::Diagnostics(),
 				engine::control::features::Resources(),
 				engine::control::features::Prompts(),
+				engine::control::features::Discovery(),
+				engine::control::features::RenderGraph(),
 			};
 			ControlSurface.Enable(features);
+			if (DataFactory) {
+				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataAudioObservation(
+						*Universe_, DataAudio, DataFactory.get()
+					)}
+				);
+				AddDataScriptPackageTool(
+					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
+						return ExecuteDataScriptPackageTransaction(
+							{
+								.Universe = *Universe_,
+								.Session = *DataFactory,
+								.RuntimeOf =
+									[this](engine::world::WorldId world) -> engine::script::Runtime * {
+									const auto runtime =
+										std::ranges::find_if(Runtimes, [world](const auto &entry) {
+											return entry.first == world;
+										});
+									return runtime == Runtimes.end() ? nullptr : runtime->second.get();
+								},
+								.DiscardRuntime =
+									[this](engine::world::WorldId world) {
+										std::erase_if(Runtimes, [world](const auto &entry) {
+											return entry.first == world;
+										});
+									},
+								.MakeRuntime =
+									[](engine::ecs::Store &store,
+									   const engine::script::RuntimeLimits &limits) {
+										return engine::script::MakeRuntime(
+											store, engine::script::Language::Luau, limits
+										);
+									},
+								.RunPackage = engine::script::RunDataScriptPackage,
+								.InstallSystems =
+									[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+										InstallPresentation(store, systems, Settings.Entities);
+										(void)EnsureLocalPlayer(store);
+										(void)RestoreDefaultCameraMovement(store, systems);
+										(void)InstallDefaultCamera(store, systems);
+										InstallClientWorldSystems(store, systems);
+									},
+								.Admit =
+									[](std::string_view source, std::string_view entry, std::string &error) {
+										return engine::script::CheckDataScriptPackageSource(
+											engine::script::Language::Luau, source, entry, error
+										);
+									},
+								.Role = engine::script::HostRole::OfBoth(),
+								.Present = true,
+							},
+							request
+						);
+					}
+				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataCapture(*DataFactory, DataCapture)}
+				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::DataScene(
+						*Universe_,
+						DataCapture,
+						DataFactory.get(),
+						[this](std::string_view world, std::string_view name, engine::assets::MeshData &out) {
+							const auto status = Renderer.CopyMesh(
+								engine::core::Name(name),
+								out,
+								engine::script::MAX_GLTF_EXPORT_VERTICES,
+								engine::script::MAX_GLTF_EXPORT_INDICES,
+								engine::core::Name(world)
+							);
+							switch (status) {
+							case engine::render::MeshCopyStatus::Copied:
+								return engine::script::GltfMeshSourceStatus::Available;
+							case engine::render::MeshCopyStatus::OverLimit:
+								return engine::script::GltfMeshSourceStatus::OverLimit;
+							case engine::render::MeshCopyStatus::Packed:
+								return engine::script::GltfMeshSourceStatus::Unsupported;
+							case engine::render::MeshCopyStatus::Invalid:
+								return engine::script::GltfMeshSourceStatus::Invalid;
+							case engine::render::MeshCopyStatus::Missing:
+								return engine::script::GltfMeshSourceStatus::Missing;
+							}
+							return engine::script::GltfMeshSourceStatus::Unsupported;
+						},
+						[this](
+							std::string_view world, std::string_view name, engine::assets::TextureData &out
+						) {
+							const auto status = Renderer.CopyTexture(
+								engine::core::Name(name),
+								out,
+								engine::script::MAX_GLTF_EXPORT_SOURCE_TEXTURE_BYTES,
+								engine::core::Name(world)
+							);
+							switch (status) {
+							case engine::render::TextureCopyStatus::Copied:
+								return engine::script::GltfTextureSourceStatus::Available;
+							case engine::render::TextureCopyStatus::OverLimit:
+								return engine::script::GltfTextureSourceStatus::OverLimit;
+							case engine::render::TextureCopyStatus::Unsupported:
+								return engine::script::GltfTextureSourceStatus::Unsupported;
+							case engine::render::TextureCopyStatus::Invalid:
+								return engine::script::GltfTextureSourceStatus::Invalid;
+							case engine::render::TextureCopyStatus::Missing:
+								return engine::script::GltfTextureSourceStatus::Missing;
+							}
+							return engine::script::GltfTextureSourceStatus::Unsupported;
+						}
+					)}
+				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::TemporalSample(*Universe_, *DataFactory)}
+				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::RigExport(*Universe_, DataFactory.get())}
+				);
+			}
+			ControlSurface.Enable(std::array{engine::control::features::VisibilityObservations([this] {
+				const engine::render::VisibilitySnapshot snapshot = Renderer.Visibility();
+				engine::control::features::VisibilitySnapshotReply reply;
+				reply.Frame = snapshot.Frame;
+				reply.ViewSlot = snapshot.ViewSlot;
+				reply.World = std::string(snapshot.World.Text());
+				reply.Valid = snapshot.Valid;
+				reply.Dropped = snapshot.Dropped;
+				reply.DroppedExact = snapshot.DroppedExact;
+				for (const engine::render::VisibilityObservation &row : snapshot.Observations)
+					reply.Observations.push_back(
+						{std::string(row.World.Text()),
+						 row.Entity,
+						 engine::render::Describe(row.State),
+						 engine::render::Describe(row.Cause)}
+					);
+				return reply;
+			})});
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
@@ -480,592 +1293,18 @@ namespace client {
 		// missing key here is "not yet" rather than "never". Refusing to start
 		// would make redirect mode unreachable for exactly the deployment it is
 		// for: a player who was given an address and nothing else. Nothing is
-		// fetched in the meantime - `Content` stays null until a key exists -
+		// fetched in the meantime - `ContentState->Client` stays null until a key exists -
 		// so the trust boundary is unchanged.
 		if (Settings.ContentPublisherKey.empty() && ExpectsServerContent()) {
 			ENGINE_INFO("content: waiting for the server to name a publisher key");
 			return true;
 		}
 
-		return BuildContentClient();
+		return BuildContentClient(*ContentState);
 	}
 
 	bool Client::ExpectsServerContent() const {
 		return !Settings.ConnectAddress.empty() || Settings.Browse || !Settings.RendezvousAddress.empty();
-	}
-
-	bool Client::BuildContentClient() {
-		engine::delivery::DeliverySettings settings;
-		settings.CachePath = Settings.ContentCache;
-		settings.AllowedHosts = Settings.ContentAllowedHosts;
-		settings.Sources = MergeContentSources(
-			Settings.ContentSources,
-			OfferedContentSources,
-			ContentRelay != nullptr
-				? (Settings.ConnectAddress.empty() ? std::string_view("server")
-												   : std::string_view(Settings.ConnectAddress))
-				: std::string_view()
-		);
-
-		if (settings.Sources.empty()) {
-			// Nobody named anything and there is no link. The origin on this
-			// machine is the historical default and stays it.
-			settings.Sources = engine::delivery::DeliverySettings::Default(Settings.ContentCache).Sources;
-		}
-
-		// **A key pinned here is kept and a server's is only ever a fallback.** A
-		// pinned client refuses rather than downgrades, which is the same position
-		// `ConnectorSettings::ServerIdentity` takes one module along.
-		const std::string &publisher =
-			Settings.ContentPublisherKey.empty() ? OfferedPublisherKey : Settings.ContentPublisherKey;
-		if (const auto key = engine::assets::PublicKey::FromHex(publisher)) {
-			settings.Publisher = *key;
-		} else {
-			ENGINE_ERROR("content delivery needs --publisher-key, 64 hex characters");
-			ENGINE_ERROR("a client that accepted an unsigned manifest would have no trust boundary");
-			return false;
-		}
-
-		std::unique_ptr<engine::delivery::AssetClient> built =
-			engine::delivery::MakeAssetClient(settings, ContentRelay.get());
-		if (!built) {
-			return false;
-		}
-		if (!OfferedContentGrant.empty()) {
-			built->UseGrant(OfferedContentGrant);
-		}
-
-		Content = std::move(built);
-
-		// **Everything asked for is asked for again.** A rebuilt client holds none
-		// of the previous one's requests, and the demand walk only asks for what
-		// it has not asked for - so a set left behind would leave every texture
-		// this client already wanted permanently unrequested.
-		ContentRequested = false;
-		ContentReported = false;
-		ContentPending.clear();
-		ContentIssued.clear();
-		ContentAsked.clear();
-
-		ENGINE_INFO(
-			"content: {} source(s), first is '{}'", settings.Usable().size(), settings.Usable().front().Name
-		);
-		return true;
-	}
-
-	void Client::AdoptContentDirectory(const engine::game::ContentDirectory &directory) {
-		const OfferedContent accepted = AcceptOfferedContent(directory, Settings.ContentAllowedHosts);
-		if (accepted.RefusedByAllowList != 0) {
-			ENGINE_WARN(
-				"content: this client's allow-list refused {} origin(s) the server named",
-				accepted.RefusedByAllowList
-			);
-		}
-		if (accepted.UnresolvedNames != 0) {
-			// **One warning rather than a stream of failures.** `Endpoint::Parse`
-			// refuses a host *name* on purpose - resolving one blocks on a network
-			// service and nothing on the fetch path may block - so a server that
-			// named one has a configuration problem, and saying it once at the
-			// door is where it is useful.
-			ENGINE_WARN(
-				"content: the server named {} origin(s) by host name rather than address - a name has to be "
-				"resolved before it gets here, so they were skipped",
-				accepted.UnresolvedNames
-			);
-		}
-
-		OfferedContentSources = accepted.Permitted;
-		OfferedPublisherKey = directory.PublisherKey;
-		OfferedContentGrant = directory.Grant;
-
-		if (!BuildContentClient()) {
-			ENGINE_WARN("content: what the server named could not be used");
-		}
-	}
-
-	void Client::PumpContent() {
-		if (!Content) {
-			return;
-		}
-
-		// **Named in pieces rather than as one bar, because "content costs
-		// 3 seconds" is not an answer.** The three things under here are a
-		// delivery client resolving and verifying bundles, a demand scan over
-		// the worlds, and a decode-and-upload of whatever finished - and they
-		// stall for entirely different reasons. The whole of this used to have
-		// no span at all, so the frame a game finished loading in read as a
-		// three-second hole between `pump events` and `simulation`, which is
-		// exactly the shape a missing span has and exactly how it was reported.
-		ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
-
-		if (!ContentRequested && Content->Ready()) {
-			ContentRequested = true;
-
-			// **Nothing is requested by kind, which is what v0.10 ended.** The
-			// unit that travels is a *bundle*, so asking for every mesh and
-			// every material asks for essentially every bundle in the store -
-			// and `AssetClient::Pump` resolves, verifies and decompresses all of
-			// it synchronously, because the contract forbids a background
-			// thread. On this repository's own store that was 6.9 GB through one
-			// function on the frame the client started.
-			//
-			// `client/ContentDemand.hpp` carries both failures this replaces.
-			ENGINE_INFO("content: catalogue ready - assets are fetched as the world names them");
-
-			// **The manifest's mesh names, handed to the world once.** Names, not
-			// content - a few hundred strings against the 6.9 GB above. It is the
-			// only way a scene can find out what there is to name, because the
-			// catalogue it can otherwise read holds what has already been asked
-			// for. `scene/PublishedCatalogue.hpp` carries the whole argument, and
-			// naming one of these is still what fetches it.
-			OfferPublishedContent();
-		}
-
-		// **A diff rather than a walk of the catalogue, and only for a world
-		// that has moved.** A world's content names change when a scene is
-		// authored, loaded or replicated, and all three of those happen inside
-		// a tick - so a world whose tick has not advanced is one whose answer
-		// cannot have. `RequestWantedContent` carries the gate. What survives
-		// the diff is almost always nothing, which is why running it every
-		// frame was eight store walks per world to produce an empty list.
-		if (ContentRequested) {
-			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
-			{
-				ENGINE_PROFILE_CAT("content.demand.references", engine::core::ProfileCategory::Assets);
-				RequestWantedContent();
-			}
-		}
-
-		{
-			// Apply completions between frames, outside render passes.
-			ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
-			Content->Pump();
-		}
-
-		// **How much decoding and uploading one frame will do**, and the same
-		// allowance the studio's own intake uses for the same reason: content
-		// arrives in bursts, and draining every completed request in the frame
-		// that noticed them is a frame that takes a third of a second when
-		// somebody walks into a room full of new models. `IntakeBudget` says why
-		// it is bytes rather than a count and why the first arrival is always
-		// admitted.
-		ContentBudget.Begin();
-
-		ENGINE_PROFILE_CAT("content.intake", engine::core::ProfileCategory::Assets);
-
-		size_t kept = 0;
-		for (const engine::delivery::RequestId id : ContentPending) {
-			const engine::delivery::RequestState state = Content->StateOf(id);
-			if (state == engine::delivery::RequestState::Pending) {
-				ContentPending[kept++] = id;
-				continue;
-			}
-
-			// Held rather than dropped: an arrival this frame cannot take is
-			// still an arrival, and putting it back is what makes the budget a
-			// delay instead of a loss.
-			if (!ContentBudget.Admits()) {
-				ContentBudget.Defer();
-				ContentPending[kept++] = id;
-				continue;
-			}
-
-			// **Read before the take, because a take is what destroys it.** A
-			// failed request answers no asset and therefore no name, and the
-			// name is what has to be unmarked - see `render::ChooseTexture`.
-			const engine::core::Name asked(Content->NameOf(id));
-
-			std::optional<engine::delivery::Asset> asset = Content->Take(id);
-
-			// **On the request finishing, not on it succeeding**, and above
-			// every `continue` below so no branch can forget. Unmarking only on
-			// arrival would leave a misspelled sheet expected for ever, which is
-			// precisely the case the purple marker exists for.
-			Renderer.StopExpectingTexture(asked);
-
-			if (!asset) {
-				// Failed, or already taken. Either way there is nothing more to
-				// wait for; `delivery` has already counted it.
-				continue;
-			}
-
-			ContentBudget.Spend(asset->Bytes.size());
-
-			// **The name is published as-is, extension included.** A
-			// `SurfaceAppearance` naming `characters/skin.atex` and a manifest
-			// carrying `characters/skin.atex` have to be the same string or the
-			// lookup misses - and the one place that could diverge is here.
-			const engine::core::Name name(asset->Name);
-			engine::core::ByteReader reader(asset->Bytes);
-
-			if (asset->Kind == engine::assets::AssetKind::Mesh) {
-				engine::assets::MeshData mesh;
-				{
-					ENGINE_PROFILE_CAT("mesh decode", engine::core::ProfileCategory::Assets);
-					if (!engine::assets::Mesh::Read(reader, mesh)) {
-						ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
-						continue;
-					}
-				}
-				// **A mesh's own sheets, asked for at the one point their names
-				// are readable.** `Submesh::Texture` lives in the mesh file, so
-				// `CollectWantedTextures` cannot see it - an imported model's
-				// twenty sheets would otherwise never be fetched at all now that
-				// textures are demand-driven.
-				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
-					if (!submesh.Texture.empty()) {
-						RequestAsset(engine::core::Name(submesh.Texture));
-					}
-				}
-
-				// The upload, which had no span while its texture sibling did -
-				// so a slow mesh looked like time `content` spent on nothing.
-				ENGINE_PROFILE_CAT("mesh upload", engine::core::ProfileCategory::Render);
-				if (Renderer.AddMesh(name, mesh)) {
-					VisualResourcesChanged = true;
-					ContentMeshes++;
-
-					// **The sheets its submeshes name, recorded where they are
-					// readable.** They live inside the mesh file, so this is the
-					// one point anything can learn them - and without them a
-					// script that wants to swap a model's texture has no way to
-					// find out what it is wearing or what to put back.
-					std::vector<engine::core::Name> sheets;
-					sheets.reserve(mesh.Submeshes.size());
-					for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
-						sheets.emplace_back(submesh.Texture);
-					}
-
-					// Mesh metadata is world data, not renderer state.
-					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
-
-					// **The collision geometry, baked once here rather than per
-					// world.** A hull and a triangle soup are a function of the
-					// mesh alone, so building them inside the loop below would
-					// be the same quickhull run four times for four worlds.
-					//
-					// **Through `game` rather than inline**, because a headless
-					// server bakes the same two shapes out of the store it
-					// serves: a second copy of the conversion here is how the
-					// two would come to disagree about a hull, which reads as a
-					// client and a server disagreeing about where a player is
-					// standing.
-					engine::scene::CollisionShapes arrived;
-					{
-						ENGINE_PROFILE_CAT("mesh collision", engine::core::ProfileCategory::Assets);
-						engine::game::AddCollisionShapes(arrived, name, mesh);
-					}
-
-					const auto record = [&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
-						engine::scene::RecordMesh(store, name, triangles, sheets);
-						engine::game::MergeCollisionShapes(store, arrived);
-					};
-
-					for (const engine::world::WorldId id : Simulated) {
-						Universe_->Enter(id, record);
-					}
-					if (ReportedJoin) {
-						Universe_->Enter(Replicated, record);
-					}
-				}
-			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
-				engine::assets::TextureData image;
-				{
-					ENGINE_PROFILE_CAT("texture decode", engine::core::ProfileCategory::Assets);
-					if (!engine::assets::Texture::Read(reader, image)) {
-						ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
-						continue;
-					}
-				}
-				{
-					ENGINE_PROFILE_CAT("texture upload", engine::core::ProfileCategory::Assets);
-					if (Renderer.AddTexture(name, image)) {
-						VisualResourcesChanged = true;
-						ContentTextures++;
-					}
-				}
-
-				// **Flipbook layout is world data, not renderer state**, exactly
-				// as the triangle count above is. A 4x4 animation sheet and a 4x4
-				// tile atlas are the same pixels, so the grid, the frame count
-				// and the authored rate are what tell an emitter how to play one
-				// - and without them every scene using a GIF would have to state
-				// numbers the file already holds. See `scene::TextureCatalogue`.
-				//
-				// Recorded whether or not the upload succeeded: a headless run
-				// has no device and still knows what it read.
-				if (image.IsFlipbook()) {
-					const engine::scene::FlipbookFacts facts{
-						.Side = image.FlipbookSide,
-						.Frames = image.FlipbookFrames,
-						.FrameRate = image.FlipbookFrameRate,
-					};
-					for (const engine::world::WorldId id : Simulated) {
-						Universe_->Enter(id, [&name, &facts](engine::ecs::Store &store) {
-							engine::scene::RecordTexture(store, name, facts);
-						});
-					}
-					if (ReportedJoin) {
-						Universe_->Enter(Replicated, [&name, &facts](engine::ecs::Store &store) {
-							engine::scene::RecordTexture(store, name, facts);
-						});
-					}
-				}
-			} else if (asset->Kind == engine::assets::AssetKind::Material) {
-				engine::assets::MaterialData material;
-				// The one decode on this path with no span of its own.
-				ENGINE_PROFILE_CAT("material decode", engine::core::ProfileCategory::Engine);
-				if (!engine::assets::Material::Read(reader, material)) {
-					ENGINE_WARN("content: {} is not a material this engine reads", asset->Name);
-					continue;
-				}
-
-				// **World data, not renderer state**, exactly as the triangle
-				// count and the flipbook layout above are - and for the sharper
-				// version of the same reason: the renderer never sees a material
-				// at all. `ResolveMaterials` turns one into a texture name on a
-				// part, in `shared`, so a headless server resolves the same
-				// materials the client does.
-				// **All seven, built once and recorded together.** A material is
-				// one thing; recording its colour and forgetting its normals
-				// would draw a part textured and flat, which reads as the normal
-				// map being broken rather than absent.
-				const engine::scene::MaterialMaps maps{
-					.Colour = engine::core::Name(material.ColourMap),
-					.Normal = engine::core::Name(material.NormalMap),
-					.Roughness = engine::core::Name(material.RoughnessMap),
-					.Occlusion = engine::core::Name(material.OcclusionMap),
-					.Height = engine::core::Name(material.HeightMap),
-					.Metalness = engine::core::Name(material.MetalnessMap),
-					.Emissive = engine::core::Name(material.EmissiveMap),
-				};
-
-				// **Deliberately not asked for here**, unlike a mesh's sheets, and
-				// the asymmetry is the point. Every material in the catalogue
-				// arrives whether anything uses it or not - 295 of them on this
-				// store - so fetching each one's sheet on arrival is requesting
-				// every texture by kind again, one indirection later, and it
-				// refuses 160 of them exactly as before.
-				//
-				// A material reaches a *part* through `ResolveMaterials`, which
-				// writes this name into that part's `SurfaceAppearance::ColourMap`
-				// - and that is a field `CollectWantedTextures` already reads. So
-				// the demand path needs no special case: the next pump asks for
-				// the sheets of the materials something is actually made of.
-				for (const engine::world::WorldId id : Simulated) {
-					Universe_->Enter(id, [&name, &maps](engine::ecs::Store &store) {
-						engine::scene::RecordMaterial(store, name, maps);
-					});
-				}
-				if (ReportedJoin) {
-					Universe_->Enter(Replicated, [&name, &maps](engine::ecs::Store &store) {
-						engine::scene::RecordMaterial(store, name, maps);
-					});
-				}
-				ContentMaterials++;
-			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
-				engine::assets::AnimationData animation;
-				if (!engine::assets::Animation::Read(reader, animation)) {
-					ENGINE_WARN("content: {} is not an animation this engine reads", asset->Name);
-					continue;
-				}
-				const auto record = [&name, &animation](engine::ecs::Store &store) {
-					(void)engine::render::RecordAnimation(store, name, animation);
-				};
-				for (const engine::world::WorldId id : Simulated) {
-					Universe_->Enter(id, record);
-				}
-				if (ReportedJoin) {
-					Universe_->Enter(Replicated, record);
-				}
-				ContentAnimations++;
-			} else if (asset->Kind == engine::assets::AssetKind::Audio) {
-				// **Decoded and converted here, once.** The graph must never resample
-				// on the device thread, and a buffer converted per voice would pay
-				// for it again for every part playing a footstep. `DecodeAudio` picks
-				// its decoder from the bytes rather than from the name - Sounds.hpp.
-				ENGINE_PROFILE_CAT("audio decode", engine::core::ProfileCategory::Assets);
-				std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(asset->Bytes);
-				if (!samples) {
-					ENGINE_WARN("content: {} is not audio this engine decodes", asset->Name);
-					continue;
-				}
-
-				// The device's format when there is one, and the graph's default when
-				// there is not. A machine with no output still registers its sounds,
-				// so a headless run exercises everything but the last hop.
-				const engine::audio::AudioFormat target =
-					Sound ? Sound->Format() : engine::audio::AudioFormat{};
-				auto ready = std::make_shared<const engine::audio::SampleBuffer>(samples->ConvertTo(target));
-
-				if (Audible.Add(name, ready)) {
-					ContentSounds++;
-					ENGINE_INFO(
-						"content: {} decoded ({:.1f}s, {} Hz, {} channel(s))",
-						asset->Name,
-						ready->Seconds(),
-						target.SampleRate,
-						target.Channels
-					);
-				}
-			}
-		}
-		ContentPending.resize(kept);
-
-		// Appended after the walk, never during it. See `RequestTexture`.
-		ContentPending.insert(ContentPending.end(), ContentIssued.begin(), ContentIssued.end());
-		ContentIssued.clear();
-
-		if (ContentRequested && ContentPending.empty() && !ContentReported) {
-			ContentReported = true;
-			ENGINE_INFO(
-				"content: {} mesh(es), {} texture(s), {} material(s), {} animation(s) and {} sound(s) "
-				"registered",
-				ContentMeshes,
-				ContentTextures,
-				ContentMaterials,
-				ContentAnimations,
-				ContentSounds
-			);
-		}
-	}
-
-	void Client::OfferPublishedContent() {
-		// **Named, because it lands in `content`'s self time and is not small.**
-		// It walks every entry of the delivery catalogue - nearly two thousand
-		// on a filled store - and enters every world to ask what each wants, on
-		// a path that runs whenever content has been requested. Unprofiled, that
-		// is a chunk of `content` with nothing in it to say what it was.
-		ENGINE_PROFILE_CAT("offer published content", engine::core::ProfileCategory::Engine);
-
-		const engine::assets::Manifest *catalogue = Content ? Content->Catalogue() : nullptr;
-		if (catalogue == nullptr) {
-			return;
-		}
-
-		// **Runtime-readable only.** A `.pmx` and a `.amesh` are both
-		// `AssetKind::Mesh` and only the second is one this process decodes, so
-		// offering both would hand a scene names it can set, fetch and then fail
-		// to draw - a part on the fallback cube with a perfectly good string
-		// behind it.
-		//
-		// **And forms this deployment turned off, for the same reason one step
-		// further out.** A name a scene can set and this process will refuse to
-		// fetch is the same untextured part with a perfectly good string behind
-		// it, arrived at by a different route.
-		const engine::assets::ContentPolicy &allowed =
-			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle);
-
-		std::vector<engine::core::Name> meshes;
-		for (const engine::assets::AssetEntry *entry : catalogue->OfKind(engine::assets::AssetKind::Mesh)) {
-			if (entry != nullptr && engine::assets::IsRuntimeReadable(entry->Name) &&
-				allowed.AllowsName(entry->Name)) {
-				meshes.emplace_back(entry->Name);
-			}
-		}
-
-		// Every simulated world, and the replica when there is one - a scene is a
-		// scene wherever it came from, and a list offered to only some of them
-		// would be a service that answers differently depending on which world a
-		// script happens to be in.
-		for (const engine::world::WorldId id : Simulated) {
-			Universe_->Enter(id, [&meshes](engine::ecs::Store &store) {
-				(void)engine::scene::RecordPublishedMeshes(store, meshes);
-			});
-		}
-		if (ReportedJoin) {
-			Universe_->Enter(Replicated, [&meshes](engine::ecs::Store &store) {
-				(void)engine::scene::RecordPublishedMeshes(store, meshes);
-			});
-		}
-
-		ENGINE_INFO("content: {} published mesh(es) offered to the world", meshes.size());
-	}
-
-	void Client::ScanWantedContent(engine::world::WorldId world) {
-		if (!world.IsValid()) {
-			return;
-		}
-
-		Universe_->Enter(world, [this, world](engine::ecs::Store &store) {
-			// **The gate, and it is a small fixed set of integer compares.**
-			// `CollectWantedContent`
-			// is several walks of the store, and this used to run all of them on
-			// every world on every frame - `docs/ARCH_REVIEW.md` F1, which is
-			// explicit that this is work that should not happen rather than
-			// work to parallelise. `WantedContentRevision` watches only columns
-			// that can carry an asset name. Its monotonic component versions survive
-			// `ClearChanges`, and live row counts cover removals, so the reader
-			// cannot miss a write between pumps. Particle simulation, transforms,
-			// ticks, and additional cameras leave it unchanged.
-			const uint64_t revision = WantedContentRevision(store);
-			const auto scanned = ContentScannedAtRevision.find(world.Index);
-			if (scanned != ContentScannedAtRevision.end() && scanned->second == revision) {
-				return;
-			}
-			ContentScannedAtRevision[world.Index] = revision;
-
-			CollectWantedContent(store, ContentWanted);
-		});
-	}
-
-	void Client::RequestWantedContent() {
-		// Reused rather than made per pump: the steady-state answer is empty and
-		// an allocation per world per frame to produce nothing is the same kind
-		// of waste the gate below removes.
-		ContentWanted.clear();
-
-		for (const engine::world::WorldId id : Simulated) {
-			ScanWantedContent(id);
-		}
-		if (ReportedJoin) {
-			ScanWantedContent(Replicated);
-		}
-
-		for (const engine::core::Name &name : ContentWanted) {
-			RequestAsset(name);
-		}
-	}
-
-	void Client::RequestAsset(const engine::core::Name &texture) {
-		// **Asked once and never again, whatever happened to it.** A name that
-		// failed - not in the manifest, refused by the table - must not be
-		// retried, or a scene naming one misspelled asset issues a request per
-		// pump for the life of the process.
-		if (!Content || !texture.IsValid() || !ContentAsked.insert(texture.Id()).second) {
-			return;
-		}
-
-		// **Refused before the request and not on arrival, so the bytes never
-		// cross.** A form this deployment has turned off is one nothing here
-		// will decode, and fetching it anyway would spend the link on something
-		// destined for a `continue`. Logged once - the insert above is what
-		// makes it once - because a name that silently never arrives is exactly
-		// the failure the settings layer exists to make legible.
-		if (const engine::assets::ContentForm form = engine::assets::FormOfName(texture.Text());
-			!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).Allows(form)) {
-			ENGINE_INFO(
-				"content: not asking for {} - {} content is turned off",
-				texture.Text(),
-				engine::assets::Describe(form)
-			);
-			return;
-		}
-
-		// **Queued rather than appended, because this is called from inside the
-		// walk over `ContentPending`.** A mesh names its own sheets and a
-		// material names its colour map, and both are read while draining that
-		// vector - pushing to it there is a range-for over a container being
-		// grown, which is what it looks like: the walk lost its place and one
-		// texture out of the several hundred asked for arrived.
-		ContentIssued.push_back(Content->Request(texture.Text()));
-
-		// **Marked before the answer, which is the whole point.** Until this
-		// request finishes, a part naming this sheet draws as the default
-		// material rather than as the purple marker - so a scene load looks like
-		// untextured parts becoming textured instead of a purple shimmer across
-		// every imported model. See `render::ChooseTexture`.
-		Renderer.ExpectTexture(texture);
 	}
 
 	void Client::PressNamedElement(engine::ecs::Store &store) {
@@ -1157,12 +1396,40 @@ namespace client {
 		if (Sound == nullptr) {
 			return;
 		}
+		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
+			const engine::world::DataFactoryReply clock =
+				DataFactory->Inspect(Universe_->NameOf(Rendered).Text());
+			if (DataAudioEpoch != 0 && DataAudioEpoch != clock.WorldEpoch) {
+				// A restored universe has no matching mixer snapshot. Rebuild the
+				// null device and stages before it may publish another observation.
+				DataAudio->Clear(clock.InstanceId);
+				Stages.clear();
+				Sound = std::unique_ptr<engine::audio::Device>(engine::audio::OpenNullDevice({}));
+				if (Sound == nullptr) return;
+				DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
+			}
+			if (DataAudioEpoch == 0) DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
+			DataAudioEpoch = clock.WorldEpoch;
+		}
+		std::erase_if(Stages, [&](auto &entry) {
+			const engine::world::WorldId world{entry.first};
+			if (world == Replicated ||
+				std::find(Simulated.begin(), Simulated.end(), world) != Simulated.end())
+				return false;
+			entry.second.Clear(Sound->Mixer());
+			return entry.second.PendingCloses() == 0;
+		});
 
 		// The listener is the composed camera's position, which is **last
 		// frame's**. One frame of latency on an ear is inaudible; reading a live
 		// camera out of a store here would be reading something a world is
 		// writing, which is the whole reason the compositor exists.
-		const engine::core::Vector3 ear = Views.CameraFrame().Position;
+		engine::core::Vector3 ear = Views.CameraFrame().Position;
+		if (Settings.DataFactory && Rendered.IsValid()) {
+			Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+				ear = DataFactoryListener(store, ear);
+			});
+		}
 		const uint32_t rate = Sound->Format().SampleRate;
 
 		const auto sync = [&](engine::world::WorldId id) {
@@ -1187,9 +1454,52 @@ namespace client {
 		if (ReportedJoin) {
 			sync(Replicated);
 		}
+
+		// Data-factory capture owns a null device. The client thread both posts
+		// commands and advances its mixer, so copying this block cannot race an
+		// SDL callback. The regular output path intentionally has no capture.
+		if (!Settings.DataFactory || !DataAudio || !DataFactory || !Rendered.IsValid()) return;
+		auto *nullDevice = dynamic_cast<engine::audio::NullDevice *>(Sound.get());
+		if (nullDevice == nullptr) return;
+		const engine::world::DataFactoryReply clock =
+			DataFactory->Inspect(Universe_->NameOf(Rendered).Text());
+		DataAudio->InvalidateUnless(clock);
+		const std::vector<size_t> slices = DataAudio->AdvanceFrames(clock, nullDevice->Format().SampleRate);
+		std::vector<AudioObservationSourceBinding> sources;
+		std::string detail;
+		bool labelled = false;
+		Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+			const auto stage = Stages.find(Rendered.Index);
+			labelled =
+				stage != Stages.end() && stage->second.CollectObservationSources(store, sources, detail);
+		});
+		if (!labelled) {
+			DataAudio->Clear(clock.InstanceId);
+		}
+		bool rendered = false;
+		for (size_t index = 0; index < slices.size(); ++index) {
+			const size_t frames = slices[index];
+			engine::audio::SampleBuffer waveform(nullDevice->Format(), frames);
+			const engine::audio::MixReport report = nullDevice->Mixer().Render(waveform);
+			rendered = true;
+			if (labelled &&
+				!DataAudio->Publish(
+					clock, nullDevice->Mixer(), waveform, report, sources, detail, index + 1 == slices.size()
+				)) {
+				ENGINE_WARN("data-factory audio observation unavailable: {}", detail);
+			}
+		}
+		if (rendered) {
+			Universe_->Enter(Rendered, [this](engine::ecs::Store &) {
+				if (const auto stage = Stages.find(Rendered.Index); stage != Stages.end())
+					stage->second.ConsumeObservationSources();
+			});
+		}
 	}
 
 	bool Client::BeginAudio() {
+		// Image producers have no audio consumer or player mixer.
+		if (Settings.PresentationSession != 0) return true;
 		// Validate before opening the device so headless runs report file errors.
 		std::shared_ptr<const engine::audio::SampleBuffer> decoded;
 		if (!Settings.SoundPath.empty()) {
@@ -1220,7 +1530,9 @@ namespace client {
 		// Opened whether or not a sound was asked for: a world's own scripts
 		// will want one, and a device that is only opened when a flag is passed
 		// is a device nothing exercises.
-		Sound = engine::audio::OpenDevice({});
+		Sound = Settings.DataFactory
+					? std::unique_ptr<engine::audio::Device>(engine::audio::OpenNullDevice({}))
+					: engine::audio::OpenDevice({});
 		if (Sound == nullptr) {
 			// Not a failure. A CI container has no sound server and a laptop
 			// may have its output disabled; a game that refused to start
@@ -1234,6 +1546,12 @@ namespace client {
 				);
 			}
 			return true;
+		}
+		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
+			const engine::world::DataFactoryReply clock =
+				DataFactory->Inspect(Universe_->NameOf(Rendered).Text());
+			DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
+			DataAudioEpoch = clock.WorldEpoch;
 		}
 		if (!decoded) {
 			return true;
@@ -1294,9 +1612,41 @@ namespace client {
 	void Client::Shutdown() {
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
+		if (DataCapture && DataCaptureDriverWorld.IsValid() && DataCaptureDriverTicket) {
+			const std::string instance(Universe_->NameOf(DataCaptureDriverWorld).Text());
+			DataCapture->Cancel(instance, *DataCaptureDriverTicket);
+			for (size_t attempt = 0; attempt < 4 && DataCaptureDriverTicket; attempt++) {
+				DataCapture->Pump();
+				engine::script::DataCaptureBridgePoll poll;
+				std::string detail;
+				if (DataCapture->Poll(instance, *DataCaptureDriverTicket, poll, detail) &&
+					client::data_capture_driver::Terminal(poll.Status) &&
+					DataCapture->Release(instance, *DataCaptureDriverTicket, detail))
+					DataCaptureDriverTicket.reset();
+			}
+		}
+		for (const auto &[world, runtime] : Runtimes) {
+			if (!runtime) continue;
+			engine::script::HostCallback callback;
+			Universe_->Enter(world, [&](engine::ecs::Store &store) {
+				if (const auto *driver = store.Resource<engine::script::DataCaptureDriver>())
+					callback = driver->Callback;
+				store.RemoveResource<engine::script::DataCaptureDriver>();
+			});
+			if (callback.Valid()) runtime->Release(callback);
+		}
+		DataCaptureDriverCallback = {};
+		// The bridge owns renderer capture tickets. Tear it down while the renderer
+		// still exists so a ticket that remained pending after the bounded drain is
+		// cancelled by its one owner before device teardown.
+		DataCapture.reset();
 		Sound.reset();
-		Content.reset();
+		ContentState->Client.reset();
 
+		PortalDrawing = nullptr;
+		PortalNext.reset();
+		DropPortalObservation();
+		ContentState->Relay.reset();
 		Connection.reset();
 		if (Socket != nullptr) {
 			Socket->Close();
@@ -1311,6 +1661,12 @@ namespace client {
 		// crash but a lock taken on a mutex that no longer exists, and the
 		// process hangs having already run, reported and returned 0.
 		Interface.Shutdown();
+		if (PresentationLink && PortalImages) {
+			PortalImages->Clear();
+			(void)PresentationLink->PublishPresentationDirectory(Universe_->LocalPresentationDirectory());
+		}
+		PresentationLink.reset();
+		PortalImages.reset();
 
 		// **Not guarded by the window, and that guard was the reason nothing
 		// caught the above.** Tearing the renderer down only when there was a
@@ -1478,6 +1834,7 @@ namespace client {
 	}
 
 	bool Client::BeginConnecting() {
+		InitialPortalViewsReady = false;
 		const bool searching =
 			Settings.ConnectAddress.empty() && (Settings.Browse || !Settings.RendezvousAddress.empty());
 		if (Settings.ConnectAddress.empty() && !searching) {
@@ -1507,7 +1864,9 @@ namespace client {
 		}
 
 		engine::world::WorldSettings world;
-		world.Name = engine::core::Name("client.replica");
+		world.Name = engine::core::Name(
+			Settings.PresentationSession != 0 ? Settings.PresentationWorld : "client.replica"
+		);
 		world.TickRate = Settings.TickRate;
 
 		Replicated = Universe_->Create(world);
@@ -1580,10 +1939,13 @@ namespace client {
 		engine::replication::ConnectorSettings connector;
 		connector.Advertised = Advertised;
 		connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
-		ClientIdentity.reset();
-		if (!Settings.PlayKey.empty()) {
+		if (!ClientIdentity) {
 			std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
-			if (!ParseHex(Settings.PlayKey, seed)) {
+			if (Settings.PlayKey.empty()) {
+				const auto ephemeral = network::SessionKey::Draw();
+				if (!ephemeral) return false;
+				seed = ephemeral->Tag({});
+			} else if (!ParseHex(Settings.PlayKey, seed)) {
 				ENGINE_ERROR("client: --play-key is not {} hex characters", seed.size() * 2);
 				return false;
 			}
@@ -1592,9 +1954,9 @@ namespace client {
 				ENGINE_ERROR("client: --play-key is not a usable Ed25519 seed");
 				return false;
 			}
-			connector.ClientIdentity = &*ClientIdentity;
 			ENGINE_INFO("client play identity {}", ClientIdentity->Public().ToHex());
 		}
+		connector.ClientIdentity = &*ClientIdentity;
 		if (!Settings.ServerKey.empty()) {
 			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
 			if (!connector.ServerIdentity.has_value()) {
@@ -1606,6 +1968,7 @@ namespace client {
 		Connection = std::make_unique<engine::replication::Connector>(
 			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
+		ResetPlayPresentation();
 
 		// **Which player is this client's, which nothing else can tell it.**
 		// `scene::LocalPlayer` cannot be replicated - a resource is one row and
@@ -1615,74 +1978,16 @@ namespace client {
 		// client made over it.** A rebuild replaces the fetcher; the routes
 		// already in flight belong to the link, and replacing the thing they are
 		// being assembled in would lose them mid-transfer.
-		ContentRelay = std::make_unique<ContentLink>([this](std::span<const std::byte> payload) {
-			return Connection != nullptr && Connection->SendUser(payload, engine::core::Clock::Seconds());
-		});
+		ContentState->RelayName = Settings.ConnectAddress;
+		ContentState->Relay =
+			std::make_unique<ContentLink>([connection =
+											   Connection.get()](std::span<const std::byte> payload) {
+				return connection->SendUser(payload, engine::core::Clock::Seconds());
+			});
 
+		ConnectedServer = *server;
 		Connection->OnUserMessage([this](std::span<const std::byte> message) {
-			engine::game::JoinNotice notice;
-			if (engine::game::DecodeJoinNotice(message, notice)) {
-				Universe_->Enter(Replicated, [notice](engine::ecs::Store &store) {
-					store.SetResource(engine::scene::LocalPlayer{notice.Player});
-				});
-
-				ENGINE_INFO("client: this is player {}", notice.Player.Id);
-				return;
-			}
-
-			engine::game::TeleportRequestResult teleport;
-			if (engine::game::DecodeTeleportResult(message, teleport)) {
-				bool accepted = false;
-				Universe_->Enter(Replicated, [&accepted, &teleport](engine::ecs::Store &store) {
-					accepted = engine::script::AcceptTeleportResult(store, teleport.Id);
-				});
-				if (!accepted) {
-					return;
-				}
-
-				engine::script::TeleportRequestDecision decision =
-					engine::script::TeleportRequestDecision::NotProcessed;
-				switch (teleport.Decision) {
-				case engine::game::TeleportRequestDecision::NotProcessed:
-					break;
-				case engine::game::TeleportRequestDecision::Denied:
-					decision = engine::script::TeleportRequestDecision::Denied;
-					break;
-				case engine::game::TeleportRequestDecision::Processed:
-					decision = engine::script::TeleportRequestDecision::Processed;
-					break;
-				}
-				if (engine::script::Runtime *runtime = RuntimeOf(Replicated); runtime != nullptr) {
-					runtime->DeliverTeleportResult({teleport.Id, decision, teleport.Message});
-				}
-
-				ENGINE_INFO(
-					"teleport request {}: {}{}",
-					teleport.Id,
-					teleport.Decision == engine::game::TeleportRequestDecision::Processed ? "processed"
-					: teleport.Decision == engine::game::TeleportRequestDecision::Denied  ? "denied"
-																						  : "not processed",
-					teleport.Message.empty() ? "" : std::string(" (" + teleport.Message + ")")
-				);
-				return;
-			}
-
-			// **Where content is, said once at admission.** It cannot be
-			// replicated for `LocalPlayer`'s reason and one more: the grant in it
-			// names this session, so it is per client by construction.
-			engine::game::ContentDirectory directory;
-			if (engine::game::DecodeContentDirectory(message, directory)) {
-				AdoptContentDirectory(directory);
-				return;
-			}
-
-			// A relayed route, or somebody else's message on a shared channel.
-			// Either way this is the last reader, so an unrecognised payload is
-			// ignored rather than counted: the tag exists so that it is a
-			// non-event.
-			if (ContentRelay != nullptr) {
-				(void)ContentRelay->Receive(message);
-			}
+			ReceiveServerMessage(message);
 		});
 
 		if (Discovery != nullptr) {
@@ -1699,6 +2004,94 @@ namespace client {
 
 		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
 		return true;
+	}
+
+	void Client::ReceiveServerMessage(std::span<const std::byte> message) {
+		if (ReceivePlayPresentation(message)) return;
+		engine::game::PlayerMotion motion;
+		if (engine::game::DecodePlayerMotion(message, motion)) {
+			Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
+				(void)AcceptNativePlayerMotion(store, motion, SubmittedMoveTick);
+			});
+			return;
+		}
+		engine::game::PortalSessionMessage admission;
+		if (engine::game::DecodePortalSession(message, admission) &&
+			(Settings.PresentationSession != 0 || ReceivePortalSession(admission)))
+			return;
+		const bool fresh = FreshAdmissionSent && engine::game::DecodePortalSession(message, admission) &&
+						   admission.Kind == engine::game::PortalSessionKind::Ready && admission.Attempt == 1;
+		engine::game::JoinNotice notice;
+		if (fresh) notice.Player = admission.Player;
+		if (fresh || engine::game::DecodeJoinNotice(message, notice)) {
+			Universe_->Enter(Replicated, [notice, fresh, &admission](engine::ecs::Store &store) {
+				store.SetResource(engine::scene::LocalPlayer{notice.Player});
+				if (fresh) {
+					if (const auto *replica = store.Resource<engine::world::Replica>()) {
+						auto identity = *replica;
+						identity.Of = engine::core::Name(admission.World);
+						store.SetResource(identity);
+					}
+				}
+			});
+
+			ENGINE_INFO("client: this is player {}", notice.Player.Id);
+			return;
+		}
+
+		engine::game::TeleportRequestResult teleport;
+		if (engine::game::DecodeTeleportResult(message, teleport)) {
+			bool accepted = false;
+			Universe_->Enter(Replicated, [&accepted, &teleport](engine::ecs::Store &store) {
+				accepted = engine::script::AcceptTeleportResult(store, teleport.Id);
+			});
+			if (!accepted) {
+				return;
+			}
+
+			engine::script::TeleportRequestDecision decision =
+				engine::script::TeleportRequestDecision::NotProcessed;
+			switch (teleport.Decision) {
+			case engine::game::TeleportRequestDecision::NotProcessed:
+				break;
+			case engine::game::TeleportRequestDecision::Denied:
+				decision = engine::script::TeleportRequestDecision::Denied;
+				break;
+			case engine::game::TeleportRequestDecision::Processed:
+				decision = engine::script::TeleportRequestDecision::Processed;
+				break;
+			}
+			if (engine::script::Runtime *runtime = RuntimeOf(Replicated); runtime != nullptr) {
+				runtime->DeliverTeleportResult({teleport.Id, decision, teleport.Message});
+			}
+
+			ENGINE_INFO(
+				"teleport request {}: {}{}",
+				teleport.Id,
+				teleport.Decision == engine::game::TeleportRequestDecision::Processed ? "processed"
+				: teleport.Decision == engine::game::TeleportRequestDecision::Denied  ? "denied"
+																					  : "not processed",
+				teleport.Message.empty() ? "" : std::string(" (" + teleport.Message + ")")
+			);
+			return;
+		}
+
+		// **Where content is, said once at admission.** It cannot be
+		// replicated for `LocalPlayer`'s reason and one more: the grant in it
+		// names this session, so it is per client by construction.
+		engine::game::ContentDirectory directory;
+		if (engine::game::DecodeContentDirectory(message, directory)) {
+			AdoptContentDirectory(*ContentState, directory);
+			return;
+		}
+
+		// A relayed route, or somebody else's message on a shared channel.
+		// Either way this is the last reader, so an unrecognised payload is
+		// ignored rather than counted: the tag exists so that it is a
+		// non-event.
+		if (ContentState->Relay != nullptr) {
+			(void)ContentState->Relay->Receive(message);
+		}
 	}
 
 	engine::world::WorldId Client::InterfaceWorld() const {
@@ -1766,6 +2159,7 @@ namespace client {
 		// `scene::InputState`. `LatchPresses` is that latch for every key, in
 		// the state both the client and the studio already share.
 		state->LatchPresses();
+		engine::scene::LatchCameraInput(store);
 
 		if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
 			controllers != nullptr) {
@@ -1779,9 +2173,41 @@ namespace client {
 			}
 			controllers->LatchPresses();
 		}
+		if (WaitingForPortalViews() && store.Resource<engine::world::Replica>()) {
+			// Both prediction and network input read this state. Camera look and zoom remain live.
+			using engine::scene::KeyCode;
+			for (const auto key :
+				 {KeyCode::W,
+				  KeyCode::A,
+				  KeyCode::S,
+				  KeyCode::D,
+				  KeyCode::Up,
+				  KeyCode::Down,
+				  KeyCode::Left,
+				  KeyCode::Right,
+				  KeyCode::Space}) {
+				state->Down.Set(key, false);
+				state->Pressed.Set(key, false);
+			}
+			if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>()) {
+				for (auto &slot : controllers->Slots) {
+					slot.Axes[static_cast<size_t>(engine::scene::ControllerAxis::LeftX)] = 0;
+					slot.Axes[static_cast<size_t>(engine::scene::ControllerAxis::LeftY)] = 0;
+					slot.PressedButtons &= ~(1u << static_cast<uint8_t>(engine::scene::ControllerButton::A));
+				}
+			}
+		}
+	}
+
+	std::optional<uint64_t> Client::InputTickAt(uint64_t localTick) const {
+		if (localTick < InputLocalEpoch) return {};
+		const uint64_t elapsedTicks = localTick - InputLocalEpoch;
+		if (elapsedTicks > std::numeric_limits<uint64_t>::max() - InputSequenceEpoch) return {};
+		return InputSequenceEpoch + elapsedTicks;
 	}
 
 	void Client::SubmitMove(double nowSeconds) {
+		if (Settings.PresentationSession != 0) return;
 		if (Connection == nullptr || !Connection->Admitted()) {
 			return;
 		}
@@ -1789,17 +2215,17 @@ namespace client {
 		engine::game::MoveInput move;
 		engine::scene::AimIntent aim;
 		uint64_t tick = 0;
+		double viewTick = 0;
 
-		Universe_->Enter(Replicated, [&move, &aim, &tick](engine::ecs::Store &store) {
-			// **Only once there is a body**, because until the join notice
-			// arrives and the character replicates there is nothing for a move
-			// to mean - and a host that received one would look up a player,
-			// find no character, and do the work of deciding that every tick.
-			if (const auto *local = store.Resource<engine::scene::LocalPlayer>();
-				local == nullptr ||
-				engine::scene::CharacterOf(store, local->Instance) == engine::ecs::NULL_ENTITY) {
+		Universe_->Enter(Replicated, [this, &move, &aim, &tick, &viewTick](engine::ecs::Store &store) {
+			// The authenticated source host forwards movement by transfer receipt
+			// after its Player has retired, until native destination input takes over.
+			const auto *local = store.Resource<engine::scene::LocalPlayer>();
+			if (local == nullptr) return;
+			const bool transferring = PortalNext && PortalNext->ProceedSent && !PortalNext->Refused;
+			if (!transferring &&
+				engine::scene::CharacterOf(store, local->Instance) == engine::ecs::NULL_ENTITY)
 				return;
-			}
 
 			// The same arithmetic a single-player character uses, which is what
 			// `scene::ReadMoveIntent` was split out for: W has to mean "away
@@ -1808,6 +2234,7 @@ namespace client {
 			const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
 			move.Direction = intent.Direction;
 			move.Jump = intent.Jump;
+			move.StepSeconds = store.Time().Delta;
 
 			// **Read in the same scope as the move, from the same tick.** Two
 			// entries would sample the camera on one tick and the keys on
@@ -1815,13 +2242,16 @@ namespace client {
 			// behind where the player was looking - which on a fast flick is
 			// several degrees and reads as the server cheating.
 			aim = engine::scene::ReadAimIntent(store);
+			if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>())
+				viewTick = buffer->RenderTick();
 
 			tick = store.Time().Tick;
 		});
 
-		if (tick == 0) {
-			return;
-		}
+		if (tick == 0) return;
+		const auto inputTick = InputTickAt(tick);
+		if (!inputTick) return;
+		tick = *inputTick;
 
 		// **The aim, and never the result.** `Server::ApplyInputs` states the
 		// division and this is the half that had no caller: `examples::
@@ -1835,6 +2265,7 @@ namespace client {
 		if (aim.Aimed && aim.Fired) {
 			engine::examples::Shot shot;
 			shot.Aim = aim.Ray;
+			shot.ViewTick = viewTick;
 
 			// **The engine's ceiling and not a game's choice.** A client picks
 			// its own range on the wire and `DecodeShot` refuses anything past
@@ -1856,12 +2287,16 @@ namespace client {
 			}
 		}
 
-		// **Sent every tick, including the still ones.** A client that only
-		// spoke when its keys changed would leave a character walking for ever
+		// Send once per observed simulation tick, including still states. A client
+		// that only spoke when its keys changed would leave a character walking for ever
 		// after a dropped release - an input channel is unreliable by design,
 		// and "still walking" is the failure a state-change protocol produces.
-		if (Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
-			Universe_->Enter(Replicated, [&move](engine::ecs::Store &store) {
+		if (tick != SubmittedMoveTick &&
+			Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
+			SubmittedMoveTick = tick;
+			ENGINE_TRACE("move submitted at tick {}", tick);
+			Universe_->Enter(Replicated, [&move, tick](engine::ecs::Store &store) {
+				(void)RecordPortalPredictionInput(store, tick, move, store.Time().Delta);
 				PredictLocalPlayerMove(store, move, store.Time().Delta);
 			});
 
@@ -1881,7 +2316,8 @@ namespace client {
 		}
 	}
 
-	void Client::PollServer(double nowSeconds) {
+	void Client::PollServer(double nowSeconds, bool presentationReady) {
+		PumpPortalObservation(nowSeconds);
 		if (Discovery != nullptr) {
 			// Before the connector's drain, so a rendezvous message routed out
 			// of it is stamped with this tick rather than the previous one.
@@ -1894,7 +2330,24 @@ namespace client {
 		}
 
 		Universe_->Enter(Replicated, [this, nowSeconds](engine::ecs::Store &store) {
+			std::optional<LocalPlayerPrediction> retainedPrediction;
+			if (PortalNext && PortalNext->ProceedSent && !PortalNext->Refused) {
+				const auto *local = store.Resource<engine::scene::LocalPlayer>();
+				const auto *prediction = store.Resource<LocalPlayerPrediction>();
+				if (local && prediction && prediction->Active &&
+					engine::scene::PrepareCameraCharacterHold(store, local->Instance, prediction->Frame))
+					retainedPrediction = *prediction;
+			}
 			Connection->Poll(store, nowSeconds);
+			if (PortalNext && PortalNext->ProceedSent && !PortalNext->Refused && retainedPrediction &&
+				engine::scene::ActivateCameraCharacterHold(store)) {
+				const auto &held = *store.Resource<engine::scene::CameraCharacterHold>();
+				retainedPrediction->Player = held.Player;
+				retainedPrediction->Root = held.Root;
+				store.SetResource(*retainedPrediction);
+				if (auto *buffer = store.ResourceMutable<engine::replication::SnapshotBuffer>())
+					buffer->Predict(held.Root);
+			}
 
 			// **Here, not in the render pass.** This instant is the one where
 			// the store holds the tick the server described; a pass that only
@@ -1903,8 +2356,23 @@ namespace client {
 			// then be interpolating across gaps the network never produced.
 			const uint64_t applied = Connection->Applied();
 			RecordReplicatedTick(store, applied);
-			ReconcileLocalPlayerPrediction(store, applied, Connection->Unconfirmed());
+			if (const auto *native = store.Resource<NativePlayerPrediction>();
+				native && native->Incarnation != 0) {
+				if (const auto inputTick = ReconcileNativePlayerPrediction(
+						store, Connection->Unconfirmed(), Connection->PredictionCoverage()
+					))
+					(void)Connection->AcknowledgePrediction(*inputTick);
+			} else {
+				ReconcileLocalPlayerPrediction(store, applied, Connection->Unconfirmed());
+			}
 		});
+
+		if (Settings.PresentationSession == 0 && !FreshAdmissionSent && Connection->Admitted()) {
+			engine::game::PortalSessionMessage fresh;
+			fresh.Kind = engine::game::PortalSessionKind::Fresh;
+			fresh.Attempt = 1;
+			FreshAdmissionSent = Connection->SendUser(engine::game::EncodePortalSession(fresh), nowSeconds);
+		}
 
 		// The exchange, before the world. A client that sat there with an empty
 		// scene used to have one explanation; it now has two, and the log has to
@@ -1943,9 +2411,11 @@ namespace client {
 		}
 
 		Connection->Advance(nowSeconds);
+		PumpPortalSuccessor(nowSeconds, presentationReady);
 	}
 
 	void Client::SubmitTeleportRequests(double nowSeconds) {
+		if (Settings.PresentationSession != 0) return;
 		if (Connection == nullptr || !ReportedJoin) {
 			return;
 		}
@@ -2343,6 +2813,40 @@ namespace client {
 		);
 	}
 
+	void Client::StampCameraTemporalSamples(std::span<engine::render::View> views) {
+		for (engine::render::View &view : views) {
+			if (view.CameraTemporalId.empty()) {
+				view.CameraTemporalSequence = 0;
+				view.CameraCut = true;
+				continue;
+			}
+
+			uint64_t worldEpoch = 0;
+			if (DataFactory && view.WorldName.IsValid()) {
+				const auto current = DataFactory->Inspect(view.WorldName.Text());
+				if (current.Status == engine::world::DataFactoryStatus::Ok) worldEpoch = current.WorldEpoch;
+			}
+			const uint64_t projection = CameraProjectionSignature(view);
+			// Each output slot retains its own history. A capture and the displayed
+			// view can sample one camera in one renderer batch without skipping each
+			// other's sequence.
+			const std::string sampleId = view.CameraTemporalId + "/" + std::to_string(view.Slot);
+			auto [found, inserted] = CameraTemporalSamples.try_emplace(sampleId);
+			CameraTemporalSample &sample = found->second;
+			const auto source = CameraTemporalSources.find(view.Slot);
+			const bool rebound =
+				source == CameraTemporalSources.end() || source->second != view.CameraTemporalId;
+			const bool discontinuity = inserted || rebound || sample.WorldEpoch != worldEpoch ||
+									   sample.Projection != projection || sample.Sequence == UINT64_MAX;
+			if (discontinuity) sample.Sequence = 0;
+			view.CameraTemporalSequence = ++sample.Sequence;
+			view.CameraCut = view.CameraCut || discontinuity;
+			sample.WorldEpoch = worldEpoch;
+			sample.Projection = projection;
+			CameraTemporalSources[view.Slot] = view.CameraTemporalId;
+		}
+	}
+
 	void Client::Step() {
 		UpdateIterations++;
 		const engine::render::PresentationSchedule::TimePoint presentationNow =
@@ -2390,9 +2894,6 @@ namespace client {
 		}
 
 		const float delta = Clock.Tick();
-		AnimationSeconds += delta;
-		ParticleDeltaSeconds += delta;
-		PresentationDeltaSeconds += delta;
 
 		{
 			ENGINE_HEAP_SCOPE("client.events");
@@ -2400,13 +2901,55 @@ namespace client {
 		}
 
 		if (ControlServer.IsRunning()) {
-			ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
+			ControlServer.Pump([this](const std::string &line) {
+				if (!Settings.DataFactory || !DataFactory || !Rendered.IsValid())
+					return ControlSurface.Answer(line);
+				const std::string answer = AnswerDataFactoryControlLine(
+					*DataFactory,
+					Universe_->NameOf(Rendered).Text(),
+					[this, &line] { return ControlSurface.Answer(line); },
+					[this](const engine::world::DataFactoryReply &) { PumpSounds(); }
+				);
+				(void)ReconcileDataFactoryWorlds();
+				return answer;
+			});
+		}
+		if (Settings.DataFactory) (void)ReconcileDataFactoryWorlds();
+		auto allSystemsPaused = [this] {
+			return DataFactory && Rendered.IsValid() &&
+				   DataFactory->AllSystemsPaused(Universe_->NameOf(Rendered).Text());
+		};
+		bool factoryPaused = allSystemsPaused();
+		const bool renderOnlyPending = DataFactoryRenderOnly.Pending();
+		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
+		auto failRenderOnly = [this](std::string detail) {
+			const auto *request = DataFactoryRenderOnly.Request();
+			if (request == nullptr || !DataFactory) return;
+			(void)DataFactory->CompleteRenderOnly({
+				.InstanceId = request->InstanceId,
+				.OperationId = request->OperationId,
+				.Submitted = false,
+				.Detail = std::move(detail),
+			});
+			DataFactoryRenderOnly.Consume();
+		};
+		// A pending render-only operation owns exactly one static visual state.
+		// Drop time accumulated before the pause even if the renderer later
+		// refuses submission, rather than carrying it into a later normal frame.
+		if (renderOnlyPending) ParticleDeltaSeconds = 0.0f;
+		if (Sound != nullptr) (void)Sound->SetPaused(factoryPaused);
+		if (!factoryPaused) {
+			AnimationSeconds += delta;
+			ParticleDeltaSeconds += delta;
+			PresentationDeltaSeconds += delta;
 		}
 
 		// Input belongs to the update clock. Presentation used to write it just
 		// before PreRender, which made an independently paced client leave every
 		// intervening simulation tick reading the last presented state.
+		const engine::world::WorldId inputReplica = ReportedJoin ? Replicated : engine::world::WorldId{};
 		for (const engine::world::WorldId id : Simulated) {
+			if (factoryPaused && id == Rendered) continue;
 			Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
 		}
 		if (ReportedJoin) {
@@ -2437,6 +2980,176 @@ namespace client {
 			ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 			Universe_->Tick(delta);
 		}
+		// A normal data-factory tick is a completed world boundary before queued
+		// lifecycle work. Capture it now so a following pause or manual Step cannot
+		// relabel its audio with a later scene state.
+		if (Settings.DataFactory) PumpSounds();
+		if (DataLifecycle) {
+			for (;;) {
+				const engine::script::DataLifecyclePumpResult lifecycle = DataLifecycle->PumpOne();
+				if (!lifecycle.Processed) break;
+				// A paused Step owns one completed world tick. Capture it before the
+				// next queued request can mutate the same scene, so every waveform
+				// record retains that exact tick's source state and clock.
+				if (lifecycle.CompletedTick || lifecycle.Restored) PumpSounds();
+				if (lifecycle.PendingRenderOnly) break;
+			}
+		}
+		if (DataCapture) DataCapture->Pump();
+		factoryPaused = allSystemsPaused();
+		if (DataAudio && DataFactory && Rendered.IsValid()) {
+			DataAudio->InvalidateUnless(DataFactory->Inspect(Universe_->NameOf(Rendered).Text()));
+		}
+		// A ticket belongs to the world and VM which created it. Keep that owner
+		// until the renderer accepts its terminal release, even if presentation
+		// switches worlds while the cancellation is in flight.
+		auto finishCaptureCancellation = [this] {
+			if (!DataCaptureDriverCancelling || !DataCapture || !DataCaptureDriverTicket ||
+				!DataCaptureDriverWorld.IsValid())
+				return;
+			const std::string instance(Universe_->NameOf(DataCaptureDriverWorld).Text());
+			client::data_capture_driver::State state{
+				DataCaptureDriverCallback,
+				DataCaptureDriverTicket,
+				DataCaptureDriverCancelling,
+				DataCaptureDriverRuntime
+			};
+			const bool released = client::data_capture_driver::AdvanceCancellation(
+				state,
+				DataCaptureDriverCancelSent,
+				[&](uint64_t ticket) { DataCapture->Cancel(instance, ticket); },
+				[this] { DataCapture->Pump(); },
+				[&](uint64_t ticket) {
+					engine::script::DataCaptureBridgePoll poll;
+					std::string detail;
+					return DataCapture->Poll(instance, ticket, poll, detail) ? poll.Status : std::string{};
+				},
+				[&](uint64_t ticket) {
+					std::string detail;
+					return DataCapture->Release(instance, ticket, detail);
+				}
+			);
+			DataCaptureDriverTicket = state.Ticket;
+			DataCaptureDriverCancelling = state.Cancelling;
+			if (!released) return;
+			DataCaptureDriverCallback = {};
+			DataCaptureDriverSnapshot.clear();
+			DataCaptureDriverWorld = {};
+			DataCaptureDriverRuntime = nullptr;
+		};
+		if (!factoryPaused && DataCaptureDriverTicket) DataCaptureDriverCancelling = true;
+		finishCaptureCancellation();
+		if (factoryPaused && DataFactory && DataCapture && Rendered.IsValid() &&
+			!DataCaptureDriverCancelling) {
+			engine::script::DataCaptureDriver driver;
+			bool registered = false;
+			Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+				if (const auto *stored = store.Resource<engine::script::DataCaptureDriver>();
+					stored != nullptr) {
+					driver = *stored;
+					registered = driver.Callback.Valid();
+				}
+			});
+			std::optional<engine::script::HostCallback> callback;
+			if (registered) callback.emplace(driver.Callback);
+			engine::script::Runtime *ownerRuntime = RuntimeOf(Rendered);
+			client::data_capture_driver::State state;
+			bool ownerCleanupPending = false;
+			if (DataCaptureDriverWorld.IsValid() &&
+				(DataCaptureDriverWorld != Rendered || DataCaptureDriverRuntime != ownerRuntime)) {
+				if (DataCaptureDriverTicket) {
+					DataCaptureDriverCancelling = true;
+					finishCaptureCancellation();
+					ownerCleanupPending = true;
+				} else {
+					DataCaptureDriverCallback = {};
+					DataCaptureDriverWorld = {};
+					DataCaptureDriverRuntime = nullptr;
+				}
+			}
+			if (!ownerCleanupPending && !DataCaptureDriverCancelling) {
+				DataCaptureDriverWorld = Rendered;
+				DataCaptureDriverRuntime = ownerRuntime;
+				state = {
+					DataCaptureDriverCallback,
+					DataCaptureDriverTicket,
+					DataCaptureDriverCancelling,
+					DataCaptureDriverRuntime
+				};
+				const std::optional<uint64_t> retainedTicket = state.Ticket;
+				const auto registration =
+					client::data_capture_driver::Transition(state, true, callback, nullptr, ownerRuntime);
+				DataCaptureDriverCallback = state.Callback;
+				DataCaptureDriverTicket = state.Ticket;
+				DataCaptureDriverCancelling = state.Cancelling;
+				if (registration == client::data_capture_driver::Action::Release && retainedTicket) {
+					std::string detail;
+					if (DataCapture->Release(Universe_->NameOf(Rendered).Text(), *retainedTicket, detail)) {
+						DataCaptureDriverTicket.reset();
+						DataCaptureDriverCancelling = false;
+						DataCaptureDriverSnapshot.clear();
+					} else {
+						DataCaptureDriverTicket = retainedTicket;
+						DataCaptureDriverCancelling = true;
+						DataCaptureDriverCancelSent = false;
+					}
+				}
+			}
+			if (registered && !ownerCleanupPending && !DataCaptureDriverCancelling) {
+				if (!DataCaptureDriverTicket) {
+					const auto saved =
+						DataFactory->Snapshot(Universe_->NameOf(Rendered).Text(), DataCaptureDriverSnapshot);
+					if (saved.Status != engine::world::DataFactoryStatus::Ok)
+						DataCaptureDriverSnapshot.clear();
+				}
+				if (!DataCaptureDriverSnapshot.empty()) {
+					if (engine::script::Runtime *runtime = RuntimeOf(Rendered); runtime != nullptr) {
+						engine::script::HostValue returned;
+						engine::script::HostValue snapshotValue(engine::script::HostTag::String);
+						snapshotValue.Text = DataCaptureDriverSnapshot;
+						engine::script::HostValue ticketValue(engine::script::HostTag::Nil);
+						if (DataCaptureDriverTicket) {
+							ticketValue.Tag = engine::script::HostTag::String;
+							ticketValue.Text = std::to_string(*DataCaptureDriverTicket);
+						}
+						const std::array arguments{std::move(snapshotValue), std::move(ticketValue)};
+						const bool invoked = runtime->Invoke(driver.Callback, arguments, returned);
+						engine::script::HostValue failed;
+						state = {
+							DataCaptureDriverCallback,
+							DataCaptureDriverTicket,
+							DataCaptureDriverCancelling,
+							DataCaptureDriverRuntime
+						};
+						const std::optional<uint64_t> ticketBefore = state.Ticket;
+						const auto action = client::data_capture_driver::Transition(
+							state, true, callback, invoked ? &returned : &failed, ownerRuntime
+						);
+						DataCaptureDriverCallback = state.Callback;
+						DataCaptureDriverTicket = state.Ticket;
+						DataCaptureDriverCancelling = state.Cancelling;
+						if (action == client::data_capture_driver::Action::Release && ticketBefore) {
+							std::string detail;
+							if (DataCapture->Release(
+									Universe_->NameOf(Rendered).Text(), *ticketBefore, detail
+								)) {
+								DataCaptureDriverTicket.reset();
+								DataCaptureDriverCancelling = false;
+								DataCaptureDriverSnapshot.clear();
+							} else {
+								DataCaptureDriverTicket = ticketBefore;
+								DataCaptureDriverCancelling = true;
+								DataCaptureDriverCancelSent = false;
+							}
+						}
+						if (action == client::data_capture_driver::Action::Invalid)
+							ENGINE_WARN("data capture driver returned an invalid structured result");
+					}
+				}
+			}
+		}
+		finishCaptureCancellation();
+		if (Sound != nullptr) (void)Sound->SetPaused(factoryPaused);
 
 		{
 			// After the tick and before presentation, the same place the server
@@ -2448,13 +3161,24 @@ namespace client {
 			// writes to a store, which put the link's cost in the same bar as
 			// the systems and made a bad connection read as a slow game.
 			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::Network);
-			PollServer(engine::core::Clock::Seconds());
+			{
+				ENGINE_PROFILE_CAT("replication.poll", engine::core::ProfileCategory::Network);
+				PollServer(engine::core::Clock::Seconds(), renderingActive && presentationDue);
+			}
+			{
+				ENGINE_PROFILE_CAT("replication.input", engine::core::ProfileCategory::Network);
+				if (ReportedJoin && Replicated != inputReplica)
+					Universe_->Enter(Replicated, [this](engine::ecs::Store &store) { WriteInput(store); });
+			}
 
 			// **After the poll, so a move is stamped with the tick this client
 			// has just finished receiving** - a submission tagged with a tick
 			// the server has not reached is one it rewinds against nothing.
-			SubmitMove(engine::core::Clock::Seconds());
-			SubmitTeleportRequests(engine::core::Clock::Seconds());
+			{
+				ENGINE_PROFILE_CAT("replication.submit", engine::core::ProfileCategory::Network);
+				SubmitMove(engine::core::Clock::Seconds());
+				SubmitTeleportRequests(engine::core::Clock::Seconds());
+			}
 		}
 
 		// After the tick and the replica's apply, so what a script set this
@@ -2462,7 +3186,7 @@ namespace client {
 		// because presentation is where the frame stops being about state.
 		{
 			ENGINE_HEAP_SCOPE("client.sounds");
-			PumpSounds();
+			if (!factoryPaused || Settings.DataFactory) PumpSounds();
 		}
 
 		// Beside the audio pump: neither is part of the tick, and a presence
@@ -2478,8 +3202,12 @@ namespace client {
 		// while PreRender and every GPU allocation below remain demand driven.
 		// Headless rendering still returns true so captures and bounded runs keep
 		// their existing behaviour.
-		if (!renderingActive || !presentationDue) {
-			if (renderingActive && !presentationDue && Settings.Uncapped && Presentations.Rate() > 0) {
+		if (!renderingActive || (!presentationDue && !renderOnlyPending)) {
+			if (!renderingActive && renderOnlyPending)
+				failRenderOnly("renderer did not provide a presentation frame");
+			if (renderingActive && !presentationDue && !renderOnlyPending &&
+				(Settings.Uncapped || PresentationLink || (Settings.DataFactory && Settings.Headless)) &&
+				Presentations.Rate() > 0) {
 				// Keep simulation and services independent from a lower presentation
 				// rate, but do not poll a future image deadline millions of times a
 				// second. The short ceiling preserves sub-frame input and network
@@ -2536,6 +3264,14 @@ namespace client {
 		if (Window != nullptr) {
 			SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
 		}
+		const ActiveScene *displayedActiveScene = nullptr;
+		std::string displayedCameraTemporalId;
+		std::vector<engine::render::DataCaptureObjectLabel> drawnObjectLabels;
+		std::vector<engine::render::DataCaptureSemanticLabel> drawnSemanticLabels;
+		std::vector<engine::render::DataCapturePartLabel> drawnPartLabels;
+		bool drawnObjectLabelsValid = true;
+		bool drawnSemanticLabelsValid = true;
+		bool drawnPartLabelsValid = true;
 
 		{
 			// Once per frame, and separate from the tick because a client draws
@@ -2554,6 +3290,8 @@ namespace client {
 			// previous frame's mirrors in the list, and the surface pass would
 			// go on rendering a camera that is no longer in the scene.
 			Surfaces.clear();
+			Portals.clear();
+			Windowed = false;
 
 			// Collection keys the snapshot by world and simulation revision. Keep
 			// it until the rendered world either replaces it or fails to publish,
@@ -2563,9 +3301,31 @@ namespace client {
 			RibbonVertices = {};
 			RibbonRuns = {};
 
-			std::vector<engine::world::Presentation> presentationDemand;
+			const auto installWorldPipeline = [&](engine::world::WorldId id) {
+				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
+				auto installed = std::find_if(
+					InstalledWorldPipelines.begin(),
+					InstalledWorldPipelines.end(),
+					[id](const InstalledWorldPipeline &entry) { return entry.World == id; }
+				);
+				if (installed != InstalledWorldPipelines.end() && installed->Selection == selectedProfile) {
+					return installed->Runtime;
+				}
+				const engine::core::Name runtime = engine::render::InstallWorldPipeline(
+					RenderingProfiles, Renderer, id.Index, selectedProfile
+				);
+				if (installed == InstalledWorldPipelines.end()) {
+					InstalledWorldPipelines.push_back({id, selectedProfile, runtime});
+				} else {
+					*installed = {id, selectedProfile, runtime};
+				}
+				return runtime;
+			};
+
+			std::vector<ActiveSceneDemand> presentationDemand;
 			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
+				if (factoryPaused && id == Rendered && !renderOnlyPending && !capturePending) continue;
 				// **The size of what it is being drawn into has to arrive before
 				// `Present`, for the same reason and in the same breath.**
 				// `aim-surface-cameras` clamps
@@ -2579,114 +3339,159 @@ namespace client {
 				// world nobody is looking at still aims its mirrors, and one
 				// that works only while it happens to be the drawn one is the
 				// kind of difference nothing reports.
-				Universe_->Enter(id, [pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					(void)engine::scene::SetViewportSize(
-						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
-					);
-				});
-				presentationDemand.push_back(
-					engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)}
-				);
+				// A frozen factory snapshot is byte-compared at the capture barrier.
+				// Resizing it here would turn a read-only capture into a stale snapshot.
+				if (!(factoryPaused && id == Rendered)) {
+					Universe_->Enter(id, [pixelWidth, pixelHeight](engine::ecs::Store &store) {
+						(void)engine::scene::SetViewportSize(
+							store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
+						);
+					});
+				}
+				if (!(factoryPaused && id == Rendered && !renderOnlyPending && !capturePending)) {
+					presentationDemand.push_back({
+						engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)},
+						installWorldPipeline(id),
+					});
+				}
 			}
 
-			// All demanded worlds prepare their draw packets together. Each
-			// PreRender pass stays on the world's stable physical-core lane and
-			// the joined result below is still copied through ViewChannel before
-			// the renderer sees it.
-			(void)Universe_->PresentMany(presentationDemand);
+			// The one presentation barrier copies each active world's completed
+			// packet on its stable lane. Nothing below reaches back into those
+			// stores to rebuild a camera or a draw list.
+			(void)ActiveScenes.Collect(
+				*Universe_,
+				presentationDemand,
+				engine::core::Vector2{static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)},
+				factoryPaused && (renderOnlyPending || capturePending)
+			);
 
-			for (const engine::world::WorldId id : Simulated) {
-				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
-				// Published from inside the world, straight after its PreRender
-				// phase filled the draw list. The camera and the list stay
-				// where they were produced; what leaves is a copy in a buffer
-				// the renderer owns the other end of.
-				Universe_->Enter(id, [&, id, selectedProfile](engine::ecs::Store &store) {
-					const auto *active = store.Resource<engine::scene::ActiveCamera>();
-					const auto *list = store.Resource<engine::render::DrawList>();
-					if (active == nullptr || list == nullptr) {
-						return;
-					}
+			const auto collectPresentation =
+				[&](engine::world::WorldId id, engine::ecs::Store &store, const engine::core::Vector3 &eye) {
+					// **The surface cameras, read from the world that owns
+					// them.** All of them: the pipeline renders one offscreen
+					// view per surface index since v0.8, so a room of
+					// mirrored walls gets a working mirror per wall rather
+					// than one wall's image projected across all four.
+					// **The holes first, because they claim slots the
+					// surfaces then leave alone.** A same-world portal is
+					// drawn by the recursive pass from a camera derived from
+					// this one; a surface camera aimed at the same pane
+					// would be a second answer taken from the eye.
+					(void)CollectPortalViews(store, Portals);
+					(void)CollectSurfaceViews(store, Surfaces, Portals);
 
-					// The live camera is a row: `ActiveCamera` names which
-					// entity it is and the placement and the lens are the
-					// components on it.
-					const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
-					const auto *lens = store.Get<engine::scene::Camera>(active->Entity);
-					if (placement == nullptr || lens == nullptr) {
-						return;
-					}
-
-					if (id == Rendered) {
-						// Kept for the replicated view below, which has no
-						// camera of its own.
-						ComposedFrame = placement->Frame;
-						ComposedCamera = *lens;
-
-						// **The surface cameras, read from the world that owns
-						// them.** All of them: the pipeline renders one offscreen
-						// view per surface index since v0.8, so a room of
-						// mirrored walls gets a working mirror per wall rather
-						// than one wall's image projected across all four.
-						// **The holes first, because they claim slots the
-						// surfaces then leave alone.** A same-world portal is
-						// drawn by the recursive pass from a camera derived from
-						// this one; a surface camera aimed at the same pane
-						// would be a second answer taken from the eye.
-						(void)CollectPortalViews(store, Portals);
-						(void)CollectSurfaceViews(store, Surfaces, Portals);
-
-						// **Whether any pane here names another world**, asked
-						// while the world is open because that is the only place
-						// it is cheap. What it gates is a whole copy of the draw
-						// list, and a scene with no window in it must not pay
-						// for one.
-						Windowed = false;
-						store.Each<const engine::scene::Portal>(
-							[this](engine::ecs::Entity, const engine::scene::Portal &portal) {
-								Windowed = Windowed || portal.DestinationWorld.IsValid();
-							}
-						);
-
-						if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
-							ProfilesInstalledFor = id;
-							ProfileInstalledSelection = selectedProfile;
-							PipelineSelected = engine::render::InstallWorldPipeline(
-								RenderingProfiles, Renderer, id.Index, selectedProfile
-							);
+					// **Whether any pane here names another world**, asked
+					// while the world is open because that is the only place
+					// it is cheap. What it gates is a whole copy of the draw
+					// list, and a scene with no window in it must not pay
+					// for one.
+					Windowed = false;
+					store.Each<const engine::scene::Portal>(
+						[this](engine::ecs::Entity, const engine::scene::Portal &portal) {
+							Windowed = Windowed || portal.DestinationWorld.IsValid();
 						}
-
-						// **The particles, from the world being drawn and only
-						// that one.** A batch is a span into this world's pool;
-						// see `Client.hpp` for why a second world's cannot be
-						// appended to the same list.
-						(void)engine::render::CollectParticleBatches(store, Particles);
-						particleFrameCollected = true;
-
-						// **The ribbons are taken as spans rather than copied**,
-						// which is safe for the frame and only for the frame:
-						// `BuildRibbons` clears and refills the buffer in the next
-						// `PreRender`, and `Render` is called before that.
-						RibbonVertices = engine::effects::RibbonStream(store);
-						RibbonRuns = engine::effects::RibbonRuns(store);
-
-						// **Ordered from the eye, which is why this needs the
-						// camera and the two above do not.** The renderer takes
-						// sixteen lights and a world may hold any number; which
-						// sixteen is a scene question and distance is the answer
-						// that is right more often than it is wrong.
-						(void)engine::render::CollectLights(store, placement->Frame.Position, Lights);
-					}
-
-					Views.Publish(
-						id,
-						placement->Frame,
-						*lens,
-						list->Instances,
-						store.Time().Tick,
-						store.Time().Alpha,
-						list->JointFrames
 					);
+
+					PipelineSelected = installWorldPipeline(id);
+
+					// **The particles, from the world being drawn and only
+					// that one.** A batch is a span into this world's pool;
+					// see `Client.hpp` for why a second world's cannot be
+					// appended to the same list.
+					(void)engine::render::CollectParticleBatches(store, Particles);
+					particleFrameCollected = true;
+
+					// **The ribbons are taken as spans rather than copied**,
+					// which is safe for the frame and only for the frame:
+					// `BuildRibbons` clears and refills the buffer in the next
+					// `PreRender`, and `Render` is called before that.
+					RibbonVertices = engine::effects::RibbonStream(store);
+					RibbonRuns = engine::effects::RibbonRuns(store);
+
+					// **Ordered from the eye, which is why this needs the
+					// camera and the two above do not.** The renderer takes
+					// sixteen lights and a world may hold any number; which
+					// sixteen is a scene question and distance is the answer
+					// that is right more often than it is wrong.
+					(void)engine::render::CollectLights(store, eye, Lights);
+				};
+
+			for (const auto &scene : ActiveScenes.Scenes()) {
+				if (scene.World == Rendered) {
+					// Kept for the replicated view below, which has no camera of its own.
+					ComposedFrame = scene.View.CameraFrame;
+					ComposedCamera = scene.View.Camera;
+					displayedCameraTemporalId = scene.View.CameraTemporalId;
+					if (!ReportedJoin) {
+						displayedActiveScene = &scene;
+						drawnObjectLabels = scene.Frame->ObjectLabels;
+						drawnSemanticLabels = scene.Frame->SemanticLabels;
+						drawnPartLabels = scene.Frame->PartLabels;
+						drawnObjectLabelsValid = scene.Frame->ObjectLabelsValid;
+						drawnSemanticLabelsValid = scene.Frame->SemanticLabelsValid;
+						drawnPartLabelsValid = scene.Frame->PartLabelsValid;
+						Portals.assign(scene.View.Portals.begin(), scene.View.Portals.end());
+						Surfaces.assign(scene.View.Surfaces.begin(), scene.View.Surfaces.end());
+						Windowed = std::ranges::any_of(scene.Frame->Seams, [](const auto &seam) {
+							return seam.Crosses;
+						});
+						RibbonVertices = scene.View.RibbonVertices;
+						RibbonRuns = scene.View.RibbonRuns;
+						Lights.assign(scene.View.Lights.begin(), scene.View.Lights.end());
+						particleFrameCollected = true;
+						PipelineSelected = installWorldPipeline(scene.World);
+					}
+				}
+				Views.Publish(
+					scene.World,
+					scene.View.CameraFrame,
+					scene.View.Camera,
+					scene.Frame->Instances,
+					scene.Frame->Tick,
+					Universe_->AlphaOf(scene.World),
+					scene.Frame->Joints
+				);
+			}
+			// A paused data-factory world deliberately skips PreRender. Keep its
+			// current-tick fallback without reopening ordinary presented worlds.
+			if (!ReportedJoin && displayedActiveScene == nullptr) {
+				Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+					engine::core::CFrame frame = ComposedFrame;
+					engine::scene::Camera camera = ComposedCamera;
+					bool hasCamera = false;
+					const std::optional<PausedDataFactoryPresentation> paused =
+						factoryPaused ? PublishPausedDataFactoryPresentation(store, Views, Rendered)
+									  : std::nullopt;
+					if (paused) {
+						frame = paused->Frame;
+						camera = paused->Camera;
+						hasCamera = true;
+						drawnObjectLabels = paused->ObjectLabels;
+						drawnSemanticLabels = paused->SemanticLabels;
+						drawnPartLabels = paused->PartLabels;
+						drawnObjectLabelsValid = paused->ObjectLabelsValid;
+						drawnSemanticLabelsValid = paused->SemanticLabelsValid;
+						drawnPartLabelsValid = paused->PartLabelsValid;
+					} else if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+							   active != nullptr && store.Alive(active->Entity)) {
+						const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
+						const auto *lens = store.Get<engine::scene::Camera>(active->Entity);
+						if (placement != nullptr && lens != nullptr) {
+							frame = placement->Frame;
+							camera = *lens;
+							hasCamera = true;
+						}
+					}
+					if (hasCamera) {
+						ComposedFrame = frame;
+						ComposedCamera = camera;
+						if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+							active != nullptr && store.Alive(active->Entity))
+							displayedCameraTemporalId =
+								CameraTemporalId(Universe_->NameOf(Rendered), store, active->Entity);
+					}
+					collectPresentation(Rendered, store, frame.Position);
 				});
 			}
 			if (!particleFrameCollected) {
@@ -2712,13 +3517,12 @@ namespace client {
 			// at where the client stood last frame.
 			if (ReportedJoin) {
 				Universe_->Enter(Replicated, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					// A join may have completed after the update-clock input pass
-					// above, so the replica's first presentation still needs the
-					// current state. Later updates write it beside the simulated
-					// worlds, without pretending this replicated world is stepped.
-					WriteInput(store);
-
-					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
+					// The source rig can retire before destination admission finishes.
+					// Keep its last eye in that gap instead of borrowing the local demo's.
+					if (!PortalNext || !PortalNext->Camera)
+						// The local demo fits its far plane to its own bounds. That lens
+						// must not become the network character's persistent camera lens.
+						(void)AimReplicaViewer(store, ComposedFrame, engine::scene::Camera{});
 
 					// **After `AimReplicaViewer` and not before it**, because
 					// that call writes a whole `ActiveCamera` out when it mints
@@ -2731,7 +3535,7 @@ namespace client {
 
 				Universe_->Present(Replicated, presentationDelta, Universe_->AlphaOf(Replicated));
 
-				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
+				Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
 					const auto *list = store.Resource<engine::render::DrawList>();
 					if (list == nullptr) {
 						return;
@@ -2756,6 +3560,13 @@ namespace client {
 						}
 					}
 
+					collectPresentation(Replicated, store, frame.Position);
+					drawnObjectLabels = list->ObjectLabels;
+					drawnSemanticLabels = list->SemanticLabels;
+					drawnPartLabels = list->PartLabels;
+					drawnObjectLabelsValid = list->ObjectLabelsValid;
+					drawnSemanticLabelsValid = list->SemanticLabelsValid;
+					drawnPartLabelsValid = list->PartLabelsValid;
 					Views.Publish(
 						Replicated,
 						frame,
@@ -2767,6 +3578,22 @@ namespace client {
 					);
 				});
 			}
+		}
+
+		if (PresentationLink && Particles.Batches.empty()) {
+			// Captures consume the prepared world directly. GPU particles still need their normal step.
+			Renderer.SetAnimationTime(AnimationSeconds);
+			const auto progress = PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
+			Metrics::Count("render.portal-producer.captures", progress.Rendered);
+			Metrics::Count("render.portal-producer.replies", progress.Sent);
+			Statistics.Record(Clock.Now(), presentationDelta);
+			Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
+			ParticleDeltaSeconds = 0.0f;
+			FramesDrawn++;
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			if (HeapProfile::SampleIfDue()) RefreshHeapReport();
+			return;
 		}
 
 		// Ticks actually achieved, over a one-second window. It matches the
@@ -2918,6 +3745,73 @@ namespace client {
 				// they still have to be drained.
 				Metrics::Clear();
 			}
+			if (redraw && WaitingForPortalViews()) {
+				Overlay.Fill(0, 0, pixelWidth, 16, 0, 0, 0, 255);
+				engine::render::DebugText::Draw(Overlay, 4, 4, "Loading portals", 255, 255, 255, 1);
+			}
+
+			// The CPU overlay is already composited after the world image. Reuse it
+			// while it is otherwise empty, which gives game adornments a visible
+			// client path without inventing a second line pipeline beside Studio's.
+			if (!Overlay.HasContent() && Rendered.IsValid()) {
+				Universe_->Enter(Rendered, [this](engine::ecs::Store &store) {
+					ClientAdornments.Build(store);
+				});
+				if (!ClientAdornments.Lines().empty() && pixelWidth > 0 && pixelHeight > 0) {
+					const engine::scene::CameraMatrices camera = engine::scene::ResolveCamera(
+						Views.CameraFrame(),
+						Views.Camera(),
+						static_cast<float>(pixelWidth) / static_cast<float>(pixelHeight)
+					);
+					const auto project = [&](const engine::core::Vector3 &point, int &x, int &y) {
+						const glm::vec4 clip =
+							camera.ViewProjection * glm::vec4(point.X, point.Y, point.Z, 1.0f);
+						if (clip.w <= 0.0f) return false;
+						const float inverse = 1.0f / clip.w;
+						x = static_cast<int>(
+							(clip.x * inverse * 0.5f + 0.5f) * static_cast<float>(pixelWidth)
+						);
+						y = static_cast<int>(
+							(0.5f - clip.y * inverse * 0.5f) * static_cast<float>(pixelHeight)
+						);
+						return true;
+					};
+					size_t segments = 0;
+					for (const engine::render::AdornmentLine &line : ClientAdornments.Lines()) {
+						if (segments == 2048) break;
+						int fromX = 0;
+						int fromY = 0;
+						int toX = 0;
+						int toY = 0;
+						if (!project(line.From, fromX, fromY) || !project(line.To, toX, toY)) continue;
+						const int steps = std::max(std::abs(toX - fromX), std::abs(toY - fromY));
+						if (steps > 8192) continue;
+						segments++;
+						const uint8_t red =
+							static_cast<uint8_t>(std::clamp(line.Colour.R, 0.0f, 1.0f) * 255.0f);
+						const uint8_t green =
+							static_cast<uint8_t>(std::clamp(line.Colour.G, 0.0f, 1.0f) * 255.0f);
+						const uint8_t blue =
+							static_cast<uint8_t>(std::clamp(line.Colour.B, 0.0f, 1.0f) * 255.0f);
+						const uint8_t alpha =
+							static_cast<uint8_t>(std::clamp(1.0f - line.Transparency, 0.0f, 1.0f) * 255.0f);
+						for (int step = 0; step <= steps; step++) {
+							const float t =
+								steps == 0 ? 0.0f : static_cast<float>(step) / static_cast<float>(steps);
+							Overlay.Blend(
+								static_cast<int>(std::lround(fromX + (toX - fromX) * t)),
+								static_cast<int>(std::lround(fromY + (toY - fromY) * t)),
+								1,
+								1,
+								red,
+								green,
+								blue,
+								alpha
+							);
+						}
+					}
+				}
+			}
 		}
 
 		// Drawn from what the compositor took off the view channels, not from a
@@ -2932,7 +3826,10 @@ namespace client {
 		// other is two scenes inside one, which reads as a rendering fault.
 		{
 			ENGINE_HEAP_SCOPE("client.compose");
-			Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
+			Views.Compose(
+				Views.Count() > 1 ? Settings.ViewSpacing : 0.0f,
+				ReportedJoin ? Replicated : engine::world::WorldId{}
+			);
 		}
 		// **The world's own interface, compiled here.** The studio does this
 		// per viewport panel because a panel *is* a canvas; a client has one
@@ -2955,14 +3852,15 @@ namespace client {
 		if (!InterfaceImagesReady) {
 			InterfaceImagesReady = true;
 			Interface.SetImageSource([this](const engine::core::Name &name) {
+				const auto owner = Universe_->NameOf(InterfaceWorld());
 				engine::render::InterfaceImage image;
-				image.Texture = Renderer.TextureHandle(name);
+				image.Texture = Renderer.TextureHandle(name, owner);
 				if (image.Texture == nullptr) {
 					return image;
 				}
 
-				image.Cell = Renderer.TextureCell(name, AnimationSeconds);
-				(void)Renderer.TextureSize(name, image.Width, image.Height);
+				image.Cell = Renderer.TextureCell(name, AnimationSeconds, owner);
+				(void)Renderer.TextureSize(name, image.Width, image.Height, owner);
 				return image;
 			});
 			Interface.SetViewportSource([this](engine::ecs::Entity instance) {
@@ -2970,7 +3868,7 @@ namespace client {
 			});
 		}
 
-		engine::render::InterfacePass *hook = nullptr;
+		engine::render::FrameOverlayHook *hook = nullptr;
 		bool interfaceContinuous = false;
 
 		// **Whether the window should be listening for text, decided from the
@@ -2986,12 +3884,30 @@ namespace client {
 		// press was picked correctly, produced the right event, and was handed to
 		// a VM that was not the one the button's script was in.
 		const engine::world::WorldId interfaceWorld = InterfaceWorld();
+		const auto prepareEditable = [&](engine::world::WorldId world) {
+			const auto owner = Universe_->NameOf(world);
+			Universe_->Enter(world, [&](engine::ecs::Store &store) {
+				const auto meshes = Settings.EnableEditableMeshes
+										? EditableMeshes.Refresh(store, Renderer, owner)
+										: EditableMeshes.RefreshLods(store, Renderer, owner);
+				const auto images =
+					Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
+				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
+			});
+		};
+		{
+			ENGINE_HEAP_SCOPE("client.editable");
+			for (const auto world : Simulated)
+				prepareEditable(world);
+			if (ReportedJoin) prepareEditable(Replicated);
+		}
 
-		if (interfaceWorld.IsValid()) {
+		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui()) {
 			ENGINE_HEAP_SCOPE("client.interface");
 
 			engine::gui::CompileRequest request;
 			std::span<const engine::gui::GuiEvent> interfaceEvents;
+			std::span<const engine::gui::GuiEvent> adornmentEvents;
 
 			// **What Return did, which the router cannot produce.** Releasing the
 			// focus with a key is not a press, so nothing is picked and
@@ -3156,6 +4072,33 @@ namespace client {
 
 				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
 
+				// World adornments use the same window pointer after screen and spatial
+				// UI have had first refusal. Their hit geometry is resolved against the
+				// camera that will draw this frame, so a press and its visible outline
+				// agree at every window size.
+				if ((interfaceEvents.empty() ||
+					 (!Input.State().IsButtonDown(engine::scene::MouseButton::Left) &&
+					  !Input.State().IsButtonDown(engine::scene::MouseButton::Right))) &&
+					request.Display.Width > 0.0f && request.Display.Height > 0.0f) {
+					const float aspect = request.Display.Width / request.Display.Height;
+					const float slope = std::tan(Views.Camera().FieldOfViewRadians * 0.5f);
+					const float x = (2.0f * Input.State().MousePosition.X / request.Display.Width - 1.0f) *
+									aspect * slope;
+					const float y =
+						(1.0f - 2.0f * Input.State().MousePosition.Y / request.Display.Height) * slope;
+					engine::render::AdornmentPointer adornment;
+					adornment.Ray = engine::core::Ray{
+						Views.CameraFrame().Position,
+						Views.CameraFrame().VectorToWorldSpace(engine::core::Vector3{x, y, -1.0f}).Unit(),
+					};
+					adornment.Position = Input.State().MousePosition;
+					adornment.PrimaryDown = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+					adornment.SecondaryDown = Input.State().IsButtonDown(engine::scene::MouseButton::Right);
+					adornment.Moved = Input.State().MouseDelta != engine::core::Vector2::Zero;
+					adornment.Inside = pointer.Inside;
+					adornmentEvents = AdornmentRouter.Update(store, adornment, 0.1f);
+				}
+
 				// **After the router, because this frame's press is what may have
 				// changed it.** A click that lands on a box has to reach the
 				// window on the frame it happened, or the first character somebody
@@ -3170,7 +4113,9 @@ namespace client {
 							return command.Kind == engine::gui::DrawKind::Viewport;
 						}
 					);
-					(void)ViewportImages.Render(Renderer, store, InterfaceList.Commands(), 1);
+					(void)ViewportImages.Render(
+						Renderer, store, InterfaceList.Commands(), 1, Universe_->NameOf(interfaceWorld)
+					);
 					Interface.Submit(
 						InterfaceList.Commands(),
 						engine::core::Vector2{request.Display.Width, request.Display.Height},
@@ -3187,7 +4132,7 @@ namespace client {
 			// **Outside the world's lock, because it reaches a VM.** The span
 			// points into the router's own vector, which is a member and is only
 			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
-			if (!typedEvents.empty() || !interfaceEvents.empty()) {
+			if (!typedEvents.empty() || !interfaceEvents.empty() || !adornmentEvents.empty()) {
 				if (engine::script::Runtime *runtime = RuntimeOf(interfaceWorld); runtime != nullptr) {
 					// Typing first, because it happened first - the keystroke is
 					// applied above the routing for the reason stated there.
@@ -3197,8 +4142,15 @@ namespace client {
 					if (!interfaceEvents.empty()) {
 						runtime->DeliverGuiEvents(interfaceEvents);
 					}
+					if (!adornmentEvents.empty()) {
+						runtime->DeliverGuiEvents(adornmentEvents);
+					}
 				}
 			}
+		} else if (interfaceWorld.IsValid()) {
+			// The retained interface buffer is part of the snapshot's visual state.
+			// Do not relayout, route, or deliver events while submitting it.
+			hook = &Interface;
 		}
 
 		// **SDL is asked for text only while a `TextBox` has the keyboard, and
@@ -3242,7 +4194,7 @@ namespace client {
 		// a feature.
 		engine::render::SceneTarget target{};
 		const engine::render::SceneTarget *sceneTarget = nullptr;
-		if (!Settings.Capture.empty()) {
+		if (!Settings.Capture.empty() || !Settings.CaptureSequence.empty()) {
 			// The window's real size rather than the one it was asked for, so a
 			// capture taken after a resize is the picture on screen.
 			target.Width = static_cast<uint32_t>(pixelWidth);
@@ -3256,37 +4208,26 @@ namespace client {
 		// `Renderer::SetAnimationTime` carries the rule.
 		Renderer.SetAnimationTime(AnimationSeconds);
 
-		// **The worlds a pane looks into, and the bodies standing in both mouths
-		// of it.** This is the step the standalone client never had: the studio
-		// has called `AttachForeignSurfaces` since cross-world panes existed and
-		// this loop handed the renderer an empty foreign span, so a
-		// `DestinationWorld` pane fell back to showing its own world - a mirror
-		// where a window was authored.
-		//
-		// **Outside every `Enter`, because it enters other worlds** and
-		// `Universe::Enter` is not re-entrant. The studio's own call carries the
-		// same note for the same reason.
-		//
-		// **And no `PresentPortalDestinations` beside it, unlike the studio.**
-		// That step exists there because a panel presents only the world it
-		// shows, so a far world's draw list was whatever it held last time
-		// somebody looked at it. This loop presents *every* simulated world
-		// already - a world the player is not looking at still ticks - so the
-		// far list is this frame's by the time we get here.
+		const auto presentationWorld = InterfaceWorld();
+		// Destination-side straddlers join the local draw list after presentation.
+		// Background images arrive separately through the portal image host.
+		// Enter other worlds only after leaving the source store.
 		ENGINE_HEAP_SCOPE("client.draw list");
 
-		Foreign.clear();
 		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
 		std::vector<engine::core::CFrame> drawnJoints(Views.JointFrames().begin(), Views.JointFrames().end());
-		std::vector<engine::core::CFrame> foreignJoints;
 
 		if (Windowed) {
 			// The copy `Drawn`'s comment argues for: the published list is
 			// `const` and the return leg has to go somewhere.
 			Drawn.assign(drawn.begin(), drawn.end());
-			(void)AttachForeignSurfaces(
-				*Universe_, Rendered, Drawn, Foreign, Surfaces, &drawnJoints, &foreignJoints
-			);
+			const size_t nativeRows = Drawn.size();
+			(void)AppendForeignPortalClones(*Universe_, presentationWorld, Drawn, &drawnJoints);
+			// The capture sidecar belongs to the native snapshot. Portal clones are
+			// derived from another world's rows, so retaining their local label would
+			// make the integer plane disagree with this snapshot's descriptor.
+			for (size_t index = nativeRows; index < Drawn.size(); ++index)
+				Drawn[index].ObjectLabel = 0;
 			drawn = Drawn;
 		}
 
@@ -3313,7 +4254,7 @@ namespace client {
 		uint32_t visualSurfaceBounces = 0;
 		uint32_t visualSurfaceLimit = 0;
 		Universe_->Enter(
-			Rendered,
+			presentationWorld,
 			[this, &visualLighting, &visualSurfaceBounces, &visualSurfaceLimit](
 				engine::ecs::Store &lit, engine::ecs::Scheduler &
 			) {
@@ -3342,187 +4283,162 @@ namespace client {
 			}
 		);
 
-		// **The shaders this world's materials name, resolved before the frame
-		// that draws with them.** Beside the sun and for the same reason: a
-		// script may select one at any time, so this runs every frame - and on a
-		// world nobody is editing it is one walk over the materials and an
-		// integer compare per distinct shader, which is what
-		// `ShaderSource::Revision` exists to make possible.
-		//
-		// **Only for the world being drawn.** A shader is a pipeline, and a
-		// pipeline built for a world nothing is presenting is video memory held
-		// for a frame that is not being rendered.
-		ENGINE_HEAP_SCOPE("client.shaders");
-		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-			const size_t changed = Shaders.Refresh(shaded);
-			const engine::core::Name wantedPostProcess = Settings.EnablePostProcessing
-															 ? engine::scene::PostProcessShaderOf(shaded)
-															 : engine::core::Name{};
-
-			if (changed > 0) {
-				VisualResourcesChanged = true;
-				// **Which of the changed names an `ImageLabel` actually asked
-				// for**, and it is worth the second walk: `opaque.frag` and
-				// `interface.frag` declare different binding counts, so a
-				// `ShaderScript` a `Material` alone selected would fail to
-				// build an interface pipeline every time it changed - a real
-				// failure logged for a shader nobody meant to put on a
-				// picture. Only names this set actually holds are offered to
-				// `Interface`, and only `wantedPostProcess` itself is offered
-				// to the postprocess slot, for the identical reason.
-				std::vector<engine::core::Name> guiShaders;
-				engine::gui::DemandedShaders(shaded, guiShaders);
-
-				// **Only what moved.** `Changed` is the whole reason a
-				// refresh returns a count rather than a bool: rebuilding
-				// every pipeline every frame is what this loop exists not to
-				// do.
-				for (const engine::core::Name &name : Shaders.Changed()) {
-					const engine::render::ShaderModule *module = Shaders.Find(name);
-					const bool wantedByGui =
-						std::find(guiShaders.begin(), guiShaders.end(), name) != guiShaders.end();
-					const bool wantedByPostProcess = wantedPostProcess.IsValid() && name == wantedPostProcess;
-
-					// Null is a name nothing asks for any more, so whatever
-					// was built for it is released. The instances that named
-					// it are already gone or already name something else.
-					if (module == nullptr) {
-						VisualResourcesChanged = Renderer.DropShader(name) || VisualResourcesChanged;
-						if (wantedByGui) {
-							(void)Interface.DropShaderVariant(name);
-						}
-						if (wantedByPostProcess) {
-							Renderer.ClearPostProcessShader();
-							VisualResourcesChanged = true;
-							LastPostProcessShader = {};
-						}
-						continue;
-					}
-
-					// **A warning and not a fatal, and the part goes on drawing with
-					// the engine's own shader.** `render/AGENTS.md` is explicit that
-					// a user shader failing is a diagnostic string - the built-in
-					// ones fail the build instead, which is where that belongs.
-					if (!module->Error.empty()) {
-						ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
-						continue;
-					}
-
-					VisualResourcesChanged =
-						Renderer.AddShader(name, module->SpirV) || VisualResourcesChanged;
-
-					// **The same words, into the interface pass too, and only
-					// when an `ImageLabel` actually named this shader.** See
-					// `InterfacePass::AddShaderVariant`'s own header for the
-					// binding-count reason a `Material`-only shader must not
-					// be offered here.
-					if (wantedByGui) {
-						(void)Interface.AddShaderVariant(name, module->SpirV);
-					}
-
-					// **And into the postprocess slot, only when this is the
-					// name the world currently wants there.** An author
-					// editing the shader mid-session sees the frame update
-					// through this branch; picking it for the first time or
-					// switching between two already-compiled shaders goes
-					// through the check below instead, because neither of
-					// those moves anything `Changed` reports.
-					if (wantedByPostProcess) {
-						if (Renderer.SetPostProcessShader(name, module->SpirV)) {
-							VisualResourcesChanged = true;
-							LastPostProcessShader = name;
-						}
-					}
-				}
-			}
-
-			// **The selection itself, independent of whether anything
-			// recompiled.** Switching from one already-known postprocess
-			// shader to another - or to none - moves neither `Changed` nor
-			// takes the branch above, so this is the other half of keeping
-			// `Renderer`'s active pipeline in step with what the world
-			// currently names.
-			if (wantedPostProcess != LastPostProcessShader) {
-				if (!wantedPostProcess.IsValid()) {
-					Renderer.ClearPostProcessShader();
-					VisualResourcesChanged = true;
-					LastPostProcessShader = {};
-				} else if (const engine::render::ShaderModule *module = Shaders.Find(wantedPostProcess);
-						   module != nullptr && module->Error.empty()) {
-					if (Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
-						VisualResourcesChanged = true;
-						LastPostProcessShader = wantedPostProcess;
-					}
-				}
-			}
-
-			if (Shaders.RefreshLenses(shaded) > 0) {
-				for (const engine::core::Name &name : Shaders.ChangedLenses()) {
-					const engine::render::ShaderModule *module = Shaders.FindLens(name);
-					if (module == nullptr) {
-						VisualResourcesChanged = Renderer.DropLensShader(name) || VisualResourcesChanged;
-						continue;
-					}
-					if (!module->Error.empty()) {
-						VisualResourcesChanged = Renderer.DropLensShader(name) || VisualResourcesChanged;
-						ENGINE_WARN("lens shader '{}': {}", name.Text(), module->Error);
-						continue;
-					}
-					VisualResourcesChanged =
-						Renderer.AddLensShader(name, module->SpirV) || VisualResourcesChanged;
-				}
-			}
+		Universe_->Enter(presentationWorld, [&](engine::ecs::Store &store) {
+			const auto owner = Universe_->NameOf(presentationWorld);
+			VisualResourcesChanged =
+				engine::render::PrepareWorldShaders(
+					store, owner, Shaders, Renderer, &Interface, Settings.EnablePostProcessing
+				) ||
+				VisualResourcesChanged;
+			LastPostProcessShader = Renderer.PostProcessShaderName(owner);
 		});
-
-		// **The other half of a world's content that only exists once the
-		// engine is running**, beside the shader refresh above and for the
-		// identical reason: only the world actually being drawn pays for an
-		// upload, and a steady scene - nothing mid-edit - costs one walk and
-		// an integer compare per `EditableMesh`.
-		{
-			ENGINE_HEAP_SCOPE("client.editable");
-			Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-				const size_t meshes =
-					Settings.EnableEditableMeshes ? EditableMeshes.Refresh(shaded, Renderer) : 0;
-				const size_t images =
-					Settings.EnableEditableImages ? EditableImages.Refresh(shaded, Renderer) : 0;
-				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
-			});
-		}
 
 		engine::render::View view;
 		view.CameraFrame = Views.CameraFrame();
 		view.Camera = Views.Camera();
+		view.CameraTemporalId = displayedCameraTemporalId;
 		view.Instances = drawn;
+		view.ObjectLabels = drawnObjectLabels;
+		view.SemanticLabels = drawnSemanticLabels;
+		view.PartLabels = drawnPartLabels;
+		view.ObjectLabelsValid = drawnObjectLabelsValid;
+		view.SemanticLabelsValid = drawnSemanticLabelsValid;
+		view.PartLabelsValid = drawnPartLabelsValid;
 		view.JointFrames = drawnJoints;
-		view.ForeignJointFrames = foreignJoints;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
 		if (Settings.EnableParticles) {
-			view.Particles = Particles.Batches;
-			view.ParticleSeams = Particles.Seams;
-			view.ParticleRevision = Particles.Revision;
-			view.ParticleLayoutRevision = Particles.LayoutRevision;
-			view.ParticleResidentRevision = Particles.ResidentRevision;
-			view.ParticlePool = Particles.Pool;
-			view.ParticleBlocks = Particles.BlockCount;
+			const auto &particles =
+				displayedActiveScene == nullptr ? Particles : displayedActiveScene->Frame->Particles;
+			view.Particles = particles.Batches;
+			view.ParticleSeams = particles.Seams;
+			view.ParticleRevision = particles.Revision;
+			view.ParticleLayoutRevision = particles.LayoutRevision;
+			view.ParticleResidentRevision = particles.ResidentRevision;
+			view.ParticlePool = particles.Pool;
+			view.ParticleBlocks = particles.BlockCount;
 		}
 
 		// The time since the last device step. Presentation may be slower than the
 		// update loop, and using only this update's delta would slow resident
 		// particles by exactly that ratio.
-		view.ParticleDelta = ParticleDeltaSeconds;
+		// A render-only frame intentionally discards accumulated presentation time.
+		// Advancing particles between the snapshot and its capture would make the
+		// image name a state the checkpoint never contained.
+		const float particleDelta = DataFactoryRenderOnly.ParticleDelta(ParticleDeltaSeconds);
+		view.ParticleDelta = particleDelta;
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;
-		view.Foreign = Foreign;
 		view.Portals = Portals;
 		view.Pipeline = PipelineSelected;
-		view.World = Rendered.IsValid() ? Rendered.Index : 0;
-		view.WorldName = Rendered.IsValid() ? Universe_->NameOf(Rendered) : engine::core::Name{};
+		view.World = presentationWorld.IsValid() ? presentationWorld.Index : 0;
+		view.WorldName =
+			presentationWorld.IsValid() ? Universe_->NameOf(presentationWorld) : engine::core::Name{};
+		view.ContentOwner = view.WorldName;
+		view.ForeignContentOwners = ContentBindings;
+		std::optional<engine::render::WorldViewFrame> namedCaptureFrame;
+		std::optional<engine::render::WorldCameraFrame> namedCaptureCamera;
+		bool namedCaptureBound = false;
+		std::vector<engine::render::View> captureViews;
+		engine::render::ScriptDataCaptureBridge::PreparedBatch preparedCaptureBatch;
+		const bool sameFrameCapture =
+			capturePending && DataCapture->PrepareBatch(view, captureViews, &preparedCaptureBatch);
+		std::vector<engine::render::WorldViewFrame> captureFrames(captureViews.size());
+		std::vector<engine::render::WorldCameraFrame> captureCameras(captureViews.size());
+		std::vector<engine::render::InterfacePass> captureInterfaces(captureViews.size());
+		std::vector<engine::render::ScriptDataCaptureBridge::PreparedView> preparedCaptureViews(
+			captureViews.size()
+		);
+		if (capturePending && !sameFrameCapture) {
+			const engine::render::View normalView = view;
+			engine::render::ScriptDataCaptureBridge::PreparedView prepared;
+			const bool namedCapture = DataCapture->PrepareView(view, &prepared);
+			if (namedCapture) {
+				namedCaptureFrame.emplace();
+				namedCaptureCamera.emplace();
+				namedCaptureBound = BindNamedCapturePresentation(
+					*Universe_,
+					presentationWorld,
+					{.World = presentationWorld.Index,
+					 .Name = view.WorldName,
+					 .Identity = 0,
+					 .ContentOwner = view.ContentOwner,
+					 .ForeignContentOwners = view.ForeignContentOwners,
+					 .Pipeline = view.Pipeline},
+					{static_cast<float>(std::max(pixelWidth, 0)),
+					 static_cast<float>(std::max(pixelHeight, 0))},
+					view,
+					*namedCaptureFrame,
+					*namedCaptureCamera,
+					Interface,
+					[this, &prepared] { DataCapture->AbortPreparedView(prepared); }
+				);
+				if (namedCaptureBound) {
+					visualLighting = view.Lighting;
+					hook = &Interface;
+					// The bridge selected the named camera's own temporal identity.
+					// Keep it across this presentation bind for history validation.
+				} else {
+					view = normalView;
+				}
+			}
+		}
 
 		const uint32_t targetWidth = static_cast<uint32_t>(std::max(pixelWidth, 0));
 		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
+		PortalDrawing = nullptr;
+		// Delegated producers answer requested cameras and own no viewer endpoints.
+		if (!namedCaptureBound && !PresentationLink &&
+			PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true)) {
+			// This eye may be copied through a portal or taken from another world.
+			// The active-camera source no longer proves its temporal lineage.
+			view.CameraTemporalId.clear();
+			Renderer.SetAnimationTime(AnimationSeconds);
+		} else if (!namedCaptureBound && !PresentationLink && PortalImages && Windowed) {
+			if (!ReportedJoin) {
+				auto sourceView = view;
+				sourceView.Instances = Views.Instances();
+				sourceView.JointFrames = Views.JointFrames();
+				UpdatePortalImages(
+					*Universe_,
+					*PortalImages,
+					presentationWorld,
+					sourceView,
+					{.Width = targetWidth, .Height = targetHeight},
+					Portals,
+					Surfaces,
+					Universe_->AlphaOf(presentationWorld),
+					std::chrono::steady_clock::now(),
+					Rendered
+				);
+			}
+			Renderer.SetAnimationTime(AnimationSeconds);
+			view.Portals = Portals;
+			view.Surfaces = Surfaces;
+		} else if (!namedCaptureBound && PortalImages) {
+			PortalImages->RemoveViewport(view.Slot);
+		}
+
+		const bool observedEye = PortalDrawing != nullptr;
+		engine::render::WorldViewInterface observedInterface(
+			observedEye ? &PortalDrawing->Interface : nullptr, hook
+		);
+		double visualSeconds = AnimationSeconds;
+		uint64_t spatialSignature = 0;
+		if (observedEye) {
+			hook = &observedInterface;
+			visualLighting = PortalDrawing->Frame.Lighting;
+			visualSeconds = PortalDrawing->Frame.Seconds;
+			visualSurfaceBounces = PortalDrawing->SurfaceBounces;
+			visualSurfaceLimit = PortalDrawing->SurfaceLimit;
+			spatialSignature = PortalDrawing->Camera.Compiled.Signature();
+			Renderer.SetAnimationTime(visualSeconds);
+			Renderer.SetSurfaceBounces(visualSurfaceBounces);
+			Renderer.SetSurfaceLimit(visualSurfaceLimit);
+		}
+		if (namedCaptureBound) spatialSignature = namedCaptureCamera->Compiled.Signature();
+
 		const uint64_t viewportSignature =
 			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
@@ -3532,12 +4448,13 @@ namespace client {
 				view,
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
-					.Animation = Renderer.TextureAnimationSignature(AnimationSeconds),
-					.Resources = 0,
+					.Animation = Renderer.TextureAnimationSignature(visualSeconds),
+					.Resources = spatialSignature,
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
 					.Untextured = false,
+					.Wireframe = Renderer.Wireframe(),
 				}
 			);
 		}
@@ -3558,7 +4475,10 @@ namespace client {
 			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
 		);
 		damage.Objects = damage.Objects || VisualResourcesChanged;
-		damage.Scene = damage.Scene || damage.Objects || diagnosticFrame || PresentedImages < 2;
+		const bool portalUploadsPending = PortalImages && PortalImages->HasPendingUploads();
+		damage.Portals = damage.Portals || portalUploadsPending;
+		damage.Scene =
+			damage.Scene || damage.Objects || portalUploadsPending || diagnosticFrame || PresentedImages < 2;
 		damage.GameInterface =
 			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
 		damage.Overlay = Overlay.IsDirty();
@@ -3573,10 +4493,11 @@ namespace client {
 			.ViewportOverlay = true,
 		};
 		view.Damage = damage;
-		const bool visualChanged = damage.Any() || PresentationInvalidated;
-		const bool particleDeviceStep = particleLayerPresent && ParticleDeltaSeconds > 0.0f;
+		const bool visualChanged =
+			damage.Any() || PresentationInvalidated || capturePending || renderOnlyPending;
+		const bool particleDeviceStep = particleLayerPresent && particleDelta > 0.0f;
 		if (!visualChanged) {
-			PresentationDamage.CacheProfile().Record(damage, false, false, cacheApplicability);
+			PresentationDamage.CacheProfile().Record(damage, false, false, false, cacheApplicability);
 			UnchangedPresentationsSkipped++;
 		}
 		if (!visualChanged && !particleDeviceStep) {
@@ -3594,6 +4515,8 @@ namespace client {
 		// then redo the entire update before trying again. One frame in flight fell
 		// from the old blocking path's throughput to roughly one third of it.
 		if (!Renderer.WaitForFrame()) {
+			if (sameFrameCapture) DataCapture->AbortPreparedBatch(preparedCaptureBatch);
+			if (renderOnlyPending) failRenderOnly("renderer refused the render-only presentation frame");
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
 			Metrics::Clear();
@@ -3601,7 +4524,88 @@ namespace client {
 		}
 		{
 			ENGINE_HEAP_SCOPE("client.submit");
-			LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
+			if (renderOnlyPending) {
+				const auto *request = DataFactoryRenderOnly.Request();
+				const auto ready = DataFactory->ValidateRenderOnlySubmission(
+					request == nullptr ? std::string_view{} : request->InstanceId,
+					request == nullptr ? 0 : request->OperationId
+				);
+				if (ready.Status != engine::world::DataFactoryStatus::Pending) {
+					if (sameFrameCapture) DataCapture->AbortPreparedBatch(preparedCaptureBatch);
+					DataFactoryRenderOnly.Consume();
+					FrameGraph::EndFrame();
+					ENGINE_PROFILE_FRAME();
+					Metrics::Clear();
+					return;
+				}
+			}
+			CaptureFrame(view, presentationWorld);
+			// Capture cameras are separate from the displayed camera. Each active
+			// world gets an offscreen target and the selected display view stays
+			// last, which is the only view allowed to present to the swapchain.
+			LastFrame = ActiveScenes.SubmitBatch(
+				presentationWorld,
+				view,
+				captureViews,
+				static_cast<uint32_t>(std::max(pixelWidth, 1)),
+				static_cast<uint32_t>(std::max(pixelHeight, 1)),
+				Settings.Headless,
+				ContentBindings,
+				[this,
+				 presentationWorld,
+				 &captureFrames,
+				 &captureCameras,
+				 &captureInterfaces,
+				 &preparedCaptureBatch,
+				 &preparedCaptureViews](std::span<engine::render::View> captures) {
+					if (captures.empty()) return true;
+					for (size_t index = 0; index < captures.size(); ++index) {
+						const std::string temporalId = captures[index].CameraTemporalId;
+						const bool bound = BindNamedCapturePresentation(
+							*Universe_,
+							presentationWorld,
+							{.World = captures[index].World,
+							 .Name = captures[index].WorldName,
+							 .Identity = 0,
+							 .ContentOwner = captures[index].ContentOwner,
+							 .ForeignContentOwners = captures[index].ForeignContentOwners,
+							 .Pipeline = captures[index].Pipeline},
+							{static_cast<float>(captures[index].Target->Width),
+							 static_cast<float>(captures[index].Target->Height)},
+							captures[index],
+							captureFrames[index],
+							captureCameras[index],
+							captureInterfaces[index],
+							[] {}
+						);
+						if (!bound) {
+							DataCapture->AbortPreparedBatch(preparedCaptureBatch);
+							return false;
+						}
+						captures[index].CameraTemporalId = temporalId;
+						(void)DataCapture->PrepareView(captures[index], &preparedCaptureViews[index]);
+					}
+					return true;
+				},
+				[&](std::span<engine::render::View> cameraBatch) {
+					StampCameraTemporalSamples(cameraBatch);
+					return Renderer.Render(cameraBatch, Overlay, hook);
+				}
+			);
+			if (sameFrameCapture && !LastFrame.Submitted)
+				DataCapture->AbortPreparedBatch(preparedCaptureBatch);
+			if (renderOnlyPending) {
+				const auto *request = DataFactoryRenderOnly.Request();
+				const bool submitted = LastFrame.Submitted;
+				(void)DataFactory->CompleteRenderOnly({
+					.InstanceId = request == nullptr ? std::string{} : request->InstanceId,
+					.OperationId = request == nullptr ? 0 : request->OperationId,
+					.Submitted = submitted,
+					.Detail = submitted ? std::string{} : "renderer did not submit the render-only frame",
+				});
+				DataFactoryRenderOnly.Consume();
+			}
+			if (PresentationLink) (void)PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
 		}
 		{
 			ENGINE_HEAP_SCOPE("client.statistics");
@@ -3610,7 +4614,11 @@ namespace client {
 		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
 			PresentationDamage.CacheProfile().Record(
-				damage, false, LastFrame.PortalPasses > 0, cacheApplicability
+				damage,
+				false,
+				LastFrame.PortalPasses > 0,
+				LastFrame.SurfaceCapturePlanWrite,
+				cacheApplicability
 			);
 			PresentationDamage.Commit(presentationSignatures);
 			if (damage.Scene) {
@@ -3716,7 +4724,10 @@ namespace client {
 		StartDiscord();
 
 		while (Running) {
+			if (!PumpPresentationHost()) break;
 			Step();
+			PumpPlayPresentation();
+			if (PresentationLink && !PumpPresentationHost()) break;
 
 			if (Settings.MaximumFrames >= 0 && FramesDrawn >= Settings.MaximumFrames) {
 				ENGINE_INFO("frame budget of {} reached", Settings.MaximumFrames);
@@ -3731,17 +4742,22 @@ namespace client {
 				// and refuses a mock renderer to close it. The last frame's
 				// draw calls are the cheapest honest evidence that the passes
 				// are being submitted at all.
-				ENGINE_INFO(
-					"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced, "
-					"{} surface pass(es), {} portal pass(es)",
-					Clock.Now(),
-					FramesDrawn,
-					LastFrame.DrawCalls,
-					LastFrame.Culled,
-					LastFrame.SurfaceInstances,
-					LastFrame.SurfacePasses,
-					LastFrame.PortalPasses
-				);
+				if (PresentationLink)
+					ENGINE_INFO(
+						"profiled producer for {:.1f}s over {} service frames", Clock.Now(), FramesDrawn
+					);
+				else
+					ENGINE_INFO(
+						"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced, "
+						"{} surface pass(es), {} portal pass(es)",
+						Clock.Now(),
+						FramesDrawn,
+						LastFrame.DrawCalls,
+						LastFrame.Culled,
+						LastFrame.SurfaceInstances,
+						LastFrame.SurfacePasses,
+						LastFrame.PortalPasses
+					);
 				break;
 			}
 		}
@@ -3769,9 +4785,10 @@ namespace client {
 			// thousands. A run whose triangle count did not move from the first
 			// is one where every `MeshId` resolved to the fallback, and that is
 			// the only cheap way to tell from a log.
-			ENGINE_INFO(
-				"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
-			);
+			if (!PresentationLink)
+				ENGINE_INFO(
+					"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
+				);
 
 			// What the resident-row delta actually rewrote. The draw-order index
 			// stream is uploaded separately and is not counted here.
@@ -3811,11 +4828,13 @@ namespace client {
 		// call gives: the graph's history is what is being written, and a
 		// snapshot taken after the world has gone is a snapshot of the
 		// shutdown.
+		bool profileArtifactsWritten = true;
 		if (!Settings.ProfileSnapshot.empty()) {
 			if (FrameGraph::WriteSnapshot(Settings.ProfileSnapshot)) {
 				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.ProfileSnapshot.string());
+				profileArtifactsWritten = false;
 			}
 		}
 
@@ -3842,10 +4861,12 @@ namespace client {
 				ENGINE_INFO("heap report written to {}", Settings.HeapReport.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.HeapReport.string());
+				profileArtifactsWritten = false;
 			}
 		}
 
-		return CheckHeapGrowth();
+		const int heapStatus = CheckHeapGrowth();
+		return heapStatus != 0 ? heapStatus : profileArtifactsWritten ? 0 : EXIT_PROFILE_ARTIFACT;
 	}
 
 	engine::render::NetworkStatistics Client::SampleNetwork() {
@@ -3977,18 +4998,5 @@ namespace client {
 			held,
 			rate
 		);
-
-		// **Drawn and never seen is the third case, and it is a framing
-		// problem rather than a replication one.** The composited camera is the
-		// demo world's: it is placed from *that* world's bounds and its far
-		// plane follows the same distance, so a replicated world larger than
-		// the demo is drawn outside a frustum sized for something else.
-		// `mono.client/AGENTS.md` records the camera of its own that fixes it.
-		if (drawn > 0) {
-			ENGINE_INFO(
-				"replica: drawn through the demo world's camera - `--view-spacing 0` overlays the two if the "
-				"replicated world is not on screen"
-			);
-		}
 	}
 }

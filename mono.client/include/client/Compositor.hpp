@@ -89,6 +89,8 @@ namespace client {
 		// @param world            Its name, which is what crosses.
 		// @param maximumInstances The draw list size to reserve for.
 		void Track(engine::world::WorldId id, engine::core::Name world, size_t maximumInstances);
+		// Retire a replaced replica's channel before reusing its world handle.
+		bool Untrack(engine::world::WorldId id);
 
 		// Publishes one world's view.
 		//
@@ -101,6 +103,7 @@ namespace client {
 		// @param list    What it drew.
 		// @param tick    The tick that produced it.
 		// @param alpha   The interpolation position it used.
+		// @param joints  Joint transforms referenced by skinned rows.
 		// @return `false` only for an untracked world. A list larger than the
 		//         channel grows it rather than being refused.
 		bool Publish(
@@ -118,9 +121,12 @@ namespace client {
 		// @param spacing World units between adjacent views along X. Zero
 		//                overlays them, which is what a single view wants and
 		//                what a mirror would want.
-		void Compose(float spacing);
+		// @param selected The world whose camera and unshifted rows are used.
+		// A selected world uses its own camera and unshifted rows. Other channels
+		// are still consumed so switching selection can use their newest frame.
+		void Compose(float spacing, engine::world::WorldId selected = {});
 
-		// What to draw, every tracked view together.
+		// What to draw: the selected world, or every tracked view together.
 		//
 		// @return The combined instances, valid until the next `Compose`.
 		std::span<const engine::scene::DrawInstance> Instances() const {
@@ -134,7 +140,8 @@ namespace client {
 
 		// Where to draw from.
 		//
-		// The first tracked view's, shifted far enough to hold the rest - a
+		// The selected world's camera, or the first tracked view's camera shifted
+		// far enough to hold the rest. A
 		// compositor with one camera and several worlds has to choose, and
 		// choosing the first and framing the row is the choice that shows
 		// something rather than nothing.

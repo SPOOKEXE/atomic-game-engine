@@ -57,10 +57,12 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/physics/BodyMotion.hpp>
+#include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/BreakGroup.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Ownership.hpp>
@@ -276,6 +278,22 @@ namespace engine::script {
 			// assignment has landed - and a caller ignoring the answer reads
 			// exactly as Roblox's does.
 			call.ReturnInstance(scene::LoadCharacter(call.World(), call.Subject()));
+		}
+
+		void CutTo(ScriptCall &call) {
+			call.ReturnBoolean(scene::CutCamera(call.World(), call.Subject(), call.AsCFrame(0)));
+		}
+
+		// Humanoid:AddAccessory uses the same authority and matching rules as C++.
+		void AddAccessory(ScriptCall &call) {
+			const auto &store = call.World();
+			const Entity character = store.ParentOf(call.Subject());
+			const auto *rig = store.Get<scene::Character>(character);
+			const Entity accessory = call.AsInstance(0);
+			call.ReturnBoolean(
+				rig && rig->Humanoid == call.Subject() &&
+				scene::EquipAccessory(call.World(), character, accessory)
+			);
 		}
 
 		// --- the tags ---------------------------------------------------------
@@ -1025,8 +1043,8 @@ namespace engine::script {
 			}
 		}
 
-		// Raises unless the subject is an `EditableImage` - the four methods
-		// below share this guard rather than each spelling it, because
+		// Raises unless the subject is an `EditableImage`. These methods share
+		// this guard rather than each spelling it, because
 		// their own return value is already spoken for: `false` means "this
 		// EditableImage refused the call" - an absurd `Resize`, mainly -
 		// and folding "the wrong kind of instance entirely" into the same
@@ -1044,6 +1062,22 @@ namespace engine::script {
 			const auto width = static_cast<uint32_t>(call.AsNumber(0));
 			const auto height = static_cast<uint32_t>(call.AsNumber(1));
 			call.ReturnBoolean(scene::ResizeEditableImage(call.World(), call.Subject(), width, height));
+		}
+
+		// `editableImage:ToBuffer()`
+		void EditableImageToBuffer(ScriptCall &call) {
+			RequireEditableImage(call, "ToBuffer");
+			call.ReturnBytes(scene::EditableImageToBuffer(call.World(), call.Subject()));
+		}
+
+		// `editableImage:FromBuffer(pixels)`. A buffer beyond the image ceiling
+		// raises through `AsBytes`; a bounded buffer with the wrong exact length
+		// returns false from the scene layer without changing the image.
+		void EditableImageFromBuffer(ScriptCall &call) {
+			RequireEditableImage(call, "FromBuffer");
+			const std::vector<std::byte> pixels =
+				call.AsBytes(0, static_cast<size_t>(scene::MAXIMUM_EDITABLE_IMAGE_PIXELS) * 4);
+			call.ReturnBoolean(scene::EditableImageFromBuffer(call.World(), call.Subject(), pixels));
 		}
 
 		// `editableImage:DrawRectangle(position, size, colour, transparency?)`
@@ -1113,6 +1147,14 @@ namespace engine::script {
 			call.ReturnVector3(physics::AngularVelocity(call.World(), call.Subject()));
 		}
 
+		void GetAppliedForce(ScriptCall &call) {
+			call.ReturnVector3(physics::AppliedForce(call.World(), call.Subject()));
+		}
+
+		void GetAppliedTorque(ScriptCall &call) {
+			call.ReturnVector3(physics::AppliedTorque(call.World(), call.Subject()));
+		}
+
 		void SetLinearVelocity(ScriptCall &call) {
 			if (!physics::SetLinearVelocity(
 					call.World(), call.Subject(), AsVector3(call, 0, "SetLinearVelocity")
@@ -1135,6 +1177,22 @@ namespace engine::script {
 			}
 		}
 
+		void SetAppliedForce(ScriptCall &call) {
+			if (!physics::SetAppliedForce(
+					call.World(), call.Subject(), AsVector3(call, 0, "SetAppliedForce")
+				)) {
+				call.Raise("SetAppliedForce needs a simulated dynamic BasePart and a physics world");
+			}
+		}
+
+		void SetAppliedTorque(ScriptCall &call) {
+			if (!physics::SetAppliedTorque(
+					call.World(), call.Subject(), AsVector3(call, 0, "SetAppliedTorque")
+				)) {
+				call.Raise("SetAppliedTorque needs a simulated dynamic BasePart and a physics world");
+			}
+		}
+
 		// `breakGroup:Break()` releases its authored pieces. Damage, health and
 		// debris policy remain outside this low-level structural operation.
 		void Break(ScriptCall &call) {
@@ -1151,7 +1209,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 64> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 72> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1159,9 +1217,13 @@ namespace engine::script {
 			{"SetLocalTransparency", SetLocalTransparency},
 			{"GetLinearVelocity", GetLinearVelocity},
 			{"GetAngularVelocity", GetAngularVelocity},
+			{"GetAppliedForce", GetAppliedForce},
+			{"GetAppliedTorque", GetAppliedTorque},
 			{"SetLinearVelocity", SetLinearVelocity},
 			{"SetAngularVelocity", SetAngularVelocity},
 			{"ApplyImpulse", ApplyImpulse},
+			{"SetAppliedForce", SetAppliedForce},
+			{"SetAppliedTorque", SetAppliedTorque},
 			{"Break", Break},
 
 			{"AddVertex", EditableMeshAddVertex},
@@ -1181,6 +1243,8 @@ namespace engine::script {
 			{"ClearAnimationData", ClearAnimationData},
 
 			{"Resize", EditableImageResize},
+			{"ToBuffer", EditableImageToBuffer},
+			{"FromBuffer", EditableImageFromBuffer},
 			{"DrawRectangle", EditableImageDrawRectangle},
 			{"DrawLine", EditableImageDrawLine},
 			{"DrawCircle", EditableImageDrawCircle},
@@ -1201,6 +1265,8 @@ namespace engine::script {
 			{"GetPlayerByUserId", GetPlayerByUserId},
 			{"GetPlayerFromCharacter", GetPlayerFromCharacter},
 			{"LoadCharacter", LoadCharacter},
+			{"AddAccessory", AddAccessory},
+			{"CutTo", CutTo},
 
 			{"IsA", IsA},
 			{"Destroy", Destroy},

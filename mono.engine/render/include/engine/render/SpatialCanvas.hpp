@@ -34,16 +34,32 @@
 //
 // @tier L12 · client
 
+#include <engine/gui/Components.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Layout.hpp>
 
 #include <cstddef>
+
+namespace engine::scene {
+	struct Camera;
+}
+namespace engine::core {
+	struct CFrame;
+}
 
 namespace engine::ecs {
 	class Store;
 }
 
 namespace engine::render {
+
+	// A copied world-space collector placement, independent of later camera preparation.
+	struct SpatialCollector {
+		// Entity owning the world-space interface collector.
+		ecs::Entity Collector;
+		// Resolved canvas size and placement for that entity.
+		gui::SpatialCanvas Canvas;
+	};
 
 	// Where a world-space pointer landed on a collector's canvas.
 	//
@@ -79,6 +95,12 @@ namespace engine::render {
 	//        making what is in it bigger.
 	// @return How many collectors were given a canvas.
 	size_t ResolveSpatialCanvases(ecs::Store &store, const gui::Screen &screen);
+
+	// Explicit camera for an offscreen world view. Neither authored camera rows
+	// nor ActiveCamera are changed. Null inputs use the active camera.
+	size_t ResolveSpatialCanvases(
+		ecs::Store &store, const gui::Screen &screen, const scene::Camera *camera, const core::CFrame *frame
+	);
 
 	// Projects a window pixel onto the foremost interactive spatial collector.
 	// Screen interfaces are deliberately not considered; a caller gives those

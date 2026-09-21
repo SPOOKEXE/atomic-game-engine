@@ -31,6 +31,10 @@ namespace client {
 		// The loopback MCP port, or -1 when the control surface is disabled.
 		int ControlPort = -1;
 
+		// Runs one local world as a data-factory host. It installs the lifecycle
+		// and capture bridges but does not permit replicas or multi-world runs.
+		bool DataFactory = false;
+
 		// Window width in logical pixels, before any display scaling.
 		int Width = 1280;
 
@@ -228,11 +232,21 @@ namespace client {
 		// the bindings were the untested half.
 		std::string ScriptPath;
 
-		// A game file to play, single-player. Empty means the demo scene.
+		// A game or standalone world file to play, single-player. Empty means the
+		// demo scene.
 		//
-		// A game file is single-player content, not a hosted server, and takes
+		// This file is single-player content, not a hosted server, and takes
 		// precedence over `--script`.
 		std::filesystem::path GameFile;
+
+		// A render pipeline document for demo worlds. Empty keeps their Default
+		// PBR selection. Game files own their embedded profile library instead.
+		std::filesystem::path RenderPipelineFile;
+
+		// Supervised rendering of one game world over an inherited control channel.
+		std::string PresentationWorld;
+		// Supervised rendering session identifier.
+		uint64_t PresentationSession = 0;
 
 		// `host:port` of a server to replicate from. Empty means run the local
 		// demo alone.
@@ -411,5 +425,8 @@ namespace client {
 		// puts the scene into a texture and presents the window from it. A game
 		// pays nothing for it because the flag is off.
 		std::filesystem::path Capture;
+
+		// One BMP and camera-state JSON per rendered frame. Requires a positive frame budget.
+		std::filesystem::path CaptureSequence;
 	};
 }

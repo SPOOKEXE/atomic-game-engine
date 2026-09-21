@@ -26,10 +26,15 @@ namespace engine::delivery {
 	//
 	// @since v0.21
 	struct ValidationFinding {
+		// Stable machine-readable identifier for this validation rule.
 		std::string Code;
+		// Severity assigned to this validation finding.
 		ValidationSeverity Severity = ValidationSeverity::Error;
+		// Manifest source row that produced the finding.
 		std::string Source;
+		// Manifest-relative path of the affected file or asset.
 		std::string Path;
+		// Human-readable explanation of the failed or skipped check.
 		std::string Explanation;
 	};
 
@@ -37,10 +42,13 @@ namespace engine::delivery {
 	//
 	// @since v0.21
 	struct ValidationReport {
+		// Findings kept in their declared order.
 		std::vector<ValidationFinding> Findings;
 
+		// True when the report contains no error-severity findings.
 		bool Passed() const;
 		void
+		// Appends one source-order finding with its stable rule code and detail.
 		Add(std::string code,
 			ValidationSeverity severity,
 			std::string source,
@@ -55,17 +63,29 @@ namespace engine::delivery {
 	//
 	// @since v0.21
 	struct ValidationOptions {
+		// Whether http declared.
 		bool HttpDeclared = false;
+		// Whether http allowed.
 		bool HttpAllowed = false;
+		// Whether check reachability.
 		bool CheckReachability = false;
+		// Whether reachable.
 		std::vector<bool> Reachable;
+		// Whether catalogue present.
 		bool CataloguePresent = false;
+		// Whether catalogue trusted.
 		bool CatalogueTrusted = false;
+		// Whether require complete.
 		bool RequireComplete = false;
+		// Whether catalogue complete.
 		bool CatalogueComplete = false;
+		// Whether validate deployment.
 		bool ValidateDeployment = false;
+		// Whether relay requested.
 		bool RelayRequested = true;
+		// Whether relay available.
 		bool RelayAvailable = false;
+		// Whether redirect available.
 		bool RedirectAvailable = false;
 	};
 

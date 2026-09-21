@@ -35,21 +35,32 @@ namespace studio {
 		Cancelled,
 	};
 
+	// Returns the stable progress label shown for an export phase.
 	const char *Describe(ExportPhase phase);
 
 	// Mutable choices collected by the export dialog.
 	//
 	// @since v0.21
 	struct ExportOptions {
+		// Artifact format selected by the export dialog.
 		engine::game::ExportProduct Product = engine::game::ExportProduct::WorldFile;
+		// Whether include processed assets.
 		bool IncludeProcessedAssets = false;
+		// Whether include raw authoring.
 		bool IncludeRawAuthoring = false;
+		// Whether include public cdns.
 		bool IncludePublicCdns = false;
+		// Whether validate cdn configuration.
 		bool ValidateCdnConfiguration = true;
+		// Whether check remote reachability.
 		bool CheckRemoteReachability = false;
+		// Whether require complete catalogue.
 		bool RequireCompleteCatalogue = false;
+		// Delivery mode to record in the exported project.
 		engine::game::ProjectDeliveryPreference Delivery = engine::game::ProjectDeliveryPreference::Relay;
+		// Whether export output must be byte reproducible.
 		bool Reproducible = false;
+		// Whether export may replace an existing destination.
 		bool ReplaceExisting = false;
 	};
 
@@ -57,16 +68,27 @@ namespace studio {
 	//
 	// @since v0.21
 	struct ExportRequest {
+		// Artifact format accepted by the normalized request.
 		engine::game::ExportProduct Product = engine::game::ExportProduct::WorldFile;
+		// Destination world or endpoint identifier.
 		std::filesystem::path Destination;
+		// Whether include processed assets.
 		bool IncludeProcessedAssets = false;
+		// Whether include raw authoring.
 		bool IncludeRawAuthoring = false;
+		// Whether include public cdns.
 		bool IncludePublicCdns = false;
+		// Whether validate cdn configuration.
 		bool ValidateCdnConfiguration = true;
+		// Whether check remote reachability.
 		bool CheckRemoteReachability = false;
+		// Whether require complete catalogue.
 		bool RequireCompleteCatalogue = false;
+		// Delivery mode accepted by the normalized request.
 		engine::game::ProjectDeliveryPreference Delivery = engine::game::ProjectDeliveryPreference::Relay;
+		// Whether export output must be byte reproducible.
 		bool Reproducible = false;
+		// Whether export may replace an existing destination.
 		bool ReplaceExisting = false;
 	};
 
@@ -74,16 +96,27 @@ namespace studio {
 	//
 	// @since v0.21
 	struct ExportPreflight {
+		// Fully normalized operation that produced these preflight facts.
 		ExportRequest Request;
+		// Number of worlds included from local project state.
 		uint64_t LocalWorlds = 0;
+		// Number of worlds fetched from configured remote sources.
 		uint64_t RemoteWorlds = 0;
+		// Number of processed assets selected for the archive.
 		uint64_t ProcessedAssets = 0;
+		// Total byte length of processed asset payloads selected for export.
 		uint64_t ProcessedBytes = 0;
+		// Estimated uncompressed byte length of the staged export tree.
 		uint64_t EstimatedUncompressedBytes = 0;
+		// Estimated final archive byte length after packaging.
 		uint64_t EstimatedArchiveBytes = 0;
+		// Whether publisher key valid.
 		bool PublisherKeyValid = false;
+		// Whether public http included.
 		bool PublicHttpIncluded = false;
+		// Delivery sources remaining after product and permission filtering.
 		std::vector<engine::delivery::Source> EffectiveSources;
+		// Project validation findings collected during preflight.
 		engine::game::ProjectValidationReport Validation;
 	};
 

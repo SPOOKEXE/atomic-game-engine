@@ -37,6 +37,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
 #include <cstdint>
@@ -105,7 +106,7 @@ namespace engine::scene {
 	// **A record rather than a movement, and the difference is which machine
 	// needs it.** `scene::CrossPortals` maps a crossing body's placement and its
 	// velocity, and that is the whole of the simulation - but a player's view
-	// direction is not in either. It lives in `CameraController::Angles`, which
+	// direction is not in either. Its basis and angles live in `CameraController`, which
 	// is a *resource on whichever host is looking*: a client's own, never the
 	// authority's. So the host that moves the body cannot turn the camera, and
 	// the host that owns the camera never sees the crossing - it receives a
@@ -115,26 +116,18 @@ namespace engine::scene {
 	// replication carries it with everything else that body owns, and the eye
 	// following it is a client reading its own subject's row.
 	//
-	// **The serial is what makes it an event.** A `Turn` on its own is a value
-	// that happens to be the same after two identical crossings, so a delta
-	// carrying only the angle would deliver the first and swallow the second -
-	// a portal that works once. A counter changes on every crossing whatever the
-	// angle was, and a consumer that has seen a number knows it has acted.
+	// A cumulative map retains crossings skipped between two presentations. Its
+	// translation is about world origin; points map as Frame(point * Scale).
+	// The serial still advances for a crossing whose composed map is identity.
 	//
 	// @since v0.15
 	struct PortalTransit {
-		// How many times this body has been through a hole. Starts at one:
-		// zero is "never", which is what a consumer that has seen nothing holds.
+		// Cumulative rigid portal map applied to the body.
+		core::CFrame Frame;
+		// Cumulative similarity scale applied about world origin.
+		float Scale = 1.0f;
+		// Monotonic crossing count for presenting hosts.
 		uint32_t Serial = 0;
-
-		// The yaw the last crossing turned it by, in radians, and only the yaw.
-		//
-		// **Only the yaw, because only the yaw is the player's to keep.** Pitch
-		// is theirs and a portal that rolled a camera would be one nobody could
-		// walk through twice. Measured off the map itself rather than off the
-		// body, so it is the same number for anything that goes through and does
-		// not depend on which way the crosser happened to be facing.
-		float Turn = 0.0f;
 	};
 
 	// The last `PortalTransit::Serial` a presenting host has drawn.
@@ -257,9 +250,9 @@ namespace engine::scene {
 	// What a part weighs, how it sheds speed, and what the solver may do with
 	// it.
 	//
-	// **On every `BasePart`, simulated or not**, because all four fields are
-	// authored rather than simulated: an author types a mass and a drag, and a
-	// part that is anchored for a while should still have them afterwards.
+	// **On every `BasePart`, simulated or not**, because its persistent loads
+	// and physical description are authored state. An author types a mass, drag
+	// or load, and a part anchored for a while must keep each value afterwards.
 	// `Simulated` is what decides whether the solver visits the row.
 	//
 	// Widest-first with named padding, so the object representation a snapshot
@@ -267,6 +260,14 @@ namespace engine::scene {
 	//
 	// @since v0.4
 	struct RigidBody {
+		// Persistent world-space force in newtons. It is applied once per
+		// completed physics step until its owner replaces it.
+		core::Vector3 AppliedForce = core::Vector3::Zero;
+
+		// Persistent world-space torque in newton metres. It uses the same
+		// lifetime and fixed-step timing as `AppliedForce`.
+		core::Vector3 AppliedTorque = core::Vector3::Zero;
+
 		// Kilograms. Ignored for a `Static` or `Kinematic` body, which is why
 		// it is here rather than on `Motion`.
 		float Mass = 1.0f;
@@ -583,6 +584,12 @@ namespace engine::scene {
 		//
 		// @since v0.10
 		core::Name Fitted;
+
+		// Per-instance feature overrides. Neither mask says "inherit"; a bit in
+		// Enable requests a feature and a bit in Disable refuses it. The renderer
+		// keeps both on the resident GPU row so a camera change does not rewrite
+		// every visual in the world.
+		RenderFeaturePolicy RenderFeatures;
 
 		// How much of what is behind shows through, 0 to 1.
 		//
@@ -1083,6 +1090,21 @@ namespace engine::scene {
 		uint32_t ImageWidth = 0;
 		// Requested render-target height, or zero for the host height.
 		uint32_t ImageHeight = 0;
+
+		// Per-view feature overrides, resolved after world lighting and before an
+		// instance's own policy. These are uploaded once for the view.
+		RenderFeaturePolicy RenderFeatures;
+	};
+
+	// A camera's authored follow target. Automatic cameras follow the local
+	// player's humanoid; assigning CameraSubject selects an explicit target.
+	struct CameraSubject {
+		// Explicit entity followed by the camera.
+		ecs::Entity Target{};
+		// Whether the local player's humanoid supplies Target.
+		bool Automatic = true;
+		// Explicit padding for deterministic component snapshots.
+		uint8_t Reserved[7] = {};
 	};
 
 	// Something that makes a noise.
@@ -1403,12 +1425,7 @@ namespace engine::scene {
 		// @since v0.19
 		bool Bidirectional = true;
 
-		// Explicit padding, for the reason every other `Reserved` gives.
-		//
-		// An `Entity` is eight bytes, a `Name` is four and the two flags are one
-		// each, so the type's own alignment leaves two the compiler inserted and
-		// nobody declared. `Column::Write` sends `sizeof(T)` bytes and does not
-		// know which of them a member claimed.
+		// Explicit in-memory padding. The wire codec omits it and restores zeroes.
 		uint8_t Reserved[2] = {};
 	};
 

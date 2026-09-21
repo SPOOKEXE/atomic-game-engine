@@ -37,7 +37,7 @@ file(READ "${EXPECTED}" MONO_EXPECTED)
 #
 # **Order matters and is not obvious.** The underscore doubling has to happen
 # before the dot becomes `_8`, or the `_8` it just wrote gets doubled into
-# `__8`. `THIRD_PARTY_NOTICES.md` and `mono.unified_tests/AGENTS.md` are the two
+# `__8`. `docs/THIRD_PARTY_NOTICES.md` and `mono.unified_tests/AGENTS.md` are the two
 # entries that prove both halves.
 #
 # These ids are stable for a Doxygen version and are not promised across one.

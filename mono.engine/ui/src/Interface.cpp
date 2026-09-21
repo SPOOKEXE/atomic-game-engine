@@ -409,10 +409,20 @@ namespace engine::ui {
 		const core::Vector3 &sun,
 		uint32_t width,
 		uint32_t height,
-		bool alwaysOnTop
+		bool alwaysOnTop,
+		render::WorldColourTarget target
 	) {
 		return State->Spatial.RecordWorld(
-			commandBuffer, renderPass, viewProjection, camera, ambient, sun, width, height, alwaysOnTop
+			commandBuffer,
+			renderPass,
+			viewProjection,
+			camera,
+			ambient,
+			sun,
+			width,
+			height,
+			alwaysOnTop,
+			target
 		);
 	}
 

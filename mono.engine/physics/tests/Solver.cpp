@@ -568,6 +568,8 @@ TEST_CASE("the impulse cache survives from one tick to the next", "[physics][sol
 	// out of order answers "not found" for contacts that are in it, which is a
 	// warm start that silently stopped warming.
 	const auto &impulses = PipelineInternals::ImpulseCache(world);
+	CHECK(world.Impulses().data() == impulses.data());
+	CHECK(world.Impulses().size() == impulses.size());
 	for (size_t index = 1; index < impulses.size(); index++) {
 		CHECK(impulses[index - 1] < impulses[index]);
 	}

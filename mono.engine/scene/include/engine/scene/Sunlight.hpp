@@ -21,6 +21,7 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Volume.hpp>
 
@@ -89,6 +90,9 @@ namespace engine::scene {
 		// What distant geometry fades towards.
 		core::Color3 FogColor{0.05f, 0.06f, 0.09f};
 
+		// The authored world feature layer copied from the Lighting service.
+		RenderFeaturePolicy RenderFeatures;
+
 		// Where the distance fade starts and becomes complete, in metres.
 		//@{
 		float FogStart = 100000.0f;
@@ -106,11 +110,13 @@ namespace engine::scene {
 		// placed `Volume` instances while the world was entered and are safe to
 		// retain across the renderer boundary.
 		std::array<VolumeState, MAX_SCENE_VOLUMES> Volumes{};
+		// Number of leading entries in Volumes selected for this presentation frame.
 		size_t VolumeCount = 0;
 
 		// World-space screen effects selected while the world is entered. As with
 		// volumes, this remains authored data until it is copied for presentation.
 		std::array<ShaderLensState, MAX_SCENE_SHADER_LENSES> ShaderLenses{};
+		// Number of leading entries in ShaderLenses selected for this presentation frame.
 		size_t ShaderLensCount = 0;
 	};
 

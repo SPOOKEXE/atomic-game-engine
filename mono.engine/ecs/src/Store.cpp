@@ -16,6 +16,15 @@
 namespace engine::ecs {
 
 	namespace {
+		uint64_t NextStoreIdentity() {
+			static std::atomic<uint64_t> next{1};
+			const uint64_t identity = next.fetch_add(1, std::memory_order_relaxed);
+			if (identity == 0) {
+				std::abort();
+			}
+			return identity;
+		}
+
 		// The key a query plan is cached under: the term ids as raw bytes, in
 		// the caller's order and with the required and excluded sets after
 		// them.
@@ -88,7 +97,8 @@ namespace engine::ecs {
 	}
 
 	Store::Store(std::string_view name)
-		: State(new StoreState()), StoreName(name), Owner(CallingThreadToken()) {
+		: State(new StoreState()), StoreName(name), Incarnation(NextStoreIdentity()),
+		  Owner(CallingThreadToken()) {
 		// **The other door into the instance model.** A world can be made and
 		// filled from a snapshot without a single `Classes::Register` running
 		// first, and the names in that snapshot have to mean what they meant
@@ -793,8 +803,21 @@ namespace engine::ecs {
 		return SetPropertyValue(instance, descriptor, value, bytes, true);
 	}
 
+	bool Store::RestoreReference(Entity instance, core::Name property, Entity target) {
+		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
+		if (descriptor == nullptr || descriptor->Type != PropertyType::Reference) {
+			return false;
+		}
+		return SetPropertyValue(instance, *descriptor, &target, sizeof(target), false, true);
+	}
+
 	bool Store::SetPropertyValue(
-		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes, bool authored
+		Entity instance,
+		const PropertyDescriptor &descriptor,
+		const void *value,
+		size_t bytes,
+		bool authored,
+		bool restoreReference
 	) {
 		RequireOwningThread("SetProperty");
 
@@ -814,10 +837,11 @@ namespace engine::ecs {
 		// Refused loudly rather than quietly, because a script author cannot
 		// see the difference between a write that was rejected and one that
 		// was applied and then replaced.
-		if (AdoptOnly() && !authored) {
+		const bool localWrite = descriptor.PredictedWritable && IsPredicted(instance) && Alive(instance);
+		if (AdoptOnly() && !authored && !localWrite) {
 			ENGINE_ERROR(
-				"store '{}': refusing to set '{}' in a replica. The authority owns this row, and "
-				"a value written here survives until its next delta and no longer.",
+				"store '{}': refusing to set '{}' in a replica. Runtime writes require a live "
+				"predicted instance and a property that permits local writes.",
 				Name(),
 				descriptor.Name.Text()
 			);
@@ -842,6 +866,9 @@ namespace engine::ecs {
 			}
 		}
 
+		if (restoreReference && descriptor.RestoreReference != nullptr) {
+			return descriptor.RestoreReference(*this, instance, value);
+		}
 		return descriptor.Set(*this, instance, value);
 	}
 
@@ -1026,7 +1053,9 @@ namespace engine::ecs {
 
 				for (const engine::ecs::ClonedPair &other : made) {
 					if (other.Source == held) {
-						property.Set(*this, pair.Copy, &other.Copy);
+						const auto restore =
+							property.RestoreReference != nullptr ? property.RestoreReference : property.Set;
+						restore(*this, pair.Copy, &other.Copy);
 						break;
 					}
 				}
@@ -1482,7 +1511,9 @@ namespace engine::ecs {
 	bool Store::Load(core::ByteReader &reader) {
 		RequireOwningThread("Load");
 
-		return LoadSnapshot(*State, StoreName, reader);
+		const bool loaded = LoadSnapshot(*State, StoreName, reader);
+		Incarnation = NextStoreIdentity();
+		return loaded;
 	}
 
 	bool Store::LoadContents(core::ByteReader &reader) {
@@ -1491,6 +1522,7 @@ namespace engine::ecs {
 		const std::string destinationName = StoreName;
 		const bool loaded = LoadSnapshot(*State, StoreName, reader);
 		StoreName = destinationName;
+		Incarnation = NextStoreIdentity();
 		return loaded;
 	}
 
@@ -1508,16 +1540,23 @@ namespace engine::ecs {
 		return destination.LoadContents(reader);
 	}
 
-	bool Store::Apply(core::ByteReader &reader, ApplyMode mode) {
+	bool Store::Apply(core::ByteReader &reader, ApplyMode mode, ApplyClock clock) {
 		RequireOwningThread("Apply");
 
-		return ApplySnapshot(*State, reader, mode);
+		const bool applied = ApplySnapshot(*State, reader, mode, clock);
+		if (applied) {
+			// Snapshot columns can replace source bytes without increasing their
+			// revisions. Invalidate incarnation-based caches even for equal images.
+			Incarnation = NextStoreIdentity();
+		}
+		return applied;
 	}
 
 	void Store::Clear() {
 		RequireOwningThread("Clear");
 
 		ClearWorld(*State);
+		Incarnation = NextStoreIdentity();
 	}
 
 	// --- deferral ----------------------------------------------------------

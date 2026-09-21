@@ -35,6 +35,7 @@
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Prompts.hpp>
 #include <engine/ui/Theme.hpp>
@@ -529,6 +530,17 @@ namespace studio {
 				if (Renderer.AddTexture(interned, image)) {
 					VisualResourceRevision++;
 				}
+				const engine::scene::FlipbookFacts facts{
+					.Side = image.FlipbookSide,
+					.Frames = image.FlipbookFrames,
+					.FrameRate = image.FlipbookFrameRate,
+				};
+				ContentTextureFacts[interned.Id()] = facts;
+				if (Universe != nullptr) {
+					EachOpenWorld([&](engine::ecs::Store &store) {
+						(void)engine::scene::RecordTexture(store, interned, facts);
+					});
+				}
 			}
 			return;
 		}
@@ -538,7 +550,20 @@ namespace studio {
 			if (engine::assets::Mesh::Read(reader, mesh)) {
 				if (Renderer.AddMesh(interned, mesh)) {
 					VisualResourceRevision++;
-					ContentMeshRevision++;
+				}
+				std::vector<engine::core::Name> sheets;
+				sheets.reserve(mesh.Submeshes.size());
+				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
+					sheets.emplace_back(submesh.Texture);
+				}
+				ContentMeshFacts[interned.Id()] = {
+					.Triangles = static_cast<uint32_t>(mesh.Indices.size() / 3), .Sheets = std::move(sheets)
+				};
+				engine::scene::CollisionShapes arrived;
+				engine::game::AddCollisionShapes(arrived, interned, mesh);
+				engine::game::MergeCollisionShapes(ContentShapes, arrived);
+				if (Universe != nullptr) {
+					EachOpenWorld([this](engine::ecs::Store &store) { ApplyKnownContentFacts(store); });
 				}
 			}
 		}

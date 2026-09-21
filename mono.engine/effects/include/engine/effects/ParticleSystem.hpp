@@ -170,8 +170,9 @@ namespace engine::effects {
 	//
 	// @since v0.10
 	struct EmitterSlot {
-		// One-shot births requested by `ParticleEmitter:Emit`. Kept on the ECS
-		// row so a script call and the simulation do not own two queues.
+		// One-shot births requested by `ParticleEmitter:Emit`. A script only
+		// accumulates this ECS value; the refresh pass transfers all requests to
+		// resident blocks together once per tick.
 		uint32_t Requested = 0;
 
 		// Which block, or `NO_SLOT` when this emitter has none.
@@ -604,10 +605,11 @@ namespace engine::effects {
 		uint64_t TextureRevision = 0;
 
 		// Observed ECS epochs already folded into the resident emitter rows.
-		// Keeping the six exact component epochs makes the steady refresh path
+		// Keeping the exact component epochs makes the steady refresh path
 		// independent of the number of quiet entities carrying those components.
 		//@{
 		uint64_t EmitterChangeVersion = 0;
+		uint64_t EmitterSlotChangeVersion = 0;
 		uint64_t TransformChangeVersion = 0;
 		uint64_t AttachmentChangeVersion = 0;
 		uint64_t BoundsChangeVersion = 0;
@@ -673,11 +675,9 @@ namespace engine::effects {
 		// for one new claim pass. It is consumed at the start of that pass.
 		bool RetryRefused = false;
 
-		// Whether an explicit emitter operation needs the claim pass.
-		//
-		// Authored and hierarchy changes have ECS dirty channels of their own.
-		// `Emit` and `Clear` write this resource so a steady scene can skip the
-		// emitter column without losing operations queued on a row with no block.
+		// Whether a device block finished retiring and needs the claim pass.
+		// Explicit emitter operations use `EmitterSlot`'s observed ECS epoch, so
+		// the script boundary never mutates this shared resource.
 		bool RefreshRequested = true;
 
 		// The emitter-row count observed by the last full claim pass.

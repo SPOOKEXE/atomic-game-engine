@@ -46,13 +46,20 @@ namespace engine::collision {
 		//@}
 	};
 
+	// One node in the mesh's median-split triangle hierarchy.
 	struct TriangleBvhNode {
+		// Bounds enclosing every triangle in this node.
 		core::AABB Bounds;
+		// First original triangle index in a leaf, or unused for an internal node.
 		uint32_t First = 0;
+		// Triangle count in a leaf; zero identifies an internal node.
 		uint32_t Count = 0;
+		// Left child node index, or an invalid index for leaves.
 		uint32_t Left = 0;
+		// Right child node index, or an invalid index for leaves.
 		uint32_t Right = 0;
 
+		// Reports whether this node stores a contiguous triangle range.
 		bool Leaf() const {
 			return Count != 0;
 		}
@@ -79,6 +86,7 @@ namespace engine::collision {
 		// Median-split hierarchy and its leaf triangle order. Leaves hold at most
 		// four triangles, while public triangle ids remain the original ids.
 		std::vector<TriangleBvhNode> Hierarchy;
+		// Original triangle ids grouped into the contiguous ranges held by BVH leaves.
 		std::vector<uint32_t> HierarchyTriangles;
 
 		// The object-space bound of the whole mesh, derived by `BuildTriangleMesh`.

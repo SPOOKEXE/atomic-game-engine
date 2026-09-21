@@ -254,16 +254,15 @@ namespace studio {
 		// One mode at a time, which the `ToolMode` declaration argues for: three
 		// sets of handles over one object is a target nobody can hit.
 		//
-		// **Select is a button of its own as well as what the others toggle back
-		// to.** Clicking the held mode puts the handles away without reaching
-		// across the strip, and somebody who wants no handles and has not
-		// learned that has an obvious thing to press.
+		// **Every tool can be put down from its own button.** `None` is more than
+		// no handles: it leaves a running game's UI as the only left-click
+		// consumer in the viewport.
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::SelectMode) {
 			if (RunButton("Select", CurrentTool == ToolMode::Select, engine::ui::AccentColour())) {
-				CurrentTool = ToolMode::Select;
+				CurrentTool = CurrentTool == ToolMode::Select ? ToolMode::None : ToolMode::Select;
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("click to select - no handles");
+				ImGui::SetTooltip("click to select; click again to leave viewport input to the game");
 			}
 			if (all) {
 				ImGui::SameLine();
@@ -272,7 +271,7 @@ namespace studio {
 
 		const auto tool = [this](ToolMode mode, const char *label, const char *tip) {
 			if (RunButton(label, CurrentTool == mode, engine::ui::AccentColour())) {
-				CurrentTool = CurrentTool == mode ? ToolMode::Select : mode;
+				CurrentTool = CurrentTool == mode ? ToolMode::None : mode;
 			}
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("%s", tip);

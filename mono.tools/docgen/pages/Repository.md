@@ -9,5 +9,5 @@ How the engine is built, run and contributed to. Start with
 - @subpage md_RUNNING
 - @subpage md_ROADMAP
 - @subpage md_SECURITY
-- @subpage md_THIRD__PARTY__NOTICES
+- @subpage md_docs_2THIRD__PARTY__NOTICES
 - @subpage md__8claude_2README

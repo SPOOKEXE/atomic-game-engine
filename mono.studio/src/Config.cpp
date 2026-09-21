@@ -6,6 +6,7 @@
 #include <SDL3/SDL_video.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -17,6 +18,9 @@
 #include <studio/Keybinds.hpp>
 
 namespace studio {
+	std::array<float, 3> LodMinimumDistances(const Preferences &preferences) {
+		return {preferences.LOD1Distance, preferences.LOD2Distance, preferences.LOD3Distance};
+	}
 
 	namespace {
 		using nlohmann::json;
@@ -106,6 +110,14 @@ namespace studio {
 		bool Flag(const json &document, const char *key, bool fallback) {
 			const auto found = document.find(key);
 			return found != document.end() && found->is_boolean() ? found->get<bool>() : fallback;
+		}
+
+		constexpr float LOD_DISTANCE_GAP = 0.001f;
+
+		bool HasOrderedLODDistances(float lod1, float lod2, float lod3) {
+			return std::isfinite(lod1) && std::isfinite(lod2) && std::isfinite(lod3) &&
+				   lod1 >= LOD_DISTANCE_GAP && lod2 - lod1 >= LOD_DISTANCE_GAP &&
+				   lod3 - lod2 >= LOD_DISTANCE_GAP;
 		}
 	}
 
@@ -281,6 +293,10 @@ namespace studio {
 		Scale = JsonNumber(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
 		ShowParticleEmitters = Flag(document, "showParticleEmitters", ShowParticleEmitters);
+		EnableLODCulling = Flag(document, "enableLODCulling", EnableLODCulling);
+		LOD1Distance = JsonNumber(document, "lod1Distance", LOD1Distance);
+		LOD2Distance = JsonNumber(document, "lod2Distance", LOD2Distance);
+		LOD3Distance = JsonNumber(document, "lod3Distance", LOD3Distance);
 		if (const auto dataStore = document.find("dataStore");
 			dataStore != document.end() && dataStore->is_object()) {
 			DataStoreEnabled = Flag(*dataStore, "enabled", DataStoreEnabled);
@@ -495,6 +511,11 @@ namespace studio {
 		// a message about the port rather than about the file - and both are one
 		// hand edit away.
 		Scale = std::clamp(Scale, 0.5f, 4.0f);
+		if (!HasOrderedLODDistances(LOD1Distance, LOD2Distance, LOD3Distance)) {
+			LOD1Distance = 30.0f;
+			LOD2Distance = 60.0f;
+			LOD3Distance = 120.0f;
+		}
 		// A step of zero would round every drag onto one point. Snapping is
 		// turned *off* rather than set to nothing, which is what the checkbox
 		// beside the field already means.
@@ -555,6 +576,10 @@ namespace studio {
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
 			{"showParticleEmitters", ShowParticleEmitters},
+			{"enableLODCulling", EnableLODCulling},
+			{"lod1Distance", LOD1Distance},
+			{"lod2Distance", LOD2Distance},
+			{"lod3Distance", LOD3Distance},
 			{"dataStore",
 			 json{
 				 {"enabled", DataStoreEnabled},

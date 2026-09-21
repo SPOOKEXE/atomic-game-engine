@@ -4,10 +4,12 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Audio.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
@@ -436,6 +438,59 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Kinematic: whether a script or animation moves this part.
+		//
+		// A kinematic body has `Motion`, so the broad phase keeps its proxy out of
+		// the static index, and `Simulated`, so it keeps the engine's established
+		// awake-body archetype. `RigidBody::Kind` is the ownership boundary: the
+		// solver gives it infinite mass and never writes a contact velocity back.
+		// This is the right state for a moving platform, scripted projectile, or
+		// editor gizmo. It can contact bodies and answer queries without forcing a
+		// static-index rebuild after each script position write.
+		//
+		// `Anchored` is deliberately false in this state. That property is only
+		// the inverse of `Simulated`; its one meaning must stay intact while
+		// `Kinematic` names the separate question of who moves the body.
+		PropertyDescriptor KinematicProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Kinematic");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern(
+				{ecs::Components::Of<Simulated>(),
+				 ecs::Components::Of<Motion>(),
+				 ecs::Components::Of<RigidBody>()}
+			);
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RigidBody *body = store.Get<RigidBody>(instance);
+				*static_cast<bool *>(out) = body != nullptr && store.Has<Simulated>(instance) &&
+											store.Has<Motion>(instance) && body->Kind == BodyKind::Kinematic;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				RigidBody *body = store.GetMutable<RigidBody>(instance);
+				if (body == nullptr) {
+					return false;
+				}
+				if (*static_cast<const bool *>(value)) {
+					// Changing ownership starts with no velocity. A script can explicitly
+					// set one afterwards when it wants the integrator to advance it.
+					body->Kind = BodyKind::Kinematic;
+					store.Set(instance, Simulated{});
+					store.Set(instance, Motion{});
+				} else if (body->Kind == BodyKind::Kinematic) {
+					body->Kind = BodyKind::Dynamic;
+				}
+				return true;
+			};
+
+			return property;
+		}
+
 		// CollisionGroup: a name over `Collider::Layer`.
 		//
 		// **The bits stay anonymous in `scene` and the naming lives in
@@ -548,6 +603,81 @@ namespace engine::scene {
 			return property;
 		}
 
+		PropertyDescriptor HumanoidRootPartProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("RootPart");
+			property.Type = PropertyType::Reference;
+			property.Kind = PropertyKind::Computed;
+			property.Size = sizeof(ecs::Entity);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Humanoid>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Humanoid *humanoid = store.Get<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) =
+					store.Alive(humanoid->RootPart) ? humanoid->RootPart : ecs::NULL_ENTITY;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const ecs::Entity root = *static_cast<const ecs::Entity *>(value);
+				if (root != ecs::NULL_ENTITY && !store.Has<Transform>(root)) {
+					return false;
+				}
+				Humanoid *humanoid = store.GetMutable<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				humanoid->RootPart = root;
+				return true;
+			};
+			return property;
+		}
+
+		bool RestoreCameraSubject(ecs::Store &store, ecs::Entity camera, const void *value) {
+			const ecs::Entity target = *static_cast<const ecs::Entity *>(value);
+			if (target != ecs::NULL_ENTITY && !store.Has<Humanoid>(target) && !store.Has<Transform>(target)) {
+				return false;
+			}
+			CameraSubject *selection = store.GetMutable<CameraSubject>(camera);
+			if (selection == nullptr) {
+				return false;
+			}
+			selection->Target = target;
+			return true;
+		}
+
+		// Each camera owns its target, including before it becomes current.
+		PropertyDescriptor CameraSubjectProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CameraSubject");
+			property.PredictedWritable = true;
+			property.Type = PropertyType::Reference;
+			property.Kind = PropertyKind::Computed;
+			property.Size = sizeof(ecs::Entity);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CameraSubject>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity camera, void *out) -> bool {
+				const CameraSubject *selection = store.Get<CameraSubject>(camera);
+				if (selection == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) =
+					store.Alive(selection->Target) ? selection->Target : ecs::NULL_ENTITY;
+				return true;
+			};
+			property.RestoreReference = RestoreCameraSubject;
+			property.Set = [](ecs::Store &store, ecs::Entity camera, const void *value) -> bool {
+				if (!RestoreCameraSubject(store, camera, value)) {
+					return false;
+				}
+				store.GetMutable<CameraSubject>(camera)->Automatic = false;
+				return true;
+			};
+			return property;
+		}
+
 		// FieldOfView: the camera's vertical angle, in degrees.
 		//
 		// Degrees out, radians stored - Roblox's `Camera.FieldOfView` is
@@ -646,6 +776,16 @@ namespace engine::scene {
 
 		const core::Name &LensShapeEnum() {
 			static const core::Name name("LensShape");
+			return name;
+		}
+
+		const core::Name &AutoMeshLodStrategyEnum() {
+			static const core::Name name("AutoMeshLODStrategy");
+			return name;
+		}
+
+		const core::Name &AuthoredAffordanceKindEnum() {
+			static const core::Name name("AuthoredAffordanceKind");
 			return name;
 		}
 
@@ -1501,6 +1641,209 @@ namespace engine::scene {
 			return property;
 		}
 
+		template <class Component, auto Policy, auto Mask>
+		PropertyDescriptor RenderFeatureMaskProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(uint32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *component = store.Get<Component>(instance);
+				if (component == nullptr) {
+					return false;
+				}
+				*static_cast<uint32_t *>(out) = ((component->*Policy).*Mask) & ALL_RENDER_FEATURES;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component *component = store.GetMutable<Component>(instance);
+				if (component == nullptr) {
+					return false;
+				}
+				(component->*Policy).*Mask = *static_cast<const uint32_t *>(value) & ALL_RENDER_FEATURES;
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component, size_t Level> PropertyDescriptor LodMeshProperty(const char *name) {
+			static_assert(Level > 0 && Level < LOD_LEVELS);
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<core::Name *>(out) = lod == nullptr ? core::Name{} : lod->Meshes[Level - 1];
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Meshes[Level - 1] = *static_cast<const core::Name *>(value);
+				if (lod.Meshes[Level - 1].IsValid()) {
+					lod.Levels = std::max<uint8_t>(lod.Levels, static_cast<uint8_t>(Level + 1));
+				}
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component, size_t Level> PropertyDescriptor LodRatioProperty(const char *name) {
+			static_assert(Level > 0 && Level < LOD_LEVELS);
+			// Automatic LOD uses this as the retained source-triangle fraction for
+			// decimation. It is not a distance threshold.
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<float *>(out) = lod == nullptr ? 0.0f : lod->Ratios[Level - 1];
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Ratios[Level - 1] = std::clamp(*static_cast<const float *>(value), 0.0f, 1.0f);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component> PropertyDescriptor LodTargetQuadAreaProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<float *>(out) = lod == nullptr ? 0.0f : lod->TargetQuadArea;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.TargetQuadArea = std::max(*static_cast<const float *>(value), 0.0f);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component> PropertyDescriptor LodLevelsProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<int32_t *>(out) = lod == nullptr ? 1 : lod->Levels;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Levels = static_cast<uint8_t>(
+					std::clamp(*static_cast<const int32_t *>(value), 1, static_cast<int32_t>(LOD_LEVELS))
+				);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor AutoLodStrategyProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("AutoLodStrategy");
+			property.Type = PropertyType::Enum;
+			property.EnumName = AutoMeshLodStrategyEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AutoMeshLOD>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const AutoMeshLOD *lod = store.Get<AutoMeshLOD>(instance);
+				const size_t ordinal = lod != nullptr && lod->Strategy == LodStrategy::Reduced ? 1 : 0;
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(AutoMeshLodStrategyEnum(), ordinal);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						AutoMeshLodStrategyEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+				AutoMeshLOD lod;
+				if (const AutoMeshLOD *existing = store.Get<AutoMeshLOD>(instance)) {
+					lod = *existing;
+				}
+				lod.Strategy = ordinal == 0 ? LodStrategy::Decimated : LodStrategy::Reduced;
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Slot, RenderEffectStage Stage>
+		PropertyDescriptor RenderEffectNodeProperty(const char *name) {
+			static_assert(Slot < MAX_RENDER_EFFECT_ATTACHMENTS);
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RenderEffects>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RenderEffects *effects = store.Get<RenderEffects>(instance);
+				*static_cast<core::Name *>(out) =
+					effects == nullptr ? core::Name{} : effects->Attachments[Slot].Node;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				RenderEffects effects;
+				if (const RenderEffects *existing = store.Get<RenderEffects>(instance)) {
+					effects = *existing;
+				}
+				RenderEffectAttachment &attachment = effects.Attachments[Slot];
+				attachment.Node = *static_cast<const core::Name *>(value);
+				attachment.Stage = Stage;
+				attachment.Enabled = attachment.Node.IsValid();
+				effects.Count = std::max<uint8_t>(effects.Count, static_cast<uint8_t>(Slot + 1));
+				store.Set(instance, effects);
+				return true;
+			};
+			return property;
+		}
+
 		PropertyDescriptor SurfaceSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("SurfaceSize");
@@ -1652,6 +1995,46 @@ namespace engine::scene {
 					return false;
 				}
 				skeleton->JointCount = static_cast<uint16_t>(count);
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor RigKeypointJointProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Joint");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RigKeypoint>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RigKeypoint *keypoint = store.Get<RigKeypoint>(instance);
+				if (keypoint == nullptr) return false;
+				*static_cast<int32_t *>(out) =
+					keypoint->Joint == NO_JOINT ? -1 : static_cast<int32_t>(keypoint->Joint);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t joint = *static_cast<const int32_t *>(value);
+				if (store.Get<RigKeypoint>(instance) == nullptr) return false;
+				if (joint == -1) {
+					RigKeypoint *keypoint = store.GetMutable<RigKeypoint>(instance);
+					if (keypoint == nullptr) return false;
+					keypoint->Joint = NO_JOINT;
+					return true;
+				}
+				if (joint < 0) return false;
+				const Skeleton *skeleton = nullptr;
+				for (ecs::Entity walk = store.ParentOf(instance); walk != ecs::NULL_ENTITY;
+					 walk = store.ParentOf(walk)) {
+					if ((skeleton = store.Get<Skeleton>(walk)) != nullptr) break;
+				}
+				if (skeleton == nullptr || joint >= skeleton->JointCount) return false;
+				RigKeypoint *keypoint = store.GetMutable<RigKeypoint>(instance);
+				if (keypoint == nullptr) return false;
+				keypoint->Joint = static_cast<uint16_t>(joint);
 				return true;
 			};
 			return property;
@@ -2029,6 +2412,13 @@ namespace engine::scene {
 			ecs::EnumTable::Register(
 				ResamplerModeEnum().Text(), std::array<std::string_view, 2>{"Default", "Pixelated"}
 			);
+			ecs::EnumTable::Register(
+				AutoMeshLodStrategyEnum().Text(), std::array<std::string_view, 2>{"Decimated", "Reduced"}
+			);
+			ecs::EnumTable::Register(
+				AuthoredAffordanceKindEnum().Text(),
+				std::array<std::string_view, 5>{"None", "Walkable", "Climbable", "Interactable", "Cover"}
+			);
 
 			// The collider shapes. **In `ShapeKind`'s own declaration order**,
 			// because `CollisionShapeProperty` converts between an ordinal and
@@ -2120,9 +2510,14 @@ namespace engine::scene {
 				// unanchoring it brought back the defaults rather than what the
 				// author typed. `Simulated` carries that decision now, so this
 				// is free to be what it reads as: the part's physical
-				// description. Sixteen bytes on every part, which is the trade
+				// description. Forty bytes on every part, which is the trade
 				// the two entries above already make.
 				ecs::Components::Of<RigidBody>(),
+
+				// Data-factory reads become a column scan because every BasePart has
+				// this eight-byte record. The fixed cost keeps one authoring surface
+				// and avoids a structural join for the bounded affordance query.
+				ecs::Components::Of<AuthoredAffordance>(),
 
 				// **`Simulated` is deliberately not here, and that is the safe
 				// default rather than an omission.** A part is static until
@@ -2206,6 +2601,8 @@ namespace engine::scene {
 			// assigns a field.
 			const std::array grip{ecs::Components::Of<Tool>()};
 			const ecs::ClassId toolClass = ecs::Classes::Register("Tool", modelClass, grip);
+			const std::array accessoryPoints{ecs::Components::Of<Accessory>()};
+			(void)ecs::Classes::Register("Accessory", modelClass, accessoryPoints);
 
 			// **A `MeshPart` is a `BasePart` whose mesh came from somewhere
 			// else**, and that is the whole of the difference. It adds no
@@ -2241,7 +2638,11 @@ namespace engine::scene {
 			// needs the same tick-start frame a moving part uses. Surface cameras
 			// inherit it harmlessly; only `ActiveCamera` is ever considered for a
 			// crossing.
-			const std::array camera{ecs::Components::Of<Camera>(), ecs::Components::Of<PreviousTransform>()};
+			const std::array camera{
+				ecs::Components::Of<Camera>(),
+				ecs::Components::Of<PreviousTransform>(),
+				ecs::Components::Of<CameraSubject>()
+			};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
 
 			// **A surface camera is a camera you parent to a part**, and that is
@@ -2481,6 +2882,8 @@ namespace engine::scene {
 			// against two different parents.
 			const std::array joint{ecs::Components::Of<Bone>()};
 			const ecs::ClassId boneClass = ecs::Classes::Register("Bone", instance, joint);
+			const std::array keypoint{ecs::Components::Of<RigKeypoint>()};
+			const ecs::ClassId rigKeypointClass = ecs::Classes::Register("RigKeypoint", instance, keypoint);
 
 			// **A `Skeleton` is not a class**, and that is deliberate. It is a
 			// component on whatever drawable is skinned - a `MeshPart` today -
@@ -2700,7 +3103,16 @@ namespace engine::scene {
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
+			ecs::Classes::Property<&AuthoredAffordance::Id>(basePart, "AffordanceId");
+			ecs::Classes::Computed(
+				basePart,
+				EnumFieldProperty<AuthoredAffordance, &AuthoredAffordance::Kind, AuthoredAffordanceKindEnum>(
+					"AffordanceKind"
+				)
+			);
+			ecs::Classes::Property<&AuthoredAffordance::Enabled>(basePart, "AffordanceEnabled");
 			ecs::Classes::Computed(basePart, AnchoredProperty());
+			ecs::Classes::Computed(basePart, KinematicProperty());
 
 			// The plain fields. `Color` is a rename rather than a conversion -
 			// `Visual::Tint` is what a script calls `Color`. `Surface::Material`,
@@ -2710,6 +3122,24 @@ namespace engine::scene {
 			// share a surface and never a material.
 			ecs::Classes::Property<&Visual::Tint>(basePart, "Color");
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
+			ecs::Classes::Computed(
+				basePart,
+				RenderFeatureMaskProperty<Visual, &Visual::RenderFeatures, &RenderFeaturePolicy::Enable>(
+					"RenderFeatureEnableMask"
+				)
+			);
+			ecs::Classes::Computed(
+				basePart,
+				RenderFeatureMaskProperty<Visual, &Visual::RenderFeatures, &RenderFeaturePolicy::Disable>(
+					"RenderFeatureDisableMask"
+				)
+			);
+			ecs::Classes::Computed(
+				basePart, RenderEffectNodeProperty<0, RenderEffectStage::Compute>("ComputeEffectNode")
+			);
+			ecs::Classes::Computed(
+				basePart, RenderEffectNodeProperty<1, RenderEffectStage::PostProcess>("PostProcessEffectNode")
+			);
 
 			// --- what it is made of ---------------------------------------
 			//
@@ -2893,6 +3323,35 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::OcclusionMap>(meshPart, "OcclusionMap");
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
+			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 1>("Lod1MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 2>("Lod2MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 3>("Lod3MeshId"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 1>("Lod1Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 2>("Lod2Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 3>("Lod3Ratio"));
+			ecs::Classes::Computed(meshPart, LodTargetQuadAreaProperty<AutoMeshLOD>("LodTargetQuadArea"));
+
+			for (const auto &property : {
+					 LodMeshProperty<AutoMeshLOD, 1>("AutoLod1MeshId"),
+					 LodMeshProperty<AutoMeshLOD, 2>("AutoLod2MeshId"),
+					 LodMeshProperty<AutoMeshLOD, 3>("AutoLod3MeshId"),
+					 LodRatioProperty<AutoMeshLOD, 1>("AutoLod1Ratio"),
+					 LodRatioProperty<AutoMeshLOD, 2>("AutoLod2Ratio"),
+					 LodRatioProperty<AutoMeshLOD, 3>("AutoLod3Ratio"),
+					 LodTargetQuadAreaProperty<AutoMeshLOD>("AutoLodTargetQuadArea"),
+					 LodLevelsProperty<AutoMeshLOD>("AutoLodLevels"),
+					 AutoLodStrategyProperty(),
+					 LodMeshProperty<CustomMeshLOD, 1>("CustomLod1MeshId"),
+					 LodMeshProperty<CustomMeshLOD, 2>("CustomLod2MeshId"),
+					 LodMeshProperty<CustomMeshLOD, 3>("CustomLod3MeshId"),
+					 LodRatioProperty<CustomMeshLOD, 1>("CustomLod1Ratio"),
+					 LodRatioProperty<CustomMeshLOD, 2>("CustomLod2Ratio"),
+					 LodRatioProperty<CustomMeshLOD, 3>("CustomLod3Ratio"),
+					 LodTargetQuadAreaProperty<CustomMeshLOD>("CustomLodTargetQuadArea"),
+					 LodLevelsProperty<CustomMeshLOD>("CustomLodLevels"),
+				 }) {
+				ecs::Classes::Computed(meshPart, property);
+			}
 
 			// Mesh metadata belongs to MeshPart, not every BasePart.
 			ecs::Classes::Computed(meshPart, TrianglesCountProperty());
@@ -2917,12 +3376,26 @@ namespace engine::scene {
 			ecs::Classes::Property<&SpawnLocation::Forced>(spawnLocation, "Forced");
 
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
+			ecs::Classes::Computed(cameraClass, CameraSubjectProperty());
+			ecs::Classes::Property<&CameraSubject::Automatic>(cameraClass, "CameraSubjectAutomatic");
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
 			ecs::Classes::Property<&Camera::MaxImageWidth>(cameraClass, "MaxImageWidth");
 			ecs::Classes::Property<&Camera::MaxImageHeight>(cameraClass, "MaxImageHeight");
 			ecs::Classes::Property<&Camera::ImageWidth>(cameraClass, "ImageWidth");
 			ecs::Classes::Property<&Camera::ImageHeight>(cameraClass, "ImageHeight");
+			ecs::Classes::Computed(
+				cameraClass,
+				RenderFeatureMaskProperty<Camera, &Camera::RenderFeatures, &RenderFeaturePolicy::Enable>(
+					"RenderFeatureEnableMask"
+				)
+			);
+			ecs::Classes::Computed(
+				cameraClass,
+				RenderFeatureMaskProperty<Camera, &Camera::RenderFeatures, &RenderFeaturePolicy::Disable>(
+					"RenderFeatureDisableMask"
+				)
+			);
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
 
 			// The surface camera's four. `SurfaceSize` above is inherited, so a
@@ -3015,7 +3488,7 @@ namespace engine::scene {
 				ecs::Classes::Computed(shaped, LightFaceProperty());
 			}
 
-			// The humanoid's. All plain fields - nothing here is a doubled
+			// The humanoid's movement fields. Nothing here is a doubled
 			// half-extent or an angle in the wrong unit, so there is no conversion
 			// to write and no place for one to be wrong in one direction.
 			//
@@ -3025,6 +3498,8 @@ namespace engine::scene {
 			// that system writing it every frame instead. One field, two writers,
 			// and only one of them installed per character - which is the same
 			// shape `MoveCamera` and a scripted camera already have.
+			// The root reference makes sibling humanoid rigs portable and cloneable.
+			ecs::Classes::Computed(humanoidClass, HumanoidRootPartProperty());
 			ecs::Classes::Property<&Humanoid::MoveDirection>(humanoidClass, "MoveDirection");
 			ecs::Classes::ClampedProperty<&Humanoid::WalkSpeed, 0.0f, 1000.0f>(humanoidClass, "WalkSpeed");
 			ecs::Classes::ClampedProperty<&Humanoid::JumpSpeed, 0.0f, 1000.0f>(humanoidClass, "JumpPower");
@@ -3067,6 +3542,9 @@ namespace engine::scene {
 			ecs::Classes::Property<&Bone::Rest>(boneClass, "RestCFrame");
 			ecs::Classes::Property<&Bone::InverseBind>(boneClass, "InverseBindCFrame");
 			ecs::Classes::Computed(boneClass, BoneWorldProperty());
+			ecs::Classes::Property<&RigKeypoint::Keypoint>(rigKeypointClass, "KeypointId");
+			ecs::Classes::Property<&RigKeypoint::Frame>(rigKeypointClass, "CFrame");
+			ecs::Classes::Computed(rigKeypointClass, RigKeypointJointProperty());
 
 			// The skeleton is guaranteed by this class's component set, unlike the
 			// optional component on an imported ordinary `MeshPart`.

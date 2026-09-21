@@ -8,6 +8,7 @@
 
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -73,6 +74,65 @@ TEST_CASE("resource kinds have stable diagnostic names", "[graph]") {
 	CHECK(std::string(engine::graph::Describe(ResourceKind::Entities)) == "entities");
 }
 
+TEST_CASE("resource shape and access are executable graph contracts", "[graph][resource-contract]") {
+	RenderGraph graph;
+	const ResourceId readable = graph.AddResource({
+		.Name = Name("readable"),
+		.Kind = ResourceKind::Texture,
+		.Format = engine::graph::ResourceFormat::RGBA8,
+		.Width = 8,
+		.Height = 8,
+		.Access = engine::graph::ResourceAccess::Read,
+		.Samples = 4,
+		.Depth = 1,
+		.Layers = 2,
+		.FirstMip = 0,
+		.MipCount = 2,
+		.Lifetime = engine::graph::ResourceLifetime::History,
+	});
+	REQUIRE(readable.IsValid());
+	const auto *desc = graph.FindResource(readable);
+	REQUIRE(desc != nullptr);
+	CHECK(desc->External);
+	CHECK(desc->Bytes(1, 1) == 2560);
+
+	const ResourceId buffer = graph.AddResource({
+		.Name = Name("generated-index"),
+		.Kind = ResourceKind::Buffer,
+		.Width = 16,
+		.Height = 4,
+		.Access = engine::graph::ResourceAccess::ReadWrite,
+		.BufferStride = 12,
+	});
+	const auto *bufferDesc = graph.FindResource(buffer);
+	REQUIRE(bufferDesc != nullptr);
+	CHECK(bufferDesc->Bytes(1, 1) == 768);
+
+	graph.AddNode({.Name = Name("bad-writer"), .Writes = {readable}});
+	Name offender;
+	CHECK(graph.Validate(offender) == GraphStatus::WriteAccessDenied);
+	CHECK(offender == Name("readable"));
+
+	RenderGraph writeOnly;
+	const ResourceId writable = writeOnly.AddResource({
+		.Name = Name("writable"),
+		.Kind = ResourceKind::Texture,
+		.External = true,
+		.Access = engine::graph::ResourceAccess::Write,
+	});
+	writeOnly.AddNode({.Name = Name("bad-reader"), .Reads = {writable}});
+	CHECK(writeOnly.Validate(offender) == GraphStatus::ReadAccessDenied);
+}
+
+TEST_CASE("invalid resource allocation shapes are refused", "[graph][resource-contract]") {
+	RenderGraph graph;
+	CHECK_FALSE(graph.AddResource({.Name = Name("samples"), .Samples = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("depth"), .Depth = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("layers"), .Layers = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("mips"), .MipCount = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("mip-range"), .FirstMip = 31, .MipCount = 2}).IsValid());
+}
+
 TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 
@@ -81,14 +141,17 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// **Shared at both ends, per view in the middle**, which is the shape of a
-	// real frame: world input and one shadow map every view samples, eighteen passes each view
+	// real frame: world input, shadow and environment work every view samples, nineteen passes each view
 	// draws for itself, and the window's overlay and chrome once over the lot.
-	CHECK(compiled.Shared.size() == 2);
-	CHECK(compiled.PerView.size() == 20);
+	CHECK(compiled.Shared.size() == 5);
+	CHECK(compiled.PerView.size() == 19);
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(compiled.Shared.back())->Name == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared[1])->Name == Name("mesh-residency"));
+	CHECK(graph.Find(compiled.Shared[2])->Name == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared[3])->Name == Name("skybox-compute"));
+	CHECK(graph.Find(compiled.Shared.back())->Name == Name("clouds-compute"));
 	CHECK(graph.Find(compiled.Final.front())->Name == Name("present"));
 	CHECK(graph.Find(compiled.Final.back())->Name == Name("output-image"));
 }
@@ -133,13 +196,16 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	// editor with every viewport closed still has panels to draw. **Both ends of
 	// the frame survive a viewless one** - which is the same contract
 	// `Renderer::Render` documents for an empty span of views.
-	REQUIRE(recorder.Ran.size() == 6);
+	REQUIRE(recorder.Ran.size() == 9);
 	CHECK(recorder.Ran[0] == "world");
-	CHECK(recorder.Ran[1] == "shadow");
-	CHECK(recorder.Ran[2] == "present");
-	CHECK(recorder.Ran[3] == "interface");
-	CHECK(recorder.Ran[4] == "overlay");
-	CHECK(recorder.Ran[5] == "output-image");
+	CHECK(recorder.Ran[1] == "mesh-residency");
+	CHECK(recorder.Ran[2] == "shadow");
+	CHECK(recorder.Ran[3] == "skybox-compute");
+	CHECK(recorder.Ran[4] == "clouds-compute");
+	CHECK(recorder.Ran[5] == "present");
+	CHECK(recorder.Ran[6] == "interface");
+	CHECK(recorder.Ran[7] == "overlay");
+	CHECK(recorder.Ran[8] == "output-image");
 }
 
 TEST_CASE("one view's passes are adjacent rather than interleaved", "[graph]") {
@@ -517,6 +583,166 @@ TEST_CASE("a world-scoped pass runs once per world, not once per view", "[graph]
 	}
 }
 
+TEST_CASE("frame setup runs once before the worlds that consume it", "[graph][frame-prefix]") {
+	RenderGraph graph;
+	const ResourceId resident = Colour(graph, "resident");
+	const ResourceId world = Colour(graph, "world");
+	const ResourceId colour = Colour(graph, "colour");
+	graph.AddNode({
+		.Name = Name("upload"),
+		.Kind = Name("upload"),
+		.Writes = {resident},
+		.Scope = NodeScope::Frame,
+	});
+	graph.AddNode({
+		.Name = Name("world"),
+		.Kind = Name("world"),
+		.Reads = {resident},
+		.Writes = {world},
+		.Scope = NodeScope::World,
+	});
+	graph.AddNode({
+		.Name = Name("draw"),
+		.Kind = Name("draw"),
+		.Reads = {world},
+		.Writes = {colour},
+		.Scope = NodeScope::View,
+	});
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	Recorder runner;
+	SECTION("whole frame shares setup across nonadjacent views of two worlds") {
+		const uint64_t worlds[] = {7, 9, 7};
+		REQUIRE(graph.Execute(compiled, runner, worlds));
+		CHECK(
+			runner.Ran == std::vector<std::string>{"upload", "world", "draw@0", "draw@2", "world", "draw@1"}
+		);
+	}
+	SECTION("explicit view execution uses a first-setup flag rather than world zero") {
+		REQUIRE(graph.ExecuteView(compiled, runner, 4, 12, true, true));
+		REQUIRE(graph.ExecuteView(compiled, runner, 6, 12, false, false));
+		REQUIRE(graph.ExecuteView(compiled, runner, 9, 19, true, false));
+		CHECK(
+			runner.Ran == std::vector<std::string>{"upload", "world", "draw@4", "draw@6", "world", "draw@9"}
+		);
+	}
+	SECTION("empty frames still execute setup exactly once") {
+		REQUIRE(graph.Execute(compiled, runner, std::span<const uint64_t>{}));
+		CHECK(runner.Ran == std::vector<std::string>{"upload", "world"});
+	}
+	SECTION("the count overload uses one setup for every camera") {
+		REQUIRE(graph.Execute(compiled, runner, 2));
+		CHECK(runner.Ran == std::vector<std::string>{"upload", "world", "draw@0", "draw@1"});
+	}
+	SECTION("failed setup never reaches a world or view") {
+		runner.FailOn = "upload";
+		const uint64_t worlds[] = {7, 9};
+		CHECK_FALSE(graph.Execute(compiled, runner, worlds));
+		CHECK(runner.Ran == std::vector<std::string>{"upload"});
+	}
+	SECTION("a frame setup request cannot silently skip the shared block") {
+		CHECK_FALSE(graph.ExecuteView(compiled, runner, 4, 12, false, true));
+		CHECK(runner.Ran.empty());
+	}
+	SECTION("frame setup carries no world or camera identity") {
+		struct ScopeRecorder : NodeRunner {
+			std::vector<size_t> Worlds;
+			std::vector<size_t> Views;
+			bool Run(const RunContext &context) override {
+				Worlds.push_back(context.World);
+				Views.push_back(context.View);
+				return true;
+			}
+		} scopes;
+		REQUIRE(graph.ExecuteView(compiled, scopes, 4, 12, true, true));
+		CHECK(scopes.Worlds == std::vector<size_t>{RunContext::WHOLE_FRAME, 12, 12});
+		CHECK(scopes.Views == std::vector<size_t>{RunContext::WHOLE_FRAME, RunContext::WHOLE_FRAME, 4});
+	}
+	SECTION("device schedule retains setup before its world consumers") {
+		engine::graph::ExecutionSchedule schedule;
+		REQUIRE(
+			engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok
+		);
+		std::vector<std::string> scheduled;
+		for (const auto &wave : schedule.Waves) {
+			for (const auto &node : wave.Nodes) {
+				scheduled.emplace_back(graph.Find(node.Node)->Name.Text());
+			}
+		}
+		CHECK(scheduled == std::vector<std::string>{"upload", "world", "draw"});
+	}
+}
+
+TEST_CASE("interleaved frame setup preserves order and refuses per-world input", "[graph][frame-prefix]") {
+	RenderGraph graph;
+	const ResourceId world = Colour(graph, "world");
+	const ResourceId resident = Colour(graph, "resident");
+	const ResourceId colour = Colour(graph, "colour");
+	graph.AddNode({.Name = Name("world"), .Writes = {world}, .Scope = NodeScope::World});
+	const NodeId setup =
+		graph.AddNode({.Name = Name("upload"), .Writes = {resident}, .Scope = NodeScope::Frame});
+	graph.AddNode({.Name = Name("draw"), .Reads = {resident}, .Writes = {colour}, .Scope = NodeScope::View});
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	Recorder runner;
+	const uint64_t worlds[] = {7, 9};
+	REQUIRE(graph.Execute(compiled, runner, worlds));
+	CHECK(runner.Ran == std::vector<std::string>{"world", "upload", "draw@0", "world", "draw@1"});
+	engine::graph::ExecutionSchedule schedule;
+	REQUIRE(engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 3);
+	CHECK(graph.Find(schedule.Waves[0].Nodes[0].Node)->Name == Name("world"));
+	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("upload"));
+
+	RenderGraph invalid;
+	const ResourceId invalidWorld = Colour(invalid, "world");
+	const ResourceId invalidResident = Colour(invalid, "resident");
+	invalid.AddNode({.Name = Name("world"), .Writes = {invalidWorld}, .Scope = NodeScope::World});
+	Node replacement = *graph.Find(setup);
+	replacement.Reads = {invalidWorld};
+	replacement.Writes = {invalidResident};
+	invalid.AddNode(replacement);
+	CHECK(invalid.Validate(offender) == GraphStatus::FrameReadsWorld);
+	CHECK(offender == Name("upload"));
+	CHECK(invalid.Compile(compiled, offender) == GraphStatus::FrameReadsWorld);
+	CHECK(
+		engine::graph::CompileSchedule(invalid, schedule, offender) ==
+		engine::graph::ScheduleStatus::InvalidGraph
+	);
+}
+
+TEST_CASE("frame seeds cannot be mutated into per-world storage", "[graph][frame-prefix]") {
+	RenderGraph graph;
+	const ResourceId resident = Colour(graph, "resident");
+	const ResourceId colour = Colour(graph, "colour");
+	graph.AddNode({.Name = Name("seed"), .Writes = {resident}, .Scope = NodeScope::Frame});
+	const NodeId update = graph.AddNode({
+		.Name = Name("update"),
+		.Reads = {resident},
+		.Writes = {resident},
+		.Scope = NodeScope::World,
+	});
+	graph.AddNode({.Name = Name("draw"), .Reads = {resident}, .Writes = {colour}, .Scope = NodeScope::View});
+	CompiledGraph compiled;
+	Name offender;
+	CHECK(graph.Validate(offender) == GraphStatus::FrameWorldWriteConflict);
+	CHECK(offender == Name("resident"));
+	CHECK(graph.Compile(compiled, offender) == GraphStatus::FrameWorldWriteConflict);
+	engine::graph::ExecutionSchedule schedule;
+	CHECK(
+		engine::graph::CompileSchedule(graph, schedule, offender) ==
+		engine::graph::ScheduleStatus::InvalidGraph
+	);
+	REQUIRE(graph.SetEnabled(update, false));
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	Recorder runner;
+	const uint64_t worlds[] = {7, 9};
+	REQUIRE(graph.Execute(compiled, runner, worlds));
+	CHECK(runner.Ran == std::vector<std::string>{"seed", "draw@0", "draw@1"});
+}
+
 TEST_CASE("a frame-scoped pass runs once however many worlds there are", "[graph]") {
 	RenderGraph graph;
 	const ResourceId colour = Colour(graph, "colour");
@@ -886,4 +1112,14 @@ TEST_CASE("a node id means nothing outside the graph that issued it", "[graph]")
 	REQUIRE(swapped != nullptr);
 	CHECK(swapped->Kind == ResourceKind::Depth);
 	CHECK(swapped->Kind != first.FindResource(firstColour)->Kind);
+}
+
+TEST_CASE("full float ambient response format preserves four channels", "[graph][formats]") {
+	using namespace engine::graph;
+	ResourceFormat parsed{};
+	REQUIRE(ParseResourceFormat("RGBA32F", parsed));
+	CHECK(parsed == ResourceFormat::RGBA32F);
+	CHECK(std::string_view(Describe(parsed)) == "RGBA32F");
+	CHECK(BitsPerPixel(parsed) == 128);
+	CHECK(ChannelCount(parsed) == 4);
 }

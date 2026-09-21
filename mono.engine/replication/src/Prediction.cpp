@@ -14,6 +14,7 @@ namespace engine::replication {
 		// throw away the input the player just made - which is the one they can
 		// see not happening.
 		if (Settings_.MaximumPending > 0 && Inputs.size() >= Settings_.MaximumPending) {
+			CoveredThrough_ = std::max(CoveredThrough_, Inputs.front().Tick);
 			Inputs.erase(Inputs.begin());
 			Dropped_++;
 			dropped = true;
@@ -23,10 +24,12 @@ namespace engine::replication {
 		input.Tick = tick;
 		input.Bytes.assign(bytes.begin(), bytes.end());
 		Inputs.push_back(std::move(input));
+		RecordedThrough_ = std::max(RecordedThrough_, tick);
 		return !dropped;
 	}
 
 	size_t Prediction::Reconcile(uint64_t applied) {
+		CoveredThrough_ = std::max(CoveredThrough_, applied);
 		// Everything up to and including the acknowledged tick. What is left is
 		// exactly what has to be replayed to arrive back at the present.
 		const auto first = std::find_if(Inputs.begin(), Inputs.end(), [applied](const Input &input) {
@@ -40,5 +43,6 @@ namespace engine::replication {
 
 	void Prediction::Clear() {
 		Inputs.clear();
+		CoveredThrough_ = RecordedThrough_ = 0;
 	}
 }

@@ -257,6 +257,13 @@ namespace unified {
 		// @return `true` once the client holds the world.
 		bool Join(int limit = 512);
 
+		// Delivers content already accepted by the relay without starting another
+		// world tick or asking for another route.
+		//
+		// @param limit How many transport turns to allow before giving up.
+		// @return `true` when no content route remains in flight.
+		bool DrainContent(int limit = 512);
+
 		// One tick: simulate, publish, carry, apply, record, draw.
 		//
 		// @return What crossed and what came out.

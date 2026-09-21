@@ -1,8 +1,7 @@
 // A supervised host, as an actual second process.
 //
-// Everything below this runs in one process by design - `world`'s tests drive
-// the protocol over a local channel because that is where the protocol lives.
-// What only a real spawn can show is the join between them: the supervisor
+// These exercise the product launch path, beyond the engine protocol tests:
+// the supervisor
 // creating a channel, the child inheriting it across an exec, `--host` finding
 // it, and worlds it was granted by name coming up and ticking. Any one of those
 // four failing produces a host that looks started and says nothing.
@@ -15,7 +14,12 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Supervisor.hpp>
 
@@ -37,6 +41,63 @@ using engine::world::HostStatus;
 using engine::world::Supervisor;
 using engine::world::SupervisorSettings;
 
+TEST_CASE("saved project child keeps only its granted world local", "[server][saved-host-child][.]") {
+	server::Options options;
+	options.HostName = "saved-host";
+	options.HostWorlds = {"far"};
+	options.GamePath = (engine::core::Paths::Base() / "saved-host-project.agame").string();
+	options.ControlPort = -1;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	CHECK(host.Worlds().NameOf(host.Primary()) == Name("far"));
+	CHECK_FALSE(host.Worlds().IsRemote(host.Primary()));
+	CHECK(host.Worlds().IsRemote(host.Worlds().Find(Name("near"))));
+	bool found = false;
+	host.Enter([&](engine::ecs::Store &store) {
+		store.Query<const engine::scene::Transform>().Each([&](engine::ecs::Entity,
+															   const engine::scene::Transform &transform) {
+			found |= transform.Frame.Position.X == 42;
+		});
+	});
+	CHECK(found);
+	host.Shutdown();
+}
+
+TEST_CASE("supervised Server loads a saved project by granted world name", "[server][saved-host]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	world::Universe authored;
+	for (const auto *name : {"near", "far"}) {
+		const auto id = authored.Create({.Name = Name(name)});
+		authored.Enter(id, [&](ecs::Store &store) {
+			const auto workspace = scene::InstallServices(store);
+			scene::PartDesc part;
+			part.Frame = core::CFrame(core::Vector3{name == std::string_view("far") ? 42.0f : 0.0f, 0, 0});
+			REQUIRE(store.SetParent(scene::MakePart(store, part), workspace));
+		});
+	}
+	std::string error;
+	REQUIRE(
+		game::SaveGame(authored, Name("saved host"), core::Paths::Base() / "saved-host-project.agame", error)
+	);
+	auto channel = parallel::MakeProcessChannel();
+	REQUIRE(channel.Valid());
+	parallel::Process child;
+	REQUIRE(child.Start(
+		core::Paths::Base() / core::Paths::Program("test_server"),
+		{"[saved-host-child]"},
+		std::move(channel.Remote)
+	));
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+	auto status = child.Poll();
+	while (status.Alive() && std::chrono::steady_clock::now() < deadline) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		status = child.Poll();
+	}
+	CHECK(status.Reason == parallel::ExitReason::Exited);
+	CHECK(status.Code == 0);
+}
+
 namespace host_mode_test {
 	// The server program, which sits beside the test binary's directory rather
 	// than in it: tests stage into `tests/` and programs into their own.
@@ -51,8 +112,8 @@ namespace host_mode_test {
 	// Runs the supervisor's barrier until `ready(status)` holds, or the
 	// deadline passes.
 	//
-	// A poll rather than a wait: nothing in the driver blocks on a host, which
-	// is what stops one host from being able to stall the universe.
+	// This helper drives autonomous link tests. Product tick coordination uses
+	// separate bounded phase waits on the driver thread.
 	bool Settle(
 		Supervisor &supervisor,
 		Name host,
@@ -93,6 +154,81 @@ namespace host_mode_test {
 }
 
 using namespace host_mode_test;
+
+TEST_CASE(
+	"repeated product phase acknowledgement does not republish bus traffic", "[server][host-exchange]"
+) {
+	using namespace engine::world;
+	if (!ServerAvailable()) SKIP("the server program was not built into this preset");
+	auto settings = Settings();
+	settings.Arguments.push_back("--host-tick-exchange");
+	settings.Arguments.push_back("--chatter");
+	Supervisor supervisor(settings);
+	const Name host("host.phase.retry");
+	REQUIRE(supervisor.Start({{host, {Name("phase.retry")}}}) == 1);
+	REQUIRE(Settle(supervisor, host, [](const HostStatus &status) { return status.Ready; }));
+	TickExchangeCommand command;
+	command.Frame = 1;
+	command.FrameSeconds = 1.0f / 30;
+	const auto send = [&] {
+		REQUIRE(supervisor.SendTickExchange(host, command));
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+		while (std::chrono::steady_clock::now() < deadline) {
+			supervisor.Pump(1);
+			if (auto result = supervisor.TakeTickExchange(host)) {
+				REQUIRE(result->Success);
+				return;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		FAIL("product phase acknowledgement deadline expired");
+	};
+	for (uint64_t frame = 1; frame <= 2; ++frame) {
+		command = {};
+		command.Frame = frame;
+		command.FrameSeconds = 1.0f / 30;
+		send();
+		command.FrameSeconds = 0;
+		for (auto operation :
+			 {TickExchangeOperation::Collect, TickExchangeOperation::Serve, TickExchangeOperation::Apply}) {
+			command.Operation = operation;
+			send();
+		}
+		command.Operation = TickExchangeOperation::End;
+		command.Round = 1;
+		send();
+	}
+	REQUIRE_FALSE(supervisor.TakeTraffic().empty());
+	send();
+	CHECK(supervisor.TakeTraffic().empty());
+	CHECK(supervisor.StatusOf(host).Tick == 2);
+	REQUIRE(supervisor.AskToStop(host));
+}
+
+TEST_CASE("product driver advances every spawned host by the same fixed frames", "[server][host-exchange]") {
+	if (!ServerAvailable()) SKIP("the server program was not built into this preset");
+	server::Options options;
+	options.TickRate = 60;
+	options.Entities = 4;
+	options.Unpaced = true;
+	options.MaximumTicks = 8;
+	options.Seconds = 10;
+	options.HostProgram = ServerProgram();
+	options.WorldsPerHost = 1;
+	options.RemoteWorlds = {"phase.first", "phase.second"};
+	server::Server driver;
+	REQUIRE(driver.Initialise(options));
+	driver.Run();
+	CHECK(driver.Worlds().StatisticsOf(driver.Primary()).Ticks == 8);
+	CHECK_FALSE(driver.Hosts()->Statistics().TickExchangeFailed);
+	const auto hosts = driver.Hosts()->Hosts().Hosts();
+	REQUIRE(hosts.size() == 2);
+	for (const auto &host : hosts) {
+		CHECK(host.Ready);
+		CHECK(host.Tick == 8);
+	}
+	driver.Shutdown();
+}
 
 TEST_CASE("a spawned host comes up, says it is ready, and heartbeats", "[server]") {
 	if (!ServerAvailable()) {
@@ -381,4 +517,86 @@ TEST_CASE("listening remote worlds receive one process and port each", "[server]
 	CHECK(firstStatus.Port != secondStatus.Port);
 
 	driver.Shutdown();
+}
+
+TEST_CASE(
+	"a server host advertises and answers its portal session endpoint",
+	"[server][portal-session][lease-discovery]"
+) {
+	using namespace engine;
+	if (!ServerAvailable()) SKIP("the server program is not built into this preset");
+	auto settings = Settings();
+	settings.Arguments.insert(settings.Arguments.end(), {"--listen", "0"});
+	Supervisor supervisor(settings);
+	HostPlan plan;
+	plan.Name = Name("lease-host");
+	plan.Worlds = {Name("lease-destination")};
+	REQUIRE(supervisor.Start({plan}) == 1);
+	world::PresentationDirectory published;
+	REQUIRE(Settle(supervisor, plan.Name, [&](const HostStatus &status) {
+		for (const auto &entry : supervisor.TakePresentationDirectories()) {
+			if (entry.Host == plan.Name && !entry.Directory.Endpoints.empty()) published = entry.Directory;
+		}
+		return status.Ready && !published.Endpoints.empty();
+	}));
+	REQUIRE(published.Endpoints.size() == 1);
+	const auto endpoint = published.Endpoints.front();
+	CHECK(endpoint.World == "lease-destination");
+	CHECK(endpoint.Channel == "portal-sessions");
+	CHECK(endpoint.Session != 0);
+	CHECK(endpoint.Generation != 0);
+	CHECK(supervisor.WantsPresentationRoutes(plan.Name));
+
+	world::Universe universe;
+	REQUIRE(universe.ConfigurePresentation(123));
+	world::WorldSettings nearSettings;
+	nearSettings.Name = Name("lease-source");
+	const auto near = universe.Create(nearSettings);
+	world::WorldSettings farSettings;
+	farSettings.Name = Name("lease-destination");
+	const auto far = universe.CreateRemote(farSettings, plan.Name);
+	REQUIRE(far.IsValid());
+	REQUIRE(universe.ApplyPresentationDirectory(plan.Name, published) == world::PresentationStatus::Ok);
+	const auto sender = universe.OpenPresentation(near, Name("portal-sessions"));
+	REQUIRE(sender.Status == world::PresentationStatus::Ok);
+	REQUIRE(supervisor.PublishPresentationRoutes(plan.Name, universe.PresentationRoutesFor(plan.Name)));
+	game::PortalSessionMessage request;
+	request.Kind = game::PortalSessionKind::LeaseRequest;
+	request.Attempt = 17;
+	request.Claim.Transfer = {"lease-source", 101, 1};
+	request.Claim.Destination = "lease-destination";
+	request.Claim.SourceSession = sender.Address.Session;
+	request.Claim.Capability.fill(std::byte{42});
+	request.Identity.Value.fill(19);
+	REQUIRE(
+		universe.SendPresentation(
+			near, sender.Address, endpoint, request.Attempt, game::EncodePortalSession(request)
+		) == world::PresentationStatus::Ok
+	);
+	const auto outgoing = universe.TakePresentationOutbound();
+	REQUIRE(outgoing.size() == 1);
+	REQUIRE(supervisor.SendPresentation(plan.Name, outgoing.front().Message));
+	game::PortalSessionMessage response;
+	bool received = false;
+	REQUIRE(Settle(supervisor, plan.Name, [&](const HostStatus &) {
+		for (const auto &entry : supervisor.TakePresentationTraffic()) {
+			REQUIRE(entry.Host == plan.Name);
+			REQUIRE(universe.IngestPresentation(plan.Name, entry.Message) == world::PresentationStatus::Ok);
+			for (const auto &reply : universe.TakePresentation(sender.Address)) {
+				REQUIRE(reply.Correlation == request.Attempt);
+				REQUIRE(game::DecodePortalSession(reply.Payload, response));
+				received = true;
+			}
+		}
+		return received;
+	}));
+	CHECK(response.Kind == game::PortalSessionKind::LeaseRoute);
+	CHECK(response.Attempt == request.Attempt);
+	CHECK(response.Claim.DestinationIncarnation == endpoint.Session);
+	CHECK(response.Port == supervisor.StatusOf(plan.Name).Port);
+	CHECK_FALSE(response.Identity.IsZero());
+	REQUIRE(supervisor.AskToStop(plan.Name));
+	REQUIRE(Settle(supervisor, plan.Name, [](const HostStatus &status) {
+		return status.State == HostState::Failed;
+	}));
 }

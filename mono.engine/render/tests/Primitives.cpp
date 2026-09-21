@@ -13,6 +13,8 @@
 
 #include "Primitives.hpp"
 
+#include "PortalBeamSelection.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -30,12 +32,20 @@ using engine::render::BeamQuadrant;
 using engine::render::BillboardQuad;
 using engine::render::CanvasFacesViewer;
 using engine::render::CanvasPixelsPerStud;
+using engine::render::PortalBeamFromPair;
+using engine::render::PortalBeamInfluenceDistanceSquared;
+using engine::render::PortalBeamMappedBounds;
+using engine::render::PortalBeamProjector;
+using engine::render::PortalBeamRank;
+using engine::render::PortalBeamRanksBefore;
 using engine::render::SpatialQuad;
 using Vector2 = engine::core::Vector2;
 using Vector3 = engine::core::Vector3;
 
 namespace {
-	constexpr uint32_t ATLAS = 2048;
+	constexpr uint32_t TILE = 1024;
+	constexpr uint32_t ATLAS_WIDTH = TILE * 2;
+	constexpr uint32_t ATLAS_HEIGHT = TILE * 3;
 
 	// Whether two texel rectangles share any area.
 	bool Overlaps(const AtlasQuadrant &left, const AtlasQuadrant &right) {
@@ -54,28 +64,28 @@ namespace {
 
 // --- the beam atlas ------------------------------------------------------
 
-TEST_CASE("the four beam quadrants tile the atlas and do not overlap", "[render][primitives]") {
+TEST_CASE("the six beam tiles tile the atlas and do not overlap", "[render][primitives]") {
 	float area = 0.0f;
-	for (uint32_t index = 0; index < 4; index++) {
-		const AtlasQuadrant quadrant = BeamQuadrant(index, ATLAS);
+	for (uint32_t index = 0; index < 6; index++) {
+		const AtlasQuadrant quadrant = BeamQuadrant(index, TILE);
 
-		REQUIRE(quadrant.Width == Approx(static_cast<float>(ATLAS) / 2.0f));
-		REQUIRE(quadrant.Height == Approx(static_cast<float>(ATLAS) / 2.0f));
+		REQUIRE(quadrant.Width == Approx(static_cast<float>(TILE)));
+		REQUIRE(quadrant.Height == Approx(static_cast<float>(TILE)));
 		REQUIRE(quadrant.X >= 0.0f);
 		REQUIRE(quadrant.Y >= 0.0f);
-		REQUIRE(quadrant.X + quadrant.Width <= static_cast<float>(ATLAS));
-		REQUIRE(quadrant.Y + quadrant.Height <= static_cast<float>(ATLAS));
+		REQUIRE(quadrant.X + quadrant.Width <= static_cast<float>(ATLAS_WIDTH));
+		REQUIRE(quadrant.Y + quadrant.Height <= static_cast<float>(ATLAS_HEIGHT));
 		area += quadrant.Width * quadrant.Height;
 
 		for (uint32_t other = 0; other < index; other++) {
-			REQUIRE_FALSE(Overlaps(quadrant, BeamQuadrant(other, ATLAS)));
+			REQUIRE_FALSE(Overlaps(quadrant, BeamQuadrant(other, TILE)));
 		}
 	}
 
-	// Four halves of a half is the whole atlas: nothing is left unwritten, and
+	// Six tiles fill the whole atlas: nothing is left unwritten, and
 	// a quadrant nobody wrote stays at the far plane, which the beam lookup
 	// reads as lit.
-	REQUIRE(area == Approx(static_cast<float>(ATLAS) * static_cast<float>(ATLAS)));
+	REQUIRE(area == Approx(static_cast<float>(ATLAS_WIDTH) * static_cast<float>(ATLAS_HEIGHT)));
 }
 
 // **The check the three hand-written copies could not make.** The viewport says
@@ -83,40 +93,135 @@ TEST_CASE("the four beam quadrants tile the atlas and do not overlap", "[render]
 // be separate expressions of `index % 2` and `index / 2`, and a beam that drew
 // into one quadrant while sampling another shadows through the wrong doorway.
 TEST_CASE("a beam quadrant's lookup window is its own viewport", "[render][primitives]") {
-	for (uint32_t index = 0; index < 4; index++) {
-		const AtlasQuadrant quadrant = BeamQuadrant(index, ATLAS);
-		const auto side = static_cast<float>(ATLAS);
+	for (uint32_t index = 0; index < 6; index++) {
+		const AtlasQuadrant quadrant = BeamQuadrant(index, TILE);
 
-		REQUIRE(quadrant.Window.x == Approx(quadrant.Width / side));
-		REQUIRE(quadrant.Window.y == Approx(quadrant.Height / side));
-		REQUIRE(quadrant.Window.z == Approx(quadrant.X / side));
-		REQUIRE(quadrant.Window.w == Approx(quadrant.Y / side));
+		REQUIRE(quadrant.Window.x == Approx(quadrant.Width / static_cast<float>(ATLAS_WIDTH)));
+		REQUIRE(quadrant.Window.y == Approx(quadrant.Height / static_cast<float>(ATLAS_HEIGHT)));
+		REQUIRE(quadrant.Window.z == Approx(quadrant.X / static_cast<float>(ATLAS_WIDTH)));
+		REQUIRE(quadrant.Window.w == Approx(quadrant.Y / static_cast<float>(ATLAS_HEIGHT)));
 	}
 }
 
-TEST_CASE("beam quadrants go in reading order", "[render][primitives]") {
-	const auto half = static_cast<float>(ATLAS) / 2.0f;
+TEST_CASE("beam tiles go in reading order", "[render][primitives]") {
+	const auto tile = static_cast<float>(TILE);
 
-	REQUIRE(BeamQuadrant(0, ATLAS).X == Approx(0.0f));
-	REQUIRE(BeamQuadrant(0, ATLAS).Y == Approx(0.0f));
-	REQUIRE(BeamQuadrant(1, ATLAS).X == Approx(half));
-	REQUIRE(BeamQuadrant(1, ATLAS).Y == Approx(0.0f));
-	REQUIRE(BeamQuadrant(2, ATLAS).X == Approx(0.0f));
-	REQUIRE(BeamQuadrant(2, ATLAS).Y == Approx(half));
-	REQUIRE(BeamQuadrant(3, ATLAS).X == Approx(half));
-	REQUIRE(BeamQuadrant(3, ATLAS).Y == Approx(half));
+	for (uint32_t index = 0; index < 6; index++) {
+		REQUIRE(BeamQuadrant(index, TILE).X == Approx(static_cast<float>(index % 2u) * tile));
+		REQUIRE(BeamQuadrant(index, TILE).Y == Approx(static_cast<float>(index / 2u) * tile));
+	}
 }
 
-// A fifth beam is refused by the caller, which logs the ones it dropped. If one
+// A seventh beam is refused by the caller, which logs the ones it dropped. If one
 // arrives anyway it takes a quadrant rather than a viewport off the edge of the
 // texture, which is a driver validation error on some backends and a silent
 // read of unmapped memory on others.
-TEST_CASE("a beam index past the fourth stays inside the atlas", "[render][primitives]") {
-	const AtlasQuadrant fifth = BeamQuadrant(4, ATLAS);
-	const AtlasQuadrant first = BeamQuadrant(0, ATLAS);
+TEST_CASE("a beam index past the sixth stays inside the atlas", "[render][primitives]") {
+	const AtlasQuadrant seventh = BeamQuadrant(6, TILE);
+	const AtlasQuadrant first = BeamQuadrant(0, TILE);
 
-	REQUIRE(fifth.X == Approx(first.X));
-	REQUIRE(fifth.Y == Approx(first.Y));
+	REQUIRE(seventh.X == Approx(first.X));
+	REQUIRE(seventh.Y == Approx(first.Y));
+}
+
+TEST_CASE("a portal beam keeps an offscreen doorway when it reaches visible ground", "[render][primitives]") {
+	std::array<engine::scene::DrawInstance, 2> rows;
+	rows[0].Frame.Position = {0.0f, 0.0f, 0.5f};
+	rows[0].HalfExtent = {0.2f, 0.2f, 0.2f};
+	rows[1].Frame.Position = {8.0f, 0.0f, 0.5f};
+	rows[1].HalfExtent = {0.2f, 0.2f, 0.2f};
+	const std::array<uint32_t, 1> visible{0};
+	const PortalBeamProjector projector{
+		.Back = {},
+		.PlaneNormal = {0.0f, 0.0f, 1.0f},
+		.PlaneOffset = -0.5f,
+		.Light = glm::mat4{1.0f},
+	};
+
+	const float influence =
+		PortalBeamInfluenceDistanceSquared(projector, rows, visible, Vector3{0.0f, 0.0f, 2.0f});
+
+	// The pane itself may be offscreen. Only the receiver set decides whether
+	// this beam earns a bounded atlas slot.
+	REQUIRE(std::isfinite(influence));
+	REQUIRE(influence == Approx(1.69f));
+}
+
+TEST_CASE("portal beam receiver bounds rotate once through a seam", "[render][primitives]") {
+	engine::scene::DrawInstance receiver;
+	receiver.Frame = engine::core::CFrame::Angles(0.0f, 0.5f, 0.0f);
+	receiver.HalfExtent = {3.0f, 1.0f, 0.5f};
+	PortalBeamProjector projector;
+	projector.Back.Frame = engine::core::CFrame::Angles(0.0f, 0.7f, 0.0f);
+	projector.Back.Scale = 1.5f;
+
+	const engine::core::AABB mapped = PortalBeamMappedBounds(projector, receiver);
+	const engine::core::AABB expected = engine::core::OrientedBoxBounds(
+		projector.Back.Place(receiver.Frame), receiver.HalfExtent * projector.Back.Scale
+	);
+
+	REQUIRE(mapped.Minimum.X == Approx(expected.Minimum.X));
+	REQUIRE(mapped.Minimum.Y == Approx(expected.Minimum.Y));
+	REQUIRE(mapped.Minimum.Z == Approx(expected.Minimum.Z));
+	REQUIRE(mapped.Maximum.X == Approx(expected.Maximum.X));
+	REQUIRE(mapped.Maximum.Y == Approx(expected.Maximum.Y));
+	REQUIRE(mapped.Maximum.Z == Approx(expected.Maximum.Z));
+}
+
+TEST_CASE("portal beam projects destination receivers through the source aperture", "[render][primitives]") {
+	engine::render::PortalView destination;
+	destination.Centre = {80.0f, 6.0f, 0.0f};
+	destination.Normal = {1.0f, 0.0f, 0.0f};
+	destination.First = {0.0f, 0.0f, 5.0f};
+	destination.Second = {0.0f, 6.0f, 0.0f};
+	destination.Warp.Frame.Position = {-80.0f, 0.0f, 0.0f};
+	engine::render::PortalView source;
+	source.Centre = {0.0f, 6.0f, 0.0f};
+	source.Normal = {0.0f, 0.0f, 1.0f};
+	source.First = {5.0f, 0.0f, 0.0f};
+	source.Second = {0.0f, 6.0f, 0.0f};
+	const engine::core::AABB bounds{{-100.0f, -10.0f, -100.0f}, {100.0f, 20.0f, 100.0f}};
+	const PortalBeamProjector projector =
+		PortalBeamFromPair(destination, source, bounds, {0.0f, -1.0f, 1.0f});
+
+	const Vector3 mapped = projector.Back.Point(destination.Centre + Vector3{0.0f, 0.0f, 2.0f});
+	REQUIRE(mapped.X == Approx(0.0f));
+	REQUIRE(mapped.Y == Approx(6.0f));
+	REQUIRE(mapped.Z == Approx(2.0f));
+	REQUIRE(projector.PlaneNormal == source.Normal);
+	REQUIRE(projector.PlaneOffset == Approx(source.Normal.Dot(source.Centre)));
+
+	const glm::vec4 caster = projector.Light * glm::vec4{0.0f, 4.0f, -2.0f, 1.0f};
+	REQUIRE(std::abs(caster.x / caster.w) <= 1.0f);
+	REQUIRE(std::abs(caster.y / caster.w) <= 1.0f);
+	REQUIRE(caster.z / caster.w >= 0.0f);
+	REQUIRE(caster.z / caster.w <= 1.0f);
+}
+
+TEST_CASE("seven portal beams retain the offscreen aperture that reaches the view", "[render][primitives]") {
+	std::array<engine::scene::DrawInstance, 1> rows;
+	rows[0].Frame.Position = {0.0f, 0.0f, 0.5f};
+	rows[0].HalfExtent = {0.1f, 0.1f, 0.1f};
+	const std::array<uint32_t, 1> visible{0};
+	std::array<PortalBeamRank, 7> ranks;
+	for (uint32_t slot = 0; slot < ranks.size(); slot++) {
+		PortalBeamProjector projector;
+		projector.PlaneNormal = {0.0f, 0.0f, 1.0f};
+		projector.PlaneOffset = -0.5f;
+		// The first six apertures' beams lie outside the receiver. The seventh
+		// can be outside the eye yet its beam lands on visible ground.
+		projector.Light = glm::translate(glm::mat4{1.0f}, glm::vec3{slot < 6 ? 4.0f : 0.0f, 0.0f, 0.0f});
+		ranks[slot] = {
+			slot, PortalBeamInfluenceDistanceSquared(projector, rows, visible, {0.0f, 0.0f, 2.0f})
+		};
+	}
+
+	std::sort(ranks.begin(), ranks.end(), PortalBeamRanksBefore);
+	REQUIRE(ranks[0].Slot == 6);
+	REQUIRE(std::isfinite(ranks[0].InfluenceDistance));
+	for (size_t index = 1; index < ranks.size(); index++) {
+		REQUIRE_FALSE(std::isfinite(ranks[index].InfluenceDistance));
+	}
 }
 
 // --- the spatial canvas quad ---------------------------------------------

@@ -6,9 +6,11 @@
 #include <engine/core/Log.hpp>
 
 #include <assetc/Bake.hpp>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <string>
 
 // The CLI parses options and reports the bake library's rows.
@@ -39,8 +41,12 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"flipbook-fps",
 		"FPS",
-		"Override the frame rate of every imported flipbook (default: 0, keep what the GIF said)"
+		"Override imported flipbook FPS, or state static-atlas FPS with --flipbook-side and --flipbook-frames"
 	);
+	arguments.Value(
+		"flipbook-side", "CELLS", "Mark ordinary image atlases as a 1, 2, 4 or 8 cell-wide flipbook"
+	);
+	arguments.Value("flipbook-frames", "COUNT", "Populated static-atlas flipbook cells, up to side squared");
 	arguments.Flag("no-mipmaps", "Skip the mip chain, leaving every texture one level");
 	arguments.Flag("no-copy", "Skip files this cannot bake instead of copying them across");
 	arguments.Flag("quiet", "Print the summary only, not a row per asset");
@@ -98,6 +104,15 @@ int main(int argc, char **argv) {
 	settings.MaximumTexture =
 		static_cast<uint32_t>(arguments.GetInteger("max-texture", settings.MaximumTexture));
 	settings.FlipbookFps = static_cast<float>(arguments.GetNumber("flipbook-fps", settings.FlipbookFps));
+	const int64_t flipbookSide = arguments.GetInteger("flipbook-side", settings.FlipbookSide);
+	const int64_t flipbookFrames = arguments.GetInteger("flipbook-frames", settings.FlipbookFrames);
+	if (flipbookSide < 0 || flipbookSide > std::numeric_limits<uint8_t>::max() || flipbookFrames < 0 ||
+		flipbookFrames > std::numeric_limits<uint8_t>::max()) {
+		ENGINE_ERROR("assetc: --flipbook-side and --flipbook-frames must be between 0 and 255");
+		return 2;
+	}
+	settings.FlipbookSide = static_cast<uint8_t>(flipbookSide);
+	settings.FlipbookFrames = static_cast<uint8_t>(flipbookFrames);
 
 	std::string failure;
 	const assetc::Report report = assetc::Bake(settings, failure);

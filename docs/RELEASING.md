@@ -139,7 +139,7 @@ the `matrix` context.
 
 Each archive holds the staged directory of all five programs - `client/`,
 `studio/`, `server/`, `cdn/`, `launcher/` - beside `LICENSE`,
-`THIRD_PARTY_NOTICES.md`, `README.md` and a `VERSION` file. The trees are not
+`docs/THIRD_PARTY_NOTICES.md`, `README.md` and a `VERSION` file. The trees are not
 merged into a shared `bin/lib` layout on purpose: `mono_add_program` builds each
 one to be runnable where it sits, and flattening them would put five copies of
 `libSDL3` and four disagreeing `shaders/render/` directories in one place.

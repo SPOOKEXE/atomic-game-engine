@@ -336,6 +336,9 @@ namespace engine::replication {
 		if (component == "scene.PortalTransitSeen") {
 			return true;
 		}
+		// Camera crossing history belongs to this viewer and travels only with
+		// its explicit camera continuation during a player handoff.
+		if (component == "scene.CameraPortalView") return true;
 
 		// **A fact about this viewer's own camera, not about the part.**
 		// `scene::LocalTransparency` exists so a poppercam can thin out

@@ -4,20 +4,28 @@
 //
 // @tier L12 · client
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Schedule.hpp>
 #include <engine/render/Capabilities.hpp>
+#include <engine/render/DataCapture.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/PortalCaptureTreeCompose.hpp>
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
+#include <engine/render/ResourceImage.hpp>
+#include <engine/render/VisibilityObservation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -33,6 +41,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -46,6 +55,22 @@ namespace engine::graph {
 }
 
 namespace engine::render {
+	class DataFactoryHookBind;
+	struct PackedMeshData;
+	enum class MeshCopyStatus : uint8_t;
+	enum class TextureCopyStatus : uint8_t;
+	class ShaderLibrary;
+	struct PortalImageBinding;
+	struct PortalShadowImageBinding;
+	struct PortalShadowImage;
+	struct PortalImageReply;
+	struct PortalImageLayerSet;
+	struct PortalImageCapture;
+	struct PortalCaptureTree;
+	struct ImportedPortalCaptureTree;
+	struct PortalCaptureLenses;
+	struct PortalImageImportUsage;
+
 	struct SceneLight;
 
 	// A second view, rendered into a texture instead of the swapchain.
@@ -285,9 +310,9 @@ namespace engine::render {
 	// `NON-EUCLIDEAN.md`'s Part III is the whole argument for the hole, and
 	// CodeParade's `Portal.cpp` is the model.
 	//
-	// **Same-world only.** A `scene::Portal` naming a `DestinationWorld` is a
-	// window onto a second simulation rather than a hole in one space: it keeps
-	// its `SurfaceView`, draws a foreign instance range, and does not recurse.
+	// Local portals derive recursive views. External portals sample an owned
+	// image reply using its fitted capture mapping and never render local geometry
+	// as a substitute for an unavailable destination.
 	//
 	// @since v0.15
 	struct PortalView {
@@ -300,6 +325,14 @@ namespace engine::render {
 		// so there is no second mesh, no vertex buffer, and nothing coplanar with
 		// the pane to fight it for depth.
 		int16_t Index = 0;
+
+		// ImportedImage is a renderer-local generation handle. ImagePortal names
+		// the authored entrance. ExternalImage stays true while an image is absent.
+		bool ExternalImage = false;
+		// Generation handle of the accepted imported image, or zero.
+		uint64_t ImportedImage = 0;
+		// Authored portal key used to resolve that imported image.
+		core::Name ImagePortal;
 
 		// The slot of the hole at the far end of this one, or -1 for none.
 		//
@@ -600,6 +633,14 @@ namespace engine::render {
 		}
 	};
 
+	// Render-local binding from an authored world to its admitted content session.
+	struct WorldContentOwner {
+		// Stable name of the world that authored the content references.
+		core::Name World;
+		// Content residency namespace admitted for that world.
+		core::Name Owner;
+	};
+
 	// One camera invocation in a graph-owned frame.
 	//
 	// Spans are borrowed for the duration of `Renderer::Render`. A batch groups
@@ -608,20 +649,83 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// An HDR image owned by this world and viewport. The eye-image node defaults
+		// to whole-eye projection; seam intermediates require its explicit projection option.
+		// Zero denotes an unavailable image.
+		uint64_t EyeImage = 0;
+		// Nearest first, sharing EyeImageKey and the base image's capture identity.
+		std::array<uint64_t, 2> EyeTransparentImages{};
+		// Premultiplied world-space interface layer over the eye image.
+		uint64_t EyeSpatialOverlayImage = 0;
+		// Stable portal key shared by every eye-image layer.
+		core::Name EyeImageKey;
+
+		// Primary-eye body selection. Rig is a local root handle; Player is the
+		// stable account identity used to resolve that root in another world.
+		// Secondary views and shadow casters retain these rows.
+		uint64_t EyeRig = 0;
+		// Stable account identity of the first-person player, when known.
+		std::optional<int64_t> EyePlayer;
+		// Sorted indices into Instances. Import selection has no local ECS handle.
+		std::span<const uint32_t> EyeHiddenRows;
 		// Which retained parts of this view differ from the last completed
 		// presentation. The conservative default preserves callers that do not
 		// yet provide independent signatures.
-		PresentationDamage Damage{true, true, true, true};
+		PresentationDamage Damage{
+			.Scene = true,
+			.GameInterface = true,
+			.HostInterface = true,
+			.Viewport = true,
+			.Overlay = true,
+			.Objects = true,
+			.Particles = true,
+			.Environment = true,
+			.Portals = true,
+		};
 
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
+		// arch-waiver ecs-copy: each View is one render invocation, not retained world state.
 		scene::Camera Camera;
+		// Set by the product's completed world snapshot barrier. A queued data
+		// capture only becomes Ready when this exact identity reaches its graph
+		// capture node; an empty value is intentionally not a data-factory frame.
+		std::string SnapshotId;
+		// Identity and ordering supplied by the completed render-sample producer.
+		// Motion capture refuses history when this is empty, a sequence is skipped,
+		// or CameraCut marks a restore, rebinding, or projection discontinuity.
+		std::string CameraTemporalId;
+		uint64_t CameraTemporalSequence = 0;
+		bool CameraCut = false;
 		//@}
+
+		// Explicit clip-space projection for a fitted or portal capture. Uses
+		// right-handed, Y-up, 0..1 depth coordinates for both culling and drawing.
+		// Camera still supplies image limits and the background depth distance.
+		std::optional<glm::mat4> Projection = {};
+
+		// Copied lens captures keep their accepted time without changing world clocks.
+		std::optional<float> LensTimeSeconds;
+		// Residency namespace for copied lens shaders and textures.
+		std::optional<core::Name> LensContentOwner;
+		// A retained captured program group, independent of authored world content.
+		uint64_t LensPrograms = 0;
 
 		// Borrowed world data consumed by view-scoped nodes.
 		//@{
 		std::span<const scene::DrawInstance> Instances;
+		// Studio may force distant meshes to a coarser level than the projected-area
+		// selector asks for. Negative first distance leaves the area rule alone.
+		std::array<float, 3> LodMinimumDistances{-1.0f, -1.0f, -1.0f};
+		// Whether offscreen LOD clusters are dropped before indirect drawing.
+		bool EnableLODCulling = true;
+		std::span<const DataCaptureObjectLabel> ObjectLabels;
+		std::span<const DataCaptureSemanticLabel> SemanticLabels;
+		std::span<const DataCapturePartLabel> PartLabels;
+		bool ObjectLabelsValid = true;
+		bool SemanticLabelsValid = true;
+		bool PartLabelsValid = true;
 		std::span<const core::CFrame> JointFrames;
 		std::span<const SurfaceView> Surfaces;
 		//@}
@@ -631,6 +735,9 @@ namespace engine::render {
 
 		// Which persistent renderer target bank this view owns.
 		size_t Slot = 0;
+		// Nonzero only for one bridge-coordinated capture group. It keeps a
+		// generated physical slot from admitting an unrelated logical-slot ticket.
+		uint64_t CaptureGroup = 0;
 
 		// A stable key shared only by views of the same logical world.
 		uint64_t World = 0;
@@ -640,8 +747,35 @@ namespace engine::render {
 		// instance rows and particle pool use this with `World`.
 		core::Name WorldName;
 
+		// Native rows use ContentOwner; copied rows select by SourceWorld.
+		// Unbound worlds retain the shared namespace for callers without scoped content.
+		// Built-in assets always use shared residency.
+		core::Name ContentOwner;
+		// Borrowed owner mappings for draw rows copied from other worlds.
+		std::span<const WorldContentOwner> ForeignContentOwners;
+
+		// Resolves a copied row's source world to its content residency owner.
+		core::Name ContentOwnerOf(core::Name sourceWorld) const {
+			if (!sourceWorld.IsValid() || sourceWorld == WorldName) return ContentOwner;
+			for (const WorldContentOwner &binding : ForeignContentOwners) {
+				if (binding.World == sourceWorld) return binding.Owner;
+			}
+			return {};
+		}
+
 		// A graph installed through `Renderer::SetPipeline`, or invalid for the default.
 		core::Name Pipeline;
+
+		// Optional request-owned limits for recursive image work. Pixels excludes
+		// the primary view and is shared by portal and mirror captures.
+		struct SurfaceCaptureBudget {
+			// Remaining nested capture depth.
+			uint32_t Depth = 0;
+			// Remaining offscreen pixel allowance.
+			uint64_t Pixels = 0;
+		};
+		// Limits shared by recursive portal and surface captures, if set.
+		std::optional<SurfaceCaptureBudget> SurfaceBudget;
 
 		// Borrowed transparent and lighting work for this view.
 		//@{
@@ -716,6 +850,14 @@ namespace engine::render {
 
 		// Whether to replace the renderer's current lighting for this view.
 		bool OverrideLighting = false;
+
+		// Complete shadow domain in this world's coordinates. Source and body passes
+		// share this bound to reproduce the native combined scene's raster grid.
+		// Must be finite, ordered and contain every drawable row in this view.
+		std::optional<core::AABB> DirectionalShadowBounds;
+		// Renderer-local imported source depth, combined with this view's body casters.
+		// Requires the exact imported domain in DirectionalShadowBounds.
+		uint64_t ImportedDirectionalShadow = 0;
 
 		// The editor's ground grid, drawn in this view or not drawn at all.
 		//
@@ -843,6 +985,31 @@ namespace engine::render {
 		std::function<void(BackendHandles)> Release;
 	};
 
+	// The attachment contract for world-space UI. Display uses Backend().ColourFormat;
+	// Hdr uses RGBA16F and preserves radiance until the portal's display conversion.
+	enum class WorldColourTarget : uint8_t { Display, Hdr };
+
+	// One prepared spatial batch rendered into caller-owned RGBA16F/D32F scratch
+	// attachments. Device handles stay local to the frame-owning renderer.
+	struct WorldInterfaceCapture {
+		// Opaque handle to the active GPU command buffer.
+		void *Command = nullptr;
+		// Opaque handle to the open render pass.
+		void *Pass = nullptr;
+		// Transform from world space into this attachment's clip space.
+		glm::mat4 ViewProjection{1};
+		// Camera pose used for world-space interface placement.
+		core::CFrame Camera;
+		// Ambient light colour applied to interface geometry.
+		core::Color3 Ambient;
+		// Direction of sunlight used by interface shading.
+		core::Vector3 Sun;
+		// Scratch attachment width in pixels.
+		uint32_t Width = 0;
+		// Scratch attachment height in pixels.
+		uint32_t Height = 0;
+	};
+
 	// A layer that records into this renderer's frame.
 	//
 	// **This exists so that Dear ImGui is not in the engine.** An editor needs
@@ -882,6 +1049,24 @@ namespace engine::render {
 		//         error and not a reason to fail the frame.
 		virtual bool Prepare(void *commandBuffer) = 0;
 
+		// Batch indices remain stable between Prepare calls. Scratch capture writes
+		// fragment depth as well as colour, for composition with other world layers.
+		virtual bool SupportsWorldLayers() const {
+			return !AffectsScene();
+		}
+		// Reports whether a prepared world-space overlay must be recorded.
+		virtual bool HasWorldOverlay() const {
+			return false;
+		}
+		// Returns the number of prepared world-space batches.
+		virtual size_t WorldBatchCount() const {
+			return 0;
+		}
+		// Records one world-space batch and returns its submitted draw count.
+		virtual uint32_t RecordWorldBatch(const WorldInterfaceCapture &, size_t) {
+			return 0;
+		}
+
 		// Records world-space interface collectors into an open scene pass.
 		//
 		// The default keeps editor hooks screen-only. A game interface backend
@@ -896,7 +1081,8 @@ namespace engine::render {
 			const core::Vector3 &,
 			uint32_t,
 			uint32_t,
-			bool
+			bool,
+			WorldColourTarget = WorldColourTarget::Display
 		) {
 			return 0;
 		}
@@ -923,6 +1109,10 @@ namespace engine::render {
 	// @since v0.1
 	// @client
 	struct FrameResult {
+		// Whether the renderer submitted this frame's command buffer. Unlike
+		// Presented, this stays true for a confirmed headless offscreen frame.
+		bool Submitted = false;
+
 		// Whether SDL accepted a command buffer for presentation.
 		bool Presented = false;
 
@@ -964,6 +1154,14 @@ namespace engine::render {
 		//
 		// @since v0.15
 		uint32_t PortalPasses = 0;
+
+		// A requested visible subcapture could not fit its depth or pixel limit.
+		bool SurfaceBudgetExceeded = false;
+
+		// Whether this frame rebuilt the retained plan for mirror and portal
+		// surface captures. The cache diagnostics use this to distinguish a
+		// stable camera hit from a descriptor or camera change.
+		bool SurfaceCapturePlanWrite = false;
 
 		// How many ribbon vertices were submitted this frame.
 		//
@@ -1055,9 +1253,10 @@ namespace engine::render {
 		//@}
 
 		// Later-transfer command buffers submitted after the main buffer:
-		// resource previews and captures download through them, so on SDL's
+		// resource previews and file captures download through them, so on SDL's
 		// one unified queue they read the frame's finished images without a
-		// copy pass inside the graphics stream.
+		// copy pass inside the graphics stream. Owned HDR exports instead copy
+		// at their graph read and share the scene fence to preserve alias lifetimes.
 		//
 		// @since v0.17
 		uint32_t DownloadCommandBuffers = 0;
@@ -1140,9 +1339,13 @@ namespace engine::render {
 	// A row is one `GpuInstance`, so `StagedBytes` is exact transfer payload.
 	// @client
 	struct AssetResidencyStatistics {
+		// Asset whose instance residency is being measured.
 		core::Name Name;
+		// Instance rows already resident on the device.
 		uint32_t ResidentInstances = 0;
+		// Instance rows included in the latest staged delta.
 		uint32_t StagedInstances = 0;
+		// Bytes in that staged instance delta.
 		uint64_t StagedBytes = 0;
 	};
 
@@ -1151,6 +1354,31 @@ namespace engine::render {
 	// @client
 	class Renderer {
 	  public:
+		// A bounded, device-free description of one installed render graph.
+		struct RenderGraphSnapshot {
+			// Stable name of the installed pipeline.
+			core::Name Pipeline;
+			// Revision of the installed graph description.
+			uint64_t Revision = 0;
+			// Authored graph copied for inspection.
+			graph::RenderGraph Graph;
+			// Validated graph used to schedule node execution.
+			graph::CompiledGraph Compiled;
+			// Dependency order selected for execution.
+			graph::ExecutionSchedule Schedule;
+			// Reuse plan for transient graph resources.
+			graph::ResourceAliasPlan Aliases;
+			// Runtime profile recorded for this pipeline.
+			graph::PipelineProfile Profile;
+		};
+		// The installed identity used by render-owned one-shot work. Invalid and
+		// missing view names resolve through the same fallback as Render.
+		struct PipelineIdentity {
+			// Resolved installed pipeline name.
+			core::Name Name;
+			// Revision of that pipeline when the work was admitted.
+			uint64_t Revision = 0;
+		};
 		// Creates an uninitialised renderer with no GPU resources.
 		Renderer();
 
@@ -1195,8 +1423,13 @@ namespace engine::render {
 		// @param framesInFlight How many frames the CPU may queue ahead.
 		//        Clamped to 1..3; ignored when headless, which has no swapchain
 		//        to be ahead of.
+		// @param retainSourceTextures Keep bounded decoded base pixels for factory export.
 		// @return True when the device, pipelines and geometry are ready.
-		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1);
+		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1, bool retainSourceTextures = false);
+
+		// An owned copy of the last successfully submitted visibility snapshot.
+		// A submission is not a claim that pixels survived depth or blending.
+		VisibilitySnapshot Visibility() const;
 
 		// Whether this renderer has a window to present to.
 		//
@@ -1207,6 +1440,118 @@ namespace engine::render {
 		//
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
+
+		// Queues owned, authenticated linear RGBA16F pixels for the portal-capture
+		// node. Returns zero on refusal. Changed pixels or fitted-view revisions
+		// invalidate the previous handle; identical radiance avoids another upload.
+		uint64_t QueuePortalImage(const PortalImageBinding &binding, PortalImageReply &&reply);
+		// Immutable copied D32 source map. Zero means refused; readiness follows submission.
+		uint64_t QueuePortalShadowImage(const PortalShadowImageBinding &binding, PortalShadowImage &&image);
+		// Lossless source depth retained in a storage buffer, decoded by the native shadow node.
+		// Subnormal samples use raw D32 storage because fragment output can flush them.
+		// Shares import CPU/GPU budgets; refusal preserves the input.
+		uint64_t
+		QueuePackedPortalShadowImage(const PortalShadowImageBinding &binding, PortalShadowImage &&image);
+		// Reports whether an accepted shadow image has finished device upload.
+		bool IsPortalShadowImageReady(uint64_t handle) const;
+		// Retires a shadow-image handle and its resident resources.
+		bool DropPortalShadowImage(uint64_t handle);
+
+		// Queue a complete copied set into new slots, retaining previous imports.
+		// Handles are base first, then ordered transparent layers. Refusal preserves
+		// input and handles; optional resident cache entries may be evicted for allocation.
+		bool QueuePortalImageLayerSet(
+			const PortalImageBinding &binding, PortalImageLayerSet &&layers, std::span<uint64_t> handles
+		);
+		// True only after every member of this exact base handle's set was submitted.
+		// Dropping any member with DropPortalImage retires the entire set.
+		bool PortalImageLayerSetReady(uint64_t base) const;
+
+		// Imports an authenticated tree into independent groups. Zero means refusal;
+		// older trees survive, but the supplied pixel storage may have been consumed.
+		uint64_t QueuePortalCaptureTree(const PortalImageBinding &root, PortalCaptureTree &&tree);
+		// Queue-safe readiness: every node's uploads were successfully submitted.
+		// This does not claim GPU fence completion or nested body composition parity.
+		bool PortalCaptureTreeReady(uint64_t token) const;
+		// Borrowed until tree retirement or renderer shutdown; null before readiness.
+		const ImportedPortalCaptureTree *FindPortalCaptureTree(uint64_t token) const;
+		// Independent display/candidate ownership, bounded to two live leases per renderer.
+		// Leases keep the original charged images, without extending transport deadlines.
+		// The lease owner must hard Drop on endpoint or authorization retirement.
+		uint64_t AcquirePortalCaptureTreeLease(uint64_t token);
+		// Releases one independently owned tree lease.
+		void ReleasePortalCaptureTreeLease(uint64_t lease);
+		// Release the original import owner. Hard Drop revokes every lease as well.
+		void ReleasePortalCaptureTree(uint64_t token);
+		// Revokes the import owner and all leases for a captured tree.
+		void DropPortalCaptureTree(uint64_t token);
+
+		// Compose destination-space opaque body rows against an accepted room group.
+		// The view supplies only body geometry, its palettes and a caller-owned target;
+		// camera and lighting come from the capture. World and slot must match its owner.
+		// Returns an owned resident image for aperture sampling, or zero on refusal.
+		// Reuses the preceding composed image for this binding; DropPortalImage retires it.
+		uint64_t ComposePortalBodyImage(const PortalImageCapture &capture, const View &body);
+		// Composes current body through an admitted tree, returning an owned root image.
+		// Child cameras must clip their mapped entrance. Failure preserves existing images.
+		uint64_t ComposePortalCaptureTree(uint64_t token, const View &rootBody);
+		// Copies body geometry, palettes and content-owner mappings; captured lighting replaces
+		// caller lights. One job owns at most the tree metadata byte limit in copied work.
+		// Unsupported borrowed inputs are refused. Tree retirement cancels its job.
+		// Pending with no request waits for submitted GPU work. BudgetExceeded can be retried.
+		// Invalid responses preserve the pending request; only Poll transfers a completed image.
+		PortalTreeCompositionStatus
+		BeginPortalCaptureTreeComposition(uint64_t tree, const View &rootBody, uint64_t &job);
+		// Transfers completed composition progress and its image once.
+		PortalTreeCompositionProgress PollPortalCaptureTreeComposition(uint64_t job);
+		// Supplies an owned source shadow image to a waiting tree job.
+		PortalTreeCompositionStatus AcceptPortalCaptureTreeShadow(uint64_t job, PortalShadowImage &&image);
+		// The host authenticates the manifest envelope. Assembly bytes share all portal import
+		// CPU admission; mismatched metadata is refused before allocation. One node assembles at a time.
+		PortalTreeCompositionStatus
+		BeginPortalCaptureTreeShadowAssembly(uint64_t job, const PortalShadowSnapshot &manifest);
+		// The final tile attempts composition. BudgetExceeded retains the complete map; Commit
+		// retries without replaying tiles. Only Poll transfers a completed composition image.
+		PortalTreeCompositionStatus
+		AcceptPortalCaptureTreeShadowTile(uint64_t job, uint32_t node, std::span<const std::byte> packet);
+		// Retries composition from a complete assembled shadow map.
+		PortalTreeCompositionStatus CommitPortalCaptureTreeShadowAssembly(uint64_t job, uint32_t node);
+		// Cancels pending requests and owned work for a composition job.
+		void CancelPortalCaptureTreeComposition(uint64_t job);
+
+		// Two independently leased preparations admit every source shadow before a pose is copied.
+		// Poll Complete means every map upload has finished; no image is transferred.
+		// Requests carry accepted eye identity. The source's declared native shadow domain is
+		// checked during preparation; exact all-node body/domain agreement is checked at pose Begin.
+		PortalTreeCompositionStatus
+		BeginPortalCaptureTreePreparation(uint64_t tree, const View &referenceBody, uint64_t &preparation);
+		// Reports upload completion and next missing shadow request.
+		PortalTreeCompositionProgress PollPortalCaptureTreePreparation(uint64_t preparation);
+		// Supplies a complete source shadow image to a preparation.
+		PortalTreeCompositionStatus
+		AcceptPortalPreparedShadow(uint64_t preparation, PortalShadowImage &&image);
+		// The preparation equivalents assemble one authenticated source map before its
+		// ordered GPU upload. They use the reference body's exact per-node fit.
+		PortalTreeCompositionStatus BeginPortalCaptureTreePreparationShadowAssembly(
+			uint64_t preparation, const PortalShadowSnapshot &manifest
+		);
+		// Adds an authenticated tile to the preparation's current source map.
+		PortalTreeCompositionStatus AcceptPortalPreparedShadowTile(
+			uint64_t preparation, uint32_t node, std::span<const std::byte> packet
+		);
+		// Admits a fully assembled source map without replaying its tiles.
+		PortalTreeCompositionStatus CommitPortalPreparedShadowAssembly(uint64_t preparation, uint32_t node);
+		// Cancels one shadow-preparation lease and its pending uploads.
+		void CancelPortalCaptureTreePreparation(uint64_t preparation);
+		// Reuses prepared GPU maps with one latest-pose snapshot and one final queue fence.
+		// Existing composition Poll/Cancel APIs own completion; source maps remain reusable.
+		PortalTreeCompositionStatus
+		BeginPreparedPortalCaptureTreeComposition(uint64_t preparation, const View &rootBody, uint64_t &job);
+
+		// Invalidates one owned image at an owning-thread frame boundary.
+		bool DropPortalImage(uint64_t handle);
+		// Reports current CPU and GPU budgets used by imported portal images.
+		PortalImageImportUsage PortalImageUsage() const;
 
 		// Releases GPU residency owned by one world while keeping shared content
 		// such as meshes and images available to the remaining worlds.
@@ -1223,25 +1568,40 @@ namespace engine::render {
 		// `delivery::Asset` reads it into an `assets::MeshData` and hands it
 		// over; nothing about the device reaches them.
 		//
-		// Registering a name twice replaces it. The old geometry stays in the
-		// buffer as dead space - nothing evicts yet, and `MeshTable`'s header
-		// says so.
+		// Registering a name twice for one owner replaces it. The old geometry
+		// becomes reusable after the table's deferred-frame window.
+		// Asset APIs use an optional content owner. Empty owner selects the shared
+		// namespace; scoped lookups never search another owner. Built-in asset
+		// lookups always select shared residency, matching their draw bindings.
 		//
 		// @param name The name to publish it under.
 		// @param mesh The geometry. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh, a full table or a failed upload.
-		bool AddMesh(const core::Name &name, const assets::MeshData &mesh);
+		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		// Retires one mesh in `owner` without releasing that owner's unrelated resources.
+		// Its storage follows MeshTable's deferred-frame reuse rule.
+		bool DropMesh(const core::Name &name, core::Name owner = {});
+		// Uploads validated, prepacked mesh streams under one content owner.
+		bool AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
+		// Copies a bounded resident mesh for a host-owned export. This never reads
+		// back the GPU or substitutes the fallback mesh for a missing name.
+		MeshCopyStatus CopyMesh(
+			const core::Name &name,
+			assets::MeshData &out,
+			size_t vertexLimit,
+			size_t indexLimit,
+			core::Name owner = {}
+		) const;
+		// Copies a bounded decoded base level for exact owner-scoped export.
+		// This does not read back GPU pixels or substitute another owner's image.
+		TextureCopyStatus CopyTexture(
+			const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner = {}
+		) const;
 
-		// Sends every mesh `AddMesh` has accumulated to the device.
-		//
-		// `Render` does this itself, so a caller inside the frame loop never
-		// needs it. It is for the paths that read the geometry without drawing a
-		// frame first.
-		//
-		// @return `false` with no device, or when the upload failed. The table
-		//         keeps what it had, so a failure is a frame drawn with the old
-		//         geometry rather than with none.
-		bool FlushMeshes();
+		// Retires meshes, textures, material/lens/postprocess variants and pending texture
+		// arrivals for one owner. Empty owner preserves shared resources.
+		void DropContentOwner(core::Name owner);
 
 		// A registered mesh's own half-extent, in mesh space.
 		//
@@ -1253,18 +1613,20 @@ namespace engine::render {
 		//
 		// @param name The mesh.
 		// @param out  Set only when the mesh is registered.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this table does not hold, so a caller can
 		//         tell "not loaded yet" from "flat on one axis".
-		bool MeshExtentOf(const core::Name &name, core::Vector3 &out) const;
+		bool MeshExtentOf(const core::Name &name, core::Vector3 &out, core::Name owner = {}) const;
 
 		// Registers a texture under the name a `SurfaceAppearance` or a submesh
 		// will ask for.
 		//
 		// @param name  The name to publish it under.
 		// @param image The pixels. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
-		bool AddTexture(const core::Name &name, const assets::TextureData &image);
+		bool AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
 
 		// Says that content is on its way under this name, and that it is not.
 		//
@@ -1281,18 +1643,20 @@ namespace engine::render {
 		// for. An arrival needs no call at all: `AddTexture` clears it.
 		//
 		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @since v0.13
 		//@{
-		void ExpectTexture(const core::Name &name);
-		void StopExpectingTexture(const core::Name &name);
+		void ExpectTexture(const core::Name &name, core::Name owner = {});
+		void StopExpectingTexture(const core::Name &name, core::Name owner = {});
 		//@}
 
 		// Whether content is on its way under this name.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` between the two calls above.
 		// @since v0.13
-		bool ExpectingTexture(const core::Name &name) const;
+		bool ExpectingTexture(const core::Name &name, core::Name owner = {}) const;
 
 		// How long animation has been running, for anything played on a clock.
 		//
@@ -1337,6 +1701,14 @@ namespace engine::render {
 
 		// Every installed graph key, sorted by text.
 		std::vector<core::Name> Pipelines() const;
+
+		// Copies an installed graph, its compiled schedule, and its device-free
+		// dimensioned profile for a read-only host diagnostic.
+		std::optional<RenderGraphSnapshot>
+		DescribePipeline(core::Name name, uint32_t viewWidth, uint32_t viewHeight) const;
+
+		// Resolves a requested graph name through the same fallback as Render.
+		std::optional<PipelineIdentity> ResolvePipelineIdentity(core::Name requested) const;
 
 		// Removes every named graph.
 		void ResetPipelines();
@@ -1393,6 +1765,88 @@ namespace engine::render {
 
 		// Returns the last completed preview without waiting for the GPU.
 		ReadbackImage Readback() const;
+
+		// Queue one image from an enabled capture node, without waiting for the
+		// device. Six requests/results may be held. Resident colour captures are
+		// bounded to 512x512; copied pixels use the shared 64 MiB staging bound.
+		// Directional shadow captures use PORTAL_SHADOW_EXTENT. A full queue refuses
+		// before recording.
+		// The node must run before a result exists. File captures remain independent.
+		bool RequestResourceImage(const ResourceImageRequest &request);
+
+		// Admit one to six captures together, or leave the queue unchanged. All
+		// requests must use one pipeline, view and delivery mode, with distinct tokens.
+		// This reserves queue slots only; publication must still validate every result.
+		bool RequestResourceImages(std::span<const ResourceImageRequest> requests);
+
+		// Assign a renderer-local token and queue atomically. Zero means refusal.
+		uint64_t QueueResourceImage(
+			core::Name pipeline,
+			core::Name node,
+			size_t viewSlot = 0,
+			ResourceImageDelivery delivery = ResourceImageDelivery::CopiedPixels,
+			std::string expectedSnapshotId = {}
+		);
+
+		// Generate tokens and admit the whole capture group. Refusal preserves outputs.
+		bool QueueResourceImages(
+			core::Name pipeline,
+			std::span<const core::Name> nodes,
+			size_t viewSlot,
+			ResourceImageDelivery delivery,
+			std::span<uint64_t> tokens
+		);
+
+		// Check successful resident submission and exact extent before publishing a
+		// receipt. This neither waits for the GPU nor transfers capture ownership.
+		bool CanPublishResourceImage(uint64_t token, uint32_t width, uint32_t height) const;
+
+		// Move a submitted resident capture into this renderer's portal ownership.
+		// Ordered GPU submissions make it usable without a CPU readback or wait.
+		// Zero refuses without consuming the capture. No device handle crosses hosts.
+		uint64_t AdoptResourceImage(uint64_t token, const PortalImageBinding &binding);
+
+		// Adopt one capture frame as a group, preserving captures, previous imports
+		// and output handles on refusal. Tokens and destination owners must be
+		// distinct; all captures must share pipeline, view, frame and extent.
+		bool AdoptResourceImages(
+			std::span<const uint64_t> tokens,
+			std::span<const PortalImageBinding> bindings,
+			std::span<uint64_t> handles
+		);
+
+		// Take only this caller's completed request when several producers share a renderer.
+		std::optional<ResourceImage> TakeResourceImage(uint64_t token);
+
+		// Take a bounded copied group in token order only when every result is ready.
+		// Missing, duplicate, resident or pending tokens consume nothing. Failed
+		// captures are returned too, so callers can retire a refused layer set.
+		std::optional<std::vector<ResourceImage>> TakeResourceImages(std::span<const uint64_t> tokens);
+
+		// Poll completed scene fences and move out owned image bytes exactly once.
+		std::vector<ResourceImage> TakeResourceImages();
+
+		// Suppress delivery. A submitted copy keeps its slot until its fence signals.
+		bool CancelResourceImage(uint64_t token);
+
+		// Queues every requested render-graph capture atomically. The named node
+		// must be an enabled `capture` node; unsupported channels stay explicit in
+		// the later poll rather than being filled with invented labels.
+		bool QueueDataCapture(const DataCaptureRequest &request, DataCaptureTicket &ticket);
+
+		// Returns Pending until every underlying GPU fence has completed. Ready
+		// planes own tightly packed bytes and BLAKE3-256 hashes, so they remain
+		// immutable after the renderer reuses its transfer buffers.
+		DataCapturePoll PollDataCapture(DataCaptureTicket &ticket);
+
+		// Cancels all outstanding resource transfers named by a ticket.
+		void CancelDataCapture(DataCaptureTicket &ticket);
+
+		// Render-owned hook state. Script and world adapters use it through their
+		// implementation files; no hook type crosses those public boundaries.
+		DataFactoryHookBind &Hooks();
+		// Borrows render-owned hook state for inspection.
+		const DataFactoryHookBind &Hooks() const;
 
 		// GPU execution time and CPU command-recording wall time for each
 		// physical pass, in microseconds and keyed by Name::Id. GPU results lag
@@ -1695,10 +2149,11 @@ namespace engine::render {
 		// does.
 		//
 		// @param name The name it was registered under.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return The handle, or nullptr for a name this renderer has not been
 		//         given.
 		// @since v0.10
-		void *TextureHandle(const core::Name &name) const;
+		void *TextureHandle(const core::Name &name, core::Name owner = {}) const;
 
 		// Where a texture's current animation cell sits.
 		//
@@ -1708,9 +2163,10 @@ namespace engine::render {
 		//
 		// @param name    The texture.
 		// @param seconds How long animation has been running.
+		// @param owner   The exact content namespace, or empty for shared content.
 		// @return The transform, or the identity for a still or an absent name.
 		// @since v0.10
-		FlipbookCell TextureCell(const core::Name &name, double seconds) const;
+		FlipbookCell TextureCell(const core::Name &name, double seconds, core::Name owner = {}) const;
 
 		// A signature of the current cells of all registered animated textures.
 		//
@@ -1720,6 +2176,10 @@ namespace engine::render {
 		//
 		// @since v0.19
 		uint64_t TextureAnimationSignature(double seconds) const;
+
+		// Changes when registered render resources are admitted, replaced or removed.
+		// Scoped to this renderer lifetime; callers also track their world/endpoint identity.
+		uint64_t ResourceRevision() const;
 
 		// How big a registered texture is, in source pixels.
 		//
@@ -1732,9 +2192,11 @@ namespace engine::render {
 		// @param name   The name.
 		// @param width  Set to the width, or left alone when the name is absent.
 		// @param height Set to the height, likewise.
+		// @param owner  The exact content namespace, or empty for shared content.
 		// @return `false` for a texture this renderer does not hold.
 		// @since v0.10
-		bool TextureSize(const core::Name &name, uint32_t &width, uint32_t &height) const;
+		bool
+		TextureSize(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner = {}) const;
 
 		// Forgets a registered texture and frees it.
 		//
@@ -1745,9 +2207,10 @@ namespace engine::render {
 		// somebody had browsed it.
 		//
 		// @param name The name to drop.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this renderer does not hold.
 		// @since v0.10
-		bool DropTexture(const core::Name &name);
+		bool DropTexture(const core::Name &name, core::Name owner = {});
 
 		// Registers a fragment shader under a name a draw instance can select.
 		//
@@ -1774,16 +2237,18 @@ namespace engine::render {
 		// it writes depth and no colour, so a fragment shader there would cost a
 		// pass over the scene to produce nothing.
 		//
-		// Registering a name twice replaces it, which is what an author editing
+		// Registering a name twice within one owner replaces it, which is what an author editing
 		// a shader does; the frame in flight is waited for before the old
 		// pipeline is released.
 		//
 		// @param name  What a material names it.
 		// @param spirv The module's words. Copied into device objects; not retained.
+		// @param owner Exact residency namespace; scoped shaders never borrow shared variants.
 		// @return `false` when the module or either pipeline could not be built.
 		//         The error is logged with the shader's name.
 		// @since v0.15
-		bool AddShader(const core::Name &name, std::span<const uint32_t> spirv);
+		// Identical owner, name and words reuse the pipeline without a frame wait or invalidation.
+		bool AddShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
 
 		// Forgets a registered shader and frees its pipelines.
 		//
@@ -1791,16 +2256,18 @@ namespace engine::render {
 		// than vanishing - `MeshTable::Resolve`'s rule, and its reason.
 		//
 		// @param name The name to drop.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this renderer does not hold.
 		// @since v0.15
-		bool DropShader(const core::Name &name);
+		bool DropShader(const core::Name &name, core::Name owner = {});
 
 		// Whether a shader is registered under this name.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` when a variant exists for it.
 		// @since v0.15
-		bool HasShader(const core::Name &name) const;
+		bool HasShader(const core::Name &name, core::Name owner = {}) const;
 
 		// Registers one `LensShader` fragment module. Lens programs have exactly
 		// two sampler slots, HDR scene colour then linear depth, and one pushed
@@ -1808,17 +2275,39 @@ namespace engine::render {
 		//
 		// @param name  What a `ShaderLens` names.
 		// @param spirv The compiled fragment module.
+		// @param owner The view's exact residency namespace, with no shared fallback.
 		// @return `false` when the module cannot form the constrained pipeline.
-		bool AddLensShader(const core::Name &name, std::span<const uint32_t> spirv);
+		// Identical owner, name and words reuse the pipeline without a frame wait or invalidation.
+		bool AddLensShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
 
 		// Forgets a registered lens pipeline.
-		bool DropLensShader(const core::Name &name);
+		bool DropLensShader(const core::Name &name, core::Name owner = {});
 
 		// Whether a lens pipeline is registered under this name.
-		bool HasLensShader(const core::Name &name) const;
+		bool HasLensShader(const core::Name &name, core::Name owner = {}) const;
 
-		// Replaces the engine's own tonemap with this shader, for every
-		// frame drawn until the next call.
+		// Exact accepted device program; zero means no installed lens for this owner.
+		assets::ContentHash LensShaderHash(const core::Name &name, core::Name owner = {}) const;
+
+		// Retain immutable captured lens programs independently of world replica residency.
+		// Zero means empty input or refusal. Matching live name/hash sets share a token.
+		uint64_t RetainPortalLensPrograms(const PortalCaptureLenses &lenses);
+		// Drops one reference to a retained captured lens-program group.
+		void ReleasePortalLensPrograms(uint64_t token);
+
+		// Reconciles one owner's device programs against current accepted modules.
+		// Material and lens demand are separate; a missing grade restores engine tonemap.
+		// Returns whether visible resources changed. Unchanged refusals are not retried.
+		bool PrepareShaders(
+			const ShaderLibrary &library,
+			std::span<const core::Name> materials,
+			std::span<const core::Name> lenses,
+			core::Name postProcess,
+			core::Name owner = {}
+		);
+
+		// Selects this shader in place of the engine tonemap for one content owner.
+		// Views resolve their exact owner; a scoped miss never borrows shared state.
 		//
 		// **Written against `tonemap.frag`'s own contract, not
 		// `opaque.frag`'s** - one sampler holding the lit, still-HDR scene,
@@ -1835,30 +2324,28 @@ namespace engine::render {
 		// the whole scene while the screen pass draws only what the eye
 		// sees; this is the identical split one stage later.
 		//
-		// **One at a time, replacing rather than accumulating** - there is
-		// one screen, so unlike `AddShader` this releases whatever pipeline
-		// it held before building the new one rather than keeping a table
-		// of names.
+		// Each owner selects one pipeline. A successful replacement retires the
+		// previous pipeline after the frame wait; a failed replacement preserves it.
 		//
-		// @param name  The shader's name, for the error this logs on
-		//        failure. Not retained past this call.
+		// @param name The selected shader name, retained for selection queries.
 		// @param spirv The compiled words.
-		// @return `false` on a device, translation or pipeline failure - the
-		//         frame goes on drawing with the engine's own tonemap either
-		//         way.
+		// @param owner Exact content namespace. Empty retains the shared namespace.
+		// @return `false` on a device, translation or pipeline failure.
 		// @since v0.18
-		bool SetPostProcessShader(const core::Name &name, std::span<const uint32_t> spirv);
+		// Identical owner, name and words reuse the pipeline without a frame wait or invalidation.
+		bool
+		SetPostProcessShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
 
 		// Goes back to the engine's own tonemap.
 		//
 		// @since v0.18
-		void ClearPostProcessShader();
+		void ClearPostProcessShader(core::Name owner = {});
 
 		// The name last handed to `SetPostProcessShader` and still active,
 		// or an invalid name when the engine's own tonemap is drawing.
 		//
 		// @since v0.18
-		core::Name PostProcessShaderName() const;
+		core::Name PostProcessShaderName(core::Name owner = {}) const;
 
 		// Waits for the display and claims this frame's image, before the caller
 		// has read a single event.
@@ -1951,6 +2438,10 @@ namespace engine::render {
 			bool present = true,
 			FrameOverlayHook *hostOverlayHook = nullptr
 		);
+
+		// Increments when Render starts recording a graph frame. Hosts that issue
+		// nested renders use it to invalidate frame-scoped source assumptions.
+		uint64_t RenderGeneration() const;
 
 		// The newest completed texture for that scene slot.
 		//
@@ -2120,6 +2611,21 @@ namespace engine::render {
 		BackendHandles Backend() const;
 
 	  private:
+		bool AdoptResourceImagesInternal(
+			std::span<const uint64_t> tokens,
+			std::span<const PortalImageBinding> bindings,
+			std::span<uint64_t> handles,
+			bool replaceExisting
+		);
+		uint64_t ComposePortalBodyImageInternal(
+			const PortalImageCapture &capture,
+			const View &body,
+			const PortalImageBinding &output,
+			std::span<const scene::DrawInstance> apertureRows = {},
+			std::span<const core::CFrame> apertureJoints = {},
+			std::span<const PortalView> apertures = {},
+			bool freshOutput = false
+		);
 		// Records one prepared view for the graph batch. Kept private so a host
 		// cannot bypass graph-owned world grouping and frame dispatch.
 		FrameResult RenderView(
@@ -2149,11 +2655,16 @@ namespace engine::render {
 		// @param what The call being refused, for the message.
 		void RequireOwningThread(const char *what) const;
 
+		// Checks an explicitly installed graph name. This deliberately does not
+		// resolve the unnamed fallback for an arbitrary missing name.
+		bool HasPipelineRevision(core::Name name, uint64_t revision) const;
+
 		// Rebuilds the unnamed fallback from the selected capability tier.
 		bool InstallEngineDefault(const graph::PipelineDocument &document);
 
 		struct Impl;
 		std::unique_ptr<Impl> State;
+		std::unique_ptr<DataFactoryHookBind> HookBind;
 
 		struct InstalledNodeHandler {
 			core::Name Kind;
@@ -2175,6 +2686,7 @@ namespace engine::render {
 		// consumer of this header can do anything with. `src/ViewRecording.hpp`
 		// carries the split's argument; `docs/ARCH_REVIEW.md` C2 is the finding.
 		friend class ViewRecording;
+		friend class DataFactoryHookBind;
 
 		// The thread that called `Initialise`, and the only one that may record.
 		//

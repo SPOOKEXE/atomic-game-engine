@@ -168,11 +168,8 @@ set_property(CACHE MONO_OPTIMISE_LEVEL PROPERTY STRINGS 1 2 3)
 # build somebody diagnoses.
 #
 # **Nothing here on MSVC, and not by oversight.** MSVC has no line-tables-only
-# mode, so there is no flag for the middle value to map to. The related MSVC
-# knob is a different one: ccache caches an MSVC compile only where debug info
-# is `/Z7` rather than `/Zi`, and `.github/workflows/build.yml` records that the
-# Windows build compiles and has never shipped - so that flag belongs to
-# whoever first ships it, beside the cache they turn on at the same time.
+# mode, so there is no flag for the middle value to map to. Its debug format is
+# selected with the compiler-cache setup below instead.
 #
 # Applied through MONO_COMPILE_OPTIONS below, which is first-party only, so
 # vendored code keeps whatever the build type gave it. Its `-g1` lands after the
@@ -266,7 +263,9 @@ set(MONO_SHADER_STAGE "${CMAKE_BINARY_DIR}/shaderstage")
 # targets only. target_compile_options land after CMAKE_CXX_FLAGS_<CONFIG> on the
 # command line, so the optimisation level chosen here wins over the build type's.
 if(MSVC)
-	set(MONO_COMPILE_OPTIONS /W4 /permissive-)
+	# Unity translation units can exceed COFF's default section count before
+	# their source size becomes a useful reason to split the owning module.
+	set(MONO_COMPILE_OPTIONS /W4 /permissive- /bigobj)
 	if(MONO_WERROR)
 		list(APPEND MONO_COMPILE_OPTIONS /WX)
 	endif()
@@ -410,6 +409,19 @@ endif()
 # same argument `just typecheck` makes about a check that passes by having
 # nothing to do.
 option(MONO_CCACHE "Use ccache or sccache when one is installed" ON)
+
+# MSVC's default `/Zi` writes compiler state into a shared program database,
+# which cannot be restored as one independent cached compilation. `/Z7` keeps
+# the same debugging information in each object; the linker still produces the
+# packaged PDB. Replace the build-type default for every target, including the
+# vendor tree where most cold-build time is spent.
+if(MSVC AND MONO_CCACHE)
+	foreach(flagVariable
+		CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG
+		CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+		string(REPLACE "/Zi" "/Z7" ${flagVariable} "${${flagVariable}}")
+	endforeach()
+endif()
 
 if(MONO_CCACHE)
 	# **`NO_CACHE`, and this is the line that stops the whole feature from being

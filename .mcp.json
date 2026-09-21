@@ -5,6 +5,12 @@
 			"command": ".cache/build/dev/tools/mcpbridge",
 			"args": ["--port", "8738"],
 			"env": {}
+		},
+		"atomic-client": {
+			"type": "stdio",
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8736"],
+			"env": {}
 		}
 	}
 }

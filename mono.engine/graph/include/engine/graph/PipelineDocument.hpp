@@ -86,6 +86,13 @@ namespace engine::graph {
 		// somebody did. `PositionsOf` replays them; the last one for a name
 		// wins.
 		Move,
+
+		// Editor-only node grouping, notes, mute state and selected preview.
+		// Build ignores these records so canvas work cannot alter a frame.
+		Group,
+		Comment,
+		Mute,
+		Preview,
 	};
 
 	// A stable, human-readable name for an edit kind.
@@ -136,6 +143,31 @@ namespace engine::graph {
 
 		// Whether an `AddResource` survives this graph's transient lifetime.
 		bool External = false;
+
+		// `AddResource`'s executable compositor contract.
+		ResourceAccess Access = ResourceAccess::Automatic;
+		// Multisample count for the resource.
+		uint32_t Samples = 1;
+		// Texture depth in texels.
+		uint32_t Depth = 1;
+		// Texture array-layer count.
+		uint32_t Layers = 1;
+		// First mip level covered by the view.
+		uint32_t FirstMip = 0;
+		// Number of mip levels covered by the view.
+		uint32_t MipCount = 1;
+		// Colour interpretation of image texels.
+		ResourceColourSpace ColourSpace = ResourceColourSpace::Automatic;
+		// Alpha interpretation of image texels.
+		ResourceAlphaSpace AlphaSpace = ResourceAlphaSpace::Automatic;
+		// Bytes between consecutive buffer elements.
+		uint32_t BufferStride = 0;
+		// Resource lifetime policy in the graph.
+		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		// Stable identifier for owner.
+		core::Name Owner{};
+		// Generation used to invalidate stale history.
+		uint32_t HistoryGeneration = 0;
 
 		// `Reads` and `Writes`: which resource, by name.
 		core::Name Target{};
@@ -386,10 +418,71 @@ namespace engine::graph {
 	// This is the engine's complete runnable graph document. G-buffer material
 	// data and emissive are produced once,
 	// ambient occlusion is derived from depth and normals, deferred lighting
-	// consumes all three, and tone mapping produces the display image.
+	// consumes all three. Surface images, transparent geometry and spatial GUI
+	// compose in HDR before authored lenses and tone mapping. Screen GUI follows.
 	//
 	// @return The PBR document. `Build`ing it produces a graph that compiles.
 	PipelineDocument DefaultPbrDocument();
+
+	// A small authored graph that demonstrates adaptive tessellation, indirect
+	// light, and screen-space ray tracing as separate, connectable passes.
+	//
+	// It is a graph contract, not a claim that every renderer has a tracing
+	// backend. A device adapter refuses it until it registers those node kinds.
+	//
+	// @return The ray-tracing demonstration document. `Build`ing it produces a
+	//         graph that compiles.
+	PipelineDocument RaytraceDemoDocument();
+
+	// A small authored graph that demonstrates progressive path-tracing inputs
+	// without coupling its geometry preparation or indirect-light estimate to
+	// the path-tracing pass.
+	//
+	// @return The path-tracing demonstration document. `Build`ing it produces a
+	//         graph that compiles.
+	PipelineDocument PathtraceDemoDocument();
+
+	// The default PBR graph with an inspectable compositor tail. The chain keeps
+	// colour grading, mixing, image transforms and the two blur axes as separate
+	// nodes so each pass can be reordered or replaced in the editor.
+	//
+	// @return The compositor demonstration document. `Build`ing it produces a
+	//         complete graph ending at the ordinary image output.
+	PipelineDocument CompositorDemoDocument();
+
+	// The default PBR graph with capture nodes for linear HDR, depth, normal,
+	// material, authored mesh UVs, segmentation, and the half-size SSAO visibility estimate used by
+	// DataCapture. SSAO is an estimator rather than ambient-occlusion ground truth.
+	PipelineDocument DefaultPbrDataCaptureDocument();
+
+	// The same default spatial chain for world-image producers and native views.
+	// Capture consumers export before tone mapping; screen GUI follows the world.
+	PipelineDocument DefaultWorldHdrDocument();
+
+	// Imported whole-eye HDR, one tone map, then local screen interface and output.
+	PipelineDocument DefaultEyeDocument();
+
+	// Intermediate opaque body composition. Uses the accepted room's camera and
+	// lighting, reads an OpaqueLighting image/depth pair, and captures the composed
+	// pair at "export". Later world layers and presentation remain the caller's job.
+	// Ordered layers use up to two paired eye-image imports, nearest first.
+	// transparentLayerCount selects the present contiguous prefix. Optional lenses
+	// compose after all copied layers and preserve the physical depth export.
+	// Nested apertures draw child colour at parent depth before body composition.
+	// retainedAmbient merges captured room/body geometry before SSAO and corrects
+	// retained ambient radiance before composing the current body.
+	// retainedDirectional also corrects retained direct lighting using the combined
+	// source/body shadow map and enables the ambient geometry inputs it requires.
+	PipelineDocument DefaultPortalBodyDocument(
+		bool seamProjection = false,
+		bool orderedLayers = false,
+		bool spatialOverlay = false,
+		bool shaderLenses = false,
+		bool nestedApertures = false,
+		size_t transparentLayerCount = 2,
+		bool retainedAmbient = false,
+		bool retainedDirectional = false
+	);
 
 	// The deferred fallback for devices without compute or storage images.
 	PipelineDocument DefaultPbrTierBDocument();

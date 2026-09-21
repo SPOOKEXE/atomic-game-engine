@@ -188,6 +188,27 @@ TEST_CASE("a scale node rebuilds normals only when it has to", "[bake][graph]") 
 	}
 }
 
+TEST_CASE("a decimate node makes a valid coarse mesh", "[bake][graph]") {
+	Graph graph;
+	const NodeId builtin = graph.AddBuiltin("engine.Cube");
+	const NodeId decimate = graph.AddDecimate(0.5f);
+	REQUIRE(graph.Connect(builtin, decimate));
+	REQUIRE(Ran(graph).empty());
+
+	const MeshData &mesh = graph.Output(decimate).Mesh;
+	CHECK(mesh.IsValid());
+	CHECK(mesh.Indices.size() <= graph.Output(builtin).Mesh.Indices.size());
+	CHECK(mesh.Minimum.X <= mesh.Maximum.X);
+
+	SECTION("an out-of-range ratio fails the bake") {
+		Graph invalid;
+		const NodeId source = invalid.AddBuiltin("engine.Cube");
+		const NodeId bad = invalid.AddDecimate(0.0f);
+		REQUIRE(invalid.Connect(source, bad));
+		CHECK_FALSE(Ran(invalid).empty());
+	}
+}
+
 TEST_CASE("a resize node box-filters a texture", "[bake][graph]") {
 	Graph graph;
 	const NodeId source = graph.AddSource("textures/floor.bmp", Bytes(BMP));
@@ -200,6 +221,33 @@ TEST_CASE("a resize node box-filters a texture", "[bake][graph]") {
 
 	CHECK(graph.Output(resize).Texture.Width == 1);
 	CHECK(graph.Output(resize).Texture.Height == 1);
+}
+
+TEST_CASE("a static RGBA atlas gains checked flipbook facts", "[bake][graph]") {
+	Graph graph;
+	const NodeId source = graph.AddSource("textures/particles.bmp", Bytes(BMP));
+	const NodeId import = graph.Add(NodeKind::Import);
+	const NodeId flipbook = graph.AddFlipbook(2, 3, 24.0f);
+
+	REQUIRE(graph.Connect(source, import));
+	REQUIRE(graph.Connect(import, flipbook));
+	REQUIRE(Ran(graph).empty());
+
+	const TextureData &atlas = graph.Output(flipbook).Texture;
+	CHECK(atlas.Format == engine::assets::TextureFormat::RGBA8);
+	CHECK(atlas.FlipbookSide == 2);
+	CHECK(atlas.FlipbookFrames == 3);
+	CHECK(atlas.FlipbookFrameRate == Approx(24.0f));
+
+	SECTION("the grid must describe the source pixels and the engine's layouts") {
+		Graph invalid;
+		const NodeId badSource = invalid.AddSource("textures/particles.bmp", Bytes(BMP));
+		const NodeId badImport = invalid.Add(NodeKind::Import);
+		const NodeId badAtlas = invalid.AddFlipbook(4, 3, 24.0f);
+		REQUIRE(invalid.Connect(badSource, badImport));
+		REQUIRE(invalid.Connect(badImport, badAtlas));
+		CHECK(Ran(invalid).find("static RGBA flipbook atlas") != std::string::npos);
+	}
 }
 
 TEST_CASE("an opaque node fills the alpha channel", "[bake][graph]") {
@@ -314,6 +362,7 @@ TEST_CASE("only bare kinds may use the generic add path", "[bake][graph]") {
 	CHECK_FALSE(graph.Add(NodeKind::Resize).IsValid());
 	CHECK_FALSE(graph.Add(NodeKind::Rasterize).IsValid());
 	CHECK_FALSE(graph.Add(NodeKind::Retime).IsValid());
+	CHECK_FALSE(graph.Add(NodeKind::Flipbook).IsValid());
 	CHECK_FALSE(graph.Add(NodeKind::Write).IsValid());
 	CHECK_FALSE(graph.Add(static_cast<NodeKind>(255)).IsValid());
 	CHECK(graph.NodeCount() == 0);

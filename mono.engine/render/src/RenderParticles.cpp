@@ -621,8 +621,8 @@ namespace engine::render {
 		Particles.EmitterRuntime = emitterRuntime;
 		Particles.EmitterRuntimeStaging = runtimeStaging;
 		Particles.TableRows = rows;
-		Particles.ParamRevision.assign(rows, 0);
-		Particles.CurveRevision.assign(rows, 0);
+		Particles.ParamRevision.assign(rows, ParticlePool::UNUPLOADED_REVISION);
+		Particles.CurveRevision.assign(rows, ParticlePool::UNUPLOADED_REVISION);
 		Particles.CullRecords.resize(rows);
 		return true;
 	}
@@ -1061,9 +1061,17 @@ namespace engine::render {
 			return {};
 		}
 
-		const bool refresh = !ActiveParticleWorld->PreparedRevisionValid ||
-							 ActiveParticleWorld->ResidentRefreshPending ||
-							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision;
+		const bool rebuildLayout =
+			!ActiveParticleWorld->PreparedRevisionValid ||
+			ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision ||
+			ActiveParticleWorld->PreparedBatches.size() != batches.size();
+		// A resident pool still has to advance when no authored emitter value did.
+		// `PreparedFrame` above limits this to one dispatch for this world each
+		// renderer frame, while ParticleDelta carries all simulation time owed since
+		// that dispatch. Revision-only refresh left static emitters frozen forever.
+		const bool refresh = rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
+							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision ||
+							 view.ParticleDelta > 0.0f;
 		if (!refresh) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
 			ParticleSpans = ActiveParticleWorld->PreparedSpans;
@@ -1076,8 +1084,6 @@ namespace engine::render {
 			ActiveParticleWorld->PreparedFrame = FrameCounter;
 			return {ActiveParticleWorld->PreparedCount, 0};
 		}
-		const bool rebuildLayout = !ActiveParticleWorld->PreparedRevisionValid ||
-								   ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision;
 		const bool refreshResident =
 			rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
 			ActiveParticleWorld->PreparedResidentRevision != view.ParticleResidentRevision;
@@ -1354,12 +1360,7 @@ namespace engine::render {
 		Particles.WorkUpdates = rebuildLayout ? written : 0;
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
-		Particles.Delta = ParticleStepDelta(
-			ActiveParticleWorld->PreparedRevision,
-			view.ParticleRevision,
-			view.ParticleDelta,
-			ActiveParticleWorld->CarriedDelta
-		);
+		Particles.Delta = ParticleStepDelta(view.ParticleDelta, ActiveParticleWorld->CarriedDelta);
 
 		Particles.SeamCount = 0;
 		if (!view.ParticleSeams.empty()) {
@@ -1381,8 +1382,16 @@ namespace engine::render {
 			ActiveParticleWorld->PreparedRevisionValid = false;
 			ActiveParticleWorld->CarriedDelta = Particles.Delta;
 			ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
-			std::fill(Particles.ParamRevision.begin(), Particles.ParamRevision.end(), 0);
-			std::fill(Particles.CurveRevision.begin(), Particles.CurveRevision.end(), 0);
+			std::fill(
+				Particles.ParamRevision.begin(),
+				Particles.ParamRevision.end(),
+				ParticlePool::UNUPLOADED_REVISION
+			);
+			std::fill(
+				Particles.CurveRevision.begin(),
+				Particles.CurveRevision.end(),
+				ParticlePool::UNUPLOADED_REVISION
+			);
 			return {};
 		}
 		Particles.SimulatedSeconds += std::max(static_cast<double>(Particles.Delta), 0.0);
@@ -1420,9 +1429,20 @@ namespace engine::render {
 		const core::CFrame &eye,
 		uint64_t &triangles,
 		uint32_t &particlesDrawn,
-		uint32_t &culled
+		uint32_t &culled,
+		WorldColourTarget target,
+		TransparentLayerPhase layer
 	) {
-		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
+		auto *selectedPipeline = target == WorldColourTarget::Hdr ? HdrParticlePipeline : ParticlePipeline;
+		auto *selectedAdditive =
+			target == WorldColourTarget::Hdr ? HdrAdditiveParticlePipeline : AdditiveParticlePipeline;
+		if (layer == TransparentLayerPhase::Nearest) {
+			selectedPipeline = selectedAdditive = ParticleLayerPipeline;
+		} else if (layer == TransparentLayerPhase::Colour) {
+			selectedPipeline = ParticleLayerColourPipeline;
+			selectedAdditive = AdditiveParticleLayerColourPipeline;
+		}
+		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
 		}
 		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
@@ -1553,15 +1573,15 @@ namespace engine::render {
 			// additive one, so each pipeline is bound the first time it is
 			// reached and never again.
 			if (state.Additive) {
-				if (AdditiveParticlePipeline == nullptr) {
+				if (selectedAdditive == nullptr) {
 					continue;
 				}
 				if (!additiveBound) {
-					BindPipeline(pass, AdditiveParticlePipeline, PipelineFamily::Other);
+					BindPipeline(pass, selectedAdditive, PipelineFamily::Other);
 					additiveBound = true;
 				}
 			} else if (!blendedBound) {
-				BindPipeline(pass, ParticlePipeline, PipelineFamily::Other);
+				BindPipeline(pass, selectedPipeline, PipelineFamily::Other);
 				blendedBound = true;
 			}
 
@@ -1573,11 +1593,18 @@ namespace engine::render {
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
-			SDL_GPUTexture *const texture = Textures.Find(state.Texture);
+			const core::Name textureOwner = TextureContentOwner(state.Texture, ActiveContentOwner);
+			SDL_GPUTexture *const texture = Textures.Find(state.Texture, textureOwner);
+			const TextureChoice choice = ChooseTexture(
+				texture != nullptr, state.Texture.IsValid(), Textures.Expecting(state.Texture, textureOwner)
+			);
+			SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? texture
+											: choice == TextureChoice::Missing ? Textures.Missing()
+																			   : FallbackTexture;
 
 			ParticleMaterial material{};
 			material.Flags = glm::vec4{
-				texture != nullptr ? 1.0f : 0.0f,
+				choice == TextureChoice::Named || choice == TextureChoice::Missing ? 1.0f : 0.0f,
 				state.Additive ? 1.0f : std::clamp(state.LightEmission, 0.0f, 1.0f),
 				std::clamp(state.LightInfluence, 0.0f, 1.0f),
 				state.SoftParticles ? 1.0f : 0.0f,
@@ -1594,7 +1621,7 @@ namespace engine::render {
 			// is a validation error on some drivers and a read of whatever was
 			// there on others. The uniform above decides whether it is used.
 			SDL_GPUTextureSamplerBinding binding{};
-			binding.texture = texture != nullptr ? texture : FallbackTexture;
+			binding.texture = sampled;
 			binding.sampler = Textures.Sampler();
 			SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 
@@ -1703,9 +1730,20 @@ namespace engine::render {
 		const glm::mat4 &viewProjection,
 		const core::CFrame &eye,
 		std::span<const effects::RibbonRun> runs,
-		uint64_t &triangles
+		uint64_t &triangles,
+		WorldColourTarget target,
+		TransparentLayerPhase layer
 	) {
-		if (RibbonPipeline == nullptr || runs.empty()) {
+		auto *selectedPipeline = target == WorldColourTarget::Hdr ? HdrRibbonPipeline : RibbonPipeline;
+		auto *selectedAdditive =
+			target == WorldColourTarget::Hdr ? HdrAdditiveRibbonPipeline : AdditiveRibbonPipeline;
+		if (layer == TransparentLayerPhase::Nearest) {
+			selectedPipeline = selectedAdditive = RibbonLayerPipeline;
+		} else if (layer == TransparentLayerPhase::Colour) {
+			selectedPipeline = RibbonLayerColourPipeline;
+			selectedAdditive = AdditiveRibbonLayerColourPipeline;
+		}
+		if (selectedPipeline == nullptr || runs.empty()) {
 			return 0;
 		}
 
@@ -1735,22 +1773,23 @@ namespace engine::render {
 				}
 
 				if (run.Additive) {
-					if (AdditiveRibbonPipeline == nullptr) {
+					if (selectedAdditive == nullptr) {
 						continue;
 					}
 					if (!additiveBound) {
-						BindPipeline(pass, AdditiveRibbonPipeline, PipelineFamily::Other);
+						BindPipeline(pass, selectedAdditive, PipelineFamily::Other);
 						additiveBound = true;
 					}
 				} else if (!blendedBound) {
-					BindPipeline(pass, RibbonPipeline, PipelineFamily::Other);
+					BindPipeline(pass, selectedPipeline, PipelineFamily::Other);
 					blendedBound = true;
 				}
 
 				uniforms.Options = glm::vec4{run.ZOffset, 0.0f, 0.0f, 0.0f};
 				SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
-				SDL_GPUTexture *const texture = Textures.Find(run.Texture);
+				SDL_GPUTexture *const texture =
+					Textures.Find(run.Texture, TextureContentOwner(run.Texture, ActiveContentOwner));
 
 				RibbonMaterial material{};
 				material.Flags =

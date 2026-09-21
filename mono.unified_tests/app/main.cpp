@@ -209,6 +209,10 @@ namespace {
 			}
 		}
 
+		if (!crossing.DrainContent()) {
+			ENGINE_ERROR("{}: content did not settle before the bounded final drain", arrangement.Name());
+		}
+
 		// **Every module's own report, and then the disagreements.** The report
 		// is what each module says it did; the disagreements are the claims no
 		// single module could have checked.

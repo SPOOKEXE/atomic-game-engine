@@ -13,6 +13,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <string>
 #include <thread>
 #include <vector>
@@ -97,9 +99,146 @@ TEST_CASE("the default PBR graph compiles into the graph backend", "[render][gra
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
 }
 
+TEST_CASE("render graph snapshots require an exact installed name", "[render][graph][diagnostic]") {
+	Renderer renderer;
+	CHECK_FALSE(renderer.DescribePipeline(Name("not-installed"), 640, 480));
+	CHECK_FALSE(renderer.DescribePipeline(Name("Engine Default"), 0, 480));
+
+	const auto snapshot = renderer.DescribePipeline(Name("Engine Default"), 640, 480);
+	REQUIRE(snapshot);
+	CHECK(snapshot->Pipeline == Name("Engine Default"));
+	CHECK_FALSE(snapshot->Profile.Passes.empty());
+	CHECK(snapshot->Aliases.Allocations.size() == snapshot->Graph.ResourceCount());
+
+	for (const engine::graph::ProfilePass &pass : snapshot->Profile.Passes) {
+		const auto *node = snapshot->Graph.Find(pass.Node);
+		REQUIRE(node != nullptr);
+		CHECK(pass.Name == node->Name);
+		CHECK(pass.Kind == node->Kind);
+	}
+	for (uint32_t value = 1; value <= snapshot->Graph.ResourceCount(); ++value) {
+		const engine::graph::ResourceId resource{value};
+		const auto allocation = snapshot->Aliases.AllocationOf(resource);
+		if (allocation.IsValid()) {
+			CHECK(snapshot->Graph.FindResource(allocation) != nullptr);
+		}
+	}
+
+	bool hasHistory = false;
+	for (uint32_t value = 1; value <= snapshot->Graph.ResourceCount(); ++value) {
+		const auto *resource = snapshot->Graph.FindResource(engine::graph::ResourceId{value});
+		hasHistory = hasHistory ||
+					 (resource != nullptr && resource->Lifetime == engine::graph::ResourceLifetime::History);
+	}
+	CHECK(hasHistory);
+}
+
+TEST_CASE("hard render demo graphs install compute handlers", "[render][graph][hard-render]") {
+	for (const auto &[name, document] : std::array{
+			 std::pair{Name("Raytrace Demo"), engine::graph::RaytraceDemoDocument()},
+			 std::pair{Name("Pathtrace Demo"), engine::graph::PathtraceDemoDocument()},
+		 }) {
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+
+		Renderer renderer;
+		CHECK(renderer.SetPipeline(name, graph));
+	}
+}
+
+TEST_CASE(
+	"retained shadow correction requires its complete input group", "[render][graph][directional-correct]"
+) {
+	using namespace engine::graph;
+	const auto base = DefaultPortalBodyDocument(false, true, true, true, false, 2, true);
+	for (unsigned mask = 0; mask < 16; ++mask) {
+		CAPTURE(mask);
+		PipelineDocument document;
+		document.Record(
+			{.Kind = EditKind::AddResource,
+			 .Name = Name("room-directional-response"),
+			 .Resource = ResourceKind::Colour,
+			 .Format = ResourceFormat::RGBA32F}
+		);
+		Name current;
+		for (const auto &edit : base.Edits()) {
+			if (edit.Kind == EditKind::AddNode) current = edit.Name;
+			document.Record(edit);
+			if (current == Name("room-image") && edit.Kind == EditKind::Writes &&
+				edit.Key == Name("lighting-baseline"))
+				document.Record(
+					{.Kind = EditKind::Writes,
+					 .Target = Name("room-directional-response"),
+					 .Key = Name("directional-response")}
+				);
+			if (current == Name("ambient-correct") && edit.Kind == EditKind::Reads &&
+				edit.Key == Name("occlusion")) {
+				const char *ports[]{"directional-response", "room-depth", "room-normal", "shadow"};
+				const char *resources[]{"room-directional-response", "room-depth", "room-normal", "shadow"};
+				for (unsigned input = 0; input < 4; ++input)
+					if (mask & (1u << input))
+						document.Record(
+							{.Kind = EditKind::Reads,
+							 .Target = Name(resources[input]),
+							 .Key = Name(ports[input])}
+						);
+			}
+		}
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+		PipelineDocument restored;
+		REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
+		CHECK(Write(restored) == Write(document));
+		Renderer renderer;
+		CHECK(renderer.SetPipeline(Name("retained-shadow-inputs"), graph) == (mask == 0 || mask == 15));
+	}
+}
+
+TEST_CASE("depth exports preserve the lighting depth singleton", "[render][graph][depth-export]") {
+	using namespace engine::graph;
+	for (const bool zeroBackground : {false, true}) {
+		const auto base = DefaultPbrDocument();
+		PipelineDocument document;
+		for (const auto &edit : base.Edits()) {
+			if (edit.Kind == EditKind::AddNode && edit.Name == Name("present")) {
+				document.Record(
+					{.Kind = EditKind::AddResource,
+					 .Name = Name("export-depth"),
+					 .Resource = ResourceKind::Colour,
+					 .Format = ResourceFormat::R32F}
+				);
+				document.Record(
+					{.Kind = EditKind::AddNode,
+					 .Name = Name("export-linearise"),
+					 .NodeKind = Name("depth-linearise"),
+					 .Scope = NodeScope::View}
+				);
+				document.Record({.Kind = EditKind::Reads, .Target = Name("depth"), .Key = Name("depth")});
+				document.Record(
+					{.Kind = EditKind::Writes, .Target = Name("export-depth"), .Key = Name("linear")}
+				);
+				document.Record(
+					{.Kind = EditKind::Set,
+					 .Key = Name("background"),
+					 .Value = zeroBackground ? "zero" : "far"}
+				);
+			}
+			document.Record(edit);
+		}
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+		Renderer renderer;
+		CHECK(renderer.SetPipeline(Name("export#1"), graph) == zeroBackground);
+	}
+}
+
 TEST_CASE("built-in capability fallbacks compile into the graph backend", "[render][graph]") {
 	Renderer renderer;
 	for (const auto &[name, document] : {
+			 std::pair{Name("Eye#1"), engine::graph::DefaultEyeDocument()},
 			 std::pair{Name("Tier B#1"), engine::graph::DefaultPbrTierBDocument()},
 			 std::pair{Name("Tier C#1"), engine::graph::DefaultForwardTierCDocument()},
 		 }) {
@@ -126,6 +265,60 @@ TEST_CASE("default PBR stages are not mandatory backend policy", "[render][graph
 
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("minimal#1"), graph));
+}
+
+TEST_CASE("draw uploads are graph dependencies rather than backend fallbacks", "[render][graph][uploads]") {
+	using engine::graph::Node;
+	using engine::graph::NodeScope;
+	using engine::graph::ResourceKind;
+
+	const auto make = [](bool residency, bool upload, bool uploadFirst) {
+		RenderGraph graph;
+		const auto meshes =
+			graph.AddResource({.Name = Name("meshes"), .Kind = ResourceKind::Buffer, .External = !residency});
+		const auto entities =
+			graph.AddResource({.Name = Name("entities"), .Kind = ResourceKind::Entities, .External = true});
+		const auto instances =
+			graph.AddResource({.Name = Name("instances"), .Kind = ResourceKind::Buffer, .External = !upload});
+		const auto colour = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+		if (residency) {
+			graph.AddNode({
+				.Name = Name("mesh-residency"),
+				.Kind = Name("mesh-residency"),
+				.Writes = {meshes},
+				.Scope = NodeScope::World,
+			});
+		}
+		const auto addUpload = [&] {
+			if (!upload) return;
+			graph.AddNode({
+				.Name = Name("delta-upload"),
+				.Kind = Name("delta-upload"),
+				.Reads = {meshes, entities},
+				.Writes = {instances},
+				.Scope = NodeScope::View,
+			});
+		};
+		const auto addDraw = [&] {
+			graph.AddNode({
+				.Name = Name("transparent"),
+				.Kind = Name("transparent"),
+				.Reads = {instances},
+				.Writes = {colour},
+				.Scope = NodeScope::View,
+			});
+		};
+		if (uploadFirst) addUpload();
+		addDraw();
+		if (!uploadFirst) addUpload();
+		return graph;
+	};
+
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("ordered#1"), make(true, true, true)));
+	CHECK_FALSE(renderer.SetPipeline(Name("missing-residency#1"), make(false, true, true)));
+	CHECK_FALSE(renderer.SetPipeline(Name("missing-upload#1"), make(true, false, true)));
+	CHECK_FALSE(renderer.SetPipeline(Name("late-upload#1"), make(true, true, false)));
 }
 
 TEST_CASE("authored raster compute and inspection nodes are repeatable backend work", "[render][graph]") {
@@ -192,6 +385,35 @@ TEST_CASE("authored compute can be scoped once per world", "[render][graph]") {
 
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("world-compute#1"), graph));
+}
+
+TEST_CASE("frame setup can feed a view before final frame inspection", "[render][graph][frame-prefix]") {
+	RenderGraph graph;
+	const auto resident =
+		graph.AddResource({.Name = Name("resident"), .Kind = engine::graph::ResourceKind::Storage});
+	const auto visible =
+		graph.AddResource({.Name = Name("visible"), .Kind = engine::graph::ResourceKind::Storage});
+	graph.AddNode({
+		.Name = Name("setup"),
+		.Kind = Name("dispatch"),
+		.Writes = {resident},
+		.Scope = engine::graph::NodeScope::Frame,
+	});
+	graph.AddNode({
+		.Name = Name("view"),
+		.Kind = Name("dispatch"),
+		.Reads = {resident},
+		.Writes = {visible},
+		.Scope = engine::graph::NodeScope::View,
+	});
+	graph.AddNode({
+		.Name = Name("inspection"),
+		.Kind = Name("viewer"),
+		.Reads = {visible},
+		.Scope = engine::graph::NodeScope::Frame,
+	});
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("frame-setup#1"), graph));
 }
 
 TEST_CASE("blit owns its target format at the installation boundary", "[render][graph]") {
@@ -299,7 +521,7 @@ TEST_CASE("optional default nodes can be disabled at the backend boundary", "[re
 	document.Record(disabled);
 	disabled.Name = Name("ssao");
 	document.Record(disabled);
-	disabled.Name = Name("mirror-capture");
+	disabled.Name = Name("surface-capture");
 	document.Record(disabled);
 
 	RenderGraph graph;
@@ -312,7 +534,7 @@ TEST_CASE("optional default nodes can be disabled at the backend boundary", "[re
 TEST_CASE("backend queue and overlap controls describe the work each node records", "[render][graph]") {
 	engine::graph::PipelineDocument document = engine::graph::DefaultPbrDocument();
 	document = WithSetting(document, Name("cull-frustum"), Name("queue"), "cpu");
-	document = WithSetting(document, Name("upload-instances"), Name("queue"), "transfer");
+	document = WithSetting(document, Name("delta-upload"), Name("queue"), "transfer");
 	document = WithSetting(document, Name("gbuffer"), Name("queue"), "graphics");
 	document = WithSetting(document, Name("ssao"), Name("async"), "allow");
 

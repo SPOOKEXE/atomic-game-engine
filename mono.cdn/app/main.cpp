@@ -476,6 +476,7 @@ int main(int argc, char **argv) {
 			engine::control::features::Diagnostics(),
 			engine::control::features::Resources(),
 			engine::control::features::Prompts(),
+			engine::control::features::Discovery(),
 			engine::control::features::Custom(
 				"cdn", [&origin, &serving, &controlServer](engine::control::Surface &surface) {
 					surface.Add(

@@ -34,7 +34,7 @@ namespace engine::replication {
 		Forgotten_.clear();
 	}
 
-	bool Replica::Count(const replication::Delta &delta) {
+	bool Replica::Count(const replication::Delta &delta, bool applied) {
 		if (!Counting.Counting || delta.Tick > Counting.Tick) {
 			if (Counting.Counting && !Counting.Whole) {
 				Stats_.Incomplete++;
@@ -42,6 +42,7 @@ namespace engine::replication {
 
 			Counting = Parts{};
 			Counting.Tick = delta.Tick;
+			Counting.ConsumedInput = delta.ConsumedInput;
 			Counting.Counting = true;
 		} else if (delta.Tick < Counting.Tick) {
 			return false;
@@ -51,7 +52,7 @@ namespace engine::replication {
 			Counting.Held.resize(static_cast<size_t>(delta.Part) + 1, false);
 		}
 
-		Counting.Held[delta.Part] = true;
+		Counting.Held[delta.Part] = Counting.Held[delta.Part] || applied;
 
 		if (delta.Final) {
 			Counting.Last = delta.Part;
@@ -119,7 +120,11 @@ namespace engine::replication {
 		const bool preface = Stage == SnapshotStage::Preface;
 
 		core::ByteReader reader(Snapshot);
-		if (!store.Apply(reader, preface ? ecs::ApplyMode::Overlay : ecs::ApplyMode::Authoritative)) {
+		if (!store.Apply(
+				reader,
+				preface ? ecs::ApplyMode::Overlay : ecs::ApplyMode::Authoritative,
+				ecs::ApplyClock::PreserveLocal
+			)) {
 			// Apply through the store's scratch path to avoid partial state.
 			ENGINE_ERROR("replication: the joining snapshot could not be restored.");
 			Assembling = false;
@@ -181,6 +186,10 @@ namespace engine::replication {
 			return ApplyStatus::Stale;
 		}
 
+		if (delta.ConsumedInput < ConsumedInput_ || (Counting.Counting && delta.Tick == Counting.Tick &&
+													 delta.ConsumedInput != Counting.ConsumedInput))
+			return ApplyStatus::Malformed;
+
 		// **The write itself is shared with the inbound direction**, which is
 		// what `Submission.hpp` is for: a delta going up the wire is the same
 		// bytes as one coming down, and the only difference is whether the
@@ -219,7 +228,7 @@ namespace engine::replication {
 			Arriving_.push_back(Arrival{deferred.Child, deferred.Parent, Stats_.Deltas});
 		}
 
-		const bool complete = Count(delta);
+		const bool complete = Count(delta, whole);
 
 		Stats_.Deltas++;
 
@@ -262,6 +271,7 @@ namespace engine::replication {
 		ReleaseArrivals(store);
 
 		Applied_ = delta.Tick;
+		ConsumedInput_ = Counting.ConsumedInput;
 		return ApplyStatus::Ok;
 	}
 
@@ -430,7 +440,7 @@ namespace engine::replication {
 		}
 
 		core::ByteWriter writer;
-		WriteMessage(writer, replication::Applied{Applied_});
+		WriteMessage(writer, replication::Applied{Applied_, ConsumedInput_});
 		return {writer.Bytes().begin(), writer.Bytes().end()};
 	}
 

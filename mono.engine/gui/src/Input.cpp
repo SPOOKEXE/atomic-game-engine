@@ -107,6 +107,7 @@ namespace engine::gui {
 			const Element *element = store.Get<Element>(instance);
 
 			const bool takes = store.IsA(instance, ButtonClass()) || store.Get<Entry>(instance) != nullptr ||
+							   store.Get<NodeCanvasLink>(instance) != nullptr ||
 							   (element != nullptr && element->Active);
 			if (!takes) {
 				return Reach::Through;
@@ -154,7 +155,13 @@ namespace engine::gui {
 				// an upright rectangle - which is what the painter does and what the
 				// hit test therefore has to agree with.
 				const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, point);
-				if (!command.Bounds.Contains(local) || !command.Clip.Contains(point)) {
+				core::Rect hitBounds = command.Bounds;
+				if (store.Get<NodeCanvasLink>(command.Source) != nullptr && hitBounds.Height() < 8.0f) {
+					const float padding = (8.0f - hitBounds.Height()) * 0.5f;
+					hitBounds.Min.Y -= padding;
+					hitBounds.Max.Y += padding;
+				}
+				if (!hitBounds.Contains(local) || !command.Clip.Contains(point)) {
 					continue;
 				}
 
@@ -368,6 +375,8 @@ namespace engine::gui {
 		Entity graph;
 		int32_t graphOrder = 0;
 		int32_t graphDepth = 0;
+		Vector2 graphOrigin;
+		Vector2 graphPoint;
 		store.Each<const NodeCanvas, const Resolved>(
 			[&](Entity node, const NodeCanvas &, const Resolved &resolved) {
 				if (!resolved.Rendered) {
@@ -380,8 +389,8 @@ namespace engine::gui {
 						resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
 					},
 				};
-				if (!bounds.Contains(Unrotated(resolved.AbsoluteRotation, bounds, point)) ||
-					!resolved.Clip.Contains(point)) {
+				const Vector2 unrotated = Unrotated(resolved.AbsoluteRotation, bounds, point);
+				if (!bounds.Contains(unrotated) || !resolved.Clip.Contains(point)) {
 					return;
 				}
 				if (graph == NULL_ENTITY || resolved.Order > graphOrder ||
@@ -389,6 +398,8 @@ namespace engine::gui {
 					graph = node;
 					graphOrder = resolved.Order;
 					graphDepth = resolved.Depth;
+					graphOrigin = resolved.AbsolutePosition;
+					graphPoint = unrotated;
 				}
 			}
 		);
@@ -406,7 +417,20 @@ namespace engine::gui {
 			if (!(low > 0.0f) || !(high > 0.0f)) {
 				return graph;
 			}
-			canvas->Zoom = std::clamp(canvas->Zoom * std::pow(1.1f, notches), low, high);
+			const float previousZoom = canvas->Zoom;
+			const float zoom = std::clamp(previousZoom * std::pow(1.1f, notches), low, high);
+			if (!(zoom > 0.0f) || zoom == previousZoom) {
+				return graph;
+			}
+
+			const Vector2 relative{graphPoint.X - graphOrigin.X, graphPoint.Y - graphOrigin.Y};
+			// Keep the canvas coordinate below the pointer fixed. Scaling around the
+			// canvas origin makes nodes and their labels slide away under the cursor.
+			canvas->Pan = Vector2{
+				canvas->Pan.X + relative.X / previousZoom - relative.X / zoom,
+				canvas->Pan.Y + relative.Y / previousZoom - relative.Y / zoom,
+			};
+			canvas->Zoom = zoom;
 			return graph;
 		}
 

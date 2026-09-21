@@ -608,6 +608,9 @@ namespace engine::replication {
 			// The last tick this client acknowledged applying in full.
 			uint64_t Applied = 0;
 
+			// Host-consumed input frontier, independent of published component budgets.
+			uint64_t ConsumedInput = 0;
+
 			// How many entities this client is believed to hold.
 			//
 			// The set every `Created`, `Destroyed` and `Forgotten` is a
@@ -942,6 +945,8 @@ namespace engine::replication {
 			uint64_t StreamedBefore = 0;
 
 			std::vector<Input> Pending;
+			uint64_t ConsumedInput = 0;
+			uint64_t AcknowledgedInput = 0;
 
 			// Accepted inbound state, cleared by the host once applied. Same
 			// shape as `Pending` and for the same reason: this module carries
@@ -1376,6 +1381,9 @@ namespace engine::replication {
 		std::vector<std::byte> Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const;
 
 		void BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick);
+
+		// Keeps changes newer than a streaming snapshot eligible for recovery.
+		void RetainStreamingChanges(const ecs::Store &store, Client &client, uint64_t tick);
 
 		// Stages the entities `Client::Oversize` names as an overlay blob.
 		//

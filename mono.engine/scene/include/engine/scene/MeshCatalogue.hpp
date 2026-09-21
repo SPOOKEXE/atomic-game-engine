@@ -29,7 +29,9 @@
 // @tier L7 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/Vector3.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -41,6 +43,36 @@ namespace engine::ecs {
 }
 
 namespace engine::scene {
+	// A data-rig reply can retain this many vertices. At 16 bytes each the
+	// per-mesh, per-world skinning payload is at most 16 KiB, rather than a copy
+	// of an asset's four-million-vertex render stream.
+	inline constexpr size_t MAXIMUM_RETAINED_SKINNING_VERTICES = 1024;
+
+	// One vertex's authored skin palette references. Joint numbers are local to
+	// the mesh's named skeleton palette, never process-local entity IDs.
+	struct MeshSkinningVertex {
+		// Four mesh-local skeleton-palette indices influencing this vertex.
+		std::array<uint16_t, 4> Joints{};
+		// Corresponding uint16-normalized influence weights.
+		std::array<uint16_t, 4> Weights{};
+	};
+	static_assert(sizeof(MeshSkinningVertex) == 16);
+
+	// The bounded skinning source that arrived with one published mesh. We keep
+	// the exact uint16 normalization the renderer consumes, so data export never
+	// has to reconstruct weights from a pose or a GPU buffer.
+	struct MeshSkinning {
+		// Number of joints in the mesh-local skeleton palette.
+		uint16_t JointCount = 0;
+
+		// The full mesh source count. It remains exact when `Vertices` retains
+		// only the bounded prefix, so export can refuse a non-exportable mesh
+		// rather than silently returning a partial skin.
+		uint32_t VertexCount = 0;
+
+		// Retained prefix of source vertex palette references and weights.
+		std::vector<MeshSkinningVertex> Vertices;
+	};
 
 	// What a world knows about the meshes named on its parts.
 	//
@@ -59,6 +91,9 @@ namespace engine::scene {
 		// a `Name` is already an integer in this process and hashing the
 		// integer skips the registry lock that comparing text would take.
 		std::unordered_map<uint32_t, uint32_t> Triangles;
+
+		// Authored object-space extents, keyed like triangles.
+		std::unordered_map<uint32_t, core::Vector3> Sizes;
 
 		// How many triangles a mesh has, or zero when this world has not been
 		// told.
@@ -89,6 +124,11 @@ namespace engine::scene {
 		//
 		// @since v0.13
 		std::unordered_map<uint32_t, std::vector<core::Name>> Textures;
+
+		// Exact authored skin weights keyed by the stable mesh name. This is
+		// intake metadata, like triangle counts: it is rebuilt from content and
+		// never survives a save without the mesh that supplied it.
+		std::unordered_map<uint32_t, MeshSkinning> Skinning;
 
 		// The sheets a mesh names, or an empty span.
 		//
@@ -130,10 +170,24 @@ namespace engine::scene {
 	//        Replaces whatever was recorded, because a republished mesh may
 	//        name different ones and a merge would leave a sheet listed that
 	//        the geometry no longer wears.
+	// @param skinning  The authored joint indices and weights, when present.
+	// @param size      Finite nonnegative object-space extent, or zero when unknown.
 	// @return `false` for an invalid name.
 	bool RecordMesh(
-		ecs::Store &store, const core::Name &mesh, uint32_t triangles, std::span<const core::Name> sheets = {}
+		ecs::Store &store,
+		const core::Name &mesh,
+		uint32_t triangles,
+		std::span<const core::Name> sheets = {},
+		const MeshSkinning &skinning = {},
+		core::Vector3 size = {}
 	);
+	// Removes metadata for a resource retired from this world's residency.
+	bool ForgetMesh(ecs::Store &store, const core::Name &mesh);
+
+	// Copies the exact skinning source for a mesh. Returns false when this world
+	// has not received that mesh; a successful empty result means an observed
+	// unskinned mesh rather than invented zero-weight vertices.
+	bool SkinningOf(const ecs::Store &store, const core::Name &mesh, MeshSkinning &out);
 
 	// The sheets a mesh's submeshes name, in this world.
 	//
@@ -157,4 +211,7 @@ namespace engine::scene {
 	// @param mesh  The mesh's name.
 	// @return The count, or zero.
 	uint32_t TrianglesOf(const ecs::Store &store, const core::Name &mesh);
+
+	// Authored object-space size, or zero before content arrives.
+	core::Vector3 MeshSizeOf(const ecs::Store &store, const core::Name &mesh);
 }

@@ -23,11 +23,13 @@
 // @tier L13 · client
 
 #include <engine/core/types/CFrame.hpp>
+#include <engine/ecs/Entity.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 
 namespace engine::ecs {
@@ -57,6 +59,45 @@ namespace studio {
 		bool Open = false;
 	};
 
+	// Screen-space layout shared by the direction gizmo and its view toggles.
+	//
+	// @since v0.25
+	struct ViewportDirectionControls {
+		// Direction-gizmo circle and its interaction padding.
+		//@{
+		float CentreX = 0.0f;
+		float CentreY = 0.0f;
+		float Radius = 0.0f;
+		float GimbalPadding = 0.0f;
+		//@}
+
+		// Wireframe button bounds in display coordinates.
+		//@{
+		float WireframeLeft = 0.0f;
+		float WireframeTop = 0.0f;
+		float WireframeRight = 0.0f;
+		float WireframeBottom = 0.0f;
+		//@}
+
+		// Tests whether a display-space point is inside the wireframe button.
+		//
+		// @param x Display-space horizontal coordinate.
+		// @param y Display-space vertical coordinate.
+		// @return True for points on or inside the button bounds.
+		bool WireframeContains(float x, float y) const;
+	};
+
+	// Places the wireframe toggle immediately below the top-right direction gizmo.
+	//
+	// @param panelX        Viewport panel left edge in display coordinates.
+	// @param panelY        Viewport panel top edge in display coordinates.
+	// @param panelWidth    Viewport panel width in display pixels.
+	// @param interfaceScale Studio interface scale.
+	// @return The direction gizmo and wireframe-button display-space layout.
+	// @since v0.25
+	ViewportDirectionControls
+	ResolveViewportDirectionControls(float panelX, float panelY, float panelWidth, float interfaceScale);
+
 	// The logical canvas and pointer coordinates a game interface receives from
 	// one viewport panel. GPU targets may be block-rounded or high-DPI; neither
 	// changes authored ScreenGui layout.
@@ -79,11 +120,26 @@ namespace studio {
 		//@}
 	};
 
+	// Which game-interface tree one Studio viewport may draw and route.
+	//
+	// A server viewport has no local player and therefore no client interface.
+	// Keeping that as an explicit source rather than relying on an empty viewer
+	// prevents a future generic compiler request from exposing every player's UI.
+	//
+	// @since v0.23
+	enum class ViewportGuiSource : uint8_t {
+		StarterGui,
+		PlayerGui,
+		None,
+	};
+
 	// The pixel extent one viewport asks the renderer to allocate.
 	//
 	// @since v0.23
 	struct ViewportTargetSize {
+		// Target width in pixels.
 		uint32_t Width = 1;
+		// Target height in pixels.
 		uint32_t Height = 1;
 	};
 
@@ -126,6 +182,28 @@ namespace studio {
 	//
 	// @since v0.19
 	ViewportCameraPose DefaultViewportCamera();
+
+	// Creates this Studio run's camera in one authoritative world and makes it
+	// the world camera. Runtime cameras are transient, so Play starts with an
+	// eye without putting one into the authored snapshot.
+	//
+	// @param store The running server world.
+	// @param name  The generated instance name.
+	// @param pose  The initial runtime camera placement.
+	// @return The new camera, or `NULL_ENTITY` when the world has no workspace.
+	// @since v0.25
+	engine::ecs::Entity
+	CreateRuntimeCamera(engine::ecs::Store &store, std::string_view name, const ViewportCameraPose &pose);
+
+	// Finds this world's usable current camera. Each runtime world owns a
+	// separate `ActiveCamera`; a viewport only reads the one belonging to the
+	// world it is presenting.
+	//
+	// @param store The world to inspect.
+	// @return Its active camera when it has a camera and transform, otherwise
+	//         `NULL_ENTITY`.
+	// @since v0.25
+	engine::ecs::Entity RuntimeCameraOf(const engine::ecs::Store &store);
 
 	// Carries a free viewport camera through the first portal crossed by its
 	// movement. A free camera is editor state rather than a simulated body, so
@@ -193,6 +271,16 @@ namespace studio {
 	ViewportCanvas CanvasForViewport(
 		float panelX, float panelY, float panelWidth, float panelHeight, float pointerX, float pointerY
 	);
+
+	// Selects the interface source for one viewport. Edit views author the
+	// StarterGui template, client replicas see only their own PlayerGui, and a
+	// running authority has no interface to render or receive input.
+	//
+	// @param running Whether this is the authority world of a live run.
+	// @param clientView Whether this viewport shows a client replica.
+	// @return The only game-interface source this viewport may use.
+	// @since v0.23
+	ViewportGuiSource ViewportGuiSourceFor(bool running, bool clientView);
 
 	// Which panel should show a world.
 	//

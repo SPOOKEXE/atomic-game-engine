@@ -26,6 +26,7 @@
 // @tier L8 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/Vector2.hpp>
@@ -319,8 +320,10 @@ namespace engine::effects {
 		// clamp across their width; a Texture tiles in both dimensions.
 		bool RepeatV = false;
 
-		// Explicit padding.
-		uint8_t Reserved[2] = {};
+		// Whether a child view reorients the sampled beam strip towards its own eye.
+		bool FaceCamera = false;
+		// Reserves representation space for future use.
+		uint8_t Reserved = 0;
 	};
 
 	// What a world's ribbons came out as.
@@ -362,6 +365,35 @@ namespace engine::effects {
 	// @param elapsed The world's clock, for texture scroll.
 	// @return How many ribbons produced vertices.
 	size_t BuildRibbons(ecs::Store &store, const core::Vector3 &eye, float elapsed);
+
+	// Builds the same view-dependent geometry into caller-owned presentation
+	// storage. Leaves the world's retained ribbon buffer and camera untouched.
+	size_t BuildRibbons(ecs::Store &store, const core::Vector3 &eye, float elapsed, RibbonBuffer &output);
+
+	// Reorients only camera-facing beam runs from copied geometry. Width, taper,
+	// UVs and colour are preserved; authored strips and trail twists are untouched.
+	// Rejects malformed run ranges before copying. Source may be the complete output span for in-place
+	// reorientation.
+	bool FaceRibbonVertices(
+		std::span<const RibbonVertex> source,
+		std::span<const RibbonRun> runs,
+		const core::Vector3 &eye,
+		std::vector<RibbonVertex> &output
+	);
+
+	// Cuts transient ribbon strips at one portal pane and maps only the far-side
+	// fragments into the portal capture's coordinate space. Trail history stays
+	// untouched because this operates on the frame-local generated stream.
+	bool ProjectRibbonsThroughPortal(
+		std::span<const RibbonVertex> source,
+		std::span<const RibbonRun> runs,
+		const core::Vector3 &centre,
+		const core::Vector3 &normal,
+		const core::CFrame &mapping,
+		float scale,
+		std::vector<RibbonVertex> &vertices,
+		std::vector<RibbonRun> &projectedRuns
+	);
 
 	// The vertices `BuildRibbons` produced.
 	//

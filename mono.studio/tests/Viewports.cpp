@@ -17,14 +17,168 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <memory>
 #include <numbers>
+#include <studio/Editor.hpp>
+#include <studio/PlayLink.hpp>
+#include <studio/Projection.hpp>
 #include <studio/Viewports.hpp>
+
+namespace studio {
+	struct ViewportCameraProbe {
+		static bool Initialise(Editor &editor, size_t viewports) {
+			Options options;
+			options.Headless = true;
+			options.StartViewports = viewports;
+			return editor.Initialise(options);
+		}
+
+		static void Present(Editor &editor, size_t viewport) {
+			editor.PresentViewport(viewport, 1.0f / 60.0f);
+		}
+
+		static void SetFieldOfView(Editor &editor, size_t viewport, float fieldOfView) {
+			const auto &viewer = editor.Viewers[viewport];
+			bool updated = false;
+			editor.Universe->Enter(viewer.World, [&](engine::ecs::Store &store) {
+				if (auto *camera = store.GetMutable<engine::scene::Camera>(viewer.Instance)) {
+					camera->FieldOfViewRadians = fieldOfView;
+					updated = true;
+				}
+			});
+			REQUIRE(updated);
+		}
+
+		static float PresentedFieldOfView(const Editor &editor, size_t viewport) {
+			return editor.Overlays[viewport].PresentedFieldOfView;
+		}
+
+		static engine::world::WorldId PresentedWorld(const Editor &editor, size_t viewport) {
+			return editor.Overlays[viewport].PresentedWorld;
+		}
+
+		static PanelProjection Projection(Editor &editor, size_t viewport) {
+			return editor.ProjectionFor(viewport);
+		}
+
+		static void SetOverlayRectangle(
+			Editor &editor,
+			size_t viewport,
+			float x,
+			float y,
+			float width,
+			float height,
+			uint32_t renderWidth,
+			uint32_t renderHeight
+		) {
+			auto &slot = editor.Overlays[viewport];
+			slot.X = x;
+			slot.Y = y;
+			slot.Width = width;
+			slot.Height = height;
+			slot.RenderWidth = renderWidth;
+			slot.RenderHeight = renderHeight;
+			slot.Drawn = true;
+		}
+
+		static void
+		SetViewerCamera(Editor &editor, size_t viewport, engine::core::CFrame frame, float fieldOfView) {
+			const auto &viewer = editor.Viewers[viewport];
+			bool updated = false;
+			editor.Universe->Enter(viewer.World, [&](engine::ecs::Store &store) {
+				auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance);
+				auto *camera = store.GetMutable<engine::scene::Camera>(viewer.Instance);
+				if (transform == nullptr || camera == nullptr) {
+					return;
+				}
+				transform->Frame = frame;
+				camera->FieldOfViewRadians = fieldOfView;
+				updated = true;
+			});
+			REQUIRE(updated);
+		}
+
+		static engine::world::WorldId StartPlay(Editor &editor) {
+			REQUIRE(editor.BeginRun(editor.Active, RunMode::Play));
+			REQUIRE_FALSE(editor.Runs.empty());
+			REQUIRE_FALSE(editor.Runs.back().Links.empty());
+			REQUIRE(editor.Runs.back().Links.front() != nullptr);
+			return editor.Runs.back().Links.front()->ReplicaWorld();
+		}
+
+		static engine::scene::FlipbookFacts Flipbook(Editor &editor, engine::world::WorldId world) {
+			engine::scene::FlipbookFacts facts;
+			editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+				facts = engine::scene::FlipbookOf(store, engine::core::Name("effects/fox_dance.atex"));
+			});
+			return facts;
+		}
+
+		static bool HasPackagedFlipbook(Editor &editor) {
+			return editor.Renderer.TextureHandle(engine::core::Name("effects/fox_dance.atex")) != nullptr;
+		}
+
+		static void Show(Editor &editor, engine::world::WorldId world) {
+			editor.Active = world;
+		}
+
+		static void SetReplicaFieldOfView(Editor &editor, engine::world::WorldId world, float fieldOfView) {
+			bool updated = false;
+			editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+				const engine::ecs::Entity camera = RuntimeCameraOf(store);
+				if (auto *lens = store.GetMutable<engine::scene::Camera>(camera)) {
+					lens->FieldOfViewRadians = fieldOfView;
+					updated = true;
+				}
+			});
+			REQUIRE(updated);
+		}
+
+		static void SetReplicaCamera(
+			Editor &editor, engine::world::WorldId world, engine::core::CFrame frame, float fieldOfView
+		) {
+			bool updated = false;
+			editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+				const engine::ecs::Entity camera = RuntimeCameraOf(store);
+				auto *transform = store.GetMutable<engine::scene::Transform>(camera);
+				auto *lens = store.GetMutable<engine::scene::Camera>(camera);
+				if (transform == nullptr || lens == nullptr) {
+					return;
+				}
+				transform->Frame = frame;
+				lens->FieldOfViewRadians = fieldOfView;
+				updated = true;
+			});
+			REQUIRE(updated);
+		}
+
+		static std::array<engine::ecs::Entity, 2> CreateTwo(Editor &editor, engine::world::WorldId world) {
+			editor.Viewers.resize(2);
+			const ViewportCameraPose pose = DefaultViewportCamera();
+			editor.EnsureViewerCamera(0, world, pose.Frame, {}, engine::ecs::NULL_ENTITY);
+			editor.EnsureViewerCamera(1, world, pose.Frame, {}, engine::ecs::NULL_ENTITY);
+			return {editor.Viewers[0].Instance, editor.Viewers[1].Instance};
+		}
+
+		static void SetFollows(Editor &editor, engine::ecs::Entity main, engine::ecs::Entity extra) {
+			editor.Extras.resize(1);
+			editor.FollowCamera = main;
+			editor.Extras[0].Follow = extra;
+		}
+
+		static std::array<engine::ecs::Entity, 2> Follows(const Editor &editor) {
+			return {editor.FollowCamera, editor.Extras[0].Follow};
+		}
+	};
+}
 
 TEST_SUITE_ID("studio.viewports")
 
@@ -33,13 +187,18 @@ using studio::CameraRelativeMovement;
 using studio::CanvasForViewport;
 using studio::CarryViewportCamera;
 using studio::ChooseViewportFor;
+using studio::CreateRuntimeCamera;
 using studio::DefaultViewportCamera;
 using studio::NO_VIEWPORT;
 using studio::PanelView;
+using studio::ResolveViewportDirectionControls;
 using studio::ResolveViewportTargetSize;
+using studio::RuntimeCameraOf;
 using studio::SnapViewportCameraDirection;
 using studio::ViewportCameraMemory;
 using studio::ViewportCameraPose;
+using studio::ViewportGuiSource;
+using studio::ViewportGuiSourceFor;
 
 namespace {
 	// Three scenes and a client view, as an editor mid-play holds them.
@@ -64,6 +223,167 @@ TEST_CASE(
 	CHECK(right.PointerY == 337.0f);
 }
 
+TEST_CASE("each viewport has an explicit game UI owner", "[studio][viewports][gui]") {
+	// Two edit viewports may both author the template. A client viewport owns
+	// its PlayerGui, while the running server view has neither UI nor input.
+	CHECK(ViewportGuiSourceFor(false, false) == ViewportGuiSource::StarterGui);
+	CHECK(ViewportGuiSourceFor(false, true) == ViewportGuiSource::PlayerGui);
+	CHECK(ViewportGuiSourceFor(true, false) == ViewportGuiSource::None);
+	CHECK(ViewportGuiSourceFor(true, true) == ViewportGuiSource::PlayerGui);
+}
+
+TEST_CASE("runtime worlds keep separate generated cameras", "[studio][viewports][camera]") {
+	engine::scene::RegisterSceneClasses();
+	engine::ecs::Store server("viewport_runtime_server");
+	engine::ecs::Store client("viewport_runtime_client");
+	engine::scene::InstallServices(server);
+	engine::scene::InstallServices(client);
+
+	ViewportCameraPose serverPose = DefaultViewportCamera();
+	serverPose.Frame.Position = {10.0f, 20.0f, 30.0f};
+	ViewportCameraPose clientPose = DefaultViewportCamera();
+	clientPose.Frame.Position = {-10.0f, 4.0f, 8.0f};
+
+	const engine::ecs::Entity serverCamera = CreateRuntimeCamera(server, "ServerCamera", serverPose);
+	const engine::ecs::Entity clientCamera = CreateRuntimeCamera(client, "ClientCamera", clientPose);
+	REQUIRE(serverCamera != engine::ecs::NULL_ENTITY);
+	REQUIRE(clientCamera != engine::ecs::NULL_ENTITY);
+	CHECK(RuntimeCameraOf(server) == serverCamera);
+	CHECK(RuntimeCameraOf(client) == clientCamera);
+	CHECK(server.Get<engine::scene::Transform>(serverCamera)->Frame.Position == serverPose.Frame.Position);
+	CHECK(client.Get<engine::scene::Transform>(clientCamera)->Frame.Position == clientPose.Frame.Position);
+	CHECK(server.Get<engine::scene::TransientComponent>(serverCamera) != nullptr);
+	CHECK(client.Get<engine::scene::TransientComponent>(clientCamera) != nullptr);
+}
+
+TEST_CASE("editor viewports keep generated cameras and follows separate", "[studio][viewports][camera]") {
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	const WorldId world = editor.Universe->Create({.Name = engine::core::Name("ViewportCameraWorld")});
+	editor.Universe->Enter(world, [](engine::ecs::Store &store) { engine::scene::InstallServices(store); });
+
+	const auto cameras = studio::ViewportCameraProbe::CreateTwo(editor, world);
+	REQUIRE(cameras[0] != engine::ecs::NULL_ENTITY);
+	REQUIRE(cameras[1] != engine::ecs::NULL_ENTITY);
+	CHECK(cameras[0] != cameras[1]);
+
+	studio::ViewportCameraProbe::SetFollows(editor, cameras[0], cameras[1]);
+	CHECK(studio::ViewportCameraProbe::Follows(editor) == cameras);
+}
+
+TEST_CASE(
+	"authored field of view reaches each viewport render projection", "[studio][viewports][camera][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 2));
+
+	// The first presentation creates the generated camera for each panel. A
+	// field edited on either camera must be the field the next render projects
+	// through, rather than the free-camera default captured before preparation.
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::Present(editor, 1);
+	studio::ViewportCameraProbe::SetFieldOfView(editor, 0, 0.61f);
+	studio::ViewportCameraProbe::SetFieldOfView(editor, 1, 1.19f);
+
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::Present(editor, 1);
+
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 1) == 1.19f);
+}
+
+TEST_CASE(
+	"staged engine textures are resident in Studio and its Play client",
+	"[studio][viewports][content][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	CHECK(studio::ViewportCameraProbe::HasPackagedFlipbook(editor));
+
+	const engine::scene::FlipbookFacts author = studio::ViewportCameraProbe::Flipbook(editor, editor.Active);
+	CHECK(author.Side == 8);
+	CHECK(author.Frames == 64);
+	CHECK(author.FrameRate > 23.0f);
+	CHECK(author.FrameRate < 25.0f);
+
+	const WorldId replica = studio::ViewportCameraProbe::StartPlay(editor);
+	const engine::scene::FlipbookFacts client = studio::ViewportCameraProbe::Flipbook(editor, replica);
+	CHECK(client.Side == 8);
+	CHECK(client.Frames == 64);
+	CHECK(client.FrameRate > 23.0f);
+	CHECK(client.FrameRate < 25.0f);
+}
+
+TEST_CASE(
+	"overlay projection stays with the camera that made its texture", "[studio][viewports][camera][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 100.0f, 50.0f, 800.0f, 400.0f, 1600, 800);
+
+	const studio::PanelProjection recorded = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 recordedPoint{};
+	REQUIRE(recorded.WorldToPanel({1.0f, 0.0f, -10.0f}, recordedPoint));
+	CHECK(recorded.ImageMin.x == 100.0f);
+	CHECK(recorded.ImageMin.y == 50.0f);
+	CHECK(recorded.ImageSize.x == 800.0f);
+	CHECK(recorded.ImageSize.y == 400.0f);
+	CHECK(recorded.RenderSize.x == 1600.0f);
+	CHECK(recorded.RenderSize.y == 800.0f);
+
+	studio::ViewportCameraProbe::SetViewerCamera(
+		editor, 0, engine::core::CFrame(engine::core::Vector3{4.0f, 0.0f, 0.0f}), 0.61f
+	);
+	const studio::PanelProjection overlay = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 overlayPoint{};
+	REQUIRE(overlay.WorldToPanel({1.0f, 0.0f, -10.0f}, overlayPoint));
+
+	CHECK(overlay.Eye == recorded.Eye);
+	CHECK(overlayPoint.x == recordedPoint.x);
+	CHECK(overlayPoint.y == recordedPoint.y);
+}
+
+TEST_CASE(
+	"a replica viewport retains its local camera field of view", "[studio][viewports][camera][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const WorldId replica = studio::ViewportCameraProbe::StartPlay(editor);
+	studio::ViewportCameraProbe::Show(editor, replica);
+
+	// Presenting a client view creates an authority viewer for its surface
+	// cameras. Its lens must not replace the replica's runtime camera lens when
+	// the authority is the visual world.
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::SetReplicaFieldOfView(editor, replica, 0.61f);
+	studio::ViewportCameraProbe::SetFieldOfView(editor, 0, 1.19f);
+
+	studio::ViewportCameraProbe::Present(editor, 0);
+
+	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
+	CHECK(studio::ViewportCameraProbe::PresentedWorld(editor, 0) == replica);
+
+	// The client image remains on screen until its next round-robin turn. Its
+	// overlay must keep the replica camera that produced that image, even after
+	// the live replica camera has moved and changed its lens.
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 40.0f, 20.0f, 800.0f, 400.0f, 1600, 800);
+	const studio::PanelProjection recorded = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 recordedPoint{};
+	REQUIRE(recorded.WorldToPanel({1.0f, 0.0f, -10.0f}, recordedPoint));
+
+	studio::ViewportCameraProbe::SetReplicaCamera(
+		editor, replica, engine::core::CFrame(engine::core::Vector3{4.0f, 0.0f, 0.0f}), 1.19f
+	);
+	const studio::PanelProjection overlay = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 overlayPoint{};
+	REQUIRE(overlay.WorldToPanel({1.0f, 0.0f, -10.0f}, overlayPoint));
+	CHECK(overlay.Eye == recorded.Eye);
+	CHECK(overlayPoint.x == recordedPoint.x);
+	CHECK(overlayPoint.y == recordedPoint.y);
+}
+
 TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewports][render]") {
 	const studio::ViewportTargetSize wide = ResolveViewportTargetSize(3200, 1200, 0, 0, 1920, 1080);
 	CHECK(wide.Width == 1920);
@@ -77,6 +397,29 @@ TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewpo
 		ResolveViewportTargetSize(UINT32_MAX, UINT32_MAX, 0, 0, 0, 0);
 	CHECK(unbounded.Width == UINT32_MAX);
 	CHECK(unbounded.Height == UINT32_MAX);
+}
+
+TEST_CASE("wireframe toggle sits below the viewport direction gizmo", "[studio][viewports][overlay]") {
+	const studio::ViewportDirectionControls controls =
+		ResolveViewportDirectionControls(100.0f, 50.0f, 800.0f, 1.0f);
+
+	CHECK(controls.CentreX == 852.0f);
+	CHECK(controls.CentreY == 98.0f);
+	CHECK(controls.WireframeTop > controls.CentreY + controls.Radius);
+	CHECK((controls.WireframeLeft + controls.WireframeRight) * 0.5f == controls.CentreX);
+	CHECK(controls.WireframeRight - controls.WireframeLeft == 88.0f);
+	CHECK(controls.WireframeBottom - controls.WireframeTop == 24.0f);
+	CHECK(controls.WireframeContains(controls.CentreX, controls.WireframeTop));
+	CHECK_FALSE(controls.WireframeContains(controls.WireframeRight + 1.0f, controls.WireframeTop));
+}
+
+TEST_CASE("wireframe toggle follows Studio interface scale", "[studio][viewports][overlay]") {
+	const studio::ViewportDirectionControls controls =
+		ResolveViewportDirectionControls(0.0f, 0.0f, 1000.0f, 2.0f);
+
+	CHECK(controls.Radius == 56.0f);
+	CHECK(controls.WireframeRight - controls.WireframeLeft == 176.0f);
+	CHECK(controls.WireframeBottom - controls.WireframeTop == 48.0f);
 }
 
 TEST_CASE("crossing either viewport ceiling scales both axes together", "[studio][viewports][render]") {

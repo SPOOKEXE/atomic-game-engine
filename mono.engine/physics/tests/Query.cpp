@@ -12,8 +12,10 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/spatial/LayerMask.hpp>
@@ -58,7 +60,15 @@ using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::physics::BroadPhase;
 using engine::physics::ColliderHit;
+using engine::physics::ColliderOccupancy;
+using engine::physics::ColliderOccupancyBatch;
+using engine::physics::ColliderSignedDistance;
+using engine::physics::ColliderSignedDistanceBatch;
+using engine::physics::FilledColliderOccupancy;
+using engine::physics::FilledColliderOccupancyBatch;
+using engine::physics::FindAuthoredNavmeshPath;
 using engine::physics::OverlapBox;
+using engine::physics::OverlapOrientedBox;
 using engine::physics::OverlapSphere;
 using engine::physics::PhysicsWorld;
 using engine::physics::PhysicsWorldRegistered;
@@ -67,6 +77,8 @@ using engine::physics::Raycast;
 using engine::physics::ShapeCast;
 using engine::physics::ShapeWorldBounds;
 using engine::physics::SyncBroadphase;
+using engine::scene::AuthoredAffordance;
+using engine::scene::AuthoredAffordanceKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::ShapeKind;
@@ -115,6 +127,367 @@ namespace {
 		collider.Extent = extent;
 		return collider;
 	}
+}
+
+TEST_CASE("collider occupancy refuses to call an unprepared index free space", "[physics][query]") {
+	Store store("query.occupancy.unprepared");
+	const std::array probes{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}};
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK_FALSE(answers[0].OverlapFound);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsUnprepared);
+}
+
+TEST_CASE("authored navmesh joins only connected explicit walkable tops", "[physics][query]") {
+	Store store("query.authored-navmesh");
+	PreparePhysicsWorld(store, 4.0f);
+	const auto part = [](Vector3 position, Vector3 size) {
+		return engine::scene::PartDesc{CFrame{position}, size, {}, {}, {}, ShapeKind::Box, false};
+	};
+	const Entity left = engine::scene::MakePart(store, part({0.0f, 0.0f, 0.0f}, {2.0f, 1.0f, 2.0f}));
+	const Entity right = engine::scene::MakePart(store, part({2.0f, 0.0f, 0.0f}, {2.0f, 1.0f, 2.0f}));
+	store.Set<AuthoredAffordance>(left, {Name("navmesh/left"), AuthoredAffordanceKind::Walkable, true});
+	store.Set<AuthoredAffordance>(right, {Name("navmesh/right"), AuthoredAffordanceKind::Walkable, true});
+	Index(store);
+	const auto path = FindAuthoredNavmeshPath(store, {-0.5f, 0.5f, 0.0f}, {2.5f, 0.5f, 0.0f});
+	CHECK(path.Available);
+	CHECK(path.Found);
+	CHECK(path.PointCount == 3);
+	CHECK(path.Points[1].X == Approx(1.0f));
+	const auto beyondZ = FindAuthoredNavmeshPath(store, {-0.5f, 0.5f, 0.0f}, {2.5f, 0.5f, 1.01f});
+	CHECK_FALSE(beyondZ.Found);
+	CHECK(beyondZ.Why == engine::physics::AuthoredNavmeshPath::Reason::EndpointUnavailable);
+
+	const Entity wall = engine::scene::MakePart(store, part({1.0f, 0.75f, 0.0f}, {0.2f, 1.0f, 2.0f}));
+	(void)wall;
+	Index(store);
+	const auto blocked = FindAuthoredNavmeshPath(store, {-0.5f, 0.5f, 0.0f}, {2.5f, 0.5f, 0.0f});
+	CHECK(blocked.Available);
+	CHECK_FALSE(blocked.Found);
+	CHECK(blocked.Why == engine::physics::AuthoredNavmeshPath::Reason::CorridorObstructed);
+}
+
+TEST_CASE("collider occupancy preserves an unlabelled primitive contact", "[physics][query]") {
+	Store store("query.occupancy.primitive");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity collider = Place(store, {});
+	Index(store);
+	const std::array probes{AABB{Vector3{-0.5f, -0.5f, -0.5f}, Vector3{0.5f, 0.5f, 0.5f}}};
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].OverlapFound);
+	CHECK(answers[0].WitnessAvailable);
+	CHECK(answers[0].Witness == collider);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::None);
+}
+
+TEST_CASE("collider occupancy refuses a stale broadphase after a collider moves", "[physics][query]") {
+	Store store("query.occupancy.stale");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity collider = Place(store, {});
+	Index(store);
+	store.Set(collider, Transform{CFrame{Vector3{8.0f, 0.0f, 0.0f}}});
+	const std::array probes{AABB{Vector3{7.5f, -0.5f, -0.5f}, Vector3{8.5f, 0.5f, 0.5f}}};
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsStale);
+}
+
+TEST_CASE("legacy overlap remains available after an unrelated store write", "[physics][query]") {
+	Store store("query.occupancy.legacy");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity collider = Place(store, {});
+	Index(store);
+	const Entity unrelated = store.Create();
+	store.Set(unrelated, Transform{CFrame{Vector3{20.0f, 0.0f, 0.0f}}});
+	const AABB probe{Vector3{-0.5f, -0.5f, -0.5f}, Vector3{0.5f, 0.5f, 0.5f}};
+	std::array<Entity, 4> legacy;
+	const QueryResult overlap = OverlapBox(store, probe, LayerMask::All(), legacy);
+	REQUIRE(overlap.Written == 1);
+	CHECK(legacy[0] == collider);
+	std::array<ColliderOccupancy, 1> answers;
+	ColliderOccupancyBatch(store, std::array{probe}, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK(answers[0].Why == ColliderOccupancy::Reason::PhysicsStale);
+}
+
+TEST_CASE(
+	"collider occupancy resolves extreme finite bounds without float intermediates", "[physics][query]"
+) {
+	Store store("query.occupancy.extreme-bounds");
+	PreparePhysicsWorld(store, 4.0f);
+	Index(store);
+	const float maximum = std::numeric_limits<float>::max();
+	const std::array probes{
+		AABB{Vector3{-maximum, -maximum, -maximum}, Vector3{maximum, maximum, maximum}},
+		AABB{Vector3{maximum * 0.5f, maximum * 0.5f, maximum * 0.5f}, Vector3{maximum, maximum, maximum}},
+	};
+	std::array<ColliderOccupancy, 2> answers;
+	ColliderOccupancyBatch(store, probes, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Complete);
+	CHECK(answers[1].Available);
+	CHECK(answers[1].Complete);
+}
+
+TEST_CASE("filled collider occupancy proves one solid primitive contains a cell", "[physics][query]") {
+	Store store("query.filled-occupancy");
+	PreparePhysicsWorld(store, 4.0f);
+	const Entity box = Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Place(store, Placed{.Position = Vector3{6.0f, 0.0f, 0.0f}});
+	Index(store);
+	const std::array probes{
+		AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}},
+		AABB{Vector3{7.5f, -1.0f, -1.0f}, Vector3{8.5f, 1.0f, 1.0f}},
+	};
+	std::array<FilledColliderOccupancy, 2> answers;
+	FilledColliderOccupancyBatch(store, probes, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].WitnessAvailable);
+	CHECK(answers[0].Witness == box);
+	CHECK(answers[1].Available);
+	CHECK_FALSE(answers[1].Filled);
+	CHECK(answers[1].Complete);
+}
+
+TEST_CASE("signed distance preserves authored primitive semantics and refuses unions", "[physics][query]") {
+	Store store("query.signed-distance");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 1.0f, 1.0f}});
+	Index(store);
+	std::array<ColliderSignedDistance, 2> answers;
+	ColliderSignedDistanceBatch(store, std::array{Vector3::Zero, Vector3{3.0f, 0.0f, 0.0f}}, answers);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].DistanceMetres == Approx(-1.0f));
+	CHECK(answers[1].Available);
+	CHECK(answers[1].DistanceMetres == Approx(1.0f));
+	Place(store, Placed{.Position = Vector3{8.0f, 0.0f, 0.0f}});
+	Index(store);
+	ColliderSignedDistanceBatch(store, std::array{Vector3::Zero, Vector3{3.0f, 0.0f, 0.0f}}, answers);
+	CHECK_FALSE(answers[0].Available);
+	CHECK(answers[0].Why == ColliderSignedDistance::Reason::UnionUncertain);
+}
+
+TEST_CASE("signed distance handles rotated boxes, spheres and finite cylinders", "[physics][query]") {
+	const auto sample = [](const Placed &placed, Vector3 point) {
+		Store store("query.signed-distance-primitive");
+		PreparePhysicsWorld(store, 4.0f);
+		Place(store, placed);
+		Index(store);
+		std::array<ColliderSignedDistance, 1> answer;
+		ColliderSignedDistanceBatch(store, std::array{point}, answer);
+		return answer.front();
+	};
+	const ColliderSignedDistance rotated = sample(
+		Placed{.Extent = Vector3{2.0f, 1.0f, 1.0f}, .Rotation = CFrame::Angles(0.0f, EIGHTH_TURN, 0.0f)},
+		Vector3{1.5f, 0.0f, 0.0f}
+	);
+	CHECK(rotated.Available);
+	CHECK(rotated.DistanceMetres == Approx(std::sqrt(1.125f) - 1.0f));
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{2.0f, 0.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(0.0f)
+	);
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{2.0f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere}, Vector3{3.0f, 0.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(1.0f)
+	);
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder},
+			Vector3{0.0f, 3.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(1.0f)
+	);
+	CHECK(
+		sample(
+			Placed{.Extent = Vector3{1.0f, 2.0f, 0.0f}, .Shape = ShapeKind::Cylinder},
+			Vector3{2.0f, 3.0f, 0.0f}
+		)
+			.DistanceMetres == Approx(std::sqrt(2.0f))
+	);
+}
+
+TEST_CASE("signed distance refuses unavailable geometry evidence", "[physics][query]") {
+	const auto unavailable = [](const Placed &placed, ColliderSignedDistance::Reason reason) {
+		Store store("query.signed-distance-unavailable");
+		PreparePhysicsWorld(store, 4.0f);
+		Place(store, placed);
+		Index(store);
+		std::array<ColliderSignedDistance, 1> answer;
+		ColliderSignedDistanceBatch(store, std::array{Vector3::Zero}, answer);
+		CHECK_FALSE(answer[0].Available);
+		CHECK(answer[0].Why == reason);
+	};
+	unavailable(Placed{.Shape = ShapeKind::Hull}, ColliderSignedDistance::Reason::BakedGeometryUncertain);
+	unavailable(Placed{.Shape = ShapeKind::Capsule}, ColliderSignedDistance::Reason::UnsupportedGeometry);
+	Store unprepared("query.signed-distance-unprepared");
+	std::array<ColliderSignedDistance, 1> answer;
+	ColliderSignedDistanceBatch(unprepared, std::array{Vector3::Zero}, answer);
+	CHECK(answer[0].Why == ColliderSignedDistance::Reason::PhysicsUnprepared);
+	Store stale("query.signed-distance-stale");
+	PreparePhysicsWorld(stale, 4.0f);
+	const Entity collider = Place(stale, Placed{});
+	Index(stale);
+	stale.Set(collider, Transform{CFrame{Vector3{1.0f, 0.0f, 0.0f}}});
+	ColliderSignedDistanceBatch(stale, std::array{Vector3::Zero}, answer);
+	CHECK(answer[0].Why == ColliderSignedDistance::Reason::PhysicsStale);
+	Store overflow("query.signed-distance-overflow");
+	PreparePhysicsWorld(overflow, 4.0f);
+	for (size_t index = 0; index <= engine::physics::QUERY_CANDIDATE_LIMIT; ++index)
+		Place(overflow, Placed{});
+	Index(overflow);
+	ColliderSignedDistanceBatch(overflow, std::array{Vector3::Zero}, answer);
+	CHECK(answer[0].Why == ColliderSignedDistance::Reason::CandidateOverflow);
+}
+
+TEST_CASE("filled collider occupancy never infers volume from a collider union", "[physics][query]") {
+	Store store("query.filled-occupancy-union");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Position = Vector3{-0.5f, 0.0f, 0.0f}, .Extent = Vector3{0.5f, 1.0f, 1.0f}});
+	Place(store, Placed{.Position = Vector3{0.5f, 0.0f, 0.0f}, .Extent = Vector3{0.5f, 1.0f, 1.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::UnprovenCoverage);
+}
+
+TEST_CASE("filled collider occupancy keeps unresolved baked shapes unknown", "[physics][query]") {
+	Store store("query.filled-occupancy-baked");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}, .Shape = ShapeKind::Hull});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::BakedGeometryUncertain);
+}
+
+TEST_CASE("filled collider occupancy keeps partial analytic coverage unknown", "[physics][query]") {
+	Store store("query.filled-occupancy-partial");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{1.0f, 1.0f, 1.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{0.5f, -0.5f, -0.5f}, Vector3{1.5f, 0.5f, 0.5f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::UnprovenCoverage);
+}
+
+TEST_CASE("filled collider occupancy preserves a proof beside a partial collider", "[physics][query]") {
+	Store store("query.filled-occupancy-proof-partial");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Position = Vector3{1.5f, 0.0f, 0.0f}, .Extent = Vector3{1.0f, 1.0f, 1.0f}});
+	const Entity containing = Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].Witness == containing);
+}
+
+TEST_CASE("filled collider occupancy preserves a proof beside a second proof", "[physics][query]") {
+	Store store("query.filled-occupancy-two-proofs");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Place(store, Placed{.Extent = Vector3{3.0f, 3.0f, 3.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].WitnessAvailable);
+}
+
+TEST_CASE(
+	"filled collider occupancy preserves a proof beside unresolved baked geometry", "[physics][query]"
+) {
+	Store store("query.filled-occupancy-proof-baked");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}, .Shape = ShapeKind::Hull});
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}});
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].WitnessAvailable);
+}
+
+TEST_CASE("filled collider occupancy preserves a proof when broadphase overflows", "[physics][query]") {
+	Store store("query.filled-occupancy-proof-overflow");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{2.0f, 2.0f, 2.0f}, .Moving = false});
+	for (size_t count = 0; count < engine::physics::QUERY_CANDIDATE_LIMIT; ++count) {
+		Place(
+			store,
+			Placed{
+				.Position = Vector3{1.5f, 0.0f, 0.0f},
+				.Extent = Vector3{1.0f, 1.0f, 1.0f},
+				.Moving = false,
+			}
+		);
+	}
+	Index(store);
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{1.0f, 1.0f, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK(answers[0].Filled);
+	CHECK(answers[0].Complete);
+	CHECK(answers[0].Why == FilledColliderOccupancy::Reason::None);
+}
+
+TEST_CASE("filled collider occupancy avoids finite float square overflow", "[physics][query]") {
+	Store store("query.filled-occupancy-finite-overflow");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Extent = Vector3{1.0e38f, 0.0f, 0.0f}, .Shape = ShapeKind::Sphere});
+	Index(store);
+	const float near = 0.9e38f;
+	const float next = std::nextafter(near, std::numeric_limits<float>::max());
+	std::array<FilledColliderOccupancy, 1> answers;
+	FilledColliderOccupancyBatch(
+		store, std::array{AABB{Vector3{near, near, -1.0f}, Vector3{next, next, 1.0f}}}, answers
+	);
+	CHECK(answers[0].Available);
+	CHECK_FALSE(answers[0].Filled);
+	CHECK_FALSE(answers[0].Complete);
 }
 
 // --- raycast ------------------------------------------------------------------
@@ -519,6 +892,35 @@ TEST_CASE("an overlap box finds what it encloses", "[physics][query]") {
 	CHECK_FALSE(result.Overflowed);
 }
 
+TEST_CASE("an oriented-box overlap filters candidates outside its rotated shape", "[physics][query]") {
+	// This collider overlaps the query's conservative world AABB, but lies past
+	// the rotated box's narrow axis. Keeping it before the interior collider
+	// also proves the answer is the exact hit rather than the first candidate.
+	Store store("query.orientedexact");
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity broadphaseOnly =
+		Place(store, Placed{.Position = Vector3{1.5f, 0.0f, 0.0f}, .Extent = Vector3{0.1f, 0.1f, 0.1f}});
+	const Entity interior = Place(store, Placed{.Extent = Vector3{0.1f, 0.1f, 0.1f}});
+	const CFrame queryFrame{Vector3::Zero, CFrame::Angles(0.0f, EIGHTH_TURN, 0.0f).Rotation()};
+	const Vector3 queryExtent{2.0f, 0.5f, 0.5f};
+	Index(store);
+
+	const AABB queryBound = engine::core::OrientedBoxBounds(queryFrame, queryExtent);
+	const Transform *outsideTransform = store.Get<Transform>(broadphaseOnly);
+	const Collider *outsideCollider = store.Get<Collider>(broadphaseOnly);
+	REQUIRE(outsideTransform != nullptr);
+	REQUIRE(outsideCollider != nullptr);
+	CHECK(queryBound.Overlaps(ShapeWorldBounds(*outsideCollider, outsideTransform->Frame)));
+
+	std::array<Entity, 8> found{};
+	const QueryResult result = OverlapOrientedBox(store, queryFrame, queryExtent, LayerMask::All(), found);
+
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == interior);
+	CHECK_FALSE(result.Overflowed);
+}
+
 TEST_CASE("an overlap says when the caller's span ran out", "[physics][query]") {
 	// **Reported rather than inferred.** A span filled exactly to its length
 	// and a span that ran out look identical from the count alone, and a
@@ -905,4 +1307,62 @@ TEST_CASE("a raycast can look straight through the thing casting it", "[physics]
 	CHECK(unaffected->Owner == caster);
 
 	CHECK(Raycast(store, under, 0.25f, LayerMask::All(), Entity{})->Owner == caster);
+}
+
+TEST_CASE(
+	"placement sweep stops a fast arrival at non-queryable solids and reports incomplete input",
+	"[physics][portal-transfer]"
+) {
+	Store store("placement");
+	engine::scene::RegisterSceneComponents();
+	PreparePhysicsWorld(store);
+	const auto wall = Place(
+		store, Placed{.Position = {0, 0, -5}, .Extent = {3, 3, .1f}, .Moving = false, .CanQuery = false}
+	);
+	Index(store);
+	Collider moving;
+	moving.Extent = {.5f, .5f, .5f};
+	const auto hit = engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {});
+	REQUIRE(hit.Complete);
+	REQUIRE(hit.Hit);
+	REQUIRE(hit.Owner == wall);
+	CHECK(hit.Fraction == Approx(.44f).margin(.002f));
+	const auto ignored = engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {}, wall);
+	REQUIRE(ignored.Complete);
+	CHECK_FALSE(ignored.Hit);
+	moving.Mask = LayerMask::None();
+	CHECK_FALSE(engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {}).Hit);
+	moving.Mask = LayerMask::All();
+	store.GetMutable<Collider>(wall)->Trigger = true;
+	CHECK_FALSE(engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {}).Hit);
+	Store absent("absent");
+	CHECK_FALSE(engine::physics::SweepPlacement(absent, moving, CFrame{}, {}, {}).Complete);
+	CHECK_FALSE(
+		engine::physics::SweepPlacement(
+			store, moving, CFrame{}, {std::numeric_limits<float>::quiet_NaN(), 0, 0}, {}
+		)
+			.Complete
+	);
+}
+
+TEST_CASE(
+	"placement sweep carries a touching body along a floor and still finds an inward wall",
+	"[physics][portal-transfer]"
+) {
+	Store store("placement-floor");
+	engine::scene::RegisterSceneComponents();
+	PreparePhysicsWorld(store);
+	Place(store, Placed{.Position = {0, -.5f, -5}, .Extent = {5, .5f, 10}, .Moving = false});
+	const auto wall = Place(store, Placed{.Position = {0, 2, -5}, .Extent = {3, 2, .1f}, .Moving = false});
+	Index(store);
+	Collider moving;
+	moving.Extent = {.5f, .5f, .5f};
+	const auto hit = engine::physics::SweepPlacement(store, moving, CFrame({0, .5f, 0}), {0, 0, -10}, {});
+	REQUIRE(hit.Complete);
+	REQUIRE(hit.Hit);
+	CHECK(hit.Owner == wall);
+	CHECK(hit.Fraction == Approx(.44f).margin(.002f));
+	const auto down = engine::physics::SweepPlacement(store, moving, CFrame({0, .5f, 0}), {0, -1, 0}, {});
+	REQUIRE(down.Hit);
+	CHECK(down.Fraction == Approx(0).margin(.002f));
 }

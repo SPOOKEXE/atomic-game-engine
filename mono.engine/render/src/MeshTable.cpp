@@ -2,14 +2,126 @@
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/render/MeshTable.hpp>
 
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace engine::render {
+
+	namespace {
+		uint64_t MeshKey(const core::Name &name, core::Name owner) {
+			return (uint64_t(owner.Id()) << 32) | name.Id();
+		}
+
+		size_t PackedValueBytes(PackedMeshFormat format, size_t values) {
+			switch (format) {
+			case PackedMeshFormat::Float32:
+				return values * 4;
+			case PackedMeshFormat::Float16:
+			case PackedMeshFormat::Signed16:
+			case PackedMeshFormat::Unsigned16:
+				return values * 2;
+			case PackedMeshFormat::Float8E4M3FN:
+			case PackedMeshFormat::Signed8:
+			case PackedMeshFormat::Unsigned8:
+				return values;
+			case PackedMeshFormat::Signed4:
+			case PackedMeshFormat::Unsigned4:
+				return (values + 1) / 2;
+			case PackedMeshFormat::Boolean:
+				return (values + 7) / 8;
+			}
+			return 0;
+		}
+
+		constexpr uint32_t CLUSTER_TRIANGLES = 64;
+
+		float TriangleArea(const assets::MeshData &mesh, uint32_t first) {
+			const auto &a = mesh.Vertices[mesh.Indices[first]].Position;
+			const auto &b = mesh.Vertices[mesh.Indices[first + 1]].Position;
+			const auto &c = mesh.Vertices[mesh.Indices[first + 2]].Position;
+			const float abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+			const float acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+			const float x = aby * acz - abz * acy;
+			const float y = abz * acx - abx * acz;
+			const float z = abx * acy - aby * acx;
+			return 0.5f * std::sqrt(x * x + y * y + z * z);
+		}
+
+		void AddClusters(MeshEntry &entry, const assets::MeshData &mesh) {
+			const auto addRange = [&](uint32_t first, uint32_t count, uint32_t material) {
+				for (uint32_t offset = 0; offset < count; offset += CLUSTER_TRIANGLES * 3u) {
+					const uint32_t indices = std::min(count - offset, CLUSTER_TRIANGLES * 3u);
+					const float *const firstPoint = mesh.Vertices[mesh.Indices[first + offset]].Position;
+					core::Vector3 minimum{firstPoint[0], firstPoint[1], firstPoint[2]};
+					core::Vector3 maximum = minimum;
+					float area = 0.0f;
+					for (uint32_t index = first + offset; index < first + offset + indices; ++index) {
+						const float *const source = mesh.Vertices[mesh.Indices[index]].Position;
+						const core::Vector3 point{source[0], source[1], source[2]};
+						minimum.X = std::min(minimum.X, point.X);
+						minimum.Y = std::min(minimum.Y, point.Y);
+						minimum.Z = std::min(minimum.Z, point.Z);
+						maximum.X = std::max(maximum.X, point.X);
+						maximum.Y = std::max(maximum.Y, point.Y);
+						maximum.Z = std::max(maximum.Z, point.Z);
+					}
+					for (uint32_t index = first + offset; index < first + offset + indices; index += 3) {
+						area += TriangleArea(mesh, index);
+					}
+					entry.Clusters.push_back({
+						{entry.Whole.FirstIndex + first + offset, indices, entry.Whole.VertexOffset},
+						(minimum + maximum) * 0.5f,
+						(maximum - minimum) * 0.5f,
+						area,
+						material,
+					});
+				}
+			};
+			if (mesh.Submeshes.empty()) {
+				addRange(0, static_cast<uint32_t>(mesh.Indices.size()), std::numeric_limits<uint32_t>::max());
+				return;
+			}
+			for (uint32_t material = 0; material < mesh.Submeshes.size(); material++) {
+				const assets::Submesh &run = mesh.Submeshes[material];
+				addRange(run.FirstIndex, run.IndexCount, material);
+			}
+		}
+	}
+
+	bool PackedMeshData::IsValid() const {
+		if (VertexCount == 0 || Indices.empty() || Indices.size() % 3 != 0 || Vertices.empty() ||
+			Vertices.size() % 4 != 0)
+			return false;
+		size_t previousEnd = 0;
+		for (size_t index = 0; index < Streams.size(); ++index) {
+			const PackedMeshStream &stream = Streams[index];
+			const uint32_t components = index == 2 ? 2u : 3u;
+			if (static_cast<uint32_t>(stream.Format) > static_cast<uint32_t>(PackedMeshFormat::Boolean) ||
+				stream.Components != components || stream.ValueCount != VertexCount * components ||
+				stream.ByteOffset % 4 != 0 ||
+				stream.ByteCount != PackedValueBytes(stream.Format, stream.ValueCount) ||
+				static_cast<size_t>(stream.ByteOffset) + stream.ByteCount > Vertices.size() ||
+				!std::isfinite(stream.Minimum) || !std::isfinite(stream.Maximum) ||
+				stream.Maximum < stream.Minimum)
+				return false;
+			if (stream.ByteOffset < previousEnd) return false;
+			previousEnd = static_cast<size_t>(stream.ByteOffset) + stream.ByteCount;
+		}
+		for (const uint32_t index : Indices)
+			if (index >= VertexCount) return false;
+		for (const assets::Submesh &submesh : Submeshes)
+			if (submesh.IndexCount % 3 != 0 ||
+				static_cast<size_t>(submesh.FirstIndex) + submesh.IndexCount > Indices.size())
+				return false;
+		return std::isfinite(Minimum.X) && std::isfinite(Minimum.Y) && std::isfinite(Minimum.Z) &&
+			   std::isfinite(Maximum.X) && std::isfinite(Maximum.Y) && std::isfinite(Maximum.Z);
+	}
 
 	MeshTable::~MeshTable() {
 		Shutdown();
@@ -35,7 +147,8 @@ namespace engine::render {
 		}
 
 		// Resolve the fallback once; the draw loop never hashes unknown names.
-		const auto found = Entries.find(core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube)).Id());
+		const auto found =
+			Entries.find(MeshKey(core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube)), {}));
 		if (found == Entries.end()) {
 			return false;
 		}
@@ -51,20 +164,27 @@ namespace engine::render {
 			if (IndexBuffer != nullptr) {
 				gpu::ReleaseBuffer(Device, IndexBuffer);
 			}
+			if (PackedVertexBuffer != nullptr) gpu::ReleaseBuffer(Device, PackedVertexBuffer);
 		}
 
 		VertexBuffer = nullptr;
 		IndexBuffer = nullptr;
+		PackedVertexBuffer = nullptr;
 		VertexCapacity = 0;
 		IndexCapacity = 0;
+		PackedCapacity = 0;
+		PackedUploadBytes = 0;
 		Uploads = 0;
 		Generation = 0;
 		FreeVertices.clear();
 		FreeIndices.clear();
+		FreePackedBytes.clear();
 		DirtyVertices.clear();
 		DirtyIndices.clear();
+		DirtyPackedBytes.clear();
 		HostVertices.clear();
 		HostIndices.clear();
+		HostPackedVertices.clear();
 		Entries.clear();
 		Fallback = MeshEntry{};
 		Device = nullptr;
@@ -197,7 +317,7 @@ namespace engine::render {
 		return total;
 	}
 
-	bool MeshTable::Add(const core::Name &name, const assets::MeshData &mesh) {
+	bool MeshTable::Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner) {
 		if (!name.IsValid() || !mesh.IsValid()) {
 			return false;
 		}
@@ -207,13 +327,21 @@ namespace engine::render {
 		// back rather than growing the table. It cannot take it back *this*
 		// frame - `Claim` refuses a run younger than `DEFERRED_FRAMES` - which
 		// is what keeps the range a frame in flight is drawing from intact.
-		if (const auto outgoing = Entries.find(name.Id()); outgoing != Entries.end()) {
-			Release(
-				FreeVertices,
-				static_cast<size_t>(outgoing->second.Whole.VertexOffset),
-				outgoing->second.VertexCount,
-				Generation
-			);
+		if (const auto outgoing = Entries.find(MeshKey(name, owner)); outgoing != Entries.end()) {
+			if (outgoing->second.Packed)
+				Release(
+					FreePackedBytes,
+					outgoing->second.PackedByteOffset,
+					outgoing->second.PackedByteCount,
+					Generation
+				);
+			else
+				Release(
+					FreeVertices,
+					static_cast<size_t>(outgoing->second.Whole.VertexOffset),
+					outgoing->second.VertexCount,
+					Generation
+				);
 			Release(
 				FreeIndices, outgoing->second.Whole.FirstIndex, outgoing->second.Whole.IndexCount, Generation
 			);
@@ -282,6 +410,7 @@ namespace engine::render {
 				submesh.BaseColour[3],
 			});
 		}
+		AddClusters(entry, mesh);
 
 		std::copy(
 			mesh.Vertices.begin(),
@@ -295,7 +424,87 @@ namespace engine::render {
 		MarkDirty(DirtyVertices, vertexAt, mesh.Vertices.size());
 		MarkDirty(DirtyIndices, indexAt, mesh.Indices.size());
 
-		Entries[name.Id()] = std::move(entry);
+		Entries[MeshKey(name, owner)] = std::move(entry);
+		Dirty = true;
+		return true;
+	}
+
+	bool MeshTable::AddPacked(const core::Name &name, const PackedMeshData &mesh, core::Name owner) {
+		if (!name.IsValid() || !mesh.IsValid()) return false;
+
+		if (const auto outgoing = Entries.find(MeshKey(name, owner)); outgoing != Entries.end()) {
+			if (outgoing->second.Packed)
+				Release(
+					FreePackedBytes,
+					outgoing->second.PackedByteOffset,
+					outgoing->second.PackedByteCount,
+					Generation
+				);
+			else
+				Release(
+					FreeVertices,
+					static_cast<size_t>(outgoing->second.Whole.VertexOffset),
+					outgoing->second.VertexCount,
+					Generation
+				);
+			Release(
+				FreeIndices, outgoing->second.Whole.FirstIndex, outgoing->second.Whole.IndexCount, Generation
+			);
+		}
+
+		size_t packedAt = Claim(FreePackedBytes, mesh.Vertices.size(), Generation);
+		size_t indexAt = Claim(FreeIndices, mesh.Indices.size(), Generation);
+		const bool growPacked = packedAt == NOWHERE;
+		const bool growIndices = indexAt == NOWHERE;
+		constexpr size_t maximumPackedBytes = MAXIMUM_VERTICES * sizeof(assets::MeshVertex);
+		if ((growPacked && HostPackedVertices.size() + mesh.Vertices.size() > maximumPackedBytes) ||
+			(growIndices && HostIndices.size() + mesh.Indices.size() > MAXIMUM_INDICES)) {
+			if (!growPacked) Release(FreePackedBytes, packedAt, mesh.Vertices.size(), Generation);
+			if (!growIndices) Release(FreeIndices, indexAt, mesh.Indices.size(), Generation);
+			return false;
+		}
+		if (growPacked) {
+			packedAt = HostPackedVertices.size();
+			HostPackedVertices.resize(packedAt + mesh.Vertices.size());
+		}
+		if (growIndices) {
+			indexAt = HostIndices.size();
+			HostIndices.resize(indexAt + mesh.Indices.size());
+		}
+
+		MeshEntry entry;
+		entry.Centre = (mesh.Minimum + mesh.Maximum) * 0.5f;
+		entry.Extent = (mesh.Maximum - mesh.Minimum) * 0.5f;
+		entry.Whole.FirstIndex = static_cast<uint32_t>(indexAt);
+		entry.Whole.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
+		entry.Whole.VertexOffset = 0;
+		entry.VertexCount = mesh.VertexCount;
+		entry.Packed = true;
+		entry.PackedByteOffset = static_cast<uint32_t>(packedAt);
+		entry.PackedByteCount = static_cast<uint32_t>(mesh.Vertices.size());
+		entry.PackedStreams = mesh.Streams;
+		for (PackedMeshStream &stream : entry.PackedStreams)
+			stream.ByteOffset += entry.PackedByteOffset;
+
+		for (const assets::Submesh &submesh : mesh.Submeshes) {
+			entry.Runs.push_back({
+				entry.Whole.FirstIndex + submesh.FirstIndex,
+				submesh.IndexCount,
+				0,
+			});
+			entry.Textures.push_back(submesh.Texture.empty() ? core::Name() : core::Name(submesh.Texture));
+			entry.Colours.push_back({
+				submesh.BaseColour[0],
+				submesh.BaseColour[1],
+				submesh.BaseColour[2],
+				submesh.BaseColour[3],
+			});
+		}
+		std::copy(mesh.Vertices.begin(), mesh.Vertices.end(), HostPackedVertices.begin() + packedAt);
+		std::copy(mesh.Indices.begin(), mesh.Indices.end(), HostIndices.begin() + indexAt);
+		MarkDirty(DirtyPackedBytes, packedAt, mesh.Vertices.size());
+		MarkDirty(DirtyIndices, indexAt, mesh.Indices.size());
+		Entries[MeshKey(name, owner)] = std::move(entry);
 		Dirty = true;
 		return true;
 	}
@@ -306,15 +515,29 @@ namespace engine::render {
 		// counter that only moved when something was sent would leave a table
 		// nobody is writing to unable to ever reuse anything.
 		Generation++;
-
-		if (!Dirty) {
-			return true;
+		if (!Dirty) return true;
+		if (Device == nullptr) return false;
+		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
+		if (command == nullptr) {
+			ENGINE_ERROR("mesh table: acquire command buffer: {}", SDL_GetError());
+			return false;
 		}
-		return Upload();
+		if (!Upload(command)) {
+			SDL_CancelGPUCommandBuffer(command);
+			return false;
+		}
+		SDL_SubmitGPUCommandBuffer(command);
+		return true;
 	}
 
-	bool MeshTable::Upload() {
-		if (Device == nullptr || HostVertices.empty() || HostIndices.empty()) {
+	bool MeshTable::Record(SDL_GPUCommandBuffer *command) {
+		Generation++;
+		if (!Dirty) return true;
+		return Upload(command);
+	}
+
+	bool MeshTable::Upload(SDL_GPUCommandBuffer *command) {
+		if (Device == nullptr || command == nullptr || HostVertices.empty() || HostIndices.empty()) {
 			return false;
 		}
 
@@ -324,6 +547,7 @@ namespace engine::render {
 		// are empty, so the tail alone would leave the meshes already registered
 		// pointing at nothing.
 		bool recreated = false;
+		bool packedRecreated = false;
 		if (VertexBuffer == nullptr || HostVertices.size() > VertexCapacity ||
 			HostIndices.size() > IndexCapacity) {
 			size_t vertices = VertexCapacity == 0 ? HostVertices.size() : VertexCapacity;
@@ -343,12 +567,14 @@ namespace engine::render {
 			}
 
 			SDL_GPUBufferCreateInfo vertexInfo{};
-			vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+			// Tessellation reads the canonical resident stream on the device. The
+			// CPU copy remains upload-only and never receives generated geometry.
+			vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 			vertexInfo.size = static_cast<uint32_t>(vertices * sizeof(assets::MeshVertex));
 			VertexBuffer = gpu::CreateBuffer(Device, &vertexInfo);
 
 			SDL_GPUBufferCreateInfo indexInfo{};
-			indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+			indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 			indexInfo.size = static_cast<uint32_t>(indices * sizeof(uint32_t));
 			IndexBuffer = gpu::CreateBuffer(Device, &indexInfo);
 
@@ -362,6 +588,24 @@ namespace engine::render {
 			VertexCapacity = vertices;
 			IndexCapacity = indices;
 			recreated = true;
+		}
+		if (!HostPackedVertices.empty() &&
+			(PackedVertexBuffer == nullptr || HostPackedVertices.size() > PackedCapacity)) {
+			size_t bytes = PackedCapacity == 0 ? HostPackedVertices.size() : PackedCapacity;
+			while (bytes < HostPackedVertices.size())
+				bytes *= 2;
+			if (PackedVertexBuffer != nullptr) gpu::ReleaseBuffer(Device, PackedVertexBuffer);
+			SDL_GPUBufferCreateInfo packedInfo{};
+			packedInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			packedInfo.size = static_cast<uint32_t>(bytes);
+			PackedVertexBuffer = gpu::CreateBuffer(Device, &packedInfo);
+			if (PackedVertexBuffer == nullptr) {
+				PackedCapacity = 0;
+				return false;
+			}
+			PackedCapacity = bytes;
+			core::Metrics::SetGauge("render.mesh.packed_resident_bytes", static_cast<double>(bytes));
+			packedRecreated = true;
 		}
 
 		// **Only the runs `Add` wrote since the last upload.** Everything else
@@ -384,10 +628,12 @@ namespace engine::render {
 			DirtyVertices.assign(1, Span{0, HostVertices.size()});
 			DirtyIndices.assign(1, Span{0, HostIndices.size()});
 		}
+		if (packedRecreated) DirtyPackedBytes.assign(1, Span{0, HostPackedVertices.size()});
 
 		const size_t vertexCount = Total(DirtyVertices);
 		const size_t indexCount = Total(DirtyIndices);
-		if (vertexCount == 0 && indexCount == 0) {
+		const size_t packedBytes = Total(DirtyPackedBytes);
+		if (vertexCount == 0 && indexCount == 0 && packedBytes == 0) {
 			Dirty = false;
 			return true;
 		}
@@ -397,7 +643,7 @@ namespace engine::render {
 
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-		transferInfo.size = static_cast<uint32_t>(vertexBytes + indexBytes);
+		transferInfo.size = static_cast<uint32_t>(vertexBytes + indexBytes + packedBytes);
 
 		SDL_GPUTransferBuffer *transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 		if (transfer == nullptr) {
@@ -419,10 +665,18 @@ namespace engine::render {
 			std::memcpy(mapped + written, HostIndices.data() + span.Offset, bytes);
 			written += bytes;
 		}
+		for (const Span &span : DirtyPackedBytes) {
+			std::memcpy(mapped + written, HostPackedVertices.data() + span.Offset, span.Count);
+			written += span.Count;
+		}
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
-		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+		if (copy == nullptr) {
+			ENGINE_ERROR("mesh table: begin copy pass: {}", SDL_GetError());
+			gpu::ReleaseTransferBuffer(Device, transfer);
+			return false;
+		}
 
 		// **Never cycled, which is the price of writing part of the buffer.**
 		// Cycling hands back a fresh allocation whose contents are undefined, so
@@ -461,20 +715,31 @@ namespace engine::render {
 			read += bytes;
 		}
 
+		for (const Span &span : DirtyPackedBytes) {
+			SDL_GPUTransferBufferLocation source{transfer, static_cast<uint32_t>(read)};
+			SDL_GPUBufferRegion destination{
+				PackedVertexBuffer, static_cast<uint32_t>(span.Offset), static_cast<uint32_t>(span.Count)
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+			read += span.Count;
+		}
+
 		SDL_EndGPUCopyPass(copy);
-		SDL_SubmitGPUCommandBuffer(command);
 		gpu::ReleaseTransferBuffer(Device, transfer);
 
 		DirtyVertices.clear();
 		DirtyIndices.clear();
+		DirtyPackedBytes.clear();
+		PackedUploadBytes += packedBytes;
+		core::Metrics::Count("render.mesh.packed_upload_bytes", packedBytes);
 		Uploads++;
 		Dirty = false;
 		return true;
 	}
 
-	const MeshEntry &MeshTable::Resolve(const core::Name &name) const {
+	const MeshEntry &MeshTable::Resolve(const core::Name &name, core::Name owner) const {
 		if (name.IsValid()) {
-			const auto found = Entries.find(name.Id());
+			const auto found = Entries.find(MeshKey(name, owner));
 			if (found != Entries.end()) {
 				return found->second;
 			}
@@ -482,7 +747,84 @@ namespace engine::render {
 		return Fallback;
 	}
 
-	bool MeshTable::Has(const core::Name &name) const {
-		return name.IsValid() && Entries.find(name.Id()) != Entries.end();
+	bool MeshTable::Has(const core::Name &name, core::Name owner) const {
+		return name.IsValid() && Entries.find(MeshKey(name, owner)) != Entries.end();
 	}
+
+	MeshCopyStatus MeshTable::Copy(
+		const core::Name &name, assets::MeshData &out, size_t vertexLimit, size_t indexLimit, core::Name owner
+	) const {
+		if (!name.IsValid()) return MeshCopyStatus::Missing;
+		const auto found = Entries.find(MeshKey(name, owner));
+		if (found == Entries.end()) return MeshCopyStatus::Missing;
+		const MeshEntry &entry = found->second;
+		if (entry.Packed) return MeshCopyStatus::Packed;
+		if (entry.VertexCount > vertexLimit || entry.Whole.IndexCount > indexLimit)
+			return MeshCopyStatus::OverLimit;
+		if (entry.Whole.VertexOffset < 0 ||
+			static_cast<size_t>(entry.Whole.VertexOffset) + entry.VertexCount > HostVertices.size() ||
+			static_cast<size_t>(entry.Whole.FirstIndex) + entry.Whole.IndexCount > HostIndices.size() ||
+			entry.Runs.size() != entry.Textures.size() || entry.Runs.size() != entry.Colours.size())
+			return MeshCopyStatus::Invalid;
+		assets::MeshData copied;
+		const size_t vertexAt = static_cast<size_t>(entry.Whole.VertexOffset);
+		const size_t indexAt = entry.Whole.FirstIndex;
+		copied.Vertices.assign(
+			HostVertices.begin() + static_cast<ptrdiff_t>(vertexAt),
+			HostVertices.begin() + static_cast<ptrdiff_t>(vertexAt + entry.VertexCount)
+		);
+		copied.Indices.assign(
+			HostIndices.begin() + static_cast<ptrdiff_t>(indexAt),
+			HostIndices.begin() + static_cast<ptrdiff_t>(indexAt + entry.Whole.IndexCount)
+		);
+		copied.JointCount = entry.JointCount;
+		for (size_t index = 0; index < entry.Runs.size(); ++index) {
+			const MeshRange &run = entry.Runs[index];
+			if (run.FirstIndex < indexAt || run.FirstIndex - indexAt > entry.Whole.IndexCount ||
+				run.IndexCount > entry.Whole.IndexCount - (run.FirstIndex - indexAt))
+				return MeshCopyStatus::Invalid;
+			assets::Submesh submesh;
+			submesh.FirstIndex = run.FirstIndex - entry.Whole.FirstIndex;
+			submesh.IndexCount = run.IndexCount;
+			submesh.Texture = std::string(entry.Textures[index].Text());
+			std::copy(entry.Colours[index].begin(), entry.Colours[index].end(), submesh.BaseColour);
+			copied.Submeshes.push_back(std::move(submesh));
+		}
+		copied.ComputeBounds();
+		if (!copied.IsValid()) return MeshCopyStatus::Invalid;
+		out = std::move(copied);
+		return MeshCopyStatus::Copied;
+	}
+	size_t MeshTable::DropOwner(core::Name owner) {
+		if (!owner.IsValid()) return 0;
+		return std::erase_if(Entries, [&](const auto &pair) {
+			if (uint32_t(pair.first >> 32) != owner.Id()) return false;
+			const MeshEntry &entry = pair.second;
+			if (entry.Packed)
+				Release(FreePackedBytes, entry.PackedByteOffset, entry.PackedByteCount, Generation);
+			else
+				Release(
+					FreeVertices, static_cast<size_t>(entry.Whole.VertexOffset), entry.VertexCount, Generation
+				);
+			Release(FreeIndices, entry.Whole.FirstIndex, entry.Whole.IndexCount, Generation);
+			return true;
+		});
+	}
+
+	bool MeshTable::Drop(const core::Name &name, core::Name owner) {
+		if (!name.IsValid()) return false;
+		const auto found = Entries.find(MeshKey(name, owner));
+		if (found == Entries.end()) return false;
+		const MeshEntry &entry = found->second;
+		if (entry.Packed)
+			Release(FreePackedBytes, entry.PackedByteOffset, entry.PackedByteCount, Generation);
+		else
+			Release(
+				FreeVertices, static_cast<size_t>(entry.Whole.VertexOffset), entry.VertexCount, Generation
+			);
+		Release(FreeIndices, entry.Whole.FirstIndex, entry.Whole.IndexCount, Generation);
+		Entries.erase(found);
+		return true;
+	}
+
 }

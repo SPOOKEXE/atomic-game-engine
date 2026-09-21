@@ -1,13 +1,10 @@
-// Light carried through portal seams, measured on the scenes authored for it.
+// Portal-light authoring and seam-field eligibility, measured on shipped scenes.
 //
-// **The transport under test is `engine::render::CollectLights`' seam-copy pass**, and
-// the fixtures are the two shipped scenes rather than hand-built stores, so
-// what the GPU capture script points a camera at and what this suite asserts
-// are one authored arrangement. What a headless test can decide is the light
-// list the renderer is handed: that a lamp standing in a pane gains a copy on
-// the far mouth, that two lamps either side each cross into the other room,
-// and that `Portal.Enabled = false` withdraws the copies. What only a capture
-// can decide - the lit pixels - is `scripts/demos/capture-portal-lighting.sh`.
+// `CollectLights` supplies only authored local lights. The renderer captures
+// portal transport into bounded seam fields, avoiding a wide lamp becoming a
+// point light at every same-world mouth. The GPU portal-radiance fixture checks
+// the transported pixels; this suite keeps the authored input and portal-view
+// eligibility tied to those same scenes.
 
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -22,8 +19,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <client/Scene.hpp>
-#include <cmath>
-#include <limits>
 #include <vector>
 
 TEST_SUITE_ID("client.scene.portallighting")
@@ -37,11 +32,6 @@ using engine::ecs::Entity;
 using engine::render::SceneLight;
 
 namespace {
-	// The two scenes' shared layout, restated so a drifted constant fails here
-	// rather than passing against itself.
-	constexpr float GAP = 120.0f;
-	constexpr float FAR_PANE_X = GAP - 10.0f;
-
 	// A world built from one of the portal lighting scenes, ready to collect.
 	struct LitScene {
 		engine::ecs::Store World{"portal-lighting"};
@@ -83,97 +73,43 @@ namespace {
 		}
 	};
 
-	// The light nearest `at`, so an assertion names a place rather than an
-	// index - the collect order is authored-then-copies today, and nothing
-	// about the transport promises it.
-	const SceneLight &NearestTo(const std::vector<SceneLight> &lights, const Vector3 &at) {
-		REQUIRE(!lights.empty());
-		const SceneLight *found = &lights.front();
-		float nearest = std::numeric_limits<float>::max();
-		for (const SceneLight &light : lights) {
-			const Vector3 offset = light.Position - at;
-			const float distance = offset.Dot(offset);
-			if (distance < nearest) {
-				nearest = distance;
-				found = &light;
-			}
-		}
-		return *found;
-	}
 }
 
-TEST_CASE("a lamp in a pane is copied onto the far mouth", "[client][portal][lighting]") {
+TEST_CASE("a lamp in a portal scene stays one authored local light", "[client][portal][lighting]") {
 	LitScene scene("PortalLightOut.luau");
 
 	const auto lights = scene.Collect();
-
-	// One authored lamp, one copy - and only one: the lamp is 110 studs from
-	// the far pane's rectangle, so the return seam makes nothing of it.
-	REQUIRE(lights.size() == 2);
-
-	const SceneLight authored = NearestTo(lights, Vector3{0.0f, 5.0f, 0.0f});
+	REQUIRE(lights.size() == 1);
+	const SceneLight &authored = lights.front();
 	CHECK(authored.Position.X == Approx(0.0f).margin(0.01f));
 	CHECK(authored.Position.Y == Approx(5.0f).margin(0.01f));
 	CHECK(authored.Position.Z == Approx(0.0f).margin(0.01f));
-
-	// The copy lands on the far pane's centre, because the map carries the near
-	// plane onto the far one and the lamp stands in the near plane. The margin
-	// is the pane's own thickness: a seam sits on the pane's *face*, so a lamp
-	// at the slab's centre is a face's depth behind it and its copy the same
-	// depth beyond the far face.
-	const SceneLight copy = NearestTo(lights, Vector3{FAR_PANE_X, 5.0f, 0.0f});
-	CHECK(copy.Position.X == Approx(FAR_PANE_X).margin(0.25f));
-	CHECK(copy.Position.Y == Approx(5.0f).margin(0.05f));
-	CHECK(copy.Position.Z == Approx(0.0f).margin(0.05f));
-
-	// The lamp itself, not a variation of it: same colour, and a range the
-	// unscaled seam maps through unchanged.
-	CHECK(copy.Colour.R == Approx(authored.Colour.R));
-	CHECK(copy.Colour.G == Approx(authored.Colour.G));
-	CHECK(copy.Colour.B == Approx(authored.Colour.B));
-	CHECK(copy.Range == Approx(authored.Range));
-	CHECK(copy.Range == Approx(25.0f));
+	CHECK(authored.Range == Approx(25.0f));
 }
 
-TEST_CASE("two lamps either side of a hole each cross into the other room", "[client][portal][lighting]") {
+TEST_CASE("portal scenes retain their authored local light set", "[client][portal][lighting]") {
 	LitScene scene("PortalLightMix.luau");
 
 	const auto lights = scene.Collect();
-
-	// Red and green authored, and one copy each through its own seam.
-	REQUIRE(lights.size() == 4);
-
-	// The authored pair, where the scene puts them: red 4 in front of the near
-	// pane, green 4 in front of the far one.
-	const SceneLight red = NearestTo(lights, Vector3{0.0f, 6.0f, -4.0f});
+	REQUIRE(lights.size() == 2);
+	const SceneLight &red = lights[0];
+	const SceneLight &green = lights[1];
+	CHECK(red.Position.X == Approx(0.0f).margin(0.05f));
+	CHECK(red.Position.Z == Approx(-4.0f).margin(0.05f));
 	CHECK(red.Colour.R > red.Colour.G * 2.0f);
-
-	const SceneLight green = NearestTo(lights, Vector3{GAP - 6.0f, 6.0f, 0.0f});
+	CHECK(green.Position.X > 100.0f);
 	CHECK(green.Colour.G > green.Colour.R * 2.0f);
+}
 
-	// The transported pair: each lands the same distance *behind* the far
-	// mouth, shining into the room the hole shows. Green in the near room is
-	// the light that can only have crossed - the scene authors no green lamp
-	// on that side - and red in the far room is its mirror.
-	// Margins are the pane's thickness: seams sit on the panes' faces, so each
-	// copy is a face's depth off the slab-centre arithmetic these constants use.
-	const SceneLight greenCopy = NearestTo(lights, Vector3{0.0f, 6.0f, 4.0f});
-	CHECK(greenCopy.Colour.G > greenCopy.Colour.R * 2.0f);
-	CHECK(greenCopy.Position.Z == Approx(4.0f).margin(0.25f));
-	CHECK(greenCopy.Position.X == Approx(0.0f).margin(0.05f));
+TEST_CASE("tunnels local lights stay below the device cap", "[client][portal][lighting]") {
+	LitScene scene("Tunnels.luau");
+	const auto lights = scene.Collect();
 
-	const SceneLight redCopy = NearestTo(lights, Vector3{FAR_PANE_X - 4.0f, 6.0f, 0.0f});
-	CHECK(redCopy.Colour.R > redCopy.Colour.G * 2.0f);
-	CHECK(redCopy.Position.X == Approx(FAR_PANE_X - 4.0f).margin(0.25f));
-	CHECK(redCopy.Position.Z == Approx(0.0f).margin(0.05f));
-
-	// Both rooms hold both colours: the mix the capture script measures on the
-	// floor exists in the list the renderer is handed.
-	const auto inNearRoom = [](const SceneLight &light) { return std::abs(light.Position.X) < 40.0f; };
-	CHECK(inNearRoom(red));
-	CHECK(inNearRoom(greenCopy));
-	CHECK(!inNearRoom(green));
-	CHECK(!inNearRoom(redCopy));
+	// Two plain lamps, six fixed tunnel lamps and two lanterns make ten. Portal
+	// transport is a seam field, so it cannot clone those wide plain lamps into
+	// the 16-slot point-light set as the camera moves around the spawn.
+	CHECK(lights.size() == 10);
+	CHECK(lights.size() < engine::render::MAX_SCENE_LIGHTS);
 }
 
 TEST_CASE("a disabled portal withdraws its light-field capture views", "[client][portal][lighting]") {
@@ -192,24 +128,4 @@ TEST_CASE("a disabled portal withdraws its light-field capture views", "[client]
 		scene.World.GetMutable<engine::scene::Portal>(mouth)->Enabled = false;
 	}
 	CHECK(client::CollectPortalViews(scene.World, views) == 0);
-}
-
-TEST_CASE("a disabled portal carries no light", "[client][portal][lighting]") {
-	LitScene scene("PortalLightMix.luau");
-	REQUIRE(scene.Collect().size() == 4);
-
-	// Turning the mouths off withdraws the seams, so only the authored lamps
-	// remain - the switch the roadmap's capture-path item relies on.
-	for (const Entity mouth : scene.Portals()) {
-		scene.World.GetMutable<engine::scene::Portal>(mouth)->Enabled = false;
-	}
-
-	const auto lights = scene.Collect();
-	REQUIRE(lights.size() == 2);
-	for (const SceneLight &light : lights) {
-		// What is left is authored: one in each room, none on a pane's far side.
-		const bool nearRoom = std::abs(light.Position.X) < 40.0f;
-		const bool farRoom = std::abs(light.Position.X - GAP) < 40.0f;
-		CHECK((nearRoom || farRoom));
-	}
 }

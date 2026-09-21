@@ -4,8 +4,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <vector>
 
 TEST_SUITE_ID("engine.collision.trianglemesh")
@@ -232,4 +234,72 @@ TEST_CASE("the closest point on a triangle with no area is a corner", "[triangle
 	const Vector3 closest = ClosestPointOnTriangle(sliver, Vector3{0.5f, 1.0f, 0.0f});
 	CHECK(closest.Y == Approx(0.0f));
 	CHECK(closest.Z == Approx(0.0f));
+}
+
+TEST_CASE("median hierarchy preserves the canonical full-sort layout", "[trianglemesh]") {
+	for (const uint32_t side : {1u, 2u, 3u, 7u, 16u, 64u}) {
+		const auto ground = Ground(side);
+		if (side == 64) {
+			CHECK(ground.Hierarchy.size() == 4095);
+			CHECK(ground.Hierarchy.capacity() == 4095);
+		}
+		for (const bool folded : {false, true}) {
+			CAPTURE(side, folded);
+			auto vertices = ground.Vertices;
+			if (folded) {
+				for (size_t index = 0; index < vertices.size(); ++index) {
+					vertices[index].Y = float((index * 7919) % 37) / 8;
+					vertices[index].X = float(index % 7);
+				}
+			}
+			const auto mesh = BuildTriangleMesh(vertices, ground.Indices);
+			std::vector<uint32_t> sorted(mesh.TriangleCount());
+			std::iota(sorted.begin(), sorted.end(), 0u);
+			uint32_t nextNode = 0;
+			const auto visit = [&](auto &&self, size_t begin, size_t end) -> void {
+				REQUIRE(nextNode < mesh.Hierarchy.size());
+				const auto &node = mesh.Hierarchy[nextNode++];
+				auto bounds = mesh.TriangleBounds[sorted[begin]];
+				const auto first = (bounds.Minimum + bounds.Maximum) * .5f;
+				AABB centres{first, first};
+				for (size_t index = begin + 1; index < end; ++index) {
+					const auto &triangle = mesh.TriangleBounds[sorted[index]];
+					bounds = bounds.Union(triangle);
+					const auto centre = (triangle.Minimum + triangle.Maximum) * .5f;
+					centres = centres.Union({centre, centre});
+				}
+				CHECK(node.Bounds.Minimum == bounds.Minimum);
+				CHECK(node.Bounds.Maximum == bounds.Maximum);
+				if (end - begin <= 4) {
+					CHECK(node.First == begin);
+					CHECK(node.Count == end - begin);
+					for (size_t index = begin; index < end; ++index)
+						CHECK(mesh.HierarchyTriangles[index] == sorted[index]);
+					return;
+				}
+				CHECK(node.Count == 0);
+				const auto extent = centres.Size();
+				const size_t axis = extent.X >= extent.Y && extent.X >= extent.Z ? 0
+									: extent.Y >= extent.Z						 ? 1
+																				 : 2;
+				std::stable_sort(
+					sorted.begin() + begin, sorted.begin() + end, [&](uint32_t left, uint32_t right) {
+						const auto &a = mesh.TriangleBounds[left], &b = mesh.TriangleBounds[right];
+						const auto aCentre = (a.Minimum + a.Maximum) * .5f,
+								   bCentre = (b.Minimum + b.Maximum) * .5f;
+						const float aValue = axis == 0 ? aCentre.X : axis == 1 ? aCentre.Y : aCentre.Z;
+						const float bValue = axis == 0 ? bCentre.X : axis == 1 ? bCentre.Y : bCentre.Z;
+						return aValue != bValue ? aValue < bValue : left < right;
+					}
+				);
+				const size_t middle = begin + (end - begin) / 2;
+				CHECK(node.Left == nextNode);
+				self(self, begin, middle);
+				CHECK(node.Right == nextNode);
+				self(self, middle, end);
+			};
+			visit(visit, 0, sorted.size());
+			CHECK(nextNode == mesh.Hierarchy.size());
+		}
+	}
 }

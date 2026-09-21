@@ -726,6 +726,32 @@ namespace engine::replication {
 	}
 
 	void Authority::ReportSignatures() {
+		static const core::LogCategory rowTrace("replication-row");
+		if (rowTrace.Enabled(core::LogLevel::Trace)) {
+			for (const size_t slot : ResignWork) {
+				if (Components[slot].Text() != "scene.Humanoid") continue;
+				const auto &signature = Signatures[slot];
+				for (const auto entity : signature.Changed) {
+					const auto hashOf = [entity](const auto &rows) {
+						const auto found = std::lower_bound(
+							rows.begin(), rows.end(), entity, [](const auto &row, uint64_t id) {
+								return row.first < id;
+							}
+						);
+						return found != rows.end() && found->first == entity ? found->second : uint64_t{0};
+					};
+					ENGINE_LOG(
+						core::LogLevel::Trace,
+						"replication-row",
+						"stage=detect authority={} entity={} before={} after={}",
+						static_cast<const void *>(this),
+						entity,
+						hashOf(signature.Next),
+						hashOf(signature.Hashes)
+					);
+				}
+			}
+		}
 		// --- the per-component rows, put back on the graph -------------------
 		//
 		// A span opened by a worker is dropped, so the breakdown is reported
@@ -886,6 +912,32 @@ namespace engine::replication {
 		client.Oversize.clear();
 	}
 
+	void Authority::RetainStreamingChanges(const ecs::Store &store, Client &client, uint64_t tick) {
+		client.Unconfirmed.resize(Components.size());
+		for (size_t slot = 0; slot < Components.size(); ++slot) {
+			const Crossing &crossing = Crossings[slot];
+			if (!crossing.Sendable) continue;
+			const ecs::ComponentId suppressor =
+				slot < ResolvedSuppressors.size() ? ResolvedSuppressors[slot] : ecs::ComponentId{};
+			const auto retain = [&](ecs::Entity entity) {
+				if (!client.Known.contains(entity.Id) || !store.HasComponent(entity, crossing.Id)) return;
+				if (suppressor.IsValid() && store.HasComponent(entity, suppressor)) return;
+				auto &pending = client.Unconfirmed[slot][entity.Id];
+				// An acknowledgement for the superseded value cannot cover this change.
+				pending.SentAt = 0;
+				if (pending.WaitingSince == 0) pending.WaitingSince = tick;
+			};
+			if (Detection[slot] == ChangeDetection::Signature) {
+				for (const uint64_t changed : Signatures[slot].Changed)
+					retain(ecs::Entity{changed});
+			} else {
+				for (const ColumnRun &run : crossing.Changed)
+					for (size_t row = 0; row < run.Rows; ++row)
+						retain(run.Entities[row]);
+			}
+		}
+	}
+
 	void Authority::StageOversize(Client &client, ecs::Store &store, uint64_t tick) {
 		std::sort(client.Oversize.begin(), client.Oversize.end());
 		client.Oversize.erase(
@@ -922,6 +974,18 @@ namespace engine::replication {
 		staged = Staged{};
 		staged.Bytes = Capture(store, Preceding);
 		staged.Tick = tick;
+
+		ENGINE_LOG(
+			core::LogLevel::Trace,
+			"replication-row",
+			"stage=oversize authority={} peer={} generation={} tick={} entities={} bytes={}",
+			static_cast<const void *>(this),
+			static_cast<const void *>(&client),
+			client.Generation,
+			tick,
+			Preceding.size(),
+			staged.Bytes.size()
+		);
 
 		if (staged.Bytes.empty()) {
 			ENGINE_ERROR("replication: {} oversized rows could not be captured.", Preceding.size());
@@ -1251,6 +1315,7 @@ namespace engine::replication {
 		Delta piece;
 		piece.Tick = delta.Tick;
 		piece.Baseline = delta.Baseline;
+		piece.ConsumedInput = delta.ConsumedInput;
 		lane.OpenEntry.assign(delta.Components.size(), NOWHERE);
 
 		Delta emitted;
@@ -1282,6 +1347,7 @@ namespace engine::replication {
 			piece = Delta{};
 			piece.Tick = delta.Tick;
 			piece.Baseline = delta.Baseline;
+			piece.ConsumedInput = delta.ConsumedInput;
 			used = MESSAGE_OVERHEAD;
 			rows = 0;
 			lane.OpenEntry.assign(delta.Components.size(), NOWHERE);
@@ -1844,6 +1910,8 @@ namespace engine::replication {
 	}
 
 	void Authority::Record(Lane &lane, Client &client, const Placement &placed, uint64_t tick) {
+		static const core::LogCategory rowTrace("replication-row");
+		const bool traceRows = rowTrace.Enabled(core::LogLevel::Trace);
 		if (placed.Values > 0) {
 			client.StreamedBefore = client.Streamed;
 			client.Streamed = tick;
@@ -1852,6 +1920,23 @@ namespace engine::replication {
 		for (size_t position = 0; position < lane.Order.size(); position++) {
 			const Candidate &candidate = lane.Candidates[lane.Order[position]];
 			Outstanding &pending = client.Unconfirmed[lane.SourceSlot[candidate.Entry]][candidate.Entity.Id];
+
+			if (traceRows && Components[lane.SourceSlot[candidate.Entry]].Text() == "scene.Humanoid") {
+				ENGINE_LOG(
+					core::LogLevel::Trace,
+					"replication-row",
+					"stage=pack authority={} peer={} generation={} entity={} tick={} placed={} "
+					"previous_sent={} waiting_since={}",
+					static_cast<const void *>(this),
+					static_cast<const void *>(&client),
+					client.Generation,
+					candidate.Entity.Id,
+					tick,
+					position < placed.Values,
+					pending.SentAt,
+					pending.WaitingSince
+				);
+			}
 
 			if (position < placed.Values) {
 				pending.SentAt = tick;
@@ -1961,6 +2046,7 @@ namespace engine::replication {
 		Delta delta;
 		delta.Tick = tick;
 		delta.Baseline = client.Applied;
+		delta.ConsumedInput = client.ConsumedInput;
 
 		BuildComponents(lane, store, client, delta, tick);
 		client.Repairing.clear();
@@ -1990,6 +2076,17 @@ namespace engine::replication {
 
 			const Lane::Timed recorded(lane, Lane::Phase::Record);
 			Record(lane, client, placed, tick);
+		} else if (client.ConsumedInput > client.AcknowledgedInput) {
+			const auto encoded = Encode(delta);
+			size_t spent = 0;
+			for (const auto &message : client.Outgoing)
+				spent += message.size();
+			const size_t allowance = std::min(Settings_.BytesPerTick, client.AllowanceBytes);
+			if (client.Outgoing.size() < Settings_.MessagesPerTick && spent <= allowance &&
+				encoded.size() <= allowance - spent) {
+				client.Outgoing.push_back(encoded);
+				client.Carried_.push_back({});
+			}
 		}
 
 		// Last, so that the byte budget turns this away before it turns away
@@ -2172,6 +2269,11 @@ namespace engine::replication {
 									tick > client.Applied + Settings_.ResnapshotAfterTicks;
 				const bool joining = Owed(client) == 0 && client.Known.empty() && client.Applied == 0;
 
+				// A fresh world snapshot includes current changes. An older blob or a
+				// new oversized slice needs recovery for changes outside its captured rows.
+				if (Owed(client) > 0 || (!joining && !adrift && !client.Oversize.empty()))
+					RetainStreamingChanges(store, client, tick);
+
 				if (joining || adrift) {
 					// **Bounded, and the bound is why a server can be joined at
 					// all.** See `AuthoritySettings::JoinsPerTick`: a client
@@ -2207,6 +2309,16 @@ namespace engine::replication {
 				}
 
 				if (Owed(client) > 0) {
+					ENGINE_LOG(
+						core::LogLevel::Trace,
+						"replication-row",
+						"stage=stream authority={} peer={} generation={} tick={} remaining={}",
+						static_cast<const void *>(this),
+						static_cast<const void *>(&client),
+						client.Generation,
+						tick,
+						Owed(client)
+					);
 					StreamSnapshot(client);
 
 					for (const std::vector<std::byte> &message : client.Outgoing) {
@@ -2421,16 +2533,35 @@ namespace engine::replication {
 			return true;
 
 		case MessageKind::Applied:
+			if (read.Applied.ConsumedInput > found->ConsumedInput) return false;
+			found->AcknowledgedInput = std::max(found->AcknowledgedInput, read.Applied.ConsumedInput);
 			if (read.Applied.Tick > found->Applied) {
 				found->Applied = read.Applied.Tick;
 
-				// One pass over each set rather than an erase per acknowledged
-				// row. An acknowledgement retires everything sent up to a tick,
-				// so this is the bulk case by construction.
+				// A newer tick may omit older rows under the recovery budget.
+				// Only retire rows carried by the tick actually acknowledged.
+				static const core::LogCategory rowTrace("replication-row");
+				const bool traceRows = rowTrace.Enabled(core::LogLevel::Trace);
 				for (OutstandingSet &unconfirmed : found->Unconfirmed) {
+					const auto slot = size_t(&unconfirmed - found->Unconfirmed.data());
+					const bool traceSlot = traceRows && Components[slot].Text() == "scene.Humanoid";
 					const uint64_t applied = found->Applied;
-					unconfirmed.EraseIf([applied](const OutstandingSet::Row &row) {
-						return row.Value.SentAt != 0 && row.Value.SentAt <= applied;
+					unconfirmed.EraseIf([&, applied](const OutstandingSet::Row &row) {
+						if (traceSlot && row.Value.SentAt == applied)
+							ENGINE_LOG(
+								core::LogLevel::Trace,
+								"replication-row",
+								"stage=retire authority={} peer={} generation={} entity={} ack={} sent_at={} "
+								"waiting_since={}",
+								static_cast<const void *>(this),
+								static_cast<const void *>(found),
+								found->Generation,
+								row.Entity,
+								applied,
+								row.Value.SentAt,
+								row.Value.WaitingSince
+							);
+						return row.Value.SentAt == applied;
 					});
 				}
 			}
@@ -2569,6 +2700,8 @@ namespace engine::replication {
 
 	void Authority::ClearInputs(ClientId client) {
 		if (Client *found = Reach(client); found != nullptr) {
+			for (const auto &input : found->Pending)
+				found->ConsumedInput = std::max(found->ConsumedInput, input.Tick);
 			found->Pending.clear();
 		}
 	}
@@ -2583,6 +2716,7 @@ namespace engine::replication {
 		status.SnapshotRemaining = Owed(*found);
 		status.Streaming = status.SnapshotRemaining > 0;
 		status.Applied = found->Applied;
+		status.ConsumedInput = found->ConsumedInput;
 		status.Known = found->Known.size();
 		return status;
 	}

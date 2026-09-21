@@ -216,6 +216,13 @@ TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[sce
 	CHECK(state->Brightness == 0.0f);
 	CHECK(state->ClockTime == 24.0f);
 	CHECK(state->GeographicLatitude == 90.0f);
+
+	const uint32_t everyBit = UINT32_MAX;
+	const uint32_t post = engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing);
+	REQUIRE(store.SetProperty(lighting, Name("RenderFeatureEnableMask"), &everyBit, sizeof(everyBit)));
+	REQUIRE(store.SetProperty(lighting, Name("RenderFeatureDisableMask"), &post, sizeof(post)));
+	CHECK(state->RenderFeatures.Enable == engine::scene::ALL_RENDER_FEATURES);
+	CHECK(state->RenderFeatures.Disable == post);
 }
 
 TEST_CASE("a server-scoped service and everything under it is hidden from clients", "[scene][services]") {

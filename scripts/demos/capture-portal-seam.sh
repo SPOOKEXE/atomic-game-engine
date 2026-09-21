@@ -35,7 +35,7 @@ out=${OUT:-$build/captures}
 cmake -S "$root" --preset "$preset" > /dev/null
 cmake --build "$build" --target client
 
-scene="$build/assets/examples/PortalSeam.luau"
+scene="$build/assets/examples/scripts/PortalSeam.luau"
 if [ ! -f "$scene" ]; then
 	echo "no staged scene at $scene" >&2
 	exit 1

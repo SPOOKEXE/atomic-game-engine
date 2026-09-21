@@ -4,6 +4,7 @@
 
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/audio/Device.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
@@ -14,32 +15,48 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Content.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
+#include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/EditableImages.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/DataCaptureDriver.hpp>
+#include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/DataFactory.hpp>
+#include <engine/world/HostLink.hpp>
+#include <engine/world/PresentationStream.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <client/Actions.hpp>
+#include <client/ActiveScenes.hpp>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
+#include <client/DataAudioObservation.hpp>
+#include <client/DataFactoryRehydrator.hpp>
+#include <client/DataFactoryRenderOnly.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <client/SettingsMenu.hpp>
@@ -104,6 +121,7 @@ namespace client {
 		}
 
 	  private:
+		struct ContentSession;
 		// Builds the demo worlds `--script`/`--worlds` describe.
 		//
 		// @return `false` when a world could not be created or its scene script
@@ -111,7 +129,8 @@ namespace client {
 		//         leave somebody wondering why.
 		bool BuildDemoWorlds();
 
-		// Loads `--game` and starts its scripts in both roles.
+		// Loads an `.agame` or `.aworld` from `--game` and starts its scripts in
+		// both roles.
 		//
 		// @return `false` when the file would not load or holds no worlds.
 		bool LoadGameFile();
@@ -125,9 +144,22 @@ namespace client {
 		//
 		// @return `true` when the client is ready to run.
 		bool FinishStartup();
+		// Reconciles the factory-owned world after the control boundary has
+		// committed it. This runs only on the driver thread that owns Universe.
+		bool ReconcileDataFactoryWorlds();
+		bool PublishDataFactoryWorld(engine::world::WorldId world);
+		void RemoveDataFactoryWorld(engine::world::WorldId world);
+		bool InitialisePresentationHost();
+		bool PumpPresentationHost();
+		void ResetPlayPresentation();
+		void PumpPlayPresentation();
+		bool ReceivePlayPresentation(std::span<const std::byte> message);
+		void ClearPlayPresentationRoutes();
 
 		void PumpEvents();
 		void Step();
+		void CaptureFrame(const engine::render::View &view, engine::world::WorldId inputWorld);
+		void StampCameraTemporalSamples(std::span<engine::render::View> views);
 		void SubmitTeleportRequests(double nowSeconds);
 		// Exit code for a run whose heap kept climbing, and for one that was
 		// asked to check and could not.
@@ -136,6 +168,10 @@ namespace client {
 		// startup and a bad command line: a soak recipe has to be able to tell
 		// "this build leaks" from "this build would not start".
 		static constexpr int EXIT_RUNAWAY_HEAP = 3;
+
+		// The requested profiling artifacts could not be written. A profiling job
+		// that reports success without its evidence is not a successful job.
+		static constexpr int EXIT_PROFILE_ARTIFACT = 4;
 
 		// Below this many seconds of readings a slope is noise. Six, because a
 		// least-squares fit over five points is as answerable to one outlier as
@@ -201,7 +237,7 @@ namespace client {
 		// day one of them learned about a new kind of source.
 		//
 		// @return `false` when sources were configured and are unusable.
-		bool BuildContentClient();
+		bool BuildContentClient(ContentSession &content);
 
 		// Whether a server may still say where content is.
 		//
@@ -232,44 +268,43 @@ namespace client {
 		//
 		// @param directory What the server said.
 		// @since v0.16
-		void AdoptContentDirectory(const engine::game::ContentDirectory &directory);
+		void AdoptContentDirectory(ContentSession &content, const engine::game::ContentDirectory &directory);
 
 		// Advances content delivery and registers whatever arrived.
 		//
 		// Called once a frame, before the simulation and outside every render
 		// pass - the two constraints that decide where this can go at all.
 		void PumpContent();
+		void RefreshContentBindings();
+		void LoadPackagedExampleTextures(ContentSession &content);
+		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 
-		// Hands every world the mesh names the store published.
+		// Hands the session's worlds the mesh names its store published.
 		//
 		// **Names, not content**, and the only way a scene can discover what
 		// there is to name - see `scene/PublishedCatalogue.hpp`. Naming one is
 		// still what fetches it.
-		void OfferPublishedContent();
+		void OfferPublishedContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 
-		// Asks for everything the simulated worlds name and has not asked for.
-		//
-		// **Demand rather than by kind**, which is what makes a large store
-		// usable at all - `client/ContentDemand.hpp` carries the two failures
-		// that forced it.
-		//
-		// **And only for a world that has moved since it was last asked.** The
-		// collection is eight walks of a store and it ran on every world on
-		// every frame; `ScanWantedContent` carries the gate and why it is the
-		// world's tick counter rather than the ECS change channel.
-		void RequestWantedContent();
+		// Requests each name once per session, scanning only worlds whose
+		// content-bearing component revisions or counts changed.
 
-		// Collects one world's content demand, if its tick has moved since the
-		// last time it was collected.
+		void RequestWantedContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
+
+		// Collects one world's demand when content references change.
 		//
 		// @param world The world to scan. A world with no valid id is skipped.
-		void ScanWantedContent(engine::world::WorldId world);
+		void ScanWantedContent(ContentSession &content, engine::world::WorldId world);
 
 		// Asks for one asset, once.
 		//
 		// @param texture The name. An invalid one, or one already asked for, is
 		//        ignored.
-		void RequestAsset(const engine::core::Name &texture);
+		void RequestAsset(
+			ContentSession &content,
+			const engine::core::Name &texture,
+			engine::core::Name requestingOwner = {}
+		);
 
 		// Brings the mixer into line with every simulated world's `Sound` rows.
 		//
@@ -315,7 +350,31 @@ namespace client {
 		// Takes one tick's worth of what the server sent.
 		//
 		// @param nowSeconds The current time.
-		void PollServer(double nowSeconds);
+		void PollServer(double nowSeconds, bool presentationReady);
+		void ReceiveServerMessage(std::span<const std::byte> message);
+		bool ReceivePortalSession(const engine::game::PortalSessionMessage &message);
+		void PumpPortalSuccessor(double nowSeconds, bool presentationReady);
+		bool PortalSuccessorDrawable();
+		void PumpPortalObservation(double nowSeconds);
+		void DropPortalObservation();
+		void RetainPortalObservation(engine::world::WorldId world);
+		struct PortalWorldView;
+		bool PreparePortalWorldView(
+			PortalWorldView &packet,
+			engine::world::WorldId world,
+			engine::render::View &view,
+			uint32_t width,
+			uint32_t height
+		);
+		bool WaitingForPortalViews() const;
+		bool PreparePortalEye(
+			engine::render::View &view,
+			engine::world::WorldId inputWorld,
+			uint32_t width,
+			uint32_t height,
+			bool prepareNative = false
+		);
+		void DropPortalReplica(engine::world::WorldId world);
 
 		// Copies this frame's keyboard and pointer onto a world's `InputState`.
 		//
@@ -340,6 +399,7 @@ namespace client {
 		//
 		// @param nowSeconds The current time.
 		void SubmitMove(double nowSeconds);
+		std::optional<uint64_t> InputTickAt(uint64_t localTick) const;
 
 		// Gathers what the F4 panel shows, and moves the rate window on.
 		//
@@ -379,11 +439,7 @@ namespace client {
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
 
-		// **What a `Material.Shader` name resolves to**, and the one thing on
-		// this class that holds a GLSL compiler. One per client rather than one
-		// per world, for the reason `ShaderLibrary` gives: it caches over
-		// process-wide names, and `Refresh` takes whichever world is being
-		// drawn.
+		// One compiler retains each world's accepted material and lens modules.
 		engine::render::ShaderLibrary Shaders;
 
 		// **What `Renderer::PostProcessShaderName` was last set to from this
@@ -470,6 +526,8 @@ namespace client {
 		// Where the pointer is, for the world's own interface. Long-lived: it
 		// holds the hover and the press across frames.
 		engine::gui::Router InterfaceRouter;
+		engine::render::AdornmentPointerRouter AdornmentRouter;
+		engine::render::AdornmentGeometry ClientAdornments;
 		engine::render::FrameStatistics Statistics;
 
 		client::Actions Actions;
@@ -541,6 +599,21 @@ namespace client {
 		// construction, and that thread is decided in Initialise rather than
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
+		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
+		uint64_t DataFactoryStoreIdentity = 0;
+		engine::world::WorldId DataFactoryWorld;
+		std::unique_ptr<DataFactoryRehydrator> FactoryRehydrator;
+		std::shared_ptr<DataAudioObservationHost> DataAudio;
+		uint64_t DataAudioEpoch = 0;
+		data_factory_render_only::Queue DataFactoryRenderOnly;
+		std::shared_ptr<engine::script::QueuedDataLifecycleBridge> DataLifecycle;
+		std::shared_ptr<engine::render::ScriptDataCaptureBridge> DataCapture;
+		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
+		std::unique_ptr<engine::world::HostLink> PresentationLink;
+		bool PresentationHostReady = false;
+		std::unique_ptr<engine::world::PresentationStream> PlayPresentation;
+		uint64_t PlayDirectorySession = 0, PlayDirectoryRevision = 0;
+		uint64_t PlayRoutesRevision = 0;
 
 		// The loopback MCP surface. It registers nothing and opens no socket when
 		// `Options::ControlPort` is negative.
@@ -561,7 +634,14 @@ namespace client {
 		// only line up on the path that fills both. `BuildDemoWorlds` fills one
 		// of them, so an index into the other would have been right until
 		// somebody ran the client without `--game`.
-		std::vector<std::pair<engine::world::WorldId, std::shared_ptr<engine::script::Runtime>>> Runtimes;
+		DataFactoryRuntimeList Runtimes;
+		engine::script::HostCallback DataCaptureDriverCallback;
+		std::optional<uint64_t> DataCaptureDriverTicket;
+		bool DataCaptureDriverCancelling = false;
+		bool DataCaptureDriverCancelSent = false;
+		std::string DataCaptureDriverSnapshot;
+		engine::world::WorldId DataCaptureDriverWorld;
+		engine::script::Runtime *DataCaptureDriverRuntime = nullptr;
 
 		// The VM for one world, or null when it runs no scripts.
 		//
@@ -602,19 +682,14 @@ namespace client {
 		// copy the store would hold is the one this exists to avoid.
 		engine::graph::PipelineSet RenderingProfiles;
 
-		// Which world's selected profile is installed in the renderer.
-		//
-		// **A guard so installing happens on a world change and not per frame.**
-		// `render::InstallWorldPipeline` compiles every profile it installs
-		// and reports what is wrong with each - worth paying when the world
-		// changes, and sixty complaints a second about a half-wired one if it
-		// were not guarded.
-		engine::world::WorldId ProfilesInstalledFor;
-
-		// The selection used for that install. A replicated WorldSettings change
-		// keeps the same WorldId, so the world id alone cannot invalidate the
-		// selected runtime key.
-		engine::core::Name ProfileInstalledSelection;
+		// Runtime keys are cached per world so one camera batch can retain each
+		// world's selected graph without compiling it again every frame.
+		struct InstalledWorldPipeline {
+			engine::world::WorldId World;
+			engine::core::Name Selection;
+			engine::core::Name Runtime;
+		};
+		std::vector<InstalledWorldPipeline> InstalledWorldPipelines;
 
 		// What to put in `render::View::Pipeline`, from that install.
 		//
@@ -625,6 +700,10 @@ namespace client {
 		// Every world this client simulates, in creation order.
 		std::vector<engine::world::WorldId> Simulated;
 
+		// The completed product packets for every active world. Its views are
+		// copied on the presentation lanes and submitted together below.
+		ActiveSceneCollector ActiveScenes;
+
 		// The socket and the connection to a server. Both null unless
 		// `--connect` was given, which is what keeps a single-player run from
 		// opening a port it has no use for.
@@ -632,6 +711,68 @@ namespace client {
 		// The connector borrows this move-only secret for the session lifetime.
 		std::optional<engine::assets::SigningKey> ClientIdentity;
 		std::unique_ptr<engine::replication::Connector> Connection;
+		engine::net::Endpoint ConnectedServer;
+		struct PortalWorldView {
+			engine::render::WorldViewFrame Frame;
+			engine::render::WorldCameraFrame Camera;
+			engine::render::InterfacePass Interface;
+			std::vector<engine::render::SurfaceView> Surfaces;
+			std::vector<uint32_t> HiddenBodyRows;
+			engine::core::Name Pipeline;
+			uint32_t SurfaceBounces = 0;
+			uint32_t SurfaceLimit = 0;
+			bool InterfaceReady = false;
+		};
+		struct PortalSuccessor {
+			PortalWorldView View;
+			engine::game::PortalSessionMessage Offer;
+			std::optional<engine::game::PortalSessionMessage> Following;
+			engine::net::Endpoint Endpoint;
+			engine::world::WorldId World;
+			std::unique_ptr<engine::net::Transport> Socket;
+			std::unique_ptr<engine::replication::Connector> Connection;
+			std::optional<engine::scene::CameraContinuation> Camera;
+			std::unique_ptr<ContentSession> Content;
+			std::optional<engine::script::PortalTransferMotion> Motion;
+			// Source-world provenance for the copied camera, never sent to the successor.
+			engine::ecs::Entity SourceCamera;
+			engine::ecs::Entity SourceSubject;
+			std::unique_ptr<engine::world::PresentationStream> Presentation;
+			std::optional<engine::world::PresentationDirectory> PresentationRoutes;
+			bool PresentationAnnounced = false;
+			engine::ecs::Entity Player;
+			double Deadline = 0;
+			double AdmissionRetryAt = 0;
+			double CancellationRetryAt = 0;
+			double ReconnectAt = 0;
+			bool DrawingArrivedPlayer = false;
+			bool ProceedSent = false;
+			bool Crossed = false;
+			bool ResumeSent = false;
+			bool Ready = false;
+			bool CommitSent = false;
+			bool Committed = false;
+			bool Refused = false;
+			std::string Failure;
+		};
+		struct PortalObservation {
+			PortalWorldView View;
+			engine::world::WorldId World;
+			engine::core::Name Authored;
+			std::unique_ptr<engine::net::Transport> Socket;
+			std::unique_ptr<engine::replication::Connector> Connection;
+			std::unique_ptr<ContentSession> Content;
+		};
+		// One former body world, retained only while the crossing view needs it.
+		std::unique_ptr<PortalObservation> PortalPrevious;
+		// Borrows the selected packet for this draw; cleared when its session retires.
+		PortalWorldView *PortalDrawing = nullptr;
+
+		std::unique_ptr<PortalSuccessor> PortalNext;
+		uint64_t NextPortalReplica = 1;
+		engine::core::Name PortalEyeDestinations[2];
+		// Initial entry waits once; body-world adoption preserves this viewport lifetime.
+		bool InitialPortalViewsReady = false;
 
 		// How this client finds a session, when it was not told an address.
 		// Null unless `--browse` or `--rendezvous` was given.
@@ -656,70 +797,41 @@ namespace client {
 		// for.
 		std::optional<engine::net::WireMode> Advertised;
 
-		// The delivery client, when content sources were configured.
-		std::unique_ptr<engine::delivery::AssetClient> Content;
-
-		// How a relayed route travels, when this client is connected to a server.
-		//
-		// Built with the connection and outliving every delivery client made over
-		// it, because a rebuild replaces the fetcher and must not replace the
-		// routes already in flight underneath one.
-		std::unique_ptr<ContentLink> ContentRelay;
-
-		// The origins a server named, in the order it named them.
-		//
-		// Kept apart from `Settings::ContentSources` rather than merged into it,
-		// because the two have different provenance and the precedence between
-		// them is decided by exactly that - see `AdoptContentDirectory`.
-		std::vector<engine::delivery::Source> OfferedContentSources;
-
-		// The publisher a server named, as 64 hex characters, or empty.
-		std::string OfferedPublisherKey;
-
-		// The grant a server issued this client, or empty.
-		std::vector<std::byte> OfferedContentGrant;
-
-		// Requests issued for meshes and textures and not yet taken.
-		//
-		// **A list rather than a count**, because a request that failed has to
-		// be dropped from it and a count could not say which.
-		std::vector<engine::delivery::RequestId> ContentPending;
-
-		// How much delivered content this frame will decode and upload.
-		//
-		// Held across frames rather than made in the loop so the allowance is
-		// one object with one meaning; `Begin` is what resets it.
+		// One admitted content route and its demand state move together at handoff.
+		// Relay outlives the delivery client that borrows it.
+		struct ContentSession {
+			// One texture shipped with an example rather than fetched from a content source.
+			struct PackagedTexture {
+				// Content name scripts use to request the texture.
+				engine::core::Name Name;
+				// Decoded texture payload installed into the local catalogue.
+				engine::assets::TextureData Data;
+				// Optional flipbook grid and playback metadata carried by the asset.
+				engine::scene::FlipbookFacts Facts;
+			};
+			std::unique_ptr<ContentLink> Relay;
+			std::unique_ptr<engine::delivery::AssetClient> Client;
+			std::string RelayName;
+			std::vector<engine::delivery::Source> OfferedSources;
+			std::string PublisherKey;
+			std::vector<std::byte> Grant;
+			std::vector<engine::delivery::RequestId> Pending;
+			std::vector<engine::delivery::RequestId> Issued;
+			std::unordered_set<uint64_t> Asked;
+			std::unordered_map<uint32_t, uint64_t> ScannedAtRevision;
+			std::vector<engine::core::Name> Wanted;
+			std::vector<engine::core::Name> Owners;
+			std::vector<PackagedTexture> PackagedTextures;
+			std::unordered_set<uint32_t> PackagedOwners;
+			bool PackagedExamplesLoaded = false;
+			bool Requested = false;
+			bool Reported = false;
+		};
+		std::unique_ptr<ContentSession> ContentState = std::make_unique<ContentSession>();
+		// One intake allowance across active and observed worlds.
 		engine::delivery::IntakeBudget ContentBudget;
-
-		// Whether the catalogue has arrived and the requests have been issued.
-		// Once, not per frame - see `PumpContent`.
-		bool ContentRequested = false;
-		bool ContentReported = false;
-
-		// Requests made while `ContentPending` was being walked, moved into it
-		// afterwards. See `Client::RequestTexture`.
-		std::vector<engine::delivery::RequestId> ContentIssued;
-
-		// Which texture names have been asked for, by `core::Name::Id`.
-		//
-		// **Asked once, whatever happened**, so a misspelled name costs one
-		// failed request rather than one per pump forever.
-		std::unordered_set<uint32_t> ContentAsked;
-
-		// The content-reference revision each world was last collected at, by
-		// `world::WorldId::Index`. Absent means never.
-		//
-		// **A watermark rather than a copy**, which is the distinction root
-		// `AGENTS.md` rule 2 is about: nothing here is a second statement of
-		// something a world holds, it is a record of how far *this* reader has
-		// got. `ContentAsked` above is the same kind of memo.
-		//
-		// The number is derived from component-specific ECS versions, so particle
-		// simulation and unrelated property writes do not falsify it.
-		std::unordered_map<uint32_t, uint64_t> ContentScannedAtRevision;
-
-		// Scratch for the demand scan, reused so a pump allocates nothing.
-		std::vector<engine::core::Name> ContentWanted;
+		std::vector<engine::world::WorldId> ContentWorlds;
+		std::vector<engine::render::WorldContentOwner> ContentBindings;
 
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
@@ -788,6 +900,14 @@ namespace client {
 		uint64_t PresentationOpportunities = 0;
 		uint64_t UnchangedPresentationsSkipped = 0;
 
+		struct CameraTemporalSample {
+			uint64_t WorldEpoch = 0;
+			uint64_t Projection = 0;
+			uint64_t Sequence = 0;
+		};
+		std::unordered_map<std::string, CameraTemporalSample> CameraTemporalSamples;
+		std::unordered_map<size_t, std::string> CameraTemporalSources;
+
 		// The audio device, when one opened. Null runs silently.
 		std::unique_ptr<engine::audio::Device> Sound;
 
@@ -806,6 +926,13 @@ namespace client {
 		// arriving both look like "nothing happened" from outside, and they want
 		// completely different investigations.
 		bool ReportedAdmission = false;
+		bool FreshAdmissionSent = false;
+
+		// One input timeline survives replica replacement. The epochs map the
+		// current replica's clock without changing that world's simulation time.
+		uint64_t SubmittedMoveTick = 0;
+		uint64_t InputLocalEpoch = 0;
+		uint64_t InputSequenceEpoch = 0;
 
 		// Whether F4 has already said there is no network to show. Once, not
 		// once per press.
@@ -843,15 +970,6 @@ namespace client {
 		// leave alone, or the pane would be drawn twice from two different
 		// viewpoints. See `render::PortalView`.
 		std::vector<engine::render::PortalView> Portals;
-
-		// Another world's rows, for a pane that shows one.
-		//
-		// **The standalone client did not assemble these at all until v0.15**,
-		// which meant a `Portal::DestinationWorld` pane worked in the studio and
-		// showed its own world here - a mirror where a window was authored, with
-		// nothing in any log to say so. `client::AttachForeignSurfaces` fills it
-		// and points the pane's `SurfaceView` at a range of it.
-		std::vector<engine::scene::DrawInstance> Foreign;
 
 		// This world's rows with the far side of anybody standing in one of its
 		// cross-world panes appended.

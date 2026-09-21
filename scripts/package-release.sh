@@ -85,19 +85,21 @@ if [ -n "$missing" ]; then
 	exit 1
 fi
 
-# The demo scenes, into each program that can run one.
+# The demo tree, including `scripts/` and `worlds/`, into each program that can
+# run one.
 #
 # **The staged tree is not self-contained without this**, which is the one place
 # the build's layout and the runtime's disagree. Shaders stage into the
 # program's own directory and `Paths::Assets()` defaults to that directory, so
 # those line up; the example scenes stage into `<build>/assets/examples`, a
-# *sibling* of every program directory, and `examples::ExamplePath` reaches them
-# through a `Base().parent_path()` fallback it documents as a mismatch. That
-# fallback holds in a build tree and nowhere else - a client copied anywhere on
-# its own starts, opens Vulkan, and dies with "could not open .../Rings.luau".
+# *sibling* of every program directory, and `examples::DemosLoader` reaches the
+# nested `scripts/` and `worlds/` roots through a `Base().parent_path()` fallback.
+# That fallback holds in a build tree and nowhere else - a client copied
+# anywhere on its own starts, opens Vulkan, and dies with "could not open
+# .../Rings.luau".
 #
-# Copying into `<stage>/examples` puts them where `ExamplePath` looks *first*,
-# so the shipped tree needs no fallback and no `--assets`.
+# Copying the complete tree into `<stage>/examples` preserves the nested
+# `scripts/` and `worlds/` roots expected by the launchers.
 #
 # `panels/` is staged beside them and is deliberately not copied: nothing loads
 # it yet - mono.studio/CMakeLists.txt calls them "not yet the editor's panels" -
@@ -105,7 +107,7 @@ fi
 # when something reads it.
 scenes="$build/assets/examples"
 if [ ! -d "$scenes" ]; then
-	echo "no example scenes at $scenes" >&2
+	echo "no example tree at $scenes" >&2
 	echo "  Engine::examples stages them during the build; an absent tree is a partial build." >&2
 	exit 1
 fi
@@ -191,7 +193,7 @@ esac
 
 # The licence travels with the binaries or the licence is not served. MPL-2.0
 # and the vendored notices both.
-cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$root/README.md" "$work/$name/"
+cp "$root/LICENSE" "$root/docs/THIRD_PARTY_NOTICES.md" "$root/README.md" "$work/$name/"
 
 printf '%s\n' "$version" > "$work/$name/VERSION"
 
@@ -227,9 +229,23 @@ echo "$archive"
 # shape somebody chasing a report unpacks anyway.
 case $platform:$flavour in
 	linux-*:)
-		"$root/scripts/package-appimage.sh" client "$work/$name/client" "$version" "$absolute"
-		"$root/scripts/package-appimage.sh" studio "$work/$name/studio" "$version" "$absolute"
-		"$root/scripts/package-appimage.sh" launcher "$work/$name/launcher" "$version" "$absolute" \
+		# appimagetool is identical for the three independent images. Download it
+		# once into this package work tree, then each isolated AppDir can use it.
+		appimage_tool="$work/appimagetool"
+		arch=$(uname -m)
+		curl -fsSL -o "$appimage_tool" \
+			"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
+		chmod +x "$appimage_tool"
+
+		# appimagetool extracts into a shared temporary location. Concurrent calls
+		# can corrupt that extraction, so the independent AppDirs still run through
+		# one tool process at a time.
+		APPIMAGETOOL="$appimage_tool" "$root/scripts/package-appimage.sh" \
+			client "$work/$name/client" "$version" "$absolute"
+		APPIMAGETOOL="$appimage_tool" "$root/scripts/package-appimage.sh" \
+			studio "$work/$name/studio" "$version" "$absolute"
+		APPIMAGETOOL="$appimage_tool" "$root/scripts/package-appimage.sh" \
+			launcher "$work/$name/launcher" "$version" "$absolute" \
 			"$work/$name/client" "$work/$name/studio" "$work/$name/server" "$work/$name/cdn"
 		;;
 esac

@@ -1,4 +1,5 @@
 #include "BackendNodes.hpp"
+#include "RenderFixture.hpp"
 
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -7,6 +8,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <string>
@@ -70,34 +72,36 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 	CHECK(
 		ran == std::vector<std::string>{
 				   "world",
+				   "mesh-residency",
 				   "shadow",
+				   "skybox-compute",
+				   "clouds-compute",
 				   "camera@0",
 				   "last-frame@0",
 				   "entities@0",
 				   "cull-frustum@0",
 				   "order-draw@0",
-				   "upload-instances@0",
-				   "mirror-capture@0",
-				   "portal-capture@0",
-				   "portal-tonemap@0",
+				   "delta-upload@0",
+				   "select-lod@0",
+				   "surface-capture@0",
 				   "gbuffer@0",
 				   "depth-linearise@0",
 				   "ssao@0",
 				   "deferred-lighting@0",
 				   "sky@0",
-				   "volumetrics@0",
-				   "shader-lenses@0",
-				   "tonemap@0",
+				   "fog@0",
 				   "portal-overlay@0",
 				   "mirror-overlay@0",
 				   "transparent@0",
+				   "shader-lenses@0",
+				   "tonemap@0",
 				   "present",
 				   "interface",
 				   "overlay",
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 26);
+	CHECK(runner.Submitted() == 28);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 
@@ -113,10 +117,41 @@ TEST_CASE("world work is shared while view work is repeated", "[render][graph]")
 
 	CHECK(std::count(ran.begin(), ran.end(), "shadow") == 2);
 	CHECK(std::count(ran.begin(), ran.end(), "world") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "skybox-compute") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "clouds-compute") == 2);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@0") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@1") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@2") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "present") == 1);
+}
+
+TEST_CASE("clouds consume the skybox producer in the same world invocation", "[render][graph]") {
+	const RenderGraph graph = DefaultGraph();
+	const engine::graph::Node *skybox = nullptr;
+	const engine::graph::Node *clouds = nullptr;
+	for (uint32_t value = 1; value <= graph.Count(); ++value) {
+		const auto *node = graph.Find(engine::graph::NodeId{value});
+		if (node == nullptr) continue;
+		if (node->Kind == Name("skybox-compute")) skybox = node;
+		if (node->Kind == Name("clouds-compute")) clouds = node;
+	}
+	REQUIRE(skybox != nullptr);
+	REQUIRE(clouds != nullptr);
+	REQUIRE(skybox->Writes.size() == 1);
+	REQUIRE(clouds->Reads.size() == 1);
+	CHECK(skybox->Scope == engine::graph::NodeScope::World);
+	CHECK(clouds->Scope == engine::graph::NodeScope::World);
+	CHECK(clouds->Reads.front() == skybox->Writes.front());
+
+	const CompiledGraph compiled = Compile(graph);
+	const auto position = [&](Name kind) {
+		for (size_t index = 0; index < compiled.Shared.size(); ++index) {
+			const auto *node = graph.Find(compiled.Shared[index]);
+			if (node != nullptr && node->Kind == kind) return index;
+		}
+		return compiled.Shared.size();
+	};
+	CHECK(position(Name("skybox-compute")) < position(Name("clouds-compute")));
 }
 
 TEST_CASE("missing backend kinds are reported before execution", "[render][graph]") {
@@ -159,6 +194,142 @@ TEST_CASE("invalid node registrations are refused", "[render][graph]") {
 	CHECK(table.Count() == 0);
 }
 
+TEST_CASE("registered handler refusal reports the authored node", "[render][graph]") {
+	RenderGraph graph;
+	const auto target = graph.AddResource({.Name = Name("target")});
+	REQUIRE(target.IsValid());
+	engine::graph::Node node;
+	node.Name = Name("deferred-output");
+	node.Kind = Name("deferred-lighting");
+	node.Writes = {target};
+	node.Scope = engine::graph::NodeScope::View;
+	REQUIRE(graph.AddNode(node).IsValid());
+
+	NodeTable table;
+	REQUIRE(table.Set(Name("deferred-lighting"), [](const RunContext &) { return false; }));
+	for (const auto tier :
+		 {engine::render::ProfilingTier::Off,
+		  engine::render::ProfilingTier::Cpu,
+		  engine::render::ProfilingTier::Full}) {
+		GraphRunner runner(table, tier);
+		CHECK_FALSE(graph.Execute(Compile(graph), runner, size_t{1}));
+		CHECK(runner.Rejected() == Name("deferred-output"));
+		CHECK_FALSE(runner.Unhandled().IsValid());
+	}
+}
+
+TEST_CASE("deferred baseline port extent follows its port in either order", "[render][graph]") {
+	using engine::graph::Edit;
+	using engine::graph::EditKind;
+	using engine::graph::PipelineDocument;
+	using engine::graph::PipelineDocumentStatus;
+	const bool baselineFirst = GENERATE(false, true);
+	const bool matchingExtent = GENERATE(false, true);
+	CAPTURE(baselineFirst, matchingExtent);
+
+	PipelineDocument document;
+	document.Record(
+		{.Kind = EditKind::AddResource,
+		 .Name = Name("lighting-baseline"),
+		 .Resource = engine::graph::ResourceKind::Colour,
+		 .Format = engine::graph::ResourceFormat::RGBA32F,
+		 .Width = matchingExtent ? 65u : 33u,
+		 .Height = matchingExtent ? 37u : 19u}
+	);
+	const Edit baselineWrite{
+		.Kind = EditKind::Writes, .Target = Name("lighting-baseline"), .Key = Name("lighting-baseline")
+	};
+	const engine::graph::PipelineDocument base = engine::graph::DefaultPbrDocument();
+	for (auto edit : base.Edits()) {
+		if (edit.Kind == EditKind::AddResource && edit.Name == Name("lit")) {
+			edit.Width = 65;
+			edit.Height = 37;
+		}
+		const bool colourWrite = edit.Kind == EditKind::Writes && edit.Target == Name("lit");
+		if (colourWrite && baselineFirst) document.Record(baselineWrite);
+		document.Record(edit);
+		if (colourWrite && !baselineFirst) document.Record(baselineWrite);
+	}
+
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(engine::graph::Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+	const engine::graph::Node *deferred = nullptr;
+	for (uint32_t value = 1; value <= graph.Count(); ++value) {
+		const auto *node = graph.Find(engine::graph::NodeId{value});
+		if (node != nullptr && node->Kind == Name("deferred-lighting")) {
+			deferred = node;
+			break;
+		}
+	}
+	REQUIRE(deferred != nullptr);
+	const auto colourPort =
+		std::find(deferred->WritePorts.begin(), deferred->WritePorts.end(), Name("colour"));
+	const auto baselinePort =
+		std::find(deferred->WritePorts.begin(), deferred->WritePorts.end(), Name("lighting-baseline"));
+	REQUIRE(colourPort != deferred->WritePorts.end());
+	REQUIRE(baselinePort != deferred->WritePorts.end());
+	const auto *colour = graph.FindResource(deferred->Writes[colourPort - deferred->WritePorts.begin()]);
+	const auto *baseline = graph.FindResource(deferred->Writes[baselinePort - deferred->WritePorts.begin()]);
+	REQUIRE(colour != nullptr);
+	REQUIRE(baseline != nullptr);
+	uint32_t colourWidth = 0, colourHeight = 0, baselineWidth = 0, baselineHeight = 0;
+	colour->Resolve(1, 1, colourWidth, colourHeight);
+	baseline->Resolve(1, 1, baselineWidth, baselineHeight);
+	CHECK(colourWidth == 65);
+	CHECK(colourHeight == 37);
+	CHECK(baseline->Format == engine::graph::ResourceFormat::RGBA32F);
+	CHECK((baselineWidth == colourWidth && baselineHeight == colourHeight) == matchingExtent);
+}
+
+TEST_CASE(
+	"deferred baseline extent validation is independent of output port order",
+	"[render][gpu][graph][lighting-baseline-extent][.]"
+) {
+	using namespace engine;
+	const bool baselineFirst = GENERATE(false, true);
+	const bool matchingExtent = GENERATE(false, true);
+	CAPTURE(baselineFirst, matchingExtent);
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::PipelineDocument document;
+	document.Record(
+		{.Kind = graph::EditKind::AddResource,
+		 .Name = Name("lighting-baseline"),
+		 .Resource = graph::ResourceKind::Colour,
+		 .Format = graph::ResourceFormat::RGBA32F,
+		 .Width = matchingExtent ? 65u : 33u,
+		 .Height = matchingExtent ? 37u : 19u}
+	);
+	const graph::Edit baselineWrite{
+		.Kind = graph::EditKind::Writes, .Target = Name("lighting-baseline"), .Key = Name("lighting-baseline")
+	};
+	const auto base = graph::DefaultPbrDocument();
+	for (auto edit : base.Edits()) {
+		if (edit.Kind == graph::EditKind::AddResource && edit.Name == Name("lit")) {
+			edit.Width = 65;
+			edit.Height = 37;
+		}
+		const bool colourWrite = edit.Kind == graph::EditKind::Writes && edit.Target == Name("lit");
+		if (colourWrite && baselineFirst) document.Record(baselineWrite);
+		document.Record(edit);
+		if (colourWrite && !baselineFirst) document.Record(baselineWrite);
+	}
+	RenderGraph pipeline;
+	Name offender;
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const Name pipelineName("baseline-extent");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+	render::SceneTarget target{65, 37};
+	render::View view;
+	view.Pipeline = pipelineName;
+	view.Target = &target;
+	render::OverlayImage overlay;
+	const auto report = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(report.Ran(Name("deferred-lighting")) == matchingExtent);
+}
+
 TEST_CASE("backend metadata is derived from the node catalogue", "[render][graph]") {
 	engine::graph::RegisterRenderNodeKinds();
 	const std::vector<engine::render::BackendNode> backends = engine::render::BackendNodes();
@@ -196,7 +367,7 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
 	const uint64_t worlds[] = {7};
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
-	CHECK(opened == 25);
+	CHECK(opened == 27);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 

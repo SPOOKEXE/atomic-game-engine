@@ -172,14 +172,16 @@ namespace engine::script {
 		//@{
 		GuiMouseButton1Down,
 		GuiMouseButton1Up,
+		GuiMouseButton1Changed,
 		//@}
 
-		// The virtual secondary-button route. The physical router currently owns
-		// one primary pointer, so only virtual controls can produce these.
+		// The secondary-button route. Interactive adornments and virtual controls
+		// both produce these beside their respective capture paths.
 		//@{
 		GuiMouseButton2Click,
 		GuiMouseButton2Down,
 		GuiMouseButton2Up,
+		GuiMouseButton2Changed,
 		//@}
 
 		// `guiObject.MouseEnter` - the pointer entered its rectangle.
@@ -391,7 +393,7 @@ namespace engine::script {
 	// @since v0.6
 	class SignalTable {
 	  public:
-		// Adds a connection.
+		// Registers a VM callback for one signal subject and returns its monotonic handle.
 		//
 		// @param kind     Which signal.
 		// @param subject  The instance, or `NULL_ENTITY` for a world signal.
@@ -467,6 +469,11 @@ namespace engine::script {
 		//
 		// @param released Appended with every callable the table held.
 		void Clear(std::vector<CallbackRef> &released);
+
+		// Reports whether no live or deferred-retirement connections remain.
+		bool Empty() const {
+			return Owners.empty();
+		}
 
 		// How many live connections one signal has.
 		//

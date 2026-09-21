@@ -99,6 +99,7 @@ namespace engine::replication {
 
 		writer.WriteUInt16(delta.Part);
 		writer.WriteBool(delta.Final);
+		writer.WriteUInt64(delta.ConsumedInput);
 
 		writer.WriteUInt32(static_cast<uint32_t>(delta.Components.size()));
 		for (const ComponentDelta &component : delta.Components) {
@@ -167,6 +168,7 @@ namespace engine::replication {
 	void WriteMessage(core::ByteWriter &writer, const Applied &applied) {
 		WriteFront(writer, MessageKind::Applied);
 		writer.WriteUInt64(applied.Tick);
+		writer.WriteUInt64(applied.ConsumedInput);
 	}
 
 	bool ReadMessage(core::ByteReader &reader, Message &message) {
@@ -213,6 +215,7 @@ namespace engine::replication {
 			read.Delta.Baseline = reader.ReadUInt64();
 			read.Delta.Part = reader.ReadUInt16();
 			read.Delta.Final = reader.ReadBool();
+			read.Delta.ConsumedInput = reader.ReadUInt64();
 
 			if (reader.Failed() || read.Delta.Part >= MAXIMUM_PARTS) {
 				return false;
@@ -256,6 +259,7 @@ namespace engine::replication {
 
 		case MessageKind::Applied:
 			read.Applied.Tick = reader.ReadUInt64();
+			read.Applied.ConsumedInput = reader.ReadUInt64();
 			break;
 
 		case MessageKind::Identify:

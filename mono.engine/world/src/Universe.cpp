@@ -1,4 +1,5 @@
 #include "BusRouter.hpp"
+#include "UniverseProfiling.hpp"
 
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
@@ -10,6 +11,44 @@
 #include <cstdlib>
 
 namespace engine::world {
+
+	void ReportWorkerSchedulerTimings(
+		World &world, std::span<const ecs::Scheduler::Timing> timings, float worldMilliseconds
+	) {
+		float systemsMilliseconds = 0.0f;
+		for (const ecs::Scheduler::Timing &timing : timings) {
+			systemsMilliseconds += timing.Milliseconds;
+		}
+
+		const std::string_view worldName = world.Name().Text();
+		core::FrameGraph::ReportedScope worldScope(
+			worldName.empty() ? std::string_view("world") : worldName,
+			core::ProfileCategory::ECS,
+			worldMilliseconds
+		);
+		core::FrameGraph::ReportedScope systemsScope(
+			"ecs.systems", core::ProfileCategory::ECS, systemsMilliseconds
+		);
+
+		for (uint8_t phaseIndex = 0; phaseIndex < static_cast<uint8_t>(ecs::Phase::Count); phaseIndex++) {
+			const auto phase = static_cast<ecs::Phase>(phaseIndex);
+			float phaseMilliseconds = 0.0f;
+			for (const ecs::Scheduler::Timing &timing : timings) {
+				if (timing.RunPhase == phase) {
+					phaseMilliseconds += timing.Milliseconds;
+				}
+			}
+
+			core::FrameGraph::ReportedScope phaseScope(
+				ecs::GetPhaseName(phase), core::ProfileCategory::ECS, phaseMilliseconds
+			);
+			for (const ecs::Scheduler::Timing &timing : timings) {
+				if (timing.RunPhase == phase) {
+					core::FrameGraph::Report(timing.Name, core::ProfileCategory::ECS, timing.Milliseconds);
+				}
+			}
+		}
+	}
 
 	Universe::Universe(const UniverseSettings &settings)
 		: Settings_(settings), Router(std::make_unique<BusRouter>()), Driver(std::this_thread::get_id()) {
@@ -227,6 +266,8 @@ namespace engine::world {
 			return WorldStatus::Ok;
 		}
 
+		PresentationMessages.RemoveWorld(NameOf(id));
+		Router->DiscardPendingDeliveries(id);
 		Registry[id.Index].reset();
 		if (id.Index < LaneByWorld.size()) {
 			LaneByWorld[id.Index] = INVALID_LANE;
@@ -274,6 +315,7 @@ namespace engine::world {
 			return WorldStatus::Ok;
 		}
 
+		PresentationMessages.RemoveWorld(world->Name());
 		world->Recover();
 		return WorldStatus::Ok;
 	}
@@ -288,6 +330,8 @@ namespace engine::world {
 
 		case Control::Kind::Destroy:
 			if (control.Target.IsValid() && control.Target.Index < Registry.size()) {
+				PresentationMessages.RemoveWorld(NameOf(control.Target));
+				Router->DiscardPendingDeliveries(control.Target);
 				Registry[control.Target.Index].reset();
 				if (control.Target.Index < LaneByWorld.size()) {
 					LaneByWorld[control.Target.Index] = INVALID_LANE;
@@ -306,6 +350,7 @@ namespace engine::world {
 
 		case Control::Kind::Recover:
 			if (World *world = Reach(control.Target); world != nullptr) {
+				PresentationMessages.RemoveWorld(world->Name());
 				world->Recover();
 			}
 			break;
@@ -476,7 +521,7 @@ namespace engine::world {
 
 	bool Universe::Deliver(core::Name world, const Delivery &delivery) {
 		RequireDriverThread("Deliver");
-		return Router->Deliver(Find(world), delivery);
+		return Router->QueueDelivery(Find(world), delivery, WorldDirectory{Registry, Hosts}, Settings_);
 	}
 
 	void Universe::InjectTraffic(std::vector<Envelope> traffic) {
@@ -521,6 +566,7 @@ namespace engine::world {
 
 	bool Universe::Save(core::ByteWriter &writer) const {
 		RequireDriverThread("Save");
+		if (Ticking) return false;
 
 		writer.WriteUInt64(UNIVERSE_MAGIC);
 		writer.WriteUInt32(SNAPSHOT_VERSION);
@@ -528,6 +574,9 @@ namespace engine::world {
 		writer.WriteUInt8(static_cast<uint8_t>(Settings_.Mode));
 		writer.WriteInt32(Settings_.MaximumCatchUpTicks);
 		writer.WriteUInt32(Settings_.BusBudgetPerTick);
+		writer.WriteBool(Settings_.Federated);
+		writer.WriteUInt32(Settings_.ChannelQueueLimit);
+		writer.WriteUInt32(Settings_.ChannelsPerWorld);
 
 		// --- worlds ---
 		writer.WriteUInt32(static_cast<uint32_t>(Count()));
@@ -572,8 +621,14 @@ namespace engine::world {
 
 	bool Universe::Load(core::ByteReader &reader) {
 		RequireDriverThread("Load");
+		if (Ticking) return false;
 
 		const auto abandon = [this] {
+			for (const auto &world : Registry) {
+				if (world != nullptr) {
+					PresentationMessages.RemoveWorld(world->Name());
+				}
+			}
 			Registry.clear();
 			Hosts.clear();
 			LaneByWorld.clear();
@@ -598,6 +653,9 @@ namespace engine::world {
 		Settings_.Mode = static_cast<ExecutionMode>(reader.ReadUInt8());
 		Settings_.MaximumCatchUpTicks = reader.ReadInt32();
 		Settings_.BusBudgetPerTick = reader.ReadUInt32();
+		Settings_.Federated = reader.ReadBool();
+		Settings_.ChannelQueueLimit = reader.ReadUInt32();
+		Settings_.ChannelsPerWorld = reader.ReadUInt32();
 
 		const uint32_t worlds = reader.ReadUInt32();
 		for (uint32_t index = 0; index < worlds && !reader.Failed(); index++) {
@@ -650,9 +708,63 @@ namespace engine::world {
 		return true;
 	}
 
+	void Universe::ReplaceWith(Universe &candidate) {
+		RequireDriverThread("ReplaceWith");
+		candidate.RequireDriverThread("ReplaceWith");
+		if (Ticking || candidate.Ticking) {
+			std::abort();
+		}
+
+		// The candidate was loaded and rehydrated before this point. Swapping the
+		// owned state is the commit: the old universe remains intact until every
+		// parser and rehydration check has accepted the checkpoint.
+		using std::swap;
+		swap(PresentationMessages, candidate.PresentationMessages);
+		swap(Settings_, candidate.Settings_);
+		swap(Stats, candidate.Stats);
+		swap(Registry, candidate.Registry);
+		swap(Hosts, candidate.Hosts);
+		swap(LaneByWorld, candidate.LaneByWorld);
+		swap(LaneCount, candidate.LaneCount);
+		swap(Pending, candidate.Pending);
+		swap(Router, candidate.Router);
+
+		// These are per-frame scratch spans into the old registry. No paused
+		// checkpoint has a running batch, so clearing them preserves the next
+		// driver's ordinary scheduling path without retaining stale pointers.
+		ActiveList.clear();
+		OwedList.clear();
+		ActiveLanes.clear();
+		DispatchLanes.clear();
+		PresentationList.clear();
+		PresentationRequests.clear();
+		PresentationLanes.clear();
+		PresentationQueued.clear();
+	}
+
 	void Universe::Tick(float frameSeconds) {
 		RequireDriverThread("Tick");
 		ENGINE_PROFILE_CAT("Universe::Tick", engine::core::ProfileCategory::Simulation);
+		if (Ticking) {
+			ENGINE_ERROR("universe: Tick called while an exchange frame is open");
+			return;
+		}
+		if (HasTickExchangeEndpoints()) {
+			const int rounds = BeginTickExchangeFrame(frameSeconds);
+			if (rounds < 0) return;
+			for (int round = 0; round < rounds; ++round) {
+				std::vector<TickExchangeRequest> requests;
+				std::vector<TickExchangeReply> replies;
+				if (!BeginTickExchangeRound() || !CollectTickExchangeRequests(requests) ||
+					!ServeTickExchangeRequests(requests, replies) || !ApplyTickExchangeReplies(replies) ||
+					!FinishTickExchangeRound()) {
+					CancelTickExchangeFrame();
+					return;
+				}
+			}
+			(void)EndTickExchangeFrame();
+			return;
+		}
 
 		const uint64_t started = core::Clock::Nanoseconds();
 
@@ -755,15 +867,19 @@ namespace engine::world {
 		// paragraph above worries about for the flag: the world's spans are now
 		// on the frame's owning thread and are kept, instead of arriving as one
 		// aggregate bar with everything it contained refused.
-		float estimatedWorldMilliseconds = 0.0f;
-		for (size_t index = 0; index < ActiveList.size(); index++) {
-			estimatedWorldMilliseconds +=
-				ActiveList[index]->Statistics().LastTickMilliseconds * static_cast<float>(OwedList[index]);
-		}
+		bool parallel = false;
+		{
+			ENGINE_PROFILE_CAT("select dispatch", engine::core::ProfileCategory::Simulation);
+			float estimatedWorldMilliseconds = 0.0f;
+			for (size_t index = 0; index < ActiveList.size(); index++) {
+				estimatedWorldMilliseconds += ActiveList[index]->Statistics().LastTickMilliseconds *
+											  static_cast<float>(OwedList[index]);
+			}
 
-		const bool parallel = Settings_.Mode == ExecutionMode::WorldParallel &&
-							  !parallel::ForceSerialCompute() && order.size() > 1 &&
-							  estimatedWorldMilliseconds >= Settings_.WorldParallelFloorMilliseconds;
+			parallel = Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
+					   order.size() > 1 &&
+					   estimatedWorldMilliseconds >= Settings_.WorldParallelFloorMilliseconds;
+		}
 
 		if (parallel && !ActiveList.empty() && LaneCount > 0) {
 			// A world keeps its lane while the pinned worker prefix is unchanged.
@@ -803,43 +919,9 @@ namespace engine::world {
 					continue;
 				}
 
-				const std::span<const ecs::Scheduler::Timing> timings = world->Systems().Timings();
-				float systemsMilliseconds = 0.0f;
-				for (const ecs::Scheduler::Timing &timing : timings) {
-					systemsMilliseconds += timing.Milliseconds;
-				}
-
-				const std::string_view worldName = world->Name().Text();
-				core::FrameGraph::ReportedScope worldScope(
-					worldName.empty() ? std::string_view("world") : worldName,
-					core::ProfileCategory::ECS,
-					world->Statistics().LastTickMilliseconds
+				ReportWorkerSchedulerTimings(
+					*world, world->Systems().Timings(), world->Statistics().LastTickMilliseconds
 				);
-				core::FrameGraph::ReportedScope systemsScope(
-					"ecs.systems", core::ProfileCategory::ECS, systemsMilliseconds
-				);
-
-				for (uint8_t phaseIndex = 0; phaseIndex < static_cast<uint8_t>(ecs::Phase::Count);
-					 phaseIndex++) {
-					const auto phase = static_cast<ecs::Phase>(phaseIndex);
-					float phaseMilliseconds = 0.0f;
-					for (const ecs::Scheduler::Timing &timing : timings) {
-						if (timing.RunPhase == phase) {
-							phaseMilliseconds += timing.Milliseconds;
-						}
-					}
-
-					core::FrameGraph::ReportedScope phaseScope(
-						ecs::GetPhaseName(phase), core::ProfileCategory::ECS, phaseMilliseconds
-					);
-					for (const ecs::Scheduler::Timing &timing : timings) {
-						if (timing.RunPhase == phase) {
-							core::FrameGraph::Report(
-								timing.Name, core::ProfileCategory::ECS, timing.Milliseconds
-							);
-						}
-					}
-				}
 			}
 		} else {
 			const bool serialRequested =
@@ -853,14 +935,13 @@ namespace engine::world {
 			}
 		}
 
-		Ticking = false;
-
 		// --- 4. diagnostics, and anything the tick queued ---
 		// Every worker has joined before the router can touch an outbox. Bus and
 		// service traffic therefore crosses cores as copied envelopes at the next
 		// driver barrier, never as shared world storage.
 		{
 			ENGINE_PROFILE_CAT("tick diagnostics", engine::core::ProfileCategory::Simulation);
+			Ticking = false;
 			DrainControls();
 
 			Stats.ActiveWorlds = ActiveList.size();
@@ -884,10 +965,59 @@ namespace engine::world {
 				}
 				Stats.SimulationTicks += world->Statistics().Ticks;
 			}
-		}
 
-		Stats.LastTickMilliseconds =
-			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
+			Stats.LastTickMilliseconds =
+				static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
+		}
+	}
+
+	WorldStatus Universe::StepPaused(WorldId id, const std::function<void()> &boundary) {
+		RequireDriverThread("StepPaused");
+		if (Ticking) {
+			return WorldStatus::WrongThread;
+		}
+		World *world = Reach(id);
+		if (world == nullptr) return WorldStatus::NoSuchWorld;
+		if (world->State() != WorldState::Suspended) return WorldStatus::WrongThread;
+
+		// A paused step is still a universe boundary. Routing here keeps mailbox
+		// delivery exactly once, including driver-staged arrivals, and lets a
+		// world post traffic for the next manual boundary just as it does in Tick.
+		// Validate before this work so an invalid request cannot consume controls
+		// or move another world's mail. Controls can destroy or resume the target,
+		// so resolve it again before dereferencing it.
+		DrainControls();
+		world = Reach(id);
+		if (world == nullptr) return WorldStatus::NoSuchWorld;
+		if (world->State() != WorldState::Suspended) return WorldStatus::WrongThread;
+
+		const BarrierCounts barrier = Router->Route(WorldDirectory{Registry, Hosts}, Settings_);
+		Stats.BusOperations = barrier.BusOperations;
+		Stats.Deliveries = barrier.Deliveries;
+
+		Ticking = true;
+		try {
+			if (boundary) boundary();
+			world->TickPaused();
+		} catch (...) {
+			Ticking = false;
+			throw;
+		}
+		Ticking = false;
+
+		Stats.ActiveWorlds = 1;
+		Stats.Suspended = 0;
+		Stats.Faulted = 0;
+		Stats.Remote = 0;
+		Stats.SimulationTicks = 0;
+		for (const auto &candidate : Registry) {
+			if (candidate == nullptr) continue;
+			if (candidate->State() == WorldState::Suspended) Stats.Suspended++;
+			if (candidate->State() == WorldState::Faulted) Stats.Faulted++;
+			if (candidate->State() == WorldState::Remote) Stats.Remote++;
+			Stats.SimulationTicks += candidate->Statistics().Ticks;
+		}
+		return world->State() == WorldState::Faulted ? WorldStatus::Faulted : WorldStatus::Ok;
 	}
 
 	WorldStatus Universe::Present(WorldId id, float frameSeconds, float alpha) {
@@ -905,13 +1035,12 @@ namespace engine::world {
 		return WorldStatus::Ok;
 	}
 
-	size_t Universe::PresentMany(std::span<const Presentation> requests) {
+	size_t Universe::PresentMany(
+		std::span<const Presentation> requests, const std::function<void(WorldId, ecs::Store &)> &collect
+	) {
 		RequireDriverThread("PresentMany");
 
-		if (Ticking) {
-			ENGINE_ERROR("universe: PresentMany called while a tick batch is in flight.");
-			std::abort();
-		}
+		if (Ticking) return 0;
 
 		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
 		PresentationList.clear();
@@ -954,16 +1083,18 @@ namespace engine::world {
 			});
 
 		if (parallel && !PresentationList.empty()) {
-			parallel::Jobs::ForWorkers(PresentationLanes, [this](size_t begin, size_t end) {
+			parallel::Jobs::ForWorkers(PresentationLanes, [this, &collect](size_t begin, size_t end) {
 				for (size_t index = begin; index < end; index++) {
 					const Presentation &request = PresentationRequests[index];
 					PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+					if (collect) collect(request.World, PresentationList[index]->Storage());
 				}
 			});
 		} else {
 			for (size_t index = 0; index < PresentationList.size(); index++) {
 				const Presentation &request = PresentationRequests[index];
 				PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+				if (collect) collect(request.World, PresentationList[index]->Storage());
 			}
 		}
 

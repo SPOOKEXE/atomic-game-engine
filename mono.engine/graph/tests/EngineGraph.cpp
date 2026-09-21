@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -133,11 +134,24 @@ TEST_CASE("the authored render graph imports into the unified final stage", "[gr
 	REQUIRE(Build(DefaultPbrTierBDocument(), render, offender) == PipelineDocumentStatus::Ok);
 	EngineGraph engine;
 	REQUIRE(AppendRenderStage(render, engine, offender) == EngineGraphStatus::Ok);
-	CHECK(engine.NodeCount() == render.Count());
+	size_t enabled = 0;
+	for (uint32_t value = 1; value <= render.Count(); value++) {
+		const Node *node = render.Find(NodeId{value});
+		REQUIRE(node != nullptr);
+		if (!node->Enabled) {
+			CHECK(node->Name == Name("depth-peel"));
+			continue;
+		}
+		enabled++;
+	}
+	CHECK(engine.NodeCount() == enabled);
 	for (const EngineNode &node : engine.AllNodes()) {
 		CHECK(node.Stage == EngineStage::Render);
 		CHECK(node.Name.Text().starts_with("render."));
 	}
+	CHECK(std::none_of(engine.AllNodes().begin(), engine.AllNodes().end(), [](const EngineNode &node) {
+		return node.Name == Name("render.depth-peel");
+	}));
 
 	EngineSchedule schedule;
 	CHECK(CompileEngineGraph(engine, schedule, offender) == EngineGraphStatus::Ok);

@@ -7,6 +7,7 @@
 #include "ViewRecording.hpp"
 #include "VulkanTimestamps.hpp"
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
@@ -15,11 +16,14 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/graph/Shadow.hpp>
+#include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/render/MeshTable.hpp>
 #include <engine/render/MissingTexture.hpp>
+#include <engine/render/PortalExchange.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderCompiler.hpp>
+#include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -40,6 +44,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -48,7 +53,10 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <optional>
+#include <spirv-tools/libspirv.hpp>
+#include <spirv_cross.hpp>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -81,7 +89,9 @@ namespace engine::render {
 			caps.UnifiedQueue = true;
 			caps.PrefersMSL = binary.Form == resources::ShaderForm::Msl;
 			caps.MaxSamplersPerDraw = 10;
-			caps.MaxColourTargets = 4;
+			// SDL exposes no portable maximum-colour-target query. The renderer
+			// fills this only after its real eight-target G-buffer pipeline builds.
+			// A format query alone does not prove simultaneous attachment support.
 
 			const SDL_GPUTextureUsageFlags storageUsage = SDL_GPU_TEXTUREUSAGE_SAMPLER |
 														  SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ |
@@ -179,11 +189,33 @@ namespace engine::render {
 					static_cast<float>(microseconds / 1000.0)
 				);
 			}
+			for (const CaptureTimingMarks &marks : PendingCaptureTimings[slot]) {
+				auto found = CaptureTimings.find(marks.Id);
+				if (found == CaptureTimings.end()) continue;
+				CaptureTiming &capture = found->second;
+				if (capture.State == CaptureTimingState::Unavailable) continue;
+				if (marks.Opened >= count || marks.Closed >= count || marks.Closed <= marks.Opened) {
+					capture.State = CaptureTimingState::Unavailable;
+					capture.Reason = "unavailable/invalid_capture_gpu_timestamp";
+					continue;
+				}
+				const double nanoseconds = VulkanTimestamps::Between(times, marks.Opened, marks.Closed);
+				if (nanoseconds < 0.0 ||
+					nanoseconds > static_cast<double>(UINT64_MAX) - capture.Nanoseconds) {
+					capture.State = CaptureTimingState::Unavailable;
+					capture.Reason = "unavailable/capture_gpu_timestamp_overflow";
+					continue;
+				}
+				capture.Nanoseconds += static_cast<uint64_t>(nanoseconds);
+				capture.State = CaptureTimingState::Ready;
+				capture.Reason.clear();
+			}
 
 			if (publish) {
 				ResolvedTimingSequence = TimingSequence[slot];
 			}
 			PendingMarks[slot].clear();
+			PendingCaptureTimings[slot].clear();
 			TimingSequence[slot] = 0;
 		}
 	}
@@ -317,12 +349,14 @@ namespace engine::render {
 	// -----------------------------------------------------------------------
 
 	void FrameResult::Accumulate(const FrameResult &view) {
+		Submitted = Submitted || view.Submitted;
 		Presented = Presented || view.Presented;
 		DrawCalls += view.DrawCalls;
 		Triangles += view.Triangles;
 		SurfaceInstances += view.SurfaceInstances;
 		SurfacePasses += view.SurfacePasses;
 		PortalPasses += view.PortalPasses;
+		SurfaceBudgetExceeded = SurfaceBudgetExceeded || view.SurfaceBudgetExceeded;
 		RibbonVertices += view.RibbonVertices;
 		InstanceChunks += view.InstanceChunks;
 		InstanceChunksDirty += view.InstanceChunksDirty;
@@ -543,7 +577,7 @@ namespace engine::render {
 		std::abort();
 	}
 
-	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight) {
+	bool Renderer::Initialise(SDL_Window *window, uint32_t framesInFlight, bool retainSourceTextures) {
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
 		// whoever owns the object and initialised by whoever owns the window -
@@ -559,6 +593,8 @@ namespace engine::render {
 		// was right while an offscreen target did not exist and stopped being
 		// right at v0.7.
 		State->Window = window;
+		State->RetainSourceTextures = retainSourceTextures;
+		State->StageProbe.Configure();
 
 		// One backend on every platform. Apple packages MoltenVK beside the
 		// executable, so it follows this same Vulkan and SPIR-V path.
@@ -654,6 +690,24 @@ namespace engine::render {
 			}
 		}
 
+		SDL_GPUSamplerCreateInfo sampler{};
+		// Nearest, because the overlay is pixel art at exactly one texel per
+		// pixel. Linear would blur the 3x5 font into illegibility.
+		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		State->OverlaySampler = SDL_CreateGPUSampler(State->Device, &sampler);
+
+		if (!State->CreatePipelines() || !State->CreateGeometry()) {
+			Shutdown();
+			return false;
+		}
+
+		// The native G-buffer pipeline is the proof that this device accepts all
+		// eight attachments at once. Choose after that probe so a backend that
+		// rejects it starts with the forward graph instead of aborting startup.
 		const PipelineTierDecision defaultTier = ChooseDefaultPipeline(State->Caps);
 		for (const PipelineTierRejection &rejected : defaultTier.Fallthrough) {
 			ENGINE_INFO(
@@ -687,21 +741,6 @@ namespace engine::render {
 			return false;
 		}
 
-		SDL_GPUSamplerCreateInfo sampler{};
-		// Nearest, because the overlay is pixel art at exactly one texel per
-		// pixel. Linear would blur the 3x5 font into illegibility.
-		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
-		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
-		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-		State->OverlaySampler = SDL_CreateGPUSampler(State->Device, &sampler);
-
-		if (!State->CreatePipelines() || !State->CreateGeometry()) {
-			Shutdown();
-			return false;
-		}
-
 		ENGINE_INFO("renderer ready on {}", State->Backend);
 		return true;
 	}
@@ -711,6 +750,9 @@ namespace engine::render {
 		// another thread holds a command buffer against it is the same violation
 		// arriving at the end of the frame instead of the middle.
 		RequireOwningThread("Shutdown");
+		State->VisibilityWorking.Invalidate();
+		State->VisibilityCompleted = {};
+		HookBind->Shutdown();
 
 		// **A frame waited for and never drawn, which is what quitting during
 		// the event pump produces.** The loop's usual shape makes this
@@ -724,6 +766,7 @@ namespace engine::render {
 		if (!device) {
 			return;
 		}
+		State->StageProbe.Clear(device);
 		const BackendHandles handles = Backend();
 		for (auto installed = CustomNodeHandlers.rbegin(); installed != CustomNodeHandlers.rend();
 			 installed++) {
@@ -737,6 +780,13 @@ namespace engine::render {
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
+		if (State->PortalTreeJob.Fence) {
+			SDL_ReleaseGPUFence(device, State->PortalTreeJob.Fence);
+			State->PortalTreeJob.Fence = nullptr;
+		}
+		State->PortalTreeJob.Submitted = false;
+		CancelPortalCaptureTreeComposition(State->PortalTreeJob.Token);
+
 		for (Impl::PendingSceneSubmission &submission : State->PendingSceneSubmissions) {
 			if (submission.Fence != nullptr) {
 				SDL_ReleaseGPUFence(device, submission.Fence);
@@ -744,6 +794,25 @@ namespace engine::render {
 		}
 		State->PendingSceneSubmissions.clear();
 		State->DropStagedSceneFrames();
+		for (auto &tree : State->ImportedPortalTrees)
+			DropPortalCaptureTree(tree.Token);
+		for (Impl::ResourceImageSlot &slot : State->ResourceImages) {
+			State->ReleaseResidentImage(slot);
+			gpu::ReleaseTransferBuffer(device, slot.Transfer);
+			slot = {};
+		}
+		for (auto &image : State->ImportedPortals) {
+			State->ReleasePortalImport(image);
+		}
+		for (auto &image : State->ImportedPortalShadows) {
+			State->ReleasePortalShadow(image);
+		}
+		State->ReleaseResidentImageCache();
+		gpu::ReleaseTransferBuffer(device, State->PortalImportStaging);
+		State->PortalImportStaging = nullptr;
+		State->PortalImportStagingBytes = 0;
+		State->PortalImportUsage.StagingBytes = 0;
+		State->ReportPortalImportUsage();
 		State->Timestamps.Shutdown();
 		if (State->Preview.Fence != nullptr) {
 			SDL_ReleaseGPUFence(device, State->Preview.Fence);
@@ -759,6 +828,7 @@ namespace engine::render {
 		// above is what makes releasing any of this safe.
 		State->ReleaseShaderVariants();
 		State->ReleaseAllGraphState();
+		State->ReleaseLod();
 		State->ReleaseOcclusion();
 		State->ReleaseParticlePool();
 		State->ReleaseEnvironments();
@@ -775,37 +845,99 @@ namespace engine::render {
 		if (State->WireframeTransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeTransparentPipeline);
 		}
+		if (State->WireframeGBufferPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeGBufferPipeline);
+		}
 		for (SDL_GPUGraphicsPipeline *pipeline :
-			 {State->GBufferPipeline,
+			 {State->PackedOpaquePipeline,
+			  State->PackedForwardPipeline,
+			  State->PackedTransparentPipeline,
+			  State->PackedWireframeOpaquePipeline,
+			  State->PackedWireframeTransparentPipeline,
+			  State->PackedHdrOpaquePipeline,
+			  State->PackedHdrTransparentPipeline,
+			  State->PackedHdrWireframeOpaquePipeline,
+			  State->PackedHdrWireframeTransparentPipeline,
+			  State->PackedGBufferPipeline,
+			  State->PackedWireframeGBufferPipeline,
+			  State->PackedDepthPeelPipeline,
+			  State->PackedMeshShadowPipeline,
+			  State->PackedTransparentLayerPipeline,
+			  State->PackedTransparentLayerColourPipeline,
+			  State->ParticleLayerPipeline,
+			  State->ParticleLayerColourPipeline,
+			  State->AdditiveParticleLayerColourPipeline,
+			  State->RibbonLayerPipeline,
+			  State->RibbonLayerColourPipeline,
+			  State->AdditiveRibbonLayerColourPipeline,
+			  State->HdrParticlePipeline,
+			  State->HdrAdditiveParticlePipeline,
+			  State->HdrRibbonPipeline,
+			  State->HdrAdditiveRibbonPipeline,
+			  State->HdrOpaquePipeline,
+			  State->HdrTransparentPipeline,
+			  State->HdrWireframeOpaquePipeline,
+			  State->HdrWireframeTransparentPipeline,
+			  State->GBufferPipeline,
+			  State->DepthPeelPipeline,
 			  State->DepthLinearPipeline,
+			  State->DepthValidityPipeline,
+			  State->CameraMotionPipeline,
+			  State->DepthComposePipeline,
+			  State->ColourComposePipeline,
+			  State->AmbientResponsePipeline,
+			  State->DeferredLightingBaselinePipeline,
+			  State->DeferredLightingDirectionalPipeline,
+			  State->AmbientMergePipeline,
+			  State->AmbientCorrectPipeline,
+			  State->DirectionalCorrectPipeline,
+			  State->TransparentLayerPipeline,
+			  State->TransparentLayerColourPipeline,
+			  State->InterfaceLayerPipeline,
+			  State->InterfaceLayerColourPipeline,
 			  State->SsaoPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
 			  State->VolumePipeline,
-			  State->TonemapPipeline,
-			  State->PostProcessPipeline}) {
+			  State->TonemapPipeline}) {
 			if (pipeline != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
 			}
 		}
-		State->PostProcessPipeline = nullptr;
-		State->PostProcessShaderName = core::Name{};
-		for (const auto &[name, pipeline] : State->LensPipelines) {
+		for (const auto &[owner, variant] : State->PostProcessPipelines) {
+			(void)owner;
+			SDL_ReleaseGPUGraphicsPipeline(device, variant.Pipeline);
+		}
+		State->PostProcessPipelines.clear();
+		for (const auto &[name, variant] : State->LensPipelines) {
 			(void)name;
-			if (pipeline != nullptr) {
-				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+			if (variant.Pipeline != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(device, variant.Pipeline);
 			}
 		}
 		State->LensPipelines.clear();
+		for (const auto &group : State->PortalLensPrograms)
+			for (const auto &binding : group.Bindings)
+				SDL_ReleaseGPUGraphicsPipeline(State->Device, binding.Pipeline);
+		State->PortalLensPrograms = {};
+		for (auto &refusals : State->ShaderRefusals)
+			refusals.clear();
 		if (State->TransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
 		}
-		if (State->EnvironmentCompute != nullptr) {
-			SDL_ReleaseGPUComputePipeline(device, State->EnvironmentCompute);
-			State->EnvironmentCompute = nullptr;
+		if (State->EnvironmentSkyCompute != nullptr) {
+			SDL_ReleaseGPUComputePipeline(device, State->EnvironmentSkyCompute);
+			State->EnvironmentSkyCompute = nullptr;
+		}
+		if (State->EnvironmentCloudCompute != nullptr) {
+			SDL_ReleaseGPUComputePipeline(device, State->EnvironmentCloudCompute);
+			State->EnvironmentCloudCompute = nullptr;
 		}
 		if (State->ShadowPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->ShadowPipeline);
+		}
+		if (State->PackedShadowPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->PackedShadowPipeline);
 		}
 		if (State->ShadowTexture) {
 			gpu::ReleaseTexture(device, State->ShadowTexture);
@@ -982,6 +1114,40 @@ namespace engine::render {
 		}
 		RequireOwningThread("ForgetWorld");
 		SDL_WaitForGPUIdle(State->Device);
+		for (auto &tree : State->ImportedPortalTrees)
+			if (!tree.Nodes.empty() && tree.Nodes.front().Binding.World == world &&
+				tree.Nodes.front().Binding.WorldName == name)
+				DropPortalCaptureTree(tree.Token);
+		for (auto &image : State->ImportedPortals) {
+			if (image.Binding.World == world && image.Binding.WorldName == name) {
+				State->ReleasePortalImport(image);
+			}
+		}
+		for (auto &image : State->ImportedPortalShadows) {
+			if (image.Binding.World == world && image.Binding.WorldName == name) {
+				State->ReleasePortalShadow(image);
+			}
+		}
+		// World-scoped graph resources use the world id as their owner. Retire
+		// them at the same idle boundary as resident instance and particle rows;
+		// otherwise each discarded world leaves its history images on the device.
+		const auto graphWorld = State->GraphWorldNames.find(world);
+		if (graphWorld != State->GraphWorldNames.end() && graphWorld->second == name) {
+			std::erase_if(State->PendingGraphHistoryWrites, [world](const auto &write) {
+				return write.Scope == graph::NodeScope::World && write.Owner == world;
+			});
+			std::erase_if(State->GraphTargets, [this, world](const auto &target) {
+				if (target.Scope != graph::NodeScope::World || target.Owner != world) return false;
+				if (target.Texture != nullptr) gpu::ReleaseTexture(State->Device, target.Texture);
+				return true;
+			});
+			std::erase_if(State->GraphBuffers, [this, world](const auto &buffer) {
+				if (buffer.Scope != graph::NodeScope::World || buffer.Owner != world) return false;
+				if (buffer.Buffer != nullptr) gpu::ReleaseBuffer(State->Device, buffer.Buffer);
+				return true;
+			});
+			State->GraphWorldNames.erase(graphWorld);
+		}
 
 		const auto sameWorld = [world, name](const auto &resident) {
 			return resident.Id == world && resident.Name == name;
@@ -1050,15 +1216,32 @@ namespace engine::render {
 		State->ActiveParticleWorld = nullptr;
 	}
 
-	bool Renderer::MeshExtentOf(const core::Name &name, core::Vector3 &out) const {
-		if (State == nullptr || !State->Meshes.Has(name)) {
+	core::Name Renderer::Impl::MeshContentOwner(core::Name name, core::Name owner) {
+		if (!owner.IsValid()) return {};
+		static const auto builtins = [] {
+			std::array<core::Name, assets::BUILTIN_MESH_COUNT> names;
+			for (uint8_t index = 0; index < names.size(); ++index) {
+				names[index] = core::Name(assets::BuiltinName(static_cast<assets::BuiltinMesh>(index)));
+			}
+			return names;
+		}();
+		return std::find(builtins.begin(), builtins.end(), name) != builtins.end() ? core::Name{} : owner;
+	}
+
+	core::Name Renderer::Impl::TextureContentOwner(core::Name name, core::Name owner) {
+		static const core::Name checker(assets::BuiltinName(assets::BuiltinTexture::Checker));
+		return name == checker ? core::Name{} : owner;
+	}
+
+	bool Renderer::MeshExtentOf(const core::Name &name, core::Vector3 &out, core::Name owner) const {
+		if (State == nullptr || !State->Meshes.Has(name, Impl::MeshContentOwner(name, owner))) {
 			return false;
 		}
-		out = State->Meshes.Resolve(name).Extent;
+		out = State->Meshes.Resolve(name, Impl::MeshContentOwner(name, owner)).Extent;
 		return true;
 	}
 
-	bool Renderer::AddMesh(const core::Name &name, const assets::MeshData &mesh) {
+	bool Renderer::AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
 		}
@@ -1071,40 +1254,102 @@ namespace engine::render {
 		// loading in. The entry is registered immediately either way, so
 		// `MeshExtentOf` and the parts waiting to be sized by it are unaffected.
 		//
-		// A caller that needs the geometry resident before the next `Render` -
-		// a readback, a preview taken outside the frame loop - calls
-		// `FlushMeshes` itself.
-		return State->Meshes.Add(name, mesh);
+		if (!State->Meshes.Add(name, mesh, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
-	bool Renderer::FlushMeshes() {
+	bool Renderer::DropMesh(const core::Name &name, core::Name owner) {
+		if (State == nullptr || !State->Meshes.Drop(name, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
+	}
+
+	MeshCopyStatus Renderer::CopyMesh(
+		const core::Name &name, assets::MeshData &out, size_t vertexLimit, size_t indexLimit, core::Name owner
+	) const {
+		return State != nullptr ? State->Meshes.Copy(name, out, vertexLimit, indexLimit, owner)
+								: MeshCopyStatus::Missing;
+	}
+
+	TextureCopyStatus Renderer::CopyTexture(
+		const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner
+	) const {
+		return State != nullptr ? State->Textures.Copy(name, out, byteLimit, owner)
+								: TextureCopyStatus::Missing;
+	}
+
+	bool Renderer::AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner) {
+		if (State == nullptr || State->Device == nullptr) return false;
+		if (!State->Meshes.AddPacked(name, mesh, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
+	}
+
+	void Renderer::DropContentOwner(core::Name owner) {
+		if (State == nullptr || !owner.IsValid()) return;
+		for (auto &refusals : State->ShaderRefusals)
+			std::erase_if(refusals, [&](const auto &entry) {
+				return static_cast<uint32_t>(entry.first >> 32) == owner.Id();
+			});
+		bool shaders = false;
+		for (auto entry = State->ShaderVariants.begin(); entry != State->ShaderVariants.end();) {
+			const uint64_t key = (entry++)->first;
+			if (static_cast<uint32_t>(key >> 32) != owner.Id()) continue;
+			if (!shaders) (void)WaitForFrame();
+			State->DropShaderVariant(core::Name::FromId(static_cast<uint32_t>(key)), owner);
+			shaders = true;
+		}
+		for (auto entry = State->LensPipelines.begin(); entry != State->LensPipelines.end();) {
+			if (static_cast<uint32_t>(entry->first >> 32) != owner.Id()) {
+				++entry;
+				continue;
+			}
+			if (!shaders) (void)WaitForFrame();
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, entry->second.Pipeline);
+			entry = State->LensPipelines.erase(entry);
+			shaders = true;
+		}
+		if (const auto found = State->PostProcessPipelines.find(owner.Id());
+			found != State->PostProcessPipelines.end()) {
+			if (!shaders) (void)WaitForFrame();
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, found->second.Pipeline);
+			State->PostProcessPipelines.erase(found);
+			shaders = true;
+		}
+		const size_t awaited = State->Textures.Awaited();
+		const size_t textures = State->Textures.DropOwner(owner);
+		const size_t meshes = State->Meshes.DropOwner(owner);
+		if (shaders || textures != 0 || meshes != 0 || awaited != State->Textures.Awaited()) {
+			++State->ResourceEpoch;
+		}
+	}
+
+	bool Renderer::AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
 		}
-		return State->Meshes.Flush();
+		if (!State->Textures.Add(name, image, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
-	bool Renderer::AddTexture(const core::Name &name, const assets::TextureData &image) {
-		if (State == nullptr || State->Device == nullptr) {
-			return false;
-		}
-		return State->Textures.Add(name, image);
-	}
-
-	void Renderer::ExpectTexture(const core::Name &name) {
-		if (State != nullptr) {
-			State->Textures.Expect(name);
+	void Renderer::ExpectTexture(const core::Name &name, core::Name owner) {
+		if (State != nullptr && name.IsValid() && !State->Textures.Expecting(name, owner)) {
+			State->Textures.Expect(name, owner);
+			++State->ResourceEpoch;
 		}
 	}
 
-	void Renderer::StopExpectingTexture(const core::Name &name) {
-		if (State != nullptr) {
-			State->Textures.StopExpecting(name);
+	void Renderer::StopExpectingTexture(const core::Name &name, core::Name owner) {
+		if (State != nullptr && State->Textures.Expecting(name, owner)) {
+			State->Textures.StopExpecting(name, owner);
+			++State->ResourceEpoch;
 		}
 	}
 
-	bool Renderer::ExpectingTexture(const core::Name &name) const {
-		return State != nullptr && State->Textures.Expecting(name);
+	bool Renderer::ExpectingTexture(const core::Name &name, core::Name owner) const {
+		return State != nullptr && State->Textures.Expecting(name, owner);
 	}
 
 	void Renderer::SetAnimationTime(double seconds) {
@@ -1262,42 +1507,53 @@ namespace engine::render {
 		return State == nullptr ? 0u : State->PortalDepth;
 	}
 
-	FlipbookCell Renderer::TextureCell(const core::Name &name, double seconds) const {
+	FlipbookCell Renderer::TextureCell(const core::Name &name, double seconds, core::Name owner) const {
 		if (State == nullptr) {
 			return {};
 		}
-		return State->Textures.CellOf(name, seconds);
+		return State->Textures.CellOf(name, seconds, Impl::TextureContentOwner(name, owner));
 	}
 
 	uint64_t Renderer::TextureAnimationSignature(double seconds) const {
 		return State == nullptr ? 0 : State->Textures.AnimationSignature(seconds);
 	}
 
-	void *Renderer::TextureHandle(const core::Name &name) const {
+	uint64_t Renderer::ResourceRevision() const {
+		return State == nullptr ? 0 : State->ResourceEpoch;
+	}
+
+	void *Renderer::TextureHandle(const core::Name &name, core::Name owner) const {
 		if (State == nullptr) {
 			return nullptr;
 		}
-		return State->Textures.Find(name);
+		return State->Textures.Find(name, Impl::TextureContentOwner(name, owner));
 	}
 
-	bool Renderer::TextureSize(const core::Name &name, uint32_t &width, uint32_t &height) const {
+	bool
+	Renderer::TextureSize(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner) const {
 		if (State == nullptr) {
 			return false;
 		}
-		return State->Textures.SizeOf(name, width, height);
+		return State->Textures.SizeOf(name, width, height, Impl::TextureContentOwner(name, owner));
 	}
 
-	bool Renderer::DropTexture(const core::Name &name) {
+	bool Renderer::DropTexture(const core::Name &name, core::Name owner) {
 		if (State == nullptr) {
 			return false;
 		}
-		return State->Textures.Drop(name);
+		if (!State->Textures.Drop(name, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
-	bool Renderer::AddShader(const core::Name &name, std::span<const uint32_t> spirv) {
-		if (State == nullptr || State->Device == nullptr) {
+	bool Renderer::AddShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
+		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) {
 			return false;
 		}
+
+		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
+		const auto held = State->ShaderVariants.find(Impl::ShaderVariantKey(name, owner));
+		if (held != State->ShaderVariants.end() && held->second.CodeHash == hash) return true;
 
 		// **Built on the spot rather than at the next frame's barrier**, which
 		// is `AddMesh`'s rule and its reason: a caller has already arranged for
@@ -1309,41 +1565,227 @@ namespace engine::render {
 		// editing a `ShaderScript` replaces a pipeline that the frame in flight
 		// may still be drawing through, and releasing that is a use after free
 		// inside the driver rather than an error here.
-		if (State->ShaderVariants.contains(name.Id())) {
+		if (State->ShaderVariants.contains(Impl::ShaderVariantKey(name, owner))) {
 			(void)WaitForFrame();
 		}
-		return State->AddShaderVariant(name, spirv);
+		if (!State->AddShaderVariant(name, spirv, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
-	bool Renderer::DropShader(const core::Name &name) {
+	bool Renderer::DropShader(const core::Name &name, core::Name owner) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
 		}
-		if (!State->ShaderVariants.contains(name.Id())) {
+		if (!State->ShaderVariants.contains(Impl::ShaderVariantKey(name, owner))) {
 			return false;
 		}
 
 		(void)WaitForFrame();
-		State->DropShaderVariant(name);
+		State->DropShaderVariant(name, owner);
+		++State->ResourceEpoch;
 		return true;
 	}
 
-	bool Renderer::HasShader(const core::Name &name) const {
-		return State != nullptr && name.IsValid() && State->ShaderVariants.contains(name.Id());
+	bool Renderer::HasShader(const core::Name &name, core::Name owner) const {
+		return State != nullptr && name.IsValid() &&
+			   State->ShaderVariants.contains(Impl::ShaderVariantKey(name, owner));
 	}
 
-	bool Renderer::AddLensShader(const core::Name &name, std::span<const uint32_t> spirv) {
-		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) {
-			return false;
+	namespace {
+		std::atomic<uint64_t> NextPortalLensToken{1};
+
+		uint64_t TakePortalLensToken() {
+			auto token = NextPortalLensToken.load(std::memory_order_relaxed);
+			while (token != 0) {
+				if (NextPortalLensToken.compare_exchange_weak(token, token + 1, std::memory_order_relaxed))
+					return token;
+			}
+			return 0;
 		}
 
-		const bool toMsl = State->Binary.Form == resources::ShaderForm::Msl;
+		bool ValidCapturedLensProgram(std::span<const uint32_t> words) {
+			spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_0);
+			if (!validator.Validate(words.data(), words.size())) return false;
+			try {
+				spirv_cross::Compiler module(words.data(), words.size());
+				const auto entries = module.get_entry_points_and_stages();
+				if (entries.size() != 1 || entries[0].execution_model != spv::ExecutionModelFragment ||
+					entries[0].name != "main")
+					return false;
+				const auto resources = module.get_shader_resources();
+				if (!resources.storage_buffers.empty() || !resources.storage_images.empty() ||
+					!resources.subpass_inputs.empty() || !resources.atomic_counters.empty() ||
+					!resources.acceleration_structures.empty() || !resources.gl_plain_uniforms.empty() ||
+					!resources.tensors.empty() || !resources.push_constant_buffers.empty() ||
+					!resources.shader_record_buffers.empty() || !resources.separate_images.empty() ||
+					!resources.separate_samplers.empty() || !resources.builtin_outputs.empty() ||
+					resources.sampled_images.size() > 2 || resources.uniform_buffers.size() > 1 ||
+					resources.stage_inputs.size() > 1 || resources.stage_outputs.size() != 1)
+					return false;
+				const auto vector = [](const spirv_cross::SPIRType &type, uint32_t count) {
+					return type.basetype == spirv_cross::SPIRType::Float && type.width == 32 &&
+						   type.vecsize == count && type.columns == 1 && type.array.empty();
+				};
+				for (const auto &input : resources.stage_inputs)
+					if (module.get_decoration(input.id, spv::DecorationLocation) != 0 ||
+						!vector(module.get_type(input.type_id), 2))
+						return false;
+				const auto &output = resources.stage_outputs.front();
+				if (module.get_decoration(output.id, spv::DecorationLocation) != 0 ||
+					module.get_decoration(output.id, spv::DecorationIndex) != 0 ||
+					!vector(module.get_type(output.type_id), 4))
+					return false;
+				uint32_t samplerBindings = 0;
+				for (const auto &sampler : resources.sampled_images) {
+					const auto binding = module.get_decoration(sampler.id, spv::DecorationBinding);
+					const auto &type = module.get_type(sampler.type_id);
+					if (module.get_decoration(sampler.id, spv::DecorationDescriptorSet) != 2 || binding > 1 ||
+						(samplerBindings & (1u << binding)) != 0 || !type.array.empty() ||
+						type.image.dim != spv::Dim2D || type.image.arrayed || type.image.ms ||
+						type.image.depth ||
+						module.get_type(type.image.type).basetype != spirv_cross::SPIRType::Float)
+						return false;
+					samplerBindings |= 1u << binding;
+				}
+				for (const auto &uniform : resources.uniform_buffers) {
+					const auto &type = module.get_type(uniform.base_type_id);
+					if (module.get_decoration(uniform.id, spv::DecorationDescriptorSet) != 3 ||
+						module.get_decoration(uniform.id, spv::DecorationBinding) != 0 ||
+						!module.get_type(uniform.type_id).array.empty() || type.member_types.size() > 7 ||
+						module.get_declared_struct_size(type) > sizeof(LensPassUniforms))
+						return false;
+					constexpr std::array<uint32_t, 7> offsets{
+						0,
+						64,
+						128,
+						144,
+						160,
+						176,
+						static_cast<uint32_t>(offsetof(LensPassUniforms, CameraDepth))
+					};
+					for (uint32_t member = 0; member < type.member_types.size(); ++member) {
+						const auto &field = module.get_type(type.member_types[member]);
+						if (module.type_struct_member_offset(type, member) != offsets[member]) return false;
+						if (member < 2) {
+							if (field.basetype != spirv_cross::SPIRType::Float || field.width != 32 ||
+								field.vecsize != 4 || field.columns != 4 || !field.array.empty() ||
+								module.type_struct_member_matrix_stride(type, member) != 16 ||
+								module.has_member_decoration(type.self, member, spv::DecorationRowMajor))
+								return false;
+						} else if (member < 5) {
+							if (!vector(field, 4)) return false;
+						} else if (member == 5) {
+							if (field.basetype != spirv_cross::SPIRType::Struct || field.array.size() != 1 ||
+								!field.array_size_literal[0] ||
+								field.array[0] != scene::MAX_SCENE_SHADER_LENSES ||
+								field.member_types.size() != 5 ||
+								module.type_struct_member_array_stride(type, member) !=
+									sizeof(LensPassUniforms::LensUniform))
+								return false;
+							for (uint32_t component = 0; component < 5; ++component)
+								if (!vector(module.get_type(field.member_types[component]), 4) ||
+									module.type_struct_member_offset(field, component) != component * 16)
+									return false;
+						} else if (!vector(field, 4)) {
+							return false;
+						}
+					}
+				}
+				return true;
+			} catch (const spirv_cross::CompilerError &) {
+				return false;
+			}
+		}
+	}
+
+	uint64_t Renderer::RetainPortalLensPrograms(const PortalCaptureLenses &lenses) {
+		ENGINE_PROFILE_CAT("captured lens programs retain", core::ProfileCategory::Render);
+		RequireOwningThread("RetainPortalLensPrograms");
+		if (!State || !State->Device || lenses.Programs.empty() || !ValidPortalCaptureLenses(lenses))
+			return 0;
+		std::vector<Impl::PortalLensProgramBinding> bindings;
+		for (const auto &lens : lenses.Entries) {
+			const core::Name name(lens.Shader);
+			const auto held = std::find_if(bindings.begin(), bindings.end(), [&](const auto &binding) {
+				return binding.Shader == name;
+			});
+			if (held != bindings.end()) {
+				if (held->Hash != lens.ProgramHash) return 0;
+				continue;
+			}
+			bindings.push_back({name, lens.ProgramHash});
+		}
+		std::sort(bindings.begin(), bindings.end(), [](const auto &left, const auto &right) {
+			return left.Shader.Id() < right.Shader.Id();
+		});
+		for (auto &group : State->PortalLensPrograms) {
+			if (group.Token != 0 && group.Bindings == bindings) {
+				if (group.References == std::numeric_limits<size_t>::max()) return 0;
+				++group.References;
+				return group.Token;
+			}
+		}
+		const auto free = std::find_if(
+			State->PortalLensPrograms.begin(), State->PortalLensPrograms.end(), [](const auto &group) {
+				return group.Token == 0;
+			}
+		);
+		if (free == State->PortalLensPrograms.end()) return 0;
+		for (const auto &binding : bindings) {
+			const auto program =
+				std::find_if(lenses.Programs.begin(), lenses.Programs.end(), [&](const auto &candidate) {
+					return candidate.Hash == binding.Hash;
+				});
+			if (program == lenses.Programs.end() ||
+				assets::Hasher::Of(std::as_bytes(std::span(program->SpirV))) != binding.Hash ||
+				!ValidCapturedLensProgram(program->SpirV))
+				return 0;
+		}
+		const auto token = TakePortalLensToken();
+		if (token == 0) return 0;
+		for (auto &binding : bindings) {
+			const auto program =
+				std::find_if(lenses.Programs.begin(), lenses.Programs.end(), [&](const auto &candidate) {
+					return candidate.Hash == binding.Hash;
+				});
+			binding.Pipeline = State->CreateLensPipeline(binding.Shader, program->SpirV);
+			if (!binding.Pipeline) {
+				for (const auto &installed : bindings)
+					if (installed.Pipeline) SDL_ReleaseGPUGraphicsPipeline(State->Device, installed.Pipeline);
+				return 0;
+			}
+		}
+		*free = {.Token = token, .References = 1, .Bindings = std::move(bindings)};
+		++State->ResourceEpoch;
+		return free->Token;
+	}
+
+	void Renderer::ReleasePortalLensPrograms(uint64_t token) {
+		RequireOwningThread("ReleasePortalLensPrograms");
+		if (!State || token == 0) return;
+		for (auto &group : State->PortalLensPrograms) {
+			if (group.Token != token) continue;
+			if (--group.References != 0) return;
+			(void)WaitForFrame();
+			for (const auto &binding : group.Bindings)
+				SDL_ReleaseGPUGraphicsPipeline(State->Device, binding.Pipeline);
+			group = {};
+			++State->ResourceEpoch;
+			return;
+		}
+	}
+
+	SDL_GPUGraphicsPipeline *
+	Renderer::Impl::CreateLensPipeline(core::Name name, std::span<const uint32_t> spirv) {
+		ENGINE_PROFILE_CAT("lens pipeline create", core::ProfileCategory::Render);
+		const bool toMsl = Binary.Form == resources::ShaderForm::Msl;
 		std::string translated;
 		if (toMsl) {
 			msl::Translation result = msl::Translate(spirv);
 			if (result.Failed) {
 				ENGINE_ERROR("lens shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
-				return false;
+				return nullptr;
 			}
 			translated = std::move(result.Source);
 		}
@@ -1352,21 +1794,21 @@ namespace engine::render {
 		fragmentInfo.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
 								  : reinterpret_cast<const Uint8 *>(spirv.data());
 		fragmentInfo.code_size = toMsl ? translated.size() : spirv.size() * sizeof(uint32_t);
-		fragmentInfo.entrypoint = State->Binary.EntryPoint;
-		fragmentInfo.format = State->Binary.Format;
+		fragmentInfo.entrypoint = Binary.EntryPoint;
+		fragmentInfo.format = Binary.Format;
 		fragmentInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
 		fragmentInfo.num_samplers = 2;
 		fragmentInfo.num_uniform_buffers = 1;
 
-		SDL_GPUShader *fragment = SDL_CreateGPUShader(State->Device, &fragmentInfo);
+		SDL_GPUShader *fragment = SDL_CreateGPUShader(Device, &fragmentInfo);
 		if (fragment == nullptr) {
 			ENGINE_ERROR("lens shader '{}': {}", name.Text(), SDL_GetError());
-			return false;
+			return nullptr;
 		}
-		SDL_GPUShader *vertex = State->LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		SDL_GPUShader *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		if (vertex == nullptr) {
-			SDL_ReleaseGPUShader(State->Device, fragment);
-			return false;
+			SDL_ReleaseGPUShader(Device, fragment);
+			return nullptr;
 		}
 
 		SDL_GPUColorTargetDescription target{};
@@ -1379,47 +1821,155 @@ namespace engine::render {
 		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
 		info.target_info.color_target_descriptions = &target;
 		info.target_info.num_color_targets = 1;
-		SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(State->Device, &info);
-		SDL_ReleaseGPUShader(State->Device, vertex);
-		SDL_ReleaseGPUShader(State->Device, fragment);
+		SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		SDL_ReleaseGPUShader(Device, vertex);
+		SDL_ReleaseGPUShader(Device, fragment);
 		if (pipeline == nullptr) {
 			ENGINE_ERROR("lens shader '{}' pipeline: {}", name.Text(), SDL_GetError());
+			return nullptr;
+		}
+
+		return pipeline;
+	}
+
+	bool Renderer::AddLensShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
+		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) {
 			return false;
 		}
 
-		const auto previous = State->LensPipelines.find(name.Id());
+		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
+		const auto held = State->LensPipelines.find(Impl::ShaderVariantKey(name, owner));
+		if (held != State->LensPipelines.end() && held->second.CodeHash == hash) return true;
+
+		SDL_GPUGraphicsPipeline *pipeline = State->CreateLensPipeline(name, spirv);
+		if (!pipeline) return false;
+
+		const auto previous = State->LensPipelines.find(Impl::ShaderVariantKey(name, owner));
 		if (previous != State->LensPipelines.end()) {
 			(void)WaitForFrame();
-			SDL_ReleaseGPUGraphicsPipeline(State->Device, previous->second);
-			previous->second = pipeline;
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, previous->second.Pipeline);
+			previous->second = {hash, pipeline};
 		} else {
-			State->LensPipelines.emplace(name.Id(), pipeline);
+			State->LensPipelines.emplace(
+				Impl::ShaderVariantKey(name, owner), Impl::LensVariant{hash, pipeline}
+			);
 		}
+		++State->ResourceEpoch;
 		return true;
 	}
 
-	bool Renderer::DropLensShader(const core::Name &name) {
+	bool Renderer::DropLensShader(const core::Name &name, core::Name owner) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
 		}
-		const auto found = State->LensPipelines.find(name.Id());
+		const auto found = State->LensPipelines.find(Impl::ShaderVariantKey(name, owner));
 		if (found == State->LensPipelines.end()) {
 			return false;
 		}
 		(void)WaitForFrame();
-		SDL_ReleaseGPUGraphicsPipeline(State->Device, found->second);
+		SDL_ReleaseGPUGraphicsPipeline(State->Device, found->second.Pipeline);
 		State->LensPipelines.erase(found);
+		++State->ResourceEpoch;
 		return true;
 	}
 
-	bool Renderer::HasLensShader(const core::Name &name) const {
-		return State != nullptr && name.IsValid() && State->LensPipelines.contains(name.Id());
+	bool Renderer::HasLensShader(const core::Name &name, core::Name owner) const {
+		return State != nullptr && name.IsValid() &&
+			   State->LensPipelines.contains(Impl::ShaderVariantKey(name, owner));
 	}
 
-	bool Renderer::SetPostProcessShader(const core::Name &name, std::span<const uint32_t> spirv) {
+	assets::ContentHash Renderer::LensShaderHash(const core::Name &name, core::Name owner) const {
+		if (!State || !name.IsValid()) return {};
+		const auto found = State->LensPipelines.find(Impl::ShaderVariantKey(name, owner));
+		return found == State->LensPipelines.end() ? assets::ContentHash{} : found->second.CodeHash;
+	}
+
+	bool Renderer::PrepareShaders(
+		const ShaderLibrary &library,
+		std::span<const core::Name> materials,
+		std::span<const core::Name> lenses,
+		core::Name postProcess,
+		core::Name owner
+	) {
+		if (State == nullptr || State->Device == nullptr) return false;
+		const auto before = State->ResourceEpoch;
+		const auto wanted = [](std::span<const core::Name> names, core::Name name) {
+			return std::find(names.begin(), names.end(), name) != names.end();
+		};
+		const auto accepted = [](const ShaderModule *module) {
+			return module != nullptr && !module->CodeHash.IsZero();
+		};
+		for (auto entry = State->ShaderVariants.begin(); entry != State->ShaderVariants.end();) {
+			const auto key = (entry++)->first;
+			if (static_cast<uint32_t>(key >> 32) != owner.Id()) continue;
+			const auto name = core::Name::FromId(static_cast<uint32_t>(key));
+			if (!wanted(materials, name) || !accepted(library.Find(name, owner))) DropShader(name, owner);
+		}
+		for (auto entry = State->LensPipelines.begin(); entry != State->LensPipelines.end();) {
+			const auto key = (entry++)->first;
+			if (static_cast<uint32_t>(key >> 32) != owner.Id()) continue;
+			const auto name = core::Name::FromId(static_cast<uint32_t>(key));
+			if (!wanted(lenses, name) || !accepted(library.FindLens(name, owner)))
+				DropLensShader(name, owner);
+		}
+		const std::array gradeDemand{postProcess};
+		const std::array<std::span<const core::Name>, 3> demands{materials, lenses, gradeDemand};
+		for (size_t family = 0; family < demands.size(); ++family) {
+			auto &refusals = State->ShaderRefusals[family];
+			std::erase_if(refusals, [&](const auto &entry) {
+				return static_cast<uint32_t>(entry.first >> 32) == owner.Id() &&
+					   !wanted(demands[family], core::Name::FromId(static_cast<uint32_t>(entry.first)));
+			});
+			for (const auto name : demands[family]) {
+				const auto key = Impl::ShaderVariantKey(name, owner);
+				const auto *module = family == 1 ? library.FindLens(name, owner) : library.Find(name, owner);
+				if (!accepted(module)) {
+					refusals.erase(key);
+					if (family == 2) ClearPostProcessShader(owner);
+					continue;
+				}
+				assets::ContentHash held;
+				if (family == 0) {
+					const auto found = State->ShaderVariants.find(key);
+					if (found != State->ShaderVariants.end()) held = found->second.CodeHash;
+				} else if (family == 1) {
+					const auto found = State->LensPipelines.find(key);
+					if (found != State->LensPipelines.end()) held = found->second.CodeHash;
+				} else {
+					const auto found = State->PostProcessPipelines.find(owner.Id());
+					if (found != State->PostProcessPipelines.end() && found->second.Shader == name)
+						held = found->second.CodeHash;
+				}
+				if (held == module->CodeHash) {
+					refusals.erase(key);
+					continue;
+				}
+				const auto refused = refusals.find(key);
+				if (refused != refusals.end() && refused->second == module->CodeHash) continue;
+				const bool installed = family == 0	 ? AddShader(name, module->SpirV, owner)
+									   : family == 1 ? AddLensShader(name, module->SpirV, owner)
+													 : SetPostProcessShader(name, module->SpirV, owner);
+				if (installed)
+					refusals.erase(key);
+				else
+					refusals[key] = module->CodeHash;
+			}
+		}
+		return State->ResourceEpoch != before;
+	}
+
+	bool Renderer::SetPostProcessShader(
+		const core::Name &name, std::span<const uint32_t> spirv, core::Name owner
+	) {
 		if (State == nullptr || State->Device == nullptr || spirv.empty()) {
 			return false;
 		}
+
+		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
+		const auto held = State->PostProcessPipelines.find(owner.Id());
+		if (held != State->PostProcessPipelines.end() && held->second.Shader == name &&
+			held->second.CodeHash == hash)
+			return true;
 
 		const bool toMsl = State->Binary.Form == resources::ShaderForm::Msl;
 		std::string translated;
@@ -1489,29 +2039,34 @@ namespace engine::render {
 		// **Waited for before replacing**, `AddShader`'s own reason: the
 		// frame in flight may still be reading through whatever pipeline
 		// this is about to release.
-		if (State->PostProcessPipeline != nullptr) {
+		const auto previous = State->PostProcessPipelines.find(owner.Id());
+		if (previous != State->PostProcessPipelines.end()) {
 			(void)WaitForFrame();
-			SDL_ReleaseGPUGraphicsPipeline(State->Device, State->PostProcessPipeline);
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, previous->second.Pipeline);
+			previous->second = {name, hash, pipeline};
+		} else {
+			State->PostProcessPipelines.emplace(owner.Id(), Impl::PostProcessVariant{name, hash, pipeline});
 		}
-		State->PostProcessPipeline = pipeline;
-		State->PostProcessShaderName = name;
+		++State->ResourceEpoch;
 		return true;
 	}
 
-	void Renderer::ClearPostProcessShader() {
-		if (State == nullptr || State->PostProcessPipeline == nullptr) {
-			return;
-		}
+	void Renderer::ClearPostProcessShader(core::Name owner) {
+		if (State == nullptr) return;
+		const auto found = State->PostProcessPipelines.find(owner.Id());
+		if (found == State->PostProcessPipelines.end()) return;
 		if (State->Device != nullptr) {
 			(void)WaitForFrame();
-			SDL_ReleaseGPUGraphicsPipeline(State->Device, State->PostProcessPipeline);
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, found->second.Pipeline);
 		}
-		State->PostProcessPipeline = nullptr;
-		State->PostProcessShaderName = core::Name{};
+		State->PostProcessPipelines.erase(found);
+		++State->ResourceEpoch;
 	}
 
-	core::Name Renderer::PostProcessShaderName() const {
-		return State == nullptr ? core::Name{} : State->PostProcessShaderName;
+	core::Name Renderer::PostProcessShaderName(core::Name owner) const {
+		if (State == nullptr) return {};
+		const auto found = State->PostProcessPipelines.find(owner.Id());
+		return found == State->PostProcessPipelines.end() ? core::Name{} : found->second.Shader;
 	}
 
 	bool Renderer::Impl::WriteCapture(
@@ -1590,6 +2145,10 @@ namespace engine::render {
 		return State->Headless();
 	}
 
+	VisibilitySnapshot Renderer::Visibility() const {
+		return State == nullptr ? VisibilitySnapshot{} : State->VisibilityCompleted;
+	}
+
 	void *Renderer::SceneTexture(size_t slot) const {
 		if (slot >= State->SceneSlots.size()) {
 			return nullptr;
@@ -1612,14 +2171,19 @@ namespace engine::render {
 		return scene.Retained[scene.PublishedFrame].Result;
 	}
 
+	uint64_t Renderer::RenderGeneration() const {
+		return State ? State->RenderGeneration : 0;
+	}
+
 	void *Renderer::ResourceTexture(core::Name resource, size_t slot) const {
 		if (State == nullptr || !resource.IsValid()) {
 			return nullptr;
 		}
 		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphTargets) {
-				if (target.Pipeline != pipeline->Name || target.Resource != resource ||
+				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
 					target.Texture == nullptr) {
 					continue;
 				}
@@ -1688,8 +2252,26 @@ namespace engine::render {
 		if (role == Impl::ResourceRole::Emissive) {
 			return pbr.Emissive;
 		}
+		if (role == Impl::ResourceRole::MeshUv) {
+			return pbr.MeshUv;
+		}
 		if (role == Impl::ResourceRole::LinearDepth) {
 			return pbr.LinearDepth;
+		}
+		if (role == Impl::ResourceRole::FirstSurfaceValidity) {
+			return pbr.FirstSurfaceValidity;
+		}
+		if (role == Impl::ResourceRole::CameraMotionVectors) {
+			return pbr.CameraMotionVectors;
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceZ) {
+			return pbr.SecondSurfaceZ;
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceDepth) {
+			return pbr.SecondSurfaceDepth;
+		}
+		if (role == Impl::ResourceRole::SecondSurfaceValidity) {
+			return pbr.SecondSurfaceValidity;
 		}
 		if (role == Impl::ResourceRole::Occlusion) {
 			return pbr.Occlusion;
@@ -1702,12 +2284,6 @@ namespace engine::render {
 		}
 		if (role == Impl::ResourceRole::VolumeLit) {
 			return pbr.Lit;
-		}
-		if (role == Impl::ResourceRole::LensA) {
-			return pbr.LensA;
-		}
-		if (role == Impl::ResourceRole::LensB) {
-			return pbr.LensB;
 		}
 		return nullptr;
 	}
@@ -1839,6 +2415,7 @@ namespace engine::render {
 			return false;
 		}
 
+		++State->ResourceEpoch;
 		return true;
 	}
 
@@ -1875,13 +2452,14 @@ namespace engine::render {
 		}
 		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphTargets) {
-				if (target.Pipeline != pipeline->Name || target.Resource != resource ||
+				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
 					target.Texture == nullptr ||
 					(target.Scope == graph::NodeScope::View && target.Owner != slot)) {
 					continue;
 				}
-				return SceneExtent{1.0f, 1.0f};
+				return SceneExtent{1.0f, 1.0f, target.Width, target.Height};
 			}
 		}
 		const Impl::ResourceRole role = State->RoleFor(resource);
@@ -1932,52 +2510,32 @@ namespace engine::render {
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render views", core::ProfileCategory::Render);
 		RequireOwningThread("Render views");
+		if (State && State->PortalTreeJob.Cancelled)
+			PollPortalCaptureTreeComposition(State->PortalTreeJob.Token);
 
 		FrameResult frame;
-		if (State == nullptr || State->Device == nullptr || views.empty() || State->BatchActive) {
+		if (State == nullptr) {
 			return frame;
 		}
+		if (State->Device == nullptr || views.empty() || State->BatchActive) {
+			State->VisibilityWorking.Invalidate();
+			State->VisibilityCompleted = {};
+			return frame;
+		}
+		State->VisibilityCompleted = {};
+		State->VisibilityWorking.Invalidate();
 		State->PollSceneFrames();
 
-		// **Every mesh admitted since the last frame, in one transfer.** `AddMesh`
-		// only accumulates, so this is the barrier the content pump used to pay
-		// once per arriving mesh. Free when nothing arrived.
-		State->Meshes.Flush();
-
-		struct ViewGroup {
-			uint64_t World = 0;
-			core::Name Pipeline;
-			std::vector<size_t> Views;
-		};
-		std::vector<ViewGroup> groups;
-		groups.reserve(views.size());
-		for (size_t index = 0; index < views.size(); index++) {
-			const View &view = views[index];
-			auto found = std::find_if(groups.begin(), groups.end(), [&](const ViewGroup &group) {
-				return group.World == view.World && group.Pipeline == view.Pipeline;
-			});
-			if (found == groups.end()) {
-				groups.push_back({view.World, view.Pipeline, {index}});
-			} else {
-				found->Views.push_back(index);
-			}
+		std::vector<FrameViewIdentity> identities;
+		identities.reserve(views.size());
+		for (const View &view : views) {
+			identities.push_back({view.World, State->PipelineFor(view.Pipeline)});
 		}
-
-		// Presentation belongs to the caller's last view. Keep that group last so
-		// another world's shared targets cannot overwrite it before its view runs.
-		if (present) {
-			const size_t finalView = views.size() - 1;
-			const auto finalGroup = std::find_if(groups.begin(), groups.end(), [&](const ViewGroup &group) {
-				return std::find(group.Views.begin(), group.Views.end(), finalView) != group.Views.end();
-			});
-			if (finalGroup != groups.end() && std::next(finalGroup) != groups.end()) {
-				std::rotate(finalGroup, std::next(finalGroup), groups.end());
-			}
-		}
+		const std::vector<FrameViewGroup> groups = GroupFrameViews(identities, present);
 
 		std::vector<size_t> order;
 		order.reserve(views.size());
-		for (const ViewGroup &group : groups) {
+		for (const FrameViewGroup &group : groups) {
 			order.insert(order.end(), group.Views.begin(), group.Views.end());
 		}
 		for (size_t position = 0; position + 1 < order.size(); position++) {
@@ -2018,20 +2576,70 @@ namespace engine::render {
 		}
 
 		const scene::WorldLighting previousLighting = CurrentLighting();
+		++State->RenderGeneration;
 		State->BatchActive = true;
+		State->DiscardPendingGraphHistoryWrites();
+		State->DataCaptureSources.clear();
+		State->MeshResidencyRecorded = false;
+		State->PreparedScopes.Clear();
 		State->BatchFailed = false;
 		State->BatchCommand = command;
 		State->BatchSwapchain = swapchain;
 		State->BatchWidth = width;
 		State->BatchHeight = height;
 		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+		State->BatchCaptureTimingRequested = std::any_of(
+			State->ResourceImages.begin(),
+			State->ResourceImages.end(),
+			[&](const Impl::ResourceImageSlot &image) {
+				if (image.Phase != Impl::ResourceImagePhase::Queued || image.Cancelled ||
+					image.Image.DataCaptureTimingId == 0) {
+					return false;
+				}
+				return std::any_of(views.begin(), views.end(), [&](const View &view) {
+					const Impl::NamedPipeline *const pipeline = State->PipelineFor(view.Pipeline);
+					const ResourceImageRequest &request = image.Image.Request;
+					return pipeline != nullptr && pipeline->Name == request.Pipeline &&
+						   view.Slot == request.ViewSlot &&
+						   (request.ExpectedSnapshotId.empty() ||
+							request.ExpectedSnapshotId == view.SnapshotId);
+				});
+			}
+		);
 
+		std::vector<ViewMutationIdentity> restorations;
 		size_t position = 0;
 		for (size_t groupIndex = 0; groupIndex < groups.size() && !State->BatchFailed; groupIndex++) {
-			const ViewGroup &group = groups[groupIndex];
+			const FrameViewGroup &group = groups[groupIndex];
 			for (size_t member = 0; member < group.Views.size(); member++, position++) {
 				const size_t viewIndex = group.Views[member];
-				const View &view = views[viewIndex];
+				const View &source = views[viewIndex];
+				const auto pipelineIdentity = ResolvePipelineIdentity(source.Pipeline);
+				const ViewMutationIdentity identity{
+					.WorldName = std::string(source.WorldName.Text()),
+					.SnapshotId = source.SnapshotId,
+					.Pipeline = pipelineIdentity ? pipelineIdentity->Name : core::Name{},
+					.PipelineRevision = pipelineIdentity ? pipelineIdentity->Revision : 0,
+					.ViewSlot = source.Slot,
+				};
+				const View *active = &source;
+				View mutated;
+				if (HookBind->HasViewMutation(identity)) {
+					mutated = source;
+					if (HookBind->ConsumeViewMutation(identity, mutated)) active = &mutated;
+				} else if (HookBind->HasViewMutationRestore(identity)) {
+					mutated = source;
+					mutated.Damage.Scene = true;
+					mutated.Damage.Viewport = true;
+					mutated.Damage.Environment = true;
+					mutated.Damage.Portals = true;
+					active = &mutated;
+					restorations.push_back(identity);
+				}
+				const View &view = *active;
+				State->ActiveDataCaptureSource = {
+					view.SnapshotId, view.WorldName, view.CameraFrame, view.Camera
+				};
 				SetLighting(view.OverrideLighting ? view.Lighting : previousLighting);
 
 				State->BatchFirst = position == 0;
@@ -2066,18 +2674,27 @@ namespace engine::render {
 				}
 			}
 		}
+		if (frame.Submitted && !State->BatchFailed)
+			for (const ViewMutationIdentity &identity : restorations)
+				HookBind->CompleteViewMutationRestore(identity);
 
-		for (const ViewGroup &group : groups) {
-			const Impl::NamedPipeline *named = State->PipelineFor(group.Pipeline);
-			if (named == nullptr) {
+		std::vector<const Impl::NamedPipeline *> plannedPipelines;
+		plannedPipelines.reserve(groups.size());
+		for (const FrameViewGroup &group : groups) {
+			const auto *named = static_cast<const Impl::NamedPipeline *>(group.Identity.Pipeline);
+			if (named == nullptr || std::find(plannedPipelines.begin(), plannedPipelines.end(), named) !=
+										plannedPipelines.end()) {
 				continue;
 			}
+			plannedPipelines.push_back(named);
 			uint32_t planWidth = width;
 			uint32_t planHeight = height;
 			std::vector<uint64_t> worlds;
-			worlds.reserve(group.Views.size());
-			for (const size_t viewIndex : group.Views) {
-				const View &view = views[viewIndex];
+			worlds.reserve(views.size());
+			for (const View &view : views) {
+				if (State->PipelineFor(view.Pipeline) != named) {
+					continue;
+				}
 				worlds.push_back(view.World);
 				if (view.Target != nullptr && view.Target->IsValid()) {
 					planWidth = std::max(planWidth, view.Target->Width);
@@ -2106,14 +2723,39 @@ namespace engine::render {
 
 		SetLighting(previousLighting);
 		if (State->BatchCommand != nullptr) {
+			// The partial command still submits to release its device ownership.
+			// Its images retain their fences but cannot certify a completed graph.
+			for (Impl::ResourceImageSlot &image : State->ResourceImages) {
+				if (image.Phase == Impl::ResourceImagePhase::Recorded) {
+					image.Image.Status = ResourceImageStatus::Failed;
+				} else if (image.Phase == Impl::ResourceImagePhase::Queued &&
+						   std::any_of(views.begin(), views.end(), [&](const View &view) {
+							   const auto *pipeline = State->PipelineFor(view.Pipeline);
+							   return pipeline && pipeline->Name == image.Image.Request.Pipeline &&
+									  view.Slot == image.Image.Request.ViewSlot;
+						   })) {
+					// A failed earlier node may prevent capture from recording at all.
+					// No device work owns this slot, so its failure is ready immediately.
+					image.Image.Status = ResourceImageStatus::Failed;
+					image.Phase = Impl::ResourceImagePhase::Ready;
+				}
+			}
 			State->Timestamps.Abandon(State->BatchTimingSlot);
 			if (State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
 				State->PendingMarks[State->BatchTimingSlot].clear();
+				State->AbandonCaptureTimings(State->BatchTimingSlot);
 			}
 			const bool submitted = State->SubmitSceneCommand(State->BatchCommand);
+			frame.Submitted = submitted;
 			if (!submitted) {
+				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());
+				State->DiscardPendingGraphHistoryWrites(State->BatchCommand);
+			} else {
+				// A partial batch releases its command buffer but never certifies history.
+				State->DiscardPendingGraphHistoryWrites(State->BatchCommand);
 			}
+			State->ClearSubmittedGraphHistoryWrites();
 			State->CompleteResidentUploads(submitted);
 			State->BatchCommand = nullptr;
 
@@ -2121,15 +2763,18 @@ namespace engine::render {
 			// downloads an earlier view recorded still hold their buffer.
 			State->DropDownloads();
 		}
+		State->StageProbe.Flush(State->Device);
 		State->BatchActive = false;
 		State->BatchFirst = false;
 		State->BatchFinal = false;
 		State->BatchShared = false;
+		State->PreparedScopes.Clear();
 		State->BatchFailed = false;
 		State->BatchSwapchain = nullptr;
 		State->BatchWidth = 0;
 		State->BatchHeight = 0;
 		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+		State->BatchCaptureTimingRequested = false;
 		return frame;
 	}
 
@@ -2214,14 +2859,18 @@ namespace engine::render {
 			return result;
 		}
 
-		// A damaged scene binds every built-in kind directly. Filling the table
-		// with no-op handlers first would build the node catalogue and then replace
-		// every entry on the hot path. An unchanged scene still needs those no-ops
-		// because graph traversal reaches the cached stages before the output nodes.
+		// A damaged scene binds every built-in kind directly. An unchanged scene
+		// starts with no-op handlers, then replaces only families containing retained
+		// history or output work. This keeps temporal pipelines alive without rebuilding
+		// every handler closure for a cached frame.
 		NodeTable frameNodes;
 		{
 			ENGINE_PROFILE_CAT("build node table", core::ProfileCategory::Render);
-			if (!request.Damage.Scene) {
+			const auto retains = [&recording](RetainedNodeFamily family) {
+				return recording.Request.Damage.Scene ||
+					   (recording.Pipeline->RetainedFamilies & static_cast<uint16_t>(family)) != 0;
+			};
+			if (!recording.Request.Damage.Scene) {
 				static const NodeTable idleNodes =
 					BackendTable([](const graph::RunContext &) { return true; });
 				frameNodes = idleNodes;
@@ -2229,15 +2878,15 @@ namespace engine::render {
 			for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
 				frameNodes.Set(installed.Kind, installed.Handler);
 			}
-			if (request.Damage.Scene) {
-				recording.RegisterUploadNodes(frameNodes);
-				recording.RegisterShadowNodes(frameNodes);
-				recording.RegisterMirrorNodes(frameNodes);
-				recording.RegisterPortalNodes(frameNodes);
-				recording.RegisterGeometryNodes(frameNodes);
-				recording.RegisterShadingNodes(frameNodes);
-				recording.RegisterAuthoredNodes(frameNodes);
-			}
+			if (retains(RetainedUpload)) recording.RegisterUploadNodes(frameNodes);
+			if (retains(RetainedShadow)) recording.RegisterShadowNodes(frameNodes);
+			if (retains(RetainedMirror)) recording.RegisterMirrorNodes(frameNodes);
+			if (retains(RetainedPortal)) recording.RegisterPortalNodes(frameNodes);
+			if (retains(RetainedSurface)) recording.RegisterSurfaceNodes(frameNodes);
+			if (retains(RetainedAuthored)) recording.RegisterAuthoredNodes(frameNodes);
+			// Dedicated geometry handlers win over authored fallbacks that share a kind.
+			if (retains(RetainedGeometry)) recording.RegisterGeometryNodes(frameNodes);
+			if (retains(RetainedShading)) recording.RegisterShadingNodes(frameNodes);
 			recording.RegisterOutputNodes(frameNodes);
 		}
 

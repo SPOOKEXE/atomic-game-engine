@@ -76,14 +76,14 @@ int main(int argc, char **argv) {
 	// malformed JSON-RPC message and desynchronise the stream. Everything this
 	// says goes to stderr, which MCP clients capture and show as server logs.
 	engine::core::Arguments arguments(
-		"mcpbridge", "atomic - carries Model Context Protocol between stdio and a running editor."
+		"mcpbridge", "atomic - carries Model Context Protocol between stdio and a running engine host."
 	);
 	arguments.Value(
 		"port",
 		"PORT",
-		"The editor's --mcp-port (default " + std::to_string(engine::control::DEFAULT_PORT) + ")"
+		"The engine host's --mcp-port (default " + std::to_string(engine::control::DEFAULT_PORT) + ")"
 	);
-	arguments.Value("host", "ADDRESS", "Where the editor is listening (default 127.0.0.1)");
+	arguments.Value("host", "ADDRESS", "Where the engine host is listening (default 127.0.0.1)");
 
 	const engine::core::Arguments::Result parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -114,12 +114,12 @@ int main(int argc, char **argv) {
 		asio::connect(socket, resolver.resolve(host, std::to_string(port)));
 		socket.set_option(asio::ip::tcp::no_delay(true));
 	} catch (const std::exception &failure) {
-		// The common case by far, and worth saying precisely: the editor is not
+		// The common case by far, and worth saying precisely: the engine host is not
 		// running, or was started without the flag that opens the port.
 		std::fprintf(
 			stderr,
-			"mcpbridge: could not reach an editor at %s:%u - %s\n"
-			"Start one with: just edit --mcp-port %u\n",
+			"mcpbridge: could not reach an engine host at %s:%u - %s\n"
+			"Start a host with its --mcp-port %u option.\n",
 			host.c_str(),
 			port,
 			failure.what(),

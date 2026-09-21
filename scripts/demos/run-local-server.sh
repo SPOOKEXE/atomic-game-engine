@@ -54,9 +54,9 @@ done
 
 # The staged copy, not the source - a demo that ran the source tree would work
 # here and nowhere a staged tree was copied to. `_common.sh` says the same.
-staged="$build/client/assets/examples/$scene"
+staged="$build/client/assets/examples/scripts/$scene"
 if [ ! -f "$staged" ]; then
-	staged="$build/assets/examples/$scene"
+	staged="$build/assets/examples/scripts/$scene"
 fi
 if [ ! -f "$staged" ]; then
 	echo "no staged scene at $staged" >&2

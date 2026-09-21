@@ -109,7 +109,7 @@ CONTROL
 scenes=("zfight-control" "${scenes[@]}")
 
 for scene in "${scenes[@]}"; do
-	source="$build/assets/examples/$scene.luau"
+	source="$build/assets/examples/scripts/$scene.luau"
 	if [ "$scene" = "zfight-control" ]; then
 		source="$out/zfight-control.luau"
 	fi

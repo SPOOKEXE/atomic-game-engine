@@ -33,6 +33,7 @@ root=$(cd -- "$here/.." && pwd)
 
 preset=${PRESET:-dev}
 build="$root/.cache/build/$preset"
+export CCACHE_STATSLOG="$build/ccache-stats.log"
 
 # The studio is configured only where both halves exist: it needs the renderer
 # to draw with and the server library to host "Play" with, so under the `server`

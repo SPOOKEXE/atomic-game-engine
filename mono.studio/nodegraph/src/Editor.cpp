@@ -1728,7 +1728,10 @@ namespace nodegraph {
 							Chosen.push_back(hit);
 						}
 						ChosenGroup = NO_GROUP;
-						Drag = Dragging::Nodes;
+						Drag = Dragging::PendingNodes;
+						DragStartX = mouseX;
+						DragStartY = mouseY;
+						DragStartedAt = ImGui::GetTime();
 					}
 				}
 			} else if (const GroupId frame = HitGroup(graph, mouseX, mouseY); frame != NO_GROUP) {
@@ -1737,19 +1740,59 @@ namespace nodegraph {
 				Chosen.clear();
 				ChosenGroup = frame;
 				DragGroup = frame;
-				Drag = Dragging::Group;
+				Drag = Dragging::PendingGroup;
+				DragStartX = mouseX;
+				DragStartY = mouseY;
+				DragStartedAt = ImGui::GetTime();
 			} else {
 				if (!io.KeyShift) {
 					Chosen.clear();
 				}
 				ChosenGroup = NO_GROUP;
-				Drag = Dragging::Marquee;
+				Drag = Dragging::PendingMarquee;
 				MarqueeX = mouseX;
 				MarqueeY = mouseY;
+				DragStartX = mouseX;
+				DragStartY = mouseY;
+				DragStartedAt = ImGui::GetTime();
 			}
 		}
 
 		// --- continuing one ---------------------------------------------------
+
+		bool promoted = false;
+		if ((Drag == Dragging::PendingNodes || Drag == Dragging::PendingGroup ||
+			 Drag == Dragging::PendingMarquee) &&
+			ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			const float dx = (mouseX - DragStartX) * Scale;
+			const float dy = (mouseY - DragStartY) * Scale;
+			const float threshold = std::max(io.MouseDragThreshold, 3.0f);
+			if (ImGui::GetTime() - DragStartedAt >= 0.150 && dx * dx + dy * dy >= threshold * threshold) {
+				if (Drag == Dragging::PendingNodes) {
+					Drag = Dragging::Nodes;
+					for (const NodeId id : Chosen) {
+						if (Node *node = graph.Find(id); node != nullptr) {
+							node->X += dx / Scale;
+							node->Y += dy / Scale;
+							Edited = true;
+						}
+					}
+				} else if (Drag == Dragging::PendingGroup) {
+					Drag = Dragging::Group;
+					if (const nodegraph::Group *frame = graph.FindGroup(DragGroup); frame != nullptr)
+						for (const NodeId id : frame->Members) {
+							if (Node *node = graph.Find(id); node != nullptr) {
+								node->X += dx / Scale;
+								node->Y += dy / Scale;
+								Edited = true;
+							}
+						}
+				} else {
+					Drag = Dragging::Marquee;
+				}
+				promoted = true;
+			}
+		}
 
 		// **Applied on release and not per frame.** A snap during the drag makes
 		// the node stutter under the pointer and makes small adjustments
@@ -1763,7 +1806,7 @@ namespace nodegraph {
 			node.Y = std::round(node.Y / GRID) * GRID;
 		};
 
-		if (Drag == Dragging::Nodes && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+		if (Drag == Dragging::Nodes && ImGui::IsMouseDown(ImGuiMouseButton_Left) && !promoted) {
 			for (const NodeId id : Chosen) {
 				if (Node *node = graph.Find(id); node != nullptr) {
 					node->X += io.MouseDelta.x / Scale;
@@ -1775,7 +1818,7 @@ namespace nodegraph {
 
 		// A frame drags everything it holds. That is the whole point of one, and
 		// it is why membership rather than a rectangle is what is stored.
-		if (Drag == Dragging::Group && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+		if (Drag == Dragging::Group && ImGui::IsMouseDown(ImGuiMouseButton_Left) && !promoted) {
 			if (const nodegraph::Group *frame = graph.FindGroup(DragGroup); frame != nullptr) {
 				for (const NodeId id : frame->Members) {
 					if (Node *node = graph.Find(id); node != nullptr) {
@@ -1827,8 +1870,8 @@ namespace nodegraph {
 						}
 					}
 				}
-				DragGroup = NO_GROUP;
 			}
+			DragGroup = NO_GROUP;
 
 			if (Drag == Dragging::Link && DragNode != NO_NODE) {
 				NodeId node = NO_NODE;

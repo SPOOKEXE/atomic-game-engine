@@ -57,11 +57,9 @@ namespace engine::scene {
 		// that is wrong wherever the camera is rotated.
 		const glm::vec4 clip = glm::transpose(frame.ToMatrix()) * world;
 
-		// The camera sits on the plane, so there is no half to keep. Skewing
-		// against it produces a matrix with no volume in front of it and the
-		// surface renders black.
-		constexpr float ON_THE_PLANE = 1.0e-4f;
-		if (std::abs(clip.w) < ON_THE_PLANE) {
+		// Exactly on the plane has no projection volume. A nonzero separation
+		// still needs clipping, including submillimetre exits of scaled portals.
+		if (clip.w == 0.0f) {
 			return projection;
 		}
 
@@ -160,12 +158,22 @@ namespace engine::scene {
 			return false;
 		}
 
-		auto *active = store.ResourceMutable<ActiveCamera>();
+		const ActiveCamera *active = store.Resource<ActiveCamera>();
 		if (active == nullptr) {
 			return false;
 		}
 
-		active->AspectRatio = static_cast<float>(width) / static_cast<float>(height);
+		const float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+		if (active->AspectRatio == aspectRatio) {
+			return true;
+		}
+
+		auto *mutableActive = store.ResourceMutable<ActiveCamera>();
+		if (mutableActive == nullptr) {
+			return false;
+		}
+
+		mutableActive->AspectRatio = aspectRatio;
 		return true;
 	}
 }

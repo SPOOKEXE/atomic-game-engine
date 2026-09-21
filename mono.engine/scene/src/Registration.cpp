@@ -1,10 +1,14 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/scene/Accessories.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Audio.hpp>
+#include <engine/scene/AuthoredAffordance.hpp>
+#include <engine/scene/CameraContinuation.hpp>
+#include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
@@ -12,6 +16,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
@@ -42,6 +47,26 @@
 namespace engine::scene {
 
 	namespace {
+		void WritePortals(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *portals = static_cast<const Portal *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteUInt64(portals[index].Destination.Id);
+				writer.WriteName(portals[index].DestinationWorld);
+				writer.WriteBool(portals[index].Enabled);
+				writer.WriteBool(portals[index].Bidirectional);
+			}
+		}
+		void ReadPortals(core::ByteReader &reader, void *destination, size_t count) {
+			auto *portals = static_cast<Portal *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				Portal portal;
+				portal.Destination = ecs::Entity{reader.ReadUInt64()};
+				portal.DestinationWorld = reader.ReadName();
+				portal.Enabled = reader.ReadBool();
+				portal.Bidirectional = reader.ReadBool();
+				portals[index] = portal;
+			}
+		}
 		// `Surface`, `Visual` and `SurfaceTable` all hold a `core::Name`, and a
 		// name's id is a counter this process assigned in first-seen order. The
 		// raw object representation would write that counter, and a reading
@@ -60,6 +85,27 @@ namespace engine::scene {
 			auto *surfaces = static_cast<Surface *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				surfaces[index].Material = reader.ReadName();
+			}
+		}
+
+		void WriteAuthoredAffordances(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *affordances = static_cast<const AuthoredAffordance *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteName(affordances[index].Id);
+				writer.WriteUInt8(static_cast<uint8_t>(affordances[index].Kind));
+				writer.WriteBool(affordances[index].Enabled);
+			}
+		}
+		void ReadAuthoredAffordances(core::ByteReader &reader, void *destination, size_t count) {
+			auto *affordances = static_cast<AuthoredAffordance *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				affordances[index].Id = reader.ReadName();
+				const uint8_t kind = reader.ReadUInt8();
+				if (kind > static_cast<uint8_t>(AuthoredAffordanceKind::Cover)) reader.Fail();
+				affordances[index].Kind = static_cast<AuthoredAffordanceKind>(kind);
+				affordances[index].Enabled = reader.ReadBool();
+				affordances[index].Reserved[0] = 0;
+				affordances[index].Reserved[1] = 0;
 			}
 		}
 
@@ -108,6 +154,7 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteName(rigs[index].Rig);
 				writer.WriteUInt16(rigs[index].JointCount);
+				writer.WriteFloat(rigs[index].PoseScale);
 			}
 		}
 
@@ -116,6 +163,28 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				rigs[index].Rig = reader.ReadName();
 				rigs[index].JointCount = reader.ReadUInt16();
+				rigs[index].PoseScale = reader.ReadFloat();
+				if (!std::isfinite(rigs[index].PoseScale) || rigs[index].PoseScale <= 0) reader.Fail();
+			}
+		}
+
+		void WriteRigKeypoints(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *keypoints = static_cast<const RigKeypoint *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(keypoints[index].Keypoint);
+				writer.WriteRaw(&keypoints[index].Frame, sizeof(core::CFrame));
+				writer.WriteUInt16(keypoints[index].Joint);
+			}
+		}
+
+		void ReadRigKeypoints(core::ByteReader &reader, void *destination, size_t count) {
+			auto *keypoints = static_cast<RigKeypoint *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				keypoints[index].Keypoint = reader.ReadName();
+				reader.ReadRaw(&keypoints[index].Frame, sizeof(core::CFrame));
+				keypoints[index].Joint = reader.ReadUInt16();
+				keypoints[index].Reserved[0] = 0;
+				keypoints[index].Reserved[1] = 0;
 			}
 		}
 
@@ -164,14 +233,10 @@ namespace engine::scene {
 			}
 		}
 
-		// **Every field written, and the ladder's three names first.**
-		// `WriteVisuals` records what a hand-written pair costs: a field added to
-		// a type with one crosses only if somebody remembers, and nothing in the
-		// build checks. Six fields today, and all six are written.
-		void WriteLevelsOfDetail(core::ByteWriter &writer, const void *source, size_t count) {
-			const auto *ladders = static_cast<const LevelOfDetail *>(source);
+		void WriteAutoMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *ladders = static_cast<const AutoMeshLOD *>(source);
 			for (size_t index = 0; index < count; index++) {
-				const LevelOfDetail &ladder = ladders[index];
+				const AutoMeshLOD &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					writer.WriteName(ladder.Meshes[level]);
 					writer.WriteFloat(ladder.Ratios[level]);
@@ -182,10 +247,58 @@ namespace engine::scene {
 			}
 		}
 
-		void ReadLevelsOfDetail(core::ByteReader &reader, void *destination, size_t count) {
-			auto *ladders = static_cast<LevelOfDetail *>(destination);
+		void WriteCustomMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *ladders = static_cast<const CustomMeshLOD *>(source);
 			for (size_t index = 0; index < count; index++) {
-				LevelOfDetail &ladder = ladders[index];
+				const CustomMeshLOD &ladder = ladders[index];
+				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+					writer.WriteName(ladder.Meshes[level]);
+					writer.WriteFloat(ladder.Ratios[level]);
+				}
+				writer.WriteFloat(ladder.TargetQuadArea);
+				writer.WriteUInt8(ladder.Levels);
+			}
+		}
+
+		void WriteRenderEffects(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *effects = static_cast<const RenderEffects *>(source);
+			for (size_t index = 0; index < count; index++) {
+				for (const RenderEffectAttachment &attachment : effects[index].Attachments) {
+					writer.WriteName(attachment.Node);
+					writer.WriteUInt32(attachment.SelectionMask);
+					writer.WriteUInt32(attachment.Order);
+					writer.WriteUInt32(attachment.Revision);
+					writer.WriteUInt8(static_cast<uint8_t>(attachment.Stage));
+					writer.WriteBool(attachment.Enabled);
+				}
+				writer.WriteUInt8(effects[index].Count);
+			}
+		}
+
+		void ReadRenderEffects(core::ByteReader &reader, void *destination, size_t count) {
+			auto *effects = static_cast<RenderEffects *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				for (RenderEffectAttachment &attachment : effects[index].Attachments) {
+					attachment.Node = reader.ReadName();
+					attachment.SelectionMask = reader.ReadUInt32();
+					attachment.Order = reader.ReadUInt32();
+					attachment.Revision = reader.ReadUInt32();
+					const uint8_t stage = reader.ReadUInt8();
+					attachment.Stage = stage <= static_cast<uint8_t>(RenderEffectStage::PostProcess)
+										   ? static_cast<RenderEffectStage>(stage)
+										   : RenderEffectStage::PostProcess;
+					attachment.Enabled = reader.ReadBool();
+				}
+				effects[index].Count = std::min<uint8_t>(
+					reader.ReadUInt8(), static_cast<uint8_t>(MAX_RENDER_EFFECT_ATTACHMENTS)
+				);
+			}
+		}
+
+		void ReadAutoMeshLods(core::ByteReader &reader, void *destination, size_t count) {
+			auto *ladders = static_cast<AutoMeshLOD *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				AutoMeshLOD &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					ladder.Meshes[level] = reader.ReadName();
 					ladder.Ratios[level] = reader.ReadFloat();
@@ -200,6 +313,19 @@ namespace engine::scene {
 				ladder.Strategy = strategy <= static_cast<uint8_t>(LodStrategy::Reduced)
 									  ? static_cast<LodStrategy>(strategy)
 									  : LodStrategy::None;
+				ladder.Levels = reader.ReadUInt8();
+			}
+		}
+
+		void ReadCustomMeshLods(core::ByteReader &reader, void *destination, size_t count) {
+			auto *ladders = static_cast<CustomMeshLOD *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				CustomMeshLOD &ladder = ladders[index];
+				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+					ladder.Meshes[level] = reader.ReadName();
+					ladder.Ratios[level] = reader.ReadFloat();
+				}
+				ladder.TargetQuadArea = reader.ReadFloat();
 				ladder.Levels = reader.ReadUInt8();
 			}
 		}
@@ -419,6 +545,8 @@ namespace engine::scene {
 				// here and silently reset on every load. A part whose `Fitted`
 				// reset would be reshaped the next time its mesh arrived.
 				writer.WriteName(visual.Fitted);
+				writer.WriteUInt32(visual.RenderFeatures.Enable);
+				writer.WriteUInt32(visual.RenderFeatures.Disable);
 
 				// **Added at v0.7, and the reason it was missing is the reason
 				// a custom serialiser is dangerous.** A field added to a type
@@ -467,6 +595,8 @@ namespace engine::scene {
 				visual.Mesh = reader.ReadName();
 				visual.Visible = reader.ReadBool();
 				visual.Fitted = reader.ReadName();
+				visual.RenderFeatures.Enable = reader.ReadUInt32();
+				visual.RenderFeatures.Disable = reader.ReadUInt32();
 				visual.Transparency = reader.ReadFloat();
 				visual.Surface = reader.ReadInt16();
 				visual.CastShadow = reader.ReadBool();
@@ -524,6 +654,8 @@ namespace engine::scene {
 			auto *catalogues = static_cast<MeshCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].Triangles.clear();
+				catalogues[index].Textures.clear();
+				catalogues[index].Skinning.clear();
 			}
 		}
 
@@ -653,6 +785,11 @@ namespace engine::scene {
 				for (uint32_t entry = 0; entry < indices; entry++) {
 					writer.WriteUInt32(mesh.Indices[entry]);
 				}
+				writer.WriteString(EditablePackingFormatName(mesh.Packing.Format));
+				writer.WriteUInt8(mesh.Packing.Attributes);
+				writer.WriteFloat(mesh.Packing.Minimum);
+				writer.WriteFloat(mesh.Packing.Maximum);
+				writer.WriteUInt32(mesh.Packing.Revision);
 
 				// The revision travels with the geometry, for
 				// `WriteShaderSources`' identical reason: a reader that reset
@@ -710,6 +847,14 @@ namespace engine::scene {
 				for (uint32_t entry = 0; entry < indices; entry++) {
 					mesh.Indices.push_back(reader.ReadUInt32());
 				}
+				const std::string_view format = reader.ReadString();
+				EditablePacking packing;
+				const bool knownPacking = ParseEditablePackingFormat(format, packing.Format);
+				packing.Attributes = reader.ReadUInt8();
+				packing.Minimum = reader.ReadFloat();
+				packing.Maximum = reader.ReadFloat();
+				packing.Revision = reader.ReadUInt32();
+				mesh.Packing = knownPacking ? packing : EditablePacking{};
 
 				mesh.Revision = reader.ReadUInt32();
 				// Derived and deliberately absent from the snapshot. The first bulk
@@ -733,6 +878,11 @@ namespace engine::scene {
 				if (!image.Pixels.empty()) {
 					writer.WriteRaw(image.Pixels.data(), image.Pixels.size());
 				}
+				writer.WriteString(EditablePackingFormatName(image.Packing.Format));
+				writer.WriteUInt8(image.Packing.Attributes);
+				writer.WriteFloat(image.Packing.Minimum);
+				writer.WriteFloat(image.Packing.Maximum);
+				writer.WriteUInt32(image.Packing.Revision);
 				writer.WriteUInt32(image.Revision);
 			}
 		}
@@ -748,6 +898,14 @@ namespace engine::scene {
 				if (bytes > 0) {
 					reader.ReadRaw(image.Pixels.data(), bytes);
 				}
+				const std::string_view format = reader.ReadString();
+				EditablePacking packing;
+				const bool knownPacking = ParseEditablePackingFormat(format, packing.Format);
+				packing.Attributes = reader.ReadUInt8();
+				packing.Minimum = reader.ReadFloat();
+				packing.Maximum = reader.ReadFloat();
+				packing.Revision = reader.ReadUInt32();
+				image.Packing = knownPacking ? packing : EditablePacking{};
 				image.Revision = reader.ReadUInt32();
 			}
 		}
@@ -1075,6 +1233,16 @@ namespace engine::scene {
 		// `DescribeType` offers raw serialisation only for a type that is.
 		ecs::Components::Register<TextContent>("scene.TextContent", WriteTexts, ReadTexts);
 		ecs::Components::Register<Camera>("scene.Camera");
+		ecs::Components::Register<CameraSubject>("scene.CameraSubject");
+		ecs::Components::Register<CameraPortalView>(
+			"scene.CameraPortalView",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *views = static_cast<CameraPortalView *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					views[index] = {};
+			}
+		);
 
 		// A name again, so a hand-written pair again. See `WriteSounds`.
 		ecs::Components::Register<Sound>("scene.Sound", WriteSounds, ReadSounds);
@@ -1231,6 +1399,25 @@ namespace engine::scene {
 		);
 
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
+		ecs::Components::Register<CameraCharacterHold>("scene.CameraCharacterHold");
+		ecs::Components::Register<CameraBodyPose>(
+			"scene.CameraBodyPose",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *poses = static_cast<CameraBodyPose *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					poses[index] = {};
+			}
+		);
+		ecs::Components::Register<PortalBodyView>(
+			"scene.PortalBodyView",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *views = static_cast<PortalBodyView *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					views[index] = {};
+			}
+		);
 
 		// **`InputState` crosses and `CameraController` crosses**, which is worth
 		// a sentence because one of them looks like it should not. Input is
@@ -1307,9 +1494,8 @@ namespace engine::scene {
 		// the same side of the line `scene.SurfaceCamera` is already on, and
 		// `replication::LocalToTheClient` names both.
 		//
-		// The generated form: the field is an `Entity`, which is a directory
-		// index a snapshot and a replica both restore exactly.
-		ecs::Components::Register<Portal>("scene.Portal");
+		// The destination part is a restored entity; its world crosses as text.
+		ecs::Components::Register<Portal>("scene.Portal", WritePortals, ReadPortals);
 
 		// **Derived data, so it does not.** A surface camera's frustum is fitted
 		// to its pane *as seen from the local eye*, so the authority's answer is
@@ -1378,8 +1564,8 @@ namespace engine::scene {
 			"scene.CharacterChanges", WriteCharacterChanges, ReadCharacterChanges
 		);
 
-		// **Registered rather than left to be minted, unlike `Gravity` and
-		// `Sun` beside it.** `workspace.SurfaceBounces` is a declared property,
+		// **Registered rather than left to be minted, unlike `Sun` beside it.**
+		// `workspace.SurfaceBounces` is a declared property,
 		// so the class table names this resource's component id while the tree
 		// is being registered - and a type that reaches `Components::Of` before
 		// an explicit name arrives keeps the compiler's spelling and aborts when
@@ -1426,6 +1612,7 @@ namespace engine::scene {
 		// those clients poses the handle by. Nothing about that needed a rule of
 		// its own - see `scene/Tools.hpp`.
 		ecs::Components::Register<Tool>("scene.Tool");
+		ecs::Components::Register<Accessory>("scene.Accessory");
 
 		// Appended because component ids are registration order. This is authored
 		// player state, so the generated scalar serializer is sufficient and the
@@ -1473,6 +1660,7 @@ namespace engine::scene {
 		// on arrival would present a rig at the origin for one frame. A frame of a
 		// character in the wrong place is more visible than the bytes.
 		ecs::Components::Register<Bone>("scene.Bone");
+		ecs::Components::Register<RigKeypoint>("scene.RigKeypoint", WriteRigKeypoints, ReadRigKeypoints);
 
 		// **A hand-written pair, because a clip holds names and an entity reference.**
 		ecs::Components::Register<AnimationClip>(
@@ -1498,15 +1686,14 @@ namespace engine::scene {
 		ecs::Components::Register<Animator>("scene.Animator");
 		ecs::Components::Register<AnimationTrack>("scene.AnimationTrack");
 
-		// **A hand-written pair, because a ladder holds three mesh names.**
-		//
-		// **It crosses, because it is authored content and not a conclusion.**
-		// Which four meshes a part has is what an author published; which of them
-		// a frame draws is derived per view and is not stored anywhere, so there
-		// is nothing here for a replica to disagree with. `scene.Visual` is on the
-		// same side of that line for the same reason.
-		ecs::Components::Register<LevelOfDetail>(
-			"scene.LevelOfDetail", WriteLevelsOfDetail, ReadLevelsOfDetail
+		// Both sources cross as authored content. The resolved level stays per-view
+		// GPU state and is never serialized.
+		ecs::Components::Register<AutoMeshLOD>("scene.AutoMeshLOD", WriteAutoMeshLods, ReadAutoMeshLods);
+		ecs::Components::Register<CustomMeshLOD>(
+			"scene.CustomMeshLOD", WriteCustomMeshLods, ReadCustomMeshLods
+		);
+		ecs::Components::Register<RenderEffects>(
+			"scene.RenderEffects", WriteRenderEffects, ReadRenderEffects
 		);
 
 		// **The generated form, because a `Constraint` is two handles, a `CFrame`,
@@ -1592,6 +1779,18 @@ namespace engine::scene {
 		// The shader name crosses as text. A process-local Name id in a scene
 		// file would resolve to an unrelated shader after a different load order.
 		ecs::Components::Register<ShaderLens>("scene.ShaderLens", WriteShaderLenses, ReadShaderLenses);
+
+		// **The per-world gravity rule is a resource too.** The client creates it
+		// when installing local world systems, including an empty data-factory
+		// world after global registration has sealed. Naming it here keeps that
+		// startup path from minting an automatic compiler-spelled component id.
+		ecs::Components::Register<Gravity>("scene.Gravity");
+
+		// Registration order is part of the ECS layout. This new row stays last
+		// so existing component ids and snapshot layouts do not move.
+		ecs::Components::Register<AuthoredAffordance>(
+			"scene.AuthoredAffordance", WriteAuthoredAffordances, ReadAuthoredAffordances
+		);
 	}
 
 	void RegisterSceneClasses() {

@@ -62,6 +62,7 @@ namespace {
 		"gui.SpatialCanvas",
 		"gui.GuiServiceState",
 		"gui.Adornment",
+		"gui.AdornmentInteraction",
 		"gui.SelectionOutline",
 		"gui.HandleShape",
 		"gui.FlexItem",
@@ -362,6 +363,7 @@ TEST_CASE("the property surface exposes no controls without consumers", "[gui][r
 	CHECK(has("SelectionBox", "LineThickness"));
 	CHECK(has("SelectionBox", "SurfaceColor3"));
 	CHECK(has("SelectionBox", "SurfaceTransparency"));
+	CHECK(has("SelectionBox", "InteractionEnabled"));
 
 	// A `SelectionSphere` shares the component, so it shares the three. Checked
 	// because sharing is Roblox's arrangement rather than an implementation

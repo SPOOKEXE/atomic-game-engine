@@ -80,22 +80,24 @@ if not exist "%CLIENT%" (
 set "PACING=--uncapped"
 if not "%MAX_FPS%"=="0" set "PACING=--uncapped --max-fps %MAX_FPS%"
 
-REM The staged copy, not the source. `mono.engine\examples\` is where a scene is
-REM written and `assets\examples\` under the build is where it is staged beside
-REM the binary that runs it - a demo that ran the source tree would work here
-REM and nowhere a staged tree was copied to.
 set "SCRIPTARG="
 if not "%SCENE%"=="" (
-    set "STAGED=%BUILD%\client\assets\examples\%SCENE%"
-    if not exist "%BUILD%\client\assets\examples\%SCENE%" set "STAGED=%BUILD%\assets\examples\%SCENE%"
+    set "EXAMPLE_KIND=scripts"
+    set "LOADER=--script"
+    if /i "%SCENE:~-6%"==".aworld" (
+        set "EXAMPLE_KIND=worlds"
+        set "LOADER=--game"
+    )
+    set "STAGED=%BUILD%\client\assets\examples\%EXAMPLE_KIND%\%SCENE%"
+    if not exist "%STAGED%" set "STAGED=%BUILD%\assets\examples\%EXAMPLE_KIND%\%SCENE%"
 )
 if not "%SCENE%"=="" (
     if not exist "%STAGED%" (
-        >&2 echo no staged scene at %STAGED%
-        >&2 echo   the build did not stage %SCENE%. Check mono.engine\examples\CMakeLists.txt.
+        >&2 echo no staged example at %STAGED%
+        >&2 echo   the build did not stage %SCENE% in examples\%EXAMPLE_KIND%.
         exit /b 1
     )
-    set "SCRIPTARG=--script "%STAGED%""
+    set "SCRIPTARG=%LOADER% "%STAGED%""
 )
 
 if "%SCENE%"=="" (

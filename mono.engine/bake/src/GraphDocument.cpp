@@ -1,5 +1,6 @@
 #include <engine/bake/GraphDocument.hpp>
 
+#include <limits>
 #include <string>
 
 namespace engine::bake {
@@ -86,6 +87,21 @@ namespace engine::bake {
 				break;
 			case OperationKind::AddRetime:
 				added = graph.AddRetime(operation.Number);
+				break;
+			case OperationKind::AddDecimate:
+				added = graph.AddDecimate(operation.Number);
+				break;
+			case OperationKind::AddFlipbook:
+				if (operation.Side > std::numeric_limits<uint8_t>::max() ||
+					operation.Frames > std::numeric_limits<uint8_t>::max()) {
+					offender = describe();
+					return DocumentStatus::Refused;
+				}
+				added = graph.AddFlipbook(
+					static_cast<uint8_t>(operation.Side),
+					static_cast<uint8_t>(operation.Frames),
+					operation.Number
+				);
 				break;
 			case OperationKind::AddWrite:
 				added = graph.AddWrite(operation.Text);

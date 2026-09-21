@@ -52,6 +52,7 @@ TEST_CASE("a shot round-trips", "[examples][shooting]") {
 	Shot sent;
 	sent.Aim = Ray(Vector3{1.0f, 2.0f, 3.0f}, Vector3{0.0f, 0.0f, -1.0f});
 	sent.Range = 42.0f;
+	sent.ViewTick = 73.25;
 
 	Shot read;
 	REQUIRE(DecodeShot(EncodeShot(sent), read));
@@ -60,6 +61,7 @@ TEST_CASE("a shot round-trips", "[examples][shooting]") {
 	CHECK(read.Aim.Origin.Z == Approx(3.0f));
 	CHECK(read.Aim.Direction.Z == Approx(-1.0f));
 	CHECK(read.Range == Approx(42.0f));
+	CHECK(read.ViewTick == Approx(73.25));
 }
 
 TEST_CASE("a direction that is not unit length is refused", "[examples][shooting]") {
@@ -114,6 +116,13 @@ TEST_CASE("a non-finite coordinate is refused", "[examples][shooting]") {
 	Shot ranged = Along();
 	ranged.Range = nan;
 	CHECK_FALSE(DecodeShot(EncodeShot(ranged), read));
+
+	for (double viewTick :
+		 {-1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+		Shot timed = Along();
+		timed.ViewTick = viewTick;
+		CHECK_FALSE(DecodeShot(EncodeShot(timed), read));
+	}
 }
 
 TEST_CASE("trailing or missing bytes are refused", "[examples][shooting]") {
@@ -125,6 +134,9 @@ TEST_CASE("trailing or missing bytes are refused", "[examples][shooting]") {
 
 	bytes.pop_back();
 	bytes.pop_back();
+	CHECK_FALSE(DecodeShot(bytes, read));
+
+	bytes.resize(7 * sizeof(float));
 	CHECK_FALSE(DecodeShot(bytes, read));
 
 	CHECK_FALSE(DecodeShot({}, read));

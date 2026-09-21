@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -192,7 +193,10 @@ namespace engine::render {
 		SceneSlot::RetainedFrame &frame = scene.Retained[selected];
 		if (frame.Texture == nullptr || frame.Width != scene.Width || frame.Height != scene.Height) {
 			if (frame.Texture != nullptr) {
-				gpu::ReleaseTexture(Device, frame.Texture);
+				// `PollSceneFrames` can publish this image after Studio recorded its
+				// draw list and before this resize selects the retained frame again.
+				// Keep that already-bound image alive through the host pass.
+				RetiredScenes.push_back(frame.Texture);
 				frame.Texture = nullptr;
 			}
 
@@ -236,6 +240,15 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::DropStagedSceneFrames() {
+		FinishPortalImports(nullptr, false);
+		for (ResourceImageSlot &slot : ResourceImages) {
+			if (slot.Phase == ResourceImagePhase::Recorded) {
+				ReleaseResidentImage(slot);
+				slot.Image.Status = ResourceImageStatus::Failed;
+				slot.Image.Width = slot.Image.Height = slot.Image.RowStride = 0;
+				slot.Phase = slot.Cancelled ? ResourceImagePhase::Free : ResourceImagePhase::Ready;
+			}
+		}
 		for (const StagedSceneFrame &staged : StagedSceneFrames) {
 			if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) {
 				continue;
@@ -249,8 +262,16 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::SubmitSceneCommand(SDL_GPUCommandBuffer *command) {
-		if (StagedSceneFrames.empty()) {
-			return SDL_SubmitGPUCommandBuffer(command);
+		PendingSceneSubmission submission;
+		for (uint32_t index = 0; index < ResourceImages.size(); index++) {
+			if (ResourceImages[index].Phase == ResourceImagePhase::Recorded) {
+				submission.Images[submission.ImageCount++] = index;
+			}
+		}
+		if (StagedSceneFrames.empty() && submission.ImageCount == 0) {
+			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
+			FinishPortalImports(command, submitted);
+			return submitted;
 		}
 
 		SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
@@ -259,7 +280,13 @@ namespace engine::render {
 			return false;
 		}
 
-		PendingSceneSubmissions.push_back({fence, std::move(StagedSceneFrames)});
+		FinishPortalImports(command, true);
+		submission.Fence = fence;
+		submission.Frames = std::move(StagedSceneFrames);
+		for (uint32_t index = 0; index < submission.ImageCount; index++) {
+			ResourceImages[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+		}
+		PendingSceneSubmissions.push_back(std::move(submission));
 		StagedSceneFrames.clear();
 		return true;
 	}
@@ -302,6 +329,9 @@ namespace engine::render {
 			}
 
 			SDL_ReleaseGPUFence(Device, submission.Fence);
+			for (uint32_t image = 0; image < submission.ImageCount; image++) {
+				CollectResourceImage(submission.Images[image]);
+			}
 			submission = std::move(PendingSceneSubmissions.back());
 			PendingSceneSubmissions.pop_back();
 		}
@@ -393,16 +423,26 @@ namespace engine::render {
 			  slot.Normal,
 			  slot.Material,
 			  slot.Emissive,
+			  slot.MeshUv,
+			  slot.ObjectIds,
+			  slot.SemanticIds,
+			  slot.PartIds,
 			  slot.LinearDepth,
+			  slot.FirstSurfaceValidity,
+			  slot.CameraMotionVectors,
+			  slot.SecondSurfaceZ,
+			  slot.SecondSurfaceDepth,
+			  slot.SecondSurfaceValidity,
 			  slot.Occlusion,
 			  slot.Lit,
-			  slot.SkyLit,
-			  slot.LensA,
-			  slot.LensB}) {
+			  slot.SkyLit}) {
 			if (texture != nullptr) {
 				gpu::ReleaseTexture(Device, texture);
 			}
 		}
+		// A resized or released target must not lend its old producer frame to
+		// the next allocation.
+		slot.OcclusionProvenance = {};
 		slot = {};
 	}
 
@@ -432,6 +472,18 @@ namespace engine::render {
 			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 			return gpu::CreateTexture(Device, &info);
 		};
+		const auto depth = [&] {
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = DepthFormat;
+			info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+			info.width = dimensions.ViewWidth;
+			info.height = dimensions.ViewHeight;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			return gpu::CreateTexture(Device, &info);
+		};
 
 		made.Albedo = texture(
 			SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB, dimensions.TargetWidth, dimensions.TargetHeight
@@ -443,22 +495,46 @@ namespace engine::render {
 		made.Emissive = texture(
 			SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.TargetWidth, dimensions.TargetHeight
 		);
+		made.MeshUv =
+			texture(SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT, dimensions.TargetWidth, dimensions.TargetHeight);
+		made.ObjectIds =
+			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
+		made.SemanticIds =
+			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
+		made.PartIds =
+			texture(SDL_GPU_TEXTUREFORMAT_R32_UINT, dimensions.TargetWidth, dimensions.TargetHeight);
 		made.LinearDepth =
 			texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.LinearWidth, dimensions.LinearHeight);
+		if (dimensions.FirstSurfaceValidity) {
+			made.FirstSurfaceValidity =
+				texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.ViewWidth, dimensions.ViewHeight);
+		}
+		if (dimensions.CameraMotion)
+			made.CameraMotionVectors =
+				texture(SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT, dimensions.ViewWidth, dimensions.ViewHeight);
+		if (dimensions.SecondSurface) {
+			made.SecondSurfaceZ = depth();
+			made.SecondSurfaceDepth =
+				texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.ViewWidth, dimensions.ViewHeight);
+			made.SecondSurfaceValidity =
+				texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.ViewWidth, dimensions.ViewHeight);
+		}
 		made.Occlusion =
 			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.OcclusionWidth, dimensions.OcclusionHeight);
 		made.Lit =
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 		made.SkyLit =
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
-		made.LensA =
-			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
-		made.LensB =
-			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
-			made.Emissive == nullptr || made.LinearDepth == nullptr || made.Occlusion == nullptr ||
-			made.Lit == nullptr || made.SkyLit == nullptr || made.LensA == nullptr || made.LensB == nullptr) {
+			made.Emissive == nullptr || made.MeshUv == nullptr || made.ObjectIds == nullptr ||
+			made.SemanticIds == nullptr || made.PartIds == nullptr || made.LinearDepth == nullptr ||
+			(dimensions.FirstSurfaceValidity && made.FirstSurfaceValidity == nullptr) ||
+			(dimensions.CameraMotion && made.CameraMotionVectors == nullptr) ||
+			(dimensions.SecondSurface &&
+			 (made.SecondSurfaceZ == nullptr || made.SecondSurfaceDepth == nullptr ||
+			  made.SecondSurfaceValidity == nullptr)) ||
+			made.Occlusion == nullptr || made.Lit == nullptr || made.SkyLit == nullptr) {
 			ENGINE_ERROR(
 				"render graph targets for {}x{} view: {}",
 				dimensions.ViewWidth,
@@ -506,6 +582,113 @@ namespace engine::render {
 		return {};
 	}
 
+	Renderer::Impl::NamedTexture Renderer::Impl::FindGraphHistoryForRead(
+		const NamedPipeline &pipeline,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner,
+		uint64_t signature
+	) const {
+		resource = GraphTargetName(pipeline, resource);
+		for (const GraphTarget &target : GraphTargets) {
+			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
+				target.Owner == owner && target.HistoryReady && target.HistorySignature == signature) {
+				return NamedTexture{target.Texture, target.Width, target.Height, target.Format};
+			}
+		}
+		return {};
+	}
+
+	Renderer::Impl::NamedTexture Renderer::Impl::FindCurrentGraphHistoryWrite(
+		const NamedPipeline &pipeline,
+		SDL_GPUCommandBuffer *readCommand,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner
+	) const {
+		for (auto write = PendingGraphHistoryWrites.rbegin(); write != PendingGraphHistoryWrites.rend();
+			 ++write) {
+			if (write->Pipeline == &pipeline && write->Resource == resource && write->Scope == scope &&
+				write->Owner == owner &&
+				GraphHistoryCurrentProducer(
+					!write->Submitted, write->Command == readCommand, write->Submitted
+				)) {
+				return FindGraphTarget(pipeline, resource, scope, owner);
+			}
+		}
+		return {};
+	}
+
+	void Renderer::Impl::CommitGraphHistoryWrite(
+		const NamedPipeline &pipeline,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner,
+		uint64_t signature
+	) {
+		resource = GraphTargetName(pipeline, resource);
+		for (GraphTarget &target : GraphTargets) {
+			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
+				target.Owner == owner) {
+				target.HistorySignature = signature;
+				target.HistoryReady = true;
+				return;
+			}
+		}
+	}
+
+	void Renderer::Impl::StageGraphHistoryWrite(
+		const NamedPipeline &pipeline,
+		SDL_GPUCommandBuffer *command,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner,
+		uint64_t signature
+	) {
+		for (PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
+			if (write.Pipeline == &pipeline && write.Command == command && write.Resource == resource &&
+				write.Scope == scope && write.Owner == owner) {
+				write.Signature = signature;
+				write.Submitted = false;
+				return;
+			}
+		}
+		PendingGraphHistoryWrites.push_back({&pipeline, command, resource, scope, owner, signature, false});
+	}
+
+	void Renderer::Impl::CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		for (PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
+			if (write.Command != command || write.Submitted) continue;
+			if (write.Pipeline != nullptr) {
+				CommitGraphHistoryWrite(
+					*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature
+				);
+			}
+			write.Submitted = true;
+		}
+		CommitEnvironmentWrites(command);
+	}
+
+	void Renderer::Impl::DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		if (command == nullptr) {
+			PendingGraphHistoryWrites.clear();
+		} else {
+			auto firstRetained = std::remove_if(
+				PendingGraphHistoryWrites.begin(),
+				PendingGraphHistoryWrites.end(),
+				[command](const PendingGraphHistoryWrite &write) { return write.Command == command; }
+			);
+			PendingGraphHistoryWrites.erase(firstRetained, PendingGraphHistoryWrites.end());
+		}
+		DiscardEnvironmentWrites(command);
+	}
+
+	void Renderer::Impl::ClearSubmittedGraphHistoryWrites() {
+		std::erase_if(PendingGraphHistoryWrites, [](const PendingGraphHistoryWrite &write) {
+			return write.Submitted;
+		});
+	}
+
 	core::Name Renderer::Impl::GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const {
 		for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); value++) {
 			const graph::ResourceId id{value};
@@ -546,7 +729,7 @@ namespace engine::render {
 								writer->Kind == core::Name("overlay");
 			break;
 		}
-		if (desc->External && !presentationImage) {
+		if (desc->External && desc->Lifetime == graph::ResourceLifetime::External && !presentationImage) {
 			return {};
 		}
 		const SDL_GPUTextureFormat format = presentationImage ? ColourFormat() : DeviceFormat(desc->Format);
@@ -605,6 +788,99 @@ namespace engine::render {
 		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight);
 	}
 
+	SDL_GPUBuffer *Renderer::Impl::FindGraphBuffer(
+		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+	) const {
+		resource = GraphTargetName(pipeline, resource);
+		for (const GraphBuffer &buffer : GraphBuffers) {
+			if (buffer.Pipeline == pipeline.Name && buffer.Resource == resource && buffer.Scope == scope &&
+				buffer.Owner == owner) {
+				return buffer.Buffer;
+			}
+		}
+		return nullptr;
+	}
+
+	SDL_GPUBuffer *Renderer::Impl::EnsureGraphBuffer(
+		const NamedPipeline &pipeline,
+		graph::ResourceId resource,
+		uint64_t owner,
+		uint32_t viewWidth,
+		uint32_t viewHeight
+	) {
+		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
+		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer || desc->External ||
+			desc->BufferStride == 0) {
+			return nullptr;
+		}
+		const uint64_t bytes = desc->Bytes(viewWidth, viewHeight);
+		if (bytes == 0 || bytes > MAX_GRAPH_BUFFER_BYTES || bytes > UINT32_MAX) {
+			ENGINE_WARN(
+				"graph buffer '{}' requests {} bytes, over the {} byte limit",
+				desc->Name.Text(),
+				bytes,
+				MAX_GRAPH_BUFFER_BYTES
+			);
+			return nullptr;
+		}
+		SDL_GPUBufferUsageFlags usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+		if (desc->Name == core::Name("tessellated-vertices")) usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
+		if (desc->Name == core::Name("tessellated-indices")) usage |= SDL_GPU_BUFFERUSAGE_INDEX;
+		if (desc->Name == core::Name("tessellated-commands")) usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
+		if (desc->Access == graph::ResourceAccess::Write ||
+			desc->Access == graph::ResourceAccess::ReadWrite ||
+			desc->Access == graph::ResourceAccess::Automatic) {
+			usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+		}
+		if (desc->Access == graph::ResourceAccess::Read || desc->Access == graph::ResourceAccess::ReadWrite ||
+			desc->Access == graph::ResourceAccess::Automatic) {
+			usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+		}
+		const graph::NodeScope scope = ResourceScope(pipeline, resource);
+		const core::Name name = GraphTargetName(pipeline, desc->Name);
+		// Count the whole table before replacing an entry. Stopping at the match
+		// misses later buffers and lets repeated graph edits exceed the budget.
+		uint64_t total = 0;
+		GraphBuffer *entry = nullptr;
+		for (GraphBuffer &buffer : GraphBuffers) {
+			if (buffer.Pipeline == pipeline.Name && buffer.Resource == name && buffer.Scope == scope &&
+				buffer.Owner == owner) {
+				entry = &buffer;
+			} else {
+				total += buffer.Bytes;
+			}
+		}
+		if (entry != nullptr && entry->Buffer != nullptr && entry->Bytes == bytes && entry->Usage == usage)
+			return entry->Buffer;
+		if (total + bytes > MAX_GRAPH_BUFFER_TOTAL_BYTES) {
+			ENGINE_WARN(
+				"graph buffers for '{}' exceed the {} byte budget",
+				pipeline.Name.Text(),
+				MAX_GRAPH_BUFFER_TOTAL_BYTES
+			);
+			return nullptr;
+		}
+		if (entry != nullptr) {
+			if (entry->Buffer != nullptr) gpu::ReleaseBuffer(Device, entry->Buffer);
+			entry->Buffer = nullptr;
+			entry->Bytes = 0;
+			entry->Usage = usage;
+		}
+		if (entry == nullptr) {
+			GraphBuffers.push_back(GraphBuffer{pipeline.Name, name, scope, owner});
+			entry = &GraphBuffers.back();
+		}
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = usage;
+		info.size = static_cast<uint32_t>(bytes);
+		entry->Buffer = gpu::CreateBuffer(Device, &info);
+		entry->Bytes = entry->Buffer != nullptr ? static_cast<uint32_t>(bytes) : 0;
+		entry->Usage = usage;
+		if (entry->Buffer == nullptr)
+			ENGINE_ERROR("graph buffer '{}': {}", desc->Name.Text(), SDL_GetError());
+		return entry->Buffer;
+	}
+
 	bool Renderer::Impl::EnsureBeams() {
 		if (BeamTexture != nullptr) {
 			return true;
@@ -621,12 +897,10 @@ namespace engine::render {
 		info.format = DepthFormat;
 		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
-		// **The world map's resolution for the whole atlas**, so one beam gets a
-		// quarter of it in each direction. A beam covers one doorway rather than
-		// a scene, so a quarter of the texels over a hundredth of the area is
-		// several times the density the world map has.
-		info.width = SHADOW_RESOLUTION;
-		info.height = SHADOW_RESOLUTION;
+		// Six fixed 1024px tiles: Tunnels has six mouths, and a rectangular atlas
+		// keeps each one independent without spending a sampler per doorway.
+		info.width = PORTAL_BEAM_COLUMNS * PORTAL_BEAM_RESOLUTION;
+		info.height = PORTAL_BEAM_ROWS * PORTAL_BEAM_RESOLUTION;
 		info.layer_count_or_depth = 1;
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -706,14 +980,17 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::EnsureSurface(size_t viewport, size_t index, uint32_t width, uint32_t height) {
+	bool Renderer::Impl::EnsureSurface(
+		size_t viewport, size_t index, uint32_t width, uint32_t height, SDL_GPUTextureFormat format
+	) {
 		if (index >= scene::MAX_SURFACES) {
 			return false;
 		}
 
 		SurfaceSlotState &state = SurfacesAt(viewport).Surfaces[index];
 
-		if (state.Texture[0] != nullptr && width == state.Width && height == state.Height) {
+		if (state.Texture[0] != nullptr && width == state.Width && height == state.Height &&
+			format == state.Format) {
 			return true;
 		}
 
@@ -730,7 +1007,7 @@ namespace engine::render {
 		// happen, and the picture the slot has is still a picture.
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		colour.format = format;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = width;
 		colour.height = height;
@@ -762,7 +1039,7 @@ namespace engine::render {
 			}
 			// **True when the slot still has its old pair**, because the caller's
 			// question is "may this surface be rendered", not "was it resized".
-			return state.Texture[0] != nullptr;
+			return state.Texture[0] != nullptr && state.Format == format;
 		};
 
 		for (SDL_GPUTexture *&texture : made) {
@@ -807,6 +1084,7 @@ namespace engine::render {
 		// showed its own tint.
 		state.Drawn = -1.0;
 
+		state.Format = format;
 		state.Width = width;
 		state.Height = height;
 		return true;
@@ -847,7 +1125,9 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		// Recursive levels exchange radiance. Quantizing before the one final
+		// tonemap loses dim light and clips values above one.
+		colour.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = width;
 		colour.height = height;
@@ -868,6 +1148,7 @@ namespace engine::render {
 			);
 			return nullptr;
 		}
+		colour.format = ColourFormat();
 		target.Display = gpu::CreateTexture(Device, &colour);
 		if (target.Display == nullptr) {
 			ENGINE_ERROR(
@@ -931,7 +1212,12 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::MirrorTarget *Renderer::Impl::EnsureMirror(
-		size_t viewport, uint32_t level, size_t index, uint32_t width, uint32_t height
+		size_t viewport,
+		uint32_t level,
+		size_t index,
+		uint32_t width,
+		uint32_t height,
+		SDL_GPUTextureFormat format
 	) {
 		if (index >= scene::MAX_SURFACES || level >= MAX_SURFACE_DEPTH || width == 0 || height == 0) {
 			return nullptr;
@@ -943,7 +1229,8 @@ namespace engine::render {
 		}
 
 		MirrorTarget &target = bank.Mirrors[level].Targets[index];
-		if (target.Colour != nullptr && width == target.Width && height == target.Height) {
+		if (target.Colour != nullptr && width == target.Width && height == target.Height &&
+			format == target.Format) {
 			return &target;
 		}
 
@@ -960,7 +1247,7 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		colour.format = format;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = width;
 		colour.height = height;
@@ -1015,24 +1302,37 @@ namespace engine::render {
 			return nullptr;
 		}
 
+		target.Format = format;
 		target.Width = width;
 		target.Height = height;
 		return &target;
 	}
 
-	Renderer::Impl::SeamLightTarget *Renderer::Impl::EnsureSeamLight(size_t viewport, size_t index) {
-		if (index >= scene::MAX_SURFACES) {
+	Renderer::Impl::SeamLightTarget *
+	Renderer::Impl::EnsureSeamLight(size_t viewport, size_t index, SDL_GPUTextureFormat format) {
+		if (index >= MAX_SEAM_LIGHT_TARGETS) {
 			return nullptr;
 		}
 
+		if (format == SDL_GPU_TEXTUREFORMAT_INVALID) {
+			format = ColourFormat();
+		}
 		SeamLightTarget &target = SurfacesAt(viewport).SeamLights[index];
-		if (target.Colour != nullptr && target.Depth != nullptr) {
+		if (target.Colour != nullptr && target.Depth != nullptr && target.Format == format) {
 			return &target;
 		}
 
+		if (target.Colour) {
+			gpu::ReleaseTexture(Device, target.Colour);
+		}
+		if (target.Depth) {
+			gpu::ReleaseTexture(Device, target.Depth);
+		}
+		target = {};
+		target.Format = format;
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		colour.format = format;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = SEAM_LIGHT_RESOLUTION;
 		colour.height = SEAM_LIGHT_RESOLUTION;

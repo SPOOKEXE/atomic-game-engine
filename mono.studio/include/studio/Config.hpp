@@ -53,6 +53,7 @@
 #include <engine/ui/Theme.hpp>
 #include <engine/world/SharedStoreFile.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <discord/Settings.hpp>
@@ -254,6 +255,21 @@ namespace studio {
 		// property or a running world's simulation state.
 		bool ShowParticleEmitters = true;
 
+		// Whether Studio asks its renderer to cull clusters outside the current
+		// level-of-detail range. The renderer remains responsible for its
+		// projected-area choice inside that range.
+		bool EnableLODCulling = true;
+
+		// The ordered distances that force LOD 1, 2, then 3 as the minimum coarse
+		// level, in studs.
+		// They stay in preferences because they tune the editor's view rather than
+		// the authored world.
+		//@{
+		float LOD1Distance = 30.0f;
+		float LOD2Distance = 60.0f;
+		float LOD3Distance = 120.0f;
+		//@}
+
 		// Whether Studio loads and saves the durable DataStore through the local
 		// provider. Off by default so opening an authored world cannot write
 		// external state without somebody choosing a location first.
@@ -279,8 +295,11 @@ namespace studio {
 
 		// Plain HTTP provider connection. Ignored while the file provider is selected.
 		std::string DataStoreHttpEndpoint = "127.0.0.1:8080";
+		// Host name used when the HTTP data-store provider is selected.
 		std::string DataStoreHttpHost = "localhost";
+		// URL path prefix under which the HTTP data-store provider exposes stores.
 		std::string DataStoreHttpPrefix = "/datastores/";
+		// Authorization value sent with HTTP data-store requests when configured.
 		std::string DataStoreHttpAuthorization;
 
 		// The external application used by source tabs and its executable override.
@@ -451,4 +470,14 @@ namespace studio {
 		// @return `false` when it could not be written.
 		bool Save() const;
 	};
+
+	// The minimum-coarse-level distances exactly as a render view and its Studio
+	// overlays consume them.
+	// Keeping this conversion shared makes a live preference edit reach rendering,
+	// debug rings, and active-LOD labels through the same ordered values.
+	//
+	// @param preferences The current Studio preferences.
+	// @return The LOD 1, 2, and 3 minimum-coarse-level distances in render-view order.
+	// @since v0.25
+	std::array<float, 3> LodMinimumDistances(const Preferences &preferences);
 }

@@ -4,7 +4,7 @@
 // complete texture residency contract.
 
 // Renderer textures are named device resources with one shared sampler.
-// Mipmaps are not represented by the current asset format.
+// Uploaded mip chains and flipbook metadata belong to each entry.
 //
 // @tier L12 · client
 
@@ -75,7 +75,18 @@ namespace engine::render {
 		return TextureChoice::Missing;
 	}
 
+	// The outcome of copying a render-owned decoded base level for export.
+	enum class TextureCopyStatus : uint8_t {
+		Copied,
+		Missing,
+		OverLimit,
+		Unsupported,
+		Invalid,
+	};
+
 	// The textures a renderer can sample.
+	// Names are scoped by an optional content owner. An empty owner is the shared
+	// namespace; scoped lookups never fall back to another owner or shared content.
 	//
 	// @client
 	// @since v0.9
@@ -86,6 +97,13 @@ namespace engine::render {
 		// Bounds device memory reachable from content.
 		static constexpr size_t MAXIMUM_BYTES = 512u * 1024u * 1024u;
 
+		// A source copy exists only for exact owner-scoped export. The individual
+		// and aggregate limits keep decoded CPU pixels from becoming a second,
+		// unbounded residency cache beside device memory.
+		static constexpr size_t MAXIMUM_COPY_BYTES = 16u * 1024u * 1024u;
+		// Total budget for retained owner-scoped source copies, in bytes.
+		static constexpr size_t MAXIMUM_RETAINED_COPY_BYTES = 256u * 1024u * 1024u;
+
 		TextureTable() = default;
 		~TextureTable();
 
@@ -93,10 +111,12 @@ namespace engine::render {
 		TextureTable &operator=(const TextureTable &) = delete;
 
 		// Takes the device, creates the shared sampler and uploads the default.
+		// Source copies are retained only when the host requests export support.
 		//
 		// @param device The GPU device. Kept, not owned.
+		// @param retainSources Keep decoded source copies for export support.
 		// @return `false` when the sampler or the default could not be created.
-		bool Initialise(SDL_GPUDevice *device);
+		bool Initialise(SDL_GPUDevice *device, bool retainSources = false);
 
 		// Releases every texture and the sampler.
 		void Shutdown();
@@ -108,9 +128,10 @@ namespace engine::render {
 		// @param name  The name a `SurfaceAppearance` or a submesh will ask
 		//              for.
 		// @param image The pixels. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
-		bool Add(const core::Name &name, const assets::TextureData &image);
+		bool Add(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
 
 		// Takes ownership of a texture somebody else created.
 		//
@@ -133,11 +154,18 @@ namespace engine::render {
 		// @param bytes   What it cost in device memory, counted against
 		//                `MAXIMUM_BYTES` like any upload. A caller that guessed
 		//                low would let the ceiling be walked past.
+		// @param owner   The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid name, a null texture or a full table -
 		//         and on `false` the caller still owns it.
 		// @since v0.10
-		bool
-		Adopt(const core::Name &name, SDL_GPUTexture *texture, uint32_t width, uint32_t height, size_t bytes);
+		bool Adopt(
+			const core::Name &name,
+			SDL_GPUTexture *texture,
+			uint32_t width,
+			uint32_t height,
+			size_t bytes,
+			core::Name owner = {}
+		);
 
 		// The texture for a name, or null when it is not registered.
 		//
@@ -148,8 +176,9 @@ namespace engine::render {
 		// picture instead of an answer asks `Default()` for one.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return The texture, or null.
-		SDL_GPUTexture *Find(const core::Name &name) const;
+		SDL_GPUTexture *Find(const core::Name &name, core::Name owner = {}) const;
 
 		// What to sample when a drawable names no texture, or names one that is
 		// not here.
@@ -202,8 +231,9 @@ namespace engine::render {
 		// the draw loop wants to know.
 		//
 		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @since v0.13
-		void Expect(const core::Name &name);
+		void Expect(const core::Name &name, core::Name owner = {});
 
 		// Says that nothing more is coming under this name.
 		//
@@ -216,15 +246,17 @@ namespace engine::render {
 		// `Add` and `Adopt` unmark too, so an arrival needs no second call.
 		//
 		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @since v0.13
-		void StopExpecting(const core::Name &name);
+		void StopExpecting(const core::Name &name, core::Name owner = {});
 
 		// Whether content is on its way under this name.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` between `Expect` and whatever finishes it.
 		// @since v0.13
-		bool Expecting(const core::Name &name) const;
+		bool Expecting(const core::Name &name, core::Name owner = {}) const;
 
 		// How many names are in flight.
 		//
@@ -242,9 +274,20 @@ namespace engine::render {
 		// @param name   The name.
 		// @param width  Set to the width, or left alone when the name is absent.
 		// @param height Set to the height, likewise.
+		// @param owner  The exact content namespace, or empty for shared content.
 		// @return `false` for a name this table does not hold.
 		// @since v0.10
-		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height) const;
+		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner = {}) const;
+
+		// The source layout and colour-space intent retained for a named texture.
+		// Returns false for an absent name and leaves `format` alone.
+		bool FormatOf(const core::Name &name, assets::TextureFormat &format, core::Name owner = {}) const;
+
+		// Copies only the decoded base level retained by `Add`. This never reads
+		// device memory and never falls back across content owners. Refusal leaves
+		// `out` unchanged.
+		TextureCopyStatus
+		Copy(const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner = {}) const;
 
 		// Where this texture's current cell sits, for a sheet that animates.
 		//
@@ -255,9 +298,10 @@ namespace engine::render {
 		// @param name    The texture.
 		// @param seconds How long animation has been running. The caller's
 		//                clock; this module holds none.
+		// @param owner   The exact content namespace, or empty for shared content.
 		// @return The transform, or the identity for a still or an absent name.
 		// @since v0.10
-		FlipbookCell CellOf(const core::Name &name, double seconds) const;
+		FlipbookCell CellOf(const core::Name &name, double seconds, core::Name owner = {}) const;
 
 		// A process-local signature of every registered animated sheet's current
 		// frame. Static textures contribute nothing.
@@ -287,9 +331,14 @@ namespace engine::render {
 		// had browsed it.
 		//
 		// @param name The name to drop.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this table does not hold.
 		// @since v0.10
-		bool Drop(const core::Name &name);
+		bool Drop(const core::Name &name, core::Name owner = {});
+
+		// Releases one named owner and cancels its expected arrivals. Shared entries
+		// are retained; an empty owner is refused. Returns the textures released.
+		size_t DropOwner(core::Name owner);
 
 		// How many bytes of device memory the table has uploaded.
 		size_t Bytes() const {
@@ -316,6 +365,7 @@ namespace engine::render {
 			// draws every slice at the wrong scale.
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+			assets::TextureFormat Format = assets::TextureFormat::RGBA8_LINEAR;
 
 			// **The sheet layout, kept because the pass that plays it has only a
 			// name.** A GIF bakes to an ordinary texture carrying its grid,
@@ -325,6 +375,12 @@ namespace engine::render {
 			uint8_t FlipbookSide = 0;
 			uint8_t FlipbookFrames = 0;
 			float FlipbookFrameRate = 0.0f;
+
+			// The decoded base level is retained for exact host-owned export. Mips
+			// stay device-only: the export seam promises source pixels, not a second
+			// unbounded copy of every upload chain.
+			std::vector<std::byte> SourcePixels;
+			TextureCopyStatus CopyStatus = TextureCopyStatus::Unsupported;
 		};
 
 		// Creates one device texture and fills it, widening `R8` on the way.
@@ -345,7 +401,8 @@ namespace engine::render {
 		SDL_GPUTexture *Upload(const assets::TextureData &image, std::string_view label, size_t &bytes);
 
 		// One entry from an upload and the image it came from. See the body.
-		static Entry Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image);
+		static Entry
+		Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image, bool retainSource);
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUSampler *SharedSampler = nullptr;
@@ -361,15 +418,17 @@ namespace engine::render {
 		// counted against `MAXIMUM_BYTES`.
 		SDL_GPUTexture *MissingHandle = nullptr;
 
-		std::unordered_map<uint32_t, Entry> Textures;
+		std::unordered_map<uint64_t, Entry> Textures;
 
 		// The names something is fetching right now. See `Expect`.
 		//
 		// **Interned ids rather than strings**, like `Textures` beside it: the
 		// draw loop asks this once per submesh per frame and a string compare
 		// per draw is what `core::Name` exists to avoid.
-		std::unordered_set<uint32_t> Awaiting;
+		std::unordered_set<uint64_t> Awaiting;
 
 		size_t UploadedBytes = 0;
+		size_t RetainedCopyBytes = 0;
+		bool RetainSources = false;
 	};
 }

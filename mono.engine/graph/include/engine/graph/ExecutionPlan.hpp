@@ -131,8 +131,8 @@ namespace engine::graph {
 		// totals because synchronisation traffic is a different cost from work.
 		uint64_t QueueTransferBytes = 0;
 
-		// Empties the plan so one instance can be reused frame after frame,
-		// which is what keeps planning out of the allocator.
+		// Clears totals and contents. The outer vectors retain capacity, but
+		// clearing waves releases their nested invocation storage.
 		void Clear() {
 			Waves.clear();
 			Transfers.clear();

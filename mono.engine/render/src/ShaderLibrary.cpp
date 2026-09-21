@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/render/ShaderCompiler.hpp>
@@ -16,6 +17,47 @@
 namespace engine::render {
 
 	namespace {
+		uint64_t ModuleKey(core::Name name, core::Name owner) {
+			return (uint64_t(owner.Id()) << 32) | name.Id();
+		}
+
+		// Accept only successful bytes. Failed attempts keep prior words and
+		// their reflection together; device consumers see no replacement event.
+		bool ApplySourceCompilation(
+			ShaderModule &module, ShaderCompilation result, const scene::ShaderText &text, core::Name name
+		) {
+			if (module.StoreIdentity != text.StoreIdentity) {
+				module = {};
+			}
+			module.StoreIdentity = text.StoreIdentity;
+			module.AttemptSource = text.Source;
+			module.Authored = true;
+			module.AttemptRevision = text.Revision;
+			module.AttemptError = std::move(result.Error);
+			if (result.Failed) {
+				if (module.Error.empty() && !module.SpirV.empty()) {
+					ENGINE_WARN(
+						"shader '{}': keeping accepted revision {} after failed edit: {}",
+						name.Text(),
+						module.Revision,
+						module.AttemptError
+					);
+					return false;
+				}
+				module.Error = module.AttemptError;
+				return true;
+			}
+			module.Error.clear();
+			module.AttemptError.clear();
+			module.Revision = text.Revision;
+			module.BuiltIn = false;
+			module.SpirV = std::move(result.SpirV);
+			module.CodeHash = assets::Hasher::Of(std::as_bytes(std::span(module.SpirV)));
+			module.Capabilities = std::move(result.Capabilities);
+			module.Optimizations = std::move(result.Optimizations);
+			return true;
+		}
+
 		// The shaders this engine ships.
 		//
 		// **Two, and adding a third is a decision rather than a file drop.**
@@ -83,11 +125,8 @@ namespace engine::render {
 		// edited compiles the same script repeatedly.
 		ShaderCompiler Compiler;
 
-		// Keyed by `core::Name::Id`, matching `MeshTable::Entries` and
-		// `MaterialCatalogue::ColourMaps`: a `Name` is already an integer in
-		// this process, so hashing the integer skips the registry lock that
-		// comparing text would take.
-		std::unordered_map<uint32_t, ShaderModule> Modules;
+		// Both ids are process-local. Names remain the serialized identity.
+		std::unordered_map<uint64_t, ShaderModule> Modules;
 
 		// What moved on the last `Refresh`, including what was dropped.
 		std::vector<core::Name> Changed;
@@ -102,7 +141,7 @@ namespace engine::render {
 		// caller into the same buffer would have to know not to violate it.
 		std::vector<core::Name> GuiDemanded;
 
-		std::unordered_map<uint32_t, ShaderModule> LensModules;
+		std::unordered_map<uint64_t, ShaderModule> LensModules;
 		std::vector<core::Name> LensChanged;
 		std::vector<core::Name> LensDemanded;
 
@@ -115,7 +154,7 @@ namespace engine::render {
 
 	ShaderLibrary::~ShaderLibrary() = default;
 
-	size_t ShaderLibrary::Refresh(ecs::Store &store) {
+	size_t ShaderLibrary::Refresh(ecs::Store &store, core::Name owner) {
 		State->Changed.clear();
 		scene::DemandedShaders(store, State->Demanded);
 
@@ -139,7 +178,11 @@ namespace engine::render {
 		// contrived order: an author retyping a shader's name goes through the
 		// invalid name for one keystroke, and the walk below sees the new one.
 		for (auto entry = State->Modules.begin(); entry != State->Modules.end();) {
-			const core::Name name = core::Name::FromId(entry->first);
+			if (static_cast<uint32_t>(entry->first >> 32) != owner.Id()) {
+				++entry;
+				continue;
+			}
+			const core::Name name = core::Name::FromId(static_cast<uint32_t>(entry->first));
 			const bool wanted =
 				std::find(State->Demanded.begin(), State->Demanded.end(), name) != State->Demanded.end();
 			if (wanted) {
@@ -152,40 +195,26 @@ namespace engine::render {
 
 		for (const core::Name &name : State->Demanded) {
 			const scene::ShaderText text = scene::ShaderTextOf(store, name);
-			const auto found = State->Modules.find(name.Id());
+			const auto found = State->Modules.find(ModuleKey(name, owner));
 			const bool held = found != State->Modules.end();
 
 			if (text.Found) {
-				// **The integer compare that keeps a GLSL front end out of the
-				// frame loop.** A script whose revision has not moved since it
-				// was compiled is the steady state of every world that is not
-				// being edited. A module that came from a built-in is
-				// recompiled whatever the revision says, because a script
-				// appearing under a built-in's name is an override arriving.
-				if (held && !found->second.BuiltIn && found->second.Revision == text.Revision) {
+				// Failed overrides also record the attempt, so a retained built-in
+				// does not trigger another compile until the selected source changes.
+				if (held && found->second.Authored && found->second.StoreIdentity == text.StoreIdentity &&
+					found->second.AttemptSource == text.Source &&
+					found->second.AttemptRevision == text.Revision) {
 					continue;
 				}
 
 				ShaderCompilation result =
 					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
 
-				ShaderModule module;
-				module.Revision = text.Revision;
-				if (result.Failed) {
-					// **A diagnostic and not a fatal**, which is
-					// `render/AGENTS.md`'s split between the two compilers: a
-					// built-in that fails to compile fails the build, and a
-					// shader somebody is writing fails with a line number and
-					// the engine keeps running.
-					module.Error = std::move(result.Error);
-				} else {
-					module.SpirV = std::move(result.SpirV);
-					module.Capabilities = std::move(result.Capabilities);
-					module.Optimizations = std::move(result.Optimizations);
+				if (ApplySourceCompilation(
+						State->Modules[ModuleKey(name, owner)], std::move(result), text, name
+					)) {
+					State->Changed.push_back(name);
 				}
-
-				State->Modules[name.Id()] = std::move(module);
-				State->Changed.push_back(name);
 				continue;
 			}
 
@@ -193,11 +222,13 @@ namespace engine::render {
 			// engine runs**, so a held module of either kind is left alone. That
 			// is what stops a typo being re-reported once a frame for the life
 			// of a session.
-			if (held) {
+			if (held && !found->second.Authored) {
+				found->second.StoreIdentity = store.Identity();
 				continue;
 			}
 
 			ShaderModule module;
+			module.StoreIdentity = store.Identity();
 			if (IsBuiltInShader(name.Text())) {
 				module.BuiltIn = true;
 				// SPIR-V, whatever the device takes. This library's output is
@@ -209,6 +240,7 @@ namespace engine::render {
 					module.Error
 				);
 				if (module.Error.empty()) {
+					module.CodeHash = assets::Hasher::Of(std::as_bytes(std::span(module.SpirV)));
 					module.Capabilities = InspectShaderCapabilities(module.SpirV);
 				}
 			} else {
@@ -220,19 +252,23 @@ namespace engine::render {
 							   "' and the engine ships no shader of that name";
 			}
 
-			State->Modules[name.Id()] = std::move(module);
+			State->Modules[ModuleKey(name, owner)] = std::move(module);
 			State->Changed.push_back(name);
 		}
 
 		return State->Changed.size();
 	}
 
-	size_t ShaderLibrary::RefreshLenses(ecs::Store &store) {
+	size_t ShaderLibrary::RefreshLenses(ecs::Store &store, core::Name owner) {
 		State->LensChanged.clear();
 		scene::DemandedLensShaders(store, State->LensDemanded);
 
 		for (auto entry = State->LensModules.begin(); entry != State->LensModules.end();) {
-			const core::Name name = core::Name::FromId(entry->first);
+			if (static_cast<uint32_t>(entry->first >> 32) != owner.Id()) {
+				++entry;
+				continue;
+			}
+			const core::Name name = core::Name::FromId(static_cast<uint32_t>(entry->first));
 			const bool wanted = std::find(State->LensDemanded.begin(), State->LensDemanded.end(), name) !=
 								State->LensDemanded.end();
 			if (wanted) {
@@ -245,29 +281,23 @@ namespace engine::render {
 
 		for (const core::Name &name : State->LensDemanded) {
 			const scene::ShaderText text = scene::LensShaderTextOf(store, name);
-			const auto found = State->LensModules.find(name.Id());
+			const auto found = State->LensModules.find(ModuleKey(name, owner));
 			const bool held = found != State->LensModules.end();
 
 			if (text.Found) {
-				if (held && !found->second.BuiltIn && found->second.Revision == text.Revision) {
+				if (held && found->second.Authored && found->second.StoreIdentity == text.StoreIdentity &&
+					found->second.AttemptSource == text.Source &&
+					found->second.AttemptRevision == text.Revision) {
 					continue;
 				}
 
 				ShaderCompilation result =
 					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
-				ShaderModule module;
-				module.Authored = true;
-				module.Revision = text.Revision;
-				if (result.Failed) {
-					module.Error = std::move(result.Error);
-				} else {
-					module.SpirV = std::move(result.SpirV);
-					module.Capabilities = std::move(result.Capabilities);
-					module.Optimizations = std::move(result.Optimizations);
+				if (ApplySourceCompilation(
+						State->LensModules[ModuleKey(name, owner)], std::move(result), text, name
+					)) {
+					State->LensChanged.push_back(name);
 				}
-
-				State->LensModules[name.Id()] = std::move(module);
-				State->LensChanged.push_back(name);
 				continue;
 			}
 
@@ -276,10 +306,12 @@ namespace engine::render {
 			// ShaderLens still names it, so resolve the fallback rather than
 			// retaining the removed source's old GPU pipeline.
 			if (held && !found->second.Authored) {
+				found->second.StoreIdentity = store.Identity();
 				continue;
 			}
 
 			ShaderModule module;
+			module.StoreIdentity = store.Identity();
 			if (IsBuiltInLensShader(name.Text())) {
 				module.BuiltIn = true;
 				module.SpirV = ReadWords(
@@ -287,6 +319,7 @@ namespace engine::render {
 					module.Error
 				);
 				if (module.Error.empty()) {
+					module.CodeHash = assets::Hasher::Of(std::as_bytes(std::span(module.SpirV)));
 					module.Capabilities = InspectShaderCapabilities(module.SpirV);
 				}
 			} else {
@@ -294,27 +327,46 @@ namespace engine::render {
 							   "' and the engine ships no lens shader of that name";
 			}
 
-			State->LensModules[name.Id()] = std::move(module);
+			State->LensModules[ModuleKey(name, owner)] = std::move(module);
 			State->LensChanged.push_back(name);
 		}
 
 		return State->LensChanged.size();
 	}
 
-	const ShaderModule *ShaderLibrary::Find(const core::Name &name) const {
+	const ShaderModule *ShaderLibrary::Find(const core::Name &name, core::Name owner) const {
 		if (!name.IsValid()) {
 			return nullptr;
 		}
-		const auto found = State->Modules.find(name.Id());
+		const auto found = State->Modules.find(ModuleKey(name, owner));
 		return found == State->Modules.end() ? nullptr : &found->second;
 	}
 
-	const ShaderModule *ShaderLibrary::FindLens(const core::Name &name) const {
+	const ShaderModule *ShaderLibrary::FindLens(const core::Name &name, core::Name owner) const {
 		if (!name.IsValid()) {
 			return nullptr;
 		}
-		const auto found = State->LensModules.find(name.Id());
+		const auto found = State->LensModules.find(ModuleKey(name, owner));
 		return found == State->LensModules.end() ? nullptr : &found->second;
+	}
+
+	size_t ShaderLibrary::DropOwner(core::Name owner) {
+		State->Changed.clear();
+		State->LensChanged.clear();
+		if (!owner.IsValid()) return 0;
+		const auto drop = [&](auto &modules, auto &changed) {
+			for (auto entry = modules.begin(); entry != modules.end();) {
+				if (static_cast<uint32_t>(entry->first >> 32) != owner.Id()) {
+					++entry;
+					continue;
+				}
+				changed.push_back(core::Name::FromId(static_cast<uint32_t>(entry->first)));
+				entry = modules.erase(entry);
+			}
+			return changed.size();
+		};
+		const size_t materials = drop(State->Modules, State->Changed);
+		return materials + drop(State->LensModules, State->LensChanged);
 	}
 
 	std::span<const core::Name> ShaderLibrary::Changed() const {

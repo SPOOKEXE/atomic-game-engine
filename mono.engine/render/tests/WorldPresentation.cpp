@@ -1,9 +1,16 @@
 // Device-free checks for the shared world-to-renderer presentation boundary.
 
+#include <engine/core/Bytes.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/CameraContinuation.hpp>
+#include <engine/scene/Characters.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -23,6 +30,186 @@ TEST_DEPENDS("engine.scene.services")
 
 using engine::core::Name;
 
+TEST_CASE(
+	"first-person body selection follows player identity across held and native rigs", "[render][eye-body]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store authority{"body-authority"};
+	scene::InstallServices(authority);
+	const auto player = scene::AddPlayer(authority, "viewer", false, 91);
+	const auto model = scene::LoadCharacter(authority, player);
+	const auto rig = *authority.Get<scene::Character>(model);
+	core::ByteWriter snapshot;
+	REQUIRE(authority.Save(snapshot));
+	ecs::Store replica{"body-replica"};
+	core::ByteReader reader(snapshot.Bytes());
+	REQUIRE(replica.Apply(reader, ecs::ApplyMode::Authoritative));
+	replica.SetAdoptOnly(true);
+	const auto camera = replica.CreatePredictedInstance(scene::CameraClass(), "Eye");
+	replica.Set(camera, scene::CameraSubject{.Target = rig.Humanoid, .Automatic = false});
+	replica.SetResource(scene::ActiveCamera{camera});
+	replica.SetResource(scene::LocalPlayer{player});
+	scene::CameraController controller;
+	controller.Mode = scene::CameraMode::LockFirstPerson;
+	replica.SetResource(controller);
+	render::View view;
+	render::SelectFirstPersonBody(replica, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+	REQUIRE(view.EyePlayer == 91);
+	REQUIRE(scene::PrepareCameraCharacterHold(replica, player, core::CFrame{}));
+	render::ResolveEyeBody(replica, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+	replica.DestroyInstance(rig.Humanoid);
+	REQUIRE(scene::ActivateCameraCharacterHold(replica));
+	const auto held = *replica.Resource<scene::CameraCharacterHold>();
+	CHECK(replica.GetFullName(held.Root) != replica.GetFullName(rig.Root));
+	render::SelectFirstPersonBody(replica, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+	CHECK(view.EyePlayer == 91);
+	render::ResolveEyeBody(authority, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+
+	SECTION("retired source root preserves identity") {
+		replica.DestroyInstance(rig.Root);
+		render::SelectFirstPersonBody(replica, view);
+		CHECK(view.EyeRig == held.Root.Id);
+		CHECK(view.EyePlayer == 91);
+		scene::CameraBodyPose retainedPose;
+		retainedPose.SourceRoot = held.SourceRoot;
+		replica.SetResource(std::move(retainedPose));
+		render::SelectFirstPersonBody(replica, view);
+		CHECK(view.EyeRig == held.SourceRoot.Id);
+		CHECK(view.EyePlayer == 91);
+		render::ResolveEyeBody(authority, view);
+		CHECK(view.EyeRig == rig.Root.Id);
+	}
+	SECTION("duplicate account cannot select an arbitrary rig") {
+		const auto second = scene::AddPlayer(authority, "other", false, 91);
+		REQUIRE(scene::LoadCharacter(authority, second) != ecs::NULL_ENTITY);
+		render::ResolveEyeBody(authority, view);
+		CHECK(view.EyeRig == 0);
+	}
+	SECTION("changed subject clears the player identity") {
+		replica.Set(camera, scene::CameraSubject{});
+		render::SelectFirstPersonBody(replica, view);
+		CHECK(view.EyeRig == 0);
+		CHECK_FALSE(view.EyePlayer);
+	}
+	SECTION("third-person and scriptable cameras show the body") {
+		for (const auto mode : {scene::CameraMode::Classic, scene::CameraMode::Scriptable}) {
+			replica.ResourceMutable<scene::CameraController>()->Mode = mode;
+			render::SelectFirstPersonBody(replica, view);
+			CHECK(view.EyeRig == 0);
+			CHECK_FALSE(view.EyePlayer);
+		}
+	}
+	SECTION("unavailable player clears a previous resolution") {
+		view.EyePlayer = 92;
+		render::ResolveEyeBody(authority, view);
+		CHECK(view.EyeRig == 0);
+	}
+}
+
+TEST_CASE("eye body selection invalidates objects without changing the environment", "[render][eye-body]") {
+	using namespace engine;
+	std::array<scene::DrawInstance, 1> rows{};
+	render::View view;
+	view.Instances = rows;
+	render::ScenePresentationState state;
+	state.Lighting.EnvironmentState.Skybox = scene::SkyboxSource::Textures;
+	state.Lighting.EnvironmentState.Textures.Enabled = true;
+	state.Lighting.EnvironmentState.Textures.Front = Name("eye-body.sky");
+	const auto before = render::ScenePresentationSignaturesOf(view, state);
+	REQUIRE(before.Environment != 0);
+	view.EyeRig = 123;
+	const auto hidden = render::ScenePresentationSignaturesOf(view, state);
+	CHECK(hidden.Objects != before.Objects);
+	CHECK(hidden.Environment == before.Environment);
+	view.EyeRig = 456;
+	CHECK(render::ScenePresentationSignaturesOf(view, state).Objects != hidden.Objects);
+	view.EyeRig = 0;
+	const std::array<uint32_t, 1> importedHidden{0};
+	view.EyeHiddenRows = importedHidden;
+	const auto imported = render::ScenePresentationSignaturesOf(view, state);
+	CHECK(imported.Objects != before.Objects);
+	CHECK(imported.Environment == before.Environment);
+}
+
+TEST_CASE("a row edit invalidates only the camera given that edited row", "[render][presentation][damage]") {
+	using namespace engine;
+	std::array<scene::DrawInstance, 3> firstRows{};
+	std::array<scene::DrawInstance, 3> secondRows{};
+	for (size_t index = 0; index < firstRows.size(); index++) {
+		firstRows[index].Source = index + 1;
+		secondRows[index].Source = index + 1;
+	}
+
+	render::View first;
+	first.Instances = firstRows;
+	render::View second;
+	second.Instances = secondRows;
+	const render::ScenePresentationState state;
+	const uint64_t firstBefore = render::ScenePresentationSignaturesOf(first, state).Objects;
+	const uint64_t secondBefore = render::ScenePresentationSignaturesOf(second, state).Objects;
+	REQUIRE(firstBefore != 0);
+	REQUIRE(secondBefore != 0);
+
+	// Camera views keep independent draw rows. The edit must reach the view
+	// whose frame is being signed, while an untouched camera remains reusable.
+	firstRows[1].Tint.R = 0.5f;
+	CHECK(render::ScenePresentationSignaturesOf(first, state).Objects != firstBefore);
+	CHECK(render::ScenePresentationSignaturesOf(second, state).Objects == secondBefore);
+}
+
+TEST_CASE("whole-eye images invalidate retained viewport composition", "[render][eye-presentation]") {
+	engine::render::View view;
+	view.EyeImageKey = Name("viewport-eye");
+	view.WorldName = Name("viewer");
+	view.World = 3;
+	view.Slot = 2;
+	const auto pending = engine::render::ScenePresentationSignaturesOf(view, {}).Portals;
+	view.EyeImage = 7;
+	view.EyeTransparentImages = {11, 13};
+	const auto accepted = engine::render::ScenePresentationSignaturesOf(view, {}).Portals;
+	REQUIRE(accepted != pending);
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals == accepted);
+	SECTION("near transparent layer changed") {
+		view.EyeTransparentImages[0] = 12;
+	}
+	SECTION("spatial overlay arrived") {
+		view.EyeSpatialOverlayImage = 17;
+	}
+	SECTION("far transparent layer changed") {
+		view.EyeTransparentImages[1] = 14;
+	}
+	SECTION("transparent layer withdrawn") {
+		view.EyeTransparentImages[0] = 0;
+	}
+	SECTION("transparent layer order changed") {
+		std::swap(view.EyeTransparentImages[0], view.EyeTransparentImages[1]);
+	}
+	SECTION("changed image") {
+		view.EyeImage = 8;
+	}
+	SECTION("withdrawal") {
+		view.EyeImage = 0;
+	}
+	SECTION("different key") {
+		view.EyeImageKey = Name("other-eye");
+	}
+	SECTION("different world") {
+		view.World = 4;
+	}
+	SECTION("different world name") {
+		view.WorldName = Name("other-viewer");
+	}
+	SECTION("different viewport") {
+		view.Slot = 4;
+	}
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals != accepted);
+}
+
 TEST_CASE("presentation resources keep their stable saved identity", "[render][presentation]") {
 	engine::render::RegisterPresentationComponents();
 	engine::render::RegisterPresentationComponents();
@@ -33,6 +220,7 @@ TEST_CASE("presentation resources keep their stable saved identity", "[render][p
 }
 
 TEST_CASE("an empty world publishes an empty reusable particle snapshot", "[render][presentation]") {
+	engine::effects::RegisterEffectComponents();
 	engine::ecs::Store store("empty-presentation");
 	engine::render::ParticleFrame frame;
 	frame.Pool = 64;
@@ -99,6 +287,113 @@ TEST_CASE("fully transparent parts never enter the resident draw list", "[render
 	CHECK(drawList->Instances[0].SkinFirst == 0);
 	CHECK(drawList->Instances[0].SkinCount == 0);
 	CHECK(drawList->JointFrames.empty());
+}
+
+TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][presentation]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("object-labels");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	const auto part = [&](std::string id) {
+		const auto entity = engine::scene::MakePart(store, engine::scene::PartDesc{});
+		REQUIRE(store.SetParent(entity, workspace));
+		engine::ecs::AttributeValue value;
+		value.Type = engine::ecs::PropertyType::String;
+		value.String = id;
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryId"), value));
+		engine::ecs::AttributeValue semantic = value;
+		semantic.String = "fixture/box";
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactorySemanticId"), semantic));
+		engine::ecs::AttributeValue part = value;
+		part.String = "fixture/part/" + id;
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryPartId"), part));
+		return entity;
+	};
+	const auto later = part("zeta");
+	const auto earlier = part("alpha");
+	REQUIRE(engine::scene::SyncRendered(store) == 2);
+	engine::render::CollectInstances(store);
+	const auto *draw = store.Resource<engine::render::DrawList>();
+	REQUIRE(draw != nullptr);
+	REQUIRE(draw->ObjectLabels.size() == 2);
+	CHECK(draw->ObjectLabels[0].Label == 1);
+	CHECK(draw->ObjectLabels[0].StableId == "alpha");
+	CHECK(draw->ObjectLabels[1].Label == 2);
+	CHECK(draw->ObjectLabels[1].StableId == "zeta");
+	REQUIRE(draw->SemanticLabelsValid);
+	REQUIRE(draw->SemanticLabels.size() == 1);
+	CHECK(draw->SemanticLabels[0].StableId == "fixture/box");
+	REQUIRE(draw->PartLabelsValid);
+	REQUIRE(draw->PartLabels.size() == 2);
+	CHECK(draw->PartLabels[0].StableId == "fixture/part/alpha");
+	CHECK(draw->PartLabels[1].StableId == "fixture/part/zeta");
+	for (const auto &instance : draw->Instances) {
+		if (instance.Source == earlier.Id) CHECK(instance.ObjectLabel == 1);
+		if (instance.Source == later.Id) CHECK(instance.ObjectLabel == 2);
+		CHECK(instance.SemanticLabel == 1);
+	}
+
+	// Attribute writes do not change the drawable shape. The reusable draw-list
+	// path must still refresh labels because an id-only edit changes object-id pixels.
+	engine::ecs::AttributeValue changed;
+	changed.Type = engine::ecs::PropertyType::String;
+	changed.String = "aardvark";
+	REQUIRE(engine::ecs::SetAttribute(store, later, Name("DataFactoryId"), changed));
+	engine::render::CollectInstances(store);
+	REQUIRE(draw->ObjectLabels.size() == 2);
+	CHECK(draw->ObjectLabels[0].StableId == "aardvark");
+	for (const auto &instance : draw->Instances)
+		if (instance.Source == later.Id) CHECK(instance.ObjectLabel == 1);
+}
+
+TEST_CASE("ambiguous data-factory ids refuse an object label table", "[render][presentation]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("duplicate-object-labels");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	for (size_t index = 0; index < 2; ++index) {
+		const auto entity = engine::scene::MakePart(store, engine::scene::PartDesc{});
+		REQUIRE(store.SetParent(entity, workspace));
+		engine::ecs::AttributeValue value;
+		value.Type = engine::ecs::PropertyType::String;
+		value.String = "same";
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryId"), value));
+	}
+	REQUIRE(engine::scene::SyncRendered(store) == 2);
+	engine::render::CollectInstances(store);
+	const auto *draw = store.Resource<engine::render::DrawList>();
+	REQUIRE(draw != nullptr);
+	CHECK_FALSE(draw->ObjectLabelsValid);
+	CHECK(draw->ObjectLabels.empty());
+	for (const auto &instance : draw->Instances)
+		CHECK(instance.ObjectLabel == 0);
+}
+
+TEST_CASE(
+	"shared semantic label tables bound unique classes rather than instances", "[render][presentation]"
+) {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("shared-semantic-labels");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	for (size_t index = 0; index < engine::render::MAX_DATA_CAPTURE_OBJECT_LABELS + 1; ++index) {
+		const auto entity = engine::scene::MakePart(store, engine::scene::PartDesc{});
+		REQUIRE(store.SetParent(entity, workspace));
+		engine::ecs::AttributeValue value;
+		value.Type = engine::ecs::PropertyType::String;
+		value.String = "fixture/shared-box";
+		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactorySemanticId"), value));
+	}
+	REQUIRE(engine::scene::SyncRendered(store) == engine::render::MAX_DATA_CAPTURE_OBJECT_LABELS + 1);
+	engine::render::CollectInstances(store);
+	const auto *draw = store.Resource<engine::render::DrawList>();
+	REQUIRE(draw != nullptr);
+	CHECK(draw->SemanticLabelsValid);
+	REQUIRE(draw->SemanticLabels.size() == 1);
+	CHECK(draw->SemanticLabels[0].StableId == "fixture/shared-box");
 }
 
 TEST_CASE("irrelevant transform writes do not hide visible source changes", "[render][presentation][cache]") {
@@ -173,6 +468,105 @@ TEST_CASE("pose-only presentation preserves static draw metadata", "[render][pre
 	CHECK(drawList->Instances[0].Frame.Position.X == 6.0f);
 	CHECK(drawList->Instances[0].Tint == tint);
 	CHECK_FALSE(drawList->HasInterpolation);
+}
+
+TEST_CASE(
+	"pose updates retain source identity after cached row order changes", "[render][presentation][cache]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("draw-source-order");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity first = scene::MakePart(store, scene::PartDesc{});
+	const ecs::Entity second = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(store.SetParent(first, workspace));
+	REQUIRE(store.SetParent(second, workspace));
+	auto firstFrame = *store.Get<scene::Transform>(first);
+	auto secondFrame = *store.Get<scene::Transform>(second);
+	firstFrame.Frame.Position.X = 1.0f;
+	secondFrame.Frame.Position.X = 9.0f;
+	store.Set(first, firstFrame);
+	store.Set(second, secondFrame);
+	REQUIRE(scene::SyncRendered(store) == 2);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	const auto *draw = store.Resource<render::DrawList>();
+	REQUIRE(draw != nullptr);
+	REQUIRE(draw->Instances.size() == 2);
+
+	// A cached source order can drift from the current query order. A pose-only
+	// update must detect that mismatch before writing frames onto other parts.
+	auto *mutableDraw = store.ResourceMutable<render::DrawList>();
+	std::swap(mutableDraw->Instances[0], mutableDraw->Instances[1]);
+	firstFrame.Frame.Position.X = 2.0f;
+	store.Set(first, firstFrame);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	REQUIRE(draw->Instances.size() == 2);
+	for (const auto &row : draw->Instances) {
+		if (row.Source == first.Id) CHECK(row.Frame.Position.X == 2.0f);
+		if (row.Source == second.Id) CHECK(row.Frame.Position.X == 9.0f);
+	}
+}
+
+TEST_CASE("optional LOD and effect rows reach the cached draw list", "[render][presentation][lod]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("optional-render-state");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity part = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(store.SetParent(part, workspace));
+
+	scene::AutoMeshLOD automatic;
+	automatic.Meshes[0] = Name("lod.auto-half");
+	automatic.Meshes[1] = Name("lod.auto-quarter");
+	automatic.Ratios[0] = 0.4f;
+	automatic.Levels = 3;
+	store.Set(part, automatic);
+	scene::CustomMeshLOD custom;
+	custom.Meshes[0] = Name("lod.custom-half");
+	custom.Levels = 3;
+	store.Set(part, custom);
+	scene::RenderEffects effects;
+	effects.Attachments[0].Node = Name("outline");
+	effects.Attachments[0].Enabled = true;
+	effects.Count = 1;
+	store.Set(part, effects);
+
+	REQUIRE(scene::SyncRendered(store) == 1);
+	render::CollectInstances(store);
+	auto *drawList = store.ResourceMutable<render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 1);
+	CHECK(drawList->Instances[0].LodMeshes[0] == Name("lod.custom-half"));
+	CHECK(drawList->Instances[0].LodMeshes[1] == Name("lod.auto-quarter"));
+	CHECK(drawList->Instances[0].LodRatios[0] == 0.4f);
+	CHECK(drawList->Instances[0].Effects.Attachments[0].Node == Name("outline"));
+
+	custom.Meshes[0] = Name("lod.changed");
+	custom.Meshes[1] = Name("lod.custom-quarter");
+	effects.Attachments[0].Node = Name("posterise");
+	store.Set(part, custom);
+	store.Set(part, effects);
+	render::CollectInstances(store);
+	CHECK(drawList->Instances[0].LodMeshes[0] == Name("lod.changed"));
+	CHECK(drawList->Instances[0].Effects.Attachments[0].Node == Name("posterise"));
+}
+
+TEST_CASE("LOD view settings invalidate the object image", "[render][presentation][lod]") {
+	using namespace engine;
+	const std::array instances{scene::DrawInstance{}};
+	render::View view;
+	view.Instances = instances;
+	const auto signature = [&] { return render::ScenePresentationSignaturesOf(view, {}).Objects; };
+	const uint64_t original = signature();
+	view.LodMinimumDistances = {30.0f, 60.0f, 120.0f};
+	const uint64_t distance = signature();
+	CHECK(distance != original);
+	view.EnableLODCulling = false;
+	CHECK(signature() != distance);
 }
 
 TEST_CASE("a draw list flattens each rig palette beside its instance", "[render][presentation][skinning]") {
@@ -286,6 +680,107 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	view.CameraFrame.Position.X = 0.0f;
 	state.Untextured = true;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+
+	state.Untextured = false;
+	state.Wireframe = true;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+}
+
+TEST_CASE("camera oscillation never settles the scene presentation cache", "[render][presentation][damage]") {
+	engine::scene::DrawInstance instance;
+	const std::array instances{instance};
+	engine::render::View view;
+	view.Instances = instances;
+	engine::render::ScenePresentationState state;
+	engine::render::PresentationDamageTracker tracker;
+
+	for (uint32_t iteration = 0; iteration < 512; ++iteration) {
+		view.CameraFrame.Position.Z = iteration % 2 == 0 ? 0.0f : 8.0f;
+		view.Camera.FieldOfViewRadians = iteration % 2 == 0 ? 0.61f : 0.5061455f;
+		const engine::render::PresentationSignatures signatures{
+			.Scene = engine::render::ScenePresentationSignaturesOf(view, state),
+		};
+		const engine::render::PresentationDamage damage = tracker.Inspect(signatures);
+		CHECK(damage.Scene);
+		tracker.Commit(signatures);
+	}
+}
+
+TEST_CASE(
+	"content bindings and active lens captures invalidate their rendered scene",
+	"[render][presentation][damage]"
+) {
+	using namespace engine;
+	const std::array instances{scene::DrawInstance{}};
+	render::View view;
+	view.Instances = instances;
+	view.ContentOwner = Name("first-assets");
+	std::array owners{render::WorldContentOwner{Name("foreign-world"), Name("foreign-assets")}};
+	view.ForeignContentOwners = owners;
+	render::ScenePresentationState state;
+	const auto signature = [&] { return render::ScenePresentationSignaturesOf(view, state).Objects; };
+	const auto initial = signature();
+	SECTION("owner bindings change which same-name resources are drawn") {
+		view.ContentOwner = Name("second-assets");
+		CHECK(signature() != initial);
+		view.ContentOwner = Name("first-assets");
+		CHECK(signature() == initial);
+		owners[0].Owner = Name("replacement-foreign-assets");
+		CHECK(signature() != initial);
+		owners[0].Owner = Name("foreign-assets");
+		owners[0].World = Name("another-foreign-world");
+		CHECK(signature() != initial);
+	}
+	SECTION("owner changes invalidate each resident world layer") {
+		const std::array particles{render::ParticleBatch{}};
+		const std::array portals{render::PortalView{}};
+		view.Particles = particles;
+		view.Portals = portals;
+		state.Lighting.EnvironmentState.Skybox = scene::SkyboxSource::Textures;
+		state.Lighting.EnvironmentState.Textures.Front = Name("owner-sky");
+		const auto before = render::ScenePresentationSignaturesOf(view, state);
+		const auto visibility = render::ParticleVisibilitySignature(view);
+		view.ContentOwner = Name("second-assets");
+		const auto after = render::ScenePresentationSignaturesOf(view, state);
+		CHECK(after.Objects != before.Objects);
+		CHECK(after.Environment != before.Environment);
+		CHECK(after.Particles != before.Particles);
+		CHECK(after.Portals != before.Portals);
+		CHECK(render::ParticleVisibilitySignature(view) != visibility);
+	}
+	SECTION("inactive lens overrides do not animate an otherwise unchanged scene") {
+		view.LensTimeSeconds = 5;
+		view.LensPrograms = 18;
+		view.LensContentOwner = Name("unused-lenses");
+		CHECK(signature() == initial);
+		view.LensTimeSeconds = 6;
+		CHECK(signature() == initial);
+	}
+	SECTION("active lenses include captured time and effective program selection") {
+		state.Lighting.ShaderLensCount = 1;
+		state.Lighting.ShaderLenses[0].Shader = Name("warped-room");
+		view.LensTimeSeconds = 5;
+		const auto timed = signature();
+		view.LensTimeSeconds = 6;
+		CHECK(signature() != timed);
+		view.LensTimeSeconds = 5;
+		CHECK(signature() == timed);
+		view.LensContentOwner = Name("other-lens-owner");
+		CHECK(signature() != timed);
+		view.LensPrograms = 18;
+		const auto captured = signature();
+		view.LensContentOwner = Name("irrelevant-authored-owner");
+		CHECK(signature() == captured);
+		view.LensPrograms = 19;
+		CHECK(signature() != captured);
+		view.LensPrograms = 18;
+		state.Lighting.ShaderLenses[0].Strength = 2;
+		CHECK(signature() != captured);
+		view.Instances = {};
+		CHECK(signature() != 0);
+		view.OverrideLighting = true;
+		CHECK(signature() == 0);
+	}
 }
 
 TEST_CASE("a changed joint palette invalidates scene pixels", "[render][presentation][skinning]") {
@@ -451,4 +946,159 @@ TEST_CASE(
 	view.CameraFrame.Position.X = 0.0f;
 	view.ParticleResidentRevision++;
 	CHECK(engine::render::ParticleVisibilitySignature(view) != original);
+}
+
+TEST_CASE("fitted projection changes invalidate every present image cause", "[render][presentation][cache]") {
+	engine::render::View view;
+	engine::scene::DrawInstance instance;
+	view.Instances = std::span(&instance, 1);
+	engine::render::PortalView portal;
+	view.Portals = std::span(&portal, 1);
+	engine::effects::EmitterBlock block;
+	engine::render::ParticleBatch particle;
+	particle.Block = &block;
+	view.Particles = std::span(&particle, 1);
+	engine::render::ScenePresentationState state;
+	state.Lighting.EnvironmentState.HasAtmosphere = true;
+	const auto absent = engine::render::ScenePresentationSignaturesOf(view, state);
+	view.Projection = glm::mat4{1};
+	const auto fitted = engine::render::ScenePresentationSignaturesOf(view, state);
+	CHECK(fitted.Objects != absent.Objects);
+	CHECK(fitted.Environment != absent.Environment);
+	CHECK(fitted.Particles != absent.Particles);
+	CHECK(fitted.Portals != absent.Portals);
+	const auto visibility = engine::render::ParticleVisibilitySignature(view);
+	for (int column = 0; column < 4; column++) {
+		for (int row = 0; row < 4; row++) {
+			view.Projection = glm::mat4{1};
+			(*view.Projection)[column][row] += .125f;
+			const auto changed = engine::render::ScenePresentationSignaturesOf(view, state);
+			CHECK(changed.Objects != fitted.Objects);
+			CHECK(changed.Environment != fitted.Environment);
+			CHECK(changed.Particles != fitted.Particles);
+			CHECK(changed.Portals != fitted.Portals);
+			CHECK(engine::render::ParticleVisibilitySignature(view) != visibility);
+		}
+	}
+	view.Projection = glm::mat4{1};
+	(*view.Projection)[2][1] = -0.0f;
+	const auto equivalent = engine::render::ScenePresentationSignaturesOf(view, state);
+	CHECK(equivalent.Objects == fitted.Objects);
+	CHECK(equivalent.Environment == fitted.Environment);
+	CHECK(equivalent.Particles == fitted.Particles);
+	CHECK(equivalent.Portals == fitted.Portals);
+	CHECK(engine::render::ParticleVisibilitySignature(view) == visibility);
+}
+
+TEST_CASE(
+	"imported portal generations and entrance bindings invalidate the retained portal image",
+	"[render][presentation][cache]"
+) {
+	engine::render::View view;
+	engine::render::PortalView portal;
+	view.Portals = std::span(&portal, 1);
+	const auto local = engine::render::ScenePresentationSignaturesOf(view, {});
+	portal.ExternalImage = true;
+	const auto unavailable = engine::render::ScenePresentationSignaturesOf(view, {});
+	CHECK(unavailable.Portals != local.Portals);
+	portal.ImportedImage = 123;
+	portal.ImagePortal = Name("import.entrance");
+	const auto accepted = engine::render::ScenePresentationSignaturesOf(view, {});
+	CHECK(accepted.Portals != unavailable.Portals);
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals == accepted.Portals);
+	portal.ImportedImage++;
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals != accepted.Portals);
+	portal.ImportedImage--;
+	portal.ImagePortal = Name("import.replaced-entrance");
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals != accepted.Portals);
+	CHECK(accepted.Objects == 0);
+	CHECK(accepted.Environment == 0);
+	CHECK(accepted.Particles == 0);
+}
+
+TEST_CASE(
+	"request mirrors derive slots without an active camera or authored camera mutations",
+	"[render][presentation][surface-slots]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("request-mirrors");
+	const auto workspace = scene::InstallServices(store);
+	std::array<ecs::Entity, 2> cameras, panes;
+	for (size_t index = 0; index < cameras.size(); ++index) {
+		scene::PartDesc part;
+		part.Frame.Position = {float(index) * 4, 0, -4};
+		part.Size = {2, 2, .1f};
+		panes[index] = scene::MakePart(store, part);
+		REQUIRE(store.SetParent(panes[index], workspace));
+		cameras[index] = store.CreateInstance(ecs::Classes::Find(Name("SurfaceCamera")), "Mirror");
+		REQUIRE(store.SetParent(cameras[index], panes[index]));
+		auto surface = *store.Get<scene::SurfaceCamera>(cameras[index]);
+		surface.Surface = -1;
+		store.Set(cameras[index], surface);
+	}
+	render::View viewer;
+	viewer.CameraFrame.Position = {0, 0, 2};
+	std::vector<render::SurfaceView> surfaces;
+	REQUIRE(render::CollectSurfaceViews(store, surfaces, {}, &viewer) == 2);
+	CHECK(surfaces[0].Index == 0);
+	CHECK(surfaces[1].Index == 1);
+	for (size_t index = 0; index < cameras.size(); ++index) {
+		CHECK(store.Get<scene::SurfaceCamera>(cameras[index])->Surface == -1);
+		CHECK(store.Get<scene::Transform>(cameras[index])->Frame.Position == core::Vector3{});
+		CHECK(surfaces[index].Frame.Position.Z < -4);
+	}
+	CHECK(store.Resource<scene::ActiveCamera>() == nullptr);
+}
+
+TEST_CASE(
+	"request surface slots share scene ordering and preserve foreign rows",
+	"[render][presentation][surface-slots]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("request-slot-map");
+	const auto workspace = scene::InstallServices(store);
+	scene::PartDesc part;
+	part.Frame.Position = {0, 0, -4};
+	const auto pane = scene::MakePart(store, part);
+	part.Frame.Position = {0, 0, -12};
+	const auto destination = scene::MakePart(store, part);
+	REQUIRE(store.SetParent(pane, workspace));
+	REQUIRE(store.SetParent(destination, workspace));
+	const auto cameraClass = ecs::Classes::Find(core::Name("SurfaceCamera"));
+	const auto first = store.CreateInstance(cameraClass, "First");
+	const auto second = store.CreateInstance(cameraClass, "Second");
+	REQUIRE(store.SetParent(first, pane));
+	REQUIRE(store.SetParent(second, pane));
+	for (const auto camera : {first, second}) {
+		auto surface = *store.Get<scene::SurfaceCamera>(camera);
+		surface.Surface = -1;
+		store.Set(camera, surface);
+		scene::Portal portal;
+		portal.Destination = destination;
+		store.Set(camera, portal);
+	}
+	std::vector<scene::SurfaceSlot> slots;
+	REQUIRE(scene::GatherSurfaceSlots(store, slots) == 2);
+	REQUIRE(slots[0].Camera == first);
+	REQUIRE(slots[1].Camera == second);
+	std::vector<render::PortalView> portals;
+	REQUIRE(render::CollectPortalViews(store, portals, slots) == 2);
+	CHECK(portals[0].Index != portals[1].Index);
+	CHECK(portals[0].Index >= 0);
+	CHECK(portals[1].Index >= 0);
+	std::array<scene::DrawInstance, 3> instances{};
+	for (auto &instance : instances) {
+		instance.Source = pane.Id;
+		instance.Surface = -1;
+	}
+	instances[1].SourceWorld = core::Name("foreign-owner");
+	instances[2].SourceWorld = core::Name("request-slot-map");
+	render::ApplySurfaceSlots(instances, slots, core::Name("request-slot-map"));
+	CHECK(instances[0].Surface == 1);
+	CHECK(instances[1].Surface == -1);
+	CHECK(instances[2].Surface == 1);
+	CHECK(store.Get<scene::SurfaceCamera>(first)->Surface == -1);
+	CHECK(store.Get<scene::SurfaceCamera>(second)->Surface == -1);
 }

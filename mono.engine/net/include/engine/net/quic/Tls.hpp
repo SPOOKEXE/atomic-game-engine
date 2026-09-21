@@ -5,7 +5,7 @@
 // This is the fallback of the five backends considered, and the only one of
 // them with zero new build dependencies. It is what got taken, and the
 // reason is the rule
-// `mono.vendor/AGENTS.md` states and `THIRD_PARTY_NOTICES.md` repeats: **a
+// `mono.vendor/AGENTS.md` states and `docs/THIRD_PARTY_NOTICES.md` repeats: **a
 // fresh clone needs CMake, Ninja and a C++ compiler and nothing else.** Every
 // other candidate costs that. AWS-LC's pre-generated build files were the one
 // that might not have, and betting the transport on a claim that has to hold on

@@ -16,5 +16,6 @@ namespace engine::ecs {
 }
 
 namespace engine::physics {
+	// Solves rigid joint constraints for the current physics step.
 	void SolveRigidJoints(ecs::Store &store);
 }

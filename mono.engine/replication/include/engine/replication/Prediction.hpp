@@ -113,6 +113,14 @@ namespace engine::replication {
 		uint64_t Dropped() const {
 			return Dropped_;
 		}
+		// Baselines before this frontier need inputs already retired or evicted.
+		uint64_t CoveredThrough() const {
+			return CoveredThrough_;
+		}
+		// Upper bound for an application-provided acknowledgement.
+		uint64_t RecordedThrough() const {
+			return RecordedThrough_;
+		}
 
 		// Forgets everything. For a rejoin, where the old inputs describe a
 		// world that no longer exists.
@@ -122,5 +130,7 @@ namespace engine::replication {
 		PredictionSettings Settings_;
 		std::vector<Input> Inputs;
 		uint64_t Dropped_ = 0;
+		uint64_t CoveredThrough_ = 0;
+		uint64_t RecordedThrough_ = 0;
 	};
 }

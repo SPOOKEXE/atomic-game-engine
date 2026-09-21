@@ -1023,7 +1023,7 @@ procedural artifacts and do not run through this scheduler.
 
 ### Materials and shaders
 
-The [materials and shaders plan](materials-and-shaders.md) owns material
+The [render refactor plan](../RENDER-REFACTOR.md#7-materials-and-shader-publication) owns material
 instances, shader variants, and GPU rules. Procedural image and parameter
 generation may publish ordinary material dependencies. Runtime shader
 compilation and render graph execution remain outside this system.

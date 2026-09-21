@@ -25,6 +25,12 @@ namespace engine::physics {
 	// for a static or sleeping body.
 	core::Vector3 AngularVelocity(const ecs::Store &store, ecs::Entity body);
 
+	// The persistent world-space force in newtons, or zero for a non-body.
+	core::Vector3 AppliedForce(const ecs::Store &store, ecs::Entity body);
+
+	// The persistent world-space torque in newton metres, or zero for a non-body.
+	core::Vector3 AppliedTorque(const ecs::Store &store, ecs::Entity body);
+
 	// Sets a simulated body's linear velocity and wakes it. Static bodies and
 	// non-finite values are refused.
 	bool SetLinearVelocity(ecs::Store &store, ecs::Entity body, const core::Vector3 &velocity);
@@ -36,4 +42,19 @@ namespace engine::physics {
 	// Changes a dynamic body's linear velocity by impulse divided by its physical
 	// mass, and wakes it. Kinematic and static bodies are refused.
 	bool ApplyImpulse(ecs::Store &store, ecs::Entity body, const core::Vector3 &impulse);
+
+	// Replaces a dynamic body's persistent world-space force in newtons. A
+	// nonzero load wakes it; zero clears without waking. The load is applied once
+	// per completed physics step until changed.
+	bool SetAppliedForce(ecs::Store &store, ecs::Entity body, const core::Vector3 &force);
+
+	// Replaces a dynamic body's persistent world-space torque in newton metres.
+	// A nonzero load wakes it; zero clears without waking. The load is applied
+	// once per completed physics step until changed.
+	bool SetAppliedTorque(ecs::Store &store, ecs::Entity body, const core::Vector3 &torque);
+
+	// Wakes loaded dynamic bodies, then adds their persistent forces and torques
+	// to velocities for one physics step. Pipeline ownership calls this
+	// immediately before integration.
+	void ApplyPersistentLoads(ecs::Store &store);
 }
