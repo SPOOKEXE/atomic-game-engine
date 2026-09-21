@@ -10,8 +10,32 @@
 
 #include <cmath>
 #include <loadtest/Session.hpp>
+#include <numbers>
 
 namespace loadtest {
+
+	namespace {
+		// SplitMix64's finalizer. Fixed-width integer operations make this stable
+		// across platforms without a process-wide generator or clock input.
+		uint64_t Mix(uint64_t value) {
+			value += 0x9E37'79B9'7F4A'7C15ull;
+			value = (value ^ (value >> 30u)) * 0xBF58'476D'1CE4'E5B9ull;
+			value = (value ^ (value >> 27u)) * 0x94D0'49BB'1331'11EBull;
+			return value ^ (value >> 31u);
+		}
+	}
+
+	float RandomHeadingRadians(uint64_t seed, uint32_t sessionOrdinal, uint64_t interval) {
+		uint64_t value = Mix(seed);
+		value = Mix(value ^ static_cast<uint64_t>(sessionOrdinal));
+		value = Mix(value ^ interval);
+
+		// The upper 24 bits fit exactly in a float, so this conversion has the
+		// same result on every supported target.
+		constexpr float TURN = static_cast<float>(2.0 * std::numbers::pi);
+		constexpr float SCALE = 1.0f / static_cast<float>(1u << 24u);
+		return static_cast<float>(value >> 40u) * SCALE * TURN;
+	}
 
 	const char *Describe(Stage stage) {
 		switch (stage) {
@@ -184,8 +208,13 @@ namespace loadtest {
 		}
 
 		engine::game::MoveInput move;
-		move.Direction =
-			engine::core::Vector3{std::cos(Settings.HeadingRadians), 0.0f, std::sin(Settings.HeadingRadians)};
+		float heading = Settings.HeadingRadians;
+		if (Settings.RandomHeadingSeed != 0 && Settings.RandomHeadingEveryTicks != 0) {
+			const uint64_t submitted = InputsSent + InputsRefused;
+			const uint64_t interval = submitted / Settings.RandomHeadingEveryTicks;
+			heading = RandomHeadingRadians(Settings.RandomHeadingSeed, Settings.SessionOrdinal, interval);
+		}
+		move.Direction = engine::core::Vector3{std::cos(heading), 0.0f, std::sin(heading)};
 
 		// The tick this client last applied, which is what the server rewinds
 		// against. `Applied` and not a local count: a client's clock is the

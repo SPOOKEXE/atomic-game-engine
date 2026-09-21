@@ -32,6 +32,8 @@ int main(int argc, char **argv) {
 	arguments.Value("ticks", "N", "Run this many ticks");
 	arguments.Value("connects-per-tick", "N", "How many sessions may start dialling on one tick (default 8)");
 	arguments.Value("input-every-ticks", "N", "How often a client submits an input (default 1)");
+	arguments.Value("random-heading-seed", "N", "Seed repeatable random headings (default 0, disabled)");
+	arguments.Value("random-heading-every-ticks", "N", "Submitted inputs per random heading (default 30)");
 	arguments.Value("stall-seconds", "N", "How long a session may make no progress (default 20)");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
 
@@ -82,6 +84,12 @@ int main(int argc, char **argv) {
 		static_cast<uint32_t>(arguments.GetInteger("connects-per-tick", options.ConnectsPerTick));
 	options.InputEveryTicks =
 		static_cast<uint32_t>(arguments.GetInteger("input-every-ticks", options.InputEveryTicks));
+	options.RandomHeadingSeed = static_cast<uint64_t>(
+		arguments.GetInteger("random-heading-seed", static_cast<int64_t>(options.RandomHeadingSeed))
+	);
+	options.RandomHeadingEveryTicks = static_cast<uint32_t>(
+		arguments.GetInteger("random-heading-every-ticks", options.RandomHeadingEveryTicks)
+	);
 	options.StallSeconds = arguments.GetNumber("stall-seconds", options.StallSeconds);
 	if (auto profile = arguments.Get("profile-out")) {
 		options.ProfilePath = std::filesystem::path(*profile);
@@ -97,6 +105,12 @@ int main(int argc, char **argv) {
 	// receives - the numbers are printed at the end.
 	if (options.Seconds <= 0.0 && options.Ticks <= 0) {
 		std::fprintf(stderr, "give --seconds or --ticks; a run with neither never ends.\n");
+		return 2;
+	}
+	if (options.RandomHeadingSeed != 0 && options.RandomHeadingEveryTicks == 0) {
+		std::fprintf(
+			stderr, "--random-heading-every-ticks must be greater than zero with a random heading seed.\n"
+		);
 		return 2;
 	}
 

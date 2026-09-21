@@ -26,6 +26,10 @@
 #
 # The last one is not bookkeeping. Two graphs are only comparable when they came
 # from the same tree, and this repository has more than one agent working in it.
+#
+# Optional positional arguments after `windowTicks` select deterministic movement:
+# `randomHeadingSeed` and `randomHeadingEveryTicks`. A zero seed keeps the
+# fixed heading spread used by existing stress runs.
 
 set -euo pipefail
 
@@ -38,6 +42,8 @@ sceneName=${6:-Stress.luau}
 # Ticks between windowed profile snapshots. 0 (the default) writes only the
 # usual whole-run capture; a positive value also gets flamegraph.py --average.
 windowTicks=${7:-0}
+randomHeadingSeed=${8:-0}
+randomHeadingEveryTicks=${9:-30}
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 out="$root/.cache/stress"
@@ -62,6 +68,8 @@ done
 	echo "clients   $clients"
 	echo "seconds   $seconds"
 	echo "scene     $sceneName"
+	echo "random_heading_seed  $randomHeadingSeed"
+	echo "random_heading_every_ticks  $randomHeadingEveryTicks"
 	echo "captured  $(date -Is)"
 } > "$out/${label}_meta.txt"
 
@@ -101,12 +109,20 @@ kill -0 "$serverPid" 2>/dev/null || {
 }
 
 echo "stress: $clients clients for ${seconds}s"
+headingArgs=()
+if [ "$randomHeadingSeed" -ne 0 ]; then
+	headingArgs=(
+		--random-heading-seed "$randomHeadingSeed"
+		--random-heading-every-ticks "$randomHeadingEveryTicks"
+	)
+fi
 set +e
 timeout $((seconds + 60)) "$harness" \
 	--port "$port" \
 	--clients "$clients" \
 	--seconds "$seconds" \
 	--tick-rate 30 \
+	"${headingArgs[@]}" \
 	> "$out/${label}_clients.txt" 2>&1
 harnessStatus=$?
 set -e
