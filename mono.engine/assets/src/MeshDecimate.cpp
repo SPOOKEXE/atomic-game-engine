@@ -7,6 +7,7 @@
 #include <iterator>
 #include <limits>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -204,6 +205,25 @@ namespace engine::assets {
 			std::stop_token stop
 		) {
 			const FaceAdjacency adjacency = BuildFaceAdjacency(vertices.size(), triangles);
+			const auto edgeKey = [](uint32_t first, uint32_t second) {
+				const uint32_t low = std::min(first, second);
+				const uint32_t high = std::max(first, second);
+				return (static_cast<uint64_t>(low) << 32u) | high;
+			};
+			std::unordered_map<uint64_t, size_t> edgeUses;
+			for (size_t index = 0; index < triangles.size(); index++) {
+				if (owners[index] != submesh || Degenerate(triangles[index])) continue;
+				const Triangle &triangle = triangles[index];
+				edgeUses[edgeKey(triangle[0], triangle[1])]++;
+				edgeUses[edgeKey(triangle[1], triangle[2])]++;
+				edgeUses[edgeKey(triangle[2], triangle[0])]++;
+			}
+			std::vector<bool> boundary(vertices.size(), false);
+			for (const auto &[key, uses] : edgeUses) {
+				if (uses != 1) continue;
+				boundary[static_cast<uint32_t>(key >> 32u)] = true;
+				boundary[static_cast<uint32_t>(key)] = true;
+			}
 			float bestCost = std::numeric_limits<float>::infinity();
 			uint32_t bestLeft = 0;
 			uint32_t bestRight = 0;
@@ -223,7 +243,8 @@ namespace engine::assets {
 					 }) {
 					const uint32_t left = std::min(edge[0], edge[1]);
 					const uint32_t right = std::max(edge[0], edge[1]);
-					if (left == right || !SameSkin(vertices[left], vertices[right])) {
+					if (left == right || boundary[left] || boundary[right] ||
+						!SameSkin(vertices[left], vertices[right])) {
 						continue;
 					}
 					size_t edgeUses = 0;

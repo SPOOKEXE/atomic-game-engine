@@ -224,7 +224,9 @@ TEST_CASE("automatic mesh LOD planning builds and shares real artifacts", "[rend
 			scene::AutoMeshLodArtifactName(base, static_cast<uint8_t>(slot + 1), policy.Ratios[slot])
 		);
 		CHECK(artifact.Data.IsValid());
-		CHECK(artifact.Data.Indices.size() < source.Indices.size());
+		// The built-in cube splits every face at UV and normal seams. Those
+		// boundaries stay fixed, so its safe best-effort result may be unchanged.
+		CHECK(artifact.Data.Indices.size() <= source.Indices.size());
 		CHECK(artifact.Worlds.size() == 2);
 	}
 }
@@ -257,5 +259,5 @@ TEST_CASE(
 	REQUIRE(artifacts.size() == 1);
 	CHECK(artifacts[0].Name == scene::AutoMeshLodArtifactName(base, 1, 0.5f, scene::LodStrategy::Reduced));
 	CHECK(artifacts[0].Data.IsValid());
-	CHECK(artifacts[0].Data.Indices.size() < source.Indices.size());
+	CHECK(artifacts[0].Data.Indices.size() <= source.Indices.size());
 }

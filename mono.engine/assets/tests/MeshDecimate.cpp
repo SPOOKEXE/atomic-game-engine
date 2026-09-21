@@ -153,6 +153,28 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("mesh decimation does not pull a topological seam apart", "[assets][mesh-decimate]") {
+	using namespace engine::assets;
+	const MeshData source = Grid(4);
+	MeshData reduced;
+	REQUIRE(DecimateMesh(source, 0.25f, reduced));
+	REQUIRE(reduced.IsValid());
+	CHECK(reduced.Indices.size() < source.Indices.size());
+
+	for (const MeshVertex &sourceVertex : source.Vertices) {
+		const float x = sourceVertex.Position[0];
+		const float z = sourceVertex.Position[2];
+		if (x != 0.0f && x != 4.0f && z != 0.0f && z != 4.0f) continue;
+		CHECK(std::any_of(reduced.Vertices.begin(), reduced.Vertices.end(), [&](const MeshVertex &candidate) {
+			return std::equal(
+				std::begin(sourceVertex.Position),
+				std::end(sourceVertex.Position),
+				std::begin(candidate.Position)
+			);
+		}));
+	}
+}
+
 TEST_CASE("mesh decimation preserves partial material runs and uncovered faces", "[assets][mesh-decimate]") {
 	using namespace engine::assets;
 	MeshData source = QuadPair();

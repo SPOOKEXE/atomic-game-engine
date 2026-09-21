@@ -9,6 +9,7 @@
 
 #include "LodPreview.hpp"
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Typing.hpp>
@@ -164,6 +165,7 @@ namespace studio {
 			const PanelProjection &panel,
 			const std::array<float, 3> &distanceBands
 		) {
+			const engine::ecs::ClassId meshPart = engine::ecs::Classes::Find(engine::core::Name("MeshPart"));
 			store.Each<
 				const engine::scene::Transform,
 				const engine::scene::Bounds,
@@ -171,8 +173,7 @@ namespace studio {
 												 const engine::scene::Transform &transform,
 												 const engine::scene::Bounds &bounds,
 												 const engine::scene::Visual &visual) {
-				if (!visual.Visible || (!store.Has<engine::scene::AutoMeshLOD>(entity) &&
-										!store.Has<engine::scene::CustomMeshLOD>(entity))) {
+				if (!visual.Visible || !store.IsA(entity, meshPart)) {
 					return;
 				}
 				const std::optional<uint8_t> active =
