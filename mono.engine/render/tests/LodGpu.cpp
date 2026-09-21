@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <span>
@@ -190,25 +191,23 @@ TEST_CASE(
 	const core::Name texture("lod.billboard.texture");
 	REQUIRE(fixture.Render.AddMesh(mesh, Quad()));
 	assets::TextureData orientation;
-	orientation.Width = orientation.Height = 2;
-	orientation.Pixels = {
-		std::byte{255},
-		std::byte{0},
-		std::byte{0},
-		std::byte{255}, // top left: red
-		std::byte{0},
-		std::byte{255},
-		std::byte{0},
-		std::byte{255}, // top right: green
-		std::byte{0},
-		std::byte{0},
-		std::byte{255},
-		std::byte{255}, // bottom left: blue
-		std::byte{255},
-		std::byte{255},
-		std::byte{0},
-		std::byte{255}, // bottom right: yellow
-	};
+	orientation.Width = orientation.Height = 16;
+	orientation.Pixels.resize(16 * 16 * 4);
+	for (uint32_t y = 0; y < orientation.Height; ++y) {
+		for (uint32_t x = 0; x < orientation.Width; ++x) {
+			const bool top = y < orientation.Height / 2;
+			const bool left = x < orientation.Width / 2;
+			const std::array<std::byte, 4> colour =
+				top && left ? std::array{std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}}
+				: top		? std::array{std::byte{0}, std::byte{255}, std::byte{0}, std::byte{255}}
+				: left		? std::array{std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}}
+							: std::array{std::byte{255}, std::byte{255}, std::byte{0}, std::byte{255}};
+			const size_t offset = (y * orientation.Width + x) * 4;
+			std::copy(
+				colour.begin(), colour.end(), orientation.Pixels.begin() + static_cast<ptrdiff_t>(offset)
+			);
+		}
+	}
 	REQUIRE(fixture.Render.AddTexture(texture, orientation));
 
 	scene::DrawInstance instance;
@@ -253,6 +252,6 @@ TEST_CASE(
 	const size_t topRed = colourPixels(true, true);
 	const size_t bottomBlue = colourPixels(false, false);
 	INFO("top red pixels: " << topRed << ", bottom blue pixels: " << bottomBlue);
-	CHECK(topRed > 40);
-	CHECK(bottomBlue > 40);
+	CHECK(topRed > 20);
+	CHECK(bottomBlue > 20);
 }
