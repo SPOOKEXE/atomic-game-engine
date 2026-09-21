@@ -1663,12 +1663,15 @@ declare extern type MeshPart extends BasePart with
 	write EmissiveMap: string?
 	read HeightMap: string
 	write HeightMap: string?
+	Lod1Distance: number
 	read Lod1MeshId: string
 	write Lod1MeshId: string?
 	Lod1Ratio: number
+	Lod2Distance: number
 	read Lod2MeshId: string
 	write Lod2MeshId: string?
 	Lod2Ratio: number
+	Lod3Distance: number
 	read Lod3MeshId: string
 	write Lod3MeshId: string?
 	Lod3Ratio: number

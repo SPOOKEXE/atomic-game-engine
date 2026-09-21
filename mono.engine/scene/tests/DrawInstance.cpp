@@ -640,6 +640,14 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.SkinFirst = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinCount = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.ObjectLabel = 1; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodMeshes[0] = Name("drawinstance_test.Lod"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodRatios[0] = 0.25f; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodMinimumDistances[0] = 20.0f; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodTargetQuadArea = 8.0f; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) {
+			  i.LodStrategyMode = engine::scene::LodStrategy::Decimated;
+		  }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodLevels = 2; }) != unchanged);
 
 	// A rotation with the same position, because the quaternion is four floats
 	// that a position-only hash would miss entirely - and a mirror on a

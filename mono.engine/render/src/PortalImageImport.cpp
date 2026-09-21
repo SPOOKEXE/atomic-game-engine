@@ -971,14 +971,20 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::ImportedPortalImage *Renderer::Impl::FindPortalImport(
-		const View &view, size_t viewSlot, const PortalView &portal, SDL_GPUCommandBuffer *command
+		const View &view,
+		size_t viewSlot,
+		const PortalView &portal,
+		SDL_GPUCommandBuffer *command,
+		bool seamRadiance
 	) {
 		for (auto &image : ImportedPortals) {
-			if (portal.ExternalImage && portal.ImportedImage != 0 && image.Handle == portal.ImportedImage &&
+			const uint64_t handle = seamRadiance ? portal.ImportedLightImage : portal.ImportedImage;
+			const core::Name key = seamRadiance ? portal.LightImagePortal : portal.ImagePortal;
+			if (portal.ExternalImage && handle != 0 && image.Handle == handle &&
 				image.Binding.World == view.World && image.Binding.WorldName == view.WorldName &&
 				image.Binding.ViewSlot == viewSlot && image.Binding.Index == portal.Index &&
-				image.Binding.Portal == portal.ImagePortal && image.Binding.Layer == 0 &&
-				image.Texture != nullptr && (image.Ready || image.Recorded == command)) {
+				image.Binding.Portal == key && image.Binding.Layer == 0 && image.Texture != nullptr &&
+				(image.Ready || image.Recorded == command)) {
 				return &image;
 			}
 		}

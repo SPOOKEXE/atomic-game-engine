@@ -2,6 +2,19 @@
 <World format="3" name="Bladeborne Demo">
 	<WorldProperties tickRate="60" idleTickRate="2" physicsTickRate="60" scriptTickRate="60" replicationTickRate="20" globalSimulatedNetworkLatency="0" faultLimit="3" isolation="Shared" renderingProfile="Default PBR" />
 	<Sources>
+		<Source path="scripts/client/BladeborneCamera.client.luau"><![CDATA[--!strict
+-- This HUD world owns its view instead of inheriting the fallback camera the
+-- client creates before authored local scripts start. Automatic tracking keeps
+-- the view attached when the local character is spawned or respawned.
+
+local Workspace = game:GetService("Workspace")
+
+local camera = Instance.new("Camera")
+camera.Name = "BladeborneCamera"
+camera.CameraSubjectAutomatic = true
+camera.Parent = Workspace
+Workspace.CurrentCamera = camera
+]]></Source>
 		<Source path="scripts/client/BladeborneHud.client.luau"><![CDATA[--!strict
 -- Bladeborne HUD bootstrap. UI ownership stays in the same widget modules as
 -- BLADEBORNE_UNIFIED/game/src; this scene only supplies local player fixtures.
@@ -522,6 +535,9 @@ marker.Parent = arena
 		<Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="24">
 			<Item class="LocalScript" name="BladeborneHud" id="25">
 				<Property name="Source" type="string">scripts/client/BladeborneHud.client.luau</Property>
+			</Item>
+			<Item class="LocalScript" name="BladeborneCamera" id="29">
+				<Property name="Source" type="string">scripts/client/BladeborneCamera.client.luau</Property>
 			</Item>
 		</Item>
 	</Item>

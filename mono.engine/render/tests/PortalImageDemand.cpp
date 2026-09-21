@@ -504,10 +504,21 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	std::vector<PortalView> portals;
 	const auto gathered = CollectPortalImageDemands(store, viewer, SETTINGS, demands, portals, slots);
 	REQUIRE(gathered.Ready == 1);
-	REQUIRE(demands.size() == 1);
+	REQUIRE(demands.size() == 2);
 	REQUIRE(portals.size() == 1);
 	CHECK(demands[0].Binding.ViewSlot == 2);
 	CHECK(demands[0].Request.Key.PortalKey == store.GetFullName(camera));
+	CHECK_FALSE(demands[0].SeamRadiance);
+	CHECK(demands[1].SeamRadiance);
+	CHECK(demands[1].Request.Scope == PortalImageScope::SeamRadiance);
+	CHECK(demands[1].Request.Projection == PortalImageProjection::Seam);
+	CHECK(demands[1].Request.Width == 128);
+	CHECK(demands[1].Request.Height == 128);
+	CHECK(demands[1].Request.PixelBudget == 128 * 128);
+	CHECK(demands[1].Request.RecursionDepth == 0);
+	CHECK(demands[1].Request.Geometry.empty());
+	CHECK(demands[1].Binding.ExpectedScope == PortalImageScope::SeamRadiance);
+	CHECK(portals[0].LightImagePortal == demands[1].Binding.Portal);
 	CHECK(portals[0].Index == slots[0].Index);
 	CHECK(portals[0].ExternalImage);
 	CHECK(store.Get<scene::SurfaceCamera>(camera)->Surface == before.Surface);
@@ -534,7 +545,7 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	viewer.JointFrames = joints;
 	portals.clear();
 	REQUIRE(CollectPortalImageDemands(store, viewer, SETTINGS, demands, portals, slots).Ready == 1);
-	REQUIRE(demands.size() == 1);
+	REQUIRE(demands.size() == 2);
 	std::vector<scene::DrawInstance> received;
 	std::vector<core::CFrame> receivedJoints;
 	std::string error;
@@ -590,7 +601,7 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	store.SetResource(scene::LocalPlayer{player});
 	portals.clear();
 	REQUIRE(CollectPortalImageDemands(store, viewer, layeredSettings, demands, portals, slots).Ready == 1);
-	REQUIRE(demands.size() == 1);
+	REQUIRE(demands.size() == 2);
 	CHECK(demands[0].Request.OrderedLayers);
 	CHECK(demands[0].Request.EyePlayer == "91");
 	CHECK(demands[0].Request.Scope == PortalImageScope::OpaqueLighting);
@@ -609,7 +620,7 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 		REQUIRE(
 			CollectPortalImageDemands(store, viewer, layeredSettings, demands, portals, slots).Ready == 1
 		);
-		REQUIRE(demands.size() == 1);
+		REQUIRE(demands.size() == 2);
 		CHECK_FALSE(demands[0].Request.OrderedLayers);
 		CHECK(demands[0].Request.Scope == PortalImageScope::CompleteWorld);
 		CHECK(demands[0].Request.EyePlayer == (firstPerson ? "91" : ""));

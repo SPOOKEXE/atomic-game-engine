@@ -711,8 +711,8 @@ TEST_CASE(
 	REQUIRE(Write(store, part, "Lod1Ratio", 1.5f));
 	REQUIRE(Write(store, part, "Lod2Ratio", -0.5f));
 	REQUIRE(Write(store, part, "LodTargetQuadArea", -4.0f));
-	const AutoMeshLOD *automatic = store.Get<AutoMeshLOD>(part);
-	const CustomMeshLOD *custom = store.Get<CustomMeshLOD>(part);
+	const LODAuto *automatic = store.Get<LODAuto>(part);
+	const LODCustom *custom = store.Get<LODCustom>(part);
 	REQUIRE(automatic != nullptr);
 	REQUIRE(custom != nullptr);
 	CHECK(automatic->Meshes[0] == Name("lod/auto-half.amesh"));
@@ -722,6 +722,15 @@ TEST_CASE(
 	CHECK(automatic->TargetQuadArea == 0.0f);
 	CHECK(custom->Meshes[0] == Name("lod/custom-half.amesh"));
 	CHECK_FALSE(custom->Meshes[1].IsValid());
+
+	REQUIRE(Write(store, part, "Lod1Distance", 17.0f));
+	REQUIRE(Write(store, part, "Lod2Distance", 43.0f));
+	REQUIRE(Write(store, part, "Lod3Distance", 91.0f));
+	const LODSettings *settings = store.Get<LODSettings>(part);
+	REQUIRE(settings != nullptr);
+	CHECK(settings->MinimumDistances[0] == 17.0f);
+	CHECK(settings->MinimumDistances[1] == 43.0f);
+	CHECK(settings->MinimumDistances[2] == 91.0f);
 
 	const LevelOfDetail resolved = ResolveMeshLOD(automatic, custom);
 	CHECK(resolved.Strategy == LodStrategy::Authored);

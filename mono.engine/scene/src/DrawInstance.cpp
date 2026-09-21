@@ -140,6 +140,14 @@ namespace engine::scene {
 			b = MixSignature(b, Pair(instance.EmissiveMap.Id(), instance.Shader.Id()));
 			c = MixSignature(c, Pair(instance.MetalnessMap.Id(), BitsOf(instance.EmissiveStrength)));
 			d = MixSignature(d, Pair(instance.SkinFirst, instance.SkinCount));
+			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
+				a = MixSignature(a, Pair(instance.LodMeshes[level].Id(), BitsOf(instance.LodRatios[level])));
+				b = MixSignature(b, Pair(BitsOf(instance.LodMinimumDistances[level]), level));
+			}
+			c = MixSignature(
+				c, Pair(BitsOf(instance.LodTargetQuadArea), static_cast<uint32_t>(instance.LodStrategyMode))
+			);
+			d = MixSignature(d, Pair(instance.LodLevels, 0u));
 			d = MixSignature(
 				d,
 				Pair(

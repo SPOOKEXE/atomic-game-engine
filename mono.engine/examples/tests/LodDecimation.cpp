@@ -41,7 +41,7 @@ namespace {
 		return store.FindFirstChild(engine::scene::WorkspaceOf(store), name);
 	}
 
-	void CheckAutomaticDecimation(const engine::scene::AutoMeshLOD &lod) {
+	void CheckAutomaticDecimation(const engine::scene::LODAuto &lod) {
 		CHECK(lod.Strategy == engine::scene::LodStrategy::Decimated);
 		CHECK(lod.Levels == 3);
 		CHECK(lod.Ratios[0] == 0.35f);
@@ -77,8 +77,8 @@ TEST_CASE(
 
 	const auto *normalVisual = store.Get<engine::scene::Visual>(normal);
 	const auto *editableVisual = store.Get<engine::scene::Visual>(editablePart);
-	const auto *normalLod = store.Get<engine::scene::AutoMeshLOD>(normal);
-	const auto *editableLod = store.Get<engine::scene::AutoMeshLOD>(editablePart);
+	const auto *normalLod = store.Get<engine::scene::LODAuto>(normal);
+	const auto *editableLod = store.Get<engine::scene::LODAuto>(editablePart);
 	REQUIRE(normalVisual != nullptr);
 	REQUIRE(editableVisual != nullptr);
 	REQUIRE(normalLod != nullptr);

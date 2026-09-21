@@ -76,7 +76,7 @@ namespace engine::render {
 
 		// Monotonic source epochs last inspected by CollectInstances. These are
 		// derived cache state and deliberately do not cross snapshots.
-		std::array<uint64_t, 14> SourceRevisions{};
+		std::array<uint64_t, 15> SourceRevisions{};
 		// Entity count used to size the cached source rows.
 		size_t SourceEntityCount = 0;
 		// Number of skeletons represented by the cached source rows.

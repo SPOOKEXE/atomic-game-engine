@@ -533,6 +533,9 @@ namespace engine::render {
 				portals = FoldPresentationObject(portals, portal.ExternalImage);
 				portals = FoldPresentationObject(portals, portal.ImportedImage);
 				portals = FoldPresentation(portals, portal.ImagePortal.Id());
+				portals = FoldPresentationObject(portals, portal.ImportedLightImage);
+				portals = FoldPresentation(portals, portal.LightImagePortal.Id());
+				portals = FoldPresentationObject(portals, portal.LightOutward);
 			}
 
 			portals = FoldPresentation(portals, view.Surfaces.size());
@@ -576,13 +579,14 @@ namespace engine::render {
 	}
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
-	using engine::scene::AutoMeshLOD;
 	using engine::scene::Bone;
 	using engine::scene::Bounds;
 	using engine::scene::CharacterLimb;
-	using engine::scene::CustomMeshLOD;
 	using engine::scene::DrawInstance;
 	using engine::scene::LocalTransparency;
+	using engine::scene::LODAuto;
+	using engine::scene::LODCustom;
+	using engine::scene::LODSettings;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
 	using engine::scene::RenderEffects;
@@ -607,6 +611,7 @@ namespace engine::render {
 			RENDERED_REVISION,
 			AUTO_LOD_REVISION,
 			CUSTOM_LOD_REVISION,
+			LOD_SETTINGS_REVISION,
 			EFFECTS_REVISION,
 		};
 
@@ -682,9 +687,10 @@ namespace engine::render {
 			changes.Full |=
 				SourceRevisionChanged<LocalTransparency>(store, drawList, TRANSPARENCY_REVISION, drawable);
 			changes.Full |= SourceRevisionChanged<CharacterLimb>(store, drawList, LIMB_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<AutoMeshLOD>(store, drawList, AUTO_LOD_REVISION, drawable);
+			changes.Full |= SourceRevisionChanged<LODAuto>(store, drawList, AUTO_LOD_REVISION, drawable);
+			changes.Full |= SourceRevisionChanged<LODCustom>(store, drawList, CUSTOM_LOD_REVISION, drawable);
 			changes.Full |=
-				SourceRevisionChanged<CustomMeshLOD>(store, drawList, CUSTOM_LOD_REVISION, drawable);
+				SourceRevisionChanged<LODSettings>(store, drawList, LOD_SETTINGS_REVISION, drawable);
 			changes.Full |= SourceRevisionChanged<RenderEffects>(store, drawList, EFFECTS_REVISION, drawable);
 			changes.Pose |= SourceRevisionAdvanced<Skeleton>(store, drawList, SKELETON_REVISION);
 			changes.Pose |= SourceRevisionAdvanced<Bone>(store, drawList, BONE_REVISION);
@@ -706,8 +712,9 @@ namespace engine::render {
 				const Entity source(instance.Source);
 				engine::scene::ApplyDrawRenderState(
 					instance,
-					store.Get<AutoMeshLOD>(source),
-					store.Get<CustomMeshLOD>(source),
+					store.Get<LODAuto>(source),
+					store.Get<LODCustom>(source),
+					store.Get<LODSettings>(source),
 					store.Get<RenderEffects>(source)
 				);
 			}

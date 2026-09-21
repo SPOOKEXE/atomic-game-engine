@@ -35,12 +35,13 @@ namespace engine::render {
 	struct alignas(16) GpuLodSelection {
 		glm::vec4 CentreTarget;
 		glm::vec4 ExtentLevels;
+		glm::vec4 MinimumDistances;
 		glm::uvec4 Triangles;
 		glm::uvec4 FirstArguments;
 		glm::uvec4 ArgumentCounts;
 	};
 
-	static_assert(sizeof(GpuLodSelection) == 80);
+	static_assert(sizeof(GpuLodSelection) == 96);
 
 	// std430 cluster page consumed by lod-select.comp. Centre and extent are
 	// already transformed into world space because the selection pass has no
@@ -113,6 +114,18 @@ namespace engine::render {
 					break;
 				}
 			}
+		}
+		const bool validOverride =
+			selection.MinimumDistances.x > 0.0f && std::isfinite(selection.MinimumDistances.x) &&
+			std::isfinite(selection.MinimumDistances.y) && std::isfinite(selection.MinimumDistances.z) &&
+			selection.MinimumDistances.x < selection.MinimumDistances.y &&
+			selection.MinimumDistances.y < selection.MinimumDistances.z;
+		if (validOverride) {
+			minimumDistances = {
+				selection.MinimumDistances.x,
+				selection.MinimumDistances.y,
+				selection.MinimumDistances.z,
+			};
 		}
 		const bool validDistances =
 			minimumDistances[0] > 0.0f && std::isfinite(minimumDistances[0]) &&
@@ -228,6 +241,12 @@ namespace engine::render {
 		const glm::vec3 extent =
 			glm::abs(rotation[0]) * half.x + glm::abs(rotation[1]) * half.y + glm::abs(rotation[2]) * half.z;
 		selection.ExtentLevels = glm::vec4{extent, static_cast<float>(levelCount)};
+		selection.MinimumDistances = glm::vec4{
+			instance.LodMinimumDistances[0],
+			instance.LodMinimumDistances[1],
+			instance.LodMinimumDistances[2],
+			0.0f,
+		};
 
 		for (uint32_t level = 0; level < levelCount; ++level) {
 			const MeshEntry &mesh = *meshes[level];

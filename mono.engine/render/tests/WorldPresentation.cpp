@@ -519,16 +519,21 @@ TEST_CASE("optional LOD and effect rows reach the cached draw list", "[render][p
 	const ecs::Entity part = scene::MakePart(store, scene::PartDesc{});
 	REQUIRE(store.SetParent(part, workspace));
 
-	scene::AutoMeshLOD automatic;
+	scene::LODAuto automatic;
 	automatic.Meshes[0] = Name("lod.auto-half");
 	automatic.Meshes[1] = Name("lod.auto-quarter");
 	automatic.Ratios[0] = 0.4f;
 	automatic.Levels = 3;
 	store.Set(part, automatic);
-	scene::CustomMeshLOD custom;
+	scene::LODCustom custom;
 	custom.Meshes[0] = Name("lod.custom-half");
 	custom.Levels = 3;
 	store.Set(part, custom);
+	scene::LODSettings settings;
+	settings.MinimumDistances[0] = 17.0f;
+	settings.MinimumDistances[1] = 43.0f;
+	settings.MinimumDistances[2] = 91.0f;
+	store.Set(part, settings);
 	scene::RenderEffects effects;
 	effects.Attachments[0].Node = Name("outline");
 	effects.Attachments[0].Enabled = true;
@@ -543,6 +548,9 @@ TEST_CASE("optional LOD and effect rows reach the cached draw list", "[render][p
 	CHECK(drawList->Instances[0].LodMeshes[0] == Name("lod.custom-half"));
 	CHECK(drawList->Instances[0].LodMeshes[1] == Name("lod.auto-quarter"));
 	CHECK(drawList->Instances[0].LodRatios[0] == 0.4f);
+	CHECK(drawList->Instances[0].LodMinimumDistances[0] == 17.0f);
+	CHECK(drawList->Instances[0].LodMinimumDistances[1] == 43.0f);
+	CHECK(drawList->Instances[0].LodMinimumDistances[2] == 91.0f);
 	CHECK(drawList->Instances[0].Effects.Attachments[0].Node == Name("outline"));
 
 	custom.Meshes[0] = Name("lod.changed");

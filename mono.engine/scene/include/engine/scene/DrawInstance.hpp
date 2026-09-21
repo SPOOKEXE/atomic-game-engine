@@ -316,6 +316,8 @@ namespace engine::scene {
 		float LodRatios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
 		// Target projected quad area for automatic LOD choice.
 		float LodTargetQuadArea = 0.0f;
+		// Per-item distance floors. An all-zero row inherits the active view.
+		float LodMinimumDistances[LOD_LEVELS - 1] = {};
 		// Rule used to interpret the LOD inputs.
 		LodStrategy LodStrategyMode = LodStrategy::None;
 		// Number of valid levels including Mesh.
@@ -331,7 +333,7 @@ namespace engine::scene {
 		uint16_t SkinCount = 0;
 
 		// Keeps the flat payload free of implicit tail padding.
-		uint16_t SkinReserved = 0;
+		uint16_t SkinReserved[3] = {};
 	};
 
 	// Copies optional LOD and graph-effect state into an existing draw row.
@@ -344,8 +346,9 @@ namespace engine::scene {
 	// @since v0.24
 	inline void ApplyDrawRenderState(
 		DrawInstance &instance,
-		const AutoMeshLOD *automatic,
-		const CustomMeshLOD *custom,
+		const LODAuto *automatic,
+		const LODCustom *custom,
+		const LODSettings *settings,
 		const RenderEffects *effects
 	) {
 		const LevelOfDetail lod = ResolveMeshLOD(instance.Mesh, automatic, custom);
@@ -357,6 +360,11 @@ namespace engine::scene {
 			instance.LodTargetQuadArea = lod.TargetQuadArea;
 			instance.LodStrategyMode = lod.Strategy;
 			instance.LodLevels = std::clamp<uint8_t>(lod.Levels, 1u, static_cast<uint8_t>(LOD_LEVELS));
+		}
+		if (settings != nullptr) {
+			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
+				instance.LodMinimumDistances[level] = settings->MinimumDistances[level];
+			}
 		}
 		if (effects != nullptr) {
 			instance.Effects = *effects;
@@ -407,6 +415,7 @@ namespace engine::scene {
 	// @param automatic  Optional automatically produced mesh ladder.
 	// @param custom     Optional per-level authored overrides. Valid meshes win;
 	//                   nil entries fall back to `automatic`.
+	// @param settings   Optional per-item LOD distance floors.
 	// @param effects    Optional graph-node attachments for this visual.
 	// @return The instance to publish.
 	// @since v0.15
@@ -419,8 +428,9 @@ namespace engine::scene {
 		uint64_t source,
 		const LocalTransparency *local = nullptr,
 		const CharacterLimb *limb = nullptr,
-		const AutoMeshLOD *automatic = nullptr,
-		const CustomMeshLOD *custom = nullptr,
+		const LODAuto *automatic = nullptr,
+		const LODCustom *custom = nullptr,
+		const LODSettings *settings = nullptr,
 		const RenderEffects *effects = nullptr
 	) {
 		DrawInstance instance;
@@ -468,7 +478,7 @@ namespace engine::scene {
 		if (limb != nullptr) {
 			instance.Rig = limb->Root.Id;
 		}
-		ApplyDrawRenderState(instance, automatic, custom, effects);
+		ApplyDrawRenderState(instance, automatic, custom, settings, effects);
 
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;

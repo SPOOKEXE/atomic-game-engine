@@ -33,6 +33,9 @@ namespace engine::render {
 		PortalImageRequest Request;
 		// Local renderer binding for the accepted image.
 		PortalImageBinding Binding;
+		// A radiance-only probe paired with a normal cross-world portal image.
+		// It is submitted and imported independently, but never displayed as a pane.
+		bool SeamRadiance = false;
 	};
 
 	// Planner outcomes for a candidate portal capture.

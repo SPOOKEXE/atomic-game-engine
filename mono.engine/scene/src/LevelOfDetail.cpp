@@ -19,8 +19,7 @@ namespace engine::scene {
 		);
 	}
 
-	LevelOfDetail
-	ResolveMeshLOD(const core::Name &base, const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
+	LevelOfDetail ResolveMeshLOD(const core::Name &base, const LODAuto *automatic, const LODCustom *custom) {
 		LevelOfDetail resolved;
 		const uint8_t automaticLevels =
 			automatic == nullptr ? 1
@@ -73,7 +72,7 @@ namespace engine::scene {
 		return resolved;
 	}
 
-	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
+	LevelOfDetail ResolveMeshLOD(const LODAuto *automatic, const LODCustom *custom) {
 		return ResolveMeshLOD({}, automatic, custom);
 	}
 

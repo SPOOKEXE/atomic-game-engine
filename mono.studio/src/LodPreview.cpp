@@ -61,7 +61,13 @@ namespace studio {
 			return (maximumX - minimumX) * pixels.x * 0.5f * (maximumY - minimumY) * pixels.y * 0.5f;
 		}
 
+		bool HasValidDistanceBands(const std::array<float, 3> &bands) {
+			return bands[0] > 0.0f && std::isfinite(bands[0]) && std::isfinite(bands[1]) &&
+				   std::isfinite(bands[2]) && bands[0] < bands[1] && bands[1] < bands[2];
+		}
+
 		uint8_t DistanceFloor(float distance, const std::array<float, 3> &bands) {
+			if (!HasValidDistanceBands(bands)) return 0;
 			for (uint8_t level = 0; level < bands.size(); level++) {
 				if (!(distance >= bands[level])) {
 					return level;
@@ -69,6 +75,34 @@ namespace studio {
 			}
 			return static_cast<uint8_t>(bands.size());
 		}
+
+	}
+
+	std::array<float, 3> EffectiveLodDistanceBands(
+		const engine::scene::LODSettings *settings, const std::array<float, 3> &defaultBands
+	) {
+		if (settings == nullptr) {
+			return defaultBands;
+		}
+		const std::array<float, 3> overrideBands{
+			settings->MinimumDistances[0],
+			settings->MinimumDistances[1],
+			settings->MinimumDistances[2],
+		};
+		return HasValidDistanceBands(overrideBands) ? overrideBands : defaultBands;
+	}
+
+	std::array<float, 3> EditedLodDistanceBands(
+		const engine::scene::LODSettings *settings,
+		const std::array<float, 3> &defaultBands,
+		size_t level,
+		float distance
+	) {
+		std::array<float, 3> bands = EffectiveLodDistanceBands(settings, defaultBands);
+		if (level < bands.size()) {
+			bands[level] = distance;
+		}
+		return bands;
 	}
 
 	float CenteredLodLabelX(float objectMinimumX, float objectMaximumX, float labelWidth) {
@@ -90,8 +124,9 @@ namespace studio {
 		const auto *visual = store.Get<engine::scene::Visual>(instance);
 		const auto *bounds = store.Get<engine::scene::Bounds>(instance);
 		const auto *transform = store.Get<engine::scene::Transform>(instance);
-		const auto *automatic = store.Get<engine::scene::AutoMeshLOD>(instance);
-		const auto *custom = store.Get<engine::scene::CustomMeshLOD>(instance);
+		const auto *automatic = store.Get<engine::scene::LODAuto>(instance);
+		const auto *custom = store.Get<engine::scene::LODCustom>(instance);
+		const auto *settings = store.Get<engine::scene::LODSettings>(instance);
 		const auto *catalogue = store.Resource<engine::scene::MeshCatalogue>();
 		if (!visual || !bounds || !transform || !catalogue || !visual->Mesh.IsValid()) {
 			return std::nullopt;
@@ -120,7 +155,8 @@ namespace studio {
 		// Distance preferences force a minimum coarse level. The renderer's
 		// lod-select.comp applies the same max, so the label follows its page.
 		return std::min<uint8_t>(
-			std::max(selected, DistanceFloor(distance, distanceBands)), static_cast<uint8_t>(lod.Levels - 1)
+			std::max(selected, DistanceFloor(distance, EffectiveLodDistanceBands(settings, distanceBands))),
+			static_cast<uint8_t>(lod.Levels - 1)
 		);
 	}
 }

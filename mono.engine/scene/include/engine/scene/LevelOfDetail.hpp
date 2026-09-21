@@ -17,7 +17,7 @@
 // is that threshold expressed in pixels, and it is what the component stores.
 //
 // **How the levels came to exist is a separate question from which one to
-// draw**, and `AutoMeshLOD` plus `CustomMeshLOD` describe the first while
+// draw**, and `LODAuto` plus `LODCustom` describe the first while
 // `SelectLevel` describes the second.
 // `ROADMAP.md`'s bullet names three ways to produce them - four authored meshes,
 // auto-decimation, and triangle reduction driven by surface area - and a
@@ -78,7 +78,7 @@ namespace engine::scene {
 		Authored = 1,
 
 		// The bake step produced each level by decimating the one above it to
-		// `LevelOfDetail::Ratios`. `AutoMeshLOD::Meshes` records the published
+		// `LevelOfDetail::Ratios`. `LODAuto::Meshes` records the published
 		// artifact names, so selection can use their real triangle counts.
 		Decimated = 2,
 
@@ -98,7 +98,7 @@ namespace engine::scene {
 	// custom component supplies that level.
 	//
 	// @since v0.25
-	struct AutoMeshLOD {
+	struct LODAuto {
 		// Published coarse artifacts for levels one through three.
 		core::Name Meshes[LOD_LEVELS - 1];
 		// Retained triangle fractions used to generate each coarse artifact.
@@ -116,12 +116,12 @@ namespace engine::scene {
 	// Per-level authored overrides for an automatic mesh ladder.
 	//
 	// Each valid mesh replaces the automatic artifact at the same level. An
-	// invalid name is an intentional nil and falls back to `AutoMeshLOD` for that
+	// invalid name is an intentional nil and falls back to `LODAuto` for that
 	// level. Zero ratios and target area inherit the automatic option, or the
 	// engine default when no automatic component exists.
 	//
 	// @since v0.25
-	struct CustomMeshLOD {
+	struct LODCustom {
 		// Authored artifact overrides for levels one through three.
 		core::Name Meshes[LOD_LEVELS - 1];
 		// Per-level retained triangle fractions; zero inherits automatic settings.
@@ -134,9 +134,21 @@ namespace engine::scene {
 		uint8_t Reserved[3] = {};
 	};
 
+	// Per-item distance floors for the LOD selector.
+	//
+	// A zero in every slot inherits the active view's default mesh LOD distances.
+	// Partial overrides are refused at resolution time, so a malformed saved row
+	// cannot make one threshold apply with the other two guessed.
+	//
+	// @since v0.25
+	struct LODSettings {
+		// Distances that force levels one, two, and three, in world units.
+		float MinimumDistances[LOD_LEVELS - 1] = {};
+	};
+
 	// A resolved automatic/custom ladder copied into a draw snapshot.
 	//
-	// This is not registered as ECS storage. `AutoMeshLOD` and `CustomMeshLOD`
+	// This is not registered as ECS storage. `LODAuto` and `LODCustom`
 	// own authored state; `ResolveMeshLOD` produces this flat value once while a
 	// draw list is built, before each camera selects a level on the GPU.
 	//
@@ -196,13 +208,12 @@ namespace engine::scene {
 	// @param automatic Generated artifacts and generation options, or null.
 	// @param custom    Authored per-level overrides, or null.
 	// @return A contiguous ladder. Strategy is `None` when no coarse level exists.
-	LevelOfDetail
-	ResolveMeshLOD(const core::Name &base, const AutoMeshLOD *automatic, const CustomMeshLOD *custom);
+	LevelOfDetail ResolveMeshLOD(const core::Name &base, const LODAuto *automatic, const LODCustom *custom);
 
 	// Resolves explicitly named artifacts when a caller has no base mesh.
 	//
 	// Kept for tools and tests that operate on stored component values alone.
-	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom);
+	LevelOfDetail ResolveMeshLOD(const LODAuto *automatic, const LODCustom *custom);
 
 	// The deterministic name of an automatic mesh artifact.
 	//

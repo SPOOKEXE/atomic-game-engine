@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <optional>
+#include <string_view>
 
 namespace engine::render {
 	namespace {
@@ -55,6 +57,78 @@ namespace engine::render {
 			Sign(signature, rotation.y);
 			Sign(signature, rotation.z);
 			Sign(signature, rotation.w);
+		}
+		std::optional<core::Name> SeamRadianceKey(core::Name portalKey) {
+			constexpr std::string_view prefix = "seam-radiance/";
+			if (!portalKey.IsValid() || portalKey.Text().size() + prefix.size() > 256) return std::nullopt;
+			return core::Name(std::string(prefix) + std::string(portalKey.Text()));
+		}
+		PortalDemandStatus BuildSeamRadianceDemand(
+			const scene::PortalSeam &seam,
+			core::Name portalKey,
+			const View &viewer,
+			size_t viewSlot,
+			PortalImageDemand demand,
+			PortalImageDemand &radiance
+		) {
+			constexpr uint32_t EXTENT = 128;
+			const float side = scene::SeamOffset(seam, viewer.CameraFrame.Position);
+			if (!std::isfinite(side)) return PortalDemandStatus::Invalid;
+			const core::Vector3 outward = seam.Normal * (side >= 0 ? 1.0f : -1.0f);
+			constexpr float STAND_OFF = 0.5f;
+			const core::Vector3 standPosition = seam.Centre + outward * STAND_OFF;
+			const core::Vector3 upAxis =
+				std::abs(outward.Y) > .99f ? core::Vector3{0, 0, 1} : core::Vector3{0, 1, 0};
+			const core::CFrame stand = core::CFrame::LookAt(standPosition, standPosition - outward, upAxis);
+			const auto through = scene::SeamMapping(seam);
+			const core::CFrame placed = through.Place(stand);
+			scene::Camera camera = viewer.Camera;
+			camera.FieldOfViewRadians = 1.9f;
+			camera.NearPlane = .05f;
+			const auto projection = scene::ResolveCamera(placed, camera, 1.0f).Projection;
+			const core::Vector3 clipNormal = through.Rotate(outward) * -1.0f;
+			const core::Vector3 clipPoint =
+				through.Point(seam.Centre) - clipNormal * scene::PortalClipBias(STAND_OFF);
+			const float clipDistance = clipNormal.Dot(clipPoint);
+			if (!Rigid(placed) || !Finite(projection) || !Finite(clipNormal) ||
+				!std::isfinite(clipDistance) || clipNormal.Dot(placed.Position) - clipDistance >= -1e-4f)
+				return PortalDemandStatus::Invalid;
+
+			demand.SeamRadiance = true;
+			demand.Portal.ImagePortal = portalKey;
+			demand.Binding.Portal = portalKey;
+			demand.Binding.ExpectedScope = PortalImageScope::SeamRadiance;
+			demand.Binding.ExpectedProjection = PortalImageProjection::Seam;
+			auto &request = demand.Request;
+			request.Key = {};
+			request.Key.PortalKey = portalKey.Text();
+			request.Scope = PortalImageScope::SeamRadiance;
+			request.OrderedLayers = false;
+			request.EyePlayer.clear();
+			request.RetainedBodyPlayer.clear();
+			request.Geometry.clear();
+			request.KnownImage.reset();
+			request.Position = {placed.Position.X, placed.Position.Y, placed.Position.Z};
+			const auto rotation = placed.Rotation();
+			request.Orientation = {rotation.x, rotation.y, rotation.z, rotation.w};
+			const float tangent = std::tan(camera.FieldOfViewRadians * .5f) * camera.NearPlane;
+			request.Frustum = {-tangent, tangent, -tangent, tangent, camera.NearPlane, camera.FarPlane};
+			request.ClipPlane = {clipNormal.X, clipNormal.Y, clipNormal.Z, -clipDistance};
+			request.Width = EXTENT;
+			request.Height = EXTENT;
+			request.RecursionDepth = 0;
+			request.PixelBudget = EXTENT * EXTENT;
+			Sign(request.Key.CameraRevision, placed);
+			Sign(request.Key.CameraRevision, outward);
+			for (const float value : request.Frustum)
+				Sign(request.Key.CameraRevision, value);
+			Sign(request.Key.SeamRevision, outward);
+			demand.Binding.Expected = request.Key;
+			demand.Binding.World = viewer.World;
+			demand.Binding.WorldName = viewer.WorldName;
+			demand.Binding.ViewSlot = viewSlot;
+			radiance = std::move(demand);
+			return PortalDemandStatus::Ready;
 		}
 	}
 
@@ -264,6 +338,13 @@ namespace engine::render {
 		PortalImageDemandCounts counts;
 		std::vector<scene::PortalSeam> seams;
 		scene::GatherPortalSeams(store, seams);
+		const size_t crossWorld =
+			std::count_if(seams.begin(), seams.end(), [](const auto &seam) { return seam.Crosses; });
+		// A light probe is supplemental. Reserve every import slot required for
+		// the visible pane image before consuming the remainder with probes.
+		const size_t radianceCapacity =
+			crossWorld < MAX_IMPORTED_PORTAL_IMAGES ? MAX_IMPORTED_PORTAL_IMAGES - crossWorld : 0;
+		size_t radianceCount = 0;
 		std::vector<std::string> names;
 		names.reserve(seams.size());
 		for (auto &seam : seams) {
@@ -338,8 +419,24 @@ namespace engine::render {
 					counts.Invalid++;
 					break;
 				}
+				std::optional<PortalImageDemand> radiance;
+				if (radianceCount < radianceCapacity) {
+					if (const auto lightKey = SeamRadianceKey(claim.ImagePortal)) {
+						PortalImageDemand probe;
+						const auto radianceStatus =
+							BuildSeamRadianceDemand(seam, *lightKey, viewer, viewer.Slot, demand, probe);
+						if (radianceStatus == PortalDemandStatus::Ready) {
+							const float side = scene::SeamOffset(seam, viewer.CameraFrame.Position);
+							demand.Portal.LightImagePortal = *lightKey;
+							demand.Portal.LightOutward = seam.Normal * (side >= 0 ? 1.0f : -1.0f);
+							radiance = std::move(probe);
+							++radianceCount;
+						}
+					}
+				}
 				claim = demand.Portal;
 				demands.push_back(std::move(demand));
+				if (radiance) demands.push_back(std::move(*radiance));
 				counts.Ready++;
 				break;
 			}

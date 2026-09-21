@@ -583,6 +583,8 @@ namespace client {
 		for (auto &portal : portals) {
 			if (portal.ExternalImage) {
 				portal.ImportedImage = images.Image(viewer.Slot, portal.ImagePortal);
+				if (portal.LightImagePortal.IsValid())
+					portal.ImportedLightImage = images.Image(viewer.Slot, portal.LightImagePortal);
 				const auto captured = images.Capture(viewer.Slot, portal.ImagePortal);
 				if (!captured || captured->TransparentImages[0] == 0) continue;
 				const auto demand = std::find_if(demands.begin(), demands.end(), [&](const auto &entry) {
@@ -623,6 +625,7 @@ namespace client {
 			});
 		});
 		return std::all_of(demands.begin(), demands.end(), [&](const auto &demand) {
+			if (demand.SeamRadiance) return true;
 			return std::any_of(portals.begin(), portals.end(), [&](const auto &portal) {
 				return portal.ExternalImage && portal.ImagePortal == demand.Binding.Portal &&
 					   portal.ImportedImage != 0;

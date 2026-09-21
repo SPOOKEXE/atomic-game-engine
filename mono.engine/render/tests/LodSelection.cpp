@@ -69,6 +69,7 @@ TEST_CASE("an authored ladder packs every mesh against the same part bounds", "[
 	CHECK(plan.Draws[0].LevelCount == 4);
 	CHECK(plan.Selections[0].Triangles == glm::uvec4(1000, 500, 250, 125));
 	CHECK(plan.Selections[0].CentreTarget.w == Approx(9.0f));
+	CHECK(plan.Selections[0].MinimumDistances == glm::vec4(0.0f));
 
 	for (size_t level = 0; level < mesh.size(); ++level) {
 		const glm::mat4 model = ModelMatrixOf(plan.Instances[level]);
@@ -202,6 +203,26 @@ TEST_CASE("distance bands force a coarse LOD page without exceeding the resident
 	const glm::mat4 projection{1.0f};
 	CHECK(SelectAuthoredLodLevel(selection, projection, Vector3{}, {30.0f, 60.0f, 120.0f}, 64, 64) == 0);
 	CHECK(SelectAuthoredLodLevel(selection, projection, Vector3{}, {1.0f, 2.0f, 3.0f}, 64, 64) == 1);
+}
+
+TEST_CASE(
+	"per-item LOD distances override the view defaults only as a complete ordered ladder", "[render][lod]"
+) {
+	engine::render::GpuLodSelection selection{};
+	selection.CentreTarget = {0.0f, 0.0f, -4.0f, 1.0f};
+	selection.ExtentLevels = {0.25f, 0.25f, 0.01f, 4.0f};
+	selection.Triangles = {2u, 1u, 1u, 1u};
+	const glm::mat4 projection{1.0f};
+	const std::array<float, 3> defaults{30.0f, 60.0f, 120.0f};
+
+	CHECK(SelectAuthoredLodLevel(selection, projection, Vector3{}, defaults, 64, 64) == 0);
+	selection.MinimumDistances = {1.0f, 2.0f, 3.0f, 0.0f};
+	CHECK(SelectAuthoredLodLevel(selection, projection, Vector3{}, defaults, 64, 64) == 3);
+
+	// A partial saved override has no meaningful inheritance rule. Falling back
+	// to the complete view ladder keeps a bad row from forcing only one level.
+	selection.MinimumDistances = {1.0f, 0.0f, 3.0f, 0.0f};
+	CHECK(SelectAuthoredLodLevel(selection, projection, Vector3{}, defaults, 64, 64) == 0);
 }
 
 TEST_CASE("repeated camera oscillation keeps authored LOD selection current", "[render][lod]") {

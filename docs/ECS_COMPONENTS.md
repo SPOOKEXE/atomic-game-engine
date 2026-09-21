@@ -149,7 +149,6 @@ state until v0.19.
 | `scene.Attachment` | 56 | 4 | yes | yes | . | . | A named point on a part: the authored local `Frame` plus the `WorldFrame` every host recomposes each tick. The cache puts an emitter and a lamp where their part is, and its reported write is what signals a change. |
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
 | `scene.AuthoredAffordance` | 8 | 4 | yes | . | . | . | Explicit bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry. |
-| `scene.AutoMeshLOD` | 32 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
 | `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
 | `scene.BoolValue` | 4 | 1 | yes | yes | . | . | The boolean stored by a `BoolValue` instance. |
@@ -171,7 +170,6 @@ state until v0.19.
 | `scene.Color3Value` | 12 | 4 | yes | yes | . | . | The colour stored by a `Color3Value` instance. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
-| `scene.CustomMeshLOD` | 32 | 4 | yes | . | . | . | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.AutoMeshLOD` artifact and valid slots take precedence. |
 | `scene.EditableImage` | 56 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes. |
 | `scene.EditableMesh` | 176 | 8 | yes | . | . | . | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
@@ -180,6 +178,9 @@ state until v0.19.
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
 | `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
 | `scene.JointInstance` | 80 | 8 | yes | yes | . | . | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld. |
+| `scene.LODAuto` | 32 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target. |
+| `scene.LODCustom` | 32 | 4 | yes | . | . | . | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.LODAuto` artifact and valid slots take precedence. |
+| `scene.LODSettings` | 12 | 4 | yes | . | . | . | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
 | `scene.LightingService` | 64 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
 | `scene.LocalPlayer` | 8 | 8 | yes | yes | . | . | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property. |
@@ -277,4 +278,4 @@ state until v0.19.
 
 ---
 
-200 components registered by the engine, 0 without a purpose line.
+201 components registered by the engine, 0 without a purpose line.

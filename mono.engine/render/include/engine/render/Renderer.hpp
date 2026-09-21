@@ -333,6 +333,11 @@ namespace engine::render {
 		uint64_t ImportedImage = 0;
 		// Authored portal key used to resolve that imported image.
 		core::Name ImagePortal;
+		// Imported HDR radiance sampled only by deferred seam spill, or zero.
+		uint64_t ImportedLightImage = 0;
+		// Capture key and source-world side paired with ImportedLightImage.
+		core::Name LightImagePortal;
+		core::Vector3 LightOutward;
 
 		// The slot of the hole at the far end of this one, or -1 for none.
 		//
@@ -1586,6 +1591,9 @@ namespace engine::render {
 		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		// Monotonically changes when one exact resident mesh is replaced. Zero
+		// means the requested owner has no mesh under this name.
+		uint64_t MeshRevision(const core::Name &name, core::Name owner = {}) const;
 		// Retires one mesh in `owner` without releasing that owner's unrelated resources.
 		// Its storage follows MeshTable's deferred-frame reuse rule.
 		bool DropMesh(const core::Name &name, core::Name owner = {});

@@ -132,6 +132,9 @@ namespace engine::render {
 	// @client
 	// @since v0.9
 	struct MeshEntry {
+		// Bumped for every replacement of this exact name and content owner.
+		uint64_t Revision = 0;
+
 		// The whole mesh, for a pass that does not care about materials - the
 		// shadow pass draws this and binds nothing.
 		MeshRange Whole;
@@ -358,6 +361,10 @@ namespace engine::render {
 		//         default.
 		bool Has(const core::Name &name, core::Name owner = {}) const;
 
+		// Monotonically changes when this exact resident mesh is replaced. Zero
+		// means the name is not resident for the requested owner.
+		uint64_t RevisionOf(const core::Name &name, core::Name owner = {}) const;
+
 		// Copies exact resident geometry without reading back the GPU. Explicit limits
 		// keep a control request from copying an arbitrarily large content mesh.
 		// Packed runtime meshes have no expanded host vertices and are refused.
@@ -485,6 +492,7 @@ namespace engine::render {
 		std::vector<std::byte> HostPackedVertices;
 		std::unordered_map<uint64_t, MeshEntry> Entries;
 		MeshEntry Fallback;
+		uint64_t ContentRevision = 0;
 		bool Dirty = false;
 	};
 }

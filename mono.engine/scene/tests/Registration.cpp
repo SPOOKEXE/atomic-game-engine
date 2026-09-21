@@ -132,8 +132,8 @@ namespace registration_test {
 		"scene.AnimationClip",
 		"scene.Animator",
 		"scene.AnimationTrack",
-		"scene.AutoMeshLOD",
-		"scene.CustomMeshLOD",
+		"scene.LODAuto",
+		"scene.LODCustom",
 		"scene.RenderEffects",
 		"scene.Constraint",
 		"scene.Atmosphere",
@@ -144,6 +144,7 @@ namespace registration_test {
 		"scene.CloudCompute",
 		"scene.AtmosphereProcedural",
 		"scene.Gravity",
+		"scene.LODSettings",
 	};
 }
 
@@ -254,7 +255,7 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 
 	ecs::Store source("registration_test.lod.source");
 	const ecs::Entity entity = source.Create();
-	scene::AutoMeshLOD automatic;
+	scene::LODAuto automatic;
 	automatic.Meshes[0] = core::Name("registration_test.auto-half");
 	automatic.Meshes[1] = core::Name("registration_test.auto-quarter");
 	automatic.Ratios[1] = 0.2f;
@@ -262,12 +263,17 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 	automatic.Strategy = scene::LodStrategy::Reduced;
 	automatic.Levels = 3;
 	source.Set(entity, automatic);
-	scene::CustomMeshLOD custom;
+	scene::LODCustom custom;
 	custom.Meshes[0] = core::Name("registration_test.custom-half");
 	custom.Ratios[0] = 0.4f;
 	custom.TargetQuadArea = 11.0f;
 	custom.Levels = 4;
 	source.Set(entity, custom);
+	scene::LODSettings settings;
+	settings.MinimumDistances[0] = 17.0f;
+	settings.MinimumDistances[1] = 43.0f;
+	settings.MinimumDistances[2] = 91.0f;
+	source.Set(entity, settings);
 
 	core::ByteWriter writer;
 	REQUIRE(source.Save(writer));
@@ -277,10 +283,12 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 	ecs::Store restored("registration_test.lod.restored");
 	core::ByteReader reader(writer.Bytes());
 	REQUIRE(restored.Load(reader));
-	const auto *automaticBack = restored.Get<scene::AutoMeshLOD>(entity);
-	const auto *customBack = restored.Get<scene::CustomMeshLOD>(entity);
+	const auto *automaticBack = restored.Get<scene::LODAuto>(entity);
+	const auto *customBack = restored.Get<scene::LODCustom>(entity);
+	const auto *settingsBack = restored.Get<scene::LODSettings>(entity);
 	REQUIRE(automaticBack != nullptr);
 	REQUIRE(customBack != nullptr);
+	REQUIRE(settingsBack != nullptr);
 	CHECK(automaticBack->Meshes[0].Text() == "registration_test.auto-half");
 	CHECK(automaticBack->Meshes[1].Text() == "registration_test.auto-quarter");
 	CHECK(automaticBack->Ratios[1] == 0.2f);
@@ -292,6 +300,9 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 	CHECK(customBack->Ratios[0] == 0.4f);
 	CHECK(customBack->TargetQuadArea == 11.0f);
 	CHECK(customBack->Levels == 4);
+	CHECK(settingsBack->MinimumDistances[0] == 17.0f);
+	CHECK(settingsBack->MinimumDistances[1] == 43.0f);
+	CHECK(settingsBack->MinimumDistances[2] == 91.0f);
 }
 
 TEST_CASE("environment shader names and texture faces survive a snapshot", "[scene][registration]") {

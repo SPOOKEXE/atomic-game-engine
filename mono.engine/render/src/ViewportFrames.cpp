@@ -39,8 +39,9 @@ namespace engine::render {
 							child.Id,
 							nullptr,
 							store.Get<scene::CharacterLimb>(child),
-							store.Get<scene::AutoMeshLOD>(child),
-							store.Get<scene::CustomMeshLOD>(child),
+							store.Get<scene::LODAuto>(child),
+							store.Get<scene::LODCustom>(child),
+							store.Get<scene::LODSettings>(child),
 							store.Get<scene::RenderEffects>(child)
 						)
 					);

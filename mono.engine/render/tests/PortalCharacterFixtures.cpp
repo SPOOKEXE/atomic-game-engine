@@ -5,6 +5,7 @@
 #include "SeamLightSelection.hpp"
 
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -13,6 +14,7 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/render/PortalImageImport.hpp>
 #include <engine/render/ResourceImage.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -716,6 +718,60 @@ TEST_CASE(
 			{target.Width, target.Height, ImageFormat::Rgba32Float, std::as_bytes(std::span(observed))},
 			tolerance
 		);
+	}
+	if (destinationSource == 0) {
+		// Cross-world portals carry the same radiance plane as a separately
+		// imported HDR image. The ordinary pane image is deliberately absent here:
+		// this checks the deferred spill path, not eye-image compositing.
+		portal.ExternalImage = true;
+		portal.ImagePortal = core::Name("remote-pane");
+		portal.LightImagePortal = core::Name("remote-seam-radiance");
+		portal.LightOutward = portal.Normal * receivingSide;
+		render::PortalImageBinding binding;
+		binding.World = views[1].World;
+		binding.WorldName = views[1].WorldName;
+		binding.ViewSlot = views[1].Slot;
+		binding.Portal = portal.LightImagePortal;
+		binding.Expected = {41, "remote-seam-radiance", 7, 9};
+		binding.ExpectedScope = render::PortalImageScope::SeamRadiance;
+		render::PortalImageReply reply;
+		reply.Key = binding.Expected;
+		reply.Scope = render::PortalImageScope::SeamRadiance;
+		reply.Status = render::PortalImageStatus::Ok;
+		reply.Width = reply.Height = 128;
+		reply.RowStride = reply.Width * 8;
+		reply.Pixels.resize(size_t(reply.RowStride) * reply.Height);
+		for (size_t pixel = 0; pixel < size_t(reply.Width) * reply.Height; pixel++) {
+			auto *const colour = reply.Pixels.data() + pixel * 8;
+			colour[1] = std::byte{0x3c};
+			colour[7] = std::byte{0x3c};
+		}
+		reply.PixelHash = assets::Hasher::Of(reply.Pixels);
+		portal.ImportedLightImage = renderer.QueuePortalImage(binding, std::move(reply));
+		REQUIRE(portal.ImportedLightImage != 0);
+		views[1].Instances = std::span(rows).first(2);
+		views[1].Lights = {};
+		constexpr uint64_t IMPORTED_CAPTURE = 4;
+		REQUIRE(renderer.RequestResourceImage({IMPORTED_CAPTURE, pipelineName, captureName, 0}));
+		renderer.Render(std::span(&views[1], 1), overlay, nullptr, false);
+		std::optional<render::ResourceImage> imported;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (!imported && std::chrono::steady_clock::now() < deadline) {
+			imported = renderer.TakeResourceImage(IMPORTED_CAPTURE);
+			if (!imported) SDL_Delay(1);
+		}
+		REQUIRE(imported.has_value());
+		REQUIRE(imported->Status == render::ResourceImageStatus::Ok);
+		const size_t byte = 18 * imported->RowStride + 32 * 8;
+		const uint16_t half = std::to_integer<uint16_t>(imported->Pixels[byte]) |
+							  (std::to_integer<uint16_t>(imported->Pixels[byte + 1]) << 8);
+		const int exponent = (half >> 10) & 31;
+		REQUIRE((half & 0x8000) == 0);
+		REQUIRE(exponent < 31);
+		const float red = exponent == 0 ? std::ldexp(static_cast<float>(half & 1023), -24)
+										: std::ldexp(1.0f + (half & 1023) / 1024.0f, exponent - 15);
+		CHECK(red > .3f);
+		CHECK(renderer.PortalImageUsage().TextureBytes >= 128u * 128 * 8);
 	}
 	if (destinationSource == 2) {
 		// The next frame has no portal. Every side target must be cleared before

@@ -3,6 +3,7 @@
 #include <engine/assets/Builtin.hpp>
 #include <engine/render/AutomaticMeshLod.hpp>
 #include <engine/render/EditableMeshes.hpp>
+#include <engine/render/MeshTable.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -38,6 +39,22 @@ namespace {
 		return mesh;
 	}
 
+	engine::render::PackedMeshData PackedTriangle() {
+		using engine::render::PackedMeshData;
+		using engine::render::PackedMeshFormat;
+		using engine::render::PackedMeshStream;
+		PackedMeshData mesh;
+		mesh.VertexCount = 3;
+		mesh.Indices = {0, 1, 2};
+		mesh.Vertices.resize(96);
+		mesh.Streams[0] = PackedMeshStream{0, 36, 9, 3, PackedMeshFormat::Float32};
+		mesh.Streams[1] = PackedMeshStream{36, 36, 9, 3, PackedMeshFormat::Float32};
+		mesh.Streams[2] = PackedMeshStream{72, 24, 6, 2, PackedMeshFormat::Float32};
+		mesh.Minimum = {0.0f, 0.0f, 0.0f};
+		mesh.Maximum = {1.0f, 1.0f, 0.0f};
+		return mesh;
+	}
+
 	template <typename Uploader>
 	size_t RefreshUntil(Uploader &uploader, engine::ecs::Store &store, engine::render::Renderer &renderer) {
 		for (size_t attempt = 0; attempt < 3000; attempt++) {
@@ -57,7 +74,7 @@ TEST_CASE("automatic LOD decimates the editable-demo triangle count", "[render][
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
-	scene::AutoMeshLOD policy;
+	scene::LODAuto policy;
 	policy.Strategy = scene::LodStrategy::Decimated;
 	policy.Levels = 3;
 	policy.Ratios[0] = 0.35f;
@@ -87,7 +104,7 @@ TEST_CASE(
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
-	scene::AutoMeshLOD policy;
+	scene::LODAuto policy;
 	policy.Strategy = scene::LodStrategy::Decimated;
 	policy.Levels = 3;
 	policy.Ratios[0] = 0.35f;
@@ -116,6 +133,107 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"automatic LOD uploader replaces and removes ladders with their source mesh",
+	"[render][gpu][lod][automatic][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("lod.source-lifecycle");
+	const core::Name base("lod.source-lifecycle-base");
+	const core::Name artifact = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::LODAuto policy;
+	policy.Levels = 2;
+	policy.Ratios[0] = 0.5f;
+	store.Set(part, policy);
+	REQUIRE(fixture.Render.AddMesh(base, Grid(8)));
+
+	render::AutomaticMeshLodUploader uploader;
+	REQUIRE(RefreshUntil(uploader, store, fixture.Render) == 1);
+	const uint32_t firstTriangles = scene::TrianglesOf(store, artifact);
+	REQUIRE(firstTriangles > 0);
+
+	REQUIRE(fixture.Render.AddMesh(base, Grid(10)));
+	REQUIRE(RefreshUntil(uploader, store, fixture.Render) == 1);
+	CHECK(scene::TrianglesOf(store, artifact) != firstTriangles);
+
+	REQUIRE(fixture.Render.DropMesh(base));
+	CHECK(uploader.Refresh(store, fixture.Render) == 0);
+	core::Vector3 extent;
+	CHECK_FALSE(fixture.Render.MeshExtentOf(artifact, extent));
+	CHECK(scene::TrianglesOf(store, artifact) == 0);
+}
+
+TEST_CASE(
+	"automatic LOD discards work copied before its source is replaced", "[render][gpu][lod][automatic][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("lod.source-race");
+	const core::Name base("lod.source-race-base");
+	const core::Name artifact = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::LODAuto policy;
+	policy.Levels = 2;
+	policy.Ratios[0] = 0.5f;
+	store.Set(part, policy);
+	REQUIRE(fixture.Render.AddMesh(base, Grid(14)));
+
+	render::AutomaticMeshLodUploader uploader;
+	CHECK(uploader.Refresh(store, fixture.Render) == 0);
+	CHECK(uploader.Refresh(store, fixture.Render) == 0);
+	const assets::MeshData replacement = Grid(6);
+	REQUIRE(fixture.Render.AddMesh(base, replacement));
+
+	const auto expected = render::BuildAutomaticMeshLods(store, base, replacement);
+	REQUIRE(expected.size() == 1);
+	REQUIRE(RefreshUntil(uploader, store, fixture.Render) == 1);
+	CHECK(scene::TrianglesOf(store, artifact) == expected[0].Data.Indices.size() / 3);
+}
+
+TEST_CASE(
+	"automatic LOD retires its ladder when a packed source cannot be copied",
+	"[render][gpu][lod][automatic][.]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store store("lod.packed-source");
+	const core::Name base("lod.packed-source-base");
+	const core::Name artifact = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
+	scene::Visual visual;
+	visual.Mesh = base;
+	store.Set(part, visual);
+	scene::LODAuto policy;
+	policy.Levels = 2;
+	policy.Ratios[0] = 0.5f;
+	store.Set(part, policy);
+	REQUIRE(fixture.Render.AddMesh(base, Grid(8)));
+
+	render::AutomaticMeshLodUploader uploader;
+	REQUIRE(RefreshUntil(uploader, store, fixture.Render) == 1);
+	REQUIRE(scene::TrianglesOf(store, artifact) > 0);
+	REQUIRE(fixture.Render.AddPackedMesh(base, PackedTriangle()));
+
+	CHECK(uploader.Refresh(store, fixture.Render) == 0);
+	core::Vector3 extent;
+	CHECK_FALSE(fixture.Render.MeshExtentOf(artifact, extent));
+	CHECK(scene::TrianglesOf(store, artifact) == 0);
+}
+
+TEST_CASE(
 	"automatic LOD uploader retains shared-owner levels until every world releases them",
 	"[render][gpu][lod][automatic][.]"
 ) {
@@ -131,7 +249,7 @@ TEST_CASE(
 		scene::Visual visual;
 		visual.Mesh = base;
 		store.Set(part, visual);
-		scene::AutoMeshLOD policy;
+		scene::LODAuto policy;
 		policy.Strategy = scene::LodStrategy::Decimated;
 		policy.Levels = 2;
 		policy.Ratios[0] = 0.35f;
@@ -147,11 +265,13 @@ TEST_CASE(
 	core::Vector3 extent;
 	REQUIRE(fixture.Render.MeshExtentOf(artifact, extent));
 
-	first.Remove<scene::AutoMeshLOD>(firstPart);
+	first.Remove<scene::LODAuto>(firstPart);
 	CHECK(uploader.RefreshLods(first, fixture.Render) == 0);
 	CHECK(fixture.Render.MeshExtentOf(artifact, extent));
+	CHECK(scene::TrianglesOf(first, artifact) == 0);
+	CHECK(scene::TrianglesOf(second, artifact) > 0);
 
-	second.Remove<scene::AutoMeshLOD>(secondPart);
+	second.Remove<scene::LODAuto>(secondPart);
 	CHECK(uploader.RefreshLods(second, fixture.Render) == 0);
 	CHECK_FALSE(fixture.Render.MeshExtentOf(artifact, extent));
 }
@@ -170,7 +290,7 @@ TEST_CASE(
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
-	scene::AutoMeshLOD policy;
+	scene::LODAuto policy;
 	policy.Levels = 2;
 	policy.Ratios[0] = 0.5f;
 	store.Set(part, policy);
@@ -210,7 +330,7 @@ TEST_CASE("automatic mesh LOD planning builds and shares real artifacts", "[rend
 	const world::WorldId first = universe.Create({.Name = core::Name("lod.first")});
 	const world::WorldId second = universe.Create({.Name = core::Name("lod.second")});
 	const core::Name base("lod.base");
-	scene::AutoMeshLOD policy;
+	scene::LODAuto policy;
 	policy.Strategy = scene::LodStrategy::Decimated;
 	policy.Levels = 3;
 	policy.Ratios[0] = 0.5f;
@@ -253,7 +373,7 @@ TEST_CASE(
 	world::Universe universe;
 	const world::WorldId world = universe.Create({.Name = core::Name("lod.reduced")});
 	const core::Name base("lod.reduced-base");
-	scene::AutoMeshLOD policy;
+	scene::LODAuto policy;
 	policy.Strategy = scene::LodStrategy::Reduced;
 	policy.Levels = 2;
 	policy.Ratios[0] = 0.5f;

@@ -25,6 +25,7 @@ namespace engine::ecs {
 
 namespace engine::render {
 	class Renderer;
+	enum class MeshCopyStatus : uint8_t;
 
 	// One derived mesh level and the worlds that requested it.
 	struct AutomaticMeshLodArtifact {
@@ -128,6 +129,7 @@ namespace engine::render {
 			core::Name Owner;
 			core::Name Base;
 			uint64_t Generation = 0;
+			uint64_t SourceRevision = 0;
 			std::mutex Guard;
 			std::vector<AutomaticMeshLodArtifact> Result;
 			bool Ready = false;
@@ -141,6 +143,7 @@ namespace engine::render {
 		struct Queued {
 			uint64_t Ticket = 0;
 			uint64_t Generation = 0;
+			uint64_t SourceRevision = 0;
 			assets::MeshData Mesh;
 			std::vector<Request> Requests;
 		};
@@ -149,7 +152,9 @@ namespace engine::render {
 			std::vector<core::Name> Artifacts;
 			std::vector<Request> Requested;
 			bool Changed = true;
+			bool UsesProvidedMesh = false;
 			uint64_t Generation = 0;
+			uint64_t SourceRevision = 0;
 			std::unique_ptr<Queued> Next;
 		};
 		struct Scope {
@@ -173,14 +178,19 @@ namespace engine::render {
 			core::Name owner,
 			const assets::MeshData *provided = nullptr
 		);
-		bool ResolveSource(
+		MeshCopyStatus ResolveSource(
 			ecs::Store &store,
 			Renderer &renderer,
 			const Source &source,
 			core::Name owner,
 			assets::MeshData &out
 		);
+		bool SourceRevision(
+			ecs::Store &store, Renderer &renderer, const Source &source, core::Name owner, uint64_t &out
+		);
+		void InvalidateSource(ecs::Store &store, Renderer &renderer, Source &source, core::Name owner);
 		bool RetainsArtifact(core::Name owner, core::Name artifact) const;
+		bool RetainsArtifact(uint64_t world, core::Name owner, core::Name artifact) const;
 		void ReleaseArtifacts(
 			ecs::Store &store, Renderer &renderer, core::Name owner, std::span<const core::Name> artifacts
 		);

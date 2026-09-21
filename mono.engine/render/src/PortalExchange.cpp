@@ -87,7 +87,7 @@ namespace engine::render {
 				}
 			}
 			const auto &lens = request.Frustum;
-			return ValidKey(request.Key) && request.Scope <= PortalImageScope::OpaqueLighting &&
+			return ValidKey(request.Key) && request.Scope <= PortalImageScope::SeamRadiance &&
 				   Finite(request.Position) && Finite(request.Orientation) && Unit(request.Orientation) &&
 				   Finite(lens) && lens[0] < lens[1] && lens[2] < lens[3] && lens[4] > 0 &&
 				   lens[5] > lens[4] && Finite(request.ClipPlane) &&
@@ -191,7 +191,7 @@ namespace engine::render {
 			ENGINE_PROFILE("portal image validation");
 			if (!ValidAmbient(reply, normal, response, baseline, directional) ||
 				(!normal.empty() && depth.empty()) || !ValidKey(reply.Key) ||
-				reply.Scope > PortalImageScope::OpaqueLighting ||
+				reply.Scope > PortalImageScope::SeamRadiance ||
 				!Text(reply.Diagnostic, MAX_DIAGNOSTIC, reply.Status == PortalImageStatus::Ok) ||
 				!ValidCaptureLighting(reply.CaptureLighting ? &*reply.CaptureLighting : nullptr)) {
 				return false;
@@ -453,7 +453,7 @@ namespace engine::render {
 	static bool EncodeReceipt(
 		const PortalResidentReceipt &receipt, std::vector<std::byte> &out, std::string &error, uint8_t kind
 	) {
-		if (!ValidKey(receipt.Key) || receipt.Scope > PortalImageScope::OpaqueLighting ||
+		if (!ValidKey(receipt.Key) || receipt.Scope > PortalImageScope::SeamRadiance ||
 			!Extent(receipt.Width, receipt.Height) ||
 			!ValidCaptureLighting(receipt.CaptureLighting ? &*receipt.CaptureLighting : nullptr)) {
 			return Refuse(error, "invalid resident portal receipt");
@@ -495,7 +495,7 @@ namespace engine::render {
 		receipt.Width = reader.ReadUInt32();
 		receipt.Height = reader.ReadUInt32();
 		if (hasCaptureLighting) CaptureLighting(reader, receipt.CaptureLighting.emplace());
-		if (reader.Failed() || !reader.AtEnd() || receipt.Scope > PortalImageScope::OpaqueLighting ||
+		if (reader.Failed() || !reader.AtEnd() || receipt.Scope > PortalImageScope::SeamRadiance ||
 			!Extent(receipt.Width, receipt.Height) ||
 			!ValidCaptureLighting(receipt.CaptureLighting ? &*receipt.CaptureLighting : nullptr)) {
 			return Refuse(error, "invalid resident portal receipt");
@@ -553,7 +553,7 @@ namespace engine::render {
 		const auto status = static_cast<PortalImageStatus>(reader.ReadUInt8());
 		const auto replyScope = static_cast<PortalImageScope>(reader.ReadUInt8());
 		const auto encoding = reader.ReadUInt16();
-		if (status > PortalImageStatus::Failed || scope > PortalImageScope::OpaqueLighting ||
+		if (status > PortalImageStatus::Failed || scope > PortalImageScope::SeamRadiance ||
 			replyScope != scope || ((encoding & 16) && scope != PortalImageScope::OpaqueLighting) ||
 			encoding > 1023 || ((encoding & 512) && !(encoding & 256)) ||
 			((encoding & 256) && !(encoding & 16)) || ((encoding & 4) && !(encoding & 2)) ||

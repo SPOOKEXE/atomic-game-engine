@@ -1322,7 +1322,7 @@ namespace engine::render {
 			return &target;
 		}
 
-		if (target.Colour) {
+		if (target.Colour && !target.Borrowed) {
 			gpu::ReleaseTexture(Device, target.Colour);
 		}
 		if (target.Depth) {
@@ -1366,6 +1366,23 @@ namespace engine::render {
 
 		target.Width = SEAM_LIGHT_RESOLUTION;
 		target.Height = SEAM_LIGHT_RESOLUTION;
+		return &target;
+	}
+
+	Renderer::Impl::SeamLightTarget *Renderer::Impl::BorrowSeamLight(
+		size_t viewport, size_t index, SDL_GPUTexture *texture, uint32_t width, uint32_t height
+	) {
+		if (index >= MAX_SEAM_LIGHT_TARGETS || texture == nullptr || width == 0 || height == 0)
+			return nullptr;
+		SeamLightTarget &target = SurfacesAt(viewport).SeamLights[index];
+		if (target.Colour && !target.Borrowed) gpu::ReleaseTexture(Device, target.Colour);
+		if (target.Depth) gpu::ReleaseTexture(Device, target.Depth);
+		target = {};
+		target.Colour = texture;
+		target.Format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		target.Width = width;
+		target.Height = height;
+		target.Borrowed = true;
 		return &target;
 	}
 

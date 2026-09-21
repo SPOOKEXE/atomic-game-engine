@@ -259,7 +259,7 @@ namespace studio {
 		ImGui::TextDisabled("interface and renderer share one frame today, so the two act as");
 		ImGui::TextDisabled("ceilings on it rather than as separate clocks");
 
-		ImGui::SeparatorText("Level of detail");
+		ImGui::SeparatorText("Default Mesh LOD distances");
 		ImGui::Checkbox("Enable LOD culling", &Prefs.EnableLODCulling);
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Skip mesh LOD clusters outside the viewport.");

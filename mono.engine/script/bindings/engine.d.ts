@@ -1408,10 +1408,13 @@ declare interface MeshPart extends BasePart {
 	CustomLodTargetQuadArea: number;
 	EmissiveMap: string;
 	HeightMap: string;
+	Lod1Distance: number;
 	Lod1MeshId: string;
 	Lod1Ratio: number;
+	Lod2Distance: number;
 	Lod2MeshId: string;
 	Lod2Ratio: number;
+	Lod3Distance: number;
 	Lod3MeshId: string;
 	Lod3Ratio: number;
 	LodTargetQuadArea: number;

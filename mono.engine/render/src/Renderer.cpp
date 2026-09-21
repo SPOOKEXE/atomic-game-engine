@@ -986,7 +986,7 @@ namespace engine::render {
 			}
 
 			for (Impl::SeamLightTarget &target : bank.SeamLights) {
-				if (target.Colour) {
+				if (target.Colour && !target.Borrowed) {
 					gpu::ReleaseTexture(device, target.Colour);
 				}
 				if (target.Depth) {
@@ -1257,6 +1257,10 @@ namespace engine::render {
 		if (!State->Meshes.Add(name, mesh, owner)) return false;
 		++State->ResourceEpoch;
 		return true;
+	}
+
+	uint64_t Renderer::MeshRevision(const core::Name &name, core::Name owner) const {
+		return State == nullptr ? 0 : State->Meshes.RevisionOf(name, Impl::MeshContentOwner(name, owner));
 	}
 
 	bool Renderer::DropMesh(const core::Name &name, core::Name owner) {

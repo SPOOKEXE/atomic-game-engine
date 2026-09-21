@@ -234,9 +234,9 @@ namespace engine::scene {
 		}
 
 		void WriteAutoMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
-			const auto *ladders = static_cast<const AutoMeshLOD *>(source);
+			const auto *ladders = static_cast<const LODAuto *>(source);
 			for (size_t index = 0; index < count; index++) {
-				const AutoMeshLOD &ladder = ladders[index];
+				const LODAuto &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					writer.WriteName(ladder.Meshes[level]);
 					writer.WriteFloat(ladder.Ratios[level]);
@@ -248,15 +248,24 @@ namespace engine::scene {
 		}
 
 		void WriteCustomMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
-			const auto *ladders = static_cast<const CustomMeshLOD *>(source);
+			const auto *ladders = static_cast<const LODCustom *>(source);
 			for (size_t index = 0; index < count; index++) {
-				const CustomMeshLOD &ladder = ladders[index];
+				const LODCustom &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					writer.WriteName(ladder.Meshes[level]);
 					writer.WriteFloat(ladder.Ratios[level]);
 				}
 				writer.WriteFloat(ladder.TargetQuadArea);
 				writer.WriteUInt8(ladder.Levels);
+			}
+		}
+
+		void WriteLodSettings(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *settings = static_cast<const LODSettings *>(source);
+			for (size_t index = 0; index < count; index++) {
+				for (const float distance : settings[index].MinimumDistances) {
+					writer.WriteFloat(distance);
+				}
 			}
 		}
 
@@ -296,9 +305,9 @@ namespace engine::scene {
 		}
 
 		void ReadAutoMeshLods(core::ByteReader &reader, void *destination, size_t count) {
-			auto *ladders = static_cast<AutoMeshLOD *>(destination);
+			auto *ladders = static_cast<LODAuto *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				AutoMeshLOD &ladder = ladders[index];
+				LODAuto &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					ladder.Meshes[level] = reader.ReadName();
 					ladder.Ratios[level] = reader.ReadFloat();
@@ -318,15 +327,24 @@ namespace engine::scene {
 		}
 
 		void ReadCustomMeshLods(core::ByteReader &reader, void *destination, size_t count) {
-			auto *ladders = static_cast<CustomMeshLOD *>(destination);
+			auto *ladders = static_cast<LODCustom *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				CustomMeshLOD &ladder = ladders[index];
+				LODCustom &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					ladder.Meshes[level] = reader.ReadName();
 					ladder.Ratios[level] = reader.ReadFloat();
 				}
 				ladder.TargetQuadArea = reader.ReadFloat();
 				ladder.Levels = reader.ReadUInt8();
+			}
+		}
+
+		void ReadLodSettings(core::ByteReader &reader, void *destination, size_t count) {
+			auto *settings = static_cast<LODSettings *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				for (float &distance : settings[index].MinimumDistances) {
+					distance = reader.ReadFloat();
+				}
 			}
 		}
 
@@ -1688,10 +1706,8 @@ namespace engine::scene {
 
 		// Both sources cross as authored content. The resolved level stays per-view
 		// GPU state and is never serialized.
-		ecs::Components::Register<AutoMeshLOD>("scene.AutoMeshLOD", WriteAutoMeshLods, ReadAutoMeshLods);
-		ecs::Components::Register<CustomMeshLOD>(
-			"scene.CustomMeshLOD", WriteCustomMeshLods, ReadCustomMeshLods
-		);
+		ecs::Components::Register<LODAuto>("scene.LODAuto", WriteAutoMeshLods, ReadAutoMeshLods);
+		ecs::Components::Register<LODCustom>("scene.LODCustom", WriteCustomMeshLods, ReadCustomMeshLods);
 		ecs::Components::Register<RenderEffects>(
 			"scene.RenderEffects", WriteRenderEffects, ReadRenderEffects
 		);
@@ -1786,11 +1802,14 @@ namespace engine::scene {
 		// startup path from minting an automatic compiler-spelled component id.
 		ecs::Components::Register<Gravity>("scene.Gravity");
 
-		// Registration order is part of the ECS layout. This new row stays last
-		// so existing component ids and snapshot layouts do not move.
+		// Registration order is part of the ECS layout. This row stays after every
+		// existing component so their ids and snapshot layouts do not move.
 		ecs::Components::Register<AuthoredAffordance>(
 			"scene.AuthoredAffordance", WriteAuthoredAffordances, ReadAuthoredAffordances
 		);
+
+		// Appended because component ids are registration order.
+		ecs::Components::Register<LODSettings>("scene.LODSettings", WriteLodSettings, ReadLodSettings);
 	}
 
 	void RegisterSceneClasses() {

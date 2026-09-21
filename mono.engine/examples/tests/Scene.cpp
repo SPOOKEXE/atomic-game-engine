@@ -2259,7 +2259,7 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 	for (const char *partName : {"DefaultPbr", "CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
 		const Entity part = InScene(store, partName);
 		REQUIRE(part != engine::ecs::NULL_ENTITY);
-		const auto *lod = store.Get<engine::scene::AutoMeshLOD>(part);
+		const auto *lod = store.Get<engine::scene::LODAuto>(part);
 		CHECK(lod == nullptr);
 	}
 

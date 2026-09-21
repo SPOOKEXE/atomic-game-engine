@@ -2404,7 +2404,11 @@ namespace engine::render {
 		void RecordPortalImports(SDL_GPUCommandBuffer *command, const View &view, size_t viewSlot);
 		void FinishPortalImports(SDL_GPUCommandBuffer *command, bool submitted);
 		ImportedPortalImage *FindPortalImport(
-			const View &view, size_t viewSlot, const PortalView &portal, SDL_GPUCommandBuffer *command
+			const View &view,
+			size_t viewSlot,
+			const PortalView &portal,
+			SDL_GPUCommandBuffer *command,
+			bool seamRadiance = false
 		);
 
 		// One level of one portal's recursion: the picture seen through that hole
@@ -2517,6 +2521,9 @@ namespace engine::render {
 		struct SeamLightTarget {
 			SDL_GPUTexture *Colour = nullptr;
 			SDL_GPUTexture *Depth = nullptr;
+			// Imported cross-world probes are owned by ImportedPortalImage rather
+			// than this per-view cache.
+			bool Borrowed = false;
 			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
@@ -2684,6 +2691,10 @@ namespace engine::render {
 		//         mouth's spill for the frame rather than the frame.
 		SeamLightTarget *EnsureSeamLight(
 			size_t viewport, size_t index, SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_INVALID
+		);
+		// Binds an imported radiance plane for this frame without transferring its ownership.
+		SeamLightTarget *BorrowSeamLight(
+			size_t viewport, size_t index, SDL_GPUTexture *texture, uint32_t width, uint32_t height
 		);
 
 		// One opaque white texel, bound wherever a real texture is missing.

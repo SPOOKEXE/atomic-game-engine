@@ -149,8 +149,8 @@ TEST_CASE("the render features scene authors policies attachments and LOD fallba
 
 	const Entity part = Child(store, "RenderFeatureLodMesh");
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
-	const auto *automatic = store.Get<engine::scene::AutoMeshLOD>(part);
-	const auto *custom = store.Get<engine::scene::CustomMeshLOD>(part);
+	const auto *automatic = store.Get<engine::scene::LODAuto>(part);
+	const auto *custom = store.Get<engine::scene::LODCustom>(part);
 	const auto *effects = store.Get<engine::scene::RenderEffects>(part);
 	const auto *visual = store.Get<engine::scene::Visual>(part);
 	REQUIRE(automatic != nullptr);

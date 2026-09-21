@@ -153,8 +153,9 @@ namespace engine::render {
 		}
 		core::Name CapturePipeline(PortalImageScope scope, bool ordered = false) {
 			if (ordered) return core::Name("portal-image-layers");
+			if (scope == PortalImageScope::CompleteWorld) return core::Name("portal-image-world");
 			return core::Name(
-				scope == PortalImageScope::CompleteWorld ? "portal-image-world" : "portal-image-opaque"
+				scope == PortalImageScope::SeamRadiance ? "portal-image-seam-radiance" : "portal-image-opaque"
 			);
 		}
 		core::Name CaptureNode() {
@@ -167,7 +168,7 @@ namespace engine::render {
 			return core::Name("portal-layer-" + std::to_string(layer) + "-export");
 		}
 		size_t CaptureProfile(const PortalImageRequest &request) {
-			return request.OrderedLayers ? 2 : static_cast<size_t>(request.Scope);
+			return request.OrderedLayers ? 3 : static_cast<size_t>(request.Scope);
 		}
 		bool InstallCapture(Renderer &renderer, PortalImageScope scope, bool ordered) {
 			if (renderer.Backend().Device == nullptr) {
@@ -176,7 +177,7 @@ namespace engine::render {
 			const auto base = scope == PortalImageScope::CompleteWorld ? graph::DefaultWorldHdrDocument()
 																	   : graph::DefaultPbrDocument();
 			graph::PipelineDocument document;
-			const bool opaque = scope == PortalImageScope::OpaqueLighting;
+			const bool opaque = scope != PortalImageScope::CompleteWorld;
 			if (ordered)
 				for (const char *name : {"lighting-baseline", "directional-response"})
 					document.Record(
@@ -1678,7 +1679,7 @@ namespace engine::render {
 		EditableImageUploader EditableImages;
 		EditableMeshUploader EditableMeshes;
 		std::optional<Time> LastTime;
-		std::array<bool, 3> PipelineReady{};
+		std::array<bool, 4> PipelineReady{};
 		double PresentationSeconds = 0;
 		WorldViewFrame WorldFrame;
 		RetainedBodyAuthorization AuthorizeRetainedBody;
@@ -2948,7 +2949,7 @@ namespace engine::render {
 				continue;
 			}
 			if (request.RecursionDepth > MAX_PORTAL_DEPTH ||
-				(request.Scope == PortalImageScope::OpaqueLighting && !request.OrderedLayers &&
+				(request.Scope != PortalImageScope::CompleteWorld && !request.OrderedLayers &&
 				 request.RecursionDepth != 0) ||
 				!ResolvePortalCaptureCamera(
 					{request.Position, request.Orientation, request.Frustum, request.ClipPlane},
@@ -3658,6 +3659,14 @@ namespace engine::render {
 				job.Output.Reply.Diagnostic = "invalid destination capture lighting";
 				state.SendFailure(job.Output, progress);
 				continue;
+			}
+			if (job.Request.Scope == PortalImageScope::SeamRadiance) {
+				view.Lighting.Ambient = {};
+				view.Lighting.OutdoorAmbient = {};
+				view.Lighting.Direct = {};
+				view.Lighting.FogColor = {};
+				view.Lighting.FogStart = 1.0e6f;
+				view.Lighting.FogEnd = 1.0e6f + 1.0f;
 			}
 			if (job.Request.OrderedLayers && lighting.ShaderLensCount != 0) {
 				static_assert(MAX_PORTAL_CAPTURE_LENSES == scene::MAX_SCENE_SHADER_LENSES);

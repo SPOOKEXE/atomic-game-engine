@@ -67,6 +67,33 @@ namespace engine::render {
 			}
 			const PortalView &portal = *portalOf[slot];
 			if (portal.ExternalImage) {
+				const auto *imported =
+					State->FindPortalImport(*Request.Source, targetSlot, portal, command, true);
+				if (imported == nullptr || portal.LightOutward.Magnitude() < .999f ||
+					portal.LightOutward.Magnitude() > 1.001f)
+					continue;
+				const float reach =
+					2.0f * std::max(portal.First.Magnitude() + portal.Second.Magnitude(), 1.0f);
+				const size_t side = portal.LightOutward.Dot(portal.Normal) >= 0 ? 0 : 1;
+				const SeamLightProjector projector{
+					.Centre = portal.Centre,
+					.Outward = portal.LightOutward,
+					.First = portal.First,
+					.Second = portal.Second,
+					.Range = reach,
+					.Index = slot * SEAM_LIGHT_SIDES + side,
+				};
+				if (SeamLightMayAffect(projector, viewFrustum)) {
+					candidates[candidateCount++] = {
+						.Portal = &portal,
+						.Projector = projector,
+						.WasReady = matchesProjector(bank.SeamLights[projector.Index], projector),
+						.ScreenCoverage = SeamLightScreenCoverage(projector, Matrices.ViewProjection),
+						.InfluenceDistance = SeamLightStaticInfluenceDistanceSquared(
+							projector, State->VisibleInstances, State->DrawOrder, Request.CameraFrame.Position
+						),
+					};
+				}
 				continue;
 			}
 
@@ -124,6 +151,28 @@ namespace engine::render {
 			const SeamLightProjector &projector = candidate.Projector;
 			const core::Vector3 &outward = projector.Outward;
 			selected[projector.Index] = true;
+			if (portal.ExternalImage) {
+				const auto *imported =
+					State->FindPortalImport(*Request.Source, targetSlot, portal, command, true);
+				if (imported == nullptr) {
+					selected[projector.Index] = false;
+					continue;
+				}
+				Impl::SeamLightTarget *const seamLight = State->BorrowSeamLight(
+					targetSlot,
+					projector.Index,
+					imported->Texture,
+					imported->TextureWidth,
+					imported->TextureHeight
+				);
+				if (seamLight == nullptr) return false;
+				seamLight->Centre = glm::vec4{portal.Centre.X, portal.Centre.Y, portal.Centre.Z, 1.0f};
+				seamLight->Outward = glm::vec4{outward.X, outward.Y, outward.Z, projector.Range};
+				seamLight->First = glm::vec4{portal.First.X, portal.First.Y, portal.First.Z, 0.0f};
+				seamLight->Second = glm::vec4{portal.Second.X, portal.Second.Y, portal.Second.Z, 0.0f};
+				seamLight->Ready = true;
+				continue;
+			}
 
 			// Far enough off the plane that the oblique clip below stays in front
 			// of the eye. The bias comes from this same distance.

@@ -1751,6 +1751,35 @@ namespace engine::scene {
 			return property;
 		}
 
+		template <size_t Level> PropertyDescriptor LodDistanceProperty(const char *name) {
+			static_assert(Level > 0 && Level < LOD_LEVELS);
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<LODSettings>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const LODSettings *settings = store.Get<LODSettings>(instance);
+				*static_cast<float *>(out) =
+					settings == nullptr ? 0.0f : settings->MinimumDistances[Level - 1];
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				LODSettings settings;
+				if (const LODSettings *existing = store.Get<LODSettings>(instance)) {
+					settings = *existing;
+				}
+				const float distance = *static_cast<const float *>(value);
+				settings.MinimumDistances[Level - 1] =
+					std::isfinite(distance) ? std::max(distance, 0.0f) : 0.0f;
+				store.Set(instance, settings);
+				return true;
+			};
+			return property;
+		}
+
 		template <class Component> PropertyDescriptor LodLevelsProperty(const char *name) {
 			PropertyDescriptor property;
 			property.Name = core::Name(name);
@@ -1785,10 +1814,10 @@ namespace engine::scene {
 			property.EnumName = AutoMeshLodStrategyEnum();
 			property.Size = sizeof(core::Name);
 			property.Kind = PropertyKind::Structural;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AutoMeshLOD>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<LODAuto>()});
 			property.Writes = property.Reads;
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const AutoMeshLOD *lod = store.Get<AutoMeshLOD>(instance);
+				const LODAuto *lod = store.Get<LODAuto>(instance);
 				const size_t ordinal = lod != nullptr && lod->Strategy == LodStrategy::Reduced ? 1 : 0;
 				*static_cast<core::Name *>(out) =
 					ecs::EnumTable::MemberAt(AutoMeshLodStrategyEnum(), ordinal);
@@ -1801,8 +1830,8 @@ namespace engine::scene {
 					)) {
 					return false;
 				}
-				AutoMeshLOD lod;
-				if (const AutoMeshLOD *existing = store.Get<AutoMeshLOD>(instance)) {
+				LODAuto lod;
+				if (const LODAuto *existing = store.Get<LODAuto>(instance)) {
 					lod = *existing;
 				}
 				lod.Strategy = ordinal == 0 ? LodStrategy::Decimated : LodStrategy::Reduced;
@@ -3323,32 +3352,35 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::OcclusionMap>(meshPart, "OcclusionMap");
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
-			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 1>("Lod1MeshId"));
-			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 2>("Lod2MeshId"));
-			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 3>("Lod3MeshId"));
-			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 1>("Lod1Ratio"));
-			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 2>("Lod2Ratio"));
-			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 3>("Lod3Ratio"));
-			ecs::Classes::Computed(meshPart, LodTargetQuadAreaProperty<AutoMeshLOD>("LodTargetQuadArea"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 1>("Lod1MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 2>("Lod2MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 3>("Lod3MeshId"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 1>("Lod1Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 2>("Lod2Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 3>("Lod3Ratio"));
+			ecs::Classes::Computed(meshPart, LodTargetQuadAreaProperty<LODAuto>("LodTargetQuadArea"));
+			ecs::Classes::Computed(meshPart, LodDistanceProperty<1>("Lod1Distance"));
+			ecs::Classes::Computed(meshPart, LodDistanceProperty<2>("Lod2Distance"));
+			ecs::Classes::Computed(meshPart, LodDistanceProperty<3>("Lod3Distance"));
 
 			for (const auto &property : {
-					 LodMeshProperty<AutoMeshLOD, 1>("AutoLod1MeshId"),
-					 LodMeshProperty<AutoMeshLOD, 2>("AutoLod2MeshId"),
-					 LodMeshProperty<AutoMeshLOD, 3>("AutoLod3MeshId"),
-					 LodRatioProperty<AutoMeshLOD, 1>("AutoLod1Ratio"),
-					 LodRatioProperty<AutoMeshLOD, 2>("AutoLod2Ratio"),
-					 LodRatioProperty<AutoMeshLOD, 3>("AutoLod3Ratio"),
-					 LodTargetQuadAreaProperty<AutoMeshLOD>("AutoLodTargetQuadArea"),
-					 LodLevelsProperty<AutoMeshLOD>("AutoLodLevels"),
+					 LodMeshProperty<LODAuto, 1>("AutoLod1MeshId"),
+					 LodMeshProperty<LODAuto, 2>("AutoLod2MeshId"),
+					 LodMeshProperty<LODAuto, 3>("AutoLod3MeshId"),
+					 LodRatioProperty<LODAuto, 1>("AutoLod1Ratio"),
+					 LodRatioProperty<LODAuto, 2>("AutoLod2Ratio"),
+					 LodRatioProperty<LODAuto, 3>("AutoLod3Ratio"),
+					 LodTargetQuadAreaProperty<LODAuto>("AutoLodTargetQuadArea"),
+					 LodLevelsProperty<LODAuto>("AutoLodLevels"),
 					 AutoLodStrategyProperty(),
-					 LodMeshProperty<CustomMeshLOD, 1>("CustomLod1MeshId"),
-					 LodMeshProperty<CustomMeshLOD, 2>("CustomLod2MeshId"),
-					 LodMeshProperty<CustomMeshLOD, 3>("CustomLod3MeshId"),
-					 LodRatioProperty<CustomMeshLOD, 1>("CustomLod1Ratio"),
-					 LodRatioProperty<CustomMeshLOD, 2>("CustomLod2Ratio"),
-					 LodRatioProperty<CustomMeshLOD, 3>("CustomLod3Ratio"),
-					 LodTargetQuadAreaProperty<CustomMeshLOD>("CustomLodTargetQuadArea"),
-					 LodLevelsProperty<CustomMeshLOD>("CustomLodLevels"),
+					 LodMeshProperty<LODCustom, 1>("CustomLod1MeshId"),
+					 LodMeshProperty<LODCustom, 2>("CustomLod2MeshId"),
+					 LodMeshProperty<LODCustom, 3>("CustomLod3MeshId"),
+					 LodRatioProperty<LODCustom, 1>("CustomLod1Ratio"),
+					 LodRatioProperty<LODCustom, 2>("CustomLod2Ratio"),
+					 LodRatioProperty<LODCustom, 3>("CustomLod3Ratio"),
+					 LodTargetQuadAreaProperty<LODCustom>("CustomLodTargetQuadArea"),
+					 LodLevelsProperty<LODCustom>("CustomLodLevels"),
 				 }) {
 				ecs::Classes::Computed(meshPart, property);
 			}
