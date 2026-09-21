@@ -258,6 +258,9 @@ TEST_CASE(
 	Universe viewer, producer;
 	const auto near = viewer.Create({.Name = Name("Near")});
 	const bool persistentOwner = GENERATE(false, true);
+	const float scale = GENERATE(.5f, 1.0f, 2.0f);
+	const bool transformed = GENERATE(false, true);
+	CAPTURE(persistentOwner, scale, transformed);
 	const auto owner = viewer.Create({.Name = Name("ViewOwner")});
 	const auto remoteFar = viewer.CreateRemote({.Name = Name("Far")}, Name("producer"));
 	const auto far = producer.Create({.Name = Name("Far")});
@@ -265,19 +268,24 @@ TEST_CASE(
 	producer.CreateRemote({.Name = Name("ViewOwner")}, Name("viewer"));
 	REQUIRE(viewer.ConfigurePresentation(123));
 	REQUIRE(producer.ConfigurePresentation(456));
-	const auto install = [](Universe &worlds, WorldId world, bool reverse) {
+	const auto placement = transformed
+						   ? core::CFrame(Vector3{11, 7, -13}) * core::CFrame::Angles(.3f, -.7f, .2f)
+						   : core::CFrame{};
+	const auto install = [placement, scale](Universe &worlds, WorldId world, bool reverse) {
 		worlds.Enter(world, [&](Store &store) {
 			const auto pane =
 				store.CreateInstance(ecs::Classes::Find(Name("Part")), reverse ? "StandIn" : "Door");
 			const auto standIn =
 				store.CreateInstance(ecs::Classes::Find(Name("Part")), reverse ? "Door" : "StandIn");
-			const core::CFrame front;
-			const auto back =
-				core::CFrame(Vector3{0, 0, -.2f}) * core::CFrame::Angles(0, 3.14159265358979323846f, 0);
+			const core::CFrame front = placement;
+			const auto back = placement * core::CFrame(Vector3{0, 0, -.2f}) *
+						  core::CFrame::Angles(0, 3.14159265358979323846f, 0);
 			store.Set(pane, scene::Transform{reverse ? back : front});
 			store.Set(standIn, scene::Transform{reverse ? front : back});
-			store.Set(pane, scene::Bounds{{2, 3, .1f}});
-			store.Set(standIn, scene::Bounds{{2, 3, .1f}});
+			const float paneScale = reverse ? scale : 1.0f;
+			const float standInScale = reverse ? 1.0f : scale;
+			store.Set(pane, scene::Bounds{{2 * paneScale, 3 * paneScale, .1f}});
+			store.Set(standIn, scene::Bounds{{2 * standInScale, 3 * standInScale, .1f}});
 			const auto portal = store.CreateInstance(ecs::Classes::Find(Name("Portal")), "Portal");
 			REQUIRE(store.SetParent(portal, pane));
 			store.Set(
@@ -303,22 +311,35 @@ TEST_CASE(
 		world::PresentationStatus::Ok
 	);
 	constexpr render::PortalImageHost::Time now{};
-	core::CFrame eye(Vector3{0, 0, 1});
+	const core::CFrame before = placement * core::CFrame(Vector3{0, 0, 1});
+	const core::CFrame after = placement * core::CFrame(Vector3{0, 0, -1});
+	core::CFrame eye = before;
 	scene::Camera lens;
+	const scene::Camera sourceLens = lens;
 	const auto topologyOwner = persistentOwner ? owner : WorldId{};
 	REQUIRE(
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) == near
 	);
-	eye.Position.Z = -1;
+	const core::CFrame apertureMiss = placement * core::CFrame(Vector3{5, 0, -1});
+	eye = apertureMiss;
+	REQUIRE(
+		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) == near
+	);
+	CHECK(eye.FuzzyEq(apertureMiss, .0001f));
+	eye = before;
+	REQUIRE(
+		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) == near
+	);
+	eye = after;
 	CHECK_FALSE(
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner).IsValid()
 	);
-	CHECK(eye.Position.Z == -1);
+	CHECK(eye.FuzzyEq(after, .0001f));
 	viewer.Enter(near, [&](Store &store) {
 		const auto *history = store.Get<scene::CameraPortalView>(camera);
 		REQUIRE(history != nullptr);
 		CHECK(history->World == "Near");
-		CHECK(history->Previous.Position.Z == 1);
+		CHECK(history->Previous.FuzzyEq(before, .0001f));
 	});
 	REQUIRE(
 		producer.ApplyPresentationDirectory(Name("viewer"), viewer.LocalPresentationDirectory()) ==
@@ -340,8 +361,17 @@ TEST_CASE(
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) ==
 		remoteFar
 	);
-	CHECK((eye.Position - Vector3{0, 0, -1}).Magnitude() < .0001f);
-	eye = core::CFrame(Vector3{0, 0, 1});
+	scene::PortalSeam sourceSeam;
+	viewer.Enter(near, [&](Store &store) {
+		std::vector<scene::PortalSeam> seams;
+		REQUIRE(scene::GatherPortalSeams(store, seams) == 1);
+		sourceSeam = seams.front();
+	});
+	const auto expected = scene::SeamMapping(sourceSeam).Place(after);
+	CHECK(eye.FuzzyEq(expected, .0001f));
+	CHECK(lens.NearPlane == Catch::Approx(sourceLens.NearPlane * scale));
+	CHECK(lens.FarPlane == Catch::Approx(sourceLens.FarPlane * scale));
+	eye = before;
 	bool available = true;
 	auto next = now;
 	SECTION("return crossing") {}
@@ -356,7 +386,7 @@ TEST_CASE(
 	const auto result =
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, next, topologyOwner);
 	CHECK(result == (available ? near : WorldId{}));
-	CHECK((eye.Position - Vector3{0, 0, 1}).Magnitude() < .0001f);
+	CHECK(eye.FuzzyEq(before, .0001f));
 	viewer.Enter(near, [&](Store &store) {
 		CHECK(store.Get<scene::CameraPortalView>(camera)->World == (available ? "Near" : "Far"));
 		CHECK(store.Get<scene::CameraSubject>(camera)->Target == humanoid);

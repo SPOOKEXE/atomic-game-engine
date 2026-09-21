@@ -15,10 +15,12 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -355,6 +357,175 @@ TEST_CASE(
 		CHECK(store.Get<engine::scene::CameraSubject>(camera)->Target == target);
 	}
 	CHECK(store.Get<Transform>(root)->Frame.Position.X == 0);
+}
+
+TEST_CASE(
+	"client prediction follows the selected character and leaves every authority rig untouched",
+	"[client][prediction][character]"
+) {
+	Replica replica;
+	auto &store = replica.World;
+	const Entity localRoot = replica.SpawnLocalCharacter();
+	const Entity localPlayer = store.Resource<engine::scene::LocalPlayer>()->Instance;
+	// Use the same complete character shape the authority delivers. A partial
+	// synthetic rig would exercise only this test fixture's omissions.
+	const Entity remoteRoot = replica.SpawnLocalCharacter();
+	const Entity remotePlayer = store.Resource<engine::scene::LocalPlayer>()->Instance;
+	store.SetResource(engine::scene::LocalPlayer{localPlayer});
+	store.Set(remoteRoot, Transform{CFrame(Vector3{40, 0, 0})});
+
+	engine::game::MoveInput move;
+	move.Direction = {1, 0, 0};
+	move.StepSeconds = 1.0 / TICK_RATE;
+	const std::vector<engine::replication::Input> pending{{2, engine::game::EncodeMoveInput(move)}};
+	client::ReconcileLocalPlayerPrediction(store, 1, pending);
+	const auto *prediction = store.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(prediction != nullptr);
+	CHECK(prediction->Active);
+	CHECK(prediction->Player == localPlayer);
+	CHECK(prediction->Root == localRoot);
+	CHECK(prediction->Frame.Position.X > 0.0f);
+	CHECK(store.Get<Transform>(localRoot)->Frame.Position == Vector3::Zero);
+	CHECK(store.Get<Transform>(remoteRoot)->Frame.Position.X == 40.0f);
+
+	// Ownership changes at the client boundary. Reconciliation must discard the
+	// old overlay instead of moving an authority row that now belongs to another player.
+	store.SetResource(engine::scene::LocalPlayer{remotePlayer});
+	client::ReconcileLocalPlayerPrediction(store, 2, {});
+	prediction = store.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(prediction != nullptr);
+	CHECK(prediction->Active);
+	CHECK(prediction->Player == remotePlayer);
+	CHECK(prediction->Root == remoteRoot);
+	CHECK(prediction->Frame.Position.X == 40.0f);
+	CHECK(store.Get<Transform>(localRoot)->Frame.Position == Vector3::Zero);
+	CHECK(store.Get<Transform>(remoteRoot)->Frame.Position.X == 40.0f);
+
+	store.SetResource(engine::scene::LocalPlayer{});
+	client::ReconcileLocalPlayerPrediction(store, 3, {});
+	CHECK_FALSE(store.Resource<client::LocalPlayerPrediction>()->Active);
+}
+
+TEST_CASE(
+	"client character presentation draws the local overlay without changing remote bodies",
+	"[client][prediction][character][presentation]"
+) {
+	Replica replica;
+	auto &store = replica.World;
+	const Entity localRoot = replica.SpawnLocalCharacter();
+	const Entity remoteRoot = replica.Spawn();
+	store.Set(remoteRoot, Transform{CFrame(Vector3{30, 0, 0})});
+
+	engine::game::MoveInput move;
+	move.Direction = {1, 0, 0};
+	move.StepSeconds = 1.0 / TICK_RATE;
+	const std::vector<engine::replication::Input> pending{{2, engine::game::EncodeMoveInput(move)}};
+	client::ReconcileLocalPlayerPrediction(store, 1, pending);
+	const auto firstPresented = client::PresentedPlayerPrediction(store);
+	REQUIRE(firstPresented);
+	replica.Draw();
+	const auto drawnPosition = [&](Entity entity) {
+		const auto &instances = replica.Instances();
+		const auto found = std::find_if(instances.begin(), instances.end(), [entity](const auto &instance) {
+			return instance.Source == entity.Id;
+		});
+		REQUIRE(found != instances.end());
+		return found->Frame.Position.X;
+	};
+	CHECK(drawnPosition(localRoot) == Approx(firstPresented->Position.X));
+	CHECK(drawnPosition(remoteRoot) == Approx(30.0f));
+
+	client::PredictLocalPlayerMove(store, move, static_cast<float>(move.StepSeconds));
+	const auto secondPresented = client::PresentedPlayerPrediction(store);
+	REQUIRE(secondPresented);
+	CHECK(secondPresented->Position.X > firstPresented->Position.X);
+	replica.Draw();
+	CHECK(drawnPosition(localRoot) == Approx(secondPresented->Position.X));
+	CHECK(drawnPosition(remoteRoot) == Approx(30.0f));
+	CHECK(store.Get<Transform>(localRoot)->Frame.Position == Vector3::Zero);
+	CHECK(store.Get<Transform>(remoteRoot)->Frame.Position.X == 30.0f);
+}
+
+TEST_CASE(
+	"a client character camera zooms through a scaled portal without moving its body",
+	"[client][prediction][camera][portal]"
+) {
+	Replica replica;
+	auto &store = replica.World;
+	const Entity root = replica.SpawnLocalCharacter();
+	const Entity player = store.Resource<engine::scene::LocalPlayer>()->Instance;
+	const auto rig = *store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
+	store.Set(root, Transform{CFrame(Vector3{0, 0, -.7f})});
+	const Entity camera = client::AimReplicaViewer(store, CFrame{}, engine::scene::Camera{});
+	store.Set(camera, engine::scene::CameraSubject{.Target = rig.Humanoid, .Automatic = false});
+	const float yaw = GENERATE(0.0f, .5f);
+	CAPTURE(yaw);
+	{
+		auto *controller = store.ResourceMutable<engine::scene::CameraController>();
+		controller->Distance = 12.0f;
+		controller->HeadHeight = 1.5f;
+		controller->Angles.Y = yaw;
+	}
+	store.ResourceMutable<engine::scene::InputState>()->Focused = true;
+
+	const Entity pane = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Door");
+	const Entity far = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Exit");
+	store.Set(pane, Transform{CFrame{}});
+	store.Set(far, Transform{CFrame(Vector3{10, 4, -8}) * CFrame::Angles(.2f, .7f, -.3f)});
+	store.Set(pane, Bounds{{2, 3, .1f}});
+	store.Set(far, Bounds{{4, 6, .1f}});
+	const Entity portal =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Portal")), "Portal");
+	REQUIRE(store.SetParent(portal, pane));
+	store.Set(portal, engine::scene::Portal{.Destination = far});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 1);
+	client::ReconcileLocalPlayerPrediction(store, 1, {});
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = 1000.0f;
+	engine::scene::LatchCameraInput(store);
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = 0.0f;
+	replica.Draw();
+	CHECK(store.Resource<engine::scene::CameraController>()->Mode == engine::scene::CameraMode::LockFirstPerson);
+	CHECK(store.Get<Transform>(camera)->Frame.Position.Y == Approx(1.5f));
+
+	// Zooming back out creates an arm, and that arm must use the portal map
+	// while the predicted body stays in its authority chart.
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = -1000.0f;
+	engine::scene::LatchCameraInput(store);
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = 0.0f;
+	replica.Draw();
+	const auto *controller = store.Resource<engine::scene::CameraController>();
+	const auto *placed = store.Get<Transform>(camera);
+	REQUIRE(controller != nullptr);
+	REQUIRE(placed != nullptr);
+	CHECK(controller->Mode == engine::scene::CameraMode::Classic);
+	CHECK(controller->Distance == Approx(controller->MaximumDistance));
+	const float armDistance =
+		controller->OccludedDistance >= 0.0f ? controller->OccludedDistance : controller->Distance;
+	const auto rootFrame = store.Get<Transform>(root)->Frame;
+	const auto orbit = engine::scene::CameraOrbit(*controller, rootFrame.Position, armDistance);
+	const auto head = rootFrame.Position + controller->Basis.UpVector() * controller->HeadHeight;
+	engine::scene::SeamTransform carried;
+	const bool crosses = engine::scene::PortalCrossing(store, head, orbit.Position, carried);
+	const auto expected = crosses ? carried.Place(orbit) : orbit;
+	CHECK(placed->Frame.FuzzyEq(expected, .0001f));
+	CHECK(crosses);
+	CHECK((store.Get<Transform>(root)->Frame.Position == Vector3{0, 0, -.7f}));
+
+	// First person has no arm to project. Returning to classic restores the
+	// same portal projection rather than retaining the first-person pose.
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = 1000.0f;
+	engine::scene::LatchCameraInput(store);
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = 0.0f;
+	replica.Draw();
+	CHECK(store.Get<Transform>(camera)->Frame.Position.Y == Approx(1.5f));
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = -1000.0f;
+	engine::scene::LatchCameraInput(store);
+	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = 0.0f;
+	replica.Draw();
+	CHECK(store.Get<Transform>(camera)->Frame.FuzzyEq(expected, .0001f));
+	CHECK((store.Get<Transform>(root)->Frame.Position == Vector3{0, 0, -.7f}));
 }
 
 TEST_CASE("a replica keeps its third-person camera inside received walls", "[client][replication][camera]") {

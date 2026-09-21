@@ -1414,6 +1414,92 @@ TEST_CASE("an active free camera flies through the portal it crosses", "[scene][
 }
 
 TEST_CASE(
+	"an active free camera carries pose through rotated scaled portal round trips",
+	"[scene][surfacecameras]"
+) {
+	const float scale = GENERATE(.5f, 1.0f, 2.0f);
+	const bool rotated = GENERATE(false, true);
+	CAPTURE(scale, rotated);
+	const CFrame sourceFrame =
+		CFrame(Vector3{3.0f, 2.0f, -4.0f}) * (rotated ? CFrame::Angles(.2f, -.4f, .1f) : CFrame{});
+	Mirror mirror(NormalId::Front, sourceFrame);
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	const CFrame farFrame = CFrame(Vector3{18.0f, -6.0f, 9.0f}) *
+		(rotated ? CFrame::Angles(-.25f, .6f, .15f) : CFrame{});
+	mirror.World.Set<Transform>(far, Transform{farFrame});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f * scale, 4.5f * scale, .2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	const Entity returnPortal = mirror.World.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "Return"
+	);
+	SurfaceCamera returnSurface;
+	returnSurface.Face = NormalId::Front;
+	mirror.World.Set(returnPortal, returnSurface);
+	REQUIRE(mirror.World.SetParent(returnPortal, far));
+	mirror.World.Set(returnPortal, engine::scene::Portal{mirror.Pane});
+	mirror.World.SetResource(engine::scene::CameraController{});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 2);
+	const auto source = std::find_if(seams.begin(), seams.end(), [&](const auto &seam) {
+		return seam.Pane == mirror.Pane;
+	});
+	const auto destination = std::find_if(seams.begin(), seams.end(), [&](const auto &seam) {
+		return seam.Pane == far;
+	});
+	REQUIRE(source != seams.end());
+	REQUIRE(destination != seams.end());
+
+	const auto flight = [](const engine::scene::PortalSeam &seam) {
+		const Vector3 previousPosition = seam.Centre - seam.Normal;
+		const Vector3 currentPosition = seam.Centre + seam.Normal;
+		return std::pair{
+			CFrame::LookAt(previousPosition, currentPosition),
+			CFrame::LookAt(currentPosition, currentPosition + seam.Normal)
+		};
+	};
+	const auto fly = [&](const engine::scene::PortalSeam &seam) {
+		const auto [before, now] = flight(seam);
+		const engine::scene::SeamTransform through = engine::scene::SeamMapping(seam);
+		mirror.World.Set(mirror.Eye, engine::scene::PreviousTransform{before});
+		mirror.World.Set(mirror.Eye, Transform{now});
+
+		REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+		CHECK(mirror.World.Get<Transform>(mirror.Eye)->Frame.FuzzyEq(through.Place(now), TOLERANCE));
+		const auto &carriedPrevious = mirror.World.Get<engine::scene::PreviousTransform>(mirror.Eye)->Frame;
+		CHECK((carriedPrevious.LookVector() - through.Rotate(before.LookVector())).Magnitude() < TOLERANCE);
+		CHECK(
+			(mirror.World.Get<Transform>(mirror.Eye)->Frame.Position - carriedPrevious.Position).Magnitude() > 0.0f
+		);
+		CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+	};
+
+	// Missing the aperture must leave both ends of the tick in their source chart.
+	const auto [missedBefore, missedNow] = flight(*source);
+	const CFrame apertureMissBefore{missedBefore.Position + source->First * 2.0f, missedBefore.Rotation()};
+	const CFrame apertureMissNow{missedNow.Position + source->First * 2.0f, missedNow.Rotation()};
+	mirror.World.Set(mirror.Eye, engine::scene::PreviousTransform{apertureMissBefore});
+	mirror.World.Set(mirror.Eye, Transform{apertureMissNow});
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+	CHECK(mirror.World.Get<Transform>(mirror.Eye)->Frame.FuzzyEq(apertureMissNow, TOLERANCE));
+	CHECK(
+		mirror.World.Get<engine::scene::PreviousTransform>(mirror.Eye)->Frame.FuzzyEq(
+			apertureMissBefore, TOLERANCE
+		)
+	);
+
+	// Two complete passages exercise orientation, endpoint history, scale, and
+	// the no-bounce guard on every active free-camera crossing.
+	for (int round = 0; round < 2; ++round) {
+		fly(*source);
+		fly(*destination);
+	}
+}
+
+TEST_CASE(
 	"a scriptable camera crosses while a player remains its controller subject", "[scene][surfacecameras]"
 ) {
 	Mirror mirror;
