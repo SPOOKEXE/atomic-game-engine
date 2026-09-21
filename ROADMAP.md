@@ -64,22 +64,28 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add extensive client character tests
 - [_] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
 
-- [_] improve atomic-game-engine build file usage sizes. Takes over 100GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc. Find what takes up all the space and try improve it.
+- [x] improve atomic-game-engine build file usage sizes. Takes over 100GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc. Find what takes up all the space and try improve it.
 
-- [_] review over v0.24 and consolidate, improve, tweak, etc.
-- [_] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
-- [_] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
-- [_] review and cleanup render pipeline (plan first)
-- [_] plan a consolidation for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them).
+- [x] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
+- [x] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
+
+- [x] review and plan a cleanup of the render pipeline. Write docs/v025-RENDER-PIPELINE-CLEANUP.md. This can be logic cleanup, better layout, components separation, merging, renaming, potential test points, areas to investigate logic (that seem wrong and need to be investigated), etc.
+- [x] plan a consolidation and cleanup for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them). Write docs/v025-MCP-CLEANUP.md.
+
+- [_] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`
+- [_] Do cleanup in `docs/v025-MCP-CLEANUP.md`
+
 - [_] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations.
+
 - [_] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
 - [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
 - [_] optimise server startup time
 - [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
+
+- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
 - [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground")
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
-- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
 
 - [_] fix portals so they are seamless. really plan out how to make them seamless and how to handle "standing in the middle" so objects are visually there on both sides of the portal with no seam especially during movement (and how to make replication seamless too)
 
