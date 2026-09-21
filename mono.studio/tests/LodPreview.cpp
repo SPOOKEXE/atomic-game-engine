@@ -74,7 +74,7 @@ TEST_CASE(
 	CHECK(*level == 0);
 }
 
-TEST_CASE("the preview is unavailable until every lod mesh has triangle metadata", "[studio][lod]") {
+TEST_CASE("the preview reports the resident prefix while coarse lod meshes build", "[studio][lod]") {
 	engine::scene::RegisterSceneComponents();
 	engine::scene::RegisterSceneClasses();
 	Store store("studio_lod_preview_missing");
@@ -83,7 +83,7 @@ TEST_CASE("the preview is unavailable until every lod mesh has triangle metadata
 	catalogue.Triangles[Name("studio.lod-preview.base").Id()] = 10000;
 	store.SetResource(catalogue);
 
-	CHECK_FALSE(studio::ActiveLodForViewport(store, part, Panel(), {100.0f, 200.0f, 300.0f}).has_value());
+	CHECK(studio::ActiveLodForViewport(store, part, Panel(), {100.0f, 200.0f, 300.0f}) == 0);
 }
 
 TEST_CASE("a base-only editable mesh reports active lod zero", "[studio][lod]") {

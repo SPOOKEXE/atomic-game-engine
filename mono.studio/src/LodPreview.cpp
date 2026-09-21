@@ -85,8 +85,7 @@ namespace studio {
 			return std::nullopt;
 		}
 
-		const engine::scene::LevelOfDetail lod =
-			engine::scene::ResolveMeshLOD(visual->Mesh, automatic, custom);
+		engine::scene::LevelOfDetail lod = engine::scene::ResolveMeshLOD(visual->Mesh, automatic, custom);
 		if (catalogue->Find(visual->Mesh) == 0) {
 			return std::nullopt;
 		}
@@ -95,7 +94,11 @@ namespace studio {
 		}
 		for (uint8_t level = 1; level < lod.Levels; level++) {
 			if (catalogue->Find(engine::scene::LevelMesh(lod, visual->Mesh, level)) == 0) {
-				return std::nullopt;
+				// The renderer keeps using the resident prefix while an automatic
+				// ladder rebuilds. Report that same fallback instead of making the
+				// label disappear during a world switch or property edit.
+				lod.Levels = level;
+				break;
 			}
 		}
 

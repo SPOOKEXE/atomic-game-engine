@@ -19,9 +19,9 @@ namespace engine::ecs {
 namespace studio {
 	struct PanelProjection;
 
-	// Returns the level the focused viewport would select for a MeshPart whose
-	// ladder and triangle metadata are available. A missing input has no
-	// trustworthy value.
+	// Returns the level the focused viewport would select for a MeshPart. A
+	// partially resident ladder is limited to its available prefix; a missing
+	// base mesh or view input has no trustworthy value.
 	std::optional<uint8_t> ActiveLodForViewport(
 		const engine::ecs::Store &store,
 		engine::ecs::Entity instance,

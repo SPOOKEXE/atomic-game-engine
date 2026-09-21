@@ -15,7 +15,7 @@
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/spatial/HashGrid.hpp>
@@ -33,7 +33,6 @@
 #include <string>
 #include <studio/Editor.hpp>
 #include <studio/Viewports.hpp>
-#include <unordered_set>
 #include <vector>
 
 namespace studio {
@@ -165,14 +164,6 @@ namespace studio {
 			const PanelProjection &panel,
 			const std::array<float, 3> &distanceBands
 		) {
-			std::unordered_set<uint32_t> editableMeshes;
-			store.Each<const engine::scene::EditableMesh>([&](Entity entity, const auto &) {
-				const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
-				if (name.IsValid()) {
-					editableMeshes.insert(name.Id());
-				}
-			});
-
 			store.Each<
 				const engine::scene::Transform,
 				const engine::scene::Bounds,
@@ -180,7 +171,8 @@ namespace studio {
 												 const engine::scene::Transform &transform,
 												 const engine::scene::Bounds &bounds,
 												 const engine::scene::Visual &visual) {
-				if (!visual.Visible || editableMeshes.find(visual.Mesh.Id()) == editableMeshes.end()) {
+				if (!visual.Visible || (!store.Has<engine::scene::AutoMeshLOD>(entity) &&
+										!store.Has<engine::scene::CustomMeshLOD>(entity))) {
 					return;
 				}
 				const std::optional<uint8_t> active =
@@ -204,7 +196,9 @@ namespace studio {
 				const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
 				const float maxX = std::max(panel.ImageMin.x, imageMaximum.x - textSize.x - 10.0f);
 				const float maxY = std::max(panel.ImageMin.y, imageMaximum.y - textSize.y - 8.0f);
-				const float x = std::clamp(minimum.x, panel.ImageMin.x, maxX);
+				const float labelWidth = textSize.x + 10.0f;
+				const float x =
+					std::clamp((minimum.x + maximum.x - labelWidth) * 0.5f, panel.ImageMin.x, maxX);
 				const float y = std::clamp(minimum.y - textSize.y - 8.0f, panel.ImageMin.y, maxY);
 				list->AddRectFilled(
 					ImVec2(x, y),

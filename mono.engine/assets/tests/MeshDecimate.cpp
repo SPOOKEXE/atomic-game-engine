@@ -69,7 +69,7 @@ TEST_CASE("mesh decimation is deterministic and keeps a valid material run", "[a
 	REQUIRE(DecimateMesh(source, 0.5f, second));
 
 	REQUIRE(first.IsValid());
-	CHECK(first.Indices.size() == 3);
+	CHECK(first.Indices.size() == source.Indices.size());
 	REQUIRE(first.Submeshes.size() == 1);
 	CHECK(first.Submeshes[0].FirstIndex == 0);
 	CHECK(first.Submeshes[0].IndexCount == first.Indices.size());
@@ -105,7 +105,7 @@ TEST_CASE("an automatic mesh ladder publishes independent valid mesh data", "[as
 	REQUIRE(BuildMeshLodLadder(source, ratios, ladder));
 	for (const MeshData &level : ladder) {
 		CHECK(level.IsValid());
-		CHECK(level.Indices.size() == 3);
+		CHECK(level.Indices.size() == source.Indices.size());
 		CHECK(level.Submeshes.size() == source.Submeshes.size());
 		CHECK(level.Submeshes[0].Material == source.Submeshes[0].Material);
 		CHECK(level.Submeshes[0].Texture == source.Submeshes[0].Texture);
@@ -124,7 +124,7 @@ TEST_CASE(
 	CHECK_FALSE(DecimateMesh(source, 0.0f, output));
 	REQUIRE(DecimateMesh(source, 0.000001f, output));
 	CHECK(output.IsValid());
-	CHECK(output.Indices.size() == 3);
+	CHECK(output.Indices.size() == source.Indices.size());
 }
 
 TEST_CASE(
@@ -168,7 +168,9 @@ TEST_CASE("mesh decimation preserves partial material runs and uncovered faces",
 	CHECK(reduced.Indices.size() == 6);
 }
 
-TEST_CASE("mesh decimation fallback retains the largest isolated face", "[assets][mesh-decimate]") {
+TEST_CASE(
+	"mesh decimation keeps isolated faces when no connected collapse is possible", "[assets][mesh-decimate]"
+) {
 	using namespace engine::assets;
 	MeshData source;
 	source.Vertices = {
@@ -185,11 +187,8 @@ TEST_CASE("mesh decimation fallback retains the largest isolated face", "[assets
 	MeshData reduced;
 	REQUIRE(DecimateMesh(source, 0.5f, reduced));
 	REQUIRE(reduced.IsValid());
-	REQUIRE(reduced.Vertices.size() == 3);
-	CHECK(reduced.Indices == std::vector<uint32_t>{0, 1, 2});
-	CHECK(reduced.Vertices[0].Position[0] == 2.0f);
-	CHECK(reduced.Vertices[1].TexCoord[0] == 6.0f);
-	CHECK(reduced.Vertices[2].Normal[1] == 1.0f);
+	CHECK(reduced.Indices == source.Indices);
+	CHECK(reduced.Vertices.size() == source.Vertices.size());
 }
 
 TEST_CASE(
@@ -211,8 +210,8 @@ TEST_CASE(
 	MeshData reduced;
 	REQUIRE(ReduceMesh(source, 0.5f, reduced));
 	REQUIRE(reduced.IsValid());
-	CHECK(reduced.Indices == std::vector<uint32_t>{0, 1, 2});
-	CHECK(reduced.Vertices[0].Position[0] == 2.0f);
+	CHECK(reduced.Indices == source.Indices);
+	CHECK(reduced.Vertices.size() == source.Vertices.size());
 
 	std::array<MeshData, 1> ladder;
 	REQUIRE(BuildReducedMeshLodLadder(source, std::array{0.5f}, ladder));

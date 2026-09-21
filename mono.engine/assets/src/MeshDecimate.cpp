@@ -356,21 +356,9 @@ namespace engine::assets {
 				while (!stop.stop_requested() && count > target &&
 					   CollapseOne(vertices, triangles, owners, submesh, count, target, reduction, stop)) {}
 				if (stop.stop_requested()) return false;
-				if (count > target) {
-					// A boundary, skin or material seam can leave no legal collapse. Keep
-					// the largest faces so the fallback removes the least visible area.
-					std::vector<size_t> ranked;
-					for (size_t index = 0; index < triangles.size(); index++) {
-						if (owners[index] == submesh && !Degenerate(triangles[index]))
-							ranked.push_back(index);
-					}
-					std::stable_sort(ranked.begin(), ranked.end(), [&](size_t left, size_t right) {
-						return FaceAreaSquared(vertices, triangles[left]) >
-							   FaceAreaSquared(vertices, triangles[right]);
-					});
-					for (size_t index = target; index < ranked.size(); index++)
-						triangles[ranked[index]][2] = triangles[ranked[index]][0];
-				}
+				// Ratio is a target, not permission to punch holes. A boundary, skin or
+				// material seam can leave no legal collapse before the target is met.
+				// Keep the connected remainder instead of deleting unrelated faces.
 			}
 
 			MeshData reduced;
