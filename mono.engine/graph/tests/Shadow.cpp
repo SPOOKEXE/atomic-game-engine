@@ -138,6 +138,33 @@ TEST_CASE("the fit does not change size as the light turns", "[graph][shadow]") 
 	}
 }
 
+TEST_CASE("a sub-texel translation keeps a directional shadow matrix", "[graph][shadow]") {
+	// The eye body is deliberately absent from the presentation domain. Once
+	// that domain is static, a camera's small motion must not move the map's
+	// texel grid or make every shadow edge crawl.
+	const AABB bounds = AABB::FromCentre(Vector3{4.0f, 2.0f, -6.0f}, Vector3{12.0f, 5.0f, 9.0f});
+	const Vector3 direction{0.0f, -1.0f, 0.0f};
+	const glm::mat4 first = FitDirectionalLight(bounds, direction, 2048);
+	const AABB moved = AABB::FromCentre(bounds.Centre() + Vector3{.001f, 0.0f, 0.0f}, bounds.Size() * .5f);
+	const glm::mat4 second = FitDirectionalLight(moved, direction, 2048);
+
+	CHECK(first == second);
+	for (int corner = 0; corner < 8; ++corner) {
+		const Vector3 point{
+			(corner & 1) != 0 ? moved.Maximum.X : moved.Minimum.X,
+			(corner & 2) != 0 ? moved.Maximum.Y : moved.Minimum.Y,
+			(corner & 4) != 0 ? moved.Maximum.Z : moved.Minimum.Z,
+		};
+		const glm::vec3 clip = Project(second, point);
+		CHECK(clip.x >= -1.0f);
+		CHECK(clip.x <= 1.0f);
+		CHECK(clip.y >= -1.0f);
+		CHECK(clip.y <= 1.0f);
+		CHECK(clip.z >= 0.0f);
+		CHECK(clip.z <= 1.0f);
+	}
+}
+
 TEST_CASE("a light straight down does not produce NaN", "[graph][shadow]") {
 	// The ordinary case for a sun, and the one where a naive `lookAt` has its
 	// up vector parallel to its forward - which produces a matrix full of NaN

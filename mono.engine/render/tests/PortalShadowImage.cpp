@@ -139,7 +139,8 @@ TEST_CASE(
 	CHECK(captured.Shadow->SourceBounds.Maximum == bounds.Maximum);
 	CHECK(captured.Shadow->DomainBounds.Minimum == view.DirectionalShadowBounds->Minimum);
 	CHECK(captured.Shadow->DomainBounds.Maximum == view.DirectionalShadowBounds->Maximum);
-	const auto matrix = graph::FitDirectionalLight(*view.DirectionalShadowBounds, view.Lighting.Direction);
+	const auto matrix =
+		graph::FitDirectionalLight(*view.DirectionalShadowBounds, view.Lighting.Direction, SHADOW_RESOLUTION);
 	for (int column = 0; column < 4; ++column)
 		for (int row = 0; row < 4; ++row)
 			CHECK(captured.Shadow->LightViewProjection[column * 4 + row] == matrix[column][row]);

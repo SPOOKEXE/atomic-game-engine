@@ -328,7 +328,8 @@ namespace engine::render {
 		if (BoundsArray(domain) != snapshot.DomainBounds) return false;
 		const auto magnitude = expected.LightDirection.Magnitude();
 		if (!std::isfinite(magnitude) || magnitude <= 0) return false;
-		const auto light = graph::FitDirectionalLight(domain, expected.LightDirection / magnitude);
+		const auto light =
+			graph::FitDirectionalLight(domain, expected.LightDirection / magnitude, SHADOW_RESOLUTION);
 		for (size_t column = 0; column < 4; ++column)
 			for (size_t row = 0; row < 4; ++row)
 				if (light[column][row] != snapshot.LightViewProjection[column * 4 + row]) return false;

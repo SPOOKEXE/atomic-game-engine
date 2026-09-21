@@ -792,15 +792,6 @@ namespace engine::render {
 			sceneBounds = graph::BoundsOfAll(instances);
 		}
 
-		DirectionalShadowBounds = source.DirectionalShadowBounds.value_or(sceneBounds);
-		if (source.DirectionalShadowBounds && !instances.empty() &&
-			(!DirectionalShadowBounds.Contains(sceneBounds.Minimum) ||
-			 !DirectionalShadowBounds.Contains(sceneBounds.Maximum))) {
-			ENGINE_WARN("view {} has directional shadow bounds smaller than its scene", request.TargetSlot);
-			endIncompleteView();
-			return ViewStart::Abandoned;
-		}
-
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
 		{
 			// Two full copies of the draw list, per view, per frame. Small on a
@@ -809,6 +800,11 @@ namespace engine::render {
 			State->VisibleInstances.assign(instances.begin(), instances.end());
 			State->DrawOrder.assign(ordered.begin(), ordered.end());
 		}
+		const auto isEyeBody = [&source](const scene::DrawInstance &row) {
+			const bool ownWorld = !row.SourceWorld.IsValid() || row.SourceWorld == source.WorldName;
+			return source.EyeRig != 0 && ownWorld && row.Variant == 0 &&
+				   (row.Rig == source.EyeRig || row.Source == source.EyeRig);
+		};
 		if (source.EyeRig != 0 || !source.EyeHiddenRows.empty()) {
 			ENGINE_PROFILE_CAT("eye body selection", core::ProfileCategory::Render);
 			size_t kept = 0, opaqueKept = 0;
@@ -816,12 +812,9 @@ namespace engine::render {
 				const uint32_t rowIndex = State->DrawOrder[index];
 				if (rowIndex >= instances.size()) continue;
 				const auto &row = instances[rowIndex];
-				const bool ownWorld = !row.SourceWorld.IsValid() || row.SourceWorld == source.WorldName;
 				if (std::binary_search(State->DrawableHidden.begin(), State->DrawableHidden.end(), rowIndex))
 					continue;
-				if (source.EyeRig != 0 && ownWorld && row.Variant == 0 &&
-					(row.Rig == source.EyeRig || row.Source == source.EyeRig))
-					continue;
+				if (isEyeBody(row)) continue;
 				State->DrawOrder[kept++] = rowIndex;
 				opaqueKept += index < opaqueCount;
 			}
@@ -829,6 +822,33 @@ namespace engine::render {
 			opaqueCount = opaqueKept;
 		}
 		visibleCount = State->DrawOrder.size();
+
+		DirectionalShadowBounds = source.DirectionalShadowBounds.value_or(sceneBounds);
+		if (!source.DirectionalShadowBounds && (source.EyeRig != 0 || !source.EyeHiddenRows.empty())) {
+			// The first-person body does not draw or cast in its own view. Keeping
+			// it in the fitted domain still moves the shadow raster with the eye,
+			// which is visible as fast crawling in an otherwise static world.
+			bool haveCaster = false;
+			for (size_t index = 0; index < instances.size(); ++index) {
+				if (std::binary_search(
+						State->DrawableHidden.begin(),
+						State->DrawableHidden.end(),
+						static_cast<uint32_t>(index)
+					) ||
+					isEyeBody(instances[index]))
+					continue;
+				const core::AABB bounds = graph::BoundsOf(instances[index]);
+				DirectionalShadowBounds = haveCaster ? DirectionalShadowBounds.Union(bounds) : bounds;
+				haveCaster = true;
+			}
+		}
+		if (source.DirectionalShadowBounds && !instances.empty() &&
+			(!DirectionalShadowBounds.Contains(sceneBounds.Minimum) ||
+			 !DirectionalShadowBounds.Contains(sceneBounds.Maximum))) {
+			ENGINE_WARN("view {} has directional shadow bounds smaller than its scene", request.TargetSlot);
+			endIncompleteView();
+			return ViewStart::Abandoned;
+		}
 
 		// **Fitted to the whole draw list, not to what survived culling.** A
 		// caster outside the camera's frustum still shadows into it, so the
@@ -841,7 +861,9 @@ namespace engine::render {
 		// whole world so an off-screen caster cannot disappear from the map.
 		// Split source/body views supply the same enclosing domain for the same raster grid.
 		lightViewProjection = graph::FitDirectionalLight(
-			DirectionalShadowBounds, core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z}
+			DirectionalShadowBounds,
+			core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+			SHADOW_RESOLUTION
 		);
 		if (source.DirectionalShadowBounds) {
 			for (size_t column = 0; column < 4; ++column)

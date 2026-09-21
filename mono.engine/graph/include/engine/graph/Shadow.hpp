@@ -51,8 +51,13 @@ namespace engine::graph {
 	// @param direction Which way the light travels. Need not be normalised;
 	//                  a zero direction yields the identity, which shadows
 	//                  nothing rather than shadowing everything.
+	// @param texels    Width of the shadow map. A non-zero value snaps its
+	//                  light-space centre and quantises its radius so movement
+	//                  below one texel cannot make the map crawl. Zero keeps an
+	//                  exact fit for callers that do not own a raster target.
 	// @return `Projection * View` for the light.
-	glm::mat4 FitDirectionalLight(const core::AABB &bounds, const core::Vector3 &direction);
+	glm::mat4
+	FitDirectionalLight(const core::AABB &bounds, const core::Vector3 &direction, uint32_t texels = 0);
 
 	// The same, for the beam of light that gets through one hole.
 	//

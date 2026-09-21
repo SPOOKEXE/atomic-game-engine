@@ -1,3 +1,5 @@
+#include "RenderTypes.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/Shadow.hpp>
@@ -361,8 +363,9 @@ TEST_CASE(
 			domain.Maximum.Y,
 			domain.Maximum.Z
 		};
-		const auto light =
-			graph::FitDirectionalLight(domain, request.LightDirection / request.LightDirection.Magnitude());
+		const auto light = graph::FitDirectionalLight(
+			domain, request.LightDirection / request.LightDirection.Magnitude(), SHADOW_RESOLUTION
+		);
 		for (size_t column = 0; column < 4; ++column)
 			for (size_t row = 0; row < 4; ++row)
 				value.LightViewProjection[column * 4 + row] = light[column][row];

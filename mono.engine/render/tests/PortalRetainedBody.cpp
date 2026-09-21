@@ -444,7 +444,7 @@ TEST_CASE(
 	REQUIRE(fullReference);
 	REQUIRE(fullReference->Status == ResourceImageStatus::Ok);
 	REQUIRE(fullReference->Kind == ResourceImageKind::DirectionalShadow);
-	CHECK(std::ranges::equal(eyeShadow, fullReference->Depth));
+	CHECK_FALSE(std::ranges::equal(eyeShadow, fullReference->Depth));
 
 	view.Instances = roomRows;
 	for (const bool sharedDomain : {true, false}) {

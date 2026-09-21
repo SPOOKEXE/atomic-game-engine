@@ -91,6 +91,42 @@ TEST_CASE("split shadow casters share the complete native raster domain", "[rend
 	CHECK(render() == native);
 }
 
+TEST_CASE(
+	"first-person body motion does not move a static shadow raster", "[render][gpu][shadow-domain][.]"
+) {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	std::array<scene::DrawInstance, 2> rows;
+	rows[0].Source = 1;
+	rows[0].Frame.Position = {-8.0f, 0.0f, -4.0f};
+	rows[0].HalfExtent = {.8f, 1.1f, .6f};
+	rows[0].CastShadow = true;
+	rows[1].Source = rows[1].Rig = 77;
+	rows[1].Frame.Position = {8.0f, 0.0f, -4.0f};
+	rows[1].HalfExtent = {.4f, .9f, .3f};
+	rows[1].CastShadow = true;
+	SceneTarget target{65, 37};
+	View view;
+	view.Target = &target;
+	view.World = 11;
+	view.EyeRig = rows[1].Rig;
+	view.Instances = rows;
+	view.OverrideLighting = true;
+	view.Lighting.Direction = core::Vector3{-.8f, -.3f, -.6f}.Unit();
+	OverlayImage overlay;
+	const auto render = [&] {
+		REQUIRE(
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("shadow"))
+		);
+		return ShadowSamples(fixture.Render);
+	};
+	const auto first = render();
+	rows[1].Frame.Position.X += .001f;
+	const auto second = render();
+
+	CHECK(first == second);
+}
+
 TEST_CASE("plain shadow casters batch across alternating materials", "[render][gpu][shadow-domain][.]") {
 	test::FixtureDevice fixture;
 	fixture.Initialise();
