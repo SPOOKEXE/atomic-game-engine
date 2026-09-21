@@ -82,6 +82,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
 
+- [_] LOD system billboard render support
+
+- [_] /docs/future-work/ui-system.md
+
 ### v0.26
 
 - [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
@@ -98,9 +102,6 @@ The milestone headings below are development labels. Not in line with project ve
   6. Make the existing data-capture resource observation the first consumer. Expose supported hook names and limits through capability discovery, then verify snapshot, camera, frame, crop and resource identity remain aligned.
   7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
   8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
-
-- [_] /docs/future-work/ui-system.md
-- [_] LOD system billboard render support
 
 ### v0.27
 
