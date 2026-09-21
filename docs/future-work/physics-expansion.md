@@ -142,6 +142,11 @@ constraint target, or explicit operation reaches them.
 
 ## Constraints and joints
 
+`scene::Constraint` must register before `ecs::Components::Seal()`. A world
+that first encounters a saved constraint after startup must be able to load it;
+the physics implementation may be unwired while its authored storage is already
+part of the world format.
+
 ### One six-axis representation
 
 `scene::Constraint` remains the authored representation. Its two attachment

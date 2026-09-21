@@ -1,8 +1,9 @@
 --!strict
 -- An arcade tornado scene driven entirely by one Luau wind field.
 --
--- `docs/TORNADOSIM.md` records why this uses kinematic debris and existing GPU
--- emitters rather than a new tornado-specific engine system.
+-- `docs/future-work/vfx-system.md` §"TornadoSim demo boundary and proof"
+-- records why this uses kinematic debris and existing GPU emitters rather than
+-- a tornado-specific engine system.
 
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")

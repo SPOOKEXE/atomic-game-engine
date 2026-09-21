@@ -346,6 +346,11 @@ policy:
 Large override maps and edit journals are referenced by stable asset or resource
 name instead of embedded into a fixed-size component.
 
+`scene::Terrain` registers before `ecs::Components::Seal()` as a world resource,
+not as a constructible `Terrain` instance. It holds the graph and seed that
+describe terrain. Generated chunks remain derived artifacts owned by the terrain
+runtime, never saved ECS rows or network payloads in place of their inputs.
+
 ### Generation request
 
 An immutable request contains:
