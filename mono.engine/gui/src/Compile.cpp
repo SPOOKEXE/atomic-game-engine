@@ -1549,6 +1549,33 @@ namespace engine::gui {
 
 		Asked++;
 
+		// No layer collector means no command can survive source filtering. This
+		// is the common scene-only viewport, so do not scan every GUI component
+		// family just to rediscover an empty list on every frame.
+		if (store.CountMatching<Layer>() == 0) {
+			core::Metrics::Count("gui.compile.asked", 1.0);
+			if (NoCollectors) {
+				return false;
+			}
+
+			NoCollectors = true;
+			Stamp = 0;
+			Fresh = false;
+			Built++;
+			List.Commands.clear();
+			List.Gradients.clear();
+			List.Elements = 0;
+			List.CanvasSize = Vector2{request.Display.Width, request.Display.Height};
+			core::Metrics::Count("gui.compile.built.changed", 1.0);
+			return true;
+		}
+		if (NoCollectors) {
+			// Zero is a valid signature, so force the first real collector through
+			// the compile instead of relying on a sentinel hash value.
+			NoCollectors = false;
+			Fresh = false;
+		}
+
 		// --- the scan, which on almost every frame is all that happens -------
 		//
 		// A pure read: no writes, no allocation, one linear pass per component

@@ -1725,7 +1725,8 @@ namespace studio {
 		// is only settled once every panel has drawn.
 		//
 		// @param index Which viewport panel.
-		void DrawViewportGui(size_t index);
+		// @param panel The projection already resolved for this panel.
+		void DrawViewportGui(size_t index, const PanelProjection &panel);
 
 		// How one panel maps between the world and itself, this frame.
 		//

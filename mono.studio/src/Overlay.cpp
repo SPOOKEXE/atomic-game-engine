@@ -459,7 +459,7 @@ namespace studio {
 		// camera: it is laid out against the panel rectangle and nothing else,
 		// so a panel whose camera cannot be resolved still draws its UI.
 		for (size_t index = 0; index < Overlays.size(); index++) {
-			DrawViewportGui(index);
+			DrawViewportGui(index, projections[index]);
 		}
 
 		// Gestures mutate selection and transforms. Finish every viewport's input
@@ -2241,7 +2241,7 @@ namespace studio {
 		RevealSelection = true;
 	}
 
-	void Editor::DrawViewportGui(size_t index) {
+	void Editor::DrawViewportGui(size_t index, const PanelProjection &panel) {
 		if (index >= Overlays.size() || Universe == nullptr) {
 			return;
 		}
@@ -2331,8 +2331,6 @@ namespace studio {
 						 ImGui::IsMouseHoveringRect(
 							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
 						 );
-		const PanelProjection adornmentPanel = ProjectionFor(index);
-
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
 			if (const auto *local = store.Resource<engine::scene::LocalPlayer>(); local != nullptr) {
@@ -2374,15 +2372,15 @@ namespace studio {
 			if ((events.empty() || (!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
 									!ImGui::IsMouseDown(ImGuiMouseButton_Right))) &&
 				selected) {
-				if (adornmentPanel.IsValid()) {
+				if (panel.IsValid()) {
 					engine::render::AdornmentPointer adornment;
-					adornment.Ray = adornmentPanel.PanelToRay(glm::vec2(mouse.x, mouse.y));
+					adornment.Ray = panel.PanelToRay(glm::vec2(mouse.x, mouse.y));
 					adornment.Position = pointer.Position;
 					adornment.PrimaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
 					adornment.SecondaryDown = selected && ImGui::IsMouseDown(ImGuiMouseButton_Right);
 					adornment.Moved =
 						ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f;
-					adornment.Inside = adornmentPanel.ContainsPanel(glm::vec2(mouse.x, mouse.y));
+					adornment.Inside = panel.ContainsPanel(glm::vec2(mouse.x, mouse.y));
 					const std::span<const engine::gui::GuiEvent> routed =
 						AdornmentRouters[index].Update(store, adornment, 0.1f);
 					events.insert(events.end(), routed.begin(), routed.end());

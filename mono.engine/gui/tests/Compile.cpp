@@ -179,6 +179,23 @@ namespace {
 	}
 }
 
+TEST_CASE("an empty GUI cache does not rescan component families", "[gui][compile][cache]") {
+	World world("empty-gui-cache");
+
+	CHECK(world.Rebuild());
+	CHECK_FALSE(world.Rebuild());
+	CHECK(world.List.Requests() == 2);
+	CHECK(world.List.Rebuilds() == 1);
+	CHECK(world.List.Commands().Commands.empty());
+
+	world.Make("ScreenGui");
+	CHECK(world.Rebuild());
+	CHECK(world.List.Rebuilds() == 2);
+
+	world.List.Invalidate();
+	CHECK(world.Rebuild());
+}
+
 TEST_CASE("one hosted collector compiles without admitting other canvases", "[gui][compile][plugin]") {
 	World world("gui_compile.plugin_collector");
 	const Entity dock = world.Make("DockWidgetPluginGui");

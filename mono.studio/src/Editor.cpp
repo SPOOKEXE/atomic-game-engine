@@ -2933,11 +2933,14 @@ namespace studio {
 		view.Damage = damage;
 		const bool visualChanged = damage.Any();
 		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
-		if (!visualChanged) {
-			ViewportPresentations[viewport].CacheProfile().Record(damage, true, false, cacheApplicability);
-		}
 		if (!visualChanged && !particleDeviceStep) {
 			return;
+		}
+		if (!visualChanged) {
+			// A retained image that prevents submission is a skipped opportunity,
+			// not a cache read. Count hits only when this presentation actually asks
+			// the renderer to reuse those layers.
+			ViewportPresentations[viewport].CacheProfile().Record(damage, true, false, cacheApplicability);
 		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
