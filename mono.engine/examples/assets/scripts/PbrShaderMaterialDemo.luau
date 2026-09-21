@@ -21,7 +21,6 @@ type PbrMaps = {
 	Normal: EditableImage,
 	Roughness: EditableImage,
 	Occlusion: EditableImage,
-	Height: EditableImage,
 	Metalness: EditableImage,
 	Emissive: EditableImage,
 }
@@ -70,7 +69,6 @@ local function PaintMaps(): PbrMaps
 		Normal = NewImage("PbrDemo_Normal"),
 		Roughness = NewImage("PbrDemo_Roughness"),
 		Occlusion = NewImage("PbrDemo_Occlusion"),
-		Height = NewImage("PbrDemo_Height"),
 		Metalness = NewImage("PbrDemo_Metalness"),
 		Emissive = NewImage("PbrDemo_Emissive"),
 	}
@@ -79,7 +77,6 @@ local function PaintMaps(): PbrMaps
 		Normal = maps.Normal,
 		Roughness = maps.Roughness,
 		Occlusion = maps.Occlusion,
-		Height = maps.Height,
 		Metalness = maps.Metalness,
 		Emissive = maps.Emissive,
 	}
@@ -109,9 +106,6 @@ local function PaintMaps(): PbrMaps
 			put(pixels.Roughness, offset, roughness, roughness, roughness)
 			local occlusion = 125 + rock * 130
 			put(pixels.Occlusion, offset, occlusion, occlusion, occlusion)
-			-- Relief is geometric. Keep the height channel neutral so its screen-space
-			-- parallax branch cannot tear across this curved, tiled demonstration mesh.
-			put(pixels.Height, offset, 0, 0, 0)
 			put(pixels.Metalness, offset, 0, 0, 0)
 			put(pixels.Emissive, offset, 0, 0, 0)
 		end
@@ -129,22 +123,10 @@ local function ApplyMaps(part: MeshPart)
 	part.NormalMap = maps.Normal.ContentId
 	part.RoughnessMap = maps.Roughness.ContentId
 	part.OcclusionMap = maps.Occlusion.ContentId
-	part.HeightMap = maps.Height.ContentId
 	part.MetalnessMap = maps.Metalness.ContentId
 	part.EmissiveMap = maps.Emissive.ContentId
 	part.EmissiveTint = Color3.new(1, 1, 1)
 	part.EmissiveStrength = 2.2
-end
-
-local function ConfigureLod(part: MeshPart)
-	-- These ratios describe retained decimated geometry only. Studio's distance
-	-- preferences choose when a resident coarse page becomes eligible.
-	part.AutoLodStrategy = Enum.AutoMeshLODStrategy.Decimated
-	part.AutoLodLevels = 4
-	part.AutoLod1Ratio = 0.70
-	part.AutoLod2Ratio = 0.40
-	part.AutoLod3Ratio = 0.10
-	part.AutoLodTargetQuadArea = 4
 end
 
 local function RockMesh(name: string, position: Vector3): MeshPart
@@ -187,7 +169,6 @@ local function RockMesh(name: string, position: Vector3): MeshPart
 	part.Position = position
 	part.Color = Color3.new(1, 1, 1)
 	ApplyMaps(part)
-	ConfigureLod(part)
 	part.Parent = workspace
 	return part
 end

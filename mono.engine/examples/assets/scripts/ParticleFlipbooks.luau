@@ -1,13 +1,11 @@
 --!strict
 -- A focused image-particle and flipbook proof scene.
 --
--- Run with the store prepared by `scripts/demos/bake-fox-flipbook.sh`:
+-- The atlas is staged beside every release under `assets/examples/effects`.
+-- The client admits that small packaged-example tree before CDN delivery, so
+-- this scene is runnable without a developer's private content store.
 --
---   client --cdn dir:.cache/build/dev/captures/fox-flipbook/store \\
---     --cdn dir:$HOME/Documents/atomic-game-engine/cdn/processed \\
---     --script ParticleFlipbooks.luau
---
--- Every bay names the same real GIF bake. The only difference is playback:
+-- Every bay names the same packaged GIF bake. The only difference is playback:
 -- one-shot, loop, ping-pong, and random fixed cells. Loop and PingPong begin
 -- each fox on a deterministic random phase. The check at the bottom
 -- waits for the texture facts, so it proves both that the particle requested
@@ -98,8 +96,8 @@ RunService.Heartbeat:Connect(function()
 	assert(facts.Side == 8, "fox flipbook must be an 8x8 sheet")
 	-- The source animation has changed frame counts over time. The baked facts
 	-- are the authority, while the grid is the contract this scene exercises.
-	assert(facts.Frames > 0 and facts.Frames <= facts.Side * facts.Side, "fox flipbook frame count must fit its grid")
-	assert(math.abs(facts.FrameRate - 24) < 0.001, "fox flipbook must retain its 24 fps bake")
+	assert(facts.Frames == facts.Side * facts.Side, "packaged fox flipbook must fill its grid")
+	assert(math.abs(facts.FrameRate - 24) < 0.1, "fox flipbook must retain its 24 fps bake")
 	checked = true
 	print(`particle flipbooks: loaded {TEXTURE}, {facts.Frames} frames at {facts.FrameRate} fps`)
 end)

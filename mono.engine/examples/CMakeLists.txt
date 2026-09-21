@@ -236,6 +236,22 @@ foreach(world IN LISTS example_worlds)
 	list(APPEND staged_scenes "${world_staged}")
 endforeach()
 
+# A packaged example texture is an ordinary baked asset, not a developer-local
+# CDN import. Keep the source GIF here so assetc records its flipbook metadata.
+set(flipbook_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects/fox_dance.gif")
+set(flipbook_staged "${MONO_STAGE_ROOT}/assets/examples/effects/fox_dance.atex")
+add_custom_command(
+	OUTPUT "${flipbook_staged}"
+	COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/effects"
+	COMMAND $<TARGET_FILE:assetc>
+		--input "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects"
+		--output "${MONO_STAGE_ROOT}/assets/examples/effects"
+		--quiet
+	DEPENDS assetc "${flipbook_source}"
+	COMMENT "Baking packaged particle flipbook"
+	VERBATIM)
+list(APPEND staged_scenes "${flipbook_staged}")
+
 file(GLOB example_pipelines CONFIGURE_DEPENDS
 	"${CMAKE_CURRENT_SOURCE_DIR}/assets/pipelines/*.pipeline")
 

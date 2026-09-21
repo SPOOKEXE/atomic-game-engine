@@ -1593,12 +1593,18 @@ namespace engine::render {
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
-			SDL_GPUTexture *const texture =
-				Textures.Find(state.Texture, TextureContentOwner(state.Texture, ActiveContentOwner));
+			const core::Name textureOwner = TextureContentOwner(state.Texture, ActiveContentOwner);
+			SDL_GPUTexture *const texture = Textures.Find(state.Texture, textureOwner);
+			const TextureChoice choice = ChooseTexture(
+				texture != nullptr, state.Texture.IsValid(), Textures.Expecting(state.Texture, textureOwner)
+			);
+			SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? texture
+											: choice == TextureChoice::Missing ? Textures.Missing()
+																			   : FallbackTexture;
 
 			ParticleMaterial material{};
 			material.Flags = glm::vec4{
-				texture != nullptr ? 1.0f : 0.0f,
+				choice == TextureChoice::Named || choice == TextureChoice::Missing ? 1.0f : 0.0f,
 				state.Additive ? 1.0f : std::clamp(state.LightEmission, 0.0f, 1.0f),
 				std::clamp(state.LightInfluence, 0.0f, 1.0f),
 				state.SoftParticles ? 1.0f : 0.0f,
@@ -1615,7 +1621,7 @@ namespace engine::render {
 			// is a validation error on some drivers and a read of whatever was
 			// there on others. The uniform above decides whether it is used.
 			SDL_GPUTextureSamplerBinding binding{};
-			binding.texture = texture != nullptr ? texture : FallbackTexture;
+			binding.texture = sampled;
 			binding.sampler = Textures.Sampler();
 			SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 

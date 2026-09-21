@@ -4,6 +4,7 @@
 #include <engine/assets/Material.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/render/Animation.hpp>
@@ -17,10 +18,51 @@
 #include <algorithm>
 #include <client/Client.hpp>
 #include <client/ContentDemand.hpp>
+#include <filesystem>
+#include <fstream>
 
 namespace client {
 	static uint64_t ContentRequestKey(engine::core::Name owner, engine::core::Name asset) {
 		return (uint64_t(owner.Id()) << 32) | asset.Id();
+	}
+
+	void Client::LoadPackagedExampleTextures(ContentSession &content) {
+		if (content.PackagedExamplesLoaded) return;
+		content.PackagedExamplesLoaded = true;
+
+		// Programs live in their own staged directory, while shared example assets
+		// are siblings under the stage root. `Paths::Assets()` is the program's
+		// renderer asset directory, not that shared tree.
+		const std::filesystem::path root = engine::core::Paths::Base().parent_path() / "assets/examples";
+		const std::filesystem::path effects = root / "effects";
+		std::error_code error;
+		if (!std::filesystem::is_directory(effects, error)) return;
+
+		for (const std::filesystem::directory_entry &entry :
+			 std::filesystem::recursive_directory_iterator(effects, error)) {
+			if (error || !entry.is_regular_file() || entry.path().extension() != ".atex") continue;
+			const size_t size = static_cast<size_t>(entry.file_size(error));
+			if (error) continue;
+			std::vector<std::byte> bytes(size);
+			std::ifstream input(entry.path(), std::ios::binary);
+			input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+			engine::assets::TextureData image;
+			engine::core::ByteReader reader(bytes);
+			if ((!input.good() && !input.eof()) || !engine::assets::Texture::Read(reader, image)) {
+				ENGINE_WARN("examples: packaged texture '{}' is unreadable", entry.path().string());
+				continue;
+			}
+			const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, error);
+			if (error) continue;
+			const engine::core::Name name(relative.generic_string());
+			content.PackagedTextures.push_back({.Name = name, .Data = std::move(image), .Facts = {}});
+			const engine::assets::TextureData &stored = content.PackagedTextures.back().Data;
+			content.PackagedTextures.back().Facts = {
+				.Side = stored.FlipbookSide,
+				.Frames = stored.FlipbookFrames,
+				.FrameRate = stored.FlipbookFrameRate,
+			};
+		}
 	}
 
 	void Client::RefreshContentBindings() {
@@ -164,6 +206,20 @@ namespace client {
 		content.Owners.clear();
 		for (const auto world : worlds)
 			content.Owners.push_back(Universe_->NameOf(world));
+		LoadPackagedExampleTextures(content);
+		for (const auto owner : content.Owners) {
+			if (!content.PackagedOwners.insert(owner.Id()).second) continue;
+			for (const ContentSession::PackagedTexture &texture : content.PackagedTextures) {
+				VisualResourcesChanged =
+					Renderer.AddTexture(texture.Name, texture.Data, owner) || VisualResourcesChanged;
+				for (const auto world : worlds) {
+					if (Universe_->NameOf(world) != owner) continue;
+					Universe_->Enter(world, [&texture](engine::ecs::Store &store) {
+						engine::scene::RecordTexture(store, texture.Name, texture.Facts);
+					});
+				}
+			}
+		}
 		if (!addedWorlds.empty()) {
 			// New worlds request their own missing names without replaying existing worlds.
 			for (const auto world : addedWorlds)

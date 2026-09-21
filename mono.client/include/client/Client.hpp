@@ -4,6 +4,7 @@
 
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/audio/Device.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
@@ -40,6 +41,7 @@
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Runtime.hpp>
@@ -274,6 +276,7 @@ namespace client {
 		// pass - the two constraints that decide where this can go at all.
 		void PumpContent();
 		void RefreshContentBindings();
+		void LoadPackagedExampleTextures(ContentSession &content);
 		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 
 		// Hands the session's worlds the mesh names its store published.
@@ -797,6 +800,15 @@ namespace client {
 		// One admitted content route and its demand state move together at handoff.
 		// Relay outlives the delivery client that borrows it.
 		struct ContentSession {
+			// One texture shipped with an example rather than fetched from a content source.
+			struct PackagedTexture {
+				// Content name scripts use to request the texture.
+				engine::core::Name Name;
+				// Decoded texture payload installed into the local catalogue.
+				engine::assets::TextureData Data;
+				// Optional flipbook grid and playback metadata carried by the asset.
+				engine::scene::FlipbookFacts Facts;
+			};
 			std::unique_ptr<ContentLink> Relay;
 			std::unique_ptr<engine::delivery::AssetClient> Client;
 			std::string RelayName;
@@ -809,6 +821,9 @@ namespace client {
 			std::unordered_map<uint32_t, uint64_t> ScannedAtRevision;
 			std::vector<engine::core::Name> Wanted;
 			std::vector<engine::core::Name> Owners;
+			std::vector<PackagedTexture> PackagedTextures;
+			std::unordered_set<uint32_t> PackagedOwners;
+			bool PackagedExamplesLoaded = false;
 			bool Requested = false;
 			bool Reported = false;
 		};

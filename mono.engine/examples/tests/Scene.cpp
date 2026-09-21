@@ -7,6 +7,8 @@
 // is what can be: that each scene builds the *inputs* those passes need, in the
 // world, through the same bindings a game would use.
 
+#include <engine/assets/Texture.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
@@ -32,6 +34,7 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataCaptureDriver.hpp>
 #include <engine/script/EventNarratives.hpp>
@@ -46,6 +49,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <numbers>
 #include <string>
@@ -2207,7 +2211,6 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		"PbrDemo_Normal",
 		"PbrDemo_Roughness",
 		"PbrDemo_Occlusion",
-		"PbrDemo_Height",
 		"PbrDemo_Metalness",
 		"PbrDemo_Emissive",
 	};
@@ -2257,13 +2260,7 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		const Entity part = InScene(store, partName);
 		REQUIRE(part != engine::ecs::NULL_ENTITY);
 		const auto *lod = store.Get<engine::scene::AutoMeshLOD>(part);
-		REQUIRE(lod != nullptr);
-		CHECK(lod->Strategy == engine::scene::LodStrategy::Decimated);
-		CHECK(lod->Levels == 4);
-		CHECK(lod->Ratios[0] == 0.70f);
-		CHECK(lod->Ratios[1] == 0.40f);
-		CHECK(lod->Ratios[2] == 0.10f);
-		CHECK(lod->TargetQuadArea == 4.0f);
+		CHECK(lod == nullptr);
 	}
 
 	const auto mapsOf = [&](const char *partName) {
@@ -2275,9 +2272,9 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		CHECK(appearance->NormalMap == contentIds[1]);
 		CHECK(appearance->RoughnessMap == contentIds[2]);
 		CHECK(appearance->OcclusionMap == contentIds[3]);
-		CHECK(appearance->HeightMap == contentIds[4]);
-		CHECK(appearance->MetalnessMap == contentIds[5]);
-		CHECK(appearance->EmissiveMap == contentIds[6]);
+		CHECK_FALSE(appearance->HeightMap.IsValid());
+		CHECK(appearance->MetalnessMap == contentIds[4]);
+		CHECK(appearance->EmissiveMap == contentIds[5]);
 		CHECK(appearance->EmissiveStrength == Approx(2.2f));
 		return part;
 	};
@@ -2314,6 +2311,42 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		});
 		CHECK(found);
 	}
+}
+
+TEST_CASE("the packaged particle flipbook resolves without a CDN", "[examples][scene][particles]") {
+	const StagedAssets assets;
+	const std::filesystem::path path = engine::core::Paths::Assets() / "examples/effects/fox_dance.atex";
+	std::ifstream input(path, std::ios::binary | std::ios::ate);
+	REQUIRE(input.good());
+	const size_t size = static_cast<size_t>(input.tellg());
+	std::vector<std::byte> bytes(size);
+	input.seekg(0);
+	input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	REQUIRE(input.good());
+
+	engine::assets::TextureData atlas;
+	engine::core::ByteReader reader(bytes);
+	REQUIRE(engine::assets::Texture::Read(reader, atlas));
+	CHECK(atlas.IsFlipbook());
+	CHECK(atlas.FlipbookSide == 8);
+	CHECK(atlas.FlipbookFrames == 64);
+	CHECK(atlas.FlipbookFrameRate == Approx(24.0f).margin(0.1f));
+
+	Store store("particle.flipbook.packaged");
+	Scheduler systems;
+	std::shared_ptr<engine::script::Runtime> runtime;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("ParticleFlipbooks.luau"), error, &runtime));
+	REQUIRE(runtime != nullptr);
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store,
+			Name("effects/fox_dance.atex"),
+			{.Side = atlas.FlipbookSide, .Frames = atlas.FlipbookFrames, .FrameRate = atlas.FlipbookFrameRate}
+		)
+	);
+	systems.Tick(store, 1.0f / 60.0f);
+	CHECK(runtime->LastError().empty());
 }
 
 TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][scene]") {
