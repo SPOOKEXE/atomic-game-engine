@@ -2893,3 +2893,5 @@ as datatypes? we can do a 3D and 2D vector field and particles can read directly
 - [x] show active LOD and view LOD debug radius
 - [x] active LOD readonly value
 - [x] preferences for LOD radius distances
+- [x] many more demo fixes
+- [x] build optimisations
