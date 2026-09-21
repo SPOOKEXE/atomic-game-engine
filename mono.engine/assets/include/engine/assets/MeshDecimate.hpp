@@ -8,10 +8,27 @@
 
 #include <engine/assets/Mesh.hpp>
 
+#include <atomic>
 #include <span>
-#include <stop_token>
 
 namespace engine::assets {
+	// A borrowed cancellation flag for interactive mesh bakes.
+	//
+	// This stays independent of `std::stop_token`, which is absent from the
+	// libc++ shipped by supported macOS runners. The owner must outlive the bake.
+	class MeshDecimationCancelToken {
+	  public:
+		MeshDecimationCancelToken() = default;
+		explicit MeshDecimationCancelToken(const std::atomic_bool &requested) : Requested(&requested) {}
+
+		bool StopRequested() const {
+			return Requested != nullptr && Requested->load(std::memory_order_relaxed);
+		}
+
+	  private:
+		const std::atomic_bool *Requested = nullptr;
+	};
+
 	// How a generated mesh ladder ranks legal reductions.
 	//
 	// Decimation keeps the historical shortest-edge result. SurfaceArea keeps
@@ -37,7 +54,7 @@ namespace engine::assets {
 	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out);
 	// As above, but stops before publishing an incomplete mesh when the caller
 	// supersedes an interactive bake.
-	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop);
+	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out, MeshDecimationCancelToken cancel);
 
 	// Produces a coarser mesh by removing the least visible surface first.
 	//
@@ -47,7 +64,7 @@ namespace engine::assets {
 	// the large faces that will occupy the most screen space across views while
 	// retaining the same winding, material, and skinning guards as DecimateMesh.
 	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out);
-	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop);
+	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, MeshDecimationCancelToken cancel);
 
 	// Builds every generated mesh in one LOD ladder from the same base mesh.
 	//

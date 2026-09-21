@@ -5,17 +5,17 @@
 //
 // @tier L12 · client
 
-#include <engine/assets/Mesh.hpp>
+#include <engine/assets/MeshDecimate.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <span>
-#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -82,6 +82,8 @@ namespace engine::render {
 			bool operator==(const Request &) const = default;
 		};
 		struct Job {
+			~Job();
+
 			uint64_t World = 0;
 			core::Name Owner;
 			core::Name Base;
@@ -89,7 +91,12 @@ namespace engine::render {
 			std::mutex Guard;
 			std::vector<AutomaticMeshLodArtifact> Result;
 			bool Ready = false;
-			std::jthread Worker;
+			std::atomic_bool CancelRequested = false;
+			std::thread Worker;
+
+			void RequestCancel() {
+				CancelRequested.store(true, std::memory_order_relaxed);
+			}
 		};
 		struct Queued {
 			uint64_t Ticket = 0;
@@ -111,8 +118,11 @@ namespace engine::render {
 			std::vector<Source> Sources;
 		};
 		static std::vector<Request> Requests(ecs::Store &store, core::Name base);
-		static std::vector<AutomaticMeshLodArtifact>
-		Build(const assets::MeshData &mesh, std::span<const Request> requests, std::stop_token stop);
+		static std::vector<AutomaticMeshLodArtifact> Build(
+			const assets::MeshData &mesh,
+			std::span<const Request> requests,
+			assets::MeshDecimationCancelToken cancel
+		);
 		void Start(uint64_t world, core::Name owner, Source &source);
 		size_t Collect(ecs::Store &store, Renderer &renderer);
 		size_t RefreshStored(

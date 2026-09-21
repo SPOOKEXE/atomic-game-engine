@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <atomic>
 
 TEST_SUITE_ID("engine.assets.mesh-decimate")
 TEST_DEPENDS("engine.assets.mesh")
@@ -126,6 +127,18 @@ TEST_CASE(
 	REQUIRE(DecimateMesh(source, 0.000001f, output));
 	CHECK(output.IsValid());
 	CHECK(output.Indices.size() == source.Indices.size());
+}
+
+TEST_CASE("mesh decimation cancellation does not publish partial output", "[assets][mesh-decimate]") {
+	using namespace engine::assets;
+	const MeshData source = Grid(24);
+	MeshData output = QuadPair();
+	const MeshData original = output;
+	std::atomic_bool cancelled = true;
+
+	CHECK_FALSE(DecimateMesh(source, 0.25f, output, MeshDecimationCancelToken(cancelled)));
+	CHECK(output.Indices == original.Indices);
+	CHECK(output.Vertices.size() == original.Vertices.size());
 }
 
 TEST_CASE(

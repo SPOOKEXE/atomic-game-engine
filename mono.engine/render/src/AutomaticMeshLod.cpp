@@ -17,6 +17,11 @@
 #include <utility>
 
 namespace engine::render {
+	AutomaticMeshLodUploader::Job::~Job() {
+		RequestCancel();
+		if (Worker.joinable()) Worker.join();
+	}
+
 	std::vector<AutomaticMeshLodArtifact>
 	BuildAutomaticMeshLods(ecs::Store &store, const core::Name &base, const assets::MeshData &mesh) {
 		std::vector<AutomaticMeshLodArtifact> generated;
@@ -173,16 +178,18 @@ namespace engine::render {
 	}
 
 	std::vector<AutomaticMeshLodArtifact> AutomaticMeshLodUploader::Build(
-		const assets::MeshData &mesh, std::span<const Request> requests, std::stop_token stop
+		const assets::MeshData &mesh,
+		std::span<const Request> requests,
+		assets::MeshDecimationCancelToken cancel
 	) {
 		std::vector<AutomaticMeshLodArtifact> artifacts;
 		for (const Request &request : requests) {
-			if (stop.stop_requested()) return {};
+			if (cancel.StopRequested()) return {};
 			assets::MeshData output;
 			const bool built = request.Strategy == scene::LodStrategy::Reduced
-								   ? assets::ReduceMesh(mesh, request.Ratio, output, stop)
-								   : assets::DecimateMesh(mesh, request.Ratio, output, stop);
-			if (stop.stop_requested()) return {};
+								   ? assets::ReduceMesh(mesh, request.Ratio, output, cancel)
+								   : assets::DecimateMesh(mesh, request.Ratio, output, cancel);
+			if (cancel.StopRequested()) return {};
 			if (built) artifacts.push_back({request.Name, std::move(output), {}});
 		}
 		return artifacts;
@@ -197,14 +204,15 @@ namespace engine::render {
 		Active->Base = source.Base;
 		Active->Generation = queued->Generation;
 		Job *job = Active.get();
-		job->Worker = std::jthread([job,
-									mesh = std::move(queued->Mesh),
-									requests = std::move(queued->Requests)](std::stop_token stop) mutable {
-			std::vector<AutomaticMeshLodArtifact> result = Build(mesh, requests, stop);
-			std::lock_guard lock(job->Guard);
-			job->Result = std::move(result);
-			job->Ready = true;
-		});
+		job->Worker = std::thread(
+			[job, mesh = std::move(queued->Mesh), requests = std::move(queued->Requests)]() mutable {
+				const assets::MeshDecimationCancelToken cancel(job->CancelRequested);
+				std::vector<AutomaticMeshLodArtifact> result = Build(mesh, requests, cancel);
+				std::lock_guard lock(job->Guard);
+				job->Result = std::move(result);
+				job->Ready = true;
+			}
+		);
 	}
 
 	size_t AutomaticMeshLodUploader::Collect(ecs::Store &store, Renderer &renderer) {
@@ -342,7 +350,7 @@ namespace engine::render {
 				return false;
 			if (Active && Active->World == scope->World && Active->Owner == owner &&
 				Active->Base == source.Base)
-				Active->Worker.request_stop();
+				Active->RequestCancel();
 			released.insert(released.end(), source.Artifacts.begin(), source.Artifacts.end());
 			return true;
 		});
@@ -381,7 +389,7 @@ namespace engine::render {
 			++source.Generation;
 			if (Active && Active->World == store.Identity() && Active->Owner == owner &&
 				Active->Base == source.Base)
-				Active->Worker.request_stop();
+				Active->RequestCancel();
 			source.Next.reset();
 			const std::vector<core::Name> released = std::move(source.Artifacts);
 			source.Artifacts.clear();
@@ -405,7 +413,7 @@ namespace engine::render {
 		source.Next = std::make_unique<Queued>(Queued{ticket, generation, std::move(mesh), wanted});
 		if (Active && Active->World == store.Identity() && Active->Owner == owner &&
 			Active->Base == source.Base)
-			Active->Worker.request_stop();
+			Active->RequestCancel();
 		return 0;
 	}
 
@@ -433,13 +441,13 @@ namespace engine::render {
 	}
 
 	void AutomaticMeshLodUploader::ForgetWorld(uint64_t identity) {
-		if (Active && Active->World == identity) Active->Worker.request_stop();
+		if (Active && Active->World == identity) Active->RequestCancel();
 		std::erase_if(Completed, [identity](const auto &job) { return job->World == identity; });
 		std::erase_if(Scopes, [identity](const Scope &scope) { return scope.World == identity; });
 	}
 
 	void AutomaticMeshLodUploader::ForgetOwner(core::Name owner) {
-		if (Active && Active->Owner == owner) Active->Worker.request_stop();
+		if (Active && Active->Owner == owner) Active->RequestCancel();
 		std::erase_if(Completed, [owner](const auto &job) { return job->Owner == owner; });
 		std::erase_if(Scopes, [owner](const Scope &scope) { return scope.Owner == owner; });
 	}

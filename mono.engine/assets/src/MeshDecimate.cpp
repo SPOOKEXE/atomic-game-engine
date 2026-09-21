@@ -203,7 +203,7 @@ namespace engine::assets {
 			size_t &count,
 			size_t target,
 			MeshReduction reduction,
-			std::stop_token stop
+			MeshDecimationCancelToken cancel
 		) {
 			struct Candidate {
 				float Cost = 0.0f;
@@ -216,7 +216,7 @@ namespace engine::assets {
 			std::unordered_map<uint64_t, bool> seen;
 
 			for (size_t index = 0; index < triangles.size(); index++) {
-				if (stop.stop_requested()) return false;
+				if (cancel.StopRequested()) return false;
 				if (owners[index] != submesh || Degenerate(triangles[index])) {
 					continue;
 				}
@@ -311,7 +311,7 @@ namespace engine::assets {
 			}
 			if (removed == 0) return false;
 			for (Triangle &triangle : triangles) {
-				if (stop.stop_requested()) return false;
+				if (cancel.StopRequested()) return false;
 				for (uint32_t &index : triangle) {
 					index = replacement[index];
 				}
@@ -352,7 +352,11 @@ namespace engine::assets {
 
 	namespace {
 		bool Reduce(
-			const MeshData &source, float ratio, MeshData &out, MeshReduction reduction, std::stop_token stop
+			const MeshData &source,
+			float ratio,
+			MeshData &out,
+			MeshReduction reduction,
+			MeshDecimationCancelToken cancel
 		) {
 			if (&source == &out || !source.IsValid() || !(ratio > 0.0f) || ratio > 1.0f) {
 				return false;
@@ -396,7 +400,7 @@ namespace engine::assets {
 
 			std::vector<MeshVertex> vertices = source.Vertices;
 			for (uint32_t submesh = 0; submesh < runCount; submesh++) {
-				if (stop.stop_requested()) return false;
+				if (cancel.StopRequested()) return false;
 				size_t count = 0;
 				for (size_t index = 0; index < triangles.size(); index++) {
 					count += owners[index] == submesh && !Degenerate(triangles[index]) ? 1u : 0u;
@@ -405,11 +409,11 @@ namespace engine::assets {
 				const std::vector<bool> boundary =
 					BoundaryVertices(vertices.size(), triangles, owners, submesh);
 				const size_t target = std::max<size_t>(1, static_cast<size_t>(std::floor(count * ratio)));
-				while (!stop.stop_requested() && count > target &&
+				while (!cancel.StopRequested() && count > target &&
 					   CollapseBatch(
-						   vertices, triangles, owners, boundary, submesh, count, target, reduction, stop
+						   vertices, triangles, owners, boundary, submesh, count, target, reduction, cancel
 					   )) {}
-				if (stop.stop_requested()) return false;
+				if (cancel.StopRequested()) return false;
 				// Ratio is a target, not permission to punch holes. A boundary, skin or
 				// material seam can leave no legal collapse before the target is met.
 				// Keep the connected remainder instead of deleting unrelated faces.
@@ -455,16 +459,16 @@ namespace engine::assets {
 		return DecimateMesh(source, ratio, out, {});
 	}
 
-	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop) {
-		return Reduce(source, ratio, out, MeshReduction::Decimation, stop);
+	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out, MeshDecimationCancelToken cancel) {
+		return Reduce(source, ratio, out, MeshReduction::Decimation, cancel);
 	}
 
 	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out) {
 		return ReduceMesh(source, ratio, out, {});
 	}
 
-	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, std::stop_token stop) {
-		return Reduce(source, ratio, out, MeshReduction::SurfaceArea, stop);
+	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, MeshDecimationCancelToken cancel) {
+		return Reduce(source, ratio, out, MeshReduction::SurfaceArea, cancel);
 	}
 
 	bool BuildMeshLodLadder(const MeshData &source, std::span<const float> ratios, std::span<MeshData> out) {
