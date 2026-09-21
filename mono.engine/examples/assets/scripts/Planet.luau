@@ -1652,17 +1652,6 @@ local function DestroyOcean(bodyIndex: number)
 	oceans[bodyIndex] = nil
 end
 
--- Rodrigues rotation of an offset around an axis. Used to turn Zephyr's chunks
--- slowly: tick time, not wall time, so two recorded runs generate the same
--- flow.
-local function RotateAroundAxis(offset: Vector3, axis: Vector3, angle: number): Vector3
-	local c = math.cos(angle)
-	local s = math.sin(angle)
-	local cross = axis:Cross(offset)
-	local dot = axis:Dot(offset)
-	return offset * c + cross * s + axis * (dot * (1 - c))
-end
-
 local zephyrAxis = TiltAxis(Bodies[3].TiltDegrees)
 
 local function TurnGasGiant(tick: number)
@@ -1670,7 +1659,11 @@ local function TurnGasGiant(tick: number)
 	for _, chunk in live do
 		if chunk.Node.Body == 3 then
 			local offset = chunk.BasePosition - Bodies[3].Centre
-			;(chunk.Part :: any).Position = Bodies[3].Centre + RotateAroundAxis(offset, zephyrAxis, angle);
+			-- The part frame owns both a patch's centre and its local vertex basis.
+			-- Moving only Position curves the centres into an orbit while the patches
+			-- keep their old orientations, which tears the globe into separated tiles.
+			chunk.Part.CFrame =
+				CFrame.new(Bodies[3].Centre) * CFrame.fromAxisAngle(zephyrAxis, angle) * CFrame.new(offset)
 		end
 	end
 end

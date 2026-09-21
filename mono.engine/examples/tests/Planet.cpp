@@ -154,3 +154,67 @@ TEST_CASE("the planet quadtree stitches every mixed-resolution edge", "[examples
 	}
 	CHECK(stitched > 0);
 }
+
+TEST_CASE("the rotating gas giant keeps its quadtree chunks joined", "[examples][scene][planet]") {
+	const StagedAssets assets;
+	Store store("planet.zephyr.rotation");
+	engine::ecs::Scheduler systems;
+	std::string error;
+	REQUIRE(engine::examples::LoadScene(store, systems, engine::examples::ExamplePath("Planet.luau"), error));
+
+	// Zephyr turns every heartbeat. This duration reaches a visibly different
+	// orientation and a settled mixed-depth leaf set.
+	for (size_t tick = 0; tick < 720; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	constexpr std::string_view meshPrefix = "PlanetMesh_Zephyr_";
+	constexpr std::string_view partPrefix = "PlanetChunk_Zephyr_";
+	std::vector<Edge> edges;
+	size_t patches = 0;
+
+	store.Each<const EditableMesh>([&](Entity meshEntity, const EditableMesh &mesh) {
+		const std::string_view meshName = store.InstanceNameOf(meshEntity).Text();
+		if (!meshName.starts_with(meshPrefix) || mesh.Positions.empty()) return;
+
+		const std::string partName =
+			std::string(partPrefix) + std::string(meshName.substr(meshPrefix.size()));
+		const Entity part = store.FindFirstChild(engine::scene::WorkspaceOf(store), partName);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const Transform *transform = store.Get<Transform>(part);
+		REQUIRE(transform != nullptr);
+		size_t patchSide = 1;
+		while (patchSide * patchSide < mesh.Positions.size()) {
+			patchSide++;
+		}
+		REQUIRE(patchSide * patchSide == mesh.Positions.size());
+
+		std::vector<Vector3> world(mesh.Positions.size());
+		for (size_t index = 0; index < world.size(); index++) {
+			world[index] = transform->Frame.PointToWorldSpace(mesh.Positions[index]);
+		}
+
+		const size_t patch = patches++;
+		const auto addEdge = [&](size_t first, size_t second) {
+			edges.push_back({world[first], world[second], patch});
+		};
+		for (size_t index = 0; index + 1 < patchSide; index++) {
+			addEdge(index, index + 1);
+			addEdge((patchSide - 1) * patchSide + index, (patchSide - 1) * patchSide + index + 1);
+			addEdge(index * patchSide, (index + 1) * patchSide);
+			addEdge(index * patchSide + patchSide - 1, (index + 1) * patchSide + patchSide - 1);
+		}
+	});
+
+	REQUIRE(patches > 6);
+	REQUIRE(!edges.empty());
+
+	for (const Edge &edge : edges) {
+		for (const Vector3 point : {edge.First, edge.Second}) {
+			const bool joined = std::any_of(edges.begin(), edges.end(), [&](const Edge &other) {
+				return other.Patch != edge.Patch && DistanceToSegment(point, other) <= 0.001f;
+			});
+			CHECK(joined);
+		}
+	}
+}
