@@ -268,6 +268,7 @@ namespace studio {
 		}
 
 		const WorldId replica = link->ReplicaWorld();
+		Universe->Enter(replica, [this](engine::ecs::Store &store) { ApplyKnownContentFacts(store); });
 
 		// **One generated split per client.** The first opens beside the panel
 		// whose transport started Play. Later clients open beside the previous
@@ -546,6 +547,9 @@ namespace studio {
 				StopPlayLink(*link);
 
 				const WorldId replica = moved->ReplicaWorld();
+				Universe->Enter(replica, [this](engine::ecs::Store &store) {
+					ApplyKnownContentFacts(store);
+				});
 				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 
 				// The panel that was showing them follows too, or the author

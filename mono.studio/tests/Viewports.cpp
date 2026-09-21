@@ -19,6 +19,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -111,6 +112,18 @@ namespace studio {
 			REQUIRE_FALSE(editor.Runs.back().Links.empty());
 			REQUIRE(editor.Runs.back().Links.front() != nullptr);
 			return editor.Runs.back().Links.front()->ReplicaWorld();
+		}
+
+		static engine::scene::FlipbookFacts Flipbook(Editor &editor, engine::world::WorldId world) {
+			engine::scene::FlipbookFacts facts;
+			editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+				facts = engine::scene::FlipbookOf(store, engine::core::Name("effects/fox_dance.atex"));
+			});
+			return facts;
+		}
+
+		static bool HasPackagedFlipbook(Editor &editor) {
+			return editor.Renderer.TextureHandle(engine::core::Name("effects/fox_dance.atex")) != nullptr;
 		}
 
 		static void Show(Editor &editor, engine::world::WorldId world) {
@@ -278,6 +291,28 @@ TEST_CASE(
 
 	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
 	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 1) == 1.19f);
+}
+
+TEST_CASE(
+	"staged engine textures are resident in Studio and its Play client",
+	"[studio][viewports][content][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	CHECK(studio::ViewportCameraProbe::HasPackagedFlipbook(editor));
+
+	const engine::scene::FlipbookFacts author = studio::ViewportCameraProbe::Flipbook(editor, editor.Active);
+	CHECK(author.Side == 8);
+	CHECK(author.Frames == 64);
+	CHECK(author.FrameRate > 23.0f);
+	CHECK(author.FrameRate < 25.0f);
+
+	const WorldId replica = studio::ViewportCameraProbe::StartPlay(editor);
+	const engine::scene::FlipbookFacts client = studio::ViewportCameraProbe::Flipbook(editor, replica);
+	CHECK(client.Side == 8);
+	CHECK(client.Frames == 64);
+	CHECK(client.FrameRate > 23.0f);
+	CHECK(client.FrameRate < 25.0f);
 }
 
 TEST_CASE(

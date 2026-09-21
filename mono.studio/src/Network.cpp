@@ -569,6 +569,15 @@ namespace studio {
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
 				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
+					const engine::scene::FlipbookFacts facts{
+						.Side = image.FlipbookSide,
+						.Frames = image.FlipbookFrames,
+						.FrameRate = image.FlipbookFrameRate,
+					};
+					ContentTextureFacts[name.Id()] = facts;
+					EachOpenWorld([&](engine::ecs::Store &store) {
+						(void)engine::scene::RecordTexture(store, name, facts);
+					});
 					const AssetFootprint footprint = TextureFootprint(image);
 					RecordContentAssetFootprint(
 						name, footprint.DecodedBytes, footprint.CpuResidentBytes, footprint.GpuResidentBytes

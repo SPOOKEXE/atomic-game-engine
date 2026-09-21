@@ -67,6 +67,7 @@
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
@@ -2294,6 +2295,14 @@ namespace studio {
 		void RegisterBakedAsset(std::span<const std::byte> bytes, const std::string &name);
 		//@}
 
+		// Loads the staged engine examples that a fresh Studio install can use
+		// without a separately published content store.
+		void LoadPackagedExampleAssets();
+
+		// Gives a newly opened authoring or replica world the facts for content
+		// this editor already registered with its renderer.
+		void ApplyKnownContentFacts(engine::ecs::Store &store) const;
+
 		// What is moving between this editor and its origins.
 		//
 		// **The panel that makes `ContentSources` observable.** The settings
@@ -2806,6 +2815,7 @@ namespace studio {
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
 		std::unordered_map<uint32_t, engine::assets::AnimationData> ContentAnimationFacts;
+		std::unordered_map<uint32_t, engine::scene::FlipbookFacts> ContentTextureFacts;
 
 		// The collision geometry of every mesh this session has taken in.
 		//

@@ -1,3 +1,4 @@
+#include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -6,6 +7,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/examples/DemosLoader.hpp>
+#include <engine/examples/PackagedAssets.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/graph/Cull.hpp>
@@ -31,6 +33,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
@@ -766,6 +769,7 @@ namespace studio {
 		engine::scene::RegisterSceneClasses();
 		engine::gui::RegisterGuiClasses();
 		engine::script::ScriptClass();
+		LoadPackagedExampleAssets();
 
 		// **Before any world is built, which is what the header asks for.** A
 		// resource is keyed by a component id too, so one registered lazily by
@@ -3320,23 +3324,43 @@ namespace studio {
 				engine::physics::SetPhysicsTickRate(store, physicsTickRate);
 				engine::script::SetScriptTickRate(store, scriptTickRate);
 
-				// **The meshes this session has already taken in.** Content arrives
-				// into the worlds that are open at the time, so a world created or
-				// opened afterwards holds parts naming a mesh whose shape it has
-				// never heard of - and a collider that cannot resolve its geometry
-				// falls back to the part's bound in silence. `ContentShapes` is the
-				// same argument `ContentMeshFacts` makes, one layer down.
-				engine::game::MergeCollisionShapes(store, ContentShapes);
-				for (const auto &[name, mesh] : ContentMeshFacts) {
-					engine::scene::RecordMesh(
-						store, engine::core::Name::FromId(name), mesh.Triangles, mesh.Sheets
-					);
-				}
-				for (const auto &[name, animation] : ContentAnimationFacts) {
-					(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
-				}
+				ApplyKnownContentFacts(store);
 			}
 		);
+	}
+
+	void Editor::ApplyKnownContentFacts(Store &store) const {
+		// Content arrives while worlds are open, but worlds can be loaded,
+		// restored, or created for a Play client afterwards. Keep the renderer's
+		// pixels and each world's runtime facts in the same session state.
+		engine::game::MergeCollisionShapes(store, ContentShapes);
+		for (const auto &[name, mesh] : ContentMeshFacts) {
+			engine::scene::RecordMesh(store, engine::core::Name::FromId(name), mesh.Triangles, mesh.Sheets);
+		}
+		for (const auto &[name, animation] : ContentAnimationFacts) {
+			(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
+		}
+		for (const auto &[name, facts] : ContentTextureFacts) {
+			(void)engine::scene::RecordTexture(store, engine::core::Name::FromId(name), facts);
+		}
+	}
+
+	void Editor::LoadPackagedExampleAssets() {
+		for (const engine::examples::PackagedAsset &asset : engine::examples::PackagedAssets()) {
+			const engine::assets::AssetKind kind = engine::assets::KindOfName(asset.Name);
+			if (kind != engine::assets::AssetKind::Texture && kind != engine::assets::AssetKind::Mesh)
+				continue;
+
+			std::ifstream input(asset.Path, std::ios::binary);
+			const std::vector<char> raw(
+				(std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>()
+			);
+			if (!input.good() && !input.eof()) {
+				ENGINE_WARN("examples: packaged asset '{}' could not be read", asset.Path.string());
+				continue;
+			}
+			RegisterBakedAsset({reinterpret_cast<const std::byte *>(raw.data()), raw.size()}, asset.Name);
+		}
 	}
 
 	bool

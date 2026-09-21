@@ -4,8 +4,8 @@
 #include <engine/assets/Material.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
-#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/examples/PackagedAssets.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/render/Animation.hpp>
 #include <engine/render/AutomaticMeshLod.hpp>
@@ -30,31 +30,21 @@ namespace client {
 		if (content.PackagedExamplesLoaded) return;
 		content.PackagedExamplesLoaded = true;
 
-		// Programs live in their own staged directory, while shared example assets
-		// are siblings under the stage root. `Paths::Assets()` is the program's
-		// renderer asset directory, not that shared tree.
-		const std::filesystem::path root = engine::core::Paths::Base().parent_path() / "assets/examples";
-		const std::filesystem::path effects = root / "effects";
-		std::error_code error;
-		if (!std::filesystem::is_directory(effects, error)) return;
-
-		for (const std::filesystem::directory_entry &entry :
-			 std::filesystem::recursive_directory_iterator(effects, error)) {
-			if (error || !entry.is_regular_file() || entry.path().extension() != ".atex") continue;
-			const size_t size = static_cast<size_t>(entry.file_size(error));
+		for (const engine::examples::PackagedAsset &asset : engine::examples::PackagedAssets()) {
+			if (std::filesystem::path(asset.Name).extension() != ".atex") continue;
+			std::error_code error;
+			const size_t size = static_cast<size_t>(std::filesystem::file_size(asset.Path, error));
 			if (error) continue;
 			std::vector<std::byte> bytes(size);
-			std::ifstream input(entry.path(), std::ios::binary);
+			std::ifstream input(asset.Path, std::ios::binary);
 			input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 			engine::assets::TextureData image;
 			engine::core::ByteReader reader(bytes);
 			if ((!input.good() && !input.eof()) || !engine::assets::Texture::Read(reader, image)) {
-				ENGINE_WARN("examples: packaged texture '{}' is unreadable", entry.path().string());
+				ENGINE_WARN("examples: packaged texture '{}' is unreadable", asset.Path.string());
 				continue;
 			}
-			const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, error);
-			if (error) continue;
-			const engine::core::Name name(relative.generic_string());
+			const engine::core::Name name(asset.Name);
 			content.PackagedTextures.push_back({.Name = name, .Data = std::move(image), .Facts = {}});
 			const engine::assets::TextureData &stored = content.PackagedTextures.back().Data;
 			content.PackagedTextures.back().Facts = {

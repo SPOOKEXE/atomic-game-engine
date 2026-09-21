@@ -1,5 +1,6 @@
 #include <engine/core/Paths.hpp>
 #include <engine/examples/DemosLoader.hpp>
+#include <engine/examples/PackagedAssets.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -7,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.examples.demos-loader")
 
@@ -18,18 +20,32 @@ namespace {
 			std::filesystem::remove_all(Root);
 			std::filesystem::create_directories(Root / "scripts" / "nested");
 			std::filesystem::create_directories(Root / "worlds");
+			std::filesystem::create_directories(Root / "effects");
 			std::ofstream(Root / "scripts" / "Zeta.luau") << "return true\n";
 			std::ofstream(Root / "scripts" / "Alpha.luau") << "return true\n";
 			std::ofstream(Root / "scripts" / "Alpha.js") << "true;\n";
 			std::ofstream(Root / "scripts" / "notes.txt") << "not a demo\n";
 			std::ofstream(Root / "scripts" / "nested" / "Hidden.luau") << "return true\n";
 			std::ofstream(Root / "worlds" / "Arena.aworld") << "<World />\n";
+			std::ofstream(Root / "effects" / "fox.atex") << "texture";
+			std::ofstream(Root / "effects" / "rock.amesh") << "mesh";
+			std::ofstream(Root / "effects" / "notes.txt") << "not packaged content";
 		}
 
 		~Fixture() {
 			std::filesystem::remove_all(Root);
 		}
 	};
+}
+
+TEST_CASE("packaged asset discovery returns staged baked assets by relative name", "[examples][demos]") {
+	const Fixture fixture;
+	const std::vector<engine::examples::PackagedAsset> assets =
+		engine::examples::PackagedAssets(fixture.Root);
+	REQUIRE(assets.size() == 2);
+	CHECK(assets[0].Name == "effects/fox.atex");
+	CHECK(assets[1].Name == "effects/rock.amesh");
+	CHECK(assets[0].Path == fixture.Root / "effects" / "fox.atex");
 }
 
 TEST_CASE("demo loader lists scripts and worlds by kind", "[examples][demos]") {
