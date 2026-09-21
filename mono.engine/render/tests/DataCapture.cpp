@@ -409,6 +409,7 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 		.CaptureNode = "data-capture",
 		.Channels = {"linear_depth", "ambient_occlusion", "pbr_material", "packed_gpu"},
 		.TemporalHistory = "preserve",
+		.PackedPlanes = {},
 	};
 	request.PackedPlanes.push_back({
 		.Name = "depth_ao_roughness",
@@ -819,6 +820,7 @@ namespace {
 			.CaptureNode = "capture",
 			.Channels = {"rgb_linear_hdr"},
 			.TemporalHistory = "preserve",
+			.PackedPlanes = {},
 		};
 	}
 	engine::script::ViewCameraMutationRequest MutationRequest(
@@ -1599,6 +1601,7 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 			 "second_surface_depth",
 			 "second_surface_validity"},
 		.TemporalHistory = "preserve",
+		.PackedPlanes = {},
 	};
 	uint64_t broadTicket = 0;
 	REQUIRE(first.Queue("data-world", broad, broadTicket, detail));

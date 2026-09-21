@@ -4921,6 +4921,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 		.Channels = {"object_ids"},
 		.TemporalHistory = "preserve",
 		.IncludeSceneData = true,
+		.PackedPlanes = {},
 	};
 	uint64_t ticket = 0;
 	std::string detail;
