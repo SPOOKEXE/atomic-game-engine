@@ -371,8 +371,9 @@ namespace engine::render {
 		bool replaceExisting
 	) {
 		RequireOwningThread("AdoptResourceImages");
-		if (State->Device == nullptr || tokens.empty() || tokens.size() > State->ResourceImages.size() ||
-			tokens.size() != bindings.size() || tokens.size() != handles.size())
+		if (State->Device == nullptr || tokens.empty() ||
+			tokens.size() > State->GraphResources.Images.size() || tokens.size() != bindings.size() ||
+			tokens.size() != handles.size())
 			return false;
 		struct Adoption {
 			Impl::ResourceImageSlot *Capture = nullptr;
@@ -400,7 +401,7 @@ namespace engine::render {
 			for (size_t previous = 0; previous < index; ++previous)
 				if (tokens[previous] == tokens[index] || SameOwner(bindings[previous], binding)) return false;
 			auto &adoption = planned[index];
-			for (auto &slot : State->ResourceImages) {
+			for (auto &slot : State->GraphResources.Images) {
 				if (slot.Image.Request.Token == tokens[index] && !slot.Cancelled && slot.Resident &&
 					slot.Image.Request.Delivery == ResourceImageDelivery::Resident &&
 					slot.Image.Status == ResourceImageStatus::Ok && slot.Image.CaptureFrame != 0 &&
@@ -519,13 +520,14 @@ namespace engine::render {
 											: 8;
 		};
 		auto found = std::find_if(
-			ResidentImageCache.begin(), ResidentImageCache.end(), [](const ResidentImagePair &pair) {
-				return pair.Colour == nullptr;
-			}
+			GraphResources.ResidentImageCache.begin(),
+			GraphResources.ResidentImageCache.end(),
+			[](const ResidentImagePair &pair) { return pair.Colour == nullptr; }
 		);
-		if (found == ResidentImageCache.end()) {
-			found = ResidentImageCache.begin() + NextResidentCache;
-			NextResidentCache = (NextResidentCache + 1) % ResidentImageCache.size();
+		if (found == GraphResources.ResidentImageCache.end()) {
+			found = GraphResources.ResidentImageCache.begin() + GraphResources.NextResidentCache;
+			GraphResources.NextResidentCache =
+				(GraphResources.NextResidentCache + 1) % GraphResources.ResidentImageCache.size();
 			PortalImportUsage.CachedTextureBytes -=
 				size_t(found->Width) * found->Height * residentBytesPerPixel(*found);
 			gpu::ReleaseTexture(Device, found->Colour);
@@ -917,9 +919,9 @@ namespace engine::render {
 			std::to_string(body.Slot)
 		);
 		if (std::none_of(
-				State->NamedPipelines.begin(), State->NamedPipelines.end(), [&](const auto &pipeline) {
-					return pipeline.Name == pipelineName;
-				}
+				State->InstalledPipelines.begin(),
+				State->InstalledPipelines.end(),
+				[&](const auto &pipeline) { return pipeline.Name == pipelineName; }
 			)) {
 			graph::PipelineDocument document;
 			const auto base = graph::DefaultPortalBodyDocument(

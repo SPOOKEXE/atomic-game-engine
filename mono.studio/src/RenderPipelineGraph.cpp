@@ -1,3 +1,5 @@
+#include "RenderPipelineDocumentAdapter.hpp"
+
 #include <engine/core/Chars.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/Schedule.hpp>
@@ -19,6 +21,8 @@ namespace studio {
 	namespace {
 		using engine::core::Name;
 		using namespace engine::graph;
+		using render_pipeline::AuthoredNode;
+		using render_pipeline::Binding;
 
 		constexpr std::string_view TYPE_PREFIX = "render.pass.";
 		constexpr std::string_view INTERNAL_PREFIX = "__render.";
@@ -134,79 +138,9 @@ namespace studio {
 			return "resource." + std::string(port) + "." + std::string(setting);
 		}
 
-		struct Binding {
-			std::string Port;
-			Name Resource;
-		};
-
-		struct AuthoredNode {
-			Name Name_;
-			Name Kind;
-			NodeScope Scope = NodeScope::View;
-			bool Enabled = true;
-			float X = 0.0f;
-			float Y = 0.0f;
-			bool Moved = false;
-			std::vector<Binding> Reads;
-			std::vector<Binding> Writes;
-			std::vector<NodeParameter> Parameters;
-		};
-
-		std::vector<AuthoredNode> AuthoredNodes(const PipelineDocument &document) {
-			std::vector<AuthoredNode> nodes;
-			AuthoredNode *current = nullptr;
-			for (const Edit &edit : document.Edits()) {
-				switch (edit.Kind) {
-				case EditKind::AddNode:
-					nodes.push_back(AuthoredNode{});
-					nodes.back().Name_ = edit.Name;
-					nodes.back().Kind = edit.NodeKind;
-					nodes.back().Scope = edit.Scope;
-					current = &nodes.back();
-					break;
-				case EditKind::Reads:
-				case EditKind::Writes:
-					if (current != nullptr) {
-						auto &bindings = edit.Kind == EditKind::Reads ? current->Reads : current->Writes;
-						bindings.push_back({std::string(edit.Key.Text()), edit.Target});
-					}
-					break;
-				case EditKind::Set:
-					if (current != nullptr) {
-						current->Parameters.push_back({edit.Key, edit.Value});
-					}
-					break;
-				case EditKind::Enable:
-					for (AuthoredNode &node : nodes) {
-						if (node.Name_ == edit.Name) {
-							node.Enabled = edit.Enabled;
-						}
-					}
-					current = nullptr;
-					break;
-				case EditKind::Move:
-					for (AuthoredNode &node : nodes) {
-						if (node.Name_ == edit.Name) {
-							node.X = edit.X;
-							node.Y = edit.Y;
-							node.Moved = true;
-						}
-					}
-					break;
-				case EditKind::AddResource:
-					current = nullptr;
-					break;
-				case EditKind::Group:
-				case EditKind::Comment:
-				case EditKind::Mute:
-				case EditKind::Preview:
-					break;
-				}
-			}
-			return nodes;
-		}
-
-		std::string BindingPort(const Binding &binding, const std::vector<PortSpec> &ports, size_t index) {
+		std::string BindingPort(
+			const render_pipeline::Binding &binding, const std::vector<PortSpec> &ports, size_t index
+		) {
 			if (!binding.Port.empty()) {
 				return binding.Port;
 			}
@@ -414,7 +348,7 @@ namespace studio {
 		graph.Clear();
 		error.clear();
 
-		const std::vector<AuthoredNode> authored = AuthoredNodes(document);
+		const std::vector<AuthoredNode> authored = render_pipeline::AuthoredNodes(document);
 		std::unordered_map<uint32_t, Edit> resourceSettings;
 		for (const Edit &edit : document.Edits()) {
 			if (edit.Kind == EditKind::AddResource) {
@@ -437,7 +371,7 @@ namespace studio {
 				return false;
 			}
 			nodegraph::Node &node = *graph.Find(id);
-			node.Label = std::string(source.Name_.Text());
+			node.Label = std::string(source.Name.Text());
 			PutToggle(node, "enabled", source.Enabled);
 			PutSelect(node, "scope", Describe(source.Scope));
 			const NodeKindSpec *spec = NodeCatalogue::Find(source.Kind);
@@ -793,6 +727,9 @@ namespace studio {
 		for (Edit &edit : moves) {
 			document.Record(std::move(edit));
 		}
+		// The canvas has no controls for these document records yet. Keep the
+		// authored metadata through a save, since Build deliberately ignores it.
+		render_pipeline::AppendUncontrolledAuthoringMetadata(basis, document);
 
 		RenderGraph built;
 		Name offender;

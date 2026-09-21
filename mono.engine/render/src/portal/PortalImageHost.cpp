@@ -1,3 +1,5 @@
+#include "PortalRenderOperations.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -20,7 +22,7 @@ namespace engine::render {
 		}
 		world::Universe &Universe;
 		bool EyePipelineInstalled = false;
-		Renderer &Render;
+		PortalRenderOperations Render;
 		PortalResidentImages Resident;
 		PortalTopologyHost Topology;
 		std::unique_ptr<ShaderLibrary> OwnedShaders;
@@ -85,8 +87,8 @@ namespace engine::render {
 						return false;
 				}
 				if (image.Route) ReleaseShadowRoute(*image.Route, LastTime.value_or(Time{}));
-				if (image.Preparation) Render.CancelPortalCaptureTreePreparation(image.Preparation);
-				Render.DropPortalImage(image.Image);
+				if (image.Preparation) Render.CancelPreparation(image.Preparation);
+				Render.ReleaseImage(image.Image);
 				return true;
 			});
 		}
@@ -242,11 +244,10 @@ namespace engine::render {
 		void AbortBody(Time now) {
 			if (!BodyJob) return;
 			if (BodyJob->Preparation)
-				Render.CancelPortalCaptureTreePreparation(BodyJob->Token);
+				Render.CancelPreparation(BodyJob->Token);
 			else
-				Render.CancelPortalCaptureTreeComposition(BodyJob->Token);
-			if (BodyJob->PreparationToken)
-				Render.CancelPortalCaptureTreePreparation(BodyJob->PreparationToken);
+				Render.CancelComposition(BodyJob->Token);
+			if (BodyJob->PreparationToken) Render.CancelPreparation(BodyJob->PreparationToken);
 			if (BodyJob->Route) ReleaseShadowRoute(*BodyJob->Route, now);
 			if (BodyJob->Stage == BodyStage::Complete) {
 				for (auto &source : Sources)
@@ -319,9 +320,7 @@ namespace engine::render {
 				return;
 			}
 			job.Status =
-				job.Preparation
-					? Render.AcceptPortalPreparedShadowTile(job.Token, job.Request->Node, packet.Payload)
-					: Render.AcceptPortalCaptureTreeShadowTile(job.Token, job.Request->Node, packet.Payload);
+				Render.UploadShadowTile(job.Token, job.Request->Node, packet.Payload, job.Preparation);
 			if (job.Status == PortalTreeCompositionStatus::Invalid) {
 				AbortBody(now);
 				return;
@@ -339,7 +338,7 @@ namespace engine::render {
 				if (now < prepared.Deadline && CurrentEndpoint(prepared.Address) &&
 					CurrentEndpoint(prepared.Producer))
 					return false;
-				Render.CancelPortalCaptureTreePreparation(prepared.PreparationToken);
+				Render.CancelPreparation(prepared.PreparationToken);
 				if (prepared.Route) ReleaseShadowRoute(*prepared.Route, now);
 				return true;
 			});
@@ -352,10 +351,7 @@ namespace engine::render {
 			auto &job = *BodyJob;
 			if (job.Stage == BodyStage::Complete) return;
 			if (job.Stage == BodyStage::AdmitManifest) {
-				job.Status =
-					job.Preparation
-						? Render.BeginPortalCaptureTreePreparationShadowAssembly(job.Token, *job.Manifest)
-						: Render.BeginPortalCaptureTreeShadowAssembly(job.Token, *job.Manifest);
+				job.Status = Render.BeginShadowAssembly(job.Token, *job.Manifest, job.Preparation);
 				if (job.Status == PortalTreeCompositionStatus::Invalid) {
 					AbortBody(now);
 					return;
@@ -368,9 +364,7 @@ namespace engine::render {
 				}
 			}
 			if (job.Stage == BodyStage::Commit) {
-				job.Status = job.Preparation
-								 ? Render.CommitPortalPreparedShadowAssembly(job.Token, job.Request->Node)
-								 : Render.CommitPortalCaptureTreeShadowAssembly(job.Token, job.Request->Node);
+				job.Status = Render.CommitShadowAssembly(job.Token, job.Request->Node, job.Preparation);
 				if (job.Status == PortalTreeCompositionStatus::Invalid) {
 					AbortBody(now);
 					return;
@@ -379,8 +373,7 @@ namespace engine::render {
 				job.Stage = BodyStage::Submitted;
 			}
 			if (job.Stage == BodyStage::Submitted) {
-				auto progress = job.Preparation ? Render.PollPortalCaptureTreePreparation(job.Token)
-												: Render.PollPortalCaptureTreeComposition(job.Token);
+				auto progress = Render.Poll(job.Token, job.Preparation);
 				job.Status = progress.Status;
 				if (progress.Status == PortalTreeCompositionStatus::Invalid) {
 					AbortBody(now);
@@ -419,7 +412,7 @@ namespace engine::render {
 							 job.Address}
 						);
 					else {
-						if (previous->Image != progress.Image) Render.DropPortalImage(previous->Image);
+						if (previous->Image != progress.Image) Render.ReleaseImage(previous->Image);
 						if (previous->Route) ReleaseShadowRoute(*previous->Route, now);
 						*previous = {
 							job.Portal,
@@ -481,8 +474,8 @@ namespace engine::render {
 				OwnedShaders = std::make_unique<ShaderLibrary>();
 				Shaders = OwnedShaders.get();
 			}
-			auto runtime = std::make_unique<PortalImageProducer>(
-				Universe, Render, destination.World, opened.Address, &Resident, Shaders, PostProcessing
+			auto runtime = Render.CreateProducer(
+				Universe, destination.World, opened.Address, &Resident, Shaders, PostProcessing
 			);
 			if (DriverBindingsEnabled) runtime->SetEndpointBindings(&DriverBindings);
 			const auto storeIdentity = LocalStoreIdentity(destination.World);
@@ -645,7 +638,7 @@ namespace engine::render {
 			core::Name offender;
 			if (graph::Build(graph::DefaultEyeDocument(), pipeline, offender) !=
 					graph::PipelineDocumentStatus::Ok ||
-				!state.Render.SetPipeline(pipelineName, pipeline))
+				!state.Render.InstallPipeline(pipelineName, pipeline))
 				return 0;
 			state.EyePipelineInstalled = true;
 		}
@@ -745,7 +738,7 @@ namespace engine::render {
 		if (!authorize) {
 			State->AbortBody(State->LastTime.value_or(Time{}));
 			for (auto prepared = State->PreparedBodies.begin(); prepared != State->PreparedBodies.end();) {
-				State->Render.CancelPortalCaptureTreePreparation(prepared->PreparationToken);
+				State->Render.CancelPreparation(prepared->PreparationToken);
 				if (prepared->Route)
 					State->ReleaseShadowRoute(*prepared->Route, State->LastTime.value_or(Time{}));
 				prepared = State->PreparedBodies.erase(prepared);
@@ -832,8 +825,8 @@ namespace engine::render {
 			if (opened.Status != world::PresentationStatus::Ok) {
 				return 0;
 			}
-			auto runtime = std::make_unique<PortalImageSource>(
-				state.Universe, state.Render, source, opened.Address, PortalInboxLimits{}, &state.Resident
+			auto runtime = state.Render.CreateSource(
+				state.Universe, source, opened.Address, PortalInboxLimits{}, &state.Resident
 			);
 			if (state.DriverBindingsEnabled) runtime->SetEndpointBindings(&state.DriverBindings);
 			state.Sources.push_back({source, viewSlot, opened.Address, std::move(runtime), {}, {}});
@@ -941,7 +934,7 @@ namespace engine::render {
 					   : uint64_t{};
 		};
 		if (state.BodyJob) return retained();
-		const auto composed = state.Render.ComposePortalBodyImage(*capture, body);
+		const auto composed = state.Render.ComposeBodyImage(*capture, body);
 		if (composed == 0) return retained();
 		if (previous == source->Compositions.end())
 			source->Compositions.push_back(
@@ -958,7 +951,7 @@ namespace engine::render {
 				state.ReleaseShadowRoute(*previous->Route, state.LastTime.value_or(Time{}));
 				previous->Route.reset();
 			}
-			if (previous->Image != composed) state.Render.DropPortalImage(previous->Image);
+			if (previous->Image != composed) state.Render.ReleaseImage(previous->Image);
 			previous->Image = composed;
 			previous->Producer = capture->Producer;
 		}
@@ -982,16 +975,16 @@ namespace engine::render {
 		if (!capture || !capture->Tree || !state.CurrentEndpoint(source->Address) ||
 			!state.CurrentEndpoint(capture->Producer))
 			return PortalTreeCompositionStatus::Invalid;
-		const auto *tree = state.Render.FindPortalCaptureTree(capture->Tree);
+		const auto *tree = state.Render.FindCaptureTree(capture->Tree);
 		if (!tree || tree->Nodes.empty()) return PortalTreeCompositionStatus::Invalid;
 		const auto publishedProducer = tree->Nodes.front().Producer;
-		const auto status = state.Render.BeginPortalCaptureTreeComposition(capture->Tree, body, token);
+		const auto status = state.Render.BeginComposition(capture->Tree, body, token);
 		if (status != PortalTreeCompositionStatus::Pending) return status;
 		const auto deadline = source->Runtime->PinCapture(
 			portal.Text(), capture->Tree, capture->Binding.Expected, now, now + std::chrono::seconds(10)
 		);
 		if (!deadline) {
-			state.Render.CancelPortalCaptureTreeComposition(token);
+			state.Render.CancelComposition(token);
 			token = 0;
 			return PortalTreeCompositionStatus::Invalid;
 		}
@@ -1061,16 +1054,15 @@ namespace engine::render {
 		if (!capture || !capture->Tree || !state.CurrentEndpoint(source->Address) ||
 			!state.CurrentEndpoint(capture->Producer))
 			return PortalTreeCompositionStatus::Invalid;
-		const auto *tree = state.Render.FindPortalCaptureTree(capture->Tree);
+		const auto *tree = state.Render.FindCaptureTree(capture->Tree);
 		if (!tree || tree->Nodes.empty()) return PortalTreeCompositionStatus::Invalid;
-		const auto status =
-			state.Render.BeginPortalCaptureTreePreparation(capture->Tree, referenceBody, token);
+		const auto status = state.Render.BeginPreparation(capture->Tree, referenceBody, token);
 		if (status != PortalTreeCompositionStatus::Pending) return status;
 		const auto deadline = source->Runtime->PinCapture(
 			portal.Text(), capture->Tree, capture->Binding.Expected, now, now + std::chrono::seconds(10)
 		);
 		if (!deadline) {
-			state.Render.CancelPortalCaptureTreePreparation(token);
+			state.Render.CancelPreparation(token);
 			token = 0;
 			return PortalTreeCompositionStatus::Invalid;
 		}
@@ -1129,7 +1121,7 @@ namespace engine::render {
 			}
 		);
 		if (found == state.PreparedBodies.end()) return;
-		state.Render.CancelPortalCaptureTreePreparation(token);
+		state.Render.CancelPreparation(token);
 		if (found->Route) state.ReleaseShadowRoute(*found->Route, state.LastTime.value_or(Time{}));
 		state.PreparedBodies.erase(found);
 	}
@@ -1147,8 +1139,7 @@ namespace engine::render {
 		if (found == state.PreparedBodies.end() || now >= found->Deadline ||
 			!state.CurrentEndpoint(found->Address) || !state.CurrentEndpoint(found->Producer))
 			return PortalTreeCompositionStatus::Invalid;
-		const auto status =
-			state.Render.BeginPreparedPortalCaptureTreeComposition(preparation, body, jobToken);
+		const auto status = state.Render.BeginPreparedComposition(preparation, body, jobToken);
 		if (status != PortalTreeCompositionStatus::Pending) return status;
 		found->Preparation = false;
 		found->Token = jobToken;
@@ -1226,7 +1217,7 @@ namespace engine::render {
 			}
 		);
 		if (found == state.PreparedBodies.end()) return;
-		state.Render.CancelPortalCaptureTreePreparation(preparation);
+		state.Render.CancelPreparation(preparation);
 		if (found->Route) state.ReleaseShadowRoute(*found->Route, state.LastTime.value_or(Time{}));
 		state.PreparedBodies.erase(found);
 	}
@@ -1259,7 +1250,7 @@ namespace engine::render {
 				++prepared;
 				continue;
 			}
-			State->Render.CancelPortalCaptureTreePreparation(prepared->PreparationToken);
+			State->Render.CancelPreparation(prepared->PreparationToken);
 			if (prepared->Route)
 				State->ReleaseShadowRoute(*prepared->Route, State->LastTime.value_or(Time{}));
 			prepared = State->PreparedBodies.erase(prepared);
@@ -1282,7 +1273,7 @@ namespace engine::render {
 				++prepared;
 				continue;
 			}
-			State->Render.CancelPortalCaptureTreePreparation(prepared->PreparationToken);
+			State->Render.CancelPreparation(prepared->PreparationToken);
 			if (prepared->Route)
 				State->ReleaseShadowRoute(*prepared->Route, State->LastTime.value_or(Time{}));
 			prepared = State->PreparedBodies.erase(prepared);
@@ -1335,7 +1326,7 @@ namespace engine::render {
 	void PortalImageHost::Clear() {
 		State->AbortBody(State->LastTime.value_or(Time{}));
 		for (auto &prepared : State->PreparedBodies) {
-			State->Render.CancelPortalCaptureTreePreparation(prepared.PreparationToken);
+			State->Render.CancelPreparation(prepared.PreparationToken);
 			if (prepared.Route) State->ReleaseShadowRoute(*prepared.Route, State->LastTime.value_or(Time{}));
 		}
 		State->PreparedBodies.clear();

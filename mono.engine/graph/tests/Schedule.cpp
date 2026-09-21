@@ -3,6 +3,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <string>
+#include <vector>
+
 TEST_SUITE_ID("engine.graph.schedule")
 TEST_DEPENDS("engine.graph.rendergraph")
 
@@ -21,6 +24,126 @@ namespace {
 		node.Scope = scope;
 		return node;
 	}
+}
+
+TEST_CASE("the last authored writer supplies a later reader", "[graph][schedule]") {
+	RenderGraph graph;
+	const ResourceId colour = Resource(graph, "colour", ResourceKind::Colour);
+	for (const char *name : {"first", "second"}) {
+		Node writer = NodeOf(name, "opaque");
+		writer.Writes = {colour};
+		graph.AddNode(writer);
+	}
+	Node reader = NodeOf("reader", "grade");
+	reader.Reads = {colour};
+	graph.AddNode(reader);
+
+	ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(CompileSchedule(graph, schedule, offender) == ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 3);
+	CHECK(graph.Find(schedule.Waves[0].Nodes[0].Node)->Name == Name("first"));
+	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("second"));
+	CHECK(graph.Find(schedule.Waves[2].Nodes[0].Node)->Name == Name("reader"));
+
+	// Execute the scheduled writes as a tiny value model. The reader must see
+	// the second version even when the first writer is also a valid producer.
+	std::string colourValue;
+	std::string observed;
+	for (const ExecutionWave &wave : schedule.Waves)
+		for (const ScheduledNode &scheduled : wave.Nodes) {
+			const Name name = graph.Find(scheduled.Node)->Name;
+			if (name == Name("reader"))
+				observed = colourValue;
+			else
+				colourValue = std::string(name.Text());
+		}
+	CHECK(observed == "second");
+}
+
+TEST_CASE("disabled writers do not replace the version a reader sees", "[graph][schedule]") {
+	RenderGraph graph;
+	const ResourceId colour = Resource(graph, "colour", ResourceKind::Colour);
+	Node first = NodeOf("first", "opaque");
+	first.Writes = {colour};
+	graph.AddNode(first);
+	Node disabled = NodeOf("disabled", "opaque");
+	disabled.Writes = {colour};
+	disabled.Enabled = false;
+	graph.AddNode(disabled);
+	Node reader = NodeOf("reader", "grade");
+	reader.Reads = {colour};
+	graph.AddNode(reader);
+
+	ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(CompileSchedule(graph, schedule, offender) == ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 2);
+	CHECK(graph.Find(schedule.Waves[0].Nodes[0].Node)->Name == Name("first"));
+	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("reader"));
+}
+
+TEST_CASE("history read before two writers uses the previous generation", "[graph][schedule]") {
+	RenderGraph graph;
+	const ResourceId history = graph.AddResource({
+		.Name = Name("history"),
+		.Kind = ResourceKind::Colour,
+		.External = true,
+		.Lifetime = ResourceLifetime::History,
+	});
+	Node reader = NodeOf("previous-frame", "grade");
+	reader.Reads = {history};
+	graph.AddNode(reader);
+	for (const char *name : {"first-write", "second-write"}) {
+		Node writer = NodeOf(name, "opaque");
+		writer.Writes = {history};
+		graph.AddNode(writer);
+	}
+
+	ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(CompileSchedule(graph, schedule, offender) == ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 2);
+	REQUIRE(schedule.Waves[0].Nodes.size() == 2);
+	CHECK(graph.Find(schedule.Waves[0].Nodes[0].Node)->Name == Name("previous-frame"));
+	CHECK(graph.Find(schedule.Waves[0].Nodes[1].Node)->Name == Name("first-write"));
+	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("second-write"));
+	std::string previousGeneration = "prior";
+	std::string nextGeneration;
+	std::string observed;
+	for (const ExecutionWave &wave : schedule.Waves)
+		for (const ScheduledNode &scheduled : wave.Nodes) {
+			const Name name = graph.Find(scheduled.Node)->Name;
+			if (name == Name("previous-frame"))
+				observed = previousGeneration;
+			else
+				nextGeneration = std::string(name.Text());
+		}
+	CHECK(observed == "prior");
+	CHECK(nextGeneration == "second-write");
+}
+
+TEST_CASE("a world version reaches views before a frame writer replaces it", "[graph][schedule]") {
+	RenderGraph graph;
+	const ResourceId colour = Resource(graph, "colour", ResourceKind::Colour, true);
+	Node world = NodeOf("world-write", "shadow", NodeScope::World);
+	world.Writes = {colour};
+	graph.AddNode(world);
+	Node view = NodeOf("view-read", "grade", NodeScope::View);
+	view.Reads = {colour};
+	graph.AddNode(view);
+	const ResourceId overlay = Resource(graph, "overlay", ResourceKind::Colour);
+	Node frame = NodeOf("frame-write", "overlay", NodeScope::Frame);
+	frame.Writes = {overlay};
+	graph.AddNode(frame);
+
+	ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(CompileSchedule(graph, schedule, offender) == ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 3);
+	CHECK(graph.Find(schedule.Waves[0].Nodes[0].Node)->Name == Name("world-write"));
+	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("view-read"));
+	CHECK(graph.Find(schedule.Waves[2].Nodes[0].Node)->Name == Name("frame-write"));
 }
 
 TEST_CASE("a unique producer is scheduled before a consumer placed above it", "[graph][schedule]") {

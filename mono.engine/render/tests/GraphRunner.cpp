@@ -1,5 +1,5 @@
-#include "BackendNodes.hpp"
 #include "RenderFixture.hpp"
+#include "RenderNodeExecutor.hpp"
 
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -330,9 +331,15 @@ TEST_CASE(
 	CHECK(report.Ran(Name("deferred-lighting")) == matchingExtent);
 }
 
-TEST_CASE("backend metadata is derived from the node catalogue", "[render][graph]") {
+TEST_CASE("backend support and catalogue declarations stay in lockstep", "[render][graph]") {
 	engine::graph::RegisterRenderNodeKinds();
 	const std::vector<engine::render::BackendNode> backends = engine::render::BackendNodes();
+	for (const std::string_view kind : engine::render::BuiltInBackendKinds()) {
+		const auto *spec = engine::graph::NodeCatalogue::Find(Name(kind));
+		INFO("backend kind: " << kind);
+		REQUIRE(spec != nullptr);
+		CHECK(spec->BuiltInBackend);
+	}
 
 	for (const engine::graph::NodeKindSpec &spec : engine::graph::NodeCatalogue::All()) {
 		const auto backend = std::find_if(

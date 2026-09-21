@@ -1,4 +1,5 @@
 #include "DisplayColour.hpp"
+#include "FrameBatch.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "ResourcePreview.hpp"
@@ -791,16 +792,16 @@ namespace engine::render {
 		State->PortalTreeJob.Submitted = false;
 		CancelPortalCaptureTreeComposition(State->PortalTreeJob.Token);
 
-		for (Impl::PendingSceneSubmission &submission : State->PendingSceneSubmissions) {
+		for (Impl::PendingSceneSubmission &submission : State->GraphResources.PendingSceneSubmissions) {
 			if (submission.Fence != nullptr) {
 				SDL_ReleaseGPUFence(device, submission.Fence);
 			}
 		}
-		State->PendingSceneSubmissions.clear();
+		State->GraphResources.PendingSceneSubmissions.clear();
 		State->DropStagedSceneFrames();
 		for (auto &tree : State->ImportedPortalTrees)
 			DropPortalCaptureTree(tree.Token);
-		for (Impl::ResourceImageSlot &slot : State->ResourceImages) {
+		for (Impl::ResourceImageSlot &slot : State->GraphResources.Images) {
 			State->ReleaseResidentImage(slot);
 			gpu::ReleaseTransferBuffer(device, slot.Transfer);
 			slot = {};
@@ -1053,14 +1054,14 @@ namespace engine::render {
 			State->ReleasePbr(slot);
 		}
 		State->PbrSlots.clear();
-		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+		for (Impl::ResourcePreviewTarget &preview : State->GraphResources.Previews) {
 			for (SDL_GPUTexture *texture : preview.Textures) {
 				if (texture != nullptr) {
 					gpu::ReleaseTexture(device, texture);
 				}
 			}
 		}
-		State->ResourcePreviews.clear();
+		State->GraphResources.Previews.clear();
 		if (State->WindowCaptureTexture != nullptr) {
 			gpu::ReleaseTexture(device, State->WindowCaptureTexture);
 			State->WindowCaptureTexture = nullptr;
@@ -1136,22 +1137,22 @@ namespace engine::render {
 		// World-scoped graph resources use the world id as their owner. Retire
 		// them at the same idle boundary as resident instance and particle rows;
 		// otherwise each discarded world leaves its history images on the device.
-		const auto graphWorld = State->GraphWorldNames.find(world);
-		if (graphWorld != State->GraphWorldNames.end() && graphWorld->second == name) {
-			std::erase_if(State->PendingGraphHistoryWrites, [world](const auto &write) {
+		const auto graphWorld = State->GraphResources.WorldNames.find(world);
+		if (graphWorld != State->GraphResources.WorldNames.end() && graphWorld->second == name) {
+			std::erase_if(State->GraphResources.PendingHistoryWrites, [world](const auto &write) {
 				return write.Scope == graph::NodeScope::World && write.Owner == world;
 			});
-			std::erase_if(State->GraphTargets, [this, world](const auto &target) {
+			std::erase_if(State->GraphResources.Targets, [this, world](const auto &target) {
 				if (target.Scope != graph::NodeScope::World || target.Owner != world) return false;
 				if (target.Texture != nullptr) gpu::ReleaseTexture(State->Device, target.Texture);
 				return true;
 			});
-			std::erase_if(State->GraphBuffers, [this, world](const auto &buffer) {
+			std::erase_if(State->GraphResources.Buffers, [this, world](const auto &buffer) {
 				if (buffer.Scope != graph::NodeScope::World || buffer.Owner != world) return false;
 				if (buffer.Buffer != nullptr) gpu::ReleaseBuffer(State->Device, buffer.Buffer);
 				return true;
 			});
-			State->GraphWorldNames.erase(graphWorld);
+			State->GraphResources.WorldNames.erase(graphWorld);
 		}
 
 		const auto sameWorld = [world, name](const auto &resident) {
@@ -2188,10 +2189,10 @@ namespace engine::render {
 		if (State == nullptr || !resource.IsValid()) {
 			return nullptr;
 		}
-		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
+		const Impl::InstalledPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
 			const core::Name physical = State->GraphTargetName(*pipeline, resource);
-			for (const Impl::GraphTarget &target : State->GraphTargets) {
+			for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
 					target.Texture == nullptr) {
 					continue;
@@ -2304,7 +2305,7 @@ namespace engine::render {
 			return;
 		}
 		const ResourcePreviewRoute route{pipeline, resource, slot};
-		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+		for (Impl::ResourcePreviewTarget &preview : State->GraphResources.Previews) {
 			if (preview.Route == route) {
 				preview.ReverseSpectrum = reverseSpectrum;
 				preview.Refresh = true;
@@ -2314,7 +2315,7 @@ namespace engine::render {
 		Impl::ResourcePreviewTarget preview;
 		preview.Route = route;
 		preview.ReverseSpectrum = reverseSpectrum;
-		State->ResourcePreviews.push_back(std::move(preview));
+		State->GraphResources.Previews.push_back(std::move(preview));
 	}
 
 	void *Renderer::ResourcePreviewTexture(core::Name pipeline, core::Name resource, size_t slot) const {
@@ -2322,7 +2323,7 @@ namespace engine::render {
 			return nullptr;
 		}
 		const ResourcePreviewRoute route{pipeline, resource, slot};
-		for (const Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+		for (const Impl::ResourcePreviewTarget &preview : State->GraphResources.Previews) {
 			if (preview.Route == route) {
 				return preview.Slots.Ready ? preview.Textures[preview.Slots.Visible] : nullptr;
 			}
@@ -2335,7 +2336,7 @@ namespace engine::render {
 			return 0.0f;
 		}
 		const ResourcePreviewRoute route{pipeline, resource, slot};
-		for (const Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+		for (const Impl::ResourcePreviewTarget &preview : State->GraphResources.Previews) {
 			if (preview.Route == route) {
 				if (preview.Height == 0) {
 					return 0.0f;
@@ -2459,10 +2460,10 @@ namespace engine::render {
 		if (State == nullptr) {
 			return {};
 		}
-		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
+		const Impl::InstalledPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
 			const core::Name physical = State->GraphTargetName(*pipeline, resource);
-			for (const Impl::GraphTarget &target : State->GraphTargets) {
+			for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
 					target.Texture == nullptr ||
 					(target.Scope == graph::NodeScope::View && target.Owner != slot)) {
@@ -2521,270 +2522,7 @@ namespace engine::render {
 		RequireOwningThread("Render views");
 		if (State && State->PortalTreeJob.Cancelled)
 			PollPortalCaptureTreeComposition(State->PortalTreeJob.Token);
-
-		FrameResult frame;
-		if (State == nullptr) {
-			return frame;
-		}
-		if (State->Device == nullptr || views.empty() || State->BatchActive) {
-			State->VisibilityWorking.Invalidate();
-			State->VisibilityCompleted = {};
-			return frame;
-		}
-		State->VisibilityCompleted = {};
-		State->VisibilityWorking.Invalidate();
-		State->PollSceneFrames();
-
-		std::vector<FrameViewIdentity> identities;
-		identities.reserve(views.size());
-		for (const View &view : views) {
-			identities.push_back({view.World, State->PipelineFor(view.Pipeline)});
-		}
-		const std::vector<FrameViewGroup> groups = GroupFrameViews(identities, present);
-
-		std::vector<size_t> order;
-		order.reserve(views.size());
-		for (const FrameViewGroup &group : groups) {
-			order.insert(order.end(), group.Views.begin(), group.Views.end());
-		}
-		for (size_t position = 0; position + 1 < order.size(); position++) {
-			const SceneTarget *target = views[order[position]].Target;
-			if (target == nullptr || !target->IsValid()) {
-				ENGINE_ERROR("render batch view {} has no offscreen target", order[position]);
-				return frame;
-			}
-		}
-
-		SDL_GPUCommandBuffer *command = nullptr;
-		SDL_GPUTexture *swapchain = nullptr;
-		uint32_t width = 0;
-		uint32_t height = 0;
-		if (present) {
-			if (!State->BeginFrame()) {
-				return frame;
-			}
-			State->TakeFrame(command, swapchain, width, height);
-		} else {
-			command = SDL_AcquireGPUCommandBuffer(State->Device);
-			if (command == nullptr) {
-				ENGINE_ERROR("SDL_AcquireGPUCommandBuffer (view batch): {}", SDL_GetError());
-				return frame;
-			}
-		}
-
-		const SceneTarget *finalTarget = views[order.back()].Target;
-		if (swapchain == nullptr && (finalTarget == nullptr || !finalTarget->IsValid())) {
-			// A headless Studio has no swapchain and its viewport has no extent
-			// until the first interface layout. That frame has nowhere to draw by
-			// design. A windowed caller reaching the same state lost its target.
-			if (!State->Headless()) {
-				ENGINE_ERROR("render batch final view has neither a swapchain nor an offscreen target");
-			}
-			SDL_SubmitGPUCommandBuffer(command);
-			return frame;
-		}
-
-		const scene::WorldLighting previousLighting = CurrentLighting();
-		++State->RenderGeneration;
-		State->BatchActive = true;
-		State->DiscardPendingGraphHistoryWrites();
-		State->DataCaptureSources.clear();
-		State->MeshResidencyRecorded = false;
-		State->PreparedScopes.Clear();
-		State->BatchFailed = false;
-		State->BatchCommand = command;
-		State->BatchSwapchain = swapchain;
-		State->BatchWidth = width;
-		State->BatchHeight = height;
-		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
-		State->BatchCaptureTimingRequested = std::any_of(
-			State->ResourceImages.begin(),
-			State->ResourceImages.end(),
-			[&](const Impl::ResourceImageSlot &image) {
-				if (image.Phase != Impl::ResourceImagePhase::Queued || image.Cancelled ||
-					image.Image.DataCaptureTimingId == 0) {
-					return false;
-				}
-				return std::any_of(views.begin(), views.end(), [&](const View &view) {
-					const Impl::NamedPipeline *const pipeline = State->PipelineFor(view.Pipeline);
-					const ResourceImageRequest &request = image.Image.Request;
-					return pipeline != nullptr && pipeline->Name == request.Pipeline &&
-						   view.Slot == request.ViewSlot &&
-						   (request.ExpectedSnapshotId.empty() ||
-							request.ExpectedSnapshotId == view.SnapshotId);
-				});
-			}
-		);
-
-		std::vector<ViewMutationIdentity> restorations;
-		size_t position = 0;
-		for (size_t groupIndex = 0; groupIndex < groups.size() && !State->BatchFailed; groupIndex++) {
-			const FrameViewGroup &group = groups[groupIndex];
-			for (size_t member = 0; member < group.Views.size(); member++, position++) {
-				const size_t viewIndex = group.Views[member];
-				const View &source = views[viewIndex];
-				const auto pipelineIdentity = ResolvePipelineIdentity(source.Pipeline);
-				const ViewMutationIdentity identity{
-					.WorldName = std::string(source.WorldName.Text()),
-					.SnapshotId = source.SnapshotId,
-					.Pipeline = pipelineIdentity ? pipelineIdentity->Name : core::Name{},
-					.PipelineRevision = pipelineIdentity ? pipelineIdentity->Revision : 0,
-					.ViewSlot = source.Slot,
-				};
-				const View *active = &source;
-				View mutated;
-				if (HookBind->HasViewMutation(identity)) {
-					mutated = source;
-					if (HookBind->ConsumeViewMutation(identity, mutated)) active = &mutated;
-				} else if (HookBind->HasViewMutationRestore(identity)) {
-					mutated = source;
-					mutated.Damage.Scene = true;
-					mutated.Damage.Viewport = true;
-					mutated.Damage.Environment = true;
-					mutated.Damage.Portals = true;
-					active = &mutated;
-					restorations.push_back(identity);
-				}
-				const View &view = *active;
-				State->ActiveDataCaptureSource = {
-					view.SnapshotId, view.WorldName, view.CameraFrame, view.Camera
-				};
-				SetLighting(view.OverrideLighting ? view.Lighting : previousLighting);
-
-				State->BatchFirst = position == 0;
-				State->BatchFinal = position + 1 == order.size();
-				State->BatchShared = member == 0;
-				State->BatchViewIndex = viewIndex;
-				State->BatchWorldIndex = groupIndex;
-
-				frame.Accumulate(RenderView(
-					view.CameraFrame,
-					view.Camera,
-					view.Instances,
-					overlay,
-					view.Surfaces,
-					gameInterfaceHook,
-					State->BatchFinal ? hostOverlayHook : nullptr,
-					view.Target,
-					view.Slot,
-					view,
-					view.Particles,
-					view.RibbonVertices,
-					view.RibbonRuns,
-					view.Lights,
-					view.Foreign,
-					view.Portals,
-					State->BatchFinal && present,
-					view.Pipeline,
-					view.World
-				));
-				if (State->BatchFailed) {
-					break;
-				}
-			}
-		}
-		if (frame.Submitted && !State->BatchFailed)
-			for (const ViewMutationIdentity &identity : restorations)
-				HookBind->CompleteViewMutationRestore(identity);
-
-		std::vector<const Impl::NamedPipeline *> plannedPipelines;
-		plannedPipelines.reserve(groups.size());
-		for (const FrameViewGroup &group : groups) {
-			const auto *named = static_cast<const Impl::NamedPipeline *>(group.Identity.Pipeline);
-			if (named == nullptr || std::find(plannedPipelines.begin(), plannedPipelines.end(), named) !=
-										plannedPipelines.end()) {
-				continue;
-			}
-			plannedPipelines.push_back(named);
-			uint32_t planWidth = width;
-			uint32_t planHeight = height;
-			std::vector<uint64_t> worlds;
-			worlds.reserve(views.size());
-			for (const View &view : views) {
-				if (State->PipelineFor(view.Pipeline) != named) {
-					continue;
-				}
-				worlds.push_back(view.World);
-				if (view.Target != nullptr && view.Target->IsValid()) {
-					planWidth = std::max(planWidth, view.Target->Width);
-					planHeight = std::max(planHeight, view.Target->Height);
-				}
-			}
-			planWidth = std::max(planWidth, 1u);
-			planHeight = std::max(planHeight, 1u);
-
-			graph::FrameExecutionPlan plan;
-			core::Name offender;
-			if (graph::PlanFrame(
-					named->Graph, named->Schedule, worlds, planWidth, planHeight, plan, offender
-				) == graph::ExecutionPlanStatus::Ok) {
-				frame.ScheduledReadBytes += plan.ReadBytes;
-				frame.ScheduledWriteBytes += plan.WriteBytes;
-				frame.QueueTransferBytes += plan.QueueTransferBytes;
-				frame.ConcurrentWaves += static_cast<uint32_t>(
-					std::count_if(plan.Waves.begin(), plan.Waves.end(), [](const graph::PlannedWave &wave) {
-						return wave.ConcurrentQueues;
-					})
-				);
-				frame.TrafficCommandBuffers += static_cast<uint32_t>(named->Buffers.size());
-			}
-		}
-
-		SetLighting(previousLighting);
-		if (State->BatchCommand != nullptr) {
-			// The partial command still submits to release its device ownership.
-			// Its images retain their fences but cannot certify a completed graph.
-			for (Impl::ResourceImageSlot &image : State->ResourceImages) {
-				if (image.Phase == Impl::ResourceImagePhase::Recorded) {
-					image.Image.Status = ResourceImageStatus::Failed;
-				} else if (image.Phase == Impl::ResourceImagePhase::Queued &&
-						   std::any_of(views.begin(), views.end(), [&](const View &view) {
-							   const auto *pipeline = State->PipelineFor(view.Pipeline);
-							   return pipeline && pipeline->Name == image.Image.Request.Pipeline &&
-									  view.Slot == image.Image.Request.ViewSlot;
-						   })) {
-					// A failed earlier node may prevent capture from recording at all.
-					// No device work owns this slot, so its failure is ready immediately.
-					image.Image.Status = ResourceImageStatus::Failed;
-					image.Phase = Impl::ResourceImagePhase::Ready;
-				}
-			}
-			State->Timestamps.Abandon(State->BatchTimingSlot);
-			if (State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
-				State->PendingMarks[State->BatchTimingSlot].clear();
-				State->AbandonCaptureTimings(State->BatchTimingSlot);
-			}
-			const bool submitted = State->SubmitSceneCommand(State->BatchCommand);
-			frame.Submitted = submitted;
-			if (!submitted) {
-				State->StageProbe.Clear(State->Device);
-				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());
-				State->DiscardPendingGraphHistoryWrites(State->BatchCommand);
-			} else {
-				// A partial batch releases its command buffer but never certifies history.
-				State->DiscardPendingGraphHistoryWrites(State->BatchCommand);
-			}
-			State->ClearSubmittedGraphHistoryWrites();
-			State->CompleteResidentUploads(submitted);
-			State->BatchCommand = nullptr;
-
-			// A failed batch never reached the final view's submit, so any
-			// downloads an earlier view recorded still hold their buffer.
-			State->DropDownloads();
-		}
-		State->StageProbe.Flush(State->Device);
-		State->BatchActive = false;
-		State->BatchFirst = false;
-		State->BatchFinal = false;
-		State->BatchShared = false;
-		State->PreparedScopes.Clear();
-		State->BatchFailed = false;
-		State->BatchSwapchain = nullptr;
-		State->BatchWidth = 0;
-		State->BatchHeight = 0;
-		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
-		State->BatchCaptureTimingRequested = false;
-		return frame;
+		return FrameBatch(*this).Run(views, overlay, gameInterfaceHook, present, hostOverlayHook).Frame;
 	}
 
 	FrameResult Renderer::RenderView(

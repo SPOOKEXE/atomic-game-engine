@@ -153,3 +153,48 @@ TEST_CASE("non-drawable ViewportFrame descendants stay out of the scene", "[rend
 
 	CHECK(instances.empty());
 }
+
+TEST_CASE("ViewportFrame ignores local transparency overrides", "[render][viewportframe]") {
+	using namespace engine;
+	ViewportWorld world;
+	const Entity part = world.Part("Opaque", world.World);
+	world.Data.Set(part, scene::LocalTransparency{1.0f});
+
+	std::vector<DrawInstance> instances;
+	CollectViewportInstances(world.Data, world.Viewport, instances);
+	REQUIRE(instances.size() == 1);
+	CHECK(instances[0].Transparency == 0.0f);
+}
+
+TEST_CASE("ViewportFrame copies optional LOD and effect state", "[render][viewportframe]") {
+	using namespace engine;
+	ViewportWorld world;
+	const Entity part = world.Part("Detailed", world.World);
+
+	scene::LODAuto automatic;
+	automatic.Meshes[0] = Name("viewport.auto-half");
+	automatic.Meshes[1] = Name("viewport.auto-quarter");
+	automatic.Levels = 3;
+	world.Data.Set(part, automatic);
+	scene::LODCustom custom;
+	custom.Meshes[0] = Name("viewport.custom-half");
+	custom.Levels = 3;
+	world.Data.Set(part, custom);
+	scene::LODSettings settings;
+	settings.MinimumDistances[0] = 12.0f;
+	world.Data.Set(part, settings);
+	scene::RenderEffects effects;
+	effects.Attachments[0].Node = Name("viewport-outline");
+	effects.Attachments[0].Enabled = true;
+	effects.Count = 1;
+	world.Data.Set(part, effects);
+
+	std::vector<DrawInstance> instances;
+	CollectViewportInstances(world.Data, world.Viewport, instances);
+	REQUIRE(instances.size() == 1);
+	CHECK(instances[0].LodMeshes[0] == Name("viewport.custom-half"));
+	CHECK(instances[0].LodMeshes[1] == Name("viewport.auto-quarter"));
+	CHECK(instances[0].LodMinimumDistances[0] == 12.0f);
+	CHECK(instances[0].Effects.Count == 1);
+	CHECK(instances[0].Effects.Attachments[0].Node == Name("viewport-outline"));
+}

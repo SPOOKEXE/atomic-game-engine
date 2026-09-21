@@ -45,7 +45,7 @@ namespace engine::render {
 			// reason below: an interface hook may already have recorded a bind
 			// of it for the frame in progress.
 			if (target.Texture) {
-				RetiredScenes.push_back(target.Texture);
+				GraphResources.RetiredTextures.push_back(target.Texture);
 				target.Texture = nullptr;
 			}
 
@@ -86,7 +86,7 @@ namespace engine::render {
 			// is what "the image is last frame's texture" means - so freeing it
 			// here is a use-after-free that lands inside SDL's Vulkan backend.
 			// `DrainRetiredScenes` frees it at the top of the next frame.
-			RetiredScenes.push_back(target.Texture);
+			GraphResources.RetiredTextures.push_back(target.Texture);
 			target.Texture = nullptr;
 		}
 
@@ -136,7 +136,7 @@ namespace engine::render {
 		}
 
 		if (WindowCaptureTexture != nullptr) {
-			RetiredScenes.push_back(WindowCaptureTexture);
+			GraphResources.RetiredTextures.push_back(WindowCaptureTexture);
 			WindowCaptureTexture = nullptr;
 		}
 
@@ -196,7 +196,7 @@ namespace engine::render {
 				// `PollSceneFrames` can publish this image after Studio recorded its
 				// draw list and before this resize selects the retained frame again.
 				// Keep that already-bound image alive through the host pass.
-				RetiredScenes.push_back(frame.Texture);
+				GraphResources.RetiredTextures.push_back(frame.Texture);
 				frame.Texture = nullptr;
 			}
 
@@ -234,14 +234,14 @@ namespace engine::render {
 		frame.Result = result;
 		frame.Sequence = NextSceneSequence++;
 		frame.Pending = true;
-		StagedSceneFrames.push_back({slot, selected, frame.Sequence});
+		GraphResources.StagedSceneFrames.push_back({slot, selected, frame.Sequence});
 		scene.NextRetainedFrame = (selected + 1) % SceneSlot::RETAINED_FRAMES;
 		return true;
 	}
 
 	void Renderer::Impl::DropStagedSceneFrames() {
 		FinishPortalImports(nullptr, false);
-		for (ResourceImageSlot &slot : ResourceImages) {
+		for (ResourceImageSlot &slot : GraphResources.Images) {
 			if (slot.Phase == ResourceImagePhase::Recorded) {
 				ReleaseResidentImage(slot);
 				slot.Image.Status = ResourceImageStatus::Failed;
@@ -249,7 +249,7 @@ namespace engine::render {
 				slot.Phase = slot.Cancelled ? ResourceImagePhase::Free : ResourceImagePhase::Ready;
 			}
 		}
-		for (const StagedSceneFrame &staged : StagedSceneFrames) {
+		for (const StagedSceneFrame &staged : GraphResources.StagedSceneFrames) {
 			if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) {
 				continue;
 			}
@@ -258,17 +258,17 @@ namespace engine::render {
 				frame.Pending = false;
 			}
 		}
-		StagedSceneFrames.clear();
+		GraphResources.StagedSceneFrames.clear();
 	}
 
 	bool Renderer::Impl::SubmitSceneCommand(SDL_GPUCommandBuffer *command) {
 		PendingSceneSubmission submission;
-		for (uint32_t index = 0; index < ResourceImages.size(); index++) {
-			if (ResourceImages[index].Phase == ResourceImagePhase::Recorded) {
+		for (uint32_t index = 0; index < GraphResources.Images.size(); index++) {
+			if (GraphResources.Images[index].Phase == ResourceImagePhase::Recorded) {
 				submission.Images[submission.ImageCount++] = index;
 			}
 		}
-		if (StagedSceneFrames.empty() && submission.ImageCount == 0) {
+		if (GraphResources.StagedSceneFrames.empty() && submission.ImageCount == 0) {
 			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
 			FinishPortalImports(command, submitted);
 			return submitted;
@@ -282,18 +282,18 @@ namespace engine::render {
 
 		FinishPortalImports(command, true);
 		submission.Fence = fence;
-		submission.Frames = std::move(StagedSceneFrames);
+		submission.Frames = std::move(GraphResources.StagedSceneFrames);
 		for (uint32_t index = 0; index < submission.ImageCount; index++) {
-			ResourceImages[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+			GraphResources.Images[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
 		}
-		PendingSceneSubmissions.push_back(std::move(submission));
-		StagedSceneFrames.clear();
+		GraphResources.PendingSceneSubmissions.push_back(std::move(submission));
+		GraphResources.StagedSceneFrames.clear();
 		return true;
 	}
 
 	void Renderer::Impl::PollSceneFrames() {
-		for (size_t index = 0; index < PendingSceneSubmissions.size();) {
-			PendingSceneSubmission &submission = PendingSceneSubmissions[index];
+		for (size_t index = 0; index < GraphResources.PendingSceneSubmissions.size();) {
+			PendingSceneSubmission &submission = GraphResources.PendingSceneSubmissions[index];
 			if (submission.Fence == nullptr || !SDL_QueryGPUFence(Device, submission.Fence)) {
 				index++;
 				continue;
@@ -332,8 +332,8 @@ namespace engine::render {
 			for (uint32_t image = 0; image < submission.ImageCount; image++) {
 				CollectResourceImage(submission.Images[image]);
 			}
-			submission = std::move(PendingSceneSubmissions.back());
-			PendingSceneSubmissions.pop_back();
+			submission = std::move(GraphResources.PendingSceneSubmissions.back());
+			GraphResources.PendingSceneSubmissions.pop_back();
 		}
 	}
 
@@ -347,7 +347,7 @@ namespace engine::render {
 			// The texture may still be sampled by work submitted for the previous
 			// frame. Retiring it follows the same frame-boundary ownership rule as
 			// a resized viewport target.
-			RetiredScenes.push_back(history.History);
+			GraphResources.RetiredTextures.push_back(history.History);
 			history.History = nullptr;
 		}
 		history.HistoryWidth = 0;
@@ -551,7 +551,7 @@ namespace engine::render {
 	}
 
 	graph::NodeScope
-	Renderer::Impl::ResourceScope(const NamedPipeline &pipeline, graph::ResourceId resource) const {
+	Renderer::Impl::ResourceScope(const InstalledPipeline &pipeline, graph::ResourceId resource) const {
 		graph::NodeScope found = graph::NodeScope::Frame;
 		for (uint32_t value = 1; value <= pipeline.Graph.Count(); value++) {
 			const graph::Node *node = pipeline.Graph.Find(graph::NodeId{value});
@@ -570,10 +570,10 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::NamedTexture Renderer::Impl::FindGraphTarget(
-		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+		const InstalledPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 	) const {
 		resource = GraphTargetName(pipeline, resource);
-		for (const GraphTarget &target : GraphTargets) {
+		for (const GraphTarget &target : GraphResources.Targets) {
 			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
 				target.Owner == owner) {
 				return NamedTexture{target.Texture, target.Width, target.Height, target.Format};
@@ -583,14 +583,14 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::NamedTexture Renderer::Impl::FindGraphHistoryForRead(
-		const NamedPipeline &pipeline,
+		const InstalledPipeline &pipeline,
 		core::Name resource,
 		graph::NodeScope scope,
 		uint64_t owner,
 		uint64_t signature
 	) const {
 		resource = GraphTargetName(pipeline, resource);
-		for (const GraphTarget &target : GraphTargets) {
+		for (const GraphTarget &target : GraphResources.Targets) {
 			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
 				target.Owner == owner && target.HistoryReady && target.HistorySignature == signature) {
 				return NamedTexture{target.Texture, target.Width, target.Height, target.Format};
@@ -600,13 +600,14 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::NamedTexture Renderer::Impl::FindCurrentGraphHistoryWrite(
-		const NamedPipeline &pipeline,
+		const InstalledPipeline &pipeline,
 		SDL_GPUCommandBuffer *readCommand,
 		core::Name resource,
 		graph::NodeScope scope,
 		uint64_t owner
 	) const {
-		for (auto write = PendingGraphHistoryWrites.rbegin(); write != PendingGraphHistoryWrites.rend();
+		for (auto write = GraphResources.PendingHistoryWrites.rbegin();
+			 write != GraphResources.PendingHistoryWrites.rend();
 			 ++write) {
 			if (write->Pipeline == &pipeline && write->Resource == resource && write->Scope == scope &&
 				write->Owner == owner &&
@@ -620,14 +621,14 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::CommitGraphHistoryWrite(
-		const NamedPipeline &pipeline,
+		const InstalledPipeline &pipeline,
 		core::Name resource,
 		graph::NodeScope scope,
 		uint64_t owner,
 		uint64_t signature
 	) {
 		resource = GraphTargetName(pipeline, resource);
-		for (GraphTarget &target : GraphTargets) {
+		for (GraphTarget &target : GraphResources.Targets) {
 			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
 				target.Owner == owner) {
 				target.HistorySignature = signature;
@@ -638,14 +639,14 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::StageGraphHistoryWrite(
-		const NamedPipeline &pipeline,
+		const InstalledPipeline &pipeline,
 		SDL_GPUCommandBuffer *command,
 		core::Name resource,
 		graph::NodeScope scope,
 		uint64_t owner,
 		uint64_t signature
 	) {
-		for (PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
+		for (PendingGraphHistoryWrite &write : GraphResources.PendingHistoryWrites) {
 			if (write.Pipeline == &pipeline && write.Command == command && write.Resource == resource &&
 				write.Scope == scope && write.Owner == owner) {
 				write.Signature = signature;
@@ -653,11 +654,13 @@ namespace engine::render {
 				return;
 			}
 		}
-		PendingGraphHistoryWrites.push_back({&pipeline, command, resource, scope, owner, signature, false});
+		GraphResources.PendingHistoryWrites.push_back(
+			{&pipeline, command, resource, scope, owner, signature, false}
+		);
 	}
 
 	void Renderer::Impl::CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
-		for (PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
+		for (PendingGraphHistoryWrite &write : GraphResources.PendingHistoryWrites) {
 			if (write.Command != command || write.Submitted) continue;
 			if (write.Pipeline != nullptr) {
 				CommitGraphHistoryWrite(
@@ -671,25 +674,27 @@ namespace engine::render {
 
 	void Renderer::Impl::DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
 		if (command == nullptr) {
-			PendingGraphHistoryWrites.clear();
+			GraphResources.PendingHistoryWrites.clear();
 		} else {
 			auto firstRetained = std::remove_if(
-				PendingGraphHistoryWrites.begin(),
-				PendingGraphHistoryWrites.end(),
+				GraphResources.PendingHistoryWrites.begin(),
+				GraphResources.PendingHistoryWrites.end(),
 				[command](const PendingGraphHistoryWrite &write) { return write.Command == command; }
 			);
-			PendingGraphHistoryWrites.erase(firstRetained, PendingGraphHistoryWrites.end());
+			GraphResources.PendingHistoryWrites.erase(
+				firstRetained, GraphResources.PendingHistoryWrites.end()
+			);
 		}
 		DiscardEnvironmentWrites(command);
 	}
 
 	void Renderer::Impl::ClearSubmittedGraphHistoryWrites() {
-		std::erase_if(PendingGraphHistoryWrites, [](const PendingGraphHistoryWrite &write) {
+		std::erase_if(GraphResources.PendingHistoryWrites, [](const PendingGraphHistoryWrite &write) {
 			return write.Submitted;
 		});
 	}
 
-	core::Name Renderer::Impl::GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const {
+	core::Name Renderer::Impl::GraphTargetName(const InstalledPipeline &pipeline, core::Name resource) const {
 		for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); value++) {
 			const graph::ResourceId id{value};
 			const graph::ResourceDesc *desc = pipeline.Graph.FindResource(id);
@@ -704,7 +709,7 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::NamedTexture Renderer::Impl::EnsureGraphTarget(
-		const NamedPipeline &pipeline,
+		const InstalledPipeline &pipeline,
 		graph::ResourceId resource,
 		uint64_t owner,
 		uint32_t viewWidth,
@@ -743,7 +748,7 @@ namespace engine::render {
 		desc->Resolve(viewWidth, viewHeight, width, height);
 		const graph::NodeScope scope = ResourceScope(pipeline, resource);
 		const core::Name targetName = GraphTargetName(pipeline, desc->Name);
-		for (GraphTarget &target : GraphTargets) {
+		for (GraphTarget &target : GraphResources.Targets) {
 			if (target.Pipeline != pipeline.Name || target.Resource != targetName || target.Scope != scope ||
 				target.Owner != owner) {
 				continue;
@@ -784,15 +789,15 @@ namespace engine::render {
 			return NamedTexture{target.Texture, width, height, format};
 		}
 
-		GraphTargets.push_back(GraphTarget{pipeline.Name, targetName, scope, owner});
+		GraphResources.Targets.push_back(GraphTarget{pipeline.Name, targetName, scope, owner});
 		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight);
 	}
 
 	SDL_GPUBuffer *Renderer::Impl::FindGraphBuffer(
-		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+		const InstalledPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 	) const {
 		resource = GraphTargetName(pipeline, resource);
-		for (const GraphBuffer &buffer : GraphBuffers) {
+		for (const GraphBuffer &buffer : GraphResources.Buffers) {
 			if (buffer.Pipeline == pipeline.Name && buffer.Resource == resource && buffer.Scope == scope &&
 				buffer.Owner == owner) {
 				return buffer.Buffer;
@@ -802,7 +807,7 @@ namespace engine::render {
 	}
 
 	SDL_GPUBuffer *Renderer::Impl::EnsureGraphBuffer(
-		const NamedPipeline &pipeline,
+		const InstalledPipeline &pipeline,
 		graph::ResourceId resource,
 		uint64_t owner,
 		uint32_t viewWidth,
@@ -842,7 +847,7 @@ namespace engine::render {
 		// misses later buffers and lets repeated graph edits exceed the budget.
 		uint64_t total = 0;
 		GraphBuffer *entry = nullptr;
-		for (GraphBuffer &buffer : GraphBuffers) {
+		for (GraphBuffer &buffer : GraphResources.Buffers) {
 			if (buffer.Pipeline == pipeline.Name && buffer.Resource == name && buffer.Scope == scope &&
 				buffer.Owner == owner) {
 				entry = &buffer;
@@ -867,8 +872,8 @@ namespace engine::render {
 			entry->Usage = usage;
 		}
 		if (entry == nullptr) {
-			GraphBuffers.push_back(GraphBuffer{pipeline.Name, name, scope, owner});
-			entry = &GraphBuffers.back();
+			GraphResources.Buffers.push_back(GraphBuffer{pipeline.Name, name, scope, owner});
+			entry = &GraphResources.Buffers.back();
 		}
 		SDL_GPUBufferCreateInfo info{};
 		info.usage = usage;

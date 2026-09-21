@@ -1848,6 +1848,7 @@ namespace studio {
 		// none, and this panel is the editor's chrome rather than a game's UI.
 		//@{
 		void DrawRenderPipeline();
+		void PrepareRenderPipelineCanvas();
 		void DrawRenderPipelineLibrary();
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();

@@ -2709,6 +2709,7 @@ namespace engine::render {
 		// carries the split's argument; `docs/ARCH_REVIEW.md` C2 is the finding.
 		friend class ViewRecording;
 		friend class DataFactoryHookBind;
+		friend class FrameBatch;
 
 		// The thread that called `Initialise`, and the only one that may record.
 		//

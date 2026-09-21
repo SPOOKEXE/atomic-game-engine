@@ -222,7 +222,9 @@ namespace engine::render {
 		visibilityView.VisibilityFrame.reset();
 		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &visibilityView);
 		effects::BuildRibbons(store, visibilityFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
-		const gui::Screen screen{extent.X, extent.Y};
+		gui::Screen screen;
+		screen.Width = extent.X;
+		screen.Height = extent.Y;
 		ResolveSpatialCanvases(store, screen, &view.Camera, &visibilityFrame);
 		gui::CompileRequest compile;
 		compile.Display = screen;

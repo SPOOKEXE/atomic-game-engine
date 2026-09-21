@@ -110,7 +110,7 @@ namespace engine::render {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			SDL_GPUCommandBuffer *const command = recording.Command;
 			const scene::Camera &drawCamera = recording.DrawCamera;
 			const scene::CameraMatrices &matrices = recording.Matrices;
@@ -267,7 +267,7 @@ namespace engine::render {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			SDL_GPUCommandBuffer *const command = recording.Command;
 			uint32_t &timingSlot = recording.TimingSlot;
 			bool &mainGpuWorkRecorded = recording.MainGpuWorkRecorded;

@@ -12,7 +12,23 @@ The first rule is to preserve a working renderer after every move. Extract priva
 the SDL device, shaders, resources, and presentation adapters. Splitting it into libraries before stable cut
 points exist would add architecture edges without reducing the work needed to understand one frame.
 
-## Current map
+## Implementation status
+
+The cleanup has delivered the private compiler, registry, and executor package, with compiler and renderer
+admission parity tests. `FrameBatch` and `GraphResourceCache` now own their frame and resource lifetimes.
+Presentation helpers isolate collection and damage work. The Studio document adapter and its canvas, inspector,
+schedule, and profile panels are separated. Portal owner grouping and the host operation boundary make the
+topology, demand, capture, composition, and residency paths explicit. Focused tests cover these extracted seams.
+
+Remaining limitations:
+
+- Final GPU test approval is pending.
+- `PortalImageRuntime` still owns direct `Renderer` capture and upload calls.
+- Full CPU CI gates are blocked by unrelated concurrent GUI work.
+
+The original investigations remain investigation items unless their own focused evidence closes them.
+
+## Baseline map
 
 ```mermaid
 flowchart LR
@@ -28,8 +44,8 @@ flowchart LR
     Profile --> Studio
 ```
 
-The ownership direction is sound: `mono.engine/graph` is device free and `mono.engine/render` consumes its
-compiled result. The implementation does not consistently retain that boundary:
+At the start of this cleanup, the ownership direction was sound: `mono.engine/graph` was device free and
+`mono.engine/render` consumed its compiled result. The implementation did not consistently retain that boundary:
 
 | Area | Current source | Cleanup concern |
 |---|---|---|
@@ -144,9 +160,22 @@ GPU wrappers out of `render` until a second, real device consumer needs them.
 
 ### P2: make portal coordination comprehensible
 
-1. Draw a state and ownership table before moving code. Separate endpoint validity, demand, source capture,
-   prepared body, shadow route, composition job, and resident image lifetime. Each item needs one owner and one
-   retirement operation.
+1. Preserve the following state and ownership boundaries before moving code. Each row has one owner and one
+   terminal retirement operation; helpers may request retirement but must not free another row's state directly.
+
+   | State | Sole owner | Retirement operation |
+   |---|---|---|
+   | Endpoint validity | `PortalTopologyHost` | `PortalTopologyHost::RemoveWorld` removes the source, destination, and producer endpoint records for a world. |
+   | Demand | `PortalImageHost::Impl::Source::Portals` | `PortalImageSource::InvalidatePortal` revokes a portal demand before `RetireCompositions` observes and removes its dependent composition. |
+   | Source capture | `PortalImageSource` | `PortalImageSource::Clear` cancels outstanding uploads and releases every preview and capture lease. |
+   | Prepared body | `PortalImageHost::Impl::PreparedBodies` | `Renderer::CancelPortalCaptureTreePreparation` cancels the preparation before the host erases the body record. |
+   | Shadow route | `PortalImageHost` | `ReleaseShadowRoute` releases the route and sends its cancellation before the record is discarded. |
+   | Composition job | `PortalImageHost::Impl::Source::Compositions` | `RetireCompositions` releases its route and preparation, then calls `Renderer::DropPortalImage`. |
+   | Resident image lifetime | `PortalResidentImages` | `PortalResidentImages::Expire` cancels the resource-image token at its deadline and erases the entry. |
+
+   `PortalImageHost::Clear` is the shutdown path: it retires bodies, sources, producers, resident images, and
+   topology in that order. `Renderer::CancelPortalCaptureTreeComposition` remains the renderer-side terminal
+   operation for an in-flight composition, including its imported shadow and node images.
 
 2. Group existing portal files by that state machine under `src/portal/`, preserving private includes and the
    render module boundary. Move a state and its tests together in small changes.
@@ -180,7 +209,7 @@ Keep focused tests beside their owners. The repository already has useful seams:
 | Contract | Existing starting suites | Add or strengthen |
 |---|---|---|
 | Graph validity, schedule, aliases, documents, diagnostics, profiles, layout | `mono.engine/graph/tests/RenderGraph.cpp`, `PipelineDocument.cpp`, `PipelineCatalogue.cpp`, `EngineGraph.cpp`, `PipelineDiagnostics.cpp`, `PipelineProfile.cpp`, `PipelineView.cpp` | Compiler result snapshots, catalogue-executor parity, multi-writer scheduling, document canonical round trips. |
-| Renderer pipeline admission and graph history | `mono.engine/render/tests/GraphRunner.cpp`, `GraphHistory.cpp`, `CustomNodes.cpp`, `Capabilities.cpp`, `ResourceImage.cpp` | Install replacement, failed admission preservation, revision and snapshot consistency, alias and retained-resource retirement. |
+| Renderer pipeline admission and graph history | `mono.engine/render/tests/GraphRunner.cpp`, `GraphHistory.cpp`, `Passes.cpp`, `CustomNodes.cpp`, `Capabilities.cpp`, `ResourceImage.cpp` | Install replacement, failed admission preservation, revision and snapshot consistency, alias and retained-resource retirement. |
 | Frame cleanup and visible output | `HardRender.cpp`, `HardRenderGpu.cpp`, `RenderStageProbe.cpp`, `RenderImageComparison.cpp`, `VisibilityObservation.cpp` | Failure-injection state machine test and a small golden default PBR image fixture. Keep GPU checks opt-in and deterministic. |
 | Presentation and viewports | `WorldPresentation.cpp`, `PresentationDamage.cpp`, `PresentationSchedule.cpp`, `ViewportFrames.cpp` | Declaration-table invalidation cases and copy parity between viewport and collector. |
 | Portals | `PortalImageHost.cpp`, `PortalCaptureTree*.cpp`, `PortalExchange.cpp`, `PortalTopologyHost.cpp`, `PortalResidentImages.cpp` | State-transition ledger tests and full terminal-release sequences. |

@@ -54,10 +54,12 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -77,6 +79,16 @@ namespace engine::render {
 		RetainedGeometry = 1u << 7,
 	};
 
+	// The compiler reports where admission stopped, with the graph name that
+	// identifies the failed declaration. This stays private to renderer policy.
+	enum class PipelineAdmissionStage : uint8_t { Graph, Schedule, Backend, Validation, Capability };
+
+	struct PipelineFailure {
+		PipelineAdmissionStage Stage = PipelineAdmissionStage::Validation;
+		core::Name Offender;
+		std::string Reason;
+	};
+
 	struct DataCaptureSource {
 		std::string SnapshotId;
 		core::Name WorldName;
@@ -94,7 +106,10 @@ namespace engine::render {
 		RenderStageProbe StageProbe;
 		DeviceCaps Caps;
 
-		struct NamedPipeline {
+		// One immutable execution package. Admission builds this whole value before
+		// touching the registry, so a refused replacement leaves its prior package
+		// and GPU state intact.
+		struct InstalledPipeline {
 			core::Name Name;
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
@@ -114,25 +129,92 @@ namespace engine::render {
 			std::vector<graph::PlannedCommandBuffer> Buffers;
 			uint64_t Revision = 0;
 		};
+		struct PipelineCompilation {
+			std::optional<InstalledPipeline> Package;
+			PipelineFailure Failure;
+
+			explicit operator bool() const {
+				return Package.has_value();
+			}
+		};
+
+		static PipelineCompilation CompilePipeline(
+			core::Name name,
+			const graph::RenderGraph &pipeline,
+			const DeviceCaps *caps,
+			std::span<const core::Name> customKinds
+		);
 
 		uint64_t PipelineRevision = 0;
 		uint64_t RenderGeneration = 0;
-		std::optional<NamedPipeline> EngineDefault;
-		std::vector<NamedPipeline> NamedPipelines;
+		std::optional<InstalledPipeline> EngineDefault;
+		std::vector<InstalledPipeline> InstalledPipelines;
 		core::Name ActiveGraph;
 		VisibilityObservations VisibilityWorking;
 		VisibilitySnapshot VisibilityCompleted;
 
-		const NamedPipeline *PipelineFor(core::Name name) const {
+		const InstalledPipeline *PipelineFor(core::Name name) const {
 			if (!name.IsValid()) {
 				return EngineDefault ? &*EngineDefault : nullptr;
 			}
-			for (const NamedPipeline &pipeline : NamedPipelines) {
+			for (const InstalledPipeline &pipeline : InstalledPipelines) {
 				if (pipeline.Name == name) {
 					return &pipeline;
 				}
 			}
 			return EngineDefault ? &*EngineDefault : nullptr;
+		}
+
+		const InstalledPipeline *Installed(core::Name name) const {
+			for (const InstalledPipeline &pipeline : InstalledPipelines)
+				if (pipeline.Name == name) return &pipeline;
+			if (EngineDefault && EngineDefault->Name == name) return &*EngineDefault;
+			return nullptr;
+		}
+
+		void InstallNamed(InstalledPipeline pipeline) {
+			for (InstalledPipeline &installed : InstalledPipelines) {
+				if (installed.Name != pipeline.Name) continue;
+				installed = std::move(pipeline);
+				installed.Revision = ++PipelineRevision;
+				return;
+			}
+			pipeline.Revision = ++PipelineRevision;
+			InstalledPipelines.push_back(std::move(pipeline));
+		}
+
+		void InstallDefault(InstalledPipeline pipeline) {
+			pipeline.Revision = ++PipelineRevision;
+			EngineDefault = std::move(pipeline);
+		}
+
+		bool RetireNamed(core::Name name) {
+			for (size_t index = 0; index < InstalledPipelines.size(); ++index) {
+				if (InstalledPipelines[index].Name != name) continue;
+				ReleaseGraphState(name);
+				InstalledPipelines.erase(InstalledPipelines.begin() + static_cast<std::ptrdiff_t>(index));
+				return true;
+			}
+			return false;
+		}
+
+		void RetireAllNamed() {
+			for (const InstalledPipeline &pipeline : InstalledPipelines)
+				ReleaseGraphState(pipeline.Name);
+			InstalledPipelines.clear();
+		}
+
+		std::optional<Renderer::RenderGraphSnapshot>
+		Snapshot(const InstalledPipeline &pipeline, uint32_t viewWidth, uint32_t viewHeight) const {
+			return Renderer::RenderGraphSnapshot{
+				.Pipeline = pipeline.Name,
+				.Revision = pipeline.Revision,
+				.Graph = pipeline.Graph,
+				.Compiled = pipeline.Compiled,
+				.Schedule = pipeline.Schedule,
+				.Aliases = pipeline.Aliases,
+				.Profile = graph::ProfilePipeline(pipeline.Graph, pipeline.Compiled, viewWidth, viewHeight),
+			};
 		}
 
 		enum class ResourceRole : uint8_t {
@@ -166,7 +248,7 @@ namespace engine::render {
 		};
 
 		ResourceRole RoleFor(core::Name resource) const {
-			const NamedPipeline *pipeline = PipelineFor(ActiveGraph);
+			const InstalledPipeline *pipeline = PipelineFor(ActiveGraph);
 			if (pipeline == nullptr) {
 				return ResourceRole::Unknown;
 			}
@@ -616,62 +698,143 @@ namespace engine::render {
 			}
 		};
 
-		// Graph targets are isolated by the pipeline that declared them and by
-		// the scope that produced them. A view target belongs to a viewport slot,
-		// while world work belongs to the caller's stable world key. This is the
-		// storage rule that prevents two worlds with identically named resources
-		// from sampling one another.
-		struct GraphTarget {
-			core::Name Pipeline;
-			core::Name Resource;
-			graph::NodeScope Scope = graph::NodeScope::Frame;
-			uint64_t Owner = 0;
-			SDL_GPUTexture *Texture = nullptr;
-			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
-			uint32_t Width = 0;
-			uint32_t Height = 0;
-			uint64_t HistorySignature = 0;
-			bool HistoryReady = false;
+		// Owns every graph-declared resource and its deferred retirement state.
+		// A resource moves from allocation, through a submitted command, to either
+		// reusable history or explicit release. Keeping that lifecycle together
+		// prevents a pipeline replacement, a world teardown, or a cancelled image
+		// readback from leaving one half of an allocation behind.
+		struct GraphResourceCache {
+			// Graph targets are isolated by the pipeline that declared them and by
+			// the scope that produced them. A view target belongs to a viewport slot,
+			// while world work belongs to the caller's stable world key.
+			struct GraphTarget {
+				core::Name Pipeline;
+				core::Name Resource;
+				graph::NodeScope Scope = graph::NodeScope::Frame;
+				uint64_t Owner = 0;
+				SDL_GPUTexture *Texture = nullptr;
+				SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+				uint32_t Width = 0;
+				uint32_t Height = 0;
+				uint64_t HistorySignature = 0;
+				bool HistoryReady = false;
+			};
+
+			std::vector<GraphTarget> Targets;
+			// A world-scoped graph owner uses a process-local id. Keep its stable name
+			// so ForgetWorld cannot retire another world's resources on a bad match.
+			std::unordered_map<uint64_t, core::Name> WorldNames;
+
+			// A history image becomes readable only after the command buffer that wrote
+			// it has entered the queue. Batched views share one command buffer, so this
+			// state belongs to the renderer rather than one view recording.
+			struct PendingGraphHistoryWrite {
+				const InstalledPipeline *Pipeline = nullptr;
+				SDL_GPUCommandBuffer *Command = nullptr;
+				core::Name Resource;
+				graph::NodeScope Scope = graph::NodeScope::Frame;
+				uint64_t Owner = 0;
+				uint64_t Signature = 0;
+				bool Submitted = false;
+			};
+
+			std::vector<PendingGraphHistoryWrite> PendingHistoryWrites;
+
+			// Buffer resources use the same ownership key as images. A graph can name
+			// the same buffer in several views without letting one view overwrite another.
+			struct GraphBuffer {
+				core::Name Pipeline;
+				core::Name Resource;
+				graph::NodeScope Scope = graph::NodeScope::Frame;
+				uint64_t Owner = 0;
+				SDL_GPUBuffer *Buffer = nullptr;
+				uint32_t Bytes = 0;
+				SDL_GPUBufferUsageFlags Usage = 0;
+			};
+
+			std::vector<GraphBuffer> Buffers;
+
+			struct ResourcePreviewTarget {
+				ResourcePreviewRoute Route;
+				std::array<SDL_GPUTexture *, 2> Textures{};
+				ResourcePreviewSlots Slots;
+				uint32_t Width = 0;
+				uint32_t Height = 0;
+				bool ReverseSpectrum = false;
+				bool Refresh = true;
+			};
+
+			std::vector<ResourcePreviewTarget> Previews;
+
+			// Resource-image requests share frame submission fences with retained
+			// scene frames, so their slots and fence ledger are one ownership unit.
+			static constexpr size_t RESOURCE_IMAGE_CAPACITY = 12;
+			struct StagedSceneFrame {
+				size_t Slot = 0;
+				uint32_t Frame = 0;
+				uint64_t Sequence = 0;
+			};
+			struct PendingSceneSubmission {
+				SDL_GPUFence *Fence = nullptr;
+				std::vector<StagedSceneFrame> Frames;
+				std::array<uint32_t, RESOURCE_IMAGE_CAPACITY> Images{};
+				uint32_t ImageCount = 0;
+			};
+			enum class ResourceImagePhase : uint8_t { Free, Queued, Recorded, Submitted, Ready };
+			struct ResourceImageSlot {
+				ResourceImagePhase Phase = ResourceImagePhase::Free;
+				ResourceImage Image;
+				SDL_GPUTexture *Resident = nullptr;
+				SDL_GPUTexture *ResidentDepth = nullptr;
+				SDL_GPUTexture *ResidentNormal = nullptr;
+				SDL_GPUTexture *ResidentAmbientResponse = nullptr;
+				SDL_GPUTexture *ResidentLightingBaseline = nullptr;
+				SDL_GPUTexture *ResidentDirectionalResponse = nullptr;
+				SDL_GPUTransferBuffer *Transfer = nullptr;
+				uint32_t TransferBytes = 0;
+				uint32_t TransferStride = 0;
+				uint32_t DepthStride = 0;
+				uint32_t DepthOffset = 0;
+				uint32_t NormalStride = 0, NormalOffset = 0;
+				uint32_t AmbientResponseStride = 0, AmbientResponseOffset = 0;
+				uint32_t LightingBaselineStride = 0, LightingBaselineOffset = 0;
+				uint32_t DirectionalResponseStride = 0, DirectionalResponseOffset = 0;
+				bool Cancelled = false;
+			};
+			struct ResidentImagePair {
+				SDL_GPUTexture *Colour = nullptr;
+				SDL_GPUTexture *Depth = nullptr;
+				SDL_GPUTexture *Normal = nullptr;
+				SDL_GPUTexture *AmbientResponse = nullptr;
+				SDL_GPUTexture *LightingBaseline = nullptr;
+				SDL_GPUTexture *DirectionalResponse = nullptr;
+				uint32_t Width = 0, Height = 0;
+			};
+
+			std::array<ResourceImageSlot, RESOURCE_IMAGE_CAPACITY> Images;
+			std::array<ResidentImagePair, 4> ResidentImageCache{};
+			size_t NextResidentCache = 0;
+			uint64_t NextResourceImageToken = 1;
+			std::vector<StagedSceneFrame> StagedSceneFrames;
+			std::vector<PendingSceneSubmission> PendingSceneSubmissions;
+			std::vector<SDL_GPUTexture *> RetiredTextures;
 		};
-
-		std::vector<GraphTarget> GraphTargets;
-		// A world-scoped graph owner uses a process-local id. Keep its stable name
-		// so ForgetWorld cannot retire another world's resources on a bad match.
-		std::unordered_map<uint64_t, core::Name> GraphWorldNames;
-
-		// A history image becomes readable only after the command buffer that wrote
-		// it has entered the queue. Batched views share one command buffer, so this
-		// state belongs to the renderer rather than one view recording.
-		struct PendingGraphHistoryWrite {
-			const NamedPipeline *Pipeline = nullptr;
-			SDL_GPUCommandBuffer *Command = nullptr;
-			core::Name Resource;
-			graph::NodeScope Scope = graph::NodeScope::Frame;
-			uint64_t Owner = 0;
-			uint64_t Signature = 0;
-			bool Submitted = false;
-		};
-
-		std::vector<PendingGraphHistoryWrite> PendingGraphHistoryWrites;
-
-		// Buffer resources use the same ownership key as images. A graph can name
-		// the same buffer in several views without letting one view overwrite another.
-		struct GraphBuffer {
-			core::Name Pipeline;
-			core::Name Resource;
-			graph::NodeScope Scope = graph::NodeScope::Frame;
-			uint64_t Owner = 0;
-			SDL_GPUBuffer *Buffer = nullptr;
-			uint32_t Bytes = 0;
-			SDL_GPUBufferUsageFlags Usage = 0;
-		};
+		using GraphTarget = GraphResourceCache::GraphTarget;
+		using PendingGraphHistoryWrite = GraphResourceCache::PendingGraphHistoryWrite;
+		using GraphBuffer = GraphResourceCache::GraphBuffer;
+		using ResourcePreviewTarget = GraphResourceCache::ResourcePreviewTarget;
+		using StagedSceneFrame = GraphResourceCache::StagedSceneFrame;
+		using PendingSceneSubmission = GraphResourceCache::PendingSceneSubmission;
+		using ResourceImageSlot = GraphResourceCache::ResourceImageSlot;
+		using ResourceImagePhase = GraphResourceCache::ResourceImagePhase;
+		using ResidentImagePair = GraphResourceCache::ResidentImagePair;
+		static constexpr size_t RESOURCE_IMAGE_CAPACITY = GraphResourceCache::RESOURCE_IMAGE_CAPACITY;
+		GraphResourceCache GraphResources;
 
 		// Authored buffers are transient scratch. These caps bound a document before
 		// one unchecked width, height and stride turn into an unbounded allocation.
 		static constexpr uint64_t MAX_GRAPH_BUFFER_BYTES = 64u * 1024u * 1024u;
 		static constexpr uint64_t MAX_GRAPH_BUFFER_TOTAL_BYTES = 256u * 1024u * 1024u;
-		std::vector<GraphBuffer> GraphBuffers;
-
 		struct TessellationState {
 			SDL_GPUBuffer *Plans = nullptr;
 			SDL_GPUTransferBuffer *Transfer = nullptr;
@@ -683,45 +846,33 @@ namespace engine::render {
 		};
 		TessellationState Tessellation;
 
-		struct ResourcePreviewTarget {
-			ResourcePreviewRoute Route;
-			std::array<SDL_GPUTexture *, 2> Textures{};
-			ResourcePreviewSlots Slots;
-			uint32_t Width = 0;
-			uint32_t Height = 0;
-			bool ReverseSpectrum = false;
-			bool Refresh = true;
-		};
-
-		std::vector<ResourcePreviewTarget> ResourcePreviews;
-
-		graph::NodeScope ResourceScope(const NamedPipeline &pipeline, graph::ResourceId resource) const;
+		graph::NodeScope ResourceScope(const InstalledPipeline &pipeline, graph::ResourceId resource) const;
 		NamedTexture FindGraphTarget(
-			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+			const InstalledPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 		) const;
 		NamedTexture FindGraphHistoryForRead(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			core::Name resource,
 			graph::NodeScope scope,
 			uint64_t owner,
 			uint64_t signature
 		) const;
 		NamedTexture FindCurrentGraphHistoryWrite(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			SDL_GPUCommandBuffer *readCommand,
 			core::Name resource,
 			graph::NodeScope scope,
 			uint64_t owner
 		) const;
 		void CommitGraphHistoryWrite(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			core::Name resource,
 			graph::NodeScope scope,
 			uint64_t owner,
 			uint64_t signature
 		);
 		void StageGraphHistoryWrite(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			SDL_GPUCommandBuffer *command,
 			core::Name resource,
 			graph::NodeScope scope,
@@ -731,19 +882,19 @@ namespace engine::render {
 		void CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command);
 		void DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command = nullptr);
 		void ClearSubmittedGraphHistoryWrites();
-		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
+		core::Name GraphTargetName(const InstalledPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			graph::ResourceId resource,
 			uint64_t owner,
 			uint32_t viewWidth,
 			uint32_t viewHeight
 		);
 		SDL_GPUBuffer *FindGraphBuffer(
-			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+			const InstalledPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 		) const;
 		SDL_GPUBuffer *EnsureGraphBuffer(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			graph::ResourceId resource,
 			uint64_t owner,
 			uint32_t viewWidth,
@@ -785,13 +936,13 @@ namespace engine::render {
 			const graph::Node &node, ShaderStage stage, std::vector<uint8_t> &bytes, std::string &entryPoint
 		) const;
 		SDL_GPUGraphicsPipeline *GraphRasterFor(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			const graph::Node &node,
 			std::span<const SDL_GPUTextureFormat> formats,
 			uint32_t samplers
 		);
 		SDL_GPUComputePipeline *GraphComputeFor(
-			const NamedPipeline &pipeline,
+			const InstalledPipeline &pipeline,
 			const graph::Node &node,
 			uint32_t samplers,
 			uint32_t storage,
@@ -1717,7 +1868,7 @@ namespace engine::render {
 		// viewports are two different sizes, so one shared target would be
 		// destroyed and recreated twice a frame as each panel asked for its
 		// own - a colour and a depth texture per frame, which is exactly the
-		// cost `RetiredScenes` exists to avoid paying even once.
+		// cost `GraphResources.RetiredTextures` exists to avoid paying even once.
 		struct SceneSlot {
 			static constexpr size_t RETAINED_FRAMES = 3;
 			uint64_t ContentSignature = 0;
@@ -1810,63 +1961,17 @@ namespace engine::render {
 
 		std::vector<SceneSlot> SceneSlots;
 
-		struct StagedSceneFrame {
-			size_t Slot = 0;
-			uint32_t Frame = 0;
-			uint64_t Sequence = 0;
-		};
 		// One data-factory capture keeps its logical planes together. Shared
 		// capture nodes reduce thirteen resource-backed logical planes to at most
 		// ten deduplicated per-batch readback nodes. This is separate from the
 		// twelve-slot global resident-image capacity below.
-		static constexpr size_t RESOURCE_IMAGE_CAPACITY = 12;
 		static_assert(
 			MAX_DATA_FACTORY_READBACK_NODES <= RESOURCE_IMAGE_CAPACITY,
 			"data-factory readbacks must fit the renderer resource-image capacity"
 		);
-		struct PendingSceneSubmission {
-			SDL_GPUFence *Fence = nullptr;
-			std::vector<StagedSceneFrame> Frames;
-			std::array<uint32_t, RESOURCE_IMAGE_CAPACITY> Images{};
-			uint32_t ImageCount = 0;
-		};
-
-		enum class ResourceImagePhase : uint8_t { Free, Queued, Recorded, Submitted, Ready };
-		struct ResourceImageSlot {
-			ResourceImagePhase Phase = ResourceImagePhase::Free;
-			ResourceImage Image;
-			SDL_GPUTexture *Resident = nullptr;
-			SDL_GPUTexture *ResidentDepth = nullptr;
-			SDL_GPUTexture *ResidentNormal = nullptr;
-			SDL_GPUTexture *ResidentAmbientResponse = nullptr;
-			SDL_GPUTexture *ResidentLightingBaseline = nullptr;
-			SDL_GPUTexture *ResidentDirectionalResponse = nullptr;
-			SDL_GPUTransferBuffer *Transfer = nullptr;
-			uint32_t TransferBytes = 0;
-			uint32_t TransferStride = 0;
-			uint32_t DepthStride = 0;
-			uint32_t DepthOffset = 0;
-			uint32_t NormalStride = 0, NormalOffset = 0;
-			uint32_t AmbientResponseStride = 0, AmbientResponseOffset = 0;
-			uint32_t LightingBaselineStride = 0, LightingBaselineOffset = 0;
-			uint32_t DirectionalResponseStride = 0, DirectionalResponseOffset = 0;
-			bool Cancelled = false;
-		};
 		// Bounded copied-image requests. The default data-factory capture has
 		// thirteen logical planes, with shared resources deduplicated to ten
 		// per-batch nodes. The global resident-image capacity remains twelve.
-		std::array<ResourceImageSlot, RESOURCE_IMAGE_CAPACITY> ResourceImages;
-		struct ResidentImagePair {
-			SDL_GPUTexture *Colour = nullptr;
-			SDL_GPUTexture *Depth = nullptr;
-			SDL_GPUTexture *Normal = nullptr;
-			SDL_GPUTexture *AmbientResponse = nullptr;
-			SDL_GPUTexture *LightingBaseline = nullptr;
-			SDL_GPUTexture *DirectionalResponse = nullptr;
-			uint32_t Width = 0, Height = 0;
-		};
-		std::array<ResidentImagePair, 4> ResidentImageCache{};
-		size_t NextResidentCache = 0;
 		bool ReuseResidentImage(
 			ResourceImageSlot &slot,
 			uint32_t width,
@@ -1877,7 +1982,6 @@ namespace engine::render {
 			bool directional = false
 		);
 		void ReleaseResidentImageCache();
-		uint64_t NextResourceImageToken = 1;
 		DataCaptureSource ActiveDataCaptureSource;
 		// A frame-scope capture may read any physical view target after the batch
 		// has recorded it. Keep its observation facts beside that target rather
@@ -1916,8 +2020,6 @@ namespace engine::render {
 		);
 		void CollectResourceImage(uint32_t slot);
 		void ReleaseResidentImage(ResourceImageSlot &slot);
-		std::vector<StagedSceneFrame> StagedSceneFrames;
-		std::vector<PendingSceneSubmission> PendingSceneSubmissions;
 		uint64_t NextSceneSequence = 1;
 
 		// The slot the frame in progress is drawing into.
@@ -1994,19 +2096,14 @@ namespace engine::render {
 			}
 		}
 
-		// Scene targets that have been replaced but may still be referenced.
-		//
-		// Keep replaced targets alive until interface draw lists finish this frame.
-		std::vector<SDL_GPUTexture *> RetiredScenes;
-
 		// Frees what the previous frame retired. Called once at the top of a
 		// frame, which is the only point at which no draw list can still name
 		// one of them.
 		void DrainRetiredScenes() {
-			for (SDL_GPUTexture *texture : RetiredScenes) {
+			for (SDL_GPUTexture *texture : GraphResources.RetiredTextures) {
 				gpu::ReleaseTexture(Device, texture);
 			}
-			RetiredScenes.clear();
+			GraphResources.RetiredTextures.clear();
 		}
 
 		// --- the frame that has been waited for but not yet recorded ----------

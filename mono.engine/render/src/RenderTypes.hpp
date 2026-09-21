@@ -10,8 +10,8 @@
 // still obey: the device layout is private and stays private, so nothing here
 // reaches a public header.
 
-#include "BackendNodes.hpp"
 #include "InstancePacking.hpp"
+#include "RenderNodeExecutor.hpp"
 
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>

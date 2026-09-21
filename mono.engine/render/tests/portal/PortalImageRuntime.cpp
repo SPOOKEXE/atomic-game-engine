@@ -516,6 +516,22 @@ TEST_CASE(
 	CHECK_FALSE(images.Contains(worlds.Replies, worlds.Requests, request, START + limits.Timeout));
 }
 
+TEST_CASE("source clear retires its resident reservation", "[render][portal-runtime]") {
+	RuntimeWorlds worlds;
+	Renderer renderer;
+	PortalResidentImages images(renderer);
+	PortalImageSource source(worlds.Universe, renderer, worlds.Source, worlds.Replies, {}, &images);
+	auto request = Request();
+	const auto issued = source.Issue(worlds.Requests, request, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	request.Key.RequestId = issued.RequestId;
+	CHECK(images.Contains(worlds.Replies, worlds.Requests, request, START));
+
+	source.Clear();
+	CHECK_FALSE(images.Contains(worlds.Replies, worlds.Requests, request, START));
+	source.Clear();
+}
+
 TEST_CASE("portal reply endpoints isolate views of the same world and mouth", "[render][portal-runtime]") {
 	RuntimeWorlds worlds;
 	Renderer renderer;
@@ -652,7 +668,7 @@ TEST_CASE("invalid retained camera leaves its view unchanged", "[render][capture
 	CHECK(*view.Projection == glm::mat4(2));
 }
 
-#include "RenderFixture.hpp"
+#include "../RenderFixture.hpp"
 
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>

@@ -289,6 +289,28 @@ TEST_CASE("fully transparent parts never enter the resident draw list", "[render
 	CHECK(drawList->JointFrames.empty());
 }
 
+TEST_CASE("source rows keep ordinary parts before character limbs", "[render][presentation]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("source-row-order");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity ordinary = scene::MakePart(store, scene::PartDesc{});
+	const ecs::Entity limb = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(store.SetParent(ordinary, workspace));
+	REQUIRE(store.SetParent(limb, workspace));
+	store.Set(limb, scene::CharacterLimb{});
+	REQUIRE(scene::SyncRendered(store) == 2);
+
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	const auto *drawList = store.Resource<render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 2);
+	CHECK(drawList->Instances[0].Source == ordinary.Id);
+	CHECK(drawList->Instances[1].Source == limb.Id);
+}
+
 TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][presentation]") {
 	engine::scene::RegisterSceneClasses();
 	engine::render::RegisterPresentationComponents();

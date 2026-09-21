@@ -17,8 +17,8 @@ namespace engine::render {
 	bool Renderer::CanPublishResourceImage(uint64_t token, uint32_t width, uint32_t height) const {
 		RequireOwningThread("CanPublishResourceImage");
 		return token != 0 && std::any_of(
-								 State->ResourceImages.begin(),
-								 State->ResourceImages.end(),
+								 State->GraphResources.Images.begin(),
+								 State->GraphResources.Images.end(),
 								 [&](const Impl::ResourceImageSlot &slot) {
 									 return slot.Image.Request.Token == token && !slot.Cancelled &&
 											slot.Resident != nullptr &&
@@ -47,9 +47,9 @@ namespace engine::render {
 					   ? token
 					   : 0;
 		}
-		if (State->NextResourceImageToken == 0) return 0;
+		if (State->GraphResources.NextResourceImageToken == 0) return 0;
 		const ResourceImageRequest request{
-			.Token = State->NextResourceImageToken,
+			.Token = State->GraphResources.NextResourceImageToken,
 			.Pipeline = pipeline,
 			.Node = node,
 			.ViewSlot = viewSlot,
@@ -57,7 +57,7 @@ namespace engine::render {
 			.ExpectedSnapshotId = std::move(expectedSnapshotId),
 		};
 		if (!RequestResourceImage(request)) return 0;
-		return State->NextResourceImageToken++;
+		return State->GraphResources.NextResourceImageToken++;
 	}
 
 	bool Renderer::QueueResourceImages(
@@ -68,17 +68,19 @@ namespace engine::render {
 		std::span<uint64_t> tokens
 	) {
 		RequireOwningThread("QueueResourceImages");
-		if (nodes.empty() || nodes.size() > State->ResourceImages.size() || tokens.size() != nodes.size())
+		if (nodes.empty() || nodes.size() > State->GraphResources.Images.size() ||
+			tokens.size() != nodes.size())
 			return false;
-		std::array<ResourceImageRequest, std::tuple_size_v<decltype(State->ResourceImages)>> requests{};
+		std::array<ResourceImageRequest, std::tuple_size_v<decltype(State->GraphResources.Images)>>
+			requests{};
 		size_t next = 0;
 		// Explicit caller tokens can occupy generated values. The slot array bounds live tokens.
-		for (size_t attempt = 0; attempt < nodes.size() + State->ResourceImages.size(); ++attempt) {
-			if (State->NextResourceImageToken == 0) return false;
-			const uint64_t token = State->NextResourceImageToken++;
+		for (size_t attempt = 0; attempt < nodes.size() + State->GraphResources.Images.size(); ++attempt) {
+			if (State->GraphResources.NextResourceImageToken == 0) return false;
+			const uint64_t token = State->GraphResources.NextResourceImageToken++;
 			const bool occupied = std::any_of(
-				State->ResourceImages.begin(),
-				State->ResourceImages.end(),
+				State->GraphResources.Images.begin(),
+				State->GraphResources.Images.end(),
 				[token](const Impl::ResourceImageSlot &slot) {
 					return slot.Phase != Impl::ResourceImagePhase::Free && slot.Image.Request.Token == token;
 				}
@@ -99,7 +101,7 @@ namespace engine::render {
 		if (State->Device != nullptr) {
 			State->PollSceneFrames();
 		}
-		for (Impl::ResourceImageSlot &slot : State->ResourceImages) {
+		for (Impl::ResourceImageSlot &slot : State->GraphResources.Images) {
 			if (slot.Phase == Impl::ResourceImagePhase::Ready && slot.Image.Request.Token == token &&
 				slot.Image.Request.Delivery == ResourceImageDelivery::CopiedPixels) {
 				ResourceImage image = std::move(slot.Image);
@@ -117,10 +119,11 @@ namespace engine::render {
 
 	bool Renderer::RequestResourceImages(std::span<const ResourceImageRequest> requests) {
 		RequireOwningThread("RequestResourceImages");
-		if (State->Device == nullptr || requests.empty() || requests.size() > State->ResourceImages.size())
+		if (State->Device == nullptr || requests.empty() ||
+			requests.size() > State->GraphResources.Images.size())
 			return false;
 		const auto &first = requests.front();
-		const Impl::NamedPipeline *pipeline = State->PipelineFor(first.Pipeline);
+		const Impl::InstalledPipeline *pipeline = State->PipelineFor(first.Pipeline);
 		if (pipeline == nullptr || (first.Pipeline.IsValid() && first.Pipeline != pipeline->Name))
 			return false;
 		for (size_t index = 0; index < requests.size(); ++index) {
@@ -203,7 +206,7 @@ namespace engine::render {
 		}
 		State->PollSceneFrames();
 		size_t available = 0;
-		for (const auto &slot : State->ResourceImages) {
+		for (const auto &slot : State->GraphResources.Images) {
 			if (slot.Phase == Impl::ResourceImagePhase::Free) {
 				++available;
 				continue;
@@ -217,7 +220,7 @@ namespace engine::render {
 		}
 		// Validation and capacity checks finish before any slot changes ownership.
 		size_t next = 0;
-		for (auto &slot : State->ResourceImages) {
+		for (auto &slot : State->GraphResources.Images) {
 			if (slot.Phase != Impl::ResourceImagePhase::Free) continue;
 			slot.Image = {};
 			slot.Image.Request = requests[next++];
@@ -231,14 +234,15 @@ namespace engine::render {
 
 	std::optional<std::vector<ResourceImage>> Renderer::TakeResourceImages(std::span<const uint64_t> tokens) {
 		RequireOwningThread("TakeResourceImages");
-		if (tokens.empty() || tokens.size() > State->ResourceImages.size()) return {};
+		if (tokens.empty() || tokens.size() > State->GraphResources.Images.size()) return {};
 		if (State->Device != nullptr) State->PollSceneFrames();
-		std::array<Impl::ResourceImageSlot *, std::tuple_size_v<decltype(State->ResourceImages)>> selected{};
+		std::array<Impl::ResourceImageSlot *, std::tuple_size_v<decltype(State->GraphResources.Images)>>
+			selected{};
 		for (size_t index = 0; index < tokens.size(); ++index) {
 			if (tokens[index] == 0) return {};
 			for (size_t previous = 0; previous < index; ++previous)
 				if (tokens[previous] == tokens[index]) return {};
-			for (auto &slot : State->ResourceImages) {
+			for (auto &slot : State->GraphResources.Images) {
 				if (slot.Image.Request.Token == tokens[index] &&
 					slot.Phase == Impl::ResourceImagePhase::Ready &&
 					slot.Image.Request.Delivery == ResourceImageDelivery::CopiedPixels) {
@@ -261,7 +265,7 @@ namespace engine::render {
 
 	bool Renderer::CancelResourceImage(uint64_t token) {
 		RequireOwningThread("CancelResourceImage");
-		for (Impl::ResourceImageSlot &slot : State->ResourceImages) {
+		for (Impl::ResourceImageSlot &slot : State->GraphResources.Images) {
 			if (slot.Phase == Impl::ResourceImagePhase::Free || slot.Image.Request.Token != token) {
 				continue;
 			}
@@ -283,7 +287,7 @@ namespace engine::render {
 			State->PollSceneFrames();
 		}
 		std::vector<ResourceImage> images;
-		for (Impl::ResourceImageSlot &slot : State->ResourceImages) {
+		for (Impl::ResourceImageSlot &slot : State->GraphResources.Images) {
 			if (slot.Phase != Impl::ResourceImagePhase::Ready ||
 				slot.Image.Request.Delivery != ResourceImageDelivery::CopiedPixels) {
 				continue;
@@ -298,7 +302,7 @@ namespace engine::render {
 	bool Renderer::Impl::HasShadowCaptureRequest(core::Name pipelineName, size_t viewSlot) const {
 		const auto *pipeline = PipelineFor(pipelineName);
 		if (!pipeline) return false;
-		for (const auto &slot : ResourceImages) {
+		for (const auto &slot : GraphResources.Images) {
 			if (slot.Phase != ResourceImagePhase::Queued || slot.Cancelled ||
 				slot.Image.Request.Pipeline != pipeline->Name || slot.Image.Request.ViewSlot != viewSlot)
 				continue;
@@ -316,10 +320,10 @@ namespace engine::render {
 		if (bytes > MAX_RESOURCE_IMAGE_STAGING_BYTES) return false;
 		if (slot.TransferBytes >= bytes) return true;
 		size_t allocated = 0;
-		for (const auto &held : ResourceImages)
+		for (const auto &held : GraphResources.Images)
 			allocated += held.TransferBytes;
 		if (allocated - slot.TransferBytes + bytes > MAX_RESOURCE_IMAGE_STAGING_BYTES) {
-			for (auto &held : ResourceImages) {
+			for (auto &held : GraphResources.Images) {
 				if (&held == &slot || held.Phase == ResourceImagePhase::Recorded ||
 					held.Phase == ResourceImagePhase::Submitted || !held.Transfer)
 					continue;
@@ -354,7 +358,7 @@ namespace engine::render {
 		const NamedTexture &source,
 		const ResourceShadowCapture &metadata
 	) {
-		for (auto &slot : ResourceImages) {
+		for (auto &slot : GraphResources.Images) {
 			const auto &request = slot.Image.Request;
 			if (slot.Phase != ResourceImagePhase::Queued || request.Pipeline != pipeline ||
 				request.Node != node || request.ViewSlot != viewSlot)
@@ -501,7 +505,7 @@ namespace engine::render {
 			SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT
 		};
 		const size_t count = withDirectional ? 6 : withAmbient ? 5 : withNormal ? 3 : withDepth ? 2 : 1;
-		for (ResourceImageSlot &slot : ResourceImages) {
+		for (ResourceImageSlot &slot : GraphResources.Images) {
 			const auto &request = slot.Image.Request;
 			if (slot.Phase != ResourceImagePhase::Queued || request.Pipeline != pipeline ||
 				request.Node != node || request.ViewSlot != viewSlot)
@@ -771,7 +775,7 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::CollectResourceImage(uint32_t index) {
-		ResourceImageSlot &slot = ResourceImages[index];
+		ResourceImageSlot &slot = GraphResources.Images[index];
 		if (slot.Cancelled) {
 			ReleaseResidentImage(slot);
 			slot.Image = {};
@@ -875,7 +879,7 @@ namespace engine::render {
 		bool ambient,
 		bool directional
 	) {
-		for (auto &pair : ResidentImageCache) {
+		for (auto &pair : GraphResources.ResidentImageCache) {
 			if (!pair.Colour || pair.Width != width || pair.Height != height || bool(pair.Depth) != depth ||
 				bool(pair.Normal) != normal || bool(pair.AmbientResponse) != ambient ||
 				bool(pair.LightingBaseline) != ambient || bool(pair.DirectionalResponse) != directional)
@@ -902,7 +906,7 @@ namespace engine::render {
 		return false;
 	}
 	void Renderer::Impl::ReleaseResidentImageCache() {
-		for (auto &pair : ResidentImageCache) {
+		for (auto &pair : GraphResources.ResidentImageCache) {
 			gpu::ReleaseTexture(Device, pair.Colour);
 			gpu::ReleaseTexture(Device, pair.Depth);
 			gpu::ReleaseTexture(Device, pair.Normal);
@@ -912,7 +916,7 @@ namespace engine::render {
 			pair = {};
 		}
 		PortalImportUsage.CachedTextureBytes = 0;
-		NextResidentCache = 0;
+		GraphResources.NextResidentCache = 0;
 		ReportPortalImportUsage();
 	}
 	void Renderer::Impl::ReleaseResidentImage(ResourceImageSlot &slot) {

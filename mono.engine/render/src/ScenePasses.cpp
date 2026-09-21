@@ -44,7 +44,7 @@ namespace engine::render {
 	}
 
 	const graph::Node *ViewRecording::GraphNode(core::Name kind) const {
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 
 		for (size_t index = 0; index < selectedPipeline->Graph.Count(); index++) {
 			const graph::Node *node =
@@ -64,7 +64,7 @@ namespace engine::render {
 	}
 
 	const graph::ScheduledNode *ViewRecording::ScheduledFor(graph::NodeId id) const {
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 
 		for (const graph::ExecutionWave &wave : selectedPipeline->Schedule.Waves) {
 			for (const graph::ScheduledNode &scheduled : wave.Nodes) {
@@ -148,7 +148,7 @@ namespace engine::render {
 	void ViewRecording::EnterNamedPass(core::Name name, SDL_GPUCommandBuffer *recordedCommand) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 		SDL_GPUCommandBuffer *const command = Command;
 		core::Name &timedName = TimedName;
 		const uint32_t timingSlot = TimingSlot;
@@ -1034,7 +1034,7 @@ namespace engine::render {
 		graph::ResourceId resource, size_t selectedSlot, bool make, SDL_GPUCommandBuffer *readCommand
 	) {
 		Impl *const State = this->State;
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 		SDL_GPUTexture *const swapchain = Swapchain;
 		const uint32_t width = Width;
 		const uint32_t height = Height;
@@ -1083,7 +1083,7 @@ namespace engine::render {
 
 		if (make) {
 			if (scope == graph::NodeScope::World) {
-				State->GraphWorldNames[owner] = Request.Source->WorldName;
+				State->GraphResources.WorldNames[owner] = Request.Source->WorldName;
 			}
 			// Graph images ultimately feed this view's output target. Using the
 			// Studio swapchain here makes an offscreen interface draw in one
@@ -1098,20 +1098,20 @@ namespace engine::render {
 	}
 
 	SDL_GPUBuffer *ViewRecording::ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make) {
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
 		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer) return nullptr;
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, Request.World);
 		if (make && scope == graph::NodeScope::World) {
-			State->GraphWorldNames[owner] = Request.Source->WorldName;
+			State->GraphResources.WorldNames[owner] = Request.Source->WorldName;
 		}
 		return make ? State->EnsureGraphBuffer(*selectedPipeline, resource, owner, SceneWidth, SceneHeight)
 					: State->FindGraphBuffer(*selectedPipeline, desc->Name, scope, owner);
 	}
 
 	size_t ViewRecording::GraphTextureSlot(const graph::RunContext &context) const {
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 		const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 		const bool selectsView = context.View == graph::RunContext::WHOLE_FRAME && node != nullptr &&
 								 node->Parameter(core::Name("view")) != nullptr;
@@ -1156,7 +1156,7 @@ namespace engine::render {
 	std::vector<SDL_GPUTextureSamplerBinding>
 	ViewRecording::TextureBindings(const graph::RunContext &context, SDL_GPUCommandBuffer *readCommand) {
 		Impl *const State = this->State;
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 
 		std::vector<SDL_GPUTextureSamplerBinding> bindings;
 		for (const graph::ResourceId resource : context.Reads) {

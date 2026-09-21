@@ -1429,7 +1429,7 @@ namespace engine::render {
 		// frustum cull already ran - occlusion composes behind it rather than
 		// replacing it.
 		occlusionCulling = false;
-		if (const Impl::NamedPipeline *active = State->PipelineFor(State->ActiveGraph);
+		if (const Impl::InstalledPipeline *active = State->PipelineFor(State->ActiveGraph);
 			active != nullptr && State->Occlusion.Seed != nullptr && State->Occlusion.Reduce != nullptr &&
 			State->Occlusion.Cull != nullptr && State->Occlusion.Args != nullptr) {
 			for (uint32_t value = 1; value <= active->Graph.Count() && !occlusionCulling; value++) {
@@ -2695,7 +2695,7 @@ namespace engine::render {
 	void ViewRecording::Finish(const NodeTable &frameNodes) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 		SDL_GPUCommandBuffer *const command = Command;
 		SDL_GPUTexture *const swapchain = Swapchain;
 		FrameOverlayHook *const hostOverlayHook = Request.HostOverlayHook;
@@ -2870,7 +2870,7 @@ namespace engine::render {
 			(State->InspectedSlot == Renderer::ANY_VIEWPORT || State->InspectedSlot == targetSlot)) {
 			Impl::NamedTexture inspected = fixedTexture(State->Inspected, targetSlot);
 			if (!inspected.IsValid()) {
-				for (const Impl::GraphTarget &target : State->GraphTargets) {
+				for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 					if (target.Pipeline == selectedPipeline->Name && target.Resource == State->Inspected &&
 						target.Texture != nullptr &&
 						(target.Scope != graph::NodeScope::View || target.Owner == targetSlot)) {

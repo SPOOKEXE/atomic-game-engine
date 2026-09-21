@@ -69,6 +69,8 @@ TEST_CASE("named render graphs compile before entering the runtime cache", "[ren
 	REQUIRE(renderer.SetPipeline(first, DefaultGraph()));
 	REQUIRE(renderer.SetPipeline(second, DefaultGraph()));
 	CHECK(renderer.Pipelines() == std::vector<Name>{second, first});
+	const auto before = renderer.DescribePipeline(first, 640, 480);
+	REQUIRE(before);
 
 	RenderGraph unsupported = DefaultGraph();
 	const engine::graph::ResourceId storage = unsupported.AddResource(
@@ -84,6 +86,13 @@ TEST_CASE("named render graphs compile before entering the runtime cache", "[ren
 	// A refusal keeps the complete graph already installed under this key.
 	CHECK_FALSE(renderer.SetPipeline(first, unsupported));
 	CHECK(renderer.Pipelines() == std::vector<Name>{second, first});
+	const auto after = renderer.DescribePipeline(first, 640, 480);
+	REQUIRE(after);
+	CHECK(after->Revision == before->Revision);
+	CHECK(after->Graph.Count() == before->Graph.Count());
+	CHECK(after->Compiled.Shared == before->Compiled.Shared);
+	CHECK(after->Schedule.Waves.size() == before->Schedule.Waves.size());
+	CHECK(after->Aliases.Allocations == before->Aliases.Allocations);
 
 	CHECK(renderer.RemovePipeline(first));
 	CHECK_FALSE(renderer.RemovePipeline(first));
@@ -97,6 +106,37 @@ TEST_CASE("the default PBR graph compiles into the graph backend", "[render][gra
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("Default PBR#1"), DefaultGraph()));
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
+}
+
+TEST_CASE("default and named PBR installs have the same execution plan", "[render][graph]") {
+	Renderer renderer;
+	const auto builtIn = renderer.DescribePipeline(Name("Engine Default"), 640, 480);
+	REQUIRE(builtIn);
+	REQUIRE(renderer.SetPipeline(Name("PBR copy"), DefaultGraph()));
+	const auto named = renderer.DescribePipeline(Name("PBR copy"), 640, 480);
+	REQUIRE(named);
+	CHECK(named->Revision != builtIn->Revision);
+	CHECK(named->Graph.Count() == builtIn->Graph.Count());
+	CHECK(named->Graph.ResourceCount() == builtIn->Graph.ResourceCount());
+	CHECK(named->Compiled.Shared == builtIn->Compiled.Shared);
+	CHECK(named->Compiled.PerView == builtIn->Compiled.PerView);
+	CHECK(named->Compiled.Final == builtIn->Compiled.Final);
+	CHECK(named->Aliases.Allocations == builtIn->Aliases.Allocations);
+	REQUIRE(named->Schedule.Waves.size() == builtIn->Schedule.Waves.size());
+	for (size_t index = 0; index < named->Schedule.Waves.size(); ++index) {
+		const auto &actual = named->Schedule.Waves[index];
+		const auto &expected = builtIn->Schedule.Waves[index];
+		REQUIRE(actual.Nodes.size() == expected.Nodes.size());
+		for (size_t node = 0; node < actual.Nodes.size(); ++node) {
+			CHECK(actual.Nodes[node].Node == expected.Nodes[node].Node);
+			CHECK(actual.Nodes[node].Queue == expected.Nodes[node].Queue);
+		}
+	}
+	REQUIRE(named->Profile.Passes.size() == builtIn->Profile.Passes.size());
+	for (size_t index = 0; index < named->Profile.Passes.size(); ++index) {
+		CHECK(named->Profile.Passes[index].Name == builtIn->Profile.Passes[index].Name);
+		CHECK(named->Profile.Passes[index].Kind == builtIn->Profile.Passes[index].Kind);
+	}
 }
 
 TEST_CASE("render graph snapshots require an exact installed name", "[render][graph][diagnostic]") {

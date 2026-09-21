@@ -172,7 +172,7 @@ namespace engine::render {
 		ViewRequest Request;
 
 		// The installed graph this view is drawing.
-		const Impl::NamedPipeline *Pipeline = nullptr;
+		const Impl::InstalledPipeline *Pipeline = nullptr;
 
 		// The buffer every pass records into, and the image it presents to.
 		SDL_GPUCommandBuffer *Command = nullptr;

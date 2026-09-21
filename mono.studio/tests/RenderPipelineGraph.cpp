@@ -118,6 +118,102 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	}
 }
 
+TEST_CASE("canvas save keeps authoring metadata without canvas controls", "[studio][pipeline]") {
+	PipelineDocument basis = DefaultPbrDocument();
+	PipelineDocument expected;
+	for (const Edit &edit : std::array{
+			 Edit{
+				 .Kind = EditKind::Group,
+				 .Name = engine::core::Name("lighting"),
+				 .Target = engine::core::Name("gbuffer")
+			 },
+			 Edit{.Kind = EditKind::Comment, .Name = engine::core::Name("gbuffer"), .Value = "world pass"},
+			 Edit{.Kind = EditKind::Mute, .Name = engine::core::Name("ssao"), .Enabled = true},
+			 Edit{.Kind = EditKind::Preview, .Target = engine::core::Name("albedo")},
+		 }) {
+		basis.Record(edit);
+		expected.Record(edit);
+	}
+
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	PipelineDocument actual;
+	for (const Edit &edit : saved.Edits())
+		if (edit.Kind == EditKind::Group || edit.Kind == EditKind::Comment || edit.Kind == EditKind::Mute ||
+			edit.Kind == EditKind::Preview)
+			actual.Record(edit);
+	CHECK(Write(actual) == Write(expected));
+	RenderGraph rebuilt;
+	engine::core::Name offender;
+	CHECK(Build(saved, rebuilt, offender) == PipelineDocumentStatus::Ok);
+}
+
+TEST_CASE("canvas document round trip retains resource and unknown authored data", "[studio][pipeline]") {
+	PipelineDocument basis;
+	basis.Record(
+		{.Kind = EditKind::AddResource,
+		 .Name = engine::core::Name("source"),
+		 .Resource = ResourceKind::Colour,
+		 .Format = ResourceFormat::RGBA16F,
+		 .Divisor = 2,
+		 .External = true}
+	);
+	basis.Record(
+		{.Kind = EditKind::AddNode,
+		 .Name = engine::core::Name("tone"),
+		 .NodeKind = engine::core::Name("tonemap"),
+		 .Scope = NodeScope::View}
+	);
+	basis.Record(
+		{.Kind = EditKind::Reads, .Target = engine::core::Name("source"), .Key = engine::core::Name("colour")}
+	);
+	basis.Record(
+		{.Kind = EditKind::Writes,
+		 .Target = engine::core::Name("display"),
+		 .Key = engine::core::Name("display")}
+	);
+	basis.Record(
+		{.Kind = EditKind::Set,
+		 .Key = engine::core::Name("unknown-authored-text"),
+		 .Value = "leave this text alone"}
+	);
+	basis.Record({.Kind = EditKind::Enable, .Name = engine::core::Name("tone"), .Enabled = true});
+	basis.Record({.Kind = EditKind::Move, .Name = engine::core::Name("tone"), .X = 140.0f, .Y = 80.0f});
+
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	REQUIRE(canvas.Nodes().size() == 1);
+	CHECK(
+		canvas.Nodes().front().Widgets.at("__render.parameter.unknown-authored-text").Text ==
+		"leave this text alone"
+	);
+
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	const auto source = std::find_if(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
+		return edit.Kind == EditKind::AddResource && edit.Name == engine::core::Name("source");
+	});
+	REQUIRE(source != saved.Edits().end());
+	CHECK(source->External);
+	CHECK(source->Divisor == 2);
+	CHECK(source->Format == ResourceFormat::RGBA16F);
+	const auto unknown = std::find_if(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
+		return edit.Kind == EditKind::Set && edit.Key == engine::core::Name("unknown-authored-text");
+	});
+	REQUIRE(unknown != saved.Edits().end());
+	CHECK(unknown->Value == "leave this text alone");
+
+	nodegraph::Graph restored;
+	REQUIRE(studio::LoadRenderPipelineGraph(saved, restored, error));
+	PipelineDocument canonical;
+	REQUIRE(studio::SaveRenderPipelineGraph(restored, saved, canonical, error));
+	CHECK(Write(canonical) == Write(saved));
+}
+
 TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][pipeline][compositor]") {
 	studio::RegisterRenderPipelineNodeTypes();
 	const PipelineDocument basis = engine::graph::CompositorDemoDocument();

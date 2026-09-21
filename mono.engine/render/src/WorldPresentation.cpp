@@ -1,4 +1,8 @@
 #include "EnvironmentModes.hpp"
+#include "PresentationSource.hpp"
+#include "PresentationSourceDamage.hpp"
+#include "PresentationSourceOrder.hpp"
+#include "PresentationSourceRows.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
@@ -597,226 +601,10 @@ namespace engine::render {
 	using engine::scene::Visual;
 
 	namespace {
-		enum SourceRevision : size_t {
-			TRANSFORM_REVISION,
-			PREVIOUS_TRANSFORM_REVISION,
-			BOUNDS_REVISION,
-			VISUAL_REVISION,
-			SURFACE_REVISION,
-			TAGS_REVISION,
-			TRANSPARENCY_REVISION,
-			LIMB_REVISION,
-			SKELETON_REVISION,
-			BONE_REVISION,
-			RENDERED_REVISION,
-			AUTO_LOD_REVISION,
-			CUSTOM_LOD_REVISION,
-			LOD_SETTINGS_REVISION,
-			EFFECTS_REVISION,
-		};
-
-		struct DrawSourceChanges {
-			bool Pose = false;
-			bool Full = false;
-		};
-
-		bool DrawableSource(const Store &store, Entity entity) {
-			return store.Has<Transform>(entity) && store.Has<PreviousTransform>(entity) &&
-				   store.Has<Bounds>(entity) && store.Has<Visual>(entity) &&
-				   store.Has<SurfaceAppearance>(entity) && store.Has<Tags>(entity) &&
-				   store.Has<LocalTransparency>(entity) && store.Has<Rendered>(entity);
-		}
-
-		template <class Component, class Relevant>
-		bool
-		SourceRevisionChanged(Store &store, DrawList &drawList, SourceRevision slot, Relevant &&relevant) {
-			store.Observe<Component>();
-			const uint64_t revision = store.ComponentChangeVersion<Component>();
-			uint64_t &seen = drawList.SourceRevisions[slot];
-			if (!drawList.SourcesReady || revision == seen) {
-				seen = revision;
-				return false;
-			}
-			seen = revision;
-
-			bool visited = false;
-			bool changed = false;
-			store.EachChanged<Component>([&](Entity entity, Component &) {
-				visited = true;
-				changed |= relevant(entity);
-			});
-			// A world may have ticked while it was not presented. Its monotonic
-			// revision survives, but the row bits do not, so an empty walk is not
-			// proof that the cached list is current.
-			return changed || !visited;
-		}
-
-		template <class Component>
-		bool SourceRevisionAdvanced(Store &store, DrawList &drawList, SourceRevision slot) {
-			store.Observe<Component>();
-			const uint64_t revision = store.ComponentChangeVersion<Component>();
-			uint64_t &seen = drawList.SourceRevisions[slot];
-			const bool changed = drawList.SourcesReady && revision != seen;
-			seen = revision;
-			return changed;
-		}
-
-		DrawSourceChanges DrawSourcesChanged(
-			Store &store, DrawList &drawList, size_t matching, size_t skeletons, size_t bones
-		) {
-			DrawSourceChanges changes;
-			changes.Full = !drawList.SourcesReady || matching != drawList.SourceEntityCount ||
-						   skeletons != drawList.SkeletonCount || bones != drawList.BoneCount;
-			const auto drawable = [&store](Entity entity) { return DrawableSource(store, entity); };
-
-			// Pose columns only affect the interpolated frame or the skin palette.
-			// A camera orbit writes `Transform` every frame but the camera has no
-			// draw row. Treating the component epoch as enough rebuilt every terrain
-			// row in Magic merely because its eye moved. The changed walk is normally
-			// one camera and a few projectiles, so filtering it at the source is
-			// cheaper than refreshing thousands of static draw rows.
-			changes.Pose |= SourceRevisionChanged<Transform>(store, drawList, TRANSFORM_REVISION, drawable);
-			changes.Pose |= SourceRevisionChanged<PreviousTransform>(
-				store, drawList, PREVIOUS_TRANSFORM_REVISION, drawable
-			);
-			changes.Full |= SourceRevisionChanged<Bounds>(store, drawList, BOUNDS_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<Visual>(store, drawList, VISUAL_REVISION, drawable);
-			changes.Full |=
-				SourceRevisionChanged<SurfaceAppearance>(store, drawList, SURFACE_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<Tags>(store, drawList, TAGS_REVISION, drawable);
-			changes.Full |=
-				SourceRevisionChanged<LocalTransparency>(store, drawList, TRANSPARENCY_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<CharacterLimb>(store, drawList, LIMB_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<LODAuto>(store, drawList, AUTO_LOD_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<LODCustom>(store, drawList, CUSTOM_LOD_REVISION, drawable);
-			changes.Full |=
-				SourceRevisionChanged<LODSettings>(store, drawList, LOD_SETTINGS_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<RenderEffects>(store, drawList, EFFECTS_REVISION, drawable);
-			changes.Pose |= SourceRevisionAdvanced<Skeleton>(store, drawList, SKELETON_REVISION);
-			changes.Pose |= SourceRevisionAdvanced<Bone>(store, drawList, BONE_REVISION);
-
-			store.Observe<Rendered>();
-			const uint64_t renderedRevision = store.ComponentChangeVersion<Rendered>();
-			changes.Full |=
-				drawList.SourcesReady && renderedRevision != drawList.SourceRevisions[RENDERED_REVISION];
-			drawList.SourceRevisions[RENDERED_REVISION] = renderedRevision;
-			drawList.SourceEntityCount = matching;
-			drawList.SkeletonCount = skeletons;
-			drawList.BoneCount = bones;
-			drawList.SourcesReady = true;
-			return changes;
-		}
-
-		void ApplyOptionalRenderState(const Store &store, std::span<DrawInstance> instances) {
-			for (DrawInstance &instance : instances) {
-				const Entity source(instance.Source);
-				engine::scene::ApplyDrawRenderState(
-					instance,
-					store.Get<LODAuto>(source),
-					store.Get<LODCustom>(source),
-					store.Get<LODSettings>(source),
-					store.Get<RenderEffects>(source)
-				);
-			}
-		}
-
 		bool SameFrame(const core::CFrame &left, const core::CFrame &right) {
 			return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
 				   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
 				   left.QuaternionW == right.QuaternionW;
-		}
-
-		size_t UpdateDrawFrames(Store &store, DrawList &drawList, float alpha, size_t grain) {
-			std::atomic_bool hasInterpolation = false;
-			std::atomic_bool sourceOrderChanged = false;
-			DrawInstance *const out = drawList.Instances.data();
-			const size_t capacity = drawList.Instances.size();
-			const auto write = [out, capacity, alpha, &hasInterpolation, &sourceOrderChanged](
-								   size_t base,
-								   size_t first,
-								   size_t rows,
-								   const Entity *entities,
-								   const Transform *transforms,
-								   const PreviousTransform *previous
-							   ) {
-				const size_t at = base + first;
-				if (at >= capacity) {
-					return;
-				}
-				rows = std::min(rows, capacity - at);
-				bool foundInterpolation = false;
-				for (size_t row = 0; row < rows; row++) {
-					if (out[at + row].Source != entities[row].Id) {
-						sourceOrderChanged.store(true, std::memory_order_relaxed);
-						continue;
-					}
-					const bool moving = !SameFrame(previous[row].Frame, transforms[row].Frame);
-					foundInterpolation |= moving;
-					out[at + row].Frame = moving ? previous[row].Frame.NLerp(transforms[row].Frame, alpha)
-												 : transforms[row].Frame;
-				}
-				if (foundInterpolation) {
-					hasInterpolation.store(true, std::memory_order_relaxed);
-				}
-			};
-
-			const size_t loose = store
-									 .Query<
-										 const Transform,
-										 const PreviousTransform,
-										 const Bounds,
-										 const Visual,
-										 const SurfaceAppearance,
-										 const Tags,
-										 const LocalTransparency>()
-									 .With<Rendered>()
-									 .Without<CharacterLimb>()
-									 .EachBatchEntitiesParallel(
-										 [&write](
-											 size_t first,
-											 size_t rows,
-											 const Entity *entities,
-											 const Transform *transforms,
-											 const PreviousTransform *previous,
-											 const Bounds *,
-											 const Visual *,
-											 const SurfaceAppearance *,
-											 const Tags *,
-											 const LocalTransparency *
-										 ) { write(0, first, rows, entities, transforms, previous); },
-										 grain
-									 );
-			const size_t rigged = store
-									  .Query<
-										  const Transform,
-										  const PreviousTransform,
-										  const Bounds,
-										  const Visual,
-										  const SurfaceAppearance,
-										  const Tags,
-										  const LocalTransparency,
-										  const CharacterLimb>()
-									  .With<Rendered>()
-									  .EachBatchEntitiesParallel(
-										  [&write, loose](
-											  size_t first,
-											  size_t rows,
-											  const Entity *entities,
-											  const Transform *transforms,
-											  const PreviousTransform *previous,
-											  const Bounds *,
-											  const Visual *,
-											  const SurfaceAppearance *,
-											  const Tags *,
-											  const LocalTransparency *,
-											  const CharacterLimb *
-										  ) { write(loose, first, rows, entities, transforms, previous); },
-										  grain
-									  );
-			drawList.HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
-			// The pose path preserves all other fields of each cached row. A query
-			// order change invalidates that positional join, so rebuild every row.
-			return sourceOrderChanged.load(std::memory_order_relaxed) ? 0 : loose + rigged;
 		}
 	}
 
@@ -893,10 +681,10 @@ namespace engine::render {
 		}
 		const size_t skeletons = store.CountMatching<Skeleton>();
 		const size_t bones = skeletons == 0 ? 0 : store.CountMatching<Bone>();
-		DrawSourceChanges sourceChanges;
+		PresentationSourceDamage sourceChanges;
 		{
 			ENGINE_PROFILE_CAT("source changes", engine::core::ProfileCategory::Simulation);
-			sourceChanges = DrawSourcesChanged(store, *drawList, matching, skeletons, bones);
+			sourceChanges = CollectPresentationSourceDamage(store, *drawList, matching, skeletons, bones);
 		}
 		if (!drawList->HasInterpolation && !sourceChanges.Pose && !sourceChanges.Full) {
 			ENGINE_PROFILE_CAT("reuse draw list", engine::core::ProfileCategory::Simulation);
@@ -943,7 +731,7 @@ namespace engine::render {
 		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
 			ENGINE_PROFILE_CAT("update draw frames", engine::core::ProfileCategory::Simulation);
 			drawList->Instances.resize(drawList->BaseInstanceCount);
-			const size_t written = UpdateDrawFrames(store, *drawList, alpha, DRAW_LIST_GRAIN);
+			const size_t written = RefreshPresentationSourceRows(store, *drawList, alpha, DRAW_LIST_GRAIN);
 			if (written == drawList->BaseInstanceCount) {
 				engine::core::Metrics::Count(
 					"render.instances", static_cast<double>(drawList->Instances.size())
@@ -1089,20 +877,23 @@ namespace engine::render {
 					// what the world knows, and `render` is what turns it
 					// into something a GPU binds.
 					//
-					// The fields come from `scene::MakeDrawInstance`, which
+					// The fields come from `PresentationSource::MakeDrawInstance`, which
 					// is the only place that list is written - the
 					// replicated collector fills the same row from a
 					// snapshot. Both components are required columns of
 					// *this* query, so the addresses are always good.
-					out[at + row] = engine::scene::MakeDrawInstance(
-						previous[row].Frame.NLerp(transforms[row].Frame, alpha),
-						bounds[row],
-						visuals[row],
-						&appearances[row],
-						&tags[row],
-						entities[row].Id,
-						&locals[row],
-						limbs == nullptr ? nullptr : &limbs[row]
+					const PresentationSource source{
+						.Transform = &transforms[row],
+						.PreviousTransform = &previous[row],
+						.Bounds = &bounds[row],
+						.Visual = &visuals[row],
+						.Appearance = &appearances[row],
+						.Tags = &tags[row],
+						.Transparency = &locals[row],
+						.Limb = limbs == nullptr ? nullptr : &limbs[row],
+					};
+					out[at + row] = source.MakeDrawInstance(
+						entities[row], previous[row].Frame.NLerp(transforms[row].Frame, alpha)
 					);
 					foundFullyTransparent |= out[at + row].Transparency >= 1.0f;
 				}
@@ -1216,12 +1007,9 @@ namespace engine::render {
 			// a vector writes nothing and keeps the capacity, so the frame
 			// after an entity is destroyed still does not allocate.
 			drawList->Instances.resize(std::min(written, drawList->Instances.size()));
-			ApplyOptionalRenderState(store, drawList->Instances);
-			if (hasFullyTransparent.load(std::memory_order_relaxed)) {
-				std::erase_if(drawList->Instances, [](const scene::DrawInstance &instance) {
-					return instance.Transparency >= 1.0f;
-				});
-			}
+			FinalizePresentationSourceRows(
+				store, *drawList, hasFullyTransparent.load(std::memory_order_relaxed)
+			);
 
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 		}
@@ -1252,7 +1040,7 @@ namespace engine::render {
 		// is what lets it *cut* the body at the plane rather than leave two
 		// whole copies straddling two panes. The same call serves a replica,
 		// which has a draw list and no simulation behind it.
-		(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+		AppendPresentationSeamRows(store, *drawList);
 		AssignObjectLabels(store, *drawList);
 		AssignAuthoredLabels(
 			store,
@@ -1272,55 +1060,6 @@ namespace engine::render {
 			&scene::DrawInstance::PartLabel,
 			false
 		);
-	}
-
-	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList) {
-		ENGINE_PROFILE_CAT("build skin palettes", engine::core::ProfileCategory::Simulation);
-		drawList.JointFrames.clear();
-		for (scene::DrawInstance &instance : drawList.Instances) {
-			instance.SkinFirst = 0;
-			instance.SkinCount = 0;
-
-			const ecs::Entity source(instance.Source);
-			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(source);
-			if (skeleton == nullptr || skeleton->JointCount == 0 ||
-				skeleton->JointCount > scene::MAX_JOINTS || !std::isfinite(skeleton->PoseScale) ||
-				skeleton->PoseScale <= 0) {
-				continue;
-			}
-
-			instance.SkinFirst = static_cast<uint32_t>(drawList.JointFrames.size());
-			instance.SkinCount = skeleton->JointCount;
-			drawList.JointFrames.resize(drawList.JointFrames.size() + skeleton->JointCount);
-			store.EachDescendant(source, [&](ecs::Entity descendant) {
-				const scene::Bone *bone = store.Get<scene::Bone>(descendant);
-				if (bone != nullptr && bone->Joint < skeleton->JointCount) {
-					auto frame = instance.Frame.Inverse() * scene::SkinningFrameOf(*bone);
-					frame.Position = frame.Position * (1.0f / skeleton->PoseScale);
-					drawList.JointFrames[instance.SkinFirst + bone->Joint] = frame;
-				}
-			});
-		}
-	}
-
-	void RebaseSkinPalettes(
-		std::span<scene::DrawInstance> instances,
-		std::span<const core::CFrame> source,
-		std::vector<core::CFrame> &destination
-	) {
-		for (scene::DrawInstance &instance : instances) {
-			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
-			if (instance.SkinCount == 0 || end > source.size() ||
-				destination.size() > std::numeric_limits<uint32_t>::max() - instance.SkinCount) {
-				instance.SkinFirst = 0;
-				instance.SkinCount = 0;
-				continue;
-			}
-
-			const size_t first = instance.SkinFirst;
-			instance.SkinFirst = static_cast<uint32_t>(destination.size());
-			destination.insert(destination.end(), source.begin() + first, source.begin() + end);
-		}
 	}
 
 	void ParticleFrame::Detach() {
@@ -1674,7 +1413,7 @@ namespace engine::render {
 					lists[index].Instances.clear();
 					lists[index].JointFrames.clear();
 					lists[index].BaseInstanceCount = 0;
-					lists[index].SourceRevisions.fill(0);
+					lists[index].Revisions = {};
 					lists[index].SourceEntityCount = 0;
 					lists[index].SkeletonCount = 0;
 					lists[index].BoneCount = 0;

@@ -17,7 +17,6 @@
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Skinning.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -51,6 +50,26 @@ namespace engine::render {
 	// while serialisation deliberately writes no instances because PreRender
 	// rebuilds them before use.
 	struct DrawList {
+		// Monotonic source epochs last inspected by CollectInstances. Named fields
+		// keep a new source component from being coupled to an array position.
+		struct SourceRevisions {
+			uint64_t Transform = 0;
+			uint64_t PreviousTransform = 0;
+			uint64_t Bounds = 0;
+			uint64_t Visual = 0;
+			uint64_t SurfaceAppearance = 0;
+			uint64_t Tags = 0;
+			uint64_t LocalTransparency = 0;
+			uint64_t CharacterLimb = 0;
+			uint64_t Skeleton = 0;
+			uint64_t Bone = 0;
+			uint64_t Rendered = 0;
+			uint64_t LODAuto = 0;
+			uint64_t LODCustom = 0;
+			uint64_t LODSettings = 0;
+			uint64_t RenderEffects = 0;
+		};
+
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
 		// Stable object identities indexed by captured object-id values.
@@ -74,9 +93,8 @@ namespace engine::render {
 		// those view-derived rows are rebuilt independently.
 		size_t BaseInstanceCount = 0;
 
-		// Monotonic source epochs last inspected by CollectInstances. These are
-		// derived cache state and deliberately do not cross snapshots.
-		std::array<uint64_t, 15> SourceRevisions{};
+		// Derived cache state that deliberately does not cross snapshots.
+		SourceRevisions Revisions{};
 		// Entity count used to size the cached source rows.
 		size_t SourceEntityCount = 0;
 		// Number of skeletons represented by the cached source rows.

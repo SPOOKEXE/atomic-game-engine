@@ -342,7 +342,7 @@ namespace engine::render {
 				CancelDataCapture(queued);
 				return false;
 			}
-			for (auto &slot : State->ResourceImages)
+			for (auto &slot : State->GraphResources.Images)
 				if (slot.Phase != Impl::ResourceImagePhase::Free && slot.Image.Request.Token == token) {
 					slot.Image.DataCaptureTimingId = queued.GpuTimingId;
 					break;

@@ -1,3 +1,4 @@
+#include "PresentationSource.hpp"
 #include "ViewportFrameScene.hpp"
 
 #include <engine/ecs/Store.hpp>
@@ -25,26 +26,11 @@ namespace engine::render {
 			}
 
 			store.EachChild(parent, [&](ecs::Entity child) {
-				const auto *placement = store.Get<scene::Transform>(child);
-				const auto *bounds = store.Get<scene::Bounds>(child);
-				const auto *visual = store.Get<scene::Visual>(child);
-				if (placement != nullptr && bounds != nullptr && visual != nullptr) {
-					out.push_back(
-						scene::MakeDrawInstance(
-							placement->Frame,
-							*bounds,
-							*visual,
-							store.Get<scene::SurfaceAppearance>(child),
-							store.Get<scene::Tags>(child),
-							child.Id,
-							nullptr,
-							store.Get<scene::CharacterLimb>(child),
-							store.Get<scene::LODAuto>(child),
-							store.Get<scene::LODCustom>(child),
-							store.Get<scene::LODSettings>(child),
-							store.Get<scene::RenderEffects>(child)
-						)
-					);
+				const PresentationSource source = PresentationSource::Of(store, child);
+				if (source.IsViewportDrawable()) {
+					out.push_back(source.MakeDrawInstance(
+						child, source.Transform->Frame, PresentationSource::LocalTransparencyMode::Ignore
+					));
 				}
 
 				CollectViewportDescendants(store, child, depth + 1, out);

@@ -397,7 +397,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("viewer"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			const size_t targetSlot = recording.Request.TargetSlot;
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
@@ -470,7 +470,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("capture"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			Impl::NamedTexture &authoredCapture = recording.AuthoredCapture;
 			std::filesystem::path &authoredCapturePath = recording.AuthoredCapturePath;
 			core::Name &authoredCaptureNode = recording.AuthoredCaptureNode;
@@ -495,7 +495,7 @@ namespace engine::render {
 				} else if (pinnedView) {
 					slots.push_back(node->Integer(core::Name("view"), 0));
 				} else {
-					for (const Impl::ResourceImageSlot &image : State->ResourceImages) {
+					for (const Impl::ResourceImageSlot &image : State->GraphResources.Images) {
 						const auto &request = image.Image.Request;
 						if (image.Phase != Impl::ResourceImagePhase::Queued ||
 							request.Pipeline != selectedPipeline->Name || request.Node != context.Name ||
@@ -640,7 +640,7 @@ namespace engine::render {
 				return true;
 			}
 			Impl *const State = recording.State;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			const size_t targetSlot = recording.Request.TargetSlot;
 			SDL_GPUTexture *const swapchain = recording.Swapchain;
 			const uint32_t width = recording.Width;
@@ -669,7 +669,7 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			enterNamedPass(context.Name);
-			for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+			for (Impl::ResourcePreviewTarget &preview : State->GraphResources.Previews) {
 				if (!preview.Refresh || preview.Route.Pipeline != selectedPipeline->Name ||
 					preview.Route.Slot != targetSlot) {
 					continue;
@@ -707,7 +707,7 @@ namespace engine::render {
 					// boundary instead of releasing either under that draw list.
 					for (SDL_GPUTexture *&texture : preview.Textures) {
 						if (texture != nullptr) {
-							State->RetiredScenes.push_back(texture);
+							State->GraphResources.RetiredTextures.push_back(texture);
 							texture = nullptr;
 						}
 					}

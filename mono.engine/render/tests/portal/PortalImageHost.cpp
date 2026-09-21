@@ -63,11 +63,20 @@ TEST_CASE("portal host shares producers while retaining viewport endpoints", "[r
 	CHECK(host.Image(0, core::Name("Door")) == 0);
 	host.RemoveViewport(0);
 	CHECK(host.Submit(worlds.Source, 0, std::span(&first, 1), std::span(&route, 1), START) == 1);
+	const auto previousProducer =
+		worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	REQUIRE(previousProducer.Generation != 0);
 	host.RemoveWorld(worlds.Destination);
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+	const auto replacementProducer = host.Serve(worlds.Destination);
+	CHECK(replacementProducer.Generation != 0);
+	CHECK(replacementProducer.Generation != previousProducer.Generation);
 	CHECK(host.Submit(worlds.Source, 2, std::span(&second, 1), std::span(&route, 1), START) == 1);
 	CHECK(host.Pump(0, 0, START).Requests == 1);
 	host.Clear();
+	host.Clear();
+	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+	CHECK(host.Image(0, core::Name("Door")) == 0);
 	CHECK(
 		worlds.Universe.OpenPresentation(worlds.Source, PortalReplyChannel(2)).Status ==
 		world::PresentationStatus::Ok
@@ -327,7 +336,7 @@ TEST_CASE(
 	CHECK(host.SetRetainedBodyAuthorization(worlds.Destination, deny));
 }
 
-#include "RenderFixture.hpp"
+#include "../RenderFixture.hpp"
 
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Characters.hpp>
