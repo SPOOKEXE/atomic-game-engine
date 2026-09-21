@@ -40,37 +40,33 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.25
 
 - [x] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
-
 - [x] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
 - [x] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
 - [x] consolidate/improve `CONTRIBUTING.md`, `SECURITY.md`, `docs/THIRD_PARTY_NOTICES.md`, `CODE_ARCH.md`, `CODE_DOCUMENTING.md`, `CODE_FORMAT.md` and `CODE_QUALITY.md`, with small sentences at the start of the file describing what they contain in succinct detail.
 - [x] cleanup documentation doxy and layout
 - [x] update and prune old content in documentation (doxy). check each statement, update, remove or replace.
-
-- [_] check LOD is cleaned up when the mesh changes / is deleted / LOD properties are changed so they release and are recomputed
-- [_] fix multi-select multi-property editing (when i select multiple objects, it should check all objects for the same component and value im editing and match them).
-- [_] add a override LOD distance per-item with default value being set to preference one.
-- [_] separate the LOD component into LODAuto/LODCustom/LODSettings, LODCustom overlays LODAuto (so we can still have auto options but overriden by LODCustom options).
-- [_] rename preferences LOD distance to "Default Mesh LOD distances".
-- [_] fix camera detached in bladeborne aworld demo
-- [_] fix lights passing through portals not working
+- [x] check LOD is cleaned up when the mesh changes / is deleted / LOD properties are changed so they release and are recomputed
+- [x] fix multi-select multi-property editing (when i select multiple objects, it should check all objects for the same component and value im editing and match them).
+- [x] add a override LOD distance per-item with default value being set to preference one.
+- [x] separate the LOD component into LODAuto/LODCustom/LODSettings, LODCustom overlays LODAuto (so we can still have auto options but overriden by LODCustom options).
+- [x] rename preferences LOD distance to "Default Mesh LOD distances".
+- [x] fix camera detached in bladeborne aworld demo
+- [x] fix lights passing through portals not working
+- [x] add extensive (freecam) camera tests (like flying through portals)
+- [x] add extensive client character tests
+- [x] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
+- [x] improve atomic-game-engine build file usage sizes. Takes over 100GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc. Find what takes up all the space and try improve it.
+- [x] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
+- [x] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
+- [x] review and plan a cleanup of the render pipeline. Write docs/v025-RENDER-PIPELINE-CLEANUP.md. This can be logic cleanup, better layout, components separation, merging, renaming, potential test points, areas to investigate logic (that seem wrong and need to be investigated), etc.
+- [x] plan a consolidation and cleanup for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them). Write docs/v025-MCP-CLEANUP.md.
 
 - [_] add a "light path visualiser" that shows a visualisation of the spatial casting of light emitters so i can see what path they take, what they hit, etc. basically blue for empty space it travels, red for end of light, orange for pass-through or reflections.
 - [_] create a "SkyGridPBR" demo of floating terrain balls with each one having one of 8 custom made shaders, then have the camera fly forward between the seams. this is a benchmark called BenchmarkSkyGrid.luau built-in demo example. We'll also use this as a performance profiler for editablemesh + terrain + etc.
 - [_] create two stress test demos: 100 unique 4k textures on material spheres with PBR (like the PBR demo), and 1 unique 4k texture on material spheres with PBR. tests instancing (for 1 duplicate item) and mem/compute usage for the uniques.
 - [_] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors.
 
-- [_] add extensive (freecam) camera tests (like flying through portals)
-- [_] add extensive client character tests
-- [_] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
-
-- [x] improve atomic-game-engine build file usage sizes. Takes over 100GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc. Find what takes up all the space and try improve it.
-
-- [x] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
-- [x] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
-
-- [x] review and plan a cleanup of the render pipeline. Write docs/v025-RENDER-PIPELINE-CLEANUP.md. This can be logic cleanup, better layout, components separation, merging, renaming, potential test points, areas to investigate logic (that seem wrong and need to be investigated), etc.
-- [x] plan a consolidation and cleanup for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them). Write docs/v025-MCP-CLEANUP.md.
+- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
 
 - [_] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`
 - [_] Do cleanup in `docs/v025-MCP-CLEANUP.md`
@@ -82,7 +78,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] optimise server startup time
 - [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
 
-- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
 - [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground")
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
