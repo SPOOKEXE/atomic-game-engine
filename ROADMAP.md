@@ -41,11 +41,11 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [x] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
 
-- [_] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
-- [_] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
-- [_] consolidate/improve `CONTRIBUTING.md`, `SECURITY.md`, `docs/THIRD_PARTY_NOTICES.md`, `CODE_ARCH.md`, `CODE_DOCUMENTING.md`, `CODE_FORMAT.md` and `CODE_QUALITY.md`, with small sentences at the start of the file describing what they contain in succinct detail.
-- [_] cleanup documentation doxy and layout
-- [_] update and prune old content in documentation (doxy). check each statement, update, remove or replace.
+- [x] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
+- [x] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
+- [x] consolidate/improve `CONTRIBUTING.md`, `SECURITY.md`, `docs/THIRD_PARTY_NOTICES.md`, `CODE_ARCH.md`, `CODE_DOCUMENTING.md`, `CODE_FORMAT.md` and `CODE_QUALITY.md`, with small sentences at the start of the file describing what they contain in succinct detail.
+- [x] cleanup documentation doxy and layout
+- [x] update and prune old content in documentation (doxy). check each statement, update, remove or replace.
 
 - [_] check LOD is cleaned up when the mesh changes / is deleted / LOD properties are changed so they release and are recomputed
 - [_] fix multi-select multi-property editing (when i select multiple objects, it should check all objects for the same component and value im editing and match them).
