@@ -61,6 +61,7 @@
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/RuntimeDiagnostics.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -115,6 +116,7 @@
 #include <studio/RobloxImport.hpp>
 #include <studio/TeamCreate.hpp>
 #include <studio/Viewports.hpp>
+#include <studio/ViewportDiagnostics.hpp>
 #include <studio/Widgets.hpp>
 #include <thread>
 #include <unordered_map>
@@ -3775,6 +3777,8 @@ namespace studio {
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;
 		std::vector<engine::effects::RibbonRun> RibbonRuns;
 		std::vector<engine::render::SceneLight> Lights;
+		std::vector<uint32_t> FrozenVisibleRows;
+		std::vector<engine::scene::DrawInstance> FrozenVisibleInstances;
 		//@}
 
 		// The universe-authored rendering profiles. Worlds hold only the name
@@ -4184,6 +4188,7 @@ namespace studio {
 		float CameraPitch = 0.0f;
 		float CameraSpeed = 24.0f;
 		ViewportCameraMemory CameraMemory;
+		ViewportDiagnostics MainViewportDiagnostics;
 		//@}
 
 		// How big a texture the world is drawn into, from the main viewport
@@ -4215,6 +4220,7 @@ namespace studio {
 			float Pitch = 0.0f;
 			float Speed = 24.0f;
 			ViewportCameraMemory CameraMemory;
+			ViewportDiagnostics Diagnostics;
 			//@}
 
 			// What the pointer is doing to this panel.
@@ -5132,6 +5138,9 @@ namespace studio {
 		//
 		// @since v0.17
 		engine::render::AdornmentGeometry Adornments;
+		engine::render::LightPathGeometry LightPathProbes;
+		std::vector<engine::render::SceneLight> DiagnosticLights;
+		std::vector<engine::render::AdornmentLine> CameraLockAdornment;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//

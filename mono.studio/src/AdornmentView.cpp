@@ -110,6 +110,28 @@ namespace studio {
 		}
 
 		const WorldId world = ViewportWorld(viewport);
+		ViewportState *extra = ExtraAt(viewport);
+		ViewportDiagnostics &diagnostics = extra != nullptr ? extra->Diagnostics : MainViewportDiagnostics;
+		size_t drawn = 0;
+		const auto drawLine = [&](const engine::render::AdornmentLine &line) {
+			if (drawn >= ADORNMENT_SEGMENTS) {
+				return;
+			}
+			drawn++;
+
+			glm::vec2 from{};
+			glm::vec2 to{};
+			if (!panel.ProjectSegment(line.From, line.To, from, to)) {
+				return;
+			}
+
+			list->AddLine(
+				ImVec2(from.x, from.y),
+				ImVec2(to.x, to.y),
+				Packed(line.Colour, line.Transparency),
+				PixelsFor(panel, line.From, line.To, line.Thickness)
+			);
+		};
 
 		Universe->Enter(world, [&](engine::ecs::Store &store) {
 			Adornments.Build(store);
@@ -144,26 +166,39 @@ namespace studio {
 				list->AddConvexPolyFilled(points, 4, Packed(face.Colour, face.Transparency));
 			}
 
-			size_t drawn = 0;
 			for (const engine::render::AdornmentLine &line : Adornments.Lines()) {
-				if (drawn >= ADORNMENT_SEGMENTS) {
-					break;
-				}
-				drawn++;
+				drawLine(line);
+			}
 
-				glm::vec2 from{};
-				glm::vec2 to{};
-				if (!panel.ProjectSegment(line.From, line.To, from, to)) {
-					continue;
+			if (diagnostics.ShowLightInfluence) {
+				const auto *drawList = store.Resource<engine::render::DrawList>();
+				if (drawList != nullptr) {
+					const Vector3 probeEye =
+						diagnostics.FrustumLocked ? diagnostics.FrozenFrustum.Position : panel.Eye;
+					(void)engine::render::CollectLights(store, probeEye, DiagnosticLights);
+					LightPathProbes.Build(DiagnosticLights, drawList->Instances);
+					for (const engine::render::LightProbeSegment &segment : LightPathProbes.Segments()) {
+						drawLine(segment.Line);
+					}
 				}
-
-				list->AddLine(
-					ImVec2(from.x, from.y),
-					ImVec2(to.x, to.y),
-					Packed(line.Colour, line.Transparency),
-					PixelsFor(panel, line.From, line.To, line.Thickness)
-				);
 			}
 		});
+
+		CameraLockAdornment.clear();
+		if (diagnostics.FrustumLocked) {
+			engine::scene::Camera markerCamera;
+			if (slot.PresentedFieldOfView > 0.0f) {
+				markerCamera.FieldOfViewRadians = slot.PresentedFieldOfView;
+			}
+			const float aspectRatio = panel.RenderSize.y > 0.0f
+								  ? panel.RenderSize.x / panel.RenderSize.y
+								  : panel.ImageSize.x / panel.ImageSize.y;
+			engine::render::AppendCameraLockAdornment(
+				CameraLockAdornment, diagnostics.FrozenFrustum, markerCamera, aspectRatio, 8.0f
+			);
+			for (const engine::render::AdornmentLine &line : CameraLockAdornment) {
+				drawLine(line);
+			}
+		}
 	}
 }

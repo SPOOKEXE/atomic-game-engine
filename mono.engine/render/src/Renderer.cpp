@@ -2833,6 +2833,7 @@ namespace engine::render {
 										gameInterfaceHook->AffectsScene());
 		const ViewRequest request{
 			.CameraFrame = cameraFrame,
+			.VisibilityCameraFrame = source.VisibilityCameraFrame(),
 			.Camera = camera,
 			.Instances = instances,
 			.JointFrames = source.JointFrames,

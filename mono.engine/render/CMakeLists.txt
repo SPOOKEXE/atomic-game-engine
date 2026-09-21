@@ -81,6 +81,10 @@ if(TARGET test_render)
 	target_link_libraries(test_render PRIVATE SDL3::SDL3)
 	# Portal camera images run actual character movement and obstruction queries.
 	target_link_libraries(test_render PRIVATE Engine::physics)
+	# The SkyGrid benchmark test loads its authored Luau scene and compiles every
+	# selected ShaderScript through ShaderLibrary. This is test-only: the renderer
+	# does not need example content to ship.
+	target_link_libraries(test_render PRIVATE Engine::examples)
 endif()
 
 # The atlas experiment owns a real headless SDL device. Benchmarks normally

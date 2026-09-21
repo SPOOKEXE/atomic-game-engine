@@ -2153,6 +2153,7 @@ namespace studio {
 		);
 		ViewportState *extra = ExtraAt(viewport);
 		const bool drawingSecond = extra != nullptr;
+		ViewportDiagnostics &diagnostics = drawingSecond ? extra->Diagnostics : MainViewportDiagnostics;
 
 		// **The second panel defaults to a *different* world, not to the active
 		// one.** Two viewports showing the same world is one view drawn twice
@@ -2316,7 +2317,8 @@ namespace studio {
 					// An edit viewport owns this generated camera outright. A client
 					// viewport uses the same per-panel camera only while the authority
 					// prepares its camera-dependent surface views.
-					EnsureViewerCamera(viewport, visual, eye, lens, runtimeVisual ? NULL_ENTITY : follow);
+					const engine::core::CFrame &behaviourEye = diagnostics.EffectiveFrustum(eye);
+					EnsureViewerCamera(viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow);
 
 					if (!IsReplicaWorld(shown)) {
 						// `EnsureViewerCamera` leaves an authored lens intact. Read it
@@ -2397,6 +2399,7 @@ namespace studio {
 		}
 
 		const bool remoteEye = visual.IsValid() && Universe->IsRemote(visual);
+		const engine::core::CFrame &cullingEye = diagnostics.EffectiveFrustum(eye);
 		// Remember the exact eye the texture below is rendered from. A hosted
 		// client may have moved its camera during `PreRender`; recording the eye
 		// before that phase would project overlays through the previous room.
@@ -2536,20 +2539,19 @@ namespace studio {
 						static thread_local std::vector<engine::core::AABB> lightReceivers;
 						lightReceivers.clear();
 						if (target.IsValid() && target.Width > 0 && target.Height > 0) {
-							const auto matrices = engine::scene::ResolveCamera(
-								eye,
+							(void)engine::render::CullForCamera(
+								DrawnInstances,
+								cullingEye,
 								lens,
-								static_cast<float>(target.Width) / static_cast<float>(target.Height)
+								static_cast<float>(target.Width) / static_cast<float>(target.Height),
+								visibleLightRows
 							);
-							const engine::graph::Frustum frustum =
-								engine::graph::Frustum::FromViewProjection(matrices.ViewProjection);
-							engine::graph::Cull(DrawnInstances, frustum, visibleLightRows);
 							lightReceivers.reserve(visibleLightRows.size());
 							for (const uint32_t row : visibleLightRows) {
 								lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
 							}
 						}
-						(void)engine::render::CollectLights(store, eye.Position, lightReceivers, Lights);
+						(void)engine::render::CollectLights(store, cullingEye.Position, lightReceivers, Lights);
 					}
 				}
 
@@ -2766,6 +2768,26 @@ namespace studio {
 			instances = &DrawnInstances;
 		}
 
+		if (diagnostics.FrustumLocked && instances != nullptr && target.IsValid() && target.Width > 0 &&
+			target.Height > 0) {
+			// The physical eye stays in `view.CameraFrame` so the author can inspect
+			// holes. Submit only rows the captured frustum would see. The renderer
+			// receives that same pose for its LOD selection below.
+			(void)engine::render::CullForCamera(
+				*instances,
+				cullingEye,
+				lens,
+				static_cast<float>(target.Width) / static_cast<float>(target.Height),
+				FrozenVisibleRows
+			);
+			FrozenVisibleInstances.clear();
+			FrozenVisibleInstances.reserve(FrozenVisibleRows.size());
+			for (const uint32_t row : FrozenVisibleRows) {
+				FrozenVisibleInstances.push_back((*instances)[row]);
+			}
+			instances = &FrozenVisibleInstances;
+		}
+
 		// **Nothing here.** Both the local client camera and the authority viewer
 		// are placed before their respective `Present` calls above, because
 		// `aim-surface-cameras` runs in that phase and reflects through what it
@@ -2794,6 +2816,9 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("build render view", engine::core::ProfileCategory::Render);
 			view.CameraFrame = eye;
+			if (diagnostics.FrustumLocked) {
+				view.VisibilityFrame = cullingEye;
+			}
 			view.Camera = lens;
 			view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 												  : std::span<const engine::scene::DrawInstance>{};

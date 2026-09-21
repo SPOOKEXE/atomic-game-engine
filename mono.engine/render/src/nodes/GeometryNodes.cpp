@@ -905,7 +905,7 @@ namespace engine::render {
 							Command,
 							pass,
 							Matrices.ViewProjection,
-							Request.CameraFrame,
+							Request.VisibilityCameraFrame,
 							Result.Triangles,
 							Result.ParticlesDrawn,
 							Result.Culled,
@@ -917,7 +917,7 @@ namespace engine::render {
 							Command,
 							pass,
 							Matrices.ViewProjection,
-							Request.CameraFrame,
+							Request.VisibilityCameraFrame,
 							Request.RibbonRuns,
 							Result.Triangles,
 							WorldColourTarget::Hdr,
@@ -1039,6 +1039,7 @@ namespace engine::render {
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
 			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::CFrame &visibilityCameraFrame = recording.Request.VisibilityCameraFrame;
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
 			const std::span<const effects::RibbonRun> ribbonRuns = recording.Request.RibbonRuns;
 			const uint32_t sceneWidth = recording.SceneWidth;
@@ -1237,8 +1238,8 @@ namespace engine::render {
 					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
-						viewProjection,
-						cameraFrame,
+							viewProjection,
+							visibilityCameraFrame,
 						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,
@@ -1301,8 +1302,8 @@ namespace engine::render {
 					result.DrawCalls += State->DrawParticles(
 						command,
 						pass,
-						frameUniforms.ViewProjection,
-						cameraFrame,
+							frameUniforms.ViewProjection,
+							visibilityCameraFrame,
 						result.Triangles,
 						result.ParticlesDrawn,
 						result.Culled,
@@ -1316,8 +1317,8 @@ namespace engine::render {
 					result.DrawCalls += State->DrawRibbons(
 						command,
 						pass,
-						frameUniforms.ViewProjection,
-						cameraFrame,
+							frameUniforms.ViewProjection,
+							visibilityCameraFrame,
 						ribbonRuns,
 						result.Triangles,
 						worldTarget
@@ -1328,8 +1329,8 @@ namespace engine::render {
 					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
-						viewProjection,
-						cameraFrame,
+							viewProjection,
+							visibilityCameraFrame,
 						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,

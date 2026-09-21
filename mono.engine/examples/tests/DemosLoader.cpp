@@ -97,6 +97,8 @@ TEST_CASE("staged demo tree contains script and authored world demos", "[example
 
 	const engine::examples::DemosLoader demos;
 	CHECK(demos.Find(engine::examples::DemoKind::Script, "Rings.luau").has_value());
+	CHECK(demos.Find(engine::examples::DemoKind::Script, "PbrTextureUniqueStress.luau").has_value());
+	CHECK(demos.Find(engine::examples::DemoKind::Script, "PbrTextureInstanceStress.luau").has_value());
 	CHECK(demos.Find(engine::examples::DemoKind::World, "BladeborneDemo.aworld").has_value());
 
 	engine::core::Paths::SetAssetsOverride(previous);

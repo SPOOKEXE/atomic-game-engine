@@ -686,6 +686,9 @@ namespace engine::render {
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
+		// The pose used for visibility and camera-dependent collection. Empty keeps
+		// ordinary views on CameraFrame, so projection and inspection stay one pose.
+		std::optional<core::CFrame> VisibilityFrame;
 		// arch-waiver ecs-copy: each View is one render invocation, not retained world state.
 		scene::Camera Camera;
 		// Set by the product's completed world snapshot barrier. A queued data
@@ -699,6 +702,10 @@ namespace engine::render {
 		uint64_t CameraTemporalSequence = 0;
 		bool CameraCut = false;
 		//@}
+
+		const core::CFrame &VisibilityCameraFrame() const {
+			return VisibilityFrame.has_value() ? *VisibilityFrame : CameraFrame;
+		}
 
 		// Explicit clip-space projection for a fitted or portal capture. Uses
 		// right-handed, Y-up, 0..1 depth coordinates for both culling and drawing.

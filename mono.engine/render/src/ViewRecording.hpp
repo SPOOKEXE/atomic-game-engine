@@ -55,6 +55,7 @@ namespace engine::render {
 	// recording as well; naming them once is what stops the two lists drifting.
 	struct ViewRequest {
 		core::CFrame CameraFrame;
+		core::CFrame VisibilityCameraFrame;
 		scene::Camera Camera;
 		std::span<const scene::DrawInstance> Instances;
 		std::span<const core::CFrame> JointFrames;

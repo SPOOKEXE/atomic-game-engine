@@ -348,7 +348,7 @@ namespace engine::render {
 			return 0;
 		}
 
-		uint64_t signature = FoldPresentationObject(0, view.CameraFrame);
+		uint64_t signature = FoldPresentationObject(0, view.VisibilityCameraFrame());
 		signature = FoldPresentationObject(signature, view.Camera);
 		signature = FoldPresentation(signature, ProjectionSignature(view));
 		signature = FoldPresentation(signature, view.World);
@@ -375,6 +375,7 @@ namespace engine::render {
 			objects = scene::SignatureOf(view.Instances);
 			objects = FoldPresentationSpan(objects, view.JointFrames);
 			objects = FoldPresentationObject(objects, view.CameraFrame);
+			objects = FoldPresentationObject(objects, view.VisibilityCameraFrame());
 			objects = FoldPresentationObject(objects, view.Camera);
 			objects = FoldPresentation(objects, projection);
 			objects = FoldPresentation(objects, view.World);

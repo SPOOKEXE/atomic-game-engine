@@ -1381,6 +1381,42 @@ namespace studio {
 		ImGui::MenuItem("Lock Camera Direction", nullptr, &DirectionLocked);
 		ImGui::MenuItem("Particle Emitters", nullptr, &ShowParticleEmitters);
 
+		ImGui::SeparatorText("Viewport Diagnostics");
+		ViewportState *diagnosticViewport = ExtraAt(FocusedViewport);
+		ViewportDiagnostics &diagnostics =
+			diagnosticViewport != nullptr ? diagnosticViewport->Diagnostics : MainViewportDiagnostics;
+		engine::core::CFrame inspectionFrame =
+			diagnosticViewport != nullptr ? diagnosticViewport->Frame : CameraFrame;
+		if (FocusedViewport < Overlays.size() && Overlays[FocusedViewport].Presented &&
+			Overlays[FocusedViewport].PresentedWorld == ViewportWorld(FocusedViewport)) {
+			inspectionFrame = Overlays[FocusedViewport].PresentedFrame;
+		}
+		ImGui::MenuItem("Light Influence Probes", nullptr, &diagnostics.ShowLightInfluence);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Blue and red are local-light influence probes. Portal seam-radiance spill is a "
+				"separate bounded field and is not sampled here. Orange is reserved for a "
+				"named transport event."
+			);
+		}
+		if (ImGui::MenuItem("Freeze Culling Frustum", nullptr, diagnostics.FrustumLocked)) {
+			if (diagnostics.FrustumLocked) {
+				diagnostics.FrustumLocked = false;
+			} else {
+				diagnostics.LockFrustum(inspectionFrame);
+			}
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Uses the captured view for base draw culling, LOD, local lights, particles, "
+				"spatial GUI layout, and local surface aiming. "
+				"The displayed camera remains free for inspection."
+			);
+		}
+		if (diagnostics.FrustumLocked && ImGui::MenuItem("Recapture Frozen Frustum")) {
+			diagnostics.LockFrustum(inspectionFrame);
+		}
+
 		// **Beside the grid, because it is the same kind of thing**: furniture
 		// that says something about the world rather than part of it. Off by
 		// default - see `ShowColliders`.

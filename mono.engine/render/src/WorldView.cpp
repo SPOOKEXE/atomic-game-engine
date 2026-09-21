@@ -200,14 +200,15 @@ namespace engine::render {
 		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame
 	) {
 		ENGINE_PROFILE_CAT("world camera collect", core::ProfileCategory::Render);
+		const core::CFrame &visibilityFrame = view.VisibilityCameraFrame();
 		static thread_local std::vector<uint32_t> visible;
 		static thread_local std::vector<core::AABB> receivers;
 		std::optional<graph::Frustum> frustum;
 		receivers.clear();
 		if (extent.X > 0.0f && extent.Y > 0.0f) {
 			const scene::CameraMatrices matrices =
-				view.Projection ? scene::ResolveSurfaceCamera(view.CameraFrame, *view.Projection)
-								: scene::ResolveCamera(view.CameraFrame, view.Camera, extent.X / extent.Y);
+				view.Projection ? scene::ResolveSurfaceCamera(visibilityFrame, *view.Projection)
+								: scene::ResolveCamera(visibilityFrame, view.Camera, extent.X / extent.Y);
 			frustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
 			graph::Cull(view.Instances, *frustum, visible);
 			receivers.reserve(visible.size());
@@ -215,11 +216,14 @@ namespace engine::render {
 				receivers.push_back(graph::BoundsOf(view.Instances[index]));
 			}
 		}
-		CollectLights(store, view.CameraFrame.Position, receivers, frame.Lights);
-		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &view);
-		effects::BuildRibbons(store, view.CameraFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
+		CollectLights(store, visibilityFrame.Position, receivers, frame.Lights);
+		View visibilityView = view;
+		visibilityView.CameraFrame = visibilityFrame;
+		visibilityView.VisibilityFrame.reset();
+		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &visibilityView);
+		effects::BuildRibbons(store, visibilityFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
 		const gui::Screen screen{extent.X, extent.Y};
-		ResolveSpatialCanvases(store, screen, &view.Camera, &view.CameraFrame);
+		ResolveSpatialCanvases(store, screen, &view.Camera, &visibilityFrame);
 		gui::CompileRequest compile;
 		compile.Display = screen;
 		compile.Seconds = store.Time().Elapsed;
