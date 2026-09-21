@@ -64,8 +64,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] create a "SkyGridPBR" demo of floating terrain balls with each one having one of 8 custom made shaders, then have the camera fly forward between the seams. this is a benchmark called BenchmarkSkyGrid.luau built-in demo example. We'll also use this as a performance profiler for editablemesh + terrain + etc.
 - [x] create two stress test demos: 100 unique 4k textures on material spheres with PBR (like the PBR demo), and 1 unique 4k texture on material spheres with PBR. tests instancing (for 1 duplicate item) and mem/compute usage for the uniques.
 - [x] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors.
-
-- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
+- [x] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
 
 - [_] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`
 - [_] Do cleanup in `docs/v025-MCP-CLEANUP.md`
