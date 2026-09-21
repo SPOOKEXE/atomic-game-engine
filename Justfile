@@ -1764,6 +1764,40 @@ em-dash-check:
     fi
     echo "em-dash-check ok - no U+2014 in ${#files[@]} first-party file(s)"
 
+# Shows which complete preset trees can be reclaimed without touching sources,
+# downloads, the test signature cache or the shared compiler cache. `yes` is
+# required to delete. dev and release are kept for the normal edit/ship loop;
+# ci and the other checks can be rebuilt from their presets when needed.
+build-prune apply="no":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{apply}}" in
+        no|yes) ;;
+        *) echo "Use 'just build-prune' to preview or 'just build-prune yes' to delete." >&2; exit 2 ;;
+    esac
+    root=$PWD
+    total=0
+    for dir in .cache/build/*/; do
+        [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+        name=${dir%/}
+        name=${name##*/}
+        case "$name" in dev|release) continue ;; esac
+        cache="$dir/CMakeCache.txt"
+        [ -f "$cache" ] || continue
+        # A build directory copied from another checkout does not belong to us.
+        if ! grep -qxF "CMAKE_HOME_DIRECTORY:INTERNAL=$root" "$cache"; then
+            echo "skipping $dir: CMake source is not this checkout"
+            continue
+        fi
+        bytes=$(du -sx --block-size=1 "$dir" | cut -f1)
+        total=$((total + bytes))
+        printf '%-28s %8d MiB\n' "$dir" "$((bytes / 1048576))"
+        if [ "{{apply}}" = yes ]; then
+            rm -rf -- "$dir"
+        fi
+    done
+    printf '%s: %d MiB %s\n' build-prune "$((total / 1048576))" "$(if [ "{{apply}}" = yes ]; then echo reclaimed; else echo reclaimable; fi)"
+
 clean:
     rm -rf .cache/build
 

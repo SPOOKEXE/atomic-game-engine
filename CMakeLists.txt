@@ -392,6 +392,12 @@ endif()
 # nondeterministic bytes into every `.gch`, so precompiled-header users never
 # share across presets whatever is set here.
 #
+# `CCACHE_DEPEND=true` keeps a cache miss out of the preprocessor. Without it,
+# ccache runs `cc1plus -E -fpch-preprocess` on a PCH-backed source. One physics
+# object grew that process past 66 GiB RSS before it was stopped. Ninja already
+# requests dependency files with `-MD`, which is what depend mode hashes.
+# Direct hits still work; a miss compiles once instead of expanding the PCH.
+#
 # Two calls per build still report as errors, and they are the two PCH
 # *generation* steps - ccache cannot parse a header as a source, so it passes
 # them to the compiler untouched. Correct, and 0.11% of the build.
@@ -440,6 +446,7 @@ if(MONO_CCACHE)
 			"CCACHE_SLOPPINESS=pch_defines,time_macros"
 			"CCACHE_BASEDIR=${CMAKE_SOURCE_DIR}"
 			"CCACHE_NOHASHDIR=true"
+			"CCACHE_DEPEND=true"
 			"${MONO_COMPILER_CACHE}")
 		else()
 			set(MONO_CACHE_LAUNCHER "${MONO_COMPILER_CACHE}")
