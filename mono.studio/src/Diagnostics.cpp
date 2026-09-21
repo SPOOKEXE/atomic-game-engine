@@ -170,6 +170,38 @@ namespace studio {
 	void AccumulateDiagnosticSpans(
 		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
 	) {
+		const auto accumulate = [](const engine::core::FrameSpan &source, DiagnosticSpan &target) {
+			target.StartMilliseconds += source.StartMilliseconds;
+			target.Milliseconds += source.Milliseconds;
+			target.SelfMilliseconds += source.SelfMilliseconds;
+			target.IdleMilliseconds += source.IdleMilliseconds;
+			target.Occurrences++;
+		};
+
+		// The common case is the same recorded tree on every frame. Its source
+		// index is already its accumulated index, so matching it must not rebuild
+		// the structural hash tables or allocate a parent remap.
+		if (frame.size() == totals.size()) {
+			bool sameStructure = true;
+			for (size_t index = 0; index < frame.size(); index++) {
+				const engine::core::FrameSpan &source = frame[index];
+				const DiagnosticSpan &target = totals[index];
+				const uint32_t parent =
+					source.Parent < index ? source.Parent : engine::core::FrameGraph::NO_PARENT;
+				if (target.Name != source.Name || target.Depth != source.Depth || target.Parent != parent ||
+					target.Owner != source.Owner) {
+					sameStructure = false;
+					break;
+				}
+			}
+			if (sameStructure) {
+				for (size_t index = 0; index < frame.size(); index++) {
+					accumulate(frame[index], totals[index]);
+				}
+				return;
+			}
+		}
+
 		struct SiblingKey {
 			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
 			std::string_view Name;
@@ -260,11 +292,7 @@ namespace studio {
 			}
 
 			targets[index] = targetIndex;
-			target->StartMilliseconds += source.StartMilliseconds;
-			target->Milliseconds += source.Milliseconds;
-			target->SelfMilliseconds += source.SelfMilliseconds;
-			target->IdleMilliseconds += source.IdleMilliseconds;
-			target->Occurrences++;
+			accumulate(source, *target);
 		}
 
 		// Keys borrow names from `totals` and `frame`. Keep the buckets between
@@ -1707,38 +1735,43 @@ namespace studio {
 				ImGui::TableSetupScrollFreeze(0, 1);
 				ImGui::TableHeadersRow();
 
-				for (const DiagnosticSpan &span : spans) {
-					ImGui::TableNextRow();
+				ImGuiListClipper clipper;
+				clipper.Begin(static_cast<int>(spans.size()), ImGui::GetTextLineHeightWithSpacing());
+				while (clipper.Step()) {
+					for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; index++) {
+						const DiagnosticSpan &span = spans[static_cast<size_t>(index)];
+						ImGui::TableNextRow();
 
-					ImGui::TableSetColumnIndex(0);
-					ImGui::Indent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
-					ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
-					ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+						ImGui::TableSetColumnIndex(0);
+						ImGui::Indent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+						ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
+						ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
 
-					const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
-					const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
+						const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
+						const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
 
-					ImGui::TableSetColumnIndex(1);
-					ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
+						ImGui::TableSetColumnIndex(1);
+						ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
 
-					ImGui::TableSetColumnIndex(2);
-					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-					if (span.IdleMilliseconds > 0.0001f) {
-						ImGui::Text(millisecondsFormat, static_cast<double>(span.IdleMilliseconds));
-					} else {
-						ImGui::TextUnformatted("-");
-					}
-					ImGui::PopStyleColor();
-
-					ImGui::TableSetColumnIndex(3);
-					// The expensive rows in the warning colour, so the thing worth
-					// looking at is the thing that catches the eye.
-					if (share >= 25.0f) {
-						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-						ImGui::Text("%.1f%%", static_cast<double>(share));
+						ImGui::TableSetColumnIndex(2);
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+						if (span.IdleMilliseconds > 0.0001f) {
+							ImGui::Text(millisecondsFormat, static_cast<double>(span.IdleMilliseconds));
+						} else {
+							ImGui::TextUnformatted("-");
+						}
 						ImGui::PopStyleColor();
-					} else {
-						ImGui::Text("%.1f%%", static_cast<double>(share));
+
+						ImGui::TableSetColumnIndex(3);
+						// The expensive rows in the warning colour, so the thing worth
+						// looking at is the thing that catches the eye.
+						if (share >= 25.0f) {
+							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+							ImGui::Text("%.1f%%", static_cast<double>(share));
+							ImGui::PopStyleColor();
+						} else {
+							ImGui::Text("%.1f%%", static_cast<double>(share));
+						}
 					}
 				}
 

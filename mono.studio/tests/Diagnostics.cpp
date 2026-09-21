@@ -369,6 +369,30 @@ TEST_CASE("same-name siblings keep their ordinal across frames", "[studio][diagn
 	CHECK(totals[2].Occurrences == 2);
 }
 
+TEST_CASE("averaging falls back when the same span rows change order", "[studio][diagnostics]") {
+	const std::array first{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{.Name = "update", .Depth = 1, .Parent = 0, .Milliseconds = 1.0f},
+		FrameSpan{.Name = "render", .Depth = 1, .Parent = 0, .Milliseconds = 2.0f},
+	};
+	const std::array reordered{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{.Name = "render", .Depth = 1, .Parent = 0, .Milliseconds = 20.0f},
+		FrameSpan{.Name = "update", .Depth = 1, .Parent = 0, .Milliseconds = 10.0f},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	AccumulateDiagnosticSpans(first, totals);
+	AccumulateDiagnosticSpans(reordered, totals);
+	FinishDiagnosticAverage(totals, 2);
+
+	REQUIRE(totals.size() == 3);
+	CHECK(totals[1].Name == "update");
+	CHECK(totals[1].Milliseconds == 5.5f);
+	CHECK(totals[2].Name == "render");
+	CHECK(totals[2].Milliseconds == 11.0f);
+}
+
 TEST_CASE("reported parallel work fits inside measured wall time", "[studio][diagnostics]") {
 	std::vector spans{
 		DiagnosticSpan{.Name = "Universe::Tick", .Depth = 0, .Milliseconds = 10.0f},
