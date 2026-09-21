@@ -37,16 +37,17 @@ namespace {
 	};
 }
 
-TEST_CASE("SkyGrid's eight selected shader variants compile through ShaderLibrary", "[render][shaders][benchmark]") {
+TEST_CASE(
+	"SkyGrid's eight selected shader variants compile through ShaderLibrary", "[render][shaders][benchmark]"
+) {
 	const StagedAssets assets;
 	engine::ecs::Store store("render.benchmark.skygrid");
 	engine::ecs::Scheduler systems;
 	std::shared_ptr<engine::script::Runtime> runtime;
 	std::string error;
-	const bool loaded =
-		engine::examples::LoadScene(
-			store, systems, engine::examples::ExamplePath("BenchmarkSkyGrid.luau"), error, &runtime
-		);
+	const bool loaded = engine::examples::LoadScene(
+		store, systems, engine::examples::ExamplePath("BenchmarkSkyGrid.luau"), error, &runtime
+	);
 	INFO(error);
 	REQUIRE(loaded);
 	REQUIRE(runtime != nullptr);

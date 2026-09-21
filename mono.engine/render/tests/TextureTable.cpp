@@ -11,7 +11,9 @@ TEST_DEPENDS("engine.assets.texture")
 
 using namespace engine;
 
-TEST_CASE("texture table capacity is defaulted and enforced per renderer", "[render][texture-budget][gpu][.]") {
+TEST_CASE(
+	"texture table capacity is defaulted and enforced per renderer", "[render][texture-budget][gpu][.]"
+) {
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);

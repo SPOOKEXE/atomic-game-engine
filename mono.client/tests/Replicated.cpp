@@ -486,7 +486,9 @@ TEST_CASE(
 	engine::scene::LatchCameraInput(store);
 	store.ResourceMutable<engine::scene::InputState>()->WheelDelta = 0.0f;
 	replica.Draw();
-	CHECK(store.Resource<engine::scene::CameraController>()->Mode == engine::scene::CameraMode::LockFirstPerson);
+	CHECK(
+		store.Resource<engine::scene::CameraController>()->Mode == engine::scene::CameraMode::LockFirstPerson
+	);
 	CHECK(store.Get<Transform>(camera)->Frame.Position.Y == Approx(1.5f));
 
 	// Zooming back out creates an arm, and that arm must use the portal map

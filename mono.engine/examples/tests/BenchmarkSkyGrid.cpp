@@ -72,10 +72,9 @@ TEST_CASE("SkyGrid PBR is a deterministic eight-variant terrain course", "[examp
 	Scheduler systems;
 	std::shared_ptr<engine::script::Runtime> runtime;
 	std::string error;
-	const bool loaded =
-		engine::examples::LoadScene(
-			store, systems, engine::examples::ExamplePath("BenchmarkSkyGrid.luau"), error, &runtime
-		);
+	const bool loaded = engine::examples::LoadScene(
+		store, systems, engine::examples::ExamplePath("BenchmarkSkyGrid.luau"), error, &runtime
+	);
 	INFO(error);
 	REQUIRE(loaded);
 	REQUIRE(runtime != nullptr);
@@ -125,7 +124,8 @@ TEST_CASE("SkyGrid PBR is a deterministic eight-variant terrain course", "[examp
 		const std::string suffix = std::to_string(index + 1);
 		const Entity shader = InScene(store, shaderNames[index]);
 		REQUIRE(shader != engine::ecs::NULL_ENTITY);
-		const engine::scene::ShaderText source = engine::scene::ShaderTextOf(store, engine::core::Name(shaderNames[index]));
+		const engine::scene::ShaderText source =
+			engine::scene::ShaderTextOf(store, engine::core::Name(shaderNames[index]));
 		CHECK(source.Found);
 		CHECK(source.Revision > 0);
 		CHECK(source.Code.find("metalnessMap") != std::string::npos);

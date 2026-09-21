@@ -56,11 +56,11 @@
 TEST_SUITE_ID("engine.scripthost.scriptcall")
 
 using engine::ecs::Store;
+using engine::script::EcsInstanceMethods;
 using engine::script::InstanceMethod;
 using engine::script::Language;
 using engine::script::MakeRuntime;
 using engine::script::NeutralInstanceMethods;
-using engine::script::EcsInstanceMethods;
 
 namespace {
 	const std::vector<Language> LANGUAGES = {Language::Luau, Language::JavaScript};

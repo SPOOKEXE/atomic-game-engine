@@ -97,11 +97,10 @@ namespace client {
 				{"projection",
 				 capture->Binding.ExpectedProjection == render::PortalImageProjection::Eye ? "eye" : "seam"},
 				{"scope",
-				 capture->Binding.ExpectedScope == render::PortalImageScope::CompleteWorld
-					 ? "complete-world"
-					 : capture->Binding.ExpectedScope == render::PortalImageScope::SeamRadiance
-						 ? "seam-radiance"
-						 : "opaque-lighting"},
+				 capture->Binding.ExpectedScope == render::PortalImageScope::CompleteWorld ? "complete-world"
+				 : capture->Binding.ExpectedScope == render::PortalImageScope::SeamRadiance
+					 ? "seam-radiance"
+					 : "opaque-lighting"},
 				{"width", capture->Width},
 				{"height", capture->Height},
 			};

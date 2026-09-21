@@ -269,8 +269,8 @@ TEST_CASE(
 	REQUIRE(viewer.ConfigurePresentation(123));
 	REQUIRE(producer.ConfigurePresentation(456));
 	const auto placement = transformed
-						   ? core::CFrame(Vector3{11, 7, -13}) * core::CFrame::Angles(.3f, -.7f, .2f)
-						   : core::CFrame{};
+							   ? core::CFrame(Vector3{11, 7, -13}) * core::CFrame::Angles(.3f, -.7f, .2f)
+							   : core::CFrame{};
 	const auto install = [placement, scale](Universe &worlds, WorldId world, bool reverse) {
 		worlds.Enter(world, [&](Store &store) {
 			const auto pane =
@@ -279,7 +279,7 @@ TEST_CASE(
 				store.CreateInstance(ecs::Classes::Find(Name("Part")), reverse ? "Door" : "StandIn");
 			const core::CFrame front = placement;
 			const auto back = placement * core::CFrame(Vector3{0, 0, -.2f}) *
-						  core::CFrame::Angles(0, 3.14159265358979323846f, 0);
+							  core::CFrame::Angles(0, 3.14159265358979323846f, 0);
 			store.Set(pane, scene::Transform{reverse ? back : front});
 			store.Set(standIn, scene::Transform{reverse ? front : back});
 			const float paneScale = reverse ? scale : 1.0f;

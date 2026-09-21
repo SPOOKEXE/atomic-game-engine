@@ -657,7 +657,8 @@ namespace engine::render {
 		// The built-in meshes and the sampler every texture shares. What used
 		// to be an unconditional upload of one cube is now a table that starts
 		// with six shapes and grows as content arrives.
-		if (!Meshes.Initialise(Device) || !Textures.Initialise(Device, RetainSourceTextures, TextureBudgetBytes)) {
+		if (!Meshes.Initialise(Device) ||
+			!Textures.Initialise(Device, RetainSourceTextures, TextureBudgetBytes)) {
 			return false;
 		}
 

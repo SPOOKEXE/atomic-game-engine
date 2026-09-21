@@ -909,7 +909,9 @@ namespace engine::script {
 			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::SetComponent), 2, InstanceSetComponent),
 			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::GetComponent), 1, InstanceGetComponent),
 			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::HasComponent), 1, InstanceHasComponent),
-			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::RemoveComponent), 1, InstanceRemoveComponent),
+			JS_CFUNC_DEF(
+				EcsInstanceMethodName(EcsInstanceMethod::RemoveComponent), 1, InstanceRemoveComponent
+			),
 			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::GetComponents), 0, InstanceGetComponents),
 		};
 

@@ -115,8 +115,8 @@
 #include <studio/Projection.hpp>
 #include <studio/RobloxImport.hpp>
 #include <studio/TeamCreate.hpp>
-#include <studio/Viewports.hpp>
 #include <studio/ViewportDiagnostics.hpp>
+#include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
 #include <thread>
 #include <unordered_map>

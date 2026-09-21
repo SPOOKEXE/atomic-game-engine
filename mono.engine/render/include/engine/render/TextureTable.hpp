@@ -118,9 +118,8 @@ namespace engine::render {
 		// @param maximumBytes Capacity for content textures. Zero uses
 		//                     `MAXIMUM_BYTES`.
 		// @return `false` when the sampler or the default could not be created.
-		bool Initialise(
-			SDL_GPUDevice *device, bool retainSources = false, size_t maximumBytes = MAXIMUM_BYTES
-		);
+		bool
+		Initialise(SDL_GPUDevice *device, bool retainSources = false, size_t maximumBytes = MAXIMUM_BYTES);
 
 		// Releases every texture and the sampler.
 		void Shutdown();

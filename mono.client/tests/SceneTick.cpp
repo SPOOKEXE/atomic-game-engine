@@ -54,6 +54,7 @@
 #include <array>
 #include <client/Scene.hpp>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
@@ -90,6 +91,11 @@ using engine::scene::WorldBounds;
 namespace {
 	constexpr uint32_t ENTITIES = 512;
 	constexpr float STEP = 1.0f / 60.0f;
+	// The authored world has one server script, two StarterPlayerScripts, and
+	// a local-player copy of each StarterPlayerScript in a combined host.
+	constexpr size_t BLADEBORNE_STARTUP_SCRIPT_COUNT = 5;
+	// The world loader puts each <Source> child in this cache.
+	constexpr size_t BLADEBORNE_SOURCE_COUNT = 15;
 
 	// A world and the scheduler that ticks it. Nothing else - which is the
 	// point: after the scene loads, everything the tick reads and writes is
@@ -1267,12 +1273,12 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		INFO(error);
 		REQUIRE(error.empty());
 		REQUIRE(runtime != nullptr);
-		REQUIRE(runtime->Costs().size() == 3);
+		REQUIRE(runtime->Costs().size() == BLADEBORNE_STARTUP_SCRIPT_COUNT);
 		CHECK(std::ranges::all_of(runtime->Costs(), &engine::script::ScriptCost::Completed));
 
 		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
 		REQUIRE(sources != nullptr);
-		CHECK(sources->Count() == 14);
+		CHECK(sources->Count() == BLADEBORNE_SOURCE_COUNT);
 
 		const engine::ecs::Entity arena = InWorkspace(store, "BladeborneArena");
 		REQUIRE(arena != engine::ecs::NULL_ENTITY);

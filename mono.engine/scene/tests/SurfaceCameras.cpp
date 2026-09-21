@@ -1414,8 +1414,7 @@ TEST_CASE("an active free camera flies through the portal it crosses", "[scene][
 }
 
 TEST_CASE(
-	"an active free camera carries pose through rotated scaled portal round trips",
-	"[scene][surfacecameras]"
+	"an active free camera carries pose through rotated scaled portal round trips", "[scene][surfacecameras]"
 ) {
 	const float scale = GENERATE(.5f, 1.0f, 2.0f);
 	const bool rotated = GENERATE(false, true);
@@ -1426,8 +1425,8 @@ TEST_CASE(
 
 	const Entity far =
 		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
-	const CFrame farFrame = CFrame(Vector3{18.0f, -6.0f, 9.0f}) *
-		(rotated ? CFrame::Angles(-.25f, .6f, .15f) : CFrame{});
+	const CFrame farFrame =
+		CFrame(Vector3{18.0f, -6.0f, 9.0f}) * (rotated ? CFrame::Angles(-.25f, .6f, .15f) : CFrame{});
 	mirror.World.Set<Transform>(far, Transform{farFrame});
 	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f * scale, 4.5f * scale, .2f}});
 	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
@@ -1444,12 +1443,10 @@ TEST_CASE(
 
 	std::vector<engine::scene::PortalSeam> seams;
 	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 2);
-	const auto source = std::find_if(seams.begin(), seams.end(), [&](const auto &seam) {
-		return seam.Pane == mirror.Pane;
-	});
-	const auto destination = std::find_if(seams.begin(), seams.end(), [&](const auto &seam) {
-		return seam.Pane == far;
-	});
+	const auto source =
+		std::find_if(seams.begin(), seams.end(), [&](const auto &seam) { return seam.Pane == mirror.Pane; });
+	const auto destination =
+		std::find_if(seams.begin(), seams.end(), [&](const auto &seam) { return seam.Pane == far; });
 	REQUIRE(source != seams.end());
 	REQUIRE(destination != seams.end());
 
@@ -1472,7 +1469,8 @@ TEST_CASE(
 		const auto &carriedPrevious = mirror.World.Get<engine::scene::PreviousTransform>(mirror.Eye)->Frame;
 		CHECK((carriedPrevious.LookVector() - through.Rotate(before.LookVector())).Magnitude() < TOLERANCE);
 		CHECK(
-			(mirror.World.Get<Transform>(mirror.Eye)->Frame.Position - carriedPrevious.Position).Magnitude() > 0.0f
+			(mirror.World.Get<Transform>(mirror.Eye)->Frame.Position - carriedPrevious.Position).Magnitude() >
+			0.0f
 		);
 		CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 	};
@@ -1485,11 +1483,8 @@ TEST_CASE(
 	mirror.World.Set(mirror.Eye, Transform{apertureMissNow});
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 	CHECK(mirror.World.Get<Transform>(mirror.Eye)->Frame.FuzzyEq(apertureMissNow, TOLERANCE));
-	CHECK(
-		mirror.World.Get<engine::scene::PreviousTransform>(mirror.Eye)->Frame.FuzzyEq(
-			apertureMissBefore, TOLERANCE
-		)
-	);
+	CHECK(mirror.World.Get<engine::scene::PreviousTransform>(mirror.Eye)
+			  ->Frame.FuzzyEq(apertureMissBefore, TOLERANCE));
 
 	// Two complete passages exercise orientation, endpoint history, scale, and
 	// the no-bounce guard on every active free-camera crossing.

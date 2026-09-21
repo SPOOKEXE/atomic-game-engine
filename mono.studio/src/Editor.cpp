@@ -2318,7 +2318,9 @@ namespace studio {
 					// viewport uses the same per-panel camera only while the authority
 					// prepares its camera-dependent surface views.
 					const engine::core::CFrame &behaviourEye = diagnostics.EffectiveFrustum(eye);
-					EnsureViewerCamera(viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow);
+					EnsureViewerCamera(
+						viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
+					);
 
 					if (!IsReplicaWorld(shown)) {
 						// `EnsureViewerCamera` leaves an authored lens intact. Read it
@@ -2551,7 +2553,9 @@ namespace studio {
 								lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
 							}
 						}
-						(void)engine::render::CollectLights(store, cullingEye.Position, lightReceivers, Lights);
+						(void)engine::render::CollectLights(
+							store, cullingEye.Position, lightReceivers, Lights
+						);
 					}
 				}
 

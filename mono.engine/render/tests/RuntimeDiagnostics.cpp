@@ -25,9 +25,8 @@ using engine::scene::Camera;
 using engine::scene::DrawInstance;
 
 namespace {
-	const engine::render::LightProbeSegment *Find(
-		std::span<const engine::render::LightProbeSegment> paths, LightProbeEvent event, Vector3 direction
-	) {
+	const engine::render::LightProbeSegment *
+	Find(std::span<const engine::render::LightProbeSegment> paths, LightProbeEvent event, Vector3 direction) {
 		for (const auto &path : paths) {
 			if (path.Event == event && (path.Line.To - path.Line.From).Unit() == direction) return &path;
 		}
@@ -62,7 +61,9 @@ TEST_CASE("light influence probes terminate on the first render bound", "[render
 	CHECK(terminationAtWall);
 }
 
-TEST_CASE("light influence probes end at range when no render bound is met", "[render][runtime-diagnostics]") {
+TEST_CASE(
+	"light influence probes end at range when no render bound is met", "[render][runtime-diagnostics]"
+) {
 	SceneLight light;
 	light.Position = Vector3{};
 	light.Range = 7.0f;
@@ -75,11 +76,15 @@ TEST_CASE("light influence probes end at range when no render bound is met", "[r
 	CHECK(travel->Line.To.Z == Catch::Approx(-7.0f));
 }
 
-TEST_CASE("a frozen culling camera can select a different draw set than the inspection camera", "[render][runtime-diagnostics]") {
+TEST_CASE(
+	"a frozen culling camera can select a different draw set than the inspection camera",
+	"[render][runtime-diagnostics]"
+) {
 	std::array<DrawInstance, 2> instances{};
 	instances[0].Frame = CFrame(Vector3{0.0f, 0.0f, -5.0f});
 	instances[1].Frame = CFrame(Vector3{0.0f, 0.0f, 5.0f});
-	for (DrawInstance &instance : instances) instance.HalfExtent = Vector3{0.5f, 0.5f, 0.5f};
+	for (DrawInstance &instance : instances)
+		instance.HalfExtent = Vector3{0.5f, 0.5f, 0.5f};
 
 	std::vector<uint32_t> visible;
 	const Camera camera;
@@ -89,7 +94,9 @@ TEST_CASE("a frozen culling camera can select a different draw set than the insp
 	CHECK(visible[0] == 1);
 }
 
-TEST_CASE("a visibility pose stays separate from the inspection projection pose", "[render][runtime-diagnostics]") {
+TEST_CASE(
+	"a visibility pose stays separate from the inspection projection pose", "[render][runtime-diagnostics]"
+) {
 	View view;
 	const Vector3 inspection{1.0f, 2.0f, 3.0f};
 	const Vector3 visibility{7.0f, 8.0f, 9.0f};

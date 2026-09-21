@@ -45,11 +45,14 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("select-lod"), [this](const graph::RunContext &context) {
 			EnterNamedPass(context.Name);
-			const scene::CameraMatrices visibility = Request.Source->Projection
-				? scene::ResolveSurfaceCamera(Request.VisibilityCameraFrame, *Request.Source->Projection)
-				: scene::ResolveCamera(
-					Request.VisibilityCameraFrame, Request.Camera, float(SceneWidth) / float(SceneHeight)
-				);
+			const scene::CameraMatrices visibility =
+				Request.Source->Projection
+					? scene::ResolveSurfaceCamera(Request.VisibilityCameraFrame, *Request.Source->Projection)
+					: scene::ResolveCamera(
+						  Request.VisibilityCameraFrame,
+						  Request.Camera,
+						  float(SceneWidth) / float(SceneHeight)
+					  );
 			return State->DispatchLodSelection(
 				Command,
 				visibility.ViewProjection,

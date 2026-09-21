@@ -333,7 +333,8 @@ namespace {
 		for (const engine::script::InstanceMethod &method : engine::script::NeutralInstanceMethods()) {
 			functions.emplace_back(method.Name, "neutral");
 		}
-		for (const engine::script::EcsInstanceMethodDescriptor &method : engine::script::EcsInstanceMethods()) {
+		for (const engine::script::EcsInstanceMethodDescriptor &method :
+			 engine::script::EcsInstanceMethods()) {
 			functions.emplace_back(method.Name, "ecs");
 		}
 		std::sort(functions.begin(), functions.end(), [](const auto &left, const auto &right) {
@@ -496,7 +497,8 @@ namespace {
 			for (const engine::script::ServiceMethod &method : surface.Methods) {
 				toml << "\n";
 				WriteTable(toml, {"services", definition.Name, "methods", method.Name});
-				toml << "name = " << Quote(method.Name) << "\nkind = \"Method\"\nlanguages = [\"Luau\", \"JavaScript\"]\n";
+				toml << "name = " << Quote(method.Name)
+					 << "\nkind = \"Method\"\nlanguages = [\"Luau\", \"JavaScript\"]\n";
 			}
 			for (const engine::script::LuauServiceMethod &method : surface.LuauMethods) {
 				toml << "\n";
@@ -506,13 +508,15 @@ namespace {
 			for (const engine::script::ServiceProperty &property : surface.Properties) {
 				toml << "\n";
 				WriteTable(toml, {"services", definition.Name, "properties", property.Name});
-				toml << "name = " << Quote(property.Name) << "\nkind = \"Property\"\nwritable = "
-					 << (property.Set != nullptr ? "true" : "false") << "\nlanguages = [\"Luau\", \"JavaScript\"]\n";
+				toml << "name = " << Quote(property.Name)
+					 << "\nkind = \"Property\"\nwritable = " << (property.Set != nullptr ? "true" : "false")
+					 << "\nlanguages = [\"Luau\", \"JavaScript\"]\n";
 			}
 			for (const engine::script::ServiceSignal &signal : surface.Signals) {
 				toml << "\n";
 				WriteTable(toml, {"services", definition.Name, "signals", signal.Name});
-				toml << "name = " << Quote(signal.Name) << "\nkind = \"Signal\"\nlanguages = [\"Luau\", \"JavaScript\"]\n";
+				toml << "name = " << Quote(signal.Name)
+					 << "\nkind = \"Signal\"\nlanguages = [\"Luau\", \"JavaScript\"]\n";
 				if (signal.Property != nullptr) {
 					toml << "filter = " << Quote(signal.Property) << "\n";
 				}

@@ -1,7 +1,6 @@
-#include <engine/render/RuntimeDiagnostics.hpp>
-
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/render/RuntimeDiagnostics.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 
 #include <algorithm>
@@ -168,7 +167,9 @@ namespace engine::render {
 		}
 	}
 
-	void LightPathGeometry::Build(std::span<const SceneLight> lights, std::span<const scene::DrawInstance> instances) {
+	void LightPathGeometry::Build(
+		std::span<const SceneLight> lights, std::span<const scene::DrawInstance> instances
+	) {
 		Paths.clear();
 		Paths.reserve(lights.size() * 18);
 		for (const SceneLight &light : lights) {

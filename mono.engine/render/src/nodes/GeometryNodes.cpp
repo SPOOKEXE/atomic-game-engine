@@ -1238,8 +1238,8 @@ namespace engine::render {
 					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
-							viewProjection,
-							visibilityCameraFrame,
+						viewProjection,
+						visibilityCameraFrame,
 						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,
@@ -1302,8 +1302,8 @@ namespace engine::render {
 					result.DrawCalls += State->DrawParticles(
 						command,
 						pass,
-							frameUniforms.ViewProjection,
-							visibilityCameraFrame,
+						frameUniforms.ViewProjection,
+						visibilityCameraFrame,
 						result.Triangles,
 						result.ParticlesDrawn,
 						result.Culled,
@@ -1317,8 +1317,8 @@ namespace engine::render {
 					result.DrawCalls += State->DrawRibbons(
 						command,
 						pass,
-							frameUniforms.ViewProjection,
-							visibilityCameraFrame,
+						frameUniforms.ViewProjection,
+						visibilityCameraFrame,
 						ribbonRuns,
 						result.Triangles,
 						worldTarget
@@ -1329,8 +1329,8 @@ namespace engine::render {
 					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
-							viewProjection,
-							visibilityCameraFrame,
+						viewProjection,
+						visibilityCameraFrame,
 						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,

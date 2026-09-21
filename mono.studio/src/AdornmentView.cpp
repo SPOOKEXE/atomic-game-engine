@@ -190,9 +190,8 @@ namespace studio {
 			if (slot.PresentedFieldOfView > 0.0f) {
 				markerCamera.FieldOfViewRadians = slot.PresentedFieldOfView;
 			}
-			const float aspectRatio = panel.RenderSize.y > 0.0f
-								  ? panel.RenderSize.x / panel.RenderSize.y
-								  : panel.ImageSize.x / panel.ImageSize.y;
+			const float aspectRatio = panel.RenderSize.y > 0.0f ? panel.RenderSize.x / panel.RenderSize.y
+																: panel.ImageSize.x / panel.ImageSize.y;
 			engine::render::AppendCameraLockAdornment(
 				CameraLockAdornment, diagnostics.FrozenFrustum, markerCamera, aspectRatio, 8.0f
 			);

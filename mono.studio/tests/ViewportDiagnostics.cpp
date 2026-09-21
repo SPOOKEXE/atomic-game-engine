@@ -1,9 +1,10 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/testing/Suite.hpp>
-#include <studio/ViewportDiagnostics.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <studio/ViewportDiagnostics.hpp>
 
 TEST_SUITE_ID("studio.viewport_diagnostics")
 
