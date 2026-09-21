@@ -80,8 +80,10 @@ done
 
 # The icon has to sit at the AppDir root under the name the .desktop file's
 # Icon= key gives, and again as .DirIcon for file managers that show one before
-# anything is mounted. appimagetool warns about a missing .DirIcon and then
-# produces an image nothing displays an icon for, which is easy to not notice.
+# anything is mounted. The atomic-$program.desktop filename matches the SDL app
+# metadata identifier, so Wayland shells can associate a packaged window with
+# this icon. appimagetool warns about a missing .DirIcon and then produces an
+# image nothing displays an icon for, which is easy to not notice.
 cp "$root/assets/small-icon.png" "$appdir/atomic-$program.png"
 cp "$root/assets/small-icon.png" "$appdir/.DirIcon"
 

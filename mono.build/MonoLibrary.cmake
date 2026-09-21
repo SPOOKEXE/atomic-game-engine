@@ -746,6 +746,22 @@ function(mono_add_program name)
 		RUNTIME_OUTPUT_DIRECTORY "${stage}"
 		LIBRARY_OUTPUT_DIRECTORY "${stage}")
 
+	if(ARG_TIER STREQUAL "client")
+		# Name the staged file itself, so a null build stays null and a deleted
+		# icon is restored without relinking the program.
+		set(icon_source "${CMAKE_SOURCE_DIR}/assets/small-icon.png")
+		set(icon_staged "${stage}/icon.png")
+		add_custom_command(
+			OUTPUT "${icon_staged}"
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${stage}"
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different "${icon_source}" "${icon_staged}"
+			DEPENDS "${icon_source}"
+			COMMENT "Staging application icon into ${stage}"
+			VERBATIM)
+		add_custom_target(${name}_stage_icon ALL DEPENDS "${icon_staged}")
+		add_dependencies(${target} ${name}_stage_icon)
+	endif()
+
 	# The staged directory has to be runnable as it stands, which means the
 	# loader must find the shared libraries *there* and not in the build tree.
 	#

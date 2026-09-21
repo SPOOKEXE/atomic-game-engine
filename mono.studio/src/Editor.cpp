@@ -611,6 +611,10 @@ namespace studio {
 			ENGINE_INFO("assets from {}", Settings.Assets.string());
 		}
 
+		if (!SDL_SetAppMetadata("Atomic Studio", nullptr, "atomic-studio")) {
+			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
+		}
+
 		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
@@ -626,6 +630,16 @@ namespace studio {
 			if (!Window) {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
+			}
+
+			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
+			if (icon == nullptr) {
+				ENGINE_WARN("SDL_LoadPNG icon: {}", SDL_GetError());
+			} else {
+				if (!SDL_SetWindowIcon(Window, icon)) {
+					ENGINE_WARN("SDL_SetWindowIcon: {}", SDL_GetError());
+				}
+				SDL_DestroySurface(icon);
 			}
 		}
 
