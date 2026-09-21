@@ -1,5 +1,6 @@
 #include "LodPreview.hpp"
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
@@ -67,6 +68,16 @@ namespace studio {
 			}
 			return static_cast<uint8_t>(bands.size());
 		}
+	}
+
+	float CenteredLodLabelX(float objectMinimumX, float objectMaximumX, float labelWidth) {
+		return (objectMinimumX + objectMaximumX - labelWidth) * 0.5f;
+	}
+
+	bool ShouldDrawActiveLodLabel(const engine::ecs::Store &store, engine::ecs::Entity instance) {
+		const auto *visual = store.Get<engine::scene::Visual>(instance);
+		const engine::ecs::ClassId meshPart = engine::ecs::Classes::Find(engine::core::Name("MeshPart"));
+		return visual != nullptr && visual->Visible && store.IsA(instance, meshPart);
 	}
 
 	std::optional<uint8_t> ActiveLodForViewport(

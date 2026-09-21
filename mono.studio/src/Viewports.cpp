@@ -15,6 +15,28 @@ namespace studio {
 	using engine::core::Vector3;
 	using engine::world::WorldId;
 
+	bool ViewportDirectionControls::WireframeContains(float x, float y) const {
+		return x >= WireframeLeft && x <= WireframeRight && y >= WireframeTop && y <= WireframeBottom;
+	}
+
+	ViewportDirectionControls
+	ResolveViewportDirectionControls(float panelX, float panelY, float panelWidth, float interfaceScale) {
+		const float scale = std::max(interfaceScale, 0.01f);
+		ViewportDirectionControls controls;
+		controls.Radius = 28.0f * scale;
+		controls.GimbalPadding = 18.0f * scale;
+		controls.CentreX = panelX + panelWidth - controls.Radius - 20.0f * scale;
+		controls.CentreY = panelY + controls.Radius + 20.0f * scale;
+
+		const float buttonWidth = 88.0f * scale;
+		const float buttonHeight = 24.0f * scale;
+		controls.WireframeLeft = controls.CentreX - buttonWidth * 0.5f;
+		controls.WireframeTop = controls.CentreY + controls.Radius + controls.GimbalPadding + 6.0f * scale;
+		controls.WireframeRight = controls.WireframeLeft + buttonWidth;
+		controls.WireframeBottom = controls.WireframeTop + buttonHeight;
+		return controls;
+	}
+
 	ViewportTargetSize ResolveViewportTargetSize(
 		uint32_t panelWidth,
 		uint32_t panelHeight,

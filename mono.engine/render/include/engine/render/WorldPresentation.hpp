@@ -102,6 +102,7 @@ namespace engine::render {
 		uint32_t SurfaceLimit = 0;
 		core::Name PostProcess;
 		bool Untextured = false;
+		bool Wireframe = false;
 		//@}
 	};
 

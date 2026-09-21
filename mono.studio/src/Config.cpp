@@ -18,6 +18,9 @@
 #include <studio/Keybinds.hpp>
 
 namespace studio {
+	std::array<float, 3> LodMinimumDistances(const Preferences &preferences) {
+		return {preferences.LOD1Distance, preferences.LOD2Distance, preferences.LOD3Distance};
+	}
 
 	namespace {
 		using nlohmann::json;

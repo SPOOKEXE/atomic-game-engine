@@ -53,7 +53,7 @@ TEST_CASE("automatic LOD decimates the editable-demo triangle count", "[render][
 	scene::RegisterSceneClasses();
 	ecs::Store store("lod.editable-demo");
 	const core::Name base("editable-mesh://lod-demo");
-	const ecs::Entity part = store.Create();
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
@@ -83,7 +83,7 @@ TEST_CASE(
 	fixture.Initialise();
 	ecs::Store store("lod.builtin-upload");
 	const core::Name base(assets::BuiltinName(assets::BuiltinMesh::Sphere));
-	const ecs::Entity part = store.Create();
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
@@ -104,12 +104,15 @@ TEST_CASE(
 	CHECK(baseTriangles > firstTriangles);
 	CHECK(firstTriangles > secondTriangles);
 
-	auto *edited = store.GetMutable<scene::AutoMeshLOD>(part);
-	REQUIRE(edited != nullptr);
-	edited->Ratios[0] = 0.5f;
+	const float editedRatio = 0.5f;
+	float propertyRatio = 0.0f;
+	REQUIRE(store.GetProperty(part, core::Name("AutoLod1Ratio"), &propertyRatio, sizeof(propertyRatio)));
+	REQUIRE(store.SetProperty(part, core::Name("AutoLod1Ratio"), &editedRatio, sizeof(editedRatio)));
 	CHECK(RefreshUntil(uploader, store, fixture.Render) == 2);
 	const core::Name replacement = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
 	CHECK(scene::TrianglesOf(store, replacement) > firstTriangles);
+	core::Vector3 extent;
+	CHECK_FALSE(fixture.Render.MeshExtentOf(first, extent));
 }
 
 TEST_CASE(
@@ -163,7 +166,7 @@ TEST_CASE(
 	fixture.Initialise();
 	ecs::Store store("lod.async-boundary");
 	const core::Name base("lod.async-source");
-	const ecs::Entity part = store.Create();
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
@@ -180,11 +183,21 @@ TEST_CASE(
 	core::Vector3 extent;
 	REQUIRE(fixture.Render.MeshExtentOf(published, extent));
 
-	auto *edited = store.GetMutable<scene::AutoMeshLOD>(part);
-	REQUIRE(edited != nullptr);
-	edited->Ratios[0] = 0.000001f;
+	const float editedRatio = 0.25f;
+	float propertyRatio = 0.0f;
+	REQUIRE(store.GetProperty(part, core::Name("AutoLod1Ratio"), &propertyRatio, sizeof(propertyRatio)));
+	REQUIRE(store.SetProperty(part, core::Name("AutoLod1Ratio"), &editedRatio, sizeof(editedRatio)));
 	CHECK(uploader.RefreshSource(store, fixture.Render, base, source) == 0);
-	edited->Ratios[0] = 0.0f;
+	REQUIRE(RefreshUntil(uploader, store, fixture.Render) == 1);
+	const core::Name republished = scene::AutoMeshLodArtifactName(base, 1, 0.25f);
+	CHECK_FALSE(fixture.Render.MeshExtentOf(published, extent));
+	REQUIRE(fixture.Render.MeshExtentOf(republished, extent));
+
+	const float tinyRatio = 0.000001f;
+	REQUIRE(store.SetProperty(part, core::Name("AutoLod1Ratio"), &tinyRatio, sizeof(tinyRatio)));
+	CHECK(uploader.RefreshSource(store, fixture.Render, base, source) == 0);
+	const float zeroRatio = 0.0f;
+	REQUIRE(store.SetProperty(part, core::Name("AutoLod1Ratio"), &zeroRatio, sizeof(zeroRatio)));
 	CHECK(uploader.Refresh(store, fixture.Render) == 0);
 	CHECK_FALSE(fixture.Render.MeshExtentOf(published, extent));
 	CHECK_FALSE(fixture.Render.MeshExtentOf(scene::AutoMeshLodArtifactName(base, 1, 0.000001f), extent));

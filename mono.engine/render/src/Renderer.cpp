@@ -845,6 +845,9 @@ namespace engine::render {
 		if (State->WireframeTransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeTransparentPipeline);
 		}
+		if (State->WireframeGBufferPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeGBufferPipeline);
+		}
 		for (SDL_GPUGraphicsPipeline *pipeline :
 			 {State->PackedOpaquePipeline,
 			  State->PackedForwardPipeline,
@@ -856,6 +859,7 @@ namespace engine::render {
 			  State->PackedHdrWireframeOpaquePipeline,
 			  State->PackedHdrWireframeTransparentPipeline,
 			  State->PackedGBufferPipeline,
+			  State->PackedWireframeGBufferPipeline,
 			  State->PackedDepthPeelPipeline,
 			  State->PackedMeshShadowPipeline,
 			  State->PackedTransparentLayerPipeline,

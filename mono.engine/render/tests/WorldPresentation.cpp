@@ -680,6 +680,10 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	view.CameraFrame.Position.X = 0.0f;
 	state.Untextured = true;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+
+	state.Untextured = false;
+	state.Wireframe = true;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
 }
 
 TEST_CASE(

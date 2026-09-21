@@ -114,6 +114,7 @@ using studio::CreateRuntimeCamera;
 using studio::DefaultViewportCamera;
 using studio::NO_VIEWPORT;
 using studio::PanelView;
+using studio::ResolveViewportDirectionControls;
 using studio::ResolveViewportTargetSize;
 using studio::RuntimeCameraOf;
 using studio::SnapViewportCameraDirection;
@@ -248,6 +249,29 @@ TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewpo
 		ResolveViewportTargetSize(UINT32_MAX, UINT32_MAX, 0, 0, 0, 0);
 	CHECK(unbounded.Width == UINT32_MAX);
 	CHECK(unbounded.Height == UINT32_MAX);
+}
+
+TEST_CASE("wireframe toggle sits below the viewport direction gizmo", "[studio][viewports][overlay]") {
+	const studio::ViewportDirectionControls controls =
+		ResolveViewportDirectionControls(100.0f, 50.0f, 800.0f, 1.0f);
+
+	CHECK(controls.CentreX == 852.0f);
+	CHECK(controls.CentreY == 98.0f);
+	CHECK(controls.WireframeTop > controls.CentreY + controls.Radius);
+	CHECK((controls.WireframeLeft + controls.WireframeRight) * 0.5f == controls.CentreX);
+	CHECK(controls.WireframeRight - controls.WireframeLeft == 88.0f);
+	CHECK(controls.WireframeBottom - controls.WireframeTop == 24.0f);
+	CHECK(controls.WireframeContains(controls.CentreX, controls.WireframeTop));
+	CHECK_FALSE(controls.WireframeContains(controls.WireframeRight + 1.0f, controls.WireframeTop));
+}
+
+TEST_CASE("wireframe toggle follows Studio interface scale", "[studio][viewports][overlay]") {
+	const studio::ViewportDirectionControls controls =
+		ResolveViewportDirectionControls(0.0f, 0.0f, 1000.0f, 2.0f);
+
+	CHECK(controls.Radius == 56.0f);
+	CHECK(controls.WireframeRight - controls.WireframeLeft == 176.0f);
+	CHECK(controls.WireframeBottom - controls.WireframeTop == 48.0f);
 }
 
 TEST_CASE("crossing either viewport ceiling scales both axes together", "[studio][viewports][render]") {

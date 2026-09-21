@@ -125,6 +125,7 @@ namespace engine::render {
 			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
 			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
 			if (native == GBufferPipeline) return PackedGBufferPipeline;
+			if (native == WireframeGBufferPipeline) return PackedWireframeGBufferPipeline;
 			if (native == DepthPeelPipeline) return PackedDepthPeelPipeline;
 			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
 			if (native == TransparentLayerPipeline) return PackedTransparentLayerPipeline;
@@ -145,7 +146,7 @@ namespace engine::render {
 								  core::Name owner) {
 			SDL_GPUGraphicsPipeline *want = native;
 			if (mesh.Packed) {
-				SDL_GPUGraphicsPipeline *variant = PackedVariantFor(shader, owner);
+				SDL_GPUGraphicsPipeline *variant = WireframeMode ? nullptr : PackedVariantFor(shader, owner);
 				want = variant != nullptr ? variant : packedPipeline(base);
 			}
 			if (want == nullptr) return false;
@@ -488,7 +489,8 @@ namespace engine::render {
 					continue;
 				}
 
-				SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader, SlotContentOwner[slot]);
+				SDL_GPUGraphicsPipeline *const wanted =
+					WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
 				SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
 
 				BindInstanceBuffers(pass, Lod.Indices, Lod.Instances, Lod.SkinOffsets);
@@ -595,7 +597,8 @@ namespace engine::render {
 			// **Bound per run and only where it changes.** A scene with no
 			// custom shaders never enters this branch, and one where every part
 			// wears the same one binds twice: once here and once on the way out.
-			SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader, SlotContentOwner[slot]);
+			SDL_GPUGraphicsPipeline *const wanted =
+				WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
 			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
 			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot])) {
 				slotRun++;

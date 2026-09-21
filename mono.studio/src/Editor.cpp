@@ -2782,7 +2782,7 @@ namespace studio {
 			view.Slot = viewport;
 			view.Portals = Portals;
 			view.Pipeline = selectedPipeline;
-			view.LodMinimumDistances = {Prefs.LOD1Distance, Prefs.LOD2Distance, Prefs.LOD3Distance};
+			view.LodMinimumDistances = LodMinimumDistances(Prefs);
 			view.EnableLODCulling = Prefs.EnableLODCulling;
 			view.World = visual.IsValid() ? visual.Index : 0;
 			view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
@@ -2870,6 +2870,7 @@ namespace studio {
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
 					.Untextured = ShowColliders && ColliderHideTextures,
+					.Wireframe = Renderer.Wireframe(),
 				}
 			);
 		}

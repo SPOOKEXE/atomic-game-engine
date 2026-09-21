@@ -19,6 +19,13 @@ namespace engine::ecs {
 namespace studio {
 	struct PanelProjection;
 
+	// Places a label so its horizontal midpoint matches the projected object's.
+	float CenteredLodLabelX(float objectMinimumX, float objectMaximumX, float labelWidth);
+
+	// Whether the viewport overlay should identify this visible MeshPart. LOD 0
+	// is still useful before a policy exists or while its artifacts are building.
+	bool ShouldDrawActiveLodLabel(const engine::ecs::Store &store, engine::ecs::Entity instance);
+
 	// Returns the level the focused viewport would select for a MeshPart. A
 	// partially resident ladder is limited to its available prefix; a missing
 	// base mesh or view input has no trustworthy value.

@@ -395,6 +395,7 @@ namespace engine::render {
 			objects = FoldPresentation(objects, state.Resources);
 			objects = FoldPresentation(objects, state.PostProcess.Id());
 			objects = FoldPresentation(objects, state.Untextured ? 1u : 0u);
+			objects = FoldPresentation(objects, state.Wireframe ? 1u : 0u);
 			objects = FoldPresentationSpan(objects, view.Lights);
 			objects = FoldPresentationObject(objects, state.Lighting.Direction);
 			objects = FoldPresentationObject(objects, state.Lighting.Ambient);

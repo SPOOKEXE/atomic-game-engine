@@ -194,41 +194,26 @@ namespace engine::assets {
 			}
 		}
 
-		bool CollapseOne(
+		bool CollapseBatch(
 			std::vector<MeshVertex> &vertices,
 			std::vector<Triangle> &triangles,
 			const std::vector<uint32_t> &owners,
+			const std::vector<bool> &boundary,
 			uint32_t submesh,
 			size_t &count,
 			size_t target,
 			MeshReduction reduction,
 			std::stop_token stop
 		) {
-			const FaceAdjacency adjacency = BuildFaceAdjacency(vertices.size(), triangles);
-			const auto edgeKey = [](uint32_t first, uint32_t second) {
-				const uint32_t low = std::min(first, second);
-				const uint32_t high = std::max(first, second);
-				return (static_cast<uint64_t>(low) << 32u) | high;
+			struct Candidate {
+				float Cost = 0.0f;
+				uint32_t Left = 0;
+				uint32_t Right = 0;
+				size_t Removed = 0;
 			};
-			std::unordered_map<uint64_t, size_t> edgeUses;
-			for (size_t index = 0; index < triangles.size(); index++) {
-				if (owners[index] != submesh || Degenerate(triangles[index])) continue;
-				const Triangle &triangle = triangles[index];
-				edgeUses[edgeKey(triangle[0], triangle[1])]++;
-				edgeUses[edgeKey(triangle[1], triangle[2])]++;
-				edgeUses[edgeKey(triangle[2], triangle[0])]++;
-			}
-			std::vector<bool> boundary(vertices.size(), false);
-			for (const auto &[key, uses] : edgeUses) {
-				if (uses != 1) continue;
-				boundary[static_cast<uint32_t>(key >> 32u)] = true;
-				boundary[static_cast<uint32_t>(key)] = true;
-			}
-			float bestCost = std::numeric_limits<float>::infinity();
-			uint32_t bestLeft = 0;
-			uint32_t bestRight = 0;
-			size_t bestRemoved = 0;
-			bool found = false;
+			const FaceAdjacency adjacency = BuildFaceAdjacency(vertices.size(), triangles);
+			std::vector<Candidate> candidates;
+			std::unordered_map<uint64_t, bool> seen;
 
 			for (size_t index = 0; index < triangles.size(); index++) {
 				if (stop.stop_requested()) return false;
@@ -243,8 +228,9 @@ namespace engine::assets {
 					 }) {
 					const uint32_t left = std::min(edge[0], edge[1]);
 					const uint32_t right = std::max(edge[0], edge[1]);
+					const uint64_t key = (static_cast<uint64_t>(left) << 32u) | right;
 					if (left == right || boundary[left] || boundary[right] ||
-						!SameSkin(vertices[left], vertices[right])) {
+						!SameSkin(vertices[left], vertices[right]) || !seen.emplace(key, true).second) {
 						continue;
 					}
 					size_t edgeUses = 0;
@@ -282,10 +268,6 @@ namespace engine::assets {
 					if (!local) {
 						continue;
 					}
-					if (count - removed < target) {
-						continue;
-					}
-
 					float cost = EdgeCost(vertices[left], vertices[right]);
 					if (reduction == MeshReduction::SurfaceArea) {
 						// The product ranks a collapse by its geometric error and by
@@ -293,31 +275,78 @@ namespace engine::assets {
 						// not disappear merely because one of its edges is short.
 						cost *= SurfaceCost(vertices, triangles, owners, adjacency, submesh, left, right);
 					}
-					if (!found || cost < bestCost ||
-						(cost == bestCost && std::pair(left, right) < std::pair(bestLeft, bestRight))) {
-						bestCost = cost;
-						bestLeft = left;
-						bestRight = right;
-						bestRemoved = removed;
-						found = true;
-					}
+					candidates.push_back({cost, left, right, removed});
 				}
 			}
 
-			if (!found) {
-				return false;
+			std::sort(
+				candidates.begin(), candidates.end(), [](const Candidate &left, const Candidate &right) {
+					if (left.Cost != right.Cost) return left.Cost < right.Cost;
+					return std::pair(left.Left, left.Right) < std::pair(right.Left, right.Right);
+				}
+			);
+			std::vector<bool> claimedVertices(vertices.size(), false);
+			std::vector<bool> claimedFaces(triangles.size(), false);
+			std::vector<uint32_t> replacement(vertices.size());
+			for (uint32_t vertex = 0; vertex < replacement.size(); vertex++)
+				replacement[vertex] = vertex;
+			size_t removed = 0;
+			for (const Candidate &candidate : candidates) {
+				if (count - removed < target + candidate.Removed || claimedVertices[candidate.Left] ||
+					claimedVertices[candidate.Right])
+					continue;
+				bool overlaps = false;
+				ForEachIncidentFace(adjacency, candidate.Left, candidate.Right, [&](size_t face) {
+					if (claimedFaces[face]) overlaps = true;
+				});
+				if (overlaps) continue;
+				claimedVertices[candidate.Left] = true;
+				claimedVertices[candidate.Right] = true;
+				ForEachIncidentFace(adjacency, candidate.Left, candidate.Right, [&](size_t face) {
+					claimedFaces[face] = true;
+				});
+				replacement[candidate.Right] = candidate.Left;
+				MergeVertex(vertices[candidate.Left], vertices[candidate.Right]);
+				removed += candidate.Removed;
 			}
-			MergeVertex(vertices[bestLeft], vertices[bestRight]);
+			if (removed == 0) return false;
 			for (Triangle &triangle : triangles) {
 				if (stop.stop_requested()) return false;
 				for (uint32_t &index : triangle) {
-					if (index == bestRight) {
-						index = bestLeft;
-					}
+					index = replacement[index];
 				}
 			}
-			count -= bestRemoved;
+			count -= removed;
 			return true;
+		}
+
+		std::vector<bool> BoundaryVertices(
+			size_t vertexCount,
+			const std::vector<Triangle> &triangles,
+			const std::vector<uint32_t> &owners,
+			uint32_t submesh
+		) {
+			const auto edgeKey = [](uint32_t first, uint32_t second) {
+				const uint32_t low = std::min(first, second);
+				const uint32_t high = std::max(first, second);
+				return (static_cast<uint64_t>(low) << 32u) | high;
+			};
+			std::unordered_map<uint64_t, size_t> edgeUses;
+			for (size_t index = 0; index < triangles.size(); index++) {
+				if (owners[index] != submesh || Degenerate(triangles[index])) continue;
+				const Triangle &triangle = triangles[index];
+				edgeUses[edgeKey(triangle[0], triangle[1])]++;
+				edgeUses[edgeKey(triangle[1], triangle[2])]++;
+				edgeUses[edgeKey(triangle[2], triangle[0])]++;
+			}
+
+			std::vector<bool> boundary(vertexCount, false);
+			for (const auto &[key, uses] : edgeUses) {
+				if (uses != 1) continue;
+				boundary[static_cast<uint32_t>(key >> 32u)] = true;
+				boundary[static_cast<uint32_t>(key)] = true;
+			}
+			return boundary;
 		}
 	}
 
@@ -373,9 +402,13 @@ namespace engine::assets {
 					count += owners[index] == submesh && !Degenerate(triangles[index]) ? 1u : 0u;
 				}
 				if (count == 0) continue;
+				const std::vector<bool> boundary =
+					BoundaryVertices(vertices.size(), triangles, owners, submesh);
 				const size_t target = std::max<size_t>(1, static_cast<size_t>(std::floor(count * ratio)));
 				while (!stop.stop_requested() && count > target &&
-					   CollapseOne(vertices, triangles, owners, submesh, count, target, reduction, stop)) {}
+					   CollapseBatch(
+						   vertices, triangles, owners, boundary, submesh, count, target, reduction, stop
+					   )) {}
 				if (stop.stop_requested()) return false;
 				// Ratio is a target, not permission to punch holes. A boundary, skin or
 				// material seam can leave no legal collapse before the target is met.

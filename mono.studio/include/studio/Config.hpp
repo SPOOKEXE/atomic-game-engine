@@ -53,6 +53,7 @@
 #include <engine/ui/Theme.hpp>
 #include <engine/world/SharedStoreFile.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <discord/Settings.hpp>
@@ -468,4 +469,13 @@ namespace studio {
 		// @return `false` when it could not be written.
 		bool Save() const;
 	};
+
+	// The distance caps exactly as a render view and its Studio overlays consume them.
+	// Keeping this conversion shared makes a live preference edit reach rendering,
+	// debug rings, and active-LOD labels through the same ordered values.
+	//
+	// @param preferences The current Studio preferences.
+	// @return The LOD 1, 2, and 3 distance caps in render-view order.
+	// @since v0.25
+	std::array<float, 3> LodMinimumDistances(const Preferences &preferences);
 }

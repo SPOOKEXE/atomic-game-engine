@@ -4431,6 +4431,7 @@ namespace client {
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
 					.Untextured = false,
+					.Wireframe = Renderer.Wireframe(),
 				}
 			);
 		}

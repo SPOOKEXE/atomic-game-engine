@@ -440,12 +440,14 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *PackedTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedForwardPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedGBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedWireframeGBufferPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedDepthPeelPipeline = nullptr;
 
-		// The two above, redrawn as lines. See where they are created for why
-		// there are two objects and not a bindable state.
+		// The forward and deferred geometry families, redrawn as lines. See where
+		// they are created for why these are objects and not bindable state.
 		SDL_GPUGraphicsPipeline *WireframeOpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *WireframeTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *WireframeGBufferPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedWireframeOpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedWireframeTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedHdrWireframeOpaquePipeline = nullptr;

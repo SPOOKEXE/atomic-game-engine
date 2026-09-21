@@ -9,7 +9,6 @@
 
 #include "LodPreview.hpp"
 
-#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/gui/Typing.hpp>
@@ -165,15 +164,14 @@ namespace studio {
 			const PanelProjection &panel,
 			const std::array<float, 3> &distanceBands
 		) {
-			const engine::ecs::ClassId meshPart = engine::ecs::Classes::Find(engine::core::Name("MeshPart"));
 			store.Each<
 				const engine::scene::Transform,
 				const engine::scene::Bounds,
 				const engine::scene::Visual>([&](Entity entity,
 												 const engine::scene::Transform &transform,
 												 const engine::scene::Bounds &bounds,
-												 const engine::scene::Visual &visual) {
-				if (!visual.Visible || !store.IsA(entity, meshPart)) {
+												 const engine::scene::Visual &) {
+				if (!ShouldDrawActiveLodLabel(store, entity)) {
 					return;
 				}
 				const std::optional<uint8_t> active =
@@ -199,7 +197,7 @@ namespace studio {
 				const float maxY = std::max(panel.ImageMin.y, imageMaximum.y - textSize.y - 8.0f);
 				const float labelWidth = textSize.x + 10.0f;
 				const float x =
-					std::clamp((minimum.x + maximum.x - labelWidth) * 0.5f, panel.ImageMin.x, maxX);
+					std::clamp(CenteredLodLabelX(minimum.x, maximum.x, labelWidth), panel.ImageMin.x, maxX);
 				const float y = std::clamp(minimum.y - textSize.y - 8.0f, panel.ImageMin.y, maxY);
 				list->AddRectFilled(
 					ImVec2(x, y),
@@ -533,11 +531,7 @@ namespace studio {
 			DrawColliderOutlines(index, panel);
 			DrawAdornments(index, panel);
 			if (ShowActiveLod && Universe != nullptr) {
-				const std::array<float, 3> distanceBands{
-					Prefs.LOD1Distance,
-					Prefs.LOD2Distance,
-					Prefs.LOD3Distance,
-				};
+				const std::array<float, 3> distanceBands = LodMinimumDistances(Prefs);
 				Universe->Enter(ViewportWorld(index), [&](Store &store) {
 					DrawActiveLodLabels(store, list, panel, distanceBands);
 				});
@@ -604,7 +598,7 @@ namespace studio {
 				// They are centred beneath the camera so the three thresholds remain
 				// readable while orbiting instead of becoming world geometry.
 				const Vector3 centre{panel.Eye.X, 0.0f, panel.Eye.Z};
-				const float distances[3] = {Prefs.LOD1Distance, Prefs.LOD2Distance, Prefs.LOD3Distance};
+				const std::array<float, 3> distances = LodMinimumDistances(Prefs);
 				for (size_t level = 0; level < 3; level++) {
 					const float radius = distances[level];
 					if (!(radius > 0.0f) || !std::isfinite(radius)) {
@@ -1015,12 +1009,19 @@ namespace studio {
 			return;
 		}
 
-		const float radius = 28.0f * Settings.Scale;
-		const ImVec2 centre(slot.X + slot.Width - radius - 20.0f, slot.Y + radius + 20.0f);
-		const ImVec2 min(centre.x - radius - 18.0f, centre.y - radius - 18.0f);
-		const ImVec2 max(centre.x + radius + 18.0f, centre.y + radius + 18.0f);
+		const ViewportDirectionControls controls =
+			ResolveViewportDirectionControls(slot.X, slot.Y, slot.Width, Settings.Scale);
+		const float radius = controls.Radius;
+		const ImVec2 centre(controls.CentreX, controls.CentreY);
+		const ImVec2 min(
+			centre.x - radius - controls.GimbalPadding, centre.y - radius - controls.GimbalPadding
+		);
+		const ImVec2 max(
+			centre.x + radius + controls.GimbalPadding, centre.y + radius + controls.GimbalPadding
+		);
 		const ImVec2 mouse = ImGui::GetIO().MousePos;
 		const bool hovered = mouse.x >= min.x && mouse.x <= max.x && mouse.y >= min.y && mouse.y <= max.y;
+		const bool wireframeHovered = controls.WireframeContains(mouse.x, mouse.y);
 
 		ViewportState *view = ExtraAt(viewport);
 		const CFrame &frame = view != nullptr ? view->Frame : CameraFrame;
@@ -1071,6 +1072,33 @@ namespace studio {
 		}
 
 		list->AddCircle(centre, radius, IM_COL32(180, 180, 180, 180), 24, 1.0f * Settings.Scale);
+
+		const ImVec2 buttonMinimum(controls.WireframeLeft, controls.WireframeTop);
+		const ImVec2 buttonMaximum(controls.WireframeRight, controls.WireframeBottom);
+		const bool wireframe = Renderer.Wireframe();
+		const ImU32 buttonFill = wireframe ? engine::ui::AccentColour() : IM_COL32(0, 0, 0, 220);
+		const ImU32 buttonBorder =
+			wireframeHovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(155, 155, 155, 220);
+		list->AddRectFilled(buttonMinimum, buttonMaximum, buttonFill, 3.0f * Settings.Scale);
+		list->AddRect(buttonMinimum, buttonMaximum, buttonBorder, 3.0f * Settings.Scale);
+		constexpr const char *WIREFRAME_LABEL = "Wireframe";
+		const ImVec2 labelSize = ImGui::CalcTextSize(WIREFRAME_LABEL);
+		list->AddText(
+			ImVec2(
+				(controls.WireframeLeft + controls.WireframeRight - labelSize.x) * 0.5f,
+				(controls.WireframeTop + controls.WireframeBottom - labelSize.y) * 0.5f
+			),
+			IM_COL32(255, 255, 255, 255),
+			WIREFRAME_LABEL
+		);
+		if (wireframeHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+			// This overlay owns the click, so the viewport must not also select what
+			// happens to sit under the button.
+			PendingPick.Wanted = false;
+			SurfaceGesture = ViewportGesture{};
+			Renderer.SetWireframe(!wireframe);
+			return;
+		}
 		if (nearestAxis < 0 || !ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 			return;
 		}

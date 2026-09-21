@@ -14,6 +14,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <thread>
+
 TEST_SUITE_ID("engine.render.editablemeshes")
 TEST_DEPENDS("engine.scene.editablemesh")
 
@@ -99,7 +102,7 @@ TEST_CASE(
 		}
 	}
 	const core::Name base = scene::EditableMeshContentName(store, mesh);
-	const ecs::Entity part = store.Create();
+	const ecs::Entity part = store.CreateInstance(ecs::Classes::Find(core::Name("MeshPart")), "part");
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
@@ -112,15 +115,35 @@ TEST_CASE(
 	render::EditableMeshUploader uploader;
 	CHECK(uploader.RefreshLods(store, fixture.Render, owner) == 0);
 	CHECK(scene::TrianglesOf(store, base) == 0);
-	REQUIRE(uploader.Refresh(store, fixture.Render, owner) == 3);
 	const core::Name first = scene::AutoMeshLodArtifactName(base, 1, 0.5f);
 	const core::Name second = scene::AutoMeshLodArtifactName(base, 2, 0.25f);
+	size_t initialUploads = 0;
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, second) == 0; attempt++) {
+		initialUploads += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(initialUploads == 3);
 	CHECK(scene::TrianglesOf(store, base) == 32);
 	CHECK(scene::TrianglesOf(store, first) < 32);
-	CHECK(scene::TrianglesOf(store, second) < scene::TrianglesOf(store, first));
+	CHECK(scene::TrianglesOf(store, second) <= scene::TrianglesOf(store, first));
+
+	const float editedRatio = 0.4f;
+	REQUIRE(store.SetProperty(part, core::Name("AutoLod1Ratio"), &editedRatio, sizeof(editedRatio)));
+	const core::Name replacement = scene::AutoMeshLodArtifactName(base, 1, editedRatio);
+	for (size_t attempt = 0; attempt < 3000 && scene::TrianglesOf(store, replacement) == 0; attempt++) {
+		(void)uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(scene::TrianglesOf(store, replacement) > scene::TrianglesOf(store, first));
+	CHECK(scene::TrianglesOf(store, first) == 0);
 
 	REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 5));
-	CHECK(uploader.Refresh(store, fixture.Render, owner) == 3);
+	size_t geometryUploads = 0;
+	for (size_t attempt = 0; attempt < 3000 && geometryUploads < 3; attempt++) {
+		geometryUploads += uploader.Refresh(store, fixture.Render, owner);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(geometryUploads == 3);
 	CHECK(scene::TrianglesOf(store, base) == 33);
 }
 

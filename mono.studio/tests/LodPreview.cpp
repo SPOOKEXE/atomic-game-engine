@@ -11,12 +11,15 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <studio/Projection.hpp>
 
 TEST_SUITE_ID("studio.lodpreview")
 TEST_DEPENDS("engine.scene.levelofdetail")
+
+using Catch::Approx;
 
 namespace {
 	using engine::core::CFrame;
@@ -55,6 +58,12 @@ namespace {
 		store.Set(part, lod);
 		return part;
 	}
+}
+
+TEST_CASE("the active LOD label is horizontally centred over the object", "[studio][lod]") {
+	const float labelX = studio::CenteredLodLabelX(100.0f, 300.0f, 80.0f);
+	CHECK(labelX == Approx(160.0f));
+	CHECK(labelX + 40.0f == Approx(200.0f));
 }
 
 TEST_CASE(
@@ -99,6 +108,24 @@ TEST_CASE("a base-only editable mesh reports active lod zero", "[studio][lod]") 
 	CHECK(studio::ActiveLodForViewport(store, part, Panel(), {30.0f, 60.0f, 120.0f}) == 0);
 }
 
+TEST_CASE("visible MeshPart labels survive switching between worlds", "[studio][lod]") {
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	Store first("studio_lod_label_first");
+	Store second("studio_lod_label_second");
+	const Entity firstPart = MeshPart(first);
+	const Entity secondPart = MeshPart(second);
+	first.Remove<AutoMeshLOD>(firstPart);
+	second.Remove<AutoMeshLOD>(secondPart);
+
+	CHECK(studio::ShouldDrawActiveLodLabel(first, firstPart));
+	CHECK(studio::ShouldDrawActiveLodLabel(second, secondPart));
+	CHECK(studio::ShouldDrawActiveLodLabel(first, firstPart));
+
+	first.GetMutable<Visual>(firstPart)->Visible = false;
+	CHECK_FALSE(studio::ShouldDrawActiveLodLabel(first, firstPart));
+}
+
 TEST_CASE("a distant mesh part previews its coarser level", "[studio][lod]") {
 	engine::scene::RegisterSceneComponents();
 	engine::scene::RegisterSceneClasses();
@@ -110,7 +137,7 @@ TEST_CASE("a distant mesh part previews its coarser level", "[studio][lod]") {
 	catalogue.Triangles[Name("studio.lod-preview.half").Id()] = 5000;
 	store.SetResource(catalogue);
 
-	const auto level = studio::ActiveLodForViewport(store, part, Panel(), {1.0f, 2.0f, 3.0f});
+	const auto level = studio::ActiveLodForViewport(store, part, Panel(), {30.0f, 60.0f, 120.0f});
 	REQUIRE(level.has_value());
 	CHECK(*level == 1);
 }

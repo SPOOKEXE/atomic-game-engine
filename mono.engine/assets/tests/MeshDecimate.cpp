@@ -1,5 +1,6 @@
 // Deterministic automatic LOD generation from valid mesh assets.
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/assets/MeshDecimate.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -173,6 +174,15 @@ TEST_CASE("mesh decimation does not pull a topological seam apart", "[assets][me
 			);
 		}));
 	}
+}
+
+TEST_CASE("the built-in sphere still reaches a coarse connected lod", "[assets][mesh-decimate]") {
+	using namespace engine::assets;
+	const MeshData source = MakeBuiltin(BuiltinMesh::Sphere);
+	MeshData reduced;
+	REQUIRE(DecimateMesh(source, 0.25f, reduced));
+	REQUIRE(reduced.IsValid());
+	CHECK(reduced.Indices.size() < source.Indices.size());
 }
 
 TEST_CASE("mesh decimation preserves partial material runs and uncovered faces", "[assets][mesh-decimate]") {

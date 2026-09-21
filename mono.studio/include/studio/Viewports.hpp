@@ -59,6 +59,45 @@ namespace studio {
 		bool Open = false;
 	};
 
+	// Screen-space layout shared by the direction gizmo and its view toggles.
+	//
+	// @since v0.25
+	struct ViewportDirectionControls {
+		// Direction-gizmo circle and its interaction padding.
+		//@{
+		float CentreX = 0.0f;
+		float CentreY = 0.0f;
+		float Radius = 0.0f;
+		float GimbalPadding = 0.0f;
+		//@}
+
+		// Wireframe button bounds in display coordinates.
+		//@{
+		float WireframeLeft = 0.0f;
+		float WireframeTop = 0.0f;
+		float WireframeRight = 0.0f;
+		float WireframeBottom = 0.0f;
+		//@}
+
+		// Tests whether a display-space point is inside the wireframe button.
+		//
+		// @param x Display-space horizontal coordinate.
+		// @param y Display-space vertical coordinate.
+		// @return True for points on or inside the button bounds.
+		bool WireframeContains(float x, float y) const;
+	};
+
+	// Places the wireframe toggle immediately below the top-right direction gizmo.
+	//
+	// @param panelX        Viewport panel left edge in display coordinates.
+	// @param panelY        Viewport panel top edge in display coordinates.
+	// @param panelWidth    Viewport panel width in display pixels.
+	// @param interfaceScale Studio interface scale.
+	// @return The direction gizmo and wireframe-button display-space layout.
+	// @since v0.25
+	ViewportDirectionControls
+	ResolveViewportDirectionControls(float panelX, float panelY, float panelWidth, float interfaceScale);
+
 	// The logical canvas and pointer coordinates a game interface receives from
 	// one viewport panel. GPU targets may be block-rounded or high-DPI; neither
 	// changes authored ScreenGui layout.

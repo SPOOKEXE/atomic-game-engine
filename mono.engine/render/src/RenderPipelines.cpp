@@ -695,10 +695,10 @@ namespace engine::render {
 		// `ActivePipeline` and `ActiveFamily` correct for `DrawSlots`'
 		// restore - see its own header - so a family-keyed substitution there
 		// reaches the screen pass, the surface pass and every mirror without
-		// a second line anywhere else. A part with its own `ShaderScript`
-		// keeps its own shader even so: `DrawSlots` binds a variant by name
-		// over whatever `BindPipeline` left active, and a debug view is not
-		// the place to override an author's own material.
+		// a second line anywhere else. `DrawSlots` also suppresses authored
+		// shader variants while this mode is active. Wireframe is a geometry
+		// inspection view, so a material shader must not fill the triangles the
+		// view is meant to expose.
 		//
 		// **Failure here is a diagnostic and a feature quietly unavailable,
 		// never a reason `CreatePipelines` itself fails.** `fillModeNonSolid`
@@ -763,6 +763,14 @@ namespace engine::render {
 			} else {
 				// This is the only portable proof that all eight formats bind together.
 				Caps.MaxColourTargets = 8;
+
+				SDL_GPUGraphicsPipelineCreateInfo wireframeGBuffer = gbuffer;
+				wireframeGBuffer.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+				wireframeGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+				WireframeGBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &wireframeGBuffer);
+				if (WireframeGBufferPipeline == nullptr) {
+					ENGINE_WARN("wireframe gbuffer pipeline unavailable: {}", SDL_GetError());
+				}
 			}
 		}
 		const bool pbrSupported = GBufferPipeline != nullptr;
@@ -951,6 +959,10 @@ namespace engine::render {
 		}
 		if (pbrSupported) {
 			PackedGBufferPipeline = packedPipeline(gbuffer, packedOpaqueVertex);
+			SDL_GPUGraphicsPipelineCreateInfo packedWireframeGBuffer = gbuffer;
+			packedWireframeGBuffer.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			packedWireframeGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			PackedWireframeGBufferPipeline = packedPipeline(packedWireframeGBuffer, packedOpaqueVertex);
 			PackedDepthPeelPipeline = packedPipeline(depthPeel, packedOpaqueVertex);
 		}
 		if (PackedOpaquePipeline == nullptr || PackedForwardPipeline == nullptr ||
@@ -1668,6 +1680,8 @@ namespace engine::render {
 			} else if (family == PipelineFamily::HdrTransparent &&
 					   HdrWireframeTransparentPipeline != nullptr) {
 				pipeline = HdrWireframeTransparentPipeline;
+			} else if (family == PipelineFamily::GBuffer && WireframeGBufferPipeline != nullptr) {
+				pipeline = WireframeGBufferPipeline;
 			}
 		}
 

@@ -1634,10 +1634,7 @@ namespace studio {
 								ImGui::TextDisabled("unavailable");
 							} else {
 								const auto active = ActiveLodForViewport(
-									store,
-									instance,
-									*focusedProjection,
-									{Prefs.LOD1Distance, Prefs.LOD2Distance, Prefs.LOD3Distance}
+									store, instance, *focusedProjection, LodMinimumDistances(Prefs)
 								);
 								if (active) {
 									ImGui::TextDisabled("%u", static_cast<unsigned>(*active));

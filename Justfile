@@ -1731,3 +1731,7 @@ clean:
 # Everything derived, including the test cache.
 clean-all:
     rm -rf .cache
+# PBR demo-sized automatic LOD build latency.
+bench-mesh-lod samples="5":
+    cmake --build --preset bench --target bench_assets
+    ./.cache/build/bench/bench/bench_assets --suite engine.assets.bench.mesh-decimate --samples {{samples}}

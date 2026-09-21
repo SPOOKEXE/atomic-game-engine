@@ -27,6 +27,7 @@ TEST_SUITE_ID("studio.config")
 using nlohmann::json;
 using studio::ConfigPath;
 using studio::ConfigRoot;
+using studio::LodMinimumDistances;
 using studio::Preferences;
 using studio::ReadConfigDocument;
 using studio::RecentProjects;
@@ -64,6 +65,20 @@ namespace {
 
 TEST_CASE("studio double buffers frames by default", "[studio][config]") {
 	CHECK(studio::Options{}.FramesInFlight == 2);
+}
+
+TEST_CASE("LOD distance preferences feed live viewport settings", "[studio][config][lod]") {
+	Preferences preferences;
+	preferences.LOD1Distance = 17.0f;
+	preferences.LOD2Distance = 43.0f;
+	preferences.LOD3Distance = 91.0f;
+
+	CHECK(LodMinimumDistances(preferences) == std::array<float, 3>{17.0f, 43.0f, 91.0f});
+
+	// The accessor reads current fields rather than a load-time copy, so a slider
+	// edit reaches the next viewport presentation without reopening the scene.
+	preferences.LOD2Distance = 57.0f;
+	CHECK(LodMinimumDistances(preferences) == std::array<float, 3>{17.0f, 57.0f, 91.0f});
 }
 
 TEST_CASE("the root is overridable and every path derives from it", "[studio][config]") {
