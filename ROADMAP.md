@@ -165,3 +165,5 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] setup a example plugin for mocap with camera point track
 - [_] ECS driven RL agent environments
 - [_] Move "roblox files to atomic game files" to a external program - the port tool?
+
+- [_] idea: for the LOD system, could we move mesh details into a normal map as part of the LOD? this way we can have a 'performance mode' that focuses on using this method instead of pure mesh data to show the details (even if it looks slightly uglier)
