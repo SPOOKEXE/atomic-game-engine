@@ -6,6 +6,7 @@
 #include <engine/assets/Signature.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/audio/Device.hpp>
+#include <engine/control/HookRegistry.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
@@ -623,6 +624,16 @@ namespace client {
 			"A shipped atomic game client. Its universe contains local scenes and may also contain a "
 			"replica received from a dedicated server. Replica writes are refused by their store."
 		};
+		std::optional<engine::control::HookLease> VisibilityObservationHook;
+		std::optional<engine::control::HookLease> TemporalSampleHook;
+		std::optional<engine::control::HookLease> RigExportHook;
+		std::optional<engine::control::HookLease> DataAudioObservationHook;
+		std::optional<engine::control::HookLease> DataFactoryLifecycleHook;
+		std::optional<engine::control::HookLease> RenderGraphHook;
+		std::optional<engine::control::HookLease> DataSceneHook;
+		std::optional<engine::control::HookLease> SceneRenderingHook;
+		std::optional<engine::control::HookLease> DataScriptPackageHook;
+		std::optional<engine::control::HookLease> DataCaptureHook;
 
 		// One VM per world, while a game file is being played. Held here as
 		// well as by each world's scheduler, for the reason

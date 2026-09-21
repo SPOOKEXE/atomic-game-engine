@@ -3394,13 +3394,15 @@ namespace studio {
 
 		// Enables this product's ordered engine and studio feature list once.
 		void EnableControlFeatures();
+		// Activates the editor-owned control rows after the shared rows are available.
+		void ActivateControlHooks();
 		// Starts the editor-owned data-factory host and registers its control features.
 		bool StartDataFactoryHost();
 		// Rebuilds client-owned runtime state required before a restored factory world is published.
 		bool PrepareDataFactoryWorld(engine::world::Universe &universe, WorldId world, std::string &detail);
 
-		// The editor's own tools, added on top of the shared ones.
-		void RegisterControlTools();
+		// The editor's own tools, staged into its product hook.
+		void RegisterControlTools(engine::control::HookRegistration &registration);
 
 		// The `world` argument, defaulting to the active scene.
 		WorldId ControlWorld(const nlohmann::json &arguments, std::string &failure);
@@ -3555,6 +3557,10 @@ namespace studio {
 			"the snapshot taken when it started."
 		};
 
+		// Owns the editor-only rows while the control surface is available.
+		engine::control::HookLease StudioControlHook;
+		// Owns the camera calibration row while the renderer and universe are available.
+		engine::control::HookLease StudioSceneRenderingHook;
 		// The window and the things that draw into it.
 		//
 		// **Held by value and in this order**, because destruction runs

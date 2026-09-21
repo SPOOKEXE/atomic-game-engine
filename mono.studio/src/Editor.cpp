@@ -937,6 +937,10 @@ namespace studio {
 		// request the frame loop will never pump again would keep the process
 		// alive; Stop wakes it and joins.
 		ControlServer.Stop();
+		// Product rows capture editor and renderer services, so their guards must
+		// drain while those services still exist.
+		StudioSceneRenderingHook.Close();
+		StudioControlHook.Close();
 
 		// **Before anything is torn down**, because the graph's history is what
 		// is being written and a snapshot taken after the universe has gone is
@@ -987,6 +991,10 @@ namespace studio {
 		Plugins.clear();
 		ScriptPlugins.clear();
 		StopCppPlugins(CppPlugins);
+
+		// Its leases capture the factory session and its session borrows the
+		// universe, so release both before the universe disappears.
+		FactoryHost.reset();
 
 		// Before the universe, because it holds a reference to it.
 		Commands.reset();

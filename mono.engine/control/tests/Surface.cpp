@@ -31,6 +31,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1006,7 +1007,7 @@ TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {
 	CHECK(Called(surface, "thing", json::object()) == 2);
 }
 
-TEST_CASE("a feature list installs only the named groups and keeps order", "[control]") {
+TEST_CASE("a feature list refuses cross-owner rows and retains the first feature", "[control]") {
 	Surface surface("test", "a suite");
 
 	const std::array features{
@@ -1025,11 +1026,11 @@ TEST_CASE("a feature list installs only the named groups and keeps order", "[con
 		}),
 	};
 
-	surface.Enable(features);
+	CHECK_THROWS(surface.Enable(features));
 
 	REQUIRE(surface.Count() == 1);
-	CHECK(surface.Registered().front().Description == "product feature");
-	CHECK(Called(surface, "thing", json::object()) == 2);
+	CHECK(surface.Registered().front().Description == "shared feature");
+	CHECK(Called(surface, "thing", json::object()) == 1);
 }
 
 TEST_CASE("omitted engine features publish none of their rows", "[control]") {
@@ -1965,7 +1966,9 @@ TEST_CASE("data-factory world tools canonicalize numeric operation arguments", "
 	CHECK(universe.Count() == 1);
 }
 
-TEST_CASE("data-factory ledger remains valid across surface copies and moves", "[control][data-factory]") {
+TEST_CASE("data-factory ledger retains replay results on its owning surface", "[control][data-factory]") {
+	static_assert(!std::is_copy_constructible_v<Surface>);
+	static_assert(!std::is_move_constructible_v<Surface>);
 	Universe universe;
 	const WorldId world = MakeWorld(universe, "surface-ledger-lifetime");
 	engine::world::DataFactorySession session(universe);
@@ -1974,19 +1977,17 @@ TEST_CASE("data-factory ledger remains valid across surface copies and moves", "
 	});
 	Surface original("test", "a suite");
 	original.Enable(std::array{engine::control::features::DataFactory(session)});
-	Surface copied = original;
-	Surface moved = std::move(original);
 	const auto lifecycle = session.Inspect("surface-ledger-lifetime");
 	const json request{
 		{"instance_id", "surface-ledger-lifetime"},
 		{"expected_tick", lifecycle.Clock.Tick},
 		{"expected_world_epoch", lifecycle.WorldEpoch},
 		{"expected_world_version", lifecycle.WorldVersion},
-		{"operation_id", "moved-surface-pause"}
+		{"operation_id", "owning-surface-pause"}
 	};
-	const json paused = Called(moved, "pause", request);
+	const json paused = Called(original, "pause", request);
 	CHECK(paused["status"] == "ok");
-	CHECK(Called(copied, "pause", request) == paused);
+	CHECK(Called(original, "pause", request) == paused);
 	CHECK(universe.StatisticsOf(world).Ticks == 0);
 }
 

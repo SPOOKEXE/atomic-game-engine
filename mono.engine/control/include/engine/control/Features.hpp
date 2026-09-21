@@ -27,8 +27,10 @@ namespace engine::control::features {
 	}
 
 	// Process logs, metric counters, and their controls.
-	inline Feature Diagnostics() {
-		return Feature{"diagnostics", [](Surface &surface) { surface.AddDiagnosticTools(); }};
+	inline Feature Diagnostics(bool includeLogTail = true) {
+		return Feature{"diagnostics", [includeLogTail](Surface &surface) {
+						   surface.AddDiagnosticTools(includeLogTail);
+					   }};
 	}
 
 	// The asynchronous test runner tools.

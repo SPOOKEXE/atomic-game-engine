@@ -162,6 +162,32 @@ namespace {
 				[](const json &, std::string &) -> json { throw std::runtime_error("boom"); },
 			}
 		);
+
+		surface.AddResource(
+			Resource{
+				"atomic://bridge/baseline",
+				"Bridge baseline",
+				"A readable resource that proves mcpbridge forwards resource reads without parsing them.",
+				"text/plain",
+				[](std::string &) { return "bridge baseline resource"; },
+			}
+		);
+		surface.AddPrompt(
+			engine::control::Prompt{
+				"bridge_baseline",
+				"Renders a fixed prompt through the bridge.",
+				{engine::control::PromptArgument{
+					"subject", "The subject to name in the baseline prompt.", true
+				}},
+				[](const json &arguments, std::string &failure) {
+					if (!arguments.contains("subject") || !arguments["subject"].is_string()) {
+						failure = "bridge_baseline needs subject";
+						return std::string{};
+					}
+					return "bridge baseline prompt for " + arguments["subject"].get<std::string>();
+				},
+			}
+		);
 	}
 
 	const json *Reply(const std::vector<json> &replies, int id) {
@@ -194,10 +220,14 @@ TEST_CASE("the bridge carries a whole conversation between stdio and the port", 
 	script += Request(6, "tools/call", json{{"name", "no_such_tool"}});
 	script += Request(7, "resources/list");
 	script += Request(8, "prompts/list");
-	script += Request(9, "nonsense/list");
+	script += Request(9, "resources/read", json{{"uri", "atomic://bridge/baseline"}});
+	script += Request(
+		10, "prompts/get", json{{"name", "bridge_baseline"}, {"arguments", json{{"subject", "pipe"}}}}
+	);
+	script += Request(11, "nonsense/list");
 	script += "{ not json\n";
 	script += Request(
-		11,
+		13,
 		"tools/call",
 		json{{"name", "module_may_link"}, {"arguments", json{{"from", "ecs"}, {"to", "control"}}}}
 	);
@@ -209,11 +239,11 @@ TEST_CASE("the bridge carries a whole conversation between stdio and the port", 
 	// lifecycle management work.
 	CHECK(exitCode == 0);
 
-	// Eleven things that expect an answer, plus one notification that must not
-	// get one. A server that answered the notification would put a twelfth
+	// Thirteen things that expect an answer, plus one notification that must not
+	// get one. A server that answered the notification would put a fourteenth
 	// message on the wire and every later reply would be read against the wrong
 	// request, which is why the count is asserted rather than only the contents.
-	REQUIRE(replies.size() == 11);
+	REQUIRE(replies.size() == 13);
 
 	const json *opened = Reply(replies, 1);
 	REQUIRE(opened != nullptr);
@@ -245,14 +275,19 @@ TEST_CASE("the bridge carries a whole conversation between stdio and the port", 
 	REQUIRE(missing != nullptr);
 	CHECK((*missing)["result"].at("isError") == true);
 
-	// No architecture tools were registered as resources or prompts on this
-	// surface, so both tables are empty and both still answer.
 	REQUIRE(Reply(replies, 7) != nullptr);
-	CHECK((*Reply(replies, 7))["result"].at("resources").empty());
+	CHECK((*Reply(replies, 7))["result"].at("resources").size() == 1);
 	REQUIRE(Reply(replies, 8) != nullptr);
-	CHECK((*Reply(replies, 8))["result"].at("prompts").empty());
+	CHECK((*Reply(replies, 8))["result"].at("prompts").size() == 1);
+	REQUIRE(Reply(replies, 9) != nullptr);
+	CHECK((*Reply(replies, 9))["result"]["contents"][0].at("text") == "bridge baseline resource");
+	REQUIRE(Reply(replies, 10) != nullptr);
+	CHECK(
+		(*Reply(replies, 10))["result"]["messages"][0]["content"].at("text") ==
+		"bridge baseline prompt for pipe"
+	);
 
-	const json *unknown = Reply(replies, 9);
+	const json *unknown = Reply(replies, 11);
 	REQUIRE(unknown != nullptr);
 	CHECK((*unknown)["error"].at("code") == -32601);
 
@@ -269,7 +304,7 @@ TEST_CASE("the bridge carries a whole conversation between stdio and the port", 
 
 	// And the conversation carried on afterwards, which is the part that makes
 	// a parse error recoverable rather than the end of the session.
-	const json *verdict = Reply(replies, 11);
+	const json *verdict = Reply(replies, 13);
 	REQUIRE(verdict != nullptr);
 	const json body = json::parse((*verdict)["result"]["content"][0].at("text").get<std::string>());
 	CHECK(body.at("allowed") == false);

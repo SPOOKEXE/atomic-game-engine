@@ -692,22 +692,23 @@ namespace engine::control {
 		return json{{"components", std::move(out)}, {"count", ecs::Components::Count()}};
 	}
 
-	inline void Surface::AddUniverseTools(world::Universe &universe, bool writable) {
+	inline void Surface::AddUniverseTools(world::Universe &universe, bool writable, bool includeEngineInfo) {
 		world::Universe *worlds = &universe;
 
-		Add(Tool{
-			"engine_info",
-			"This program's own state: how many scenes it holds and what they are called. Call it "
-			"first.",
-			[] { return json{{"type", "object"}}; },
-			[worlds](const json &, std::string &) {
-				json names = json::array();
-				for (const WorldId id : worlds->Worlds()) {
-					names.push_back(std::string(worlds->NameOf(id).Text()));
-				}
-				return json{{"worlds", std::move(names)}, {"count", worlds->Count()}};
-			},
-		});
+		if (includeEngineInfo)
+			Add(Tool{
+				"engine_info",
+				"This program's own state: how many scenes it holds and what they are called. Call it "
+				"first.",
+				[] { return json{{"type", "object"}}; },
+				[worlds](const json &, std::string &) {
+					json names = json::array();
+					for (const WorldId id : worlds->Worlds()) {
+						names.push_back(std::string(worlds->NameOf(id).Text()));
+					}
+					return json{{"worlds", std::move(names)}, {"count", worlds->Count()}};
+				},
+			});
 
 		// **The engine's own components, which `component_list` deliberately does
 		// not show.** That tool reads `ecs::Schemas`, which is what a *game*
@@ -1248,10 +1249,14 @@ namespace engine::control {
 
 	namespace features {
 		// World and ECS inspection, with writes when the product permits them.
-		inline Feature Universe(world::Universe &universe, bool writable = true) {
+		// A product that owns a richer engine_info row can omit the generic one.
+		inline Feature
+		Universe(world::Universe &universe, bool writable = true, bool includeEngineInfo = true) {
 			return Feature{
 				"universe",
-				[&universe, writable](Surface &surface) { surface.AddUniverseTools(universe, writable); },
+				[&universe, writable, includeEngineInfo](Surface &surface) {
+					surface.AddUniverseTools(universe, writable, includeEngineInfo);
+				},
 			};
 		}
 	}

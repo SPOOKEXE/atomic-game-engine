@@ -293,6 +293,96 @@ TEST_CASE("Studio factory tools omit unavailable render work", "[studio][data-fa
 	CHECK_FALSE(has("world_resume"));
 	CHECK_FALSE(has("world_list"));
 	CHECK_FALSE(has("render_only"));
+
+	const auto hooks = surface.Hooks().Active();
+	const auto findHook = [&hooks](std::string_view id) {
+		return std::ranges::find_if(hooks, [id](const engine::control::HookStatus &hook) {
+			return hook.Descriptor.Id == id;
+		});
+	};
+	const auto lifecycle = findHook("studio.data-factory.lifecycle");
+	const auto rawScene = findHook("studio.data-factory.raw-scene");
+	const auto physics = findHook("studio.data-factory.physics-observation");
+	const auto package = findHook("studio.data-factory.package");
+	const auto selection = findHook("studio.data-factory.selection");
+	REQUIRE(lifecycle != hooks.end());
+	REQUIRE(rawScene != hooks.end());
+	REQUIRE(physics != hooks.end());
+	REQUIRE(package != hooks.end());
+	REQUIRE(selection != hooks.end());
+	CHECK(std::ranges::find(lifecycle->Tools, "world_create") != lifecycle->Tools.end());
+	CHECK(std::ranges::find(rawScene->Tools, "begin_raw_scene_extract") != rawScene->Tools.end());
+	CHECK(std::ranges::find(physics->Tools, "physics_observation_records") != physics->Tools.end());
+	CHECK(package->Tools == std::vector<std::string>{"run_script_package"});
+	CHECK(selection->Tools == std::vector<std::string>{"world_select"});
+}
+
+TEST_CASE("Studio factory host closes every session-bound control hook", "[studio][data-factory]") {
+	engine::world::Universe worlds;
+	engine::control::Surface surface("studio-test", "test");
+	{
+		studio::DataFactoryHost host;
+		std::string detail;
+		REQUIRE(host.Start(worlds, Callbacks(), detail));
+		host.InstallTools(surface, true);
+		CHECK_FALSE(surface.Hooks().Active().empty());
+	}
+	CHECK(surface.Hooks().Active().empty());
+}
+
+TEST_CASE("Studio factory lifecycle replay survives hook reactivation", "[studio][data-factory][control]") {
+	engine::world::Universe worlds;
+	studio::DataFactoryHost host;
+	std::string detail;
+	REQUIRE(host.Start(worlds, Callbacks(), detail));
+	engine::control::Surface surface("studio-test", "test");
+	const auto activate = [&surface, &host](std::string &failure) {
+		return surface.ActivateHook(
+			{
+				.Id = "studio.test.factory-lifecycle",
+				.Revision = "v1",
+				.Purpose = "Factory lifecycle replay test.",
+				.Dependencies = {},
+				.Limits = {},
+			},
+			[&surface, &host](engine::control::HookRegistration &) {
+				surface.AddDataFactoryTools(*host.Session(), {.RenderOnly = false});
+			},
+			failure
+		);
+	};
+
+	std::string failure;
+	auto lease = activate(failure);
+	REQUIRE(failure.empty());
+	REQUIRE(lease.IsValid());
+	const nlohmann::json request{
+		{"instance_id", "hook-replay"}, {"seed", 41}, {"tick_rate", 60.0}, {"operation_id", "create-once"}
+	};
+	bool failed = false;
+	const nlohmann::json created = Call(surface, "world_create", request, failed);
+	REQUIRE_FALSE(failed);
+	CHECK(created["status"] == "ok");
+	CHECK(worlds.Count() == 1);
+
+	lease.Close();
+	CHECK(std::none_of(surface.Registered().begin(), surface.Registered().end(), [](const auto &tool) {
+		return tool.Name == "world_create";
+	}));
+	lease = activate(failure);
+	REQUIRE(failure.empty());
+	REQUIRE(lease.IsValid());
+	const nlohmann::json replayed = Call(surface, "world_create", request, failed);
+	CHECK_FALSE(failed);
+	CHECK(replayed == created);
+	CHECK(worlds.Count() == 1);
+
+	nlohmann::json conflict = request;
+	conflict["seed"] = 42;
+	const nlohmann::json refused = Call(surface, "world_create", conflict, failed);
+	CHECK(failed);
+	CHECK(refused["error"].get<std::string>().starts_with("operation_id_conflict:"));
+	CHECK(worlds.Count() == 1);
 }
 
 TEST_CASE("Studio factory exposes fenced authored-affordance reads", "[studio][data-factory]") {

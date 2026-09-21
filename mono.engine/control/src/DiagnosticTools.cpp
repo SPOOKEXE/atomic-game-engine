@@ -15,9 +15,8 @@
 //
 // **The sink is installed by `AddDiagnosticTools` and not by the module.** A
 // program that never opens a control port must not pay for a second sink on
-// every line it writes, and the editor already has one of its own - which is
-// why `mono.studio` registers its own `log_tail` over this one, reading the
-// panel a person is looking at rather than a second ring beside it.
+// every line it writes. Studio can omit the standard `log_tail` while it
+// installs its output-panel row under that established name.
 
 #include <engine/control/Surface.hpp>
 #include <engine/core/Log.hpp>
@@ -160,86 +159,88 @@ namespace engine::control {
 		}
 	}
 
-	void Surface::AddDiagnosticTools() {
-		const std::shared_ptr<RingSink> sink = InstalledSink();
-
-		Add(Tool{
-			"log_tail",
-			"The most recent lines this program has logged, newest last. Filter by minimum level "
-			"and by category - a category is one area of the engine, usually one module, and "
-			"log_level lists the ones this build registers. Only the last 1024 lines are kept, and "
-			"`dropped` says how many scrolled off before the oldest one shown.",
-			[] {
-				return json{
-					{"type", "object"},
-					{"properties",
-					 json{
-						 {"lines",
-						  json{
-							  {"type", "integer"},
-							  {"description", "How many lines at most. Default 50, capped at 1024."},
-						  }},
-						 {"level",
-						  json{
-							  {"type", "string"},
-							  {"description", "The lowest severity to include. Default trace."},
-							  {"enum", json::array({"trace", "debug", "info", "warning", "error"})},
-						  }},
-						 {"category",
-						  json{
-							  {"type", "string"},
-							  {"description", "Only lines from this area. Default all of them."},
-						  }},
-					 }},
-				};
-			},
-			[sink](const json &arguments, std::string &failure) -> json {
-				LogLevel floor = LogLevel::Trace;
-				if (arguments.contains("level") && arguments["level"].is_string()) {
-					bool known = false;
-					floor = LevelFrom(arguments["level"].get<std::string>(), known);
-					if (!known) {
-						failure = "'" + arguments["level"].get<std::string>() +
-								  "' is not a level. Use trace, debug, info, warning or error.";
-						return nullptr;
-					}
-				}
-
-				const auto wanted = static_cast<size_t>(std::clamp<int64_t>(
-					arguments.value("lines", 50), 1, static_cast<int64_t>(RingSink::CAPACITY)
-				));
-				const std::string category = arguments.value("category", std::string());
-
-				std::vector<LogLine> recent = sink->Recent();
-
-				json lines = json::array();
-				for (auto line = recent.rbegin(); line != recent.rend() && lines.size() < wanted; ++line) {
-					if (line->Level < floor) {
-						continue;
-					}
-					const std::string area = CategoryOf(line->Text);
-					if (!category.empty() && area != category) {
-						continue;
-					}
-					lines.push_back(
-						json{
-							{"level", core::Describe(line->Level)},
-							{"category", area},
-							{"text", line->Text},
+	void Surface::AddDiagnosticTools(bool includeLogTail) {
+		if (includeLogTail) {
+			const std::shared_ptr<RingSink> sink = InstalledSink();
+			Add(Tool{
+				"log_tail",
+				"The most recent lines this program has logged, newest last. Filter by minimum level "
+				"and by category - a category is one area of the engine, usually one module, and "
+				"log_level lists the ones this build registers. Only the last 1024 lines are kept, and "
+				"`dropped` says how many scrolled off before the oldest one shown.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"lines",
+							  json{
+								  {"type", "integer"},
+								  {"description", "How many lines at most. Default 50, capped at 1024."},
+							  }},
+							 {"level",
+							  json{
+								  {"type", "string"},
+								  {"description", "The lowest severity to include. Default trace."},
+								  {"enum", json::array({"trace", "debug", "info", "warning", "error"})},
+							  }},
+							 {"category",
+							  json{
+								  {"type", "string"},
+								  {"description", "Only lines from this area. Default all of them."},
+							  }},
+						 }},
+					};
+				},
+				[sink](const json &arguments, std::string &failure) -> json {
+					LogLevel floor = LogLevel::Trace;
+					if (arguments.contains("level") && arguments["level"].is_string()) {
+						bool known = false;
+						floor = LevelFrom(arguments["level"].get<std::string>(), known);
+						if (!known) {
+							failure = "'" + arguments["level"].get<std::string>() +
+									  "' is not a level. Use trace, debug, info, warning or error.";
+							return nullptr;
 						}
-					);
-				}
+					}
 
-				std::reverse(lines.begin(), lines.end());
+					const auto wanted = static_cast<size_t>(std::clamp<int64_t>(
+						arguments.value("lines", 50), 1, static_cast<int64_t>(RingSink::CAPACITY)
+					));
+					const std::string category = arguments.value("category", std::string());
 
-				return json{
-					{"lines", std::move(lines)},
-					{"written", sink->Written()},
-					{"dropped", sink->Written() > recent.size() ? sink->Written() - recent.size() : 0},
-					{"kept", recent.size()},
-				};
-			},
-		});
+					std::vector<LogLine> recent = sink->Recent();
+
+					json lines = json::array();
+					for (auto line = recent.rbegin(); line != recent.rend() && lines.size() < wanted;
+						 ++line) {
+						if (line->Level < floor) {
+							continue;
+						}
+						const std::string area = CategoryOf(line->Text);
+						if (!category.empty() && area != category) {
+							continue;
+						}
+						lines.push_back(
+							json{
+								{"level", core::Describe(line->Level)},
+								{"category", area},
+								{"text", line->Text},
+							}
+						);
+					}
+
+					std::reverse(lines.begin(), lines.end());
+
+					return json{
+						{"lines", std::move(lines)},
+						{"written", sink->Written()},
+						{"dropped", sink->Written() > recent.size() ? sink->Written() - recent.size() : 0},
+						{"kept", recent.size()},
+					};
+				},
+			});
+		}
 
 		Add(Tool{
 			"log_level",

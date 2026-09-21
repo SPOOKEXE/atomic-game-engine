@@ -1049,11 +1049,14 @@ namespace server {
 		// Adds this server's own tools after the engine feature list.
 		//
 		// **In `src/Control.cpp`, beside the state it reads**, which is the same
-		// place the editor keeps its own. Called by the custom feature in `Run`,
-		// and only when `--mcp-port` asked for a surface at all.
+		// place the editor keeps its own. The product hook owns the rows and only
+		// exists when `--mcp-port` asked for a surface at all.
 		//
 		// @since v0.19
-		void RegisterControlTools();
+		void RegisterControlTools(engine::control::HookRegistration &registration);
+
+		// Installs the core and data-factory control features this product can support for this run.
+		void ConfigureControlHooks();
 
 		// The control surface. Started only when asked; a server that was never
 		// started costs a thread that was never spawned.
@@ -1065,6 +1068,7 @@ namespace server {
 			"mode this program authors nothing. `--data-factory` instead exposes one isolated, "
 			"MCP-owned world through the data-factory lifecycle tools."
 		};
+		engine::control::HookLease ProductControlHook;
 
 		Options Settings;
 
@@ -1089,6 +1093,11 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
+		// Factory callbacks borrow DataFactory, so their leases close first.
+		engine::control::HookLease FactoryLifecycleControlHook;
+		engine::control::HookLease FactorySceneControlHook;
+		engine::control::HookLease FactoryCameraRenderingControlHook;
+		engine::control::HookLease FactoryPackageControlHook;
 		engine::world::WorldId PrimaryWorld;
 
 		// Placement derived once from `Options::Worlds`. The driver keeps the

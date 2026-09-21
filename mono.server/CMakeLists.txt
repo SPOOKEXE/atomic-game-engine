@@ -127,3 +127,8 @@ mono_add_program(server
 		Mono::server
 		Engine::core
 )
+
+# The product MCP contract suite speaks the loopback wire directly.
+if(TARGET test_server)
+	target_link_libraries(test_server PRIVATE Vendor::asio Vendor::json)
+endif()

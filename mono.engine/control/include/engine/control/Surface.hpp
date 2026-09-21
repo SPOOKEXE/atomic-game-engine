@@ -23,6 +23,7 @@
 //
 // @tier shared
 
+#include <engine/control/HookRegistry.hpp>
 #include <engine/script/GltfSceneExport.hpp>
 
 #include <functional>
@@ -184,6 +185,10 @@ namespace engine::control {
 		// @param name    What this program calls itself to a client.
 		// @param purpose One sentence a model reads before its first call.
 		Surface(std::string name, std::string purpose);
+		Surface(const Surface &) = delete;
+		Surface &operator=(const Surface &) = delete;
+		Surface(Surface &&) = delete;
+		Surface &operator=(Surface &&) = delete;
 
 		// Adds one tool. Later rows win, so a program may replace an inherited
 		// one with a better-informed version of itself.
@@ -198,6 +203,23 @@ namespace engine::control {
 		// @param features Borrowed for this call. Installers are not retained.
 		// @since v0.20
 		void Enable(std::span<const Feature> features);
+
+		// Activates an optional provider through owned transactional registration.
+		// During installation, Add, AddResource, and AddPrompt stage rows in the
+		// same transaction, so existing row builders can become a host hook without
+		// a shadow registration path.
+		HookLease
+		ActivateHook(HookDescriptor descriptor, const HookInstaller &installer, std::string &failure);
+		// The owner table for optional host providers.
+		HookRegistry &Hooks() {
+			return HookRegistry_;
+		}
+		void PumpHooks() {
+			HookRegistry_.Pump();
+		}
+		const HookRegistry &Hooks() const {
+			return HookRegistry_;
+		}
 
 		// Supplies the host-owned capture readiness snapshot used by `negotiate`.
 		// No provider means this surface has no capture host.
@@ -235,7 +257,9 @@ namespace engine::control {
 		// @param writable Whether `instance_set` is offered at all. A replica
 		//                 refuses writes at the store, and a tool that always
 		//                 fails is worse than one that was never listed.
-		void AddUniverseTools(world::Universe &universe, bool writable = true);
+		// @param includeEngineInfo Whether to publish the generic engine_info row.
+		//                 Products with a richer replacement own that row themselves.
+		void AddUniverseTools(world::Universe &universe, bool writable = true, bool includeEngineInfo = true);
 
 		// Installs the module graph and the layer table.
 		//
@@ -284,7 +308,7 @@ namespace engine::control {
 		// use-after-free in the one component whose job is explaining a crash.
 		//
 		// @since v0.19
-		void AddDiagnosticTools();
+		void AddDiagnosticTools(bool includeLogTail = true);
 
 		// Installs the test runner.
 		//
@@ -383,6 +407,7 @@ namespace engine::control {
 		// @return The tools.
 		// @since v0.12
 		std::span<const Tool> Registered() const {
+			const_cast<HookRegistry &>(HookRegistry_).Reap();
 			return Tools;
 		}
 
@@ -404,6 +429,7 @@ namespace engine::control {
 		// @return The resources.
 		// @since v0.19
 		std::span<const Resource> Readable() const {
+			const_cast<HookRegistry &>(HookRegistry_).Reap();
 			return Resources;
 		}
 
@@ -414,16 +440,27 @@ namespace engine::control {
 		// @return The prompts.
 		// @since v0.19
 		std::span<const Prompt> Prompted() const {
+			const_cast<HookRegistry &>(HookRegistry_).Reap();
 			return Prompts;
 		}
 
 	  private:
+		friend class HookRegistry;
+		void InstallHookTool(Tool tool, std::string_view id, uint64_t generation, bool replaceBuiltin);
+		void
+		InstallHookResource(Resource resource, std::string_view id, uint64_t generation, bool replaceBuiltin);
+		void InstallHookPrompt(Prompt prompt, std::string_view id, uint64_t generation, bool replaceBuiltin);
+		void RemoveHookTool(std::string_view name, std::string_view id, uint64_t generation);
+		void RemoveHookResource(std::string_view uri);
+		void RemoveHookPrompt(std::string_view name);
 		nlohmann::json ToolList() const;
 		nlohmann::json ResourceList() const;
 		nlohmann::json PromptList() const;
 
 		std::string Name;
 		std::string Purpose;
+		HookRegistry HookRegistry_;
+		HookRegistration *CurrentRegistration = nullptr;
 		std::vector<Tool> Tools;
 		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
 		RenderGraphProvider RenderGraphProviderCallback;
@@ -431,5 +468,6 @@ namespace engine::control {
 		std::vector<Resource> Resources;
 		std::vector<Prompt> Prompts;
 		bool Profiling = false;
+		std::vector<HookLease> BuiltinHooks;
 	};
 }

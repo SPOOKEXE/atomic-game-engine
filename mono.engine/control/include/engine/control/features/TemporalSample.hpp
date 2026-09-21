@@ -170,12 +170,11 @@ namespace engine::control {
 		}
 	}
 
-	inline void
-	Surface::AddTemporalSampleTools(world::Universe &universe, world::DataFactorySession &session) {
+	inline Tool TemporalSampleTool(world::Universe &universe, world::DataFactorySession &session) {
 		using namespace temporal_sample_detail;
 		world::Universe *worlds = &universe;
 		world::DataFactorySession *lifecycle = &session;
-		Add(Tool{
+		return Tool{
 			"get_temporal_sample",
 			"Copies one selected camera and up to 64 selected object poses from a named retained "
 			"all-systems-paused snapshot.",
@@ -364,7 +363,12 @@ namespace engine::control {
 				}
 				return out;
 			}
-		});
+		};
+	}
+
+	inline void
+	Surface::AddTemporalSampleTools(world::Universe &universe, world::DataFactorySession &session) {
+		Add(TemporalSampleTool(universe, session));
 	}
 
 	namespace features {

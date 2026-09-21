@@ -1,19 +1,17 @@
+#include "ControlHooks.hpp"
 #include "DataCaptureDriver.hpp"
 #include "DataFactoryPausedPresentation.hpp"
 #include "NamedCaptureView.hpp"
 
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
-#include <engine/control/features/AudioObservation.hpp>
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/PhysicsObservation.hpp>
-#include <engine/control/features/RigExport.hpp>
 #include <engine/control/features/Script.hpp>
-#include <engine/control/features/TemporalSample.hpp>
 #include <engine/control/features/Universe.hpp>
-#include <engine/control/features/VisibilityObservation.hpp>
+#include <engine/core/Assert.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -1137,21 +1135,59 @@ namespace client {
 				engine::control::features::Resources(),
 				engine::control::features::Prompts(),
 				engine::control::features::Discovery(),
-				engine::control::features::RenderGraph(),
 			};
 			ControlSurface.Enable(features);
+			std::string renderGraphFailure;
+			RenderGraphHook.emplace(ControlSurface.ActivateHook(
+				{.Id = "client.render-graph",
+				 .Revision = "v1",
+				 .Purpose = "Reports the active client render graph.",
+				 .Dependencies = {},
+				 .Limits = {}},
+				[this](engine::control::HookRegistration &) {
+					engine::control::features::RenderGraph().Install(ControlSurface);
+				},
+				renderGraphFailure
+			));
+			if (!RenderGraphHook->IsValid()) {
+				ENGINE_ERROR("control: render graph hook did not activate: {}", renderGraphFailure);
+				RenderGraphHook.reset();
+			}
 			if (DataFactory) {
-				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
+				std::string lifecycleFailure;
+				DataFactoryLifecycleHook.emplace(ControlSurface.ActivateHook(
+					{.Id = "client.data-factory-lifecycle",
+					 .Revision = "v1",
+					 .Purpose = "Owns the client data-factory lifecycle tools.",
+					 .Dependencies = {},
+					 .Limits = {}},
+					[this](engine::control::HookRegistration &) {
+						ControlSurface.AddDataFactoryTools(*DataFactory);
+					},
+					lifecycleFailure
+				));
+				if (!DataFactoryLifecycleHook->IsValid()) {
+					ENGINE_ERROR("control: data-factory lifecycle hook did not activate: {}", lifecycleFailure);
+					DataFactoryLifecycleHook.reset();
+				}
 				ControlSurface.Enable(
 					std::array{engine::control::features::PhysicsObservation(*DataFactory)}
 				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataAudioObservation(
-						*Universe_, DataAudio, DataFactory.get()
-					)}
+				std::string audioObservationFailure;
+				DataAudioObservationHook.emplace(
+					ActivateDataAudioObservationHook(
+						ControlSurface.Hooks(), *Universe_, DataAudio, *DataFactory, audioObservationFailure
+					)
 				);
-				AddDataScriptPackageTool(
-					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
+				if (!DataAudioObservationHook->IsValid()) {
+					ENGINE_ERROR("control: audio observation hook did not activate: {}", audioObservationFailure);
+					DataAudioObservationHook.reset();
+				}
+				std::string scriptPackageFailure;
+				DataScriptPackageHook.emplace(ControlSurface.ActivateHook(
+					{.Id = "client.data-script-package", .Revision = "v1", .Purpose = "Runs bounded data-factory script packages.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
+					[this](engine::control::HookRegistration &) { AddDataScriptPackageTool(
+						ControlSurface, [this](const engine::script::DataScriptRequest &request) {
 						return ExecuteDataScriptPackageTransaction(
 							{
 								.Universe = *Universe_,
@@ -1197,13 +1233,41 @@ namespace client {
 							},
 							request
 						);
-					}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataCapture(*DataFactory, DataCapture)}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataScene(
+						}
+					); }, scriptPackageFailure));
+				if (!DataScriptPackageHook->IsValid()) {
+					ENGINE_ERROR("control: data script package hook did not activate: {}", scriptPackageFailure);
+					DataScriptPackageHook.reset();
+				}
+				std::string captureFailure;
+				DataCaptureHook.emplace(ControlSurface.ActivateHook(
+					{.Id = "client.data-capture", .Revision = "v1", .Purpose = "Owns client capture tickets.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
+					[this](engine::control::HookRegistration &registration) {
+						registration.SetDrain([bridge = DataCapture] { return bridge == nullptr || !bridge->HasPending(); });
+						engine::control::features::DataCapture(*DataFactory, DataCapture).Install(ControlSurface);
+					}, captureFailure));
+				if (!DataCaptureHook->IsValid()) {
+					DataCaptureHook.reset();
+					ControlSurface.SetDataCaptureAvailabilityProvider({});
+				} else {
+					ControlSurface.SetDataCaptureAvailabilityProvider([this] {
+						const auto hooks = ControlSurface.Hooks().Active();
+						const bool active = std::any_of(hooks.begin(), hooks.end(), [](const auto &hook) {
+							return hook.Descriptor.Id == "client.data-capture" && hook.State == engine::control::HookState::Active;
+						});
+						if (!active || !DataCapture) return engine::control::DataCaptureAvailability{};
+						const auto capabilities = DataCapture->Capabilities();
+						return engine::control::DataCaptureAvailability{
+							.Available = capabilities.Available,
+							.Channels = capabilities.Channels,
+							.Detail = capabilities.Detail,
+						};
+					});
+				}
+				std::string dataSceneFailure;
+				DataSceneHook.emplace(ControlSurface.ActivateHook(
+					{.Id = "client.data-scene", .Revision = "v1", .Purpose = "Reads and exports the factory scene.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
+					[this](engine::control::HookRegistration &) { engine::control::features::DataScene(
 						*Universe_,
 						DataCapture,
 						DataFactory.get(),
@@ -1252,33 +1316,50 @@ namespace client {
 							}
 							return engine::script::GltfTextureSourceStatus::Unsupported;
 						}
-					)}
+					).Install(ControlSurface); }, dataSceneFailure));
+				if (!DataSceneHook->IsValid()) {
+					ENGINE_ERROR("control: data scene hook did not activate: {}", dataSceneFailure);
+					DataSceneHook.reset();
+				}
+				std::string sceneRenderingFailure;
+				SceneRenderingHook.emplace(ControlSurface.ActivateHook(
+					{.Id = "client.scene-rendering", .Revision = "v1", .Purpose = "Reads camera calibration for the rendered factory scene.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
+					[this](engine::control::HookRegistration &registration) {
+						registration.Add(engine::control::features::CameraRenderingDataTool(*Universe_, DataFactory.get()));
+					},
+					sceneRenderingFailure
+				));
+				if (!SceneRenderingHook->IsValid()) {
+					ENGINE_ERROR("control: scene-rendering hook did not activate: {}", sceneRenderingFailure);
+					SceneRenderingHook.reset();
+				}
+				std::string temporalSampleFailure;
+				TemporalSampleHook.emplace(ActivateTemporalSampleHook(
+					ControlSurface.Hooks(), *Universe_, *DataFactory, temporalSampleFailure
+				));
+				if (!TemporalSampleHook->IsValid()) {
+					ENGINE_ERROR("control: temporal sample hook did not activate: {}", temporalSampleFailure);
+					TemporalSampleHook.reset();
+				}
+				std::string rigExportFailure;
+				RigExportHook.emplace(
+					ActivateRigExportHook(ControlSurface.Hooks(), *Universe_, *DataFactory, rigExportFailure)
 				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::TemporalSample(*Universe_, *DataFactory)}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::RigExport(*Universe_, DataFactory.get())}
-				);
+				if (!RigExportHook->IsValid()) {
+					ENGINE_ERROR("control: rig export hook did not activate: {}", rigExportFailure);
+					RigExportHook.reset();
+				}
 			}
-			ControlSurface.Enable(std::array{engine::control::features::VisibilityObservations([this] {
-				const engine::render::VisibilitySnapshot snapshot = Renderer.Visibility();
-				engine::control::features::VisibilitySnapshotReply reply;
-				reply.Frame = snapshot.Frame;
-				reply.ViewSlot = snapshot.ViewSlot;
-				reply.World = std::string(snapshot.World.Text());
-				reply.Valid = snapshot.Valid;
-				reply.Dropped = snapshot.Dropped;
-				reply.DroppedExact = snapshot.DroppedExact;
-				for (const engine::render::VisibilityObservation &row : snapshot.Observations)
-					reply.Observations.push_back(
-						{std::string(row.World.Text()),
-						 row.Entity,
-						 engine::render::Describe(row.State),
-						 engine::render::Describe(row.Cause)}
-					);
-				return reply;
-			})});
+			std::string visibilityFailure;
+			VisibilityObservationHook.emplace(ActivateVisibilityObservationHook(
+				ControlSurface.Hooks(),
+				[this] { return VisibilityObservationSnapshot(Renderer); },
+				visibilityFailure
+			));
+			if (!VisibilityObservationHook->IsValid()) {
+				ENGINE_ERROR("control: visibility observation hook did not activate: {}", visibilityFailure);
+				VisibilityObservationHook.reset();
+			}
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
@@ -1624,6 +1705,30 @@ namespace client {
 	void Client::Shutdown() {
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
+		VisibilityObservationHook.reset();
+		TemporalSampleHook.reset();
+		RigExportHook.reset();
+		DataAudioObservationHook.reset();
+		SceneRenderingHook.reset();
+		DataSceneHook.reset();
+		DataScriptPackageHook.reset();
+		DataCaptureHook.reset();
+		ControlSurface.SetDataCaptureAvailabilityProvider({});
+		if (DataCapture) {
+			// The bridge borrows the renderer. Once its hook starts draining, cancel
+			// every outstanding owner ticket and finish its owner pump before teardown.
+			DataCapture->CancelPending();
+			DataCapture->Pump();
+			ENGINE_ASSERT(!DataCapture->HasPending());
+			ControlSurface.PumpHooks();
+			const auto hooks = ControlSurface.Hooks().Active();
+			ENGINE_ASSERT(std::none_of(hooks.begin(), hooks.end(), [](const auto &hook) {
+				return hook.Descriptor.Id == "client.data-capture";
+			}));
+		}
+		DataFactoryLifecycleHook.reset();
+		RenderGraphHook.reset();
+		ControlSurface.SetRenderGraphProvider({});
 		if (DataCapture && DataCaptureDriverWorld.IsValid() && DataCaptureDriverTicket) {
 			const std::string instance(Universe_->NameOf(DataCaptureDriverWorld).Text());
 			DataCapture->Cancel(instance, *DataCaptureDriverTicket);
@@ -2934,6 +3039,7 @@ namespace client {
 		bool factoryPaused = allSystemsPaused();
 		const bool renderOnlyPending = DataFactoryRenderOnly.Pending();
 		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
+		ControlSurface.PumpHooks();
 		auto failRenderOnly = [this](std::string detail) {
 			const auto *request = DataFactoryRenderOnly.Request();
 			if (request == nullptr || !DataFactory) return;

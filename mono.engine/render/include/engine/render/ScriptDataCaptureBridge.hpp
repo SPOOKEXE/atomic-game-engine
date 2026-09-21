@@ -88,6 +88,9 @@ namespace engine::render {
 		void AbortPreparedView(const PreparedView &prepared);
 		// Advances queued captures and publishes completed readbacks.
 		void Pump();
+		// Cancels every pending capture and retires every camera mutation. One owner
+		// Pump completes the capture side before the renderer can be torn down.
+		void CancelPending();
 		// Reports whether tickets still need renderer or session work.
 		bool HasPending() const;
 

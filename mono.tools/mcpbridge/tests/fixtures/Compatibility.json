@@ -1,0 +1,55 @@
+{
+  "server": {
+    "name": "compatibility-baseline",
+    "purpose": "A fixed MCP surface used to preserve the current JSON-RPC wire contract."
+  },
+  "tool": {
+    "name": "echo",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {"type": "string"}
+      },
+      "required": ["text"]
+    },
+    "arguments": {"text": "baseline request"},
+    "result": {"text": "baseline request"}
+  },
+  "refusedTool": {
+    "name": "refuse",
+    "reason": "this operation is unavailable in the baseline fixture"
+  },
+  "resource": {
+    "uri": "atomic://compatibility/baseline",
+    "text": "baseline resource"
+  },
+  "prompt": {
+    "name": "baseline_prompt",
+    "argument": {"name": "subject", "value": "baseline"},
+    "text": "baseline prompt for baseline"
+  },
+  "negotiate": {
+    "arguments": {"requested_channels": ["rgb_linear_hdr"]},
+    "contract_version": "1",
+    "schema_version": "1",
+    "control_generation": 0,
+    "hooks": [],
+    "requested_channels": [
+      {
+        "name": "rgb_linear_hdr",
+        "supported": false,
+        "reason": "capture channels are not implemented by this host"
+      }
+    ],
+    "headless_cpu": {
+      "name": "headless_cpu",
+      "supported": false,
+      "reason": "not declared by this control host"
+    },
+    "offscreen_gpu": {
+      "name": "offscreen_gpu",
+      "supported": false,
+      "reason": "capture channels are not implemented by this host"
+    }
+  }
+}

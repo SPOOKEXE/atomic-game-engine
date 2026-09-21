@@ -1,4 +1,5 @@
 #include <engine/assets/ContentHash.hpp>
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/core/Name.hpp>

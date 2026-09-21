@@ -180,6 +180,11 @@ mono_add_program(studio
 		Engine::core
 )
 
+# The product MCP contract suite speaks the loopback wire directly.
+if(TARGET test_studio)
+	target_link_libraries(test_studio PRIVATE Vendor::asio Vendor::json)
+endif()
+
 # --- the studio's own panels, authored in TypeScript --------------------------
 #
 # **Staged as stripped JavaScript, exactly as the examples are**, and for the

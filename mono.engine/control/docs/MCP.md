@@ -5,6 +5,11 @@ running engine. An MCP client and the typed Python client in the sibling
 `datafactories-docs/api.py` use the same tool table, schemas, and engine
 validation. There is no private Python execution path around the engine.
 
+This document describes rows and lifecycle behavior shipped by the running
+host. Historical proposals and sibling handoff documents can explain intent,
+but they do not advertise a capability. `tools/list`, `resources/list`,
+`prompts/list`, and `negotiate` are the contract for one host process.
+
 The engine owns worlds, scene mutation, deterministic stepping, snapshots,
 captures, and retained resources. A caller owns recipes, dataset layout,
 conversion, storage, training, and evaluation.
@@ -45,6 +50,47 @@ present only when their host service is installed. Only `render_only` has the
 paired `poll_render_only` row. Capture tickets use `poll_capture`. Always call
 `negotiate` and inspect `tools/list` before building a workflow around an
 optional feature.
+
+## Hook discovery and refresh
+
+The control kernel owns the protocol tables. Product code composes optional
+providers locally, where it already owns the typed world, renderer, capture,
+or factory service. The shared control module does not link renderer adapters
+or load native plugins at runtime.
+
+Each active provider has a stable hook ID, revision, state, tool names, and
+declared numeric limits. `negotiate` returns these under `hooks` and includes a
+monotonic `control_generation`. A successful hook activation or completed
+removal advances that generation. The hook list reports active providers, while
+`operations` reports the callable tool table at the time of the response.
+
+```json
+{
+  "control_generation": 17,
+  "hooks": [
+    {
+      "id": "studio.data-factory.raw-scene",
+      "state": "active",
+      "revision": "v1",
+      "tools": ["begin_raw_scene_extract", "get_raw_scene_chunk", "release_raw_scene_extract"],
+      "limits": {}
+    }
+  ]
+}
+```
+
+A hook stages its tools, resources, and prompts as one registration. A name or
+URI collision rejects the activation, leaving the existing surface unchanged.
+Closing a hook first blocks new calls to its rows. Existing calls retain their
+activation guard until they return; rows disappear after the hook has drained.
+Dependencies keep an owner hook from completing removal until its dependent
+hooks have closed.
+
+MCP `listChanged` remains `false` for tools, resources, and prompts. The host
+does not send list-change notifications. After a host acknowledges a provider
+change, refresh `negotiate`, `tools/list`, `resources/list`, and `prompts/list`
+before issuing another optional operation. A disabled provider is absent from
+the applicable list instead of remaining listed and refusing later.
 
 ## General tool reference
 

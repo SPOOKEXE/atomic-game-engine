@@ -75,6 +75,43 @@ namespace engine::control {
 			}
 			return operations;
 		}
+
+		const char *Text(HookState state) {
+			switch (state) {
+			case HookState::Inactive:
+				return "inactive";
+			case HookState::Starting:
+				return "starting";
+			case HookState::Active:
+				return "active";
+			case HookState::Draining:
+				return "draining";
+			case HookState::Failed:
+				return "failed";
+			}
+			return "unknown";
+		}
+
+		json DescribeHooks(const Surface &surface) {
+			json hooks = json::array();
+			for (const HookStatus &hook : surface.Hooks().Active()) {
+				if (hook.State != HookState::Active) continue;
+				json limits = json::object();
+				for (const HookLimit &limit : hook.Descriptor.Limits) {
+					limits[limit.Name] = limit.Maximum;
+				}
+				hooks.push_back(
+					json{
+						{"id", hook.Descriptor.Id},
+						{"state", Text(hook.State)},
+						{"revision", hook.Descriptor.Revision},
+						{"tools", hook.Tools},
+						{"limits", std::move(limits)}
+					}
+				);
+			}
+			return hooks;
+		}
 	}
 
 	void Surface::AddDiscoveryTools() {
@@ -202,6 +239,8 @@ namespace engine::control {
 					{"contract_version", CONTRACT_VERSION},
 					{"schema_version", SCHEMA_VERSION},
 					{"engine_version", std::string(core::Version())},
+					{"control_generation", Hooks().ControlGeneration()},
+					{"hooks", DescribeHooks(*this)},
 					{"operations", DescribeOperations(*this)},
 					{"unsupported_operations", DescribeUnavailableOperations(*this)},
 					{"requested_channels", std::move(channels)},

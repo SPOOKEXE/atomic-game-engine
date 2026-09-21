@@ -224,238 +224,241 @@ namespace engine::control {
 		}
 	}
 
-	// Deliberately a free installer until a product registers the feature in its
-	// own surface list. That keeps this lower-layer slice independent of
-	// Surface.hpp and of any product's audio ownership.
-	// Installs audio record and chunk readers; bridge ownership remains with the product.
+	// The resource and both readers form one provider transaction.
+	struct DataAudioObservationRows {
+		Resource Metadata;
+		Tool Observation;
+		Tool Waveform;
+	};
+
+	inline DataAudioObservationRows DataAudioObservationTools(
+		world::Universe &universe,
+		std::shared_ptr<script::DataAudioObservationBridge> bridge,
+		world::DataFactorySession *session = nullptr
+	) {
+		using namespace audio_observation_detail;
+		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
+		DataAudioObservationRows rows;
+		rows.Metadata = Resource{
+			"atomic://metadata/audio_observation/v1",
+			"audio_observation/v1 metadata",
+			"Metadata for the copied sample-aligned audio record. Waveform bytes stay in "
+			"digest-addressed "
+			"chunks fetched through get_audio_waveform_chunk.",
+			"application/json",
+			[bridge](std::string &) {
+				const auto capabilities = bridge->Capabilities();
+				const std::string detail = BridgeText(capabilities.Detail, false)
+											   ? capabilities.Detail
+											   : "invalid audio capture capability detail";
+				return json{
+					{"schema", script::AUDIO_OBSERVATION_SCHEMA},
+					{"contract", "datafactories-docs/audio_observation.py"},
+					{"capture",
+					 {{"available", capabilities.Available},
+					  {"detail", detail},
+					  {"maximum_frames", capabilities.MaximumFrames}}},
+					{"waveform", "external_digest_addressed_chunks"},
+					{"sample_type", "float32"},
+					{"interleaved", true},
+					{"limits",
+					 {{"json_bytes", script::MAX_AUDIO_OBSERVATION_JSON_BYTES},
+					  {"string_bytes", script::MAX_AUDIO_OBSERVATION_STRING_BYTES},
+					  {"id_bytes", script::MAX_AUDIO_OBSERVATION_ID_BYTES},
+					  {"sources", script::MAX_AUDIO_OBSERVATION_SOURCES},
+					  {"events", script::MAX_AUDIO_OBSERVATION_EVENTS},
+					  {"chunks", script::MAX_AUDIO_OBSERVATION_CHUNKS},
+					  {"missing", script::MAX_AUDIO_OBSERVATION_MISSING}}},
+					{"waveform_handoff",
+					 {{"tool", "get_audio_waveform_chunk"},
+					  {"sha256", "lowercase_hex_64"},
+					  {"range", "half_open_byte_begin_byte_end"},
+					  {"lifetime", "host_owned_immutable_until_expired"}}}
+				}.dump();
+			},
+		};
+		rows.Observation = Tool{
+			"get_audio_observation",
+			"Returns one bounded audio_observation/v1 record. Waveform bytes remain external "
+			"digest-addressed chunks.",
+			[session] { return Schema(session); },
+			[worlds, bridge, session](const json &arguments, std::string &failure) -> json {
+				if (!Only(
+						arguments,
+						{"instance_id", "expected_tick", "expected_world_epoch", "expected_world_version"},
+						session != nullptr,
+						failure
+					))
+					return nullptr;
+				std::string instance;
+				const auto field = arguments.find("instance_id");
+				if (field == arguments.end()) {
+					failure = Error("validation_failed", "instance_id is required");
+					return nullptr;
+				}
+				if (!Text(*field, "instance_id", script::MAX_AUDIO_OBSERVATION_ID_BYTES, instance, failure))
+					return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(session, instance, arguments, fence, failure))
+					return fence;
+				if (!worlds->Find(core::Name(instance)).IsValid()) {
+					failure = Error("not_found", "no scene has that instance_id");
+					return nullptr;
+				}
+				script::DataAudioObservationBridgeResult result;
+				std::string detail;
+				if (!bridge->Capture(instance, result, detail)) {
+					if (!BridgeText(detail, false)) {
+						failure = Error("invalid_bridge_reply", "capture bridge returned an invalid detail");
+						return nullptr;
+					}
+					failure = Error(
+						"audio_observation_unavailable",
+						detail.empty() ? "capture bridge refused the request" : detail
+					);
+					return nullptr;
+				}
+				if (!Status(result.Status) || !BridgeText(result.Status) ||
+					!BridgeText(result.Detail, false)) {
+					failure =
+						Error("invalid_bridge_reply", "capture bridge returned an invalid status or detail");
+					return nullptr;
+				}
+				if (result.Status != "ok") return {{"status", result.Status}, {"detail", result.Detail}};
+				if (!script::ValidateDataAudioObservation(result.Observation, detail)) {
+					failure = Error("invalid_audio_observation", detail);
+					return nullptr;
+				}
+				json record = Record(result.Observation);
+				if (!FitsSurfaceContent(record)) {
+					failure = Error("resource_limit", "audio observation exceeds its JSON byte bound");
+					return nullptr;
+				}
+				return record;
+			},
+		};
+		rows.Waveform = Tool{
+			"get_audio_waveform_chunk",
+			"Copies a bounded byte range from one digest-addressed waveform chunk returned by "
+			"get_audio_observation.",
+			[session] {
+				json properties{
+					{"instance_id", {{"type", "string"}}},
+					{"resource_id", {{"type", "string"}}},
+					{"sha256", {{"type", "string"}, {"pattern", "^[0-9a-f]{64}$"}}},
+					{"byte_begin", {{"type", "integer"}, {"minimum", 0}}},
+					{"byte_end", {{"type", "integer"}, {"minimum", 1}}},
+				};
+				json required =
+					json::array({"instance_id", "resource_id", "sha256", "byte_begin", "byte_end"});
+				if (session != nullptr) {
+					properties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
+					properties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
+					properties["expected_world_version"] = {{"type", "integer"}, {"minimum", 0}};
+					required.push_back("expected_tick");
+					required.push_back("expected_world_epoch");
+					required.push_back("expected_world_version");
+				}
+				return json{
+					{"type", "object"},
+					{"additionalProperties", false},
+					{"properties", std::move(properties)},
+					{"required", std::move(required)}
+				};
+			},
+			[worlds, bridge, session](const json &arguments, std::string &failure) -> json {
+				if (!Only(
+						arguments,
+						{"instance_id",
+						 "resource_id",
+						 "sha256",
+						 "byte_begin",
+						 "byte_end",
+						 "expected_tick",
+						 "expected_world_epoch",
+						 "expected_world_version"},
+						session != nullptr,
+						failure
+					))
+					return nullptr;
+				std::string instance, resource, digest;
+				uint64_t begin = 0, end = 0;
+				if (!Text(
+						arguments.value("instance_id", json{}),
+						"instance_id",
+						script::MAX_AUDIO_OBSERVATION_ID_BYTES,
+						instance,
+						failure
+					) ||
+					!Text(
+						arguments.value("resource_id", json{}),
+						"resource_id",
+						script::MAX_AUDIO_OBSERVATION_ID_BYTES,
+						resource,
+						failure
+					) ||
+					!Text(arguments.value("sha256", json{}), "sha256", 64, digest, failure) ||
+					!UInt(arguments.value("byte_begin", json{}), "byte_begin", begin, failure) ||
+					!UInt(arguments.value("byte_end", json{}), "byte_end", end, failure))
+					return nullptr;
+				json fence;
+				if (!data_factory_read_fence::Validate(session, instance, arguments, fence, failure))
+					return fence;
+				if (!script::IsDataAudioObservationDigest(digest)) {
+					failure =
+						Error("validation_failed", "sha256 must be 64 lowercase hexadecimal characters");
+					return nullptr;
+				}
+				if (end <= begin || end - begin > MAXIMUM_READ_BYTES ||
+					!worlds->Find(core::Name(instance)).IsValid()) {
+					failure = Error("validation_failed", "waveform range or instance_id is invalid");
+					return nullptr;
+				}
+				std::vector<std::byte> bytes;
+				std::string detail;
+				if (!bridge->ReadWaveform(
+						instance, resource, digest, begin, static_cast<size_t>(end - begin), bytes, detail
+					) ||
+					bytes.size() != end - begin) {
+					if (!BridgeText(detail, false)) {
+						failure = Error("invalid_bridge_reply", "waveform bridge returned an invalid detail");
+						return nullptr;
+					}
+					failure = Error(
+						"waveform_unavailable",
+						detail.empty() ? "bridge did not return the requested chunk range" : detail
+					);
+					return nullptr;
+				}
+				json reply{
+					{"resource_id", resource},
+					{"sha256", digest},
+					{"byte_begin", begin},
+					{"byte_end", end},
+					{"base64", Base64(bytes)}
+				};
+				if (!FitsSurfaceContent(reply)) {
+					failure = Error("resource_limit", "waveform response exceeds its JSON byte bound");
+					return nullptr;
+				}
+				return reply;
+			},
+		};
+		return rows;
+	}
+
+	// Installs the coordinated audio rows through a built-in feature activation.
 	inline void AddDataAudioObservationTools(
 		Surface &surface,
 		world::Universe &universe,
 		std::shared_ptr<script::DataAudioObservationBridge> bridge,
 		world::DataFactorySession *session = nullptr
 	) {
-		using namespace audio_observation_detail;
 		if (!bridge) return;
-		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
-		surface.AddResource(
-			Resource{
-				"atomic://metadata/audio_observation/v1",
-				"audio_observation/v1 metadata",
-				"Metadata for the copied sample-aligned audio record. Waveform bytes stay in "
-				"digest-addressed "
-				"chunks fetched through get_audio_waveform_chunk.",
-				"application/json",
-				[bridge](std::string &) {
-					const auto capabilities = bridge->Capabilities();
-					const std::string detail = BridgeText(capabilities.Detail, false)
-												   ? capabilities.Detail
-												   : "invalid audio capture capability detail";
-					return json{
-						{"schema", script::AUDIO_OBSERVATION_SCHEMA},
-						{"contract", "datafactories-docs/audio_observation.py"},
-						{"capture",
-						 {{"available", capabilities.Available},
-						  {"detail", detail},
-						  {"maximum_frames", capabilities.MaximumFrames}}},
-						{"waveform", "external_digest_addressed_chunks"},
-						{"sample_type", "float32"},
-						{"interleaved", true},
-						{"limits",
-						 {{"json_bytes", script::MAX_AUDIO_OBSERVATION_JSON_BYTES},
-						  {"string_bytes", script::MAX_AUDIO_OBSERVATION_STRING_BYTES},
-						  {"id_bytes", script::MAX_AUDIO_OBSERVATION_ID_BYTES},
-						  {"sources", script::MAX_AUDIO_OBSERVATION_SOURCES},
-						  {"events", script::MAX_AUDIO_OBSERVATION_EVENTS},
-						  {"chunks", script::MAX_AUDIO_OBSERVATION_CHUNKS},
-						  {"missing", script::MAX_AUDIO_OBSERVATION_MISSING}}},
-						{"waveform_handoff",
-						 {{"tool", "get_audio_waveform_chunk"},
-						  {"sha256", "lowercase_hex_64"},
-						  {"range", "half_open_byte_begin_byte_end"},
-						  {"lifetime", "host_owned_immutable_until_expired"}}}
-					}.dump();
-				},
-			}
-		);
-		surface.Add(
-			Tool{
-				"get_audio_observation",
-				"Returns one bounded audio_observation/v1 record. Waveform bytes remain external "
-				"digest-addressed chunks.",
-				[session] { return Schema(session); },
-				[worlds, bridge, session](const json &arguments, std::string &failure) -> json {
-					if (!Only(
-							arguments,
-							{"instance_id",
-							 "expected_tick",
-							 "expected_world_epoch",
-							 "expected_world_version"},
-							session != nullptr,
-							failure
-						))
-						return nullptr;
-					std::string instance;
-					const auto field = arguments.find("instance_id");
-					if (field == arguments.end()) {
-						failure = Error("validation_failed", "instance_id is required");
-						return nullptr;
-					}
-					if (!Text(
-							*field, "instance_id", script::MAX_AUDIO_OBSERVATION_ID_BYTES, instance, failure
-						))
-						return nullptr;
-					json fence;
-					if (!data_factory_read_fence::Validate(session, instance, arguments, fence, failure))
-						return fence;
-					if (!worlds->Find(core::Name(instance)).IsValid()) {
-						failure = Error("not_found", "no scene has that instance_id");
-						return nullptr;
-					}
-					script::DataAudioObservationBridgeResult result;
-					std::string detail;
-					if (!bridge->Capture(instance, result, detail)) {
-						if (!BridgeText(detail, false)) {
-							failure =
-								Error("invalid_bridge_reply", "capture bridge returned an invalid detail");
-							return nullptr;
-						}
-						failure = Error(
-							"audio_observation_unavailable",
-							detail.empty() ? "capture bridge refused the request" : detail
-						);
-						return nullptr;
-					}
-					if (!Status(result.Status) || !BridgeText(result.Status) ||
-						!BridgeText(result.Detail, false)) {
-						failure = Error(
-							"invalid_bridge_reply", "capture bridge returned an invalid status or detail"
-						);
-						return nullptr;
-					}
-					if (result.Status != "ok") return {{"status", result.Status}, {"detail", result.Detail}};
-					if (!script::ValidateDataAudioObservation(result.Observation, detail)) {
-						failure = Error("invalid_audio_observation", detail);
-						return nullptr;
-					}
-					json record = Record(result.Observation);
-					if (!FitsSurfaceContent(record)) {
-						failure = Error("resource_limit", "audio observation exceeds its JSON byte bound");
-						return nullptr;
-					}
-					return record;
-				},
-			}
-		);
-		surface.Add(
-			Tool{
-				"get_audio_waveform_chunk",
-				"Copies a bounded byte range from one digest-addressed waveform chunk returned by "
-				"get_audio_observation.",
-				[session] {
-					json properties{
-						{"instance_id", {{"type", "string"}}},
-						{"resource_id", {{"type", "string"}}},
-						{"sha256", {{"type", "string"}, {"pattern", "^[0-9a-f]{64}$"}}},
-						{"byte_begin", {{"type", "integer"}, {"minimum", 0}}},
-						{"byte_end", {{"type", "integer"}, {"minimum", 1}}},
-					};
-					json required =
-						json::array({"instance_id", "resource_id", "sha256", "byte_begin", "byte_end"});
-					if (session != nullptr) {
-						properties["expected_tick"] = {{"type", "integer"}, {"minimum", 0}};
-						properties["expected_world_epoch"] = {{"type", "integer"}, {"minimum", 0}};
-						properties["expected_world_version"] = {{"type", "integer"}, {"minimum", 0}};
-						required.push_back("expected_tick");
-						required.push_back("expected_world_epoch");
-						required.push_back("expected_world_version");
-					}
-					return json{
-						{"type", "object"},
-						{"additionalProperties", false},
-						{"properties", std::move(properties)},
-						{"required", std::move(required)}
-					};
-				},
-				[worlds, bridge, session](const json &arguments, std::string &failure) -> json {
-					if (!Only(
-							arguments,
-							{"instance_id",
-							 "resource_id",
-							 "sha256",
-							 "byte_begin",
-							 "byte_end",
-							 "expected_tick",
-							 "expected_world_epoch",
-							 "expected_world_version"},
-							session != nullptr,
-							failure
-						))
-						return nullptr;
-					std::string instance, resource, digest;
-					uint64_t begin = 0, end = 0;
-					if (!Text(
-							arguments.value("instance_id", json{}),
-							"instance_id",
-							script::MAX_AUDIO_OBSERVATION_ID_BYTES,
-							instance,
-							failure
-						) ||
-						!Text(
-							arguments.value("resource_id", json{}),
-							"resource_id",
-							script::MAX_AUDIO_OBSERVATION_ID_BYTES,
-							resource,
-							failure
-						) ||
-						!Text(arguments.value("sha256", json{}), "sha256", 64, digest, failure) ||
-						!UInt(arguments.value("byte_begin", json{}), "byte_begin", begin, failure) ||
-						!UInt(arguments.value("byte_end", json{}), "byte_end", end, failure))
-						return nullptr;
-					json fence;
-					if (!data_factory_read_fence::Validate(session, instance, arguments, fence, failure))
-						return fence;
-					if (!script::IsDataAudioObservationDigest(digest)) {
-						failure =
-							Error("validation_failed", "sha256 must be 64 lowercase hexadecimal characters");
-						return nullptr;
-					}
-					if (end <= begin || end - begin > MAXIMUM_READ_BYTES ||
-						!worlds->Find(core::Name(instance)).IsValid()) {
-						failure = Error("validation_failed", "waveform range or instance_id is invalid");
-						return nullptr;
-					}
-					std::vector<std::byte> bytes;
-					std::string detail;
-					if (!bridge->ReadWaveform(
-							instance, resource, digest, begin, static_cast<size_t>(end - begin), bytes, detail
-						) ||
-						bytes.size() != end - begin) {
-						if (!BridgeText(detail, false)) {
-							failure =
-								Error("invalid_bridge_reply", "waveform bridge returned an invalid detail");
-							return nullptr;
-						}
-						failure = Error(
-							"waveform_unavailable",
-							detail.empty() ? "bridge did not return the requested chunk range" : detail
-						);
-						return nullptr;
-					}
-					json reply{
-						{"resource_id", resource},
-						{"sha256", digest},
-						{"byte_begin", begin},
-						{"byte_end", end},
-						{"base64", Base64(bytes)}
-					};
-					if (!FitsSurfaceContent(reply)) {
-						failure = Error("resource_limit", "waveform response exceeds its JSON byte bound");
-						return nullptr;
-					}
-					return reply;
-				},
-			}
-		);
+		DataAudioObservationRows rows = DataAudioObservationTools(universe, std::move(bridge), session);
+		surface.AddResource(std::move(rows.Metadata));
+		surface.Add(std::move(rows.Observation));
+		surface.Add(std::move(rows.Waveform));
 	}
 
 	namespace features {

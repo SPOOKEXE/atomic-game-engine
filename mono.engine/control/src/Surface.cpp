@@ -58,12 +58,19 @@ namespace engine::control {
 	}
 
 	Surface::Surface(std::string name, std::string purpose)
-		: Name(std::move(name)), Purpose(std::move(purpose)),
+		: Name(std::move(name)), Purpose(std::move(purpose)), HookRegistry_(*this),
 		  FactoryOperations(std::make_shared<DataFactoryOperationLedger>()) {}
 
 	void Surface::Add(Tool tool) {
+		if (CurrentRegistration != nullptr) {
+			CurrentRegistration->Add(std::move(tool));
+			return;
+		}
 		for (Tool &existing : Tools) {
 			if (existing.Name == tool.Name) {
+				if (HookRegistry_.OwnsTool(tool.Name)) {
+					throw std::runtime_error("an active hook owns tool: " + tool.Name);
+				}
 				existing = std::move(tool);
 				return;
 			}
@@ -73,10 +80,49 @@ namespace engine::control {
 
 	void Surface::Enable(std::span<const Feature> features) {
 		for (const Feature &feature : features) {
-			if (feature.Install) {
-				feature.Install(*this);
-			}
+			if (!feature.Install) continue;
+			std::string failure;
+			HookLease lease = HookRegistry_.ActivateBuiltin(
+				{.Id = "builtin." + feature.Name,
+				 .Revision = "v1",
+				 .Purpose = "Built-in feature registration.",
+				 .Dependencies = {},
+				 .Limits = {}},
+				[this, &feature](HookRegistration &registration) {
+					struct ResetRegistration {
+						Surface &Owner;
+						HookRegistration *Previous;
+						~ResetRegistration() {
+							Owner.CurrentRegistration = Previous;
+						}
+					} reset{*this, CurrentRegistration};
+					CurrentRegistration = &registration;
+					feature.Install(*this);
+				},
+				failure
+			);
+			if (!failure.empty()) throw std::runtime_error(failure);
+			BuiltinHooks.push_back(std::move(lease));
 		}
+	}
+
+	HookLease
+	Surface::ActivateHook(HookDescriptor descriptor, const HookInstaller &installer, std::string &failure) {
+		return HookRegistry_.Activate(
+			std::move(descriptor),
+			[this, &installer](HookRegistration &registration) {
+				struct ResetRegistration {
+					Surface &Owner;
+					HookRegistration *Previous;
+					~ResetRegistration() {
+						Owner.CurrentRegistration = Previous;
+					}
+				} reset{*this, CurrentRegistration};
+				CurrentRegistration = &registration;
+				if (installer) installer(registration);
+			},
+			failure
+		);
 	}
 
 	void Surface::SetDataCaptureAvailabilityProvider(std::function<DataCaptureAvailability()> provider) {
@@ -103,6 +149,94 @@ namespace engine::control {
 	}
 
 	void Surface::AddResource(Resource resource) {
+		if (CurrentRegistration != nullptr) {
+			CurrentRegistration->Add(std::move(resource));
+			return;
+		}
+		for (Resource &existing : Resources) {
+			if (existing.Uri == resource.Uri) {
+				if (HookRegistry_.OwnsResource(resource.Uri)) {
+					throw std::runtime_error("an active hook owns resource: " + resource.Uri);
+				}
+				existing = std::move(resource);
+				return;
+			}
+		}
+		Resources.push_back(std::move(resource));
+	}
+
+	void Surface::AddPrompt(Prompt prompt) {
+		if (CurrentRegistration != nullptr) {
+			CurrentRegistration->Add(std::move(prompt));
+			return;
+		}
+		for (Prompt &existing : Prompts) {
+			if (existing.Name == prompt.Name) {
+				if (HookRegistry_.OwnsPrompt(prompt.Name)) {
+					throw std::runtime_error("an active hook owns prompt: " + prompt.Name);
+				}
+				existing = std::move(prompt);
+				return;
+			}
+		}
+		Prompts.push_back(std::move(prompt));
+	}
+
+	size_t Surface::Count() const {
+		const_cast<HookRegistry &>(HookRegistry_).Reap();
+		return Tools.size();
+	}
+
+	void Surface::InstallHookTool(Tool tool, std::string_view ownerId, uint64_t ownerGeneration, bool) {
+		const std::string name = tool.Name;
+		const std::string id(ownerId);
+		const auto call = std::move(tool.Call);
+		tool.Call =
+			[this, name, id, ownerGeneration, call](const nlohmann::json &arguments, std::string &failure) {
+				if (!HookRegistry_.Holds(name, id, ownerGeneration)) {
+					failure = "hook is draining: " + name;
+					return nlohmann::json(nullptr);
+				}
+				struct Guard {
+					HookRegistry &Registry;
+					std::string Id;
+					uint64_t Generation;
+					~Guard() {
+						Registry.Release(Id, Generation);
+					}
+				} guard{HookRegistry_, id, ownerGeneration};
+				return call(arguments, failure);
+			};
+		for (Tool &existing : Tools) {
+			if (existing.Name == tool.Name) {
+				existing = std::move(tool);
+				return;
+			}
+		}
+		Tools.push_back(std::move(tool));
+	}
+
+	void Surface::InstallHookResource(
+		Resource resource, std::string_view ownerId, uint64_t ownerGeneration, bool
+	) {
+		const std::string uri = resource.Uri;
+		const auto read = std::move(resource.Read);
+		const std::string id(ownerId);
+		resource.Read = [this, uri, id, ownerGeneration, read](std::string &failure) {
+			if (!HookRegistry_.HoldsResource(uri, id, ownerGeneration)) {
+				failure = "hook is draining: " + uri;
+				return std::string{};
+			}
+			struct Guard {
+				HookRegistry &Registry;
+				std::string Id;
+				uint64_t Generation;
+				~Guard() {
+					Registry.Release(Id, Generation);
+				}
+			} guard{HookRegistry_, id, ownerGeneration};
+			return read(failure);
+		};
 		for (Resource &existing : Resources) {
 			if (existing.Uri == resource.Uri) {
 				existing = std::move(resource);
@@ -112,7 +246,26 @@ namespace engine::control {
 		Resources.push_back(std::move(resource));
 	}
 
-	void Surface::AddPrompt(Prompt prompt) {
+	void Surface::InstallHookPrompt(Prompt prompt, std::string_view ownerId, uint64_t ownerGeneration, bool) {
+		const std::string name = prompt.Name;
+		const auto render = std::move(prompt.Render);
+		const std::string id(ownerId);
+		prompt.Render =
+			[this, name, id, ownerGeneration, render](const nlohmann::json &arguments, std::string &failure) {
+				if (!HookRegistry_.HoldsPrompt(name, id, ownerGeneration)) {
+					failure = "hook is draining: " + name;
+					return std::string{};
+				}
+				struct Guard {
+					HookRegistry &Registry;
+					std::string Id;
+					uint64_t Generation;
+					~Guard() {
+						Registry.Release(Id, Generation);
+					}
+				} guard{HookRegistry_, id, ownerGeneration};
+				return render(arguments, failure);
+			};
 		for (Prompt &existing : Prompts) {
 			if (existing.Name == prompt.Name) {
 				existing = std::move(prompt);
@@ -122,13 +275,22 @@ namespace engine::control {
 		Prompts.push_back(std::move(prompt));
 	}
 
-	size_t Surface::Count() const {
-		return Tools.size();
+	void Surface::RemoveHookTool(std::string_view name, std::string_view, uint64_t) {
+		std::erase_if(Tools, [name](const Tool &tool) { return tool.Name == name; });
+	}
+
+	void Surface::RemoveHookResource(std::string_view uri) {
+		std::erase_if(Resources, [uri](const Resource &resource) { return resource.Uri == uri; });
+	}
+
+	void Surface::RemoveHookPrompt(std::string_view name) {
+		std::erase_if(Prompts, [name](const Prompt &prompt) { return prompt.Name == name; });
 	}
 
 	json Surface::ToolList() const {
 		json out = json::array();
 		for (const Tool &tool : Tools) {
+			if (!HookRegistry_.VisibleTool(tool.Name)) continue;
 			out.push_back(
 				json{
 					{"name", tool.Name},
@@ -143,6 +305,7 @@ namespace engine::control {
 	json Surface::ResourceList() const {
 		json out = json::array();
 		for (const Resource &resource : Resources) {
+			if (!HookRegistry_.VisibleResource(resource.Uri)) continue;
 			out.push_back(
 				json{
 					{"uri", resource.Uri},
@@ -158,6 +321,7 @@ namespace engine::control {
 	json Surface::PromptList() const {
 		json out = json::array();
 		for (const Prompt &prompt : Prompts) {
+			if (!HookRegistry_.VisiblePrompt(prompt.Name)) continue;
 			json arguments = json::array();
 			for (const PromptArgument &argument : prompt.Arguments) {
 				arguments.push_back(
@@ -181,6 +345,7 @@ namespace engine::control {
 	}
 
 	std::string Surface::Answer(const std::string &line) {
+		HookRegistry_.Reap();
 		json request;
 		try {
 			request = json::parse(line);
@@ -287,9 +452,13 @@ namespace engine::control {
 					} else if (!payload.contains("error")) {
 						payload["error"] = failure;
 					}
-					return Result(id, Content(std::move(payload), true)).dump();
+					const std::string reply = Result(id, Content(std::move(payload), true)).dump();
+					HookRegistry_.Reap();
+					return reply;
 				}
-				return Result(id, Content(std::move(payload))).dump();
+				const std::string reply = Result(id, Content(std::move(payload))).dump();
+				HookRegistry_.Reap();
+				return reply;
 			}
 
 			return Result(id, Content(json{{"error", "no such tool: " + wanted}}, true)).dump();
@@ -333,22 +502,26 @@ namespace engine::control {
 				}
 
 				if (!failure.empty()) {
-					return Error(id, -32002, failure).dump();
+					const std::string reply = Error(id, -32002, failure).dump();
+					HookRegistry_.Reap();
+					return reply;
 				}
 
-				return Result(
-						   id,
-						   json{
-							   {"contents",
-								json::array({json{
-									{"uri", resource.Uri},
-									{"name", resource.Name},
-									{"mimeType", resource.MimeType},
-									{"text", std::move(contents)},
-								}})},
-						   }
+				const std::string reply = Result(
+											  id,
+											  json{
+												  {"contents",
+												   json::array({json{
+													   {"uri", resource.Uri},
+													   {"name", resource.Name},
+													   {"mimeType", resource.MimeType},
+													   {"text", std::move(contents)},
+												   }})},
+											  }
 				)
-					.dump();
+											  .dump();
+				HookRegistry_.Reap();
+				return reply;
 			}
 
 			return Error(id, -32002, "no such resource: " + wanted).dump();
@@ -381,21 +554,26 @@ namespace engine::control {
 				}
 
 				if (!failure.empty()) {
-					return Error(id, -32602, failure).dump();
+					const std::string reply = Error(id, -32602, failure).dump();
+					HookRegistry_.Reap();
+					return reply;
 				}
 
-				return Result(
-						   id,
-						   json{
-							   {"description", prompt.Description},
-							   {"messages",
-								json::array({json{
-									{"role", "user"},
-									{"content", json{{"type", "text"}, {"text", std::move(text)}}},
-								}})},
-						   }
-				)
-					.dump();
+				const std::string reply =
+					Result(
+						id,
+						json{
+							{"description", prompt.Description},
+							{"messages",
+							 json::array({json{
+								 {"role", "user"},
+								 {"content", json{{"type", "text"}, {"text", std::move(text)}}},
+							 }})},
+						}
+					)
+						.dump();
+				HookRegistry_.Reap();
+				return reply;
 			}
 
 			return Error(id, -32602, "no such prompt: " + wanted).dump();

@@ -153,4 +153,5 @@ mono_add_program(client
 
 if(TARGET test_client)
 	add_dependencies(test_client client)
+	target_link_libraries(test_client PRIVATE Vendor::asio Vendor::json)
 endif()

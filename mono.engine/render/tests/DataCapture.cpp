@@ -1071,9 +1071,11 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 	bridge.Pump();
 	REQUIRE(bridge.PollViewCameraMutation("data-world", cancelledTicket, poll, detail));
 	CHECK_FALSE(poll.Terminal);
-	bridge.PrepareView(view);
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	// Shutdown owns no future view to restore. It must retire this applied patch
+	// without waiting for another render frame.
+	bridge.CancelPending();
 	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
 	REQUIRE(bridge.PollViewCameraMutation("data-world", cancelledTicket, poll, detail));
 	CHECK(poll.Terminal);
 	CHECK(poll.Status == "cancelled");
@@ -1687,6 +1689,32 @@ TEST_CASE("script capture reuses capacity after sequential terminal releases", "
 		CHECK_FALSE(bridge.ReadPlane("data-world", ticket, "capture/invalid", 0, 16, bytes, detail));
 		REQUIRE(bridge.Release("data-world", ticket, detail));
 	}
+}
+
+TEST_CASE("script capture owner cancellation drains every pending kind", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t captureTicket = 0;
+	uint64_t mutationTicket = 0;
+	REQUIRE(bridge.Queue("data-world", Request(), captureTicket, detail));
+	REQUIRE(bridge.QueueViewCameraMutation("data-world", MutationRequest(), mutationTicket, detail));
+	REQUIRE(bridge.HasPending());
+
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+
+	engine::script::DataCaptureBridgePoll capture;
+	REQUIRE(bridge.Poll("data-world", captureTicket, capture, detail));
+	CHECK(capture.Status == "cancelled");
+	REQUIRE(bridge.Release("data-world", captureTicket, detail));
+	engine::script::ViewCameraMutationPoll mutation;
+	REQUIRE(bridge.PollViewCameraMutation("data-world", mutationTicket, mutation, detail));
+	CHECK(mutation.Terminal);
+	CHECK(mutation.Status == "cancelled");
 }
 
 TEST_CASE("script capture tears down one instance without touching another", "[render][data-capture]") {

@@ -9,8 +9,7 @@
 // **`engine_info` is replaced rather than extended.** The shared one knows about
 // worlds; this one also knows which game file is open and how many frames have
 // been drawn, and a client should get one answer to one question rather than two
-// tools that overlap. `Surface::Add` replaces by name, which is what makes that
-// a one-line decision.
+// tools that overlap. The Studio product hook owns that row.
 //
 // Every tool here runs on the editor thread, called from `PumpControl` in the
 // frame loop, because `Universe::Enter` aborts on a foreign one.
@@ -198,19 +197,18 @@ namespace studio {
 		}
 
 		const std::array features{
-			engine::control::features::Universe(*Universe),
+			// Studio owns its richer engine_info row through its product hook.
+			engine::control::features::Universe(*Universe, true, false),
 			engine::control::features::Architecture(),
 			engine::control::features::Script(),
-			engine::control::features::Diagnostics(),
+			engine::control::features::Diagnostics(false),
 			engine::control::features::Build(),
 			engine::control::features::Resources(),
 			engine::control::features::Prompts(),
 			engine::control::features::Discovery(),
-			engine::control::features::Custom("studio", [this](engine::control::Surface &) {
-				RegisterControlTools();
-			}),
 		};
 		ControlSurface.Enable(features);
+		ActivateControlHooks();
 	}
 
 	bool Editor::StartControl() {
@@ -257,10 +255,10 @@ namespace studio {
 		ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 	}
 
-	void Editor::RegisterControlTools() {
+	void Editor::RegisterControlTools(engine::control::HookRegistration &registration) {
 		Editor *editor = this;
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"engine_info",
 				"The editor's own state: which game is open, whether it has unsaved changes, how many "
@@ -298,7 +296,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"world_run",
 				"Starts or stops one scene. `play` runs both halves in this process, `server` runs only "
@@ -346,7 +344,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"selection_get",
 				"What is selected in the editor right now.",
@@ -364,7 +362,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"select",
 				"Selects instances in a scene, replacing whatever was selected.",
@@ -400,7 +398,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"log_tail",
 				"The tail of the output panel: the engine log and everything scripts have printed.",
@@ -432,7 +430,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"list_command_palette",
 				"Lists Studio command-palette entries from the live operator table, including stable ids, "
@@ -480,7 +478,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"run_palette_command",
 				"Runs one Studio command-palette entry by the stable id returned by list_command_palette. "
@@ -523,7 +521,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"screenshot",
 				"Queues BMP screenshots under the system temporary directory. `scene` captures visible "
@@ -630,7 +628,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"emulate_click",
 				"Queues one mouse click at Studio client coordinates. The press and release cross rendered "
@@ -721,7 +719,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"emulate_key",
 				"Queues one named keyboard key. Optional modifiers are shift, control, alt and gui. "
@@ -828,7 +826,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"emulate_text",
 				"Queues UTF-8 text for the focused Studio text field. Use emulate_key for shortcuts and "
@@ -876,7 +874,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"open_window",
 				"Shows, restores and raises the Studio window, then reports its client geometry.",
@@ -906,7 +904,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"set_window_geometry",
 				"Sets the Studio client window position and size, then reports the geometry accepted by the "

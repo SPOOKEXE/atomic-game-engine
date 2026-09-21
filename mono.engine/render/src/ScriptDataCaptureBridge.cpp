@@ -1823,6 +1823,32 @@ namespace engine::render {
 		RendererRef.Hooks().DisconnectHooks(completedConnections);
 	}
 
+	void ScriptDataCaptureBridge::CancelPending() {
+		std::vector<MutationHandle> mutations;
+		{
+			std::lock_guard lock(Mutex);
+			for (auto &[ticket, entry] : Entries) {
+				(void)ticket;
+				if (!entry.Terminal) entry.CancelRequested = true;
+			}
+			for (auto &[ticket, entry] : Mutations) {
+				(void)ticket;
+				if (!entry.Handle.IsValid()) {
+					entry.Status = ViewMutationStatus::Cancelled;
+					continue;
+				}
+				mutations.push_back(entry.Handle);
+				entry.Handle = {};
+				entry.Status = ViewMutationStatus::Cancelled;
+				entry.CancelRequested = false;
+			}
+		}
+		// Applied patches normally wait for a following view to restore. Shutdown
+		// has no following view, so retire those handles through the teardown path.
+		for (MutationHandle mutation : mutations)
+			RendererRef.Hooks().DiscardViewMutation(mutation);
+	}
+
 	bool ScriptDataCaptureBridge::HasPending() const {
 		std::lock_guard lock(Mutex);
 		const bool captures = std::any_of(Entries.begin(), Entries.end(), [](const auto &entry) {

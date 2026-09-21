@@ -380,6 +380,11 @@ namespace server {
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
+		FactoryPackageControlHook.Close();
+		FactoryCameraRenderingControlHook.Close();
+		FactorySceneControlHook.Close();
+		FactoryLifecycleControlHook.Close();
+		ProductControlHook.Close();
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
 		DataFactory.reset();
@@ -1625,7 +1630,8 @@ namespace server {
 		Replication = std::make_unique<engine::replication::Listener>(*Socket, streaming);
 		if (Settings.ControlPort >= 0) {
 			if (!ReplicationObservationRecords)
-				ReplicationObservationRecords = std::make_unique<engine::replication::ReplicationObservations>();
+				ReplicationObservationRecords =
+					std::make_unique<engine::replication::ReplicationObservations>();
 			else
 				ReplicationObservationRecords->Clear();
 			const engine::core::Name worldName = Worlds().NameOf(PrimaryWorld);
@@ -3748,6 +3754,11 @@ namespace server {
 			Socket.reset();
 		}
 
+		FactoryPackageControlHook.Close();
+		FactoryCameraRenderingControlHook.Close();
+		FactorySceneControlHook.Close();
+		FactoryLifecycleControlHook.Close();
+		ProductControlHook.Close();
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
 		DataFactory.reset();
@@ -3828,71 +3839,20 @@ namespace server {
 		}
 
 		if (Settings.ControlPort >= 0) {
-			const std::array features{
-				engine::control::features::Universe(Worlds()),
-				engine::control::features::Architecture(),
-				engine::control::features::Script(),
-				engine::control::features::Diagnostics(),
-				engine::control::features::Build(),
-				engine::control::features::Resources(),
-				engine::control::features::Prompts(),
-				engine::control::features::Discovery(),
-				engine::control::features::Custom("server", [this](engine::control::Surface &) {
-					RegisterControlTools();
-				}),
-			};
-			ControlSurface.Enable(features);
+			ConfigureControlHooks();
 			if (DataFactory) {
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataFactory(*DataFactory, {.RenderOnly = false})}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataScene(Worlds(), {}, DataFactory.get())}
-				);
 				ControlSurface.Enable(
 					std::array{engine::control::features::PhysicsObservation(*DataFactory)}
 				);
-				engine::control::AddDataScriptPackageTool(
-					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
-						return engine::script::ExecuteDataScriptPackageTransaction(
-							{.Universe = Worlds(),
-							 .Session = *DataFactory,
-							 .RuntimeOf = [this](engine::world::WorldId world) { return RuntimeOf(world); },
-							 .DiscardRuntime =
-								 [this](engine::world::WorldId world) {
-									 std::erase_if(Runtimes, [world](const auto &entry) {
-										 return entry.first == world;
-									 });
-								 },
-							 .MakeRuntime =
-								 [](engine::ecs::Store &store, const engine::script::RuntimeLimits &limits) {
-									 return engine::script::MakeRuntime(
-										 store, engine::script::Language::Luau, limits
-									 );
-								 },
-							 .RunPackage = engine::script::RunDataScriptPackage,
-							 .InstallSystems = [](
-												   engine::ecs::Store &store, engine::ecs::Scheduler &systems
-											   ) { RegisterPlaceholderSystems(store, systems); },
-							 .Admit =
-								 [](std::string_view source, std::string_view entry, std::string &error) {
-									 return engine::script::CheckDataScriptPackageSource(
-										 engine::script::Language::Luau, source, entry, error
-									 );
-								 },
-							 .Role = engine::script::HostRole::OfServer(),
-							 .Present = false},
-							request
-						);
-					}
-				);
 			}
 			if (ReplicationObservationRecords)
-				ControlSurface.Enable(std::array{engine::control::features::ReplicationObservation(
-					DataFactory.get(),
-					*ReplicationObservationRecords,
-					std::string(Worlds().NameOf(PrimaryWorld).Text())
-				)});
+				ControlSurface.Enable(
+					std::array{engine::control::features::ReplicationObservation(
+						DataFactory.get(),
+						*ReplicationObservationRecords,
+						std::string(Worlds().NameOf(PrimaryWorld).Text())
+					)}
+				);
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",

@@ -170,6 +170,10 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	const WorldId world = World(universe, "scene");
 	Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	CHECK(std::none_of(surface.Registered().begin(), surface.Registered().end(), [](const auto &tool) {
+		return tool.Name == "get_camera_rendering_data";
+	}));
+	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
@@ -325,6 +329,7 @@ TEST_CASE("camera object observations reject diagonal screen-bound false positiv
 	const WorldId world = World(universe, "diagonal");
 	Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -365,6 +370,7 @@ TEST_CASE("data-scene refuses finite geometry whose derived corners overflow", "
 	const WorldId world = World(universe, "overflow");
 	Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -397,6 +403,7 @@ TEST_CASE(
 	const WorldId world = World(universe, "parent-frame");
 	Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
@@ -433,6 +440,7 @@ TEST_CASE("rolled camera projects an object along its look vector", "[control][d
 	const WorldId world = World(universe, "rolled-camera");
 	Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -469,6 +477,7 @@ TEST_CASE("camera projection keeps extreme finite depth denominators truthful", 
 	const WorldId world = World(universe, "extreme-projection");
 	Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -510,6 +519,7 @@ TEST_CASE("camera projection preserves a clipped UINT32_MAX right edge", "[contr
 	const WorldId world = World(universe, "wide-edge");
 	Surface surface("test", "test");
 	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -952,6 +962,7 @@ TEST_CASE(
 			engine::control::features::DataScene(decoy, {}, &session),
 		}
 	);
+	surface.Add(engine::control::features::CameraRenderingDataTool(decoy, &session));
 	const auto current = session.Inspect("fenced");
 	REQUIRE(current.Status == DataFactoryStatus::Ok);
 	const json revision{

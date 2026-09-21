@@ -45,6 +45,9 @@ namespace studio {
 	// Studio scene can never become factory-owned by accident.
 	class DataFactoryHost final {
 	  public:
+		// Drains factory control hooks before the session they capture is released.
+		~DataFactoryHost();
+
 		bool
 		// Builds the lifecycle session and installs host callbacks for this universe.
 		Start(engine::world::Universe &universe, DataFactoryHostCallbacks callbacks, std::string &detail);
@@ -65,11 +68,18 @@ namespace studio {
 		}
 
 	  private:
+		void CloseControlHooks();
 		engine::world::Universe *Worlds = nullptr;
 		std::unique_ptr<engine::world::DataFactorySession> Lifecycle;
 		std::function<engine::script::DataScriptPackageTransactionDependencies(
 			engine::world::Universe &, engine::world::DataFactorySession &
 		)>
 			PackageDependencies;
+		// Members close in reverse order, so every session reader drains before lifecycle rows.
+		engine::control::HookLease FactoryLifecycleHook;
+		engine::control::HookLease FactorySceneHook;
+		engine::control::HookLease FactoryPhysicsHook;
+		engine::control::HookLease FactoryPackageHook;
+		engine::control::HookLease FactorySelectionHook;
 	};
 }
