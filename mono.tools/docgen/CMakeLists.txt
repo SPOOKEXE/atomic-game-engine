@@ -232,11 +232,10 @@ endforeach()
 
 set(MONO_AWESOME "${CMAKE_SOURCE_DIR}/mono.vendor/doxygen-awesome-css")
 set(MONO_DOCS_STYLESHEETS
-	"\"${MONO_AWESOME}/doxygen-awesome.css\" \\\n                         \"${MONO_AWESOME}/doxygen-awesome-sidebar-only.css\" \\\n                         \"${MONO_AWESOME}/doxygen-awesome-sidebar-only-darkmode-toggle.css\"")
+	"\"${MONO_AWESOME}/doxygen-awesome.css\" \\\n                         \"${MONO_AWESOME}/doxygen-awesome-sidebar-only.css\" \\\n                         \"${CMAKE_CURRENT_SOURCE_DIR}/pages/Theme.css\"")
 
 # Copied beside the HTML so the generated header can load them by name.
 set(MONO_DOCS_SCRIPT_FILES
-	"${MONO_AWESOME}/doxygen-awesome-darkmode-toggle.js"
 	"${MONO_AWESOME}/doxygen-awesome-fragment-copy-button.js"
 	"${MONO_AWESOME}/doxygen-awesome-paragraph-link.js"
 	"${MONO_AWESOME}/doxygen-awesome-interactive-toc.js")

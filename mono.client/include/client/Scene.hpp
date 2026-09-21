@@ -1,23 +1,11 @@
 #pragma once
 
-// The v0.1 demo scene.
+// Client presentation and world setup.
 //
-// **The components are `mono.engine/scene`'s and nothing here declares one.**
-// This file used to carry a `Transform`, a `PreviousTransform`, a `Visual`, a
-// `SceneBounds` and an `ActiveCamera` of its own, because the ECS is storage
-// and does not know what a Transform is and there was nowhere shared to put
-// them. `scene` at L7 is that place, both programs register the same set under
-// the same names, and a snapshot now crosses between them with no translation
-// layer. What is left here is the demo: `Spin` and `Orbit`, which describe how
-// this scene moves and nothing else does. The draw list and its collectors now
-// live in `Engine::render`, where both this client and Studio use them.
-//
-// **There is no scene object.** Building the world is a function, and
-// everything the tick touches is in the store: per-entity data as components,
-// world-scoped data as resources. That is not tidiness - a scene class with the
-// draw list and the clock as members puts the state the renderer reads outside
-// the world, where the affinity check does not cover it, the profiler does not
-// see it, and a second world cannot have its own.
+// Components belong to the engine modules that define them. This header adds
+// client orchestration, presentation state and world setup without owning a
+// second copy of simulation state. Per-entity data remains in components and
+// world-scoped data remains in store resources.
 
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -58,14 +46,7 @@ namespace client {
 		engine::world::WorldId topologyOwner = {}
 	);
 
-	// --- components: per-entity, and iterated ------------------------------
-	//
-	// `Orbit` and `Spin` used to be declared here, and they moved to
-	// `engine::examples` at v0.5 for the reason that module's CMakeLists gives:
-	// a scene is not a client-tier idea. A server authors the same world and
-	// replicates it, so a component only a client could name was a component
-	// only a client could ever build a scene out of. These are the same two
-	// types under `examples.Orbit` and `examples.Spin`.
+	// Example-scene components shared by every program that can load an example.
 
 	using engine::examples::Orbit;
 	using engine::examples::Spin;

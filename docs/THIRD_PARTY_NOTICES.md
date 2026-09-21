@@ -1,6 +1,9 @@
 # Third-party notices
 
-This engine is MPL-2.0. It builds against the projects below, each under its own
+This file records each third-party dependency, shipped asset, and ported code
+used by the engine, together with its licence and distribution relevance.
+
+The engine is MPL-2.0. It builds against the projects below, each under its own
 licence. Most live in `mono.vendor/` as git submodules. The standalone fonts and
 the compiled-in texture are tracked exceptions, with their licence or
 provenance beside the file.

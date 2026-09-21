@@ -38,6 +38,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -59,6 +60,7 @@ using engine::script::InstanceMethod;
 using engine::script::Language;
 using engine::script::MakeRuntime;
 using engine::script::NeutralInstanceMethods;
+using engine::script::EcsInstanceMethods;
 
 namespace {
 	const std::vector<Language> LANGUAGES = {Language::Luau, Language::JavaScript};
@@ -351,7 +353,7 @@ namespace {
 	}
 }
 
-TEST_CASE("every neutral method is a member in both languages", "[scripting][scriptcall]") {
+TEST_CASE("every shared Instance method is a member in both languages", "[scripting][scriptcall]") {
 	// **The structural half, and the one that would have caught the drift.** A
 	// method missing from a language is `undefined` in JavaScript and a missing
 	// member in Luau, and neither says anything until a script reaches it - which
@@ -362,12 +364,12 @@ TEST_CASE("every neutral method is a member in both languages", "[scripting][scr
 		const auto runtime = MakeRuntime(store, language);
 		REQUIRE(runtime != nullptr);
 
-		for (const InstanceMethod &method : NeutralInstanceMethods()) {
+		auto requireMember = [&](const char *rawName) {
 			// **No local, because every JavaScript chunk shares one global
 			// scope** - a second `let part` in the same VM is a `SyntaxError`
 			// before a line of it runs, which would fail this case for a reason
 			// that has nothing to do with the method being asked about.
-			const std::string name(method.Name);
+			const std::string name(rawName);
 			const std::string subject = "Instance.new('Part')." + name;
 			const std::string source =
 				language == Language::Luau
@@ -375,10 +377,17 @@ TEST_CASE("every neutral method is a member in both languages", "[scripting][scr
 					: "if (typeof " + subject + " !== 'function') { throw new Error('" + name +
 						  " is missing') }\n";
 
-			INFO(method.Name);
+			INFO(rawName);
 			const bool ok = runtime->Run(source.c_str());
 			INFO(runtime->LastError());
 			CHECK(ok);
+		};
+
+		for (const InstanceMethod &method : NeutralInstanceMethods()) {
+			requireMember(method.Name);
+		}
+		for (const auto &method : EcsInstanceMethods()) {
+			requireMember(method.Name);
 		}
 	}
 }

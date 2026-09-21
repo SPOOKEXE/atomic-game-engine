@@ -1,8 +1,9 @@
-# The schema dump tool for classes and components.
+# The runtime API reference dump tool.
 #
-# Outputs the complete TOML schema describing registered ECS components and
-# classes. The registry owns the facts, so this target links each module that
-# registers one rather than maintaining a second list in a document.
+# Outputs the complete TOML reference for registered ECS components, classes,
+# properties, enums, and shared script methods. The registries own the facts,
+# so this target links each module that registers one rather than maintaining a
+# second list in a document.
 #
 # Everything here is `shared` so this builds in a `server` preset.
 add_executable(schemadump app/main.cpp)

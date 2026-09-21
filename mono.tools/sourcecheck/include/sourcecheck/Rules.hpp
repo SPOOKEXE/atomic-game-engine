@@ -1,12 +1,9 @@
 #pragma once
 
-// The four architecture rules that live in source text rather than in the
-// target graph.
+// Architecture rules that require source-text analysis.
 //
-// `mono.tools/architecture/CheckTargetGraph.cmake` checks the rules that are
-// visible in CMake's own output - the module set, the tiers, the link sets and
-// the layer heights. These four are not visible there, and `docs/CODE_ARCH.md`
-// §11 listed all four as convention until v0.19:
+// `mono.tools/architecture/CheckTargetGraph.cmake` checks module, tier, link
+// and layer relationships. These rules inspect declarations instead:
 //
 // | Rule | Root `AGENTS.md` | What this decides |
 // |---|---|---|
@@ -15,13 +12,8 @@
 // | `name-id` | rule 4 | `core::Name::Id()` reaching a serialiser |
 // | `public-header` | §3 | a header in `include/` nothing outside the module includes |
 //
-// **Each of them says what it does not catch, and those sentences are the
-// point.** A check whose limits are not written down is read as a proof, and
-// three of these four are heuristics over declarations. The fixtures under
-// `tests/fixtures/` are the other half of the same honesty: every rule has an
-// input that must fail with a named message and an input that must pass, for
-// `CheckTargetGraph.cmake`'s reason - a walker over an expectation it cannot
-// parse reports success, and so would a scanner over a tree it cannot read.
+// Each rule documents its limits. Fixtures cover both a named refusal and a
+// permitted input.
 //
 // @tier L0 · shared
 
@@ -51,10 +43,7 @@ namespace sourcecheck {
 		// apart from the waived, and not fatal, so a *new* copy still cannot land
 		// while the old one stays in front of whoever reads the output.
 		//
-		// Nothing in the tree carries one at v0.19. `docs/ARCH_REVIEW.md` A4 was
-		// this rule's first finding and was fixed while the rule was being
-		// written, which is the outcome this state exists to make optional rather
-		// than mandatory.
+		// Existing known violations remain visible without blocking unrelated work.
 		Known,
 	};
 
@@ -100,15 +89,11 @@ namespace sourcecheck {
 
 	// A module does not keep a private copy of data the ECS owns.
 	//
-	// **Catches** a record that declares a function - so it is an object that
+	// **Catches** a record that declares a function, so it is an object that
 	// lives across frames rather than an argument list - holding, by value or
 	// inside a container, either a type registered with
 	// `ecs::Components::Register` or an enumeration declared beside a registered
-	// component and used as one of its fields. The second half is what found
-	// `docs/ARCH_REVIEW.md` A4 - the client's copy of `scene::InputState`'s mouse
-	// behaviour was an enumeration, not a component, so a rule matching whole
-	// components would have missed the instance it was written from. That copy is
-	// gone at v0.19 and the fixture that stands in for it is not.
+	// component and used as one of its fields.
 	//
 	// **Does not catch** a copy whose type is a primitive. `InputState` carries
 	// `MouseIconEnabled` as a `bool`, and a `bool` beside it somewhere else
@@ -145,10 +130,10 @@ namespace sourcecheck {
 	//
 	// **Catches** `Id()` inside the arguments of a call whose name begins
 	// `Write`, `Encode`, `Serialise`, `Serialize`, `Emit` or `Put`; a
-	// `sizeof(...Name...)` inside one of those, which is the object-representation
-	// write that produced the `engine::render::DrawList` failure at v0.7; and
-	// `Name::FromId` fed from a `Read` call, which is the same violation on the
-	// way back in.
+	// `sizeof(...Name...)` inside one of those, which writes an object
+	// representation; and
+	// `Name::FromId` fed from a `Read` call, which is the same violation while
+	// decoding.
 	//
 	// **The compiler already owns half of this rule.** `core::Name` has no
 	// implicit conversion to an integer - its only conversion operator is an

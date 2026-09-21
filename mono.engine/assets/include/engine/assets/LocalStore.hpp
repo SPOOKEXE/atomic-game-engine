@@ -1,66 +1,13 @@
 #pragma once
 
-// The content folder on this machine, at a path every program agrees on.
+// Shared on-disk layout for locally authored and published content.
 //
-// **What this is for is making the cdn the default rather than a flag.** Before
-// it, content only existed if somebody ran `assetc`, then `cdn --publish`, then
-// passed `--cdn dir:...` to the client - three steps and a path, every time, on
-// every machine. A test that wanted a texture had to do all three. So this is the
-// well-known place: `~/Documents/atomic-game-engine/cdn`, with three folders under
-// it, and every program looks there when nobody has said otherwise.
+// `raw/` keeps author-named source files, `baked/` holds runtime formats and
+// `processed/` holds content-addressed chunks, groups and a manifest. Raw files
+// may be nested and are named relative to `raw/` when published.
 //
-// ## The three folders, and why the split
-//
-// - **`raw/`** - what a person put in. A `.png`, a `.gltf`, a `.wav`, under its
-//   own name. This is the half a human reads and drags files into.
-// - **`baked/`** - the same content in the formats a runtime reads: `.atex`,
-//   `.amesh`, `.amat`. What a publisher publishes.
-// - **`processed/`** - what the engine reads: chunks, groups, a manifest.
-//   Content-addressed, so a name here is a hash and nothing else.
-//
-// **`baked/` arrived at v0.10 and its absence was a four-version bug, not a
-// simplification.** `PublishLocal` published `raw/` directly, so every PNG
-// somebody imported through the assets panel reached a client as a PNG - and
-// `assets::Texture::Read` refuses one, because `Texture.hpp`'s whole argument is
-// that a runtime does not decode. The symptom was that nothing worked and
-// nothing said why: an `ImageLabel` drew its missing-image marker, a part's
-// `ColorMap` did nothing at all, and a `MeshPart` drew the fallback cube. This
-// store held 231 PNGs, 12 BMPs, 6 PMX models and a GLB, and the engine could
-// read none of them.
-//
-// **Nothing here bakes or publishes, and that is deliberate.** This module owns
-// the shared workspace layout and the operations that describe its files.
-// `Engine::bake` interprets source content, while `cdn::PublishLocal` applies
-// origin grouping and compression policy. The Studio and `contentimport`
-// compose those operations without making either policy part of the workspace.
-//
-// **The split is not tidiness, it is that the two have different identities.** A
-// raw file is identified by what somebody called it and changes when they edit
-// it; a processed chunk is identified by its bytes and never changes at all.
-// Putting both in one folder would mean either hashing the names or naming the
-// hashes, and each of those loses the half that made the other useful.
-//
-// **`ImportFile` is flat; `raw/` is not required to be.** `Publish` has always
-// walked it recursively and named each asset by its path relative to the root, so
-// a tool writing a tree there was always publishable - and v0.10's material
-// import is the first thing that does, because a material has to *name* its
-// texture and a hash rename gives it no name to write. `RawContents` was not
-// recursive and showed such a store as empty; it is now. What the paragraph below
-// is about is what a *person* drags in.
-//
-// **Flat, for now, and `ROADMAP.md` says so in as many words.** A tree under
-// `raw/` is what an author eventually wants - `characters/`, `props/` - and it is
-// a decision about how a manifest name is built, which is worth making once the
-// assets manager exists to show the tree. Flat until then, and the log is what
-// makes a flat folder navigable.
-//
-// ## The log
-//
-// One line per import and per publish, appended, never rewritten. **It is a
-// record and not an index**: nothing reads it back to find a file, because the
-// folder is the index. What it answers is "where did this come from and when",
-// which is the question a content folder is asked six months later and which no
-// amount of hashing can answer.
+// This module owns the layout, not baking or publishing policy. The append-only
+// log is for people to inspect and is never used as a content index.
 //
 // @tier shared
 
@@ -100,14 +47,10 @@ namespace engine::assets {
 		std::filesystem::path Log;
 	};
 
-	// The default location, per `ROADMAP.md` v0.10.
+	// The default user-visible workspace location.
 	//
-	// `~/Documents/atomic-game-engine/cdn` on every platform, because that is
-	// what the roadmap names. **Not a platform-idiomatic data directory**, which
-	// would be `~/.local/share` on Linux and `%APPDATA%` on Windows - and that is
-	// a deliberate choice rather than an oversight: this folder is one a *person*
-	// drags files into, and a hidden per-platform data directory is exactly where
-	// somebody cannot find it.
+	// `~/Documents/atomic-game-engine/cdn` is intentionally not a platform data
+	// directory because authors work with these files directly.
 	//
 	// **The home directory is read from the environment and not assumed.** A
 	// process with no `HOME` - a container, a service - falls back to the current

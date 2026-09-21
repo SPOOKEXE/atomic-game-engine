@@ -22,6 +22,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 
 #include <algorithm>
 #include <array>
@@ -905,11 +906,11 @@ namespace engine::script {
 		// every instance object already is one. A separate `Entity` type would
 		// have been a second handle onto the same sixty-four bits.
 		static const JSCFunctionListEntry METHODS[] = {
-			JS_CFUNC_DEF("SetComponent", 2, InstanceSetComponent),
-			JS_CFUNC_DEF("GetComponent", 1, InstanceGetComponent),
-			JS_CFUNC_DEF("HasComponent", 1, InstanceHasComponent),
-			JS_CFUNC_DEF("RemoveComponent", 1, InstanceRemoveComponent),
-			JS_CFUNC_DEF("GetComponents", 0, InstanceGetComponents),
+			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::SetComponent), 2, InstanceSetComponent),
+			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::GetComponent), 1, InstanceGetComponent),
+			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::HasComponent), 1, InstanceHasComponent),
+			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::RemoveComponent), 1, InstanceRemoveComponent),
+			JS_CFUNC_DEF(EcsInstanceMethodName(EcsInstanceMethod::GetComponents), 0, InstanceGetComponents),
 		};
 
 		const JSValue methods = JS_GetPropertyStr(context, global, "__instanceMethods");

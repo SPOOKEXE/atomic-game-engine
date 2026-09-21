@@ -1,17 +1,17 @@
 # Documenting code
 
-The API reference at `just docs` is generated from the comments already in the
-headers. There is no separate documentation tree to keep in step, no manifest of
-what to document, and no marker to remember.
+This guide explains how ordinary source comments become checked API reference
+documentation.
+
+The API reference at `just docs` is generated from comments already in public
+headers. There is no separate documentation tree or registration manifest.
 
 This file is the part that is not automatic: where a comment goes, what the
 tags do, and the handful of things that will bite you.
 
-[`CODE_FORMAT.md`](CODE_FORMAT.md) covers *when* a comment is worth writing -
-comment the decision, not the mechanics. That still applies. Nothing here asks
-you to write more comments; it says where the ones you write end up.
-
-Also as a standard practice, document LAST so you do not have to keep re-writing the documentation for code that will be replaced. Use a `// TODO: document` marker so you can find all the locations.
+[`CODE_FORMAT.md`](CODE_FORMAT.md) covers when a comment is worth writing:
+comment the decision, not the mechanics. This guide explains where those
+comments appear in the reference.
 
 ---
 
@@ -330,7 +330,8 @@ Linking to another document is an ordinary markdown link, and it works both on
 GitHub and on the generated site:
 
 ```markdown
-See [RUNNING.md](../RUNNING.md) and [the tier rule](#the-layer-stack-is-not-negotiable).
+See the command index in [RUNNING.md](../RUNNING.md) and the relevant
+architecture rule in [CODE_ARCH.md](CODE_ARCH.md#4--the-layer-stack).
 ```
 
 ---
@@ -468,30 +469,8 @@ Both must be clean. This is `AGENTS.md` rule 6 applied to documentation - a rule
 the build does not check is documentation, and "public headers are documented"
 is a rule.
 
-**It passes.** `just docs-check` is clean at v0.1: every public entity in every
-public header carries a comment, and no comment in the tree is malformed.
-
-It was 263 gaps when this file was first written, and the last 56 of them were
-the two programs and the test runner - `Demo.hpp` (14), `Server.hpp` (10),
-`Client.hpp` (9), `Runner.hpp` (8), `Sha256.hpp` (7), `Simulation.hpp` (5) and
-`Process.hpp` (3). Almost all were fields: a struct whose *type* had prose and
-whose members had none, which is the shape the section above warns about.
-
-Keep it at zero. A check that has been failing for a while stops being read, and
-takes the real failures down with it - which is exactly what happened here. The
-site pass was failing on a warning that looked like it came from README.md, and
-because the site pass runs first, the coverage pass behind it had never run at
-all. Nobody had seen the gap count because nothing had ever printed one.
-
-The warning turned out to have nothing to do with README.md. Four empty
-`docs/index.md` placeholders each became a page, each was titled from its
-filename for want of a heading, and each claimed the page label `index` that the
-main page already holds. **An empty markdown file is not an inert one.**
-`mono.tools/docgen/CMakeLists.txt` now leaves pages with no content out of the
-site, and says so at configure time rather than dropping them quietly.
-
-`mono.tools/docgen/AGENTS.md` has the reasoning behind the filter itself,
-including why the line count is an invariant and why it is scoped to `*.hpp`.
+Keep the checks clean. `mono.tools/docgen/AGENTS.md` documents the generator
+invariants, including the public-header coverage scope.
 
 ---
 

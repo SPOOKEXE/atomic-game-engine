@@ -1,5 +1,7 @@
 # Security
 
+This document defines the hostile-input boundaries, development control-surface limits, and private reporting process for security issues.
+
 ## Reporting
 
 Do not open a public issue for anything in the threat model below. Report it
@@ -113,8 +115,9 @@ handful of functions. Reading is what catches the bug where a length field is
 trusted before it is bounded.
 
 **Every new untrusted parser needs a fuzz target.** Corpora belong beside the
-targets. The current tree has negative parser tests, but it does not yet carry
-first-party fuzz executables or corpora; do not describe those tests as fuzzing.
+targets. `just shader-fuzz` and `just presentation-fuzz` cover their respective
+owned byte formats; negative parser tests are not fuzzing, and other untrusted
+parsers still need equivalent coverage.
 
 **Capability, not trust.** Nothing is safe because of where it ran.
 
@@ -128,7 +131,6 @@ shader compilation, Luau and QuickJS runtimes, and the loopback control surface.
 They are active attack surfaces and must be treated as hostile input paths.
 
 The parser suites cover malformed game files, assets and network messages with
-negative cases. Dedicated first-party fuzz targets and corpora are still open,
-so a crash or memory error in any parser remains a release blocker. Crashes or
-memory errors in shader loading, SPIR-V staging, command-line handling or the
-control surface are also in scope.
+negative cases. A crash or memory error in any parser remains a release blocker.
+Crashes or memory errors in shader loading, SPIR-V staging, command-line
+handling, or the control surface are also in scope.

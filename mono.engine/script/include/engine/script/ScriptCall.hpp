@@ -2,97 +2,15 @@
 
 #include <engine/script/InstanceShim.hpp>
 
-// One method, written once, called from either language.
+// Script runtime interfaces and data-defined methods.
 //
-// **A property was already neutral and a method was not.**
-// `ecs::PropertyDescriptor` is data - a `PropertyType`, a size, a getter, a
-// setter - so a property declared in `scene` is readable from Luau, from
-// JavaScript and in the properties panel with none of the three changing,
-// because every binding switches on the type and never on the name.
+// A method is a name and a function over `ScriptCall`; each VM adapter owns its
+// argument, result and error mechanics. Service methods use the same model with
+// `NULL_ENTITY` as their subject. Service properties pair two such methods.
 //
-// A method had no such shape. It was a `lua_CFunction` in `LuauInstances.cpp` and a
-// `JSCFunction` in `JsSurface.cpp`, written twice, and the two drifted exactly as
-// two lists do: Luau's instance method table held thirty entries and
-// JavaScript's held twenty-one, and nothing in the build named the nine that
-// were missing. `JsSurface.cpp` already carried a scar from the same class of
-// bug - a hard-coded count of `10` on a list of sixteen, so six methods
-// including `IsDescendantOf` and `Changed` were simply never installed, and a
-// method that is not there is `undefined` until something calls it.
-//
-// So a method becomes data too: a name and a function taking a `ScriptCall`.
-// The VM-shaped half - reading an argument, pushing a result, raising an error -
-// is an adapter implemented once per language, and `LuauCall.cpp` and
-// `JsCall.cpp` are the only files that have met a VM.
-//
-// ## Why `ScriptValue` cannot be the currency
-//
-// `script::ScriptValue` is already the shared value type and both languages
-// already convert to and from it, so it looks like the answer. It is not, and
-// the reason is a rule rather than an omission: `ValueTag` has no instance, and
-// `CodecStatus::Unsupported` is what a script gets for offering one. A
-// `ScriptValue` crosses a **world** - a bus envelope, a data store, a save file -
-// and rule 3 says nothing crossing a world boundary is a pointer, so a handle
-// naming a row in one store must not arrive in another.
-//
-// A method call crosses nothing. It happens inside one process, against one
-// store, and returns before the tick moves - which is why `ecs::Entity` is
-// exactly the right currency here and exactly the wrong one there. Two
-// interfaces, because they answer two questions.
-//
-// ## A service method is the same thing with no subject
-//
-// `ServiceSurface` described a service in `lua_CFunction`s, so it could only
-// build a Luau one and every JavaScript service was hand-written - which is how
-// `ContentService`, `CollectionService`, `HttpService`, `CrossWorldService` and
-// `ContextActionService` came to be reachable from one language and not the
-// other, with the catalogue naming the gap and nothing closing it. A service
-// method takes the service table as its receiver and does nothing with it, so it
-// is an instance method whose `Subject()` is `NULL_ENTITY` - one adapter per
-// language, a second trampoline on each, and no third interface. See
-// `ServiceMethod` at the foot of this file and `ServiceSurface.hpp` for what a
-// service became.
-//
-// **A service *property* is the same thing again, and it needed one more row
-// type rather than one more interface.** `ServiceProperty` is a name and two
-// `ScriptMethod`s - a getter that answers and a setter that reads argument zero
-// - so the property surface of `UserInputService` and `SoundService` is written
-// against this same interface and installed by the same two adapters. What
-// differs is only how each VM hangs an accessor off an object, which is the
-// business of `InstallService` and `InstallJsServiceProperties`.
-//
-// ## The interface carries what its callers ask for and nothing else
-//
-// There is no `AsBoolean`, no `OptionalNumber` and no `ReturnColor3`, because
-// nothing written against this takes or returns one. A pure virtual with no
-// caller is a line every adapter has to implement to satisfy the compiler and
-// nobody has to get right, which is the shape a mistake hides in - and adding
-// one when the first method needs it is a three-line change the build refuses
-// to let anybody forget.
-//
-// Every member is here because exactly one service asked. `ReturnVector2`,
-// `ReturnVector3`, `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
-// `UserInputService`'s seven methods; `Role`, `Tweens`, `Debris`, `Subscriptions`,
-// `AsTweenInfo`, the two record readers, `ReturnTween`, `ForgetSubject` and
-// `Await` arrived with the seven services that stopped being written twice at
-// v0.16. `Forget`, `ReadProperty` and `ConnectOnce` arrived at v0.18 with the
-// last twenty instance methods and the interface a UI author reaches for -
-// `Forget` is what made `Destroy` and `ClearAllChildren` neutral, and the other
-// two are `GuiObject`'s three tween methods. `Waiters` and `AwaitChild` arrived
-// with `WaitForChild`, which is the first method here that resumes on something
-// other than a bus reply. Each one names its caller in its own comment, so a
-// member nothing calls any more is a member with a lie above it.
-//
-// ## `ScriptValue` is a *payload* here, and that is not a contradiction
-//
-// The section above says `ScriptValue` cannot be this interface's currency and
-// `ReadValue`/`ReturnValue` are on it anyway. Both are true, and the difference
-// is what the value *is*. An argument that names a thing in this world is an
-// `ecs::Entity`, because a handle is meaningful inside one process. An argument
-// that is an arbitrary tree a script built - the message `CrossWorldService`
-// puts on a bus, the document `HttpService` writes as JSON - is a `ScriptValue`,
-// because those are exactly the values that leave the world and rule 3 already
-// decided their shape. `ValueTag` still has no instance, so the two doors stay
-// separate: no method may take a tree where it means a handle.
+// `ecs::Entity` names an instance for one in-process call. `ScriptValue` is for
+// value payloads that may cross a world boundary and never represents an
+// instance. The interface exposes only operations required by registered methods.
 //
 // @tier L9 · shared
 // @since v0.16
