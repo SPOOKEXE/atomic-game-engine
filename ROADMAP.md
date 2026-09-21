@@ -95,6 +95,8 @@ The milestone headings below are development labels. Not in line with project ve
   7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
   8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
 
+- [_] LOD system billboard render support
+
 ### v0.27
 
 - [_] ```const char *CameraModeName(scene::CameraMode mode) {
