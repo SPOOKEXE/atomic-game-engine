@@ -15,6 +15,18 @@ namespace client {
 		constexpr size_t MAXIMUM_ARTIFACTS = 8;
 		constexpr size_t MAXIMUM_RETAINED_BYTES = MAXIMUM_ARTIFACTS * MAXIMUM_WAVEFORM_BYTES;
 
+		uint64_t MultiplyModulo(uint64_t left, uint64_t right, uint64_t modulus) {
+			left %= modulus;
+			uint64_t result = 0;
+			while (right != 0) {
+				if ((right & 1u) != 0)
+					result = result >= modulus - left ? result - (modulus - left) : result + left;
+				right >>= 1u;
+				if (right != 0) left = left >= modulus - left ? left - (modulus - left) : left + left;
+			}
+			return result;
+		}
+
 		std::string Hex(std::span<const std::byte> bytes) {
 			static constexpr char DIGITS[] = "0123456789abcdef";
 			const auto digest = engine::net::quic::Digest(bytes);
@@ -369,7 +381,9 @@ namespace client {
 		const engine::world::DataFactoryReply &clock, uint32_t sampleRate
 	) {
 		std::string detail;
-		if (!ValidClock(clock, detail) || sampleRate == 0) {
+		if (!ValidClock(clock, detail) || sampleRate == 0 ||
+			clock.Clock.Interval.Denominator > UINT64_MAX / 1'000'000'000ull ||
+			sampleRate > UINT64_MAX / clock.Clock.Interval.NumeratorNanoseconds) {
 			TickClockReady = false;
 			return;
 		}
@@ -380,7 +394,7 @@ namespace client {
 		TickClockReady = true;
 		TickEpoch = clock.WorldEpoch;
 		Tick = clock.Clock.Tick;
-		TickRemainder = static_cast<uint64_t>((static_cast<__uint128_t>(Tick) * numerator) % denominator);
+		TickRemainder = MultiplyModulo(Tick, numerator, denominator);
 		// A reset is a discontinuity. No mixer state survives it, so an older
 		// waveform must not remain observable until a newly completed tick arrives.
 		Clear(clock.InstanceId);

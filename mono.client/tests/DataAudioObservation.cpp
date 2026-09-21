@@ -21,6 +21,7 @@
 #include <array>
 #include <client/DataAudioObservation.hpp>
 #include <client/Sounds.hpp>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -448,6 +449,22 @@ TEST_CASE(
 	CHECK(unavailable.Status == "unavailable");
 	CHECK(host.AdvanceFrames(ClockAt(10'000, 3, 9), 48'000).empty());
 	CHECK(host.AdvanceFrames(ClockAt(10'001, 3, 9), 48'000) == std::vector<size_t>({512, 288}));
+}
+
+TEST_CASE("audio reset keeps exact phase at a large restored tick", "[client][audio][data-factory]") {
+	client::DataAudioObservationHost large;
+	client::DataAudioObservationHost equivalent;
+	constexpr uint64_t TICK = std::numeric_limits<uint64_t>::max() - 10;
+	auto largeClock = ClockAt(TICK);
+	largeClock.Clock.Interval.Denominator = 59;
+	auto equivalentClock = ClockAt(TICK % 59);
+	equivalentClock.Clock.Interval.Denominator = 59;
+
+	large.ResetTickClock(largeClock, 48'000);
+	equivalent.ResetTickClock(equivalentClock, 48'000);
+	largeClock.Clock.Tick++;
+	equivalentClock.Clock.Tick++;
+	CHECK(large.AdvanceFrames(largeClock, 48'000) == equivalent.AdvanceFrames(equivalentClock, 48'000));
 }
 
 TEST_CASE(

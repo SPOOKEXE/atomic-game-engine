@@ -42,6 +42,7 @@
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/RenderFeatures.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
