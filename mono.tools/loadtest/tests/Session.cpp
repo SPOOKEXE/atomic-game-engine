@@ -18,7 +18,16 @@ TEST_SUITE_ID("tools.loadtest.session")
 
 using loadtest::NextStage;
 using loadtest::Progress;
+using loadtest::RandomHeadingRadians;
 using loadtest::Stage;
+
+TEST_CASE("seeded headings depend only on the session and submitted-input interval", "[loadtest]") {
+	const float original = RandomHeadingRadians(42, 7, 3);
+	REQUIRE(original == RandomHeadingRadians(42, 7, 3));
+	REQUIRE(original != RandomHeadingRadians(42, 8, 3));
+	REQUIRE(original != RandomHeadingRadians(42, 7, 4));
+	REQUIRE(original != RandomHeadingRadians(43, 7, 3));
+}
 
 TEST_CASE("a session that has heard nothing stays where it is", "[loadtest]") {
 	REQUIRE(NextStage(Stage::Dialling, Progress{}, 1.0, 20.0) == Stage::Dialling);

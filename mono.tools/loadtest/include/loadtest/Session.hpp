@@ -90,6 +90,12 @@ namespace loadtest {
 	// @return `true` for `Refused` and `TimedOut`.
 	bool Terminal(Stage stage);
 
+	// A deterministic movement heading for one session and submitted-input interval.
+	//
+	// `seed`, `sessionOrdinal`, and `interval` are all explicit so a load test
+	// can be replayed without sharing a generator between sessions.
+	float RandomHeadingRadians(uint64_t seed, uint32_t sessionOrdinal, uint64_t interval);
+
 	// What one virtual client did, gathered when the run ends.
 	struct SessionReport {
 		// How far this client got. Read first: every timing below is zero for a
@@ -162,6 +168,12 @@ namespace loadtest {
 		// than drawn from a random source, for `net::LossyTransport`'s reason: a
 		// run has to be reproducible from its inputs alone.
 		float HeadingRadians = 0.0f;
+
+		// A zero seed preserves `HeadingRadians`. A non-zero seed derives headings
+		// from this session's stable ordinal and its submitted-input interval.
+		uint64_t RandomHeadingSeed = 0;
+		uint32_t RandomHeadingEveryTicks = 30;
+		uint32_t SessionOrdinal = 0;
 	};
 
 	// One virtual client: a socket, a connector, and a replica of the world.
