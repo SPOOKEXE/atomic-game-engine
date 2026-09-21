@@ -8,6 +8,7 @@
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/PhysicsObservation.hpp>
 #include <engine/control/features/RigExport.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/TemporalSample.hpp>
@@ -1141,6 +1142,9 @@ namespace client {
 			ControlSurface.Enable(features);
 			if (DataFactory) {
 				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
+				ControlSurface.Enable(
+					std::array{engine::control::features::PhysicsObservation(*DataFactory)}
+				);
 				ControlSurface.Enable(
 					std::array{engine::control::features::DataAudioObservation(
 						*Universe_, DataAudio, DataFactory.get()

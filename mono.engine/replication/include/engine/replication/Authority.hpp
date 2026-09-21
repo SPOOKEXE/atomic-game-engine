@@ -19,36 +19,7 @@
 #include <vector>
 
 namespace engine::replication {
-
-	// One connected client, from the server's point of view.
-	//
-	// @since v0.3
-	struct ClientId {
-		// The index no client ever has, so a default handle is not client zero.
-		static constexpr uint32_t INVALID = 0xFFFFFFFFu;
-
-		// Which slot this client occupies.
-		uint32_t Index = INVALID;
-
-		// How many clients have occupied that slot before it.
-		//
-		// **The half that makes a stale handle safe.** Slots are reused the
-		// moment a client leaves, so an index alone would let a message meant
-		// for somebody who disconnected be delivered to whoever arrived next -
-		// `ecs::Entity` carries a generation for the same reason.
-		uint32_t Generation = 0;
-
-		// @return `true` when it came from `Admit`.
-		bool IsValid() const {
-			return Index != INVALID;
-		}
-
-		// @param other The handle to compare.
-		// @return `true` when both name the same client.
-		bool operator==(const ClientId &other) const {
-			return Index == other.Index && Generation == other.Generation;
-		}
-	};
+	class ReplicationObservations;
 
 	// How the server streams.
 	//
@@ -542,6 +513,10 @@ namespace engine::replication {
 		// @param bytes  `ConnectionStats::SendAllowanceBytes` for that link.
 		// @since v0.15
 		void SetAllowance(ClientId client, size_t bytes);
+
+		// Names this authority's copied observation identity and optional record
+		// sink. The sink receives metadata only and cannot affect replication.
+		void SetObservations(core::Name world, core::Name authority, ReplicationObservations *observations);
 
 		// Builds this tick's messages for every client.
 		//
@@ -1450,7 +1425,7 @@ namespace engine::replication {
 
 		// Takes a client's answer to an audit, having decided the server agrees
 		// it asked the question.
-		bool Dispute(Client &into, const replication::Disputed &disputed);
+		bool Dispute(ClientId client, Client &into, const replication::Disputed &disputed);
 
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Interest;
@@ -1466,6 +1441,10 @@ namespace engine::replication {
 		// `SetOwnership`.
 		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Ownership;
 		std::vector<core::Name> Components;
+		core::Name ObservationWorld;
+		core::Name ObservationAuthority;
+		ReplicationObservations *Observations = nullptr;
+		uint64_t ObservationRound = 0;
 
 		std::vector<ChangeDetection> Detection;
 

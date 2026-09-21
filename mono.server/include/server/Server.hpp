@@ -19,6 +19,7 @@
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/replication/Observation.hpp>
 #include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -1202,6 +1203,7 @@ namespace server {
 		bool TestPortalCrossedAcknowledgementDropped = false;
 		bool TestPresentationRestarted = false;
 		std::unique_ptr<engine::replication::Listener> Replication;
+		std::unique_ptr<engine::replication::ReplicationObservations> ReplicationObservationRecords;
 
 		// What Discord is told this server is hosting, or null when nothing is
 		// configured. Off unless `discord.enabled` and `discord.app-id` are

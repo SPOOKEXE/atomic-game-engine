@@ -35,6 +35,7 @@
 #include <engine/net/Wire.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/replication/Observation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -142,6 +143,7 @@ namespace server_replication_test {
 		Process Child;
 		std::unique_ptr<Transport> Socket;
 		std::unique_ptr<Connector> Link;
+		engine::replication::ReplicationObservations Observations;
 		Store World{"replica"};
 		double Now = engine::core::Clock::Seconds();
 
@@ -217,6 +219,7 @@ namespace server_replication_test {
 				connecting.ClientIdentity = identity;
 				Now = engine::core::Clock::Seconds();
 				Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now, connecting);
+				Link->SetObservations(Name("replica"), Name("server"), {}, &Observations);
 				ListenForJoinNotice();
 				return true;
 			}
@@ -235,6 +238,7 @@ namespace server_replication_test {
 			Port = port;
 			Now = engine::core::Clock::Seconds();
 			Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
+			Link->SetObservations(Name("replica"), Name("server"), {}, &Observations);
 			ListenForJoinNotice();
 			return true;
 		}
@@ -1001,6 +1005,9 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 	CHECK(engine::scene::CharacterOf(second.World, first.Mine) != engine::ecs::NULL_ENTITY);
 
 	const engine::core::Vector3 before = first.World.Get<Transform>(rig->Root)->Frame.Position;
+	const uint64_t priorReplicaTick = second.Link->Applied();
+	second.Observations.Clear();
+	bool sawMoveExchange = false;
 
 	// **Walk, and keep walking.** An input channel is unreliable by design and
 	// the server clears what it has applied every tick, so a single submission
@@ -1017,8 +1024,18 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 		first.Walk(engine::core::Vector3{1.0f, 0.0f, 0.0f});
 		first.Tick();
 		second.Tick();
+		while (const auto record = second.Observations.Poll()) {
+			if (record->Hook == engine::replication::ReplicationHook::ReplicaApplied) {
+				const auto *applied =
+					std::get_if<engine::replication::ReplicaAppliedObservation>(&record->Context);
+				if (applied != nullptr && applied->Identity.TickAvailable &&
+					applied->Identity.Tick > priorReplicaTick)
+					sawMoveExchange = true;
+			}
+		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
 	}
+	CHECK(sawMoveExchange);
 
 	const engine::core::Vector3 after = first.World.Get<Transform>(rig->Root)->Frame.Position;
 
@@ -1043,7 +1060,12 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 
 	// And the *other* client sees the same body in the new place, which is the
 	// half that separates "the server moved it" from "everybody was told".
-	Settle(second);
+	REQUIRE(second.Wait([&] {
+		const Entity character = engine::scene::CharacterOf(second.World, first.Mine);
+		const Character *current = second.World.Get<Character>(character);
+		const Transform *position = current == nullptr ? nullptr : second.World.Get<Transform>(current->Root);
+		return position != nullptr && position->Frame.Position.X > before.X + 1.0f;
+	}, 400));
 	const Entity theirs = engine::scene::CharacterOf(second.World, first.Mine);
 	const Character *seen = second.World.Get<Character>(theirs);
 	REQUIRE(seen != nullptr);
@@ -1087,7 +1109,10 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	Remote client;
 	REQUIRE(client.Start(0, scene.string()));
 	REQUIRE(client.Join(400));
-	Settle(client);
+	REQUIRE(client.Wait([&] {
+		return client.Mine != engine::ecs::NULL_ENTITY &&
+			   engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY;
+	}, 400));
 
 	REQUIRE(client.Mine != engine::ecs::NULL_ENTITY);
 	REQUIRE(engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY);
@@ -1567,7 +1592,6 @@ TEST_CASE(
 		},
 		1000
 	));
-	Settle(remote);
 	CHECK(players() == 1);
 	const auto player = remote.Mine;
 	const auto character = engine::scene::CharacterOf(remote.World, player);

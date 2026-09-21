@@ -7,6 +7,8 @@
 #include <engine/control/Features.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/PhysicsObservation.hpp>
+#include <engine/control/features/ReplicationObservation.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Bytes.hpp>
@@ -1621,6 +1623,16 @@ namespace server {
 		}
 
 		Replication = std::make_unique<engine::replication::Listener>(*Socket, streaming);
+		if (Settings.ControlPort >= 0) {
+			if (!ReplicationObservationRecords)
+				ReplicationObservationRecords = std::make_unique<engine::replication::ReplicationObservations>();
+			else
+				ReplicationObservationRecords->Clear();
+			const engine::core::Name worldName = Worlds().NameOf(PrimaryWorld);
+			Replication->Authority().SetObservations(
+				worldName, worldName, ReplicationObservationRecords.get()
+			);
+		}
 
 		AdmittedClientKeys.clear();
 		for (const std::string &text : Settings.AdmittedKeys) {
@@ -3837,6 +3849,9 @@ namespace server {
 				ControlSurface.Enable(
 					std::array{engine::control::features::DataScene(Worlds(), {}, DataFactory.get())}
 				);
+				ControlSurface.Enable(
+					std::array{engine::control::features::PhysicsObservation(*DataFactory)}
+				);
 				engine::control::AddDataScriptPackageTool(
 					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
 						return engine::script::ExecuteDataScriptPackageTransaction(
@@ -3872,6 +3887,12 @@ namespace server {
 					}
 				);
 			}
+			if (ReplicationObservationRecords)
+				ControlSurface.Enable(std::array{engine::control::features::ReplicationObservation(
+					DataFactory.get(),
+					*ReplicationObservationRecords,
+					std::string(Worlds().NameOf(PrimaryWorld).Text())
+				)});
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",

@@ -1,6 +1,7 @@
 #include <engine/control/DataScriptPackage.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/PhysicsObservation.hpp>
 
 #include <array>
 #include <nlohmann/json.hpp>
@@ -53,6 +54,7 @@ namespace studio {
 		const std::array features{
 			engine::control::features::DataFactory(*Lifecycle, tools),
 			engine::control::features::DataScene(*Worlds, {}, Lifecycle.get()),
+			engine::control::features::PhysicsObservation(*Lifecycle),
 		};
 		surface.Enable(features);
 		if (PackageDependencies)

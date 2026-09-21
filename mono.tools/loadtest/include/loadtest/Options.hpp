@@ -51,14 +51,6 @@ namespace loadtest {
 		// How often a client submits an input, in harness ticks.
 		uint32_t InputEveryTicks = 1;
 
-		// A non-zero seed makes every client choose repeatable headings. Zero keeps
-		// the fixed heading spread used by existing load tests.
-		uint64_t RandomHeadingSeed = 0;
-
-		// How many submitted inputs keep one seeded heading before choosing the
-		// next. This has no effect while `RandomHeadingSeed` is zero.
-		uint32_t RandomHeadingEveryTicks = 30;
-
 		// How long a session may make no progress before it is written off.
 		double StallSeconds = 20.0;
 

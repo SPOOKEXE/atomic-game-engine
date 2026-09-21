@@ -35,16 +35,6 @@ namespace loadtest {
 					defaults.InputEveryTicks,
 					"How often a client submits an input, in harness ticks"
 				);
-				built.Integer(
-					"loadtest.random-heading-seed",
-					static_cast<int64_t>(defaults.RandomHeadingSeed),
-					"Seed deterministic per-client random movement headings, or zero to disable"
-				);
-				built.Integer(
-					"loadtest.random-heading-every-ticks",
-					defaults.RandomHeadingEveryTicks,
-					"How many submitted inputs keep one random heading"
-				);
 				built.Number(
 					"loadtest.stall-seconds",
 					defaults.StallSeconds,
@@ -82,9 +72,6 @@ namespace loadtest {
 		options.Ticks = Flag("loadtest.ticks").Integer();
 		options.ConnectsPerTick = static_cast<uint32_t>(Flag("loadtest.connects-per-tick").Integer());
 		options.InputEveryTicks = static_cast<uint32_t>(Flag("loadtest.input-every-ticks").Integer());
-		options.RandomHeadingSeed = static_cast<uint64_t>(Flag("loadtest.random-heading-seed").Integer());
-		options.RandomHeadingEveryTicks =
-			static_cast<uint32_t>(Flag("loadtest.random-heading-every-ticks").Integer());
 		options.StallSeconds = Flag("loadtest.stall-seconds").Number();
 		options.ProfilePath = std::filesystem::path(Flag("loadtest.profile-out").Text());
 

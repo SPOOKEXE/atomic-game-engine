@@ -1445,11 +1445,6 @@ stress label="baseline" clients="200" seconds="45" port="45100": (build "server"
 stress-motion label="motion-baseline" clients="1" seconds="20" port="45200" window="30": (build "server") (build "loadtest")
     ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}} ReplicationStress.luau {{window}}
 
-# Two hundred moving clients with a fixed seed, ready to compare across server
-# changes. The script records both random-heading arguments beside the capture.
-stress-random-motion label="random-motion" clients="200" seconds="45" port="45300" window="30" seed="1" every="30": (build "server") (build "loadtest")
-    ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}} Stress.luau {{window}} {{seed}} {{every}}
-
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.
 check-server-is-headless:

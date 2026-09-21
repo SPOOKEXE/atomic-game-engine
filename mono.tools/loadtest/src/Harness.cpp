@@ -68,9 +68,6 @@ namespace loadtest {
 					session.StallSeconds = Settings.StallSeconds;
 					session.InputEveryTicks = Settings.InputEveryTicks;
 					session.HeadingRadians = HeadingOf(opened, Settings.Clients);
-					session.RandomHeadingSeed = Settings.RandomHeadingSeed;
-					session.RandomHeadingEveryTicks = Settings.RandomHeadingEveryTicks;
-					session.SessionOrdinal = opened;
 
 					auto opening = std::make_unique<Session>(session, nowSeconds);
 					if (!opening->Open()) {

@@ -34,6 +34,7 @@
 #include <vector>
 
 namespace engine::replication {
+	class ReplicationObservations;
 
 	// Why a message was refused.
 	//
@@ -83,6 +84,10 @@ namespace engine::replication {
 		// @param message The bytes as they arrived.
 		// @return Why it was refused, or `Ok`.
 		ApplyStatus Receive(ecs::Store &store, std::span<const std::byte> message);
+
+		// Names this replica's copied observation identity and optional record
+		// sink. The sink receives metadata only and cannot affect the local world.
+		void SetObservations(core::Name world, core::Name authority, ClientId client, ReplicationObservations *observations);
 
 		// The last tick applied in full.
 		//
@@ -425,6 +430,11 @@ namespace engine::replication {
 		// tick's spawns are a handful, and this is walked whole or not at all.
 		std::vector<Arrival> Arriving_;
 		Parts Counting;
+		core::Name ObservationWorld;
+		core::Name ObservationAuthority;
+		ClientId ObservationClient;
+		ReplicationObservations *Observations = nullptr;
+		uint64_t ObservationRound = 0;
 		uint64_t Applied_ = 0;
 		uint64_t ConsumedInput_ = 0;
 		bool Joined_ = false;

@@ -68,14 +68,6 @@ TEST_CASE("every option is reachable by its flag", "[loadtest]") {
 		engine::core::FlagStatus::Applied
 	);
 	REQUIRE(
-		Flags::Set("loadtest.random-heading-seed", "12345", FlagSource::CommandLine) ==
-		engine::core::FlagStatus::Applied
-	);
-	REQUIRE(
-		Flags::Set("loadtest.random-heading-every-ticks", "7", FlagSource::CommandLine) ==
-		engine::core::FlagStatus::Applied
-	);
-	REQUIRE(
 		Flags::Set("loadtest.stall-seconds", "5.5", FlagSource::CommandLine) ==
 		engine::core::FlagStatus::Applied
 	);
@@ -93,8 +85,6 @@ TEST_CASE("every option is reachable by its flag", "[loadtest]") {
 	REQUIRE(options.Ticks == 900);
 	REQUIRE(options.ConnectsPerTick == 3);
 	REQUIRE(options.InputEveryTicks == 4);
-	REQUIRE(options.RandomHeadingSeed == 12345);
-	REQUIRE(options.RandomHeadingEveryTicks == 7);
 	REQUIRE(options.StallSeconds == 5.5);
 	REQUIRE(options.ProfilePath == "out.folded");
 
@@ -114,8 +104,6 @@ TEST_CASE("the declared defaults are the header's defaults", "[loadtest]") {
 	REQUIRE(declared.TickRate == defaults.TickRate);
 	REQUIRE(declared.ConnectsPerTick == defaults.ConnectsPerTick);
 	REQUIRE(declared.InputEveryTicks == defaults.InputEveryTicks);
-	REQUIRE(declared.RandomHeadingSeed == defaults.RandomHeadingSeed);
-	REQUIRE(declared.RandomHeadingEveryTicks == defaults.RandomHeadingEveryTicks);
 	REQUIRE(declared.StallSeconds == defaults.StallSeconds);
 	REQUIRE(declared.Address == defaults.Address);
 

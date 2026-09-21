@@ -15,6 +15,23 @@
 
 namespace engine::replication {
 
+	// One connected client, from the authority's point of view. The generation
+	// makes a reused slot distinct from the session that occupied it before.
+	struct ClientId {
+		static constexpr uint32_t INVALID = 0xFFFFFFFFu;
+
+		uint32_t Index = INVALID;
+		uint32_t Generation = 0;
+
+		bool IsValid() const {
+			return Index != INVALID;
+		}
+
+		bool operator==(const ClientId &other) const {
+			return Index == other.Index && Generation == other.Generation;
+		}
+	};
+
 	// What a message is.
 	//
 	// @since v0.3

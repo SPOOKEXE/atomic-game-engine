@@ -2,6 +2,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/replication/Replica.hpp>
+#include <engine/replication/Observation.hpp>
 #include <engine/replication/Submission.hpp>
 
 #include <algorithm>
@@ -28,6 +29,15 @@ namespace engine::replication {
 
 	size_t Replica::SnapshotOutstanding() const {
 		return Assembling ? Outstanding : 0;
+	}
+
+	void Replica::SetObservations(
+		core::Name world, core::Name authority, ClientId client, ReplicationObservations *observations
+	) {
+		ObservationWorld = world;
+		ObservationAuthority = authority;
+		ObservationClient = client;
+		Observations = observations;
 	}
 
 	void Replica::ClearForgotten() {
@@ -395,26 +405,63 @@ namespace engine::replication {
 	}
 
 	ApplyStatus Replica::Receive(ecs::Store &store, std::span<const std::byte> message) {
+		ObservationRound++;
 		core::ByteReader reader(message);
 
 		Message read;
 		if (!ReadMessage(reader, read)) {
 			Stats_.Malformed++;
+			if (Observations != nullptr) {
+				Observations->Record({
+					ReplicationHook::ReplicaRejected,
+					ReplicaRejectedObservation{
+						ExchangeIdentity{
+							.World = ObservationWorld,
+							.Authority = ObservationAuthority,
+							.Client = ObservationClient,
+							.Round = ObservationRound,
+						},
+						MessageKind::Applied,
+						ApplyStatus::Malformed,
+						static_cast<uint64_t>(message.size()),
+						false,
+					},
+				});
+			}
 			return ApplyStatus::Malformed;
 		}
 
+		ApplyStatus result = ApplyStatus::Malformed;
+		uint64_t tick = 0;
+		uint64_t baseline = 0;
+		bool tickAvailable = false;
+		bool baselineAvailable = false;
 		switch (read.Kind) {
 		case MessageKind::SnapshotChunk:
-			return Apply(store, read.Chunk);
+			tick = read.Chunk.Tick;
+			tickAvailable = true;
+			result = Apply(store, read.Chunk);
+			break;
 
 		case MessageKind::Delta:
-			return Apply(store, read.Delta);
+			tick = read.Delta.Tick;
+			baseline = read.Delta.Baseline;
+			tickAvailable = true;
+			baselineAvailable = true;
+			result = Apply(store, read.Delta);
+			break;
 
 		case MessageKind::Structure:
-			return Apply(store, read.Structure);
+			tick = read.Structure.Tick;
+			tickAvailable = true;
+			result = Apply(store, read.Structure);
+			break;
 
 		case MessageKind::GroupSignatures:
-			return Check(store, read.Signatures);
+			tick = read.Signatures.Tick;
+			tickAvailable = true;
+			result = Check(store, read.Signatures);
+			break;
 
 		case MessageKind::Input:
 		case MessageKind::Applied:
@@ -427,11 +474,40 @@ namespace engine::replication {
 		// a message to drop quietly.
 		case MessageKind::User:
 			Stats_.Malformed++;
-			return ApplyStatus::Malformed;
+			result = ApplyStatus::Malformed;
+			break;
 		}
 
-		Stats_.Malformed++;
-		return ApplyStatus::Malformed;
+		if (Observations != nullptr) {
+			const ExchangeIdentity identity{
+				.World = ObservationWorld,
+				.Authority = ObservationAuthority,
+				.Client = ObservationClient,
+				.Baseline = baseline,
+				.Tick = tick,
+				.Round = ObservationRound,
+				.BaselineAvailable = baselineAvailable,
+				.TickAvailable = tickAvailable,
+			};
+			if (result == ApplyStatus::Ok) {
+				Observations->Record({
+					ReplicationHook::ReplicaApplied,
+					ReplicaAppliedObservation{identity, read.Kind, result, static_cast<uint64_t>(message.size())},
+				});
+			} else {
+				Observations->Record({
+					ReplicationHook::ReplicaRejected,
+					ReplicaRejectedObservation{
+						identity,
+						read.Kind,
+						result,
+						static_cast<uint64_t>(message.size()),
+						true,
+					},
+				});
+			}
+		}
+		return result;
 	}
 
 	std::vector<std::byte> Replica::Acknowledge() const {

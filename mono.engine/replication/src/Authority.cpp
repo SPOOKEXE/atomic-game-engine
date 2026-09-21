@@ -7,6 +7,7 @@
 #include <engine/net/Packet.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Authority.hpp>
+#include <engine/replication/Observation.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1614,7 +1615,7 @@ namespace engine::replication {
 		lane.Stats.Audits++;
 	}
 
-	bool Authority::Dispute(Client &into, const replication::Disputed &disputed) {
+	bool Authority::Dispute(ClientId client, Client &into, const replication::Disputed &disputed) {
 		// **The limit is enforced here and nothing about it is taken from the
 		// client**, which is what `docs/retired/DEFERRED.md` D00015 calls part of the
 		// security argument rather than a tuning knob. An answer is only ever
@@ -1661,11 +1662,32 @@ namespace engine::replication {
 		into.Audit.Answered = true;
 		Stats_.Disputed += disputed.Groups.size();
 
+		uint32_t entities = 0;
 		for (const uint32_t group : disputed.Groups) {
 			for (const ecs::Entity entity : into.Audit.Groups[group].Entities) {
 				into.Repairing.push_back(entity.Id);
 				Stats_.Repaired++;
+				entities++;
 			}
+		}
+		if (Observations != nullptr) {
+			Observations->Record({
+				ReplicationHook::AuthorityRepaired,
+				AuthorityRepairedObservation{
+					ExchangeIdentity{
+						.World = ObservationWorld,
+						.Authority = ObservationAuthority,
+						.Client = client,
+						.Baseline = into.Applied,
+						.Tick = disputed.Tick,
+						.Round = ObservationRound,
+						.BaselineAvailable = true,
+						.TickAvailable = true,
+					},
+					static_cast<uint32_t>(disputed.Groups.size()),
+					entities,
+				},
+			});
 		}
 		return true;
 	}
@@ -2101,6 +2123,28 @@ namespace engine::replication {
 			lane.Stats.Bytes += message.size();
 		}
 		lane.Stats.Messages += client.Outgoing.size();
+		if (Observations != nullptr) {
+			uint64_t bytes = 0;
+			for (const auto &message : client.Outgoing) bytes += message.size();
+			Observations->Record({
+				ReplicationHook::AuthorityPublished,
+				AuthorityPublishedObservation{
+					ExchangeIdentity{
+						.World = ObservationWorld,
+						.Authority = ObservationAuthority,
+						.Client = handle,
+						.Baseline = client.Applied,
+						.Tick = tick,
+						.Round = ObservationRound,
+						.BaselineAvailable = true,
+						.TickAvailable = true,
+					},
+					static_cast<uint32_t>(client.Outgoing.size()),
+					bytes,
+					false,
+				},
+			});
+		}
 	}
 
 	size_t Authority::LanesFor(size_t clients) const {
@@ -2220,6 +2264,7 @@ namespace engine::replication {
 	}
 
 	void Authority::PublishAfterSurvey(ecs::Store &store, uint64_t tick) {
+		ObservationRound++;
 		// --- what has to happen on the thread that owns the store ------------
 		//
 		// **A join is the one part of a publish that builds a world**, and
@@ -2325,6 +2370,28 @@ namespace engine::replication {
 						Stats_.Bytes += message.size();
 					}
 					Stats_.Messages += client.Outgoing.size();
+					if (Observations != nullptr) {
+						uint64_t bytes = 0;
+						for (const auto &message : client.Outgoing) bytes += message.size();
+						Observations->Record({
+							ReplicationHook::AuthorityPublished,
+							AuthorityPublishedObservation{
+								ExchangeIdentity{
+									.World = ObservationWorld,
+									.Authority = ObservationAuthority,
+									.Client = handle,
+									.Baseline = client.Applied,
+									.Tick = tick,
+									.Round = ObservationRound,
+									.BaselineAvailable = true,
+									.TickAvailable = true,
+								},
+								static_cast<uint32_t>(client.Outgoing.size()),
+								bytes,
+								true,
+							},
+						});
+					}
 					continue;
 				}
 
@@ -2473,6 +2540,12 @@ namespace engine::replication {
 		}
 	}
 
+	void Authority::SetObservations(core::Name world, core::Name authority, ReplicationObservations *observations) {
+		ObservationWorld = world;
+		ObservationAuthority = authority;
+		Observations = observations;
+	}
+
 	std::span<const std::vector<std::byte>> Authority::Outgoing(ClientId client) const {
 		const Client *found = Reach(client);
 		return found == nullptr ? std::span<const std::vector<std::byte>>{} : found->Outgoing;
@@ -2485,6 +2558,25 @@ namespace engine::replication {
 		}
 
 		const Carried &carried = found->Carried_[index];
+		if (Observations != nullptr) {
+			const auto kind = PeekMessageKind(found->Outgoing[index]);
+			Observations->Record({
+				ReplicationHook::AuthorityDropped,
+				AuthorityDroppedObservation{
+					ExchangeIdentity{
+						.World = ObservationWorld,
+						.Authority = ObservationAuthority,
+						.Client = client,
+						.Baseline = found->Applied,
+						.Round = ObservationRound,
+						.BaselineAvailable = true,
+					},
+					kind.value_or(MessageKind::Applied),
+					static_cast<uint64_t>(found->Outgoing[index].size()),
+					kind.has_value(),
+				},
+			});
+		}
 
 		if (carried.Values) {
 			found->Streamed = found->StreamedBefore;
@@ -2517,6 +2609,18 @@ namespace engine::replication {
 		Client *found = Reach(client);
 		if (found == nullptr) {
 			Stats_.Refused++;
+			if (Observations != nullptr)
+				Observations->Record({
+					ReplicationHook::AuthorityRejected,
+					AuthorityRejectedObservation{
+						ExchangeIdentity{.World = ObservationWorld, .Authority = ObservationAuthority, .Client = client,
+								.Round = ObservationRound},
+						MessageKind::Applied,
+						ApplyStatus::Malformed,
+						static_cast<uint64_t>(message.size()),
+						false,
+					},
+				});
 			return false;
 		}
 
@@ -2524,16 +2628,59 @@ namespace engine::replication {
 		Message read;
 		if (!ReadMessage(reader, read)) {
 			Stats_.Refused++;
+			if (Observations != nullptr)
+				Observations->Record({
+					ReplicationHook::AuthorityRejected,
+					AuthorityRejectedObservation{
+						ExchangeIdentity{.World = ObservationWorld, .Authority = ObservationAuthority, .Client = client,
+								.Round = ObservationRound},
+						MessageKind::Applied,
+						ApplyStatus::Malformed,
+						static_cast<uint64_t>(message.size()),
+						false,
+					},
+				});
 			return false;
 		}
+		auto finish = [&](bool accepted) {
+			uint64_t tick = 0;
+			uint64_t baseline = found->Applied;
+			bool tickAvailable = false;
+			bool baselineAvailable = true;
+			if (read.Kind == MessageKind::Applied) {
+				tick = read.Applied.Tick;
+				tickAvailable = true;
+			} else if (read.Kind == MessageKind::Delta) {
+				tick = read.Delta.Tick;
+				baseline = read.Delta.Baseline;
+				tickAvailable = true;
+			}
+			if (Observations != nullptr) {
+				const ExchangeIdentity identity{.World = ObservationWorld, .Authority = ObservationAuthority,
+					.Client = client, .Baseline = baseline, .Tick = tick, .Round = ObservationRound,
+					.BaselineAvailable = baselineAvailable, .TickAvailable = tickAvailable};
+				if (accepted)
+					Observations->Record({
+						ReplicationHook::AuthorityReceived,
+						AuthorityReceivedObservation{identity, read.Kind, static_cast<uint64_t>(message.size())},
+					});
+				else
+					Observations->Record({
+						ReplicationHook::AuthorityRejected,
+						AuthorityRejectedObservation{
+							identity, read.Kind, ApplyStatus::Malformed, static_cast<uint64_t>(message.size()), true},
+					});
+			}
+			return accepted;
+		};
 
 		switch (read.Kind) {
 		case MessageKind::Input:
 			found->Pending.push_back(std::move(read.Input));
-			return true;
+			return finish(true);
 
 		case MessageKind::Applied:
-			if (read.Applied.ConsumedInput > found->ConsumedInput) return false;
+			if (read.Applied.ConsumedInput > found->ConsumedInput) return finish(false);
 			found->AcknowledgedInput = std::max(found->AcknowledgedInput, read.Applied.ConsumedInput);
 			if (read.Applied.Tick > found->Applied) {
 				found->Applied = read.Applied.Tick;
@@ -2565,16 +2712,16 @@ namespace engine::replication {
 					});
 				}
 			}
-			return true;
+			return finish(true);
 
 		case MessageKind::Identify:
-			return !IdentityCheck || IdentityCheck(client, read.Identify);
+			return finish(!IdentityCheck || IdentityCheck(client, read.Identify));
 
 		case MessageKind::Delta:
-			return Submit(*found, std::move(read.Delta));
+			return finish(Submit(*found, std::move(read.Delta)));
 
 		case MessageKind::Disputed:
-			return Dispute(*found, read.Disputed);
+			return finish(Dispute(client, *found, read.Disputed));
 
 		case MessageKind::GroupSignatures:
 			// A client does not audit a server. The digests say what the
@@ -2582,7 +2729,7 @@ namespace engine::replication {
 			// back up would be a client telling the authority what its own
 			// world is - the same line a snapshot is refused on.
 			Stats_.Refused++;
-			return false;
+			return finish(false);
 
 		case MessageKind::SnapshotChunk:
 		case MessageKind::Structure:
@@ -2591,7 +2738,7 @@ namespace engine::replication {
 			// structure message is a client saying what exists, which is the
 			// one thing an authority may never be told.
 			Stats_.Refused++;
-			return false;
+			return finish(false);
 
 		case MessageKind::User:
 			// Opaque to this module by design, so whoever owns the link peels
@@ -2599,11 +2746,11 @@ namespace engine::replication {
 			// reason. Reaching this is a routing mistake, and counting it is how
 			// it becomes visible.
 			Stats_.Refused++;
-			return false;
+			return finish(false);
 		}
 
 		Stats_.Refused++;
-		return false;
+		return finish(false);
 	}
 
 	bool Authority::Submit(Client &into, Delta &&delta) {
@@ -2671,8 +2818,40 @@ namespace engine::replication {
 
 		ApplyStatus worst = ApplyStatus::Ok;
 		for (const Delta &delta : found->Submitted) {
+			uint32_t values = 0;
+			for (const ComponentDelta &component : delta.Components)
+				values += static_cast<uint32_t>(component.Entities.size());
 			const WriteOutcome outcome = WriteComponents(store, delta, allow);
 			Stats_.Unowned += outcome.Refused;
+			if (Observations != nullptr) {
+				const ExchangeIdentity identity{
+					.World = ObservationWorld,
+					.Authority = ObservationAuthority,
+					.Client = client,
+					.Baseline = delta.Baseline,
+					.Tick = delta.Tick,
+					.Round = ObservationRound,
+					.BaselineAvailable = true,
+					.TickAvailable = true,
+				};
+				if (outcome.Status == ApplyStatus::Ok)
+					Observations->Record({
+						ReplicationHook::AuthorityApplied,
+						AuthorityAppliedObservation{
+							identity,
+							MessageKind::Delta,
+							outcome.Status,
+							0,
+							values,
+							static_cast<uint32_t>(outcome.Refused),
+						},
+					});
+				else
+					Observations->Record({
+						ReplicationHook::AuthorityRejected,
+						AuthorityRejectedObservation{identity, MessageKind::Delta, outcome.Status, 0, true},
+					});
+			}
 			if (outcome.Status != ApplyStatus::Ok) {
 				worst = outcome.Status;
 			}

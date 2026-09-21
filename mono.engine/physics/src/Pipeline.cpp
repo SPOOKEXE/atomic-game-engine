@@ -1,4 +1,5 @@
 #include "PipelineInternals.hpp"
+#include "ObservationInternal.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/Bytes.hpp>
@@ -143,6 +144,7 @@ namespace engine::physics {
 		// See `RegisterCharacterComponents`.
 		RegisterCharacterComponents();
 		RegisterCopiedContactComponents();
+		RegisterPhysicsObservations();
 
 		ecs::Components::Register<PhysicsClock>(
 			PHYSICS_CLOCK_COMPONENT, WritePhysicsClocks, ReadPhysicsClocks
@@ -158,6 +160,7 @@ namespace engine::physics {
 		// apply calls `SetPhysicsTickRate` after this; a host with nothing to
 		// say gets what physics did before the clock existed.
 		store.SetResource(PhysicsClock{});
+		PreparePhysicsObservations(store);
 
 		// Declared when the world is built, per `Store::Observe`: observing
 		// later moves every row already carrying the component into an
@@ -218,6 +221,7 @@ namespace engine::physics {
 			BeginCopiedContactStep(store);
 			ApplyPersistentLoads(store);
 			IntegrateMotion(store);
+			RecordPostIntegration(store);
 			SolveCopiedContactStep(store);
 			SolveRigidJoints(store);
 
@@ -259,7 +263,9 @@ namespace engine::physics {
 
 			BroadPhase(store);
 			NarrowPhase(store);
+			RecordPreSolve(store);
 			Solve(store);
+			RecordCompletedSolver(store);
 			Publish(store);
 			SolveRigidJoints(store);
 
@@ -267,13 +273,16 @@ namespace engine::physics {
 				BeginCopiedContactStep(store);
 				ApplyPersistentLoads(store);
 				IntegrateMotion(store);
+				RecordPostIntegration(store);
 				SolveCopiedContactStep(store);
 				SolveRigidJoints(store);
 				SweepFastBodies(store);
 				SyncBroadphase(store);
 				BroadPhase(store);
 				NarrowPhase(store);
+				RecordPreSolve(store);
 				Solve(store);
+				RecordCompletedSolver(store);
 				Publish(store);
 				SolveRigidJoints(store);
 			}
