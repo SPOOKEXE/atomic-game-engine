@@ -867,15 +867,19 @@ namespace engine::world {
 		// paragraph above worries about for the flag: the world's spans are now
 		// on the frame's owning thread and are kept, instead of arriving as one
 		// aggregate bar with everything it contained refused.
-		float estimatedWorldMilliseconds = 0.0f;
-		for (size_t index = 0; index < ActiveList.size(); index++) {
-			estimatedWorldMilliseconds +=
-				ActiveList[index]->Statistics().LastTickMilliseconds * static_cast<float>(OwedList[index]);
-		}
+		bool parallel = false;
+		{
+			ENGINE_PROFILE_CAT("select dispatch", engine::core::ProfileCategory::Simulation);
+			float estimatedWorldMilliseconds = 0.0f;
+			for (size_t index = 0; index < ActiveList.size(); index++) {
+				estimatedWorldMilliseconds += ActiveList[index]->Statistics().LastTickMilliseconds *
+											  static_cast<float>(OwedList[index]);
+			}
 
-		const bool parallel = Settings_.Mode == ExecutionMode::WorldParallel &&
-							  !parallel::ForceSerialCompute() && order.size() > 1 &&
-							  estimatedWorldMilliseconds >= Settings_.WorldParallelFloorMilliseconds;
+			parallel = Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
+					   order.size() > 1 &&
+					   estimatedWorldMilliseconds >= Settings_.WorldParallelFloorMilliseconds;
+		}
 
 		if (parallel && !ActiveList.empty() && LaneCount > 0) {
 			// A world keeps its lane while the pinned worker prefix is unchanged.
@@ -931,14 +935,13 @@ namespace engine::world {
 			}
 		}
 
-		Ticking = false;
-
 		// --- 4. diagnostics, and anything the tick queued ---
 		// Every worker has joined before the router can touch an outbox. Bus and
 		// service traffic therefore crosses cores as copied envelopes at the next
 		// driver barrier, never as shared world storage.
 		{
 			ENGINE_PROFILE_CAT("tick diagnostics", engine::core::ProfileCategory::Simulation);
+			Ticking = false;
 			DrainControls();
 
 			Stats.ActiveWorlds = ActiveList.size();
@@ -962,10 +965,10 @@ namespace engine::world {
 				}
 				Stats.SimulationTicks += world->Statistics().Ticks;
 			}
-		}
 
-		Stats.LastTickMilliseconds =
-			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
+			Stats.LastTickMilliseconds =
+				static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
+		}
 	}
 
 	WorldStatus Universe::StepPaused(WorldId id, const std::function<void()> &boundary) {

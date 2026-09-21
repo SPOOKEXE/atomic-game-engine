@@ -170,6 +170,11 @@ namespace studio {
 	void AccumulateDiagnosticSpans(
 		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
 	) {
+		// Retained because averaging runs every frame while the panel is open.
+		// It maps the previous frame's source indices to their rows in `totals`.
+		static thread_local std::vector<uint32_t> targets;
+		static thread_local const std::vector<DiagnosticSpan> *targetTotals = nullptr;
+
 		const auto accumulate = [](const engine::core::FrameSpan &source, DiagnosticSpan &target) {
 			target.StartMilliseconds += source.StartMilliseconds;
 			target.Milliseconds += source.Milliseconds;
@@ -178,16 +183,25 @@ namespace studio {
 			target.Occurrences++;
 		};
 
-		// The common case is the same recorded tree on every frame. Its source
-		// index is already its accumulated index, so matching it must not rebuild
-		// the structural hash tables or allocate a parent remap.
-		if (frame.size() == totals.size()) {
+		// The common case is the same recorded tree on every frame. Reuse its
+		// source-to-total mapping, so an intermittent row retained in `totals`
+		// does not force a hash-table rebuild for every smaller later frame.
+		if (targetTotals == &totals && targets.size() == frame.size()) {
 			bool sameStructure = true;
 			for (size_t index = 0; index < frame.size(); index++) {
 				const engine::core::FrameSpan &source = frame[index];
-				const DiagnosticSpan &target = totals[index];
+				const uint32_t targetIndex = targets[index];
+				if (targetIndex >= totals.size()) {
+					sameStructure = false;
+					break;
+				}
+				if (source.Parent < index && targets[source.Parent] >= totals.size()) {
+					sameStructure = false;
+					break;
+				}
 				const uint32_t parent =
-					source.Parent < index ? source.Parent : engine::core::FrameGraph::NO_PARENT;
+					source.Parent < index ? targets[source.Parent] : engine::core::FrameGraph::NO_PARENT;
+				const DiagnosticSpan &target = totals[targetIndex];
 				if (target.Name != source.Name || target.Depth != source.Depth || target.Parent != parent ||
 					target.Owner != source.Owner) {
 					sameStructure = false;
@@ -196,7 +210,7 @@ namespace studio {
 			}
 			if (sameStructure) {
 				for (size_t index = 0; index < frame.size(); index++) {
-					accumulate(frame[index], totals[index]);
+					accumulate(frame[index], totals[targets[index]]);
 				}
 				return;
 			}
@@ -230,10 +244,8 @@ namespace studio {
 			}
 		};
 
-		// Retained because averaging runs every frame while the panel is open.
 		// The previous pair of linear searches made N spans cost N squared and
 		// turned a granular particle or server capture into profiler lag.
-		static thread_local std::vector<uint32_t> targets;
 		static thread_local std::unordered_map<SiblingKey, uint32_t, SiblingHash> ordinals;
 		static thread_local std::unordered_map<StructuralKey, uint32_t, StructuralHash> targetByKey;
 
@@ -299,6 +311,7 @@ namespace studio {
 		// frames, but never keep those borrowed views after either owner can move.
 		ordinals.clear();
 		targetByKey.clear();
+		targetTotals = &totals;
 	}
 
 	void FilterDiagnosticSpans(
@@ -1601,6 +1614,9 @@ namespace studio {
 			const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 			const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
 			const float graphHeight = rowHeight * static_cast<float>(visibleRowCount);
+			const ImVec2 graphLower(origin.x + graphWidth, origin.y + graphHeight);
+			const bool mouseInGraph = ImGui::IsMouseHoveringRect(origin, graphLower);
+			const float labelMinimumWidth = engine::ui::Scaled(34.0f);
 
 			ImDrawList *draw = ImGui::GetWindowDrawList();
 			const DiagnosticSpan *hovered = nullptr;
@@ -1629,7 +1645,7 @@ namespace studio {
 					span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
 				draw->AddRectFilled(upper, lower, colour);
 
-				if (ImGui::IsMouseHoveringRect(upper, lower)) {
+				if (mouseInGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
 					hovered = &span;
 					hoveredSource = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
 					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -1640,7 +1656,7 @@ namespace studio {
 
 				// Only where the label fits. Text clipped mid-word is noise, and a
 				// flame graph is read as shape first.
-				if (width > engine::ui::Scaled(34.0f)) {
+				if (width > labelMinimumWidth) {
 					draw->PushClipRect(upper, lower, true);
 					draw->AddText(
 						ImVec2(left + 3.0f, top + 1.0f),

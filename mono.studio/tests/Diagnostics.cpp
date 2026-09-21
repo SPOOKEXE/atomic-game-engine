@@ -369,6 +369,54 @@ TEST_CASE("same-name siblings keep their ordinal across frames", "[studio][diagn
 	CHECK(totals[2].Occurrences == 2);
 }
 
+TEST_CASE("averaging retains rows absent from a later frame", "[studio][diagnostics]") {
+	const std::array first{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{.Name = "optional", .Depth = 1, .Parent = 0, .Milliseconds = 3.0f},
+		FrameSpan{.Name = "stable", .Depth = 1, .Parent = 0, .Milliseconds = 4.0f},
+	};
+	const std::array smaller{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{.Name = "stable", .Depth = 1, .Parent = 0, .Milliseconds = 6.0f},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	AccumulateDiagnosticSpans(first, totals);
+	AccumulateDiagnosticSpans(smaller, totals);
+	FinishDiagnosticAverage(totals, 2);
+
+	REQUIRE(totals.size() == 3);
+	CHECK(totals[1].Name == "optional");
+	CHECK(totals[1].Milliseconds == 1.5f);
+	CHECK(totals[2].Name == "stable");
+	CHECK(totals[2].Parent == 0);
+	CHECK(totals[2].Milliseconds == 5.0f);
+}
+
+TEST_CASE("averaging repeats smaller frames against retained rows", "[studio][diagnostics]") {
+	const std::array first{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{.Name = "optional", .Depth = 1, .Parent = 0, .Milliseconds = 2.0f},
+		FrameSpan{.Name = "stable", .Depth = 1, .Parent = 0, .Milliseconds = 2.0f},
+	};
+	const std::array smaller{
+		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{.Name = "stable", .Depth = 1, .Parent = 0, .Milliseconds = 6.0f},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	AccumulateDiagnosticSpans(first, totals);
+	AccumulateDiagnosticSpans(smaller, totals);
+	AccumulateDiagnosticSpans(smaller, totals);
+	AccumulateDiagnosticSpans(smaller, totals);
+	FinishDiagnosticAverage(totals, 4);
+
+	REQUIRE(totals.size() == 3);
+	CHECK(totals[1].Occurrences == 1);
+	CHECK(totals[2].Occurrences == 4);
+	CHECK(totals[2].Milliseconds == 5.0f);
+}
+
 TEST_CASE("averaging falls back when the same span rows change order", "[studio][diagnostics]") {
 	const std::array first{
 		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
