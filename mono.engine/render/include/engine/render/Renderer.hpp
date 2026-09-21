@@ -715,7 +715,7 @@ namespace engine::render {
 		// Borrowed world data consumed by view-scoped nodes.
 		//@{
 		std::span<const scene::DrawInstance> Instances;
-		// Studio may keep nearby meshes at a finer level than the projected-area
+		// Studio may force distant meshes to a coarser level than the projected-area
 		// selector asks for. Negative first distance leaves the area rule alone.
 		std::array<float, 3> LodMinimumDistances{-1.0f, -1.0f, -1.0f};
 		// Whether offscreen LOD clusters are dropped before indirect drawing.

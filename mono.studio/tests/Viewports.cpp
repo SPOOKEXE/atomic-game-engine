@@ -28,6 +28,7 @@
 #include <numbers>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/Projection.hpp>
 #include <studio/Viewports.hpp>
 
 namespace studio {
@@ -59,6 +60,51 @@ namespace studio {
 			return editor.Overlays[viewport].PresentedFieldOfView;
 		}
 
+		static engine::world::WorldId PresentedWorld(const Editor &editor, size_t viewport) {
+			return editor.Overlays[viewport].PresentedWorld;
+		}
+
+		static PanelProjection Projection(Editor &editor, size_t viewport) {
+			return editor.ProjectionFor(viewport);
+		}
+
+		static void SetOverlayRectangle(
+			Editor &editor,
+			size_t viewport,
+			float x,
+			float y,
+			float width,
+			float height,
+			uint32_t renderWidth,
+			uint32_t renderHeight
+		) {
+			auto &slot = editor.Overlays[viewport];
+			slot.X = x;
+			slot.Y = y;
+			slot.Width = width;
+			slot.Height = height;
+			slot.RenderWidth = renderWidth;
+			slot.RenderHeight = renderHeight;
+			slot.Drawn = true;
+		}
+
+		static void
+		SetViewerCamera(Editor &editor, size_t viewport, engine::core::CFrame frame, float fieldOfView) {
+			const auto &viewer = editor.Viewers[viewport];
+			bool updated = false;
+			editor.Universe->Enter(viewer.World, [&](engine::ecs::Store &store) {
+				auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance);
+				auto *camera = store.GetMutable<engine::scene::Camera>(viewer.Instance);
+				if (transform == nullptr || camera == nullptr) {
+					return;
+				}
+				transform->Frame = frame;
+				camera->FieldOfViewRadians = fieldOfView;
+				updated = true;
+			});
+			REQUIRE(updated);
+		}
+
 		static engine::world::WorldId StartPlay(Editor &editor) {
 			REQUIRE(editor.BeginRun(editor.Active, RunMode::Play));
 			REQUIRE_FALSE(editor.Runs.empty());
@@ -79,6 +125,24 @@ namespace studio {
 					lens->FieldOfViewRadians = fieldOfView;
 					updated = true;
 				}
+			});
+			REQUIRE(updated);
+		}
+
+		static void SetReplicaCamera(
+			Editor &editor, engine::world::WorldId world, engine::core::CFrame frame, float fieldOfView
+		) {
+			bool updated = false;
+			editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+				const engine::ecs::Entity camera = RuntimeCameraOf(store);
+				auto *transform = store.GetMutable<engine::scene::Transform>(camera);
+				auto *lens = store.GetMutable<engine::scene::Camera>(camera);
+				if (transform == nullptr || lens == nullptr) {
+					return;
+				}
+				transform->Frame = frame;
+				lens->FieldOfViewRadians = fieldOfView;
+				updated = true;
 			});
 			REQUIRE(updated);
 		}
@@ -217,6 +281,36 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"overlay projection stays with the camera that made its texture", "[studio][viewports][camera][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	studio::ViewportCameraProbe::Present(editor, 0);
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 100.0f, 50.0f, 800.0f, 400.0f, 1600, 800);
+
+	const studio::PanelProjection recorded = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 recordedPoint{};
+	REQUIRE(recorded.WorldToPanel({1.0f, 0.0f, -10.0f}, recordedPoint));
+	CHECK(recorded.ImageMin.x == 100.0f);
+	CHECK(recorded.ImageMin.y == 50.0f);
+	CHECK(recorded.ImageSize.x == 800.0f);
+	CHECK(recorded.ImageSize.y == 400.0f);
+	CHECK(recorded.RenderSize.x == 1600.0f);
+	CHECK(recorded.RenderSize.y == 800.0f);
+
+	studio::ViewportCameraProbe::SetViewerCamera(
+		editor, 0, engine::core::CFrame(engine::core::Vector3{4.0f, 0.0f, 0.0f}), 0.61f
+	);
+	const studio::PanelProjection overlay = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 overlayPoint{};
+	REQUIRE(overlay.WorldToPanel({1.0f, 0.0f, -10.0f}, overlayPoint));
+
+	CHECK(overlay.Eye == recorded.Eye);
+	CHECK(overlayPoint.x == recordedPoint.x);
+	CHECK(overlayPoint.y == recordedPoint.y);
+}
+
+TEST_CASE(
 	"a replica viewport retains its local camera field of view", "[studio][viewports][camera][render]"
 ) {
 	studio::Editor editor;
@@ -234,6 +328,25 @@ TEST_CASE(
 	studio::ViewportCameraProbe::Present(editor, 0);
 
 	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
+	CHECK(studio::ViewportCameraProbe::PresentedWorld(editor, 0) == replica);
+
+	// The client image remains on screen until its next round-robin turn. Its
+	// overlay must keep the replica camera that produced that image, even after
+	// the live replica camera has moved and changed its lens.
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 40.0f, 20.0f, 800.0f, 400.0f, 1600, 800);
+	const studio::PanelProjection recorded = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 recordedPoint{};
+	REQUIRE(recorded.WorldToPanel({1.0f, 0.0f, -10.0f}, recordedPoint));
+
+	studio::ViewportCameraProbe::SetReplicaCamera(
+		editor, replica, engine::core::CFrame(engine::core::Vector3{4.0f, 0.0f, 0.0f}), 1.19f
+	);
+	const studio::PanelProjection overlay = studio::ViewportCameraProbe::Projection(editor, 0);
+	glm::vec2 overlayPoint{};
+	REQUIRE(overlay.WorldToPanel({1.0f, 0.0f, -10.0f}, overlayPoint));
+	CHECK(overlay.Eye == recorded.Eye);
+	CHECK(overlayPoint.x == recordedPoint.x);
+	CHECK(overlayPoint.y == recordedPoint.y);
 }
 
 TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewports][render]") {

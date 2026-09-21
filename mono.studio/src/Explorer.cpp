@@ -556,6 +556,10 @@ namespace studio {
 				// indentation, so the tree does not jump as the field opens and
 				// closes - and it keeps the clipper's rows uniform, which is
 				// what lets it skip by arithmetic.
+				// The trailing insert control is submitted later on this row. The
+				// tree node must release its full-width hit box so that control can
+				// own a click in the overlap.
+				ImGui::SetNextItemAllowOverlap();
 				ImGui::TreeNodeEx("##node", flags, "%s", renaming ? "" : row.Text);
 
 				// **Everything that asks about "the last item" happens here,
@@ -567,6 +571,14 @@ namespace studio {
 				// which is the good version of this mistake.
 				const bool toggled = ImGui::IsItemToggledOpen();
 				const bool hovered = ImGui::IsItemHovered();
+				const ImVec2 rowMin = ImGui::GetItemRectMin();
+				const float insertButtonSize = ImGui::GetFrameHeight();
+				const float insertButtonX =
+					ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - insertButtonSize;
+				const bool insertButtonHovered = ImGui::IsMouseHoveringRect(
+					ImVec2(insertButtonX, rowMin.y),
+					ImVec2(insertButtonX + insertButtonSize, rowMin.y + insertButtonSize)
+				);
 
 				if (toggled) {
 					const auto found = std::find(tree.Open.begin(), tree.Open.end(), row.Instance);
@@ -669,8 +681,8 @@ namespace studio {
 				// that happened to reuse an ImGui tree id could open the wrong picker
 				// and leave the tree node handling the click as an expand/collapse.
 				ImGui::PushID(static_cast<int>(row.Instance.Id));
-				if (hovered) {
-					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
+				if (hovered || insertButtonHovered) {
+					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - insertButtonSize);
 					if (ImGui::SmallButton("+##insert-hover")) {
 						ImGui::OpenPopup("##insert-hover-popup");
 					}

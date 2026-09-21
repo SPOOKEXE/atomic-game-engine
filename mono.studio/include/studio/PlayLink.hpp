@@ -135,7 +135,7 @@ namespace studio {
 	// @since v0.7
 	class PlayLink {
 	  public:
-		PlayLink() = default;
+		PlayLink();
 		~PlayLink() = default;
 
 		PlayLink(const PlayLink &) = delete;

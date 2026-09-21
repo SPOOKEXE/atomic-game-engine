@@ -183,6 +183,10 @@ function MagicRuntime.build(compiled: any, parent: Instance?, name: string?, muz
 	local part = Instance.new("Part")
 	part.Name = name or "Projectile"
 	part.Anchored = true
+	-- Anchored clears Motion, so Kinematic must follow it. Script then owns the
+	-- projectile transform while Kinematic keeps its trigger and query behaviour
+	-- in the dynamic broadphase.
+	part.Kinematic = true
 	-- A projectile is a visual: it must not shove the terrain it is about to
 	-- crater, and nothing in this slice reads its collisions.
 	part.CanCollide = false

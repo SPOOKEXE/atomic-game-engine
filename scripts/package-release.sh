@@ -229,9 +229,23 @@ echo "$archive"
 # shape somebody chasing a report unpacks anyway.
 case $platform:$flavour in
 	linux-*:)
-		"$root/scripts/package-appimage.sh" client "$work/$name/client" "$version" "$absolute"
-		"$root/scripts/package-appimage.sh" studio "$work/$name/studio" "$version" "$absolute"
-		"$root/scripts/package-appimage.sh" launcher "$work/$name/launcher" "$version" "$absolute" \
+		# appimagetool is identical for the three independent images. Download it
+		# once into this package work tree, then each isolated AppDir can use it.
+		appimage_tool="$work/appimagetool"
+		arch=$(uname -m)
+		curl -fsSL -o "$appimage_tool" \
+			"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
+		chmod +x "$appimage_tool"
+
+		# appimagetool extracts into a shared temporary location. Concurrent calls
+		# can corrupt that extraction, so the independent AppDirs still run through
+		# one tool process at a time.
+		APPIMAGETOOL="$appimage_tool" "$root/scripts/package-appimage.sh" \
+			client "$work/$name/client" "$version" "$absolute"
+		APPIMAGETOOL="$appimage_tool" "$root/scripts/package-appimage.sh" \
+			studio "$work/$name/studio" "$version" "$absolute"
+		APPIMAGETOOL="$appimage_tool" "$root/scripts/package-appimage.sh" \
+			launcher "$work/$name/launcher" "$version" "$absolute" \
 			"$work/$name/client" "$work/$name/studio" "$work/$name/server" "$work/$name/cdn"
 		;;
 esac

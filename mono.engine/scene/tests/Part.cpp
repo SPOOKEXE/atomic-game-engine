@@ -30,6 +30,7 @@ using engine::ecs::ClassId;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
+using engine::scene::BodyKind;
 using engine::scene::Bounds;
 using engine::scene::Collider;
 using engine::scene::LocalTransparencyOf;
@@ -432,6 +433,37 @@ TEST_CASE("CanQuery controls participation in spatial queries", "[scene][part]")
 	CHECK(Read<bool>(store, part, "CanQuery"));
 	REQUIRE(Write(store, part, "CanQuery", false));
 	CHECK_FALSE(store.Get<Collider>(part)->CanQuery);
+}
+
+TEST_CASE("Kinematic gives a script-owned part a dynamic broadphase proxy", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	CHECK(Read<bool>(store, part, "Anchored"));
+	CHECK_FALSE(Read<bool>(store, part, "Kinematic"));
+	CHECK_FALSE(store.Has<Motion>(part));
+
+	REQUIRE(Write(store, part, "Kinematic", true));
+	CHECK_FALSE(Read<bool>(store, part, "Anchored"));
+	CHECK(Read<bool>(store, part, "Kinematic"));
+	CHECK(store.Has<Simulated>(part));
+	CHECK(store.Has<Motion>(part));
+	CHECK(store.Get<RigidBody>(part)->Kind == BodyKind::Kinematic);
+	CHECK(store.Get<Motion>(part)->Linear == Vector3::Zero);
+
+	// `Anchored` owns the Simulated/Motion pair. Re-applying it intentionally
+	// removes the kinematic proxy, so scripts enable Kinematic after Anchored.
+	REQUIRE(Write(store, part, "Anchored", true));
+	CHECK(Read<bool>(store, part, "Anchored"));
+	CHECK_FALSE(Read<bool>(store, part, "Kinematic"));
+	CHECK_FALSE(store.Has<Motion>(part));
+
+	REQUIRE(Write(store, part, "Kinematic", true));
+	REQUIRE(Write(store, part, "Kinematic", false));
+	CHECK_FALSE(Read<bool>(store, part, "Kinematic"));
+	CHECK_FALSE(Read<bool>(store, part, "Anchored"));
+	CHECK(store.Has<Motion>(part));
+	CHECK(store.Get<RigidBody>(part)->Kind == BodyKind::Dynamic);
 }
 
 TEST_CASE("a replica refuses a property write", "[scene][part]") {

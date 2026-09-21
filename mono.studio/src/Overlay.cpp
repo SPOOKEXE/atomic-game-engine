@@ -256,7 +256,9 @@ namespace studio {
 		// no texture for it to disagree with.
 		const ViewportState *extra = ExtraAt(viewport);
 		CFrame frame = extra != nullptr ? extra->Frame : CameraFrame;
-		if (slot.Presented) {
+		const WorldId shown = ViewportWorld(viewport);
+		const bool usePresentedCamera = slot.Presented && slot.PresentedWorld == shown;
+		if (usePresentedCamera) {
 			frame = slot.PresentedFrame;
 		}
 
@@ -267,7 +269,7 @@ namespace studio {
 		// frame alone. Reproducing `FarPlane = max(FarPlane, reach * 40)` here
 		// would be a second copy of a number that cannot affect the answer.
 		engine::scene::Camera lens;
-		if (slot.Presented && slot.PresentedFieldOfView > 0.0f) {
+		if (usePresentedCamera && slot.PresentedFieldOfView > 0.0f) {
 			// The lens the picture was taken with, for the same reason as the
 			// frame above: a followed camera's field of view is its own, and
 			// reading this frame's while the texture holds last frame's is the
@@ -275,13 +277,12 @@ namespace studio {
 			lens.FieldOfViewRadians = slot.PresentedFieldOfView;
 		}
 
-		const WorldId shown = ViewportWorld(viewport);
 		const Entity follow = extra != nullptr ? extra->Follow : FollowCamera;
 
 		// A followed camera brings its own field of view, exactly as
 		// `PresentWorld` honours it - looking through a camera while ignoring
 		// its lens is looking through something else.
-		if (follow != NULL_ENTITY && shown.IsValid() && Universe != nullptr) {
+		if (!usePresentedCamera && follow != NULL_ENTITY && shown.IsValid() && Universe != nullptr) {
 			Universe->Enter(shown, [&](Store &store) {
 				if (store.Alive(follow)) {
 					if (const auto *component = store.Get<engine::scene::Camera>(follow)) {
@@ -305,7 +306,7 @@ namespace studio {
 		// overlay pass that placed a camera would be a second author of the
 		// eye - running in the imgui half of the frame, where the store is being
 		// read by three other passes.
-		if (shown.IsValid() && Universe != nullptr && IsReplicaWorld(shown)) {
+		if (!usePresentedCamera && shown.IsValid() && Universe != nullptr && IsReplicaWorld(shown)) {
 			Universe->Enter(shown, [&](Store &store) {
 				const auto *active = store.Resource<engine::scene::ActiveCamera>();
 				if (active == nullptr || !store.Alive(active->Entity)) {
@@ -320,13 +321,17 @@ namespace studio {
 			});
 		}
 
+		const float renderWidth = slot.RenderWidth > 0 ? static_cast<float>(slot.RenderWidth) : slot.Width;
+		const float renderHeight =
+			slot.RenderHeight > 0 ? static_cast<float>(slot.RenderHeight) : slot.Height;
 		const engine::scene::CameraMatrices matrices =
-			engine::scene::ResolveCamera(frame, lens, slot.Width / slot.Height);
+			engine::scene::ResolveCamera(frame, lens, renderWidth / renderHeight);
 
 		projection.Matrix = matrices.ViewProjection;
 		projection.Eye = frame.Position;
 		projection.ImageMin = glm::vec2(slot.X, slot.Y);
 		projection.ImageSize = glm::vec2(slot.Width, slot.Height);
+		projection.RenderSize = glm::vec2(renderWidth, renderHeight);
 		projection.Near = lens.NearPlane;
 		return projection;
 	}

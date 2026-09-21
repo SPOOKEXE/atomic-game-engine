@@ -2400,6 +2400,9 @@ namespace studio {
 			OverlaySlot &slot = Overlays[viewport];
 			slot.PresentedFrame = eye;
 			slot.PresentedFieldOfView = lens.FieldOfViewRadians;
+			// `visual` can be a replica's authority while this viewport's camera
+			// belongs to the replica. Match `ViewportWorld` in ProjectionFor.
+			slot.PresentedWorld = shown;
 			slot.Presented = true;
 		}
 
@@ -2964,6 +2967,11 @@ namespace studio {
 				&Interface
 			);
 		}
+		if (ViewportResults.size() <= viewport) {
+			ViewportResults.resize(viewport + 1);
+		}
+		ViewportResults[viewport].Triangles =
+			UpdateSceneTriangleCount(ViewportResults[viewport].Triangles, LastFrame, damage.Scene);
 		if (LastFrame.Submitted) {
 			LastGraphViewport = viewport;
 			LastGraphRenderGeneration = Renderer.RenderGeneration();

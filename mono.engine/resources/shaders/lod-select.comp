@@ -93,7 +93,9 @@ void main() {
 		if (distance >= view.Distances.x) eligible = 1u;
 		if (distance >= view.Distances.y) eligible = 2u;
 		if (distance >= view.Distances.z) eligible = 3u;
-		chosen = min(chosen, eligible);
+		// Distance bands are a minimum coarse level. `min` pinned a detailed
+		// projected-area choice at LOD 0 forever, making the sliders inert.
+		chosen = max(chosen, min(eligible, levelCount - 1u));
 	}
 
 	Selection clusterSelection = selection;

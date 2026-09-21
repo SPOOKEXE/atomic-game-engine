@@ -1182,6 +1182,8 @@ namespace engine::render {
 			uint32_t InstanceCapacity = 0;
 			uint32_t ArgumentCapacity = 0;
 			uint32_t TransferCapacity = 0;
+			// CPU mirror of the selected pages for FrameResult's triangle estimate.
+			std::vector<uint8_t> SelectedLevels;
 			bool Ready = false;
 		};
 		LodState Lod;

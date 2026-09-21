@@ -1590,6 +1590,7 @@ declare extern type BasePart extends PVInstance with
 	EmissiveStrength: number
 	EmissiveTint: Color3
 	Friction: number
+	Kinematic: boolean
 	LinearDamping: number
 	read LocalTransparency: number
 	Locked: boolean

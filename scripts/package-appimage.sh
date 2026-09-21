@@ -117,11 +117,21 @@ arch=$(uname -m)
 
 # appimagetool is itself an AppImage, and GitHub runners have no FUSE. The
 # extract-and-run flag unpacks it to a temporary directory instead of mounting,
-# which is the supported answer and not a workaround.
-tool=$work/appimagetool
-curl -fsSL -o "$tool" \
-	"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
-chmod +x "$tool"
+# which is the supported answer and not a workaround. The release packager
+# supplies one shared downloaded tool for its three isolated image builds;
+# standalone calls retain the self-contained download path.
+tool=${APPIMAGETOOL:-}
+if [ -n "$tool" ]; then
+	if [ ! -x "$tool" ]; then
+		echo "APPIMAGETOOL is not executable: $tool" >&2
+		exit 1
+	fi
+else
+	tool=$work/appimagetool
+	curl -fsSL -o "$tool" \
+		"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
+	chmod +x "$tool"
+fi
 
 mkdir -p "$outdir"
 output="$outdir/atomic-$program-$version-linux-$arch.AppImage"

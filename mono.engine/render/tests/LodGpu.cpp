@@ -151,17 +151,20 @@ TEST_CASE("gpu projected area selects an authored mesh level", "[render][gpu][lo
 	const size_t coarsePixels = redPixels(coarse);
 	INFO("detailed red pixels: " << detailedPixels << ", coarse red pixels: " << coarsePixels);
 	CHECK(detailedPixels > coarsePixels + 100);
+	CHECK(detailedFrame.Triangles > coarseFrame.Triangles);
 
-	// Studio distance limits may keep a nearby mesh detailed even when the
-	// projected-area rule would otherwise choose its cheapest level.
+	// Distance limits are a coarse-level floor. Keep projected area on level
+	// zero, then prove the same mesh reaches its last resident page by distance.
+	instance.LodTargetQuadArea = 1.0f;
 	view.LodMinimumDistances = {30.0f, 60.0f, 120.0f};
 	view.Damage.Objects = true;
-	const auto distanceFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-	REQUIRE(distanceFrame.Ran(core::Name("select-lod")));
+	const auto nearbyFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(nearbyFrame.Ran(core::Name("select-lod")));
 	const CapturedImage nearby = CaptureResource(
 		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
 	);
 	CHECK(redPixels(nearby) == detailedPixels);
+	CHECK(nearbyFrame.Triangles == detailedFrame.Triangles);
 
 	view.LodMinimumDistances = {1.0f, 2.0f, 3.0f};
 	view.Damage.Objects = true;
@@ -171,4 +174,5 @@ TEST_CASE("gpu projected area selects an authored mesh level", "[render][gpu][lo
 		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
 	);
 	CHECK(redPixels(distant) == coarsePixels);
+	CHECK(farFrame.Triangles == coarseFrame.Triangles);
 }

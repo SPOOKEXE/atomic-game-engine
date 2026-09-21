@@ -438,6 +438,59 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Kinematic: whether a script or animation moves this part.
+		//
+		// A kinematic body has `Motion`, so the broad phase keeps its proxy out of
+		// the static index, and `Simulated`, so it keeps the engine's established
+		// awake-body archetype. `RigidBody::Kind` is the ownership boundary: the
+		// solver gives it infinite mass and never writes a contact velocity back.
+		// This is the right state for a moving platform, scripted projectile, or
+		// editor gizmo. It can contact bodies and answer queries without forcing a
+		// static-index rebuild after each script position write.
+		//
+		// `Anchored` is deliberately false in this state. That property is only
+		// the inverse of `Simulated`; its one meaning must stay intact while
+		// `Kinematic` names the separate question of who moves the body.
+		PropertyDescriptor KinematicProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Kinematic");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern(
+				{ecs::Components::Of<Simulated>(),
+				 ecs::Components::Of<Motion>(),
+				 ecs::Components::Of<RigidBody>()}
+			);
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RigidBody *body = store.Get<RigidBody>(instance);
+				*static_cast<bool *>(out) = body != nullptr && store.Has<Simulated>(instance) &&
+											store.Has<Motion>(instance) && body->Kind == BodyKind::Kinematic;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				RigidBody *body = store.GetMutable<RigidBody>(instance);
+				if (body == nullptr) {
+					return false;
+				}
+				if (*static_cast<const bool *>(value)) {
+					// Changing ownership starts with no velocity. A script can explicitly
+					// set one afterwards when it wants the integrator to advance it.
+					body->Kind = BodyKind::Kinematic;
+					store.Set(instance, Simulated{});
+					store.Set(instance, Motion{});
+				} else if (body->Kind == BodyKind::Kinematic) {
+					body->Kind = BodyKind::Dynamic;
+				}
+				return true;
+			};
+
+			return property;
+		}
+
 		// CollisionGroup: a name over `Collider::Layer`.
 		//
 		// **The bits stay anonymous in `scene` and the naming lives in
@@ -1647,6 +1700,8 @@ namespace engine::scene {
 
 		template <class Component, size_t Level> PropertyDescriptor LodRatioProperty(const char *name) {
 			static_assert(Level > 0 && Level < LOD_LEVELS);
+			// Automatic LOD uses this as the retained source-triangle fraction for
+			// decimation. It is not a distance threshold.
 			PropertyDescriptor property;
 			property.Name = core::Name(name);
 			property.Type = PropertyType::Float;
@@ -3057,6 +3112,7 @@ namespace engine::scene {
 			);
 			ecs::Classes::Property<&AuthoredAffordance::Enabled>(basePart, "AffordanceEnabled");
 			ecs::Classes::Computed(basePart, AnchoredProperty());
+			ecs::Classes::Computed(basePart, KinematicProperty());
 
 			// The plain fields. `Color` is a rename rather than a conversion -
 			// `Visual::Tint` is what a script calls `Color`. `Surface::Material`,

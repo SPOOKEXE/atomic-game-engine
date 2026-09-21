@@ -56,11 +56,12 @@ namespace studio {
 					}
 				}
 			}
-			return (maximumX - minimumX) * panel.ImageSize.x * 0.5f * (maximumY - minimumY) *
-				   panel.ImageSize.y * 0.5f;
+			const glm::vec2 pixels =
+				panel.RenderSize.x > 0.0f && panel.RenderSize.y > 0.0f ? panel.RenderSize : panel.ImageSize;
+			return (maximumX - minimumX) * pixels.x * 0.5f * (maximumY - minimumY) * pixels.y * 0.5f;
 		}
 
-		uint8_t DistanceCap(float distance, const std::array<float, 3> &bands) {
+		uint8_t DistanceFloor(float distance, const std::array<float, 3> &bands) {
 			for (uint8_t level = 0; level < bands.size(); level++) {
 				if (!(distance >= bands[level])) {
 					return level;
@@ -116,6 +117,10 @@ namespace studio {
 		const float area = ProjectedArea(panel, transform->Frame, bounds->HalfExtent);
 		const uint8_t selected = engine::scene::SelectLevel(lod, *catalogue, visual->Mesh, area);
 		const float distance = (transform->Frame.Position - panel.Eye).Magnitude();
-		return std::min(selected, DistanceCap(distance, distanceBands));
+		// Distance preferences force a minimum coarse level. The renderer's
+		// lod-select.comp applies the same max, so the label follows its page.
+		return std::min<uint8_t>(
+			std::max(selected, DistanceFloor(distance, distanceBands)), static_cast<uint8_t>(lod.Levels - 1)
+		);
 	}
 }

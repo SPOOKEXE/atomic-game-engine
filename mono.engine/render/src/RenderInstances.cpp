@@ -495,6 +495,8 @@ namespace engine::render {
 
 				BindInstanceBuffers(pass, Lod.Indices, Lod.Instances, Lod.SkinOffsets);
 				const LodDraw &draw = LodFrame.Draws[lodIndex];
+				const uint32_t selectedLevel =
+					lodIndex < Lod.SelectedLevels.size() ? Lod.SelectedLevels[lodIndex] : 0;
 				const bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;
 				for (uint32_t level = 0; level < draw.LevelCount; ++level) {
 					const LodDrawLevel &levelDraw = draw.Levels[level];
@@ -522,7 +524,7 @@ namespace engine::render {
 							simpleShadow,
 							Lod.Arguments,
 							lodArgument++,
-							level == 0
+							level == selectedLevel
 						);
 					};
 					for (const LodDrawRange &cluster : draw.Clusters[level]) {

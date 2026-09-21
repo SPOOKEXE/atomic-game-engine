@@ -260,7 +260,8 @@ namespace studio {
 		// projected-area choice inside that range.
 		bool EnableLODCulling = true;
 
-		// The ordered distance caps for the renderer's LOD levels, in studs.
+		// The ordered distances that force LOD 1, 2, then 3 as the minimum coarse
+		// level, in studs.
 		// They stay in preferences because they tune the editor's view rather than
 		// the authored world.
 		//@{
@@ -470,12 +471,13 @@ namespace studio {
 		bool Save() const;
 	};
 
-	// The distance caps exactly as a render view and its Studio overlays consume them.
+	// The minimum-coarse-level distances exactly as a render view and its Studio
+	// overlays consume them.
 	// Keeping this conversion shared makes a live preference edit reach rendering,
 	// debug rings, and active-LOD labels through the same ordered values.
 	//
 	// @param preferences The current Studio preferences.
-	// @return The LOD 1, 2, and 3 distance caps in render-view order.
+	// @return The LOD 1, 2, and 3 minimum-coarse-level distances in render-view order.
 	// @since v0.25
 	std::array<float, 3> LodMinimumDistances(const Preferences &preferences);
 }

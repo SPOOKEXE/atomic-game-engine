@@ -686,6 +686,26 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
 }
 
+TEST_CASE("camera oscillation never settles the scene presentation cache", "[render][presentation][damage]") {
+	engine::scene::DrawInstance instance;
+	const std::array instances{instance};
+	engine::render::View view;
+	view.Instances = instances;
+	engine::render::ScenePresentationState state;
+	engine::render::PresentationDamageTracker tracker;
+
+	for (uint32_t iteration = 0; iteration < 512; ++iteration) {
+		view.CameraFrame.Position.Z = iteration % 2 == 0 ? 0.0f : 8.0f;
+		view.Camera.FieldOfViewRadians = iteration % 2 == 0 ? 0.61f : 0.5061455f;
+		const engine::render::PresentationSignatures signatures{
+			.Scene = engine::render::ScenePresentationSignaturesOf(view, state),
+		};
+		const engine::render::PresentationDamage damage = tracker.Inspect(signatures);
+		CHECK(damage.Scene);
+		tracker.Commit(signatures);
+	}
+}
+
 TEST_CASE(
 	"content bindings and active lens captures invalidate their rendered scene",
 	"[render][presentation][damage]"

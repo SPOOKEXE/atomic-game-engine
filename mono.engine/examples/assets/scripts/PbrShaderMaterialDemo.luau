@@ -136,6 +136,17 @@ local function ApplyMaps(part: MeshPart)
 	part.EmissiveStrength = 2.2
 end
 
+local function ConfigureLod(part: MeshPart)
+	-- These ratios describe retained decimated geometry only. Studio's distance
+	-- preferences choose when a resident coarse page becomes eligible.
+	part.AutoLodStrategy = Enum.AutoMeshLODStrategy.Decimated
+	part.AutoLodLevels = 4
+	part.AutoLod1Ratio = 0.70
+	part.AutoLod2Ratio = 0.40
+	part.AutoLod3Ratio = 0.10
+	part.AutoLodTargetQuadArea = 4
+end
+
 local function RockMesh(name: string, position: Vector3): MeshPart
 	local mesh = Instance.new("EditableMesh")
 	mesh.Name = `{name}_ReliefMesh`
@@ -176,6 +187,7 @@ local function RockMesh(name: string, position: Vector3): MeshPart
 	part.Position = position
 	part.Color = Color3.new(1, 1, 1)
 	ApplyMaps(part)
+	ConfigureLod(part)
 	part.Parent = workspace
 	return part
 end

@@ -17,6 +17,12 @@ namespace studio {
 	using engine::game::FormatValue;
 	using engine::game::ParseValue;
 	using engine::game::PropertyValue;
+
+	bool IsAutomaticLodRatioProperty(std::string_view spelling) {
+		return spelling == "Lod1Ratio" || spelling == "Lod2Ratio" || spelling == "Lod3Ratio" ||
+			   spelling == "AutoLod1Ratio" || spelling == "AutoLod2Ratio" || spelling == "AutoLod3Ratio";
+	}
+
 	// Drags at a rate that suits how big the number already is.
 	//
 	// A fixed step makes a part's `Transparency` unusable at 0.01 per pixel

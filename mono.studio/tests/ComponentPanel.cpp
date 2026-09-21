@@ -136,6 +136,50 @@ namespace {
 		ImGui::Render();
 	}
 
+	struct ExplorerInsertOverlap {
+		ImVec2 Button;
+		bool Pressed = false;
+		bool PopupOpen = false;
+
+		void Frame(const Mouse &mouse = {}) {
+			ImGuiIO &io = ImGui::GetIO();
+			io.AddMousePosEvent(mouse.X, mouse.Y);
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, mouse.Down);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+			ImGui::Begin("Explorer");
+
+			ImGui::SetNextItemAllowOverlap();
+			ImGui::TreeNodeEx(
+				"##row",
+				ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
+					ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Leaf,
+				"InsertTarget"
+			);
+			const ImVec2 row = ImGui::GetItemRectMin();
+			const float side = ImGui::GetFrameHeight();
+			const float x = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - side;
+			Button = ImVec2(x + side * 0.5f, row.y + side * 0.5f);
+			if (ImGui::IsItemHovered() ||
+				ImGui::IsMouseHoveringRect(ImVec2(x, row.y), ImVec2(x + side, row.y + side))) {
+				ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - side);
+				Pressed |= ImGui::SmallButton("+##insert-hover");
+				if (Pressed) {
+					ImGui::OpenPopup("##insert-hover-popup");
+				}
+			}
+			if (ImGui::BeginPopup("##insert-hover-popup")) {
+				ImGui::BeginChild("##class-list", ImVec2(220.0f, 260.0f));
+				ImGui::EndChild();
+				PopupOpen = true;
+				ImGui::EndPopup();
+			}
+			ImGui::End();
+			ImGui::Render();
+		}
+	};
+
 	bool ReadEnabled(const studio::Editor &editor, WorldId world, Entity instance, ComponentId component) {
 		bool enabled = false;
 		editor.Universe->Enter(world, [&](Store &store) {
@@ -176,6 +220,34 @@ TEST_CASE("a removed viewport restores and cancels a surface gesture", "[studio]
 	editor.Universe->Enter(world, [&](Store &store) {
 		CHECK(store.Get<engine::scene::Transform>(entity)->Frame.Position == before.Position);
 	});
+}
+
+TEST_CASE("automatic LOD ratio widgets include legacy and explicit aliases", "[studio][components][lod]") {
+	CHECK(studio::IsAutomaticLodRatioProperty("Lod1Ratio"));
+	CHECK(studio::IsAutomaticLodRatioProperty("Lod2Ratio"));
+	CHECK(studio::IsAutomaticLodRatioProperty("Lod3Ratio"));
+	CHECK(studio::IsAutomaticLodRatioProperty("AutoLod1Ratio"));
+	CHECK(studio::IsAutomaticLodRatioProperty("AutoLod2Ratio"));
+	CHECK(studio::IsAutomaticLodRatioProperty("AutoLod3Ratio"));
+	CHECK_FALSE(studio::IsAutomaticLodRatioProperty("CustomLod1Ratio"));
+	CHECK_FALSE(studio::IsAutomaticLodRatioProperty("LodTargetQuadArea"));
+}
+
+TEST_CASE("the explorer insert button opens its picker over a full-width tree row", "[studio][explorer]") {
+	Context context;
+	ExplorerInsertOverlap overlap;
+	overlap.Frame();
+
+	// The real row is full-width. The button must remain alive when the pointer
+	// enters its trailing overlap, then accept a normal click and open its picker.
+	overlap.Frame(Mouse{.X = 80.0f, .Y = overlap.Button.y});
+	overlap.Frame(Mouse{.X = overlap.Button.x, .Y = overlap.Button.y});
+	overlap.Frame(Mouse{.X = overlap.Button.x, .Y = overlap.Button.y});
+	overlap.Frame(Mouse{.X = overlap.Button.x, .Y = overlap.Button.y, .Down = true});
+	overlap.Frame(Mouse{.X = overlap.Button.x, .Y = overlap.Button.y});
+
+	CHECK(overlap.Pressed);
+	CHECK(overlap.PopupOpen);
 }
 
 TEST_CASE("the Components panel shows metadata and edits exposed values", "[studio][components]") {

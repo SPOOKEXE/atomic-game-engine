@@ -264,7 +264,7 @@ namespace studio {
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Skip mesh LOD clusters outside the viewport.");
 		}
-		ImGui::TextDisabled("Distance caps preserve the renderer's projected-area LOD choice.");
+		ImGui::TextDisabled("Distances force coarser LODs while preserving the projected-area choice.");
 
 		constexpr float LOD_DISTANCE_GAP = 0.001f;
 		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));

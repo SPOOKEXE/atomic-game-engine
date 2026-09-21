@@ -1123,7 +1123,12 @@ namespace studio {
 		if (ViewportResults.size() <= index) {
 			ViewportResults.resize(index + 1);
 		}
+		// The completed retained frame is intentionally older than the result of
+		// the redraw Studio just submitted. Keep the live scene tally beside its
+		// viewport rather than rolling it back while that image waits on its fence.
+		const uint64_t triangles = ViewportResults[index].Triangles;
 		ViewportResults[index] = Renderer.SceneFrameResult(index);
+		ViewportResults[index].Triangles = triangles;
 		ViewportImageRect imageRect{glm::vec2(0.0f), glm::vec2(size.x, size.y)};
 		if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
 			// Keep the last complete frame visible while the new target is being
@@ -1171,6 +1176,8 @@ namespace studio {
 			slot.Y = origin.y + imageRect.Min.y;
 			slot.Width = imageRect.Size.x;
 			slot.Height = imageRect.Size.y;
+			slot.RenderWidth = extent.DrawnWidth > 0 ? extent.DrawnWidth : target.Width;
+			slot.RenderHeight = extent.DrawnHeight > 0 ? extent.DrawnHeight : target.Height;
 			slot.Drawn = true;
 		}
 

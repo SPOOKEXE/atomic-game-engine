@@ -14,6 +14,7 @@
 #include <engine/scene/DrawInstance.hpp>
 
 #include <SDL3/SDL_gpu.h>
+#include <glm/geometric.hpp>
 #include <glm/mat3x3.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
@@ -57,6 +58,76 @@ namespace engine::render {
 	inline bool
 	ClusterVisibleAtSelectedLevel(uint32_t selectedLevel, uint32_t clusterLevel, float projectedArea) {
 		return selectedLevel == clusterLevel && projectedArea > 0.0f && !std::isnan(projectedArea);
+	}
+
+	// Mirrors lod-select.comp for the CPU frame statistics. The device still owns
+	// command visibility. This only chooses the page whose submitted triangles
+	// the diagnostics report, avoiding a GPU-to-CPU readback just for a counter.
+	inline float ProjectedLodArea(
+		const GpuLodSelection &selection, const glm::mat4 &viewProjection, uint32_t width, uint32_t height
+	) {
+		glm::vec2 low{1.0f};
+		glm::vec2 high{-1.0f};
+		for (uint32_t corner = 0; corner < 8; ++corner) {
+			const glm::vec3 signs{
+				(corner & 1u) != 0 ? 1.0f : -1.0f,
+				(corner & 2u) != 0 ? 1.0f : -1.0f,
+				(corner & 4u) != 0 ? 1.0f : -1.0f,
+			};
+			const glm::vec3 point =
+				glm::vec3(selection.CentreTarget) + glm::vec3(selection.ExtentLevels) * signs;
+			const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
+			if (clip.w <= 1e-4f) {
+				return std::numeric_limits<float>::max();
+			}
+			const glm::vec2 ndc = glm::clamp(glm::vec2(clip) / clip.w, glm::vec2(-1.0f), glm::vec2(1.0f));
+			low = glm::min(low, ndc);
+			high = glm::max(high, ndc);
+		}
+		const glm::vec2 pixels = glm::max(high - low, glm::vec2(0.0f)) *
+								 glm::vec2(static_cast<float>(width), static_cast<float>(height)) * 0.5f;
+		return pixels.x * pixels.y;
+	}
+
+	// Applies area selection first, then the optional distance floor. Distance
+	// bands are a minimum coarse level, so the two answers combine with max.
+	inline uint8_t SelectAuthoredLodLevel(
+		const GpuLodSelection &selection,
+		const glm::mat4 &viewProjection,
+		core::Vector3 eye,
+		std::array<float, 3> minimumDistances,
+		uint32_t width,
+		uint32_t height
+	) {
+		const uint32_t levelCount = std::clamp(
+			static_cast<uint32_t>(selection.ExtentLevels.w), 1u, static_cast<uint32_t>(scene::LOD_LEVELS)
+		);
+		const float area = ProjectedLodArea(selection, viewProjection, width, height);
+		uint32_t chosen = 0;
+		if (area > 0.0f && !std::isnan(area)) {
+			chosen = levelCount - 1;
+			for (uint32_t level = 0; level < levelCount; ++level) {
+				const uint32_t triangles = selection.Triangles[level];
+				if (triangles != 0 && area / static_cast<float>(triangles) >= selection.CentreTarget.w) {
+					chosen = level;
+					break;
+				}
+			}
+		}
+		const bool validDistances =
+			minimumDistances[0] > 0.0f && std::isfinite(minimumDistances[0]) &&
+			std::isfinite(minimumDistances[1]) && std::isfinite(minimumDistances[2]) &&
+			minimumDistances[0] < minimumDistances[1] && minimumDistances[1] < minimumDistances[2];
+		if (!validDistances) {
+			return static_cast<uint8_t>(chosen);
+		}
+		const float distance =
+			glm::length(glm::vec3(selection.CentreTarget) - glm::vec3(eye.X, eye.Y, eye.Z));
+		uint32_t floor = 0;
+		if (distance >= minimumDistances[0]) floor = 1;
+		if (distance >= minimumDistances[1]) floor = 2;
+		if (distance >= minimumDistances[2]) floor = 3;
+		return static_cast<uint8_t>(std::max(chosen, std::min(floor, levelCount - 1)));
 	}
 
 	struct LodDrawLevel {

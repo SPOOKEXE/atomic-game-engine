@@ -42,6 +42,7 @@ for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 
 if "%PRESET%"=="" set "PRESET=dev"
 set "BUILD=%ROOT%\.cache\build\%PRESET%"
+set "CCACHE_STATSLOG=%BUILD%\ccache-stats.log"
 
 REM The studio is configured only where both halves exist: it needs the renderer
 REM to draw with and the server library to host "Play" with, so under the

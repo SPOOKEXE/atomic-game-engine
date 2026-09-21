@@ -1,5 +1,7 @@
 #include <engine/render/Overlay.hpp>
 
+#include <engine/core/Profiling.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -86,6 +88,7 @@ namespace engine::render {
 		const size_t stride = static_cast<size_t>(Width) * BYTES_PER_PIXEL;
 		const size_t run = static_cast<size_t>(right - left) * BYTES_PER_PIXEL;
 
+		ENGINE_PROFILE_CAT("overlay clear pixels", core::ProfileCategory::Render);
 		for (int row = top; row < bottom; row++) {
 			uint8_t *start = Pixels.data() + static_cast<size_t>(row) * stride +
 							 static_cast<size_t>(left) * BYTES_PER_PIXEL;
@@ -196,15 +199,21 @@ namespace engine::render {
 		// The first row the slow way, then every other row is a copy of it. One
 		// pass over the rectangle at memcpy speed, rather than a four-byte
 		// read-modify-write per pixel.
-		for (size_t offset = 0; offset < span; offset += BYTES_PER_PIXEL) {
-			std::memcpy(first + offset, pattern, BYTES_PER_PIXEL);
+		{
+			ENGINE_PROFILE_CAT("overlay fill seed row", core::ProfileCategory::Render);
+			for (size_t offset = 0; offset < span; offset += BYTES_PER_PIXEL) {
+				std::memcpy(first + offset, pattern, BYTES_PER_PIXEL);
+			}
 		}
 
-		for (int row = top + 1; row < bottom; row++) {
-			uint8_t *destination = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
+		{
+			ENGINE_PROFILE_CAT("overlay fill rows", core::ProfileCategory::Render);
+			for (int row = top + 1; row < bottom; row++) {
+				uint8_t *destination = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
 													static_cast<size_t>(left)) *
 													   BYTES_PER_PIXEL;
-			std::memcpy(destination, first, span);
+				std::memcpy(destination, first, span);
+			}
 		}
 	}
 
@@ -235,6 +244,7 @@ namespace engine::render {
 		// started with - `(c * 255 + 0 + 127) / 255` is `c` for every c in 0..255,
 		// exactly, so this is the same bytes by a shorter route.
 		if (alpha == 255) {
+			ENGINE_PROFILE_CAT("overlay blend opaque", core::ProfileCategory::Render);
 			for (int row = top; row < bottom; row++) {
 				uint8_t *pixel = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
 												  static_cast<size_t>(left)) *
@@ -251,6 +261,7 @@ namespace engine::render {
 			return;
 		}
 
+		ENGINE_PROFILE_CAT("overlay blend alpha", core::ProfileCategory::Render);
 		for (int row = top; row < bottom; row++) {
 			uint8_t *pixel = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
 											  static_cast<size_t>(left)) *

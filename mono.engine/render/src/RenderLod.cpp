@@ -131,6 +131,7 @@ namespace engine::render {
 		uint32_t height
 	) {
 		Lod.Ready = false;
+		Lod.SelectedLevels.clear();
 		if (LodFrame.Selections.empty()) {
 			return true;
 		}
@@ -169,6 +170,17 @@ namespace engine::render {
 			!std::isfinite(minimumDistances[1]) || !std::isfinite(minimumDistances[2]) ||
 			minimumDistances[0] >= minimumDistances[1] || minimumDistances[1] >= minimumDistances[2]) {
 			uniforms.Distances.x = -1.0f;
+		}
+		Lod.SelectedLevels.reserve(LodFrame.Selections.size());
+		for (const GpuLodSelection &selection : LodFrame.Selections) {
+			Lod.SelectedLevels.push_back(SelectAuthoredLodLevel(
+				selection,
+				viewProjection,
+				eye,
+				{uniforms.Distances.x, uniforms.Distances.y, uniforms.Distances.z},
+				width,
+				height
+			));
 		}
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (uniforms.Counts.y + 63u) / 64u, 1, 1);

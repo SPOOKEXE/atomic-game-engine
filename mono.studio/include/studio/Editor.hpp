@@ -4295,6 +4295,14 @@ namespace studio {
 			float Height = 0.0f;
 			//@}
 
+			// Pixel extent of the target that produced this displayed image. The
+			// label's area metric uses it, while its draw coordinates use the panel
+			// rectangle above.
+			//@{
+			uint32_t RenderWidth = 0;
+			uint32_t RenderHeight = 0;
+			//@}
+
 			// Whether this panel drew at all this frame. A closed panel returns
 			// early and leaves this false.
 			bool Drawn = false;
@@ -4318,6 +4326,7 @@ namespace studio {
 			//@{
 			engine::core::CFrame PresentedFrame;
 			float PresentedFieldOfView = 0.0f;
+			engine::world::WorldId PresentedWorld;
 			bool Presented = false;
 			//@}
 		};

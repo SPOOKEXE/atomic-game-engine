@@ -1344,6 +1344,7 @@ declare interface BasePart extends PVInstance {
 	EmissiveStrength: number;
 	EmissiveTint: Color3;
 	Friction: number;
+	Kinematic: boolean;
 	LinearDamping: number;
 	readonly LocalTransparency: number;
 	Locked: boolean;
@@ -2679,6 +2680,7 @@ declare interface DataSceneService {
 	GetSignedDistanceField(request: unknown): Record<string, unknown>;
 	GetAuthoredAffordances(request: { limit: number }): Record<string, unknown>;
 }
+
 
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //

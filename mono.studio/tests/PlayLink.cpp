@@ -29,6 +29,8 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Input.hpp>
@@ -36,6 +38,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
@@ -54,6 +57,7 @@
 #include <array>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
+#include <filesystem>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <numbers>
@@ -173,6 +177,61 @@ namespace {
 			return found;
 		}
 	};
+
+	// Looks through the same two script-visible homes as the example tests. A
+	// procedural asset may be deliberately detached while it only supplies a
+	// ContentId, so restricting this to Workspace would make the test miss the
+	// exact rows PBR needs to replicate.
+	Entity InScene(Store &store, std::string_view name) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		if (workspace != engine::ecs::NULL_ENTITY) {
+			if (const Entity child = store.FindFirstChild(workspace, name, true);
+				child != engine::ecs::NULL_ENTITY) {
+				return child;
+			}
+		}
+		return store.FindFirstRoot(name);
+	}
+
+	// A Studio Play authority starts scripts after the editor has furnished its
+	// world. Keep this route separate from examples::LoadScene: that loader has
+	// a standalone scheduler and would not exercise the PlayLink boundary.
+	void StartStudioAuthorityDemo(Fixture &fixture, std::string_view scriptName) {
+		// Editor registers the complete class tree before it creates its first
+		// world. The fixture only needs components for most link cases, but these
+		// demos construct EditableImage, EditableMesh, and GravitationalLens by
+		// class name at script runtime.
+		engine::scene::RegisterSceneClasses();
+		const std::string script(scriptName);
+		fixture.Worlds.Enter(fixture.Authority, [&script](Store &store, engine::ecs::Scheduler &systems) {
+			client::InstallPresentation(store, systems, 256);
+			engine::scene::InstallServices(store);
+			engine::physics::PreparePhysicsWorld(store);
+			engine::physics::RegisterPhysicsSystems(systems);
+			engine::scene::PrepareGravity(store);
+			engine::scene::RegisterGravitySystem(systems);
+			engine::scene::RegisterOwnershipSystem(systems);
+
+			REQUIRE(
+				engine::script::MakeScript(store, engine::examples::ExamplePath(script), script) !=
+				engine::ecs::NULL_ENTITY
+			);
+			engine::script::RuntimeLimits limits;
+			limits.Role = engine::script::HostRole{.Server = true, .Client = true, .Studio = true};
+			std::string error;
+			REQUIRE(engine::game::StartWorldScripts(store, systems, limits, error) != nullptr);
+			INFO(error);
+			REQUIRE(error.empty());
+		});
+	}
+
+	struct RestoreAssets {
+		std::filesystem::path Previous = engine::core::Paths::Assets();
+
+		~RestoreAssets() {
+			engine::core::Paths::SetAssetsOverride(Previous);
+		}
+	};
 }
 
 TEST_CASE("a play link gives the run a second world", "[studio][playlink]") {
@@ -192,6 +251,118 @@ TEST_CASE("a play link gives the run a second world", "[studio][playlink]") {
 	REQUIRE(link.ReplicaWorld().IsValid());
 	CHECK(link.ReplicaWorld() != fixture.Authority);
 	CHECK(fixture.Worlds.NameOf(link.ReplicaWorld()) != fixture.Worlds.NameOf(fixture.Authority));
+}
+
+TEST_CASE("studio play carries procedural PBR content into its replica", "[studio][playlink][pbr]") {
+	// The presentation installer resolves shader paths from beside the staged
+	// test binary, while the authority script lives in the staged examples tree.
+	// That is the same split Editor::BeginRun crosses in a packaged Studio.
+	const RestoreAssets restoreAssets;
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base());
+	Fixture fixture;
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+	StartStudioAuthorityDemo(fixture, "PbrShaderMaterialDemo.luau");
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	INFO(error);
+	REQUIRE(error.empty());
+
+	// SetGeometry yields once per relief mesh. The local PlayLink budget moves
+	// 128 KiB a tick, so this also bounds a complete 4.5 MiB procedural scene
+	// arriving to less than 1.6 seconds at the editor's 60 Hz tick rate.
+	fixture.Step(link, 96);
+
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		const std::array maps{
+			"PbrDemo_Colour",
+			"PbrDemo_Normal",
+			"PbrDemo_Roughness",
+			"PbrDemo_Occlusion",
+			"PbrDemo_Height",
+			"PbrDemo_Metalness",
+			"PbrDemo_Emissive",
+		};
+		std::array<Name, std::tuple_size_v<decltype(maps)>> mapContent{};
+		for (size_t index = 0; index < maps.size(); index++) {
+			const Entity imageEntity = InScene(store, maps[index]);
+			REQUIRE(imageEntity != engine::ecs::NULL_ENTITY);
+			const auto *image = store.Get<engine::scene::EditableImage>(imageEntity);
+			REQUIRE(image != nullptr);
+			CHECK(image->Width == 256);
+			CHECK(image->Height == 256);
+			CHECK(image->Pixels.size() == static_cast<size_t>(256 * 256 * 4));
+			CHECK(image->Revision > 0);
+			mapContent[index] = engine::scene::EditableImageContentName(store, imageEntity);
+		}
+
+		for (const char *partName : {"DefaultPbr", "CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
+			const Entity meshEntity = InScene(store, std::string(partName) + "_ReliefMesh");
+			REQUIRE(meshEntity != engine::ecs::NULL_ENTITY);
+			const auto *mesh = store.Get<engine::scene::EditableMesh>(meshEntity);
+			REQUIRE(mesh != nullptr);
+			CHECK(mesh->Positions.size() == 85 * 113);
+			CHECK(mesh->Indices.size() == 84 * 112 * 6);
+			CHECK(mesh->Revision > 0);
+
+			const Entity partEntity = InScene(store, partName);
+			REQUIRE(partEntity != engine::ecs::NULL_ENTITY);
+			const auto *visual = store.Get<Visual>(partEntity);
+			const auto *appearance = store.Get<engine::scene::SurfaceAppearance>(partEntity);
+			REQUIRE(visual != nullptr);
+			REQUIRE(appearance != nullptr);
+			CHECK(visual->Mesh == engine::scene::EditableMeshContentName(store, meshEntity));
+			CHECK(
+				std::array{
+					appearance->ColourMap,
+					appearance->NormalMap,
+					appearance->RoughnessMap,
+					appearance->OcclusionMap,
+					appearance->HeightMap,
+					appearance->MetalnessMap,
+					appearance->EmissiveMap,
+				} == mapContent
+			);
+		}
+	});
+}
+
+TEST_CASE(
+	"studio play carries a gravitational lens into its replica presentation", "[studio][playlink][lens]"
+) {
+	const RestoreAssets restoreAssets;
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base());
+	Fixture fixture;
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+	StartStudioAuthorityDemo(fixture, "BlackHoleSimulator.luau");
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	INFO(error);
+	REQUIRE(error.empty());
+	// The lens travels in the Black Hole scene's first snapshot, alongside its
+	// star field and accretion shards, rather than being special-cased as a
+	// presentation-only local row.
+	fixture.Step(link, 32);
+
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		const Entity lensEntity = InScene(store, "Black Hole Lens");
+		REQUIRE(lensEntity != engine::ecs::NULL_ENTITY);
+		const auto *lens = store.Get<engine::scene::ShaderLens>(lensEntity);
+		REQUIRE(lens != nullptr);
+		CHECK(lens->Shader == Name("gravitational-lens"));
+		CHECK(lens->Radius > 20.0f);
+		CHECK(lens->InnerRadius > 0.0f);
+		CHECK(lens->Enabled);
+
+		std::array<engine::scene::ShaderLensState, 1> resolved{};
+		REQUIRE(engine::scene::ResolveShaderLenses(store, resolved) == 1);
+		CHECK(resolved[0].Shader == Name("gravitational-lens"));
+		CHECK(resolved[0].Radius == lens->Radius);
+		CHECK(resolved[0].Strength == lens->Strength);
+	});
 }
 
 TEST_CASE("each play client starts with its own predicted camera", "[studio][playlink][camera]") {
@@ -661,9 +832,11 @@ TEST_CASE(
 			engine::script::RegisterTeleportAdmission(systems);
 		});
 	}
-	// Real destination geometry makes the initial snapshot exceed one publish's
-	// eight 1 KiB chunks, without widening the link API for a test-only budget.
+	// Real destination content makes the initial snapshot exceed one local
+	// publish. The image keeps this assertion tied to the payload that used to
+	// expose the portal join budget, rather than to a test-only link setting.
 	std::vector<Entity> destinationGeometry;
+	Entity destinationImage;
 	fixture.Worlds.Enter(destination, [&](Store &store) {
 		for (int index = 0; index < 128; ++index) {
 			PartDesc part;
@@ -675,6 +848,14 @@ TEST_CASE(
 			store.SetInstanceName(entity, "ArrivalGeometry" + std::to_string(index));
 			destinationGeometry.push_back(entity);
 		}
+		destinationImage = store.CreateInstance(engine::scene::EditableImageClass(), "ArrivalImage");
+		REQUIRE(destinationImage != engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::ResizeEditableImage(store, destinationImage, 1024, 1024));
+		auto *image = store.GetMutable<engine::scene::EditableImage>(destinationImage);
+		REQUIRE(image != nullptr);
+		for (size_t index = 0; index < image->Pixels.size(); index++)
+			image->Pixels[index] = static_cast<uint8_t>(index);
+		image->Revision++;
 	});
 	PlayLink departing;
 	PlayLink resident;
@@ -748,6 +929,8 @@ TEST_CASE(
 	REQUIRE(joining.IsValid());
 	fixture.Worlds.Enter(joining, [&](const Store &store) {
 		CHECK_FALSE(store.Has<Transform>(destinationGeometry.back()));
+		const auto *image = store.Get<engine::scene::EditableImage>(destinationImage);
+		CHECK((image == nullptr || image->Pixels.size() < 1024u * 1024u * 4u));
 	});
 	if (removeDestination) {
 		fixture.Worlds.Destroy(destination);
@@ -779,6 +962,11 @@ TEST_CASE(
 				return store.Has<Transform>(entity);
 			});
 		CHECK(received == destinationGeometry.size());
+		const auto *image = store.Get<engine::scene::EditableImage>(destinationImage);
+		REQUIRE(image != nullptr);
+		CHECK(image->Width == 1024);
+		CHECK(image->Height == 1024);
+		CHECK(image->Pixels.size() == 1024u * 1024u * 4u);
 	});
 	CHECK(arriving.Player() == arrival->Player);
 	CHECK(arriving.ReplicaWorld() != resident.ReplicaWorld());

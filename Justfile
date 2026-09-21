@@ -99,7 +99,39 @@ build target="":
     if [ ! -f {{build}}/build.ninja ] || [ CMakePresets.json -nt {{build}}/CMakeCache.txt ]; then
         cmake --preset {{preset}} > /dev/null
     fi
+    # ccache appends one comment-delimited outcome per compiler call. Keeping the
+    # log in the build tree makes its cumulative history match this preset rather
+    # than mixing debug, release and unrelated checkouts. ccache runs from the
+    # build directory, so this must be absolute.
+    export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
     cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
+
+# Report one selected build's Ninja edges and cumulative ccache outcomes. The
+# build status remains authoritative: a partial Ninja log is still useful after
+# a failed compile, but profiling must never turn that failure into success.
+build-profile target="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f {{build}}/build.ninja ] || [ CMakePresets.json -nt {{build}}/CMakeCache.txt ]; then
+        cmake --preset {{preset}} > /dev/null
+    fi
+    export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
+    set +e
+    cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
+    build_status=$?
+    python3 scripts/build-profile.py --build-dir "{{build}}" --stats-log "$CCACHE_STATSLOG"
+    profile_status=$?
+    set -e
+    if [ "$build_status" -ne 0 ]; then
+        exit "$build_status"
+    fi
+    exit "$profile_status"
+
+# The profiler is standalone so it can inspect a build before an engine tool
+# exists. Its synthetic fixtures cover Ninja timing, grouping, ccache outcomes
+# and unity-source attribution.
+build-profile-check:
+    python3 scripts/tests/build_profile_test.py
 
 # One program and only its dependencies.
 client: (build "client")
@@ -342,6 +374,13 @@ parallel-grid-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_spatial bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.hashgrid --all --samples {{samples}}
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.broadphase --all --samples {{samples}}
+
+# A script-owned moving proxy beside static terrain. This guards the broadphase
+# split used by the Magic projectile runtime without launching a renderer.
+kinematic-broadphase-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.broadphase --all --samples {{samples}}
 
 # Constraint graph scheduling rows: independent active stacks, sparse sleeping
@@ -982,8 +1021,8 @@ luau-lsp:
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
 # strictest configuration this repository has - which is also what the hook
 # runs, so a push is held to the strictest configuration by default.
-check: format-check em-dash-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
-    @echo "check ok - format, em dashes, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+check: format-check em-dash-check build-profile-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+    @echo "check ok - format, em dashes, build profile, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.
 #

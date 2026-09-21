@@ -49,6 +49,7 @@ using studio::PresentationCeiling;
 using studio::PresentationRates;
 using studio::StatusBarSnapshot;
 using studio::StudioParticleSelection;
+using studio::UpdateSceneTriangleCount;
 using studio::WorldSelectorLabel;
 
 namespace {
@@ -238,6 +239,30 @@ TEST_CASE("changing the focused viewport refreshes status immediately", "[studio
 	CHECK(snapshot.Refresh(10.01, 1, 300, 4, 0, 0));
 	CHECK(snapshot.Viewport == 1);
 	CHECK(snapshot.DrawCalls == 4);
+}
+
+TEST_CASE("scene triangle tally is live across retained redraws and LOD changes", "[studio][presentation]") {
+	engine::render::FrameResult lod0;
+	lod0.Submitted = true;
+	lod0.Triangles = 12'000;
+	uint64_t triangles = UpdateSceneTriangleCount(0, lod0, true);
+	CHECK(triangles == 12'000);
+
+	// A cache redraw did not submit geometry. Its zero must not erase the scene
+	// tally a viewport is still showing.
+	engine::render::FrameResult retained;
+	retained.Submitted = true;
+	CHECK(UpdateSceneTriangleCount(triangles, retained, false) == 12'000);
+
+	engine::render::FrameResult lod2;
+	lod2.Submitted = true;
+	lod2.Triangles = 1'500;
+	triangles = UpdateSceneTriangleCount(triangles, lod2, true);
+	CHECK(triangles == 1'500);
+
+	engine::render::FrameResult failed;
+	failed.Triangles = 200;
+	CHECK(UpdateSceneTriangleCount(triangles, failed, true) == 1'500);
 }
 
 // --- the hosted client visual scene -----------------------------------------

@@ -53,10 +53,6 @@ namespace studio {
 
 	namespace {
 
-		bool IsAutomaticLodRatio(std::string_view spelling) {
-			return spelling == "AutoLod1Ratio" || spelling == "AutoLod2Ratio" || spelling == "AutoLod3Ratio";
-		}
-
 		bool DrawAutomaticLodRatio(float &value) {
 			ImGuiStorage *storage = ImGui::GetStateStorage();
 			const ImGuiID valueId = ImGui::GetID("##v");
@@ -994,7 +990,7 @@ namespace studio {
 						break;
 
 					case PropertyType::Float:
-						if (IsAutomaticLodRatio(descriptor->Spelling)) {
+						if (IsAutomaticLodRatioProperty(descriptor->Spelling)) {
 							// The pending drag belongs to the selected world and primary
 							// entity. A new selection must not inherit an old mouse-up.
 							ImGui::PushID(SelectionWorld.Index);
@@ -1002,6 +998,12 @@ namespace studio {
 							wrote = DrawAutomaticLodRatio(changed.Float);
 							ImGui::PopID();
 							ImGui::PopID();
+							if (ImGui::IsItemHovered()) {
+								ImGui::SetTooltip(
+									"Fraction of source triangles retained when generating this LOD.\n"
+									"0.40 keeps about 40%%. Distance thresholds are in Studio Preferences."
+								);
+							}
 						} else {
 							wrote = ImGui::DragFloat("##v", &changed.Float, StepFor(changed.Float));
 						}

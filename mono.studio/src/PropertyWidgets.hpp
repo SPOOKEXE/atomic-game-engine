@@ -5,7 +5,12 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
 
+#include <string_view>
+
 namespace studio {
+	// Identifies both current and legacy property spellings that configure an
+	// automatically generated mesh LOD's retained-triangle fraction.
+	bool IsAutomaticLodRatioProperty(std::string_view spelling);
 	float StepFor(float value);
 	bool DrawReference(const engine::ecs::Store &store, engine::ecs::Entity &reference);
 	bool DrawTransform(engine::core::CFrame &frame);

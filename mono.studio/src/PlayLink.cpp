@@ -26,6 +26,18 @@ namespace studio {
 		using engine::ecs::Store;
 		using engine::replication::ChangeDetection;
 
+		engine::replication::AuthoritySettings StudioLinkSettings() {
+			engine::replication::AuthoritySettings settings;
+			// PlayLink hands bytes directly to the replica in this process. The
+			// network defaults deliberately stream a join at 8 KiB per tick, which
+			// left a 1.75 MiB procedural image blank for several seconds even
+			// though no transport, congestion, or peer had to be protected here.
+			settings.ChunksPerTick = 128;
+			settings.MessagesPerTick = 128;
+			settings.BytesPerTick = 128 * 1024;
+			return settings;
+		}
+
 		size_t PosedEntities(Store &store) {
 			size_t count = 0;
 			store.Each<const engine::scene::Transform>(
@@ -34,6 +46,8 @@ namespace studio {
 			return count;
 		}
 	}
+
+	PlayLink::PlayLink() : Server(StudioLinkSettings()) {}
 
 	bool PlayLink::Start(
 		engine::world::Universe &universe,

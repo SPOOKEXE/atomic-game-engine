@@ -25,6 +25,7 @@ using engine::render::LodPlan;
 using engine::render::MeshEntry;
 using engine::render::MeshRange;
 using engine::render::ModelMatrixOf;
+using engine::render::SelectAuthoredLodLevel;
 using engine::render::TransferLayoutOf;
 using engine::scene::DrawInstance;
 using engine::scene::LodStrategy;
@@ -190,4 +191,30 @@ TEST_CASE("plain visuals do not allocate an LOD draw", "[render][lod]") {
 	CHECK(plan.Commands.empty());
 	CHECK(plan.Instances.empty());
 	CHECK(plan.SkinOffsets.empty());
+}
+
+TEST_CASE("distance bands force a coarse LOD page without exceeding the resident ladder", "[render][lod]") {
+	engine::render::GpuLodSelection selection{};
+	selection.CentreTarget = {0.0f, 0.0f, -4.0f, 1.0f};
+	selection.ExtentLevels = {0.25f, 0.25f, 0.01f, 2.0f};
+	selection.Triangles = {2u, 1u, 0u, 0u};
+
+	const glm::mat4 projection{1.0f};
+	CHECK(SelectAuthoredLodLevel(selection, projection, Vector3{}, {30.0f, 60.0f, 120.0f}, 64, 64) == 0);
+	CHECK(SelectAuthoredLodLevel(selection, projection, Vector3{}, {1.0f, 2.0f, 3.0f}, 64, 64) == 1);
+}
+
+TEST_CASE("repeated camera oscillation keeps authored LOD selection current", "[render][lod]") {
+	engine::render::GpuLodSelection selection{};
+	selection.CentreTarget = {0.0f, 0.0f, -4.0f, 1.0f};
+	selection.ExtentLevels = {0.25f, 0.25f, 0.01f, 2.0f};
+	selection.Triangles = {2u, 1u, 0u, 0u};
+
+	const glm::mat4 projection{1.0f};
+	const std::array<float, 3> bands{5.0f, 15.0f, 30.0f};
+	for (uint32_t iteration = 0; iteration < 1'024; ++iteration) {
+		const Vector3 eye = iteration % 2 == 0 ? Vector3{} : Vector3{0.0f, 0.0f, 3.0f};
+		const uint8_t expected = iteration % 2 == 0 ? 0 : 1;
+		CHECK(SelectAuthoredLodLevel(selection, projection, eye, bands, 64, 64) == expected);
+	}
 }

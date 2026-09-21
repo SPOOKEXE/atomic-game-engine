@@ -2227,7 +2227,11 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		contentIds[index] = engine::scene::EditableImageContentName(store, image);
 	}
 
-	for (const char *meshName : {"DefaultPbr_ReliefMesh", "WarmStonePbr_ReliefMesh"}) {
+	for (const char *meshName :
+		 {"DefaultPbr_ReliefMesh",
+		  "CoolStonePbr_ReliefMesh",
+		  "FillStonePbr_ReliefMesh",
+		  "WarmStonePbr_ReliefMesh"}) {
 		const Entity meshEntity = InScene(store, meshName);
 		REQUIRE(meshEntity != engine::ecs::NULL_ENTITY);
 		const auto *mesh = store.Get<engine::scene::EditableMesh>(meshEntity);
@@ -2247,6 +2251,19 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		const auto &b = mesh->Positions[mesh->Indices[29 * 3 + 1]];
 		const auto &c = mesh->Positions[mesh->Indices[29 * 3 + 2]];
 		CHECK((b - a).Cross(c - a).Dot(a) > 0.0f);
+	}
+
+	for (const char *partName : {"DefaultPbr", "CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
+		const Entity part = InScene(store, partName);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const auto *lod = store.Get<engine::scene::AutoMeshLOD>(part);
+		REQUIRE(lod != nullptr);
+		CHECK(lod->Strategy == engine::scene::LodStrategy::Decimated);
+		CHECK(lod->Levels == 4);
+		CHECK(lod->Ratios[0] == 0.70f);
+		CHECK(lod->Ratios[1] == 0.40f);
+		CHECK(lod->Ratios[2] == 0.10f);
+		CHECK(lod->TargetQuadArea == 4.0f);
 	}
 
 	const auto mapsOf = [&](const char *partName) {

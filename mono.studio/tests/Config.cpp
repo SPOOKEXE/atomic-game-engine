@@ -322,7 +322,7 @@ TEST_CASE("a hand-edited preference is clamped rather than obeyed", "[studio][co
 	CHECK(preferences.LOD3Distance == 120.0f);
 }
 
-TEST_CASE("LOD distance caps must be positive and ordered", "[studio][config]") {
+TEST_CASE("LOD minimum coarse distances must be positive and ordered", "[studio][config]") {
 	Scratch scratch;
 	scratch.Write(
 		"preferences.json", R"({"lod1Distance": 0.0, "lod2Distance": 60.0, "lod3Distance": 120.0})"
