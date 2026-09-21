@@ -4433,6 +4433,7 @@ namespace studio {
 		// reason. Editor state, not world state: nobody replicates where a
 		// mouse is.
 		std::vector<engine::gui::Router> GuiRouters;
+		// Routes pointer input to adornment geometry for each viewport.
 		std::vector<engine::render::AdornmentPointerRouter> AdornmentRouters;
 
 		// The world each viewport router was last allowed to address. A router
@@ -5334,6 +5335,7 @@ namespace studio {
 		// so a different slot must rebuild its scene and interface layers before
 		// it may reuse the composite.
 		std::optional<size_t> LastGraphViewport;
+		// Generation of the last composed frame-graph render.
 		uint64_t LastGraphRenderGeneration = 0;
 
 		// A requested scene capture has to receive a frame from its named panel,
@@ -5934,6 +5936,7 @@ namespace studio {
 		// Held by pointer because it borrows the command log and the universe,
 		// and both are built during `Initialise` rather than at construction.
 		std::unique_ptr<TeamCreate> Team;
+		// Time when the latest team presence update was sent.
 		double TeamPresenceAt = 0.0;
 
 		// What the team-create fields hold while somebody is editing them.

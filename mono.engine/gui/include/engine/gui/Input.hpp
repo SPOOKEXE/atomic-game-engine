@@ -115,17 +115,13 @@ namespace engine::gui {
 		// Kept separate because a 3D adornment can capture both buttons at once,
 		// and a receiver must know which gesture ended without asking a device
 		// whose state may already have advanced to the next frame.
-		//@{
 		MouseButton2Began,
 		MouseButton2Ended,
-		//@}
 
 		// Motion while a captured adornment button remains down. Unlike
 		// `MouseMoved`, each kind names the button that owns the capture.
-		//@{
 		MouseButton1Changed,
 		MouseButton2Changed,
-		//@}
 
 		// The button went down and came up on the same element.
 		//

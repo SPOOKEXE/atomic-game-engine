@@ -1745,7 +1745,9 @@ namespace engine::gui {
 
 	// Opts an adornment into pointer hit testing.
 	struct AdornmentInteraction {
+		// Whether this adornment receives pointer hit tests.
 		bool Enabled = false;
+		// Padding reserved for alignment and future fields.
 		uint8_t Reserved[3] = {};
 	};
 

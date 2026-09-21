@@ -245,11 +245,16 @@ namespace engine::replication {
 		// carried between discontinuous spaces, while ordinary replicated poses
 		// leave it absent.
 		struct Chart {
+			// The pose in the chart's coordinate space.
 			core::CFrame Frame;
+			// The cumulative scale applied by the chart.
 			float Scale = 1.0f;
+			// The chart revision used to identify matching spaces.
 			uint32_t Serial = 0;
 		};
 
+		// @param tick   The authoritative simulation tick that produced the pose.
+		// @param entity The entity the pose belongs to.
 		// @param frame  Where it was.
 		// @param chart  The pose's cumulative coordinate chart, when it has one.
 		void Record(

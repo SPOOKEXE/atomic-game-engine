@@ -19,8 +19,14 @@ namespace engine::assets {
 	class MeshDecimationCancelToken {
 	  public:
 		MeshDecimationCancelToken() = default;
+		// Borrows a flag that can cancel an interactive bake.
+		//
+		// @param requested Flag set by the owner to request cancellation.
 		explicit MeshDecimationCancelToken(const std::atomic_bool &requested) : Requested(&requested) {}
 
+		// Reports whether the owner has requested cancellation.
+		//
+		// @return `true` when the borrowed flag is set.
 		bool StopRequested() const {
 			return Requested != nullptr && Requested->load(std::memory_order_relaxed);
 		}
@@ -64,6 +70,13 @@ namespace engine::assets {
 	// the large faces that will occupy the most screen space across views while
 	// retaining the same winding, material, and skinning guards as DecimateMesh.
 	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out);
+	// Produces the same area-weighted reduction while observing cancellation.
+	//
+	// @param source Input mesh. Must be valid.
+	// @param ratio Fraction of triangles to retain, in the range (0, 1].
+	// @param out Filled on success. May not alias `source`.
+	// @param cancel Borrowed flag checked while reducing.
+	// @return `false` for invalid input, cancellation, or an unreducible mesh.
 	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out, MeshDecimationCancelToken cancel);
 
 	// Builds every generated mesh in one LOD ladder from the same base mesh.
