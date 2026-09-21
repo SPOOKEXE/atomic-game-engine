@@ -348,6 +348,27 @@ namespace {
 		return out;
 	}
 
+	// The same picture with palette entry zero marked transparent. GIF has a
+	// one-bit transparency flag, so this is the format-level boundary: the
+	// opaque blue texel must stay opaque and the transparent red texel must not
+	// turn into an opaque black texel while the frame becomes an RGBA8 sheet.
+	std::vector<std::byte> TransparentTinyGif() {
+		std::vector<std::byte> out = TinyGif();
+		const auto image = out.begin() + 19;
+		out.insert(
+			image,
+			{std::byte{0x21},
+			 std::byte{0xF9},
+			 std::byte{0x04},
+			 std::byte{0x01},
+			 std::byte{0x00},
+			 std::byte{0x00},
+			 std::byte{0x00},
+			 std::byte{0x00}}
+		);
+		return out;
+	}
+
 	// A GIF of `delays.size()` frames, each 2x1, with the delay each one names.
 	//
 	// **Built byte by byte for `TinyGif`'s reason** - the format is the thing
@@ -754,6 +775,21 @@ TEST_CASE("a single-frame GIF decodes to a one-cell sheet", "[bake]") {
 	REQUIRE(static_cast<uint8_t>(texture.Pixels[3]) == 255);
 	REQUIRE(static_cast<uint8_t>(texture.Pixels[6]) == 255);
 	REQUIRE(static_cast<uint8_t>(texture.Pixels[7]) == 255);
+}
+
+TEST_CASE("a GIF transparent palette entry remains transparent in its RGBA8 sheet", "[bake][image]") {
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	REQUIRE(engine::bake::ReadImage(TransparentTinyGif(), texture, failure));
+	REQUIRE(failure.empty());
+	REQUIRE(texture.Format == TextureFormat::RGBA8);
+
+	// The decoder composites a transparent GIF pixel by leaving the clear RGBA
+	// canvas untouched. The neighbouring opaque palette entry proves this is not
+	// a blanket alpha conversion applied to the full frame.
+	CHECK(At(texture, 0, 0) == Pixel{0, 0, 0, 0});
+	CHECK(At(texture, 1, 0) == Pixel{0, 0, 255, 255});
 }
 
 TEST_CASE("a truncated GIF is refused rather than clamped", "[bake]") {

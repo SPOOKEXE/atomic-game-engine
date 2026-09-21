@@ -5,7 +5,7 @@
 -- The client admits that small packaged-example tree before CDN delivery, so
 -- this scene is runnable without a developer's private content store.
 --
--- Every bay names the same packaged GIF bake. The only difference is playback:
+-- Every bay names the same packaged RGBA8 atlas. The only difference is playback:
 -- one-shot, loop, ping-pong, and random fixed cells. Loop and PingPong begin
 -- each fox on a deterministic random phase. The check at the bottom
 -- waits for the texture facts, so it proves both that the particle requested

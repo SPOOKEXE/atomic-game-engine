@@ -78,6 +78,41 @@ TEST_CASE("a texture round-trips", "[assets][texture]") {
 	CHECK(reader.AtEnd());
 }
 
+TEST_CASE("rgba alpha bytes round-trip exactly", "[assets][texture]") {
+	TextureData source;
+	source.Width = 3;
+	source.Height = 1;
+	source.Format = TextureFormat::RGBA8;
+	source.Pixels = {
+		std::byte{9},
+		std::byte{8},
+		std::byte{7},
+		std::byte{0},
+		std::byte{6},
+		std::byte{5},
+		std::byte{4},
+		std::byte{127},
+		std::byte{3},
+		std::byte{2},
+		std::byte{1},
+		std::byte{255},
+	};
+	REQUIRE(source.IsValid());
+
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, source));
+	TextureData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, read));
+
+	// Alpha is a byte lane, not a boolean mask. Keep transparent, partial and
+	// opaque texels exact through the on-disk texture that a runtime uploads.
+	CHECK(read.Pixels == source.Pixels);
+	CHECK(static_cast<uint8_t>(read.Pixels[3]) == 0);
+	CHECK(static_cast<uint8_t>(read.Pixels[7]) == 127);
+	CHECK(static_cast<uint8_t>(read.Pixels[11]) == 255);
+}
+
 TEST_CASE("the single-channel format round-trips at its own stride", "[assets][texture]") {
 	// **A stride bug is invisible in a square RGBA image** - the same byte count
 	// either way - so the case that catches one is a non-square image in the

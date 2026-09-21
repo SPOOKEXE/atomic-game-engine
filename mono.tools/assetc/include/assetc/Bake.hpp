@@ -65,6 +65,18 @@ namespace assetc {
 		// @since v0.10
 		float FlipbookFps = 0.0f;
 
+		// Marks every ordinary image this run imports as one static flipbook atlas.
+		// All three fields are supplied together: a grid without its populated-cell
+		// count or rate is not an animation contract a runtime can safely play.
+		// Zeroes leave image metadata to the source, which is how GIF baking keeps
+		// its own frame facts.
+		//
+		// @since v0.24
+		//@{
+		uint8_t FlipbookSide = 0;
+		uint8_t FlipbookFrames = 0;
+		//@}
+
 		// Finds the source a model's texture reference means, when the tree
 		// alone cannot say.
 		//

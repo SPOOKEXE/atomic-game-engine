@@ -237,8 +237,9 @@ foreach(world IN LISTS example_worlds)
 endforeach()
 
 # A packaged example texture is an ordinary baked asset, not a developer-local
-# CDN import. Keep the source GIF here so assetc records its flipbook metadata.
-set(flipbook_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects/fox_dance.gif")
+# CDN import. The authored RGBA8 atlas keeps soft alpha edges; the explicit
+# layout records animation metadata that a still PNG cannot carry itself.
+set(flipbook_source "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects/fox_dance.png")
 set(flipbook_staged "${MONO_STAGE_ROOT}/assets/examples/effects/fox_dance.atex")
 add_custom_command(
 	OUTPUT "${flipbook_staged}"
@@ -246,6 +247,9 @@ add_custom_command(
 	COMMAND $<TARGET_FILE:assetc>
 		--input "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects"
 		--output "${MONO_STAGE_ROOT}/assets/examples/effects"
+		--flipbook-side 8
+		--flipbook-frames 64
+		--flipbook-fps 24
 		--quiet
 	DEPENDS assetc "${flipbook_source}"
 	COMMENT "Baking packaged particle flipbook"

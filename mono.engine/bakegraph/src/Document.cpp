@@ -213,6 +213,8 @@ namespace engine::bake {
 			return "retime";
 		case OperationKind::AddDecimate:
 			return "decimate";
+		case OperationKind::AddFlipbook:
+			return "flipbook";
 		case OperationKind::AddWrite:
 			return "write";
 		case OperationKind::Connect:
@@ -303,6 +305,11 @@ namespace engine::bake {
 				case OperationKind::AddRasterize:
 					out += ' ' + std::to_string(operation.Width) + ' ' + std::to_string(operation.Height);
 					break;
+				case OperationKind::AddFlipbook:
+					out += ' ' + std::to_string(operation.Side) + ' ' + std::to_string(operation.Frames);
+					out.push_back(' ');
+					AppendFloat(out, operation.Number);
+					break;
 				case OperationKind::Connect:
 					out += ' ' + std::to_string(operation.From) + ' ' + std::to_string(operation.To);
 					break;
@@ -346,6 +353,10 @@ namespace engine::bake {
 			} else if (word == "resize" || word == "rasterize") {
 				operation.Kind = word == "resize" ? OperationKind::AddResize : OperationKind::AddRasterize;
 				parsed = TakeUnsigned(line, operation.Width) && TakeUnsigned(line, operation.Height);
+			} else if (word == "flipbook") {
+				operation.Kind = OperationKind::AddFlipbook;
+				parsed = TakeUnsigned(line, operation.Side) && TakeUnsigned(line, operation.Frames) &&
+						 TakeFloat(line, operation.Number);
 			} else if (word == "connect") {
 				operation.Kind = OperationKind::Connect;
 				parsed = TakeUnsigned(line, operation.From) && TakeUnsigned(line, operation.To);

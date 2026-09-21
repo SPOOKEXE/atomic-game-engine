@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <assetc/Bake.hpp>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <set>
@@ -293,6 +294,20 @@ namespace assetc {
 
 	Report Bake(const Settings &settings, std::string &failure) {
 		Report report;
+
+		const bool staticFlipbook = settings.FlipbookSide != 0 || settings.FlipbookFrames != 0;
+		if (staticFlipbook) {
+			const uint32_t side = settings.FlipbookSide;
+			const uint32_t cells = side * side;
+			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8;
+			if (!powerOfTwoSide || settings.FlipbookFrames == 0 || settings.FlipbookFrames > cells ||
+				!std::isfinite(settings.FlipbookFps) || settings.FlipbookFps <= 0.0f ||
+				settings.FlipbookFps >= 1000.0f) {
+				failure = "assetc: static flipbook needs side 1, 2, 4 or 8, a frame count within its grid, "
+						  "and FPS in (0, 1000)";
+				return report;
+			}
+		}
 
 		std::error_code error;
 		if (!fs::is_directory(settings.Input, error)) {
@@ -682,7 +697,12 @@ namespace assetc {
 			// today and would break the first time a resize stopped preserving
 			// the rate - which is exactly the failure `ResizeImage`'s note is
 			// about.
-			if (image && settings.FlipbookFps > 0.0f) {
+			if (image && staticFlipbook) {
+				const engine::bake::NodeId flipbook =
+					graph.AddFlipbook(settings.FlipbookSide, settings.FlipbookFrames, settings.FlipbookFps);
+				graph.Connect(tail, flipbook);
+				tail = flipbook;
+			} else if (image && settings.FlipbookFps > 0.0f) {
 				const engine::bake::NodeId retime = graph.AddRetime(settings.FlipbookFps);
 				graph.Connect(tail, retime);
 				tail = retime;

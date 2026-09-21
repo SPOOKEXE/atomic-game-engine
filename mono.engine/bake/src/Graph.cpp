@@ -10,6 +10,7 @@
 #include <engine/core/Metrics.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace engine::bake {
 
@@ -101,6 +102,15 @@ namespace engine::bake {
 	NodeId Graph::AddRetime(float fps) {
 		Node node;
 		node.Kind = NodeKind::Retime;
+		node.Size = fps;
+		return Append(std::move(node));
+	}
+
+	NodeId Graph::AddFlipbook(uint8_t side, uint8_t frames, float fps) {
+		Node node;
+		node.Kind = NodeKind::Flipbook;
+		node.FlipbookSide = side;
+		node.FlipbookFrames = frames;
 		node.Size = fps;
 		return Append(std::move(node));
 	}
@@ -375,6 +385,30 @@ namespace engine::bake {
 				result.Texture.FlipbookFrameRate = node.Size;
 			}
 			break;
+		case NodeKind::Flipbook: {
+			if (input.Kind != PayloadKind::Texture) {
+				return wrongKind("a texture");
+			}
+
+			// Static atlas metadata is only meaningful for the RGBA texture that a
+			// particle shader samples. A mask has no alpha lane to preserve, and an
+			// existing flipbook has source animation facts this node must not erase.
+			const uint32_t side = node.FlipbookSide;
+			const uint32_t cells = side * side;
+			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8;
+			if (result.Texture.Format != assets::TextureFormat::RGBA8 || result.Texture.IsFlipbook() ||
+				!powerOfTwoSide || node.FlipbookFrames == 0 || node.FlipbookFrames > cells ||
+				!std::isfinite(node.Size) || node.Size <= 0.0f || node.Size >= 1000.0f ||
+				result.Texture.Width % side != 0 || result.Texture.Height % side != 0) {
+				failure = "graph: '" + input.Source + "' is not a valid static RGBA flipbook atlas";
+				return false;
+			}
+
+			result.Texture.FlipbookSide = node.FlipbookSide;
+			result.Texture.FlipbookFrames = node.FlipbookFrames;
+			result.Texture.FlipbookFrameRate = node.Size;
+			break;
+		}
 		case NodeKind::Decimate:
 			if (input.Kind != PayloadKind::Mesh) {
 				return wrongKind("a mesh");
