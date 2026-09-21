@@ -95,6 +95,7 @@ The milestone headings below are development labels. Not in line with project ve
   7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
   8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
 
+- [_] /docs/future-work/ui-system.md
 - [_] LOD system billboard render support
 
 ### v0.27
@@ -120,7 +121,6 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] expose automation tools (AutomationService) like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
 
 - [_] /docs/future-work/physics-expansion.md
-- [_] /docs/future-work/ui-system.md
 - [_] /docs/future-work/world-streaming.md
 
 ### FUTURE
