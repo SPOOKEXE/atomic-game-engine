@@ -310,7 +310,9 @@ namespace {
 						 .ValueClassification = "finite",
 						 .MaximumAbsoluteError = .25,
 					 },
-				 .PreviousCameraMotionFrame = std::nullopt},
+				 .PreviousCameraMotionFrame = std::nullopt,
+				 .Packed = {},
+				 .Resampling = {}},
 				{.Channel = "ambient_occlusion",
 				 .Status = "ready",
 				 .Resource = "capture/1/ambient_occlusion",
@@ -356,7 +358,9 @@ namespace {
 						 .BackgroundClassification = "unavailable"
 					 },
 				 .Noise = {},
-				 .PreviousCameraMotionFrame = std::nullopt}
+				 .PreviousCameraMotionFrame = std::nullopt,
+				 .Packed = {},
+				 .Resampling = {}}
 			};
 			if (UnavailableAmbientOcclusion)
 				poll.Planes[1].AmbientOcclusion = engine::script::DataCaptureBridgeAmbientOcclusion{

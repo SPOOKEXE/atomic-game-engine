@@ -1669,7 +1669,9 @@ namespace engine::render {
 					 .Provenance = plane.Provenance.empty() ? Provenance(plane.Channel) : plane.Provenance,
 					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion),
 					 .Noise = std::move(noises[index]),
-					 .PreviousCameraMotionFrame = plane.PreviousCameraMotionFrame}
+					 .PreviousCameraMotionFrame = plane.PreviousCameraMotionFrame,
+					 .Packed = {},
+					 .Resampling = {}}
 				);
 				if (!plane.Bytes.empty()) {
 					if (totalBytes > RETAINED_BYTE_LIMIT ||
@@ -1694,6 +1696,7 @@ namespace engine::render {
 					{.Channel = "packed/" + output.Definition.Name,
 					 .Status = ready ? "ready" : "unsupported",
 					 .Resource = resource,
+					 .SourceResource = {},
 					 .HashAlgorithm = "blake3-256",
 					 .Hash = hash.ToHex(),
 					 .Width = output.Image.Width,
@@ -1702,6 +1705,7 @@ namespace engine::render {
 					 .ByteSize = output.Image.Bytes.size(),
 					 .Scalar = "float32",
 					 .SourceScalar = "mixed",
+					 .SourceHash = {},
 					 .SourceEncoding = "mixed",
 					 .SourceColourSpace = "mixed",
 					 .SourceOrigin = "top_left",
@@ -1709,11 +1713,15 @@ namespace engine::render {
 					 .SourceProvenance = "completed_capture_planes/v1",
 					 .ValueClassification = "not_inspected",
 					 .Encoding = "ieee754_binary32_le",
+					 .MaximumAbsoluteError = {},
 					 .ColourSpace = "not_applicable",
 					 .Origin = "top_left",
 					 .Packing = "rgba32_float",
 					 .Provenance = ready ? "derived/explicit_channel_pack_rgba32f/v1"
 										 : "unavailable/explicit_channel_pack_" + output.Rejection + "/v1",
+					 .AmbientOcclusion = {},
+					 .Noise = {},
+					 .PreviousCameraMotionFrame = {},
 					 .Packed = output.Definition,
 					 .Resampling = "pixel_center_nearest/v1"}
 				);
