@@ -1684,6 +1684,12 @@ declare extern type MeshPart extends BasePart with
 	write NormalMap: string?
 	read OcclusionMap: string
 	write OcclusionMap: string?
+	PackedHeightChannel: number
+	PackedMetalnessChannel: number
+	PackedOcclusionChannel: number
+	read PackedPbrMap: string
+	write PackedPbrMap: string?
+	PackedRoughnessChannel: number
 	read RoughnessMap: string
 	write RoughnessMap: string?
 	read TextureID: string

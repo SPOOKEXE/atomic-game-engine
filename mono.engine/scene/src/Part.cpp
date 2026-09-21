@@ -1807,6 +1807,41 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Packed PBR channels remain bytes in the draw column, but scripts carry
+		// integers. Keeping that conversion here gives every binding the same
+		// four-byte value and reserves 255 as the explicit "not packed" marker.
+		template <uint8_t SurfaceAppearance::*Channel>
+		PropertyDescriptor PackedPbrChannelProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = appearance->*Channel;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t channel = *static_cast<const int32_t *>(value);
+				if (channel < 0 || (channel > 3 && channel != 255)) {
+					return false;
+				}
+				SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+				appearance->*Channel = static_cast<uint8_t>(channel);
+				return true;
+			};
+			return property;
+		}
+
 		PropertyDescriptor AutoLodStrategyProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("AutoLodStrategy");
@@ -3353,10 +3388,21 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
 			ecs::Classes::Property<&SurfaceAppearance::PackedPbrMap>(meshPart, "PackedPbrMap");
-			ecs::Classes::Property<&SurfaceAppearance::RoughnessChannel>(meshPart, "PackedRoughnessChannel");
-			ecs::Classes::Property<&SurfaceAppearance::OcclusionChannel>(meshPart, "PackedOcclusionChannel");
-			ecs::Classes::Property<&SurfaceAppearance::HeightChannel>(meshPart, "PackedHeightChannel");
-			ecs::Classes::Property<&SurfaceAppearance::MetalnessChannel>(meshPart, "PackedMetalnessChannel");
+			ecs::Classes::Computed(
+				meshPart,
+				PackedPbrChannelProperty<&SurfaceAppearance::RoughnessChannel>("PackedRoughnessChannel")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				PackedPbrChannelProperty<&SurfaceAppearance::OcclusionChannel>("PackedOcclusionChannel")
+			);
+			ecs::Classes::Computed(
+				meshPart, PackedPbrChannelProperty<&SurfaceAppearance::HeightChannel>("PackedHeightChannel")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				PackedPbrChannelProperty<&SurfaceAppearance::MetalnessChannel>("PackedMetalnessChannel")
+			);
 			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 1>("Lod1MeshId"));
 			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 2>("Lod2MeshId"));
 			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 3>("Lod3MeshId"));

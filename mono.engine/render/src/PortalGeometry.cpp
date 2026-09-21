@@ -223,8 +223,8 @@ namespace engine::render {
 				row.FirstJoint = reader.ReadUInt32();
 				row.JointCount = reader.ReadUInt32();
 				if (reader.Failed() || !ValidRow(row, joints)) return false;
-				measure.MetadataBytes += row.Name.size() + row.Player.size() + row.Alpha.size() +
-										 row.Resample.size() + row.PackedPbrChannels.size();
+				measure.MetadataBytes +=
+					row.Name.size() + row.Player.size() + row.Alpha.size() + row.Resample.size();
 				for (const auto &asset : row.Assets)
 					measure.MetadataBytes += asset.size();
 				if constexpr (StoreRows) geometry->Rows[index] = std::move(row);

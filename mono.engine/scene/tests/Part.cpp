@@ -678,14 +678,17 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	CHECK(Read<Name>(store, part, "EmissiveMap") == Name("props/fox_emissive.atex"));
 	REQUIRE(Write(store, part, "PackedPbrMap", Name("props/fox_orm.atex")));
 	CHECK(Read<Name>(store, part, "PackedPbrMap") == Name("props/fox_orm.atex"));
-	REQUIRE(Write(store, part, "PackedRoughnessChannel", uint8_t{2}));
-	REQUIRE(Write(store, part, "PackedOcclusionChannel", uint8_t{1}));
-	REQUIRE(Write(store, part, "PackedHeightChannel", uint8_t{255}));
-	REQUIRE(Write(store, part, "PackedMetalnessChannel", uint8_t{3}));
-	CHECK(Read<uint8_t>(store, part, "PackedRoughnessChannel") == 2);
-	CHECK(Read<uint8_t>(store, part, "PackedOcclusionChannel") == 1);
-	CHECK(Read<uint8_t>(store, part, "PackedHeightChannel") == 255);
-	CHECK(Read<uint8_t>(store, part, "PackedMetalnessChannel") == 3);
+	REQUIRE(Write(store, part, "PackedRoughnessChannel", int32_t{2}));
+	REQUIRE(Write(store, part, "PackedOcclusionChannel", int32_t{1}));
+	REQUIRE(Write(store, part, "PackedHeightChannel", int32_t{255}));
+	REQUIRE(Write(store, part, "PackedMetalnessChannel", int32_t{3}));
+	CHECK(Read<int32_t>(store, part, "PackedRoughnessChannel") == 2);
+	CHECK(Read<int32_t>(store, part, "PackedOcclusionChannel") == 1);
+	CHECK(Read<int32_t>(store, part, "PackedHeightChannel") == 255);
+	CHECK(Read<int32_t>(store, part, "PackedMetalnessChannel") == 3);
+	CHECK_FALSE(Write(store, part, "PackedRoughnessChannel", int32_t{4}));
+	CHECK_FALSE(Write(store, part, "PackedRoughnessChannel", int32_t{-1}));
+	CHECK(Read<int32_t>(store, part, "PackedRoughnessChannel") == 2);
 
 	// **One spelling and not two.** `Mesh` and `ColorMap` were aliases of these
 	// on `BasePart` and are gone: two names for one field is the duplication

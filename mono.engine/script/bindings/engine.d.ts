@@ -1422,6 +1422,11 @@ declare interface MeshPart extends BasePart {
 	MetalnessMap: string;
 	NormalMap: string;
 	OcclusionMap: string;
+	PackedHeightChannel: number;
+	PackedMetalnessChannel: number;
+	PackedOcclusionChannel: number;
+	PackedPbrMap: string;
+	PackedRoughnessChannel: number;
 	RoughnessMap: string;
 	TextureID: string;
 	readonly TrianglesCount: number;
