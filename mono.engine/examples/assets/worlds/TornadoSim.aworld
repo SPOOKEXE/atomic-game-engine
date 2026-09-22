@@ -85,7 +85,14 @@ end)
 local StarterGui = game:GetService("StarterGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+
+local camera = Instance.new("Camera")
+camera.Name = "TornadoChaseCamera"
+camera.CFrame = CFrame.lookAt(Vector3.new(-145, 62, -175), Vector3.new(0, 48, 95))
+camera.Parent = Workspace
+Workspace.CurrentCamera = camera
 
 local function request(change: { [string]: any })
 	MessagingService:PublishAsync("tornado.sim.control", change)
