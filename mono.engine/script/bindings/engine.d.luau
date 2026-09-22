@@ -1725,8 +1725,10 @@ declare extern type MeshPart extends BasePart with
 	PackedRoughnessChannel: number
 	read RoughnessMap: string
 	write RoughnessMap: string?
+	SpecularFactor: number
 	read TextureID: string
 	write TextureID: string?
+	TransmissionFactor: number
 	read TrianglesCount: number
 end
 

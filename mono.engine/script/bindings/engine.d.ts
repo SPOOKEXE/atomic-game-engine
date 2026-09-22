@@ -1452,7 +1452,9 @@ declare interface MeshPart extends BasePart {
 	PackedPbrMap: string;
 	PackedRoughnessChannel: number;
 	RoughnessMap: string;
+	SpecularFactor: number;
 	TextureID: string;
+	TransmissionFactor: number;
 	readonly TrianglesCount: number;
 }
 

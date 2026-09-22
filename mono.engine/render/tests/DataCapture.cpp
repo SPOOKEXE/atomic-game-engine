@@ -653,34 +653,6 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 }
 
 TEST_CASE(
-	"unmodeled authored material facts complete with explicit unavailable provenance",
-	"[render][data-capture]"
-) {
-	Renderer renderer;
-	DataCaptureRequest request{
-		.SnapshotId = "snapshot-1",
-		.Pipeline = engine::core::Name("capture-pipeline"),
-		.CaptureNode = engine::core::Name("capture"),
-		.Channels = {DataCaptureChannel::PbrSpecular, DataCaptureChannel::PbrTransmission},
-		.ObjectLabels = {},
-		.SemanticLabels = {},
-		.PartLabels = {},
-	};
-	DataCaptureTicket ticket;
-	REQUIRE(renderer.QueueDataCapture(request, ticket));
-	CHECK(ticket.ResourceTokens.empty());
-	const DataCapturePoll captured = renderer.PollDataCapture(ticket);
-	CHECK(captured.Status == DataCaptureStatus::Unsupported);
-	REQUIRE(captured.Planes.size() == 2);
-	CHECK(captured.Planes[0].Status == DataCaptureStatus::Unsupported);
-	CHECK(captured.Planes[0].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
-	CHECK(captured.Planes[1].Status == DataCaptureStatus::Unsupported);
-	CHECK(
-		captured.Planes[1].Provenance == "unavailable/authored_transmission_not_in_current_material_model/v1"
-	);
-}
-
-TEST_CASE(
 	"capture record validation rejects hostile planes and status mismatches", "[render][data-capture]"
 ) {
 	DataCaptureTicket ticket;

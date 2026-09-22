@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <numbers>
 #include <string>
 #include <string_view>
@@ -1867,6 +1868,32 @@ namespace engine::scene {
 			return property;
 		}
 
+		template <float SurfaceAppearance::*Factor>
+		PropertyDescriptor BoundedSurfaceFactorProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(instance);
+				if (appearance == nullptr) return false;
+				*static_cast<float *>(out) = appearance->*Factor;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const float factor = *static_cast<const float *>(value);
+				if (!std::isfinite(factor) || factor < 0.0f || factor > 1.0f) return false;
+				SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(instance);
+				if (appearance == nullptr) return false;
+				appearance->*Factor = factor;
+				return true;
+			};
+			return property;
+		}
+
 		PropertyDescriptor AutoLodStrategyProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("AutoLodStrategy");
@@ -3413,8 +3440,13 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
 			ecs::Classes::Property<&SurfaceAppearance::PackedPbrMap>(meshPart, "PackedPbrMap");
-			ecs::Classes::Property<&SurfaceAppearance::SpecularFactor>(meshPart, "SpecularFactor");
-			ecs::Classes::Property<&SurfaceAppearance::TransmissionFactor>(meshPart, "TransmissionFactor");
+			ecs::Classes::Computed(
+				meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::SpecularFactor>("SpecularFactor")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				BoundedSurfaceFactorProperty<&SurfaceAppearance::TransmissionFactor>("TransmissionFactor")
+			);
 			ecs::Classes::Computed(
 				meshPart,
 				PackedPbrChannelProperty<&SurfaceAppearance::RoughnessChannel>("PackedRoughnessChannel")

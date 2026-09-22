@@ -91,6 +91,8 @@ TEST_CASE("every PBR map resolves onto the surface appearance", "[scene][materia
 		.Height = Name("pbr-height"),
 		.Metalness = Name("pbr-metalness"),
 		.Emissive = Name("pbr-emissive"),
+		.SpecularFactor = 0.35f,
+		.TransmissionFactor = 0.2f,
 	};
 	REQUIRE(RecordMaterial(store, asset, maps));
 
@@ -108,6 +110,8 @@ TEST_CASE("every PBR map resolves onto the surface appearance", "[scene][materia
 	CHECK(appearance->HeightMap == maps.Height);
 	CHECK(appearance->MetalnessMap == maps.Metalness);
 	CHECK(appearance->EmissiveMap == maps.Emissive);
+	CHECK(appearance->SpecularFactor == maps.SpecularFactor);
+	CHECK(appearance->TransmissionFactor == maps.TransmissionFactor);
 
 	CHECK(MaterialMaps{.Emissive = maps.Emissive}.IsValid());
 	CHECK(MaterialMaps{.Metalness = maps.Metalness}.IsValid());

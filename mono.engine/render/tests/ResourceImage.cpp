@@ -4401,13 +4401,15 @@ TEST_CASE(
 		render::DataCaptureChannel::PartMask,
 		render::DataCaptureChannel::SecondSurfaceDepth,
 		render::DataCaptureChannel::SecondSurfaceValidity,
+		render::DataCaptureChannel::PbrSpecular,
+		render::DataCaptureChannel::PbrTransmission,
 	};
 	request.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	request.SemanticLabels = {{1, "fixture/box"}};
 	request.PartLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	render::DataCaptureTicket partial;
 	REQUIRE(renderer.QueueDataCapture(request, partial));
-	CHECK(partial.ResourceTokens.size() == 9);
+	CHECK(partial.ResourceTokens.size() == 11);
 	CHECK(partial.ChannelResourceIndices.size() == request.Channels.size());
 	CHECK(partial.ChannelResourceIndices[10] == partial.ChannelResourceIndices[11]);
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
@@ -4418,7 +4420,7 @@ TEST_CASE(
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
-	REQUIRE(captured.Planes.size() == 12);
+	REQUIRE(captured.Planes.size() == 14);
 	for (const auto &plane : captured.Planes) {
 		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
 		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
@@ -4453,6 +4455,18 @@ TEST_CASE(
 	CHECK(captured.Planes[4].ColourSpace == render::DataCaptureColourSpace::NotApplicable);
 	CHECK(captured.Planes[5].Scalar == render::DataCaptureScalar::Float16);
 	CHECK(captured.Planes[5].ColourSpace == render::DataCaptureColourSpace::Linear);
+	CHECK(captured.Planes[12].Channel == render::DataCaptureChannel::PbrSpecular);
+	CHECK(captured.Planes[12].Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(
+		captured.Planes[12].Provenance ==
+		"authored_specular_factor/v1;source=material_alpha;range=zero_to_one"
+	);
+	CHECK(captured.Planes[13].Channel == render::DataCaptureChannel::PbrTransmission);
+	CHECK(captured.Planes[13].Scalar == render::DataCaptureScalar::Float16);
+	CHECK(
+		captured.Planes[13].Provenance ==
+		"authored_transmission_factor/v1;source=emissive_alpha;range=zero_to_one;refraction=unavailable"
+	);
 	core::ByteReader objectIds(captured.Planes[7].Bytes);
 	size_t labelledPixels = 0, packedPixels = 0, zeroPixels = 0;
 	uint32_t centreLabel = 99;
@@ -4465,7 +4479,10 @@ TEST_CASE(
 			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material]) == 192);
 			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 1]) == 64);
 			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 2]) == 128);
-			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 3]) == 0);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 3]) == 255);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[12].Bytes[pixel]) == 255);
+			CHECK(captured.Planes[13].Bytes[pixel * 2] == std::byte{0});
+			CHECK(captured.Planes[13].Bytes[pixel * 2 + 1] == std::byte{0});
 		}
 		if (label == 0) ++zeroPixels;
 		if (pixel ==
@@ -5223,50 +5240,6 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	));
 	CHECK(signedZeroBytes == nativeRgbBytes);
 	REQUIRE(bridge.Release("script-capture-world", signedZeroTicket, detail));
-
-	// Unmodeled authored facts have no readback texture, but still complete with
-	// the dispatch identity and explicit unavailable provenance.
-	script::DataCaptureBridgeRequest unavailable = request;
-	unavailable.Channels = {"pbr_specular", "pbr_transmission"};
-	unavailable.IncludeSceneData = false;
-	uint64_t unavailableTicket = 0;
-	REQUIRE(bridge.Queue("script-capture-world", unavailable, unavailableTicket, detail));
-	view.SnapshotId.clear();
-	bridge.PrepareView(view);
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
-	do {
-		bridge.Pump();
-		REQUIRE(bridge.Poll("script-capture-world", unavailableTicket, poll, detail));
-		if (poll.Status == "pending") SDL_Delay(1);
-	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
-	REQUIRE(poll.Status == "unsupported");
-	REQUIRE(poll.SnapshotId == snapshot);
-	REQUIRE(poll.Planes.size() == 2);
-	CHECK(poll.Planes[0].Status == "unsupported");
-	CHECK(poll.Planes[0].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
-	CHECK(poll.Planes[1].Status == "unsupported");
-	CHECK(poll.Planes[1].Provenance == "unavailable/authored_transmission_not_in_current_material_model/v1");
-	REQUIRE(bridge.Release("script-capture-world", unavailableTicket, detail));
-
-	script::DataCaptureBridgeRequest mixed = request;
-	mixed.Channels = {"object_ids", "pbr_specular"};
-	mixed.IncludeSceneData = false;
-	uint64_t mixedTicket = 0;
-	REQUIRE(bridge.Queue("script-capture-world", mixed, mixedTicket, detail));
-	view.SnapshotId.clear();
-	bridge.PrepareView(view);
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
-	do {
-		bridge.Pump();
-		REQUIRE(bridge.Poll("script-capture-world", mixedTicket, poll, detail));
-		if (poll.Status == "pending") SDL_Delay(1);
-	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
-	REQUIRE(poll.Status == "partial");
-	REQUIRE(poll.Planes.size() == 2);
-	CHECK(poll.Planes[0].Status == "ready");
-	CHECK(poll.Planes[1].Status == "unsupported");
-	CHECK(poll.Planes[1].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
-	REQUIRE(bridge.Release("script-capture-world", mixedTicket, detail));
 
 	// Requested storage is observable before submission and after an early cancellation.
 	script::DataCaptureBridgeRequest pendingCompact = request;
