@@ -1647,6 +1647,6 @@ TEST_CASE("interface pass matches the reference raster coverage", "[render][gpu]
 				actualDrawn ? gui::ReferencePixel{255, 255, 255, 255} : gui::ReferencePixel{};
 		}
 	}
-	const gui::ReferenceComparison comparison = gui::CompareReferenceImages(expected, observed, 0, 0.03f);
+	const gui::ReferenceComparison comparison = gui::CompareReferenceImages(expected, observed, 0, 0.0f);
 	CHECK(comparison.WithinChangedAreaCap);
 }
