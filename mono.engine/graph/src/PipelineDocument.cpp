@@ -1947,7 +1947,7 @@ namespace engine::graph {
 				}
 			}
 			if (!keep) continue;
-			if (edit.Kind == EditKind::Reads && edit.Target == core::Name("lens-b"))
+			if (edit.Kind == EditKind::Reads && edit.Target == core::Name("god-rays"))
 				edit.Target = core::Name("eye-hdr");
 			if (edit.Kind == EditKind::Reads && edit.Target == core::Name("display"))
 				edit.Target = core::Name("tonemapped");

@@ -95,6 +95,8 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "mirror-overlay@0",
 				   "transparent@0",
 				   "shader-lenses@0",
+				   "dof@0",
+				   "god-rays@0",
 				   "bloom@0",
 				   "tonemap@0",
 				   "present",
@@ -103,7 +105,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 29);
+	CHECK(runner.Submitted() == 31);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 
@@ -377,7 +379,7 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
 	// Bloom is a separate HDR graph pass and is profiled with the rest of the
 	// view chain, even when its authored intensity leaves it pass-through.
-	CHECK(opened == 28);
+	CHECK(opened == 30);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 

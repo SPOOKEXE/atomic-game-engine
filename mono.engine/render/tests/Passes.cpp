@@ -285,6 +285,22 @@ TEST_CASE("built-in capability fallbacks compile into the graph backend", "[rend
 		RenderGraph graph;
 		Name offender;
 		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		if (name == Name("Eye#1")) {
+			const auto readTarget = [&graph](Name kind, Name port) -> Name {
+				for (uint32_t value = 1; value <= graph.Count(); ++value) {
+					const auto *node = graph.Find(engine::graph::NodeId{value});
+					if (node == nullptr || node->Kind != kind) continue;
+					const auto found = std::find(node->ReadPorts.begin(), node->ReadPorts.end(), port);
+					if (found == node->ReadPorts.end()) return {};
+					const size_t index = static_cast<size_t>(found - node->ReadPorts.begin());
+					const auto *resource = graph.FindResource(node->Reads[index]);
+					return resource == nullptr ? Name{} : resource->Name;
+				}
+				return {};
+			};
+			CHECK(readTarget(Name("bloom"), Name("source")) == Name("eye-hdr"));
+			CHECK(readTarget(Name("tonemap"), Name("colour")) == Name("eye-hdr"));
+		}
 		CHECK(renderer.SetPipeline(name, graph));
 	}
 }
