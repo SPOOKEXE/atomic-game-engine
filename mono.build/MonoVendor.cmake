@@ -239,7 +239,30 @@ set(TRACY_ENABLE         ${MONO_TRACY} CACHE BOOL "" FORCE)
 set(TRACY_ON_DEMAND      ON  CACHE BOOL "" FORCE)
 set(TRACY_ONLY_LOCALHOST ON  CACHE BOOL "" FORCE)
 set(TRACY_NO_BROADCAST   ON  CACHE BOOL "" FORCE)
-add_subdirectory("${MONO_VENDOR}/tracy" EXCLUDE_FROM_ALL)
+# Tracy reads and parses `/proc/kallsyms` before an on-demand session is
+# attached. Linux builds use a patched tree so the scan waits until connection,
+# while user-space callstacks and crash backtraces stay enabled. The recipe is a
+# Bash script, so other platforms retain the pinned source directly.
+if(MONO_TRACY AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	set_property(
+		DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/tracy/defer-linux-kernel-symbols.patch"
+		"${CMAKE_SOURCE_DIR}/scripts/vendor-tree.sh"
+	)
+	execute_process(
+		COMMAND "${CMAKE_SOURCE_DIR}/scripts/vendor-tree.sh" tracy
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+		RESULT_VARIABLE mono_tracy_vendor_result
+		OUTPUT_VARIABLE MONO_TRACY_VENDOR
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+	)
+	if(NOT mono_tracy_vendor_result EQUAL 0)
+		message(FATAL_ERROR "Could not prepare the patched Tracy source tree.")
+	endif()
+	add_subdirectory("${MONO_TRACY_VENDOR}" EXCLUDE_FROM_ALL)
+else()
+	add_subdirectory("${MONO_VENDOR}/tracy" EXCLUDE_FROM_ALL)
+endif()
 mono_vendor_system(TracyClient)
 # `pipe()` and `fscanf()` carry `warn_unused_result` on Linux, and Tracy's
 # `.cpp` files (included by TracyClient.cpp) do not check the return values.

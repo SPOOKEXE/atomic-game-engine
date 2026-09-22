@@ -1,0 +1,81 @@
+Defer Tracy's Linux kernel-symbol scan until a profiler attaches.
+
+WHY THIS IS A PATCH
+    Tracy's `InitCallstack` runs on the symbol worker at process startup, even
+    with `TRACY_ON_DEMAND`. On Linux it eagerly reads and parses
+    `/proc/kallsyms`, which is unrelated to user-space callstack capture and
+    symbolisation. On the server this work dominates an otherwise idle launch.
+
+WHAT STAYS AVAILABLE
+    `InitCallstack` still creates libbacktrace state, image caches and the
+    demangling buffer before any connection. The kernel-symbol cache is loaded
+    immediately before Tracy publishes a successful connection and installs its
+    crash handler. A connected capture, including a crash report, therefore has
+    the same kernel-symbol lookup as upstream. A process without an attached
+    profiler does no kernel scan.
+
+WHY IT LIVES HERE
+    `mono.vendor/AGENTS.md` requires changes to linked vendor code to be a
+    visible patch applied to an archived copy. This is Linux-specific engine
+    startup policy, so carrying it locally is more appropriate than changing a
+    generic upstream default.
+
+WHERE IT GOES
+    `InitKernelSymbols` remains in `TracyCallstack.cpp` but becomes callable
+    from `TracyProfiler.cpp`. The profiler worker calls it after its on-demand
+    connection bookkeeping and before `m_isConnected` or the crash handler.
+    The boolean makes reconnects a no-op.
+
+WHEN IT STOPS APPLYING
+    `scripts/vendor-tree.sh tracy` fails during configure. Re-point these three
+    hunks at Tracy's callstack declaration, Linux kernel cache, and connection
+    publication sites. Do not edit `mono.vendor/tracy` in place.
+
+diff --git a/public/client/TracyCallstack.cpp b/public/client/TracyCallstack.cpp
+index 9944a86..db62268 100644
+--- a/public/client/TracyCallstack.cpp
++++ b/public/client/TracyCallstack.cpp
+@@ -1167,5 +1167,9 @@ void InitKernelSymbols()
+-static void InitKernelSymbols()
++void InitKernelSymbols()
+ {
++    static bool initialized = false;
++    if( initialized ) return;
++    initialized = true;
++
+     FILE* f = fopen( "/proc/kallsyms", "rb" );
+     if( !f )
+     {
+@@ -1358,6 +1362,3 @@ void InitCallstack()
+-#ifdef __linux
+-    InitKernelSymbols();
+-#endif
+ #ifdef TRACY_DEBUGINFOD
+     s_debuginfod = debuginfod_begin();
+     s_di_known = (FastVector<DebugInfo>*)tracy_malloc( sizeof( FastVector<DebugInfo> ) );
+diff --git a/public/client/TracyCallstack.hpp b/public/client/TracyCallstack.hpp
+index 221c989..c4ee46e 100644
+--- a/public/client/TracyCallstack.hpp
++++ b/public/client/TracyCallstack.hpp
+@@ -86,4 +86,7 @@ CallstackEntryData DecodeCallstackPtr( uint64_t ptr );
+ void InitCallstack();
+ void InitCallstackCritical();
+ void EndCallstack();
++#ifdef __linux
++void InitKernelSymbols();
++#endif
+ const char* GetKernelModulePath( uint64_t addr );
+diff --git a/public/client/TracyProfiler.cpp b/public/client/TracyProfiler.cpp
+index 90ff8ea..12253a1 100644
+--- a/public/client/TracyProfiler.cpp
++++ b/public/client/TracyProfiler.cpp
+@@ -2038,6 +2038,9 @@ void Profiler::Worker()
+         const auto currentTime = GetTime();
+         ClearQueues( token );
+         m_connectionId.fetch_add( 1, std::memory_order_release );
+ #endif
++#if defined __linux && defined TRACY_HAS_CALLSTACK
++        InitKernelSymbols();
++#endif
+         m_isConnected.store( true, std::memory_order_release );
+         InstallCrashHandler();
