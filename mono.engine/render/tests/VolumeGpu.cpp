@@ -12,6 +12,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
+#include <cstdlib>
+#include <iostream>
 #include <span>
 
 TEST_SUITE_ID("engine.render.volumegpu")
@@ -82,15 +85,30 @@ namespace {
 		return volume;
 	}
 
-	CapturedImage RenderOrder(Renderer &renderer, View &view, bool reversed) {
-		view.Lighting.VolumeCount = 2;
-		if (!reversed) {
-			view.Lighting.Volumes[0] = Volume({1.0f, 0.05f, 0.0f});
-			view.Lighting.Volumes[1] = Volume({0.0f, 0.15f, 1.0f});
-		} else {
-			view.Lighting.Volumes[0] = Volume({0.0f, 0.15f, 1.0f});
-			view.Lighting.Volumes[1] = Volume({1.0f, 0.05f, 0.0f});
+	void SetVolumeOrder(View &view, bool reversed) {
+		const std::array colours{
+			core::Color3{1.0f, 0.05f, 0.0f},
+			core::Color3{0.0f, 0.15f, 1.0f},
+			core::Color3{0.1f, 1.0f, 0.0f},
+			core::Color3{1.0f, 0.7f, 0.0f},
+			core::Color3{0.8f, 0.0f, 0.8f},
+			core::Color3{0.0f, 0.9f, 0.8f},
+			core::Color3{0.9f, 0.4f, 0.1f},
+			core::Color3{0.3f, 0.4f, 1.0f},
+		};
+		view.Lighting.VolumeCount = colours.size();
+		for (size_t index = 0; index < colours.size(); index++) {
+			const size_t source = reversed ? colours.size() - index - 1 : index;
+			view.Lighting.Volumes[index] = Volume(colours[source]);
+			if (source >= 2) {
+				view.Lighting.Volumes[index].Frame.Position.X = -3.0f + float(source - 2) * 1.2f;
+				view.Lighting.Volumes[index].HalfExtent = {0.55f, 3.0f, 2.0f};
+			}
 		}
+	}
+
+	CapturedImage RenderOrder(Renderer &renderer, View &view, bool reversed) {
+		SetVolumeOrder(view, reversed);
 		OverlayImage overlay;
 		REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("fog")));
 		return CaptureResource(
@@ -99,7 +117,9 @@ namespace {
 	}
 }
 
-TEST_CASE("overlapping local fog volumes are invariant to resolved order", "[render][gpu][volume][.]") {
+TEST_CASE(
+	"overlapping local fog volumes are invariant to resolved order", "[render][gpu][volume][volume-stress][.]"
+) {
 	FixtureDevice fixture;
 	fixture.Initialise();
 	InstallCapturePipeline(fixture.Render);
@@ -148,9 +168,32 @@ TEST_CASE("overlapping local fog volumes are invariant to resolved order", "[ren
 		fixture.Render,
 		"volume-order",
 		"tonemapped",
-		"two coincident volumes with red and blue scattering swapped in resolved order",
+		"two coincident and six dispersed volumes reversed in resolved order",
 		forward.View(),
 		reverse.View(),
 		orderTolerance
 	);
+
+	const char *configuredFrames = std::getenv("MONO_VOLUME_STRESS_FRAMES");
+	if (configuredFrames == nullptr) return;
+	const unsigned long requested = std::strtoul(configuredFrames, nullptr, 10);
+	REQUIRE(requested > 0);
+	const uint32_t frames = static_cast<uint32_t>(std::min(requested, 10'000ul));
+	for (uint32_t frame = 0; frame < 8; frame++) {
+		SetVolumeOrder(view, (frame & 1u) != 0);
+		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	}
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	REQUIRE(device != nullptr);
+	REQUIRE(SDL_WaitForGPUIdle(device));
+	const auto started = std::chrono::steady_clock::now();
+	for (uint32_t frame = 0; frame < frames; frame++) {
+		SetVolumeOrder(view, (frame & 1u) != 0);
+		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	}
+	REQUIRE(SDL_WaitForGPUIdle(device));
+	const double milliseconds =
+		std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+	std::cout << "volume stress frames=" << frames
+			  << ", end-to-end ms/frame=" << milliseconds / double(frames) << '\n';
 }

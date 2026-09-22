@@ -14,11 +14,16 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/scene/Volume.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdlib>
+#include <iostream>
 
 TEST_SUITE_ID("engine.render.worldview")
 TEST_DEPENDS("engine.render.worldpresentation")
@@ -402,10 +407,15 @@ TEST_CASE(
 		store.Set(rectangle, element);
 		store.Set(rectangle, gui::Background{});
 	}
-	for (size_t index = 0; index <= render::MAX_SCENE_LIGHTS; ++index) {
+	for (size_t index = 0; index < 256; ++index) {
 		const auto anchor = PartAt(store, {float(index * 20), 0, -10});
 		const auto bulb = store.CreateInstance(ecs::Classes::Find(core::Name("PointLight")), "Light");
 		REQUIRE(store.SetParent(bulb, anchor));
+	}
+	for (uint32_t index = 0; index < 256; index++) {
+		const auto volume = store.Create();
+		store.Set(volume, scene::Volume{.Seed = index});
+		store.Set(volume, scene::Transform{.Frame = core::CFrame{{0.0f, 0.0f, -10.0f - float(index)}}});
 	}
 	std::array<ecs::Entity, 2> ends;
 	for (size_t index = 0; index < ends.size(); ++index) {
@@ -427,6 +437,7 @@ TEST_CASE(
 	render::WorldCameraFrame first, second;
 	render::CollectWorldCamera(store, eye, {200, 200}, first);
 	REQUIRE(first.Lights.size() == render::MAX_SCENE_LIGHTS);
+	REQUIRE(first.VolumeCount == scene::MAX_SCENE_VOLUMES);
 	CHECK(first.Lights[0].Position.X == 0);
 	REQUIRE_FALSE(first.Ribbons.Vertices.empty());
 	REQUIRE_FALSE(first.SpatialCommands.Commands.empty());
@@ -439,10 +450,11 @@ TEST_CASE(
 	);
 	const float nearWidth = store.Get<gui::SpatialCanvas>(billboard)->Size.X;
 	const auto firstVertex = first.Ribbons.Vertices[0].Position;
-	const float farLight = float(render::MAX_SCENE_LIGHTS * 20);
+	const float farLight = 240.0f;
 	eye.CameraFrame.Position = {farLight, 10, 10};
 	render::CollectWorldCamera(store, eye, {200, 200}, second);
 	REQUIRE(second.Lights.size() == render::MAX_SCENE_LIGHTS);
+	REQUIRE(second.VolumeCount == scene::MAX_SCENE_VOLUMES);
 	CHECK(second.Lights[0].Position.X == farLight);
 	CHECK(first.Lights[0].Position.X == 0);
 	CHECK(store.Get<gui::SpatialCanvas>(billboard)->Size.X < nearWidth);
@@ -457,6 +469,24 @@ TEST_CASE(
 	CHECK(store.Resource<scene::ActiveCamera>()->Entity == active);
 	CHECK(store.Get<scene::Transform>(active)->Frame.Position == activeFrame.Position);
 	CHECK(store.Get<scene::Transform>(active)->Frame.Rotation() == activeFrame.Rotation());
+
+	const char *configuredFrames = std::getenv("MONO_LIGHT_SELECTION_STRESS_FRAMES");
+	if (configuredFrames == nullptr) return;
+	const unsigned long requested = std::strtoul(configuredFrames, nullptr, 10);
+	REQUIRE(requested > 0);
+	const uint32_t frames = static_cast<uint32_t>(std::min(requested, 10'000ul));
+	std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> volumes;
+	std::vector<render::SceneLight> selectedLights;
+	const auto started = std::chrono::steady_clock::now();
+	for (uint32_t frame = 0; frame < frames; frame++) {
+		const core::Vector3 selectionEye = frame & 1u ? core::Vector3{farLight, 10, 10} : core::Vector3{};
+		scene::ResolveVolumes(store, selectionEye, {}, volumes);
+		render::CollectLights(store, selectionEye, {}, selectedLights);
+	}
+	const double milliseconds =
+		std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+	std::cout << "local lighting selection frames=" << frames
+			  << ", cpu ms/frame=" << milliseconds / double(frames) << '\n';
 }
 
 TEST_CASE(

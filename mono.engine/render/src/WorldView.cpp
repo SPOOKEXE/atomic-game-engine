@@ -131,6 +131,8 @@ namespace engine::render {
 		view.PartLabelsValid = frame.PartLabelsValid;
 		view.JointFrames = frame.Joints;
 		view.Lighting = frame.Lighting;
+		view.Lighting.Volumes = camera.Volumes;
+		view.Lighting.VolumeCount = camera.VolumeCount;
 		view.OverrideLighting = true;
 		view.Lights = camera.Lights;
 		view.Surfaces = camera.Surfaces;
@@ -217,6 +219,7 @@ namespace engine::render {
 			}
 		}
 		CollectLights(store, visibilityFrame.Position, receivers, frame.Lights);
+		frame.VolumeCount = scene::ResolveVolumes(store, visibilityFrame.Position, receivers, frame.Volumes);
 		View visibilityView = view;
 		visibilityView.CameraFrame = visibilityFrame;
 		visibilityView.VisibilityFrame.reset();

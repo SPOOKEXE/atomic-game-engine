@@ -12,6 +12,9 @@
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
+#include <array>
+#include <cstddef>
+
 namespace engine::render {
 	class ShaderLibrary;
 	class InterfacePass;
@@ -112,6 +115,10 @@ namespace engine::render {
 	// One camera's light selection, surface demand, facing ribbons and spatial
 	// interface commands.
 	struct WorldCameraFrame {
+		// Camera-local selection of the world's bounded participating-media set.
+		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
+		// Number of selected volumes in `Volumes`.
+		size_t VolumeCount = 0;
 		// Lights selected for this camera.
 		std::vector<SceneLight> Lights;
 		// Surface views demanded by this camera.

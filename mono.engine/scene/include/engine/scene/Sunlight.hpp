@@ -36,7 +36,7 @@ namespace engine::scene {
 	// A pixel samples every active entry, so the cap is renderer work rather
 	// than an arbitrary hierarchy restriction. Additional authored volumes stay
 	// valid scene data and are simply not selected for this presentation frame.
-	inline constexpr size_t MAX_SCENE_VOLUMES = 4;
+	inline constexpr size_t MAX_SCENE_VOLUMES = 8;
 
 	// Where the sun shines *towards*, as a unit vector.
 	//

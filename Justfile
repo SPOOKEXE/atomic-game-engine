@@ -163,6 +163,19 @@ render-check filter="[render][gpu]" backend="vulkan": (build "test_render")
     export MONO_RENDER_REVISION="$(git describe --always --dirty)"
     ./{{build}}/tests/test_render "{{filter}}"
 
+# Proves 256 authored volumes resolve to the eight-volume fragment budget, then
+# measures that eight-volume frame cost. The light collector's receiver-aware
+# sixteen-light cap is exercised by the world-view release test. Each measured
+# submission waits for the GPU; no benchmark artifact is written outside build.
+volume-light-stress frames="120":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_scene test_render
+    ./.cache/build/release-tests/tests/test_scene "[scene][volume]"
+    MONO_LIGHT_SELECTION_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][world-view]"
+    MONO_VOLUME_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][gpu][volume-stress]"
+
 # Whole camera-batch signature costs, with unchanged rows and one-row edits.
 render-preparation-bench samples="5":
     cmake --preset bench > /dev/null

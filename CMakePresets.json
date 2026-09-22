@@ -48,6 +48,14 @@
       }
     },
     {
+      "name": "release-tests",
+      "inherits": "release",
+      "displayName": "release tests with release optimisation",
+      "cacheVariables": {
+        "MONO_BUILD_TESTS": "ON"
+      }
+    },
+    {
       "name": "profile",
       "inherits": "release",
       "displayName": "profile - release optimisation with heap tracking",
@@ -162,6 +170,10 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "release-tests",
+      "configurePreset": "release-tests"
     },
     {
       "name": "profile",

@@ -1,5 +1,9 @@
 #version 450
 
+#ifndef MAX_VOLUMES
+#define MAX_VOLUMES 8
+#endif
+
 layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outColour;
 
@@ -39,7 +43,7 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 SeamOutward[2];
 	vec4 SeamFirst[2];
 	vec4 SeamSecond[2];
-	Volume Volumes[4];
+	Volume Volumes[MAX_VOLUMES];
 	vec4 VolumeCount;
 } pass;
 
@@ -148,7 +152,7 @@ void main() {
 	float first = maximum;
 	float last = 0.0;
 	uint steps = 1u;
-	for (uint volumeIndex = 0u; volumeIndex < 4u; volumeIndex++) {
+	for (uint volumeIndex = 0u; volumeIndex < MAX_VOLUMES; volumeIndex++) {
 		if (volumeIndex >= uint(pass.VolumeCount.x)) break;
 		float enter;
 		float exit;
@@ -171,7 +175,7 @@ void main() {
 		vec3 point = pass.Eye.xyz + ray * distanceAlongRay;
 		float extinction = 0.0;
 		vec3 source = vec3(0.0);
-		for (uint volumeIndex = 0u; volumeIndex < 4u; volumeIndex++) {
+		for (uint volumeIndex = 0u; volumeIndex < MAX_VOLUMES; volumeIndex++) {
 			if (volumeIndex >= uint(pass.VolumeCount.x)) break;
 			Volume volume = pass.Volumes[volumeIndex];
 			float enter;
