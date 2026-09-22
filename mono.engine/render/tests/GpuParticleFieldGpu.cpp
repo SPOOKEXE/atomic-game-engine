@@ -39,13 +39,15 @@ TEST_CASE("GPU particle field dispatches and resizes without a CPU particle read
 	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
 
 	render::SceneTarget target{96, 64};
+	render::OverlayImage overlay;
 	auto first = FieldView(target, 262'144, 17);
-	const render::FrameResult firstFrame = fixture.Render.Render(std::span(&first, 1), nullptr, nullptr, false);
+	const render::FrameResult firstFrame = fixture.Render.Render(std::span(&first, 1), overlay, nullptr, false);
 	CHECK(firstFrame.ComputeDispatches >= 1);
 	CHECK(firstFrame.ParticlesDrawn >= 262'144);
 
 	auto resized = FieldView(target, 1'048'576, 23);
-	const render::FrameResult resizedFrame = fixture.Render.Render(std::span(&resized, 1), nullptr, nullptr, false);
+	const render::FrameResult resizedFrame =
+		fixture.Render.Render(std::span(&resized, 1), overlay, nullptr, false);
 	CHECK(resizedFrame.ComputeDispatches >= 1);
 	CHECK(resizedFrame.ParticlesDrawn >= 1'048'576);
 }
