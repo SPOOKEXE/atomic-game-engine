@@ -1132,6 +1132,8 @@ namespace engine::render {
 			}
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			const auto worldTarget = hdr ? WorldColourTarget::Hdr : WorldColourTarget::Display;
+			State->RefractionTexture = source.Texture;
+			State->RefractionSampler = recording.Sampler;
 			colourTarget.texture = target.Texture;
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
@@ -1381,6 +1383,8 @@ namespace engine::render {
 			}
 
 			SDL_EndGPURenderPass(pass);
+			State->RefractionTexture = nullptr;
+			State->RefractionSampler = nullptr;
 			return true;
 		});
 	}

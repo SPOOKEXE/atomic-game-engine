@@ -228,7 +228,8 @@ namespace engine::render::capture_record_validation {
 				 ? plane.Provenance != "authored_specular_factor/v1;source=material_alpha;range=zero_to_one"
 			 : plane.Channel == DataCaptureChannel::PbrTransmission
 				 ? plane.Provenance != "authored_transmission_factor/"
-									   "v1;source=emissive_alpha;range=zero_to_one;refraction=unavailable"
+									   "v1;source=emissive_alpha;range=zero_to_one;"
+									   "visual_model=screen_space_refraction;ior=1_5"
 			 : plane.Channel == DataCaptureChannel::LocalLightContribution
 				 ? plane.Provenance != "local_light_contribution/v1;source=single_selected_local_light;"
 									   "radiance=additive_linear_before_tonemap;encoding=rgba16_float"

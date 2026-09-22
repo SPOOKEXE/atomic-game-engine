@@ -219,7 +219,8 @@ namespace engine::render {
 						values
 					);
 					plane.Provenance = "authored_transmission_factor/"
-									   "v1;source=emissive_alpha;range=zero_to_one;refraction=unavailable";
+									   "v1;source=emissive_alpha;range=zero_to_one;"
+									   "visual_model=screen_space_refraction;ior=1_5";
 				}
 				break;
 			case DataCaptureChannel::DirectionalResponse:

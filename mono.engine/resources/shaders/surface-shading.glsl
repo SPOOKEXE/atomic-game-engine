@@ -34,6 +34,10 @@ layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
 layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
+// The transparent node binds its completed opaque source here. It is a
+// different texture from the active colour target, so transmission never reads
+// and writes the same image in one render pass.
+layout(set = 2, binding = 11) uniform sampler2D refractionImage;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -684,5 +688,29 @@ void shadeSurface() {
 		}
 	}
 
-	outColour = vec4(Encode(lit), alpha);
+	const float transmission = clamp(lighting.MaterialExtra.w, 0.0, 1.0);
+	if (transmission <= 0.0) {
+		outColour = vec4(Encode(lit), alpha);
+		return;
+	}
+
+	// A thin screen-space dielectric has no authored thickness or IOR in the
+	// current material model. IOR 1.5 is the conventional glass baseline; the
+	// normal-derived displacement approximates its refracted ray against the
+	// completed opaque scene. The factor makes zero exactly match opaque shading.
+	const float fixedIor = 1.5;
+	const float refractionScale = (1.0 - 1.0 / fixedIor) * 0.08;
+	vec2 sourceSize = vec2(textureSize(refractionImage, 0));
+	vec2 screenUv = gl_FragCoord.xy / max(sourceSize, vec2(1.0));
+	vec2 refractedUv = clamp(
+		screenUv + normal.xy * (refractionScale * transmission / max(abs(normal.z), 0.2)),
+		vec2(0.0),
+		vec2(1.0)
+	);
+	vec3 refracted = texture(refractionImage, refractedUv).rgb;
+	vec3 transmitted = mix(lit, refracted, transmission);
+	// Coverage remains independent for legacy fades. Transmission itself is an
+	// optically transparent surface, so a full factor is fully covered by the
+	// refracted result rather than blending its old opaque colour back in.
+	outColour = vec4(Encode(transmitted), mix(alpha, 1.0, transmission));
 }

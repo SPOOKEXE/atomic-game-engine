@@ -244,6 +244,14 @@ TEST_CASE("a hair of transparency is treated as opaque", "[scene][drawinstance]"
 	DrawInstance solid;
 	CHECK_FALSE(engine::scene::IsTransparent(solid));
 
+	DrawInstance transmissive;
+	transmissive.TransmissionFactor = 0.25f;
+	CHECK(engine::scene::IsTransparent(transmissive));
+
+	DrawInstance nearlyOpaqueTransmission;
+	nearlyOpaqueTransmission.TransmissionFactor = 1.0f / 100000.0f;
+	CHECK_FALSE(engine::scene::IsTransparent(nearlyOpaqueTransmission));
+
 	DrawInstance texturedGlass;
 	texturedGlass.Transparency = 0.25f;
 	CHECK(engine::scene::IsTransparent(texturedGlass));

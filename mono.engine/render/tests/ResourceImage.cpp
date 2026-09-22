@@ -4465,7 +4465,8 @@ TEST_CASE(
 	CHECK(captured.Planes[13].Scalar == render::DataCaptureScalar::Float16);
 	CHECK(
 		captured.Planes[13].Provenance ==
-		"authored_transmission_factor/v1;source=emissive_alpha;range=zero_to_one;refraction=unavailable"
+		"authored_transmission_factor/v1;source=emissive_alpha;range=zero_to_one;"
+		"visual_model=screen_space_refraction;ior=1_5"
 	);
 	core::ByteReader objectIds(captured.Planes[7].Bytes);
 	size_t labelledPixels = 0, packedPixels = 0, zeroPixels = 0;

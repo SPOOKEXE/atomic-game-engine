@@ -157,7 +157,10 @@ namespace engine::render {
 			// A valid authored name can still fall back for packed meshes, LODs, or
 			// a pass family without a matching variant. Those pipelines are engine
 			// PBR pipelines and declare the eleventh packed-material sampler.
-			materialSamplerCount = authoredMaterial ? 10u : 11u;
+			const bool surfaceShader = native == OpaquePipeline || native == TransparentPipeline ||
+									   native == HdrOpaquePipeline || native == HdrTransparentPipeline ||
+									   native == ForwardPipeline;
+			materialSamplerCount = authoredMaterial ? 10u : surfaceShader ? 12u : 11u;
 			if (want != bound) {
 				SDL_BindGPUGraphicsPipeline(pass, want);
 				bound = want;
@@ -322,6 +325,8 @@ namespace engine::render {
 					{height != nullptr ? height : FallbackTexture, materialSampler},
 					{metalness != nullptr ? metalness : FallbackTexture, materialSampler},
 					{packedPbr != nullptr ? packedPbr : FallbackTexture, materialSampler},
+					{RefractionTexture != nullptr ? RefractionTexture : FallbackTexture,
+					 RefractionSampler != nullptr ? RefractionSampler : fallbackSampler},
 				};
 				SDL_BindGPUFragmentSamplers(pass, 0, samplers, materialSamplerCount);
 

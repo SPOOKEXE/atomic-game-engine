@@ -965,6 +965,12 @@ namespace engine::render {
 		// modern API and cannot be changed by a draw call.
 		SDL_GPUGraphicsPipeline *TransparentPipeline = nullptr;
 
+		// The transparent node copies its completed opaque input before drawing
+		// this tail. Transmission samples that immutable copy, never the target it
+		// is blending into, which avoids a read/write feedback loop.
+		SDL_GPUTexture *RefractionTexture = nullptr;
+		SDL_GPUSampler *RefractionSampler = nullptr;
+
 		// The ground grid, drawn in the transparent pass. See `grid.frag`: a
 		// fullscreen triangle that finds the ground plane per pixel and writes
 		// its own `gl_FragDepth`, so the hardware depth test is what hides it

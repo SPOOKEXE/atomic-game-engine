@@ -49,7 +49,11 @@ namespace engine::scene {
 	}
 
 	bool IsTransparent(const DrawInstance &instance) {
-		return instance.Transparency > TRANSPARENCY_EPSILON;
+		// Transmission is a surface property rather than coverage, but it still
+		// needs the sorted tail: the refractive shader samples the completed opaque
+		// image, which cannot include this surface itself.
+		return instance.Transparency > TRANSPARENCY_EPSILON ||
+			   instance.TransmissionFactor > TRANSPARENCY_EPSILON;
 	}
 
 	uint64_t MixSignature(uint64_t hash, uint64_t word) {
