@@ -126,7 +126,8 @@ namespace engine::render {
 		SDL_GPUShader *packedOpaqueVertex =
 			LoadShader("packed-opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 2, 5);
 
-		// **Two samplers now: the shadow map and the surface.** The count is
+		// **Twelve samplers: material inputs plus the immutable opaque scene for
+		// transmission.** The count is
 		// part of the shader object rather than of the pipeline, so a mismatch
 		// with the `layout(set = 2, binding = n)` declarations is a bind that
 		// silently reads nothing rather than a validation error.
@@ -138,7 +139,7 @@ namespace engine::render {
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
-			11,
+			12,
 			3
 		);
 
