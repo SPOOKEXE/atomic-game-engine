@@ -999,6 +999,10 @@ namespace engine::replication {
 
 			uint64_t WaitingSince = 0;
 
+			// The entity's position in this tick's `Bearing`, when scoring found
+			// one. Refinement reuses it instead of searching the same sorted set.
+			size_t BearingSlot = NOWHERE;
+
 			float Hint = 0.0f;
 		};
 

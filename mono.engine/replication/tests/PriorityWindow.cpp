@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -42,9 +43,14 @@ namespace priority_window_test {
 		float X = 0.0f;
 	};
 
+	struct Other {
+		float X = 0.0f;
+	};
+
 	void RegisterTypes() {
 		static bool once = [] {
 			engine::ecs::Components::Register<Mark>("priority_window_test.Mark");
+			engine::ecs::Components::Register<Other>("priority_window_test.Other");
 			return true;
 		}();
 		(void)once;
@@ -100,6 +106,19 @@ namespace priority_window_test {
 				made.push_back(entity);
 			}
 			return made;
+		}
+
+		// Adds a second changed row per entity so refinement's per-entity cache
+		// has to join rows from separate replicated components.
+		void ReplicateOther() {
+			Authority_.Replicate(Name("priority_window_test.Other"));
+			Server.Observe<Other>();
+		}
+
+		void ChangeOther(const std::vector<Entity> &entities, float value) {
+			for (const Entity entity : entities) {
+				Server.Set<Other>(entity, Other{value});
+			}
 		}
 
 		Store Server;
@@ -254,4 +273,35 @@ TEST_CASE("no refinement registered leaves the order the score gave", "[replicat
 	}
 
 	CHECK_NOTHROW(plain.Tick());
+}
+
+TEST_CASE(
+	"refinement without a score still shares one answer between component rows", "[replication][priority]"
+) {
+	// Refinement is valid without a cheap score hook. In that mode there is no
+	// slot saved by scoring, so the fallback must still locate each entity and
+	// retain one answer for both rows.
+	Pair pair(80, 24);
+	pair.ReplicateOther();
+	const std::vector<Entity> made = pair.Fill(24);
+	pair.ChangeOther(made, 0.0f);
+	REQUIRE(pair.Join());
+
+	std::map<uint64_t, size_t> asked;
+	pair.Authority_.SetPriorityRefinement([&asked](ClientId, Entity entity, float hint) {
+		asked[entity.Id]++;
+		return hint;
+	});
+
+	for (const Entity entity : made) {
+		pair.Server.Set<Mark>(entity, Mark{1.0f});
+	}
+	pair.ChangeOther(made, 1.0f);
+	pair.Tick();
+
+	REQUIRE(asked.size() == made.size());
+	for (const auto &[entity, calls] : asked) {
+		(void)entity;
+		CHECK(calls == 1);
+	}
 }

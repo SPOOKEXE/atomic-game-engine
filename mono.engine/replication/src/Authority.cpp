@@ -1104,6 +1104,7 @@ namespace engine::replication {
 				const size_t slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
 				cursor = static_cast<size_t>(found - Bearing.begin());
 
+				candidate.BearingSlot = known ? slot : NOWHERE;
 				if (known && !std::isnan(lane.Scores[slot])) {
 					candidate.Hint = lane.Scores[slot];
 					continue;
@@ -1269,9 +1270,13 @@ namespace engine::replication {
 		for (size_t position = 0; position < window; position++) {
 			Candidate &candidate = lane.Candidates[lane.Order[position]];
 
-			const auto found = std::lower_bound(Bearing.begin(), Bearing.end(), candidate.Entity.Id);
-			const bool known = found != Bearing.end() && *found == candidate.Entity.Id;
-			const size_t slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
+			size_t slot = candidate.BearingSlot;
+			bool known = slot != NOWHERE;
+			if (!known) {
+				const auto found = std::lower_bound(Bearing.begin(), Bearing.end(), candidate.Entity.Id);
+				known = found != Bearing.end() && *found == candidate.Entity.Id;
+				slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
+			}
 
 			if (known && !std::isnan(lane.Refined[slot])) {
 				candidate.Hint = lane.Refined[slot];
@@ -1809,6 +1814,7 @@ namespace engine::replication {
 						static_cast<uint32_t>(values.Bytes().size() - at),
 						entity,
 						pending.WaitingSince,
+						NOWHERE,
 						0.0f
 					}
 				);

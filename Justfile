@@ -490,6 +490,13 @@ simulation-publish-sweep samples="3":
             --samples "{{samples}}"
     done
 
+# The scored and refined multi-row publish path. The priority hook locates one
+# Bearing slot per entity and refinement must reuse it across component rows.
+priority-refinement-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_replication
+    ./.cache/build/bench/bench/bench_replication --suite engine.replication.bench.priority-refinement --samples {{samples}}
+
 # How much of the repository is code, comment and blank, as markdown.
 #
 # `just linecount` walks everything except mono.vendor and the dot-directories;
