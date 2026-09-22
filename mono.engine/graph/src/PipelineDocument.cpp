@@ -973,6 +973,12 @@ namespace engine::graph {
 		resource("second-surface-validity", ResourceKind::Colour, ResourceFormat::R8);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		if (captureObservations) {
+			// Directional response keeps the source radiance and shadow factor before
+			// later scene passes alter the lit image.
+			resource("lighting-baseline", ResourceKind::Colour, ResourceFormat::RGBA32F);
+			resource("directional-response", ResourceKind::Colour, ResourceFormat::RGBA32F);
+		}
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-b", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1097,6 +1103,10 @@ namespace engine::graph {
 		// the projection samples this frame's captures rather than last frame's.
 		touches(EditKind::Reads, "portal-light", "portal-light");
 		touches(EditKind::Writes, "lit", "colour");
+		if (captureObservations) {
+			touches(EditKind::Writes, "lighting-baseline", "lighting-baseline");
+			touches(EditKind::Writes, "directional-response", "directional-response");
+		}
 
 		node("sky", NodeScope::View);
 		touches(EditKind::Reads, "lit", "colour");
@@ -1539,6 +1549,20 @@ namespace engine::graph {
 		);
 		document.Record(
 			{.Kind = EditKind::Reads, .Target = core::Name("occlusion"), .Key = core::Name("source")}
+		);
+		// RGB is unshadowed directional radiance after fog, while alpha is the sampled
+		// directional shadow and portal-beam visibility factor. ShadowVisibility shares
+		// this readback and derives its compact display plane from alpha.
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-directional-response"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads,
+			 .Target = core::Name("directional-response"),
+			 .Key = core::Name("source")}
 		);
 		// The packed target is capture-only: native depth and material facts stay available
 		// independently, while this resource provides an opt-in GPU RGBA32F readback.

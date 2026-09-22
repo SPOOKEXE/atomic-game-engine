@@ -46,13 +46,15 @@ namespace engine::render::capture_record_validation {
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors)
 				? scalar == DataCaptureScalar::Float16
 			: (channel == DataCaptureChannel::LinearDepth ||
-			   channel == DataCaptureChannel::SecondSurfaceDepth || channel == DataCaptureChannel::PackedGpu)
+			   channel == DataCaptureChannel::SecondSurfaceDepth ||
+			   channel == DataCaptureChannel::PackedGpu || channel == DataCaptureChannel::DirectionalResponse)
 				? scalar == DataCaptureScalar::Float32
 			: channel == DataCaptureChannel::ShadingNormal ? scalar == DataCaptureScalar::UNorm10A2
 			: channel == DataCaptureChannel::ObjectIds	   ? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::SemanticMask || channel == DataCaptureChannel::PartMask)
 				? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::AmbientOcclusion ||
+			   channel == DataCaptureChannel::ShadowVisibility ||
 			   channel == DataCaptureChannel::FirstSurfaceValidity ||
 			   channel == DataCaptureChannel::SecondSurfaceValidity)
 				? scalar == DataCaptureScalar::UNorm8
@@ -61,13 +63,15 @@ namespace engine::render::capture_record_validation {
 				: false;
 		const size_t bytesPerPixel =
 			(channel == DataCaptureChannel::AmbientOcclusion ||
+			 channel == DataCaptureChannel::ShadowVisibility ||
 			 channel == DataCaptureChannel::FirstSurfaceValidity ||
 			 channel == DataCaptureChannel::SecondSurfaceValidity)
 				? 1
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors) ? 4
-			: channel == DataCaptureChannel::PackedGpu												  ? 16
-			: scalar == DataCaptureScalar::Float16													  ? 8
-																									  : 4;
+			: (channel == DataCaptureChannel::PackedGpu || channel == DataCaptureChannel::DirectionalResponse)
+				? 16
+			: scalar == DataCaptureScalar::Float16 ? 8
+												   : 4;
 		return valid && width > 0 && bytesPerPixel <= std::numeric_limits<size_t>::max() / width
 				   ? bytesPerPixel * width
 				   : 0;
@@ -126,6 +130,18 @@ namespace engine::render::capture_record_validation {
 		});
 	}
 
+	inline bool ValidDirectionalResponseProvenance(std::string_view provenance) {
+		return provenance == "directional_response/v1;components=unshadowed_directional_radiance_rgb_"
+							 "shadow_visibility_a;radiance=linear_after_fog;visibility=directional_shadow_"
+							 "and_portal_beam_factor;range_a=0_to_1";
+	}
+
+	inline bool ValidShadowVisibilityProvenance(std::string_view provenance) {
+		return provenance ==
+			   "shadow_visibility/v1;source=directional_response_alpha;factor=directional_shadow_"
+			   "and_portal_beam_visibility;encoding=unorm8_round_to_nearest;source_range=0_to_1";
+	}
+
 	inline bool
 	Plane(const DataCaptureTicket &ticket, const DataCapturePlane &plane, uint64_t id, State &state) {
 		const std::string channel(DataCaptureChannelName(plane.Channel));
@@ -173,6 +189,7 @@ namespace engine::render::capture_record_validation {
 				   plane.Scalar == DataCaptureScalar::Unknown &&
 				   plane.ColourSpace == DataCaptureColourSpace::Unknown;
 		}
+
 		const size_t stride = MinimumRowStride(plane.Channel, plane.Scalar, plane.Width);
 		const bool validSecondProvenance = ValidSecondSurfaceProvenance(plane.Provenance);
 		const bool validFirstProvenance = ValidFirstSurfaceProvenance(plane.Provenance);
@@ -180,6 +197,10 @@ namespace engine::render::capture_record_validation {
 				 ? !plane.AmbientOcclusion || !ValidAmbientOcclusion(*plane.AmbientOcclusion)
 				 : plane.AmbientOcclusion.has_value()) ||
 			(secondSurface ? !validSecondProvenance
+			 : plane.Channel == DataCaptureChannel::DirectionalResponse
+				 ? !ValidDirectionalResponseProvenance(plane.Provenance)
+			 : plane.Channel == DataCaptureChannel::ShadowVisibility
+				 ? !ValidShadowVisibilityProvenance(plane.Provenance)
 			 : plane.Channel == DataCaptureChannel::FirstSurfaceValidity
 				 ? !validFirstProvenance || !ValidFirstSurfaceValidityBytes(plane.Bytes)
 			 : plane.Channel == DataCaptureChannel::MeshUv

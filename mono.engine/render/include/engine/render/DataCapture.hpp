@@ -115,6 +115,10 @@ namespace engine::render {
 		SecondSurfaceValidity,
 		MotionVectors,
 		OpticalFlow,
+		// Unshadowed directional radiance in RGB and the exact sampled visibility factor in alpha.
+		DirectionalResponse,
+		// One-byte display/export representation derived from DirectionalResponse alpha.
+		ShadowVisibility,
 		// Explicit RGBA32F render-graph packing, with four documented retained lanes.
 		PackedGpu,
 	};
@@ -154,8 +158,11 @@ namespace engine::render {
 				? "-second-surface"
 			: channel == DataCaptureChannel::MotionVectors ? "-motion-vectors"
 			: channel == DataCaptureChannel::OpticalFlow   ? "-optical-flow"
-			: channel == DataCaptureChannel::PackedGpu	   ? "-packed-gpu"
-														   : "";
+			: channel == DataCaptureChannel::DirectionalResponse ||
+					channel == DataCaptureChannel::ShadowVisibility
+				? "-directional-response"
+			: channel == DataCaptureChannel::PackedGpu ? "-packed-gpu"
+													   : "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 

@@ -8,6 +8,8 @@
 #include <engine/render/Renderer.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <numeric>
 #include <utility>
 
@@ -97,7 +99,7 @@ namespace engine::render {
 
 		void FillPlane(DataCapturePlane &plane, ResourceImage &image) {
 			const core::Name lit("lit"), albedo("albedo"), material("material"), emissive("emissive"),
-				depth("linear-depth"), normal("normal");
+				depth("linear-depth"), normal("normal"), directionalResponse("directional-response");
 			auto primary = [&](core::Name expected,
 							   DataCaptureScalar scalar,
 							   DataCaptureColourSpace colourSpace,
@@ -172,6 +174,19 @@ namespace engine::render {
 					DataCaptureColourSpace::Linear,
 					ResourceImageFormat::RGBA16_Float
 				);
+				break;
+			case DataCaptureChannel::DirectionalResponse:
+				primary(
+					directionalResponse,
+					DataCaptureScalar::Float32,
+					DataCaptureColourSpace::NotApplicable,
+					ResourceImageFormat::RGBA32_Float
+				);
+				if (plane.Status == DataCaptureStatus::Ready)
+					plane.Provenance =
+						"directional_response/v1;components=unshadowed_directional_radiance_rgb_"
+						"shadow_visibility_a;radiance=linear_after_fog;visibility=directional_shadow_"
+						"and_portal_beam_factor;range_a=0_to_1";
 				break;
 			case DataCaptureChannel::MeshUv:
 				primary(
@@ -270,6 +285,43 @@ namespace engine::render {
 			default:
 				break;
 			}
+		}
+
+		void FillShadowVisibility(DataCapturePlane &plane, const DataCapturePlane &directionalResponse) {
+			if (directionalResponse.Status != DataCaptureStatus::Ready ||
+				directionalResponse.Resource != core::Name("directional-response") ||
+				directionalResponse.Scalar != DataCaptureScalar::Float32 || directionalResponse.Width == 0 ||
+				directionalResponse.Height == 0 ||
+				directionalResponse.RowStride < directionalResponse.Width * 16 ||
+				directionalResponse.Bytes.size() !=
+					static_cast<size_t>(directionalResponse.Height) * directionalResponse.RowStride)
+				return;
+			std::vector<std::byte> visibility(
+				static_cast<size_t>(directionalResponse.Width) * directionalResponse.Height
+			);
+			for (uint32_t row = 0; row < directionalResponse.Height; ++row)
+				for (uint32_t column = 0; column < directionalResponse.Width; ++column) {
+					float factor = 0.0f;
+					const size_t source = static_cast<size_t>(row) * directionalResponse.RowStride +
+										  static_cast<size_t>(column) * 16 + 12;
+					std::memcpy(&factor, directionalResponse.Bytes.data() + source, sizeof(factor));
+					if (!std::isfinite(factor)) return;
+					visibility[static_cast<size_t>(row) * directionalResponse.Width + column] =
+						static_cast<std::byte>(std::lround(std::clamp(factor, 0.0f, 1.0f) * 255.0f));
+				}
+			Ready(
+				plane,
+				directionalResponse.Resource,
+				directionalResponse.Width,
+				directionalResponse.Height,
+				directionalResponse.Width,
+				DataCaptureScalar::UNorm8,
+				DataCaptureColourSpace::NotApplicable,
+				visibility
+			);
+			plane.Provenance =
+				"shadow_visibility/v1;source=directional_response_alpha;factor=directional_shadow_"
+				"and_portal_beam_visibility;encoding=unorm8_round_to_nearest;source_range=0_to_1";
 		}
 
 	}
@@ -477,6 +529,10 @@ namespace engine::render {
 		for (size_t index = 0; index < ticket.Channels.size(); ++index) {
 			const DataCaptureChannel channel = ticket.Channels[index];
 			DataCapturePlane plane = Plane(channel, ticket);
+			if (channel == DataCaptureChannel::ShadowVisibility) {
+				poll.Planes.push_back(std::move(plane));
+				continue;
+			}
 			if (ticket.ChannelResourceIndices[index] == NO_DATA_CAPTURE_RESOURCE) {
 				poll.Planes.push_back(std::move(plane));
 				continue;
@@ -488,6 +544,29 @@ namespace engine::render {
 				plane.Status = DataCaptureStatus::Failed;
 			}
 			poll.Planes.push_back(std::move(plane));
+		}
+		for (size_t index = 0; index < ticket.Channels.size(); ++index) {
+			if (ticket.Channels[index] != DataCaptureChannel::ShadowVisibility) continue;
+			DataCapturePlane &plane = poll.Planes[index];
+			if (ticket.ChannelResourceIndices[index] == NO_DATA_CAPTURE_RESOURCE) continue;
+			ResourceImage &image = images[ticket.ChannelResourceIndices[index]];
+			if (image.Status == ResourceImageStatus::Failed) {
+				plane.Status = DataCaptureStatus::Failed;
+				continue;
+			}
+			if (image.Status != ResourceImageStatus::Ok) continue;
+			const auto response = std::ranges::find_if(poll.Planes, [](const DataCapturePlane &candidate) {
+				return candidate.Channel == DataCaptureChannel::DirectionalResponse;
+			});
+			if (response != poll.Planes.end()) {
+				FillShadowVisibility(plane, *response);
+				continue;
+			}
+			DataCapturePlane temporary;
+			temporary.Channel = DataCaptureChannel::DirectionalResponse;
+			temporary.CaptureNode = ticket.CaptureNode;
+			FillPlane(temporary, image);
+			FillShadowVisibility(plane, temporary);
 		}
 		const auto secondDepth = std::ranges::find_if(poll.Planes, [](const DataCapturePlane &plane) {
 			return plane.Channel == DataCaptureChannel::SecondSurfaceDepth;

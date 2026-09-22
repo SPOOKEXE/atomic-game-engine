@@ -22,7 +22,7 @@ namespace engine::render {
 	struct View;
 
 	// Maximum registered hook capabilities owned by one renderer.
-	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 19;
+	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 21;
 	// Maximum live client connections to hook capabilities.
 	inline constexpr size_t MAX_DATA_FACTORY_CONNECTIONS = 6;
 	// Maximum admitted readback batches awaiting completion.
@@ -30,7 +30,7 @@ namespace engine::render {
 	// Maximum capture channels one hook may expose.
 	inline constexpr size_t MAX_DATA_FACTORY_HOOK_CHANNELS = 1;
 	// Maximum graph nodes whose readback one batch may retain.
-	inline constexpr size_t MAX_DATA_FACTORY_READBACK_NODES = 10;
+	inline constexpr size_t MAX_DATA_FACTORY_READBACK_NODES = 11;
 	// Aggregate byte budget for retained capture payloads.
 	inline constexpr size_t MAX_DATA_FACTORY_RETAINED_BYTES = 64 * 1024 * 1024;
 	// Pump runs once per owner frame, so this bounds a lost completion to ten

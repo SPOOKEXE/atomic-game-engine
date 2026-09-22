@@ -30,7 +30,7 @@ namespace engine::render {
 	}
 
 	namespace {
-		constexpr size_t MAX_CAPTURE_CHANNELS = 15;
+		constexpr size_t MAX_CAPTURE_CHANNELS = 17;
 		constexpr size_t MAX_CAPTURE_TICKETS = 6;
 		constexpr size_t RETAINED_BYTE_LIMIT = 64 * 1024 * 1024;
 
@@ -56,6 +56,8 @@ namespace engine::render {
 			if (name == "second_surface_depth") return DataCaptureChannel::SecondSurfaceDepth;
 			if (name == "second_surface_validity") return DataCaptureChannel::SecondSurfaceValidity;
 			if (name == "motion_vectors") return DataCaptureChannel::MotionVectors;
+			if (name == "directional_response") return DataCaptureChannel::DirectionalResponse;
+			if (name == "shadow_visibility") return DataCaptureChannel::ShadowVisibility;
 			if (name == "packed_gpu") return DataCaptureChannel::PackedGpu;
 			return std::nullopt;
 		}
@@ -313,15 +315,18 @@ namespace engine::render {
 
 		const char *Packing(DataCaptureChannel channel, DataCaptureScalar scalar) {
 			return channel == DataCaptureChannel::AmbientOcclusion ||
+						   channel == DataCaptureChannel::ShadowVisibility ||
 						   channel == DataCaptureChannel::FirstSurfaceValidity ||
 						   channel == DataCaptureChannel::SecondSurfaceValidity
 					   ? "unorm8"
 				   : scalar == DataCaptureScalar::UNorm8 ? "rgba8_unorm"
 				   : channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors
 					   ? "rg16_float"
-				   : scalar == DataCaptureScalar::UNorm10A2	  ? "unorm10a2"
-				   : channel == DataCaptureChannel::PackedGpu ? "rgba32_float"
-															  : "";
+				   : scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
+				   : (channel == DataCaptureChannel::PackedGpu ||
+					  channel == DataCaptureChannel::DirectionalResponse)
+					   ? "rgba32_float"
+					   : "";
 		}
 
 		bool Compactible(DataCaptureChannel channel) {
@@ -356,6 +361,10 @@ namespace engine::render {
 		const char *Provenance(DataCaptureChannel channel) {
 			return channel == DataCaptureChannel::AmbientOcclusion
 					   ? "ssao_estimator_visibility_factor_not_ground_truth"
+				   : channel == DataCaptureChannel::DirectionalResponse
+					   ? "directional_response_rgb_is_unshadowed_linear_radiance_alpha_is_visibility_factor"
+				   : channel == DataCaptureChannel::ShadowVisibility
+					   ? "directional_shadow_and_portal_beam_visibility_factor_quantized_to_unorm8"
 					   : "";
 		}
 
@@ -461,25 +470,26 @@ namespace engine::render {
 		std::lock_guard lock(Mutex);
 		return {
 			.Available = CaptureAvailable,
-			.Channels =
-				{"rgb_linear_hdr",
-				 "linear_depth",
-				 "shading_normal",
-				 "pbr_albedo",
-				 "pbr_material",
-				 "pbr_emissive",
-				 "pbr_specular",
-				 "pbr_transmission",
-				 "mesh_uv",
-				 "ambient_occlusion",
-				 "object_ids",
-				 "semantic_ids",
-				 "part_ids",
-				 "first_surface_validity",
-				 "second_surface_depth",
-				 "second_surface_validity",
-				 "motion_vectors",
-				 "packed_gpu"},
+			.Channels = {"rgb_linear_hdr",
+						 "linear_depth",
+						 "shading_normal",
+						 "pbr_albedo",
+						 "pbr_material",
+						 "pbr_emissive",
+						 "pbr_specular",
+						 "pbr_transmission",
+						 "mesh_uv",
+						 "ambient_occlusion",
+						 "object_ids",
+						 "semantic_ids",
+						 "part_ids",
+						 "first_surface_validity",
+						 "second_surface_depth",
+						 "second_surface_validity",
+						 "motion_vectors",
+						 "directional_response",
+						 "shadow_visibility",
+						 "packed_gpu"},
 			.StorageProfiles = {"lossless", "training_compact"},
 			.TrainingCompactLimitations =
 				{"linear_depth=float32_to_float16_le",

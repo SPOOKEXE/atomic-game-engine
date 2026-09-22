@@ -143,6 +143,36 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 	CHECK(occlusion->Divisor == 2);
 }
 
+TEST_CASE(
+	"the data capture document retains directional response for shadow visibility", "[graph][data-capture]"
+) {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(
+		Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok
+	);
+	const engine::graph::Node *lighting = nullptr;
+	const engine::graph::Node *capture = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("deferred-lighting")) lighting = node;
+		if (node && node->Name == Name("data-capture-directional-response")) capture = node;
+	}
+	REQUIRE(lighting != nullptr);
+	CHECK(
+		lighting->WritePorts ==
+		std::vector<Name>{Name("colour"), Name("lighting-baseline"), Name("directional-response")}
+	);
+	REQUIRE(capture != nullptr);
+	CHECK(capture->Kind == Name("capture"));
+	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
+	REQUIRE(capture->Reads.size() == 1);
+	const auto *response = graph.FindResource(capture->Reads.front());
+	REQUIRE(response != nullptr);
+	CHECK(response->Name == Name("directional-response"));
+	CHECK(response->Format == engine::graph::ResourceFormat::RGBA32F);
+}
+
 TEST_CASE("the data capture document exposes a GPU packed RGBA32F target", "[graph][data-capture]") {
 	RenderGraph graph;
 	Name offender;

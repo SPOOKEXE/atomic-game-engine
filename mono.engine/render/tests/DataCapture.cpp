@@ -124,6 +124,13 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(
 		std::string_view(DataCaptureChannelName(DataCaptureChannel::AmbientOcclusion)) == "ambient_occlusion"
 	);
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::DirectionalResponse)) ==
+		"directional_response"
+	);
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::ShadowVisibility)) == "shadow_visibility"
+	);
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::SemanticMask)) == "semantic_ids");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::PartMask)) == "part_ids");
 	CHECK(
@@ -333,6 +340,8 @@ TEST_CASE(
 			 render::DataCaptureChannel::SemanticMask,
 			 render::DataCaptureChannel::PartMask,
 			 render::DataCaptureChannel::AmbientOcclusion,
+			 render::DataCaptureChannel::DirectionalResponse,
+			 render::DataCaptureChannel::ShadowVisibility,
 			 render::DataCaptureChannel::FirstSurfaceValidity,
 			 render::DataCaptureChannel::SecondSurfaceDepth,
 			 render::DataCaptureChannel::SecondSurfaceValidity},
@@ -357,12 +366,16 @@ TEST_CASE(
 	bool hasNativeResolutionPlane = false;
 	const render::DataCapturePlane *firstSurfaceValidity = nullptr;
 	const render::DataCapturePlane *pbrEmissive = nullptr;
+	const render::DataCapturePlane *directionalResponse = nullptr;
+	const render::DataCapturePlane *shadowVisibility = nullptr;
 	for (const render::DataCapturePlane &plane : poll.Planes) {
 		CHECK(plane.Status == render::DataCaptureStatus::Ready);
 		hasNativeResolutionPlane =
 			hasNativeResolutionPlane || (plane.Width >= target.Width && plane.Height >= target.Height);
 		if (plane.Channel == render::DataCaptureChannel::FirstSurfaceValidity) firstSurfaceValidity = &plane;
 		if (plane.Channel == render::DataCaptureChannel::PbrEmissive) pbrEmissive = &plane;
+		if (plane.Channel == render::DataCaptureChannel::DirectionalResponse) directionalResponse = &plane;
+		if (plane.Channel == render::DataCaptureChannel::ShadowVisibility) shadowVisibility = &plane;
 	}
 	CHECK(hasNativeResolutionPlane);
 	REQUIRE(firstSurfaceValidity != nullptr);
@@ -385,6 +398,39 @@ TEST_CASE(
 	}
 	CHECK(maximumEmissive > instance.EmissiveStrength - 16.0f / 255.0f);
 	CHECK(maximumEmissive < instance.EmissiveStrength + 16.0f / 255.0f);
+	REQUIRE(directionalResponse != nullptr);
+	REQUIRE(shadowVisibility != nullptr);
+	CHECK(directionalResponse->Scalar == render::DataCaptureScalar::Float32);
+	CHECK(directionalResponse->RowStride == directionalResponse->Width * 16);
+	CHECK(shadowVisibility->Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(shadowVisibility->RowStride == shadowVisibility->Width);
+	CHECK(shadowVisibility->Width == directionalResponse->Width);
+	CHECK(shadowVisibility->Height == directionalResponse->Height);
+	REQUIRE_FALSE(directionalResponse->Bytes.empty());
+	REQUIRE_FALSE(shadowVisibility->Bytes.empty());
+	const auto visibilityMatches = [&] {
+		for (uint32_t y = 0; y < directionalResponse->Height; ++y) {
+			for (uint32_t x = 0; x < directionalResponse->Width; ++x) {
+				float responseVisibility = 0.0f;
+				std::memcpy(
+					&responseVisibility,
+					directionalResponse->Bytes.data() + y * directionalResponse->RowStride + x * 16 + 12,
+					sizeof(responseVisibility)
+				);
+				if (!std::isfinite(responseVisibility)) return false;
+				const auto expected = static_cast<unsigned char>(
+					std::lround(std::clamp(responseVisibility, 0.0f, 1.0f) * 255.0f)
+				);
+				if (std::to_integer<unsigned char>(
+						shadowVisibility->Bytes[y * shadowVisibility->RowStride + x]
+					) != expected) {
+					return false;
+				}
+			}
+		}
+		return true;
+	};
+	CHECK(visibilityMatches());
 }
 
 TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gpu][data-capture][.]") {
@@ -1549,7 +1595,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			return hook.Access == "observation";
 		})
 	);
-	REQUIRE(observationHooks == 18);
+	REQUIRE(observationHooks == 20);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
 		if (hook.Access != "observation") continue;
@@ -1573,7 +1619,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 	CHECK(capabilities.MaximumHooks == MAX_DATA_FACTORY_HOOKS);
 	CHECK(capabilities.MaximumConnections == MAX_DATA_FACTORY_CONNECTIONS);
 	CHECK(capabilities.MaximumBatches == MAX_DATA_FACTORY_BATCHES);
-	CHECK(capabilities.MaximumReadbackNodes == 10);
+	CHECK(capabilities.MaximumReadbackNodes == 11);
 }
 
 TEST_CASE("script capture validates requests and isolates ticket owners", "[render][data-capture]") {
