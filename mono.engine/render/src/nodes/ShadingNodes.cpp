@@ -907,12 +907,10 @@ namespace engine::render {
 				for (uint32_t index = 0; index < 4; ++index) {
 					const core::Name requested = recording.LocalLightCaptureIds[index];
 					if (!requested.IsValid()) continue;
-					const auto row = std::find(
-						recording.SceneLightIds.begin(),
-						recording.SceneLightIds.begin() + static_cast<size_t>(lightUniforms.Count.x),
-						requested
-					);
-					recording.LocalLightCaptureMatched[index] = row != recording.SceneLightIds.end();
+					const auto activeLightEnd =
+						recording.SceneLightIds.begin() + static_cast<size_t>(lightUniforms.Count.x);
+					const auto row = std::find(recording.SceneLightIds.begin(), activeLightEnd, requested);
+					recording.LocalLightCaptureMatched[index] = row != activeLightEnd;
 					if (!recording.LocalLightCaptureMatched[index]) continue;
 					const uint32_t lightRow = static_cast<uint32_t>(row - recording.SceneLightIds.begin());
 					const core::Name port(std::string("local-light-response-") + std::to_string(index));

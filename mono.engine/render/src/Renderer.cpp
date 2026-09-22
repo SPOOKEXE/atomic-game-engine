@@ -2636,7 +2636,7 @@ namespace engine::render {
 			.PipelineRevision = recording.Pipeline->Revision,
 			.ViewSlot = targetSlot,
 		};
-		Hooks().ApplyLocalLightCapture(captureIdentity, recording);
+		if (Hooks().ApplyLocalLightCapture(captureIdentity, recording)) recording.Request.Damage.Scene = true;
 
 		// A damaged scene binds every built-in kind directly. An unchanged scene
 		// starts with no-op handlers, then replaces only families containing retained
