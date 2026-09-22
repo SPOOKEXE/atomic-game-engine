@@ -1232,6 +1232,8 @@ namespace engine::render {
 		frameNodes.Set(core::Name("dof"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
+			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
+			recording.Sampler = State->SurfaceSampler;
 			if (context.Reads.size() != 2 || context.Writes.size() != 1 ||
 				State->DepthOfFieldPipeline == nullptr)
 				return false;
@@ -1283,21 +1285,31 @@ namespace engine::render {
 		frameNodes.Set(core::Name("god-rays"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			if (context.Reads.size() != 1 || context.Writes.size() != 1 || State->GodRaysPipeline == nullptr)
+			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
+			recording.Sampler = State->SurfaceSampler;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1 || State->GodRaysPipeline == nullptr)
 				return false;
-			const Impl::NamedTexture source = recording.GraphTexture(context.Reads.front(), context, false);
+			const Impl::NamedTexture source = recording.GraphTexture(context.Reads[0], context, false);
+			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
-			if (!source.IsValid() || !target.IsValid() ||
+			if (!source.IsValid() || !depth.IsValid() || !target.IsValid() ||
 				source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
 				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || source.Width != target.Width ||
-				source.Height != target.Height)
+				source.Height != target.Height || depth.Width != target.Width ||
+				depth.Height != target.Height)
 				return false;
 
 			const core::Vector3 eye = recording.Request.CameraFrame.Position;
+			// The directional sun is projected at the eye's own far distance. A
+			// fixed kilometre point can lie behind an ordinary 500 metre camera far
+			// plane and incorrectly suppress every shaft.
+			const float sunDistance =
+				std::max(recording.DrawCamera.NearPlane * 2.0f, recording.DrawCamera.FarPlane * 0.99f);
 			const glm::vec4 sunWorld{
-				eye.X - State->Sun.x * 1000.0f,
-				eye.Y - State->Sun.y * 1000.0f,
-				eye.Z - State->Sun.z * 1000.0f,
+				eye.X - State->Sun.x * sunDistance,
+				eye.Y - State->Sun.y * sunDistance,
+				eye.Z - State->Sun.z * sunDistance,
 				1.0f,
 			};
 			const glm::vec4 clip = recording.Matrices.ViewProjection * sunWorld;
@@ -1319,7 +1331,10 @@ namespace engine::render {
 					1.0f / static_cast<float>(target.Height),
 				},
 			};
-			const std::array bindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
+			const std::array bindings{
+				SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{depth.Texture, recording.Sampler},
+			};
 			recording.Fullscreen(
 				context.Name,
 				State->GodRaysPipeline,

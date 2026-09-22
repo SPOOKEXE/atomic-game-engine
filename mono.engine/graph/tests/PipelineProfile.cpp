@@ -81,9 +81,9 @@ namespace {
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	REQUIRE(profile.Passes.size() == 29);
-	REQUIRE(profile.Resources.size() == 42);
-	CHECK(profile.Cells.size() == 1218);
+	REQUIRE(profile.Passes.size() == 31);
+	REQUIRE(profile.Resources.size() == 44);
+	CHECK(profile.Cells.size() == 1364);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -119,7 +119,7 @@ TEST_CASE("a resource's lifetime is where it is written to where it is last read
 
 	const ProfileResource &depth = profile.Resources[RowOf(profile, "linear-depth")];
 	const auto written = static_cast<uint32_t>(ColumnOf(profile, "depth-linearise"));
-	const auto lastRead = static_cast<uint32_t>(ColumnOf(profile, "shader-lenses"));
+	const auto lastRead = static_cast<uint32_t>(ColumnOf(profile, "god-rays"));
 
 	CHECK(depth.FirstWrite == written);
 	CHECK(depth.LastRead == lastRead);

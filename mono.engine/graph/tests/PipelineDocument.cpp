@@ -92,7 +92,7 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
 	REQUIRE(fromDocument.Shared.size() == 5);
-	REQUIRE(fromDocument.PerView.size() == 20);
+	REQUIRE(fromDocument.PerView.size() == 22);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("mesh-residency"));
@@ -454,7 +454,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 5);
-	REQUIRE(compiled.PerView.size() == 20);
+	REQUIRE(compiled.PerView.size() == 22);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
@@ -480,8 +480,8 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("mirror-overlay"));
 	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("transparent"));
 	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("shader-lenses"));
-	CHECK(graph.Find(compiled.PerView[18])->Kind == Name("bloom"));
-	CHECK(graph.Find(compiled.PerView[19])->Kind == Name("tonemap"));
+	CHECK(graph.Find(compiled.PerView[20])->Kind == Name("bloom"));
+	CHECK(graph.Find(compiled.PerView[21])->Kind == Name("tonemap"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
 	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 
@@ -541,7 +541,7 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	RenderGraph graph;
 	Name offender;
 	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
-	CHECK(graph.ResourceCount() == 42);
+	CHECK(graph.ResourceCount() == 44);
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
@@ -713,7 +713,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 19);
+	CHECK(compiled.PerView.size() == 21);
 }
 
 TEST_CASE("the game interface can be disabled without removing the frame output", "[graph][interface]") {
@@ -1166,6 +1166,8 @@ TEST_CASE(
 		Name("mirror-overlay"),
 		Name("transparent"),
 		Name("shader-lenses"),
+		Name("dof"),
+		Name("god-rays"),
 		Name("bloom"),
 		Name("tonemap")
 	};

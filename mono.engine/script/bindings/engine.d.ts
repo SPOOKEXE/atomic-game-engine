@@ -2510,10 +2510,10 @@ declare interface Lighting extends Service {
 	FogColor: Color3;
 	FogEnd: number;
 	FogStart: number;
+	GeographicLatitude: number;
 	GodRayIntensity: number;
 	GodRayRadius: number;
 	GodRayThreshold: number;
-	GeographicLatitude: number;
 	OutdoorAmbient: Color3;
 	PostProcessShader: string;
 	RenderFeatureDisableMask: number;

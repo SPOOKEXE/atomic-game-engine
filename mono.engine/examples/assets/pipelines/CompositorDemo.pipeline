@@ -164,6 +164,7 @@ reads "linear-depth" "depth"
 writes "dof" "colour"
 node "god-rays" "god-rays" view no
 reads "dof" "colour"
+reads "linear-depth" "depth"
 writes "god-rays" "colour"
 node "bloom" "bloom" view no
 reads "god-rays" "source"

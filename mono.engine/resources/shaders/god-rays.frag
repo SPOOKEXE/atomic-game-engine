@@ -4,6 +4,7 @@ layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outColour;
 
 layout(set = 2, binding = 0) uniform sampler2D colourImage;
+layout(set = 2, binding = 1) uniform sampler2D linearDepthImage;
 layout(set = 3, binding = 0, std140) uniform LightingEffects {
 	vec4 depthOfField;
 	// x: intensity, y: HDR threshold, z: radius in pixels, w: projected-sun visibility.
@@ -31,7 +32,10 @@ void main() {
 	for (int sampleIndex = 1; sampleIndex <= 8; ++sampleIndex) {
 		float fraction = float(sampleIndex) / 8.0;
 		vec2 sampleUv = clamp(inUv + direction * sampleLength * fraction, vec2(0.0), vec2(1.0));
-		shafts += Extract(texture(colourImage, sampleUv).rgb) * (1.0 - fraction * 0.5);
+		// The linear-depth pass writes zero for sky. Opaque geometry blocks the
+		// sampled radiance, so shafts do not continue through foreground solids.
+		float unobscured = texture(linearDepthImage, sampleUv).r <= 0.0 ? 1.0 : 0.0;
+		shafts += Extract(texture(colourImage, sampleUv).rgb) * unobscured * (1.0 - fraction * 0.5);
 	}
 	outColour = vec4(source.rgb + shafts * effects.godRays.x / 8.0, source.a);
 }

@@ -1175,9 +1175,10 @@ namespace engine::graph {
 			 "God rays",
 			 C::Composite,
 			 S::View,
-			 {{"colour", K::Texture, RGBA16, true, "The HDR frame."}},
+			 {{"colour", K::Texture, RGBA16, true, "The HDR frame."},
+			  {"depth", K::Texture, R32, true, "Linear depth that blocks shafts behind opaque surfaces."}},
 			 {{"colour", K::Colour, RGBA16, true, "Sun shafts added in HDR."}},
-			 "Samples bright radiance toward the visible directional sun.",
+			 "Samples bright radiance toward the visible directional sun, masked by linear depth.",
 			 false,
 			 "god-rays.frag"},
 

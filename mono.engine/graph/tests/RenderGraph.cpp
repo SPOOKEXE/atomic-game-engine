@@ -144,7 +144,7 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	// real frame: world input, shadow and environment work every view samples, twenty passes each view
 	// draws for itself, and the window's overlay and chrome once over the lot.
 	CHECK(compiled.Shared.size() == 5);
-	CHECK(compiled.PerView.size() == 20);
+	CHECK(compiled.PerView.size() == 22);
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));

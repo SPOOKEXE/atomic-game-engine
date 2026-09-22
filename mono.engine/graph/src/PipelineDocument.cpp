@@ -1170,6 +1170,7 @@ namespace engine::graph {
 
 		node("god-rays", NodeScope::View);
 		touches(EditKind::Reads, "dof", "colour");
+		touches(EditKind::Reads, "linear-depth", "depth");
 		touches(EditKind::Writes, "god-rays", "colour");
 
 		node("bloom", NodeScope::View);

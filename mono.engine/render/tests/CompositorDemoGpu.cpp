@@ -208,6 +208,99 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 				}
 		return sum;
 	}
+
+	std::string FocusDepth() {
+		return R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ outColour=vec4(inUv.x < 0.5 ? 24.0 : 100.0); })";
+	}
+	std::string EmptyDepth() {
+		return R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ outColour=vec4(0.0); })";
+	}
+	std::string SunBlockerDepth() {
+		return R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ float blocked=step(0.40,inUv.x)*step(inUv.x,0.60)*step(0.40,inUv.y)*step(inUv.y,0.60); outColour=vec4(blocked); })";
+	}
+	graph::RenderGraph InstallEffect(
+		Renderer &renderer,
+		const char *pipelineName,
+		const char *effectKind,
+		const std::string &colour,
+		const std::string &depth
+	) {
+		graph::RenderGraph graph;
+		auto texture = [&graph](const char *name, graph::ResourceFormat format) {
+			const graph::ResourceId resource = graph.AddResource(
+				{.Name = core::Name(name), .Kind = graph::ResourceKind::Colour, .Format = format}
+			);
+			REQUIRE(resource.IsValid());
+			return resource;
+		};
+		const graph::ResourceId source = texture("effect-source", graph::ResourceFormat::RGBA16F);
+		const graph::ResourceId linearDepth = texture("effect-depth", graph::ResourceFormat::R32F);
+		const graph::ResourceId result = texture("effect-result", graph::ResourceFormat::RGBA16F);
+		auto raster = [&graph](const char *name, graph::ResourceId output, const std::string &sourceText) {
+			graph::Node node;
+			node.Name = core::Name(name);
+			node.Kind = core::Name("raster");
+			node.Scope = graph::NodeScope::View;
+			node.Writes = {output};
+			node.Parameters.push_back({core::Name("source"), sourceText});
+			REQUIRE(graph.AddNode(std::move(node)).IsValid());
+		};
+		raster("effect-colour-pass", source, colour);
+		raster("effect-depth-pass", linearDepth, depth);
+		graph::Node effect;
+		effect.Name = core::Name("effect-pass");
+		effect.Kind = core::Name(effectKind);
+		effect.Scope = graph::NodeScope::View;
+		effect.Reads = {source, linearDepth};
+		effect.Writes = {result};
+		REQUIRE(graph.AddNode(std::move(effect)).IsValid());
+		const core::Name sinkKind(std::string(pipelineName) + "-sink");
+		graph::NodeKindSpec sinkSpec;
+		sinkSpec.Kind = sinkKind;
+		sinkSpec.Scope = graph::NodeScope::Frame;
+		sinkSpec.Queue = graph::ExecutionQueue::Cpu;
+		sinkSpec.Category = graph::NodeCategory::Output;
+		sinkSpec.Inputs.push_back({.Name = core::Name("colour"), .Kind = graph::ResourceKind::Texture});
+		REQUIRE(graph::RegisterNodeKind(std::move(sinkSpec)));
+		REQUIRE(renderer.InstallNodeHandler(sinkKind, [](const graph::RunContext &) { return true; }));
+		graph::Node sink;
+		sink.Name = sinkKind;
+		sink.Kind = sinkKind;
+		sink.Scope = graph::NodeScope::Frame;
+		sink.Reads = {result};
+		REQUIRE(graph.AddNode(std::move(sink)).IsValid());
+		REQUIRE(renderer.SetPipeline(core::Name(pipelineName), graph));
+		return graph;
+	}
+	double Diff16Region(
+		std::span<const std::byte> a,
+		std::span<const std::byte> b,
+		uint32_t w,
+		uint32_t h,
+		uint32_t firstX,
+		uint32_t lastX
+	) {
+		const size_t row = (size_t(w) * 8 + 255) / 256 * 256;
+		double sum = 0.0;
+		for (uint32_t y = 0; y < h; y++)
+			for (uint32_t x = firstX; x < lastX; x++)
+				for (size_t c = 0; c < 3; c++) {
+					uint16_t left = 0, right = 0;
+					std::memcpy(&left, a.data() + y * row + x * 8 + c * 2, 2);
+					std::memcpy(&right, b.data() + y * row + x * 8 + c * 2, 2);
+					sum += std::abs(glm::unpackHalf1x16(left) - glm::unpackHalf1x16(right));
+				}
+		return sum;
+	}
 	size_t Lit(const CapturedImage &i) {
 		size_t n = 0;
 		for (uint32_t y = 0; y < i.Height; y++)
@@ -315,4 +408,67 @@ TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render
 		std::to_integer<uint8_t>(withBloom.Bytes[neighbour]) >
 		std::to_integer<uint8_t>(withoutBloom.Bytes[neighbour])
 	);
+}
+
+TEST_CASE("depth of field preserves focus and blurs distant HDR detail on Vulkan", "[render][gpu][dof]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallEffect(fixture.Render, "dof-gpu", "dof", Solid(), FocusDepth());
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 1;
+	view.Pipeline = core::Name("dof-gpu");
+	view.Target = &target;
+	OverlayImage overlay;
+	scene::WorldLighting lighting;
+	lighting.DepthOfFieldIntensity = 1.0f;
+	lighting.DepthOfFieldFocusDistance = 24.0f;
+	lighting.DepthOfFieldFocusRange = 2.0f;
+	lighting.DepthOfFieldRadius = 6.0f;
+	fixture.Render.SetLighting(lighting);
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto source = Capture16(fixture.Render, core::Name("effect-source"), view.Slot, 41, 31);
+	const auto blurred = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
+	CHECK(Diff16Region(source, blurred, 41, 31, 0, 20) < 0.01);
+	CHECK(Diff16Region(source, blurred, 41, 31, 21, 41) > 10.0);
+}
+
+TEST_CASE("god rays stop at linear-depth occluders on Vulkan", "[render][gpu][god-rays]") {
+	FixtureDevice clearFixture;
+	clearFixture.Initialise();
+	InstallEffect(clearFixture.Render, "god-rays-clear-gpu", "god-rays", BloomSource(), EmptyDepth());
+	SceneTarget target{41, 31};
+	View clearView;
+	clearView.World = 1;
+	clearView.Pipeline = core::Name("god-rays-clear-gpu");
+	clearView.Target = &target;
+	OverlayImage overlay;
+	scene::WorldLighting lighting;
+	lighting.Direction = {0.0f, 0.0f, 1.0f};
+	lighting.GodRayIntensity = 2.0f;
+	lighting.GodRayThreshold = 0.5f;
+	lighting.GodRayRadius = 48.0f;
+	clearFixture.Render.SetLighting(lighting);
+	const auto clearFrame = clearFixture.Render.Render(std::span(&clearView, 1), overlay, nullptr, false);
+	CHECK(clearFrame.Ran(core::Name("effect-pass")));
+	const auto clearSource =
+		Capture16(clearFixture.Render, core::Name("effect-source"), clearView.Slot, 41, 31);
+	const auto unobscured =
+		Capture16(clearFixture.Render, core::Name("effect-result"), clearView.Slot, 41, 31);
+	CHECK(Diff16(clearSource, unobscured, 41, 31) > 1.0);
+
+	FixtureDevice blockedFixture;
+	blockedFixture.Initialise();
+	InstallEffect(
+		blockedFixture.Render, "god-rays-blocked-gpu", "god-rays", BloomSource(), SunBlockerDepth()
+	);
+	View blockedView;
+	blockedView.World = 1;
+	blockedView.Pipeline = core::Name("god-rays-blocked-gpu");
+	blockedView.Target = &target;
+	blockedFixture.Render.SetLighting(lighting);
+	blockedFixture.Render.Render(std::span(&blockedView, 1), overlay, nullptr, false);
+	const auto blocked =
+		Capture16(blockedFixture.Render, core::Name("effect-result"), blockedView.Slot, 41, 31);
+	CHECK(Diff16(unobscured, blocked, 41, 31) > 1.0);
 }

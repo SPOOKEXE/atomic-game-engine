@@ -2848,10 +2848,10 @@ declare extern type Lighting extends Service with
 	FogColor: Color3
 	FogEnd: number
 	FogStart: number
+	GeographicLatitude: number
 	GodRayIntensity: number
 	GodRayRadius: number
 	GodRayThreshold: number
-	GeographicLatitude: number
 	OutdoorAmbient: Color3
 	read PostProcessShader: string
 	write PostProcessShader: string?
