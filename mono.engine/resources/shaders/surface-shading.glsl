@@ -510,8 +510,12 @@ void shadeSurface() {
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
 	roughness = clamp(roughness, 0.045, 1.0);
 	float occlusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = (features & FEATURE_EMISSION) != 0u && lighting.Material.w > 0.5
-		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
+	// Emissive tint and strength are authored independently of an optional map.
+	// A missing map therefore leaves their constant radiance intact instead of
+	// turning the surface black.
+	vec3 emissive = (features & FEATURE_EMISSION) != 0u
+		? inEmission.rgb * inEmission.a *
+			(lighting.Material.w > 0.5 ? texture(emissiveMap, cellUv).rgb : vec3(1.0))
 		: vec3(0.0);
 	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;
 	if (lighting.MaterialExtra.y > 0.5) {

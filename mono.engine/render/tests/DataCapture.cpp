@@ -309,6 +309,8 @@ TEST_CASE(
 	instance.Mesh = mesh;
 	instance.Frame.Position = {0, 0, -3};
 	instance.HalfExtent = {1, 1, 1};
+	instance.EmissiveTint = {0.25f, 0.5f, 1.0f};
+	instance.EmissiveStrength = 4.0f;
 	instance.CastShadow = false;
 	render::SceneTarget target{1280, 720};
 	render::View view;
@@ -354,11 +356,13 @@ TEST_CASE(
 	REQUIRE(poll.Planes.size() == request.Channels.size());
 	bool hasNativeResolutionPlane = false;
 	const render::DataCapturePlane *firstSurfaceValidity = nullptr;
+	const render::DataCapturePlane *pbrEmissive = nullptr;
 	for (const render::DataCapturePlane &plane : poll.Planes) {
 		CHECK(plane.Status == render::DataCaptureStatus::Ready);
 		hasNativeResolutionPlane =
 			hasNativeResolutionPlane || (plane.Width >= target.Width && plane.Height >= target.Height);
 		if (plane.Channel == render::DataCaptureChannel::FirstSurfaceValidity) firstSurfaceValidity = &plane;
+		if (plane.Channel == render::DataCaptureChannel::PbrEmissive) pbrEmissive = &plane;
 	}
 	CHECK(hasNativeResolutionPlane);
 	REQUIRE(firstSurfaceValidity != nullptr);
@@ -371,6 +375,16 @@ TEST_CASE(
 	const auto values = std::span(firstSurfaceValidity->Bytes);
 	CHECK(std::find(values.begin(), values.end(), std::byte{255}) != values.end());
 	CHECK(std::find(values.begin(), values.end(), std::byte{0}) != values.end());
+	REQUIRE(pbrEmissive != nullptr);
+	REQUIRE(pbrEmissive->Scalar == render::DataCaptureScalar::Float16);
+	float maximumEmissive = 0.0f;
+	for (size_t offset = 0; offset + 1 < pbrEmissive->Bytes.size(); offset += sizeof(uint16_t)) {
+		uint16_t packed = 0;
+		std::memcpy(&packed, pbrEmissive->Bytes.data() + offset, sizeof(packed));
+		maximumEmissive = std::max(maximumEmissive, data_capture_compact::Float16ToFloat32(packed));
+	}
+	CHECK(maximumEmissive > instance.EmissiveStrength - 16.0f / 255.0f);
+	CHECK(maximumEmissive < instance.EmissiveStrength + 16.0f / 255.0f);
 }
 
 TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gpu][data-capture][.]") {
