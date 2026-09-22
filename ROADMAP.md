@@ -65,27 +65,28 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] create two stress test demos: 100 unique 4k textures on material spheres with PBR (like the PBR demo), and 1 unique 4k texture on material spheres with PBR. tests instancing (for 1 duplicate item) and mem/compute usage for the uniques.
 - [x] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors.
 - [x] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
-
-- [_] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`
-- [_] Do cleanup in `docs/v025-MCP-CLEANUP.md`
-
-- [_] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations.
-
-- [_] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
-- [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
-- [_] optimise server startup time
-- [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
-
+- [x] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`
+- [x] Do cleanup in `docs/v025-MCP-CLEANUP.md`
+- [x] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations.
+- [x] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
+- [x] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
+- [x] optimise server startup time
+- [x] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
+- [x] LOD system billboard render support
+- [x] /docs/future-work/ui-system.md
 - [x] plan how to fix portals so they are seamless. really plan out how to make them seamless and how to handle "standing in the middle" so objects are visually there on both sides of the portal with no seam especially during movement (and how to make replication seamless too). Write docs/v025-SEAMLESS-PORTALS.md.
-- [_] implement seamless portals plan
+- [x] implement seamless portals plan
+
+- [_] ```The next measured costs are recovery-row serialization and scoring. Testing
+  also exposed a separate existing issue: clients retain rows after a visibility
+  Forgotten message. The batch change preserves that behavior; it remains
+  unresolved.
+```
 
 - [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground")
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
 
-- [x] LOD system billboard render support
-
-- [x] /docs/future-work/ui-system.md
 
 ### v0.26
 
