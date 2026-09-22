@@ -33,6 +33,7 @@ namespace engine::render {
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABELS = 4096;
 	// Maximum combined UTF-8 bytes in a label table.
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABEL_BYTES = 512 * 1024;
+	// Maximum stable light identities accepted in one capture descriptor.
 	inline constexpr size_t MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS = 4;
 
 	// Checks for well-formed UTF-8 without normalizing the input.
@@ -230,6 +231,7 @@ namespace engine::render {
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
 		// Part identities to include beside part-mask pixels.
 		std::vector<DataCapturePartLabel> PartLabels;
+		// Stable light identities to isolate in local_light_contribution planes.
 		std::vector<std::string> LocalLightIds;
 		// History policy for temporal capture channels.
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
@@ -260,6 +262,7 @@ namespace engine::render {
 		// Present only for the ambient-occlusion plane, including an explicit
 		// Unavailable state for an unrecognised R8 source.
 		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
+		// Stable source light identity, empty when the plane has no single light source.
 		std::string LightId;
 		// Why this channel has its reported status or contents.
 		std::string Provenance;

@@ -437,6 +437,7 @@ namespace engine::script {
 		uint32_t MaximumSameFrameCameraViews = 0;
 		// Maximum UTF-8 bytes accepted in one camera id.
 		uint32_t MaximumCameraIdBytes = 0;
+		// Maximum stable light identities accepted in one request.
 		uint32_t MaximumLocalLightIds = 0;
 		// Host diagnostic for capability negotiation or failure.
 		std::string Detail;
