@@ -18,9 +18,10 @@ namespace server {
 	// The terminal action authorized by a sealed source decision.
 	enum class PortalJournalOutcome : uint8_t { Commit = 1, Completed = 2 };
 
+	// One durable portal-handoff decision and its outcome.
 	struct PortalJournalRecord {
-		engine::script::PortalTransferDecision Decision;
-		PortalJournalOutcome Outcome = PortalJournalOutcome::Commit;
+		engine::script::PortalTransferDecision Decision;			 // Sealed source decision.
+		PortalJournalOutcome Outcome = PortalJournalOutcome::Commit; // Authorized terminal action.
 	};
 
 	// Reads every complete, checksummed record. A torn final append is ignored;

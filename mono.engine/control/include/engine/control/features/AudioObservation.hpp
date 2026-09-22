@@ -226,11 +226,12 @@ namespace engine::control {
 
 	// The resource and both readers form one provider transaction.
 	struct DataAudioObservationRows {
-		Resource Metadata;
-		Tool Observation;
-		Tool Waveform;
+		Resource Metadata; // Observation metadata resource.
+		Tool Observation;  // Current-observation tool.
+		Tool Waveform;	   // Waveform-read tool.
 	};
 
+	// Builds all audio-observation rows for one host.
 	inline DataAudioObservationRows DataAudioObservationTools(
 		world::Universe &universe,
 		std::shared_ptr<script::DataAudioObservationBridge> bridge,

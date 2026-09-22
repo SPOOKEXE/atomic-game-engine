@@ -86,9 +86,9 @@ namespace engine::render {
 	// clipped to the canvas before sizing, so authored coordinates can never
 	// turn into an unchecked texture allocation.
 	struct InterfaceGroupTarget {
-		core::Rect Bounds;
-		uint32_t Width = 0;
-		uint32_t Height = 0;
+		core::Rect Bounds;	 // Clipped canvas bounds.
+		uint32_t Width = 0;	 // Target width in device pixels.
+		uint32_t Height = 0; // Target height in device pixels.
 	};
 
 	// Resolves a bounded CanvasGroup target. Invalid coordinates and empty
@@ -347,10 +347,12 @@ namespace engine::render {
 		}
 		//@}
 
+		// Returns the number of retained CanvasGroup targets.
 		size_t RetainedTargetCount() const {
 			return Targets.TargetCount();
 		}
 
+		// Returns bytes used by retained CanvasGroup targets.
 		uint64_t RetainedTargetBytes() const {
 			return Targets.TargetBytes();
 		}

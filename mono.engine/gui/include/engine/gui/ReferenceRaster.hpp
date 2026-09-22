@@ -20,33 +20,54 @@ namespace engine::gui {
 	// Golden images are deliberately small. These bounds cover the returned
 	// pixels and every isolated group held while the reference painter recurses.
 	inline constexpr size_t MAXIMUM_REFERENCE_RASTER_PIXELS = 1'048'576;
+	// Largest total byte count of a reference raster.
 	inline constexpr size_t MAXIMUM_REFERENCE_RASTER_BYTES = 64 * 1024 * 1024;
+	// Largest nested isolated raster groups.
 	inline constexpr size_t MAXIMUM_REFERENCE_RASTER_GROUPS = 8;
+	// Largest nested clipping masks.
 	inline constexpr size_t MAXIMUM_REFERENCE_RASTER_MASKS = 8;
+	// Largest number of glyphs rasterized for one image.
 	inline constexpr size_t MAXIMUM_REFERENCE_RASTER_GLYPHS = 4'096;
+	// Largest cached glyph bitmap storage.
 	inline constexpr size_t MAXIMUM_REFERENCE_GLYPH_CACHE_BYTES = 16 * 1024 * 1024;
+	// Largest rasterized glyph dimension in pixels.
 	inline constexpr uint16_t MAXIMUM_REFERENCE_GLYPH_PIXEL_SIZE = 512;
 
+	// One premultiplied RGBA pixel in a reference raster.
 	struct ReferencePixel {
+		// Red channel.
 		uint8_t R = 0;
+		// Green channel.
 		uint8_t G = 0;
+		// Blue channel.
 		uint8_t B = 0;
+		// Alpha channel.
 		uint8_t A = 0;
 
+		// Compares every RGBA channel.
 		constexpr bool operator==(const ReferencePixel &) const = default;
 	};
 
+	// A row-major RGBA image used by the reference painter.
 	struct ReferenceImage {
+		// Image width in pixels.
 		uint32_t Width = 0;
+		// Image height in pixels.
 		uint32_t Height = 0;
+		// Row-major pixels with Width times Height entries.
 		std::vector<ReferencePixel> Pixels;
 
+		// Whether Pixels matches the declared dimensions.
 		bool Valid() const;
+		// Returns the pixel at an in-bounds coordinate.
 		const ReferencePixel &At(uint32_t x, uint32_t y) const;
 	};
 
+	// Named image bytes supplied to the reference painter.
 	struct ReferenceAsset {
+		// Content name matched by DrawCommand::Image.
 		core::Name Name;
+		// Decoded source image.
 		ReferenceImage Image;
 	};
 
@@ -67,10 +88,15 @@ namespace engine::gui {
 	// the expected value in source, making a visual change reviewable in a diff.
 	uint64_t ReferenceImageHash(const ReferenceImage &image);
 
+	// Measured difference between two reference images.
 	struct ReferenceComparison {
+		// Number of pixels outside the channel tolerance.
 		size_t ChangedPixels = 0;
+		// Fraction of image pixels outside the tolerance.
 		float ChangedArea = 0.0f;
+		// Largest per-channel absolute difference.
 		uint8_t MaximumChannelDifference = 0;
+		// Whether ChangedArea meets the requested cap.
 		bool WithinChangedAreaCap = true;
 	};
 

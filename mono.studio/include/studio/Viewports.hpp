@@ -41,11 +41,17 @@ namespace engine::ecs {
 
 namespace studio {
 
+	// Device canvas selected for an editor-only GUI preview.
 	enum class GuiPreviewProfile : uint8_t { Desktop, Phone, Tablet };
+	// Viewer-only interaction state supplied to GUI compilation.
 	enum class GuiPreviewState : uint8_t { None, Hovered, Pressed };
+	// Editor-only device, scale, locale, and interaction settings for one GUI preview.
 	struct GuiPreviewSettings {
+		// Device profile that determines the preview canvas.
 		GuiPreviewProfile Profile = GuiPreviewProfile::Desktop;
+		// Scale applied to interface geometry.
 		float InterfaceScale = 1.0f;
+		// Scale applied to interface text.
 		float TextScale = 1.0f;
 		// This is viewer state, so switching the preview locale never edits a
 		// LocalizationTable in the world being inspected.
@@ -54,6 +60,7 @@ namespace studio {
 		// fed into CompileRequest and never changes authored interaction state.
 		GuiPreviewState State = GuiPreviewState::None;
 	};
+	// Resolves the GUI canvas visible within a viewport panel.
 	engine::gui::Screen
 	ResolveGuiPreviewScreen(GuiPreviewSettings settings, float panelWidth, float panelHeight);
 

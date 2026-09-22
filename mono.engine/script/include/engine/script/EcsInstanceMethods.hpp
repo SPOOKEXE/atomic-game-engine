@@ -10,6 +10,7 @@
 
 namespace engine::script {
 
+	// Script-visible ECS methods installed on every Instance.
 	enum class EcsInstanceMethod : uint8_t {
 		SetComponent,
 		GetComponent,
@@ -18,8 +19,11 @@ namespace engine::script {
 		GetComponents,
 	};
 
+	// Script method enum paired with its public name.
 	struct EcsInstanceMethodDescriptor {
+		// Method implemented by the VM adapter.
 		EcsInstanceMethod Method;
+		// Script-visible method name.
 		const char *Name;
 	};
 

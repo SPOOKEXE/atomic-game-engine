@@ -214,9 +214,11 @@ namespace engine::control {
 		HookRegistry &Hooks() {
 			return HookRegistry_;
 		}
+		// Advances optional hooks on the surface thread.
 		void PumpHooks() {
 			HookRegistry_.Pump();
 		}
+		// Returns the installed optional-hook registry.
 		const HookRegistry &Hooks() const {
 			return HookRegistry_;
 		}

@@ -19,37 +19,44 @@
 
 namespace engine::render {
 
+	// Identifies one retained collector-range target.
 	struct InterfaceTargetKey {
-		ecs::Entity Collector;
-		uint64_t Viewer = 0;
-		uint32_t Width = 0;
-		uint32_t Height = 0;
-		size_t FirstCommand = 0;
-		size_t CommandCount = 0;
-		bool Spatial = false;
+		ecs::Entity Collector;	 // Collector that owns the commands.
+		uint64_t Viewer = 0;	 // Viewer whose interface is rendered.
+		uint32_t Width = 0;		 // Target width in pixels.
+		uint32_t Height = 0;	 // Target height in pixels.
+		size_t FirstCommand = 0; // First command in paint order.
+		size_t CommandCount = 0; // Commands in this target.
+		bool Spatial = false;	 // Whether commands use spatial coordinates.
 
+		// Compares every part of the target identity.
 		bool operator==(const InterfaceTargetKey &) const = default;
 	};
 
+	// Capacity limits for retained interface targets.
 	struct InterfaceTargetLimits {
-		size_t Count = 64;
-		uint64_t Bytes = 64ull * 1024ull * 1024ull;
+		size_t Count = 64;							// Maximum resident targets.
+		uint64_t Bytes = 64ull * 1024ull * 1024ull; // Maximum resident bytes.
 	};
 
+	// Work required before a target can be reused.
 	enum class InterfaceTargetWork : uint8_t {
 		Skip,
 		Partial,
 		Full,
 	};
 
+	// Work and damaged rectangles selected for one target.
 	struct InterfaceTargetPlan {
-		InterfaceTargetWork Work = InterfaceTargetWork::Full;
-		std::vector<core::Rect> Damage;
+		InterfaceTargetWork Work = InterfaceTargetWork::Full; // Recording scope.
+		std::vector<core::Rect> Damage;						  // Damaged target rectangles.
 	};
 
 	// One cached image to composite at a particular paint-order range.
 	struct InterfaceTargetComposite {
+		// Device image for the cached range.
 		void *Target = nullptr;
+		// Draw-list range occupied by this image.
 		gui::CollectorRange Range;
 	};
 
@@ -60,6 +67,7 @@ namespace engine::render {
 	// compiler reports a cache hit on the next frame.
 	class InterfaceTargetCache {
 	  public:
+		// Sets the maximum resident target count and byte budget.
 		explicit InterfaceTargetCache(InterfaceTargetLimits limits = {});
 		~InterfaceTargetCache();
 
@@ -92,8 +100,11 @@ namespace engine::render {
 		// renderer records into that image and calls Complete only after submit.
 		void *Target(const InterfaceTargetKey &key) const;
 
+		// Releases every retained target.
 		void Clear();
+		// Returns the number of resident targets.
 		size_t TargetCount() const;
+		// Returns bytes used by resident targets.
 		uint64_t TargetBytes() const;
 
 	  private:

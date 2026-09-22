@@ -205,11 +205,16 @@ namespace studio {
 		// theme, and attachment ids are deliberately kept beside the bytes: ECS
 		// handles change on every redo, while these editor ids remain stable.
 		struct UiImport {
+			// Canonical serialized GUI document.
 			std::vector<std::byte> Encoded;
+			// Stable ids of imported document roots.
 			std::vector<EditId> Roots;
+			// Stable ids of imported theme resources.
 			std::vector<EditId> Themes;
+			// Existing parents receiving the imported roots.
 			std::vector<EditId> Parents;
 		};
+		// GUI import data used to undo or redo the command.
 		UiImport Import;
 
 		// Which property changed.
@@ -222,7 +227,9 @@ namespace studio {
 		// The component name is stable; its process-local id is resolved only
 		// while applying the command in this process.
 		engine::core::Name Component;
+		// Serialized component state before the edit.
 		std::vector<std::byte> ComponentBefore;
+		// Serialized component state after the edit.
 		std::vector<std::byte> ComponentAfter;
 
 		// What to call this in the Edit menu - "Delete Part", not "Destroy".

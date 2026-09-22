@@ -10,12 +10,13 @@
 #include <string_view>
 
 namespace studio {
+	// Limits accepted from an external UI design document.
 	struct UiDesignImportLimits {
-		static constexpr size_t HARD_MAXIMUM_BYTES = 1024 * 1024;
-		static constexpr size_t HARD_MAXIMUM_DEPTH = 32;
+		static constexpr size_t HARD_MAXIMUM_BYTES = 1024 * 1024; // Absolute input byte ceiling.
+		static constexpr size_t HARD_MAXIMUM_DEPTH = 32;		  // Absolute document-depth ceiling.
 
-		size_t MaximumBytes = HARD_MAXIMUM_BYTES;
-		size_t MaximumDepth = HARD_MAXIMUM_DEPTH;
+		size_t MaximumBytes = HARD_MAXIMUM_BYTES; // Requested input byte ceiling.
+		size_t MaximumDepth = HARD_MAXIMUM_DEPTH; // Requested document-depth ceiling.
 	};
 
 	// Imports schema version 1 design tokens:

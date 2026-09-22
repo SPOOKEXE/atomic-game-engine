@@ -66,7 +66,9 @@ namespace engine::world {
 	// One opaque value record emitted at the joined fixed-step barrier. The
 	// generic world layer routes bytes only; game-level owners interpret them.
 	struct FixedStepBarrierRecord {
+		// Stable source world name.
 		std::string World;
+		// Opaque value emitted by the source world.
 		std::vector<std::byte> Payload;
 	};
 
@@ -74,11 +76,15 @@ namespace engine::world {
 	// Physics. World owns the order and transport; the caller owns the byte
 	// format and the one global resolve step.
 	struct FixedStepBarrierCallbacks {
+		// Collects one world's opaque barrier payload.
 		std::function<void(ecs::Store &, std::vector<std::byte> &)> Collect;
+		// Resolves collected payloads into addressed records.
 		std::function<bool(std::span<const FixedStepBarrierRecord>, std::vector<FixedStepBarrierRecord> &)>
 			Resolve;
+		// Applies one resolved payload to its owning world.
 		std::function<bool(ecs::Store &, std::span<const std::byte>)> Apply;
 
+		// Reports whether all three barrier callbacks are callable.
 		bool Valid() const {
 			return Collect && Resolve && Apply;
 		}

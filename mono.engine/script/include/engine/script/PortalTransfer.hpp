@@ -39,20 +39,31 @@ namespace engine::script {
 
 	// A named seam barrier. The domain is a stable world-clock name, never a local clock pointer.
 	struct PortalTransferClock {
+		// Stable name of the shared clock domain.
 		std::string Domain;
+		// Source-world tick at the barrier.
 		uint64_t SourceTick = 0;
+		// Destination-world tick at the barrier.
 		uint64_t DestinationTick = 0;
+		// Compares the complete named barrier clock.
 		bool operator==(const PortalTransferClock &) const = default;
 	};
 
 	// The immutable fence carried by preparation, sealing and commit messages.
 	struct PortalTransferFence {
+		// Portal topology revision captured at preparation.
 		uint64_t TopologyRevision = 0;
+		// Authority epoch captured at preparation.
 		uint64_t AuthorityEpoch = 0;
+		// Monotonic revision of the preparation state.
 		uint64_t PrepareRevision = 0;
+		// Identifier of the sealed body baseline.
 		uint64_t BaselineId = 0;
+		// Content hash of the sealed body baseline.
 		assets::ContentHash BaselineHash;
+		// Source and destination ticks for the handoff barrier.
 		PortalTransferClock H;
+		// Compares the complete immutable handoff fence.
 		bool operator==(const PortalTransferFence &) const = default;
 	};
 
@@ -129,7 +140,9 @@ namespace engine::script {
 
 	// A sealed handoff awaiting durable host storage. The host may persist this after a tick.
 	struct PortalTransferDecision {
+		// Sealed transfer receipt awaiting durable storage.
 		PortalTransferReceipt Receipt;
+		// Persistent identity of the transferred body.
 		scene::BodyIdentity Body;
 		// Exact sealed transfer body hashed by Receipt.Fence.BaselineHash.
 		std::vector<std::byte> Baseline;

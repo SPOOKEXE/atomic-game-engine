@@ -78,8 +78,11 @@ namespace engine::gui {
 		// Viewer-local catalogue and locale. The catalogue remains outside ECS so
 		// a client can select a language without mutating replicated UI state.
 		const LocalizationCatalogue *Catalogue = nullptr;
+		// Locale used to resolve localized label text.
 		std::string Locale;
+		// Whether Studio marks unresolved localized text.
 		bool StudioMissingLocalizationMarker = false;
+		// Font catalogue used to shape viewer-local text.
 		const FontPackage *Fonts = nullptr;
 
 		// The element the pointer is over, or null.
@@ -148,9 +151,13 @@ namespace engine::gui {
 		// deliberately cumulative so a host and a test can prove an unchanged
 		// frame did not run a derived-state pass behind a compile cache hit.
 		struct WorkCounters {
+			// Binding evaluations performed by the latest rebuild.
 			size_t BindingEvaluations = 0;
+			// Animation samples advanced by the latest rebuild.
 			size_t PresentationAdvances = 0;
+			// Virtual scroll anchors reconciled by the latest rebuild.
 			size_t VirtualAnchorReconciliations = 0;
+			// Layout passes performed by the latest rebuild.
 			size_t Layouts = 0;
 		};
 
@@ -160,8 +167,11 @@ namespace engine::gui {
 		//
 		// @since v0.22
 		struct DamageRegion {
+			// Collector whose cached target needs repainting.
 			ecs::Entity Collector;
+			// Conservative changed canvas rectangle.
 			core::Rect Bounds;
+			// Whether Bounds belongs to a spatial collector.
 			bool Spatial = false;
 		};
 
@@ -199,6 +209,7 @@ namespace engine::gui {
 			return DamageRegions;
 		}
 
+		// Whether Damage() can be used for partial repainting.
 		bool DamageValid() const {
 			return DamageReady;
 		}
@@ -231,6 +242,7 @@ namespace engine::gui {
 			return Asked;
 		}
 
+		// Cumulative derived-state work performed by this retained compiler.
 		const WorkCounters &Work() const {
 			return WorkDone;
 		}

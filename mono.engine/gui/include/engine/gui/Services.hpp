@@ -200,9 +200,12 @@ namespace engine::gui {
 	// @since v0.15
 	bool Focus(ecs::Store &store, ecs::Entity textBox);
 
+	// Retains focus for a virtualized record that may leave the published page.
 	bool
 	RememberVirtualFocus(ecs::Store &store, ecs::Entity collection, std::string_view key, uint32_t index);
+	// Clears the retained virtual-record focus.
 	void ClearVirtualFocus(ecs::Store &store);
+	// Restores retained virtual-record focus when its facet becomes visible.
 	void RestoreVirtualFocus(ecs::Store &store, const DrawList &list);
 
 	// Rebuilds a player's interface from the world's `StarterGui`.

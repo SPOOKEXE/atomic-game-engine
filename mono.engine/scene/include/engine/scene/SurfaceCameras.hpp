@@ -808,6 +808,7 @@ namespace engine::scene {
 	// physical. The pane itself becomes a trigger so the aperture can be crossed;
 	// these rows retain the narrow perimeter until the portal closes.
 	struct PortalRim {
+		// Static collider entities forming the aperture perimeter.
 		std::array<ecs::Entity, 4> Parts{};
 	};
 

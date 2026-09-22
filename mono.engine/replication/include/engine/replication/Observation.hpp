@@ -41,85 +41,127 @@ namespace engine::replication {
 	// matching availability flag is true. Names are interned values whose text
 	// remains stable for the process lifetime.
 	struct ExchangeIdentity {
+		// World that owns the exchange.
 		const core::Name World{};
+		// Authority endpoint serving the exchange.
 		const core::Name Authority{};
+		// Client endpoint participating in the exchange.
 		const ClientId Client{};
+		// Baseline identifier when BaselineAvailable.
 		const uint64_t Baseline = 0;
+		// Logical tick when TickAvailable.
 		const uint64_t Tick = 0;
+		// Exchange round within Tick.
 		const uint64_t Round = 0;
+		// Whether Baseline identifies this exchange.
 		const bool BaselineAvailable = false;
+		// Whether Tick identifies this exchange.
 		const bool TickAvailable = false;
 	};
 
 	// One authority-to-client exchange completed at the publish boundary.
 	struct AuthorityPublishedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Number of messages published.
 		const uint32_t MessageCount = 0;
+		// Total bytes published.
 		const uint64_t ByteCount = 0;
+		// Whether the publication contains a snapshot.
 		const bool Snapshot = false;
 	};
 
 	// One valid inbound authority message changed replication state.
 	struct AuthorityAppliedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Applied inbound message kind.
 		const MessageKind Message = MessageKind::Applied;
+		// Outcome of applying the message.
 		const ApplyStatus Status = ApplyStatus::Ok;
+		// Bytes in the applied message.
 		const uint64_t ByteCount = 0;
 		// Values named by the submitted delta and values refused by the ownership
 		// or component gate. A successful status may still have refused values.
 		const uint32_t ValueCount = 0;
+		// Values refused by ownership or component validation.
 		const uint32_t RefusedCount = 0;
 	};
 
 	// One valid inbound message was accepted for authority processing. A client
 	// delta remains queued until the host calls ApplySubmitted.
 	struct AuthorityReceivedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Accepted inbound message kind.
 		const MessageKind Message = MessageKind::Applied;
+		// Bytes in the accepted message.
 		const uint64_t ByteCount = 0;
 	};
 
 	// One inbound authority message was refused. Its payload remains private.
 	struct AuthorityRejectedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Rejected message kind when available.
 		const MessageKind Message = MessageKind::Applied;
+		// Rejection outcome.
 		const ApplyStatus Status = ApplyStatus::Malformed;
+		// Bytes in the rejected message.
 		const uint64_t ByteCount = 0;
+		// Whether Message was available for the rejection.
 		const bool MessageAvailable = false;
 	};
 
 	// One valid audit answer scheduled rows for the existing recovery walk.
 	struct AuthorityRepairedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Recovery groups scheduled by the audit.
 		const uint32_t GroupCount = 0;
+		// Entities scheduled for recovery.
 		const uint32_t EntityCount = 0;
 	};
 
 	// The transport declined an already-built authority message.
 	struct AuthorityDroppedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Dropped message kind when available.
 		const MessageKind Message = MessageKind::Applied;
+		// Bytes in the dropped message.
 		const uint64_t ByteCount = 0;
+		// Whether Message was available before dropping.
 		const bool MessageAvailable = false;
 	};
 
 	// One server message was applied to the replica world at its receive boundary.
 	struct ReplicaAppliedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Applied server message kind.
 		const MessageKind Message = MessageKind::Applied;
+		// Outcome of applying the message.
 		const ApplyStatus Status = ApplyStatus::Ok;
+		// Bytes in the applied message.
 		const uint64_t ByteCount = 0;
 	};
 
 	// One server message was rejected before it could change the replica world.
 	struct ReplicaRejectedObservation {
+		// Identity of the completed exchange.
 		const ExchangeIdentity Identity;
+		// Rejected server message kind when available.
 		const MessageKind Message = MessageKind::Applied;
+		// Rejection outcome.
 		const ApplyStatus Status = ApplyStatus::Malformed;
+		// Bytes in the rejected message.
 		const uint64_t ByteCount = 0;
+		// Whether Message was available for the rejection.
 		const bool MessageAvailable = false;
 	};
 
+	// Variant containing the typed context for one replication hook.
 	using ReplicationObservationContext = std::variant<
 		AuthorityPublishedObservation,
 		AuthorityReceivedObservation,
@@ -133,7 +175,9 @@ namespace engine::replication {
 	// A completed, value-only observation. Consumers may inspect the variant but
 	// have no path back to an authority, replica, store, or wire payload.
 	struct ReplicationObservationRecord {
+		// Hook that produced Context.
 		const ReplicationHook Hook = ReplicationHook::AuthorityPublished;
+		// Typed, value-only observation context.
 		const ReplicationObservationContext Context;
 	};
 
@@ -142,6 +186,7 @@ namespace engine::replication {
 	// it. Its fixed slots avoid per-record allocation in replication workers.
 	class ReplicationObservations {
 	  public:
+		// Maximum records retained by the bounded queue.
 		static constexpr size_t MAXIMUM_RECORDS = 256;
 
 		ReplicationObservations();

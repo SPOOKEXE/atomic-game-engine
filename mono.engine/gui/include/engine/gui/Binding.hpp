@@ -36,26 +36,38 @@ namespace engine::gui {
 
 	// An authored attribute-to-property binding. It is a child of its target.
 	struct Binding {
+		// Relative path to the source instance.
 		std::string SourcePath;
+		// Source attribute to read.
 		core::Name Attribute;
+		// Bound target property name.
 		core::Name Target{"Text"};
+		// Value used when the binding cannot resolve.
 		std::string Fallback;
 	};
 
 	// The derived result of a binding evaluation.
 	struct BindingOutput {
+		// Last resolved text value.
 		std::string Value;
+		// Whether Value came from a valid source.
 		bool Valid = false;
+		// Reason the last evaluation failed.
 		BindingFailure Failure = BindingFailure::None;
+		// Revision of the source used for Value.
 		uint64_t SourceRevision = 0;
+		// Number of evaluations performed.
 		uint64_t EvaluationCount = 0;
 	};
 
 	// The resolved source and exact attribute version used by one binding. This
 	// is local derived state, never an authored reference or serialized row.
 	struct BindingDependency {
+		// Resolved source instance.
 		ecs::Entity Source = ecs::NULL_ENTITY;
+		// Revision of the binding configuration.
 		uint64_t ConfigurationStamp = 0;
+		// Revision of Source's read attribute.
 		uint64_t SourceRevision = 0;
 	};
 

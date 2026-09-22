@@ -33,12 +33,12 @@ namespace engine::input {
 	// them, and the revision lets a consumer distinguish a retained preedit from
 	// a new platform update.
 	struct TextComposition {
-		static constexpr size_t MAXIMUM_BYTES = 4096;
+		static constexpr size_t MAXIMUM_BYTES = 4096; // Maximum UTF-8 preedit bytes.
 
-		std::string_view Text;
-		int32_t Start = -1;
-		int32_t Length = -1;
-		uint64_t Revision = 0;
+		std::string_view Text; // Borrowed UTF-8 preedit text.
+		int32_t Start = -1;	   // Selected preedit offset.
+		int32_t Length = -1;   // Selected preedit length.
+		uint64_t Revision = 0; // Platform update revision.
 	};
 
 	// Accumulates SDL events into one frame's input state.

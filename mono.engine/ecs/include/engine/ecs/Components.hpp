@@ -62,6 +62,7 @@ namespace engine::ecs {
 		// @param name  The stable name to register under.
 		// @param write Appends `count` values to a writer.
 		// @param read  Reads `count` already-constructed values back.
+		// @param maximumSerialisedBytes Maximum encoded size per component value.
 		// @return The dense id for `T`.
 		template <class T>
 		static ComponentId Register(

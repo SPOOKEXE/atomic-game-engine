@@ -105,6 +105,7 @@ namespace engine::ui {
 	// @return `false` when the current context was not prepared by `LoadFonts`.
 	bool ShapedGlyphAtlasRect(ImFontAtlasRect *out);
 
+	// Returns the GUI font package stored in the active ImGui atlas.
 	const gui::FontPackage &GuiFontPackage();
 
 	// The face for a role and a size.

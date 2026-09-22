@@ -35,7 +35,8 @@ namespace client {
 		// room for destination assets and uploads. 512 MiB admits both eyes at
 		// 3840x2160 (about 127 MiB together) plus the 256 MiB content allowance.
 		static constexpr size_t DEFAULT_PORTAL_READINESS_BUDGET_BYTES = 512u * 1024u * 1024u;
-		static constexpr size_t DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES = 256u * 1024u * 1024u;
+		static constexpr size_t DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES =
+			256u * 1024u * 1024u; // Default staged asset-upload allowance.
 
 		// Converts an explicit command-line MiB capacity into bytes. Zero and
 		// overflow are refused so the default budget cannot be disabled by error.
@@ -65,7 +66,7 @@ namespace client {
 		// Viewer accessibility scales applied once at the ScreenGui collector.
 		// They are local presentation policy and never change authored GUI rows.
 		float InterfaceScale = 1.0f;
-		float TextScale = 1.0f;
+		float TextScale = 1.0f; // Viewer text accessibility scale.
 
 		// The viewer's requested localization tag. It affects only presentation.
 		std::string Locale = "en";
@@ -185,7 +186,8 @@ namespace client {
 		// lower either value for constrained devices; exhaustion keeps the mouth
 		// image-only until capacity becomes available.
 		size_t PortalReadinessBudgetBytes = DEFAULT_PORTAL_READINESS_BUDGET_BYTES;
-		size_t PortalReadinessAssetUploadBytes = DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES;
+		size_t PortalReadinessAssetUploadBytes =
+			DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES; // Destination asset-upload allowance.
 
 		// The maximum presentation rate, or zero for every update.
 		//

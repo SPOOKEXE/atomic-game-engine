@@ -91,8 +91,8 @@ namespace engine::ui {
 		// They let CanvasGroup targets remain resident until their visible inputs
 		// change, without treating backend handle churn as image damage.
 		uint64_t CompiledSignature = 0;
-		uint64_t Revision = 0;
-		const gui::FontPackage *Fonts = nullptr;
+		uint64_t Revision = 0;					 // Image revision used for cache invalidation.
+		const gui::FontPackage *Fonts = nullptr; // Fonts used to paint shaped text.
 	};
 
 	// How a compiled list is placed on screen.

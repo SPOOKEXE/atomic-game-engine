@@ -18,12 +18,16 @@ namespace engine::game {
 	// records; only the coordinator's resolver knows their physics meaning.
 	class PortalSeamCoordinator {
 	  public:
+		// Collects one world's opaque seam facts.
 		using Collect = std::function<void(ecs::Store &, std::vector<std::byte> &)>;
+		// Resolves copied facts into records for their destination worlds.
 		using Resolve = std::function<bool(
 			std::span<const world::FixedStepBarrierRecord>, std::vector<world::FixedStepBarrierRecord> &
 		)>;
+		// Applies resolved opaque facts to one world.
 		using Apply = std::function<bool(ecs::Store &, std::span<const std::byte>)>;
 
+		// Creates a coordinator from the host's seam callbacks.
 		PortalSeamCoordinator(Collect collect, Resolve resolve, Apply apply);
 
 		// Advances a locally hosted frame through the ordered seam barrier. A

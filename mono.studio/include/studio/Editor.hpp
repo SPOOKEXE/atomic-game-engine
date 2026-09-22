@@ -4211,6 +4211,7 @@ namespace studio {
 		// are different sizes: a single target would be reallocated twice a
 		// frame as each asked for its own dimensions.
 		engine::render::SceneTarget WorldTarget;
+		// Editor-only GUI preview settings for the main viewport.
 		GuiPreviewSettings MainGuiPreview;
 
 		// What a viewport panel is looking at, and from where.
@@ -4220,6 +4221,7 @@ namespace studio {
 		// the second is to watch a different world, or the same world from
 		// somewhere else, while the first stays where it was put.
 		struct ViewportState {
+			// Editor-only GUI preview settings for this panel.
 			GuiPreviewSettings GuiPreview;
 			// Which world it draws, or invalid to follow the active one.
 			WorldId World;
@@ -4446,6 +4448,7 @@ namespace studio {
 		// `gui::Compiled` is for. A fresh one per frame would compute a
 		// signature, find nothing to compare it against and rebuild every time.
 		std::vector<engine::gui::Compiled> GuiLists;
+		// Per-viewport locale caches used while compiling game UI.
 		std::vector<engine::gui::LocalizationCache> GuiLocalizations;
 
 		// The retained scene, game UI, host UI, and geometry signatures for each
@@ -4505,33 +4508,53 @@ namespace studio {
 		// are captured on grab, while Resolved supplies only the canvas-space
 		// feedback rectangle.
 		struct GuiCanvasDrag {
+			// World containing the manipulated GUI instance.
 			WorldId World;
+			// Manipulated GUI instance.
 			Entity Instance;
+			// Viewport where the drag began.
 			size_t Viewport = 0;
+			// Current authored position.
 			engine::core::UDim2 Position;
+			// Current authored size.
 			engine::core::UDim2 Size;
+			// Position captured when the drag began.
 			engine::core::UDim2 BeforePosition;
+			// Size captured when the drag began.
 			engine::core::UDim2 BeforeSize;
+			// Whether the drag resizes instead of moves.
 			bool Resize = false;
+			// Whether the drag changed position or size.
 			bool Moved = false;
 		};
 
+		// Active direct manipulation of a GUI rectangle.
 		GuiCanvasDrag GuiDragging;
 
 		// A canvas drag writes after the viewport left Universe::Enter. Its final
 		// update commits one grouped undo step for Position and Size.
 		struct PendingGuiCanvasEdit {
+			// World containing the edited GUI instance.
 			WorldId World;
+			// Edited GUI instance.
 			Entity Instance;
+			// Requested authored position.
 			engine::core::UDim2 Position;
+			// Requested authored size.
 			engine::core::UDim2 Size;
+			// Position before the drag.
 			engine::core::UDim2 BeforePosition;
+			// Size before the drag.
 			engine::core::UDim2 BeforeSize;
+			// Whether the edit resizes instead of moves.
 			bool Resize = false;
+			// Whether this update completes the grouped undo command.
 			bool Commit = false;
+			// Whether an edit awaits application outside Universe::Enter.
 			bool Wanted = false;
 		};
 
+		// Pending GUI edit applied after viewport rendering.
 		PendingGuiCanvasEdit PendingGuiEdit;
 
 		// An Alt-click waiting to place the editor's 3D cursor after projection
@@ -5186,8 +5209,11 @@ namespace studio {
 		//
 		// @since v0.17
 		engine::render::AdornmentGeometry Adornments;
+		// Light path probe geometry drawn for viewport diagnostics.
 		engine::render::LightPathGeometry LightPathProbes;
+		// Lights collected for diagnostic overlays.
 		std::vector<engine::render::SceneLight> DiagnosticLights;
+		// Lines showing the editor camera lock location.
 		std::vector<engine::render::AdornmentLine> CameraLockAdornment;
 
 		// Which viewport a panel index refers to, or null for the main one.

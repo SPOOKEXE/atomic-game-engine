@@ -127,6 +127,7 @@ namespace engine::control {
 		std::unique_ptr<Impl> State;
 	};
 
+	// Stages one optional provider's rows for registration.
 	using HookInstaller = std::function<void(HookRegistration &)>;
 
 	// The surface-local owner table for optional provider rows.
@@ -151,9 +152,13 @@ namespace engine::control {
 		bool OwnsResource(std::string_view uri) const;
 		// Whether an active hook owns this prompt name.
 		bool OwnsPrompt(std::string_view name) const;
+		// Returns whether an active hook exposes this tool.
 		bool VisibleTool(std::string_view name) const;
+		// Returns whether an active hook exposes this resource.
 		bool VisibleResource(std::string_view uri) const;
+		// Returns whether an active hook exposes this prompt.
 		bool VisiblePrompt(std::string_view name) const;
+		// Reaps hooks whose draining work has finished.
 		void Pump() {
 			Reap();
 		}

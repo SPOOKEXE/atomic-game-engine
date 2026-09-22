@@ -44,9 +44,13 @@ namespace engine::gui {
 	// describe a phone, a television overscan region, or Studio's preview pane.
 	// @since v0.25
 	struct DisplayInsets {
+		// Left reserved display edge in logical pixels.
 		float Left = 0.0f;
+		// Top reserved display edge in logical pixels.
 		float Top = 0.0f;
+		// Right reserved display edge in logical pixels.
 		float Right = 0.0f;
+		// Bottom reserved display edge in logical pixels.
 		float Bottom = 0.0f;
 	};
 
@@ -72,23 +76,28 @@ namespace engine::gui {
 	struct DisplayProfile {
 		// The host logical display dimensions before the collector scale.
 		float Width = 1600.0f;
+		// Host logical display height before collector scale.
 		float Height = 900.0f;
 
 		// Physical pixels represented by one logical pixel, and the platform's
 		// reported device ratio. A host may render to a framebuffer whose scale
 		// differs from the display's ratio, so the two remain distinct.
 		float FramebufferScale = 1.0f;
+		// Platform physical-pixel ratio per logical pixel.
 		float DevicePixelRatio = 1.0f;
 
+		// Host-reported display orientation.
 		DisplayOrientation Orientation = DisplayOrientation::Landscape;
 
 		// Permanent display cutouts and transient keyboard or system overlays.
 		DisplayInsets SafeArea;
+		// Transient occluded display edges such as keyboards.
 		DisplayInsets Occluded;
 
 		// The host's accessibility choices. They are inputs to the canonical
 		// layout call and cache key; authored components remain unchanged.
 		float TextScale = 1.0f;
+		// Viewer scale applied to the screen collector canvas.
 		float InterfaceScale = 1.0f;
 
 		// The historic top-bar reservation. It remains so existing callers keep
@@ -127,7 +136,9 @@ namespace engine::gui {
 	// The host presentation extent before collector transforms are applied.
 	core::Vector2 ScreenPresentationSize(const Screen &screen);
 
+	// Fallback glyph-width multiple without a validated font package.
 	constexpr float AVERAGE_ADVANCE = 0.52f;
+	// Fallback line-height multiple without shaped text metrics.
 	constexpr float LINE_SPACING = 1.2f;
 
 	// The containers a `LayerCollector` may draw from, by name.
@@ -175,6 +186,7 @@ namespace engine::gui {
 	//        why it is an argument rather than something this module reads.
 	//        Defaulted so every caller that lays out a still interface - which
 	//        is most tests - says nothing about time and gets a settled one.
+	// @param text      Viewer-local inputs for resolving and scaling text.
 	// @return How many nodes were reached and marked rendered.
 	size_t Layout(
 		ecs::Store &store, const Screen &screen, double seconds = 0.0, const TextResolutionRequest &text = {}
@@ -193,6 +205,7 @@ namespace engine::gui {
 	// @param collector The `LayerCollector` whose descendants are laid out.
 	// @param screen    The host-owned pixel rectangle, starting at `(0, 0)`.
 	// @param seconds   The caller's monotonic clock.
+	// @param text      Viewer-local inputs for resolving and scaling text.
 	// @return How many descendant nodes were placed.
 	// @since v0.22
 	size_t LayoutCollector(

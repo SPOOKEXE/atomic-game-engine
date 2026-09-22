@@ -10,6 +10,7 @@
 
 namespace studio {
 
+	// Editor-session diagnostics applied to one viewport panel.
 	struct ViewportDiagnostics {
 		// Whether bounded local-light influence probes are drawn over this panel.
 		bool ShowLightInfluence = false;

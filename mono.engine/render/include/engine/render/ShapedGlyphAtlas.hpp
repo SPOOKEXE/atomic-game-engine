@@ -17,23 +17,27 @@
 
 namespace engine::render {
 
+	// Packed coverage location for one shaped glyph.
 	struct ShapedAtlasGlyph {
-		uint16_t Page = 0;
-		uint16_t X = 0;
-		uint16_t Y = 0;
-		uint16_t Width = 0;
-		uint16_t Height = 0;
-		float OffsetX = 0.0f;
-		float OffsetY = 0.0f;
-		bool Present = false;
+		uint16_t Page = 0;	  // Coverage page index.
+		uint16_t X = 0;		  // Left pixel coordinate.
+		uint16_t Y = 0;		  // Top pixel coordinate.
+		uint16_t Width = 0;	  // Coverage width in pixels.
+		uint16_t Height = 0;  // Coverage height in pixels.
+		float OffsetX = 0.0f; // Raster offset along X.
+		float OffsetY = 0.0f; // Raster offset along Y.
+		bool Present = false; // Whether coverage was packed.
+		// Compares the packed glyph location and raster offsets.
 		bool operator==(const ShapedAtlasGlyph &) const = default;
 	};
 
+	// Bounded coverage atlas for shaped text glyphs.
 	class ShapedGlyphAtlas {
 	  public:
-		static constexpr uint16_t PAGE_EXTENT = 512;
-		static constexpr uint16_t MAXIMUM_PAGES = 4;
+		static constexpr uint16_t PAGE_EXTENT = 512; // Page width and height in pixels.
+		static constexpr uint16_t MAXIMUM_PAGES = 4; // Maximum resident pages.
 
+		// Creates an atlas with its default raster size.
 		explicit ShapedGlyphAtlas(float pixelSize);
 
 		// Resolves each shaped glyph in order. `FontPackage` owns the bytes used
@@ -45,7 +49,9 @@ namespace engine::render {
 			float pixelSize = 0.0f
 		);
 
+		// Returns resident coverage pages.
 		uint16_t PageCount() const;
+		// Returns one page's alpha coverage.
 		const std::vector<uint8_t> &Coverage(uint16_t page) const;
 
 		// Drops all coverage when the bytes behind a face identity change. A face

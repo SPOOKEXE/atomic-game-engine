@@ -120,14 +120,21 @@ namespace engine::gui {
 		DuplicateControlName,
 	};
 
+	// One accessibility problem detected in a compiled snapshot.
 	struct SemanticIssue {
+		// Category of accessibility problem.
 		SemanticIssueKind Kind = SemanticIssueKind::MissingName;
+		// Instance with the problem.
 		ecs::Entity Instance;
+		// Collector that owns the instance canvas.
 		ecs::Entity Collector;
 	};
 
+	// Bounded accessibility audit output.
 	struct SemanticAudit {
+		// Detected problems in snapshot order.
 		std::vector<SemanticIssue> Issues;
+		// Whether the audit stopped at its output limit.
 		bool Truncated = false;
 	};
 

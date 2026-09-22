@@ -18,15 +18,20 @@ namespace engine::replication {
 	// One connected client, from the authority's point of view. The generation
 	// makes a reused slot distinct from the session that occupied it before.
 	struct ClientId {
+		// Sentinel index for an unassigned client slot.
 		static constexpr uint32_t INVALID = 0xFFFFFFFFu;
 
+		// Authority slot occupied by the client.
 		uint32_t Index = INVALID;
+		// Incarnation that distinguishes a reused slot.
 		uint32_t Generation = 0;
 
+		// Reports whether this identifies an assigned client slot.
 		bool IsValid() const {
 			return Index != INVALID;
 		}
 
+		// Compares the client slot and its incarnation.
 		bool operator==(const ClientId &other) const {
 			return Index == other.Index && Generation == other.Generation;
 		}

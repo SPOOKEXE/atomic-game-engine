@@ -105,6 +105,7 @@ namespace engine::control {
 			return id;
 		}
 	}
+	// Builds the rig-export tool for the selected world host.
 	inline Tool RigExportTool(world::Universe &universe, world::DataFactorySession *session) {
 		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
 		return Tool{

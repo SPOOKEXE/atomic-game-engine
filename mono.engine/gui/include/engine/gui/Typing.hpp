@@ -101,8 +101,11 @@ namespace engine::gui {
 		// established five keyboard fields so positional construction preserves
 		// its existing meaning.
 		std::string_view Preedit;
+		// Grapheme offset of the active conversion segment in Preedit.
 		int32_t PreeditStart = -1;
+		// Grapheme length of the active conversion segment in Preedit.
 		int32_t PreeditLength = -1;
+		// Input-method revision for this uncommitted candidate.
 		uint64_t PreeditRevision = 0;
 	};
 

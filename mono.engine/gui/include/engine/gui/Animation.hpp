@@ -43,6 +43,7 @@ namespace engine::gui {
 		Size,
 	};
 
+	// The payload carried by a presentation track key.
 	enum class PresentationValueType : uint8_t {
 		Color,
 		Number,
@@ -59,32 +60,44 @@ namespace engine::gui {
 
 	// A typed track value. Only the field selected by Type is meaningful.
 	struct PresentationValue {
+		// Selects the active union-style payload.
 		PresentationValueType Type = PresentationValueType::Number;
+		// Colour payload when Type is Color.
 		core::Color3 Color{};
+		// Scalar payload when Type is Number.
 		float Number = 0.0f;
+		// Layout payload when Type is UDim2.
 		core::UDim2 UDim2{};
 
+		// Creates a colour payload.
 		static PresentationValue FromColor(core::Color3 value);
+		// Creates a scalar payload.
 		static PresentationValue FromNumber(float value);
+		// Creates a layout payload.
 		static PresentationValue FromUDim2(core::UDim2 value);
 	};
 
 	// One normalized key on a presentation track.
 	struct PresentationKey {
+		// Normalized position within the clip.
 		float Time = 0.0f;
+		// Value sampled at Time.
 		PresentationValue Value;
 	};
 
 	// A typed, bounded track. Keys are monotonic normalized values in [0, 1].
 	class PresentationTrack {
 	  public:
+		// Largest number of authored keys in one track.
 		static constexpr size_t MAXIMUM_KEYS = 16;
 
+		// Property this track samples.
 		PresentationProperty Property = PresentationProperty::BackgroundColor;
 
 		// Refuses a value with the wrong property type, non-finite data, a time
 		// outside [0, 1], a decreasing time, or a key beyond the fixed capacity.
 		bool Add(PresentationKey key);
+		// Authored keys in increasing normalized time order.
 		std::span<const PresentationKey> Keys() const;
 
 	  private:
@@ -92,8 +105,11 @@ namespace engine::gui {
 		size_t Count = 0;
 	};
 
+	// A named instant within an animation clip.
 	struct AnimationMarker {
+		// Stable marker name.
 		core::Name Name;
+		// Normalized position within the clip.
 		float Time = 0.0f;
 	};
 
@@ -102,15 +118,23 @@ namespace engine::gui {
 	// overrides into authoritative component fields.
 	class UIAnimation {
 	  public:
+		// Largest number of sampled property tracks.
 		static constexpr size_t MAXIMUM_TRACKS = 16;
+		// Largest number of named clip markers.
 		static constexpr size_t MAXIMUM_MARKERS = 16;
+		// Largest encoded marker name.
 		static constexpr size_t MAXIMUM_MARKER_NAME_BYTES = 64;
 
+		// Timing and easing shared by all tracks.
 		core::TweenInfo Tween;
 
+		// Adds one valid property track.
 		bool AddTrack(const PresentationTrack &track);
+		// Adds one valid named marker.
 		bool AddMarker(AnimationMarker marker);
+		// Authored tracks in insertion order.
 		std::span<const PresentationTrack> Tracks() const;
+		// Authored markers in insertion order.
 		std::span<const AnimationMarker> Markers() const;
 
 	  private:
@@ -120,8 +144,11 @@ namespace engine::gui {
 		size_t MarkerCount = 0;
 	};
 
+	// One sampled property value for a presentation pass.
 	struct PresentationOverride {
+		// Property receiving the sampled value.
 		PresentationProperty Property = PresentationProperty::BackgroundColor;
+		// Sampled value for Property.
 		PresentationValue Value;
 	};
 
@@ -129,10 +156,14 @@ namespace engine::gui {
 	// adapter. It is rebuilt from the clip each sample and never stored in ECS.
 	class PresentationOverrides {
 	  public:
+		// Largest number of sampled property values.
 		static constexpr size_t MAXIMUM_OVERRIDES = UIAnimation::MAXIMUM_TRACKS;
 
+		// Adds one sampled value unless the bounded result is full.
 		bool Add(PresentationOverride override);
+		// Finds the sampled value for a property.
 		const PresentationOverride *Find(PresentationProperty property) const;
+		// Sampled values in track order.
 		std::span<const PresentationOverride> Values() const;
 
 	  private:

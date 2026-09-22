@@ -7,8 +7,11 @@
 namespace engine::physics {
 	// Rigid motion of one portal mouth at a fixed physics sample.
 	struct PortalMouthMotion {
+		// Portal-mouth centre at the physics sample.
 		core::Vector3 Centre;
+		// Portal-mouth linear velocity.
 		core::Vector3 Linear;
+		// Portal-mouth angular velocity.
 		core::Vector3 Angular;
 	};
 

@@ -19,6 +19,7 @@ namespace engine::control {
 	using nlohmann::json;
 
 	namespace physics_observation_detail {
+		// Encodes one physics observation for a control response.
 		inline json Record(const physics::PhysicsObservationRecord &record) {
 			using Available = physics::PhysicsObservationAvailability;
 			const auto value = [&](Available field, auto number) -> json {
@@ -43,6 +44,7 @@ namespace engine::control {
 		}
 	}
 
+	// Installs physics-observation rows for a data-factory session.
 	inline void AddPhysicsObservationTools(Surface &surface, world::DataFactorySession &session) {
 		surface.Add(
 			Tool{
@@ -139,6 +141,7 @@ namespace engine::control {
 	}
 
 	namespace features {
+		// Returns the physics-observation feature for this session.
 		inline Feature PhysicsObservation(world::DataFactorySession &session) {
 			return Feature{"physics_observation", [&session](Surface &surface) {
 							   AddPhysicsObservationTools(surface, session);

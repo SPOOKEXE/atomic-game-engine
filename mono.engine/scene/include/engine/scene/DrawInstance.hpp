@@ -304,7 +304,9 @@ namespace engine::scene {
 		// Logical body identity survives portal import, where Source and Rig are
 		// request-local handles and cannot safely identify a native body.
 		uint64_t BodyKeyHigh = 0;
+		// Low half of the persistent body key.
 		uint64_t BodyKeyLow = 0;
+		// Incarnation of the persistent body key.
 		uint64_t BodyGeneration = 0;
 
 		// Snapshot-local data-capture label. Zero is background or an entity
@@ -367,6 +369,7 @@ namespace engine::scene {
 	// @param automatic Optional automatically produced mesh ladder.
 	// @param custom    Optional per-level authored overrides. Valid meshes win;
 	//                  nil entries fall back to `automatic`.
+	// @param settings  Optional distances and policy for automatic LOD selection.
 	// @param effects   Optional graph-node attachments for this visual.
 	// @since v0.24
 	inline void ApplyDrawRenderState(

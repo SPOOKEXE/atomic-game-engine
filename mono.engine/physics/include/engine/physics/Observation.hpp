@@ -25,7 +25,9 @@ namespace engine::physics {
 	// Stable discovery names. These strings, rather than their enum values,
 	// identify observations outside this process.
 	inline constexpr std::string_view PHYSICS_POST_INTEGRATION_OBSERVATION = "physics.post-integration";
+	// Discovery name for observations after narrow phase and before solving.
 	inline constexpr std::string_view PHYSICS_PRE_SOLVE_OBSERVATION = "physics.pre-solve";
+	// Discovery name for observations after solving and before publication.
 	inline constexpr std::string_view PHYSICS_COMPLETED_SOLVER_OBSERVATION = "physics.completed-solver";
 
 	// The complete discovery surface in deterministic pipeline order.
@@ -62,6 +64,7 @@ namespace engine::physics {
 		SolverRows = 1 << 9,
 	};
 
+	// Combines independent observation availability flags.
 	constexpr PhysicsObservationAvailability
 	operator|(PhysicsObservationAvailability left, PhysicsObservationAvailability right) {
 		return static_cast<PhysicsObservationAvailability>(
@@ -69,6 +72,7 @@ namespace engine::physics {
 		);
 	}
 
+	// Reports whether an observation availability flag is present.
 	constexpr bool
 	HasObservationValue(PhysicsObservationAvailability values, PhysicsObservationAvailability value) {
 		return (static_cast<uint16_t>(values) & static_cast<uint16_t>(value)) != 0;
@@ -77,34 +81,51 @@ namespace engine::physics {
 	// The immutable identity every hook context shares. `World` is copied into
 	// the completed record, so an observation never transports a Store pointer.
 	struct PhysicsObservationIdentity {
+		// Stable discovery name of the observed boundary.
 		std::string_view Hook;
+		// Stable name of the observed world.
 		std::string_view World;
+		// World tick that contains this observation.
 		uint64_t Tick = 0;
+		// Physics step number when the clock supplies one.
 		uint64_t PhysicsStep = 0;
+		// Step ordinal within Tick when available.
 		uint32_t StepInTick = 0;
+		// Duration of the physics step.
 		float StepSeconds = 0.0f;
+		// Unit used by StepSeconds.
 		PhysicsObservationTimeUnit TimeUnit = PhysicsObservationTimeUnit::Seconds;
+		// Whether PhysicsStep identifies this record.
 		bool PhysicsStepAvailable = false;
+		// Whether StepInTick identifies this record.
 		bool StepInTickAvailable = false;
 	};
 
 	// Read-only input available immediately after `IntegrateMotion`.
 	struct PostIntegrationObservationContext {
+		// Shared immutable boundary identity.
 		const PhysicsObservationIdentity Identity;
+		// Bodies integrated at this boundary.
 		const size_t MovingBodies;
 	};
 
 	// Read-only input available after `NarrowPhase` and before `Solve`.
 	struct PreSolveObservationContext {
+		// Shared immutable boundary identity.
 		const PhysicsObservationIdentity Identity;
+		// Broad-phase candidates entering narrow phase.
 		const size_t CandidatePairs;
+		// Contact manifolds entering the solver.
 		const size_t Manifolds;
 	};
 
 	// Read-only input available after `Solve` and before `Publish`.
 	struct CompletedSolverObservationContext {
+		// Shared immutable boundary identity.
 		const PhysicsObservationIdentity Identity;
+		// Bodies processed by the solver.
 		const size_t SolverBodies;
+		// Constraint rows processed by the solver.
 		const size_t SolverRows;
 	};
 
@@ -116,21 +137,36 @@ namespace engine::physics {
 		// the terminating zero in this fixed, allocation-free record.
 		static constexpr size_t MAXIMUM_WORLD_NAME_BYTES = 129;
 
+		// Pipeline boundary described by this record.
 		PhysicsObservationBoundary Boundary = PhysicsObservationBoundary::PostIntegration;
+		// Mask of fields with meaningful values.
 		PhysicsObservationAvailability Available = PhysicsObservationAvailability::None;
+		// Null-terminated world name copied into the record.
 		std::array<char, MAXIMUM_WORLD_NAME_BYTES> World = {};
+		// World tick containing the boundary.
 		uint64_t Tick = 0;
+		// Physics step number when supplied.
 		uint64_t PhysicsStep = 0;
+		// Step ordinal within Tick when supplied.
 		uint32_t StepInTick = 0;
+		// Physics step duration.
 		float StepSeconds = 0.0f;
+		// Count of integrated moving bodies.
 		uint32_t MovingBodies = 0;
+		// Count of broad-phase candidate pairs.
 		uint32_t CandidatePairs = 0;
+		// Count of narrow-phase manifolds.
 		uint32_t Manifolds = 0;
+		// Count of solver bodies.
 		uint32_t SolverBodies = 0;
+		// Count of solver constraint rows.
 		uint32_t SolverRows = 0;
+		// Unit used by StepSeconds.
 		PhysicsObservationTimeUnit TimeUnit = PhysicsObservationTimeUnit::Seconds;
 
+		// Returns this boundary's stable hook name.
 		std::string_view Hook() const;
+		// Returns the copied stable world name.
 		std::string_view WorldName() const;
 	};
 
@@ -138,9 +174,12 @@ namespace engine::physics {
 	// from becoming a backlog when a consumer is absent or slow.
 	class PhysicsObservationLog {
 	  public:
+		// Maximum completed records retained for one world.
 		static constexpr size_t CAPACITY = 96;
 
+		// Copies retained records in production order.
 		std::vector<PhysicsObservationRecord> Copy() const;
+		// Returns records overwritten after the ring became full.
 		uint64_t Overwritten() const;
 
 	  private:

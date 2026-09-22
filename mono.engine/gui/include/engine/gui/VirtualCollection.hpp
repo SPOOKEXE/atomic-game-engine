@@ -21,16 +21,23 @@
 
 namespace engine::gui {
 
+	// Focus retained for a virtualized item that may leave its page.
 	struct VirtualFocusState {
+		// Collection that owns the focused record.
 		ecs::Entity Collection;
+		// Stable source key of the focused record.
 		std::string Key;
+		// Last published source index for Key.
 		uint32_t Index = UINT32_MAX;
 	};
 
 	// Viewer-local scroll anchor retained across a source page revision.
 	struct VirtualAnchorState {
+		// Source revision used to establish this anchor.
 		uint64_t Revision = UINT64_MAX;
+		// Stable key held at the viewport anchor.
 		std::string Key;
+		// Vertical offset from the anchored item.
 		float OffsetY = 0.0f;
 	};
 

@@ -21,6 +21,7 @@ namespace engine::control {
 	using nlohmann::json;
 
 	namespace replication_observation_detail {
+		// Encodes observable replication hook names.
 		inline json Hooks() {
 			json hooks = json::array();
 			for (const auto hook : std::array{
@@ -37,6 +38,7 @@ namespace engine::control {
 			return hooks;
 		}
 
+		// Encodes one replication observation for a control response.
 		inline json Record(const replication::ReplicationObservationRecord &record) {
 			json result{{"hook", replication::Describe(record.Hook)}};
 			std::visit(
@@ -84,6 +86,7 @@ namespace engine::control {
 		}
 	}
 
+	// Installs replication-observation rows for one world.
 	inline void AddReplicationObservationTools(
 		Surface &surface,
 		world::DataFactorySession *session,
@@ -198,6 +201,7 @@ namespace engine::control {
 	}
 
 	namespace features {
+		// Returns the replication-observation feature for one world.
 		inline Feature ReplicationObservation(
 			world::DataFactorySession *session,
 			replication::ReplicationObservations &observations,

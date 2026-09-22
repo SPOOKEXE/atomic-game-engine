@@ -34,8 +34,8 @@ namespace engine::render {
 
 	// One overlay line and the event that chose its colour.
 	struct LightProbeSegment {
-		AdornmentLine Line;
-		LightProbeEvent Event = LightProbeEvent::EmptySpace;
+		AdornmentLine Line;									 // Visible sampled path segment.
+		LightProbeEvent Event = LightProbeEvent::EmptySpace; // Event at this segment.
 	};
 
 	// Bounded sample paths from resolved local lights through render bounds.

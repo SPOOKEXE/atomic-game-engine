@@ -337,7 +337,7 @@ namespace engine::render {
 		uint64_t ImportedLightImage = 0;
 		// Capture key and source-world side paired with ImportedLightImage.
 		core::Name LightImagePortal;
-		core::Vector3 LightOutward;
+		core::Vector3 LightOutward; // Source portal's outward light direction.
 
 		// The slot of the hole at the far end of this one, or -1 for none.
 		//
@@ -708,6 +708,7 @@ namespace engine::render {
 		bool CameraCut = false;
 		//@}
 
+		// Returns the frame used for visibility culling.
 		const core::CFrame &VisibilityCameraFrame() const {
 			return VisibilityFrame.has_value() ? *VisibilityFrame : CameraFrame;
 		}

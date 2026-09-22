@@ -21,18 +21,24 @@ namespace engine::gui {
 	class FontPackage;
 	struct Label;
 
+	// Viewer-specific inputs used to resolve and measure authored label text.
 	struct TextResolutionRequest {
+		// Viewer-local message catalogue, if localization is enabled.
 		const LocalizationCatalogue *Catalogue = nullptr;
+		// Locale used to resolve localized labels.
 		std::string_view Locale;
+		// Whether Studio marks unresolved localized text.
 		bool StudioMissingLocalizationMarker = false;
 
 		// Multiplied into text metrics by layout. This belongs beside locale
 		// because both are viewer-local inputs resolved before placement; authored
 		// label sizes remain unchanged.
 		float LayoutScale = 1.0f;
+		// Font catalogue used to select viewer-local text faces.
 		const FontPackage *Fonts = nullptr;
 	};
 
+	// Resolves a label using viewer-local localization and font settings.
 	std::string ResolveText(
 		const ecs::Store &store,
 		ecs::Entity instance,

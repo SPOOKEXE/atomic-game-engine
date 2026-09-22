@@ -170,6 +170,7 @@ namespace engine::control {
 		}
 	}
 
+	// Builds the temporal-sample tool for the active data-factory session.
 	inline Tool TemporalSampleTool(world::Universe &universe, world::DataFactorySession &session) {
 		using namespace temporal_sample_detail;
 		world::Universe *worlds = &universe;

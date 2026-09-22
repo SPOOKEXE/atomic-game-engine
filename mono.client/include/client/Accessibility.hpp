@@ -18,11 +18,13 @@
 struct SDL_Window;
 
 namespace client {
+	// One platform accessibility action for the UI thread.
 	struct AccessibilityAction {
-		engine::ecs::Entity Target;
-		engine::ecs::Entity Collector;
-		uint64_t WorldEpoch = 0;
-		engine::gui::SemanticAction Action = engine::gui::SemanticAction::Activate;
+		engine::ecs::Entity Target;	   // Semantic node to receive the action.
+		engine::ecs::Entity Collector; // Collector that exposed the node.
+		uint64_t WorldEpoch = 0;	   // World generation that produced the node.
+		engine::gui::SemanticAction Action =
+			engine::gui::SemanticAction::Activate; // Requested semantic action.
 	};
 
 	// Rejects callbacks from a replaced store or collector before they reach the
@@ -67,10 +69,12 @@ namespace client {
 		return projected;
 	}
 
+	// Bridges the current GUI semantic tree to the native accessibility API.
 	class AccessibilityAdapter {
 	  public:
 		struct State;
 
+		// Binds the adapter to one product window.
 		explicit AccessibilityAdapter(SDL_Window *window);
 		~AccessibilityAdapter();
 
@@ -81,6 +85,7 @@ namespace client {
 		// is part of every generated node id, so a recycled ECS entity cannot be
 		// targeted through an action queued for an earlier world.
 		void Update(const engine::gui::SemanticSnapshot &snapshot, uint64_t worldEpoch);
+		// Updates the native window-focus state.
 		void SetWindowFocused(bool focused);
 
 		// Returns requests copied by the platform callback. This runs only on the

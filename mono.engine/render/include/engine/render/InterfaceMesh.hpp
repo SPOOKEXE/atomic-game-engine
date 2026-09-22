@@ -108,10 +108,11 @@ namespace engine::render {
 	// refuses a ninth nesting level, so the renderer can use a fixed array and
 	// keep the fragment contract bounded.
 	struct InterfaceMask {
-		core::Rect Bounds;
-		float CornerRadius = 0.0f;
+		core::Rect Bounds;		   // Canvas-space mask bounds.
+		float CornerRadius = 0.0f; // Rounded-corner radius.
 	};
 
+	// Maximum active rounded masks per interface batch.
 	inline constexpr size_t MAXIMUM_INTERFACE_MASKS = 8;
 
 	// Converts a canvas-space clip into the target's device pixels.
@@ -204,7 +205,7 @@ namespace engine::render {
 		// The active rounded `UIMask` ancestors at this paint position. A batch
 		// splits on this state because it is fragment state, not vertex data.
 		std::array<InterfaceMask, MAXIMUM_INTERFACE_MASKS> Masks{};
-		uint8_t MaskCount = 0;
+		uint8_t MaskCount = 0; // Active entries in Masks.
 	};
 
 	// The source-pixel extent of an image after selecting its animation cell.
@@ -249,6 +250,9 @@ namespace engine::render {
 		// @param viewports The same for an element showing a live viewport,
 		//        which is resolved by entity rather than by name because the
 		//        texture belongs to the element and not to any content.
+		// @param shapedAtlas Optional atlas used to resolve shaped glyphs.
+		// @param fonts       Font package used to rasterise shaped glyphs.
+		// @param shapedUse   Use marker passed to the shaped atlas for cache aging.
 		void Build(
 			const gui::DrawList &list,
 			const GlyphAtlas &atlas,

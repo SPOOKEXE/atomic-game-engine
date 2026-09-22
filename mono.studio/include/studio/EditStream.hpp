@@ -119,6 +119,7 @@ namespace studio {
 		// attachment path per document root. Theme resources are document-local
 		// and rebuild from the same bytes, so they need no wire handle.
 		std::vector<std::byte> UiDocument;
+		// Existing parents receiving the imported document roots.
 		std::vector<InstancePath> UiImportParents;
 
 		// Which property changed, by name.

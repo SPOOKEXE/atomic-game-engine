@@ -339,7 +339,9 @@ namespace studio {
 	// The renderer revision and asset name make a retained source valid only for
 	// the resource state that supplied it.
 	struct PluginGroupImageSource {
+		// Asset that produced the renderer texture.
 		engine::core::Name Asset;
+		// CPU texture data retained for group rasterisation.
 		engine::assets::TextureData Image;
 	};
 
@@ -348,8 +350,10 @@ namespace studio {
 	// texture readback a per-frame cost or grow without a bound.
 	class PluginGroupImageCache {
 	  public:
+		// Maximum CPU texture bytes retained by this cache.
 		static constexpr size_t MAXIMUM_BYTES = 16u * 1024u * 1024u;
 
+		// Starts a renderer revision, discarding stale texture sources.
 		void BeginRevision(uint64_t revision) {
 			if (Revision != revision) {
 				Sources.clear();
@@ -359,6 +363,7 @@ namespace studio {
 			}
 		}
 
+		// Reports whether this texture requires a CPU copy for the revision.
 		[[nodiscard]] bool NeedsCopy(uint64_t revision, uintptr_t texture, engine::core::Name asset) const {
 			if (Revision != revision) {
 				return true;
@@ -371,6 +376,7 @@ namespace studio {
 			return unavailable == Unavailable.end() || unavailable->second != asset;
 		}
 
+		// Retains a valid CPU texture when both cache budgets permit it.
 		[[nodiscard]] bool Store(
 			uintptr_t texture,
 			engine::core::Name asset,
@@ -390,10 +396,12 @@ namespace studio {
 			return true;
 		}
 
+		// Records that a texture could not provide a CPU copy this revision.
 		void MarkUnavailable(uintptr_t texture, engine::core::Name asset) {
 			Unavailable.insert_or_assign(texture, asset);
 		}
 
+		// Removes one texture source and returns its released byte count.
 		[[nodiscard]] size_t Remove(uintptr_t texture) {
 			const auto found = Sources.find(texture);
 			Unavailable.erase(texture);
@@ -406,11 +414,13 @@ namespace studio {
 			return released;
 		}
 
+		// Returns a retained CPU texture source, if present.
 		[[nodiscard]] const engine::assets::TextureData *Find(uintptr_t texture) const {
 			const auto found = Sources.find(texture);
 			return found == Sources.end() ? nullptr : &found->second.Image;
 		}
 
+		// Clears all retained sources and returns their released byte count.
 		[[nodiscard]] size_t Clear() {
 			const size_t released = Bytes;
 			Sources.clear();
@@ -419,6 +429,7 @@ namespace studio {
 			return released;
 		}
 
+		// Returns current retained CPU texture bytes.
 		[[nodiscard]] size_t Size() const {
 			return Bytes;
 		}

@@ -152,7 +152,8 @@ namespace engine::ecs {
 		// Revisions are derived runtime state.  A consumer that depends on one
 		// attribute can therefore avoid polling every value in the table.
 		uint64_t NextRevision = 1;
-		std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>> Revisions;
+		std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>>
+			Revisions; // Latest revision for each entity attribute.
 	};
 
 	// Reads one attribute.

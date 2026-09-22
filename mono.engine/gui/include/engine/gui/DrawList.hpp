@@ -226,6 +226,7 @@ namespace engine::gui {
 		// `Compiled` - so this allocates on a rebuild rather than per frame, and
 		// a run short enough for the small-string buffer never allocates at all.
 		std::string Text;
+		// Canonical glyph positions and line metrics for Text.
 		ShapedText Shaping;
 
 		// The em size to draw at, already fitted and clamped. **A backend uses
@@ -316,21 +317,32 @@ namespace engine::gui {
 	//
 	// @since v0.23
 	struct DrawOperation {
+		// Structural boundary type.
 		DrawOperationKind Kind = DrawOperationKind::BeginMask;
+		// Instance that opened this boundary.
 		ecs::Entity Source;
+		// Collector that owns the boundary canvas.
 		ecs::Entity Collector;
+		// Command index where the boundary occurs.
 		size_t Command = 0;
+		// Boundary bounds in canvas pixels.
 		core::Rect Bounds;
+		// Active clip at the boundary.
 		core::Rect Clip;
+		// Mask corner radius in pixels.
 		float CornerRadius = 0.0f;
+		// Group opacity applied by an adapter.
 		float Transparency = 0.0f;
 	};
 
 	// One collector's logical-to-presentation map. Commands remain in the
 	// collector's logical coordinates so scripts, layout and input share them.
 	struct CollectorTransform {
+		// Collector whose commands use this transform.
 		ecs::Entity Collector;
+		// Presentation-space origin for the logical canvas.
 		core::Vector2 Origin;
+		// Presentation scale for the logical canvas.
 		core::Vector2 Scale{1.0f, 1.0f};
 	};
 
@@ -340,9 +352,13 @@ namespace engine::gui {
 	// after ordinary paint. Retained render targets therefore cache this range,
 	// not every command owned by the collector, so compositing preserves z-order.
 	struct CollectorRange {
+		// Collector that owns this command range.
 		ecs::Entity Collector;
+		// Index of its first command.
 		size_t First = 0;
+		// Number of consecutive commands.
 		size_t Count = 0;
+		// Whether this range belongs to a spatial collector.
 		bool Spatial = false;
 	};
 

@@ -21,6 +21,7 @@
 
 namespace engine::gui {
 
+	// The payload kind held by a style value.
 	enum class StyleValueType : uint8_t {
 		Color,
 		Number,
@@ -38,10 +39,12 @@ namespace engine::gui {
 		Invalid = 1 << 5,
 	};
 
+	// Combines two interaction-state masks.
 	constexpr StyleState operator|(StyleState left, StyleState right) {
 		return static_cast<StyleState>(static_cast<uint8_t>(left) | static_cast<uint8_t>(right));
 	}
 
+	// Whether state contains every required interaction flag.
 	constexpr bool Includes(StyleState state, StyleState required) {
 		return (static_cast<uint8_t>(state) & static_cast<uint8_t>(required)) ==
 			   static_cast<uint8_t>(required);
@@ -49,16 +52,21 @@ namespace engine::gui {
 
 	// One value with an explicit type tag. The unused member is never read.
 	struct StyleValue {
+		// Selects the active style payload.
 		StyleValueType Type = StyleValueType::Color;
+		// Colour payload when Type is Color.
 		core::Color3 Color{};
+		// Scalar payload when Type is Number.
 		float Number = 0.0f;
 
+		// Creates a colour style value.
 		static StyleValue FromColor(core::Color3 value) {
 			StyleValue result;
 			result.Color = value;
 			return result;
 		}
 
+		// Creates a numeric style value.
 		static StyleValue FromNumber(float value) {
 			StyleValue result;
 			result.Type = StyleValueType::Number;
@@ -67,8 +75,11 @@ namespace engine::gui {
 		}
 	};
 
+	// One named typed style token.
 	struct StyleDeclaration {
+		// Stable token name.
 		core::Name Name;
+		// Authored token value.
 		StyleValue Value;
 	};
 
@@ -76,11 +87,16 @@ namespace engine::gui {
 	// what prevents a colour token from becoming a number by accident.
 	class StyleSet {
 	  public:
+		// Largest number of tokens in this set.
 		static constexpr size_t MAXIMUM_DECLARATIONS = 32;
 
+		// Adds or replaces a token of the same type.
 		bool Set(StyleDeclaration declaration);
+		// Finds a token by stable name.
 		const StyleValue *Find(core::Name name) const;
+		// Tokens in authored insertion order.
 		std::span<const StyleDeclaration> Declarations() const;
+		// Monotonic revision of accepted changes.
 		uint64_t Revision() const {
 			return RevisionNumber;
 		}
@@ -96,9 +112,12 @@ namespace engine::gui {
 	// inspectable without selector specificity arithmetic.
 	class StyleClasses {
 	  public:
+		// Largest number of attached stable class names.
 		static constexpr size_t MAXIMUM_CLASSES = 8;
 
+		// Adds a class name within fixed capacity.
 		bool Add(core::Name name);
+		// Attached class names in cascade order.
 		std::span<const core::Name> Names() const;
 
 	  private:
@@ -110,6 +129,7 @@ namespace engine::gui {
 	// to the collector, so the same retained tree can compile for two viewers
 	// without copying style values into either adapter.
 	struct UITheme {
+		// Theme token table.
 		StyleSet Tokens;
 	};
 
@@ -117,6 +137,7 @@ namespace engine::gui {
 	// and wire contract: a hostile document cannot turn class matching into an
 	// unbounded selector loop.
 	struct StyleClass {
+		// Stable class names attached to the target.
 		StyleClasses Names;
 	};
 
@@ -132,13 +153,17 @@ namespace engine::gui {
 		ImageTransparency = 1 << 5,
 	};
 
+	// Authored direct-property precedence mask.
 	struct StyleDirect {
+		// Bit mask of directly assigned visual properties.
 		uint8_t Properties = 0;
 
+		// Whether a property was assigned directly.
 		bool Has(StyleDirectProperty property) const {
 			return (Properties & static_cast<uint8_t>(property)) != 0;
 		}
 
+		// Marks a property as directly assigned.
 		void Set(StyleDirectProperty property) {
 			Properties |= static_cast<uint8_t>(property);
 		}
@@ -147,30 +172,38 @@ namespace engine::gui {
 	// A declaration group. An empty class is local to the target. A non-empty
 	// class matches only that exact stable class name.
 	struct StyleRule {
+		// Optional class this rule matches.
 		core::Name Class;
+		// Interaction flags required to match.
 		StyleState State = StyleState::None;
+		// Tokens supplied by this rule.
 		StyleSet Declarations;
 	};
 
 	// An authored UIStyle child. Class is optional for an element-local rule and
 	// states are matched only against interaction facts supplied by compile.
 	struct UIStyle {
+		// Rule authored by this child instance.
 		StyleRule Rule;
 	};
 
 	// The collector's explicit reference to a UITheme instance. An entity handle
 	// is saved through Store's normal remapping and is never a process pointer.
 	struct ThemeBinding {
+		// Theme resource selected by the collector.
 		ecs::Entity Theme;
 	};
 
 	// Viewer-local compile output. It is never authored or replicated; scripts
 	// continue to read the direct properties they wrote.
 	struct ResolvedStyle {
+		// Final resolved token table.
 		StyleSet Values;
+		// Interaction facts used for resolution.
 		StyleState State = StyleState::None;
 	};
 
+	// Largest number of style rules collected for one target.
 	constexpr size_t MAXIMUM_STYLE_RULES = 64;
 
 	// The layer that supplied a resolved token. This stays alongside compile
@@ -183,24 +216,36 @@ namespace engine::gui {
 		Direct,
 	};
 
+	// Source information for one resolved style token.
 	struct StyleProvenance {
+		// Marker for values that do not originate from a rule.
 		static constexpr size_t NO_RULE = static_cast<size_t>(-1);
 
+		// Resolved token name.
 		core::Name Name;
+		// Resolved token value.
 		StyleValue Value;
+		// Cascade layer that supplied Value.
 		StyleSource Source = StyleSource::Theme;
+		// Matching class for a class rule.
 		core::Name Class;
+		// Matching interaction state for a rule.
 		StyleState State = StyleState::None;
 		// Index in the ResolveStyleTrace rules span, or NO_RULE for theme and
 		// direct values. A host can map this back to the authored UIStyle child.
 		size_t RuleIndex = NO_RULE;
 	};
 
+	// Resolved tokens with their winning cascade layers.
 	struct StyleResolution {
+		// Final resolved token table.
 		StyleSet Values;
+		// Provenance storage parallel to Values.
 		std::array<StyleProvenance, StyleSet::MAXIMUM_DECLARATIONS> Provenance{};
+		// Number of active provenance entries.
 		size_t Count = 0;
 
+		// Active provenance entries in token order.
 		std::span<const StyleProvenance> Sources() const {
 			return {Provenance.data(), Count};
 		}

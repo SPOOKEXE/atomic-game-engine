@@ -123,10 +123,15 @@ namespace engine::scene {
 		// What the surface emits on its own, independent of any light.
 		core::Name Emissive = {};
 
+		// Texture carrying one or more packed PBR channels.
 		core::Name PackedPbr = {};
+		// PackedPbr channel for roughness, or 255 when absent.
 		uint8_t RoughnessChannel = 255;
+		// PackedPbr channel for ambient occlusion, or 255 when absent.
 		uint8_t OcclusionChannel = 255;
+		// PackedPbr channel for height, or 255 when absent.
 		uint8_t HeightChannel = 255;
+		// PackedPbr channel for metalness, or 255 when absent.
 		uint8_t MetalnessChannel = 255;
 
 		// Whether this names anything at all.

@@ -172,8 +172,8 @@ namespace loadtest {
 		// A zero seed preserves `HeadingRadians`. A non-zero seed derives headings
 		// from this session's stable ordinal and its submitted-input interval.
 		uint64_t RandomHeadingSeed = 0;
-		uint32_t RandomHeadingEveryTicks = 30;
-		uint32_t SessionOrdinal = 0;
+		uint32_t RandomHeadingEveryTicks = 30; // Input intervals before changing heading.
+		uint32_t SessionOrdinal = 0;		   // Stable ordinal used by the heading seed.
 	};
 
 	// One virtual client: a socket, a connector, and a replica of the world.

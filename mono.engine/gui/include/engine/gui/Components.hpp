@@ -314,10 +314,15 @@ namespace engine::gui {
 	// cross a save or replication boundary; number and date values carry no
 	// formatted cache because the viewer locale owns that result.
 	struct LabelLocalizationArgument {
+		// Localized-message placeholder name.
 		core::Name Name;
+		// Selects the active argument payload.
 		LocalizedArgumentType Type = LocalizedArgumentType::String;
+		// String payload when Type is String.
 		std::string String;
+		// Numeric payload when Type is Number.
 		double Number = 0.0;
+		// UTC timestamp payload when Type is Date.
 		int64_t UnixSeconds = 0;
 	};
 
@@ -326,10 +331,14 @@ namespace engine::gui {
 	// It has its own component wire name so the original LabelPresentation row
 	// remains readable by saves written before localized arguments existed.
 	struct LabelLocalizationArguments {
+		// Largest number of authored localization arguments.
 		static constexpr size_t MAXIMUM_ARGUMENTS = 8;
+		// Largest UTF-8 string argument in bytes.
 		static constexpr size_t MAXIMUM_STRING_BYTES = 512;
 
+		// Fixed storage for authored arguments.
 		std::array<LabelLocalizationArgument, MAXIMUM_ARGUMENTS> Values{};
+		// Number of active entries in Values.
 		uint8_t Count = 0;
 	};
 
@@ -817,7 +826,9 @@ namespace engine::gui {
 	// canvas. `Resolved` remains in logical coordinates; draw and input consume
 	// this map at their respective boundary.
 	struct CanvasTransform {
+		// Presentation-space origin of the logical canvas.
 		core::Vector2 Origin;
+		// Presentation scale of the logical canvas.
 		core::Vector2 Scale{1.0f, 1.0f};
 	};
 
@@ -1129,8 +1140,11 @@ namespace engine::gui {
 	//
 	// @since v0.23
 	struct Mask {
+		// Corner radius resolved against the target rectangle.
 		core::UDim Radius{0.0f, 0.0f};
+		// Whether this mask participates in compilation.
 		bool Enabled = true;
+		// Padding retained for deterministic component serialization.
 		uint8_t Reserved[3] = {};
 	};
 
@@ -1163,7 +1177,9 @@ namespace engine::gui {
 		// The retained-target refresh contract. `Manual` refreshes only after
 		// InvalidationRevision changes; `FixedRate` uses UpdateEveryFrames.
 		ViewportUpdateMode UpdateMode = ViewportUpdateMode::OnChange;
+		// Padding retained for deterministic component serialization.
 		uint8_t UpdateReserved[7] = {};
+		// Fixed-rate refresh interval in frames.
 		uint32_t UpdateEveryFrames = 1;
 
 		// An authored monotonic token for scripts and Studio to request a manual
@@ -1700,9 +1716,13 @@ namespace engine::gui {
 	//
 	// @since v0.25
 	struct AnimationPlayback {
+		// Authored presentation clip to sample.
 		UIAnimation Clip;
+		// Compile timeline time at which playback began.
 		double StartedAt = -1.0;
+		// Whether the clip advances from StartedAt.
 		bool Playing = true;
+		// Padding retained for deterministic component serialization.
 		uint8_t Reserved[7] = {};
 	};
 
@@ -1712,9 +1732,13 @@ namespace engine::gui {
 	//
 	// @since v0.25
 	struct PresentationState {
+		// Latest sampled overrides.
 		PresentationOverrides Overrides;
+		// Whether a valid playback attachment supplied Overrides.
 		bool Active = false;
+		// Whether the sample can change at a later time.
 		bool Moving = false;
+		// Padding retained for deterministic component serialization.
 		uint8_t Reserved[6] = {};
 	};
 
@@ -2028,10 +2052,15 @@ namespace engine::gui {
 	// state because an unfinished platform candidate must never cross a save or
 	// replication boundary.
 	struct TextCompositionState {
+		// Focused box that owns this input-method candidate.
 		ecs::Entity TextBox;
+		// Uncommitted candidate UTF-8 text.
 		std::string Text;
+		// Grapheme offset of the selected candidate segment.
 		int32_t Start = -1;
+		// Grapheme length of the selected candidate segment.
 		int32_t Length = -1;
+		// Monotonic revision of the input-method candidate.
 		uint64_t Revision = 0;
 	};
 }

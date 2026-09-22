@@ -50,10 +50,12 @@ namespace engine::physics {
 		std::vector<core::Vector3> Points;
 		// Resolved at the destination so source and destination material tables may differ.
 		float Friction = 0.5f;
+		// Contact restitution resolved in the destination material table.
 		float Restitution = 0.0f;
 		// Destination support velocity sampled with this shape. It lets a copied
 		// kinematic surface wake and carry the local body without a remote pointer.
 		core::Vector3 Linear = core::Vector3::Zero;
+		// Destination support angular velocity sampled with the shape.
 		core::Vector3 Angular = core::Vector3::Zero;
 	};
 	// Copied Static Contacts declaration.
@@ -65,24 +67,38 @@ namespace engine::physics {
 	// value record because the owning entity belongs to another world. The
 	// barrier solver receives only this record and never a foreign Store.
 	struct CopiedDynamicContact {
+		// Persistent identity of the foreign body.
 		scene::BodyIdentity Identity;
+		// Body transform in the local chart.
 		core::CFrame Frame;
+		// Body linear and angular motion.
 		scene::Motion Motion;
+		// Shape half-extent or radius data.
 		core::Vector3 Extent;
+		// Body mass used by the barrier solver.
 		float Mass = 0.0f;
+		// Contact friction resolved for this body.
 		float Friction = 0.5f;
+		// Contact restitution resolved for this body.
 		float Restitution = 0.0f;
+		// Geometry interpretation for Extent.
 		scene::ShapeKind Kind = scene::ShapeKind::Box;
+		// Finite portal aperture that clips this contact.
 		ContactWindow Window;
 	};
+	// Copied far-side dynamic contacts grouped for one collection.
 	struct CopiedDynamicContacts {
+		// Dynamic bodies overlapping the copied aperture.
 		std::vector<CopiedDynamicContact> Bodies;
 	};
 	// Dynamic rows returned for one local root during the current fixed step.
 	// They remain copied values until the seam barrier consumes them.
 	struct CopiedDynamicBodyContacts {
+		// Local root whose contacts were collected.
 		ecs::Entity Root = ecs::NULL_ENTITY;
+		// Dynamic contacts copied for Root.
 		CopiedDynamicContacts Contacts;
+		// Whether all requested contacts were collected.
 		bool Complete = false;
 	};
 	// Root is local-only. Only Window and copied geometry have wire encoders.
@@ -113,7 +129,9 @@ namespace engine::physics {
 	bool WriteCopiedContacts(core::ByteWriter &writer, const CopiedStaticContacts &contacts);
 	// Reads bounded copied static-contact rows from the portable wire representation.
 	bool ReadCopiedContacts(core::ByteReader &reader, CopiedStaticContacts &contacts);
+	// Encodes bounded copied dynamic contacts for transfer across a barrier.
 	bool WriteCopiedDynamicContacts(core::ByteWriter &writer, const CopiedDynamicContacts &contacts);
+	// Decodes bounded copied dynamic contacts transactionally.
 	bool ReadCopiedDynamicContacts(core::ByteReader &reader, CopiedDynamicContacts &contacts);
 	// Registers ECS component metadata for copied-contact snapshots.
 	void RegisterCopiedContactComponents();

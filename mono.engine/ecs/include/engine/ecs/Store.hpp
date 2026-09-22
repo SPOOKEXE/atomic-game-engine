@@ -1686,6 +1686,7 @@ namespace engine::ecs {
 			RequireOwningThread("Observe");
 			ObserveRaw(id);
 		}
+		// Returns the current mutation version for one component type.
 		uint64_t ComponentChangeVersion(ComponentId id) const {
 			return ComponentChangeVersionRaw(id);
 		}
