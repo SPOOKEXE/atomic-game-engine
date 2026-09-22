@@ -289,6 +289,8 @@ namespace engine::render {
 		std::vector<DataCaptureChannel> Channels;
 		// Stable light identity per logical plane, empty for other channels.
 		std::vector<std::string> LightIds;
+		// Set after rendering when the requested local light matched a visible row.
+		std::vector<uint8_t> LocalLightMatched;
 		// Object label table retained for the final result.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Semantic label table retained for the final result.

@@ -2613,6 +2613,14 @@ namespace engine::render {
 		if (recording.Begin(request) != ViewStart::Recording) {
 			return result;
 		}
+		const ViewMutationIdentity captureIdentity{
+			.WorldName = std::string(source.WorldName.Text()),
+			.SnapshotId = source.SnapshotId,
+			.Pipeline = pipeline,
+			.PipelineRevision = recording.Pipeline->Revision,
+			.ViewSlot = targetSlot,
+		};
+		Hooks().ApplyLocalLightCapture(captureIdentity, recording);
 
 		// A damaged scene binds every built-in kind directly. An unchanged scene
 		// starts with no-op handlers, then replaces only families containing retained
@@ -2646,6 +2654,7 @@ namespace engine::render {
 		}
 
 		recording.Finish(frameNodes);
+		Hooks().CompleteLocalLightCapture(captureIdentity, recording);
 		return result;
 	}
 }

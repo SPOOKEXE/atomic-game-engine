@@ -435,15 +435,18 @@ namespace engine::render {
 		}
 		std::vector<DataCaptureChannel> expandedChannels;
 		std::vector<std::string> expandedLightIds;
+		std::vector<uint8_t> localLightMatched;
 		for (const DataCaptureChannel channel : request.Channels) {
 			if (channel == DataCaptureChannel::LocalLightContribution) {
 				for (const std::string &id : request.LocalLightIds) {
 					expandedChannels.push_back(channel);
 					expandedLightIds.push_back(id);
+					localLightMatched.push_back(0);
 				}
 			} else {
 				expandedChannels.push_back(channel);
 				expandedLightIds.emplace_back();
+				localLightMatched.push_back(1);
 			}
 		}
 
@@ -455,6 +458,7 @@ namespace engine::render {
 			.TemporalHistory = request.TemporalHistory,
 			.Channels = std::move(expandedChannels),
 			.LightIds = std::move(expandedLightIds),
+			.LocalLightMatched = std::move(localLightMatched),
 			.ObjectLabels = wantsObjectIds ? request.ObjectLabels : std::vector<DataCaptureObjectLabel>{},
 			.SemanticLabels =
 				wantsSemantic ? request.SemanticLabels : std::vector<DataCaptureSemanticLabel>{},
@@ -527,6 +531,7 @@ namespace engine::render {
 		}
 		if (ticket.SnapshotId.empty() || ticket.Channels.empty() ||
 			ticket.LightIds.size() != ticket.Channels.size() ||
+			ticket.LocalLightMatched.size() != ticket.Channels.size() ||
 			ticket.ChannelResourceIndices.size() != ticket.Channels.size() ||
 			!HasSecondSurfacePair(ticket.Channels) ||
 			std::ranges::any_of(ticket.ChannelResourceIndices, [&](uint8_t index) {
@@ -635,6 +640,11 @@ namespace engine::render {
 			const DataCaptureChannel channel = ticket.Channels[index];
 			DataCapturePlane plane = Plane(channel, ticket);
 			plane.LightId = ticket.LightIds[index];
+			if (channel == DataCaptureChannel::LocalLightContribution && !ticket.LocalLightMatched[index]) {
+				plane.Provenance = "unavailable/local_light_not_visible_or_culled/v1";
+				poll.Planes.push_back(std::move(plane));
+				continue;
+			}
 			if (channel == DataCaptureChannel::ShadowVisibility) {
 				poll.Planes.push_back(std::move(plane));
 				continue;
