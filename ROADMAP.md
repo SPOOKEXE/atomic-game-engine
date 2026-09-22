@@ -83,10 +83,11 @@ The milestone headings below are development labels. Not in line with project ve
   unresolved.
 ```
 
-- [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground")
+- [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground" - maybe 'fog volumes' with different shapes and size/squash/fluffy sliders?).
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
 - [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
-
+- [_] fix and expand current lighting items (clouds, sunrays, atmosphere, etc). Needs actual tests, overlapping, compute shader tests to ensure they work, etc.
+- [_] get an agent to interact with and use studio EXTENSIVELY. check all dropdowns and ensure all those work, interact with studio, make a little game/scene/scenario and run it / play in it, move character around, check all 'classes' and their capabilities and ensure they work, etc.
 
 ### v0.26
 
