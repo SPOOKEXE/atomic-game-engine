@@ -50,6 +50,14 @@ Storm.Configure(Controls.default)
 
 local validPreset = {}
 for _, preset in ipairs(Controls.presets) do validPreset[preset] = true end
+local validParticleCount = {
+	[262144] = true,
+	[1048576] = true,
+	[4194304] = true,
+	[16777216] = true,
+	[50000000] = true,
+}
+local particleField = workspace:FindFirstChild("TornadoParticles", true)
 
 -- The cross-world bus carries a value copy, so a client can request a change
 -- without ever writing the authority-owned storm resource itself.
@@ -58,6 +66,12 @@ MessagingService:SubscribeAsync("tornado.sim.control", function(message)
 	if type(request) ~= "table" then return end
 	if request.kind == "preset" and type(request.name) == "string" and validPreset[request.name] then
 		Storm.Preset(request.name)
+	elseif request.kind == "custom" and type(request.energy) == "number" and type(request.radius) == "number"
+		and request.energy >= 0 and request.energy <= 1 and request.radius >= 1 and request.radius <= 300 then
+		Storm.Configure({ Energy = request.energy, CoreRadius = request.radius })
+	elseif request.kind == "particles" and particleField ~= nil and type(request.count) == "number"
+		and validParticleCount[request.count] then
+		particleField.RequestedCount = request.count
 	elseif request.kind == "enabled" and type(request.value) == "boolean" then
 		Storm.Configure({ Enabled = request.value })
 	elseif request.kind == "reset" then
@@ -129,11 +143,43 @@ end)
 button("LIFE", 170, 120, function()
 	request({ kind = "lifecycle", value = true })
 end)
+button("LIFE OFF", 224, 120, function()
+	request({ kind = "lifecycle", value = false })
+end)
+
+local counts = { 262144, 1048576, 4194304, 16777216, 50000000 }
+for index, count in ipairs(counts) do
+	button(string.format("P%.0fM", count / 1000000), 8 + (index - 1) * 64, 154, function()
+		request({ kind = "particles", count = count })
+	end)
+end
+
+local function input(label: string, text: string, x: number)
+	local box = Instance.new("TextBox")
+	box.Name = label
+	box.Size = UDim2.new(0, 92, 0, 26)
+	box.Position = UDim2.new(0, x, 0, 192)
+	box.Text = text
+	box.TextColor3 = Color3.new(1, 1, 1)
+	box.BackgroundColor3 = Color3.new(0, 0, 0)
+	box.Parent = panel
+	return box
+end
+
+local energy = input("EnergySlider", "0.78", 8)
+local radius = input("RadiusSlider", "28", 106)
+button("CUSTOM", 204, 192, function()
+	local requestedEnergy = tonumber(energy.Text)
+	local requestedRadius = tonumber(radius.Text)
+	if requestedEnergy ~= nil and requestedRadius ~= nil then
+		request({ kind = "custom", energy = requestedEnergy, radius = requestedRadius })
+	end
+end)
 
 local readout = Instance.new("TextLabel")
 readout.Name = "FieldVectorInset"
 readout.Size = UDim2.new(1, -16, 0, 180)
-readout.Position = UDim2.new(0, 8, 0, 160)
+readout.Position = UDim2.new(0, 8, 0, 238)
 readout.TextColor3 = Color3.new(1, 1, 1)
 readout.BackgroundTransparency = 1
 readout.Parent = panel
@@ -143,7 +189,7 @@ RunService.Heartbeat:Connect(function()
 	local visibility = Storm.Visibility(Vector3.new(0, 15, 30), 500)
 	local damage = Storm.Damage(Vector3.new(0, 15, 30))
 	readout.Text = string.format(
-		"CUSTOM SLIDERS\nEnergy %.2f  Radius %.0f\nWind %.1f %.1f %.1f\nInfluence %.2f  Visibility %.0f\nDamage %.2f  Band %d\nLayers: funnel rain debris mist fog clouds atmosphere audio",
+		"CUSTOM CONTROLS\nEnergy %.2f  Radius %.0f\nWind %.1f %.1f %.1f\nInfluence %.2f  Visibility %.0f\nDamage %.2f  Band %d\nGPU field: 262K 1M 4M 16M 50M\nLayers: funnel rain debris mist fog clouds atmosphere audio",
 		Controls.default.Energy, Controls.default.CoreRadius,
 		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
 		sample.Influence, visibility.EffectiveDistance, damage.Potential, damage.Band
@@ -165,6 +211,7 @@ end)
 			<Item class="Part" name="RoadSign" id="10"><Property name="Size" type="Vector3">4,8,1</Property><Property name="Position" type="Vector3">-18,6,4</Property></Item>
 			<Item class="Part" name="ChaseVehicle" id="11"><Property name="Size" type="Vector3">4,2,8</Property><Property name="Position" type="Vector3">-10,2,-55</Property></Item>
 			<Item class="Part" name="StormAnchor" id="12"><Property name="Position" type="Vector3">0,0,95</Property>
+				<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property></Item>
 				<Item class="ParticleEmitter" name="FunnelMist" id="13"><Property name="Rate" type="float">180</Property></Item>
 				<Item class="ParticleEmitter" name="RainVeil" id="14"><Property name="Rate" type="float">260</Property></Item>
 				<Item class="ParticleEmitter" name="Debris" id="15"><Property name="Rate" type="float">90</Property></Item>

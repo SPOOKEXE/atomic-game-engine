@@ -17,6 +17,7 @@
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Gravity.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
@@ -49,6 +50,31 @@
 namespace engine::scene {
 
 	namespace {
+		void WriteGpuParticleFields(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *fields = static_cast<const GpuParticleField *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteBool(fields[index].Enabled);
+				writer.WriteUInt8(fields[index].Layers);
+				writer.WriteUInt16(fields[index].Reserved);
+				writer.WriteUInt32(fields[index].RequestedCount);
+				writer.WriteUInt32(fields[index].Seed);
+			}
+		}
+
+		void ReadGpuParticleFields(core::ByteReader &reader, void *destination, size_t count) {
+			auto *fields = static_cast<GpuParticleField *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				GpuParticleField field;
+				field.Enabled = reader.ReadBool();
+				field.Layers = reader.ReadUInt8();
+				field.Reserved = reader.ReadUInt16();
+				field.RequestedCount = reader.ReadUInt32();
+				field.Seed = reader.ReadUInt32();
+				if ((field.Layers & ~GPU_PARTICLE_ALL_LAYERS) != 0 || field.Reserved != 0) reader.Fail();
+				fields[index] = field;
+			}
+		}
+
 		void WritePortals(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *portals = static_cast<const Portal *>(source);
 			for (size_t index = 0; index < count; ++index) {
@@ -1846,6 +1872,13 @@ namespace engine::scene {
 
 		// Appended because component ids are registration order.
 		ecs::Components::Register<LODSettings>("scene.LODSettings", WriteLodSettings, ReadLodSettings);
+
+		// This is a compact authored request rather than particle state. Its
+		// fixed twelve-byte format keeps saves and replicas independent of struct
+		// padding while the renderer owns all device-local particles.
+		ecs::Components::Register<GpuParticleField>(
+			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields
+		);
 	}
 
 	void RegisterSceneClasses() {

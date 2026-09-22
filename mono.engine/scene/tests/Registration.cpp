@@ -148,6 +148,7 @@ namespace registration_test {
 		"scene.AtmosphereProcedural",
 		"scene.Gravity",
 		"scene.LODSettings",
+		"scene.GpuParticleField",
 	};
 }
 

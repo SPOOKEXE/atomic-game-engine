@@ -51,6 +51,9 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("MessagingService:SubscribeAsync(\"tornado.sim.control\"") != std::string::npos);
 	CHECK(document.find("\"PAUSE\"") != std::string::npos);
 	CHECK(document.find("\"RESET\"") != std::string::npos);
+	CHECK(document.find("GpuParticleField") != std::string::npos);
+	CHECK(document.find("50000000") != std::string::npos);
+	CHECK(document.find("kind = \"custom\"") != std::string::npos);
 	CHECK(document.find("Farmhouse") != std::string::npos);
 	CHECK(document.find("Barn") != std::string::npos);
 	CHECK(document.find("Workshop") != std::string::npos);

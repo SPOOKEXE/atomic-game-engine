@@ -15,6 +15,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
@@ -822,6 +823,31 @@ namespace engine::scene {
 				}
 				using Field = std::remove_cvref_t<decltype(component->*Member)>;
 				component->*Member = static_cast<Field>(ordinal);
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor GpuParticleLayersProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Layers");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<GpuParticleField>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const GpuParticleField *field = store.Get<GpuParticleField>(instance);
+				if (field == nullptr) return false;
+				*static_cast<int32_t *>(out) = field->Layers;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t layers = *static_cast<const int32_t *>(value);
+				if (layers < 0 || (layers & ~static_cast<int32_t>(GPU_PARTICLE_ALL_LAYERS)) != 0) return false;
+				GpuParticleField *field = store.GetMutable<GpuParticleField>(instance);
+				if (field == nullptr) return false;
+				field->Layers = static_cast<uint8_t>(layers);
 				return true;
 			};
 			return property;
@@ -2577,6 +2603,13 @@ namespace engine::scene {
 			const ecs::ClassId vectorField3D =
 				ecs::Classes::Register("VectorField3D", pvInstance, vectorField3DSet);
 
+			// A field holds only the renderer request. The renderer derives every
+			// particle from the authoritative storm copied into its view, so no
+			// device-local particle position can enter an authored world.
+			const std::array gpuParticleField{ecs::Components::Of<GpuParticleField>()};
+			const ecs::ClassId gpuParticleFieldClass =
+				ecs::Classes::Register("GpuParticleField", instance, gpuParticleField);
+
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
 				ecs::Components::Of<Visual>(),
@@ -3215,6 +3248,11 @@ namespace engine::scene {
 			// same field for the same reason. Declaring it where the storage is
 			// keeps one answer to "what has a pivot".
 			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
+
+			ecs::Classes::Property<&GpuParticleField::Enabled>(gpuParticleFieldClass, "Enabled");
+			ecs::Classes::Computed(gpuParticleFieldClass, GpuParticleLayersProperty());
+			ecs::Classes::Property<&GpuParticleField::RequestedCount>(gpuParticleFieldClass, "RequestedCount");
+			ecs::Classes::Property<&GpuParticleField::Seed>(gpuParticleFieldClass, "Seed");
 
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
