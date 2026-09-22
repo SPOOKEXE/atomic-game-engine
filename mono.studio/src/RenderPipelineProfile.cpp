@@ -11,12 +11,12 @@
 namespace studio {
 	namespace {
 		template <typename Timings>
-		double PassTiming(const Timings &timings, const engine::graph::ProfilePass &pass) {
+		double ProfilePassTiming(const Timings &timings, const engine::graph::ProfilePass &pass) {
 			if (const auto named = timings.find(pass.Name.Id()); named != timings.end()) return named->second;
 			if (const auto kind = timings.find(pass.Kind.Id()); kind != timings.end()) return kind->second;
 			return 0.0;
 		}
-		double FrameGraphWallTime(const engine::graph::ProfilePass &pass) {
+		double ProfileFrameGraphWallTime(const engine::graph::ProfilePass &pass) {
 			double microseconds = 0.0;
 			for (const engine::core::FrameSpan &span : engine::core::FrameGraph::Spans())
 				if (span.Name == pass.Name.Text() || span.Name == pass.Kind.Text())
@@ -87,11 +87,10 @@ namespace studio {
 		const auto &gpuTimings = Renderer.PassTimings();
 		const auto &wallTimings = Renderer.PassWallTimes();
 		for (engine::graph::ProfilePass &pass : profile.Passes) {
-			pass.Elapsed = PassTiming(gpuTimings, pass);
-			pass.Wall = PassTiming(wallTimings, pass);
-			if (pass.Wall <= 0.0) {
-				pass.Wall = FrameGraphWallTime(pass);
-			}
+			pass.Elapsed = ProfilePassTiming(gpuTimings, pass);
+			pass.Wall = ProfilePassTiming(wallTimings, pass);
+			if (pass.Wall == 0.0)
+				pass.Wall = ProfileFrameGraphWallTime(pass);
 		}
 		const auto mib = [](uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
 		int profilingTier = static_cast<int>(Renderer.Profiling());

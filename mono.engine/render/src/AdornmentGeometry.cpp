@@ -386,7 +386,7 @@ namespace engine::render {
 			pointer.Inside ? Geometry.Pick(pointer.Ray, radius) : std::nullopt;
 		const auto emit = [&](gui::EventKind kind, Entity instance) {
 			if (instance != ecs::NULL_ENTITY) {
-				Events.push_back(gui::GuiEvent{kind, instance, pointer.Position, core::Vector2::Zero});
+				Events.push_back(gui::GuiEvent{kind, instance, pointer.Position, core::Vector2::Zero, false, ecs::NULL_ENTITY, ""});
 			}
 		};
 

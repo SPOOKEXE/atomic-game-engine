@@ -20,7 +20,7 @@ namespace studio {
 			return 0.0;
 		}
 
-		double FrameGraphWallTime(const engine::graph::ProfilePass &pass) {
+		inline double FrameGraphWallTime(const engine::graph::ProfilePass &pass) {
 			double microseconds = 0.0;
 			for (const engine::core::FrameSpan &span : engine::core::FrameGraph::Spans())
 				if (span.Name == pass.Name.Text() || span.Name == pass.Kind.Text())

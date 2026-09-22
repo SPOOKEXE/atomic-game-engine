@@ -87,14 +87,14 @@ namespace client {
 	//
 	// @param action The action to name.
 	// @client
-	std::string_view GetActionName(Action action);
+	std::string_view GetActionName(client::Action action);
 
 	// Returns the current binding as display text, or an empty string when no
 	// binding exists. UI uses this text to make bindings discoverable.
 	//
 	// @param action The action whose binding to describe.
 	// @client
-	std::string_view GetActionBinding(Action action);
+	std::string_view GetActionBinding(client::Action action);
 
 	// Translates caller-supplied SDL events into per-frame action state.
 	//
@@ -127,7 +127,7 @@ namespace client {
 		//
 		// @param action The action to query.
 		// @client
-		bool Fired(Action action) const;
+		bool Fired(client::Action action) const;
 
 		// Reports whether the action is currently held.
 		// This is level-triggered and remains true across BeginFrame calls until
@@ -135,7 +135,7 @@ namespace client {
 		//
 		// @param action The action to query.
 		// @client
-		bool Held(Action action) const;
+		bool Held(client::Action action) const;
 
 	  private:
 		bool FiredThisFrame[static_cast<size_t>(Action::Count)] = {};

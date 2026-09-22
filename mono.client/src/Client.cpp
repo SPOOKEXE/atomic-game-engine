@@ -78,7 +78,6 @@
 
 namespace client {
 
-	using client::Action;
 	using engine::core::FrameGraph;
 	using engine::core::HeapProfile;
 	using engine::core::Metrics;

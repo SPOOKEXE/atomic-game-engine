@@ -7,7 +7,7 @@ namespace client {
 	namespace {
 
 		struct Binding {
-			Action Bound;
+			client::Action Bound;
 			SDL_Keycode Key;
 			std::string_view Display;
 		};
@@ -17,66 +17,66 @@ namespace client {
 		// a search. `input::KeyOf` is the only other place an `SDLK_` appears,
 		// and it answers a different question: what a script sees.
 		constexpr Binding BINDINGS[] = {
-			{Action::Quit, SDLK_F12, "F12"},
-			{Action::ToggleSettings, SDLK_ESCAPE, "Esc"},
-			{Action::SettingsUp, SDLK_UP, "Up"},
-			{Action::SettingsDown, SDLK_DOWN, "Down"},
-			{Action::SettingsActivate, SDLK_RETURN, "Enter"},
-			{Action::ToggleStatistics, SDLK_F3, "F3"},
-			{Action::ToggleNetwork, SDLK_F4, "F4"},
-			{Action::ToggleFrameGraph, SDLK_F5, "F5"},
-			{Action::NextProfilerTab, SDLK_F6, "F6"},
-			{Action::PreviousProfilerTab, SDLK_F7, "F7"},
-			{Action::ScrollProfilerUp, SDLK_PAGEUP, "PgUp"},
-			{Action::ScrollProfilerDown, SDLK_PAGEDOWN, "PgDn"},
-			{Action::DecreaseProfilerDepth, SDLK_MINUS, "-"},
-			{Action::IncreaseProfilerDepth, SDLK_EQUALS, "="},
-			{Action::WriteProfilerSnapshot, SDLK_F8, "F8"},
-			{Action::ToggleWireframe, SDLK_F9, "F9"},
+			{client::Action::Quit, SDLK_F12, "F12"},
+			{client::Action::ToggleSettings, SDLK_ESCAPE, "Esc"},
+			{client::Action::SettingsUp, SDLK_UP, "Up"},
+			{client::Action::SettingsDown, SDLK_DOWN, "Down"},
+			{client::Action::SettingsActivate, SDLK_RETURN, "Enter"},
+			{client::Action::ToggleStatistics, SDLK_F3, "F3"},
+			{client::Action::ToggleNetwork, SDLK_F4, "F4"},
+			{client::Action::ToggleFrameGraph, SDLK_F5, "F5"},
+			{client::Action::NextProfilerTab, SDLK_F6, "F6"},
+			{client::Action::PreviousProfilerTab, SDLK_F7, "F7"},
+			{client::Action::ScrollProfilerUp, SDLK_PAGEUP, "PgUp"},
+			{client::Action::ScrollProfilerDown, SDLK_PAGEDOWN, "PgDn"},
+			{client::Action::DecreaseProfilerDepth, SDLK_MINUS, "-"},
+			{client::Action::IncreaseProfilerDepth, SDLK_EQUALS, "="},
+			{client::Action::WriteProfilerSnapshot, SDLK_F8, "F8"},
+			{client::Action::ToggleWireframe, SDLK_F9, "F9"},
 		};
 	}
 
-	std::string_view GetActionName(Action action) {
+	std::string_view GetActionName(client::Action action) {
 		switch (action) {
-		case Action::Quit:
+		case client::Action::Quit:
 			return "quit";
-		case Action::ToggleSettings:
+		case client::Action::ToggleSettings:
 			return "toggle settings";
-		case Action::SettingsUp:
+		case client::Action::SettingsUp:
 			return "settings up";
-		case Action::SettingsDown:
+		case client::Action::SettingsDown:
 			return "settings down";
-		case Action::SettingsActivate:
+		case client::Action::SettingsActivate:
 			return "activate setting";
-		case Action::ToggleStatistics:
+		case client::Action::ToggleStatistics:
 			return "toggle statistics";
-		case Action::ToggleNetwork:
+		case client::Action::ToggleNetwork:
 			return "toggle network";
-		case Action::ToggleFrameGraph:
+		case client::Action::ToggleFrameGraph:
 			return "toggle frame graph";
-		case Action::PreviousProfilerTab:
+		case client::Action::PreviousProfilerTab:
 			return "previous tab";
-		case Action::NextProfilerTab:
+		case client::Action::NextProfilerTab:
 			return "next tab";
-		case Action::ScrollProfilerUp:
+		case client::Action::ScrollProfilerUp:
 			return "scroll up";
-		case Action::ScrollProfilerDown:
+		case client::Action::ScrollProfilerDown:
 			return "scroll down";
-		case Action::DecreaseProfilerDepth:
+		case client::Action::DecreaseProfilerDepth:
 			return "shallower graph";
-		case Action::IncreaseProfilerDepth:
+		case client::Action::IncreaseProfilerDepth:
 			return "deeper graph";
-		case Action::WriteProfilerSnapshot:
+		case client::Action::WriteProfilerSnapshot:
 			return "write profiler snapshot";
-		case Action::ToggleWireframe:
+		case client::Action::ToggleWireframe:
 			return "toggle wireframe";
-		case Action::Count:
+		case client::Action::Count:
 			break;
 		}
 		return "?";
 	}
 
-	std::string_view GetActionBinding(Action action) {
+	std::string_view GetActionBinding(client::Action action) {
 		for (const auto &binding : BINDINGS) {
 			if (binding.Bound == action) {
 				return binding.Display;
@@ -93,7 +93,7 @@ namespace client {
 
 	bool Actions::HandleEvent(const SDL_Event &event) {
 		if (event.type == SDL_EVENT_QUIT) {
-			FiredThisFrame[static_cast<size_t>(Action::Quit)] = true;
+			FiredThisFrame[static_cast<size_t>(client::Action::Quit)] = true;
 			return true;
 		}
 
@@ -125,11 +125,11 @@ namespace client {
 		return false;
 	}
 
-	bool Actions::Fired(Action action) const {
+	bool Actions::Fired(client::Action action) const {
 		return FiredThisFrame[static_cast<size_t>(action)];
 	}
 
-	bool Actions::Held(Action action) const {
+	bool Actions::Held(client::Action action) const {
 		return HeldNow[static_cast<size_t>(action)];
 	}
 }
