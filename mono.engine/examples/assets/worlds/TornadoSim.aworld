@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <World format="3" name="TornadoSim">
+	<WorldProperties tickRate="60" idleTickRate="2" physicsTickRate="60" scriptTickRate="60" replicationTickRate="20" globalSimulatedNetworkLatency="0" faultLimit="3" isolation="Shared" renderingProfile="Default PBR" />
 	<Sources>
 		<Source path="scripts/shared/TornadoSim/init.luau"><![CDATA[--!strict
 return require(script.StormControls)
@@ -204,9 +205,9 @@ RunService.Heartbeat:Connect(function()
 end)
 ]]></Source>
 	</Sources>
-	<Items>
-		<Item class="Model" name="TornadoSimWorld" id="1">
-			<Item class="Part" name="Terrain" id="2">
+	<Item class="Workspace" name="Workspace" id="1">
+		<Item class="Model" name="TornadoSimWorld" id="2">
+			<Item class="Part" name="Terrain" id="3">
 				<Property name="Size" type="Vector3">1800,8,1800</Property>
 				<Property name="Position" type="Vector3">0,-4,0</Property>
 				<Property name="Color" type="Color3">0.12,0.16,0.10</Property>
@@ -224,11 +225,14 @@ end)
 				<Item class="ParticleEmitter" name="Debris" id="15"><Property name="Rate" type="float">90</Property></Item>
 			</Item>
 		</Item>
-		<Item class="ModuleScript" name="TornadoSim" id="16">
+	</Item>
+	<Item class="ReplicatedStorage" name="ReplicatedStorage" id="16">
+		<Item class="ModuleScript" name="TornadoSim" id="17">
 			<Property name="Source" type="string">scripts/shared/TornadoSim/init.luau</Property>
-			<Item class="ModuleScript" name="StormControls" id="17"><Property name="Source" type="string">scripts/shared/TornadoSim/StormControls.luau</Property></Item>
+			<Item class="ModuleScript" name="StormControls" id="18"><Property name="Source" type="string">scripts/shared/TornadoSim/StormControls.luau</Property></Item>
 		</Item>
-		<Item class="Script" name="TornadoServer" id="18"><Property name="Source" type="string">scripts/server/TornadoServer.server.luau</Property></Item>
-		<Item class="LocalScript" name="TornadoClient" id="19"><Property name="Source" type="string">scripts/client/TornadoClient.client.luau</Property></Item>
-	</Items>
+	</Item>
+	<Item class="StarterPlayer" name="StarterPlayer" id="19"><Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="20"><Item class="LocalScript" name="TornadoClient" id="21"><Property name="Source" type="string">scripts/client/TornadoClient.client.luau</Property></Item></Item></Item>
+	<Item class="StarterGui" name="StarterGui" id="22" />
+	<Item class="ServerScriptService" name="ServerScriptService" id="23"><Item class="Script" name="TornadoServer" id="24"><Property name="Source" type="string">scripts/server/TornadoServer.server.luau</Property></Item></Item>
 </World>
