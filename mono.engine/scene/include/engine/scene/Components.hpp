@@ -1675,8 +1675,8 @@ namespace engine::scene {
 		// Which of the three this is.
 		LightKind Kind = LightKind::Point;
 
-		// Reserved for a local-shadow pass. It is deliberately not exposed as a
-		// property until a renderer consumes it.
+		// Requests local shadows. The renderer may decline unsupported or culled
+		// lights, and capture reports that outcome per stable light identity.
 		bool Shadows = false;
 
 		// Whether it is on.

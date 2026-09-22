@@ -3662,6 +3662,7 @@ namespace engine::scene {
 			// angle or face that it cannot use.
 			ecs::Classes::Property<&Light::Colour>(lightClass, "Color");
 			ecs::Classes::Property<&Light::Enabled>(lightClass, "Enabled");
+			ecs::Classes::Property<&Light::Shadows>(lightClass, "Shadows");
 
 			// Clamped, because all three are quantities with an obvious nearest
 			// meaning outside their range - `ClampedProperty`'s own argument. The
