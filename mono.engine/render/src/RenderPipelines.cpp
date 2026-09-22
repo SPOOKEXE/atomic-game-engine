@@ -1211,6 +1211,15 @@ namespace engine::render {
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription target{};
 			target.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			// Point-light capture renders one dominant-axis face at a time. Additive
+			// blending keeps the six mutually exclusive face responses in one plane.
+			target.blend_state.enable_blend = true;
+			target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+			target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+			target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
 			SDL_GPUGraphicsPipelineCreateInfo info{};
 			info.vertex_shader = vertex;
 			info.fragment_shader = fragment;
