@@ -1504,8 +1504,7 @@ namespace engine::render {
 			particleCount = prepared.Count +
 				(State->ActiveGpuParticleFieldWorld == nullptr ? 0 : State->ActiveGpuParticleFieldWorld->ActiveCount);
 			result.ComputeDispatches += prepared.Dispatches +
-				(State->ActiveGpuParticleFieldWorld == nullptr ? 0 : 1);
-			(void)fieldPrepared;
+				(fieldPrepared && State->ActiveGpuParticleFieldWorld != nullptr ? 1 : 0);
 			result.Particles = particleCount;
 
 			ribbonCount = effectsVisible ? State->PrepareRibbons(ribbonVertices) : 0;

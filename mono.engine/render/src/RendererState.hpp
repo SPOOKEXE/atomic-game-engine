@@ -2164,6 +2164,13 @@ namespace engine::render {
 				world.SubmissionPending = false;
 				world.StateInitialisationPending = false;
 			}
+			for (GpuParticleFieldWorld &world : GpuParticleFieldWorlds) {
+				if (!world.SubmissionPending) continue;
+				// A command buffer that never submitted cannot have initialized the
+				// replacement buffer. Re-run the device-only reset next frame.
+				if (!submitted) world.ResetPending = true;
+				world.SubmissionPending = false;
+			}
 		}
 
 		// Frees what the previous frame retired. Called once at the top of a
