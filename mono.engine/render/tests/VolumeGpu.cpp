@@ -93,7 +93,9 @@ namespace {
 		}
 		OverlayImage overlay;
 		REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("fog")));
-		return CaptureResource(renderer, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm);
+		return CaptureResource(
+			renderer, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+		);
 	}
 }
 
