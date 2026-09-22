@@ -2569,6 +2569,9 @@ namespace client {
 					buffer->Predict(held.Root);
 			}
 
+			ForgetReplicatedRows(store, Connection->Forgotten());
+			Connection->ClearForgotten();
+
 			// **Here, not in the render pass.** This instant is the one where
 			// the store holds the tick the server described; a pass that only
 			// ran when a frame was drawn would miss a received tick whenever

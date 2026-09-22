@@ -160,8 +160,7 @@ namespace {
 		Link(const Link &) = delete;
 		Link &operator=(const Link &) = delete;
 
-		// One tick of each side, in the order two programs run them.
-		void Tick(const std::function<void()> &afterClear = {}) {
+		void Publish(const std::function<void()> &afterClear = {}) {
 			Now += FRAME_SECONDS;
 			Beat++;
 
@@ -177,12 +176,22 @@ namespace {
 			Server->Poll(Now);
 			Server->Publish(World, Beat, Now);
 			Server->Advance(Now);
+		}
 
+		void Drain() {
 			Client->Poll(Replica, Now);
+			client::ForgetReplicatedRows(Replica, Client->Forgotten());
+			Client->ClearForgotten();
 			Replica.SetFrame(FRAME_SECONDS, 0.0f);
 			ReplicaSystems.RunPhases(Replica, Phase::PreSimulation, Phase::Simulation);
 			Replica.FlushSignals();
 			Client->Advance(Now);
+		}
+
+		// One tick of each side, in the order two programs run them.
+		void Tick(const std::function<void()> &afterClear = {}) {
+			Publish(afterClear);
+			Drain();
 		}
 
 		// Runs until the world has arrived, then names the viewer.
@@ -807,6 +816,63 @@ TEST_CASE("typing into a replicated TextBox survives what arrives next", "[clien
 	const auto *stillTyped = link.Replica.Get<engine::gui::Label>(arrived);
 	REQUIRE(stillTyped != nullptr);
 	CHECK(stillTyped->Text == "hello");
+}
+
+TEST_CASE(
+	"a forgotten visibility row leaves and returns without removing the predicted viewer",
+	"[client][replication]"
+) {
+	Link link(false);
+	const Entity playerGui = link.ContainerOf(engine::gui::PLAYER_GUI);
+	const Entity screen =
+		link.World.CreateInstance(engine::gui::GuiClass("ScreenGui"), std::string("Visibility"));
+	REQUIRE(link.World.SetParent(screen, playerGui));
+	const Entity watched =
+		link.World.CreateInstance(engine::gui::GuiClass("TextLabel"), std::string("Watched"));
+	REQUIRE(link.World.SetParent(watched, screen));
+	engine::gui::Label label;
+	label.Text = "before visibility changed";
+	link.World.Set(watched, label);
+
+	REQUIRE(link.Join());
+	link.Settle();
+	REQUIRE(link.Replica.Alive(watched));
+
+	const Entity viewer = client::AimReplicaViewer(link.Replica, {}, {});
+	REQUIRE(viewer != NULL_ENTITY);
+	REQUIRE(Store::IsPredicted(viewer));
+
+	bool visible = true;
+	link.Server->Authority().SetInterest([watched, &visible](
+											 engine::replication::ClientId, Entity entity, const Store &
+										 ) { return entity != watched || visible; });
+
+	visible = false;
+	link.Settle();
+
+	CHECK(link.World.Alive(watched));
+	CHECK_FALSE(link.Replica.Alive(watched));
+	CHECK(link.Replica.Alive(viewer));
+	CHECK(link.Client->Forgotten().empty());
+
+	visible = true;
+	link.Settle();
+	REQUIRE(link.Replica.Alive(watched));
+
+	// The client has not drained the first structure when the server makes the
+	// row visible again. Both structures arrive in the next connector poll.
+	visible = false;
+	link.World.Remove<engine::gui::Label>(watched);
+	link.Publish();
+	visible = true;
+	link.Publish();
+	link.Drain();
+
+	CHECK(link.World.Alive(watched));
+	CHECK(link.Replica.Alive(watched));
+	CHECK(link.Replica.Get<engine::gui::Label>(watched) == nullptr);
+	CHECK(link.Replica.Alive(viewer));
+	CHECK(link.Client->Forgotten().empty());
 }
 
 TEST_CASE("an unchanged script costs nothing per tick", "[client][replication][scripting]") {

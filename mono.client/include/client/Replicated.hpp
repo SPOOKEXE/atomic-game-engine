@@ -302,6 +302,10 @@ namespace client {
 	//        the snapshot has not landed and there is no state to record.
 	void RecordReplicatedTick(engine::ecs::Store &store, uint64_t tick);
 
+	// Removes authoritative rows the server withdrew from this replica's visibility.
+	// Predicted rows belong to this client and a server cannot legitimately name them.
+	void ForgetReplicatedRows(engine::ecs::Store &store, std::span<const engine::ecs::Entity> forgotten);
+
 	// Replaces the local prediction with the just-applied authoritative player
 	// state, then replays every still-unacknowledged movement input.
 	void ReconcileLocalPlayerPrediction(

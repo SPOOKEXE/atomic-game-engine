@@ -40,6 +40,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace engine::core {
@@ -106,6 +107,11 @@ namespace engine::core {
 		// @return A view of the buffer, valid until the next mutation.
 		std::span<const std::byte> Bytes() const {
 			return {Buffer.data(), Buffer.size()};
+		}
+
+		// Moves the encoded bytes out and leaves this writer empty.
+		std::vector<std::byte> TakeBytes() {
+			return std::exchange(Buffer, {});
 		}
 
 		// --- scalars -------------------------------------------------------

@@ -77,11 +77,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] plan how to fix portals so they are seamless. really plan out how to make them seamless and how to handle "standing in the middle" so objects are visually there on both sides of the portal with no seam especially during movement (and how to make replication seamless too). Write docs/v025-SEAMLESS-PORTALS.md.
 - [x] implement seamless portals plan
 
-- [_] ```The next measured costs are recovery-row serialization and scoring. Testing
-  also exposed a separate existing issue: clients retain rows after a visibility
-  Forgotten message. The batch change preserves that behavior; it remains
-  unresolved.
-```
+- [x] Fix client cleanup for rows after a visibility Forgotten message, with regression coverage.
+- [x] Optimize recovery-row serialization by moving the ByteWriter buffer. The recovery benchmark improved from 294±35 to 212±22 ns/item across 15 samples.
+- [_] Investigate scoring performance. A candidate fast path showed a noisy 4-5% mean improvement and was reverted, so scoring remains unresolved.
 
 - [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground" - maybe 'fog volumes' with different shapes and size/squash/fluffy sliders?).
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).

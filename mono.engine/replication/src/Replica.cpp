@@ -338,6 +338,13 @@ namespace engine::replication {
 		}
 
 		for (const ecs::Entity entity : structure.Created) {
+			// One poll can drain a forget and a later reappearance. The newest
+			// structure says this row is visible again. Discard its old row before
+			// creating the new arrival, or a component removed while it was hidden
+			// would survive because the reappearance only carries what exists now.
+			if (std::erase(Forgotten_, entity) > 0) {
+				store.Destroy(entity);
+			}
 			store.CreateAt(entity);
 
 			// **Recorded before a single component of it has arrived.** The

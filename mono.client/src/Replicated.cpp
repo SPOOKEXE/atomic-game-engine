@@ -749,6 +749,18 @@ namespace client {
 		engine::physics::SyncBroadphase(store);
 	}
 
+	void ForgetReplicatedRows(Store &store, std::span<const Entity> forgotten) {
+		auto *buffer = store.ResourceMutable<SnapshotBuffer>();
+		for (const Entity entity : forgotten) {
+			if (!Store::IsPredicted(entity) && store.Alive(entity)) {
+				if (buffer != nullptr) {
+					buffer->Forget(entity);
+				}
+				store.Destroy(entity);
+			}
+		}
+	}
+
 	void ReconcileLocalPlayerPrediction(
 		Store &store, uint64_t tick, std::span<const engine::replication::Input> unconfirmed
 	) {

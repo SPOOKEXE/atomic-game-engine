@@ -1954,7 +1954,7 @@ namespace engine::replication {
 					continue;
 				}
 
-				component.Values.assign(values.Bytes().begin(), values.Bytes().end());
+				component.Values = values.TakeBytes();
 
 				lane.SourceSlot.push_back(slot);
 				delta.Components.push_back(std::move(component));

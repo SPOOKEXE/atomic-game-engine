@@ -514,6 +514,12 @@ priority-refinement-bench samples="5":
     cmake --build --preset bench --target bench_replication
     ./.cache/build/bench/bench/bench_replication --suite engine.replication.bench.priority-refinement --samples {{samples}}
 
+# Recovery-row re-offer work with acknowledgements withheld after the initial join.
+recovery-rows-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_replication
+    ./.cache/build/bench/bench/bench_replication --suite engine.replication.bench.recovery-rows --samples {{samples}}
+
 # How much of the repository is code, comment and blank, as markdown.
 #
 # `just linecount` walks everything except mono.vendor and the dot-directories;

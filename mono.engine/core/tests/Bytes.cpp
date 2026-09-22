@@ -72,6 +72,15 @@ TEST_CASE("a string is a four-byte length and then the bytes", "[bytes]") {
 	REQUIRE(Raw(writer) == std::vector<uint8_t>{0x02, 0x00, 0x00, 0x00, 'h', 'i'});
 }
 
+TEST_CASE("taking bytes transfers the encoded buffer", "[bytes]") {
+	ByteWriter writer;
+	writer.WriteUInt16(0x1234);
+
+	const std::vector<std::byte> bytes = writer.TakeBytes();
+	CHECK(bytes == std::vector<std::byte>{std::byte{0x34}, std::byte{0x12}});
+	CHECK(writer.Bytes().empty());
+}
+
 TEST_CASE("nothing is padded or aligned", "[bytes]") {
 	ByteWriter writer;
 	writer.WriteUInt8(1);
