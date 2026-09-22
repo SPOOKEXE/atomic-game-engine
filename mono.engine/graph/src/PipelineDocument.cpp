@@ -1880,16 +1880,15 @@ namespace engine::graph {
 		for (auto edit : basis.Edits()) {
 			if (edit.Kind == EditKind::AddResource) {
 				if (edit.Name == core::Name("bloom") || edit.Name == core::Name("tonemapped") ||
-					edit.Name == core::Name("scene-image") ||
-					edit.Name == core::Name("interface-image") || edit.Name == core::Name("composed-image"))
+					edit.Name == core::Name("scene-image") || edit.Name == core::Name("interface-image") ||
+					edit.Name == core::Name("composed-image"))
 					result.Record(std::move(edit));
 				continue;
 			}
 			if (edit.Kind == EditKind::AddNode) {
 				keep = edit.Name == core::Name("bloom") || edit.Name == core::Name("tonemap") ||
-					   edit.Name == core::Name("present") ||
-					   edit.Name == core::Name("interface") || edit.Name == core::Name("overlay") ||
-					   edit.Name == core::Name("output-image");
+					   edit.Name == core::Name("present") || edit.Name == core::Name("interface") ||
+					   edit.Name == core::Name("overlay") || edit.Name == core::Name("output-image");
 				if (edit.Name == core::Name("bloom")) {
 					result.Record(
 						{.Kind = EditKind::AddNode,

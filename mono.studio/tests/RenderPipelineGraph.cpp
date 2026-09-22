@@ -61,9 +61,10 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	REQUIRE(shaderLenses != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(shaderLenses->Id, "colour") != nullptr);
 	CHECK(canvas.LinkInto(shaderLenses->Id, "depth") != nullptr);
-	const auto bloom = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-		return node.Type == "render.pass.bloom";
-	});
+	const auto bloom =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.bloom";
+		});
 	REQUIRE(bloom != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(bloom->Id, "source") != nullptr);
 	const auto surfaceCapture =
