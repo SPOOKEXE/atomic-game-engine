@@ -9,6 +9,7 @@
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldView.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/ShaderLens.hpp>
@@ -146,6 +147,7 @@ namespace engine::render {
 		view.ParticlePool = frame.Particles.Pool;
 		view.ParticleDelta = frame.ParticleDelta;
 		view.ParticleBlocks = frame.Particles.BlockCount;
+		view.GpuParticles = frame.GpuParticles;
 		view.Portals = frame.Portals;
 		view.EyeImage = 0;
 		view.EyeTransparentImages = {};
@@ -169,6 +171,15 @@ namespace engine::render {
 		frame.Tick = time.Tick;
 		frame.Seconds = time.Elapsed;
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
+		frame.GpuParticles.reset();
+		if (const auto *storm = physics::StormOf(store)) {
+			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
+				if (!frame.GpuParticles.has_value()) {
+					frame.GpuParticles = GpuParticleFieldView{
+						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds};
+				}
+			});
+		}
 		frame.Lighting = scene::LightingOf(store);
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||

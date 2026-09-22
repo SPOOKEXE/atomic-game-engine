@@ -1443,7 +1443,9 @@ namespace engine::render {
 			selectedAdditive = AdditiveParticleLayerColourPipeline;
 		}
 		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
-			return 0;
+			return layer == TransparentLayerPhase::None
+				? DrawGpuParticleField(command, pass, viewProjection, eye, triangles, particlesDrawn, target)
+				: 0;
 		}
 		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
 		const std::span<const render::ParticleBatch> batches = ActiveParticleWorld->PreparedBatches;
@@ -1644,7 +1646,153 @@ namespace engine::render {
 			// had been submitted; the particles were on screen the whole time.
 		}
 
+		if (layer == TransparentLayerPhase::None) {
+			draws += DrawGpuParticleField(command, pass, viewProjection, eye, triangles, particlesDrawn, target);
+		}
 		return draws;
+	}
+
+	bool Renderer::Impl::ReserveGpuParticleField(uint32_t count) {
+		GpuParticleFieldWorld &field = *ActiveGpuParticleFieldWorld;
+		if (count == field.Capacity && field.States != nullptr) return true;
+
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+			SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+		info.size = count * static_cast<uint32_t>(sizeof(glm::vec4) * 2);
+		SDL_GPUBuffer *replacement = gpu::CreateBuffer(Device, &info);
+		if (replacement == nullptr) {
+			ENGINE_WARN("GPU particle field keeps {} rows after {}-row allocation failed: {}", field.ActiveCount,
+				count, SDL_GetError());
+			return false;
+		}
+		if (field.States != nullptr) gpu::ReleaseBuffer(Device, field.States);
+		field.States = replacement;
+		field.Capacity = count;
+		field.ActiveCount = count;
+		field.ResetPending = true;
+		return true;
+	}
+
+	bool Renderer::Impl::PrepareGpuParticleField(
+		const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot
+	) {
+		ActiveGpuParticleFieldWorld = nullptr;
+		if (!view.GpuParticles.has_value() || !view.GpuParticles->Field.Enabled || command == nullptr ||
+			GpuParticleFieldStep == nullptr) {
+			return true;
+		}
+		ActiveGpuParticleFieldWorld = &GpuParticleFieldWorldFor(view.World, view.WorldName);
+		GpuParticleFieldWorld &state = *ActiveGpuParticleFieldWorld;
+		const GpuParticleFieldView &source = *view.GpuParticles;
+		const uint32_t requested = scene::NormalizeGpuParticleCount(source.Field.RequestedCount);
+		if ((state.States == nullptr || state.RequestedCount != requested) && !ReserveGpuParticleField(requested)) {
+			// An allocation failure intentionally retains the previous complete field.
+			return state.States != nullptr;
+		}
+		const bool changed = state.Seed != source.Field.Seed || state.Layers != source.Field.Layers;
+		state.RequestedCount = requested;
+		state.Seed = source.Field.Seed;
+		state.Layers = source.Field.Layers;
+		if (changed) state.ResetPending = true;
+
+		struct FieldUniforms {
+			glm::vec4 CentreTime;
+			glm::vec4 Radii;
+			glm::vec4 Wind;
+			glm::vec4 Control;
+		};
+		const scene::TornadoParameters parameters = scene::SanitizeTornadoParameters(source.Storm);
+		const FieldUniforms uniforms{
+			{source.Centre.X, source.Centre.Y, source.Centre.Z, source.Seconds},
+			{parameters.CoreRadius, parameters.InfluenceRadius, parameters.TopHeight, view.ParticleDelta},
+			{parameters.PeakTangentialSpeed, parameters.PeakInflowSpeed, parameters.PeakUpdraftSpeed,
+			 parameters.RainRate},
+			{static_cast<float>(state.ActiveCount), static_cast<float>(state.Seed), state.ResetPending ? 1.0f : 0.0f,
+			 static_cast<float>(state.Layers)},
+		};
+		SDL_GPUStorageBufferReadWriteBinding output{};
+		output.buffer = state.States;
+		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
+		if (pass == nullptr) {
+			ENGINE_ERROR("GPU particle field: SDL_BeginGPUComputePass: {}", SDL_GetError());
+			return false;
+		}
+		SDL_BindGPUComputePipeline(pass, GpuParticleFieldStep);
+		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
+		SDL_DispatchGPUCompute(pass, (state.ActiveCount + 255u) / 256u, 1, 1);
+		SDL_EndGPUComputePass(pass);
+		state.ResetPending = false;
+		state.SubmissionPending = true;
+		(void)timingSlot;
+		return true;
+	}
+
+	uint32_t Renderer::Impl::DrawGpuParticleField(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPURenderPass *pass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &eye,
+		uint64_t &triangles,
+		uint32_t &particlesDrawn,
+		WorldColourTarget target
+	) {
+		if (ActiveGpuParticleFieldWorld == nullptr || ActiveGpuParticleFieldWorld->States == nullptr ||
+			ActiveGpuParticleFieldWorld->ActiveCount == 0 || pass == nullptr) return 0;
+		auto *pipeline = target == WorldColourTarget::Hdr ? HdrGpuParticleFieldPipeline : GpuParticleFieldPipeline;
+		if (pipeline == nullptr) return 0;
+		BindPipeline(pass, pipeline, PipelineFamily::Other);
+		const SDL_GPUBufferBinding states{ActiveGpuParticleFieldWorld->States, 0};
+		SDL_BindGPUVertexBuffers(pass, 0, &states, 1);
+		const core::Vector3 forward = eye.VectorToWorldSpace({0.0f, 0.0f, -1.0f});
+		const core::Vector3 right = eye.VectorToWorldSpace({1.0f, 0.0f, 0.0f});
+		const core::Vector3 up = eye.VectorToWorldSpace({0.0f, 1.0f, 0.0f});
+		struct FieldVertexUniforms {
+			glm::mat4 ViewProjection;
+			glm::vec4 CameraRight;
+			glm::vec4 CameraUp;
+			glm::vec4 CameraForward;
+			glm::vec4 Options;
+		};
+		struct FieldMaterial {
+			glm::vec4 Flags;
+			glm::vec4 Illumination;
+			glm::vec4 FogColour;
+			glm::vec4 Fog;
+			glm::vec4 Eye;
+		};
+		const FieldVertexUniforms uniforms{
+			viewProjection,
+			{right.X, right.Y, right.Z, 0.0f},
+			{up.X, up.Y, up.Z, 0.0f},
+			{forward.X, forward.Y, forward.Z, 0.0f},
+			{1.0f, 0.0f, 0.0f, 0.0f},
+		};
+		FieldMaterial material{};
+		material.Flags.w = 1.0f;
+		material.Eye = {eye.Position.X, eye.Position.Y, eye.Position.Z, 0.0f};
+		SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+		SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
+		SDL_GPUTextureSamplerBinding binding{FallbackTexture, Textures.Sampler()};
+		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+		SDL_DrawGPUPrimitives(pass, 4, ActiveGpuParticleFieldWorld->ActiveCount, 0, 0);
+		particlesDrawn += ActiveGpuParticleFieldWorld->ActiveCount;
+		triangles += static_cast<uint64_t>(ActiveGpuParticleFieldWorld->ActiveCount) * 2;
+		return 1;
+	}
+
+	void Renderer::Impl::ReleaseGpuParticleField() {
+		for (GpuParticleFieldWorld &field : GpuParticleFieldWorlds) {
+			if (field.States != nullptr) gpu::ReleaseBuffer(Device, field.States);
+		}
+		GpuParticleFieldWorlds.clear();
+		ActiveGpuParticleFieldWorld = nullptr;
+		if (GpuParticleFieldStep != nullptr) SDL_ReleaseGPUComputePipeline(Device, GpuParticleFieldStep);
+		if (GpuParticleFieldPipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, GpuParticleFieldPipeline);
+		if (HdrGpuParticleFieldPipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, HdrGpuParticleFieldPipeline);
+		GpuParticleFieldStep = nullptr;
+		GpuParticleFieldPipeline = nullptr;
+		HdrGpuParticleFieldPipeline = nullptr;
 	}
 
 	bool Renderer::Impl::ReserveRibbons(uint32_t count) {

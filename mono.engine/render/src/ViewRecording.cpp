@@ -1499,8 +1499,13 @@ namespace engine::render {
 			const Impl::ParticlePreparation prepared =
 				effectsVisible ? State->PrepareParticles(source, command, timingSlot)
 							   : Impl::ParticlePreparation{};
-			particleCount = prepared.Count;
-			result.ComputeDispatches += prepared.Dispatches;
+			const bool fieldPrepared =
+				effectsVisible ? State->PrepareGpuParticleField(source, command, timingSlot) : true;
+			particleCount = prepared.Count +
+				(State->ActiveGpuParticleFieldWorld == nullptr ? 0 : State->ActiveGpuParticleFieldWorld->ActiveCount);
+			result.ComputeDispatches += prepared.Dispatches +
+				(State->ActiveGpuParticleFieldWorld == nullptr ? 0 : 1);
+			(void)fieldPrepared;
 			result.Particles = particleCount;
 
 			ribbonCount = effectsVisible ? State->PrepareRibbons(ribbonVertices) : 0;

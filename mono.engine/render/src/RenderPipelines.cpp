@@ -693,6 +693,55 @@ namespace engine::render {
 			SDL_ReleaseGPUShader(Device, particleFragment);
 		}
 
+		// The analytical field uses its simulation row as the vertex stream. It
+		// deliberately has a separate vertex program: allocating the ordinary
+		// particle instance stream as well would double the 50M preset's memory.
+		auto *fieldVertex = LoadShader("gpu-particle-field.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		auto *fieldFragment = LoadShader("particle.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		if (fieldVertex != nullptr && fieldFragment != nullptr) {
+			const SDL_GPUVertexBufferDescription buffers[] = {
+				{0, sizeof(glm::vec4) * 2, SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
+			};
+			const SDL_GPUVertexAttribute attributes[] = {
+				{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
+				{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(glm::vec4)},
+			};
+			SDL_GPUColorTargetDescription colour{};
+			colour.format = swapchainFormat;
+			colour.blend_state.enable_blend = true;
+			colour.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+			colour.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+			colour.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			colour.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+			colour.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			colour.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+			SDL_GPUGraphicsPipelineCreateInfo field{};
+			field.vertex_shader = fieldVertex;
+			field.fragment_shader = fieldFragment;
+			field.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+			field.vertex_input_state.vertex_buffer_descriptions = buffers;
+			field.vertex_input_state.num_vertex_buffers = 1;
+			field.vertex_input_state.vertex_attributes = attributes;
+			field.vertex_input_state.num_vertex_attributes = 2;
+			field.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			field.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			field.depth_stencil_state.enable_depth_test = true;
+			field.depth_stencil_state.enable_depth_write = false;
+			field.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+			field.target_info.color_target_descriptions = &colour;
+			field.target_info.num_color_targets = 1;
+			field.target_info.depth_stencil_format = DepthFormat;
+			field.target_info.has_depth_stencil_target = true;
+			GpuParticleFieldPipeline = SDL_CreateGPUGraphicsPipeline(Device, &field);
+			colour.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			HdrGpuParticleFieldPipeline = SDL_CreateGPUGraphicsPipeline(Device, &field);
+			if (GpuParticleFieldPipeline == nullptr || HdrGpuParticleFieldPipeline == nullptr) {
+				ENGINE_WARN("GPU particle field pipeline unavailable: {}", SDL_GetError());
+			}
+		}
+		if (fieldVertex != nullptr) SDL_ReleaseGPUShader(Device, fieldVertex);
+		if (fieldFragment != nullptr) SDL_ReleaseGPUShader(Device, fieldFragment);
+
 		// --- ribbons --------------------------------------------------------
 		//
 		// A triangle strip over a real vertex buffer, where the particle pass has
@@ -855,6 +904,7 @@ namespace engine::render {
 			ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
 			ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
 			ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
+			GpuParticleFieldStep = LoadComputePipeline("gpu-particle-field.comp", 0, 1, 0, 1, 256, 1);
 			EnvironmentSkyCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
 			EnvironmentCloudCompute = LoadComputePipeline("environment-clouds.comp", 1, 0, 1, 0, 8, 8);
 		}

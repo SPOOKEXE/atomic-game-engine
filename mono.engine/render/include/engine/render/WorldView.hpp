@@ -110,6 +110,9 @@ namespace engine::render {
 		std::vector<PortalView> Portals;
 		// Detached particle data owned by this packet.
 		ParticleFrame Particles;
+		// Device-local analytical particles. This is a copied request and field,
+		// never a borrowed ECS row.
+		std::optional<GpuParticleFieldView> GpuParticles;
 	};
 
 	// One camera's light selection, surface demand, facing ribbons and spatial

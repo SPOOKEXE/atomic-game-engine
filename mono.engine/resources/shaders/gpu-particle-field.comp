@@ -1,0 +1,79 @@
+#version 450
+
+// Device-local cosmetic particles driven by the same analytical quantities as
+// the storm resource. One row is position/kind and velocity/age, exactly 32
+// bytes, which keeps the optional 50M preset near 1.6 GiB.
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 1, binding = 0, std430) buffer States { vec4 rows[]; } states;
+
+layout(set = 2, binding = 0) uniform Field {
+	// centre.xyz, elapsed seconds
+	vec4 centreTime;
+	// core radius, influence radius, top height, tick seconds
+	vec4 radii;
+	// tangential, inflow, updraft, rain rate
+	vec4 wind;
+	// active rows, seed, reset, visible layer mask
+	vec4 control;
+} field;
+
+uint Mix(uint value) {
+	value ^= value >> 16u;
+	value *= 0x7feb352du;
+	value ^= value >> 15u;
+	value *= 0x846ca68bu;
+	return value ^ (value >> 16u);
+}
+
+float Unit(uint value) { return float(Mix(value) >> 8u) * (1.0 / 16777216.0); }
+
+void Reset(uint index) {
+	float kind = floor(Unit(index ^ uint(field.control.y)) * 3.0);
+	uint layer = 1u << uint(kind);
+	if ((uint(field.control.w) & layer) == 0u) kind = 3.0;
+	float angle = Unit(index * 3u + 1u) * 6.28318530718;
+	float radius = mix(field.radii.x * 0.35, field.radii.y, Unit(index * 3u + 2u));
+	// Twelve stable depth slices keep the full particle count from becoming one
+	// thick billboard sheet when a camera looks along the funnel.
+	float height = (float(index % 12u) + Unit(index * 3u + 3u)) * (field.radii.z / 12.0);
+	states.rows[index * 2u] = vec4(
+		field.centreTime.xyz + vec3(cos(angle) * radius, height, sin(angle) * radius), kind
+	);
+	states.rows[index * 2u + 1u] = vec4(0.0, 0.0, 0.0, Unit(index * 5u + 4u) * 15.0);
+}
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	uint activeCount = uint(field.control.x);
+	if (index >= activeCount) return;
+	if (field.control.z > 0.5) {
+		Reset(index);
+		return;
+	}
+
+	vec4 positionKind = states.rows[index * 2u];
+	vec4 velocityAge = states.rows[index * 2u + 1u];
+	vec3 offset = positionKind.xyz - field.centreTime.xyz;
+	float radius = max(length(offset.xz), 0.001);
+	vec3 radial = vec3(offset.x / radius, 0.0, offset.z / radius);
+	vec3 tangent = vec3(-radial.z, 0.0, radial.x);
+	float core = max(field.radii.x, 1.0);
+	float influence = 1.0 / (1.0 + pow(radius / max(field.radii.y, core), 2.25));
+	float turn = field.wind.x * (2.0 * radius / core) / (1.0 + radius * radius / (core * core));
+	float inward = field.wind.y * (radius / core) * exp(1.0 - radius / core) * influence;
+	float heightFraction = clamp(offset.y / max(field.radii.z, 1.0), 0.0, 1.0);
+	float lift = field.wind.z * exp(-pow((radius - core) / core, 2.0)) * (1.0 - heightFraction);
+	vec3 target = tangent * turn * influence - radial * inward + vec3(0.0, lift, 0.0);
+	if (positionKind.w > 1.5) target += vec3(0.0, -field.wind.w * 22.0, 0.0);
+	velocityAge.xyz += (target - velocityAge.xyz) * min(field.radii.w * 2.5, 1.0);
+	positionKind.xyz += velocityAge.xyz * field.radii.w;
+	velocityAge.w += field.radii.w;
+	if (length(positionKind.xyz - field.centreTime.xyz) > field.radii.y * 1.25 ||
+		positionKind.y < 0.0 || positionKind.y > field.radii.z) Reset(index);
+	else {
+		states.rows[index * 2u] = positionKind;
+		states.rows[index * 2u + 1u] = velocityAge;
+	}
+}

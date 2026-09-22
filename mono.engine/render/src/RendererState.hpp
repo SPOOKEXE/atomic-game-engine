@@ -1537,6 +1537,47 @@ namespace engine::render {
 		SDL_GPUComputePipeline *ParticleEmit = nullptr;
 		SDL_GPUComputePipeline *ParticleScatter = nullptr;
 
+		// The analytical storm field shares no allocation or simulation path with
+		// authored emitters. Its one state row is both compute storage and the
+		// vertex stream, so even fifty million particles remain device-local.
+		SDL_GPUComputePipeline *GpuParticleFieldStep = nullptr;
+		SDL_GPUGraphicsPipeline *GpuParticleFieldPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrGpuParticleFieldPipeline = nullptr;
+		struct GpuParticleFieldWorld {
+			uint64_t Id = 0;
+			core::Name Name;
+			SDL_GPUBuffer *States = nullptr;
+			uint32_t Capacity = 0;
+			uint32_t ActiveCount = 0;
+			uint32_t RequestedCount = 0;
+			uint32_t Seed = 0;
+			uint8_t Layers = 0;
+			bool ResetPending = true;
+			bool SubmissionPending = false;
+		};
+		std::vector<GpuParticleFieldWorld> GpuParticleFieldWorlds;
+		GpuParticleFieldWorld *ActiveGpuParticleFieldWorld = nullptr;
+
+		GpuParticleFieldWorld &GpuParticleFieldWorldFor(uint64_t id, core::Name name) {
+			for (GpuParticleFieldWorld &world : GpuParticleFieldWorlds) {
+				if (world.Id == id && world.Name == name) return world;
+			}
+			GpuParticleFieldWorlds.push_back({.Id = id, .Name = name});
+			return GpuParticleFieldWorlds.back();
+		}
+		bool ReserveGpuParticleField(uint32_t count);
+		bool PrepareGpuParticleField(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
+		uint32_t DrawGpuParticleField(
+			SDL_GPUCommandBuffer *command,
+			SDL_GPURenderPass *pass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &eye,
+			uint64_t &triangles,
+			uint32_t &particlesDrawn,
+			WorldColourTarget target
+		);
+		void ReleaseGpuParticleField();
+
 		// One run of particles that share every uniform and every binding.
 		//
 		// **What makes the target count drawable at all.** One draw call per

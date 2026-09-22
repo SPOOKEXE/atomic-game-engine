@@ -835,6 +835,7 @@ namespace engine::render {
 		State->ReleaseAllGraphState();
 		State->ReleaseLod();
 		State->ReleaseOcclusion();
+		State->ReleaseGpuParticleField();
 		State->ReleaseParticlePool();
 		State->ReleaseEnvironments();
 

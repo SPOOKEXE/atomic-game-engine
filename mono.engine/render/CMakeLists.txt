@@ -37,6 +37,10 @@ mono_add_library(render
 		# the tier check has nothing to say about it.
 		Engine::effects
 
+		# The renderer copies an installed analytical storm into its presentation
+		# packet for the GPU particle field. This is a downward L12 to L8 edge.
+		Engine::physics
+
 		Engine::script
 
 		# Public table APIs use asset data types.

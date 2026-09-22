@@ -27,6 +27,8 @@
 #include <engine/render/ResourceImage.hpp>
 #include <engine/render/VisibilityObservation.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/GpuParticleField.hpp>
+#include <engine/scene/Storm.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -649,6 +651,15 @@ namespace engine::render {
 		core::Name Owner;
 	};
 
+	// An owned copy of the authored request and analytical field that one frame
+	// gives to the device. No renderer path retains or dereferences a world row.
+	struct GpuParticleFieldView {
+		scene::GpuParticleField Field;
+		scene::TornadoParameters Storm;
+		core::Vector3 Centre;
+		float Seconds = 0.0f;
+	};
+
 	// One camera invocation in a graph-owned frame.
 	//
 	// Spans are borrowed for the duration of `Renderer::Render`. A batch groups
@@ -851,6 +862,7 @@ namespace engine::render {
 
 		std::span<const effects::RibbonVertex> RibbonVertices;
 		std::span<const effects::RibbonRun> RibbonRuns;
+		std::optional<GpuParticleFieldView> GpuParticles;
 		std::span<const SceneLight> Lights;
 		//@}
 
