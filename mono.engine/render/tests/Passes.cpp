@@ -753,6 +753,13 @@ TEST_CASE("a renderer returns the complete lighting state it was given", "[rende
 	lighting.BloomThreshold = 0.75f;
 	lighting.BloomIntensity = 1.5f;
 	lighting.BloomRadius = 11.0f;
+	lighting.DepthOfFieldIntensity = 0.65f;
+	lighting.DepthOfFieldFocusDistance = 32.0f;
+	lighting.DepthOfFieldFocusRange = 6.0f;
+	lighting.DepthOfFieldRadius = 8.0f;
+	lighting.GodRayIntensity = 1.75f;
+	lighting.GodRayThreshold = 0.4f;
+	lighting.GodRayRadius = 64.0f;
 	lighting.EnvironmentState.Skybox = engine::scene::SkyboxSource::Compute;
 	lighting.EnvironmentState.SkyCompute.Seed = 83;
 	renderer.SetLighting(lighting);
@@ -768,6 +775,13 @@ TEST_CASE("a renderer returns the complete lighting state it was given", "[rende
 	CHECK(current.BloomThreshold == 0.75f);
 	CHECK(current.BloomIntensity == 1.5f);
 	CHECK(current.BloomRadius == 11.0f);
+	CHECK(current.DepthOfFieldIntensity == 0.65f);
+	CHECK(current.DepthOfFieldFocusDistance == 32.0f);
+	CHECK(current.DepthOfFieldFocusRange == 6.0f);
+	CHECK(current.DepthOfFieldRadius == 8.0f);
+	CHECK(current.GodRayIntensity == 1.75f);
+	CHECK(current.GodRayThreshold == 0.4f);
+	CHECK(current.GodRayRadius == 64.0f);
 	CHECK(current.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);
 	CHECK(current.EnvironmentState.SkyCompute.Seed == 83);
 }

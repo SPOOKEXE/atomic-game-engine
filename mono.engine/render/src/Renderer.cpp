@@ -906,6 +906,8 @@ namespace engine::render {
 			  State->SkyPipeline,
 			  State->VolumePipeline,
 			  State->BloomPipeline,
+			  State->DepthOfFieldPipeline,
+			  State->GodRaysPipeline,
 			  State->TonemapPipeline}) {
 			if (pipeline != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
@@ -1473,6 +1475,13 @@ namespace engine::render {
 		State->BloomThreshold = std::max(lighting.BloomThreshold, 0.0f);
 		State->BloomIntensity = std::max(lighting.BloomIntensity, 0.0f);
 		State->BloomRadius = std::max(lighting.BloomRadius, 0.0f);
+		State->DepthOfFieldIntensity = std::clamp(lighting.DepthOfFieldIntensity, 0.0f, 1.0f);
+		State->DepthOfFieldFocusDistance = std::max(lighting.DepthOfFieldFocusDistance, 0.0f);
+		State->DepthOfFieldFocusRange = std::max(lighting.DepthOfFieldFocusRange, 0.0f);
+		State->DepthOfFieldRadius = std::max(lighting.DepthOfFieldRadius, 0.0f);
+		State->GodRayIntensity = std::max(lighting.GodRayIntensity, 0.0f);
+		State->GodRayThreshold = std::max(lighting.GodRayThreshold, 0.0f);
+		State->GodRayRadius = std::max(lighting.GodRayRadius, 0.0f);
 		State->EnvironmentState = lighting.EnvironmentState;
 		State->Volumes = lighting.Volumes;
 		State->VolumeCount = std::min(lighting.VolumeCount, State->Volumes.size());
@@ -1500,6 +1509,13 @@ namespace engine::render {
 		lighting.BloomThreshold = State->BloomThreshold;
 		lighting.BloomIntensity = State->BloomIntensity;
 		lighting.BloomRadius = State->BloomRadius;
+		lighting.DepthOfFieldIntensity = State->DepthOfFieldIntensity;
+		lighting.DepthOfFieldFocusDistance = State->DepthOfFieldFocusDistance;
+		lighting.DepthOfFieldFocusRange = State->DepthOfFieldFocusRange;
+		lighting.DepthOfFieldRadius = State->DepthOfFieldRadius;
+		lighting.GodRayIntensity = State->GodRayIntensity;
+		lighting.GodRayThreshold = State->GodRayThreshold;
+		lighting.GodRayRadius = State->GodRayRadius;
 		lighting.EnvironmentState = State->EnvironmentState;
 		lighting.Volumes = State->Volumes;
 		lighting.VolumeCount = State->VolumeCount;

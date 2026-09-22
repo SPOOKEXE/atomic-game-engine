@@ -991,6 +991,27 @@ namespace engine::scene {
 			Classes::ClampedProperty<&LightingServiceComponent::BloomRadius, 0.0f, 128.0f>(
 				lighting, "BloomRadius"
 			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldIntensity, 0.0f, 1.0f>(
+				lighting, "DepthOfFieldIntensity"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldFocusDistance, 0.0f, 100000.0f>(
+				lighting, "DepthOfFieldFocusDistance"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldFocusRange, 0.0f, 100000.0f>(
+				lighting, "DepthOfFieldFocusRange"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldRadius, 0.0f, 128.0f>(
+				lighting, "DepthOfFieldRadius"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::GodRayIntensity, 0.0f, 100.0f>(
+				lighting, "GodRayIntensity"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::GodRayThreshold, 0.0f, 10000.0f>(
+				lighting, "GodRayThreshold"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::GodRayRadius, 0.0f, 512.0f>(
+				lighting, "GodRayRadius"
+			);
 			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
 				lighting, "GeographicLatitude"
 			);

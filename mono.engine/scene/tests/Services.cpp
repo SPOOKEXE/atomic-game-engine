@@ -209,11 +209,15 @@ TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[sce
 	const float impossibleLatitude = 120.0f;
 	const float negativeBloom = -4.0f;
 	const float excessiveRadius = 1000.0f;
+	const float negativeDepthOfField = -4.0f;
+	const float excessiveGodRayRadius = 1000.0f;
 	REQUIRE(store.SetProperty(lighting, Name("Brightness"), &negativeBrightness, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("ClockTime"), &lateClock, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("GeographicLatitude"), &impossibleLatitude, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("BloomIntensity"), &negativeBloom, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("BloomRadius"), &excessiveRadius, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("DepthOfFieldIntensity"), &negativeDepthOfField, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("GodRayRadius"), &excessiveGodRayRadius, sizeof(float)));
 
 	const LightingServiceComponent *state = store.Get<LightingServiceComponent>(lighting);
 	REQUIRE(state != nullptr);
@@ -222,6 +226,8 @@ TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[sce
 	CHECK(state->GeographicLatitude == 90.0f);
 	CHECK(state->BloomIntensity == 0.0f);
 	CHECK(state->BloomRadius == 128.0f);
+	CHECK(state->DepthOfFieldIntensity == 0.0f);
+	CHECK(state->GodRayRadius == 512.0f);
 
 	const uint32_t everyBit = UINT32_MAX;
 	const uint32_t post = engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing);

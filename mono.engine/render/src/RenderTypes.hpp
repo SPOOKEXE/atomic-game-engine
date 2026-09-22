@@ -284,6 +284,17 @@ namespace engine::render {
 		glm::vec4 Target{};
 	};
 
+	// Built-in post-process controls. Both passes use their own vec4 slots so
+	// shader layouts remain explicit and the two effects can evolve separately.
+	struct LightingEffectsUniforms {
+		// x: depth-of-field intensity, y: focus distance, z: focus range, w: radius in pixels.
+		glm::vec4 DepthOfField{};
+		// x: god-ray intensity, y: HDR threshold, z: ray radius in pixels, w: projected-sun visibility.
+		glm::vec4 GodRays{};
+		// xy: projected sun UV, zw: one target pixel in UV space.
+		glm::vec4 Target{};
+	};
+
 	// The two camera transforms that define the bounded reprojection capture.
 	// Object transforms are deliberately absent: this pass reports camera motion
 	// over the current visible opaque or masked depth only.

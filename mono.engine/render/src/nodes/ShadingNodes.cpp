@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <tuple>
 #include <type_traits>
 
@@ -1215,6 +1216,113 @@ namespace engine::render {
 			recording.Fullscreen(
 				context.Name,
 				State->BloomPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				bindings,
+				nullptr,
+				nullptr,
+				SDL_FColor{},
+				&uniforms,
+				sizeof(uniforms)
+			);
+			return true;
+		});
+
+		frameNodes.Set(core::Name("dof"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1 ||
+				State->DepthOfFieldPipeline == nullptr)
+				return false;
+			const Impl::NamedTexture colour = recording.GraphTexture(context.Reads[0], context, false);
+			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
+			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!colour.IsValid() || !depth.IsValid() || !target.IsValid() ||
+				colour.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || colour.Width != target.Width ||
+				colour.Height != target.Height || depth.Width != target.Width ||
+				depth.Height != target.Height)
+				return false;
+			const LightingEffectsUniforms uniforms{
+				.DepthOfField =
+					glm::vec4{
+						State->DepthOfFieldIntensity,
+						State->DepthOfFieldFocusDistance,
+						State->DepthOfFieldFocusRange,
+						State->DepthOfFieldRadius,
+					},
+				.Target = glm::vec4{
+					0.0f,
+					0.0f,
+					1.0f / static_cast<float>(target.Width),
+					1.0f / static_cast<float>(target.Height),
+				},
+			};
+			const std::array bindings{
+				SDL_GPUTextureSamplerBinding{colour.Texture, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{depth.Texture, recording.Sampler},
+			};
+			recording.Fullscreen(
+				context.Name,
+				State->DepthOfFieldPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				bindings,
+				nullptr,
+				nullptr,
+				SDL_FColor{},
+				&uniforms,
+				sizeof(uniforms)
+			);
+			return true;
+		});
+
+		frameNodes.Set(core::Name("god-rays"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			if (context.Reads.size() != 1 || context.Writes.size() != 1 || State->GodRaysPipeline == nullptr)
+				return false;
+			const Impl::NamedTexture source = recording.GraphTexture(context.Reads.front(), context, false);
+			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid() || !target.IsValid() ||
+				source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || source.Width != target.Width ||
+				source.Height != target.Height)
+				return false;
+
+			const core::Vector3 eye = recording.Request.CameraFrame.Position;
+			const glm::vec4 sunWorld{
+				eye.X - State->Sun.x * 1000.0f,
+				eye.Y - State->Sun.y * 1000.0f,
+				eye.Z - State->Sun.z * 1000.0f,
+				1.0f,
+			};
+			const glm::vec4 clip = recording.Matrices.ViewProjection * sunWorld;
+			const bool visible = clip.w > 0.0f && std::abs(clip.x) <= clip.w && std::abs(clip.y) <= clip.w &&
+								 clip.z >= 0.0f && clip.z <= clip.w;
+			const float reciprocalW = visible ? 1.0f / clip.w : 0.0f;
+			const LightingEffectsUniforms uniforms{
+				.GodRays =
+					glm::vec4{
+						State->GodRayIntensity,
+						State->GodRayThreshold,
+						State->GodRayRadius,
+						visible ? 1.0f : 0.0f,
+					},
+				.Target = glm::vec4{
+					clip.x * reciprocalW * 0.5f + 0.5f,
+					0.5f - clip.y * reciprocalW * 0.5f,
+					1.0f / static_cast<float>(target.Width),
+					1.0f / static_cast<float>(target.Height),
+				},
+			};
+			const std::array bindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
+			recording.Fullscreen(
+				context.Name,
+				State->GodRaysPipeline,
 				target.Texture,
 				target.Width,
 				target.Height,

@@ -165,13 +165,15 @@ namespace engine::render {
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *bloomFragment = LoadShader("bloom.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		SDL_GPUShader *depthOfFieldFragment = LoadShader("dof.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+		SDL_GPUShader *godRaysFragment = LoadShader("god-rays.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
 			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
 			!packChannelsFragment || !deferredLightingFragment || !skyFragment || !volumeFragment ||
-			!bloomFragment || !tonemapFragment) {
+			!bloomFragment || !depthOfFieldFragment || !godRaysFragment || !tonemapFragment) {
 			return false;
 		}
 
@@ -396,11 +398,14 @@ namespace engine::render {
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			BloomPipeline = fullscreen(bloomFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			DepthOfFieldPipeline = fullscreen(depthOfFieldFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			GodRaysPipeline = fullscreen(godRaysFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
 			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
 				CameraMotionPipeline == nullptr || SsaoPipeline == nullptr ||
 				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
-				BloomPipeline == nullptr || TonemapPipeline == nullptr) {
+				BloomPipeline == nullptr || DepthOfFieldPipeline == nullptr || GodRaysPipeline == nullptr ||
+				TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 			}
 		}

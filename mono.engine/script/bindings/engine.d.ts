@@ -2503,9 +2503,16 @@ declare interface Lighting extends Service {
 	BloomThreshold: number;
 	Brightness: number;
 	ClockTime: number;
+	DepthOfFieldFocusDistance: number;
+	DepthOfFieldFocusRange: number;
+	DepthOfFieldIntensity: number;
+	DepthOfFieldRadius: number;
 	FogColor: Color3;
 	FogEnd: number;
 	FogStart: number;
+	GodRayIntensity: number;
+	GodRayRadius: number;
+	GodRayThreshold: number;
 	GeographicLatitude: number;
 	OutdoorAmbient: Color3;
 	PostProcessShader: string;

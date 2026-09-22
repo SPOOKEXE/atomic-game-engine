@@ -57,6 +57,13 @@ namespace engine::scene {
 			lighting.BloomThreshold = std::max(authored->BloomThreshold, 0.0f);
 			lighting.BloomIntensity = std::max(authored->BloomIntensity, 0.0f);
 			lighting.BloomRadius = std::max(authored->BloomRadius, 0.0f);
+			lighting.DepthOfFieldIntensity = std::clamp(authored->DepthOfFieldIntensity, 0.0f, 1.0f);
+			lighting.DepthOfFieldFocusDistance = std::max(authored->DepthOfFieldFocusDistance, 0.0f);
+			lighting.DepthOfFieldFocusRange = std::max(authored->DepthOfFieldFocusRange, 0.0f);
+			lighting.DepthOfFieldRadius = std::max(authored->DepthOfFieldRadius, 0.0f);
+			lighting.GodRayIntensity = std::max(authored->GodRayIntensity, 0.0f);
+			lighting.GodRayThreshold = std::max(authored->GodRayThreshold, 0.0f);
+			lighting.GodRayRadius = std::max(authored->GodRayRadius, 0.0f);
 			lighting.RenderFeatures = authored->RenderFeatures;
 		}
 

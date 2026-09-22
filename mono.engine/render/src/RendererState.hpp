@@ -581,6 +581,8 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *BloomPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DepthOfFieldPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *GodRaysPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
@@ -1230,6 +1232,13 @@ namespace engine::render {
 		float BloomThreshold = 1.0f;
 		float BloomIntensity = 0.0f;
 		float BloomRadius = 6.0f;
+		float DepthOfFieldIntensity = 0.0f;
+		float DepthOfFieldFocusDistance = 24.0f;
+		float DepthOfFieldFocusRange = 8.0f;
+		float DepthOfFieldRadius = 6.0f;
+		float GodRayIntensity = 0.0f;
+		float GodRayThreshold = 1.0f;
+		float GodRayRadius = 48.0f;
 		scene::Environment EnvironmentState;
 		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
 		size_t VolumeCount = 0;

@@ -459,6 +459,8 @@ namespace engine::render {
 				std::string_view("fog"),
 				std::string_view("shader-lenses"),
 				std::string_view("bloom"),
+				std::string_view("dof"),
+				std::string_view("god-rays"),
 				std::string_view("tonemap")
 			};
 			static constexpr std::array geometryKinds{

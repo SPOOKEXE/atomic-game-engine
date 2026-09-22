@@ -139,6 +139,27 @@ namespace engine::scene {
 		// The bloom filter radius, in display pixels.
 		float BloomRadius = 6.0f;
 
+		// How strongly depth outside the focus range is blurred. Zero disables it.
+		float DepthOfFieldIntensity = 0.0f;
+
+		// The camera-forward distance that remains sharp, in studs.
+		float DepthOfFieldFocusDistance = 24.0f;
+
+		// The sharp range around DepthOfFieldFocusDistance, in studs.
+		float DepthOfFieldFocusRange = 8.0f;
+
+		// The maximum depth-of-field sample radius, in display pixels.
+		float DepthOfFieldRadius = 6.0f;
+
+		// How strongly screen-space shafts from the visible sun are added. Zero disables them.
+		float GodRayIntensity = 0.0f;
+
+		// HDR radiance begins contributing to the screen-space shafts above this value.
+		float GodRayThreshold = 1.0f;
+
+		// How far each god-ray sample moves toward the projected sun, in display pixels.
+		float GodRayRadius = 48.0f;
+
 		// Which latitude the sun's arc is computed for, in degrees.
 		float GeographicLatitude = 41.733f;
 

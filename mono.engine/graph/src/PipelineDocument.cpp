@@ -989,6 +989,8 @@ namespace engine::graph {
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-b", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-scratch", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("dof", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("god-rays", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("bloom", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1161,12 +1163,21 @@ namespace engine::graph {
 		touches(EditKind::Writes, "lens-b", "colour");
 		touches(EditKind::Writes, "lens-scratch", "scratch");
 
+		node("dof", NodeScope::View);
+		touches(EditKind::Reads, "lens-b", "colour");
+		touches(EditKind::Reads, "linear-depth", "depth");
+		touches(EditKind::Writes, "dof", "colour");
+
+		node("god-rays", NodeScope::View);
+		touches(EditKind::Reads, "dof", "colour");
+		touches(EditKind::Writes, "god-rays", "colour");
+
 		node("bloom", NodeScope::View);
-		touches(EditKind::Reads, "lens-b", "source");
+		touches(EditKind::Reads, "god-rays", "source");
 		touches(EditKind::Writes, "bloom", "bloom");
 
 		node("tonemap", NodeScope::View);
-		touches(EditKind::Reads, "lens-b", "colour");
+		touches(EditKind::Reads, "god-rays", "colour");
 		touches(EditKind::Reads, "bloom", "bloom");
 		touches(EditKind::Writes, "tonemapped", "colour");
 

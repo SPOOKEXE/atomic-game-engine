@@ -107,6 +107,18 @@ namespace engine::scene {
 		float BloomRadius = 6.0f;
 		//@}
 
+		// The depth-of-field and god-ray controls copied from Lighting. They stay
+		// with the resolved world lighting so portals and ordinary views agree.
+		//@{
+		float DepthOfFieldIntensity = 0.0f;
+		float DepthOfFieldFocusDistance = 24.0f;
+		float DepthOfFieldFocusRange = 8.0f;
+		float DepthOfFieldRadius = 6.0f;
+		float GodRayIntensity = 0.0f;
+		float GodRayThreshold = 1.0f;
+		float GodRayRadius = 48.0f;
+		//@}
+
 		// The first skybox, atmosphere and cloud providers beneath `Lighting`.
 		// This is one resolved value rather than parallel renderer state, so a
 		// redraw signature and a render pass cannot select different siblings.
