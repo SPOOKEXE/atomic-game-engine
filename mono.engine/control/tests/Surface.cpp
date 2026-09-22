@@ -694,11 +694,15 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	missingLocalLightIds.erase("local_light_ids");
 	const json missingLocalLightReply = Called(surface, "capture", missingLocalLightIds, localLightFailed);
 	CHECK(localLightFailed);
-	CHECK(missingLocalLightReply["error"] == "validation_failed: local_light_ids must accompany local_light_contribution");
+	CHECK(
+		missingLocalLightReply["error"] ==
+		"validation_failed: local_light_ids must accompany local_light_contribution"
+	);
 	json duplicateLocalLightIds = localLightCapture;
 	duplicateLocalLightIds["operation_id"] = "capture-local-lights-duplicate";
 	duplicateLocalLightIds["local_light_ids"] = json::array({"light/key", "light/key"});
-	const json duplicateLocalLightReply = Called(surface, "capture", duplicateLocalLightIds, localLightFailed);
+	const json duplicateLocalLightReply =
+		Called(surface, "capture", duplicateLocalLightIds, localLightFailed);
 	CHECK(localLightFailed);
 	CHECK(duplicateLocalLightReply["error"] == "validation_failed: local_light_ids must be unique");
 	const json poll = Called(surface, "poll_capture", json{{"instance_id", "capture-world"}, {"ticket", 1}});
@@ -986,9 +990,8 @@ TEST_CASE(
 	json unpaired = request("bundle-unpaired", CaptureBundleOptions(json::array({"second_surface_depth"})));
 	Called(surface, "capture_bundle", unpaired, failed);
 	CHECK(failed);
-	json localLight = request(
-		"bundle-local-lights", CaptureBundleOptions(json::array({"local_light_contribution"}))
-	);
+	json localLight =
+		request("bundle-local-lights", CaptureBundleOptions(json::array({"local_light_contribution"})));
 	localLight["options"]["local_light_ids"] = json::array({"light/key", "light/fill"});
 	CHECK(Called(surface, "capture_bundle", localLight)["status"] == "queued");
 	CHECK(bridge->RequestedChannels() == std::vector<std::string>{"local_light_contribution"});

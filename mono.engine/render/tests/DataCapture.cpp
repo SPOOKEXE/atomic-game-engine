@@ -657,7 +657,9 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
 }
 
-TEST_CASE("data capture expands each requested local light into one logical plane", "[render][gpu][data-capture]") {
+TEST_CASE(
+	"data capture expands each requested local light into one logical plane", "[render][gpu][data-capture]"
+) {
 	using namespace engine;
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
@@ -800,7 +802,9 @@ TEST_CASE(
 	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, malformedAmbient));
 }
 
-TEST_CASE("local-light planes validate per light and preserve unavailable identity", "[render][data-capture]") {
+TEST_CASE(
+	"local-light planes validate per light and preserve unavailable identity", "[render][data-capture]"
+) {
 	DataCaptureTicket ticket;
 	ticket.CaptureNode = engine::core::Name("capture");
 	ticket.Channels = {
@@ -821,7 +825,7 @@ TEST_CASE("local-light planes validate per light and preserve unavailable identi
 	ready.Scalar = DataCaptureScalar::Float16;
 	ready.ColourSpace = DataCaptureColourSpace::Linear;
 	ready.Provenance = "local_light_contribution/v1;source=single_selected_local_light;"
-					 "radiance=additive_linear_before_tonemap;encoding=rgba16_float";
+					   "radiance=additive_linear_before_tonemap;encoding=rgba16_float";
 	ready.Bytes.assign(8, std::byte{0});
 	ready.Hash = engine::assets::Hasher::Of(ready.Bytes);
 
