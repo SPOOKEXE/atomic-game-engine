@@ -1936,6 +1936,14 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "local_light_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 4,
+                "minItems": 1,
+                "type": "array"
+              },
               "operation_id": {
                 "maxLength": 128,
                 "minLength": 1,
@@ -2082,6 +2090,16 @@
                   },
                   "include_scene_data": {
                     "type": "boolean"
+                  },
+                  "local_light_ids": {
+                    "items": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 4,
+                    "minItems": 1,
+                    "type": "array"
                   },
                   "noise_mode": {
                     "maxLength": 256,
@@ -3736,6 +3754,14 @@
               "minLength": 1,
               "type": "string"
             },
+            "local_light_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            },
             "operation_id": {
               "maxLength": 128,
               "minLength": 1,
@@ -3883,6 +3909,16 @@
                 },
                 "include_scene_data": {
                   "type": "boolean"
+                },
+                "local_light_ids": {
+                  "items": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
                 },
                 "noise_mode": {
                   "maxLength": 256,

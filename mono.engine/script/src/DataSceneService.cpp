@@ -1026,8 +1026,7 @@ namespace engine::script {
 			}
 			if (const ScriptValue *lightIds = Field(value, "local_light_ids"); lightIds != nullptr) {
 				const uint32_t maximum = bridge->Capabilities().MaximumLocalLightIds;
-				if (lightIds->Tag != ValueTag::Array || lightIds->Items.empty() ||
-					lightIds->Items.size() > maximum)
+				if (lightIds->Tag != ValueTag::Array || lightIds->Items.size() > maximum)
 					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
 				request.LocalLightIds.reserve(lightIds->Items.size());
 				for (const ScriptValue &lightId : lightIds->Items) {
