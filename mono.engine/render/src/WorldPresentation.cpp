@@ -1257,6 +1257,10 @@ namespace engine::render {
 			if (scene::ResolveLocalLight(store, entity, bulb, source) != scene::LocalLightRejection::None)
 				return;
 			SceneLight light;
+			ecs::AttributeValue identifier;
+			if (ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identifier) &&
+				identifier.Type == ecs::PropertyType::String)
+				light.DataFactoryId = core::Name(identifier.String);
 			light.Position = source.Position;
 			light.Range = source.Range;
 			light.Colour = source.Colour;

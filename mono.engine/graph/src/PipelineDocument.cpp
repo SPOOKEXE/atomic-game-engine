@@ -978,6 +978,12 @@ namespace engine::graph {
 			// later scene passes alter the lit image.
 			resource("lighting-baseline", ResourceKind::Colour, ResourceFormat::RGBA32F);
 			resource("directional-response", ResourceKind::Colour, ResourceFormat::RGBA32F);
+			for (uint32_t index = 0; index < 4; ++index)
+				resource(
+					"local-light-response-" + std::to_string(index),
+					ResourceKind::Colour,
+					ResourceFormat::RGBA32F
+				);
 		}
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1107,6 +1113,12 @@ namespace engine::graph {
 		if (captureObservations) {
 			touches(EditKind::Writes, "lighting-baseline", "lighting-baseline");
 			touches(EditKind::Writes, "directional-response", "directional-response");
+			for (uint32_t index = 0; index < 4; ++index)
+				touches(
+					EditKind::Writes,
+					"local-light-response-" + std::to_string(index),
+					"local-light-response-" + std::to_string(index)
+				);
 		}
 
 		node("sky", NodeScope::View);

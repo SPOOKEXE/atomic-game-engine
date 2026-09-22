@@ -273,6 +273,7 @@ namespace engine::render {
 		// The world's lighting, and the blocks the passes push from it.
 		scene::WorldLighting CurrentLighting;
 		LightUniforms SceneLights;
+		std::array<core::Name, MAX_SCENE_LIGHTS> SceneLightIds{};
 		LightingUniforms Lighting;
 		FrameUniforms Frame;
 		PbrUniforms Uniforms;

@@ -901,6 +901,42 @@ namespace engine::render {
 						"render.directional_response.output_bytes",
 						uint64_t(baseline.Width) * baseline.Height * 16
 					);
+				// Each capture target is rendered with exactly one source row. It is
+				// not a copy of the summed local-light result.
+				for (uint32_t index = 0; index < 4 && index < static_cast<uint32_t>(lightUniforms.Count.x);
+					 ++index) {
+					const core::Name port(std::string("local-light-response-") + std::to_string(index));
+					auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
+					if (found == node->WritePorts.end()) continue;
+					const auto target =
+						GraphTexture(context.Writes[found - node->WritePorts.begin()], context, true);
+					if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT)
+						return false;
+					if (!State->EnsureDeferredLocalLight()) return false;
+					LightUniforms selected{};
+					selected.Position[0] = lightUniforms.Position[index];
+					selected.Colour[0] = lightUniforms.Colour[index];
+					selected.Direction[0] = lightUniforms.Direction[index];
+					selected.Count.x = 1.0f;
+					SDL_GPUColorTargetInfo targetInfo{};
+					targetInfo.texture = target.Texture;
+					targetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+					targetInfo.store_op = SDL_GPU_STOREOP_STORE;
+					targetInfo.cycle = true;
+					auto *localPass = SDL_BeginGPURenderPass(Command, &targetInfo, 1, nullptr);
+					if (!localPass) return false;
+					SDL_BindGPUGraphicsPipeline(localPass, State->DeferredLocalLightPipeline);
+					SDL_BindGPUFragmentSamplers(
+						localPass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
+					);
+					SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+					SDL_PushGPUFragmentUniformData(Command, 1, &selected, sizeof(selected));
+					SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+					SDL_SetGPUViewport(localPass, &viewport);
+					SDL_SetGPUScissor(localPass, &scissor);
+					SDL_DrawGPUPrimitives(localPass, 3, 1, 0, 0);
+					SDL_EndGPURenderPass(localPass);
+				}
 				return true;
 			}
 

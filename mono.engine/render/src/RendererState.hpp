@@ -2735,9 +2735,11 @@ namespace engine::render {
 		bool EnsureDirectionalCorrection();
 		bool EnsureDeferredLightingBaseline();
 		bool EnsureDeferredLightingDirectional();
+		bool EnsureDeferredLocalLight();
 		SDL_GPUGraphicsPipeline *AmbientResponsePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingBaselinePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingDirectionalPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DeferredLocalLightPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AmbientMergePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AmbientCorrectPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DirectionalCorrectPipeline = nullptr;

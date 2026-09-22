@@ -476,6 +476,9 @@ namespace engine::render {
 		// angle would be an `acos` per light per fragment to compare something the
 		// dot product already gives.
 		float ConeCosine = -1.0f;
+
+		// Interned runtime identity of the authored DataFactoryId, when present.
+		core::Name DataFactoryId = {};
 	};
 
 	// One portal pane a particle can be drawn through.

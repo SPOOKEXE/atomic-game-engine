@@ -1133,6 +1133,28 @@ namespace engine::render {
 		return DeferredLightingDirectionalPipeline != nullptr;
 	}
 
+	bool Renderer::Impl::EnsureDeferredLocalLight() {
+		if (DeferredLocalLightPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("deferred-local-light.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+			DeferredLocalLightPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return DeferredLocalLightPipeline != nullptr;
+	}
+
 	bool Renderer::Impl::EnsureDirectionalCorrection() {
 		if (DirectionalCorrectPipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
