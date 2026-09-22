@@ -1,20 +1,30 @@
 #include <engine/ui/Browse.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <system_error>
+#include <utility>
 
 namespace engine::ui {
 
 	namespace {
-		// Lowercases ASCII only, which is what a file suffix is.
-		std::string Lowered(std::string_view text) {
+		// File suffixes and sort keys are ASCII. Keeping this explicit avoids a
+		// locale-dependent directory order.
+		std::string LoweredAscii(std::string_view text) {
 			std::string out(text);
-			std::transform(out.begin(), out.end(), out.begin(), [](unsigned char letter) {
-				return static_cast<char>(std::tolower(letter));
-			});
+			for (char &letter : out) {
+				if (letter >= 'A' && letter <= 'Z') {
+					letter = static_cast<char>(letter - 'A' + 'a');
+				}
+			}
 			return out;
 		}
+
+		// The key is kept beside the entry only while building a listing. A
+		// comparator can then compare strings without remaking either key.
+		struct SortableEntry {
+			BrowseEntry Entry;
+			std::string SortKey;
+		};
 	}
 
 	bool MatchesExtension(std::string_view name, const std::vector<std::string> &extensions) {
@@ -22,7 +32,7 @@ namespace engine::ui {
 			return true;
 		}
 
-		const std::string lowered = Lowered(name);
+		const std::string lowered = LoweredAscii(name);
 
 		for (const std::string &suffix : extensions) {
 			if (suffix.empty() || lowered.size() < suffix.size()) {
@@ -39,6 +49,7 @@ namespace engine::ui {
 	Listing
 	BrowseDirectory(const std::filesystem::path &directory, const std::vector<std::string> &extensions) {
 		Listing listing;
+		std::vector<SortableEntry> entries;
 
 		std::error_code code;
 
@@ -106,22 +117,30 @@ namespace engine::ui {
 				continue;
 			}
 
-			listing.Entries.push_back(BrowseEntry{name, entry.path(), directoryEntry});
+			entries.push_back(
+				SortableEntry{
+					.Entry = BrowseEntry{name, entry.path(), directoryEntry},
+					.SortKey = LoweredAscii(name),
+				}
+			);
 		}
 
-		// Directories first, then by name. Case-insensitive, because a listing
-		// that puts `Zebra` before `apple` is a listing sorted by an
-		// implementation detail.
-		std::sort(
-			listing.Entries.begin(),
-			listing.Entries.end(),
-			[](const BrowseEntry &left, const BrowseEntry &right) {
-				if (left.Directory != right.Directory) {
-					return left.Directory;
-				}
-				return Lowered(left.Name) < Lowered(right.Name);
+		// Directories first, then by one lowercase key per row. The displayed name
+		// resolves a case-only tie so every filesystem yields the same listing.
+		std::sort(entries.begin(), entries.end(), [](const SortableEntry &left, const SortableEntry &right) {
+			if (left.Entry.Directory != right.Entry.Directory) {
+				return left.Entry.Directory;
 			}
-		);
+			if (left.SortKey != right.SortKey) {
+				return left.SortKey < right.SortKey;
+			}
+			return left.Entry.Name < right.Entry.Name;
+		});
+
+		listing.Entries.reserve(entries.size());
+		for (SortableEntry &entry : entries) {
+			listing.Entries.push_back(std::move(entry.Entry));
+		}
 
 		return listing;
 	}

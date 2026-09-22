@@ -250,21 +250,13 @@ BENCH("ResizeImage · 256x256 up to 1024x1024", 1) {
 }
 
 BENCH("ResizeImage · 2048x2048 to the same size", 1) {
-	// **The most expensive row in this file, and it is a no-op.** As measured it
-	// costs more than building the entire mip chain of the same image and
-	// several times what resizing it *down* costs, because `ResizeImage` has no
-	// early-out for a target equal to the source: it resamples four megapixels
-	// into four megapixels at the same per-output-pixel rate every other
-	// direction pays.
+	// A graph can normalise an image to the dimensions it already has. This row
+	// keeps the base-level copy for that no-op measurable beside real resamples.
 	//
 	// It is reachable. `bakegraph`'s `NodeKind::Resize` passes the size the
 	// graph author wrote, so a pipeline that normalises every texture to a
 	// target pays this for every texture that already was that size.
 	//
-	// The fix is not obviously free, which is why this is a row rather than a
-	// patch: a box filter at a scale of exactly one is not guaranteed to
-	// reproduce its input byte for byte, so short-circuiting to a copy is a
-	// change to what comes out and not only to how long it takes.
 	TextureData out;
 	Consume(ResizeImage(Image(LARGE), LARGE, LARGE, out));
 	Consume(out.Pixels.size());

@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -553,6 +554,30 @@ TEST_CASE("the mix is clipped exactly once, at the end", "[audio][mixer]") {
 	// which is the number that hides the problem.
 	CHECK(report.Peak == 2.0f);
 	CHECK(out.Peak() == 1.0f);
+}
+
+TEST_CASE("the output stage preserves non-finite meter semantics", "[audio][mixer]") {
+	// `SampleBuffer::Peak` ignores NaN through `std::max`, but keeps infinity
+	// visible. The fused meter and clip pass has to retain both behaviours.
+	Rig nan;
+	nan.Post(SetSound(nan.Player, Constant(std::numeric_limits<float>::quiet_NaN())));
+	nan.Post(Act(CommandKind::Play, nan.Player));
+	nan.Engine.ApplyPending();
+
+	const MixReport nanReport = nan.Render();
+	CHECK(nanReport.Peak == 0.0f);
+	CHECK_FALSE(nanReport.Clipped);
+	CHECK(std::isnan(nan.At(0)));
+
+	Rig infinity;
+	infinity.Post(SetSound(infinity.Player, Constant(std::numeric_limits<float>::infinity())));
+	infinity.Post(Act(CommandKind::Play, infinity.Player));
+	infinity.Engine.ApplyPending();
+
+	const MixReport infinityReport = infinity.Render();
+	CHECK(std::isinf(infinityReport.Peak));
+	CHECK(infinityReport.Clipped);
+	CHECK(infinity.At(0) == 1.0f);
 }
 
 TEST_CASE("the mixer is deterministic", "[audio][mixer]") {

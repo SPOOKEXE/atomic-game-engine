@@ -10,6 +10,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -642,6 +643,47 @@ TEST_CASE("a snapshot names the spans and the worst frames", "[framegraph]") {
 	REQUIRE(text.find("worst") != std::string::npos);
 	// The columns a spike hunt reads.
 	REQUIRE(text.find("p99") != std::string::npos);
+}
+
+TEST_CASE("a snapshot uses nearest-rank percentiles for unsorted span readings", "[framegraph]") {
+	const auto path = std::filesystem::temp_directory_path() / "atomic-framegraph-percentiles.txt";
+	std::filesystem::remove(path);
+
+	{
+		Collecting collecting;
+		for (float milliseconds : {4.0f, 1.0f, 10.0f, 7.0f, 3.0f, 6.0f, 2.0f, 9.0f, 5.0f, 8.0f}) {
+			FrameGraph::BeginFrame();
+			FrameGraph::Report("percentile-sample", ProfileCategory::ECS, milliseconds);
+			FrameGraph::EndFrame();
+		}
+
+		REQUIRE(FrameGraph::WriteSnapshot(path));
+	}
+
+	std::ifstream in(path);
+	REQUIRE(in);
+	const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+	in.close();
+	std::filesystem::remove(path);
+
+	const size_t entryStart = text.find("percentile-sample");
+	REQUIRE(entryStart != std::string::npos);
+	const size_t entryEnd = text.find('\n', entryStart);
+	std::istringstream entry{text.substr(entryStart, entryEnd - entryStart)};
+	std::string name;
+	size_t frames = 0;
+	float mean = 0.0f;
+	float p50 = 0.0f;
+	float p99 = 0.0f;
+	float maximum = 0.0f;
+	entry >> name >> frames >> mean >> p50 >> p99 >> maximum;
+
+	REQUIRE(name == "percentile-sample");
+	REQUIRE(frames == 10);
+	REQUIRE(mean == 5.5f);
+	REQUIRE(p50 == 6.0f);
+	REQUIRE(p99 == 10.0f);
+	REQUIRE(maximum == 10.0f);
 }
 
 TEST_CASE(

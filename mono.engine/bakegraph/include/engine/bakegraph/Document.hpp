@@ -329,10 +329,9 @@ namespace engine::bake {
 	// counter - first-seen order is a property of the process rather than of the
 	// document, and rule 4 is about exactly that difference.
 	//
-	// Two parallel vectors searched linearly, for `script::SourceCache`'s
-	// reason: a world holds a handful of pipelines and a `core::Name` compare is
-	// an integer compare, so a map would cost an allocation per world to improve
-	// a lookup nobody has measured.
+	// Two parallel vectors searched by `Name` equality while small, then by text
+	// with a binary search. This keeps serialized order stable without a
+	// per-world map allocation, while avoiding a linear walk in large editor sets.
 	//
 	// @since v0.15
 	class PipelineSet {

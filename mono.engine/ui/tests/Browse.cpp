@@ -110,6 +110,28 @@ TEST_CASE("directories come first, then files, each by name", "[studio][browse]"
 	CHECK(listing.Entries[3].Name == "zebra.agame");
 }
 
+TEST_CASE("mixed-case names use the displayed name to break equal sort keys", "[studio][browse]") {
+	Tree tree;
+	tree.Directory("alpha");
+	tree.Directory("Alpha");
+	tree.File("beta.agame");
+	tree.File("Beta.agame");
+
+	const Listing listing = BrowseDirectory(tree.Root);
+
+	// A filesystem that folds case cannot hold both fixture names. The ordering
+	// contract is exercised wherever the operating system can represent it.
+	if (listing.Entries.size() != 4) {
+		SKIP("filesystem does not preserve names that differ only by case");
+	}
+
+	REQUIRE(listing.Entries.size() == 4);
+	CHECK(listing.Entries[0].Name == "Alpha");
+	CHECK(listing.Entries[1].Name == "alpha");
+	CHECK(listing.Entries[2].Name == "Beta.agame");
+	CHECK(listing.Entries[3].Name == "beta.agame");
+}
+
 TEST_CASE("a filter hides other files but never hides folders", "[studio][browse]") {
 	Tree tree;
 	tree.File("keep.agame");

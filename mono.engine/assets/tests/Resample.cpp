@@ -274,6 +274,26 @@ TEST_CASE("a resize drops the chain it cannot carry", "[assets][resample]") {
 	CHECK(bigger.IsValid());
 }
 
+TEST_CASE("a same-size resize copies the base level without retaining mips", "[assets][resample]") {
+	TextureData source = Sheet(2, 4, 3);
+	REQUIRE(BuildMipChain(source));
+	REQUIRE_FALSE(source.Mips.empty());
+
+	TextureData out;
+	REQUIRE(ResizeImage(source, source.Width, source.Height, out));
+	CHECK(out.Pixels == source.Pixels);
+	CHECK(out.Format == source.Format);
+	CHECK(out.FlipbookSide == source.FlipbookSide);
+	CHECK(out.FlipbookFrames == source.FlipbookFrames);
+	CHECK(out.FlipbookFrameRate == source.FlipbookFrameRate);
+	CHECK(out.Mips.empty());
+	CHECK(out.IsValid());
+
+	REQUIRE(ResizeImage(source, source.Width, source.Height, source));
+	CHECK(source.Mips.empty());
+	CHECK(source.IsValid());
+}
+
 TEST_CASE("building a chain twice gives the same chain", "[assets][resample]") {
 	// **Rebuilt rather than appended to**, because a graph may be run twice and
 	// a pipeline that added levels each time would produce a different file every

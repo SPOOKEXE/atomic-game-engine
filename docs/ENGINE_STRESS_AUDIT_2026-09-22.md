@@ -282,3 +282,17 @@ The player-character workload spans server, scene, game, replication, and net. I
 5. Measure combined correction and delta transport against the dedicated player-motion message; `Server.cpp:3248`.
 
 The loadtest harness originally gave each client a fixed radial heading. The audit adds an opt-in deterministic seed and heading interval so clients turn independently and runs are repeatable. `Stress.luau` permits 512 players. `ReplicationStress.luau` is a separate 20,000-moving-part workload with a much smaller player cap. The run must report how many clients reached Playing; a requested connection count is not proof that hundreds of characters moved.
+
+## Follow-up optimization pass
+
+All 31 `mono.engine` modules were scanned again for a small, local improvement. The first changes were selected in assets, audio, bakegraph, core, and ui. The other modules either have a larger measured bottleneck listed above, have concurrent edits in the shared tree, or have too little runtime work for a credible local speedup. In particular, the existing `ForWorkers` million-row benchmark submits only 64 tasks, so changing its per-worker task scan needs a targeted dispatch measurement first.
+
+| Change | Optimized preset observation | Verification |
+|---|---|---|
+| Assets, 2048 by 2048 same-size resize | 30.64 ms baseline, 0.39 ms after, on an isolated revision | Resample suite: 67 assertions in 11 cases. |
+| Audio, one voice output mix | 2,225 ns baseline, 1,973 ns after | Mixer suite: 2,276 assertions in 29 cases. The 16 to 512 voice rows showed little or inconsistent difference. |
+| Bakegraph, 4,096 pipeline lookup | 377 ns linear control, 268 ns binary control, 266 ns live lookup | Bakegraph suite: 8,403 assertions in 27 cases. Linear lookup was faster through 2,048 entries. |
+| Core frame snapshot | One sort per sample distribution instead of repeated copies and sorts | FrameGraph suite: 294 assertions in 61 cases. No direct speed measurement yet. |
+| UI directory browse | Fold each name once before sorting | Browse suite: 36 assertions in 10 cases. No direct speed measurement yet. |
+
+The assets and audio comparisons used the same isolated source revision, build preset, and benchmark fixture before and after each edit. The bakegraph controls isolate search cost and do not return the same pointer type as the public API. These numbers establish the crossover for that fixture, not a whole-frame gain. The next substantial targets are replication interest and refinement, and physics stable-contact solver work. Their optimized comparisons belong beside parity checks before any speedup claim.

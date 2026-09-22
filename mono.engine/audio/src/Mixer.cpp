@@ -435,13 +435,15 @@ namespace engine::audio {
 		// `Segments` counts the pieces actually mixed; a block with no commands
 		// in it is one.
 		report.Segments = std::max<size_t>(1, report.Segments);
-		report.Peak = out.Peak();
 		report.Finished = FinishedThisBlock;
 
 		// **Clipped exactly once, here, at the end.** The whole graph runs in
 		// float precisely so it can exceed ±1.0 without harm; a device takes
 		// samples in range, so this is where the range starts to matter.
 		for (float &sample : out.Data()) {
+			// Keep the meter's `SampleBuffer::Peak` semantics: NaN does not
+			// replace an earlier finite peak, while infinity remains visible.
+			report.Peak = std::max(report.Peak, std::abs(sample));
 			if (sample > 1.0f || sample < -1.0f) {
 				sample = std::clamp(sample, -1.0f, 1.0f);
 				report.Clipped = true;

@@ -14,6 +14,21 @@ namespace engine::assets {
 		if (width > Texture::MAXIMUM_DIMENSION || height > Texture::MAXIMUM_DIMENSION) {
 			return false;
 		}
+		if (source.Width == width && source.Height == height) {
+			// A resize result owns only its base level, even when the dimensions already
+			// match. Keeping source mips here would make the result invalid if it came
+			// from an image whose chain no longer belongs to the caller's next step.
+			TextureData resized;
+			resized.Width = source.Width;
+			resized.Height = source.Height;
+			resized.Format = source.Format;
+			resized.FlipbookSide = source.FlipbookSide;
+			resized.FlipbookFrames = source.FlipbookFrames;
+			resized.FlipbookFrameRate = source.FlipbookFrameRate;
+			resized.Pixels = source.Pixels;
+			out = std::move(resized);
+			return true;
+		}
 
 		const uint32_t channels = BytesPerPixel(source.Format);
 
@@ -137,15 +152,17 @@ namespace engine::assets {
 		image.Mips.clear();
 		image.Mips.reserve(levels - 1u);
 
-		TextureData previous = image;
+		const TextureData *source = &image;
+		TextureData previous;
 
 		for (uint32_t level = 1; level < levels; level++) {
 			TextureData next;
-			if (!ResizeImage(previous, MipExtent(image.Width, level), MipExtent(image.Height, level), next)) {
+			if (!ResizeImage(*source, MipExtent(image.Width, level), MipExtent(image.Height, level), next)) {
 				return false;
 			}
-			image.Mips.push_back(next.Pixels);
 			previous = std::move(next);
+			image.Mips.push_back(previous.Pixels);
+			source = &previous;
 		}
 		return true;
 	}

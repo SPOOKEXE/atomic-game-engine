@@ -318,6 +318,13 @@ bench *args:
 # Every benchmark, whatever changed.
 bench-all *args: (bench "--all" args)
 
+# Lookup across a large, text-sorted bake-pipeline set. Output stays on the
+# terminal so a busy machine cannot turn one measurement into a stored claim.
+bakegraph-pipeline-set-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_bakegraph
+    ./.cache/build/bench/bench/bench_bakegraph --suite engine.bakegraph.bench.pipeline-set --samples {{samples}}
+
 # Portal reply encoding and decoding, per complete batch. No GPU or process transport.
 # Run the binary directly so measurements stay on the terminal.
 portal-exchange-bench samples="5":

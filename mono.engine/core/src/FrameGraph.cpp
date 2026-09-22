@@ -373,16 +373,15 @@ namespace engine::core {
 			return state.BuildingNames[state.BuildingNameCount++];
 		}
 
-		// Nearest-rank, on a copy the caller owns. Not interpolated: with
-		// thousands of readings the neighbouring ones are indistinguishable, and
-		// an interpolated p99 can report a number no frame actually took.
-		float Percentile(std::vector<float> &readings, double fraction) {
-			if (readings.empty()) {
+		// Nearest-rank from sorted readings. Not interpolated: with thousands of
+		// readings the neighbouring ones are indistinguishable, and an interpolated
+		// p99 can report a number no frame actually took.
+		float Percentile(const std::vector<float> &sorted, double fraction) {
+			if (sorted.empty()) {
 				return 0.0f;
 			}
-			std::sort(readings.begin(), readings.end());
-			const auto rank = static_cast<size_t>(fraction * static_cast<double>(readings.size() - 1) + 0.5);
-			return readings[std::min(rank, readings.size() - 1)];
+			const auto rank = static_cast<size_t>(fraction * static_cast<double>(sorted.size() - 1) + 0.5);
+			return sorted[std::min(rank, sorted.size() - 1)];
 		}
 
 		// How many of the worst frames the snapshot lists individually. The
@@ -1075,9 +1074,12 @@ namespace engine::core {
 		);
 		out << line;
 
-		std::vector<float> frameSorted = frameMilliseconds;
-		const float p99 = Percentile(frameSorted, 0.99);
-		const float p50 = Percentile(frameSorted, 0.50);
+		// Frame order is used again for the worst-frame list, so this is the one
+		// percentile copy. Sorting it once serves both ranks.
+		std::vector<float> percentileScratch = frameMilliseconds;
+		std::sort(percentileScratch.begin(), percentileScratch.end());
+		const float p99 = Percentile(percentileScratch, 0.99);
+		const float p50 = Percentile(percentileScratch, 0.50);
 		std::snprintf(
 			line,
 			sizeof(line),
@@ -1095,14 +1097,14 @@ namespace engine::core {
 		// that was all vsync wait and one that was all work show the same rows.
 		// Reading the table and finding nothing that adds up to the frame is the
 		// correct outcome, and this is the line that says why.
-		std::vector<float> idleSorted = idleMilliseconds;
+		std::sort(idleMilliseconds.begin(), idleMilliseconds.end());
 		std::snprintf(
 			line,
 			sizeof(line),
 			"idle ms  mean %.3f  p99 %.3f  p50 %.3f   (waiting; the span rows below are busy time)\n",
 			state.HistoryCount == 0 ? 0.0 : idleTotal / static_cast<double>(state.HistoryCount),
-			Percentile(idleSorted, 0.99),
-			Percentile(idleSorted, 0.50)
+			Percentile(idleMilliseconds, 0.99),
+			Percentile(idleMilliseconds, 0.50)
 		);
 		out << line;
 
@@ -1139,16 +1141,16 @@ namespace engine::core {
 		});
 
 		for (uint32_t id : order) {
-			const std::vector<float> &span = readings[id];
+			std::vector<float> &span = readings[id];
 			double total = 0.0;
 			float worst = 0.0f;
 			for (float milliseconds : span) {
 				total += milliseconds;
 				worst = std::max(worst, milliseconds);
 			}
-			std::vector<float> sorted = span;
-			const float spanP50 = Percentile(sorted, 0.50);
-			const float spanP99 = Percentile(sorted, 0.99);
+			std::sort(span.begin(), span.end());
+			const float spanP50 = Percentile(span, 0.50);
+			const float spanP99 = Percentile(span, 0.99);
 			std::snprintf(
 				line,
 				sizeof(line),

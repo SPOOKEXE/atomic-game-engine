@@ -18,9 +18,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
-#include <map>
 #include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.bakegraph.document")
@@ -81,6 +82,12 @@ namespace {
 		document.Record(WriteNode("box.amesh"));
 		document.Record(Wire(1, 2));
 		document.Record(Wire(2, 3));
+		return document;
+	}
+
+	Document Tagged(float value) {
+		Document document;
+		document.Record(Fit(value));
 		return document;
 	}
 }
@@ -409,6 +416,90 @@ TEST_CASE("setting a name twice replaces rather than appends", "[bakegraph]") {
 	CHECK_FALSE(set.Remove(Name("main")));
 	CHECK(set.Find(Name("main")) == nullptr);
 	CHECK(set.Count() == 0);
+}
+
+TEST_CASE("a set finds, replaces and removes many text-sorted names", "[bakegraph]") {
+	// Names arrive in editor order, while lookup and writing follow text order.
+	// Each tag travels with its name through replacement and erasure, which
+	// catches the parallel vectors losing their shared index.
+	PipelineSet set;
+	const std::vector<std::pair<std::string, float>> pipelines{
+		{"zebra", 1.0f},
+		{"alpha", 2.0f},
+		{"marble", 3.0f},
+		{"brick", 4.0f},
+		{"quartz", 5.0f},
+		{"cedar", 6.0f},
+		{"yellow", 7.0f},
+		{"denim", 8.0f},
+		{"violet", 9.0f},
+		{"ember", 10.0f},
+	};
+	for (const auto &[text, tag] : pipelines) {
+		REQUIRE(set.Set(Name(text), Tagged(tag)));
+	}
+
+	REQUIRE(set.Count() == pipelines.size());
+	for (const auto &[text, tag] : pipelines) {
+		const Document *document = set.Find(Name(text));
+		REQUIRE(document != nullptr);
+		REQUIRE(document->Count() == 1);
+		CHECK(document->Operations()[0].Number == tag);
+	}
+	for (size_t index = 1; index < set.Names().size(); ++index) {
+		CHECK(set.Names()[index - 1].Text() < set.Names()[index].Text());
+	}
+	CHECK(set.Find(Name("bamboo")) == nullptr);
+
+	REQUIRE(set.Set(Name("marble"), Tagged(30.0f)));
+	REQUIRE(set.Find(Name("marble")) != nullptr);
+	CHECK(set.Find(Name("marble"))->Operations()[0].Number == 30.0f);
+	CHECK(set.Count() == pipelines.size());
+
+	for (const std::string_view text : {"alpha", "marble", "yellow", "zebra"}) {
+		REQUIRE(set.Remove(Name(text)));
+		CHECK(set.Find(Name(text)) == nullptr);
+	}
+	CHECK_FALSE(set.Remove(Name("missing")));
+	CHECK(set.Count() == pipelines.size() - 4);
+	for (const auto &[text, tag] : pipelines) {
+		if (text == "alpha" || text == "marble" || text == "yellow" || text == "zebra") {
+			continue;
+		}
+		const Document *document = set.Find(Name(text));
+		REQUIRE(document != nullptr);
+		CHECK(document->Operations()[0].Number == tag);
+	}
+	for (size_t index = 1; index < set.Names().size(); ++index) {
+		CHECK(set.Names()[index - 1].Text() < set.Names()[index].Text());
+	}
+}
+
+TEST_CASE("a large set keeps document associations through binary lookup", "[bakegraph]") {
+	PipelineSet set;
+	for (size_t index = 0; index < 4096; ++index) {
+		REQUIRE(set.Set(Name("pipeline." + std::to_string(index)), Document()));
+	}
+
+	const Name inserted("pipeline.new");
+	REQUIRE(set.Set(inserted, Tagged(41.0f)));
+	REQUIRE(set.Find(inserted) != nullptr);
+	CHECK(set.Find(inserted)->Operations()[0].Number == 41.0f);
+	for (size_t index = 1; index < set.Names().size(); ++index) {
+		CHECK(set.Names()[index - 1].Text() < set.Names()[index].Text());
+	}
+	REQUIRE(set.Remove(inserted));
+	CHECK(set.Find(inserted) == nullptr);
+	CHECK(set.Count() == 4096);
+
+	const Name target("pipeline.1024");
+	REQUIRE(set.Find(target) != nullptr);
+	REQUIRE(set.Set(target, Tagged(40.0f)));
+	REQUIRE(set.Find(target) != nullptr);
+	CHECK(set.Find(target)->Operations()[0].Number == 40.0f);
+	REQUIRE(set.Remove(target));
+	CHECK(set.Find(target) == nullptr);
+	CHECK(set.Count() == 4095);
 }
 
 TEST_CASE("an unnamed pipeline is refused, in memory and in text", "[bakegraph]") {
