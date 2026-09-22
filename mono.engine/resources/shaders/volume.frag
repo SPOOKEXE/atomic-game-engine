@@ -143,34 +143,48 @@ void main() {
 	vec3 surface = WorldAt(inUv, texture(depthImage, inUv * pass.Target.zw).r);
 	vec3 ray = normalize(surface - pass.Eye.xyz);
 	float maximum = length(surface - pass.Eye.xyz);
-	vec3 colour = base.rgb;
+	// All active media share one march. Compositing each volume independently
+	// makes two overlapping volumes change colour when their entity order changes.
+	float first = maximum;
+	float last = 0.0;
+	uint steps = 1u;
 	for (uint volumeIndex = 0u; volumeIndex < 4u; volumeIndex++) {
-		if (volumeIndex >= uint(pass.VolumeCount.x)) {
-			break;
-		}
-		Volume volume = pass.Volumes[volumeIndex];
+		if (volumeIndex >= uint(pass.VolumeCount.x)) break;
 		float enter;
 		float exit;
-		if (!Interval(volume, pass.Eye.xyz, ray, maximum, enter, exit)) {
-			continue;
-		}
+		if (!Interval(pass.Volumes[volumeIndex], pass.Eye.xyz, ray, maximum, enter, exit)) continue;
+		first = min(first, enter);
+		last = max(last, exit);
+		steps = max(steps, uint(clamp(pass.Volumes[volumeIndex].Steps.x, 1.0, 64.0)));
+	}
+	if (!(last > first)) {
+		outColour = base;
+		return;
+	}
 
-		uint steps = uint(clamp(volume.Steps.x, 1.0, 64.0));
-		float delta = (exit - enter) / float(steps);
-		float transmittance = 1.0;
-		vec3 scattering = vec3(0.0);
-		for (uint index = 0u; index < 64u; index++) {
-			if (index >= steps) {
-				break;
-			}
-			vec3 point = pass.Eye.xyz + ray * (enter + (float(index) + 0.5) * delta);
+	float delta = (last - first) / float(steps);
+	float transmittance = 1.0;
+	vec3 scattering = vec3(0.0);
+	for (uint stepIndex = 0u; stepIndex < 64u; stepIndex++) {
+		if (stepIndex >= steps) break;
+		float distanceAlongRay = first + (float(stepIndex) + 0.5) * delta;
+		vec3 point = pass.Eye.xyz + ray * distanceAlongRay;
+		float extinction = 0.0;
+		vec3 source = vec3(0.0);
+		for (uint volumeIndex = 0u; volumeIndex < 4u; volumeIndex++) {
+			if (volumeIndex >= uint(pass.VolumeCount.x)) break;
+			Volume volume = pass.Volumes[volumeIndex];
+			float enter;
+			float exit;
+			if (!Interval(volume, pass.Eye.xyz, ray, maximum, enter, exit) || distanceAlongRay < enter ||
+				distanceAlongRay > exit) continue;
 			float density = DensityAt(volume, point);
 			float light = LightTransmittance(volume, point);
-			vec3 source = volume.ColourDensity.rgb * (pass.Ambient.rgb + pass.Direct.rgb * light) * density;
-			scattering += transmittance * source * delta;
-			transmittance *= exp(-volume.ExtinctionNoise.x * density * delta);
+			extinction += volume.ExtinctionNoise.x * density;
+			source += volume.ColourDensity.rgb * (pass.Ambient.rgb + pass.Direct.rgb * light) * density;
 		}
-		colour = colour * transmittance + scattering;
+		scattering += transmittance * source * delta;
+		transmittance *= exp(-extinction * delta);
 	}
-	outColour = vec4(colour, base.a);
+	outColour = vec4(base.rgb * transmittance + scattering, base.a);
 }
