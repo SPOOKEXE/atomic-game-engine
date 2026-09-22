@@ -33,6 +33,7 @@ namespace engine::render {
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABELS = 4096;
 	// Maximum combined UTF-8 bytes in a label table.
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABEL_BYTES = 512 * 1024;
+	inline constexpr size_t MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS = 4;
 
 	// Checks for well-formed UTF-8 without normalizing the input.
 	inline bool DataCaptureUtf8(std::string_view value) {
@@ -118,6 +119,7 @@ namespace engine::render {
 		DirectionalResponse,
 		// One-byte display/export representation derived from DirectionalResponse alpha.
 		ShadowVisibility,
+		LocalLightContribution,
 		// Explicit RGBA32F render-graph packing, with four documented retained lanes.
 		PackedGpu,
 	};
@@ -162,8 +164,9 @@ namespace engine::render {
 			: channel == DataCaptureChannel::DirectionalResponse ||
 					channel == DataCaptureChannel::ShadowVisibility
 				? "-directional-response"
-			: channel == DataCaptureChannel::PackedGpu ? "-packed-gpu"
-													   : "";
+			: channel == DataCaptureChannel::LocalLightContribution ? "-local-light-response-0"
+			: channel == DataCaptureChannel::PackedGpu				? "-packed-gpu"
+																	: "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 
@@ -227,6 +230,7 @@ namespace engine::render {
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
 		// Part identities to include beside part-mask pixels.
 		std::vector<DataCapturePartLabel> PartLabels;
+		std::vector<std::string> LocalLightIds;
 		// History policy for temporal capture channels.
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 	};
@@ -256,6 +260,7 @@ namespace engine::render {
 		// Present only for the ambient-occlusion plane, including an explicit
 		// Unavailable state for an unrecognised R8 source.
 		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
+		std::string LightId;
 		// Why this channel has its reported status or contents.
 		std::string Provenance;
 		// Renderer-local preceding frame used by a verified camera-motion plane.
@@ -282,6 +287,8 @@ namespace engine::render {
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 		// Logical channels awaiting resource readback.
 		std::vector<DataCaptureChannel> Channels;
+		// Stable light identity per logical plane, empty for other channels.
+		std::vector<std::string> LightIds;
 		// Object label table retained for the final result.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Semantic label table retained for the final result.

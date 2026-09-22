@@ -7,6 +7,8 @@
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/Renderer.hpp>
 
+#include <glm/gtc/packing.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -47,7 +49,16 @@ namespace engine::render {
 				   HasChannel(channels, DataCaptureChannel::SecondSurfaceValidity);
 		}
 
-		core::Name CaptureNode(const DataCaptureTicket &ticket, DataCaptureChannel channel) {
+		core::Name
+		CaptureNode(const DataCaptureTicket &ticket, DataCaptureChannel channel, size_t planeIndex) {
+			if (channel == DataCaptureChannel::LocalLightContribution) {
+				size_t slot = 0;
+				for (size_t index = 0; index < planeIndex; ++index)
+					if (ticket.Channels[index] == DataCaptureChannel::LocalLightContribution) ++slot;
+				return core::Name(
+					std::string(ticket.CaptureNode.Text()) + "-local-light-response-" + std::to_string(slot)
+				);
+			}
 			return DataCaptureNode(ticket.CaptureNode, channel);
 		}
 
@@ -224,6 +235,39 @@ namespace engine::render {
 						"shadow_visibility_a;radiance=linear_after_fog;visibility=directional_shadow_"
 						"and_portal_beam_factor;range_a=0_to_1";
 				break;
+			case DataCaptureChannel::LocalLightContribution:
+				if (image.Resource.Text().starts_with("local-light-response-") &&
+					image.Format == ResourceImageFormat::RGBA32_Float &&
+					image.RowStride >= image.Width * 16 && image.Height > 0 &&
+					image.Pixels.size() >=
+						size_t(image.Height - 1) * image.RowStride + size_t(image.Width) * 16) {
+					std::vector<std::byte> values(size_t(image.Width) * image.Height * 8);
+					for (uint32_t y = 0; y < image.Height; ++y)
+						for (uint32_t x = 0; x < image.Width; ++x) {
+							float rgba[4];
+							std::memcpy(
+								rgba, image.Pixels.data() + size_t(y) * image.RowStride + size_t(x) * 16, 16
+							);
+							const uint64_t packed =
+								glm::packHalf4x16(glm::vec4(rgba[0], rgba[1], rgba[2], rgba[3]));
+							const size_t offset = (size_t(y) * image.Width + x) * 8;
+							for (size_t byte = 0; byte < 8; ++byte)
+								values[offset + byte] = std::byte((packed >> (byte * 8)) & 0xff);
+						}
+					Ready(
+						plane,
+						image.Resource,
+						image.Width,
+						image.Height,
+						image.Width * 8,
+						DataCaptureScalar::Float16,
+						DataCaptureColourSpace::Linear,
+						values
+					);
+					plane.Provenance = "local_light_contribution/v1;source=single_selected_local_light;"
+									   "radiance=additive_linear_before_tonemap;encoding=rgba16_float";
+				}
+				break;
 			case DataCaptureChannel::MeshUv:
 				primary(
 					core::Name("mesh-uv"),
@@ -371,6 +415,8 @@ namespace engine::render {
 			std::ranges::find(request.Channels, DataCaptureChannel::SemanticMask) != request.Channels.end();
 		const bool wantsPart =
 			std::ranges::find(request.Channels, DataCaptureChannel::PartMask) != request.Channels.end();
+		const bool wantsLocalLights =
+			HasChannel(request.Channels, DataCaptureChannel::LocalLightContribution);
 		if (!ValidSnapshotId(request.SnapshotId) || !request.Pipeline.IsValid() ||
 			!request.CaptureNode.IsValid() ||
 			request.TemporalHistory != DataCaptureTemporalHistory::Preserve ||
@@ -378,8 +424,28 @@ namespace engine::render {
 			!ticket.ChannelResourceIndices.empty() || !ticket.ResourceTokens.empty() ||
 			(wantsObjectIds && !ValidDataCaptureObjectLabels(request.ObjectLabels)) ||
 			(wantsSemantic && !ValidDataCaptureObjectLabels(request.SemanticLabels)) ||
-			(wantsPart && !ValidDataCaptureObjectLabels(request.PartLabels)))
+			(wantsPart && !ValidDataCaptureObjectLabels(request.PartLabels)) ||
+			wantsLocalLights != !request.LocalLightIds.empty() ||
+			request.LocalLightIds.size() > MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS)
 			return false;
+		for (size_t index = 0; index < request.LocalLightIds.size(); ++index) {
+			if (!ValidSnapshotId(request.LocalLightIds[index])) return false;
+			for (size_t prior = 0; prior < index; ++prior)
+				if (request.LocalLightIds[prior] == request.LocalLightIds[index]) return false;
+		}
+		std::vector<DataCaptureChannel> expandedChannels;
+		std::vector<std::string> expandedLightIds;
+		for (const DataCaptureChannel channel : request.Channels) {
+			if (channel == DataCaptureChannel::LocalLightContribution) {
+				for (const std::string &id : request.LocalLightIds) {
+					expandedChannels.push_back(channel);
+					expandedLightIds.push_back(id);
+				}
+			} else {
+				expandedChannels.push_back(channel);
+				expandedLightIds.emplace_back();
+			}
+		}
 
 		DataCaptureTicket queued{
 			.SnapshotId = request.SnapshotId,
@@ -387,7 +453,8 @@ namespace engine::render {
 			.CaptureNode = request.CaptureNode,
 			.ViewSlot = request.ViewSlot,
 			.TemporalHistory = request.TemporalHistory,
-			.Channels = request.Channels,
+			.Channels = std::move(expandedChannels),
+			.LightIds = std::move(expandedLightIds),
 			.ObjectLabels = wantsObjectIds ? request.ObjectLabels : std::vector<DataCaptureObjectLabel>{},
 			.SemanticLabels =
 				wantsSemantic ? request.SemanticLabels : std::vector<DataCaptureSemanticLabel>{},
@@ -402,12 +469,13 @@ namespace engine::render {
 		queued.GpuTimingId = State->NextCaptureTimingId++;
 		State->CaptureTimings.emplace(queued.GpuTimingId, Impl::CaptureTiming{});
 		std::vector<core::Name> resourceNodes;
-		for (const DataCaptureChannel channel : request.Channels) {
+		for (size_t channelIndex = 0; channelIndex < queued.Channels.size(); ++channelIndex) {
+			const DataCaptureChannel channel = queued.Channels[channelIndex];
 			if (UnimplementedTemporalFact(channel)) {
 				queued.ChannelResourceIndices.push_back(NO_DATA_CAPTURE_RESOURCE);
 				continue;
 			}
-			const core::Name node = CaptureNode(queued, channel);
+			const core::Name node = CaptureNode(queued, channel, channelIndex);
 			const auto existing = std::ranges::find(resourceNodes, node);
 			if (existing != resourceNodes.end()) {
 				queued.ChannelResourceIndices.push_back(
@@ -458,6 +526,7 @@ namespace engine::render {
 			return poll;
 		}
 		if (ticket.SnapshotId.empty() || ticket.Channels.empty() ||
+			ticket.LightIds.size() != ticket.Channels.size() ||
 			ticket.ChannelResourceIndices.size() != ticket.Channels.size() ||
 			!HasSecondSurfacePair(ticket.Channels) ||
 			std::ranges::any_of(ticket.ChannelResourceIndices, [&](uint8_t index) {
@@ -537,9 +606,9 @@ namespace engine::render {
 		for (size_t channelIndex = 0; channelIndex < ticket.Channels.size(); ++channelIndex) {
 			if (ticket.ChannelResourceIndices[channelIndex] == NO_DATA_CAPTURE_RESOURCE) continue;
 			const ResourceImage &channelImage = images[ticket.ChannelResourceIndices[channelIndex]];
-			correctNodes =
-				correctNodes && channelImage.Observation &&
-				channelImage.Observation->Node == CaptureNode(ticket, ticket.Channels[channelIndex]);
+			correctNodes = correctNodes && channelImage.Observation &&
+						   channelImage.Observation->Node ==
+							   CaptureNode(ticket, ticket.Channels[channelIndex], channelIndex);
 		}
 		if (image.SnapshotId != ticket.SnapshotId || !image.Observation || !correctNodes ||
 			std::any_of(images.begin(), images.end(), [&](const ResourceImage &item) {
@@ -565,6 +634,7 @@ namespace engine::render {
 		for (size_t index = 0; index < ticket.Channels.size(); ++index) {
 			const DataCaptureChannel channel = ticket.Channels[index];
 			DataCapturePlane plane = Plane(channel, ticket);
+			plane.LightId = ticket.LightIds[index];
 			if (channel == DataCaptureChannel::ShadowVisibility) {
 				poll.Planes.push_back(std::move(plane));
 				continue;
