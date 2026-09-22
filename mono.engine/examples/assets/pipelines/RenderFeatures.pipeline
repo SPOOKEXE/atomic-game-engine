@@ -33,6 +33,7 @@ resource "sky-lit" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient 
 resource "volume-lit" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "lens-b" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "lens-scratch" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "bloom" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "tonemapped" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "portaled" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "mirrored" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
@@ -155,8 +156,12 @@ reads "display" "colour"
 reads "linear-depth" "depth"
 writes "lens-b" "colour"
 writes "lens-scratch" "scratch"
+node "bloom" "bloom" view no
+reads "lens-b" "source"
+writes "bloom" "bloom"
 node "tonemap" "tonemap" view no
 reads "lens-b" "colour"
+reads "bloom" "bloom"
 writes "tonemapped" "colour"
 node "present" "present" frame no
 reads "tonemapped" "image"

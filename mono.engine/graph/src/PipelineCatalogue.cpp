@@ -438,6 +438,7 @@ namespace engine::graph {
 				 "sky",
 				 "fog",
 				 "shader-lenses",
+				 "bloom",
 				 "tonemap",
 				 "eye-image",
 				 "portal-overlay",

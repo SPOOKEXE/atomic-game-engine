@@ -19,11 +19,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 29);
+	CHECK(canvas.Nodes().size() == 30);
 
 	// The environment compute stages add three links before the lit colour and
 	// depth enter the sky pass. Pin the stages below so this remains a checksum.
-	CHECK(canvas.Links().size() == 58);
+	CHECK(canvas.Links().size() == 60);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -61,6 +61,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	REQUIRE(shaderLenses != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(shaderLenses->Id, "colour") != nullptr);
 	CHECK(canvas.LinkInto(shaderLenses->Id, "depth") != nullptr);
+	const auto bloom = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+		return node.Type == "render.pass.bloom";
+	});
+	REQUIRE(bloom != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(bloom->Id, "source") != nullptr);
 	const auto surfaceCapture =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.surface-capture";

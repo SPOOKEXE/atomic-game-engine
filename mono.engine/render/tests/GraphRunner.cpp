@@ -95,6 +95,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "mirror-overlay@0",
 				   "transparent@0",
 				   "shader-lenses@0",
+				   "bloom@0",
 				   "tonemap@0",
 				   "present",
 				   "interface",
@@ -102,7 +103,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 28);
+	CHECK(runner.Submitted() == 29);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 

@@ -987,7 +987,7 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 	CHECK(reply["limits"]["maximum_hooks"] == 18);
 	CHECK(reply["limits"]["maximum_connections"] == 6);
 	CHECK(reply["limits"]["maximum_batches"] == 6);
-	CHECK(reply["limits"]["maximum_readback_nodes"] == 11);
+	CHECK(reply["limits"]["maximum_readback_nodes"] == 10);
 	CHECK(reply["limits"]["maximum_retained_bytes"] == 67'108'864);
 	CHECK(reply["limits"]["maximum_pending_pumps"] == 600);
 	CHECK(reply["limits"]["named_camera_selection"] == true);
