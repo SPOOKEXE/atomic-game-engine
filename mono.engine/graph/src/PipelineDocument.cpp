@@ -1584,6 +1584,25 @@ namespace engine::graph {
 			 .Target = core::Name("directional-response"),
 			 .Key = core::Name("source")}
 		);
+		// Each requested local light has a dedicated capture node. The response resources
+		// are populated by the shading pass only when their selected light is visible.
+		const std::array<std::pair<const char *, const char *>, 4> localLightResponses{{
+			{"data-capture-local-light-response-0", "local-light-response-0"},
+			{"data-capture-local-light-response-1", "local-light-response-1"},
+			{"data-capture-local-light-response-2", "local-light-response-2"},
+			{"data-capture-local-light-response-3", "local-light-response-3"},
+		}};
+		for (const auto &[node, resource] : localLightResponses) {
+			document.Record(
+				{.Kind = EditKind::AddNode,
+				 .Name = core::Name(node),
+				 .NodeKind = core::Name("capture"),
+				 .Scope = NodeScope::Frame}
+			);
+			document.Record(
+				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
+			);
+		}
 		// The packed target is capture-only: native depth and material facts stay available
 		// independently, while this resource provides an opt-in GPU RGBA32F readback.
 		document.Record(

@@ -174,7 +174,8 @@ namespace {
 					 "object_ids",
 					 "semantic_ids",
 					 "part_ids",
-					 "first_surface_validity"},
+					 "first_surface_validity",
+					 "local_light_contribution"},
 				.StorageProfiles = {"lossless", "training_compact"},
 				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
 				.NoiseLimitations = {"gaussian=rgb_linear_hdr_only"},
@@ -199,7 +200,7 @@ namespace {
 				.MaximumConnections = 6,
 				.MaximumBatches = 6,
 				.MaximumCaptureTickets = 6,
-				.MaximumReadbackNodes = 10,
+				.MaximumReadbackNodes = 11,
 				.MaximumRetainedBytes = 64u * 1024u * 1024u,
 				.MaximumPendingPumps = 600,
 				.NamedCameraSelection = NamedCameraSelection,
@@ -221,6 +222,7 @@ namespace {
 			ViewSlot = request.ViewSlot;
 			Channels = request.Channels;
 			PackedPlanes = request.PackedPlanes;
+			LocalLightIds = request.LocalLightIds;
 			IncludeSceneData = request.IncludeSceneData;
 			StorageProfile = request.StorageProfile;
 			NoiseMode = request.NoiseMode;
@@ -452,6 +454,9 @@ namespace {
 		const std::vector<engine::script::DataCaptureBridgePackedPlane> &RequestedPackedPlanes() const {
 			return PackedPlanes;
 		}
+		const std::vector<std::string> &RequestedLocalLightIds() const {
+			return LocalLightIds;
+		}
 		void UseUnavailableAmbientOcclusion() {
 			UnavailableAmbientOcclusion = true;
 		}
@@ -472,6 +477,7 @@ namespace {
 		std::string CaptureNode;
 		std::string CameraId;
 		std::vector<std::string> Channels;
+		std::vector<std::string> LocalLightIds;
 		std::vector<engine::script::DataCaptureBridgePackedPlane> PackedPlanes;
 		uint64_t ViewSlot = 0;
 		bool Queued = false;
@@ -665,6 +671,36 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 										   "part_ids"
 									   }
 	);
+	json localLightCapture = {
+		{"instance_id", "capture-world"},
+		{"snapshot_id", "snapshot-1"},
+		{"pipeline", "default_pbr"},
+		{"capture_node", "capture"},
+		{"view_slot", 0},
+		{"channels", json::array({"local_light_contribution"})},
+		{"local_light_ids", json::array({"light/key", "light/fill"})},
+		{"temporal_history", "preserve"},
+		{"operation_id", "capture-local-lights"},
+		{"expected_tick", current.Clock.Tick},
+		{"expected_world_epoch", current.WorldEpoch},
+		{"expected_world_version", current.WorldVersion},
+	};
+	CHECK(Called(surface, "capture", localLightCapture)["status"] == "queued");
+	CHECK(bridge->RequestedChannels() == std::vector<std::string>{"local_light_contribution"});
+	CHECK(bridge->RequestedLocalLightIds() == std::vector<std::string>{"light/key", "light/fill"});
+	bool localLightFailed = false;
+	json missingLocalLightIds = localLightCapture;
+	missingLocalLightIds["operation_id"] = "capture-local-lights-missing";
+	missingLocalLightIds.erase("local_light_ids");
+	const json missingLocalLightReply = Called(surface, "capture", missingLocalLightIds, localLightFailed);
+	CHECK(localLightFailed);
+	CHECK(missingLocalLightReply["error"] == "validation_failed: local_light_ids must accompany local_light_contribution");
+	json duplicateLocalLightIds = localLightCapture;
+	duplicateLocalLightIds["operation_id"] = "capture-local-lights-duplicate";
+	duplicateLocalLightIds["local_light_ids"] = json::array({"light/key", "light/key"});
+	const json duplicateLocalLightReply = Called(surface, "capture", duplicateLocalLightIds, localLightFailed);
+	CHECK(localLightFailed);
+	CHECK(duplicateLocalLightReply["error"] == "validation_failed: local_light_ids must be unique");
 	const json poll = Called(surface, "poll_capture", json{{"instance_id", "capture-world"}, {"ticket", 1}});
 	CHECK(poll["planes"][0]["digest"] == "abcd");
 	CHECK(poll["planes"][0]["hash_algorithm"] == "blake3-256");
@@ -950,6 +986,28 @@ TEST_CASE(
 	json unpaired = request("bundle-unpaired", CaptureBundleOptions(json::array({"second_surface_depth"})));
 	Called(surface, "capture_bundle", unpaired, failed);
 	CHECK(failed);
+	json localLight = request(
+		"bundle-local-lights", CaptureBundleOptions(json::array({"local_light_contribution"}))
+	);
+	localLight["options"]["local_light_ids"] = json::array({"light/key", "light/fill"});
+	CHECK(Called(surface, "capture_bundle", localLight)["status"] == "queued");
+	CHECK(bridge->RequestedChannels() == std::vector<std::string>{"local_light_contribution"});
+	CHECK(bridge->RequestedLocalLightIds() == std::vector<std::string>{"light/key", "light/fill"});
+	json localLightMissing = localLight;
+	localLightMissing["operation_id"] = "bundle-local-lights-missing";
+	localLightMissing["options"].erase("local_light_ids");
+	const json localLightMissingReply = Called(surface, "capture_bundle", localLightMissing, failed);
+	CHECK(failed);
+	CHECK(
+		localLightMissingReply["error"] ==
+		"validation_failed: local_light_ids must accompany local_light_contribution"
+	);
+	json localLightDuplicate = localLight;
+	localLightDuplicate["operation_id"] = "bundle-local-lights-duplicate";
+	localLightDuplicate["options"]["local_light_ids"] = json::array({"light/key", "light/key"});
+	const json localLightDuplicateReply = Called(surface, "capture_bundle", localLightDuplicate, failed);
+	CHECK(failed);
+	CHECK(localLightDuplicateReply["error"] == "validation_failed: local_light_ids must be unique");
 	json sidecar = request("bundle-sidecar");
 	sidecar["options"]["include_scene_data"] = true;
 	const json sidecarReply = Called(surface, "capture_bundle", sidecar);

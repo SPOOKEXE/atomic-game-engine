@@ -650,6 +650,50 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 	request.Channels = {DataCaptureChannel::SecondSurfaceDepth};
 	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
 	CHECK(ticket.ChannelResourceIndices.empty());
+
+	request.Channels = {DataCaptureChannel::LocalLightContribution};
+	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
+	request.LocalLightIds = {"light/key", "light/key"};
+	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
+}
+
+TEST_CASE("data capture expands each requested local light into one logical plane", "[render][gpu][data-capture]") {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("local-light-capture-expansion");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+
+	DataCaptureRequest request{
+		.SnapshotId = "local-light-snapshot",
+		.Pipeline = pipeline,
+		.CaptureNode = core::Name("data-capture"),
+		.Channels = {DataCaptureChannel::LocalLightContribution},
+		.ObjectLabels = {},
+		.SemanticLabels = {},
+		.PartLabels = {},
+		.LocalLightIds = {"light/key", "light/fill"},
+	};
+	DataCaptureTicket ticket;
+	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	CHECK(
+		ticket.Channels ==
+		std::vector<DataCaptureChannel>{
+			DataCaptureChannel::LocalLightContribution, DataCaptureChannel::LocalLightContribution
+		}
+	);
+	CHECK(ticket.LightIds == std::vector<std::string>{"light/key", "light/fill"});
+	CHECK(ticket.LocalLightMatched == std::vector<uint8_t>{0, 0});
+	CHECK(ticket.ChannelResourceIndices.size() == 2);
+	CHECK(ticket.ResourceTokens.size() == 2);
+	renderer.CancelDataCapture(ticket);
 }
 
 TEST_CASE(
@@ -754,6 +798,47 @@ TEST_CASE(
 	ambient.RowStride = 1;
 	capture_record_validation::State malformedAmbient;
 	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, malformedAmbient));
+}
+
+TEST_CASE("local-light planes validate per light and preserve unavailable identity", "[render][data-capture]") {
+	DataCaptureTicket ticket;
+	ticket.CaptureNode = engine::core::Name("capture");
+	ticket.Channels = {
+		DataCaptureChannel::LocalLightContribution,
+		DataCaptureChannel::LocalLightContribution,
+	};
+	ticket.LightIds = {"light/key", "light/culled"};
+
+	DataCapturePlane ready;
+	ready.Channel = DataCaptureChannel::LocalLightContribution;
+	ready.CaptureNode = ticket.CaptureNode;
+	ready.Status = DataCaptureStatus::Ready;
+	ready.Resource = engine::core::Name("local-light-key");
+	ready.LightId = "light/key";
+	ready.Width = 1;
+	ready.Height = 1;
+	ready.RowStride = 8;
+	ready.Scalar = DataCaptureScalar::Float16;
+	ready.ColourSpace = DataCaptureColourSpace::Linear;
+	ready.Provenance = "local_light_contribution/v1;source=single_selected_local_light;"
+					 "radiance=additive_linear_before_tonemap;encoding=rgba16_float";
+	ready.Bytes.assign(8, std::byte{0});
+	ready.Hash = engine::assets::Hasher::Of(ready.Bytes);
+
+	DataCapturePlane unavailable;
+	unavailable.Channel = DataCaptureChannel::LocalLightContribution;
+	unavailable.CaptureNode = ticket.CaptureNode;
+	unavailable.Status = DataCaptureStatus::Unsupported;
+	unavailable.LightId = "light/culled";
+	unavailable.Provenance = "unavailable/local_light_not_visible_or_culled/v1";
+
+	capture_record_validation::State state;
+	CHECK(capture_record_validation::Plane(ticket, ready, 17, state));
+	CHECK(capture_record_validation::Plane(ticket, unavailable, 17, state));
+
+	DataCapturePlane duplicate = ready;
+	duplicate.Resource = engine::core::Name("local-light-key-duplicate");
+	CHECK_FALSE(capture_record_validation::Plane(ticket, duplicate, 17, state));
 }
 
 TEST_CASE("second surface capture records one strict aligned provenance pair", "[render][data-capture]") {
