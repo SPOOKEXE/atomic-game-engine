@@ -167,7 +167,7 @@ mono_add_library(studio
 	# document and reuses that emitter. **Private, and it stays private**: this
 	# is a parser for one file extension in an editor, and nothing in a public
 	# header here names a `toml::` type.
-	VENDOR Vendor::tomlplusplus
+	VENDOR Vendor::tomlplusplus Vendor::accesskit-c Vendor::json
 
 	ALLOW_TIER_ESCAPE Mono::server
 )

@@ -78,6 +78,7 @@
 
 #include <array>
 #include <atomic>
+#include <client/Accessibility.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
@@ -139,6 +140,7 @@ struct ImGuiTableSortSpecs;
 
 namespace studio {
 	struct ComponentPanelProbe;
+	struct UiAuthoringProbe;
 	struct ToolsProbe;
 	struct ViewportCameraProbe;
 	struct PlayedInputAdapter;
@@ -906,6 +908,7 @@ namespace studio {
 
 	  private:
 		friend struct ComponentPanelProbe;
+		friend struct UiAuthoringProbe;
 		friend struct ToolsProbe;
 		friend struct ViewportCameraProbe;
 
@@ -991,6 +994,7 @@ namespace studio {
 		// `FocusedViewport`.
 		void ResolveFocusedViewport();
 		void DrawProperties();
+		void DrawUiAuthoring();
 		void DrawShaderCapabilities(
 			Entity shader, const engine::scene::ShaderSource &source, engine::core::Name name
 		);
@@ -3556,11 +3560,11 @@ namespace studio {
 			"independently - `world_run` starts one without starting the rest, and stopping restores "
 			"the snapshot taken when it started."
 		};
-
 		// Owns the editor-only rows while the control surface is available.
 		engine::control::HookLease StudioControlHook;
 		// Owns the camera calibration row while the renderer and universe are available.
 		engine::control::HookLease StudioSceneRenderingHook;
+
 		// The window and the things that draw into it.
 		//
 		// **Held by value and in this order**, because destruction runs
@@ -3568,6 +3572,7 @@ namespace studio {
 		// renderer before the window it borrowed its device from.
 		//@{
 		SDL_Window *Window = nullptr;
+		std::unique_ptr<client::AccessibilityAdapter> NativeAccessibility;
 		std::unique_ptr<PlayedInputAdapter> PlayedInput;
 		engine::render::Renderer Renderer;
 
@@ -4206,6 +4211,7 @@ namespace studio {
 		// are different sizes: a single target would be reallocated twice a
 		// frame as each asked for its own dimensions.
 		engine::render::SceneTarget WorldTarget;
+		GuiPreviewSettings MainGuiPreview;
 
 		// What a viewport panel is looking at, and from where.
 		//
@@ -4214,6 +4220,7 @@ namespace studio {
 		// the second is to watch a different world, or the same world from
 		// somewhere else, while the first stays where it was put.
 		struct ViewportState {
+			GuiPreviewSettings GuiPreview;
 			// Which world it draws, or invalid to follow the active one.
 			WorldId World;
 
@@ -4439,6 +4446,7 @@ namespace studio {
 		// `gui::Compiled` is for. A fresh one per frame would compute a
 		// signature, find nothing to compare it against and rebuild every time.
 		std::vector<engine::gui::Compiled> GuiLists;
+		std::vector<engine::gui::LocalizationCache> GuiLocalizations;
 
 		// The retained scene, game UI, host UI, and geometry signatures for each
 		// viewport. A turn in the round robin can update one image without
@@ -4492,6 +4500,39 @@ namespace studio {
 
 		// The click waiting to become a selection, if any.
 		PendingPickAction PendingPick;
+
+		// One direct manipulation of a GUI rectangle. The authored UDim2 values
+		// are captured on grab, while Resolved supplies only the canvas-space
+		// feedback rectangle.
+		struct GuiCanvasDrag {
+			WorldId World;
+			Entity Instance;
+			size_t Viewport = 0;
+			engine::core::UDim2 Position;
+			engine::core::UDim2 Size;
+			engine::core::UDim2 BeforePosition;
+			engine::core::UDim2 BeforeSize;
+			bool Resize = false;
+			bool Moved = false;
+		};
+
+		GuiCanvasDrag GuiDragging;
+
+		// A canvas drag writes after the viewport left Universe::Enter. Its final
+		// update commits one grouped undo step for Position and Size.
+		struct PendingGuiCanvasEdit {
+			WorldId World;
+			Entity Instance;
+			engine::core::UDim2 Position;
+			engine::core::UDim2 Size;
+			engine::core::UDim2 BeforePosition;
+			engine::core::UDim2 BeforeSize;
+			bool Resize = false;
+			bool Commit = false;
+			bool Wanted = false;
+		};
+
+		PendingGuiCanvasEdit PendingGuiEdit;
 
 		// An Alt-click waiting to place the editor's 3D cursor after projection
 		// data is available.
@@ -5576,6 +5617,17 @@ namespace studio {
 		bool ShowExplorer = true;
 		bool ShowWorlds = true;
 		bool ShowProperties = true;
+		bool ShowUiAuthoring = false;
+		std::string UiDocumentImportPath;
+		std::string UiDocumentExportPath;
+		std::string UiThemeTokenImportPath;
+		std::string UiLocalizationImportPath;
+		std::string UiDocumentStatus;
+		std::string UiThemeTokenDraft = "token";
+		std::string UiAnimationMarkerDraft = "marker";
+		std::unordered_map<std::string, std::string> UiAuthoringTextDrafts;
+		uint64_t UiAuthoringDraftEntity = 0;
+		uint32_t UiAuthoringDraftEpoch = 0;
 		bool ShowComponents = true;
 		bool ShowScripts = false;
 		bool ShowDatasets = false;

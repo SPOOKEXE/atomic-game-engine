@@ -236,6 +236,7 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	// two was excluded, so the authority's screen rectangle crossed to every
 	// client and was overwritten by that client's next layout pass.
 	CHECK(LocalToTheClient("gui.Canvas"));
+	CHECK(LocalToTheClient("gui.CanvasTransform"));
 	CHECK(LocalToTheClient("gui.Resolved"));
 
 	// And what an author wrote still crosses, which is the line the whole gui
@@ -296,6 +297,7 @@ TEST_CASE("a serialiser is not enough to cross, and the two that say so", "[repl
 	CHECK(engine::replication::CannotBeSigned("scene.ShaderSource"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasNode"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasGroup"));
+	CHECK(engine::replication::CannotBeSigned("gui.VirtualCollection"));
 
 	// And the ordinary case, so this is a rule rather than a list: a component
 	// whose bytes *can* be hashed is signed, and declaring it here would buy a

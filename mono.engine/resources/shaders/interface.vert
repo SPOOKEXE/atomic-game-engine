@@ -21,6 +21,8 @@ layout(set = 1, binding = 0) uniform Canvas {
 	// The target, in pixels. One divide rather than a matrix: an interface is
 	// an axis-aligned orthographic projection and nothing here rotates.
 	vec2 Size;
+	vec2 Origin;
+	vec2 Scale;
 } canvas;
 
 void main() {
@@ -28,7 +30,7 @@ void main() {
 	outColour = inColour;
 	outCanvasPosition = inPosition;
 
-	const vec2 normalised = inPosition / canvas.Size;
+	const vec2 normalised = (canvas.Origin + inPosition * canvas.Scale) / canvas.Size;
 
 	// SDL's GPU clip space is Y-up on every backend - its Vulkan path submits a
 	// negative-height viewport to make that true - while a canvas has its origin

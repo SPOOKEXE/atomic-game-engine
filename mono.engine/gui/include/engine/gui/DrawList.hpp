@@ -29,6 +29,7 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/gui/Enums.hpp>
+#include <engine/gui/ShapedText.hpp>
 
 #include <cstdint>
 #include <string>
@@ -56,15 +57,25 @@ namespace engine::gui {
 		Text,
 	};
 
+	// Structural paint boundaries. They describe work which must be isolated by
+	// a presentation adapter, while DrawCommand remains the flat primitive list.
+	//
+	// @since v0.23
+	enum class DrawOperationKind : uint8_t {
+		BeginMask,
+		EndMask,
+		BeginGroup,
+		EndGroup,
+	};
+
 	// One styled stretch of a text run.
 	//
 	// **A range over the command's own string rather than a string of its own.**
-	// The backend is the only thing that can measure a glyph, so a rich-text run
-	// has to reach it as one string it lays out in one pass - spans carrying
-	// their own text would have to be positioned by whoever built them, using
-	// compile-time estimates, and the second word would land somewhere the
-	// renderer disagrees with. That is `Layout.hpp`'s one-answer rule applied to
-	// markup.
+	// The canonical headless shaper lays out the complete string in one pass,
+	// applying these ranges before publishing glyph positions. Keeping spans
+	// over the source lets every backend consume the same shaped result without
+	// positioning each styled fragment independently. That is `Layout.hpp`'s
+	// one-answer rule applied to markup.
 	//
 	// Ranges are byte offsets, in order, and do not overlap. Anything not
 	// covered by a span is drawn in the command's own colour, face and size.
@@ -114,6 +125,15 @@ namespace engine::gui {
 		// which is the question every UI debugging session opens with.
 		ecs::Entity Source;
 
+		// A virtual facet keeps the authored template as its source while naming
+		// the source collection and stable record key that produced this command.
+		// Both are empty for ordinary tree commands.
+		//@{
+		ecs::Entity Collection;
+		std::string Key;
+		uint32_t Index = UINT32_MAX;
+		//@}
+
 		// The `LayerCollector` whose canvas these pixels belong to.
 		//
 		// A screen collector and a spatial collector may both use (0, 0), but
@@ -140,8 +160,8 @@ namespace engine::gui {
 		// `Image` command's multiplier, a `Rectangle`'s fill.
 		core::Color3 Tint{1.0f, 1.0f, 1.0f};
 
-		// 0 is opaque and 1 is invisible. A command at 1 is not emitted at all,
-		// so a backend never has to test for it.
+		// 0 is opaque and 1 is invisible. Transparent geometry can remain in the
+		// list so hit testing and retained paint ranges keep the same structure.
 		float Transparency = 0.0f;
 
 		// How thick an `Outline` is, in pixels. Ignored by every other kind.
@@ -206,6 +226,7 @@ namespace engine::gui {
 		// `Compiled` - so this allocates on a rebuild rather than per frame, and
 		// a run short enough for the small-string buffer never allocates at all.
 		std::string Text;
+		ShapedText Shaping;
 
 		// The em size to draw at, already fitted and clamped. **A backend uses
 		// this rather than measuring again** - see `Layout.hpp` on why there is
@@ -288,6 +309,43 @@ namespace engine::gui {
 		core::Vector2 Axis;
 	};
 
+	// A semantic boundary at a command position. A boundary before command N has
+	// Command == N; an end boundary after the final command has Command equal to
+	// DrawList::Commands.size(). Backends may use stencil or a transient layer,
+	// but must not turn this back into per-command alpha.
+	//
+	// @since v0.23
+	struct DrawOperation {
+		DrawOperationKind Kind = DrawOperationKind::BeginMask;
+		ecs::Entity Source;
+		ecs::Entity Collector;
+		size_t Command = 0;
+		core::Rect Bounds;
+		core::Rect Clip;
+		float CornerRadius = 0.0f;
+		float Transparency = 0.0f;
+	};
+
+	// One collector's logical-to-presentation map. Commands remain in the
+	// collector's logical coordinates so scripts, layout and input share them.
+	struct CollectorTransform {
+		ecs::Entity Collector;
+		core::Vector2 Origin;
+		core::Vector2 Scale{1.0f, 1.0f};
+	};
+
+	// One contiguous paint-order run belonging to a collector.
+	//
+	// A collector can appear more than once: selection adornments are appended
+	// after ordinary paint. Retained render targets therefore cache this range,
+	// not every command owned by the collector, so compositing preserves z-order.
+	struct CollectorRange {
+		ecs::Entity Collector;
+		size_t First = 0;
+		size_t Count = 0;
+		bool Spatial = false;
+	};
+
 	// A whole frame's worth, in paint order.
 	//
 	// @since v0.8
@@ -297,8 +355,17 @@ namespace engine::gui {
 		// backwards for exactly that reason.
 		std::vector<DrawCommand> Commands;
 
+		// Nested mask and isolated canvas-group boundaries in paint order.
+		std::vector<DrawOperation> Operations;
+
 		// The ramps `DrawCommand::Gradient` indexes. Usually empty.
 		std::vector<DrawGradient> Gradients;
+
+		// One transform per collector represented by this list.
+		std::vector<CollectorTransform> Transforms;
+
+		// Consecutive command ranges in their exact paint order.
+		std::vector<CollectorRange> CollectorRanges;
 
 		// The canvas this was compiled against, in pixels.
 		core::Vector2 CanvasSize;

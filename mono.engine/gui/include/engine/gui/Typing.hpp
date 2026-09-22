@@ -34,8 +34,8 @@
 // already, and an undo stack is state that would have to live somewhere and rule
 // 2 says where - a component, once something asks for one.
 //
-// **No caret drawing.** `DrawKind` has four members and none of them is a line
-// blinking at a character offset. `Entry::CursorPosition` is where the answer is
+// **No caret drawing.** The draw list has no blinking caret command.
+// `Entry::CursorPosition` is where the answer is
 // for whoever draws one.
 //
 // @tier L7 · shared
@@ -43,6 +43,7 @@
 #include <engine/ecs/Entity.hpp>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace engine::ecs {
@@ -66,19 +67,19 @@ namespace engine::gui {
 		//
 		// **The layout's answer and not the keyboard's**, which is why this is a
 		// string and not a set of key codes: `Shift` plus `1` is `!` here, an
-		// input method commits a whole word at once, and one character is between
-		// one and four bytes. `input::Translator::TypedText` is what produces it
+		// input method commits a whole word at once, and one Unicode grapheme may
+		// span several code points. `input::Translator::TypedText` is what produces it
 		// on a client.
 		std::string_view Text;
 
 		// Whether Backspace was pressed.
 		//
-		// **Deletes the selection when there is one and one *character* when
+		// **Deletes the selection when there is one and one *grapheme* when
 		// there is not** - never one byte, which would leave a lone continuation
 		// byte behind and turn the rest of the string into a question mark.
 		bool Backspace = false;
 
-		// Which way the caret moved, in characters. Negative is left.
+		// Which way the caret moved, in graphemes. Negative is left.
 		//
 		// A count rather than a flag so that a host with key repeat can hand over
 		// what a held arrow did, and clamped to the text at both ends.
@@ -94,6 +95,15 @@ namespace engine::gui {
 		//
 		// What it does is `Entry::MultiLine`'s to decide - see `Type`.
 		bool Submit = false;
+
+		// The input method's uncommitted candidate. This remains derived UI state
+		// until `Text` arrives in a later committed-text event. Kept after the
+		// established five keyboard fields so positional construction preserves
+		// its existing meaning.
+		std::string_view Preedit;
+		int32_t PreeditStart = -1;
+		int32_t PreeditLength = -1;
+		uint64_t PreeditRevision = 0;
 	};
 
 	// What one frame's typing did.
@@ -154,4 +164,8 @@ namespace engine::gui {
 	// @see gui::Focus
 	// @since v0.15
 	TypeResult Type(ecs::Store &store, const Typing &typing);
+
+	// Resolves the current input-method candidate into the focused text box's
+	// visible text. The returned string is presentation data only.
+	std::string TextWithComposition(const ecs::Store &store, ecs::Entity instance, std::string_view text);
 }

@@ -54,8 +54,10 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/gui/Animation.hpp>
 #include <engine/gui/Enums.hpp>
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -293,6 +295,42 @@ namespace engine::gui {
 
 		// Explicit padding, for the reason every other `Reserved` gives.
 		uint8_t Reserved[3] = {};
+	};
+
+	// Optional authored presentation metadata for a text instance.
+	//
+	// Kept outside `Label` because Label's packed custom serialization format
+	// predates these fields. A separate component lets older saved Label rows
+	// retain their original byte layout.
+	struct LabelPresentation {
+		// An optional stable catalogue key. Label::Text remains the source
+		// fallback, while the resolved locale stays local to the viewer.
+		core::Name LocalizationKey;
+	};
+
+	// One bounded typed value supplied to a localized label message.
+	//
+	// A name is stable authored data. String values are bounded before they
+	// cross a save or replication boundary; number and date values carry no
+	// formatted cache because the viewer locale owns that result.
+	struct LabelLocalizationArgument {
+		core::Name Name;
+		LocalizedArgumentType Type = LocalizedArgumentType::String;
+		std::string String;
+		double Number = 0.0;
+		int64_t UnixSeconds = 0;
+	};
+
+	// Optional authored arguments for LabelPresentation::LocalizationKey.
+	//
+	// It has its own component wire name so the original LabelPresentation row
+	// remains readable by saves written before localized arguments existed.
+	struct LabelLocalizationArguments {
+		static constexpr size_t MAXIMUM_ARGUMENTS = 8;
+		static constexpr size_t MAXIMUM_STRING_BYTES = 512;
+
+		std::array<LabelLocalizationArgument, MAXIMUM_ARGUMENTS> Values{};
+		uint8_t Count = 0;
 	};
 
 	// The image an element shows.
@@ -718,6 +756,10 @@ namespace engine::gui {
 		// Whether a person may type into it at all.
 		bool TextEditable = true;
 
+		// Whether the value is sensitive. The compiled accessibility tree exposes
+		// the password state but never the text itself.
+		bool Password = false;
+
 		// The caret's position in the text, or -1 when unfocused.
 		//
 		// **Roblox's number: one-based, and counted in characters rather than
@@ -748,17 +790,35 @@ namespace engine::gui {
 		// Which collector draws on top. Higher draws later.
 		int32_t DisplayOrder = 0;
 
+		// The logical design canvas. A zero axis keeps the collector's available
+		// canvas as its authored space.
+		core::Vector2 ReferenceResolution;
+
 		// Whether this collector and its subtree are drawn at all.
 		bool Enabled = true;
 
 		// Whether `ZIndex` is compared across the collector or among siblings.
 		ZIndexBehavior Behavior = ZIndexBehavior::Sibling;
 
+		// How `ReferenceResolution` maps into the available presentation area.
+		CollectorScaleMode ScaleMode = CollectorScaleMode::Stretch;
+
 		// Whether the tree is rebuilt when the player respawns.
 		bool ResetOnSpawn = true;
 
 		// Whether the canvas covers the top bar's strip as well.
 		bool IgnoreGuiInset = false;
+
+		// Keeps object-representation serialization deterministic.
+		uint8_t Reserved[3] = {};
+	};
+
+	// The one affine map from a collector's logical canvas into the presentation
+	// canvas. `Resolved` remains in logical coordinates; draw and input consume
+	// this map at their respective boundary.
+	struct CanvasTransform {
+		core::Vector2 Origin;
+		core::Vector2 Scale{1.0f, 1.0f};
 	};
 
 	// The canvas rectangle a collector's roots lay out inside.
@@ -1063,6 +1123,17 @@ namespace engine::gui {
 		float Transparency = 0.0f;
 	};
 
+	// Clips a GuiObject and its subtree to a rounded rectangle. It is a modifier
+	// child, like UICorner, so one object owns the geometry and the mask never
+	// becomes a second authored rectangle.
+	//
+	// @since v0.23
+	struct Mask {
+		core::UDim Radius{0.0f, 0.0f};
+		bool Enabled = true;
+		uint8_t Reserved[3] = {};
+	};
+
 	// What a `ViewportFrame` renders into itself.
 	//
 	// @since v0.8
@@ -1085,9 +1156,23 @@ namespace engine::gui {
 		// 0 is opaque and 1 is invisible.
 		float Transparency = 0.0f;
 
+		// Requested scale of the frame's resolved rectangle. The renderer clamps
+		// the result to its project and device target limits before allocation.
+		float ResolutionScale = 1.0f;
+
+		// The retained-target refresh contract. `Manual` refreshes only after
+		// InvalidationRevision changes; `FixedRate` uses UpdateEveryFrames.
+		ViewportUpdateMode UpdateMode = ViewportUpdateMode::OnChange;
+		uint8_t UpdateReserved[7] = {};
+		uint32_t UpdateEveryFrames = 1;
+
+		// An authored monotonic token for scripts and Studio to request a manual
+		// target refresh without perturbing scene properties.
+		uint32_t InvalidationRevision = 0;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
 		// `CurrentCamera` aligns the whole component to eight.
-		uint8_t Reserved[4] = {};
+		uint8_t Reserved[8] = {};
 	};
 
 	// --- the modifiers ------------------------------------------------------
@@ -1608,6 +1693,31 @@ namespace engine::gui {
 		float Factor = 1.0f;
 	};
 
+	// An authored presentation clip attached below the GuiObject it affects.
+	// `StartedAt` uses the caller-supplied compile timeline. A negative value
+	// starts the clip on its first local sample, which is how a restored or
+	// replicated attachment avoids inheriting another process's clock origin.
+	//
+	// @since v0.25
+	struct AnimationPlayback {
+		UIAnimation Clip;
+		double StartedAt = -1.0;
+		bool Playing = true;
+		uint8_t Reserved[7] = {};
+	};
+
+	// A local sample of `AnimationPlayback`, rebuilt from explicit compile time.
+	// It is derived presentation state and is deliberately never serialized or
+	// replicated: each view samples the authored clip on its own timeline.
+	//
+	// @since v0.25
+	struct PresentationState {
+		PresentationOverrides Overrides;
+		bool Active = false;
+		bool Moving = false;
+		uint8_t Reserved[6] = {};
+	};
+
 	// --- what the layout pass produces --------------------------------------
 
 	// Where an element actually ended up.
@@ -1646,11 +1756,9 @@ namespace engine::gui {
 
 		// How much room the string takes at `TextSize`, in canvas pixels.
 		//
-		// **The layout's estimate and not a backend's measurement**, which is
-		// `Layout.hpp`'s standing rule: `AVERAGE_ADVANCE` is the one answer this
-		// engine has, so `TextBounds` agrees with what `TextScaled` fitted and
-		// with what a headless test asserts. A backend with real metrics would
-		// disagree with both, which is why nothing asks one.
+		// Layout uses the supplied font package's shaped advance when one is
+		// available. A headless caller without fonts gets the constant advance
+		// fallback. Backends read this answer rather than measuring again.
 		//
 		// @since v0.18
 		core::Vector2 TextBounds;
@@ -1914,5 +2022,16 @@ namespace engine::gui {
 		// Explicit padding, for the reason every other `Reserved` gives. Both
 		// handles align the whole component to eight.
 		uint8_t Reserved[6] = {};
+	};
+
+	// Viewer-local input-method text. Kept apart from the serializable service
+	// state because an unfinished platform candidate must never cross a save or
+	// replication boundary.
+	struct TextCompositionState {
+		ecs::Entity TextBox;
+		std::string Text;
+		int32_t Start = -1;
+		int32_t Length = -1;
+		uint64_t Revision = 0;
 	};
 }

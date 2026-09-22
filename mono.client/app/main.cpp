@@ -120,6 +120,8 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("width", "PX", "Window width (default 1280)");
 	arguments.Value("height", "PX", "Window height (default 720)");
+	arguments.Value("interface-scale", "FACTOR", "Screen interface scale (default 1.0)");
+	arguments.Value("text-scale", "FACTOR", "Screen text accessibility scale (default 1.0)");
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems, counters or heap");
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
@@ -179,6 +181,7 @@ int main(int argc, char **argv) {
 		"TEXT",
 		"Type this into the focused TextBox once, mid-run. Pairs with --click; see Options::TypedText"
 	);
+	arguments.Value("locale", "TAG", "Use this localization tag for the interface, for example fr-CA");
 	arguments.Value(
 		"capture",
 		"PATH",
@@ -238,6 +241,9 @@ int main(int argc, char **argv) {
 	client::Options options = client::OptionsFromFlags();
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
+	options.InterfaceScale =
+		static_cast<float>(arguments.GetNumber("interface-scale", options.InterfaceScale));
+	options.TextScale = static_cast<float>(arguments.GetNumber("text-scale", options.TextScale));
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
 	options.Worlds = static_cast<uint32_t>(arguments.GetInteger("worlds", options.Worlds));
 	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
@@ -248,6 +254,17 @@ int main(int argc, char **argv) {
 	options.EnablePostProcessing = options.EnablePostProcessing && !arguments.Has("disable-post-processing");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	options.DataFactory = arguments.Has("data-factory");
+	if (auto locale = arguments.Get("locale")) {
+		if (locale->empty() || locale->size() > engine::gui::LocalizationCatalogue::MAXIMUM_LOCALE_BYTES) {
+			std::fprintf(
+				stderr,
+				"--locale must contain 1 to %zu bytes.\n",
+				engine::gui::LocalizationCatalogue::MAXIMUM_LOCALE_BYTES
+			);
+			return 2;
+		}
+		options.Locale = *locale;
+	}
 	if (auto world = arguments.Get("presentation-world")) options.PresentationWorld = *world;
 	if (arguments.Has("presentation-session")) {
 		const auto session = arguments.GetInteger("presentation-session", 0);

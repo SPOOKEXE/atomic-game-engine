@@ -28,6 +28,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/gui/DrawList.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <imgui.h>
 
@@ -76,6 +77,22 @@ namespace engine::ui {
 
 		// The live texture rendered for a `ViewportFrame` element.
 		std::function<Resolved(ecs::Entity instance)> ResolveViewport;
+
+		// Samples a CPU-side source image for an isolated CanvasGroup. Normal
+		// drawing always uses `Texture`; this is only the Studio painter's
+		// bounded fallback when its CPU target must composite an image once.
+		// A source that has no retained pixels returns false and leaves the
+		// group on the visible direct-draw fallback.
+		std::function<
+			bool(ImTextureID texture, const ImVec2 &uv, float &red, float &green, float &blue, float &alpha)>
+			Sample;
+
+		// Revisions supplied by the owner of the compiled list and image sources.
+		// They let CanvasGroup targets remain resident until their visible inputs
+		// change, without treating backend handle churn as image damage.
+		uint64_t CompiledSignature = 0;
+		uint64_t Revision = 0;
+		const gui::FontPackage *Fonts = nullptr;
 	};
 
 	// How a compiled list is placed on screen.
@@ -116,4 +133,8 @@ namespace engine::ui {
 	size_t PaintGui(
 		const gui::DrawList &list, ImDrawList *into, const PaintTarget &target, const ImageSource &images = {}
 	);
+
+	// Releases user textures created for isolated CanvasGroups in the current
+	// ImGui context. Call before destroying that context.
+	void ShutdownGuiPainter();
 }

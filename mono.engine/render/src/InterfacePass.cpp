@@ -15,11 +15,81 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <vector>
 
 namespace engine::render {
 
+	std::optional<InterfaceGroupTarget> InterfaceGroupTargetFor(
+		const core::Rect &bounds,
+		const core::Rect &clip,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels
+	) {
+		const auto finite = [](float value) { return std::isfinite(value); };
+		if (!finite(bounds.Min.X) || !finite(bounds.Min.Y) || !finite(bounds.Max.X) ||
+			!finite(bounds.Max.Y) || !finite(clip.Min.X) || !finite(clip.Min.Y) || !finite(clip.Max.X) ||
+			!finite(clip.Max.Y) || !finite(canvas.X) || !finite(canvas.Y) || !finite(targetPixels.X) ||
+			!finite(targetPixels.Y) || canvas.X <= 0.0f || canvas.Y <= 0.0f || targetPixels.X <= 0.0f ||
+			targetPixels.Y <= 0.0f) {
+			return std::nullopt;
+		}
+
+		const core::Rect clipped{
+			{
+				std::max({bounds.Min.X, clip.Min.X, 0.0f}),
+				std::max({bounds.Min.Y, clip.Min.Y, 0.0f}),
+			},
+			{
+				std::min({bounds.Max.X, clip.Max.X, canvas.X}),
+				std::min({bounds.Max.Y, clip.Max.Y, canvas.Y}),
+			},
+		};
+		const core::Vector2 extent = clipped.Max - clipped.Min;
+		if (extent.X <= 0.0f || extent.Y <= 0.0f) return std::nullopt;
+
+		const float width = std::ceil(extent.X * targetPixels.X / canvas.X);
+		const float height = std::ceil(extent.Y * targetPixels.Y / canvas.Y);
+		if (!finite(width) || !finite(height) || width <= 0.0f || height <= 0.0f ||
+			width > MAXIMUM_INTERFACE_GROUP_TARGET_EDGE || height > MAXIMUM_INTERFACE_GROUP_TARGET_EDGE) {
+			return std::nullopt;
+		}
+		return InterfaceGroupTarget{clipped, static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+	}
+
 	namespace {
+		struct FragmentUniforms {
+			float Clip[4]{};
+			float MaskBounds[MAXIMUM_INTERFACE_MASKS][4]{};
+			float MaskData[MAXIMUM_INTERFACE_MASKS][4]{};
+			float MaskCount[4]{};
+		};
+
+		FragmentUniforms FragmentUniformsFor(const InterfaceBatch &batch) {
+			FragmentUniforms uniforms{};
+			uniforms.Clip[0] = batch.Clip.Min.X;
+			uniforms.Clip[1] = batch.Clip.Min.Y;
+			uniforms.Clip[2] = batch.Clip.Max.X;
+			uniforms.Clip[3] = batch.Clip.Max.Y;
+			uniforms.MaskCount[0] = static_cast<float>(batch.MaskCount);
+			uniforms.MaskCount[1] = 1.0f;
+			for (size_t index = 0; index < batch.MaskCount; index++) {
+				const InterfaceMask &mask = batch.Masks[index];
+				uniforms.MaskBounds[index][0] = mask.Bounds.Min.X;
+				uniforms.MaskBounds[index][1] = mask.Bounds.Min.Y;
+				uniforms.MaskBounds[index][2] = mask.Bounds.Max.X;
+				uniforms.MaskBounds[index][3] = mask.Bounds.Max.Y;
+				uniforms.MaskData[index][0] = mask.CornerRadius;
+			}
+			return uniforms;
+		}
+
+		FragmentUniforms FragmentUniformsFor(const core::Rect &clip) {
+			InterfaceBatch batch;
+			batch.Clip = clip;
+			return FragmentUniformsFor(batch);
+		}
+
 		std::vector<uint8_t> ReadShader(std::string_view name, resources::ShaderForm form) {
 			const auto path = resources::Shader(name, form);
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -92,6 +162,7 @@ namespace engine::render {
 		// interface still draws its rectangles and images, and the missing text
 		// is visible as missing - `GlyphAtlas::Build` says why.
 		Glyphs.Build(pixelSize);
+		ShapedGlyphs.emplace(pixelSize);
 
 		SDL_GPUShader *vertex = Load(gpu, "interface.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		SDL_GPUShader *spatialVertex = Load(gpu, "interface_spatial.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
@@ -310,12 +381,35 @@ namespace engine::render {
 		if (AtlasTransferBuffer != nullptr) {
 			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
 		}
+		for (void *buffer : ShapedAtlasTransferBuffers) {
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(buffer));
+		}
+		for (void *texture : ShapedAtlasTextures) {
+			gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(texture));
+		}
 		if (IndexBuffer != nullptr) {
 			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
 		}
 		if (VertexBuffer != nullptr) {
 			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
 		}
+		if (CompositeTransferBuffer != nullptr) {
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(CompositeTransferBuffer));
+		}
+		if (CompositeIndexBuffer != nullptr) {
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(CompositeIndexBuffer));
+		}
+		if (CompositeVertexBuffer != nullptr) {
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(CompositeVertexBuffer));
+		}
+		for (const GroupLayer &layer : GroupLayers) {
+			if (layer.Target != nullptr)
+				gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(layer.Target));
+		}
+		GroupLayers.clear();
+		Targets.Clear();
+		PendingTargetWrites.clear();
+		DirectTargetRanges.clear();
 		if (AtlasTexture != nullptr) {
 			gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(AtlasTexture));
 		}
@@ -350,10 +444,17 @@ namespace engine::render {
 		ContentOwner = {};
 
 		TransferBuffer = nullptr;
+		CompositeTransferBuffer = nullptr;
+		CompositeIndexBuffer = nullptr;
+		CompositeVertexBuffer = nullptr;
 		IndexBuffer = nullptr;
 		VertexBuffer = nullptr;
 		AtlasTexture = nullptr;
 		AtlasTransferBuffer = nullptr;
+		ShapedAtlasTransferBuffers.clear();
+		ShapedAtlasTextures.clear();
+		ShapedGlyphs.reset();
+		ShapedUse = 0;
 		Sampler = nullptr;
 		PixelSampler = nullptr;
 		Pipeline = nullptr;
@@ -370,6 +471,7 @@ namespace engine::render {
 		VertexCapacity = 0;
 		IndexCapacity = 0;
 		TransferCapacity = 0;
+		CompositeCanvas = {};
 		AtlasUploaded = false;
 		SignatureValid = false;
 		MeshDirty = true;
@@ -387,6 +489,8 @@ namespace engine::render {
 		Pending = list;
 		SignatureValid = false;
 		MeshDirty = true;
+		PendingDamage.clear();
+		PendingDamageValid = false;
 		Canvas = canvas;
 		TargetPixels = targetPixels;
 		SpatialCollectors.clear();
@@ -400,9 +504,13 @@ namespace engine::render {
 		const core::Vector2 &canvas,
 		const core::Vector2 &targetPixels,
 		ecs::Store &store,
-		uint64_t signature
+		uint64_t signature,
+		bool damageValid,
+		std::span<const gui::Compiled::DamageRegion> damage
 	) {
 		SubmitCommands(list, canvas, targetPixels, signature);
+		PendingDamage.assign(damage.begin(), damage.end());
+		PendingDamageValid = damageValid;
 		SpatialCollectors.clear();
 		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
 			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
@@ -413,6 +521,8 @@ namespace engine::render {
 		const WorldCameraFrame &frame, const core::Vector2 &canvas, const core::Vector2 &targetPixels
 	) {
 		SubmitCommands(frame.SpatialCommands, canvas, targetPixels, frame.Compiled.Signature());
+		PendingDamage.clear();
+		PendingDamageValid = false;
 		SpatialCollectors = frame.SpatialCollectors;
 	}
 
@@ -701,6 +811,153 @@ namespace engine::render {
 		return true;
 	}
 
+	bool InterfacePass::UploadShapedAtlas(void *commandBuffer) {
+		if (!ShapedGlyphs.has_value() || ShapedGlyphs->PageCount() == 0 || commandBuffer == nullptr) {
+			return true;
+		}
+
+		auto *gpu = static_cast<SDL_GPUDevice *>(Device);
+		const size_t pages = ShapedGlyphs->PageCount();
+		while (ShapedAtlasTextures.size() < pages) {
+			SDL_GPUTextureCreateInfo texture{};
+			texture.type = SDL_GPU_TEXTURETYPE_2D;
+			texture.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+			texture.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			texture.width = ShapedGlyphAtlas::PAGE_EXTENT;
+			texture.height = ShapedGlyphAtlas::PAGE_EXTENT;
+			texture.layer_count_or_depth = 1;
+			texture.num_levels = 1;
+			void *created = gpu::CreateTexture(gpu, &texture);
+			if (created == nullptr) {
+				return false;
+			}
+			ShapedAtlasTextures.push_back(created);
+
+			SDL_GPUTransferBufferCreateInfo staging{};
+			staging.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+			staging.size =
+				static_cast<uint32_t>(ShapedGlyphAtlas::PAGE_EXTENT) * ShapedGlyphAtlas::PAGE_EXTENT * 4;
+			void *buffer = gpu::CreateTransferBuffer(gpu, &staging);
+			if (buffer == nullptr) {
+				gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(created));
+				ShapedAtlasTextures.pop_back();
+				return false;
+			}
+			ShapedAtlasTransferBuffers.push_back(buffer);
+		}
+
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
+		if (copy == nullptr) return false;
+		for (size_t page = 0; page < pages; page++) {
+			const std::vector<uint8_t> &coverage = ShapedGlyphs->Coverage(static_cast<uint16_t>(page));
+			if (coverage.size() !=
+				static_cast<size_t>(ShapedGlyphAtlas::PAGE_EXTENT) * ShapedGlyphAtlas::PAGE_EXTENT) {
+				continue;
+			}
+			void *mapped = SDL_MapGPUTransferBuffer(
+				gpu, static_cast<SDL_GPUTransferBuffer *>(ShapedAtlasTransferBuffers[page]), false
+			);
+			if (mapped == nullptr) {
+				SDL_EndGPUCopyPass(copy);
+				return false;
+			}
+			auto *pixels = static_cast<uint8_t *>(mapped);
+			for (size_t index = 0; index < coverage.size(); index++) {
+				pixels[index * 4 + 0] = 255;
+				pixels[index * 4 + 1] = 255;
+				pixels[index * 4 + 2] = 255;
+				pixels[index * 4 + 3] = coverage[index];
+			}
+			SDL_UnmapGPUTransferBuffer(
+				gpu, static_cast<SDL_GPUTransferBuffer *>(ShapedAtlasTransferBuffers[page])
+			);
+
+			SDL_GPUTextureTransferInfo source{};
+			source.transfer_buffer = static_cast<SDL_GPUTransferBuffer *>(ShapedAtlasTransferBuffers[page]);
+			source.pixels_per_row = ShapedGlyphAtlas::PAGE_EXTENT;
+			source.rows_per_layer = ShapedGlyphAtlas::PAGE_EXTENT;
+			SDL_GPUTextureRegion target{};
+			target.texture = static_cast<SDL_GPUTexture *>(ShapedAtlasTextures[page]);
+			target.w = ShapedGlyphAtlas::PAGE_EXTENT;
+			target.h = ShapedGlyphAtlas::PAGE_EXTENT;
+			target.d = 1;
+			SDL_UploadToGPUTexture(copy, &source, &target, false);
+			LastUploadBytes += coverage.size() * 4;
+		}
+		SDL_EndGPUCopyPass(copy);
+		return true;
+	}
+
+	bool InterfacePass::EnsureCompositeGeometry(void *commandBuffer) {
+		if (CompositeVertexBuffer != nullptr && CompositeIndexBuffer != nullptr &&
+			CompositeCanvas == Canvas) {
+			return true;
+		}
+		if (commandBuffer == nullptr || Device == nullptr || Canvas.X <= 0.0f || Canvas.Y <= 0.0f) {
+			return false;
+		}
+		auto *gpu = static_cast<SDL_GPUDevice *>(Device);
+		if (CompositeTransferBuffer != nullptr) {
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(CompositeTransferBuffer));
+			CompositeTransferBuffer = nullptr;
+		}
+		if (CompositeIndexBuffer != nullptr) {
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(CompositeIndexBuffer));
+			CompositeIndexBuffer = nullptr;
+		}
+		if (CompositeVertexBuffer != nullptr) {
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(CompositeVertexBuffer));
+			CompositeVertexBuffer = nullptr;
+		}
+
+		const InterfaceVertex vertices[4]{
+			{0.0f, 0.0f, 0.0f, 0.0f},
+			{1.0f, 0.0f, 1.0f, 0.0f},
+			{1.0f, 1.0f, 1.0f, 1.0f},
+			{0.0f, 1.0f, 0.0f, 1.0f},
+		};
+		const uint16_t indices[6]{0, 1, 2, 0, 2, 3};
+		SDL_GPUBufferCreateInfo vertexInfo{};
+		vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+		vertexInfo.size = sizeof(vertices);
+		CompositeVertexBuffer = gpu::CreateBuffer(gpu, &vertexInfo);
+		SDL_GPUBufferCreateInfo indexInfo{};
+		indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+		indexInfo.size = sizeof(indices);
+		CompositeIndexBuffer = gpu::CreateBuffer(gpu, &indexInfo);
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
+		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		transferInfo.size = sizeof(vertices) + sizeof(indices);
+		CompositeTransferBuffer = gpu::CreateTransferBuffer(gpu, &transferInfo);
+		if (CompositeVertexBuffer == nullptr || CompositeIndexBuffer == nullptr ||
+			CompositeTransferBuffer == nullptr) {
+			return false;
+		}
+		void *mapped = SDL_MapGPUTransferBuffer(
+			gpu, static_cast<SDL_GPUTransferBuffer *>(CompositeTransferBuffer), true
+		);
+		if (mapped == nullptr) return false;
+		std::memcpy(mapped, vertices, sizeof(vertices));
+		std::memcpy(static_cast<uint8_t *>(mapped) + sizeof(vertices), indices, sizeof(indices));
+		SDL_UnmapGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(CompositeTransferBuffer));
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
+		if (copy == nullptr) return false;
+		SDL_GPUTransferBufferLocation source{};
+		source.transfer_buffer = static_cast<SDL_GPUTransferBuffer *>(CompositeTransferBuffer);
+		SDL_GPUBufferRegion target{};
+		target.buffer = static_cast<SDL_GPUBuffer *>(CompositeVertexBuffer);
+		target.size = sizeof(vertices);
+		SDL_UploadToGPUBuffer(copy, &source, &target, true);
+		source.offset = sizeof(vertices);
+		target.buffer = static_cast<SDL_GPUBuffer *>(CompositeIndexBuffer);
+		target.size = sizeof(indices);
+		SDL_UploadToGPUBuffer(copy, &source, &target, true);
+		SDL_EndGPUCopyPass(copy);
+		CompositeCanvas = Canvas;
+		LastUploadBytes += sizeof(vertices) + sizeof(indices);
+		return true;
+	}
+
 	bool InterfacePass::Prepare(void *commandBuffer) {
 		LastUploadBytes = 0;
 		if (Pipeline == nullptr || commandBuffer == nullptr) {
@@ -750,7 +1007,8 @@ namespace engine::render {
 
 		if (!MeshDirty && VertexBuffer != nullptr && IndexBuffer != nullptr) {
 			Reuses++;
-			return !Mesh.Vertices().empty() && !Mesh.Indices().empty();
+			const bool drawable = !Mesh.Vertices().empty() && !Mesh.Indices().empty();
+			return drawable && PrepareGroups(commandBuffer) && PrepareRetainedTargets(commandBuffer);
 		}
 
 		const auto information = [](const InterfaceImage &image) {
@@ -784,8 +1042,14 @@ namespace engine::render {
 					}
 				);
 				return found != ResolvedImages.end() ? information(found->Value) : InterfaceImageInfo{};
-			}
+			},
+			ShapedGlyphs ? &*ShapedGlyphs : nullptr,
+			Fonts ? &*Fonts : nullptr,
+			++ShapedUse
 		);
+		if (!UploadShapedAtlas(commandBuffer)) {
+			return false;
+		}
 		Recorded = Mesh.Batches().size();
 
 		const auto vertices = static_cast<uint32_t>(Mesh.Vertices().size());
@@ -877,12 +1141,20 @@ namespace engine::render {
 
 		SDL_EndGPUCopyPass(copy);
 		MeshDirty = false;
-		LastUploadBytes = total;
+		LastUploadBytes += total;
 		Uploads++;
-		return true;
+		return PrepareGroups(commandBuffer) && PrepareRetainedTargets(commandBuffer);
 	}
 
-	void InterfacePass::Record(void *commandBuffer, void *renderPass) {
+	void InterfacePass::RecordScreenRange(
+		void *commandBuffer,
+		void *renderPass,
+		size_t firstCommand,
+		size_t commandCount,
+		const core::Rect *damage,
+		const core::Rect *targetBounds,
+		const core::Vector2 *targetPixels
+	) {
 		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
 		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
 		if (command == nullptr || pass == nullptr || Pipeline == nullptr) {
@@ -892,14 +1164,6 @@ namespace engine::render {
 		auto *defaultPipeline = static_cast<SDL_GPUGraphicsPipeline *>(Pipeline);
 		SDL_BindGPUGraphicsPipeline(pass, defaultPipeline);
 		SDL_GPUGraphicsPipeline *boundPipeline = defaultPipeline;
-
-		// The canvas, for the vertex shader's one divide. Pushed rather than
-		// held in a buffer because it is two floats and changes with the window.
-		const float canvas[2] = {
-			Canvas.X > 0.0f ? Canvas.X : 1.0f,
-			Canvas.Y > 0.0f ? Canvas.Y : 1.0f,
-		};
-		SDL_PushGPUVertexUniformData(command, 0, canvas, sizeof(canvas));
 
 		SDL_GPUBufferBinding vertex{};
 		vertex.buffer = static_cast<SDL_GPUBuffer *>(VertexBuffer);
@@ -918,7 +1182,15 @@ namespace engine::render {
 		SDL_GPUTexture *bound = nullptr;
 		SDL_GPUSampler *boundSampler = nullptr;
 
+		const core::Rect localBounds = targetBounds != nullptr ? *targetBounds : core::Rect{};
+		const core::Vector2 localCanvas =
+			targetBounds != nullptr ? localBounds.Max - localBounds.Min : Canvas;
+		const core::Vector2 localPixels = targetPixels != nullptr ? *targetPixels : TargetPixels;
+		const size_t endCommand = firstCommand + commandCount;
 		for (const InterfaceBatch &batch : Mesh.Batches()) {
+			if (batch.FirstCommand < firstCommand || batch.FirstCommand >= endCommand) {
+				continue;
+			}
 			const bool spatial = std::any_of(
 				SpatialCollectors.begin(), SpatialCollectors.end(), [&](const SpatialCollector &entry) {
 					return entry.Collector == batch.Collector;
@@ -927,6 +1199,31 @@ namespace engine::render {
 			if (spatial) {
 				continue;
 			}
+			const auto transform = std::find_if(
+				Pending.Transforms.begin(),
+				Pending.Transforms.end(),
+				[&](const gui::CollectorTransform &entry) { return entry.Collector == batch.Collector; }
+			);
+			const core::Vector2 origin = targetBounds != nullptr				 ? -localBounds.Min
+										 : transform != Pending.Transforms.end() ? transform->Origin
+																				 : core::Vector2::Zero;
+			const core::Vector2 scale = targetBounds != nullptr					? core::Vector2{1.0f, 1.0f}
+										: transform != Pending.Transforms.end() ? transform->Scale
+																				: core::Vector2{1.0f, 1.0f};
+
+			// Screen collectors use their logical canvas while world collectors
+			// retain the display canvas submitted by the client. A shared list can
+			// contain both, and a single canvas would scale one of those spaces
+			// incorrectly when the interface scale differs from one.
+			const float canvas[6] = {
+				localCanvas.X > 0.0f ? localCanvas.X : 1.0f,
+				localCanvas.Y > 0.0f ? localCanvas.Y : 1.0f,
+				origin.X,
+				origin.Y,
+				scale.X,
+				scale.Y,
+			};
+			SDL_PushGPUVertexUniformData(command, 0, canvas, sizeof(canvas));
 
 			// **Bound per batch only when it changes**, `bound`'s own reason
 			// applied to a pipeline instead of a texture. A batch naming no
@@ -947,6 +1244,9 @@ namespace engine::render {
 			}
 
 			SDL_GPUTexture *texture = atlas;
+			if (batch.ShapedPage != UINT16_MAX && batch.ShapedPage < ShapedAtlasTextures.size()) {
+				texture = static_cast<SDL_GPUTexture *>(ShapedAtlasTextures[batch.ShapedPage]);
+			}
 
 			if (batch.Image.IsValid() || batch.Viewport != ecs::NULL_ENTITY) {
 				const auto found = std::find_if(
@@ -984,20 +1284,26 @@ namespace engine::render {
 				boundSampler = sampler;
 			}
 
-			const float clip[4] = {
-				batch.Clip.Min.X,
-				batch.Clip.Min.Y,
-				batch.Clip.Max.X,
-				batch.Clip.Max.Y,
-			};
+			const FragmentUniforms uniforms = FragmentUniformsFor(batch);
 			SDL_PushGPUFragmentUniformData(
-				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, clip, sizeof(clip)
+				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, &uniforms, sizeof(uniforms)
 			);
 
 			// **The scissor is in device pixels and `Clip` is in canvas units.**
 			// `ScissorFor` carries why those are not the same number and what
 			// clipping the interface to a fraction of the panel looked like.
-			const InterfaceScissor clipped = ScissorFor(batch.Clip, Canvas, TargetPixels);
+			core::Rect clippedCanvas = batch.Clip;
+			if (damage != nullptr) {
+				clippedCanvas.Min.X = std::max(clippedCanvas.Min.X, damage->Min.X);
+				clippedCanvas.Min.Y = std::max(clippedCanvas.Min.Y, damage->Min.Y);
+				clippedCanvas.Max.X = std::min(clippedCanvas.Max.X, damage->Max.X);
+				clippedCanvas.Max.Y = std::min(clippedCanvas.Max.Y, damage->Max.Y);
+			}
+			const core::Rect presentationClip{
+				origin + clippedCanvas.Min * scale,
+				origin + clippedCanvas.Max * scale,
+			};
+			const InterfaceScissor clipped = ScissorFor(presentationClip, localCanvas, localPixels);
 			if (clipped.Empty()) {
 				continue;
 			}
@@ -1006,6 +1312,357 @@ namespace engine::render {
 			SDL_SetGPUScissor(pass, &scissor);
 
 			SDL_DrawGPUIndexedPrimitives(pass, batch.IndexCount, 1, batch.FirstIndex, 0, 0);
+		}
+	}
+
+	void InterfacePass::RecordComposite(
+		void *commandBuffer,
+		void *renderPass,
+		void *texture,
+		const core::Rect &bounds,
+		float opacity,
+		const core::Rect *targetBounds,
+		const core::Vector2 *targetPixels
+	) {
+		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
+		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
+		if (command == nullptr || pass == nullptr || texture == nullptr || Pipeline == nullptr ||
+			CompositeVertexBuffer == nullptr || CompositeIndexBuffer == nullptr) {
+			return;
+		}
+		SDL_BindGPUGraphicsPipeline(pass, static_cast<SDL_GPUGraphicsPipeline *>(Pipeline));
+		SDL_GPUBufferBinding vertex{};
+		vertex.buffer = static_cast<SDL_GPUBuffer *>(CompositeVertexBuffer);
+		SDL_BindGPUVertexBuffers(pass, 0, &vertex, 1);
+		SDL_GPUBufferBinding index{};
+		index.buffer = static_cast<SDL_GPUBuffer *>(CompositeIndexBuffer);
+		SDL_BindGPUIndexBuffer(pass, &index, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+		const core::Vector2 extent = bounds.Max - bounds.Min;
+		if (extent.X <= 0.0f || extent.Y <= 0.0f) return;
+		const core::Rect destination = targetBounds != nullptr ? *targetBounds : core::Rect{};
+		const core::Vector2 destinationExtent =
+			targetBounds != nullptr ? destination.Max - destination.Min : Canvas;
+		const core::Vector2 destinationPixels = targetPixels != nullptr ? *targetPixels : TargetPixels;
+		const core::Vector2 origin = targetBounds != nullptr ? bounds.Min - destination.Min : bounds.Min;
+		const float canvas[6]{
+			destinationExtent.X, destinationExtent.Y, origin.X, origin.Y, extent.X, extent.Y
+		};
+		SDL_PushGPUVertexUniformData(command, 0, canvas, sizeof(canvas));
+		FragmentUniforms uniforms = FragmentUniformsFor({{0.0f, 0.0f}, {1.0f, 1.0f}});
+		uniforms.MaskCount[1] = std::clamp(opacity, 0.0f, 1.0f);
+		SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+		SDL_GPUTextureSamplerBinding binding{};
+		binding.texture = static_cast<SDL_GPUTexture *>(texture);
+		binding.sampler = static_cast<SDL_GPUSampler *>(Sampler);
+		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+		const core::Rect localBounds{origin, origin + extent};
+		const InterfaceScissor whole = ScissorFor(localBounds, destinationExtent, destinationPixels);
+		if (whole.Empty()) return;
+		const SDL_Rect scissor{whole.X, whole.Y, whole.Width, whole.Height};
+		SDL_SetGPUScissor(pass, &scissor);
+		SDL_DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0);
+	}
+
+	void InterfacePass::RecordGroupRange(
+		void *commandBuffer,
+		void *renderPass,
+		size_t firstCommand,
+		size_t endCommand,
+		size_t parent,
+		const core::Rect *targetBounds,
+		const core::Vector2 *targetPixels
+	) {
+		size_t cursor = firstCommand;
+		for (size_t index = 0; index < GroupLayers.size(); index++) {
+			const GroupLayer &child = GroupLayers[index];
+			if (child.Parent != parent || child.First < cursor || child.End > endCommand) continue;
+			RecordScreenRange(
+				commandBuffer, renderPass, cursor, child.First - cursor, nullptr, targetBounds, targetPixels
+			);
+			if (child.Target != nullptr) {
+				RecordComposite(
+					commandBuffer,
+					renderPass,
+					child.Target,
+					child.Bounds,
+					child.Opacity,
+					targetBounds,
+					targetPixels
+				);
+			} else {
+				if (child.Opacity < 1.0f) {
+					// The source range remains the only visible fallback when its
+					// transient target could not be made. A direct batch cannot apply
+					// one opacity after its children blended, so report the deliberate
+					// degradation instead of pretending this is isolated composition.
+					ENGINE_WARN_EVERY(
+						5.0, "interface CanvasGroup target unavailable; drawing unisolated children"
+					);
+				}
+				RecordGroupRange(
+					commandBuffer, renderPass, child.First, child.End, index, targetBounds, targetPixels
+				);
+			}
+			cursor = child.End;
+		}
+		RecordScreenRange(
+			commandBuffer, renderPass, cursor, endCommand - cursor, nullptr, targetBounds, targetPixels
+		);
+	}
+
+	bool InterfacePass::PrepareGroups(void *commandBuffer) {
+		constexpr size_t maximumGroups = 8;
+		constexpr uint64_t maximumBytes = 64ull * 1024 * 1024;
+		auto *gpu = static_cast<SDL_GPUDevice *>(Device);
+		for (const GroupLayer &layer : GroupLayers) {
+			if (layer.Target != nullptr)
+				gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(layer.Target));
+		}
+		GroupLayers.clear();
+		if (Pending.Operations.empty() || Canvas.X <= 0.0f || Canvas.Y <= 0.0f) return true;
+		// Groups retain their source commands when the shared composite geometry
+		// cannot be prepared. Returning success lets Record use that direct path
+		// rather than making a transient allocation failure erase the interface.
+		if (!EnsureCompositeGeometry(commandBuffer)) return true;
+
+		std::vector<size_t> stack;
+		for (const gui::DrawOperation &operation : Pending.Operations) {
+			if (operation.Kind == gui::DrawOperationKind::BeginGroup) {
+				if (stack.size() >= maximumGroups) {
+					ENGINE_WARN_EVERY(
+						5.0, "interface group nesting exceeds {}; group was refused", maximumGroups
+					);
+					stack.push_back(SIZE_MAX);
+					continue;
+				}
+				const core::Rect bounds{
+					{
+						std::max(operation.Bounds.Min.X, operation.Clip.Min.X),
+						std::max(operation.Bounds.Min.Y, operation.Clip.Min.Y),
+					},
+					{
+						std::min(operation.Bounds.Max.X, operation.Clip.Max.X),
+						std::min(operation.Bounds.Max.Y, operation.Clip.Max.Y),
+					},
+				};
+				size_t parent = SIZE_MAX;
+				for (auto ancestor = stack.rbegin(); ancestor != stack.rend(); ++ancestor) {
+					if (*ancestor != SIZE_MAX) {
+						parent = *ancestor;
+						break;
+					}
+				}
+				GroupLayers.push_back(
+					{operation.Command,
+					 operation.Command,
+					 parent,
+					 bounds,
+					 {},
+					 1.0f - std::clamp(operation.Transparency, 0.0f, 1.0f),
+					 nullptr}
+				);
+				stack.push_back(GroupLayers.size() - 1);
+				continue;
+			}
+			if (operation.Kind != gui::DrawOperationKind::EndGroup || stack.empty()) continue;
+			const size_t index = stack.back();
+			stack.pop_back();
+			if (index == SIZE_MAX || operation.Command <= GroupLayers[index].First ||
+				operation.Command > Pending.Commands.size()) {
+				continue;
+			}
+			GroupLayers[index].End = operation.Command;
+		}
+
+		uint64_t usedBytes = 0;
+		for (size_t reverse = GroupLayers.size(); reverse > 0; reverse--) {
+			GroupLayer &group = GroupLayers[reverse - 1];
+			if (group.End <= group.First) continue;
+			const auto targetRegion =
+				InterfaceGroupTargetFor(group.Bounds, {{0.0f, 0.0f}, Canvas}, Canvas, TargetPixels);
+			if (!targetRegion.has_value()) continue;
+			group.Bounds = targetRegion->Bounds;
+			const uint32_t width = targetRegion->Width;
+			const uint32_t height = targetRegion->Height;
+			const uint64_t bytes = SDL_CalculateGPUTextureFormatSize(
+				static_cast<SDL_GPUTextureFormat>(SwapchainFormat), width, height, 1
+			);
+			if (width == 0 || height == 0 || bytes > maximumBytes || usedBytes > maximumBytes - bytes) {
+				ENGINE_WARN_EVERY(
+					5.0, "interface canvas groups exceed the {} byte transient limit", maximumBytes
+				);
+				continue;
+			}
+			SDL_GPUTextureCreateInfo texture{};
+			texture.type = SDL_GPU_TEXTURETYPE_2D;
+			texture.format = static_cast<SDL_GPUTextureFormat>(SwapchainFormat);
+			texture.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			texture.width = width;
+			texture.height = height;
+			texture.layer_count_or_depth = 1;
+			texture.num_levels = 1;
+			auto *target = gpu::CreateTexture(gpu, &texture);
+			if (target == nullptr) continue;
+			SDL_GPUColorTargetInfo colour{};
+			colour.texture = target;
+			colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
+			colour.load_op = SDL_GPU_LOADOP_CLEAR;
+			colour.store_op = SDL_GPU_STOREOP_STORE;
+			colour.cycle = true;
+			auto *pass = SDL_BeginGPURenderPass(
+				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), &colour, 1, nullptr
+			);
+			if (pass == nullptr) {
+				gpu::ReleaseTexture(gpu, target);
+				continue;
+			}
+			group.Pixels = {static_cast<float>(width), static_cast<float>(height)};
+			group.Target = target;
+			RecordGroupRange(
+				commandBuffer, pass, group.First, group.End, reverse - 1, &group.Bounds, &group.Pixels
+			);
+			SDL_EndGPURenderPass(pass);
+			usedBytes += bytes;
+		}
+		return true;
+	}
+
+	bool InterfacePass::PrepareRetainedTargets(void *commandBuffer) {
+		DirectTargetRanges.clear();
+		if (!GroupLayers.empty()) {
+			// `Record` selects RecordGroupRange whenever a CanvasGroup is present.
+			// Preparing collector targets here would write images that this frame
+			// cannot composite, then incorrectly advance their retained baselines in
+			// CompleteFrame. The group path owns the full screen composition.
+			return true;
+		}
+		if (Pending.CollectorRanges.empty()) return true;
+		const uint32_t width = static_cast<uint32_t>(std::max(TargetPixels.X, Canvas.X));
+		const uint32_t height = static_cast<uint32_t>(std::max(TargetPixels.Y, Canvas.Y));
+		if (!EnsureCompositeGeometry(commandBuffer)) {
+			// A retained target may already be ready from an earlier frame. Without
+			// composite geometry `RecordComposite` cannot submit it, so force the
+			// source batches through the direct path instead of dropping that UI.
+			for (const gui::CollectorRange &range : Pending.CollectorRanges) {
+				if (range.Spatial || range.Count == 0) continue;
+				DirectTargetRanges.push_back(
+					InterfaceTargetKey{range.Collector, 0, width, height, range.First, range.Count, false}
+				);
+			}
+			return true;
+		}
+		if (Device == nullptr || Canvas.X <= 0.0f || Canvas.Y <= 0.0f) return false;
+		auto *gpu = static_cast<SDL_GPUDevice *>(Device);
+		if (width == 0 || height == 0 ||
+			!SDL_GPUTextureSupportsFormat(
+				gpu,
+				static_cast<SDL_GPUTextureFormat>(SwapchainFormat),
+				SDL_GPU_TEXTURETYPE_2D,
+				SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
+			)) {
+			// A target capability miss degrades to the direct screen path. The
+			// source batches remain valid and an older target, if any, stays usable.
+			return true;
+		}
+		const auto dynamicRange = [&](const gui::CollectorRange &range) {
+			const size_t end = std::min(range.First + range.Count, Pending.Commands.size());
+			return std::any_of(
+				Pending.Commands.begin() + std::min(range.First, Pending.Commands.size()),
+				Pending.Commands.begin() + end,
+				[](const gui::DrawCommand &command) {
+					return command.Kind == gui::DrawKind::Image || command.Kind == gui::DrawKind::Viewport;
+				}
+			);
+		};
+		for (const gui::CollectorRange &range : Pending.CollectorRanges) {
+			if (range.Spatial || range.Count == 0) continue;
+			const InterfaceTargetKey key{range.Collector, 0, width, height, range.First, range.Count, false};
+			// Content texture revisions are resolved at render time and are not in
+			// the compiled UI signature. Keep those ranges direct until the image
+			// resolver exposes a stable revision for a retained key.
+			if (dynamicRange(range)) {
+				DirectTargetRanges.push_back(key);
+				continue;
+			}
+			const InterfaceTargetPlan plan =
+				Targets.Begin(key, PendingSignature, PendingDamageValid, PendingDamage);
+			if (plan.Work == InterfaceTargetWork::Skip) continue;
+			void *target = Targets.Target(key);
+			if (target == nullptr) {
+				SDL_GPUTextureCreateInfo texture{};
+				texture.type = SDL_GPU_TEXTURETYPE_2D;
+				texture.format = static_cast<SDL_GPUTextureFormat>(SwapchainFormat);
+				texture.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+				texture.width = width;
+				texture.height = height;
+				texture.layer_count_or_depth = 1;
+				texture.num_levels = 1;
+				target = gpu::CreateTexture(gpu, &texture);
+				const uint64_t bytes = SDL_CalculateGPUTextureFormatSize(texture.format, width, height, 1);
+				if (target == nullptr || !Targets.Attach(key, target, bytes, [gpu](void *resource) {
+						gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(resource));
+					})) {
+					continue;
+				}
+			}
+			SDL_GPUColorTargetInfo colour{};
+			colour.texture = static_cast<SDL_GPUTexture *>(target);
+			colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
+			// Alpha blending cannot remove pixels left by a deleted command. Keep
+			// the compiler's partial plan pending, but repaint this bounded target
+			// from a clear baseline until the backend has a damage-rect clear path.
+			colour.load_op = SDL_GPU_LOADOP_CLEAR;
+			colour.store_op = SDL_GPU_STOREOP_STORE;
+			colour.cycle = true;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(
+				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), &colour, 1, nullptr
+			);
+			if (pass == nullptr) {
+				DirectTargetRanges.push_back(key);
+				continue;
+			}
+			RecordScreenRange(commandBuffer, pass, range.First, range.Count, nullptr);
+			SDL_EndGPURenderPass(pass);
+			PendingTargetWrites.push_back(key);
+		}
+		return true;
+	}
+
+	void InterfacePass::CompleteFrame(bool submitted) {
+		for (const InterfaceTargetKey &key : PendingTargetWrites) {
+			Targets.Complete(key, submitted);
+		}
+		PendingTargetWrites.clear();
+	}
+
+	void InterfacePass::Record(void *commandBuffer, void *renderPass) {
+		if (commandBuffer == nullptr || renderPass == nullptr || Pipeline == nullptr) return;
+		if (!GroupLayers.empty()) {
+			RecordGroupRange(
+				commandBuffer, renderPass, 0, Pending.Commands.size(), SIZE_MAX, nullptr, nullptr
+			);
+			return;
+		}
+		const uint32_t width = static_cast<uint32_t>(std::max(TargetPixels.X, Canvas.X));
+		const uint32_t height = static_cast<uint32_t>(std::max(TargetPixels.Y, Canvas.Y));
+		const std::vector<InterfaceTargetComposite> composites = Targets.Composite(Pending, 0, width, height);
+		for (const gui::CollectorRange &range : Pending.CollectorRanges) {
+			if (range.Spatial || range.Count == 0) continue;
+			const InterfaceTargetKey key{range.Collector, 0, width, height, range.First, range.Count, false};
+			const bool forceDirect = std::find(DirectTargetRanges.begin(), DirectTargetRanges.end(), key) !=
+									 DirectTargetRanges.end();
+			const auto found = std::find_if(composites.begin(), composites.end(), [&](const auto &entry) {
+				return entry.Range.Collector == range.Collector && entry.Range.First == range.First &&
+					   entry.Range.Count == range.Count && entry.Range.Spatial == range.Spatial;
+			});
+			if (!forceDirect && found != composites.end()) {
+				RecordComposite(commandBuffer, renderPass, found->Target, {{0.0f, 0.0f}, Canvas});
+			} else {
+				RecordScreenRange(commandBuffer, renderPass, range.First, range.Count, nullptr);
+			}
+		}
+		if (Pending.CollectorRanges.empty()) {
+			RecordScreenRange(commandBuffer, renderPass, 0, Pending.Commands.size(), nullptr);
 		}
 	}
 
@@ -1124,6 +1781,15 @@ namespace engine::render {
 			}
 
 			const gui::SpatialCanvas &spatial = placed->Canvas;
+			const auto transform = std::find_if(
+				Pending.Transforms.begin(),
+				Pending.Transforms.end(),
+				[&](const gui::CollectorTransform &entry) { return entry.Collector == batch.Collector; }
+			);
+			const core::Vector2 transformOrigin =
+				transform != Pending.Transforms.end() ? transform->Origin : core::Vector2::Zero;
+			const core::Vector2 transformScale =
+				transform != Pending.Transforms.end() ? transform->Scale : core::Vector2{1.0f, 1.0f};
 			core::Vector3 origin = spatial.Origin;
 			core::Vector3 axisX = spatial.AxisX;
 			core::Vector3 axisY = spatial.AxisY;
@@ -1199,6 +1865,7 @@ namespace engine::render {
 				glm::vec4 AxisY;
 				glm::vec4 Tint;
 				glm::vec4 Canvas;
+				glm::vec4 Transform;
 			};
 
 			const SpatialUniforms uniforms{
@@ -1213,10 +1880,14 @@ namespace engine::render {
 					1.0f,
 				},
 				glm::vec4{spatial.Size.X, spatial.Size.Y, 0.0f, 0.0f},
+				glm::vec4{transformOrigin.X, transformOrigin.Y, transformScale.X, transformScale.Y},
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
 			SDL_GPUTexture *texture = atlas;
+			if (batch.ShapedPage != UINT16_MAX && batch.ShapedPage < ShapedAtlasTextures.size()) {
+				texture = static_cast<SDL_GPUTexture *>(ShapedAtlasTextures[batch.ShapedPage]);
+			}
 			if (batch.Image.IsValid() || batch.Viewport != ecs::NULL_ENTITY) {
 				const auto found = std::find_if(
 					ResolvedImages.begin(), ResolvedImages.end(), [&](const ResolvedImage &entry) {
@@ -1245,13 +1916,8 @@ namespace engine::render {
 				boundSampler = sampler;
 			}
 
-			const float clip[4]{
-				batch.Clip.Min.X,
-				batch.Clip.Min.Y,
-				batch.Clip.Max.X,
-				batch.Clip.Max.Y,
-			};
-			SDL_PushGPUFragmentUniformData(command, 0, clip, sizeof(clip));
+			const FragmentUniforms fragmentUniforms = FragmentUniformsFor(batch);
+			SDL_PushGPUFragmentUniformData(command, 0, &fragmentUniforms, sizeof(fragmentUniforms));
 			SDL_DrawGPUIndexedPrimitives(pass, batch.IndexCount, 1, batch.FirstIndex, 0, 0);
 			drawn++;
 		}

@@ -98,6 +98,10 @@ namespace engine::replication {
 			return descriptor.Wire.Present() ? descriptor.Wire.Size : descriptor.Size;
 		}
 
+		bool CanStageOversize(const ecs::TypeDescriptor &descriptor) {
+			return !descriptor.Wire.Present() && descriptor.MaximumSerialisedBytes > 0;
+		}
+
 		void WriteValue(core::ByteWriter &writer, const ecs::TypeDescriptor &descriptor, const void *value) {
 			if (descriptor.Wire.Present()) {
 				descriptor.Wire.Write(writer, value, 1);
@@ -453,8 +457,9 @@ namespace engine::replication {
 				if (descriptor.Size > 0 && !descriptor.Serialisable) {
 					ENGINE_WARN("replication: '{}' has no serialisation and cannot cross.", name.Text());
 				} else if (const size_t crossingBytes = WireBytes(descriptor);
+						   !CanStageOversize(descriptor) &&
 						   MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + crossingBytes >
-						   Settings_.ChunkBytes) {
+							   Settings_.ChunkBytes) {
 					ENGINE_WARN(
 						"replication: '{}' is {} bytes stored and cannot fit a delta message.",
 						name.Text(),

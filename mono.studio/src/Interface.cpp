@@ -52,12 +52,13 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v19";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v20";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";
+		constexpr const char *UI_AUTHORING = "UI Authoring";
 		constexpr const char *COMPONENTS = "Components";
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *INSTANCES = "Live Instances";
@@ -89,6 +90,7 @@ namespace studio {
 			{WORLDS, PluginDock::Left},
 			{INSTANCES, PluginDock::Left},
 			{PROPERTIES, PluginDock::Right},
+			{UI_AUTHORING, PluginDock::Right},
 			{COMPONENTS, PluginDock::Right},
 			{OUTPUT, PluginDock::Bottom},
 			{"Command Bar", PluginDock::Bottom},
@@ -403,6 +405,10 @@ namespace studio {
 			ENGINE_PROFILE_CAT("worlds", engine::core::ProfileCategory::Render);
 			Skinned(WORLDS, [&] { DrawWorlds(); });
 			Skinned(INSTANCES, [&] { DrawLiveInstances(); });
+		}
+		{
+			ENGINE_PROFILE_CAT("ui authoring", engine::core::ProfileCategory::Render);
+			Skinned(UI_AUTHORING, [&] { DrawUiAuthoring(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Render);
@@ -1339,6 +1345,7 @@ namespace studio {
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
 		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
+		ImGui::MenuItem("UI Authoring", nullptr, &ShowUiAuthoring);
 		ImGui::MenuItem("Components", nullptr, &ShowComponents);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
 		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);

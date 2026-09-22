@@ -7,7 +7,9 @@
 // at a screen.
 
 #include <engine/core/Paths.hpp>
+#include <engine/gui/ShapedText.hpp>
 #include <engine/render/InterfaceMesh.hpp>
+#include <engine/render/ShapedGlyphAtlas.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -15,6 +17,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <vector>
 
@@ -49,6 +52,18 @@ namespace {
 		command.Clip = Rect{Vector2{0.0f, 0.0f}, Vector2{800.0f, 600.0f}};
 		return command;
 	}
+
+	engine::gui::FontPackage Package() {
+		std::ifstream file(engine::core::Paths::Fonts() / "Inter.ttf", std::ios::binary | std::ios::ate);
+		REQUIRE(file);
+		const std::streamsize size = file.tellg();
+		std::vector<std::byte> bytes(static_cast<size_t>(size));
+		file.seekg(0);
+		REQUIRE(file.read(reinterpret_cast<char *>(bytes.data()), size));
+		engine::gui::FontPackage package;
+		REQUIRE(package.Add(engine::core::Name("fonts/Inter.ttf"), engine::gui::FontFace::Regular, bytes));
+		return package;
+	}
 }
 
 TEST_CASE("a rectangle becomes one quad", "[render][interfacemesh]") {
@@ -69,7 +84,49 @@ TEST_CASE("a rectangle becomes one quad", "[render][interfacemesh]") {
 	CHECK(mesh.Vertices()[2].Y == Approx(70.0f));
 
 	CHECK(mesh.Batches()[0].IndexCount == 6);
+	CHECK(mesh.Batches()[0].FirstCommand == 0);
 	CHECK_FALSE(mesh.Batches()[0].Image.IsValid());
+}
+
+TEST_CASE(
+	"rounded UI masks split batches and retain their bounded nesting", "[render][interfacemesh][mask]"
+) {
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+	auto first = Rectangle(0.0f, 0.0f, 100.0f, 100.0f);
+	first.Collector = engine::ecs::Entity(1);
+	auto masked = Rectangle(10.0f, 10.0f, 100.0f, 100.0f);
+	masked.Collector = engine::ecs::Entity(1);
+	auto after = Rectangle(20.0f, 20.0f, 100.0f, 100.0f);
+	after.Collector = engine::ecs::Entity(1);
+	list.Commands = {first, masked, after};
+	list.Operations = {
+		{engine::gui::DrawOperationKind::BeginMask,
+		 engine::ecs::Entity(44),
+		 engine::ecs::Entity(1),
+		 1,
+		 {{10.0f, 10.0f}, {90.0f, 90.0f}},
+		 {{0.0f, 0.0f}, {800.0f, 600.0f}},
+		 12.0f},
+		{engine::gui::DrawOperationKind::EndMask,
+		 engine::ecs::Entity(44),
+		 engine::ecs::Entity(1),
+		 2,
+		 {},
+		 {},
+		 0.0f,
+		 0.0f},
+	};
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Batches().size() == 3);
+	CHECK(mesh.Batches()[0].MaskCount == 0);
+	CHECK(mesh.Batches()[1].MaskCount == 1);
+	CHECK(mesh.Batches()[1].Masks[0].Bounds.Min.X == Approx(10.0f));
+	CHECK(mesh.Batches()[1].Masks[0].CornerRadius == Approx(12.0f));
+	CHECK(mesh.Batches()[2].MaskCount == 0);
 }
 
 TEST_CASE("transparency is inverted into alpha exactly once", "[render][interfacemesh]") {
@@ -326,6 +383,74 @@ TEST_CASE("text without an atlas draws nothing and breaks nothing", "[render][in
 	CHECK(mesh.Vertices().size() == 4);
 	REQUIRE(mesh.Batches().size() == 1);
 	CHECK(mesh.Batches()[0].IndexCount == 6);
+}
+
+TEST_CASE(
+	"shaped text emits its compiled glyph positions through coverage pages", "[render][interfacemesh][text]"
+) {
+	const StagedAssets assets;
+	const auto package = Package();
+	GlyphAtlas fallback;
+	engine::render::ShapedGlyphAtlas shapedAtlas(18.0f);
+	engine::gui::DrawList list;
+	auto label = Rectangle(20.0f, 30.0f, 240.0f, 30.0f);
+	label.Kind = engine::gui::DrawKind::Text;
+	label.Text = "office";
+	label.TextSize = 18;
+	label.XAlignment = engine::gui::TextXAlignment::Left;
+	label.YAlignment = engine::gui::TextYAlignment::Top;
+	label.Shaping = engine::gui::ShapeText(package, {.Text = label.Text, .PixelSize = 18.0f});
+	REQUIRE(label.Shaping.Status == engine::gui::TextShapeStatus::Ok);
+	list.Commands.push_back(label);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, fallback, {}, {}, &shapedAtlas, &package, 1);
+
+	REQUIRE_FALSE(mesh.Vertices().empty());
+	REQUIRE_FALSE(mesh.Indices().empty());
+	REQUIRE_FALSE(mesh.Batches().empty());
+	CHECK(mesh.Batches()[0].ShapedPage == 0);
+	CHECK(mesh.Vertices()[0].X >= label.Bounds.Min.X);
+	CHECK(mesh.Vertices()[0].Y >= label.Bounds.Min.Y);
+}
+
+TEST_CASE("shaped text keeps canonical wrapped line placement", "[render][interfacemesh][text]") {
+	const StagedAssets assets;
+	const auto package = Package();
+	GlyphAtlas fallback;
+	engine::render::ShapedGlyphAtlas shapedAtlas(18.0f);
+	engine::gui::DrawList list;
+	auto label = Rectangle(20.0f, 30.0f, 70.0f, 60.0f);
+	label.Kind = engine::gui::DrawKind::Text;
+	label.Text = "alpha beta";
+	label.TextSize = 18;
+	label.XAlignment = engine::gui::TextXAlignment::Left;
+	label.YAlignment = engine::gui::TextYAlignment::Top;
+	label.Wrapped = true;
+	label.Shaping = engine::gui::LayoutText(
+		package,
+		{.Text = label.Text, .PixelSize = 18.0f},
+		label.Bounds.Width(),
+		true,
+		engine::gui::TextTruncate::None
+	);
+	REQUIRE(label.Shaping.Status == engine::gui::TextShapeStatus::Ok);
+	REQUIRE(label.Shaping.Lines.size() == 2);
+	list.Commands.push_back(label);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, fallback, {}, {}, &shapedAtlas, &package, 2);
+	REQUIRE(mesh.Vertices().size() >= 8);
+	float firstLine = std::numeric_limits<float>::max();
+	float secondLine = std::numeric_limits<float>::max();
+	for (const auto &vertex : mesh.Vertices()) {
+		if (vertex.Y < label.Bounds.Min.Y + 18.0f) {
+			firstLine = std::min(firstLine, vertex.Y);
+		} else {
+			secondLine = std::min(secondLine, vertex.Y);
+		}
+	}
+	CHECK(firstLine < secondLine);
 }
 
 TEST_CASE("text with an atlas advances the pen per glyph", "[render][interfacemesh]") {

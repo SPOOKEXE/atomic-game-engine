@@ -67,6 +67,7 @@
 
 #include <engine/ecs/Entity.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Document.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <cstddef>
@@ -122,6 +123,13 @@ namespace studio {
 
 		// One property of one instance changed.
 		Property,
+
+		// One canonical UI document was imported. Undo and redo remove or rebuild
+		// every root and document theme as one transaction.
+		UiDocumentImport,
+
+		// One serializable component changed as an atomic authored value.
+		UiComponent,
 	};
 
 	// What to do with a recording that has finished.
@@ -193,11 +201,29 @@ namespace studio {
 		// The subtree, for the kinds that have to rebuild one.
 		std::string Document;
 
+		// The encoded canonical GUI document for `UiDocumentImport`. Its root,
+		// theme, and attachment ids are deliberately kept beside the bytes: ECS
+		// handles change on every redo, while these editor ids remain stable.
+		struct UiImport {
+			std::vector<std::byte> Encoded;
+			std::vector<EditId> Roots;
+			std::vector<EditId> Themes;
+			std::vector<EditId> Parents;
+		};
+		UiImport Import;
+
 		// Which property changed.
 		engine::core::Name Property;
 
 		engine::game::PropertyValue Before; // What it read before the edit.
 		engine::game::PropertyValue After;	// What it reads after it.
+
+		// An opaque component change, carried in its registered serialization.
+		// The component name is stable; its process-local id is resolved only
+		// while applying the command in this process.
+		engine::core::Name Component;
+		std::vector<std::byte> ComponentBefore;
+		std::vector<std::byte> ComponentAfter;
 
 		// What to call this in the Edit menu - "Delete Part", not "Destroy".
 		std::string Description;
@@ -373,6 +399,32 @@ namespace studio {
 			engine::core::Name property,
 			const engine::game::PropertyValue &before,
 			const engine::game::PropertyValue &after,
+			std::string description
+		);
+
+		// Records one complete serializable component replacement. The caller
+		// supplies registered before and after bytes, so the command never holds
+		// a mutable component pointer past the entered world.
+		void RecordComponent(
+			engine::world::WorldId world,
+			engine::ecs::Entity instance,
+			engine::core::Name component,
+			std::vector<std::byte> before,
+			std::vector<std::byte> after,
+			std::string description
+		);
+
+		// Records an already-attached canonical UI document import as one edit.
+		// The roots, themes, and their attachment parents must be in document
+		// order. Returns false without recording when the document cannot be
+		// encoded or the supplied transaction is incomplete.
+		bool RecordUiDocumentImport(
+			engine::ecs::Store &store,
+			engine::world::WorldId world,
+			const engine::gui::UiDocument &document,
+			std::span<const engine::ecs::Entity> roots,
+			std::span<const engine::ecs::Entity> themes,
+			std::span<const engine::ecs::Entity> parents,
 			std::string description
 		);
 
@@ -685,6 +737,11 @@ namespace studio {
 		// @param world  Which scene the new handle lives in.
 		// @param entity What now carries it.
 		void Rebind(EditId id, engine::world::WorldId world, engine::ecs::Entity entity);
+
+		// Resolves only an id owned by the world being replayed. The same entity
+		// handle can be live in several stores, so `Store::Alive` alone cannot
+		// establish that a tracked parent belongs to this command's world.
+		engine::ecs::Entity ResolveInWorld(EditId id, engine::world::WorldId world) const;
 
 		// Pushes onto the undo stack, dropping the oldest past `DEPTH`.
 		//

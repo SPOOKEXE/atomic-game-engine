@@ -162,6 +162,7 @@
 //
 // @tier client
 
+#include <engine/assets/Texture.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
@@ -170,6 +171,8 @@
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -177,6 +180,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace studio {
@@ -326,6 +331,103 @@ namespace studio {
 		PluginStatus,
 		DemoNodes,
 		DemoDescription,
+	};
+
+	// A CPU copy of one renderer texture used while a CanvasGroup is rasterised.
+	//
+	// The handle alone is insufficient because renderer handles can be recycled.
+	// The renderer revision and asset name make a retained source valid only for
+	// the resource state that supplied it.
+	struct PluginGroupImageSource {
+		engine::core::Name Asset;
+		engine::assets::TextureData Image;
+	};
+
+	// Per-widget CPU sources for CanvasGroup rasterisation. The caller supplies
+	// the renderer revision and a total-cache budget so this cache never makes
+	// texture readback a per-frame cost or grow without a bound.
+	class PluginGroupImageCache {
+	  public:
+		static constexpr size_t MAXIMUM_BYTES = 16u * 1024u * 1024u;
+
+		void BeginRevision(uint64_t revision) {
+			if (Revision != revision) {
+				Sources.clear();
+				Unavailable.clear();
+				Bytes = 0;
+				Revision = revision;
+			}
+		}
+
+		[[nodiscard]] bool NeedsCopy(uint64_t revision, uintptr_t texture, engine::core::Name asset) const {
+			if (Revision != revision) {
+				return true;
+			}
+			const auto found = Sources.find(texture);
+			if (found != Sources.end() && found->second.Asset == asset) {
+				return false;
+			}
+			const auto unavailable = Unavailable.find(texture);
+			return unavailable == Unavailable.end() || unavailable->second != asset;
+		}
+
+		[[nodiscard]] bool Store(
+			uintptr_t texture,
+			engine::core::Name asset,
+			engine::assets::TextureData image,
+			size_t totalRemaining
+		) {
+			if (!image.IsValid() || Sources.contains(texture)) {
+				return false;
+			}
+			const size_t allowed = std::min(MAXIMUM_BYTES - Bytes, totalRemaining);
+			if (image.Pixels.size() > allowed) {
+				return false;
+			}
+			Bytes += image.Pixels.size();
+			Unavailable.erase(texture);
+			Sources.emplace(texture, PluginGroupImageSource{asset, std::move(image)});
+			return true;
+		}
+
+		void MarkUnavailable(uintptr_t texture, engine::core::Name asset) {
+			Unavailable.insert_or_assign(texture, asset);
+		}
+
+		[[nodiscard]] size_t Remove(uintptr_t texture) {
+			const auto found = Sources.find(texture);
+			Unavailable.erase(texture);
+			if (found == Sources.end()) {
+				return 0;
+			}
+			const size_t released = found->second.Image.Pixels.size();
+			Sources.erase(found);
+			Bytes -= released;
+			return released;
+		}
+
+		[[nodiscard]] const engine::assets::TextureData *Find(uintptr_t texture) const {
+			const auto found = Sources.find(texture);
+			return found == Sources.end() ? nullptr : &found->second.Image;
+		}
+
+		[[nodiscard]] size_t Clear() {
+			const size_t released = Bytes;
+			Sources.clear();
+			Unavailable.clear();
+			Bytes = 0;
+			return released;
+		}
+
+		[[nodiscard]] size_t Size() const {
+			return Bytes;
+		}
+
+	  private:
+		uint64_t Revision = 0;
+		size_t Bytes = 0;
+		std::unordered_map<uintptr_t, PluginGroupImageSource> Sources;
+		std::unordered_map<uintptr_t, engine::core::Name> Unavailable;
 	};
 
 	// One native panel declared by the Default Studio plugin.
@@ -537,6 +639,10 @@ namespace studio {
 		engine::gui::Compiled GuiList;
 		engine::gui::Router GuiRouter;
 		//@}
+
+		// Sources retained only for CanvasGroup rasterisation. They are invalidated
+		// when the renderer changes a resource and released when grouping stops.
+		PluginGroupImageCache GroupImages;
 
 		// What the plugin coloured it, if anything. See `SetWidgetColour`.
 		//

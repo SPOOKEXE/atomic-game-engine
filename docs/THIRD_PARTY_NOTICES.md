@@ -54,6 +54,12 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only - nothing else links `audio` |
 | [ngtcp2](https://github.com/ngtcp2/ngtcp2) | MIT | the QUIC transport under `engine::net::quic`, from v0.19 | yes, where `net` is linked |
 | [SQLite / SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) | SQLite public domain / MIT | SQLite-backed durable DataStore files; only the bundled SQLite C amalgamation is compiled | server and Studio |
+| [FreeType](https://github.com/freetype/freetype) | FreeType License | FreeType 2.13.3, validated TrueType and OpenType font-table access for shared GUI shaping | yes, where `Engine::gui` is linked |
+| [HarfBuzz](https://github.com/harfbuzz/harfbuzz) | MIT | HarfBuzz 11.5.1, OpenType shaping from delivered GUI font bytes | yes, where `Engine::gui` is linked |
+| [utf8proc](https://github.com/JuliaStrings/utf8proc) | MIT | utf8proc pinned at `03cb134`, UTF-8 validation and grapheme segmentation for shared GUI text | yes, where `Engine::gui` is linked |
+| [SheenBidi](https://github.com/Tehreer/SheenBidi) | Apache-2.0 | SheenBidi pinned at `9c048a3`, Unicode bidirectional resolution for shared GUI text | yes, where `Engine::gui` is linked |
+| [libunibreak](https://github.com/adah1972/libunibreak) | Zlib | libunibreak 8.0, Unicode line-break opportunities for shared GUI text | yes, where `Engine::gui` is linked |
+| [AccessKit C](https://github.com/AccessKit/accesskit-c) | MIT or Apache-2.0 | AccessKit C 0.23.0, native assistive-technology adapters for client and Studio windows | client and Studio only |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They

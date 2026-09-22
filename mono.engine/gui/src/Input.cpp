@@ -4,11 +4,13 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/Modal.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <vector>
 
 namespace engine::gui {
@@ -118,6 +120,21 @@ namespace engine::gui {
 	}
 
 	namespace {
+		Vector2 LogicalPoint(const DrawList &list, Entity collector, const Vector2 &point) {
+			const auto found = std::find_if(
+				list.Transforms.begin(),
+				list.Transforms.end(),
+				[collector](const CollectorTransform &transform) { return transform.Collector == collector; }
+			);
+			if (found == list.Transforms.end() || !(found->Scale.X > 0.0f) || !(found->Scale.Y > 0.0f)) {
+				return point;
+			}
+			return Vector2{
+				(point.X - found->Origin.X) / found->Scale.X,
+				(point.Y - found->Origin.Y) / found->Scale.Y,
+			};
+		}
+
 		Entity PickWhere(
 			const Store &store, const DrawList &list, const Vector2 &point, Entity collector, bool screenOnly
 		) {
@@ -154,14 +171,15 @@ namespace engine::gui {
 				// so an element rotated inside a clipped container is still cut by
 				// an upright rectangle - which is what the painter does and what the
 				// hit test therefore has to agree with.
-				const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, point);
+				const core::Vector2 logical = LogicalPoint(list, command.Collector, point);
+				const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, logical);
 				core::Rect hitBounds = command.Bounds;
 				if (store.Get<NodeCanvasLink>(command.Source) != nullptr && hitBounds.Height() < 8.0f) {
 					const float padding = (8.0f - hitBounds.Height()) * 0.5f;
 					hitBounds.Min.Y -= padding;
 					hitBounds.Max.Y += padding;
 				}
-				if (!hitBounds.Contains(local) || !command.Clip.Contains(point)) {
+				if (!hitBounds.Contains(local) || !command.Clip.Contains(logical)) {
 					continue;
 				}
 
@@ -223,6 +241,27 @@ namespace engine::gui {
 
 	Entity PickScreen(const Store &store, const DrawList &list, const Vector2 &point) {
 		return PickWhere(store, list, point, NULL_ENTITY, true);
+	}
+
+	Entity PickVisibleScreen(const DrawList &list, const Vector2 &point) {
+		ENGINE_PROFILE_CAT("gui visible screen pick", engine::core::ProfileCategory::ECS);
+
+		// The compiled list is the canonical paint and clip order. The editor
+		// must not repeat the hierarchy walk merely because it selects inactive
+		// objects that game input deliberately passes through.
+		for (size_t index = list.Commands.size(); index > 0; index--) {
+			const DrawCommand &command = list.Commands[index - 1];
+			if (command.Spatial) {
+				continue;
+			}
+
+			const core::Vector2 logical = LogicalPoint(list, command.Collector, point);
+			const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, logical);
+			if (command.Bounds.Contains(local) && command.Clip.Contains(logical)) {
+				return command.Source;
+			}
+		}
+		return NULL_ENTITY;
 	}
 
 	size_t ElementsAt(const Store &store, Entity root, const Vector2 &point, std::vector<Entity> &found) {
@@ -368,6 +407,193 @@ namespace engine::gui {
 		return false;
 	}
 
+	std::span<const GuiEvent>
+	Router::UpdateSemantic(Store &store, const DrawList &list, SemanticAction action) {
+		Events.clear();
+		SyncModals(store, list);
+		// The default only covers non-navigating actions. They return before the
+		// value reaches SelectNext, while the four navigation cases replace it.
+		SelectionMove move = SelectionMove::Up;
+		bool navigates = true;
+		switch (action) {
+		case SemanticAction::Up:
+			move = SelectionMove::Up;
+			break;
+		case SemanticAction::Down:
+			move = SelectionMove::Down;
+			break;
+		case SemanticAction::Left:
+			move = SelectionMove::Left;
+			break;
+		case SemanticAction::Right:
+			move = SelectionMove::Right;
+			break;
+		default:
+			navigates = false;
+			break;
+		}
+		const Entity service = GuiServiceOf(store);
+		const GuiServiceState *state = store.Get<GuiServiceState>(service);
+		const Entity selected = state != nullptr ? state->SelectedObject : NULL_ENTITY;
+		Entity collector = CollectorOf(store, selected);
+		bool modalCollectorAmbiguous = false;
+		if (collector == NULL_ENTITY) {
+			Entity onlyModalCollector;
+			for (const ModalContext &context : ModalContexts) {
+				if (context.Modal == NULL_ENTITY) {
+					continue;
+				}
+				if (onlyModalCollector != NULL_ENTITY) {
+					onlyModalCollector = NULL_ENTITY;
+					modalCollectorAmbiguous = true;
+					break;
+				}
+				onlyModalCollector = context.Collector;
+			}
+			collector = onlyModalCollector;
+		}
+		const Entity modal = ModalFor(collector);
+		if (navigates) {
+			if (modalCollectorAmbiguous) {
+				// A keyboard action has no projected-canvas identity. Seeding from
+				// the whole list here could select through either modal, so wait for
+				// a routed collector or an existing selection to identify one.
+				return Events;
+			}
+			DrawList scoped;
+			const DrawList *visible = &list;
+			if (collector != NULL_ENTITY) {
+				for (const DrawCommand &command : list.Commands) {
+					if (command.Collector != collector) {
+						continue;
+					}
+					if (modal == NULL_ENTITY || command.Source == modal ||
+						store.IsDescendantOf(command.Source, modal)) {
+						scoped.Commands.push_back(command);
+					}
+				}
+				visible = &scoped;
+			}
+			(void)SelectNext(store, *visible, move);
+			return Events;
+		}
+
+		if (action == SemanticAction::Cancel) {
+			const Entity focused = FocusedTextBox(store);
+			if (Focus(store, NULL_ENTITY)) {
+				Events.push_back(
+					GuiEvent{
+						.Kind = EventKind::FocusReleased,
+						.Instance = focused,
+						.Position = Vector2::Zero,
+						.Local = Vector2::Zero,
+						.Entered = false,
+						.Collection = NULL_ENTITY,
+						.Key = {},
+						.Index = UINT32_MAX,
+					}
+				);
+			}
+			return Events;
+		}
+
+		if (modal != NULL_ENTITY && selected != modal && !store.IsDescendantOf(selected, modal)) {
+			return Events;
+		}
+		const Element *element = store.Get<Element>(selected);
+		const bool compiled =
+			std::any_of(list.Commands.begin(), list.Commands.end(), [&](const DrawCommand &command) {
+				return command.Source == selected;
+			});
+		if (selected != NULL_ENTITY && store.IsA(selected, ButtonClass()) && element != nullptr &&
+			element->Visible && element->Selectable && element->Interactable && compiled) {
+			// Keyboard and gamepad activation is not a fabricated pointer press.
+			// `Activated` is the semantic event scripts need; claiming a mouse
+			// down and up would make device-specific handlers lie.
+			Events.push_back(
+				GuiEvent{
+					.Kind = EventKind::Activated,
+					.Instance = selected,
+					.Position = Vector2::Zero,
+					.Local = Vector2::Zero,
+					.Entered = false,
+					.Collection = NULL_ENTITY,
+					.Key = {},
+					.Index = UINT32_MAX,
+				}
+			);
+		}
+		return Events;
+	}
+
+	std::span<const GuiEvent>
+	Router::UpdateSemantic(Store &store, const DrawList &list, Entity target, SemanticAction action) {
+		Events.clear();
+		SyncModals(store, list);
+		if (target == NULL_ENTITY ||
+			(action != SemanticAction::Activate && action != SemanticAction::Focus)) {
+			return Events;
+		}
+
+		const DrawCommand *command = nullptr;
+		for (const DrawCommand &candidate : list.Commands) {
+			if (candidate.Source != target || !candidate.Bounds.Intersects(candidate.Clip)) {
+				continue;
+			}
+			command = &candidate;
+			break;
+		}
+		const Element *element = store.Get<Element>(target);
+		if (command == nullptr || element == nullptr || !element->Visible || !element->Interactable ||
+			!AllowsModal(store, target)) {
+			return Events;
+		}
+
+		if (action == SemanticAction::Focus) {
+			if (store.Get<Entry>(target) != nullptr) {
+				const Entity previous = FocusedTextBox(store);
+				if (Focus(store, target)) {
+					if (previous != NULL_ENTITY) {
+						Events.push_back(
+							{.Kind = EventKind::FocusReleased,
+							 .Instance = previous,
+							 .Position = Vector2::Zero,
+							 .Local = Vector2::Zero,
+							 .Collection = NULL_ENTITY,
+							 .Key = {},
+							 .Index = UINT32_MAX}
+						);
+					}
+					Events.push_back(
+						{.Kind = EventKind::Focused,
+						 .Instance = target,
+						 .Position = Vector2::Zero,
+						 .Local = Vector2::Zero,
+						 .Collection = NULL_ENTITY,
+						 .Key = {},
+						 .Index = UINT32_MAX}
+					);
+				}
+			} else if (element->Selectable) {
+				(void)Select(store, target);
+			}
+			return Events;
+		}
+
+		if (store.IsA(target, ButtonClass()) && element->Selectable) {
+			Events.push_back(
+				{.Kind = EventKind::Activated,
+				 .Instance = target,
+				 .Position = Vector2::Zero,
+				 .Local = Vector2::Zero,
+				 .Collection = NULL_ENTITY,
+				 .Key = {},
+				 .Index = UINT32_MAX}
+			);
+		}
+		return Events;
+	}
+
 	Entity Router::Wheel(Store &store, const Vector2 &point, float notches) {
 		// A node canvas owns wheel input before a scrolling frame below it. A
 		// graph wheel gesture means zoom, and treating it as a page wheel first
@@ -379,7 +605,7 @@ namespace engine::gui {
 		Vector2 graphPoint;
 		store.Each<const NodeCanvas, const Resolved>(
 			[&](Entity node, const NodeCanvas &, const Resolved &resolved) {
-				if (!resolved.Rendered) {
+				if (!resolved.Rendered || !AllowsModal(store, node)) {
 					return;
 				}
 				const core::Rect bounds{
@@ -452,7 +678,7 @@ namespace engine::gui {
 
 		store.Each<const Scrolling, const ScrollState, const Resolved>(
 			[&](Entity node, const Scrolling &scrolling, const ScrollState &state, const Resolved &resolved) {
-				if (!resolved.Rendered ||
+				if (!resolved.Rendered || !AllowsModal(store, node) ||
 					(!Scrolls(scrolling, state, true) && !Scrolls(scrolling, state, false))) {
 					return;
 				}
@@ -497,6 +723,9 @@ namespace engine::gui {
 		// past it.
 		for (size_t index = list.Commands.size(); index > 0; index--) {
 			const DrawCommand &command = list.Commands[index - 1];
+			if (!AllowsModal(store, command.Source)) {
+				continue;
+			}
 			if (!command.Bounds.Contains(Unrotated(command.Rotation, command.Bounds, point)) ||
 				!command.Clip.Contains(point)) {
 				continue;
@@ -682,6 +911,9 @@ namespace engine::gui {
 		// reason: a frame drawn over another frame gets the press.
 		for (size_t index = list.Commands.size(); index > 0; index--) {
 			const DrawCommand &command = list.Commands[index - 1];
+			if (!AllowsModal(store, command.Source)) {
+				continue;
+			}
 
 			const Scrolling *scrolling = store.Get<Scrolling>(command.Source);
 			const ScrollState *state = store.Get<ScrollState>(command.Source);
@@ -796,6 +1028,175 @@ namespace engine::gui {
 		Canvas = NULL_ENTITY;
 	}
 
+	Entity Router::CollectorOf(const Store &store, Entity entity) const {
+		for (size_t depth = 0; entity != NULL_ENTITY && depth < 256; depth++) {
+			if (store.IsA(entity, GuiClass("LayerCollector"))) {
+				return entity;
+			}
+			entity = store.ParentOf(entity);
+		}
+		return NULL_ENTITY;
+	}
+
+	Entity Router::ModalFor(Entity collector) const {
+		for (const ModalContext &context : ModalContexts) {
+			if (context.Collector == collector) {
+				return context.Modal;
+			}
+		}
+		return NULL_ENTITY;
+	}
+
+	bool Router::AllowsModal(const Store &store, Entity entity) const {
+		const Entity modal = ModalFor(CollectorOf(store, entity));
+		if (modal == NULL_ENTITY && ModalOverflow) {
+			return false;
+		}
+		return modal == NULL_ENTITY || entity == modal || store.IsDescendantOf(entity, modal);
+	}
+
+	void Router::CancelCaptureInCollector(Store &store, Entity collector) {
+		if (CollectorOf(store, Holding) == collector) {
+			Holding = NULL_ENTITY;
+		}
+		if (CollectorOf(store, Dragging) == collector) {
+			Dragging = NULL_ENTITY;
+		}
+		if (CollectorOf(store, Detector) == collector || CollectorOf(store, Dragged) == collector) {
+			Detector = NULL_ENTITY;
+			Dragged = NULL_ENTITY;
+		}
+		if (CollectorOf(store, Canvas) == collector) {
+			ReleaseCanvas(store);
+		}
+	}
+
+	void Router::SyncModals(Store &store, const DrawList &list) {
+		const auto scopeOf = [&](Entity entity) {
+			for (size_t depth = 0; entity != NULL_ENTITY && depth < 256; depth++) {
+				bool enabled = false;
+				store.EachChild(entity, [&](Entity child) {
+					const ModalScope *scope = store.Get<ModalScope>(child);
+					enabled = enabled || (scope != nullptr && scope->Enabled);
+				});
+				if (enabled) {
+					return entity;
+				}
+				entity = store.ParentOf(entity);
+			}
+			return NULL_ENTITY;
+		};
+
+		const auto inside = [&](Entity entity, Entity scope) {
+			return entity != NULL_ENTITY && (entity == scope || store.IsDescendantOf(entity, scope));
+		};
+
+		for (ModalContext &context : ModalContexts) {
+			context.NextModal = NULL_ENTITY;
+			context.Seen = false;
+		}
+		ModalOverflow = false;
+
+		// Draw order chooses the innermost visible scope in each collector. The
+		// contexts are kept separately because a surface dialog has no authority
+		// over the HUD or a second surface. A reverse walk finds each top scope
+		// once, avoiding a full draw-list scan for every collector.
+		for (size_t index = list.Commands.size(); index > 0; index--) {
+			const DrawCommand &command = list.Commands[index - 1];
+			if (command.Collector == NULL_ENTITY) {
+				continue;
+			}
+			auto found =
+				std::find_if(ModalContexts.begin(), ModalContexts.end(), [&](const ModalContext &context) {
+					return context.Collector == command.Collector;
+				});
+			if (found == ModalContexts.end()) {
+				const Entity top = scopeOf(command.Source);
+				if (top == NULL_ENTITY) {
+					continue;
+				}
+				if (ModalContexts.size() >= MAX_MODAL_CONTEXTS) {
+					// A new context cannot be tracked safely once the bound is full.
+					// `AllowsModal` refuses unknown collectors for this frame.
+					ModalOverflow = true;
+					continue;
+				}
+				ModalContexts.push_back(
+					ModalContext{
+						.Collector = command.Collector,
+						.Modal = NULL_ENTITY,
+						.NextModal = top,
+						.FocusBeforeModal = NULL_ENTITY,
+						.SelectionBeforeModal = NULL_ENTITY,
+						.Seen = true,
+					}
+				);
+				continue;
+			}
+			found->Seen = true;
+			if (found->NextModal == NULL_ENTITY) {
+				found->NextModal = scopeOf(command.Source);
+			}
+		}
+
+		for (size_t index = 0; index < ModalContexts.size();) {
+			ModalContext &context = ModalContexts[index];
+			const Entity top = context.NextModal;
+			if (top == context.Modal) {
+				if (top == NULL_ENTITY) {
+					ModalContexts.erase(ModalContexts.begin() + static_cast<std::ptrdiff_t>(index));
+					continue;
+				}
+				index++;
+				continue;
+			}
+
+			const bool opened = context.Modal == NULL_ENTITY && top != NULL_ENTITY;
+			if (context.Modal != NULL_ENTITY && top == NULL_ENTITY) {
+				if (context.FocusBeforeModal != NULL_ENTITY && store.Alive(context.FocusBeforeModal) &&
+					CollectorOf(store, context.FocusBeforeModal) == context.Collector &&
+					store.Get<Entry>(context.FocusBeforeModal) != nullptr) {
+					(void)Focus(store, context.FocusBeforeModal);
+				}
+				if (context.SelectionBeforeModal != NULL_ENTITY &&
+					store.Alive(context.SelectionBeforeModal) &&
+					CollectorOf(store, context.SelectionBeforeModal) == context.Collector) {
+					(void)Select(store, context.SelectionBeforeModal);
+				}
+				context.FocusBeforeModal = NULL_ENTITY;
+				context.SelectionBeforeModal = NULL_ENTITY;
+			}
+
+			// A nested scope replaces the accessible subtree. Any capture outside
+			// it must end here, or its later release can activate a hidden control.
+			if (top != NULL_ENTITY) {
+				CancelCaptureInCollector(store, context.Collector);
+			}
+			context.Modal = top;
+			if (top == NULL_ENTITY) {
+				ModalContexts.erase(ModalContexts.begin() + static_cast<std::ptrdiff_t>(index));
+				continue;
+			}
+
+			const Entity focused = FocusedTextBox(store);
+			if (CollectorOf(store, focused) == context.Collector && !inside(focused, top)) {
+				if (opened) {
+					context.FocusBeforeModal = focused;
+				}
+				(void)Focus(store, NULL_ENTITY);
+			}
+			const GuiServiceState *state = store.Get<GuiServiceState>(GuiServiceOf(store));
+			if (state != nullptr && CollectorOf(store, state->SelectedObject) == context.Collector &&
+				!inside(state->SelectedObject, top)) {
+				if (opened) {
+					context.SelectionBeforeModal = state->SelectedObject;
+				}
+				(void)Select(store, NULL_ENTITY);
+			}
+			index++;
+		}
+	}
+
 	void Router::DragBar(Store &store, const Vector2 &point) {
 		const Scrolling *scrolling = store.Get<Scrolling>(Dragging);
 		const ScrollState *state = store.Get<ScrollState>(Dragging);
@@ -843,29 +1244,87 @@ namespace engine::gui {
 		ENGINE_PROFILE_CAT("gui route", engine::core::ProfileCategory::ECS);
 
 		Events.clear();
+		SyncModals(store, list);
 
-		const Entity found = !pointer.Inside ? NULL_ENTITY
-							 : pointer.Collector != NULL_ENTITY
-								 ? PickInCollector(store, list, pointer.Collector, pointer.Position)
-							 : pointer.ScreenOnly ? PickScreen(store, list, pointer.Position)
-												  : Pick(store, list, pointer.Position);
+		const Entity picked = !pointer.Inside ? NULL_ENTITY
+							  : pointer.Collector != NULL_ENTITY
+								  ? PickInCollector(store, list, pointer.Collector, pointer.Position)
+							  : pointer.ScreenOnly ? PickScreen(store, list, pointer.Position)
+												   : Pick(store, list, pointer.Position);
+		const Entity found = picked != NULL_ENTITY && !AllowsModal(store, picked) ? NULL_ENTITY : picked;
 
 		const auto local = [&](Entity instance) -> Vector2 {
 			const Resolved *resolved = store.Get<Resolved>(instance);
 			if (resolved == nullptr) {
 				return Vector2::Zero;
 			}
+			Vector2 logical = pointer.Position;
+			for (size_t index = list.Commands.size(); index > 0; index--) {
+				const DrawCommand &command = list.Commands[index - 1];
+				if (command.Source == instance) {
+					logical = LogicalPoint(list, command.Collector, pointer.Position);
+					break;
+				}
+			}
 			return Vector2{
-				pointer.Position.X - resolved->AbsolutePosition.X,
-				pointer.Position.Y - resolved->AbsolutePosition.Y,
+				logical.X - resolved->AbsolutePosition.X,
+				logical.Y - resolved->AbsolutePosition.Y,
 			};
 		};
 
 		const auto emit = [&](EventKind kind, Entity instance) {
 			if (instance != NULL_ENTITY) {
-				Events.push_back(GuiEvent{kind, instance, pointer.Position, local(instance)});
+				GuiEvent event{
+					kind, instance, pointer.Position, local(instance), false, NULL_ENTITY, {}, UINT32_MAX
+				};
+				if (instance == Holding && HoldingCollection != NULL_ENTITY) {
+					event.Collection = HoldingCollection;
+					event.Key = HoldingKey;
+					event.Index = HoldingIndex;
+				} else {
+					for (size_t index = list.Commands.size(); index > 0; index--) {
+						const DrawCommand &command = list.Commands[index - 1];
+						if (command.Source == instance && command.Bounds.Contains(pointer.Position)) {
+							event.Collection = command.Collection;
+							event.Key = command.Key;
+							event.Index = command.Index;
+							break;
+						}
+					}
+				}
+				Events.push_back(std::move(event));
 			}
 		};
+
+		if (pointer.Cancelled) {
+			// Cancellation ends capture but never turns into a release over the
+			// target. A withdrawn touch has no up position a button may treat as a
+			// click, while listeners still need the matching input-ended event.
+			Dragging = NULL_ENTITY;
+			ReleaseCanvas(store);
+			if (Detector != NULL_ENTITY) {
+				Events.push_back(
+					GuiEvent{
+						EventKind::DragEnded,
+						Detector,
+						pointer.Position,
+						Vector2{pointer.Position.X - DragFrom.X, pointer.Position.Y - DragFrom.Y},
+						false,
+						NULL_ENTITY,
+						{},
+						UINT32_MAX,
+					}
+				);
+				Detector = NULL_ENTITY;
+				Dragged = NULL_ENTITY;
+			}
+			emit(EventKind::InputEnded, Holding);
+			Holding = NULL_ENTITY;
+			WasDown = false;
+			Last = pointer.Position;
+			Started = true;
+			return Events;
+		}
 
 		// **Leave before enter**, so a handler that moves something on leave
 		// runs before the one that reacts to the arrival. The other order makes
@@ -917,6 +1376,10 @@ namespace engine::gui {
 					Detector,
 					pointer.Position,
 					Vector2{pointer.Position.X - DragFrom.X, pointer.Position.Y - DragFrom.Y},
+					false,
+					NULL_ENTITY,
+					{},
+					UINT32_MAX,
 				}
 			);
 			Last = pointer.Position;
@@ -935,6 +1398,9 @@ namespace engine::gui {
 			for (size_t index = list.Commands.size(); index > 0 && Dragging == NULL_ENTITY; index--) {
 				const DrawCommand &command = list.Commands[index - 1];
 				if (pointer.Collector != NULL_ENTITY && command.Collector != pointer.Collector) {
+					continue;
+				}
+				if (!AllowsModal(store, command.Source)) {
 					continue;
 				}
 
@@ -969,7 +1435,18 @@ namespace engine::gui {
 			// `Frame` still wins over the press that would otherwise pass
 			// straight through it.
 			if (BeginDrag(store, list, pointer.Position)) {
-				Events.push_back(GuiEvent{EventKind::DragBegan, Detector, pointer.Position, Vector2::Zero});
+				Events.push_back(
+					GuiEvent{
+						EventKind::DragBegan,
+						Detector,
+						pointer.Position,
+						Vector2::Zero,
+						false,
+						NULL_ENTITY,
+						{},
+						UINT32_MAX
+					}
+				);
 				Last = pointer.Position;
 				WasDown = true;
 				Started = true;
@@ -990,6 +1467,24 @@ namespace engine::gui {
 			}
 
 			Holding = found;
+			HoldingCollection = NULL_ENTITY;
+			HoldingKey.clear();
+			HoldingIndex = UINT32_MAX;
+			for (size_t index = list.Commands.size(); index > 0; index--) {
+				const DrawCommand &command = list.Commands[index - 1];
+				if (command.Source == found && command.Bounds.Contains(pointer.Position)) {
+					HoldingCollection = command.Collection;
+					HoldingKey = command.Key;
+					HoldingIndex = command.Index;
+					break;
+				}
+			}
+			if (store.Get<Entry>(found) != nullptr && HoldingCollection != NULL_ENTITY &&
+				!HoldingKey.empty()) {
+				(void)RememberVirtualFocus(store, HoldingCollection, HoldingKey, HoldingIndex);
+			} else {
+				ClearVirtualFocus(store);
+			}
 			emit(EventKind::InputBegan, found);
 
 			// **A press that landed on nothing releases the focus, which is
@@ -1015,6 +1510,50 @@ namespace engine::gui {
 				emit(EventKind::FocusReleased, had);
 				emit(EventKind::Focused, wanted);
 			}
+			if (Entry *entry = store.GetMutable<Entry>(wanted); entry != nullptr) {
+				for (size_t index = list.Commands.size(); index > 0; index--) {
+					const DrawCommand &command = list.Commands[index - 1];
+					if (command.Kind != DrawKind::Text || command.Source != wanted ||
+						command.Shaping.Lines.empty()) {
+						continue;
+					}
+					const Vector2 point = LogicalPoint(list, command.Collector, pointer.Position);
+					const float lineHeight =
+						static_cast<float>(command.TextSize) * std::max(command.LineHeight, 0.0f);
+					if (!(lineHeight > 0.0f)) break;
+					float top = command.Bounds.Min.Y;
+					if (command.YAlignment == TextYAlignment::Center) {
+						top += (command.Bounds.Height() - lineHeight * command.Shaping.Lines.size()) * 0.5f;
+					} else if (command.YAlignment == TextYAlignment::Bottom) {
+						top = command.Bounds.Max.Y - lineHeight * command.Shaping.Lines.size();
+					}
+					const uint32_t line = static_cast<uint32_t>(std::clamp(
+						static_cast<int32_t>((point.Y - top) / lineHeight),
+						0,
+						static_cast<int32_t>(command.Shaping.Lines.size() - 1)
+					));
+					const ShapedLine &placed = command.Shaping.Lines[line];
+					float origin = command.Bounds.Min.X;
+					if (command.XAlignment == TextXAlignment::Center) {
+						origin += (command.Bounds.Width() - placed.Advance) * 0.5f;
+					} else if (command.XAlignment == TextXAlignment::Right) {
+						origin = command.Bounds.Max.X - placed.Advance;
+					}
+					const uint32_t source = SourceAt(command.Shaping, line, point.X - origin);
+					const auto boundary = std::lower_bound(
+						command.Shaping.GraphemeBoundaries.begin(),
+						command.Shaping.GraphemeBoundaries.end(),
+						source
+					);
+					entry->CursorPosition =
+						static_cast<int32_t>(
+							std::distance(command.Shaping.GraphemeBoundaries.begin(), boundary)
+						) +
+						1;
+					entry->SelectionStart = -1;
+					break;
+				}
+			}
 		} else if (!pointer.Down && WasDown) {
 			// **Letting go of a bar ends the drag and nothing else.** No press
 			// began, so no `InputEnded` is owed and no `Activated` can follow -
@@ -1036,6 +1575,10 @@ namespace engine::gui {
 						Detector,
 						pointer.Position,
 						Vector2{pointer.Position.X - DragFrom.X, pointer.Position.Y - DragFrom.Y},
+						false,
+						NULL_ENTITY,
+						{},
+						UINT32_MAX,
 					}
 				);
 				Detector = NULL_ENTITY;
@@ -1054,6 +1597,9 @@ namespace engine::gui {
 			}
 
 			Holding = NULL_ENTITY;
+			HoldingCollection = NULL_ENTITY;
+			HoldingKey.clear();
+			HoldingIndex = UINT32_MAX;
 		}
 
 		// **After the press, so a wheel turned in the same frame as a click acts

@@ -573,6 +573,9 @@ end
 declare extern type Enum_CloudComputeShader extends EnumItem with
 end
 
+declare extern type Enum_CollectorScaleMode extends EnumItem with
+end
+
 declare extern type Enum_ConstraintMotion extends EnumItem with
 end
 
@@ -616,6 +619,9 @@ declare extern type Enum_LineJoinMode extends EnumItem with
 end
 
 declare extern type Enum_ListenerType extends EnumItem with
+end
+
+declare extern type Enum_LocalizedArgumentType extends EnumItem with
 end
 
 declare extern type Enum_MouseBehavior extends EnumItem with
@@ -732,6 +738,9 @@ end
 declare extern type Enum_VerticalScrollBarPosition extends EnumItem with
 end
 
+declare extern type Enum_ViewportUpdateMode extends EnumItem with
+end
+
 declare extern type Enum_VolumeShape extends EnumItem with
 end
 
@@ -804,6 +813,13 @@ declare Enum: {
 		Stratus: Enum_CloudComputeShader,
 		Storm: Enum_CloudComputeShader,
 		Voxel: Enum_CloudComputeShader,
+	},
+	CollectorScaleMode: {
+		Stretch: Enum_CollectorScaleMode,
+		Fit: Enum_CollectorScaleMode,
+		Fill: Enum_CollectorScaleMode,
+		Integer: Enum_CollectorScaleMode,
+		None: Enum_CollectorScaleMode,
 	},
 	ConstraintMotion: {
 		Locked: Enum_ConstraintMotion,
@@ -963,6 +979,11 @@ declare Enum: {
 	ListenerType: {
 		Camera: Enum_ListenerType,
 		ObjectPosition: Enum_ListenerType,
+	},
+	LocalizedArgumentType: {
+		String: Enum_LocalizedArgumentType,
+		Number: Enum_LocalizedArgumentType,
+		Date: Enum_LocalizedArgumentType,
 	},
 	MouseBehavior: {
 		Default: Enum_MouseBehavior,
@@ -1179,6 +1200,12 @@ declare Enum: {
 	VerticalScrollBarPosition: {
 		Right: Enum_VerticalScrollBarPosition,
 		Left: Enum_VerticalScrollBarPosition,
+	},
+	ViewportUpdateMode: {
+		OnChange: Enum_ViewportUpdateMode,
+		EveryFrame: Enum_ViewportUpdateMode,
+		FixedRate: Enum_ViewportUpdateMode,
+		Manual: Enum_ViewportUpdateMode,
 	},
 	VolumeShape: {
 		Box: Enum_VolumeShape,
@@ -1645,6 +1672,8 @@ declare extern type MeshPart extends BasePart with
 	read AutoLod3MeshId: string
 	write AutoLod3MeshId: string?
 	AutoLod3Ratio: number
+	read AutoLodBillboardTexture: string
+	write AutoLodBillboardTexture: string?
 	AutoLodLevels: number
 	AutoLodStrategy: Enum_AutoMeshLODStrategy
 	AutoLodTargetQuadArea: number
@@ -1657,6 +1686,8 @@ declare extern type MeshPart extends BasePart with
 	read CustomLod3MeshId: string
 	write CustomLod3MeshId: string?
 	CustomLod3Ratio: number
+	read CustomLodBillboardTexture: string
+	write CustomLodBillboardTexture: string?
 	CustomLodLevels: number
 	CustomLodTargetQuadArea: number
 	read EmissiveMap: string
@@ -1675,6 +1706,8 @@ declare extern type MeshPart extends BasePart with
 	read Lod3MeshId: string
 	write Lod3MeshId: string?
 	Lod3Ratio: number
+	read LodBillboardTexture: string
+	write LodBillboardTexture: string?
 	LodTargetQuadArea: number
 	read MeshId: string
 	write MeshId: string?
@@ -2414,6 +2447,9 @@ declare extern type TextButton extends GuiButton with
 	read ContentText: string
 	Font: Enum_Font
 	LineHeight: number
+	LocalizationArgumentCount: number
+	read LocalizationKey: string
+	write LocalizationKey: string?
 	MaxVisibleGraphemes: number
 	RichText: boolean
 	Text: string
@@ -2458,6 +2494,9 @@ declare extern type TextLabel extends GuiLabel with
 	read ContentText: string
 	Font: Enum_Font
 	LineHeight: number
+	LocalizationArgumentCount: number
+	read LocalizationKey: string
+	write LocalizationKey: string?
 	MaxVisibleGraphemes: number
 	RichText: boolean
 	Text: string
@@ -2497,8 +2536,12 @@ declare extern type TextBox extends GuiObject with
 	CursorPosition: number
 	Font: Enum_Font
 	LineHeight: number
+	LocalizationArgumentCount: number
+	read LocalizationKey: string
+	write LocalizationKey: string?
 	MaxVisibleGraphemes: number
 	MultiLine: boolean
+	Password: boolean
 	PlaceholderColor3: Color3
 	PlaceholderText: string
 	RichText: boolean
@@ -2528,14 +2571,21 @@ declare extern type ViewportFrame extends GuiObject with
 	CurrentCamera: Instance
 	ImageColor3: Color3
 	ImageTransparency: number
+	InvalidationRevision: number
 	LightColor: Color3
 	LightDirection: Vector3
+	ResolutionScale: number
+	UpdateEveryFrames: number
+	UpdateMode: Enum_ViewportUpdateMode
 end
 
 declare extern type LayerCollector extends GuiBase2d with
 	DisplayOrder: number
 	Enabled: boolean
+	ReferenceResolution: Vector2
 	ResetOnSpawn: boolean
+	ScaleMode: Enum_CollectorScaleMode
+	Theme: Instance
 	ZIndexBehavior: Enum_ZIndexBehavior
 end
 
@@ -2640,6 +2690,11 @@ end
 declare extern type UIConstraint extends UIComponent with
 end
 
+declare extern type UIMask extends UIComponent with
+	CornerRadius: UDim
+	Enabled: boolean
+end
+
 declare extern type UIAspectRatioConstraint extends UIConstraint with
 	AspectRatio: number
 	AspectType: Enum_AspectType
@@ -2707,6 +2762,39 @@ declare extern type UIDragDetector extends UIComponent with
 	function VirtualDragBegin(self, x: number, y: number): ()
 	function VirtualDragContinue(self, x: number, y: number, dx: number, dy: number): ()
 	function VirtualDragEnd(self, x: number, y: number, dx: number, dy: number): ()
+end
+
+declare extern type UIBinding extends Instance with
+	read Attribute: string
+	write Attribute: string?
+	Fallback: string
+	SourcePath: string
+	read Target: string
+	write Target: string?
+	read Valid: boolean
+	read Value: string
+end
+
+declare extern type UIModalScope extends UIComponent with
+	Enabled: boolean
+end
+
+declare extern type UIAnimation extends UIComponent with
+	Playing: boolean
+	StartTime: number
+end
+
+declare extern type UIStyle extends UIComponent with
+end
+
+declare extern type UITheme extends Instance with
+end
+
+declare extern type UIVirtualCollection extends Instance with
+	FixedExtent: number
+	ItemCount: number
+	Revision: number
+	function SetVirtualPage(self, first: number, extentBefore: number, records: { { Key: string, Extent: number?, Fields: { [string]: any } } }, revision: number): ()
 end
 
 declare extern type Service extends Instance with
@@ -3504,6 +3592,7 @@ type CreatableInstances = {
 	UIGridLayout: UIGridLayout,
 	UITableLayout: UITableLayout,
 	UIPageLayout: UIPageLayout,
+	UIMask: UIMask,
 	UIAspectRatioConstraint: UIAspectRatioConstraint,
 	UISizeConstraint: UISizeConstraint,
 	UITextSizeConstraint: UITextSizeConstraint,
@@ -3514,6 +3603,12 @@ type CreatableInstances = {
 	UIFlexItem: UIFlexItem,
 	UIGradient: UIGradient,
 	UIDragDetector: UIDragDetector,
+	UIBinding: UIBinding,
+	UIModalScope: UIModalScope,
+	UIAnimation: UIAnimation,
+	UIStyle: UIStyle,
+	UITheme: UITheme,
+	UIVirtualCollection: UIVirtualCollection,
 	Player: Player,
 	Team: Team,
 }

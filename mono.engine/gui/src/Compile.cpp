@@ -1,14 +1,20 @@
+#include "Utf8.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Binding.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Localization.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/RichText.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/TextResolution.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -82,6 +88,10 @@ namespace engine::gui {
 			return Fold(running, static_cast<uint64_t>(std::bit_cast<uint32_t>(value)));
 		}
 
+		uint64_t Fold(uint64_t running, double value) {
+			return Fold(running, std::bit_cast<uint64_t>(value));
+		}
+
 		uint64_t Fold(uint64_t running, bool value) {
 			// **1 and 2, not 1 and 0.** A zero term folds to a value that
 			// depends only on the running total, so a `false` next to a
@@ -132,6 +142,44 @@ namespace engine::gui {
 		uint64_t Fold(uint64_t running, const Color3 &value) {
 			return Fold(Fold(Fold(running, value.R), value.G), value.B);
 		}
+
+		uint64_t FoldStyleSet(uint64_t running, const StyleSet &set) {
+			for (const StyleDeclaration &declaration : set.Declarations()) {
+				running = Fold(running, declaration.Name);
+				running = Fold(running, static_cast<uint64_t>(declaration.Value.Type));
+				running = declaration.Value.Type == StyleValueType::Color
+							  ? Fold(running, declaration.Value.Color)
+							  : Fold(running, declaration.Value.Number);
+			}
+			return running;
+		}
+
+		uint64_t Fold(uint64_t running, const StyleClass &value) {
+			for (const core::Name name : value.Names.Names()) {
+				running = Fold(running, name);
+			}
+			return running;
+		}
+
+		uint64_t Fold(uint64_t running, const UIStyle &value) {
+			running = Fold(running, value.Rule.Class);
+			running = Fold(running, static_cast<uint64_t>(value.Rule.State));
+			return FoldStyleSet(running, value.Rule.Declarations);
+		}
+
+		uint64_t Fold(uint64_t running, const ThemeBinding &value) {
+			return Fold(running, value.Theme);
+		}
+
+		const StyleValue *
+		StyleValueFor(const ResolvedStyle &style, std::string_view name, StyleValueType type);
+		const ecs::AttributeValue *VirtualBindingValue(
+			const Store &store,
+			ecs::Entity instance,
+			ecs::Entity collectionOn,
+			std::string_view key,
+			std::string_view target
+		);
 
 		uint64_t Fold(uint64_t running, const UDim &value) {
 			return Fold(Fold(running, value.Scale), value.Offset);
@@ -189,6 +237,14 @@ namespace engine::gui {
 			return Fold(running, value.AutoSelectGuiEnabled);
 		}
 
+		uint64_t Fold(uint64_t running, const TextCompositionState &value) {
+			running = Fold(running, value.TextBox);
+			running = Fold(running, value.Text);
+			running = Fold(running, value.Start);
+			running = Fold(running, value.Length);
+			return Fold(running, value.Revision);
+		}
+
 		uint64_t Fold(uint64_t running, const Selection &value) {
 			running = Fold(running, value.NextUp);
 			running = Fold(running, value.NextDown);
@@ -222,6 +278,165 @@ namespace engine::gui {
 			running = Fold(running, value.LineHeight);
 			running = Fold(running, value.MaxVisible);
 			return Fold(running, value.Rich);
+		}
+
+		uint64_t Fold(uint64_t running, const LabelPresentation &value) {
+			return Fold(running, value.LocalizationKey);
+		}
+
+		uint64_t Fold(uint64_t running, const LabelLocalizationArguments &value) {
+			running = Fold(running, value.Count);
+			const size_t count = std::min<size_t>(value.Count, value.Values.size());
+			for (size_t index = 0; index < count; index++) {
+				const LabelLocalizationArgument &argument = value.Values[index];
+				running = Fold(running, argument.Name);
+				running = Fold(running, argument.Type);
+				running = Fold(running, argument.String);
+				running = Fold(running, argument.Number);
+				running = Fold(running, static_cast<uint64_t>(argument.UnixSeconds));
+			}
+			return running;
+		}
+
+		uint64_t Fold(uint64_t running, const BindingOutput &value) {
+			return Fold(Fold(running, value.Value), value.Valid);
+		}
+
+		uint64_t Fold(uint64_t running, const VirtualCollection &value) {
+			// The source page is variable-width authored data. Its canonical wire
+			// representation is the one stable complete view, so fold those bytes
+			// instead of maintaining a second partial field list here.
+			core::ByteWriter bytes;
+			if (!WriteVirtualCollection(bytes, value)) {
+				return Fold(running, static_cast<uint64_t>(0));
+			}
+			for (const std::byte byte : bytes.Bytes()) {
+				running = Fold(running, static_cast<uint8_t>(byte));
+			}
+			return running;
+		}
+
+		bool ValidCompileRequest(const CompileRequest &request) {
+			return request.Locale.size() <= LocalizationCatalogue::MAXIMUM_LOCALE_BYTES;
+		}
+
+		void BuildCollectorRanges(DrawList &list) {
+			list.CollectorRanges.clear();
+			for (size_t first = 0; first < list.Commands.size();) {
+				const DrawCommand &command = list.Commands[first];
+				size_t end = first + 1;
+				while (end < list.Commands.size() && list.Commands[end].Collector == command.Collector &&
+					   list.Commands[end].Spatial == command.Spatial) {
+					end++;
+				}
+				list.CollectorRanges.push_back({command.Collector, first, end - first, command.Spatial});
+				first = end;
+			}
+		}
+
+		bool Finite(const Rect &rect) {
+			return std::isfinite(rect.Min.X) && std::isfinite(rect.Min.Y) && std::isfinite(rect.Max.X) &&
+				   std::isfinite(rect.Max.Y);
+		}
+
+		// A draw command's clipping is an axis-aligned scissor applied after its
+		// geometry turns. Damage therefore turns the command's conservative AABB
+		// first, then intersects the same scissor. Reversing that order drops the
+		// corner pixels of a rotated command.
+		bool VisualBounds(const DrawCommand &command, Rect &out) {
+			if (!Finite(command.Bounds) || !Finite(command.Clip) || !std::isfinite(command.Rotation) ||
+				!std::isfinite(command.Thickness)) {
+				return false;
+			}
+
+			Rect painted = command.Bounds;
+			// Text strokes are emitted one pixel in each direction by both current
+			// painters. Outlines may be handed to a backend as centred strokes, so
+			// include their half-width even though the built-in compiler already
+			// expands its own outline bounds.
+			float outset = 0.0f;
+			if (command.Kind == DrawKind::Text && command.StrokeTransparency < 1.0f) {
+				outset = 1.0f;
+			} else if (command.Kind == DrawKind::Outline) {
+				outset = std::max(command.Thickness, 1.0f) * 0.5f;
+			}
+			painted.Min.X -= outset;
+			painted.Min.Y -= outset;
+			painted.Max.X += outset;
+			painted.Max.Y += outset;
+
+			const float radians = command.Rotation * 3.14159265f / 180.0f;
+			const float cosine = std::abs(std::cos(radians));
+			const float sine = std::abs(std::sin(radians));
+			const Vector2 centre = painted.Center();
+			const float halfWidth = painted.Width() * 0.5f;
+			const float halfHeight = painted.Height() * 0.5f;
+			const float extentX = cosine * halfWidth + sine * halfHeight;
+			const float extentY = sine * halfWidth + cosine * halfHeight;
+			out = Rect{
+				Vector2{centre.X - extentX, centre.Y - extentY},
+				Vector2{centre.X + extentX, centre.Y + extentY}
+			}.Intersection(command.Clip);
+			return true;
+		}
+
+		template <typename Baseline, typename SignatureFor>
+		bool BuildDamage(
+			const DrawList &list,
+			const std::vector<Baseline> &previous,
+			std::vector<Baseline> &next,
+			std::vector<Compiled::DamageRegion> &damage,
+			SignatureFor signatureFor
+		) {
+			next.clear();
+			damage.clear();
+			const auto append = [](auto &regions, Entity collector, bool spatial, const Rect &bounds) {
+				if (bounds.Empty()) {
+					return;
+				}
+				for (auto &region : regions) {
+					if (region.Collector == collector && region.Spatial == spatial) {
+						region.Bounds.Min.X = std::min(region.Bounds.Min.X, bounds.Min.X);
+						region.Bounds.Min.Y = std::min(region.Bounds.Min.Y, bounds.Min.Y);
+						region.Bounds.Max.X = std::max(region.Bounds.Max.X, bounds.Max.X);
+						region.Bounds.Max.Y = std::max(region.Bounds.Max.Y, bounds.Max.Y);
+						return;
+					}
+				}
+				regions.push_back({collector, bounds, spatial});
+			};
+
+			for (const DrawCommand &command : list.Commands) {
+				Rect visual;
+				if (!VisualBounds(command, visual)) {
+					next.clear();
+					damage.clear();
+					return false;
+				}
+				append(next, command.Collector, command.Spatial, visual);
+			}
+			// A global compile stamp can change for one collector. Check each
+			// painted collector only on a compile miss so retained targets for
+			// unchanged siblings keep their pixels.
+			for (Baseline &region : next) {
+				region.Signature = signatureFor(region.Collector);
+			}
+			for (const Baseline &region : previous) {
+				const auto match = std::find_if(next.begin(), next.end(), [&](const Baseline &candidate) {
+					return candidate.Collector == region.Collector && candidate.Spatial == region.Spatial;
+				});
+				if (match == next.end() || match->Signature != region.Signature)
+					append(damage, region.Collector, region.Spatial, region.Bounds);
+			}
+			for (const Baseline &region : next) {
+				const auto match =
+					std::find_if(previous.begin(), previous.end(), [&](const Baseline &candidate) {
+						return candidate.Collector == region.Collector && candidate.Spatial == region.Spatial;
+					});
+				if (match == previous.end() || match->Signature != region.Signature)
+					append(damage, region.Collector, region.Spatial, region.Bounds);
+			}
+			return true;
 		}
 
 		uint64_t Fold(uint64_t running, const Picture &value) {
@@ -312,6 +527,7 @@ namespace engine::gui {
 			running = Fold(running, value.ClearTextOnFocus);
 			running = Fold(running, value.MultiLine);
 			running = Fold(running, value.TextEditable);
+			running = Fold(running, value.Password);
 			running = Fold(running, value.CursorPosition);
 			return Fold(running, value.SelectionStart);
 		}
@@ -319,9 +535,11 @@ namespace engine::gui {
 		uint64_t Fold(uint64_t running, const Layer &value) {
 			running = Fold(running, value.Enabled);
 			running = Fold(running, value.DisplayOrder);
+			running = Fold(running, value.ReferenceResolution);
 			running = Fold(running, value.Behavior);
 			running = Fold(running, value.ResetOnSpawn);
-			return Fold(running, value.IgnoreGuiInset);
+			running = Fold(running, value.IgnoreGuiInset);
+			return Fold(running, value.ScaleMode);
 		}
 
 		uint64_t Fold(uint64_t running, const Surface &value) {
@@ -362,13 +580,22 @@ namespace engine::gui {
 			return Fold(running, value.Transparency);
 		}
 
+		uint64_t Fold(uint64_t running, const Mask &value) {
+			running = Fold(running, value.Radius);
+			return Fold(running, value.Enabled);
+		}
+
 		uint64_t Fold(uint64_t running, const Viewport &value) {
 			running = Fold(running, value.CurrentCamera);
 			running = Fold(running, value.Ambient);
 			running = Fold(running, value.LightColor);
 			running = Fold(running, value.LightDirection);
 			running = Fold(running, value.Color);
-			return Fold(running, value.Transparency);
+			running = Fold(running, value.Transparency);
+			running = Fold(running, value.ResolutionScale);
+			running = Fold(running, value.UpdateMode);
+			running = Fold(running, static_cast<uint64_t>(value.UpdateEveryFrames));
+			return Fold(running, static_cast<uint64_t>(value.InvalidationRevision));
 		}
 
 		uint64_t Fold(uint64_t running, const Padding &value) {
@@ -487,6 +714,52 @@ namespace engine::gui {
 			return Fold(running, value.Factor);
 		}
 
+		uint64_t Fold(uint64_t running, const PresentationValue &value) {
+			running = Fold(running, value.Type);
+			switch (value.Type) {
+			case PresentationValueType::Color:
+				return Fold(running, value.Color);
+			case PresentationValueType::Number:
+				return Fold(running, value.Number);
+			case PresentationValueType::UDim2:
+				return Fold(running, value.UDim2);
+			}
+			return running;
+		}
+
+		uint64_t Fold(uint64_t running, const AnimationPlayback &value) {
+			running = Fold(running, value.StartedAt);
+			running = Fold(running, value.Playing);
+			running = Fold(running, value.Clip.Tween.Time);
+			running = Fold(running, value.Clip.Tween.DelayTime);
+			running = Fold(running, value.Clip.Tween.RepeatCount);
+			running = Fold(running, value.Clip.Tween.Style);
+			running = Fold(running, value.Clip.Tween.Direction);
+			running = Fold(running, value.Clip.Tween.Reverses);
+			for (const PresentationTrack &track : value.Clip.Tracks()) {
+				running = Fold(running, track.Property);
+				for (const PresentationKey &key : track.Keys()) {
+					running = Fold(running, key.Time);
+					running = Fold(running, key.Value);
+				}
+			}
+			for (const AnimationMarker &marker : value.Clip.Markers()) {
+				running = Fold(running, marker.Name);
+				running = Fold(running, marker.Time);
+			}
+			return running;
+		}
+
+		uint64_t Fold(uint64_t running, const PresentationState &value) {
+			running = Fold(running, value.Active);
+			running = Fold(running, value.Moving);
+			for (const PresentationOverride &override : value.Overrides.Values()) {
+				running = Fold(running, override.Property);
+				running = Fold(running, override.Value);
+			}
+			return running;
+		}
+
 		// **The whole sequence and not just its count.** A ramp edited keypoint
 		// by keypoint is the ordinary way one is authored, and folding the count
 		// alone would leave the panel showing the previous colours until
@@ -525,6 +798,94 @@ namespace engine::gui {
 			running = Fold(running, value.ShrinkRatio);
 			running = Fold(running, value.Mode);
 			return Fold(running, value.ItemLine);
+		}
+
+		// Layout measures text but never reads its paint colours. Keeping those
+		// fields out lets a text tint edit replace commands without reshaping.
+		uint64_t FoldLayout(uint64_t running, const Label &value) {
+			running = Fold(running, value.Text);
+			running = Fold(running, value.Size);
+			running = Fold(running, value.Font);
+			running = Fold(running, value.XAlignment);
+			running = Fold(running, value.YAlignment);
+			running = Fold(running, value.Wrapped);
+			running = Fold(running, value.Scaled);
+			running = Fold(running, value.Truncate);
+			running = Fold(running, value.LineHeight);
+			running = Fold(running, value.MaxVisible);
+			return Fold(running, value.Rich);
+		}
+
+		uint64_t FoldLayoutRows(Store &store, uint64_t running) {
+			store.Each<const Label, const Hierarchy>(
+				[&](Entity entity, const Label &label, const Hierarchy &node) {
+					running = Fold(running, entity);
+					running = Fold(running, node.Parent);
+					running = Fold(running, node.FirstChild);
+					running = Fold(running, node.NextSibling);
+					running = FoldLayout(running, label);
+				}
+			);
+			return running;
+		}
+
+		uint64_t FoldLayout(uint64_t running, const PresentationState &value) {
+			running = Fold(running, value.Active);
+			for (const PresentationOverride &override : value.Overrides.Values()) {
+				if (!PresentationAffectsLayout(override.Property)) {
+					continue;
+				}
+				running = Fold(running, override.Property);
+				running = Fold(running, override.Value);
+			}
+			return running;
+		}
+
+		uint64_t FoldLayoutPresentationRows(Store &store, uint64_t running) {
+			store.Each<const PresentationState, const Hierarchy>(
+				[&](Entity entity, const PresentationState &state, const Hierarchy &node) {
+					running = Fold(running, entity);
+					running = Fold(running, node.Parent);
+					running = Fold(running, node.FirstChild);
+					running = Fold(running, node.NextSibling);
+					running = FoldLayout(running, state);
+				}
+			);
+			return running;
+		}
+
+		bool LayoutMoving(Store &store) {
+			bool moving = false;
+			store.Each<const PageMotion>([&](Entity, const PageMotion &motion) {
+				moving = moving || motion.From != motion.To;
+			});
+			store.Each<const ScrollMotion>([&](Entity, const ScrollMotion &motion) {
+				moving = moving || motion.Held || motion.ReleasedAt >= 0.0;
+			});
+			store.Each<const PresentationState>([&](Entity, const PresentationState &state) {
+				if (!state.Moving) {
+					return;
+				}
+				for (const PresentationOverride &override : state.Overrides.Values()) {
+					moving = moving || PresentationAffectsLayout(override.Property);
+				}
+			});
+			return moving;
+		}
+
+		uint64_t FoldLayoutVirtualAnchorRows(Store &store, uint64_t running) {
+			store.Each<const VirtualAnchorState, const Hierarchy>(
+				[&](Entity entity, const VirtualAnchorState &anchor, const Hierarchy &node) {
+					running = Fold(running, entity);
+					running = Fold(running, node.Parent);
+					running = Fold(running, node.FirstChild);
+					running = Fold(running, node.NextSibling);
+					running = Fold(running, anchor.Revision);
+					running = Fold(running, anchor.Key);
+					running = Fold(running, anchor.OffsetY);
+				}
+			);
+			return running;
 		}
 
 		// One pass over every row carrying `T`, folding the row's identity, its
@@ -729,12 +1090,16 @@ namespace engine::gui {
 			const CompileRequest &request,
 			const Color3 &groupTint,
 			float groupOpacity,
-			DrawList &out
+			DrawList &out,
+			Entity virtualCollection = ecs::NULL_ENTITY,
+			std::string_view virtualKey = {},
+			uint32_t virtualIndex = UINT32_MAX
 		) {
 			const Element *element = store.Get<Element>(instance);
 			if (element == nullptr) {
 				return;
 			}
+			const ResolvedStyle *style = store.Get<ResolvedStyle>(instance);
 
 			const Rect bounds{
 				resolved.AbsolutePosition,
@@ -769,6 +1134,7 @@ namespace engine::gui {
 			const Stroke *stroke = nullptr;
 			Entity strokeInstance;
 			const Gradient *gradient = nullptr;
+			const PresentationState *presentation = nullptr;
 			store.EachChild(instance, [&](Entity child) {
 				if (const Corner *corner = store.Get<Corner>(child)) {
 					// Against the *smaller* axis, which is what stops a scale
@@ -785,7 +1151,17 @@ namespace engine::gui {
 				if (gradient == nullptr) {
 					gradient = store.Get<Gradient>(child);
 				}
+				if (presentation == nullptr) {
+					presentation = store.Get<PresentationState>(child);
+				}
 			});
+
+			const auto presentationValue = [&](PresentationProperty property) -> const PresentationValue * {
+				const PresentationOverride *override = presentation != nullptr && presentation->Active
+														   ? presentation->Overrides.Find(property)
+														   : nullptr;
+				return override != nullptr ? &override->Value : nullptr;
+			};
 
 			// **One resolve for the element and one for its outline, and the
 			// second is a gradient one level deeper.** Roblox's arrangement: a
@@ -803,11 +1179,18 @@ namespace engine::gui {
 			DrawCommand base;
 			base.Gradient = ramp;
 			base.Source = instance;
+			base.Collection = virtualCollection;
+			base.Key = virtualKey;
+			base.Index = virtualIndex;
 			base.Collector = collector;
 			base.Spatial = store.Get<SpatialCanvas>(collector) != nullptr;
 			base.Bounds = bounds;
 			base.Clip = resolved.Clip;
 			base.Rotation = resolved.AbsoluteRotation;
+			if (const PresentationValue *rotation = presentationValue(PresentationProperty::Rotation);
+				rotation != nullptr && rotation->Type == PresentationValueType::Number) {
+				base.Rotation += rotation->Number;
+			}
 			base.CornerRadius = radius;
 
 			const auto tintByGroup = [&](const Color3 &colour) {
@@ -821,9 +1204,40 @@ namespace engine::gui {
 				return 1.0f - (1.0f - std::clamp(transparency, 0.0f, 1.0f)) * groupOpacity;
 			};
 
-			if (const Background *background = store.Get<Background>(instance);
-				background != nullptr && background->Transparency < 1.0f) {
+			if (const Background *background = store.Get<Background>(instance); background != nullptr) {
 				Color3 fill = background->Color;
+				float transparency = background->Transparency;
+				if (style != nullptr) {
+					if (const StyleValue *value =
+							StyleValueFor(*style, "BackgroundColor3", StyleValueType::Color)) {
+						fill = value->Color;
+					}
+					if (const StyleValue *value =
+							StyleValueFor(*style, "BackgroundTransparency", StyleValueType::Number)) {
+						transparency = value->Number;
+					}
+				}
+				if (const ecs::AttributeValue *value = VirtualBindingValue(
+						store, instance, virtualCollection, virtualKey, "BackgroundColor3"
+					);
+					value != nullptr && value->Type == ecs::PropertyType::Color3) {
+					fill = value->Color3;
+				}
+				if (const ecs::AttributeValue *value = VirtualBindingValue(
+						store, instance, virtualCollection, virtualKey, "BackgroundTransparency"
+					);
+					value != nullptr && value->Type == ecs::PropertyType::Float) {
+					transparency = value->Float;
+				}
+				if (const PresentationValue *value = presentationValue(PresentationProperty::BackgroundColor);
+					value != nullptr && value->Type == PresentationValueType::Color) {
+					fill = value->Color;
+				}
+				if (const PresentationValue *value =
+						presentationValue(PresentationProperty::BackgroundTransparency);
+					value != nullptr && value->Type == PresentationValueType::Number) {
+					transparency = value->Number;
+				}
 
 				// **Applied here and never stored back**, so `BackgroundColor3`
 				// reads what the author wrote however the pointer is behaving.
@@ -842,13 +1256,17 @@ namespace engine::gui {
 					}
 				}
 
+				// A fully transparent GuiObject still establishes the shared draw-list
+				// geometry used by picking and gamepad navigation. The painter receives
+				// an alpha-zero rectangle, while a hidden Element emits no command at
+				// all, which keeps visibility and transparency distinct.
 				DrawCommand rectangle = base;
 				rectangle.Kind = DrawKind::Rectangle;
 				rectangle.Tint = tintByGroup(fill);
-				rectangle.Transparency = fadeByGroup(background->Transparency);
+				rectangle.Transparency = fadeByGroup(transparency);
 				out.Commands.push_back(rectangle);
 
-				if (background->BorderSizePixel > 0) {
+				if (background->BorderSizePixel > 0 && transparency < 1.0f) {
 					DrawCommand border = base;
 					border.Kind = DrawKind::Outline;
 					border.Bounds = BorderRect(
@@ -860,13 +1278,47 @@ namespace engine::gui {
 					// Roblox's border fades with the *background*'s
 					// transparency and has none of its own. Kept, because a
 					// script fading a panel expects the outline to go with it.
-					border.Transparency = fadeByGroup(background->Transparency);
+					border.Transparency = fadeByGroup(transparency);
 					out.Commands.push_back(border);
 				}
 			}
 
 			if (const Picture *picture = store.Get<Picture>(instance);
-				picture != nullptr && picture->Image.IsValid() && picture->Transparency < 1.0f) {
+				picture != nullptr &&
+				(picture->Image.IsValid() ||
+				 VirtualBindingValue(store, instance, virtualCollection, virtualKey, "Image") != nullptr)) {
+				Color3 colour = picture->Color;
+				float transparency = picture->Transparency;
+				if (style != nullptr) {
+					if (const StyleValue *value =
+							StyleValueFor(*style, "ImageColor3", StyleValueType::Color)) {
+						colour = value->Color;
+					}
+					if (const StyleValue *value =
+							StyleValueFor(*style, "ImageTransparency", StyleValueType::Number)) {
+						transparency = value->Number;
+					}
+				}
+				if (const ecs::AttributeValue *value =
+						VirtualBindingValue(store, instance, virtualCollection, virtualKey, "ImageColor3");
+					value != nullptr && value->Type == ecs::PropertyType::Color3) {
+					colour = value->Color3;
+				}
+				if (const ecs::AttributeValue *value = VirtualBindingValue(
+						store, instance, virtualCollection, virtualKey, "ImageTransparency"
+					);
+					value != nullptr && value->Type == ecs::PropertyType::Float) {
+					transparency = value->Float;
+				}
+				if (const PresentationValue *value = presentationValue(PresentationProperty::ImageColor);
+					value != nullptr && value->Type == PresentationValueType::Color) {
+					colour = value->Color;
+				}
+				if (const PresentationValue *value =
+						presentationValue(PresentationProperty::ImageTransparency);
+					value != nullptr && value->Type == PresentationValueType::Number) {
+					transparency = value->Number;
+				}
 				// **The state image wins and neither is stored back**, which is
 				// `AutoButtonColor`'s rule for the same reason: `Image` has to
 				// read what the author wrote whatever the pointer is doing.
@@ -874,6 +1326,11 @@ namespace engine::gui {
 				// because a greyed-out button showing its hover art would be
 				// telling a person it is pressable.
 				core::Name shown = picture->Image;
+				if (const ecs::AttributeValue *value =
+						VirtualBindingValue(store, instance, virtualCollection, virtualKey, "Image");
+					value != nullptr && value->Type == ecs::PropertyType::Name) {
+					shown = value->Name;
+				}
 				if (element->Interactable) {
 					if (instance == request.Pressed && picture->PressedImage.IsValid()) {
 						shown = picture->PressedImage;
@@ -882,25 +1339,27 @@ namespace engine::gui {
 					}
 				}
 
-				DrawCommand image = base;
-				image.Kind = DrawKind::Image;
-				image.Image = shown;
-				image.Resample = picture->Resample;
-				image.Tint = tintByGroup(picture->Color);
-				image.Transparency = fadeByGroup(picture->Transparency);
-				image.Scale = picture->Scale;
-				image.SliceCenter = picture->SliceCenter;
-				image.SliceScale = picture->SliceScale;
-				image.Sample = Rect{
-					picture->RectOffset,
-					Vector2{
-						picture->RectOffset.X + picture->RectSize.X,
-						picture->RectOffset.Y + picture->RectSize.Y,
-					}
-				};
-				image.Tile = picture->TileSize.Resolve(resolved.AbsoluteSize);
-				image.Shader = picture->Shader;
-				out.Commands.push_back(image);
+				if (transparency < 1.0f) {
+					DrawCommand image = base;
+					image.Kind = DrawKind::Image;
+					image.Image = shown;
+					image.Resample = picture->Resample;
+					image.Tint = tintByGroup(colour);
+					image.Transparency = fadeByGroup(transparency);
+					image.Scale = picture->Scale;
+					image.SliceCenter = picture->SliceCenter;
+					image.SliceScale = picture->SliceScale;
+					image.Sample = Rect{
+						picture->RectOffset,
+						Vector2{
+							picture->RectOffset.X + picture->RectSize.X,
+							picture->RectOffset.Y + picture->RectSize.Y,
+						}
+					};
+					image.Tile = picture->TileSize.Resolve(resolved.AbsoluteSize);
+					image.Shader = picture->Shader;
+					out.Commands.push_back(image);
+				}
 			}
 
 			if (const Viewport *viewport = store.Get<Viewport>(instance);
@@ -920,10 +1379,63 @@ namespace engine::gui {
 				// the two strings it is.
 				const std::string *text = &label->Text;
 				Color3 colour = label->Color;
+				float transparency = label->Transparency;
+				if (style != nullptr) {
+					if (const StyleValue *value =
+							StyleValueFor(*style, "TextColor3", StyleValueType::Color)) {
+						colour = value->Color;
+					}
+					if (const StyleValue *value =
+							StyleValueFor(*style, "TextTransparency", StyleValueType::Number)) {
+						transparency = value->Number;
+					}
+				}
+				if (const ecs::AttributeValue *value =
+						VirtualBindingValue(store, instance, virtualCollection, virtualKey, "TextColor3");
+					value != nullptr && value->Type == ecs::PropertyType::Color3) {
+					colour = value->Color3;
+				}
+				if (const ecs::AttributeValue *value = VirtualBindingValue(
+						store, instance, virtualCollection, virtualKey, "TextTransparency"
+					);
+					value != nullptr && value->Type == ecs::PropertyType::Float) {
+					transparency = value->Float;
+				}
+				if (const PresentationValue *value = presentationValue(PresentationProperty::TextColor);
+					value != nullptr && value->Type == PresentationValueType::Color) {
+					colour = value->Color;
+				}
+				if (const PresentationValue *value =
+						presentationValue(PresentationProperty::TextTransparency);
+					value != nullptr && value->Type == PresentationValueType::Number) {
+					transparency = value->Number;
+				}
+				const TextResolutionRequest resolution{
+					request.Catalogue,
+					request.Locale,
+					request.StudioMissingLocalizationMarker,
+					1.0f,
+					request.Fonts
+				};
+				std::string resolvedText = ResolveText(store, instance, *label, resolution);
+				if (const ecs::AttributeValue *value =
+						VirtualBindingValue(store, instance, virtualCollection, virtualKey, "Text");
+					value != nullptr && value->Type == ecs::PropertyType::String) {
+					resolvedText = value->String;
+				}
+				text = &resolvedText;
 
-				if (const Entry *entry = store.Get<Entry>(instance); entry != nullptr && text->empty()) {
+				const Entry *entry = store.Get<Entry>(instance);
+				std::string protectedText;
+				if (entry != nullptr && text->empty()) {
 					text = &entry->PlaceholderText;
 					colour = entry->PlaceholderColor;
+				} else if (entry != nullptr && entry->Password) {
+					// Keep the authored value for editing and replication, but replace
+					// every visible grapheme after composition has been applied. A
+					// password's echo must not reveal a Unicode byte count either.
+					protectedText.assign(Characters(*text), '*');
+					text = &protectedText;
 				}
 
 				// **Parsed, then cut, then the spans are cut to match.** Roblox
@@ -953,13 +1465,53 @@ namespace engine::gui {
 					}
 				}
 
-				if (!shown.empty() && label->Transparency < 1.0f) {
+				if (!shown.empty() && transparency < 1.0f) {
 					DrawCommand run = base;
 					run.Kind = DrawKind::Text;
 					run.Text = std::string(shown);
-					run.Spans = std::move(spans);
 					run.Tint = tintByGroup(colour);
-					run.Transparency = fadeByGroup(label->Transparency);
+					run.Transparency = fadeByGroup(transparency);
+					std::vector<TextStyleSpan> shapeStyles;
+					shapeStyles.reserve(spans.size());
+					for (const DrawSpan &span : spans) {
+						shapeStyles.push_back(
+							TextStyleSpan{
+								.Begin = span.Begin,
+								.End = span.End,
+								.Tint = tintByGroup(span.Tint),
+								.Transparency = fadeByGroup(span.Transparency),
+								.PixelSize = span.Size > 0 ? static_cast<float>(span.Size) : 0.0f,
+								.Font = span.Font,
+								.Underline = span.Underline,
+								.Strike = span.Strike,
+							}
+						);
+					}
+					if (request.Fonts != nullptr) {
+						run.Shaping = LayoutText(
+							*request.Fonts,
+							TextShapeRequest{
+								.Text = shown,
+								.Role = label->Font,
+								.Direction = TextDirection::Automatic,
+								.PixelSize = static_cast<float>(resolved.TextSize),
+							},
+							bounds.Width(),
+							label->Wrapped,
+							label->Truncate,
+							label->LineHeight,
+							shapeStyles
+						);
+						ApplyTextStyles(
+							run.Shaping,
+							shapeStyles,
+							run.Tint,
+							run.Transparency,
+							label->Font,
+							static_cast<float>(resolved.TextSize)
+						);
+					}
+					run.Spans = std::move(spans);
 					run.TextSize = resolved.TextSize;
 					run.Font = label->Font;
 					run.XAlignment = label->XAlignment;
@@ -1381,15 +1933,184 @@ namespace engine::gui {
 		// over its parent whatever its `ZIndex`**, which is
 		// `ZIndexBehavior::Sibling` and Roblox's modern default; `Global` is
 		// applied afterwards, as a stable sort of the whole collector's list.
-		void Walk(
+		StyleState StyleStateFor(const Store &store, Entity instance, const CompileRequest &request) {
+			StyleState state = StyleState::None;
+			if (instance == request.Hovered) {
+				state = state | StyleState::Hovered;
+			}
+			if (instance == request.Pressed) {
+				state = state | StyleState::Pressed;
+			}
+			if (const Entity service = GuiServiceOf(store); service != ecs::NULL_ENTITY) {
+				if (const GuiServiceState *gui = store.Get<GuiServiceState>(service); gui != nullptr) {
+					if (gui->SelectedObject == instance) {
+						state = state | StyleState::Selected;
+					}
+					if (gui->FocusedTextBox == instance) {
+						state = state | StyleState::Focused;
+					}
+				}
+			}
+			if (const Element *element = store.Get<Element>(instance);
+				element != nullptr && !element->Interactable) {
+				state = state | StyleState::Disabled;
+			}
+			return state;
+		}
+
+		const UITheme *ThemeFor(const Store &store, Entity collector) {
+			const ThemeBinding *binding = store.Get<ThemeBinding>(collector);
+			if (binding == nullptr || !store.Alive(binding->Theme)) {
+				return nullptr;
+			}
+			return store.Get<UITheme>(binding->Theme);
+		}
+
+	}
+
+	void CollectDirectStyleValues(const Store &store, Entity instance, StyleSet &direct) {
+		const StyleDirect *authored = store.Get<StyleDirect>(instance);
+		const auto directlySet = [authored](StyleDirectProperty property) {
+			return authored != nullptr && authored->Has(property);
+		};
+		const Background defaultBackground;
+		if (const Background *background = store.Get<Background>(instance); background != nullptr) {
+			if (directlySet(StyleDirectProperty::BackgroundColor) ||
+				!(background->Color == defaultBackground.Color)) {
+				(void)direct.Set({core::Name("BackgroundColor3"), StyleValue::FromColor(background->Color)});
+			}
+			if (directlySet(StyleDirectProperty::BackgroundTransparency) ||
+				background->Transparency != defaultBackground.Transparency) {
+				(void)direct.Set(
+					{core::Name("BackgroundTransparency"), StyleValue::FromNumber(background->Transparency)}
+				);
+			}
+		}
+		const Label defaultLabel;
+		if (const Label *label = store.Get<Label>(instance); label != nullptr) {
+			if (directlySet(StyleDirectProperty::TextColor) || !(label->Color == defaultLabel.Color)) {
+				(void)direct.Set({core::Name("TextColor3"), StyleValue::FromColor(label->Color)});
+			}
+			if (directlySet(StyleDirectProperty::TextTransparency) ||
+				label->Transparency != defaultLabel.Transparency) {
+				(void)direct.Set(
+					{core::Name("TextTransparency"), StyleValue::FromNumber(label->Transparency)}
+				);
+			}
+		}
+		const Picture defaultPicture;
+		if (const Picture *picture = store.Get<Picture>(instance); picture != nullptr) {
+			if (directlySet(StyleDirectProperty::ImageColor) || !(picture->Color == defaultPicture.Color)) {
+				(void)direct.Set({core::Name("ImageColor3"), StyleValue::FromColor(picture->Color)});
+			}
+			if (directlySet(StyleDirectProperty::ImageTransparency) ||
+				picture->Transparency != defaultPicture.Transparency) {
+				(void)direct.Set(
+					{core::Name("ImageTransparency"), StyleValue::FromNumber(picture->Transparency)}
+				);
+			}
+		}
+	}
+
+	namespace {
+
+		ResolvedStyle
+		ResolveAuthoredStyle(Store &store, Entity instance, Entity collector, const CompileRequest &request) {
+			ResolvedStyle result;
+			result.State = StyleStateFor(store, instance, request);
+			StyleSet direct;
+			CollectDirectStyleValues(store, instance, direct);
+			StyleClasses emptyClasses;
+			const StyleClasses *classes = &emptyClasses;
+			if (const StyleClass *authored = store.Get<StyleClass>(instance); authored != nullptr) {
+				classes = &authored->Names;
+			}
+			std::array<StyleRule, MAXIMUM_STYLE_RULES> rules{};
+			size_t count = 0;
+			bool overflow = false;
+			store.EachChild(instance, [&](Entity child) {
+				const UIStyle *style = store.Get<UIStyle>(child);
+				if (style == nullptr) {
+					return;
+				}
+				if (count == rules.size()) {
+					overflow = true;
+					return;
+				}
+				if (!overflow) {
+					rules[count++] = style->Rule;
+				}
+			});
+			const UITheme *theme = ThemeFor(store, collector);
+			const StyleSet emptyTheme;
+			if (overflow || !ResolveStyle(
+								theme != nullptr ? theme->Tokens : emptyTheme,
+								*classes,
+								{rules.data(), count},
+								direct,
+								result.State,
+								result.Values
+							)) {
+				if (overflow) {
+					ENGINE_WARN_EVERY(
+						5.0,
+						"gui element {} has more than {} UIStyle children; styles were refused",
+						instance.Id,
+						MAXIMUM_STYLE_RULES
+					);
+				}
+				result = {};
+			}
+			store.Set(instance, result);
+			return result;
+		}
+
+		const StyleValue *
+		StyleValueFor(const ResolvedStyle &style, std::string_view name, StyleValueType type) {
+			const StyleValue *value = style.Values.Find(core::Name(name));
+			return value != nullptr && value->Type == type ? value : nullptr;
+		}
+
+		const ecs::AttributeValue *VirtualBindingValue(
 			const Store &store,
+			Entity instance,
+			Entity collectionOn,
+			std::string_view key,
+			std::string_view target
+		) {
+			if (collectionOn == ecs::NULL_ENTITY || key.empty()) return nullptr;
+			const VirtualCollection *collection = store.Get<VirtualCollection>(collectionOn);
+			const VirtualRecord *record =
+				collection != nullptr ? FindVirtualRecord(*collection, key) : nullptr;
+			if (record == nullptr) return nullptr;
+			const ecs::AttributeValue *result = nullptr;
+			store.EachChild(instance, [&](Entity child) {
+				const Binding *binding = store.Get<Binding>(child);
+				if (result != nullptr || binding == nullptr || binding->Target.Text() != target ||
+					!binding->SourcePath.starts_with("$item."))
+					return;
+				result = FindVirtualField(*record, std::string_view(binding->SourcePath).substr(6));
+			});
+			return result;
+		}
+
+		void Walk(
+			Store &store,
 			Entity instance,
 			Entity collector,
 			const CompileRequest &request,
 			int depth,
 			const Color3 &inheritedTint,
 			float inheritedOpacity,
-			DrawList &out
+			DrawList &out,
+			Entity virtualCollection = ecs::NULL_ENTITY,
+			std::string_view virtualKey = {},
+			uint32_t virtualIndex = UINT32_MAX,
+			float virtualOffsetX = 0.0f,
+			float virtualOffsetY = 0.0f,
+			const Rect *virtualClip = nullptr,
+			Vector2 virtualRootSize = Vector2::Zero,
+			uint8_t maskDepth = 0
 		) {
 			if (depth > 256) {
 				// The whole subtree below here is dropped from the draw list
@@ -1414,10 +2135,82 @@ namespace engine::gui {
 					tint.G * group->Color.G,
 					tint.B * group->Color.B,
 				};
-				opacity *= 1.0f - std::clamp(group->Transparency, 0.0f, 1.0f);
+				// Group transparency belongs to the isolated layer, after descendants
+				// have blended with each other. Folding it into every command makes two
+				// overlapping children too dark, so adapters consume BeginGroup and
+				// EndGroup instead of receiving a weakened primitive alpha here.
 			}
 
-			Emit(store, instance, collector, *resolved, request, tint, opacity, out);
+			(void)ResolveAuthoredStyle(store, instance, collector, request);
+			// Adding ResolvedStyle can move this entity to a new archetype. Reacquire
+			// the geometry row before passing it to paint or child traversal because
+			// pointers into the previous archetype are no longer valid.
+			resolved = store.Get<Resolved>(instance);
+			if (resolved == nullptr) {
+				return;
+			}
+			Resolved facetResolved = *resolved;
+			if (virtualClip != nullptr) {
+				facetResolved.AbsolutePosition.X += virtualOffsetX;
+				facetResolved.AbsolutePosition.Y += virtualOffsetY;
+				facetResolved.Clip = *virtualClip;
+				if (virtualRootSize.X > 0.0f) facetResolved.AbsoluteSize.X = virtualRootSize.X;
+				if (virtualRootSize.Y > 0.0f) facetResolved.AbsoluteSize.Y = virtualRootSize.Y;
+			}
+			const Rect visualBounds{
+				facetResolved.AbsolutePosition, facetResolved.AbsolutePosition + facetResolved.AbsoluteSize
+			};
+			const auto beginOperation = [&](DrawOperationKind kind, float radius, float transparency) {
+				out.Operations.push_back(
+					{kind,
+					 instance,
+					 collector,
+					 out.Commands.size(),
+					 visualBounds,
+					 facetResolved.Clip,
+					 radius,
+					 transparency}
+				);
+			};
+			const auto endOperation = [&](DrawOperationKind kind) {
+				out.Operations.push_back(
+					{kind, instance, collector, out.Commands.size(), visualBounds, facetResolved.Clip}
+				);
+			};
+			bool masks = false;
+			store.EachChild(instance, [&](Entity child) {
+				const Mask *mask = store.Get<Mask>(child);
+				if (mask == nullptr || !mask->Enabled || masks) return;
+				const float extent = std::min(facetResolved.AbsoluteSize.X, facetResolved.AbsoluteSize.Y);
+				const float radius = std::clamp(mask->Radius.Resolve(extent), 0.0f, extent * 0.5f);
+				if (maskDepth < 8) {
+					beginOperation(DrawOperationKind::BeginMask, radius, 0.0f);
+					masks = true;
+				} else {
+					ENGINE_WARN_EVERY(
+						5.0, "gui mask nesting exceeds 8 at entity {}; mask was refused", instance.Id
+					);
+				}
+			});
+			const Group *group = store.Get<Group>(instance);
+			const bool isolatesGroup = group != nullptr && group->Transparency > 0.0f;
+			if (isolatesGroup)
+				beginOperation(
+					DrawOperationKind::BeginGroup, 0.0f, std::clamp(group->Transparency, 0.0f, 1.0f)
+				);
+			Emit(
+				store,
+				instance,
+				collector,
+				facetResolved,
+				request,
+				tint,
+				opacity,
+				out,
+				virtualCollection,
+				virtualKey,
+				virtualIndex
+			);
 			NodeCanvasViewport nodeCanvasView;
 			const NodeCanvas *nodeCanvas = store.Get<NodeCanvas>(instance);
 			const bool transformsNodeCanvasContent =
@@ -1455,7 +2248,127 @@ namespace engine::gui {
 			});
 
 			for (const Entity child : children) {
-				Walk(store, child, collector, request, depth + 1, tint, opacity, out);
+				Rect childVirtualClip;
+				const Rect *childClip = virtualClip;
+				if (virtualClip != nullptr && store.Get<Element>(instance)->ClipsDescendants) {
+					childVirtualClip = virtualClip->Intersection(
+						Rect{
+							facetResolved.AbsolutePosition,
+							facetResolved.AbsolutePosition + facetResolved.AbsoluteSize
+						}
+					);
+					childClip = &childVirtualClip;
+				}
+				Walk(
+					store,
+					child,
+					collector,
+					request,
+					depth + 1,
+					tint,
+					opacity,
+					out,
+					virtualCollection,
+					virtualKey,
+					virtualIndex,
+					virtualOffsetX,
+					virtualOffsetY,
+					childClip,
+					Vector2::Zero,
+					static_cast<uint8_t>(maskDepth + (masks ? 1 : 0))
+				);
+			}
+
+			// A collection's template is an authored child of the modifier, so it
+			// is deliberately absent from the ordinary entity walk above. Expand
+			// only records in the resident page and visible range. Facets reuse the
+			// template's resolved subtree and never create ECS rows.
+			if (const Scrolling *scrolling = store.Get<Scrolling>(instance); scrolling != nullptr) {
+				Entity collectionOn = ecs::NULL_ENTITY;
+				Entity templateRoot = ecs::NULL_ENTITY;
+				const VirtualCollection *collection = nullptr;
+				store.EachChild(instance, [&](Entity child) {
+					if (collection == nullptr) {
+						collection = store.Get<VirtualCollection>(child);
+						collectionOn = collection != nullptr ? child : ecs::NULL_ENTITY;
+					}
+				});
+				if (collection != nullptr && collection->FixedExtent > 0.0f &&
+					ValidateVirtualCollection(*collection)) {
+					store.EachChild(collectionOn, [&](Entity child) {
+						if (templateRoot == ecs::NULL_ENTITY && store.Get<Element>(child) != nullptr) {
+							templateRoot = child;
+						}
+					});
+					const ScrollState *state = store.Get<ScrollState>(instance);
+					if (templateRoot != ecs::NULL_ENTITY && state != nullptr) {
+						const float viewportTop = std::max(scrolling->CanvasPosition.Y, 0.0f);
+						const float viewportBottom = viewportTop + state->WindowSize.Y;
+						uint32_t first = UINT32_MAX;
+						uint32_t last = 0;
+						float recordTop = VirtualExtentBefore(*collection, collection->Page.First);
+						for (size_t pageIndex = 0; pageIndex < collection->Page.Records.size(); pageIndex++) {
+							const VirtualRecord &record = collection->Page.Records[pageIndex];
+							const uint32_t index = collection->Page.First + static_cast<uint32_t>(pageIndex);
+							const float recordBottom = collection->LayoutPolicy == VirtualLayoutPolicy::Grid
+														   ? recordTop + collection->GridCellStride.Y
+														   : recordTop + VirtualExtentOf(*collection, record);
+							if (recordBottom > viewportTop && recordTop < viewportBottom) {
+								first = std::min(first, index);
+								last = index + 1;
+							}
+							if (collection->LayoutPolicy != VirtualLayoutPolicy::Grid ||
+								index % collection->GridColumns == collection->GridColumns - 1) {
+								recordTop = recordBottom;
+							}
+						}
+						const uint32_t lower =
+							first == UINT32_MAX
+								? UINT32_MAX
+								: (first > collection->Overscan ? first - collection->Overscan : 0);
+						const uint64_t upper = first == UINT32_MAX
+												   ? 0
+												   : std::min<uint64_t>(
+														 collection->ItemCount,
+														 static_cast<uint64_t>(last) + collection->Overscan
+													 );
+						for (uint32_t index = collection->Page.First;
+							 index < collection->Page.First + collection->Page.Records.size() &&
+							 index < upper;
+							 index++) {
+							const VirtualRecord *record = VirtualRecordAt(*collection, index);
+							if (record == nullptr) continue;
+							if (index < lower) continue;
+							const Vector2 offset = VirtualCellPosition(*collection, index);
+							const Rect viewportClip = resolved->Clip.Intersection(
+								Rect{
+									resolved->AbsolutePosition,
+									resolved->AbsolutePosition + resolved->AbsoluteSize
+								}
+							);
+							Walk(
+								store,
+								templateRoot,
+								collector,
+								request,
+								depth + 1,
+								tint,
+								opacity,
+								out,
+								collectionOn,
+								record->Key,
+								index,
+								offset.X,
+								offset.Y,
+								&viewportClip,
+								collection->LayoutPolicy == VirtualLayoutPolicy::Grid
+									? collection->GridCellStride
+									: Vector2{0.0f, VirtualExtentOf(*collection, *record)},
+								maskDepth
+							);
+						}
+					}
+				}
 			}
 
 			// Scrollbars belong over the scrolled children. Emitting them after
@@ -1466,6 +2379,8 @@ namespace engine::gui {
 					out, nodeCanvasCommandStart, nodeCanvasGradientStart, nodeCanvasView
 				);
 			}
+			if (isolatesGroup) endOperation(DrawOperationKind::EndGroup);
+			if (masks) endOperation(DrawOperationKind::EndMask);
 		}
 
 		uint64_t ScanSignature(Store &store, const CompileRequest &request, Entity collector, bool &moving) {
@@ -1473,9 +2388,46 @@ namespace engine::gui {
 			stamp = Fold(stamp, collector);
 			stamp = Fold(stamp, request.Display.Width);
 			stamp = Fold(stamp, request.Display.Height);
+			stamp = Fold(stamp, request.Display.FramebufferScale);
+			stamp = Fold(stamp, request.Display.DevicePixelRatio);
+			stamp = Fold(stamp, request.Display.Orientation);
+			stamp = Fold(stamp, request.Display.SafeArea.Left);
+			stamp = Fold(stamp, request.Display.SafeArea.Top);
+			stamp = Fold(stamp, request.Display.SafeArea.Right);
+			stamp = Fold(stamp, request.Display.SafeArea.Bottom);
+			stamp = Fold(stamp, request.Display.Occluded.Left);
+			stamp = Fold(stamp, request.Display.Occluded.Top);
+			stamp = Fold(stamp, request.Display.Occluded.Right);
+			stamp = Fold(stamp, request.Display.Occluded.Bottom);
+			stamp = Fold(stamp, request.Display.TextScale);
+			stamp = Fold(stamp, request.Display.InterfaceScale);
 			stamp = Fold(stamp, request.Display.TopInset);
-			stamp = Fold(stamp, request.Hovered);
-			stamp = Fold(stamp, request.Pressed);
+			stamp = Fold(stamp, request.Locale);
+			stamp = Fold(stamp, request.StudioMissingLocalizationMarker);
+			stamp = Fold(
+				stamp, request.Catalogue != nullptr ? request.Catalogue->Revision() : static_cast<uint64_t>(0)
+			);
+			stamp = Fold(stamp, request.Fonts != nullptr ? request.Fonts->Signature() : uint64_t{0});
+			store.Each<const ThemeBinding>([&](Entity entity, const ThemeBinding &binding) {
+				if (collector != ecs::NULL_ENTITY && entity != collector &&
+					!store.IsDescendantOf(entity, collector)) {
+					return;
+				}
+				stamp = Fold(stamp, binding.Theme);
+				if (store.Alive(binding.Theme)) {
+					if (const UITheme *theme = store.Get<UITheme>(binding.Theme); theme != nullptr) {
+						stamp = FoldStyleSet(stamp, theme->Tokens);
+					}
+				}
+			});
+			const auto localInteraction = [&](Entity target) {
+				return collector == ecs::NULL_ENTITY || target == collector ||
+							   (target != ecs::NULL_ENTITY && store.IsDescendantOf(target, collector))
+						   ? target
+						   : ecs::NULL_ENTITY;
+			};
+			stamp = Fold(stamp, localInteraction(request.Hovered));
+			stamp = Fold(stamp, localInteraction(request.Pressed));
 			stamp = Fold(stamp, request.Viewer);
 			stamp = Fold(stamp, request.ScreenGuis);
 
@@ -1492,6 +2444,11 @@ namespace engine::gui {
 			stamp = FoldRows<Element>(store, stamp, collector);
 			stamp = FoldRows<Background>(store, stamp, collector);
 			stamp = FoldRows<Label>(store, stamp, collector);
+			stamp = FoldRows<LabelPresentation>(store, stamp, collector);
+			stamp = FoldRows<LabelLocalizationArguments>(store, stamp, collector);
+			stamp = FoldRows<StyleClass>(store, stamp, collector);
+			stamp = FoldRows<UIStyle>(store, stamp, collector);
+			stamp = FoldRows<ThemeBinding>(store, stamp, collector);
 			stamp = FoldRows<Picture>(store, stamp, collector);
 			stamp = FoldRows<Button>(store, stamp, collector);
 			stamp = FoldRows<Scrolling>(store, stamp, collector);
@@ -1501,10 +2458,13 @@ namespace engine::gui {
 			stamp = FoldRows<NodeCanvasPort>(store, stamp, collector);
 			stamp = FoldRows<NodeCanvasLink>(store, stamp, collector);
 			stamp = FoldRows<Entry>(store, stamp, collector);
+			stamp = FoldRows<BindingOutput>(store, stamp, collector);
+			stamp = FoldRows<VirtualCollection>(store, stamp, collector);
 			stamp = FoldRows<Layer>(store, stamp, collector);
 			stamp = FoldRows<Surface>(store, stamp, collector);
 			stamp = FoldRows<Billboard>(store, stamp, collector);
 			stamp = FoldRows<Group>(store, stamp, collector);
+			stamp = FoldRows<Mask>(store, stamp, collector);
 			stamp = FoldRows<Viewport>(store, stamp, collector);
 			stamp = FoldRows<Padding>(store, stamp, collector);
 			stamp = FoldRows<ListLayout>(store, stamp, collector);
@@ -1513,6 +2473,8 @@ namespace engine::gui {
 			stamp = FoldRows<PageLayout>(store, stamp, collector);
 			stamp = FoldRows<PageMotion>(store, stamp, collector);
 			stamp = FoldRows<ScrollMotion>(store, stamp, collector);
+			stamp = FoldRows<AnimationPlayback>(store, stamp, collector);
+			stamp = FoldRows<PresentationState>(store, stamp, collector);
 
 			moving = false;
 			store.Each<const PageMotion>([&](Entity entity, const PageMotion &motion) {
@@ -1524,6 +2486,11 @@ namespace engine::gui {
 				const bool included =
 					collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector);
 				moving = moving || (included && (motion.Held || motion.ReleasedAt >= 0.0));
+			});
+			store.Each<const PresentationState>([&](Entity entity, const PresentationState &state) {
+				const bool included =
+					collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector);
+				moving = moving || (included && state.Moving);
 			});
 			if (moving) {
 				stamp = Fold(stamp, static_cast<float>(request.Seconds));
@@ -1540,14 +2507,128 @@ namespace engine::gui {
 			stamp = FoldRows<Gradient>(store, stamp, collector);
 			stamp = FoldRows<Selection>(store, stamp, collector);
 			stamp = FoldRows<GuiServiceState>(store, stamp, collector);
+			stamp = FoldRows<TextCompositionState>(store, stamp, collector);
+			return stamp;
+		}
+
+		uint64_t ScanLayoutSignature(Store &store, const CompileRequest &request) {
+			uint64_t stamp = Fold(0, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&store)));
+			stamp = Fold(stamp, request.Display.Width);
+			stamp = Fold(stamp, request.Display.Height);
+			stamp = Fold(stamp, request.Display.FramebufferScale);
+			stamp = Fold(stamp, request.Display.DevicePixelRatio);
+			stamp = Fold(stamp, request.Display.Orientation);
+			stamp = Fold(stamp, request.Display.SafeArea.Left);
+			stamp = Fold(stamp, request.Display.SafeArea.Top);
+			stamp = Fold(stamp, request.Display.SafeArea.Right);
+			stamp = Fold(stamp, request.Display.SafeArea.Bottom);
+			stamp = Fold(stamp, request.Display.Occluded.Left);
+			stamp = Fold(stamp, request.Display.Occluded.Top);
+			stamp = Fold(stamp, request.Display.Occluded.Right);
+			stamp = Fold(stamp, request.Display.Occluded.Bottom);
+			stamp = Fold(stamp, request.Display.TextScale);
+			stamp = Fold(stamp, request.Display.InterfaceScale);
+			stamp = Fold(stamp, request.Display.TopInset);
+			stamp = Fold(stamp, request.Locale);
+			stamp = Fold(stamp, request.StudioMissingLocalizationMarker);
+			stamp = Fold(stamp, request.Catalogue != nullptr ? request.Catalogue->Revision() : uint64_t{0});
+			stamp = Fold(stamp, request.Fonts != nullptr ? request.Fonts->Signature() : uint64_t{0});
+			store.Each<const Element, const InstanceName>(
+				[&](Entity entity, const Element &, const InstanceName &label) {
+					stamp = Fold(stamp, entity);
+					stamp = Fold(stamp, label.Value);
+				}
+			);
+			stamp = FoldRows<Element>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldLayoutRows(store, stamp);
+			stamp = FoldRows<LabelPresentation>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<LabelLocalizationArguments>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<BindingOutput>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<TextCompositionState>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<Scrolling>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<VirtualCollection>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldLayoutVirtualAnchorRows(store, stamp);
+			stamp = FoldRows<Layer>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<Surface>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<Billboard>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<Padding>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<ListLayout>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<GridLayout>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<TableLayout>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<PageLayout>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<PageMotion>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<ScrollMotion>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldLayoutPresentationRows(store, stamp);
+			stamp = FoldRows<AspectRatio>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<SizeLimits>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<TextSizeLimits>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<Scale>(store, stamp, ecs::NULL_ENTITY);
+			stamp = FoldRows<FlexItem>(store, stamp, ecs::NULL_ENTITY);
+			if (LayoutMoving(store)) {
+				stamp = Fold(stamp, request.Seconds);
+			}
 			return stamp;
 		}
 	}
 
 	bool Compiled::Rebuild(Store &store, const CompileRequest &request) {
 		ENGINE_PROFILE_CAT("gui compile", engine::core::ProfileCategory::ECS);
+		const auto commitDamage = [&] {
+			std::vector<DamageBaseline> next;
+			std::vector<DamageRegion> regions;
+			if (BuildDamage(List, DamagePrevious, next, regions, [&](Entity collector) {
+					bool moving = false;
+					return ScanSignature(store, request, collector, moving);
+				})) {
+				DamagePrevious = std::move(next);
+				DamageRegions = std::move(regions);
+				DamageReady = true;
+			} else {
+				// Leave the known-good baseline alone. A retained adapter can repaint
+				// the full collector and retry after the malformed list is replaced.
+				DamageRegions.clear();
+				DamageReady = false;
+			}
+		};
 
 		Asked++;
+		if (!ValidCompileRequest(request)) {
+			// A rejected request must not leave a list built for a different
+			// locale or style table visible. Clearing it is bounded and lets the
+			// next valid request rebuild from an invalid cache state.
+			Fresh = false;
+			NoCollectors = true;
+			List.Commands.clear();
+			List.Operations.clear();
+			List.Gradients.clear();
+			List.Transforms.clear();
+			List.CollectorRanges.clear();
+			List.Elements = 0;
+			List.CanvasSize = {};
+			DamageRegions.clear();
+			DamageReady = false;
+			DynamicFresh = false;
+			return true;
+		}
+
+		// Derived passes may write components, so their own writes cannot be the
+		// signal that keeps them alive. Compare anchors against the epoch after
+		// the last accepted request. Bindings keep their own attribute revisions
+		// outside ECS rows, so each configured binding still gets its bounded
+		// revision check. Animation samples remain clock driven while attached.
+		const bool changedSinceDynamic = !DynamicFresh || DynamicEpoch != store.ChangeVersion();
+		if (store.CountMatching<Binding>() != 0) {
+			WorkDone.BindingEvaluations++;
+			EvaluateBindings(store);
+		}
+		if (changedSinceDynamic) {
+			WorkDone.VirtualAnchorReconciliations++;
+			ReconcileVirtualCollectionAnchors(store, ecs::NULL_ENTITY);
+		}
+		if (store.CountMatching<AnimationPlayback>() != 0) {
+			WorkDone.PresentationAdvances++;
+			AdvancePresentationAnimations(store, request.Seconds);
+		}
 
 		// No layer collector means no command can survive source filtering. This
 		// is the common scene-only viewport, so do not scan every GUI component
@@ -1555,6 +2636,8 @@ namespace engine::gui {
 		if (store.CountMatching<Layer>() == 0) {
 			core::Metrics::Count("gui.compile.asked", 1.0);
 			if (NoCollectors) {
+				DynamicEpoch = store.ChangeVersion();
+				DynamicFresh = true;
 				return false;
 			}
 
@@ -1563,10 +2646,16 @@ namespace engine::gui {
 			Fresh = false;
 			Built++;
 			List.Commands.clear();
+			List.Operations.clear();
 			List.Gradients.clear();
+			List.Transforms.clear();
+			List.CollectorRanges.clear();
 			List.Elements = 0;
-			List.CanvasSize = Vector2{request.Display.Width, request.Display.Height};
+			List.CanvasSize = ScreenPresentationSize(request.Display);
+			commitDamage();
 			core::Metrics::Count("gui.compile.built.changed", 1.0);
+			DynamicEpoch = store.ChangeVersion();
+			DynamicFresh = true;
 			return true;
 		}
 		if (NoCollectors) {
@@ -1588,8 +2677,13 @@ namespace engine::gui {
 		core::Metrics::Count("gui.compile.asked", 1.0);
 
 		if (Fresh && stamp == Stamp) {
+			DamageRegions.clear();
+			DynamicEpoch = store.ChangeVersion();
+			DynamicFresh = true;
 			return false;
 		}
+
+		const uint64_t layoutStamp = ScanLayoutSignature(store, request);
 
 		// --- the compile, which is what the scan exists to skip ---------------
 
@@ -1601,15 +2695,26 @@ namespace engine::gui {
 		ENGINE_TRACE("rebuilding: signature {} -> {}, {}", Stamp, stamp, moving ? "animating" : "changed");
 
 		Stamp = stamp;
+		const bool layoutChanged = !Fresh || layoutStamp != LayoutStamp;
+		LayoutStamp = layoutStamp;
 		Fresh = true;
 		Built++;
 
-		Layout(store, request.Display, request.Seconds);
+		const TextResolutionRequest resolution{
+			request.Catalogue, request.Locale, request.StudioMissingLocalizationMarker, 1.0f, request.Fonts
+		};
+		if (layoutChanged) {
+			WorkDone.Layouts++;
+			Layout(store, request.Display, request.Seconds, resolution);
+		}
 
 		List.Commands.clear();
+		List.Operations.clear();
 		List.Gradients.clear();
+		List.Transforms.clear();
+		List.CollectorRanges.clear();
 		List.Elements = 0;
-		List.CanvasSize = Vector2{request.Display.Width, request.Display.Height};
+		List.CanvasSize = ScreenPresentationSize(request.Display);
 
 		const Ids &ids = Classes();
 
@@ -1642,6 +2747,10 @@ namespace engine::gui {
 				billboard != nullptr && request.Viewer != ecs::NULL_ENTITY &&
 				billboard->PlayerToHideFrom == request.Viewer) {
 				continue;
+			}
+			if (const CanvasTransform *transform = store.Get<CanvasTransform>(collector);
+				transform != nullptr) {
+				List.Transforms.push_back({collector, transform->Origin, transform->Scale});
 			}
 
 			const size_t first = List.Commands.size();
@@ -1682,6 +2791,8 @@ namespace engine::gui {
 				);
 			}
 		}
+
+		RestoreVirtualFocus(store, List);
 
 		// **The selection highlight, last, so it sits over everything.** A
 		// gamepad's selection is a viewer's fact rather than the tree's, which is
@@ -1764,6 +2875,9 @@ namespace engine::gui {
 			}
 		}
 
+		BuildCollectorRanges(List);
+		commitDamage();
+
 		// The paint position, written back so a panel or a test can ask why one
 		// element covered another. Read by nothing on the drawing path.
 		for (size_t index = 0; index < List.Commands.size(); index++) {
@@ -1785,18 +2899,52 @@ namespace engine::gui {
 			Built,
 			Asked
 		);
+		DynamicEpoch = store.ChangeVersion();
+		DynamicFresh = true;
 
 		return true;
 	}
 
 	bool Compiled::RebuildCollector(Store &store, Entity collector, const CompileRequest &request) {
 		ENGINE_PROFILE_CAT("gui collector compile", engine::core::ProfileCategory::ECS);
+		const auto commitDamage = [&] {
+			std::vector<DamageBaseline> next;
+			std::vector<DamageRegion> regions;
+			if (BuildDamage(List, DamagePrevious, next, regions, [&](Entity owner) {
+					bool moving = false;
+					return ScanSignature(store, request, owner, moving);
+				})) {
+				DamagePrevious = std::move(next);
+				DamageRegions = std::move(regions);
+				DamageReady = true;
+			} else {
+				DamageRegions.clear();
+				DamageReady = false;
+			}
+		};
 		Asked++;
+		if (!ValidCompileRequest(request)) {
+			Fresh = false;
+			List.Commands.clear();
+			List.Operations.clear();
+			List.Gradients.clear();
+			List.Transforms.clear();
+			List.CollectorRanges.clear();
+			List.Elements = 0;
+			List.CanvasSize = {};
+			DamageRegions.clear();
+			DamageReady = false;
+			return true;
+		}
+		EvaluateBindings(store);
+		AdvancePresentationAnimations(store, request.Seconds, collector);
+		ReconcileVirtualCollectionAnchors(store, collector);
 
 		bool moving = false;
 		const uint64_t stamp = ScanSignature(store, request, collector, moving);
 		core::Metrics::Count("gui.compile.asked", 1.0);
 		if (Fresh && stamp == Stamp) {
+			DamageRegions.clear();
 			return false;
 		}
 
@@ -1806,18 +2954,29 @@ namespace engine::gui {
 		core::Metrics::Count(moving ? "gui.compile.built.moving" : "gui.compile.built.changed", 1.0);
 
 		List.Commands.clear();
+		List.Operations.clear();
 		List.Gradients.clear();
+		List.Transforms.clear();
+		List.CollectorRanges.clear();
 		List.Elements = 0;
-		List.CanvasSize = Vector2{request.Display.Width, request.Display.Height};
+		List.CanvasSize = ScreenPresentationSize(request.Display);
 
 		if (!store.Alive(collector)) {
+			commitDamage();
 			return true;
 		}
 
-		LayoutCollector(store, collector, request.Display, request.Seconds);
+		const TextResolutionRequest resolution{
+			request.Catalogue, request.Locale, request.StudioMissingLocalizationMarker, 1.0f, request.Fonts
+		};
+		LayoutCollector(store, collector, request.Display, request.Seconds, resolution);
 		const Resolved *collectorResolved = store.Get<Resolved>(collector);
 		if (collectorResolved == nullptr || !collectorResolved->Rendered) {
+			commitDamage();
 			return true;
+		}
+		if (const CanvasTransform *transform = store.Get<CanvasTransform>(collector); transform != nullptr) {
+			List.Transforms.push_back({collector, transform->Origin, transform->Scale});
 		}
 
 		const Ids &ids = Classes();
@@ -1849,6 +3008,9 @@ namespace engine::gui {
 				}
 			);
 		}
+
+		BuildCollectorRanges(List);
+		commitDamage();
 
 		for (size_t index = 0; index < List.Commands.size(); index++) {
 			if (Resolved *value = store.GetMutable<Resolved>(List.Commands[index].Source)) {

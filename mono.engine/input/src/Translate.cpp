@@ -161,6 +161,36 @@ namespace engine::input {
 	namespace {
 		constexpr float AXIS_DEADZONE = 0.12f;
 
+		std::string BoundedText(const char *text) {
+			if (text == nullptr) {
+				return {};
+			}
+
+			size_t bytes = 0;
+			while (bytes < TextComposition::MAXIMUM_BYTES && text[bytes] != '\0') {
+				bytes++;
+			}
+
+			// A platform event is UTF-8. Do not retain the leading bytes of a
+			// codepoint that crossed the budget, because the shaper must never see
+			// a preedit corrupted only by this safety cap.
+			size_t complete = 0;
+			for (size_t offset = 0; offset < bytes;) {
+				const uint8_t first = static_cast<uint8_t>(text[offset]);
+				const size_t width = first < 0x80u				? 1
+									 : (first & 0xE0u) == 0xC0u ? 2
+									 : (first & 0xF0u) == 0xE0u ? 3
+									 : (first & 0xF8u) == 0xF0u ? 4
+																: 1;
+				if (offset + width > bytes) {
+					break;
+				}
+				complete = offset + width;
+				offset += width;
+			}
+			return std::string(text, complete);
+		}
+
 		float AxisValue(int16_t value, bool trigger = false) {
 			const float normalized = trigger ? std::max(0.0f, static_cast<float>(value) / 32767.0f)
 											 : std::max(-1.0f, static_cast<float>(value) / 32767.0f);
@@ -489,6 +519,21 @@ namespace engine::input {
 			// wanted. `client::Client` asks while a `TextBox` has the keyboard,
 			// so this case runs for exactly as long as somebody is typing.
 			Typed += event.text.text;
+			Preedit.clear();
+			PreeditStart = -1;
+			PreeditLength = -1;
+			PreeditRevision++;
+			Current.LastSource = scene::InputSource::Keyboard;
+			return true;
+
+		case SDL_EVENT_TEXT_EDITING:
+			// **Assigned rather than accumulated.** Each SDL editing event names
+			// the complete candidate currently being composed; appending would show
+			// every intermediate spelling beside the final one.
+			Preedit = BoundedText(event.edit.text);
+			PreeditStart = event.edit.start;
+			PreeditLength = event.edit.length;
+			PreeditRevision++;
 			Current.LastSource = scene::InputSource::Keyboard;
 			return true;
 
@@ -571,5 +616,9 @@ namespace engine::input {
 			std::fill(std::begin(slot.Axes), std::end(slot.Axes), 0.0f);
 		}
 		Typed.clear();
+		Preedit.clear();
+		PreeditStart = -1;
+		PreeditLength = -1;
+		PreeditRevision++;
 	}
 }

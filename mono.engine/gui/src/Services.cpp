@@ -7,7 +7,9 @@
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string_view>
@@ -33,14 +35,14 @@ namespace engine::gui {
 
 		// Whether an element can hold the selection.
 		//
-		// `Selectable` and nothing else - deliberately not "or it is a
+		// `Selectable` and an enabled interaction, deliberately not "or it is a
 		// `GuiButton`", which is the rule for *input*. A button is clickable by
 		// default because a pointer is aimed; selection is moved a step at a
 		// time and a game that did not opt an element in did not want the
 		// selection to stop there.
 		bool Selectable(const Store &store, Entity instance) {
 			const Element *element = store.Get<Element>(instance);
-			return element != nullptr && element->Visible && element->Selectable;
+			return element != nullptr && element->Visible && element->Selectable && element->Interactable;
 		}
 
 		// The middle of an element's drawn rectangle, or nothing.
@@ -52,7 +54,9 @@ namespace engine::gui {
 		// selection go".
 		bool CentreOf(const DrawList &list, Entity instance, Vector2 &out) {
 			for (const DrawCommand &command : list.Commands) {
-				if (command.Source == instance) {
+				if (command.Source == instance && command.Bounds.Min.X < command.Clip.Max.X &&
+					command.Bounds.Max.X > command.Clip.Min.X && command.Bounds.Min.Y < command.Clip.Max.Y &&
+					command.Bounds.Max.Y > command.Clip.Min.Y) {
 					out = Vector2{
 						(command.Bounds.Min.X + command.Bounds.Max.X) * 0.5f,
 						(command.Bounds.Min.Y + command.Bounds.Max.Y) * 0.5f,
@@ -151,6 +155,9 @@ namespace engine::gui {
 		if (store.Get<GuiServiceState>(service) == nullptr) {
 			store.Set(service, GuiServiceState{});
 		}
+		if (store.Get<TextCompositionState>(service) == nullptr) {
+			store.Set(service, TextCompositionState{});
+		}
 
 		return service;
 	}
@@ -160,7 +167,10 @@ namespace engine::gui {
 	}
 
 	Vector2 GuiInset(const Screen &screen) {
-		return Vector2{0.0f, screen.TopInset};
+		return Vector2{
+			std::max(screen.SafeArea.Left, screen.Occluded.Left),
+			std::max({screen.TopInset, screen.SafeArea.Top, screen.Occluded.Top}),
+		};
 	}
 
 	bool Select(Store &store, Entity instance) {
@@ -212,7 +222,8 @@ namespace engine::gui {
 		// reason a player could see.
 		std::unordered_set<uint64_t> seen;
 
-		if (current == ecs::NULL_ENTITY || !Selectable(store, current)) {
+		Vector2 from;
+		if (current == ecs::NULL_ENTITY || !Selectable(store, current) || !CentreOf(list, current, from)) {
 			// Nothing selected, or what was selected has gone. Seed from the
 			// lowest `SelectionOrder`, and from paint order within it.
 			if (!state->AutoSelectGuiEnabled) {
@@ -226,7 +237,8 @@ namespace engine::gui {
 				if (!seen.insert(command.Source.Id).second) {
 					continue;
 				}
-				if (!Selectable(store, command.Source)) {
+				Vector2 centre;
+				if (!Selectable(store, command.Source) || !CentreOf(list, command.Source, centre)) {
 					continue;
 				}
 
@@ -256,7 +268,8 @@ namespace engine::gui {
 								 : move == SelectionMove::Down ? selection->NextDown
 								 : move == SelectionMove::Left ? selection->NextLeft
 															   : selection->NextRight;
-			if (named != ecs::NULL_ENTITY && Selectable(store, named)) {
+			Vector2 namedCentre;
+			if (named != ecs::NULL_ENTITY && Selectable(store, named) && CentreOf(list, named, namedCentre)) {
 				ENGINE_DEBUG("selection: authored override {} -> {}", current.Id, named.Id);
 				return Select(store, named);
 			}
@@ -269,13 +282,6 @@ namespace engine::gui {
 					current.Id
 				);
 			}
-		}
-
-		Vector2 from;
-		if (!CentreOf(list, current, from)) {
-			// Selected but not drawn this frame - scrolled away, or its
-			// collector was disabled. Nothing to move relative to.
-			return false;
 		}
 
 		Entity best = ecs::NULL_ENTITY;
@@ -372,6 +378,13 @@ namespace engine::gui {
 		}
 
 		state->FocusedTextBox = textBox;
+		if (TextCompositionState *composition = store.GetMutable<TextCompositionState>(service);
+			composition != nullptr) {
+			composition->TextBox = ecs::NULL_ENTITY;
+			composition->Text.clear();
+			composition->Start = -1;
+			composition->Length = -1;
+		}
 
 		Entry *taking = textBox != ecs::NULL_ENTITY ? store.GetMutable<Entry>(textBox) : nullptr;
 		if (taking == nullptr) {
@@ -394,6 +407,41 @@ namespace engine::gui {
 		taking->CursorPosition = static_cast<int32_t>(Characters(label != nullptr ? label->Text : "")) + 1;
 		taking->SelectionStart = -1;
 		return true;
+	}
+
+	bool RememberVirtualFocus(Store &store, Entity collection, std::string_view key, uint32_t index) {
+		const Entity service = GuiServiceOf(store);
+		VirtualFocusState *state =
+			service != ecs::NULL_ENTITY ? store.GetMutable<VirtualFocusState>(service) : nullptr;
+		if (state == nullptr || collection == ecs::NULL_ENTITY || key.empty()) return false;
+		state->Collection = collection;
+		state->Key = std::string(key);
+		state->Index = index;
+		return true;
+	}
+
+	void ClearVirtualFocus(Store &store) {
+		const Entity service = GuiServiceOf(store);
+		if (VirtualFocusState *state =
+				service != ecs::NULL_ENTITY ? store.GetMutable<VirtualFocusState>(service) : nullptr) {
+			*state = {};
+		}
+	}
+
+	void RestoreVirtualFocus(Store &store, const DrawList &list) {
+		const Entity service = GuiServiceOf(store);
+		VirtualFocusState *state =
+			service != ecs::NULL_ENTITY ? store.GetMutable<VirtualFocusState>(service) : nullptr;
+		if (state == nullptr || state->Collection == ecs::NULL_ENTITY || state->Key.empty()) return;
+		for (const DrawCommand &command : list.Commands) {
+			if (command.Collection == state->Collection && command.Key == state->Key &&
+				store.Get<Entry>(command.Source) != nullptr) {
+				(void)Focus(store, command.Source);
+				state->Index = command.Index;
+				return;
+			}
+		}
+		(void)Focus(store, ecs::NULL_ENTITY);
 	}
 
 	size_t ResetPlayerGui(Store &store, Entity player) {

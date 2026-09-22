@@ -326,6 +326,24 @@ namespace engine::ecs {
 		table.Entries[id.Index].Info.Creatable = creatable;
 	}
 
+	void Classes::SetKind(ClassId id, ClassKind kind) {
+		auto &table = Get();
+		std::lock_guard lock(table.Guard);
+		if (!id.IsValid() || id.Index >= table.Entries.size()) {
+			return;
+		}
+		table.Entries[id.Index].Info.Kind = kind;
+	}
+
+	void Classes::SetStudioVisible(ClassId id, bool visible) {
+		auto &table = Get();
+		std::lock_guard lock(table.Guard);
+		if (!id.IsValid() || id.Index >= table.Entries.size()) {
+			return;
+		}
+		table.Entries[id.Index].Info.StudioVisible = visible;
+	}
+
 	bool Classes::IsA(ClassId derived, ClassId base) {
 		if (!derived.IsValid() || !base.IsValid()) {
 			return false;

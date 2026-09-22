@@ -85,7 +85,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [x] LOD system billboard render support
 
-- [_] /docs/future-work/ui-system.md
+- [x] /docs/future-work/ui-system.md
 
 ### v0.26
 

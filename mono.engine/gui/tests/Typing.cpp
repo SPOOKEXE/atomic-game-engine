@@ -17,6 +17,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/TextResolution.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -127,6 +128,44 @@ TEST_CASE("nothing is typed into a world where nothing has focus", "[gui][typing
 	CHECK(world.Text() == "hi");
 }
 
+TEST_CASE("IME preedit resolves at the caret without changing authored text", "[gui][typing]") {
+	World world("gui_typing.preedit", "ab");
+	world.PlaceCaret(2);
+
+	Typing composition;
+	composition.Preedit = "\xE5\x80\x99\xE8\xA3\x9C";
+	composition.PreeditStart = 1;
+	composition.PreeditLength = 1;
+	composition.PreeditRevision = 1;
+	CHECK_FALSE(world.Send(composition).Changed);
+	CHECK(world.Text() == "ab");
+
+	const Label *label = world.Data.Get<Label>(world.Box);
+	REQUIRE(label != nullptr);
+	CHECK(
+		ResolveText(world.Data, world.Box, *label, {}) == "a\xE5\x80\x99\xE8\xA3\x9C"
+														  "b"
+	);
+
+	const TextCompositionState *state = world.Data.Get<TextCompositionState>(GuiServiceOf(world.Data));
+	REQUIRE(state != nullptr);
+	CHECK(state->TextBox == world.Box);
+	CHECK(state->Start == 1);
+	CHECK(state->Length == 1);
+
+	// The committed event clears the preedit before it updates the only
+	// authored copy, so a composition can never be painted twice.
+	composition.Text = "\xE5\x80\x99\xE8\xA3\x9C";
+	composition.Preedit = {};
+	composition.PreeditRevision = 2;
+	CHECK(world.Send(composition).Changed);
+	CHECK(
+		world.Text() == "a\xE5\x80\x99\xE8\xA3\x9C"
+						"b"
+	);
+	CHECK(ResolveText(world.Data, world.Box, *label, {}) == world.Text());
+}
+
 TEST_CASE("a multi-byte character arrives whole", "[gui][typing]") {
 	// **The failure this pins is one byte of a letter.** `Translator::TypedText`
 	// hands over composed UTF-8 - two bytes for `é` and four for an emoji - and
@@ -149,6 +188,37 @@ TEST_CASE("a multi-byte character arrives whole", "[gui][typing]") {
 	world.PlaceCaret(3);
 	world.Send("-");
 	CHECK(world.Text() == std::string("H") + std::string(ACCENT) + "-" + std::string(EMOJI));
+}
+
+TEST_CASE("caret and backspace follow grapheme clusters", "[gui][typing]") {
+	World world("gui_typing.graphemes", "e\xCC\x81");
+	REQUIRE(world.Cursor() == 2);
+	world.Send("!");
+	CHECK(world.Text() == "e\xCC\x81!");
+	CHECK(world.Cursor() == 3);
+
+	Typing backspace;
+	backspace.Backspace = true;
+	world.Send(backspace);
+	world.Send(backspace);
+	CHECK(world.Text().empty());
+	CHECK(world.Cursor() == 1);
+
+	world.Send("e");
+	world.Send("\xCC\x81");
+	CHECK(world.Text() == "e\xCC\x81");
+	CHECK(world.Cursor() == 2);
+}
+
+TEST_CASE("joined emoji is one editable grapheme", "[gui][typing]") {
+	const std::string joined = "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB";
+	World world("gui_typing.joined_emoji", joined);
+	REQUIRE(world.Cursor() == 2);
+	Typing backspace;
+	backspace.Backspace = true;
+	CHECK(world.Send(backspace).Changed);
+	CHECK(world.Text().empty());
+	CHECK(world.Cursor() == 1);
 }
 
 TEST_CASE("backspace removes one character and not one byte", "[gui][typing]") {
@@ -384,7 +454,9 @@ TEST_CASE("a destroyed box takes no typing", "[gui][typing]") {
 
 	world.Data.DestroyInstance(box);
 
-	const TypeResult typed = Type(world.Data, Typing{"x", false, 0, false, false});
+	Typing typing;
+	typing.Text = "x";
+	const TypeResult typed = Type(world.Data, typing);
 	CHECK(typed.Instance == NULL_ENTITY);
 	CHECK_FALSE(typed.Changed);
 }

@@ -621,3 +621,21 @@ TEST_CASE("each viewport remembers an independent camera per world", "[studio][v
 	left.Use(SCENE, leftPose);
 	CHECK(leftPose.Frame.Position == engine::core::Vector3{7.0f, 8.0f, 9.0f});
 }
+
+TEST_CASE("GUI preview profiles resolve viewer-local screen metrics", "[studio][viewports]") {
+	studio::GuiPreviewSettings phone;
+	phone.Profile = studio::GuiPreviewProfile::Phone;
+	phone.InterfaceScale = 1.5f;
+	phone.TextScale = 1.25f;
+	const engine::gui::Screen screen = studio::ResolveGuiPreviewScreen(phone, 800.0f, 600.0f);
+	CHECK(screen.Width == 390.0f);
+	CHECK(screen.Height == 844.0f);
+	CHECK(screen.SafeArea.Top == 47.0f);
+	CHECK(screen.InterfaceScale == 1.5f);
+	CHECK(screen.TextScale == 1.25f);
+	CHECK(phone.State == studio::GuiPreviewState::None);
+	studio::GuiPreviewSettings secondViewport;
+	secondViewport.State = studio::GuiPreviewState::Pressed;
+	CHECK(phone.State == studio::GuiPreviewState::None);
+	CHECK(secondViewport.State == studio::GuiPreviewState::Pressed);
+}

@@ -9,6 +9,8 @@
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/RichText.hpp>
+#include <engine/gui/Services.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -179,11 +181,15 @@ namespace engine::gui {
 			const SizeLimits *Limits = nullptr;
 			const TextSizeLimits *TextLimits = nullptr;
 			const Scale *Factor = nullptr;
+			const PresentationState *Presentation = nullptr;
 
 			// Read by the *parent's* list layout rather than by this node's
 			// own placement - a `UIFlexItem` describes how its parent trades
 			// size for the line's spare room.
 			const FlexItem *Flex = nullptr;
+			const VirtualCollection *Collection = nullptr;
+			ecs::Entity CollectionOn;
+			ecs::Entity CollectionTemplate;
 		};
 
 		// Everything one walk of a node's child list produces.
@@ -202,6 +208,8 @@ namespace engine::gui {
 		// and once from its own `Place`. Producing both answers at once is the
 		// whole of this struct.
 		struct Scan {
+			const TextResolutionRequest *Text = nullptr;
+
 			// The modifier children, which are the ones with no `Element`.
 			Modifiers Mods;
 
@@ -334,13 +342,48 @@ namespace engine::gui {
 				if (found.Mods.Factor == nullptr) {
 					found.Mods.Factor = store.Get<Scale>(child);
 				}
+				if (found.Mods.Presentation == nullptr) {
+					found.Mods.Presentation = store.Get<PresentationState>(child);
+				}
 				if (found.Mods.Flex == nullptr) {
 					found.Mods.Flex = store.Get<FlexItem>(child);
+				}
+				if (found.Mods.Collection == nullptr) {
+					found.Mods.Collection = store.Get<VirtualCollection>(child);
+					if (found.Mods.Collection != nullptr) {
+						found.Mods.CollectionOn = child;
+						store.EachChild(child, [&](Entity candidate) {
+							if (found.Mods.CollectionTemplate == ecs::NULL_ENTITY &&
+								store.Get<Element>(candidate) != nullptr) {
+								found.Mods.CollectionTemplate = candidate;
+							}
+						});
+					}
 				}
 			});
 
 			found.ChildCount = static_cast<uint32_t>(arena.size() - found.ChildFirst);
 			return found;
+		}
+
+		const PresentationOverride *Override(const Modifiers &modifiers, PresentationProperty property) {
+			return modifiers.Presentation != nullptr && modifiers.Presentation->Active
+					   ? modifiers.Presentation->Overrides.Find(property)
+					   : nullptr;
+		}
+
+		core::UDim2 PresentationSize(const Element &element, const Modifiers &modifiers) {
+			const PresentationOverride *override = Override(modifiers, PresentationProperty::Size);
+			return override != nullptr && override->Value.Type == PresentationValueType::UDim2
+					   ? override->Value.UDim2
+					   : element.Size;
+		}
+
+		core::UDim2 PresentationPosition(const Element &element, const Modifiers &modifiers) {
+			const PresentationOverride *override = Override(modifiers, PresentationProperty::Position);
+			return override != nullptr && override->Value.Type == PresentationValueType::UDim2
+					   ? override->Value.UDim2
+					   : element.Position;
 		}
 
 		// What a container's padding takes out of each edge.
@@ -492,6 +535,12 @@ namespace engine::gui {
 				if (growsY) {
 					canvas.Y = automatic.Y;
 				}
+				if (const VirtualCollection *collection = scan.Mods.Collection;
+					collection != nullptr && ValidateVirtualCollection(*collection)) {
+					const Vector2 virtualExtent = VirtualCanvasExtent(*collection);
+					canvas.X = std::max(canvas.X, virtualExtent.X);
+					canvas.Y = std::max(canvas.Y, virtualExtent.Y);
+				}
 
 				const bool showsY = scrollsY && canvas.Y > window.Y;
 				const bool showsX = scrollsX && canvas.X > window.X;
@@ -601,32 +650,33 @@ namespace engine::gui {
 			return size;
 		}
 
-		// The em size a label is actually drawn at.
-		//
-		// See `Layout.hpp`: the advance is an estimate and this is the one
-		// answer everything downstream uses. Returning the authored size
-		// unchanged when `Scaled` is off is not a shortcut - a scaled size on an
-		// unscaled label would silently override what the author typed.
-		// How many characters a label actually draws.
+		// The text a label actually draws.
 		//
 		// **After the markup is stripped and after the visible limit**, because
 		// both change what a reader sees and `TextScaled` fits what a reader
 		// sees. A label whose text is mostly tags would otherwise shrink to fit
 		// a string nobody is shown.
 		//
-		// **Characters and not bytes**, which is the same crossing
-		// `Entry::CursorPosition` makes: `AVERAGE_ADVANCE` is a fraction of an em
-		// per *glyph*, so counting the three bytes of an accented letter three
-		// times measures a word half again too wide.
-		size_t DrawnCharacters(const Label &label) {
+		// Keeping this strip step in one place makes automatic sizing and fitted
+		// text shape the same visible content as compile emits.
+		std::string DrawnText(const Label &label, std::string_view source) {
 			std::string plain;
 			std::vector<DrawSpan> spans;
-			std::string_view text = label.Text;
+			std::string_view text = source;
 			if (label.Rich) {
-				ParseRichText(label.Text, label, plain, spans);
+				ParseRichText(source, label, plain, spans);
 				text = plain;
 			}
-			return Characters(FirstCharacters(text, label.MaxVisible));
+			return std::string(FirstCharacters(text, label.MaxVisible));
+		}
+
+		float ShapedAdvance(const FontPackage *fonts, const Label &label, std::string_view text, float size) {
+			if (fonts != nullptr) {
+				const ShapedText shaped =
+					ShapeText(*fonts, TextShapeRequest{text, label.Font, TextDirection::Automatic, size});
+				return shaped.Status == TextShapeStatus::Ok ? shaped.Advance : 0.0f;
+			}
+			return static_cast<float>(Characters(text)) * AVERAGE_ADVANCE * size;
 		}
 
 		// How many lines a label occupies, counting only the breaks it carries.
@@ -642,8 +692,14 @@ namespace engine::gui {
 		}
 
 		// @param factor `UIScale`'s multiplier, or one where there is none.
-		int32_t
-		FittedTextSize(const Label &label, const Vector2 &box, const TextSizeLimits *limits, float factor) {
+		int32_t FittedTextSize(
+			const Label &label,
+			std::string_view text,
+			const Vector2 &box,
+			const TextSizeLimits *limits,
+			float factor,
+			const FontPackage *fonts
+		) {
 			// **`UIScale` multiplies the glyphs as well as the box**, which is
 			// what `gui::Scale` says it does. It was applied in `Constrain` to
 			// the rectangle and nowhere to the text, so a scale of two gave a
@@ -654,8 +710,9 @@ namespace engine::gui {
 			float size = static_cast<float>(label.Size) * (factor > 0.0f ? factor : 1.0f);
 
 			if (label.Scaled) {
-				const size_t characters = std::max<size_t>(DrawnCharacters(label), 1);
-				const float byWidth = box.X / (static_cast<float>(characters) * AVERAGE_ADVANCE);
+				const std::string visible = DrawnText(label, text);
+				const float advanceAtSize = ShapedAdvance(fonts, label, visible, std::max(size, 1.0f));
+				const float byWidth = box.X * size / std::max(advanceAtSize, 1.0f);
 				const float byHeight = box.Y / LINE_SPACING;
 
 				size = std::min({byWidth, byHeight, size});
@@ -685,7 +742,8 @@ namespace engine::gui {
 			const Rect &clip,
 			int depth,
 			float rotation,
-			const Scan &scan
+			const Scan &scan,
+			bool virtualTemplate = false
 		);
 
 		Vector2 Measure(
@@ -694,7 +752,8 @@ namespace engine::gui {
 			const Vector2 &parent,
 			int depth,
 			Scan &scan,
-			std::vector<Entity> &arena
+			std::vector<Entity> &arena,
+			const TextResolutionRequest &text
 		);
 
 		// How many cells a grid puts on one line.
@@ -822,7 +881,7 @@ namespace engine::gui {
 				}
 
 				Scan found;
-				const Vector2 size = Measure(store, node, basis, depth, found, arena);
+				const Vector2 size = Measure(store, node, basis, depth, found, arena, *scan.Text);
 
 				if (stacked) {
 					const float mainSize = horizontal ? size.X : size.Y;
@@ -853,7 +912,7 @@ namespace engine::gui {
 				// deliberately ignored: a child at a negative position hangs out
 				// of its parent rather than pushing the parent's origin, which is
 				// what keeps this a growth rule and not a reflow.
-				const Vector2 anchored = child->Position.Resolve(basis);
+				const Vector2 anchored = PresentationPosition(*child, found.Mods).Resolve(basis);
 				along = std::max(along, anchored.X + (1.0f - child->AnchorPoint.X) * size.X);
 				across = std::max(across, anchored.Y + (1.0f - child->AnchorPoint.Y) * size.Y);
 			}
@@ -900,7 +959,8 @@ namespace engine::gui {
 			const Vector2 &parent,
 			int depth,
 			Scan &scan,
-			std::vector<Entity> &arena
+			std::vector<Entity> &arena,
+			const TextResolutionRequest &text
 		) {
 			const Element *element = store.Get<Element>(instance);
 			if (element == nullptr) {
@@ -908,23 +968,15 @@ namespace engine::gui {
 			}
 
 			scan = ScanChildren(store, instance, arena);
-			Vector2 size = element->Size.Resolve(Basis(element->Constraint, parent));
+			scan.Text = &text;
+			Vector2 size = PresentationSize(*element, scan.Mods).Resolve(Basis(element->Constraint, parent));
 
-			// **What a labelled element grows to is its string, and it is
-			// measured with the same estimate that decides whether the string
-			// fits.** That is the whole soundness argument and it is worth
-			// stating, because this used to be a refusal on the grounds that
-			// "growing a box to an estimate produces a box the text does not
-			// fit".
-			//
-			// It does not, and the reason is the invariant `Layout.hpp` already
-			// states: the backend draws at `Resolved::TextSize` and does not
-			// second-guess it. Nothing downstream re-measures with real metrics,
-			// so `AVERAGE_ADVANCE` is not an approximation of the truth - within
-			// this engine it *is* the truth, the one answer a hit test, a
-			// headless assertion and a renderer all agree on. A box grown to it
-			// fits by the same definition of fitting the module uses everywhere
-			// else.
+			// **Automatic sizing and TextScaled use the same measurement path as
+			// the resolved text bounds.** A validated font package supplies
+			// canonical shaped advances; callers without one use the bounded
+			// `AVERAGE_ADVANCE` fallback. Backends consume the resulting glyph
+			// positions and `Resolved::TextSize` without measuring again, so
+			// layout, hit testing and painting share one answer.
 			//
 			// **`TextScaled` stays a no-op on a grown axis, by construction
 			// rather than by a special case.** `FittedTextSize` divides the box
@@ -933,10 +985,6 @@ namespace engine::gui {
 			// in a box that holds it, which is the only reading under which the
 			// pair means anything.
 			//
-			// The residual risk is that the estimate is wrong about real glyphs.
-			// That risk is not introduced here - it is the same risk `TextScaled`
-			// has carried since v0.8, and closing it means metrics shared below
-			// L7 rather than a second opinion in this branch.
 			const Label *label = store.Get<Label>(instance);
 
 			if (element->Automatic != AutomaticSize::None && label != nullptr) {
@@ -945,15 +993,13 @@ namespace engine::gui {
 
 				const Insets insets = InsetsOf(scan.Mods.Inset, size);
 
-				// One line, because this module wraps nothing: `Label` carries a
-				// string and a size and no wrap mode, so the height of a label
-				// is one line's height whatever the width is. The day wrapping
-				// arrives this is where the line count comes from, and it will
-				// need the width *before* the height - which is why the two are
-				// computed apart rather than as one extent.
-				const auto characters = static_cast<float>(label->Text.size());
-				const float advance = characters * AVERAGE_ADVANCE * static_cast<float>(label->Size);
-				const float lineHeight = LINE_SPACING * static_cast<float>(label->Size);
+				const std::string resolved = ResolveText(store, instance, *label, text);
+				const std::string visible = DrawnText(*label, resolved);
+				const float scale = text.LayoutScale > 0.0f ? text.LayoutScale : 1.0f;
+				const float advance =
+					ShapedAdvance(text.Fonts, *label, visible, static_cast<float>(label->Size) * scale);
+				const float lineHeight = static_cast<float>(TextLines(visible)) * LINE_SPACING *
+										 static_cast<float>(label->Size) * scale;
 
 				if (growX) {
 					size.X = std::max(advance + insets.Left + insets.Right, 0.0f);
@@ -1060,14 +1106,13 @@ namespace engine::gui {
 				if (element == nullptr || !element->Visible) {
 					continue;
 				}
-
 				Item item;
 				item.Node = child;
 				item.Order = element->LayoutOrder;
 				if (named) {
 					item.Label = store.InstanceNameOf(child);
 				}
-				item.Size = Measure(store, child, area, depth, item.Found, arena);
+				item.Size = Measure(store, child, area, depth, item.Found, arena, *scan.Text);
 				items.push_back(item);
 			}
 		}
@@ -1942,7 +1987,8 @@ namespace engine::gui {
 			const Rect &clip,
 			int depth,
 			float rotation,
-			const Scan &scan
+			const Scan &scan,
+			bool virtualTemplate
 		) {
 			if (depth > MAXIMUM_DEPTH) {
 				// `Store::SetParent` refuses a cycle, so reaching this means
@@ -1968,7 +2014,7 @@ namespace engine::gui {
 			// saying it is not on screen. That is one pass over a packed column
 			// instead of a recursion per hidden node, and it cannot miss a
 			// branch the way a hook on every parenting path can.
-			if (!element->Visible) {
+			if (!element->Visible && !virtualTemplate) {
 				return 0;
 			}
 
@@ -1985,23 +2031,22 @@ namespace engine::gui {
 			value.Rendered = true;
 
 			if (const Label *label = store.Get<Label>(instance)) {
+				const std::string text = ResolveText(store, instance, *label, *scan.Text);
 				value.TextSize = FittedTextSize(
 					*label,
+					text,
 					rect.Size(),
 					modifiers.TextLimits,
-					modifiers.Factor != nullptr ? modifiers.Factor->Factor : 1.0f
+					(modifiers.Factor != nullptr ? modifiers.Factor->Factor : 1.0f) * scan.Text->LayoutScale,
+					scan.Text->Fonts
 				);
 
-				// **The same estimate the fit used, kept rather than recomputed
-				// by whoever asks.** `TextBounds` and `TextFits` are two readings
-				// of one measurement, and a script that derived the second from
-				// the first would be doing arithmetic this pass has already done
-				// with the numbers it already had.
-				const auto characters = static_cast<float>(DrawnCharacters(*label));
 				const auto drawn = static_cast<float>(value.TextSize);
-				const auto lines = static_cast<float>(TextLines(label->Text));
+				const std::string visible = DrawnText(*label, text);
+				const auto lines = static_cast<float>(TextLines(visible));
+				const float advance = ShapedAdvance(scan.Text->Fonts, *label, visible, drawn);
 				value.TextBounds = Vector2{
-					characters * AVERAGE_ADVANCE * drawn,
+					advance,
 					lines * LINE_SPACING * drawn,
 				};
 				value.TextFits = value.TextBounds.X <= rect.Width() && value.TextBounds.Y <= rect.Height();
@@ -2033,8 +2078,35 @@ namespace engine::gui {
 			if (ContentArea(store, instance, rect, modifiers, scan, depth, arena, area, scrolled)) {
 				store.Set(instance, scrolled);
 			}
-
 			size_t placed = 1;
+			if (modifiers.Collection != nullptr && modifiers.CollectionTemplate != ecs::NULL_ENTITY &&
+				modifiers.Collection->FixedExtent > 0.0f) {
+				Scan templateScan;
+				const Vector2 templateSize = Measure(
+					store,
+					modifiers.CollectionTemplate,
+					area.Size(),
+					depth + 1,
+					templateScan,
+					arena,
+					*scan.Text
+				);
+				const Vector2 pageOffset =
+					VirtualCellPosition(*modifiers.Collection, modifiers.Collection->Page.First);
+				const Vector2 placedSize = modifiers.Collection->LayoutPolicy == VirtualLayoutPolicy::Grid
+											   ? modifiers.Collection->GridCellStride
+											   : templateSize;
+				placed += Place(
+					store,
+					modifiers.CollectionTemplate,
+					FromCorner(area.Min + pageOffset, placedSize),
+					inner,
+					depth + 1,
+					total,
+					templateScan,
+					true
+				);
+			}
 
 			// This level's scratch. Live only until the loops below finish with
 			// it: every recursive call uses the next level's, and by the time
@@ -2077,7 +2149,8 @@ namespace engine::gui {
 			} else {
 				for (const Item &item : items) {
 					const Element *child = store.Get<Element>(item.Node);
-					const Vector2 anchored = child->Position.Resolve(area.Size());
+					const Vector2 anchored =
+						PresentationPosition(*child, item.Found.Mods).Resolve(area.Size());
 					const Vector2 corner{
 						area.Min.X + anchored.X - child->AnchorPoint.X * item.Size.X,
 						area.Min.Y + anchored.Y - child->AnchorPoint.Y * item.Size.Y,
@@ -2089,6 +2162,36 @@ namespace engine::gui {
 			}
 
 			return placed;
+		}
+
+		bool ValidDisplay(const Screen &screen) {
+			const auto extent = [](float value) { return std::isfinite(value) && value >= 0.0f; };
+			const auto scale = [](float value) { return std::isfinite(value) && value > 0.0f; };
+			const auto insets = [&extent](const DisplayInsets &value) {
+				return extent(value.Left) && extent(value.Top) && extent(value.Right) && extent(value.Bottom);
+			};
+			return extent(screen.Width) && extent(screen.Height) && scale(screen.FramebufferScale) &&
+				   scale(screen.DevicePixelRatio) && scale(screen.TextScale) &&
+				   scale(screen.InterfaceScale) && extent(screen.TopInset) && insets(screen.SafeArea) &&
+				   insets(screen.Occluded);
+		}
+
+		Screen CollectorProfile(const Screen &screen) {
+			Screen logical = screen;
+			const float inverse = 1.0f / screen.InterfaceScale;
+			logical.Width *= inverse;
+			logical.Height *= inverse;
+			logical.SafeArea.Left *= inverse;
+			logical.SafeArea.Top *= inverse;
+			logical.SafeArea.Right *= inverse;
+			logical.SafeArea.Bottom *= inverse;
+			logical.Occluded.Left *= inverse;
+			logical.Occluded.Top *= inverse;
+			logical.Occluded.Right *= inverse;
+			logical.Occluded.Bottom *= inverse;
+			logical.TopInset *= inverse;
+			logical.InterfaceScale = 1.0f;
+			return logical;
 		}
 
 		// How far a collector that clips nothing lets its subtree reach.
@@ -2114,7 +2217,80 @@ namespace engine::gui {
 		// @return `false` for a collector that has no world-owned canvas. A
 		//         `PluginGui` instead enters through `LayoutCollector` with the
 		//         rectangle its host chose.
-		bool CanvasFor(const Store &store, Entity collector, const Screen &screen, Rect &out, Rect &clip) {
+		bool ApplyCollectorScale(
+			const Layer *layer,
+			bool screenCollector,
+			const Screen &screen,
+			Rect &out,
+			Rect &clip,
+			CanvasTransform &transform
+		) {
+			const float displayScale = screenCollector ? screen.InterfaceScale : 1.0f;
+			transform.Origin = Vector2::Zero;
+			transform.Scale = Vector2{displayScale, displayScale};
+			if (layer == nullptr || !std::isfinite(layer->ReferenceResolution.X) ||
+				!std::isfinite(layer->ReferenceResolution.Y) || !(layer->ReferenceResolution.X > 0.0f) ||
+				!(layer->ReferenceResolution.Y > 0.0f)) {
+				return true;
+			}
+
+			const Vector2 available = out.Size();
+			if (!(available.X > 0.0f) || !(available.Y > 0.0f)) {
+				return false;
+			}
+			Vector2 scale{1.0f, 1.0f};
+			switch (layer->ScaleMode) {
+			case CollectorScaleMode::Stretch:
+				scale = Vector2{
+					available.X / layer->ReferenceResolution.X, available.Y / layer->ReferenceResolution.Y
+				};
+				break;
+			case CollectorScaleMode::Fit:
+			case CollectorScaleMode::Fill:
+			case CollectorScaleMode::Integer: {
+				const float fit = std::min(
+					available.X / layer->ReferenceResolution.X, available.Y / layer->ReferenceResolution.Y
+				);
+				const float uniform = layer->ScaleMode == CollectorScaleMode::Fill
+										  ? std::max(
+												available.X / layer->ReferenceResolution.X,
+												available.Y / layer->ReferenceResolution.Y
+											)
+									  : layer->ScaleMode == CollectorScaleMode::Integer
+										  ? std::max(std::floor(fit), 1.0f)
+										  : fit;
+				if (std::isfinite(uniform) && uniform > 0.0f) scale = Vector2{uniform, uniform};
+				break;
+			}
+			case CollectorScaleMode::None:
+				break;
+			}
+
+			const Vector2 fitted{
+				layer->ReferenceResolution.X * scale.X, layer->ReferenceResolution.Y * scale.Y
+			};
+			const Vector2 localOrigin{
+				out.Min.X + (available.X - fitted.X) * 0.5f,
+				out.Min.Y + (available.Y - fitted.Y) * 0.5f,
+			};
+			const auto inverse = [&](Vector2 point) {
+				return Vector2{(point.X - localOrigin.X) / scale.X, (point.Y - localOrigin.Y) / scale.Y};
+			};
+			clip = Rect{inverse(clip.Min), inverse(clip.Max)};
+			out = Rect{Vector2::Zero, layer->ReferenceResolution};
+			transform.Origin = localOrigin * displayScale;
+			transform.Scale = Vector2{scale.X * displayScale, scale.Y * displayScale};
+			return true;
+		}
+
+		bool CanvasFor(
+			const Store &store,
+			Entity collector,
+			const Screen &screen,
+			Rect &out,
+			Rect &clip,
+			CanvasTransform &transform
+		) {
 			const LayoutIds &ids = LayoutClasses();
 
 			const auto unclipped = [](const Rect &canvas) {
@@ -2129,15 +2305,39 @@ namespace engine::gui {
 			};
 
 			if (store.IsA(collector, ids.ScreenGui)) {
+				if (!ValidDisplay(screen)) {
+					return false;
+				}
+				const Screen logical = CollectorProfile(screen);
 				const Layer *layer = store.Get<Layer>(collector);
-				const float top = layer != nullptr && layer->IgnoreGuiInset ? 0.0f : screen.TopInset;
-				out = Rect{Vector2{0.0f, top}, Vector2{screen.Width, screen.Height}};
+				if (layer != nullptr && layer->IgnoreGuiInset) {
+					out = Rect{Vector2::Zero, Vector2{logical.Width, logical.Height}};
+				} else {
+					// A cutout and a keyboard can reserve the same edge. They do not
+					// stack: both describe the first usable pixel, so the larger one
+					// wins. The legacy top inset is one more top reservation while
+					// hosts move to `DisplayProfile::SafeArea`.
+					const float left = std::max(logical.SafeArea.Left, logical.Occluded.Left);
+					const float top =
+						std::max({logical.TopInset, logical.SafeArea.Top, logical.Occluded.Top});
+					const float right = std::max(logical.SafeArea.Right, logical.Occluded.Right);
+					const float bottom = std::max(logical.SafeArea.Bottom, logical.Occluded.Bottom);
+					out = Rect{
+						Vector2{std::clamp(left, 0.0f, logical.Width), std::clamp(top, 0.0f, logical.Height)},
+						Vector2{
+							std::clamp(logical.Width - std::max(right, 0.0f), 0.0f, logical.Width),
+							std::clamp(logical.Height - std::max(bottom, 0.0f), 0.0f, logical.Height),
+						},
+					};
+					out.Max.X = std::max(out.Min.X, out.Max.X);
+					out.Max.Y = std::max(out.Min.Y, out.Max.Y);
+				}
 
 				// **A screen gui always clips and has no property saying so**,
 				// which is Roblox's shape: the canvas *is* the display, so there
 				// is nowhere past it for anything to be drawn.
 				clip = out;
-				return true;
+				return ApplyCollectorScale(layer, true, screen, out, clip, transform);
 			}
 
 			// **What a host resolved wins, and its absence is not a failure.**
@@ -2157,7 +2357,7 @@ namespace engine::gui {
 				surface != nullptr && store.IsA(collector, ids.SurfaceGui)) {
 				out = Rect{Vector2::Zero, resolved != nullptr ? resolved->Size : surface->CanvasSize};
 				clip = surface->ClipsDescendants ? out : unclipped(out);
-				return true;
+				return ApplyCollectorScale(store.Get<Layer>(collector), false, screen, out, clip, transform);
 			}
 
 			if (const Billboard *billboard = store.Get<Billboard>(collector);
@@ -2171,14 +2371,22 @@ namespace engine::gui {
 										: Vector2{billboard->Size.X.Offset, billboard->Size.Y.Offset},
 				};
 				clip = billboard->ClipsDescendants ? out : unclipped(out);
-				return true;
+				return ApplyCollectorScale(store.Get<Layer>(collector), false, screen, out, clip, transform);
 			}
 
 			return false;
 		}
 
-		size_t PlaceCollector(Store &store, Entity collector, const Rect &canvas, const Rect &clip) {
+		size_t PlaceCollector(
+			Store &store,
+			Entity collector,
+			const Rect &canvas,
+			const Rect &clip,
+			const CanvasTransform &transform,
+			const TextResolutionRequest &text
+		) {
 			store.Set(collector, Canvas{canvas});
+			store.Set(collector, transform);
 
 			Resolved collectorResolved;
 			collectorResolved.AbsolutePosition = canvas.Min;
@@ -2203,8 +2411,8 @@ namespace engine::gui {
 				const ArenaScope scope(arena);
 
 				Scan scan;
-				const Vector2 size = Measure(store, root, canvas.Size(), 1, scan, arena);
-				const Vector2 anchored = element->Position.Resolve(canvas.Size());
+				const Vector2 size = Measure(store, root, canvas.Size(), 1, scan, arena, text);
+				const Vector2 anchored = PresentationPosition(*element, scan.Mods).Resolve(canvas.Size());
 				const Vector2 corner{
 					canvas.Min.X + anchored.X - element->AnchorPoint.X * size.X,
 					canvas.Min.Y + anchored.Y - element->AnchorPoint.Y * size.Y,
@@ -2223,19 +2431,96 @@ namespace engine::gui {
 		}
 	}
 
-	size_t Layout(Store &store, const Screen &screen, double seconds) {
+	void ReconcileVirtualCollectionAnchors(Store &store, Entity collector) {
+		std::vector<Entity> collections;
+		store.Each<const VirtualCollection>([&](Entity entity, const VirtualCollection &) {
+			if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector))
+				collections.push_back(entity);
+		});
+		for (const Entity entity : collections) {
+			const VirtualCollection *source = store.Get<VirtualCollection>(entity);
+			const VirtualAnchorState *previous = store.Get<VirtualAnchorState>(entity);
+			const Entity frame = store.ParentOf(entity);
+			const Scrolling *scrolling = store.Get<Scrolling>(frame);
+			if (source == nullptr || previous == nullptr || scrolling == nullptr ||
+				previous->Revision == source->Revision || !ValidateVirtualCollection(*source))
+				continue;
+			if (!previous->Key.empty()) {
+				if (const VirtualRecord *record = FindVirtualRecord(*source, previous->Key);
+					record != nullptr) {
+					const uint32_t index =
+						source->Page.First + static_cast<uint32_t>(record - source->Page.Records.data());
+					Scrolling adjusted = *scrolling;
+					adjusted.CanvasPosition.Y =
+						std::max(0.0f, VirtualExtentBefore(*source, index) - previous->OffsetY);
+					store.Set(frame, adjusted);
+				}
+			}
+			VirtualAnchorState updated = *previous;
+			updated.Revision = source->Revision;
+			store.Set(entity, updated);
+		}
+	}
+
+	namespace {
+		void RefreshVirtualCollectionAnchors(Store &store, Entity collector) {
+			std::vector<Entity> collections;
+			store.Each<const VirtualCollection>([&](Entity entity, const VirtualCollection &) {
+				if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector))
+					collections.push_back(entity);
+			});
+			for (const Entity entity : collections) {
+				const VirtualCollection *source = store.Get<VirtualCollection>(entity);
+				const Entity frame = store.ParentOf(entity);
+				const Scrolling *scrolling = store.Get<Scrolling>(frame);
+				const ScrollState *window = store.Get<ScrollState>(frame);
+				if (source == nullptr || scrolling == nullptr || window == nullptr ||
+					!ValidateVirtualCollection(*source))
+					continue;
+				const float top = std::clamp(
+					scrolling->CanvasPosition.Y,
+					0.0f,
+					std::max(window->CanvasSize.Y - window->WindowSize.Y, 0.0f)
+				);
+				float recordTop = VirtualExtentBefore(*source, source->Page.First);
+				VirtualAnchorState anchor;
+				anchor.Revision = source->Revision;
+				for (const VirtualRecord &record : source->Page.Records) {
+					const float bottom = recordTop + VirtualExtentOf(*source, record);
+					if (bottom > top && recordTop < top + window->WindowSize.Y) {
+						anchor.Key = record.Key;
+						anchor.OffsetY = recordTop - top;
+						break;
+					}
+					recordTop = bottom;
+				}
+				const VirtualAnchorState *old = store.Get<VirtualAnchorState>(entity);
+				if (old == nullptr || old->Revision != anchor.Revision || old->Key != anchor.Key ||
+					old->OffsetY != anchor.OffsetY)
+					store.Set(entity, anchor);
+			}
+		}
+	}
+
+	size_t Layout(Store &store, const Screen &screen, double seconds, const TextResolutionRequest &text) {
 		ENGINE_PROFILE_CAT("gui layout", engine::core::ProfileCategory::ECS);
 
 		// Forces the class table up before the first `IsA` below, which is
 		// what makes a store that has never seen this module still lay out.
 		LayoutClasses();
+		TextResolutionRequest scaledText = text;
+		if (ValidDisplay(screen)) {
+			scaledText.LayoutScale *= screen.TextScale;
+		}
 
 		// **The only two places in this module that read the clock, and both
 		// are here rather than in the walk.** Each turns elapsed seconds into a
 		// number - a page's `Alpha`, a canvas's spring - so everything below
 		// places rectangles exactly as it did before any of this existed.
+		ReconcileVirtualCollectionAnchors(store, ecs::NULL_ENTITY);
 		AdvancePages(store, seconds);
 		AdvanceScrolling(store, seconds);
+		AdvancePresentationAnimations(store, seconds);
 
 		// **Cleared first, then set by the walk.** Anything the walk does not
 		// reach is an orphan - an element a script created and has not
@@ -2279,6 +2564,7 @@ namespace engine::gui {
 			const Layer *layer = store.Get<Layer>(collector);
 			Rect canvas;
 			Rect clip;
+			CanvasTransform transform;
 
 			// **Where it sits decides whether it draws at all**, before
 			// anything asks how big it is. A `SurfaceGui` or a `BillboardGui`
@@ -2289,13 +2575,13 @@ namespace engine::gui {
 				store.IsA(collector, ids.SurfaceGui) || store.IsA(collector, ids.BillboardGui);
 
 			const bool drawn = layer != nullptr && layer->Enabled && Contained(store, collector, spatial) &&
-							   CanvasFor(store, collector, screen, canvas, clip);
+							   CanvasFor(store, collector, screen, canvas, clip, transform);
 
 			if (!drawn) {
 				continue;
 			}
 
-			placed += PlaceCollector(store, collector, canvas, clip);
+			placed += PlaceCollector(store, collector, canvas, clip, transform, scaledText);
 		}
 
 		// Per layout pass rather than per frame: `Compiled::Rebuild` only calls
@@ -2305,11 +2591,18 @@ namespace engine::gui {
 		// **Nothing at all when nothing was placed**, because a client with no
 		// interface lays out zero elements on every frame and neither the
 		// counter's lock nor the line is worth paying for that.
+		RefreshVirtualCollectionAnchors(store, ecs::NULL_ENTITY);
 		ReportPlaced(placed);
 		return placed;
 	}
 
-	size_t LayoutCollector(Store &store, Entity collector, const Screen &screen, double seconds) {
+	size_t LayoutCollector(
+		Store &store,
+		Entity collector,
+		const Screen &screen,
+		double seconds,
+		const TextResolutionRequest &text
+	) {
 		ENGINE_PROFILE_CAT("gui collector layout", engine::core::ProfileCategory::ECS);
 
 		const LayoutIds &ids = LayoutClasses();
@@ -2317,8 +2610,10 @@ namespace engine::gui {
 			return 0;
 		}
 
+		ReconcileVirtualCollectionAnchors(store, collector);
 		AdvancePages(store, seconds, collector);
 		AdvanceScrolling(store, seconds, collector);
+		AdvancePresentationAnimations(store, seconds, collector);
 
 		if (Resolved *resolved = store.GetMutable<Resolved>(collector); resolved != nullptr) {
 			resolved->Rendered = false;
@@ -2330,13 +2625,41 @@ namespace engine::gui {
 		});
 
 		const Layer *layer = store.Get<Layer>(collector);
-		if (layer == nullptr || !layer->Enabled || screen.Width <= 0.0f || screen.Height <= 0.0f) {
+		if (layer == nullptr || !layer->Enabled || !ValidDisplay(screen) || screen.Width <= 0.0f ||
+			screen.Height <= 0.0f) {
 			return 0;
 		}
 
-		const Rect canvas{Vector2::Zero, Vector2{screen.Width, screen.Height}};
-		const size_t placed = PlaceCollector(store, collector, canvas, canvas);
+		const Screen logical = CollectorProfile(screen);
+		TextResolutionRequest scaledText = text;
+		scaledText.LayoutScale *= screen.TextScale;
+		Rect canvas{Vector2::Zero, Vector2{logical.Width, logical.Height}};
+		Rect clip = canvas;
+		CanvasTransform transform;
+		if (!ApplyCollectorScale(layer, true, screen, canvas, clip, transform)) return 0;
+		const size_t placed = PlaceCollector(store, collector, canvas, clip, transform, scaledText);
+		RefreshVirtualCollectionAnchors(store, collector);
 		ReportPlaced(placed);
 		return placed;
+	}
+
+	Screen ScreenCollectorProfile(const Screen &screen) {
+		if (!ValidDisplay(screen)) {
+			Screen invalid;
+			invalid.Width = 0.0f;
+			invalid.Height = 0.0f;
+			return invalid;
+		}
+		return CollectorProfile(screen);
+	}
+
+	Vector2 ScreenCanvasSize(const Screen &screen) {
+		const Screen logical = ScreenCollectorProfile(screen);
+		return Vector2{logical.Width, logical.Height};
+	}
+
+	Vector2 ScreenPresentationSize(const Screen &screen) {
+		if (!ValidDisplay(screen)) return Vector2::Zero;
+		return Vector2{screen.Width, screen.Height};
 	}
 }

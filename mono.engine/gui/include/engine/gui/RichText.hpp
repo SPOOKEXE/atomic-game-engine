@@ -5,14 +5,9 @@
 
 // Markup in a `TextLabel`, turned into plain text and the styles over it.
 //
-// **The parse produces spans and never geometry.** A rich-text run reaches a
-// backend as one string plus a list of byte ranges, and the backend lays it out
-// in one pass with its own glyph metrics - which is the only arrangement under
-// which the second word lands where the renderer thinks it does. Positioning
-// the runs here would use `AVERAGE_ADVANCE`, and `Layout.hpp`'s standing rule is
-// that there is exactly one answer to how wide a string is; two would show up as
-// emphasis drifting out of place as a panel resizes. `DrawSpan` says the same
-// thing from the other end.
+// **The parse produces spans and never geometry.** The canonical shaper lays
+// out the plain string with these byte ranges, then gives every painter the
+// same glyph positions.
 //
 // ## What is understood, and what a malformed string does
 //
@@ -24,11 +19,10 @@
 //   - `<br />`
 //   - the entities `&lt; &gt; &amp; &quot; &apos;` and `&#NNN;`
 //
-// **A string that does not parse is shown literally, tags and all**, which is
-// Roblox's behaviour and the useful one: an author who typed `a < b` sees
-// `a < b` rather than nothing, and an author who mistyped a tag sees the tag and
-// knows where to look. The alternative - dropping what did not parse - hides a
-// mistake at exactly the moment somebody is making it.
+// Malformed markup within the text limit is shown literally, tags and all.
+// Inputs beyond the shaping limit are refused with empty output. Nesting and
+// styled span counts are bounded at 64; exceeding either shows the bounded
+// source literally.
 //
 // @tier L7 · shared
 
@@ -52,9 +46,9 @@ namespace engine::gui {
 	//        without overlaps. Cleared first. Empty when the string asked for no
 	//        styling at all, which is the ordinary case and costs a backend
 	//        nothing.
-	// @return `false` when the markup is malformed. `plain` is then `source`
-	//         unchanged and `spans` is empty, so a caller that ignores the
-	//         result still shows something a person can read.
+	// @return `false` when malformed or over a limit. A bounded malformed
+	//         source is copied literally into `plain`. Oversized source leaves
+	//         `plain` empty. `spans` is empty in either case.
 	// @since v0.18
 	bool ParseRichText(
 		std::string_view source, const Label &base, std::string &plain, std::vector<DrawSpan> &spans

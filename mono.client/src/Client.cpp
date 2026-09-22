@@ -16,6 +16,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Shooting.hpp>
@@ -64,6 +65,7 @@
 #include <client/Client.hpp>
 #include <client/DataScriptPackage.hpp>
 #include <client/DataScriptPackageTransaction.hpp>
+#include <client/GuiActions.hpp>
 #include <client/Replicated.hpp>
 #include <client/WorldSystems.hpp>
 #include <cmath>
@@ -166,6 +168,8 @@ namespace client {
 				return "key up";
 			case SDL_EVENT_TEXT_INPUT:
 				return "text input";
+			case SDL_EVENT_TEXT_EDITING:
+				return "text editing";
 			case SDL_EVENT_MOUSE_MOTION:
 				return "mouse motion";
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -207,6 +211,34 @@ namespace client {
 		Settings = options;
 		SubmittedMoveTick = 0;
 		InputLocalEpoch = InputSequenceEpoch = 0;
+		if (!std::isfinite(Settings.InterfaceScale) || Settings.InterfaceScale <= 0.0f ||
+			!std::isfinite(Settings.TextScale) || Settings.TextScale <= 0.0f) {
+			ENGINE_ERROR("interface and text scales must be finite and positive");
+			return false;
+		}
+		size_t fontPackageBytes = 0;
+		for (const auto &[file, face] : std::array{
+				 std::pair{"Inter.ttf", engine::gui::FontFace::Regular},
+				 std::pair{"Roboto.ttf", engine::gui::FontFace::Bold},
+				 std::pair{"NotoSans.ttf", engine::gui::FontFace::Italic},
+				 std::pair{"JetBrainsMono.ttf", engine::gui::FontFace::Code},
+			 }) {
+			std::ifstream input(engine::core::Paths::Fonts() / file, std::ios::binary | std::ios::ate);
+			if (!input) continue;
+			const std::streamsize size = input.tellg();
+			if (size <= 0 || static_cast<uint64_t>(size) > engine::gui::MAXIMUM_FONT_PACKAGE_BYTES ||
+				static_cast<uint64_t>(size) >
+					engine::gui::MAXIMUM_FONT_PACKAGE_TOTAL_BYTES - fontPackageBytes)
+				continue;
+			std::vector<std::byte> bytes(static_cast<size_t>(size));
+			input.seekg(0);
+			if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
+			if (InterfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
+				fontPackageBytes += bytes.size();
+		}
+		if (InterfaceFonts.Faces().empty()) {
+			ENGINE_WARN("no GUI font package; text shaping uses the fallback path");
+		}
 		if (!Settings.RenderPipelineFile.empty()) {
 			if (!Settings.GameFile.empty()) {
 				ENGINE_ERROR("--render-pipeline applies to demo worlds; --game owns its rendering profiles");
@@ -288,12 +320,13 @@ namespace client {
 				"atomic",
 				Settings.Width,
 				Settings.Height,
-				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN
 			);
 			if (!Window) {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
 			}
+			NativeAccessibility = std::make_unique<AccessibilityAdapter>(Window);
 
 			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
 			if (icon == nullptr) {
@@ -344,6 +377,11 @@ namespace client {
 			if (!Interface.Initialise(backend.Device, backend.ColourFormat)) {
 				ENGINE_WARN("no interface pass; a ScreenGui will not be drawn");
 			}
+			Interface.SetFontPackage(InterfaceFonts);
+		}
+
+		if (Window != nullptr && !SDL_ShowWindow(Window)) {
+			ENGINE_WARN("SDL_ShowWindow: {}", SDL_GetError());
 		}
 
 		// **Only with a window**, because a present mode belongs to a swapchain
@@ -1476,6 +1514,8 @@ namespace client {
 		// moves.
 		const engine::core::Name wanted(Settings.ClickElement);
 		engine::core::Vector2 centre;
+		engine::gui::CanvasTransform transform;
+		bool screenCollector = false;
 		bool found = false;
 
 		store.Each<const engine::gui::Resolved>([&](engine::ecs::Entity element,
@@ -1492,11 +1532,29 @@ namespace client {
 				resolved.AbsolutePosition.X + resolved.AbsoluteSize.X * 0.5f,
 				resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y * 0.5f,
 			};
+			static const engine::ecs::ClassId screenGui =
+				engine::ecs::Classes::Find(engine::core::Name("ScreenGui"));
+			for (engine::ecs::Entity above = element; above != engine::ecs::NULL_ENTITY;
+				 above = store.ParentOf(above)) {
+				if (store.Get<engine::gui::Layer>(above) != nullptr) {
+					screenCollector = store.IsA(above, screenGui);
+					if (const auto *foundTransform = store.Get<engine::gui::CanvasTransform>(above);
+						foundTransform != nullptr) {
+						transform = *foundTransform;
+					}
+					break;
+				}
+			}
 			found = true;
 		});
 
 		if (!found) {
 			return;
+		}
+		if (screenCollector) {
+			// `Resolved` uses collector logical pixels while SDL receives window
+			// coordinates. The collector transform is the sole conversion.
+			centre = transform.Origin + centre * transform.Scale;
 		}
 
 		// Moved and then pressed, as a real pointer is: the router admits a
@@ -1845,6 +1903,7 @@ namespace client {
 			SDL_CloseJoystick(joystick);
 		}
 		Joysticks.clear();
+		NativeAccessibility.reset();
 		if (Window) {
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
@@ -4079,6 +4138,7 @@ namespace client {
 			// the only record of it, and a script's `FocusLost` is owed one
 			// however the focus went away.
 			std::vector<engine::gui::GuiEvent> typedEvents;
+			std::vector<engine::gui::GuiEvent> semanticEvents;
 
 			// **The clock a page slide and a rubber band are measured against.**
 			// Passed in rather than read inside `gui`, which is the standing
@@ -4088,6 +4148,22 @@ namespace client {
 
 			request.Display.Width = static_cast<float>(windowWidth);
 			request.Display.Height = static_cast<float>(windowHeight);
+			const float framebufferScale =
+				windowWidth > 0 && windowHeight > 0
+					? std::min(
+						  static_cast<float>(pixelWidth) / static_cast<float>(windowWidth),
+						  static_cast<float>(pixelHeight) / static_cast<float>(windowHeight)
+					  )
+					: 1.0f;
+			request.Display.FramebufferScale =
+				std::isfinite(framebufferScale) && framebufferScale > 0.0f ? framebufferScale : 1.0f;
+			// SDL reports logical window coordinates and device framebuffer pixels,
+			// but no independent display-density value. They describe the same
+			// ratio here and must not be multiplied together.
+			request.Display.DevicePixelRatio = request.Display.FramebufferScale;
+			request.Display.InterfaceScale = Settings.InterfaceScale;
+			request.Display.TextScale = Settings.TextScale;
+			request.Fonts = InterfaceFonts.Faces().empty() ? nullptr : &InterfaceFonts;
 			request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 
 			// Fed back from the previous frame's routing, deliberately: the
@@ -4097,6 +4173,8 @@ namespace client {
 			request.Pressed = InterfaceRouter.Pressed();
 
 			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
+				request.Catalogue = InterfaceLocalization.Refresh(store);
+				request.Locale = Settings.Locale;
 				// **Before the layout, and that order is the whole of it.** A
 				// `SurfaceGui` sized in pixels-per-stud and a `BillboardGui`
 				// sized in studs both need numbers `gui` cannot reach - the
@@ -4107,7 +4185,6 @@ namespace client {
 				// which on one a player is walking towards is a visible lag on
 				// everything inside it.
 				engine::render::ResolveSpatialCanvases(store, request.Display);
-				engine::gui::Layout(store, request.Display);
 
 				// **Whose eyes this list is for**, which only
 				// `BillboardGui.PlayerToHideFrom` reads and which only this
@@ -4119,7 +4196,37 @@ namespace client {
 					request.Viewer = local->Instance;
 				}
 
-				InterfaceList.Rebuild(store, request);
+				const bool interfaceRebuilt = InterfaceList.Rebuild(store, request);
+				if (NativeAccessibility != nullptr) {
+					NativeAccessibility->SetWindowFocused(
+						(SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0
+					);
+					if (interfaceRebuilt) {
+						NativeAccessibility->Update(
+							ProjectAccessibilitySnapshot(
+								engine::gui::CompileSemantics(store, InterfaceList.Commands()),
+								InterfaceList.Commands()
+							),
+							store.Identity()
+						);
+					}
+					for (const AccessibilityAction &action : NativeAccessibility->Drain()) {
+						if (!IsCurrentAccessibilityAction(action, store.Identity(), InterfaceList.Commands()))
+							continue;
+						const std::span<const engine::gui::GuiEvent> events = InterfaceRouter.UpdateSemantic(
+							store, InterfaceList.Commands(), action.Target, action.Action
+						);
+						semanticEvents.insert(semanticEvents.end(), events.begin(), events.end());
+					}
+				}
+
+				const bool textEditing = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
+				for (const engine::gui::SemanticAction action :
+					 GuiActions(Input.State(), Input.Controllers(), textEditing)) {
+					const std::span<const engine::gui::GuiEvent> events =
+						InterfaceRouter.UpdateSemantic(store, InterfaceList.Commands(), action);
+					semanticEvents.insert(semanticEvents.end(), events.begin(), events.end());
+				}
 
 				// **This frame's characters, and before the press that may move
 				// the focus.** They were produced by a keyboard aimed at whichever
@@ -4152,6 +4259,11 @@ namespace client {
 				// where rule 2 says the text lives.
 				engine::gui::Typing typing;
 				typing.Text = Input.TypedText();
+				const engine::input::TextComposition composition = Input.Composition();
+				typing.Preedit = composition.Text;
+				typing.PreeditStart = composition.Start;
+				typing.PreeditLength = composition.Length;
+				typing.PreeditRevision = composition.Revision;
 				typing.Backspace = Input.State().WasKeyPressed(engine::scene::KeyCode::Backspace);
 				typing.Submit = Input.State().WasKeyPressed(engine::scene::KeyCode::Return);
 				typing.Extend = Input.State().IsKeyDown(engine::scene::KeyCode::LeftShift) ||
@@ -4188,8 +4300,9 @@ namespace client {
 				// fed that compile is deliberately the previous frame's - see
 				// `Router::Hovered`, which explains why the one-frame loop is the
 				// alternative to a compile that depends on its own output.
+				engine::core::Vector2 windowPointer = Input.State().MousePosition;
 				engine::gui::Pointer pointer;
-				pointer.Position = Input.State().MousePosition;
+				pointer.Position = windowPointer;
 				pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
 
 				// **Focus and not a rectangle test.** The position is already in
@@ -4213,7 +4326,8 @@ namespace client {
 				// direction.
 				if (!Settings.ClickElement.empty() && !InterfaceList.Commands().Commands.empty()) {
 					PressNamedElement(store);
-					pointer.Position = Input.State().MousePosition;
+					windowPointer = Input.State().MousePosition;
+					pointer.Position = windowPointer;
 					pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
 				}
 
@@ -4226,7 +4340,7 @@ namespace client {
 						engine::ecs::NULL_ENTITY) {
 					engine::render::SpatialPointer spatial;
 					if (engine::render::ResolveSpatialPointer(
-							store, InterfaceList.Commands(), request.Display, pointer.Position, spatial
+							store, InterfaceList.Commands(), request.Display, windowPointer, spatial
 						)) {
 						pointer.Position = spatial.Position;
 						pointer.Collector = spatial.Collector;
@@ -4269,26 +4383,42 @@ namespace client {
 				// types is the one SDL was never asked for.
 				wantsTextInput = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
 
-				if (!InterfaceList.Commands().Commands.empty()) {
-					interfaceContinuous = std::any_of(
-						InterfaceList.Commands().Commands.begin(),
-						InterfaceList.Commands().Commands.end(),
-						[](const engine::gui::DrawCommand &command) {
-							return command.Kind == engine::gui::DrawKind::Viewport;
-						}
-					);
+				const bool hasInterfaceCommands = !InterfaceList.Commands().Commands.empty();
+				// The compiler signature includes its store, so a world switch always
+				// rebuilds. Keep the viewport answer beside that list and only walk its
+				// commands when either source changes.
+				if (interfaceRebuilt || InterfaceViewportWorld != interfaceWorld) {
+					InterfaceViewportWorld = interfaceWorld;
+					InterfaceHasViewport = hasInterfaceCommands &&
+										   std::any_of(
+											   InterfaceList.Commands().Commands.begin(),
+											   InterfaceList.Commands().Commands.end(),
+											   [](const engine::gui::DrawCommand &command) {
+												   return command.Kind == engine::gui::DrawKind::Viewport;
+											   }
+										   );
+				}
+				interfaceContinuous = InterfaceHasViewport;
+				if (hasInterfaceCommands) {
+					// A retained viewport still observes its scene and update policy on
+					// a list cache hit. Its renderer owns that narrower cache, while the
+					// outer interface submission only changes with the compiled list.
 					(void)ViewportImages.Render(
 						Renderer, store, InterfaceList.Commands(), 1, Universe_->NameOf(interfaceWorld)
 					);
-					Interface.Submit(
-						InterfaceList.Commands(),
-						engine::core::Vector2{request.Display.Width, request.Display.Height},
-						engine::core::Vector2{
-							static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
-						},
-						store,
-						InterfaceList.Signature()
-					);
+					if (interfaceRebuilt) {
+						Interface.Submit(
+							InterfaceList.Commands(),
+							engine::core::Vector2{request.Display.Width, request.Display.Height},
+							engine::core::Vector2{
+								static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
+							},
+							store,
+							InterfaceList.Signature(),
+							InterfaceList.DamageValid(),
+							InterfaceList.Damage()
+						);
+					}
 					hook = &Interface;
 				}
 			});
@@ -4296,12 +4426,16 @@ namespace client {
 			// **Outside the world's lock, because it reaches a VM.** The span
 			// points into the router's own vector, which is a member and is only
 			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
-			if (!typedEvents.empty() || !interfaceEvents.empty() || !adornmentEvents.empty()) {
+			if (!typedEvents.empty() || !semanticEvents.empty() || !interfaceEvents.empty() ||
+				!adornmentEvents.empty()) {
 				if (engine::script::Runtime *runtime = RuntimeOf(interfaceWorld); runtime != nullptr) {
 					// Typing first, because it happened first - the keystroke is
 					// applied above the routing for the reason stated there.
 					if (!typedEvents.empty()) {
 						runtime->DeliverGuiEvents(typedEvents);
+					}
+					if (!semanticEvents.empty()) {
+						runtime->DeliverGuiEvents(semanticEvents);
 					}
 					if (!interfaceEvents.empty()) {
 						runtime->DeliverGuiEvents(interfaceEvents);

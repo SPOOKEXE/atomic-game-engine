@@ -22,6 +22,8 @@
 //
 // @tier L12 · client
 
+#include <engine/gui/ShapedText.hpp>
+
 #include <cstdint>
 #include <imgui.h>
 
@@ -92,6 +94,18 @@ namespace engine::ui {
 	//              interface. See `InterfaceSettings::Scale`.
 	// @return `false` when no face could be loaded and the default is in use.
 	bool LoadFonts(float scale);
+
+	// Gets the rectangle reserved for glyphs produced by the engine shaper.
+	//
+	// `LoadFonts` reserves this before the first frame, so consumers may update
+	// pixels inside it while a frame is open without asking Dear ImGui to pack or
+	// resize its font atlas. The rectangle's UVs are current for the atlas
+	// texture and must be read again when recording quads.
+	//
+	// @return `false` when the current context was not prepared by `LoadFonts`.
+	bool ShapedGlyphAtlasRect(ImFontAtlasRect *out);
+
+	const gui::FontPackage &GuiFontPackage();
 
 	// The face for a role and a size.
 	//

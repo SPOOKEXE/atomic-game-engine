@@ -2,6 +2,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/ui/Fonts.hpp>
+#include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -253,6 +254,7 @@ namespace engine::ui {
 			ShutdownBackends();
 		}
 		State->Spatial.Shutdown();
+		ShutdownGuiPainter();
 
 		ImGui::DestroyContext(State->Context);
 

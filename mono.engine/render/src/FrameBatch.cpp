@@ -328,6 +328,12 @@ namespace engine::render {
 		Render.State->BatchHeight = 0;
 		Render.State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
 		Render.State->BatchCaptureTimingRequested = false;
+		if (gameInterfaceHook != nullptr) {
+			gameInterfaceHook->CompleteFrame(frame.Submitted);
+		}
+		if (hostOverlayHook != nullptr && hostOverlayHook != gameInterfaceHook) {
+			hostOverlayHook->CompleteFrame(frame.Submitted);
+		}
 		return {.Frame = frame, .Outcome = outcome};
 	}
 }

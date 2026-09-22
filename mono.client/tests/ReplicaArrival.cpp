@@ -17,8 +17,10 @@
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Animation.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
@@ -26,6 +28,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Connector.hpp>
@@ -43,6 +46,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <client/Replicated.hpp>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -157,13 +161,16 @@ namespace {
 		Link &operator=(const Link &) = delete;
 
 		// One tick of each side, in the order two programs run them.
-		void Tick() {
+		void Tick(const std::function<void()> &afterClear = {}) {
 			Now += FRAME_SECONDS;
 			Beat++;
 
 			// Cleared at the head, exactly as `world::World::Tick` does it: the
 			// bits are the delta's source and `Publish` reads them at the end.
 			World.ClearChanges();
+			if (afterClear) {
+				afterClear();
+			}
 			World.SetFrame(FRAME_SECONDS, 0.0f);
 			WorldScripts->Heartbeat(FRAME_SECONDS);
 
@@ -254,6 +261,64 @@ namespace {
 		return replica.FindFirstChild(parent, name);
 	}
 
+	engine::gui::AnimationPlayback FullAnimationPlayback() {
+		using namespace engine::gui;
+
+		AnimationPlayback playback;
+		playback.Playing = true;
+		playback.Clip.Tween = engine::core::TweenInfo(
+			2.0f, engine::core::EasingStyle::Sine, engine::core::EasingDirection::InOut, 3, true, 0.25f
+		);
+
+		for (const PresentationProperty property : {
+				 PresentationProperty::BackgroundColor,
+				 PresentationProperty::BackgroundTransparency,
+				 PresentationProperty::ImageColor,
+				 PresentationProperty::ImageTransparency,
+				 PresentationProperty::TextColor,
+				 PresentationProperty::TextTransparency,
+				 PresentationProperty::Rotation,
+				 PresentationProperty::Position,
+				 PresentationProperty::Size,
+			 }) {
+			PresentationTrack track;
+			track.Property = property;
+			for (size_t index = 0; index < PresentationTrack::MAXIMUM_KEYS; index++) {
+				const float time =
+					static_cast<float>(index) / static_cast<float>(PresentationTrack::MAXIMUM_KEYS - 1);
+				PresentationValue value;
+				switch (property) {
+				case PresentationProperty::BackgroundColor:
+				case PresentationProperty::ImageColor:
+				case PresentationProperty::TextColor:
+					value = PresentationValue::FromColor(engine::core::Color3{time, 1.0f - time, 0.5f});
+					break;
+				case PresentationProperty::Position:
+				case PresentationProperty::Size:
+					value = PresentationValue::FromUDim2(engine::core::UDim2{time, time, 1.0f - time, -time});
+					break;
+				default:
+					value = PresentationValue::FromNumber(time * 360.0f);
+					break;
+				}
+				REQUIRE(track.Add(PresentationKey{time, value}));
+			}
+			REQUIRE(playback.Clip.AddTrack(track));
+		}
+
+		for (size_t index = 0; index < UIAnimation::MAXIMUM_MARKERS; index++) {
+			std::string name(UIAnimation::MAXIMUM_MARKER_NAME_BYTES - 1, 'm');
+			name.push_back(static_cast<char>('a' + index));
+			REQUIRE(playback.Clip.AddMarker(
+				AnimationMarker{
+					Name(name),
+					static_cast<float>(index) / static_cast<float>(UIAnimation::MAXIMUM_MARKERS - 1),
+				}
+			));
+		}
+		return playback;
+	}
+
 	// What the default table says about one name, or nothing when it says
 	// nothing.
 	const engine::replication::ReplicatedComponent *Row(std::string_view name) {
@@ -304,9 +369,9 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 
 		INFO("component: " << name);
 
-		// Four interface rows are what the machine looking at the world works
-		// out for itself, and the world's script table is a resource that could
-		// only ever cross whole. Everything else is authored and crosses.
+		// Viewer-local interface rows are what the machine looking at the world
+		// works out for itself, and the world's script table is a resource that
+		// could only ever cross whole. Everything else is authored and crosses.
 		//
 		// `gui.ScrollState` joined the four at v0.18 and is `gui.Resolved`'s case
 		// for one class: the pixel canvas, the visible window and the thumb
@@ -347,21 +412,29 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// row. A capture consumer asks its own world for them, so sending the
 		// authority's declared observations to every gameplay replica is wrong.
 		// Portal contact requests and native input queues belong to the authority's tick exchange.
-		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
-							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
-							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
-							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache" ||
-							  name == "script.ScriptClock" || name == "script.DataCaptureDriver" ||
-							  name == "script.EventNarratives" || name == "script.TeleportRequestHandler" ||
-							  name == "script.TeleportRequestOutbox" || name == "script.PortalTransfers" ||
-							  name == "script.PortalContactRequests" || name == "script.PortalPlayerInput";
+		// Text composition, binding results, virtual focus and anchors, presentation
+		// samples, and resolved styles are derived from one viewer's input, source
+		// revisions, timeline, or display. Their authored inputs cross separately.
+		const bool excluded =
+			name == "gui.Canvas" || name == "gui.CanvasTransform" || name == "gui.Resolved" ||
+			name == "gui.SpatialCanvas" || name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
+			name == "gui.PageMotion" || name == "gui.ScrollMotion" || name == "gui.SettingsMenuExtensions" ||
+			name == "gui.TextCompositionState" || name == "gui.BindingOutput" ||
+			name == "gui.BindingDependency" || name == "gui.VirtualFocusState" ||
+			name == "gui.VirtualAnchorState" || name == "gui.PresentationState" ||
+			name == "gui.ResolvedStyle" || name == "script.SourceCache" || name == "script.ScriptClock" ||
+			name == "script.DataCaptureDriver" || name == "script.EventNarratives" ||
+			name == "script.TeleportRequestHandler" || name == "script.TeleportRequestOutbox" ||
+			name == "script.PortalTransfers" || name == "script.PortalContactRequests" ||
+			name == "script.PortalPlayerInput";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}
 }
 
 TEST_CASE(
-	"the three a hash cannot cover are observed and the rest are signed", "[client][replication][defaults]"
+	"the four variable-storage components are observed and the rest are signed",
+	"[client][replication][defaults]"
 ) {
 	RegisterEverything();
 
@@ -372,10 +445,12 @@ TEST_CASE(
 	// nothing.
 	REQUIRE(Row("gui.Label") != nullptr);
 	REQUIRE(Row("gui.Entry") != nullptr);
+	REQUIRE(Row("gui.VirtualCollection") != nullptr);
 	REQUIRE(Row("script.Program") != nullptr);
 
 	CHECK(Row("gui.Label")->Detection == engine::replication::ChangeDetection::Observed);
 	CHECK(Row("gui.Entry")->Detection == engine::replication::ChangeDetection::Observed);
+	CHECK(Row("gui.VirtualCollection")->Detection == engine::replication::ChangeDetection::Observed);
 	CHECK(Row("script.Program")->Detection == engine::replication::ChangeDetection::Observed);
 
 	// And the ordinary interface row is signed, because a `UDim2` is bytes and a
@@ -535,6 +610,96 @@ TEST_CASE("a ScreenGui authored on the authority arrives drawable", "[client][re
 		drawn = drawn || command.Text == "1000 points";
 	}
 	CHECK(drawn);
+}
+
+TEST_CASE(
+	"an authored UIAnimation change reaches a replica through the bounded oversized row path",
+	"[client][replication][gui]"
+) {
+	Link link;
+	const Entity playerGui = link.ContainerOf(engine::gui::PLAYER_GUI);
+	const Entity screen = link.World.CreateInstance(engine::gui::GuiClass("ScreenGui"), std::string("Hud"));
+	REQUIRE(link.World.SetParent(screen, playerGui));
+	const Entity modifier =
+		link.World.CreateInstance(engine::gui::GuiClass("UIAnimation"), std::string("Open"));
+	REQUIRE(link.World.SetParent(modifier, screen));
+
+	REQUIRE(link.Join());
+	link.Settle();
+
+	const engine::gui::AnimationPlayback authored = FullAnimationPlayback();
+	const engine::ecs::TypeDescriptor &descriptor =
+		engine::ecs::Components::Describe(engine::ecs::Components::Of<engine::gui::AnimationPlayback>());
+	CHECK(descriptor.MaximumSerialisedBytes > 1024);
+	engine::core::ByteWriter bytes;
+	descriptor.Write(bytes, &authored, 1);
+	REQUIRE(bytes.Size() > 1024);
+
+	// AnimationPlayback uses signature detection. The write occurs after the
+	// preceding publish, so the next tick sees the authored bytes even though
+	// the ordinary dirty bits are cleared at its head.
+	link.World.Set(modifier, authored);
+	link.Settle();
+
+	const engine::gui::AnimationPlayback *arrived =
+		link.Replica.Get<engine::gui::AnimationPlayback>(modifier);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->Playing);
+	CHECK(arrived->Clip.Tween == authored.Clip.Tween);
+	CHECK(arrived->Clip.Tracks().size() == authored.Clip.Tracks().size());
+	CHECK(arrived->Clip.Tracks().back().Keys().size() == engine::gui::PresentationTrack::MAXIMUM_KEYS);
+	CHECK(arrived->Clip.Markers().size() == engine::gui::UIAnimation::MAXIMUM_MARKERS);
+	CHECK(arrived->Clip.Markers().back().Name == authored.Clip.Markers().back().Name);
+}
+
+TEST_CASE(
+	"an observed virtual collection page reaches a replica through the bounded oversized row path",
+	"[client][replication][gui]"
+) {
+	Link link;
+	const Entity playerGui = link.ContainerOf(engine::gui::PLAYER_GUI);
+	const Entity screen = link.World.CreateInstance(engine::gui::GuiClass("ScreenGui"), std::string("Hud"));
+	REQUIRE(link.World.SetParent(screen, playerGui));
+	const Entity collection =
+		link.World.CreateInstance(engine::gui::GuiClass("UIVirtualCollection"), std::string("Rows"));
+	REQUIRE(link.World.SetParent(collection, screen));
+
+	REQUIRE(link.Join());
+	link.Settle();
+
+	engine::gui::VirtualCollection authored;
+	authored.ItemCount = 32;
+	authored.Page.Records.reserve(authored.ItemCount);
+	for (uint32_t index = 0; index < authored.ItemCount; index++) {
+		engine::gui::VirtualRecord record;
+		record.Key = "row" + std::to_string(index);
+		engine::gui::VirtualField field;
+		field.Name = "body";
+		field.Value.Type = engine::ecs::PropertyType::String;
+		field.Value.String = std::string(engine::gui::VirtualCollection::MAXIMUM_TEXT_BYTES, 'v');
+		record.Fields.push_back(std::move(field));
+		authored.Page.Records.push_back(std::move(record));
+	}
+	REQUIRE(engine::gui::ValidateVirtualCollection(authored));
+
+	engine::core::ByteWriter bytes;
+	REQUIRE(engine::gui::WriteVirtualCollection(bytes, authored));
+	REQUIRE(bytes.Size() > 1024);
+
+	// VirtualCollection is non-trivial and therefore observed. The write has to
+	// occur after ClearChanges, which is the same point a source provider runs.
+	link.Tick([&] { link.World.Set(collection, authored); });
+	link.Settle();
+
+	const engine::gui::VirtualCollection *arrived =
+		link.Replica.Get<engine::gui::VirtualCollection>(collection);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->Page.Records.size() == authored.Page.Records.size());
+	CHECK(arrived->Page.Records.back().Key == authored.Page.Records.back().Key);
+	CHECK(
+		arrived->Page.Records.back().Fields.front().Value.String ==
+		authored.Page.Records.back().Fields.front().Value.String
+	);
 }
 
 TEST_CASE("the client's own keyboard focus does not cross", "[client][replication][gui]") {

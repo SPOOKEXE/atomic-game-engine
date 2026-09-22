@@ -9,6 +9,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/gui/ReferenceRaster.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/ResourceImage.hpp>
@@ -1566,4 +1567,86 @@ TEST_CASE("interface shaders follow the submitted content owner", "[render][gpu]
 	CHECK(lagging.RefreshShaders(demand, library, first) == 1);
 	CHECK_FALSE(lagging.HasShaderVariant(name, first));
 	CHECK(CompareImages(missing.View(), capture(&lagging).View()).Passed());
+}
+
+TEST_CASE("interface pass matches the reference raster coverage", "[render][gpu][interface-reference][.]") {
+	gui::RegisterGuiClasses();
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render);
+	render::InterfacePass interface;
+	const auto backend = fixture.Render.Backend();
+	REQUIRE(interface.Initialise(backend.Device, backend.ColourFormat));
+
+	ecs::Store world("interface.reference");
+	gui::DrawCommand fill;
+	fill.Kind = gui::DrawKind::Rectangle;
+	fill.Bounds = {{8.0f, 7.0f}, {92.0f, 72.0f}};
+	fill.Clip = {{13.0f, 11.0f}, {84.0f, 68.0f}};
+	fill.Tint = {0.8f, 0.2f, 0.1f};
+	gui::DrawCommand outline = fill;
+	outline.Kind = gui::DrawKind::Outline;
+	outline.Bounds = {{20.0f, 18.0f}, {76.0f, 59.0f}};
+	outline.Thickness = 3.0f;
+	outline.Tint = {0.1f, 0.8f, 0.3f};
+	gui::DrawList list;
+	list.Commands = {fill, outline};
+
+	render::SceneTarget target{WIDTH, HEIGHT};
+	render::View view;
+	view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
+	view.World = 993;
+	view.WorldName = core::Name("interface.reference.world");
+	view.Target = &target;
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	render::OverlayImage overlay;
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto baseline = CaptureResource(
+		fixture.Render, core::Name("composed-image"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+	);
+
+	view.Damage.GameInterface = true;
+	constexpr uint64_t drawSignature = 0x1A2B3C4Du;
+	interface.Submit(list, {WIDTH, HEIGHT}, {WIDTH, HEIGHT}, world, drawSignature, false, {});
+	fixture.Render.Render(std::span(&view, 1), overlay, &interface, false);
+	const auto captured = CaptureResource(
+		fixture.Render, core::Name("composed-image"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+	);
+	REQUIRE(interface.LastBatchCount() == 1);
+	REQUIRE(interface.LastUploadedBytes() > 0);
+	REQUIRE(interface.RetainedTargetCount() == 0);
+	REQUIRE(interface.RetainedTargetBytes() == 0);
+
+	view.Damage.GameInterface = false;
+	interface.Submit(list, {WIDTH, HEIGHT}, {WIDTH, HEIGHT}, world, drawSignature, false, {});
+	fixture.Render.Render(std::span(&view, 1), overlay, &interface, false);
+	CHECK(interface.LastBatchCount() == 1);
+	CHECK(interface.LastUploadedBytes() == 0);
+	CHECK(interface.UploadCount() == 1);
+	CHECK(interface.ReuseCount() > 0);
+
+	const gui::ReferenceImage reference = gui::RasterizeReference(list, WIDTH, HEIGHT);
+	REQUIRE(reference.Valid());
+	gui::ReferenceImage expected = reference;
+	gui::ReferenceImage observed = reference;
+	for (uint32_t y = 0; y < HEIGHT; y++) {
+		for (uint32_t x = 0; x < WIDTH; x++) {
+			const size_t capturedOffset = static_cast<size_t>(y) * captured.RowStrideBytes + x * 4;
+			const size_t pixel = static_cast<size_t>(y) * WIDTH + x;
+			const bool expectedDrawn = reference.Pixels[pixel].A != 0;
+			bool actualDrawn = false;
+			for (size_t channel = 0; channel < 3; channel++) {
+				actualDrawn |= std::abs(
+								   std::to_integer<int>(captured.Bytes[capturedOffset + channel]) -
+								   std::to_integer<int>(baseline.Bytes[capturedOffset + channel])
+							   ) > 8;
+			}
+			expected.Pixels[pixel] =
+				expectedDrawn ? gui::ReferencePixel{255, 255, 255, 255} : gui::ReferencePixel{};
+			observed.Pixels[pixel] =
+				actualDrawn ? gui::ReferencePixel{255, 255, 255, 255} : gui::ReferencePixel{};
+		}
+	}
+	const gui::ReferenceComparison comparison = gui::CompareReferenceImages(expected, observed, 0, 0.03f);
+	CHECK(comparison.WithinChangedAreaCap);
 }

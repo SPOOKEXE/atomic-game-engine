@@ -275,3 +275,28 @@
 	path = mono.vendor/sqlitecpp
 	url = https://github.com/SRombauts/SQLiteCpp.git
 	branch = sqlitecpp-3.x
+[submodule "mono.vendor/harfbuzz"]
+	path = mono.vendor/harfbuzz
+	url = https://github.com/harfbuzz/harfbuzz.git
+	shallow = true
+[submodule "mono.vendor/freetype"]
+	path = mono.vendor/freetype
+	url = https://github.com/freetype/freetype.git
+	shallow = true
+[submodule "mono.vendor/utf8proc"]
+	path = mono.vendor/utf8proc
+	url = https://github.com/JuliaStrings/utf8proc.git
+	shallow = true
+[submodule "mono.vendor/sheenbidi"]
+	path = mono.vendor/sheenbidi
+	url = https://github.com/Tehreer/SheenBidi.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/libunibreak"]
+	path = mono.vendor/libunibreak
+	url = https://github.com/adah1972/libunibreak.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/accesskit-c"]
+	path = mono.vendor/accesskit-c
+	url = https://github.com/AccessKit/accesskit-c

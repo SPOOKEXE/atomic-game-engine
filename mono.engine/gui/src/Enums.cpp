@@ -108,6 +108,18 @@ namespace engine::gui {
 		return "None";
 	}
 
+	const char *Describe(LocalizedArgumentType value) {
+		switch (value) {
+		case LocalizedArgumentType::String:
+			return "String";
+		case LocalizedArgumentType::Number:
+			return "Number";
+		case LocalizedArgumentType::Date:
+			return "Date";
+		}
+		return "String";
+	}
+
 	const char *Describe(FontFace value) {
 		switch (value) {
 		case FontFace::Regular:
@@ -270,6 +282,20 @@ namespace engine::gui {
 		return "Manual";
 	}
 
+	const char *Describe(ViewportUpdateMode value) {
+		switch (value) {
+		case ViewportUpdateMode::OnChange:
+			return "OnChange";
+		case ViewportUpdateMode::EveryFrame:
+			return "EveryFrame";
+		case ViewportUpdateMode::FixedRate:
+			return "FixedRate";
+		case ViewportUpdateMode::Manual:
+			return "Manual";
+		}
+		return "OnChange";
+	}
+
 	const char *Describe(StrokeMode value) {
 		switch (value) {
 		case StrokeMode::Contextual:
@@ -422,6 +448,22 @@ namespace engine::gui {
 			return "Sibling";
 		}
 		return "Sibling";
+	}
+
+	const char *Describe(CollectorScaleMode value) {
+		switch (value) {
+		case CollectorScaleMode::Stretch:
+			return "Stretch";
+		case CollectorScaleMode::Fit:
+			return "Fit";
+		case CollectorScaleMode::Fill:
+			return "Fill";
+		case CollectorScaleMode::Integer:
+			return "Integer";
+		case CollectorScaleMode::None:
+			return "None";
+		}
+		return "Stretch";
 	}
 
 	const char *Describe(SurfaceSizingMode value) {

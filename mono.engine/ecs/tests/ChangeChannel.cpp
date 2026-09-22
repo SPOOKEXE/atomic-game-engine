@@ -380,6 +380,18 @@ TEST_CASE("component change epochs ignore unrelated writes", "[ecs]") {
 	REQUIRE(store.ComponentChangeVersion<Drift>() == held);
 }
 
+TEST_CASE("runtime component epochs match typed observation", "[ecs]") {
+	Store store("test");
+	const auto spot = Components::Of<Spot>();
+	store.Observe(spot);
+	const uint64_t before = store.ComponentChangeVersion(spot);
+	const Entity entity = store.Create();
+	store.Set<Quiet>(entity, Quiet{});
+	CHECK(store.ComponentChangeVersion(spot) == before);
+	store.Set<Spot>(entity, Spot{});
+	CHECK(store.ComponentChangeVersion(spot) > before);
+}
+
 TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {
 	// The documented gap. EachBatch hands out raw column pointers precisely to
 	// avoid a per-row check, so a write through one cannot set a bit - and a

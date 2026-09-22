@@ -1680,6 +1680,16 @@ namespace engine::ecs {
 			return ComponentChangeVersionRaw(Components::Of<T>());
 		}
 
+		// Runtime component-name consumers can observe the same narrow epoch
+		// without naming a higher-layer component type in their public headers.
+		void Observe(ComponentId id) {
+			RequireOwningThread("Observe");
+			ObserveRaw(id);
+		}
+		uint64_t ComponentChangeVersion(ComponentId id) const {
+			return ComponentChangeVersionRaw(id);
+		}
+
 		// Reports whether one entity's `T` was written since the last
 		// ClearChanges.
 		//

@@ -67,13 +67,15 @@ namespace engine::ecs {
 		static ComponentId Register(
 			std::string_view name,
 			void (*write)(core::ByteWriter &, const void *, size_t),
-			void (*read)(core::ByteReader &, void *, size_t)
+			void (*read)(core::ByteReader &, void *, size_t),
+			uint32_t maximumSerialisedBytes = 0
 		) {
 			const core::Name key(name);
 			TypeDescriptor descriptor = DescribeType<T>(key);
 			descriptor.Write = write;
 			descriptor.Read = read;
 			descriptor.Serialisable = write != nullptr && read != nullptr;
+			descriptor.MaximumSerialisedBytes = maximumSerialisedBytes;
 
 			// The caller's writer replaces the object representation, so
 			// neither padding nor a process-local id inside `T` can reach a

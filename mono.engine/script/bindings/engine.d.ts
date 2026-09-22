@@ -465,6 +465,7 @@ declare namespace Enum {
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
 	interface CloudComputeShader extends EnumItem { readonly __enum: "CloudComputeShader"; }
+	interface CollectorScaleMode extends EnumItem { readonly __enum: "CollectorScaleMode"; }
 	interface ConstraintMotion extends EnumItem { readonly __enum: "ConstraintMotion"; }
 	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
@@ -480,6 +481,7 @@ declare namespace Enum {
 	interface LensShape extends EnumItem { readonly __enum: "LensShape"; }
 	interface LineJoinMode extends EnumItem { readonly __enum: "LineJoinMode"; }
 	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
+	interface LocalizedArgumentType extends EnumItem { readonly __enum: "LocalizedArgumentType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
 	interface NodeBypassMode extends EnumItem { readonly __enum: "NodeBypassMode"; }
 	interface NodeGroupLayout extends EnumItem { readonly __enum: "NodeGroupLayout"; }
@@ -518,6 +520,7 @@ declare namespace Enum {
 	interface UserInputType extends EnumItem { readonly __enum: "UserInputType"; }
 	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
+	interface ViewportUpdateMode extends EnumItem { readonly __enum: "ViewportUpdateMode"; }
 	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
@@ -586,6 +589,13 @@ declare namespace Enum {
 		readonly Stratus: CloudComputeShader;
 		readonly Storm: CloudComputeShader;
 		readonly Voxel: CloudComputeShader;
+	};
+	const CollectorScaleMode: {
+		readonly Stretch: CollectorScaleMode;
+		readonly Fit: CollectorScaleMode;
+		readonly Fill: CollectorScaleMode;
+		readonly Integer: CollectorScaleMode;
+		readonly None: CollectorScaleMode;
 	};
 	const ConstraintMotion: {
 		readonly Locked: ConstraintMotion;
@@ -745,6 +755,11 @@ declare namespace Enum {
 	const ListenerType: {
 		readonly Camera: ListenerType;
 		readonly ObjectPosition: ListenerType;
+	};
+	const LocalizedArgumentType: {
+		readonly String: LocalizedArgumentType;
+		readonly Number: LocalizedArgumentType;
+		readonly Date: LocalizedArgumentType;
 	};
 	const MouseBehavior: {
 		readonly Default: MouseBehavior;
@@ -961,6 +976,12 @@ declare namespace Enum {
 	const VerticalScrollBarPosition: {
 		readonly Right: VerticalScrollBarPosition;
 		readonly Left: VerticalScrollBarPosition;
+	};
+	const ViewportUpdateMode: {
+		readonly OnChange: ViewportUpdateMode;
+		readonly EveryFrame: ViewportUpdateMode;
+		readonly FixedRate: ViewportUpdateMode;
+		readonly Manual: ViewportUpdateMode;
 	};
 	const VolumeShape: {
 		readonly Box: VolumeShape;
@@ -1395,6 +1416,7 @@ declare interface MeshPart extends BasePart {
 	AutoLod2Ratio: number;
 	AutoLod3MeshId: string;
 	AutoLod3Ratio: number;
+	AutoLodBillboardTexture: string;
 	AutoLodLevels: number;
 	AutoLodStrategy: Enum.AutoMeshLODStrategy;
 	AutoLodTargetQuadArea: number;
@@ -1404,6 +1426,7 @@ declare interface MeshPart extends BasePart {
 	CustomLod2Ratio: number;
 	CustomLod3MeshId: string;
 	CustomLod3Ratio: number;
+	CustomLodBillboardTexture: string;
 	CustomLodLevels: number;
 	CustomLodTargetQuadArea: number;
 	EmissiveMap: string;
@@ -1417,6 +1440,7 @@ declare interface MeshPart extends BasePart {
 	Lod3Distance: number;
 	Lod3MeshId: string;
 	Lod3Ratio: number;
+	LodBillboardTexture: string;
 	LodTargetQuadArea: number;
 	MeshId: string;
 	MetalnessMap: string;
@@ -2109,6 +2133,8 @@ declare interface TextButton extends GuiButton {
 	readonly ContentText: string;
 	Font: Enum.Font;
 	LineHeight: number;
+	LocalizationArgumentCount: number;
+	LocalizationKey: string;
 	MaxVisibleGraphemes: number;
 	RichText: boolean;
 	Text: string;
@@ -2149,6 +2175,8 @@ declare interface TextLabel extends GuiLabel {
 	readonly ContentText: string;
 	Font: Enum.Font;
 	LineHeight: number;
+	LocalizationArgumentCount: number;
+	LocalizationKey: string;
 	MaxVisibleGraphemes: number;
 	RichText: boolean;
 	Text: string;
@@ -2186,8 +2214,11 @@ declare interface TextBox extends GuiObject {
 	CursorPosition: number;
 	Font: Enum.Font;
 	LineHeight: number;
+	LocalizationArgumentCount: number;
+	LocalizationKey: string;
 	MaxVisibleGraphemes: number;
 	MultiLine: boolean;
+	Password: boolean;
 	PlaceholderColor3: Color3;
 	PlaceholderText: string;
 	RichText: boolean;
@@ -2217,14 +2248,21 @@ declare interface ViewportFrame extends GuiObject {
 	CurrentCamera: Instance;
 	ImageColor3: Color3;
 	ImageTransparency: number;
+	InvalidationRevision: number;
 	LightColor: Color3;
 	LightDirection: Vector3;
+	ResolutionScale: number;
+	UpdateEveryFrames: number;
+	UpdateMode: Enum.ViewportUpdateMode;
 }
 
 declare interface LayerCollector extends GuiBase2d {
 	DisplayOrder: number;
 	Enabled: boolean;
+	ReferenceResolution: Vector2;
 	ResetOnSpawn: boolean;
+	ScaleMode: Enum.CollectorScaleMode;
+	Theme: Instance;
 	ZIndexBehavior: Enum.ZIndexBehavior;
 }
 
@@ -2329,6 +2367,11 @@ declare interface UIPageLayout extends UILayout {
 declare interface UIConstraint extends UIComponent {
 }
 
+declare interface UIMask extends UIComponent {
+	CornerRadius: UDim;
+	Enabled: boolean;
+}
+
 declare interface UIAspectRatioConstraint extends UIConstraint {
 	AspectRatio: number;
 	AspectType: Enum.AspectType;
@@ -2396,6 +2439,37 @@ declare interface UIDragDetector extends UIComponent {
 	VirtualDragBegin(x: number, y: number): void;
 	VirtualDragContinue(x: number, y: number, dx: number, dy: number): void;
 	VirtualDragEnd(x: number, y: number, dx: number, dy: number): void;
+}
+
+declare interface UIBinding extends Instance {
+	Attribute: string;
+	Fallback: string;
+	SourcePath: string;
+	Target: string;
+	readonly Valid: boolean;
+	readonly Value: string;
+}
+
+declare interface UIModalScope extends UIComponent {
+	Enabled: boolean;
+}
+
+declare interface UIAnimation extends UIComponent {
+	Playing: boolean;
+	StartTime: number;
+}
+
+declare interface UIStyle extends UIComponent {
+}
+
+declare interface UITheme extends Instance {
+}
+
+declare interface UIVirtualCollection extends Instance {
+	FixedExtent: number;
+	ItemCount: number;
+	Revision: number;
+	SetVirtualPage(first: number, extentBefore: number, records: { Key: string; Extent?: number; Fields: Record<string, unknown> }[], revision: number): void;
 }
 
 declare interface Service extends Instance {
@@ -3092,6 +3166,7 @@ declare const Instance: {
 		(className: "UIGridLayout", parent?: Instance): UIGridLayout;
 		(className: "UITableLayout", parent?: Instance): UITableLayout;
 		(className: "UIPageLayout", parent?: Instance): UIPageLayout;
+		(className: "UIMask", parent?: Instance): UIMask;
 		(className: "UIAspectRatioConstraint", parent?: Instance): UIAspectRatioConstraint;
 		(className: "UISizeConstraint", parent?: Instance): UISizeConstraint;
 		(className: "UITextSizeConstraint", parent?: Instance): UITextSizeConstraint;
@@ -3102,6 +3177,12 @@ declare const Instance: {
 		(className: "UIFlexItem", parent?: Instance): UIFlexItem;
 		(className: "UIGradient", parent?: Instance): UIGradient;
 		(className: "UIDragDetector", parent?: Instance): UIDragDetector;
+		(className: "UIBinding", parent?: Instance): UIBinding;
+		(className: "UIModalScope", parent?: Instance): UIModalScope;
+		(className: "UIAnimation", parent?: Instance): UIAnimation;
+		(className: "UIStyle", parent?: Instance): UIStyle;
+		(className: "UITheme", parent?: Instance): UITheme;
+		(className: "UIVirtualCollection", parent?: Instance): UIVirtualCollection;
 		(className: "Player", parent?: Instance): Player;
 		(className: "Team", parent?: Instance): Team;
 	};

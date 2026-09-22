@@ -69,6 +69,7 @@ TEST_CASE("the text sets keep Roblox's order", "[gui][enums]") {
 	Expect<TextYAlignment, 3>({"Top", "Center", "Bottom"});
 
 	Expect<TextTruncate, 2>({"None", "AtEnd"});
+	Expect<LocalizedArgumentType, 3>({"String", "Number", "Date"});
 	Expect<FontFace, 4>({"Regular", "Bold", "Italic", "Code"});
 	Expect<ScaleType, 5>({"Stretch", "Slice", "Tile", "Fit", "Crop"});
 }
@@ -76,6 +77,7 @@ TEST_CASE("the text sets keep Roblox's order", "[gui][enums]") {
 TEST_CASE("the collector sets keep Roblox's order", "[gui][enums]") {
 	Expect<ZIndexBehavior, 2>({"Global", "Sibling"});
 	Expect<SurfaceSizingMode, 2>({"FixedSize", "PixelsPerStud"});
+	Expect<ViewportUpdateMode, 4>({"OnChange", "EveryFrame", "FixedRate", "Manual"});
 
 	// **Starts at one.** `ScrollingDirection` is a bit pair in Roblox - X is 1,
 	// Y is 2 and XY is 3 - rather than a counter, and the ordinal is the format

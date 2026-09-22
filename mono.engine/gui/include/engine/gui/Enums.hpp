@@ -122,6 +122,18 @@ namespace engine::gui {
 		AtEnd = 1,
 	};
 
+	// The value representation an authored localized label argument carries.
+	//
+	// This is deliberately distinct from a property type. A localized message
+	// accepts only the three forms the formatter can format deterministically.
+	//
+	// @since v0.25
+	enum class LocalizedArgumentType : uint8_t {
+		String = 0,
+		Number = 1,
+		Date = 2,
+	};
+
 	// The typeface a label asks for, by role.
 	//
 	// **By role and not by family**, which is `ui/Fonts.hpp`'s rule one module
@@ -437,12 +449,37 @@ namespace engine::gui {
 		Sibling = 1,
 	};
 
+	// How a collector's authored reference canvas reaches its presentation area.
+	// `Stretch` preserves the existing independent X and Y scaling; the other
+	// policies retain aspect ratio except `None`, which presents authored pixels
+	// one for one.
+	enum class CollectorScaleMode : uint8_t {
+		Stretch = 0,
+		Fit = 1,
+		Fill = 2,
+		Integer = 3,
+		None = 4,
+	};
+
 	// How a surface gui decides how many pixels of canvas it has.
 	//
 	// @since v0.8
 	enum class SurfaceSizingMode : uint8_t {
 		FixedSize = 0,
 		PixelsPerStud = 1,
+	};
+
+	// When a ViewportFrame asks its retained scene target for new pixels.
+	//
+	// The ordinal is authored data. Keep these values explicit so a saved
+	// `Manual` frame cannot become an every-frame render after a later edit.
+	//
+	// @since v0.23
+	enum class ViewportUpdateMode : uint8_t {
+		OnChange = 0,
+		EveryFrame = 1,
+		FixedRate = 2,
+		Manual = 3,
 	};
 
 	// A face of a box, for a surface gui.
@@ -486,6 +523,7 @@ namespace engine::gui {
 	const char *Describe(TextXAlignment value);
 	const char *Describe(TextYAlignment value);
 	const char *Describe(TextTruncate value);
+	const char *Describe(LocalizedArgumentType value);
 	const char *Describe(FontFace value);
 	const char *Describe(FillDirection value);
 	const char *Describe(HorizontalAlignment value);
@@ -520,7 +558,9 @@ namespace engine::gui {
 	const char *Describe(ItemLineAlignment value);
 	const char *Describe(FlexMode value);
 	const char *Describe(ZIndexBehavior value);
+	const char *Describe(CollectorScaleMode value);
 	const char *Describe(SurfaceSizingMode value);
+	const char *Describe(ViewportUpdateMode value);
 	const char *Describe(Face value);
 	//@}
 }

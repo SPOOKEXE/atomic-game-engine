@@ -2,7 +2,7 @@
 
 // The two conversions between a caret and a byte string.
 //
-// `Entry::CursorPosition` is a one-based *character* index and `Label::Text` is
+// `Entry::CursorPosition` is a one-based grapheme index and `Label::Text` is
 // UTF-8 bytes, so every caret operation crosses between the two. Both halves
 // live here rather than beside either caller: `gui::Focus` places a caret at the
 // end of the text and `gui::Type` inserts at one, and a second copy of this
@@ -15,47 +15,64 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <utf8proc.h>
 
 namespace engine::gui {
 
-	// Whether a byte continues the character before it rather than starting one.
-	//
-	// **The whole of UTF-8 for this purpose.** A continuation byte is the only
-	// one whose top two bits are `10`; everything else - ASCII, and the lead byte
-	// of a two-, three- or four-byte sequence - begins a character.
-	inline bool Continuation(char byte) {
-		return (static_cast<unsigned char>(byte) & 0xC0) == 0x80;
-	}
-
-	// How many characters a UTF-8 string holds.
+	// How many user-visible graphemes a UTF-8 string holds.
 	inline size_t Characters(std::string_view text) {
 		size_t count = 0;
-		for (const char byte : text) {
-			count += static_cast<size_t>(!Continuation(byte));
+		utf8proc_int32_t previous = 0;
+		utf8proc_int32_t state = 0;
+		for (size_t offset = 0; offset < text.size();) {
+			utf8proc_int32_t current = 0;
+			const utf8proc_ssize_t consumed = utf8proc_iterate(
+				reinterpret_cast<const utf8proc_uint8_t *>(text.data() + offset),
+				static_cast<utf8proc_ssize_t>(text.size() - offset),
+				&current
+			);
+			if (consumed <= 0) {
+				current = 0xFFFD;
+				state = 0;
+			}
+			if (count == 0 || utf8proc_grapheme_break_stateful(previous, current, &state)) count++;
+			previous = current;
+			offset += consumed > 0 ? static_cast<size_t>(consumed) : 1;
 		}
 		return count;
 	}
 
-	// Where a one-based character position starts, in bytes.
+	// Where a one-based grapheme position starts, in bytes.
 	//
 	// **Clamped rather than refused at both ends**, which is what makes a caret
 	// left over from longer text harmless: position 1 and anything below it is
-	// offset 0, and a position past the last character is `text.size()`. A caller
-	// that wanted to know it was out of range compares the characters itself.
+	// offset 0, and a position past the last grapheme is `text.size()`.
 	inline size_t ByteOffset(std::string_view text, int32_t position) {
 		if (position <= 1) {
 			return 0;
 		}
 
-		size_t offset = 0;
-		int32_t remaining = position - 1;
-		while (offset < text.size() && remaining > 0) {
-			offset++;
-			while (offset < text.size() && Continuation(text[offset])) {
-				offset++;
+		int32_t graphemes = 0;
+		utf8proc_int32_t previous = 0;
+		utf8proc_int32_t state = 0;
+		for (size_t offset = 0; offset < text.size();) {
+			utf8proc_int32_t current = 0;
+			const utf8proc_ssize_t consumed = utf8proc_iterate(
+				reinterpret_cast<const utf8proc_uint8_t *>(text.data() + offset),
+				static_cast<utf8proc_ssize_t>(text.size() - offset),
+				&current
+			);
+			if (consumed <= 0) {
+				current = 0xFFFD;
+				state = 0;
 			}
-			remaining--;
+			if (graphemes == 0 || utf8proc_grapheme_break_stateful(previous, current, &state)) {
+				graphemes++;
+				if (graphemes == position) return offset;
+			}
+			previous = current;
+			offset += consumed > 0 ? static_cast<size_t>(consumed) : 1;
 		}
-		return offset;
+		return text.size();
 	}
 }

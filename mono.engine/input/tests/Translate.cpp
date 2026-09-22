@@ -46,6 +46,15 @@ namespace {
 		return event;
 	}
 
+	SDL_Event EditingEvent(const char *text, int32_t start, int32_t length) {
+		SDL_Event event{};
+		event.type = SDL_EVENT_TEXT_EDITING;
+		event.edit.text = text;
+		event.edit.start = start;
+		event.edit.length = length;
+		return event;
+	}
+
 	SDL_Event ButtonEvent(uint8_t button, bool down) {
 		SDL_Event event{};
 		event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
@@ -341,6 +350,37 @@ TEST_CASE("typed text arrives as UTF-8 and is a frame delta", "[input][translate
 	// other delta is dropped there: the frame did not finish delivering.
 	REQUIRE(translator.HandleEvent(WindowEvent(false)));
 	CHECK(translator.TypedText().empty());
+}
+
+TEST_CASE("IME preedit is bounded, retained, and cleared by a commit", "[input][translate]") {
+	Translator translator;
+	translator.BeginFrame();
+
+	REQUIRE(translator.HandleEvent(EditingEvent("\xE5\x80\x99\xE8\xA3\x9C", 1, 1)));
+	const engine::input::TextComposition first = translator.Composition();
+	CHECK(first.Text == "\xE5\x80\x99\xE8\xA3\x9C");
+	CHECK(first.Start == 1);
+	CHECK(first.Length == 1);
+	CHECK(first.Revision != 0);
+
+	// A candidate has no frame delta. SDL only reports it when it changes, so
+	// it must remain visible during the quiet frames between editing events.
+	translator.BeginFrame();
+	CHECK(translator.Composition().Text == first.Text);
+	CHECK(translator.Composition().Revision == first.Revision);
+
+	std::string oversized(engine::input::TextComposition::MAXIMUM_BYTES + 12, 'a');
+	REQUIRE(translator.HandleEvent(EditingEvent(oversized.c_str(), 0, 0)));
+	CHECK(translator.Composition().Text.size() == engine::input::TextComposition::MAXIMUM_BYTES);
+
+	REQUIRE(translator.HandleEvent(TextEvent("\xE5\x80\x99")));
+	CHECK(translator.TypedText() == "\xE5\x80\x99");
+	CHECK(translator.Composition().Text.empty());
+	CHECK(translator.Composition().Revision > first.Revision);
+
+	REQUIRE(translator.HandleEvent(EditingEvent("next", 0, 4)));
+	translator.ReleaseAll();
+	CHECK(translator.Composition().Text.empty());
 }
 
 TEST_CASE("gamepads occupy stable slots and normalize buttons and axes", "[input][gamepad]") {

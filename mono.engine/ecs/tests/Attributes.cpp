@@ -351,6 +351,30 @@ TEST_CASE("clearing drops every attribute and says how many", "[ecs][attributes]
 	CHECK(ClearAttributes(store, instance) == 0);
 }
 
+TEST_CASE("an attribute revision advances for each effective table mutation", "[ecs][attributes]") {
+	RegisterAttributeComponents();
+
+	Store store("attribute_revisions");
+	const Entity instance = store.Create();
+	const Name key("Value");
+	AttributeValue value;
+	value.Type = PropertyType::Int32;
+	value.Int32 = 7;
+
+	CHECK(AttributeRevision(store, instance, key) == 0);
+	REQUIRE(SetAttribute(store, instance, key, value));
+	const uint64_t written = AttributeRevision(store, instance, key);
+	REQUIRE(written != 0);
+
+	value.Type = PropertyType::Opaque;
+	REQUIRE(SetAttribute(store, instance, key, value));
+	const uint64_t removed = AttributeRevision(store, instance, key);
+	CHECK(removed > written);
+
+	REQUIRE(SetAttribute(store, instance, key, value));
+	CHECK(AttributeRevision(store, instance, key) == removed);
+}
+
 TEST_CASE("a dead instance takes neither a read nor a write", "[ecs][attributes]") {
 	RegisterAttributeComponents();
 

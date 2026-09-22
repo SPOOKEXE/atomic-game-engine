@@ -47,3 +47,20 @@ mono_add_library(bake
 		Vendor::roblox_files
 		Vendor::zstd
 )
+
+option(MONO_FUZZ_BAKE "Build hostile bake importers with libFuzzer and sanitizers" OFF)
+if(MONO_FUZZ_BAKE)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR "MONO_FUZZ_BAKE requires Clang with libFuzzer")
+	endif()
+
+	# Compile the importer into this standalone target so libFuzzer instruments
+	# its parser. This creates no dependency from a shipped runtime module to bake.
+	set(bake_fuzz_options -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -O1 -g)
+	add_executable(fuzz_bake_svg fuzz/Svg.cpp src/Svg.cpp)
+	target_include_directories(fuzz_bake_svg PRIVATE src)
+	target_link_libraries(fuzz_bake_svg PRIVATE Engine::core Engine::assets)
+	target_compile_options(fuzz_bake_svg PRIVATE ${bake_fuzz_options})
+	target_link_options(fuzz_bake_svg PRIVATE -fsanitize=fuzzer,address,undefined)
+	set_target_properties(fuzz_bake_svg PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
+endif()

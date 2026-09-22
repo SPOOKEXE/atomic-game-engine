@@ -24,8 +24,11 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/gui/Layout.hpp>
+#include <engine/gui/Localization.hpp>
 #include <engine/world/World.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -37,6 +40,22 @@ namespace engine::ecs {
 }
 
 namespace studio {
+
+	enum class GuiPreviewProfile : uint8_t { Desktop, Phone, Tablet };
+	enum class GuiPreviewState : uint8_t { None, Hovered, Pressed };
+	struct GuiPreviewSettings {
+		GuiPreviewProfile Profile = GuiPreviewProfile::Desktop;
+		float InterfaceScale = 1.0f;
+		float TextScale = 1.0f;
+		// This is viewer state, so switching the preview locale never edits a
+		// LocalizationTable in the world being inspected.
+		std::array<char, engine::gui::LocalizationCatalogue::MAXIMUM_LOCALE_BYTES + 1> Locale{'e', 'n'};
+		// Viewer-only interaction state for the selected GUI instance. This is
+		// fed into CompileRequest and never changes authored interaction state.
+		GuiPreviewState State = GuiPreviewState::None;
+	};
+	engine::gui::Screen
+	ResolveGuiPreviewScreen(GuiPreviewSettings settings, float panelWidth, float panelHeight);
 
 	// No panel. Also what `ChooseViewportFor` says when one has to be made.
 	//

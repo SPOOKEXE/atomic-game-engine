@@ -3,9 +3,13 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Binding.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Modal.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/RichText.hpp>
+#include <engine/gui/Style.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 
 #include <array>
 #include <cstddef>
@@ -19,6 +23,7 @@ namespace engine::gui {
 	namespace {
 		using ecs::Classes;
 		using ecs::ClassId;
+		using ecs::ClassKind;
 		using ecs::Components;
 		using ecs::ComponentSet;
 		using ecs::PropertyDescriptor;
@@ -54,6 +59,7 @@ namespace engine::gui {
 		GUI_ENUM_NAME(TextXAlignment, "TextXAlignment")
 		GUI_ENUM_NAME(TextYAlignment, "TextYAlignment")
 		GUI_ENUM_NAME(TextTruncate, "TextTruncate")
+		GUI_ENUM_NAME(LocalizedArgumentType, "LocalizedArgumentType")
 		GUI_ENUM_NAME(FontFace, "Font")
 		GUI_ENUM_NAME(FillDirection, "FillDirection")
 		GUI_ENUM_NAME(HorizontalAlignment, "HorizontalAlignment")
@@ -82,7 +88,9 @@ namespace engine::gui {
 		GUI_ENUM_NAME(ItemLineAlignment, "ItemLineAlignment")
 		GUI_ENUM_NAME(FlexMode, "UIFlexMode")
 		GUI_ENUM_NAME(ZIndexBehavior, "ZIndexBehavior")
+		GUI_ENUM_NAME(CollectorScaleMode, "CollectorScaleMode")
 		GUI_ENUM_NAME(SurfaceSizingMode, "SurfaceSizingMode")
+		GUI_ENUM_NAME(ViewportUpdateMode, "ViewportUpdateMode")
 		GUI_ENUM_NAME(Face, "NormalId")
 
 #undef GUI_ENUM_NAME
@@ -120,6 +128,7 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(TextXAlignment, 3)
 		GUI_ENUM_COUNT(TextYAlignment, 3)
 		GUI_ENUM_COUNT(TextTruncate, 2)
+		GUI_ENUM_COUNT(LocalizedArgumentType, 3)
 		GUI_ENUM_COUNT(FontFace, 4)
 		GUI_ENUM_COUNT(FillDirection, 2)
 		GUI_ENUM_COUNT(HorizontalAlignment, 3)
@@ -148,7 +157,9 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(ItemLineAlignment, 5)
 		GUI_ENUM_COUNT(FlexMode, 5)
 		GUI_ENUM_COUNT(ZIndexBehavior, 2)
+		GUI_ENUM_COUNT(CollectorScaleMode, 5)
 		GUI_ENUM_COUNT(SurfaceSizingMode, 2)
+		GUI_ENUM_COUNT(ViewportUpdateMode, 4)
 		GUI_ENUM_COUNT(Face, 6)
 
 #undef GUI_ENUM_COUNT
@@ -166,6 +177,158 @@ namespace engine::gui {
 				members[index] = Describe(static_cast<E>(index + EnumOrigin<E>()));
 			}
 			ecs::EnumTable::Register(EnumNameOf<E>().Text(), members);
+		}
+
+		template <size_t Index> PropertyDescriptor LocalizedArgumentCountField(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ComponentSet::Intern({Components::Of<LabelLocalizationArguments>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *arguments = store.Get<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				*static_cast<int32_t *>(out) = arguments->Count;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				const int32_t count = *static_cast<const int32_t *>(value);
+				if (count < 0 || count > static_cast<int32_t>(LabelLocalizationArguments::MAXIMUM_ARGUMENTS))
+					return false;
+				auto *arguments = store.GetMutable<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				arguments->Count = static_cast<uint8_t>(count);
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Index> PropertyDescriptor LocalizedArgumentNameField(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ComponentSet::Intern({Components::Of<LabelLocalizationArguments>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *arguments = store.Get<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				*static_cast<core::Name *>(out) = arguments->Values[Index].Name;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				auto *arguments = store.GetMutable<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				arguments->Values[Index].Name = *static_cast<const core::Name *>(value);
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Index> PropertyDescriptor LocalizedArgumentStringField(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::String;
+			property.Size = sizeof(std::string);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ComponentSet::Intern({Components::Of<LabelLocalizationArguments>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *arguments = store.Get<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				*static_cast<std::string *>(out) = arguments->Values[Index].String;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				const auto &string = *static_cast<const std::string *>(value);
+				if (string.size() > LabelLocalizationArguments::MAXIMUM_STRING_BYTES) return false;
+				auto *arguments = store.GetMutable<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				arguments->Values[Index].String = string;
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Index> PropertyDescriptor LocalizedArgumentNumberField(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Double;
+			property.Size = sizeof(double);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ComponentSet::Intern({Components::Of<LabelLocalizationArguments>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *arguments = store.Get<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				*static_cast<double *>(out) = arguments->Values[Index].Number;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				auto *arguments = store.GetMutable<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				arguments->Values[Index].Number = *static_cast<const double *>(value);
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Index> PropertyDescriptor LocalizedArgumentDateField(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int64;
+			property.Size = sizeof(int64_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ComponentSet::Intern({Components::Of<LabelLocalizationArguments>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *arguments = store.Get<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				*static_cast<int64_t *>(out) = arguments->Values[Index].UnixSeconds;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				auto *arguments = store.GetMutable<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				arguments->Values[Index].UnixSeconds = *static_cast<const int64_t *>(value);
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Index> PropertyDescriptor LocalizedArgumentTypeField(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Enum;
+			property.EnumName = EnumNameOf<LocalizedArgumentType>();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ComponentSet::Intern({Components::Of<LabelLocalizationArguments>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *arguments = store.Get<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				*static_cast<core::Name *>(out) = ecs::EnumTable::MemberAt(
+					EnumNameOf<LocalizedArgumentType>(), static_cast<size_t>(arguments->Values[Index].Type)
+				);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						EnumNameOf<LocalizedArgumentType>(), *static_cast<const core::Name *>(value), ordinal
+					) ||
+					ordinal >= 3)
+					return false;
+				auto *arguments = store.GetMutable<LabelLocalizationArguments>(instance);
+				if (arguments == nullptr) return false;
+				arguments->Values[Index].Type = static_cast<LocalizedArgumentType>(ordinal);
+				return true;
+			};
+			return property;
 		}
 
 		// --- the generated enum property -------------------------------------
@@ -258,12 +421,57 @@ namespace engine::gui {
 		template <class T> constexpr PropertyType TypeOfValue() {
 			if constexpr (std::is_same_v<T, core::Vector2>) {
 				return PropertyType::Vector2;
+			} else if constexpr (std::is_same_v<T, core::Color3>) {
+				return PropertyType::Color3;
+			} else if constexpr (std::is_same_v<T, std::string>) {
+				return PropertyType::String;
 			} else if constexpr (std::is_same_v<T, bool>) {
 				return PropertyType::Bool;
+			} else if constexpr (std::is_same_v<T, int32_t> || std::is_same_v<T, uint32_t>) {
+				return PropertyType::Int32;
 			} else {
 				static_assert(std::is_same_v<T, float>, "add a case for this type");
 				return PropertyType::Float;
 			}
+		}
+
+		// A direct visual assignment needs one bit of authored provenance in
+		// addition to its value. Otherwise setting an engine-default colour is
+		// indistinguishable from never touching the field and a theme could
+		// overwrite an intentional reset after save or replication.
+		template <auto Member, StyleDirectProperty Direct>
+		PropertyDescriptor StyledField(std::string_view name) {
+			using Traits = MemberOf<decltype(Member)>;
+			using Component = typename Traits::Component;
+			using Value = typename Traits::Value;
+
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = TypeOfValue<Value>();
+			property.Size = sizeof(Value);
+			property.Kind = PropertyKind::Field;
+			property.Reads =
+				&ComponentSet::Intern({Components::Of<Component>(), Components::Of<StyleDirect>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *component = store.Get<Component>(instance);
+				if (component == nullptr) {
+					return false;
+				}
+				*static_cast<Value *>(out) = component->*Member;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component *component = store.GetMutable<Component>(instance);
+				StyleDirect *direct = store.GetMutable<StyleDirect>(instance);
+				if (component == nullptr || direct == nullptr) {
+					return false;
+				}
+				component->*Member = *static_cast<const Value *>(value);
+				direct->Set(Direct);
+				return true;
+			};
+			return property;
 		}
 
 		// A field of a **derived** component, exposed read-only.
@@ -398,6 +606,13 @@ namespace engine::gui {
 			"UIFlexItem",
 			"UIGradient",
 			"UIDragDetector",
+			"UIMask",
+			"UIBinding",
+			"UIModalScope",
+			"UIAnimation",
+			"UIVirtualCollection",
+			"UITheme",
+			"UIStyle",
 			"GuiService",
 
 			// The 3D branch. `GuiBase3d` and `PVAdornment` are abstract in
@@ -432,6 +647,7 @@ namespace engine::gui {
 			RegisterEnum<TextXAlignment>();
 			RegisterEnum<TextYAlignment>();
 			RegisterEnum<TextTruncate>();
+			RegisterEnum<LocalizedArgumentType>();
 			RegisterEnum<FontFace>();
 			RegisterEnum<FillDirection>();
 			RegisterEnum<HorizontalAlignment>();
@@ -468,7 +684,9 @@ namespace engine::gui {
 			RegisterEnum<ItemLineAlignment>();
 			RegisterEnum<FlexMode>();
 			RegisterEnum<ZIndexBehavior>();
+			RegisterEnum<CollectorScaleMode>();
 			RegisterEnum<SurfaceSizingMode>();
+			RegisterEnum<ViewportUpdateMode>();
 
 			// **The one set this module shares with `scene`.** Both register
 			// `NormalId` and `EnumTable` takes the second declaration as
@@ -488,15 +706,23 @@ namespace engine::gui {
 			// the split back at exactly the point somebody is adding a feature.
 			const ClassId guiBase = Classes::Register("GuiBase", instance, {});
 			Classes::SetCreatable(guiBase, false);
+			Classes::SetKind(guiBase, ClassKind::Abstract);
+			Classes::SetStudioVisible(guiBase, false);
 
 			// **A service, so it hangs off `Instance` rather than off
 			// `GuiBase`.** It is not a thing that draws - it is the thing that
 			// *owns the selection*, which is what finally gives
 			// `GuiObject::Selectable` a reader. `scene`'s services sit at the
 			// root the same way, and `GetService` finds either by name.
-			const std::array guiServiceState{Components::Of<GuiServiceState>()};
+			const std::array guiServiceState{
+				Components::Of<GuiServiceState>(),
+				Components::Of<VirtualFocusState>(),
+				Components::Of<TextCompositionState>()
+			};
 			const ClassId guiService = Classes::Register("GuiService", instance, guiServiceState);
 			Classes::SetCreatable(guiService, false);
+			Classes::SetKind(guiService, ClassKind::Service);
+			Classes::SetStudioVisible(guiService, false);
 
 			// --- the 3D branch -----------------------------------------------
 			//
@@ -511,6 +737,8 @@ namespace engine::gui {
 			// how, and nothing that resolves it into geometry.
 			const ClassId guiBase3d = Classes::Register("GuiBase3d", guiBase, {});
 			Classes::SetCreatable(guiBase3d, false);
+			Classes::SetKind(guiBase3d, ClassKind::Abstract);
+			Classes::SetStudioVisible(guiBase3d, false);
 
 			// `PVAdornment` is Roblox's name for "an adornment about a
 			// `BasePart`", and the `Adornee` lives here rather than on
@@ -518,6 +746,8 @@ namespace engine::gui {
 			const std::array adornment{Components::Of<Adornment>(), Components::Of<AdornmentInteraction>()};
 			const ClassId pvAdornment = Classes::Register("PVAdornment", guiBase3d, adornment);
 			Classes::SetCreatable(pvAdornment, false);
+			Classes::SetKind(pvAdornment, ClassKind::Abstract);
+			Classes::SetStudioVisible(pvAdornment, false);
 
 			const std::array outline{Components::Of<SelectionOutline>()};
 			const ClassId selectionBox = Classes::Register("SelectionBox", pvAdornment, outline);
@@ -529,6 +759,8 @@ namespace engine::gui {
 			const std::array handle{Components::Of<HandleShape>()};
 			const ClassId handleAdornment = Classes::Register("HandleAdornment", pvAdornment, handle);
 			Classes::SetCreatable(handleAdornment, false);
+			Classes::SetKind(handleAdornment, ClassKind::Abstract);
+			Classes::SetStudioVisible(handleAdornment, false);
 
 			const std::array boxShape{Components::Of<BoxHandleShape>()};
 			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, boxShape);
@@ -558,12 +790,20 @@ namespace engine::gui {
 			const std::array base2d{Components::Of<Resolved>()};
 			const ClassId guiBase2d = Classes::Register("GuiBase2d", guiBase, base2d);
 			Classes::SetCreatable(guiBase2d, false);
+			Classes::SetKind(guiBase2d, ClassKind::Abstract);
+			Classes::SetStudioVisible(guiBase2d, false);
 
 			const std::array object{
-				Components::Of<Element>(), Components::Of<Background>(), Components::Of<Selection>()
+				Components::Of<Element>(),
+				Components::Of<Background>(),
+				Components::Of<Selection>(),
+				Components::Of<StyleClass>(),
+				Components::Of<StyleDirect>()
 			};
 			const ClassId guiObject = Classes::Register("GuiObject", guiBase2d, object);
 			Classes::SetCreatable(guiObject, false);
+			Classes::SetKind(guiObject, ClassKind::Abstract);
+			Classes::SetStudioVisible(guiObject, false);
 
 			const ClassId frame = Classes::Register("Frame", guiObject, {});
 
@@ -587,8 +827,14 @@ namespace engine::gui {
 			const std::array button{Components::Of<Button>()};
 			const ClassId guiButton = Classes::Register("GuiButton", guiObject, button);
 			Classes::SetCreatable(guiButton, false);
+			Classes::SetKind(guiButton, ClassKind::Abstract);
+			Classes::SetStudioVisible(guiButton, false);
 
-			const std::array label{Components::Of<Label>()};
+			const std::array label{
+				Components::Of<Label>(),
+				Components::Of<LabelPresentation>(),
+				Components::Of<LabelLocalizationArguments>()
+			};
 			const std::array picture{Components::Of<Picture>()};
 
 			const ClassId textButton = Classes::Register("TextButton", guiButton, label);
@@ -596,11 +842,18 @@ namespace engine::gui {
 
 			const ClassId guiLabel = Classes::Register("GuiLabel", guiObject, {});
 			Classes::SetCreatable(guiLabel, false);
+			Classes::SetKind(guiLabel, ClassKind::Abstract);
+			Classes::SetStudioVisible(guiLabel, false);
 			const ClassId textLabel = Classes::Register("TextLabel", guiLabel, label);
 			const ClassId imageLabel = Classes::Register("ImageLabel", guiLabel, picture);
 
 			// A text box is a label you can type into, so it carries both.
-			const std::array entry{Components::Of<Label>(), Components::Of<Entry>()};
+			const std::array entry{
+				Components::Of<Label>(),
+				Components::Of<LabelPresentation>(),
+				Components::Of<LabelLocalizationArguments>(),
+				Components::Of<Entry>()
+			};
 			const ClassId textBox = Classes::Register("TextBox", guiObject, entry);
 
 			const std::array viewport{Components::Of<Viewport>()};
@@ -608,9 +861,13 @@ namespace engine::gui {
 
 			// --- the collectors ----------------------------------------------
 
-			const std::array collector{Components::Of<Layer>(), Components::Of<Canvas>()};
+			const std::array collector{
+				Components::Of<Layer>(), Components::Of<Canvas>(), Components::Of<ThemeBinding>()
+			};
 			const ClassId layerCollector = Classes::Register("LayerCollector", guiBase2d, collector);
 			Classes::SetCreatable(layerCollector, false);
+			Classes::SetKind(layerCollector, ClassKind::Abstract);
+			Classes::SetStudioVisible(layerCollector, false);
 
 			const ClassId screenGui = Classes::Register("ScreenGui", layerCollector, {});
 
@@ -626,6 +883,8 @@ namespace engine::gui {
 			// skip it because neither owns the dock's content area.
 			const ClassId pluginGui = Classes::Register("PluginGui", layerCollector, {});
 			Classes::SetCreatable(pluginGui, false);
+			Classes::SetKind(pluginGui, ClassKind::Abstract);
+			Classes::SetStudioVisible(pluginGui, false);
 			const ClassId dockWidget = Classes::Register("DockWidgetPluginGui", pluginGui, {});
 
 			// --- the modifiers -----------------------------------------------
@@ -636,6 +895,12 @@ namespace engine::gui {
 			Classes::SetCreatable(uiBase, false);
 			Classes::SetCreatable(uiComponent, false);
 			Classes::SetCreatable(uiLayout, false);
+			Classes::SetKind(uiBase, ClassKind::Abstract);
+			Classes::SetKind(uiComponent, ClassKind::Abstract);
+			Classes::SetKind(uiLayout, ClassKind::Abstract);
+			Classes::SetStudioVisible(uiBase, false);
+			Classes::SetStudioVisible(uiComponent, false);
+			Classes::SetStudioVisible(uiLayout, false);
 
 			const std::array listLayout{Components::Of<ListLayout>()};
 			const ClassId uiListLayout = Classes::Register("UIListLayout", uiLayout, listLayout);
@@ -651,6 +916,11 @@ namespace engine::gui {
 
 			const ClassId uiConstraint = Classes::Register("UIConstraint", uiComponent, {});
 			Classes::SetCreatable(uiConstraint, false);
+			Classes::SetKind(uiConstraint, ClassKind::Abstract);
+			Classes::SetStudioVisible(uiConstraint, false);
+
+			const std::array mask{Components::Of<Mask>()};
+			const ClassId uiMask = Classes::Register("UIMask", uiComponent, mask);
 
 			const std::array aspect{Components::Of<AspectRatio>()};
 			const ClassId uiAspect = Classes::Register("UIAspectRatioConstraint", uiConstraint, aspect);
@@ -688,6 +958,25 @@ namespace engine::gui {
 			const std::array dragDetector{Components::Of<DragDetector>()};
 			const ClassId uiDragDetector = Classes::Register("UIDragDetector", uiComponent, dragDetector);
 
+			const std::array binding{
+				Components::Of<Binding>(),
+				Components::Of<BindingOutput>(),
+				Components::Of<BindingDependency>()
+			};
+			const ClassId uiBinding = Classes::Register("UIBinding", instance, binding);
+			const std::array modalScope{Components::Of<ModalScope>()};
+			const ClassId uiModalScope = Classes::Register("UIModalScope", uiComponent, modalScope);
+			const std::array animation{Components::Of<AnimationPlayback>()};
+			const ClassId uiAnimation = Classes::Register("UIAnimation", uiComponent, animation);
+			const std::array style{Components::Of<UIStyle>()};
+			Classes::Register("UIStyle", uiComponent, style);
+			const std::array theme{Components::Of<UITheme>()};
+			Classes::Register("UITheme", instance, theme);
+
+			const std::array virtualCollection{Components::Of<VirtualCollection>()};
+			const ClassId uiVirtualCollection =
+				Classes::Register("UIVirtualCollection", instance, virtualCollection);
+
 			// --- the property surface ----------------------------------------
 			//
 			// Each declared on the class that first holds what it projects, so
@@ -713,6 +1002,7 @@ namespace engine::gui {
 			Classes::Property<&Element::Active>(guiObject, "Active");
 			Classes::Property<&Element::Selectable>(guiObject, "Selectable");
 			Classes::Property<&Element::Interactable>(guiObject, "Interactable");
+			Classes::Property<&ThemeBinding::Theme>(layerCollector, "Theme");
 
 			// **The four overrides and the highlight, on `GuiObject` because
 			// every one of them is a `GuiObject`'s to answer.** `SelectNext`
@@ -730,8 +1020,16 @@ namespace engine::gui {
 			Classes::Computed(guiObject, EnumField<&Element::Automatic>("AutomaticSize"));
 
 			// The box it draws for itself.
-			Classes::Property<&Background::Color>(guiObject, "BackgroundColor3");
-			Classes::Property<&Background::Transparency>(guiObject, "BackgroundTransparency");
+			Classes::Computed(
+				guiObject,
+				StyledField<&Background::Color, StyleDirectProperty::BackgroundColor>("BackgroundColor3")
+			);
+			Classes::Computed(
+				guiObject,
+				StyledField<&Background::Transparency, StyleDirectProperty::BackgroundTransparency>(
+					"BackgroundTransparency"
+				)
+			);
 			Classes::Property<&Background::BorderColor>(guiObject, "BorderColor3");
 			Classes::Property<&Background::BorderSizePixel>(guiObject, "BorderSizePixel");
 			Classes::Computed(guiObject, EnumField<&Background::Border>("BorderMode"));
@@ -747,8 +1045,17 @@ namespace engine::gui {
 			// than a loop over three ids.
 			for (const ClassId owner : {textButton, textLabel, textBox}) {
 				Classes::Property<&Label::Text>(owner, "Text");
-				Classes::Property<&Label::Color>(owner, "TextColor3");
-				Classes::Property<&Label::Transparency>(owner, "TextTransparency");
+				Classes::Property<&LabelPresentation::LocalizationKey>(owner, "LocalizationKey");
+				Classes::Computed(owner, LocalizedArgumentCountField<0>("LocalizationArgumentCount"));
+				Classes::Computed(
+					owner, StyledField<&Label::Color, StyleDirectProperty::TextColor>("TextColor3")
+				);
+				Classes::Computed(
+					owner,
+					StyledField<&Label::Transparency, StyleDirectProperty::TextTransparency>(
+						"TextTransparency"
+					)
+				);
 				Classes::Property<&Label::Size>(owner, "TextSize");
 				Classes::Property<&Label::Wrapped>(owner, "TextWrapped");
 				Classes::Property<&Label::Scaled>(owner, "TextScaled");
@@ -774,8 +1081,15 @@ namespace engine::gui {
 			// reason.
 			for (const ClassId owner : {imageButton, imageLabel}) {
 				Classes::Property<&Picture::Image>(owner, "Image");
-				Classes::Property<&Picture::Color>(owner, "ImageColor3");
-				Classes::Property<&Picture::Transparency>(owner, "ImageTransparency");
+				Classes::Computed(
+					owner, StyledField<&Picture::Color, StyleDirectProperty::ImageColor>("ImageColor3")
+				);
+				Classes::Computed(
+					owner,
+					StyledField<&Picture::Transparency, StyleDirectProperty::ImageTransparency>(
+						"ImageTransparency"
+					)
+				);
 				Classes::Property<&Picture::SliceCenter>(owner, "SliceCenter");
 				Classes::Property<&Picture::SliceScale>(owner, "SliceScale");
 				Classes::Property<&Picture::TileSize>(owner, "TileSize");
@@ -868,11 +1182,14 @@ namespace engine::gui {
 			Classes::Property<&Entry::ClearTextOnFocus>(textBox, "ClearTextOnFocus");
 			Classes::Property<&Entry::MultiLine>(textBox, "MultiLine");
 			Classes::Property<&Entry::TextEditable>(textBox, "TextEditable");
+			Classes::Property<&Entry::Password>(textBox, "Password");
 			Classes::Property<&Entry::CursorPosition>(textBox, "CursorPosition");
 			Classes::Property<&Entry::SelectionStart>(textBox, "SelectionStart");
 
 			Classes::Property<&Group::Color>(canvasGroup, "GroupColor3");
 			Classes::Property<&Group::Transparency>(canvasGroup, "GroupTransparency");
+			Classes::Property<&Mask::Radius>(uiMask, "CornerRadius");
+			Classes::Property<&Mask::Enabled>(uiMask, "Enabled");
 
 			Classes::Property<&Viewport::CurrentCamera>(viewportFrame, "CurrentCamera");
 			Classes::Property<&Viewport::Ambient>(viewportFrame, "Ambient");
@@ -880,11 +1197,17 @@ namespace engine::gui {
 			Classes::Property<&Viewport::LightDirection>(viewportFrame, "LightDirection");
 			Classes::Property<&Viewport::Color>(viewportFrame, "ImageColor3");
 			Classes::Property<&Viewport::Transparency>(viewportFrame, "ImageTransparency");
+			Classes::Property<&Viewport::ResolutionScale>(viewportFrame, "ResolutionScale");
+			Classes::Computed(viewportFrame, EnumField<&Viewport::UpdateMode>("UpdateMode"));
+			Classes::Property<&Viewport::UpdateEveryFrames>(viewportFrame, "UpdateEveryFrames");
+			Classes::Property<&Viewport::InvalidationRevision>(viewportFrame, "InvalidationRevision");
 
 			Classes::Property<&Layer::Enabled>(layerCollector, "Enabled");
 			Classes::Property<&Layer::DisplayOrder>(layerCollector, "DisplayOrder");
 			Classes::Property<&Layer::ResetOnSpawn>(layerCollector, "ResetOnSpawn");
 			Classes::Computed(layerCollector, EnumField<&Layer::Behavior>("ZIndexBehavior"));
+			Classes::Property<&Layer::ReferenceResolution>(layerCollector, "ReferenceResolution");
+			Classes::Computed(layerCollector, EnumField<&Layer::ScaleMode>("ScaleMode"));
 
 			// On `ScreenGui` alone, because the inset is the *screen*'s top bar
 			// and a surface gui projected onto a wall has no such thing.
@@ -1005,6 +1328,20 @@ namespace engine::gui {
 			Classes::Computed(uiDragDetector, EnumField<&DragDetector::Style>("DragStyle"));
 			Classes::Computed(uiDragDetector, EnumField<&DragDetector::Response>("ResponseStyle"));
 
+			Classes::Property<&Binding::SourcePath>(uiBinding, "SourcePath");
+			Classes::Property<&Binding::Attribute>(uiBinding, "Attribute");
+			Classes::Property<&Binding::Target>(uiBinding, "Target");
+			Classes::Property<&Binding::Fallback>(uiBinding, "Fallback");
+			Classes::Computed(uiBinding, DerivedField<&BindingOutput::Value>("Value"));
+			Classes::Computed(uiBinding, DerivedField<&BindingOutput::Valid>("Valid"));
+			Classes::Property<&ModalScope::Enabled>(uiModalScope, "Enabled");
+			Classes::Property<&AnimationPlayback::StartedAt>(uiAnimation, "StartTime");
+			Classes::Property<&AnimationPlayback::Playing>(uiAnimation, "Playing");
+
+			Classes::Property<&VirtualCollection::ItemCount>(uiVirtualCollection, "ItemCount");
+			Classes::Property<&VirtualCollection::FixedExtent>(uiVirtualCollection, "FixedExtent");
+			Classes::Property<&VirtualCollection::Revision>(uiVirtualCollection, "Revision");
+
 			Classes::Property<&FlexItem::GrowRatio>(uiFlexItem, "GrowRatio");
 			Classes::Property<&FlexItem::ShrinkRatio>(uiFlexItem, "ShrinkRatio");
 			Classes::Computed(uiFlexItem, EnumField<&FlexItem::Mode>("FlexMode"));
@@ -1044,6 +1381,9 @@ namespace engine::gui {
 			(void)canvasGroup;
 			(void)dockWidget;
 			(void)uiScale;
+			(void)uiBinding;
+			(void)uiModalScope;
+			(void)uiVirtualCollection;
 			// **The three that were `Reserved until the renderer consumes them`,
 			// declared at v0.17 now that it does.** They were absent rather than
 			// answering a default on `SoundService.cpp`'s rule - a property with

@@ -30,12 +30,15 @@
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GlyphAtlas.hpp>
 #include <engine/render/InterfaceMesh.hpp>
+#include <engine/render/InterfaceTargetCache.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ShapedGlyphAtlas.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -45,6 +48,10 @@ namespace engine::ecs {
 }
 
 namespace engine::render {
+	// A device-independent ceiling for transient CanvasGroup targets. It keeps a
+	// hostile display profile from reaching SDL with an impractical edge length.
+	constexpr uint32_t MAXIMUM_INTERFACE_GROUP_TARGET_EDGE = 16384;
+
 	struct WorldCameraFrame;
 	class ShaderLibrary;
 
@@ -74,6 +81,24 @@ namespace engine::render {
 		uint32_t Height = 0;
 		//@}
 	};
+
+	// The device-pixel target that contains one isolated CanvasGroup. Bounds are
+	// clipped to the canvas before sizing, so authored coordinates can never
+	// turn into an unchecked texture allocation.
+	struct InterfaceGroupTarget {
+		core::Rect Bounds;
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+	};
+
+	// Resolves a bounded CanvasGroup target. Invalid coordinates and empty
+	// clipped regions are refused before any conversion to an unsigned extent.
+	std::optional<InterfaceGroupTarget> InterfaceGroupTargetFor(
+		const core::Rect &bounds,
+		const core::Rect &clip,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels
+	);
 
 	// Draws a compiled `gui::DrawList` into the render target selected by the
 	// interface node.
@@ -162,6 +187,20 @@ namespace engine::render {
 			return true;
 		}
 
+		// Copies the validated package used when compiled text was shaped.
+		// The package stays owned by this pass so a compiled list never borrows
+		// client-owned font bytes across a frame boundary.
+		void SetFontPackage(const gui::FontPackage &package) {
+			if (Fonts.has_value() && Fonts->Signature() == package.Signature()) {
+				return;
+			}
+			Fonts = package;
+			if (ShapedGlyphs.has_value()) {
+				ShapedGlyphs->Clear();
+			}
+			MeshDirty = true;
+		}
+
 		// The list to draw next frame, and the canvas it was compiled against.
 		//
 		// **Copied rather than held by reference.** The list belongs to a
@@ -200,7 +239,9 @@ namespace engine::render {
 			const core::Vector2 &canvas,
 			const core::Vector2 &targetPixels,
 			ecs::Store &store,
-			uint64_t signature
+			uint64_t signature,
+			bool damageValid = false,
+			std::span<const gui::Compiled::DamageRegion> damage = {}
 		);
 
 		// Submits an owned camera packet without reopening its world. Canvas
@@ -214,6 +255,10 @@ namespace engine::render {
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
 		// @return `false` when there is nothing to draw.
 		bool Prepare(void *commandBuffer) override;
+
+		// Publishes retained target writes only after SDL accepted the command
+		// buffer. A rejected submission leaves their conservative damage pending.
+		void CompleteFrame(bool submitted) override;
 
 		// Records the batches.
 		//
@@ -302,8 +347,47 @@ namespace engine::render {
 		}
 		//@}
 
+		size_t RetainedTargetCount() const {
+			return Targets.TargetCount();
+		}
+
+		uint64_t RetainedTargetBytes() const {
+			return Targets.TargetBytes();
+		}
+
 	  private:
 		bool UploadAtlas(void *commandBuffer);
+		bool UploadShapedAtlas(void *commandBuffer);
+		bool PrepareGroups(void *commandBuffer);
+		bool PrepareRetainedTargets(void *commandBuffer);
+		bool EnsureCompositeGeometry(void *commandBuffer);
+		void RecordScreenRange(
+			void *commandBuffer,
+			void *renderPass,
+			size_t firstCommand,
+			size_t commandCount,
+			const core::Rect *damage,
+			const core::Rect *targetBounds = nullptr,
+			const core::Vector2 *targetPixels = nullptr
+		);
+		void RecordComposite(
+			void *commandBuffer,
+			void *renderPass,
+			void *texture,
+			const core::Rect &bounds,
+			float opacity = 1.0f,
+			const core::Rect *targetBounds = nullptr,
+			const core::Vector2 *targetPixels = nullptr
+		);
+		void RecordGroupRange(
+			void *commandBuffer,
+			void *renderPass,
+			size_t firstCommand,
+			size_t endCommand,
+			size_t parent,
+			const core::Rect *targetBounds,
+			const core::Vector2 *targetPixels
+		);
 		uint32_t RecordWorldRange(
 			void *commandBuffer,
 			void *renderPass,
@@ -342,6 +426,7 @@ namespace engine::render {
 			return (uint64_t(owner.Id()) << 32) | name.Id();
 		}
 		core::Name ContentOwner;
+		std::optional<gui::FontPackage> Fonts;
 		struct ShaderVariant {
 			assets::ContentHash CodeHash;
 			assets::ContentHash AttemptHash;
@@ -358,11 +443,19 @@ namespace engine::render {
 		void *VertexBuffer = nullptr;
 		void *IndexBuffer = nullptr;
 		void *TransferBuffer = nullptr;
+		void *CompositeVertexBuffer = nullptr;
+		void *CompositeIndexBuffer = nullptr;
+		void *CompositeTransferBuffer = nullptr;
 		uint32_t VertexCapacity = 0;
 		uint32_t IndexCapacity = 0;
 		uint32_t TransferCapacity = 0;
+		core::Vector2 CompositeCanvas;
 
 		GlyphAtlas Glyphs;
+		std::optional<ShapedGlyphAtlas> ShapedGlyphs;
+		std::vector<void *> ShapedAtlasTextures;
+		std::vector<void *> ShapedAtlasTransferBuffers;
+		uint64_t ShapedUse = 0;
 		InterfaceMesh Mesh;
 		void SubmitCommands(
 			const gui::DrawList &list,
@@ -373,12 +466,27 @@ namespace engine::render {
 		gui::DrawList Pending;
 		core::Vector2 Canvas;
 		uint64_t PendingSignature = 0;
+		bool PendingDamageValid = false;
+		std::vector<gui::Compiled::DamageRegion> PendingDamage;
 		bool SignatureValid = false;
 		bool MeshDirty = true;
 
 		// The attachment's real size in device pixels. See `Submit`.
 		core::Vector2 TargetPixels;
 		std::vector<SpatialCollector> SpatialCollectors;
+		InterfaceTargetCache Targets;
+		std::vector<InterfaceTargetKey> PendingTargetWrites;
+		std::vector<InterfaceTargetKey> DirectTargetRanges;
+		struct GroupLayer {
+			size_t First = 0;
+			size_t End = 0;
+			size_t Parent = SIZE_MAX;
+			core::Rect Bounds;
+			core::Vector2 Pixels;
+			float Opacity = 1.0f;
+			void *Target = nullptr;
+		};
+		std::vector<GroupLayer> GroupLayers;
 
 		struct ResolvedImage {
 			core::Name Name;

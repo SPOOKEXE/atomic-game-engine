@@ -53,6 +53,8 @@
 // own - a header is only self-contained when something proves it.
 #include <engine/gui/Layout.hpp>
 
+#include <string_view>
+
 namespace engine::ecs {
 	class Store;
 }
@@ -100,8 +102,7 @@ namespace engine::gui {
 	// The strip at each edge a `ScreenGui` keeps clear unless it says not to.
 	//
 	// Roblox's `GuiService:GetGuiInset()` answers two corners; this answers the
-	// top-left one, because nothing in this engine reserves anything at the
-	// bottom and returning a second zero would imply somebody had decided it.
+	// top-left one from the same merged safe and transient insets layout reads.
 	//
 	// **Read from the `Screen` the caller laid out against**, rather than
 	// stored: the inset is a property of the surface being drawn to, and a
@@ -113,12 +114,7 @@ namespace engine::gui {
 	// `game:GetService("GuiService")` and its three settings are ordinary
 	// declared properties, so what a game *decides* is reachable; what it cannot
 	// reach is this, because the answer is a fact about the surface being drawn
-	// and the scripting layer at L9 cannot name a `Screen`. It would also be
-	// `(0, 0)` in every world today - `Screen::TopInset` is zero because this
-	// engine has no top bar - so a binding would be a member that exists, answers
-	// one constant forever and looks decided. `PlayerGui`'s `SetTopbarTransparency`
-	// pair is absent for the same missing thing; `script/src/GuiMethods.cpp` names
-	// it where an author would look for it.
+	// and the scripting layer at L9 cannot name a `Screen`.
 	//
 	// @param screen The screen the world was laid out against.
 	// @return The reserved offset from the top-left, in pixels.
@@ -129,7 +125,7 @@ namespace engine::gui {
 	// **Refuses an element that cannot be selected**, rather than accepting it
 	// and leaving the selection somewhere a move can never leave - which is the
 	// state a game recovers from by rebooting. An element is selectable when it
-	// carries `Element::Selectable`.
+	// carries `Element::Selectable` and remains interactable.
 	//
 	// @param store    The world.
 	// @param instance The element to select, or `ecs::NULL_ENTITY` to clear.
@@ -203,6 +199,11 @@ namespace engine::gui {
 	// @return Whether the focus changed.
 	// @since v0.15
 	bool Focus(ecs::Store &store, ecs::Entity textBox);
+
+	bool
+	RememberVirtualFocus(ecs::Store &store, ecs::Entity collection, std::string_view key, uint32_t index);
+	void ClearVirtualFocus(ecs::Store &store);
+	void RestoreVirtualFocus(ecs::Store &store, const DrawList &list);
 
 	// Rebuilds a player's interface from the world's `StarterGui`.
 	//

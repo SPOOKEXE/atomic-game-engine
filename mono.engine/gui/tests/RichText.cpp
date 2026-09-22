@@ -1,12 +1,11 @@
 // Markup in a label, and the two rules that make it safe.
 //
-// **Spans and never geometry**, so a backend lays a marked-up run out with its
-// own metrics; and **a string that does not parse is shown literally**, so an
-// author who mistyped a tag sees the tag rather than a gap. Both are arranged
-// around by the cases below.
+// Spans carry style into canonical shaping; bounded malformed markup stays
+// literal so an author can see the error.
 
 #include <engine/gui/Components.hpp>
 #include <engine/gui/RichText.hpp>
+#include <engine/gui/ShapedText.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -120,6 +119,17 @@ TEST_CASE("entities and breaks reach the text", "[gui][richtext]") {
 	// author writing "Tom & Jerry" typed.
 	REQUIRE(ParseRichText("Tom & Jerry", Base(), plain, spans));
 	CHECK(plain == "Tom & Jerry");
+	CHECK(ParseRichText("&#55296; & untouched", Base(), plain, spans));
+	CHECK(plain == "&#55296; & untouched");
+}
+
+TEST_CASE("bare ampersands stay bounded and literal", "[gui][richtext]") {
+	std::string plain;
+	std::vector<DrawSpan> spans;
+	const std::string source(32 * 1024, '&');
+	REQUIRE(ParseRichText(source, Base(), plain, spans));
+	CHECK(plain == source);
+	CHECK(spans.empty());
 }
 
 TEST_CASE("malformed markup is shown rather than swallowed", "[gui][richtext]") {
@@ -141,6 +151,36 @@ TEST_CASE("malformed markup is shown rather than swallowed", "[gui][richtext]") 
 		CHECK(plain == broken);
 		CHECK(spans.empty());
 	}
+}
+
+TEST_CASE("rich text refuses oversized input before copying it", "[gui][richtext]") {
+	std::string plain = "previous";
+	std::vector<DrawSpan> spans(1);
+	const std::string source(engine::gui::MAXIMUM_SHAPED_TEXT_BYTES + 1, 'x');
+	CHECK_FALSE(ParseRichText(source, Base(), plain, spans));
+	CHECK(plain.empty());
+	CHECK(spans.empty());
+}
+
+TEST_CASE("rich text bounds nesting and styled runs", "[gui][richtext]") {
+	std::string plain;
+	std::vector<DrawSpan> spans;
+	std::string nested;
+	for (int index = 0; index < 64; ++index)
+		nested += "<b>";
+	nested += 'x';
+	for (int index = 0; index < 64; ++index)
+		nested += "</b>";
+	CHECK_FALSE(ParseRichText(nested, Base(), plain, spans));
+	CHECK(plain == nested);
+	CHECK(spans.empty());
+
+	std::string manySpans;
+	for (int index = 0; index < 65; ++index)
+		manySpans += "<b>x</b>";
+	CHECK_FALSE(ParseRichText(manySpans, Base(), plain, spans));
+	CHECK(plain == manySpans);
+	CHECK(spans.empty());
 }
 
 TEST_CASE("the visible limit counts characters and never splits one", "[gui][richtext]") {

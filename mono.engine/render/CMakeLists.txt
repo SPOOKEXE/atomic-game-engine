@@ -1,6 +1,6 @@
 # L12 [client]. The GLSL this module binds lives in Engine::resources.
 
-set(render_vendor SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross Vendor::zstd)
+set(render_vendor SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross Vendor::zstd freetype)
 if(APPLE)
 	# SDL loads this dynamically. Naming it here lets mono_add_program stage it
 	# for every executable that actually links the renderer.

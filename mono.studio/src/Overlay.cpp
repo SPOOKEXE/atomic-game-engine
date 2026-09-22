@@ -12,6 +12,8 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -23,6 +25,7 @@
 #include <engine/spatial/Query.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <SDL3/SDL_video.h>
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
@@ -2255,6 +2258,29 @@ namespace studio {
 			return;
 		}
 
+		// A GUI control is authored in the same tree the viewport compiled, so
+		// selection asks that compiled tree before falling through to the 3D ray.
+		// The command list carries the paint order and clips already resolved by
+		// gui; rebuilding a second hit test here would make Studio disagree with
+		// what it just drew.
+		if (!IsRunning(shown) && viewport < Overlays.size()) {
+			const OverlaySlot &slot = Overlays[viewport];
+			if (slot.Drawn && slot.List != nullptr) {
+				const ViewportCanvas canvas =
+					CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, x, y);
+				const Entity gui = engine::gui::PickVisibleScreen(
+					GuiLists[viewport].Commands(), engine::core::Vector2{canvas.PointerX, canvas.PointerY}
+				);
+				if (gui != NULL_ENTITY) {
+					Select(shown, gui, add);
+					SelectionAnchor = gui;
+					OpenPathTo(shown, gui);
+					RevealSelection = true;
+					return;
+				}
+			}
+		}
+
 		const Ray ray = panel.PanelToRay(glm::vec2(x, y));
 		const std::optional<engine::core::RayHit> hit = RaycastWorld(shown, ray, {});
 
@@ -2306,13 +2332,40 @@ namespace studio {
 			return;
 		}
 
-		const ViewportState *viewport = ExtraAt(index);
+		ViewportState *viewport = ExtraAt(index);
 		const ImVec2 mouse = ImGui::GetIO().MousePos;
 		const ViewportCanvas canvas =
 			CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, mouse.x, mouse.y);
+		const GuiPreviewSettings &preview = viewport != nullptr ? viewport->GuiPreview : MainGuiPreview;
+		GuiPreviewSettings &editablePreview = viewport != nullptr ? viewport->GuiPreview : MainGuiPreview;
+		const char *profiles[] = {"Desktop", "Phone", "Tablet"};
+		const char *states[] = {"State", "Hover", "Pressed"};
+		int profile = static_cast<int>(editablePreview.Profile);
+		ImGui::SetCursorScreenPos(ImVec2(slot.X + 8.0f, slot.Y + 8.0f));
+		ImGui::SetNextItemWidth(100.0f);
+		if (ImGui::Combo("##gui-preview-profile", &profile, profiles, 3)) {
+			editablePreview.Profile = static_cast<GuiPreviewProfile>(profile);
+		}
+		ImGui::SetNextItemWidth(70.0f);
+		ImGui::DragFloat(
+			"##gui-interface-scale", &editablePreview.InterfaceScale, 0.01f, 0.1f, 4.0f, "UI %.2f"
+		);
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(70.0f);
+		ImGui::DragFloat("##gui-text-scale", &editablePreview.TextScale, 0.01f, 0.1f, 4.0f, "Text %.2f");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(80.0f);
+		ImGui::InputText(
+			"##gui-preview-locale", editablePreview.Locale.data(), editablePreview.Locale.size()
+		);
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(72.0f);
+		int previewState = static_cast<int>(editablePreview.State);
+		if (ImGui::Combo("##gui-preview-state", &previewState, states, 3)) {
+			editablePreview.State = static_cast<GuiPreviewState>(previewState);
+		}
 		engine::gui::CompileRequest request;
-		request.Display.Width = canvas.Width;
-		request.Display.Height = canvas.Height;
+		request.Display = ResolveGuiPreviewScreen(preview, canvas.Width, canvas.Height);
 		request.ScreenGuis = source == ViewportGuiSource::PlayerGui
 								 ? engine::gui::ScreenGuiSource::PlayerGui
 								 : engine::gui::ScreenGuiSource::StarterGui;
@@ -2328,14 +2381,22 @@ namespace studio {
 		// appearing under a stationary pointer lights up one frame later.
 		request.Hovered = GuiRouters[index].Hovered();
 		request.Pressed = GuiRouters[index].Pressed();
+		if (preview.State != GuiPreviewState::None && SelectionWorld == shown && Selection.size() == 1) {
+			const Entity selectedGui = Selection.front();
+			if (preview.State == GuiPreviewState::Hovered) {
+				request.Hovered = selectedGui;
+			} else {
+				request.Pressed = selectedGui;
+			}
+		}
 
 		// The pointer in canvas space, which is the panel's own corner as the
 		// origin. A `ScreenGui` inside a panel is laid out from that corner, so
 		// anything else would hit-test against a canvas nobody drew.
 		engine::gui::Pointer pointer;
 		pointer.Position = engine::core::Vector2{
-			canvas.PointerX,
-			canvas.PointerY,
+			canvas.PointerX * request.Display.Width / canvas.Width,
+			canvas.PointerY * request.Display.Height / canvas.Height,
 		};
 		const bool selected = FocusedIsViewport && FocusedViewport == index;
 		pointer.Down = selected && ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -2373,6 +2434,11 @@ namespace studio {
 						 );
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
+			if (index < GuiLocalizations.size()) {
+				request.Catalogue = GuiLocalizations[index].Refresh(store);
+				request.Locale = editablePreview.Locale.data();
+				request.StudioMissingLocalizationMarker = true;
+			}
 			if (const auto *local = store.Resource<engine::scene::LocalPlayer>(); local != nullptr) {
 				request.Viewer = local->Instance;
 			}
@@ -2401,6 +2467,29 @@ namespace studio {
 				engine::render::ResolveSpatialCanvases(store, request.Display);
 			}
 			GuiLists[index].Rebuild(store, request);
+			if (NativeAccessibility != nullptr && selected) {
+				NativeAccessibility->SetWindowFocused(
+					(SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0
+				);
+				const uint64_t accessibilityEpoch = (store.Identity() << 16U) ^ static_cast<uint64_t>(index);
+				NativeAccessibility->Update(
+					client::ProjectAccessibilitySnapshot(
+						engine::gui::CompileSemantics(store, GuiLists[index].Commands()),
+						GuiLists[index].Commands()
+					),
+					accessibilityEpoch
+				);
+				for (const client::AccessibilityAction &action : NativeAccessibility->Drain()) {
+					if (!client::IsCurrentAccessibilityAction(
+							action, accessibilityEpoch, GuiLists[index].Commands()
+						))
+						continue;
+					const std::span<const engine::gui::GuiEvent> semantic = GuiRouters[index].UpdateSemantic(
+						store, GuiLists[index].Commands(), action.Target, action.Action
+					);
+					events.insert(events.end(), semantic.begin(), semantic.end());
+				}
+			}
 			(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
 			if (engine::gui::PickScreen(store, GuiLists[index].Commands(), pointer.Position) == NULL_ENTITY) {
 				engine::render::SpatialPointer spatial;
@@ -2518,6 +2607,131 @@ namespace studio {
 				}
 			}
 		});
+
+		// The selection outline reads the resolved rectangle the same canonical
+		// layout pass produced for the draw list. It is editor-only state drawn
+		// over the viewport image, so no preview rectangle can leak into a save.
+		if (SelectionWorld == shown && !Selection.empty()) {
+			struct SelectedRect {
+				Entity Instance;
+				engine::gui::Resolved Resolved;
+				engine::gui::Element Element;
+			};
+			std::vector<SelectedRect> selectedRects;
+			const engine::gui::DrawList &commands = GuiLists[index].Commands();
+			Universe->Enter(shown, [&](Store &store) {
+				for (const Entity instance : Selection) {
+					const bool screenVisible = std::any_of(
+						commands.Commands.begin(),
+						commands.Commands.end(),
+						[&](const engine::gui::DrawCommand &command) {
+							return command.Source == instance && !command.Spatial;
+						}
+					);
+					if (!screenVisible) {
+						continue;
+					}
+					const auto *resolved = store.Get<engine::gui::Resolved>(instance);
+					const auto *element = store.Get<engine::gui::Element>(instance);
+					if (resolved != nullptr && element != nullptr) {
+						selectedRects.push_back(SelectedRect{instance, *resolved, *element});
+					}
+				}
+			});
+
+			ImDrawList *draw = ImGui::GetWindowDrawList();
+			// The resolved rectangle may extend past its collector through an
+			// unclipped ancestor. The viewport image still ends at this slot, so
+			// keep editor chrome from painting over an adjacent Studio panel.
+			draw->PushClipRect(
+				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
+			);
+			for (const SelectedRect &selectedRect : selectedRects) {
+				const engine::gui::Resolved &resolved = selectedRect.Resolved;
+				const ImVec2 minimum(
+					slot.X + resolved.AbsolutePosition.X, slot.Y + resolved.AbsolutePosition.Y
+				);
+				const ImVec2 maximum(
+					minimum.x + resolved.AbsoluteSize.X, minimum.y + resolved.AbsoluteSize.Y
+				);
+				draw->AddRect(minimum, maximum, IM_COL32(80, 170, 255, 255), 0.0f, 0, 2.0f);
+
+				// The lower-right square is deliberately small and has a separate hit
+				// target: moving a panel is the common operation, and a whole edge
+				// that resized would make ordinary selection and dragging frustrating.
+				const ImVec2 handle(minimum.x + resolved.AbsoluteSize.X, minimum.y + resolved.AbsoluteSize.Y);
+				draw->AddRectFilled(
+					ImVec2(handle.x - 4.0f, handle.y - 4.0f),
+					ImVec2(handle.x + 4.0f, handle.y + 4.0f),
+					IM_COL32(80, 170, 255, 255)
+				);
+
+				const bool editable = !IsRunning(shown) && CurrentTool == ToolMode::Select && pointer.Inside;
+				const bool contains = mouse.x >= minimum.x && mouse.x <= maximum.x && mouse.y >= minimum.y &&
+									  mouse.y <= maximum.y;
+				const bool onHandle =
+					std::abs(mouse.x - handle.x) <= 8.0f && std::abs(mouse.y - handle.y) <= 8.0f;
+				if (editable && GuiDragging.Instance == NULL_ENTITY &&
+					ImGui::IsMouseClicked(ImGuiMouseButton_Left) && contains) {
+					GuiDragging.World = shown;
+					GuiDragging.Instance = selectedRect.Instance;
+					GuiDragging.Viewport = index;
+					GuiDragging.Position = selectedRect.Element.Position;
+					GuiDragging.Size = selectedRect.Element.Size;
+					GuiDragging.BeforePosition = selectedRect.Element.Position;
+					GuiDragging.BeforeSize = selectedRect.Element.Size;
+					GuiDragging.Resize = onHandle;
+				}
+			}
+
+			if (GuiDragging.Instance != NULL_ENTITY && GuiDragging.World == shown &&
+				GuiDragging.Viewport == index) {
+				if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+					const ImVec2 delta = ImGui::GetIO().MouseDelta;
+					if (delta.x != 0.0f || delta.y != 0.0f) {
+						if (GuiDragging.Resize) {
+							const float canvasX = delta.x * canvas.Width / slot.Width;
+							const float canvasY = delta.y * canvas.Height / slot.Height;
+							GuiDragging.Size.X.Offset = std::max(0.0f, GuiDragging.Size.X.Offset + canvasX);
+							GuiDragging.Size.Y.Offset = std::max(0.0f, GuiDragging.Size.Y.Offset + canvasY);
+						} else {
+							GuiDragging.Position.X.Offset += delta.x * canvas.Width / slot.Width;
+							GuiDragging.Position.Y.Offset += delta.y * canvas.Height / slot.Height;
+						}
+						GuiDragging.Moved = true;
+					}
+
+					if (GuiDragging.Moved) {
+						PendingGuiEdit = {
+							.World = GuiDragging.World,
+							.Instance = GuiDragging.Instance,
+							.Position = GuiDragging.Position,
+							.Size = GuiDragging.Size,
+							.BeforePosition = GuiDragging.BeforePosition,
+							.BeforeSize = GuiDragging.BeforeSize,
+							.Resize = GuiDragging.Resize,
+							.Wanted = true,
+						};
+					}
+				} else {
+					if (GuiDragging.Moved) {
+						PendingGuiEdit = {
+							.World = GuiDragging.World,
+							.Instance = GuiDragging.Instance,
+							.Position = GuiDragging.Position,
+							.Size = GuiDragging.Size,
+							.BeforePosition = GuiDragging.BeforePosition,
+							.BeforeSize = GuiDragging.BeforeSize,
+							.Resize = GuiDragging.Resize,
+							.Commit = true,
+							.Wanted = true,
+						};
+					}
+					GuiDragging = GuiCanvasDrag{};
+				}
+			}
+			draw->PopClipRect();
+		}
 
 		// **Handed to the VM, which is what turns a click into a `.Activated`.**
 		// This is the join the v0.8 plan left last, and the editor is still not

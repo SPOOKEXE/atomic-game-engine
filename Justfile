@@ -294,6 +294,23 @@ presentation-fuzz runs="10000" compiler="clang++-21":
     "$fuzz_build/fuzz/fuzz_presentation" --write-seeds "$fuzz_build/fuzz/presentation-corpus"
     "$fuzz_build/fuzz/fuzz_presentation" "$fuzz_build/fuzz/presentation-corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/presentation-artifacts/"
 
+# Coverage-guided hostile GUI parsing under AddressSanitizer and UBSan. The
+# targets generate deterministic canonical documents, markup, a font package,
+# binding paths, and a bounded SVG before their bounded smoke run.
+fuzz-ui runs="1000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/gui-fuzz"
+    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_GUI=ON -DMONO_FUZZ_BAKE=ON
+    cmake --build "$fuzz_build" --target fuzz_gui_document fuzz_gui_text fuzz_gui_binding fuzz_bake_svg -j 4
+    for target in fuzz_gui_document fuzz_gui_text fuzz_gui_binding fuzz_bake_svg; do
+        corpus="$fuzz_build/fuzz/$target-corpus"
+        artifacts="$fuzz_build/fuzz/$target-artifacts"
+        mkdir -p "$corpus" "$artifacts"
+        "$fuzz_build/fuzz/$target" --write-seeds "$corpus"
+        "$fuzz_build/fuzz/$target" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$artifacts/"
+    done
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A

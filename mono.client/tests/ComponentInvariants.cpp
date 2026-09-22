@@ -21,6 +21,7 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/script/Instances.hpp>
@@ -30,7 +31,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <client/Scene.hpp>
+#include <cstdint>
+#include <ranges>
+#include <string_view>
 
 TEST_SUITE_ID("client.componentinvariants")
 TEST_DEPENDS("engine.ecs.invariants")
@@ -65,4 +70,24 @@ TEST_CASE("every declared property obeys the class table's rules", "[client][inv
 	(void)engine::script::ScriptClass();
 
 	CHECK(engine::ecs::Describe(engine::ecs::AuditProperties()) == "");
+}
+
+TEST_CASE("every authored GUI component has a replication policy", "[client][invariants][gui]") {
+	engine::gui::RegisterGuiComponents();
+	const auto replicated = engine::replication::DefaultReplicatedComponents();
+	for (size_t index = 0; index < engine::ecs::Components::Count(); ++index) {
+		const auto &type =
+			engine::ecs::Components::Describe(engine::ecs::ComponentId{static_cast<uint32_t>(index)});
+		const std::string_view name = type.Name.Text();
+		if (!name.starts_with("gui.")) continue;
+		const bool local = engine::replication::LocalToTheClient(name);
+		const bool onWire =
+			std::ranges::any_of(replicated, [name](const auto &row) { return row.Name == name; });
+		INFO("GUI component: " << name);
+		CHECK_FALSE((local && onWire));
+		if (type.Serialisable || type.Size == 0)
+			CHECK((local || onWire));
+		else
+			CHECK(local);
+	}
 }

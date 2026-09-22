@@ -28,6 +28,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -37,6 +38,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -166,7 +168,14 @@ namespace {
 			const engine::gui::TypeResult result = engine::gui::Type(Data, typing);
 			if (result.Released) {
 				const engine::gui::GuiEvent released{
-					engine::gui::EventKind::FocusReleased, result.Instance, {}, {}, true
+					.Kind = engine::gui::EventKind::FocusReleased,
+					.Instance = result.Instance,
+					.Position = {},
+					.Local = {},
+					.Entered = true,
+					.Collection = {},
+					.Key = {},
+					.Index = UINT32_MAX,
 				};
 				runtime.DeliverGuiEvents(std::span<const engine::gui::GuiEvent>(&released, 1));
 			}
@@ -209,6 +218,80 @@ namespace {
 		return "function note(mark) {\n"
 			   "	workspace.SetAttribute('log', (workspace.GetAttribute('log') || '') + mark)\n"
 			   "}\n";
+	}
+}
+
+TEST_CASE(
+	"localized label argument methods share one typed surface in both runtimes", "[scripting][guisurface]"
+) {
+	for (const Language language : LANGUAGES) {
+		INFO((language == Language::Luau ? "luau" : "javascript"));
+		Interface world("guisurface.localized_arguments");
+		const Entity label = world.Box("TextLabel", "Status", 20.0f, 20.0f, 120.0f, 32.0f);
+		const auto runtime = MakeRuntime(world.Data, language);
+		REQUIRE(runtime != nullptr);
+		const std::string source =
+			language == Language::Luau
+				? "local label = game:GetService('Players').LocalPlayer:FindFirstChild('Status', true)\n"
+				  "label:SetLocalizedStringArgument('name', 'Ada')\n"
+				  "label:SetLocalizedNumberArgument('total', 12.5)\n"
+				  "label:SetLocalizedDateArgument('day', 86400)\n"
+				  "label:SetLocalizedStringArgument('name', 'Grace')\n"
+				: "let label = game.GetService('Players').LocalPlayer.FindFirstChild('Status', true)\n"
+				  "label.SetLocalizedStringArgument('name', 'Ada')\n"
+				  "label.SetLocalizedNumberArgument('total', 12.5)\n"
+				  "label.SetLocalizedDateArgument('day', 86400)\n"
+				  "label.SetLocalizedStringArgument('name', 'Grace')\n";
+		REQUIRE(runtime->Run(source.c_str()));
+		const auto *arguments = world.Data.Get<engine::gui::LabelLocalizationArguments>(label);
+		REQUIRE(arguments != nullptr);
+		REQUIRE(arguments->Count == 3);
+		CHECK(arguments->Values[0].String == "Grace");
+		CHECK(arguments->Values[1].Type == engine::gui::LocalizedArgumentType::Number);
+		CHECK(arguments->Values[1].Number == 12.5);
+		CHECK(arguments->Values[2].Type == engine::gui::LocalizedArgumentType::Date);
+		CHECK(arguments->Values[2].UnixSeconds == 86400);
+
+		const std::string clear =
+			language == Language::Luau
+				? "local label = game:GetService('Players').LocalPlayer:FindFirstChild('Status', true)\n"
+				  "label:ClearLocalizedArgument('total')\n"
+				: "let clearLabel = game.GetService('Players').LocalPlayer.FindFirstChild('Status', true)\n"
+				  "clearLabel.ClearLocalizedArgument('total')\n";
+		REQUIRE(runtime->Run(clear.c_str()));
+		CHECK(arguments->Count == 2);
+		CHECK(arguments->Values[1].Name == Name("day"));
+
+		const std::array<std::string, 4> invalid =
+			language == Language::Luau
+				? std::array<std::string, 4>{
+					"local bad = game:GetService('Players').LocalPlayer:FindFirstChild('Status', true)\n"
+					"bad:SetLocalizedStringArgument('', 'bad')\n",
+					"local bad = game:GetService('Players').LocalPlayer:FindFirstChild('Status', true)\n"
+					"bad:SetLocalizedStringArgument('long', string.rep('x', 513))\n",
+					"local bad = game:GetService('Players').LocalPlayer:FindFirstChild('Status', true)\n"
+					"bad:SetLocalizedNumberArgument('nan', 0 / 0)\n",
+					"local bad = game:GetService('Players').LocalPlayer:FindFirstChild('Status', true)\n"
+					"bad:SetLocalizedDateArgument('fraction', 1.5)\n",
+				}
+				: std::array<std::string, 4>{
+					"let bad1 = game.GetService('Players').LocalPlayer.FindFirstChild('Status', true)\n"
+					"bad1.SetLocalizedStringArgument('', 'bad')\n",
+					"let bad2 = game.GetService('Players').LocalPlayer.FindFirstChild('Status', true)\n"
+					"bad2.SetLocalizedStringArgument('long', 'x'.repeat(513))\n",
+					"let bad3 = game.GetService('Players').LocalPlayer.FindFirstChild('Status', true)\n"
+					"bad3.SetLocalizedNumberArgument('nan', NaN)\n",
+					"let bad4 = game.GetService('Players').LocalPlayer.FindFirstChild('Status', true)\n"
+					"bad4.SetLocalizedDateArgument('fraction', 1.5)\n",
+				};
+		for (const std::string &rejected : invalid) {
+			CHECK_FALSE(runtime->Run(rejected.c_str()));
+			CHECK(arguments->Count == 2);
+			CHECK(arguments->Values[0].Name == Name("name"));
+			CHECK(arguments->Values[0].String == "Grace");
+			CHECK(arguments->Values[1].Name == Name("day"));
+			CHECK(arguments->Values[1].UnixSeconds == 86400);
+		}
 	}
 }
 
@@ -783,5 +866,64 @@ TEST_CASE("typing reaches the box and Return says so, in both languages", "[scri
 
 		CHECK(engine::gui::FocusedTextBox(world.Data) == NULL_ENTITY);
 		CHECK(world.Log() == "lost=true,Ada ");
+	}
+}
+
+TEST_CASE(
+	"scripts publish one bounded virtual collection page in both languages", "[scripting][guisurface]"
+) {
+	for (const Language language : LANGUAGES) {
+		INFO((language == Language::Luau ? "luau" : "javascript"));
+
+		Interface world("guisurface.virtual_page");
+		const Entity scrolling = world.Make("ScrollingFrame", "List", world.Screen);
+		const Entity collection = world.Make("UIVirtualCollection", "Rows", scrolling);
+		REQUIRE(collection != NULL_ENTITY);
+
+		const auto runtime = MakeRuntime(world.Data, language);
+		REQUIRE(runtime != nullptr);
+
+		const std::string source =
+			language == Language::Luau
+				? "local rows = game:GetService('Players').LocalPlayer:FindFirstChild('Rows', true)\n"
+				  "rows.ItemCount = 100\n"
+				  "rows:SetVirtualPage(40, 800, {{Key = 'ada', Extent = 25, Fields = {Name = 'Ada', Score = "
+				  "7}}}, 9)\n"
+				: "let rows = game.GetService('Players').LocalPlayer.FindFirstChild('Rows', true)\n"
+				  "rows.ItemCount = 100\n"
+				  "rows.SetVirtualPage(40, 800, [{Key: 'ada', Extent: 25, Fields: {Name: 'Ada', Score: 7}}], "
+				  "9)\n";
+
+		INFO(source);
+		const bool ran = runtime->Run(source.c_str());
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+
+		const engine::gui::VirtualCollection *published =
+			world.Data.Get<engine::gui::VirtualCollection>(collection);
+		REQUIRE(published != nullptr);
+		CHECK(published->Revision == 9);
+		CHECK(published->Page.First == 40);
+		CHECK(published->Page.ExtentBefore == 800.0f);
+		REQUIRE(published->Page.Records.size() == 1);
+		CHECK(published->Page.Records.front().Key == "ada");
+		CHECK(published->Page.Records.front().MeasuredExtent == 25.0f);
+		const engine::ecs::AttributeValue *score =
+			engine::gui::FindVirtualField(published->Page.Records.front(), "Score");
+		REQUIRE(score != nullptr);
+		CHECK(score->Type == engine::ecs::PropertyType::Double);
+		CHECK(score->Double == 7.0);
+
+		// A rejected source must leave the last complete page intact. A provider
+		// that races a bad page with a good one should keep drawing the good page.
+		const std::string invalid =
+			language == Language::Luau
+				? "local rows = game:GetService('Players').LocalPlayer:FindFirstChild('Rows', true)\n"
+				  "rows:SetVirtualPage(101, 0, {}, 10)\n"
+				: "rows.SetVirtualPage(101, 0, [], 10)\n";
+		CHECK_FALSE(runtime->Run(invalid.c_str()));
+		CHECK(published->Revision == 9);
+		CHECK(published->Page.First == 40);
+		CHECK(published->Page.Records.front().Key == "ada");
 	}
 }

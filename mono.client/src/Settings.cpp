@@ -18,6 +18,8 @@ namespace client {
 
 				built.Integer("client.width", defaults.Width, "Window width in logical pixels");
 				built.Integer("client.height", defaults.Height, "Window height in logical pixels");
+				built.Number("client.interface-scale", defaults.InterfaceScale, "Screen interface scale");
+				built.Number("client.text-scale", defaults.TextScale, "Screen text accessibility scale");
 				built.Integer("client.entities", defaults.Entities, "Cubes in the demo scene, per world");
 				built.Integer("client.worlds", defaults.Worlds, "Worlds to simulate and composite");
 				built.Number(
@@ -157,6 +159,8 @@ namespace client {
 
 		options.Width = static_cast<int>(Flag("client.width").Integer());
 		options.Height = static_cast<int>(Flag("client.height").Integer());
+		options.InterfaceScale = static_cast<float>(Flag("client.interface-scale").Number());
+		options.TextScale = static_cast<float>(Flag("client.text-scale").Number());
 		options.Entities = static_cast<uint32_t>(Flag("client.entities").Integer());
 		options.Worlds = static_cast<uint32_t>(Flag("client.worlds").Integer());
 		options.ViewSpacing = static_cast<float>(Flag("client.view-spacing").Number());

@@ -22,12 +22,33 @@ layout(set = 3, binding = 0) uniform Batch {
 	// The collector-space scissor. Unlike a GPU scissor this remains correct
 	// after a `SurfaceGui` plane is projected into perspective.
 	vec4 Clip;
+
+	// The compiler limits `UIMask` nesting to eight. Keeping that same fixed
+	// limit here makes malformed lists unable to grow a fragment uniform block.
+	vec4 MaskBounds[8];
+	vec4 MaskData[8]; // x is the corner radius.
+	vec4 MaskCount; // x is the number of active masks; y is layer opacity.
 } batch;
+
+bool insideRoundedRect(vec2 point, vec4 bounds, float radius) {
+	if (point.x < bounds.x || point.y < bounds.y || point.x > bounds.z || point.y > bounds.w) {
+		return false;
+	}
+	const float capped = min(max(radius, 0.0), min(bounds.z - bounds.x, bounds.w - bounds.y) * 0.5);
+	if (capped <= 0.0) return true;
+	const vec2 nearest = clamp(point, bounds.xy + vec2(capped), bounds.zw - vec2(capped));
+	return dot(point - nearest, point - nearest) <= capped * capped;
+}
 
 void main() {
 	if (inCanvasPosition.x < batch.Clip.x || inCanvasPosition.y < batch.Clip.y ||
 		inCanvasPosition.x > batch.Clip.z || inCanvasPosition.y > batch.Clip.w) {
 		discard;
+	}
+	for (int index = 0; index < int(batch.MaskCount.x); index++) {
+		if (!insideRoundedRect(inCanvasPosition, batch.MaskBounds[index], batch.MaskData[index].x)) {
+			discard;
+		}
 	}
 	const vec4 sampled = texture(interfaceTexture, inUv);
 
@@ -41,6 +62,7 @@ void main() {
 	// coverage. Branching on which would be a divergent branch per fragment to
 	// avoid a multiply by one.
 	outColour = inColour * sampled;
+	outColour.a *= batch.MaskCount.y;
 
 	// **Discard rather than blend a zero.** The interface is drawn back to
 	// front with no depth test, so a fully transparent fragment costs a blend

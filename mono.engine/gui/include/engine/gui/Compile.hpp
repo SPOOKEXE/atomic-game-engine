@@ -21,7 +21,7 @@
 // | Folded in | Why it has to be |
 // |---|---|
 // | The store's address | Two worlds built the same way hash identically |
-// | The screen size and inset | Every `UDim2` resolves against it |
+// | The display profile | Canvas geometry and display-scale cache inputs resolve from it |
 // | Entity id, per row | A destroyed row and a new one may otherwise match |
 // | `Hierarchy` parent, first child, next sibling | The order the flatten descends in |
 // | `InstanceName` | `SortOrder::Name` reads it |
@@ -46,8 +46,14 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/gui/Localization.hpp>
+#include <engine/gui/ShapedText.hpp>
+#include <engine/gui/Style.hpp>
 
 #include <cstdint>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -68,6 +74,13 @@ namespace engine::gui {
 	struct CompileRequest {
 		// The screen a `ScreenGui` collects onto.
 		Screen Display;
+
+		// Viewer-local catalogue and locale. The catalogue remains outside ECS so
+		// a client can select a language without mutating replicated UI state.
+		const LocalizationCatalogue *Catalogue = nullptr;
+		std::string Locale;
+		bool StudioMissingLocalizationMarker = false;
+		const FontPackage *Fonts = nullptr;
 
 		// The element the pointer is over, or null.
 		//
@@ -131,6 +144,27 @@ namespace engine::gui {
 	// @since v0.8
 	class Compiled {
 	  public:
+		// Work performed while bringing this retained list up to date. These are
+		// deliberately cumulative so a host and a test can prove an unchanged
+		// frame did not run a derived-state pass behind a compile cache hit.
+		struct WorkCounters {
+			size_t BindingEvaluations = 0;
+			size_t PresentationAdvances = 0;
+			size_t VirtualAnchorReconciliations = 0;
+			size_t Layouts = 0;
+		};
+
+		// One conservative changed rectangle for a collector. It contains both
+		// the old and new visible pixels, so a retained target can repaint it
+		// without leaving a removed command behind.
+		//
+		// @since v0.22
+		struct DamageRegion {
+			ecs::Entity Collector;
+			core::Rect Bounds;
+			bool Spatial = false;
+		};
+
 		// Brings the list up to date, rebuilding only if it has to.
 		//
 		// @param store   The world.
@@ -156,6 +190,17 @@ namespace engine::gui {
 		// The list, whether or not this frame rebuilt it.
 		const DrawList &Commands() const {
 			return List;
+		}
+
+		// Regions changed by the most recent successful rebuild. They stay empty
+		// on a cache hit. A false return from `DamageValid` tells an adapter to
+		// repaint its whole collector and leaves the last usable baseline intact.
+		const std::vector<DamageRegion> &Damage() const {
+			return DamageRegions;
+		}
+
+		bool DamageValid() const {
+			return DamageReady;
 		}
 
 		// The signature of what the list was built from.
@@ -186,6 +231,10 @@ namespace engine::gui {
 			return Asked;
 		}
 
+		const WorkCounters &Work() const {
+			return WorkDone;
+		}
+
 		// Forgets the signature so the next `Rebuild` rebuilds.
 		//
 		// For a caller whose *backend* state was lost - a device reset, a
@@ -195,13 +244,30 @@ namespace engine::gui {
 			Stamp = 0;
 			Fresh = false;
 			NoCollectors = false;
+			DamageRegions.clear();
+			DamagePrevious.clear();
+			DamageReady = true;
 		}
 
 	  private:
+		struct DamageBaseline {
+			ecs::Entity Collector;
+			core::Rect Bounds;
+			bool Spatial = false;
+			uint64_t Signature = 0;
+		};
+
 		DrawList List;
+		std::vector<DamageRegion> DamageRegions;
+		std::vector<DamageBaseline> DamagePrevious;
+		bool DamageReady = true;
 		uint64_t Stamp = 0;
+		uint64_t LayoutStamp = 0;
 		size_t Built = 0;
 		size_t Asked = 0;
+		WorkCounters WorkDone;
+		uint64_t DynamicEpoch = 0;
+		bool DynamicFresh = false;
 
 		// Whether `Stamp` came from a real scan rather than from the initial
 		// zero. Without it, a world whose scan genuinely hashes to zero would
@@ -210,6 +276,11 @@ namespace engine::gui {
 		// Whether the last request proved the store had no layer collectors.
 		bool NoCollectors = false;
 	};
+
+	// Collects the visual properties directly authored on an instance. Style
+	// inspection uses this rather than guessing whether an engine-default value
+	// was explicitly assigned.
+	void CollectDirectStyleValues(const ecs::Store &store, ecs::Entity instance, StyleSet &out);
 
 	// Every shader an `ImageLabel` or `ImageButton` in this world names,
 	// without duplicates.

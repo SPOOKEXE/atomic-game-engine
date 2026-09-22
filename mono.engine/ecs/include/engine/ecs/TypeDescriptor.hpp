@@ -216,6 +216,14 @@ namespace engine::ecs {
 		// the values unspecified but valid - never a partial object.
 		void (*Read)(core::ByteReader &reader, void *destination, size_t count) = nullptr;
 
+		// The greatest number of bytes one value's ordinary Write callback can
+		// emit. Zero means that the callback has no declared bound.
+		//
+		// Replication uses this only to admit a variable-sized row to its
+		// chunked snapshot path. Save and Load keep calling Write and Read, so
+		// this is not a second format and cannot make a saved value lossy.
+		uint32_t MaximumSerialisedBytes = 0;
+
 		// The compact form this type crosses a replication wire in, if it has
 		// one. Empty means the wire carries `Write`'s bytes unchanged.
 		//

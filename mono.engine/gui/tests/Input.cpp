@@ -3,6 +3,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/Modal.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/testing/Suite.hpp>
@@ -115,6 +116,329 @@ namespace {
 			return false;
 		}
 	};
+}
+
+TEST_CASE("semantic actions navigate and activate the selected control", "[gui][input][semantic]") {
+	World world("gui_input.semantic");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity first = world.Make("TextButton", screen);
+	const Entity second = world.Make("TextButton", screen);
+	world.Box(first, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(second, 0.0f, 80.0f, 80.0f, 40.0f);
+	world.Data.GetMutable<Element>(first)->Selectable = true;
+	world.Data.GetMutable<Element>(second)->Selectable = true;
+	world.Compile();
+
+	const auto moved = world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(moved.empty());
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == first);
+
+	const auto activated =
+		world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Activate);
+	const std::vector<GuiEvent> events(activated.begin(), activated.end());
+	CHECK_FALSE(world.Has(events, EventKind::InputBegan, first));
+	CHECK_FALSE(world.Has(events, EventKind::InputEnded, first));
+	CHECK(world.Has(events, EventKind::Activated, first));
+}
+
+TEST_CASE("semantic activation refuses stale and non-interactable selections", "[gui][input][semantic]") {
+	World world("gui_input.semantic_refusal");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+	world.Box(button, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Data.GetMutable<Element>(button)->Selectable = true;
+	world.Compile();
+	REQUIRE(Select(world.Data, button));
+
+	world.Data.GetMutable<Element>(button)->Interactable = false;
+	const auto disabled =
+		world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Activate);
+	CHECK(disabled.empty());
+
+	world.Data.GetMutable<Element>(button)->Interactable = true;
+	world.Data.GetMutable<Element>(button)->Visible = false;
+	world.Compile();
+	const auto hidden =
+		world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Activate);
+	CHECK(hidden.empty());
+}
+
+TEST_CASE("semantic targets require a visible current modal control", "[gui][input][semantic][modal]") {
+	World world("gui_input.semantic_target");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity outside = world.Make("TextButton", screen);
+	const Entity dialog = world.Make("Frame", screen);
+	const Entity scope = world.Make("UIModalScope", dialog);
+	const Entity inside = world.Make("TextButton", dialog);
+	world.Box(outside, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(dialog, 100.0f, 0.0f, 100.0f, 80.0f);
+	world.Box(inside, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Data.GetMutable<Element>(outside)->Selectable = true;
+	world.Data.GetMutable<Element>(inside)->Selectable = true;
+	world.Data.Set(scope, ModalScope{});
+	world.Compile();
+
+	CHECK(world.Route.UpdateSemantic(world.Data, world.List.Commands(), outside, SemanticAction::Activate)
+			  .empty());
+	const auto activated =
+		world.Route.UpdateSemantic(world.Data, world.List.Commands(), inside, SemanticAction::Activate);
+	CHECK(world.Has(std::vector<GuiEvent>(activated.begin(), activated.end()), EventKind::Activated, inside));
+
+	world.Data.GetMutable<Element>(inside)->Visible = false;
+	world.Compile();
+	CHECK(world.Route.UpdateSemantic(world.Data, world.List.Commands(), inside, SemanticAction::Activate)
+			  .empty());
+}
+
+TEST_CASE("semantic focus only reaches a currently visible text field", "[gui][input][semantic]") {
+	World world("gui_input.semantic_focus");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity field = world.Make("TextBox", screen);
+	world.Box(field, 0.0f, 0.0f, 160.0f, 40.0f);
+	world.Compile();
+
+	const auto focused =
+		world.Route.UpdateSemantic(world.Data, world.List.Commands(), field, SemanticAction::Focus);
+	CHECK(world.Has(std::vector<GuiEvent>(focused.begin(), focused.end()), EventKind::Focused, field));
+	CHECK(FocusedTextBox(world.Data) == field);
+
+	world.Data.GetMutable<Element>(field)->Visible = false;
+	world.Compile();
+	CHECK(
+		world.Route.UpdateSemantic(world.Data, world.List.Commands(), field, SemanticAction::Focus).empty()
+	);
+}
+
+TEST_CASE("a cancelled touch ends capture without activating its button", "[gui][input][touch]") {
+	World world("gui_input.touch_cancel");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+	world.Box(button, 0.0f, 0.0f, 80.0f, 40.0f);
+
+	world.Compile();
+	Pointer down;
+	down.Position = Vector2{20.0f, 20.0f};
+	down.Down = true;
+	const auto began = world.Route.Update(world.Data, world.List.Commands(), down);
+	CHECK(world.Has(std::vector<GuiEvent>(began.begin(), began.end()), EventKind::InputBegan, button));
+
+	Pointer cancelled;
+	cancelled.Position = Vector2{20.0f, 20.0f};
+	cancelled.Cancelled = true;
+	const auto ended = world.Route.Update(world.Data, world.List.Commands(), cancelled);
+	const std::vector<GuiEvent> events(ended.begin(), ended.end());
+	CHECK(world.Has(events, EventKind::InputEnded, button));
+	CHECK_FALSE(world.Has(events, EventKind::Activated, button));
+	CHECK(world.Route.Pressed() == NULL_ENTITY);
+}
+
+TEST_CASE("a modal scope blocks outside pointer and semantic targets", "[gui][input][modal]") {
+	World world("gui_input.modal");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity outside = world.Make("TextButton", screen);
+	const Entity dialog = world.Make("Frame", screen);
+	const Entity scope = world.Make("UIModalScope", dialog);
+	const Entity inside = world.Make("TextButton", dialog);
+	world.Box(outside, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(dialog, 100.0f, 0.0f, 100.0f, 80.0f);
+	world.Box(inside, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Data.GetMutable<Element>(outside)->Selectable = true;
+	world.Data.GetMutable<Element>(inside)->Selectable = true;
+	world.Data.Set(scope, ModalScope{});
+	REQUIRE(Select(world.Data, outside));
+
+	world.Compile();
+	Pointer down;
+	down.Position = Vector2{20.0f, 20.0f};
+	down.Down = true;
+	CHECK(world.Route.Update(world.Data, world.List.Commands(), down).empty());
+	CHECK(world.Route.Pressed() == NULL_ENTITY);
+
+	const auto moved = world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(moved.empty());
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == inside);
+
+	world.Data.GetMutable<ModalScope>(scope)->Enabled = false;
+	world.Compile();
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == outside);
+}
+
+TEST_CASE("a modal only constrains its own collector", "[gui][input][modal]") {
+	World world("gui_input.modal_collectors");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity screenButton = world.Make("TextButton", screen);
+	const Entity firstSurface = world.Make("ScreenGui");
+	const Entity dialog = world.Make("Frame", firstSurface);
+	const Entity scope = world.Make("UIModalScope", dialog);
+	const Entity dialogButton = world.Make("TextButton", dialog);
+	const Entity secondSurface = world.Make("ScreenGui");
+	const Entity secondButton = world.Make("TextButton", secondSurface);
+
+	SpatialCanvas spatial;
+	spatial.Size = Vector2{100.0f, 100.0f};
+	world.Data.Set(firstSurface, spatial);
+	world.Data.Set(secondSurface, spatial);
+	world.Data.Set(scope, ModalScope{});
+	world.Data.GetMutable<Element>(screenButton)->Selectable = true;
+	world.Data.GetMutable<Element>(dialogButton)->Selectable = true;
+	world.Data.GetMutable<Element>(secondButton)->Selectable = true;
+
+	DrawList list;
+	const auto add = [&](Entity source, Entity collector) {
+		DrawCommand command;
+		command.Kind = DrawKind::Rectangle;
+		command.Source = source;
+		command.Collector = collector;
+		command.Bounds = engine::core::Rect{0.0f, 0.0f, 80.0f, 40.0f};
+		command.Clip = command.Bounds;
+		list.Commands.push_back(command);
+	};
+	add(screenButton, screen);
+	add(dialog, firstSurface);
+	add(dialogButton, firstSurface);
+	add(secondButton, secondSurface);
+
+	REQUIRE(Select(world.Data, screenButton));
+	const auto semantic = world.Route.UpdateSemantic(world.Data, list, SemanticAction::Activate);
+	CHECK(
+		world.Has(std::vector<GuiEvent>(semantic.begin(), semantic.end()), EventKind::Activated, screenButton)
+	);
+
+	Pointer screenPointer;
+	screenPointer.Position = Vector2{20.0f, 20.0f};
+	screenPointer.Down = true;
+	screenPointer.ScreenOnly = true;
+	const auto screenEvents = world.Route.Update(world.Data, list, screenPointer);
+	CHECK(world.Has(
+		std::vector<GuiEvent>(screenEvents.begin(), screenEvents.end()), EventKind::InputBegan, screenButton
+	));
+
+	Pointer release = screenPointer;
+	release.Down = false;
+	world.Route.Update(world.Data, list, release);
+
+	Pointer secondPointer;
+	secondPointer.Position = Vector2{20.0f, 20.0f};
+	secondPointer.Down = true;
+	secondPointer.Collector = secondSurface;
+	const auto secondEvents = world.Route.Update(world.Data, list, secondPointer);
+	CHECK(world.Has(
+		std::vector<GuiEvent>(secondEvents.begin(), secondEvents.end()), EventKind::InputBegan, secondButton
+	));
+}
+
+TEST_CASE("ambiguous modal collectors do not seed semantic selection", "[gui][input][modal]") {
+	World world("gui_input.ambiguous_modal_collectors");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity outside = world.Make("TextButton", screen);
+	const Entity first = world.Make("ScreenGui");
+	const Entity firstDialog = world.Make("Frame", first);
+	const Entity firstScope = world.Make("UIModalScope", firstDialog);
+	const Entity firstButton = world.Make("TextButton", firstDialog);
+	const Entity second = world.Make("ScreenGui");
+	const Entity secondDialog = world.Make("Frame", second);
+	const Entity secondScope = world.Make("UIModalScope", secondDialog);
+	const Entity secondButton = world.Make("TextButton", secondDialog);
+	world.Data.Set(firstScope, ModalScope{});
+	world.Data.Set(secondScope, ModalScope{});
+	world.Data.GetMutable<Element>(outside)->Selectable = true;
+	world.Data.GetMutable<Element>(firstButton)->Selectable = true;
+	world.Data.GetMutable<Element>(secondButton)->Selectable = true;
+
+	DrawList list;
+	const auto add = [&](Entity source, Entity collector) {
+		DrawCommand command;
+		command.Kind = DrawKind::Rectangle;
+		command.Source = source;
+		command.Collector = collector;
+		command.Bounds = engine::core::Rect{0.0f, 0.0f, 80.0f, 40.0f};
+		command.Clip = command.Bounds;
+		list.Commands.push_back(command);
+	};
+	add(outside, screen);
+	add(firstDialog, first);
+	add(firstButton, first);
+	add(secondDialog, second);
+	add(secondButton, second);
+
+	world.Route.UpdateSemantic(world.Data, list, SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == NULL_ENTITY);
+}
+
+TEST_CASE("nested modal scopes restore only after the final scope closes", "[gui][input][modal]") {
+	World world("gui_input.nested_modal_restore");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity outside = world.Make("TextButton", screen);
+	const Entity dialog = world.Make("Frame", screen);
+	const Entity outerScope = world.Make("UIModalScope", dialog);
+	const Entity outerButton = world.Make("TextButton", dialog);
+	const Entity nested = world.Make("Frame", dialog);
+	const Entity nestedScope = world.Make("UIModalScope", nested);
+	const Entity nestedButton = world.Make("TextButton", nested);
+	world.Box(outside, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(dialog, 100.0f, 0.0f, 100.0f, 80.0f);
+	world.Box(outerButton, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(nested, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(nestedButton, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Data.GetMutable<Element>(outside)->Selectable = true;
+	world.Data.GetMutable<Element>(outerButton)->Selectable = true;
+	world.Data.GetMutable<Element>(nestedButton)->Selectable = true;
+	world.Data.Set(outerScope, ModalScope{});
+	world.Data.Set(nestedScope, ModalScope{.Enabled = false});
+	REQUIRE(Select(world.Data, outside));
+
+	world.Compile();
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == outerButton);
+
+	world.Data.GetMutable<ModalScope>(nestedScope)->Enabled = true;
+	world.Compile();
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == nestedButton);
+
+	world.Data.GetMutable<ModalScope>(nestedScope)->Enabled = false;
+	world.Compile();
+	world.Route.UpdateSemantic(world.Data, world.List.Commands(), SemanticAction::Down);
+	// Closing the inner scope leaves its selection valid in the outer scope.
+	// The pre-modal selection belongs to the whole stack and returns only when
+	// the outer scope closes.
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject != outside);
+
+	world.Data.GetMutable<ModalScope>(outerScope)->Enabled = false;
+	world.Compile();
+	Pointer idle;
+	idle.Inside = false;
+	world.Route.Update(world.Data, world.List.Commands(), idle);
+	CHECK(world.Data.Get<GuiServiceState>(GuiServiceOf(world.Data))->SelectedObject == outside);
+}
+
+TEST_CASE("opening a modal cancels its collector capture", "[gui][input][modal]") {
+	World world("gui_input.modal_capture");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+	const Entity dialog = world.Make("Frame", screen);
+	const Entity scope = world.Make("UIModalScope", dialog);
+	world.Box(button, 0.0f, 0.0f, 80.0f, 40.0f);
+	world.Box(dialog, 100.0f, 0.0f, 80.0f, 40.0f);
+	world.Data.Set(scope, ModalScope{.Enabled = false});
+
+	world.Compile();
+	Pointer down;
+	down.Position = Vector2{20.0f, 20.0f};
+	down.Down = true;
+	world.Route.Update(world.Data, world.List.Commands(), down);
+	REQUIRE(world.Route.Pressed() == button);
+
+	world.Data.GetMutable<ModalScope>(scope)->Enabled = true;
+	world.Compile();
+	world.Route.Update(world.Data, world.List.Commands(), down);
+	CHECK(world.Route.Pressed() == NULL_ENTITY);
+
+	Pointer up = down;
+	up.Down = false;
+	const auto events = world.Route.Update(world.Data, world.List.Commands(), up);
+	CHECK_FALSE(world.Has(std::vector<GuiEvent>(events.begin(), events.end()), EventKind::Activated, button));
 }
 
 TEST_CASE("a button takes the click and a plain frame does not", "[gui][input]") {
@@ -615,6 +939,31 @@ TEST_CASE("screen and spatial picks stay inside their collector", "[gui][input]"
 	CHECK(PickScreen(world.Data, list, point) == screenButton);
 	CHECK(PickInCollector(world.Data, list, spatialCollector, point) == spatialButton);
 	CHECK(PickInCollector(world.Data, list, screen, point) == screenButton);
+}
+
+TEST_CASE("visible screen pick selects decorative elements in paint order", "[gui][input]") {
+	World world("gui_input.visible_screen_pick");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	const Entity spatial = world.Make("Frame", screen);
+
+	DrawList list;
+	DrawCommand decoration;
+	decoration.Kind = DrawKind::Rectangle;
+	decoration.Source = frame;
+	decoration.Collector = screen;
+	decoration.Bounds = engine::core::Rect{0.0f, 0.0f, 100.0f, 100.0f};
+	decoration.Clip = decoration.Bounds;
+	list.Commands.push_back(decoration);
+
+	DrawCommand projected = decoration;
+	projected.Source = spatial;
+	projected.Spatial = true;
+	list.Commands.push_back(projected);
+
+	const Vector2 point{50.0f, 50.0f};
+	CHECK(PickScreen(world.Data, list, point) == NULL_ENTITY);
+	CHECK(PickVisibleScreen(list, point) == frame);
 }
 
 namespace {

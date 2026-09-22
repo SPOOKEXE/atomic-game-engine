@@ -51,6 +51,7 @@
 #include <engine/world/PresentationStream.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <client/Accessibility.hpp>
 #include <client/Actions.hpp>
 #include <client/ActiveScenes.hpp>
 #include <client/Compositor.hpp>
@@ -441,6 +442,7 @@ namespace client {
 		int64_t DiscordStartedUnixSeconds = 0;
 
 		SDL_Window *Window = nullptr;
+		std::unique_ptr<AccessibilityAdapter> NativeAccessibility;
 		engine::render::Renderer Renderer;
 
 		// One compiler retains each world's accepted material and lens modules.
@@ -475,6 +477,7 @@ namespace client {
 		// the viewer, and `--worlds N` places four *views* rather than four
 		// overlays.
 		engine::render::InterfacePass Interface;
+		engine::gui::FontPackage InterfaceFonts;
 		engine::render::ViewportFrames ViewportImages;
 
 		// Whether the interface pass has been given its image resolver. Set
@@ -526,6 +529,9 @@ namespace client {
 		// nothing to compare it against and rebuild every time - every cost of
 		// the design and none of its benefit.
 		engine::gui::Compiled InterfaceList;
+		engine::gui::LocalizationCache InterfaceLocalization;
+		engine::world::WorldId InterfaceViewportWorld;
+		bool InterfaceHasViewport = false;
 
 		// Where the pointer is, for the world's own interface. Long-lived: it
 		// holds the hover and the press across frames.

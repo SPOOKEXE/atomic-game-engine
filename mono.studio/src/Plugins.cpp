@@ -1,22 +1,28 @@
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Typing.hpp>
+#include <engine/render/TextureTable.hpp>
 #include <engine/scripthost/Runtime.hpp>
+#include <engine/ui/Fonts.hpp>
 #include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Metrics.hpp>
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <fstream>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <studio/Config.hpp>
@@ -1779,6 +1785,16 @@ namespace studio {
 	}
 
 	void Editor::DrawPluginWidgets() {
+		constexpr size_t MAXIMUM_PLUGIN_GROUP_IMAGE_CACHE_BYTES = 64u * 1024u * 1024u;
+		const uint64_t resourceRevision = Renderer.ResourceRevision();
+		size_t groupImageCacheBytes = 0;
+		for (PluginPresentation *plugin : Plugins) {
+			for (PluginWidget &widget : plugin->Widgets) {
+				widget.GroupImages.BeginRevision(resourceRevision);
+				groupImageCacheBytes += widget.GroupImages.Size();
+			}
+		}
+
 		size_t viewportImageSlot = PreviewSlot() + 1;
 		for (PluginPresentation *pluginPointer : Plugins) {
 			PluginPresentation &plugin = *pluginPointer;
@@ -1943,15 +1959,46 @@ namespace studio {
 							request.Hovered = widget.GuiRouter.Hovered();
 							request.Pressed = widget.GuiRouter.Pressed();
 							request.Seconds = engine::core::Clock::Seconds();
+							request.Fonts = &engine::ui::GuiFontPackage();
 							widget.GuiList.RebuildCollector(store, widget.Gui, request);
 
 							const size_t renderedViewports = ViewportImages.Render(
 								Renderer, store, widget.GuiList.Commands(), viewportImageSlot
 							);
 							viewportImageSlot += renderedViewports;
+							const bool groupSampling = std::any_of(
+								widget.GuiList.Commands().Operations.begin(),
+								widget.GuiList.Commands().Operations.end(),
+								[](const engine::gui::DrawOperation &operation) {
+									return operation.Kind == engine::gui::DrawOperationKind::BeginGroup;
+								}
+							);
+
+							if (!groupSampling) {
+								groupImageCacheBytes -= widget.GroupImages.Clear();
+							}
 
 							engine::ui::ImageSource images;
-							images.Resolve = [this](const engine::core::Name &name) {
+							images.Fonts = request.Fonts;
+							images.CompiledSignature = widget.GuiList.Signature();
+							images.Revision = resourceRevision;
+							for (const engine::gui::DrawCommand &command :
+								 widget.GuiList.Commands().Commands) {
+								if (command.Kind != engine::gui::DrawKind::Image) continue;
+								const engine::render::FlipbookCell cell =
+									Renderer.TextureCell(command.Image, AnimationSeconds);
+								images.Revision ^= static_cast<uint64_t>(std::hash<float>{}(cell.OffsetU));
+								images.Revision ^= static_cast<uint64_t>(std::hash<float>{}(cell.OffsetV))
+												   << 1u;
+								images.Revision ^= static_cast<uint64_t>(std::hash<float>{}(cell.Scale))
+												   << 2u;
+							}
+							PluginGroupImageCache &groupImages = widget.GroupImages;
+							images.Resolve = [this,
+											  groupSampling,
+											  resourceRevision,
+											  &groupImages,
+											  &groupImageCacheBytes](const engine::core::Name &name) {
 								engine::ui::ImageSource::Resolved resolved;
 								resolved.Texture =
 									reinterpret_cast<ImTextureID>(Renderer.TextureHandle(name));
@@ -1964,7 +2011,66 @@ namespace studio {
 								resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
 								resolved.CellMax =
 									ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);
+								const uintptr_t key = static_cast<uintptr_t>(resolved.Texture);
+								if (groupSampling && key != 0 &&
+									groupImages.NeedsCopy(resourceRevision, key, name) &&
+									groupImageCacheBytes < MAXIMUM_PLUGIN_GROUP_IMAGE_CACHE_BYTES) {
+									groupImageCacheBytes -= groupImages.Remove(key);
+									engine::assets::TextureData copy;
+									const size_t remaining = std::min(
+										MAXIMUM_PLUGIN_GROUP_IMAGE_CACHE_BYTES - groupImageCacheBytes,
+										PluginGroupImageCache::MAXIMUM_BYTES - groupImages.Size()
+									);
+									if (Renderer.CopyTexture(name, copy, remaining) ==
+											engine::render::TextureCopyStatus::Copied &&
+										copy.IsValid()) {
+										const size_t copiedBytes = copy.Pixels.size();
+										if (groupImages.Store(key, name, std::move(copy), remaining)) {
+											groupImageCacheBytes += copiedBytes;
+										} else {
+											groupImages.MarkUnavailable(key, name);
+										}
+									} else {
+										groupImages.MarkUnavailable(key, name);
+									}
+								}
 								return resolved;
+							};
+							images.Sample = [&groupImages](
+												ImTextureID texture,
+												const ImVec2 &uv,
+												float &red,
+												float &green,
+												float &blue,
+												float &alpha
+											) {
+								const engine::assets::TextureData *image =
+									groupImages.Find(static_cast<uintptr_t>(texture));
+								if (image == nullptr) return false;
+								if (!image->IsValid() || image->Width == 0 || image->Height == 0)
+									return false;
+								const uint32_t x = std::min(
+									static_cast<uint32_t>(std::clamp(uv.x, 0.0f, 1.0f) * image->Width),
+									image->Width - 1
+								);
+								const uint32_t y = std::min(
+									static_cast<uint32_t>(std::clamp(uv.y, 0.0f, 1.0f) * image->Height),
+									image->Height - 1
+								);
+								const std::byte *pixel =
+									image->Pixels.data() + (static_cast<size_t>(y) * image->Width + x) *
+															   engine::assets::BytesPerPixel(image->Format);
+								if (image->Format == engine::assets::TextureFormat::R8) {
+									red = green = blue =
+										static_cast<float>(std::to_integer<uint8_t>(*pixel)) / 255.0f;
+									alpha = 1.0f;
+								} else {
+									red = static_cast<float>(std::to_integer<uint8_t>(pixel[0])) / 255.0f;
+									green = static_cast<float>(std::to_integer<uint8_t>(pixel[1])) / 255.0f;
+									blue = static_cast<float>(std::to_integer<uint8_t>(pixel[2])) / 255.0f;
+									alpha = static_cast<float>(std::to_integer<uint8_t>(pixel[3])) / 255.0f;
+								}
+								return true;
 							};
 							images.ResolveViewport = [this](Entity instance) {
 								const engine::render::InterfaceImage image = ViewportImages.Resolve(instance);

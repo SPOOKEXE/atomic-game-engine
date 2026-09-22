@@ -15,6 +15,32 @@ namespace studio {
 	using engine::core::Vector3;
 	using engine::world::WorldId;
 
+	engine::gui::Screen
+	ResolveGuiPreviewScreen(GuiPreviewSettings settings, float panelWidth, float panelHeight) {
+		engine::gui::Screen screen;
+		switch (settings.Profile) {
+		case GuiPreviewProfile::Desktop:
+			screen.Width = panelWidth;
+			screen.Height = panelHeight;
+			break;
+		case GuiPreviewProfile::Phone:
+			screen.Width = 390.0f;
+			screen.Height = 844.0f;
+			screen.SafeArea.Top = 47.0f;
+			screen.SafeArea.Bottom = 34.0f;
+			break;
+		case GuiPreviewProfile::Tablet:
+			screen.Width = 1024.0f;
+			screen.Height = 1366.0f;
+			screen.SafeArea.Top = 24.0f;
+			screen.SafeArea.Bottom = 20.0f;
+			break;
+		}
+		screen.InterfaceScale = std::max(0.1f, settings.InterfaceScale);
+		screen.TextScale = std::max(0.1f, settings.TextScale);
+		return screen;
+	}
+
 	bool ViewportDirectionControls::WireframeContains(float x, float y) const {
 		return x >= WireframeLeft && x <= WireframeRight && y >= WireframeTop && y <= WireframeBottom;
 	}

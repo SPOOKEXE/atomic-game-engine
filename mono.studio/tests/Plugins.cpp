@@ -55,6 +55,7 @@ using studio::PluginBindingRegistry;
 using studio::PluginButton;
 using studio::PluginControlKind;
 using studio::PluginDock;
+using studio::PluginGroupImageCache;
 using studio::PluginManifest;
 using studio::PluginRunTarget;
 using studio::PluginToolbar;
@@ -142,6 +143,36 @@ namespace {
 		INFO(error);
 		return plugin;
 	}
+}
+
+TEST_CASE("CanvasGroup image sources are copied once per renderer revision", "[studio][plugins]") {
+	PluginGroupImageCache cache;
+	const Name asset("test.plugin.group-image");
+	constexpr uint64_t revision = 17;
+	constexpr uintptr_t texture = 91;
+	size_t copies = 0;
+
+	auto resolve = [&] {
+		cache.BeginRevision(revision);
+		if (!cache.NeedsCopy(revision, texture, asset)) {
+			return;
+		}
+		copies++;
+		engine::assets::TextureData image;
+		image.Width = 1;
+		image.Height = 1;
+		image.Pixels.resize(4);
+		REQUIRE(cache.Store(texture, asset, std::move(image), PluginGroupImageCache::MAXIMUM_BYTES));
+	};
+
+	resolve();
+	const size_t copiesBeforeUnchangedFrame = copies;
+	resolve();
+	CHECK(copies - copiesBeforeUnchangedFrame == 0);
+	CHECK(copies == 1);
+
+	cache.BeginRevision(revision + 1);
+	CHECK(cache.NeedsCopy(revision + 1, texture, asset));
 }
 
 // --- the manifest --------------------------------------------------------------

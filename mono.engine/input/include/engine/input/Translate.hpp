@@ -28,6 +28,19 @@
 
 namespace engine::input {
 
+	// The platform-owned text that is visible while an input method has not
+	// committed it yet. Positions are UTF-8 character offsets as SDL reports
+	// them, and the revision lets a consumer distinguish a retained preedit from
+	// a new platform update.
+	struct TextComposition {
+		static constexpr size_t MAXIMUM_BYTES = 4096;
+
+		std::string_view Text;
+		int32_t Start = -1;
+		int32_t Length = -1;
+		uint64_t Revision = 0;
+	};
+
 	// Accumulates SDL events into one frame's input state.
 	//
 	// **A class rather than a free function, because a frame has a shape**: the
@@ -114,6 +127,16 @@ namespace engine::input {
 			return Typed;
 		}
 
+		// The input method's current uncommitted text.
+		//
+		// **A level rather than a frame delta.** SDL only sends an editing event
+		// when the candidate changes, so clearing this in `BeginFrame` would make
+		// preedit disappear between platform events. A committed text event,
+		// an empty editing event, or losing window focus clears it instead.
+		TextComposition Composition() const {
+			return TextComposition{Preedit, PreeditStart, PreeditLength, PreeditRevision};
+		}
+
 		// Clears every key and button, and this frame's typed text with them.
 		//
 		// **What losing focus does.** Alt-tabbing away while holding W must not
@@ -145,6 +168,14 @@ namespace engine::input {
 		// This frame's text, accumulated across however many
 		// `SDL_EVENT_TEXT_INPUT` events arrived.
 		std::string Typed;
+
+		// The bounded preedit retained across frames until SDL replaces or commits
+		// it. It belongs to this platform adapter and is forwarded to GUI as a
+		// viewer-local derived value.
+		std::string Preedit;
+		int32_t PreeditStart = -1;
+		int32_t PreeditLength = -1;
+		uint64_t PreeditRevision = 0;
 	};
 
 	// The key an SDL keycode names, or `Unknown`.

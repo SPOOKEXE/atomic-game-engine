@@ -27,7 +27,9 @@
 #include <engine/gui/DrawList.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GlyphAtlas.hpp>
+#include <engine/render/ShapedGlyphAtlas.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -102,6 +104,16 @@ namespace engine::render {
 		}
 	};
 
+	// One rounded ancestor clip carried by an interface batch. `gui::Compiled`
+	// refuses a ninth nesting level, so the renderer can use a fixed array and
+	// keep the fragment contract bounded.
+	struct InterfaceMask {
+		core::Rect Bounds;
+		float CornerRadius = 0.0f;
+	};
+
+	inline constexpr size_t MAXIMUM_INTERFACE_MASKS = 8;
+
 	// Converts a canvas-space clip into the target's device pixels.
 	//
 	// **The two are the same number only when the caller laid the interface out
@@ -139,6 +151,10 @@ namespace engine::render {
 		//@{
 		uint32_t FirstIndex = 0;
 		uint32_t IndexCount = 0;
+
+		// The first draw-list command contributing indices to this batch. Ordered
+		// collector ranges use it to select exactly one retained paint island.
+		size_t FirstCommand = 0;
 		//@}
 
 		// The scissor, in canvas pixels.
@@ -179,6 +195,16 @@ namespace engine::render {
 		//
 		// @since v0.18
 		gui::ResampleMode Resample = gui::ResampleMode::Default;
+
+		// A coverage page produced from `DrawCommand::Shaping`, or `UINT16_MAX`
+		// for the long-lived editor atlas and ordinary images. Pages are separate
+		// textures, so page identity has to take part in batching.
+		uint16_t ShapedPage = UINT16_MAX;
+
+		// The active rounded `UIMask` ancestors at this paint position. A batch
+		// splits on this state because it is fragment state, not vertex data.
+		std::array<InterfaceMask, MAXIMUM_INTERFACE_MASKS> Masks{};
+		uint8_t MaskCount = 0;
 	};
 
 	// The source-pixel extent of an image after selecting its animation cell.
@@ -227,7 +253,10 @@ namespace engine::render {
 			const gui::DrawList &list,
 			const GlyphAtlas &atlas,
 			const std::function<InterfaceImageInfo(const core::Name &)> &images = {},
-			const std::function<InterfaceImageInfo(ecs::Entity)> &viewports = {}
+			const std::function<InterfaceImageInfo(ecs::Entity)> &viewports = {},
+			ShapedGlyphAtlas *shapedAtlas = nullptr,
+			const gui::FontPackage *fonts = nullptr,
+			uint64_t shapedUse = 0
 		);
 
 		// The vertices, valid until the next `Build`.

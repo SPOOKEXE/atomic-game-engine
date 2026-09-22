@@ -2500,6 +2500,10 @@ declare task: {
 				out << "\tfunction VirtualText(self, text: string): ()\n";
 				out << "\tfunction VirtualSubmit(self): ()\n";
 			}
+			if (name == "UIVirtualCollection") {
+				out << "\tfunction SetVirtualPage(self, first: number, extentBefore: number, records: { { "
+					   "Key: string, Extent: number?, Fields: { [string]: any } } }, revision: number): ()\n";
+			}
 
 			// The member only the Workspace answers, for the reason
 			// `LuauInstances.cpp` keeps it in a table of its own: a `Raycast` on a
@@ -4154,6 +4158,10 @@ declare const task: {
 				out << "\tVirtualUnfocus(): void;\n";
 				out << "\tVirtualText(text: string): void;\n";
 				out << "\tVirtualSubmit(): void;\n";
+			}
+			if (name == "UIVirtualCollection") {
+				out << "\tSetVirtualPage(first: number, extentBefore: number, records: { Key: string; "
+					   "Extent?: number; Fields: Record<string, unknown> }[], revision: number): void;\n";
 			}
 
 			// The member only the Workspace answers, matching the Luau half.

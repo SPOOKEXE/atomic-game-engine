@@ -7,6 +7,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/render/ViewportFramePolicy.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -23,6 +24,32 @@ using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::render::CollectViewportInstances;
 using engine::scene::DrawInstance;
+
+TEST_CASE("ViewportFrame cache modes refresh only on their declared schedule", "[render][viewportframe]") {
+	using engine::gui::ViewportUpdateMode;
+	using engine::render::ViewportFrameCache;
+	using engine::render::ViewportFrameTargetOwner;
+
+	ViewportFrameCache cache;
+	CHECK(cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 11, 1));
+	cache.Commit(11, 1, 0);
+	CHECK_FALSE(cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 11, 2));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 12, 2));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::EveryFrame, 1, 0, 11, 2));
+	CHECK_FALSE(cache.NeedsRender(ViewportUpdateMode::FixedRate, 3, 0, 11, 3));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::FixedRate, 3, 0, 11, 4));
+	CHECK_FALSE(cache.NeedsRender(ViewportUpdateMode::Manual, 1, 0, 11, 100));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::Manual, 1, 1, 11, 100));
+
+	ViewportFrameTargetOwner target;
+	target.Commit(10, 1);
+	CHECK(target.Owns(10));
+	target.Commit(20, 2);
+	CHECK_FALSE(target.Owns(10));
+	CHECK(target.Owns(20));
+	CHECK_FALSE(target.Owns(0));
+	CHECK((!target.Owns(10) || cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 11, 2)));
+}
 
 TEST_CASE(
 	"viewport frames resolve textures in their containing world owner", "[render][gpu][viewport-owner][.]"
@@ -152,6 +179,21 @@ TEST_CASE("non-drawable ViewportFrame descendants stay out of the scene", "[rend
 	CollectViewportInstances(world.Data, world.Viewport, instances);
 
 	CHECK(instances.empty());
+}
+
+TEST_CASE("ViewportFrame collection does not merge a nested viewport world", "[render][viewportframe]") {
+	using namespace engine;
+	ViewportWorld world;
+	const Entity nested = world.Data.CreateInstance(gui::GuiClass("ViewportFrame"), "Nested");
+	REQUIRE(world.Data.SetParent(nested, world.World));
+	const Entity nestedWorld = world.Data.CreateInstance(Classes::Find(Name("WorldModel")), "NestedWorld");
+	REQUIRE(world.Data.SetParent(nestedWorld, nested));
+	const Entity nestedPart = world.Part("NestedPart", nestedWorld);
+
+	std::vector<DrawInstance> instances;
+	CollectViewportInstances(world.Data, world.Viewport, instances);
+
+	CHECK_FALSE(ContainsSource(instances, nestedPart));
 }
 
 TEST_CASE("ViewportFrame ignores local transparency overrides", "[render][viewportframe]") {

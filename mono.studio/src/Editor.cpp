@@ -494,6 +494,7 @@ namespace studio {
 		Viewers.resize(1 + extras);
 		Overlays.resize(1 + extras);
 		GuiLists.resize(1 + extras);
+		GuiLocalizations.resize(1 + extras);
 		ViewportPresentations.resize(1 + extras);
 		ViewportParticleVisibility.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
@@ -628,12 +629,13 @@ namespace studio {
 				"atomic studio",
 				Settings.Width,
 				Settings.Height,
-				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN
 			);
 			if (!Window) {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
 			}
+			NativeAccessibility = std::make_unique<client::AccessibilityAdapter>(Window);
 
 			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
 			if (icon == nullptr) {
@@ -647,8 +649,14 @@ namespace studio {
 		}
 
 		// Null when headless, which is what puts the renderer in that mode.
-		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
+		// Plugin dock widgets paint CanvasGroups through Dear ImGui's CPU target.
+		// Retaining source pixels gives that bounded path image samples without a
+		// GPU readback. TextureTable caps retained copies at 256 MiB.
+		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight), true)) {
 			return false;
+		}
+		if (Window != nullptr && !SDL_ShowWindow(Window)) {
+			ENGINE_WARN("SDL_ShowWindow: {}", SDL_GetError());
 		}
 
 		// **Said once here and applied per panel, where the world is entered.**
@@ -1025,6 +1033,7 @@ namespace studio {
 			SDL_CloseJoystick(joystick);
 		PlayedInput->Joysticks.clear();
 
+		NativeAccessibility.reset();
 		if (Window != nullptr) {
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
@@ -2751,7 +2760,9 @@ namespace studio {
 							static_cast<float>(target.Width), static_cast<float>(target.Height)
 						},
 						store,
-						GuiLists[viewport].Signature()
+						GuiLists[viewport].Signature(),
+						GuiLists[viewport].DamageValid(),
+						GuiLists[viewport].Damage()
 					);
 				}
 

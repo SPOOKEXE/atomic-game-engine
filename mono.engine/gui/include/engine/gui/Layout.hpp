@@ -12,45 +12,24 @@
 // downstream wants a flat list in paint order, which is what `Compile.hpp`
 // produces once and keeps.
 //
-// ## What is deliberately approximate, stated rather than discovered
+// ## Text measurement
 //
-// **Text is measured with a constant advance.** `AVERAGE_ADVANCE` below is the
-// fraction of an em a glyph is assumed to occupy, and `TextScaled` shrinks the
-// size until the string fits by that estimate. The exact answer needs a glyph
-// atlas, which is a `client` thing this module may not have - and the important
-// property is not exactness but that **there is one answer**: a backend that
-// re-measured with real metrics would disagree with the hit test and with what
-// a headless test asserts. So the backend draws at `Resolved::TextSize` and
-// does not second-guess it.
+// A viewer may supply a validated font package. Layout then shapes the visible
+// text for automatic sizing, fitted text size, and `Resolved::TextBounds`.
+// Without a package, headless callers retain the constant advance fallback.
+// The chosen package is also a compile input, so a package change invalidates
+// the draw list. Backends consume the compiled glyph positions when available.
 //
-// **`AutomaticSize` measures children, and a labelled element measures its
-// string.** The second half used to be a refusal, on the grounds that growing a
-// box to an estimate produces a box the text spills out of. It does not, and the
-// reason is the paragraph above: nothing downstream re-measures, so within this
-// engine `AVERAGE_ADVANCE` is not an approximation of the truth - it *is* the
-// measurement, the one answer the hit test, a headless assertion and the
-// renderer all agree on. A box grown to it fits by the same definition of
-// fitting the module uses everywhere else, and `TextScaled` on a grown axis
-// recovers exactly the size it started from because `FittedTextSize` divides by
-// the product the growth multiplies.
-//
-// What is still true is that the estimate may be wrong about real glyphs. That
-// risk is not introduced by growing - it is the risk `TextScaled` has carried
-// since v0.8 - and closing it means metrics shared *below* L7 rather than a
-// second opinion at the point of use.
-//
-// **The failure the old refusal also named is still refused, and now by
-// construction rather than by a branch.** A `TextLabel` has no children, so an
-// implementation that measured children and did not notice the text would
-// collapse every labelled element an author set the property on to nothing at
-// all. A labelled element is sized from its text, so that is not the path it
-// takes.
+// `AutomaticSize` measures children and the visible string of a labelled
+// element. Markup and the visible grapheme limit are applied before measuring.
 //
 // @tier L7 · shared
 
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/gui/TextResolution.hpp>
 
+#include <cstdint>
 #include <string_view>
 
 namespace engine::ecs {
@@ -58,6 +37,64 @@ namespace engine::ecs {
 }
 
 namespace engine::gui {
+
+	// Physical insets a host reserves at the edge of a display.
+	//
+	// They are values rather than a platform handle, so the same profile can
+	// describe a phone, a television overscan region, or Studio's preview pane.
+	// @since v0.25
+	struct DisplayInsets {
+		float Left = 0.0f;
+		float Top = 0.0f;
+		float Right = 0.0f;
+		float Bottom = 0.0f;
+	};
+
+	// How the display is oriented. The dimensions remain authoritative because a
+	// resizable desktop window can be neither conventional orientation.
+	// @since v0.25
+	enum class DisplayOrientation : uint8_t {
+		Landscape,
+		Portrait,
+	};
+
+	// The display facts a host resolves before calling the shared layout pass.
+	//
+	// `Width` and `Height` are the host's logical display units. A screen
+	// collector derives its own logical canvas by applying `InterfaceScale` once;
+	// authored descendants never see or multiply that transform. `FramebufferScale`
+	// and `DevicePixelRatio` preserve physical facts for painters and diagnostics.
+	// A screen collector uses the merged safe and transient insets; a spatial
+	// collector owns its canvas through `SpatialCanvas` and does not consume
+	// display reservations.
+	//
+	// @since v0.25
+	struct DisplayProfile {
+		// The host logical display dimensions before the collector scale.
+		float Width = 1600.0f;
+		float Height = 900.0f;
+
+		// Physical pixels represented by one logical pixel, and the platform's
+		// reported device ratio. A host may render to a framebuffer whose scale
+		// differs from the display's ratio, so the two remain distinct.
+		float FramebufferScale = 1.0f;
+		float DevicePixelRatio = 1.0f;
+
+		DisplayOrientation Orientation = DisplayOrientation::Landscape;
+
+		// Permanent display cutouts and transient keyboard or system overlays.
+		DisplayInsets SafeArea;
+		DisplayInsets Occluded;
+
+		// The host's accessibility choices. They are inputs to the canonical
+		// layout call and cache key; authored components remain unchanged.
+		float TextScale = 1.0f;
+		float InterfaceScale = 1.0f;
+
+		// The historic top-bar reservation. It remains so existing callers keep
+		// their source contract while hosts migrate to `SafeArea.Top`.
+		float TopInset = 0.0f;
+	};
 
 	// The screen a `ScreenGui` collects onto.
 	//
@@ -71,29 +108,26 @@ namespace engine::gui {
 	// which is very nearly the opposite of this.
 	//
 	// @since v0.8
-	struct Screen {
-		// How wide the canvas is, in pixels.
-		float Width = 1600.0f;
+	using Screen = DisplayProfile;
 
-		// How tall, in pixels.
-		float Height = 900.0f;
-
-		// The strip at the top a `ScreenGui` keeps clear unless it says not to.
-		//
-		// Roblox's is 36 pixels of top bar. Zero here by default because this
-		// engine has no top bar of its own yet, and a reserved strip nothing
-		// occupies is a band of dead space an author cannot explain.
-		float TopInset = 0.0f;
-	};
-
-	// The fraction of an em an average glyph is assumed to advance.
+	// The logical canvas owned by a screen collector. Insets in a display
+	// profile are expressed in host logical units, so they cross the collector
+	// transform with the dimensions. Spatial collectors do not use this helper.
 	//
-	// One number, in one place, used by the size fit and by nothing else. See
-	// the note at the top of this file for why an estimate is the right shape
-	// here and why the backend must use the result rather than its own.
-	constexpr float AVERAGE_ADVANCE = 0.52f;
+	// @since v0.25
+	Screen ScreenCollectorProfile(const Screen &screen);
 
-	// How much taller than its em size a line of text is drawn.
+	// The extent a screen draw list uses. It is the same transform
+	// `ScreenCollectorProfile` applies during layout, so a backend and a hit test
+	// receive coordinates from one space.
+	//
+	// @since v0.25
+	core::Vector2 ScreenCanvasSize(const Screen &screen);
+
+	// The host presentation extent before collector transforms are applied.
+	core::Vector2 ScreenPresentationSize(const Screen &screen);
+
+	constexpr float AVERAGE_ADVANCE = 0.52f;
 	constexpr float LINE_SPACING = 1.2f;
 
 	// The containers a `LayerCollector` may draw from, by name.
@@ -142,7 +176,9 @@ namespace engine::gui {
 	//        Defaulted so every caller that lays out a still interface - which
 	//        is most tests - says nothing about time and gets a settled one.
 	// @return How many nodes were reached and marked rendered.
-	size_t Layout(ecs::Store &store, const Screen &screen, double seconds = 0.0);
+	size_t Layout(
+		ecs::Store &store, const Screen &screen, double seconds = 0.0, const TextResolutionRequest &text = {}
+	);
 
 	// Resolves one host-provided collector against its own pixel canvas.
 	//
@@ -159,6 +195,15 @@ namespace engine::gui {
 	// @param seconds   The caller's monotonic clock.
 	// @return How many descendant nodes were placed.
 	// @since v0.22
-	size_t
-	LayoutCollector(ecs::Store &store, ecs::Entity collector, const Screen &screen, double seconds = 0.0);
+	size_t LayoutCollector(
+		ecs::Store &store,
+		ecs::Entity collector,
+		const Screen &screen,
+		double seconds = 0.0,
+		const TextResolutionRequest &text = {}
+	);
+
+	// Preserves the first visible keyed row's screen offset after its source
+	// publishes new measured extents. Called before a compile signature is read.
+	void ReconcileVirtualCollectionAnchors(ecs::Store &store, ecs::Entity collector);
 }

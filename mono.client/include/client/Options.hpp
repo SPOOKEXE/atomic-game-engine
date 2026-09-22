@@ -62,6 +62,14 @@ namespace client {
 		// where it starts and not where it stays.
 		int Height = 720;
 
+		// Viewer accessibility scales applied once at the ScreenGui collector.
+		// They are local presentation policy and never change authored GUI rows.
+		float InterfaceScale = 1.0f;
+		float TextScale = 1.0f;
+
+		// The viewer's requested localization tag. It affects only presentation.
+		std::string Locale = "en";
+
 		// How many cubes the demo scene builds, per world.
 		uint32_t Entities = 2048;
 

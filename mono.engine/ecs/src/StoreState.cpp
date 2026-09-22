@@ -180,6 +180,7 @@ namespace engine::ecs {
 
 			if (auto *table = static_cast<AttributeTable *>(column->At(0))) {
 				table->Entities.erase(entity.Id);
+				table->Revisions.erase(entity.Id);
 			}
 		}
 	}

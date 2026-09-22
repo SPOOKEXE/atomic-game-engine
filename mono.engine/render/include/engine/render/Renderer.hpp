@@ -1061,6 +1061,11 @@ namespace engine::render {
 		//         error and not a reason to fail the frame.
 		virtual bool Prepare(void *commandBuffer) = 0;
 
+		// Called after the frame command buffer has been accepted or rejected.
+		// Hooks that retain device output use this to advance a pixel baseline only
+		// after the bytes that produced it are owned by SDL.
+		virtual void CompleteFrame(bool) {}
+
 		// Batch indices remain stable between Prepare calls. Scratch capture writes
 		// fragment depth as well as colour, for composition with other world layers.
 		virtual bool SupportsWorldLayers() const {

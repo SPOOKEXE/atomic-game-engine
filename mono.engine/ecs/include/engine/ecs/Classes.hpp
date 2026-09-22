@@ -420,6 +420,15 @@ namespace engine::ecs {
 		bool (*PrepareDocument)(const void *value) = nullptr;
 	};
 
+	// The role a class has in the object model. Abstract classes contribute
+	// ancestry and properties without being instances an author can create.
+	enum class ClassKind : uint8_t {
+		Concrete,
+		Abstract,
+		Service,
+		Internal,
+	};
+
 	// Everything registered about one class.
 	//
 	// @since v0.2
@@ -449,6 +458,13 @@ namespace engine::ecs {
 		// This flag is not inherited. A virtual base such as `BasePart` is not
 		// creatable while its concrete `Part` child is.
 		bool Creatable = true;
+
+		// Whether Studio may offer this class for insertion. A class can remain
+		// part of `IsA` while being absent from authoring surfaces.
+		bool StudioVisible = true;
+
+		// The class's object-model role.
+		ClassKind Kind = ClassKind::Concrete;
 	};
 
 	// Registers classes and answers questions about them.
@@ -606,6 +622,22 @@ namespace engine::ecs {
 		// @param id        The registered class.
 		// @param creatable Whether creation is allowed.
 		static void SetCreatable(ClassId id, bool creatable);
+
+		// Changes the object-model role of one exact class.
+		//
+		// The role is independent from creation: an abstract class is normally
+		// non-creatable, while a service or internal class may have a different
+		// creation policy owned by its module.
+		//
+		// @param id   The registered class.
+		// @param kind The role the class serves.
+		static void SetKind(ClassId id, ClassKind kind);
+
+		// Changes whether Studio may present one exact class for insertion.
+		//
+		// @param id      The registered class.
+		// @param visible Whether Studio may offer the class.
+		static void SetStudioVisible(ClassId id, bool visible);
 
 		// Reports whether `derived` is `base` or descends from it.
 		//

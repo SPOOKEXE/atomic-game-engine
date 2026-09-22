@@ -180,11 +180,16 @@ scene.WorldBounds | Resource: how far the world reaches from the origin on each 
 
 gui.Adornment | The half of a 3D adornment this module owns: which instance a `SelectionBox` or handle adornment is drawn around, in what colour, and whether it draws.
 gui.AdornmentInteraction | Opt-in pointer input for a 3D adornment. The renderer marks its geometry pickable only while enabled, so decorative adornments never steal scene input.
+gui.AnimationPlayback | An authored `UIAnimation` clip: bounded typed tracks and markers, explicit timeline start, and whether its presentation sample is active.
 gui.AspectRatio | `UIAspectRatioConstraint`: forces the parent element's resolved size to a width-over-height ratio, derived from whichever axis dominates.
 gui.Background | The box a `GuiObject` draws for itself: fill colour and transparency, plus the border's colour, thickness and inset mode.
+gui.Binding | A declarative attribute-to-text binding: its source, attribute, named target and fallback string.
+gui.BindingDependency | Local resolved source and revision used to invalidate one binding when its input changes.
+gui.BindingOutput | The local derived string and validity result of evaluating a `gui.Binding`.
 gui.Billboard | What a `BillboardGui` adds: the adornee it hangs off, its stud and extents offsets, lighting, and the distance past which it stops drawing.
 gui.Button | What makes a `GuiButton` a button: whether the fill shifts under the pointer and further on press, plus two reserved flags.
 gui.Canvas | The screen-sized rectangle a `ScreenGui` collects onto, in pixels. Derived, because a screen gui authors no canvas: its canvas is the viewport.
+gui.CanvasTransform | The derived scale and origin mapping a collector's logical canvas into presentation pixels.
 gui.Corner | `UICorner`: the radius the parent element's corners are rounded by, resolved against the parent's smaller axis.
 gui.DragDetector | `UIDragDetector`: makes the parent element draggable, deciding what a pointer drag does to `Element::Position` and how far it may move.
 gui.Element | The base row every `GuiObject` has: position, size, anchor, rotation, draw order and the visibility, clipping and input flags the layout pass reads.
@@ -203,8 +208,11 @@ gui.ConeHandleShape | The height, radius and hollow-base choice of a `ConeHandle
 gui.HandlesShape | The face mask drawn by a `Handles` instance.
 gui.ArcHandlesShape | The axis mask drawn by an `ArcHandles` instance.
 gui.Label | The text a `TextLabel`, `TextButton` or `TextBox` shows: the string, font, size, colour and alignment, with the wrap, scale and rich-text flags.
+gui.LabelPresentation | Optional text presentation metadata: a stable localization key and style class, plus the explicit choice to use the style text colour.
 gui.Layer | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset.
+gui.Mask | `UIMask`: enables a rounded rectangle clip around a `GuiObject` and its subtree, with a radius resolved from the element's extent.
 gui.ListLayout | `UIListLayout`: stacks the parent's children along one axis, with padding, alignment, sort order, flex behaviour and wrapping.
+gui.ModalScope | `UIModalScope`: marks the parent subtree as the active input scope while enabled.
 gui.NodeCanvas | The view state of a typed graph editor: its pan, zoom and background grid policy, while graph nodes and links remain ordinary instances beneath it.
 gui.NodeCanvasNode | The stable id, node kind, bypass state, title, resize policy and input-port layout of one graph node; links refer to its id rather than its local entity handle.
 gui.NodeCanvasGroup | A named visual grouping of direct graph-node children, with optional edge-fitting or tight-fitting layout and ordinary Frame background colour.
@@ -214,7 +222,9 @@ gui.Padding | `UIPadding`: space held back inside the parent element on each of 
 gui.PageLayout | `UIPageLayout`: shows one of the parent's children at a time and slides the rest aside, with a tween time, easing curve and circular wrap.
 gui.PageMotion | Engine state for a sliding `UIPageLayout`: which pages it is between, when the slide began, and how far along the eased curve it is.
 gui.Picture | The image an `ImageLabel` or `ImageButton` shows: the asset name, tint, scale mode, slice and tile settings, and the hover and pressed swaps.
+gui.PresentationState | The local, derived override sample of an `AnimationPlayback`, rebuilt from the caller's explicit UI timeline and never saved or replicated.
 gui.Resolved | Where the layout pass actually put a 2D element: absolute position, size and rotation, the clip rectangle, the drawn text size and the paint order.
+gui.ResolvedStyle | Viewer-local result of resolving theme tokens, class rules, interaction state and direct properties.
 gui.Scale | `UIScale`: a factor multiplied into the parent's resolved size and text size after layout, so scaling a container does not re-flow its contents.
 gui.ScrollMotion | Local overscroll state for a `ScrollingFrame`: how far a drag has pulled the canvas past its end, and the spring returning it after release.
 gui.ScrollState | What the layout worked out about a `ScrollingFrame`: the pixel canvas extent, the visible window after any bar inset, and the two thumb rectangles.
@@ -225,10 +235,19 @@ gui.SettingsMenuExtensions | Resource: script-authored actions appended to the l
 gui.SizeLimits | `UISizeConstraint`: clamps the parent element's resolved size between a minimum and a maximum, in pixels.
 gui.SpatialCanvas | Where a `SurfaceGui` or `BillboardGui` was resolved to for the display looking at it: its pixel size, world plane, lighting and draw distance.
 gui.Stroke | `UIStroke`: an outline drawn around the parent outside its own border, with its own colour, thickness, transparency, join and sizing.
+gui.StyleClass | Stable style class names attached to one GUI element for bounded rule matching.
+gui.StyleDirect | Authored mask recording which visual properties were explicitly assigned on an element.
 gui.Surface | What a `SurfaceGui` adds: the adornee part and which face, how the pixel canvas is sized, its lighting, z-offset and draw distance.
 gui.TableLayout | `UITableLayout`: lays the parent's children out as rows and their children as cells, so one column is the same width in every row.
+gui.TextCompositionState | Viewer-local input-method candidate text and range for the currently edited `TextBox`.
 gui.TextSizeLimits | `UITextSizeConstraint`: clamps the pixel size a scaled label may pick between a floor and a ceiling.
+gui.ThemeBinding | Authored reference selecting the UI theme for one collector.
+gui.UIStyle | An authored bounded style rule with optional class, interaction state and typed declarations.
+gui.UITheme | Authored typed tokens shared by GUI style rules through a collector's theme binding.
 gui.Viewport | What a `ViewportFrame` renders into itself: the camera to render from, the frame's own ambient and directional light, and a tint over the result.
+gui.VirtualAnchorState | Viewer-local keyed scroll anchor preserved while a virtual page changes.
+gui.VirtualCollection | A bounded keyed data page, total item count, extent policy and overscan for one virtual scrolling collection.
+gui.VirtualFocusState | Viewer-local stable key and index used to restore focus after virtual row recycling.
 
 script.PortalPlayerInput | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue.
 script.PortalTransfers | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages.

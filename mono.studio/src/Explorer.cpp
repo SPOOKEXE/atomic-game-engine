@@ -1232,6 +1232,71 @@ namespace studio {
 			PendingInsert = PendingInsertAction{};
 		}
 
+		// A viewport can close, switch worlds, or select another object while its
+		// drag is held. Preview writes already reached the world in those cases,
+		// so restore the captured value instead of leaving a change with no undo.
+		if (GuiDragging.Instance != NULL_ENTITY &&
+			(GuiDragging.Viewport >= Overlays.size() || !Overlays[GuiDragging.Viewport].Drawn ||
+			 ViewportWorld(GuiDragging.Viewport) != GuiDragging.World ||
+			 SelectionWorld != GuiDragging.World || !IsSelected(GuiDragging.Instance))) {
+			PendingGuiEdit = {
+				.World = GuiDragging.World,
+				.Instance = GuiDragging.Instance,
+				.Position = GuiDragging.BeforePosition,
+				.Size = GuiDragging.BeforeSize,
+				.BeforePosition = GuiDragging.BeforePosition,
+				.BeforeSize = GuiDragging.BeforeSize,
+				.Resize = GuiDragging.Resize,
+				.Wanted = true,
+			};
+			GuiDragging = GuiCanvasDrag{};
+		}
+
+		if (PendingGuiEdit.Wanted) {
+			const PendingGuiCanvasEdit edit = PendingGuiEdit;
+			PendingGuiEdit = PendingGuiCanvasEdit{};
+			const bool authoritative = AuthorityOf(edit.World) == EditAuthority::Authoritative;
+			bool wrote = false;
+			if (authoritative) {
+				Universe->Enter(edit.World, [&](Store &store) {
+					if (!store.Alive(edit.Instance)) {
+						return;
+					}
+					const engine::core::Name property(edit.Resize ? "Size" : "Position");
+					const engine::core::UDim2 &value = edit.Resize ? edit.Size : edit.Position;
+					wrote = store.SetPropertyAuthored(edit.Instance, property, &value, sizeof(value));
+				});
+			}
+
+			if (wrote && edit.Commit) {
+				engine::game::PropertyValue before;
+				before.Type = engine::ecs::PropertyType::UDim2;
+				before.UDim2 = edit.Resize ? edit.BeforeSize : edit.BeforePosition;
+				engine::game::PropertyValue after;
+				after.Type = engine::ecs::PropertyType::UDim2;
+				after.UDim2 = edit.Resize ? edit.Size : edit.Position;
+				if (!engine::game::ValuesEqual(before, after)) {
+					if (Commands != nullptr) {
+						const std::optional<std::string> group = Commands->TryBeginRecording(
+							edit.Resize ? "Resize GUI" : "Move GUI", edit.Resize ? "Resize GUI" : "Move GUI"
+						);
+						Commands->RecordProperty(
+							edit.World,
+							edit.Instance,
+							engine::core::Name(edit.Resize ? "Size" : "Position"),
+							before,
+							after,
+							edit.Resize ? "Resize GUI" : "Move GUI"
+						);
+						if (group) {
+							Commands->FinishRecording(*group, FinishOperation::Commit);
+						}
+					}
+					MarkModified();
+				}
+			}
+		}
+
 		if (PendingReparent.World.IsValid()) {
 			const WorldId world = PendingReparent.World;
 			const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;

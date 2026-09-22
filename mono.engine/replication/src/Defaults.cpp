@@ -218,13 +218,23 @@ namespace engine::replication {
 		// text can cross, but a `Trivial` gate cannot distinguish it from an
 		// opaque allocation. Observation is the declared safe path.
 		//
+		// `gui.VirtualCollection` carries page vectors and is updated by its
+		// source provider. Its declared maximum page size lets an oversized row
+		// use the chunked overlay path, while observation avoids hashing vector
+		// addresses instead of the authored records.
+		// Label arguments and bindings also own bounded strings. They are
+		// authored rows, so excluding them would make localized labels and
+		// binding declarations disappear from replicas.
+		//
 		// They are the same shape as `script.Program` one row up: an author
 		// writes the text and then leaves it alone for the life of the world, so
 		// the dirty bit is set on the tick somebody wrote and never again.
-		return component == "gui.Label" || component == "gui.Entry" || component == "gui.NodeCanvasNode" ||
-			   component == "gui.NodeCanvasGroup" || component == "script.Program" ||
-			   component == "scene.EditableMesh" || component == "scene.EditableImage" ||
-			   component == "scene.TextContent" || component == "scene.ShaderSource";
+		return component == "gui.Label" || component == "gui.LabelLocalizationArguments" ||
+			   component == "gui.Entry" || component == "gui.Binding" || component == "gui.NodeCanvasNode" ||
+			   component == "gui.NodeCanvasGroup" || component == "gui.VirtualCollection" ||
+			   component == "script.Program" || component == "scene.EditableMesh" ||
+			   component == "scene.EditableImage" || component == "scene.TextContent" ||
+			   component == "scene.ShaderSource";
 	}
 
 	bool LocalToTheClient(std::string_view component) {
@@ -421,10 +431,17 @@ namespace engine::replication {
 		// field". Only the exclusion was missing, so the authority's screen
 		// rectangle crossed to every client and was overwritten by that
 		// client's next layout pass.
-		if (component == "gui.Canvas" || component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
-			component == "gui.GuiServiceState" || component == "gui.ScrollState" ||
-			component == "gui.PageMotion" || component == "gui.ScrollMotion" ||
-			component == "gui.SettingsMenuExtensions") {
+		// Composition, binding output, virtual focus, presentation, and resolved
+		// style are also viewer-local answers. Their authored inputs cross in
+		// separate rows, while these values depend on this viewer and frame.
+		if (component == "gui.Canvas" || component == "gui.CanvasTransform" || component == "gui.Resolved" ||
+			component == "gui.SpatialCanvas" || component == "gui.GuiServiceState" ||
+			component == "gui.ScrollState" || component == "gui.PageMotion" ||
+			component == "gui.ScrollMotion" || component == "gui.SettingsMenuExtensions" ||
+			component == "gui.TextCompositionState" || component == "gui.BindingOutput" ||
+			component == "gui.BindingDependency" || component == "gui.VirtualFocusState" ||
+			component == "gui.VirtualAnchorState" || component == "gui.PresentationState" ||
+			component == "gui.ResolvedStyle") {
 			return true;
 		}
 
