@@ -43,6 +43,8 @@ namespace engine::render {
 			return "directional_response";
 		case DataCaptureChannel::ShadowVisibility:
 			return "shadow_visibility";
+		case DataCaptureChannel::LocalLightContribution:
+			return "local_light_contribution";
 		case DataCaptureChannel::PackedGpu:
 			return "packed_gpu";
 		}
