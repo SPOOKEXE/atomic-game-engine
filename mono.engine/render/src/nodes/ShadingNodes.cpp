@@ -903,8 +903,14 @@ namespace engine::render {
 					);
 				// Each capture target is rendered with exactly one source row. It is
 				// not a copy of the summed local-light result.
-				for (uint32_t index = 0; index < 4 && index < static_cast<uint32_t>(lightUniforms.Count.x);
-					 ++index) {
+				for (uint32_t index = 0; index < 4; ++index) {
+					const core::Name requested = recording.LocalLightCaptureIds[index];
+					if (!requested.IsValid()) continue;
+					const auto row =
+						std::find(recording.SceneLightIds.begin(), recording.SceneLightIds.end(), requested);
+					recording.LocalLightCaptureMatched[index] = row != recording.SceneLightIds.end();
+					if (!recording.LocalLightCaptureMatched[index]) continue;
+					const uint32_t lightRow = static_cast<uint32_t>(row - recording.SceneLightIds.begin());
 					const core::Name port(std::string("local-light-response-") + std::to_string(index));
 					auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
 					if (found == node->WritePorts.end()) continue;
@@ -914,9 +920,9 @@ namespace engine::render {
 						return false;
 					if (!State->EnsureDeferredLocalLight()) return false;
 					LightUniforms selected{};
-					selected.Position[0] = lightUniforms.Position[index];
-					selected.Colour[0] = lightUniforms.Colour[index];
-					selected.Direction[0] = lightUniforms.Direction[index];
+					selected.Position[0] = lightUniforms.Position[lightRow];
+					selected.Colour[0] = lightUniforms.Colour[lightRow];
+					selected.Direction[0] = lightUniforms.Direction[lightRow];
 					selected.Count.x = 1.0f;
 					SDL_GPUColorTargetInfo targetInfo{};
 					targetInfo.texture = target.Texture;
