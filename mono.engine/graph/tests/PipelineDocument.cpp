@@ -159,10 +159,16 @@ TEST_CASE(
 		if (node && node->Name == Name("data-capture-directional-response")) capture = node;
 	}
 	REQUIRE(lighting != nullptr);
-	CHECK(
-		lighting->WritePorts ==
-		std::vector<Name>{Name("colour"), Name("lighting-baseline"), Name("directional-response")}
-	);
+	const std::vector<Name> expectedWritePorts{
+		Name("colour"),
+		Name("lighting-baseline"),
+		Name("directional-response"),
+		Name("local-light-response-0"),
+		Name("local-light-response-1"),
+		Name("local-light-response-2"),
+		Name("local-light-response-3")
+	};
+	CHECK(lighting->WritePorts == expectedWritePorts);
 	REQUIRE(capture != nullptr);
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
