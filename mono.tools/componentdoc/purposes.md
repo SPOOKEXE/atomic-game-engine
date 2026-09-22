@@ -45,6 +45,9 @@ physics.CopiedDynamicContactCache | Per-world per-tick cache of copied dynamic f
 physics.PoppercamState | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else.
 physics.PhysicsClock | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is.
 physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks.
+physics.Storm | Per-world authored analytical tornado field and its fixed-tick trajectory, sampled by the physics force pass when enabled.
+physics.StormLink | Per-joint wind failure rating and material strength, read before rigid-joint connectivity is rebuilt.
+physics.StormResponse | Per-rigid-body aerodynamic area, drag and force settings that the storm pass uses to apply wind loads.
 physics.observation-log | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.
 script.PortalContactRequests | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts.
