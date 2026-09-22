@@ -382,7 +382,6 @@ namespace client {
 	) {
 		std::string detail;
 		if (!ValidClock(clock, detail) || sampleRate == 0 ||
-			clock.Clock.Interval.Denominator > UINT64_MAX / 1'000'000'000ull ||
 			sampleRate > UINT64_MAX / clock.Clock.Interval.NumeratorNanoseconds) {
 			TickClockReady = false;
 			return;
