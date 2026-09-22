@@ -329,7 +329,8 @@ namespace engine::render {
 					if (node->Kind == core::Name("deferred-lighting")) {
 						return output < node->WritePorts.size() &&
 									   (node->WritePorts[output] == core::Name("lighting-baseline") ||
-										node->WritePorts[output] == core::Name("directional-response"))
+										node->WritePorts[output] == core::Name("directional-response") ||
+										node->WritePorts[output].Text().starts_with("local-light-response-"))
 								   ? ResourceRole::Unknown
 								   : ResourceRole::Lit;
 					}

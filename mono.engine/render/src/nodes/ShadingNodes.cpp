@@ -918,9 +918,21 @@ namespace engine::render {
 					if (found == node->WritePorts.end()) continue;
 					const auto target =
 						GraphTexture(context.Writes[found - node->WritePorts.begin()], context, true);
-					if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT)
+					if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT) {
+						ENGINE_ERROR(
+							"deferred local light capture target {} invalid={} format={} extent={}x{}",
+							index,
+							!target.IsValid(),
+							static_cast<int>(target.Format),
+							target.Width,
+							target.Height
+						);
 						return false;
-					if (!State->EnsureDeferredLocalLight()) return false;
+					}
+					if (!State->EnsureDeferredLocalLight()) {
+						ENGINE_ERROR("deferred local light capture pipeline is unavailable");
+						return false;
+					}
 					LightUniforms selected{};
 					selected.Position[0] = lightUniforms.Position[lightRow];
 					selected.Colour[0] = lightUniforms.Colour[lightRow];
@@ -932,7 +944,12 @@ namespace engine::render {
 					targetInfo.store_op = SDL_GPU_STOREOP_STORE;
 					targetInfo.cycle = true;
 					auto *localPass = SDL_BeginGPURenderPass(Command, &targetInfo, 1, nullptr);
-					if (!localPass) return false;
+					if (!localPass) {
+						ENGINE_ERROR(
+							"deferred local light capture pass {} could not begin: {}", index, SDL_GetError()
+						);
+						return false;
+					}
 					SDL_BindGPUGraphicsPipeline(localPass, State->DeferredLocalLightPipeline);
 					SDL_BindGPUFragmentSamplers(
 						localPass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())

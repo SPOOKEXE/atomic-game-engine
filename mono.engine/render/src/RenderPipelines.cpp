@@ -1154,6 +1154,8 @@ namespace engine::render {
 			info.target_info.color_target_descriptions = &target;
 			info.target_info.num_color_targets = 1;
 			DeferredLocalLightPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (DeferredLocalLightPipeline == nullptr)
+				ENGINE_ERROR("deferred local light pipeline: {}", SDL_GetError());
 		}
 		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
 		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
