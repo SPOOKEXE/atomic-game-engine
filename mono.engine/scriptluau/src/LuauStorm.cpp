@@ -92,7 +92,8 @@ namespace engine::script {
 			} else if (name.size() == 2 && name[0] == 'Q' && name[1] >= '0' && name[1] <= '5') {
 				storm.State.Parameters = scene::QPreset(static_cast<scene::QCategory>(name[1] - '0'));
 			} else {
-				return luaL_errorL(state, "Storm.Preset expects EF0 through EF5 or Q0 through Q5");
+				luaL_errorL(state, "Storm.Preset expects EF0 through EF5 or Q0 through Q5");
+				return 0;
 			}
 			physics::SetStorm(*ContextOf(state).World, storm);
 			return 0;

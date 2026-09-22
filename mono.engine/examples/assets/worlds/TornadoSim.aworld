@@ -47,12 +47,35 @@ local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
 Storm.Configure(Controls.default)
 Storm.Preset("EF3")
 Storm.Configure(Controls.default)
+
+local validPreset = {}
+for _, preset in ipairs(Controls.presets) do validPreset[preset] = true end
+
+-- The cross-world bus carries a value copy, so a client can request a change
+-- without ever writing the authority-owned storm resource itself.
+MessagingService:SubscribeAsync("tornado.sim.control", function(message)
+	local request = message :: any
+	if type(request) ~= "table" then return end
+	if request.kind == "preset" and type(request.name) == "string" and validPreset[request.name] then
+		Storm.Preset(request.name)
+	elseif request.kind == "enabled" and type(request.value) == "boolean" then
+		Storm.Configure({ Enabled = request.value })
+	elseif request.kind == "reset" then
+		Storm.Configure(Controls.default)
+	elseif request.kind == "lifecycle" and type(request.value) == "boolean" then
+		Storm.Configure({ LifecycleEnabled = request.value })
+	end
+end)
 ]]></Source>
 		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
 local StarterGui = game:GetService("StarterGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+
+local function request(change: { [string]: any })
+	MessagingService:PublishAsync("tornado.sim.control", change)
+end
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "TornadoSimPanel"
@@ -90,21 +113,21 @@ for index, preset in ipairs(Controls.presets) do
 	local column = (index - 1) % 6
 	local row = math.floor((index - 1) / 6)
 	button(preset, 8 + column * 54, 48 + row * 30, function()
-		if RunService:IsServer() then Storm.Preset(preset) end
+		request({ kind = "preset", name = preset })
 	end)
 end
 
 button("PAUSE", 8, 120, function()
-	if RunService:IsServer() then Storm.Configure({ Enabled = false }) end
+	request({ kind = "enabled", value = false })
 end)
 button("PLAY", 62, 120, function()
-	if RunService:IsServer() then Storm.Configure({ Enabled = true }) end
+	request({ kind = "enabled", value = true })
 end)
 button("RESET", 116, 120, function()
-	if RunService:IsServer() then Storm.Configure(Controls.default) end
+	request({ kind = "reset" })
 end)
 button("LIFE", 170, 120, function()
-	if RunService:IsServer() then Storm.Configure({ LifecycleEnabled = true }) end
+	request({ kind = "lifecycle", value = true })
 end)
 
 local readout = Instance.new("TextLabel")
