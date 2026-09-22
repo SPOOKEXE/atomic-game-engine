@@ -2807,10 +2807,12 @@ namespace engine::render {
 		bool EnsureDeferredLightingBaseline();
 		bool EnsureDeferredLightingDirectional();
 		bool EnsureDeferredLocalLight();
+		bool EnsureDeferredLocalLightAccumulation();
 		SDL_GPUGraphicsPipeline *AmbientResponsePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingBaselinePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingDirectionalPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLocalLightPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DeferredLocalLightAccumulationPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AmbientMergePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AmbientCorrectPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DirectionalCorrectPipeline = nullptr;

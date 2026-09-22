@@ -896,6 +896,7 @@ namespace engine::render {
 			  State->AmbientResponsePipeline,
 			  State->DeferredLightingBaselinePipeline,
 			  State->DeferredLightingDirectionalPipeline,
+			  State->DeferredLocalLightAccumulationPipeline,
 			  State->AmbientMergePipeline,
 			  State->AmbientCorrectPipeline,
 			  State->DirectionalCorrectPipeline,
