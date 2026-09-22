@@ -375,7 +375,9 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
 	const uint64_t worlds[] = {7};
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
-	CHECK(opened == 27);
+	// Bloom is a separate HDR graph pass and is profiled with the rest of the
+	// view chain, even when its authored intensity leaves it pass-through.
+	CHECK(opened == 28);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 
