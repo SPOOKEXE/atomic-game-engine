@@ -1458,8 +1458,11 @@ namespace engine::render {
 		// it is in.
 		lightUniforms = ToGpu(lights);
 		SceneLightIds.fill({});
-		for (size_t index = 0; index < std::min(lights.size(), MAX_SCENE_LIGHTS); ++index)
+		SceneLightShadows.fill(false);
+		for (size_t index = 0; index < std::min(lights.size(), MAX_SCENE_LIGHTS); ++index) {
 			SceneLightIds[index] = lights[index].DataFactoryId;
+			SceneLightShadows[index] = lights[index].Shadows;
+		}
 
 		// Begin the device timeline before particle preparation because its copy,
 		// scatter and simulation now belong to this frame command buffer. The old

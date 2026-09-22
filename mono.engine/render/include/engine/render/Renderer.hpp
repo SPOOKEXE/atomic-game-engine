@@ -479,6 +479,11 @@ namespace engine::render {
 		// dot product already gives.
 		float ConeCosine = -1.0f;
 
+		// The authored request for a depth-tested local-light term. The renderer
+		// retains this alongside the resolved row so final lighting and capture
+		// make the same availability decision.
+		bool Shadows = false;
+
 		// Interned runtime identity of the authored DataFactoryId, when present.
 		core::Name DataFactoryId = {};
 	};

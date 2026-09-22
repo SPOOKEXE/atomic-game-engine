@@ -1266,6 +1266,7 @@ namespace engine::render {
 			light.Colour = source.Colour;
 			light.Direction = source.Direction;
 			light.ConeCosine = source.ConeCosine;
+			light.Shadows = bulb.Shadows;
 
 			lights.push_back(light);
 		});
