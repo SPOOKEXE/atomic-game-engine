@@ -709,8 +709,9 @@ void shadeSurface() {
 	);
 	vec3 refracted = texture(refractionImage, refractedUv).rgb;
 	vec3 transmitted = mix(lit, refracted, transmission);
-	// Coverage remains independent for legacy fades. Transmission itself is an
-	// optically transparent surface, so a full factor is fully covered by the
-	// refracted result rather than blending its old opaque colour back in.
-	outColour = vec4(Encode(transmitted), mix(alpha, 1.0, transmission));
+	// Transmission is optical coverage, not a second alpha blend over the same
+	// source. The material owns this pixel, and the factor already selected the
+	// lit and refracted energy above. A second blend would apply transmission
+	// twice and make a 0.2 glass surface nearly disappear.
+	outColour = vec4(Encode(transmitted), 1.0);
 }
