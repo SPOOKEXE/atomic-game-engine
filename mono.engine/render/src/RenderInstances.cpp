@@ -354,8 +354,8 @@ namespace engine::render {
 				uniforms.MaterialExtra = glm::vec4{
 					metalness != nullptr ? 1.0f : 0.0f,
 					packedPbr != nullptr ? 1.0f : 0.0f,
-					State->SlotSpecularFactor[entry.Instance],
-					State->SlotTransmissionFactor[entry.Instance]
+					SlotSpecularFactor[slot],
+					SlotTransmissionFactor[slot]
 				};
 				uniforms.PackedPbrChannels = SlotPackedPbrChannels[slot];
 
