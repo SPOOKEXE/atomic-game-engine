@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<World format="3" name="TornadoSim">
+	<Sources>
+		<Source path="scripts/shared/TornadoSim/init.luau"><![CDATA[--!strict
+return require(script.StormControls)
+]]></Source>
+		<Source path="scripts/shared/TornadoSim/StormControls.luau"><![CDATA[--!strict
+-- One controls vocabulary for the server's storm resource and the local panel.
+local Controls = {}
+
+Controls.presets = {
+	"EF0", "EF1", "EF2", "EF3", "EF4", "EF5",
+	"Q0", "Q1", "Q2", "Q3", "Q4", "Q5",
+}
+
+Controls.default = {
+	Energy = 0.78,
+	CoreRadius = 28,
+	InfluenceRadius = 310,
+	PeakTangentialSpeed = 122,
+	PeakInflowSpeed = 38,
+	PeakUpdraftSpeed = 64,
+	PeakDowndraftSpeed = 28,
+	SurfaceOutflowSpeed = 24,
+	PressureDrop = 96,
+	Humidity = 0.88,
+	RainRate = 0.82,
+	Turbulence = 0.34,
+	GroundFriction = 0.22,
+	DebrisDensity = 0.72,
+	VortexTightness = 8,
+	TopHeight = 430,
+	UpperWind = Vector3.new(14, 0, 7),
+	TranslationVelocity = Vector3.new(5, 0, 1.5),
+	Position = Vector3.new(0, 0, 95),
+	LifecycleEnabled = true,
+	Enabled = true,
+}
+
+return Controls
+]]></Source>
+		<Source path="scripts/server/TornadoServer.server.luau"><![CDATA[--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+
+-- The fixed-step physics resource owns lifecycle and force application.
+Storm.Configure(Controls.default)
+Storm.Preset("EF3")
+Storm.Configure(Controls.default)
+]]></Source>
+		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
+local StarterGui = game:GetService("StarterGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "TornadoSimPanel"
+gui.ResetOnSpawn = false
+gui.Parent = StarterGui
+
+local panel = Instance.new("Frame")
+panel.Name = "StormControls"
+panel.Size = UDim2.new(0, 340, 0, 510)
+panel.Position = UDim2.new(0, 16, 0, 16)
+panel.BackgroundColor3 = Color3.new(0, 0, 0)
+panel.Parent = gui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -16, 0, 28)
+title.Position = UDim2.new(0, 8, 0, 8)
+title.Text = "TORNADOSIM  EF0-EF5  Q0-Q5  CUSTOM"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.BackgroundTransparency = 1
+title.Parent = panel
+
+local function button(label: string, x: number, y: number, callback: () -> ())
+	local control = Instance.new("TextButton")
+	control.Name = label
+	control.Size = UDim2.new(0, 48, 0, 26)
+	control.Position = UDim2.new(0, x, 0, y)
+	control.Text = label
+	control.TextColor3 = Color3.new(1, 1, 1)
+	control.BackgroundColor3 = Color3.new(0, 0, 0)
+	control.Parent = panel
+	control.MouseButton1Click:Connect(callback)
+end
+
+for index, preset in ipairs(Controls.presets) do
+	local column = (index - 1) % 6
+	local row = math.floor((index - 1) / 6)
+	button(preset, 8 + column * 54, 48 + row * 30, function()
+		if RunService:IsServer() then Storm.Preset(preset) end
+	end)
+end
+
+button("PAUSE", 8, 120, function()
+	if RunService:IsServer() then Storm.Configure({ Enabled = false }) end
+end)
+button("PLAY", 62, 120, function()
+	if RunService:IsServer() then Storm.Configure({ Enabled = true }) end
+end)
+button("RESET", 116, 120, function()
+	if RunService:IsServer() then Storm.Configure(Controls.default) end
+end)
+button("LIFE", 170, 120, function()
+	if RunService:IsServer() then Storm.Configure({ LifecycleEnabled = true }) end
+end)
+
+local readout = Instance.new("TextLabel")
+readout.Name = "FieldVectorInset"
+readout.Size = UDim2.new(1, -16, 0, 180)
+readout.Position = UDim2.new(0, 8, 0, 160)
+readout.TextColor3 = Color3.new(1, 1, 1)
+readout.BackgroundTransparency = 1
+readout.Parent = panel
+
+RunService.Heartbeat:Connect(function()
+	local sample = Storm.Sample(Vector3.new(0, 15, 30))
+	local visibility = Storm.Visibility(Vector3.new(0, 15, 30), 500)
+	local damage = Storm.Damage(Vector3.new(0, 15, 30))
+	readout.Text = string.format(
+		"CUSTOM SLIDERS\nEnergy %.2f  Radius %.0f\nWind %.1f %.1f %.1f\nInfluence %.2f  Visibility %.0f\nDamage %.2f  Band %d\nLayers: funnel rain debris mist fog clouds atmosphere audio",
+		Controls.default.Energy, Controls.default.CoreRadius,
+		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
+		sample.Influence, visibility.EffectiveDistance, damage.Potential, damage.Band
+	)
+end)
+]]></Source>
+	</Sources>
+	<Items>
+		<Item class="Model" name="TornadoSimWorld" id="1">
+			<Item class="Part" name="Terrain" id="2">
+				<Property name="Size" type="Vector3">1800,8,1800</Property>
+				<Property name="Position" type="Vector3">0,-4,0</Property>
+				<Property name="Color" type="Color3">0.12,0.16,0.10</Property>
+			</Item>
+			<Item class="Model" name="Farmhouse" id="3"><Item class="Part" name="RoofPanel" id="4"><Property name="Size" type="Vector3">20,2,16</Property><Property name="Position" type="Vector3">-65,12,35</Property></Item></Item>
+			<Item class="Model" name="Barn" id="5"><Item class="Part" name="RoofPanel" id="6"><Property name="Size" type="Vector3">30,2,18</Property><Property name="Position" type="Vector3">42,14,62</Property></Item></Item>
+			<Item class="Model" name="Workshop" id="7"><Item class="Part" name="RoofPanel" id="8"><Property name="Size" type="Vector3">24,2,18</Property><Property name="Position" type="Vector3">80,12,-18</Property></Item></Item>
+			<Item class="Part" name="TreeLine" id="9"><Property name="Size" type="Vector3">180,20,8</Property><Property name="Position" type="Vector3">-120,10,110</Property></Item>
+			<Item class="Part" name="RoadSign" id="10"><Property name="Size" type="Vector3">4,8,1</Property><Property name="Position" type="Vector3">-18,6,4</Property></Item>
+			<Item class="Part" name="ChaseVehicle" id="11"><Property name="Size" type="Vector3">4,2,8</Property><Property name="Position" type="Vector3">-10,2,-55</Property></Item>
+			<Item class="Part" name="StormAnchor" id="12"><Property name="Position" type="Vector3">0,0,95</Property>
+				<Item class="ParticleEmitter" name="FunnelMist" id="13"><Property name="Rate" type="float">180</Property></Item>
+				<Item class="ParticleEmitter" name="RainVeil" id="14"><Property name="Rate" type="float">260</Property></Item>
+				<Item class="ParticleEmitter" name="Debris" id="15"><Property name="Rate" type="float">90</Property></Item>
+			</Item>
+		</Item>
+		<Item class="ModuleScript" name="TornadoSim" id="16">
+			<Property name="Source" type="string">scripts/shared/TornadoSim/init.luau</Property>
+			<Item class="ModuleScript" name="StormControls" id="17"><Property name="Source" type="string">scripts/shared/TornadoSim/StormControls.luau</Property></Item>
+		</Item>
+		<Item class="Script" name="TornadoServer" id="18"><Property name="Source" type="string">scripts/server/TornadoServer.server.luau</Property></Item>
+		<Item class="LocalScript" name="TornadoClient" id="19"><Property name="Source" type="string">scripts/client/TornadoClient.client.luau</Property></Item>
+	</Items>
+</World>

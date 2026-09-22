@@ -13,6 +13,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -122,6 +123,41 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
+}
+
+TEST_CASE("the luau storm service authors one physics resource and samples its field", "[scriptluau][storm]") {
+	RegisterClasses();
+	Store store("scriptluau_storm");
+	const auto runtime = MakeLuauRuntime(store);
+
+	REQUIRE(runtime->Run(R"(
+		Storm.Preset("EF4")
+		Storm.Configure({ Position = Vector3.new(4, 0, 8), LifecycleEnabled = true })
+		local field = Storm.Sample(Vector3.new(32, 12, 8))
+		local visibility = Storm.Visibility(Vector3.new(32, 12, 8), 400)
+		local damage = Storm.Damage(Vector3.new(32, 12, 8))
+		assert(field.Influence > 0 and visibility.EffectiveDistance > 0 and damage.Potential >= 0)
+	)"));
+
+	const engine::physics::Storm *storm = engine::physics::StormOf(store);
+	REQUIRE(storm != nullptr);
+	CHECK(storm->State.Position.FuzzyEq({4.0f, 0.0f, 8.0f}));
+	CHECK(storm->State.LifecycleEnabled);
+}
+
+TEST_CASE("the luau storm service refuses client-side authoring", "[scriptluau][storm]") {
+	RegisterClasses();
+	Store store("scriptluau_storm_client");
+	const auto runtime = MakeLuauRuntime(
+		store,
+		{
+			.Role = engine::script::HostRole::OfClient(),
+		}
+	);
+
+	CHECK_FALSE(runtime->Run("Storm.Configure({ Energy = 1 })"));
+	CHECK(runtime->LastError().find("authoritative server") != std::string::npos);
+	CHECK(engine::physics::StormOf(store) == nullptr);
 }
 
 TEST_CASE("luau package runtime exposes only immutable package data", "[scriptluau][data-script-package]") {

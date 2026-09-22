@@ -577,6 +577,7 @@ namespace engine::script {
 		InstallLuauServices(State, ServiceAvailability::Always, bounds->Context.Access, IsPackageOnly());
 
 		OpenQueries(State);
+		OpenStorm(State);
 
 		// After `OpenInstances`, whose method table this adds the component
 		// half of the ECS surface to.

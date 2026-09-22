@@ -3356,6 +3356,37 @@ declare extern type RunService with
 	function IsReplica(self): boolean
 end
 
+-- The shared analytical tornado field. Configure and Preset require the
+-- authoritative server role; the remaining queries are read-only everywhere.
+declare extern type StormFieldSample with
+	Velocity: Vector3
+	Influence: number
+	DamagePotential: number
+	Condensation: number
+end
+
+declare extern type StormVisibility with
+	Clarity: number
+	EffectiveDistance: number
+	Rain: number
+	Condensation: number
+end
+
+declare extern type StormDamage with
+	Wind: Vector3
+	DynamicPressure: number
+	Potential: number
+	Band: number
+end
+
+declare extern type StormService with
+	function Configure(self, values: { [string]: any }): ()
+	function Preset(self, name: string): ()
+	function Sample(self, position: Vector3): StormFieldSample
+	function Visibility(self, position: Vector3, viewDistance: number): StormVisibility
+	function Damage(self, position: Vector3): StormDamage
+end
+
 -- --- the globals -----------------------------------------------------------
 
 declare MessagingService: MessagingService
@@ -3364,6 +3395,7 @@ declare CrossWorldService: CrossWorldService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare Storm: StormService
 declare ComputeService: ComputeService
 declare DataSceneService: DataSceneService
 declare ContentService: ContentService

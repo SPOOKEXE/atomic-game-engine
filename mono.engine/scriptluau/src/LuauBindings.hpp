@@ -761,6 +761,11 @@ namespace engine::script {
 	// Called after `OpenWorkspace`, because it adds to the world's method table.
 	void OpenQueries(lua_State *state);
 
+	// Installs the authored storm resource and its read-only analytical queries.
+	// The service owns no copy of the field: every call reads or writes the
+	// physics world's one `physics::Storm` resource.
+	void OpenStorm(lua_State *state);
+
 	// Installs `World`, and the component methods every instance gains.
 	//
 	// **The storage named directly, underneath the Roblox vocabulary the rest of
