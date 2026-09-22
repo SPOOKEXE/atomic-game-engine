@@ -41,6 +41,7 @@
 #include <network/Advert.hpp>
 #include <network/Presence.hpp>
 #include <optional>
+#include <server/PortalJournal.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -879,6 +880,8 @@ namespace server {
 
 		// Writes only when the driver-owned records changed since the last flush.
 		bool FlushDataStore();
+		// Durably records sealed portal decisions between world ticks before Commit.
+		bool FlushPortalTransferDecisions();
 
 		// Builds the worlds a host was granted and announces itself.
 		//
@@ -983,6 +986,7 @@ namespace server {
 		void ReplyToAdmission(engine::replication::ClientId client, std::vector<std::byte> bytes);
 		void PumpPortalSessions(double nowSeconds);
 		void PumpPortalDepartures(double nowSeconds);
+		void PumpPortalApproaches(double nowSeconds);
 		void ProceedThroughPortal(
 			engine::replication::ClientId client, const engine::game::PortalSessionMessage &request
 		);
@@ -1110,6 +1114,7 @@ namespace server {
 		// store through `Driver`, so no per-world persistence copy can diverge.
 		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
 		std::vector<engine::world::SharedStoreEntry> PersistedDataStore;
+		std::vector<PortalJournalRecord> DurablePortalTransferDecisions;
 		bool DataStoreReady = false;
 
 		// How this server is found - the LAN beacon and the rendezvous
@@ -1338,6 +1343,15 @@ namespace server {
 			uint64_t MotionSentTick = 0;
 		};
 		std::unordered_map<uint32_t, PortalDeparture> PortalDepartures;
+		struct PortalApproach {
+			engine::replication::ClientId Client;
+			engine::game::PortalSessionMessage Request;
+			engine::world::PresentationAddress Destination;
+			double RetryAt = 0;
+			bool Advertised = false;
+		};
+		// One route per client bounds route discovery and destination prewarm work.
+		std::unordered_map<uint32_t, PortalApproach> PortalApproaches;
 		uint64_t NextPortalAttempt = 1;
 		engine::world::PresentationAddress PortalSessionEndpoint;
 		engine::parallel::Process ImageProcess;

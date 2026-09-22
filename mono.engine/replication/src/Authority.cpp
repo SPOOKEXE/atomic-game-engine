@@ -2162,7 +2162,8 @@ namespace engine::replication {
 		lane.Stats.Messages += client.Outgoing.size();
 		if (Observations != nullptr) {
 			uint64_t bytes = 0;
-			for (const auto &message : client.Outgoing) bytes += message.size();
+			for (const auto &message : client.Outgoing)
+				bytes += message.size();
 			Observations->Record({
 				ReplicationHook::AuthorityPublished,
 				AuthorityPublishedObservation{
@@ -2409,7 +2410,8 @@ namespace engine::replication {
 					Stats_.Messages += client.Outgoing.size();
 					if (Observations != nullptr) {
 						uint64_t bytes = 0;
-						for (const auto &message : client.Outgoing) bytes += message.size();
+						for (const auto &message : client.Outgoing)
+							bytes += message.size();
 						Observations->Record({
 							ReplicationHook::AuthorityPublished,
 							AuthorityPublishedObservation{
@@ -2577,7 +2579,9 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::SetObservations(core::Name world, core::Name authority, ReplicationObservations *observations) {
+	void Authority::SetObservations(
+		core::Name world, core::Name authority, ReplicationObservations *observations
+	) {
 		ObservationWorld = world;
 		ObservationAuthority = authority;
 		Observations = observations;
@@ -2650,8 +2654,12 @@ namespace engine::replication {
 				Observations->Record({
 					ReplicationHook::AuthorityRejected,
 					AuthorityRejectedObservation{
-						ExchangeIdentity{.World = ObservationWorld, .Authority = ObservationAuthority, .Client = client,
-								.Round = ObservationRound},
+						ExchangeIdentity{
+							.World = ObservationWorld,
+							.Authority = ObservationAuthority,
+							.Client = client,
+							.Round = ObservationRound
+						},
 						MessageKind::Applied,
 						ApplyStatus::Malformed,
 						static_cast<uint64_t>(message.size()),
@@ -2669,8 +2677,12 @@ namespace engine::replication {
 				Observations->Record({
 					ReplicationHook::AuthorityRejected,
 					AuthorityRejectedObservation{
-						ExchangeIdentity{.World = ObservationWorld, .Authority = ObservationAuthority, .Client = client,
-								.Round = ObservationRound},
+						ExchangeIdentity{
+							.World = ObservationWorld,
+							.Authority = ObservationAuthority,
+							.Client = client,
+							.Round = ObservationRound
+						},
 						MessageKind::Applied,
 						ApplyStatus::Malformed,
 						static_cast<uint64_t>(message.size()),
@@ -2693,19 +2705,33 @@ namespace engine::replication {
 				tickAvailable = true;
 			}
 			if (Observations != nullptr) {
-				const ExchangeIdentity identity{.World = ObservationWorld, .Authority = ObservationAuthority,
-					.Client = client, .Baseline = baseline, .Tick = tick, .Round = ObservationRound,
-					.BaselineAvailable = baselineAvailable, .TickAvailable = tickAvailable};
+				const ExchangeIdentity identity{
+					.World = ObservationWorld,
+					.Authority = ObservationAuthority,
+					.Client = client,
+					.Baseline = baseline,
+					.Tick = tick,
+					.Round = ObservationRound,
+					.BaselineAvailable = baselineAvailable,
+					.TickAvailable = tickAvailable
+				};
 				if (accepted)
 					Observations->Record({
 						ReplicationHook::AuthorityReceived,
-						AuthorityReceivedObservation{identity, read.Kind, static_cast<uint64_t>(message.size())},
+						AuthorityReceivedObservation{
+							identity, read.Kind, static_cast<uint64_t>(message.size())
+						},
 					});
 				else
 					Observations->Record({
 						ReplicationHook::AuthorityRejected,
 						AuthorityRejectedObservation{
-							identity, read.Kind, ApplyStatus::Malformed, static_cast<uint64_t>(message.size()), true},
+							identity,
+							read.Kind,
+							ApplyStatus::Malformed,
+							static_cast<uint64_t>(message.size()),
+							true
+						},
 					});
 			}
 			return accepted;

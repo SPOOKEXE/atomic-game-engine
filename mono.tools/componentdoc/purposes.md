@@ -98,6 +98,8 @@ scene.ControllerState | Resource: this host's mapped gamepad and raw joystick st
 scene.EditableImage | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes.
 scene.EditableMesh | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision.
 scene.PortalBodyView | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes.
+scene.BodyIdentity | Globally unique persistent body key and lifetime generation, preserved by rename and reparent and refused when a live key collides.
+scene.PortalCrossing | Portal-only state for one canonical body: its reference anchor, active seam, stable side, authority epoch and presentation revision. Pose and motion stay in their canonical components.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
 scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.

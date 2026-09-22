@@ -19,6 +19,16 @@ namespace engine::render {
 	// destination frame; palette transforms retain the renderer's local convention.
 	// Position XYZ and destination-frame unit quaternion XYZW.
 	using PortalGeometryPose = std::array<float, 7>;
+	inline constexpr size_t MAX_PORTAL_GEOMETRY_EFFECTS = 4;
+	struct PortalGeometryEffect {
+		std::string Node;
+		uint32_t SelectionMask = UINT32_MAX;
+		uint32_t Order = 0;
+		uint32_t Revision = 0;
+		uint8_t Stage = 1;
+		bool Enabled = true;
+		bool operator==(const PortalGeometryEffect &) const = default;
+	};
 	// One mesh draw and its material and skeletal-palette references.
 	struct PortalGeometryRow {
 		// Optional diagnostic path. Draw rows do not transfer ECS identity, so
@@ -49,14 +59,29 @@ namespace engine::render {
 		float AlphaCutoff = .5f;
 		// Keep dot(XYZ, position) >= W; zero XYZ disables the cut.
 		std::array<float, 4> SeamPlane{};
+		// Finite aperture axes from SeamCentre. SeamMask describes which side of
+		// the finite transfer volume this row owns.
+		std::array<float, 3> SeamFirst{};
+		std::array<float, 3> SeamSecond{};
+		std::array<float, 3> SeamCentre{};
+		uint8_t SeamMask = 0;
 		// Directional seam-light contribution in destination-frame coordinates.
 		std::array<float, 3> SeamLight{};
+		// Stable logical body identity. Zero identifies a drawable with no body
+		// association, such as an ordinary anchored part.
+		uint64_t BodyKeyHigh = 0;
+		uint64_t BodyKeyLow = 0;
+		uint64_t BodyGeneration = 0;
 		// Alpha blend mode selected by the source material.
 		std::string Alpha = "opaque";
 		// Texture resampling mode selected by the source material.
 		std::string Resample = "default";
 		// Whether this row contributes to portal shadow maps.
 		bool CastShadow = true;
+		// Graph work attached to this visual. Names travel as content identities;
+		// the destination resolves them against its own graph library.
+		std::array<PortalGeometryEffect, MAX_PORTAL_GEOMETRY_EFFECTS> Effects{};
+		uint8_t EffectCount = 0;
 		// First pose in PortalGeometry::Joints used by this row.
 		uint32_t FirstJoint = 0;
 		// Number of consecutive palette poses used by this row.
@@ -66,6 +91,11 @@ namespace engine::render {
 	};
 	// Owned geometry decoded from one authenticated portal payload.
 	struct PortalGeometry {
+		// The one presentation timestamp selected by the source view for every
+		// row and palette pose in this packet.
+		double PresentationSeconds = 0;
+		// Source-owned revision for diagnostics and stale-packet rejection.
+		uint64_t PresentationRevision = 0;
 		// Draw rows in sender declaration order.
 		std::vector<PortalGeometryRow> Rows;
 		// Shared pose palette addressed by each row's joint range.

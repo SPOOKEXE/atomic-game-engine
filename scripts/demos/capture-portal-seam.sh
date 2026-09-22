@@ -1,27 +1,16 @@
 #!/usr/bin/env bash
 #
-# Three stills of a bar standing in a hole, and the count that says it was cut.
+# A ninety-frame reference sequence for each PortalSeam camera route.
 #
 #   scripts/demos/capture-portal-seam.sh              # all three views
-#   scripts/demos/capture-portal-seam.sh side         # one of them
+#   scripts/demos/capture-portal-seam.sh side         # one route
 #   OUT=/tmp/shots scripts/demos/capture-portal-seam.sh
 #
-# **A measurement rather than a screenshot to squint at.** `PortalSeam.luau`
-# stands a ten-stud bar through a ten-stud hole, five studs on each side, beside
-# a control bar of the same size well clear of the pane. In the `side` view the
-# pane is edge-on and the two bars are broadside, so the straddler's coloured
-# pixels are half the control's when the cut is working and equal to them when
-# it is not. That ratio is what this prints.
-#
-# **Ninety frames rather than a handful**, because one of the things a still has
-# to show is a particle that has travelled: a plume driven at the hole covers six
-# studs in about a second, and a capture taken a third of a second in shows a
-# blob sitting on its nozzle. Everything else in the scene is anchored and would
-# be the same on frame one.
-#
-# The client is killed rather than waited for: there is a shutdown race in the
-# GPU teardown that predates the portal pass - `NON-EUCLIDEAN.md` Appendix A -
-# and the capture is written well before the exit that hangs.
+# The client writes each rendered frame and its camera-state JSON sidecar. The
+# report keeps the side and far image measurements, then records the presented
+# frame, camera route revisions, fixture, resolution, backend, pipeline revision
+# and tolerance in one reviewable report. Set BACKEND and PIPELINE_REVISION when
+# the runtime exposes those values; the harness reports "unknown" otherwise.
 
 set -euo pipefail
 
@@ -31,51 +20,105 @@ root=$(cd -- "$here/../.." && pwd)
 preset=${PRESET:-dev}
 build="$root/.cache/build/$preset"
 out=${OUT:-$build/captures}
+frames=${FRAMES:-90}
+backend=${BACKEND:-unknown}
+pipeline_revision=${PIPELINE_REVISION:-unknown}
+side_ratio_maximum=${SIDE_RATIO_MAXIMUM:-0.75}
+
+if ! [[ "$frames" =~ ^[1-9][0-9]*$ ]]; then
+	echo "FRAMES must be a positive integer" >&2
+	exit 1
+fi
 
 cmake -S "$root" --preset "$preset" > /dev/null
 cmake --build "$build" --target client
 
 scene="$build/assets/examples/scripts/PortalSeam.luau"
+reference_scene="$build/assets/examples/scripts/PortalSeamMatchedRoom.luau"
 if [ ! -f "$scene" ]; then
 	echo "no staged scene at $scene" >&2
 	exit 1
 fi
+if [ ! -f "$reference_scene" ]; then
+	echo "no staged matched-room reference at $reference_scene" >&2
+	exit 1
+fi
 
 mkdir -p "$out"
+
+capture_sequence() {
+	local staged_scene=$1
+	local sequence=$2
+	local label=$3
+	mkdir -p "$sequence"
+	rm -f "$sequence"/*.bmp "$sequence"/*.json
+	echo "capturing $label ($frames frames)"
+	timeout 120 "$build/client/client" \
+		--headless --uncapped --max-fps 60 --script "$staged_scene" --frames "$frames" \
+		--capture-sequence "$sequence" > /dev/null 2>&1
+	for ((frame = 0; frame < frames; frame++)); do
+		if [ ! -f "$sequence/$frame.bmp" ] || [ ! -f "$sequence/$frame.json" ]; then
+			echo "capture sequence is missing frame $frame for $label" >&2
+			exit 1
+		fi
+	done
+	shopt -s nullglob
+	local images=("$sequence"/*.bmp)
+	local sidecars=("$sequence"/*.json)
+	if [ ${#images[@]} -ne "$frames" ] || [ ${#sidecars[@]} -ne "$frames" ]; then
+		echo "capture sequence count differs from $frames for $label" >&2
+		exit 1
+	fi
+}
 
 views=("$@")
 if [ ${#views[@]} -eq 0 ]; then
 	views=(side front far)
 fi
 
+sequences=()
+front_requested=false
 for view in "${views[@]}"; do
-	# **The line is rewritten rather than a global set.** `_G` is readonly in
-	# the script sandbox, so a scene cannot be told anything from outside except
-	# by editing it - see the note beside `VIEW` in `PortalSeam.luau`.
-	#
-	# **Whatever the scene's own default is, not only an empty one** - see the
-	# same note in `capture-portal-lighting.sh`.
 	staged="$out/PortalSeam-$view.luau"
+	sequence="$out/portal-seam-$view"
 	sed "s/^local VIEW = \"[^\"]*\"$/local VIEW = \"$view\"/" "$scene" > "$staged"
 
 	if ! grep -q "^local VIEW = \"$view\"$" "$staged"; then
-		echo "  the view line in PortalSeam.luau moved; this script did not follow" >&2
+		echo "the view line in PortalSeam.luau moved; this script did not follow" >&2
 		exit 1
 	fi
 
-	shot="$out/portal-seam-$view.bmp"
-	rm -f "$shot"
-
-	echo "capturing $view"
-	timeout --signal=KILL 120 "$build/client/client" \
-		--script "$staged" --frames 90 --capture "$shot" > /dev/null 2>&1 || true
-
-	if [ ! -f "$shot" ]; then
-		echo "  no capture written - run the client by hand to see why" >&2
-		exit 1
+	capture_sequence "$staged" "$sequence" "$view portal sequence"
+	sequences+=("$sequence")
+	if [ "$view" = "front" ]; then
+		front_requested=true
 	fi
-
-	python3 "$here/portal-seam-report.py" "$shot"
 done
 
-echo "stills in $out"
+# The continuous-room reference uses the same moving front camera route. It is
+# intentionally captured separately so its timeline contains no portal images
+# or aperture history, then paired by frame number in the CPU report.
+report_requirements=()
+if [ "$front_requested" = true ]; then
+	reference_staged="$out/PortalSeamMatchedRoom-front.luau"
+	reference_sequence="$out/portal-seam-reference-front"
+	sed 's/^local VIEW = "[^"]*"$/local VIEW = "front"/' "$reference_scene" > "$reference_staged"
+	if ! grep -q '^local VIEW = "front"$' "$reference_staged"; then
+		echo "the view line in PortalSeamMatchedRoom.luau moved; this script did not follow" >&2
+		exit 1
+	fi
+	capture_sequence "$reference_staged" "$reference_sequence" "matched-room front reference"
+	sequences+=("$reference_sequence")
+	report_requirements=(--require-full-reference --require-moving-front)
+fi
+
+python3 "$here/portal-seam-report.py" \
+	--fixture PortalSeam \
+	--backend "$backend" \
+	--pipeline-revision "$pipeline_revision" \
+	--side-ratio-maximum "$side_ratio_maximum" \
+	"${report_requirements[@]}" \
+	--output "$out/portal-seam-report.json" \
+	"${sequences[@]}"
+
+echo "reference sequences and report in $out"

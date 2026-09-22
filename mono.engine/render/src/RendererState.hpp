@@ -1279,6 +1279,9 @@ namespace engine::render {
 		// world with no hole in it holds one value throughout and pays one compare
 		// per instance for it. See `scene::DrawInstance::SeamNormal`.
 		std::vector<glm::vec4> SlotSeam;
+		std::vector<glm::vec4> SlotSeamFirst;
+		std::vector<glm::vec4> SlotSeamSecond;
+		std::vector<glm::vec4> SlotSeamCentre;
 
 		// Which way the sun comes from for each slot, or a zero vector for the
 		// world's own. `scene::DrawInstance::SeamLight` carries the argument.
@@ -1466,7 +1469,9 @@ namespace engine::render {
 				   SlotPackedPbrMap[next] == SlotPackedPbrMap[slot] &&
 				   glm::all(glm::equal(SlotPackedPbrChannels[next], SlotPackedPbrChannels[slot])) &&
 				   SlotResample[next] == SlotResample[slot] && SlotShader[next] == SlotShader[slot] &&
-				   SlotSeam[next] == SlotSeam[slot] && SlotSeamLight[next] == SlotSeamLight[slot];
+				   SlotSeam[next] == SlotSeam[slot] && SlotSeamFirst[next] == SlotSeamFirst[slot] &&
+				   SlotSeamSecond[next] == SlotSeamSecond[slot] &&
+				   SlotSeamCentre[next] == SlotSeamCentre[slot] && SlotSeamLight[next] == SlotSeamLight[slot];
 		}
 
 		// One phase of the occlusion-culled pass for `DrawSlots`: where its

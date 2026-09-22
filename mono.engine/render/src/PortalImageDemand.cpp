@@ -42,6 +42,42 @@ namespace engine::render {
 			}
 			return true;
 		}
+		bool ApplyFinitePortalMask(
+			const scene::PortalSeam &seam,
+			const scene::DrawInstance &source,
+			std::span<const core::CFrame> joints,
+			scene::DrawInstance &mapped
+		) {
+			// `AppendPortalClones` already made a complementary finite half. A nested
+			// request may arrive with that half from an earlier mouth, where splitting
+			// it again would reject the other plane and erase otherwise valid geometry.
+			if (mapped.SeamMask != 0) return true;
+			const auto through = scene::SeamMapping(seam);
+			auto cut = scene::CutOfSeam(seam, through, source.Frame, source.HalfExtent);
+			const core::Vector3 normal =
+				source.SeamNormal.MagnitudeSquared() > 0.0f ? source.SeamNormal : cut.NearNormal;
+			const float offset =
+				source.SeamNormal.MagnitudeSquared() > 0.0f ? source.SeamOffset : cut.NearOffset;
+			PortalBodyDraws split;
+			if (!SplitPortalBodyDraws(
+					std::span(&source, 1),
+					joints,
+					through,
+					normal,
+					offset,
+					seam.First,
+					seam.Second,
+					seam.Centre,
+					split
+				))
+				return false;
+			const auto variant = mapped.Variant;
+			const auto sourceWorld = mapped.SourceWorld;
+			mapped = split.Far.front();
+			mapped.Variant = variant;
+			mapped.SourceWorld = sourceWorld;
+			return true;
+		}
 		void Sign(uint64_t &signature, float value) {
 			signature = scene::MixSignature(signature, std::bit_cast<uint32_t>(value == 0 ? 0.0f : value));
 		}
@@ -275,7 +311,11 @@ namespace engine::render {
 			return true;
 		}
 		const auto native = [&](const scene::DrawInstance &row) {
-			return row.Variant == 0 && (!row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name());
+			// A source-owned synthetic form still needs its far half. A row that
+			// already carries a finite portal mask is a prior portal result and
+			// cannot become the source of another clone.
+			return row.SeamMask == 0 &&
+				   (!row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name());
 		};
 		std::vector<scene::DrawInstance> owned;
 		const auto firstForeign = std::find_if_not(instances.begin(), instances.end(), native);
@@ -292,6 +332,20 @@ namespace engine::render {
 		for (const auto &seam : seams) {
 			const size_t before = clones.size();
 			scene::AppendPortalClones(store, seam, instances, clones);
+			for (size_t index = before; index < clones.size(); ++index) {
+				// `AppendPortalClones` owns candidate admission. This producer owns the
+				// packet, so it records the finite destination region with the mapped
+				// half instead of reducing it back to a plane on the wire.
+				auto source = std::find_if(instances.begin(), instances.end(), [&](const auto &row) {
+					return row.Source == clones[index].Source && row.Rig == clones[index].Rig &&
+						   scene::PortalVariant(row.Variant, seam.Pane.Id) == clones[index].Variant;
+				});
+				if (source == instances.end() ||
+					!ApplyFinitePortalMask(seam, *source, joints, clones[index])) {
+					error = "crossing body has no finite portal mask";
+					return false;
+				}
+			}
 			if (clones.size() > MAX_PORTAL_GEOMETRY_ROWS) {
 				error = "whole-eye crossing geometry exceeds row budget";
 				return false;
@@ -413,6 +467,20 @@ namespace engine::render {
 				}
 				std::vector<scene::DrawInstance> clones;
 				scene::AppendPortalClones(store, seam, viewer.Instances, clones);
+				for (auto &row : clones) {
+					auto source = std::find_if(
+						viewer.Instances.begin(), viewer.Instances.end(), [&](const auto &source) {
+							return source.Source == row.Source && source.Rig == row.Rig &&
+								   scene::PortalVariant(source.Variant, seam.Pane.Id) == row.Variant;
+						}
+					);
+					if (source == viewer.Instances.end() ||
+						!ApplyFinitePortalMask(seam, *source, viewer.JointFrames, row)) {
+						counts.Invalid++;
+						clones.clear();
+						break;
+					}
+				}
 				std::string error;
 				if (!clones.empty() &&
 					!EncodePortalDraws(store, clones, viewer.JointFrames, demand.Request.Geometry, error)) {

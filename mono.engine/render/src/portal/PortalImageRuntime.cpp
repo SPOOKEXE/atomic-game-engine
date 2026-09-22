@@ -1,4 +1,6 @@
 #include "PortalCaptureEntrance.hpp"
+#include "PortalImageBudget.hpp"
+#include "PortalPresentationClock.hpp"
 #include "TransparentLayerWork.hpp"
 
 #include <engine/core/Log.hpp>
@@ -1680,12 +1682,14 @@ namespace engine::render {
 		EditableMeshUploader EditableMeshes;
 		std::optional<Time> LastTime;
 		std::array<bool, 4> PipelineReady{};
-		double PresentationSeconds = 0;
 		WorldViewFrame WorldFrame;
 		RetainedBodyAuthorization AuthorizeRetainedBody;
 		struct PresentationFrame {
 			std::vector<scene::DrawInstance> EntranceRows;
 			std::optional<int16_t> Entrance;
+			// Each capture owns one clock. Imported body packets replace this
+			// destination clock so their materials and temporal passes agree.
+			double PresentationSeconds = 0;
 			WorldCameraFrame Camera;
 			std::vector<SurfaceView> Surfaces;
 			InterfacePass Interface;
@@ -3047,10 +3051,10 @@ namespace engine::render {
 			frame.InterfaceReady = frame.Interface.Initialise(
 				state.Render.Backend().Device, state.Render.Backend().ColourFormat
 			);
-			frame.Interface.SetImageSource([&state](const core::Name &name) {
+			frame.Interface.SetImageSource([&state, source = &frame](const core::Name &name) {
 				InterfaceImage image;
 				image.Texture = state.Render.TextureHandle(name, state.ContentOwner);
-				image.Cell = state.Render.TextureCell(name, state.PresentationSeconds, state.ContentOwner);
+				image.Cell = state.Render.TextureCell(name, source->PresentationSeconds, state.ContentOwner);
 				state.Render.TextureSize(name, image.Width, image.Height, state.ContentOwner);
 				return image;
 			});
@@ -3102,12 +3106,12 @@ namespace engine::render {
 			lighting = state.WorldFrame.Lighting;
 			tick = state.WorldFrame.Tick;
 			identity = state.WorldFrame.Identity;
-			state.PresentationSeconds = state.WorldFrame.Seconds;
 			const auto &seams = state.WorldFrame.Seams;
 
 			for (size_t index = 0; index < jobs.size(); ++index) {
 				auto &frame = state.Frames[index];
 				auto &view = jobs[index]->Viewpoint;
+				frame.PresentationSeconds = PortalPresentationSeconds(state.WorldFrame.Seconds, std::nullopt);
 				frame.Entrance = jobs[index]->Request.Entrance
 									 ? ResolvePortalEntrance(*jobs[index]->Request.Entrance, seams)
 									 : std::nullopt;
@@ -3342,9 +3346,6 @@ namespace engine::render {
 					if (pending.Source) pending.Source->SetEndpointBindings(state.EndpointBindings);
 				}
 				if (!pending.Source) job.Failure = "nested reply endpoint unavailable";
-				const size_t shares =
-					job.Children.size() +
-					(!job.Request.OrderedLayers && !state.Frames[index].Surfaces.empty() ? 1 : 0);
 				const auto &collectors = state.Frames[index].Camera.SpatialCollectors;
 				const bool topOverlay =
 					std::any_of(collectors.begin(), collectors.end(), [](const auto &placed) {
@@ -3358,8 +3359,38 @@ namespace engine::render {
 				}
 				const uint64_t remaining =
 					ownPixels <= job.Request.PixelBudget ? job.Request.PixelBudget - ownPixels : 0;
-				const uint32_t childBudget = uint32_t(remaining / shares);
-				job.LocalPixels = remaining - uint64_t(childBudget) * job.Children.size();
+				std::vector<PortalChildBudget> budgets;
+				budgets.reserve(job.Children.size());
+				for (const auto &child : job.Children) {
+					budgets.push_back(
+						{uint64_t(child.Demand.Request.Width) * child.Demand.Request.Height *
+							 (job.Request.OrderedLayers ? 4u : 1u),
+						 child.Demand.SeamRadiance}
+					);
+				}
+				uint32_t childBudget = 0;
+				if (!PlanPortalChildBudgets(
+						budgets,
+						remaining,
+						!job.Request.OrderedLayers && !state.Frames[index].Surfaces.empty(),
+						childBudget,
+						job.LocalPixels
+					)) {
+					job.Failure = "nested portal pixel budget exceeded";
+					job.FailureStatus = PortalImageStatus::BudgetExceeded;
+				}
+				for (size_t childIndex = job.Children.size(); childIndex != 0; --childIndex) {
+					const size_t selected = childIndex - 1;
+					if (budgets[selected].Accepted) continue;
+					const auto &discarded = job.Children[selected].Demand;
+					for (auto &portal : job.Portals) {
+						if (portal.Index != discarded.Portal.Index) continue;
+						portal.LightImagePortal = {};
+						portal.ImportedLightImage = 0;
+						portal.LightOutward = {};
+					}
+					job.Children.erase(job.Children.begin() + selected);
+				}
 				for (auto &child : job.Children) {
 					if (!job.Failure.empty()) break;
 					auto &demand = child.Demand;
@@ -3447,6 +3478,17 @@ namespace engine::render {
 			view.DirectionalShadowBounds.reset();
 			view.EyeHiddenRows = {};
 			if (!job.Request.Geometry.empty()) {
+				PortalGeometry packet;
+				std::string packetError;
+				if (!DecodePortalGeometry(job.Request.Geometry, packet, packetError)) {
+					job.Output.Reply.Status = PortalImageStatus::Failed;
+					job.Output.Reply.Diagnostic = std::move(packetError);
+					state.SendFailure(job.Output, progress);
+					continue;
+				}
+				state.Frames[index].PresentationSeconds = PortalPresentationSeconds(
+					state.Frames[index].PresentationSeconds, packet.PresentationSeconds
+				);
 				joinedInstances.assign(view.Instances.begin(), view.Instances.end());
 				joinedJoints = joints;
 				std::string error;
@@ -3514,6 +3556,7 @@ namespace engine::render {
 				view.EyeHiddenRows = bodySelection.Hidden;
 			}
 			view.Lights = state.Frames[index].Camera.Lights;
+			view.LensTimeSeconds = static_cast<float>(state.Frames[index].PresentationSeconds);
 			view.Lighting = lighting;
 			view.OverrideLighting = true;
 
@@ -3562,7 +3605,7 @@ namespace engine::render {
 			}
 			signatureState.Animation = scene::MixSignature(
 				state.Frames[index].Camera.Compiled.Signature(),
-				state.Render.TextureAnimationSignature(state.PresentationSeconds)
+				state.Render.TextureAnimationSignature(state.Frames[index].PresentationSeconds)
 			);
 			const bool shaderClock =
 				lighting.ShaderLensCount != 0 ||
@@ -3572,7 +3615,7 @@ namespace engine::render {
 				});
 			if (shaderClock) {
 				signatureState.Animation = scene::MixSignature(
-					signatureState.Animation, std::bit_cast<uint64_t>(state.PresentationSeconds)
+					signatureState.Animation, std::bit_cast<uint64_t>(state.Frames[index].PresentationSeconds)
 				);
 			}
 			job.Output.Reply.CaptureTick = tick;
@@ -3671,7 +3714,7 @@ namespace engine::render {
 			if (job.Request.OrderedLayers && lighting.ShaderLensCount != 0) {
 				static_assert(MAX_PORTAL_CAPTURE_LENSES == scene::MAX_SCENE_SHADER_LENSES);
 				auto &capturedLenses = job.Output.Lenses;
-				capturedLenses.TimeSeconds = static_cast<float>(state.PresentationSeconds);
+				capturedLenses.TimeSeconds = static_cast<float>(state.Frames[index].PresentationSeconds);
 				bool programsAvailable = true;
 				size_t programBytes = 0;
 				for (size_t lensIndex = 0; lensIndex < lighting.ShaderLensCount; ++lensIndex) {
@@ -3861,7 +3904,7 @@ namespace engine::render {
 				continue;
 			}
 			OverlayImage overlay;
-			state.Render.SetAnimationTime(state.PresentationSeconds);
+			state.Render.SetAnimationTime(state.Frames[index].PresentationSeconds);
 			const auto rendered = state.Render.Render(std::span(&view, 1), overlay, interface, false);
 			if (rendered.SurfaceBudgetExceeded) {
 				state.Cancel(job.Output);

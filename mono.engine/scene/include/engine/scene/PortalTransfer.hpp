@@ -81,6 +81,9 @@ namespace engine::scene {
 		std::vector<PortalNodeCopy> Nodes;
 		// Optional motion to transform through the portal seam.
 		std::optional<PortalBodySweep> Sweep;
+		// The root was resting in the authoritative physics world. A sleeping body
+		// has no Motion component, so this must travel beside the copied rows.
+		bool RootSleeping = false;
 	};
 
 	// Local handles returned after admission. Objects return only Root.

@@ -899,6 +899,17 @@ namespace engine::scene {
 				seam.Centre = face.Centre;
 				seam.Normal = face.Normal;
 				FaceAxes(face.Placement, local, face.HalfExtent, seam.First, seam.Second);
+				seam.RimThickness = portal.RimThickness;
+				const float firstLength = seam.First.Magnitude();
+				const float secondLength = seam.Second.Magnitude();
+				if (!std::isfinite(seam.RimThickness) || seam.RimThickness < 0 ||
+					seam.RimThickness >= firstLength || seam.RimThickness >= secondLength) {
+					return;
+				}
+				if (seam.RimThickness > 0) {
+					seam.First = seam.First * ((firstLength - seam.RimThickness) / firstLength);
+					seam.Second = seam.Second * ((secondLength - seam.RimThickness) / secondLength);
+				}
 				seam.Up = face.Placement.VectorToWorldSpace(UpFor(local));
 				seam.Destination = FaceFrame(far->Frame, farCentre, local);
 
@@ -1444,12 +1455,13 @@ namespace engine::scene {
 				return false;
 			}
 
-			// **Nothing invisible has a far half worth drawing**, and a
-			// cross-world pair puts exactly such a row in the seam: the
+			// **Nothing invisible without graph work has a far half worth drawing**,
+			// and a cross-world pair puts exactly such a row in the seam: the
 			// destination stand-in is pane-sized, centred on the plane and
 			// authored invisible, so it fits the hole perfectly and would be
-			// copied every frame for nothing.
-			if (row.Transparency >= 1.0f) {
+			// copied every frame for nothing. An invisible effect carrier still
+			// crosses because its graph work can produce visible pixels.
+			if (row.Transparency >= 1.0f && row.Effects.Count == 0) {
 				return false;
 			}
 
@@ -1497,7 +1509,7 @@ namespace engine::scene {
 			}
 
 			ghost = row;
-			ghost.Variant = seam.Pane.Id;
+			ghost.Variant = PortalVariant(row.Variant, seam.Pane.Id);
 			ghost.Frame = through.Place(row.Frame);
 			ghost.HalfExtent = row.HalfExtent * through.Scale;
 
@@ -1511,6 +1523,10 @@ namespace engine::scene {
 			// and their intersection is empty.
 			ghost.SeamNormal = cut.FarNormal;
 			ghost.SeamOffset = cut.FarOffset;
+			ghost.SeamFirst = through.Rotate(seam.First) * through.Scale;
+			ghost.SeamSecond = through.Rotate(seam.Second) * through.Scale;
+			ghost.SeamCentre = through.Point(seam.Centre);
+			ghost.SeamMask = 2;
 
 			// **And it is lit by the sun this side of the hole sees.** The
 			// copy's normals are the original's turned by the seam's rotation,
@@ -2375,6 +2391,8 @@ namespace engine::scene {
 		});
 
 		size_t opened = 0;
+		std::vector<PortalSeam> seams;
+		GatherSeams(store, seams);
 		for (size_t first = 0; first < openings.size();) {
 			size_t after = first + 1;
 			bool open = openings[first].Open;
@@ -2389,6 +2407,53 @@ namespace engine::scene {
 				first = after;
 				continue;
 			}
+			const Collider authored = *collider;
+			const auto *rim = store.Get<PortalRim>(pane);
+			if (!open && rim != nullptr) {
+				for (const ecs::Entity part : rim->Parts)
+					if (store.Alive(part)) store.Destroy(part);
+				store.Remove<PortalRim>(pane);
+			}
+			if (open && !collider->Trigger && rim == nullptr) {
+				const auto seam = std::find_if(seams.begin(), seams.end(), [&](const auto &candidate) {
+					return candidate.Pane == pane;
+				});
+				if (seam != seams.end()) {
+					const float apertureFirst = seam->First.Magnitude();
+					const float apertureSecond = seam->Second.Magnitude();
+					const float thickness = seam->RimThickness;
+					if (thickness > 0) {
+						const float outerFirst = apertureFirst + thickness;
+						const float outerSecond = apertureSecond + thickness;
+						const auto frame =
+							core::CFrame::LookAt(seam->Centre, seam->Centre + seam->Normal, seam->Up);
+						PortalRim created;
+						const std::array<core::Vector3, 4> centres{
+							core::Vector3{-outerFirst + thickness * .5f, 0, 0},
+							core::Vector3{outerFirst - thickness * .5f, 0, 0},
+							core::Vector3{0, -outerSecond + thickness * .5f, 0},
+							core::Vector3{0, outerSecond - thickness * .5f, 0},
+						};
+						const std::array<core::Vector3, 4> extents{
+							core::Vector3{thickness * .5f, outerSecond, collider->Extent.Z},
+							core::Vector3{thickness * .5f, outerSecond, collider->Extent.Z},
+							core::Vector3{apertureFirst, thickness * .5f, collider->Extent.Z},
+							core::Vector3{apertureFirst, thickness * .5f, collider->Extent.Z},
+						};
+						for (size_t index = 0; index < created.Parts.size(); ++index) {
+							created.Parts[index] = store.Create();
+							store.Set(
+								created.Parts[index], scene::Transform{frame * core::CFrame(centres[index])}
+							);
+							scene::Collider edge = authored;
+							edge.Extent = extents[index];
+							edge.Trigger = false;
+							store.Set(created.Parts[index], edge);
+						}
+						store.Set(pane, created);
+					}
+				}
+			}
 			if (collider->Trigger == open) {
 				first = after;
 				continue;
@@ -2400,7 +2465,7 @@ namespace engine::scene {
 			// collider that became a trigger without one would keep being solved
 			// against until something else happened to touch the row. It stamps
 			// only when the authored activation changes, not once per tick.
-			Collider opened_ = *collider;
+			Collider opened_ = authored;
 			opened_.Trigger = open;
 			store.Set(pane, opened_);
 			opened += open ? 1u : 0u;
@@ -2569,6 +2634,10 @@ namespace engine::scene {
 				if (!staticLocal) {
 					out[index].SeamNormal = cut.NearNormal;
 					out[index].SeamOffset = cut.NearOffset;
+					out[index].SeamFirst = seam.First;
+					out[index].SeamSecond = seam.Second;
+					out[index].SeamCentre = seam.Centre;
+					out[index].SeamMask = 1;
 				} else {
 					ghost.SeamNormal = {};
 					ghost.SeamOffset = 0.0f;

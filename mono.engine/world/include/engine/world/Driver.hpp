@@ -175,6 +175,10 @@ namespace engine::world {
 		//                     testable in a microsecond.
 		void Tick(float frameSeconds, double now);
 
+		// Installs the game-owned fixed-step barrier for both local worlds and
+		// phase-controlled hosts. The resolver runs only on this driver.
+		void SetFixedStepBarrier(FixedStepBarrierCallbacks callbacks);
+
 		// Services presentation links without ticking worlds or touching their
 		// simulation mailboxes. Authenticated directories update endpoint discovery;
 		// disconnected or replaced links retire their presentation sessions.
@@ -209,6 +213,7 @@ namespace engine::world {
 		DriverStatistics Stats;
 		uint64_t ObservedPresentationDrops = 0;
 		uint64_t ExchangeFrame = 0;
+		FixedStepBarrierCallbacks Barrier;
 
 		// Reused between barriers so a driver stops allocating.
 		std::vector<HostDelivery> Batch;

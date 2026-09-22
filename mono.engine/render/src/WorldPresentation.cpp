@@ -877,23 +877,15 @@ namespace engine::render {
 					// what the world knows, and `render` is what turns it
 					// into something a GPU binds.
 					//
-					// The fields come from `PresentationSource::MakeDrawInstance`, which
-					// is the only place that list is written - the
-					// replicated collector fills the same row from a
-					// snapshot. Both components are required columns of
-					// *this* query, so the addresses are always good.
-					const PresentationSource source{
-						.Transform = &transforms[row],
-						.PreviousTransform = &previous[row],
-						.Bounds = &bounds[row],
-						.Visual = &visuals[row],
-						.Appearance = &appearances[row],
-						.Tags = &tags[row],
-						.Transparency = &locals[row],
-						.Limb = limbs == nullptr ? nullptr : &limbs[row],
-					};
-					out[at + row] = source.MakeDrawInstance(
-						entities[row], previous[row].Frame.NLerp(transforms[row].Frame, alpha)
+					out[at + row] = scene::MakeDrawInstance(
+						previous[row].Frame.NLerp(transforms[row].Frame, alpha),
+						bounds[row],
+						visuals[row],
+						&appearances[row],
+						&tags[row],
+						entities[row].Id,
+						&locals[row],
+						limbs == nullptr ? nullptr : &limbs[row]
 					);
 					foundFullyTransparent |= out[at + row].Transparency >= 1.0f;
 				}

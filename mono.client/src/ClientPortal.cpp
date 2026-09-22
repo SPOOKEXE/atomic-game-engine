@@ -1,9 +1,12 @@
+#include "PortalReadiness.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/script/PortalTransfer.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <client/Client.hpp>
@@ -17,6 +20,14 @@ namespace client {
 	static constexpr size_t PORTAL_SUCCESSOR_VIEW = 1;
 	// Whole-eye replies belong to the viewport lifetime, not its current body replica.
 	static constexpr size_t PORTAL_EYE_VIEW = 2;
+
+	std::optional<PortalReadinessReservation> PortalPrewarmReservation(const Options &settings) {
+		const uint32_t width = static_cast<uint32_t>(std::max(settings.Width, 1));
+		const uint32_t height = static_cast<uint32_t>(std::max(settings.Height, 1));
+		return PortalReadinessReservation::ForRgba16fEyes(
+			width, height, static_cast<uint64_t>(settings.PortalReadinessAssetUploadBytes)
+		);
+	}
 
 	void Client::DropPortalObservation() {
 		if (!PortalPrevious) return;
@@ -430,7 +441,8 @@ namespace client {
 		if (prepareNative && PortalNext && PortalNext->World.IsValid() && !PortalNext->Refused &&
 			PortalNext->Failure.empty() && PortalNext->Connection && PortalNext->Connection->Admitted() &&
 			PortalNext->Connection->Joined() && PortalNext->Connection->Live() &&
-			!PortalNext->Connection->Rejected() && eyeWorld.Text() == PortalNext->Offer.Claim.Destination &&
+			!PortalNext->Connection->Rejected() && PortalNext->LivePresentationReady &&
+			eyeWorld.Text() == PortalNext->Offer.Claim.Destination &&
 			PreparePortalWorldView(PortalNext->View, PortalNext->World, view, width, height))
 			return true;
 		remote.EyeImage = selected.IsValid() ? PortalImages->Image(remote.Slot, remote.EyeImageKey) : 0;
@@ -475,6 +487,25 @@ namespace client {
 
 	bool Client::ReceivePortalSession(const engine::game::PortalSessionMessage &message) {
 		using namespace engine;
+		if (message.Kind == game::PortalSessionKind::Approach) {
+			if (message.Port == 0 || PortalNext) return false;
+			if (PortalApproach && PortalApproach->Route.Seam == message.Seam &&
+				PortalApproach->Route.Destination == message.Destination) {
+				if (PortalApproach->Route.Identity == message.Identity &&
+					PortalApproach->Route.Port == message.Port) {
+					PortalApproach->Route = message;
+					PortalApproach->Deadline = core::Clock::Seconds() + 20.0;
+					return true;
+				}
+			}
+			DropPortalApproach();
+			PortalApproach = std::make_unique<PortalApproachReplica>();
+			PortalApproach->Route = message;
+			PortalApproach->Endpoint = ConnectedServer;
+			PortalApproach->Endpoint.Port = message.Port;
+			PortalApproach->Deadline = core::Clock::Seconds() + 20.0;
+			return true;
+		}
 		if (message.Kind == game::PortalSessionKind::Transfer) {
 			if (PortalNext) {
 				if (!PortalNext->ProceedSent && message.Attempt > PortalNext->Offer.Attempt &&
@@ -484,10 +515,87 @@ namespace client {
 			}
 			DropPortalObservation();
 			PortalNext = std::make_unique<PortalSuccessor>();
-			PortalNext->Offer = message;
-			PortalNext->Endpoint = ConnectedServer;
-			PortalNext->Endpoint.Port = message.Port;
-			PortalNext->Deadline = core::Clock::Seconds() + 15;
+			auto &next = *PortalNext;
+			next.Offer = message;
+			next.Endpoint = ConnectedServer;
+			next.Endpoint.Port = message.Port;
+			next.Deadline = core::Clock::Seconds() + 15;
+			next.View.Pipeline = PipelineSelected;
+			next.Readiness = std::make_shared<PortalReadinessController>(PortalReadinessSettings{
+				.EnterDistance = 16,
+				.ExitDistance = 20,
+				.CapacityBytes = static_cast<uint64_t>(Settings.PortalReadinessBudgetBytes)
+			});
+			if (PortalApproach && PortalApproach->World.IsValid() && PortalApproach->Connection &&
+				PortalApproach->Content && PortalApproachMatchesTransfer(PortalApproach->Route, message)) {
+				// The advisory route proved this endpoint before a receipt existed.
+				// Rebinding its callback is enough to turn the same replica into the
+				// authoritative successor without reopening a socket or reloading content.
+				auto warmed = std::move(PortalApproach);
+				next.World = warmed->World;
+				next.Socket = std::move(warmed->Socket);
+				next.Connection = std::move(warmed->Connection);
+				next.Content = std::move(warmed->Content);
+				next.ReadinessDistance = warmed->LastDistance;
+				next.HasReadinessDistance = warmed->HasDistance;
+				if (const auto reservation = PortalPrewarmReservation(Settings))
+					(void)next.Readiness->Reserve(*reservation);
+				next.Presentation = std::make_unique<world::PresentationStream>();
+				next.PresentationRoutes.reset();
+				next.PresentationAnnounced = false;
+				const auto destination = next.World;
+				next.Connection->OnUserMessage([this, destination](std::span<const std::byte> bytes) {
+					if (!PortalNext || PortalNext->World != destination) return;
+					auto &pending = *PortalNext;
+					if (world::PresentationStream::Recognizes(bytes)) {
+						if (pending.Presentation->Receive(bytes) ==
+							world::PresentationStreamReceive::Refused) {
+							pending.Failure = "destination presentation stream refused";
+							return;
+						}
+						for (auto &frame : pending.Presentation->Take()) {
+							if (frame.Kind != world::PresentationStreamKind::Routes) {
+								pending.Failure = "destination sent unsolicited presentation data";
+								return;
+							}
+							pending.PresentationRoutes = std::move(frame.Directory);
+						}
+						return;
+					}
+					game::ContentDirectory directory;
+					if (game::DecodeContentDirectory(bytes, directory)) {
+						AdoptContentDirectory(*pending.Content, directory);
+						return;
+					}
+					if (pending.Content->Relay && pending.Content->Relay->Receive(bytes)) return;
+					game::PortalSessionMessage reply;
+					if (!game::DecodePortalSession(bytes, reply) || reply.Attempt != pending.Offer.Attempt)
+						return;
+					if (reply.Kind == game::PortalSessionKind::Refused) {
+						if (pending.Crossed) {
+							pending.ResumeSent = false;
+							pending.Ready = false;
+							pending.CommitSent = false;
+							pending.AdmissionRetryAt = core::Clock::Seconds() + .25;
+							return;
+						}
+						pending.Failure = reply.Diagnostic;
+						return;
+					}
+					if (reply.World != pending.Offer.Claim.Destination) return;
+					if (reply.Kind == game::PortalSessionKind::Ready && pending.ResumeSent) {
+						if (pending.Player != ecs::NULL_ENTITY && pending.Player != reply.Player) return;
+						pending.Player = reply.Player;
+						pending.DestinationFence = reply.Fence;
+						pending.Ready = true;
+					}
+					if (reply.Kind == game::PortalSessionKind::Committed && pending.CommitSent &&
+						reply.Player == pending.Player)
+						pending.Committed = true;
+				});
+			} else {
+				DropPortalApproach();
+			}
 			return true;
 		}
 		if (!PortalNext || message.Attempt != PortalNext->Offer.Attempt) return false;
@@ -511,6 +619,97 @@ namespace client {
 			return true;
 		}
 		return false;
+	}
+
+	void Client::DropPortalApproach() {
+		if (!PortalApproach) return;
+		const auto world = PortalApproach->World;
+		PortalApproach.reset();
+		DropPortalReplica(world);
+	}
+
+	void Client::PumpPortalApproach(double nowSeconds) {
+		using namespace engine;
+		if (!PortalApproach) return;
+		auto &approach = *PortalApproach;
+		if (nowSeconds >= approach.Deadline) {
+			DropPortalApproach();
+			return;
+		}
+		float distance = std::numeric_limits<float>::infinity();
+		Universe_->Enter(Replicated, [&](ecs::Store &store) {
+			const auto *player = store.Resource<scene::LocalPlayer>();
+			const auto character = player ? scene::CharacterOf(store, player->Instance) : ecs::NULL_ENTITY;
+			const auto *placement = store.Get<scene::Transform>(character);
+			if (placement) distance = (placement->Frame.Position - approach.Route.Through.Origin).Magnitude();
+		});
+		const float limit = approach.Active ? 20.0f : 16.0f;
+		if (distance > limit) {
+			DropPortalApproach();
+			return;
+		}
+		approach.LastDistance = distance;
+		approach.HasDistance = true;
+		approach.Active = true;
+		if (!approach.World.IsValid()) {
+			world::WorldSettings settings;
+			settings.Name = core::Name("client.portal.approach." + std::to_string(NextPortalReplica++));
+			settings.TickRate = Settings.TickRate;
+			approach.World = Universe_->Create(settings);
+			if (!approach.World.IsValid()) {
+				DropPortalApproach();
+				return;
+			}
+			Universe_->Enter(approach.World, [&](ecs::Store &store, ecs::Scheduler &systems) {
+				store.SetResource(
+					world::Replica{.Active = true, .Of = core::Name(approach.Route.Destination), .View = {}}
+				);
+				store.SetAdoptOnly(true);
+				replication::InterpolationSettings interpolation;
+				interpolation.TickRate = Settings.TickRate;
+				if (auto runtime = BuildReplicatedWorld(store, systems, interpolation))
+					Runtimes.emplace_back(approach.World, std::move(runtime));
+			});
+			approach.Socket = net::MakeUdpTransport(0);
+			if (!approach.Socket || !ClientIdentity) {
+				DropPortalApproach();
+				return;
+			}
+			replication::ConnectorSettings connecting;
+			connecting.Prediction.MaximumPending = PortalInputHistory::CAPACITY;
+			connecting.ClientIdentity = &*ClientIdentity;
+			connecting.ServerIdentity = approach.Route.Identity;
+			connecting.Quic.BytesPerTick = connecting.Session.Link.BytesPerTick;
+			approach.Connection = std::make_unique<replication::Connector>(
+				*approach.Socket, approach.Endpoint, nowSeconds, connecting
+			);
+			approach.Content = std::make_unique<ContentSession>();
+			approach.Content->RelayName = approach.Endpoint.Text();
+			approach.Content->Relay = std::make_unique<ContentLink>(
+				[connection = approach.Connection.get()](std::span<const std::byte> bytes) {
+					return connection->SendUser(bytes, core::Clock::Seconds());
+				}
+			);
+			if (!Settings.ContentPublisherKey.empty()) (void)BuildContentClient(*approach.Content);
+			const auto world = approach.World;
+			approach.Connection->OnUserMessage([this, world](std::span<const std::byte> bytes) {
+				if (!PortalApproach || PortalApproach->World != world) return;
+				game::ContentDirectory directory;
+				if (game::DecodeContentDirectory(bytes, directory)) {
+					AdoptContentDirectory(*PortalApproach->Content, directory);
+					return;
+				}
+				if (PortalApproach->Content->Relay) (void)PortalApproach->Content->Relay->Receive(bytes);
+			});
+		}
+		Universe_->Enter(approach.World, [&](ecs::Store &store) {
+			approach.Connection->Poll(store, nowSeconds);
+			RecordReplicatedTick(store, approach.Connection->Applied());
+		});
+		approach.Connection->Advance(nowSeconds);
+		// A connector may replace a failed wire during its initial handshake.
+		// Its deadline owns that provisional period; only an exhausted exchange is terminal here.
+		if (approach.Connection->Rejected()) DropPortalApproach();
 	}
 
 	void Client::DropPortalReplica(engine::world::WorldId world) {
@@ -561,6 +760,8 @@ namespace client {
 				next.Content.reset();
 				next.Connection.reset();
 				next.Socket.reset();
+				if (next.Readiness) next.Readiness->Release();
+				next.SuppressRetainedCapture = false;
 				const auto previous = next.World;
 				next.World = {};
 				DropPortalReplica(previous);
@@ -648,6 +849,12 @@ namespace client {
 			next.Connection =
 				std::make_unique<replication::Connector>(*next.Socket, next.Endpoint, nowSeconds, connecting);
 			next.Content = std::make_unique<ContentSession>();
+			if (next.Readiness) {
+				// Reserve the destination and return images plus content/upload headroom
+				// before work begins. Failure remains explicitly image-only.
+				if (const auto reservation = PortalPrewarmReservation(Settings))
+					(void)next.Readiness->Reserve(*reservation);
+			}
 			next.Content->RelayName = next.Endpoint.Text();
 			next.Content->Relay =
 				std::make_unique<ContentLink>([connection =
@@ -706,6 +913,7 @@ namespace client {
 				if (reply.Kind == game::PortalSessionKind::Ready && pending.ResumeSent) {
 					if (pending.Player != ecs::NULL_ENTITY && pending.Player != reply.Player) return;
 					pending.Player = reply.Player;
+					pending.DestinationFence = reply.Fence;
 					pending.Ready = true;
 				}
 				if (reply.Kind == game::PortalSessionKind::Committed && pending.CommitSent &&
@@ -740,6 +948,9 @@ namespace client {
 		if (!next.ProceedSent) {
 			if (!next.Connection->Admitted() || !next.Connection->Joined() || !next.Camera) return;
 			if (!presentationReady || !PortalSuccessorDrawable()) return;
+			// Proceed starts authority preparation. It is not permission to replace
+			// the retained image, which remains selected until the destination sends
+			// a sealed, observed readiness fence in its later Ready response.
 			game::PortalSessionMessage proceed;
 			proceed.Kind = game::PortalSessionKind::Proceed;
 			proceed.Attempt = next.Offer.Attempt;
@@ -758,6 +969,84 @@ namespace client {
 			return;
 		}
 		if (!next.Ready || !next.Connection->Joined() || !presentationReady) return;
+		if (!next.Readiness) return;
+		PortalReadinessEvidence evidence;
+		evidence.Distance =
+			next.HasReadinessDistance ? next.ReadinessDistance : std::numeric_limits<float>::infinity();
+		Universe_->Enter(Replicated, [&](ecs::Store &store) {
+			const auto *player = store.Resource<scene::LocalPlayer>();
+			const auto character = player ? scene::CharacterOf(store, player->Instance) : ecs::NULL_ENTITY;
+			const auto *placement = store.Get<scene::Transform>(character);
+			if (placement) {
+				next.ReadinessDistance = (placement->Frame.Position - next.Offer.Through.Origin).Magnitude();
+				next.HasReadinessDistance = true;
+				evidence.Distance = next.ReadinessDistance;
+			}
+		});
+		evidence.RetainedCapture =
+			PortalImages->Image(PORTAL_SUCCESSOR_VIEW, core::Name("viewport-eye")) != 0;
+		evidence.RetainedCaptureFresh = evidence.RetainedCapture;
+		// Both RGBA16F eyes and bounded content/upload headroom must fit before
+		// destination geometry can replace the retained image.
+		if (const auto reservation = PortalPrewarmReservation(Settings))
+			evidence.CapacityReserved = next.Readiness->Reserve(*reservation);
+		if (next.Content) {
+			// Content delivery retains deferred work, so a clear pair of queues is
+			// the only point this replica may promote its already scanned far region.
+			evidence.AssetsResident =
+				next.Content->Requested && next.Content->Pending.empty() && next.Content->Issued.empty();
+			const auto scanned = next.Content->ScannedAtRevision.find(next.World.Index);
+			if (scanned != next.Content->ScannedAtRevision.end()) {
+				evidence.RequiredAssetRevision = scanned->second;
+				evidence.ResidentAssetRevision = evidence.AssetsResident ? scanned->second : 0;
+			}
+		}
+		Universe_->Enter(Replicated, [&](ecs::Store &store) {
+			const auto *player = store.Resource<scene::LocalPlayer>();
+			if (!player) return;
+			const auto receipt = script::PortalTransferOfPlayer(store, player->Instance);
+			if (!receipt || receipt->Stage < script::PortalTransferStage::Prepared) return;
+			const auto &fence = receipt->Fence;
+			if (fence.TopologyRevision == 0 || fence.BaselineId == 0 || fence.H.DestinationTick == 0) return;
+			evidence.RequiredBaseline = fence.BaselineId;
+			evidence.RequiredBaselineHash = fence.BaselineHash;
+			// Connector exposes its completed tick, but not the fenced baseline
+			// identity, hash, or topology revision. Do not manufacture evidence
+			// from that tick: a missing destination receipt remains image-only.
+			evidence.RequiredTopologyRevision = fence.TopologyRevision;
+			evidence.RequiredAuthorityEpoch = fence.AuthorityEpoch;
+			evidence.RequiredPrepareRevision = fence.PrepareRevision;
+			evidence.RequiredClockDomain = fence.H.Domain;
+			evidence.RequiredSourceTick = fence.H.SourceTick;
+			evidence.RequiredDestinationTick = fence.H.DestinationTick;
+			evidence.RequiredPoseBegin = fence.H.DestinationTick;
+			evidence.RequiredPoseEnd = fence.H.DestinationTick;
+		});
+		std::optional<script::PortalTransferFence> localFence;
+		Universe_->Enter(next.World, [&](ecs::Store &store) {
+			localFence = script::PortalTransferDestinationFence(store, next.Offer.Claim.Transfer);
+		});
+		// A host Ready fence names the sealed destination receipt. The replica must
+		// independently expose that exact receipt before it can replace the image.
+		if (localFence && next.DestinationFence && *localFence == *next.DestinationFence) {
+			const auto &observed = *localFence;
+			evidence.ReplicaBaseline = observed.BaselineId;
+			evidence.ReplicaBaselineHash = observed.BaselineHash;
+			evidence.ReplicaTopologyRevision = observed.TopologyRevision;
+			evidence.ReplicaAuthorityEpoch = observed.AuthorityEpoch;
+			evidence.ReplicaPrepareRevision = observed.PrepareRevision;
+			evidence.ReplicaClockDomain = observed.H.Domain;
+			evidence.ReplicaSourceTick = observed.H.SourceTick;
+			evidence.ReplicaDestinationTick = observed.H.DestinationTick;
+		}
+		// The local connector's applied watermark proves the destination body pose
+		// reached the named baseline after its receipt was replicated.
+		evidence.ReplicaPoseBegin = 0;
+		evidence.ReplicaPoseEnd = next.Connection->Applied();
+		const PortalReadiness readiness = next.Readiness->Evaluate(evidence);
+		next.SuppressRetainedCapture = readiness.SuppressRetainedCapture;
+		next.LivePresentationReady = readiness.Live;
+		if (!next.LivePresentationReady) return;
 		bool cameraReady = false;
 		size_t entities = 0;
 		Universe_->Present(next.World, 0, 0);
@@ -772,7 +1061,9 @@ namespace client {
 		});
 		if (!cameraReady) return;
 		if (!next.DrawingArrivedPlayer) {
-			PortalImages->RemoveViewport(PORTAL_SUCCESSOR_VIEW);
+			// The retained eye kept the destination visible while the local replica
+			// caught up. Retire it before the matching live body is submitted.
+			if (next.SuppressRetainedCapture) PortalImages->RemoveViewport(PORTAL_SUCCESSOR_VIEW);
 			next.DrawingArrivedPlayer = true;
 		}
 		if (!PortalSuccessorDrawable()) return;

@@ -271,7 +271,11 @@ namespace engine::render {
 					entry.Instance >= State->SlotEmissiveMap.size() ||
 					entry.Instance >= State->SlotPackedPbrMap.size() ||
 					entry.Instance >= State->SlotPackedPbrChannels.size() ||
-					entry.Instance >= State->SlotSeam.size() || entry.Instance >= State->SlotSeamLight.size())
+					entry.Instance >= State->SlotSeam.size() ||
+					entry.Instance >= State->SlotSeamFirst.size() ||
+					entry.Instance >= State->SlotSeamSecond.size() ||
+					entry.Instance >= State->SlotSeamCentre.size() ||
+					entry.Instance >= State->SlotSeamLight.size())
 					continue;
 				const MeshEntry *mesh = State->SlotMesh[entry.Instance];
 				if (mesh == nullptr) continue;
@@ -362,6 +366,9 @@ namespace engine::render {
 				const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
 				material.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				material.SeamPlane = State->SlotSeam[entry.Instance];
+				material.SeamFirst = State->SlotSeamFirst[entry.Instance];
+				material.SeamSecond = State->SlotSeamSecond[entry.Instance];
+				material.SeamCentre = State->SlotSeamCentre[entry.Instance];
 				const glm::vec3 seamLight{State->SlotSeamLight[entry.Instance]};
 				if (glm::dot(seamLight, seamLight) > 0.0f) material.Direction = glm::vec4{seamLight, 0.0f};
 				SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));

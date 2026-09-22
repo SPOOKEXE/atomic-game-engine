@@ -841,6 +841,15 @@ namespace engine::world {
 		);
 		// Applies a complete reply set on each source lane.
 		bool ApplyTickExchangeReplies(std::span<const TickExchangeReply> replies);
+		// Runs Simulation, then joins worlds before their Physics phase.
+		bool AdvanceTickExchangeRoundToPhysics();
+		using FixedStepBarrierCollect = std::function<void(WorldId, ecs::Store &, std::vector<std::byte> &)>;
+		using FixedStepBarrierApply = std::function<bool(WorldId, ecs::Store &, std::span<const std::byte>)>;
+		bool CollectFixedStepBarrier(
+			FixedStepBarrierCollect collect, std::vector<FixedStepBarrierRecord> &records
+		);
+		bool
+		ApplyFixedStepBarrier(FixedStepBarrierApply apply, std::span<const FixedStepBarrierRecord> records);
 		// Completes the current round and restores simulation phase.
 		bool FinishTickExchangeRound();
 		// Closes a completed exchange frame.
@@ -857,7 +866,16 @@ namespace engine::world {
 			const std::function<void(size_t)> &body, std::span<float> worldMilliseconds = {}
 		);
 		void CompleteExchangeFrame();
-		enum class ExchangePhase : uint8_t { Closed, BetweenRounds, Input, Collected, Applied };
+		enum class ExchangePhase : uint8_t {
+			Closed,
+			BetweenRounds,
+			Input,
+			Collected,
+			Applied,
+			Simulated,
+			BarrierCollected,
+			BarrierApplied
+		};
 		ExchangePhase ExchangeStage = ExchangePhase::Closed;
 		unsigned ExchangeRound = 0;
 		unsigned ExchangeRounds = 0;

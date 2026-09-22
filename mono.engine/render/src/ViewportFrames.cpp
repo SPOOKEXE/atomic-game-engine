@@ -26,11 +26,13 @@ namespace engine::render {
 			}
 
 			store.EachChild(parent, [&](ecs::Entity child) {
-				const PresentationSource source = PresentationSource::Of(store, child);
-				if (source.IsViewportDrawable()) {
-					out.push_back(source.MakeDrawInstance(
-						child, source.Transform->Frame, PresentationSource::LocalTransparencyMode::Ignore
-					));
+				const auto *transform = store.Get<scene::Transform>(child);
+				if (transform != nullptr && PresentationSource::IsViewportDrawable(store, child)) {
+					out.push_back(
+						PresentationSource::MakeDrawInstance(
+							store, child, transform->Frame, PresentationSource::LocalTransparencyMode::Ignore
+						)
+					);
 				}
 
 				CollectViewportDescendants(store, child, depth + 1, out);

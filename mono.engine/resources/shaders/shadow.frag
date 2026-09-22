@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Writes nothing. The depth attachment is the output.
 //
@@ -14,6 +15,8 @@ layout(location = 3) flat in float inInstanceAlpha;
 
 layout(set = 2, binding = 0) uniform sampler2D colourMap;
 
+#include "seam-mask.glsl"
+
 // The half-space this draw keeps, matching `opaque.frag`'s `SeamPlane`.
 //
 // The compact shadow block carries only clipping state. The colour sampler is
@@ -21,14 +24,16 @@ layout(set = 2, binding = 0) uniform sampler2D colourMap;
 // cutoff branch.
 layout(set = 3, binding = 0) uniform Shadow {
 	vec4 Plane;
+	vec4 SeamFirst;
+	vec4 SeamSecond;
+	vec4 SeamCentre;
 	// x: submesh base alpha.
 	vec4 Material;
 	vec4 Flipbook;
 } shadow;
 
 void main() {
-	if (dot(shadow.Plane.xyz, shadow.Plane.xyz) > 0.0 &&
-		dot(inWorldPosition, shadow.Plane.xyz) < shadow.Plane.w) {
+	if (!KeepSeamSample(inWorldPosition, shadow.Plane, shadow.SeamFirst, shadow.SeamSecond, shadow.SeamCentre)) {
 		discard;
 	}
 

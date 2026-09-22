@@ -1060,12 +1060,16 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 
 	// And the *other* client sees the same body in the new place, which is the
 	// half that separates "the server moved it" from "everybody was told".
-	REQUIRE(second.Wait([&] {
-		const Entity character = engine::scene::CharacterOf(second.World, first.Mine);
-		const Character *current = second.World.Get<Character>(character);
-		const Transform *position = current == nullptr ? nullptr : second.World.Get<Transform>(current->Root);
-		return position != nullptr && position->Frame.Position.X > before.X + 1.0f;
-	}, 400));
+	REQUIRE(second.Wait(
+		[&] {
+			const Entity character = engine::scene::CharacterOf(second.World, first.Mine);
+			const Character *current = second.World.Get<Character>(character);
+			const Transform *position =
+				current == nullptr ? nullptr : second.World.Get<Transform>(current->Root);
+			return position != nullptr && position->Frame.Position.X > before.X + 1.0f;
+		},
+		400
+	));
 	const Entity theirs = engine::scene::CharacterOf(second.World, first.Mine);
 	const Character *seen = second.World.Get<Character>(theirs);
 	REQUIRE(seen != nullptr);
@@ -1109,10 +1113,13 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	Remote client;
 	REQUIRE(client.Start(0, scene.string()));
 	REQUIRE(client.Join(400));
-	REQUIRE(client.Wait([&] {
-		return client.Mine != engine::ecs::NULL_ENTITY &&
-			   engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY;
-	}, 400));
+	REQUIRE(client.Wait(
+		[&] {
+			return client.Mine != engine::ecs::NULL_ENTITY &&
+				   engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY;
+		},
+		400
+	));
 
 	REQUIRE(client.Mine != engine::ecs::NULL_ENTITY);
 	REQUIRE(engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY);

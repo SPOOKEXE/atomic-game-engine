@@ -4,12 +4,21 @@
 #include <engine/render/PortalGeometry.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <string_view>
 #include <type_traits>
 
 namespace engine::render {
 	namespace {
+		struct BorrowedGeometryEffect {
+			std::string_view Node;
+			uint32_t SelectionMask = UINT32_MAX;
+			uint32_t Order = 0;
+			uint32_t Revision = 0;
+			uint8_t Stage = 1;
+			bool Enabled = true;
+		};
 		struct BorrowedGeometryRow {
 			std::string_view Name;
 			std::string_view Player;
@@ -24,14 +33,23 @@ namespace engine::render {
 			float Transparency = 0;
 			float AlphaCutoff = .5f;
 			std::array<float, 4> SeamPlane{};
+			std::array<float, 3> SeamFirst{};
+			std::array<float, 3> SeamSecond{};
+			std::array<float, 3> SeamCentre{};
+			uint8_t SeamMask = 0;
 			std::array<float, 3> SeamLight{};
+			uint64_t BodyKeyHigh = 0;
+			uint64_t BodyKeyLow = 0;
+			uint64_t BodyGeneration = 0;
 			std::string_view Alpha = "opaque";
 			std::string_view Resample = "default";
 			bool CastShadow = true;
+			std::array<BorrowedGeometryEffect, MAX_PORTAL_GEOMETRY_EFFECTS> Effects{};
+			uint8_t EffectCount = 0;
 			uint32_t FirstJoint = 0;
 			uint32_t JointCount = 0;
 		};
-		constexpr uint32_t GEOMETRY_MAGIC = 0x32454750;
+		constexpr uint32_t GEOMETRY_MAGIC = 0x35454750;
 		bool Text(std::string_view text, bool empty = true) {
 			return (empty || !text.empty()) && text.size() <= 256 &&
 				   text.find('\0') == std::string_view::npos;
@@ -61,12 +79,18 @@ namespace engine::render {
 				!GeometryFinite(row.EmissiveTint) || !std::isfinite(row.EmissiveStrength) ||
 				row.EmissiveStrength < 0 || !std::isfinite(row.Transparency) || row.Transparency < 0 ||
 				row.Transparency > 1 || !std::isfinite(row.AlphaCutoff) || row.AlphaCutoff < 0 ||
-				row.AlphaCutoff > 1 || !GeometryFinite(row.SeamPlane) || !GeometryFinite(row.SeamLight) ||
+				row.AlphaCutoff > 1 || !GeometryFinite(row.SeamPlane) || !GeometryFinite(row.SeamFirst) ||
+				!GeometryFinite(row.SeamSecond) || !GeometryFinite(row.SeamCentre) || row.SeamMask > 2 ||
+				!GeometryFinite(row.SeamLight) ||
 				(row.Alpha != "opaque" && row.Alpha != "overlay" && row.Alpha != "transparency" &&
 				 row.Alpha != "tint-mask") ||
-				(row.Resample != "default" && row.Resample != "pixelated") || row.FirstJoint > joints ||
+				(row.Resample != "default" && row.Resample != "pixelated") ||
+				row.EffectCount > MAX_PORTAL_GEOMETRY_EFFECTS || row.FirstJoint > joints ||
 				row.JointCount > joints - row.FirstJoint || (row.JointCount == 0 && row.FirstJoint != 0)) {
 				return false;
+			}
+			for (size_t index = 0; index < row.EffectCount; ++index) {
+				if (!Text(row.Effects[index].Node) || row.Effects[index].Stage > 1) return false;
 			}
 			const auto normal = std::span(row.SeamPlane).template first<3>();
 			if (!GeometryUnit(normal) &&
@@ -85,7 +109,8 @@ namespace engine::render {
 		bool Valid(const PortalGeometry &geometry) {
 			if (geometry.Rows.size() > MAX_PORTAL_GEOMETRY_ROWS ||
 				geometry.Joints.size() > MAX_PORTAL_GEOMETRY_JOINTS ||
-				(geometry.Rows.empty() && !geometry.Joints.empty())) {
+				(geometry.Rows.empty() && !geometry.Joints.empty()) ||
+				!std::isfinite(geometry.PresentationSeconds)) {
 				return false;
 			}
 			for (const auto &pose : geometry.Joints) {
@@ -128,6 +153,8 @@ namespace engine::render {
 		writer.WriteUInt32(GEOMETRY_MAGIC);
 		writer.WriteUInt32(static_cast<uint32_t>(geometry.Rows.size()));
 		writer.WriteUInt32(static_cast<uint32_t>(geometry.Joints.size()));
+		writer.WriteUInt64(std::bit_cast<uint64_t>(geometry.PresentationSeconds));
+		writer.WriteUInt64(geometry.PresentationRevision);
 		for (const auto &row : geometry.Rows) {
 			writer.WriteString(row.Name);
 			writer.WriteString(row.Player);
@@ -145,10 +172,27 @@ namespace engine::render {
 			writer.WriteFloat(row.Transparency);
 			writer.WriteFloat(row.AlphaCutoff);
 			GeometryFloats(writer, row.SeamPlane);
+			GeometryFloats(writer, row.SeamFirst);
+			GeometryFloats(writer, row.SeamSecond);
+			GeometryFloats(writer, row.SeamCentre);
+			writer.WriteUInt8(row.SeamMask);
 			GeometryFloats(writer, row.SeamLight);
+			writer.WriteUInt64(row.BodyKeyHigh);
+			writer.WriteUInt64(row.BodyKeyLow);
+			writer.WriteUInt64(row.BodyGeneration);
 			writer.WriteString(row.Alpha);
 			writer.WriteString(row.Resample);
 			writer.WriteUInt8(row.CastShadow ? 1 : 0);
+			writer.WriteUInt8(row.EffectCount);
+			for (size_t index = 0; index < row.EffectCount; ++index) {
+				const auto &effect = row.Effects[index];
+				writer.WriteString(effect.Node);
+				writer.WriteUInt32(effect.SelectionMask);
+				writer.WriteUInt32(effect.Order);
+				writer.WriteUInt32(effect.Revision);
+				writer.WriteUInt8(effect.Stage);
+				writer.WriteUInt8(effect.Enabled ? 1 : 0);
+			}
 			writer.WriteUInt32(row.FirstJoint);
 			writer.WriteUInt32(row.JointCount);
 		}
@@ -177,7 +221,10 @@ namespace engine::render {
 			}
 			const uint32_t rows = reader.ReadUInt32();
 			const uint32_t joints = reader.ReadUInt32();
+			const double presentationSeconds = std::bit_cast<double>(reader.ReadUInt64());
+			const uint64_t presentationRevision = reader.ReadUInt64();
 			if (reader.Failed() || rows > MAX_PORTAL_GEOMETRY_ROWS || joints > MAX_PORTAL_GEOMETRY_JOINTS ||
+				!std::isfinite(presentationSeconds) ||
 				uint64_t(joints) * 28 + uint64_t(rows) * 4 > reader.Remaining()) {
 				return false;
 			}
@@ -188,6 +235,10 @@ namespace engine::render {
 				sizeof(PortalGeometry) + size_t(rows) * sizeof(PortalGeometryRow) +
 					size_t(joints) * sizeof(PortalGeometryPose)
 			};
+			if constexpr (StoreRows) {
+				geometry->PresentationSeconds = presentationSeconds;
+				geometry->PresentationRevision = presentationRevision;
+			}
 			if constexpr (StoreRows) geometry->Rows.resize(rows);
 			for (size_t index = 0; index < rows; ++index) {
 				std::conditional_t<StoreRows, PortalGeometryRow, BorrowedGeometryRow> row;
@@ -211,7 +262,14 @@ namespace engine::render {
 				row.Transparency = reader.ReadFloat();
 				row.AlphaCutoff = reader.ReadFloat();
 				GeometryFloats(reader, row.SeamPlane);
+				GeometryFloats(reader, row.SeamFirst);
+				GeometryFloats(reader, row.SeamSecond);
+				GeometryFloats(reader, row.SeamCentre);
+				row.SeamMask = reader.ReadUInt8();
 				GeometryFloats(reader, row.SeamLight);
+				row.BodyKeyHigh = reader.ReadUInt64();
+				row.BodyKeyLow = reader.ReadUInt64();
+				row.BodyGeneration = reader.ReadUInt64();
 				if (!ReadText(reader, row.Alpha, false) || !ReadText(reader, row.Resample, false)) {
 					return false;
 				}
@@ -220,11 +278,26 @@ namespace engine::render {
 					return false;
 				}
 				row.CastShadow = shadow != 0;
+				row.EffectCount = reader.ReadUInt8();
+				if (row.EffectCount > MAX_PORTAL_GEOMETRY_EFFECTS) return false;
+				for (size_t effectIndex = 0; effectIndex < row.EffectCount; ++effectIndex) {
+					auto &effect = row.Effects[effectIndex];
+					if (!ReadText(reader, effect.Node) || reader.Failed()) return false;
+					effect.SelectionMask = reader.ReadUInt32();
+					effect.Order = reader.ReadUInt32();
+					effect.Revision = reader.ReadUInt32();
+					effect.Stage = reader.ReadUInt8();
+					const auto enabled = reader.ReadUInt8();
+					if (enabled > 1) return false;
+					effect.Enabled = enabled != 0;
+				}
 				row.FirstJoint = reader.ReadUInt32();
 				row.JointCount = reader.ReadUInt32();
 				if (reader.Failed() || !ValidRow(row, joints)) return false;
 				measure.MetadataBytes +=
 					row.Name.size() + row.Player.size() + row.Alpha.size() + row.Resample.size();
+				for (size_t effectIndex = 0; effectIndex < row.EffectCount; ++effectIndex)
+					measure.MetadataBytes += row.Effects[effectIndex].Node.size();
 				for (const auto &asset : row.Assets)
 					measure.MetadataBytes += asset.size();
 				if constexpr (StoreRows) geometry->Rows[index] = std::move(row);

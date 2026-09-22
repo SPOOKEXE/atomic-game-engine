@@ -1,8 +1,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
-#include <engine/replication/Replica.hpp>
 #include <engine/replication/Observation.hpp>
+#include <engine/replication/Replica.hpp>
 #include <engine/replication/Submission.hpp>
 
 #include <algorithm>
@@ -492,7 +492,9 @@ namespace engine::replication {
 			if (result == ApplyStatus::Ok) {
 				Observations->Record({
 					ReplicationHook::ReplicaApplied,
-					ReplicaAppliedObservation{identity, read.Kind, result, static_cast<uint64_t>(message.size())},
+					ReplicaAppliedObservation{
+						identity, read.Kind, result, static_cast<uint64_t>(message.size())
+					},
 				});
 			} else {
 				Observations->Record({

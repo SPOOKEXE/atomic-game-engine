@@ -1,3 +1,5 @@
+#include <engine/core/Clock.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/world/TickExchangeHost.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -27,6 +29,33 @@ namespace engine::world {
 			messages.resize(count);
 			for (auto &message : messages)
 				if (!ReadTickExchange(reader, message)) return false;
+			return true;
+		}
+		bool WriteBarrierBatch(core::ByteWriter &writer, std::span<const FixedStepBarrierRecord> records) {
+			if (records.size() > MAXIMUM_TICK_EXCHANGE_MESSAGES) return false;
+			writer.WriteUInt32(static_cast<uint32_t>(records.size()));
+			for (const auto &record : records) {
+				if (record.World.empty() || record.Payload.size() > MAXIMUM_TICK_EXCHANGE_BYTES) return false;
+				writer.WriteString(record.World);
+				writer.WriteUInt32(static_cast<uint32_t>(record.Payload.size()));
+				writer.WriteRaw(record.Payload.data(), record.Payload.size());
+				if (writer.Size() > MAXIMUM_TICK_EXCHANGE_BYTES) return false;
+			}
+			return true;
+		}
+		bool ReadBarrierBatch(core::ByteReader &reader, std::vector<FixedStepBarrierRecord> &records) {
+			const uint32_t count = reader.ReadUInt32();
+			if (reader.Failed() || count > MAXIMUM_TICK_EXCHANGE_MESSAGES) return false;
+			records.resize(count);
+			for (auto &record : records) {
+				record.World = reader.ReadString();
+				const uint32_t bytes = reader.ReadUInt32();
+				if (record.World.empty() || bytes > MAXIMUM_TICK_EXCHANGE_BYTES || bytes > reader.Remaining())
+					return false;
+				record.Payload.resize(bytes);
+				reader.ReadRaw(record.Payload.data(), bytes);
+				if (reader.Failed()) return false;
+			}
 			return true;
 		}
 		void Prefix(
@@ -63,7 +92,9 @@ namespace engine::world {
 				   (command.Operation == TickExchangeOperation::Begin ? command.Round == 0
 																	  : command.FrameSeconds == 0) &&
 				   (command.Operation == TickExchangeOperation::Serve || command.Requests.empty()) &&
-				   (command.Operation == TickExchangeOperation::Apply || command.Replies.empty());
+				   (command.Operation == TickExchangeOperation::Apply || command.Replies.empty()) &&
+				   (command.Operation == TickExchangeOperation::BarrierResolve ||
+					command.BarrierRecords.empty());
 		}
 		bool Valid(const TickExchangeResult &result) {
 			return Valid(result.Operation, result.Frame) && result.Round <= MAXIMUM_HOST_EXCHANGE_ROUNDS &&
@@ -72,7 +103,9 @@ namespace engine::world {
 				   (result.Success ||
 					(result.Requests.empty() && result.Replies.empty() && result.Rounds == 0)) &&
 				   (result.Operation == TickExchangeOperation::Collect || result.Requests.empty()) &&
-				   (result.Operation == TickExchangeOperation::Serve || result.Replies.empty());
+				   (result.Operation == TickExchangeOperation::Serve || result.Replies.empty()) &&
+				   (result.Operation == TickExchangeOperation::BarrierCollect ||
+					result.BarrierRecords.empty());
 		}
 	}
 	bool WriteTickExchangeControl(core::ByteWriter &writer, const TickExchangeCommand &command) {
@@ -80,7 +113,9 @@ namespace engine::world {
 		core::ByteWriter encoded;
 		Prefix(encoded, 0, command.Operation, command.Frame, command.Round);
 		encoded.WriteFloat(command.FrameSeconds);
-		if (!WriteBatch(encoded, command.Requests) || !WriteBatch(encoded, command.Replies)) return false;
+		if (!WriteBatch(encoded, command.Requests) || !WriteBatch(encoded, command.Replies) ||
+			!WriteBarrierBatch(encoded, command.BarrierRecords))
+			return false;
 		writer.WriteRaw(encoded.Bytes().data(), encoded.Size());
 		return true;
 	}
@@ -88,8 +123,8 @@ namespace engine::world {
 		TickExchangeCommand read;
 		if (!Prefix(reader, 0, read.Operation, read.Frame, read.Round)) return false;
 		read.FrameSeconds = reader.ReadFloat();
-		if (!ReadBatch(reader, read.Requests) || !ReadBatch(reader, read.Replies) || !reader.AtEnd() ||
-			!Valid(read))
+		if (!ReadBatch(reader, read.Requests) || !ReadBatch(reader, read.Replies) ||
+			!ReadBarrierBatch(reader, read.BarrierRecords) || !reader.AtEnd() || !Valid(read))
 			return false;
 		command = std::move(read);
 		return true;
@@ -100,7 +135,9 @@ namespace engine::world {
 		Prefix(encoded, 1, result.Operation, result.Frame, result.Round);
 		encoded.WriteUInt8(result.Success ? 1 : 0);
 		encoded.WriteUInt32(result.Rounds);
-		if (!WriteBatch(encoded, result.Requests) || !WriteBatch(encoded, result.Replies)) return false;
+		if (!WriteBatch(encoded, result.Requests) || !WriteBatch(encoded, result.Replies) ||
+			!WriteBarrierBatch(encoded, result.BarrierRecords))
+			return false;
 		writer.WriteRaw(encoded.Bytes().data(), encoded.Size());
 		return true;
 	}
@@ -111,7 +148,7 @@ namespace engine::world {
 		read.Success = success == 1;
 		read.Rounds = reader.ReadUInt32();
 		if (success > 1 || !ReadBatch(reader, read.Requests) || !ReadBatch(reader, read.Replies) ||
-			!reader.AtEnd() || !Valid(read))
+			!ReadBarrierBatch(reader, read.BarrierRecords) || !reader.AtEnd() || !Valid(read))
 			return false;
 		result = std::move(read);
 		return true;
@@ -124,8 +161,14 @@ namespace engine::world {
 		if (Stage != Phase::Idle) Worlds.CancelTickExchangeFrame();
 		Stage = Phase::Idle;
 		ActiveFrame = 0;
+		FrameStartedNanoseconds = 0;
 		LastCommand.clear();
 		LastResult = {};
+		BarrierResults.clear();
+	}
+	void TickExchangeHost::SetFixedStepBarrier(FixedStepBarrierCallbacks callbacks) {
+		if (Stage != Phase::Idle) Disconnect();
+		Barrier = std::move(callbacks);
 	}
 	TickExchangeResult TickExchangeHost::Handle(const TickExchangeCommand &command) {
 		TickExchangeResult result;
@@ -149,6 +192,7 @@ namespace engine::world {
 				return result;
 			}
 			ActiveFrame = command.Frame;
+			FrameStartedNanoseconds = core::Clock::Nanoseconds();
 			NextRound = 0;
 			Stage = Phase::Between;
 			result.Rounds = static_cast<uint32_t>(rounds);
@@ -172,9 +216,53 @@ namespace engine::world {
 			case TickExchangeOperation::Apply:
 				if (Stage != Phase::Served || NextRound == std::numeric_limits<uint32_t>::max())
 					return result;
-				result.Success =
-					Worlds.ApplyTickExchangeReplies(command.Replies) && Worlds.FinishTickExchangeRound();
+				result.Success = Worlds.ApplyTickExchangeReplies(command.Replies);
 				if (result.Success) {
+					if (!Barrier.Valid()) {
+						result.Success = Worlds.FinishTickExchangeRound();
+						if (result.Success) {
+							++NextRound;
+							Stage = Phase::Between;
+						}
+					} else {
+						Stage = Phase::Applied;
+					}
+				}
+				break;
+			case TickExchangeOperation::BarrierCollect:
+				if (!Barrier.Valid() || Stage != Phase::Applied) return result;
+				BarrierResults.clear();
+				result.Success = Worlds.AdvanceTickExchangeRoundToPhysics() &&
+								 Worlds.CollectFixedStepBarrier(
+									 [&](WorldId, ecs::Store &store, std::vector<std::byte> &out) {
+										 Barrier.Collect(store, out);
+									 },
+									 BarrierResults
+								 );
+				if (result.Success) {
+					result.BarrierRecords = BarrierResults;
+					Stage = Phase::BarrierCollected;
+				}
+				break;
+			case TickExchangeOperation::BarrierResolve:
+				if (!Barrier.Valid() || Stage != Phase::BarrierCollected) return result;
+				BarrierResults = command.BarrierRecords;
+				result.Success = true;
+				if (result.Success) Stage = Phase::BarrierResolved;
+				break;
+			case TickExchangeOperation::BarrierApply:
+				if (!Barrier.Valid() || Stage != Phase::BarrierResolved ||
+					NextRound == std::numeric_limits<uint32_t>::max())
+					return result;
+				result.Success = Worlds.ApplyFixedStepBarrier(
+									 [&](WorldId, ecs::Store &store, std::span<const std::byte> bytes) {
+										 return Barrier.Apply(store, bytes);
+									 },
+									 BarrierResults
+								 ) &&
+								 Worlds.FinishTickExchangeRound();
+				if (result.Success) {
+					BarrierResults.clear();
 					++NextRound;
 					Stage = Phase::Between;
 				}
@@ -183,8 +271,19 @@ namespace engine::world {
 				if (Stage != Phase::Between) return result;
 				result.Success = Worlds.EndTickExchangeFrame();
 				if (result.Success) {
+					const uint64_t ended = core::Clock::Nanoseconds();
+					const float milliseconds = static_cast<float>(
+						static_cast<double>(ended - FrameStartedNanoseconds) / 1'000'000.0
+					);
+					core::FrameGraph::ReportedScope wholeTick(
+						"Universe::Tick", core::ProfileCategory::Simulation, milliseconds
+					);
+					core::FrameGraph::ReportedScope worlds(
+						"worlds (driver)", core::ProfileCategory::ECS, milliseconds
+					);
 					Stage = Phase::Idle;
 					ActiveFrame = 0;
+					FrameStartedNanoseconds = 0;
 				}
 				break;
 			case TickExchangeOperation::Cancel:
@@ -200,6 +299,7 @@ namespace engine::world {
 		if (!result.Success) {
 			result.Requests.clear();
 			result.Replies.clear();
+			result.BarrierRecords.clear();
 		}
 		LastCommand.assign(encoded.Bytes().begin(), encoded.Bytes().end());
 		LastResult = result;

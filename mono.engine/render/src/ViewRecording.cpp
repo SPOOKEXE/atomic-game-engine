@@ -1909,6 +1909,9 @@ namespace engine::render {
 		State->SlotTags.resize(uploadCount);
 		State->SlotRig.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
+		State->SlotSeamFirst.resize(uploadCount);
+		State->SlotSeamSecond.resize(uploadCount);
+		State->SlotSeamCentre.resize(uploadCount);
 		State->SlotSeamLight.resize(uploadCount);
 		State->SlotInstanceKey.resize(sceneCount);
 		State->SlotInstanceCurrent.resize(sceneCount);
@@ -1955,6 +1958,13 @@ namespace engine::render {
 					instance.SeamNormal.Z,
 					instance.SeamOffset,
 				};
+				State->SlotSeamFirst[drawSlot] = glm::vec4{
+					instance.SeamFirst.X, instance.SeamFirst.Y, instance.SeamFirst.Z, float(instance.SeamMask)
+				};
+				State->SlotSeamSecond[drawSlot] =
+					glm::vec4{instance.SeamSecond.X, instance.SeamSecond.Y, instance.SeamSecond.Z, 0.0f};
+				State->SlotSeamCentre[drawSlot] =
+					glm::vec4{instance.SeamCentre.X, instance.SeamCentre.Y, instance.SeamCentre.Z, 0.0f};
 				State->SlotSeamLight[drawSlot] =
 					glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
 			};
@@ -2143,6 +2153,9 @@ namespace engine::render {
 						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
 						State->SlotRig[drawSlot] = State->SlotRig[sceneSlot];
 						State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
+						State->SlotSeamFirst[drawSlot] = State->SlotSeamFirst[sceneSlot];
+						State->SlotSeamSecond[drawSlot] = State->SlotSeamSecond[sceneSlot];
+						State->SlotSeamCentre[drawSlot] = State->SlotSeamCentre[sceneSlot];
 						State->SlotSeamLight[drawSlot] = State->SlotSeamLight[sceneSlot];
 					}
 				};

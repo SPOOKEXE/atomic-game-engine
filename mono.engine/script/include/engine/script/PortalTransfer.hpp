@@ -1,10 +1,13 @@
 #pragma once
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/PortalTransfer.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -34,8 +37,34 @@ namespace engine::script {
 		bool operator==(const PortalTransferId &) const = default;
 	};
 
+	// A named seam barrier. The domain is a stable world-clock name, never a local clock pointer.
+	struct PortalTransferClock {
+		std::string Domain;
+		uint64_t SourceTick = 0;
+		uint64_t DestinationTick = 0;
+		bool operator==(const PortalTransferClock &) const = default;
+	};
+
+	// The immutable fence carried by preparation, sealing and commit messages.
+	struct PortalTransferFence {
+		uint64_t TopologyRevision = 0;
+		uint64_t AuthorityEpoch = 0;
+		uint64_t PrepareRevision = 0;
+		uint64_t BaselineId = 0;
+		assets::ContentHash BaselineHash;
+		PortalTransferClock H;
+		bool operator==(const PortalTransferFence &) const = default;
+	};
+
 	// A portal transfer stage value.
-	enum class PortalTransferStage : uint8_t { Preparing, Committing, Committed, Refused, Cancelling };
+	enum class PortalTransferStage : uint8_t {
+		Preparing,
+		Prepared,
+		Committing,
+		Committed,
+		Refused,
+		Cancelling
+	};
 
 	// Completed destination state in destination coordinates. The enclosing receipt owns identity.
 	struct PortalTransferMotion {
@@ -82,18 +111,50 @@ namespace engine::script {
 		std::string Diagnostic;
 		// Record kind discriminator.
 		scene::PortalBodyKind Kind = scene::PortalBodyKind::Player;
+		// The latest destination-confirmed immutable handoff fence.
+		PortalTransferFence Fence;
 		// Destination control assignment, not a completed physics pose acknowledgement.
 		uint64_t AcknowledgedInputTick = 0;
 		// Optional completed destination motion acknowledgement.
 		std::optional<PortalTransferMotion> Motion;
 	};
 
+	// Controls whether a store may commit without a host durable-decision acknowledgement.
+	enum class PortalTransferDurability : uint8_t {
+		InMemoryOnly,
+		RequirePrepareCommit,
+		// A listening host without a persistent journal exposes no source transfers.
+		Disabled
+	};
+
+	// A sealed handoff awaiting durable host storage. The host may persist this after a tick.
+	struct PortalTransferDecision {
+		PortalTransferReceipt Receipt;
+		scene::BodyIdentity Body;
+		// Exact sealed transfer body hashed by Receipt.Fence.BaselineHash.
+		std::vector<std::byte> Baseline;
+	};
+
 	// Registers portal transfer components.
 	void RegisterPortalTransferComponents();
 	// Host control must assign a fresh nonzero incarnation on world recreation.
 	// A snapshot restore retains the stored incarnation and must not reconfigure.
-	bool
-	ConfigurePortalTransfers(ecs::Store &store, uint64_t incarnation, bool requirePlayerAdmission = false);
+	bool ConfigurePortalTransfers(
+		ecs::Store &store,
+		uint64_t incarnation,
+		bool requirePlayerAdmission = false,
+		PortalTransferDurability durability = PortalTransferDurability::InMemoryOnly
+	);
+	// Returns sealed durable decisions that still require a host acknowledgement.
+	std::vector<PortalTransferDecision> PortalTransferPendingDecisions(const ecs::Store &store);
+	// Marks a matching sealed decision durable after the host's journal write completes.
+	// Repeating the acknowledgement for the same receipt is safe.
+	bool MarkPortalTransferDurable(
+		ecs::Store &store, const PortalTransferId &id, const assets::ContentHash &baselineHash
+	);
+	// Recreates an exact sealed source record after a host restart. It accepts
+	// only the durable baseline and fence, never a reconstructed local pose.
+	bool RestorePortalTransferDecision(ecs::Store &store, const PortalTransferDecision &decision);
 	// Host admission names the exact destination incarnation before source retirement.
 	bool
 	AdmitPortalPlayerTransfer(ecs::Store &store, const PortalTransferId &id, uint64_t destinationIncarnation);
@@ -133,6 +194,9 @@ namespace engine::script {
 	PortalTransferOfPlayer(const ecs::Store &store, ecs::Entity sourcePlayer);
 	// Resolves the exact committed receipt inside the destination store only.
 	ecs::Entity PortalTransferPlayer(const ecs::Store &store, const PortalTransferId &id);
+	// Returns the destination's sealed fence before its local body is made live.
+	std::optional<PortalTransferFence>
+	PortalTransferDestinationFence(const ecs::Store &store, const PortalTransferId &id);
 	// Queues validated source-space movement for this player's transfer. Delivery
 	// is acknowledged after destination control assignment; no source entity crosses the bus.
 	// inputTick preserves the client clock; zero denotes unstamped host/local control.

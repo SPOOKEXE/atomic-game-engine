@@ -143,13 +143,21 @@ namespace engine::render {
 		const auto bindMesh = [&](const MeshEntry &mesh,
 								  SDL_GPUGraphicsPipeline *native,
 								  const core::Name &shader,
-								  core::Name owner) {
+								  core::Name owner,
+								  uint32_t &materialSamplerCount) {
 			SDL_GPUGraphicsPipeline *want = native;
+			bool authoredMaterial = native != base;
 			if (mesh.Packed) {
 				SDL_GPUGraphicsPipeline *variant = WireframeMode ? nullptr : PackedVariantFor(shader, owner);
 				want = variant != nullptr ? variant : packedPipeline(base);
+				authoredMaterial = variant != nullptr;
 			}
 			if (want == nullptr) return false;
+			// The binding count comes from the pipeline that was actually selected.
+			// A valid authored name can still fall back for packed meshes, LODs, or
+			// a pass family without a matching variant. Those pipelines are engine
+			// PBR pipelines and declare the eleventh packed-material sampler.
+			materialSamplerCount = authoredMaterial ? 10u : 11u;
 			if (want != bound) {
 				SDL_BindGPUGraphicsPipeline(pass, want);
 				bound = want;
@@ -198,6 +206,7 @@ namespace engine::render {
 							  uint32_t slot,
 							  uint32_t run,
 							  bool simpleShadow,
+							  uint32_t materialSamplerCount,
 							  SDL_GPUBuffer *forcedArguments,
 							  uint32_t forcedArgument,
 							  bool tallyTriangles) {
@@ -314,10 +323,7 @@ namespace engine::render {
 					{metalness != nullptr ? metalness : FallbackTexture, materialSampler},
 					{packedPbr != nullptr ? packedPbr : FallbackTexture, materialSampler},
 				};
-				// Authored shaders retain their documented ten sampler contract. The
-				// engine PBR shader alone declares the appended packed-map sampler.
-				const uint32_t samplerCount = SlotShader[slot].IsValid() ? 10u : 11u;
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, samplerCount);
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, materialSamplerCount);
 
 				LightingUniforms uniforms = *lighting;
 
@@ -374,6 +380,9 @@ namespace engine::render {
 				// this draw is cut the same way - which is what makes a per-instance
 				// fact expressible in a per-draw uniform.
 				uniforms.SeamPlane = SlotSeam[slot];
+				uniforms.SeamFirst = SlotSeamFirst[slot];
+				uniforms.SeamSecond = SlotSeamSecond[slot];
+				uniforms.SeamCentre = SlotSeamCentre[slot];
 
 				// **The far half of a body in a hole is lit by the sun turned the way
 				// the body was.** Its normals are the near half's rotated by the
@@ -411,6 +420,9 @@ namespace engine::render {
 
 				ShadowUniforms uniforms;
 				uniforms.Plane = SlotSeam[slot];
+				uniforms.SeamFirst = SlotSeamFirst[slot];
+				uniforms.SeamSecond = SlotSeamSecond[slot];
+				uniforms.SeamCentre = SlotSeamCentre[slot];
 				uniforms.Material.x = colour[3];
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
@@ -517,7 +529,9 @@ namespace engine::render {
 				for (uint32_t level = 0; level < draw.LevelCount; ++level) {
 					const LodDrawLevel &levelDraw = draw.Levels[level];
 					const MeshEntry &mesh = *levelDraw.Mesh;
-					if (!bindMesh(mesh, native, shader, SlotContentOwner[slot])) continue;
+					uint32_t materialSamplerCount = 11;
+					if (!bindMesh(mesh, native, shader, SlotContentOwner[slot], materialSamplerCount))
+						continue;
 					uint32_t lodArgument = levelDraw.FirstArgument;
 					const auto issue = [&](const LodDrawRange &cluster) {
 						const MeshRange &range = cluster.Range;
@@ -539,6 +553,7 @@ namespace engine::render {
 							slot,
 							1,
 							simpleShadow,
+							materialSamplerCount,
 							Lod.Arguments,
 							lodArgument++,
 							level == selectedLevel
@@ -619,7 +634,8 @@ namespace engine::render {
 			SDL_GPUGraphicsPipeline *const wanted =
 				WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
 			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
-			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot])) {
+			uint32_t materialSamplerCount = 11;
+			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot], materialSamplerCount)) {
 				slotRun++;
 				slot += run;
 				continue;
@@ -634,6 +650,7 @@ namespace engine::render {
 					slot,
 					phaseInstances,
 					simpleShadow,
+					materialSamplerCount,
 					nullptr,
 					0,
 					true
@@ -651,6 +668,7 @@ namespace engine::render {
 						slot,
 						phaseInstances,
 						simpleShadow,
+						materialSamplerCount,
 						nullptr,
 						0,
 						true

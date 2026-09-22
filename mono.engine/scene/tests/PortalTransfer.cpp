@@ -6,6 +6,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/PortalTransfer.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -99,6 +100,7 @@ TEST_CASE(
 	source.GetMutable<Humanoid>(rig.Humanoid)->Health = 37;
 	source.GetMutable<Humanoid>(rig.Humanoid)->MoveDirection = {1, 0, 0};
 	source.Set(rig.Root, Motion{{3, 4, 5}, {1, 2, 3}});
+	source.Set(rig.Root, BodyIdentity{{0x1234, 0x5678}, 9});
 	const CFrame before = source.Get<Transform>(rig.Root)->Frame;
 	PortalBodyCopy body;
 	std::string failure;
@@ -131,6 +133,8 @@ TEST_CASE(
 	REQUIRE((destination.Get<Motion>(arrived.Root)->Linear - through.Carry({3, 4, 5})).Magnitude() < 1e-5f);
 	REQUIRE((destination.Get<Motion>(arrived.Root)->Angular - through.Rotate({1, 2, 3})).Magnitude() < 1e-5f);
 	REQUIRE(destination.Get<PlayerIdentity>(arrived.Player)->UserId == 12345);
+	REQUIRE(destination.Get<BodyIdentity>(arrived.Root)->Key == BodyKey{0x1234, 0x5678});
+	REQUIRE(destination.Get<BodyIdentity>(arrived.Root)->Generation == 9);
 	REQUIRE(source.Get<Humanoid>(rig.Humanoid)->Health == 37);
 
 	for (size_t size = 0; size < writer.Size(); ++size) {

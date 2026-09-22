@@ -235,6 +235,17 @@ namespace engine::scene {
 		float SeamOffset = 0.0f;
 		//@}
 
+		// The aperture axes from the seam centre. A zero mask keeps the legacy
+		// plane-only rule. Source-complement retains points in front of the plane
+		// or outside this rectangle; destination-inside retains the other points.
+		//@{
+		core::Vector3 SeamFirst{0.0f, 0.0f, 0.0f};
+		core::Vector3 SeamSecond{0.0f, 0.0f, 0.0f};
+		core::Vector3 SeamCentre{0.0f, 0.0f, 0.0f};
+		uint8_t SeamMask = 0;
+		uint8_t SeamReserved[3] = {};
+		//@}
+
 		// Which way the sun comes from *for this half*, or zero for the world's.
 		//
 		// **A copy turned by `R` has to be lit by `R · L`.** The far half of a
@@ -290,6 +301,12 @@ namespace engine::scene {
 		// and makes visibility a separate index stream.
 		uint64_t Source = 0;
 
+		// Logical body identity survives portal import, where Source and Rig are
+		// request-local handles and cannot safely identify a native body.
+		uint64_t BodyKeyHigh = 0;
+		uint64_t BodyKeyLow = 0;
+		uint64_t BodyGeneration = 0;
+
 		// Snapshot-local data-capture label. Zero is background or an entity
 		// without an authored DataFactoryId.
 		uint32_t ObjectLabel = 0;
@@ -299,8 +316,9 @@ namespace engine::scene {
 		uint32_t PartLabel = 0;
 
 		// Which synthetic form of `Source` this row is, or zero for the entity
-		// itself. A portal half uses the pane entity, so the original and its copy
-		// can both be resident without claiming the same slot.
+		// itself. A portal half derives this from both the pane and any existing
+		// form, so the original, its source variant, and its copy can all remain
+		// resident without claiming the same slot.
 		uint64_t Variant = 0;
 
 		// The world `Source` belongs to, or invalid for the view's own world.
@@ -881,6 +899,11 @@ namespace engine::scene {
 	// @return The new signature.
 	// @since v0.8
 	uint64_t MixSignature(uint64_t hash, uint64_t word);
+
+	// Names the portal form of one already-identified draw row. A plain row keeps
+	// the pane identity for compatibility; a synthetic source also contributes so
+	// two source forms cannot collapse into one portal-resident row.
+	uint64_t PortalVariant(uint64_t sourceVariant, uint64_t pane);
 
 	// What a draw list looks like, as one number.
 	//

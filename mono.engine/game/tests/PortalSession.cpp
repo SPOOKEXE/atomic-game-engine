@@ -43,13 +43,16 @@ TEST_CASE(
 		  game::PortalSessionKind::Proceed,
 		  game::PortalSessionKind::Crossed,
 		  game::PortalSessionKind::Motion,
-		  game::PortalSessionKind::LeaseAdopted}) {
+		  game::PortalSessionKind::LeaseAdopted,
+		  game::PortalSessionKind::Approach}) {
 		CAPTURE(kind);
 		game::PortalSessionMessage message;
 		message.Kind = kind;
 		message.Attempt = 77;
 		message.Player = ecs::Entity(53);
 		message.World = "far";
+		message.Destination = "next";
+		message.Seam = "far/Portal|next/Portal";
 		message.Claim = Claim();
 		message.Through.Origin = {1, 2, 3};
 		message.Through.Frame = core::CFrame({4, 5, 6}) * core::CFrame::Angles(.2f, .3f, .4f);
@@ -57,6 +60,16 @@ TEST_CASE(
 		message.Identity = Identity();
 		message.Port = 9000;
 		message.Diagnostic = "destination was recreated";
+		if (kind == game::PortalSessionKind::Ready || kind == game::PortalSessionKind::Committed) {
+			script::PortalTransferFence fence;
+			fence.TopologyRevision = 1;
+			fence.AuthorityEpoch = 2;
+			fence.PrepareRevision = 3;
+			fence.BaselineId = 4;
+			fence.BaselineHash.Digest[0] = 5;
+			fence.H = {"portal-clock", 6, 7};
+			message.Fence = fence;
+		}
 		if (kind == game::PortalSessionKind::Motion) {
 			script::PortalTransferMotion motion;
 			motion.DestinationIncarnation = message.Claim.DestinationIncarnation;

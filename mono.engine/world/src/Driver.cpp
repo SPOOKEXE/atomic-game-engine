@@ -14,6 +14,11 @@ namespace engine::world {
 		Stop();
 	}
 
+	void Driver::SetFixedStepBarrier(FixedStepBarrierCallbacks callbacks) {
+		Barrier = std::move(callbacks);
+		LocalExchange.SetFixedStepBarrier(Barrier);
+	}
+
 	size_t Driver::Start(const std::vector<WorldSettings> &remote) {
 		const std::vector<HostPlan> plans = Settings_.Hosts.SharedHosts > 0
 												? PlanHostsAcross(remote, Settings_.Hosts.SharedHosts)
@@ -83,7 +88,7 @@ namespace engine::world {
 		}
 
 		// --- 3. one barrier, local and remote worlds together ---
-		if (Settings_.CoordinateHostTicks)
+		if (Settings_.CoordinateHostTicks || Barrier.Valid())
 			Stats.TickExchangeFailed = !TickHosts(frameSeconds, now);
 		else
 			Universe_.Tick(frameSeconds);

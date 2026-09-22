@@ -57,6 +57,8 @@ namespace engine::game {
 				   through.Scale > 0 && std::abs(glm::dot(rotation, rotation) - 1.0f) < .001f;
 		}
 
+		bool FenceValid(const script::PortalTransferFence &fence);
+
 		bool Valid(const PortalSessionMessage &message) {
 			if (message.Attempt == 0) return false;
 			switch (message.Kind) {
@@ -74,11 +76,15 @@ namespace engine::game {
 				return ClaimValid(message.Claim);
 			case PortalSessionKind::Ready:
 			case PortalSessionKind::Committed:
-				return message.Player != ecs::NULL_ENTITY && NameValid(message.World);
+				return message.Player != ecs::NULL_ENTITY && NameValid(message.World) &&
+					   (!message.Fence || FenceValid(*message.Fence));
 			case PortalSessionKind::Transfer:
 			case PortalSessionKind::LeaseRoute:
 				return ClaimValid(message.Claim) && ThroughValid(message.Through) &&
 					   !message.Identity.IsZero() && message.Port != 0;
+			case PortalSessionKind::Approach:
+				return NameValid(message.World) && NameValid(message.Destination) &&
+					   NameValid(message.Seam) && ThroughValid(message.Through) && !message.Identity.IsZero();
 			case PortalSessionKind::LeaseRequest:
 				return ClaimValid(message.Claim, true) && ThroughValid(message.Through) &&
 					   !message.Identity.IsZero();
@@ -113,6 +119,36 @@ namespace engine::game {
 			claim.DestinationIncarnation = reader.ReadUInt64();
 			claim.SourceSession = reader.ReadUInt64();
 			return reader.ReadRaw(claim.Capability.data(), claim.Capability.size());
+		}
+
+		bool FenceValid(const script::PortalTransferFence &fence) {
+			return fence.TopologyRevision != 0 && fence.AuthorityEpoch != 0 && fence.PrepareRevision != 0 &&
+				   fence.BaselineId != 0 && !fence.BaselineHash.IsZero() && NameValid(fence.H.Domain) &&
+				   fence.H.SourceTick != 0 && fence.H.DestinationTick != 0;
+		}
+
+		void WriteFence(core::ByteWriter &writer, const script::PortalTransferFence &fence) {
+			writer.WriteUInt64(fence.TopologyRevision);
+			writer.WriteUInt64(fence.AuthorityEpoch);
+			writer.WriteUInt64(fence.PrepareRevision);
+			writer.WriteUInt64(fence.BaselineId);
+			writer.WriteRaw(fence.BaselineHash.Digest.data(), fence.BaselineHash.Digest.size());
+			writer.WriteString(fence.H.Domain);
+			writer.WriteUInt64(fence.H.SourceTick);
+			writer.WriteUInt64(fence.H.DestinationTick);
+		}
+
+		bool ReadFence(core::ByteReader &reader, script::PortalTransferFence &fence) {
+			fence.TopologyRevision = reader.ReadUInt64();
+			fence.AuthorityEpoch = reader.ReadUInt64();
+			fence.PrepareRevision = reader.ReadUInt64();
+			fence.BaselineId = reader.ReadUInt64();
+			if (!reader.ReadRaw(fence.BaselineHash.Digest.data(), fence.BaselineHash.Digest.size()) ||
+				!ReadName(reader, fence.H.Domain))
+				return false;
+			fence.H.SourceTick = reader.ReadUInt64();
+			fence.H.DestinationTick = reader.ReadUInt64();
+			return !reader.Failed() && FenceValid(fence);
 		}
 
 		void WriteThrough(core::ByteWriter &writer, const scene::SeamTransform &through) {
@@ -170,6 +206,8 @@ namespace engine::game {
 		case PortalSessionKind::Committed:
 			writer.WriteUInt64(message.Player.Id);
 			writer.WriteString(message.World);
+			writer.WriteBool(message.Fence.has_value());
+			if (message.Fence) WriteFence(writer, *message.Fence);
 			break;
 		case PortalSessionKind::Transfer:
 		case PortalSessionKind::LeaseRoute:
@@ -178,6 +216,14 @@ namespace engine::game {
 			WriteThrough(writer, message.Through);
 			writer.WriteRaw(message.Identity.Value.data(), message.Identity.Value.size());
 			if (message.Kind != PortalSessionKind::LeaseRequest) writer.WriteUInt16(message.Port);
+			break;
+		case PortalSessionKind::Approach:
+			writer.WriteString(message.World);
+			writer.WriteString(message.Destination);
+			writer.WriteString(message.Seam);
+			WriteThrough(writer, message.Through);
+			writer.WriteRaw(message.Identity.Value.data(), message.Identity.Value.size());
+			writer.WriteUInt16(message.Port);
 			break;
 		case PortalSessionKind::Refused:
 			writer.WriteString(message.Diagnostic);
@@ -214,6 +260,11 @@ namespace engine::game {
 		case PortalSessionKind::Committed:
 			message.Player = ecs::Entity(reader.ReadUInt64());
 			if (!ReadName(reader, message.World)) return false;
+			if (reader.ReadBool()) {
+				script::PortalTransferFence fence;
+				if (!ReadFence(reader, fence)) return false;
+				message.Fence = std::move(fence);
+			}
 			break;
 		case PortalSessionKind::Transfer:
 		case PortalSessionKind::LeaseRoute:
@@ -222,6 +273,14 @@ namespace engine::game {
 			ReadThrough(reader, message.Through);
 			if (!reader.ReadRaw(message.Identity.Value.data(), message.Identity.Value.size())) return false;
 			if (message.Kind != PortalSessionKind::LeaseRequest) message.Port = reader.ReadUInt16();
+			break;
+		case PortalSessionKind::Approach:
+			if (!ReadName(reader, message.World) || !ReadName(reader, message.Destination) ||
+				!ReadName(reader, message.Seam))
+				return false;
+			ReadThrough(reader, message.Through);
+			if (!reader.ReadRaw(message.Identity.Value.data(), message.Identity.Value.size())) return false;
+			message.Port = reader.ReadUInt16();
 			break;
 		case PortalSessionKind::Refused: {
 			const auto diagnostic = reader.ReadString();

@@ -26,6 +26,7 @@
 #include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -1892,7 +1893,9 @@ TEST_CASE("a portal's pane stops solving contacts, so a body can be in it", "[sc
 	CHECK(engine::scene::OpenPortals(mirror.World) == 0);
 	CHECK_FALSE(mirror.World.Get<engine::scene::Collider>(mirror.Pane)->Trigger);
 
-	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+	engine::scene::Portal linked{far};
+	linked.RimThickness = .5f;
+	mirror.World.Set(mirror.Reflection, linked);
 
 	CHECK(engine::scene::OpenPortals(mirror.World) == 1);
 
@@ -1904,9 +1907,27 @@ TEST_CASE("a portal's pane stops solving contacts, so a body can be in it", "[sc
 	REQUIRE(opened != nullptr);
 	CHECK(opened->Trigger);
 	CHECK(opened->Extent.X == 8.0f);
+	const auto *rim = mirror.World.Get<engine::scene::PortalRim>(mirror.Pane);
+	REQUIRE(rim != nullptr);
+	for (const Entity edge : rim->Parts) {
+		REQUIRE(mirror.World.Alive(edge));
+		CHECK_FALSE(mirror.World.Get<engine::scene::Collider>(edge)->Trigger);
+	}
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	CHECK(seams[0].First.Magnitude() == Catch::Approx(7.5f));
+	CHECK(seams[0].Second.Magnitude() == Catch::Approx(4.0f));
+	CHECK(seams[0].RimThickness == Catch::Approx(.5f));
+	CHECK(mirror.World.Get<engine::scene::Collider>(rim->Parts[0])->Extent.X == Catch::Approx(.25f));
 
 	// Idempotent: every tick after the first writes nothing at all.
 	CHECK(engine::scene::OpenPortals(mirror.World) == 0);
+	engine::scene::Portal closed{far};
+	closed.Enabled = false;
+	mirror.World.Set(mirror.Reflection, closed);
+	CHECK(engine::scene::OpenPortals(mirror.World) == 0);
+	CHECK_FALSE(mirror.World.Get<engine::scene::Collider>(mirror.Pane)->Trigger);
+	CHECK_FALSE(mirror.World.Has<engine::scene::PortalRim>(mirror.Pane));
 }
 
 TEST_CASE("a pane already authored passable is left alone", "[scene][surfacecameras]") {
@@ -3595,12 +3616,30 @@ TEST_CASE("a hole does not copy its own furniture, or anything with no far half"
 	// pass, so a list walk is the first thing ever to see one.
 	CHECK_FALSE(crosses(Window::Row(centre + normal * 0.03f, Vector3{0.17f, 0.03f, 0.03f})));
 
-	// **Nothing invisible**, and a cross-world pair puts exactly such a row in
-	// the seam: the destination stand-in is pane-sized, centred on the plane and
-	// authored invisible.
+	// **Nothing invisible without attached graph work**, and a cross-world pair
+	// puts exactly such a row in the seam: the destination stand-in is pane-sized,
+	// centred on the plane and authored invisible.
 	engine::scene::DrawInstance ghostly = Window::Row(centre, Vector3{0.5f, 1.0f, 0.5f});
 	ghostly.Transparency = 1.0f;
 	CHECK_FALSE(crosses(ghostly));
+	ghostly.Source = 77;
+	ghostly.Variant = 9;
+	ghostly.Effects.Count = 1;
+	ghostly.Effects.Attachments[0].Node = engine::core::Name("portal.effect");
+	ghostly.Effects.Attachments[0].SelectionMask = 0x3u;
+	ghostly.Effects.Attachments[0].Order = 4;
+	ghostly.Effects.Attachments[0].Revision = 7;
+	ghostly.Effects.Attachments[0].Enabled = false;
+	CHECK(crosses(ghostly));
+	std::vector<engine::scene::DrawInstance> picture;
+	REQUIRE(engine::scene::AppendPortalClones(window.Room.World, 0, std::span(&ghostly, 1), picture) == 1);
+	CHECK(picture.front().Effects.Count == 1);
+	CHECK(picture.front().Effects.Attachments[0].Node == engine::core::Name("portal.effect"));
+	CHECK(picture.front().Effects.Attachments[0].SelectionMask == 0x3u);
+	CHECK(picture.front().Effects.Attachments[0].Order == 4);
+	CHECK(picture.front().Effects.Attachments[0].Revision == 7);
+	CHECK_FALSE(picture.front().Effects.Attachments[0].Enabled);
+	CHECK(picture.front().Variant == engine::scene::PortalVariant(ghostly.Variant, seam[0].Pane.Id));
 
 	// **And nothing bigger than the hole**, which cannot be cut by a single
 	// plane without slicing the part of it that hangs past the rim, where the

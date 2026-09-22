@@ -941,6 +941,14 @@ namespace engine::physics {
 		// @return `true` when it was asleep and is not any more.
 		bool Wake(ecs::Entity entity);
 
+		// Marks a body asleep without waiting for the settling heuristic. Portal
+		// admission uses this to preserve an already-resting body's state across
+		// its local entity replacement.
+		//
+		// @param entity The body to put into the resting set.
+		// @return `true` when the body was awake before this call.
+		bool Sleep(ecs::Entity entity);
+
 		// Records that the static geometry changed and its index must be rebuilt.
 		//
 		// `SyncBroadphase` detects the ordinary cases itself - a static collider

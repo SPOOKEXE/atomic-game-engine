@@ -1,5 +1,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/BodyMotion.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
@@ -36,7 +37,11 @@ namespace {
 		ecs::Entity Player;
 		ecs::Entity Root;
 		ecs::Entity Humanoid;
-		explicit Pair(const world::UniverseSettings &settings = {}, bool requireAdmission = false)
+		explicit Pair(
+			const world::UniverseSettings &settings = {},
+			bool requireAdmission = false,
+			PortalTransferDurability durability = PortalTransferDurability::InMemoryOnly
+		)
 			: Worlds(settings) {
 			scene::RegisterSceneClasses();
 			RegisterPortalTransferComponents();
@@ -50,7 +55,7 @@ namespace {
 			Destination = Worlds.Create(destination);
 			Worlds.Enter(Source, [&](ecs::Store &store, ecs::Scheduler &scheduler) {
 				scene::InstallServices(store);
-				REQUIRE(ConfigurePortalTransfers(store, 101, requireAdmission));
+				REQUIRE(ConfigurePortalTransfers(store, 101, requireAdmission, durability));
 				RegisterTeleportAdmission(scheduler);
 				Player = scene::AddPlayer(store, "shared label", false, 71);
 				const auto model = scene::LoadCharacter(store, Player);
@@ -75,7 +80,7 @@ namespace {
 			});
 			Worlds.Enter(Destination, [&](ecs::Store &store, ecs::Scheduler &scheduler) {
 				scene::InstallServices(store);
-				REQUIRE(ConfigurePortalTransfers(store, 202));
+				REQUIRE(ConfigurePortalTransfers(store, 202, false, durability));
 				RegisterTeleportAdmission(scheduler);
 			});
 			Tick(3);
@@ -109,11 +114,11 @@ TEST_CASE(
 	REQUIRE(id.SourceIncarnation == 101);
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 		REQUIRE(store.Alive(pair.Player));
-		REQUIRE_FALSE(store.Has<scene::Motion>(pair.Root));
-		REQUIRE_FALSE(store.Has<scene::Simulated>(pair.Root));
-		REQUIRE_FALSE(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled);
+		REQUIRE(store.Has<scene::Motion>(pair.Root));
+		REQUIRE(store.Has<scene::Simulated>(pair.Root));
+		REQUIRE(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled);
 	});
-	for (int tick = 0; tick < 6; ++tick) {
+	for (int tick = 0; tick < 8; ++tick) {
 		pair.Tick();
 		size_t authorities = 0;
 		for (const auto world : {pair.Source, pair.Destination})
@@ -144,12 +149,33 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"portal seals the final H pose and velocity instead of its offer snapshot", "[script][portal-transfer]"
+) {
+	Pair pair;
+	const auto id = pair.Begin();
+	pair.Tick(2);
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		store.Set(pair.Root, scene::Transform{core::CFrame({7, 8, 9})});
+		store.Set(pair.Root, scene::Motion{{11, 12, 13}, {2, 4, 6}});
+	});
+	pair.Tick(8);
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		const auto player = PortalTransferPlayer(store, id);
+		REQUIRE(player != ecs::NULL_ENTITY);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, player));
+		CHECK(store.Get<scene::Transform>(rig.Root)->Frame.Position == core::Vector3{107, 18, 29});
+		CHECK(store.Get<scene::Motion>(rig.Root)->Linear == core::Vector3{11, 12, 13});
+		CHECK(store.Get<scene::Motion>(rig.Root)->Angular == core::Vector3{2, 4, 6});
+	});
+}
+
+TEST_CASE(
 	"portal precommit refusal restores exact source motion and humanoid while budget refusal never fences",
 	"[script][portal-transfer]"
 ) {
 	Pair pair;
 	pair.Begin("missing-world");
-	pair.Tick(2);
+	pair.Tick(6);
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 		REQUIRE(store.Alive(pair.Player));
 		REQUIRE(store.Has<scene::Simulated>(pair.Root));
@@ -163,6 +189,97 @@ TEST_CASE(
 		REQUIRE(store.Has<scene::Simulated>(pair.Root));
 		REQUIRE(store.Has<scene::Motion>(pair.Root));
 		REQUIRE(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled);
+	});
+}
+
+TEST_CASE("portal durable decision waits for host journal acknowledgement", "[script][portal-transfer]") {
+	Pair pair({}, false, PortalTransferDurability::RequirePrepareCommit);
+	const auto id = pair.Begin();
+	pair.Tick(8);
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		REQUIRE(store.Alive(pair.Player));
+		const auto pending = PortalTransferPendingDecisions(store);
+		REQUIRE(pending.size() == 1);
+		CHECK(pending.front().Receipt.Id == id);
+		CHECK(pending.front().Receipt.Fence.BaselineId != 0);
+		CHECK_FALSE(pending.front().Receipt.Fence.BaselineHash.IsZero());
+		CHECK(pending.front().Body.Key.IsValid());
+		CHECK_FALSE(MarkPortalTransferDurable(store, id, {}));
+		REQUIRE(MarkPortalTransferDurable(store, id, pending.front().Receipt.Fence.BaselineHash));
+		CHECK(MarkPortalTransferDurable(store, id, pending.front().Receipt.Fence.BaselineHash));
+		CHECK(PortalTransferPendingDecisions(store).empty());
+	});
+	pair.Tick(20);
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		CHECK_FALSE(store.Alive(pair.Player));
+		CHECK(PortalTransferOfPlayer(store, pair.Player)->Stage == PortalTransferStage::Committed);
+	});
+}
+
+TEST_CASE("portal durable acknowledgement reopens a sealed snapshot receipt", "[script][portal-transfer]") {
+	Pair pair({}, false, PortalTransferDurability::RequirePrepareCommit);
+	const auto id = pair.Begin();
+	pair.Tick(8);
+	core::ByteWriter snapshot;
+	REQUIRE(pair.Worlds.Save(snapshot));
+
+	world::Universe restored;
+	core::ByteReader reader(snapshot.Bytes());
+	REQUIRE(restored.Load(reader));
+	for (const auto world : restored.Worlds())
+		restored.Enter(world, [](ecs::Store &, ecs::Scheduler &scheduler) {
+			RegisterTeleportAdmission(scheduler);
+		});
+	const auto source = restored.Find(core::Name("source"));
+	restored.Enter(source, [&](ecs::Store &store) {
+		const auto pending = PortalTransferPendingDecisions(store);
+		REQUIRE(pending.size() == 1);
+		REQUIRE(pending.front().Receipt.Id == id);
+		REQUIRE(MarkPortalTransferDurable(store, id, pending.front().Receipt.Fence.BaselineHash));
+	});
+	for (int tick = 0; tick < 20; ++tick)
+		restored.Tick(1.0f / 60);
+	restored.Enter(source, [&](ecs::Store &store) {
+		const auto receipt = PortalTransferOfPlayer(store, pair.Player);
+		REQUIRE(receipt);
+		CHECK(receipt->Stage == PortalTransferStage::Committed);
+	});
+}
+
+TEST_CASE(
+	"portal journal replays a sealed decision into a snapshot before the crossing",
+	"[script][portal-transfer]"
+) {
+	Pair pair({}, false, PortalTransferDurability::RequirePrepareCommit);
+	core::ByteWriter before;
+	REQUIRE(pair.Worlds.Save(before));
+	const auto id = pair.Begin();
+	pair.Tick(8);
+	PortalTransferDecision decision;
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		const auto pending = PortalTransferPendingDecisions(store);
+		REQUIRE(pending.size() == 1);
+		decision = pending.front();
+	});
+
+	world::Universe restored;
+	core::ByteReader reader(before.Bytes());
+	REQUIRE(restored.Load(reader));
+	for (const auto world : restored.Worlds())
+		restored.Enter(world, [](ecs::Store &, ecs::Scheduler &scheduler) {
+			RegisterTeleportAdmission(scheduler);
+		});
+	const auto source = restored.Find(core::Name("source"));
+	restored.Enter(source, [&](ecs::Store &store) {
+		REQUIRE(RestorePortalTransferDecision(store, decision));
+		CHECK(RestorePortalTransferDecision(store, decision));
+		REQUIRE(MarkPortalTransferDurable(store, id, decision.Receipt.Fence.BaselineHash));
+	});
+	for (int tick = 0; tick < 24; ++tick)
+		restored.Tick(1.0f / 60);
+	restored.Enter(restored.Find(core::Name("destination")), [&](ecs::Store &store) {
+		CHECK(scene::PlayerCount(store) == 1);
+		CHECK(PortalTransferPlayer(store, id) != ecs::NULL_ENTITY);
 	});
 }
 
@@ -250,7 +367,7 @@ TEST_CASE(
 	}
 	Pair pair;
 	const auto id = pair.Begin();
-	pair.Tick(2);
+	pair.Tick(6);
 	world::Envelope commit;
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 		auto *outbox = store.ResourceMutable<world::Outbox>();
@@ -308,9 +425,9 @@ TEST_CASE(
 		const auto receipt = PortalTransferOfPlayer(store, pair.Player);
 		REQUIRE(receipt.has_value());
 		id = receipt->Id;
-		REQUIRE_FALSE(store.Has<scene::NetworkOwner>(pair.Root));
+		REQUIRE(store.Has<scene::NetworkOwner>(pair.Root));
 	});
-	pair.Tick(6);
+	pair.Tick(8);
 	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
 		const auto player = PortalTransferPlayer(store, id);
 		REQUIRE(player != ecs::NULL_ENTITY);
@@ -337,7 +454,7 @@ TEST_CASE(
 		});
 	}
 	SECTION("done lost after destination admission") {
-		pair.Tick(3);
+		pair.Tick(6);
 		pair.Worlds.Enter(pair.Destination, [](ecs::Store &store) {
 			store.ResourceMutable<world::Outbox>()->Pending.clear();
 		});
@@ -354,6 +471,42 @@ TEST_CASE(
 	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
 		REQUIRE(scene::PlayerCount(store) == 1);
 		REQUIRE(PortalTransferPlayer(store, id) != ecs::NULL_ENTITY);
+	});
+}
+
+TEST_CASE(
+	"portal transfer preserves a sleeping root through duplicate delivery and wakes it only on demand",
+	"[script][portal-transfer]"
+) {
+	Pair pair;
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		physics::PreparePhysicsWorld(store);
+		REQUIRE(physics::SetSleeping(store, pair.Root, true));
+		REQUIRE(physics::Sleeping(store, pair.Root));
+		REQUIRE_FALSE(store.Has<scene::Motion>(pair.Root));
+	});
+	pair.Worlds.Enter(pair.Destination, [](ecs::Store &store) { physics::PreparePhysicsWorld(store); });
+	const auto id = pair.Begin();
+	pair.Tick(2);
+	pair.Worlds.Enter(pair.Source, [](ecs::Store &store) {
+		auto *outbox = store.ResourceMutable<world::Outbox>();
+		REQUIRE(outbox != nullptr);
+		REQUIRE_FALSE(outbox->Pending.empty());
+		auto repeated = outbox->Pending.back();
+		repeated.Sequence = outbox->NextSequence++;
+		outbox->Pending.push_back(std::move(repeated));
+	});
+	pair.Tick(30);
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		const auto player = PortalTransferPlayer(store, id);
+		REQUIRE(player != ecs::NULL_ENTITY);
+		REQUIRE(scene::PlayerCount(store) == 1);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, player));
+		REQUIRE(physics::Sleeping(store, rig.Root));
+		REQUIRE_FALSE(store.Has<scene::Motion>(rig.Root));
+		REQUIRE(physics::SetSleeping(store, rig.Root, false));
+		CHECK_FALSE(physics::Sleeping(store, rig.Root));
+		REQUIRE(store.Has<scene::Motion>(rig.Root));
 	});
 }
 
@@ -383,7 +536,7 @@ TEST_CASE(
 	});
 	forged.From = core::Name("destination");
 	REQUIRE(pair.Worlds.Deliver(core::Name("source"), forged));
-	pair.Tick();
+	pair.Tick(6);
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) { REQUIRE_FALSE(store.Alive(pair.Player)); });
 	forged.Payload[4] = std::byte{4}; // The wire discriminator is Refuse.
 	REQUIRE(pair.Worlds.Deliver(core::Name("source"), forged));
@@ -447,11 +600,11 @@ TEST_CASE(
 		const bool begun = BeginPortalObjectTransfer(store, object, "destination", through, outward, failure);
 		INFO(failure);
 		REQUIRE(begun);
-		REQUIRE_FALSE(store.Has<scene::Motion>(object));
+		REQUIRE(store.Has<scene::Motion>(object));
 		REQUIRE_FALSE(PortalTransferOfPlayer(store, object));
 		REQUIRE(PortalTransferOfObject(store, object)->Kind == scene::PortalBodyKind::Object);
 	});
-	pair.Tick(6);
+	pair.Tick(8);
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 		REQUIRE_FALSE(store.Alive(object));
 		REQUIRE(store.Alive(pair.Player));
@@ -469,7 +622,7 @@ TEST_CASE(
 		std::string failure;
 		REQUIRE(BeginPortalObjectTransfer(store, arrived, "source", reverse, inward, failure));
 	});
-	pair.Tick(6);
+	pair.Tick(8);
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 		const auto returned = PortalTransferObject(store, inward);
 		REQUIRE(returned != ecs::NULL_ENTITY);
@@ -594,9 +747,9 @@ TEST_CASE(
 		const auto receipt = PortalTransferOfObject(store, object);
 		REQUIRE(receipt.has_value());
 		id = receipt->Id;
-		REQUIRE_FALSE(store.Has<scene::Motion>(object));
+		REQUIRE(store.Has<scene::Motion>(object));
 	});
-	pair.Tick(6);
+	pair.Tick(8);
 	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
 		const auto arrived = PortalTransferObject(store, id);
 		REQUIRE(arrived != ecs::NULL_ENTITY);
@@ -639,9 +792,9 @@ TEST_CASE(
 	});
 	pair.Begin("missing-world");
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
-		REQUIRE_FALSE(store.Has<scene::Animator>(animator));
-		REQUIRE_FALSE(store.Has<scene::AnimationTrack>(track));
-		REQUIRE(scene::AdvanceAnimationTracks(store) == 0);
+		REQUIRE(store.Has<scene::Animator>(animator));
+		REQUIRE(store.Has<scene::AnimationTrack>(track));
+		REQUIRE(scene::AdvanceAnimationTracks(store) != 0);
 	});
 	core::ByteWriter saved;
 	REQUIRE(pair.Worlds.Save(saved));
@@ -729,7 +882,7 @@ TEST_CASE(
 		pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 			REQUIRE(store.Alive(pair.Player));
 			REQUIRE_FALSE(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled);
-			REQUIRE(PortalTransferOfPlayer(store, pair.Player)->Stage == PortalTransferStage::Preparing);
+			REQUIRE(PortalTransferOfPlayer(store, pair.Player)->Stage == PortalTransferStage::Prepared);
 			CHECK_FALSE(AdmitPortalPlayerTransfer(store, id, 0));
 			if (admission != 0) {
 				REQUIRE(AdmitPortalPlayerTransfer(store, id, admission));
@@ -782,7 +935,7 @@ TEST_CASE(
 			CHECK(CancelPortalPlayerTransfer(store, id, "duplicate cancellation"));
 			CHECK_FALSE(AdmitPortalPlayerTransfer(store, id, 202));
 			CHECK(store.Alive(pair.Player));
-			CHECK_FALSE(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled);
+			CHECK(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled == (phase == 0));
 		});
 		bool discard = true;
 		size_t dropped = 0;
@@ -806,7 +959,7 @@ TEST_CASE(
 		discard = false;
 		pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 			REQUIRE(PortalTransferOfPlayer(store, pair.Player)->Stage == PortalTransferStage::Cancelling);
-			CHECK_FALSE(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled);
+			CHECK(store.Get<scene::Humanoid>(pair.Humanoid)->Enabled == (phase == 0));
 		});
 		core::ByteWriter saved;
 		REQUIRE(pair.Worlds.Save(saved));
@@ -917,7 +1070,7 @@ TEST_CASE(
 		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {0, 0, -1}, true, 9000));
 		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {1, 0, 0}, false, 9001));
 	});
-	pair.Tick(8);
+	pair.Tick(9);
 	ecs::Entity humanoid;
 	ecs::Entity player;
 	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
@@ -1070,6 +1223,74 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"portal move segments reject gaps and deduplicate a jump", "[script][portal-transfer][portal-move]"
+) {
+	Pair pair;
+	const auto id = pair.Begin();
+	pair.Tick(8);
+	world::Envelope segment;
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {1, 0, 0}, false, 210));
+		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {0, 0, 1}, true, 211));
+		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {}, false, 212));
+		PumpPortalTransfers(store);
+		auto &pending = store.ResourceMutable<world::Outbox>()->Pending;
+		REQUIRE_FALSE(pending.empty());
+		segment = pending.back();
+		pending.clear();
+	});
+	// The Move body ends with u32 count followed by fixed 44-byte move rows.
+	auto skipped = segment;
+	const size_t rowBytes = 44;
+	const size_t countOffset = skipped.Payload.size() - 4 - 3 * rowBytes;
+	skipped.Payload[countOffset] = std::byte{2};
+	skipped.Payload.erase(
+		skipped.Payload.begin() + static_cast<std::ptrdiff_t>(countOffset + 4),
+		skipped.Payload.begin() + static_cast<std::ptrdiff_t>(countOffset + 4 + rowBytes)
+	);
+	world::Delivery delivery;
+	delivery.Bus = world::BusKind::Channel;
+	delivery.Key = core::Name("engine.portal.transfer");
+	delivery.From = core::Name("source");
+	delivery.Payload = skipped.Payload;
+	REQUIRE(pair.Worlds.Deliver(core::Name("destination"), delivery));
+	pair.Tick();
+	bool jumped = false;
+	std::vector<core::Vector3> directions;
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		const auto player = PortalTransferPlayer(store, id);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, player));
+		const auto *humanoid = store.Get<scene::Humanoid>(rig.Humanoid);
+		CHECK(humanoid->MoveDirection == core::Vector3{});
+		CHECK_FALSE(humanoid->JumpRequested);
+	});
+	delivery.Payload = segment.Payload;
+	REQUIRE(pair.Worlds.Deliver(core::Name("destination"), delivery));
+	for (int tick = 0; tick < 3; ++tick) {
+		pair.Tick();
+		pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+			const auto player = PortalTransferPlayer(store, id);
+			auto *humanoid = store.GetMutable<scene::Humanoid>(
+				store.Get<scene::Character>(scene::CharacterOf(store, player))->Humanoid
+			);
+			directions.push_back(humanoid->MoveDirection);
+			jumped |= humanoid->JumpRequested;
+			humanoid->JumpRequested = false;
+		});
+	}
+	CHECK(directions == std::vector<core::Vector3>{{1, 0, 0}, {0, 0, 1}, {}});
+	CHECK(jumped);
+	// Replaying the full segment cannot recreate its discrete jump.
+	REQUIRE(pair.Worlds.Deliver(core::Name("destination"), delivery));
+	pair.Tick();
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		const auto player = PortalTransferPlayer(store, id);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, player));
+		CHECK_FALSE(store.Get<scene::Humanoid>(rig.Humanoid)->JumpRequested);
+	});
+}
+
+TEST_CASE(
 	"refused portal restores current movement instead of captured movement",
 	"[script][portal-transfer][portal-move]"
 ) {
@@ -1097,7 +1318,7 @@ TEST_CASE(
 		store.GetMutable<scene::PlayersServiceComponent>(scene::PlayersOf(store))->MaxPlayers = 128;
 	});
 	const auto first = pair.Begin();
-	pair.Tick(6);
+	pair.Tick(8);
 	for (int index = 1; index < 64; ++index) {
 		pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
 			const auto player = scene::AddPlayer(store, "walker", false, 100 + index);
@@ -1106,7 +1327,7 @@ TEST_CASE(
 			std::string failure;
 			REQUIRE(BeginPortalTransfer(store, player, "destination", {}, id, failure));
 		});
-		pair.Tick(6);
+		pair.Tick(8);
 	}
 	ecs::Entity nextPlayer;
 	world::Delivery delayed;
@@ -1137,7 +1358,7 @@ TEST_CASE(
 		std::string failure;
 		REQUIRE(BeginPortalTransfer(store, nextPlayer, "destination", {}, next, failure));
 	});
-	pair.Tick(6);
+	pair.Tick(8);
 	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
 		REQUIRE(PortalTransferPlayer(store, next) != ecs::NULL_ENTITY);
 		REQUIRE(scene::PlayerCount(store) == 65);

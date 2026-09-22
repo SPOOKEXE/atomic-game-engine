@@ -11,6 +11,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/PortalTransfer.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
@@ -95,6 +96,7 @@ namespace engine::scene {
 			PlayerNetworkComponent,
 			ServiceComponent,
 			PortalTransit,
+			BodyIdentity,
 			TextContent,
 			Skeleton,
 			Bone,
@@ -193,6 +195,8 @@ namespace engine::scene {
 				return value.Value.size() <= MAXIMUM_COMPONENT_BYTES - 4;
 			else if constexpr (std::is_same_v<T, PortalTransit>)
 				return Finite(value.Frame) && Finite(value.Scale) && value.Scale > 0;
+			else if constexpr (std::is_same_v<T, BodyIdentity>)
+				return value.Key.IsValid() && value.Generation != 0;
 			else if constexpr (std::is_same_v<T, AuthoredAffordance>)
 				return static_cast<uint8_t>(value.Kind) <=
 						   static_cast<uint8_t>(AuthoredAffordanceKind::Cover) &&
@@ -276,7 +280,8 @@ namespace engine::scene {
 				   id == ecs::Components::Assigned<Rendered>() ||
 				   id == ecs::Components::Assigned<RenderedSignature>() ||
 				   id == ecs::Components::Assigned<LocalTransparency>() ||
-				   id == ecs::Components::Assigned<PortalTransitSeen>();
+				   id == ecs::Components::Assigned<PortalTransitSeen>() ||
+				   id == ecs::Components::Assigned<PortalCrossingState>();
 		}
 
 		const PortalNodeCopy *Find(const PortalBodyCopy &body, std::string_view key) {
@@ -403,7 +408,7 @@ namespace engine::scene {
 				if (!root.Parent.empty() ||
 					!ecs::Classes::IsA(FindClass(root.Class), FindClass("BasePart")) ||
 					Component(root, "scene.Transform") == nullptr ||
-					Component(root, "scene.Motion") == nullptr ||
+					(body.RootSleeping == (Component(root, "scene.Motion") != nullptr)) ||
 					Component(root, "scene.Collider") == nullptr)
 					return false;
 				for (const auto &node : body.Nodes) {
@@ -440,7 +445,8 @@ namespace engine::scene {
 				steering == nullptr ||
 				steering->References !=
 					std::vector<std::string>{body.Root == body.Humanoid ? std::string() : body.Root} ||
-				Component(root, "scene.Transform") == nullptr || Component(root, "scene.Motion") == nullptr ||
+				Component(root, "scene.Transform") == nullptr ||
+				(body.RootSleeping == (Component(root, "scene.Motion") != nullptr)) ||
 				(ownership != nullptr && ownership->References != std::vector<std::string>{body.Player}))
 				return false;
 			const auto inCharacter = [&](const PortalNodeCopy *node) {
@@ -473,6 +479,7 @@ namespace engine::scene {
 			writer.WriteString(body.Character);
 			writer.WriteString(body.Root);
 			writer.WriteString(body.Humanoid);
+			writer.WriteBool(body.RootSleeping);
 			writer.WriteBool(body.Sweep.has_value());
 			if (body.Sweep) {
 				writer.WriteRaw(&body.Sweep->From, sizeof(body.Sweep->From));
@@ -587,6 +594,10 @@ namespace engine::scene {
 			body.Character = object ? std::string() : key(model);
 			body.Root = key(root);
 			body.Humanoid = key(humanoid);
+			// A sleeping body deliberately has no Motion row. This belongs in the
+			// captured value before validation, because capture is also used by
+			// worlds that have not installed a physics step yet.
+			body.RootSleeping = !store.Has<Motion>(root);
 			for (size_t index = 0; index < entities.size(); ++index) {
 				const Entity entity = entities[index];
 				for (const auto id : store.ComponentsOf(entity)) {
@@ -793,6 +804,7 @@ namespace engine::scene {
 		body.Character = ReadText(input, true);
 		body.Root = ReadText(input);
 		body.Humanoid = ReadText(input, true);
+		body.RootSleeping = input.ReadBool();
 		const uint8_t swept = input.ReadUInt8();
 		if (swept > 1) input.Fail();
 		if (swept == 1) {

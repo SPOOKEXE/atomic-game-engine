@@ -147,6 +147,12 @@ namespace engine::render {
 		// to is chosen by that plane - a caller passing one here would be
 		// overwritten by the slot's.
 		glm::vec4 SeamPlane{0.0f, 0.0f, 0.0f, 0.0f};
+		// Finite portal aperture axes and ownership mode. Mode zero preserves the
+		// legacy plane cut; one is the source complement and two is the mapped
+		// destination interior.
+		glm::vec4 SeamFirst{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamSecond{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamCentre{0.0f, 0.0f, 0.0f, 0.0f};
 
 		// The sky term, fog colour and eye-relative fog interval. Appended so
 		// built-in and user shaders that copy the established prefix keep every
@@ -172,6 +178,9 @@ namespace engine::render {
 
 	struct ShadowUniforms {
 		glm::vec4 Plane{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamFirst{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamSecond{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamCentre{0.0f, 0.0f, 0.0f, 0.0f};
 		glm::vec4 Material{1.0f, 0.0f, 0.0f, 0.0f};
 		glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
 	};

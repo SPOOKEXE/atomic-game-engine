@@ -9,11 +9,13 @@
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/CollisionShapes.hpp>
+#include <engine/scene/SurfaceTable.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <tuple>
 
 namespace engine::physics {
 	namespace {
@@ -25,6 +27,10 @@ namespace engine::physics {
 		struct ContactCache {
 			uint64_t Tick = 0;
 			std::vector<ContactStep> Bodies;
+		};
+		struct DynamicContactCache {
+			uint64_t Tick = 0;
+			std::vector<CopiedDynamicBodyContacts> Bodies;
 		};
 		struct Plane {
 			core::Vector3 Normal;
@@ -126,13 +132,23 @@ namespace engine::physics {
 		bool ValidShape(const CopiedContactShape &shape) {
 			if (!Rigid(shape.Frame) || !Finite(shape.Extent) ||
 				static_cast<size_t>(shape.Kind) >= KINDS.size() ||
-				shape.Points.size() > MAXIMUM_COPIED_CONTACT_POINTS)
+				shape.Points.size() > MAXIMUM_COPIED_CONTACT_POINTS || !std::isfinite(shape.Friction) ||
+				shape.Friction < 0 || !std::isfinite(shape.Restitution) || shape.Restitution < 0 ||
+				shape.Restitution > 1 || !Finite(shape.Linear) || !Finite(shape.Angular))
 				return false;
 			if (shape.Kind == scene::ShapeKind::Hull)
 				return !shape.Points.empty() && std::all_of(shape.Points.begin(), shape.Points.end(), Finite);
 			return shape.Points.empty() && shape.Extent.X > 0 &&
 				   (shape.Kind == scene::ShapeKind::Sphere || shape.Extent.Y > 0) &&
 				   (shape.Kind != scene::ShapeKind::Box || shape.Extent.Z > 0);
+		}
+		bool ValidDynamic(const CopiedDynamicContact &body) {
+			return body.Identity.Key.IsValid() && body.Identity.Generation != 0 && Rigid(body.Frame) &&
+				   Finite(body.Motion.Linear) && Finite(body.Motion.Angular) && Finite(body.Extent) &&
+				   body.Extent.X > 0 && body.Extent.Y > 0 && body.Extent.Z > 0 && std::isfinite(body.Mass) &&
+				   body.Mass > 0 && std::isfinite(body.Friction) && body.Friction >= 0 &&
+				   std::isfinite(body.Restitution) && body.Restitution >= 0 && body.Restitution <= 1 &&
+				   static_cast<size_t>(body.Kind) < KINDS.size() && ValidContactWindow(body.Window);
 		}
 		// Intersect a convex point cloud with each plane. Intersections of all
 		// inside/outside segments contain every new extreme; rebuilding discards
@@ -169,7 +185,9 @@ namespace engine::physics {
 			const ShapeInstance &shape,
 			const std::array<Plane, 6> &planes,
 			CopiedStaticContacts &contacts,
-			bool &handled
+			bool &handled,
+			const scene::SurfaceProperties &material,
+			const scene::Motion &supportMotion
 		) {
 			float lower[] = {-shape.Extent.X, -shape.Extent.Y, -shape.Extent.Z};
 			float upper[] = {shape.Extent.X, shape.Extent.Y, shape.Extent.Z};
@@ -198,7 +216,15 @@ namespace engine::physics {
 			};
 			if (extent.X > 0 && extent.Y > 0 && extent.Z > 0)
 				return Append(
-					contacts, {shape.Frame * core::CFrame(centre), extent, scene::ShapeKind::Box, {}}
+					contacts,
+					{shape.Frame * core::CFrame(centre),
+					 extent,
+					 scene::ShapeKind::Box,
+					 {},
+					 material.Friction,
+					 material.Restitution,
+					 supportMotion.Linear,
+					 supportMotion.Angular}
 				);
 			std::vector<core::Vector3> points;
 			for (float x : {lower[0], upper[0]})
@@ -208,13 +234,28 @@ namespace engine::physics {
 						if (std::find(points.begin(), points.end(), point) == points.end())
 							points.push_back(point);
 					}
-			return Append(contacts, {core::CFrame{}, {}, scene::ShapeKind::Hull, std::move(points)});
+			return Append(
+				contacts,
+				{core::CFrame{},
+				 {},
+				 scene::ShapeKind::Hull,
+				 std::move(points),
+				 material.Friction,
+				 material.Restitution,
+				 supportMotion.Linear,
+				 supportMotion.Angular}
+			);
 		}
 
 		void WriteCache(core::ByteWriter &, const void *, size_t) {}
 		void ReadCache(core::ByteReader &, void *out, size_t count) {
 			for (size_t at = 0; at < count; ++at)
 				static_cast<ContactCache *>(out)[at] = {};
+		}
+		void WriteDynamicCache(core::ByteWriter &, const void *, size_t) {}
+		void ReadDynamicCache(core::ByteReader &, void *out, size_t count) {
+			for (size_t at = 0; at < count; ++at)
+				static_cast<DynamicContactCache *>(out)[at] = {};
 		}
 		collision::ConvexHull HullOf(const CopiedContactShape &shape) {
 			collision::ConvexHull hull;
@@ -248,6 +289,7 @@ namespace engine::physics {
 		}
 		const auto planes = Planes(window);
 		const auto *baked = scene::CollisionShapesOf(store);
+		const auto *surfaces = store.Resource<scene::SurfaceTable>();
 		CopiedStaticContacts contacts;
 		bool complete = true;
 		store.Each<const scene::Transform, const scene::Collider>(
@@ -267,18 +309,47 @@ namespace engine::physics {
 					if (SupportPoint(shape, -plane.Normal).Dot(plane.Normal) > plane.Offset) return;
 					inside = inside && SupportPoint(shape, plane.Normal).Dot(plane.Normal) <= plane.Offset;
 				}
-				if (store.Has<scene::Simulated>(entity) || store.Has<scene::Motion>(entity)) {
-					failure = "dynamic destination contacts require a coupled impulse solve";
-					complete = false;
+				const scene::RigidBody *rigid = store.Get<scene::RigidBody>(entity);
+				// Dynamic rows travel through CollectDynamicContacts and the joined
+				// portal-island solve. Treating their current transform as a static
+				// obstacle would apply a second, stale impulse on this side.
+				if (store.Has<scene::Simulated>(entity) &&
+					(rigid == nullptr || rigid->Kind == scene::BodyKind::Dynamic))
 					return;
-				}
+				const scene::Motion supportMotion =
+					store.Get<scene::Motion>(entity) ? *store.Get<scene::Motion>(entity) : scene::Motion{};
 				if (!Rigid(pose.Frame)) {
 					failure = "invalid static contact pose";
 					complete = false;
 					return;
 				}
+				scene::SurfaceProperties material;
+				if (const auto *surface = store.Get<scene::Surface>(entity); surface && surfaces) {
+					if (const auto *found = surfaces->Find(surface->Material)) material = *found;
+				}
+				if (const auto *override = store.Get<scene::PhysicsProperties>(entity);
+					override && override->Custom) {
+					material.Friction = override->Friction;
+					material.Restitution = override->Elasticity;
+				}
+				if (!std::isfinite(material.Friction) || material.Friction < 0 ||
+					!std::isfinite(material.Restitution) || material.Restitution < 0 ||
+					material.Restitution > 1) {
+					failure = "invalid static contact material";
+					complete = false;
+					return;
+				}
 				if (inside && shape.Shape != scene::ShapeKind::Mesh) {
-					CopiedContactShape copy{pose.Frame, collider.Extent, shape.Shape, {}};
+					CopiedContactShape copy{
+						pose.Frame,
+						collider.Extent,
+						shape.Shape,
+						{},
+						material.Friction,
+						material.Restitution,
+						supportMotion.Linear,
+						supportMotion.Angular
+					};
 					if (hull) copy.Points = hull->Points;
 					complete = Append(contacts, std::move(copy));
 					return;
@@ -288,11 +359,21 @@ namespace engine::physics {
 						point = pose.Frame.PointToWorldSpace(point);
 					if (!Clip(points, planes)) return false;
 					if (points.empty()) return true;
-					return Append(contacts, {core::CFrame{}, {}, scene::ShapeKind::Hull, std::move(points)});
+					return Append(
+						contacts,
+						{core::CFrame{},
+						 {},
+						 scene::ShapeKind::Hull,
+						 std::move(points),
+						 material.Friction,
+						 material.Restitution,
+						 supportMotion.Linear,
+						 supportMotion.Angular}
+					);
 				};
 				if (shape.Shape == scene::ShapeKind::Box) {
 					bool handled = false;
-					complete = ClipAlignedBox(shape, planes, contacts, handled);
+					complete = ClipAlignedBox(shape, planes, contacts, handled, material, supportMotion);
 					if (handled || !complete) return;
 					std::vector<core::Vector3> points;
 					for (int x : {-1, 1})
@@ -323,6 +404,80 @@ namespace engine::physics {
 			if (failure.empty()) failure = "static contact geometry exceeds bounded representation";
 			return false;
 		}
+		out = std::move(contacts);
+		failure.clear();
+		return true;
+	}
+	bool CollectDynamicContacts(
+		ecs::Store &store, const ContactWindow &window, CopiedDynamicContacts &out, std::string &failure
+	) {
+		ENGINE_PROFILE_CAT("physics.copy-dynamic-contacts", core::ProfileCategory::Physics);
+		if (!ValidContactWindow(window)) {
+			failure = "invalid contact aperture";
+			return false;
+		}
+		const auto planes = Planes(window);
+		const auto *surfaces = store.Resource<scene::SurfaceTable>();
+		CopiedDynamicContacts contacts;
+		bool complete = true;
+		store
+			.Each<const scene::Transform, const scene::Collider, const scene::Motion, const scene::RigidBody>(
+				[&](ecs::Entity entity,
+					const scene::Transform &pose,
+					const scene::Collider &collider,
+					const scene::Motion &motion,
+					const scene::RigidBody &rigid) {
+					if (!complete || collider.Trigger || !store.Has<scene::Simulated>(entity) ||
+						rigid.Kind != scene::BodyKind::Dynamic || !collider.Layer.Overlaps(window.Mask) ||
+						!collider.Mask.Overlaps(window.Layer))
+						return;
+					const ShapeInstance shape{pose.Frame, collider.Extent, collider.Shape, nullptr, nullptr};
+					for (const Plane &plane : planes)
+						if (SupportPoint(shape, -plane.Normal).Dot(plane.Normal) > plane.Offset) return;
+					if (!Rigid(pose.Frame) || !(rigid.Mass > 0)) {
+						failure = "invalid dynamic contact body";
+						complete = false;
+						return;
+					}
+					const scene::BodyIdentity *identity = store.Get<scene::BodyIdentity>(entity);
+					if (identity == nullptr || !identity->Key.IsValid() || identity->Generation == 0) {
+						failure = "dynamic contact body has no stable identity";
+						complete = false;
+						return;
+					}
+					scene::SurfaceProperties material;
+					if (const auto *surface = store.Get<scene::Surface>(entity); surface && surfaces) {
+						if (const auto *found = surfaces->Find(surface->Material)) material = *found;
+					}
+					if (const auto *override = store.Get<scene::PhysicsProperties>(entity);
+						override && override->Custom) {
+						material.Friction = override->Friction;
+						material.Restitution = override->Elasticity;
+					}
+					CopiedDynamicContact copy{
+						*identity,
+						pose.Frame,
+						motion,
+						collider.Extent,
+						rigid.Mass,
+						material.Friction,
+						material.Restitution,
+						collider.Shape,
+						window
+					};
+					if (!ValidDynamic(copy) || contacts.Bodies.size() >= MAXIMUM_COPIED_CONTACT_SHAPES) {
+						failure = "dynamic contact geometry exceeds bounded representation";
+						complete = false;
+						return;
+					}
+					contacts.Bodies.push_back(std::move(copy));
+				}
+			);
+		if (!complete) return false;
+		std::sort(contacts.Bodies.begin(), contacts.Bodies.end(), [](const auto &left, const auto &right) {
+			return std::tie(left.Identity.Key.High, left.Identity.Key.Low, left.Identity.Generation) <
+				   std::tie(right.Identity.Key.High, right.Identity.Key.Low, right.Identity.Generation);
+		});
 		out = std::move(contacts);
 		failure.clear();
 		return true;
@@ -364,7 +519,7 @@ namespace engine::physics {
 	bool WriteCopiedContacts(core::ByteWriter &writer, const CopiedStaticContacts &contacts) {
 		if (contacts.Shapes.size() > MAXIMUM_COPIED_CONTACT_SHAPES) return false;
 		core::ByteWriter bytes;
-		bytes.WriteUInt8(1);
+		bytes.WriteUInt8(3);
 		bytes.WriteUInt32(static_cast<uint32_t>(contacts.Shapes.size()));
 		for (const auto &shape : contacts.Shapes) {
 			if (!ValidShape(shape)) return false;
@@ -376,6 +531,10 @@ namespace engine::physics {
 			bytes.WriteFloat(q.y);
 			bytes.WriteFloat(q.z);
 			WriteVector(bytes, shape.Extent);
+			bytes.WriteFloat(shape.Friction);
+			bytes.WriteFloat(shape.Restitution);
+			WriteVector(bytes, shape.Linear);
+			WriteVector(bytes, shape.Angular);
 			bytes.WriteUInt32(static_cast<uint32_t>(shape.Points.size()));
 			for (const auto &point : shape.Points)
 				WriteVector(bytes, point);
@@ -386,7 +545,7 @@ namespace engine::physics {
 		return true;
 	}
 	bool ReadCopiedContacts(core::ByteReader &reader, CopiedStaticContacts &out) {
-		if (reader.ReadUInt8() != 1) {
+		if (reader.ReadUInt8() != 3) {
 			reader.Fail();
 			return false;
 		}
@@ -410,6 +569,10 @@ namespace engine::physics {
 						z = reader.ReadFloat();
 			shape.Frame = {position, glm::quat{w, x, y, z}};
 			shape.Extent = ReadVector(reader);
+			shape.Friction = reader.ReadFloat();
+			shape.Restitution = reader.ReadFloat();
+			shape.Linear = ReadVector(reader);
+			shape.Angular = ReadVector(reader);
 			const size_t points = reader.ReadUInt32();
 			if (points > MAXIMUM_COPIED_CONTACT_POINTS || points > reader.Remaining() / 12) {
 				reader.Fail();
@@ -426,16 +589,131 @@ namespace engine::physics {
 		out = std::move(contacts);
 		return true;
 	}
+	bool WriteCopiedDynamicContacts(core::ByteWriter &writer, const CopiedDynamicContacts &contacts) {
+		if (contacts.Bodies.size() > MAXIMUM_COPIED_CONTACT_SHAPES) return false;
+		core::ByteWriter bytes;
+		bytes.WriteUInt8(1);
+		bytes.WriteUInt32(static_cast<uint32_t>(contacts.Bodies.size()));
+		for (const CopiedDynamicContact &body : contacts.Bodies) {
+			if (!ValidDynamic(body)) return false;
+			bytes.WriteUInt64(body.Identity.Key.High);
+			bytes.WriteUInt64(body.Identity.Key.Low);
+			bytes.WriteUInt64(body.Identity.Generation);
+			WriteVector(bytes, body.Frame.Position);
+			const auto rotation = body.Frame.Rotation();
+			bytes.WriteFloat(rotation.w);
+			bytes.WriteFloat(rotation.x);
+			bytes.WriteFloat(rotation.y);
+			bytes.WriteFloat(rotation.z);
+			WriteVector(bytes, body.Motion.Linear);
+			WriteVector(bytes, body.Motion.Angular);
+			WriteVector(bytes, body.Extent);
+			bytes.WriteFloat(body.Mass);
+			bytes.WriteFloat(body.Friction);
+			bytes.WriteFloat(body.Restitution);
+			bytes.WriteString(KINDS[static_cast<size_t>(body.Kind)]);
+			if (!WriteContactWindow(bytes, body.Window)) return false;
+		}
+		writer.WriteRaw(bytes.Bytes().data(), bytes.Size());
+		return true;
+	}
+	bool ReadCopiedDynamicContacts(core::ByteReader &reader, CopiedDynamicContacts &out) {
+		if (reader.ReadUInt8() != 1) {
+			reader.Fail();
+			return false;
+		}
+		const size_t count = reader.ReadUInt32();
+		if (count > MAXIMUM_COPIED_CONTACT_SHAPES) {
+			reader.Fail();
+			return false;
+		}
+		CopiedDynamicContacts contacts;
+		for (size_t at = 0; at < count; ++at) {
+			CopiedDynamicContact body;
+			body.Identity.Key = {reader.ReadUInt64(), reader.ReadUInt64()};
+			body.Identity.Generation = reader.ReadUInt64();
+			const core::Vector3 position = ReadVector(reader);
+			body.Frame = {
+				position, {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()}
+			};
+			body.Motion.Linear = ReadVector(reader);
+			body.Motion.Angular = ReadVector(reader);
+			body.Extent = ReadVector(reader);
+			body.Mass = reader.ReadFloat();
+			body.Friction = reader.ReadFloat();
+			body.Restitution = reader.ReadFloat();
+			const std::string kind = ReadText(reader);
+			const auto found = std::find(KINDS.begin(), KINDS.end(), kind);
+			if (found == KINDS.end() || !ReadContactWindow(reader, body.Window)) {
+				reader.Fail();
+				return false;
+			}
+			body.Kind = static_cast<scene::ShapeKind>(found - KINDS.begin());
+			if (reader.Failed() || !ValidDynamic(body)) {
+				reader.Fail();
+				return false;
+			}
+			contacts.Bodies.push_back(std::move(body));
+		}
+		out = std::move(contacts);
+		return true;
+	}
 	void RegisterCopiedContactComponents() {
 		ecs::Components::Register<ContactCache>("physics.CopiedContactCache", WriteCache, ReadCache);
+		ecs::Components::Register<DynamicContactCache>(
+			"physics.CopiedDynamicContactCache", WriteDynamicCache, ReadDynamicCache
+		);
 	}
 	void SetCopiedBodyContacts(ecs::Store &store, std::vector<CopiedBodyContacts> contacts) {
 		if (store.AdoptOnly()) return;
 		ContactCache cache;
 		cache.Tick = store.Time().Tick;
-		for (auto &body : contacts)
+		for (auto &body : contacts) {
+			const auto existing =
+				std::find_if(cache.Bodies.begin(), cache.Bodies.end(), [&](const auto &step) {
+					return step.Body.Root == body.Root;
+				});
+			if (existing != cache.Bodies.end()) {
+				// Two active windows cannot independently decide one body's contact result.
+				existing->Body.Complete = false;
+				continue;
+			}
 			cache.Bodies.push_back({std::move(body), {}, false});
+		}
 		store.SetResource(cache);
+	}
+	void SetCopiedDynamicBodyContacts(ecs::Store &store, std::vector<CopiedDynamicBodyContacts> contacts) {
+		if (store.AdoptOnly()) return;
+		DynamicContactCache cache;
+		cache.Tick = store.Time().Tick;
+		for (auto &body : contacts) {
+			if (body.Root == ecs::NULL_ENTITY ||
+				body.Contacts.Bodies.size() > MAXIMUM_COPIED_CONTACT_SHAPES) {
+				body.Complete = false;
+				body.Contacts.Bodies.clear();
+			}
+			const auto duplicate =
+				std::find_if(cache.Bodies.begin(), cache.Bodies.end(), [&](const auto &existing) {
+					return existing.Root == body.Root;
+				});
+			if (duplicate != cache.Bodies.end()) {
+				duplicate->Complete = false;
+				duplicate->Contacts.Bodies.clear();
+				continue;
+			}
+			cache.Bodies.push_back(std::move(body));
+		}
+		store.SetResource(cache);
+	}
+	std::span<const CopiedDynamicContact>
+	CopiedDynamicContactsFor(const ecs::Store &store, ecs::Entity root) {
+		const auto *cache = store.Resource<DynamicContactCache>();
+		if (cache == nullptr || cache->Tick != store.Time().Tick) return {};
+		const auto found = std::find_if(cache->Bodies.begin(), cache->Bodies.end(), [&](const auto &body) {
+			return body.Root == root && body.Complete;
+		});
+		return found == cache->Bodies.end() ? std::span<const CopiedDynamicContact>{}
+											: std::span<const CopiedDynamicContact>(found->Contacts.Bodies);
 	}
 	void BeginCopiedContactStep(ecs::Store &store) {
 		auto *cache = store.ResourceMutable<ContactCache>();
@@ -476,6 +754,7 @@ namespace engine::physics {
 			for (int slide = 0; slide < 4; ++slide) {
 				const ShapeInstance moving{current, collider->Extent, collider->Shape, hull, nullptr};
 				ConvexSweep earliest;
+				const CopiedContactShape *copiedHit = nullptr;
 				// Resolve the supporting local floor before the copied floor's cut edge.
 				const auto local = SweepPlacement(store, *collider, current, remaining, angular, root, true);
 				if (!local.Complete) {
@@ -502,7 +781,10 @@ namespace engine::physics {
 					if (!hit.ConservativeFallback && angular.MagnitudeSquared() < 1e-12f &&
 						remaining.Dot(hit.Normal) >= -1e-6f)
 						continue;
-					if (!earliest.Hit || hit.Fraction < earliest.Fraction) earliest = hit;
+					if (!earliest.Hit || hit.Fraction < earliest.Fraction) {
+						earliest = hit;
+						copiedHit = &fixed;
+					}
 				}
 				if (!earliest.Hit) {
 					current = Advanced(current, remaining, angular, 1);
@@ -515,10 +797,41 @@ namespace engine::physics {
 					length > 0 ? std::max(0.0f, earliest.Fraction - .001f / length) : earliest.Fraction;
 				current = Advanced(current, remaining, angular, safeFraction);
 				remaining = remaining * (1 - safeFraction);
-				const float displacementInto = remaining.Dot(earliest.Normal);
-				if (displacementInto < 0) remaining = remaining - earliest.Normal * displacementInto;
-				const float velocityInto = stopped.Linear.Dot(earliest.Normal);
-				if (velocityInto < 0) stopped.Linear = stopped.Linear - earliest.Normal * velocityInto;
+				if (copiedHit) {
+					// Match the local solver's material combination using resolved copied values.
+					scene::SurfaceProperties own;
+					if (const auto *table = store.Resource<scene::SurfaceTable>()) {
+						if (const auto *surface = store.Get<scene::Surface>(root)) {
+							if (const auto *row = table->Find(surface->Material)) own = *row;
+						}
+					}
+					if (const auto *properties = store.Get<scene::PhysicsProperties>(root);
+						properties && properties->Custom) {
+						own.Friction = properties->Friction;
+						own.Restitution = properties->Elasticity;
+					}
+					const core::Vector3 supportVelocity =
+						copiedHit->Linear +
+						copiedHit->Angular.Cross(current.Position - copiedHit->Frame.Position);
+					const core::Vector3 relativeVelocity = stopped.Linear - supportVelocity;
+					const float inward = std::max(0.0f, -relativeVelocity.Dot(earliest.Normal));
+					const float restitution = std::max(own.Restitution, copiedHit->Restitution);
+					const float friction = std::sqrt(std::max(0.0f, own.Friction * copiedHit->Friction));
+					auto tangent = relativeVelocity + earliest.Normal * inward;
+					const float tangentSpeed = tangent.Magnitude();
+					if (tangentSpeed > 0 && inward > 0) {
+						const float kept =
+							std::max(0.0f, tangentSpeed - friction * inward * (1 + restitution));
+						tangent = tangent * (kept / tangentSpeed);
+					}
+					stopped.Linear = supportVelocity + tangent + earliest.Normal * (inward * restitution);
+					remaining = stopped.Linear * (PhysicsStepSeconds(store) * (1 - safeFraction));
+				} else {
+					const float displacementInto = remaining.Dot(earliest.Normal);
+					if (displacementInto < 0) remaining = remaining - earliest.Normal * displacementInto;
+					const float velocityInto = stopped.Linear.Dot(earliest.Normal);
+					if (velocityInto < 0) stopped.Linear = stopped.Linear - earliest.Normal * velocityInto;
+				}
 				if (angular.MagnitudeSquared() > 0) stopped.Angular = {};
 				angular = {};
 				if (earliest.ConservativeFallback) break;

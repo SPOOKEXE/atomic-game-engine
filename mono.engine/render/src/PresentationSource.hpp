@@ -16,36 +16,6 @@ namespace engine::render {
 			Ignore,
 		};
 
-		const scene::Transform *Transform = nullptr;
-		const scene::PreviousTransform *PreviousTransform = nullptr;
-		const scene::Bounds *Bounds = nullptr;
-		const scene::Visual *Visual = nullptr;
-		const scene::SurfaceAppearance *Appearance = nullptr;
-		const scene::Tags *Tags = nullptr;
-		const scene::LocalTransparency *Transparency = nullptr;
-		const scene::CharacterLimb *Limb = nullptr;
-		const scene::LODAuto *AutomaticLod = nullptr;
-		const scene::LODCustom *CustomLod = nullptr;
-		const scene::LODSettings *LodSettings = nullptr;
-		const scene::RenderEffects *Effects = nullptr;
-
-		static PresentationSource Of(const ecs::Store &store, ecs::Entity entity) {
-			return {
-				.Transform = store.Get<scene::Transform>(entity),
-				.PreviousTransform = store.Get<scene::PreviousTransform>(entity),
-				.Bounds = store.Get<scene::Bounds>(entity),
-				.Visual = store.Get<scene::Visual>(entity),
-				.Appearance = store.Get<scene::SurfaceAppearance>(entity),
-				.Tags = store.Get<scene::Tags>(entity),
-				.Transparency = store.Get<scene::LocalTransparency>(entity),
-				.Limb = store.Get<scene::CharacterLimb>(entity),
-				.AutomaticLod = store.Get<scene::LODAuto>(entity),
-				.CustomLod = store.Get<scene::LODCustom>(entity),
-				.LodSettings = store.Get<scene::LODSettings>(entity),
-				.Effects = store.Get<scene::RenderEffects>(entity),
-			};
-		}
-
 		static bool IsWorldDrawable(const ecs::Store &store, ecs::Entity entity) {
 			return store.Has<scene::Transform>(entity) && store.Has<scene::PreviousTransform>(entity) &&
 				   store.Has<scene::Bounds>(entity) && store.Has<scene::Visual>(entity) &&
@@ -53,28 +23,37 @@ namespace engine::render {
 				   store.Has<scene::LocalTransparency>(entity) && store.Has<scene::Rendered>(entity);
 		}
 
-		bool IsViewportDrawable() const {
-			return Transform != nullptr && Bounds != nullptr && Visual != nullptr;
+		static bool IsViewportDrawable(const ecs::Store &store, ecs::Entity entity) {
+			return store.Has<scene::Transform>(entity) && store.Has<scene::Bounds>(entity) &&
+				   store.Has<scene::Visual>(entity);
 		}
 
-		scene::DrawInstance MakeDrawInstance(
+		static scene::DrawInstance MakeDrawInstance(
+			const ecs::Store &store,
 			ecs::Entity entity,
 			const core::CFrame &frame,
 			LocalTransparencyMode transparencyMode = LocalTransparencyMode::Include
-		) const {
+		) {
+			const auto *bounds = store.Get<scene::Bounds>(entity);
+			const auto *visual = store.Get<scene::Visual>(entity);
+			if (bounds == nullptr || visual == nullptr) {
+				return {};
+			}
 			return scene::MakeDrawInstance(
 				frame,
-				*Bounds,
-				*Visual,
-				Appearance,
-				Tags,
+				*bounds,
+				*visual,
+				store.Get<scene::SurfaceAppearance>(entity),
+				store.Get<scene::Tags>(entity),
 				entity.Id,
-				transparencyMode == LocalTransparencyMode::Include ? Transparency : nullptr,
-				Limb,
-				AutomaticLod,
-				CustomLod,
-				LodSettings,
-				Effects
+				transparencyMode == LocalTransparencyMode::Include
+					? store.Get<scene::LocalTransparency>(entity)
+					: nullptr,
+				store.Get<scene::CharacterLimb>(entity),
+				store.Get<scene::LODAuto>(entity),
+				store.Get<scene::LODCustom>(entity),
+				store.Get<scene::LODSettings>(entity),
+				store.Get<scene::RenderEffects>(entity)
 			);
 		}
 

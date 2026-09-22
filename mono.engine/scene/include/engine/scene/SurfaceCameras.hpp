@@ -708,6 +708,9 @@ namespace engine::scene {
 		// Authored face-up direction transported with the part's rotation.
 		// Zero retains the world-up convention for manually constructed seams.
 		core::Vector3 Up;
+		// Authored inset removed from each aperture edge. The remaining First and
+		// Second axes describe the exact render and traversal aperture.
+		float RimThickness = 0.0f;
 
 		// The far pane's face frame, looking out of itself. The half of the
 		// mapping that does not depend on who is crossing.
@@ -799,6 +802,13 @@ namespace engine::scene {
 
 		// Local routing data. Encoders write the text when a crossing leaves this store.
 		core::Name DestinationWorld;
+	};
+
+	// The four invisible static colliders that keep an opened pane's finite edge
+	// physical. The pane itself becomes a trigger so the aperture can be crossed;
+	// these rows retain the narrow perimeter until the portal closes.
+	struct PortalRim {
+		std::array<ecs::Entity, 4> Parts{};
 	};
 
 	// Local presentation history for the predicted body. The source still owns

@@ -61,6 +61,12 @@ namespace engine::scene {
 		return hash ^ (word + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2));
 	}
 
+	uint64_t PortalVariant(uint64_t sourceVariant, uint64_t pane) {
+		if (sourceVariant == 0) return pane;
+		const uint64_t variant = MixSignature(pane, sourceVariant);
+		return variant != 0 ? variant : 1;
+	}
+
 	namespace {
 		// The four independent accumulators one signature is folded through.
 		// **Four chains rather than one, because this is latency-bound and not
@@ -173,6 +179,11 @@ namespace engine::scene {
 			// is what the skip wants.
 			d = MixSignature(d, Pair(BitsOf(instance.SeamNormal.X), BitsOf(instance.SeamNormal.Y)));
 			a = MixSignature(a, Pair(BitsOf(instance.SeamNormal.Z), BitsOf(instance.SeamOffset)));
+			b = MixSignature(b, Pair(BitsOf(instance.SeamFirst.X), BitsOf(instance.SeamFirst.Y)));
+			c = MixSignature(c, Pair(BitsOf(instance.SeamFirst.Z), BitsOf(instance.SeamSecond.X)));
+			d = MixSignature(d, Pair(BitsOf(instance.SeamSecond.Y), BitsOf(instance.SeamSecond.Z)));
+			a = MixSignature(a, Pair(BitsOf(instance.SeamCentre.X), BitsOf(instance.SeamCentre.Y)));
+			b = MixSignature(b, Pair(BitsOf(instance.SeamCentre.Z), instance.SeamMask));
 			b = MixSignature(b, Pair(BitsOf(instance.SeamLight.X), BitsOf(instance.SeamLight.Y)));
 			c = MixSignature(c, Pair(BitsOf(instance.SeamLight.Z), 0u));
 		}

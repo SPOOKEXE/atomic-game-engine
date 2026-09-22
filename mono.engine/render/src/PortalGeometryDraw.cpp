@@ -4,6 +4,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/scene/CameraContinuation.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
@@ -47,6 +48,33 @@ namespace engine::render {
 		float offset,
 		PortalBodyDraws &out
 	) {
+		return SplitPortalBodyDraws(body, joints, through, normal, offset, {}, {}, normal * offset, out);
+	}
+	bool SplitPortalBodyDraws(
+		std::span<const scene::DrawInstance> body,
+		std::span<const core::CFrame> joints,
+		const scene::SeamTransform &through,
+		const core::Vector3 &normal,
+		float offset,
+		const core::Vector3 &first,
+		const core::Vector3 &second,
+		PortalBodyDraws &out
+	) {
+		return SplitPortalBodyDraws(
+			body, joints, through, normal, offset, first, second, normal * offset, out
+		);
+	}
+	bool SplitPortalBodyDraws(
+		std::span<const scene::DrawInstance> body,
+		std::span<const core::CFrame> joints,
+		const scene::SeamTransform &through,
+		const core::Vector3 &normal,
+		float offset,
+		const core::Vector3 &first,
+		const core::Vector3 &second,
+		const core::Vector3 &centre,
+		PortalBodyDraws &out
+	) {
 		ENGINE_PROFILE("split current portal body");
 		const auto overlaps = [](auto input, const auto &storage) {
 			return !input.empty() && !storage.empty() &&
@@ -62,9 +90,10 @@ namespace engine::render {
 			const float norm = glm::dot(rotation, rotation);
 			return finite(frame.Position) && std::isfinite(norm) && std::abs(norm - 1) < .001f;
 		};
-		if (body.size() > MAX_PORTAL_GEOMETRY_ROWS || !finite(normal) ||
-			std::abs(normal.Dot(normal) - 1) > .0001f || !std::isfinite(offset) || !rigid(through.Frame) ||
-			!finite(through.Origin) || !std::isfinite(through.Scale) || through.Scale <= 0)
+		if (body.size() > MAX_PORTAL_GEOMETRY_ROWS || !finite(normal) || !finite(first) || !finite(second) ||
+			!finite(centre) || std::abs(normal.Dot(normal) - 1) > .0001f || !std::isfinite(offset) ||
+			!rigid(through.Frame) || !finite(through.Origin) || !std::isfinite(through.Scale) ||
+			through.Scale <= 0)
 			return false;
 		const auto farNormal = through.Rotate(-normal);
 		const float farOffset = farNormal.Dot(through.Point(normal * offset));
@@ -78,11 +107,11 @@ namespace engine::render {
 		for (size_t i = 0; i < body.size(); ++i) {
 			const auto &row = body[i];
 			const auto mappedHalf = row.HalfExtent * through.Scale;
-			if (row.Surface >= 0 || row.Variant != 0 || !rigid(row.Frame) || !finite(row.HalfExtent) ||
-				row.HalfExtent.X <= 0 || row.HalfExtent.Y <= 0 || row.HalfExtent.Z <= 0 ||
-				!finite(mappedHalf) || mappedHalf.X <= 0 || mappedHalf.Y <= 0 || mappedHalf.Z <= 0 ||
-				!rigid(through.Place(row.Frame)) || !finite(through.Rotate(row.SeamLight)) ||
-				!finite(row.SeamNormal) || !std::isfinite(row.SeamOffset) ||
+			if (!rigid(row.Frame) || !finite(row.HalfExtent) || row.HalfExtent.X <= 0 ||
+				row.HalfExtent.Y <= 0 || row.HalfExtent.Z <= 0 || !finite(mappedHalf) || mappedHalf.X <= 0 ||
+				mappedHalf.Y <= 0 || mappedHalf.Z <= 0 || !rigid(through.Place(row.Frame)) ||
+				!finite(through.Rotate(row.SeamLight)) || !finite(row.SeamNormal) ||
+				!std::isfinite(row.SeamOffset) ||
 				(row.SeamNormal != core::Vector3{} && ((row.SeamNormal - normal).Magnitude() > .0001f ||
 													   std::abs(row.SeamOffset - offset) > .0001f)) ||
 				row.SkinFirst > joints.size() || row.SkinCount > joints.size() - row.SkinFirst)
@@ -114,12 +143,20 @@ namespace engine::render {
 			near.SkinFirst = compact[i];
 			near.SeamNormal = normal;
 			near.SeamOffset = offset;
+			near.SeamFirst = first;
+			near.SeamSecond = second;
+			near.SeamCentre = centre;
+			near.SeamMask = first.MagnitudeSquared() > 0 && second.MagnitudeSquared() > 0 ? 1 : 0;
 			auto &far = out.Far[i];
 			far = near;
 			far.Frame = through.Place(near.Frame);
 			far.HalfExtent = near.HalfExtent * through.Scale;
 			far.SeamNormal = farNormal;
 			far.SeamOffset = farOffset;
+			far.SeamFirst = through.Rotate(first) * through.Scale;
+			far.SeamSecond = through.Rotate(second) * through.Scale;
+			far.SeamCentre = through.Point(near.SeamCentre);
+			far.SeamMask = near.SeamMask == 0 ? 0 : 2;
 			far.SeamLight = through.Rotate(near.SeamLight);
 			far.TagMask = 0;
 		}
@@ -144,6 +181,8 @@ namespace engine::render {
 			return false;
 		const auto through = scene::SeamMapping(seam);
 		PortalGeometry forwarded;
+		forwarded.PresentationSeconds = source.PresentationSeconds;
+		forwarded.PresentationRevision = source.PresentationRevision;
 		for (auto row : source.Rows) {
 			const auto frame = Pose(row.Pose);
 			const core::Vector3 half{row.HalfExtent[0], row.HalfExtent[1], row.HalfExtent[2]};
@@ -163,6 +202,17 @@ namespace engine::render {
 			row.Pose = Pose(through.Place(frame));
 			row.HalfExtent = Vector(half * through.Scale);
 			row.SeamPlane = {cut.FarNormal.X, cut.FarNormal.Y, cut.FarNormal.Z, cut.FarOffset};
+			const core::Vector3 apertureFirst{row.SeamFirst[0], row.SeamFirst[1], row.SeamFirst[2]};
+			const core::Vector3 apertureSecond{row.SeamSecond[0], row.SeamSecond[1], row.SeamSecond[2]};
+			const bool finiteAperture = row.SeamMask != 0 && apertureFirst.MagnitudeSquared() > 0 &&
+										apertureSecond.MagnitudeSquared() > 0;
+			const core::Vector3 apertureCentre{row.SeamCentre[0], row.SeamCentre[1], row.SeamCentre[2]};
+			row.SeamFirst =
+				Vector(through.Rotate(finiteAperture ? apertureFirst : seam.First) * through.Scale);
+			row.SeamSecond =
+				Vector(through.Rotate(finiteAperture ? apertureSecond : seam.Second) * through.Scale);
+			row.SeamCentre = Vector(through.Point(finiteAperture ? apertureCentre : seam.Centre));
+			row.SeamMask = 2;
 			row.SeamLight =
 				Vector(through.Rotate(core::Vector3{row.SeamLight[0], row.SeamLight[1], row.SeamLight[2]}));
 			if (row.JointCount > MAX_PORTAL_GEOMETRY_JOINTS - forwarded.Joints.size()) return overBudget();
@@ -177,6 +227,8 @@ namespace engine::render {
 		}
 		if (forwarded.Rows.empty()) return true;
 		PortalGeometry merged;
+		merged.PresentationSeconds = source.PresentationSeconds;
+		merged.PresentationRevision = source.PresentationRevision;
 		for (auto row : destination.Rows) {
 			if (!row.Player.empty() &&
 				std::any_of(forwarded.Rows.begin(), forwarded.Rows.end(), [&](const auto &copy) {
@@ -215,6 +267,7 @@ namespace engine::render {
 			return false;
 		}
 		PortalGeometry geometry;
+		geometry.PresentationSeconds = source.Time().Elapsed;
 		for (const auto &draw : rows) {
 			if (draw.SkinFirst > joints.size() || draw.SkinCount > joints.size() - draw.SkinFirst ||
 				draw.SkinCount > MAX_PORTAL_GEOMETRY_JOINTS - geometry.Joints.size() ||
@@ -233,6 +286,17 @@ namespace engine::render {
 					player = held->Player;
 				if (const auto *identity = source.Get<scene::PlayerIdentity>(player))
 					row.Player = std::to_string(identity->UserId);
+				row.BodyKeyHigh = draw.BodyKeyHigh;
+				row.BodyKeyLow = draw.BodyKeyLow;
+				row.BodyGeneration = draw.BodyGeneration;
+				if (row.BodyKeyHigh == 0 && row.BodyKeyLow == 0) {
+					const ecs::Entity body(draw.Rig != 0 ? draw.Rig : draw.Source);
+					if (const auto *identity = source.Get<scene::BodyIdentity>(body)) {
+						row.BodyKeyHigh = identity->Key.High;
+						row.BodyKeyLow = identity->Key.Low;
+						row.BodyGeneration = identity->Generation;
+					}
+				}
 			}
 			const std::array names{
 				draw.Mesh,
@@ -261,10 +325,25 @@ namespace engine::render {
 			row.Transparency = draw.Transparency;
 			row.AlphaCutoff = draw.AlphaCutoff;
 			row.SeamPlane = {draw.SeamNormal.X, draw.SeamNormal.Y, draw.SeamNormal.Z, draw.SeamOffset};
+			row.SeamFirst = Vector(draw.SeamFirst);
+			row.SeamSecond = Vector(draw.SeamSecond);
+			row.SeamCentre = Vector(draw.SeamCentre);
+			row.SeamMask = draw.SeamMask;
 			row.SeamLight = Vector(draw.SeamLight);
 			row.Alpha = ALPHA[static_cast<size_t>(draw.Alpha)];
 			row.Resample = RESAMPLE[static_cast<size_t>(draw.Resample)];
 			row.CastShadow = draw.CastShadow;
+			row.EffectCount = draw.Effects.Count;
+			for (size_t index = 0; index < row.EffectCount; ++index) {
+				const auto &sourceEffect = draw.Effects.Attachments[index];
+				auto &effect = row.Effects[index];
+				effect.Node = sourceEffect.Node.Text();
+				effect.SelectionMask = sourceEffect.SelectionMask;
+				effect.Order = sourceEffect.Order;
+				effect.Revision = sourceEffect.Revision;
+				effect.Stage = static_cast<uint8_t>(sourceEffect.Stage);
+				effect.Enabled = sourceEffect.Enabled;
+			}
 			if (draw.SkinCount != 0) {
 				row.FirstJoint = static_cast<uint32_t>(geometry.Joints.size());
 				row.JointCount = draw.SkinCount;
@@ -341,26 +420,59 @@ namespace engine::render {
 		}
 		const auto previousRows = rows.size();
 		if (destination) {
-			std::vector<int64_t> players;
+			struct BodyKey {
+				uint64_t High, Low, Generation;
+				bool operator==(const BodyKey &) const = default;
+			};
+			std::vector<BodyKey> bodies;
 			for (const auto &row : geometry.Rows) {
-				if (row.Player.empty()) continue;
-				int64_t player = 0;
-				std::from_chars(row.Player.data(), row.Player.data() + row.Player.size(), player);
-				players.push_back(player);
+				if (row.BodyKeyHigh != 0 || row.BodyKeyLow != 0)
+					bodies.push_back({row.BodyKeyHigh, row.BodyKeyLow, row.BodyGeneration});
 			}
-			std::sort(players.begin(), players.end());
-			players.erase(std::unique(players.begin(), players.end()), players.end());
-			const auto *held = destination->Resource<scene::CameraCharacterHold>();
-			if (!players.empty())
+			std::sort(bodies.begin(), bodies.end(), [](const auto &left, const auto &right) {
+				return std::tie(left.High, left.Low, left.Generation) <
+					   std::tie(right.High, right.Low, right.Generation);
+			});
+			bodies.erase(std::unique(bodies.begin(), bodies.end()), bodies.end());
+			auto localBody = [&](const scene::DrawInstance &row) {
+				return row.Rig != 0 && row.Variant == 0 &&
+					   (!row.SourceWorld.IsValid() || row.SourceWorld.Text() == destination->Name());
+			};
+			if (!bodies.empty()) {
 				std::erase_if(rows, [&](const auto &row) {
 					if (row.Rig == 0 || row.Variant != 0 ||
 						(row.SourceWorld.IsValid() && row.SourceWorld.Text() != destination->Name()))
 						return false;
-					auto player = scene::PlayerOf(*destination, destination->ParentOf(ecs::Entity(row.Rig)));
-					if (held && held->Active && row.Rig == held->SourceRoot.Id) player = held->Player;
-					const auto *identity = destination->Get<scene::PlayerIdentity>(player);
-					return identity && std::binary_search(players.begin(), players.end(), identity->UserId);
+					BodyKey key{row.BodyKeyHigh, row.BodyKeyLow, row.BodyGeneration};
+					if (key.High == 0 && key.Low == 0) {
+						if (const auto *identity =
+								destination->Get<scene::BodyIdentity>(ecs::Entity(row.Rig)))
+							key = {identity->Key.High, identity->Key.Low, identity->Generation};
+					}
+					return std::binary_search(
+						bodies.begin(), bodies.end(), key, [](const auto &left, const auto &right) {
+							return std::tie(left.High, left.Low, left.Generation) <
+								   std::tie(right.High, right.Low, right.Generation);
+						}
+					);
 				});
+			} else {
+				std::vector<std::string_view> players;
+				for (const auto &row : geometry.Rows)
+					if (!row.Player.empty()) players.push_back(row.Player);
+				std::sort(players.begin(), players.end());
+				players.erase(std::unique(players.begin(), players.end()), players.end());
+				const auto *held = destination->Resource<scene::CameraCharacterHold>();
+				std::erase_if(rows, [&](const auto &row) {
+					if (!localBody(row)) return false;
+					auto owner = scene::PlayerOf(*destination, destination->ParentOf(ecs::Entity(row.Rig)));
+					if (held && held->Active && held->SourceRoot.Id == row.Rig) owner = held->Player;
+					const auto *identity = destination->Get<scene::PlayerIdentity>(owner);
+					return identity && std::binary_search(
+										   players.begin(), players.end(), std::to_string(identity->UserId)
+									   );
+				});
+			}
 		}
 		const auto first = static_cast<uint32_t>(joints.size());
 		if (selection) {
@@ -381,6 +493,10 @@ namespace engine::render {
 			draw.AlphaCutoff = row.AlphaCutoff;
 			draw.SeamNormal = {row.SeamPlane[0], row.SeamPlane[1], row.SeamPlane[2]};
 			draw.SeamOffset = row.SeamPlane[3];
+			draw.SeamFirst = {row.SeamFirst[0], row.SeamFirst[1], row.SeamFirst[2]};
+			draw.SeamSecond = {row.SeamSecond[0], row.SeamSecond[1], row.SeamSecond[2]};
+			draw.SeamCentre = {row.SeamCentre[0], row.SeamCentre[1], row.SeamCentre[2]};
+			draw.SeamMask = row.SeamMask;
 			draw.SeamLight = {row.SeamLight[0], row.SeamLight[1], row.SeamLight[2]};
 			std::array fields{
 				&draw.Mesh,
@@ -408,8 +524,22 @@ namespace engine::render {
 			}
 			draw.Resample = row.Resample == "pixelated" ? scene::SurfaceResampleMode::Pixelated
 														: scene::SurfaceResampleMode::Default;
+			draw.Effects.Count = row.EffectCount;
+			for (size_t index = 0; index < row.EffectCount; ++index) {
+				const auto &sourceEffect = row.Effects[index];
+				auto &effect = draw.Effects.Attachments[index];
+				effect.Node = core::Name(sourceEffect.Node);
+				effect.SelectionMask = sourceEffect.SelectionMask;
+				effect.Order = sourceEffect.Order;
+				effect.Revision = sourceEffect.Revision;
+				effect.Stage = static_cast<scene::RenderEffectStage>(sourceEffect.Stage);
+				effect.Enabled = sourceEffect.Enabled;
+			}
 			draw.CastShadow = row.CastShadow;
 			draw.SourceWorld = sourceWorld;
+			draw.BodyKeyHigh = row.BodyKeyHigh;
+			draw.BodyKeyLow = row.BodyKeyLow;
+			draw.BodyGeneration = row.BodyGeneration;
 			draw.SkinFirst = row.JointCount != 0 ? first + row.FirstJoint : 0;
 			draw.SkinCount = static_cast<uint16_t>(row.JointCount);
 			if (selection && !selection->Player.empty() && selection->Player == row.Player)

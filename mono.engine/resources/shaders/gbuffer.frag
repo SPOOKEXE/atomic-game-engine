@@ -52,6 +52,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Mirror;
 	vec4 PaneNormal;
 	vec4 SeamPlane;
+	vec4 SeamFirst;
+	vec4 SeamSecond;
+	vec4 SeamCentre;
 	vec4 OutdoorAmbient;
 	vec4 FogColour;
 	vec4 Fog;
@@ -60,6 +63,8 @@ layout(set = 3, binding = 0) uniform Lighting {
 	uvec4 RenderFeatures;
 	vec4 PackedPbrChannels;
 } lighting;
+
+#include "seam-mask.glsl"
 
 float PackedPbrValue(vec2 uv, float channel) {
 	return texture(packedPbrMap, uv)[int(channel + 0.5)];

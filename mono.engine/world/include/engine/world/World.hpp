@@ -342,6 +342,8 @@ namespace engine::world {
 
 		// Internal joined-round slices used by the Universe exchange coordinator.
 		bool BeginExchangeRound(bool firstInBatch);
+		// Runs Simulation and stops before Physics for a joined fixed-step barrier.
+		bool AdvanceExchangeRoundToPhysics();
 		// Commits the joined exchange round before simulation resumes.
 		bool FinishExchangeRound();
 		// Abandons the open exchange round without applying partial replies.

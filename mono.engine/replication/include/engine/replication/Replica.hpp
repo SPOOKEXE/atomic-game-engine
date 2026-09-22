@@ -87,7 +87,9 @@ namespace engine::replication {
 
 		// Names this replica's copied observation identity and optional record
 		// sink. The sink receives metadata only and cannot affect the local world.
-		void SetObservations(core::Name world, core::Name authority, ClientId client, ReplicationObservations *observations);
+		void SetObservations(
+			core::Name world, core::Name authority, ClientId client, ReplicationObservations *observations
+		);
 
 		// The last tick applied in full.
 		//

@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "seam-mask.glsl"
 
 // The engine's flat shader: albedo, and nothing done to it.
 //
@@ -58,6 +61,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Mirror;
 	vec4 PaneNormal;
 	vec4 SeamPlane;
+	vec4 SeamFirst;
+	vec4 SeamSecond;
+	vec4 SeamCentre;
 	vec4 OutdoorAmbient;
 	vec4 FogColour;
 	vec4 Fog;
@@ -91,8 +97,7 @@ void main() {
 	}
 	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
 
-	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
-		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
+	if (!KeepSeamSample(inWorldPosition, lighting.SeamPlane, lighting.SeamFirst, lighting.SeamSecond, lighting.SeamCentre)) {
 		discard;
 	}
 

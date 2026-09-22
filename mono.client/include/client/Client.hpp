@@ -79,6 +79,7 @@ struct SDL_Gamepad;
 struct SDL_Joystick;
 
 namespace client {
+	class PortalReadinessController;
 
 	// The window, the renderer and the frame loop over one world.
 	//
@@ -355,6 +356,7 @@ namespace client {
 		void ReceiveServerMessage(std::span<const std::byte> message);
 		bool ReceivePortalSession(const engine::game::PortalSessionMessage &message);
 		void PumpPortalSuccessor(double nowSeconds, bool presentationReady);
+		void PumpPortalApproach(double nowSeconds);
 		bool PortalSuccessorDrawable();
 		void PumpPortalObservation(double nowSeconds);
 		void DropPortalObservation();
@@ -376,6 +378,7 @@ namespace client {
 			bool prepareNative = false
 		);
 		void DropPortalReplica(engine::world::WorldId world);
+		void DropPortalApproach();
 
 		// Copies this frame's keyboard and pointer onto a world's `InputState`.
 		//
@@ -763,9 +766,30 @@ namespace client {
 			bool Ready = false;
 			bool CommitSent = false;
 			bool Committed = false;
+			// The retained image stays selected until this staged replica has every
+			// receipt, asset, pose and capacity fact needed for live presentation.
+			std::shared_ptr<PortalReadinessController> Readiness;
+			std::optional<engine::script::PortalTransferFence> DestinationFence;
+			float ReadinessDistance = 0;
+			bool HasReadinessDistance = false;
+			bool SuppressRetainedCapture = false;
+			bool LivePresentationReady = false;
 			bool Refused = false;
 			std::string Failure;
 		};
+		struct PortalApproachReplica {
+			engine::game::PortalSessionMessage Route;
+			engine::net::Endpoint Endpoint;
+			engine::world::WorldId World;
+			std::unique_ptr<engine::net::Transport> Socket;
+			std::unique_ptr<engine::replication::Connector> Connection;
+			std::unique_ptr<ContentSession> Content;
+			double Deadline = 0;
+			float LastDistance = 0;
+			bool HasDistance = false;
+			bool Active = false;
+		};
+		std::unique_ptr<PortalApproachReplica> PortalApproach;
 		struct PortalObservation {
 			PortalWorldView View;
 			engine::world::WorldId World;

@@ -53,8 +53,7 @@ OpaqueSurfaceSample SampleEligibleOpaqueSurface() {
 		discard;
 	}
 	result.alpha = result.alphaMode == 1u ? inColour.a * result.materialAlpha : inColour.a;
-	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
-		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
+	if (!KeepSeamSample(inWorldPosition, lighting.SeamPlane, lighting.SeamFirst, lighting.SeamSecond, lighting.SeamCentre)) {
 		discard;
 	}
 	return result;

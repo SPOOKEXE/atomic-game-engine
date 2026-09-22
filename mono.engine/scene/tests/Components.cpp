@@ -4,6 +4,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
@@ -23,6 +24,8 @@ using engine::core::CFrame;
 using engine::core::Color3;
 using engine::core::Name;
 using engine::core::Vector3;
+using engine::scene::BodyIdentity;
+using engine::scene::BodyIdentityAuthority;
 using engine::scene::BodyKind;
 using engine::scene::BoolValue;
 using engine::scene::Bounds;
@@ -37,6 +40,8 @@ using engine::scene::NormalId;
 using engine::scene::NumberValue;
 using engine::scene::ObjectValue;
 using engine::scene::Portal;
+using engine::scene::PortalCrossingState;
+using engine::scene::PortalSeamPin;
 using engine::scene::PreviousTransform;
 using engine::scene::Rendered;
 using engine::scene::RenderFeaturePolicy;
@@ -68,6 +73,10 @@ TEST_CASE("every component is trivially copyable", "[scene][components]") {
 	CHECK(std::is_trivially_copyable_v<Visual>);
 	CHECK(std::is_trivially_copyable_v<Camera>);
 	CHECK(std::is_trivially_copyable_v<Portal>);
+	CHECK(std::is_trivially_copyable_v<BodyIdentity>);
+	CHECK(std::is_trivially_copyable_v<BodyIdentityAuthority>);
+	CHECK(std::is_trivially_copyable_v<PortalCrossingState>);
+	CHECK(std::is_trivially_copyable_v<PortalSeamPin>);
 	CHECK(std::is_trivially_copyable_v<SurfaceLens>);
 	CHECK(std::is_trivially_copyable_v<BoolValue>);
 	CHECK(std::is_trivially_copyable_v<CFrameValue>);
@@ -91,6 +100,18 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(PreviousTransform) == sizeof(CFrame));
 	CHECK(sizeof(Bounds) == sizeof(Vector3));
 	CHECK(sizeof(Motion) == 2 * sizeof(Vector3));
+	CHECK(sizeof(BodyIdentity) == 3 * sizeof(uint64_t));
+	CHECK(sizeof(BodyIdentityAuthority) == 2 * sizeof(uint64_t));
+	CHECK(
+		sizeof(PortalSeamPin) == 2 * sizeof(engine::ecs::Entity) + 2 * sizeof(CFrame) + 3 * sizeof(Vector3) +
+									 sizeof(Name) + sizeof(float) + sizeof(uint32_t) + sizeof(int16_t) +
+									 2 * sizeof(bool) + sizeof(PortalSeamPin::Reserved)
+	);
+	CHECK(
+		sizeof(PortalCrossingState) ==
+		sizeof(PortalSeamPin) + 3 * sizeof(engine::ecs::Entity) + 3 * sizeof(uint64_t) + 2 * sizeof(int8_t) +
+			sizeof(engine::scene::PortalCrossingPhase) + sizeof(PortalCrossingState::Reserved)
+	);
 	CHECK(sizeof(Surface) == sizeof(Name));
 	CHECK(sizeof(Camera) == 7 * sizeof(float) + sizeof(RenderFeaturePolicy));
 	// **`ImageTransparency` widened this one and the two bytes it needed came
@@ -122,12 +143,14 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 									 sizeof(int16_t) + sizeof(NormalId) + sizeof(SurfaceEffect)
 	);
 
-	// **A portal is a handle, a world, an activation byte and a reserve.** Which
+	// **A portal is a handle, a world, two flags, a rim width and a reserve.** Which
 	// part the hole leads to decides where the camera stands; which world decides
 	// what it draws; and the activation byte decides whether either path runs.
-	// An `Entity` is eight bytes, a `Name` is four and the flag is one, so three
-	// bytes are left over and named rather than left to the compiler.
-	CHECK(sizeof(Portal) == sizeof(engine::ecs::Entity) + sizeof(Name) + sizeof(bool) + 3);
+	// An `Entity` is eight bytes and a `Name` is four. The rim starts at the next
+	// four-byte boundary, and its trailing flags and reserve fill the final word.
+	CHECK(
+		sizeof(Portal) == sizeof(engine::ecs::Entity) + sizeof(Name) + sizeof(float) + 2 * sizeof(bool) + 6
+	);
 	CHECK(offsetof(Portal, Reserved) + sizeof(Portal::Reserved) == sizeof(Portal));
 	CHECK(Portal{}.Enabled);
 

@@ -31,6 +31,12 @@ namespace client {
 
 	// Command-line configuration copied into Client during Initialise.
 	struct Options {
+		// A traversable portal prewarms two RGBA16F eye images and keeps bounded
+		// room for destination assets and uploads. 512 MiB admits both eyes at
+		// 3840x2160 (about 127 MiB together) plus the 256 MiB content allowance.
+		static constexpr size_t DEFAULT_PORTAL_READINESS_BUDGET_BYTES = 512u * 1024u * 1024u;
+		static constexpr size_t DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES = 256u * 1024u * 1024u;
+
 		// Converts an explicit command-line MiB capacity into bytes. Zero and
 		// overflow are refused so the default budget cannot be disabled by error.
 		static std::optional<size_t> TextureBudgetBytesForMiB(int64_t mebibytes) {
@@ -166,6 +172,12 @@ namespace client {
 		// Texture-table capacity for this run. Zero preserves the renderer's
 		// normal safety limit; a command-line measurement may request more.
 		size_t TextureBudgetBytes = 0;
+
+		// Bounded local allowance for a staged portal destination. Integrators may
+		// lower either value for constrained devices; exhaustion keeps the mouth
+		// image-only until capacity becomes available.
+		size_t PortalReadinessBudgetBytes = DEFAULT_PORTAL_READINESS_BUDGET_BYTES;
+		size_t PortalReadinessAssetUploadBytes = DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES;
 
 		// The maximum presentation rate, or zero for every update.
 		//

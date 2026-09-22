@@ -685,6 +685,12 @@ namespace client {
 					auto clones = std::span(drawn).subspan(begin);
 					for (auto &clone : clones) {
 						clone.SourceWorld = farName;
+						const engine::ecs::Entity body{clone.Rig != 0 ? clone.Rig : clone.Source};
+						if (const auto *identity = store.Get<engine::scene::BodyIdentity>(body)) {
+							clone.BodyKeyHigh = identity->Key.High;
+							clone.BodyKeyLow = identity->Key.Low;
+							clone.BodyGeneration = identity->Generation;
+						}
 					}
 					if (joints != nullptr) {
 						engine::render::RebaseSkinPalettes(clones, list->JointFrames, *joints);

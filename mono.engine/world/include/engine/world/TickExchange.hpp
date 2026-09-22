@@ -3,6 +3,7 @@
 #include <engine/core/Bytes.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -60,6 +61,27 @@ namespace engine::world {
 		TickExchangeStatus Status = TickExchangeStatus::Unavailable;
 		// Owned channel-defined reply bytes.
 		std::vector<std::byte> Payload;
+	};
+
+	// One opaque value record emitted at the joined fixed-step barrier. The
+	// generic world layer routes bytes only; game-level owners interpret them.
+	struct FixedStepBarrierRecord {
+		std::string World;
+		std::vector<std::byte> Payload;
+	};
+
+	// Opaque hooks around the fixed-step boundary between Simulation and
+	// Physics. World owns the order and transport; the caller owns the byte
+	// format and the one global resolve step.
+	struct FixedStepBarrierCallbacks {
+		std::function<void(ecs::Store &, std::vector<std::byte> &)> Collect;
+		std::function<bool(std::span<const FixedStepBarrierRecord>, std::vector<FixedStepBarrierRecord> &)>
+			Resolve;
+		std::function<bool(ecs::Store &, std::span<const std::byte>)> Apply;
+
+		bool Valid() const {
+			return Collect && Resolve && Apply;
+		}
 	};
 
 	// These run only at a joined phase boundary and only on the addressed world's

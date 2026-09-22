@@ -969,6 +969,11 @@ TEST_CASE(
 	const float walkingDirection = outcome == 0 ? GENERATE(-1.f, 1.f) : -1.f;
 	CAPTURE(outcome, walkingDirection);
 	auto options = Headless(0, 1);
+	const std::filesystem::path portalStore =
+		std::filesystem::temp_directory_path() / "atomic-server-source-lease-store";
+	std::error_code ignored;
+	std::filesystem::remove_all(portalStore, ignored);
+	options.DataStoreRoot = portalStore;
 	if (outcome == 0) {
 		const auto path = core::Paths::Base() / "portal-source-walk.luau";
 		std::ofstream script(path);
@@ -1139,14 +1144,21 @@ TEST_CASE(
 	for (int tick = 0; tick < 4; tick++)
 		(void)host.Run();
 	const auto requests = host.Worlds().TakePresentation(endpoint.Address);
-	REQUIRE(requests.size() == 1);
+	std::vector<world::PresentationMessage> leaseRequests;
+	for (const auto &request : requests) {
+		game::PortalSessionMessage message;
+		if (game::DecodePortalSession(request.Payload, message) &&
+			message.Kind == game::PortalSessionKind::LeaseRequest)
+			leaseRequests.push_back(request);
+	}
+	REQUIRE(leaseRequests.size() == 1);
+	const auto &leaseRequest = leaseRequests.front();
 	game::PortalSessionMessage route;
-	REQUIRE(game::DecodePortalSession(requests.front().Payload, route));
-	REQUIRE(route.Kind == game::PortalSessionKind::LeaseRequest);
+	REQUIRE(game::DecodePortalSession(leaseRequest.Payload, route));
 	CHECK(route.Identity == identity->Public());
 	CHECK(route.Claim.Transfer == transfer);
-	CHECK(transfer.SourceIncarnation == requests.front().From.Session);
-	CHECK(route.Claim.SourceSession == requests.front().From.Session);
+	CHECK(transfer.SourceIncarnation == leaseRequest.From.Session);
+	CHECK(route.Claim.SourceSession == leaseRequest.From.Session);
 	route.Kind = refuse ? game::PortalSessionKind::Refused : game::PortalSessionKind::LeaseRoute;
 	route.Claim.DestinationIncarnation = 202;
 	route.Identity = identity->Public();
@@ -1193,14 +1205,16 @@ TEST_CASE(
 		const auto receipt = script::PortalTransferOfPlayer(store, original);
 		REQUIRE(receipt.has_value());
 		CHECK(
-			receipt->Stage == (refuse && outcome != 4 ? script::PortalTransferStage::Refused
-													  : script::PortalTransferStage::Preparing)
+			receipt->Stage == (refuse && outcome != 4
+								   ? script::PortalTransferStage::Refused
+								   : (outcome == 4 ? script::PortalTransferStage::Preparing
+												   : script::PortalTransferStage::Prepared))
 		);
 		const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, original));
 		REQUIRE(rig != nullptr);
 		const auto *humanoid = store.Get<scene::Humanoid>(rig->Humanoid);
 		REQUIRE(humanoid != nullptr);
-		CHECK(humanoid->Enabled == (refuse && outcome != 4));
+		CHECK(humanoid->Enabled == refuse);
 	}));
 	host.Worlds().Enter(destination, [&](Store &store) {
 		CHECK(script::PortalTransferPlayer(store, transfer) == ecs::NULL_ENTITY);
@@ -1396,6 +1410,7 @@ TEST_CASE(
 		CHECK(replies.size() == 4);
 	}
 	host.Shutdown();
+	std::filesystem::remove_all(portalStore, ignored);
 }
 
 TEST_CASE(

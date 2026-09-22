@@ -25,6 +25,7 @@
 #include <engine/game/Content.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSeamCoordinator.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/game/Project.hpp>
 #include <engine/gui/Services.hpp>
@@ -44,6 +45,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/script/TeleportRequest.hpp>
@@ -64,6 +66,7 @@
 #include <limits>
 #include <network/SessionKey.hpp>
 #include <server/ContentRelay.hpp>
+#include <server/PortalJournal.hpp>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
 #include <span>
@@ -72,6 +75,14 @@
 namespace server {
 
 	namespace {
+		std::filesystem::path PortalJournalPath(const Options &settings, engine::core::Name world) {
+			const std::string_view name = world.Text();
+			const auto digest =
+				engine::assets::Hasher::Of(std::as_bytes(std::span(name.data(), name.size())));
+			return settings.DataStoreRoot / engine::world::Describe(settings.DataStoreEnvironment) /
+				   "portal-journals" / (digest.ToHex() + ".journal");
+		}
+
 		void ReportPortalFault(const Options &settings, std::string_view marker) {
 			if (settings.TestPortalFaultReport.empty()) return;
 			std::ofstream report(settings.TestPortalFaultReport, std::ios::app);
@@ -870,6 +881,22 @@ namespace server {
 			driver.Hosts.Arguments.emplace_back("--game");
 			driver.Hosts.Arguments.emplace_back(Settings.GamePath);
 		}
+		if (!Settings.DataStoreRoot.empty()) {
+			// A child that owns a portal destination must keep the same durable
+			// transfer policy as its driver. Leaving this behind makes one side
+			// accept an offer that the other side is configured to refuse.
+			driver.Hosts.Arguments.emplace_back("--datastore-root");
+			driver.Hosts.Arguments.emplace_back(Settings.DataStoreRoot.string());
+		}
+		if (Settings.Listening) {
+			// A portal route ends at the host that owns the destination world. Give
+			// that host its own ephemeral listener so the client can complete the
+			// lease there rather than reconnecting to the source authority.
+			driver.Hosts.Arguments.insert(
+				driver.Hosts.Arguments.end(),
+				{"--listen", "--listen-port", "0", "--transport", engine::net::Describe(Settings.Transport)}
+			);
+		}
 		if (driver.CoordinateHostTicks) driver.Hosts.Arguments.emplace_back("--host-tick-exchange");
 		if (!Settings.PresentationProgram.empty()) {
 			driver.Hosts.Arguments.insert(
@@ -918,6 +945,7 @@ namespace server {
 		}
 
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
+		Driver_->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 		if (Settings.DataFactory) {
 			// A factory begins empty, but its first MCP create still constructs a
 			// Store. Construct and remove one private world while component
@@ -1234,6 +1262,43 @@ namespace server {
 		ENGINE_INFO("loaded {} DataStore record(s) from '{}'", PersistedDataStore.size(), location);
 		DataStorePersistence = std::move(persistence);
 		DataStoreReady = true;
+		return true;
+	}
+
+	bool Server::FlushPortalTransferDecisions() {
+		if (Settings.DataStoreRoot.empty() || !PrimaryWorld.IsValid()) return false;
+		std::vector<engine::script::PortalTransferDecision> pending;
+		Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+			pending = engine::script::PortalTransferPendingDecisions(store);
+		});
+		std::vector<PortalJournalRecord> writes;
+		for (const auto &decision : pending)
+			if (!PortalJournalPending(DurablePortalTransferDecisions, decision))
+				writes.push_back({decision, PortalJournalOutcome::Commit});
+		if (!AppendPortalJournal(PortalJournalPath(Settings, Worlds().NameOf(PrimaryWorld)), writes))
+			return false;
+		for (const auto &write : writes) {
+			auto existing = std::find_if(
+				DurablePortalTransferDecisions.begin(),
+				DurablePortalTransferDecisions.end(),
+				[&](const auto &prior) {
+					return prior.Decision.Receipt.Id == write.Decision.Receipt.Id &&
+						   prior.Decision.Receipt.Fence == write.Decision.Receipt.Fence &&
+						   prior.Decision.Body.Key == write.Decision.Body.Key &&
+						   prior.Decision.Body.Generation == write.Decision.Body.Generation;
+				}
+			);
+			if (existing == DurablePortalTransferDecisions.end())
+				DurablePortalTransferDecisions.push_back(write);
+			else
+				*existing = write;
+		}
+		Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+			for (const auto &decision : pending)
+				(void)engine::script::MarkPortalTransferDurable(
+					store, decision.Receipt.Id, decision.Receipt.Fence.BaselineHash
+				);
+		});
 		return true;
 	}
 
@@ -2214,17 +2279,50 @@ namespace server {
 		);
 
 		if (!Worlds().IsRemote(PrimaryWorld)) {
+			auto durability = Settings.DataStoreRoot.empty()
+								  ? engine::script::PortalTransferDurability::Disabled
+								  : engine::script::PortalTransferDurability::RequirePrepareCommit;
+			if (durability == engine::script::PortalTransferDurability::RequirePrepareCommit &&
+				!LoadPortalJournal(
+					PortalJournalPath(Settings, Worlds().NameOf(PrimaryWorld)), DurablePortalTransferDecisions
+				)) {
+				ENGINE_ERROR(
+					"could not recover portal transfer journal '{}'",
+					PortalJournalPath(Settings, Worlds().NameOf(PrimaryWorld)).string()
+				);
+				return false;
+			}
+			if (durability == engine::script::PortalTransferDurability::Disabled)
+				ENGINE_WARN("portal transfers are disabled because --datastore-root was not configured");
 			const auto endpoint =
 				Worlds().OpenPresentation(PrimaryWorld, engine::core::Name("portal-sessions"));
 			if (endpoint.Status != engine::world::PresentationStatus::Ok) return false;
 			PortalSessionEndpoint = endpoint.Address;
 			bool configured = false;
 			Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
-				configured = engine::script::ConfigurePortalTransfers(store, endpoint.Address.Session, true);
+				configured = engine::script::ConfigurePortalTransfers(
+					store, endpoint.Address.Session, true, durability
+				);
 				if (configured) engine::script::RegisterTeleportAdmission(scheduler);
 			});
 			if (!configured) {
 				ENGINE_ERROR("listening world could not configure authenticated portal transfers");
+				return false;
+			}
+			bool restored = true;
+			if (durability == engine::script::PortalTransferDurability::RequirePrepareCommit)
+				Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+					for (const auto &record : DurablePortalTransferDecisions)
+						if (record.Outcome == PortalJournalOutcome::Commit)
+							restored &= engine::script::RestorePortalTransferDecision(store, record.Decision);
+				});
+			if (!restored) {
+				ENGINE_ERROR("portal transfer journal could not restore its sealed source decisions");
+				return false;
+			}
+			if (durability == engine::script::PortalTransferDurability::RequirePrepareCommit &&
+				!FlushPortalTransferDecisions()) {
+				ENGINE_ERROR("portal transfer journal does not match the restored source snapshot");
 				return false;
 			}
 		}
@@ -2784,6 +2882,8 @@ namespace server {
 				if (script::PortalTransferIncarnation(store) != request.Claim.DestinationIncarnation) return;
 				const auto player = script::PortalTransferPlayer(store, request.Claim.Transfer);
 				if (player == ecs::NULL_ENTITY || !store.Alive(player)) return;
+				const auto fence = script::PortalTransferDestinationFence(store, request.Claim.Transfer);
+				if (!fence) return;
 				const auto assigned = Players.find(client.Index);
 				if (assigned != Players.end() &&
 					(assigned->second.Generation != client.Generation || assigned->second.Instance != player))
@@ -2791,6 +2891,7 @@ namespace server {
 				if (request.Kind == game::PortalSessionKind::Resume) {
 					if (!PortalLeases.Reserve(request.Claim, *identity, peer, player, PollNow)) return;
 					response.Kind = game::PortalSessionKind::Ready;
+					response.Fence = *fence;
 				} else {
 					if (!PortalLeases.Commit(request.Claim, peer, PollNow)) return;
 					Players.insert_or_assign(client.Index, Occupant{player, client.Generation});
@@ -2866,6 +2967,71 @@ namespace server {
 		refusal.Attempt = request.Attempt;
 		refusal.Diagnostic = "source portal offer is unavailable or does not match";
 		ReplyToAdmission(client, game::EncodePortalSession(refusal));
+	}
+
+	void Server::PumpPortalApproaches(double nowSeconds) {
+		using namespace engine;
+		if (PortalSessionEndpoint.Generation == 0 || !Identity) return;
+
+		std::vector<scene::PortalSeam> seams;
+		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) { scene::GatherPortalSeams(store, seams); });
+		const std::string source(Worlds().NameOf(PrimaryWorld).Text());
+		for (const auto &[index, player] : Players) {
+			const replication::ClientId client{index, player.Generation};
+			core::Vector3 eye;
+			if (!ViewpointOf(client, eye)) continue;
+			const scene::PortalSeam *nearest = nullptr;
+			float nearestDistance = 20.0f;
+			for (const scene::PortalSeam &seam : seams) {
+				if (!seam.Crosses || !seam.DestinationWorld.IsValid() || seam.PanePath.empty() ||
+					seam.FarPath.empty())
+					continue;
+				const float distance = (seam.Centre - eye).Magnitude();
+				if (distance < nearestDistance) {
+					nearest = &seam;
+					nearestDistance = distance;
+				}
+			}
+			if (!nearest) {
+				PortalApproaches.erase(index);
+				continue;
+			}
+			const std::string route = source + "/" + nearest->PanePath + "|" + nearest->FarPath;
+			auto current = PortalApproaches.find(index);
+			if (current != PortalApproaches.end() &&
+				(current->second.Client != client || current->second.Request.Seam != route ||
+				 current->second.Request.Destination != nearest->DestinationWorld.Text())) {
+				PortalApproaches.erase(current);
+				current = PortalApproaches.end();
+			}
+			if (current == PortalApproaches.end()) {
+				if (NextPortalAttempt == std::numeric_limits<uint64_t>::max()) continue;
+				PortalApproach approach;
+				approach.Client = client;
+				approach.Request.Kind = game::PortalSessionKind::Approach;
+				approach.Request.Attempt = NextPortalAttempt++;
+				approach.Request.World = source;
+				approach.Request.Destination = nearest->DestinationWorld.Text();
+				approach.Request.Seam = route;
+				approach.Request.Through = scene::SeamMapping(*nearest);
+				approach.Request.Identity = Identity->Public();
+				current = PortalApproaches.emplace(index, std::move(approach)).first;
+			}
+			auto &approach = current->second;
+			const auto destination = Worlds().Find(core::Name(approach.Request.Destination));
+			const auto endpoint = Worlds().LookupPresentation(destination, "portal-sessions");
+			if (endpoint.Generation == 0 || nowSeconds < approach.RetryAt) continue;
+			if (Worlds().SendPresentation(
+					PrimaryWorld,
+					PortalSessionEndpoint,
+					endpoint,
+					approach.Request.Attempt,
+					game::EncodePortalSession(approach.Request)
+				) == world::PresentationStatus::Ok) {
+				approach.Destination = endpoint;
+				approach.RetryAt = nowSeconds + 2.0;
+			}
+		}
 	}
 
 	void Server::PumpPortalDepartures(double nowSeconds) {
@@ -3066,6 +3232,34 @@ namespace server {
 				}
 				continue;
 			}
+			if (request.Kind == game::PortalSessionKind::Approach) {
+				for (const auto &[index, approach] : PortalApproaches) {
+					if (approach.Request.Attempt != request.Attempt || approach.Destination != message.From ||
+						request.World != approach.Request.World ||
+						request.Destination != approach.Request.Destination ||
+						request.Seam != approach.Request.Seam || request.Port == 0)
+						continue;
+					(void)Replication->SendTo(
+						approach.Client, game::EncodePortalSession(request), nowSeconds
+					);
+					break;
+				}
+				if (request.Port != 0) continue;
+				if (request.World != message.From.World || request.Destination != PortalSessionEndpoint.World)
+					continue;
+				game::PortalSessionMessage response = request;
+				response.Port = ListeningOn().Port;
+				if (!Identity || response.Port == 0) continue;
+				response.Identity = Identity->Public();
+				(void)Worlds().SendPresentation(
+					PrimaryWorld,
+					PortalSessionEndpoint,
+					message.From,
+					message.Correlation,
+					game::EncodePortalSession(response)
+				);
+				continue;
+			}
 			if (request.Kind != game::PortalSessionKind::LeaseRequest ||
 				request.Claim.Transfer.SourceWorld != message.From.World ||
 				request.Claim.SourceSession != message.From.Session ||
@@ -3134,6 +3328,7 @@ namespace server {
 		// where that client stood on the previous one - invisible while a
 		// player stands still and exactly wrong while they run.
 		UpdateClientViewpoints();
+		PumpPortalApproaches(nowSeconds);
 
 		// **Asked once per frame, and asking is what clears it.** A world with
 		// no replication rate answers `true` after every tick, which is what
@@ -3477,6 +3672,7 @@ namespace server {
 		engine::world::HostFrame ready;
 		if (Settings.HostTickExchange) {
 			HostExchange = std::make_unique<engine::world::TickExchangeHost>(Worlds());
+			HostExchange->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 			PublishedHostFrame = 0;
 		}
 		ready.Signal = engine::world::HostSignal::Ready;
@@ -3971,6 +4167,9 @@ namespace server {
 				// Other deployments start their fixed frame through Driver here.
 				if (!HostExchange)
 					Driver_->Tick(delta, static_cast<double>(engine::core::Clock::Nanoseconds()) / 1e9);
+				// Journal I/O is deliberately outside `Driver::Tick`; an acknowledgement affects the next
+				// tick.
+				(void)FlushPortalTransferDecisions();
 				if (Recorder_) {
 					Recorder_->Capture(Worlds(), delta);
 				}

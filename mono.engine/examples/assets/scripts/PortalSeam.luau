@@ -39,6 +39,7 @@
 -- and spawns in front of the hole. See the note beside it.
 
 local WORLD = workspace
+local RunService = game:GetService("RunService")
 
 local GAP = 120 -- between the two rooms
 local ROOM = 30 -- how far a floor reaches from its middle
@@ -117,11 +118,28 @@ link(farPane, nearPane, "ToNear")
 -- of it is on each side and the two halves are the same length to the pixel.
 -- One stud square, so it fits the hole's footprint with room to spare and is
 -- therefore cut rather than left whole.
-block("Straddler", Vector3.new(1, 1, BAR), CFrame.new(0, 3, 0), STRADDLER)
+local straddler = block("Straddler", Vector3.new(1, 1, BAR), CFrame.new(0, 3, 0), STRADDLER)
 
 -- The same bar, at the same height and the same distance from the side camera,
 -- well clear of the hole. Never cut, so it is the length a whole bar reads as.
 block("Control", Vector3.new(1, 1, BAR), CFrame.new(0, 3, -18), CONTROL)
+
+-- The front sequence moves the mouth and the body through it together. A
+-- static cut can look correct while a changing endpoint transform leaves a
+-- stale half behind, so the report checks that the front straddler's centroid
+-- travels through a measurable range.
+local nearPaneFrame = nearPane.CFrame
+local straddlerFrame = straddler.CFrame
+local beats = 0
+RunService.Heartbeat:Connect(function()
+	-- A default script heartbeat runs once for each fixed world tick. Count it
+	-- locally instead of reading `tick()`, which is wall time and would phase two
+	-- separately started capture processes differently.
+	beats += 1
+	local offset = math.sin(beats * math.pi / 36) * 1.5
+	nearPane.CFrame = nearPaneFrame * CFrame.new(offset, 0, 0)
+	straddler.CFrame = straddlerFrame * CFrame.new(offset, 0, 0)
+end)
 
 -- --- light -------------------------------------------------------------------
 --

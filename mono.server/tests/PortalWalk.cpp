@@ -79,6 +79,9 @@ portal.Parent = pane
 	options.Listening = true;
 	options.Transport = GENERATE(net::WireMode::Datagram, net::WireMode::Quic);
 	CAPTURE(options.Transport);
+	options.DataStoreRoot = core::Paths::Base() / "portal-product-walk-store";
+	std::error_code ignored;
+	std::filesystem::remove_all(options.DataStoreRoot, ignored);
 	options.MaximumTicks = 1;
 	options.Unpaced = true;
 	server::Server host;

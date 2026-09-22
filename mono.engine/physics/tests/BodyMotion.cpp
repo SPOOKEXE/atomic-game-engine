@@ -48,6 +48,22 @@ TEST_CASE("velocity setters wake and retain the other body velocity", "[physics]
 	CHECK(engine::physics::AngularVelocity(store, part) == Vector3{0.0f, 2.5f, -1.0f});
 }
 
+TEST_CASE("admitted sleeping body restores its dynamic archetype state", "[physics][bodymotion]") {
+	engine::scene::RegisterSceneClasses();
+	Store store("physics.bodymotion.portal-sleep");
+	engine::physics::PreparePhysicsWorld(store);
+	const Entity part = DynamicPart(store);
+
+	REQUIRE(engine::physics::SetSleeping(store, part, true));
+	CHECK(engine::physics::Sleeping(store, part));
+	CHECK_FALSE(store.Has<engine::scene::Motion>(part));
+
+	REQUIRE(engine::physics::SetSleeping(store, part, false));
+	CHECK_FALSE(engine::physics::Sleeping(store, part));
+	REQUIRE(store.Has<engine::scene::Motion>(part));
+	CHECK(engine::physics::LinearVelocity(store, part) == Vector3::Zero);
+}
+
 TEST_CASE("an impulse uses the same mass as the solver", "[physics][bodymotion]") {
 	engine::scene::RegisterSceneClasses();
 	Store store("physics.bodymotion.impulse");

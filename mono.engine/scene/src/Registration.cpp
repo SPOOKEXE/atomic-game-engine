@@ -22,6 +22,7 @@
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -41,6 +42,7 @@
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/Wire.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -54,6 +56,7 @@ namespace engine::scene {
 				writer.WriteName(portals[index].DestinationWorld);
 				writer.WriteBool(portals[index].Enabled);
 				writer.WriteBool(portals[index].Bidirectional);
+				writer.WriteFloat(portals[index].RimThickness);
 			}
 		}
 		void ReadPortals(core::ByteReader &reader, void *destination, size_t count) {
@@ -64,6 +67,8 @@ namespace engine::scene {
 				portal.DestinationWorld = reader.ReadName();
 				portal.Enabled = reader.ReadBool();
 				portal.Bidirectional = reader.ReadBool();
+				portal.RimThickness = reader.ReadFloat();
+				if (!std::isfinite(portal.RimThickness) || portal.RimThickness < 0) reader.Fail();
 				portals[index] = portal;
 			}
 		}
@@ -1578,6 +1583,15 @@ namespace engine::scene {
 		// that a crossing had already been shown, which is precisely the state
 		// in which nothing snaps.
 		ecs::Components::Register<PortalTransitSeen>("scene.PortalTransitSeen");
+
+		// A logical body is named by a stable, fixed-width key. The explicit codec
+		// keeps host byte order out of snapshots and transfer baselines.
+		ecs::Components::Register<BodyIdentity>(
+			"scene.BodyIdentity", WriteBodyIdentities, ReadBodyIdentities
+		);
+		ecs::Components::Register<BodyIdentityAuthority>("scene.BodyIdentityAuthority");
+		ecs::Components::Register<PortalCrossingState>("scene.PortalCrossing");
+		ecs::Components::Register<PortalRim>("scene.PortalRim");
 
 		// **The three the player pipeline added, appended for this list's
 		// standing reason.** Component ids are a dense counter and an archetype

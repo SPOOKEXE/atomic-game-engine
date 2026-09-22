@@ -987,7 +987,7 @@ namespace engine::scene {
 		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[3] = {};
 	};
 
 	// Which material an instance names.
@@ -1408,6 +1408,10 @@ namespace engine::scene {
 		// @since v0.16
 		bool Enabled = true;
 
+		// Width of the authored physical and visual frame around this mouth, in
+		// metres. Zero makes the aperture the whole pane face.
+		float RimThickness = 0.0f;
+
 		// Whether this mouth may be entered from behind as well as from in
 		// front.
 		//
@@ -1431,7 +1435,7 @@ namespace engine::scene {
 		bool Bidirectional = true;
 
 		// Explicit in-memory padding. The wire codec omits it and restores zeroes.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[3] = {};
 	};
 
 	// The frustum a surface camera renders through, fitted to its pane.

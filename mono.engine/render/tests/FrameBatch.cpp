@@ -25,6 +25,7 @@ namespace {
 		view.Target = &target;
 		view.World = world;
 		view.WorldName = core::Name("frame-batch-world-" + std::to_string(world));
+		view.SnapshotId = "frame-batch-snapshot-" + std::to_string(world);
 		view.Slot = slot;
 		view.Camera.NearPlane = 0.1f;
 		view.Camera.FarPlane = 100.0f;
@@ -54,7 +55,7 @@ TEST_CASE("FrameBatch rejects an invalid earlier offscreen view before acquisiti
 	render::OverlayImage overlay;
 	render::SceneTarget valid{19, 13};
 	render::SceneTarget invalid{};
-	std::array views{ViewFor(valid, 1, 0), ViewFor(invalid, 2, 1)};
+	std::array views{ViewFor(invalid, 2, 0), ViewFor(valid, 1, 1)};
 
 	const render::FrameBatchResult skipped =
 		render::FrameBatch(fixture.Render).Run(views, overlay, nullptr, false, nullptr);
@@ -63,7 +64,7 @@ TEST_CASE("FrameBatch rejects an invalid earlier offscreen view before acquisiti
 	CHECK_FALSE(fixture.Render.Visibility().Valid);
 
 	const render::FrameBatchResult recovered =
-		render::FrameBatch(fixture.Render).Run(std::span(views).first(1), overlay, nullptr, false, nullptr);
+		render::FrameBatch(fixture.Render).Run(std::span(views).last(1), overlay, nullptr, false, nullptr);
 	CHECK(recovered.Outcome == render::FrameBatchOutcome::Submitted);
 	CHECK(recovered.Frame.Submitted);
 }

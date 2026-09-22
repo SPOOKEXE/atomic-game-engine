@@ -1,3 +1,4 @@
+#include "seam-mask.glsl"
 
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inColour;
@@ -96,6 +97,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// are drawn whole - the original hanging out of the back of the pane and the
 	// copy out of the far one. See `scene::DrawInstance::SeamNormal`.
 	vec4 SeamPlane;
+	vec4 SeamFirst;
+	vec4 SeamSecond;
+	vec4 SeamCentre;
 
 	// The sky term and eye-relative fog. Kept in this per-draw block because a
 	// mirror or portal pass has its own eye even when it shares the world.
@@ -538,8 +542,7 @@ void shadeSurface() {
 	// only ever the halves that pay for the branch. It does defeat early-Z on
 	// those draws, which is why what may be cut is bounded by what fits through
 	// the hole.
-	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
-		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
+	if (!KeepSeamSample(inWorldPosition, lighting.SeamPlane, lighting.SeamFirst, lighting.SeamSecond, lighting.SeamCentre)) {
 		discard;
 	}
 

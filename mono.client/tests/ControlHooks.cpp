@@ -179,7 +179,11 @@ TEST_CASE("scoped client factory hooks retain lifecycle rows until dependants cl
 	engine::control::Surface surface("client", "client hook test");
 	std::string failure;
 	auto lifecycle = surface.ActivateHook(
-		{.Id = "client.lifecycle", .Revision = "v1", .Purpose = "test lifecycle", .Dependencies = {}, .Limits = {}},
+		{.Id = "client.lifecycle",
+		 .Revision = "v1",
+		 .Purpose = "test lifecycle",
+		 .Dependencies = {},
+		 .Limits = {}},
 		[&surface, &session](engine::control::HookRegistration &) { surface.AddDataFactoryTools(session); },
 		failure
 	);

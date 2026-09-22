@@ -41,7 +41,10 @@ namespace engine::game {
 		Proceed,
 		Crossed,
 		Motion,
-		LeaseAdopted
+		LeaseAdopted,
+		// A bounded, non-authoritative route discovery used to warm a visible
+		// destination before any player transfer exists.
+		Approach
 	};
 
 	// One bounded application message, carried inside the authenticated play
@@ -56,6 +59,8 @@ namespace engine::game {
 		ecs::Entity Player;
 		// Source or destination world name carried across the authenticated session.
 		std::string World;
+		// Destination named by an advisory approach route.
+		std::string Destination;
 		// Portal resume claim that owns this history.
 		PortalResume Claim;
 		// Portal seam transform used to carry prediction state.
@@ -64,10 +69,16 @@ namespace engine::game {
 		assets::PublicKey Identity;
 		// Network port carried by the session message.
 		uint16_t Port = 0;
+		// Stable authored source-mouth identity. It is a route string, never a
+		// process-local entity handle, so a client can retire one prewarm safely.
+		std::string Seam;
 		// Diagnostic text carried with the session message.
 		std::string Diagnostic;
 		// Authoritative or transferred motion sample.
 		std::optional<script::PortalTransferMotion> Motion{};
+		// Destination-observed sealed fence. A client promotes local portal geometry
+		// only after this matches the source preparation receipt exactly.
+		std::optional<script::PortalTransferFence> Fence{};
 	};
 
 	std::vector<std::byte> EncodePortalSession(const PortalSessionMessage &message);

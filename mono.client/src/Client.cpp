@@ -1167,85 +1167,111 @@ namespace client {
 					lifecycleFailure
 				));
 				if (!DataFactoryLifecycleHook->IsValid()) {
-					ENGINE_ERROR("control: data-factory lifecycle hook did not activate: {}", lifecycleFailure);
+					ENGINE_ERROR(
+						"control: data-factory lifecycle hook did not activate: {}", lifecycleFailure
+					);
 					DataFactoryLifecycleHook.reset();
 				}
 				ControlSurface.Enable(
 					std::array{engine::control::features::PhysicsObservation(*DataFactory)}
 				);
 				std::string audioObservationFailure;
-				DataAudioObservationHook.emplace(
-					ActivateDataAudioObservationHook(
-						ControlSurface.Hooks(), *Universe_, DataAudio, *DataFactory, audioObservationFailure
-					)
-				);
+				DataAudioObservationHook.emplace(ActivateDataAudioObservationHook(
+					ControlSurface.Hooks(), *Universe_, DataAudio, *DataFactory, audioObservationFailure
+				));
 				if (!DataAudioObservationHook->IsValid()) {
-					ENGINE_ERROR("control: audio observation hook did not activate: {}", audioObservationFailure);
+					ENGINE_ERROR(
+						"control: audio observation hook did not activate: {}", audioObservationFailure
+					);
 					DataAudioObservationHook.reset();
 				}
 				std::string scriptPackageFailure;
 				DataScriptPackageHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.data-script-package", .Revision = "v1", .Purpose = "Runs bounded data-factory script packages.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
-					[this](engine::control::HookRegistration &) { AddDataScriptPackageTool(
-						ControlSurface, [this](const engine::script::DataScriptRequest &request) {
-						return ExecuteDataScriptPackageTransaction(
-							{
-								.Universe = *Universe_,
-								.Session = *DataFactory,
-								.RuntimeOf =
-									[this](engine::world::WorldId world) -> engine::script::Runtime * {
-									const auto runtime =
-										std::ranges::find_if(Runtimes, [world](const auto &entry) {
-											return entry.first == world;
-										});
-									return runtime == Runtimes.end() ? nullptr : runtime->second.get();
-								},
-								.DiscardRuntime =
-									[this](engine::world::WorldId world) {
-										std::erase_if(Runtimes, [world](const auto &entry) {
-											return entry.first == world;
-										});
+					{.Id = "client.data-script-package",
+					 .Revision = "v1",
+					 .Purpose = "Runs bounded data-factory script packages.",
+					 .Dependencies = {"client.data-factory-lifecycle"},
+					 .Limits = {}},
+					[this](engine::control::HookRegistration &) {
+						AddDataScriptPackageTool(
+							ControlSurface, [this](const engine::script::DataScriptRequest &request) {
+								return ExecuteDataScriptPackageTransaction(
+									{
+										.Universe = *Universe_,
+										.Session = *DataFactory,
+										.RuntimeOf = [this](engine::world::WorldId world)
+											-> engine::script::Runtime * {
+											const auto runtime =
+												std::ranges::find_if(Runtimes, [world](const auto &entry) {
+													return entry.first == world;
+												});
+											return runtime == Runtimes.end() ? nullptr
+																			 : runtime->second.get();
+										},
+										.DiscardRuntime =
+											[this](engine::world::WorldId world) {
+												std::erase_if(Runtimes, [world](const auto &entry) {
+													return entry.first == world;
+												});
+											},
+										.MakeRuntime =
+											[](engine::ecs::Store &store,
+											   const engine::script::RuntimeLimits &limits) {
+												return engine::script::MakeRuntime(
+													store, engine::script::Language::Luau, limits
+												);
+											},
+										.RunPackage = engine::script::RunDataScriptPackage,
+										.InstallSystems =
+											[this](
+												engine::ecs::Store &store, engine::ecs::Scheduler &systems
+											) {
+												InstallPresentation(store, systems, Settings.Entities);
+												(void)EnsureLocalPlayer(store);
+												(void)RestoreDefaultCameraMovement(store, systems);
+												(void)InstallDefaultCamera(store, systems);
+												InstallClientWorldSystems(store, systems);
+											},
+										.Admit =
+											[](std::string_view source,
+											   std::string_view entry,
+											   std::string &error) {
+												return engine::script::CheckDataScriptPackageSource(
+													engine::script::Language::Luau, source, entry, error
+												);
+											},
+										.Role = engine::script::HostRole::OfBoth(),
+										.Present = true,
 									},
-								.MakeRuntime =
-									[](engine::ecs::Store &store,
-									   const engine::script::RuntimeLimits &limits) {
-										return engine::script::MakeRuntime(
-											store, engine::script::Language::Luau, limits
-										);
-									},
-								.RunPackage = engine::script::RunDataScriptPackage,
-								.InstallSystems =
-									[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-										InstallPresentation(store, systems, Settings.Entities);
-										(void)EnsureLocalPlayer(store);
-										(void)RestoreDefaultCameraMovement(store, systems);
-										(void)InstallDefaultCamera(store, systems);
-										InstallClientWorldSystems(store, systems);
-									},
-								.Admit =
-									[](std::string_view source, std::string_view entry, std::string &error) {
-										return engine::script::CheckDataScriptPackageSource(
-											engine::script::Language::Luau, source, entry, error
-										);
-									},
-								.Role = engine::script::HostRole::OfBoth(),
-								.Present = true,
-							},
-							request
+									request
+								);
+							}
 						);
-						}
-					); }, scriptPackageFailure));
+					},
+					scriptPackageFailure
+				));
 				if (!DataScriptPackageHook->IsValid()) {
-					ENGINE_ERROR("control: data script package hook did not activate: {}", scriptPackageFailure);
+					ENGINE_ERROR(
+						"control: data script package hook did not activate: {}", scriptPackageFailure
+					);
 					DataScriptPackageHook.reset();
 				}
 				std::string captureFailure;
 				DataCaptureHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.data-capture", .Revision = "v1", .Purpose = "Owns client capture tickets.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
+					{.Id = "client.data-capture",
+					 .Revision = "v1",
+					 .Purpose = "Owns client capture tickets.",
+					 .Dependencies = {"client.data-factory-lifecycle"},
+					 .Limits = {}},
 					[this](engine::control::HookRegistration &registration) {
-						registration.SetDrain([bridge = DataCapture] { return bridge == nullptr || !bridge->HasPending(); });
-						engine::control::features::DataCapture(*DataFactory, DataCapture).Install(ControlSurface);
-					}, captureFailure));
+						registration.SetDrain([bridge = DataCapture] {
+							return bridge == nullptr || !bridge->HasPending();
+						});
+						engine::control::features::DataCapture(*DataFactory, DataCapture)
+							.Install(ControlSurface);
+					},
+					captureFailure
+				));
 				if (!DataCaptureHook->IsValid()) {
 					DataCaptureHook.reset();
 					ControlSurface.SetDataCaptureAvailabilityProvider({});
@@ -1253,7 +1279,8 @@ namespace client {
 					ControlSurface.SetDataCaptureAvailabilityProvider([this] {
 						const auto hooks = ControlSurface.Hooks().Active();
 						const bool active = std::any_of(hooks.begin(), hooks.end(), [](const auto &hook) {
-							return hook.Descriptor.Id == "client.data-capture" && hook.State == engine::control::HookState::Active;
+							return hook.Descriptor.Id == "client.data-capture" &&
+								   hook.State == engine::control::HookState::Active;
 						});
 						if (!active || !DataCapture) return engine::control::DataCaptureAvailability{};
 						const auto capabilities = DataCapture->Capabilities();
@@ -1266,66 +1293,84 @@ namespace client {
 				}
 				std::string dataSceneFailure;
 				DataSceneHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.data-scene", .Revision = "v1", .Purpose = "Reads and exports the factory scene.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
-					[this](engine::control::HookRegistration &) { engine::control::features::DataScene(
-						*Universe_,
-						DataCapture,
-						DataFactory.get(),
-						[this](std::string_view world, std::string_view name, engine::assets::MeshData &out) {
-							const auto status = Renderer.CopyMesh(
-								engine::core::Name(name),
-								out,
-								engine::script::MAX_GLTF_EXPORT_VERTICES,
-								engine::script::MAX_GLTF_EXPORT_INDICES,
-								engine::core::Name(world)
-							);
-							switch (status) {
-							case engine::render::MeshCopyStatus::Copied:
-								return engine::script::GltfMeshSourceStatus::Available;
-							case engine::render::MeshCopyStatus::OverLimit:
-								return engine::script::GltfMeshSourceStatus::OverLimit;
-							case engine::render::MeshCopyStatus::Packed:
+					{.Id = "client.data-scene",
+					 .Revision = "v1",
+					 .Purpose = "Reads and exports the factory scene.",
+					 .Dependencies = {"client.data-factory-lifecycle"},
+					 .Limits = {}},
+					[this](engine::control::HookRegistration &) {
+						engine::control::features::DataScene(
+							*Universe_,
+							DataCapture,
+							DataFactory.get(),
+							[this](
+								std::string_view world, std::string_view name, engine::assets::MeshData &out
+							) {
+								const auto status = Renderer.CopyMesh(
+									engine::core::Name(name),
+									out,
+									engine::script::MAX_GLTF_EXPORT_VERTICES,
+									engine::script::MAX_GLTF_EXPORT_INDICES,
+									engine::core::Name(world)
+								);
+								switch (status) {
+								case engine::render::MeshCopyStatus::Copied:
+									return engine::script::GltfMeshSourceStatus::Available;
+								case engine::render::MeshCopyStatus::OverLimit:
+									return engine::script::GltfMeshSourceStatus::OverLimit;
+								case engine::render::MeshCopyStatus::Packed:
+									return engine::script::GltfMeshSourceStatus::Unsupported;
+								case engine::render::MeshCopyStatus::Invalid:
+									return engine::script::GltfMeshSourceStatus::Invalid;
+								case engine::render::MeshCopyStatus::Missing:
+									return engine::script::GltfMeshSourceStatus::Missing;
+								}
 								return engine::script::GltfMeshSourceStatus::Unsupported;
-							case engine::render::MeshCopyStatus::Invalid:
-								return engine::script::GltfMeshSourceStatus::Invalid;
-							case engine::render::MeshCopyStatus::Missing:
-								return engine::script::GltfMeshSourceStatus::Missing;
-							}
-							return engine::script::GltfMeshSourceStatus::Unsupported;
-						},
-						[this](
-							std::string_view world, std::string_view name, engine::assets::TextureData &out
-						) {
-							const auto status = Renderer.CopyTexture(
-								engine::core::Name(name),
-								out,
-								engine::script::MAX_GLTF_EXPORT_SOURCE_TEXTURE_BYTES,
-								engine::core::Name(world)
-							);
-							switch (status) {
-							case engine::render::TextureCopyStatus::Copied:
-								return engine::script::GltfTextureSourceStatus::Available;
-							case engine::render::TextureCopyStatus::OverLimit:
-								return engine::script::GltfTextureSourceStatus::OverLimit;
-							case engine::render::TextureCopyStatus::Unsupported:
+							},
+							[this](
+								std::string_view world,
+								std::string_view name,
+								engine::assets::TextureData &out
+							) {
+								const auto status = Renderer.CopyTexture(
+									engine::core::Name(name),
+									out,
+									engine::script::MAX_GLTF_EXPORT_SOURCE_TEXTURE_BYTES,
+									engine::core::Name(world)
+								);
+								switch (status) {
+								case engine::render::TextureCopyStatus::Copied:
+									return engine::script::GltfTextureSourceStatus::Available;
+								case engine::render::TextureCopyStatus::OverLimit:
+									return engine::script::GltfTextureSourceStatus::OverLimit;
+								case engine::render::TextureCopyStatus::Unsupported:
+									return engine::script::GltfTextureSourceStatus::Unsupported;
+								case engine::render::TextureCopyStatus::Invalid:
+									return engine::script::GltfTextureSourceStatus::Invalid;
+								case engine::render::TextureCopyStatus::Missing:
+									return engine::script::GltfTextureSourceStatus::Missing;
+								}
 								return engine::script::GltfTextureSourceStatus::Unsupported;
-							case engine::render::TextureCopyStatus::Invalid:
-								return engine::script::GltfTextureSourceStatus::Invalid;
-							case engine::render::TextureCopyStatus::Missing:
-								return engine::script::GltfTextureSourceStatus::Missing;
 							}
-							return engine::script::GltfTextureSourceStatus::Unsupported;
-						}
-					).Install(ControlSurface); }, dataSceneFailure));
+						).Install(ControlSurface);
+					},
+					dataSceneFailure
+				));
 				if (!DataSceneHook->IsValid()) {
 					ENGINE_ERROR("control: data scene hook did not activate: {}", dataSceneFailure);
 					DataSceneHook.reset();
 				}
 				std::string sceneRenderingFailure;
 				SceneRenderingHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.scene-rendering", .Revision = "v1", .Purpose = "Reads camera calibration for the rendered factory scene.", .Dependencies = {"client.data-factory-lifecycle"}, .Limits = {}},
+					{.Id = "client.scene-rendering",
+					 .Revision = "v1",
+					 .Purpose = "Reads camera calibration for the rendered factory scene.",
+					 .Dependencies = {"client.data-factory-lifecycle"},
+					 .Limits = {}},
 					[this](engine::control::HookRegistration &registration) {
-						registration.Add(engine::control::features::CameraRenderingDataTool(*Universe_, DataFactory.get()));
+						registration.Add(
+							engine::control::features::CameraRenderingDataTool(*Universe_, DataFactory.get())
+						);
 					},
 					sceneRenderingFailure
 				));
@@ -2529,6 +2574,7 @@ namespace client {
 
 		Connection->Advance(nowSeconds);
 		PumpPortalSuccessor(nowSeconds, presentationReady);
+		PumpPortalApproach(nowSeconds);
 	}
 
 	void Client::SubmitTeleportRequests(double nowSeconds) {

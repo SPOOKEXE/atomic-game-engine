@@ -1,3 +1,5 @@
+#include "PortalImageBudget.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageDemand.hpp>
@@ -12,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -19,6 +22,25 @@
 TEST_SUITE_ID("engine.render.portalimagedemand")
 TEST_DEPENDS("engine.scene.surfacecameras")
 TEST_DEPENDS("engine.render.portalexchange")
+
+TEST_CASE("nested portal budgets keep visible children ahead of seam radiance", "[render][portal-demand]") {
+	using namespace engine::render;
+	std::array children{
+		PortalChildBudget{.Pixels = 32 * 32}, PortalChildBudget{.Pixels = 128 * 128, .Optional = true}
+	};
+	uint32_t childBudget = 0;
+	uint64_t localPixels = 0;
+	REQUIRE(PlanPortalChildBudgets(children, 32 * 32, false, childBudget, localPixels));
+	CHECK(children[0].Accepted);
+	CHECK_FALSE(children[1].Accepted);
+	CHECK(childBudget == 32 * 32);
+	CHECK(localPixels == 0);
+
+	REQUIRE(PlanPortalChildBudgets(children, 2 * 128 * 128, false, childBudget, localPixels));
+	CHECK(children[0].Accepted);
+	CHECK(children[1].Accepted);
+	CHECK(childBudget == 128 * 128);
+}
 
 TEST_CASE(
 	"source-world eyes export their retained body with account identity",

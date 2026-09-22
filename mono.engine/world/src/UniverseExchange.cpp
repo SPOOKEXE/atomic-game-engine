@@ -339,7 +339,11 @@ namespace engine::world {
 	bool Universe::FinishTickExchangeRound() {
 		RequireDriverThread("FinishTickExchangeRound");
 		ENGINE_PROFILE("tick exchange integration");
-		if (ExchangeStage != ExchangePhase::Applied) return false;
+		// Existing hosts finish directly. They retain the old whole-tick path;
+		// a seam coordinator may stop at the joined fixed-step barrier.
+		if (ExchangeStage == ExchangePhase::Applied && !AdvanceTickExchangeRoundToPhysics()) return false;
+		if (ExchangeStage == ExchangePhase::Simulated) ExchangeStage = ExchangePhase::BarrierApplied;
+		if (ExchangeStage != ExchangePhase::BarrierApplied) return false;
 		const bool profileWorkers = core::FrameGraph::IsEnabled();
 		const std::vector<TimingSnapshot> before =
 			profileWorkers ? SnapshotTimings(ActiveList) : std::vector<TimingSnapshot>{};
@@ -355,6 +359,77 @@ namespace engine::world {
 		ExchangeRequests.clear();
 		++ExchangeRound;
 		ExchangeStage = ExchangePhase::BetweenRounds;
+		return true;
+	}
+
+	bool Universe::AdvanceTickExchangeRoundToPhysics() {
+		RequireDriverThread("AdvanceTickExchangeRoundToPhysics");
+		if (ExchangeStage != ExchangePhase::Applied) return false;
+		const bool profileWorkers = core::FrameGraph::IsEnabled();
+		const std::vector<TimingSnapshot> before =
+			profileWorkers ? SnapshotTimings(ActiveList) : std::vector<TimingSnapshot>{};
+		std::vector<uint8_t> success(ActiveList.size(), 1);
+		const bool workers = DispatchExchangeWorlds([&](size_t at) {
+			if (ExchangeParticipants[at]) success[at] = ActiveList[at]->AdvanceExchangeRoundToPhysics();
+		});
+		if (workers && profileWorkers) {
+			ReportExchangeWorkerTimings(
+				ActiveList, ExchangeParticipants, before, false, parallel::Jobs::LastBatch().BusyMilliseconds
+			);
+		}
+		if (std::find(success.begin(), success.end(), 0) != success.end()) {
+			CancelTickExchangeFrame();
+			return false;
+		}
+		ExchangeStage = ExchangePhase::Simulated;
+		return true;
+	}
+
+	bool Universe::CollectFixedStepBarrier(
+		FixedStepBarrierCollect collect, std::vector<FixedStepBarrierRecord> &records
+	) {
+		RequireDriverThread("CollectFixedStepBarrier");
+		if (ExchangeStage != ExchangePhase::Simulated || !collect) return false;
+		std::vector<std::vector<std::byte>> payloads(ActiveList.size());
+		(void)DispatchExchangeWorlds([&](size_t at) {
+			if (ExchangeParticipants[at])
+				collect(ActiveList[at]->Id(), ActiveList[at]->Storage(), payloads[at]);
+		});
+		records.clear();
+		for (size_t at = 0; at < payloads.size(); ++at) {
+			if (payloads[at].empty() || !ExchangeParticipants[at]) continue;
+			records.push_back({std::string(ActiveList[at]->Name().Text()), std::move(payloads[at])});
+		}
+		std::sort(records.begin(), records.end(), [](const auto &left, const auto &right) {
+			return left.World < right.World;
+		});
+		ExchangeStage = ExchangePhase::BarrierCollected;
+		return true;
+	}
+
+	bool Universe::ApplyFixedStepBarrier(
+		FixedStepBarrierApply apply, std::span<const FixedStepBarrierRecord> records
+	) {
+		RequireDriverThread("ApplyFixedStepBarrier");
+		if (ExchangeStage != ExchangePhase::BarrierCollected || !apply) return false;
+		std::vector<uint8_t> success(ActiveList.size(), 1);
+		(void)DispatchExchangeWorlds([&](size_t at) {
+			if (!ExchangeParticipants[at]) return;
+			const std::string_view name = ActiveList[at]->Name().Text();
+			const auto found =
+				std::lower_bound(records.begin(), records.end(), name, [](const auto &record, auto key) {
+					return record.World < key;
+				});
+			const std::span<const std::byte> payload = found != records.end() && found->World == name
+														   ? std::span<const std::byte>(found->Payload)
+														   : std::span<const std::byte>{};
+			success[at] = apply(ActiveList[at]->Id(), ActiveList[at]->Storage(), payload);
+		});
+		if (std::find(success.begin(), success.end(), 0) != success.end()) {
+			CancelTickExchangeFrame();
+			return false;
+		}
+		ExchangeStage = ExchangePhase::BarrierApplied;
 		return true;
 	}
 	void Universe::CompleteExchangeFrame() {

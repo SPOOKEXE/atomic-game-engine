@@ -31,8 +31,8 @@ TEST_CASE(
 	scene::RegisterSceneComponents();
 	const auto &type = ecs::Components::Describe(ecs::Components::Of<scene::Portal>());
 	const scene::Portal authored[] = {
-		{ecs::Entity{73}, core::Name("portal-wire-other-world"), false, true, {12, 34}},
-		{ecs::NULL_ENTITY, {}, true, false, {56, 78}}
+		{ecs::Entity{73}, core::Name("portal-wire-other-world"), false, .125f, true, {12, 34}},
+		{ecs::NULL_ENTITY, {}, true, .25f, false, {56, 78}}
 	};
 	core::ByteWriter writer;
 	type.Write(writer, authored, 2);
@@ -41,10 +41,12 @@ TEST_CASE(
 	CHECK(wire.ReadString() == "portal-wire-other-world");
 	CHECK_FALSE(wire.ReadBool());
 	CHECK(wire.ReadBool());
+	CHECK(wire.ReadFloat() == .125f);
 	CHECK(wire.ReadUInt64() == 0);
 	CHECK(wire.ReadString().empty());
 	CHECK(wire.ReadBool());
 	CHECK_FALSE(wire.ReadBool());
+	CHECK(wire.ReadFloat() == .25f);
 	REQUIRE_FALSE(wire.Failed());
 	CHECK(wire.AtEnd());
 	scene::Portal restored[2];
@@ -57,6 +59,7 @@ TEST_CASE(
 		CHECK(restored[index].DestinationWorld == authored[index].DestinationWorld);
 		CHECK(restored[index].Enabled == authored[index].Enabled);
 		CHECK(restored[index].Bidirectional == authored[index].Bidirectional);
+		CHECK(restored[index].RimThickness == authored[index].RimThickness);
 		CHECK(restored[index].Reserved[0] == 0);
 		CHECK(restored[index].Reserved[1] == 0);
 	}
