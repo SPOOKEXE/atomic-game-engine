@@ -884,7 +884,7 @@ namespace engine::render {
 			AdditiveParticleLayerColourPipeline && RibbonLayerPipeline && RibbonLayerColourPipeline &&
 			AdditiveRibbonLayerColourPipeline)
 			return true;
-		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 13, 4);
+		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 14, 4);
 		auto *particleVertex = LoadShader("particle.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		auto *particleFragment = LoadShader("particle-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
 		auto *ribbonVertex = LoadShader("ribbon.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);

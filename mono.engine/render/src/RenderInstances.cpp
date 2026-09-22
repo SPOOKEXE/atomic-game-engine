@@ -159,7 +159,8 @@ namespace engine::render {
 			// PBR pipelines and declare the eleventh packed-material sampler.
 			const bool surfaceShader = native == OpaquePipeline || native == TransparentPipeline ||
 									   native == HdrOpaquePipeline || native == HdrTransparentPipeline ||
-									   native == ForwardPipeline;
+									   native == ForwardPipeline || native == TransparentLayerPipeline ||
+									   native == TransparentLayerColourPipeline;
 			materialSamplerCount = authoredMaterial ? 10u : surfaceShader ? 12u : 11u;
 			if (want != bound) {
 				SDL_BindGPUGraphicsPipeline(pass, want);

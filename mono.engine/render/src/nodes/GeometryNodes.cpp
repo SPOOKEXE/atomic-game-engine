@@ -896,7 +896,7 @@ namespace engine::render {
 						phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
 						Impl::PipelineFamily::Other
 					);
-					SDL_BindGPUFragmentSamplers(pass, 11, bounds, 2);
+					SDL_BindGPUFragmentSamplers(pass, 12, bounds, 2);
 					State->BindInstanceBuffers(pass);
 					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
