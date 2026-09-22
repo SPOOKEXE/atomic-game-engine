@@ -905,6 +905,7 @@ namespace engine::render {
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
 			  State->VolumePipeline,
+			  State->BloomPipeline,
 			  State->TonemapPipeline}) {
 			if (pipeline != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
@@ -1469,6 +1470,9 @@ namespace engine::render {
 		State->FogColour = glm::vec4{lighting.FogColor.R, lighting.FogColor.G, lighting.FogColor.B, 1.0f};
 		State->FogStart = std::max(lighting.FogStart, 0.0f);
 		State->FogEnd = std::max(lighting.FogEnd, State->FogStart);
+		State->BloomThreshold = std::max(lighting.BloomThreshold, 0.0f);
+		State->BloomIntensity = std::max(lighting.BloomIntensity, 0.0f);
+		State->BloomRadius = std::max(lighting.BloomRadius, 0.0f);
 		State->EnvironmentState = lighting.EnvironmentState;
 		State->Volumes = lighting.Volumes;
 		State->VolumeCount = std::min(lighting.VolumeCount, State->Volumes.size());
@@ -1493,6 +1497,9 @@ namespace engine::render {
 		lighting.FogColor = core::Color3{State->FogColour.x, State->FogColour.y, State->FogColour.z};
 		lighting.FogStart = State->FogStart;
 		lighting.FogEnd = State->FogEnd;
+		lighting.BloomThreshold = State->BloomThreshold;
+		lighting.BloomIntensity = State->BloomIntensity;
+		lighting.BloomRadius = State->BloomRadius;
 		lighting.EnvironmentState = State->EnvironmentState;
 		lighting.Volumes = State->Volumes;
 		lighting.VolumeCount = State->VolumeCount;

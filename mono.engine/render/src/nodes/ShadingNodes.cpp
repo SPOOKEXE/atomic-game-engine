@@ -1144,6 +1144,45 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("bloom"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			if (context.Reads.size() != 1 || context.Writes.size() != 1 || State->BloomPipeline == nullptr)
+				return false;
+			const Impl::NamedTexture source = recording.GraphTexture(context.Reads.front(), context, false);
+			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid() || !target.IsValid() ||
+				source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || source.Width != target.Width ||
+				source.Height != target.Height)
+				return false;
+
+			const BloomUniforms uniforms{
+				.Settings = glm::vec4{State->BloomIntensity, State->BloomThreshold, State->BloomRadius, 0.0f},
+				.Target = glm::vec4{
+					static_cast<float>(target.Width),
+					static_cast<float>(target.Height),
+					1.0f / static_cast<float>(target.Width),
+					1.0f / static_cast<float>(target.Height),
+				},
+			};
+			const std::array bindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
+			recording.Fullscreen(
+				context.Name,
+				State->BloomPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				bindings,
+				nullptr,
+				nullptr,
+				SDL_FColor{},
+				&uniforms,
+				sizeof(uniforms)
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("tonemap"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
@@ -1153,22 +1192,6 @@ namespace engine::render {
 			if (context.Reads.empty()) return false;
 			const auto source = recording.GraphTexture(context.Reads.front(), context, false);
 			if (!source.IsValid()) return false;
-			const std::array tonemapBindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
-			const auto fullscreen = [&recording](
-										core::Name name,
-										SDL_GPUGraphicsPipeline *pipeline,
-										SDL_GPUTexture *target,
-										uint32_t passWidth,
-										uint32_t passHeight,
-										std::span<const SDL_GPUTextureSamplerBinding> bindings,
-										const PbrUniforms *passUniforms,
-										const LightUniforms *passLights,
-										SDL_FColor clear
-									) {
-				recording.Fullscreen(
-					name, pipeline, target, passWidth, passHeight, bindings, passUniforms, passLights, clear
-				);
-			};
 			const auto graphTexture =
 				[&recording](graph::ResourceId resource, const graph::RunContext &runContext, bool make) {
 					return recording.GraphTexture(resource, runContext, make);
@@ -1181,20 +1204,63 @@ namespace engine::render {
 					break;
 				}
 			}
+			if (!target.IsValid()) return false;
 			// Portal previews retain their plain tonemap; this grade belongs to the view.
 			const auto postprocess = State->PostProcessPipelines.find(Request.Source->ContentOwner.Id());
-			fullscreen(
-				context.Name,
-				postprocess != State->PostProcessPipelines.end() ? postprocess->second.Pipeline
-																 : State->TonemapPipeline,
-				target.Texture,
-				target.Width,
-				target.Height,
-				tonemapBindings,
-				nullptr,
-				nullptr,
-				colourTarget.clear_color
-			);
+			if (postprocess != State->PostProcessPipelines.end()) {
+				const std::array bindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
+				recording.Fullscreen(
+					context.Name,
+					postprocess->second.Pipeline,
+					target.Texture,
+					target.Width,
+					target.Height,
+					bindings,
+					nullptr,
+					nullptr,
+					colourTarget.clear_color
+				);
+			} else {
+				const Impl::NamedTexture bloom =
+					context.Reads.size() > 1 ? recording.GraphTexture(context.Reads[1], context, false)
+											 : Impl::NamedTexture{};
+				const bool useBloom =
+					bloom.IsValid() && bloom.Width == source.Width && bloom.Height == source.Height;
+				const BloomUniforms uniforms{
+					.Settings =
+						glm::vec4{
+							useBloom ? State->BloomIntensity : 0.0f,
+							State->BloomThreshold,
+							State->BloomRadius,
+							0.0f,
+						},
+					.Target = glm::vec4{
+						static_cast<float>(target.Width),
+						static_cast<float>(target.Height),
+						1.0f / static_cast<float>(target.Width),
+						1.0f / static_cast<float>(target.Height),
+					},
+				};
+				const std::array bindings{
+					SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler},
+					SDL_GPUTextureSamplerBinding{
+						useBloom ? bloom.Texture : source.Texture, recording.Sampler
+					},
+				};
+				recording.Fullscreen(
+					context.Name,
+					State->TonemapPipeline,
+					target.Texture,
+					target.Width,
+					target.Height,
+					bindings,
+					nullptr,
+					nullptr,
+					colourTarget.clear_color,
+					&uniforms,
+					sizeof(uniforms)
+				);
+			}
 
 			// The forward tail consumes both completed attachments.
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;

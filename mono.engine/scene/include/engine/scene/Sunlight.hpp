@@ -99,6 +99,14 @@ namespace engine::scene {
 		float FogEnd = 100001.0f;
 		//@}
 
+		// The bloom controls copied from Lighting. The renderer filters HDR
+		// radiance before it applies the display transform.
+		//@{
+		float BloomThreshold = 1.0f;
+		float BloomIntensity = 0.0f;
+		float BloomRadius = 6.0f;
+		//@}
+
 		// The first skybox, atmosphere and cloud providers beneath `Lighting`.
 		// This is one resolved value rather than parallel renderer state, so a
 		// redraw signature and a render pass cannot select different siblings.

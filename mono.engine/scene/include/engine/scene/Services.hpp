@@ -130,6 +130,15 @@ namespace engine::scene {
 		// no fog at all.
 		float FogEnd = 100000.0f;
 
+		// HDR radiance begins contributing to bloom above this value.
+		float BloomThreshold = 1.0f;
+
+		// How strongly the filtered bright radiance is added before tone mapping.
+		float BloomIntensity = 0.0f;
+
+		// The bloom filter radius, in display pixels.
+		float BloomRadius = 6.0f;
+
 		// Which latitude the sun's arc is computed for, in degrees.
 		float GeographicLatitude = 41.733f;
 

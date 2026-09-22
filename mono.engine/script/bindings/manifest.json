@@ -3173,6 +3173,9 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.LightingService", "scene.Service"],
 			"properties": [
 				{"name": "Ambient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "BloomIntensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "BloomRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "BloomThreshold", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "ClockTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},

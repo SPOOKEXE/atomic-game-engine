@@ -641,7 +641,7 @@ namespace engine::render {
 		void RegisterGeometryNodes(NodeTable &nodes);
 
 		// `last-frame`, `depth-linearise`, `hzb`, `ssao`, `deferred-lighting`,
-		// `sky` and `tonemap`: the screen-space chain over the material head.
+		// `sky`, `bloom` and `tonemap`: the screen-space chain over the material head.
 		void RegisterShadingNodes(NodeTable &nodes);
 
 		// `raster` and `dispatch`: the two nodes a pipeline document can author

@@ -1153,8 +1153,7 @@ namespace engine::graph {
 			 S::View,
 			 {{"source", K::Texture, RGBA16, true, "The lit frame."}},
 			 {{"bloom", K::Colour, F::RGBA16F, true, "The bright parts, spread."}},
-			 "Downsample, blur, upsample. Reuses its own chain, so it is one node "
-			 "rather than a dozen.",
+			 "Extracts HDR highlights and filters them with a bounded screen-space kernel.",
 			 false,
 			 "bloom.frag"},
 

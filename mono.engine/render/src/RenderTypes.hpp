@@ -274,6 +274,16 @@ namespace engine::render {
 		glm::vec4 VolumeCount{};
 	};
 
+	// The built-in bloom and tone-map passes share these controls. This stays
+	// separate from PbrUniforms because authored post-process shaders have a
+	// stable one-sampler, no-uniform contract.
+	struct BloomUniforms {
+		// x: bloom intensity, y: HDR threshold, z: filter radius in pixels.
+		glm::vec4 Settings{};
+		// xy: target size, zw: one target pixel in UV space.
+		glm::vec4 Target{};
+	};
+
 	// The two camera transforms that define the bounded reprojection capture.
 	// Object transforms are deliberately absent: this pass reports camera motion
 	// over the current visible opaque or masked depth only.

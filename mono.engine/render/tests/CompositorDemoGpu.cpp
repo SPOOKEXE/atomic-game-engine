@@ -10,6 +10,7 @@
 #include <glm/gtc/packing.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <span>
 #include <string>
@@ -26,7 +27,14 @@ layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
 layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
 void main(){ float band=step(0.5,fract(inUv.x*7.0)); outColour=vec4(mix(vec3(0.05,0.2,1.5),vec3(1.8,0.18,0.04),band),1.0); })";
 	}
-	void Raster(graph::PipelineDocument &d, const char *n, const char *out) {
+	std::string BloomSource() {
+		return R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,centre.y),0.12); outColour=vec4(mix(vec3(0.03),vec3(8.0,2.0,0.5),source),1.0); })";
+	}
+	void
+	Raster(graph::PipelineDocument &d, const char *n, const char *out, const std::string &source = Solid()) {
 		d.Record(
 			{.Kind = graph::EditKind::AddNode,
 			 .Name = core::Name(n),
@@ -34,7 +42,7 @@ void main(){ float band=step(0.5,fract(inUv.x*7.0)); outColour=vec4(mix(vec3(0.0
 			 .Scope = graph::NodeScope::View}
 		);
 		d.Record({.Kind = graph::EditKind::Writes, .Target = core::Name(out), .Key = core::Name("colour")});
-		d.Record({.Kind = graph::EditKind::Set, .Key = core::Name("source"), .Value = Solid()});
+		d.Record({.Kind = graph::EditKind::Set, .Key = core::Name("source"), .Value = source});
 	}
 	graph::RenderGraph Install(Renderer &r) {
 		auto base = graph::CompositorDemoDocument();
@@ -93,6 +101,59 @@ void main(){ float band=step(0.5,fract(inUv.x*7.0)); outColour=vec4(mix(vec3(0.0
 		REQUIRE(r.SetPipeline(core::Name("compositor-gpu"), g));
 		return g;
 	}
+	graph::RenderGraph InstallBloom(Renderer &renderer) {
+		graph::RenderGraph graph;
+		const auto texture = [&graph](const char *name, graph::ResourceFormat format) {
+			const graph::ResourceId resource = graph.AddResource(
+				{.Name = core::Name(name), .Kind = graph::ResourceKind::Colour, .Format = format}
+			);
+			REQUIRE(resource.IsValid());
+			return resource;
+		};
+		const graph::ResourceId source = texture("bloom-source", graph::ResourceFormat::RGBA16F);
+		const graph::ResourceId bloom = texture("bloom-result", graph::ResourceFormat::RGBA16F);
+		const graph::ResourceId tonemapped = texture("tonemapped", graph::ResourceFormat::RGBA8);
+
+		graph::Node raster;
+		raster.Name = core::Name("bloom-source-pass");
+		raster.Kind = core::Name("raster");
+		raster.Scope = graph::NodeScope::View;
+		raster.Writes = {source};
+		raster.Parameters.push_back({core::Name("source"), BloomSource()});
+		REQUIRE(graph.AddNode(std::move(raster)).IsValid());
+
+		for (const auto &[name, kind, reads, writes] : std::array{
+				 std::tuple{"bloom-pass", "bloom", std::vector{source}, std::vector{bloom}},
+				 std::tuple{"tonemap-pass", "tonemap", std::vector{source, bloom}, std::vector{tonemapped}},
+			 }) {
+			graph::Node node;
+			node.Name = core::Name(name);
+			node.Kind = core::Name(kind);
+			node.Scope = graph::NodeScope::View;
+			node.Reads = reads;
+			node.Writes = writes;
+			REQUIRE(graph.AddNode(std::move(node)).IsValid());
+		}
+
+		const core::Name sinkKind("bloom-test-boundary");
+		graph::NodeKindSpec sinkSpec;
+		sinkSpec.Kind = sinkKind;
+		sinkSpec.Scope = graph::NodeScope::Frame;
+		sinkSpec.Queue = graph::ExecutionQueue::Cpu;
+		sinkSpec.Category = graph::NodeCategory::Output;
+		sinkSpec.Inputs.push_back({.Name = core::Name("tonemapped"), .Kind = graph::ResourceKind::Texture});
+		REQUIRE(graph::RegisterNodeKind(std::move(sinkSpec)));
+		REQUIRE(renderer.InstallNodeHandler(sinkKind, [](const graph::RunContext &) { return true; }));
+		graph::Node sink;
+		sink.Name = sinkKind;
+		sink.Kind = sinkKind;
+		sink.Scope = graph::NodeScope::Frame;
+		sink.Reads = {tonemapped};
+		REQUIRE(graph.AddNode(std::move(sink)).IsValid());
+		REQUIRE(renderer.SetPipeline(core::Name("bloom-gpu"), graph));
+		return graph;
+	}
+
 	std::vector<std::byte> Capture16(Renderer &r, core::Name n, size_t slot, uint32_t w, uint32_t h) {
 		auto *d = static_cast<SDL_GPUDevice *>(r.Backend().Device);
 		auto *t = static_cast<SDL_GPUTexture *>(r.ResourceTexture(n, slot));
@@ -221,4 +282,37 @@ TEST_CASE("compositor demo runs its authored image workflow on Vulkan", "[render
 	// Debug overlays belong to a visible window. The headless compositor still
 	// runs the overlay node, copying the scene unchanged into its final image.
 	CHECK(Different(scene, output) == 0);
+}
+
+TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render][gpu][bloom]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallBloom(fixture.Render);
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 1;
+	view.Pipeline = core::Name("bloom-gpu");
+	view.Target = &target;
+	OverlayImage overlay;
+
+	scene::WorldLighting lighting;
+	lighting.BloomThreshold = 0.5f;
+	lighting.BloomRadius = 6.0f;
+	fixture.Render.SetLighting(lighting);
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto withoutBloom =
+		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
+
+	lighting.BloomIntensity = 1.5f;
+	fixture.Render.SetLighting(lighting);
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto withBloom =
+		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
+
+	CHECK(Different(withoutBloom, withBloom) > 100);
+	const size_t neighbour = 15 * withBloom.RowStrideBytes + 14 * 4;
+	CHECK(
+		std::to_integer<uint8_t>(withBloom.Bytes[neighbour]) >
+		std::to_integer<uint8_t>(withoutBloom.Bytes[neighbour])
+	);
 }

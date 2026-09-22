@@ -164,13 +164,14 @@ namespace engine::render {
 			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
-		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+		SDL_GPUShader *bloomFragment = LoadShader("bloom.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
 			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
 			!packChannelsFragment || !deferredLightingFragment || !skyFragment || !volumeFragment ||
-			!tonemapFragment) {
+			!bloomFragment || !tonemapFragment) {
 			return false;
 		}
 
@@ -394,11 +395,12 @@ namespace engine::render {
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			BloomPipeline = fullscreen(bloomFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
 			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
 				CameraMotionPipeline == nullptr || SsaoPipeline == nullptr ||
 				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
-				TonemapPipeline == nullptr) {
+				BloomPipeline == nullptr || TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 			}
 		}

@@ -81,9 +81,9 @@ namespace {
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	REQUIRE(profile.Passes.size() == 28);
-	REQUIRE(profile.Resources.size() == 41);
-	CHECK(profile.Cells.size() == 1148);
+	REQUIRE(profile.Passes.size() == 29);
+	REQUIRE(profile.Resources.size() == 42);
+	CHECK(profile.Cells.size() == 1218);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);

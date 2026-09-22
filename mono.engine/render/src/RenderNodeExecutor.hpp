@@ -29,7 +29,7 @@ namespace engine::render {
 	// The capability list is deliberately independent from NodeCatalogue. A
 	// catalogue entry remains authorable until this list gains its executor.
 	inline const auto &BuiltInBackendKinds() {
-		static constexpr std::array<std::string_view, 68> kinds{
+		static constexpr std::array<std::string_view, 69> kinds{
 			"world",
 			"shadow",
 			"camera",
@@ -72,6 +72,7 @@ namespace engine::render {
 			"sky",
 			"fog",
 			"shader-lenses",
+			"bloom",
 			"tonemap",
 			"eye-image",
 			"portal-overlay",

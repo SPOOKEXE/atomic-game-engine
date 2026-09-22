@@ -54,6 +54,9 @@ namespace engine::scene {
 			lighting.FogColor = authored->FogColor;
 			lighting.FogStart = std::max(authored->FogStart, 0.0f);
 			lighting.FogEnd = std::max(authored->FogEnd, lighting.FogStart);
+			lighting.BloomThreshold = std::max(authored->BloomThreshold, 0.0f);
+			lighting.BloomIntensity = std::max(authored->BloomIntensity, 0.0f);
+			lighting.BloomRadius = std::max(authored->BloomRadius, 0.0f);
 			lighting.RenderFeatures = authored->RenderFeatures;
 		}
 

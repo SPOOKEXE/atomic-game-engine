@@ -982,6 +982,15 @@ namespace engine::scene {
 			);
 			Classes::Property<&LightingServiceComponent::FogStart>(lighting, "FogStart");
 			Classes::Property<&LightingServiceComponent::FogEnd>(lighting, "FogEnd");
+			Classes::ClampedProperty<&LightingServiceComponent::BloomThreshold, 0.0f, 10000.0f>(
+				lighting, "BloomThreshold"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::BloomIntensity, 0.0f, 100.0f>(
+				lighting, "BloomIntensity"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::BloomRadius, 0.0f, 128.0f>(
+				lighting, "BloomRadius"
+			);
 			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
 				lighting, "GeographicLatitude"
 			);

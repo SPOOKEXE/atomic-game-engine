@@ -2496,6 +2496,9 @@ declare interface Workspace extends WorldRoot {
 
 declare interface Lighting extends Service {
 	Ambient: Color3;
+	BloomIntensity: number;
+	BloomRadius: number;
+	BloomThreshold: number;
 	Brightness: number;
 	ClockTime: number;
 	FogColor: Color3;

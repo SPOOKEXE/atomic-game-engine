@@ -983,6 +983,7 @@ namespace engine::graph {
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-b", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-scratch", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("bloom", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("mirrored", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1148,8 +1149,13 @@ namespace engine::graph {
 		touches(EditKind::Writes, "lens-b", "colour");
 		touches(EditKind::Writes, "lens-scratch", "scratch");
 
+		node("bloom", NodeScope::View);
+		touches(EditKind::Reads, "lens-b", "source");
+		touches(EditKind::Writes, "bloom", "bloom");
+
 		node("tonemap", NodeScope::View);
 		touches(EditKind::Reads, "lens-b", "colour");
+		touches(EditKind::Reads, "bloom", "bloom");
 		touches(EditKind::Writes, "tonemapped", "colour");
 
 		node("present", NodeScope::Frame);

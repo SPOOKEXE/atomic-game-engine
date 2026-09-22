@@ -580,6 +580,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *BloomPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
@@ -1226,6 +1227,9 @@ namespace engine::render {
 		glm::vec4 FogColour{0.05f, 0.06f, 0.09f, 1.0f};
 		float FogStart = 100000.0f;
 		float FogEnd = 100001.0f;
+		float BloomThreshold = 1.0f;
+		float BloomIntensity = 0.0f;
+		float BloomRadius = 6.0f;
 		scene::Environment EnvironmentState;
 		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
 		size_t VolumeCount = 0;

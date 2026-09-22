@@ -2834,6 +2834,9 @@ end
 
 declare extern type Lighting extends Service with
 	Ambient: Color3
+	BloomIntensity: number
+	BloomRadius: number
+	BloomThreshold: number
 	Brightness: number
 	ClockTime: number
 	FogColor: Color3

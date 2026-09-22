@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 28);
+	REQUIRE(layout.Nodes.size() == 29);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -128,8 +128,8 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	CHECK(columnOf("overlay") == 2);
 	CHECK(columnOf("output-image") == 3);
 
-	// Wide enough for the widest band, which is the per-view one at nineteen.
-	CHECK(layout.Columns == 19);
+	// Wide enough for the widest band, which is the per-view one at twenty.
+	CHECK(layout.Columns == 20);
 }
 
 // --- the edges ----------------------------------------------------------------
@@ -148,6 +148,8 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 	CHECK(Joined(graph, layout, "portal-overlay", "mirror-overlay", "portaled"));
 	CHECK(Joined(graph, layout, "mirror-overlay", "transparent", "mirrored"));
 	CHECK(Joined(graph, layout, "transparent", "shader-lenses", "display"));
+	CHECK(Joined(graph, layout, "shader-lenses", "bloom", "lens-b"));
+	CHECK(Joined(graph, layout, "bloom", "tonemap", "bloom"));
 	CHECK(Joined(graph, layout, "tonemap", "present", "tonemapped"));
 	CHECK(Joined(graph, layout, "interface", "overlay", "interface-image"));
 	CHECK(Joined(graph, layout, "overlay", "output-image", "composed-image"));
@@ -252,7 +254,7 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(surfaceCapture, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 27);
+	CHECK(after.Nodes.size() == 28);
 	CHECK_FALSE(Joined(graph, after, "surface-capture", "mirror-overlay", "mirror-views"));
 }
 

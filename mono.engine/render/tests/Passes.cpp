@@ -750,6 +750,9 @@ TEST_CASE("a renderer returns the complete lighting state it was given", "[rende
 	lighting.FogColor = {0.11f, 0.22f, 0.33f};
 	lighting.FogStart = 12.0f;
 	lighting.FogEnd = 48.0f;
+	lighting.BloomThreshold = 0.75f;
+	lighting.BloomIntensity = 1.5f;
+	lighting.BloomRadius = 11.0f;
 	lighting.EnvironmentState.Skybox = engine::scene::SkyboxSource::Compute;
 	lighting.EnvironmentState.SkyCompute.Seed = 83;
 	renderer.SetLighting(lighting);
@@ -762,6 +765,9 @@ TEST_CASE("a renderer returns the complete lighting state it was given", "[rende
 	CHECK(current.FogColor == lighting.FogColor);
 	CHECK(current.FogStart == 12.0f);
 	CHECK(current.FogEnd == 48.0f);
+	CHECK(current.BloomThreshold == 0.75f);
+	CHECK(current.BloomIntensity == 1.5f);
+	CHECK(current.BloomRadius == 11.0f);
 	CHECK(current.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);
 	CHECK(current.EnvironmentState.SkyCompute.Seed == 83);
 }

@@ -54,6 +54,9 @@ TEST_CASE("Lighting reaches every resolved render term", "[scene][sunlight]") {
 	authored.FogColor = Color3{0.7f, 0.8f, 0.9f};
 	authored.FogStart = 10.0f;
 	authored.FogEnd = 40.0f;
+	authored.BloomThreshold = 0.8f;
+	authored.BloomIntensity = 1.25f;
+	authored.BloomRadius = 9.0f;
 
 	const WorldLighting resolved = engine::scene::LightingOf(store);
 	CHECK(resolved.Direction.X == Approx(0.0f).margin(0.0001f));
@@ -65,6 +68,9 @@ TEST_CASE("Lighting reaches every resolved render term", "[scene][sunlight]") {
 	CheckColour(resolved.FogColor, authored.FogColor);
 	CHECK(resolved.FogStart == Approx(10.0f));
 	CHECK(resolved.FogEnd == Approx(40.0f));
+	CHECK(resolved.BloomThreshold == Approx(0.8f));
+	CHECK(resolved.BloomIntensity == Approx(1.25f));
+	CHECK(resolved.BloomRadius == Approx(9.0f));
 }
 
 TEST_CASE("clock and latitude move the sun and remove night light", "[scene][sunlight]") {
