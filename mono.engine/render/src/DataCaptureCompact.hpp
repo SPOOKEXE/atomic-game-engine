@@ -241,7 +241,7 @@ namespace engine::render::data_capture_compact {
 		result = {};
 		result.ValueClassification = "not_inspected";
 		constexpr size_t PIXEL_BYTES = 8;
-		if (width == 0 || height == 0 || width > std::numeric_limits<size_t>::max() / PIXEL_BYTES)
+		if (width == 0 || height == 0 || width > std::numeric_limits<uint32_t>::max() / PIXEL_BYTES)
 			return false;
 		const size_t minimumRowStride = static_cast<size_t>(width) * PIXEL_BYTES;
 		if (rowStride < minimumRowStride || height > std::numeric_limits<size_t>::max() / rowStride ||

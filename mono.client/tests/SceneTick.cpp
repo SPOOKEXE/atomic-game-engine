@@ -217,7 +217,12 @@ TEST_CASE("GuiInteraction routes client controls into visible scripted state", "
 	REQUIRE(eventStatus != engine::ecs::NULL_ENTITY);
 
 	engine::gui::CompileRequest request;
-	request.Display = {.Width = 1280.0f, .Height = 720.0f};
+	request.Display = {
+		.Width = 1280.0f,
+		.Height = 720.0f,
+		.SafeArea = {},
+		.Occluded = {},
+	};
 	request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 	const auto *local = store.Resource<engine::scene::LocalPlayer>();
 	REQUIRE(local != nullptr);

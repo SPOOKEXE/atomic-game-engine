@@ -311,10 +311,9 @@ namespace engine::render {
 			return true;
 		}
 		const auto native = [&](const scene::DrawInstance &row) {
-			// A source-owned synthetic form still needs its far half. A row that
-			// already carries a finite portal mask is a prior portal result and
-			// cannot become the source of another clone.
-			return row.SeamMask == 0 &&
+			// Only the source entity can begin a new crossing. A synthetic form or
+			// finite portal mask is a prior portal result and cannot cross again.
+			return row.Variant == 0 && row.SeamMask == 0 &&
 				   (!row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name());
 		};
 		std::vector<scene::DrawInstance> owned;

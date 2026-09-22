@@ -78,7 +78,8 @@ namespace engine::render {
 		damage.Pose |= SourceRevisionChanged<PreviousTransform>(
 			store, drawList, drawList.Revisions.PreviousTransform, drawable
 		);
-		damage.Full |= SourceRevisionChanged<scene::Bounds>(store, drawList, drawList.Revisions.Bounds, drawable);
+		damage.Full |=
+			SourceRevisionChanged<scene::Bounds>(store, drawList, drawList.Revisions.Bounds, drawable);
 		damage.Full |= SourceRevisionChanged<Visual>(store, drawList, drawList.Revisions.Visual, drawable);
 		damage.Full |= SourceRevisionChanged<SurfaceAppearance>(
 			store, drawList, drawList.Revisions.SurfaceAppearance, drawable

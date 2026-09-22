@@ -1406,7 +1406,7 @@ namespace engine::control {
 			},
 		});
 
-		auto action = [&session, bridge, ledger](const char *name, bool release) {
+		auto action = [bridge, ledger](const char *name, bool release) {
 			return Tool{
 				name,
 				release ? "Releases one terminal capture and its retained bytes."
@@ -1419,7 +1419,7 @@ namespace engine::control {
 						{"instance_id", "ticket", "operation_id"}
 					);
 				},
-				[&session, bridge, ledger, name, release](const json &values, std::string &failure) -> json {
+				[bridge, ledger, name, release](const json &values, std::string &failure) -> json {
 					if (!Only(values, {"instance_id", "ticket", "operation_id"}, failure)) return nullptr;
 					const json *field = nullptr;
 					std::string instance, operation;

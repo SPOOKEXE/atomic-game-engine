@@ -102,7 +102,7 @@ namespace engine::testing {
 // does not have to repeat it, which is the version that drifts.
 #define TEST_SUITE_ID(id)                                                                                    \
 	namespace {                                                                                              \
-		constexpr std::string_view MonoTestSuiteId = id;                                                     \
+		[[maybe_unused]] constexpr std::string_view MonoTestSuiteId = id;                                    \
 		const ::engine::testing::SuiteDeclaration MonoTestSuiteDeclaration{id, __FILE__};                    \
 	}
 

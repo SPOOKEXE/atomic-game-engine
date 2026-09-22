@@ -134,6 +134,9 @@ namespace engine::script {
 			std::vector<std::byte> Body;
 			scene::SeamTransform Through;
 			Entity Subject;
+			// The arrival consumes its source sweep. Keep its landed pose out of
+			// velocity reconstruction until this world actually moves the body.
+			std::optional<core::CFrame> ArrivalFrame;
 			bool Committed = false;
 			bool Cancelled = false;
 			ForwardMove Move{};
@@ -250,6 +253,13 @@ namespace engine::script {
 			const float norm = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
 			return finite(through.Frame.Position) && finite(through.Origin) && std::isfinite(norm) &&
 				   std::abs(norm - 1) < .001f && std::isfinite(through.Scale) && through.Scale > 0;
+		}
+		bool ValidFrame(const core::CFrame &frame) {
+			const auto rotation = frame.Rotation();
+			const float norm = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
+							   rotation.w * rotation.w;
+			return std::isfinite(frame.Position.X) && std::isfinite(frame.Position.Y) &&
+				   std::isfinite(frame.Position.Z) && std::isfinite(norm) && std::abs(norm - 1) < .001f;
 		}
 		void WriteThrough(ByteWriter &writer, const scene::SeamTransform &through) {
 			writer.WriteRaw(&through.Frame, sizeof(through.Frame));
@@ -1259,6 +1269,7 @@ namespace engine::script {
 						store.Remove<scene::PortalCrossingState>(arrival.Root);
 				}
 				found->Subject = body.Kind == scene::PortalBodyKind::Player ? arrival.Player : arrival.Root;
+				found->ArrivalFrame = store.Get<scene::Transform>(arrival.Root)->Frame;
 				found->Committed = true;
 				found->Body.clear();
 				ApplyForwardMove(store, *found);
@@ -1503,6 +1514,9 @@ namespace engine::script {
 					WriteBytes(writer, record.Body);
 					WriteThrough(writer, record.Through);
 					writer.WriteUInt64(record.Subject.Id);
+					writer.WriteBool(record.ArrivalFrame.has_value());
+					if (record.ArrivalFrame)
+						writer.WriteRaw(&*record.ArrivalFrame, sizeof(*record.ArrivalFrame));
 					writer.WriteBool(record.Committed);
 					writer.WriteBool(record.Cancelled);
 					WriteMove(writer, record.Move);
@@ -1627,6 +1641,13 @@ namespace engine::script {
 					remainingBytes -= record.Body.size();
 					record.Through = ReadThrough(reader);
 					record.Subject = Entity{reader.ReadUInt64()};
+					const bool hasArrivalFrame = StrictBool(reader);
+					if (hasArrivalFrame) {
+						core::CFrame arrivalFrame;
+						reader.ReadRaw(&arrivalFrame, sizeof(arrivalFrame));
+						if (!ValidFrame(arrivalFrame)) reader.Fail();
+						record.ArrivalFrame = arrivalFrame;
+					}
 					record.Committed = reader.ReadBool();
 					record.Cancelled = reader.ReadBool();
 					record.Move = ReadMove(reader);
@@ -2239,6 +2260,17 @@ namespace engine::script {
 							);
 						};
 						if (!crosses(previousFrame.Position)) {
+							const bool awaitingArrivalMovement =
+								std::any_of(state->In.begin(), state->In.end(), [&](const Incoming &record) {
+									return record.Committed && record.Subject == subject &&
+										   record.ArrivalFrame &&
+										   record.ArrivalFrame->Position == currentFrame.Position &&
+										   record.ArrivalFrame->QuaternionX == currentFrame.QuaternionX &&
+										   record.ArrivalFrame->QuaternionY == currentFrame.QuaternionY &&
+										   record.ArrivalFrame->QuaternionZ == currentFrame.QuaternionZ &&
+										   record.ArrivalFrame->QuaternionW == currentFrame.QuaternionW;
+								});
+							if (awaitingArrivalMovement) return;
 							// PreviousTransform may already be synchronized by a host that runs its
 							// transform pass before this service. Reconstruct one bounded physics
 							// step from velocity so a full-aperture sweep still has endpoints.

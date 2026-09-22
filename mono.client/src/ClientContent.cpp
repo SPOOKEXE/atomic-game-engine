@@ -644,7 +644,7 @@ namespace client {
 			return;
 		}
 
-		Universe_->Enter(world, [this, &content, world](engine::ecs::Store &store) {
+		Universe_->Enter(world, [&content, world](engine::ecs::Store &store) {
 			// **The gate, and it is a small fixed set of integer compares.**
 			// `CollectWantedContent`
 			// is several walks of the store, and this used to run all of them on

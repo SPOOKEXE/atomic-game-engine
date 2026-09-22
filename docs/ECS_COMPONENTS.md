@@ -29,7 +29,7 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
-| `ecs.AttributeTable` | 56 | 8 | yes | . | . | . | Per-world singleton holding every instance attribute a game has set, as a map per entity keyed by interned attribute name. |
+| `ecs.AttributeTable` | 120 | 8 | yes | . | . | . | Per-world singleton holding every instance attribute a game has set, as a map per entity keyed by interned attribute name. |
 | `ecs.DirtyBits` | 8 | 8 | yes | yes | . | . | One row's changed-component bits, one bit per column position in its archetype's sorted set, so marking a write is an index the store already holds. |
 | `ecs.Hierarchy` | 40 | 8 | yes | yes | . | 8 | Parent, first and last child and both sibling links for one instance, which is how the instance tree is stored rather than as a child vector per node. |
 | `ecs.InstanceClass` | 4 | 4 | yes | . | . | . | Which registered class an entity was created as, so `ClassName` and `:IsA` are a column read rather than a lookup in a side index. |
@@ -41,14 +41,14 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
-| `effects.Beam` | 712 | 8 | yes | . | yes | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
+| `effects.Beam` | 712 | 8 | yes | . | . | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
 | `effects.Decal` | 28 | 4 | yes | . | . | . | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
 | `effects.ParticleEmitter` | 1300 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
 | `effects.ParticleSystem` | 400 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Texture` | 44 | 4 | yes | . | . | . | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order. |
-| `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
+| `effects.Trail` | 1152 | 8 | yes | . | . | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
 
 ## `examples`
 
@@ -69,13 +69,18 @@ state until v0.19.
 |---|---|---|---|---|---|---|---|
 | `gui.Adornment` | 32 | 8 | yes | yes | . | . | The half of a 3D adornment this module owns: which instance a `SelectionBox` or handle adornment is drawn around, in what colour, and whether it draws. |
 | `gui.AdornmentInteraction` | 4 | 1 | yes | yes | . | . | Opt-in pointer input for a 3D adornment. The renderer marks its geometry pickable only while enabled, so decorative adornments never steal scene input. |
+| `gui.AnimationPlayback` | 10672 | 8 | yes | . | . | . | An authored `UIAnimation` clip: bounded typed tracks and markers, explicit timeline start, and whether its presentation sample is active. |
 | `gui.ArcHandlesShape` | 4 | 4 | yes | yes | . | . | The axis mask drawn by an `ArcHandles` instance. |
 | `gui.AspectRatio` | 8 | 4 | yes | yes | . | . | `UIAspectRatioConstraint`: forces the parent element's resolved size to a width-over-height ratio, derived from whichever axis dominates. |
 | `gui.Background` | 36 | 4 | yes | yes | . | . | The box a `GuiObject` draws for itself: fill colour and transparency, plus the border's colour, thickness and inset mode. |
 | `gui.Billboard` | 112 | 8 | yes | yes | . | . | What a `BillboardGui` adds: the adornee it hangs off, its stud and extents offsets, lighting, and the distance past which it stops drawing. |
+| `gui.Binding` | 72 | 8 | yes | . | . | . | A declarative attribute-to-text binding: its source, attribute, named target and fallback string. |
+| `gui.BindingDependency` | 24 | 8 | yes | . | . | . | Local resolved source and revision used to invalidate one binding when its input changes. |
+| `gui.BindingOutput` | 56 | 8 | yes | . | . | . | The local derived string and validity result of evaluating a `gui.Binding`. |
 | `gui.BoxHandleShape` | 12 | 4 | yes | yes | . | . | The three-dimensional size of a `BoxHandleAdornment`. |
 | `gui.Button` | 3 | 1 | yes | yes | . | . | What makes a `GuiButton` a button: whether the fill shifts under the pointer and further on press, plus two reserved flags. |
-| `gui.Canvas` | 16 | 4 | yes | yes | . | . | The screen-sized rectangle a `ScreenGui` collects onto, in pixels. Derived, because a screen gui authors no canvas: its canvas is the viewport. |
+| `gui.Canvas` | 16 | 4 | yes | . | . | . | The screen-sized rectangle a `ScreenGui` collects onto, in pixels. Derived, because a screen gui authors no canvas: its canvas is the viewport. |
+| `gui.CanvasTransform` | 16 | 4 | yes | . | . | . | The derived scale and origin mapping a collector's logical canvas into presentation pixels. |
 | `gui.ConeHandleShape` | 12 | 4 | yes | yes | . | . | The height, radius and hollow-base choice of a `ConeHandleAdornment`. |
 | `gui.Corner` | 8 | 4 | yes | yes | . | . | `UICorner`: the radius the parent element's corners are rounded by, resolved against the parent's smaller axis. |
 | `gui.CylinderHandleShape` | 16 | 4 | yes | yes | . | . | The outer radius, inner radius, height and arc angle of a `CylinderHandleAdornment`. |
@@ -86,47 +91,64 @@ state until v0.19.
 | `gui.Gradient` | 672 | 4 | yes | . | . | . | `UIGradient`: a colour and transparency ramp multiplied into whatever the parent already draws, at an authored angle and size-relative offset. |
 | `gui.GridLayout` | 44 | 4 | yes | yes | . | . | `UIGridLayout`: places the parent's children in equal cells on a grid, with a cell size, cell padding, fill direction and start corner. |
 | `gui.Group` | 16 | 4 | yes | yes | . | . | What a `CanvasGroup` composites its subtree with: one colour and one transparency applied to the whole group rather than to each child. |
-| `gui.GuiServiceState` | 24 | 8 | yes | yes | . | . | `GuiService`'s own state: the selected element, the focused `TextBox`, whether a platform menu covers the game, and whether selection may seed itself. |
+| `gui.GuiServiceState` | 24 | 8 | yes | . | . | . | `GuiService`'s own state: the selected element, the focused `TextBox`, whether a platform menu covers the game, and whether selection may seed itself. |
 | `gui.HandleShape` | 40 | 4 | yes | yes | . | . | Where a `HandleAdornment` sits relative to its adornee, as a local `CFrame` and size-relative offset. |
 | `gui.HandlesShape` | 4 | 4 | yes | yes | . | . | The face mask drawn by a `Handles` instance. |
 | `gui.Label` | 88 | 8 | yes | . | . | . | The text a `TextLabel`, `TextButton` or `TextBox` shows: the string, font, size, colour and alignment, with the wrap, scale and rich-text flags. |
-| `gui.Layer` | 8 | 4 | yes | yes | . | . | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset. |
+| `gui.LabelLocalizationArguments` | 456 | 8 | yes | . | . | . | Named string, number and date values substituted into a localized label message. |
+| `gui.LabelPresentation` | 4 | 4 | yes | . | . | . | Optional text presentation metadata: a stable localization key and style class, plus the explicit choice to use the style text colour. |
+| `gui.Layer` | 20 | 4 | yes | yes | . | . | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset. |
 | `gui.LineHandleShape` | 8 | 4 | yes | yes | . | . | The length and overlay thickness of a `LineHandleAdornment`. |
 | `gui.ListLayout` | 16 | 4 | yes | yes | . | . | `UIListLayout`: stacks the parent's children along one axis, with padding, alignment, sort order, flex behaviour and wrapping. |
+| `gui.Mask` | 12 | 4 | yes | yes | . | . | `UIMask`: enables a rounded rectangle clip around a `GuiObject` and its subtree, with a radius resolved from the element's extent. |
+| `gui.ModalScope` | 1 | 1 | yes | yes | . | . | `UIModalScope`: marks the parent subtree as the active input scope while enabled. |
 | `gui.NodeCanvas` | 28 | 4 | yes | yes | . | . | The view state of a typed graph editor: its pan, zoom and background grid policy, while graph nodes and links remain ordinary instances beneath it. |
 | `gui.NodeCanvasGroup` | 56 | 8 | yes | . | . | . | A named visual grouping of direct graph-node children, with optional edge-fitting or tight-fitting layout and ordinary Frame background colour. |
 | `gui.NodeCanvasLink` | 44 | 4 | yes | . | . | . | A persistent, colourable wire between named node ports in one graph, stored with endpoint names rather than entity handles. |
 | `gui.NodeCanvasNode` | 64 | 8 | yes | . | . | . | The stable id, node kind, bypass state, title, resize policy and input-port layout of one graph node; links refer to its id rather than its local entity handle. |
-| `gui.NodeCanvasPort` | 16 | 4 | yes | . | yes | . | A stable typed input or output terminal beneath a graph node, with a connection limit, checked before a wire is made and positioned on a requested graph-node edge. |
+| `gui.NodeCanvasPort` | 16 | 4 | yes | . | . | . | A stable typed input or output terminal beneath a graph node, with a connection limit, checked before a wire is made and positioned on a requested graph-node edge. |
 | `gui.Padding` | 32 | 4 | yes | yes | . | . | `UIPadding`: space held back inside the parent element on each of its four edges before its children are placed. |
 | `gui.PageLayout` | 32 | 8 | yes | yes | . | . | `UIPageLayout`: shows one of the parent's children at a time and slides the rest aside, with a tween time, easing curve and circular wrap. |
-| `gui.PageMotion` | 32 | 8 | yes | yes | . | . | Engine state for a sliding `UIPageLayout`: which pages it is between, when the slide began, and how far along the eased curve it is. |
-| `gui.Picture` | 92 | 4 | yes | . | yes | . | The image an `ImageLabel` or `ImageButton` shows: the asset name, tint, scale mode, slice and tile settings, and the hover and pressed swaps. |
-| `gui.Resolved` | 60 | 4 | yes | yes | . | . | Where the layout pass actually put a 2D element: absolute position, size and rotation, the clip rectangle, the drawn text size and the paint order. |
+| `gui.PageMotion` | 32 | 8 | yes | . | . | . | Engine state for a sliding `UIPageLayout`: which pages it is between, when the slide began, and how far along the eased curve it is. |
+| `gui.Picture` | 92 | 4 | yes | . | . | . | The image an `ImageLabel` or `ImageButton` shows: the asset name, tint, scale mode, slice and tile settings, and the hover and pressed swaps. |
+| `gui.PresentationState` | 656 | 8 | yes | . | . | . | The local, derived override sample of an `AnimationPlayback`, rebuilt from the caller's explicit UI timeline and never saved or replicated. |
+| `gui.Resolved` | 60 | 4 | yes | . | . | . | Where the layout pass actually put a 2D element: absolute position, size and rotation, the clip rectangle, the drawn text size and the paint order. |
+| `gui.ResolvedStyle` | 792 | 8 | yes | . | . | . | Viewer-local result of resolving theme tokens, class rules, interaction state and direct properties. |
 | `gui.Scale` | 4 | 4 | yes | yes | . | . | `UIScale`: a factor multiplied into the parent's resolved size and text size after layout, so scaling a container does not re-flow its contents. |
-| `gui.ScrollMotion` | 48 | 8 | yes | yes | . | . | Local overscroll state for a `ScrollingFrame`: how far a drag has pulled the canvas past its end, and the spring returning it after release. |
-| `gui.ScrollState` | 48 | 4 | yes | yes | . | . | What the layout worked out about a `ScrollingFrame`: the pixel canvas extent, the visible window after any bar inset, and the two thumb rectangles. |
+| `gui.ScrollMotion` | 48 | 8 | yes | . | . | . | Local overscroll state for a `ScrollingFrame`: how far a drag has pulled the canvas past its end, and the spring returning it after release. |
+| `gui.ScrollState` | 48 | 4 | yes | . | . | . | What the layout worked out about a `ScrollingFrame`: the pixel canvas extent, the visible window after any bar inset, and the two thumb rectangles. |
 | `gui.Scrolling` | 64 | 4 | yes | yes | . | . | What a `ScrollingFrame` authors: the canvas size and position, which axes scroll, and the bars' thickness, colour, images and inset. |
 | `gui.Selection` | 48 | 8 | yes | yes | . | . | Where a gamepad's selection goes from a `GuiObject` in each direction, which object is drawn over it while selected, and its seeding order. |
 | `gui.SelectionOutline` | 20 | 4 | yes | yes | . | . | The box a `SelectionBox` or `SelectionSphere` draws: the line thickness, and the filled face's colour and transparency. |
-| `gui.SettingsMenuExtensions` | 24 | 8 | . | . | . | . | Resource: script-authored actions appended to the local escape menu, with stable ids, labels and the callback token dispatched when a player activates one. |
+| `gui.SettingsMenuExtensions` | 24 | 8 | yes | . | . | . | Resource: script-authored actions appended to the local escape menu, with stable ids, labels and the callback token dispatched when a player activates one. |
 | `gui.SizeLimits` | 16 | 4 | yes | yes | . | . | `UISizeConstraint`: clamps the parent element's resolved size between a minimum and a maximum, in pixels. |
-| `gui.SpatialCanvas` | 104 | 4 | yes | yes | . | . | Where a `SurfaceGui` or `BillboardGui` was resolved to for the display looking at it: its pixel size, world plane, lighting and draw distance. |
+| `gui.SpatialCanvas` | 104 | 4 | yes | . | . | . | Where a `SurfaceGui` or `BillboardGui` was resolved to for the display looking at it: its pixel size, world plane, lighting and draw distance. |
 | `gui.SphereHandleShape` | 4 | 4 | yes | yes | . | . | The radius of a `SphereHandleAdornment`. |
 | `gui.Stroke` | 24 | 4 | yes | yes | . | . | `UIStroke`: an outline drawn around the parent outside its own border, with its own colour, thickness, transparency, join and sizing. |
+| `gui.StyleClass` | 40 | 8 | yes | . | . | . | Stable style class names attached to one GUI element for bounded rule matching. |
+| `gui.StyleDirect` | 1 | 1 | yes | yes | . | . | Authored mask recording which visual properties were explicitly assigned on an element. |
 | `gui.Surface` | 48 | 8 | yes | yes | . | . | What a `SurfaceGui` adds: the adornee part and which face, how the pixel canvas is sized, its lighting, z-offset and draw distance. |
 | `gui.TableLayout` | 24 | 4 | yes | yes | . | . | `UITableLayout`: lays the parent's children out as rows and their children as cells, so one column is the same width in every row. |
+| `gui.TextCompositionState` | 56 | 8 | yes | . | . | . | Viewer-local input-method candidate text and range for the currently edited `TextBox`. |
 | `gui.TextSizeLimits` | 8 | 4 | yes | yes | . | . | `UITextSizeConstraint`: clamps the pixel size a scaled label may pick between a floor and a ceiling. |
-| `gui.Viewport` | 64 | 8 | yes | yes | . | . | What a `ViewportFrame` renders into itself: the camera to render from, the frame's own ambient and directional light, and a tint over the result. |
+| `gui.ThemeBinding` | 8 | 8 | yes | yes | . | . | Authored reference selecting the UI theme for one collector. |
+| `gui.UIStyle` | 792 | 8 | yes | . | . | . | An authored bounded style rule with optional class, interaction state and typed declarations. |
+| `gui.UITheme` | 784 | 8 | yes | . | . | . | Authored typed tokens shared by GUI style rules through a collector's theme binding. |
+| `gui.Viewport` | 88 | 8 | yes | yes | . | . | What a `ViewportFrame` renders into itself: the camera to render from, the frame's own ambient and directional light, and a tint over the result. |
+| `gui.VirtualAnchorState` | 48 | 8 | yes | . | . | . | Viewer-local keyed scroll anchor preserved while a virtual page changes. |
+| `gui.VirtualCollection` | 80 | 8 | yes | . | . | . | A bounded keyed data page, total item count, extent policy and overscan for one virtual scrolling collection. |
+| `gui.VirtualFocusState` | 48 | 8 | yes | . | . | . | Viewer-local stable key and index used to restore focus after virtual row recycling. |
 
 ## `physics`
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `physics.CopiedContactCache` | 32 | 8 | yes | . | . | . | Per-tick copied contact geometry and pre-step body poses used for portal collision correction. |
-| `physics.PhysicsClock` | 56 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
+| `physics.CopiedDynamicContactCache` | 32 | 8 | yes | . | . | . | Per-world per-tick cache of copied dynamic far-side bodies, keyed by local root for the portal seam barrier. |
+| `physics.PhysicsClock` | 56 | 8 | yes | . | . | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
 | `physics.PhysicsWorld` | 10632 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
 | `physics.PoppercamState` | 8 | 8 | yes | yes | . | . | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else. |
+| `physics.observation-log` | 17688 | 8 | yes | . | . | . | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries. |
 
 ## `replication`
 
@@ -150,6 +172,8 @@ state until v0.19.
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
 | `scene.AuthoredAffordance` | 8 | 4 | yes | . | . | . | Explicit bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
+| `scene.BodyIdentity` | 24 | 8 | yes | . | . | . | Globally unique persistent body key and lifetime generation, preserved by rename and reparent and refused when a live key collides. |
+| `scene.BodyIdentityAuthority` | 16 | 8 | yes | yes | . | . | Per-world authority holding the stable namespace and next sequence used to mint persistent body identities. |
 | `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
 | `scene.BoolValue` | 4 | 1 | yes | yes | . | . | The boolean stored by a `BoolValue` instance. |
 | `scene.Bounds` | 12 | 4 | yes | yes | . | . | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it. |
@@ -178,8 +202,8 @@ state until v0.19.
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
 | `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
 | `scene.JointInstance` | 80 | 8 | yes | yes | . | . | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld. |
-| `scene.LODAuto` | 32 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target. |
-| `scene.LODCustom` | 32 | 4 | yes | . | . | . | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.LODAuto` artifact and valid slots take precedence. |
+| `scene.LODAuto` | 36 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, projected quad-area target, and optional final billboard texture. |
+| `scene.LODCustom` | 36 | 4 | yes | . | . | . | Per-level authored mesh overrides and an optional final billboard texture. Nil fields inherit the matching `scene.LODAuto` field and valid fields take precedence. |
 | `scene.LODSettings` | 12 | 4 | yes | . | . | . | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
 | `scene.LightingService` | 64 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
@@ -200,9 +224,11 @@ state until v0.19.
 | `scene.PlayerRespawn` | 8 | 8 | yes | yes | . | . | Present only between losing a character and gaining the next, and holds the tick `UpdateRespawns` will spawn the replacement on. |
 | `scene.PlayerTeam` | 8 | 8 | yes | yes | . | . | On a `Player`: which `Team` instance it belongs to. A player on no team simply has no row. |
 | `scene.PlayersService` | 24 | 8 | yes | yes | . | . | On the single `Players` service instance: the admission cap, the next auto-assigned user id, the default respawn delay, and whether characters load automatically. |
-| `scene.Portal` | 16 | 8 | yes | . | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
-| `scene.PortalBodyView` | 232 | 8 | yes | . | . | . | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes. |
+| `scene.Portal` | 24 | 8 | yes | . | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
+| `scene.PortalBodyView` | 240 | 8 | yes | . | . | . | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes. |
+| `scene.PortalCrossing` | 184 | 8 | yes | yes | . | . | Portal-only state for one canonical body: its reference anchor, active seam, stable side, authority epoch and presentation revision. Pose and motion stay in their canonical components. |
 | `scene.PortalProxy` | 8 | 8 | yes | yes | . | . | A piece of the far room, made and unmade inside a single tick, so a body standing in a portal has the other side's floor under it. Never replicated. |
+| `scene.PortalRim` | 32 | 8 | yes | yes | . | . | The four invisible static colliders preserving an open portal pane's physical perimeter while its aperture becomes a trigger. |
 | `scene.PortalTransit` | 36 | 4 | yes | yes | . | . | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body. |
 | `scene.PortalTransitSeen` | 4 | 4 | yes | yes | . | . | Which `PortalTransit::Serial` this viewer has already snapped its interpolation for, so one crossing is corrected once and never twice. |
 | `scene.PostProcessing` | 4 | 4 | yes | . | . | . | Resource: the fragment shader that replaces the engine's own tonemap for this world. An invalid name leaves the default pass in place. |
@@ -220,11 +246,11 @@ state until v0.19.
 | `scene.Skeleton` | 12 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
 | `scene.SkyboxCompute` | 52 | 4 | yes | . | . | . | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture. |
 | `scene.SkyboxTextures` | 28 | 4 | yes | . | . | . | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded. |
-| `scene.Sound` | 20 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
+| `scene.Sound` | 20 | 4 | yes | . | . | . | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
-| `scene.SurfaceAppearance` | 76 | 4 | yes | . | . | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
+| `scene.SurfaceAppearance` | 80 | 4 | yes | . | . | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
 | `scene.SurfaceBounces` | 4 | 4 | yes | yes | . | . | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property. |
 | `scene.SurfaceCamera` | 20 | 4 | yes | yes | . | . | On a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, which face it projects off and which surface slot it writes. |
 | `scene.SurfaceLens` | 84 | 4 | yes | yes | . | . | The off-axis frustum, oblique clip plane and pane mapping `AimSurfaceCameras` fits to a mirror or portal every frame. Derived from where the local eye stands, never authored. |
@@ -258,7 +284,7 @@ state until v0.19.
 | `script.JavaScriptSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column. |
 | `script.LuaSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference. |
 | `script.PortalContactRequests` | 32 | 8 | yes | . | . | . | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts. |
-| `script.PortalPlayerInput` | 2136 | 8 | yes | . | yes | . | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue. |
+| `script.PortalPlayerInput` | 2136 | 8 | yes | . | . | . | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue. |
 | `script.PortalTransfers` | 104 | 8 | yes | . | . | . | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages. |
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
@@ -273,9 +299,9 @@ state until v0.19.
 | `world.BusBudget` | 8 | 4 | yes | yes | . | . | Per-world singleton capping bus traffic: how many requests this world may make per tick, and how many it has spent since the last barrier. |
 | `world.Inbox` | 24 | 8 | yes | . | . | . | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to. |
 | `world.Outbox` | 40 | 8 | yes | . | . | . | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them. |
-| `world.Replica` | 12 | 4 | yes | . | yes | . | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus. |
+| `world.Replica` | 12 | 4 | yes | . | . | . | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus. |
 | `world.TickExchangeEndpoints` | 24 | 8 | yes | . | . | . | Named tick-exchange channels opened by this world, with incarnations retained across snapshots to reject stale deliveries. |
 
 ---
 
-201 components registered by the engine, 0 without a purpose line.
+227 components registered by the engine, 0 without a purpose line.

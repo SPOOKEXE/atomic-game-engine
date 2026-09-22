@@ -89,8 +89,7 @@ namespace studio {
 		for (engine::graph::ProfilePass &pass : profile.Passes) {
 			pass.Elapsed = ProfilePassTiming(gpuTimings, pass);
 			pass.Wall = ProfilePassTiming(wallTimings, pass);
-			if (pass.Wall == 0.0)
-				pass.Wall = ProfileFrameGraphWallTime(pass);
+			if (pass.Wall == 0.0) pass.Wall = ProfileFrameGraphWallTime(pass);
 		}
 		const auto mib = [](uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
 		int profilingTier = static_cast<int>(Renderer.Profiling());

@@ -41,9 +41,11 @@ examples.Orbit | Demo-only component that carries an entity round a fixed centre
 examples.Spin | Demo-only component that turns an entity at a fixed rate about its local X, Y and Z axes.
 graph.PipelineSet | Per-world singleton holding the named render pipeline documents a game file carried. A legacy load path: `game` reads it once and then removes it.
 physics.CopiedContactCache | Per-tick copied contact geometry and pre-step body poses used for portal collision correction.
+physics.CopiedDynamicContactCache | Per-world per-tick cache of copied dynamic far-side bodies, keyed by local root for the portal seam barrier.
 physics.PoppercamState | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else.
 physics.PhysicsClock | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is.
 physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks.
+physics.observation-log | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.
 script.PortalContactRequests | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts.
 script.CodeSourceContainerSelector | Which language container the script actually runs, and the one part of the script trio a game may set at run time. Absent means Luau.
@@ -99,7 +101,9 @@ scene.EditableImage | Script-drawable RGBA8 pixels with dimensions, presentation
 scene.EditableMesh | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision.
 scene.PortalBodyView | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes.
 scene.BodyIdentity | Globally unique persistent body key and lifetime generation, preserved by rename and reparent and refused when a live key collides.
+scene.BodyIdentityAuthority | Per-world authority holding the stable namespace and next sequence used to mint persistent body identities.
 scene.PortalCrossing | Portal-only state for one canonical body: its reference anchor, active seam, stable side, authority epoch and presentation revision. Pose and motion stay in their canonical components.
+scene.PortalRim | The four invisible static colliders preserving an open portal pane's physical perimeter while its aperture becomes a trigger.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
 scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
@@ -208,6 +212,7 @@ gui.ConeHandleShape | The height, radius and hollow-base choice of a `ConeHandle
 gui.HandlesShape | The face mask drawn by a `Handles` instance.
 gui.ArcHandlesShape | The axis mask drawn by an `ArcHandles` instance.
 gui.Label | The text a `TextLabel`, `TextButton` or `TextBox` shows: the string, font, size, colour and alignment, with the wrap, scale and rich-text flags.
+gui.LabelLocalizationArguments | Named string, number and date values substituted into a localized label message.
 gui.LabelPresentation | Optional text presentation metadata: a stable localization key and style class, plus the explicit choice to use the style text colour.
 gui.Layer | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset.
 gui.Mask | `UIMask`: enables a rounded rectangle clip around a `GuiObject` and its subtree, with a radius resolved from the element's extent.
