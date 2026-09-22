@@ -181,6 +181,16 @@ TEST_CASE(
 		)
 	);
 	CHECK(error.empty());
+	CHECK(
+		engine::script::CheckLuauDataScriptPackageSource(
+			"local lighting: Lighting = game:GetService('Lighting')\n"
+			"lighting.Ambient = Color3.new(0.03, 0.04, 0.06)\n"
+			"lighting.Brightness = 2.5\nlighting.ClockTime = 14",
+			"package.luau",
+			error
+		)
+	);
+	CHECK(error.empty());
 
 	CHECK_FALSE(engine::script::CheckLuauDataScriptPackageSource("local =", "package.luau", error));
 	CHECK(error.starts_with("data-script package syntax error at "));
@@ -248,6 +258,13 @@ TEST_CASE(
 	"luau packages refuse every deferred boundary in a fresh runtime", "[scriptluau][data-script-package]"
 ) {
 	RegisterClasses();
+	const auto lighting = RunFreshPackage(
+		"local lighting = game:GetService('Lighting')\n"
+		"lighting.Ambient = Color3.new(0.03, 0.04, 0.06)\n"
+		"lighting.Brightness = 2.5\nlighting.ClockTime = 14\n"
+		"assert(lighting.Brightness == 2.5 and lighting.ClockTime == 14)"
+	);
+	CHECK(lighting.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
 	CheckPackageRefusal("task.wait()", "data-script packages may not schedule deferred work");
 	CheckPackageRefusal("task.defer(function() end)", "data-script packages may not schedule deferred work");
 	CheckPackageRefusal("task.spawn(function() end)", "data-script packages may not schedule deferred work");

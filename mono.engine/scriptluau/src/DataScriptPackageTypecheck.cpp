@@ -133,7 +133,8 @@ declare Package: {
 type PackageDataModel = {
     Workspace: Workspace,
     JobId: string,
-    GetService: (self: PackageDataModel, service: "Workspace") -> Workspace,
+    GetService: ((self: PackageDataModel, service: "Workspace") -> Workspace) &
+                ((self: PackageDataModel, service: "Lighting") -> Lighting),
 }
 declare game: PackageDataModel
 )";
