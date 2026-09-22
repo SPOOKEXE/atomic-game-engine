@@ -15,6 +15,9 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -938,29 +941,72 @@ namespace engine::render {
 					selected.Colour[0] = lightUniforms.Colour[lightRow];
 					selected.Direction[0] = lightUniforms.Direction[lightRow];
 					selected.Count.x = 1.0f;
-					SDL_GPUColorTargetInfo targetInfo{};
-					targetInfo.texture = target.Texture;
-					targetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
-					targetInfo.store_op = SDL_GPU_STOREOP_STORE;
-					targetInfo.cycle = true;
-					auto *localPass = SDL_BeginGPURenderPass(Command, &targetInfo, 1, nullptr);
-					if (!localPass) {
-						ENGINE_ERROR(
-							"deferred local light capture pass {} could not begin: {}", index, SDL_GetError()
+					const bool shadows = recording.SceneLightShadows[lightRow];
+					const bool point = selected.Direction[0].w < -1.0f;
+					const uint32_t faceCount = shadows && point ? 6u : 1u;
+					const glm::vec3 position = selected.Position[0].xyz;
+					const std::array<glm::vec3, 6> directions{{
+						{1, 0, 0},
+						{-1, 0, 0},
+						{0, 1, 0},
+						{0, -1, 0},
+						{0, 0, 1},
+						{0, 0, -1},
+					}};
+					const std::array<glm::vec3, 6> ups{{
+						{0, -1, 0},
+						{0, -1, 0},
+						{0, 0, 1},
+						{0, 0, -1},
+						{0, -1, 0},
+						{0, -1, 0},
+					}};
+					for (uint32_t face = 0; face < faceCount; ++face) {
+						PbrUniforms localUniforms = uniforms;
+						localUniforms.Shadow = glm::vec4{0.0f, 0.0f, -1.0f, 0.0f};
+						if (shadows) {
+							glm::mat4 projection;
+							glm::mat4 view;
+							if (point) {
+								projection = glm::perspectiveRH_ZO(
+									glm::radians(90.0f), 1.0f, 0.05f, selected.Position[0].w
+								);
+								view = glm::lookAtRH(position, position + directions[face], ups[face]);
+								localUniforms.Shadow.z = static_cast<float>(face);
+							} else {
+								const float angle =
+									2.0f * acos(glm::clamp(selected.Direction[0].w, -0.999f, 0.999f));
+								projection =
+									glm::perspectiveRH_ZO(angle, 1.0f, 0.05f, selected.Position[0].w);
+								const glm::vec3 direction = glm::normalize(selected.Direction[0].xyz);
+								view = glm::lookAtRH(position, position + direction, glm::vec3{0, 1, 0});
+							}
+							if (!recording.RecordLocalLightShadow(projection * view)) return false;
+							localUniforms.LightViewProjection = projection * view;
+							localUniforms.Shadow.x = 1.0f;
+							localUniforms.Shadow.y = 1.0f / float(SHADOW_RESOLUTION);
+							spillBindings[6] =
+								SDL_GPUTextureSamplerBinding{State->ShadowTexture, State->ShadowSampler};
+						}
+						SDL_GPUColorTargetInfo targetInfo{};
+						targetInfo.texture = target.Texture;
+						targetInfo.load_op = face == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+						targetInfo.store_op = SDL_GPU_STOREOP_STORE;
+						targetInfo.cycle = face == 0;
+						auto *localPass = SDL_BeginGPURenderPass(Command, &targetInfo, 1, nullptr);
+						if (!localPass) return false;
+						SDL_BindGPUGraphicsPipeline(localPass, State->DeferredLocalLightPipeline);
+						SDL_BindGPUFragmentSamplers(
+							localPass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
 						);
-						return false;
+						SDL_PushGPUFragmentUniformData(Command, 0, &localUniforms, sizeof(localUniforms));
+						SDL_PushGPUFragmentUniformData(Command, 1, &selected, sizeof(selected));
+						SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+						SDL_SetGPUViewport(localPass, &viewport);
+						SDL_SetGPUScissor(localPass, &scissor);
+						SDL_DrawGPUPrimitives(localPass, 3, 1, 0, 0);
+						SDL_EndGPURenderPass(localPass);
 					}
-					SDL_BindGPUGraphicsPipeline(localPass, State->DeferredLocalLightPipeline);
-					SDL_BindGPUFragmentSamplers(
-						localPass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
-					);
-					SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
-					SDL_PushGPUFragmentUniformData(Command, 1, &selected, sizeof(selected));
-					SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
-					SDL_SetGPUViewport(localPass, &viewport);
-					SDL_SetGPUScissor(localPass, &scissor);
-					SDL_DrawGPUPrimitives(localPass, 3, 1, 0, 0);
-					SDL_EndGPURenderPass(localPass);
 				}
 				return true;
 			}
