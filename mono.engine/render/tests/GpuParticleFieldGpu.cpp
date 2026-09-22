@@ -44,10 +44,17 @@ TEST_CASE("GPU particle field dispatches and resizes without a CPU particle read
 	const render::FrameResult firstFrame = fixture.Render.Render(std::span(&first, 1), overlay, nullptr, false);
 	CHECK(firstFrame.ComputeDispatches >= 1);
 	CHECK(firstFrame.ParticlesDrawn >= 262'144);
+	const render::GpuMemoryStatistics firstMemory = fixture.Render.MemoryStatistics();
 
 	auto resized = FieldView(target, 1'048'576, 23);
 	const render::FrameResult resizedFrame =
 		fixture.Render.Render(std::span(&resized, 1), overlay, nullptr, false);
 	CHECK(resizedFrame.ComputeDispatches >= 1);
 	CHECK(resizedFrame.ParticlesDrawn >= 1'048'576);
+	const render::GpuMemoryStatistics resizedMemory = fixture.Render.MemoryStatistics();
+	// The simulation state is the only field allocation: 32 bytes per row. A
+	// resize has no upload or download companion, so the transfer residency does
+	// not grow with the particle count.
+	CHECK(resizedMemory.BufferBytes >= firstMemory.BufferBytes + (1'048'576u - 262'144u) * 32ull);
+	CHECK(resizedMemory.TransferBufferBytes == firstMemory.TransferBufferBytes);
 }

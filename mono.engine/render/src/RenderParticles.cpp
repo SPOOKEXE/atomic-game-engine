@@ -1713,6 +1713,9 @@ namespace engine::render {
 		};
 		SDL_GPUStorageBufferReadWriteBinding output{};
 		output.buffer = state.States;
+		static const core::Name GPU_PARTICLE_FIELD_NAME("gpu-particle-field");
+		const uint32_t opened =
+			timingSlot < VulkanTimestamps::SLOTS ? Timestamps.Mark(command) : VulkanTimestamps::MARKS;
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
 		if (pass == nullptr) {
 			ENGINE_ERROR("GPU particle field: SDL_BeginGPUComputePass: {}", SDL_GetError());
@@ -1722,6 +1725,12 @@ namespace engine::render {
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (state.ActiveCount + 255u) / 256u, 1, 1);
 		SDL_EndGPUComputePass(pass);
+		if (timingSlot < VulkanTimestamps::SLOTS) {
+			const uint32_t closed = Timestamps.Mark(command);
+			if (opened < VulkanTimestamps::MARKS && closed < VulkanTimestamps::MARKS) {
+				PendingMarks[timingSlot].push_back({GPU_PARTICLE_FIELD_NAME, opened, closed});
+			}
+		}
 		state.ResetPending = false;
 		state.SubmissionPending = true;
 		(void)timingSlot;
