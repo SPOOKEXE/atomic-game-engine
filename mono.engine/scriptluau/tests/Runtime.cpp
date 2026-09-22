@@ -125,7 +125,9 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
 }
 
-TEST_CASE("the luau storm service authors one physics resource and samples its field", "[scriptluau][storm]") {
+TEST_CASE(
+	"the luau storm service authors one physics resource and samples its field", "[scriptluau][storm]"
+) {
 	RegisterClasses();
 	Store store("scriptluau_storm");
 	const auto runtime = MakeLuauRuntime(store);

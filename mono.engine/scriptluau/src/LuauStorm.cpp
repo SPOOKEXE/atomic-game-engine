@@ -123,10 +123,14 @@ namespace engine::script {
 				storm.State, {CheckVector3(state, 1), static_cast<float>(luaL_checknumber(state, 2))}
 			);
 			lua_newtable(state);
-			lua_pushnumber(state, result.Clarity); lua_setfield(state, -2, "Clarity");
-			lua_pushnumber(state, result.EffectiveDistance); lua_setfield(state, -2, "EffectiveDistance");
-			lua_pushnumber(state, result.RainObscuration); lua_setfield(state, -2, "Rain");
-			lua_pushnumber(state, result.CondensationObscuration); lua_setfield(state, -2, "Condensation");
+			lua_pushnumber(state, result.Clarity);
+			lua_setfield(state, -2, "Clarity");
+			lua_pushnumber(state, result.EffectiveDistance);
+			lua_setfield(state, -2, "EffectiveDistance");
+			lua_pushnumber(state, result.RainObscuration);
+			lua_setfield(state, -2, "Rain");
+			lua_pushnumber(state, result.CondensationObscuration);
+			lua_setfield(state, -2, "Condensation");
 			return 1;
 		}
 
@@ -136,20 +140,28 @@ namespace engine::script {
 			lua_newtable(state);
 			*PushVector3(state) = result.WindVelocity;
 			lua_setfield(state, -2, "Wind");
-			lua_pushnumber(state, result.AerodynamicPressure); lua_setfield(state, -2, "DynamicPressure");
-			lua_pushnumber(state, result.Potential); lua_setfield(state, -2, "Potential");
-			lua_pushinteger(state, static_cast<int>(result.Band)); lua_setfield(state, -2, "Band");
+			lua_pushnumber(state, result.AerodynamicPressure);
+			lua_setfield(state, -2, "DynamicPressure");
+			lua_pushnumber(state, result.Potential);
+			lua_setfield(state, -2, "Potential");
+			lua_pushinteger(state, static_cast<int>(result.Band));
+			lua_setfield(state, -2, "Band");
 			return 1;
 		}
 	}
 
 	void OpenStorm(lua_State *state) {
 		lua_newtable(state);
-		lua_pushcfunction(state, Configure, "Configure"); lua_setfield(state, -2, "Configure");
-		lua_pushcfunction(state, Preset, "Preset"); lua_setfield(state, -2, "Preset");
-		lua_pushcfunction(state, Sample, "Sample"); lua_setfield(state, -2, "Sample");
-		lua_pushcfunction(state, Visibility, "Visibility"); lua_setfield(state, -2, "Visibility");
-		lua_pushcfunction(state, Damage, "Damage"); lua_setfield(state, -2, "Damage");
+		lua_pushcfunction(state, Configure, "Configure");
+		lua_setfield(state, -2, "Configure");
+		lua_pushcfunction(state, Preset, "Preset");
+		lua_setfield(state, -2, "Preset");
+		lua_pushcfunction(state, Sample, "Sample");
+		lua_setfield(state, -2, "Sample");
+		lua_pushcfunction(state, Visibility, "Visibility");
+		lua_setfield(state, -2, "Visibility");
+		lua_pushcfunction(state, Damage, "Damage");
+		lua_setfield(state, -2, "Damage");
 		lua_setglobal(state, "Storm");
 	}
 }
