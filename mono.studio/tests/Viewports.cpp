@@ -639,3 +639,13 @@ TEST_CASE("GUI preview profiles resolve viewer-local screen metrics", "[studio][
 	CHECK(phone.State == studio::GuiPreviewState::None);
 	CHECK(secondViewport.State == studio::GuiPreviewState::Pressed);
 }
+
+TEST_CASE("GUI preview controls follow the rendered image rectangle", "[studio][viewports]") {
+	studio::PanelProjection panel;
+	panel.ImageMin = {403.0f, 140.0f};
+	panel.ImageSize = {810.0f, 464.0f};
+
+	const glm::vec2 controls = studio::GuiPreviewControlsPosition(panel);
+	CHECK(controls.x == 411.0f);
+	CHECK(controls.y == 148.0f);
+}

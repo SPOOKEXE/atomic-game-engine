@@ -1332,6 +1332,11 @@ namespace studio {
 		}
 
 		ImGui::EndGroup();
+
+		// GUI-preview controls are widgets, so they must be submitted while this
+		// viewport owns the current ImGui window. Drawing them after `End` makes
+		// ImGui create its fallback Debug window and detaches them from the image.
+		DrawViewportGui(index, ProjectionFor(index));
 		ImGui::End();
 	}
 
@@ -1381,6 +1386,7 @@ namespace studio {
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
 		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
+		ImGui::MenuItem("GUI Preview Controls", nullptr, &ShowGuiPreviewControls);
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
 		ImGui::MenuItem("Direction Gizmo", nullptr, &ShowDirectionGizmo);
 		ImGui::MenuItem("3D Cursor", nullptr, &ShowCursor);
@@ -1482,7 +1488,7 @@ namespace studio {
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
 			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
-			ShowStatistics = ShowFrameGraph = ShowHeap = ShowCallStack = ShowBreakpointsWatch = open;
+			ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack = ShowBreakpointsWatch = open;
 			ShowRojoSync = open;
 			for (PluginPresentation *plugin : Plugins) {
 				if (plugin == nullptr || !plugin->Running) {

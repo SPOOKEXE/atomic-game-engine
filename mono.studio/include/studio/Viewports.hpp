@@ -28,6 +28,8 @@
 #include <engine/gui/Localization.hpp>
 #include <engine/world/World.hpp>
 
+#include <studio/Projection.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -63,6 +65,14 @@ namespace studio {
 	// Resolves the GUI canvas visible within a viewport panel.
 	engine::gui::Screen
 	ResolveGuiPreviewScreen(GuiPreviewSettings settings, float panelWidth, float panelHeight);
+
+	// Places GUI-preview controls over the rendered image, including when the
+	// image is fitted into only part of its docked viewport.
+	//
+	// @param panel The image rectangle displayed by this viewport.
+	// @return The display-space position for the controls' top-left corner.
+	// @since v0.25
+	glm::vec2 GuiPreviewControlsPosition(const PanelProjection &panel);
 
 	// No panel. Also what `ChooseViewportFor` says when one has to be made.
 	//

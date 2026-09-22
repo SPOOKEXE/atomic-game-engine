@@ -466,22 +466,6 @@ namespace studio {
 			}
 		}
 
-		// **The game's own UI, before the editor's furniture below it.** The
-		// grid, the axes and the selection outline are tools for looking at the
-		// world; a `ScreenGui` is part of the game. Drawing the tools last is
-		// what keeps a selection outline visible through a full-screen menu the
-		// game happens to have open.
-		//
-		// Outside the projection loop below, because a `ScreenGui` has no
-		// camera: it is laid out against the panel rectangle and nothing else,
-		// so a panel whose camera cannot be resolved still draws its UI.
-		{
-			ENGINE_PROFILE_CAT("overlay game gui", engine::core::ProfileCategory::Render);
-			for (size_t index = 0; index < Overlays.size(); index++) {
-				DrawViewportGui(index, projections[index]);
-			}
-		}
-
 		// Gestures mutate selection and transforms. Finish every viewport's input
 		// pass before gathering outlines, so a picked or moved object is projected
 		// from its current geometry in this same frame.
@@ -2338,31 +2322,34 @@ namespace studio {
 			CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, mouse.x, mouse.y);
 		const GuiPreviewSettings &preview = viewport != nullptr ? viewport->GuiPreview : MainGuiPreview;
 		GuiPreviewSettings &editablePreview = viewport != nullptr ? viewport->GuiPreview : MainGuiPreview;
-		const char *profiles[] = {"Desktop", "Phone", "Tablet"};
-		const char *states[] = {"State", "Hover", "Pressed"};
-		int profile = static_cast<int>(editablePreview.Profile);
-		ImGui::SetCursorScreenPos(ImVec2(slot.X + 8.0f, slot.Y + 8.0f));
-		ImGui::SetNextItemWidth(100.0f);
-		if (ImGui::Combo("##gui-preview-profile", &profile, profiles, 3)) {
-			editablePreview.Profile = static_cast<GuiPreviewProfile>(profile);
-		}
-		ImGui::SetNextItemWidth(70.0f);
-		ImGui::DragFloat(
-			"##gui-interface-scale", &editablePreview.InterfaceScale, 0.01f, 0.1f, 4.0f, "UI %.2f"
-		);
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(70.0f);
-		ImGui::DragFloat("##gui-text-scale", &editablePreview.TextScale, 0.01f, 0.1f, 4.0f, "Text %.2f");
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(80.0f);
-		ImGui::InputText(
-			"##gui-preview-locale", editablePreview.Locale.data(), editablePreview.Locale.size()
-		);
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(72.0f);
-		int previewState = static_cast<int>(editablePreview.State);
-		if (ImGui::Combo("##gui-preview-state", &previewState, states, 3)) {
-			editablePreview.State = static_cast<GuiPreviewState>(previewState);
+		if (ShowGuiPreviewControls) {
+			const char *profiles[] = {"Desktop", "Phone", "Tablet"};
+			const char *states[] = {"State", "Hover", "Pressed"};
+			int profile = static_cast<int>(editablePreview.Profile);
+			const glm::vec2 controls = GuiPreviewControlsPosition(panel);
+			ImGui::SetCursorScreenPos(ImVec2(controls.x, controls.y));
+			ImGui::SetNextItemWidth(100.0f);
+			if (ImGui::Combo("##gui-preview-profile", &profile, profiles, 3)) {
+				editablePreview.Profile = static_cast<GuiPreviewProfile>(profile);
+			}
+			ImGui::SetNextItemWidth(70.0f);
+			ImGui::DragFloat(
+				"##gui-interface-scale", &editablePreview.InterfaceScale, 0.01f, 0.1f, 4.0f, "UI %.2f"
+			);
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(70.0f);
+			ImGui::DragFloat("##gui-text-scale", &editablePreview.TextScale, 0.01f, 0.1f, 4.0f, "Text %.2f");
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(80.0f);
+			ImGui::InputText(
+				"##gui-preview-locale", editablePreview.Locale.data(), editablePreview.Locale.size()
+			);
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(72.0f);
+			int previewState = static_cast<int>(editablePreview.State);
+			if (ImGui::Combo("##gui-preview-state", &previewState, states, 3)) {
+				editablePreview.State = static_cast<GuiPreviewState>(previewState);
+			}
 		}
 		engine::gui::CompileRequest request;
 		request.Display = ResolveGuiPreviewScreen(preview, canvas.Width, canvas.Height);

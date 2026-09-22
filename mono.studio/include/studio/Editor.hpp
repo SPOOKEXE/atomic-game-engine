@@ -6396,6 +6396,8 @@ namespace studio {
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+		// Viewer-only GUI controls share the View menu with the other viewport tools.
+		bool ShowGuiPreviewControls = true;
 		// How many more frames an explicit `--graph` should select the dock tab.
 		// A few frames outlast the first-run dock rebuild, as `FocusWorlds` does.
 		int FocusFrameGraphFrames = 0;
