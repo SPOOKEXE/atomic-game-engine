@@ -4636,18 +4636,23 @@ namespace studio {
 				return;
 			}
 
-			// **Nothing selected means `Workspace`, and since v0.7 it has to.**
-			// An instance with no parent is an orphan: it is not in the scene,
-			// nothing draws it, and `Insert Object` with an empty selection
-			// would have quietly produced something invisible. It used to be
-			// drawn, because an unparented instance was a root of the world and
-			// roots were what the renderer collected - see
-			// `scene/Visibility.hpp` for why that is no longer the rule.
+			// **Nothing selected means `Workspace`, except a `ScreenGui` belongs in
+			// `StarterGui`.** An instance with no parent is an orphan: it is not in
+			// the scene, nothing draws it, and `Insert Object` with an empty
+			// selection would quietly produce something invisible. A ScreenGui has a
+			// second containment rule: the editor compiles its template only below
+			// StarterGui, and Play copies that template into PlayerGui.
 			//
-			// Studio does the same thing, and for an author it is the only
-			// sensible reading of "insert a Part" with nothing highlighted.
-			landed =
-				parent != NULL_ENTITY && store.Alive(parent) ? parent : engine::scene::WorkspaceOf(store);
+			// Explicit parents remain authoritative. This only supplies the parent
+			// the root Insert Object command means when there is no selection.
+			const Entity defaultParent =
+				store.IsA(created, engine::gui::GuiClass("ScreenGui"))
+					? engine::scene::ServiceOf(
+						  store, engine::ecs::Classes::Find(engine::core::Name("StarterGui"))
+					  )
+					: engine::scene::WorkspaceOf(store);
+
+			landed = parent != NULL_ENTITY && store.Alive(parent) ? parent : defaultParent;
 
 			if (landed != NULL_ENTITY) {
 				store.SetParent(created, landed);

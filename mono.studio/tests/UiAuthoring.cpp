@@ -7,10 +7,13 @@
 #include <engine/gui/Animation.hpp>
 #include <engine/gui/Binding.hpp>
 #include <engine/gui/Compile.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/gui/Style.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -33,6 +36,15 @@ namespace studio {
 	struct UiAuthoringProbe {
 		static void Draw(Editor &editor) {
 			editor.DrawUiAuthoring();
+		}
+
+		static engine::ecs::Entity Insert(
+			Editor &editor,
+			engine::world::WorldId world,
+			engine::ecs::ClassId klass,
+			engine::ecs::Entity parent = {}
+		) {
+			return editor.InsertInstance(world, klass, parent);
 		}
 	};
 }
@@ -69,6 +81,55 @@ namespace {
 			engine::parallel::Jobs::Stop();
 		}
 	};
+}
+
+TEST_CASE("inserting a ScreenGui places its visible tree in StarterGui", "[studio][ui-authoring][gui]") {
+	engine::scene::RegisterSceneClasses();
+	engine::gui::RegisterGuiClasses();
+
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	const engine::world::WorldId world = editor.Universe->Create({.Name = engine::core::Name("ui_insert")});
+	editor.Universe->Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::InstallServices(store);
+		engine::gui::InstallGuiServices(store);
+	});
+
+	const engine::ecs::Entity screen =
+		studio::UiAuthoringProbe::Insert(editor, world, engine::gui::GuiClass("ScreenGui"));
+	REQUIRE(screen != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity label =
+		studio::UiAuthoringProbe::Insert(editor, world, engine::gui::GuiClass("TextLabel"), screen);
+	REQUIRE(label != engine::ecs::NULL_ENTITY);
+
+	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
+		const engine::ecs::Entity starterGui =
+			engine::scene::ServiceOf(store, engine::ecs::Classes::Find(engine::core::Name("StarterGui")));
+		REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
+		CHECK(store.ParentOf(screen) == starterGui);
+		CHECK(store.ParentOf(label) == screen);
+
+		engine::gui::Element element = *store.Get<engine::gui::Element>(label);
+		element.Size = engine::core::UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+		store.Set(label, element);
+		engine::gui::Background background = *store.Get<engine::gui::Background>(label);
+		background.Color = {0.125f, 0.125f, 0.125f};
+		background.Transparency = 0.0f;
+		store.Set(label, background);
+
+		engine::gui::CompileRequest request;
+		request.Display = {.Width = 800.0f, .Height = 600.0f};
+		request.ScreenGuis = engine::gui::ScreenGuiSource::StarterGui;
+		engine::gui::Compiled compiled;
+		REQUIRE(compiled.Rebuild(store, request));
+
+		bool foundBackground = false;
+		for (const engine::gui::DrawCommand &command : compiled.Commands().Commands) {
+			if (command.Source != label || command.Kind != engine::gui::DrawKind::Rectangle) continue;
+			foundBackground = command.Tint == background.Color && command.Transparency == 0.0f;
+		}
+		CHECK(foundBackground);
+	});
 }
 
 TEST_CASE("UI authoring exposes canonical values and preserves opaque undo", "[studio][ui-authoring]") {
