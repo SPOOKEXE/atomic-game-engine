@@ -259,6 +259,29 @@ TEST_CASE("grouping is deterministic", "[cdn][grouper]") {
 	}
 }
 
+TEST_CASE("all loose candidates are deterministic", "[cdn][grouper]") {
+	const Grouper grouper(Small());
+
+	std::vector<GroupCandidate> forward{
+		Candidate("a", 300),
+		Candidate("b", 300),
+		Candidate("c", 400),
+		Candidate("d", 500),
+		Candidate("e", 200),
+	};
+	std::vector<GroupCandidate> backward(forward.rbegin(), forward.rend());
+
+	const Assembly first = grouper.Assemble(forward);
+	const Assembly second = grouper.Assemble(backward);
+
+	REQUIRE(first.Groups.size() == second.Groups.size());
+	for (size_t index = 0; index < first.Groups.size(); ++index) {
+		INFO("group " << index);
+		CHECK(first.Groups[index].Assets == second.Groups[index].Assets);
+		CHECK(first.Groups[index].TotalBytes == second.Groups[index].TotalBytes);
+	}
+}
+
 TEST_CASE("a group's assets are sorted", "[cdn][grouper]") {
 	const Grouper grouper(GroupPolicy{10'000, 20'000});
 	const std::vector<GroupCandidate> candidates{
