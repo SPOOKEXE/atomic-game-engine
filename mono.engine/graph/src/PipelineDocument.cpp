@@ -1890,7 +1890,7 @@ namespace engine::graph {
 					   edit.Name == core::Name("present") ||
 					   edit.Name == core::Name("interface") || edit.Name == core::Name("overlay") ||
 					   edit.Name == core::Name("output-image");
-				if (edit.Name == core::Name("tonemap")) {
+				if (edit.Name == core::Name("bloom")) {
 					result.Record(
 						{.Kind = EditKind::AddNode,
 						 .Name = core::Name("eye-image"),
