@@ -1383,6 +1383,67 @@ namespace engine::render {
 			}
 
 			SDL_EndGPURenderPass(pass);
+			// The deferred resolve has consumed the opaque G-buffer by this point.
+			// Overlay the sorted transmissive tail into those metadata attachments
+			// only now, so data capture sees its authored labels and factors without
+			// making the deferred lighting source contain the glass itself.
+			if (plainTransparent > 0 && recording.Pbr != nullptr &&
+				State->GBufferTransparentPipeline != nullptr) {
+				Impl::PbrSlot &pbr = *recording.Pbr;
+				SDL_GPUColorTargetInfo metadata[8]{};
+				SDL_GPUTexture *const textures[] = {
+					pbr.Albedo,
+					pbr.Normal,
+					pbr.Material,
+					pbr.Emissive,
+					pbr.ObjectIds,
+					pbr.SemanticIds,
+					pbr.PartIds,
+					pbr.MeshUv,
+				};
+				bool valid = true;
+				for (size_t index = 0; index < std::size(metadata); ++index) {
+					metadata[index].texture = textures[index];
+					metadata[index].load_op = SDL_GPU_LOADOP_LOAD;
+					metadata[index].store_op = SDL_GPU_STOREOP_STORE;
+					metadata[index].cycle = false;
+					valid = valid && textures[index] != nullptr;
+				}
+				if (valid) {
+					auto metadataDepth = depthTarget;
+					metadataDepth.load_op = SDL_GPU_LOADOP_LOAD;
+					metadataDepth.store_op = SDL_GPU_STOREOP_STORE;
+					metadataDepth.cycle = false;
+					auto *metadataPass = SDL_BeginGPURenderPass(command, metadata, 8, &metadataDepth);
+					if (metadataPass != nullptr) {
+						State->BindPipeline(
+							metadataPass, State->GBufferTransparentPipeline, Impl::PipelineFamily::Other
+						);
+						State->BindInstanceBuffers(metadataPass);
+						const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+						SDL_BindGPUIndexBuffer(metadataPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+						const FrameUniforms frame{
+							matrices.ViewProjection, lightViewProjection, glm::mat4{1.0f}
+						};
+						SDL_PushGPUVertexUniformData(command, 0, &frame, sizeof(frame));
+						const auto metadataLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+						result.DrawCalls += State->DrawSlots(
+							command,
+							metadataPass,
+							static_cast<uint32_t>(sceneCount + opaqueCount),
+							plainTransparent,
+							&metadataLighting,
+							State->ShadowTexture,
+							State->ShadowSampler,
+							nullptr,
+							State->SurfaceSampler,
+							0,
+							result.Triangles
+						);
+						SDL_EndGPURenderPass(metadataPass);
+					}
+				}
+			}
 			State->RefractionTexture = nullptr;
 			State->RefractionSampler = nullptr;
 			return true;

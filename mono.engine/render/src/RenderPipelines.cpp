@@ -350,6 +350,14 @@ namespace engine::render {
 			}
 		}
 		const bool pbrSupported = GBufferPipeline != nullptr;
+		if (pbrSupported) {
+			SDL_GPUGraphicsPipelineCreateInfo transparentGBuffer = gbuffer;
+			transparentGBuffer.depth_stencil_state.enable_depth_write = false;
+			transparentGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			GBufferTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &transparentGBuffer);
+			if (GBufferTransparentPipeline == nullptr)
+				ENGINE_ERROR("transparent G-buffer pipeline: {}", SDL_GetError());
+		}
 		const bool packChannelsSupported = SDL_GPUTextureSupportsFormat(
 			Device,
 			SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,
@@ -548,6 +556,10 @@ namespace engine::render {
 		}
 		if (pbrSupported) {
 			PackedGBufferPipeline = packedPipeline(gbuffer, packedOpaqueVertex);
+			SDL_GPUGraphicsPipelineCreateInfo packedTransparentGBuffer = gbuffer;
+			packedTransparentGBuffer.depth_stencil_state.enable_depth_write = false;
+			packedTransparentGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			PackedGBufferTransparentPipeline = packedPipeline(packedTransparentGBuffer, packedOpaqueVertex);
 			SDL_GPUGraphicsPipelineCreateInfo packedWireframeGBuffer = gbuffer;
 			packedWireframeGBuffer.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 			packedWireframeGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
@@ -556,7 +568,9 @@ namespace engine::render {
 		}
 		if (PackedOpaquePipeline == nullptr || PackedForwardPipeline == nullptr ||
 			PackedTransparentPipeline == nullptr || PackedMeshShadowPipeline == nullptr ||
-			(pbrSupported && (PackedGBufferPipeline == nullptr || PackedDepthPeelPipeline == nullptr)) ||
+			(pbrSupported &&
+			 (PackedGBufferPipeline == nullptr || PackedGBufferTransparentPipeline == nullptr ||
+			  PackedDepthPeelPipeline == nullptr)) ||
 			(hdrSupported &&
 			 (PackedHdrOpaquePipeline == nullptr || PackedHdrTransparentPipeline == nullptr))) {
 			ENGINE_ERROR("packed editable mesh pipeline: {}", SDL_GetError());
@@ -920,11 +934,12 @@ namespace engine::render {
 			   PackedTransparentPipeline != nullptr && PackedMeshShadowPipeline != nullptr &&
 			   (!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
-			   (!pbrSupported || (GBufferPipeline != nullptr && DepthPeelPipeline != nullptr &&
-								  DepthLinearPipeline != nullptr && DepthValidityPipeline != nullptr &&
-								  CameraMotionPipeline != nullptr && SsaoPipeline != nullptr &&
-								  DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
-								  VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
+			   (!pbrSupported ||
+				(GBufferPipeline != nullptr && GBufferTransparentPipeline != nullptr &&
+				 DepthPeelPipeline != nullptr && DepthLinearPipeline != nullptr &&
+				 DepthValidityPipeline != nullptr && CameraMotionPipeline != nullptr &&
+				 SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
+				 VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
 			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
 									 Lod.Select != nullptr));
 	}

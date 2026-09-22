@@ -524,6 +524,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *PackedTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedForwardPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedGBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedGBufferTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedWireframeGBufferPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedDepthPeelPipeline = nullptr;
 
@@ -552,6 +553,7 @@ namespace engine::render {
 		// blended tail stay on the forward family below because their projected
 		// images and ordering are not representable by one G-buffer pixel.
 		SDL_GPUGraphicsPipeline *GBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *GBufferTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthPeelPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthLinearPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthValidityPipeline = nullptr;

@@ -125,6 +125,7 @@ namespace engine::render {
 			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
 			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
 			if (native == GBufferPipeline) return PackedGBufferPipeline;
+			if (native == GBufferTransparentPipeline) return PackedGBufferTransparentPipeline;
 			if (native == WireframeGBufferPipeline) return PackedWireframeGBufferPipeline;
 			if (native == DepthPeelPipeline) return PackedDepthPeelPipeline;
 			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
