@@ -1488,7 +1488,8 @@ namespace studio {
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
 			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
-			ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack = ShowBreakpointsWatch = open;
+			ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack =
+				ShowBreakpointsWatch = open;
 			ShowRojoSync = open;
 			for (PluginPresentation *plugin : Plugins) {
 				if (plugin == nullptr || !plugin->Running) {

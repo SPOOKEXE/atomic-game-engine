@@ -28,13 +28,12 @@
 #include <engine/gui/Localization.hpp>
 #include <engine/world/World.hpp>
 
-#include <studio/Projection.hpp>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <studio/Projection.hpp>
 #include <unordered_map>
 
 namespace engine::ecs {
