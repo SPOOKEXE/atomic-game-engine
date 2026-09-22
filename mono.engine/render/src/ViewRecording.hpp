@@ -629,6 +629,7 @@ namespace engine::render {
 
 		// `shadow`, which is the sun's map and the portal beam atlas beside it.
 		void RegisterShadowNodes(NodeTable &nodes);
+		bool RecordLocalLightShadow(const glm::mat4 &viewProjection);
 
 		// `mirror-capture` and `mirror-overlay`: what a pane shows, and the
 		// panes composited back over the frame.
