@@ -39,6 +39,8 @@ namespace engine::control {
 		inline constexpr size_t MAXIMUM_CHANNEL_NAME = 64;
 		// Largest channel set accepted for one capture ticket.
 		inline constexpr size_t MAXIMUM_CHANNELS = 15;
+		// Per-light contribution uses one graph response target per selected light.
+		inline constexpr size_t MAXIMUM_LOCAL_LIGHT_IDS = 4;
 		// ScriptDataCaptureBridge owns six retained ticket slots. The MCP bound must
 		// match that admission limit rather than the separate hook-batch limit.
 		inline constexpr size_t MAXIMUM_MULTICAMERA_VIEWS = 6;
@@ -111,7 +113,8 @@ namespace engine::control {
 					 "coordinate_space",
 					 "noise_mode",
 					 "noise_seed",
-					 "noise_sigma"},
+					 "noise_sigma",
+					 "local_light_ids"},
 					failure
 				))
 				return false;
@@ -213,6 +216,31 @@ namespace engine::control {
 				);
 				return false;
 			}
+			if (const auto localLights = options.find("local_light_ids"); localLights != options.end()) {
+				if (!localLights->is_array() || localLights->empty() ||
+					localLights->size() > MAXIMUM_LOCAL_LIGHT_IDS) {
+					failure = Error("validation_failed", "local_light_ids must contain 1 to 4 ids");
+					return false;
+				}
+				for (const json &light : *localLights) {
+					std::string id;
+					if (!OptionText(light, "local_light_ids", MAXIMUM_ID, id, failure)) return false;
+					if (std::find(request.LocalLightIds.begin(), request.LocalLightIds.end(), id) !=
+						request.LocalLightIds.end()) {
+						failure = Error("validation_failed", "local_light_ids must be unique");
+						return false;
+					}
+					request.LocalLightIds.push_back(std::move(id));
+				}
+			}
+			const bool localLightChannel =
+				std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
+				request.Channels.end();
+			if (localLightChannel != !request.LocalLightIds.empty()) {
+				failure =
+					Error("validation_failed", "local_light_ids must accompany local_light_contribution");
+				return false;
+			}
 			if (request.NoiseMode == "gaussian" &&
 				std::find(request.Channels.begin(), request.Channels.end(), "rgb_linear_hdr") ==
 					request.Channels.end()) {
@@ -244,7 +272,8 @@ namespace engine::control {
 					 "coordinate_space",
 					 "noise_mode",
 					 "noise_seed",
-					 "noise_sigma"},
+					 "noise_sigma",
+					 "local_light_ids"},
 					failure
 				))
 				return false;
@@ -456,6 +485,7 @@ namespace engine::control {
 			}
 			return {
 				{"channel", plane.Channel},
+				{"light_id", plane.LightId.empty() ? json(nullptr) : json(plane.LightId)},
 				{"status", plane.Status},
 				{"snapshot_id", snapshot},
 				{"resource_id", plane.Resource},
@@ -663,6 +693,11 @@ namespace engine::control {
 					   {"minItems", 1},
 					   {"maxItems", MAXIMUM_CHANNELS},
 					   {"items", {{"type", "string"}}}}},
+					 {"local_light_ids",
+					  {{"type", "array"},
+					   {"minItems", 1},
+					   {"maxItems", MAXIMUM_LOCAL_LIGHT_IDS},
+					   {"items", {{"type", "string"}}}}},
 					 {"packed_planes",
 					  {{"type", "array"},
 					   {"maxItems", script::MAX_DATA_CAPTURE_PACKED_PLANES},
@@ -695,6 +730,7 @@ namespace engine::control {
 						 "camera_id",
 						 "view_slot",
 						 "channels",
+						 "local_light_ids",
 						 "packed_planes",
 						 "temporal_history",
 						 "operation_id",
@@ -746,6 +782,31 @@ namespace engine::control {
 					std::string name;
 					if (!Text(channel, "channel", name, failure)) return nullptr;
 					request.Channels.push_back(std::move(name));
+				}
+				if (const auto localLights = values.find("local_light_ids"); localLights != values.end()) {
+					if (!localLights->is_array() || localLights->empty() ||
+						localLights->size() > MAXIMUM_LOCAL_LIGHT_IDS) {
+						failure = Error("validation_failed", "local_light_ids must contain 1 to 4 ids");
+						return nullptr;
+					}
+					for (const json &light : *localLights) {
+						std::string id;
+						if (!Text(light, "local_light_ids", id, failure)) return nullptr;
+						if (std::find(request.LocalLightIds.begin(), request.LocalLightIds.end(), id) !=
+							request.LocalLightIds.end()) {
+							failure = Error("validation_failed", "local_light_ids must be unique");
+							return nullptr;
+						}
+						request.LocalLightIds.push_back(std::move(id));
+					}
+				}
+				const bool localLightChannel =
+					std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
+					request.Channels.end();
+				if (localLightChannel != !request.LocalLightIds.empty()) {
+					failure =
+						Error("validation_failed", "local_light_ids must accompany local_light_contribution");
+					return nullptr;
 				}
 				if (const auto packed = values.find("packed_planes"); packed != values.end()) {
 					if (!packed->is_array() || packed->size() > script::MAX_DATA_CAPTURE_PACKED_PLANES) {
@@ -846,6 +907,11 @@ namespace engine::control {
 					  {"maxItems", MAXIMUM_CHANNELS},
 					  {"items",
 					   {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}}}},
+					{"local_light_ids",
+					 {{"type", "array"},
+					  {"minItems", 1},
+					  {"maxItems", MAXIMUM_LOCAL_LIGHT_IDS},
+					  {"items", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}}},
 					{"camera_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					{"pipeline", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					{"capture_node",

@@ -181,6 +181,7 @@ namespace engine::render {
 			bool Submitted = false;
 			bool Ready = false;
 			bool Observed = false;
+			std::array<bool, MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS> LocalLightCaptureMatched{};
 			uint16_t PollAttempts = 0;
 			size_t AccountedBytes = 0;
 			uint64_t SubmittedNanoseconds = 0;
@@ -537,6 +538,63 @@ namespace engine::render {
 		pending.Submitted = true;
 		pending.SubmittedNanoseconds = core::Clock::Nanoseconds();
 		return {.Status = HookBindStatus::Ok, .Batch = batch};
+	}
+
+	bool DataFactoryHookBind::ApplyLocalLightCapture(
+		const ViewMutationIdentity &identity, ViewRecording &recording
+	) {
+		std::fill(recording.LocalLightCaptureIds.begin(), recording.LocalLightCaptureIds.end(), core::Name{});
+		std::fill(
+			recording.LocalLightCaptureMatched.begin(), recording.LocalLightCaptureMatched.end(), false
+		);
+		for (const auto &batch : State->Batches) {
+			if (!batch.Used || !batch.Submitted || batch.Ready || !State->Valid(batch.Connection)) continue;
+			const auto &connection = State->Connections[batch.Connection.Slot];
+			if (connection.Request.PipelineRevision != identity.PipelineRevision ||
+				connection.Request.Session.WorldName != identity.WorldName ||
+				batch.Request.SnapshotId != identity.SnapshotId ||
+				batch.Request.Pipeline != identity.Pipeline || batch.Request.ViewSlot != identity.ViewSlot ||
+				std::find(
+					batch.Request.Channels.begin(),
+					batch.Request.Channels.end(),
+					DataCaptureChannel::LocalLightContribution
+				) == batch.Request.Channels.end())
+				continue;
+			for (size_t index = 0; index < batch.Request.LocalLightIds.size(); ++index)
+				recording.LocalLightCaptureIds[index] = core::Name(batch.Request.LocalLightIds[index]);
+			return true;
+		}
+		return false;
+	}
+
+	void DataFactoryHookBind::CompleteLocalLightCapture(
+		const ViewMutationIdentity &identity, const ViewRecording &recording
+	) {
+		for (auto &batch : State->Batches) {
+			if (!batch.Used || !batch.Submitted || batch.Ready || !State->Valid(batch.Connection)) continue;
+			const auto &connection = State->Connections[batch.Connection.Slot];
+			if (connection.Request.PipelineRevision != identity.PipelineRevision ||
+				connection.Request.Session.WorldName != identity.WorldName ||
+				batch.Request.SnapshotId != identity.SnapshotId ||
+				batch.Request.Pipeline != identity.Pipeline || batch.Request.ViewSlot != identity.ViewSlot ||
+				std::find(
+					batch.Request.Channels.begin(),
+					batch.Request.Channels.end(),
+					DataCaptureChannel::LocalLightContribution
+				) == batch.Request.Channels.end())
+				continue;
+			batch.LocalLightCaptureMatched = recording.LocalLightCaptureMatched;
+			size_t localSlot = 0;
+			for (size_t index = 0; index < batch.Ticket.Channels.size(); ++index) {
+				if (batch.Ticket.Channels[index] != DataCaptureChannel::LocalLightContribution) continue;
+				if (index < batch.Ticket.LocalLightMatched.size() &&
+					localSlot < recording.LocalLightCaptureMatched.size())
+					batch.Ticket.LocalLightMatched[index] =
+						recording.LocalLightCaptureMatched[localSlot] ? 1 : 0;
+				++localSlot;
+			}
+			return;
+		}
 	}
 
 	void DataFactoryHookBind::Observe(const RenderObservationContext &context) {

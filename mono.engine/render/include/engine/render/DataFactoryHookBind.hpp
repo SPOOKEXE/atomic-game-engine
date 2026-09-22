@@ -20,6 +20,7 @@
 namespace engine::render {
 	class Renderer;
 	struct View;
+	class ViewRecording;
 
 	// Maximum registered hook capabilities owned by one renderer.
 	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 21;
@@ -246,6 +247,11 @@ namespace engine::render {
 		// Runs one admitted batch against the current render observation context.
 		CallHooksResult
 		CallHooks(ConnectionHandle connection, BatchHandle batch, const RenderObservationContext &context);
+		// Copies the bounded local-light selection for this render observation into
+		// its recording before the local-light graph nodes run.
+		bool ApplyLocalLightCapture(const ViewMutationIdentity &identity, ViewRecording &recording);
+		// Retains the graph's per-slot selection result for the later readback poll.
+		void CompleteLocalLightCapture(const ViewMutationIdentity &identity, const ViewRecording &recording);
 		// Queues an owned one-shot patch for the built-in view.camera hook. Admission
 		// validates the complete identity and payload before it claims a slot.
 		ArmViewMutationResult ArmViewMutation(HookHandle hook, ViewCameraPatch patch);

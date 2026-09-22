@@ -58,6 +58,7 @@ namespace engine::render {
 			if (name == "motion_vectors") return DataCaptureChannel::MotionVectors;
 			if (name == "directional_response") return DataCaptureChannel::DirectionalResponse;
 			if (name == "shadow_visibility") return DataCaptureChannel::ShadowVisibility;
+			if (name == "local_light_contribution") return DataCaptureChannel::LocalLightContribution;
 			if (name == "packed_gpu") return DataCaptureChannel::PackedGpu;
 			return std::nullopt;
 		}
@@ -71,8 +72,17 @@ namespace engine::render {
 				(request.NoiseMode != "none" && request.NoiseMode != "gaussian") ||
 				!std::isfinite(request.NoiseSigma) || request.NoiseSigma < 0.0 || request.NoiseSigma > 64.0 ||
 				(request.NoiseMode == "none" && (request.NoiseSeed != 0 || request.NoiseSigma != 0.0)) ||
-				request.ViewSlot > std::numeric_limits<size_t>::max())
+				request.ViewSlot > std::numeric_limits<size_t>::max() ||
+				request.LocalLightIds.size() > MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS)
 				return false;
+			for (size_t index = 0; index < request.LocalLightIds.size(); ++index) {
+				if (!Text(request.LocalLightIds[index], script::MAX_DATA_SCENE_ID_BYTES)) return false;
+				for (size_t previous = 0; previous < index; ++previous)
+					if (request.LocalLightIds[previous] == request.LocalLightIds[index]) return false;
+			}
+			const bool requested =
+				std::ranges::find(request.Channels, "local_light_contribution") != request.Channels.end();
+			if (requested != !request.LocalLightIds.empty()) return false;
 			for (size_t first = 0; first < request.Channels.size(); ++first) {
 				if (!Text(request.Channels[first], 64) || !Channel(request.Channels[first])) return false;
 				for (size_t second = first + 1; second < request.Channels.size(); ++second)
@@ -410,8 +420,11 @@ namespace engine::render {
 			};
 		}
 
-		std::string ResourceId(uint64_t ticket, DataCaptureChannel channel) {
-			return "capture/" + std::to_string(ticket) + "/" + std::string(DataCaptureChannelName(channel));
+		std::string ResourceId(uint64_t ticket, DataCaptureChannel channel, std::string_view lightId = {}) {
+			std::string resource =
+				"capture/" + std::to_string(ticket) + "/" + std::string(DataCaptureChannelName(channel));
+			if (!lightId.empty()) resource += "/" + std::string(lightId);
+			return resource;
 		}
 
 		std::string PackedResourceId(uint64_t ticket, std::string_view name) {
@@ -489,6 +502,7 @@ namespace engine::render {
 						 "motion_vectors",
 						 "directional_response",
 						 "shadow_visibility",
+						 "local_light_contribution",
 						 "packed_gpu"},
 			.StorageProfiles = {"lossless", "training_compact"},
 			.TrainingCompactLimitations =
@@ -518,6 +532,7 @@ namespace engine::render {
 			.SameFrameMultiCamera = true,
 			.MaximumSameFrameCameraViews = static_cast<uint32_t>(MAX_CAPTURE_TICKETS),
 			.MaximumCameraIdBytes = static_cast<uint32_t>(script::MAX_DATA_SCENE_ID_BYTES),
+			.MaximumLocalLightIds = static_cast<uint32_t>(MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS),
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
 		};
@@ -1132,6 +1147,7 @@ namespace engine::render {
 				.ObjectLabels = {view.ObjectLabels.begin(), view.ObjectLabels.end()},
 				.SemanticLabels = {view.SemanticLabels.begin(), view.SemanticLabels.end()},
 				.PartLabels = {view.PartLabels.begin(), view.PartLabels.end()},
+				.LocalLightIds = pendingRequest.Request.LocalLightIds,
 			};
 			for (const std::string &name : pendingRequest.Request.Channels) {
 				const auto channel = Channel(name);
@@ -1467,8 +1483,19 @@ namespace engine::render {
 				validationTicket.CaptureNode = core::Name(entry->second.Request.CaptureNode);
 				storageProfile = entry->second.Request.StorageProfile;
 				storedRequest = entry->second.Request;
-				for (const std::string &name : entry->second.Request.Channels)
-					if (const auto channel = Channel(name)) validationTicket.Channels.push_back(*channel);
+				for (const std::string &name : entry->second.Request.Channels) {
+					const auto channel = Channel(name);
+					if (!channel) continue;
+					if (*channel == DataCaptureChannel::LocalLightContribution)
+						for (const std::string &lightId : entry->second.Request.LocalLightIds) {
+							validationTicket.Channels.push_back(*channel);
+							validationTicket.LightIds.push_back(lightId);
+						}
+					else {
+						validationTicket.Channels.push_back(*channel);
+						validationTicket.LightIds.emplace_back();
+					}
+				}
 				Hooks->Batches.erase(ticket.first);
 				if (const auto connection = Hooks->Connections.find(ticket.first);
 					connection != Hooks->Connections.end()) {
@@ -1643,12 +1670,13 @@ namespace engine::render {
 			size_t totalBytes = 0;
 			for (size_t index = 0; index < captured.Planes.size(); ++index) {
 				DataCapturePlane &plane = captured.Planes[index];
-				const std::string resource = ResourceId(ticket.first, plane.Channel);
+				const std::string resource = ResourceId(ticket.first, plane.Channel, plane.LightId);
 				const std::string channel(DataCaptureChannelName(plane.Channel));
 				const std::string &source = sources[index].Resource;
 				const std::string hash = plane.Hash.ToHex();
 				reply.Planes.push_back(
 					{.Channel = channel,
+					 .LightId = plane.LightId,
 					 .Status = Status(plane.Status),
 					 .Resource = resource,
 					 .SourceResource = source,

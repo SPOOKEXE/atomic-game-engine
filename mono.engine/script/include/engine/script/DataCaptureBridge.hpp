@@ -52,6 +52,8 @@ namespace engine::script {
 		uint64_t ViewSlot = 0;
 		// Channel names the host must retain for this ticket.
 		std::vector<std::string> Channels;
+		// Stable DataFactoryIds whose local-light terms are requested with local_light_contribution.
+		std::vector<std::string> LocalLightIds;
 		// Requested temporal-history policy, as named by the capture host.
 		std::string TemporalHistory;
 		// "lossless" retains renderer readback bytes. "training_compact" is an
@@ -146,6 +148,8 @@ namespace engine::script {
 	struct DataCaptureBridgePlane {
 		// Stable channel name represented by this plane.
 		std::string Channel;
+		// Stable source light for local_light_contribution; empty for other channels.
+		std::string LightId = {};
 		// Machine-readable operation status.
 		std::string Status;
 		// An opaque capture-local identifier. It is accepted only with its
@@ -433,6 +437,7 @@ namespace engine::script {
 		uint32_t MaximumSameFrameCameraViews = 0;
 		// Maximum UTF-8 bytes accepted in one camera id.
 		uint32_t MaximumCameraIdBytes = 0;
+		uint32_t MaximumLocalLightIds = 0;
 		// Host diagnostic for capability negotiation or failure.
 		std::string Detail;
 	};
