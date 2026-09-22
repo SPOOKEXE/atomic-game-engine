@@ -40,10 +40,28 @@ TEST_CASE("GPU particle field dispatches and resizes without a CPU particle read
 
 	render::SceneTarget target{96, 64};
 	render::OverlayImage overlay;
+	auto baseline = FieldView(target, 262'144, 17);
+	baseline.GpuParticles.reset();
+	fixture.Render.Render(std::span(&baseline, 1), overlay, nullptr, false);
+	const CapturedImage empty = CaptureResource(
+		fixture.Render, core::Name("composed-image"), baseline.Slot, target.Width, target.Height,
+		ImageFormat::Rgba8Unorm
+	);
 	auto first = FieldView(target, 262'144, 17);
 	const render::FrameResult firstFrame = fixture.Render.Render(std::span(&first, 1), overlay, nullptr, false);
 	CHECK(firstFrame.ComputeDispatches >= 1);
 	CHECK(firstFrame.ParticlesDrawn >= 262'144);
+	const CapturedImage field = CaptureResource(
+		fixture.Render, core::Name("composed-image"), first.Slot, target.Width, target.Height,
+		ImageFormat::Rgba8Unorm
+	);
+	size_t changedBytes = 0;
+	for (size_t index = 0; index < field.Bytes.size(); ++index) {
+		changedBytes += field.Bytes[index] != empty.Bytes[index];
+	}
+	// This is the post-transparent LDR result, so a difference proves the field
+	// affected rendered pixels rather than only recording a dispatch and draw.
+	CHECK(changedBytes > 64);
 	const render::GpuMemoryStatistics firstMemory = fixture.Render.MemoryStatistics();
 
 	auto resized = FieldView(target, 1'048'576, 23);
