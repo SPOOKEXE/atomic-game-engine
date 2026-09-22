@@ -906,8 +906,11 @@ namespace engine::render {
 				for (uint32_t index = 0; index < 4; ++index) {
 					const core::Name requested = recording.LocalLightCaptureIds[index];
 					if (!requested.IsValid()) continue;
-					const auto row =
-						std::find(recording.SceneLightIds.begin(), recording.SceneLightIds.end(), requested);
+					const auto row = std::find(
+						recording.SceneLightIds.begin(),
+						recording.SceneLightIds.begin() + static_cast<size_t>(lightUniforms.Count.x),
+						requested
+					);
 					recording.LocalLightCaptureMatched[index] = row != recording.SceneLightIds.end();
 					if (!recording.LocalLightCaptureMatched[index]) continue;
 					const uint32_t lightRow = static_cast<uint32_t>(row - recording.SceneLightIds.begin());
