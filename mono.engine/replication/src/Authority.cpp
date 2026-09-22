@@ -297,6 +297,15 @@ namespace engine::replication {
 
 	void Authority::SetInterest(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate) {
 		Interest = std::move(predicate);
+		InterestBatch = {};
+	}
+
+	void Authority::SetInterestBatch(
+		std::function<void(ClientId, const ecs::Store &, std::span<const ecs::Entity>, std::span<uint8_t>)>
+			selector
+	) {
+		InterestBatch = std::move(selector);
+		Interest = {};
 	}
 
 	void Authority::SetIdentityCheck(std::function<bool(ClientId, const Identify &)> check) {
@@ -531,6 +540,17 @@ namespace engine::replication {
 			// table order and not id order. `Prioritise` and `Refine` index into it
 			// with `std::lower_bound`.
 			std::sort(Bearing.begin(), Bearing.end());
+
+			// Batch interest runs once per client, often in parallel. Only it needs
+			// entity candidates, so keep the legacy predicate path on its original
+			// id walk and materialize these once for the whole batch publish.
+			if (InterestBatch) {
+				BearingEntities.clear();
+				BearingEntities.reserve(Bearing.size());
+				for (const uint64_t id : Bearing) {
+					BearingEntities.push_back(ecs::Entity{id});
+				}
+			}
 		}
 
 		{
@@ -1997,6 +2017,17 @@ namespace engine::replication {
 		// pass takes rather than re-deriving.
 		lane.Visible.clear();
 		lane.Visible.reserve(Bearing.size());
+		if (InterestBatch) {
+			lane.Accepted.assign(BearingEntities.size(), 0);
+			InterestBatch(handle, store, BearingEntities, lane.Accepted);
+			for (size_t index = 0; index < BearingEntities.size(); index++) {
+				if (lane.Accepted[index] != 0) {
+					lane.Visible.push_back(BearingEntities[index]);
+				}
+			}
+			return;
+		}
+
 		for (const uint64_t id : Bearing) {
 			const ecs::Entity entity{id};
 			if (!Interest || Interest(handle, entity, store)) {

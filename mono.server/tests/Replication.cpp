@@ -1235,6 +1235,9 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 		file << "local block = Instance.new(\"Part\")\n"
 			 << "block.Anchored = true\n"
 			 << "block.Parent = workspace\n"
+			 << "local secret = Instance.new(\"Part\")\n"
+			 << "secret.Name = \"ServerOnlySecret\"\n"
+			 << "secret.Parent = game:GetService(\"ServerStorage\")\n"
 
 			 // **A `Tool` in `StarterPack`, because a container is only private
 			 // if what is *in* it is.** The four containers arriving empty proved
@@ -1303,6 +1306,19 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 	CHECK(children(second.World, second.Mine) == 4);
 	CHECK(children(second.World, first.Mine) == 0);
 
+	// The service itself and all of its descendants stay out of every replica.
+	// A named row makes this an end-to-end secrecy check rather than a count that
+	// would pass if the server sent the service but not its contents.
+	const auto named = [](Store &world, std::string_view name) {
+		bool found = false;
+		world.EachEntity([&](Entity entity) {
+			if (world.InstanceNameOf(entity) == Name(name)) found = true;
+		});
+		return found;
+	};
+	CHECK_FALSE(named(first.World, "ServerOnlySecret"));
+	CHECK_FALSE(named(second.World, "ServerOnlySecret"));
+
 	// **And the gear inside them, which is what a `Tool` made worth asserting.**
 	// Four empty containers prove the predicate hides a *row* under a player; a
 	// game keys "what am I holding" off the contents, so what has to be proved is
@@ -1353,6 +1369,26 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 	CHECK(toolsUnder(first.World, second.Mine) == 0);
 	CHECK(toolsUnder(second.World, second.Mine) == 2);
 	CHECK(toolsUnder(second.World, first.Mine) == 0);
+
+	// Drop the second connection, then admit a new one. The listener owns the
+	// transport timeout, so this case only relies on the new connection getting
+	// its own private state rather than on a particular time for slot reuse.
+	second.Link.reset();
+	second.Socket->Close();
+	for (int tick = 0; tick < 60; tick++) {
+		first.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+
+	Remote reconnected;
+	REQUIRE(reconnected.Connect(first.Port));
+	REQUIRE(reconnected.Join(400));
+	Settle(first);
+	Settle(reconnected);
+
+	REQUIRE(reconnected.Mine != engine::ecs::NULL_ENTITY);
+	CHECK(swordIn(reconnected.World, reconnected.Mine, "Backpack"));
+	CHECK_FALSE(swordIn(reconnected.World, first.Mine, "Backpack"));
 
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);

@@ -308,6 +308,20 @@ namespace engine::replication {
 		//                  must not write to the store.
 		void SetInterest(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate);
 
+		// Decides which entities a client may see in one call.
+		//
+		// `candidates` are sorted by entity handle and `accepted` has the same
+		// length. Write a non-zero byte at each candidate the client may see.
+		// Setting this replaces the per-entity interest predicate.
+		//
+		// @param selector Called as `selector(ClientId, store, candidates, accepted)`.
+		//        It must be safe to call concurrently and must not write to the
+		//        store.
+		void SetInterestBatch(
+			std::function<
+				void(ClientId, const ecs::Store &, std::span<const ecs::Entity>, std::span<uint8_t>)> selector
+		);
+
 		// Scores which entities a client is sent first when not all of them
 		// fit.
 		//
@@ -1149,6 +1163,11 @@ namespace engine::replication {
 			// The entities this client may be sent, ascending by handle.
 			std::vector<ecs::Entity> Visible;
 
+			// Batch interest acceptance bytes, one per `BearingEntities` row. This
+			// belongs to the lane because batch selectors run concurrently for
+			// different clients.
+			std::vector<uint8_t> Accepted;
+
 			// The rows this tick built, and a permutation of them the priority
 			// pass puts in order.
 			//@{
@@ -1376,7 +1395,7 @@ namespace engine::replication {
 		void StageOversize(Client &client, ecs::Store &store, uint64_t tick);
 
 		void StreamSnapshot(Client &client);
-		// Filters `Bearing` through the host's interest predicate into
+		// Filters `BearingEntities` through the host's interest selector into
 		// `Lane::Visible`, ascending by handle.
 		void SelectVisible(Lane &lane, ClientId handle, const ecs::Store &store);
 
@@ -1433,6 +1452,8 @@ namespace engine::replication {
 
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Interest;
+		std::function<void(ClientId, const ecs::Store &, std::span<const ecs::Entity>, std::span<uint8_t>)>
+			InterestBatch;
 		std::function<float(ClientId, ecs::Entity)> Priority;
 
 		// The expensive half of the score, asked only about the rows in
@@ -1483,6 +1504,11 @@ namespace engine::replication {
 		std::vector<ecs::Entity> Preceding;
 
 		std::vector<uint64_t> Bearing;
+
+		// `Bearing` as entity handles, materialized once after each survey while a
+		// batch selector is installed. `PublishOne` only reads it while client
+		// lanes run.
+		std::vector<ecs::Entity> BearingEntities;
 
 		// The signed slots this tick, as indices into `Signatures`.
 		//

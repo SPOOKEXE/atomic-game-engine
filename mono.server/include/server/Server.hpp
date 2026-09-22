@@ -648,9 +648,9 @@ namespace server {
 
 		// Works out what every client can see, before any of them is served.
 		//
-		// Fills `HiddenFromClients` and `OwnedByPlayer` - see those members for
-		// why the client-independent half of the interest predicate is hoisted
-		// out of the per-client loop.
+		// Fills `VisibilityExceptions` - see that member for why the
+		// client-independent half of the interest predicate is hoisted out of
+		// the per-client loop.
 		//
 		// **Not `const`, because `EachEntity` is not**: walking a store binds it
 		// to the calling thread, which is a write however read-only the body is.
@@ -1380,7 +1380,7 @@ namespace server {
 		// viewpoint, which the score reads as "order these by rotation alone".
 		std::unordered_map<uint32_t, Viewpoint> Viewpoints;
 
-		// What `SetInterest` needs that does not depend on who is asking, worked
+		// What `SetInterestBatch` needs that does not depend on who is asking, worked
 		// out once per publish.
 		//
 		// **Because two of the predicate's three questions are about the world
@@ -1398,14 +1398,24 @@ namespace server {
 		// and nothing between the two mutates the world. It cannot drift,
 		// because it does not survive long enough to.
 		//
-		// Both are sorted by entity id, and both are usually tiny - the entities
-		// under a player, and the entities inside `ServerScriptService` and
-		// `ServerStorage`. Everything else answers "visible and unowned" after
-		// two failed binary searches.
-		//@{
-		std::vector<uint64_t> HiddenFromClients;
-		std::vector<std::pair<uint64_t, engine::ecs::Entity>> OwnedByPlayer;
-		//@}
+		// The list is sorted by the complete entity id and is usually tiny: rows
+		// under a player, and rows inside `ServerScriptService` or
+		// `ServerStorage`. Everything absent from it is public. The batch callback
+		// merge-walks it with the authority's sorted candidates, so it does one
+		// player-slot lookup per client instead of one per candidate.
+		enum class VisibilityExceptionKind : uint8_t {
+			Hidden,
+			RequirePlayer,
+			OwnerOnly,
+		};
+
+		struct VisibilityException {
+			uint64_t EntityId = 0;
+			VisibilityExceptionKind Kind = VisibilityExceptionKind::Hidden;
+			engine::ecs::Entity Owner;
+		};
+
+		std::vector<VisibilityException> VisibilityExceptions;
 
 		// The store `Listener::Publish` is walking, for as long as it is walking
 		// it. Null at every other moment.

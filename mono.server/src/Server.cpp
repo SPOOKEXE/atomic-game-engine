@@ -66,6 +66,7 @@
 #include <server/ContentRelay.hpp>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
+#include <span>
 #include <thread>
 
 namespace server {
@@ -2148,58 +2149,48 @@ namespace server {
 		// same split `SetOwnership` makes one block up: `mono.engine/replication`
 		// does not depend on `scene` and must not, because the wire's job is to
 		// move components and it has no business knowing what a service is.
-		Replication->Authority().SetInterest([this](
-												 engine::replication::ClientId client,
-												 engine::ecs::Entity entity,
-												 const engine::ecs::Store &store
-											 ) {
-			// **Two lookups into what `SurveyVisibility` worked out this tick,
-			// rather than two walks up the tree.** Both of those questions are
-			// about the world rather than about who is asking, and this runs once
-			// per entity per client - see `HiddenFromClients`.
-			if (std::binary_search(HiddenFromClients.begin(), HiddenFromClients.end(), entity.Id)) {
-				return false;
-			}
-
-			// **Almost everything is nobody's**, so this answers first and the
-			// player lookup below is paid only by the few rows under a player.
-			const auto owned = std::lower_bound(
-				OwnedByPlayer.begin(),
-				OwnedByPlayer.end(),
-				entity.Id,
-				[](const std::pair<uint64_t, engine::ecs::Entity> &row, uint64_t id) {
-					return row.first < id;
-				}
-			);
-			if (owned == OwnedByPlayer.end() || owned->first != entity.Id) {
-				return true;
-			}
-
-			const engine::ecs::Entity owner = owned->second;
-
-			// **The `Player` row itself goes to everybody; what is *under* it
-			// does not.** Roblox draws the line in the same place and for the
-			// same reason: `Players:GetPlayers()` is how a game knows who is in
-			// it, and a client shown only its own row would think it was alone.
-			// `server.replication`'s "a client is told which player is theirs"
-			// case is what caught this - the first version of this predicate hid
-			// every player from every other client, which reads as a lobby that
-			// never fills.
-			if (entity == owner) {
-				return true;
-			}
-
-			// **A client this server has forgotten sees nothing under any
-			// player**, rather than everything: the map is the only statement of
-			// who a connection is, and a handle it does not answer for is a
-			// connection that has gone. Failing open here would show a departing
-			// client every player's interface on its way out.
+		Replication->Authority().SetInterestBatch([this](
+													  engine::replication::ClientId client,
+													  const engine::ecs::Store &,
+													  std::span<const engine::ecs::Entity> candidates,
+													  std::span<uint8_t> accepted
+												  ) {
+			// **One client lookup for the whole batch.** A forgotten or recycled
+			// slot may still see public rows, but never any descendant of a
+			// `Player`; generation is the proof that the slot still names this
+			// connection.
 			const auto occupant = Players.find(client.Index);
-			if (occupant == Players.end() || occupant->second.Generation != client.Generation) {
-				return false;
+			const engine::ecs::Entity player =
+				occupant != Players.end() && occupant->second.Generation == client.Generation
+					? occupant->second.Instance
+					: engine::ecs::NULL_ENTITY;
+
+			size_t exception = 0;
+			for (size_t index = 0; index < candidates.size(); index++) {
+				const uint64_t entityId = candidates[index].Id;
+				while (exception < VisibilityExceptions.size() &&
+					   VisibilityExceptions[exception].EntityId < entityId) {
+					exception++;
+				}
+
+				uint8_t visible = 1;
+				if (exception < VisibilityExceptions.size() &&
+					VisibilityExceptions[exception].EntityId == entityId) {
+					const VisibilityException &entry = VisibilityExceptions[exception];
+					switch (entry.Kind) {
+					case VisibilityExceptionKind::Hidden:
+						visible = 0;
+						break;
+					case VisibilityExceptionKind::RequirePlayer:
+						visible = player != engine::ecs::NULL_ENTITY;
+						break;
+					case VisibilityExceptionKind::OwnerOnly:
+						visible = player != engine::ecs::NULL_ENTITY && entry.Owner == player;
+						break;
+					}
+				}
+				accepted[index] = visible;
 			}
-			const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
-			return privateOwner == engine::ecs::NULL_ENTITY || owner == occupant->second.Instance;
 		});
 
 		// A delta is the third reader of the dirty bits, so the components that
@@ -2257,8 +2248,7 @@ namespace server {
 	void Server::SurveyVisibility(engine::ecs::Store &store) {
 		ENGINE_PROFILE_CAT("Server::SurveyVisibility", engine::core::ProfileCategory::Network);
 
-		HiddenFromClients.clear();
-		OwnedByPlayer.clear();
+		VisibilityExceptions.clear();
 		if (Settings.GamePath.empty()) {
 			return;
 		}
@@ -2272,26 +2262,30 @@ namespace server {
 			return;
 		}
 
-		// **One walk for the world, where the predicate it feeds is one walk per
-		// entity per client.** `EachEntity` visits in archetype order, so both
-		// lists are sorted afterwards rather than assumed to be - the predicate
-		// reaches them by binary search.
+		// **One walk for the world, where the batch predicate it feeds walks only
+		// sorted candidates.** `EachEntity` visits in archetype order, so the
+		// exceptions are sorted afterwards rather than assumed to be.
 		store.EachEntity([this, &store](engine::ecs::Entity entity) {
 			if (!engine::scene::VisibleToClients(store, entity)) {
-				HiddenFromClients.push_back(entity.Id);
+				VisibilityExceptions.push_back({entity.Id, VisibilityExceptionKind::Hidden, {}});
 				return;
 			}
 
 			const engine::ecs::Entity owner = engine::scene::PlayerOwning(store, entity);
-			if (owner != engine::ecs::NULL_ENTITY) {
-				OwnedByPlayer.emplace_back(entity.Id, owner);
-			}
+			if (owner == engine::ecs::NULL_ENTITY || entity == owner) return;
+
+			const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
+			const VisibilityExceptionKind kind = privateOwner == engine::ecs::NULL_ENTITY
+													 ? VisibilityExceptionKind::RequirePlayer
+													 : VisibilityExceptionKind::OwnerOnly;
+			VisibilityExceptions.push_back({entity.Id, kind, privateOwner});
 		});
 
-		std::sort(HiddenFromClients.begin(), HiddenFromClients.end());
-		std::sort(OwnedByPlayer.begin(), OwnedByPlayer.end(), [](const auto &left, const auto &right) {
-			return left.first < right.first;
-		});
+		std::sort(
+			VisibilityExceptions.begin(),
+			VisibilityExceptions.end(),
+			[](const auto &left, const auto &right) { return left.EntityId < right.EntityId; }
+		);
 	}
 
 	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) const {
