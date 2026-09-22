@@ -566,7 +566,7 @@ void shadeSurface() {
 	float shadow = min(ShadowFactor(normal, toLight), PortalBeamFactor(inWorldPosition));
 	vec3 viewDirection = normalize(lighting.Eye.xyz - inWorldPosition);
 	vec3 halfway = normalize(viewDirection + toLight);
-	vec3 baseReflectance = mix(vec3(0.04), albedo, metalness);
+	vec3 baseReflectance = mix(vec3(0.04), albedo, metalness) * clamp(lighting.MaterialExtra.z, 0.0, 1.0);
 	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), baseReflectance);
 	float distribution = DistributionGGX(normal, halfway, roughness);
 	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *

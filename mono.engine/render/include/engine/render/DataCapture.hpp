@@ -99,8 +99,7 @@ namespace engine::render {
 		PbrAlbedo,
 		PbrMaterial,
 		PbrEmissive,
-		// The current material model has no authored specular or transmission fact.
-		// They remain requestable so consumers receive a terminal provenance record.
+		// Scalar authored factors; transmission is captured without physical refraction.
 		PbrSpecular,
 		PbrTransmission,
 		// Perspective-correct interpolated authored mesh texcoords at visible opaque pixels.
@@ -147,6 +146,8 @@ namespace engine::render {
 			channel == DataCaptureChannel::PbrAlbedo			  ? "-albedo"
 			: channel == DataCaptureChannel::PbrMaterial		  ? "-material"
 			: channel == DataCaptureChannel::PbrEmissive		  ? "-emissive"
+			: channel == DataCaptureChannel::PbrSpecular		  ? "-specular"
+			: channel == DataCaptureChannel::PbrTransmission	  ? "-transmission"
 			: channel == DataCaptureChannel::MeshUv				  ? "-mesh-uv"
 			: channel == DataCaptureChannel::AmbientOcclusion	  ? "-ambient-occlusion"
 			: channel == DataCaptureChannel::ObjectIds			  ? "-object-ids"

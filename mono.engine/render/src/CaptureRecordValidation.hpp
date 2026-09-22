@@ -41,7 +41,8 @@ namespace engine::render::capture_record_validation {
 
 	inline size_t MinimumRowStride(DataCaptureChannel channel, DataCaptureScalar scalar, uint32_t width) {
 		const bool valid =
-			(channel == DataCaptureChannel::RgbLinearHdr || channel == DataCaptureChannel::PbrEmissive)
+			(channel == DataCaptureChannel::RgbLinearHdr || channel == DataCaptureChannel::PbrEmissive ||
+			 channel == DataCaptureChannel::PbrTransmission)
 				? scalar == DataCaptureScalar::Float16
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors)
 				? scalar == DataCaptureScalar::Float16
@@ -56,7 +57,8 @@ namespace engine::render::capture_record_validation {
 			: (channel == DataCaptureChannel::AmbientOcclusion ||
 			   channel == DataCaptureChannel::ShadowVisibility ||
 			   channel == DataCaptureChannel::FirstSurfaceValidity ||
-			   channel == DataCaptureChannel::SecondSurfaceValidity)
+			   channel == DataCaptureChannel::SecondSurfaceValidity ||
+			   channel == DataCaptureChannel::PbrSpecular)
 				? scalar == DataCaptureScalar::UNorm8
 			: (channel == DataCaptureChannel::PbrAlbedo || channel == DataCaptureChannel::PbrMaterial)
 				? scalar == DataCaptureScalar::UNorm8
@@ -65,8 +67,10 @@ namespace engine::render::capture_record_validation {
 			(channel == DataCaptureChannel::AmbientOcclusion ||
 			 channel == DataCaptureChannel::ShadowVisibility ||
 			 channel == DataCaptureChannel::FirstSurfaceValidity ||
-			 channel == DataCaptureChannel::SecondSurfaceValidity)
+			 channel == DataCaptureChannel::SecondSurfaceValidity ||
+			 channel == DataCaptureChannel::PbrSpecular)
 				? 1
+			: channel == DataCaptureChannel::PbrTransmission										  ? 2
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors) ? 4
 			: (channel == DataCaptureChannel::PackedGpu || channel == DataCaptureChannel::DirectionalResponse)
 				? 16
@@ -173,11 +177,7 @@ namespace engine::render::capture_record_validation {
 											 plane.Channel == DataCaptureChannel::MotionVectors ||
 											 plane.Channel == DataCaptureChannel::OpticalFlow;
 			const std::string_view expectedUnavailable =
-				plane.Channel == DataCaptureChannel::PbrSpecular
-					? "unavailable/authored_specular_not_in_current_material_model/v1"
-				: plane.Channel == DataCaptureChannel::PbrTransmission
-					? "unavailable/authored_transmission_not_in_current_material_model/v1"
-				: plane.Channel == DataCaptureChannel::MotionVectors
+				plane.Channel == DataCaptureChannel::MotionVectors
 					? "unavailable/camera_reprojection_history_not_verified/v1"
 					: "unavailable/optical_flow_not_implemented/v1";
 			return terminal && !plane.AmbientOcclusion && !plane.PreviousCameraMotionFrame &&
@@ -215,7 +215,14 @@ namespace engine::render::capture_record_validation {
 				 ? plane.Provenance != "camera_reprojection/v1;components=delta_x_delta_y;units=pixels;"
 									   "surface=visible_static_builtin_opaque_or_masked;object_motion=false;"
 									   "disocclusion=unavailable;camera_history=verified"
-				 : !plane.Provenance.empty()) ||
+				 : (plane.Channel == DataCaptureChannel::PbrSpecular
+						? plane.Provenance !=
+							  "authored_specular_factor/v1;source=material_alpha;range=zero_to_one"
+					: plane.Channel == DataCaptureChannel::PbrTransmission
+						? plane.Provenance !=
+							  "authored_transmission_factor/"
+							  "v1;source=emissive_alpha;range=zero_to_one;refraction=unavailable"
+						: !plane.Provenance.empty())) ||
 			(plane.Channel == DataCaptureChannel::MotionVectors
 				 ? !plane.PreviousCameraMotionFrame || *plane.PreviousCameraMotionFrame == 0
 				 : plane.PreviousCameraMotionFrame.has_value()) ||

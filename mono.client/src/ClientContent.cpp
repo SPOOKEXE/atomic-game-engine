@@ -510,6 +510,8 @@ namespace client {
 					.OcclusionChannel = material.OcclusionChannel,
 					.HeightChannel = material.HeightChannel,
 					.MetalnessChannel = material.MetalnessChannel,
+					.SpecularFactor = material.SpecularFactor,
+					.TransmissionFactor = material.TransmissionFactor,
 				};
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and

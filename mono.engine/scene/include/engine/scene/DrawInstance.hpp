@@ -110,6 +110,8 @@ namespace engine::scene {
 		uint8_t OcclusionChannel = 255;
 		uint8_t HeightChannel = 255;
 		uint8_t MetalnessChannel = 255;
+		float SpecularFactor = 1.0f;
+		float TransmissionFactor = 0.0f;
 		//@}
 
 		// Which shader draws this instance, or invalid for the engine's own.
@@ -485,6 +487,8 @@ namespace engine::scene {
 			instance.OcclusionChannel = appearance->OcclusionChannel;
 			instance.HeightChannel = appearance->HeightChannel;
 			instance.MetalnessChannel = appearance->MetalnessChannel;
+			instance.SpecularFactor = appearance->SpecularFactor;
+			instance.TransmissionFactor = appearance->TransmissionFactor;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

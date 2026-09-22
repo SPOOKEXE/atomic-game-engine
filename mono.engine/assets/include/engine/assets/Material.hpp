@@ -96,6 +96,9 @@ namespace engine::assets {
 		uint8_t OcclusionChannel = 255;
 		uint8_t HeightChannel = 255;
 		uint8_t MetalnessChannel = 255;
+
+		float SpecularFactor = 1.0f;
+		float TransmissionFactor = 0.0f;
 		//@}
 
 		// Whether this describes a material at all.
@@ -128,7 +131,7 @@ namespace engine::assets {
 		// other four names are empty - so the older format is not a special case to translate, it is the
 		// newer one with four absent fields. That is what makes reading it a branch on how many strings to
 		// expect rather than a second parser.
-		static constexpr uint16_t VERSION = 5;
+		static constexpr uint16_t VERSION = 6;
 
 		// The longest asset name this will read.
 		//

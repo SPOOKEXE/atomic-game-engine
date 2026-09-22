@@ -18,21 +18,12 @@ namespace engine::render {
 		constexpr size_t MAX_DATA_CAPTURE_CHANNELS = static_cast<size_t>(DataCaptureChannel::PackedGpu) + 1;
 		constexpr uint8_t NO_DATA_CAPTURE_RESOURCE = UINT8_MAX;
 
-		bool AuthoredFactUnavailable(DataCaptureChannel channel) {
-			return channel == DataCaptureChannel::PbrSpecular ||
-				   channel == DataCaptureChannel::PbrTransmission;
-		}
-
 		bool UnimplementedTemporalFact(DataCaptureChannel channel) {
 			return channel == DataCaptureChannel::OpticalFlow;
 		}
 
 		const char *UnavailableProvenance(DataCaptureChannel channel) {
-			return channel == DataCaptureChannel::PbrSpecular
-					   ? "unavailable/authored_specular_not_in_current_material_model/v1"
-				   : channel == DataCaptureChannel::PbrTransmission
-					   ? "unavailable/authored_transmission_not_in_current_material_model/v1"
-				   : channel == DataCaptureChannel::MotionVectors
+			return channel == DataCaptureChannel::MotionVectors
 					   ? "unavailable/camera_reprojection_history_not_verified/v1"
 					   : "unavailable/optical_flow_not_implemented/v1";
 		}
@@ -70,8 +61,7 @@ namespace engine::render {
 			plane.Channel = channel;
 			plane.Status = DataCaptureStatus::Unsupported;
 			plane.CaptureNode = ticket.CaptureNode;
-			if (AuthoredFactUnavailable(channel) || channel == DataCaptureChannel::MotionVectors ||
-				channel == DataCaptureChannel::OpticalFlow)
+			if (channel == DataCaptureChannel::MotionVectors || channel == DataCaptureChannel::OpticalFlow)
 				plane.Provenance = UnavailableProvenance(channel);
 			return plane;
 		}
@@ -174,6 +164,52 @@ namespace engine::render {
 					DataCaptureColourSpace::Linear,
 					ResourceImageFormat::RGBA16_Float
 				);
+				break;
+			case DataCaptureChannel::PbrSpecular:
+				if (image.Resource == material && image.Format == ResourceImageFormat::RGBA8_UNorm &&
+					image.RowStride >= image.Width * 4) {
+					std::vector<std::byte> values(size_t(image.Width) * image.Height);
+					for (uint32_t y = 0; y < image.Height; ++y)
+						for (uint32_t x = 0; x < image.Width; ++x)
+							values[size_t(y) * image.Width + x] =
+								image.Pixels[size_t(y) * image.RowStride + size_t(x) * 4 + 3];
+					Ready(
+						plane,
+						material,
+						image.Width,
+						image.Height,
+						image.Width,
+						DataCaptureScalar::UNorm8,
+						DataCaptureColourSpace::NotApplicable,
+						values
+					);
+					plane.Provenance = "authored_specular_factor/v1;source=material_alpha;range=zero_to_one";
+				}
+				break;
+			case DataCaptureChannel::PbrTransmission:
+				if (image.Resource == emissive && image.Format == ResourceImageFormat::RGBA16_Float &&
+					image.RowStride >= image.Width * 8) {
+					std::vector<std::byte> values(size_t(image.Width) * image.Height * 2);
+					for (uint32_t y = 0; y < image.Height; ++y)
+						for (uint32_t x = 0; x < image.Width; ++x) {
+							const size_t source = size_t(y) * image.RowStride + size_t(x) * 8 + 6;
+							const size_t destination = (size_t(y) * image.Width + x) * 2;
+							values[destination] = image.Pixels[source];
+							values[destination + 1] = image.Pixels[source + 1];
+						}
+					Ready(
+						plane,
+						emissive,
+						image.Width,
+						image.Height,
+						image.Width * 2,
+						DataCaptureScalar::Float16,
+						DataCaptureColourSpace::NotApplicable,
+						values
+					);
+					plane.Provenance = "authored_transmission_factor/"
+									   "v1;source=emissive_alpha;range=zero_to_one;refraction=unavailable";
+				}
 				break;
 			case DataCaptureChannel::DirectionalResponse:
 				primary(
@@ -367,7 +403,7 @@ namespace engine::render {
 		State->CaptureTimings.emplace(queued.GpuTimingId, Impl::CaptureTiming{});
 		std::vector<core::Name> resourceNodes;
 		for (const DataCaptureChannel channel : request.Channels) {
-			if (AuthoredFactUnavailable(channel) || UnimplementedTemporalFact(channel)) {
+			if (UnimplementedTemporalFact(channel)) {
 				queued.ChannelResourceIndices.push_back(NO_DATA_CAPTURE_RESOURCE);
 				continue;
 			}

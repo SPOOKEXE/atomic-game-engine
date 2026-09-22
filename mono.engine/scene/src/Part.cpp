@@ -3413,6 +3413,8 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
 			ecs::Classes::Property<&SurfaceAppearance::PackedPbrMap>(meshPart, "PackedPbrMap");
+			ecs::Classes::Property<&SurfaceAppearance::SpecularFactor>(meshPart, "SpecularFactor");
+			ecs::Classes::Property<&SurfaceAppearance::TransmissionFactor>(meshPart, "TransmissionFactor");
 			ecs::Classes::Computed(
 				meshPart,
 				PackedPbrChannelProperty<&SurfaceAppearance::RoughnessChannel>("PackedRoughnessChannel")

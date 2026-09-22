@@ -1504,10 +1504,12 @@ namespace engine::graph {
 				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
 			);
 		}
-		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 3>{
+		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 5>{
 				 {{"data-capture-albedo", "albedo"},
 				  {"data-capture-material", "material"},
-				  {"data-capture-emissive", "emissive"}}
+				  {"data-capture-emissive", "emissive"},
+				  {"data-capture-specular", "material"},
+				  {"data-capture-transmission", "emissive"}}
 			 }) {
 			document.Record(
 				{.Kind = EditKind::AddNode,

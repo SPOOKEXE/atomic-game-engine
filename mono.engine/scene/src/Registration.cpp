@@ -988,6 +988,8 @@ namespace engine::scene {
 				writer.WriteUInt8(appearances[index].OcclusionChannel);
 				writer.WriteUInt8(appearances[index].HeightChannel);
 				writer.WriteUInt8(appearances[index].MetalnessChannel);
+				writer.WriteFloat(appearances[index].SpecularFactor);
+				writer.WriteFloat(appearances[index].TransmissionFactor);
 			}
 		}
 
@@ -1066,6 +1068,8 @@ namespace engine::scene {
 				appearances[index].OcclusionChannel = channel();
 				appearances[index].HeightChannel = channel();
 				appearances[index].MetalnessChannel = channel();
+				appearances[index].SpecularFactor = reader.ReadFloat();
+				appearances[index].TransmissionFactor = reader.ReadFloat();
 			}
 		}
 

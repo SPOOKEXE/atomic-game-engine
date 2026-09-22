@@ -188,7 +188,7 @@ vec4 ShadeDeferred(out vec4 directionalResponse) {
 	vec3 viewDirection = normalize(pass.Eye.xyz - world);
 	vec3 halfway = normalize(viewDirection + toLight);
 	float lambert = max(dot(normal, toLight), 0.0);
-	vec3 baseReflectance = mix(vec3(0.04), albedo.rgb, metalness);
+	vec3 baseReflectance = mix(vec3(0.04), albedo.rgb, metalness) * clamp(material.a, 0.0, 1.0);
 	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), baseReflectance);
 	float distribution = DistributionGGX(normal, halfway, roughness);
 	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *

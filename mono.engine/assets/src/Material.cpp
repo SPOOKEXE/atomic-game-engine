@@ -1,5 +1,7 @@
 #include <engine/assets/Material.hpp>
 
+#include <cmath>
+
 namespace engine::assets {
 
 	bool Material::Write(core::ByteWriter &writer, const MaterialData &data) {
@@ -10,7 +12,10 @@ namespace engine::assets {
 			(data.RoughnessChannel > 3 && data.RoughnessChannel != 255) ||
 			(data.OcclusionChannel > 3 && data.OcclusionChannel != 255) ||
 			(data.HeightChannel > 3 && data.HeightChannel != 255) ||
-			(data.MetalnessChannel > 3 && data.MetalnessChannel != 255)) {
+			(data.MetalnessChannel > 3 && data.MetalnessChannel != 255) ||
+			!std::isfinite(data.SpecularFactor) || data.SpecularFactor < 0.0f || data.SpecularFactor > 1.0f ||
+			!std::isfinite(data.TransmissionFactor) || data.TransmissionFactor < 0.0f ||
+			data.TransmissionFactor > 1.0f) {
 			return false;
 		}
 
@@ -34,6 +39,8 @@ namespace engine::assets {
 		writer.WriteUInt8(data.OcclusionChannel);
 		writer.WriteUInt8(data.HeightChannel);
 		writer.WriteUInt8(data.MetalnessChannel);
+		writer.WriteFloat(data.SpecularFactor);
+		writer.WriteFloat(data.TransmissionFactor);
 		return true;
 	}
 
@@ -72,6 +79,7 @@ namespace engine::assets {
 		std::string_view metalness;
 		std::string_view packedPbr;
 		uint8_t roughnessChannel = 255, occlusionChannel = 255, heightChannel = 255, metalnessChannel = 255;
+		float specularFactor = 1.0f, transmissionFactor = 0.0f;
 		if (version >= 2) {
 			normal = reader.ReadString();
 			roughness = reader.ReadString();
@@ -107,11 +115,17 @@ namespace engine::assets {
 			occlusionChannel = reader.ReadUInt8();
 			heightChannel = reader.ReadUInt8();
 			metalnessChannel = reader.ReadUInt8();
+			if (version >= 6) {
+				specularFactor = reader.ReadFloat();
+				transmissionFactor = reader.ReadFloat();
+			}
 			if (reader.Failed() || packedPbr.size() > MAXIMUM_NAME ||
 				(roughnessChannel > 3 && roughnessChannel != 255) ||
 				(occlusionChannel > 3 && occlusionChannel != 255) ||
 				(heightChannel > 3 && heightChannel != 255) ||
-				(metalnessChannel > 3 && metalnessChannel != 255)) {
+				(metalnessChannel > 3 && metalnessChannel != 255) || !std::isfinite(specularFactor) ||
+				specularFactor < 0.0f || specularFactor > 1.0f || !std::isfinite(transmissionFactor) ||
+				transmissionFactor < 0.0f || transmissionFactor > 1.0f) {
 				return false;
 			}
 		}
@@ -128,6 +142,8 @@ namespace engine::assets {
 		out.OcclusionChannel = occlusionChannel;
 		out.HeightChannel = heightChannel;
 		out.MetalnessChannel = metalnessChannel;
+		out.SpecularFactor = specularFactor;
+		out.TransmissionFactor = transmissionFactor;
 		return true;
 	}
 }

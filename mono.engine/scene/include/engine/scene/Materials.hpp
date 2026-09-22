@@ -133,6 +133,8 @@ namespace engine::scene {
 		uint8_t HeightChannel = 255;
 		// PackedPbr channel for metalness, or 255 when absent.
 		uint8_t MetalnessChannel = 255;
+		float SpecularFactor = 1.0f;
+		float TransmissionFactor = 0.0f;
 
 		// Whether this names anything at all.
 		//

@@ -107,8 +107,8 @@ void main() {
 	}
 	outAlbedo = vec4(albedo, surface.alpha);
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
-	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, 0.0);
-	outEmissive = vec4(emissive, 1.0);
+	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, clamp(MaterialExtra.z, 0.0, 1.0));
+	outEmissive = vec4(emissive, clamp(MaterialExtra.w, 0.0, 1.0));
 	outObjectId = inObjectLabel;
 	outSemanticId = inSemanticLabel;
 	outPartId = inPartLabel;

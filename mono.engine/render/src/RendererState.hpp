@@ -1249,6 +1249,8 @@ namespace engine::render {
 		std::vector<core::Name> SlotEmissiveMap;
 		std::vector<core::Name> SlotPackedPbrMap;
 		std::vector<glm::vec4> SlotPackedPbrChannels;
+		std::vector<float> SlotSpecularFactor;
+		std::vector<float> SlotTransmissionFactor;
 		std::vector<scene::SurfaceResampleMode> SlotResample;
 		// Whether a shadow run needs per-material alpha or seam state.
 		std::vector<uint8_t> SlotShadowDetail;
@@ -1468,6 +1470,8 @@ namespace engine::render {
 				   SlotEmissiveMap[next] == SlotEmissiveMap[slot] &&
 				   SlotPackedPbrMap[next] == SlotPackedPbrMap[slot] &&
 				   glm::all(glm::equal(SlotPackedPbrChannels[next], SlotPackedPbrChannels[slot])) &&
+				   SlotSpecularFactor[next] == SlotSpecularFactor[slot] &&
+				   SlotTransmissionFactor[next] == SlotTransmissionFactor[slot] &&
 				   SlotResample[next] == SlotResample[slot] && SlotShader[next] == SlotShader[slot] &&
 				   SlotSeam[next] == SlotSeam[slot] && SlotSeamFirst[next] == SlotSeamFirst[slot] &&
 				   SlotSeamSecond[next] == SlotSeamSecond[slot] &&
