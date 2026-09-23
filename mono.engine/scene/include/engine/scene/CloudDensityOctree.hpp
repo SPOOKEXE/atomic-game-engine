@@ -20,16 +20,23 @@ namespace engine::scene {
 
 	// Bounds and precision limits for a normalized cloud-density octree.
 	struct CloudDensityOctreeConfig {
+		// Minimum corner of the root bounds in tornado-local coordinates.
 		core::Vector3 RootMinimum{-512.0f, 0.0f, -512.0f};
+		// Positive width, height, and depth of the root bounds.
 		core::Vector3 RootSize{1024.0f, 512.0f, 1024.0f};
+		// Maximum subdivision depth, which sets the finest voxel size.
 		uint8_t MaximumDepth = 8;
+		// Values at or below this density are treated as empty.
 		float EmptyThreshold = 1.0e-4f;
 	};
 
 	// One node in the packed octree representation consumed by a volume renderer.
 	struct alignas(16) CloudDensityGpuNode {
+		// Child indices for octants zero through three; UINT32_MAX marks an absent child.
 		std::array<uint32_t, 4> ChildrenLow{};
+		// Child indices for octants four through seven; UINT32_MAX marks an absent child.
 		std::array<uint32_t, 4> ChildrenHigh{};
+		// The node density is in element zero; remaining elements are reserved.
 		std::array<float, 4> Values{};
 	};
 
@@ -50,17 +57,23 @@ namespace engine::scene {
 
 		// Removes occupied branches while retaining this tree's bounds.
 		void Clear();
+		// Returns the bounds and depth settings this tree was created with.
 		[[nodiscard]] const CloudDensityOctreeConfig &Config() const {
 			return config_;
 		}
+		// Returns the size of one voxel at the configured maximum depth.
 		[[nodiscard]] core::Vector3 VoxelSize() const;
+		// Returns the recursively averaged density stored at the root.
 		[[nodiscard]] float AverageDensity() const;
+		// Returns the number of currently active octree nodes.
 		[[nodiscard]] size_t NodeCount() const {
 			return activeNodeCount_;
 		}
+		// Returns the number of occupied leaf voxels.
 		[[nodiscard]] size_t StoredVoxelCount() const {
 			return storedVoxelCount_;
 		}
+		// Packs nodes for the renderer, retaining slots left by erased branches.
 		[[nodiscard]] std::vector<CloudDensityGpuNode> GpuNodes() const;
 
 	  private:

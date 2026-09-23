@@ -218,7 +218,7 @@ namespace engine::replication {
 		//
 		// @param component The component's registered name.
 		// @param detection How changes are detected.
-		// @param resource Whether the name identifies a world resource instead of an entity component.
+		// @param resource Whether to replicate the component as a world resource.
 		void Replicate(
 			core::Name component, ChangeDetection detection = ChangeDetection::Observed, bool resource = false
 		);

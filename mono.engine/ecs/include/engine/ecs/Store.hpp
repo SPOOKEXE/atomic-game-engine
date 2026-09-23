@@ -548,13 +548,24 @@ namespace engine::ecs {
 
 		// The type-erased resource boundary used by serializers that resolve a
 		// stable component name at runtime.
+		//
+		// @param id Registered component type id of the resource.
+		// @return A pointer to the stored value, or `nullptr` when unset.
 		const void *ResourceById(ComponentId id) const {
 			return GetResourceRaw(id);
 		}
+		// Copies a registered resource value into this world for type-erased
+		// serializers and replication code.
+		//
+		// @param id Registered component type id of the resource.
+		// @param value Pointer to a value matching the registered component type.
 		void SetResourceById(ComponentId id, const void *value) {
 			RequireOwningThread("SetResourceById");
 			SetResourceRaw(id, value);
 		}
+		// Removes the resource identified by its registered component type id.
+		//
+		// @param id Registered component type id of the resource.
 		void RemoveResourceById(ComponentId id) {
 			RequireOwningThread("RemoveResourceById");
 			RemoveResourceRaw(id);

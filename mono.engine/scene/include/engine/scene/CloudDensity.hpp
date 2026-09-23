@@ -19,28 +19,43 @@ namespace engine::scene {
 
 	// Controls the coarse outer volume and funnel-local refinement.
 	struct CloudDensityBuildConfig {
+		// Octree depth used outside the locally refined region.
 		uint8_t CoarseDepth = 5;
+		// Octree depth used inside the locally refined region.
 		uint8_t FineDepth = 7;
+		// Radius of the refined region, measured in tornado core radii.
 		float FineRadiusInCoreRadii = 2.5f;
+		// Densities below this cutoff are omitted from the octree.
 		float MinimumDensity = 0.026f;
 	};
 
 	// Counts produced by one adaptive cloud-density rebuild.
 	struct CloudDensityBuildStats {
+		// Total coarse and fine cell centers evaluated by the density function.
 		size_t EvaluatedCells = 0;
+		// Coarse-depth cells retained in the tree.
 		size_t CoarseCells = 0;
+		// Fine-depth cells retained in the tree.
 		size_t FineCells = 0;
+		// Occupied leaf voxels after the rebuild.
 		size_t StoredLeaves = 0;
+		// Active octree nodes after the rebuild.
 		size_t Nodes = 0;
 	};
 
 	// An owned, renderer-facing cloud field. Coordinates are tornado-local;
 	// Centre translates them into the presented world's coordinates.
 	struct CloudDensitySnapshot {
+		// World-space position of the tornado-local field origin.
 		core::Vector3 Centre;
+		// Bounds and depth settings used to build the packed nodes.
 		CloudDensityOctreeConfig Config;
+		// Renderer-ready packed octree nodes.
 		std::vector<CloudDensityGpuNode> Nodes;
 
+		// Reports whether the snapshot contains packed octree data.
+		//
+		// @return `true` when at least one node is present.
 		[[nodiscard]] bool IsValid() const {
 			return !Nodes.empty();
 		}
