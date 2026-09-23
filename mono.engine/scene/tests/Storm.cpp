@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cmath>
+#include <utility>
 
 TEST_SUITE_ID("engine.scene.storm")
 TEST_DEPENDS("engine.core.types")
@@ -98,6 +99,44 @@ TEST_CASE("prepared field matches deterministic reference fixtures", "[scene][st
 	}
 }
 
+TEST_CASE("EF and Q field samples match TornadoSim reference fixtures", "[scene][storm]") {
+	struct Fixture {
+		float Tangential;
+		float Inflow;
+		float Updraft;
+		Vector3 Velocity;
+		float Potential;
+	};
+	constexpr std::array FIXTURES{
+		Fixture{11.283473f, 4.115903f, 2.906791f, {10.024008f, .651069f, 13.142146f}, .031175f},
+		Fixture{20.800848f, 8.009912f, 6.860350f, {14.329248f, 4.107254f, 23.578329f}, .094094f},
+		Fixture{34.006016f, 13.940103f, 13.719780f, {19.535351f, 10.269013f, 38.511238f}, .221202f},
+		Fixture{50.757362f, 22.033022f, 24.185247f, {25.786077f, 19.691429f, 57.901539f}, .428369f},
+		Fixture{71.638649f, 32.953224f, 38.834202f, {33.179909f, 33.213676f, 82.376328f}, .751830f},
+		Fixture{97.362549f, 46.501331f, 58.281773f, {42.642582f, 51.262539f, 112.548340f}, 1.0f},
+		Fixture{121.529617f, 55.648186f, 89.440186f, {58.001450f, 80.245300f, 139.824051f}, 1.0f},
+		Fixture{142.341629f, 64.093597f, 125.568459f, {75.835579f, 112.857841f, 164.842682f}, 1.0f},
+		Fixture{158.905991f, 71.980515f, 151.260757f, {89.603416f, 134.218094f, 186.490570f}, 1.0f},
+		Fixture{166.361450f, 76.979828f, 149.172379f, {99.320244f, 126.241302f, 197.852676f}, 1.0f},
+		Fixture{169.044693f, 76.529503f, 121.786079f, {110.797150f, 91.134575f, 201.893326f}, 1.0f},
+		Fixture{176.353012f, 71.934746f, 90.803902f, {130.054962f, 52.393543f, 207.688446f}, 1.0f},
+	};
+	const Vector3 centre{12.0f, 0.0f, -7.0f};
+	const Vector3 position{53.0f, 80.0f, -38.0f};
+	for (size_t index = 0; index < FIXTURES.size(); ++index) {
+		const TornadoParameters parameters =
+			index < 6 ? EfPreset(static_cast<EfCategory>(index)) : QPreset(static_cast<QCategory>(index - 6));
+		const auto sample = SampleTornadoField(parameters, centre, position, 17.25f);
+		const Fixture &expected = FIXTURES[index];
+		INFO("preset index: " << index);
+		CHECK(sample.TangentialSpeed == Catch::Approx(expected.Tangential).margin(1.0e-5f));
+		CHECK(sample.InflowSpeed == Catch::Approx(expected.Inflow).margin(1.0e-5f));
+		CHECK(sample.UpdraftSpeed == Catch::Approx(expected.Updraft).margin(1.0e-5f));
+		CHECK(sample.Velocity.FuzzyEq(expected.Velocity, 1.0e-5f));
+		CHECK(sample.DamagePotential == Catch::Approx(expected.Potential).margin(1.0e-5f));
+	}
+}
+
 TEST_CASE("the tornado field retains its two-cell circulation", "[scene][storm]") {
 	TornadoParameters circulation;
 	circulation.TranslationVelocity = Vector3::Zero;
@@ -125,6 +164,18 @@ TEST_CASE("the tornado field retains its two-cell circulation", "[scene][storm]"
 }
 
 TEST_CASE("storm lifecycle and gameplay queries share the field", "[scene][storm]") {
+	const std::array lifecycleFixtures{
+		std::pair{0.0f, .12f},
+		std::pair{8.1f, .435f},
+		std::pair{16.2f, .75f},
+		std::pair{45.0f, .912868857f},
+		std::pair{61.2f, .75f},
+		std::pair{90.0f, .12f},
+	};
+	for (const auto &[seconds, energy] : lifecycleFixtures) {
+		CHECK(LifecycleEnergy(seconds) == Catch::Approx(energy).margin(1.0e-6f));
+	}
+
 	StormState storm;
 	storm.Parameters.TranslationVelocity = {4.0f, 0.0f, 1.5f};
 	storm.LifecycleEnabled = true;
@@ -141,6 +192,14 @@ TEST_CASE("storm lifecycle and gameplay queries share the field", "[scene][storm
 	intense.Parameters.TranslationVelocity = Vector3::Zero;
 	const auto near = QueryStormVisibility(intense, {{intense.Parameters.CoreRadius, 20.0f, 0.0f}, 300.0f});
 	const auto far = QueryStormVisibility(intense, {{1000.0f, 20.0f, 0.0f}, 300.0f});
+	CHECK(near.Clarity == Catch::Approx(.191687584f).margin(1.0e-6f));
+	CHECK(near.EffectiveDistance == Catch::Approx(57.506275f).margin(1.0e-5f));
+	CHECK(near.RainObscuration == Catch::Approx(.992671251f).margin(1.0e-6f));
+	CHECK(near.CondensationObscuration == Catch::Approx(.994401634f).margin(1.0e-6f));
+	CHECK(far.Clarity == Catch::Approx(.906157494f).margin(1.0e-6f));
+	CHECK(far.EffectiveDistance == Catch::Approx(271.847260f).margin(1.0e-5f));
+	CHECK(far.RainObscuration == Catch::Approx(.313154995f).margin(1.0e-6f));
+	CHECK(far.CondensationObscuration == Catch::Approx(0.0f).margin(1.0e-6f));
 	CHECK(near.Clarity < far.Clarity);
 	CHECK(near.EffectiveDistance < 300.0f);
 	CHECK(near.CondensationObscuration > far.CondensationObscuration);

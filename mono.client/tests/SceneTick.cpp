@@ -1428,7 +1428,24 @@ TEST_CASE(
 
 		const engine::physics::Storm *storm = engine::physics::StormOf(store);
 		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.Energy == Approx(0.78f));
+		CHECK(storm->State.Parameters.Energy == Approx(0.72f));
+		CHECK(storm->State.Parameters.CoreRadius == Approx(34.0f));
+		CHECK(storm->State.Parameters.InfluenceRadius == Approx(260.0f));
+		CHECK(storm->State.Parameters.PeakTangentialSpeed == Approx(92.0f));
+		CHECK(storm->State.Parameters.PeakInflowSpeed == Approx(34.0f));
+		CHECK(storm->State.Parameters.PeakUpdraftSpeed == Approx(58.0f));
+		CHECK(storm->State.Parameters.PeakDowndraftSpeed == Approx(32.0f));
+		CHECK(storm->State.Parameters.SurfaceOutflowSpeed == Approx(28.0f));
+		CHECK(storm->State.Parameters.PressureDrop == Approx(72.0f));
+		CHECK(storm->State.Parameters.Humidity == Approx(.82f));
+		CHECK(storm->State.Parameters.RainRate == Approx(.68f));
+		CHECK(storm->State.Parameters.Turbulence == Approx(13.0f));
+		CHECK(storm->State.Parameters.GroundFriction == Approx(.28f));
+		CHECK(storm->State.Parameters.DebrisDensity == Approx(.65f));
+		CHECK(storm->State.Parameters.VortexTightness == Approx(2.25f));
+		CHECK(storm->State.Parameters.TopHeight == Approx(360.0f));
+		CHECK((storm->State.Parameters.UpperWind == engine::core::Vector3{18.0f, 0.0f, -6.0f}));
+		CHECK((storm->State.Parameters.TranslationVelocity == engine::core::Vector3{4.0f, 0.0f, 1.5f}));
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"motion","x":-15,"y":5,"z":25}')
