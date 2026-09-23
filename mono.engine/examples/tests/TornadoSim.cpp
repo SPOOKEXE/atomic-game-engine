@@ -77,10 +77,10 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Wall Cloud East") != std::string::npos);
 	CHECK(document.find("Anvil Back Shelf") != std::string::npos);
 	CHECK(document.find("Tornado Wind Bed") != std::string::npos);
-	CHECK(document.find("examples/audio/tornado-wind.wav") != std::string::npos);
+	CHECK(document.find("audio/tornado-wind.wav") != std::string::npos);
 	CHECK(document.find("windBed.Playing = not windBed.Playing") != std::string::npos);
 
-	const std::filesystem::path audio = world.parent_path().parent_path() / "audio" / "tornado-wind.wav";
+	const std::filesystem::path audio = world.parent_path().parent_path().parent_path() / "audio" / "tornado-wind.wav";
 	CHECK(std::filesystem::is_regular_file(audio));
 	CHECK(std::filesystem::file_size(audio) > 1024U);
 }

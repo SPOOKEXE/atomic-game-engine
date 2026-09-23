@@ -236,18 +236,18 @@ foreach(world IN LISTS example_worlds)
 	list(APPEND staged_scenes "${world_staged}")
 endforeach()
 
-# Ambient demo audio is ordinary staged content. Keeping it alongside the
-# world assets makes a SoundId resolve through the same local content path as
-# the scene that owns it.
+# Ambient demo audio is ordinary staged content. Its location is the published
+# SoundId path, so `cdn --publish` can carry it from a clean build without a
+# scene-specific path rewrite.
 file(GLOB example_audio CONFIGURE_DEPENDS
 	"${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/*.wav")
 
 foreach(audio IN LISTS example_audio)
 	get_filename_component(audio_name "${audio}" NAME)
-	set(audio_staged "${MONO_STAGE_ROOT}/assets/examples/audio/${audio_name}")
+	set(audio_staged "${MONO_STAGE_ROOT}/assets/audio/${audio_name}")
 	add_custom_command(
 		OUTPUT "${audio_staged}"
-		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/audio"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/audio"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${audio}" "${audio_staged}"
 		DEPENDS "${audio}"
 		COMMENT "Staging example audio ${audio_name}"
