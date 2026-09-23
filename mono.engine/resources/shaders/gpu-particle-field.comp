@@ -29,19 +29,46 @@ uint Mix(uint value) {
 
 float Unit(uint value) { return float(Mix(value) >> 8u) * (1.0 / 16777216.0); }
 
-void Reset(uint index) {
-	float kind = floor(Unit(index ^ uint(field.control.y)) * 3.0);
+float FunnelRadiusAt(float height) {
+	float heightScale = min(1.0, 500.0 / max(field.radii.z, 1.0));
+	return max(field.radii.x, 1.0) * (0.38 + 0.0036 * max(height, 0.0) * heightScale);
+}
+
+float ParticleKind(uint index) {
+	uint lane = index % 16u;
+	return float(lane < 7u ? 0u : (lane < 12u ? 1u : (lane < 14u ? 2u : 3u)));
+}
+
+void Reset(uint index, uint cycle) {
+	float kind = ParticleKind(index);
 	uint layer = 1u << uint(kind);
 	if ((uint(field.control.w) & layer) == 0u) kind = 3.0;
-	float angle = Unit(index * 3u + 1u) * 6.28318530718;
-	float radius = mix(field.radii.x * 0.35, field.radii.y, Unit(index * 3u + 2u));
-	// Twelve stable depth slices keep the full particle count from becoming one
-	// thick billboard sheet when a camera looks along the funnel.
-	float height = (float(index % 12u) + Unit(index * 3u + 3u)) * (field.radii.z / 12.0);
+	uint randomCycle = cycle + uint(field.control.y);
+	float angle = Unit(index * 5u + randomCycle + 1u) * 6.28318530718;
+	float radialSample = Unit(index * 5u + randomCycle + 2u);
+	float heightSample = Unit(index * 5u + randomCycle + 3u);
+	float height = kind < 0.5 ? 0.25 + pow(heightSample, 0.72) * field.radii.z * 0.99
+		: (kind < 1.5 ? 80.0 + heightSample * max(field.radii.z - 80.0, 1.0)
+		: (kind < 2.5 ? 0.5 + pow(heightSample, 1.6) * 7.0
+					  : 0.5 + pow(heightSample, 1.3) * 14.0));
+	float radius = kind < 0.5
+		? FunnelRadiusAt(height) * (0.55 + sqrt(radialSample) * 0.45)
+		: (kind < 1.5 ? sqrt(radialSample) * field.radii.y * 1.32
+		: (kind < 2.5 ? min(field.radii.x * (3.4 + radialSample * 2.2), field.radii.y * 0.95)
+					  : field.radii.y * (0.58 + radialSample * 0.37)));
+	// The fixed lanes keep the layer mix stable while the hashed cycle lets a
+	// recycled parcel rejoin a different soft billow on the same annulus.
+	if (kind < 0.5) {
+		float billow =
+			0.5 + 0.5 * sin(angle * 3.0 + Unit(index + randomCycle + 4u) * 6.28318530718);
+		radius = clamp(radius * mix(0.90, 1.08, billow), FunnelRadiusAt(height) * 0.55,
+			FunnelRadiusAt(height));
+	}
 	states.rows[index * 2u] = vec4(
 		field.centreTime.xyz + vec3(cos(angle) * radius, height, sin(angle) * radius), kind
 	);
-	states.rows[index * 2u + 1u] = vec4(0.0, 0.0, 0.0, Unit(index * 5u + 4u) * 15.0);
+	states.rows[index * 2u + 1u] =
+		vec4(0.0, 0.0, 0.0, Unit(index * 7u + randomCycle + 4u) * 15.0);
 }
 
 void main() {
@@ -49,7 +76,7 @@ void main() {
 	uint activeCount = uint(field.control.x);
 	if (index >= activeCount) return;
 	if (field.control.z > 0.5) {
-		Reset(index);
+		Reset(index, 0u);
 		return;
 	}
 
@@ -66,12 +93,14 @@ void main() {
 	float heightFraction = clamp(offset.y / max(field.radii.z, 1.0), 0.0, 1.0);
 	float lift = field.wind.z * exp(-pow((radius - core) / core, 2.0)) * (1.0 - heightFraction);
 	vec3 target = tangent * turn * influence - radial * inward + vec3(0.0, lift, 0.0);
-	if (positionKind.w > 1.5) target += vec3(0.0, -field.wind.w * 22.0, 0.0);
+	if (positionKind.w > 0.5) target += vec3(0.0, -field.wind.w * 22.0, 0.0);
 	velocityAge.xyz += (target - velocityAge.xyz) * min(field.radii.w * 2.5, 1.0);
 	positionKind.xyz += velocityAge.xyz * field.radii.w;
 	velocityAge.w += field.radii.w;
 	if (length(positionKind.xyz - field.centreTime.xyz) > field.radii.y * 1.25 ||
-		positionKind.y < 0.0 || positionKind.y > field.radii.z) Reset(index);
+		positionKind.y < 0.0 || positionKind.y > field.radii.z) {
+		Reset(index, uint(max(velocityAge.w, 0.0) * 31.0) + 1u);
+	}
 	else {
 		states.rows[index * 2u] = positionKind;
 		states.rows[index * 2u + 1u] = velocityAge;

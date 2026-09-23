@@ -67,6 +67,44 @@ namespace {
 		}
 		return pixels;
 	}
+
+	struct PixelBounds {
+		uint32_t Left = 0;
+		uint32_t Top = 0;
+		uint32_t Right = 0;
+		uint32_t Bottom = 0;
+		bool Found = false;
+
+		uint32_t Width() const { return Found ? Right - Left + 1 : 0; }
+		uint32_t Height() const { return Found ? Bottom - Top + 1 : 0; }
+	};
+
+	PixelBounds RedParticleBounds(const CapturedImage &image, const CapturedImage &empty) {
+		REQUIRE(image.Format == ImageFormat::Bgra8Unorm);
+		PixelBounds bounds;
+		for (uint32_t y = 0; y < image.Height; ++y) {
+			for (uint32_t x = 0; x < image.Width; ++x) {
+				const size_t offset = y * image.RowStrideBytes + x * 4;
+				const auto channel = [&](size_t index) {
+					return std::to_integer<int>(image.Bytes[offset + index]);
+				};
+				if ((image.Bytes[offset] == empty.Bytes[offset] &&
+					 image.Bytes[offset + 1] == empty.Bytes[offset + 1] &&
+					 image.Bytes[offset + 2] == empty.Bytes[offset + 2]) ||
+					channel(2) <= channel(1) || channel(2) <= channel(0))
+					continue;
+				if (!bounds.Found) {
+					bounds = {x, y, x, y, true};
+				} else {
+					bounds.Left = std::min(bounds.Left, x);
+					bounds.Top = std::min(bounds.Top, y);
+					bounds.Right = std::max(bounds.Right, x);
+					bounds.Bottom = std::max(bounds.Bottom, y);
+				}
+			}
+		}
+		return bounds;
+	}
 }
 
 TEST_CASE(
@@ -140,6 +178,12 @@ TEST_CASE(
 	);
 	CHECK(ChangedBytes(empty, redImage) > 64);
 	CHECK(RedDominantPixels(redImage, empty) > 64);
+	const PixelBounds condensation = RedParticleBounds(redImage, empty);
+	// The red-only capture isolates the condensation lanes. Its tall, narrow
+	// envelope proves reset placed them around the height-scaled funnel wall,
+	// rather than across the full storm influence radius.
+	CHECK(condensation.Height() > target.Height / 3);
+	CHECK(condensation.Width() < target.Width / 3);
 
 	auto smallerFainter = FieldView(target, 262'144, 17);
 	smallerFainter.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
