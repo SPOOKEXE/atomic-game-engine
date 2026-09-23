@@ -8,8 +8,8 @@ layout(location = 1) out float outVisibility;
 // `pass.Shadow.z` is -1 for a spot light. Point lights render one cube face at
 // a time, so the six passes partition fragments by their dominant light axis.
 bool LocalShadowFace(vec3 fromLight) {
+	if (pass.Shadow.z < 0.0) return true;
 	int face = int(pass.Shadow.z + 0.5);
-	if (face < 0) return true;
 	vec3 axis = abs(fromLight);
 	if (axis.x >= axis.y && axis.x >= axis.z) return face == (fromLight.x >= 0.0 ? 0 : 1);
 	if (axis.y >= axis.z) return face == (fromLight.y >= 0.0 ? 2 : 3);
