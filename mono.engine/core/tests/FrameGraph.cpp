@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -510,51 +511,26 @@ TEST_CASE("the recent maximum keeps a spike an ordinary frame would hide", "[fra
 TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]") {
 	Collecting collecting;
 
-	// **The loop is timed as well as profiled**, and the assertion below is
-	// against that rather than against a number of milliseconds. A ceiling like
-	// "under 3 ms" is a claim about the machine: burns of a millisecond each
-	// take that long on an idle box and can take three times as long on a loaded
-	// one, so the test failed about one run in six while the code was correct.
-	//
-	// **A ratio was the first fix and it was not enough, for a reason worth
-	// keeping.** The comment here used to say the wall clock and the profiler
-	// stretch together - true only if the stretch is *uniform*, and a scheduler
-	// does not work that way. It preempts one span. With four repeats a single
-	// stall of three milliseconds puts the maximum past sixty percent of a loop
-	// that should have been four, and the case failed under this repository's
-	// own parallel test sweep while the code was right.
-	//
-	// **Sixteen repeats rather than four**, which widens the gap the assertion
-	// is measuring instead of loosening the assertion. A total now reads about
-	// sixteen times a single reading, so one preempted burn among sixteen is
-	// still far below the ceiling - the discrimination gets stronger and the
-	// flake goes, which is the opposite trade from raising the bound.
-	constexpr int REPEATS = 16;
-
-	const auto started = std::chrono::steady_clock::now();
+	constexpr std::array<float, 4> readings = {1.0f, 3.0f, 2.0f, 4.0f};
 
 	FrameGraph::BeginFrame();
-	for (int repeat = 0; repeat < REPEATS; repeat++) {
-		ENGINE_PROFILE("four-times");
-		BurnMilliseconds(1.0);
+	for (const float milliseconds : readings) {
+		FrameGraph::Report("repeated", ProfileCategory::Engine, milliseconds);
 	}
 	FrameGraph::EndFrame();
 
-	const float spent =
-		std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == readings.size());
+	float maximum = 0.0f;
+	float total = 0.0f;
+	for (const auto &span : spans) {
+		CHECK(span.Name == "repeated");
+		maximum = std::max(maximum, span.Milliseconds);
+		total += span.Milliseconds;
+	}
 
-	// Sixteen opens of about a millisecond each. **A total would read near the
-	// whole loop; a single reading reads near a sixteenth of it** - and that is
-	// the difference the column has to show, so that it compares with the
-	// per-frame figure printed beside it.
-	//
-	// A third, which is nowhere near either answer: a sixteenth is far under it
-	// and a total is far over, and one stalled burn among sixteen cannot cross
-	// it however slow the machine got.
-	const float worst = FrameGraph::RecentMaximum("four-times");
-	INFO("worst " << worst << " ms of " << spent << " ms spent over " << REPEATS << " opens");
-	REQUIRE(worst >= 0.5f);
-	REQUIRE(worst < spent * 0.33f);
+	CHECK(total > maximum);
+	CHECK(FrameGraph::RecentMaximum("repeated") == maximum);
 }
 
 TEST_CASE("a span that stops running decays out of the window", "[framegraph]") {
