@@ -43,9 +43,8 @@ namespace {
 		return mesh;
 	}
 
-	void InstallCapturePipeline(Renderer &renderer) {
+	void InstallCapturePipeline(Renderer &renderer, core::Name pipeline, core::Name kind) {
 		graph::PipelineDocument document = graph::DefaultPbrDocument();
-		const core::Name kind("volume-test-boundary");
 		graph::NodeKindSpec boundary;
 		boundary.Kind = kind;
 		boundary.Scope = graph::NodeScope::Frame;
@@ -68,7 +67,7 @@ namespace {
 		graph::RenderGraph graph;
 		core::Name offender;
 		REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
-		REQUIRE(renderer.SetPipeline(PIPELINE, graph));
+		REQUIRE(renderer.SetPipeline(pipeline, graph));
 	}
 
 	scene::VolumeState Volume(const core::Color3 &colour) {
@@ -116,6 +115,57 @@ namespace {
 		}
 	}
 
+	// A deliberately saturated environment makes every producer visible in the
+	// final LDR capture: generated sky and scattering feed clouds, clouds feed
+	// sky, local media shades the receiver, and the projected sun feeds shafts.
+	void ConfigureCombinedLighting(View &view) {
+		scene::WorldLighting &lighting = view.Lighting;
+		lighting.Direction = {0.0f, 0.0f, 1.0f};
+		lighting.FogStart = 1'000.0f;
+		lighting.FogEnd = 1'001.0f;
+		lighting.GodRayIntensity = 1.5f;
+		lighting.GodRayThreshold = 0.15f;
+		lighting.GodRayRadius = 40.0f;
+
+		scene::Environment &environment = lighting.EnvironmentState;
+		environment.Skybox = scene::SkyboxSource::Compute;
+		environment.SkyCompute.Zenith = {0.03f, 0.08f, 0.28f};
+		environment.SkyCompute.Horizon = {1.0f, 0.38f, 0.05f};
+		environment.SkyCompute.Ground = {0.01f, 0.015f, 0.025f};
+		environment.SkyCompute.SunSize = 0.18f;
+		environment.SkyCompute.Seed = 67;
+		environment.SkyCompute.Shader = scene::SkyboxComputeShader::Sunset;
+		environment.SkyCompute.Enabled = true;
+		environment.HasAtmosphere = true;
+		environment.HasAtmosphereCompute = true;
+		environment.Air.Colour = {0.82f, 0.49f, 0.27f};
+		environment.Air.Decay = {0.18f, 0.09f, 0.04f};
+		environment.Air.Density = 0.72f;
+		environment.Air.Glare = 3.0f;
+		environment.Air.Haze = 4.0f;
+		environment.AirCompute.Rayleigh = 1.3f;
+		environment.AirCompute.Mie = 0.8f;
+		environment.AirCompute.Samples = 24;
+		environment.AirCompute.Enabled = true;
+		environment.HasClouds = true;
+		environment.HasCloudCompute = true;
+		environment.CloudLayer.Colour = {1.0f, 0.72f, 0.46f};
+		environment.CloudLayer.Cover = 0.36f;
+		environment.CloudLayer.Density = 0.92f;
+		environment.CloudLayer.WindSpeed = 8.0f;
+		environment.CloudLayer.WindDirection = {0.6f, 0.8f};
+		environment.CloudLayer.Enabled = true;
+		environment.CloudVolume.CellSize = 0.14f;
+		environment.CloudVolume.Detail = 0.8f;
+		environment.CloudVolume.Height = 0.25f;
+		environment.CloudVolume.Thickness = 0.2f;
+		environment.CloudVolume.Seed = 91;
+		environment.CloudVolume.Steps = 32;
+		environment.CloudVolume.Shader = scene::CloudComputeShader::Storm;
+		environment.CloudVolume.Enabled = true;
+		environment.CloudTime = 0.75;
+	}
+
 	CapturedImage RenderOrder(Renderer &renderer, View &view, bool reversed) {
 		SetVolumeOrder(view, reversed);
 		OverlayImage overlay;
@@ -131,7 +181,7 @@ TEST_CASE(
 ) {
 	FixtureDevice fixture;
 	fixture.Initialise();
-	InstallCapturePipeline(fixture.Render);
+	InstallCapturePipeline(fixture.Render, PIPELINE, core::Name("volume-test-boundary"));
 
 	const core::Name receiver("volume.gpu.receiver");
 	REQUIRE(fixture.Render.AddMesh(receiver, Receiver()));
@@ -238,4 +288,85 @@ TEST_CASE(
 		std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 	std::cout << "volume stress frames=" << frames
 			  << ", end-to-end ms/frame=" << milliseconds / double(frames) << '\n';
+}
+
+TEST_CASE(
+	"combined atmosphere clouds local fog and god rays change one Vulkan capture",
+	"[render][gpu][volume][lighting]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
+	const core::Name pipeline("volume.gpu.lighting");
+	InstallCapturePipeline(fixture.Render, pipeline, core::Name("volume-lighting-test-boundary"));
+
+	const core::Name receiver("volume.gpu.lighting.receiver");
+	REQUIRE(fixture.Render.AddMesh(receiver, Receiver()));
+	scene::DrawInstance instance;
+	instance.Source = 1;
+	instance.Mesh = receiver;
+	instance.Frame.Position = {0.0f, 0.0f, -6.0f};
+	instance.HalfExtent = {4.0f, 4.0f, 0.01f};
+	instance.Tint = {0.65f, 0.65f, 0.65f};
+	instance.CastShadow = false;
+
+	SceneTarget target{EXTENT, EXTENT};
+	View view;
+	view.World = 222;
+	view.WorldName = core::Name("volume.gpu.lighting.world");
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = 0.25f;
+	view.Camera.FarPlane = 32.0f;
+	view.Instances = std::span(&instance, 1);
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1.0f, 1.0f, 1.0f};
+	view.Lighting.OutdoorAmbient = {};
+	view.Lighting.Direct = {};
+	SetVolumeOrder(view, false);
+	ConfigureCombinedLighting(view);
+	OverlayImage overlay;
+
+	const FrameResult combinedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(combinedFrame.ComputeDispatches >= 2);
+	CHECK(combinedFrame.Ran(core::Name("skybox-compute")));
+	CHECK(combinedFrame.Ran(core::Name("clouds-compute")));
+	CHECK(combinedFrame.Ran(core::Name("fog")));
+	CHECK(combinedFrame.Ran(core::Name("god-rays")));
+	const CapturedImage combined = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+
+	view.Lighting.VolumeCount = 0;
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const CapturedImage withoutVolumes = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+	CHECK(CompareImages(combined.View(), withoutVolumes.View()).MismatchedPixels > EXTENT * EXTENT / 8);
+
+	SetVolumeOrder(view, false);
+	view.Lighting.GodRayIntensity = 0.0f;
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const CapturedImage withoutGodRays = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+	CHECK(CompareImages(combined.View(), withoutGodRays.View()).MismatchedPixels > EXTENT / 2);
+
+	view.Lighting.GodRayIntensity = 1.5f;
+	view.Lighting.EnvironmentState.HasCloudCompute = false;
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const CapturedImage withoutCloudCompute = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+	CHECK(CompareImages(combined.View(), withoutCloudCompute.View()).MismatchedPixels > EXTENT * EXTENT / 8);
+
+	view.Lighting.EnvironmentState.HasCloudCompute = true;
+	view.Lighting.EnvironmentState.HasAtmosphere = false;
+	view.Lighting.EnvironmentState.HasAtmosphereCompute = false;
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const CapturedImage withoutAtmosphere = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+	CHECK(CompareImages(combined.View(), withoutAtmosphere.View()).MismatchedPixels > EXTENT * EXTENT / 8);
 }
