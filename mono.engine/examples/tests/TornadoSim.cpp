@@ -24,7 +24,8 @@ namespace {
 
 	std::optional<Vector3Components> LocalVector3(const std::string &document, const std::string &name) {
 		const std::regex assignment(
-			"local\\s+" + name + "\\s*=\\s*Vector3\\.new\\(\\s*(-?[0-9]+(?:\\.[0-9]+)?)\\s*,\\s*"
+			"local\\s+" + name +
+			"\\s*=\\s*Vector3\\.new\\(\\s*(-?[0-9]+(?:\\.[0-9]+)?)\\s*,\\s*"
 			"(-?[0-9]+(?:\\.[0-9]+)?)\\s*,\\s*(-?[0-9]+(?:\\.[0-9]+)?)\\s*\\)"
 		);
 		std::smatch match;

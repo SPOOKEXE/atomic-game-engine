@@ -1485,9 +1485,9 @@ TEST_CASE(
 		REQUIRE(field != nullptr);
 		CHECK_FALSE(condensation->Enabled);
 		CHECK(condensation->Rate == Approx(0.0f));
-		CHECK_FALSE(engine::scene::HasGpuParticleLayer(
-			*field, engine::scene::GpuParticleLayer::Condensation
-		));
+		CHECK_FALSE(
+			engine::scene::HasGpuParticleLayer(*field, engine::scene::GpuParticleLayer::Condensation)
+		);
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"preset","name":"EF5"}')
