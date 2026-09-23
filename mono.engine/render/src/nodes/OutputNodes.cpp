@@ -535,21 +535,37 @@ namespace engine::render {
 					const DataCaptureSource &captureSource = slot < State->DataCaptureSources.size()
 																 ? State->DataCaptureSources[slot]
 																 : State->ActiveDataCaptureSource;
-					const auto source = recording.ResourceTexture(colorId, slot, false);
+					auto source = recording.ResourceTexture(colorId, slot, false);
 					const auto depth =
 						depthDesc ? recording.ResourceTexture(depthId, slot, false) : Impl::NamedTexture{};
 					auto normal =
 						normalDesc ? recording.ResourceTexture(normalId, slot, false) : Impl::NamedTexture{};
-					if (normal.IsValid() && slot < State->PbrSlots.size()) {
+					if (slot < State->PbrSlots.size()) {
 						const auto &pbr = State->PbrSlots[slot];
-						if (normal.Texture == pbr.Normal && source.Width == pbr.Dimensions.ViewWidth &&
-							source.Height == pbr.Dimensions.ViewHeight && normal.Width >= source.Width &&
-							normal.Height >= source.Height) {
-							// Native GBuffer storage is padded; its rendered viewport begins at (0, 0).
-							// Copy that rectangle directly, preserving every packed normal bit.
-							normal.Width = source.Width;
-							normal.Height = source.Height;
-						}
+						const auto cropNative = [&](Impl::NamedTexture &image) {
+							if (!image.IsValid() || captureSource.Width != pbr.Dimensions.ViewWidth ||
+								captureSource.Height != pbr.Dimensions.ViewHeight ||
+								image.Width < captureSource.Width || image.Height < captureSource.Height)
+								return;
+							for (SDL_GPUTexture *native :
+								 {pbr.Albedo,
+								  pbr.Normal,
+								  pbr.Material,
+								  pbr.Emissive,
+								  pbr.MeshUv,
+								  pbr.ObjectIds,
+								  pbr.SemanticIds,
+								  pbr.PartIds}) {
+								if (image.Texture != native) continue;
+								// These targets are block-padded, but the image outside the
+								// viewport was never rasterized by the camera.
+								image.Width = captureSource.Width;
+								image.Height = captureSource.Height;
+								return;
+							}
+						};
+						cropNative(source);
+						cropNative(normal);
 					}
 					const RenderObservationContext observation = DataFactoryObservation(
 						recording, context, selectedPipeline->Name, slot, captureSource
