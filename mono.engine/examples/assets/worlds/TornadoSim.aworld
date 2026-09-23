@@ -93,6 +93,7 @@ for _, parameter in ipairs(Controls.parameters) do
 end
 local particleField = workspace:FindFirstChild("TornadoParticles", true)
 local environmentResetRequested = false
+local environmentRefreshRequested = false
 local environmentObserverPosition = Controls.default.Position
 
 -- Authority applies validated requests from the in-game controls.
@@ -135,6 +136,7 @@ controlEvent.OnServerEvent:Connect(function(payload: string)
 	elseif request.kind == "observer" and type(request.x) == "number" and type(request.z) == "number"
 		and math.abs(request.x) <= 4096 and math.abs(request.z) <= 4096 then
 		environmentObserverPosition = Vector3.new(request.x, 0, request.z)
+		environmentRefreshRequested = true
 	elseif request.kind == "lifecycle" and type(request.value) == "boolean" then
 		Storm.Configure({ LifecycleEnabled = request.value })
 	end
@@ -497,7 +499,8 @@ RunService.Heartbeat:Connect(function(delta: number)
 	end
 	environmentClock += delta
 	environmentElapsed += delta
-	if environmentClock < 0.75 then return end
+	if not environmentRefreshRequested and environmentClock < 0.75 then return end
+	environmentRefreshRequested = false
 	environmentClock = 0
 	streamEnvironmentCells(environmentObserverPosition)
 	cleanupRetainedCells(environmentElapsed)
