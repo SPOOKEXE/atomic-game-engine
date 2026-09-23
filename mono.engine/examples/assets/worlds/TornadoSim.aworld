@@ -89,6 +89,7 @@ for _, parameter in ipairs(Controls.parameters) do
 end
 local particleField = workspace:FindFirstChild("TornadoParticles", true)
 local environmentResetRequested = false
+local environmentObserverPosition = Controls.default.Position
 
 -- Authority applies validated requests from the in-game controls.
 controlEvent.OnServerEvent:Connect(function(payload: string)
@@ -118,60 +119,78 @@ controlEvent.OnServerEvent:Connect(function(payload: string)
 	elseif request.kind == "enabled" and type(request.value) == "boolean" then
 		Storm.Configure({ Enabled = request.value })
 	elseif request.kind == "reset" then
+		Storm.Configure({ ElapsedSeconds = 0 })
 		Storm.Configure(Controls.default)
 		environmentResetRequested = true
+	elseif request.kind == "observer" and type(request.x) == "number" and type(request.z) == "number"
+		and math.abs(request.x) <= 4096 and math.abs(request.z) <= 4096 then
+		environmentObserverPosition = Vector3.new(request.x, 0, request.z)
 	elseif request.kind == "lifecycle" and type(request.value) == "boolean" then
 		Storm.Configure({ LifecycleEnabled = request.value })
 	end
 end)
 
-local interaction = workspace:FindFirstChild("StormInteraction")
-if interaction ~= nil then
-	local mast = interaction:FindFirstChild("SteelMast") :: Part
-	local woodenSign = interaction:FindFirstChild("WoodenSign") :: Part
-	local steelPanel = interaction:FindFirstChild("SteelPanel") :: Part
-	local tree = interaction:FindFirstChild("WindBentTree") :: Part
+local interactionConnections: { RBXScriptConnection } = {}
 
-	-- Each failure keeps its material multiplier separate from the structural rating.
+local function interactionPart(name: string, position: Vector3, size: Vector3, colour: Color3, anchored: boolean, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Position = position
+	part.Size = size
+	part.Color = colour
+	part.Anchored = anchored
+	part.Parent = parent
+	return part
+end
+
+local function rebuildInteraction()
+	for _, connection in ipairs(interactionConnections) do connection:Disconnect() end
+	interactionConnections = {}
+	local old = workspace:FindFirstChild("StormInteraction")
+	if old then old:Destroy() end
+	local interaction = Instance.new("Folder")
+	interaction.Name = "StormInteraction"
+	interaction.Parent = workspace
+	local mast = interactionPart("SteelMast", Vector3.new(-28, 5, -12), Vector3.new(0.7, 10, 0.7), Color3.fromRGB(46, 51, 56), true, interaction)
+	local woodenSign = interactionPart("WoodenSign", Vector3.new(-25.3, 7, -12), Vector3.new(5, 2.8, 0.25), Color3.fromRGB(82, 46, 20), false, interaction)
+	local steelPanel = interactionPart("SteelPanel", Vector3.new(-25.8, 3.5, -12), Vector3.new(3.2, 2.1, 0.2), Color3.fromRGB(87, 92, 94), false, interaction)
+	local tree = interactionPart("WindBentTree", Vector3.new(13.630354, 7, -15.45179), Vector3.new(1.1, 14, 1.1), Color3.fromRGB(69, 51, 31), true, interaction)
+
 	woodenSign.StormExposedArea = 12.0
 	woodenSign.StormDragCoefficient = 1.15
 	woodenSign.StormForceScale = 1.0
 	steelPanel.StormExposedArea = 7.0
 	steelPanel.StormDragCoefficient = 1.05
 	steelPanel.StormForceScale = 0.7
-
 	tree.StormRestFrame = tree.CFrame
 	tree.StormMaximumBendRadians = 0.52
 	tree.StormResponsePerSecond = 5.0
 	tree.StormWindSpeedForMaximumBend = 72.0
 
-	local woodLink = Instance.new("WeldConstraint")
-	woodLink.Name = "Wood Sign Wind Link"
-	woodLink.Part0 = mast
-	woodLink.Part1 = woodenSign
-	woodLink.StormBreakForce = 360.0
-	woodLink.StormMaterialStrength = 0.55
-	woodLink.Parent = interaction
-
-	local steelLink = Instance.new("WeldConstraint")
-	steelLink.Name = "Steel Panel Wind Link"
-	steelLink.Part0 = mast
-	steelLink.Part1 = steelPanel
-	steelLink.StormBreakForce = 640.0
-	steelLink.StormMaterialStrength = 1.65
-	steelLink.Parent = interaction
+	local function stormLink(name: string, part: Part, breakForce: number, strength: number): WeldConstraint
+		local link = Instance.new("WeldConstraint")
+		link.Name = name
+		link.Part0 = mast
+		link.Part1 = part
+		link.StormBreakForce = breakForce
+		link.StormMaterialStrength = strength
+		link.Parent = interaction
+		return link
+	end
 
 	local function retireWhenBroken(link: WeldConstraint, part: Part)
 		local retired = false
-		RunService.Heartbeat:Connect(function()
+		table.insert(interactionConnections, RunService.Heartbeat:Connect(function()
 			if retired or link.Enabled then return end
 			retired = true
 			local damage = Storm.Damage(part.Position)
 			Debris:AddItem(part, if damage.Potential > 0.5 then 5.0 else 10.0)
 			Debris:AddItem(link, 10.0)
-		end)
+		end))
 	end
 
+	local woodLink = stormLink("Wood Sign Wind Link", woodenSign, 360.0, 0.55)
+	local steelLink = stormLink("Steel Panel Wind Link", steelPanel, 640.0, 1.65)
 	retireWhenBroken(woodLink, woodenSign)
 	retireWhenBroken(steelLink, steelPanel)
 end
@@ -248,9 +267,12 @@ local function assembly(name: string, origin: Vector3, yaw: number, columns: num
 	end
 end
 
-assembly("Timber Farmhouse", Vector3.new(-76, 0, 119), math.rad(24), 3, 3, 2, material.timber)
-assembly("Masonry Depot", Vector3.new(46, 0, 83), math.rad(-31), 4, 2, 3, material.masonry)
-assembly("Steel Workshop", Vector3.new(96, 0, 177), math.rad(47), 2, 4, 2, material.steel)
+local function rebuildAssemblies()
+	for _, child in ipairs(assemblies:GetChildren()) do child:Destroy() end
+	assembly("Timber Farmhouse", Vector3.new(-76, 0, 119), math.rad(24), 3, 3, 2, material.timber)
+	assembly("Masonry Depot", Vector3.new(46, 0, 83), math.rad(-31), 4, 2, 3, material.masonry)
+	assembly("Steel Workshop", Vector3.new(96, 0, 177), math.rad(47), 2, 4, 2, material.steel)
+end
 
 -- The vehicle body and every wheel are regular rigid parts. A single weak
 -- tie-down uses StormLink, so the same fatigue pass that releases roof panels
@@ -323,8 +345,11 @@ local environment = Instance.new("Folder")
 environment.Name = "Tornado Environment Cells"
 environment.Parent = workspace
 local loadedCells: { [string]: Folder } = {}
+local retainedCells: { { Cell: Folder, RetireAt: number } } = {}
 local environmentCellSize = 160
-local environmentRadius = 1
+local environmentRadius = 2
+local retainedCellLimit = 8
+local retainedCellSeconds = 45.0
 
 local function environmentKey(cellX: number, cellZ: number): string
 	return cellX .. ":" .. cellZ
@@ -341,6 +366,18 @@ local function environmentalPart(name: string, position: Vector3, size: Vector3,
 	return part
 end
 
+local function weatherAttachedScenery(name: string, position: Vector3, size: Vector3, colour: Color3, breakForce: number, parent: Instance): Part
+	local part = vehiclePart(name, CFrame.new(position), size, colour, parent)
+	part.StormExposedArea = size.X * size.Y
+	local anchor = environmentalPart(name .. " Anchor", position - Vector3.new(0, size.Y * 0.5, 0), Vector3.new(0.25, 0.25, 0.25), Color3.fromRGB(0, 0, 0), parent)
+	anchor.Visible = false
+	local link = vehicleJoint(name .. " Wind Link", anchor, part, parent)
+	link.StormBreakForce = breakForce
+	link.StormMaterialStrength = 0.72
+	link.StormDamageRate = 1.2
+	return part
+end
+
 local function appendEnvironmentCell(cellX: number, cellZ: number)
 	local key = environmentKey(cellX, cellZ)
 	if loadedCells[key] ~= nil then return end
@@ -353,11 +390,15 @@ local function appendEnvironmentCell(cellX: number, cellZ: number)
 		local x = origin.X + ((index * 47 + cellZ * 19) % 130) - 65
 		local z = origin.Z + ((index * 71 + cellX * 23) % 130) - 65
 		if index % 3 == 0 then
-			environmentalPart("Cell Tree " .. index, Vector3.new(x, 5.5, z), Vector3.new(1.05, 11, 1.05), Color3.fromRGB(67, 55, 36), cell)
+			local tree = environmentalPart("Cell Tree " .. index, Vector3.new(x, 5.5, z), Vector3.new(1.05, 11, 1.05), Color3.fromRGB(67, 55, 36), cell)
+			tree.StormRestFrame = tree.CFrame
+			tree.StormMaximumBendRadians = 0.46
+			tree.StormResponsePerSecond = 4.2
+			tree.StormWindSpeedForMaximumBend = 78.0
 		elseif index % 3 == 1 then
-			environmentalPart("Cell Sign " .. index, Vector3.new(x, 2.1, z), Vector3.new(3.6, 1.8, 0.2), Color3.fromRGB(137, 87, 42), cell)
+			weatherAttachedScenery("Cell Sign " .. index, Vector3.new(x, 2.1, z), Vector3.new(3.6, 1.8, 0.2), Color3.fromRGB(137, 87, 42), 980, cell)
 		else
-			environmentalPart("Cell Roof Panel " .. index, Vector3.new(x, 1.4, z), Vector3.new(4.4, 0.18, 2.8), Color3.fromRGB(85, 59, 44), cell)
+			weatherAttachedScenery("Cell Roof Panel " .. index, Vector3.new(x, 1.4, z), Vector3.new(4.4, 0.18, 2.8), Color3.fromRGB(85, 59, 44), 1650, cell)
 		end
 	end
 	if math.abs(cellX * 17 + cellZ * 31) % 3 == 0 then
@@ -389,9 +430,35 @@ local function streamEnvironmentCells(position: Vector3)
 	end
 	for key, cell in pairs(loadedCells) do
 		if not wanted[key] then
-			cell:Destroy()
+			local released = false
+			for _, descendant in ipairs(cell:GetDescendants()) do
+				if descendant:IsA("WeldConstraint") and not descendant.Enabled then
+					released = true
+					break
+				end
+			end
+			if released then
+				cell.Parent = environment
+				table.insert(retainedCells, { Cell = cell, RetireAt = os.clock() + retainedCellSeconds })
+			else
+				cell:Destroy()
+			end
 			loadedCells[key] = nil
 		end
+	end
+end
+
+local function cleanupRetainedCells(now: number)
+	for index = #retainedCells, 1, -1 do
+		local retained = retainedCells[index]
+		if now >= retained.RetireAt or retained.Cell.Parent == nil then
+			retained.Cell:Destroy()
+			table.remove(retainedCells, index)
+		end
+	end
+	while #retainedCells > retainedCellLimit do
+		retainedCells[1].Cell:Destroy()
+		table.remove(retainedCells, 1)
 	end
 end
 
@@ -400,10 +467,14 @@ local function resetEnvironment()
 		cell:Destroy()
 		loadedCells[key] = nil
 	end
+	for _, retained in ipairs(retainedCells) do retained.Cell:Destroy() end
+	retainedCells = {}
 	local intercept = environment:FindFirstChild("Tornado Chase Intercept")
 	if intercept then intercept:Destroy() end
+	rebuildInteraction()
+	rebuildAssemblies()
 	chaseVehicle("Tornado Chase Intercept", Vector3.new(-84, 1, -54), math.rad(2), environment)
-	streamEnvironmentCells(Controls.default.Position)
+	streamEnvironmentCells(environmentObserverPosition)
 end
 
 resetEnvironment()
@@ -416,9 +487,9 @@ RunService.Heartbeat:Connect(function(delta: number)
 	environmentClock += delta
 	if environmentClock < 0.75 then return end
 	environmentClock = 0
-	streamEnvironmentCells(Storm.Snapshot().Position)
+	streamEnvironmentCells(environmentObserverPosition)
+	cleanupRetainedCells(os.clock())
 end)
-streamEnvironmentCells(Controls.default.Position)
 ]]></Source>
 		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
 local StarterGui = game:GetService("StarterGui")
@@ -557,6 +628,7 @@ observerHead.Parent = observer
 local observerPosition = observerRoot.Position
 local observerHeading = Vector3.new(0, 0, 1)
 local observerFollow = false
+local observerPublishElapsed = 0.0
 
 local function updateObserverVisual()
 	observerRoot.Position = observerPosition
@@ -1315,6 +1387,11 @@ RunService.Heartbeat:Connect(function(delta: number)
 		end
 	end
 	updateObserverVisual()
+	observerPublishElapsed += delta
+	if observerPublishElapsed >= 0.5 then
+		observerPublishElapsed = 0
+		request({ kind = "observer", x = observerPosition.X, z = observerPosition.Z })
+	end
 	if cameraOrbit then
 		local orbit = elapsed * 0.16
 		local position = Vector3.new(math.cos(orbit) * 205, 72, 95 + math.sin(orbit) * 205) + stormOffset
