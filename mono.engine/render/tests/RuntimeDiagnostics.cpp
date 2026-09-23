@@ -1,6 +1,6 @@
 // The diagnostic geometry is deliberate approximation, so its contract is
-// pinned without a GPU: finite influence probes stop at render bounds and a
-// frozen visibility camera can differ from the inspection camera.
+// pinned without a GPU: probes cross noncasting bounds, stop at opaque casting
+// bounds, and a frozen visibility camera can differ from the inspection camera.
 
 #include <engine/render/RuntimeDiagnostics.hpp>
 #include <engine/testing/Suite.hpp>
@@ -74,6 +74,114 @@ TEST_CASE(
 	const auto *travel = Find(paths.Segments(), LightProbeEvent::EmptySpace, Vector3{0.0f, 0.0f, -1.0f});
 	REQUIRE(travel != nullptr);
 	CHECK(travel->Line.To.Z == Catch::Approx(-7.0f));
+}
+
+TEST_CASE(
+	"light probes pass through noncasting bounds before an opaque stop", "[render][runtime-diagnostics]"
+) {
+	SceneLight light;
+	light.Range = 10.0f;
+	DrawInstance pane;
+	pane.Frame = CFrame(Vector3{0.0f, 0.0f, -3.0f});
+	pane.HalfExtent = Vector3{1.0f, 1.0f, 0.5f};
+	DrawInstance wall;
+	wall.Frame = CFrame(Vector3{0.0f, 0.0f, -6.0f});
+	wall.HalfExtent = Vector3{1.0f, 1.0f, 1.0f};
+	std::array<DrawInstance, 2> instances{pane, wall};
+	LightPathGeometry paths;
+	const auto build = [&] { paths.Build(std::span(&light, 1), instances); };
+	const auto pass = [&] {
+		return Find(paths.Segments(), LightProbeEvent::PassThrough, Vector3{0.0f, 0.0f, -1.0f});
+	};
+
+	instances[0].Transparency = 0.5f;
+	build();
+	REQUIRE(pass() != nullptr);
+	CHECK(pass()->Line.From.Z == Catch::Approx(-2.5f));
+	CHECK(pass()->Line.To.Z == Catch::Approx(-3.5f));
+	bool travelAfterPane = false;
+	bool stopAtWall = false;
+	for (const auto &segment : paths.Segments()) {
+		if (segment.Event == LightProbeEvent::EmptySpace && segment.Line.From.Z == Catch::Approx(-3.5f) &&
+			segment.Line.To.Z == Catch::Approx(-5.0f))
+			travelAfterPane = true;
+		if (segment.Event != LightProbeEvent::Termination) continue;
+		stopAtWall |= ((segment.Line.From.Z + segment.Line.To.Z) * 0.5f == Catch::Approx(-5.0f));
+	}
+	CHECK(travelAfterPane);
+	CHECK(stopAtWall);
+
+	instances[0].Transparency = 0.0f;
+	instances[0].TransmissionFactor = 0.5f;
+	build();
+	CHECK(pass() != nullptr);
+
+	instances[0].TransmissionFactor = 0.0f;
+	instances[0].CastShadow = false;
+	build();
+	CHECK(pass() != nullptr);
+
+	instances[0].CastShadow = true;
+	instances[0].Alpha = engine::scene::AlphaMode::Transparency;
+	build();
+	CHECK(pass() == nullptr);
+	const auto *opaqueTravel =
+		Find(paths.Segments(), LightProbeEvent::EmptySpace, Vector3{0.0f, 0.0f, -1.0f});
+	REQUIRE(opaqueTravel != nullptr);
+	CHECK(opaqueTravel->Line.To.Z == Catch::Approx(-2.5f));
+}
+
+TEST_CASE(
+	"light probe pass-through intervals remain bounded and nonoverlapping", "[render][runtime-diagnostics]"
+) {
+	SceneLight light;
+	light.Range = 30.0f;
+	std::array<DrawInstance, 18> panes{};
+	for (size_t index = 0; index < panes.size(); ++index) {
+		panes[index].Frame = CFrame(Vector3{0.0f, 0.0f, -1.0f - static_cast<float>(index)});
+		panes[index].HalfExtent = Vector3{0.5f, 0.5f, 0.25f};
+		panes[index].Transparency = 0.5f;
+	}
+	LightPathGeometry paths;
+	paths.Build(std::span(&light, 1), panes);
+	size_t passes = 0;
+	float furthest = 0.0f;
+	for (const auto &segment : paths.Segments()) {
+		if (segment.Event != LightProbeEvent::PassThrough ||
+			(segment.Line.To - segment.Line.From).Unit() != Vector3{0.0f, 0.0f, -1.0f})
+			continue;
+		++passes;
+		CHECK(segment.Line.From.Z <= furthest);
+		furthest = segment.Line.To.Z;
+	}
+	CHECK(passes == 16);
+	CHECK(furthest == Catch::Approx(-16.25f));
+}
+
+TEST_CASE("overlapping pass-through bounds stop at the light range", "[render][runtime-diagnostics]") {
+	SceneLight light;
+	light.Range = 4.5f;
+	std::array<DrawInstance, 2> panes{};
+	panes[0].Frame = CFrame(Vector3{0.0f, 0.0f, -3.0f});
+	panes[1].Frame = CFrame(Vector3{0.0f, 0.0f, -4.0f});
+	for (DrawInstance &pane : panes) {
+		pane.HalfExtent = Vector3{0.5f, 0.5f, 1.0f};
+		pane.Transparency = 0.5f;
+	}
+	LightPathGeometry paths;
+	paths.Build(std::span(&light, 1), panes);
+	float orangeDistance = 0.0f;
+	float previousEnd = 0.0f;
+	for (const auto &segment : paths.Segments()) {
+		if (segment.Event != LightProbeEvent::PassThrough ||
+			(segment.Line.To - segment.Line.From).Unit() != Vector3{0.0f, 0.0f, -1.0f})
+			continue;
+		CHECK(segment.Line.From.Z <= previousEnd);
+		orangeDistance += segment.Line.From.Z - segment.Line.To.Z;
+		previousEnd = segment.Line.To.Z;
+	}
+	CHECK(orangeDistance == Catch::Approx(2.5f));
+	CHECK(previousEnd == Catch::Approx(-4.5f));
 }
 
 TEST_CASE(

@@ -1293,7 +1293,9 @@ TEST_CASE(
 				.Width = 32, .Height = 32, .RecursionDepth = 0, .PixelBudget = 1024
 			};
 			REQUIRE(CollectPortalImageDemands(store, viewer, settings, demands, portals, slots).Ready == 1);
-			REQUIRE(demands.size() == 1);
+			REQUIRE(demands.size() == 2);
+			CHECK_FALSE(demands[0].SeamRadiance);
+			CHECK(demands[1].SeamRadiance);
 			request = demands[0].Request;
 			binding = demands[0].Binding;
 			request.Key.PortalKey = "Door";

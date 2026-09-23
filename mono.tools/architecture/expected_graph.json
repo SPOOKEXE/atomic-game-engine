@@ -323,6 +323,7 @@
       "links": [
         "assets",
         "collision",
+        "control",
         "core",
         "ecs",
         "effects",
@@ -784,6 +785,7 @@
       "links": [
         "assets",
         "collision",
+        "control",
         "core",
         "ecs",
         "effects",

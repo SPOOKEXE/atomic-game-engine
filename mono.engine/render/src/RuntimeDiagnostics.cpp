@@ -20,6 +20,7 @@ namespace engine::render {
 		using core::Vector3;
 
 		constexpr float MINIMUM_DISTANCE = 0.01f;
+		constexpr size_t MAX_PASS_THROUGH_BOUNDS = 16;
 		constexpr Color3 EMPTY_SPACE{0.10f, 0.55f, 1.0f};
 		constexpr Color3 PASS_THROUGH{1.0f, 0.48f, 0.08f};
 		constexpr Color3 REFLECTION{1.0f, 0.48f, 0.08f};
@@ -40,7 +41,12 @@ namespace engine::render {
 			return EMPTY_SPACE;
 		}
 
-		std::optional<float> RayBoxDistance(const Ray &ray, const AABB &bounds, float maximum) {
+		struct RayBound {
+			float Enter = 0.0f;
+			float Leave = 0.0f;
+		};
+
+		std::optional<RayBound> RayBoxDistance(const Ray &ray, const AABB &bounds, float maximum) {
 			float enter = 0.0f;
 			float leave = maximum;
 			const std::array<float, 3> origin{ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
@@ -63,12 +69,19 @@ namespace engine::render {
 			}
 
 			if (leave < MINIMUM_DISTANCE) return std::nullopt;
-			return enter >= MINIMUM_DISTANCE ? enter : leave;
+			return RayBound{enter, leave};
 		}
 
-		std::optional<float>
-		FirstBound(const Ray &ray, float maximum, std::span<const scene::DrawInstance> instances) {
-			std::optional<float> nearest;
+		struct ProbeBounds {
+			float Stop = 0.0f;
+			std::array<RayBound, MAX_PASS_THROUGH_BOUNDS> PassThrough{};
+			size_t Count = 0;
+		};
+
+		ProbeBounds
+		TraceBounds(const Ray &ray, float maximum, std::span<const scene::DrawInstance> instances) {
+			ProbeBounds result;
+			result.Stop = maximum;
 			for (const scene::DrawInstance &instance : instances) {
 				const AABB bounds = graph::BoundsOf(instance);
 				// A local light commonly shares its part's bounds. Treating that
@@ -79,9 +92,29 @@ namespace engine::render {
 					continue;
 				}
 				const auto hit = RayBoxDistance(ray, bounds, maximum);
-				if (hit && (!nearest || *hit < *nearest)) nearest = hit;
+				if (!hit) continue;
+				if (!scene::IsTransparent(instance) && instance.CastShadow) {
+					const float stop = hit->Enter >= MINIMUM_DISTANCE ? hit->Enter : hit->Leave;
+					result.Stop = std::min(result.Stop, stop);
+					continue;
+				}
+				if (result.Count < result.PassThrough.size()) {
+					result.PassThrough[result.Count++] = *hit;
+					continue;
+				}
+				const auto farthest = std::max_element(
+					result.PassThrough.begin(),
+					result.PassThrough.end(),
+					[](const RayBound &left, const RayBound &right) { return left.Enter < right.Enter; }
+				);
+				if (hit->Enter < farthest->Enter) *farthest = *hit;
 			}
-			return nearest;
+			std::sort(
+				result.PassThrough.begin(),
+				result.PassThrough.begin() + result.Count,
+				[](const RayBound &left, const RayBound &right) { return left.Enter < right.Enter; }
+			);
+			return result;
 		}
 
 		void AddProbe(
@@ -188,9 +221,34 @@ namespace engine::render {
 				const Vector3 &direction = directions[index];
 				if (direction == Vector3::Zero) continue;
 				const Ray ray{light.Position, direction};
-				const float distance = FirstBound(ray, light.Range, instances).value_or(light.Range);
-				AddProbe(Paths, light.Position, direction, distance, LightProbeEvent::EmptySpace);
-				AddTermination(Paths, ray.PointAt(distance), direction, light.Range);
+				const ProbeBounds bounds = TraceBounds(ray, light.Range, instances);
+				float travelled = 0.0f;
+				for (size_t pass = 0; pass < bounds.Count; ++pass) {
+					const RayBound &hit = bounds.PassThrough[pass];
+					if (hit.Enter >= bounds.Stop) break;
+					const float entry = std::max(travelled, hit.Enter);
+					const float leave = std::min(bounds.Stop, hit.Leave);
+					if (leave <= entry) continue;
+					AddProbe(
+						Paths,
+						ray.PointAt(travelled),
+						direction,
+						entry - travelled,
+						LightProbeEvent::EmptySpace
+					);
+					AddProbe(
+						Paths, ray.PointAt(entry), direction, leave - entry, LightProbeEvent::PassThrough
+					);
+					travelled = leave;
+				}
+				AddProbe(
+					Paths,
+					ray.PointAt(travelled),
+					direction,
+					bounds.Stop - travelled,
+					LightProbeEvent::EmptySpace
+				);
+				AddTermination(Paths, ray.PointAt(bounds.Stop), direction, light.Range);
 			}
 		}
 	}

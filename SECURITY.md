@@ -49,17 +49,21 @@ worlds.** It answers Model Context Protocol, which is what lets a language model
 or a script watch the engine and drive it: list scenes, read and write
 properties, start and stop a world, read the log and the metrics, change what the
 program logs, read any `AGENTS.md` in the checkout, type-check a script, and
-start a test run. The control surface is currently exposed by `server` and
-`studio`; `client`, the unified harness and `cdn` do not register this option. It
+start a test run. The control surface is exposed by `server`, `studio`, `client`,
+`cdn`, and `launcher` when each is started with `--mcp-port`. The unified harness has no listener. It
 is a development surface and it is deliberately powerful.
 
-**Two of its tools start a child process, and neither takes a command line.**
+**Two shared tools start a child process, and neither takes a command line.**
 `test_run` runs the staged `testrunner` and `script_check` runs the staged
 `scriptcheck`, both with an argument list the engine assembles - no shell, no
 `just`, and no executable path a client can influence. `script_check` refuses a
 path that resolves outside the checkout. That restraint is the boundary: a tool
 that accepted a command line would turn "can reach loopback" into "can run
 anything", which is a far larger grant than the rest of this surface makes.
+
+The launcher also exposes a launch action. It starts only a staged program from
+its discovered mode catalogue, with values for options that program declared.
+It does not accept an executable path or a raw command line from MCP.
 
 **Nothing on it evaluates a script.** Checking is offered and running is not.
 
@@ -88,14 +92,17 @@ configuration that makes it safe to run in front of players; the flag exists so
 that a person building a game can see and steer the engine while they build it.
 
 The ports are conventional rather than enforced - any free port works, and the
-defaults only exist so the two supported programs on one machine do not collide:
+named values let several development programs run on one machine:
 
 | Program | Port |
 |---|---|
 | `server` | 8734 |
 | `studio` | 8738 |
+| `client` | 8736 |
+| `cdn` | 8732 |
+| `launcher` | explicit port |
 
-Both are `engine::control::DEFAULT_SERVER_PORT` and `DEFAULT_PORT`. Neither is a
+The named values live in `engine::control::Server.hpp`. None is a
 default in the sense that matters here: `--mcp-port` takes a number and has to be
 given, and no program opens a socket without it.
 

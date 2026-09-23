@@ -25,9 +25,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <filesystem>
 #include <imgui.h>
 #include <memory>
 #include <numbers>
+#include <random>
+#include <stdexcept>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
@@ -35,6 +38,20 @@
 
 namespace studio {
 	struct ViewportCameraProbe {
+		static void LeaveLiveInstancesSelected(Editor &editor) {
+			editor.ShowWorlds = false;
+			editor.FocusWorlds = 0;
+			editor.FocusInstances = 4;
+		}
+
+		static bool WorldsFocusedForEditing(const Editor &editor) {
+			return editor.ShowWorlds && editor.FocusWorlds > 0 && editor.FocusInstances == 0;
+		}
+
+		static void Stop(Editor &editor) {
+			editor.SetRunMode(editor.Active, RunMode::Edit);
+		}
+
 		static bool Initialise(Editor &editor, size_t viewports) {
 			Options options;
 			options.Headless = true;
@@ -216,6 +233,28 @@ using studio::ViewportGuiSource;
 using studio::ViewportGuiSourceFor;
 
 namespace {
+	struct SavedGameScratch {
+		std::filesystem::path Root;
+
+		SavedGameScratch() {
+			std::random_device random;
+			for (int attempt = 0; attempt < 16; ++attempt) {
+				const std::filesystem::path candidate = std::filesystem::temp_directory_path() /
+														("atomic-studio-reopen-" + std::to_string(random()));
+				if (std::filesystem::create_directory(candidate)) {
+					Root = candidate;
+					return;
+				}
+			}
+			throw std::runtime_error("could not create Studio reopen test directory");
+		}
+
+		~SavedGameScratch() {
+			std::error_code ignored;
+			std::filesystem::remove_all(Root, ignored);
+		}
+	};
+
 	// Three scenes and a client view, as an editor mid-play holds them.
 	constexpr WorldId SCENE{0};
 	constexpr WorldId OTHER{1};
@@ -724,4 +763,32 @@ TEST_CASE("GUI preview controls follow the rendered image rectangle", "[studio][
 	const glm::vec2 controls = studio::GuiPreviewControlsPosition(panel.ImageMin);
 	CHECK(controls.x == 411.0f);
 	CHECK(controls.y == 148.0f);
+}
+
+TEST_CASE("opening a saved game refocuses Worlds after Live Instances", "[studio][viewports][worlds]") {
+	SavedGameScratch scratch;
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const std::filesystem::path game = scratch.Root / "worlds.agame";
+	REQUIRE(editor.SaveGame(game));
+
+	studio::ViewportCameraProbe::LeaveLiveInstancesSelected(editor);
+	REQUIRE(editor.OpenGame(game));
+	CHECK(studio::ViewportCameraProbe::WorldsFocusedForEditing(editor));
+
+	editor.Shutdown();
+}
+
+TEST_CASE("stopping the last Play run refocuses Worlds", "[studio][viewports][worlds]") {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	REQUIRE(studio::ViewportCameraProbe::StartPlay(editor).IsValid());
+	CHECK_FALSE(studio::ViewportCameraProbe::WorldsFocusedForEditing(editor));
+
+	studio::ViewportCameraProbe::Stop(editor);
+	CHECK(studio::ViewportCameraProbe::WorldsFocusedForEditing(editor));
+	studio::ViewportCameraProbe::Stop(editor);
+	CHECK(studio::ViewportCameraProbe::WorldsFocusedForEditing(editor));
+
+	editor.Shutdown();
 }

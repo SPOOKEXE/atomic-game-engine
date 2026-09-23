@@ -1047,9 +1047,35 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 						 .Format = graph::ResourceFormat::R32F,
 						 .Divisor = 2}
 					);
+					if (divisor == 2)
+						depthDocument.Record(
+							{.Kind = graph::EditKind::AddResource,
+							 .Name = core::Name("lens-full-colour"),
+							 .Resource = graph::ResourceKind::Colour,
+							 .Format = graph::ResourceFormat::RGBA16F}
+						);
 					resourcesAdded = true;
 				}
 				if (edit.Kind == graph::EditKind::AddNode) {
+					if (divisor == 2 && edit.Name == core::Name("dof")) {
+						// The lens writes at half resolution; the stock dof node requires full-size inputs.
+						depthDocument.Record(
+							{.Kind = graph::EditKind::AddNode,
+							 .Name = core::Name("lens-upsample"),
+							 .NodeKind = core::Name("blit"),
+							 .Scope = graph::NodeScope::View}
+						);
+						depthDocument.Record(
+							{.Kind = graph::EditKind::Reads,
+							 .Target = core::Name("lens-b"),
+							 .Key = core::Name("source")}
+						);
+						depthDocument.Record(
+							{.Kind = graph::EditKind::Writes,
+							 .Target = core::Name("lens-full-colour"),
+							 .Key = core::Name("colour")}
+						);
+					}
 					inLens = edit.Name == core::Name("shader-lenses");
 					if (inLens) {
 						depthDocument.Record(
@@ -1073,6 +1099,9 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 						);
 					}
 				}
+				if (divisor == 2 && edit.Kind == graph::EditKind::Reads &&
+					edit.Target == core::Name("lens-b"))
+					edit.Target = core::Name("lens-full-colour");
 				if (remapDepth && inLens && edit.Kind == graph::EditKind::Reads &&
 					edit.Key == core::Name("depth"))
 					edit.Target = core::Name("lens-zero-depth");
@@ -1103,7 +1132,9 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 			const auto expected = capture(0);
 			view.Lighting.ShaderLenses[0].Shader = depthName;
 			install(depthDocument);
-			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			const auto rendered = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			if (divisor == 2) CHECK(rendered.Ran(core::Name("lens-upsample")));
+			CHECK(rendered.Ran(core::Name("dof")));
 			CheckImage(
 				fixture.Render,
 				"lens-graph-depth",

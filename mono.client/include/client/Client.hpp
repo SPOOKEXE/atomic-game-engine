@@ -637,6 +637,9 @@ namespace client {
 			"A shipped atomic game client. Its universe contains local scenes and may also contain a "
 			"replica received from a dedicated server. Replica writes are refused by their store."
 		};
+		// A tap releases on the next input frame so scripts and GUI see its down edge.
+		std::vector<engine::control::InputAutomationEvent> PendingControlInput;
+		std::vector<engine::control::InputAutomationEvent> DeferredControlRelease;
 		std::optional<engine::control::HookLease> VisibilityObservationHook;
 		std::optional<engine::control::HookLease> TemporalSampleHook;
 		std::optional<engine::control::HookLease> RigExportHook;

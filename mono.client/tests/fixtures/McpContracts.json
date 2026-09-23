@@ -39,10 +39,13 @@
             "world_list",
             "world_tree",
             "instance_get",
+            "entity_create",
+            "entity_destroy",
             "instance_set",
             "component_list",
             "entity_query",
             "component_get",
+            "component_remove",
             "component_set",
             "profile_frame"
           ]
@@ -370,6 +373,45 @@
         {
           "input_schema": {
             "properties": {
+              "class": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": "integer"
+              },
+              "world": {
+                "description": "Which scene, by name.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "name": "entity_create"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "world": {
+                "description": "Which scene, by name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "name": "entity_destroy"
+        },
+        {
+          "input_schema": {
+            "properties": {
               "id": {
                 "type": "integer"
               },
@@ -451,6 +493,28 @@
             "type": "object"
           },
           "name": "component_get"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "component": {
+                "type": "string"
+              },
+              "id": {
+                "type": "integer"
+              },
+              "world": {
+                "description": "Which scene, by name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "component"
+            ],
+            "type": "object"
+          },
+          "name": "component_remove"
         },
         {
           "input_schema": {
@@ -635,6 +699,112 @@
             "type": "object"
           },
           "name": "negotiate"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_mouse_move"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "button": {
+                "enum": [
+                  "left",
+                  "middle",
+                  "right"
+                ],
+                "type": "string"
+              },
+              "down": {
+                "type": "boolean"
+              },
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_click"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "notches": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "notches"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_mouse_wheel"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "down": {
+                "type": "boolean"
+              },
+              "key": {
+                "type": "string"
+              },
+              "modifiers": {
+                "items": {
+                  "enum": [
+                    "shift",
+                    "control",
+                    "alt",
+                    "gui"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "key"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_key"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "text": {
+                "maxLength": 16384,
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_text"
         },
         {
           "input_schema": {
@@ -3704,52 +3874,582 @@
       }
     },
     "tools": {
-      "begin_raw_scene_extract": {
-        "description": "Captures one fenced scene as portable raw mesh and texture sections with an inline manifest.",
+      "engine_info": {
+        "description": "This program's own state: how many scenes it holds and what they are called. Call it first.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "engine_info"
+      },
+      "engine_components": {
+        "description": "Every component type this engine registers, with its size, whether it is a tag, whether a save file can carry it and whether replication has a compact form for it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Use component_list instead for the components a game declared for itself, and instance_get to read one off a particular instance.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "engine_components"
+      },
+      "world_list": {
+        "description": "Every scene, with its state, its tick statistics and how many instances it holds. A world is a scene; the universe is the game.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "world_list"
+      },
+      "world_tree": {
+        "description": "The instance tree of one scene, as an author sees it in the explorer. Depth-limited and count-limited; ask for more when you know where you are going.",
+        "inputSchema": {
+          "properties": {
+            "depth": {
+              "description": "Levels to descend. Default 3.",
+              "type": "integer"
+            },
+            "limit": {
+              "description": "Instances at most. Default 200.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "world_tree"
+      },
+      "instance_get": {
+        "description": "Every property of one instance, by the id world_tree reported.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "description": "The entity id.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "name": "instance_get"
+      },
+      "entity_create": {
+        "description": "Creates an authoritative entity in a scene. Give a class name to create an instance from its defaults; omit class for a raw entity. An instance may have a name and a parent instance id. Raw names are unique within their scene. Refused on replicas.",
+        "inputSchema": {
+          "properties": {
+            "class": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parent": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "entity_create"
+      },
+      "entity_destroy": {
+        "description": "Destroys one entity in a scene. For an instance, also destroys its descendants. World fixtures and replica scenes are protected.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "name": "entity_destroy"
+      },
+      "instance_set": {
+        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "property": {
+              "type": "string"
+            },
+            "value": {},
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "property",
+            "value"
+          ],
+          "type": "object"
+        },
+        "name": "instance_set"
+      },
+      "component_list": {
+        "description": "Every component a game declared for itself, with its fields and how many entities in a scene carry it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Components the engine declares are not listed here - those are reached as properties, through instance_get.",
+        "inputSchema": {
+          "properties": {
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "component_list"
+      },
+      "entity_query": {
+        "description": "Every entity in a scene carrying all of the named components. This is the query a system runs, asked from outside: name the components and get the ids back, then read one with component_get or instance_get.",
+        "inputSchema": {
+          "properties": {
+            "components": {
+              "description": "Every one an entity must carry. Call component_list first.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "limit": {
+              "description": "Ids at most. Default 200.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "components"
+          ],
+          "type": "object"
+        },
+        "name": "entity_query"
+      },
+      "component_get": {
+        "description": "The values one entity holds for one component, field by field. Null when the entity does not carry it - which is a different answer from carrying it with every field at zero.",
+        "inputSchema": {
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "id": {
+              "description": "The entity id.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component"
+          ],
+          "type": "object"
+        },
+        "name": "component_get"
+      },
+      "component_remove": {
+        "description": "Removes one game-declared component from an entity in a scene. Engine-owned components, protected fixtures, and replica scenes cannot be changed here.",
+        "inputSchema": {
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "id": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component"
+          ],
+          "type": "object"
+        },
+        "name": "component_remove"
+      },
+      "component_set": {
+        "description": "Writes fields of one component on one entity, adding it when the entity does not carry it yet. Fields left out keep what they had; a fresh component starts at zero. Vector3 and Color3 take an object of named components, as instance_set does.",
+        "inputSchema": {
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "fields": {},
+            "id": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "fields"
+          ],
+          "type": "object"
+        },
+        "name": "component_set"
+      },
+      "profile_frame": {
+        "description": "The last frame as a flame graph: one span per scope with its depth, its parent, its inclusive time and its self time. Collection is switched on by the first call, so the first reply is empty and the next one is not.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "profile_frame"
+      },
+      "layer_table": {
+        "description": "The engine's layer stack, bottom to top: every module at each height, with its tier. A layer may see every layer below it and none above it, so this table is what decides which module may include which. The programs are listed separately - they are what links modules and nothing links them. Call module_may_link to ask about one edge.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "layer_table"
+      },
+      "module_get": {
+        "description": "One module or program: which layer and tier it is, every first-party target it links, and everything that links it. `linkedBy` is what would have to be rebuilt and reviewed if this module's interface changed. With no name, every module in layer order.",
+        "inputSchema": {
+          "properties": {
+            "name": {
+              "description": "The module or program. Omit for all of them.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "module_get"
+      },
+      "module_may_link": {
+        "description": "Whether one module is allowed to link another, and why. This is the question the architecture check answers, decided here from the same two rules: a tier may link shared and its own tier, and a layer may see every layer below it and none above it. Ask before writing an include - an edge that runs upward is refused at configure time and the fix is almost never to widen the rule.",
+        "inputSchema": {
+          "properties": {
+            "from": {
+              "description": "The module doing the linking.",
+              "type": "string"
+            },
+            "to": {
+              "description": "What it would link.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        "name": "module_may_link"
+      },
+      "class_list": {
+        "description": "Every class this process registers, with what it derives from. A class is what Instance.new names and what a save file carries; its properties are what a script may read and write. Inheritance is set inclusion here, so a query for a base class matches every derived instance. Call class_get for one class's properties.",
+        "inputSchema": {
+          "properties": {
+            "derivedFrom": {
+              "description": "Only classes that are a kind of this one.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "class_list"
+      },
+      "class_get": {
+        "description": "One class: what it derives from, and every property it exposes with the type it carries, whether it can be written and whether a script can see it at all. This is the live class table rather than the checked-in manifest, so it describes what this process registered. Use instance_get to read the values off a particular instance.",
+        "inputSchema": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "name": "class_get"
+      },
+      "script_check": {
+        "description": "Type-checks Luau against the engine's generated declarations, without running any of it. Give `source` for a draft or `path` for a file in the repository. Every diagnostic the editor's language server would show comes back here, because both go through the same declaration file. Nothing is evaluated: this surface will not run a script, because a tool runs inside the program's frame and there is nothing here that could interrupt a loop.",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "description": "A path relative to the repository root, instead of `source`.",
+              "type": "string"
+            },
+            "source": {
+              "description": "Luau to check.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "script_check"
+      },
+      "log_tail": {
+        "description": "The most recent lines this program has logged, newest last. Filter by minimum level and by category - a category is one area of the engine, usually one module, and log_level lists the ones this build registers. Only the last 1024 lines are kept, and `dropped` says how many scrolled off before the oldest one shown.",
+        "inputSchema": {
+          "properties": {
+            "category": {
+              "description": "Only lines from this area. Default all of them.",
+              "type": "string"
+            },
+            "level": {
+              "description": "The lowest severity to include. Default trace.",
+              "enum": [
+                "trace",
+                "debug",
+                "info",
+                "warning",
+                "error"
+              ],
+              "type": "string"
+            },
+            "lines": {
+              "description": "How many lines at most. Default 50, capped at 1024.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_tail"
+      },
+      "log_level": {
+        "description": "Reads or changes what this program logs, while it runs. With no argument it lists every category the build has registered and the severity floor each is at. `set` takes the same text the engine.log-level setting does: a bare level for everything, or comma-separated category=level overrides, or both - `warning,net=trace`. Statements below the compiled floor were removed by the preprocessor and cannot be switched on.",
+        "inputSchema": {
+          "properties": {
+            "set": {
+              "description": "A level, or category=level terms, or both.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_level"
+      },
+      "metrics_read": {
+        "description": "Every counter, gauge and distribution this process has recorded. A counter accumulates and is drained once a frame, so its value is a rate; a gauge is a level as last set; a histogram carries a mean, a maximum and nearest-rank percentiles over its recent window, which is what says whether a server holding its tick rate on average is still missing a fiftieth of its ticks. Times are nanoseconds. Reading changes nothing.",
+        "inputSchema": {
+          "properties": {
+            "prefix": {
+              "description": "Only names starting with this. Default all of them.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "metrics_read"
+      },
+      "negotiate": {
+        "description": "Pure data-factory capability discovery. Reports this host's callable MCP operations and their schemas, and names unsupported proposed capture capabilities instead of guessing from renderer internals. It does not create, load, reset, or mutate a world.",
+        "inputSchema": {
+          "properties": {
+            "contract_version": {
+              "type": "string"
+            },
+            "requested_channels": {
+              "items": {
+                "maxLength": 128,
+                "pattern": "^[a-z0-9_]+$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "schema_version": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "negotiate"
+      },
+      "emulate_mouse_move": {
+        "description": "Moves the mouse pointer to client coordinates through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_move"
+      },
+      "emulate_click": {
+        "description": "Clicks, presses, or releases a mouse button at client coordinates through this program's input boundary. Omit down for one complete click.",
+        "inputSchema": {
+          "properties": {
+            "button": {
+              "enum": [
+                "left",
+                "middle",
+                "right"
+              ],
+              "type": "string"
+            },
+            "down": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_click"
+      },
+      "emulate_mouse_wheel": {
+        "description": "Turns the mouse wheel by a signed number of vertical notches through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "notches": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "notches"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_wheel"
+      },
+      "emulate_key": {
+        "description": "Presses, releases, or taps one named keyboard key through this program's input boundary. Omit down for one complete key press.",
+        "inputSchema": {
+          "properties": {
+            "down": {
+              "type": "boolean"
+            },
+            "key": {
+              "type": "string"
+            },
+            "modifiers": {
+              "items": {
+                "enum": [
+                  "shift",
+                  "control",
+                  "alt",
+                  "gui"
+                ],
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_key"
+      },
+      "emulate_text": {
+        "description": "Sends UTF-8 text through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "text": {
+              "maxLength": 16384,
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_text"
+      },
+      "get_render_graph": {
+        "description": "Read the installed render graph, compiled schedule, and bounded memory profile.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
             "instance_id": {
+              "maxLength": 128,
               "minLength": 1,
               "type": "string"
             },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
+            "pipeline": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "view_height": {
+              "maximum": 16384,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "view_width": {
+              "maximum": 16384,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           "required": [
             "instance_id",
-            "options"
+            "pipeline",
+            "view_width",
+            "view_height",
+            "expected_world_epoch",
+            "expected_world_version"
           ],
           "type": "object"
         },
-        "name": "begin_raw_scene_extract"
+        "name": "get_render_graph"
       },
-      "cancel_capture": {
-        "description": "Cancels one pending capture.",
+      "world_create": {
+        "description": "Creates one factory-owned local world in this Universe.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
               "type": "string"
             },
             "operation_id": {
@@ -3757,40 +4457,1233 @@
               "minLength": 1,
               "type": "string"
             },
-            "ticket": {
-              "minimum": 1,
+            "seed": {
+              "minimum": 0,
               "type": "integer"
+            },
+            "tick_rate": {
+              "exclusiveMinimum": 0,
+              "maximum": 1000,
+              "type": "number"
             }
           },
           "required": [
             "instance_id",
-            "ticket",
+            "seed",
+            "tick_rate",
             "operation_id"
           ],
           "type": "object"
         },
-        "name": "cancel_capture"
+        "name": "world_create"
       },
-      "cancel_view_camera_mutation": {
-        "description": "Cancels one queued view.camera mutation.",
+      "world_reset": {
+        "description": "Resets one factory-owned local world after an all-systems pause.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "seed": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tick_rate": {
+              "exclusiveMinimum": 0,
+              "maximum": 1000,
+              "type": "number"
+            }
+          },
+          "required": [
+            "instance_id",
+            "seed",
+            "tick_rate",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        "name": "world_reset"
+      },
+      "world_retire": {
+        "description": "Retires one factory-owned local world after an all-systems pause and returns a tombstone.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        "name": "world_retire"
+      },
+      "lifecycle_inspect": {
+        "description": "Reads one data-factory world's completed tick and lifecycle revision without changing it.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id"
+          ],
+          "type": "object"
+        },
+        "name": "lifecycle_inspect"
+      },
+      "data_factory_operation_audit": {
+        "description": "Reads the bounded, redacted replay ledger shared by lifecycle and capture mutation tools. Rows are newest first and contain no raw scene arguments.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "maximum": 256,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "name": "data_factory_operation_audit"
+      },
+      "pause": {
+        "description": "Pauses one data-factory world at a completed tick boundary.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
               "type": "string"
             },
-            "ticket": {
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "scope": {
+              "enum": [
+                "all_systems",
+                "physics_only"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version"
+          ],
+          "type": "object"
+        },
+        "name": "pause"
+      },
+      "resume": {
+        "description": "Resumes one data-factory world at a completed tick boundary.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version"
+          ],
+          "type": "object"
+        },
+        "name": "resume"
+      },
+      "step": {
+        "description": "Advances one all-systems-paused world through its canonical dt_ns interval. Nonempty actions are unsupported until the host installs an executor.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "actions": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 32,
+              "type": "array"
+            },
+            "dt_ns": {
+              "additionalProperties": false,
+              "properties": {
+                "denominator": {
+                  "maximum": 4294967295,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "numerator": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "numerator",
+                "denominator"
+              ],
+              "type": "object"
+            },
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "operation_id",
+            "dt_ns"
+          ],
+          "type": "object"
+        },
+        "name": "step"
+      },
+      "snapshot": {
+        "description": "Retains one immutable world snapshot at a completed boundary.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version"
+          ],
+          "type": "object"
+        },
+        "name": "snapshot"
+      },
+      "checkpoint": {
+        "description": "Retains a restorable checkpoint when the host provides rehydration.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version"
+          ],
+          "type": "object"
+        },
+        "name": "checkpoint"
+      },
+      "fork_world": {
+        "description": "Forks one retained checkpoint into an isolated, non-presented branch runtime. The parent lifecycle revision and checkpoint identity fence the operation.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "branch_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "checkpoint_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "checkpoint_id",
+            "branch_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        "name": "fork_world"
+      },
+      "render_only": {
+        "description": "Queues one static frame from a paused snapshot. Submitted means the frame command was accepted, not that GPU readback is ready.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "temporal_history": {
+              "enum": [
+                "preserve"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "snapshot_id",
+            "temporal_history",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        "name": "render_only"
+      },
+      "poll_render_only": {
+        "description": "Reads pending, submitted, or failed render-only command status. Submitted does not claim GPU readback readiness.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
               "minimum": 1,
               "type": "integer"
             }
           },
           "required": [
             "instance_id",
-            "ticket"
+            "operation_id"
           ],
           "type": "object"
         },
-        "name": "cancel_view_camera_mutation"
+        "name": "poll_render_only"
+      },
+      "restore": {
+        "description": "Restores a compatible checkpoint through a scratch universe and starts a fresh epoch.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "checkpoint_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "checkpoint_id"
+          ],
+          "type": "object"
+        },
+        "name": "restore"
+      },
+      "seek_backward": {
+        "description": "Restores the newest retained paused checkpoint and replays contiguous action-free fixed steps to an earlier completed tick.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "target_tick": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "operation_id",
+            "target_tick"
+          ],
+          "type": "object"
+        },
+        "name": "seek_backward"
+      },
+      "get_collider_bev": {
+        "description": "Returns a snapshot-bound bird's-eye collider-contact grid. Rows are z-major from minimum Z to maximum Z; columns then run from minimum X to maximum X. Each cell is occupied, empty, or explicitly unknown when physics cannot prove a negative answer.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "columns": {
+              "maximum": 8,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "lifecycle": {
+              "additionalProperties": false,
+              "properties": {
+                "tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tick",
+                "world_epoch",
+                "world_version"
+              ],
+              "type": "object"
+            },
+            "rows": {
+              "maximum": 8,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "schema_version": {
+              "const": "collider-bev/v1"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "world_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "xz_bounds_metres": {
+              "additionalProperties": false,
+              "properties": {
+                "maximum": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "minimum": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "minimum",
+                "maximum"
+              ],
+              "type": "object"
+            },
+            "y_maximum_metres": {
+              "type": "number"
+            },
+            "y_minimum_metres": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "schema_version",
+            "world_id",
+            "lifecycle",
+            "snapshot_id",
+            "xz_bounds_metres",
+            "y_minimum_metres",
+            "y_maximum_metres",
+            "rows",
+            "columns"
+          ],
+          "type": "object"
+        },
+        "name": "get_collider_bev"
+      },
+      "get_filled_occupancy": {
+        "description": "Returns a bounded snapshot-bound voxel grid. A filled cell is proven only when one analytic collider contains its whole AABB. Collider unions, baked hulls and meshes remain explicitly unknown rather than being inferred.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "columns": {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "layers": {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "lifecycle": {
+              "additionalProperties": false,
+              "properties": {
+                "tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tick",
+                "world_epoch",
+                "world_version"
+              ],
+              "type": "object"
+            },
+            "maximum_metres": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "minimum_metres": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "rows": {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "schema_version": {
+              "const": "filled-occupancy/v1"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "world_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_version",
+            "world_id",
+            "lifecycle",
+            "snapshot_id",
+            "minimum_metres",
+            "maximum_metres",
+            "columns",
+            "rows",
+            "layers"
+          ],
+          "type": "object"
+        },
+        "name": "get_filled_occupancy"
+      },
+      "get_signed_distance_field": {
+        "description": "Samples a bounded world-space signed-distance grid at cell centres against one retained paused snapshot. Distances are metres, negative inside and positive outside. Exact values require one authored analytic box, sphere or cylinder; unions and baked geometry are returned as unknown.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "columns": {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "layers": {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "lifecycle": {
+              "additionalProperties": false,
+              "properties": {
+                "tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tick",
+                "world_epoch",
+                "world_version"
+              ],
+              "type": "object"
+            },
+            "maximum_metres": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "minimum_metres": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "rows": {
+              "maximum": 4,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "schema_version": {
+              "const": "signed-distance-field/v1"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "world_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_version",
+            "world_id",
+            "lifecycle",
+            "snapshot_id",
+            "minimum_metres",
+            "maximum_metres",
+            "columns",
+            "rows",
+            "layers"
+          ],
+          "type": "object"
+        },
+        "name": "get_signed_distance_field"
+      },
+      "get_authored_navmesh_path": {
+        "description": "Finds a bounded authored-walkable surface route in one retained paused snapshot. A route is returned only for supported authored geometry and a clear zero-radius corridor; every other case is explicitly unknown.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "goal_metres": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "lifecycle": {
+              "additionalProperties": false,
+              "properties": {
+                "tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tick",
+                "world_epoch",
+                "world_version"
+              ],
+              "type": "object"
+            },
+            "schema_version": {
+              "const": "authored-navmesh-path/v1"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "start_metres": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "vertical_tolerance_metres": {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "number"
+            },
+            "world_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_version",
+            "world_id",
+            "lifecycle",
+            "snapshot_id",
+            "start_metres",
+            "goal_metres"
+          ],
+          "type": "object"
+        },
+        "name": "get_authored_navmesh_path"
+      },
+      "get_collider_occupancy": {
+        "description": "Tests up to 32 named finite world-space AABBs against the exact completed, retained all-systems-paused snapshot. Boundary contact counts as collider contact. This is not a filled-volume test: unavailable physics, broad-phase overflow, and mesh or hull candidates remain explicitly incomplete.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "lifecycle": {
+              "additionalProperties": false,
+              "properties": {
+                "tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tick",
+                "world_epoch",
+                "world_version"
+              ],
+              "type": "object"
+            },
+            "probes": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "maximum_metres": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "maxItems": 3,
+                    "minItems": 3,
+                    "type": "array"
+                  },
+                  "minimum_metres": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "maxItems": 3,
+                    "minItems": 3,
+                    "type": "array"
+                  },
+                  "name": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "minimum_metres",
+                  "maximum_metres"
+                ],
+                "type": "object"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "collider-occupancy/v1"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "world_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_version",
+            "world_id",
+            "lifecycle",
+            "snapshot_id",
+            "probes"
+          ],
+          "type": "object"
+        },
+        "name": "get_collider_occupancy"
+      },
+      "physics_observation_hooks": {
+        "description": "Lists the stable fixed-step physics observation hook names and the completed-record capacity.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "type": "object"
+        },
+        "name": "physics_observation_hooks"
+      },
+      "physics_observation_records": {
+        "description": "Returns up to 96 completed fixed-step physics records for one factory-owned world. The hook name declares post-integration, pre-solve, or completed-solver state. Values retain exact tick, physics step, step seconds and availability; unavailable fields are null. The read cannot change physics state.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version"
+          ],
+          "type": "object"
+        },
+        "name": "physics_observation_records"
+      },
+      "get_audio_observation": {
+        "description": "Returns one bounded audio_observation/v1 record. Waveform bytes remain external digest-addressed chunks.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version"
+          ],
+          "type": "object"
+        },
+        "name": "get_audio_observation"
+      },
+      "get_audio_waveform_chunk": {
+        "description": "Copies a bounded byte range from one digest-addressed waveform chunk returned by get_audio_observation.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "byte_begin": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "byte_end": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "type": "string"
+            },
+            "resource_id": {
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "resource_id",
+            "sha256",
+            "byte_begin",
+            "byte_end",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version"
+          ],
+          "type": "object"
+        },
+        "name": "get_audio_waveform_chunk"
+      },
+      "run_script_package": {
+        "description": "Runs one atomic.data-script.v1 package in a fresh capability-limited Luau sandbox and atomically replaces a paused factory world.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "assets": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "base64": {
+                    "maxLength": 33554432,
+                    "type": "string"
+                  },
+                  "path": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "base64"
+                ],
+                "type": "object"
+              },
+              "maxItems": 128,
+              "type": "array"
+            },
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "language": {
+              "enum": [
+                "luau"
+              ],
+              "type": "string"
+            },
+            "manifest": {
+              "maxLength": 65536,
+              "minLength": 1,
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_base64": {
+              "maxLength": 524288,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "expected_tick",
+            "expected_world_epoch",
+            "expected_world_version",
+            "operation_id",
+            "language",
+            "manifest",
+            "source_base64",
+            "assets"
+          ],
+          "type": "object"
+        },
+        "name": "run_script_package"
       },
       "capture": {
         "description": "Queues one calibrated render capture from a paused world's exact completed snapshot.",
@@ -4186,1011 +6079,39 @@
         },
         "name": "capture_multi_camera"
       },
-      "checkpoint": {
-        "description": "Retains a restorable checkpoint when the host provides rehydration.",
+      "poll_capture": {
+        "description": "Reads capture metadata without consuming its retained plane bytes.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
             "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
               "type": "string"
             },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version"
-          ],
-          "type": "object"
-        },
-        "name": "checkpoint"
-      },
-      "class_get": {
-        "description": "One class: what it derives from, and every property it exposes with the type it carries, whether it can be written and whether a script can see it at all. This is the live class table rather than the checked-in manifest, so it describes what this process registered. Use instance_get to read the values off a particular instance.",
-        "inputSchema": {
-          "properties": {
-            "name": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "name"
-          ],
-          "type": "object"
-        },
-        "name": "class_get"
-      },
-      "class_list": {
-        "description": "Every class this process registers, with what it derives from. A class is what Instance.new names and what a save file carries; its properties are what a script may read and write. Inheritance is set inclusion here, so a query for a base class matches every derived instance. Call class_get for one class's properties.",
-        "inputSchema": {
-          "properties": {
-            "derivedFrom": {
-              "description": "Only classes that are a kind of this one.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "class_list"
-      },
-      "component_get": {
-        "description": "The values one entity holds for one component, field by field. Null when the entity does not carry it - which is a different answer from carrying it with every field at zero.",
-        "inputSchema": {
-          "properties": {
-            "component": {
-              "type": "string"
-            },
-            "id": {
-              "description": "The entity id.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "component"
-          ],
-          "type": "object"
-        },
-        "name": "component_get"
-      },
-      "component_list": {
-        "description": "Every component a game declared for itself, with its fields and how many entities in a scene carry it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Components the engine declares are not listed here - those are reached as properties, through instance_get.",
-        "inputSchema": {
-          "properties": {
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "component_list"
-      },
-      "component_set": {
-        "description": "Writes fields of one component on one entity, adding it when the entity does not carry it yet. Fields left out keep what they had; a fresh component starts at zero. Vector3 and Color3 take an object of named components, as instance_set does.",
-        "inputSchema": {
-          "properties": {
-            "component": {
-              "type": "string"
-            },
-            "fields": {},
-            "id": {
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "fields"
-          ],
-          "type": "object"
-        },
-        "name": "component_set"
-      },
-      "data_factory_operation_audit": {
-        "description": "Reads the bounded, redacted replay ledger shared by lifecycle and capture mutation tools. Rows are newest first and contain no raw scene arguments.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "limit": {
-              "maximum": 256,
+            "ticket": {
               "minimum": 1,
               "type": "integer"
             }
           },
+          "required": [
+            "instance_id",
+            "ticket"
+          ],
           "type": "object"
         },
-        "name": "data_factory_operation_audit"
+        "name": "poll_capture"
       },
-      "engine_components": {
-        "description": "Every component type this engine registers, with its size, whether it is a tag, whether a save file can carry it and whether replication has a compact form for it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Use component_list instead for the components a game declared for itself, and instance_get to read one off a particular instance.",
+      "submit_view_camera_mutation": {
+        "description": "Queues one owned synchronous view.camera patch for an exact paused snapshot and pipeline revision.",
         "inputSchema": {
-          "type": "object"
-        },
-        "name": "engine_components"
-      },
-      "engine_info": {
-        "description": "This program's own state: how many scenes it holds and what they are called. Call it first.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "engine_info"
-      },
-      "entity_query": {
-        "description": "Every entity in a scene carrying all of the named components. This is the query a system runs, asked from outside: name the components and get the ids back, then read one with component_get or instance_get.",
-        "inputSchema": {
+          "additionalProperties": false,
           "properties": {
-            "components": {
-              "description": "Every one an entity must carry. Call component_list first.",
-              "items": {
-                "type": "string"
-              },
+            "camera": {
+              "type": "object"
+            },
+            "camera_frame": {
+              "maxItems": 7,
+              "minItems": 7,
               "type": "array"
-            },
-            "limit": {
-              "description": "Ids at most. Default 200.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "components"
-          ],
-          "type": "object"
-        },
-        "name": "entity_query"
-      },
-      "export_gltf_scene": {
-        "description": "Exports one fenced scene as a bounded glTF 2.0 GLB. Results above 40 KiB use a retained resource with ranged reads and explicit release. The v1 subset contains built-in, EditableMesh and bounded resident mesh geometry, source image maps, material runs and perspective cameras. Unavailable source facts are listed explicitly.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options"
-          ],
-          "type": "object"
-        },
-        "name": "export_gltf_scene"
-      },
-      "fork_world": {
-        "description": "Forks one retained checkpoint into an isolated, non-presented branch runtime. The parent lifecycle revision and checkpoint identity fence the operation.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "branch_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "checkpoint_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "checkpoint_id",
-            "branch_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "operation_id"
-          ],
-          "type": "object"
-        },
-        "name": "fork_world"
-      },
-      "get_audio_observation": {
-        "description": "Returns one bounded audio_observation/v1 record. Waveform bytes remain external digest-addressed chunks.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 512,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version"
-          ],
-          "type": "object"
-        },
-        "name": "get_audio_observation"
-      },
-      "get_audio_waveform_chunk": {
-        "description": "Copies a bounded byte range from one digest-addressed waveform chunk returned by get_audio_observation.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "byte_begin": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "byte_end": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "type": "string"
-            },
-            "resource_id": {
-              "type": "string"
-            },
-            "sha256": {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "resource_id",
-            "sha256",
-            "byte_begin",
-            "byte_end",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version"
-          ],
-          "type": "object"
-        },
-        "name": "get_audio_waveform_chunk"
-      },
-      "get_authored_affordances": {
-        "description": "Return bounded explicit authored affordances in stable identity order. Geometry and colliders do not infer semantics.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "additionalProperties": false,
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "limit": {
-                  "maximum": 256,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "limit",
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options"
-          ],
-          "type": "object"
-        },
-        "name": "get_authored_affordances"
-      },
-      "get_authored_navmesh_path": {
-        "description": "Finds a bounded authored-walkable surface route in one retained paused snapshot. A route is returned only for supported authored geometry and a clear zero-radius corridor; every other case is explicitly unknown.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "goal_metres": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            },
-            "lifecycle": {
-              "additionalProperties": false,
-              "properties": {
-                "tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "tick",
-                "world_epoch",
-                "world_version"
-              ],
-              "type": "object"
-            },
-            "schema_version": {
-              "const": "authored-navmesh-path/v1"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "start_metres": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            },
-            "vertical_tolerance_metres": {
-              "maximum": 10,
-              "minimum": 0,
-              "type": "number"
-            },
-            "world_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "schema_version",
-            "world_id",
-            "lifecycle",
-            "snapshot_id",
-            "start_metres",
-            "goal_metres"
-          ],
-          "type": "object"
-        },
-        "name": "get_authored_navmesh_path"
-      },
-      "get_camera_rendering_data": {
-        "description": "Camera calibration for a stable authored camera id, or the scene's active camera.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options"
-          ],
-          "type": "object"
-        },
-        "name": "get_camera_rendering_data"
-      },
-      "get_capture_channels": {
-        "description": "Capture channel capability metadata for one scene.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options"
-          ],
-          "type": "object"
-        },
-        "name": "get_capture_channels"
-      },
-      "get_collider_bev": {
-        "description": "Returns a snapshot-bound bird's-eye collider-contact grid. Rows are z-major from minimum Z to maximum Z; columns then run from minimum X to maximum X. Each cell is occupied, empty, or explicitly unknown when physics cannot prove a negative answer.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "columns": {
-              "maximum": 8,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "lifecycle": {
-              "additionalProperties": false,
-              "properties": {
-                "tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "tick",
-                "world_epoch",
-                "world_version"
-              ],
-              "type": "object"
-            },
-            "rows": {
-              "maximum": 8,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "schema_version": {
-              "const": "collider-bev/v1"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "world_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "xz_bounds_metres": {
-              "additionalProperties": false,
-              "properties": {
-                "maximum": {
-                  "items": {
-                    "type": "number"
-                  },
-                  "maxItems": 2,
-                  "minItems": 2,
-                  "type": "array"
-                },
-                "minimum": {
-                  "items": {
-                    "type": "number"
-                  },
-                  "maxItems": 2,
-                  "minItems": 2,
-                  "type": "array"
-                }
-              },
-              "required": [
-                "minimum",
-                "maximum"
-              ],
-              "type": "object"
-            },
-            "y_maximum_metres": {
-              "type": "number"
-            },
-            "y_minimum_metres": {
-              "type": "number"
-            }
-          },
-          "required": [
-            "schema_version",
-            "world_id",
-            "lifecycle",
-            "snapshot_id",
-            "xz_bounds_metres",
-            "y_minimum_metres",
-            "y_maximum_metres",
-            "rows",
-            "columns"
-          ],
-          "type": "object"
-        },
-        "name": "get_collider_bev"
-      },
-      "get_collider_occupancy": {
-        "description": "Tests up to 32 named finite world-space AABBs against the exact completed, retained all-systems-paused snapshot. Boundary contact counts as collider contact. This is not a filled-volume test: unavailable physics, broad-phase overflow, and mesh or hull candidates remain explicitly incomplete.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "lifecycle": {
-              "additionalProperties": false,
-              "properties": {
-                "tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "tick",
-                "world_epoch",
-                "world_version"
-              ],
-              "type": "object"
-            },
-            "probes": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "maximum_metres": {
-                    "items": {
-                      "type": "number"
-                    },
-                    "maxItems": 3,
-                    "minItems": 3,
-                    "type": "array"
-                  },
-                  "minimum_metres": {
-                    "items": {
-                      "type": "number"
-                    },
-                    "maxItems": 3,
-                    "minItems": 3,
-                    "type": "array"
-                  },
-                  "name": {
-                    "maxLength": 128,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "name",
-                  "minimum_metres",
-                  "maximum_metres"
-                ],
-                "type": "object"
-              },
-              "maxItems": 32,
-              "minItems": 1,
-              "type": "array"
-            },
-            "schema_version": {
-              "const": "collider-occupancy/v1"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "world_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "schema_version",
-            "world_id",
-            "lifecycle",
-            "snapshot_id",
-            "probes"
-          ],
-          "type": "object"
-        },
-        "name": "get_collider_occupancy"
-      },
-      "get_event_narratives": {
-        "description": "Script-declared, bounded event narratives for one scene.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options"
-          ],
-          "type": "object"
-        },
-        "name": "get_event_narratives"
-      },
-      "get_filled_occupancy": {
-        "description": "Returns a bounded snapshot-bound voxel grid. A filled cell is proven only when one analytic collider contains its whole AABB. Collider unions, baked hulls and meshes remain explicitly unknown rather than being inferred.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "columns": {
-              "maximum": 4,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "layers": {
-              "maximum": 4,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "lifecycle": {
-              "additionalProperties": false,
-              "properties": {
-                "tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "tick",
-                "world_epoch",
-                "world_version"
-              ],
-              "type": "object"
-            },
-            "maximum_metres": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            },
-            "minimum_metres": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            },
-            "rows": {
-              "maximum": 4,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "schema_version": {
-              "const": "filled-occupancy/v1"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "world_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "schema_version",
-            "world_id",
-            "lifecycle",
-            "snapshot_id",
-            "minimum_metres",
-            "maximum_metres",
-            "columns",
-            "rows",
-            "layers"
-          ],
-          "type": "object"
-        },
-        "name": "get_filled_occupancy"
-      },
-      "get_gltf_scene_chunk": {
-        "description": "Returns up to one MiB from a retained glTF export at its original world revision.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "byte_begin": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "byte_end": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "hash": {
-              "type": "string"
-            },
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            },
-            "resource_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options",
-            "resource_id",
-            "hash",
-            "byte_begin",
-            "byte_end"
-          ],
-          "type": "object"
-        },
-        "name": "get_gltf_scene_chunk"
-      },
-      "get_raw_scene_chunk": {
-        "description": "Returns up to one MiB from a retained raw scene extract at its original world revision.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "byte_begin": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "byte_end": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "hash": {
-              "type": "string"
-            },
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            },
-            "resource_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options",
-            "resource_id",
-            "hash",
-            "byte_begin",
-            "byte_end"
-          ],
-          "type": "object"
-        },
-        "name": "get_raw_scene_chunk"
-      },
-      "get_render_graph": {
-        "description": "Read the installed render graph, compiled schedule, and bounded memory profile.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
             },
             "instance_id": {
               "maxLength": 128,
@@ -5202,28 +6123,77 @@
               "minLength": 1,
               "type": "string"
             },
-            "view_height": {
-              "maximum": 16384,
+            "pipeline_revision": {
               "minimum": 1,
               "type": "integer"
             },
-            "view_width": {
-              "maximum": 16384,
+            "projection": {
+              "maxItems": 16,
+              "minItems": 16,
+              "type": "array"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "view_slot": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "instance_id",
+            "snapshot_id",
+            "pipeline",
+            "pipeline_revision",
+            "view_slot"
+          ],
+          "type": "object"
+        },
+        "name": "submit_view_camera_mutation"
+      },
+      "cancel_view_camera_mutation": {
+        "description": "Cancels one queued view.camera mutation.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "type": "string"
+            },
+            "ticket": {
               "minimum": 1,
               "type": "integer"
             }
           },
           "required": [
             "instance_id",
-            "pipeline",
-            "view_width",
-            "view_height",
-            "expected_world_epoch",
-            "expected_world_version"
+            "ticket"
           ],
           "type": "object"
         },
-        "name": "get_render_graph"
+        "name": "cancel_view_camera_mutation"
+      },
+      "poll_view_camera_mutation": {
+        "description": "Returns a view.camera mutation status and releases a terminal mutation ticket.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "type": "string"
+            },
+            "ticket": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "instance_id",
+            "ticket"
+          ],
+          "type": "object"
+        },
+        "name": "poll_view_camera_mutation"
       },
       "get_resource": {
         "description": "Returns up to one MiB of one retained capture resource as base64.",
@@ -5247,107 +6217,59 @@
         },
         "name": "get_resource"
       },
-      "get_resources": {
-        "description": "Durable resource metadata for one scene.",
+      "release_capture": {
+        "description": "Releases one terminal capture and its retained bytes.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "instance_id": {
-              "minLength": 1,
               "type": "string"
             },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options"
-          ],
-          "type": "object"
-        },
-        "name": "get_resources"
-      },
-      "get_rig_export": {
-        "description": "A bounded data-rig/v1 export of identified skeletons. Missing engine source data is declared rather than inferred.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "export_id": {
-              "maxLength": 512,
-              "minLength": 1,
-              "type": "string"
-            },
-            "instance_id": {
+            "operation_id": {
               "maxLength": 128,
               "minLength": 1,
               "type": "string"
             },
-            "options": {
-              "additionalProperties": false,
-              "properties": {
-                "entity_ids": {
-                  "items": {
-                    "maxLength": 500,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "maxItems": 256,
-                  "type": "array"
-                },
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "limit": {
-                  "maximum": 256,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
+            "ticket": {
+              "minimum": 1,
+              "type": "integer"
             }
           },
           "required": [
             "instance_id",
-            "export_id",
-            "options"
+            "ticket",
+            "operation_id"
           ],
           "type": "object"
         },
-        "name": "get_rig_export"
+        "name": "release_capture"
+      },
+      "cancel_capture": {
+        "description": "Cancels one pending capture.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "type": "string"
+            },
+            "operation_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "ticket": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "instance_id",
+            "ticket",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        "name": "cancel_capture"
       },
       "get_scene_snapshot": {
         "description": "A read-only snapshot of one scene using stable authored ids. Large results return an immutable resource for get_scene_snapshot_chunk and release_scene_snapshot.",
@@ -5447,328 +6369,493 @@
         },
         "name": "get_scene_snapshot_chunk"
       },
-      "get_signed_distance_field": {
-        "description": "Samples a bounded world-space signed-distance grid at cell centres against one retained paused snapshot. Distances are metres, negative inside and positive outside. Exact values require one authored analytic box, sphere or cylinder; unions and baked geometry are returned as unknown.",
+      "release_scene_snapshot": {
+        "description": "Releases one retained scene snapshot, including after its world revision changes.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
-            "columns": {
-              "maximum": 4,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "layers": {
-              "maximum": 4,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "lifecycle": {
-              "additionalProperties": false,
-              "properties": {
-                "tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "tick",
-                "world_epoch",
-                "world_version"
-              ],
-              "type": "object"
-            },
-            "maximum_metres": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            },
-            "minimum_metres": {
-              "items": {
-                "type": "number"
-              },
-              "maxItems": 3,
-              "minItems": 3,
-              "type": "array"
-            },
-            "rows": {
-              "maximum": 4,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "schema_version": {
-              "const": "signed-distance-field/v1"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "world_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "schema_version",
-            "world_id",
-            "lifecycle",
-            "snapshot_id",
-            "minimum_metres",
-            "maximum_metres",
-            "columns",
-            "rows",
-            "layers"
-          ],
-          "type": "object"
-        },
-        "name": "get_signed_distance_field"
-      },
-      "get_temporal_sample": {
-        "description": "Copies one selected camera and up to 64 selected object poses from a named retained all-systems-paused snapshot.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "camera_id": {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
             "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
               "type": "string"
             },
-            "object_ids": {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 64,
-              "type": "array"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
+            "resource_id": {
               "type": "string"
             }
           },
           "required": [
             "instance_id",
-            "snapshot_id",
-            "expected_world_epoch",
-            "expected_world_version",
-            "expected_tick",
-            "camera_id",
-            "object_ids"
+            "resource_id"
           ],
           "type": "object"
         },
-        "name": "get_temporal_sample"
+        "name": "release_scene_snapshot"
       },
-      "instance_get": {
-        "description": "Every property of one instance, by the id world_tree reported.",
-        "inputSchema": {
-          "properties": {
-            "id": {
-              "description": "The entity id.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id"
-          ],
-          "type": "object"
-        },
-        "name": "instance_get"
-      },
-      "instance_set": {
-        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string.",
-        "inputSchema": {
-          "properties": {
-            "id": {
-              "type": "integer"
-            },
-            "property": {
-              "type": "string"
-            },
-            "value": {},
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "property",
-            "value"
-          ],
-          "type": "object"
-        },
-        "name": "instance_set"
-      },
-      "layer_table": {
-        "description": "The engine's layer stack, bottom to top: every module at each height, with its tier. A layer may see every layer below it and none above it, so this table is what decides which module may include which. The programs are listed separately - they are what links modules and nothing links them. Call module_may_link to ask about one edge.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "layer_table"
-      },
-      "lifecycle_inspect": {
-        "description": "Reads one data-factory world's completed tick and lifecycle revision without changing it.",
+      "export_gltf_scene": {
+        "description": "Exports one fenced scene as a bounded glTF 2.0 GLB. Results above 40 KiB use a retained resource with ranged reads and explicit release. The v1 subset contains built-in, EditableMesh and bounded resident mesh geometry, source image maps, material runs and perspective cameras. Unavailable source facts are listed explicitly.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "instance_id": {
-              "maxLength": 128,
               "minLength": 1,
               "type": "string"
-            }
-          },
-          "required": [
-            "instance_id"
-          ],
-          "type": "object"
-        },
-        "name": "lifecycle_inspect"
-      },
-      "log_level": {
-        "description": "Reads or changes what this program logs, while it runs. With no argument it lists every category the build has registered and the severity floor each is at. `set` takes the same text the engine.log-level setting does: a bare level for everything, or comma-separated category=level overrides, or both - `warning,net=trace`. Statements below the compiled floor were removed by the preprocessor and cannot be switched on.",
-        "inputSchema": {
-          "properties": {
-            "set": {
-              "description": "A level, or category=level terms, or both.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "log_level"
-      },
-      "log_tail": {
-        "description": "The most recent lines this program has logged, newest last. Filter by minimum level and by category - a category is one area of the engine, usually one module, and log_level lists the ones this build registers. Only the last 1024 lines are kept, and `dropped` says how many scrolled off before the oldest one shown.",
-        "inputSchema": {
-          "properties": {
-            "category": {
-              "description": "Only lines from this area. Default all of them.",
-              "type": "string"
             },
-            "level": {
-              "description": "The lowest severity to include. Default trace.",
-              "enum": [
-                "trace",
-                "debug",
-                "info",
-                "warning",
-                "error"
-              ],
-              "type": "string"
-            },
-            "lines": {
-              "description": "How many lines at most. Default 50, capped at 1024.",
-              "type": "integer"
-            }
-          },
-          "type": "object"
-        },
-        "name": "log_tail"
-      },
-      "metrics_read": {
-        "description": "Every counter, gauge and distribution this process has recorded. A counter accumulates and is drained once a frame, so its value is a rate; a gauge is a level as last set; a histogram carries a mean, a maximum and nearest-rank percentiles over its recent window, which is what says whether a server holding its tick rate on average is still missing a fiftieth of its ticks. Times are nanoseconds. Reading changes nothing.",
-        "inputSchema": {
-          "properties": {
-            "prefix": {
-              "description": "Only names starting with this. Default all of them.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "metrics_read"
-      },
-      "module_get": {
-        "description": "One module or program: which layer and tier it is, every first-party target it links, and everything that links it. `linkedBy` is what would have to be rebuilt and reviewed if this module's interface changed. With no name, every module in layer order.",
-        "inputSchema": {
-          "properties": {
-            "name": {
-              "description": "The module or program. Omit for all of them.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "module_get"
-      },
-      "module_may_link": {
-        "description": "Whether one module is allowed to link another, and why. This is the question the architecture check answers, decided here from the same two rules: a tier may link shared and its own tier, and a layer may see every layer below it and none above it. Ask before writing an include - an edge that runs upward is refused at configure time and the fix is almost never to widen the rule.",
-        "inputSchema": {
-          "properties": {
-            "from": {
-              "description": "The module doing the linking.",
-              "type": "string"
-            },
-            "to": {
-              "description": "What it would link.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "from",
-            "to"
-          ],
-          "type": "object"
-        },
-        "name": "module_may_link"
-      },
-      "negotiate": {
-        "description": "Pure data-factory capability discovery. Reports this host's callable MCP operations and their schemas, and names unsupported proposed capture capabilities instead of guessing from renderer internals. It does not create, load, reset, or mutate a world.",
-        "inputSchema": {
-          "properties": {
-            "contract_version": {
-              "type": "string"
-            },
-            "requested_channels": {
-              "items": {
-                "maxLength": 128,
-                "pattern": "^[a-z0-9_]+$",
-                "type": "string"
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
               },
-              "maxItems": 64,
-              "type": "array"
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "export_gltf_scene"
+      },
+      "get_gltf_scene_chunk": {
+        "description": "Returns up to one MiB from a retained glTF export at its original world revision.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "byte_begin": {
+              "minimum": 0,
+              "type": "integer"
             },
-            "schema_version": {
+            "byte_end": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "hash": {
+              "type": "string"
+            },
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            },
+            "resource_id": {
               "type": "string"
             }
           },
+          "required": [
+            "instance_id",
+            "options",
+            "resource_id",
+            "hash",
+            "byte_begin",
+            "byte_end"
+          ],
           "type": "object"
         },
-        "name": "negotiate"
+        "name": "get_gltf_scene_chunk"
+      },
+      "release_gltf_scene": {
+        "description": "Releases one retained glTF export, including after its world revision changes.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "type": "string"
+            },
+            "resource_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "resource_id"
+          ],
+          "type": "object"
+        },
+        "name": "release_gltf_scene"
+      },
+      "begin_raw_scene_extract": {
+        "description": "Captures one fenced scene as portable raw mesh and texture sections with an inline manifest.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "begin_raw_scene_extract"
+      },
+      "get_raw_scene_chunk": {
+        "description": "Returns up to one MiB from a retained raw scene extract at its original world revision.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "byte_begin": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "byte_end": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "hash": {
+              "type": "string"
+            },
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            },
+            "resource_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options",
+            "resource_id",
+            "hash",
+            "byte_begin",
+            "byte_end"
+          ],
+          "type": "object"
+        },
+        "name": "get_raw_scene_chunk"
+      },
+      "release_raw_scene_extract": {
+        "description": "Releases one retained raw scene extract, including after its world revision changes.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "type": "string"
+            },
+            "resource_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "resource_id"
+          ],
+          "type": "object"
+        },
+        "name": "release_raw_scene_extract"
+      },
+      "get_capture_channels": {
+        "description": "Capture channel capability metadata for one scene.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "get_capture_channels"
+      },
+      "get_resources": {
+        "description": "Durable resource metadata for one scene.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "get_resources"
+      },
+      "get_event_narratives": {
+        "description": "Script-declared, bounded event narratives for one scene.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "get_event_narratives"
+      },
+      "get_authored_affordances": {
+        "description": "Return bounded explicit authored affordances in stable identity order. Geometry and colliders do not infer semantics.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "additionalProperties": false,
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "limit": {
+                  "maximum": 256,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "limit",
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "get_authored_affordances"
+      },
+      "raycast": {
+        "description": "Cast a finite ray through one scene's prepared physics colliders and return exact hit metadata with a stable authored entity id when one exists.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "additionalProperties": false,
+              "properties": {
+                "direction": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                },
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "max_distance_metres": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 100000,
+                  "type": "number"
+                },
+                "origin": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "origin",
+                "direction",
+                "max_distance_metres",
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "raycast"
       },
       "overlap_aabb": {
         "description": "Return stable authored ids for prepared physics colliders overlapping one finite world-space axis-aligned box.",
@@ -5897,166 +6984,8 @@
         },
         "name": "overlap_obb"
       },
-      "pause": {
-        "description": "Pauses one data-factory world at a completed tick boundary.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "scope": {
-              "enum": [
-                "all_systems",
-                "physics_only"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version"
-          ],
-          "type": "object"
-        },
-        "name": "pause"
-      },
-      "physics_observation_hooks": {
-        "description": "Lists the stable fixed-step physics observation hook names and the completed-record capacity.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "type": "object"
-        },
-        "name": "physics_observation_hooks"
-      },
-      "physics_observation_records": {
-        "description": "Returns up to 96 completed fixed-step physics records for one factory-owned world. The hook name declares post-integration, pre-solve, or completed-solver state. Values retain exact tick, physics step, step seconds and availability; unavailable fields are null. The read cannot change physics state.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version"
-          ],
-          "type": "object"
-        },
-        "name": "physics_observation_records"
-      },
-      "poll_capture": {
-        "description": "Reads capture metadata without consuming its retained plane bytes.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "type": "string"
-            },
-            "ticket": {
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "instance_id",
-            "ticket"
-          ],
-          "type": "object"
-        },
-        "name": "poll_capture"
-      },
-      "poll_render_only": {
-        "description": "Reads pending, submitted, or failed render-only command status. Submitted does not claim GPU readback readiness.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "instance_id",
-            "operation_id"
-          ],
-          "type": "object"
-        },
-        "name": "poll_render_only"
-      },
-      "poll_view_camera_mutation": {
-        "description": "Returns a view.camera mutation status and releases a terminal mutation ticket.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "type": "string"
-            },
-            "ticket": {
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "instance_id",
-            "ticket"
-          ],
-          "type": "object"
-        },
-        "name": "poll_view_camera_mutation"
-      },
-      "profile_frame": {
-        "description": "The last frame as a flame graph: one span per scope with its depth, its parent, its inclusive time and its self time. Collection is switched on by the first call, so the first reply is empty and the next one is not.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "profile_frame"
-      },
-      "raycast": {
-        "description": "Cast a finite ray through one scene's prepared physics colliders and return exact hit metadata with a stable authored entity id when one exists.",
+      "get_camera_rendering_data": {
+        "description": "Camera calibration for a stable authored camera id, or the scene's active camera.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -6065,14 +6994,114 @@
               "type": "string"
             },
             "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "get_camera_rendering_data"
+      },
+      "get_temporal_sample": {
+        "description": "Copies one selected camera and up to 64 selected object poses from a named retained all-systems-paused snapshot.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "camera_id": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "expected_tick": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_epoch": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected_world_version": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "object_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "snapshot_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "snapshot_id",
+            "expected_world_epoch",
+            "expected_world_version",
+            "expected_tick",
+            "camera_id",
+            "object_ids"
+          ],
+          "type": "object"
+        },
+        "name": "get_temporal_sample"
+      },
+      "get_rig_export": {
+        "description": "A bounded data-rig/v1 export of identified skeletons. Missing engine source data is declared rather than inferred.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "export_id": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "instance_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
               "additionalProperties": false,
               "properties": {
-                "direction": {
+                "entity_ids": {
                   "items": {
-                    "type": "number"
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
                   },
-                  "maxItems": 3,
-                  "minItems": 3,
+                  "maxItems": 256,
                   "type": "array"
                 },
                 "expected_tick": {
@@ -6087,24 +7116,13 @@
                   "minimum": 0,
                   "type": "integer"
                 },
-                "max_distance_metres": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 100000,
-                  "type": "number"
-                },
-                "origin": {
-                  "items": {
-                    "type": "number"
-                  },
-                  "maxItems": 3,
-                  "minItems": 3,
-                  "type": "array"
+                "limit": {
+                  "maximum": 256,
+                  "minimum": 0,
+                  "type": "integer"
                 }
               },
               "required": [
-                "origin",
-                "direction",
-                "max_distance_metres",
                 "expected_tick",
                 "expected_world_epoch",
                 "expected_world_version"
@@ -6114,533 +7132,12 @@
           },
           "required": [
             "instance_id",
+            "export_id",
             "options"
           ],
           "type": "object"
         },
-        "name": "raycast"
-      },
-      "release_capture": {
-        "description": "Releases one terminal capture and its retained bytes.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "ticket": {
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "instance_id",
-            "ticket",
-            "operation_id"
-          ],
-          "type": "object"
-        },
-        "name": "release_capture"
-      },
-      "release_gltf_scene": {
-        "description": "Releases one retained glTF export, including after its world revision changes.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "type": "string"
-            },
-            "resource_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "resource_id"
-          ],
-          "type": "object"
-        },
-        "name": "release_gltf_scene"
-      },
-      "release_raw_scene_extract": {
-        "description": "Releases one retained raw scene extract, including after its world revision changes.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "type": "string"
-            },
-            "resource_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "resource_id"
-          ],
-          "type": "object"
-        },
-        "name": "release_raw_scene_extract"
-      },
-      "release_scene_snapshot": {
-        "description": "Releases one retained scene snapshot, including after its world revision changes.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "type": "string"
-            },
-            "resource_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "resource_id"
-          ],
-          "type": "object"
-        },
-        "name": "release_scene_snapshot"
-      },
-      "render_only": {
-        "description": "Queues one static frame from a paused snapshot. Submitted means the frame command was accepted, not that GPU readback is ready.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "temporal_history": {
-              "enum": [
-                "preserve"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "snapshot_id",
-            "temporal_history",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "operation_id"
-          ],
-          "type": "object"
-        },
-        "name": "render_only"
-      },
-      "restore": {
-        "description": "Restores a compatible checkpoint through a scratch universe and starts a fresh epoch.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "checkpoint_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "checkpoint_id"
-          ],
-          "type": "object"
-        },
-        "name": "restore"
-      },
-      "resume": {
-        "description": "Resumes one data-factory world at a completed tick boundary.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version"
-          ],
-          "type": "object"
-        },
-        "name": "resume"
-      },
-      "run_script_package": {
-        "description": "Runs one atomic.data-script.v1 package in a fresh capability-limited Luau sandbox and atomically replaces a paused factory world.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "assets": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "base64": {
-                    "maxLength": 33554432,
-                    "type": "string"
-                  },
-                  "path": {
-                    "maxLength": 256,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "path",
-                  "base64"
-                ],
-                "type": "object"
-              },
-              "maxItems": 128,
-              "type": "array"
-            },
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "language": {
-              "enum": [
-                "luau"
-              ],
-              "type": "string"
-            },
-            "manifest": {
-              "maxLength": 65536,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "source_base64": {
-              "maxLength": 524288,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "operation_id",
-            "language",
-            "manifest",
-            "source_base64",
-            "assets"
-          ],
-          "type": "object"
-        },
-        "name": "run_script_package"
-      },
-      "script_check": {
-        "description": "Type-checks Luau against the engine's generated declarations, without running any of it. Give `source` for a draft or `path` for a file in the repository. Every diagnostic the editor's language server would show comes back here, because both go through the same declaration file. Nothing is evaluated: this surface will not run a script, because a tool runs inside the program's frame and there is nothing here that could interrupt a loop.",
-        "inputSchema": {
-          "properties": {
-            "path": {
-              "description": "A path relative to the repository root, instead of `source`.",
-              "type": "string"
-            },
-            "source": {
-              "description": "Luau to check.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "script_check"
-      },
-      "seek_backward": {
-        "description": "Restores the newest retained paused checkpoint and replays contiguous action-free fixed steps to an earlier completed tick.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "target_tick": {
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "operation_id",
-            "target_tick"
-          ],
-          "type": "object"
-        },
-        "name": "seek_backward"
-      },
-      "snapshot": {
-        "description": "Retains one immutable world snapshot at a completed boundary.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version"
-          ],
-          "type": "object"
-        },
-        "name": "snapshot"
-      },
-      "step": {
-        "description": "Advances one all-systems-paused world through its canonical dt_ns interval. Nonempty actions are unsupported until the host installs an executor.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "actions": {
-              "items": {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              "maxItems": 32,
-              "type": "array"
-            },
-            "dt_ns": {
-              "additionalProperties": false,
-              "properties": {
-                "denominator": {
-                  "maximum": 4294967295,
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                "numerator": {
-                  "minimum": 1,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "numerator",
-                "denominator"
-              ],
-              "type": "object"
-            },
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "operation_id",
-            "dt_ns"
-          ],
-          "type": "object"
-        },
-        "name": "step"
-      },
-      "submit_view_camera_mutation": {
-        "description": "Queues one owned synchronous view.camera patch for an exact paused snapshot and pipeline revision.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "camera": {
-              "type": "object"
-            },
-            "camera_frame": {
-              "maxItems": 7,
-              "minItems": 7,
-              "type": "array"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "pipeline": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "pipeline_revision": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "projection": {
-              "maxItems": 16,
-              "minItems": 16,
-              "type": "array"
-            },
-            "snapshot_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "view_slot": {
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "instance_id",
-            "snapshot_id",
-            "pipeline",
-            "pipeline_revision",
-            "view_slot"
-          ],
-          "type": "object"
-        },
-        "name": "submit_view_camera_mutation"
+        "name": "get_rig_export"
       },
       "visibility_observations": {
         "description": "Returns bounded per-object facts from the completed main camera submission.",
@@ -6656,158 +7153,6 @@
           "type": "object"
         },
         "name": "visibility_observations"
-      },
-      "world_create": {
-        "description": "Creates one factory-owned local world in this Universe.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "seed": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "tick_rate": {
-              "exclusiveMinimum": 0,
-              "maximum": 1000,
-              "type": "number"
-            }
-          },
-          "required": [
-            "instance_id",
-            "seed",
-            "tick_rate",
-            "operation_id"
-          ],
-          "type": "object"
-        },
-        "name": "world_create"
-      },
-      "world_list": {
-        "description": "Every scene, with its state, its tick statistics and how many instances it holds. A world is a scene; the universe is the game.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "world_list"
-      },
-      "world_reset": {
-        "description": "Resets one factory-owned local world after an all-systems pause.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "seed": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "tick_rate": {
-              "exclusiveMinimum": 0,
-              "maximum": 1000,
-              "type": "number"
-            }
-          },
-          "required": [
-            "instance_id",
-            "seed",
-            "tick_rate",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "operation_id"
-          ],
-          "type": "object"
-        },
-        "name": "world_reset"
-      },
-      "world_retire": {
-        "description": "Retires one factory-owned local world after an all-systems pause and returns a tombstone.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "expected_tick": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_epoch": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "expected_world_version": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "instance_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "operation_id": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "expected_tick",
-            "expected_world_epoch",
-            "expected_world_version",
-            "operation_id"
-          ],
-          "type": "object"
-        },
-        "name": "world_retire"
-      },
-      "world_tree": {
-        "description": "The instance tree of one scene, as an author sees it in the explorer. Depth-limited and count-limited; ask for more when you know where you are going.",
-        "inputSchema": {
-          "properties": {
-            "depth": {
-              "description": "Levels to descend. Default 3.",
-              "type": "integer"
-            },
-            "limit": {
-              "description": "Instances at most. Default 200.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "world_tree"
       }
     }
   },
@@ -6851,10 +7196,13 @@
             "world_list",
             "world_tree",
             "instance_get",
+            "entity_create",
+            "entity_destroy",
             "instance_set",
             "component_list",
             "entity_query",
             "component_get",
+            "component_remove",
             "component_set",
             "profile_frame"
           ]
@@ -7055,6 +7403,45 @@
         {
           "input_schema": {
             "properties": {
+              "class": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": "integer"
+              },
+              "world": {
+                "description": "Which scene, by name.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "name": "entity_create"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "world": {
+                "description": "Which scene, by name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "name": "entity_destroy"
+        },
+        {
+          "input_schema": {
+            "properties": {
               "id": {
                 "type": "integer"
               },
@@ -7136,6 +7523,28 @@
             "type": "object"
           },
           "name": "component_get"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "component": {
+                "type": "string"
+              },
+              "id": {
+                "type": "integer"
+              },
+              "world": {
+                "description": "Which scene, by name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "component"
+            ],
+            "type": "object"
+          },
+          "name": "component_remove"
         },
         {
           "input_schema": {
@@ -7320,6 +7729,112 @@
             "type": "object"
           },
           "name": "negotiate"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_mouse_move"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "button": {
+                "enum": [
+                  "left",
+                  "middle",
+                  "right"
+                ],
+                "type": "string"
+              },
+              "down": {
+                "type": "boolean"
+              },
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_click"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "notches": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "notches"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_mouse_wheel"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "down": {
+                "type": "boolean"
+              },
+              "key": {
+                "type": "string"
+              },
+              "modifiers": {
+                "items": {
+                  "enum": [
+                    "shift",
+                    "control",
+                    "alt",
+                    "gui"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "key"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_key"
+        },
+        {
+          "input_schema": {
+            "properties": {
+              "text": {
+                "maxLength": 16384,
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "type": "object"
+          },
+          "name": "emulate_text"
         },
         {
           "input_schema": {
@@ -7746,41 +8261,52 @@
       }
     },
     "tools": {
-      "class_get": {
-        "description": "One class: what it derives from, and every property it exposes with the type it carries, whether it can be written and whether a script can see it at all. This is the live class table rather than the checked-in manifest, so it describes what this process registered. Use instance_get to read the values off a particular instance.",
+      "engine_info": {
+        "description": "This program's own state: how many scenes it holds and what they are called. Call it first.",
         "inputSchema": {
-          "properties": {
-            "name": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "name"
-          ],
           "type": "object"
         },
-        "name": "class_get"
+        "name": "engine_info"
       },
-      "class_list": {
-        "description": "Every class this process registers, with what it derives from. A class is what Instance.new names and what a save file carries; its properties are what a script may read and write. Inheritance is set inclusion here, so a query for a base class matches every derived instance. Call class_get for one class's properties.",
+      "engine_components": {
+        "description": "Every component type this engine registers, with its size, whether it is a tag, whether a save file can carry it and whether replication has a compact form for it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Use component_list instead for the components a game declared for itself, and instance_get to read one off a particular instance.",
         "inputSchema": {
-          "properties": {
-            "derivedFrom": {
-              "description": "Only classes that are a kind of this one.",
-              "type": "string"
-            }
-          },
           "type": "object"
         },
-        "name": "class_list"
+        "name": "engine_components"
       },
-      "component_get": {
-        "description": "The values one entity holds for one component, field by field. Null when the entity does not carry it - which is a different answer from carrying it with every field at zero.",
+      "world_list": {
+        "description": "Every scene, with its state, its tick statistics and how many instances it holds. A world is a scene; the universe is the game.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "world_list"
+      },
+      "world_tree": {
+        "description": "The instance tree of one scene, as an author sees it in the explorer. Depth-limited and count-limited; ask for more when you know where you are going.",
         "inputSchema": {
           "properties": {
-            "component": {
-              "type": "string"
+            "depth": {
+              "description": "Levels to descend. Default 3.",
+              "type": "integer"
             },
+            "limit": {
+              "description": "Instances at most. Default 200.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "world_tree"
+      },
+      "instance_get": {
+        "description": "Every property of one instance, by the id world_tree reported.",
+        "inputSchema": {
+          "properties": {
             "id": {
               "description": "The entity id.",
               "type": "integer"
@@ -7791,12 +8317,77 @@
             }
           },
           "required": [
-            "id",
-            "component"
+            "id"
           ],
           "type": "object"
         },
-        "name": "component_get"
+        "name": "instance_get"
+      },
+      "entity_create": {
+        "description": "Creates an authoritative entity in a scene. Give a class name to create an instance from its defaults; omit class for a raw entity. An instance may have a name and a parent instance id. Raw names are unique within their scene. Refused on replicas.",
+        "inputSchema": {
+          "properties": {
+            "class": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parent": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "entity_create"
+      },
+      "entity_destroy": {
+        "description": "Destroys one entity in a scene. For an instance, also destroys its descendants. World fixtures and replica scenes are protected.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "name": "entity_destroy"
+      },
+      "instance_set": {
+        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "property": {
+              "type": "string"
+            },
+            "value": {},
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "property",
+            "value"
+          ],
+          "type": "object"
+        },
+        "name": "instance_set"
       },
       "component_list": {
         "description": "Every component a game declared for itself, with its fields and how many entities in a scene carry it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Components the engine declares are not listed here - those are reached as properties, through instance_get.",
@@ -7810,45 +8401,6 @@
           "type": "object"
         },
         "name": "component_list"
-      },
-      "component_set": {
-        "description": "Writes fields of one component on one entity, adding it when the entity does not carry it yet. Fields left out keep what they had; a fresh component starts at zero. Vector3 and Color3 take an object of named components, as instance_set does.",
-        "inputSchema": {
-          "properties": {
-            "component": {
-              "type": "string"
-            },
-            "fields": {},
-            "id": {
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "fields"
-          ],
-          "type": "object"
-        },
-        "name": "component_set"
-      },
-      "engine_components": {
-        "description": "Every component type this engine registers, with its size, whether it is a tag, whether a save file can carry it and whether replication has a compact form for it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Use component_list instead for the components a game declared for itself, and instance_get to read one off a particular instance.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "engine_components"
-      },
-      "engine_info": {
-        "description": "This program's own state: how many scenes it holds and what they are called. Call it first.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "engine_info"
       },
       "entity_query": {
         "description": "Every entity in a scene carrying all of the named components. This is the query a system runs, asked from outside: name the components and get the ids back, then read one with component_get or instance_get.",
@@ -7877,10 +8429,13 @@
         },
         "name": "entity_query"
       },
-      "instance_get": {
-        "description": "Every property of one instance, by the id world_tree reported.",
+      "component_get": {
+        "description": "The values one entity holds for one component, field by field. Null when the entity does not carry it - which is a different answer from carrying it with every field at zero.",
         "inputSchema": {
           "properties": {
+            "component": {
+              "type": "string"
+            },
             "id": {
               "description": "The entity id.",
               "type": "integer"
@@ -7891,23 +8446,23 @@
             }
           },
           "required": [
-            "id"
+            "id",
+            "component"
           ],
           "type": "object"
         },
-        "name": "instance_get"
+        "name": "component_get"
       },
-      "instance_set": {
-        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string.",
+      "component_remove": {
+        "description": "Removes one game-declared component from an entity in a scene. Engine-owned components, protected fixtures, and replica scenes cannot be changed here.",
         "inputSchema": {
           "properties": {
+            "component": {
+              "type": "string"
+            },
             "id": {
               "type": "integer"
             },
-            "property": {
-              "type": "string"
-            },
-            "value": {},
             "world": {
               "description": "Which scene, by name.",
               "type": "string"
@@ -7915,12 +8470,43 @@
           },
           "required": [
             "id",
-            "property",
-            "value"
+            "component"
           ],
           "type": "object"
         },
-        "name": "instance_set"
+        "name": "component_remove"
+      },
+      "component_set": {
+        "description": "Writes fields of one component on one entity, adding it when the entity does not carry it yet. Fields left out keep what they had; a fresh component starts at zero. Vector3 and Color3 take an object of named components, as instance_set does.",
+        "inputSchema": {
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "fields": {},
+            "id": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "fields"
+          ],
+          "type": "object"
+        },
+        "name": "component_set"
+      },
+      "profile_frame": {
+        "description": "The last frame as a flame graph: one span per scope with its depth, its parent, its inclusive time and its self time. Collection is switched on by the first call, so the first reply is empty and the next one is not.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "profile_frame"
       },
       "layer_table": {
         "description": "The engine's layer stack, bottom to top: every module at each height, with its tier. A layer may see every layer below it and none above it, so this table is what decides which module may include which. The programs are listed separately - they are what links modules and nothing links them. Call module_may_link to ask about one edge.",
@@ -7928,60 +8514,6 @@
           "type": "object"
         },
         "name": "layer_table"
-      },
-      "log_level": {
-        "description": "Reads or changes what this program logs, while it runs. With no argument it lists every category the build has registered and the severity floor each is at. `set` takes the same text the engine.log-level setting does: a bare level for everything, or comma-separated category=level overrides, or both - `warning,net=trace`. Statements below the compiled floor were removed by the preprocessor and cannot be switched on.",
-        "inputSchema": {
-          "properties": {
-            "set": {
-              "description": "A level, or category=level terms, or both.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "log_level"
-      },
-      "log_tail": {
-        "description": "The most recent lines this program has logged, newest last. Filter by minimum level and by category - a category is one area of the engine, usually one module, and log_level lists the ones this build registers. Only the last 1024 lines are kept, and `dropped` says how many scrolled off before the oldest one shown.",
-        "inputSchema": {
-          "properties": {
-            "category": {
-              "description": "Only lines from this area. Default all of them.",
-              "type": "string"
-            },
-            "level": {
-              "description": "The lowest severity to include. Default trace.",
-              "enum": [
-                "trace",
-                "debug",
-                "info",
-                "warning",
-                "error"
-              ],
-              "type": "string"
-            },
-            "lines": {
-              "description": "How many lines at most. Default 50, capped at 1024.",
-              "type": "integer"
-            }
-          },
-          "type": "object"
-        },
-        "name": "log_tail"
-      },
-      "metrics_read": {
-        "description": "Every counter, gauge and distribution this process has recorded. A counter accumulates and is drained once a frame, so its value is a rate; a gauge is a level as last set; a histogram carries a mean, a maximum and nearest-rank percentiles over its recent window, which is what says whether a server holding its tick rate on average is still missing a fiftieth of its ticks. Times are nanoseconds. Reading changes nothing.",
-        "inputSchema": {
-          "properties": {
-            "prefix": {
-              "description": "Only names starting with this. Default all of them.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "metrics_read"
       },
       "module_get": {
         "description": "One module or program: which layer and tier it is, every first-party target it links, and everything that links it. `linkedBy` is what would have to be rebuilt and reviewed if this module's interface changed. With no name, every module in layer order.",
@@ -8017,6 +8549,105 @@
         },
         "name": "module_may_link"
       },
+      "class_list": {
+        "description": "Every class this process registers, with what it derives from. A class is what Instance.new names and what a save file carries; its properties are what a script may read and write. Inheritance is set inclusion here, so a query for a base class matches every derived instance. Call class_get for one class's properties.",
+        "inputSchema": {
+          "properties": {
+            "derivedFrom": {
+              "description": "Only classes that are a kind of this one.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "class_list"
+      },
+      "class_get": {
+        "description": "One class: what it derives from, and every property it exposes with the type it carries, whether it can be written and whether a script can see it at all. This is the live class table rather than the checked-in manifest, so it describes what this process registered. Use instance_get to read the values off a particular instance.",
+        "inputSchema": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "name": "class_get"
+      },
+      "script_check": {
+        "description": "Type-checks Luau against the engine's generated declarations, without running any of it. Give `source` for a draft or `path` for a file in the repository. Every diagnostic the editor's language server would show comes back here, because both go through the same declaration file. Nothing is evaluated: this surface will not run a script, because a tool runs inside the program's frame and there is nothing here that could interrupt a loop.",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "description": "A path relative to the repository root, instead of `source`.",
+              "type": "string"
+            },
+            "source": {
+              "description": "Luau to check.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "script_check"
+      },
+      "log_tail": {
+        "description": "The most recent lines this program has logged, newest last. Filter by minimum level and by category - a category is one area of the engine, usually one module, and log_level lists the ones this build registers. Only the last 1024 lines are kept, and `dropped` says how many scrolled off before the oldest one shown.",
+        "inputSchema": {
+          "properties": {
+            "category": {
+              "description": "Only lines from this area. Default all of them.",
+              "type": "string"
+            },
+            "level": {
+              "description": "The lowest severity to include. Default trace.",
+              "enum": [
+                "trace",
+                "debug",
+                "info",
+                "warning",
+                "error"
+              ],
+              "type": "string"
+            },
+            "lines": {
+              "description": "How many lines at most. Default 50, capped at 1024.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_tail"
+      },
+      "log_level": {
+        "description": "Reads or changes what this program logs, while it runs. With no argument it lists every category the build has registered and the severity floor each is at. `set` takes the same text the engine.log-level setting does: a bare level for everything, or comma-separated category=level overrides, or both - `warning,net=trace`. Statements below the compiled floor were removed by the preprocessor and cannot be switched on.",
+        "inputSchema": {
+          "properties": {
+            "set": {
+              "description": "A level, or category=level terms, or both.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_level"
+      },
+      "metrics_read": {
+        "description": "Every counter, gauge and distribution this process has recorded. A counter accumulates and is drained once a frame, so its value is a rate; a gauge is a level as last set; a histogram carries a mean, a maximum and nearest-rank percentiles over its recent window, which is what says whether a server holding its tick rate on average is still missing a fiftieth of its ticks. Times are nanoseconds. Reading changes nothing.",
+        "inputSchema": {
+          "properties": {
+            "prefix": {
+              "description": "Only names starting with this. Default all of them.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "metrics_read"
+      },
       "negotiate": {
         "description": "Pure data-factory capability discovery. Reports this host's callable MCP operations and their schemas, and names unsupported proposed capture capabilities instead of guessing from renderer internals. It does not create, load, reset, or mutate a world.",
         "inputSchema": {
@@ -8041,29 +8672,116 @@
         },
         "name": "negotiate"
       },
-      "profile_frame": {
-        "description": "The last frame as a flame graph: one span per scope with its depth, its parent, its inclusive time and its self time. Collection is switched on by the first call, so the first reply is empty and the next one is not.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "profile_frame"
-      },
-      "script_check": {
-        "description": "Type-checks Luau against the engine's generated declarations, without running any of it. Give `source` for a draft or `path` for a file in the repository. Every diagnostic the editor's language server would show comes back here, because both go through the same declaration file. Nothing is evaluated: this surface will not run a script, because a tool runs inside the program's frame and there is nothing here that could interrupt a loop.",
+      "emulate_mouse_move": {
+        "description": "Moves the mouse pointer to client coordinates through this program's input boundary.",
         "inputSchema": {
           "properties": {
-            "path": {
-              "description": "A path relative to the repository root, instead of `source`.",
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_move"
+      },
+      "emulate_click": {
+        "description": "Clicks, presses, or releases a mouse button at client coordinates through this program's input boundary. Omit down for one complete click.",
+        "inputSchema": {
+          "properties": {
+            "button": {
+              "enum": [
+                "left",
+                "middle",
+                "right"
+              ],
               "type": "string"
             },
-            "source": {
-              "description": "Luau to check.",
+            "down": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_click"
+      },
+      "emulate_mouse_wheel": {
+        "description": "Turns the mouse wheel by a signed number of vertical notches through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "notches": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "notches"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_wheel"
+      },
+      "emulate_key": {
+        "description": "Presses, releases, or taps one named keyboard key through this program's input boundary. Omit down for one complete key press.",
+        "inputSchema": {
+          "properties": {
+            "down": {
+              "type": "boolean"
+            },
+            "key": {
+              "type": "string"
+            },
+            "modifiers": {
+              "items": {
+                "enum": [
+                  "shift",
+                  "control",
+                  "alt",
+                  "gui"
+                ],
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_key"
+      },
+      "emulate_text": {
+        "description": "Sends UTF-8 text through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "text": {
+              "maxLength": 16384,
               "type": "string"
             }
           },
+          "required": [
+            "text"
+          ],
           "type": "object"
         },
-        "name": "script_check"
+        "name": "emulate_text"
       },
       "visibility_observations": {
         "description": "Returns bounded per-object facts from the completed main camera submission.",
@@ -8079,34 +8797,6 @@
           "type": "object"
         },
         "name": "visibility_observations"
-      },
-      "world_list": {
-        "description": "Every scene, with its state, its tick statistics and how many instances it holds. A world is a scene; the universe is the game.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "world_list"
-      },
-      "world_tree": {
-        "description": "The instance tree of one scene, as an author sees it in the explorer. Depth-limited and count-limited; ask for more when you know where you are going.",
-        "inputSchema": {
-          "properties": {
-            "depth": {
-              "description": "Levels to descend. Default 3.",
-              "type": "integer"
-            },
-            "limit": {
-              "description": "Instances at most. Default 200.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "world_tree"
       }
     }
   }

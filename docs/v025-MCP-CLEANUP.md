@@ -45,7 +45,7 @@ flowchart LR
     Bridge --> Socket[loopback control Server]
     Socket --> Surface[control::Surface\nJSON-RPC and row tables]
     Surface --> Core[always-on features\ndiscovery, resources, prompts]
-    Surface --> Product[product rows\nStudio, client, server, CDN]
+    Surface --> Product[product rows\nStudio, client, server, CDN, launcher]
     Surface --> Factory[data-factory and observation rows]
     Factory --> World[DataFactorySession\nworld lifecycle and fences]
     Factory --> Render[renderer capture bridge\nasync tickets and resources]
@@ -56,6 +56,14 @@ thread. `Surface::Answer` implements the MCP handshake and dispatches
 `tools/*`, `resources/*`, and `prompts/*`. `mcpbridge` intentionally parses no
 MCP and forwards bytes between stdio and the loopback socket. This separation is
 sound and should remain.
+
+The shared surface also registers `emulate_mouse_move`, `emulate_click`,
+`emulate_mouse_wheel`, `emulate_key`, and `emulate_text` when a host supplies an
+input callback. Studio, client, and launcher route these through their normal
+input boundaries, including headless UI frames. A server or CDN has no pointer
+or keyboard owner and does not advertise those rows. The Universe feature
+exposes bounded entity creation, destruction, and component removal alongside
+its existing read and write tools. Product MCP listeners remain opt-in.
 
 Products presently assemble feature arrays themselves. Studio changes the list
 when `DataFactoryHost` is present. Client conditionally adds data-factory,

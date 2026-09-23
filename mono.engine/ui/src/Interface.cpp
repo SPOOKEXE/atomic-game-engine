@@ -6,6 +6,7 @@
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
@@ -16,9 +17,49 @@
 #include <cstring>
 #include <imgui.h>
 #include <string>
+#include <vector>
+
+// SDL's ImGui backend intentionally exports this mapper for other hosts.
+ImGuiKey ImGui_ImplSDL3_KeyEventToImGuiKey(SDL_Keycode keycode, SDL_Scancode scancode);
 
 namespace engine::ui {
 	namespace {
+		void ApplyHeadlessEvent(const SDL_Event &event) {
+			ImGuiIO &io = ImGui::GetIO();
+			switch (event.type) {
+			case SDL_EVENT_MOUSE_MOTION:
+				io.AddMousePosEvent(event.motion.x, event.motion.y);
+				break;
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+			case SDL_EVENT_MOUSE_BUTTON_UP: {
+				const int button = event.button.button == SDL_BUTTON_RIGHT	  ? 1
+								   : event.button.button == SDL_BUTTON_MIDDLE ? 2
+																			  : 0;
+				io.AddMouseButtonEvent(button, event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+				break;
+			}
+			case SDL_EVENT_MOUSE_WHEEL:
+				io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
+				break;
+			case SDL_EVENT_TEXT_INPUT:
+				io.AddInputCharactersUTF8(event.text.text);
+				break;
+			case SDL_EVENT_KEY_DOWN:
+			case SDL_EVENT_KEY_UP: {
+				const bool down = event.type == SDL_EVENT_KEY_DOWN;
+				io.AddKeyEvent(ImGuiMod_Shift, down && (event.key.mod & SDL_KMOD_SHIFT) != 0);
+				io.AddKeyEvent(ImGuiMod_Ctrl, down && (event.key.mod & SDL_KMOD_CTRL) != 0);
+				io.AddKeyEvent(ImGuiMod_Alt, down && (event.key.mod & SDL_KMOD_ALT) != 0);
+				io.AddKeyEvent(ImGuiMod_Super, down && (event.key.mod & SDL_KMOD_GUI) != 0);
+				const ImGuiKey key = ImGui_ImplSDL3_KeyEventToImGuiKey(event.key.key, event.key.scancode);
+				if (key != ImGuiKey_None) io.AddKeyEvent(key, down);
+				break;
+			}
+			default:
+				break;
+			}
+		}
+
 		uint64_t FoldBytes(uint64_t hash, const void *data, size_t size) {
 			constexpr uint64_t PRIME = 1099511628211ull;
 			const auto *bytes = static_cast<const std::byte *>(data);
@@ -70,6 +111,12 @@ namespace engine::ui {
 	}
 
 	struct Interface::Impl {
+		struct PendingEvent {
+			SDL_Event Event{};
+			std::string Text;
+		};
+		std::vector<PendingEvent> HeadlessEvents;
+
 		render::InterfacePass Spatial;
 		double SpatialSeconds = 0.0;
 		ImGuiContext *Context = nullptr;
@@ -116,11 +163,8 @@ namespace engine::ui {
 		const bool drawable = window != nullptr;
 
 		const render::BackendHandles backend = renderer.Backend();
-		if (backend.Device == nullptr) {
-			// Not an assertion. A headless run legitimately has no device, and
-			// the caller decides whether that is fatal - same contract as
-			// `Renderer::Initialise`.
-			ENGINE_ERROR("ui::Interface needs an initialised renderer");
+		if (drawable && backend.Device == nullptr) {
+			ENGINE_ERROR("ui::Interface needs an initialised renderer with a window");
 			return false;
 		}
 
@@ -263,6 +307,7 @@ namespace engine::ui {
 		State->DrawSignature = 0;
 		State->UploadedSignature = 0;
 		State->UploadedSignatureValid = false;
+		State->HeadlessEvents.clear();
 		State->Ready = false;
 		State->Drawable = false;
 	}
@@ -282,10 +327,31 @@ namespace engine::ui {
 	}
 
 	void Interface::ProcessEvent(const SDL_Event &event) {
-		if (!State->Ready || !State->Drawable) {
+		if (!State->Ready) {
 			return;
 		}
-		ImGui_ImplSDL3_ProcessEvent(&event);
+		if (State->Drawable) {
+			ImGui_ImplSDL3_ProcessEvent(&event);
+			return;
+		}
+		switch (event.type) {
+		case SDL_EVENT_MOUSE_MOTION:
+		case SDL_EVENT_MOUSE_BUTTON_DOWN:
+		case SDL_EVENT_MOUSE_BUTTON_UP:
+		case SDL_EVENT_MOUSE_WHEEL:
+		case SDL_EVENT_TEXT_INPUT:
+		case SDL_EVENT_KEY_DOWN:
+		case SDL_EVENT_KEY_UP:
+			break;
+		default:
+			return;
+		}
+		auto &pending = State->HeadlessEvents.emplace_back();
+		pending.Event = event;
+		if (event.type == SDL_EVENT_TEXT_INPUT) {
+			pending.Text = event.text.text == nullptr ? "" : event.text.text;
+			pending.Event.text.text = nullptr;
+		}
 	}
 
 	void Interface::Begin(float frameSeconds) {
@@ -310,6 +376,12 @@ namespace engine::ui {
 			ImGuiIO &headless = ImGui::GetIO();
 			headless.DisplaySize = State->Display;
 			headless.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+			for (auto &pending : State->HeadlessEvents) {
+				if (pending.Event.type == SDL_EVENT_TEXT_INPUT)
+					pending.Event.text.text = pending.Text.c_str();
+				ApplyHeadlessEvent(pending.Event);
+			}
+			State->HeadlessEvents.clear();
 		}
 
 		// **The delta is overwritten after `NewFrame`, not before it.** The

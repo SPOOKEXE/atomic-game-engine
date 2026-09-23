@@ -5,8 +5,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <chrono>
 #include <launcher/Launcher.hpp>
 #include <launcher/Programs.hpp>
+#include <thread>
 
 namespace launcher {
 
@@ -27,6 +29,7 @@ namespace launcher {
 
 	bool Launcher::Initialise(const Options &options) {
 		Settings = options;
+		ControlOnly = Settings.Headless && Settings.MaximumFrames < 0 && Settings.ControlPort >= 0;
 		Catalogue = Modes();
 
 		// Before anything reads a file, for `Editor::Initialise`'s reason:
@@ -40,7 +43,7 @@ namespace launcher {
 			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
 		}
 
-		if (!SDL_Init(SDL_INIT_VIDEO)) {
+		if (!SDL_Init(ControlOnly ? SDL_INIT_EVENTS : SDL_INIT_VIDEO)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
 		}
@@ -62,6 +65,25 @@ namespace launcher {
 		// that is up and empty while they run, which reads as a hang; a window
 		// that opens a second later reads as a program starting.
 		Programs.Load(Stage, ProgramsOf(Catalogue));
+
+		if (ControlOnly) {
+			engine::ui::InterfaceSettings interfaceSettings;
+			interfaceSettings.Docking = false;
+			interfaceSettings.Scale = Settings.Scale;
+			interfaceSettings.DisplayWidth = Settings.Width;
+			interfaceSettings.DisplayHeight = Settings.Height;
+			if (!Interface.Initialise(Renderer, nullptr, interfaceSettings)) return false;
+			if (!Settings.StartMode.empty()) {
+				if (const Mode *mode = FindMode(Catalogue, Settings.StartMode)) Open(*mode);
+			}
+			InstallControl();
+			if (!ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
+				ENGINE_ERROR("launcher: could not bind MCP port {}", Settings.ControlPort);
+				return false;
+			}
+			ENGINE_INFO("launcher: MCP listening on 127.0.0.1:{}", ControlServer.Port());
+			return true;
+		}
 
 		if (!Settings.Headless) {
 			Window = SDL_CreateWindow(
@@ -124,6 +146,14 @@ namespace launcher {
 				Open(*mode);
 			}
 		}
+		if (Settings.ControlPort >= 0) {
+			InstallControl();
+			if (!ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
+				ENGINE_ERROR("launcher: could not bind MCP port {}", Settings.ControlPort);
+				return false;
+			}
+			ENGINE_INFO("launcher: MCP listening on 127.0.0.1:{}", ControlServer.Port());
+		}
 
 		return true;
 	}
@@ -132,6 +162,13 @@ namespace launcher {
 		engine::core::FrameClock clock;
 
 		while (!Quit) {
+			if (ControlOnly) {
+				PumpControl();
+				Child.Poll(engine::core::Clock::Seconds());
+				Frame(clock.Tick());
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				continue;
+			}
 			// A frame that could not be acquired is a minimised or resizing
 			// window. The form still runs - a supervised child is still polled
 			// and still reported - and only the drawing is skipped.
@@ -152,6 +189,7 @@ namespace launcher {
 
 			const float delta = clock.Tick();
 			Child.Poll(engine::core::Clock::Seconds());
+			PumpControl();
 
 			// **`HandOver` is a hide rather than an exit.** The launcher has to
 			// outlive the child to know it ended, and coming back to the form
@@ -203,6 +241,7 @@ namespace launcher {
 		}
 
 		Interface.End();
+		if (ControlOnly) return;
 
 		// **One view, empty.** `Renderer::Render` returns without presenting
 		// when handed no views at all, so this is what carries the interface to

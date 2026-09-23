@@ -879,6 +879,126 @@ namespace engine::control {
 
 		if (writable) {
 			Add(Tool{
+				"entity_create",
+				"Creates an authoritative entity in a scene. Give a class name to create an instance "
+				"from its defaults; omit class for a raw entity. An instance may have a name and a "
+				"parent instance id. Raw names are unique within their scene. Refused on replicas.",
+				[] {
+					json schema = WorldSchema();
+					schema["properties"]["class"] = json{{"type", "string"}};
+					schema["properties"]["name"] = json{{"type", "string"}};
+					schema["properties"]["parent"] = json{{"type", "integer"}};
+					return schema;
+				},
+				[worlds](const json &arguments, std::string &failure) -> json {
+					const WorldId world = WorldArgument(*worlds, arguments, failure);
+					if (!failure.empty()) return nullptr;
+					if (worlds->IsRemote(world)) {
+						failure = "that scene is owned by another process";
+						return nullptr;
+					}
+					if ((arguments.contains("class") && !arguments["class"].is_string()) ||
+						(arguments.contains("name") && !arguments["name"].is_string()) ||
+						(arguments.contains("parent") && !arguments["parent"].is_number_unsigned())) {
+						failure = "class and name must be strings; parent must be an entity id";
+						return nullptr;
+					}
+					const std::string className = arguments.value("class", std::string());
+					const std::string name = arguments.value("name", std::string());
+					if (className.size() > 128 || name.size() > 256 ||
+						className.find('\0') != std::string::npos || name.find('\0') != std::string::npos) {
+						failure = "class and name must have no NUL bytes; class is limited to 128 bytes and "
+								  "name to 256 bytes";
+						return nullptr;
+					}
+					if (arguments.contains("parent") && className.empty()) {
+						failure = "only a class instance can have a parent";
+						return nullptr;
+					}
+					const ClassId klass =
+						className.empty() ? ClassId{} : Classes::Find(core::Name(className.c_str()));
+					if (!className.empty() && (!klass.IsValid() || !Classes::Describe(klass).Creatable)) {
+						failure = "that class is unknown or cannot be created";
+						return nullptr;
+					}
+					ecs::Entity created;
+					worlds->Enter(world, [&](Store &store) {
+						if (store.AdoptOnly()) {
+							failure = "that scene is a replica and cannot mint authoritative entities";
+							return;
+						}
+						ecs::Entity parent;
+						if (arguments.contains("parent")) {
+							parent = ecs::Entity(arguments["parent"].get<uint64_t>());
+							if (!store.Alive(parent) || !store.ClassOf(parent).IsValid()) {
+								failure = "parent is not an instance in that scene";
+								return;
+							}
+						}
+						if (klass.IsValid()) {
+							created = store.CreateInstance(klass, name);
+							if (created && parent && !store.SetParentAuthored(created, parent)) {
+								store.DestroyInstance(created);
+								created = {};
+								failure = "could not parent the new instance";
+							}
+						} else {
+							if (!name.empty() && store.Find(name)) {
+								failure = "a raw entity already has that name";
+								return;
+							}
+							created = name.empty() ? store.Create() : store.Create(name);
+						}
+					});
+					if (!failure.empty()) return nullptr;
+					if (!created) {
+						failure = "the scene could not create an entity";
+						return nullptr;
+					}
+					return json{{"id", created.Id}, {"world", std::string(worlds->NameOf(world).Text())}};
+				},
+			});
+
+			Add(Tool{
+				"entity_destroy",
+				"Destroys one entity in a scene. For an instance, also destroys its descendants. "
+				"World fixtures and replica scenes are protected.",
+				[] {
+					json schema = WorldSchema();
+					schema["properties"]["id"] = json{{"type", "integer"}};
+					schema["required"] = json::array({"id"});
+					return schema;
+				},
+				[worlds](const json &arguments, std::string &failure) -> json {
+					const WorldId world = WorldArgument(*worlds, arguments, failure);
+					if (!failure.empty()) return nullptr;
+					if (worlds->IsRemote(world)) {
+						failure = "that scene is owned by another process";
+						return nullptr;
+					}
+					if (!arguments.contains("id") || !arguments["id"].is_number_unsigned()) {
+						failure = "entity_destroy needs an entity id";
+						return nullptr;
+					}
+					const ecs::Entity entity(arguments["id"].get<uint64_t>());
+					worlds->Enter(world, [&](Store &store) {
+						if (store.AdoptOnly())
+							failure = "that scene is a replica";
+						else if (!store.Alive(entity))
+							failure = "no such entity in that scene";
+						else if (store.Protected(entity))
+							failure = "that entity is a protected world fixture";
+						else if (store.ClassOf(entity).IsValid()) {
+							if (!store.DestroyAuthored(entity)) failure = "that instance cannot be destroyed";
+						} else
+							store.Destroy(entity);
+					});
+					if (!failure.empty()) return nullptr;
+					return json{{"id", entity.Id}, {"ok", true}};
+				},
+			});
+
+			Add(Tool{
 				"instance_set",
 				"Writes one property of one instance. Vector3 and Color3 take an object of named "
 				"components; an enum takes its member name as a string.",
@@ -1093,6 +1213,58 @@ namespace engine::control {
 		});
 
 		if (writable) {
+			Add(Tool{
+				"component_remove",
+				"Removes one game-declared component from an entity in a scene. Engine-owned "
+				"components, protected fixtures, and replica scenes cannot be changed here.",
+				[] {
+					json schema = WorldSchema();
+					schema["properties"]["id"] = json{{"type", "integer"}};
+					schema["properties"]["component"] = json{{"type", "string"}};
+					schema["required"] = json::array({"id", "component"});
+					return schema;
+				},
+				[worlds](const json &arguments, std::string &failure) -> json {
+					const WorldId world = WorldArgument(*worlds, arguments, failure);
+					if (!failure.empty()) return nullptr;
+					if (worlds->IsRemote(world)) {
+						failure = "that scene is owned by another process";
+						return nullptr;
+					}
+					if (!arguments.contains("id") || !arguments["id"].is_number_unsigned()) {
+						failure = "component_remove needs an entity id";
+						return nullptr;
+					}
+					if (!arguments.contains("component") || !arguments["component"].is_string() ||
+						arguments["component"].get_ref<const std::string &>().size() > 128 ||
+						arguments["component"].get_ref<const std::string &>().find('\0') !=
+							std::string::npos) {
+						failure = "component must be a name of at most 128 bytes with no NUL bytes";
+						return nullptr;
+					}
+					ecs::ComponentId component;
+					const ecs::Schema *schema = SchemaArgument(arguments, component, failure);
+					if (schema == nullptr) return nullptr;
+					const ecs::Entity entity(arguments["id"].get<uint64_t>());
+					worlds->Enter(world, [&](Store &store) {
+						if (store.AdoptOnly())
+							failure = "that scene is a replica";
+						else if (!store.Alive(entity))
+							failure = "no such entity in that scene";
+						else if (store.Protected(entity))
+							failure = "that entity is a protected world fixture";
+						else if (!store.HasComponent(entity, component))
+							failure = "entity does not carry that component";
+						else
+							store.RemoveComponent(entity, component);
+					});
+					if (!failure.empty()) return nullptr;
+					return json{
+						{"id", entity.Id}, {"component", std::string(schema->Name().Text())}, {"ok", true}
+					};
+				},
+			});
+
 			Add(Tool{
 				"component_set",
 				"Writes fields of one component on one entity, adding it when the entity does not "

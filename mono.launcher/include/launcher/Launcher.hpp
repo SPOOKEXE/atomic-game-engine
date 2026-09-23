@@ -21,6 +21,8 @@
 // @tier L13 · client
 // @since v0.18
 
+#include <engine/control/Server.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/ui/Interface.hpp>
@@ -51,10 +53,12 @@ namespace launcher {
 		// What every font and padding is multiplied by.
 		float Scale = 1.0f;
 
-		// Run with no window. **Needs `Frames`**, for the client's and the
-		// editor's reason: there is nothing to close, so without a budget the
-		// run would never end.
+		// Run with no window. Needs a frame budget or an MCP listener with a
+		// quit action, because otherwise nothing can end the run.
 		bool Headless = false;
+
+		// Loopback MCP port, or -1 when control is disabled.
+		int ControlPort = -1;
 
 		// Exit after this many presented frames, or negative for no limit.
 		int64_t MaximumFrames = -1;
@@ -69,13 +73,14 @@ namespace launcher {
 	// The launcher's window, its screens and the child it is watching.
 	class Launcher {
 	  public:
+		friend struct LauncherControlProbe;
 		Launcher();
 		~Launcher();
 
 		Launcher(const Launcher &) = delete;
 		Launcher &operator=(const Launcher &) = delete;
 
-		// Opens the window and asks every staged program what it accepts.
+		// Starts the interface and asks every staged program what it accepts.
 		//
 		// @param options How to set it up.
 		// @return `false` when the window, the renderer or the interface refused.
@@ -89,6 +94,9 @@ namespace launcher {
 		int Run();
 
 	  private:
+		void InstallControl();
+		void PumpControl();
+		void DispatchControlInput(const engine::control::InputAutomationEvent &event);
 		// One frame: events, then widgets, then a present.
 		void Frame(float frameSeconds);
 
@@ -142,6 +150,12 @@ namespace launcher {
 		engine::render::Renderer Renderer;
 		engine::render::OverlayImage Overlay;
 		engine::ui::Interface Interface;
+		engine::control::Server ControlServer;
+		engine::control::Surface ControlSurface{
+			"launcher", "Open modes, configure child options, and supervise a staged program."
+		};
+		bool ControlOnly = false;
+		std::vector<engine::control::InputAutomationEvent> DeferredControlRelease;
 
 		std::vector<Mode> Catalogue;
 		Descriptions Programs;

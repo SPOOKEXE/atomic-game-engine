@@ -1292,6 +1292,34 @@ namespace client {
 				engine::control::features::Discovery(),
 			};
 			ControlSurface.Enable(features);
+			ControlSurface.AddInputTools(
+				[this](
+					const engine::control::InputAutomationEvent &event, std::string &failure
+				) -> nlohmann::json {
+					if (PendingControlInput.size() >= 64) {
+						failure = "input queue is full";
+						return nullptr;
+					}
+					if (event.Kind == engine::control::InputAutomationKind::Key &&
+						SDL_GetKeyFromName(event.Key.c_str()) == SDLK_UNKNOWN &&
+						SDL_GetScancodeFromName(event.Key.c_str()) == SDL_SCANCODE_UNKNOWN) {
+						failure = "key is not a recognized SDL key name";
+						return nullptr;
+					}
+					if (event.Kind == engine::control::InputAutomationKind::MouseMove ||
+						event.Kind == engine::control::InputAutomationKind::MouseButton) {
+						int width = Settings.Width;
+						int height = Settings.Height;
+						if (Window != nullptr) (void)SDL_GetWindowSize(Window, &width, &height);
+						if (event.X < 0.0f || event.Y < 0.0f || event.X >= width || event.Y >= height) {
+							failure = "pointer coordinates are outside the client area";
+							return nullptr;
+						}
+					}
+					PendingControlInput.push_back(event);
+					return nlohmann::json{{"queued", true}};
+				}
+			);
 			std::string renderGraphFailure;
 			RenderGraphHook.emplace(ControlSurface.ActivateHook(
 				{.Id = "client.render-graph",
@@ -2801,6 +2829,83 @@ namespace client {
 		// scripts read. Two questions about one keyboard, and both want every
 		// event.
 		Input.BeginFrame();
+
+		// Control requests arrive after the previous event pump. Feed them into
+		// this pump before the world reads input, including in headless mode.
+		std::vector<engine::control::InputAutomationEvent> automated;
+		automated.swap(DeferredControlRelease);
+		std::vector<engine::control::InputAutomationEvent> fresh;
+		fresh.swap(PendingControlInput);
+		for (auto &event : fresh)
+			automated.push_back(std::move(event));
+		const uint32_t windowId = Window == nullptr ? 0 : SDL_GetWindowID(Window);
+		for (const auto &input : automated) {
+			SDL_Event event{};
+			event.common.timestamp = SDL_GetTicksNS();
+			switch (input.Kind) {
+			case engine::control::InputAutomationKind::MouseMove:
+				event.type = SDL_EVENT_MOUSE_MOTION;
+				event.motion.windowID = windowId;
+				event.motion.x = input.X;
+				event.motion.y = input.Y;
+				break;
+			case engine::control::InputAutomationKind::MouseButton:
+				event.type = input.State == engine::control::InputAutomationState::Up
+								 ? SDL_EVENT_MOUSE_BUTTON_UP
+								 : SDL_EVENT_MOUSE_BUTTON_DOWN;
+				event.button.windowID = windowId;
+				event.button.button = input.Button == "right"	 ? SDL_BUTTON_RIGHT
+									  : input.Button == "middle" ? SDL_BUTTON_MIDDLE
+																 : SDL_BUTTON_LEFT;
+				event.button.down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+				event.button.clicks = 1;
+				event.button.x = input.X;
+				event.button.y = input.Y;
+				break;
+			case engine::control::InputAutomationKind::MouseWheel:
+				event.type = SDL_EVENT_MOUSE_WHEEL;
+				event.wheel.windowID = windowId;
+				event.wheel.y = input.Wheel;
+				break;
+			case engine::control::InputAutomationKind::Key: {
+				event.type = input.State == engine::control::InputAutomationState::Up ? SDL_EVENT_KEY_UP
+																					  : SDL_EVENT_KEY_DOWN;
+				event.key.windowID = windowId;
+				event.key.key = SDL_GetKeyFromName(input.Key.c_str());
+				event.key.scancode = SDL_GetScancodeFromName(input.Key.c_str());
+				SDL_Keymod modifiers = SDL_KMOD_NONE;
+				for (const std::string &name : input.Modifiers) {
+					if (name == "shift") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_SHIFT);
+					if (name == "control") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_CTRL);
+					if (name == "alt") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_ALT);
+					if (name == "gui") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_GUI);
+				}
+				if (event.key.scancode == SDL_SCANCODE_UNKNOWN)
+					event.key.scancode = SDL_GetScancodeFromKey(event.key.key, &modifiers);
+				if (event.key.key == SDLK_UNKNOWN)
+					event.key.key = SDL_GetKeyFromScancode(event.key.scancode, modifiers, true);
+				event.key.mod = event.type == SDL_EVENT_KEY_UP ? SDL_KMOD_NONE : modifiers;
+				event.key.down = event.type == SDL_EVENT_KEY_DOWN;
+				break;
+			}
+			case engine::control::InputAutomationKind::Text:
+				event.type = SDL_EVENT_TEXT_INPUT;
+				event.text.windowID = windowId;
+				event.text.text = input.Text.c_str();
+				break;
+			}
+			const bool queued = SDL_PushEvent(&event);
+			if (!queued) {
+				ENGINE_ERROR("control: could not queue input: {}", SDL_GetError());
+			}
+			if (queued && input.State == engine::control::InputAutomationState::Click &&
+				(input.Kind == engine::control::InputAutomationKind::MouseButton ||
+				 input.Kind == engine::control::InputAutomationKind::Key)) {
+				auto release = input;
+				release.State = engine::control::InputAutomationState::Up;
+				DeferredControlRelease.push_back(std::move(release));
+			}
+		}
 
 		const auto refreshFrameGraphCollection = [this]() {
 			FrameGraph::SetEnabled(Settings.ShowFrameGraph);

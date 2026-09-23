@@ -1326,19 +1326,19 @@ namespace studio {
 				PlayedInput->Translator.HandleEvent(event);
 
 				if (PendingControlClick.has_value() && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-					event.button.windowID == SDL_GetWindowID(Window) &&
+					event.button.windowID == (Window == nullptr ? 0 : SDL_GetWindowID(Window)) &&
 					event.button.button == PendingControlClick->Button &&
 					event.button.x == PendingControlClick->X && event.button.y == PendingControlClick->Y) {
 					PendingControlClick->DownProcessed = true;
 				}
 				if (PendingControlKey.has_value() && event.type == SDL_EVENT_KEY_DOWN &&
-					event.key.windowID == SDL_GetWindowID(Window) &&
+					event.key.windowID == (Window == nullptr ? 0 : SDL_GetWindowID(Window)) &&
 					static_cast<uint32_t>(event.key.scancode) == PendingControlKey->Scancode &&
 					static_cast<uint32_t>(event.key.key) == PendingControlKey->Key) {
 					PendingControlKey->DownProcessed = true;
 				}
 				if (PendingControlText.has_value() && event.type == SDL_EVENT_TEXT_INPUT &&
-					event.text.windowID == SDL_GetWindowID(Window) &&
+					event.text.windowID == (Window == nullptr ? 0 : SDL_GetWindowID(Window)) &&
 					event.text.text == PendingControlText->Text.c_str()) {
 					PendingControlText->Processed = true;
 				}
@@ -3821,6 +3821,11 @@ namespace studio {
 
 		Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
 		SelectionWorld = Active;
+		// An open game returns to authoring. Live Instances may still have a
+		// pending focus from Play, and it draws after Worlds in the shared dock.
+		FocusInstances = 0;
+		ShowWorlds = true;
+		FocusWorlds = 4;
 
 		// **Remembered on a successful open rather than on the attempt.** A path
 		// that failed to load is not one to offer again from a menu - the list
@@ -5291,6 +5296,13 @@ namespace studio {
 			),
 			Runs.end()
 		);
+		if (Runs.empty()) {
+			// Live Instances shares a dock with Worlds and draws later. After the
+			// last Stop, return that dock to the scenes the author can edit.
+			FocusInstances = 0;
+			ShowWorlds = true;
+			FocusWorlds = 4;
+		}
 
 		if (document.empty()) {
 			SyncWorldStates();

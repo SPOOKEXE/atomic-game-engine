@@ -561,6 +561,7 @@ namespace {
 			row.CastShadow = false;
 			row.EmissiveMap = core::Name("body-emission");
 			row.EmissiveTint = {0, .25f, 0};
+			row.EmissiveStrength = 1.0f;
 			frame.push_back(row);
 		};
 		panel(-10 - halfWidth, 0, 0, 10, 20);
@@ -1803,6 +1804,7 @@ TEST_CASE(
 		room[index].Source = index + 1;
 		room[index].CastShadow = false;
 		room[index].EmissiveMap = emission;
+		room[index].EmissiveStrength = 1.0f;
 	}
 	room[0].Frame.Position = {0, 0, -8};
 	room[0].HalfExtent = {8, 8, .05f};
@@ -2348,7 +2350,8 @@ TEST_CASE(
 		view.Lighting.Direct = {4, 4, 4};
 		wall.EmissiveMap = {};
 		wall.Tint = {1, 0, 0};
-	}
+	} else
+		wall.EmissiveStrength = 1.0f;
 	const bool resident = GENERATE(false, true);
 	const auto residentToken =
 		resident ? renderer.QueueResourceImage(
@@ -2468,7 +2471,8 @@ TEST_CASE(
 				if (shaded) {
 					row.EmissiveMap = {};
 					row.Tint = {0, 0, 1};
-				}
+				} else
+					row.EmissiveStrength = 1.0f;
 				row.SeamNormal = normal;
 				row.SeamOffset = normal.Dot(cut);
 			}

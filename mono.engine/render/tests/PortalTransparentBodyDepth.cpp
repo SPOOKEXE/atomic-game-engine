@@ -164,6 +164,7 @@ TEST_CASE(
 	pane.Tint = {};
 	pane.EmissiveMap = whiteName;
 	pane.EmissiveTint = {1, 0, 0};
+	pane.EmissiveStrength = 1.0f;
 	view.Instances = std::span(&pane, 1);
 	const auto retained = Capture(renderer, view, "pane-export");
 	const auto retainedPixels = Pixels(retained);

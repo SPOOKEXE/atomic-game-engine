@@ -9,7 +9,7 @@
 #include <utility>
 
 TEST_SUITE_ID("engine.scene.storm")
-TEST_DEPENDS("engine.core.types")
+TEST_DEPENDS("engine.core.types.vector3")
 
 using engine::core::Vector3;
 using engine::scene::AdvanceStorm;

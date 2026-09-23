@@ -21,10 +21,10 @@ namespace engine::render {
 
 	// What one light-influence probe segment represents.
 	//
-	// `PassThrough` and `Reflection` remain reserved until a probe can name a
-	// specific event. Portal seam radiance is a real transport field, but is not
-	// attributable to one local light. The local-light builder emits only
-	// `EmptySpace` and `Termination`.
+	// `PassThrough` marks sampled bounds that the shadow pass does not draw:
+	// transparent or refractive rows and rows with CastShadow disabled. It is
+	// a conservative bounds diagnostic, not a per-pixel transmission result.
+	// `Reflection` remains reserved: mirror cameras do not bounce local light.
 	enum class LightProbeEvent : uint8_t {
 		EmptySpace,
 		PassThrough,
@@ -40,9 +40,10 @@ namespace engine::render {
 
 	// Bounded sample paths from resolved local lights through render bounds.
 	//
-	// Build reuses its storage. A probe reports the nearest draw-instance AABB
-	// it meets, which is intentionally conservative and can differ from a mesh
-	// silhouette or the shadow map.
+	// Build reuses its storage. Each probe traverses at most 16 nearest
+	// pass-through bounds, then stops at the first opaque shadow-casting AABB or
+	// the light range. Alpha-masked opaque rows remain conservative blockers.
+	// These sampled bounds can differ from mesh silhouettes and shadow maps.
 	class LightPathGeometry {
 	  public:
 		// Rebuilds probe segments for the supplied resolved lights and draw rows.

@@ -1599,6 +1599,125 @@ TEST_CASE("component_get and component_set read and write one entity's fields", 
 	CHECK(after["fields"]["Flag"] == true);
 }
 
+TEST_CASE("entity lifecycle tools create, parent, remove, and destroy on the owning world", "[control]") {
+	const auto root = Classes::RegisterInstanceRoot();
+	const std::string className = Unique("lifecycle-class");
+	const auto klass = Classes::Register(className, root, {});
+	REQUIRE(klass.IsValid());
+	const std::string component = Unique("lifecycle-component");
+	const FieldSpec fields[] = {{"Amount", PropertyType::Int32}};
+	REQUIRE(Schemas::Register(component, fields).Why == Schemas::Status::Ok);
+
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "control-lifecycle");
+	Surface surface("test", "a suite");
+	surface.AddUniverseTools(universe);
+
+	const json parent = Called(surface, "entity_create", json{{"class", className}, {"name", "Parent"}});
+	const json child = Called(
+		surface, "entity_create", json{{"class", className}, {"name", "Child"}, {"parent", parent["id"]}}
+	);
+	const Entity childEntity(child["id"].get<uint64_t>());
+	universe.Enter(world, [&](Store &store) {
+		CHECK(store.ClassOf(childEntity) == klass);
+		CHECK(store.ParentOf(childEntity) == Entity(parent["id"].get<uint64_t>()));
+		CHECK(store.InstanceNameOf(childEntity).Text() == "Child");
+	});
+
+	Called(
+		surface,
+		"component_set",
+		json{{"id", child["id"]}, {"component", component}, {"fields", json{{"Amount", 7}}}}
+	);
+	CHECK(Called(surface, "component_remove", json{{"id", child["id"]}, {"component", component}})["ok"]);
+	CHECK(Called(surface, "component_get", json{{"id", child["id"]}, {"component", component}}).is_null());
+
+	CHECK(Called(surface, "entity_destroy", json{{"id", parent["id"]}})["ok"]);
+	universe.Enter(world, [&](Store &store) {
+		CHECK_FALSE(store.Alive(childEntity));
+		CHECK_FALSE(store.Alive(Entity(parent["id"].get<uint64_t>())));
+	});
+
+	const json raw = Called(surface, "entity_create", json{{"name", "raw-lifecycle"}});
+	CHECK(Called(surface, "entity_destroy", json{{"id", raw["id"]}})["ok"]);
+}
+
+TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[control]") {
+	const auto root = Classes::RegisterInstanceRoot();
+	const std::string className = Unique("protected-class");
+	const auto klass = Classes::Register(className, root, {});
+	REQUIRE(klass.IsValid());
+	const std::string abstractName = Unique("abstract-class");
+	const auto abstractClass = Classes::Register(abstractName, root, {});
+	REQUIRE(abstractClass.IsValid());
+	Classes::SetCreatable(abstractClass, false);
+	const std::string component = Unique("protected-component");
+	const FieldSpec fields[] = {{"Amount", PropertyType::Int32}};
+	REQUIRE(Schemas::Register(component, fields).Why == Schemas::Status::Ok);
+
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "control-protection");
+	Entity fixture;
+	universe.Enter(world, [&](Store &store) {
+		fixture = store.CreateInstance(klass, "Fixture");
+		store.Protect(fixture);
+	});
+	Surface surface("test", "a suite");
+	surface.AddUniverseTools(universe);
+	Called(
+		surface,
+		"component_set",
+		json{{"id", fixture.Id}, {"component", component}, {"fields", json{{"Amount", 7}}}}
+	);
+	bool failed = false;
+	CHECK(
+		Called(surface, "entity_destroy", json{{"id", fixture.Id}}, failed)["error"] ==
+		"that entity is a protected world fixture"
+	);
+	CHECK(failed);
+	CHECK(Called(surface, "instance_get", json{{"id", fixture.Id}})["name"] == "Fixture");
+
+	CHECK(
+		Called(
+			surface, "component_remove", json{{"id", fixture.Id}, {"component", component}}, failed
+		)["error"] == "that entity is a protected world fixture"
+	);
+	CHECK(failed);
+	CHECK(Called(
+			  surface, "component_get", json{{"id", fixture.Id}, {"component", component}}
+	).contains("fields"));
+	Called(surface, "entity_create", json{{"class", abstractName}}, failed);
+	CHECK(failed);
+	Called(surface, "entity_create", json{{"class", className}, {"parent", 999999u}}, failed);
+	CHECK(failed);
+	Called(surface, "entity_create", json{{"name", std::string(257, 'x')}}, failed);
+	CHECK(failed);
+	Called(surface, "entity_create", json{{"parent", fixture.Id}}, failed);
+	CHECK(failed);
+	const json named = Called(surface, "entity_create", json{{"name", "raw-unique"}});
+	Called(surface, "entity_create", json{{"name", "raw-unique"}}, failed);
+	CHECK(failed);
+	CHECK(named.contains("id"));
+
+	universe.Enter(world, [&](Store &store) { store.SetAdoptOnly(true); });
+	CHECK(
+		Called(surface, "entity_create", json::object(), failed)["error"] ==
+		"that scene is a replica and cannot mint authoritative entities"
+	);
+	CHECK(failed);
+	CHECK(
+		Called(surface, "entity_destroy", json{{"id", fixture.Id}}, failed)["error"] ==
+		"that scene is a replica"
+	);
+	CHECK(failed);
+	CHECK(
+		Called(
+			surface, "component_remove", json{{"id", fixture.Id}, {"component", component}}, failed
+		)["error"] == "that scene is a replica"
+	);
+	CHECK(failed);
+}
+
 TEST_CASE("a component the engine declares is refused with a reason", "[control]") {
 	Universe universe;
 	const WorldId world = MakeWorld(universe, "control-refuse");
@@ -1648,6 +1767,9 @@ TEST_CASE("a read-only surface offers neither write tool", "[control]") {
 	for (const Tool &tool : surface.Registered()) {
 		CHECK(tool.Name != "instance_set");
 		CHECK(tool.Name != "component_set");
+		CHECK(tool.Name != "entity_create");
+		CHECK(tool.Name != "entity_destroy");
+		CHECK(tool.Name != "component_remove");
 	}
 
 	// The read halves are still there.

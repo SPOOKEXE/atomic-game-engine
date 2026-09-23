@@ -34,6 +34,7 @@ namespace {
 		row.CastShadow = false;
 		row.EmissiveMap = EMISSION;
 		row.EmissiveTint = colour;
+		row.EmissiveStrength = 1.0f;
 		return row;
 	}
 	std::vector<scene::DrawInstance> Frame(uint64_t source, float depth, float half, core::Color3 colour) {

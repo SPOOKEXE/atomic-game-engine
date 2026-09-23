@@ -20,6 +20,7 @@ mono_add_library(launcher
 	NAMESPACE Mono
 	DEPS
 		Engine::core
+		Engine::control
 
 		# L2, `shared`. `parallel::Process` supervises the child and
 		# `parallel::Capture` is what asks each program `--describe`. Both are

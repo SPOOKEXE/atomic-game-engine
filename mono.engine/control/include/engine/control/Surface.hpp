@@ -102,6 +102,42 @@ namespace engine::control {
 	// Host callback that serializes the current frame graph or explains why it cannot.
 	using RenderGraphProvider = std::function<nlohmann::json(const nlohmann::json &, std::string &)>;
 
+	// One input action a host accepts from the control surface.
+	//
+	// The control module names no windowing API. A graphical host routes this to
+	// its existing event pump, while a host without an input path leaves these
+	// tools unregistered.
+	enum class InputAutomationKind : uint8_t {
+		MouseMove,
+		MouseButton,
+		MouseWheel,
+		Key,
+		Text,
+	};
+
+	// Whether an emulated button or key is a complete click, press, or release.
+	enum class InputAutomationState : uint8_t {
+		Click,
+		Down,
+		Up,
+	};
+
+	struct InputAutomationEvent {
+		InputAutomationKind Kind = InputAutomationKind::MouseMove;
+		InputAutomationState State = InputAutomationState::Click;
+		float X = 0.0f;
+		float Y = 0.0f;
+		float Wheel = 0.0f;
+		std::string Button;
+		std::string Key;
+		std::string Text;
+		std::vector<std::string> Modifiers;
+	};
+
+	// Delivers a validated automation event to the host's input boundary.
+	using InputAutomationCallback =
+		std::function<nlohmann::json(const InputAutomationEvent &, std::string &)>;
+
 	// Something a client may read without calling a tool.
 	//
 	// **The difference from a tool is who decides to fetch it.** A tool is an
@@ -324,6 +360,11 @@ namespace engine::control {
 		//
 		// @since v0.19
 		void AddBuildTools();
+
+		// Installs the five input automation tools when the host has an input
+		// boundary that can consume them. The callback owns event delivery, so
+		// control remains usable in programs built without SDL.
+		void AddInputTools(InputAutomationCallback callback);
 
 		// Installs pure capability and schema discovery for an external data
 		// factory. The result reports this surface's registered tools, while
