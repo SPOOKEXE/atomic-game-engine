@@ -1312,10 +1312,8 @@ TEST_CASE("light classes expose only controls their render path consumes", "[sce
 		return false;
 	};
 
-	// The renderer has no local-light shadow pass, and a point has no cone or
-	// face. A writable row for any of those would claim an effect that cannot
-	// occur.
-	CHECK_FALSE(has("PointLight", "Shadows"));
+	// Point shadows use six depth views; points still have no cone or face.
+	CHECK(has("PointLight", "Shadows"));
 	CHECK_FALSE(has("PointLight", "Angle"));
 	CHECK_FALSE(has("PointLight", "Face"));
 
