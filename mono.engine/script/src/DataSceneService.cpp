@@ -1274,6 +1274,8 @@ namespace engine::script {
 			const ScriptValue *noiseSeed = Field(options, "NoiseSeed");
 			const ScriptValue *noiseSigma = Field(options, "NoiseSigma");
 			const ScriptValue *localLightIds = Field(options, "LocalLightIds");
+			const bool emptyLocalLightMap = localLightIds != nullptr && localLightIds->Tag == ValueTag::Map &&
+											localLightIds->Entries.empty();
 			uint64_t parsedNoiseSeed = 0;
 			if (channels == nullptr || channels->Tag != ValueTag::Array || channels->Items.empty() ||
 				channels->Items.size() > 12 || slot == nullptr || slot->Tag != ValueTag::Number ||
@@ -1290,7 +1292,7 @@ namespace engine::script {
 				(noiseMode == "none" && (noiseSeed->Number != 0.0 || noiseSigma->Number != 0.0)) ||
 				(noiseMode != "none" && noiseMode != "gaussian"))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
-			if (localLightIds == nullptr || localLightIds->Tag != ValueTag::Array ||
+			if (localLightIds == nullptr || (!emptyLocalLightMap && localLightIds->Tag != ValueTag::Array) ||
 				localLightIds->Items.size() > (bridge ? bridge->Capabilities().MaximumLocalLightIds : 0))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 

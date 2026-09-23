@@ -902,6 +902,9 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				invalid = service:CreateOptions()
 				invalid.ViewSlot = 4294967296
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.LocalLightIds = { unexpected = true }
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
 				assert(service:CaptureBundle("fixture/snapshot", options).status == "queued")
 			)");
 		} else {
@@ -939,6 +942,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("pair");
 				invalid = service.CreateOptions(); invalid.ViewSlot = 4294967296;
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("view slot");
+				invalid = service.CreateOptions(); invalid.LocalLightIds = { unexpected: true };
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("local light map");
 				if (service.CaptureBundle("fixture/snapshot", options).status !== "queued") throw new Error("final queue");
 			)");
 		}
