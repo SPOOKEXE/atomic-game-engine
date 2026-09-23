@@ -43,6 +43,8 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("scripts/client/TornadoClient.client.luau") != std::string::npos);
 	CHECK(document.find("scripts/shared/TornadoSim/StormControls.luau") != std::string::npos);
 	CHECK(document.find("Storm.Preset(\"EF3\")") != std::string::npos);
+	CHECK(document.find("Instance.new(\"GpuParticleField\")") != std::string::npos);
+	CHECK(document.find("visualField.Layers = 7") != std::string::npos);
 	CHECK(document.find("TORNADO FIELD LAB") != std::string::npos);
 	CHECK(document.find("Storm.Sample") != std::string::npos);
 	CHECK(document.find("Storm.Visibility") != std::string::npos);

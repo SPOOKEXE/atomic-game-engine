@@ -126,9 +126,9 @@ end
 -- clear colour removes its silhouette before any particle system can help.
 Lighting.ClockTime = 17.2
 Lighting.GeographicLatitude = 35
-Lighting.Brightness = 0.33
-Lighting.Ambient = Color3.fromRGB(42, 50, 64)
-Lighting.OutdoorAmbient = Color3.fromRGB(34, 42, 53)
+Lighting.Brightness = 0.18
+Lighting.Ambient = Color3.fromRGB(24, 26, 28)
+Lighting.OutdoorAmbient = Color3.fromRGB(31, 29, 25)
 Lighting.BloomThreshold = 1.1
 Lighting.BloomIntensity = 0.45
 Lighting.BloomRadius = 6
@@ -146,10 +146,10 @@ sky.Parent = Lighting
 local atmosphere = Instance.new("AtmosphereProcedural")
 atmosphere.Name = "Tornado Storm Atmosphere"
 atmosphere.Shader = Enum.AtmosphereProceduralShader.Earth
-atmosphere.Color = Color3.fromRGB(95, 110, 123)
-atmosphere.Decay = Color3.fromRGB(33, 40, 44)
-atmosphere.Density = 0.42
-atmosphere.Haze = 3.1
+atmosphere.Color = Color3.fromRGB(73, 75, 73)
+atmosphere.Decay = Color3.fromRGB(19, 20, 20)
+atmosphere.Density = 0.25
+atmosphere.Haze = 2.3
 atmosphere.Glare = 0.04
 atmosphere.Samples = 16
 atmosphere.Parent = Lighting
@@ -157,9 +157,9 @@ atmosphere.Parent = Lighting
 local clouds = Instance.new("CloudCompute")
 clouds.Name = "Tornado Anvil Cloud Deck"
 clouds.Shader = Enum.CloudComputeShader.Storm
-clouds.Color = Color3.fromRGB(62, 73, 84)
-clouds.Cover = 0.94
-clouds.Density = 0.9
+clouds.Color = Color3.fromRGB(27, 29, 28)
+clouds.Cover = 0.98
+clouds.Density = 0.98
 clouds.WindSpeed = 19
 clouds.WindDirection = Vector2.new(0.85, 0.34)
 clouds.CellSize = 0.19
@@ -190,7 +190,7 @@ if authoredWorld then
 	end
 end
 
-local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -2.0, 80), Color3.fromRGB(74, 81, 49))
+local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -2.0, 80), Color3.fromRGB(66, 59, 38))
 local road = makePart("Storm Chase Road", Vector3.new(18, 0.18, 650), Vector3.new(-82, 0.1, 84), Color3.fromRGB(64, 61, 54))
 for index = -14, 14 do
 	makePart("Road Mark " .. index, Vector3.new(0.55, 0.04, 9), Vector3.new(-82, 0.22, 84 + index * 20), Color3.fromRGB(193, 169, 99))
@@ -287,23 +287,41 @@ local function condensationLayer(name: string, height: number, radius: number, r
 	layer.Lifetime = NumberRange.new(2.6, 4.6)
 	layer.Speed = NumberRange.new(5, 13)
 	layer.SpreadAngle = Vector2.new(48, 48)
-	layer.Size = NumberSequence.new(radius * 0.10, radius * 0.24)
-	layer.Transparency = NumberSequence.new(0.88, 0.99)
+	layer.Size = NumberSequence.new(radius * 0.16, radius * 0.32)
+	layer.Transparency = NumberSequence.new(0.78, 0.97)
 	layer.Acceleration = Vector3.new(0, 13, 0)
 	return layer
 end
 
-condensationLayer("Condensation Streamers", 7, 14, 16, Color3.fromRGB(104, 85, 64))
-condensationLayer("Funnel Lower Wisps", 31, 19, 20, Color3.fromRGB(111, 105, 94))
-condensationLayer("Funnel Mid Wisps", 72, 27, 24, Color3.fromRGB(99, 98, 91))
-condensationLayer("Funnel Upper Wisps", 125, 37, 28, Color3.fromRGB(79, 84, 88))
+condensationLayer("Condensation Streamers", 7, 14, 80, Color3.fromRGB(79, 55, 36))
+condensationLayer("Funnel Lower Wisps", 31, 19, 110, Color3.fromRGB(89, 71, 52))
+condensationLayer("Funnel Mid Wisps", 72, 27, 140, Color3.fromRGB(83, 76, 67))
+condensationLayer("Funnel Upper Wisps", 125, 37, 180, Color3.fromRGB(68, 70, 68))
 
--- Layers is a field mask. Set it at runtime as well as in the world row so
--- older world readers cannot silently restore the default condensation layer.
+-- Layers is a field mask. Preserve condensation with rain and debris: omitting
+-- bit one leaves only a thin spray column, even with a million GPU particles.
 local gpuField = Workspace:FindFirstChild("TornadoParticles", true)
-if gpuField then
-	(gpuField :: any).Layers = 6
+if gpuField == nil then
+	local fieldAnchor = makePart("Tornado Particle Anchor", Vector3.one, Vector3.new(0, 0, 95), Color3.new(1, 1, 1))
+	fieldAnchor.Visible = false
+	gpuField = Instance.new("GpuParticleField")
+	gpuField.Name = "TornadoParticles"
+	local visualField = gpuField :: any
+	visualField.RequestedCount = 1048576
+	visualField.Seed = 123456789
+	visualField.CondensationColor = Color3.fromRGB(87, 69, 51)
+	visualField.CondensationAlpha = 0.16
+	visualField.CondensationSize = 8.5
+	visualField.RainColor = Color3.fromRGB(41, 51, 56)
+	visualField.RainAlpha = 0.10
+	visualField.RainSize = 0.30
+	visualField.DebrisColor = Color3.fromRGB(56, 38, 23)
+	visualField.DebrisAlpha = 0.16
+	visualField.DebrisSize = 0.8
+	gpuField.Parent = fieldAnchor
 end
+local visualField = gpuField :: any
+visualField.Layers = 7
 for x = -2, 2 do
 	for z = -2, 2 do
 		local host = makePart("Rain Host " .. x .. "/" .. z, Vector3.one, Vector3.new(x * 34, 74, 55 + z * 34), Color3.new(1, 1, 1))
@@ -462,7 +480,7 @@ end)
 			<Item class="Part" name="RoadSign" id="10"><Property name="Size" type="Vector3">4,8,1</Property><Property name="Position" type="Vector3">-18,6,4</Property></Item>
 			<Item class="Part" name="ChaseVehicle" id="11"><Property name="Size" type="Vector3">4,2,8</Property><Property name="Position" type="Vector3">-10,2,-55</Property></Item>
 			<Item class="Part" name="StormAnchor" id="12"><Property name="Position" type="Vector3">0,0,95</Property>
-		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property><Property name="CondensationColor" type="Color3">0.38,0.32,0.25</Property><Property name="CondensationAlpha" type="float">0.045</Property><Property name="CondensationSize" type="float">5.5</Property><Property name="RainColor" type="Color3">0.20,0.27,0.33</Property><Property name="RainAlpha" type="float">0.08</Property><Property name="RainSize" type="float">0.22</Property><Property name="DebrisColor" type="Color3">0.25,0.18,0.12</Property><Property name="DebrisAlpha" type="float">0.12</Property><Property name="DebrisSize" type="float">0.6</Property></Item>
+		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property><Property name="CondensationColor" type="Color3">0.34,0.27,0.20</Property><Property name="CondensationAlpha" type="float">0.16</Property><Property name="CondensationSize" type="float">8.5</Property><Property name="RainColor" type="Color3">0.16,0.20,0.22</Property><Property name="RainAlpha" type="float">0.10</Property><Property name="RainSize" type="float">0.30</Property><Property name="DebrisColor" type="Color3">0.22,0.15,0.09</Property><Property name="DebrisAlpha" type="float">0.16</Property><Property name="DebrisSize" type="float">0.8</Property></Item>
 			</Item>
 		</Item>
 	</Item>
