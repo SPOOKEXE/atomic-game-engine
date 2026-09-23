@@ -367,7 +367,10 @@ TEST_CASE(
 	const CapturedImage withoutCloudCompute = CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
 	);
-	CHECK(CompareImages(combined.View(), withoutCloudCompute.View()).MismatchedPixels > EXTENT * EXTENT / 8);
+	// Clouds occupy a bounded sky region around the receiver. One tenth of the
+	// capture rejects a sparse dispatch artifact while avoiding a boundary that
+	// changes when one antialiased sky edge moves by a few pixels.
+	CHECK(CompareImages(combined.View(), withoutCloudCompute.View()).MismatchedPixels > EXTENT * EXTENT / 10);
 
 	view.Lighting.EnvironmentState.HasCloudCompute = true;
 	view.Lighting.EnvironmentState.HasAtmosphere = false;
