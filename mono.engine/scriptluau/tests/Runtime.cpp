@@ -125,6 +125,18 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
 }
 
+TEST_CASE("a data package can set a detached RigKeypoint joint", "[scriptluau][data-script-package]") {
+	const auto result = RunFreshPackage(
+		"local rig = Instance.new('SkinnedMeshPart')\n"
+		"rig.JointCount = 1\n"
+		"local nose = Instance.new('RigKeypoint')\n"
+		"nose.Joint = 0\n"
+		"nose.Parent = rig\n"
+	);
+	CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
+	CHECK(result.Error.empty());
+}
+
 TEST_CASE(
 	"the luau storm service authors one physics resource and samples its field", "[scriptluau][storm]"
 ) {

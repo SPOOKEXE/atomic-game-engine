@@ -2175,7 +2175,10 @@ namespace engine::scene {
 					 walk = store.ParentOf(walk)) {
 					if ((skeleton = store.Get<Skeleton>(walk)) != nullptr) break;
 				}
-				if (skeleton == nullptr || joint >= skeleton->JointCount) return false;
+				// A detached keypoint is a normal intermediate state while a script
+				// builds a rig. Bound its slot by the shared palette limit until an
+				// ancestor skeleton exists; once parented, use that rig's tighter size.
+				if (skeleton != nullptr ? joint >= skeleton->JointCount : joint >= MAX_JOINTS) return false;
 				RigKeypoint *keypoint = store.GetMutable<RigKeypoint>(instance);
 				if (keypoint == nullptr) return false;
 				keypoint->Joint = static_cast<uint16_t>(joint);

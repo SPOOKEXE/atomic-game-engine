@@ -812,13 +812,16 @@ TEST_CASE("a RigKeypoint joint uses minus one to clear its optional rig slot", "
 	REQUIRE(Write(store, keypoint, "Joint", int32_t{-1}));
 	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
 	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{-2}));
-	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{0}));
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{0}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == 0);
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{engine::scene::MAX_JOINTS}));
 
 	const Entity rig = store.CreateInstance(Classes::Find(Name("Part")), "Rig");
 	REQUIRE(rig != NULL_ENTITY);
 	store.Set(rig, engine::scene::Skeleton{Name("test.rig"), 2, {}});
 	REQUIRE(store.SetParent(keypoint, rig));
 
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{2}));
 	REQUIRE(Write(store, keypoint, "Joint", int32_t{1}));
 	CHECK(Read<int32_t>(store, keypoint, "Joint") == 1);
 	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{2}));

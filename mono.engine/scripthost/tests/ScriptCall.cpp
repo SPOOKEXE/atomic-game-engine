@@ -1453,6 +1453,17 @@ TEST_CASE("an instance property is live in both languages", "[scripting][scriptc
 		"0/-0.75",
 	};
 	Both(pan);
+
+	const ParityCase rigKeypointJoint{
+		"a detached RigKeypoint can be assigned before it is parented",
+		[](Language language) {
+			return Let(language, "rig", "Instance.new('SkinnedMeshPart')") +
+				   "rig.JointCount = 1\n" + Let(language, "nose", "Instance.new('RigKeypoint')") +
+				   "nose.Joint = 0\n" + "nose.Parent = rig\n" + Say(language, "nose.Joint");
+		},
+		"0",
+	};
+	Both(rigKeypointJoint);
 }
 
 TEST_CASE("the two input surfaces answer the same in both languages", "[scripting][scriptcall]") {
