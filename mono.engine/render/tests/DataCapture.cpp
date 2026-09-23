@@ -348,6 +348,7 @@ TEST_CASE(
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {},
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -568,7 +569,8 @@ TEST_CASE(
 		 .Channels = {render::DataCaptureChannel::RgbLinearHdr},
 		 .ObjectLabels = {},
 		 .SemanticLabels = {},
-		 .PartLabels = {}},
+		 .PartLabels = {},
+		 .LocalLightIds = {}},
 		ticket
 	));
 	const std::array views{first, capture};
@@ -637,6 +639,7 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {},
 		.TemporalHistory = DataCaptureTemporalHistory::Reset,
 	};
 	DataCaptureTicket ticket;
@@ -682,6 +685,7 @@ TEST_CASE(
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {},
 		.LocalLightIds = {"light/key", "light/fill"},
 	};
 	DataCaptureTicket ticket;
@@ -1766,6 +1770,7 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 			 "second_surface_validity"},
 		.TemporalHistory = "preserve",
 		.PackedPlanes = {},
+		.LocalLightIds = {},
 	};
 	uint64_t broadTicket = 0;
 	REQUIRE(first.Queue("data-world", broad, broadTicket, detail));

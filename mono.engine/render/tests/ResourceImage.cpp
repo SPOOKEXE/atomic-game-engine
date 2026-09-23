@@ -4326,6 +4326,7 @@ TEST_CASE(
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {},
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -4670,7 +4671,8 @@ TEST_CASE(
 				.Channels = std::move(channels),
 				.ObjectLabels = {},
 				.SemanticLabels = {},
-				.PartLabels = {},
+		.PartLabels = {},
+		.LocalLightIds = {},
 			};
 			render::DataCaptureTicket ticket;
 			REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -4844,7 +4846,8 @@ TEST_CASE("second surface eligibility rejects non-built-in fragments", "[render]
 				 render::DataCaptureChannel::SecondSurfaceValidity},
 			.ObjectLabels = {},
 			.SemanticLabels = {},
-			.PartLabels = {},
+		.PartLabels = {},
+		.LocalLightIds = {},
 		};
 		render::DataCaptureTicket ticket;
 		REQUIRE(renderer.QueueDataCapture(request, ticket));

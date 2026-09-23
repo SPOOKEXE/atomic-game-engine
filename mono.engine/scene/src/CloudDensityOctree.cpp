@@ -8,7 +8,7 @@ namespace engine::scene {
 	namespace {
 		constexpr uint8_t MAXIMUM_SUPPORTED_DEPTH = 20;
 
-		bool Finite(const core::Vector3 &value) {
+		bool FiniteDensity(const core::Vector3 &value) {
 			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
 		}
 
@@ -50,7 +50,7 @@ namespace engine::scene {
 
 	std::optional<CloudDensityOctree> CloudDensityOctree::Create(CloudDensityOctreeConfig config) {
 		const core::Vector3 rootMaximum = config.RootMinimum + config.RootSize;
-		if (!Finite(config.RootMinimum) || !Finite(config.RootSize) || !Finite(rootMaximum) ||
+		if (!FiniteDensity(config.RootMinimum) || !FiniteDensity(config.RootSize) || !FiniteDensity(rootMaximum) ||
 			!Positive(config.RootSize) || config.MaximumDepth == 0 ||
 			config.MaximumDepth > MAXIMUM_SUPPORTED_DEPTH || !Resolvable(config, rootMaximum) ||
 			!std::isfinite(config.EmptyThreshold) || config.EmptyThreshold < 0.0f ||
@@ -65,7 +65,7 @@ namespace engine::scene {
 	}
 
 	bool CloudDensityOctree::Contains(const core::Vector3 &position) const {
-		if (!Finite(position)) return false;
+		if (!FiniteDensity(position)) return false;
 		const core::Vector3 maximum = config_.RootMinimum + config_.RootSize;
 		return position.X >= config_.RootMinimum.X && position.X < maximum.X &&
 			   position.Y >= config_.RootMinimum.Y && position.Y < maximum.Y &&

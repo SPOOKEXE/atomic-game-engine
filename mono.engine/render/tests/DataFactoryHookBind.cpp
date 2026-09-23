@@ -49,7 +49,8 @@ namespace engine::render {
 				.Channels = {DataCaptureChannel::RgbLinearHdr},
 				.ObjectLabels = {},
 				.SemanticLabels = {},
-				.PartLabels = {}
+				.PartLabels = {},
+				.LocalLightIds = {}
 			};
 		}
 		RenderHookSpec CameraSpec() {
@@ -179,8 +180,9 @@ namespace engine::render {
 			 .CaptureNode = core::Name("data-capture"),
 			 .Channels = {DataCaptureChannel::RgbLinearHdr},
 			 .ObjectLabels = {},
-			 .SemanticLabels = {},
-			 .PartLabels = {}}
+				 .SemanticLabels = {},
+				 .PartLabels = {},
+				 .LocalLightIds = {}}
 		);
 		REQUIRE(batch);
 		bind.Shutdown();
