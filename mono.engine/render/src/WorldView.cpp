@@ -17,6 +17,7 @@
 #include <engine/scene/Sunlight.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace engine::render {
@@ -179,6 +180,17 @@ namespace engine::render {
 			frame.CloudParameters.reset();
 		}
 		if (const auto *storm = physics::StormOf(store)) {
+			bool cloudInputsChanged = false;
+			if (frame.CloudParameters) {
+				auto previous = *frame.CloudParameters;
+				previous.Energy = storm->State.Parameters.Energy;
+				const float energyChange =
+					std::abs(frame.CloudParameters->Energy - storm->State.Parameters.Energy);
+				// Lifecycle energy evolves every tick. Rebuild immediately for a
+				// changed preset or a paused edit, and at a visible energy step.
+				cloudInputsChanged = previous != storm->State.Parameters || energyChange >= 0.05f ||
+									 (frame.CloudBuiltSeconds == time.Elapsed && energyChange > 0.0f);
+			}
 			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
 				if (!frame.GpuParticles.has_value()) {
 					frame.GpuParticles = GpuParticleFieldView{
@@ -186,8 +198,8 @@ namespace engine::render {
 					};
 				}
 			});
-			if (!frame.CloudDensity || frame.CloudParameters != storm->State.Parameters ||
-				time.Elapsed < frame.CloudBuiltSeconds || time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
+			if (!frame.CloudDensity || cloudInputsChanged || time.Elapsed < frame.CloudBuiltSeconds ||
+				time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
 				ENGINE_PROFILE_CAT("storm cloud density build", core::ProfileCategory::Render);
 				frame.CloudBuiltSeconds = time.Elapsed;
 				frame.CloudParameters = storm->State.Parameters;

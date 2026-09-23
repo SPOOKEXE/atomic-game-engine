@@ -63,6 +63,11 @@ TEST_CASE("retained cloud density follows a frozen storm preset change", "[rende
 	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
 	REQUIRE(frame.CloudDensity.has_value());
 	CHECK(frame.CloudDensity->Config.RootSize.X == originalWidth * 1.5f);
+	storm.State.Parameters.Energy += 0.01f;
+	physics::SetStorm(store, storm);
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	REQUIRE(frame.CloudParameters.has_value());
+	CHECK(frame.CloudParameters->Energy == storm.State.Parameters.Energy);
 }
 
 TEST_CASE(
