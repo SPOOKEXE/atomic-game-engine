@@ -316,7 +316,7 @@ local status = Instance.new("TextLabel")
 status.Name = "Weather Status"
 status.BackgroundTransparency = 1
 status.Position = UDim2.new(0, 12, 0, 10)
-status.Size = UDim2.new(1, -24, 0, 44)
+status.Size = UDim2.new(1, -24, 0, 52)
 status.TextColor3 = Color3.new(1, 1, 1)
 status.TextSize = 13
 status.TextWrapped = true
@@ -326,7 +326,7 @@ status.Parent = panel
 
 local activePreset = 2
 local target = presets[activePreset]
-local fogMode = "LOW BANK"
+local fogMode = "LOW"
 local fogSize = 1
 local fogSquash = 1
 local fogFluff = 1
@@ -354,7 +354,7 @@ end
 
 local function updateStatus()
 	status.Text = string.format(
-		"WEATHER %s\nRAIN %.0f/s  CLOUD %.0f%%\nFOG %s  DOF %.0f%%  RAYS %.0f%%",
+		"WEATHER %s\nRAIN %.0f/s  CLOUD %.0f%%\nFOG %s | DOF %.0f | RAYS %.0f",
 		target.Name,
 		target.RainRate,
 		target.CloudCover * 100,
@@ -369,7 +369,7 @@ local function button(name: string, text: string, column: number, row: number): 
 	control.Name = name
 	control.BackgroundColor3 = Color3.fromRGB(25, 35, 50)
 	control.BorderSizePixel = 0
-	control.Position = UDim2.new(0, 12 + column * 78, 0, 56 + row * 38)
+	control.Position = UDim2.new(0, 12 + column * 78, 0, 68 + row * 34)
 	control.Size = UDim2.new(0, 70, 0, 30)
 	control.Text = text
 	control.TextColor3 = Color3.new(1, 1, 1)
@@ -390,7 +390,7 @@ end
 
 local lowBankControl = button("Fog Low Bank", "LOW BANK", 0, 1)
 lowBankControl.Activated:Connect(function()
-	fogMode = "LOW BANK"
+	fogMode = "LOW"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
 	fogSize = 1
 	fogSquash = 1
@@ -401,7 +401,7 @@ end)
 
 local squashedControl = button("Fog Squashed", "SQUASHED", 1, 1)
 squashedControl.Activated:Connect(function()
-	fogMode = "SQUASHED"
+	fogMode = "SQUASH"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
 	fogSize = 3
 	fogSquash = 1
@@ -412,7 +412,7 @@ end)
 
 local fluffyControl = button("Fog Fluffy", "FLUFFY", 2, 1)
 fluffyControl.Activated:Connect(function()
-	fogMode = "FLUFFY"
+	fogMode = "FLUFF"
 	fogFluff = 3
 	applyFogProfile()
 	updateStatus()
@@ -423,7 +423,7 @@ local function slider(name: string, label: string, row: number): TextButton
 	track.Name = name
 	track.BackgroundColor3 = Color3.fromRGB(25, 35, 50)
 	track.BorderSizePixel = 0
-	track.Position = UDim2.new(0, 12, 0, 132 + row * 28)
+	track.Position = UDim2.new(0, 12, 0, 140 + row * 28)
 	track.Size = UDim2.new(0, 234, 0, 22)
 	track.Text = label
 	track.TextColor3 = Color3.new(1, 1, 1)
