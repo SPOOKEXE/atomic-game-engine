@@ -151,12 +151,12 @@ atmosphere.Parent = Lighting
 local clouds = Instance.new("CloudCompute")
 clouds.Name = "Weather Clouds"
 clouds.Shader = Enum.CloudComputeShader.Storm
-clouds.Color = Color3.fromRGB(128, 141, 160)
+clouds.Color = Color3.fromRGB(83, 94, 112)
 clouds.WindDirection = Vector2.new(0.9, 0.3)
 clouds.CellSize = 0.24
 clouds.Detail = 0.82
-clouds.Height = 0.62
-clouds.Thickness = 0.42
+clouds.Height = 0.48
+clouds.Thickness = 0.68
 clouds.Steps = 32
 clouds.Seed = 1337
 clouds.Parent = Lighting
@@ -164,17 +164,34 @@ clouds.Parent = Lighting
 makePart("Weather Ground", Vector3.new(150, 1, 150), Vector3.new(0, -0.5, -28), Color3.fromRGB(26, 31, 38))
 makePart("Weather Ruin Left", Vector3.new(12, 18, 8), Vector3.new(-22, 9, -38), Color3.fromRGB(53, 57, 63))
 makePart("Weather Ruin Right", Vector3.new(9, 26, 9), Vector3.new(22, 13, -56), Color3.fromRGB(47, 52, 61))
-makePart("Weather Beacon", Vector3.new(4, 20, 4), Vector3.new(0, 10, -72), Color3.fromRGB(36, 42, 51))
+local beacon = makePart("Weather Beacon", Vector3.new(4, 20, 4), Vector3.new(0, 10, -72), Color3.fromRGB(36, 42, 51))
+
+for index = -3, 3 do
+	local height = 5 + math.abs(index % 3) * 4
+	makePart(
+		"Weather Broken Column",
+		Vector3.new(2.4, height, 2.4),
+		Vector3.new(index * 9, height * 0.5, -50 - math.abs(index % 2) * 12),
+		Color3.fromRGB(57, 64, 75)
+	)
+end
+
+local beaconLight = Instance.new("PointLight")
+beaconLight.Name = "Weather Beacon Light"
+beaconLight.Color = Color3.fromRGB(127, 171, 255)
+beaconLight.Brightness = 9
+beaconLight.Range = 48
+beaconLight.Parent = beacon
 
 -- `Bounds` is a half-extent. The Y half-extent is intentionally small, making
 -- this a squashed ellipsoid of mist along the ground instead of world fog.
 local lowBank = Instance.new("Volume")
 lowBank.Name = "Fog Field Low Bank"
-lowBank.Position = Vector3.new(-14, 2.8, -32)
-lowBank.Bounds = Vector3.new(30, 2.8, 16)
+lowBank.Position = Vector3.new(0, 4, -42)
+lowBank.Bounds = Vector3.new(54, 4, 38)
 lowBank.Shape = Enum.VolumeShape.Ellipsoid
 lowBank.Color = Color3.fromRGB(157, 178, 201)
-lowBank.Falloff = 0.82
+lowBank.Falloff = 0.68
 lowBank.NoiseScale = 0.16
 lowBank.NoiseStrength = 0.74
 lowBank.Steps = 28
@@ -199,32 +216,39 @@ ruinMist.Parent = Workspace
 local rainEmitters: { ParticleEmitter } = {}
 for x = -1, 1 do
 	for z = -1, 1 do
-		-- ParticleEmitter has no independent world-size property. A 3x3 host grid
-		-- keeps the weather local to the play space while covering the camera view.
+		-- A particle emitter takes its spawn box from its parent part. The hosts
+		-- stay invisible but deliberately broad, so nine emitters cover the whole
+		-- camera view rather than leaving nine narrow rain columns.
 		local rainHost = makePart(
 			"Weather Rain Host",
-			Vector3.new(1, 1, 1),
-			Vector3.new(x * 18, 30, -30 + z * 18),
+			Vector3.new(22, 1, 22),
+			Vector3.new(x * 22, 30, -32 + z * 22),
 			Color3.new(1, 1, 1)
 		)
 		rainHost.Visible = false
 		local rain = Instance.new("ParticleEmitter")
 		rain.Name = "Weather Rain"
 		rain.Rate = 0
-		rain.MaxParticles = 360
+		rain.MaxParticles = 480
 		rain.Lifetime = NumberRange.new(1.1, 1.55)
 		rain.Speed = NumberRange.new(18, 28)
 		rain.Acceleration = Vector3.new(7, -46, 3)
 		rain.Drag = 0.08
+		-- The default is Top. Rain emitted upward is mostly outside this camera,
+		-- even though its emitter is healthy and the GPU is stepping it.
+		rain.EmissionDirection = Enum.NormalId.Bottom
 		rain.Shape = Enum.ParticleEmitterShape.Box
 		rain.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
 		rain.ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward
 		rain.ShapePartial = 1
 		rain.SpreadAngle = Vector2.new(7, 7)
-		rain.Size = NumberSequence.new(0.07, 0.04)
-		rain.Squash = NumberSequence.new(-0.75, -0.9)
-		rain.Transparency = NumberSequence.new(0.3, 0.92)
+		-- 7 cm billboards disappear into the storm exposure at the showcase camera.
+		rain.Size = NumberSequence.new(0.34, 0.18)
+		rain.Squash = NumberSequence.new(8.0, 6.0)
+		rain.Transparency = NumberSequence.new(0.02, 0.42)
 		rain.Color = ColorSequence.new(Color3.fromRGB(159, 185, 214))
+		rain.Brightness = 8.0
+		rain.LightInfluence = 0
 		rain.NoiseStrength = 0.65
 		rain.NoiseFrequency = 0.9
 		rain.NoiseScrollSpeed = 1.4
@@ -285,16 +309,16 @@ panel.BackgroundColor3 = Color3.new(0, 0, 0)
 panel.BackgroundTransparency = 0.08
 panel.BorderSizePixel = 0
 panel.Position = UDim2.new(0, 18, 0, 18)
-panel.Size = UDim2.new(0, 310, 0, 394)
+panel.Size = UDim2.new(0, 258, 0, 258)
 panel.Parent = screen
 
 local status = Instance.new("TextLabel")
 status.Name = "Weather Status"
 status.BackgroundTransparency = 1
 status.Position = UDim2.new(0, 12, 0, 10)
-status.Size = UDim2.new(1, -24, 0, 58)
+status.Size = UDim2.new(1, -24, 0, 44)
 status.TextColor3 = Color3.new(1, 1, 1)
-status.TextSize = 15
+status.TextSize = 13
 status.TextWrapped = true
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.TextYAlignment = Enum.TextYAlignment.Top
@@ -307,22 +331,34 @@ local fogSize = 1
 local fogSquash = 1
 local fogFluff = 1
 
+-- The GPU keeps each emitter's continuous spawn accumulator in its resident
+-- state. Updating Rate or Speed every heartbeat restarts that state before the
+-- rain can build up, so only a preset change writes these particle properties.
+local function applyRain(preset: Weather)
+	for _, rain in rainEmitters do
+		rain.Rate = preset.RainRate / #rainEmitters
+		rain.Speed = NumberRange.new(preset.RainSpeed * 0.8, preset.RainSpeed)
+	end
+end
+
+applyRain(target)
+
 local function applyFogProfile()
 	local sizeScale = ({ 0.68, 1, 1.36 })[fogSize]
 	local squashScale = ({ 0.45, 1, 1.75 })[fogSquash]
 	local fluffiness = ({ 0.28, 0.74, 1 })[fogFluff]
-	lowBank.Bounds = Vector3.new(30 * sizeScale, 2.8 * squashScale, 16 * sizeScale)
+	lowBank.Bounds = Vector3.new(54 * sizeScale, 4 * squashScale, 38 * sizeScale)
 	lowBank.NoiseStrength = fluffiness
 	lowBank.NoiseScale = if fogFluff == 3 then 0.11 else 0.16
 end
 
 local function updateStatus()
 	status.Text = string.format(
-		"WEATHER  %s\nFOG  %s  |  local volumes, no global fog\nRAIN %.0f/s  CLOUD %.0f%%\nDOF %.0f%%  RAYS %.0f%%",
+		"WEATHER %s\nRAIN %.0f/s  CLOUD %.0f%%\nFOG %s  DOF %.0f%%  RAYS %.0f%%",
 		target.Name,
-		fogMode,
 		target.RainRate,
 		target.CloudCover * 100,
+		fogMode,
 		target.DepthOfFieldIntensity * 100,
 		target.GodRayIntensity * 100
 	)
@@ -333,11 +369,11 @@ local function button(name: string, text: string, column: number, row: number): 
 	control.Name = name
 	control.BackgroundColor3 = Color3.fromRGB(25, 35, 50)
 	control.BorderSizePixel = 0
-	control.Position = UDim2.new(0, 12 + column * 94, 0, 78 + row * 48)
-	control.Size = UDim2.new(0, 86, 0, 36)
+	control.Position = UDim2.new(0, 12 + column * 78, 0, 56 + row * 38)
+	control.Size = UDim2.new(0, 70, 0, 30)
 	control.Text = text
 	control.TextColor3 = Color3.new(1, 1, 1)
-	control.TextSize = 13
+	control.TextSize = 11
 	control.Parent = panel
 	return control
 end
@@ -347,6 +383,7 @@ for index, preset in presets do
 	control.Activated:Connect(function()
 		activePreset = index
 		target = presets[activePreset]
+		applyRain(target)
 		updateStatus()
 	end)
 end
@@ -386,11 +423,11 @@ local function slider(name: string, label: string, row: number): TextButton
 	track.Name = name
 	track.BackgroundColor3 = Color3.fromRGB(25, 35, 50)
 	track.BorderSizePixel = 0
-	track.Position = UDim2.new(0, 12, 0, 184 + row * 48)
-	track.Size = UDim2.new(0, 282, 0, 36)
+	track.Position = UDim2.new(0, 12, 0, 132 + row * 28)
+	track.Size = UDim2.new(0, 234, 0, 22)
 	track.Text = label
 	track.TextColor3 = Color3.new(1, 1, 1)
-	track.TextSize = 13
+	track.TextSize = 11
 	track.Parent = panel
 	return track
 end
@@ -463,10 +500,6 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	clouds.Cover = lerp(clouds.Cover, target.CloudCover, alpha)
 	clouds.Density = lerp(clouds.Density, target.CloudDensity, alpha)
 	clouds.WindSpeed = lerp(clouds.WindSpeed, target.CloudWindSpeed, alpha)
-	for _, rain in rainEmitters do
-		rain.Rate = lerp(rain.Rate, target.RainRate / #rainEmitters, alpha)
-		rain.Speed = NumberRange.new(target.RainSpeed * 0.8, target.RainSpeed)
-	end
 	lowBank.Density = lerp(lowBank.Density, target.FogDensity, alpha)
 	ruinMist.Density = lerp(ruinMist.Density, target.FogDensity * 1.3, alpha)
 	lowBank.Extinction = lerp(lowBank.Extinction, target.FogExtinction, alpha)
