@@ -163,16 +163,18 @@ render-check filter="[render][gpu]" backend="vulkan": (build "test_render")
     export MONO_RENDER_REVISION="$(git describe --always --dirty)"
     ./{{build}}/tests/test_render "{{filter}}"
 
-# Proves 256 authored volumes resolve to the sixteen-volume fragment budget, then
-# measures that sixteen-volume frame cost. The light collector's receiver-aware
+# Loads the authored high-count point, spot, fog and environment course, then
+# proves its sixteen-volume GPU budget. The light collector's receiver-aware
 # sixteen-light cap is exercised by the world-view release test. Each measured
 # submission waits for the GPU; no benchmark artifact is written outside build.
 volume-light-stress frames="120":
     #!/usr/bin/env bash
     set -euo pipefail
     cmake --preset release-tests > /dev/null
-    cmake --build --preset release-tests --target test_scene test_render
+    cmake --build --preset release-tests --target test_examples test_scene test_render
+    ./.cache/build/release-tests/tests/test_examples "[examples][lighting-stress]"
     ./.cache/build/release-tests/tests/test_scene "[scene][volume]"
+    ./.cache/build/release-tests/tests/test_render "[render][lighting-stress]"
     MONO_LIGHT_SELECTION_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][world-view]"
     MONO_VOLUME_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][gpu][volume-stress]"
 
