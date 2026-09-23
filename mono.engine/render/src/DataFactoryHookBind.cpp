@@ -608,6 +608,7 @@ namespace engine::render {
 				for (size_t prior = 0; prior < index; ++prior)
 					if (batch.Ticket.Channels[prior] == channel) ++localSlot;
 				if (index < batch.Ticket.LocalLightMatched.size() &&
+					index < batch.Ticket.LocalLightShadowAvailable.size() &&
 					localSlot < recording.LocalLightCaptureMatched.size()) {
 					batch.Ticket.LocalLightMatched[index] =
 						recording.LocalLightCaptureMatched[localSlot] ? 1 : 0;
