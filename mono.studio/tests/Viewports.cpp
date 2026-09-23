@@ -25,6 +25,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <imgui.h>
 #include <memory>
 #include <numbers>
 #include <studio/Editor.hpp>
@@ -178,6 +179,20 @@ namespace studio {
 			return {editor.FollowCamera, editor.Extras[0].Follow};
 		}
 	};
+
+	struct ViewportGuiControlsProbe {
+		static bool VisibleByDefault(const Editor &editor) {
+			return editor.ShowGuiPreviewControls;
+		}
+
+		static bool Draw(Editor &editor, size_t index, glm::vec2 position) {
+			return editor.DrawViewportGuiControls(index, position);
+		}
+
+		static void SetVisible(Editor &editor, bool visible) {
+			editor.ShowGuiPreviewControls = visible;
+		}
+	};
 }
 
 TEST_SUITE_ID("studio.viewports")
@@ -205,6 +220,54 @@ namespace {
 	constexpr WorldId SCENE{0};
 	constexpr WorldId OTHER{1};
 	constexpr WorldId CLIENT{2};
+
+	class GuiContext {
+	  public:
+		GuiContext() {
+			IMGUI_CHECKVERSION();
+			Handle = ImGui::CreateContext();
+			ImGuiIO &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2(640.0f, 480.0f);
+			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+		}
+
+		~GuiContext() {
+			ImGui::DestroyContext(Handle);
+		}
+
+		GuiContext(const GuiContext &) = delete;
+		GuiContext &operator=(const GuiContext &) = delete;
+
+	  private:
+		ImGuiContext *Handle = nullptr;
+	};
+
+	struct GuiPreviewControlFrame {
+		bool ControlsCapture = false;
+		bool SurfaceActive = false;
+	};
+
+	GuiPreviewControlFrame DrawGuiPreviewControlFrame(studio::Editor &editor, bool down) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(140.0f, 110.0f);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400.0f, 300.0f), ImGuiCond_Always);
+		ImGui::Begin("GUI preview controls");
+		GuiPreviewControlFrame frame;
+		frame.ControlsCapture = studio::ViewportGuiControlsProbe::Draw(editor, 0, glm::vec2{100.0f, 100.0f});
+		ImGui::SetCursorScreenPos(ImVec2(20.0f, 20.0f));
+		ImGui::InvisibleButton("##surface", ImVec2(300.0f, 220.0f));
+		frame.SurfaceActive = ImGui::IsItemActive();
+		ImGui::End();
+		ImGui::Render();
+		return frame;
+	}
 }
 
 TEST_CASE(
@@ -640,12 +703,25 @@ TEST_CASE("GUI preview profiles resolve viewer-local screen metrics", "[studio][
 	CHECK(secondViewport.State == studio::GuiPreviewState::Pressed);
 }
 
+TEST_CASE("GUI preview controls start hidden and claim viewport input", "[studio][viewports][gui][input]") {
+	GuiContext context;
+	studio::Editor editor;
+	CHECK_FALSE(studio::ViewportGuiControlsProbe::VisibleByDefault(editor));
+
+	studio::ViewportGuiControlsProbe::SetVisible(editor, true);
+	DrawGuiPreviewControlFrame(editor, false);
+	const GuiPreviewControlFrame pressed = DrawGuiPreviewControlFrame(editor, true);
+	CHECK(pressed.ControlsCapture);
+	CHECK_FALSE(pressed.SurfaceActive);
+	DrawGuiPreviewControlFrame(editor, false);
+}
+
 TEST_CASE("GUI preview controls follow the rendered image rectangle", "[studio][viewports]") {
 	studio::PanelProjection panel;
 	panel.ImageMin = {403.0f, 140.0f};
 	panel.ImageSize = {810.0f, 464.0f};
 
-	const glm::vec2 controls = studio::GuiPreviewControlsPosition(panel);
+	const glm::vec2 controls = studio::GuiPreviewControlsPosition(panel.ImageMin);
 	CHECK(controls.x == 411.0f);
 	CHECK(controls.y == 148.0f);
 }

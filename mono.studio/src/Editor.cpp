@@ -498,6 +498,7 @@ namespace studio {
 		ViewportPresentations.resize(1 + extras);
 		ViewportParticleVisibility.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
+		GuiPreviewControlsCapture.resize(1 + extras);
 		AdornmentRouters.resize(1 + extras);
 		GuiRouterWorlds.resize(1 + extras);
 

@@ -2322,35 +2322,6 @@ namespace studio {
 			CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, mouse.x, mouse.y);
 		const GuiPreviewSettings &preview = viewport != nullptr ? viewport->GuiPreview : MainGuiPreview;
 		GuiPreviewSettings &editablePreview = viewport != nullptr ? viewport->GuiPreview : MainGuiPreview;
-		if (ShowGuiPreviewControls) {
-			const char *profiles[] = {"Desktop", "Phone", "Tablet"};
-			const char *states[] = {"State", "Hover", "Pressed"};
-			int profile = static_cast<int>(editablePreview.Profile);
-			const glm::vec2 controls = GuiPreviewControlsPosition(panel);
-			ImGui::SetCursorScreenPos(ImVec2(controls.x, controls.y));
-			ImGui::SetNextItemWidth(100.0f);
-			if (ImGui::Combo("##gui-preview-profile", &profile, profiles, 3)) {
-				editablePreview.Profile = static_cast<GuiPreviewProfile>(profile);
-			}
-			ImGui::SetNextItemWidth(70.0f);
-			ImGui::DragFloat(
-				"##gui-interface-scale", &editablePreview.InterfaceScale, 0.01f, 0.1f, 4.0f, "UI %.2f"
-			);
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(70.0f);
-			ImGui::DragFloat("##gui-text-scale", &editablePreview.TextScale, 0.01f, 0.1f, 4.0f, "Text %.2f");
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(80.0f);
-			ImGui::InputText(
-				"##gui-preview-locale", editablePreview.Locale.data(), editablePreview.Locale.size()
-			);
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(72.0f);
-			int previewState = static_cast<int>(editablePreview.State);
-			if (ImGui::Combo("##gui-preview-state", &previewState, states, 3)) {
-				editablePreview.State = static_cast<GuiPreviewState>(previewState);
-			}
-		}
 		engine::gui::CompileRequest request;
 		request.Display = ResolveGuiPreviewScreen(preview, canvas.Width, canvas.Height);
 		request.ScreenGuis = source == ViewportGuiSource::PlayerGui
@@ -2415,7 +2386,10 @@ namespace studio {
 		// on the way past.
 		const bool driving = viewport != nullptr ? viewport->Active : ViewportActive;
 
-		pointer.Inside = selected && (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
+		const bool previewControlsCapture =
+			index < GuiPreviewControlsCapture.size() && GuiPreviewControlsCapture[index];
+		pointer.Inside = !previewControlsCapture && selected &&
+						 (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
 						 ImGui::IsMouseHoveringRect(
 							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
 						 );
@@ -2740,5 +2714,54 @@ namespace studio {
 				break;
 			}
 		}
+	}
+
+	bool Editor::DrawViewportGuiControls(size_t index, glm::vec2 position) {
+		if (index >= GuiPreviewControlsCapture.size()) {
+			return false;
+		}
+
+		GuiPreviewControlsCapture[index] = false;
+		if (!ShowGuiPreviewControls) {
+			return false;
+		}
+
+		ViewportState *viewport = ExtraAt(index);
+		GuiPreviewSettings &preview = viewport != nullptr ? viewport->GuiPreview : MainGuiPreview;
+		const char *profiles[] = {"Desktop", "Phone", "Tablet"};
+		const char *states[] = {"State", "Hover", "Pressed"};
+		bool capturesPointer = false;
+		const auto capture = [&] {
+			capturesPointer = capturesPointer || ImGui::IsItemHovered() || ImGui::IsItemActive();
+		};
+
+		ImGui::SetCursorScreenPos(ImVec2(position.x, position.y));
+		ImGui::SetNextItemWidth(100.0f);
+		int profile = static_cast<int>(preview.Profile);
+		if (ImGui::Combo("##gui-preview-profile", &profile, profiles, 3)) {
+			preview.Profile = static_cast<GuiPreviewProfile>(profile);
+		}
+		capture();
+		ImGui::SetNextItemWidth(70.0f);
+		ImGui::DragFloat("##gui-interface-scale", &preview.InterfaceScale, 0.01f, 0.1f, 4.0f, "UI %.2f");
+		capture();
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(70.0f);
+		ImGui::DragFloat("##gui-text-scale", &preview.TextScale, 0.01f, 0.1f, 4.0f, "Text %.2f");
+		capture();
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(80.0f);
+		ImGui::InputText("##gui-preview-locale", preview.Locale.data(), preview.Locale.size());
+		capture();
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(72.0f);
+		int previewState = static_cast<int>(preview.State);
+		if (ImGui::Combo("##gui-preview-state", &previewState, states, 3)) {
+			preview.State = static_cast<GuiPreviewState>(previewState);
+		}
+		capture();
+
+		GuiPreviewControlsCapture[index] = capturesPointer;
+		return capturesPointer;
 	}
 }

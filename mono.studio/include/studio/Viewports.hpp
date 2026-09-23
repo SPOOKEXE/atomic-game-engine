@@ -68,10 +68,10 @@ namespace studio {
 	// Places GUI-preview controls over the rendered image, including when the
 	// image is fitted into only part of its docked viewport.
 	//
-	// @param panel The image rectangle displayed by this viewport.
+	// @param imageMinimum The image's top-left display coordinate.
 	// @return The display-space position for the controls' top-left corner.
 	// @since v0.25
-	glm::vec2 GuiPreviewControlsPosition(const PanelProjection &panel);
+	glm::vec2 GuiPreviewControlsPosition(glm::vec2 imageMinimum);
 
 	// No panel. Also what `ChooseViewportFor` says when one has to be made.
 	//

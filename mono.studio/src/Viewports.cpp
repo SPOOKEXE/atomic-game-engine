@@ -41,8 +41,8 @@ namespace studio {
 		return screen;
 	}
 
-	glm::vec2 GuiPreviewControlsPosition(const PanelProjection &panel) {
-		return panel.ImageMin + glm::vec2{8.0f, 8.0f};
+	glm::vec2 GuiPreviewControlsPosition(glm::vec2 imageMinimum) {
+		return imageMinimum + glm::vec2{8.0f, 8.0f};
 	}
 
 	bool ViewportDirectionControls::WireframeContains(float x, float y) const {

@@ -1187,6 +1187,14 @@ namespace studio {
 			slot.Drawn = true;
 		}
 
+		// The full-image surface is a button so it can capture camera drags and
+		// picks. Submit the controls first so that button cannot claim their
+		// press before ImGui reaches them.
+		const bool previewControlsCapture = DrawViewportGuiControls(
+			index,
+			GuiPreviewControlsPosition(glm::vec2{origin.x + imageRect.Min.x, origin.y + imageRect.Min.y})
+		);
+
 		ImGui::SetCursorScreenPos(origin);
 
 		// **Left is claimed now, and the comment below used to say it was
@@ -1226,10 +1234,10 @@ namespace studio {
 		}
 
 		if (second) {
-			extra->Hovered = ImGui::IsItemHovered();
+			extra->Hovered = !previewControlsCapture && ImGui::IsItemHovered();
 			extra->Active = ImGui::IsItemActive();
 		} else {
-			ViewportHovered = ImGui::IsItemHovered();
+			ViewportHovered = !previewControlsCapture && ImGui::IsItemHovered();
 			ViewportActive = ImGui::IsItemActive();
 		}
 
@@ -1282,7 +1290,9 @@ namespace studio {
 		// Both panels fall through to the same readout now. See `DrawToolbar`.
 
 		// The readout, drawn back over the top-left of the image.
-		ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
+		const float previewControlsOffset =
+			ShowGuiPreviewControls ? ImGui::GetFrameHeightWithSpacing() * 2.0f : 0.0f;
+		ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f + previewControlsOffset));
 
 		// **Scoped to the readout and not to the function.** A pushed font that
 		// is still pushed when `ImGui::End` runs is imgui's "Missing PopFont()"

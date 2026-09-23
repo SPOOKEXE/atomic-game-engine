@@ -911,6 +911,7 @@ namespace studio {
 		friend struct UiAuthoringProbe;
 		friend struct ToolsProbe;
 		friend struct ViewportCameraProbe;
+		friend struct ViewportGuiControlsProbe;
 
 		// --- the frame ------------------------------------------------------
 
@@ -1734,6 +1735,10 @@ namespace studio {
 		// @param index Which viewport panel.
 		// @param panel The projection already resolved for this panel.
 		void DrawViewportGui(size_t index, const PanelProjection &panel);
+
+		// Draws the editor's GUI preview controls before the viewport surface
+		// claims input, and reports whether those controls own the pointer.
+		bool DrawViewportGuiControls(size_t index, glm::vec2 position);
 
 		// How one panel maps between the world and itself, this frame.
 		//
@@ -4467,6 +4472,8 @@ namespace studio {
 		// reason. Editor state, not world state: nobody replicates where a
 		// mouse is.
 		std::vector<engine::gui::Router> GuiRouters;
+		// Whether the editor-only GUI preview controls own the pointer this frame.
+		std::vector<bool> GuiPreviewControlsCapture;
 		// Routes pointer input to adornment geometry for each viewport.
 		std::vector<engine::render::AdornmentPointerRouter> AdornmentRouters;
 
@@ -6397,7 +6404,7 @@ namespace studio {
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
 		// Viewer-only GUI controls share the View menu with the other viewport tools.
-		bool ShowGuiPreviewControls = true;
+		bool ShowGuiPreviewControls = false;
 		// How many more frames an explicit `--graph` should select the dock tab.
 		// A few frames outlast the first-run dock rebuild, as `FocusWorlds` does.
 		int FocusFrameGraphFrames = 0;
