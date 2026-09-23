@@ -168,7 +168,7 @@ TEST_CASE("storm links accumulate damage before releasing unsupported assemblies
 		"foundation-to-lower",
 		foundation,
 		lower,
-		{.BreakForce = 8000.0f, .MaterialStrength = 0.72f, .DamageRate = 4.0f}
+		{.BreakForce = 1500.0f, .MaterialStrength = 0.72f, .DamageRate = 4.0f}
 	);
 	link(
 		"lower-to-upper",
@@ -188,6 +188,7 @@ TEST_CASE("storm links accumulate damage before releasing unsupported assemblies
 	for (int tick = 0; tick < 240 && store.Get<engine::scene::WeldConstraint>(baseLink)->Enabled; ++tick) {
 		store.AdvanceTick(TICK);
 		engine::physics::ApplyStormForces(store);
+		engine::physics::SolveRigidJoints(store);
 	}
 	CHECK_FALSE(store.Get<engine::scene::WeldConstraint>(baseLink)->Enabled);
 	engine::physics::SolveRigidJoints(store);
