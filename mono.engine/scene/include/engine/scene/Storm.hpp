@@ -37,6 +37,8 @@ namespace engine::scene {
 		float VortexTightness = 2.25f;						 // Falloff exponent outside the core.
 		float TopHeight = 360.0f;							 // Vertical extent of the storm.
 		bool CounterClockwise = true;						 // Rotation direction when viewed from above.
+		// Compares authored field inputs for presentation cache invalidation.
+		bool operator==(const TornadoParameters &) const = default;
 	};
 
 	// Enhanced Fujita severity presets.

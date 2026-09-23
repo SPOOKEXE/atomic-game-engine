@@ -107,6 +107,11 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	CHECK(collector.Views()[0].Instances.data() == collector.Scenes()[0].Frame->Instances.data());
 	REQUIRE(collector.Views()[0].Lights.size() == 1);
 	CHECK(collector.Views()[0].Lights.data() == collector.Scenes()[0].CameraLayers->Lights.data());
+	const auto *alphaFrame = collector.Scenes()[0].Frame.get();
+	const auto *zuluFrame = collector.Scenes()[1].Frame.get();
+	REQUIRE(collector.Collect(worlds, demands, {640, 480}) == 2);
+	CHECK(collector.Scenes()[0].Frame.get() == alphaFrame);
+	CHECK(collector.Scenes()[1].Frame.get() == zuluFrame);
 
 	size_t submissions = 0;
 	std::vector<world::WorldId> submittedWorlds;

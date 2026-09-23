@@ -38,8 +38,11 @@ namespace client {
 		bool frozen
 	) {
 		Demands.assign(requests.begin(), requests.end());
-		Collected.clear();
 		Submitted.clear();
+		// Keep presentation-owned snapshots across collects. The world packet
+		// refreshes itself against the store identity and simulation tick.
+		auto previous = std::move(Collected);
+		Collected.clear();
 		std::sort(Demands.begin(), Demands.end(), [&](const auto &left, const auto &right) {
 			return Before(left, right, universe);
 		});
@@ -58,8 +61,16 @@ namespace client {
 			scene.World = Demands[index].Request.World;
 			scene.Name = universe.NameOf(scene.World);
 			scene.Pipeline = Demands[index].Pipeline;
-			scene.Frame = std::make_unique<engine::render::WorldViewFrame>();
-			scene.CameraLayers = std::make_unique<engine::render::WorldCameraFrame>();
+			auto old = std::find_if(previous.begin(), previous.end(), [&](const auto &item) {
+				return item.World == scene.World && item.Name == scene.Name;
+			});
+			if (old != previous.end()) {
+				scene.Frame = std::move(old->Frame);
+				scene.CameraLayers = std::move(old->CameraLayers);
+			}
+			if (!scene.Frame) scene.Frame = std::make_unique<engine::render::WorldViewFrame>();
+			if (!scene.CameraLayers)
+				scene.CameraLayers = std::make_unique<engine::render::WorldCameraFrame>();
 		}
 		std::vector<engine::world::Presentation> presentations;
 		presentations.reserve(Demands.size());

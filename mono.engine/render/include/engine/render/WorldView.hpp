@@ -10,6 +10,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/Storm.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <array>
@@ -89,6 +90,11 @@ namespace engine::render {
 		scene::WorldLighting Lighting;
 		// Packed cloud-density snapshot copied from the storm field.
 		std::optional<scene::CloudDensitySnapshot> CloudDensity;
+		// Field inputs used to invalidate the cached density when a preset changes.
+		std::optional<scene::TornadoParameters> CloudParameters;
+		// Last density rebuild in world time; the volume moves every tick while
+		// its expensive local density pattern changes only four times a second.
+		double CloudBuiltSeconds = -1.0;
 		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
 		// Object labels for capture output.

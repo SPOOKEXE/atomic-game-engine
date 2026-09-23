@@ -5,6 +5,7 @@
 #include <engine/graph/Frustum.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -43,6 +44,25 @@ namespace {
 		part.Frame.Position = position;
 		return scene::MakePart(store, part);
 	}
+}
+
+TEST_CASE("retained cloud density follows a frozen storm preset change", "[render][world-view][cloud]") {
+	ecs::Store store("frozen-cloud");
+	physics::Storm storm;
+	physics::SetStorm(store, storm);
+	render::WorldViewFrame frame;
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	REQUIRE(frame.CloudDensity.has_value());
+	const float originalWidth = frame.CloudDensity->Config.RootSize.X;
+	const auto *originalNodes = frame.CloudDensity->Nodes.data();
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	CHECK(frame.CloudDensity->Nodes.data() == originalNodes);
+
+	storm.State.Parameters.InfluenceRadius *= 1.5f;
+	physics::SetStorm(store, storm);
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	REQUIRE(frame.CloudDensity.has_value());
+	CHECK(frame.CloudDensity->Config.RootSize.X == originalWidth * 1.5f);
 }
 
 TEST_CASE(

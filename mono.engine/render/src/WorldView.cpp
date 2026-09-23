@@ -165,8 +165,8 @@ namespace engine::render {
 		const ecs::WorldTime time = store.Time();
 		// A collected packet can be rebound for another camera while its source
 		// world is paused. Only a new source or world tick carries time to the device pool.
-		const bool advanced =
-			frame.Name != owner || frame.Identity != store.Identity() || time.Tick != frame.Tick;
+		const bool newWorld = frame.Name != owner || frame.Identity != store.Identity();
+		const bool advanced = newWorld || time.Tick != frame.Tick;
 		frame.Name = owner;
 		frame.Identity = store.Identity();
 		frame.Tick = time.Tick;
@@ -174,7 +174,10 @@ namespace engine::render {
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
 		frame.GpuParticles.reset();
 		frame.Lighting = scene::LightingOf(store);
-		frame.CloudDensity.reset();
+		if (newWorld) {
+			frame.CloudDensity.reset();
+			frame.CloudParameters.reset();
+		}
 		if (const auto *storm = physics::StormOf(store)) {
 			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
 				if (!frame.GpuParticles.has_value()) {
@@ -183,24 +186,36 @@ namespace engine::render {
 					};
 				}
 			});
-			const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
-			const float extent = field.Parameters.InfluenceRadius;
-			const scene::CloudDensityOctreeConfig config{
-				.RootMinimum = {-extent, 0.0f, -extent},
-				.RootSize = {extent * 2.0f, field.Parameters.TopHeight * 1.16f, extent * 2.0f},
-				.MaximumDepth = 7,
-			};
-			if (auto tree = scene::CloudDensityOctree::Create(config)) {
-				const scene::CloudDensityBuildStats built =
-					scene::BuildCloudDensity(*tree, field, storm->State.ElapsedSeconds);
-				if (built.Nodes != 0) {
-					frame.CloudDensity = scene::CloudDensitySnapshot{
-						.Centre = storm->State.Position,
-						.Config = config,
-						.Nodes = tree->GpuNodes(),
-					};
+			if (!frame.CloudDensity || frame.CloudParameters != storm->State.Parameters ||
+				time.Elapsed < frame.CloudBuiltSeconds || time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
+				ENGINE_PROFILE_CAT("storm cloud density build", core::ProfileCategory::Render);
+				frame.CloudBuiltSeconds = time.Elapsed;
+				frame.CloudParameters = storm->State.Parameters;
+				frame.CloudDensity.reset();
+				const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
+				const float extent = field.Parameters.InfluenceRadius;
+				const scene::CloudDensityOctreeConfig config{
+					.RootMinimum = {-extent, 0.0f, -extent},
+					.RootSize = {extent * 2.0f, field.Parameters.TopHeight * 1.16f, extent * 2.0f},
+					.MaximumDepth = 6,
+				};
+				if (auto tree = scene::CloudDensityOctree::Create(config)) {
+					const scene::CloudDensityBuildStats built = scene::BuildCloudDensity(
+						*tree, field, storm->State.ElapsedSeconds, {.CoarseDepth = 4, .FineDepth = 6}
+					);
+					if (built.Nodes != 0) {
+						frame.CloudDensity = scene::CloudDensitySnapshot{
+							.Centre = storm->State.Position,
+							.Config = config,
+							.Nodes = tree->GpuNodes(),
+						};
+					}
 				}
 			}
+			if (frame.CloudDensity) frame.CloudDensity->Centre = storm->State.Position;
+		} else {
+			frame.CloudDensity.reset();
+			frame.CloudParameters.reset();
 		}
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||
