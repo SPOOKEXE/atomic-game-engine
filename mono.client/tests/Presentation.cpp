@@ -6,6 +6,8 @@
 // that is wrong and the thing that looks wrong are in different modules. A
 // headless test over the same sequence is where that gets cornered.
 
+#include "../src/DisplayedSceneView.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -34,7 +36,6 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
-#include "../src/DisplayedSceneView.hpp"
 #include <client/ActiveScenes.hpp>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
@@ -263,17 +264,17 @@ TEST_CASE("active scenes submit a collected GPU particle field", "[client][activ
 	CHECK(scene.View.GpuParticles->Centre == Vector3{12, 0, -8});
 	CHECK(scene.View.GpuParticles->Seconds == 42.0f);
 
-	collector.SubmitBatch(
-		stormWorld, scene.View, 960, 540, false, {}, [](std::span<render::View> views) {
-			REQUIRE(views.size() == 1);
-			REQUIRE(views.front().GpuParticles.has_value());
-			CHECK(views.front().GpuParticles->Field.Seed == 73);
-			return render::FrameResult{};
-		}
-	);
+	collector.SubmitBatch(stormWorld, scene.View, 960, 540, false, {}, [](std::span<render::View> views) {
+		REQUIRE(views.size() == 1);
+		REQUIRE(views.front().GpuParticles.has_value());
+		CHECK(views.front().GpuParticles->Field.Seed == 73);
+		return render::FrameResult{};
+	});
 }
 
-TEST_CASE("normal client view receives the displayed GPU particle field", "[client][active-scenes][gpu-particles]") {
+TEST_CASE(
+	"normal client view receives the displayed GPU particle field", "[client][active-scenes][gpu-particles]"
+) {
 	using namespace engine;
 	client::ActiveScene activeScene;
 	activeScene.Frame = std::make_unique<render::WorldViewFrame>();

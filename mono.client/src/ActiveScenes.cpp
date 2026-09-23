@@ -1,7 +1,8 @@
+#include "DisplayedSceneView.hpp"
+
 #include <engine/scene/ActiveCamera.hpp>
 
 #include <algorithm>
-#include "DisplayedSceneView.hpp"
 #include <client/ActiveScenes.hpp>
 #include <string>
 
@@ -33,9 +34,8 @@ namespace client {
 	}
 
 	void BindDisplayedSceneFields(const ActiveScene *scene, engine::render::View &view) {
-		view.GpuParticles = scene == nullptr || scene->Frame == nullptr
-							? std::nullopt
-							: scene->Frame->GpuParticles;
+		view.GpuParticles =
+			scene == nullptr || scene->Frame == nullptr ? std::nullopt : scene->Frame->GpuParticles;
 	}
 
 	size_t ActiveSceneCollector::Collect(
