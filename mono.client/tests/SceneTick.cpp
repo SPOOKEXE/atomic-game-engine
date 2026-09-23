@@ -15,6 +15,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
@@ -317,6 +318,65 @@ TEST_CASE("GuiInteraction routes client controls into visible scripted state", "
 	frame({0.0f, 0.0f}, true);
 	CHECK(engine::gui::FocusedTextBox(store) == engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::gui::Label>(eventStatus)->Text == "TextBox focus lost");
+}
+
+TEST_CASE(
+	"a GUI weather preset reaches the resident emitter before its next step", "[client][gui][particles]"
+) {
+	Session session("Weather.luau");
+	Store &store = session.World;
+	session.Tick(1);
+
+	const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
+	const engine::ecs::Entity emitter = FirstNamedDescendant(store, workspace, "Weather Rain");
+	const engine::ecs::Entity clear = FirstGuiElement(store, "Weather CLEAR");
+	REQUIRE(emitter != engine::ecs::NULL_ENTITY);
+	REQUIRE(clear != engine::ecs::NULL_ENTITY);
+	const auto *slot = store.Get<engine::effects::EmitterSlot>(emitter);
+	REQUIRE(slot != nullptr);
+	REQUIRE(slot->Index != engine::effects::NO_SLOT);
+	auto *particles = store.ResourceMutable<engine::effects::ParticleSystem>();
+	REQUIRE(particles != nullptr);
+	CHECK(particles->RuntimeStates[slot->Index].ContinuousRate > 0.0f);
+
+	engine::gui::CompileRequest request;
+	request.Display = {
+		.Width = 1280.0f,
+		.Height = 720.0f,
+		.SafeArea = {},
+		.Occluded = {},
+	};
+	request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
+	const auto *local = store.Resource<engine::scene::LocalPlayer>();
+	REQUIRE(local != nullptr);
+	request.Viewer = local->Instance;
+
+	engine::gui::Compiled compiled;
+	engine::gui::Router router;
+	const auto frame = [&](bool down) {
+		request.Hovered = router.Hovered();
+		request.Pressed = router.Pressed();
+		REQUIRE(engine::gui::Layout(store, request.Display) > 0);
+		compiled.Rebuild(store, request);
+		const auto *resolved = store.Get<engine::gui::Resolved>(clear);
+		REQUIRE(resolved != nullptr);
+
+		engine::gui::Pointer pointer;
+		pointer.Position = resolved->AbsolutePosition + resolved->AbsoluteSize * 0.5f;
+		pointer.Down = down;
+		pointer.Inside = true;
+		pointer.ScreenOnly = true;
+		session.Scripts->DeliverGuiEvents(router.Update(store, compiled.Commands(), pointer));
+		session.Tick(1);
+	};
+
+	frame(false);
+	frame(true);
+	frame(false);
+
+	particles = store.ResourceMutable<engine::effects::ParticleSystem>();
+	CHECK(particles->RuntimeStates[slot->Index].ContinuousRate == 0.0f);
+	CHECK(particles->RuntimeStates[slot->Index].DeviceRetiring);
 }
 
 TEST_CASE("data capture driver ticket transition is paused, strict, and terminal", "[client][data-capture]") {
@@ -1068,15 +1128,16 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// beside it and places every surface camera parented to a part - see
 	// `scene/SurfaceCameras.hpp`.
 	//
-	// **Nine more at v0.10**, from two installers. `InstallEffects` adds
-	// resolve-attachments and refresh-emitters in `PreSimulation`, step-particles
-	// and record-trails in `Simulation`, and build-ribbons in `PreRender`.
+	// **Ten more at v0.10**, from two installers. `InstallEffects` adds
+	// resolve-attachments in `PreSimulation`, then refreshes attachments and
+	// emitters after `script-heartbeat` and before step-particles in `Simulation`;
+	// record-trails also runs in `Simulation`, and build-ribbons in `PreRender`.
 	// `InstallControls` adds character-control in `PreSimulation` and
 	// camera-control in `PreRender`, and `physics::RegisterCharacterSystems`
 	// adds character.control in `PreSimulation` - that moved out of this file's
 	// installer at v0.14, so that a dedicated server grounds its characters too.
 	//
-	// Only two of the nine are presentation; the rest are simulation and are here
+	// Only two of the ten are presentation; the rest are simulation and are here
 	// because this count is over every phase rather than over one.
 	//
 	// The question this assertion exists to force was asked and answered:
@@ -1160,10 +1221,12 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// gravity and abandoned-owner reclamation. Without those five a scripted
 	// Humanoid produced velocity that no system ever integrated.
 	//
-	// **And thirty for the animation pipeline.** Track clocks advance in
+	// **And thirty-one for the animation pipeline.** The post-heartbeat attachment
+	// and emitter refresh lets script-authored particle changes reach the GPU
+	// before the particle step. Track clocks advance in
 	// `Simulation`; clip sampling and bone resolution are presentation work, so
 	// a suspended Studio scene retains and redraws its last simulated pose.
-	REQUIRE(timings.size() == 30);
+	REQUIRE(timings.size() == 31);
 	const auto hasTiming = [&timings](const std::string_view name) {
 		return std::ranges::any_of(timings, [name](const auto &timing) { return timing.Name == name; });
 	};

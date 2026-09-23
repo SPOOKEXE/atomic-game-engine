@@ -747,36 +747,43 @@ namespace client {
 				store.SetResource(engine::effects::RibbonBuffer{});
 			}
 
-			// **Registered in both phases, and that is not a duplicate system.**
+			// **Resolved in all three phases, and that is not a duplicate system.**
 			// `ResolveAttachments` is a pure recompute of a cache - one multiply
-			// per attachment, from state it does not own - so running it twice
-			// gives the same answer twice, which is what makes this safe where
+			// per attachment, from state it does not own - so running it more than once
+			// gives the same answer each time, which is what makes this safe where
 			// two *different* systems writing one field would not be.
 			//
-			// It has a consumer in each phase and they need different things:
+			// Its consumers need different boundaries:
 			//
-			//   - `refresh-emitters`, below, reads `Attachment::WorldFrame` to
-			//     place a spawn, and it runs in `PreSimulation`. Resolving only
-			//     at `PreRender` would hand it the previous tick's frame, so a
-			//     rocket's exhaust would trail its nozzle by a tick.
+			//   - `refresh-emitters-after-scripts` reads `Attachment::WorldFrame`
+			//     after `script-heartbeat`, so particle properties and attachment
+			//     transforms authored by a GUI callback reach the GPU before stepping.
+			//   - `resolve-attachments` keeps the PreSimulation cache current for
+			//     systems that run before scripts.
 			//   - `render::CollectLights` reads it to place a lamp, and it runs
 			//     at present time. A world that is being *authored* never ticks
 			//     at all - `World::Present` runs `PreRender` alone - so
-			//     resolving only at `PreSimulation` left every attachment at the
+			//     resolving only at tick time left every attachment at the
 			//     identity and every lamp in the studio lighting the origin.
 			//
-			// `Attachments.hpp` says this pass runs in `PreRender`; it was
-			// registered in `PreSimulation` alone, and the header was the half
-			// that was right about the draw path. Both are true and both are
-			// declared.
+			// `Attachments.hpp` names the PreRender consumer; all three phases are
+			// declared here because they serve different readers.
 			scheduler.Add("resolve-attachments", Phase::PreSimulation, [](Store &world) {
 				(void)engine::scene::ResolveAttachments(world);
 			});
 			scheduler.Add(
-				"refresh-emitters",
-				Phase::PreSimulation,
+				"resolve-attachments-after-scripts",
+				Phase::Simulation,
+				[](Store &world) { (void)engine::scene::ResolveAttachments(world); },
+				SystemOrder{{}, {}, {}, {"script-heartbeat"}}
+			);
+			scheduler.Add(
+				"refresh-emitters-after-scripts",
+				Phase::Simulation,
 				[](Store &world) { (void)engine::effects::RefreshEmitters(world); },
-				SystemOrder{{}, {"resolve-attachments"}}
+				SystemOrder{
+					{}, {"resolve-attachments-after-scripts", "step-particles"}, {}, {"script-heartbeat"}
+				}
 			);
 			scheduler.Add("step-particles", Phase::Simulation, [](Store &world) {
 				(void)engine::effects::StepParticles(world, static_cast<float>(world.Time().Delta));
