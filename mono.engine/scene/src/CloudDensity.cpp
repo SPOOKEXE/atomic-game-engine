@@ -37,8 +37,6 @@ namespace engine::scene {
 		);
 		const float lowerColumn = 1.0f - Saturate((height - 0.78f) / 0.24f);
 		const float funnel = sample.Condensation * lowerColumn * (0.38f + windLineDensity * 0.78f);
-		const float anvil = pressureMoisture * sample.Influence * Bell((height - 0.88f) / 0.19f) * 0.78f *
-							(0.28f + windLineDensity * 0.72f);
 		const float wallRadius =
 			(radius - parameters.CoreRadius * 1.8f) / std::max(parameters.CoreRadius * 1.7f, 1.0f);
 		const float wallCloud = pressureMoisture * Bell(wallRadius) * Bell((height - 0.24f) / 0.22f) *
@@ -52,7 +50,10 @@ namespace engine::scene {
 								localPosition.X * 0.043f + localPosition.Y * 0.029f -
 								localPosition.Z * 0.037f + timeSeconds * 0.11f
 							);
-		return Saturate(std::max(funnel, std::max(anvil, wallCloud)) * streamlineBands * cellularVariation);
+		// The funnel carries its own taper through the upper cell. A separate
+		// high anvil in this sparse octree resolves as a detached box at distance;
+		// authored cloud volumes provide the broader storm deck instead.
+		return Saturate(std::max(funnel, wallCloud) * streamlineBands * cellularVariation);
 	}
 
 	CloudDensityBuildStats BuildCloudDensity(

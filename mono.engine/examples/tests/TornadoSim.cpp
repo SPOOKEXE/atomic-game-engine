@@ -79,6 +79,9 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Storm.Sample") != std::string::npos);
 	CHECK(document.find("Storm.Visibility") != std::string::npos);
 	CHECK(document.find("Storm.Damage") != std::string::npos);
+	CHECK(document.find("button(\"FUNNEL\"") != std::string::npos);
+	CHECK(document.find("rainBank.Enabled = layerActive(activeLayers, 2)") != std::string::npos);
+	CHECK(document.find("funnelVolumes[5].Enabled = activeLayers ~= 1") != std::string::npos);
 	CHECK(document.find("StormInteraction") != std::string::npos);
 	CHECK(document.find("WoodenSign") != std::string::npos);
 	CHECK(document.find("SteelPanel") != std::string::npos);

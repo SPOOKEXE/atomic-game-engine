@@ -1224,6 +1224,7 @@ local function setEmitterLayer(emitters: { ParticleEmitter }, enabled: boolean, 
 end
 local function updateLayers()
 	request({ kind = "layers", mask = activeLayers })
+	rainBank.Enabled = layerActive(activeLayers, 2)
 	for bit, control in pairs(layerButtons) do
 		local enabled = layerActive(activeLayers, bit)
 		control.BackgroundColor3 = if enabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
@@ -1247,6 +1248,15 @@ for index, layer in ipairs({ { 1, "COND" }, { 2, "RAIN" }, { 4, "DUST" } }) do
 		updateLayers()
 	end, 64)
 end
+
+local funnelOnlyControl: TextButton
+funnelOnlyControl = button("FUNNEL", 119, 810, function()
+	activeLayers = if activeLayers == 1 then 7 else 1
+	clouds.Cover = if activeLayers == 1 then 0 else 0.98
+	funnelVolumes[5].Enabled = activeLayers ~= 1
+	updateLayers()
+	funnelOnlyControl.BackgroundColor3 = if activeLayers == 1 then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 62)
 
 for _, emitters in ipairs({ condensationEmitters, rainEmitters, debrisEmitters }) do
 	for _, effect in ipairs(emitters) do emitterRates[effect] = effect.Rate end
