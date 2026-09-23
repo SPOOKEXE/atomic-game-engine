@@ -103,6 +103,12 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("CAM ORBIT") != std::string::npos);
 	CHECK(document.find("SHAKE") != std::string::npos);
 	CHECK(document.find("FieldVectorInset") != std::string::npos);
+	CHECK(document.find("cameraTarget = Vector3.new(0, 170, 95)") != std::string::npos);
+	CHECK(document.find("cameraHome = Vector3.new(-275, 135, -405)") != std::string::npos);
+	CHECK(document.find("Instance.new(\"ScrollingFrame\")") != std::string::npos);
+	CHECK(document.find("panel.CanvasSize = UDim2.new(0, 352, 0, 704)") != std::string::npos);
+	CHECK(document.find("panel.CanvasPosition = Vector2.new(0, 0)") != std::string::npos);
+	CHECK(document.find("panel.ScrollBarThickness = 8") != std::string::npos);
 
 	const std::filesystem::path audio =
 		world.parent_path().parent_path().parent_path() / "audio" / "tornado-wind.wav";

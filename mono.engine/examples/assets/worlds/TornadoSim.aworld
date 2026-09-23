@@ -542,8 +542,10 @@ local camera = Instance.new("Camera")
 camera.Name = "TornadoChaseCamera"
 camera.FieldOfView = 57
 camera.FarPlaneZ = 1500
-local cameraTarget = Vector3.new(0, 55, 95)
-local cameraHome = Vector3.new(-145, 62, -175)
+-- The mature EF3 column is 430 metres tall. Keep the default capture far
+-- enough back and aimed near its midpoint, so it fits 540-pixel-tall output.
+local cameraTarget = Vector3.new(0, 170, 95)
+local cameraHome = Vector3.new(-275, 135, -405)
 camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)
 camera.Parent = Workspace
 Workspace.CurrentCamera = camera
@@ -558,10 +560,14 @@ gui.ResetOnSpawn = false
 local player = Players.LocalPlayer
 gui.Parent = if player and player:FindFirstChild("PlayerGui") then player.PlayerGui else StarterGui
 
-local panel = Instance.new("Frame")
+local panel = Instance.new("ScrollingFrame")
 panel.Name = "StormControls"
-panel.Size = UDim2.new(0, 352, 0, 704)
+panel.Size = UDim2.new(0, 352, 1, -28)
 panel.Position = UDim2.new(0, 14, 0, 14)
+panel.CanvasSize = UDim2.new(0, 352, 0, 704)
+panel.CanvasPosition = Vector2.new(0, 0)
+panel.ScrollBarThickness = 8
+panel.ScrollBarImageColor3 = Color3.fromRGB(70, 117, 132)
 panel.BackgroundColor3 = Color3.fromRGB(3, 6, 9)
 panel.BackgroundTransparency = 0.08
 panel.BorderSizePixel = 0
