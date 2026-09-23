@@ -13,6 +13,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
+#include <glm/gtc/packing.hpp>
 
 #include <array>
 #include <cmath>
@@ -187,6 +188,23 @@ namespace {
 				.Key = core::Name(resource),
 			});
 		}
+		const std::array captures{
+			std::pair{"fixture-lit-capture", "lit"},
+			std::pair{"fixture-god-rays-capture", "god-rays"},
+		};
+		for (const auto &[name, resource] : captures) {
+			document.Record({
+				.Kind = graph::EditKind::AddNode,
+				.Name = core::Name(name),
+				.NodeKind = core::Name("capture"),
+				.Scope = graph::NodeScope::Frame,
+			});
+			document.Record({
+				.Kind = graph::EditKind::Reads,
+				.Target = core::Name(resource),
+				.Key = core::Name("source"),
+			});
+		}
 		graph::RenderGraph graph;
 		core::Name offender;
 		REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
@@ -305,6 +323,14 @@ TEST_CASE("default PBR preserves distinct part tints through the display transfo
 	view.Lighting.OutdoorAmbient = {};
 	view.Lighting.Direct = {};
 	render::OverlayImage overlay;
+	const uint64_t litToken = fixture.Render.QueueResourceImage(
+		view.Pipeline, core::Name("fixture-lit-capture"), view.Slot
+	);
+	const uint64_t godRaysToken = fixture.Render.QueueResourceImage(
+		view.Pipeline, core::Name("fixture-god-rays-capture"), view.Slot
+	);
+	REQUIRE(litToken != 0);
+	REQUIRE(godRaysToken != 0);
 	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(frame.Ran(core::Name("gbuffer")));
 	REQUIRE(frame.Ran(core::Name("deferred-lighting")));
@@ -328,12 +354,42 @@ TEST_CASE("default PBR preserves distinct part tints through the display transfo
 	const auto greenAlbedo = sample(albedo, 58, 32);
 	const auto redDisplay = sample(display, 38, 32);
 	const auto greenDisplay = sample(display, 58, 32);
+	const auto await = [&fixture](uint64_t token) {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (std::chrono::steady_clock::now() < deadline) {
+			if (auto image = fixture.Render.TakeResourceImage(token)) return std::move(*image);
+			SDL_Delay(1);
+		}
+		FAIL("HDR fixture image did not complete");
+		return render::ResourceImage{};
+	};
+	const render::ResourceImage lit = await(litToken);
+	const render::ResourceImage godRays = await(godRaysToken);
+	const auto sampleHdr = [](const render::ResourceImage &image, uint32_t x, uint32_t y) {
+		REQUIRE(image.Status == render::ResourceImageStatus::Ok);
+		REQUIRE(image.Format == render::ResourceImageFormat::RGBA16_Float);
+		const std::byte *pixel = image.Pixels.data() + y * image.RowStride + x * 8;
+		uint32_t redGreen, blueAlpha;
+		std::memcpy(&redGreen, pixel, sizeof(redGreen));
+		std::memcpy(&blueAlpha, pixel + sizeof(redGreen), sizeof(blueAlpha));
+		const glm::vec2 redGreenValue = glm::unpackHalf2x16(redGreen);
+		const glm::vec2 blueAlphaValue = glm::unpackHalf2x16(blueAlpha);
+		return std::array{redGreenValue.x, redGreenValue.y, blueAlphaValue.x};
+	};
+	const auto redLit = sampleHdr(lit, 38, 32);
+	const auto greenLit = sampleHdr(lit, 58, 32);
+	const auto redGodRays = sampleHdr(godRays, 38, 32);
+	const auto greenGodRays = sampleHdr(godRays, 58, 32);
 	INFO("red albedo=" << int(redAlbedo[0]) << ',' << int(redAlbedo[1]) << ',' << int(redAlbedo[2])
 						<< " display=" << int(redDisplay[0]) << ',' << int(redDisplay[1]) << ','
 						<< int(redDisplay[2]));
 	INFO("green albedo=" << int(greenAlbedo[0]) << ',' << int(greenAlbedo[1]) << ','
 						  << int(greenAlbedo[2]) << " display=" << int(greenDisplay[0]) << ','
 						  << int(greenDisplay[1]) << ',' << int(greenDisplay[2]));
+	INFO("red lit=" << redLit[0] << ',' << redLit[1] << ',' << redLit[2] << " god-rays="
+						<< redGodRays[0] << ',' << redGodRays[1] << ',' << redGodRays[2]);
+	INFO("green lit=" << greenLit[0] << ',' << greenLit[1] << ',' << greenLit[2] << " god-rays="
+						  << greenGodRays[0] << ',' << greenGodRays[1] << ',' << greenGodRays[2]);
 	CHECK(redAlbedo[0] > redAlbedo[1] + 80);
 	CHECK(redAlbedo[0] > redAlbedo[2] + 80);
 	CHECK(greenAlbedo[1] > greenAlbedo[0] + 80);
