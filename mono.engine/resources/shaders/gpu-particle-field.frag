@@ -57,7 +57,9 @@ void main() {
 	float fogInterval = max(material.Fog.y - material.Fog.x, 0.0001);
 	float fog = clamp((distance(inWorldPosition, material.Eye.xyz) - material.Fog.x) / fogInterval, 0.0, 1.0);
 	result.rgb = mix(result.rgb, material.FogColour.rgb, fog);
-	if (result.a < 0.001) discard;
+	// A dense analytical field integrates thousands of very low-opacity parcels.
+	// Discarding at ordinary-emitter opacity removes the field before blending.
+	if (result.a < 0.00001) discard;
 	result.rgb *= result.a;
 	result.a *= 1.0 - material.Flags.y;
 	outColour = result;
