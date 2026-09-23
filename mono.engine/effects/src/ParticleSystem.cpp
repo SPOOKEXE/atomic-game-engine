@@ -1225,7 +1225,7 @@ namespace engine::effects {
 				}
 				const bool continuouslyEmitting =
 					slot.Enabled && eligible &&
-					(emitter->Rate > 0.0f && emitter->TimeScale > 0.0f || emitter->RateOverDistance > 0.0f);
+					((emitter->Rate > 0.0f && emitter->TimeScale > 0.0f) || emitter->RateOverDistance > 0.0f);
 				if (!continuouslyEmitting && slot.Requested == 0) {
 					return;
 				}
