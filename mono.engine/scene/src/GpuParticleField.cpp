@@ -15,7 +15,7 @@ namespace engine::scene {
 			20'000'000u,
 			50'000'000u,
 		};
-		if (requested == 0) return PRESETS[1];
+		if (requested == 0) return PRESETS[2];
 		for (uint32_t preset : PRESETS) {
 			if (requested <= preset) return preset;
 		}
