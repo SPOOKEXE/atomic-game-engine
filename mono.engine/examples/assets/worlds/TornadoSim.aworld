@@ -281,6 +281,11 @@ end
 
 -- Five local overlapping cells form a condensation funnel. The broad dirty
 -- base and the upper anvil feed preserve the reference's multi-layer shape.
+local stormOrigin = Vector3.new(0, 0, 95)
+local stormVisuals: { { Object: any, Origin: Vector3 } } = {}
+local function followStorm(object: any)
+	table.insert(stormVisuals, { Object = object, Origin = object.Position })
+end
 local funnelVolumes = {
 	makeVolume("Funnel Ground Spray", Vector3.new(0, 10, 95), Vector3.new(46, 12, 46), 0.10),
 	makeVolume("Funnel Lower Condensation", Vector3.new(0, 38, 95), Vector3.new(38, 32, 38), 0.08),
@@ -295,9 +300,11 @@ funnelVolumes[3].Color = Color3.fromRGB(126, 124, 116)
 funnelVolumes[4].Color = Color3.fromRGB(92, 99, 105)
 funnelVolumes[5].Color = Color3.fromRGB(67, 76, 86)
 funnelVolumes[5].Density = 0.055
+for _, volume in ipairs(funnelVolumes) do followStorm(volume) end
 local rainBank = makeVolume("Rain Curtain", Vector3.new(-34, 38, 44), Vector3.new(120, 46, 105), 0.035)
 rainBank.Color = Color3.fromRGB(112, 129, 140)
 rainBank.Falloff = 0.72
+followStorm(rainBank)
 
 -- A shallow stack makes the storm's wall cloud recede behind the funnel. The
 -- distant layers use fewer march steps because they only establish silhouette.
@@ -308,6 +315,7 @@ local cloudShelf = {
 	makeVolume("Anvil Back Shelf", Vector3.new(28, 260, 246), Vector3.new(455, 54, 220), 0.017),
 }
 for index, shelf in ipairs(cloudShelf) do
+	followStorm(shelf)
 	shelf.Color = Color3.fromRGB(47 + index * 3, 53 + index * 3, 57 + index * 4)
 	shelf.Falloff = 0.68
 	shelf.NoiseScale = 0.22
@@ -341,6 +349,7 @@ end
 
 local stormHost = makePart("Storm Cosmetic Host", Vector3.new(24, 3, 24), Vector3.new(0, 1, 95), Color3.new(1, 1, 1))
 stormHost.Visible = false
+followStorm(stormHost)
 
 -- Each loop owns one perceptual layer from the reference mix. The engine
 -- decodes ordinary published WAVs, which keeps the authored demo portable
@@ -395,6 +404,7 @@ for index = 0, 11 do
 	local z = 95 + math.sin(angle) * radius * 0.72
 	local host = makePart("Ground Debris Host " .. index, Vector3.new(12, 1, 12), Vector3.new(x, 0.6, z), Color3.new(1, 1, 1))
 	host.Visible = false
+	followStorm(host)
 	local dust = emitter("Ground Debris Inflow", host, 16, Color3.fromRGB(105, 78, 49))
 	dust.MaxParticles = 480
 	dust.Lifetime = NumberRange.new(2.2, 3.7)
@@ -411,6 +421,7 @@ end
 local function condensationLayer(name: string, height: number, radius: number, rate: number, colour: Color3)
 	local host = makePart(name .. " Host", Vector3.new(radius * 2, radius * 1.2, radius * 2), Vector3.new(0, height, 95), Color3.new(1, 1, 1))
 	host.Visible = false
+	followStorm(host)
 	local layer = emitter(name, host, rate, colour)
 	layer.MaxParticles = 900
 	layer.Shape = Enum.ParticleEmitterShape.Cylinder
@@ -438,6 +449,7 @@ local gpuField = Workspace:FindFirstChild("TornadoParticles", true)
 if gpuField == nil then
 	local fieldAnchor = makePart("Tornado Particle Anchor", Vector3.one, Vector3.new(0, 0, 95), Color3.new(1, 1, 1))
 	fieldAnchor.Visible = false
+	followStorm(fieldAnchor)
 	gpuField = Instance.new("GpuParticleField")
 	gpuField.Name = "TornadoParticles"
 	local visualField = gpuField :: any
@@ -456,10 +468,13 @@ if gpuField == nil then
 end
 local visualField = gpuField :: any
 visualField.Layers = 7
+local authoredAnchor = Workspace:FindFirstChild("StormAnchor", true)
+if authoredAnchor and authoredAnchor:IsA("Part") then followStorm(authoredAnchor) end
 for x = -2, 2 do
 	for z = -2, 2 do
 		local host = makePart("Rain Host " .. x .. "/" .. z, Vector3.one, Vector3.new(x * 34, 74, 55 + z * 34), Color3.new(1, 1, 1))
 		host.Visible = false
+		followStorm(host)
 		local rain = emitter("Tornado Rain", host, 28, Color3.fromRGB(87, 112, 127))
 		rain.Lifetime = NumberRange.new(1.0, 1.5)
 		rain.Speed = NumberRange.new(26, 37)
@@ -732,24 +747,42 @@ local vectorPoints = {
 }
 local arrows = { "→", "↗", "↑", "↖", "←", "↙", "↓", "↘" }
 local elapsed = 0
+local stormOffset = Vector3.zero
 RunService.Heartbeat:Connect(function(delta: number)
 	elapsed += delta
+	local snapshot = Storm.Snapshot()
+	-- A replica starts without the server resource. Keep the authored origin
+	-- until its first fixed-step snapshot arrives, then move every local effect
+	-- from the same value that drives gameplay and GPU cloud presentation.
+	if snapshot.ElapsedSeconds > 0 then
+		local nextOffset = snapshot.Position - stormOrigin
+		if nextOffset.X ~= stormOffset.X or nextOffset.Y ~= stormOffset.Y or nextOffset.Z ~= stormOffset.Z then
+			stormOffset = nextOffset
+			for _, visual in ipairs(stormVisuals) do
+				visual.Object.Position = visual.Origin + stormOffset
+			end
+			if not cameraOrbit and not cameraShake then
+				camera.CFrame = CFrame.lookAt(cameraHome + stormOffset, cameraTarget + stormOffset)
+			end
+		end
+	end
 	if cameraOrbit then
 		local orbit = elapsed * 0.16
-		local position = Vector3.new(math.cos(orbit) * 205, 72, 95 + math.sin(orbit) * 205)
-		camera.CFrame = CFrame.lookAt(position, cameraTarget)
+		local position = Vector3.new(math.cos(orbit) * 205, 72, 95 + math.sin(orbit) * 205) + stormOffset
+		camera.CFrame = CFrame.lookAt(position, cameraTarget + stormOffset)
 	elseif cameraShake then
-		camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)
+		camera.CFrame = CFrame.lookAt(cameraHome + stormOffset, cameraTarget + stormOffset)
 	end
 	if cameraShake then
 		local shake = Vector3.new(math.sin(elapsed * 23) * 0.7, math.sin(elapsed * 31) * 0.45, 0)
 		camera.CFrame = camera.CFrame + shake
 	end
-	local sample = Storm.Sample(Vector3.new(0, 15, 30))
-	local visibility = Storm.Visibility(Vector3.new(0, 15, 30), 500)
-	local damage = Storm.Damage(Vector3.new(0, 15, 30))
+	local samplePoint = Vector3.new(0, 15, 30) + stormOffset
+	local sample = Storm.Sample(samplePoint)
+	local visibility = Storm.Visibility(samplePoint, 500)
+	local damage = Storm.Damage(samplePoint)
 	for index, point in ipairs(vectorPoints) do
-		local field = Storm.Sample(point)
+		local field = Storm.Sample(point + stormOffset)
 		local velocity = field.Velocity
 		local angle = math.atan(velocity.Z, velocity.X)
 		local arrow = arrows[(math.floor((angle + math.pi / 8) / (math.pi / 4)) % 8) + 1]
