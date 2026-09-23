@@ -38,6 +38,27 @@ Controls.default = {
 	Enabled = true,
 }
 
+-- Bounds live beside the default so both clients give immediate feedback and
+-- the authority can reject values that do not describe a usable field.
+Controls.parameters = {
+	{ Key = "Energy", Label = "Energy", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "CoreRadius", Label = "Core radius", Min = 1, Max = 300, Step = 1 },
+	{ Key = "InfluenceRadius", Label = "Influence", Min = 20, Max = 1200, Step = 10 },
+	{ Key = "PeakTangentialSpeed", Label = "Tangential", Min = 0, Max = 220, Step = 5 },
+	{ Key = "PeakInflowSpeed", Label = "Inflow", Min = 0, Max = 160, Step = 5 },
+	{ Key = "PeakUpdraftSpeed", Label = "Updraft", Min = 0, Max = 180, Step = 5 },
+	{ Key = "PeakDowndraftSpeed", Label = "Downdraft", Min = 0, Max = 160, Step = 5 },
+	{ Key = "SurfaceOutflowSpeed", Label = "Outflow", Min = 0, Max = 140, Step = 5 },
+	{ Key = "PressureDrop", Label = "Pressure", Min = 0, Max = 220, Step = 5 },
+	{ Key = "Humidity", Label = "Humidity", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "RainRate", Label = "Rain", Min = 0, Max = 2, Step = 0.05 },
+	{ Key = "Turbulence", Label = "Turbulence", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "GroundFriction", Label = "Ground drag", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "DebrisDensity", Label = "Debris", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "VortexTightness", Label = "Tightness", Min = 1, Max = 20, Step = 0.5 },
+	{ Key = "TopHeight", Label = "Top height", Min = 60, Max = 1200, Step = 20 },
+}
+
 return Controls
 ]]></Source>
 		<Source path="scripts/server/TornadoServer.server.luau"><![CDATA[--!strict
@@ -58,6 +79,10 @@ local validParticleCount = {
 	[16777216] = true,
 	[50000000] = true,
 }
+local parameterBounds: { [string]: any } = {}
+for _, parameter in ipairs(Controls.parameters) do
+	parameterBounds[parameter.Key] = parameter
+end
 local particleField = workspace:FindFirstChild("TornadoParticles", true)
 
 -- The cross-world bus carries a value copy, so a client can request a change
@@ -73,6 +98,18 @@ MessagingService:SubscribeAsync("tornado.sim.control", function(message)
 	elseif request.kind == "particles" and particleField ~= nil and type(request.count) == "number"
 		and validParticleCount[request.count] then
 		particleField.RequestedCount = request.count
+	elseif request.kind == "layers" and particleField ~= nil and type(request.mask) == "number"
+		and request.mask >= 0 and request.mask <= 7 and request.mask % 1 == 0 then
+		particleField.Layers = request.mask
+	elseif request.kind == "parameters" and type(request.values) == "table" then
+		local configuration: { [string]: number } = {}
+		for name, value in pairs(request.values) do
+			local bounds = parameterBounds[name]
+			if bounds ~= nil and type(value) == "number" and value >= bounds.Min and value <= bounds.Max then
+				configuration[name] = value
+			end
+		end
+		if next(configuration) ~= nil then Storm.Configure(configuration) end
 	elseif request.kind == "enabled" and type(request.value) == "boolean" then
 		Storm.Configure({ Enabled = request.value })
 	elseif request.kind == "reset" then
@@ -410,7 +447,9 @@ local camera = Instance.new("Camera")
 camera.Name = "TornadoChaseCamera"
 camera.FieldOfView = 57
 camera.FarPlaneZ = 1500
-camera.CFrame = CFrame.lookAt(Vector3.new(-145, 62, -175), Vector3.new(60, 60, 95))
+local cameraTarget = Vector3.new(0, 55, 95)
+local cameraHome = Vector3.new(-145, 62, -175)
+camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)
 camera.Parent = Workspace
 Workspace.CurrentCamera = camera
 
@@ -426,7 +465,7 @@ gui.Parent = if player and player:FindFirstChild("PlayerGui") then player.Player
 
 local panel = Instance.new("Frame")
 panel.Name = "StormControls"
-panel.Size = UDim2.new(0, 258, 0, 330)
+panel.Size = UDim2.new(0, 352, 0, 704)
 panel.Position = UDim2.new(0, 14, 0, 14)
 panel.BackgroundColor3 = Color3.fromRGB(3, 6, 9)
 panel.BackgroundTransparency = 0.08
@@ -443,7 +482,7 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.BackgroundTransparency = 1
 title.Parent = panel
 
-local function button(label: string, x: number, y: number, callback: () -> (), width: number?)
+local function button(label: string, x: number, y: number, callback: () -> (), width: number?): TextButton
 	local control = Instance.new("TextButton")
 	control.Name = label
 	control.Size = UDim2.new(0, width or 37, 0, 22)
@@ -455,6 +494,7 @@ local function button(label: string, x: number, y: number, callback: () -> (), w
 	control.BorderSizePixel = 0
 	control.Parent = panel
 	control.Activated:Connect(callback)
+	return control
 end
 
 for index, preset in ipairs(Controls.presets) do
@@ -491,34 +531,162 @@ for index, count in ipairs(counts) do
 	end)
 end
 
-local function input(label: string, text: string, x: number)
+local activeLayers = 7
+local layerButtons: { [number]: TextButton } = {}
+local function updateLayers()
+	request({ kind = "layers", mask = activeLayers })
+	for bit, control in pairs(layerButtons) do
+		local enabled = activeLayers % (bit * 2) >= bit
+		control.BackgroundColor3 = if enabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+	end
+end
+
+
+for index, layer in ipairs({ { 1, "COND" }, { 2, "RAIN" }, { 4, "DUST" } }) do
+	local bit = layer[1] :: number
+	local label = layer[2] :: string
+	layerButtons[bit] = button(label, 7 + (index - 1) * 69, 148, function()
+		if activeLayers % (bit * 2) >= bit then
+			activeLayers -= bit
+		else
+			activeLayers += bit
+		end
+		updateLayers()
+	end, 64)
+end
+local cameraOrbit = false
+local cameraShake = false
+local orbitControl: TextButton
+orbitControl = button("CAM ORBIT", 215, 148, function()
+	cameraOrbit = not cameraOrbit
+	orbitControl.BackgroundColor3 = if cameraOrbit then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 62)
+local shakeControl: TextButton
+shakeControl = button("SHAKE", 281, 148, function()
+	cameraShake = not cameraShake
+	shakeControl.BackgroundColor3 = if cameraShake then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 64)
+
+local section = Instance.new("TextLabel")
+section.Name = "FieldParameters"
+section.Size = UDim2.new(1, -14, 0, 18)
+section.Position = UDim2.new(0, 7, 0, 178)
+section.Text = "FIELD AND WEATHER  click −/+ or edit then press Return"
+section.TextColor3 = Color3.fromRGB(127, 170, 184)
+section.TextSize = 10
+section.TextXAlignment = Enum.TextXAlignment.Left
+section.BackgroundTransparency = 1
+section.Parent = panel
+
+local function clamp(value: number, minimum: number, maximum: number): number
+	return math.max(minimum, math.min(maximum, value))
+end
+
+local function formatValue(value: number): string
+	if value % 1 == 0 then return string.format("%.0f", value) end
+	return string.format("%.2f", value)
+end
+
+local function commitParameter(parameter: any, box: TextBox)
+	local requested = tonumber(box.Text)
+	if requested == nil then
+		box.Text = formatValue(Controls.default[parameter.Key])
+		return
+	end
+	requested = clamp(requested, parameter.Min, parameter.Max)
+	box.Text = formatValue(requested)
+	request({ kind = "parameters", values = { [parameter.Key] = requested } })
+end
+
+for index, parameter in ipairs(Controls.parameters) do
+	local column = (index - 1) % 2
+	local row = math.floor((index - 1) / 2)
+	local x = 7 + column * 172
+	local y = 201 + row * 27
+	local label = Instance.new("TextLabel")
+	label.Name = parameter.Key .. "Label"
+	label.Size = UDim2.new(0, 76, 0, 22)
+	label.Position = UDim2.new(0, x, 0, y)
+	label.Text = parameter.Label
+	label.TextSize = 10
+	label.TextColor3 = Color3.fromRGB(178, 196, 204)
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.BackgroundTransparency = 1
+	label.Parent = panel
+
 	local box = Instance.new("TextBox")
-	box.Name = label
-	box.Size = UDim2.new(0, 73, 0, 23)
-	box.Position = UDim2.new(0, x, 0, 148)
-	box.Text = text
-	box.TextSize = 12
+	box.Name = parameter.Key .. "Slider"
+	box.Size = UDim2.new(0, 48, 0, 22)
+	box.Position = UDim2.new(0, x + 76, 0, y)
+	box.Text = formatValue(Controls.default[parameter.Key])
+	box.TextSize = 11
 	box.TextColor3 = Color3.fromRGB(227, 234, 239)
 	box.BackgroundColor3 = Color3.fromRGB(12, 22, 29)
 	box.BorderSizePixel = 0
 	box.Parent = panel
-	return box
+	box.FocusLost:Connect(function()
+		commitParameter(parameter, box)
+	end)
+	button("−", x + 127, y, function()
+		local value = tonumber(box.Text) or Controls.default[parameter.Key]
+		box.Text = formatValue(clamp(value - parameter.Step, parameter.Min, parameter.Max))
+		commitParameter(parameter, box)
+	end, 18)
+	button("+", x + 147, y, function()
+		local value = tonumber(box.Text) or Controls.default[parameter.Key]
+		box.Text = formatValue(clamp(value + parameter.Step, parameter.Min, parameter.Max))
+		commitParameter(parameter, box)
+	end, 18)
 end
 
-local energy = input("EnergySlider", "0.78", 7)
-local radius = input("RadiusSlider", "28", 85)
-button("CUSTOM", 164, 148, function()
-	local requestedEnergy = tonumber(energy.Text)
-	local requestedRadius = tonumber(radius.Text)
-	if requestedEnergy ~= nil and requestedRadius ~= nil then
-		request({ kind = "custom", energy = requestedEnergy, radius = requestedRadius })
-	end
-end, 80)
+local vectorInset = Instance.new("Frame")
+vectorInset.Name = "FieldVectorInset"
+vectorInset.Size = UDim2.new(1, -14, 0, 106)
+vectorInset.Position = UDim2.new(0, 7, 0, 425)
+vectorInset.BackgroundColor3 = Color3.fromRGB(6, 15, 20)
+vectorInset.BorderSizePixel = 0
+vectorInset.Parent = panel
+
+local insetTitle = Instance.new("TextLabel")
+insetTitle.Size = UDim2.new(1, -10, 0, 18)
+insetTitle.Position = UDim2.new(0, 5, 0, 4)
+insetTitle.Text = "VECTOR INSET  circulation / inflow / vertical"
+insetTitle.TextColor3 = Color3.fromRGB(130, 186, 203)
+insetTitle.TextSize = 10
+insetTitle.TextXAlignment = Enum.TextXAlignment.Left
+insetTitle.BackgroundTransparency = 1
+insetTitle.Parent = vectorInset
+
+local horizontalAxis = Instance.new("Frame")
+horizontalAxis.Size = UDim2.new(1, -24, 0, 1)
+horizontalAxis.Position = UDim2.new(0, 12, 0, 57)
+horizontalAxis.BackgroundColor3 = Color3.fromRGB(48, 85, 94)
+horizontalAxis.BorderSizePixel = 0
+horizontalAxis.Parent = vectorInset
+local verticalAxis = Instance.new("Frame")
+verticalAxis.Size = UDim2.new(0, 1, 1, -32)
+verticalAxis.Position = UDim2.new(0.5, 0, 0, 24)
+verticalAxis.BackgroundColor3 = Color3.fromRGB(48, 85, 94)
+verticalAxis.BorderSizePixel = 0
+verticalAxis.Parent = vectorInset
+
+local vectorLabels: { TextLabel } = {}
+for index = 1, 5 do
+	local vector = Instance.new("TextLabel")
+	vector.Name = "FieldVector" .. index
+	vector.Size = UDim2.new(0, 64, 0, 16)
+	vector.Position = UDim2.new(0, 8 + (index - 1) * 67, 0, if index % 2 == 0 then 66 else 39)
+	vector.TextColor3 = Color3.fromRGB(191, 221, 229)
+	vector.TextSize = 10
+	vector.BackgroundTransparency = 1
+	vector.Parent = vectorInset
+	table.insert(vectorLabels, vector)
+end
 
 local readout = Instance.new("TextLabel")
-readout.Name = "FieldVectorInset"
-readout.Size = UDim2.new(1, -14, 0, 132)
-readout.Position = UDim2.new(0, 7, 0, 181)
+readout.Name = "FieldReadout"
+readout.Size = UDim2.new(1, -14, 0, 155)
+readout.Position = UDim2.new(0, 7, 0, 541)
 readout.TextColor3 = Color3.fromRGB(192, 211, 221)
 readout.TextSize = 12
 readout.TextWrapped = true
@@ -527,12 +695,37 @@ readout.TextYAlignment = Enum.TextYAlignment.Top
 readout.BackgroundTransparency = 1
 readout.Parent = panel
 
-RunService.Heartbeat:Connect(function()
+local vectorPoints = {
+	Vector3.new(-70, 15, 95), Vector3.new(-28, 15, 95), Vector3.new(0, 15, 95),
+	Vector3.new(28, 15, 95), Vector3.new(70, 15, 95),
+}
+local arrows = { "→", "↗", "↑", "↖", "←", "↙", "↓", "↘" }
+local elapsed = 0
+RunService.Heartbeat:Connect(function(delta: number)
+	elapsed += delta
+	if cameraOrbit then
+		local orbit = elapsed * 0.16
+		local position = Vector3.new(math.cos(orbit) * 205, 72, 95 + math.sin(orbit) * 205)
+		camera.CFrame = CFrame.lookAt(position, cameraTarget)
+	elseif cameraShake then
+		camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)
+	end
+	if cameraShake then
+		local shake = Vector3.new(math.sin(elapsed * 23) * 0.7, math.sin(elapsed * 31) * 0.45, 0)
+		camera.CFrame = camera.CFrame + shake
+	end
 	local sample = Storm.Sample(Vector3.new(0, 15, 30))
 	local visibility = Storm.Visibility(Vector3.new(0, 15, 30), 500)
 	local damage = Storm.Damage(Vector3.new(0, 15, 30))
+	for index, point in ipairs(vectorPoints) do
+		local field = Storm.Sample(point)
+		local velocity = field.Velocity
+		local angle = math.atan(velocity.Z, velocity.X)
+		local arrow = arrows[(math.floor((angle + math.pi / 8) / (math.pi / 4)) % 8) + 1]
+		vectorLabels[index].Text = string.format("%s %.0f / %.0f", arrow, velocity.Magnitude, velocity.Y)
+	end
 	readout.Text = string.format(
-		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nFunnel, debris, rain, cloud deck\nGPU: 262K  1M  4M  16M  50M\nField band %d",
+		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nGPU: 262K  1M  4M  16M  50M\nLayers: condensation, rain, dust\nField band %d",
 		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
 		sample.Influence, visibility.EffectiveDistance, damage.Potential, damage.Band
 	)

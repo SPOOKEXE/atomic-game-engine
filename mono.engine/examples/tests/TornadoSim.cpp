@@ -51,6 +51,9 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Storm.Damage") != std::string::npos);
 	CHECK(document.find("MessagingService:PublishAsync(\"tornado.sim.control\"") != std::string::npos);
 	CHECK(document.find("MessagingService:SubscribeAsync(\"tornado.sim.control\"") != std::string::npos);
+	CHECK(document.find("Controls.parameters") != std::string::npos);
+	CHECK(document.find("request.kind == \"parameters\"") != std::string::npos);
+	CHECK(document.find("request.kind == \"layers\"") != std::string::npos);
 	CHECK(document.find("\"PAUSE\"") != std::string::npos);
 	CHECK(document.find("\"RESET\"") != std::string::npos);
 	CHECK(document.find("GpuParticleField") != std::string::npos);
@@ -79,6 +82,10 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Tornado Wind Bed") != std::string::npos);
 	CHECK(document.find("audio/tornado-wind.wav") != std::string::npos);
 	CHECK(document.find("windBed.Playing = not windBed.Playing") != std::string::npos);
+	CHECK(document.find("FIELD AND WEATHER") != std::string::npos);
+	CHECK(document.find("CAM ORBIT") != std::string::npos);
+	CHECK(document.find("SHAKE") != std::string::npos);
+	CHECK(document.find("FieldVectorInset") != std::string::npos);
 
 	const std::filesystem::path audio = world.parent_path().parent_path().parent_path() / "audio" / "tornado-wind.wav";
 	CHECK(std::filesystem::is_regular_file(audio));
