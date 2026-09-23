@@ -1650,6 +1650,15 @@ declare extern type BasePart extends PVInstance with
 end
 
 declare extern type Part extends BasePart with
+	StormDragCoefficient: number
+	StormEnabled: boolean
+	StormExposedArea: number
+	StormForceScale: number
+	StormMaximumBendRadians: number
+	StormResponsePerSecond: number
+	StormRestFrame: CFrame
+	StormVegetationEnabled: boolean
+	StormWindSpeedForMaximumBend: number
 end
 
 declare extern type SpawnLocation extends Part with
@@ -2080,6 +2089,9 @@ declare extern type JointInstance extends Instance with
 end
 
 declare extern type Weld extends JointInstance with
+	StormBreakForce: number
+	StormLinkEnabled: boolean
+	StormMaterialStrength: number
 end
 
 declare extern type WeldConstraint extends Instance with
@@ -2087,6 +2099,9 @@ declare extern type WeldConstraint extends Instance with
 	Enabled: boolean
 	Part0: Instance
 	Part1: Instance
+	StormBreakForce: number
+	StormLinkEnabled: boolean
+	StormMaterialStrength: number
 end
 
 declare extern type ShaderScript extends Instance with

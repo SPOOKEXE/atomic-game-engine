@@ -91,6 +91,7 @@ namespace {
 	}
 	void RegisterClasses() {
 		engine::scene::EnsureClassTree();
+		engine::physics::RegisterPhysicsClasses();
 	}
 
 	// Runs a chunk and reports the error rather than a bare false, so a failing
@@ -825,6 +826,44 @@ TEST_CASE("a replica refuses a write and says so", "[scripting]") {
 }
 
 // --- enums ------------------------------------------------------------------
+
+TEST_CASE("Luau authors optional storm response, link, and vegetation components", "[scripting][storm]") {
+	RegisterClasses();
+	Store store("script_storm_authoring");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part')
+		assert(part.StormEnabled, 'storm response default is not visible')
+		part.StormExposedArea = 6.5
+		part.StormDragCoefficient = 1.3
+		part.StormForceScale = 0.4
+		part.StormEnabled = false
+		assert(math.abs(part.StormExposedArea - 6.5) < 0.001)
+		assert(math.abs(part.StormDragCoefficient - 1.3) < 0.001)
+		assert(math.abs(part.StormForceScale - 0.4) < 0.001 and not part.StormEnabled)
+
+		part.StormRestFrame = CFrame.new(2, 3, 4)
+		part.StormMaximumBendRadians = 0.7
+		part.StormResponsePerSecond = 8
+		part.StormWindSpeedForMaximumBend = 120
+		part.StormVegetationEnabled = false
+		assert(part.StormRestFrame.Position == Vector3.new(2, 3, 4))
+		assert(math.abs(part.StormMaximumBendRadians - 0.7) < 0.001)
+		assert(math.abs(part.StormResponsePerSecond - 8) < 0.001)
+		assert(math.abs(part.StormWindSpeedForMaximumBend - 120) < 0.001 and not part.StormVegetationEnabled)
+
+		for _, className in {'Weld', 'WeldConstraint'} do
+			local link = Instance.new(className)
+			link.StormBreakForce = 450
+			link.StormMaterialStrength = 1.8
+			link.StormLinkEnabled = false
+			assert(math.abs(link.StormBreakForce - 450) < 0.001)
+			assert(math.abs(link.StormMaterialStrength - 1.8) < 0.001)
+			assert(not link.StormLinkEnabled)
+		end
+	)");
+}
 
 TEST_CASE("an enum property takes a member and refuses a stranger", "[scripting]") {
 	RegisterClasses();

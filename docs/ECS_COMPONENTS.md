@@ -151,6 +151,7 @@ state until v0.19.
 | `physics.Storm` | 116 | 4 | yes | . | . | . | Per-world authored analytical tornado field and its fixed-tick trajectory, sampled by the physics force pass when enabled. |
 | `physics.StormLink` | 12 | 4 | yes | yes | . | . | Per-joint wind failure rating and material strength, read before rigid-joint connectivity is rebuilt. |
 | `physics.StormResponse` | 16 | 4 | yes | yes | . | . | Per-rigid-body aerodynamic area, drag and force settings that the storm pass uses to apply wind loads. |
+| `physics.StormVegetation` | 52 | 4 | yes | yes | . | . | Per-static-part rest pose and wind-bend settings used to flex authored vegetation in the storm field. |
 | `physics.observation-log` | 17688 | 8 | yes | . | . | . | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries. |
 
 ## `replication`
@@ -308,4 +309,4 @@ state until v0.19.
 
 ---
 
-231 components registered by the engine, 0 without a purpose line.
+232 components registered by the engine, 0 without a purpose line.

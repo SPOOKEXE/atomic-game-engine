@@ -35,6 +35,15 @@ namespace engine::physics {
 	// Idempotent.
 	void RegisterPhysicsComponents();
 
+	// Adds storm authoring properties to the scene classes that can use them.
+	//
+	// A part remains ordinary until an author writes one of these properties.
+	// That write adds the matching component, so worlds without storm behaviour
+	// carry no weather data. Both weld forms expose link properties because the
+	// storm pass reads either one.
+	// Idempotent.
+	void RegisterPhysicsClasses();
+
 	// Gives a world its `PhysicsWorld` resource and starts the change tracking
 	// the broad phase needs.
 	//

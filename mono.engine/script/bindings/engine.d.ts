@@ -1397,6 +1397,15 @@ declare interface BasePart extends PVInstance {
 }
 
 declare interface Part extends BasePart {
+	StormDragCoefficient: number;
+	StormEnabled: boolean;
+	StormExposedArea: number;
+	StormForceScale: number;
+	StormMaximumBendRadians: number;
+	StormResponsePerSecond: number;
+	StormRestFrame: CFrame;
+	StormVegetationEnabled: boolean;
+	StormWindSpeedForMaximumBend: number;
 }
 
 declare interface SpawnLocation extends Part {
@@ -1790,6 +1799,9 @@ declare interface JointInstance extends Instance {
 }
 
 declare interface Weld extends JointInstance {
+	StormBreakForce: number;
+	StormLinkEnabled: boolean;
+	StormMaterialStrength: number;
 }
 
 declare interface WeldConstraint extends Instance {
@@ -1797,6 +1809,9 @@ declare interface WeldConstraint extends Instance {
 	Enabled: boolean;
 	Part0: Instance;
 	Part1: Instance;
+	StormBreakForce: number;
+	StormLinkEnabled: boolean;
+	StormMaterialStrength: number;
 }
 
 declare interface ShaderScript extends Instance {

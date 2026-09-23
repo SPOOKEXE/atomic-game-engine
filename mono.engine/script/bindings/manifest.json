@@ -205,6 +205,15 @@
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ResamplerMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
+				{"name": "StormDragCoefficient", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormExposedArea", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormForceScale", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormMaximumBendRadians", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormResponsePerSecond", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormRestFrame", "type": "CFrame", "kind": "structural", "bytes": 28, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormVegetationEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormWindSpeedForMaximumBend", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
 				{"name": "SurfaceColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
@@ -256,6 +265,15 @@
 				{"name": "RenderFeatureEnableMask", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "ResampleMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ResamplerMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
+				{"name": "StormDragCoefficient", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormExposedArea", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormForceScale", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormResponse"], "writes": ["physics.StormResponse"]},
+				{"name": "StormMaximumBendRadians", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormResponsePerSecond", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormRestFrame", "type": "CFrame", "kind": "structural", "bytes": 28, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormVegetationEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
+				{"name": "StormWindSpeedForMaximumBend", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormVegetation"], "writes": ["physics.StormVegetation"]},
 				{"name": "SurfaceColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "TeamColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.SpawnLocation"], "writes": ["scene.SpawnLocation"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
@@ -1362,7 +1380,10 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
-				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]}
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "StormBreakForce", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormLinkEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormMaterialStrength", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]}
 			]
 		},
 		{
@@ -1376,7 +1397,10 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
-				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]}
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
+				{"name": "StormBreakForce", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormLinkEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormMaterialStrength", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]}
 			]
 		},
 		{

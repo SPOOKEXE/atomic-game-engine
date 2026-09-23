@@ -22,6 +22,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
@@ -4352,6 +4353,7 @@ int main(int argc, char **argv) {
 	// from an empty table would be a valid file describing nothing, and its
 	// drift check would pass forever.
 	(void)engine::scene::PartClass();
+	engine::physics::RegisterPhysicsClasses();
 
 	// **`ShaderScript` and `EditableMesh`, which `PartClass` does not reach.**
 	// Both self-register through their own accessor rather than through

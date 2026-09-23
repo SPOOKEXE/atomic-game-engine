@@ -16,6 +16,7 @@ target_link_libraries(bindings PRIVATE
 	Engine::core
 	Engine::ecs
 	Engine::gui
+	Engine::physics
 	Engine::scene
 
 	# **Because `effects` registers three more classes a script can name.**

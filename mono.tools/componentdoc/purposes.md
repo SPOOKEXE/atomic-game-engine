@@ -48,6 +48,7 @@ physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collide
 physics.Storm | Per-world authored analytical tornado field and its fixed-tick trajectory, sampled by the physics force pass when enabled.
 physics.StormLink | Per-joint wind failure rating and material strength, read before rigid-joint connectivity is rebuilt.
 physics.StormResponse | Per-rigid-body aerodynamic area, drag and force settings that the storm pass uses to apply wind loads.
+physics.StormVegetation | Per-static-part rest pose and wind-bend settings used to flex authored vegetation in the storm field.
 physics.observation-log | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.
 script.PortalContactRequests | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts.
