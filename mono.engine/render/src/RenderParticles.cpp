@@ -1786,7 +1786,19 @@ namespace engine::render {
 			{1.0f, 0.0f, 0.0f, 0.0f},
 		};
 		FieldMaterial material{};
-		material.Flags.w = 1.0f;
+		material.Flags = {0.0f, 0.0f, 0.75f, 1.0f};
+		material.Illumination = {
+			ActiveGpuParticleFieldWorld->Lighting.Ambient.R +
+				ActiveGpuParticleFieldWorld->Lighting.OutdoorAmbient.R * 0.5f +
+				ActiveGpuParticleFieldWorld->Lighting.Direct.R * 0.5f,
+			ActiveGpuParticleFieldWorld->Lighting.Ambient.G +
+				ActiveGpuParticleFieldWorld->Lighting.OutdoorAmbient.G * 0.5f +
+				ActiveGpuParticleFieldWorld->Lighting.Direct.G * 0.5f,
+			ActiveGpuParticleFieldWorld->Lighting.Ambient.B +
+				ActiveGpuParticleFieldWorld->Lighting.OutdoorAmbient.B * 0.5f +
+				ActiveGpuParticleFieldWorld->Lighting.Direct.B * 0.5f,
+			1.0f,
+		};
 		material.FogColour = {
 			ActiveGpuParticleFieldWorld->Lighting.FogColor.R,
 			ActiveGpuParticleFieldWorld->Lighting.FogColor.G,
