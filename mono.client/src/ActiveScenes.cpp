@@ -1,6 +1,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 
 #include <algorithm>
+#include "DisplayedSceneView.hpp"
 #include <client/ActiveScenes.hpp>
 #include <string>
 
@@ -29,6 +30,12 @@ namespace client {
 		std::string id = "native/" + std::string(world.Text()) + "/" + path + "/" +
 						 std::to_string(store.Identity()) + "/" + std::to_string(camera.Id);
 		return id.size() <= 256 ? id : std::string{};
+	}
+
+	void BindDisplayedSceneFields(const ActiveScene *scene, engine::render::View &view) {
+		view.GpuParticles = scene == nullptr || scene->Frame == nullptr
+							? std::nullopt
+							: scene->Frame->GpuParticles;
 	}
 
 	size_t ActiveSceneCollector::Collect(

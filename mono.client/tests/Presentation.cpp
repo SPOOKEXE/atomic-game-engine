@@ -13,11 +13,13 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -32,6 +34,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include "../src/DisplayedSceneView.hpp"
 #include <client/ActiveScenes.hpp>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
@@ -223,6 +226,72 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 			return render::FrameResult{};
 		}
 	);
+}
+
+TEST_CASE("active scenes submit a collected GPU particle field", "[client][active-scenes][gpu-particles]") {
+	using namespace engine;
+	effects::RegisterEffectComponents();
+	scene::RegisterSceneClasses();
+	physics::RegisterStormComponents();
+	render::RegisterPresentationComponents();
+	Universe worlds({.Mode = world::ExecutionMode::WorldParallel});
+	const auto stormWorld = worlds.Create({.Name = Name("Storm")});
+	worlds.Enter(stormWorld, [](Store &store) {
+		const auto camera = store.CreateInstance(scene::CameraClass(), "Eye");
+		store.Set(camera, scene::Transform{core::CFrame(Vector3{0, 80, 240})});
+		store.Set(camera, scene::Camera{});
+		store.SetResource(scene::ActiveCamera{camera});
+		store.SetResource(render::DrawList{});
+		physics::Storm storm;
+		storm.State.Position = {12, 0, -8};
+		storm.State.ElapsedSeconds = 42.0f;
+		physics::SetStorm(store, storm);
+		const auto field = store.CreateInstance(ecs::Classes::Find(Name("GpuParticleField")), "Funnel");
+		store.Set(field, scene::GpuParticleField{.RequestedCount = 262'144, .Seed = 73});
+	});
+
+	client::ActiveSceneCollector collector;
+	const std::array demands{
+		client::ActiveSceneDemand{world::Presentation{stormWorld, .016f, .25f}, Name("storm-pipeline")},
+	};
+	REQUIRE(collector.Collect(worlds, demands, {960, 540}) == 1);
+	const client::ActiveScene &scene = collector.Scenes().front();
+	REQUIRE(scene.Frame->GpuParticles.has_value());
+	REQUIRE(scene.View.GpuParticles.has_value());
+	CHECK(scene.View.GpuParticles->Field.Seed == 73);
+	CHECK(scene.View.GpuParticles->Field.RequestedCount == 262'144);
+	CHECK(scene.View.GpuParticles->Centre == Vector3{12, 0, -8});
+	CHECK(scene.View.GpuParticles->Seconds == 42.0f);
+
+	collector.SubmitBatch(
+		stormWorld, scene.View, 960, 540, false, {}, [](std::span<render::View> views) {
+			REQUIRE(views.size() == 1);
+			REQUIRE(views.front().GpuParticles.has_value());
+			CHECK(views.front().GpuParticles->Field.Seed == 73);
+			return render::FrameResult{};
+		}
+	);
+}
+
+TEST_CASE("normal client view receives the displayed GPU particle field", "[client][active-scenes][gpu-particles]") {
+	using namespace engine;
+	client::ActiveScene activeScene;
+	activeScene.Frame = std::make_unique<render::WorldViewFrame>();
+	activeScene.Frame->GpuParticles = render::GpuParticleFieldView{
+		.Field = {.RequestedCount = 262'144, .Seed = 73},
+		.Storm = scene::EfPreset(scene::EfCategory::EF3),
+		.Centre = {12, 0, -8},
+		.Seconds = 42.0f,
+	};
+	render::View view;
+	client::BindDisplayedSceneFields(&activeScene, view);
+	REQUIRE(view.GpuParticles.has_value());
+	CHECK(view.GpuParticles->Field.Seed == 73);
+	CHECK(view.GpuParticles->Centre == Vector3{12, 0, -8});
+	CHECK(view.GpuParticles->Seconds == 42.0f);
+
+	client::BindDisplayedSceneFields(nullptr, view);
+	CHECK_FALSE(view.GpuParticles.has_value());
 }
 
 TEST_CASE("a trailing eye draws its original world after body admission", "[client][camera-portal-world]") {
