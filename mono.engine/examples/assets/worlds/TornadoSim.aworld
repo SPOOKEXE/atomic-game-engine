@@ -360,6 +360,7 @@ local environmentCellSize = 160
 local environmentRadius = 2
 local retainedCellLimit = 8
 local retainedCellSeconds = 45.0
+local environmentElapsed = 0.0
 
 local function environmentKey(cellX: number, cellZ: number): string
 	return cellX .. ":" .. cellZ
@@ -449,7 +450,7 @@ local function streamEnvironmentCells(position: Vector3)
 			end
 			if released then
 				cell.Parent = environment
-				table.insert(retainedCells, { Cell = cell, RetireAt = os.clock() + retainedCellSeconds })
+				table.insert(retainedCells, { Cell = cell, RetireAt = environmentElapsed + retainedCellSeconds })
 			else
 				cell:Destroy()
 			end
@@ -495,10 +496,11 @@ RunService.Heartbeat:Connect(function(delta: number)
 		resetEnvironment()
 	end
 	environmentClock += delta
+	environmentElapsed += delta
 	if environmentClock < 0.75 then return end
 	environmentClock = 0
 	streamEnvironmentCells(environmentObserverPosition)
-	cleanupRetainedCells(os.clock())
+	cleanupRetainedCells(environmentElapsed)
 end)
 ]]></Source>
 		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict

@@ -1512,6 +1512,21 @@ TEST_CASE(
 		REQUIRE(storm != nullptr);
 		CHECK(storm->State.ElapsedSeconds > 0.0f);
 
+		// Cross the 0.75-second streaming cadence with a different observer cell.
+		// A one-tick check misses the retention clock path that runs in live play.
+		REQUIRE(runtime->Run(R"(
+			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"observer","x":960,"z":735}')
+		)"));
+		for (int tick = 0; tick < 50; tick++) systems.Tick(store, STEP);
+		CHECK(runtime->LastError().empty());
+		CHECK(store.FindFirstChild(environment, "Storm Cell 4:2") != engine::ecs::NULL_ENTITY);
+
+		REQUIRE(runtime->Run(R"(
+			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"observer","x":0,"z":95}')
+		)"));
+		for (int tick = 0; tick < 50; tick++) systems.Tick(store, STEP);
+		CHECK(runtime->LastError().empty());
+
 		const engine::ecs::Entity firstCell = store.FindFirstChild(environment, "Storm Cell -1:-1");
 		REQUIRE(firstCell != engine::ecs::NULL_ENTITY);
 		store.DestroyInstance(firstCell);
