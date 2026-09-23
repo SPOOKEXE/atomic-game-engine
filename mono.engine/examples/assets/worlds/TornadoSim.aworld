@@ -847,6 +847,13 @@ local function updateStormAudio(snapshot: any, observer: Vector3)
 	circulationBed.Volume = 0.05 + rumble * 0.31
 	rainBed.Volume = 0.02 + rain * 0.22
 	debrisBed.Volume = 0.01 + debris * 0.18
+	local toStorm = snapshot.Position - observer
+	local pan = math.clamp(toStorm.X / math.max(toStorm.Magnitude, 1), -1, 1)
+	windBed.Pan = pan
+	circulationBed.Pan = pan
+	rainBed.Pan = pan
+	debrisBed.Pan = pan
+	thunder.Pan = pan
 	for _, sound in ipairs(audioLayers) do sound.Playing = audioEnabled and snapshot.Enabled end
 end
 

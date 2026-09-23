@@ -1443,6 +1443,18 @@ TEST_CASE("a service property is live in both languages", "[scripting][scriptcal
 	}
 }
 
+TEST_CASE("an instance property is live in both languages", "[scripting][scriptcall]") {
+	const ParityCase pan{
+		"Sound Pan remains a signed live property",
+		[](Language language) {
+			return Let(language, "sound", "Instance.new('Sound')") + Let(language, "before", "sound.Pan") +
+				   "sound.Pan = -0.75\n" + Say(language, Join(language, "before", "sound.Pan"));
+		},
+		"0/-0.75",
+	};
+	Both(pan);
+}
+
 TEST_CASE("the two input surfaces answer the same in both languages", "[scripting][scriptcall]") {
 	// **The methods that came across with the properties.** Four of the six on
 	// `UserInputService` needed a return this interface did not have -

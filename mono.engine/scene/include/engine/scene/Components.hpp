@@ -1156,6 +1156,13 @@ namespace engine::scene {
 		// cannot get back.
 		float Volume = 0.5f;
 
+		// Signed stereo placement, from full left at -1 to full right at 1.
+		//
+		// This is a source mix control, separate from positional attenuation:
+		// a world can steer an ambient layer across the stereo field while its
+		// parent still decides where it falls off in three-dimensional space.
+		float Pan = 0.0f;
+
 		// How close the listener must be for a positional sound to be at full
 		// volume, in metres.
 		//

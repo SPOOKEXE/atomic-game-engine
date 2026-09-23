@@ -1049,6 +1049,7 @@ namespace engine::scene {
 				const Sound &sound = sounds[index];
 				writer.WriteName(sound.SoundId);
 				writer.WriteFloat(sound.Volume);
+				writer.WriteFloat(sound.Pan);
 				writer.WriteFloat(sound.RollOffMinDistance);
 				writer.WriteFloat(sound.RollOffMaxDistance);
 				writer.WriteBool(sound.Looped);
@@ -1068,6 +1069,7 @@ namespace engine::scene {
 				Sound &sound = sounds[index];
 				sound.SoundId = reader.ReadName();
 				sound.Volume = reader.ReadFloat();
+				sound.Pan = reader.ReadFloat();
 				sound.RollOffMinDistance = reader.ReadFloat();
 				sound.RollOffMaxDistance = reader.ReadFloat();
 				sound.Looped = reader.ReadBool();

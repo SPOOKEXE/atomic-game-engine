@@ -142,6 +142,10 @@ namespace client {
 		// no legal volume is, so the first pass always posts.
 		float Level = -1.0f;
 
+		// The signed stereo position last sent. Two is outside Sound.Pan's
+		// closed range, so the first pass always posts the authored centre.
+		float Pan = 2.0f;
+
 		// Whether the player was last told to loop, and whether it was told at
 		// all. The second is not redundant: `false` is a legal value, so
 		// nothing about the first says whether the `SetLooping` landed.

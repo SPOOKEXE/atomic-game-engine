@@ -1802,6 +1802,7 @@ end
 
 declare extern type Sound extends Instance with
 	Looped: boolean
+	Pan: number
 	Playing: boolean
 	RollOffMaxDistance: number
 	RollOffMinDistance: number

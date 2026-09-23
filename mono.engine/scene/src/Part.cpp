@@ -3631,7 +3631,7 @@ namespace engine::scene {
 			ecs::Classes::Property<&Portal::Enabled>(portalClass, "Enabled");
 			ecs::Classes::Property<&Portal::Bidirectional>(portalClass, "Bidirectional");
 
-			// The sound's six. All plain fields, which is unusual enough here
+			// The sound's seven. All plain fields, which is unusual enough here
 			// to be worth saying: nothing about a sound is a doubled
 			// half-extent or a quaternion in degrees, so there is no conversion
 			// to write and no place for one to be wrong in one direction.
@@ -3648,6 +3648,7 @@ namespace engine::scene {
 			// once at the device. Refusing at 1 would make a sound authored
 			// quiet unable to be brought up.
 			ecs::Classes::ClampedProperty<&Sound::Volume, 0.0f, 10.0f>(soundClass, "Volume");
+			ecs::Classes::ClampedProperty<&Sound::Pan, -1.0f, 1.0f>(soundClass, "Pan");
 			ecs::Classes::Property<&Sound::Looped>(soundClass, "Looped");
 			ecs::Classes::Property<&Sound::Playing>(soundClass, "Playing");
 			ecs::Classes::Property<&Sound::RollOffMinDistance>(soundClass, "RollOffMinDistance");
