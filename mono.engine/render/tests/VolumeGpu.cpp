@@ -150,7 +150,10 @@ namespace {
 		environment.HasClouds = true;
 		environment.HasCloudCompute = true;
 		environment.CloudLayer.Colour = {1.0f, 0.72f, 0.46f};
-		environment.CloudLayer.Cover = 0.36f;
+		// Keep coverage well above the noise field's median so the compute and
+		// authored cloud paths have a broad, visible sky difference in the final
+		// capture.
+		environment.CloudLayer.Cover = 0.78f;
 		environment.CloudLayer.Density = 0.92f;
 		environment.CloudLayer.WindSpeed = 8.0f;
 		environment.CloudLayer.WindDirection = {0.6f, 0.8f};

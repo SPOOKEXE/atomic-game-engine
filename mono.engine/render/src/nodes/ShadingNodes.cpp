@@ -1504,6 +1504,9 @@ namespace engine::render {
 								 clip.z >= 0.0f && clip.z <= clip.w;
 			const float reciprocalW = visible ? 1.0f / clip.w : 0.0f;
 			const LightingEffectsUniforms uniforms{
+				// Standard linear-depth clears to FarPlane. Keep that value with the
+				// effect so the shader can distinguish sky from an opaque sample.
+				.DepthOfField = glm::vec4{recording.DrawCamera.FarPlane},
 				.GodRays =
 					glm::vec4{
 						State->GodRayIntensity,
