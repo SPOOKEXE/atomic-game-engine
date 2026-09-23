@@ -13,7 +13,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
-#include <glm/gtc/packing.hpp>
+#include <glm/packing.hpp>
 
 #include <array>
 #include <cmath>
