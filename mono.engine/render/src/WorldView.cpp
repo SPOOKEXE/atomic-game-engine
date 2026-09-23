@@ -5,11 +5,11 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldView.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/ShaderLens.hpp>
@@ -176,7 +176,8 @@ namespace engine::render {
 			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
 				if (!frame.GpuParticles.has_value()) {
 					frame.GpuParticles = GpuParticleFieldView{
-						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds};
+						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds
+					};
 				}
 			});
 		}

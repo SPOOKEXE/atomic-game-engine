@@ -1447,8 +1447,10 @@ namespace engine::render {
 		}
 		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return layer == TransparentLayerPhase::None
-				? DrawGpuParticleField(command, pass, viewProjection, eye, triangles, particlesDrawn, target)
-				: 0;
+					   ? DrawGpuParticleField(
+							 command, pass, viewProjection, eye, triangles, particlesDrawn, target
+						 )
+					   : 0;
 		}
 		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
 		const std::span<const render::ParticleBatch> batches = ActiveParticleWorld->PreparedBatches;
@@ -1650,7 +1652,8 @@ namespace engine::render {
 		}
 
 		if (layer == TransparentLayerPhase::None) {
-			draws += DrawGpuParticleField(command, pass, viewProjection, eye, triangles, particlesDrawn, target);
+			draws +=
+				DrawGpuParticleField(command, pass, viewProjection, eye, triangles, particlesDrawn, target);
 		}
 		return draws;
 	}
@@ -1665,12 +1668,16 @@ namespace engine::render {
 
 		SDL_GPUBufferCreateInfo info{};
 		info.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
-			SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+					 SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 		info.size = count * static_cast<uint32_t>(sizeof(glm::vec4) * 2);
 		SDL_GPUBuffer *replacement = gpu::CreateBuffer(Device, &info);
 		if (replacement == nullptr) {
-			ENGINE_WARN("GPU particle field keeps {} rows after {}-row allocation failed: {}", field.ActiveCount,
-				count, SDL_GetError());
+			ENGINE_WARN(
+				"GPU particle field keeps {} rows after {}-row allocation failed: {}",
+				field.ActiveCount,
+				count,
+				SDL_GetError()
+			);
 			return false;
 		}
 		if (field.States != nullptr) gpu::ReleaseBuffer(Device, field.States);
@@ -1693,7 +1700,8 @@ namespace engine::render {
 		GpuParticleFieldWorld &state = *ActiveGpuParticleFieldWorld;
 		const GpuParticleFieldView &source = *view.GpuParticles;
 		const uint32_t requested = scene::NormalizeGpuParticleCount(source.Field.RequestedCount);
-		if ((state.States == nullptr || state.RequestedCount != requested) && !ReserveGpuParticleField(requested)) {
+		if ((state.States == nullptr || state.RequestedCount != requested) &&
+			!ReserveGpuParticleField(requested)) {
 			// An allocation failure intentionally retains the previous complete field.
 			return state.States != nullptr;
 		}
@@ -1714,9 +1722,13 @@ namespace engine::render {
 		const FieldUniforms uniforms{
 			{source.Centre.X, source.Centre.Y, source.Centre.Z, source.Seconds},
 			{parameters.CoreRadius, parameters.InfluenceRadius, parameters.TopHeight, view.ParticleDelta},
-			{parameters.PeakTangentialSpeed, parameters.PeakInflowSpeed, parameters.PeakUpdraftSpeed,
+			{parameters.PeakTangentialSpeed,
+			 parameters.PeakInflowSpeed,
+			 parameters.PeakUpdraftSpeed,
 			 parameters.RainRate},
-			{static_cast<float>(state.ActiveCount), static_cast<float>(state.Seed), state.ResetPending ? 1.0f : 0.0f,
+			{static_cast<float>(state.ActiveCount),
+			 static_cast<float>(state.Seed),
+			 state.ResetPending ? 1.0f : 0.0f,
 			 static_cast<float>(state.Layers)},
 		};
 		SDL_GPUStorageBufferReadWriteBinding output{};
@@ -1755,8 +1767,10 @@ namespace engine::render {
 		WorldColourTarget target
 	) {
 		if (ActiveGpuParticleFieldWorld == nullptr || ActiveGpuParticleFieldWorld->States == nullptr ||
-			ActiveGpuParticleFieldWorld->ActiveCount == 0 || pass == nullptr) return 0;
-		auto *pipeline = target == WorldColourTarget::Hdr ? HdrGpuParticleFieldPipeline : GpuParticleFieldPipeline;
+			ActiveGpuParticleFieldWorld->ActiveCount == 0 || pass == nullptr)
+			return 0;
+		auto *pipeline =
+			target == WorldColourTarget::Hdr ? HdrGpuParticleFieldPipeline : GpuParticleFieldPipeline;
 		if (pipeline == nullptr) return 0;
 		BindPipeline(pass, pipeline, PipelineFamily::Other);
 		const SDL_GPUBufferBinding states{ActiveGpuParticleFieldWorld->States, 0};
@@ -1829,8 +1843,10 @@ namespace engine::render {
 		GpuParticleFieldWorlds.clear();
 		ActiveGpuParticleFieldWorld = nullptr;
 		if (GpuParticleFieldStep != nullptr) SDL_ReleaseGPUComputePipeline(Device, GpuParticleFieldStep);
-		if (GpuParticleFieldPipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, GpuParticleFieldPipeline);
-		if (HdrGpuParticleFieldPipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, HdrGpuParticleFieldPipeline);
+		if (GpuParticleFieldPipeline != nullptr)
+			SDL_ReleaseGPUGraphicsPipeline(Device, GpuParticleFieldPipeline);
+		if (HdrGpuParticleFieldPipeline != nullptr)
+			SDL_ReleaseGPUGraphicsPipeline(Device, HdrGpuParticleFieldPipeline);
 		GpuParticleFieldStep = nullptr;
 		GpuParticleFieldPipeline = nullptr;
 		HdrGpuParticleFieldPipeline = nullptr;

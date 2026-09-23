@@ -844,7 +844,8 @@ namespace engine::scene {
 			};
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				const int32_t layers = *static_cast<const int32_t *>(value);
-				if (layers < 0 || (layers & ~static_cast<int32_t>(GPU_PARTICLE_ALL_LAYERS)) != 0) return false;
+				if (layers < 0 || (layers & ~static_cast<int32_t>(GPU_PARTICLE_ALL_LAYERS)) != 0)
+					return false;
 				GpuParticleField *field = store.GetMutable<GpuParticleField>(instance);
 				if (field == nullptr) return false;
 				field->Layers = static_cast<uint8_t>(layers);
@@ -3251,7 +3252,9 @@ namespace engine::scene {
 
 			ecs::Classes::Property<&GpuParticleField::Enabled>(gpuParticleFieldClass, "Enabled");
 			ecs::Classes::Computed(gpuParticleFieldClass, GpuParticleLayersProperty());
-			ecs::Classes::Property<&GpuParticleField::RequestedCount>(gpuParticleFieldClass, "RequestedCount");
+			ecs::Classes::Property<&GpuParticleField::RequestedCount>(
+				gpuParticleFieldClass, "RequestedCount"
+			);
 			ecs::Classes::Property<&GpuParticleField::Seed>(gpuParticleFieldClass, "Seed");
 
 			ecs::Classes::Computed(basePart, PartSizeProperty());

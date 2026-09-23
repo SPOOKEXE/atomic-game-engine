@@ -109,6 +109,7 @@ scene.PortalCrossing | Portal-only state for one canonical body: its reference a
 scene.PortalRim | The four invisible static colliders preserving an open portal pane's physical perimeter while its aperture becomes a trigger.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
 scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default.
+scene.GpuParticleField | Authored request for a deterministic analytical storm particle field, including its enabled state, visible layers, normalized count request, and reset seed.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.

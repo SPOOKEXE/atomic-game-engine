@@ -21,15 +21,20 @@ namespace engine::scene {
 
 	// A stable bit set because this crosses saves and scripts by value.
 	constexpr uint8_t GPU_PARTICLE_ALL_LAYERS = static_cast<uint8_t>(GpuParticleLayer::Condensation) |
-		static_cast<uint8_t>(GpuParticleLayer::Rain) | static_cast<uint8_t>(GpuParticleLayer::Debris);
+												static_cast<uint8_t>(GpuParticleLayer::Rain) |
+												static_cast<uint8_t>(GpuParticleLayer::Debris);
 
 	// Requests a reusable analytical particle field for this world.
 	struct GpuParticleField {
+		// Whether the renderer emits this field.
 		bool Enabled = true;
+		// Visible layers as a bit mask of GpuParticleLayer values.
 		uint8_t Layers = GPU_PARTICLE_ALL_LAYERS;
+		// Reserved for future field settings and preserved in the saved record.
 		uint16_t Reserved = 0;
 		// Exact supported count, normalized to the nearest safe preset by the renderer.
 		uint32_t RequestedCount = 1'048'576;
+		// Seed used to place particles deterministically when the field resets.
 		uint32_t Seed = 0xC105D00Du;
 	};
 

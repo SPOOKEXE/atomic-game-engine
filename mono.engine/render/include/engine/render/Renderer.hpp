@@ -27,9 +27,9 @@
 #include <engine/render/ResourceImage.hpp>
 #include <engine/render/VisibilityObservation.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Storm.hpp>
-#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
@@ -654,9 +654,13 @@ namespace engine::render {
 	// An owned copy of the authored request and analytical field that one frame
 	// gives to the device. No renderer path retains or dereferences a world row.
 	struct GpuParticleFieldView {
+		// The authored enable, layer, count and seed request.
 		scene::GpuParticleField Field;
+		// Analytical wind and geometry values that drive particle motion.
 		scene::TornadoParameters Storm;
+		// World-space position of the storm centre.
 		core::Vector3 Centre;
+		// Elapsed seconds in the storm state copied for this view.
 		float Seconds = 0.0f;
 	};
 

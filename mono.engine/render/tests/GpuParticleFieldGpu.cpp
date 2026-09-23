@@ -34,7 +34,9 @@ namespace {
 	}
 }
 
-TEST_CASE("GPU particle field dispatches and resizes without a CPU particle readback", "[render][gpu][particles]") {
+TEST_CASE(
+	"GPU particle field dispatches and resizes without a CPU particle readback", "[render][gpu][particles]"
+) {
 	FixtureDevice fixture;
 	fixture.Initialise();
 	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
@@ -47,15 +49,24 @@ TEST_CASE("GPU particle field dispatches and resizes without a CPU particle read
 	baseline.GpuParticles.reset();
 	fixture.Render.Render(std::span(&baseline, 1), overlay, nullptr, false);
 	const CapturedImage empty = CaptureResource(
-		fixture.Render, core::Name("composed-image"), baseline.Slot, target.Width, target.Height,
+		fixture.Render,
+		core::Name("composed-image"),
+		baseline.Slot,
+		target.Width,
+		target.Height,
 		ImageFormat::Rgba8Unorm
 	);
 	auto first = FieldView(target, 262'144, 17);
-	const render::FrameResult firstFrame = fixture.Render.Render(std::span(&first, 1), overlay, nullptr, false);
+	const render::FrameResult firstFrame =
+		fixture.Render.Render(std::span(&first, 1), overlay, nullptr, false);
 	CHECK(firstFrame.ComputeDispatches >= 1);
 	CHECK(firstFrame.ParticlesDrawn >= 262'144);
 	const CapturedImage field = CaptureResource(
-		fixture.Render, core::Name("composed-image"), first.Slot, target.Width, target.Height,
+		fixture.Render,
+		core::Name("composed-image"),
+		first.Slot,
+		target.Width,
+		target.Height,
 		ImageFormat::Rgba8Unorm
 	);
 	size_t changedBytes = 0;
