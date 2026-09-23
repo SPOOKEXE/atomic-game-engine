@@ -104,10 +104,12 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("SHAKE") != std::string::npos);
 	CHECK(document.find("FieldVectorInset") != std::string::npos);
 
-	const std::filesystem::path audio = world.parent_path().parent_path().parent_path() / "audio" / "tornado-wind.wav";
+	const std::filesystem::path audio =
+		world.parent_path().parent_path().parent_path() / "audio" / "tornado-wind.wav";
 	CHECK(std::filesystem::is_regular_file(audio));
 	CHECK(std::filesystem::file_size(audio) > 1024U);
-	for (const char *name : {"tornado-circulation.wav", "tornado-rain.wav", "tornado-debris.wav", "tornado-thunder.wav"}) {
+	for (const char *name :
+		 {"tornado-circulation.wav", "tornado-rain.wav", "tornado-debris.wav", "tornado-thunder.wav"}) {
 		const std::filesystem::path layer = audio.parent_path() / name;
 		CHECK(std::filesystem::is_regular_file(layer));
 		CHECK(std::filesystem::file_size(layer) > 1024U);

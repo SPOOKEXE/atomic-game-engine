@@ -346,7 +346,9 @@ TEST_CASE(
 		authority = std::make_unique<replication::Listener>(*socket, settings);
 		authority->SetIdentity(&*identity);
 		for (const auto &component : replication::DefaultReplicatedComponents()) {
-			authority->Authority().Replicate(core::Name(component.Name), component.Detection, component.Resource);
+			authority->Authority().Replicate(
+				core::Name(component.Name), component.Detection, component.Resource
+			);
 			if (!component.Suppressor.empty())
 				authority->Authority().SuppressWhenTagged(
 					core::Name(component.Name), core::Name(component.Suppressor)

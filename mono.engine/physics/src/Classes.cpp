@@ -54,32 +54,50 @@ namespace engine::physics {
 		}
 
 		void RegisterResponseProperties(ecs::ClassId part) {
-			ecs::Classes::Computed(part, StormProperty<StormResponse, &StormResponse::ExposedArea>("StormExposedArea"));
+			ecs::Classes::Computed(
+				part, StormProperty<StormResponse, &StormResponse::ExposedArea>("StormExposedArea")
+			);
 			ecs::Classes::Computed(
 				part, StormProperty<StormResponse, &StormResponse::DragCoefficient>("StormDragCoefficient")
 			);
-			ecs::Classes::Computed(part, StormProperty<StormResponse, &StormResponse::ForceScale>("StormForceScale"));
-			ecs::Classes::Computed(part, StormProperty<StormResponse, &StormResponse::Enabled>("StormEnabled"));
+			ecs::Classes::Computed(
+				part, StormProperty<StormResponse, &StormResponse::ForceScale>("StormForceScale")
+			);
+			ecs::Classes::Computed(
+				part, StormProperty<StormResponse, &StormResponse::Enabled>("StormEnabled")
+			);
 		}
 
 		void RegisterVegetationProperties(ecs::ClassId part) {
-			ecs::Classes::Computed(part, StormProperty<StormVegetation, &StormVegetation::RestFrame>("StormRestFrame"));
 			ecs::Classes::Computed(
-				part, StormProperty<StormVegetation, &StormVegetation::MaximumBendRadians>("StormMaximumBendRadians")
-			);
-			ecs::Classes::Computed(
-				part, StormProperty<StormVegetation, &StormVegetation::ResponsePerSecond>("StormResponsePerSecond")
+				part, StormProperty<StormVegetation, &StormVegetation::RestFrame>("StormRestFrame")
 			);
 			ecs::Classes::Computed(
 				part,
-				StormProperty<StormVegetation, &StormVegetation::WindSpeedForMaximumBend>("StormWindSpeedForMaximumBend")
+				StormProperty<StormVegetation, &StormVegetation::MaximumBendRadians>(
+					"StormMaximumBendRadians"
+				)
 			);
-			ecs::Classes::Computed(part, StormProperty<StormVegetation, &StormVegetation::Enabled>("StormVegetationEnabled"));
+			ecs::Classes::Computed(
+				part,
+				StormProperty<StormVegetation, &StormVegetation::ResponsePerSecond>("StormResponsePerSecond")
+			);
+			ecs::Classes::Computed(
+				part,
+				StormProperty<StormVegetation, &StormVegetation::WindSpeedForMaximumBend>(
+					"StormWindSpeedForMaximumBend"
+				)
+			);
+			ecs::Classes::Computed(
+				part, StormProperty<StormVegetation, &StormVegetation::Enabled>("StormVegetationEnabled")
+			);
 		}
 
 		void RegisterLinkProperties(ecs::ClassId link) {
 			ecs::Classes::Computed(link, StormProperty<StormLink, &StormLink::BreakForce>("StormBreakForce"));
-			ecs::Classes::Computed(link, StormProperty<StormLink, &StormLink::MaterialStrength>("StormMaterialStrength"));
+			ecs::Classes::Computed(
+				link, StormProperty<StormLink, &StormLink::MaterialStrength>("StormMaterialStrength")
+			);
 			ecs::Classes::Computed(link, StormProperty<StormLink, &StormLink::Enabled>("StormLinkEnabled"));
 		}
 	}

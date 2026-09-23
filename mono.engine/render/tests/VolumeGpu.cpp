@@ -170,7 +170,10 @@ TEST_CASE(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
 	);
 	const ImageComparison cloudEffect = CompareImages(withoutVolumes.View(), sparseCloud.View());
-	INFO("cloud changed pixels=" << cloudEffect.MismatchedPixels << ", max=" << cloudEffect.MaximumAbsoluteError);
+	INFO(
+		"cloud changed pixels=" << cloudEffect.MismatchedPixels
+								<< ", max=" << cloudEffect.MaximumAbsoluteError
+	);
 	CHECK(cloudEffect.MismatchedPixels > size_t(EXTENT) * EXTENT / 4);
 	view.CloudDensity.reset();
 	const CapturedImage forward = RenderOrder(fixture.Render, view, false);

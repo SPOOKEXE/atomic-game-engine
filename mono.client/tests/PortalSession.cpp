@@ -86,7 +86,9 @@ static void RunPortalSuccessor(int outcome) {
 	to->SetIdentity(&*identity);
 	const auto configure = [&](replication::Listener *listener) {
 		for (const auto &component : replication::DefaultReplicatedComponents()) {
-			listener->Authority().Replicate(core::Name(component.Name), component.Detection, component.Resource);
+			listener->Authority().Replicate(
+				core::Name(component.Name), component.Detection, component.Resource
+			);
 			if (!component.Suppressor.empty())
 				listener->Authority().SuppressWhenTagged(
 					core::Name(component.Name), core::Name(component.Suppressor)

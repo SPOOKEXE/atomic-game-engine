@@ -66,7 +66,8 @@ namespace engine::render {
 		if (bytes > UINT32_MAX) return false;
 		if (State->CloudDensityCapacity < bytes) {
 			if (State->CloudDensityBuffer) gpu::ReleaseBuffer(State->Device, State->CloudDensityBuffer);
-			if (State->CloudDensityTransfer) gpu::ReleaseTransferBuffer(State->Device, State->CloudDensityTransfer);
+			if (State->CloudDensityTransfer)
+				gpu::ReleaseTransferBuffer(State->Device, State->CloudDensityTransfer);
 			State->CloudDensityBuffer = nullptr;
 			State->CloudDensityTransfer = nullptr;
 			SDL_GPUBufferCreateInfo buffer{};
@@ -1812,10 +1813,18 @@ namespace engine::render {
 		};
 		uniforms.VolumeCount = glm::vec4{static_cast<float>(currentLighting.VolumeCount), 0.0f, 0.0f, 0.0f};
 		if (const auto &cloud = source.CloudDensity; cloud && cloud->IsValid()) {
-			uniforms.CloudMinimumNodeCount = glm::vec4{cloud->Config.RootMinimum.X, cloud->Config.RootMinimum.Y,
-				cloud->Config.RootMinimum.Z, static_cast<float>(cloud->Nodes.size())};
-			uniforms.CloudSizeDepth = glm::vec4{cloud->Config.RootSize.X, cloud->Config.RootSize.Y,
-				cloud->Config.RootSize.Z, static_cast<float>(cloud->Config.MaximumDepth)};
+			uniforms.CloudMinimumNodeCount = glm::vec4{
+				cloud->Config.RootMinimum.X,
+				cloud->Config.RootMinimum.Y,
+				cloud->Config.RootMinimum.Z,
+				static_cast<float>(cloud->Nodes.size())
+			};
+			uniforms.CloudSizeDepth = glm::vec4{
+				cloud->Config.RootSize.X,
+				cloud->Config.RootSize.Y,
+				cloud->Config.RootSize.Z,
+				static_cast<float>(cloud->Config.MaximumDepth)
+			};
 			uniforms.CloudCentreEnabled = glm::vec4{cloud->Centre.X, cloud->Centre.Y, cloud->Centre.Z, 1.0f};
 		}
 		for (size_t index = 0; index < currentLighting.VolumeCount; index++) {

@@ -124,8 +124,9 @@ TEST_CASE("storm link material strength separates wooden and steel failures", "[
 		store.SetParent(panel, workspace);
 		store.Set(mast, engine::physics::StormResponse{.ExposedArea = 2.0f});
 		store.Set(panel, engine::physics::StormResponse{.ExposedArea = 2.0f});
-		const Entity link =
-			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("WeldConstraint")), "MaterialLink");
+		const Entity link = store.CreateInstance(
+			engine::ecs::Classes::Find(engine::core::Name("WeldConstraint")), "MaterialLink"
+		);
 		store.SetParent(link, mast);
 		store.Set(link, engine::scene::WeldConstraint{mast, panel});
 		store.Set(link, engine::physics::StormLink{.BreakForce = 1.0f, .MaterialStrength = materialStrength});

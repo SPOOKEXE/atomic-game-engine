@@ -50,8 +50,8 @@ namespace engine::scene {
 
 	std::optional<CloudDensityOctree> CloudDensityOctree::Create(CloudDensityOctreeConfig config) {
 		const core::Vector3 rootMaximum = config.RootMinimum + config.RootSize;
-		if (!FiniteDensity(config.RootMinimum) || !FiniteDensity(config.RootSize) || !FiniteDensity(rootMaximum) ||
-			!Positive(config.RootSize) || config.MaximumDepth == 0 ||
+		if (!FiniteDensity(config.RootMinimum) || !FiniteDensity(config.RootSize) ||
+			!FiniteDensity(rootMaximum) || !Positive(config.RootSize) || config.MaximumDepth == 0 ||
 			config.MaximumDepth > MAXIMUM_SUPPORTED_DEPTH || !Resolvable(config, rootMaximum) ||
 			!std::isfinite(config.EmptyThreshold) || config.EmptyThreshold < 0.0f ||
 			config.EmptyThreshold >= 1.0f)

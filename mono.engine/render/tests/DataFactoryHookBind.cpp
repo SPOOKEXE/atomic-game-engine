@@ -180,9 +180,9 @@ namespace engine::render {
 			 .CaptureNode = core::Name("data-capture"),
 			 .Channels = {DataCaptureChannel::RgbLinearHdr},
 			 .ObjectLabels = {},
-				 .SemanticLabels = {},
-				 .PartLabels = {},
-				 .LocalLightIds = {}}
+			 .SemanticLabels = {},
+			 .PartLabels = {},
+			 .LocalLightIds = {}}
 		);
 		REQUIRE(batch);
 		bind.Shutdown();

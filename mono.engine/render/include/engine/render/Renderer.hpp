@@ -26,11 +26,11 @@
 #include <engine/render/Readback.hpp>
 #include <engine/render/ResourceImage.hpp>
 #include <engine/render/VisibilityObservation.hpp>
+#include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Storm.hpp>
-#include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
