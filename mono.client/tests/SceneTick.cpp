@@ -26,6 +26,7 @@
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -1348,5 +1349,116 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 				return instance.Source == part.Id;
 			}));
 		}
+	});
+}
+
+TEST_CASE(
+	"the TornadoSim world streams resettable storm scenery through its live scripts",
+	"[client][world][tornado]"
+) {
+	engine::parallel::Jobs::Start(2);
+	struct StopJobs {
+		~StopJobs() {
+			engine::parallel::Jobs::Stop();
+		}
+	} stopJobs;
+
+	const auto demo =
+		engine::examples::DemosLoader().Find(engine::examples::DemoKind::World, "TornadoSim.aworld");
+	REQUIRE(demo.has_value());
+
+	engine::world::Universe universe;
+	std::string error;
+	const engine::world::WorldId id =
+		engine::game::ImportWorld(universe, demo->Path, engine::core::Name{}, error);
+	INFO(error);
+	REQUIRE(id.IsValid());
+
+	universe.Enter(id, [&](Store &store, Scheduler &systems) {
+		client::InstallPresentation(store, systems);
+		REQUIRE(client::EnsureLocalPlayer(store) != engine::ecs::NULL_ENTITY);
+
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		const std::shared_ptr<engine::script::Runtime> runtime = engine::game::StartWorldScripts(
+			store, systems, limits, error, nullptr, universe.SettingsOf(id).ScriptTickRate
+		);
+		INFO(error);
+		REQUIRE(error.empty());
+		REQUIRE(runtime != nullptr);
+		CHECK(std::ranges::all_of(runtime->Costs(), &engine::script::ScriptCost::Completed));
+
+		const engine::ecs::Entity environment = InWorkspace(store, "Tornado Environment Cells");
+		REQUIRE(environment != engine::ecs::NULL_ENTITY);
+		auto childCount = [&](engine::ecs::Entity parent) {
+			size_t count = 0;
+			store.EachChild(parent, [&](engine::ecs::Entity) { count++; });
+			return count;
+		};
+		CHECK(childCount(environment) == 10);
+		CHECK(CountNamedDescendants(store, environment, "Cell Tree 0") == 9);
+		CHECK(CountNamedDescendants(store, environment, "Cell Sign 1") == 9);
+		CHECK(CountNamedDescendants(store, environment, "Cell Roof Panel 2") == 9);
+		CHECK(CountNamedDescendants(store, environment, "Cell Chase Vehicle") > 0);
+
+		size_t stormBodies = 0;
+		store.Each<const engine::physics::StormResponse>(
+			[&](engine::ecs::Entity, const engine::physics::StormResponse &) { stormBodies++; }
+		);
+		size_t stormLinks = 0;
+		store.Each<const engine::physics::StormLink>(
+			[&](engine::ecs::Entity, const engine::physics::StormLink &) { stormLinks++; }
+		);
+		CHECK(stormBodies >= 80);
+		CHECK(stormLinks >= 60);
+
+		const engine::physics::Storm *storm = engine::physics::StormOf(store);
+		REQUIRE(storm != nullptr);
+		CHECK(storm->State.Parameters.Energy == Approx(0.78f));
+
+		REQUIRE(runtime->Run(R"(
+			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"preset","name":"EF5"}')
+		)"));
+		storm = engine::physics::StormOf(store);
+		REQUIRE(storm != nullptr);
+		CHECK(storm->State.Parameters.CoreRadius == Approx(45.0f));
+		systems.Tick(store, STEP);
+		storm = engine::physics::StormOf(store);
+		REQUIRE(storm != nullptr);
+		CHECK(storm->State.ElapsedSeconds > 0.0f);
+
+		const engine::ecs::Entity firstCell = store.FindFirstChild(environment, "Storm Cell -1:-1");
+		REQUIRE(firstCell != engine::ecs::NULL_ENTITY);
+		store.DestroyInstance(firstCell);
+		CHECK(store.FindFirstChild(environment, "Storm Cell -1:-1") == engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity interaction = InWorkspace(store, "StormInteraction");
+		REQUIRE(interaction != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity woodenSign = FirstNamedDescendant(store, interaction, "WoodenSign");
+		const engine::ecs::Entity woodenLink =
+			FirstNamedDescendant(store, interaction, "Wood Sign Wind Link");
+		REQUIRE(woodenSign != engine::ecs::NULL_ENTITY);
+		REQUIRE(woodenLink != engine::ecs::NULL_ENTITY);
+		store.DestroyInstance(woodenSign);
+		store.DestroyInstance(woodenLink);
+		CHECK(FirstNamedDescendant(store, interaction, "WoodenSign") == engine::ecs::NULL_ENTITY);
+		CHECK(FirstNamedDescendant(store, interaction, "Wood Sign Wind Link") == engine::ecs::NULL_ENTITY);
+
+		REQUIRE(runtime->Run(R"(
+			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"reset"}')
+		)"));
+		storm = engine::physics::StormOf(store);
+		REQUIRE(storm != nullptr);
+		CHECK(storm->State.ElapsedSeconds == Approx(0.0f));
+		systems.Tick(store, STEP);
+
+		CHECK(childCount(environment) == 10);
+		CHECK(store.FindFirstChild(environment, "Storm Cell -1:-1") != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, environment, "Cell Tree 0") == 9);
+		CHECK(FirstNamedDescendant(store, interaction, "WoodenSign") != engine::ecs::NULL_ENTITY);
+		CHECK(FirstNamedDescendant(store, interaction, "Wood Sign Wind Link") != engine::ecs::NULL_ENTITY);
+		storm = engine::physics::StormOf(store);
+		REQUIRE(storm != nullptr);
+		CHECK(storm->State.Parameters.Energy == Approx(0.78f));
+		CHECK(storm->State.Parameters.CoreRadius == Approx(28.0f));
 	});
 }
