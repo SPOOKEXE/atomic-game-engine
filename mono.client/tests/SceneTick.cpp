@@ -175,6 +175,14 @@ namespace {
 		return found;
 	}
 
+	engine::ecs::Entity LastNamedDescendant(Store &store, engine::ecs::Entity root, std::string_view name) {
+		engine::ecs::Entity found = engine::ecs::NULL_ENTITY;
+		store.EachDescendant(root, [&](engine::ecs::Entity entity) {
+			if (store.InstanceNameOf(entity) == engine::core::Name(name)) found = entity;
+		});
+		return found;
+	}
+
 	engine::ecs::Entity FirstGuiElement(Store &store, std::string_view name) {
 		engine::ecs::Entity found = engine::ecs::NULL_ENTITY;
 		store.Each<const engine::gui::Element>([&](engine::ecs::Entity entity, const engine::gui::Element &) {
@@ -1436,8 +1444,12 @@ TEST_CASE(
 		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
 		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
 		const engine::ecs::Entity condensationButton = FirstNamedDescendant(store, playerGui, "COND");
+		// A combined host runs the StarterPlayerScripts template and the local
+		// player's clone. The panel belongs to the clone, whose cosmetic emitter
+		// was created last; asserting against the template's earlier emitter
+		// would observe a different client script's local state.
 		const engine::ecs::Entity condensationEmitter =
-			FirstNamedDescendant(store, engine::scene::WorkspaceOf(store), "Condensation Streamers");
+			LastNamedDescendant(store, engine::scene::WorkspaceOf(store), "Condensation Streamers");
 		const engine::ecs::Entity gpuParticles =
 			FirstNamedDescendant(store, engine::scene::WorkspaceOf(store), "TornadoParticles");
 		REQUIRE(condensationButton != engine::ecs::NULL_ENTITY);
