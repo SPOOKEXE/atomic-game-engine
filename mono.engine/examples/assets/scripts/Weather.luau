@@ -22,6 +22,8 @@ type Weather = {
 	Ambient: Color3,
 	OutdoorAmbient: Color3,
 	BloomIntensity: number,
+	DepthOfFieldIntensity: number,
+	GodRayIntensity: number,
 	CloudCover: number,
 	CloudDensity: number,
 	CloudWindSpeed: number,
@@ -42,6 +44,8 @@ local presets: { Weather } = {
 		Ambient = Color3.fromRGB(44, 51, 68),
 		OutdoorAmbient = Color3.fromRGB(110, 132, 170),
 		BloomIntensity = 0.72,
+		DepthOfFieldIntensity = 0.32,
+		GodRayIntensity = 0.42,
 		CloudCover = 0.22,
 		CloudDensity = 0.35,
 		CloudWindSpeed = 4,
@@ -60,6 +64,8 @@ local presets: { Weather } = {
 		Ambient = Color3.fromRGB(24, 30, 42),
 		OutdoorAmbient = Color3.fromRGB(57, 73, 104),
 		BloomIntensity = 1.0,
+		DepthOfFieldIntensity = 0.54,
+		GodRayIntensity = 0.68,
 		CloudCover = 0.74,
 		CloudDensity = 0.76,
 		CloudWindSpeed = 13,
@@ -78,6 +84,8 @@ local presets: { Weather } = {
 		Ambient = Color3.fromRGB(10, 14, 25),
 		OutdoorAmbient = Color3.fromRGB(25, 37, 64),
 		BloomIntensity = 1.8,
+		DepthOfFieldIntensity = 0.72,
+		GodRayIntensity = 0.9,
 		CloudCover = 0.96,
 		CloudDensity = 0.96,
 		CloudWindSpeed = 24,
@@ -116,6 +124,14 @@ end
 
 Lighting.BloomThreshold = 0.8
 Lighting.BloomRadius = 8
+Lighting.BloomIntensity = 1.0
+Lighting.DepthOfFieldFocusDistance = 54
+Lighting.DepthOfFieldFocusRange = 14
+Lighting.DepthOfFieldRadius = 7
+Lighting.DepthOfFieldIntensity = 0.54
+Lighting.GodRayThreshold = 0.72
+Lighting.GodRayRadius = 72
+Lighting.GodRayIntensity = 0.68
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Weather Sky"
@@ -269,7 +285,7 @@ panel.BackgroundColor3 = Color3.new(0, 0, 0)
 panel.BackgroundTransparency = 0.08
 panel.BorderSizePixel = 0
 panel.Position = UDim2.new(0, 18, 0, 18)
-panel.Size = UDim2.new(0, 310, 0, 238)
+panel.Size = UDim2.new(0, 310, 0, 394)
 panel.Parent = screen
 
 local status = Instance.new("TextLabel")
@@ -287,14 +303,28 @@ status.Parent = panel
 local activePreset = 2
 local target = presets[activePreset]
 local fogMode = "LOW BANK"
+local fogSize = 1
+local fogSquash = 1
+local fogFluff = 1
+
+local function applyFogProfile()
+	local sizeScale = ({ 0.68, 1, 1.36 })[fogSize]
+	local squashScale = ({ 0.45, 1, 1.75 })[fogSquash]
+	local fluffiness = ({ 0.28, 0.74, 1 })[fogFluff]
+	lowBank.Bounds = Vector3.new(30 * sizeScale, 2.8 * squashScale, 16 * sizeScale)
+	lowBank.NoiseStrength = fluffiness
+	lowBank.NoiseScale = if fogFluff == 3 then 0.11 else 0.16
+end
 
 local function updateStatus()
 	status.Text = string.format(
-		"WEATHER  %s\nFOG  %s  |  local volumes, no global fog\nRAIN %.0f/s  CLOUD %.0f%%",
+		"WEATHER  %s\nFOG  %s  |  local volumes, no global fog\nRAIN %.0f/s  CLOUD %.0f%%\nDOF %.0f%%  RAYS %.0f%%",
 		target.Name,
 		fogMode,
 		target.RainRate,
-		target.CloudCover * 100
+		target.CloudCover * 100,
+		target.DepthOfFieldIntensity * 100,
+		target.GodRayIntensity * 100
 	)
 end
 
@@ -325,8 +355,10 @@ local lowBankControl = button("Fog Low Bank", "LOW BANK", 0, 1)
 lowBankControl.Activated:Connect(function()
 	fogMode = "LOW BANK"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
-	lowBank.Bounds = Vector3.new(30, 2.8, 16)
-	lowBank.NoiseStrength = 0.74
+	fogSize = 1
+	fogSquash = 1
+	fogFluff = 2
+	applyFogProfile()
 	updateStatus()
 end)
 
@@ -334,18 +366,73 @@ local squashedControl = button("Fog Squashed", "SQUASHED", 1, 1)
 squashedControl.Activated:Connect(function()
 	fogMode = "SQUASHED"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
-	lowBank.Bounds = Vector3.new(38, 1.5, 22)
-	lowBank.NoiseStrength = 0.48
+	fogSize = 3
+	fogSquash = 1
+	fogFluff = 1
+	applyFogProfile()
 	updateStatus()
 end)
 
 local fluffyControl = button("Fog Fluffy", "FLUFFY", 2, 1)
 fluffyControl.Activated:Connect(function()
 	fogMode = "FLUFFY"
-	lowBank.Shape = Enum.VolumeShape.Ellipsoid
-	lowBank.Bounds = Vector3.new(25, 6.5, 18)
-	lowBank.NoiseStrength = 1
+	fogFluff = 3
+	applyFogProfile()
 	updateStatus()
+end)
+
+local function slider(name: string, label: string, row: number): TextButton
+	local track = Instance.new("TextButton")
+	track.Name = name
+	track.BackgroundColor3 = Color3.fromRGB(25, 35, 50)
+	track.BorderSizePixel = 0
+	track.Position = UDim2.new(0, 12, 0, 184 + row * 48)
+	track.Size = UDim2.new(0, 282, 0, 36)
+	track.Text = label
+	track.TextColor3 = Color3.new(1, 1, 1)
+	track.TextSize = 13
+	track.Parent = panel
+	return track
+end
+
+-- Clicking a slider advances through its three deliberate visual states. The
+-- discrete positions make the three volume properties easy to compare in a
+-- capture, while retaining a compact control surface for the demo.
+local sizeSlider = slider("Fog Size Slider", "SIZE     100%", 0)
+local squashSlider = slider("Fog Squash Slider", "SQUASH   100%", 1)
+local fluffSlider = slider("Fog Fluffy Slider", "FLUFFY   100%", 2)
+
+local function advanceSlider(value: number): number
+	return value % 3 + 1
+end
+
+sizeSlider.Activated:Connect(function()
+	fogSize = advanceSlider(fogSize)
+	sizeSlider.Text = string.format("SIZE     %.0f%%", ({ 68, 100, 136 })[fogSize])
+	applyFogProfile()
+end)
+
+squashSlider.Activated:Connect(function()
+	fogSquash = advanceSlider(fogSquash)
+	squashSlider.Text = string.format("SQUASH   %.0f%%", ({ 45, 100, 175 })[fogSquash])
+	applyFogProfile()
+end)
+
+fluffSlider.Activated:Connect(function()
+	fogFluff = advanceSlider(fogFluff)
+	fluffSlider.Text = string.format("FLUFFY   %.0f%%", ({ 28, 74, 100 })[fogFluff])
+	applyFogProfile()
+end)
+
+local shapeSlider = slider("Fog Shape Slider", "SHAPE    ELLIPSOID", 3)
+shapeSlider.Activated:Connect(function()
+	if lowBank.Shape == Enum.VolumeShape.Ellipsoid then
+		lowBank.Shape = Enum.VolumeShape.Box
+		shapeSlider.Text = "SHAPE    BOX"
+	else
+		lowBank.Shape = Enum.VolumeShape.Ellipsoid
+		shapeSlider.Text = "SHAPE    ELLIPSOID"
+	end
 end)
 
 updateStatus()
@@ -364,6 +451,12 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	Lighting.Ambient = lerpColour(Lighting.Ambient, target.Ambient, alpha)
 	Lighting.OutdoorAmbient = lerpColour(Lighting.OutdoorAmbient, target.OutdoorAmbient, alpha)
 	Lighting.BloomIntensity = lerp(Lighting.BloomIntensity, target.BloomIntensity, alpha)
+	Lighting.DepthOfFieldIntensity = lerp(
+		Lighting.DepthOfFieldIntensity,
+		target.DepthOfFieldIntensity,
+		alpha
+	)
+	Lighting.GodRayIntensity = lerp(Lighting.GodRayIntensity, target.GodRayIntensity, alpha)
 	atmosphere.Density = lerp(atmosphere.Density, target.AtmosphereDensity, alpha)
 	atmosphere.Haze = lerp(atmosphere.Haze, target.AtmosphereHaze, alpha)
 	atmosphere.Glare = lerp(atmosphere.Glare, target.AtmosphereGlare, alpha)

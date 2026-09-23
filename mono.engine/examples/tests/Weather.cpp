@@ -52,6 +52,14 @@ TEST_CASE("the weather scene stages and authors local volumetric fog", "[example
 	CHECK(lighting.FogStart == Catch::Approx(0.0f));
 	CHECK(lighting.FogEnd == Catch::Approx(100000.0f));
 	CHECK(lighting.BloomThreshold == Catch::Approx(0.8f));
+	CHECK(lighting.BloomIntensity == Catch::Approx(1.0f));
+	CHECK(lighting.DepthOfFieldFocusDistance == Catch::Approx(54.0f));
+	CHECK(lighting.DepthOfFieldFocusRange == Catch::Approx(14.0f));
+	CHECK(lighting.DepthOfFieldRadius == Catch::Approx(7.0f));
+	CHECK(lighting.DepthOfFieldIntensity == Catch::Approx(0.54f));
+	CHECK(lighting.GodRayThreshold == Catch::Approx(0.72f));
+	CHECK(lighting.GodRayRadius == Catch::Approx(72.0f));
+	CHECK(lighting.GodRayIntensity == Catch::Approx(0.68f));
 	CHECK(lighting.EnvironmentState.HasAtmosphereCompute);
 	CHECK(lighting.EnvironmentState.HasCloudCompute);
 	CHECK(lighting.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);
