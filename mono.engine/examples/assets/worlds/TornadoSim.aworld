@@ -1414,8 +1414,21 @@ RunService.Heartbeat:Connect(function(delta: number)
 		camera.CFrame = CFrame.lookAt(cameraHome + stormOffset, cameraTarget + stormOffset)
 	end
 	if cameraShake then
-		local shake = Vector3.new(math.sin(elapsed * 23) * 0.7, math.sin(elapsed * 31) * 0.45, 0)
-		camera.CFrame = camera.CFrame + shake
+		-- Sample at the observer's eye so the optional camera response grows with
+		-- the same field and damage potential the reference program uses.
+		local observerField = Storm.Sample(observerPosition + Vector3.new(0, 1, 0))
+		local horizontalWind = Vector3.new(observerField.Velocity.X, 0, observerField.Velocity.Z).Magnitude
+		local shake = clamp(horizontalWind / 115 + observerField.DamagePotential * 0.45, 0, 1)
+		local phase = elapsed * (9 + horizontalWind * 0.035)
+		local offset = Vector3.new(
+			math.sin(phase * 1.7) * shake * 2.4,
+			math.sin(phase * 2.31 + 1.2) * shake * 1.1,
+			math.cos(phase * 1.13) * shake * 1.8
+		)
+		local yaw = math.sin(phase * 0.73) * shake * 0.018
+		local pitch = math.sin(phase * 1.37) * shake * 0.012
+		local roll = math.sin(phase * 0.91) * shake * 0.026
+		camera.CFrame = camera.CFrame * CFrame.Angles(pitch, yaw, roll) + offset
 	end
 	if snapshot.Enabled and snapshot.ElapsedSeconds > 0 then
 		while snapshot.ElapsedSeconds >= lightningNextStrike do
