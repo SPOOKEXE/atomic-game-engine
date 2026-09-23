@@ -77,16 +77,15 @@ TEST_CASE("the weather scene stages and authors local volumetric fog", "[example
 	CHECK(hasSquashedEllipsoid);
 
 	size_t rainEmitterCount = 0;
-	store.Each<const engine::effects::ParticleEmitter>(
-		[&](engine::ecs::Entity, const engine::effects::ParticleEmitter &emitter) {
-			rainEmitterCount++;
-			CHECK(emitter.Rate == Catch::Approx(280.0f / 9.0f));
-			CHECK(emitter.MaxParticles == 480);
-			CHECK(emitter.EmissionDirection == engine::scene::NormalId::Bottom);
-			CHECK(emitter.Brightness == Catch::Approx(8.0f));
-			CHECK(emitter.Size.Evaluate(0.0f) == Catch::Approx(0.34f));
-			CHECK(emitter.Squash.Evaluate(0.0f) == Catch::Approx(8.0f));
-		}
-	);
+	store.Each<const engine::effects::ParticleEmitter>([&](engine::ecs::Entity,
+														   const engine::effects::ParticleEmitter &emitter) {
+		rainEmitterCount++;
+		CHECK(emitter.Rate == Catch::Approx(280.0f / 9.0f));
+		CHECK(emitter.MaxParticles == 480);
+		CHECK(emitter.EmissionDirection == engine::scene::NormalId::Bottom);
+		CHECK(emitter.Brightness == Catch::Approx(8.0f));
+		CHECK(emitter.Size.Evaluate(0.0f) == Catch::Approx(0.34f));
+		CHECK(emitter.Squash.Evaluate(0.0f) == Catch::Approx(8.0f));
+	});
 	CHECK(rainEmitterCount == 9);
 }
