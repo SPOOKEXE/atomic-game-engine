@@ -1885,7 +1885,9 @@ namespace engine::render {
 		// This avoids sorting or a second 50M-sized buffer while keeping cloud
 		// alpha compositing stable.
 		constexpr uint32_t depthSlices = 12;
-		for (uint32_t slice = 0; slice < depthSlices; ++slice) {
+		// Camera-forward depth grows away from this camera, so the largest bucket
+		// is farthest and must blend first.
+		for (uint32_t slice = depthSlices; slice-- > 0;) {
 			uniforms.Options.w = static_cast<float>(slice);
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 			SDL_DrawGPUPrimitives(pass, 4, drawBudget, 0, 0);

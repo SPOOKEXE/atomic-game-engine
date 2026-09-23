@@ -256,7 +256,6 @@ TEST_CASE(
 	const render::FrameResult resizedFrame =
 		fixture.Render.Render(std::span(&resized, 1), overlay, nullptr, false);
 	CHECK(resizedFrame.ComputeDispatches >= 1);
-	// The full million rows still step on the GPU, while the renderer submits
 	// The full million rows still step on the GPU, while the renderer submits an
 	// 18k condensation cohort across twelve ordered depth slices plus one rain
 	// cohort. The bounded draw keeps the 50M preset viable without weakening the
