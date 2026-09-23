@@ -7,15 +7,33 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
+#include <regex>
 #include <string>
 
 TEST_SUITE_ID("engine.examples.tornado-sim")
 TEST_DEPENDS("engine.examples.demos-loader")
 
 namespace {
+	using Vector3Components = std::array<float, 3>;
+
+	std::optional<Vector3Components> LocalVector3(const std::string &document, const std::string &name) {
+		const std::regex assignment(
+			"local\\s+" + name + "\\s*=\\s*Vector3\\.new\\(\\s*(-?[0-9]+(?:\\.[0-9]+)?)\\s*,\\s*"
+			"(-?[0-9]+(?:\\.[0-9]+)?)\\s*,\\s*(-?[0-9]+(?:\\.[0-9]+)?)\\s*\\)"
+		);
+		std::smatch match;
+		if (!std::regex_search(document, match, assignment)) {
+			return std::nullopt;
+		}
+		return Vector3Components{std::stof(match[1]), std::stof(match[2]), std::stof(match[3])};
+	}
+
 	struct StagedAssets {
 		std::filesystem::path Previous = engine::core::Paths::Assets();
 
@@ -128,8 +146,23 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("CAM ORBIT") != std::string::npos);
 	CHECK(document.find("SHAKE") != std::string::npos);
 	CHECK(document.find("FieldVectorInset") != std::string::npos);
-	CHECK(document.find("cameraTarget = Vector3.new(0, 170, 95)") != std::string::npos);
-	CHECK(document.find("cameraHome = Vector3.new(-275, 135, -405)") != std::string::npos);
+	const std::optional<Vector3Components> cameraTarget = LocalVector3(document, "cameraTarget");
+	const std::optional<Vector3Components> cameraHome = LocalVector3(document, "cameraHome");
+	REQUIRE(cameraTarget.has_value());
+	REQUIRE(cameraHome.has_value());
+	const float targetFromStorm = std::hypot((*cameraTarget)[0], (*cameraTarget)[2] - 95.0f);
+	const float eyeToTarget = std::sqrt(
+		std::pow((*cameraTarget)[0] - (*cameraHome)[0], 2.0f) +
+		std::pow((*cameraTarget)[1] - (*cameraHome)[1], 2.0f) +
+		std::pow((*cameraTarget)[2] - (*cameraHome)[2], 2.0f)
+	);
+	CHECK(targetFromStorm < 300.0f);
+	CHECK((*cameraTarget)[1] >= 140.0f);
+	CHECK((*cameraTarget)[1] <= 270.0f);
+	CHECK((*cameraHome)[0] < -80.0f);
+	CHECK((*cameraHome)[2] < -50.0f);
+	CHECK(2.0f * eyeToTarget * std::tan(57.0f * 0.5f * 0.0174532925f) >= 1.5f * 285.0f);
+	CHECK(document.find("camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)") != std::string::npos);
 	CHECK(document.find("Instance.new(\"ScrollingFrame\")") != std::string::npos);
 	CHECK(document.find("panel.CanvasSize = UDim2.new(0, 352, 0, 704)") != std::string::npos);
 	CHECK(document.find("panel.CanvasPosition = Vector2.new(0, 0)") != std::string::npos);
