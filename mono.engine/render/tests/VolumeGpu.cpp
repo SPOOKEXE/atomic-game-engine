@@ -138,23 +138,24 @@ namespace {
 		environment.SkyCompute.Enabled = true;
 		environment.HasAtmosphere = true;
 		environment.HasAtmosphereCompute = true;
-		environment.Air.Colour = {0.82f, 0.49f, 0.27f};
-		environment.Air.Decay = {0.18f, 0.09f, 0.04f};
-		environment.Air.Density = 0.72f;
-		environment.Air.Glare = 3.0f;
-		environment.Air.Haze = 4.0f;
-		environment.AirCompute.Rayleigh = 1.3f;
-		environment.AirCompute.Mie = 0.8f;
+		// Blue scattering contrasts with the orange source sky. That makes the
+		// atmosphere's final LDR contribution visible beneath the cloud layer.
+		environment.Air.Colour = {0.08f, 0.72f, 1.0f};
+		environment.Air.Decay = {0.08f, 0.05f, 0.02f};
+		environment.Air.Density = 0.9f;
+		environment.Air.Glare = 4.0f;
+		environment.Air.Haze = 8.0f;
+		environment.AirCompute.Rayleigh = 1.8f;
+		environment.AirCompute.Mie = 0.45f;
 		environment.AirCompute.Samples = 24;
 		environment.AirCompute.Enabled = true;
 		environment.HasClouds = true;
 		environment.HasCloudCompute = true;
 		environment.CloudLayer.Colour = {1.0f, 0.72f, 0.46f};
-		// Keep coverage well above the noise field's median so the compute and
-		// authored cloud paths have a broad, visible sky difference in the final
-		// capture.
-		environment.CloudLayer.Cover = 0.78f;
-		environment.CloudLayer.Density = 0.92f;
+		// Storm clouds are deliberately broad but not opaque, leaving enough sky
+		// for the atmosphere capture while exposing the compute path's darkening.
+		environment.CloudLayer.Cover = 0.7f;
+		environment.CloudLayer.Density = 0.72f;
 		environment.CloudLayer.WindSpeed = 8.0f;
 		environment.CloudLayer.WindDirection = {0.6f, 0.8f};
 		environment.CloudLayer.Enabled = true;
