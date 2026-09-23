@@ -16,7 +16,8 @@ The supplied files are five binary PXCX-prefix projects: Black-Hole_121092.pxc, 
 Glass-Block-Refraction_121092.pxc, Ornate-Trim_121092.pxc, and Spark-Bolt_121092.pxc. The supplied captures are
 005_nodes.png, 008_3d.png, 001_effect_2.gif, 006_effects.gif, and 007_simulation.gif. They show graph and timeline
 workflows, 3D nodes, VFX and simulation. Screenshot text appears to identify version 1.16.6.0; strings in project
-files appear to identify 1.22.10.201. Both are observations, not verified format semantics.
+files contain the string 1.22.10.201. These are observations only. The project string may be a schema or build id,
+not the application version, and must not be treated as one without validation.
 
 Create and pin a source-of-truth inventory from the official
 [Pixel Composer documentation](https://docs.pixel-composer.com/) and
@@ -24,6 +25,17 @@ Create and pin a source-of-truth inventory from the official
 version when exposed, node page URL, node id, ports, types, properties and defaults, dynamic inputs, animation,
 arrays/groups, errors, required resources and documented edge behavior. Do not infer undocumented behavior from a
 name, screenshot or binary string.
+
+At M0, pin the latest reproducible official Pixel Composer build and record its version, release channel, release
+date, executable hash and platform. The current candidate is
+[1.21.10 beta, dated September 13, 2026](https://makham.itch.io/pixel-composer/devlog/1662052/12110-beta);
+verify that the official build can be acquired and run for reference captures. Use
+[1.21.0 stable, dated April 28, 2026](https://makham.itch.io/pixel-composer/devlog/1502094/1210-stable) as a
+comparison fallback if the beta is not reproducible. A fallback does not permit omitting features in newer
+documentation: the inventory must reconcile every current documentation row to the pinned build, marking build
+availability or behavior as unresolved until verified. Archive the exact documentation snapshot used for the
+inventory with its retrieval date and content hashes. Supplied project version strings remain unidentified unless
+validated against the application.
 
 Every node gets a node-parity-matrix row with one status: documented and implemented, documented and blocked by named
 prerequisite, undocumented but verified by approved fixture, unknown, or prohibited by engine policy. Every
@@ -40,10 +52,12 @@ perform the corresponding workflow.
 |---|---|
 | Core graph | Typed ports, junctions, defaults, dynamic inputs, links, groups, subgraphs, arrays and errors |
 | Import/export/I/O | Image, video, sequence, PXC, paths, headless, file, network and shell behavior |
+| External formats and devices | Aseprite, Krita, ORA and GameMaker imports; MIDI and Spout inputs/outputs |
+| Project and diagnostics | Project settings, tilesets, cache controls, debug tools, migration and diagnostics workflows |
 | 2D | UV, generate, draw, pixel builder, transform, compose, filter and effect nodes |
 | Data | Scalar, colour, vector, matrix, text, conversions, random, curves, math and expressions |
 | Animation/audio | Timeline, keyframes, interpolation, playback modes, audio inputs and frame semantics |
-| Stateful VFX | Feedback, particles, rigid, fluid and all simulation reset/state rules |
+| Stateful VFX | Feedback, particles, smoke, FLIP, strand and Verlet simulation, rigid and fluid state/reset rules |
 | 3D | Scene, cameras, lights, meshes, materials, ray marching, render and 3D outputs |
 | Scripting | Expression, Lua and shader-language nodes with policy and resource boundaries |
 
@@ -67,10 +81,12 @@ generate images or their own graph state, but feed particle emitters through sta
 the game effects emitter, motion, or draw systems. The module dependency plan follows
 [the engine architecture](CODE_ARCH.md).
 
-The canonical document stores format version, stable string node and port ids, durable text or UUID node instance
-ids, values, links,
-outputs, group/subgraph declarations, timeline/keyframes, layout and declared external dependencies. It never stores
-pointers, process-local Name ids, renderer handles, compiled plans, workers, previews, caches or pixels.
+The authored graph is immutable content: its canonical document stores format version, stable string node and port
+ids, durable text or UUID node instance ids, authored values, links, outputs, group/subgraph declarations,
+timeline/keyframes, layout and declared external dependencies. Live parameters and output bindings shared between
+systems are ECS-owned state, identified across boundaries by stable names. Evaluator and render caches are derived
+only; they are never authoritative state. The document never stores pointers, process-local Name ids, renderer
+handles, compiled plans, workers, previews, caches or pixels.
 
 Compilation rejects unknown/version-incompatible nodes, invalid properties, incompatible ports, duplicate wires,
 illegal cycles, incomplete feedback definitions, invalid outputs, dimensions and limit excess. It produces one
@@ -96,7 +112,10 @@ availability.
 
 Every evaluation receives graph revision, seed, fixed tick index, fixed delta, parameter snapshot, selected output,
 dimensions and format. It has no wall clock or hidden random state. Random samples derive from seed, node id,
-coordinate, frame and declared sample index. Equivalent input produces equivalent output on a supported evaluator.
+coordinate, frame and declared sample index. Equivalent input produces equivalent CPU output on a supported
+evaluator. Tick-visible output is deterministic under the declared fixed-step and recorded-input contract.
+GPU-rendered visual output may vary by backend, driver or device; its parity uses a pinned backend/device
+configuration and reviewed image tolerances rather than claiming bit-exact cross-backend determinism.
 
 Static graphs run after signature changes. Animated and simulation graphs run at declared fixed rates with bounded
 catch-up. A late result cannot overwrite a newer generation. Feedback, VFX, rigid and fluid state have explicit
@@ -126,8 +145,13 @@ loss, rebind and failed admission each retire one generation exactly once.
 
 ### M0: inventory and reference harness
 
-1. Crawl and pin official documentation. Build node and product-workflow parity matrices with fixture manifests.
-2. Establish a reference capture runner at pinned Pixel Composer versions where possible.
+1. Pin the latest reproducible official Pixel Composer build and archive the retrieved official documentation pages
+   with retrieval date and content hashes. Start with 1.21.10 beta as the current candidate and 1.21.0 stable as the
+   comparison fallback. Reconcile every current documentation row against the selected build; no current row may be
+   omitted because it was added after the fallback. Build node and product-workflow parity matrices with fixtures.
+2. Establish and pass a reference capture runner at the pinned version. If the executable, platform or a required
+   reference behavior is unavailable, mark the runner/fixture gate open with the blocker and evidence; M0 cannot pass
+   and dependent parity claims remain blocked. Unavailable reference evidence is never a silent pass.
 3. Characterise the five supplied projects without claiming their binary layout is public.
 4. Record baseline graph layouts, parameters, ticks, images and diagnostics for all reference fixtures.
 5. Gate later work on reviewed matrix coverage. Unknown remains unknown.
@@ -166,18 +190,21 @@ timeline, asset and sink panel, diagnostics, cache/budget state and profiler pan
 
 1. Implement all documented VFX, rigid and fluid simulation rows after state and resource contracts are proved.
 2. Feed generated texture names into existing effects systems and future effect graph work.
-3. Add owner-scoped live texture registry, last-good fallback and every consumer binding.
+3. Add owner-scoped live texture registry, last-good fallback and all 2D consumer bindings, including particles,
+   beams/trails and GUI images. Material maps, shader inputs, skyboxes and other 3D consumer bindings are completed
+   and gated in M5.
 4. Match fixed seed, fixed tick, reset and long-run drift fixtures.
 
 ### M5: complete 3D parity
 
 1. Implement documented scenes, cameras, lights, meshes, materials, ray marching, render nodes and output nodes.
 2. Define typed render capabilities and explicit resource lifetime for each 3D node.
-3. Reuse cooked shaders and declared sampler/resource inputs. Add a validated named-sampler binding extension before
+3. Complete material-map, shader-input and skybox sink bindings in the engine-output matrix.
+4. Reuse cooked shaders and declared sampler/resource inputs. Add a validated named-sampler binding extension before
    arbitrary composer output may bind a cooked shader sampler. It enumerates allowed sampler names, expected
    dimensions, format, colour space and owner lifetime. HLSL and shader-language composer nodes compile during
    authoring or cook into validated binaries; shipped clients consume those binaries and carry no runtime compiler.
-4. Compare controlled captures, output structures and diagnostics at fixed backend and resolution.
+5. Compare controlled captures, output structures and diagnostics at fixed backend and resolution.
 
 ### M6: I/O, scripting, PXC and export parity
 
@@ -190,8 +217,9 @@ timeline, asset and sink panel, diagnostics, cache/budget state and profiler pan
 
 ### M7: parity release gate
 
-1. Every node-matrix and product-workflow-matrix row is implemented and passing. A policy prohibition is a release
-   blocker until user accepts the corresponding parity exception.
+1. Every node-matrix, product-workflow-matrix and engine-output sink row is implemented and passing against the pinned
+   product and documentation snapshots. A policy prohibition is a release blocker until user accepts the corresponding
+   parity exception.
 2. Run native and reference fixtures, publish tolerances and reviewed visual-diff evidence.
 3. Profile static 2D, animated, feedback, simulation and 3D graphs in release.
 4. Run Studio and client scenes and preserve release evidence.
@@ -217,7 +245,8 @@ Native PXC read and write are explicit parity work and release gates.
 1. Obtain an authoritative PXC format specification or a validated format description.
 2. Verify PXCX framing, versions, compression, graph records, values, links, resources, timeline and export against
    controlled fixtures.
-3. Write bounded parser and writer tests for valid, malformed, unknown-version and unsupported-node documents.
+3. Write bounded parser and writer tests for valid, malformed, unknown-version and unsupported-node documents, and add
+   a PXC parser fuzz target with bounded input size and execution time.
 4. Round-trip every supplied PXC file through native read/write, compare graph structure, parameters, animation and
    render output against reference captures.
 5. Verify native-generated PXC in Pixel Composer or an authoritative validator before claiming writer parity.
