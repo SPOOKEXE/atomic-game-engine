@@ -1327,13 +1327,23 @@ RunService.Heartbeat:Connect(function(delta: number)
 	elapsed += delta
 	panelClock += delta
 	bindStormDamageScenery()
-	for _, scenery in ipairs(damageScenery) do
-		if scenery.Source.Parent == nil then
-			scenery.Decoration.Visible = false
+	for index = #damageScenery, 1, -1 do
+		local scenery = damageScenery[index]
+		-- A replicated source can disappear between frames. Keep every access to
+		-- that old handle inside pcall, then let the next bind find its replacement.
+		local readable, frame = pcall(function(): CFrame?
+			if scenery.Source.Parent == nil or scenery.Decoration.Parent == nil then return nil end
+			return scenery.Source.CFrame * scenery.LocalFrame
+		end)
+		if not readable or frame == nil then
+			pcall(function() scenery.Decoration:Destroy() end)
+			table.remove(damageScenery, index)
 		else
-			scenery.Decoration.CFrame = scenery.Source.CFrame * scenery.LocalFrame
+			local placed = pcall(function() scenery.Decoration.CFrame = frame end)
+			if not placed then table.remove(damageScenery, index) end
 		end
 	end
+	if #damageScenery == 0 then damageSceneryBound = false end
 	local snapshot = Storm.Snapshot()
 	if snapshot.ElapsedSeconds > 0 and panelClock >= nextParameterSync then
 		nextParameterSync = panelClock + 0.25
