@@ -299,7 +299,9 @@ TEST_CASE(
 	}
 }
 
-TEST_CASE("default PBR preserves distinct part tints through the display transform", "[render][gpu][colour][.]") {
+TEST_CASE(
+	"default PBR preserves distinct part tints through the display transform", "[render][gpu][colour][.]"
+) {
 	FixtureDevice fixture;
 	fixture.Initialise();
 	InstallFixture(fixture.Render);
@@ -325,12 +327,10 @@ TEST_CASE("default PBR preserves distinct part tints through the display transfo
 	view.Lighting.OutdoorAmbient = {};
 	view.Lighting.Direct = {};
 	render::OverlayImage overlay;
-	const uint64_t litToken = fixture.Render.QueueResourceImage(
-		view.Pipeline, core::Name("fixture-lit-capture"), view.Slot
-	);
-	const uint64_t godRaysToken = fixture.Render.QueueResourceImage(
-		view.Pipeline, core::Name("fixture-god-rays-capture"), view.Slot
-	);
+	const uint64_t litToken =
+		fixture.Render.QueueResourceImage(view.Pipeline, core::Name("fixture-lit-capture"), view.Slot);
+	const uint64_t godRaysToken =
+		fixture.Render.QueueResourceImage(view.Pipeline, core::Name("fixture-god-rays-capture"), view.Slot);
 	REQUIRE(litToken != 0);
 	REQUIRE(godRaysToken != 0);
 	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
@@ -350,7 +350,12 @@ TEST_CASE("default PBR preserves distinct part tints through the display transfo
 		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
 	);
 	const CapturedImage display = CaptureResource(
-		fixture.Render, core::Name("tonemapped"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
+		fixture.Render,
+		core::Name("tonemapped"),
+		view.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Rgba8Unorm
 	);
 	const auto redAlbedo = sample(albedo, 38, 32);
 	const auto greenAlbedo = sample(albedo, 58, 32);
@@ -382,16 +387,24 @@ TEST_CASE("default PBR preserves distinct part tints through the display transfo
 	const auto greenLit = sampleHdr(lit, 58, 32);
 	const auto redGodRays = sampleHdr(godRays, 38, 32);
 	const auto greenGodRays = sampleHdr(godRays, 58, 32);
-	INFO("red albedo=" << int(redAlbedo[0]) << ',' << int(redAlbedo[1]) << ',' << int(redAlbedo[2])
-						<< " display=" << int(redDisplay[0]) << ',' << int(redDisplay[1]) << ','
-						<< int(redDisplay[2]));
-	INFO("green albedo=" << int(greenAlbedo[0]) << ',' << int(greenAlbedo[1]) << ','
-						  << int(greenAlbedo[2]) << " display=" << int(greenDisplay[0]) << ','
-						  << int(greenDisplay[1]) << ',' << int(greenDisplay[2]));
-	INFO("red lit=" << redLit[0] << ',' << redLit[1] << ',' << redLit[2] << " god-rays="
-						<< redGodRays[0] << ',' << redGodRays[1] << ',' << redGodRays[2]);
-	INFO("green lit=" << greenLit[0] << ',' << greenLit[1] << ',' << greenLit[2] << " god-rays="
-						  << greenGodRays[0] << ',' << greenGodRays[1] << ',' << greenGodRays[2]);
+	INFO(
+		"red albedo=" << int(redAlbedo[0]) << ',' << int(redAlbedo[1]) << ',' << int(redAlbedo[2])
+					  << " display=" << int(redDisplay[0]) << ',' << int(redDisplay[1]) << ','
+					  << int(redDisplay[2])
+	);
+	INFO(
+		"green albedo=" << int(greenAlbedo[0]) << ',' << int(greenAlbedo[1]) << ',' << int(greenAlbedo[2])
+						<< " display=" << int(greenDisplay[0]) << ',' << int(greenDisplay[1]) << ','
+						<< int(greenDisplay[2])
+	);
+	INFO(
+		"red lit=" << redLit[0] << ',' << redLit[1] << ',' << redLit[2] << " god-rays=" << redGodRays[0]
+				   << ',' << redGodRays[1] << ',' << redGodRays[2]
+	);
+	INFO(
+		"green lit=" << greenLit[0] << ',' << greenLit[1] << ',' << greenLit[2]
+					 << " god-rays=" << greenGodRays[0] << ',' << greenGodRays[1] << ',' << greenGodRays[2]
+	);
 	CHECK(redAlbedo[0] > redAlbedo[1] + 80);
 	CHECK(redAlbedo[0] > redAlbedo[2] + 80);
 	CHECK(greenAlbedo[1] > greenAlbedo[0] + 80);
