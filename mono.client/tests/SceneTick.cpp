@@ -1398,10 +1398,10 @@ TEST_CASE(
 			store.EachChild(parent, [&](engine::ecs::Entity) { count++; });
 			return count;
 		};
-		CHECK(childCount(environment) == 10);
-		CHECK(CountNamedDescendants(store, environment, "Cell Tree 0") == 9);
-		CHECK(CountNamedDescendants(store, environment, "Cell Sign 1") == 9);
-		CHECK(CountNamedDescendants(store, environment, "Cell Roof Panel 2") == 9);
+		CHECK(childCount(environment) == 26);
+		CHECK(CountNamedDescendants(store, environment, "Cell Tree 0") == 25);
+		CHECK(CountNamedDescendants(store, environment, "Cell Sign 1") == 25);
+		CHECK(CountNamedDescendants(store, environment, "Cell Roof Panel 2") == 25);
 		CHECK(CountNamedDescendants(store, environment, "Cell Chase Vehicle") > 0);
 
 		size_t stormBodies = 0;
@@ -1456,11 +1456,15 @@ TEST_CASE(
 		CHECK(storm->State.ElapsedSeconds == Approx(0.0f));
 		systems.Tick(store, STEP);
 
-		CHECK(childCount(environment) == 10);
+		CHECK(childCount(environment) == 26);
 		CHECK(store.FindFirstChild(environment, "Storm Cell -1:-1") != engine::ecs::NULL_ENTITY);
-		CHECK(CountNamedDescendants(store, environment, "Cell Tree 0") == 9);
-		CHECK(FirstNamedDescendant(store, interaction, "WoodenSign") != engine::ecs::NULL_ENTITY);
-		CHECK(FirstNamedDescendant(store, interaction, "Wood Sign Wind Link") != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, environment, "Cell Tree 0") == 25);
+		const engine::ecs::Entity resetInteraction = InWorkspace(store, "StormInteraction");
+		REQUIRE(resetInteraction != engine::ecs::NULL_ENTITY);
+		CHECK(FirstNamedDescendant(store, resetInteraction, "WoodenSign") != engine::ecs::NULL_ENTITY);
+		CHECK(
+			FirstNamedDescendant(store, resetInteraction, "Wood Sign Wind Link") != engine::ecs::NULL_ENTITY
+		);
 		storm = engine::physics::StormOf(store);
 		REQUIRE(storm != nullptr);
 		CHECK(storm->State.Parameters.Energy == Approx(0.78f));
