@@ -90,6 +90,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] implement seamless portals plan. Production body splitting, transfer fences, and dynamic island solving exist; complete the plan's frame-rate, network, resolution, profiling, and GPU acceptance matrix.
 - [_] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks. The large-count scene exists; record before and after measurements for the claimed optimizations.
 - [_] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene. A live session inserted and edited a Part, played and stopped a client, then reopened the saved game. The Worlds dock focus fixes pass a live Stop check; broader class and dropdown coverage remains open.
+- [_] create pixel composer for live changing images
 
 The [v0.25 roadmap audit](docs/v025-roadmap-audit.md) records source evidence and remaining verification limits for all 49 items. The opt-in GPU suite passes all 132 cases; release benchmarks and parts of the Studio workflow remain unverified.
 
