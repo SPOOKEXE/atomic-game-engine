@@ -1,3 +1,4 @@
+#include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/Storm.hpp>
 
 #include <algorithm>
@@ -482,12 +483,17 @@ namespace engine::scene {
 
 	VisibilityResult QueryStormVisibility(const StormState &storm, const VisibilityQuery &query) {
 		const float distance = std::clamp(query.ViewDistance, 0.0f, 5000.0f);
+		const PreparedTornadoField prepared = PrepareTornadoField(storm.Parameters);
 		const StormSample field =
-			SampleTornadoField(storm.Parameters, storm.Position, query.Position, storm.ElapsedSeconds);
+			SampleTornadoField(prepared, storm.Position, query.Position, storm.ElapsedSeconds);
 		const TornadoParameters parameters = SanitizeTornadoParameters(storm.Parameters);
 		const float rain =
 			Saturate(parameters.RainRate * parameters.Humidity * (.28f + field.Influence * .72f));
-		const float condensation = Saturate(field.Condensation * (.45f + field.Influence * .55f));
+		const float cloud =
+			WindLineCloudDensity(prepared, query.Position - storm.Position, storm.ElapsedSeconds);
+		const float condensation = Saturate(
+			field.Condensation * (.45f + field.Influence * .55f) + cloud * (.38f + field.Influence * .32f)
+		);
 		const float obscuration =
 			Saturate((rain * .42f + condensation * .72f) * (1.0f - std::exp(-distance / 240.0f)));
 		const float clarity = 1.0f - std::min(obscuration, .96f);

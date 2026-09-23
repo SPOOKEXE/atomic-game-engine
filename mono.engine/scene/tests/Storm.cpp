@@ -143,6 +143,7 @@ TEST_CASE("storm lifecycle and gameplay queries share the field", "[scene][storm
 	const auto far = QueryStormVisibility(intense, {{1000.0f, 20.0f, 0.0f}, 300.0f});
 	CHECK(near.Clarity < far.Clarity);
 	CHECK(near.EffectiveDistance < 300.0f);
+	CHECK(near.CondensationObscuration > far.CondensationObscuration);
 
 	const auto eyewall = QueryStormDamage(intense, {intense.Parameters.CoreRadius, 5.0f, 0.0f});
 	const auto distant = QueryStormDamage(intense, {intense.Parameters.InfluenceRadius * 5.0f, 5.0f, 0.0f});
