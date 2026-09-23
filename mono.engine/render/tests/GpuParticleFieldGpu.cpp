@@ -75,8 +75,12 @@ namespace {
 		uint32_t Bottom = 0;
 		bool Found = false;
 
-		uint32_t Width() const { return Found ? Right - Left + 1 : 0; }
-		uint32_t Height() const { return Found ? Bottom - Top + 1 : 0; }
+		uint32_t Width() const {
+			return Found ? Right - Left + 1 : 0;
+		}
+		uint32_t Height() const {
+			return Found ? Bottom - Top + 1 : 0;
+		}
 	};
 
 	PixelBounds RedParticleBounds(const CapturedImage &image, const CapturedImage &empty) {

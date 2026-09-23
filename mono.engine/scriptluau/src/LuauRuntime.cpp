@@ -644,9 +644,7 @@ namespace engine::script {
 		if (subject == ecs::NULL_ENTITY || ambiguous) return false;
 
 		lua_pushlstring(
-			State,
-			reinterpret_cast<const char *>(message.Payload.data()),
-			message.Payload.size()
+			State, reinterpret_cast<const char *>(message.Payload.data()), message.Payload.size()
 		);
 		Error = FireSignal(State, SignalKind::RemoteEvent, subject, 1);
 		return Error.empty();

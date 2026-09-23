@@ -487,8 +487,7 @@ namespace client {
 		);
 	}
 
-	std::shared_ptr<engine::script::Runtime>
-	BuildReplicatedWorld(
+	std::shared_ptr<engine::script::Runtime> BuildReplicatedWorld(
 		Store &store,
 		Scheduler &scheduler,
 		const InterpolationSettings &interpolation,

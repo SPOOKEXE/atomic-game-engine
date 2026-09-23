@@ -37,7 +37,9 @@ namespace engine::script {
 	// @param payload Application bytes to copy into the envelope.
 	// @param out Receives the framed request on success and is cleared on refusal.
 	// @return Whether the request fits the envelope bounds.
-	bool EncodeRemoteEvent(std::string_view event, std::span<const std::byte> payload, std::vector<std::byte> &out);
+	bool EncodeRemoteEvent(
+		std::string_view event, std::span<const std::byte> payload, std::vector<std::byte> &out
+	);
 
 	// Decodes one complete request. Extra bytes, invalid names, and over-limit
 	// fields are refused so an authority never dispatches an ambiguous payload.

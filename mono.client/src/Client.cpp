@@ -2142,7 +2142,8 @@ namespace client {
 				interpolation.TickRate = Settings.TickRate;
 				engine::script::RuntimeLimits limits;
 				limits.RemoteEventSender = [this](std::span<const std::byte> payload) {
-					return Connection != nullptr && Connection->SendUser(payload, engine::core::Clock::Seconds());
+					return Connection != nullptr &&
+						   Connection->SendUser(payload, engine::core::Clock::Seconds());
 				};
 
 				replicaScripts = BuildReplicatedWorld(store, systems, interpolation, limits);

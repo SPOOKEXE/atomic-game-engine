@@ -311,7 +311,9 @@ TEST_CASE("a message is reliable and ordered", "[replication][user]") {
 	}
 }
 
-TEST_CASE("a Luau RemoteEvent reaches an authority callback over the user lane", "[replication][user][remote-event]") {
+TEST_CASE(
+	"a Luau RemoteEvent reaches an authority callback over the user lane", "[replication][user][remote-event]"
+) {
 	Pair pair;
 	REQUIRE(pair.Admit());
 	engine::script::ScriptClass();

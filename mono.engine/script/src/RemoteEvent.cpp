@@ -1,9 +1,10 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/script/RemoteEvent.hpp>
 
-#include <engine/core/Bytes.hpp>
-
 namespace engine::script {
-	bool EncodeRemoteEvent(std::string_view event, std::span<const std::byte> payload, std::vector<std::byte> &out) {
+	bool EncodeRemoteEvent(
+		std::string_view event, std::span<const std::byte> payload, std::vector<std::byte> &out
+	) {
 		out.clear();
 		if (event.empty() || payload.size() > REMOTE_EVENT_MAXIMUM_PAYLOAD_BYTES) return false;
 		core::ByteWriter writer(0, REMOTE_EVENT_MAXIMUM_MESSAGE_BYTES);
@@ -23,8 +24,10 @@ namespace engine::script {
 		const uint16_t version = reader.ReadUInt16();
 		const std::string_view event = reader.ReadString();
 		const uint32_t payloadBytes = reader.ReadUInt32();
-		if (reader.Failed() || magic != REMOTE_EVENT_MAGIC || version != REMOTE_EVENT_VERSION || event.empty() || payloadBytes > REMOTE_EVENT_MAXIMUM_PAYLOAD_BYTES ||
-			payloadBytes != reader.Remaining()) return false;
+		if (reader.Failed() || magic != REMOTE_EVENT_MAGIC || version != REMOTE_EVENT_VERSION ||
+			event.empty() || payloadBytes > REMOTE_EVENT_MAXIMUM_PAYLOAD_BYTES ||
+			payloadBytes != reader.Remaining())
+			return false;
 
 		RemoteEventMessage decoded;
 		decoded.Event = event;
