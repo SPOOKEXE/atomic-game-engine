@@ -16,8 +16,10 @@
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Version.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
@@ -44,6 +46,7 @@ using engine::control::Tool;
 using engine::core::Name;
 using engine::ecs::ComponentId;
 using engine::ecs::Components;
+using engine::ecs::Classes;
 using engine::ecs::Entity;
 using engine::ecs::FieldPacking;
 using engine::ecs::FieldSpec;
@@ -1121,6 +1124,20 @@ TEST_CASE("omitted engine features publish none of their rows", "[control]") {
 		CHECK(tool.Name != "test_run");
 	}
 	CHECK(architecture);
+}
+
+TEST_CASE("class_list counts the classes returned after filtering", "[control]") {
+	Surface surface("test", "a suite");
+	surface.Enable(std::array{engine::control::features::Script()});
+
+	const auto root = Classes::RegisterInstanceRoot();
+	const std::string className = Unique("class-list");
+	Classes::Register(className, root, {});
+
+	const json listed = Called(surface, "class_list", json{{"derivedFrom", "Instance"}});
+	REQUIRE(listed.contains("classes"));
+	CHECK(listed["count"] == listed["classes"].size());
+	REQUIRE(Named(listed["classes"], className.c_str()) != nullptr);
 }
 
 TEST_CASE("discovery reports the final callable registry and schema", "[control][discovery]") {

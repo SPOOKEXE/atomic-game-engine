@@ -148,7 +148,8 @@ namespace engine::control {
 					classes.push_back(DescribeClass(id, false));
 				}
 
-				return json{{"classes", std::move(classes)}, {"count", classes.size()}};
+				const size_t count = classes.size();
+				return json{{"classes", std::move(classes)}, {"count", count}};
 			},
 		});
 
