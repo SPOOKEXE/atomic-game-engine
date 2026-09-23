@@ -60,6 +60,26 @@ namespace engine::physics {
 				   (0.5f * AIR_DENSITY * response.DragCoefficient * area * speed * response.ForceScale);
 		}
 
+		core::Vector3 ApplyDrag(
+			const scene::StormSample &sample,
+			const core::Vector3 &velocity,
+			const scene::Collider &collider,
+			const StormResponse &response,
+			float delta,
+			float mass
+		) {
+			const core::Vector3 relative = sample.Velocity - velocity;
+			const core::Vector3 impulse = DragForce(sample, velocity, collider, response) * (delta / mass);
+			const float relativeSpeed = relative.Magnitude();
+			const float impulseSpeed = impulse.Magnitude();
+			if (!(relativeSpeed > 0.0f) || !(impulseSpeed > 0.0f)) return velocity;
+
+			// Quadratic drag must approach the sampled wind. An explicit step larger
+			// than the relative velocity reverses direction and makes CCD sweep an
+			// unbounded distance through the static world.
+			return velocity + impulse * std::min(1.0f, relativeSpeed / impulseSpeed);
+		}
+
 		bool ActiveBody(const scene::RigidBody &body, const StormResponse &response) {
 			return body.Kind == scene::BodyKind::Dynamic && response.Enabled;
 		}
@@ -352,8 +372,7 @@ namespace engine::physics {
 				const scene::StormSample sample = scene::SampleTornadoField(
 					field, storm->State.Position, transform.Frame.Position, storm->State.ElapsedSeconds
 				);
-				motion.Linear =
-					motion.Linear + DragForce(sample, motion.Linear, collider, response) * (delta / mass);
+				motion.Linear = ApplyDrag(sample, motion.Linear, collider, response, delta, mass);
 			});
 	}
 }

@@ -15,6 +15,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 TEST_SUITE_ID("engine.physics.storm")
 TEST_DEPENDS("engine.physics.pipeline")
 TEST_DEPENDS("engine.physics.welds")
@@ -74,11 +76,39 @@ TEST_CASE("storm drag uses authored area and rigid-body mass", "[physics][storm]
 	);
 	const float speed = sample.Velocity.Magnitude();
 	const float force = 0.5f * 1.225f * response.DragCoefficient * response.ExposedArea * speed * speed;
-	const Vector3 expected = sample.Velocity.Unit() * (force * TICK / 2.0f);
+	const Vector3 expected = sample.Velocity.Unit() * std::min(force * TICK / 2.0f, speed);
 	const Vector3 actual = store.Get<engine::scene::Motion>(body)->Linear;
 	CHECK(actual.X == Approx(expected.X).margin(1e-5f));
 	CHECK(actual.Y == Approx(expected.Y).margin(1e-5f));
 	CHECK(actual.Z == Approx(expected.Z).margin(1e-5f));
+}
+
+TEST_CASE("storm drag cannot reverse past the sampled wind", "[physics][storm]") {
+	engine::scene::RegisterSceneClasses();
+	Store store("physics.storm.drag-clamp");
+	engine::physics::PreparePhysicsWorld(store);
+	const auto storm = StormAtOrigin();
+	engine::physics::SetStorm(store, storm);
+
+	const Entity body = DynamicPart(store, {storm.State.Parameters.CoreRadius, 0.0f, 0.0f}, .01f);
+	store.Set(body, engine::physics::StormResponse{.ExposedArea = 100.0f});
+
+	store.AdvanceTick(TICK);
+	engine::physics::ApplyStormForces(store);
+
+	const engine::physics::Storm *advanced = engine::physics::StormOf(store);
+	REQUIRE(advanced != nullptr);
+	const auto field = engine::scene::PrepareTornadoField(advanced->State.Parameters);
+	const auto sample = engine::scene::SampleTornadoField(
+		field,
+		advanced->State.Position,
+		store.Get<engine::scene::Transform>(body)->Frame.Position,
+		advanced->State.ElapsedSeconds
+	);
+	const Vector3 actual = store.Get<engine::scene::Motion>(body)->Linear;
+	CHECK(actual.X == Approx(sample.Velocity.X).margin(1e-5f));
+	CHECK(actual.Y == Approx(sample.Velocity.Y).margin(1e-5f));
+	CHECK(actual.Z == Approx(sample.Velocity.Z).margin(1e-5f));
 }
 
 TEST_CASE("storm link break disables the real weld and rebuilds connectivity", "[physics][storm]") {
