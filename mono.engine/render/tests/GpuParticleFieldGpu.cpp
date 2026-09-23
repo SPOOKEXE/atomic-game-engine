@@ -27,6 +27,8 @@ namespace {
 		view.WorldName = core::Name("gpu-particle-field-test");
 		view.CameraFrame = core::CFrame::LookAt({0.0f, 185.0f, 650.0f}, {0.0f, 185.0f, 0.0f});
 		view.Camera.FarPlane = 4'000.0f;
+		view.Lighting.Ambient = {1.0f, 1.0f, 1.0f};
+		view.Lighting.FogEnd = 100'000.0f;
 		view.ParticleDelta = 1.0f / 60.0f;
 		view.GpuParticles = render::GpuParticleFieldView{
 			.Field = {.RequestedCount = count, .Seed = seed},
@@ -48,6 +50,8 @@ namespace {
 
 	size_t RedDominantPixels(const CapturedImage &image, const CapturedImage &empty) {
 		size_t pixels = 0;
+		// The composed swapchain image stores blue before red in each raw pixel.
+		REQUIRE(image.Format == ImageFormat::Bgra8Unorm);
 		for (uint32_t y = 0; y < image.Height; ++y) {
 			for (uint32_t x = 0; x < image.Width; ++x) {
 				const size_t offset = y * image.RowStrideBytes + x * 4;
@@ -58,7 +62,7 @@ namespace {
 					image.Bytes[offset + 1] == empty.Bytes[offset + 1] &&
 					image.Bytes[offset + 2] == empty.Bytes[offset + 2])
 					continue;
-				pixels += channel(0) > channel(1) && channel(0) > channel(2);
+				pixels += channel(2) > channel(1) && channel(2) > channel(0);
 			}
 		}
 		return pixels;
@@ -85,7 +89,7 @@ TEST_CASE(
 		baseline.Slot,
 		target.Width,
 		target.Height,
-		ImageFormat::Rgba8Unorm
+		ImageFormat::Bgra8Unorm
 	);
 	auto first = FieldView(target, 262'144, 17);
 	const render::FrameResult firstFrame =
@@ -98,7 +102,7 @@ TEST_CASE(
 		first.Slot,
 		target.Width,
 		target.Height,
-		ImageFormat::Rgba8Unorm
+		ImageFormat::Bgra8Unorm
 	);
 	// This is the post-transparent LDR result, so a difference proves the field
 	// affected rendered pixels rather than only recording a dispatch and draw.
@@ -115,7 +119,7 @@ TEST_CASE(
 		disabled.Slot,
 		target.Width,
 		target.Height,
-		ImageFormat::Rgba8Unorm
+		ImageFormat::Bgra8Unorm
 	);
 	CHECK(ChangedBytes(empty, disabledImage) == 0);
 
@@ -132,7 +136,7 @@ TEST_CASE(
 		red.Slot,
 		target.Width,
 		target.Height,
-		ImageFormat::Rgba8Unorm
+		ImageFormat::Bgra8Unorm
 	);
 	CHECK(ChangedBytes(empty, redImage) > 64);
 	CHECK(RedDominantPixels(redImage, empty) > 64);
@@ -149,7 +153,7 @@ TEST_CASE(
 		smallerFainter.Slot,
 		target.Width,
 		target.Height,
-		ImageFormat::Rgba8Unorm
+		ImageFormat::Bgra8Unorm
 	);
 	CHECK(ChangedBytes(redImage, smallerFainterImage) > 64);
 	const render::GpuMemoryStatistics firstMemory = fixture.Render.MemoryStatistics();
