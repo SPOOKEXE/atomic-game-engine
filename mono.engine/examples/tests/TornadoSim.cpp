@@ -61,8 +61,9 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("StormRestFrame") != std::string::npos);
 	CHECK(document.find("retireWhenBroken") != std::string::npos);
 	CHECK(document.find("Debris:AddItem") != std::string::npos);
-	CHECK(document.find("MessagingService:PublishAsync(\"tornado.sim.control\"") != std::string::npos);
-	CHECK(document.find("MessagingService:SubscribeAsync(\"tornado.sim.control\"") != std::string::npos);
+	CHECK(document.find("<Item class=\"RemoteEvent\" name=\"TornadoControl\"") != std::string::npos);
+	CHECK(document.find("controlEvent:FireServer(HttpService:JSONEncode(change))") != std::string::npos);
+	CHECK(document.find("controlEvent.OnServerEvent:Connect(") != std::string::npos);
 	CHECK(document.find("Controls.parameters") != std::string::npos);
 	CHECK(document.find("request.kind == \"parameters\"") != std::string::npos);
 	CHECK(document.find("request.kind == \"layers\"") != std::string::npos);

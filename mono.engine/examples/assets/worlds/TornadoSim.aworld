@@ -65,7 +65,9 @@ return Controls
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+local controlEvent = ReplicatedStorage.TornadoControl
 
 -- The fixed-step physics resource owns lifecycle and force application.
 Storm.Configure(Controls.default)
@@ -88,8 +90,9 @@ end
 local particleField = workspace:FindFirstChild("TornadoParticles", true)
 
 -- Authority applies validated requests from the in-game controls.
-MessagingService:SubscribeAsync("tornado.sim.control", function(message)
-	local request = message :: any
+controlEvent.OnServerEvent:Connect(function(payload: string)
+	local decoded, request = pcall(function() return HttpService:JSONDecode(payload) end)
+	if not decoded then return end
 	if type(request) ~= "table" then return end
 	if request.kind == "preset" and type(request.name) == "string" and validPreset[request.name] then
 		Storm.Preset(request.name)
@@ -255,7 +258,8 @@ local Workspace = game:GetService("Workspace")
 local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
-local MessagingService = game:GetService("MessagingService")
+local HttpService = game:GetService("HttpService")
+local controlEvent = ReplicatedStorage.TornadoControl
 
 local function makePart(name: string, size: Vector3, position: Vector3, colour: Color3): Part
 	local part = Instance.new("Part")
@@ -779,7 +783,7 @@ camera.Parent = Workspace
 Workspace.CurrentCamera = camera
 
 local function request(change: { [string]: any })
-	MessagingService:PublishAsync("tornado.sim.control", change)
+	controlEvent:FireServer(HttpService:JSONEncode(change))
 end
 
 local gui = Instance.new("ScreenGui")
@@ -1176,6 +1180,7 @@ end)
 		</Item>
 	</Item>
 	<Item class="ReplicatedStorage" name="ReplicatedStorage" id="16">
+		<Item class="RemoteEvent" name="TornadoControl" id="31" />
 		<Item class="ModuleScript" name="TornadoSim" id="17">
 			<Property name="Source" type="string">scripts/shared/TornadoSim/init.luau</Property>
 			<Item class="ModuleScript" name="StormControls" id="18"><Property name="Source" type="string">scripts/shared/TornadoSim/StormControls.luau</Property></Item>
