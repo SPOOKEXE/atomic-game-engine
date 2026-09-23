@@ -155,7 +155,7 @@ namespace {
 		// Storm clouds are deliberately broad but not opaque, leaving enough sky
 		// for the atmosphere capture while exposing the compute path's darkening.
 		environment.CloudLayer.Cover = 0.7f;
-		environment.CloudLayer.Density = 0.72f;
+		environment.CloudLayer.Density = 0.8f;
 		environment.CloudLayer.WindSpeed = 8.0f;
 		environment.CloudLayer.WindDirection = {0.6f, 0.8f};
 		environment.CloudLayer.Enabled = true;
