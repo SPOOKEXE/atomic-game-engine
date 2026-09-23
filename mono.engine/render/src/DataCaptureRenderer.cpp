@@ -612,6 +612,28 @@ namespace engine::render {
 			ticket.CompletedImages = std::move(*completed);
 			ticket.ImagesTaken = true;
 		}
+		if (ticket.CompletedImages.empty()) {
+			// Every requested shadow can be unavailable. No GPU work then exists
+			// to complete the timing ticket, so finish before waiting for it.
+			poll.Pipeline = ticket.Pipeline;
+			poll.ViewSlot = ticket.ViewSlot;
+			poll.GpuTimingReason = "unavailable/no_capture_gpu_commands";
+			for (size_t index = 0; index < ticket.Channels.size(); ++index) {
+				DataCapturePlane plane = Plane(ticket.Channels[index], ticket);
+				plane.LightId = ticket.LightIds[index];
+				if (ticket.Channels[index] == DataCaptureChannel::LocalLightShadowVisibility) {
+					plane.Provenance = !ticket.LocalLightMatched[index]
+										   ? "unavailable/local_light_not_visible_or_culled/v1"
+										   : "unavailable/local_light_shadows_disabled/v1";
+				}
+				poll.Planes.push_back(std::move(plane));
+			}
+			poll.Status = DataCaptureStatus::Unsupported;
+			ticket.ResourceTokens.clear();
+			ticket.ChannelResourceIndices.clear();
+			State->CaptureTimings.erase(ticket.GpuTimingId);
+			return poll;
+		}
 		State->CollectTimings();
 		if (const auto timing = State->CaptureTimings.find(ticket.GpuTimingId);
 			timing != State->CaptureTimings.end()) {
@@ -638,18 +660,6 @@ namespace engine::render {
 			poll.HostReadbackReservedCapacityBytes += image.ReadbackHostReservedCapacityBytes;
 			poll.DeviceReadbackStagingReservedCapacityBytes +=
 				image.ReadbackDeviceStagingReservedCapacityBytes;
-		}
-		if (images.empty()) {
-			poll.Pipeline = ticket.Pipeline;
-			poll.ViewSlot = ticket.ViewSlot;
-			for (const DataCaptureChannel channel : ticket.Channels)
-				poll.Planes.push_back(Plane(channel, ticket));
-			poll.Status = DataCaptureStatus::Unsupported;
-			ticket.ResourceTokens.clear();
-			ticket.ChannelResourceIndices.clear();
-			ticket.CompletedImages.clear();
-			State->CaptureTimings.erase(ticket.GpuTimingId);
-			return poll;
 		}
 		const ResourceImage &image = images.front();
 		poll.CaptureFrame = image.CaptureFrame;

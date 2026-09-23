@@ -706,6 +706,48 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"disabled local light shadows complete without a GPU timing result", "[render][gpu][data-capture]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("disabled-local-light-shadows");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	DataCaptureRequest request{
+		.SnapshotId = "disabled-shadow-snapshot",
+		.Pipeline = pipeline,
+		.CaptureNode = core::Name("data-capture"),
+		.Channels = {DataCaptureChannel::LocalLightShadowVisibility},
+		.ObjectLabels = {},
+		.SemanticLabels = {},
+		.PartLabels = {},
+		.LocalLightIds = {"light/key", "light/fill", "light/rim"},
+	};
+	DataCaptureTicket ticket;
+	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	ticket.LocalLightMatched = {1, 1, 1};
+	ticket.LocalLightShadowAvailable = {0, 0, 0};
+	const DataCapturePoll poll = renderer.PollDataCapture(ticket);
+	REQUIRE(poll.Status == DataCaptureStatus::Unsupported);
+	REQUIRE(poll.Planes.size() == 3);
+	capture_record_validation::State validation;
+	for (size_t index = 0; index < poll.Planes.size(); ++index) {
+		CHECK(poll.Planes[index].LightId == request.LocalLightIds[index]);
+		CHECK(poll.Planes[index].Status == DataCaptureStatus::Unsupported);
+		CHECK(poll.Planes[index].Provenance == "unavailable/local_light_shadows_disabled/v1");
+		CHECK(capture_record_validation::Plane(ticket, poll.Planes[index], 1, validation));
+	}
+	CHECK(ticket.ResourceTokens.empty());
+}
+
+TEST_CASE(
 	"capture record validation rejects hostile planes and status mismatches", "[render][data-capture]"
 ) {
 	DataCaptureTicket ticket;

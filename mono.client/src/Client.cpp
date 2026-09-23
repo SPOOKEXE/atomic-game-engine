@@ -4,6 +4,7 @@
 #include "DisplayedSceneView.hpp"
 #include "NamedCaptureView.hpp"
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
 #include <engine/control/features/DataCapture.hpp>
@@ -74,10 +75,13 @@
 #include <cmath>
 #include <cstddef>
 #include <fstream>
+#include <map>
 #include <network/SessionKey.hpp>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace client {
@@ -88,28 +92,92 @@ namespace client {
 	using engine::render::ProfilerTab;
 
 	namespace {
+		std::string AuthoredPathSegment(std::string_view name) {
+			std::string segment;
+			constexpr char digits[] = "0123456789ABCDEF";
+			for (const unsigned char byte : name) {
+				if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
+					(byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.') {
+					segment += static_cast<char>(byte);
+				} else {
+					segment += '%';
+					segment += digits[byte >> 4];
+					segment += digits[byte & 15];
+				}
+			}
+			return segment.empty() ? "unnamed" : segment;
+		}
+
 		bool IdentifyAuthoredInstances(engine::ecs::Store &store) {
 			const engine::core::Name key(engine::script::DATA_SCENE_ID_ATTRIBUTE);
-			std::vector<engine::ecs::Entity> missing;
+			struct NamedInstance {
+				engine::ecs::Entity Entity;
+				engine::ecs::Entity Parent;
+				std::string Segment;
+				bool Missing = false;
+			};
+			std::vector<NamedInstance> instances;
 			std::unordered_set<std::string> used;
 			store.Each<const engine::ecs::InstanceName>([&](engine::ecs::Entity entity, const auto &) {
 				engine::ecs::AttributeValue value;
-				if (engine::ecs::GetAttribute(store, entity, key, value) &&
-					value.Type == engine::ecs::PropertyType::String && !value.String.empty()) {
-					used.insert(value.String);
-				} else {
-					missing.push_back(entity);
-				}
+				const bool identified = engine::ecs::GetAttribute(store, entity, key, value) &&
+										value.Type == engine::ecs::PropertyType::String &&
+										!value.String.empty();
+				if (identified) used.insert(value.String);
+				instances.push_back(
+					{entity,
+					 store.ParentOf(entity),
+					 AuthoredPathSegment(store.InstanceNameOf(entity).Text()),
+					 !identified}
+				);
 			});
-			for (const engine::ecs::Entity entity : missing) {
-				std::string id = "authored/" + std::to_string(entity.Id);
-				while (used.contains(id))
-					id += "_";
+			std::sort(instances.begin(), instances.end(), [](const auto &left, const auto &right) {
+				return left.Entity.Id < right.Entity.Id;
+			});
+			std::map<std::pair<uint64_t, std::string>, size_t> siblingCounts;
+			for (const auto &instance : instances)
+				++siblingCounts[{instance.Parent.Id, instance.Segment}];
+			std::unordered_map<uint64_t, size_t> byEntity;
+			for (size_t index = 0; index < instances.size(); ++index)
+				byEntity.emplace(instances[index].Entity.Id, index);
+			std::map<std::pair<uint64_t, std::string>, size_t> siblingOrdinals;
+			// Same-name siblings use creation order. Scripts needing persistent identity
+			// across reordered creation should set DataFactoryId explicitly.
+			for (auto &instance : instances) {
+				const auto sibling = std::pair{instance.Parent.Id, instance.Segment};
+				const size_t ordinal = siblingOrdinals[sibling]++;
+				if (siblingCounts[sibling] > 1) instance.Segment += "~" + std::to_string(ordinal);
+			}
+			for (const auto &instance : instances) {
+				if (!instance.Missing) continue;
+				std::vector<std::string_view> ancestry;
+				ancestry.push_back(instance.Segment);
+				auto parent = byEntity.find(instance.Parent.Id);
+				while (parent != byEntity.end()) {
+					const auto &ancestor = instances[parent->second];
+					ancestry.push_back(ancestor.Segment);
+					parent = byEntity.find(ancestor.Parent.Id);
+				}
+				std::string id = "authored";
+				for (auto segment = ancestry.rbegin(); segment != ancestry.rend(); ++segment) {
+					id += '/';
+					id += *segment;
+				}
+				if (id.size() > engine::script::MAX_DATA_SCENE_ID_BYTES || used.contains(id)) {
+					const std::string path = id;
+					for (size_t collision = 0;; ++collision) {
+						const std::string salted =
+							collision == 0 ? path : path + "#" + std::to_string(collision);
+						const auto bytes = std::as_bytes(std::span(salted.data(), salted.size()));
+						id = "authored/hash/" + engine::assets::Hasher::Of(bytes).ToHex();
+						if (!used.contains(id)) break;
+					}
+				}
 				used.insert(id);
 				engine::ecs::AttributeValue value;
 				value.Type = engine::ecs::PropertyType::String;
 				value.String = std::move(id);
-				if (!engine::ecs::SetAttribute(store, entity, key, value)) return false;
+				if (!engine::ecs::SetAttribute(store, instance.Entity, key, value)) return false;
 			}
 			return true;
 		}
