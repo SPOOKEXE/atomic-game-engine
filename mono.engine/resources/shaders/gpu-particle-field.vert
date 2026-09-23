@@ -62,7 +62,7 @@ void main() {
 		// enough that the blend integrates to cloud density instead of an opaque
 		// tube. The column tapers before the cloud deck, so upper parcels may not
 		// become a detached rectangular cap.
-		size *= mix(0.92, 1.42, pow(smoothstep(0.03, 0.68, height), 0.72)) * mix(0.82, 1.54, renderDensity) * mix(0.76, 1.26, seed);
+		size *= mix(0.92, 1.42, pow(smoothstep(0.03, 0.68, height), 0.72)) * mix(0.82, 1.54, renderDensity) * mix(0.94, 1.06, seed);
 		float luminance = dot(visual.rgb, vec3(0.2126, 0.7152, 0.0722));
 		visual.rgb = mix(visual.rgb, vec3(luminance), 0.78) * mix(0.78, 1.08, seed);
 		// The depth-sliced path draws a bounded 18k cohort, unlike the former

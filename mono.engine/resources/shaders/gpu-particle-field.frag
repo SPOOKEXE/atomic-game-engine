@@ -42,8 +42,11 @@ void main() {
 		vec2 point = inTexCoord - vec2(0.5);
 		vec2 billowDirection = inFieldData.yz;
 		float billowDistance = BillowDistance(point, billowDirection);
-		float scallop = 0.08 * dot(point, billowDirection);
-		float softness = 1.0 - smoothstep(0.44, 1.04 + scallop, billowDistance);
+		float scallop = 0.035 * dot(point, billowDirection);
+		// A broad shoulder lets adjacent depth-sorted parcels merge into a cloud
+		// volume. The previous narrow edge exposed every billboard as a separate
+		// circular puff at the reference camera distance.
+		float softness = 1.0 - smoothstep(0.20, 1.28 + scallop, billowDistance);
 		// Fade the rising edge across several billows. A hard cut at the authored
 		// height turns even a sparse field into a rectangular cap.
 		float topFade = 1.0 - smoothstep(0.40, 0.68, inFieldData.x);
