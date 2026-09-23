@@ -1542,6 +1542,7 @@ declare interface Light extends Instance {
 	Color: Color3;
 	Enabled: boolean;
 	Range: number;
+	Shadows: boolean;
 }
 
 declare interface PointLight extends Light {

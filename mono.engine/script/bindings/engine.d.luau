@@ -1822,6 +1822,7 @@ declare extern type Light extends Instance with
 	Color: Color3
 	Enabled: boolean
 	Range: number
+	Shadows: boolean
 end
 
 declare extern type PointLight extends Light with
