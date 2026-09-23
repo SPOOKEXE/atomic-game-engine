@@ -1100,8 +1100,11 @@ namespace server {
 		// Factory callbacks borrow DataFactory, so their leases close first.
 		engine::control::HookLease FactoryLifecycleControlHook;
 		engine::control::HookLease FactorySceneControlHook;
+		engine::control::HookLease FactoryPhysicsControlHook;
 		engine::control::HookLease FactoryCameraRenderingControlHook;
 		engine::control::HookLease FactoryPackageControlHook;
+		// Replication callbacks borrow the completed-record queue.
+		engine::control::HookLease ReplicationObservationControlHook;
 		engine::world::WorldId PrimaryWorld;
 
 		// Placement derived once from `Options::Worlds`. The driver keeps the

@@ -199,8 +199,10 @@
           ]
         },
         {
-          "id": "builtin.physics_observation",
-          "limits": {},
+          "id": "server.data-factory.physics-observation",
+          "limits": {
+            "records": 96
+          },
           "revision": "v1",
           "state": "active",
           "tools": [
@@ -6834,6 +6836,20 @@
         },
         "name": "world_tree"
       }
+    }
+  },
+  "replication_observation": {
+    "hook": {
+      "id": "server.replication-observation",
+      "limits": {
+        "records": 256
+      },
+      "revision": "v1",
+      "state": "active",
+      "tools": [
+        "replication_observation_hooks",
+        "replication_observation_poll"
+      ]
     }
   }
 }

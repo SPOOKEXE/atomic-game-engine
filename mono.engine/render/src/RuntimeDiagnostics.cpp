@@ -76,13 +76,20 @@ namespace engine::render {
 			float Stop = 0.0f;
 			std::array<RayBound, MAX_PASS_THROUGH_BOUNDS> PassThrough{};
 			size_t Count = 0;
+			const scene::DrawInstance *Reflection = nullptr;
+			float ReflectionDistance = 0.0f;
 		};
 
-		ProbeBounds
-		TraceBounds(const Ray &ray, float maximum, std::span<const scene::DrawInstance> instances) {
+		ProbeBounds TraceBounds(
+			const Ray &ray,
+			float maximum,
+			std::span<const scene::DrawInstance> instances,
+			const scene::DrawInstance *ignored = nullptr
+		) {
 			ProbeBounds result;
 			result.Stop = maximum;
 			for (const scene::DrawInstance &instance : instances) {
+				if (&instance == ignored) continue;
 				const AABB bounds = graph::BoundsOf(instance);
 				// A local light commonly shares its part's bounds. Treating that
 				// enclosure as an occluder would make every sample end at its source.
@@ -93,9 +100,19 @@ namespace engine::render {
 				}
 				const auto hit = RayBoxDistance(ray, bounds, maximum);
 				if (!hit) continue;
-				if (!scene::IsTransparent(instance) && instance.CastShadow) {
-					const float stop = hit->Enter >= MINIMUM_DISTANCE ? hit->Enter : hit->Leave;
-					result.Stop = std::min(result.Stop, stop);
+				const float contact = hit->Enter >= MINIMUM_DISTANCE ? hit->Enter : hit->Leave;
+				if (instance.SurfaceIsPortal) {
+					// A portal samples a surface slot but opens into another view. It
+					// does not reverse this ray, so make its aperture visible as an
+					// orange pass-through interval instead of a reflection.
+				} else if (instance.Surface >= 0) {
+					if (result.Reflection == nullptr || contact < result.ReflectionDistance) {
+						result.Reflection = &instance;
+						result.ReflectionDistance = contact;
+					}
+					continue;
+				} else if (!scene::IsTransparent(instance) && instance.CastShadow) {
+					result.Stop = std::min(result.Stop, contact);
 					continue;
 				}
 				if (result.Count < result.PassThrough.size()) {
@@ -114,7 +131,44 @@ namespace engine::render {
 				result.PassThrough.begin() + result.Count,
 				[](const RayBound &left, const RayBound &right) { return left.Enter < right.Enter; }
 			);
+			if (result.Reflection != nullptr) {
+				if (result.ReflectionDistance >= result.Stop) {
+					result.Reflection = nullptr;
+				} else {
+					result.Stop = result.ReflectionDistance;
+				}
+			}
 			return result;
+		}
+
+		Vector3 SurfaceNormal(const AABB &bounds, const Vector3 &point, const Vector3 &fallback) {
+			const std::array<float, 6> distances{
+				std::abs(point.X - bounds.Minimum.X),
+				std::abs(point.X - bounds.Maximum.X),
+				std::abs(point.Y - bounds.Minimum.Y),
+				std::abs(point.Y - bounds.Maximum.Y),
+				std::abs(point.Z - bounds.Minimum.Z),
+				std::abs(point.Z - bounds.Maximum.Z),
+			};
+			const size_t face = static_cast<size_t>(
+				std::distance(distances.begin(), std::min_element(distances.begin(), distances.end()))
+			);
+			switch (face) {
+			case 0:
+				return {-1.0f, 0.0f, 0.0f};
+			case 1:
+				return {1.0f, 0.0f, 0.0f};
+			case 2:
+				return {0.0f, -1.0f, 0.0f};
+			case 3:
+				return {0.0f, 1.0f, 0.0f};
+			case 4:
+				return {0.0f, 0.0f, -1.0f};
+			case 5:
+				return {0.0f, 0.0f, 1.0f};
+			default:
+				return fallback * -1.0f;
+			}
 		}
 
 		void AddProbe(
@@ -248,7 +302,28 @@ namespace engine::render {
 					bounds.Stop - travelled,
 					LightProbeEvent::EmptySpace
 				);
-				AddTermination(Paths, ray.PointAt(bounds.Stop), direction, light.Range);
+				if (bounds.Reflection == nullptr) {
+					AddTermination(Paths, ray.PointAt(bounds.Stop), direction, light.Range);
+					continue;
+				}
+
+				const Vector3 reflectionPoint = ray.PointAt(bounds.ReflectionDistance);
+				const Vector3 normal =
+					SurfaceNormal(graph::BoundsOf(*bounds.Reflection), reflectionPoint, direction);
+				const Vector3 reflected = (direction - normal * (2.0f * direction.Dot(normal))).Unit();
+				if (reflected == Vector3::Zero) {
+					AddTermination(Paths, reflectionPoint, direction, light.Range);
+					continue;
+				}
+
+				const float remaining = light.Range - bounds.ReflectionDistance;
+				const Ray bounced{reflectionPoint + reflected * MINIMUM_DISTANCE, reflected};
+				const ProbeBounds rebound = TraceBounds(bounced, remaining, instances, bounds.Reflection);
+				const float reflectedDistance = std::min(remaining, rebound.Stop + MINIMUM_DISTANCE);
+				AddProbe(Paths, reflectionPoint, reflected, reflectedDistance, LightProbeEvent::Reflection);
+				AddTermination(
+					Paths, reflectionPoint + reflected * reflectedDistance, reflected, light.Range
+				);
 			}
 		}
 	}

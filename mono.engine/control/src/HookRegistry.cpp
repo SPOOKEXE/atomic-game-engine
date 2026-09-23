@@ -16,14 +16,17 @@ namespace engine::control {
 		std::vector<Prompt> Prompts;
 		std::string Failure;
 		std::function<bool()> Drain;
+		std::function<void()> Release;
 	};
 
 	struct HookRegistryState {
 		struct Activation {
 			HookStatus Status;
 			bool Builtin = false;
+			bool Hidden = false;
 			size_t Guards = 0;
 			std::function<bool()> Drain;
+			std::function<void()> Release;
 		};
 
 		Surface *Owner = nullptr;
@@ -192,6 +195,10 @@ namespace engine::control {
 		State->Drain = std::move(drained);
 	}
 
+	void HookRegistration::SetRelease(std::function<void()> release) {
+		State->Release = std::move(release);
+	}
+
 	HookRegistry::HookRegistry(Surface &surface) : State(std::make_shared<HookRegistryState>()) {
 		State->Owner = &surface;
 	}
@@ -206,13 +213,17 @@ namespace engine::control {
 	}
 
 	HookLease HookRegistry::ActivateBuiltin(
-		HookDescriptor descriptor, const HookInstaller &installer, std::string &failure
+		HookDescriptor descriptor, const HookInstaller &installer, std::string &failure, bool hidden
 	) {
-		return ActivateImpl(std::move(descriptor), installer, failure, true);
+		return ActivateImpl(std::move(descriptor), installer, failure, true, hidden);
 	}
 
 	HookLease HookRegistry::ActivateImpl(
-		HookDescriptor descriptor, const HookInstaller &installer, std::string &failure, bool builtin
+		HookDescriptor descriptor,
+		const HookInstaller &installer,
+		std::string &failure,
+		bool builtin,
+		bool hidden
 	) {
 		failure.clear();
 		if (descriptor.Id.empty() || descriptor.Revision.empty()) {
@@ -234,10 +245,12 @@ namespace engine::control {
 		try {
 			if (installer) installer(registration);
 		} catch (const std::exception &exception) {
+			if (registration.State->Release) registration.State->Release();
 			failure = exception.what();
 			return {};
 		}
 		if (!registration.Failure().empty()) {
+			if (registration.State->Release) registration.State->Release();
 			failure = std::string(registration.Failure());
 			return {};
 		}
@@ -253,6 +266,7 @@ namespace engine::control {
 					"hook " + descriptor.Id + " cannot publish tool name collision: " + tool.Name +
 					" is owned by " +
 					(owner == State->ToolOwners.end() ? std::string("the surface") : owner->second.first);
+				if (registration.State->Release) registration.State->Release();
 				return {};
 			}
 		}
@@ -263,6 +277,7 @@ namespace engine::control {
 					"hook " + descriptor.Id + " cannot publish resource URI collision: " + resource.Uri +
 					" is owned by " +
 					(owner == State->ResourceOwners.end() ? std::string("the surface") : owner->second.first);
+				if (registration.State->Release) registration.State->Release();
 				return {};
 			}
 		}
@@ -273,6 +288,7 @@ namespace engine::control {
 					"hook " + descriptor.Id + " cannot publish prompt name collision: " + prompt.Name +
 					" is owned by " +
 					(owner == State->PromptOwners.end() ? std::string("the surface") : owner->second.first);
+				if (registration.State->Release) registration.State->Release();
 				return {};
 			}
 		}
@@ -288,7 +304,9 @@ namespace engine::control {
 			.Prompts = {},
 		};
 		activation.Builtin = builtin;
+		activation.Hidden = hidden;
 		activation.Drain = std::move(registration.State->Drain);
+		activation.Release = std::move(registration.State->Release);
 		HookLease lease(State, activation.Status.Descriptor.Id, generation);
 		std::vector<std::string> tools, resources, prompts;
 		try {
@@ -366,17 +384,18 @@ namespace engine::control {
 				return entry.second == owner;
 			});
 			std::erase_if(State->PromptOwners, [&owner](const auto &entry) { return entry.second == owner; });
+			if (activation.Release) activation.Release();
 			failure = exception.what();
 			return {};
 		}
-		State->ControlGeneration++;
+		if (!hidden) State->ControlGeneration++;
 		return lease;
 	}
 
 	std::vector<HookStatus> HookRegistry::Active() const {
 		std::vector<HookStatus> active;
 		for (const HookRegistryState::Activation &activation : State->Activations) {
-			active.push_back(activation.Status);
+			if (!activation.Hidden) active.push_back(activation.Status);
 		}
 		return active;
 	}
@@ -500,6 +519,8 @@ namespace engine::control {
 				State->PromptOwners.erase(owner);
 			}
 		}
+		const bool hidden = activation->Hidden;
+		if (activation->Release) activation->Release();
 		State->Activations.erase(
 			std::remove_if(
 				State->Activations.begin(),
@@ -510,7 +531,7 @@ namespace engine::control {
 			),
 			State->Activations.end()
 		);
-		State->ControlGeneration++;
+		if (!hidden) State->ControlGeneration++;
 		Reap();
 	}
 

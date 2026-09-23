@@ -183,6 +183,39 @@ namespace {
 		CHECK(discovery["contract_version"] == "1");
 		CHECK(discovery.contains("hooks"));
 		if (factory) CHECK_FALSE(discovery["hooks"].empty());
+		if (!factory) {
+			const auto worlds = Ask(socket, 6, "tools/call", {{"name", "world_list"}, {"arguments", {}}});
+			REQUIRE(worlds);
+			CHECK_FALSE((*worlds)["result"].value("isError", false));
+			CHECK_FALSE(json::parse((*worlds)["result"]["content"][0]["text"].get<std::string>()).empty());
+			const auto components =
+				Ask(socket, 7, "tools/call", {{"name", "component_list"}, {"arguments", {}}});
+			REQUIRE(components);
+			CHECK_FALSE((*components)["result"].value("isError", false));
+			CHECK(
+				json::parse((*components)["result"]["content"][0]["text"].get<std::string>())
+					.contains("components")
+			);
+			const auto click = Ask(
+				socket, 8, "tools/call", {{"name", "emulate_click"}, {"arguments", {{"x", 5.0}, {"y", 5.0}}}}
+			);
+			REQUIRE(click);
+			CHECK_FALSE((*click)["result"].value("isError", false));
+			CHECK(json::parse((*click)["result"]["content"][0]["text"].get<std::string>())["queued"] == true);
+			const auto key =
+				Ask(socket, 9, "tools/call", {{"name", "emulate_key"}, {"arguments", {{"key", "F5"}}}});
+			REQUIRE(key);
+			CHECK_FALSE((*key)["result"].value("isError", false));
+			CHECK(json::parse((*key)["result"]["content"][0]["text"].get<std::string>())["queued"] == true);
+			const auto text =
+				Ask(socket,
+					10,
+					"tools/call",
+					{{"name", "emulate_text"}, {"arguments", {{"text", "headless control"}}}});
+			REQUIRE(text);
+			CHECK_FALSE((*text)["result"].value("isError", false));
+			CHECK(json::parse((*text)["result"]["content"][0]["text"].get<std::string>())["queued"] == true);
+		}
 		const json observed{
 			{"server", (*opened)["result"]["serverInfo"]["name"]},
 			{"initialize", StableInitialize((*opened)["result"])},

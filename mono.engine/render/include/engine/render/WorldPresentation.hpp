@@ -132,6 +132,11 @@ namespace engine::render {
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state);
 
+	// Signs resolved lighting and local lights without reading padding. Portal-image renewal uses this
+	// value because its reply must stay stable for equivalent copied world snapshots.
+	uint64_t
+	LightingPresentationSignature(const scene::WorldLighting &lighting, std::span<const SceneLight> lights);
+
 	// Signs inputs that can move an invisible particle layer back into a camera.
 	// Simulation time is deliberately absent, so an off-camera resident pool can
 	// advance without invalidating pixels that remain unchanged.
@@ -317,13 +322,19 @@ namespace engine::render {
 	void RegisterPresentationComponents();
 	// Copies shared seam geometry and traversal mappings for local portal captures.
 	size_t CollectPortalViews(
-		ecs::Store &store, std::vector<PortalView> &portals, std::span<const scene::SurfaceSlot> slots = {}
+		ecs::Store &store,
+		std::vector<PortalView> &portals,
+		std::span<const scene::SurfaceSlot> slots = {},
+		float alpha = 1.0f
 	);
 
 	// Applies request-local slots to copied rows from this world only. Rows from
 	// foreign presentation messages retain their independently owned indices.
 	void ApplySurfaceSlots(
-		std::span<scene::DrawInstance> instances, std::span<const scene::SurfaceSlot> slots, core::Name world
+		std::span<scene::DrawInstance> instances,
+		std::span<const scene::SurfaceSlot> slots,
+		core::Name world,
+		std::span<const scene::PortalSeam> portals = {}
 	);
 
 	// Copies surface views in entity order. An explicit viewer derives mirror

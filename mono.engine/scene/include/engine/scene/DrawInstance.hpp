@@ -175,6 +175,11 @@ namespace engine::scene {
 		// the `static_assert` below is what keeps that true.
 		int16_t Surface = -1;
 
+		// A linked portal also samples a surface slot, but maps a view into its
+		// partner instead of reflecting this side. Consumers that need a mirror
+		// must use this distinction rather than treating every surface as one.
+		bool SurfaceIsPortal = false;
+
 		// Whether this instance is drawn into the shadow map.
 		//
 		// **Carried rather than derived, because the renderer cannot work it

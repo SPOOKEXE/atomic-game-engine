@@ -112,6 +112,13 @@ static void RunPortalSuccessor(int outcome) {
 	}
 	offer.Port = destinationSocket->Local().Port;
 	offer.Through.Frame = core::CFrame({20, 0, 0}) * core::CFrame::Angles(0, .5f, 0);
+	script::PortalTransferFence handoffFence;
+	handoffFence.TopologyRevision = 1;
+	handoffFence.AuthorityEpoch = 202;
+	handoffFence.PrepareRevision = 1;
+	handoffFence.BaselineId = 1;
+	handoffFence.BaselineHash.Digest[0] = 1;
+	handoffFence.H = {"destination", 1, 1};
 	if (outcome == 0) {
 		std::vector<scene::PortalSeam> seams;
 		REQUIRE(scene::GatherPortalSeams(source, seams) == 1);
@@ -407,6 +414,7 @@ static void RunPortalSuccessor(int outcome) {
 			crossed.Kind = game::PortalSessionKind::Crossed;
 			crossed.Attempt = offer.Attempt;
 			crossed.Claim = offer.Claim;
+			crossed.Fence = handoffFence;
 			sourceReplies.emplace_back(peer, crossed);
 		} else if (request.Kind == game::PortalSessionKind::Refused) {
 			REQUIRE(retryRefusal);
@@ -499,6 +507,7 @@ static void RunPortalSuccessor(int outcome) {
 			CHECK(proceeded);
 			resumed = true;
 			reply.Kind = game::PortalSessionKind::Ready;
+			reply.Fence = handoffFence;
 		} else if (request.Kind == game::PortalSessionKind::Commit) {
 			CHECK(resumed);
 			committed = true;
@@ -516,10 +525,11 @@ static void RunPortalSuccessor(int outcome) {
 		"--frames",
 		"100000",
 		"--profile-seconds",
-		readinessExpiry ? "25"
-		: outcome >= 4	? "15"
-		: outcome == 0	? "8"
-						: "5",
+		readinessExpiry		 ? "25"
+		: delayedDestination ? "20"
+		: outcome >= 4		 ? "15"
+		: outcome == 0		 ? "8"
+							 : "5",
 		"--config",
 		config.string(),
 		"--connect",
@@ -585,7 +595,11 @@ end)
 
 	bool offered = false;
 	uint64_t tick = 0;
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(readinessExpiry ? 30 : 20);
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(
+																 readinessExpiry	  ? 30
+																 : delayedDestination ? 25
+																					  : 20
+															 );
 	while (child.Poll().Alive() && std::chrono::steady_clock::now() < deadline) {
 		now = core::Clock::Seconds();
 		from.Poll(now);
@@ -695,7 +709,9 @@ end)
 	if (observeContent) {
 		CHECK(lateContentAuthored);
 		CHECK(sourceManifestWaited);
-		CHECK(sourceContent.BundleRequests == 1);
+		// The delayed successor resolves its own camera after adoption. With no
+		// return seam visible, the old source eye creates no late content demand.
+		CHECK(sourceContent.BundleRequests == (delayedDestination ? 0 : 1));
 		if (renderContent) {
 			CHECK(destinationContentRequestedBeforeAdoption);
 			CHECK(destinationContent.BundleRequests == (lateLocalDemand ? 2 : 1));
@@ -703,11 +719,13 @@ end)
 				REQUIRE(destinationContent.SecondBundleRequestedAt);
 				CHECK(*destinationContent.SecondBundleRequestedAt > *destinationInputAt + 1);
 			}
-			REQUIRE(sourceContent.FirstBundleReplyAt);
+			if (!delayedDestination) REQUIRE(sourceContent.FirstBundleReplyAt);
 			REQUIRE(destinationContent.FirstBundleReplyAt);
 			CHECK(*destinationContent.FirstBundleReplyAt < *destinationInputAt);
-			CHECK(*sourceContent.FirstBundleReplyAt > *destinationInputAt);
-			CHECK(now > *sourceContent.FirstBundleReplyAt + 1);
+			if (!delayedDestination) {
+				CHECK(*sourceContent.FirstBundleReplyAt > *destinationInputAt);
+				CHECK(now > *sourceContent.FirstBundleReplyAt + 1);
+			}
 			std::filesystem::path latest;
 			uint64_t lastFrame = 0;
 			for (const auto &entry : std::filesystem::directory_iterator(captures)) {
@@ -726,9 +744,9 @@ end)
 			const auto finalFrame = nlohmann::json::parse(recorded);
 			CHECK(
 				finalFrame.at(meshContent ? "delivered_meshes" : "delivered_textures") ==
-				(refuseSourceContent ? 1
-				 : lateLocalDemand	 ? 3
-									 : 2)
+				(refuseSourceContent || delayedDestination ? 1
+				 : lateLocalDemand						   ? 3
+														   : 2)
 			);
 			CHECK(finalFrame.at("pending_content") == 0);
 			if (retireSource) {
@@ -765,7 +783,9 @@ end)
 					after.at("released_bytes").get<uint64_t>() >=
 					before.at("released_bytes").get<uint64_t>() + 4
 				);
-			} else
+			} else if (delayedDestination)
+				CHECK_FALSE(finalFrame.contains("retained_world"));
+			else
 				CHECK(finalFrame.at("retained_world") == "client.replica");
 			CHECK(finalFrame.at("content_owner") == "client.portal.1");
 			CHECK(finalFrame.at("view_world") == "client.portal.1");
@@ -792,10 +812,10 @@ end)
 	CHECK(destinationFresh == 0);
 	CHECK_FALSE(sourceConsumers.Endpoints.empty());
 	CHECK(destinationConsumers.Revision != 0);
-	CHECK(destinationConsumers.Endpoints.empty() == (outcome != 0));
+	CHECK(destinationConsumers.Endpoints.empty() == (outcome != 0 && !delayedDestination));
 	CHECK(destinationConsumers.Session == sourceConsumers.Session);
 	CHECK(requestedImage == (outcome == 0));
-	CHECK(requestedEye == (outcome == 0));
+	CHECK(requestedEye == (outcome == 0 || delayedDestination));
 	CHECK(refusalSeen == retryRefusal);
 	CHECK(destinationRefusalSeen == (outcome == 2 || outcome == 3));
 	CHECK(transportLost == (outcome == 4 || outcome == 5 || readinessDisconnect));

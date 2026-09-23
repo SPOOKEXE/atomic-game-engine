@@ -9,8 +9,8 @@
 # The client writes each rendered frame and its camera-state JSON sidecar. The
 # report keeps the side and far image measurements, then records the presented
 # frame, camera route revisions, fixture, resolution, backend, pipeline revision
-# and tolerance in one reviewable report. Set BACKEND and PIPELINE_REVISION when
-# the runtime exposes those values; the harness reports "unknown" otherwise.
+# and tolerance in one reviewable report. The backend comes from the renderer
+# startup log. Set PIPELINE_REVISION when the runtime exposes that value.
 
 set -euo pipefail
 
@@ -21,7 +21,13 @@ preset=${PRESET:-dev}
 build="$root/.cache/build/$preset"
 out=${OUT:-$build/captures}
 frames=${FRAMES:-90}
+width=${WIDTH:-1920}
+height=${HEIGHT:-1080}
+fps=${FPS:-60}
+capture_alpha=${CAPTURE_ALPHA:-0.5}
+capture_timeout=${CAPTURE_TIMEOUT:-300}
 backend=${BACKEND:-unknown}
+detected_backend=
 pipeline_revision=${PIPELINE_REVISION:-unknown}
 side_ratio_maximum=${SIDE_RATIO_MAXIMUM:-0.75}
 
@@ -29,6 +35,12 @@ if ! [[ "$frames" =~ ^[1-9][0-9]*$ ]]; then
 	echo "FRAMES must be a positive integer" >&2
 	exit 1
 fi
+for setting in width height fps capture_timeout; do
+	if ! [[ "${!setting}" =~ ^[1-9][0-9]*$ ]]; then
+		echo "${setting^^} must be a positive integer" >&2
+		exit 1
+	fi
+done
 
 cmake -S "$root" --preset "$preset" > /dev/null
 cmake --build "$build" --target client
@@ -53,9 +65,27 @@ capture_sequence() {
 	mkdir -p "$sequence"
 	rm -f "$sequence"/*.bmp "$sequence"/*.json
 	echo "capturing $label ($frames frames)"
-	timeout 120 "$build/client/client" \
-		--headless --uncapped --max-fps 60 --script "$staged_scene" --frames "$frames" \
-		--capture-sequence "$sequence" > /dev/null 2>&1
+	timeout "$capture_timeout" "$build/client/client" \
+		--headless --uncapped --max-fps "$fps" --width "$width" --height "$height" \
+		--script "$staged_scene" --frames "$frames" \
+		--capture-alpha "$capture_alpha" \
+		--capture-sequence "$sequence" > "$sequence/runtime.log" 2>&1
+	local ready_line
+	ready_line=$(grep -E 'renderer ready on [[:alnum:]_-]+' "$sequence/runtime.log" | tail -1 || true)
+	if [ -z "$ready_line" ]; then
+		echo "capture did not report a renderer backend for $label" >&2
+		exit 1
+	fi
+	local current_backend=${ready_line##* }
+	if [ -n "$detected_backend" ] && [ "$detected_backend" != "$current_backend" ]; then
+		echo "capture backend changed from $detected_backend to $current_backend" >&2
+		exit 1
+	fi
+	detected_backend=$current_backend
+	if [ "$backend" != unknown ] && [ "$backend" != "$detected_backend" ]; then
+		echo "requested backend $backend differs from runtime backend $detected_backend" >&2
+		exit 1
+	fi
 	for ((frame = 0; frame < frames; frame++)); do
 		if [ ! -f "$sequence/$frame.bmp" ] || [ ! -f "$sequence/$frame.json" ]; then
 			echo "capture sequence is missing frame $frame for $label" >&2
@@ -79,6 +109,10 @@ fi
 sequences=()
 front_requested=false
 for view in "${views[@]}"; do
+	case "$view" in
+		side|front|far) ;;
+		*) echo "unsupported portal view: $view" >&2; exit 1 ;;
+	esac
 	staged="$out/PortalSeam-$view.luau"
 	sequence="$out/portal-seam-$view"
 	sed "s/^local VIEW = \"[^\"]*\"$/local VIEW = \"$view\"/" "$scene" > "$staged"
@@ -114,8 +148,11 @@ fi
 
 python3 "$here/portal-seam-report.py" \
 	--fixture PortalSeam \
-	--backend "$backend" \
+	--backend "$detected_backend" \
 	--pipeline-revision "$pipeline_revision" \
+	--target-fps "$fps" \
+	--expected-alpha "$capture_alpha" \
+	--aperture-only \
 	--side-ratio-maximum "$side_ratio_maximum" \
 	"${report_requirements[@]}" \
 	--output "$out/portal-seam-report.json" \

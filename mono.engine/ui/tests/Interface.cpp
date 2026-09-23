@@ -67,3 +67,34 @@ TEST_CASE("headless interface accepts SDL pointer and keyboard events", "[ui][he
 	CHECK(characters[7] == 'l');
 	interface.End();
 }
+
+TEST_CASE("automation events retain their pointer position through a frame", "[ui][headless]") {
+	engine::render::Renderer renderer;
+	engine::ui::Interface interface;
+	engine::ui::InterfaceSettings settings;
+	settings.DisplayWidth = 640;
+	settings.DisplayHeight = 480;
+	REQUIRE(interface.Initialise(renderer, nullptr, settings));
+
+	SDL_Event physical{};
+	physical.type = SDL_EVENT_MOUSE_MOTION;
+	physical.motion.x = 10.0f;
+	physical.motion.y = 20.0f;
+	interface.ProcessEvent(physical);
+
+	SDL_Event syntheticMotion{};
+	syntheticMotion.type = SDL_EVENT_MOUSE_MOTION;
+	syntheticMotion.motion.x = 320.0f;
+	syntheticMotion.motion.y = 240.0f;
+	interface.QueueAutomationEvent(syntheticMotion);
+	SDL_Event syntheticDown{};
+	syntheticDown.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+	syntheticDown.button.button = SDL_BUTTON_LEFT;
+	interface.QueueAutomationEvent(syntheticDown);
+
+	interface.Begin(1.0f / 60.0f);
+	CHECK(ImGui::GetMousePos().x == 320.0f);
+	CHECK(ImGui::GetMousePos().y == 240.0f);
+	CHECK(ImGui::IsMouseDown(ImGuiMouseButton_Left));
+	interface.End();
+}

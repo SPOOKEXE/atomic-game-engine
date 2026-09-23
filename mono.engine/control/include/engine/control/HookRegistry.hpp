@@ -119,6 +119,8 @@ namespace engine::control {
 		std::string_view Failure() const;
 		// Retains published rows after Close until this predicate reports terminal work drained.
 		void SetDrain(std::function<bool()> drained);
+		// Releases provider-owned callbacks after its rows are no longer reachable.
+		void SetRelease(std::function<void()> release);
 
 	  private:
 		friend class HookRegistry;
@@ -166,10 +168,18 @@ namespace engine::control {
 	  private:
 		friend class HookLease;
 		friend class Surface;
-		HookLease
-		ActivateBuiltin(HookDescriptor descriptor, const HookInstaller &installer, std::string &failure);
+		HookLease ActivateBuiltin(
+			HookDescriptor descriptor,
+			const HookInstaller &installer,
+			std::string &failure,
+			bool hidden = false
+		);
 		HookLease ActivateImpl(
-			HookDescriptor descriptor, const HookInstaller &installer, std::string &failure, bool builtin
+			HookDescriptor descriptor,
+			const HookInstaller &installer,
+			std::string &failure,
+			bool builtin,
+			bool hidden = false
 		);
 		void Reap();
 		void Close(std::string_view id, uint64_t generation);

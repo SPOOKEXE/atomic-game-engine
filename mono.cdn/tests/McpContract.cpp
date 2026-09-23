@@ -174,6 +174,25 @@ TEST_CASE("CDN MCP manifest is the reviewed contract", "[cdn][mcp]") {
 	REQUIRE(product != discovery["hooks"].end());
 	CHECK((*product)["state"] == "active");
 	CHECK((*product)["tools"] == json::array({"engine_info"}));
+	const json info = Ask(socket, 6, "tools/call", {{"name", "engine_info"}, {"arguments", {}}});
+	CHECK_FALSE(info["result"].value("isError", false));
+	CHECK(json::parse(info["result"]["content"][0]["text"].get<std::string>()).contains("control"));
+	for (const std::string_view unavailable :
+		 {"emulate_click",
+		  "emulate_key",
+		  "emulate_text",
+		  "instance_get",
+		  "instance_set",
+		  "component_get",
+		  "component_set"}) {
+		CHECK_FALSE(
+			std::any_of(
+				tools["result"]["tools"].begin(),
+				tools["result"]["tools"].end(),
+				[unavailable](const json &tool) { return tool["name"] == unavailable; }
+			)
+		);
+	}
 	const json observed{
 		{"server", opened["result"]["serverInfo"]["name"]},
 		{"initialize", StableInitialize(opened["result"])},

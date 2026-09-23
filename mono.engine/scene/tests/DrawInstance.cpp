@@ -598,7 +598,7 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 	// assumption they just changed.
 	//
 	// **It survived the seam fields**, which is the case worth recording: the
-	// single-byte fields - `Surface`, `CastShadow`, `Alpha` - sit inside one
+	// single-byte fields - `SurfaceIsPortal`, `CastShadow`, `Alpha` - sit inside one
 	// four-byte word, so a four-aligned `Vector3` lands immediately after them
 	// and opens nothing. A fourth byte-sized field would still fit; a fifth is
 	// what would widen the row.
@@ -644,6 +644,7 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.Alpha = engine::scene::AlphaMode::Transparency; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Shader = Name("drawinstance_test.Shader"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Surface = 0; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SurfaceIsPortal = true; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinFirst = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinCount = 1; }) != unchanged);

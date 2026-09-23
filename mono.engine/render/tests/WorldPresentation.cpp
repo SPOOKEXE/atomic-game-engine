@@ -21,6 +21,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstring>
+#include <memory>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.worldpresentation")
@@ -716,6 +718,54 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
 }
 
+TEST_CASE(
+	"semantic override lighting ignores padding in the presentation signature", "[render][presentation]"
+) {
+	using namespace engine;
+	using LightingStorage = std::array<std::byte, sizeof(scene::WorldLighting)>;
+	alignas(scene::WorldLighting) LightingStorage firstBytes, secondBytes;
+	firstBytes.fill(std::byte{0x1a});
+	secondBytes.fill(std::byte{0xe5});
+	auto *first = std::construct_at(reinterpret_cast<scene::WorldLighting *>(firstBytes.data()));
+	auto *second = std::construct_at(reinterpret_cast<scene::WorldLighting *>(secondBytes.data()));
+	static_assert(
+		offsetof(scene::VolumeState, Enabled) + sizeof(scene::VolumeState::Enabled) <
+		sizeof(scene::VolumeState)
+	);
+	// This slot is outside VolumeCount and its final byte is padding, so it cannot change rendered lighting.
+	auto *const padding =
+		reinterpret_cast<std::byte *>(&second->Volumes.front()) + sizeof(scene::VolumeState) - 1;
+	*padding = std::byte{0xe5};
+	CHECK(std::memcmp(first, second, sizeof(scene::WorldLighting)) != 0);
+
+	std::array instances{scene::DrawInstance{}};
+	render::View left, right;
+	left.Instances = instances;
+	right.Instances = instances;
+	left.OverrideLighting = right.OverrideLighting = true;
+	std::memcpy(&left.Lighting, first, sizeof(left.Lighting));
+	std::memcpy(&right.Lighting, second, sizeof(right.Lighting));
+	const auto signature = [](const render::View &view) {
+		return render::ScenePresentationSignaturesOf(view, {}).Objects;
+	};
+	const uint64_t original = signature(left);
+	CHECK(original == signature(right));
+	CHECK(
+		render::LightingPresentationSignature(*first, {}) ==
+		render::LightingPresentationSignature(*second, {})
+	);
+
+	right.Lighting.BloomIntensity = 1.0f;
+	CHECK(original != signature(right));
+	right.Lighting = left.Lighting;
+	right.Lighting.VolumeCount = 1;
+	right.Lighting.Volumes[0].Enabled = true;
+	CHECK(original != signature(right));
+
+	std::destroy_at(first);
+	std::destroy_at(second);
+}
+
 TEST_CASE("camera oscillation never settles the scene presentation cache", "[render][presentation][damage]") {
 	engine::scene::DrawInstance instance;
 	const std::array instances{instance};
@@ -1125,10 +1175,18 @@ TEST_CASE(
 	}
 	instances[1].SourceWorld = core::Name("foreign-owner");
 	instances[2].SourceWorld = core::Name("request-slot-map");
-	render::ApplySurfaceSlots(instances, slots, core::Name("request-slot-map"));
+	std::vector<scene::PortalSeam> seams;
+	REQUIRE(scene::GatherPortalSeams(store, seams) == 2);
+	for (auto &seam : seams) {
+		for (const auto &slot : slots)
+			if (slot.Camera == seam.Camera) seam.Surface = slot.Index;
+	}
+	render::ApplySurfaceSlots(instances, slots, core::Name("request-slot-map"), seams);
 	CHECK(instances[0].Surface == 1);
+	CHECK(instances[0].SurfaceIsPortal);
 	CHECK(instances[1].Surface == -1);
 	CHECK(instances[2].Surface == 1);
+	CHECK(instances[2].SurfaceIsPortal);
 	CHECK(store.Get<scene::SurfaceCamera>(first)->Surface == -1);
 	CHECK(store.Get<scene::SurfaceCamera>(second)->Surface == -1);
 }

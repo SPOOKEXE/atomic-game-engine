@@ -3567,6 +3567,8 @@ namespace studio {
 		};
 		// Owns the editor-only rows while the control surface is available.
 		engine::control::HookLease StudioControlHook;
+		// Owns input automation while the Studio window accepts queued events.
+		engine::control::HookLease StudioInputControlHook;
 		// Owns the camera calibration row while the renderer and universe are available.
 		engine::control::HookLease StudioSceneRenderingHook;
 

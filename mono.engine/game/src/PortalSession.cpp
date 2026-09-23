@@ -72,8 +72,9 @@ namespace engine::game {
 			case PortalSessionKind::Commit:
 			case PortalSessionKind::Proceed:
 			case PortalSessionKind::LeaseAdopted:
-			case PortalSessionKind::Crossed:
 				return ClaimValid(message.Claim);
+			case PortalSessionKind::Crossed:
+				return ClaimValid(message.Claim) && message.Fence && FenceValid(*message.Fence);
 			case PortalSessionKind::Ready:
 			case PortalSessionKind::Committed:
 				return message.Player != ecs::NULL_ENTITY && NameValid(message.World) &&
@@ -199,8 +200,12 @@ namespace engine::game {
 		case PortalSessionKind::Commit:
 		case PortalSessionKind::Proceed:
 		case PortalSessionKind::LeaseAdopted:
+			WriteClaim(writer, message.Claim);
+			break;
 		case PortalSessionKind::Crossed:
 			WriteClaim(writer, message.Claim);
+			writer.WriteBool(message.Fence.has_value());
+			if (message.Fence) WriteFence(writer, *message.Fence);
 			break;
 		case PortalSessionKind::Ready:
 		case PortalSessionKind::Committed:
@@ -253,8 +258,15 @@ namespace engine::game {
 		case PortalSessionKind::Commit:
 		case PortalSessionKind::Proceed:
 		case PortalSessionKind::LeaseAdopted:
+			if (!ReadClaim(reader, message.Claim)) return false;
+			break;
 		case PortalSessionKind::Crossed:
 			if (!ReadClaim(reader, message.Claim)) return false;
+			if (reader.ReadBool()) {
+				script::PortalTransferFence fence;
+				if (!ReadFence(reader, fence)) return false;
+				message.Fence = fence;
+			}
 			break;
 		case PortalSessionKind::Ready:
 		case PortalSessionKind::Committed:

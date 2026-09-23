@@ -140,6 +140,21 @@
           "tools": [
             "get_camera_rendering_data"
           ]
+        },
+        {
+          "id": "studio.input",
+          "limits": {
+            "queued_events": 64
+          },
+          "revision": "v1",
+          "state": "active",
+          "tools": [
+            "emulate_mouse_move",
+            "emulate_click",
+            "emulate_mouse_wheel",
+            "emulate_key",
+            "emulate_text"
+          ]
         }
       ],
       "limits": [

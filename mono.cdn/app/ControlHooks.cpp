@@ -16,13 +16,7 @@
 
 namespace cdn {
 
-	engine::control::HookLease ConfigureControlHooks(
-		engine::control::Surface &surface,
-		Origin &origin,
-		Service &service,
-		engine::control::Server &server,
-		std::string &failure
-	) {
+	engine::control::HookLease ConfigureControlHooks(ControlHookContext context, std::string &failure) {
 		const std::array features{
 			engine::control::features::Architecture(),
 			engine::control::features::Diagnostics(),
@@ -30,34 +24,35 @@ namespace cdn {
 			engine::control::features::Prompts(),
 			engine::control::features::Discovery(),
 		};
-		surface.Enable(features);
+		context.Surface.Enable(features);
 
-		return surface.ActivateHook(
+		return context.Surface.ActivateHook(
 			{.Id = "cdn.product",
 			 .Revision = "v1",
 			 .Purpose = "Reads state owned by this content-origin process.",
 			 .Dependencies = {},
 			 .Limits = {}},
-			[&origin, &service, &server](engine::control::HookRegistration &registration) {
+			[context](engine::control::HookRegistration &registration) {
 				registration.Add(
 					engine::control::Tool{
 						"engine_info",
 						"This content origin's own state: where it is listening, the manifest root it "
 						"serves, cache use, request counters, and its loopback control endpoint.",
 						[] { return nlohmann::json{{"type", "object"}}; },
-						[&origin, &service, &server](const nlohmann::json &, std::string &) {
-							const ServiceCounters &counts = service.Counters();
-							const std::shared_ptr<const Publication> publication = origin.Current();
+						[context](const nlohmann::json &, std::string &) {
+							const ServiceCounters &counts = context.ContentService.Counters();
+							const std::shared_ptr<const Publication> publication =
+								context.ContentOrigin.Current();
 							return nlohmann::json{
-								{"endpoint", service.Local().Text()},
+								{"endpoint", context.ContentService.Local().Text()},
 								{"manifest",
 								 publication == nullptr ? std::string()
 														: publication->Contents().Root().ToHex()},
 								{"cache",
 								 nlohmann::json{
-									 {"bytes", origin.Cache().Bytes()},
-									 {"entries", origin.Cache().Count()},
-									 {"capacity", origin.Cache().Capacity()}
+									 {"bytes", context.ContentOrigin.Cache().Bytes()},
+									 {"entries", context.ContentOrigin.Cache().Count()},
+									 {"capacity", context.ContentOrigin.Cache().Capacity()}
 								 }},
 								{"requests",
 								 nlohmann::json{
@@ -68,7 +63,10 @@ namespace cdn {
 									 {"receivedBytes", counts.ReceivedBytes}
 								 }},
 								{"control",
-								 nlohmann::json{{"port", server.Port()}, {"served", server.Served()}}},
+								 nlohmann::json{
+									 {"port", context.ControlServer.Port()},
+									 {"served", context.ControlServer.Served()}
+								 }},
 							};
 						},
 					}

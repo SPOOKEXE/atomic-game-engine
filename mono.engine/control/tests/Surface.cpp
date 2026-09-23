@@ -1074,16 +1074,18 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 	CHECK(reply["storage_profiles"] == json::array({"lossless", "training_compact"}));
 }
 
-TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {
+TEST_CASE("a later owned row cannot replace an earlier row", "[control]") {
 	Surface surface("test", "a suite");
 
 	surface.Add(Tool{"thing", "first", nullptr, [](const json &, std::string &) { return json(1); }});
 	REQUIRE(surface.Count() == 1);
 
-	surface.Add(Tool{"thing", "second", nullptr, [](const json &, std::string &) { return json(2); }});
+	CHECK_THROWS(surface.Add(Tool{"thing", "second", nullptr, [](const json &, std::string &) {
+									  return json(2);
+								  }}));
 	CHECK(surface.Count() == 1);
-	CHECK(surface.Registered().front().Description == "second");
-	CHECK(Called(surface, "thing", json::object()) == 2);
+	CHECK(surface.Registered().front().Description == "first");
+	CHECK(Called(surface, "thing", json::object()) == 1);
 }
 
 TEST_CASE("a feature list refuses cross-owner rows and retains the first feature", "[control]") {
@@ -2178,6 +2180,45 @@ TEST_CASE("data-factory world tools canonicalize numeric operation arguments", "
 	};
 	const json created = Called(surface, "world_create", integerTickRate);
 	CHECK(Called(surface, "world_create", decimalTickRate) == created);
+	CHECK(universe.Count() == 1);
+}
+
+TEST_CASE("data-factory lifecycle replay survives hook reactivation", "[control][data-factory]") {
+	Universe universe;
+	engine::world::DataFactorySession session(universe);
+	session.SetPauseParticipant([](WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) {
+		return true;
+	});
+	Surface surface("test", "a suite");
+	const auto activate = [&] {
+		std::string failure;
+		auto lease = surface.ActivateHook(
+			{.Id = "test.data-factory-lifecycle",
+			 .Revision = "v1",
+			 .Purpose = "Lifecycle replay fixture.",
+			 .Dependencies = {},
+			 .Limits = {}},
+			[&](engine::control::HookRegistration &) {
+				surface.AddDataFactoryTools(session, {.RenderOnly = false});
+			},
+			failure
+		);
+		REQUIRE(failure.empty());
+		return lease;
+	};
+	const json request{
+		{"instance_id", "reactivated-lifecycle"},
+		{"seed", 11u},
+		{"tick_rate", 30u},
+		{"operation_id", "create-reactivated"}
+	};
+	auto firstLease = activate();
+	const json created = Called(surface, "world_create", request);
+	CHECK(universe.Count() == 1);
+	firstLease.Close();
+	surface.PumpHooks();
+	auto secondLease = activate();
+	CHECK(Called(surface, "world_create", request) == created);
 	CHECK(universe.Count() == 1);
 }
 

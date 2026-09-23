@@ -6,6 +6,7 @@ from __future__ import annotations
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -135,6 +136,66 @@ class PortalSeamReportTest(unittest.TestCase):
 		reference = {"presentation_time": {"simulation_tick": 121, "simulation_alpha": 0.5}}
 		comparison = MODULE.matched_presentation_time(portal, reference, 0.05)
 		self.assertFalse(comparison["matched"])
+
+	def test_capture_rate_uses_recorded_times(self) -> None:
+		rows = [
+			{"route": "portal", "view": "front", "presentation_time": {"capture_seconds": seconds}}
+			for seconds in (10.0, 10.02, 10.04)
+		]
+		rates = MODULE.measured_capture_rates(rows)
+		self.assertEqual(len(rates), 1)
+		self.assertEqual(rates[0]["captured_frames"], 3)
+		self.assertAlmostEqual(rates[0]["measured_fps"], 50.0)
+
+	def test_cli_rejects_a_different_capture_phase(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			image = Path(temporary) / "0.bmp"
+			Image.new("RGB", (2, 2), (0, 0, 0)).save(image)
+			image.with_suffix(".json").write_text(
+				json.dumps({"frame": 0, "tick": 0, "alpha": 0.25}), encoding="utf-8"
+			)
+			command = [sys.executable, str(ROOT / "scripts/demos/portal-seam-report.py")]
+			accepted = subprocess.run(
+				[*command, "--expected-alpha", "0.25", str(image)], capture_output=True, text=True
+			)
+			refused = subprocess.run(
+				[*command, "--expected-alpha", "0.5", str(image)], capture_output=True, text=True
+			)
+			self.assertEqual(accepted.returncode, 0)
+			self.assertNotEqual(refused.returncode, 0)
+			self.assertIn("capture interpolation phase differed", refused.stderr)
+
+	def test_aperture_comparison_excludes_body_behind_the_wall(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			root = Path(temporary)
+			portal = root / "portal-seam-front"
+			reference = root / "portal-seam-reference-front"
+			portal.mkdir()
+			reference.mkdir()
+			for sequence in (portal, reference):
+				picture = Image.new("RGB", (100, 100), (0, 0, 0))
+				picture.putpixel((50, 50), (255, 214, 0))
+				if sequence == reference:
+					picture.putpixel((10, 50), (255, 214, 0))
+				picture.save(sequence / "0.bmp")
+			frame = {
+				"camera": {"position": [0, 0, 0], "rotation": [0, 0, 0, 1]},
+				"field_of_view": 1.5707963267948966,
+				"portal_views": [{
+					"external": False,
+					"centre": [0, 0, -5],
+					"first": [1, 0, 0],
+					"second": [0, 1, 0],
+					"normal": [0, 0, 1],
+				}],
+			}
+			(portal / "0.json").write_text(json.dumps(frame), encoding="utf-8")
+			bounded = MODULE.full_reference_measurement(portal / "0.bmp", reference / "0.bmp", 0, True)
+			full = MODULE.full_reference_measurement(portal / "0.bmp", reference / "0.bmp", 0)
+			self.assertEqual(bounded["comparison_region"], "projected_aperture")
+			self.assertGreater(bounded["aperture_pixels"], 0)
+			self.assertEqual(bounded["uncovered_body_samples"], 0)
+			self.assertEqual(full["uncovered_body_samples"], 1)
 
 
 if __name__ == "__main__":

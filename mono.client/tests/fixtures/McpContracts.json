@@ -107,6 +107,21 @@
           ]
         },
         {
+          "id": "client.input",
+          "limits": {
+            "queued_events": 64
+          },
+          "revision": "v1",
+          "state": "active",
+          "tools": [
+            "emulate_mouse_move",
+            "emulate_click",
+            "emulate_mouse_wheel",
+            "emulate_key",
+            "emulate_text"
+          ]
+        },
+        {
           "id": "client.render-graph",
           "limits": {},
           "revision": "v1",
@@ -144,8 +159,10 @@
           ]
         },
         {
-          "id": "builtin.physics_observation",
-          "limits": {},
+          "id": "client.data-factory.physics-observation",
+          "limits": {
+            "records": 96
+          },
           "revision": "v1",
           "state": "active",
           "tools": [
@@ -7261,6 +7278,21 @@
           "state": "active",
           "tools": [
             "negotiate"
+          ]
+        },
+        {
+          "id": "client.input",
+          "limits": {
+            "queued_events": 64
+          },
+          "revision": "v1",
+          "state": "active",
+          "tools": [
+            "emulate_mouse_move",
+            "emulate_click",
+            "emulate_mouse_wheel",
+            "emulate_key",
+            "emulate_text"
           ]
         },
         {

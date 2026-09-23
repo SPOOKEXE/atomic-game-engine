@@ -192,8 +192,11 @@ namespace studio {
 			}
 			const float aspectRatio = panel.RenderSize.y > 0.0f ? panel.RenderSize.x / panel.RenderSize.y
 																: panel.ImageSize.x / panel.ImageSize.y;
+			// Show the virtual camera that drives behaviour, including the live
+			// inspection direction, instead of the orientation captured at lock time.
+			const engine::core::CFrame &virtualEye = diagnostics.EffectiveFrustum(slot.PresentedFrame);
 			engine::render::AppendCameraLockAdornment(
-				CameraLockAdornment, diagnostics.FrozenFrustum, markerCamera, aspectRatio, 8.0f
+				CameraLockAdornment, virtualEye, markerCamera, aspectRatio, 8.0f
 			);
 			for (const engine::render::AdornmentLine &line : CameraLockAdornment) {
 				drawLine(line);

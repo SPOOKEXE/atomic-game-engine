@@ -8,7 +8,6 @@
 #include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/PhysicsObservation.hpp>
-#include <engine/control/features/ReplicationObservation.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Bytes.hpp>
@@ -392,8 +391,10 @@ namespace server {
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
+		ReplicationObservationControlHook.Close();
 		FactoryPackageControlHook.Close();
 		FactoryCameraRenderingControlHook.Close();
+		FactoryPhysicsControlHook.Close();
 		FactorySceneControlHook.Close();
 		FactoryLifecycleControlHook.Close();
 		ProductControlHook.Close();
@@ -3117,6 +3118,7 @@ namespace server {
 				crossed.Attempt = departure.Request.Attempt;
 				crossed.Kind = game::PortalSessionKind::Crossed;
 				crossed.Claim = departure.Route->Claim;
+				crossed.Fence = receipt.Fence;
 				departure.CrossedSent =
 					Replication->SendTo(client, game::EncodePortalSession(crossed), nowSeconds);
 				// Adoption can wait after physical commit. Renew until the destination
@@ -3957,8 +3959,10 @@ namespace server {
 			Socket.reset();
 		}
 
+		ReplicationObservationControlHook.Close();
 		FactoryPackageControlHook.Close();
 		FactoryCameraRenderingControlHook.Close();
+		FactoryPhysicsControlHook.Close();
 		FactorySceneControlHook.Close();
 		FactoryLifecycleControlHook.Close();
 		ProductControlHook.Close();
@@ -4043,19 +4047,6 @@ namespace server {
 
 		if (Settings.ControlPort >= 0) {
 			ConfigureControlHooks();
-			if (DataFactory) {
-				ControlSurface.Enable(
-					std::array{engine::control::features::PhysicsObservation(*DataFactory)}
-				);
-			}
-			if (ReplicationObservationRecords)
-				ControlSurface.Enable(
-					std::array{engine::control::features::ReplicationObservation(
-						DataFactory.get(),
-						*ReplicationObservationRecords,
-						std::string(Worlds().NameOf(PrimaryWorld).Text())
-					)}
-				);
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",

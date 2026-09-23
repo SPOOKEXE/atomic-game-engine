@@ -40,6 +40,12 @@ namespace studio {
 			PackageDependencies = {};
 	};
 
+	// Product services supplied when this host composes its optional control rows.
+	struct DataFactoryControlHookContext {
+		engine::control::Surface &Surface;
+		bool RendererReady = false;
+	};
+
 	// Binds one empty Studio universe to the shared factory lifecycle and MCP
 	// feature. The session refuses compatibility worlds itself, so a normal
 	// Studio scene can never become factory-owned by accident.
@@ -52,7 +58,7 @@ namespace studio {
 		// Builds the lifecycle session and installs host callbacks for this universe.
 		Start(engine::world::Universe &universe, DataFactoryHostCallbacks callbacks, std::string &detail);
 		// Adds data-factory control rows whose availability matches renderer state.
-		void InstallTools(engine::control::Surface &surface, bool rendererReady);
+		void InstallTools(DataFactoryControlHookContext context);
 
 		// Advances the isolated factory universe only while its lifecycle has resumed it.
 		bool Tick(float frameSeconds);

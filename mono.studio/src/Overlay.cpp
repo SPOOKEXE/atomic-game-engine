@@ -2421,9 +2421,11 @@ namespace studio {
 						camera = *found;
 					}
 				}
-				engine::render::ResolveSpatialCanvases(
-					store, request.Display, &camera, &diagnostics.FrozenFrustum
-				);
+				// Match the virtual eye that supplied visibility and LOD for the image
+				// below. A frozen orientation leaves billboards facing a camera the
+				// inspection view no longer uses.
+				const engine::core::CFrame &virtualEye = diagnostics.EffectiveFrustum(slot.PresentedFrame);
+				engine::render::ResolveSpatialCanvases(store, request.Display, &camera, &virtualEye);
 			} else {
 				engine::render::ResolveSpatialCanvases(store, request.Display);
 			}

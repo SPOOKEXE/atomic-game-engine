@@ -77,36 +77,6 @@ namespace studio {
 			return directory;
 		}
 
-		uint8_t MouseButton(std::string_view button) {
-			if (button == "left") {
-				return SDL_BUTTON_LEFT;
-			}
-			if (button == "middle") {
-				return SDL_BUTTON_MIDDLE;
-			}
-			if (button == "right") {
-				return SDL_BUTTON_RIGHT;
-			}
-			return 0;
-		}
-
-		SDL_Keymod KeyboardModifiers(uint8_t modifiers) {
-			SDL_Keymod translated = SDL_KMOD_NONE;
-			if ((modifiers & automation::KeyboardModifierShift) != 0) {
-				translated |= SDL_KMOD_SHIFT;
-			}
-			if ((modifiers & automation::KeyboardModifierControl) != 0) {
-				translated |= SDL_KMOD_CTRL;
-			}
-			if ((modifiers & automation::KeyboardModifierAlt) != 0) {
-				translated |= SDL_KMOD_ALT;
-			}
-			if ((modifiers & automation::KeyboardModifierGui) != 0) {
-				translated |= SDL_KMOD_GUI;
-			}
-			return translated;
-		}
-
 		const Keybind *BindingFor(Action action) {
 			for (const Keybind &binding : Keybinds::All()) {
 				if (binding.Bound == action) {
@@ -177,156 +147,6 @@ namespace studio {
 				ImGui::SetClipboardText(text.c_str());
 			}
 		}
-	}
-
-	void Editor::EnableControlFeatures() {
-		if (FactoryHost != nullptr) {
-			// A factory session owns world state and lifecycle. Ordinary Studio
-			// universe tools would mutate the same world outside that session.
-			const std::array features{
-				engine::control::features::Architecture(),
-				engine::control::features::Script(),
-				engine::control::features::Diagnostics(),
-				engine::control::features::Resources(),
-				engine::control::features::Prompts(),
-				engine::control::features::Discovery(),
-			};
-			ControlSurface.Enable(features);
-			FactoryHost->InstallTools(ControlSurface, true);
-			return;
-		}
-
-		const std::array features{
-			// Studio owns its richer engine_info row through its product hook.
-			engine::control::features::Universe(*Universe, true, false),
-			engine::control::features::Architecture(),
-			engine::control::features::Script(),
-			engine::control::features::Diagnostics(false),
-			engine::control::features::Build(),
-			engine::control::features::Resources(),
-			engine::control::features::Prompts(),
-			engine::control::features::Discovery(),
-		};
-		ControlSurface.Enable(features);
-		ActivateControlHooks();
-		ControlSurface.AddInputTools(
-			[this](const engine::control::InputAutomationEvent &event, std::string &failure) {
-				const uint32_t window = Window == nullptr ? 0 : SDL_GetWindowID(Window);
-				const auto push = [&](SDL_Event &input, const char *what) {
-					if (!SDL_PushEvent(&input)) {
-						failure = std::string("could not queue ") + what + ": " + SDL_GetError();
-						return false;
-					}
-					return true;
-				};
-				const auto motion = [&](float x, float y) {
-					SDL_Event input{};
-					input.type = SDL_EVENT_MOUSE_MOTION;
-					input.motion.timestamp = SDL_GetTicksNS();
-					input.motion.windowID = window;
-					input.motion.x = x;
-					input.motion.y = y;
-					return push(input, "mouse motion");
-				};
-				switch (event.Kind) {
-				case engine::control::InputAutomationKind::MouseMove:
-					return motion(event.X, event.Y) ? json{{"queued", true}, {"x", event.X}, {"y", event.Y}}
-													: json(nullptr);
-				case engine::control::InputAutomationKind::MouseButton: {
-					if (event.State == engine::control::InputAutomationState::Click &&
-						PendingControlClick.has_value()) {
-						failure = "an emulated click is already in progress";
-						return json(nullptr);
-					}
-					const uint8_t button = MouseButton(event.Button);
-					if (!motion(event.X, event.Y)) return json(nullptr);
-					SDL_Event input{};
-					input.type = event.State == engine::control::InputAutomationState::Up
-									 ? SDL_EVENT_MOUSE_BUTTON_UP
-									 : SDL_EVENT_MOUSE_BUTTON_DOWN;
-					input.button.timestamp = SDL_GetTicksNS();
-					input.button.windowID = window;
-					input.button.button = button;
-					input.button.down = event.State != engine::control::InputAutomationState::Up;
-					input.button.clicks = 1;
-					input.button.x = event.X;
-					input.button.y = event.Y;
-					if (!push(input, "mouse button")) return json(nullptr);
-					if (event.State == engine::control::InputAutomationState::Click) {
-						PendingControlClick = Editor::ControlClick{event.X, event.Y, button, false};
-					}
-					return json{{"queued", true}, {"x", event.X}, {"y", event.Y}, {"button", event.Button}};
-				}
-				case engine::control::InputAutomationKind::MouseWheel: {
-					SDL_Event input{};
-					input.type = SDL_EVENT_MOUSE_WHEEL;
-					input.wheel.timestamp = SDL_GetTicksNS();
-					input.wheel.windowID = window;
-					input.wheel.y = event.Wheel;
-					return push(input, "mouse wheel") ? json{{"queued", true}, {"notches", event.Wheel}}
-													  : json(nullptr);
-				}
-				case engine::control::InputAutomationKind::Key: {
-					if (event.State == engine::control::InputAutomationState::Click &&
-						PendingControlKey.has_value()) {
-						failure = "an emulated key is already in progress";
-						return json(nullptr);
-					}
-					uint8_t modifierBits = automation::KeyboardModifierNone;
-					if (!automation::ParseKeyboardModifiers(event.Modifiers, modifierBits, failure))
-						return json(nullptr);
-					SDL_Keymod modifiers = KeyboardModifiers(modifierBits);
-					SDL_Keycode key = SDL_GetKeyFromName(event.Key.c_str());
-					SDL_Scancode scancode = SDL_GetScancodeFromName(event.Key.c_str());
-					if (key == SDLK_UNKNOWN && scancode == SDL_SCANCODE_UNKNOWN) {
-						failure = "key is not a recognized SDL key name";
-						return json(nullptr);
-					}
-					if (scancode == SDL_SCANCODE_UNKNOWN) scancode = SDL_GetScancodeFromKey(key, &modifiers);
-					if (key == SDLK_UNKNOWN) key = SDL_GetKeyFromScancode(scancode, modifiers, true);
-					SDL_Event input{};
-					input.type = event.State == engine::control::InputAutomationState::Up
-									 ? SDL_EVENT_KEY_UP
-									 : SDL_EVENT_KEY_DOWN;
-					input.key.timestamp = SDL_GetTicksNS();
-					input.key.windowID = window;
-					input.key.scancode = scancode;
-					input.key.key = key;
-					input.key.mod = modifiers;
-					input.key.down = event.State != engine::control::InputAutomationState::Up;
-					if (!push(input, "key")) return json(nullptr);
-					if (event.State == engine::control::InputAutomationState::Click) {
-						PendingControlKey = Editor::ControlKey{
-							static_cast<uint32_t>(scancode),
-							static_cast<uint32_t>(key),
-							static_cast<uint16_t>(modifiers),
-							false
-						};
-					}
-					return json{{"queued", true}, {"key", event.Key}, {"modifiers", event.Modifiers}};
-				}
-				case engine::control::InputAutomationKind::Text: {
-					if (PendingControlText.has_value()) {
-						failure = "emulated text is already in progress";
-						return json(nullptr);
-					}
-					PendingControlText = Editor::ControlText{event.Text, false};
-					SDL_Event input{};
-					input.type = SDL_EVENT_TEXT_INPUT;
-					input.text.timestamp = SDL_GetTicksNS();
-					input.text.windowID = window;
-					input.text.text = PendingControlText->Text.c_str();
-					if (!push(input, "text input")) {
-						PendingControlText.reset();
-						return json(nullptr);
-					}
-					return json{{"queued", true}, {"bytes", event.Text.size()}};
-				}
-				}
-				failure = "input event is unknown";
-				return json(nullptr);
-			}
-		);
 	}
 
 	bool Editor::StartControl() {
@@ -862,6 +682,12 @@ namespace studio {
 		}
 
 		if (PendingControlClick.has_value() && PendingControlClick->DownProcessed) {
+			SDL_Event motion{};
+			motion.type = SDL_EVENT_MOUSE_MOTION;
+			motion.motion.timestamp = SDL_GetTicksNS();
+			motion.motion.windowID = window;
+			motion.motion.x = PendingControlClick->X;
+			motion.motion.y = PendingControlClick->Y;
 			SDL_Event release{};
 			release.type = SDL_EVENT_MOUSE_BUTTON_UP;
 			release.button.timestamp = SDL_GetTicksNS();
@@ -871,10 +697,12 @@ namespace studio {
 			release.button.clicks = 1;
 			release.button.x = PendingControlClick->X;
 			release.button.y = PendingControlClick->Y;
-			if (!SDL_PushEvent(&release)) {
+			if (!SDL_PushEvent(&motion) || !SDL_PushEvent(&release)) {
 				Say(std::string("control: could not release emulated click: ") + SDL_GetError(),
 					engine::core::LogLevel::Error);
 			} else {
+				Interface.QueueAutomationEvent(motion);
+				Interface.QueueAutomationEvent(release);
 				PendingControlClick.reset();
 			}
 		}

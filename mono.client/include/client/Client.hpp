@@ -147,6 +147,8 @@ namespace client {
 		//
 		// @return `true` when the client is ready to run.
 		bool FinishStartup();
+		// Activates client-owned MCP rows after every backing service exists.
+		void ConfigureControlHooks();
 		// Reconciles the factory-owned world after the control boundary has
 		// committed it. This runs only on the driver thread that owns Universe.
 		bool ReconcileDataFactoryWorlds();
@@ -162,6 +164,7 @@ namespace client {
 		void PumpEvents();
 		void Step();
 		void CaptureFrame(const engine::render::View &view, engine::world::WorldId inputWorld);
+		float PresentationAlpha(engine::world::WorldId world) const;
 		void StampCameraTemporalSamples(std::span<engine::render::View> views);
 		void SubmitTeleportRequests(double nowSeconds);
 		// Exit code for a run whose heap kept climbing, and for one that was
@@ -640,7 +643,9 @@ namespace client {
 		// A tap releases on the next input frame so scripts and GUI see its down edge.
 		std::vector<engine::control::InputAutomationEvent> PendingControlInput;
 		std::vector<engine::control::InputAutomationEvent> DeferredControlRelease;
+		std::optional<engine::control::HookLease> InputControlHook;
 		std::optional<engine::control::HookLease> VisibilityObservationHook;
+		std::optional<engine::control::HookLease> PhysicsObservationHook;
 		std::optional<engine::control::HookLease> TemporalSampleHook;
 		std::optional<engine::control::HookLease> RigExportHook;
 		std::optional<engine::control::HookLease> DataAudioObservationHook;
@@ -782,6 +787,7 @@ namespace client {
 			// The retained image stays selected until this staged replica has every
 			// receipt, asset, pose and capacity fact needed for live presentation.
 			std::shared_ptr<PortalReadinessController> Readiness;
+			std::optional<engine::script::PortalTransferFence> SourceFence;
 			std::optional<engine::script::PortalTransferFence> DestinationFence;
 			float ReadinessDistance = 0;
 			bool HasReadinessDistance = false;

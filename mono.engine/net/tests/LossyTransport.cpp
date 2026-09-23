@@ -131,6 +131,23 @@ TEST_CASE("the next datagram is dropped whatever number it turns out to have", "
 	CHECK(link.Receiver->Stats().Dropped == 1);
 }
 
+TEST_CASE(
+	"the next datagrams can be duplicated or reordered without knowing their numbers",
+	"[net][transport][lossy]"
+) {
+	Link link(LossSettings{});
+	link.Receiver->DuplicateNext(1);
+	link.Say("duplicate");
+	CHECK(link.Heard() == std::vector<std::string>{"duplicate", "duplicate"});
+	CHECK(link.Receiver->Stats().Duplicated == 1);
+
+	link.Receiver->ReorderNext(1);
+	link.Say("held");
+	link.Say("overtakes");
+	CHECK(link.Heard() == std::vector<std::string>{"overtakes", "held"});
+	CHECK(link.Receiver->Stats().Reordered == 1);
+}
+
 TEST_CASE("a seeded loss is the same loss twice", "[net][transport][lossy]") {
 	// The property the whole approach rests on: a failure is reported as a seed
 	// and reproduced from it. Two links with one seed lose the same datagrams;

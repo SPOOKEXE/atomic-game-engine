@@ -17,15 +17,16 @@ TEST_CASE("client visibility observation hook owns its row for the lease lifetim
 	engine::control::Surface surface("client", "client hook test");
 	std::string failure;
 	auto lease = client::ActivateVisibilityObservationHook(
-		surface.Hooks(),
-		[] {
-			return engine::control::features::VisibilitySnapshotReply{
-				.Frame = 13,
-				.World = {},
-				.Valid = true,
-				.Observations = {},
-			};
-		},
+		{.Hooks = surface.Hooks(),
+		 .Snapshot =
+			 [] {
+				 return engine::control::features::VisibilitySnapshotReply{
+					 .Frame = 13,
+					 .World = {},
+					 .Valid = true,
+					 .Observations = {},
+				 };
+			 }},
 		failure
 	);
 
@@ -51,7 +52,8 @@ TEST_CASE("client visibility observation hook owns its row for the lease lifetim
 TEST_CASE("client visibility observation hook refuses a missing renderer provider", "[client][control]") {
 	engine::control::Surface surface("client", "client hook test");
 	std::string failure;
-	const auto lease = client::ActivateVisibilityObservationHook(surface.Hooks(), {}, failure);
+	const auto lease =
+		client::ActivateVisibilityObservationHook({.Hooks = surface.Hooks(), .Snapshot = {}}, failure);
 
 	CHECK_FALSE(lease.IsValid());
 	CHECK(failure == "visibility snapshot provider is required");
@@ -63,10 +65,14 @@ TEST_CASE("client temporal and rig hooks own their session-fenced readers", "[cl
 	engine::world::DataFactorySession session(worlds);
 	engine::control::Surface surface("client", "client hook test");
 	std::string failure;
-	auto temporal = client::ActivateTemporalSampleHook(surface.Hooks(), worlds, session, failure);
+	auto temporal = client::ActivateTemporalSampleHook(
+		{.Hooks = surface.Hooks(), .Universe = worlds, .Session = session}, failure
+	);
 	REQUIRE(failure.empty());
 	REQUIRE(temporal.IsValid());
-	auto rig = client::ActivateRigExportHook(surface.Hooks(), worlds, session, failure);
+	auto rig = client::ActivateRigExportHook(
+		{.Hooks = surface.Hooks(), .Universe = worlds, .Session = session}, failure
+	);
 	REQUIRE(failure.empty());
 	REQUIRE(rig.IsValid());
 
@@ -99,7 +105,9 @@ TEST_CASE("client audio observation hook publishes and removes its coordinated r
 	engine::control::Surface surface("client", "client hook test");
 	std::string failure;
 	auto bridge = std::make_shared<client::DataAudioObservationHost>();
-	auto lease = client::ActivateDataAudioObservationHook(surface.Hooks(), worlds, bridge, session, failure);
+	auto lease = client::ActivateDataAudioObservationHook(
+		{.Hooks = surface.Hooks(), .Universe = worlds, .Bridge = bridge, .Session = session}, failure
+	);
 
 	REQUIRE(failure.empty());
 	REQUIRE(lease.IsValid());
@@ -124,8 +132,9 @@ TEST_CASE("client audio observation hook refuses a missing bridge", "[client][co
 	engine::world::DataFactorySession session(worlds);
 	engine::control::Surface surface("client", "client hook test");
 	std::string failure;
-	const auto lease =
-		client::ActivateDataAudioObservationHook(surface.Hooks(), worlds, {}, session, failure);
+	const auto lease = client::ActivateDataAudioObservationHook(
+		{.Hooks = surface.Hooks(), .Universe = worlds, .Bridge = {}, .Session = session}, failure
+	);
 
 	CHECK_FALSE(lease.IsValid());
 	CHECK(failure == "audio observation bridge is required");

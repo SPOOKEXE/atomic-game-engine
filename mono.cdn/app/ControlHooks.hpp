@@ -15,13 +15,14 @@ namespace engine::control {
 }
 
 namespace cdn {
+	// The content-origin services a product hook may borrow for its lease lifetime.
+	struct ControlHookContext {
+		engine::control::Surface &Surface;
+		Origin &ContentOrigin;
+		Service &ContentService;
+		engine::control::Server &ControlServer;
+	};
 
 	// Installs the ordered MCP vocabulary this content origin can answer.
-	engine::control::HookLease ConfigureControlHooks(
-		engine::control::Surface &surface,
-		Origin &origin,
-		Service &service,
-		engine::control::Server &server,
-		std::string &failure
-	);
+	engine::control::HookLease ConfigureControlHooks(ControlHookContext context, std::string &failure);
 }

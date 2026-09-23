@@ -948,6 +948,7 @@ namespace studio {
 		ControlServer.Stop();
 		// Product rows capture editor and renderer services, so their guards must
 		// drain while those services still exist.
+		StudioInputControlHook.Close();
 		StudioSceneRenderingHook.Close();
 		StudioControlHook.Close();
 

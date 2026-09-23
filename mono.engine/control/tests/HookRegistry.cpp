@@ -87,7 +87,9 @@ TEST_CASE("owned hooks publish atomically and report both collision owners", "[c
 	CHECK(surface.Count() == 1);
 }
 
-TEST_CASE("direct registration cannot replace rows owned by an active hook", "[control][hooks]") {
+TEST_CASE(
+	"direct registration creates built-in owned rows and cannot replace an active hook", "[control][hooks]"
+) {
 	Surface surface("test", "hook registry");
 	std::string failure;
 	HookLease lease = surface.Hooks().Activate(
@@ -108,6 +110,21 @@ TEST_CASE("direct registration cannot replace rows owned by an active hook", "[c
 		failure
 	);
 	REQUIRE(failure.empty());
+	surface.Add(Tool{"unowned_tool", "unowned tool", nullptr, [](const json &, std::string &) {
+						 return json{};
+					 }});
+	CHECK(surface.Hooks().OwnsTool("unowned_tool"));
+	surface.AddResource(
+		Resource{"atomic://test/unowned", "unowned resource", "test", "text/plain", [](std::string &) {
+					 return std::string{};
+				 }}
+	);
+	CHECK(surface.Hooks().OwnsResource("atomic://test/unowned"));
+	CHECK_NOTHROW(
+		surface.AddPrompt(Prompt{"unowned_prompt", "unowned prompt", {}, [](const json &, std::string &) {
+									 return std::string{};
+								 }})
+	);
 	CHECK_THROWS(surface.Add(Tool{"owned_tool", "replacement", nullptr, [](const json &, std::string &) {
 									  return json{};
 								  }}));
@@ -232,6 +249,41 @@ TEST_CASE("negotiate hides draining hook tools with tools/list", "[control][hook
 	surface.PumpHooks();
 	CHECK(surface.Hooks().Active().empty());
 	CHECK(surface.Count() == 1);
+}
+
+TEST_CASE("hook release owns provider callbacks through failed and closed activation", "[control][hooks]") {
+	Surface surface("test", "hook registry");
+	bool released = false;
+	std::string failure;
+	auto lease = surface.Hooks().Activate(
+		Descriptor("test.release"),
+		[&released](HookRegistration &rows) {
+			rows.SetRelease([&released] { released = true; });
+			rows.Add(Tool{"release_probe", "test", nullptr, [](const json &, std::string &) {
+							  return json{};
+						  }});
+		},
+		failure
+	);
+	REQUIRE(lease.IsValid());
+	CHECK_FALSE(released);
+
+	bool rejectedReleased = false;
+	auto collision = surface.Hooks().Activate(
+		Descriptor("test.release-collision"),
+		[&rejectedReleased](HookRegistration &rows) {
+			rows.SetRelease([&rejectedReleased] { rejectedReleased = true; });
+			rows.Add(Tool{"release_probe", "test", nullptr, [](const json &, std::string &) {
+							  return json{};
+						  }});
+		},
+		failure
+	);
+	CHECK_FALSE(collision.IsValid());
+	CHECK(rejectedReleased);
+	CHECK_FALSE(released);
+	lease.Close();
+	CHECK(released);
 }
 
 TEST_CASE("owned dependencies keep their providers active until children close", "[control][hooks]") {

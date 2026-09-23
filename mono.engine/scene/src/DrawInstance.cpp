@@ -125,7 +125,13 @@ namespace engine::scene {
 			// `Surface` is signed and -1 means "no surface", so it is widened
 			// through `uint8_t` exactly as it was before: sign-extending it
 			// would fold in twenty-four bits that say nothing.
-			a = MixSignature(a, Pair(static_cast<uint8_t>(instance.Surface), instance.CastShadow ? 1u : 0u));
+			a = MixSignature(
+				a,
+				Pair(
+					static_cast<uint8_t>(instance.Surface),
+					(instance.CastShadow ? 1u : 0u) | (instance.SurfaceIsPortal ? 2u : 0u)
+				)
+			);
 
 			// The three fields v0.9 added. Folded in for the reason every other
 			// field is: this signature answers "would drawing this again produce

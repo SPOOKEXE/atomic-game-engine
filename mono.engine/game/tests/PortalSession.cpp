@@ -60,7 +60,8 @@ TEST_CASE(
 		message.Identity = Identity();
 		message.Port = 9000;
 		message.Diagnostic = "destination was recreated";
-		if (kind == game::PortalSessionKind::Ready || kind == game::PortalSessionKind::Committed) {
+		if (kind == game::PortalSessionKind::Ready || kind == game::PortalSessionKind::Committed ||
+			kind == game::PortalSessionKind::Crossed) {
 			script::PortalTransferFence fence;
 			fence.TopologyRevision = 1;
 			fence.AuthorityEpoch = 2;

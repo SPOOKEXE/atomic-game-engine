@@ -15,21 +15,29 @@ namespace studio {
 		// Whether bounded local-light influence probes are drawn over this panel.
 		bool ShowLightInfluence = false;
 
-		// Whether this panel submits its draw rows through a frozen frustum.
+		// Whether this panel presents camera-dependent behaviour from a saved position.
 		bool FrustumLocked = false;
-		// The pose captured when FrustumLocked was enabled or recaptured.
+		// The position captured when FrustumLocked was enabled or recaptured.
 		engine::core::CFrame FrozenFrustum;
 
-		// Freezes this panel's effective culling pose at inspectionFrame.
+		// Saves this panel's virtual camera position from inspectionFrame.
 		void LockFrustum(const engine::core::CFrame &inspectionFrame) {
 			FrozenFrustum = inspectionFrame;
 			FrustumLocked = true;
 		}
 
-		// Returns the pose used for culling, while the caller keeps using its own
-		// inspection frame for rendering and overlay projection.
+		// Returns the pose used by camera-dependent behaviour. The virtual camera
+		// holds its position while retaining the live inspection direction, so a
+		// user can turn to test a different culling direction without moving it.
 		const engine::core::CFrame &EffectiveFrustum(const engine::core::CFrame &inspectionFrame) const {
-			return FrustumLocked ? FrozenFrustum : inspectionFrame;
+			if (!FrustumLocked) {
+				return inspectionFrame;
+			}
+			VirtualFrustum = engine::core::CFrame(FrozenFrustum.Position, inspectionFrame.Rotation());
+			return VirtualFrustum;
 		}
+
+	  private:
+		mutable engine::core::CFrame VirtualFrustum;
 	};
 }

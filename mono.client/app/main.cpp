@@ -18,6 +18,7 @@
 #include <client/Client.hpp>
 #include <client/Scene.hpp>
 #include <client/Settings.hpp>
+#include <cmath>
 #include <cstdio>
 #include <discord/Settings.hpp>
 #include <limits>
@@ -190,6 +191,9 @@ int main(int argc, char **argv) {
 
 	arguments.Value(
 		"capture-sequence", "DIR", "Write each rendered frame as BMP and camera-state JSON. Needs --frames"
+	);
+	arguments.Value(
+		"capture-alpha", "PHASE", "Fix interpolation to [0, 1) for --capture-sequence comparisons"
 	);
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -423,6 +427,14 @@ int main(int argc, char **argv) {
 	}
 	if (auto sequence = arguments.Get("capture-sequence")) {
 		options.CaptureSequence = std::filesystem::path(*sequence);
+	}
+	if (arguments.Get("capture-alpha")) {
+		const double alpha = arguments.GetNumber("capture-alpha", -1.0);
+		if (options.CaptureSequence.empty() || !std::isfinite(alpha) || alpha < 0.0 || alpha >= 1.0) {
+			std::fprintf(stderr, "--capture-alpha needs --capture-sequence and a phase in [0, 1)\n");
+			return 2;
+		}
+		options.CaptureAlpha = static_cast<float>(alpha);
 	}
 	if (auto sound = arguments.Get("sound")) {
 		options.SoundPath = std::filesystem::path(*sound);

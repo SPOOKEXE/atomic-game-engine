@@ -227,6 +227,9 @@ if WHICH == "side" then
 	-- comparable and the straddler's is what the cut changes.
 	viewpoint = CFrame.lookAt(Vector3.new(-26, 4, -6), Vector3.new(0, 3.5, -6))
 elseif WHICH == "front" then
+	-- The matched-room silhouette reference has no emitter. Keep sparks out of
+	-- this route so their magenta pixels cannot cover the yellow body.
+	sparks.Rate = 0
 	-- **Over the shoulder, not square on.** Straight down the bar's own axis it
 	-- is an end cap and says nothing; from the quarter you see the near half
 	-- run into the glass and the rest continue inside the picture, which is the

@@ -154,6 +154,7 @@ namespace launcher {
 		engine::control::Surface ControlSurface{
 			"launcher", "Open modes, configure child options, and supervise a staged program."
 		};
+		engine::control::HookLease LauncherControlHook;
 		bool ControlOnly = false;
 		std::vector<engine::control::InputAutomationEvent> DeferredControlRelease;
 

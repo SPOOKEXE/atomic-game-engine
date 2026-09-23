@@ -274,7 +274,7 @@ TEST_CASE("Studio factory tools omit unavailable render work", "[studio][data-fa
 	};
 	REQUIRE(host.Start(worlds, std::move(callbacks), detail));
 	engine::control::Surface surface("studio-test", "test");
-	host.InstallTools(surface, true);
+	host.InstallTools({.Surface = surface, .RendererReady = true});
 
 	const auto has = [&surface](std::string_view name) {
 		return std::ranges::any_of(surface.Registered(), [name](const engine::control::Tool &tool) {
@@ -324,7 +324,7 @@ TEST_CASE("Studio factory host closes every session-bound control hook", "[studi
 		studio::DataFactoryHost host;
 		std::string detail;
 		REQUIRE(host.Start(worlds, Callbacks(), detail));
-		host.InstallTools(surface, true);
+		host.InstallTools({.Surface = surface, .RendererReady = true});
 		CHECK_FALSE(surface.Hooks().Active().empty());
 	}
 	CHECK(surface.Hooks().Active().empty());
@@ -393,7 +393,7 @@ TEST_CASE("Studio factory exposes fenced authored-affordance reads", "[studio][d
 	REQUIRE(host.Start(worlds, Callbacks(), detail));
 	engine::control::Surface surface("studio-test", "test");
 	surface.Enable(std::array{engine::control::features::Discovery()});
-	host.InstallTools(surface, true);
+	host.InstallTools({.Surface = surface, .RendererReady = true});
 
 	const auto created = host.Session()->CreateWorld(Request("affordances", "create"));
 	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
@@ -526,7 +526,7 @@ TEST_CASE(
 	const auto created = host.Session()->CreateWorld(Request("studio-package", "create"));
 	REQUIRE(created.Status == engine::world::DataFactoryStatus::Ok);
 	engine::control::Surface surface("studio-test", "test");
-	host.InstallTools(surface, true);
+	host.InstallTools({.Surface = surface, .RendererReady = true});
 
 	std::string failure;
 	const nlohmann::json busy = PackageTool(surface).Call(PackageRequest(created, "package-busy"), failure);

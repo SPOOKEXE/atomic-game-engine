@@ -300,6 +300,65 @@ The assets and audio comparisons used the same isolated source revision, build p
 
 The stable-contact solver cache was tested and rejected. With the final cache implementation and a corrected churn fixture, seven-sample release A/B measured stable dense contacts at 1.243 ms baseline versus 1.210 ms cached, with spreads of 0.245 and 0.177 ms. Bridge churn measured 2.077 ms baseline versus 2.135 ms cached, with spreads of 0.353 and 0.374 ms. The overlapping variation and churn regression do not support carrying the extra topology state. The cache patch remains isolated and is not included in this pass.
 
+### Large lighting scene, 2026-09-24
+
+The `release-tests` Vulkan `volume-light-stress 60` gate passed its authored scene,
+volume resolver, light selection, and GPU volume cases. The 60-frame selection
+measurements were 0.0263 ms per frame for 256 point lights, 0.0241 ms for 256
+spot lights, 0.0540 ms for the mixed set, and 0.0073 ms for fog volume selection.
+The GPU volume fixture reported 0.455 ms per frame. Its small render target and
+sixteen-volume cap make that figure a separate workload from the full scene.
+
+The `release` Vulkan client ran `LightingStress.luau` for 240 headless frames at
+1280 by 720. It reported 176.5 average presented FPS and 62 simulation ticks;
+the latter reached only 10.4 Hz during the run. A five-second frame-graph
+capture recorded a 37.49 ms mean `gpu fog` span from 31 completed GPU samples.
+The CPU frame median was 3.383 ms. The first render also spent 4.536 seconds in
+shadow setup, which dominates the capture mean and must be separated from
+steady-state cost. These figures establish fog shading as the measured large
+scene pressure point, not light selection.
+
+Caching each volume's camera-ray interval per pixel was tested as a shader
+candidate, then rejected. A second five-second `release` Vulkan capture on the
+same scene measured a 37.73 ms mean `gpu fog` span from 27 completed samples,
+against 37.49 ms before. The small difference does not establish a gain. The
+shader was restored. Further work needs a visual parity comparison and a
+measured reduction in shadowed density sampling or active pixel work.
+
+A temporary authored-scene experiment changed each volume from 16 to 4 shadow
+steps without changing engine code. The `release` Vulkan profile measured 13.93
+ms mean `gpu fog` over 60 completed samples, and a repeat of the original
+16-step scene measured 39.29 ms over 27 samples. At simulation tick 20, the
+1280 by 720 BMP captures had identical RGB pixels. A subsequent comparison of
+all 29 shared simulation ticks in the two 60-frame captures found identical RGB
+pixels at each tick. Visual inspection showed that the dense, overlapping fog
+obscured the receiver field in those captures, so this equality does not prove
+that four shadow steps preserve visible shadow detail. The checked-in stress
+scene still uses 16 shadow steps. In a temporary visibility variant, the first
+16 volumes used density 0.005 and the other 240 used density 0.03. Receivers
+were visible, yet all five shared ticks still had identical RGB pixels with 16
+and four shadow steps.
+This is explained by the scene's 18.4 clock time: `LightingOf` sets the
+directional term to zero below the horizon, while `volume.frag` still traces
+the shadow rays. This identified an exact zero-contribution shader path to
+remove and measure with the same scene.
+
+That shader branch is now implemented. On the same `release` Vulkan client,
+1280 by 720 scene, and dedicated Xvfb display, a ten-second baseline capture
+recorded `gpu fog` mean 38.414 ms across 27 completed samples. The branch
+recorded 4.785 ms across 186 completed samples, about an eightfold reduction
+for this zero-directional-light scene. Both runs include a cold setup pause;
+the reported fog spans are completed device timestamps, not the capture-wide
+CPU frame mean. The checked-in night scene had identical RGB pixels on all
+three shared simulation ticks in five-frame before and after sequences. A
+temporary noon variant with visible receivers and nonzero direct light had
+identical RGB pixels on all five shared ticks. These comparisons check that
+the zero branch preserves the captured image and that the nonzero branch still
+takes the original calculation; they do not cover every renderer backend.
+After the shader change, `just volume-light-stress 60` passed its five focused
+scene, selection, and Vulkan GPU suites, including 167 assertions in the GPU
+volume case. `just shader-check` also passed the SPIR-V and MSL contract check.
+
 ### Continued pass
 
 The committed release state at `7acb651f` ran 200 randomly turning clients for 45 seconds. All 200 reached Playing; tick p50 was 100.388 ms and p95 was 121.743 ms, with 567 overruns in 642 ticks. The test sent 205,548 inputs and applied 1,653,336 deltas. The profile dropped 36,984 scopes, so its percentages describe recorded self time only: interest 36.17%, recovery 24.69%, score 22.26%, and refinement 6.24%. This is a new reference, not an A/B attribution to one prior change.
@@ -313,3 +372,73 @@ The first interest-filter experiment combined the server's two sorted visibility
 The accepted interest change passes the sorted replicated candidates to a batch selector once per client. The server builds one sorted visibility-exception list per publish and merge-walks it with those candidates, validating a client's player slot once per batch. The legacy predicate path keeps its original survey and selection work. In the same isolated `release` worktree, two 200-player random-motion runs with the batch path reached Playing for all 200 clients and had tick p95 values of 79.97 and 81.54 ms. A fresh baseline rebuild in that worktree reached all 200 and had tick p95 of 105.47 ms; the two earlier baselines were 121.74 and 129.63 ms. The three baseline and two batch runs used the same seed, 45-second load, 30 Hz input, and 30-tick heading changes. Recorded `Authority::Interest` self time was 369,271 ms across 689 baseline frames, versus 1,272 ms across 1,396 batch frames and 1,142 ms across 1,262 batch frames. These are summed worker spans, not elapsed wall time. The profiler dropped 43,496 baseline scopes and 96,118 and 85,218 batch scopes, so the captures are incomplete. The end-to-end tick percentiles give the stronger evidence of a repeatable gain. The final replication suite passed 22,847 assertions in 281 cases, including batch/legacy interest parity and serial/parallel publishing. The server replication suite passed 201 assertions in 14 cases with the batch path.
 
 The extended server test exposed a separate existing visibility-consumer gap: both the legacy and batch hooks emit `Structure::Forgotten` when a public player child moves into a private container, but `Replica` deliberately retains forgotten entities and no client consumer currently removes them from the traversable store. The optimization preserves this protocol behavior; the dynamic-reparent assertion was not included in its passing test suite. A client-side forgotten-row policy needs its own design and verification.
+
+### Remaining-module coverage closure, 2026-09-24
+
+The earlier thin-module note was incomplete. The following candidates complete the
+five-opportunity inventory for every engine module. They are hypotheses to measure,
+not claims of an existing bottleneck. `bakegraph`, `control`, `datastore`, `script`,
+`scriptjs`, and `ui` already have five candidates above. `bakegraph` also has an
+optimized-preset 4,096-pipeline lookup measurement in the follow-up table. The
+other modules below have no dedicated benchmark row, so no speed figure is claimed.
+
+A fresh `just preset=bench bakegraph-pipeline-set-bench 5` run completed after
+this review. At 4,096 pipelines it reported 385 ns per call for the linear
+control, 266 ns for the text binary control, and 267 ns for
+`PipelineSet::Find`, with spreads of 13 ns, 8 ns, and 21 ns. This confirms the
+earlier lookup measurement on the current checkout. It does not measure parsing,
+writing, or graph execution.
+
+#### `examples`
+
+1. Feed `NearestHit` a deterministic broadphase candidate span for large target sets; `mono.engine/examples/src/Shooting.cpp:72` tests every target per shot. Keep its equal-distance behavior and invalid-target refusal.
+2. Replace the temporary `ByteWriter` result copy in `EncodeShot` with a fixed-size shot payload only after preserving the exact 36-byte wire encoding; `Shooting.cpp:16` through `:28` constructs a vector from another byte range.
+3. Measure combined sine and cosine evaluation for large orbit scenes; `mono.engine/examples/src/Scene.cpp:54` through `:61` evaluates both for every orbit each tick. Preserve the deterministic clock and transform result.
+4. Build the scene-library child-name index once while mounting, instead of calling `FindFirstChild` for each sorted directory; `Scene.cpp:120` through `:126`. The duplicate-name check must keep using the ECS tree as its authority.
+5. Cache a directory listing only behind an explicit filesystem-generation or mtime check; `mono.engine/examples/src/DemosLoader.cpp:57` through `:78` walks and sorts on every list request. Startup discovery is likely the only credible workload.
+
+#### `msl`
+
+1. Reserve each resource-slot vector from the corresponding SPIRV-Cross group sizes before `Collect`; `mono.engine/msl/src/Translate.cpp:56` through `:81` grows five separate vectors.
+2. Reserve the final texture and buffer vectors before appending storage slots; `Translate.cpp:56` through `:73` can otherwise reallocate and copy earlier slots.
+3. Measure one stable partition followed by one sort against the current per-kind sorts, while retaining the required type order and set-binding order; `Translate.cpp:38` through `:73`.
+4. Cache a successful translation by complete SPIR-V bytes and all translation options when repeated runtime compilation is demonstrated; `Translate.cpp:156`. The cache key must include every binding-affecting option and not outlive changed staged shader bytes.
+5. Avoid constructing trace diagnostics unless `msl` trace logging is enabled, if profiling shows formatting material at shader-load time; `Translate.cpp:91` through `:151` reports every binding. Preserve the first separate-sampler warning.
+
+#### `resources`
+
+1. Replace the heap-backed suffix temporary with a `string_view` if path construction profiles show repeated calls matter; `mono.engine/resources/src/Shaders.cpp:14` currently creates `std::string` for either fixed suffix.
+2. Build the final filename with one reserved string before converting to `std::filesystem::path`, if the platform path implementation makes the current nested construction allocate; `Shaders.cpp:25` through `:26` creates both a filename string and a path.
+3. Measure caching the staged module root after process initialization; `Shaders.cpp:25` calls `core::Paths::Shaders` for every lookup. The cache is valid only if the process treats asset roots as immutable.
+4. Make the trace argument lazy if disabled-log profiling shows `staged.string()` allocation is visible; `Shaders.cpp:31` converts every resolved path to text. Keep trace output identical when enabled.
+5. Cache exact `(name, form)` path results at shader-library ownership only if repeated lookup dominates a measured reload workload. `Shader` must remain a pure path constructor and must not acquire global cache state or file-existence policy.
+
+These five `resources` candidates all concern path construction. This module has no
+device work, compilation, or file I/O, and the audit found no evidence that it is a
+frame-time pressure point.
+
+### Lighting stress release repeat, 2026-09-24
+
+The current worktree passed `just volume-light-stress 120` after rebuilding the
+release test targets. Its authored-scene, volume resolver, and renderer checks
+passed 1,023 assertions. The 120-frame CPU measurements were 0.0220 ms per frame
+for 256 point lights, 0.0251 ms for 256 spot lights, 0.0491 ms for their mixed
+selection, and 0.00386 ms for 256 fog volumes. The Vulkan sixteen-volume fixture
+measured 0.330 ms end to end per frame. These bounded fixtures show that local
+light and volume selection are not the large-scene bottleneck.
+
+A separate current `release` client capture used the checked-in `LightingStress`
+scene at 1280 by 720, headless and uncapped, for 600 presented frames. It recorded
+146 completed `gpu fog` timestamps: 4.655 ms mean, 4.562 ms p50, and 6.442 ms p99.
+The earlier zero-directional-light after-capture recorded 4.785 ms mean over 186
+timestamps. The two captures use different durations and a worktree containing
+concurrent renderer edits, so the 2.7% difference is a repeatability check rather
+than a speedup attribution. The new capture also contains one-time shadow setup
+work, with a 533.138 ms maximum, and must not be summarized by its 4.039 ms
+whole-run frame mean.
+
+No additional lighting change was made in this pass. The concrete before-and-after
+result remains the existing zero-directional-light fog branch, from 38.414 ms to
+4.785 ms on its controlled capture. The new release repeat supports retaining that
+result while keeping shadowed direct-light sampling and visible-image parity as the
+next optimization gate.

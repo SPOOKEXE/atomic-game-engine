@@ -475,8 +475,13 @@ int main(int argc, char **argv) {
 		);
 
 		std::string controlHookFailure;
-		controlProductHook =
-			cdn::ConfigureControlHooks(*controlSurface, origin, *serving, *controlServer, controlHookFailure);
+		controlProductHook = cdn::ConfigureControlHooks(
+			{.Surface = *controlSurface,
+			 .ContentOrigin = origin,
+			 .ContentService = *serving,
+			 .ControlServer = *controlServer},
+			controlHookFailure
+		);
 		if (!controlProductHook.IsValid()) {
 			ENGINE_ERROR("cdn: could not install control product hook: {}", controlHookFailure);
 			return 1;

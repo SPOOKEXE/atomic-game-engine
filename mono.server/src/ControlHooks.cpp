@@ -6,6 +6,8 @@
 #include <engine/control/DataScriptPackage.hpp>
 #include <engine/control/Features.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/PhysicsObservation.hpp>
+#include <engine/control/features/ReplicationObservation.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
@@ -19,6 +21,27 @@
 #include <string_view>
 
 namespace server {
+	namespace {
+		// The replication reader borrows only these server-owned services for one hook lease.
+		struct ReplicationObservationControlHookContext {
+			engine::control::Surface &Surface;
+			engine::world::DataFactorySession *Session = nullptr;
+			engine::replication::ReplicationObservations &Records;
+			std::string PrimaryWorld;
+		};
+
+		struct ServerProductControlHookContext {
+			Server &Host;
+			engine::control::Surface &Surface;
+		};
+
+		struct ServerFactoryControlHookContext {
+			Server &Host;
+			engine::control::Surface &Surface;
+			engine::world::Universe &Universe;
+			engine::world::DataFactorySession &Session;
+		};
+	}
 
 	void Server::ConfigureControlHooks() {
 		const std::array standard{
@@ -34,37 +57,74 @@ namespace server {
 		};
 		ControlSurface.Enable(standard);
 
+		const ServerProductControlHookContext productContext{.Host = *this, .Surface = ControlSurface};
 		std::string failure;
-		ProductControlHook = ControlSurface.ActivateHook(
+		ProductControlHook = productContext.Surface.ActivateHook(
 			{.Id = "server.product",
 			 .Revision = "v1",
 			 .Purpose = "Reads and administers state owned by this dedicated server.",
 			 .Dependencies = {},
 			 .Limits = {}},
-			[this](engine::control::HookRegistration &registration) { RegisterControlTools(registration); },
+			[productContext](engine::control::HookRegistration &registration) {
+				productContext.Host.RegisterControlTools(registration);
+			},
 			failure
 		);
 		if (!ProductControlHook.IsValid()) {
 			throw std::runtime_error("could not install server control product hook: " + failure);
 		}
 
+		if (ReplicationObservationRecords != nullptr) {
+			const ReplicationObservationControlHookContext context{
+				.Surface = ControlSurface,
+				.Session = DataFactory.get(),
+				.Records = *ReplicationObservationRecords,
+				.PrimaryWorld = std::string(Worlds().NameOf(PrimaryWorld).Text()),
+			};
+			ReplicationObservationControlHook = ControlSurface.ActivateHook(
+				{.Id = "server.replication-observation",
+				 .Revision = "v1",
+				 .Purpose = "Completed replication exchange observations for the listening server.",
+				 .Dependencies = {"server.product"},
+				 .Limits = {{"records", engine::replication::ReplicationObservations::MAXIMUM_RECORDS}}},
+				[context](engine::control::HookRegistration &) {
+					engine::control::AddReplicationObservationTools(
+						context.Surface, context.Session, context.Records, context.PrimaryWorld
+					);
+				},
+				failure
+			);
+			if (!ReplicationObservationControlHook.IsValid()) {
+				ProductControlHook.Close();
+				throw std::runtime_error(
+					"could not activate server replication observation hook: " + failure
+				);
+			}
+		}
+
 		if (DataFactory == nullptr) return;
+		const ServerFactoryControlHookContext factoryContext{
+			.Host = *this, .Surface = ControlSurface, .Universe = Worlds(), .Session = *DataFactory
+		};
 
 		const auto abortActivation = [this](std::string message) {
 			FactoryPackageControlHook.Close();
 			FactoryCameraRenderingControlHook.Close();
+			FactoryPhysicsControlHook.Close();
 			FactorySceneControlHook.Close();
 			FactoryLifecycleControlHook.Close();
+			ReplicationObservationControlHook.Close();
+			ProductControlHook.Close();
 			throw std::runtime_error(std::move(message));
 		};
-		FactoryLifecycleControlHook = ControlSurface.ActivateHook(
+		FactoryLifecycleControlHook = factoryContext.Surface.ActivateHook(
 			{.Id = "server.data-factory.lifecycle",
 			 .Revision = "v1",
 			 .Purpose = "Dedicated-server data-factory lifecycle controls.",
 			 .Dependencies = {},
 			 .Limits = {}},
-			[this](engine::control::HookRegistration &) {
-				ControlSurface.AddDataFactoryTools(*DataFactory, {.RenderOnly = false});
+			[factoryContext](engine::control::HookRegistration &) {
+				factoryContext.Surface.AddDataFactoryTools(factoryContext.Session, {.RenderOnly = false});
 			},
 			failure
 		);
@@ -72,14 +132,16 @@ namespace server {
 			abortActivation("could not activate server factory lifecycle hook: " + failure);
 		}
 
-		FactorySceneControlHook = ControlSurface.ActivateHook(
+		FactorySceneControlHook = factoryContext.Surface.ActivateHook(
 			{.Id = "server.data-factory.raw-scene",
 			 .Revision = "v1",
 			 .Purpose = "Dedicated-server factory scene and retained-export reads.",
 			 .Dependencies = {"server.data-factory.lifecycle"},
 			 .Limits = {}},
-			[this](engine::control::HookRegistration &) {
-				ControlSurface.AddDataSceneTools(Worlds(), {}, DataFactory.get());
+			[factoryContext](engine::control::HookRegistration &) {
+				factoryContext.Surface.AddDataSceneTools(
+					factoryContext.Universe, {}, &factoryContext.Session
+				);
 			},
 			failure
 		);
@@ -87,15 +149,17 @@ namespace server {
 			abortActivation("could not activate server factory raw-scene hook: " + failure);
 		}
 
-		FactoryCameraRenderingControlHook = ControlSurface.ActivateHook(
+		FactoryCameraRenderingControlHook = factoryContext.Surface.ActivateHook(
 			{.Id = "server.data-factory.camera-rendering",
 			 .Revision = "v1",
 			 .Purpose = "Dedicated-server factory camera calibration reads.",
 			 .Dependencies = {"server.data-factory.lifecycle"},
 			 .Limits = {}},
-			[this](engine::control::HookRegistration &registration) {
+			[factoryContext](engine::control::HookRegistration &registration) {
 				registration.Add(
-					engine::control::features::CameraRenderingDataTool(Worlds(), DataFactory.get())
+					engine::control::features::CameraRenderingDataTool(
+						factoryContext.Universe, &factoryContext.Session
+					)
 				);
 			},
 			failure
@@ -104,22 +168,25 @@ namespace server {
 			abortActivation("could not activate server factory camera-rendering hook: " + failure);
 		}
 
-		FactoryPackageControlHook = ControlSurface.ActivateHook(
+		FactoryPackageControlHook = factoryContext.Surface.ActivateHook(
 			{.Id = "server.data-factory.package",
 			 .Revision = "v1",
 			 .Purpose = "Dedicated-server factory atomic script package replacement.",
 			 .Dependencies = {"server.data-factory.lifecycle"},
 			 .Limits = {}},
-			[this](engine::control::HookRegistration &) {
+			[factoryContext](engine::control::HookRegistration &) {
 				engine::control::AddDataScriptPackageTool(
-					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
+					factoryContext.Surface,
+					[factoryContext](const engine::script::DataScriptRequest &request) {
 						return engine::script::ExecuteDataScriptPackageTransaction(
-							{.Universe = Worlds(),
-							 .Session = *DataFactory,
-							 .RuntimeOf = [this](engine::world::WorldId world) { return RuntimeOf(world); },
+							{.Universe = factoryContext.Universe,
+							 .Session = factoryContext.Session,
+							 .RuntimeOf = [factoryContext](
+											  engine::world::WorldId world
+										  ) { return factoryContext.Host.RuntimeOf(world); },
 							 .DiscardRuntime =
-								 [this](engine::world::WorldId world) {
-									 std::erase_if(Runtimes, [world](const auto &entry) {
+								 [factoryContext](engine::world::WorldId world) {
+									 std::erase_if(factoryContext.Host.Runtimes, [world](const auto &entry) {
 										 return entry.first == world;
 									 });
 								 },
@@ -150,6 +217,21 @@ namespace server {
 		);
 		if (!FactoryPackageControlHook.IsValid()) {
 			abortActivation("could not activate server factory package hook: " + failure);
+		}
+
+		FactoryPhysicsControlHook = factoryContext.Surface.ActivateHook(
+			{.Id = "server.data-factory.physics-observation",
+			 .Revision = "v1",
+			 .Purpose = "Dedicated-server completed fixed-step physics observations.",
+			 .Dependencies = {"server.data-factory.lifecycle"},
+			 .Limits = {{"records", engine::physics::PhysicsObservationLog::CAPACITY}}},
+			[factoryContext](engine::control::HookRegistration &) {
+				engine::control::AddPhysicsObservationTools(factoryContext.Surface, factoryContext.Session);
+			},
+			failure
+		);
+		if (!FactoryPhysicsControlHook.IsValid()) {
+			abortActivation("could not activate server factory physics observation hook: " + failure);
 		}
 	}
 }

@@ -230,6 +230,9 @@ void main() {
 	float delta = (last - first) / float(steps);
 	float transmittance = 1.0;
 	vec3 scattering = vec3(0.0);
+	// The sun has no directional contribution below the horizon. Its shadow
+	// march cannot change the result then, even for a dense volume.
+	bool hasDirectLight = any(notEqual(pass.Direct.rgb, vec3(0.0)));
 	for (uint stepIndex = 0u; stepIndex < 64u; stepIndex++) {
 		if (stepIndex >= steps) break;
 		float distanceAlongRay = first + (float(stepIndex) + 0.5) * delta;
@@ -244,7 +247,7 @@ void main() {
 			if (!Interval(volume, pass.Eye.xyz, ray, maximum, enter, exit) || distanceAlongRay < enter ||
 				distanceAlongRay > exit) continue;
 			float density = DensityAt(volume, point);
-			float light = LightTransmittance(volume, point);
+			float light = hasDirectLight ? LightTransmittance(volume, point) : 1.0;
 			extinction += volume.ExtinctionNoise.x * density;
 			source += volume.ColourDensity.rgb * (pass.Ambient.rgb + pass.Direct.rgb * light) * density;
 		}

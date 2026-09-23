@@ -24,7 +24,9 @@ namespace engine::render {
 	// `PassThrough` marks sampled bounds that the shadow pass does not draw:
 	// transparent or refractive rows and rows with CastShadow disabled. It is
 	// a conservative bounds diagnostic, not a per-pixel transmission result.
-	// `Reflection` remains reserved: mirror cameras do not bounce local light.
+	// `Reflection` marks the first bounce from a visible planar surface camera.
+	// It follows the same conservative AABB approximation as the rest of the
+	// diagnostic rather than claiming to represent a shaded reflection ray.
 	enum class LightProbeEvent : uint8_t {
 		EmptySpace,
 		PassThrough,
@@ -42,7 +44,8 @@ namespace engine::render {
 	//
 	// Build reuses its storage. Each probe traverses at most 16 nearest
 	// pass-through bounds, then stops at the first opaque shadow-casting AABB or
-	// the light range. Alpha-masked opaque rows remain conservative blockers.
+	// the light range. A surface-camera row reflects one continuation before that
+	// stop. Alpha-masked opaque rows remain conservative blockers.
 	// These sampled bounds can differ from mesh silhouettes and shadow maps.
 	class LightPathGeometry {
 	  public:

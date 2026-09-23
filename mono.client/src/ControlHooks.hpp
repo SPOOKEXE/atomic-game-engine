@@ -24,40 +24,43 @@ namespace engine::world {
 }
 
 namespace client {
+	// Makes the renderer-owned snapshot callback an explicit hook dependency.
+	struct VisibilityObservationHookContext {
+		engine::control::HookRegistry &Hooks;
+		std::function<engine::control::features::VisibilitySnapshotReply()> Snapshot;
+	};
+
+	// Both readers are fenced to the same factory session and universe.
+	struct FactoryReadHookContext {
+		engine::control::HookRegistry &Hooks;
+		engine::world::Universe &Universe;
+		engine::world::DataFactorySession &Session;
+	};
+
+	// The bridge owns copied audio records and its metadata resource.
+	struct DataAudioObservationHookContext {
+		engine::control::HookRegistry &Hooks;
+		engine::world::Universe &Universe;
+		std::shared_ptr<engine::script::DataAudioObservationBridge> Bridge;
+		engine::world::DataFactorySession &Session;
+	};
 
 	// Produces the control-owned copy of the renderer's latest visibility snapshot.
 	engine::control::features::VisibilitySnapshotReply
 	VisibilityObservationSnapshot(const engine::render::Renderer &renderer);
 
 	// Activates the renderer-owned visibility reader for this client process.
-	engine::control::HookLease ActivateVisibilityObservationHook(
-		engine::control::HookRegistry &hooks,
-		std::function<engine::control::features::VisibilitySnapshotReply()> snapshot,
-		std::string &failure
-	);
+	engine::control::HookLease
+	ActivateVisibilityObservationHook(VisibilityObservationHookContext context, std::string &failure);
 
 	// Activates session-fenced temporal pose sampling for this data-factory client.
-	engine::control::HookLease ActivateTemporalSampleHook(
-		engine::control::HookRegistry &hooks,
-		engine::world::Universe &universe,
-		engine::world::DataFactorySession &session,
-		std::string &failure
-	);
+	engine::control::HookLease
+	ActivateTemporalSampleHook(FactoryReadHookContext context, std::string &failure);
 
 	// Activates data-rig export for this data-factory client.
-	engine::control::HookLease ActivateRigExportHook(
-		engine::control::HookRegistry &hooks,
-		engine::world::Universe &universe,
-		engine::world::DataFactorySession &session,
-		std::string &failure
-	);
+	engine::control::HookLease ActivateRigExportHook(FactoryReadHookContext context, std::string &failure);
 
 	// Activates the bridge-owned audio metadata and readers as one provider transaction.
-	engine::control::HookLease ActivateDataAudioObservationHook(
-		engine::control::HookRegistry &hooks,
-		engine::world::Universe &universe,
-		std::shared_ptr<engine::script::DataAudioObservationBridge> bridge,
-		engine::world::DataFactorySession &session,
-		std::string &failure
-	);
+	engine::control::HookLease
+	ActivateDataAudioObservationHook(DataAudioObservationHookContext context, std::string &failure);
 }

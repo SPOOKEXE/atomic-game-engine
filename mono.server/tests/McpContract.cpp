@@ -113,6 +113,36 @@ namespace {
 				{{"name", "negotiate"}, {"arguments", {{"requested_channels", {"rgb_linear_hdr"}}}}});
 		const json discovery = json::parse(negotiated["result"]["content"][0]["text"].get<std::string>());
 		CHECK(StableNegotiation(discovery) == expected["negotiate"]);
+		if (!factory) {
+			const json worlds = Ask(socket, 6, "tools/call", {{"name", "world_list"}, {"arguments", {}}});
+			CHECK_FALSE(worlds["result"].value("isError", false));
+			CHECK_FALSE(json::parse(worlds["result"]["content"][0]["text"].get<std::string>()).empty());
+			const json components =
+				Ask(socket, 7, "tools/call", {{"name", "component_list"}, {"arguments", {}}});
+			CHECK_FALSE(components["result"].value("isError", false));
+			CHECK(
+				json::parse(components["result"]["content"][0]["text"].get<std::string>())
+					.contains("components")
+			);
+			const json created =
+				Ask(socket,
+					8,
+					"tools/call",
+					{{"name", "entity_create"}, {"arguments", {{"name", "mcp-contract-probe"}}}});
+			CHECK_FALSE(created["result"].value("isError", false));
+			const uint64_t createdId = json::parse(created["result"]["content"][0]["text"].get<std::string>())
+										   .at("id")
+										   .get<uint64_t>();
+			const json read =
+				Ask(socket, 9, "tools/call", {{"name", "instance_get"}, {"arguments", {{"id", createdId}}}});
+			CHECK_FALSE(read["result"].value("isError", false));
+			CHECK(json::parse(read["result"]["content"][0]["text"].get<std::string>()).at("id") == createdId);
+			const json removed = Ask(
+				socket, 10, "tools/call", {{"name", "entity_destroy"}, {"arguments", {{"id", createdId}}}}
+			);
+			CHECK_FALSE(removed["result"].value("isError", false));
+			CHECK(json::parse(removed["result"]["content"][0]["text"].get<std::string>())["ok"] == true);
+		}
 	}
 }
 
@@ -121,4 +151,82 @@ TEST_CASE("server normal MCP manifest is the reviewed contract", "[server][mcp]"
 }
 TEST_CASE("server factory MCP manifest is the reviewed contract", "[server][mcp][data-factory]") {
 	Check("factory", true);
+}
+
+TEST_CASE("server replication observation MCP hook follows listener availability", "[server][mcp]") {
+	if (!std::filesystem::exists(Program())) SKIP("the server program is not built into this preset");
+	const uint16_t port = FreePort();
+	engine::parallel::Process child;
+	REQUIRE(child.Start(
+		Program(),
+		{"--mcp-port", std::to_string(port), "--listen", "--listen-port", "0", "--unpaced", "--seconds", "30"}
+	));
+
+	asio::io_context context;
+	asio::ip::tcp::socket socket(context);
+	std::error_code failure;
+	for (int attempt = 0; attempt < 200; ++attempt) {
+		socket.connect({asio::ip::address_v4::loopback(), port}, failure);
+		if (!failure) break;
+		socket.close();
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	REQUIRE_FALSE(failure);
+
+	const json negotiated =
+		Ask(socket,
+			1,
+			"tools/call",
+			{{"name", "negotiate"}, {"arguments", {{"requested_channels", {"rgb_linear_hdr"}}}}});
+	const json discovery = json::parse(negotiated["result"]["content"][0]["text"].get<std::string>());
+	const auto hook = std::find_if(discovery["hooks"].begin(), discovery["hooks"].end(), [](const json &row) {
+		return row["id"] == "server.replication-observation";
+	});
+	REQUIRE(hook != discovery["hooks"].end());
+	CHECK(*hook == Fixture()["replication_observation"]["hook"]);
+}
+
+TEST_CASE("server MCP listener restarts with its reviewed normal manifest", "[server][mcp]") {
+	if (!std::filesystem::exists(Program())) SKIP("the server program is not built into this preset");
+	const json expected = Fixture()["normal"];
+	const uint16_t port = FreePort();
+	const auto run = [&](engine::parallel::Process &child) {
+		REQUIRE(
+			child.Start(Program(), {"--mcp-port", std::to_string(port), "--unpaced", "--seconds", "0.25"})
+		);
+
+		asio::io_context context;
+		asio::ip::tcp::socket socket(context);
+		std::error_code failure;
+		for (int attempt = 0; attempt < 200; ++attempt) {
+			socket.connect({asio::ip::address_v4::loopback(), port}, failure);
+			if (!failure) break;
+			socket.close();
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+		REQUIRE_FALSE(failure);
+
+		const json opened = Ask(socket, 1, "initialize");
+		CHECK(StableInitialize(opened["result"]) == expected["initialize"]);
+		const json negotiated =
+			Ask(socket,
+				2,
+				"tools/call",
+				{{"name", "negotiate"}, {"arguments", {{"requested_channels", {"rgb_linear_hdr"}}}}});
+		return StableNegotiation(json::parse(negotiated["result"]["content"][0]["text"].get<std::string>()));
+	};
+
+	engine::parallel::Process first;
+	const json firstManifest = run(first);
+	CHECK(firstManifest == expected["negotiate"]);
+	const engine::parallel::ProcessStatus firstExit = first.Wait();
+	REQUIRE(firstExit.Reason == engine::parallel::ExitReason::Exited);
+	CHECK(firstExit.Code == 0);
+
+	engine::parallel::Process second;
+	const json secondManifest = run(second);
+	CHECK(secondManifest == firstManifest);
+	const engine::parallel::ProcessStatus secondExit = second.Wait();
+	REQUIRE(secondExit.Reason == engine::parallel::ExitReason::Exited);
+	CHECK(secondExit.Code == 0);
 }

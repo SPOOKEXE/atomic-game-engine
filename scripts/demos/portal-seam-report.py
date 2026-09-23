@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 try:
-	from PIL import Image, ImageChops, ImageFilter, ImageMath, ImageStat
+	from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageMath, ImageStat
 except ImportError:  # pragma: no cover - a helper, not a dependency
 	raise SystemExit("PIL is not installed; open the .bmp instead")
 
@@ -152,8 +153,66 @@ def nonzero_pixels(image: Image.Image) -> int:
 	return sum(image.histogram()[1:])
 
 
+def projected_aperture_mask(size: tuple[int, int], frame: dict[str, Any] | None) -> Image.Image | None:
+	if frame is None or not isinstance(frame.get("camera"), dict):
+		return None
+	camera = frame["camera"]
+	position = camera.get("position")
+	rotation = camera.get("rotation")
+	fov = frame.get("field_of_view")
+	if not (
+		isinstance(position, list) and len(position) == 3
+		and isinstance(rotation, list) and len(rotation) == 4
+		and isinstance(fov, (int, float)) and 0 < fov < math.pi
+	):
+		return None
+	qx, qy, qz, qw = (-rotation[0], -rotation[1], -rotation[2], rotation[3])
+	tangent = math.tan(fov / 2)
+	width, height = size
+	mask = Image.new("L", size, 0)
+	draw = ImageDraw.Draw(mask)
+	projected = 0
+	for portal in frame.get("portal_views", []):
+		if not isinstance(portal, dict) or portal.get("external"):
+			continue
+		centre, first, second, normal = (
+			portal.get("centre"), portal.get("first"), portal.get("second"), portal.get("normal")
+		)
+		if not all(isinstance(value, list) and len(value) == 3 for value in (centre, first, second, normal)):
+			continue
+		if sum(normal[index] * (position[index] - centre[index]) for index in range(3)) <= 0:
+			continue
+		corners: list[tuple[float, float]] = []
+		for along, up in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+			world = [centre[i] + along * first[i] + up * second[i] - position[i] for i in range(3)]
+			t = [
+				2 * (qy * world[2] - qz * world[1]),
+				2 * (qz * world[0] - qx * world[2]),
+				2 * (qx * world[1] - qy * world[0]),
+			]
+			view = [
+				world[0] + qw * t[0] + qy * t[2] - qz * t[1],
+				world[1] + qw * t[1] + qz * t[0] - qx * t[2],
+				world[2] + qw * t[2] + qx * t[1] - qy * t[0],
+			]
+			if view[2] >= -0.001:
+				corners = []
+				break
+			corners.append((
+				(1 + view[0] / (-view[2] * tangent * width / height)) * width / 2,
+				(1 - view[1] / (-view[2] * tangent)) * height / 2,
+			))
+		if corners:
+			draw.polygon(corners, fill=255)
+			projected += 1
+	if not projected:
+		return None
+	mask = mask.filter(ImageFilter.MinFilter(3))
+	return mask if nonzero_pixels(mask) else None
+
+
 def full_reference_measurement(
-	portal_path: Path, reference_path: Path, position_tolerance_pixels: int
+	portal_path: Path, reference_path: Path, position_tolerance_pixels: int, aperture_only: bool = False
 ) -> dict[str, Any]:
 	portal = Image.open(portal_path).convert("RGB")
 	reference = Image.open(reference_path).convert("RGB")
@@ -168,16 +227,24 @@ def full_reference_measurement(
 
 	portal_mask = straddler_mask(portal)
 	reference_mask = straddler_mask(reference)
+	aperture = projected_aperture_mask(portal.size, sidecar_for(portal_path)) if aperture_only else None
+	if aperture_only and aperture is None:
+		return {"reference_image": str(reference_path), "comparable": False, "reason": "no projected portal aperture"}
+	if aperture is not None:
+		portal_mask = ImageChops.multiply(portal_mask, aperture)
+		reference_mask = ImageChops.multiply(reference_mask, aperture)
 	portal_near = nearby_opaque(portal_mask, position_tolerance_pixels)
 	reference_near = nearby_opaque(reference_mask, position_tolerance_pixels)
 	uncovered = ImageChops.subtract(reference_mask, portal_near)
 	duplicate = ImageChops.subtract(portal_mask, reference_near)
 	colour_delta = ImageChops.difference(portal, reference)
-	colour_stats = ImageStat.Stat(colour_delta)
+	colour_stats = ImageStat.Stat(colour_delta, aperture)
 	return {
 		"reference_image": str(reference_path),
 		"comparable": True,
 		"position_tolerance_pixels": position_tolerance_pixels,
+		"comparison_region": "projected_aperture" if aperture_only else "full_frame",
+		"aperture_pixels": nonzero_pixels(aperture) if aperture is not None else None,
 		"reference_body_samples": nonzero_pixels(reference_mask),
 		"portal_body_samples": nonzero_pixels(portal_mask),
 		"uncovered_body_samples": nonzero_pixels(uncovered),
@@ -253,7 +320,7 @@ def matched_presentation_time(
 
 
 def reference_pairs(
-	rows: list[dict[str, Any]], position_tolerance_pixels: int, alpha_tolerance: float
+	rows: list[dict[str, Any]], position_tolerance_pixels: int, alpha_tolerance: float, aperture_only: bool = False
 ) -> list[dict[str, Any]]:
 	references = {
 		(row["view"], row["presentation_time"]["frame"]): row
@@ -274,7 +341,7 @@ def reference_pairs(
 				"frame": frame,
 				"portal_image": row["image"],
 				"presentation_time": matched_presentation_time(row, reference, alpha_tolerance),
-				**full_reference_measurement(Path(row["image"]), Path(reference["image"]), position_tolerance_pixels),
+				**full_reference_measurement(Path(row["image"]), Path(reference["image"]), position_tolerance_pixels, aperture_only),
 			}
 		)
 	return pairs
@@ -294,6 +361,24 @@ def moving_front_seam(rows: list[dict[str, Any]], minimum_pixels: float) -> dict
 		"minimum_motion_pixels": minimum_pixels,
 		"observed": len(samples) >= 2 and span >= minimum_pixels,
 	}
+
+
+def measured_capture_rates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+	sequences: dict[tuple[str, str], list[float]] = {}
+	for row in rows:
+		seconds = row["presentation_time"]["capture_seconds"]
+		if isinstance(seconds, (int, float)):
+			sequences.setdefault((row["route"], row["view"]), []).append(float(seconds))
+	return [
+		{
+			"route": route,
+			"view": view,
+			"captured_frames": len(times),
+			"elapsed_seconds": times[-1] - times[0] if len(times) >= 2 else None,
+			"measured_fps": (len(times) - 1) / (times[-1] - times[0]) if len(times) >= 2 and times[-1] > times[0] else None,
+		}
+		for (route, view), times in sorted(sequences.items())
+	]
 
 
 def full_reference_passes(recorded: dict[str, Any], body_mismatch_maximum: int) -> bool:
@@ -321,6 +406,8 @@ def report(
 	position_tolerance_pixels: int = 1,
 	front_motion_minimum_pixels: float = 2.0,
 	alpha_tolerance: float = 0.05,
+	target_fps: int | None = None,
+	aperture_only: bool = False,
 ) -> dict[str, Any]:
 	rows = [measurement(image) for image in images]
 	frames = [row["presentation_time"]["frame"] for row in rows]
@@ -328,6 +415,7 @@ def report(
 		"fixture": fixture,
 		"backend": backend,
 		"pipeline_revision": pipeline_revision,
+		"target_fps": target_fps,
 		"tolerance": {
 			"side_ratio_maximum": side_ratio_maximum,
 			"position_tolerance_pixels": position_tolerance_pixels,
@@ -335,8 +423,9 @@ def report(
 			"presentation_alpha_tolerance": alpha_tolerance,
 		},
 		"captures": rows,
-		"full_reference": reference_pairs(rows, position_tolerance_pixels, alpha_tolerance),
+		"full_reference": reference_pairs(rows, position_tolerance_pixels, alpha_tolerance, aperture_only),
 		"moving_front_seam": moving_front_seam(rows, front_motion_minimum_pixels),
+		"capture_rates": measured_capture_rates(rows),
 		"sequence": {
 			"capture_count": len(rows),
 			"metadata_complete": all(row["metadata_available"] for row in rows),
@@ -367,6 +456,8 @@ def main() -> None:
 	parser.add_argument("--fixture", default="PortalSeam")
 	parser.add_argument("--backend", default="unknown", help="runtime backend name, or unknown")
 	parser.add_argument("--pipeline-revision", default="unknown", help="runtime pipeline revision, or unknown")
+	parser.add_argument("--target-fps", type=int, help="requested presentation cap; not measured output FPS")
+	parser.add_argument("--expected-alpha", type=float, help="required capture interpolation phase")
 	parser.add_argument("--side-ratio-maximum", type=float, default=0.75)
 	parser.add_argument("--position-tolerance-pixels", type=int, default=1)
 	parser.add_argument("--front-motion-minimum-pixels", type=float, default=2.0)
@@ -374,6 +465,7 @@ def main() -> None:
 	parser.add_argument("--body-mismatch-maximum", type=int, default=0)
 	parser.add_argument("--require-moving-front", action="store_true")
 	parser.add_argument("--require-full-reference", action="store_true")
+	parser.add_argument("--aperture-only", action="store_true", help="compare the body within the projected portal aperture")
 	parser.add_argument("--output", type=Path, help="write the complete machine-readable report here")
 	args = parser.parse_args()
 	if not 0.0 < args.side_ratio_maximum <= 1.0:
@@ -386,6 +478,10 @@ def main() -> None:
 		parser.error("--presentation-alpha-tolerance must be non-negative")
 	if args.body_mismatch_maximum < 0:
 		parser.error("--body-mismatch-maximum must be non-negative")
+	if args.target_fps is not None and args.target_fps <= 0:
+		parser.error("--target-fps must be positive")
+	if args.expected_alpha is not None and not 0.0 <= args.expected_alpha < 1.0:
+		parser.error("--expected-alpha must be within [0, 1)")
 	images = capture_images(args.captures)
 	if not images:
 		parser.error("no BMP captures found")
@@ -398,12 +494,23 @@ def main() -> None:
 		args.position_tolerance_pixels,
 		args.front_motion_minimum_pixels,
 		args.presentation_alpha_tolerance,
+		args.target_fps,
+		args.aperture_only,
 	)
+	if args.expected_alpha is not None:
+		recorded["capture_alpha"] = args.expected_alpha
+		recorded["sequence"]["fixed_alpha_match"] = all(
+			isinstance((alpha := row["presentation_time"]["simulation_alpha"]), (int, float))
+			and abs(alpha - args.expected_alpha) <= 0.0001
+			for row in recorded["captures"]
+		)
 	for row in recorded["captures"]:
 		print_row(row, args.side_ratio_maximum)
 	print(json.dumps(recorded["sequence"], sort_keys=True))
 	if args.output:
 		args.output.write_text(json.dumps(recorded, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+	if args.expected_alpha is not None and not recorded["sequence"]["fixed_alpha_match"]:
+		raise SystemExit("capture interpolation phase differed from --expected-alpha")
 	if args.require_full_reference:
 		if not full_reference_passes(recorded, args.body_mismatch_maximum):
 			raise SystemExit("portal body silhouette or fixed-step phase differed from the matched-room reference")

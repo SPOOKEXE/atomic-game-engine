@@ -1,10 +1,12 @@
 #pragma once
 
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/Renderer.hpp>
 
 #include <memory>
+#include <utility>
 
 namespace engine::render {
 	// The portal coordinator only needs this bounded set of renderer operations.
@@ -39,6 +41,119 @@ namespace engine::render {
 		}
 		bool InstallPipeline(core::Name name, const graph::RenderGraph &pipeline) {
 			return Render.SetPipeline(name, pipeline);
+		}
+		bool SetPipeline(core::Name name, const graph::RenderGraph &pipeline) {
+			return InstallPipeline(name, pipeline);
+		}
+		Renderer &RendererRef() {
+			return Render;
+		}
+		const Renderer &RendererRef() const {
+			return Render;
+		}
+		// Source and producer state own portal work. These are the complete GPU
+		// operations that state may request, so neither role reaches the renderer's
+		// general frame state directly.
+		bool HasDevice() const {
+			return Render.Backend().Device != nullptr;
+		}
+		bool InitialiseInterface(InterfacePass &interface) const {
+			const auto backend = Render.Backend();
+			return backend.Device != nullptr && interface.Initialise(backend.Device, backend.ColourFormat);
+		}
+
+		template <typename... Args> decltype(auto) QueuePortalImage(Args &&...args) {
+			return Render.QueuePortalImage(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) QueuePortalImageLayerSet(Args &&...args) {
+			return Render.QueuePortalImageLayerSet(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) PortalImageLayerSetReady(Args &&...args) const {
+			return Render.PortalImageLayerSetReady(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) QueuePortalCaptureTree(Args &&...args) {
+			return Render.QueuePortalCaptureTree(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) FindPortalCaptureTree(Args &&...args) const {
+			return Render.FindPortalCaptureTree(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) AcquirePortalCaptureTreeLease(Args &&...args) {
+			return Render.AcquirePortalCaptureTreeLease(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) ReleasePortalCaptureTreeLease(Args &&...args) {
+			return Render.ReleasePortalCaptureTreeLease(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) ReleasePortalCaptureTree(Args &&...args) {
+			return Render.ReleasePortalCaptureTree(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) DropPortalCaptureTree(Args &&...args) {
+			return Render.DropPortalCaptureTree(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) RetainPortalLensPrograms(Args &&...args) {
+			return Render.RetainPortalLensPrograms(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) ReleasePortalLensPrograms(Args &&...args) {
+			return Render.ReleasePortalLensPrograms(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) QueueResourceImage(Args &&...args) {
+			return Render.QueueResourceImage(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) QueueResourceImages(Args &&...args) {
+			return Render.QueueResourceImages(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) TakeResourceImage(Args &&...args) {
+			return Render.TakeResourceImage(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) TakeResourceImages(Args &&...args) {
+			return Render.TakeResourceImages(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) CancelResourceImage(Args &&...args) {
+			return Render.CancelResourceImage(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) ResourceRevision(Args &&...args) const {
+			return Render.ResourceRevision(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) ForgetWorld(Args &&...args) {
+			return Render.ForgetWorld(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) MeshExtentOf(Args &&...args) const {
+			return Render.MeshExtentOf(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) TextureHandle(Args &&...args) const {
+			return Render.TextureHandle(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) TextureCell(Args &&...args) const {
+			return Render.TextureCell(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) TextureSize(Args &&...args) const {
+			return Render.TextureSize(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) TextureAnimationSignature(Args &&...args) const {
+			return Render.TextureAnimationSignature(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) PostProcessShaderName(Args &&...args) const {
+			return Render.PostProcessShaderName(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) LensShaderHash(Args &&...args) const {
+			return Render.LensShaderHash(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) SetAnimationTime(Args &&...args) {
+			return Render.SetAnimationTime(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) RenderViews(Args &&...args) {
+			return Render.Render(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) SunDirection(Args &&...args) const {
+			return Render.SunDirection(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) SunAmbient(Args &&...args) const {
+			return Render.SunAmbient(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) SunColor(Args &&...args) const {
+			return Render.SunColor(std::forward<Args>(args)...);
+		}
+		template <typename... Args> decltype(auto) SetSun(Args &&...args) {
+			return Render.SetSun(std::forward<Args>(args)...);
 		}
 		const ImportedPortalCaptureTree *FindCaptureTree(uint64_t token) const {
 			return Render.FindPortalCaptureTree(token);

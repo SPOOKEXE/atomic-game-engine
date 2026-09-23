@@ -95,7 +95,9 @@ namespace engine::net {
 			}
 
 			const bool reordering =
+				ReorderArming > 0 ||
 				std::find(Settings.Reorder.begin(), Settings.Reorder.end(), number) != Settings.Reorder.end();
+			if (ReorderArming > 0) --ReorderArming;
 			if (reordering && !Held.has_value()) {
 				Held = Waiting{inbound.From, {datagram.begin(), datagram.end()}};
 				Counters.Reordered++;
@@ -103,8 +105,11 @@ namespace engine::net {
 			}
 
 			Waiting survivor{inbound.From, {datagram.begin(), datagram.end()}};
-			if (std::find(Settings.Duplicate.begin(), Settings.Duplicate.end(), number) !=
-				Settings.Duplicate.end()) {
+			const bool duplicate = DuplicateArming > 0 ||
+								   std::find(Settings.Duplicate.begin(), Settings.Duplicate.end(), number) !=
+									   Settings.Duplicate.end();
+			if (DuplicateArming > 0) --DuplicateArming;
+			if (duplicate) {
 				// Back to back, which is what a resend looks like when the
 				// acknowledgement for the original was the packet that got lost.
 				Ready.push_back(survivor);
@@ -140,6 +145,14 @@ namespace engine::net {
 
 	void LossyTransport::DropNext(size_t datagrams) {
 		Arming += datagrams;
+	}
+
+	void LossyTransport::DuplicateNext(size_t datagrams) {
+		DuplicateArming += datagrams;
+	}
+
+	void LossyTransport::ReorderNext(size_t datagrams) {
+		ReorderArming += datagrams;
 	}
 
 	void LossyTransport::DropAt(uint64_t number) {

@@ -246,12 +246,12 @@ namespace engine::render {
 			frame.Joints = draw->JointFrames;
 		}
 		scene::GatherSurfaceSlots(store, frame.Slots);
-		ApplySurfaceSlots(frame.Instances, frame.Slots, owner);
 		scene::GatherPortalSeams(store, frame.Seams);
 		for (auto &seam : frame.Seams) {
 			for (const auto &slot : frame.Slots)
 				if (slot.Camera == seam.Camera) seam.Surface = slot.Index;
 		}
+		ApplySurfaceSlots(frame.Instances, frame.Slots, owner, frame.Seams);
 		CollectPortalViews(store, frame.Portals, frame.Slots);
 		CollectParticleBatches(store, frame.Particles);
 		frame.Particles.Detach();

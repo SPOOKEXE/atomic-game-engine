@@ -1417,12 +1417,12 @@ namespace studio {
 		ImGui::MenuItem("Light Influence Probes", nullptr, &diagnostics.ShowLightInfluence);
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"Blue and red are local-light influence probes. Portal seam-radiance spill is a "
-				"separate bounded field and is not sampled here. Orange is reserved for a "
-				"named transport event."
+				"Blue traces open local-light influence, red marks a stop, and orange marks "
+				"pass-through or one surface-camera reflection. Portal seam-radiance spill "
+				"is a separate bounded field and is not sampled here."
 			);
 		}
-		if (ImGui::MenuItem("Freeze Culling Frustum", nullptr, diagnostics.FrustumLocked)) {
+		if (ImGui::MenuItem("Lock Virtual Camera Position", nullptr, diagnostics.FrustumLocked)) {
 			if (diagnostics.FrustumLocked) {
 				diagnostics.FrustumLocked = false;
 			} else {
@@ -1431,12 +1431,12 @@ namespace studio {
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"Uses the captured view for base draw culling, LOD, local lights, particles, "
-				"spatial GUI layout, and local surface aiming. "
+				"Uses the captured position and the live view direction for base draw culling, LOD, "
+				"local lights, particles, spatial GUI layout, and local surface aiming. "
 				"The displayed camera remains free for inspection."
 			);
 		}
-		if (diagnostics.FrustumLocked && ImGui::MenuItem("Recapture Frozen Frustum")) {
+		if (diagnostics.FrustumLocked && ImGui::MenuItem("Recapture Virtual Camera Position")) {
 			diagnostics.LockFrustum(inspectionFrame);
 		}
 

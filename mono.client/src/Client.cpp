@@ -1282,312 +1282,7 @@ namespace client {
 		}
 
 		if (Settings.ControlPort >= 0) {
-			const std::array features{
-				engine::control::features::Universe(*Universe_),
-				engine::control::features::Architecture(),
-				engine::control::features::Script(),
-				engine::control::features::Diagnostics(),
-				engine::control::features::Resources(),
-				engine::control::features::Prompts(),
-				engine::control::features::Discovery(),
-			};
-			ControlSurface.Enable(features);
-			ControlSurface.AddInputTools(
-				[this](
-					const engine::control::InputAutomationEvent &event, std::string &failure
-				) -> nlohmann::json {
-					if (PendingControlInput.size() >= 64) {
-						failure = "input queue is full";
-						return nullptr;
-					}
-					if (event.Kind == engine::control::InputAutomationKind::Key &&
-						SDL_GetKeyFromName(event.Key.c_str()) == SDLK_UNKNOWN &&
-						SDL_GetScancodeFromName(event.Key.c_str()) == SDL_SCANCODE_UNKNOWN) {
-						failure = "key is not a recognized SDL key name";
-						return nullptr;
-					}
-					if (event.Kind == engine::control::InputAutomationKind::MouseMove ||
-						event.Kind == engine::control::InputAutomationKind::MouseButton) {
-						int width = Settings.Width;
-						int height = Settings.Height;
-						if (Window != nullptr) (void)SDL_GetWindowSize(Window, &width, &height);
-						if (event.X < 0.0f || event.Y < 0.0f || event.X >= width || event.Y >= height) {
-							failure = "pointer coordinates are outside the client area";
-							return nullptr;
-						}
-					}
-					PendingControlInput.push_back(event);
-					return nlohmann::json{{"queued", true}};
-				}
-			);
-			std::string renderGraphFailure;
-			RenderGraphHook.emplace(ControlSurface.ActivateHook(
-				{.Id = "client.render-graph",
-				 .Revision = "v1",
-				 .Purpose = "Reports the active client render graph.",
-				 .Dependencies = {},
-				 .Limits = {}},
-				[this](engine::control::HookRegistration &) {
-					engine::control::features::RenderGraph().Install(ControlSurface);
-				},
-				renderGraphFailure
-			));
-			if (!RenderGraphHook->IsValid()) {
-				ENGINE_ERROR("control: render graph hook did not activate: {}", renderGraphFailure);
-				RenderGraphHook.reset();
-			}
-			if (DataFactory) {
-				std::string lifecycleFailure;
-				DataFactoryLifecycleHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.data-factory-lifecycle",
-					 .Revision = "v1",
-					 .Purpose = "Owns the client data-factory lifecycle tools.",
-					 .Dependencies = {},
-					 .Limits = {}},
-					[this](engine::control::HookRegistration &) {
-						ControlSurface.AddDataFactoryTools(*DataFactory);
-					},
-					lifecycleFailure
-				));
-				if (!DataFactoryLifecycleHook->IsValid()) {
-					ENGINE_ERROR(
-						"control: data-factory lifecycle hook did not activate: {}", lifecycleFailure
-					);
-					DataFactoryLifecycleHook.reset();
-				}
-				ControlSurface.Enable(
-					std::array{engine::control::features::PhysicsObservation(*DataFactory)}
-				);
-				std::string audioObservationFailure;
-				DataAudioObservationHook.emplace(ActivateDataAudioObservationHook(
-					ControlSurface.Hooks(), *Universe_, DataAudio, *DataFactory, audioObservationFailure
-				));
-				if (!DataAudioObservationHook->IsValid()) {
-					ENGINE_ERROR(
-						"control: audio observation hook did not activate: {}", audioObservationFailure
-					);
-					DataAudioObservationHook.reset();
-				}
-				std::string scriptPackageFailure;
-				DataScriptPackageHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.data-script-package",
-					 .Revision = "v1",
-					 .Purpose = "Runs bounded data-factory script packages.",
-					 .Dependencies = {"client.data-factory-lifecycle"},
-					 .Limits = {}},
-					[this](engine::control::HookRegistration &) {
-						AddDataScriptPackageTool(
-							ControlSurface, [this](const engine::script::DataScriptRequest &request) {
-								return ExecuteDataScriptPackageTransaction(
-									{
-										.Universe = *Universe_,
-										.Session = *DataFactory,
-										.RuntimeOf = [this](engine::world::WorldId world)
-											-> engine::script::Runtime * {
-											const auto runtime =
-												std::ranges::find_if(Runtimes, [world](const auto &entry) {
-													return entry.first == world;
-												});
-											return runtime == Runtimes.end() ? nullptr
-																			 : runtime->second.get();
-										},
-										.DiscardRuntime =
-											[this](engine::world::WorldId world) {
-												std::erase_if(Runtimes, [world](const auto &entry) {
-													return entry.first == world;
-												});
-											},
-										.MakeRuntime =
-											[](engine::ecs::Store &store,
-											   const engine::script::RuntimeLimits &limits) {
-												return engine::script::MakeRuntime(
-													store, engine::script::Language::Luau, limits
-												);
-											},
-										.RunPackage = engine::script::RunDataScriptPackage,
-										.InstallSystems =
-											[this](
-												engine::ecs::Store &store, engine::ecs::Scheduler &systems
-											) {
-												InstallPresentation(store, systems, Settings.Entities);
-												(void)EnsureLocalPlayer(store);
-												(void)RestoreDefaultCameraMovement(store, systems);
-												(void)InstallDefaultCamera(store, systems);
-												InstallClientWorldSystems(store, systems);
-											},
-										.Admit =
-											[](std::string_view source,
-											   std::string_view entry,
-											   std::string &error) {
-												return engine::script::CheckDataScriptPackageSource(
-													engine::script::Language::Luau, source, entry, error
-												);
-											},
-										.Role = engine::script::HostRole::OfBoth(),
-										.Present = true,
-									},
-									request
-								);
-							}
-						);
-					},
-					scriptPackageFailure
-				));
-				if (!DataScriptPackageHook->IsValid()) {
-					ENGINE_ERROR(
-						"control: data script package hook did not activate: {}", scriptPackageFailure
-					);
-					DataScriptPackageHook.reset();
-				}
-				std::string captureFailure;
-				DataCaptureHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.data-capture",
-					 .Revision = "v1",
-					 .Purpose = "Owns client capture tickets.",
-					 .Dependencies = {"client.data-factory-lifecycle"},
-					 .Limits = {}},
-					[this](engine::control::HookRegistration &registration) {
-						registration.SetDrain([bridge = DataCapture] {
-							return bridge == nullptr || !bridge->HasPending();
-						});
-						engine::control::features::DataCapture(*DataFactory, DataCapture)
-							.Install(ControlSurface);
-					},
-					captureFailure
-				));
-				if (!DataCaptureHook->IsValid()) {
-					DataCaptureHook.reset();
-					ControlSurface.SetDataCaptureAvailabilityProvider({});
-				} else {
-					ControlSurface.SetDataCaptureAvailabilityProvider([this] {
-						const auto hooks = ControlSurface.Hooks().Active();
-						const bool active = std::any_of(hooks.begin(), hooks.end(), [](const auto &hook) {
-							return hook.Descriptor.Id == "client.data-capture" &&
-								   hook.State == engine::control::HookState::Active;
-						});
-						if (!active || !DataCapture) return engine::control::DataCaptureAvailability{};
-						const auto capabilities = DataCapture->Capabilities();
-						return engine::control::DataCaptureAvailability{
-							.Available = capabilities.Available,
-							.Channels = capabilities.Channels,
-							.Detail = capabilities.Detail,
-						};
-					});
-				}
-				std::string dataSceneFailure;
-				DataSceneHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.data-scene",
-					 .Revision = "v1",
-					 .Purpose = "Reads and exports the factory scene.",
-					 .Dependencies = {"client.data-factory-lifecycle"},
-					 .Limits = {}},
-					[this](engine::control::HookRegistration &) {
-						engine::control::features::DataScene(
-							*Universe_,
-							DataCapture,
-							DataFactory.get(),
-							[this](
-								std::string_view world, std::string_view name, engine::assets::MeshData &out
-							) {
-								const auto status = Renderer.CopyMesh(
-									engine::core::Name(name),
-									out,
-									engine::script::MAX_GLTF_EXPORT_VERTICES,
-									engine::script::MAX_GLTF_EXPORT_INDICES,
-									engine::core::Name(world)
-								);
-								switch (status) {
-								case engine::render::MeshCopyStatus::Copied:
-									return engine::script::GltfMeshSourceStatus::Available;
-								case engine::render::MeshCopyStatus::OverLimit:
-									return engine::script::GltfMeshSourceStatus::OverLimit;
-								case engine::render::MeshCopyStatus::Packed:
-									return engine::script::GltfMeshSourceStatus::Unsupported;
-								case engine::render::MeshCopyStatus::Invalid:
-									return engine::script::GltfMeshSourceStatus::Invalid;
-								case engine::render::MeshCopyStatus::Missing:
-									return engine::script::GltfMeshSourceStatus::Missing;
-								}
-								return engine::script::GltfMeshSourceStatus::Unsupported;
-							},
-							[this](
-								std::string_view world,
-								std::string_view name,
-								engine::assets::TextureData &out
-							) {
-								const auto status = Renderer.CopyTexture(
-									engine::core::Name(name),
-									out,
-									engine::script::MAX_GLTF_EXPORT_SOURCE_TEXTURE_BYTES,
-									engine::core::Name(world)
-								);
-								switch (status) {
-								case engine::render::TextureCopyStatus::Copied:
-									return engine::script::GltfTextureSourceStatus::Available;
-								case engine::render::TextureCopyStatus::OverLimit:
-									return engine::script::GltfTextureSourceStatus::OverLimit;
-								case engine::render::TextureCopyStatus::Unsupported:
-									return engine::script::GltfTextureSourceStatus::Unsupported;
-								case engine::render::TextureCopyStatus::Invalid:
-									return engine::script::GltfTextureSourceStatus::Invalid;
-								case engine::render::TextureCopyStatus::Missing:
-									return engine::script::GltfTextureSourceStatus::Missing;
-								}
-								return engine::script::GltfTextureSourceStatus::Unsupported;
-							}
-						).Install(ControlSurface);
-					},
-					dataSceneFailure
-				));
-				if (!DataSceneHook->IsValid()) {
-					ENGINE_ERROR("control: data scene hook did not activate: {}", dataSceneFailure);
-					DataSceneHook.reset();
-				}
-				std::string sceneRenderingFailure;
-				SceneRenderingHook.emplace(ControlSurface.ActivateHook(
-					{.Id = "client.scene-rendering",
-					 .Revision = "v1",
-					 .Purpose = "Reads camera calibration for the rendered factory scene.",
-					 .Dependencies = {"client.data-factory-lifecycle"},
-					 .Limits = {}},
-					[this](engine::control::HookRegistration &registration) {
-						registration.Add(
-							engine::control::features::CameraRenderingDataTool(*Universe_, DataFactory.get())
-						);
-					},
-					sceneRenderingFailure
-				));
-				if (!SceneRenderingHook->IsValid()) {
-					ENGINE_ERROR("control: scene-rendering hook did not activate: {}", sceneRenderingFailure);
-					SceneRenderingHook.reset();
-				}
-				std::string temporalSampleFailure;
-				TemporalSampleHook.emplace(ActivateTemporalSampleHook(
-					ControlSurface.Hooks(), *Universe_, *DataFactory, temporalSampleFailure
-				));
-				if (!TemporalSampleHook->IsValid()) {
-					ENGINE_ERROR("control: temporal sample hook did not activate: {}", temporalSampleFailure);
-					TemporalSampleHook.reset();
-				}
-				std::string rigExportFailure;
-				RigExportHook.emplace(
-					ActivateRigExportHook(ControlSurface.Hooks(), *Universe_, *DataFactory, rigExportFailure)
-				);
-				if (!RigExportHook->IsValid()) {
-					ENGINE_ERROR("control: rig export hook did not activate: {}", rigExportFailure);
-					RigExportHook.reset();
-				}
-			}
-			std::string visibilityFailure;
-			VisibilityObservationHook.emplace(ActivateVisibilityObservationHook(
-				ControlSurface.Hooks(),
-				[this] { return VisibilityObservationSnapshot(Renderer); },
-				visibilityFailure
-			));
-			if (!VisibilityObservationHook->IsValid()) {
-				ENGINE_ERROR("control: visibility observation hook did not activate: {}", visibilityFailure);
-				VisibilityObservationHook.reset();
-			}
+			ConfigureControlHooks();
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
@@ -1955,7 +1650,9 @@ namespace client {
 	void Client::Shutdown() {
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
+		InputControlHook.reset();
 		VisibilityObservationHook.reset();
+		PhysicsObservationHook.reset();
 		TemporalSampleHook.reset();
 		RigExportHook.reset();
 		DataAudioObservationHook.reset();
@@ -3358,6 +3055,11 @@ namespace client {
 		}
 	}
 
+	float Client::PresentationAlpha(engine::world::WorldId world) const {
+		if (!Settings.CaptureSequence.empty() && Settings.CaptureAlpha) return *Settings.CaptureAlpha;
+		return Universe_->AlphaOf(world);
+	}
+
 	void Client::Step() {
 		UpdateIterations++;
 		const engine::render::PresentationSchedule::TimePoint presentationNow =
@@ -3862,7 +3564,7 @@ namespace client {
 				}
 				if (!(factoryPaused && id == Rendered && !renderOnlyPending && !capturePending)) {
 					presentationDemand.push_back({
-						engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)},
+						engine::world::Presentation{id, presentationDelta, PresentationAlpha(id)},
 						installWorldPipeline(id),
 					});
 				}
@@ -3890,7 +3592,7 @@ namespace client {
 					// drawn by the recursive pass from a camera derived from
 					// this one; a surface camera aimed at the same pane
 					// would be a second answer taken from the eye.
-					(void)CollectPortalViews(store, Portals);
+					(void)CollectPortalViews(store, Portals, {}, PresentationAlpha(id));
 					(void)CollectSurfaceViews(store, Surfaces, Portals);
 
 					// **Whether any pane here names another world**, asked
@@ -3961,7 +3663,7 @@ namespace client {
 					scene.View.Camera,
 					scene.Frame->Instances,
 					scene.Frame->Tick,
-					Universe_->AlphaOf(scene.World),
+					PresentationAlpha(scene.World),
 					scene.Frame->Joints
 				);
 			}
@@ -4045,7 +3747,7 @@ namespace client {
 					);
 				});
 
-				Universe_->Present(Replicated, presentationDelta, Universe_->AlphaOf(Replicated));
+				Universe_->Present(Replicated, presentationDelta, PresentationAlpha(Replicated));
 
 				Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
 					const auto *list = store.Resource<engine::render::DrawList>();
@@ -4998,7 +4700,7 @@ namespace client {
 					{.Width = targetWidth, .Height = targetHeight},
 					Portals,
 					Surfaces,
-					Universe_->AlphaOf(presentationWorld),
+					PresentationAlpha(presentationWorld),
 					std::chrono::steady_clock::now(),
 					Rendered
 				);

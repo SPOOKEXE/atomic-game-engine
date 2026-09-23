@@ -54,7 +54,8 @@ namespace studio {
 		return false;
 	}
 
-	void DataFactoryHost::InstallTools(engine::control::Surface &surface, bool rendererReady) {
+	void DataFactoryHost::InstallTools(DataFactoryControlHookContext context) {
+		auto &[surface, rendererReady] = context;
 		if (Lifecycle == nullptr) return;
 		CloseControlHooks();
 

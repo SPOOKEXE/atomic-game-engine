@@ -51,6 +51,13 @@ paired `poll_render_only` row. Capture tickets use `poll_capture`. Always call
 `negotiate` and inspect `tools/list` before building a workflow around an
 optional feature.
 
+Interactive hosts advertise `emulate_mouse_move`, `emulate_click`,
+`emulate_mouse_wheel`, `emulate_key`, and `emulate_text` when they install an
+input provider. Client, Studio, and launcher process these events through their
+normal event loop, including when they run headlessly. A server and content
+origin do not advertise input rows because they own neither a window nor an
+input state. Their world rows remain available when the host owns a universe.
+
 ## Hook discovery and refresh
 
 The control kernel owns the protocol tables. Product code composes optional
@@ -101,7 +108,8 @@ Every row is described by the running program and is callable only when listed.
 | --- | --- | --- |
 | Discovery | `negotiate` | Read the exact advertised operation, capability, and limit contract before using an optional feature. |
 | Engine and worlds | `engine_info`, `world_list`, `world_tree` | Identify this engine and inspect the available worlds and bounded instance tree. |
-| Instances and components | `instance_get`, `instance_set`, `engine_components`, `component_list`, `entity_query`, `component_get`, `component_set` | Inspect the class-facing instance view and the engine or world component schemas. |
+| Instances and components | `instance_get`, `instance_set`, `entity_create`, `entity_destroy`, `engine_components`, `component_list`, `entity_query`, `component_get`, `component_set` | Inspect and edit authoritative entities, class properties, and engine or world component schemas. |
+| Input automation | `emulate_mouse_move`, `emulate_click`, `emulate_mouse_wheel`, `emulate_key`, `emulate_text` | Queue semantic pointer, keyboard, and UTF-8 text input through an interactive host's normal event boundary. |
 | Profiling | `profile_frame` | Read bounded frame-profile data. |
 | Architecture | `layer_table`, `module_get`, `module_may_link` | Inspect the compiled module graph and whether a proposed edge is allowed. |
 | Script surface | `class_list`, `class_get`, `script_check` | Discover class properties and type-check bounded Luau input without evaluating it. |
@@ -113,6 +121,11 @@ Every row is described by the running program and is callable only when listed.
 questions. `engine_components` is the sealed process-wide storage catalogue.
 `component_list` is what one world declares and how many entities use each
 component. `instance_get` is the class and property projection for one entity.
+
+`entity_create`, `entity_destroy`, `instance_set`, and `component_set` change
+only an authoritative world. A replicated world refuses those writes. Use
+`world_tree` or `entity_query` to find an entity before reading or changing it,
+then use the listed schema to supply a property or component value.
 
 `world_tree`, `entity_query`, log tails, profiles, and similar reads are bounded.
 Read their advertised JSON schema instead of assuming a full-world response.

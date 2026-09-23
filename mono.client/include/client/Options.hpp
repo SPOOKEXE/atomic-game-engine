@@ -468,5 +468,9 @@ namespace client {
 
 		// One BMP and camera-state JSON per rendered frame. Requires a positive frame budget.
 		std::filesystem::path CaptureSequence;
+
+		// Optional fixed interpolation phase for deterministic comparison captures.
+		// Only used with CaptureSequence; ordinary presentation keeps the world clock.
+		std::optional<float> CaptureAlpha;
 	};
 }

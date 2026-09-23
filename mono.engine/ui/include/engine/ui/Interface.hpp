@@ -163,6 +163,11 @@ namespace engine::ui {
 		// @param event The event, as SDL delivered it.
 		void ProcessEvent(const SDL_Event &event);
 
+		// Queues a synthetic event after the platform backend has refreshed physical input.
+		// Hosts use this with their normal SDL event path so editor input and ImGui
+		// receive the same gesture without physical mouse sampling moving its release.
+		void QueueAutomationEvent(const SDL_Event &event);
+
 		// Opens a frame. Every `ImGui::` call belongs between this and `End`.
 		//
 		// @param frameSeconds Wall seconds since the previous frame. Passed in

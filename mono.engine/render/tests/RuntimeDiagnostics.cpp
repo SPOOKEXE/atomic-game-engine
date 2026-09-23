@@ -184,6 +184,101 @@ TEST_CASE("overlapping pass-through bounds stop at the light range", "[render][r
 	CHECK(previousEnd == Catch::Approx(-4.5f));
 }
 
+TEST_CASE("light probes reflect from a surface camera before terminating", "[render][runtime-diagnostics]") {
+	SceneLight light;
+	light.Range = 10.0f;
+	DrawInstance mirror;
+	mirror.Frame = CFrame(Vector3{0.0f, 0.0f, -3.0f});
+	mirror.HalfExtent = Vector3{1.0f, 1.0f, 0.1f};
+	mirror.Surface = 0;
+	DrawInstance wall;
+	wall.Frame = CFrame(Vector3{0.0f, 0.0f, 2.0f});
+	wall.HalfExtent = Vector3{1.0f, 1.0f, 0.1f};
+	const std::array<DrawInstance, 2> instances{mirror, wall};
+
+	LightPathGeometry paths;
+	paths.Build(std::span(&light, 1), instances);
+
+	const auto *incoming = Find(paths.Segments(), LightProbeEvent::EmptySpace, Vector3{0.0f, 0.0f, -1.0f});
+	const auto *reflection = Find(paths.Segments(), LightProbeEvent::Reflection, Vector3{0.0f, 0.0f, 1.0f});
+	REQUIRE(incoming != nullptr);
+	REQUIRE(reflection != nullptr);
+	CHECK(incoming->Line.To.Z == Catch::Approx(-2.9f));
+	CHECK(reflection->Line.From.Z == Catch::Approx(-2.9f));
+	CHECK(reflection->Line.To.Z == Catch::Approx(1.9f));
+	CHECK(reflection->Line.Colour.R == Catch::Approx(1.0f));
+	CHECK(reflection->Line.Colour.G == Catch::Approx(0.48f));
+	CHECK(reflection->Line.Colour.B == Catch::Approx(0.08f));
+}
+
+TEST_CASE("light probes do not reflect through an opaque bound", "[render][runtime-diagnostics]") {
+	SceneLight light;
+	light.Range = 10.0f;
+	DrawInstance wall;
+	wall.Frame = CFrame(Vector3{0.0f, 0.0f, -2.0f});
+	wall.HalfExtent = Vector3{1.0f, 1.0f, 0.1f};
+	DrawInstance mirror;
+	mirror.Frame = CFrame(Vector3{0.0f, 0.0f, -4.0f});
+	mirror.HalfExtent = Vector3{1.0f, 1.0f, 0.1f};
+	mirror.Surface = 0;
+	const std::array<DrawInstance, 2> instances{wall, mirror};
+
+	LightPathGeometry paths;
+	paths.Build(std::span(&light, 1), instances);
+
+	const auto *incoming = Find(paths.Segments(), LightProbeEvent::EmptySpace, Vector3{0.0f, 0.0f, -1.0f});
+	REQUIRE(incoming != nullptr);
+	CHECK(incoming->Line.To.Z == Catch::Approx(-1.9f));
+	CHECK(std::none_of(paths.Segments().begin(), paths.Segments().end(), [](const auto &segment) {
+		return segment.Event == LightProbeEvent::Reflection;
+	}));
+}
+
+TEST_CASE("light probe reflections remain within the source range", "[render][runtime-diagnostics]") {
+	SceneLight light;
+	light.Range = 5.0f;
+	DrawInstance mirror;
+	mirror.Frame = CFrame(Vector3{0.0f, 0.0f, -3.0f});
+	mirror.HalfExtent = Vector3{1.0f, 1.0f, 0.1f};
+	mirror.Surface = 0;
+
+	LightPathGeometry paths;
+	paths.Build(std::span(&light, 1), std::span(&mirror, 1));
+
+	const auto *reflection = Find(paths.Segments(), LightProbeEvent::Reflection, Vector3{0.0f, 0.0f, 1.0f});
+	REQUIRE(reflection != nullptr);
+	CHECK(reflection->Line.From.Z == Catch::Approx(-2.9f));
+	CHECK(reflection->Line.To.Z == Catch::Approx(-0.8f));
+}
+
+TEST_CASE(
+	"light probes pass through linked portal surfaces without reflecting", "[render][runtime-diagnostics]"
+) {
+	SceneLight light;
+	light.Range = 10.0f;
+	DrawInstance portal;
+	portal.Frame = CFrame(Vector3{0.0f, 0.0f, -3.0f});
+	portal.HalfExtent = Vector3{1.0f, 1.0f, 0.1f};
+	portal.Surface = 0;
+	portal.SurfaceIsPortal = true;
+	DrawInstance wall;
+	wall.Frame = CFrame(Vector3{0.0f, 0.0f, -6.0f});
+	wall.HalfExtent = Vector3{1.0f, 1.0f, 0.1f};
+	const std::array<DrawInstance, 2> instances{portal, wall};
+
+	LightPathGeometry paths;
+	paths.Build(std::span(&light, 1), instances);
+
+	const auto *passThrough =
+		Find(paths.Segments(), LightProbeEvent::PassThrough, Vector3{0.0f, 0.0f, -1.0f});
+	REQUIRE(passThrough != nullptr);
+	CHECK(passThrough->Line.From.Z == Catch::Approx(-2.9f));
+	CHECK(passThrough->Line.To.Z == Catch::Approx(-3.1f));
+	CHECK(std::none_of(paths.Segments().begin(), paths.Segments().end(), [](const auto &segment) {
+		return segment.Event == LightProbeEvent::Reflection;
+	}));
+}
+
 TEST_CASE(
 	"a frozen culling camera can select a different draw set than the inspection camera",
 	"[render][runtime-diagnostics]"

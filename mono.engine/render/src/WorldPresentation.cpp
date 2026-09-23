@@ -334,6 +334,108 @@ namespace engine::render {
 				signature = FoldPresentationObject(signature, value);
 			return signature;
 		}
+
+		uint64_t FoldCFrame(uint64_t signature, const core::CFrame &frame) {
+			for (const float value :
+				 {frame.Position.X,
+				  frame.Position.Y,
+				  frame.Position.Z,
+				  frame.QuaternionX,
+				  frame.QuaternionY,
+				  frame.QuaternionZ,
+				  frame.QuaternionW})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			return signature;
+		}
+
+		uint64_t FoldVolumeState(uint64_t signature, const scene::VolumeState &volume) {
+			signature = FoldCFrame(signature, volume.Frame);
+			for (const float value :
+				 {volume.Colour.R,
+				  volume.Colour.G,
+				  volume.Colour.B,
+				  volume.HalfExtent.X,
+				  volume.HalfExtent.Y,
+				  volume.HalfExtent.Z,
+				  volume.Density,
+				  volume.Extinction,
+				  volume.Falloff,
+				  volume.NoiseScale,
+				  volume.NoiseStrength})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, volume.Steps);
+			signature = FoldPresentation(signature, volume.ShadowSteps);
+			signature = FoldPresentation(signature, volume.Seed);
+			signature = FoldPresentation(signature, static_cast<uint8_t>(volume.Shape));
+			return FoldPresentation(signature, volume.Enabled ? 1u : 0u);
+		}
+
+		uint64_t FoldShaderLensState(uint64_t signature, const scene::ShaderLensState &lens) {
+			signature = FoldCFrame(signature, lens.Frame);
+			signature = FoldPresentation(signature, lens.Shader.Id());
+			signature = FoldPresentation(signature, lens.EntityId);
+			for (const float value : {lens.Radius, lens.InnerRadius, lens.Falloff, lens.Strength, lens.Spin})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, static_cast<uint32_t>(lens.Priority));
+			return FoldPresentation(signature, static_cast<uint8_t>(lens.Shape));
+		}
+
+		uint64_t FoldWorldLighting(uint64_t signature, const scene::WorldLighting &lighting) {
+			for (const float value :
+				 {lighting.Direction.X,
+				  lighting.Direction.Y,
+				  lighting.Direction.Z,
+				  lighting.Ambient.R,
+				  lighting.Ambient.G,
+				  lighting.Ambient.B,
+				  lighting.OutdoorAmbient.R,
+				  lighting.OutdoorAmbient.G,
+				  lighting.OutdoorAmbient.B,
+				  lighting.Direct.R,
+				  lighting.Direct.G,
+				  lighting.Direct.B,
+				  lighting.FogColor.R,
+				  lighting.FogColor.G,
+				  lighting.FogColor.B,
+				  lighting.FogStart,
+				  lighting.FogEnd,
+				  lighting.BloomThreshold,
+				  lighting.BloomIntensity,
+				  lighting.BloomRadius,
+				  lighting.DepthOfFieldIntensity,
+				  lighting.DepthOfFieldFocusDistance,
+				  lighting.DepthOfFieldFocusRange,
+				  lighting.DepthOfFieldRadius,
+				  lighting.GodRayIntensity,
+				  lighting.GodRayThreshold,
+				  lighting.GodRayRadius})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, lighting.RenderFeatures.Enable);
+			signature = FoldPresentation(signature, lighting.RenderFeatures.Disable);
+			const size_t volumeCount = std::min(lighting.VolumeCount, lighting.Volumes.size());
+			signature = FoldPresentation(signature, volumeCount);
+			for (const auto &volume : std::span(lighting.Volumes).first(volumeCount))
+				signature = FoldVolumeState(signature, volume);
+			return signature;
+		}
+
+		uint64_t FoldSceneLight(uint64_t signature, const SceneLight &light) {
+			for (const float value :
+				 {light.Position.X,
+				  light.Position.Y,
+				  light.Position.Z,
+				  light.Range,
+				  light.Colour.R,
+				  light.Colour.G,
+				  light.Colour.B,
+				  light.Direction.X,
+				  light.Direction.Y,
+				  light.Direction.Z,
+				  light.ConeCosine})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, light.Shadows ? 1u : 0u);
+			return FoldPresentation(signature, light.DataFactoryId.Id());
+		}
 	}
 
 	bool EnvironmentLayerPresent(const scene::WorldLighting &lighting) {
@@ -345,6 +447,21 @@ namespace engine::render {
 			 environment.Textures.Left.IsValid() || environment.Textures.Right.IsValid() ||
 			 environment.Textures.Up.IsValid() || environment.Textures.Down.IsValid());
 		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0;
+	}
+
+	uint64_t
+	LightingPresentationSignature(const scene::WorldLighting &lighting, std::span<const SceneLight> lights) {
+		View view;
+		view.OverrideLighting = true;
+		view.Lighting = lighting;
+		view.Grid.Enabled = true;
+		ScenePresentationState state;
+		state.Lighting = lighting;
+		const ScenePresentationSignatures signatures = ScenePresentationSignaturesOf(view, state);
+		uint64_t signature = scene::MixSignature(signatures.Objects, signatures.Environment);
+		for (const SceneLight &light : lights)
+			signature = FoldSceneLight(signature, light);
+		return signature;
 	}
 
 	uint64_t ParticleVisibilitySignature(const View &view) {
@@ -401,20 +518,13 @@ namespace engine::render {
 			objects = FoldPresentation(objects, state.PostProcess.Id());
 			objects = FoldPresentation(objects, state.Untextured ? 1u : 0u);
 			objects = FoldPresentation(objects, state.Wireframe ? 1u : 0u);
-			objects = FoldPresentationSpan(objects, view.Lights);
-			objects = FoldPresentationObject(objects, state.Lighting.Direction);
-			objects = FoldPresentationObject(objects, state.Lighting.Ambient);
-			objects = FoldPresentationObject(objects, state.Lighting.OutdoorAmbient);
-			objects = FoldPresentationObject(objects, state.Lighting.Direct);
-			objects = FoldPresentationObject(objects, state.Lighting.FogColor);
-			objects = FoldPresentationObject(objects, state.Lighting.FogStart);
-			objects = FoldPresentationObject(objects, state.Lighting.FogEnd);
+			for (const SceneLight &light : view.Lights)
+				objects = FoldSceneLight(objects, light);
+			objects = FoldWorldLighting(objects, lighting);
 			objects = FoldPresentation(objects, view.OverrideLighting ? 1u : 0u);
-			if (view.OverrideLighting) {
-				objects = FoldPresentationObject(objects, view.Lighting);
-			}
 			if (lensCount != 0) {
-				objects = FoldPresentationSpan(objects, std::span(lighting.ShaderLenses).first(lensCount));
+				for (const auto &lens : std::span(lighting.ShaderLenses).first(lensCount))
+					objects = FoldShaderLensState(objects, lens);
 				objects = FoldPresentation(objects, view.LensPrograms);
 				if (view.LensPrograms == 0)
 					objects =
@@ -428,18 +538,17 @@ namespace engine::render {
 		// Only the selected environment enters the pixel signature. Lower siblings
 		// and providers outside Lighting cannot reach the sky node, so changing one
 		// of them must not redraw an identical scene.
-		const scene::Environment &environment = state.Lighting.EnvironmentState;
+		const scene::Environment &environment = lighting.EnvironmentState;
 		const EnvironmentUniformModes environmentModes = EnvironmentModesOf(environment);
-		if (!EnvironmentLayerPresent(state.Lighting)) {
+		if (!EnvironmentLayerPresent(lighting)) {
 			environmentSignature = 0;
 		} else {
 			environmentSignature = FoldPresentation(environmentSignature, projection);
 			environmentSignature = FoldPresentation(environmentSignature, contentOwners);
-			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direction);
-			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Ambient);
-			environmentSignature =
-				FoldPresentationObject(environmentSignature, state.Lighting.OutdoorAmbient);
-			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direct);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.Direction);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.Ambient);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.OutdoorAmbient);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.Direct);
 			environmentSignature =
 				FoldPresentation(environmentSignature, static_cast<uint8_t>(environment.Skybox));
 			if (environment.Skybox == scene::SkyboxSource::Textures) {
@@ -480,7 +589,7 @@ namespace engine::render {
 			}
 			environmentSignature = FoldPresentation(environmentSignature, view.OverrideLighting ? 1u : 0u);
 			if (view.OverrideLighting) {
-				environmentSignature = FoldPresentationObject(environmentSignature, view.Lighting);
+				environmentSignature = FoldWorldLighting(environmentSignature, lighting);
 			}
 		}
 
@@ -1439,7 +1548,10 @@ namespace engine::render {
 		}
 	}
 	void ApplySurfaceSlots(
-		std::span<scene::DrawInstance> instances, std::span<const scene::SurfaceSlot> slots, core::Name world
+		std::span<scene::DrawInstance> instances,
+		std::span<const scene::SurfaceSlot> slots,
+		core::Name world,
+		std::span<const scene::PortalSeam> portals
 	) {
 		static thread_local std::vector<scene::SurfaceSlot> parts;
 		parts.assign(slots.begin(), slots.end());
@@ -1460,13 +1572,21 @@ namespace engine::render {
 			);
 			if (found != parts.begin() && (found - 1)->Part.Id == instance.Source) {
 				instance.Surface = (found - 1)->Index;
+				instance.SurfaceIsPortal =
+					std::any_of(portals.begin(), portals.end(), [&](const auto &portal) {
+						return portal.Surface == instance.Surface;
+					});
 			}
 		}
 	}
 
 	size_t CollectPortalViews(
-		ecs::Store &store, std::vector<PortalView> &portals, std::span<const scene::SurfaceSlot> slots
+		ecs::Store &store,
+		std::vector<PortalView> &portals,
+		std::span<const scene::SurfaceSlot> slots,
+		float alpha
 	) {
+		(void)alpha;
 		portals.clear();
 
 		// **`GatherPortalSeams`, and never a second measurement of the same

@@ -185,6 +185,17 @@ namespace engine::net {
 		//        whatever is already armed.
 		void DropNext(size_t datagrams);
 
+		// Delivers the next arrivals twice. Adds to any already armed duplicates.
+		//
+		// @param datagrams How many next arrivals to duplicate.
+		void DuplicateNext(size_t datagrams);
+
+		// Holds the next arrivals behind the datagram after each one. Adds to any
+		// already armed reorders.
+		//
+		// @param datagrams How many next arrivals to reorder.
+		void ReorderNext(size_t datagrams);
+
 		// Loses the arrival with this number.
 		//
 		// The same nomination `LossSettings::Drop` carries, for a case that
@@ -238,6 +249,8 @@ namespace engine::net {
 		// next arrival will have is not the number it will still have once
 		// something before it is dropped.
 		size_t Arming = 0;
+		size_t DuplicateArming = 0;
+		size_t ReorderArming = 0;
 
 		// Survivors in the order they go out, which is not the order they
 		// arrived once anything is duplicated or reordered.

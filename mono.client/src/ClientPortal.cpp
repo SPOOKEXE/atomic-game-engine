@@ -610,6 +610,8 @@ namespace client {
 			return true;
 		}
 		if (message.Kind == game::PortalSessionKind::Crossed && message.Claim == PortalNext->Offer.Claim) {
+			if (!message.Fence) return false;
+			PortalNext->SourceFence = message.Fence;
 			PortalNext->Crossed = true;
 			return true;
 		}
@@ -1022,14 +1024,28 @@ namespace client {
 			evidence.RequiredPoseBegin = fence.H.DestinationTick;
 			evidence.RequiredPoseEnd = fence.H.DestinationTick;
 		});
+		if (next.SourceFence) {
+			const auto &fence = *next.SourceFence;
+			evidence.RequiredBaseline = fence.BaselineId;
+			evidence.RequiredBaselineHash = fence.BaselineHash;
+			evidence.RequiredTopologyRevision = fence.TopologyRevision;
+			evidence.RequiredAuthorityEpoch = fence.AuthorityEpoch;
+			evidence.RequiredPrepareRevision = fence.PrepareRevision;
+			evidence.RequiredClockDomain = fence.H.Domain;
+			evidence.RequiredSourceTick = fence.H.SourceTick;
+			evidence.RequiredDestinationTick = fence.H.DestinationTick;
+			evidence.RequiredPoseBegin = fence.H.DestinationTick;
+			evidence.RequiredPoseEnd = fence.H.DestinationTick;
+		}
 		std::optional<script::PortalTransferFence> localFence;
 		Universe_->Enter(next.World, [&](ecs::Store &store) {
 			localFence = script::PortalTransferDestinationFence(store, next.Offer.Claim.Transfer);
 		});
-		// A host Ready fence names the sealed destination receipt. The replica must
-		// independently expose that exact receipt before it can replace the image.
-		if (localFence && next.DestinationFence && *localFence == *next.DestinationFence) {
-			const auto &observed = *localFence;
+		// Crossed and Ready arrive on authenticated source and destination channels.
+		// If replication also carries the receipt, it must agree with both hosts.
+		if (next.SourceFence && next.DestinationFence && *next.SourceFence == *next.DestinationFence &&
+			(!localFence || *localFence == *next.DestinationFence)) {
+			const auto &observed = *next.DestinationFence;
 			evidence.ReplicaBaseline = observed.BaselineId;
 			evidence.ReplicaBaselineHash = observed.BaselineHash;
 			evidence.ReplicaTopologyRevision = observed.TopologyRevision;
@@ -1117,6 +1133,8 @@ namespace client {
 		}
 		Universe_->Enter(next.World, [&](ecs::Store &store) {
 			localInputEpoch = store.Time().Tick;
+			if (const auto *active = store.Resource<scene::ActiveCamera>())
+				store.Remove<scene::CameraPortalView>(active->Entity);
 			if (prediction)
 				adoptedPrediction =
 					AdoptPortalPrediction(store, next.Player, *prediction, Universe_->AlphaOf(next.World));

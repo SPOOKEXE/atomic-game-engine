@@ -68,6 +68,27 @@ TEST_CASE("headless launcher MCP controls its mode and exits cleanly", "[launche
 	CHECK(hasQuit);
 	CHECK(hasClick);
 	CHECK(hasKey);
+	const json negotiated = Value(Call(launcher, 7, "negotiate"));
+	const auto hook =
+		std::find_if(negotiated["hooks"].begin(), negotiated["hooks"].end(), [](const json &row) {
+			return row["id"] == "launcher.product";
+		});
+	REQUIRE(hook != negotiated["hooks"].end());
+	CHECK(
+		hook->at("tools") == json(
+								 {"emulate_mouse_move",
+								  "emulate_click",
+								  "emulate_mouse_wheel",
+								  "emulate_key",
+								  "emulate_text",
+								  "launcher_status",
+								  "launcher_open_mode",
+								  "launcher_set_option",
+								  "launcher_launch",
+								  "launcher_stop",
+								  "launcher_quit"}
+							 )
+	);
 
 	CHECK(Value(Call(launcher, 10, "emulate_click", {{"x", 5}, {"y", 5}})).at("queued") == true);
 	launcher::LauncherControlProbe::Frame(launcher);
@@ -81,6 +102,9 @@ TEST_CASE("headless launcher MCP controls its mode and exits cleanly", "[launche
 	launcher::LauncherControlProbe::Pump(launcher);
 	launcher::LauncherControlProbe::Frame(launcher);
 	CHECK_FALSE(ImGui::IsKeyDown(ImGuiKey_F5));
+	CHECK(Value(Call(launcher, 12, "emulate_text", {{"text", "headless control"}})).at("queued") == true);
+	launcher::LauncherControlProbe::Frame(launcher);
+	launcher::LauncherControlProbe::Pump(launcher);
 
 	const json status = Value(Call(launcher, 2, "launcher_status"));
 	CHECK(status.at("child_state") == "idle");

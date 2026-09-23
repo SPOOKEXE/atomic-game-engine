@@ -226,8 +226,8 @@ namespace engine::control {
 		Surface(Surface &&) = delete;
 		Surface &operator=(Surface &&) = delete;
 
-		// Adds one tool. Later rows win, so a program may replace an inherited
-		// one with a better-informed version of itself.
+		// Adds one row during built-in feature or active-hook installation. A legacy
+		// direct call is recorded as a surface-lifetime built-in activation.
 		void Add(Tool tool);
 
 		// Enables a program's explicit feature list, in order.
@@ -505,6 +505,7 @@ namespace engine::control {
 		HookRegistry HookRegistry_;
 		HookRegistration *CurrentRegistration = nullptr;
 		std::vector<Tool> Tools;
+		uint64_t NextBuiltinRegistration = 0;
 		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
 		RenderGraphProvider RenderGraphProviderCallback;
 		std::shared_ptr<DataFactoryOperationLedger> FactoryOperations;

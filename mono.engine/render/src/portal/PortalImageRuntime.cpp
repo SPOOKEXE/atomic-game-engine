@@ -1,6 +1,7 @@
 #include "PortalCaptureEntrance.hpp"
 #include "PortalImageBudget.hpp"
 #include "PortalPresentationClock.hpp"
+#include "PortalRenderOperations.hpp"
 #include "TransparentLayerWork.hpp"
 
 #include <engine/core/Log.hpp>
@@ -172,8 +173,8 @@ namespace engine::render {
 		size_t CaptureProfile(const PortalImageRequest &request) {
 			return request.OrderedLayers ? 3 : static_cast<size_t>(request.Scope);
 		}
-		bool InstallCapture(Renderer &renderer, PortalImageScope scope, bool ordered) {
-			if (renderer.Backend().Device == nullptr) {
+		bool InstallCapture(PortalRenderOperations &renderer, PortalImageScope scope, bool ordered) {
+			if (!renderer.HasDevice()) {
 				return false;
 			}
 			const auto base = scope == PortalImageScope::CompleteWorld ? graph::DefaultWorldHdrDocument()
@@ -507,7 +508,7 @@ namespace engine::render {
 			  Limits(limits), Resident(resident), Delivery(delivery), ViewSlot(ReplySlot(Replies.Channel)) {}
 
 		world::Universe &Universe;
-		Renderer &Render;
+		PortalRenderOperations Render;
 		world::WorldId World;
 		world::PresentationAddress Replies;
 		PortalImageInbox Inbox;
@@ -645,7 +646,7 @@ namespace engine::render {
 			Render.ReleasePortalLensPrograms(preview.UploadLensPrograms);
 			preview.UploadLensPrograms = 0;
 			preview.UploadLenses = {};
-			if (preview.UploadImages[0] != 0) Render.DropPortalImage(preview.UploadImages[0]);
+			if (preview.UploadImages[0] != 0) Render.ReleaseImage(preview.UploadImages[0]);
 			preview.UploadImages = {};
 			preview.UploadVersion.reset();
 		}
@@ -662,7 +663,7 @@ namespace engine::render {
 			}
 			Inbox.CancelRequest(preview.Pending);
 			if (preview.Handle != 0) {
-				Render.DropPortalImage(preview.Handle);
+				Render.ReleaseImage(preview.Handle);
 			}
 			preview.Deferred.reset();
 		}
@@ -671,7 +672,7 @@ namespace engine::render {
 			if (preview.Tree != 0)
 				Render.ReleasePortalCaptureTree(preview.Tree);
 			else if (preview.Handle != 0)
-				Render.DropPortalImage(preview.Handle);
+				Render.ReleaseImage(preview.Handle);
 			preview.Tree = 0;
 			preview.Handle = 0;
 		}
@@ -679,7 +680,7 @@ namespace engine::render {
 			Render.DropPortalCaptureTree(preview.Tree);
 			ReleaseCaptureLease(preview);
 			preview.CapturePinDeadline.reset();
-			Render.DropPortalImage(preview.Handle);
+			Render.ReleaseImage(preview.Handle);
 			Render.ReleasePortalLensPrograms(preview.LensPrograms);
 			preview.Handle = 0;
 			preview.Tree = 0;
@@ -818,7 +819,7 @@ namespace engine::render {
 		if (request.Geometry.size() > MAX_PORTAL_GEOMETRY_BYTES || !state.ViewSlot ||
 			(state.Delivery == PortalImageSourceDelivery::CapturePayloads && !request.OrderedLayers) ||
 			binding.ViewSlot != *state.ViewSlot ||
-			(state.Resident != nullptr && !state.Resident->Owns(state.Render)) ||
+			(state.Resident != nullptr && !state.Resident->Owns(state.Render.RendererRef())) ||
 			!Local(state.Universe, state.World, state.Replies) ||
 			producer.Channel != PORTAL_REQUEST_CHANNEL || binding.World != state.World.Index ||
 			binding.WorldName.Text() != state.Replies.World ||
@@ -1665,7 +1666,7 @@ namespace engine::render {
 			  OwnerName(ownerName), Resident(resident), ContentOwner(OwnerName) {}
 
 		world::Universe &Universe;
-		Renderer &Render;
+		PortalRenderOperations Render;
 		world::WorldId World;
 		world::PresentationAddress Requests;
 		core::Name OwnerName;
@@ -2291,7 +2292,7 @@ namespace engine::render {
 							Render.SetSun(
 								view.Lighting.Direction, view.Lighting.Ambient, view.Lighting.Direct
 							);
-							(void)Render.Render(std::span(&view, 1), overlay, nullptr, false);
+							(void)Render.RenderViews(std::span(&view, 1), overlay, nullptr, false);
 							Render.SetSun(previousDirection, previousAmbient, previousDirect);
 							if (held->Revision != Render.ResourceRevision()) {
 								Render.CancelResourceImage(held->FitToken);
@@ -2784,7 +2785,7 @@ namespace engine::render {
 			return progress;
 		}
 		if (state.Requests.Channel != PORTAL_REQUEST_CHANNEL ||
-			(state.Resident != nullptr && !state.Resident->Owns(state.Render)) ||
+			(state.Resident != nullptr && !state.Resident->Owns(state.Render.RendererRef())) ||
 			!Local(state.Universe, state.World, state.Requests)) {
 			Clear();
 			return progress;
@@ -3045,12 +3046,10 @@ namespace engine::render {
 			auto &frame = state.Frames[index];
 			if ((jobs[index]->Request.Scope != PortalImageScope::CompleteWorld &&
 				 !jobs[index]->Request.OrderedLayers) ||
-				frame.InterfaceReady || state.Render.Backend().Device == nullptr) {
+				frame.InterfaceReady || !state.Render.HasDevice()) {
 				continue;
 			}
-			frame.InterfaceReady = frame.Interface.Initialise(
-				state.Render.Backend().Device, state.Render.Backend().ColourFormat
-			);
+			frame.InterfaceReady = state.Render.InitialiseInterface(frame.Interface);
 			frame.Interface.SetImageSource([&state, source = &frame](const core::Name &name) {
 				InterfaceImage image;
 				image.Texture = state.Render.TextureHandle(name, state.ContentOwner);
@@ -3073,10 +3072,15 @@ namespace engine::render {
 		gui::RegisterGuiComponents();
 		const bool copied = presented && state.Universe.Enter(state.World, [&](ecs::Store &store) {
 			// Prepare once for this batch, before lookups and capture renewal compare resources.
-			state.EditableImages.Refresh(store, state.Render, state.ContentOwner);
-			state.EditableMeshes.Refresh(store, state.Render, state.ContentOwner);
+			state.EditableImages.Refresh(store, state.Render.RendererRef(), state.ContentOwner);
+			state.EditableMeshes.Refresh(store, state.Render.RendererRef(), state.ContentOwner);
 			PrepareWorldShaders(
-				store, state.ContentOwner, *state.Shaders, state.Render, nullptr, state.PostProcessing
+				store,
+				state.ContentOwner,
+				*state.Shaders,
+				state.Render.RendererRef(),
+				nullptr,
+				state.PostProcessing
 			);
 			gui::DemandedShaders(store, state.GuiShaders);
 			state.GuiShaderSignature = 0;
@@ -3334,7 +3338,7 @@ namespace engine::render {
 					if (pending.Replies.Generation != 0)
 						pending.Source = std::make_unique<PortalImageSource>(
 							state.Universe,
-							state.Render,
+							state.Render.RendererRef(),
 							state.World,
 							pending.Replies,
 							PortalInboxLimits{},
@@ -3667,13 +3671,8 @@ namespace engine::render {
 			}
 			// These are process-local presentation signatures, not serialized ECS identities.
 			// The outer endpoint incarnation scopes them to this producer.
-			assets::Hasher lightingHash;
-			lightingHash.Update(std::as_bytes(std::span(&lighting, 1)));
-			lightingHash.Update(std::as_bytes(std::span(state.Frames[index].Camera.Lights)));
-			const auto digest = lightingHash.Finish();
-			for (size_t byte = 0; byte < 8; ++byte) {
-				job.Output.Reply.LightingRevision |= uint64_t(digest.Digest[byte]) << (byte * 8);
-			}
+			job.Output.Reply.LightingRevision =
+				LightingPresentationSignature(lighting, state.Frames[index].Camera.Lights);
 			job.Output.Reply.CaptureLighting = PortalCaptureLighting{
 				{lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z},
 				{lighting.Ambient.R, lighting.Ambient.G, lighting.Ambient.B},
@@ -3905,7 +3904,7 @@ namespace engine::render {
 			}
 			OverlayImage overlay;
 			state.Render.SetAnimationTime(state.Frames[index].PresentationSeconds);
-			const auto rendered = state.Render.Render(std::span(&view, 1), overlay, interface, false);
+			const auto rendered = state.Render.RenderViews(std::span(&view, 1), overlay, interface, false);
 			if (rendered.SurfaceBudgetExceeded) {
 				state.Cancel(job.Output);
 				job.Output.Reply.Status = PortalImageStatus::BudgetExceeded;

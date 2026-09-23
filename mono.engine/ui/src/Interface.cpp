@@ -116,6 +116,7 @@ namespace engine::ui {
 			std::string Text;
 		};
 		std::vector<PendingEvent> HeadlessEvents;
+		std::vector<PendingEvent> AutomationEvents;
 
 		render::InterfacePass Spatial;
 		double SpatialSeconds = 0.0;
@@ -308,6 +309,7 @@ namespace engine::ui {
 		State->UploadedSignature = 0;
 		State->UploadedSignatureValid = false;
 		State->HeadlessEvents.clear();
+		State->AutomationEvents.clear();
 		State->Ready = false;
 		State->Drawable = false;
 	}
@@ -354,6 +356,16 @@ namespace engine::ui {
 		}
 	}
 
+	void Interface::QueueAutomationEvent(const SDL_Event &event) {
+		if (!State->Ready) return;
+		auto &pending = State->AutomationEvents.emplace_back();
+		pending.Event = event;
+		if (event.type == SDL_EVENT_TEXT_INPUT) {
+			pending.Text = event.text.text == nullptr ? "" : event.text.text;
+			pending.Event.text.text = nullptr;
+		}
+	}
+
 	void Interface::Begin(float frameSeconds) {
 		// Four spans over one frame of imgui rather than one, because the
 		// four cost different things: `Begin` and `End` are layout and
@@ -383,6 +395,11 @@ namespace engine::ui {
 			}
 			State->HeadlessEvents.clear();
 		}
+		for (auto &pending : State->AutomationEvents) {
+			if (pending.Event.type == SDL_EVENT_TEXT_INPUT) pending.Event.text.text = pending.Text.c_str();
+			ApplyHeadlessEvent(pending.Event);
+		}
+		State->AutomationEvents.clear();
 
 		// **The delta is overwritten after `NewFrame`, not before it.** The
 		// SDL3 backend reads a wall clock and assigns `io.DeltaTime` itself, so

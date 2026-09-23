@@ -66,16 +66,29 @@ namespace engine::control {
 			CurrentRegistration->Add(std::move(tool));
 			return;
 		}
-		for (Tool &existing : Tools) {
-			if (existing.Name == tool.Name) {
-				if (HookRegistry_.OwnsTool(tool.Name)) {
-					throw std::runtime_error("an active hook owns tool: " + tool.Name);
-				}
-				existing = std::move(tool);
-				return;
-			}
-		}
-		Tools.push_back(std::move(tool));
+		std::string failure;
+		HookLease lease = HookRegistry_.ActivateBuiltin(
+			{.Id = "builtin.compat." + std::to_string(++NextBuiltinRegistration),
+			 .Revision = "v1",
+			 .Purpose = "Compatibility registration retained for the surface lifetime.",
+			 .Dependencies = {},
+			 .Limits = {}},
+			[this, tool = std::move(tool)](HookRegistration &registration) mutable {
+				struct ResetRegistration {
+					Surface &Owner;
+					HookRegistration *Previous;
+					~ResetRegistration() {
+						Owner.CurrentRegistration = Previous;
+					}
+				} reset{*this, CurrentRegistration};
+				CurrentRegistration = &registration;
+				Add(std::move(tool));
+			},
+			failure,
+			true
+		);
+		if (!lease.IsValid()) throw std::runtime_error(failure);
+		BuiltinHooks.push_back(std::move(lease));
 	}
 
 	void Surface::Enable(std::span<const Feature> features) {
@@ -153,16 +166,29 @@ namespace engine::control {
 			CurrentRegistration->Add(std::move(resource));
 			return;
 		}
-		for (Resource &existing : Resources) {
-			if (existing.Uri == resource.Uri) {
-				if (HookRegistry_.OwnsResource(resource.Uri)) {
-					throw std::runtime_error("an active hook owns resource: " + resource.Uri);
-				}
-				existing = std::move(resource);
-				return;
-			}
-		}
-		Resources.push_back(std::move(resource));
+		std::string failure;
+		HookLease lease = HookRegistry_.ActivateBuiltin(
+			{.Id = "builtin.compat." + std::to_string(++NextBuiltinRegistration),
+			 .Revision = "v1",
+			 .Purpose = "Compatibility registration retained for the surface lifetime.",
+			 .Dependencies = {},
+			 .Limits = {}},
+			[this, resource = std::move(resource)](HookRegistration &registration) mutable {
+				struct ResetRegistration {
+					Surface &Owner;
+					HookRegistration *Previous;
+					~ResetRegistration() {
+						Owner.CurrentRegistration = Previous;
+					}
+				} reset{*this, CurrentRegistration};
+				CurrentRegistration = &registration;
+				AddResource(std::move(resource));
+			},
+			failure,
+			true
+		);
+		if (!lease.IsValid()) throw std::runtime_error(failure);
+		BuiltinHooks.push_back(std::move(lease));
 	}
 
 	void Surface::AddPrompt(Prompt prompt) {
@@ -170,16 +196,29 @@ namespace engine::control {
 			CurrentRegistration->Add(std::move(prompt));
 			return;
 		}
-		for (Prompt &existing : Prompts) {
-			if (existing.Name == prompt.Name) {
-				if (HookRegistry_.OwnsPrompt(prompt.Name)) {
-					throw std::runtime_error("an active hook owns prompt: " + prompt.Name);
-				}
-				existing = std::move(prompt);
-				return;
-			}
-		}
-		Prompts.push_back(std::move(prompt));
+		std::string failure;
+		HookLease lease = HookRegistry_.ActivateBuiltin(
+			{.Id = "builtin.compat." + std::to_string(++NextBuiltinRegistration),
+			 .Revision = "v1",
+			 .Purpose = "Compatibility registration retained for the surface lifetime.",
+			 .Dependencies = {},
+			 .Limits = {}},
+			[this, prompt = std::move(prompt)](HookRegistration &registration) mutable {
+				struct ResetRegistration {
+					Surface &Owner;
+					HookRegistration *Previous;
+					~ResetRegistration() {
+						Owner.CurrentRegistration = Previous;
+					}
+				} reset{*this, CurrentRegistration};
+				CurrentRegistration = &registration;
+				AddPrompt(std::move(prompt));
+			},
+			failure,
+			true
+		);
+		if (!lease.IsValid()) throw std::runtime_error(failure);
+		BuiltinHooks.push_back(std::move(lease));
 	}
 
 	size_t Surface::Count() const {
