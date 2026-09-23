@@ -1784,6 +1784,10 @@ namespace engine::render {
 			glm::vec4 CameraUp;
 			glm::vec4 CameraForward;
 			glm::vec4 Options;
+			glm::vec4 Condensation;
+			glm::vec4 Rain;
+			glm::vec4 Debris;
+			glm::vec4 Sizes;
 		};
 		struct FieldMaterial {
 			glm::vec4 Flags;
@@ -1798,6 +1802,10 @@ namespace engine::render {
 			{up.X, up.Y, up.Z, 0.0f},
 			{forward.X, forward.Y, forward.Z, 0.0f},
 			{1.0f, 0.0f, 0.0f, 0.0f},
+			{source.Field.CondensationColor.R, source.Field.CondensationColor.G, source.Field.CondensationColor.B, source.Field.CondensationAlpha},
+			{source.Field.RainColor.R, source.Field.RainColor.G, source.Field.RainColor.B, source.Field.RainAlpha},
+			{source.Field.DebrisColor.R, source.Field.DebrisColor.G, source.Field.DebrisColor.B, source.Field.DebrisAlpha},
+			{source.Field.CondensationSize, source.Field.RainSize, source.Field.DebrisSize, 0.0f},
 		};
 		FieldMaterial material{};
 		material.Flags = {0.0f, 0.0f, 0.75f, 1.0f};

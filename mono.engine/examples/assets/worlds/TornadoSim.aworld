@@ -462,7 +462,7 @@ end)
 			<Item class="Part" name="RoadSign" id="10"><Property name="Size" type="Vector3">4,8,1</Property><Property name="Position" type="Vector3">-18,6,4</Property></Item>
 			<Item class="Part" name="ChaseVehicle" id="11"><Property name="Size" type="Vector3">4,2,8</Property><Property name="Position" type="Vector3">-10,2,-55</Property></Item>
 			<Item class="Part" name="StormAnchor" id="12"><Property name="Position" type="Vector3">0,0,95</Property>
-		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">6</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property></Item>
+		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property><Property name="CondensationColor" type="Color3">0.38,0.32,0.25</Property><Property name="CondensationAlpha" type="float">0.045</Property><Property name="CondensationSize" type="float">5.5</Property><Property name="RainColor" type="Color3">0.20,0.27,0.33</Property><Property name="RainAlpha" type="float">0.08</Property><Property name="RainSize" type="float">0.22</Property><Property name="DebrisColor" type="Color3">0.25,0.18,0.12</Property><Property name="DebrisAlpha" type="float">0.12</Property><Property name="DebrisSize" type="float">0.6</Property></Item>
 			</Item>
 		</Item>
 	</Item>

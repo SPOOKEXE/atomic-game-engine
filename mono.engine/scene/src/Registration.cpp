@@ -58,6 +58,18 @@ namespace engine::scene {
 				writer.WriteUInt16(fields[index].Reserved);
 				writer.WriteUInt32(fields[index].RequestedCount);
 				writer.WriteUInt32(fields[index].Seed);
+				for (const core::Color3 colour : {fields[index].CondensationColor, fields[index].RainColor,
+					 fields[index].DebrisColor}) {
+					writer.WriteFloat(colour.R);
+					writer.WriteFloat(colour.G);
+					writer.WriteFloat(colour.B);
+				}
+				writer.WriteFloat(fields[index].CondensationAlpha);
+				writer.WriteFloat(fields[index].RainAlpha);
+				writer.WriteFloat(fields[index].DebrisAlpha);
+				writer.WriteFloat(fields[index].CondensationSize);
+				writer.WriteFloat(fields[index].RainSize);
+				writer.WriteFloat(fields[index].DebrisSize);
 			}
 		}
 
@@ -70,6 +82,15 @@ namespace engine::scene {
 				field.Reserved = reader.ReadUInt16();
 				field.RequestedCount = reader.ReadUInt32();
 				field.Seed = reader.ReadUInt32();
+				field.CondensationColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.RainColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.DebrisColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.CondensationAlpha = reader.ReadFloat();
+				field.RainAlpha = reader.ReadFloat();
+				field.DebrisAlpha = reader.ReadFloat();
+				field.CondensationSize = reader.ReadFloat();
+				field.RainSize = reader.ReadFloat();
+				field.DebrisSize = reader.ReadFloat();
 				if ((field.Layers & ~GPU_PARTICLE_ALL_LAYERS) != 0 || field.Reserved != 0) reader.Fail();
 				fields[index] = field;
 			}

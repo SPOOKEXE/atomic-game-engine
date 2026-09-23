@@ -10,6 +10,8 @@
 
 #include <cstdint>
 
+#include <engine/core/Color3.hpp>
+
 namespace engine::scene {
 
 	// Visible layers emitted by a GPU particle field.
@@ -36,6 +38,15 @@ namespace engine::scene {
 		uint32_t RequestedCount = 1'048'576;
 		// Seed used to place particles deterministically when the field resets.
 		uint32_t Seed = 0xC105D00Du;
+		core::Color3 CondensationColor{0.70f, 0.74f, 0.76f};
+		core::Color3 RainColor{0.55f, 0.67f, 0.85f};
+		core::Color3 DebrisColor{0.34f, 0.25f, 0.16f};
+		float CondensationAlpha = 0.11f;
+		float RainAlpha = 0.35f;
+		float DebrisAlpha = 0.24f;
+		float CondensationSize = 3.0f;
+		float RainSize = 0.45f;
+		float DebrisSize = 0.8f;
 	};
 
 	// Returns a supported count at or above the requested count, clamped to the
