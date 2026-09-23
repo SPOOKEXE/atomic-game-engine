@@ -1525,6 +1525,7 @@ declare interface Portal extends SurfaceCamera {
 
 declare interface Sound extends Instance {
 	Looped: boolean;
+	Pan: number;
 	Playing: boolean;
 	RollOffMaxDistance: number;
 	RollOffMinDistance: number;

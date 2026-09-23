@@ -655,6 +655,7 @@
 			"properties": [
 				{"name": "Looped", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Pan", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Playing", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "RollOffMaxDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
