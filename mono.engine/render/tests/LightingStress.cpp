@@ -46,6 +46,7 @@ TEST_CASE("lighting stress scene reaches bounded camera lighting payloads", "[re
 	);
 
 	REQUIRE(engine::scene::SyncRendered(store) > 0);
+	store.SetResource(engine::render::DrawList{});
 	engine::render::CollectInstances(store);
 	const auto *draw = store.Resource<engine::render::DrawList>();
 	const auto *active = store.Resource<engine::scene::ActiveCamera>();
