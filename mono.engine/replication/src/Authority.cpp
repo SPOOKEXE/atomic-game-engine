@@ -1217,11 +1217,17 @@ namespace engine::replication {
 			const Lane::Timed timed(lane, Lane::Phase::Sort);
 
 			if (reachable < lane.Order.size()) {
-				std::partial_sort(
+				// The prefix is almost the whole candidate set in a wide tick.
+				// Partitioning leaves exactly the rows that belong in it at the
+				// front, and sorting that prefix restores the comparator's total order.
+				std::nth_element(
 					lane.Order.begin(),
 					lane.Order.begin() + static_cast<ptrdiff_t>(reachable),
 					lane.Order.end(),
 					before
+				);
+				std::sort(
+					lane.Order.begin(), lane.Order.begin() + static_cast<ptrdiff_t>(reachable), before
 				);
 			} else {
 				std::sort(lane.Order.begin(), lane.Order.end(), before);
@@ -1279,12 +1285,13 @@ namespace engine::replication {
 		if (window > reachable) {
 			// The window reaches past what the first sort put in order, so the
 			// rows between have to be brought in before they can be refined.
-			std::partial_sort(
+			std::nth_element(
 				lane.Order.begin(),
 				lane.Order.begin() + static_cast<ptrdiff_t>(window),
 				lane.Order.end(),
 				before
 			);
+			std::sort(lane.Order.begin(), lane.Order.begin() + static_cast<ptrdiff_t>(window), before);
 		}
 
 		// Per *entity*, exactly as the cheap half is memoised, and for the same
