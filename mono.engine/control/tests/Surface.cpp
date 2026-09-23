@@ -394,6 +394,7 @@ namespace {
 					.Scene = std::move(scene),
 				};
 			}
+			detail = "capture diagnostics remain visible to poll clients";
 			return true;
 		}
 		bool ReadPlane(
@@ -716,6 +717,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(localLightFailed);
 	CHECK(duplicateLocalLightReply["error"] == "validation_failed: local_light_ids must be unique");
 	const json poll = Called(surface, "poll_capture", json{{"instance_id", "capture-world"}, {"ticket", 1}});
+	CHECK(poll["detail"] == "capture diagnostics remain visible to poll clients");
 	CHECK(poll["planes"][0]["digest"] == "abcd");
 	CHECK(poll["planes"][0]["hash_algorithm"] == "blake3-256");
 	CHECK(poll["planes"][0]["shape"] == json::array({1, 2, 4}));

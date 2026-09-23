@@ -34,6 +34,30 @@ namespace engine::render {
 		constexpr size_t MAX_CAPTURE_TICKETS = 6;
 		constexpr size_t RETAINED_BYTE_LIMIT = 64 * 1024 * 1024;
 
+		// A requested inline sidecar must fit before a capture ticket is issued. Large
+		// worlds can still be captured using get_scene_snapshot and ranged reads.
+		bool SidecarFits(
+			world::DataFactorySession &session,
+			const script::DataCaptureBridgeRequest &request,
+			std::string &detail
+		) {
+			if (!request.IncludeSceneData) return true;
+			const world::WorldId worldId = session.UniverseOf().Find(core::Name(request.InstanceId));
+			if (!worldId.IsValid()) return true;
+			bool fits = false;
+			const world::WorldStatus status = session.UniverseOf().Enter(worldId, [&](ecs::Store &store) {
+				const script::DataSceneResult scene = script::GetSceneSnapshot(store);
+				size_t bytes = 0;
+				fits = scene.Status == std::string_view("ok") &&
+					   script::DataSceneJsonResponseBudget(scene.Value, bytes);
+			});
+			if (status != world::WorldStatus::Ok) return true;
+			if (fits) return true;
+			detail = "inline scene sidecar exceeds 64 KiB or is unavailable; use get_scene_snapshot "
+					 "and include_scene_data=false";
+			return false;
+		}
+
 		bool Text(std::string_view value, size_t limit = 256) {
 			return !value.empty() && value.size() <= limit && value.find('\0') == std::string_view::npos;
 		}
@@ -585,11 +609,12 @@ namespace engine::render {
 		uint64_t &ticket,
 		std::string &detail
 	) {
-		std::lock_guard lock(Mutex);
 		if (!Valid(instanceId, request)) {
 			detail = "invalid capture request";
 			return false;
 		}
+		if (!SidecarFits(Session, request, detail)) return false;
+		std::lock_guard lock(Mutex);
 		if (Entries.size() >= MAX_CAPTURE_TICKETS) {
 			detail = "capture queue is full; release a terminal capture";
 			return false;
@@ -618,6 +643,8 @@ namespace engine::render {
 			detail = "same-frame capture group needs matching request and ticket counts of at least two";
 			return false;
 		}
+		for (const auto &request : requests)
+			if (!SidecarFits(Session, request, detail)) return false;
 		std::lock_guard lock(Mutex);
 		if (requests.size() > MAX_CAPTURE_TICKETS - Entries.size() || NextTicket == 0 || NextGroup == 0) {
 			detail = Entries.size() >= MAX_CAPTURE_TICKETS

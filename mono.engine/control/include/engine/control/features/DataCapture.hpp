@@ -529,7 +529,8 @@ namespace engine::control {
 		}
 
 		// Serializes a ticket poll, including only scene sidecars that fit the response budget.
-		inline json PollReply(uint64_t ticket, const script::DataCaptureBridgePoll &reply) {
+		inline json
+		PollReply(uint64_t ticket, const script::DataCaptureBridgePoll &reply, std::string_view detail) {
 			json planes = json::array();
 			for (const auto &plane : reply.Planes)
 				planes.push_back(Plane(plane, reply.SnapshotId));
@@ -556,6 +557,7 @@ namespace engine::control {
 			return {
 				{"ticket", ticket},
 				{"status", reply.Status},
+				{"detail", detail},
 				{"snapshot_id", reply.SnapshotId},
 				{"capture_frame", reply.CaptureFrame},
 				{"storage_profile", reply.StorageProfile},
@@ -1229,7 +1231,7 @@ namespace engine::control {
 					failure = Error("capture_not_found", detail);
 					return nullptr;
 				}
-				return PollReply(ticket, reply);
+				return PollReply(ticket, reply, detail);
 			},
 		});
 

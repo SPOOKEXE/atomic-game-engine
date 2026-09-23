@@ -1427,6 +1427,51 @@ TEST_CASE("script capture does not retain a scene sidecar for a stale snapshot",
 	CHECK_FALSE(bridge.Poll("data-world", ticket, reply, detail));
 }
 
+TEST_CASE("oversized inline scene sidecar is refused before capture is queued", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const auto world = worlds.Create({.Name = engine::core::Name("data-world")});
+	worlds.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		engine::scene::RegisterSceneClasses();
+		const auto part = engine::ecs::Classes::Find(engine::core::Name("Part"));
+		for (size_t index = 0; index < 400; ++index) {
+			const auto entity = store.CreateInstance(part, "CapturePart");
+			engine::ecs::AttributeValue id;
+			id.Type = engine::ecs::PropertyType::String;
+			id.String = "capture/" + std::to_string(index);
+			REQUIRE(engine::ecs::SetAttribute(store, entity, engine::core::Name("DataFactoryId"), id));
+		}
+	});
+	session.SetPauseParticipant(
+		[world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
+			return candidate == world;
+		}
+	);
+	REQUIRE(
+		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-world", snapshot).Status == engine::world::DataFactoryStatus::Ok);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	auto request = Request();
+	request.SnapshotId = snapshot;
+	request.IncludeSceneData = true;
+	uint64_t ticket = 0;
+	std::string detail;
+	CHECK_FALSE(bridge.Queue("data-world", request, ticket, detail));
+	CHECK(ticket == 0);
+	CHECK(detail.find("get_scene_snapshot") != std::string::npos);
+	request.IncludeSceneData = false;
+	CHECK(bridge.Queue("data-world", request, ticket, detail));
+	CHECK(ticket != 0);
+	bridge.Cancel("data-world", ticket);
+	bridge.Pump();
+	REQUIRE(bridge.Release("data-world", ticket, detail));
+}
+
 TEST_CASE(
 	"script capture terminally refuses invalid resource labels without advancing the world",
 	"[render][data-capture]"
