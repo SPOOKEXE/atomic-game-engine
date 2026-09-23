@@ -9,6 +9,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+
 TEST_SUITE_ID("engine.render.gpuparticlefieldgpu")
 TEST_DEPENDS("engine.render.fixtures")
 
@@ -31,6 +35,33 @@ namespace {
 			.Seconds = 1.0f,
 		};
 		return view;
+	}
+
+	size_t ChangedBytes(const CapturedImage &expected, const CapturedImage &actual) {
+		REQUIRE(expected.Bytes.size() == actual.Bytes.size());
+		size_t changed = 0;
+		for (size_t index = 0; index < actual.Bytes.size(); ++index) {
+			changed += actual.Bytes[index] != expected.Bytes[index];
+		}
+		return changed;
+	}
+
+	size_t RedDominantPixels(const CapturedImage &image, const CapturedImage &empty) {
+		size_t pixels = 0;
+		for (uint32_t y = 0; y < image.Height; ++y) {
+			for (uint32_t x = 0; x < image.Width; ++x) {
+				const size_t offset = y * image.RowStrideBytes + x * 4;
+				const auto channel = [&](size_t index) {
+					return std::to_integer<int>(image.Bytes[offset + index]);
+				};
+				if (image.Bytes[offset] == empty.Bytes[offset] &&
+					image.Bytes[offset + 1] == empty.Bytes[offset + 1] &&
+					image.Bytes[offset + 2] == empty.Bytes[offset + 2])
+					continue;
+				pixels += channel(0) > channel(1) && channel(0) > channel(2);
+			}
+		}
+		return pixels;
 	}
 }
 
@@ -69,13 +100,58 @@ TEST_CASE(
 		target.Height,
 		ImageFormat::Rgba8Unorm
 	);
-	size_t changedBytes = 0;
-	for (size_t index = 0; index < field.Bytes.size(); ++index) {
-		changedBytes += field.Bytes[index] != empty.Bytes[index];
-	}
 	// This is the post-transparent LDR result, so a difference proves the field
 	// affected rendered pixels rather than only recording a dispatch and draw.
-	CHECK(changedBytes > 64);
+	CHECK(ChangedBytes(empty, field) > 64);
+
+	auto disabled = FieldView(target, 262'144, 17);
+	disabled.GpuParticles->Field.Enabled = false;
+	const render::FrameResult disabledFrame =
+		fixture.Render.Render(std::span(&disabled, 1), overlay, nullptr, false);
+	CHECK(disabledFrame.ParticlesDrawn == 0);
+	const CapturedImage disabledImage = CaptureResource(
+		fixture.Render,
+		core::Name("composed-image"),
+		disabled.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Rgba8Unorm
+	);
+	CHECK(ChangedBytes(empty, disabledImage) == 0);
+
+	auto red = FieldView(target, 262'144, 17);
+	red.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
+	red.GpuParticles->Field.CondensationColor = {1.0f, 0.0f, 0.0f};
+	red.GpuParticles->Field.CondensationAlpha = 0.8f;
+	red.GpuParticles->Field.CondensationSize = 3.0f;
+	const render::FrameResult redFrame = fixture.Render.Render(std::span(&red, 1), overlay, nullptr, false);
+	CHECK(redFrame.ParticlesDrawn > 0);
+	const CapturedImage redImage = CaptureResource(
+		fixture.Render,
+		core::Name("composed-image"),
+		red.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Rgba8Unorm
+	);
+	CHECK(ChangedBytes(empty, redImage) > 64);
+	CHECK(RedDominantPixels(redImage, empty) > 64);
+
+	auto smallerFainter = FieldView(target, 262'144, 17);
+	smallerFainter.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
+	smallerFainter.GpuParticles->Field.CondensationColor = {1.0f, 0.0f, 0.0f};
+	smallerFainter.GpuParticles->Field.CondensationAlpha = 0.05f;
+	smallerFainter.GpuParticles->Field.CondensationSize = 0.5f;
+	fixture.Render.Render(std::span(&smallerFainter, 1), overlay, nullptr, false);
+	const CapturedImage smallerFainterImage = CaptureResource(
+		fixture.Render,
+		core::Name("composed-image"),
+		smallerFainter.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Rgba8Unorm
+	);
+	CHECK(ChangedBytes(redImage, smallerFainterImage) > 64);
 	const render::GpuMemoryStatistics firstMemory = fixture.Render.MemoryStatistics();
 	// The allocation path must retain the working 262k field when a larger
 	// optional preset cannot be admitted.
