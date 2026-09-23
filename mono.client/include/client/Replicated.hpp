@@ -273,6 +273,7 @@ namespace client {
 	// @param interpolation How far behind the newest received tick to draw, and
 	//        the rate that delay is measured against. The tick rate must be the
 	//        authority's, not this client's frame rate.
+	// @param limits The client script role and user-message sender for this replica.
 	// @return The world's runtime, which is never null. The scheduler holds a
 	//         reference too and drops it with the world, so a caller that keeps
 	//         none still leaves the VM alive for exactly as long as the store -
