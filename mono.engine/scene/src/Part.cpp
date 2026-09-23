@@ -3256,15 +3256,29 @@ namespace engine::scene {
 				gpuParticleFieldClass, "RequestedCount"
 			);
 			ecs::Classes::Property<&GpuParticleField::Seed>(gpuParticleFieldClass, "Seed");
-			ecs::Classes::Property<&GpuParticleField::CondensationColor>(gpuParticleFieldClass, "CondensationColor");
+			ecs::Classes::Property<&GpuParticleField::CondensationColor>(
+				gpuParticleFieldClass, "CondensationColor"
+			);
 			ecs::Classes::Property<&GpuParticleField::RainColor>(gpuParticleFieldClass, "RainColor");
 			ecs::Classes::Property<&GpuParticleField::DebrisColor>(gpuParticleFieldClass, "DebrisColor");
-			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationAlpha, 0.0f, 1.0f>(gpuParticleFieldClass, "CondensationAlpha");
-			ecs::Classes::ClampedProperty<&GpuParticleField::RainAlpha, 0.0f, 1.0f>(gpuParticleFieldClass, "RainAlpha");
-			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisAlpha, 0.0f, 1.0f>(gpuParticleFieldClass, "DebrisAlpha");
-			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationSize, 0.0f, 64.0f>(gpuParticleFieldClass, "CondensationSize");
-			ecs::Classes::ClampedProperty<&GpuParticleField::RainSize, 0.0f, 64.0f>(gpuParticleFieldClass, "RainSize");
-			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisSize, 0.0f, 64.0f>(gpuParticleFieldClass, "DebrisSize");
+			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationAlpha, 0.0f, 1.0f>(
+				gpuParticleFieldClass, "CondensationAlpha"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::RainAlpha, 0.0f, 1.0f>(
+				gpuParticleFieldClass, "RainAlpha"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisAlpha, 0.0f, 1.0f>(
+				gpuParticleFieldClass, "DebrisAlpha"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationSize, 0.0f, 64.0f>(
+				gpuParticleFieldClass, "CondensationSize"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::RainSize, 0.0f, 64.0f>(
+				gpuParticleFieldClass, "RainSize"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisSize, 0.0f, 64.0f>(
+				gpuParticleFieldClass, "DebrisSize"
+			);
 
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());

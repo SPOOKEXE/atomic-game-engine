@@ -1226,9 +1226,7 @@ namespace engine::replication {
 					lane.Order.end(),
 					before
 				);
-				std::sort(
-					lane.Order.begin(), lane.Order.begin() + static_cast<ptrdiff_t>(reachable), before
-				);
+				std::sort(lane.Order.begin(), lane.Order.begin() + static_cast<ptrdiff_t>(reachable), before);
 			} else {
 				std::sort(lane.Order.begin(), lane.Order.end(), before);
 			}

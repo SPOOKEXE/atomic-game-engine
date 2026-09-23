@@ -58,8 +58,8 @@ namespace engine::scene {
 				writer.WriteUInt16(fields[index].Reserved);
 				writer.WriteUInt32(fields[index].RequestedCount);
 				writer.WriteUInt32(fields[index].Seed);
-				for (const core::Color3 colour : {fields[index].CondensationColor, fields[index].RainColor,
-					 fields[index].DebrisColor}) {
+				for (const core::Color3 colour :
+					 {fields[index].CondensationColor, fields[index].RainColor, fields[index].DebrisColor}) {
 					writer.WriteFloat(colour.R);
 					writer.WriteFloat(colour.G);
 					writer.WriteFloat(colour.B);
