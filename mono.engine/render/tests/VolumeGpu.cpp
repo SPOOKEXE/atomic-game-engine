@@ -96,6 +96,8 @@ namespace {
 			core::Color3{0.0f, 0.9f, 0.8f},
 			core::Color3{0.9f, 0.4f, 0.1f},
 			core::Color3{0.3f, 0.4f, 1.0f},
+			core::Color3{0.65f, 0.25f, 0.12f},
+			core::Color3{0.12f, 0.55f, 0.34f},
 		};
 		view.Lighting.VolumeCount = colours.size();
 		for (size_t index = 0; index < colours.size(); index++) {
@@ -189,7 +191,7 @@ TEST_CASE(
 		fixture.Render,
 		"volume-order",
 		"tonemapped",
-		"two coincident and six dispersed volumes reversed in resolved order",
+		"two coincident and eight dispersed volumes reversed in resolved order",
 		forward.View(),
 		reverse.View(),
 		orderTolerance

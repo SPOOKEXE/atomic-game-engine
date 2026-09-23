@@ -90,4 +90,25 @@ namespace {
 		for (uint32_t index = 0; index < selectedSeeds.size(); index++)
 			CHECK(selectedSeeds[index] == index);
 	}
+
+	TEST_CASE("camera selection retains a complete layered tornado stack", "[scene][volume][tornado]") {
+		RegisterSceneClasses();
+		Store store("volume.tornado");
+		constexpr uint32_t LAYERS = 10;
+		for (uint32_t index = 0; index < LAYERS; index++) {
+			const auto source = store.Create();
+			store.Set(source, Volume{.Seed = index});
+			store.Set(
+				source, Transform{.Frame = CFrame{Vector3{0.0f, 12.0f + float(index) * 24.0f, -80.0f}}}
+			);
+		}
+
+		std::array<VolumeState, engine::scene::MAX_SCENE_VOLUMES> selected;
+		REQUIRE(engine::scene::ResolveVolumes(store, {}, {}, selected) == LAYERS);
+		std::array<bool, LAYERS> present{};
+		for (const VolumeState &volume : selected) {
+			if (volume.Seed < present.size()) present[volume.Seed] = true;
+		}
+		CHECK(std::all_of(present.begin(), present.end(), [](bool layer) { return layer; }));
+	}
 }

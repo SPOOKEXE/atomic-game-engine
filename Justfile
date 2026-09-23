@@ -163,8 +163,8 @@ render-check filter="[render][gpu]" backend="vulkan": (build "test_render")
     export MONO_RENDER_REVISION="$(git describe --always --dirty)"
     ./{{build}}/tests/test_render "{{filter}}"
 
-# Proves 256 authored volumes resolve to the eight-volume fragment budget, then
-# measures that eight-volume frame cost. The light collector's receiver-aware
+# Proves 256 authored volumes resolve to the sixteen-volume fragment budget, then
+# measures that sixteen-volume frame cost. The light collector's receiver-aware
 # sixteen-light cap is exercised by the world-view release test. Each measured
 # submission waits for the GPU; no benchmark artifact is written outside build.
 volume-light-stress frames="120":
