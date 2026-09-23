@@ -26,9 +26,8 @@ TEST_CASE("a Luau RemoteEvent copies its payload to an authority callback", "[sc
 	engine::script::RuntimeLimits authorityLimits;
 	authorityLimits.Role = engine::script::HostRole::OfServer();
 
-	auto authority = engine::script::MakeRuntime(
-		authorityStore, engine::script::Language::Luau, authorityLimits
-	);
+	auto authority =
+		engine::script::MakeRuntime(authorityStore, engine::script::Language::Luau, authorityLimits);
 	auto client = engine::script::MakeRuntime(clientStore, engine::script::Language::Luau, clientLimits);
 
 	REQUIRE(authority->Run(R"(
@@ -48,4 +47,26 @@ TEST_CASE("a Luau RemoteEvent copies its payload to an authority callback", "[sc
 	REQUIRE_FALSE(sent.empty());
 	REQUIRE(authority->DeliverRemoteEvent(sent));
 	CHECK(authorityStore.FindFirstRoot("copied payload") != engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("a combined Luau host delivers a RemoteEvent without a network sender", "[script][remote-event]") {
+	engine::script::ScriptClass();
+	engine::ecs::Store store("remote_event_local");
+
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
+	auto runtime = engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+	REQUIRE(runtime != nullptr);
+
+	REQUIRE(runtime->Run(R"(
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = "TornadoControl"
+		remote.OnServerEvent:Connect(function(payload)
+			assert(payload == "EF5")
+			local proof = Instance.new("Part")
+			proof.Name = "local:" .. payload
+		end)
+		remote:FireServer("EF5")
+	)"));
+	CHECK(store.FindFirstRoot("local:EF5") != engine::ecs::NULL_ENTITY);
 }

@@ -53,13 +53,33 @@ namespace engine::script {
 			const char *payload = luaL_checklstring(state, 2, &bytes);
 			std::vector<std::byte> message;
 			if (!EncodeRemoteEvent(
-					context.World->GetFullName(instance),
-					std::as_bytes(std::span(payload, bytes)),
-					message
-				) ||
-				!context.RemoteEventSender || !context.RemoteEventSender(message)) {
+					context.World->GetFullName(instance), std::as_bytes(std::span(payload, bytes)), message
+				)) {
 				luaL_errorL(state, "RemoteEvent:FireServer could not send this payload");
 				return 0;
+			}
+
+			// A combined host owns both roles in one VM, so its client request has
+			// no connection to cross. Keep the same bounded envelope and dispatch
+			// it through the server signal rather than inventing a local transport.
+			if (context.Role.Server) {
+				RemoteEventMessage delivered;
+				if (!DecodeRemoteEvent(message, delivered)) {
+					luaL_errorL(state, "RemoteEvent:FireServer could not deliver this payload");
+					return 0;
+				}
+				lua_pushlstring(
+					state, reinterpret_cast<const char *>(delivered.Payload.data()), delivered.Payload.size()
+				);
+				if (const std::string error = FireSignal(state, SignalKind::RemoteEvent, instance, 1);
+					!error.empty()) {
+					luaL_errorL(state, "RemoteEvent:FireServer handler failed: %s", error.c_str());
+				}
+				return 0;
+			}
+
+			if (!context.RemoteEventSender || !context.RemoteEventSender(message)) {
+				luaL_errorL(state, "RemoteEvent:FireServer could not send this payload");
 			}
 			return 0;
 		}
