@@ -22,8 +22,8 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <string>

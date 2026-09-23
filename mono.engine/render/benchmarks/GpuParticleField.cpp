@@ -42,18 +42,19 @@ namespace {
 		for (const std::optional<Report> &stored : Reports) {
 			if (!stored) continue;
 			const Report &report = *stored;
-			std::cout << "gpu-particle-field-report count=" << report.Count
-					  << " admitted=" << report.Admitted << " cpu_record_ns=" << report.CpuRecordingNanoseconds
-					  << " gpu_us=";
+			std::cout << "gpu-particle-field-report count=" << report.Count << " admitted=" << report.Admitted
+					  << " cpu_record_ns=" << report.CpuRecordingNanoseconds << " gpu_us=";
 			if (report.TimestampAvailable) {
 				std::cout << report.GpuMicroseconds;
 			} else {
 				std::cout << "unavailable";
 			}
-			std::cout << " buffer_live_bytes=" << Delta(report.Resident.BufferBytes, report.Before.BufferBytes)
+			std::cout << " buffer_live_bytes="
+					  << Delta(report.Resident.BufferBytes, report.Before.BufferBytes)
 					  << " live_bytes=" << Delta(report.Resident.LiveBytes, report.Before.LiveBytes)
 					  << " peak_bytes=" << Delta(report.Resident.PeakBytes, report.Before.PeakBytes)
-					  << " allocated_bytes=" << Delta(report.Resident.AllocatedBytes, report.Before.AllocatedBytes)
+					  << " allocated_bytes="
+					  << Delta(report.Resident.AllocatedBytes, report.Before.AllocatedBytes)
 					  << " transfer_live_bytes="
 					  << Delta(report.Resident.TransferBufferBytes, report.Before.TransferBufferBytes)
 					  << " buffer_allocations="
@@ -93,7 +94,9 @@ namespace {
 			throw std::runtime_error(std::string("SDL video init failed: ") + SDL_GetError());
 		}
 		struct VideoQuit {
-			~VideoQuit() { SDL_QuitSubSystem(SDL_INIT_VIDEO); }
+			~VideoQuit() {
+				SDL_QuitSubSystem(SDL_INIT_VIDEO);
+			}
 		} videoQuit;
 
 		Report report;
@@ -113,10 +116,13 @@ namespace {
 			engine::render::OverlayImage overlay;
 			auto view = FieldView(target, count);
 			const auto started = std::chrono::steady_clock::now();
-			const engine::render::FrameResult first = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
-			report.CpuRecordingNanoseconds = static_cast<uint64_t>(
-				std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count()
-			);
+			const engine::render::FrameResult first =
+				renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+			report.CpuRecordingNanoseconds =
+				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+										  std::chrono::steady_clock::now() - started
+				)
+										  .count());
 			report.Resident = renderer.MemoryStatistics();
 			report.Admitted = first.ParticlesDrawn >= count;
 

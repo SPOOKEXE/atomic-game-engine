@@ -81,7 +81,8 @@ TEST_CASE(
 	// optional preset cannot be admitted.
 	render::test_support::SetForceGpuParticleFieldAllocationFailure(true);
 	auto refused = FieldView(target, 1'048'576, 19);
-	const render::FrameResult refusedFrame = fixture.Render.Render(std::span(&refused, 1), overlay, nullptr, false);
+	const render::FrameResult refusedFrame =
+		fixture.Render.Render(std::span(&refused, 1), overlay, nullptr, false);
 	CHECK(refusedFrame.ParticlesDrawn >= 262'144);
 	CHECK(refusedFrame.ParticlesDrawn < 1'048'576);
 	CHECK(fixture.Render.MemoryStatistics().BufferBytes == firstMemory.BufferBytes);
