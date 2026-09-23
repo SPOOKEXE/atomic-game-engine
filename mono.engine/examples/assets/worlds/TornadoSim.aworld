@@ -88,10 +88,196 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local MessagingService = game:GetService("MessagingService")
+
+local function makePart(name: string, size: Vector3, position: Vector3, colour: Color3): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.Size = size
+	part.Position = position
+	part.Color = colour
+	part.Parent = Workspace
+	return part
+end
+
+local function makeVolume(name: string, position: Vector3, bounds: Vector3, density: number): Volume
+	local volume = Instance.new("Volume")
+	volume.Name = name
+	volume.Position = position
+	volume.Bounds = bounds
+	volume.Shape = Enum.VolumeShape.Ellipsoid
+	volume.Color = Color3.fromRGB(168, 178, 184)
+	volume.Density = density
+	volume.Extinction = 0.68
+	volume.Falloff = 0.58
+	volume.NoiseScale = 0.16
+	volume.NoiseStrength = 0.86
+	volume.Steps = 32
+	volume.ShadowSteps = 12
+	volume.Seed = #name * 41
+	volume.Parent = Workspace
+	return volume
+end
+
+-- A computed sky and a dark cloud deck keep the pale funnel visible. A black
+-- clear colour removes its silhouette before any particle system can help.
+Lighting.ClockTime = 17.7
+Lighting.GeographicLatitude = 35
+Lighting.Brightness = 1.15
+Lighting.Ambient = Color3.fromRGB(18, 23, 29)
+Lighting.OutdoorAmbient = Color3.fromRGB(37, 47, 55)
+Lighting.BloomThreshold = 1.1
+Lighting.BloomIntensity = 0.45
+Lighting.BloomRadius = 6
+Lighting.GodRayIntensity = 0.16
+Lighting.GodRayThreshold = 1.1
+Lighting.GodRayRadius = 46
+
+local sky = Instance.new("SkyboxCompute")
+sky.Name = "Tornado Storm Sky"
+sky.Shader = Enum.SkyboxComputeShader.Sunset
+sky.SunSize = 0.026
+sky.Seed = 401
+sky.Parent = Lighting
+
+local atmosphere = Instance.new("AtmosphereProcedural")
+atmosphere.Name = "Tornado Storm Atmosphere"
+atmosphere.Shader = Enum.AtmosphereProceduralShader.Earth
+atmosphere.Color = Color3.fromRGB(95, 110, 123)
+atmosphere.Decay = Color3.fromRGB(33, 40, 44)
+atmosphere.Density = 0.42
+atmosphere.Haze = 3.1
+atmosphere.Glare = 0.04
+atmosphere.Samples = 16
+atmosphere.Parent = Lighting
+
+local clouds = Instance.new("CloudCompute")
+clouds.Name = "Tornado Anvil Cloud Deck"
+clouds.Shader = Enum.CloudComputeShader.Storm
+clouds.Color = Color3.fromRGB(91, 101, 110)
+clouds.Cover = 0.94
+clouds.Density = 0.9
+clouds.WindSpeed = 19
+clouds.WindDirection = Vector2.new(0.85, 0.34)
+clouds.CellSize = 0.19
+clouds.Detail = 0.9
+clouds.Height = 0.54
+clouds.Thickness = 0.58
+clouds.Steps = 32
+clouds.Seed = 957
+clouds.Parent = Lighting
+
+local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -1.5, 80), Color3.fromRGB(38, 54, 35))
+ground.Material = Enum.Material.Grass
+local road = makePart("Storm Chase Road", Vector3.new(18, 0.18, 650), Vector3.new(-82, 0.1, 84), Color3.fromRGB(43, 43, 41))
+road.Material = Enum.Material.Asphalt
+for index = -14, 14 do
+	makePart("Road Mark " .. index, Vector3.new(0.55, 0.04, 9), Vector3.new(-82, 0.22, 84 + index * 20), Color3.fromRGB(193, 169, 99))
+end
+
+local function building(name: string, x: number, z: number, width: number, depth: number, height: number, colour: Color3)
+	makePart(name .. " Walls", Vector3.new(width, height, depth), Vector3.new(x, height * 0.5, z), colour)
+	local roof = makePart(name .. " Roof", Vector3.new(width + 2, 1.5, depth + 2), Vector3.new(x, height + 0.75, z), Color3.fromRGB(68, 47, 39))
+	roof.Material = Enum.Material.Wood
+	for window = -1, 1, 2 do
+		local pane = makePart(name .. " Window " .. window, Vector3.new(2.4, 2.6, 0.12), Vector3.new(x + window * width * 0.28, height * 0.57, z - depth * 0.505), Color3.fromRGB(116, 139, 146))
+		pane.EmissiveStrength = 0.15
+	end
+end
+
+building("Farmhouse", -80, 36, 24, 18, 12, Color3.fromRGB(111, 100, 82))
+building("Barn", 52, 72, 36, 24, 17, Color3.fromRGB(117, 61, 44))
+building("Workshop", 94, -12, 28, 20, 13, Color3.fromRGB(86, 88, 80))
+for row = 0, 3 do
+	for column = 0, 4 do
+		local bale = makePart("Hay Bale " .. row .. "/" .. column, Vector3.new(3.5, 2.1, 3.5), Vector3.new(-8 + column * 7, 1.05, 10 + row * 8), Color3.fromRGB(133, 107, 51))
+		bale.Material = Enum.Material.Grass
+	end
+end
+for index = 0, 52 do
+	local angle = index * 2.399
+	local radius = 126 + (index % 6) * 13
+	local x = math.cos(angle) * radius
+	local z = 95 + math.sin(angle) * radius * 0.68
+	local trunk = makePart("Tree Trunk " .. index, Vector3.new(1.2, 9 + index % 5, 1.2), Vector3.new(x, 4.5 + index % 5 * 0.5, z), Color3.fromRGB(70, 55, 37))
+	trunk.Material = Enum.Material.Wood
+	local crown = makePart("Tree Crown " .. index, Vector3.new(8 + index % 4 * 2, 8 + index % 3 * 2, 8 + index % 4 * 2), Vector3.new(x, 12 + index % 5, z), Color3.fromRGB(43, 76 + index % 3 * 5, 42))
+	crown.Material = Enum.Material.Grass
+end
+
+-- Five local overlapping cells form a condensation funnel. The broad dirty
+-- base and the upper anvil feed preserve the reference's multi-layer shape.
+local funnelVolumes = {
+	makeVolume("Funnel Ground Spray", Vector3.new(0, 10, 95), Vector3.new(38, 10, 38), 0.49),
+	makeVolume("Funnel Lower Condensation", Vector3.new(0, 38, 95), Vector3.new(28, 30, 28), 0.44),
+	makeVolume("Funnel Mid Condensation", Vector3.new(0, 91, 95), Vector3.new(42, 44, 42), 0.40),
+	makeVolume("Funnel Upper Condensation", Vector3.new(0, 166, 95), Vector3.new(62, 55, 62), 0.36),
+	makeVolume("Funnel Anvil Feed", Vector3.new(0, 250, 95), Vector3.new(142, 30, 106), 0.31),
+}
+funnelVolumes[1].Color = Color3.fromRGB(136, 112, 77)
+funnelVolumes[1].NoiseStrength = 1
+funnelVolumes[5].Color = Color3.fromRGB(113, 122, 131)
+local rainBank = makeVolume("Rain Curtain", Vector3.new(-34, 38, 44), Vector3.new(120, 46, 105), 0.16)
+rainBank.Color = Color3.fromRGB(80, 100, 117)
+rainBank.Falloff = 0.72
+
+local function emitter(name: string, host: Part, rate: number, colour: Color3): ParticleEmitter
+	local effect = Instance.new("ParticleEmitter")
+	effect.Name = name
+	effect.Rate = rate
+	effect.MaxParticles = 2400
+	effect.Lifetime = NumberRange.new(1.8, 3.8)
+	effect.Speed = NumberRange.new(3, 11)
+	effect.Drag = 0.6
+	effect.Shape = Enum.ParticleEmitterShape.Disc
+	effect.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+	effect.ShapeInOut = Enum.ParticleEmitterShapeInOut.InAndOut
+	effect.SpreadAngle = Vector2.new(35, 35)
+	effect.Size = NumberSequence.new(0.35, 1.8)
+	effect.Transparency = NumberSequence.new(0.18, 0.85)
+	effect.Color = ColorSequence.new(colour)
+	effect.NoiseStrength = 0.8
+	effect.NoiseFrequency = 0.65
+	effect.NoiseScrollSpeed = 1.2
+	effect.SoftParticles = true
+	effect.Parent = host
+	return effect
+end
+
+local stormHost = makePart("Storm Cosmetic Host", Vector3.one, Vector3.new(0, 1, 95), Color3.new(1, 1, 1))
+stormHost.Visible = false
+local debris = emitter("Debris Skirt", stormHost, 420, Color3.fromRGB(128, 91, 51))
+debris.Shape = Enum.ParticleEmitterShape.Cylinder
+debris.Lifetime = NumberRange.new(2.8, 5.0)
+debris.Size = NumberSequence.new(0.2, 0.7)
+debris.Acceleration = Vector3.new(0, 8, 0)
+local mist = emitter("Condensation Streamers", stormHost, 340, Color3.fromRGB(179, 188, 190))
+mist.Lifetime = NumberRange.new(3, 5)
+mist.Speed = NumberRange.new(8, 17)
+mist.Size = NumberSequence.new(1.0, 3.2)
+mist.Acceleration = Vector3.new(0, 18, 0)
+for x = -2, 2 do
+	for z = -2, 2 do
+		local host = makePart("Rain Host " .. x .. "/" .. z, Vector3.one, Vector3.new(x * 34, 74, 55 + z * 34), Color3.new(1, 1, 1))
+		host.Visible = false
+		local rain = emitter("Tornado Rain", host, 52, Color3.fromRGB(130, 161, 184))
+		rain.Lifetime = NumberRange.new(1.0, 1.5)
+		rain.Speed = NumberRange.new(26, 37)
+		rain.Acceleration = Vector3.new(8, -49, 3)
+		rain.Size = NumberSequence.new(0.05, 0.025)
+		rain.Squash = NumberSequence.new(-0.86, -0.95)
+		rain.Transparency = NumberSequence.new(0.38, 0.9)
+	end
+end
 
 local camera = Instance.new("Camera")
 camera.Name = "TornadoChaseCamera"
-camera.CFrame = CFrame.lookAt(Vector3.new(-145, 62, -175), Vector3.new(0, 48, 95))
+camera.FieldOfView = 57
+camera.FarPlaneZ = 1500
+camera.CFrame = CFrame.lookAt(Vector3.new(-145, 62, -175), Vector3.new(0, 74, 95))
 camera.Parent = Workspace
 Workspace.CurrentCamera = camera
 
@@ -102,62 +288,69 @@ end
 local gui = Instance.new("ScreenGui")
 gui.Name = "TornadoSimPanel"
 gui.ResetOnSpawn = false
-gui.Parent = StarterGui
+local player = Players.LocalPlayer
+gui.Parent = if player and player:FindFirstChild("PlayerGui") then player.PlayerGui else StarterGui
 
 local panel = Instance.new("Frame")
 panel.Name = "StormControls"
-panel.Size = UDim2.new(0, 340, 0, 510)
-panel.Position = UDim2.new(0, 16, 0, 16)
-panel.BackgroundColor3 = Color3.new(0, 0, 0)
+panel.Size = UDim2.new(0, 258, 0, 396)
+panel.Position = UDim2.new(0, 14, 0, 14)
+panel.BackgroundColor3 = Color3.fromRGB(3, 6, 9)
+panel.BackgroundTransparency = 0.08
+panel.BorderSizePixel = 0
 panel.Parent = gui
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -16, 0, 28)
-title.Position = UDim2.new(0, 8, 0, 8)
-title.Text = "TORNADOSIM  EF0-EF5  Q0-Q5  CUSTOM"
-title.TextColor3 = Color3.new(1, 1, 1)
+title.Size = UDim2.new(1, -12, 0, 25)
+title.Position = UDim2.new(0, 7, 0, 7)
+title.Text = "TORNADO FIELD LAB"
+title.TextColor3 = Color3.fromRGB(224, 233, 239)
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
 title.BackgroundTransparency = 1
 title.Parent = panel
 
 local function button(label: string, x: number, y: number, callback: () -> ())
 	local control = Instance.new("TextButton")
 	control.Name = label
-	control.Size = UDim2.new(0, 48, 0, 26)
+	control.Size = UDim2.new(0, 37, 0, 22)
 	control.Position = UDim2.new(0, x, 0, y)
 	control.Text = label
-	control.TextColor3 = Color3.new(1, 1, 1)
-	control.BackgroundColor3 = Color3.new(0, 0, 0)
+	control.TextSize = 11
+	control.TextColor3 = Color3.fromRGB(220, 229, 235)
+	control.BackgroundColor3 = Color3.fromRGB(12, 22, 29)
+	control.BorderSizePixel = 0
 	control.Parent = panel
-	control.MouseButton1Click:Connect(callback)
+	control.Activated:Connect(callback)
 end
 
 for index, preset in ipairs(Controls.presets) do
 	local column = (index - 1) % 6
 	local row = math.floor((index - 1) / 6)
-	button(preset, 8 + column * 54, 48 + row * 30, function()
+	button(preset, 7 + column * 41, 39 + row * 25, function()
 		request({ kind = "preset", name = preset })
 	end)
 end
 
-button("PAUSE", 8, 120, function()
+button("PAUSE", 7, 91, function()
 	request({ kind = "enabled", value = false })
 end)
-button("PLAY", 62, 120, function()
+button("PLAY", 48, 91, function()
 	request({ kind = "enabled", value = true })
 end)
-button("RESET", 116, 120, function()
+button("RESET", 89, 91, function()
 	request({ kind = "reset" })
 end)
-button("LIFE", 170, 120, function()
+button("LIFE", 130, 91, function()
 	request({ kind = "lifecycle", value = true })
 end)
-button("LIFE OFF", 224, 120, function()
+button("OFF", 171, 91, function()
 	request({ kind = "lifecycle", value = false })
 end)
 
 local counts = { 262144, 1048576, 4194304, 16777216, 50000000 }
 for index, count in ipairs(counts) do
-	button(string.format("P%.0fM", count / 1000000), 8 + (index - 1) * 64, 154, function()
+	button(string.format("P%.0fM", count / 1000000), 7 + (index - 1) * 48, 119, function()
 		request({ kind = "particles", count = count })
 	end)
 end
@@ -165,18 +358,20 @@ end
 local function input(label: string, text: string, x: number)
 	local box = Instance.new("TextBox")
 	box.Name = label
-	box.Size = UDim2.new(0, 92, 0, 26)
-	box.Position = UDim2.new(0, x, 0, 192)
+	box.Size = UDim2.new(0, 73, 0, 23)
+	box.Position = UDim2.new(0, x, 0, 148)
 	box.Text = text
-	box.TextColor3 = Color3.new(1, 1, 1)
-	box.BackgroundColor3 = Color3.new(0, 0, 0)
+	box.TextSize = 12
+	box.TextColor3 = Color3.fromRGB(227, 234, 239)
+	box.BackgroundColor3 = Color3.fromRGB(12, 22, 29)
+	box.BorderSizePixel = 0
 	box.Parent = panel
 	return box
 end
 
-local energy = input("EnergySlider", "0.78", 8)
-local radius = input("RadiusSlider", "28", 106)
-button("CUSTOM", 204, 192, function()
+local energy = input("EnergySlider", "0.78", 7)
+local radius = input("RadiusSlider", "28", 85)
+button("CUSTOM", 164, 148, function()
 	local requestedEnergy = tonumber(energy.Text)
 	local requestedRadius = tonumber(radius.Text)
 	if requestedEnergy ~= nil and requestedRadius ~= nil then
@@ -186,9 +381,13 @@ end)
 
 local readout = Instance.new("TextLabel")
 readout.Name = "FieldVectorInset"
-readout.Size = UDim2.new(1, -16, 0, 180)
-readout.Position = UDim2.new(0, 8, 0, 238)
-readout.TextColor3 = Color3.new(1, 1, 1)
+readout.Size = UDim2.new(1, -14, 0, 205)
+readout.Position = UDim2.new(0, 7, 0, 181)
+readout.TextColor3 = Color3.fromRGB(192, 211, 221)
+readout.TextSize = 12
+readout.TextWrapped = true
+readout.TextXAlignment = Enum.TextXAlignment.Left
+readout.TextYAlignment = Enum.TextYAlignment.Top
 readout.BackgroundTransparency = 1
 readout.Parent = panel
 
@@ -197,8 +396,7 @@ RunService.Heartbeat:Connect(function()
 	local visibility = Storm.Visibility(Vector3.new(0, 15, 30), 500)
 	local damage = Storm.Damage(Vector3.new(0, 15, 30))
 	readout.Text = string.format(
-		"CUSTOM CONTROLS\nEnergy %.2f  Radius %.0f\nWind %.1f %.1f %.1f\nInfluence %.2f  Visibility %.0f\nDamage %.2f  Band %d\nGPU field: 262K 1M 4M 16M 50M\nLayers: funnel rain debris mist fog clouds atmosphere audio",
-		Controls.default.Energy, Controls.default.CoreRadius,
+		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m  Damage %.2f\nFunnel + debris + rain + cloud deck\nGPU: 262K  1M  4M  16M  50M\nField band %d",
 		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
 		sample.Influence, visibility.EffectiveDistance, damage.Potential, damage.Band
 	)

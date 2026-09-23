@@ -43,7 +43,7 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("scripts/client/TornadoClient.client.luau") != std::string::npos);
 	CHECK(document.find("scripts/shared/TornadoSim/StormControls.luau") != std::string::npos);
 	CHECK(document.find("Storm.Preset(\"EF3\")") != std::string::npos);
-	CHECK(document.find("EF0-EF5  Q0-Q5  CUSTOM") != std::string::npos);
+	CHECK(document.find("TORNADO FIELD LAB") != std::string::npos);
 	CHECK(document.find("Storm.Sample") != std::string::npos);
 	CHECK(document.find("Storm.Visibility") != std::string::npos);
 	CHECK(document.find("Storm.Damage") != std::string::npos);
@@ -57,4 +57,13 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Farmhouse") != std::string::npos);
 	CHECK(document.find("Barn") != std::string::npos);
 	CHECK(document.find("Workshop") != std::string::npos);
+	CHECK(document.find("Tornado Storm Sky") != std::string::npos);
+	CHECK(document.find("Tornado Anvil Cloud Deck") != std::string::npos);
+	CHECK(document.find("Funnel Ground Spray") != std::string::npos);
+	CHECK(document.find("Funnel Upper Condensation") != std::string::npos);
+	CHECK(document.find("Funnel Anvil Feed") != std::string::npos);
+	CHECK(document.find("Rain Curtain") != std::string::npos);
+	CHECK(document.find("Debris Skirt") != std::string::npos);
+	CHECK(document.find("Condensation Streamers") != std::string::npos);
+	CHECK(document.find("Storm Prairie") != std::string::npos);
 }
