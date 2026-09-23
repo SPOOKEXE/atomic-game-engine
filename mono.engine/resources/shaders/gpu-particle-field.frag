@@ -36,7 +36,7 @@ float BillowDistance(vec2 point, vec2 direction) {
 }
 
 void main() {
-	float kind = inFieldData.z;
+	float kind = inFieldData.w;
 	vec4 result = texture(particleTexture, inTexCoord) * inColour;
 	if (kind < 0.5) {
 		vec2 point = inTexCoord - vec2(0.5);

@@ -34,7 +34,7 @@ void main() {
 		// billboard size exposes while preserving the authored base size.
 		size *= mix(1.20, 2.35, pow(smoothstep(0.03, 0.94, height), 0.72)) * mix(0.84, 1.14, seed);
 		visual.rgb *= mix(0.78, 1.12, seed);
-		visual.a *= mix(0.70, 1.0, smoothstep(0.06, 0.72, height));
+		visual.a *= mix(1.35, 1.80, smoothstep(0.06, 0.72, height));
 	}
 	vec3 right = normalize(cross(frame.CameraUp.xyz, frame.CameraForward.xyz));
 	vec3 world = inPositionKind.xyz + right * corner.x * size + frame.CameraUp.xyz * corner.y * size;

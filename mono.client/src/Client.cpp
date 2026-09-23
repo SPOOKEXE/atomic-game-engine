@@ -4682,6 +4682,11 @@ namespace client {
 			view.ParticlePool = particles.Pool;
 			view.ParticleBlocks = particles.BlockCount;
 		}
+		if (displayedActiveScene != nullptr) {
+			// The collected scene packet owns the storm's device-local field request.
+			// Omitting it here leaves the normal game view with only authored puffs.
+			view.GpuParticles = displayedActiveScene->Frame->GpuParticles;
+		}
 
 		// The time since the last device step. Presentation may be slower than the
 		// update loop, and using only this update's delta would slow resident
