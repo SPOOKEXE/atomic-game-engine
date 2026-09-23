@@ -1512,19 +1512,20 @@ TEST_CASE(
 		REQUIRE(storm != nullptr);
 		CHECK(storm->State.ElapsedSeconds > 0.0f);
 
-		// Cross the 0.75-second streaming cadence in one tick. Repeating the full
-		// physics schedule here makes this scripted ownership check needlessly slow.
+		// The first fixed step delivers the user-lane request after the server
+		// heartbeat. The second consumes its refresh flag without a long physics run.
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"observer","x":960,"z":735}')
 		)"));
-		systems.Tick(store, 0.8f);
+		systems.Tick(store, STEP);
+		systems.Tick(store, STEP);
 		CHECK(runtime->LastError().empty());
 		CHECK(store.FindFirstChild(environment, "Storm Cell 4:2") != engine::ecs::NULL_ENTITY);
 
 		const engine::ecs::Entity firstCell = store.FindFirstChild(environment, "Storm Cell 4:2");
 		REQUIRE(firstCell != engine::ecs::NULL_ENTITY);
 		store.DestroyInstance(firstCell);
-		CHECK(store.FindFirstChild(environment, "Storm Cell -1:-1") == engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(environment, "Storm Cell 4:2") == engine::ecs::NULL_ENTITY);
 		const engine::ecs::Entity interaction = InWorkspace(store, "StormInteraction");
 		REQUIRE(interaction != engine::ecs::NULL_ENTITY);
 		const engine::ecs::Entity woodenSign = FirstNamedDescendant(store, interaction, "WoodenSign");
