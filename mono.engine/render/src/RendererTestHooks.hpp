@@ -7,6 +7,10 @@ namespace engine::render::test_support {
 	// It must be set before Initialise and reset after the fixture finishes.
 	void SetForceGBufferPipelineFailure(bool enabled);
 
+	// Forces only the next analytical-field buffer reservation path to refuse.
+	// It proves a larger requested preset retains the last working device field.
+	void SetForceGpuParticleFieldAllocationFailure(bool enabled);
+
 	// Stops a batch before the selected view group records. The frame still owns
 	// a real command buffer, so cleanup follows the same partial-submit path.
 	// Passing no group disables the hook; release builds always leave it disabled.

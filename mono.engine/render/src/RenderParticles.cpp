@@ -9,6 +9,7 @@
 #include "ParticleWork.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
+#include "RendererTestHooks.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
@@ -21,6 +22,7 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cstring>
 #include <limits>
@@ -29,6 +31,7 @@
 
 namespace engine::render {
 	namespace {
+		std::atomic_bool ForceGpuParticleFieldAllocationFailureForTests = false;
 		bool Finite(const core::Vector3 &value) {
 			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
 		}
@@ -1655,6 +1658,10 @@ namespace engine::render {
 	bool Renderer::Impl::ReserveGpuParticleField(uint32_t count) {
 		GpuParticleFieldWorld &field = *ActiveGpuParticleFieldWorld;
 		if (count == field.Capacity && field.States != nullptr) return true;
+		if (ForceGpuParticleFieldAllocationFailureForTests.exchange(false, std::memory_order_relaxed)) {
+			ENGINE_WARN("GPU particle field test fault rejected {} rows", count);
+			return false;
+		}
 
 		SDL_GPUBufferCreateInfo info{};
 		info.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
@@ -1694,6 +1701,7 @@ namespace engine::render {
 		state.RequestedCount = requested;
 		state.Seed = source.Field.Seed;
 		state.Layers = source.Field.Layers;
+		state.Lighting = view.Lighting;
 		if (changed) state.ResetPending = true;
 
 		struct FieldUniforms {
@@ -1779,6 +1787,18 @@ namespace engine::render {
 		};
 		FieldMaterial material{};
 		material.Flags.w = 1.0f;
+		material.FogColour = {
+			ActiveGpuParticleFieldWorld->Lighting.FogColor.R,
+			ActiveGpuParticleFieldWorld->Lighting.FogColor.G,
+			ActiveGpuParticleFieldWorld->Lighting.FogColor.B,
+			1.0f,
+		};
+		material.Fog = {
+			ActiveGpuParticleFieldWorld->Lighting.FogStart,
+			ActiveGpuParticleFieldWorld->Lighting.FogEnd,
+			0.0f,
+			0.0f,
+		};
 		material.Eye = {eye.Position.X, eye.Position.Y, eye.Position.Z, 0.0f};
 		SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
@@ -1802,6 +1822,10 @@ namespace engine::render {
 		GpuParticleFieldStep = nullptr;
 		GpuParticleFieldPipeline = nullptr;
 		HdrGpuParticleFieldPipeline = nullptr;
+	}
+
+	void test_support::SetForceGpuParticleFieldAllocationFailure(bool enabled) {
+		ForceGpuParticleFieldAllocationFailureForTests.store(enabled, std::memory_order_relaxed);
 	}
 
 	bool Renderer::Impl::ReserveRibbons(uint32_t count) {

@@ -1,6 +1,7 @@
 // Real-device execution coverage for the analytical cosmetic field.
 
 #include "RenderFixture.hpp"
+#include "RendererTestHooks.hpp"
 
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/GpuParticleField.hpp>
@@ -20,7 +21,7 @@ namespace {
 		view.Target = &target;
 		view.World = 71;
 		view.WorldName = core::Name("gpu-particle-field-test");
-		view.CameraFrame = core::CFrame({0.0f, 120.0f, 600.0f});
+		view.CameraFrame = core::CFrame::LookAt({0.0f, 185.0f, 650.0f}, {0.0f, 185.0f, 0.0f});
 		view.Camera.FarPlane = 4'000.0f;
 		view.ParticleDelta = 1.0f / 60.0f;
 		view.GpuParticles = render::GpuParticleFieldView{
@@ -38,7 +39,9 @@ TEST_CASE("GPU particle field dispatches and resizes without a CPU particle read
 	fixture.Initialise();
 	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
 
-	render::SceneTarget target{96, 64};
+	// The field is a broad atmospheric volume. A 960x540 target gives its
+	// three-metre cloud billboards enough LDR coverage for a meaningful capture.
+	render::SceneTarget target{960, 540};
 	render::OverlayImage overlay;
 	auto baseline = FieldView(target, 262'144, 17);
 	baseline.GpuParticles.reset();
@@ -63,6 +66,14 @@ TEST_CASE("GPU particle field dispatches and resizes without a CPU particle read
 	// affected rendered pixels rather than only recording a dispatch and draw.
 	CHECK(changedBytes > 64);
 	const render::GpuMemoryStatistics firstMemory = fixture.Render.MemoryStatistics();
+	// The allocation path must retain the working 262k field when a larger
+	// optional preset cannot be admitted.
+	render::test_support::SetForceGpuParticleFieldAllocationFailure(true);
+	auto refused = FieldView(target, 1'048'576, 19);
+	const render::FrameResult refusedFrame = fixture.Render.Render(std::span(&refused, 1), overlay, nullptr, false);
+	CHECK(refusedFrame.ParticlesDrawn >= 262'144);
+	CHECK(refusedFrame.ParticlesDrawn < 1'048'576);
+	CHECK(fixture.Render.MemoryStatistics().BufferBytes == firstMemory.BufferBytes);
 
 	auto resized = FieldView(target, 1'048'576, 23);
 	const render::FrameResult resizedFrame =
