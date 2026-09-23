@@ -884,7 +884,7 @@ TEST_CASE("a server storm reaches replica scripts as authoritative state", "[cli
 	engine::physics::Storm storm;
 	storm.State.Position = {37.0f, 4.0f, -12.0f};
 	storm.State.ElapsedSeconds = 9.5f;
-	storm.State.Parameters.Energy = 3.0f;
+	storm.State.Parameters.Energy = 0.8f;
 	storm.State.LifecycleEnabled = true;
 	engine::physics::SetStorm(link.World, storm);
 
@@ -910,7 +910,7 @@ TEST_CASE("a server storm reaches replica scripts as authoritative state", "[cli
 	CHECK(link.ReplicaScripts->Run(R"(
 		local state = Storm.Snapshot()
 		assert(state.Position == Vector3.new(51, 4, -12))
-		assert(state.ElapsedSeconds == 10 and state.Parameters.Energy == 3)
+		assert(state.ElapsedSeconds == 10 and math.abs(state.Parameters.Energy - 0.8) < 1e-5)
 	)"));
 }
 
