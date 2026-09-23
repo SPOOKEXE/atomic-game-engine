@@ -15,6 +15,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Particles.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
@@ -36,6 +37,7 @@
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -1379,7 +1381,8 @@ TEST_CASE(
 		client::InstallPresentation(store, systems);
 		engine::physics::PreparePhysicsWorld(store);
 		engine::physics::RegisterPhysicsSystems(systems);
-		REQUIRE(client::EnsureLocalPlayer(store) != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
+		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
 
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
@@ -1418,6 +1421,73 @@ TEST_CASE(
 		const engine::physics::Storm *storm = engine::physics::StormOf(store);
 		REQUIRE(storm != nullptr);
 		CHECK(storm->State.Parameters.Energy == Approx(0.78f));
+
+		REQUIRE(runtime->Run(R"(
+			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"motion","x":-15,"y":5,"z":25}')
+			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"rotation","counterClockwise":false}')
+		)"));
+		storm = engine::physics::StormOf(store);
+		REQUIRE(storm != nullptr);
+		CHECK(storm->State.Parameters.TranslationVelocity.X == Approx(-15.0f));
+		CHECK(storm->State.Parameters.TranslationVelocity.Y == Approx(5.0f));
+		CHECK(storm->State.Parameters.TranslationVelocity.Z == Approx(25.0f));
+		CHECK_FALSE(storm->State.Parameters.CounterClockwise);
+
+		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
+		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity condensationButton = FirstNamedDescendant(store, playerGui, "COND");
+		const engine::ecs::Entity condensationEmitter =
+			FirstNamedDescendant(store, engine::scene::WorkspaceOf(store), "Condensation Streamers");
+		const engine::ecs::Entity gpuParticles =
+			FirstNamedDescendant(store, engine::scene::WorkspaceOf(store), "TornadoParticles");
+		REQUIRE(condensationButton != engine::ecs::NULL_ENTITY);
+		REQUIRE(condensationEmitter != engine::ecs::NULL_ENTITY);
+		REQUIRE(gpuParticles != engine::ecs::NULL_ENTITY);
+
+		engine::gui::CompileRequest panelRequest;
+		panelRequest.Display = {
+			.Width = 1280.0f,
+			.Height = 960.0f,
+			.SafeArea = {},
+			.Occluded = {},
+		};
+		panelRequest.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
+		panelRequest.Viewer = localPlayer;
+		engine::gui::Compiled panel;
+		engine::gui::Router panelRouter;
+		const auto panelFrame = [&](engine::core::Vector2 position, bool down) {
+			panelRequest.Hovered = panelRouter.Hovered();
+			panelRequest.Pressed = panelRouter.Pressed();
+			REQUIRE(engine::gui::Layout(store, panelRequest.Display) > 0);
+			REQUIRE(panel.Rebuild(store, panelRequest));
+
+			engine::gui::Pointer pointer;
+			pointer.Position = position;
+			pointer.Down = down;
+			pointer.Inside = true;
+			pointer.ScreenOnly = true;
+			runtime->DeliverGuiEvents(panelRouter.Update(store, panel.Commands(), pointer));
+			systems.Tick(store, STEP);
+		};
+		panelFrame({0.0f, 0.0f}, false);
+		const engine::gui::Resolved *condensationResolved =
+			store.Get<engine::gui::Resolved>(condensationButton);
+		REQUIRE(condensationResolved != nullptr);
+		const engine::core::Vector2 condensationCentre =
+			condensationResolved->AbsolutePosition + condensationResolved->AbsoluteSize * 0.5f;
+		panelFrame(condensationCentre, false);
+		panelFrame(condensationCentre, true);
+		panelFrame(condensationCentre, false);
+
+		const auto *condensation = store.Get<engine::effects::ParticleEmitter>(condensationEmitter);
+		const auto *field = store.Get<engine::scene::GpuParticleField>(gpuParticles);
+		REQUIRE(condensation != nullptr);
+		REQUIRE(field != nullptr);
+		CHECK_FALSE(condensation->Enabled);
+		CHECK(condensation->Rate == Approx(0.0f));
+		CHECK_FALSE(engine::scene::HasGpuParticleLayer(
+			*field, engine::scene::GpuParticleLayer::Condensation
+		));
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"preset","name":"EF5"}')
