@@ -554,11 +554,16 @@ namespace engine::render {
 				connection.Request.Session.WorldName != identity.WorldName ||
 				batch.Request.SnapshotId != identity.SnapshotId ||
 				batch.Request.Pipeline != identity.Pipeline || batch.Request.ViewSlot != identity.ViewSlot ||
-				std::find(
-					batch.Request.Channels.begin(),
-					batch.Request.Channels.end(),
-					DataCaptureChannel::LocalLightContribution
-				) == batch.Request.Channels.end())
+				(std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightContribution
+				 ) == batch.Request.Channels.end() &&
+				 std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightShadowVisibility
+				 ) == batch.Request.Channels.end()))
 				continue;
 			for (size_t index = 0; index < batch.Request.LocalLightIds.size(); ++index)
 				recording.LocalLightCaptureIds[index] = core::Name(batch.Request.LocalLightIds[index]);
@@ -577,21 +582,30 @@ namespace engine::render {
 				connection.Request.Session.WorldName != identity.WorldName ||
 				batch.Request.SnapshotId != identity.SnapshotId ||
 				batch.Request.Pipeline != identity.Pipeline || batch.Request.ViewSlot != identity.ViewSlot ||
-				std::find(
-					batch.Request.Channels.begin(),
-					batch.Request.Channels.end(),
-					DataCaptureChannel::LocalLightContribution
-				) == batch.Request.Channels.end())
+				(std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightContribution
+				 ) == batch.Request.Channels.end() &&
+				 std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightShadowVisibility
+				 ) == batch.Request.Channels.end()))
 				continue;
 			batch.LocalLightCaptureMatched = recording.LocalLightCaptureMatched;
-			size_t localSlot = 0;
 			for (size_t index = 0; index < batch.Ticket.Channels.size(); ++index) {
-				if (batch.Ticket.Channels[index] != DataCaptureChannel::LocalLightContribution) continue;
+				const DataCaptureChannel channel = batch.Ticket.Channels[index];
+				if (channel != DataCaptureChannel::LocalLightContribution &&
+					channel != DataCaptureChannel::LocalLightShadowVisibility)
+					continue;
+				size_t localSlot = 0;
+				for (size_t prior = 0; prior < index; ++prior)
+					if (batch.Ticket.Channels[prior] == channel) ++localSlot;
 				if (index < batch.Ticket.LocalLightMatched.size() &&
 					localSlot < recording.LocalLightCaptureMatched.size())
 					batch.Ticket.LocalLightMatched[index] =
 						recording.LocalLightCaptureMatched[localSlot] ? 1 : 0;
-				++localSlot;
 			}
 			return;
 		}

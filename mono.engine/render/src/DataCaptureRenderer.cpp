@@ -51,13 +51,15 @@ namespace engine::render {
 
 		core::Name
 		CaptureNode(const DataCaptureTicket &ticket, DataCaptureChannel channel, size_t planeIndex) {
-			if (channel == DataCaptureChannel::LocalLightContribution) {
+			if (channel == DataCaptureChannel::LocalLightContribution ||
+				channel == DataCaptureChannel::LocalLightShadowVisibility) {
 				size_t slot = 0;
 				for (size_t index = 0; index < planeIndex; ++index)
-					if (ticket.Channels[index] == DataCaptureChannel::LocalLightContribution) ++slot;
-				return core::Name(
-					std::string(ticket.CaptureNode.Text()) + "-local-light-response-" + std::to_string(slot)
-				);
+					if (ticket.Channels[index] == channel) ++slot;
+				const char *const name = channel == DataCaptureChannel::LocalLightContribution
+											 ? "-local-light-response-"
+											 : "-local-light-shadow-visibility-";
+				return core::Name(std::string(ticket.CaptureNode.Text()) + name + std::to_string(slot));
 			}
 			return DataCaptureNode(ticket.CaptureNode, channel);
 		}
@@ -273,6 +275,25 @@ namespace engine::render {
 									   "radiance=additive_linear_before_tonemap;encoding=rgba16_float";
 				}
 				break;
+			case DataCaptureChannel::LocalLightShadowVisibility:
+				if (image.Resource.Text().starts_with("local-light-shadow-visibility-") &&
+					image.Format == ResourceImageFormat::R8_UNorm && image.RowStride >= image.Width &&
+					image.Height > 0 && image.Pixels.size() >= size_t(image.Height) * image.RowStride) {
+					Ready(
+						plane,
+						image.Resource,
+						image.Width,
+						image.Height,
+						image.RowStride,
+						DataCaptureScalar::UNorm8,
+						DataCaptureColourSpace::NotApplicable,
+						image.Pixels
+					);
+					plane.Provenance =
+						"local_light_shadow_visibility/v1;source=selected_local_light_shadow_map;"
+						"factor=pcf_visibility;encoding=unorm8_direct;range=zero_to_one";
+				}
+				break;
 			case DataCaptureChannel::MeshUv:
 				primary(
 					core::Name("mesh-uv"),
@@ -421,7 +442,8 @@ namespace engine::render {
 		const bool wantsPart =
 			std::ranges::find(request.Channels, DataCaptureChannel::PartMask) != request.Channels.end();
 		const bool wantsLocalLights =
-			HasChannel(request.Channels, DataCaptureChannel::LocalLightContribution);
+			HasChannel(request.Channels, DataCaptureChannel::LocalLightContribution) ||
+			HasChannel(request.Channels, DataCaptureChannel::LocalLightShadowVisibility);
 		if (!ValidSnapshotId(request.SnapshotId) || !request.Pipeline.IsValid() ||
 			!request.CaptureNode.IsValid() ||
 			request.TemporalHistory != DataCaptureTemporalHistory::Preserve ||
@@ -442,7 +464,8 @@ namespace engine::render {
 		std::vector<std::string> expandedLightIds;
 		std::vector<uint8_t> localLightMatched;
 		for (const DataCaptureChannel channel : request.Channels) {
-			if (channel == DataCaptureChannel::LocalLightContribution) {
+			if (channel == DataCaptureChannel::LocalLightContribution ||
+				channel == DataCaptureChannel::LocalLightShadowVisibility) {
 				for (const std::string &id : request.LocalLightIds) {
 					expandedChannels.push_back(channel);
 					expandedLightIds.push_back(id);
@@ -645,7 +668,9 @@ namespace engine::render {
 			const DataCaptureChannel channel = ticket.Channels[index];
 			DataCapturePlane plane = Plane(channel, ticket);
 			plane.LightId = ticket.LightIds[index];
-			if (channel == DataCaptureChannel::LocalLightContribution && !ticket.LocalLightMatched[index]) {
+			if ((channel == DataCaptureChannel::LocalLightContribution ||
+				 channel == DataCaptureChannel::LocalLightShadowVisibility) &&
+				!ticket.LocalLightMatched[index]) {
 				plane.Provenance = "unavailable/local_light_not_visible_or_culled/v1";
 				poll.Planes.push_back(std::move(plane));
 				continue;

@@ -677,7 +677,8 @@ TEST_CASE(
 		.SnapshotId = "local-light-snapshot",
 		.Pipeline = pipeline,
 		.CaptureNode = core::Name("data-capture"),
-		.Channels = {DataCaptureChannel::LocalLightContribution},
+		.Channels =
+			{DataCaptureChannel::LocalLightContribution, DataCaptureChannel::LocalLightShadowVisibility},
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
@@ -686,15 +687,17 @@ TEST_CASE(
 	DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
 	CHECK(
-		ticket.Channels ==
-		std::vector<DataCaptureChannel>{
-			DataCaptureChannel::LocalLightContribution, DataCaptureChannel::LocalLightContribution
-		}
+		ticket.Channels == std::vector<DataCaptureChannel>{
+							   DataCaptureChannel::LocalLightContribution,
+							   DataCaptureChannel::LocalLightContribution,
+							   DataCaptureChannel::LocalLightShadowVisibility,
+							   DataCaptureChannel::LocalLightShadowVisibility
+						   }
 	);
-	CHECK(ticket.LightIds == std::vector<std::string>{"light/key", "light/fill"});
-	CHECK(ticket.LocalLightMatched == std::vector<uint8_t>{0, 0});
-	CHECK(ticket.ChannelResourceIndices.size() == 2);
-	CHECK(ticket.ResourceTokens.size() == 2);
+	CHECK(ticket.LightIds == std::vector<std::string>{"light/key", "light/fill", "light/key", "light/fill"});
+	CHECK(ticket.LocalLightMatched == std::vector<uint8_t>{0, 0, 0, 0});
+	CHECK(ticket.ChannelResourceIndices.size() == 4);
+	CHECK(ticket.ResourceTokens.size() == 4);
 	renderer.CancelDataCapture(ticket);
 }
 
@@ -843,6 +846,31 @@ TEST_CASE(
 	DataCapturePlane duplicate = ready;
 	duplicate.Resource = engine::core::Name("local-light-key-duplicate");
 	CHECK_FALSE(capture_record_validation::Plane(ticket, duplicate, 17, state));
+
+	DataCaptureTicket visibilityTicket;
+	visibilityTicket.CaptureNode = engine::core::Name("capture");
+	visibilityTicket.Channels = {DataCaptureChannel::LocalLightShadowVisibility};
+	visibilityTicket.LightIds = {"light/key"};
+	DataCapturePlane visibility;
+	visibility.Channel = DataCaptureChannel::LocalLightShadowVisibility;
+	visibility.CaptureNode = visibilityTicket.CaptureNode;
+	visibility.Status = DataCaptureStatus::Ready;
+	visibility.Resource = engine::core::Name("local-light-shadow-visibility-0");
+	visibility.LightId = "light/key";
+	visibility.Width = 2;
+	visibility.Height = 1;
+	visibility.RowStride = 2;
+	visibility.Scalar = DataCaptureScalar::UNorm8;
+	visibility.ColourSpace = DataCaptureColourSpace::NotApplicable;
+	visibility.Provenance = "local_light_shadow_visibility/v1;source=selected_local_light_shadow_map;"
+							"factor=pcf_visibility;encoding=unorm8_direct;range=zero_to_one";
+	visibility.Bytes = {std::byte{0}, std::byte{255}};
+	visibility.Hash = engine::assets::Hasher::Of(visibility.Bytes);
+	capture_record_validation::State visibilityState;
+	CHECK(capture_record_validation::Plane(visibilityTicket, visibility, 18, visibilityState));
+	visibility.Provenance.clear();
+	capture_record_validation::State malformedVisibility;
+	CHECK_FALSE(capture_record_validation::Plane(visibilityTicket, visibility, 18, malformedVisibility));
 }
 
 TEST_CASE("second surface capture records one strict aligned provenance pair", "[render][data-capture]") {
@@ -1656,7 +1684,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			return hook.Access == "observation";
 		})
 	);
-	REQUIRE(observationHooks == 21);
+	REQUIRE(observationHooks == 22);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
 		if (hook.Access != "observation") continue;

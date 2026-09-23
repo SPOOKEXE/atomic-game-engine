@@ -175,7 +175,8 @@ namespace {
 					 "semantic_ids",
 					 "part_ids",
 					 "first_surface_validity",
-					 "local_light_contribution"},
+					 "local_light_contribution",
+					 "local_light_shadow_visibility"},
 				.StorageProfiles = {"lossless", "training_compact"},
 				.TrainingCompactLimitations = {"linear_depth=float32_to_float16_le"},
 				.NoiseLimitations = {"gaussian=rgb_linear_hdr_only"},
@@ -688,6 +689,12 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(Called(surface, "capture", localLightCapture)["status"] == "queued");
 	CHECK(bridge->RequestedChannels() == std::vector<std::string>{"local_light_contribution"});
 	CHECK(bridge->RequestedLocalLightIds() == std::vector<std::string>{"light/key", "light/fill"});
+	json localShadowVisibilityCapture = localLightCapture;
+	localShadowVisibilityCapture["operation_id"] = "capture-local-shadow-visibility";
+	localShadowVisibilityCapture["channels"] = json::array({"local_light_shadow_visibility"});
+	CHECK(Called(surface, "capture", localShadowVisibilityCapture)["status"] == "queued");
+	CHECK(bridge->RequestedChannels() == std::vector<std::string>{"local_light_shadow_visibility"});
+	CHECK(bridge->RequestedLocalLightIds() == std::vector<std::string>{"light/key", "light/fill"});
 	bool localLightFailed = false;
 	json missingLocalLightIds = localLightCapture;
 	missingLocalLightIds["operation_id"] = "capture-local-lights-missing";
@@ -696,7 +703,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	CHECK(localLightFailed);
 	CHECK(
 		missingLocalLightReply["error"] ==
-		"validation_failed: local_light_ids must accompany local_light_contribution"
+		"validation_failed: local_light_ids must accompany a local-light capture channel"
 	);
 	json duplicateLocalLightIds = localLightCapture;
 	duplicateLocalLightIds["operation_id"] = "capture-local-lights-duplicate";
@@ -996,6 +1003,12 @@ TEST_CASE(
 	CHECK(Called(surface, "capture_bundle", localLight)["status"] == "queued");
 	CHECK(bridge->RequestedChannels() == std::vector<std::string>{"local_light_contribution"});
 	CHECK(bridge->RequestedLocalLightIds() == std::vector<std::string>{"light/key", "light/fill"});
+	json localShadowVisibility = localLight;
+	localShadowVisibility["operation_id"] = "bundle-local-shadow-visibility";
+	localShadowVisibility["options"]["channels"] = json::array({"local_light_shadow_visibility"});
+	CHECK(Called(surface, "capture_bundle", localShadowVisibility)["status"] == "queued");
+	CHECK(bridge->RequestedChannels() == std::vector<std::string>{"local_light_shadow_visibility"});
+	CHECK(bridge->RequestedLocalLightIds() == std::vector<std::string>{"light/key", "light/fill"});
 	json localLightMissing = localLight;
 	localLightMissing["operation_id"] = "bundle-local-lights-missing";
 	localLightMissing["options"].erase("local_light_ids");
@@ -1003,7 +1016,7 @@ TEST_CASE(
 	CHECK(failed);
 	CHECK(
 		localLightMissingReply["error"] ==
-		"validation_failed: local_light_ids must accompany local_light_contribution"
+		"validation_failed: local_light_ids must accompany a local-light capture channel"
 	);
 	json localLightDuplicate = localLight;
 	localLightDuplicate["operation_id"] = "bundle-local-lights-duplicate";

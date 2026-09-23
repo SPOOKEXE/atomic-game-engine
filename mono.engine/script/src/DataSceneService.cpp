@@ -1041,7 +1041,10 @@ namespace engine::script {
 			}
 			const bool localLightChannel =
 				std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
-				request.Channels.end();
+					request.Channels.end() ||
+				std::find(
+					request.Channels.begin(), request.Channels.end(), "local_light_shadow_visibility"
+				) != request.Channels.end();
 			if (localLightChannel != !request.LocalLightIds.empty())
 				return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
 			uint64_t ticket = 0;
@@ -1348,7 +1351,8 @@ namespace engine::script {
 			}
 			const bool localLightChannel =
 				std::any_of(copiedChannels.begin(), copiedChannels.end(), [](const ScriptValue &channel) {
-					return channel.Text == "local_light_contribution";
+					return channel.Text == "local_light_contribution" ||
+						   channel.Text == "local_light_shadow_visibility";
 				});
 			if (localLightChannel != !copiedLightIds.empty())
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};

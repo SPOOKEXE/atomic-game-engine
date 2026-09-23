@@ -799,6 +799,89 @@ namespace engine::render {
 				);
 				return false;
 			}
+			const auto applyLocalShadowCorrections = [&]() {
+				bool anyShadow = false;
+				for (uint32_t index = 0; index < static_cast<uint32_t>(lightUniforms.Count.x); ++index)
+					anyShadow = anyShadow || recording.SceneLightShadows[index];
+				if (!anyShadow) return true;
+				if (!State->EnsureDeferredLocalLightAccumulation()) return false;
+				const SDL_GPUViewport viewport{
+					0, 0, float(pbrDimensions.LitWidth), float(pbrDimensions.LitHeight), 0, 1
+				};
+				const SDL_Rect scissor{0, 0, int(pbrDimensions.LitWidth), int(pbrDimensions.LitHeight)};
+				const std::array<glm::vec3, 6> directions{{
+					{1, 0, 0},
+					{-1, 0, 0},
+					{0, 1, 0},
+					{0, -1, 0},
+					{0, 0, 1},
+					{0, 0, -1},
+				}};
+				const std::array<glm::vec3, 6> ups{{
+					{0, -1, 0},
+					{0, -1, 0},
+					{0, 0, 1},
+					{0, 0, -1},
+					{0, -1, 0},
+					{0, -1, 0},
+				}};
+				for (uint32_t lightRow = 0; lightRow < static_cast<uint32_t>(lightUniforms.Count.x);
+					 ++lightRow) {
+					if (!recording.SceneLightShadows[lightRow]) continue;
+					LightUniforms selected{};
+					selected.Position[0] = lightUniforms.Position[lightRow];
+					selected.Colour[0] = lightUniforms.Colour[lightRow];
+					selected.Direction[0] = lightUniforms.Direction[lightRow];
+					selected.Count.x = 1.0f;
+					const bool point = selected.Direction[0].w < -1.0f;
+					const uint32_t faceCount = point ? 6u : 1u;
+					const glm::vec3 position = glm::vec3(selected.Position[0]);
+					for (uint32_t face = 0; face < faceCount; ++face) {
+						glm::mat4 projection;
+						glm::mat4 view;
+						if (point) {
+							projection = glm::perspectiveRH_ZO(
+								glm::radians(90.0f), 1.0f, 0.05f, selected.Position[0].w
+							);
+							view = glm::lookAtRH(position, position + directions[face], ups[face]);
+						} else {
+							const float angle =
+								2.0f * acos(glm::clamp(selected.Direction[0].w, -0.999f, 0.999f));
+							projection = glm::perspectiveRH_ZO(angle, 1.0f, 0.05f, selected.Position[0].w);
+							const glm::vec3 direction = glm::normalize(glm::vec3(selected.Direction[0]));
+							view = glm::lookAtRH(position, position + direction, glm::vec3{0, 1, 0});
+						}
+						if (!recording.RecordLocalLightShadow(projection * view)) return false;
+						PbrUniforms localUniforms = uniforms;
+						localUniforms.LightViewProjection = projection * view;
+						localUniforms.Shadow = glm::vec4{
+							1.0f, 1.0f / float(SHADOW_RESOLUTION), point ? float(face) : -1.0f, 0.0f
+						};
+						spillBindings[6] =
+							SDL_GPUTextureSamplerBinding{State->ShadowTexture, State->ShadowSampler};
+						SDL_GPUColorTargetInfo target{};
+						target.texture = pbr.Lit;
+						target.load_op = SDL_GPU_LOADOP_LOAD;
+						target.store_op = SDL_GPU_STOREOP_STORE;
+						auto *pass = SDL_BeginGPURenderPass(Command, &target, 1, nullptr);
+						if (!pass) return false;
+						SDL_BindGPUGraphicsPipeline(pass, State->DeferredLocalLightAccumulationPipeline);
+						SDL_BindGPUFragmentSamplers(
+							pass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
+						);
+						SDL_PushGPUFragmentUniformData(Command, 0, &localUniforms, sizeof(localUniforms));
+						SDL_PushGPUFragmentUniformData(Command, 1, &selected, sizeof(selected));
+						SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+						SDL_SetGPUViewport(pass, &viewport);
+						SDL_SetGPUScissor(pass, &scissor);
+						SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+						SDL_EndGPURenderPass(pass);
+						++Result.DrawCalls;
+					}
+				}
+				return true;
+			};
+
 			if (baselinePort != node->WritePorts.end()) {
 				const auto baseline =
 					GraphTexture(context.Writes[baselinePort - node->WritePorts.begin()], context, true);
@@ -914,8 +997,6 @@ namespace engine::render {
 						recording.SceneLightIds.begin() + static_cast<size_t>(lightUniforms.Count.x);
 					const auto row = std::find(recording.SceneLightIds.begin(), activeLightEnd, requested);
 					recording.LocalLightCaptureMatched[index] = row != activeLightEnd;
-					if (!recording.LocalLightCaptureMatched[index]) continue;
-					const uint32_t lightRow = static_cast<uint32_t>(row - recording.SceneLightIds.begin());
 					const core::Name port(std::string("local-light-response-") + std::to_string(index));
 					auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
 					if (found == node->WritePorts.end()) continue;
@@ -932,6 +1013,34 @@ namespace engine::render {
 						);
 						return false;
 					}
+					const core::Name visibilityPort(
+						std::string("local-light-shadow-visibility-") + std::to_string(index)
+					);
+					auto visibilityFound =
+						std::find(node->WritePorts.begin(), node->WritePorts.end(), visibilityPort);
+					if (visibilityFound == node->WritePorts.end()) return false;
+					const auto visibilityTarget = GraphTexture(
+						context.Writes[visibilityFound - node->WritePorts.begin()], context, true
+					);
+					if (!visibilityTarget.IsValid() ||
+						visibilityTarget.Format != SDL_GPU_TEXTUREFORMAT_R8_UNORM ||
+						visibilityTarget.Width != target.Width || visibilityTarget.Height != target.Height)
+						return false;
+					if (!recording.LocalLightCaptureMatched[index]) {
+						SDL_GPUColorTargetInfo emptyTargets[2]{};
+						emptyTargets[0].texture = target.Texture;
+						emptyTargets[1].texture = visibilityTarget.Texture;
+						for (auto &emptyTarget : emptyTargets) {
+							emptyTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+							emptyTarget.store_op = SDL_GPU_STOREOP_STORE;
+							emptyTarget.cycle = true;
+						}
+						auto *emptyPass = SDL_BeginGPURenderPass(Command, emptyTargets, 2, nullptr);
+						if (!emptyPass) return false;
+						SDL_EndGPURenderPass(emptyPass);
+						continue;
+					}
+					const uint32_t lightRow = static_cast<uint32_t>(row - recording.SceneLightIds.begin());
 					if (!State->EnsureDeferredLocalLight()) {
 						ENGINE_ERROR("deferred local light capture pipeline is unavailable");
 						return false;
@@ -944,7 +1053,7 @@ namespace engine::render {
 					const bool shadows = recording.SceneLightShadows[lightRow];
 					const bool point = selected.Direction[0].w < -1.0f;
 					const uint32_t faceCount = shadows && point ? 6u : 1u;
-					const glm::vec3 position = selected.Position[0].xyz;
+					const glm::vec3 position = glm::vec3(selected.Position[0]);
 					const std::array<glm::vec3, 6> directions{{
 						{1, 0, 0},
 						{-1, 0, 0},
@@ -978,7 +1087,7 @@ namespace engine::render {
 									2.0f * acos(glm::clamp(selected.Direction[0].w, -0.999f, 0.999f));
 								projection =
 									glm::perspectiveRH_ZO(angle, 1.0f, 0.05f, selected.Position[0].w);
-								const glm::vec3 direction = glm::normalize(selected.Direction[0].xyz);
+								const glm::vec3 direction = glm::normalize(glm::vec3(selected.Direction[0]));
 								view = glm::lookAtRH(position, position + direction, glm::vec3{0, 1, 0});
 							}
 							if (!recording.RecordLocalLightShadow(projection * view)) return false;
@@ -988,12 +1097,15 @@ namespace engine::render {
 							spillBindings[6] =
 								SDL_GPUTextureSamplerBinding{State->ShadowTexture, State->ShadowSampler};
 						}
-						SDL_GPUColorTargetInfo targetInfo{};
-						targetInfo.texture = target.Texture;
-						targetInfo.load_op = face == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
-						targetInfo.store_op = SDL_GPU_STOREOP_STORE;
-						targetInfo.cycle = face == 0;
-						auto *localPass = SDL_BeginGPURenderPass(Command, &targetInfo, 1, nullptr);
+						SDL_GPUColorTargetInfo targetInfos[2]{};
+						targetInfos[0].texture = target.Texture;
+						targetInfos[1].texture = visibilityTarget.Texture;
+						for (auto &targetInfo : targetInfos) {
+							targetInfo.load_op = face == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+							targetInfo.store_op = SDL_GPU_STOREOP_STORE;
+							targetInfo.cycle = face == 0;
+						}
+						auto *localPass = SDL_BeginGPURenderPass(Command, targetInfos, 2, nullptr);
 						if (!localPass) return false;
 						SDL_BindGPUGraphicsPipeline(localPass, State->DeferredLocalLightPipeline);
 						SDL_BindGPUFragmentSamplers(
@@ -1008,6 +1120,7 @@ namespace engine::render {
 						SDL_EndGPURenderPass(localPass);
 					}
 				}
+				if (!applyLocalShadowCorrections()) return false;
 				return true;
 			}
 
@@ -1023,7 +1136,7 @@ namespace engine::render {
 				SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f},
 				&State->Beams
 			);
-			return true;
+			return applyLocalShadowCorrections();
 		});
 
 		frameNodes.Set(core::Name("skybox-compute"), [this](const graph::RunContext &context) {

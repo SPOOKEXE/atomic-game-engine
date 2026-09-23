@@ -52,7 +52,7 @@ namespace engine::script {
 		uint64_t ViewSlot = 0;
 		// Channel names the host must retain for this ticket.
 		std::vector<std::string> Channels;
-		// Stable DataFactoryIds whose local-light terms are requested with local_light_contribution.
+		// Stable DataFactoryIds whose local-light planes are requested.
 		std::vector<std::string> LocalLightIds;
 		// Requested temporal-history policy, as named by the capture host.
 		std::string TemporalHistory;
@@ -148,7 +148,7 @@ namespace engine::script {
 	struct DataCaptureBridgePlane {
 		// Stable channel name represented by this plane.
 		std::string Channel;
-		// Stable source light for local_light_contribution; empty for other channels.
+		// Stable source light for repeated local-light capture planes; empty for other channels.
 		std::string LightId = {};
 		// Machine-readable operation status.
 		std::string Status;

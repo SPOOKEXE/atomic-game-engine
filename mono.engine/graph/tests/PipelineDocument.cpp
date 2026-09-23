@@ -182,9 +182,13 @@ TEST_CASE(
 		Name("lighting-baseline"),
 		Name("directional-response"),
 		Name("local-light-response-0"),
+		Name("local-light-shadow-visibility-0"),
 		Name("local-light-response-1"),
+		Name("local-light-shadow-visibility-1"),
 		Name("local-light-response-2"),
-		Name("local-light-response-3")
+		Name("local-light-shadow-visibility-2"),
+		Name("local-light-response-3"),
+		Name("local-light-shadow-visibility-3")
 	};
 	CHECK(lighting->WritePorts == expectedWritePorts);
 	REQUIRE(capture != nullptr);

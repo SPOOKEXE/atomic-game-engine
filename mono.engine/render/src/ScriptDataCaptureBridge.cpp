@@ -59,6 +59,8 @@ namespace engine::render {
 			if (name == "directional_response") return DataCaptureChannel::DirectionalResponse;
 			if (name == "shadow_visibility") return DataCaptureChannel::ShadowVisibility;
 			if (name == "local_light_contribution") return DataCaptureChannel::LocalLightContribution;
+			if (name == "local_light_shadow_visibility")
+				return DataCaptureChannel::LocalLightShadowVisibility;
 			if (name == "packed_gpu") return DataCaptureChannel::PackedGpu;
 			return std::nullopt;
 		}
@@ -81,7 +83,9 @@ namespace engine::render {
 					if (request.LocalLightIds[previous] == request.LocalLightIds[index]) return false;
 			}
 			const bool requested =
-				std::ranges::find(request.Channels, "local_light_contribution") != request.Channels.end();
+				std::ranges::find(request.Channels, "local_light_contribution") != request.Channels.end() ||
+				std::ranges::find(request.Channels, "local_light_shadow_visibility") !=
+					request.Channels.end();
 			if (requested != !request.LocalLightIds.empty()) return false;
 			for (size_t first = 0; first < request.Channels.size(); ++first) {
 				if (!Text(request.Channels[first], 64) || !Channel(request.Channels[first])) return false;
@@ -326,6 +330,7 @@ namespace engine::render {
 		const char *Packing(DataCaptureChannel channel, DataCaptureScalar scalar) {
 			return channel == DataCaptureChannel::AmbientOcclusion ||
 						   channel == DataCaptureChannel::ShadowVisibility ||
+						   channel == DataCaptureChannel::LocalLightShadowVisibility ||
 						   channel == DataCaptureChannel::FirstSurfaceValidity ||
 						   channel == DataCaptureChannel::SecondSurfaceValidity
 					   ? "unorm8"
@@ -483,27 +488,29 @@ namespace engine::render {
 		std::lock_guard lock(Mutex);
 		return {
 			.Available = CaptureAvailable,
-			.Channels = {"rgb_linear_hdr",
-						 "linear_depth",
-						 "shading_normal",
-						 "pbr_albedo",
-						 "pbr_material",
-						 "pbr_emissive",
-						 "pbr_specular",
-						 "pbr_transmission",
-						 "mesh_uv",
-						 "ambient_occlusion",
-						 "object_ids",
-						 "semantic_ids",
-						 "part_ids",
-						 "first_surface_validity",
-						 "second_surface_depth",
-						 "second_surface_validity",
-						 "motion_vectors",
-						 "directional_response",
-						 "shadow_visibility",
-						 "local_light_contribution",
-						 "packed_gpu"},
+			.Channels =
+				{"rgb_linear_hdr",
+				 "linear_depth",
+				 "shading_normal",
+				 "pbr_albedo",
+				 "pbr_material",
+				 "pbr_emissive",
+				 "pbr_specular",
+				 "pbr_transmission",
+				 "mesh_uv",
+				 "ambient_occlusion",
+				 "object_ids",
+				 "semantic_ids",
+				 "part_ids",
+				 "first_surface_validity",
+				 "second_surface_depth",
+				 "second_surface_validity",
+				 "motion_vectors",
+				 "directional_response",
+				 "shadow_visibility",
+				 "local_light_contribution",
+				 "local_light_shadow_visibility",
+				 "packed_gpu"},
 			.StorageProfiles = {"lossless", "training_compact"},
 			.TrainingCompactLimitations =
 				{"linear_depth=float32_to_float16_le",
@@ -1486,7 +1493,8 @@ namespace engine::render {
 				for (const std::string &name : entry->second.Request.Channels) {
 					const auto channel = Channel(name);
 					if (!channel) continue;
-					if (*channel == DataCaptureChannel::LocalLightContribution)
+					if (*channel == DataCaptureChannel::LocalLightContribution ||
+						*channel == DataCaptureChannel::LocalLightShadowVisibility)
 						for (const std::string &lightId : entry->second.Request.LocalLightIds) {
 							validationTicket.Channels.push_back(*channel);
 							validationTicket.LightIds.push_back(lightId);

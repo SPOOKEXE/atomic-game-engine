@@ -58,6 +58,7 @@ namespace engine::render::capture_record_validation {
 				? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::AmbientOcclusion ||
 			   channel == DataCaptureChannel::ShadowVisibility ||
+			   channel == DataCaptureChannel::LocalLightShadowVisibility ||
 			   channel == DataCaptureChannel::FirstSurfaceValidity ||
 			   channel == DataCaptureChannel::SecondSurfaceValidity ||
 			   channel == DataCaptureChannel::PbrSpecular)
@@ -68,6 +69,7 @@ namespace engine::render::capture_record_validation {
 		const size_t bytesPerPixel =
 			(channel == DataCaptureChannel::AmbientOcclusion ||
 			 channel == DataCaptureChannel::ShadowVisibility ||
+			 channel == DataCaptureChannel::LocalLightShadowVisibility ||
 			 channel == DataCaptureChannel::FirstSurfaceValidity ||
 			 channel == DataCaptureChannel::SecondSurfaceValidity ||
 			 channel == DataCaptureChannel::PbrSpecular)
@@ -148,10 +150,16 @@ namespace engine::render::capture_record_validation {
 			   "and_portal_beam_visibility;encoding=unorm8_round_to_nearest;source_range=0_to_1";
 	}
 
+	inline bool ValidLocalLightShadowVisibilityProvenance(std::string_view provenance) {
+		return provenance == "local_light_shadow_visibility/v1;source=selected_local_light_shadow_map;"
+							 "factor=pcf_visibility;encoding=unorm8_direct;range=zero_to_one";
+	}
+
 	inline bool
 	Plane(const DataCaptureTicket &ticket, const DataCapturePlane &plane, uint64_t id, State &state) {
 		const std::string channel(DataCaptureChannelName(plane.Channel));
-		const bool localLight = plane.Channel == DataCaptureChannel::LocalLightContribution;
+		const bool localLight = plane.Channel == DataCaptureChannel::LocalLightContribution ||
+								plane.Channel == DataCaptureChannel::LocalLightShadowVisibility;
 		const std::string planeKey = localLight ? channel + "\n" + plane.LightId : channel;
 		const std::string resource =
 			"capture/" + std::to_string(id) + "/" + channel + (localLight ? "/" + plane.LightId : "");
@@ -210,6 +218,8 @@ namespace engine::render::capture_record_validation {
 				 ? !ValidDirectionalResponseProvenance(plane.Provenance)
 			 : plane.Channel == DataCaptureChannel::ShadowVisibility
 				 ? !ValidShadowVisibilityProvenance(plane.Provenance)
+			 : plane.Channel == DataCaptureChannel::LocalLightShadowVisibility
+				 ? !ValidLocalLightShadowVisibilityProvenance(plane.Provenance)
 			 : plane.Channel == DataCaptureChannel::FirstSurfaceValidity
 				 ? !validFirstProvenance || !ValidFirstSurfaceValidityBytes(plane.Bytes)
 			 : plane.Channel == DataCaptureChannel::MeshUv

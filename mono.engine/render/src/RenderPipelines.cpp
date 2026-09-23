@@ -1209,25 +1209,28 @@ namespace engine::render {
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		auto *fragment = LoadShader("deferred-local-light.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		if (vertex && fragment) {
-			SDL_GPUColorTargetDescription target{};
-			target.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			SDL_GPUColorTargetDescription targets[2]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			targets[1].format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
 			// Point-light capture renders one dominant-axis face at a time. Additive
 			// blending keeps the six mutually exclusive face responses in one plane.
-			target.blend_state.enable_blend = true;
-			target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-			target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-			target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-			target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-			target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-			target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			for (auto &target : targets) {
+				target.blend_state.enable_blend = true;
+				target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+				target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+				target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+				target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+				target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+				target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			}
 			SDL_GPUGraphicsPipelineCreateInfo info{};
 			info.vertex_shader = vertex;
 			info.fragment_shader = fragment;
 			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			info.target_info.color_target_descriptions = &target;
-			info.target_info.num_color_targets = 1;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 2;
 			DeferredLocalLightPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
 			if (DeferredLocalLightPipeline == nullptr)
 				ENGINE_ERROR("deferred local light pipeline: {}", SDL_GetError());
@@ -1240,7 +1243,7 @@ namespace engine::render {
 	bool Renderer::Impl::EnsureDeferredLocalLightAccumulation() {
 		if (DeferredLocalLightAccumulationPipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		auto *fragment = LoadShader("deferred-local-light.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+		auto *fragment = LoadShader("deferred-local-light-delta.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription target{};
 			target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;

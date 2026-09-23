@@ -331,7 +331,12 @@ namespace engine::render {
 						return output < node->WritePorts.size() &&
 									   (node->WritePorts[output] == core::Name("lighting-baseline") ||
 										node->WritePorts[output] == core::Name("directional-response") ||
-										node->WritePorts[output].Text().starts_with("local-light-response-"))
+										(node->WritePorts[output].Text().starts_with(
+											 "local-light-response-"
+										 ) ||
+										 node->WritePorts[output].Text().starts_with(
+											 "local-light-shadow-visibility-"
+										 )))
 								   ? ResourceRole::Unknown
 								   : ResourceRole::Lit;
 					}

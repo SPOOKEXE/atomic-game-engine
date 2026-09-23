@@ -978,12 +978,18 @@ namespace engine::graph {
 			// later scene passes alter the lit image.
 			resource("lighting-baseline", ResourceKind::Colour, ResourceFormat::RGBA32F);
 			resource("directional-response", ResourceKind::Colour, ResourceFormat::RGBA32F);
-			for (uint32_t index = 0; index < 4; ++index)
+			for (uint32_t index = 0; index < 4; ++index) {
 				resource(
 					"local-light-response-" + std::to_string(index),
 					ResourceKind::Colour,
 					ResourceFormat::RGBA32F
 				);
+				resource(
+					"local-light-shadow-visibility-" + std::to_string(index),
+					ResourceKind::Colour,
+					ResourceFormat::R8
+				);
+			}
 		}
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1115,12 +1121,18 @@ namespace engine::graph {
 		if (captureObservations) {
 			touches(EditKind::Writes, "lighting-baseline", "lighting-baseline");
 			touches(EditKind::Writes, "directional-response", "directional-response");
-			for (uint32_t index = 0; index < 4; ++index)
+			for (uint32_t index = 0; index < 4; ++index) {
 				touches(
 					EditKind::Writes,
 					"local-light-response-" + std::to_string(index),
 					"local-light-response-" + std::to_string(index)
 				);
+				touches(
+					EditKind::Writes,
+					"local-light-shadow-visibility-" + std::to_string(index),
+					"local-light-shadow-visibility-" + std::to_string(index)
+				);
+			}
 		}
 
 		node("sky", NodeScope::View);
@@ -1601,11 +1613,15 @@ namespace engine::graph {
 		);
 		// Each requested local light has a dedicated capture node. The response resources
 		// are populated by the shading pass only when their selected light is visible.
-		const std::array<std::pair<const char *, const char *>, 4> localLightResponses{{
+		const std::array<std::pair<const char *, const char *>, 8> localLightResponses{{
 			{"data-capture-local-light-response-0", "local-light-response-0"},
 			{"data-capture-local-light-response-1", "local-light-response-1"},
 			{"data-capture-local-light-response-2", "local-light-response-2"},
 			{"data-capture-local-light-response-3", "local-light-response-3"},
+			{"data-capture-local-light-shadow-visibility-0", "local-light-shadow-visibility-0"},
+			{"data-capture-local-light-shadow-visibility-1", "local-light-shadow-visibility-1"},
+			{"data-capture-local-light-shadow-visibility-2", "local-light-shadow-visibility-2"},
+			{"data-capture-local-light-shadow-visibility-3", "local-light-shadow-visibility-3"},
 		}};
 		for (const auto &[node, resource] : localLightResponses) {
 			document.Record(

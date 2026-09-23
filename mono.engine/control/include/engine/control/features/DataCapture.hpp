@@ -235,10 +235,14 @@ namespace engine::control {
 			}
 			const bool localLightChannel =
 				std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
-				request.Channels.end();
+					request.Channels.end() ||
+				std::find(
+					request.Channels.begin(), request.Channels.end(), "local_light_shadow_visibility"
+				) != request.Channels.end();
 			if (localLightChannel != !request.LocalLightIds.empty()) {
-				failure =
-					Error("validation_failed", "local_light_ids must accompany local_light_contribution");
+				failure = Error(
+					"validation_failed", "local_light_ids must accompany a local-light capture channel"
+				);
 				return false;
 			}
 			if (request.NoiseMode == "gaussian" &&
@@ -802,10 +806,14 @@ namespace engine::control {
 				}
 				const bool localLightChannel =
 					std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
-					request.Channels.end();
+						request.Channels.end() ||
+					std::find(
+						request.Channels.begin(), request.Channels.end(), "local_light_shadow_visibility"
+					) != request.Channels.end();
 				if (localLightChannel != !request.LocalLightIds.empty()) {
-					failure =
-						Error("validation_failed", "local_light_ids must accompany local_light_contribution");
+					failure = Error(
+						"validation_failed", "local_light_ids must accompany a local-light capture channel"
+					);
 					return nullptr;
 				}
 				if (const auto packed = values.find("packed_planes"); packed != values.end()) {

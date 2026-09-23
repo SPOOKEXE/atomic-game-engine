@@ -122,6 +122,8 @@ namespace engine::render {
 		// One-byte display/export representation derived from DirectionalResponse alpha.
 		ShadowVisibility,
 		LocalLightContribution,
+		// Direct selected-local-light shadow factor in a one-byte grayscale plane.
+		LocalLightShadowVisibility,
 		// Explicit RGBA32F render-graph packing, with four documented retained lanes.
 		PackedGpu,
 	};
@@ -166,9 +168,10 @@ namespace engine::render {
 			: channel == DataCaptureChannel::DirectionalResponse ||
 					channel == DataCaptureChannel::ShadowVisibility
 				? "-directional-response"
-			: channel == DataCaptureChannel::LocalLightContribution ? "-local-light-response-0"
-			: channel == DataCaptureChannel::PackedGpu				? "-packed-gpu"
-																	: "";
+			: channel == DataCaptureChannel::LocalLightContribution		? "-local-light-response-0"
+			: channel == DataCaptureChannel::LocalLightShadowVisibility ? "-local-light-shadow-visibility-0"
+			: channel == DataCaptureChannel::PackedGpu					? "-packed-gpu"
+																		: "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 
