@@ -833,7 +833,7 @@ namespace engine::render {
 					selected.Colour[0] = lightUniforms.Colour[lightRow];
 					selected.Direction[0] = lightUniforms.Direction[lightRow];
 					selected.Count.x = 1.0f;
-					const bool point = selected.Direction[0].w < -1.0f;
+					const bool point = selected.Direction[0].w <= -1.0f;
 					const uint32_t faceCount = point ? 6u : 1u;
 					const glm::vec3 position = glm::vec3(selected.Position[0]);
 					for (uint32_t face = 0; face < faceCount; ++face) {
@@ -1051,7 +1051,7 @@ namespace engine::render {
 					selected.Direction[0] = lightUniforms.Direction[lightRow];
 					selected.Count.x = 1.0f;
 					const bool shadows = recording.SceneLightShadows[lightRow];
-					const bool point = selected.Direction[0].w < -1.0f;
+					const bool point = selected.Direction[0].w <= -1.0f;
 					const uint32_t faceCount = shadows && point ? 6u : 1u;
 					const glm::vec3 position = glm::vec3(selected.Position[0]);
 					const std::array<glm::vec3, 6> directions{{

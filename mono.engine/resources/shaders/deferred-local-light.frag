@@ -19,8 +19,10 @@ bool LocalShadowFace(vec3 fromLight) {
 float LocalShadowVisibility(vec3 world, vec3 normal, vec3 direction, vec3 lightPosition) {
 	if (pass.Shadow.x < 0.5) return 1.0;
 	if (!LocalShadowFace(world - lightPosition)) return 0.0;
+	// The local map is rasterized from a separate view. Offset its receiver along
+	// the geometric normal before the shared depth comparison to avoid acne.
 	return DirectionalShadowVisibility(
-		shadowImage, pass.LightViewProjection, pass.Shadow, world, normal, direction
+		shadowImage, pass.LightViewProjection, pass.Shadow, world + normal * 0.005, normal, direction
 	);
 }
 
