@@ -6,6 +6,7 @@
 // can reach.
 
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Invariants.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
@@ -28,6 +29,7 @@ TEST_CASE("every component this program registers obeys the serialisation rules"
 	engine::replication::RegisterReplicationComponents();
 	engine::world::RegisterMailboxTypes();
 	server::RegisterPlaceholderComponents();
+	CHECK(engine::ecs::Components::Find(engine::core::Name("effects.ParticleEmitter")).IsValid());
 
 	CHECK(engine::ecs::Describe(engine::ecs::AuditComponents()) == "");
 }

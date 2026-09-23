@@ -2,6 +2,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
@@ -290,6 +291,9 @@ namespace server {
 		// used to be one, and keeping two declarations of one wire type in step
 		// by hand is what it cost.
 		engine::scene::RegisterSceneComponents();
+		// Factory packages can open a script runtime after the server seals the
+		// component table. Its effect probes need these stable ids beforehand.
+		engine::effects::RegisterEffectComponents();
 
 		// `PhysicsWorld` is a resource, and a resource is keyed by a component
 		// id like any other - so one never registered here is minted by the
