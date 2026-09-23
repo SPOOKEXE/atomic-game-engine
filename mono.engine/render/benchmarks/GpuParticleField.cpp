@@ -121,14 +121,19 @@ namespace {
 			report.Admitted = first.ParticlesDrawn >= count;
 
 			auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
-			if (report.Admitted && device != nullptr && SDL_WaitForGPUIdle(device)) {
-				// The second recording collects the completed nonblocking timestamp
-				// slot from the measured first frame.
-				renderer.Render(std::span(&view, 1), overlay, nullptr, false);
-				const auto found = renderer.PassTimings().find(engine::core::Name("gpu-particle-field").Id());
-				if (found != renderer.PassTimings().end() && found->second > 0.0) {
-					report.TimestampAvailable = true;
-					report.GpuMicroseconds = found->second;
+			static const engine::core::Name GPU_PARTICLE_FIELD_NAME("gpu-particle-field");
+			if (report.Admitted && device != nullptr) {
+				// Profiling samples every fourth frame. The query result is collected
+				// only at the next frame boundary, so advance through one bounded
+				// sample-and-drain window after the measured recording.
+				for (uint32_t frame = 0; frame < 8 && !report.TimestampAvailable; frame++) {
+					if (!SDL_WaitForGPUIdle(device)) break;
+					renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+					const auto found = renderer.PassTimings().find(GPU_PARTICLE_FIELD_NAME.Id());
+					if (found != renderer.PassTimings().end() && found->second > 0.0) {
+						report.TimestampAvailable = true;
+						report.GpuMicroseconds = found->second;
+					}
 				}
 			}
 			engine::core::Metrics::Count("render.gpu_particle_field_probe.particle_count", count);
