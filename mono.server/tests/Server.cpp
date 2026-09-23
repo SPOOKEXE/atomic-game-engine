@@ -1151,10 +1151,20 @@ TEST_CASE(
 			message.Kind == game::PortalSessionKind::LeaseRequest)
 			leaseRequests.push_back(request);
 	}
-	REQUIRE(leaseRequests.size() == 1);
+	// The source retries an unanswered request after 250 ms, so this batch may contain copies.
+	REQUIRE(leaseRequests.size() >= 1);
 	const auto &leaseRequest = leaseRequests.front();
 	game::PortalSessionMessage route;
 	REQUIRE(game::DecodePortalSession(leaseRequest.Payload, route));
+	for (const auto &retry : leaseRequests) {
+		game::PortalSessionMessage repeated;
+		REQUIRE(game::DecodePortalSession(retry.Payload, repeated));
+		CHECK(retry.From == leaseRequest.From);
+		CHECK(retry.Payload == leaseRequest.Payload);
+		CHECK(repeated.Kind == route.Kind);
+		CHECK(repeated.Attempt == route.Attempt);
+		CHECK(repeated.Claim == route.Claim);
+	}
 	CHECK(route.Identity == identity->Public());
 	CHECK(route.Claim.Transfer == transfer);
 	CHECK(transfer.SourceIncarnation == leaseRequest.From.Session);
@@ -1183,11 +1193,7 @@ TEST_CASE(
 	}
 	REQUIRE(
 		host.Worlds().SendPresentation(
-			destination,
-			endpoint.Address,
-			requests.front().From,
-			route.Attempt,
-			game::EncodePortalSession(route)
+			destination, endpoint.Address, leaseRequest.From, route.Attempt, game::EncodePortalSession(route)
 		) == world::PresentationStatus::Ok
 	);
 	for (int tick = 0; tick < 1000 && replies.size() < 2; tick++) {
@@ -1224,9 +1230,27 @@ TEST_CASE(
 		for (int tick = 0; tick < 3; tick++)
 			(void)host.Run();
 		const auto retry = host.Worlds().TakePresentation(endpoint.Address);
-		REQUIRE(retry.size() == 1);
+		std::vector<world::PresentationMessage> retryRequests;
+		for (const auto &message : retry) {
+			game::PortalSessionMessage decoded;
+			if (game::DecodePortalSession(message.Payload, decoded) &&
+				decoded.Kind == game::PortalSessionKind::LeaseRequest)
+				retryRequests.push_back(message);
+		}
+		REQUIRE(retryRequests.size() >= 1);
+		const auto &retryRequest = retryRequests.front();
 		game::PortalSessionMessage request;
-		REQUIRE(game::DecodePortalSession(retry.front().Payload, request));
+		REQUIRE(game::DecodePortalSession(retryRequest.Payload, request));
+		for (const auto &message : retryRequests) {
+			game::PortalSessionMessage repeated;
+			REQUIRE(game::DecodePortalSession(message.Payload, repeated));
+			CHECK(message.From == retryRequest.From);
+			CHECK(message.Payload == retryRequest.Payload);
+			CHECK(repeated.Kind == request.Kind);
+			CHECK(repeated.Attempt == request.Attempt);
+			CHECK(repeated.Claim == request.Claim);
+		}
+		CHECK(retryRequest.From == leaseRequest.From);
 		CHECK(request.Kind == game::PortalSessionKind::LeaseRequest);
 		CHECK(request.Claim.Transfer == successor);
 		CHECK(request.Attempt != route.Attempt);
@@ -1349,7 +1373,7 @@ TEST_CASE(
 				host.Worlds().SendPresentation(
 					destination,
 					endpoint.Address,
-					requests.front().From,
+					leaseRequest.From,
 					reply.Attempt,
 					game::EncodePortalSession(reply)
 				) == world::PresentationStatus::Ok
