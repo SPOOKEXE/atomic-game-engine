@@ -195,11 +195,11 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 		std::pow((*cameraTarget)[2] - (*cameraHome)[2], 2.0f)
 	);
 	CHECK(targetFromStorm < 300.0f);
-	CHECK((*cameraTarget)[1] >= 140.0f);
-	CHECK((*cameraTarget)[1] <= 270.0f);
+	CHECK((*cameraTarget)[1] >= 40.0f);
+	CHECK((*cameraTarget)[1] <= 100.0f);
 	CHECK((*cameraHome)[0] < -80.0f);
 	CHECK((*cameraHome)[2] < -50.0f);
-	CHECK(2.0f * eyeToTarget * std::tan(57.0f * 0.5f * 0.0174532925f) >= 1.5f * 285.0f);
+	CHECK(2.0f * eyeToTarget * std::tan(68.0f * 0.5f * 0.0174532925f) >= 1.5f * 285.0f);
 	CHECK(document.find("return CFrame.lookAt(eye, target)") != std::string::npos);
 	CHECK(document.find("camera.CFrame = cameraFrame(cameraTarget)") != std::string::npos);
 	CHECK(document.find("Instance.new(\"ScrollingFrame\")") != std::string::npos);

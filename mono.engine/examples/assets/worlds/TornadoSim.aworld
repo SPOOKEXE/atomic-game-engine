@@ -1097,12 +1097,12 @@ end
 
 camera = Instance.new("Camera")
 camera.Name = "TornadoChaseCamera"
-camera.FieldOfView = 57
+camera.FieldOfView = 68
 camera.FarPlaneZ = 1500
--- Frame the mature EF3 column in the open space beside the control panel.
--- This closer eye preserves its full height at 960 by 540 while the offset
--- aim holds the funnel clear of the panel's right edge.
-local cameraTarget = Vector3.new(240, 185, 95)
+-- Frame the mature EF3 column beside the control panel. The lower aim and
+-- wider lens match the reference orbit's horizon and funnel bounds at 1440 by
+-- 900 while keeping the camera controls centered on the same storm target.
+local cameraTarget = Vector3.new(240, 65, 95)
 local cameraHome = Vector3.new(-255, 125, -285)
 local cameraYaw = 0.0
 local cameraPitch = 0.0
