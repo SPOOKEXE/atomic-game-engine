@@ -63,6 +63,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace engine::render {
@@ -1565,7 +1566,10 @@ namespace engine::render {
 			for (GpuParticleFieldWorld &world : GpuParticleFieldWorlds) {
 				if (world.Id == id && world.Name == name) return world;
 			}
-			GpuParticleFieldWorlds.push_back({.Id = id, .Name = name});
+			GpuParticleFieldWorld world;
+			world.Id = id;
+			world.Name = name;
+			GpuParticleFieldWorlds.push_back(std::move(world));
 			return GpuParticleFieldWorlds.back();
 		}
 		bool ReserveGpuParticleField(uint32_t count);

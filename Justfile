@@ -204,6 +204,19 @@ gpu-texture-atlas-bench samples="1":
         exit 1
     fi
 
+# Release-optimised compute, draw, timestamp and logical-memory measurement
+# for every supported analytical storm field preset. Allocation refusal remains
+# a reported result so modest GPUs still document their supported ceiling.
+gpu-particle-field-bench samples="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    if ! MONO_GPU_PARTICLE_FIELD_REPORT=1 timeout --foreground --kill-after=10s 900s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-particle-field --samples {{samples}}; then
+        echo "gpu-particle-field-bench failed or exceeded its 900s device deadline" >&2
+        exit 1
+    fi
+
 # Builds the device-owning benchmark without running it, then proves every
 # compiled resource shader was staged beside that benchmark.
 check-bench-render-shaders:
