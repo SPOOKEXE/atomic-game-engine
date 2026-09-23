@@ -341,15 +341,42 @@ end
 
 local stormHost = makePart("Storm Cosmetic Host", Vector3.new(24, 3, 24), Vector3.new(0, 1, 95), Color3.new(1, 1, 1))
 stormHost.Visible = false
-local windBed = Instance.new("Sound")
-windBed.Name = "Tornado Wind Bed"
-windBed.SoundId = "audio/tornado-wind.wav"
-windBed.Volume = 0.34
-windBed.RollOffMinDistance = 48
-windBed.RollOffMaxDistance = 740
-windBed.Looped = true
-windBed.Playing = true
-windBed.Parent = stormHost
+
+-- Each loop owns one perceptual layer from the reference mix. The engine
+-- decodes ordinary published WAVs, which keeps the authored demo portable
+-- while the future procedural audio graph receives the same control signals.
+local function stormSound(name: string, soundId: string, volume: number, looped: boolean): Sound
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.SoundId = soundId
+	sound.Volume = volume
+	sound.RollOffMinDistance = 48
+	sound.RollOffMaxDistance = 740
+	sound.Looped = looped
+	sound.Playing = looped
+	sound.Parent = stormHost
+	return sound
+end
+
+local windBed = stormSound("Tornado Wind Bed", "audio/tornado-wind.wav", 0.28, true)
+local circulationBed = stormSound("Tornado Low Circulation", "audio/tornado-circulation.wav", 0.23, true)
+local rainBed = stormSound("Tornado Rain Sheet", "audio/tornado-rain.wav", 0.13, true)
+local debrisBed = stormSound("Tornado Debris Rattle", "audio/tornado-debris.wav", 0.09, true)
+local thunder = stormSound("Tornado Delayed Thunder", "audio/tornado-thunder.wav", 0.62, false)
+local audioLayers = { windBed, circulationBed, rainBed, debrisBed }
+local audioEnabled = true
+local thunderRevision = 0
+local scheduleThunder: (number) -> ()
+scheduleThunder = function(delay: number)
+	local revision = thunderRevision
+	task.delay(delay, function()
+		if not audioEnabled or revision ~= thunderRevision then return end
+		thunder.Playing = false
+		thunder.Playing = true
+		scheduleThunder(12 + (revision % 3) * 2)
+	end)
+end
+scheduleThunder(6.5)
 local debris = emitter("Debris Skirt", stormHost, 64, Color3.fromRGB(96, 75, 54))
 debris.Shape = Enum.ParticleEmitterShape.Cylinder
 debris.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
@@ -521,7 +548,11 @@ button("OFF", 171, 91, function()
 	request({ kind = "lifecycle", value = false })
 end)
 button("AUDIO", 212, 91, function()
-	windBed.Playing = not windBed.Playing
+	audioEnabled = not audioEnabled
+	thunderRevision += 1
+	for _, sound in ipairs(audioLayers) do sound.Playing = audioEnabled end
+	thunder.Playing = false
+	if audioEnabled then scheduleThunder(4.5) end
 end, 39)
 
 local counts = { 262144, 1048576, 4194304, 16777216, 50000000 }

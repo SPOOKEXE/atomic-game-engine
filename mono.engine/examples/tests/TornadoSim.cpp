@@ -81,6 +81,15 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Anvil Back Shelf") != std::string::npos);
 	CHECK(document.find("Tornado Wind Bed") != std::string::npos);
 	CHECK(document.find("audio/tornado-wind.wav") != std::string::npos);
+	CHECK(document.find("Tornado Low Circulation") != std::string::npos);
+	CHECK(document.find("audio/tornado-circulation.wav") != std::string::npos);
+	CHECK(document.find("Tornado Rain Sheet") != std::string::npos);
+	CHECK(document.find("audio/tornado-rain.wav") != std::string::npos);
+	CHECK(document.find("Tornado Debris Rattle") != std::string::npos);
+	CHECK(document.find("audio/tornado-debris.wav") != std::string::npos);
+	CHECK(document.find("Tornado Delayed Thunder") != std::string::npos);
+	CHECK(document.find("audio/tornado-thunder.wav") != std::string::npos);
+	CHECK(document.find("scheduleThunder") != std::string::npos);
 	CHECK(document.find("windBed.Playing = not windBed.Playing") != std::string::npos);
 	CHECK(document.find("FIELD AND WEATHER") != std::string::npos);
 	CHECK(document.find("CAM ORBIT") != std::string::npos);
@@ -90,4 +99,9 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	const std::filesystem::path audio = world.parent_path().parent_path().parent_path() / "audio" / "tornado-wind.wav";
 	CHECK(std::filesystem::is_regular_file(audio));
 	CHECK(std::filesystem::file_size(audio) > 1024U);
+	for (const char *name : {"tornado-circulation.wav", "tornado-rain.wav", "tornado-debris.wav", "tornado-thunder.wav"}) {
+		const std::filesystem::path layer = audio.parent_path() / name;
+		CHECK(std::filesystem::is_regular_file(layer));
+		CHECK(std::filesystem::file_size(layer) > 1024U);
+	}
 }
