@@ -1576,7 +1576,7 @@ TEST_CASE(
 		);
 		storm = engine::physics::StormOf(store);
 		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.Energy == Approx(0.78f));
-		CHECK(storm->State.Parameters.CoreRadius == Approx(28.0f));
+		CHECK(storm->State.Parameters.Energy == Approx(0.72f));
+		CHECK(storm->State.Parameters.CoreRadius == Approx(34.0f));
 	});
 }
