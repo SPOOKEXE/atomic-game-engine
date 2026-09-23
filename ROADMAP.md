@@ -81,11 +81,15 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Optimize recovery-row serialization by moving the ByteWriter buffer. The recovery benchmark improved from 294±35 to 212±22 ns/item across 15 samples.
 - [x] Improve scoring performance by selecting the exact replication prefix with `nth_element` followed by `sort`. Controlled release A/B runs with 15 samples each measured baseline means of 2,427,371 and 2,315,204 ns/item, and candidate means of 2,122,163 and 2,147,329 ns/item, about 10% lower at the midpoint of the two run means. 138 affected dev suites pass, including packet-order coverage.
 
-- [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground" - maybe 'fog volumes' with different shapes and size/squash/fluffy sliders?).
-- [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
-- [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
-- [_] fix and expand current lighting items (clouds, sunrays, atmosphere, etc). Needs actual tests, overlapping, compute shader tests to ensure they work, etc.
-- [_] get an agent to interact with and use studio EXTENSIVELY. check all dropdowns and ensure all those work, interact with studio, make a little game/scene/scenario and run it / play in it, move character around, check all 'classes' and their capabilities and ensure they work, etc.
+- [x] add bloom, depth of field, god rays, shaped local fog volumes, and cloud and atmosphere authoring used by example scenes.
+- [x] create a weather demo with cloud and atmosphere lighting, local fog volumes, rain particles, and weather transitions.
+- [x] build a self-contained `TornadoSim.aworld` with reusable storm queries, in-game controls, damage interactions, audio, lightning, weather layers, and a GPU particle field.
+- [x] make Studio GUI Preview Controls hidden by default and interactive when enabled.
+- [x] remove the HarfBuzz configure notice from the Studio launcher build.
+- [_] validate combined lighting behavior with overlapping fog volumes, clouds, atmosphere, and god rays; expand compute shader tests and captures, and fix issues found.
+- [_] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks.
+- [_] compare TornadoSim field samples, presets, lifecycle, damage, and matched default and mature-funnel captures against the C++ reference; finish GPU preset and failure-fallback validation.
+- [_] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene.
 
 ### v0.26
 
