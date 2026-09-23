@@ -152,7 +152,7 @@ scene.Simulated | Tag meaning physics owns this body's motion. `Anchored = false
 scene.SkyboxCompute | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture.
 scene.SkyboxTextures | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded.
 scene.Skeleton | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints.
-scene.Sound | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
+scene.Sound | What a sound is rather than a sound playing: asset name, volume, stereo pan, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
 scene.SpawnLocation | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three.
 scene.Surface | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like.
 scene.Sun | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses.
