@@ -38,6 +38,7 @@ namespace engine::scene {
 		uint32_t RequestedCount = 1'048'576;
 		// Seed used to place particles deterministically when the field resets.
 		uint32_t Seed = 0xC105D00Du;
+		// Linear tint, opacity and billboard size for each visible layer.
 		core::Color3 CondensationColor{0.70f, 0.74f, 0.76f};
 		core::Color3 RainColor{0.55f, 0.67f, 0.85f};
 		core::Color3 DebrisColor{0.34f, 0.25f, 0.16f};
