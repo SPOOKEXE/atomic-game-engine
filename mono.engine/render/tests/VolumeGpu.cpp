@@ -98,13 +98,19 @@ namespace {
 			core::Color3{0.3f, 0.4f, 1.0f},
 			core::Color3{0.65f, 0.25f, 0.12f},
 			core::Color3{0.12f, 0.55f, 0.34f},
+			core::Color3{0.88f, 0.22f, 0.51f},
+			core::Color3{0.31f, 0.73f, 0.25f},
+			core::Color3{0.41f, 0.36f, 0.93f},
+			core::Color3{0.91f, 0.75f, 0.18f},
+			core::Color3{0.17f, 0.76f, 0.71f},
+			core::Color3{0.72f, 0.47f, 0.29f},
 		};
 		view.Lighting.VolumeCount = colours.size();
 		for (size_t index = 0; index < colours.size(); index++) {
 			const size_t source = reversed ? colours.size() - index - 1 : index;
 			view.Lighting.Volumes[index] = Volume(colours[source]);
 			if (source >= 2) {
-				view.Lighting.Volumes[index].Frame.Position.X = -3.0f + float(source - 2) * 1.2f;
+				view.Lighting.Volumes[index].Frame.Position.X = -1.5f + float(source - 2) * 0.22f;
 				view.Lighting.Volumes[index].HalfExtent = {0.55f, 3.0f, 2.0f};
 			}
 		}
@@ -180,6 +186,19 @@ TEST_CASE(
 	view.CloudDensity.reset();
 	const CapturedImage forward = RenderOrder(fixture.Render, view, false);
 	const CapturedImage reverse = RenderOrder(fixture.Render, view, true);
+	SetVolumeOrder(view, false);
+	view.Lighting.VolumeCount = 8;
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("fog")));
+	const CapturedImage firstEight = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+	view.Lighting.VolumeCount = 10;
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("fog")));
+	const CapturedImage firstTen = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+	const ImageComparison ninthAndTenth = CompareImages(firstEight.View(), firstTen.View());
+	CHECK(ninthAndTenth.MismatchedPixels > 0);
 
 	const ImageComparison fogEffect = CompareImages(withoutVolumes.View(), forward.View());
 	ImageTolerance orderTolerance;
@@ -191,7 +210,7 @@ TEST_CASE(
 		fixture.Render,
 		"volume-order",
 		"tonemapped",
-		"two coincident and eight dispersed volumes reversed in resolved order",
+		"two coincident and fourteen overlapping displaced volumes reversed in resolved order",
 		forward.View(),
 		reverse.View(),
 		orderTolerance
