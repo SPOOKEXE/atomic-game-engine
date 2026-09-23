@@ -216,12 +216,12 @@ namespace engine::script {
 	struct RuntimeLimits {
 		// Host-owned, runtime-scoped adapters. They are never process globals and
 		// service calls may only enqueue work for their owning host thread.
-		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataCaptureBridge> DataCapture{};
 		// Host-owned lifecycle adapter for copied package and world state.
-		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle{};
 		// The client host supplies the reliable, ordered user lane. It receives a
 		// complete RemoteEvent envelope and must copy it before returning.
-		std::function<bool(std::span<const std::byte>)> RemoteEventSender;
+		std::function<bool(std::span<const std::byte>)> RemoteEventSender{};
 		// The most memory one VM may hold, in bytes.
 		//
 		// Allocation past this fails inside the VM, which surfaces as an

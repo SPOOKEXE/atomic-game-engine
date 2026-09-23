@@ -90,9 +90,9 @@ namespace engine::gui {
 		DisplayOrientation Orientation = DisplayOrientation::Landscape;
 
 		// Permanent display cutouts and transient keyboard or system overlays.
-		DisplayInsets SafeArea;
+		DisplayInsets SafeArea{};
 		// Transient occluded display edges such as keyboards.
-		DisplayInsets Occluded;
+		DisplayInsets Occluded{};
 
 		// The host's accessibility choices. They are inputs to the canonical
 		// layout call and cache key; authored components remain unchanged.
