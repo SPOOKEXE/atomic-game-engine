@@ -758,7 +758,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 	readout.Text = string.format(
 		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nGPU: 262K  1M  4M  16M  50M\nLayers: condensation, rain, dust\nField band %d",
 		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
-		sample.Influence, visibility.EffectiveDistance, damage.Potential, damage.Band
+		visibility.EffectiveDistance, damage.Potential, damage.Band
 	)
 end)
 ]]></Source>
