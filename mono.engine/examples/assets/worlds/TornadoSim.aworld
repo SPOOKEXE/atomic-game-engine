@@ -1050,10 +1050,11 @@ camera = Instance.new("Camera")
 camera.Name = "TornadoChaseCamera"
 camera.FieldOfView = 57
 camera.FarPlaneZ = 1500
--- The mature EF3 column is 430 metres tall. Keep the default capture far
--- enough back and aimed near its midpoint, so it fits 540-pixel-tall output.
-local cameraTarget = Vector3.new(0, 170, 95)
-local cameraHome = Vector3.new(-275, 135, -405)
+-- Frame the mature EF3 column in the open space beside the control panel.
+-- This closer eye preserves its full height at 960 by 540 while the offset
+-- aim holds the funnel clear of the panel's right edge.
+local cameraTarget = Vector3.new(240, 185, 95)
+local cameraHome = Vector3.new(-255, 125, -285)
 camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)
 camera.Parent = Workspace
 Workspace.CurrentCamera = camera

@@ -33,10 +33,10 @@ void main() {
 		// A million parcels overlap along one viewing ray. Keep each parcel thin
 		// enough that the blend integrates to cloud density instead of an opaque
 		// tube, then let the wider upper billows make the cap read as vapor.
-		size *= mix(0.82, 1.42, pow(smoothstep(0.03, 0.88, height), 0.72)) * mix(0.84, 1.14, seed);
+		size *= mix(0.82, 1.90, pow(smoothstep(0.03, 0.88, height), 0.72)) * mix(0.78, 1.22, seed);
 		float luminance = dot(visual.rgb, vec3(0.2126, 0.7152, 0.0722));
 		visual.rgb = mix(visual.rgb, vec3(luminance), 0.78) * mix(0.78, 1.08, seed);
-		visual.a *= mix(0.0035, 0.0090, smoothstep(0.08, 0.72, height));
+		visual.a *= mix(0.0015, 0.0045, smoothstep(0.08, 0.72, height));
 	}
 	vec3 right = normalize(cross(frame.CameraUp.xyz, frame.CameraForward.xyz));
 	vec3 world = inPositionKind.xyz + right * corner.x * size + frame.CameraUp.xyz * corner.y * size;
