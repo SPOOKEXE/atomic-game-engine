@@ -9,6 +9,7 @@
 // state and ownership move together.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -20,8 +21,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -182,10 +185,35 @@ namespace priority_refinement_bench {
 	void Publish() {
 		FixtureOf().Step();
 	}
+
+	// Prints one steady-state phase sample before the benchmark consumes its
+	// timed samples. Authority already records these phases for the server
+	// metrics endpoint, so this reads existing instrumentation only.
+	void PrintPhaseProfile() {
+		static const bool printed = [] {
+			FixtureOf();
+			engine::core::Metrics::Clear();
+			Publish();
+
+			for (const engine::core::Histogram &histogram : engine::core::Metrics::Snapshot().Histograms) {
+				const std::string_view name = histogram.Name.Text();
+				if (!name.starts_with("replication.publish.")) {
+					continue;
+				}
+				std::cout << "priority-refinement-phase\t" << name << '\t'
+						  << histogram.Mean / static_cast<double>(CLIENTS) << "\tns/item\n";
+			}
+
+			engine::core::Metrics::Clear();
+			return true;
+		}();
+		(void)printed;
+	}
 }
 
 using namespace priority_refinement_bench;
 
 BENCH_PER_ITEM("Priority refinement · 2k entities × 4 rows · 32 clients", CLIENTS) {
+	PrintPhaseProfile();
 	Publish();
 }
