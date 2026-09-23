@@ -1168,31 +1168,30 @@ TEST_CASE("device burst requests are batched from the emitter row", "[effects][d
 	Settings(store, emitter).Rate = 0.0f;
 	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
 	Frame(store, 1.0f / 60.0f);
-	const auto *before = store.Resource<engine::effects::ParticleSystem>();
-	const uint64_t residentRevision = before->ResidentRevision;
-	const uint32_t blockRevision = before->Blocks[0].Revision;
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
 
 	REQUIRE(engine::effects::EmitParticles(store, emitter, 7));
 	REQUIRE(engine::effects::EmitParticles(store, emitter, 5));
-	const auto *queued = store.Resource<engine::effects::ParticleSystem>();
 	CHECK(store.Get<EmitterSlot>(emitter)->Requested == 12);
-	CHECK(queued->RuntimeStates[0].Requested == 0);
-	CHECK(queued->ResidentRevision == residentRevision);
-	CHECK(queued->Blocks[0].Revision == blockRevision);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks.empty());
 
 	Frame(store, 1.0f / 60.0f);
 	auto *batched = store.ResourceMutable<engine::effects::ParticleSystem>();
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
 	CHECK(store.Get<EmitterSlot>(emitter)->Requested == 0);
-	CHECK(batched->RuntimeStates[0].Requested == 12);
-	CHECK(batched->ResidentRevision == residentRevision + 1);
-	CHECK(batched->Blocks[0].Revision == blockRevision + 1);
+	CHECK(batched->RuntimeStates[slot].Requested == 12);
 
 	// The resident counter is a total the device compares with what it already
 	// consumed. A second capped batch must advance it past one block ceiling.
+	const uint64_t residentRevision = batched->ResidentRevision;
+	const uint32_t blockRevision = batched->Blocks[slot].Revision;
 	batched->BlockCeiling = 8;
 	REQUIRE(engine::effects::EmitParticles(store, emitter, 40));
 	Frame(store, 1.0f / 60.0f);
-	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Requested == 20);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[slot].Requested == 20);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->ResidentRevision == residentRevision + 1);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks[slot].Revision == blockRevision + 1);
 }
 
 TEST_CASE("queued particle bursts saturate before a device batch", "[effects][device]") {
@@ -1275,6 +1274,44 @@ TEST_CASE("a device block empties once nothing has been born for a lifetime", "[
 	}
 
 	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Live == 0);
+}
+
+TEST_CASE("a zero-rate device emitter retires after its particles age out", "[effects][device]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	system->DeviceStepped = true;
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
+	for (int frame = 0; frame < 30; frame++) {
+		Frame(store, 1.0f / 60.0f);
+	}
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	REQUIRE(system->RuntimeStates[slot].Live > 0);
+	CHECK_FALSE(system->RuntimeStates[slot].DeviceRetiring);
+
+	Settings(store, emitter).Rate = 0.0f;
+	Frame(store, 1.0f / 60.0f);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == 0.0f);
+	CHECK(system->RuntimeStates[slot].DeviceRetiring);
+	CHECK(system->RetiringBlocks.size() == 1);
+
+	// Resuming before the last particle's lifetime keeps the same device block.
+	Settings(store, emitter).Rate = 60.0f;
+	Frame(store, 1.0f / 60.0f);
+	CHECK_FALSE(system->RuntimeStates[slot].DeviceRetiring);
+	CHECK(system->RetiringBlocks.empty());
+
+	Settings(store, emitter).Rate = 0.0f;
+	for (int frame = 0; frame < 30; frame++) {
+		Frame(store, 1.0f / 60.0f);
+	}
+
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
+	CHECK(system->RetiringBlocks.empty());
 }
 
 TEST_CASE("a disabled device burst releases its block after its lifetime", "[effects][device]") {

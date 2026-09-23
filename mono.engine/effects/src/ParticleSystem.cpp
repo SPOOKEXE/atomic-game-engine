@@ -964,20 +964,25 @@ namespace engine::effects {
 					EmitterRuntime &runtime = system->RuntimeStates[slot->Index];
 					RefreshSpawnState(store, entity, emitter, system->SpawnStates[slot->Index]);
 					RefreshRuntimeState(emitter, runtime);
-					if (system->DeviceStepped && !runtime.Enabled && !runtime.DeviceRetiring) {
+					block.RateOverDistance = emitter.RateOverDistance;
+					const bool continuouslyEmitting =
+						runtime.Enabled && (runtime.ContinuousRate > 0.0f || block.RateOverDistance > 0.0f);
+					if (system->DeviceStepped && !continuouslyEmitting && runtime.Live > 0 &&
+						!runtime.DeviceRetiring) {
 						runtime.DeviceRetiring = true;
 						runtime.Idle = 0.0f;
 						runtime.Live = std::max(runtime.Live, 1u);
 						system->RetiringBlocks.push_back(slot->Index);
-					} else if (runtime.Enabled) {
+					} else if (continuouslyEmitting && runtime.DeviceRetiring) {
 						runtime.DeviceRetiring = false;
+						runtime.Idle = 0.0f;
+						std::erase(system->RetiringBlocks, slot->Index);
 					}
 					// Spawn state and the rate now live in the resident parameter table.
 					// Every authored emitter write therefore invalidates that row even when
 					// its playback and force fields happened to stay equal.
 					block.Revision++;
 					residentChanged = true;
-					block.RateOverDistance = emitter.RateOverDistance;
 					if (block.ParticleLimit != emitter.MaxParticles) {
 						releaseBlock(*slot);
 						return;
@@ -1074,15 +1079,20 @@ namespace engine::effects {
 						}
 						block.Revision++;
 						residentChanged = true;
-						if (system->DeviceStepped && !continuouslyEnabled && !runtime.DeviceRetiring) {
-							runtime.DeviceRetiring = true;
-							runtime.Idle = 0.0f;
-							runtime.Live = std::max(runtime.Live, 1u);
-							system->RetiringBlocks.push_back(slot.Index);
-						} else if (continuouslyEnabled) {
-							runtime.DeviceRetiring = false;
-							std::erase(system->RetiringBlocks, slot.Index);
-						}
+					}
+
+					const bool continuouslyEmitting = continuouslyEnabled && (runtime.ContinuousRate > 0.0f ||
+																			  block.RateOverDistance > 0.0f);
+					if (system->DeviceStepped && !continuouslyEmitting && runtime.Live > 0 &&
+						!runtime.DeviceRetiring) {
+						runtime.DeviceRetiring = true;
+						runtime.Idle = 0.0f;
+						runtime.Live = std::max(runtime.Live, 1u);
+						system->RetiringBlocks.push_back(slot.Index);
+					} else if (continuouslyEmitting && runtime.DeviceRetiring) {
+						runtime.DeviceRetiring = false;
+						runtime.Idle = 0.0f;
+						std::erase(system->RetiringBlocks, slot.Index);
 					}
 
 					if (slot.ClearRequested) {
@@ -1118,7 +1128,7 @@ namespace engine::effects {
 						if (system->DeviceStepped && runtime.Requested != previous) {
 							block.Revision++;
 							residentChanged = true;
-							if (!continuouslyEnabled) {
+							if (!continuouslyEmitting) {
 								// A manual burst on a disabled device emitter has a fresh
 								// lifetime. Keep its block resident until that lifetime has
 								// elapsed, even when a prior clear or retirement left it empty.
@@ -1132,7 +1142,7 @@ namespace engine::effects {
 						}
 					}
 
-					if (!continuouslyEnabled && (system->DeviceStepped || runtime.Requested == 0) &&
+					if (!continuouslyEmitting && (system->DeviceStepped || runtime.Requested == 0) &&
 						runtime.Live == 0) {
 						releaseBlock(slot);
 						return;
@@ -1213,7 +1223,12 @@ namespace engine::effects {
 				if (emitter == nullptr) {
 					return;
 				}
-
+				const bool continuouslyEmitting =
+					slot.Enabled && eligible &&
+					(emitter->Rate > 0.0f && emitter->TimeScale > 0.0f || emitter->RateOverDistance > 0.0f);
+				if (!continuouslyEmitting && slot.Requested == 0) {
+					return;
+				}
 				uint32_t first = 0;
 				const uint32_t wanted = BlockSizeFor(*emitter, slot.Requested, system->BlockCeiling);
 				// **The ceiling is on rows in use, not rows ever made** - which
@@ -1491,7 +1506,10 @@ namespace engine::effects {
 					continue;
 				}
 				EmitterRuntime &runtime = system->RuntimeStates[index];
-				if (!runtime.DeviceRetiring || runtime.Enabled) {
+				const EmitterBlock &block = system->Blocks[index];
+				const bool continuouslyEmitting =
+					runtime.Enabled && (runtime.ContinuousRate > 0.0f || block.RateOverDistance > 0.0f);
+				if (!runtime.DeviceRetiring || continuouslyEmitting) {
 					system->RetiringBlocks.erase(
 						system->RetiringBlocks.begin() + static_cast<std::ptrdiff_t>(at - 1)
 					);
