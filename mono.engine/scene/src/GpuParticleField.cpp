@@ -4,11 +4,15 @@
 
 namespace engine::scene {
 	uint32_t NormalizeGpuParticleCount(uint32_t requested) {
-		constexpr std::array<uint32_t, 5> PRESETS{
+		constexpr std::array<uint32_t, 9> PRESETS{
 			262'144u,
+			524'288u,
 			1'048'576u,
-			4'194'304u,
-			16'777'216u,
+			2'000'000u,
+			5'000'000u,
+			10'000'000u,
+			15'000'000u,
+			20'000'000u,
 			50'000'000u,
 		};
 		if (requested == 0) return PRESETS[1];

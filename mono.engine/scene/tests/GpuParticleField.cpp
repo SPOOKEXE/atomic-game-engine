@@ -10,8 +10,17 @@ TEST_CASE("GPU particle fields normalize authored requests to fixed presets", "[
 	CHECK(NormalizeGpuParticleCount(0) == 1'048'576);
 	CHECK(NormalizeGpuParticleCount(1) == 262'144);
 	CHECK(NormalizeGpuParticleCount(262'144) == 262'144);
-	CHECK(NormalizeGpuParticleCount(262'145) == 1'048'576);
-	CHECK(NormalizeGpuParticleCount(16'777'217) == 50'000'000);
+	CHECK(NormalizeGpuParticleCount(262'145) == 524'288);
+	CHECK(NormalizeGpuParticleCount(524'288) == 524'288);
+	CHECK(NormalizeGpuParticleCount(524'289) == 1'048'576);
+	CHECK(NormalizeGpuParticleCount(1'048'577) == 2'000'000);
+	CHECK(NormalizeGpuParticleCount(4'194'304) == 5'000'000);
+	CHECK(NormalizeGpuParticleCount(5'000'000) == 5'000'000);
+	CHECK(NormalizeGpuParticleCount(10'000'000) == 10'000'000);
+	CHECK(NormalizeGpuParticleCount(15'000'000) == 15'000'000);
+	CHECK(NormalizeGpuParticleCount(20'000'000) == 20'000'000);
+	CHECK(NormalizeGpuParticleCount(16'777'217) == 20'000'000);
+	CHECK(NormalizeGpuParticleCount(20'000'001) == 50'000'000);
 	CHECK(NormalizeGpuParticleCount(UINT32_MAX) == 50'000'000);
 }
 

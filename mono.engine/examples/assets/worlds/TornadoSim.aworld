@@ -78,9 +78,13 @@ local validPreset = {}
 for _, preset in ipairs(Controls.presets) do validPreset[preset] = true end
 local validParticleCount = {
 	[262144] = true,
+	[524288] = true,
 	[1048576] = true,
-	[4194304] = true,
-	[16777216] = true,
+	[2000000] = true,
+	[5000000] = true,
+	[10000000] = true,
+	[15000000] = true,
+	[20000000] = true,
 	[50000000] = true,
 }
 local parameterBounds: { [string]: any } = {}
@@ -107,6 +111,12 @@ controlEvent.OnServerEvent:Connect(function(payload: string)
 	elseif request.kind == "layers" and particleField ~= nil and type(request.mask) == "number"
 		and request.mask >= 0 and request.mask <= 7 and request.mask % 1 == 0 then
 		particleField.Layers = request.mask
+	elseif request.kind == "motion" and type(request.x) == "number" and type(request.y) == "number"
+		and type(request.z) == "number" and math.abs(request.x) <= 60 and math.abs(request.y) <= 60
+		and math.abs(request.z) <= 60 then
+		Storm.Configure({ TranslationVelocity = Vector3.new(request.x, request.y, request.z) })
+	elseif request.kind == "rotation" and type(request.counterClockwise) == "boolean" then
+		Storm.Configure({ CounterClockwise = request.counterClockwise })
 	elseif request.kind == "parameters" and type(request.values) == "table" then
 		local configuration: { [string]: number } = {}
 		for name, value in pairs(request.values) do
@@ -824,6 +834,22 @@ local thunder = stormSound("Tornado Delayed Thunder", "audio/tornado-thunder.wav
 local audioLayers = { windBed, circulationBed, rainBed, debrisBed }
 local audioEnabled = true
 local thunderRevision = 0
+
+local function updateStormAudio(snapshot: any, observer: Vector3)
+	local sample = Storm.Sample(observer)
+	local horizontalWind = Vector3.new(sample.Velocity.X, 0, sample.Velocity.Z).Magnitude
+	local parameters = snapshot.Parameters
+	local wind = math.clamp(horizontalWind / 105, 0, 1)
+	local rain = math.clamp(parameters.RainRate * parameters.Humidity * (0.35 + sample.Influence), 0, 1)
+	local debris = math.clamp(sample.DamagePotential * parameters.DebrisDensity * 0.45, 0, 1)
+	local rumble = math.clamp(parameters.Energy * sample.Influence * (0.4 + horizontalWind / 140), 0, 1)
+	windBed.Volume = 0.08 + wind * 0.34
+	circulationBed.Volume = 0.05 + rumble * 0.31
+	rainBed.Volume = 0.02 + rain * 0.22
+	debrisBed.Volume = 0.01 + debris * 0.18
+	for _, sound in ipairs(audioLayers) do sound.Playing = audioEnabled and snapshot.Enabled end
+end
+
 local function scheduleThunder(delay: number)
 	local revision = thunderRevision
 	task.delay(delay, function()
@@ -903,7 +929,9 @@ lightningSparks.LightEmission = 1
 lightningSparks.TimeScale = 0
 lightningSparks.Parent = lightningHost
 
+local lightningEnabled = true
 local function setLightningVisible(visible: boolean, intensity: number)
+	visible = visible and lightningEnabled
 	for _, beam in ipairs(lightningBeams) do
 		beam.Enabled = visible
 		beam.Transparency = NumberSequence.new(1 - intensity)
@@ -947,7 +975,12 @@ local function strikeLightning(snapshot: any)
 	lightningNextStrike += lightningRange(1.2, 5.5) / math.max(0.25 + moisture, 0.25)
 	scheduleThunder((lightningHost.Position - camera.CFrame.Position).Magnitude / 343)
 end
+local condensationEmitters: { ParticleEmitter } = {}
+local rainEmitters: { ParticleEmitter } = {}
+local debrisEmitters: { ParticleEmitter } = {}
+
 local debris = emitter("Debris Skirt", stormHost, 64, Color3.fromRGB(96, 75, 54))
+table.insert(debrisEmitters, debris)
 debris.Shape = Enum.ParticleEmitterShape.Cylinder
 debris.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
 debris.Lifetime = NumberRange.new(2.8, 5.0)
@@ -967,6 +1000,7 @@ for index = 0, 11 do
 	host.Visible = false
 	followStorm(host)
 	local dust = emitter("Ground Debris Inflow", host, 16, Color3.fromRGB(105, 78, 49))
+	table.insert(debrisEmitters, dust)
 	dust.MaxParticles = 480
 	dust.Lifetime = NumberRange.new(2.2, 3.7)
 	dust.Speed = NumberRange.new(3, 7)
@@ -996,13 +1030,15 @@ local function condensationLayer(name: string, height: number, radius: number, r
 	return layer
 end
 
-condensationLayer("Condensation Streamers", 7, 14, 120, Color3.fromRGB(51, 34, 21))
-condensationLayer("Funnel Lower Wisps", 22, 20, 140, Color3.fromRGB(59, 45, 31))
-condensationLayer("Funnel Lower Body", 43, 27, 150, Color3.fromRGB(64, 54, 41))
-condensationLayer("Funnel Mid Wisps", 69, 35, 160, Color3.fromRGB(63, 60, 53))
-condensationLayer("Funnel Mid Body", 101, 46, 140, Color3.fromRGB(57, 58, 55))
-condensationLayer("Funnel Upper Wisps", 138, 60, 115, Color3.fromRGB(49, 51, 50))
-condensationLayer("Funnel Anvil Wisps", 176, 82, 80, Color3.fromRGB(43, 45, 44))
+for _, layer in ipairs({
+	condensationLayer("Condensation Streamers", 7, 14, 120, Color3.fromRGB(51, 34, 21)),
+	condensationLayer("Funnel Lower Wisps", 22, 20, 140, Color3.fromRGB(59, 45, 31)),
+	condensationLayer("Funnel Lower Body", 43, 27, 150, Color3.fromRGB(64, 54, 41)),
+	condensationLayer("Funnel Mid Wisps", 69, 35, 160, Color3.fromRGB(63, 60, 53)),
+	condensationLayer("Funnel Mid Body", 101, 46, 140, Color3.fromRGB(57, 58, 55)),
+	condensationLayer("Funnel Upper Wisps", 138, 60, 115, Color3.fromRGB(49, 51, 50)),
+	condensationLayer("Funnel Anvil Wisps", 176, 82, 80, Color3.fromRGB(43, 45, 44)),
+}) do table.insert(condensationEmitters, layer) end
 
 -- Layers is a field mask. Preserve condensation with rain and debris: omitting
 -- bit one leaves only a thin spray column, even with a million GPU particles.
@@ -1037,6 +1073,7 @@ for x = -2, 2 do
 		host.Visible = false
 		followStorm(host)
 		local rain = emitter("Tornado Rain", host, 28, Color3.fromRGB(87, 112, 127))
+		table.insert(rainEmitters, rain)
 		rain.Lifetime = NumberRange.new(1.0, 1.5)
 		rain.Speed = NumberRange.new(26, 37)
 		rain.Acceleration = Vector3.new(8, -49, 3)
@@ -1055,7 +1092,20 @@ camera.FarPlaneZ = 1500
 -- aim holds the funnel clear of the panel's right edge.
 local cameraTarget = Vector3.new(240, 185, 95)
 local cameraHome = Vector3.new(-255, 125, -285)
-camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)
+local cameraYaw = 0.0
+local cameraPitch = 0.0
+local cameraZoom = 1.0
+local function cameraFrame(target: Vector3): CFrame
+	local offset = cameraHome - cameraTarget
+	local yawCosine, yawSine = math.cos(cameraYaw), math.sin(cameraYaw)
+	local x = offset.X * yawCosine + offset.Z * yawSine
+	local z = -offset.X * yawSine + offset.Z * yawCosine
+	local pitchCosine, pitchSine = math.cos(cameraPitch), math.sin(cameraPitch)
+	local eye = target + Vector3.new(x, offset.Y * pitchCosine - z * pitchSine,
+		(offset.Y * pitchSine + z * pitchCosine)) / cameraZoom
+	return CFrame.lookAt(eye, target)
+end
+camera.CFrame = cameraFrame(cameraTarget)
 camera.Parent = Workspace
 Workspace.CurrentCamera = camera
 
@@ -1073,7 +1123,7 @@ local panel = Instance.new("ScrollingFrame")
 panel.Name = "StormControls"
 panel.Size = UDim2.new(0, 352, 1, -28)
 panel.Position = UDim2.new(0, 14, 0, 14)
-panel.CanvasSize = UDim2.new(0, 352, 0, 704)
+panel.CanvasSize = UDim2.new(0, 352, 0, 900)
 panel.CanvasPosition = Vector2.new(0, 0)
 panel.ScrollBarThickness = 8
 panel.ScrollBarImageColor3 = Color3.fromRGB(70, 117, 132)
@@ -1137,28 +1187,46 @@ button("AUDIO", 212, 91, function()
 	thunder.Playing = false
 end, 39)
 
-local counts = { 262144, 1048576, 4194304, 16777216, 50000000 }
+local counts = { 262144, 524288, 1000000, 2000000, 5000000, 10000000, 15000000, 20000000, 50000000 }
 for index, count in ipairs(counts) do
-	button(string.format("P%.0fM", count / 1000000), 7 + (index - 1) * 48, 119, function()
+	local column = (index - 1) % 5
+	local row = math.floor((index - 1) / 5)
+	button(string.format("P%.2gM", count / 1000000), 7 + column * 68, 119 + row * 25, function()
 		request({ kind = "particles", count = count })
-	end)
+	end, 63)
 end
 
 local activeLayers = 7
 local layerButtons: { [number]: TextButton } = {}
+local rainOpacity = 1.0
+local rainDensity = 1.0
+local emitterRates: { [ParticleEmitter]: number } = {}
+local function layerActive(mask: number, bit: number): boolean
+	return mask % (bit * 2) >= bit
+end
+local function setEmitterLayer(emitters: { ParticleEmitter }, enabled: boolean, scale: number)
+	for _, effect in ipairs(emitters) do
+		effect.Enabled = enabled
+		effect.Rate = enabled and emitterRates[effect] * scale or 0
+	end
+end
 local function updateLayers()
 	request({ kind = "layers", mask = activeLayers })
 	for bit, control in pairs(layerButtons) do
-		local enabled = activeLayers % (bit * 2) >= bit
+		local enabled = layerActive(activeLayers, bit)
 		control.BackgroundColor3 = if enabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
 	end
+	setEmitterLayer(condensationEmitters, layerActive(activeLayers, 1), 1)
+	setEmitterLayer(rainEmitters, layerActive(activeLayers, 2), rainDensity)
+	setEmitterLayer(debrisEmitters, layerActive(activeLayers, 4), 1)
+	visualField.RainAlpha = 0.10 * rainOpacity * rainDensity
 end
 
 
 for index, layer in ipairs({ { 1, "COND" }, { 2, "RAIN" }, { 4, "DUST" } }) do
 	local bit = layer[1] :: number
 	local label = layer[2] :: string
-	layerButtons[bit] = button(label, 7 + (index - 1) * 69, 148, function()
+	layerButtons[bit] = button(label, 7 + (index - 1) * 69, 174, function()
 		if activeLayers % (bit * 2) >= bit then
 			activeLayers -= bit
 		else
@@ -1167,15 +1235,20 @@ for index, layer in ipairs({ { 1, "COND" }, { 2, "RAIN" }, { 4, "DUST" } }) do
 		updateLayers()
 	end, 64)
 end
+
+for _, emitters in ipairs({ condensationEmitters, rainEmitters, debrisEmitters }) do
+	for _, effect in ipairs(emitters) do emitterRates[effect] = effect.Rate end
+end
+updateLayers()
 local cameraOrbit = false
 local cameraShake = false
 local orbitControl: TextButton
-orbitControl = button("CAM ORBIT", 215, 148, function()
+orbitControl = button("CAM ORBIT", 215, 174, function()
 	cameraOrbit = not cameraOrbit
 	orbitControl.BackgroundColor3 = if cameraOrbit then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
 end, 62)
 local shakeControl: TextButton
-shakeControl = button("SHAKE", 281, 148, function()
+shakeControl = button("SHAKE", 281, 174, function()
 	cameraShake = not cameraShake
 	shakeControl.BackgroundColor3 = if cameraShake then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
 end, 64)
@@ -1183,7 +1256,7 @@ end, 64)
 local section = Instance.new("TextLabel")
 section.Name = "FieldParameters"
 section.Size = UDim2.new(1, -14, 0, 18)
-section.Position = UDim2.new(0, 7, 0, 178)
+section.Position = UDim2.new(0, 7, 0, 204)
 section.Text = "FIELD AND WEATHER  click −/+ or edit then press Return"
 section.TextColor3 = Color3.fromRGB(127, 170, 184)
 section.TextSize = 10
@@ -1221,7 +1294,7 @@ for index, parameter in ipairs(Controls.parameters) do
 	local column = (index - 1) % 2
 	local row = math.floor((index - 1) / 2)
 	local x = 7 + column * 172
-	local y = 201 + row * 27
+	local y = 227 + row * 27
 	local label = Instance.new("TextLabel")
 	label.Name = parameter.Key .. "Label"
 	label.Size = UDim2.new(0, 76, 0, 22)
@@ -1264,7 +1337,7 @@ end
 local vectorInset = Instance.new("Frame")
 vectorInset.Name = "FieldVectorInset"
 vectorInset.Size = UDim2.new(1, -14, 0, 106)
-vectorInset.Position = UDim2.new(0, 7, 0, 425)
+vectorInset.Position = UDim2.new(0, 7, 0, 451)
 vectorInset.BackgroundColor3 = Color3.fromRGB(6, 15, 20)
 vectorInset.BorderSizePixel = 0
 vectorInset.Parent = panel
@@ -1308,7 +1381,7 @@ end
 local readout = Instance.new("TextLabel")
 readout.Name = "FieldReadout"
 readout.Size = UDim2.new(1, -14, 0, 155)
-readout.Position = UDim2.new(0, 7, 0, 541)
+readout.Position = UDim2.new(0, 7, 0, 567)
 readout.TextColor3 = Color3.fromRGB(192, 211, 221)
 readout.TextSize = 12
 readout.TextWrapped = true
@@ -1316,6 +1389,64 @@ readout.TextXAlignment = Enum.TextXAlignment.Left
 readout.TextYAlignment = Enum.TextYAlignment.Top
 readout.BackgroundTransparency = 1
 readout.Parent = panel
+
+local stormMotion = Controls.default.TranslationVelocity
+local counterClockwise = false
+local environmentEnabled = true
+local environmentControl: TextButton
+local lightningControl: TextButton
+local function setEnvironmentVisible(visible: boolean)
+	environmentEnabled = visible
+	for _, object in ipairs(Workspace:GetDescendants()) do
+		if not object:IsA("Part") and not object:IsA("Volume") then continue end
+		local name = object.Name
+		local environmentObject = string.find(name, "Storm Prairie") or string.find(name, "Storm Chase Road")
+			or string.find(name, "Road Mark") or string.find(name, "Prairie Grid") or string.find(name, "Farmhouse")
+			or string.find(name, "Barn") or string.find(name, "Workshop") or string.find(name, "Hay Bale")
+			or string.find(name, "Tree ") or string.find(name, "Fence ") or string.find(name, "Storm Cell")
+			or string.find(name, "Cell ") or string.find(name, "Tornado Chase") or string.find(name, "StormInteraction")
+			or string.find(name, "WoodenSign") or string.find(name, "SteelPanel") or string.find(name, "WindBentTree")
+		if environmentObject then
+			if object:IsA("Part") then object.Visible = visible else (object :: Volume).Enabled = visible end
+		end
+	end
+end
+local function setStormMotion(change: Vector3)
+	stormMotion = Vector3.new(
+		math.clamp(change.X, -60, 60), math.clamp(change.Y, -60, 60), math.clamp(change.Z, -60, 60)
+	)
+	request({ kind = "motion", x = stormMotion.X, y = stormMotion.Y, z = stormMotion.Z })
+end
+
+button("CCW", 7, 732, function()
+	counterClockwise = not counterClockwise
+	request({ kind = "rotation", counterClockwise = counterClockwise })
+end, 52)
+button("WIND X-", 7, 758, function() setStormMotion(stormMotion - Vector3.new(5, 0, 0)) end, 52)
+button("WIND X+", 61, 758, function() setStormMotion(stormMotion + Vector3.new(5, 0, 0)) end, 52)
+button("WIND Y-", 115, 758, function() setStormMotion(stormMotion - Vector3.new(0, 5, 0)) end, 52)
+button("WIND Y+", 169, 758, function() setStormMotion(stormMotion + Vector3.new(0, 5, 0)) end, 52)
+button("WIND Z-", 223, 758, function() setStormMotion(stormMotion - Vector3.new(0, 0, 5)) end, 52)
+button("WIND Z+", 277, 758, function() setStormMotion(stormMotion + Vector3.new(0, 0, 5)) end, 52)
+button("RAIN OP-", 7, 784, function() rainOpacity = math.max(0, rainOpacity - 0.1); updateLayers() end, 78)
+button("RAIN OP+", 87, 784, function() rainOpacity = math.min(1, rainOpacity + 0.1); updateLayers() end, 78)
+button("RAIN DEN-", 167, 784, function() rainDensity = math.max(0, rainDensity - 0.1); updateLayers() end, 86)
+button("RAIN DEN+", 255, 784, function() rainDensity = math.min(1, rainDensity + 0.1); updateLayers() end, 86)
+environmentControl = button("ENV", 7, 810, function()
+	setEnvironmentVisible(not environmentEnabled)
+	environmentControl.BackgroundColor3 = if environmentEnabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 52)
+lightningControl = button("LIGHT", 61, 810, function()
+	lightningEnabled = not lightningEnabled
+	setLightningVisible(false, 0)
+	lightningControl.BackgroundColor3 = if lightningEnabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 52)
+button("YAW -", 7, 836, function() cameraYaw -= math.rad(8) end, 52)
+button("YAW +", 61, 836, function() cameraYaw += math.rad(8) end, 52)
+button("PITCH -", 115, 836, function() cameraPitch = math.max(math.rad(-75), cameraPitch - math.rad(5)) end, 70)
+button("PITCH +", 187, 836, function() cameraPitch = math.min(math.rad(75), cameraPitch + math.rad(5)) end, 70)
+button("ZOOM -", 259, 836, function() cameraZoom = math.max(0.55, cameraZoom - 0.1) end, 78)
+button("ZOOM +", 259, 862, function() cameraZoom = math.min(1.7, cameraZoom + 0.1) end, 78)
 
 local vectorPoints = {
 	Vector3.new(-70, 15, 95), Vector3.new(-28, 15, 95), Vector3.new(0, 15, 95),
@@ -1346,6 +1477,12 @@ RunService.Heartbeat:Connect(function(delta: number)
 	end
 	if #damageScenery == 0 then damageSceneryBound = false end
 	local snapshot = Storm.Snapshot()
+	if snapshot.Parameters.TranslationVelocity then
+		stormMotion = snapshot.Parameters.TranslationVelocity
+	end
+	if type(snapshot.Parameters.CounterClockwise) == "boolean" then
+		counterClockwise = snapshot.Parameters.CounterClockwise
+	end
 	if snapshot.ElapsedSeconds > 0 and panelClock >= nextParameterSync then
 		nextParameterSync = panelClock + 0.25
 		if panelClock - lastParameterEdit >= 0.35 then
@@ -1374,7 +1511,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 				visual.Object.Position = visual.Origin + stormOffset
 			end
 	if not cameraOrbit and not cameraShake and not observerFollow then
-				camera.CFrame = CFrame.lookAt(cameraHome + stormOffset, cameraTarget + stormOffset)
+				camera.CFrame = cameraFrame(cameraTarget + stormOffset)
 			end
 		end
 	end
@@ -1398,6 +1535,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 		end
 	end
 	updateObserverVisual()
+	updateStormAudio(snapshot, observerPosition)
 	observerPublishElapsed += delta
 	if observerPublishElapsed >= 0.5 then
 		observerPublishElapsed = 0
@@ -1411,7 +1549,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 		local eye = observerPosition - observerHeading * 15 + Vector3.new(0, 7, 0)
 		camera.CFrame = CFrame.lookAt(eye, observerPosition + Vector3.new(0, 1.3, 0))
 	elseif cameraShake then
-		camera.CFrame = CFrame.lookAt(cameraHome + stormOffset, cameraTarget + stormOffset)
+		camera.CFrame = cameraFrame(cameraTarget + stormOffset)
 	end
 	if cameraShake then
 		-- Sample at the observer's eye so the optional camera response grows with
@@ -1456,7 +1594,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 		vectorLabels[index].Text = string.format("%s %.0f / %.0f", arrow, velocity.Magnitude, velocity.Y)
 	end
 	readout.Text = string.format(
-		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nGPU: 262K  1M  4M  16M  50M\nLayers: condensation, rain, dust\nField band %d",
+		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nGPU: 262K  524K  1M  2M  5M  10M  15M  20M  50M\nLayers: condensation, rain, dust\nField band %d",
 		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
 		visibility.EffectiveDistance, damage.Potential, damage.Band
 	)
