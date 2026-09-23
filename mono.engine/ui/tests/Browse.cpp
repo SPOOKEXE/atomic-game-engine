@@ -175,6 +175,17 @@ TEST_CASE("pointing at a file lists the folder it is in", "[studio][browse]") {
 	CHECK(Tree::Has(listing, "other.agame"));
 }
 
+TEST_CASE("a bare filename lists the working folder", "[studio][browse]") {
+	const Listing listing = BrowseDirectory("Untitled.agame");
+	std::error_code code;
+	const std::filesystem::path working =
+		std::filesystem::weakly_canonical(std::filesystem::current_path(code), code);
+
+	REQUIRE_FALSE(code);
+	CHECK(listing.Error.empty());
+	CHECK(listing.Directory == working);
+}
+
 TEST_CASE("a folder that is not there says so rather than looking empty", "[studio][browse]") {
 	Tree tree;
 	const Listing listing = BrowseDirectory(tree.Root / "nope" / "nowhere");

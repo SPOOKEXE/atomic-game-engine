@@ -74,8 +74,18 @@ namespace engine::ui {
 		if (!std::filesystem::is_directory(where, code)) {
 			if (where.has_parent_path()) {
 				where = where.parent_path();
+			} else {
+				// A bare filename has no explicit parent, so its folder is the
+				// working directory. Leaving it as `where` makes the dialog list
+				// the not-yet-created file as though it were a directory.
+				where = std::filesystem::current_path(code);
+				if (code) {
+					listing.Error = "cannot tell where we are: " + code.message();
+					return listing;
+				}
 			}
 		}
+		code.clear();
 
 		where = std::filesystem::weakly_canonical(where, code);
 		if (code) {
