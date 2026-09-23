@@ -38,15 +38,23 @@ namespace engine::scene {
 		uint32_t RequestedCount = 1'048'576;
 		// Seed used to place particles deterministically when the field resets.
 		uint32_t Seed = 0xC105D00Du;
-		// Linear tint, opacity and billboard size for each visible layer.
+		// Linear tint of condensation particles.
 		core::Color3 CondensationColor{0.70f, 0.74f, 0.76f};
+		// Linear tint of rain particles.
 		core::Color3 RainColor{0.55f, 0.67f, 0.85f};
+		// Linear tint of debris particles.
 		core::Color3 DebrisColor{0.34f, 0.25f, 0.16f};
+		// Condensation opacity in the range zero to one.
 		float CondensationAlpha = 0.11f;
+		// Rain opacity in the range zero to one.
 		float RainAlpha = 0.35f;
+		// Debris opacity in the range zero to one.
 		float DebrisAlpha = 0.24f;
+		// Condensation billboard width and height in world units.
 		float CondensationSize = 3.0f;
+		// Rain billboard width and height in world units.
 		float RainSize = 0.45f;
+		// Debris billboard width and height in world units.
 		float DebrisSize = 0.8f;
 	};
 
