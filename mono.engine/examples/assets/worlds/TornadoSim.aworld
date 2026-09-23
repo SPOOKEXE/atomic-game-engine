@@ -469,17 +469,129 @@ local thunder = stormSound("Tornado Delayed Thunder", "audio/tornado-thunder.wav
 local audioLayers = { windBed, circulationBed, rainBed, debrisBed }
 local audioEnabled = true
 local thunderRevision = 0
-local scheduleThunder: (number) -> ()
-scheduleThunder = function(delay: number)
+local function scheduleThunder(delay: number)
 	local revision = thunderRevision
 	task.delay(delay, function()
 		if not audioEnabled or revision ~= thunderRevision then return end
 		thunder.Playing = false
 		thunder.Playing = true
-		scheduleThunder(12 + (revision % 3) * 2)
 	end)
 end
-scheduleThunder(6.5)
+
+-- The simulation seeds mt19937 with this value. This compact Park-Miller
+-- sequence keeps the visual schedule reproducible without mutating Luau's
+-- shared random generator.
+local lightningSeed = 0x544F524E
+local lightningNextStrike = 1.5
+local lightningStrikeTime = -1000
+local lightningDuration = 0.18
+local lightningSerial = 0
+local lightningTop = Vector3.zero
+local lastStormElapsed = 0
+local camera: Camera
+
+local function lightningRandom(): number
+	lightningSeed = (lightningSeed * 16807) % 2147483647
+	return (lightningSeed - 1) / 2147483646
+end
+
+local function lightningRange(minimum: number, maximum: number): number
+	return minimum + (maximum - minimum) * lightningRandom()
+end
+
+local lightningHost = makePart("Tornado Lightning Flash", Vector3.one, stormOrigin, Color3.new(1, 1, 1))
+lightningHost.Visible = false
+local lightningLight = Instance.new("PointLight")
+lightningLight.Name = "Tornado Lightning Light"
+lightningLight.Color = Color3.fromRGB(218, 232, 255)
+lightningLight.Brightness = 0
+lightningLight.Range = 0
+lightningLight.Parent = lightningHost
+
+local lightningPoints: { Attachment } = {}
+for index = 0, 9 do
+	local point = Instance.new("Attachment")
+	point.Name = "Lightning Point " .. index
+	point.Parent = lightningHost
+	table.insert(lightningPoints, point)
+end
+
+local lightningBeams: { Beam } = {}
+for index = 1, 9 do
+	local beam = Instance.new("Beam")
+	beam.Name = "Tornado Lightning Segment " .. index
+	beam.Attachment0 = lightningPoints[index]
+	beam.Attachment1 = lightningPoints[index + 1]
+	beam.Width0 = 3.6
+	beam.Width1 = 3.6
+	beam.Color = ColorSequence.new(Color3.fromRGB(209, 225, 255))
+	beam.Transparency = NumberSequence.new(1)
+	beam.Additive = true
+	beam.Enabled = false
+	beam.Parent = lightningHost
+	table.insert(lightningBeams, beam)
+end
+
+local lightningSparks = Instance.new("ParticleEmitter")
+lightningSparks.Name = "Tornado Lightning Sparks"
+lightningSparks.Rate = 120
+lightningSparks.MaxParticles = 96
+lightningSparks.Lifetime = NumberRange.new(0.16, 0.34)
+lightningSparks.Speed = NumberRange.new(12, 26)
+lightningSparks.SpreadAngle = Vector2.new(42, 42)
+lightningSparks.Acceleration = Vector3.new(0, -34, 0)
+lightningSparks.Size = NumberSequence.new(0.35, 0)
+lightningSparks.Transparency = NumberSequence.new(0.05, 1)
+lightningSparks.Color = ColorSequence.new(Color3.fromRGB(218, 232, 255))
+lightningSparks.Additive = true
+lightningSparks.LightEmission = 1
+lightningSparks.TimeScale = 0
+lightningSparks.Parent = lightningHost
+
+local function setLightningVisible(visible: boolean, intensity: number)
+	for _, beam in ipairs(lightningBeams) do
+		beam.Enabled = visible
+		beam.Transparency = NumberSequence.new(1 - intensity)
+	end
+	lightningLight.Brightness = if visible then 360 * intensity else 0
+	lightningLight.Range = if visible then 220 * intensity else 0
+	lightningSparks.TimeScale = if visible then intensity else 0
+end
+
+local function resetLightning()
+	lightningSeed = 0x544F524E
+	lightningNextStrike = 1.5
+	lightningStrikeTime = -1000
+	lightningDuration = 0.18
+	lightningSerial = 0
+	setLightningVisible(false, 0)
+end
+
+local function strikeLightning(snapshot: any)
+	local parameters = snapshot.Parameters
+	local angle = lightningRange(0, math.pi * 2)
+	local radius = lightningRange(parameters.CoreRadius * 1.2, parameters.InfluenceRadius * 0.82)
+	local height = parameters.TopHeight * 0.82
+	lightningTop = Vector3.new(math.cos(angle) * radius, height, math.sin(angle) * radius)
+	lightningHost.Position = snapshot.Position + lightningTop
+	lightningDuration = lightningRange(0.12, 0.24)
+	lightningStrikeTime = lightningNextStrike
+	lightningSerial += 1
+
+	for index, point in ipairs(lightningPoints) do
+		local segment = index - 1
+		local fraction = segment / 9
+		point.CFrame = CFrame.new(Vector3.new(
+			math.sin(segment * 8.73 + lightningSerial * 0.71) * 5,
+			-height * fraction,
+			math.cos(segment * 5.19 + lightningSerial * 0.43) * 3
+		))
+	end
+
+	local moisture = math.max(0, math.min(1, parameters.Humidity * parameters.Energy))
+	lightningNextStrike += lightningRange(1.2, 5.5) / math.max(0.25 + moisture, 0.25)
+	scheduleThunder((lightningHost.Position - camera.CFrame.Position).Magnitude / 343)
+end
 local debris = emitter("Debris Skirt", stormHost, 64, Color3.fromRGB(96, 75, 54))
 debris.Shape = Enum.ParticleEmitterShape.Cylinder
 debris.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
@@ -579,7 +691,7 @@ for x = -2, 2 do
 	end
 end
 
-local camera = Instance.new("Camera")
+camera = Instance.new("Camera")
 camera.Name = "TornadoChaseCamera"
 camera.FieldOfView = 57
 camera.FarPlaneZ = 1500
@@ -667,7 +779,6 @@ button("AUDIO", 212, 91, function()
 	thunderRevision += 1
 	for _, sound in ipairs(audioLayers) do sound.Playing = audioEnabled end
 	thunder.Playing = false
-	if audioEnabled then scheduleThunder(4.5) end
 end, 39)
 
 local counts = { 262144, 1048576, 4194304, 16777216, 50000000 }
@@ -859,6 +970,10 @@ RunService.Heartbeat:Connect(function(delta: number)
 		end
 	end
 	local snapshot = Storm.Snapshot()
+	if snapshot.ElapsedSeconds < lastStormElapsed then
+		resetLightning()
+	end
+	lastStormElapsed = snapshot.ElapsedSeconds
 	-- A replica starts without the server resource. Keep the authored origin
 	-- until its first fixed-step snapshot arrives, then move every local effect
 	-- from the same value that drives gameplay and GPU cloud presentation.
@@ -884,6 +999,20 @@ RunService.Heartbeat:Connect(function(delta: number)
 	if cameraShake then
 		local shake = Vector3.new(math.sin(elapsed * 23) * 0.7, math.sin(elapsed * 31) * 0.45, 0)
 		camera.CFrame = camera.CFrame + shake
+	end
+	if snapshot.Enabled and snapshot.ElapsedSeconds > 0 then
+		while snapshot.ElapsedSeconds >= lightningNextStrike do
+			strikeLightning(snapshot)
+		end
+		local lightningAge = snapshot.ElapsedSeconds - lightningStrikeTime
+		local lightningIntensity = if lightningAge >= 0 and lightningAge < lightningDuration
+			then (1 - lightningAge / lightningDuration) ^ 2 else 0
+		setLightningVisible(lightningIntensity > 0, lightningIntensity)
+		if lightningIntensity > 0 then
+			lightningHost.Position = snapshot.Position + lightningTop
+		end
+	else
+		setLightningVisible(false, 0)
 	end
 	local samplePoint = Vector3.new(0, 15, 30) + stormOffset
 	local sample = Storm.Sample(samplePoint)

@@ -105,6 +105,14 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Tornado Delayed Thunder") != std::string::npos);
 	CHECK(document.find("audio/tornado-thunder.wav") != std::string::npos);
 	CHECK(document.find("scheduleThunder") != std::string::npos);
+	CHECK(document.find("local lightningSeed = 0x544F524E") != std::string::npos);
+	CHECK(document.find("lightningSeed = (lightningSeed * 16807) % 2147483647") != std::string::npos);
+	CHECK(document.find("parameters.Humidity * parameters.Energy") != std::string::npos);
+	CHECK(document.find("/ math.max(0.25 + moisture, 0.25)") != std::string::npos);
+	CHECK(document.find("Tornado Lightning Segment") != std::string::npos);
+	CHECK(document.find("Tornado Lightning Light") != std::string::npos);
+	CHECK(document.find("Tornado Lightning Sparks") != std::string::npos);
+	CHECK(document.find("/ 343") != std::string::npos);
 	CHECK(document.find("FIELD AND WEATHER") != std::string::npos);
 	CHECK(document.find("CAM ORBIT") != std::string::npos);
 	CHECK(document.find("SHAKE") != std::string::npos);
