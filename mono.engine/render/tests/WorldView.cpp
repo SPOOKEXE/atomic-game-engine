@@ -432,10 +432,17 @@ TEST_CASE(
 		store.Set(rectangle, element);
 		store.Set(rectangle, gui::Background{});
 	}
+	std::vector<ecs::Entity> pointLights, spotLights;
+	pointLights.reserve(256);
+	spotLights.reserve(256);
 	for (size_t index = 0; index < 256; ++index) {
 		const auto anchor = PartAt(store, {float(index * 20), 0, -10});
-		const auto bulb = store.CreateInstance(ecs::Classes::Find(core::Name("PointLight")), "Light");
-		REQUIRE(store.SetParent(bulb, anchor));
+		const auto point = store.CreateInstance(ecs::Classes::Find(core::Name("PointLight")), "PointLight");
+		REQUIRE(store.SetParent(point, anchor));
+		pointLights.push_back(point);
+		const auto spot = store.CreateInstance(ecs::Classes::Find(core::Name("SpotLight")), "SpotLight");
+		REQUIRE(store.SetParent(spot, anchor));
+		spotLights.push_back(spot);
 	}
 	for (uint32_t index = 0; index < 256; index++) {
 		const auto volume = store.Create();
@@ -502,16 +509,44 @@ TEST_CASE(
 	const uint32_t frames = static_cast<uint32_t>(std::min(requested, 10'000ul));
 	std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> volumes;
 	std::vector<render::SceneLight> selectedLights;
-	const auto started = std::chrono::steady_clock::now();
-	for (uint32_t frame = 0; frame < frames; frame++) {
-		const core::Vector3 selectionEye = frame & 1u ? core::Vector3{farLight, 10, 10} : core::Vector3{};
-		scene::ResolveVolumes(store, selectionEye, {}, volumes);
-		render::CollectLights(store, selectionEye, {}, selectedLights);
-	}
-	const double milliseconds =
-		std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-	std::cout << "local lighting selection frames=" << frames
-			  << ", cpu ms/frame=" << milliseconds / double(frames) << '\n';
+	const auto setEnabled = [&](const std::vector<ecs::Entity> &lights, bool enabled) {
+		for (const ecs::Entity entity : lights) {
+			auto light = *store.Get<scene::Light>(entity);
+			light.Enabled = enabled;
+			store.Set(entity, light);
+		}
+	};
+	const auto measureLights = [&](const char *label) {
+		const auto started = std::chrono::steady_clock::now();
+		for (uint32_t frame = 0; frame < frames; frame++) {
+			const core::Vector3 selectionEye = frame & 1u ? core::Vector3{farLight, 10, 10} : core::Vector3{};
+			render::CollectLights(store, selectionEye, {}, selectedLights);
+		}
+		const double milliseconds =
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+		std::cout << label << " frames=" << frames << ", cpu ms/frame=" << milliseconds / double(frames)
+				  << '\n';
+	};
+	const auto measureVolumes = [&] {
+		const auto started = std::chrono::steady_clock::now();
+		for (uint32_t frame = 0; frame < frames; frame++) {
+			const core::Vector3 selectionEye = frame & 1u ? core::Vector3{farLight, 10, 10} : core::Vector3{};
+			scene::ResolveVolumes(store, selectionEye, {}, volumes);
+		}
+		const double milliseconds =
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+		std::cout << "fog volume selection frames=" << frames
+				  << ", cpu ms/frame=" << milliseconds / double(frames) << '\n';
+	};
+	setEnabled(pointLights, true);
+	setEnabled(spotLights, false);
+	measureLights("point light selection");
+	setEnabled(pointLights, false);
+	setEnabled(spotLights, true);
+	measureLights("spot light selection");
+	setEnabled(pointLights, true);
+	measureLights("mixed local light selection");
+	measureVolumes();
 }
 
 TEST_CASE(

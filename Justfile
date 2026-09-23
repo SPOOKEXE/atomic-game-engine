@@ -178,6 +178,11 @@ volume-light-stress frames="120":
     MONO_LIGHT_SELECTION_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][world-view]"
     MONO_VOLUME_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][gpu][volume-stress]"
 
+# Runs the authored 256-point, 256-spot and 256-volume course through the
+# release renderer. Statistics and the frame graph stay on the terminal.
+lighting-stress-scene frames="720": (build "client")
+    ./{{build}}/client/client --headless --script LightingStress.luau --frames {{frames}} --stats --graph --uncapped
+
 # Whole camera-batch signature costs, with unchanged rows and one-row edits.
 render-preparation-bench samples="5":
     cmake --preset bench > /dev/null
