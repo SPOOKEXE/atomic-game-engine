@@ -46,7 +46,7 @@ void main() {
 		float softness = 1.0 - smoothstep(0.44, 1.04 + scallop, billowDistance);
 		// Fade the rising edge across several billows. A hard cut at the authored
 		// height turns even a sparse field into a rectangular cap.
-		float topFade = 1.0 - smoothstep(0.46, 0.92, inFieldData.x);
+		float topFade = 1.0 - smoothstep(0.48, 0.80, inFieldData.x);
 		result.a *= softness * topFade;
 	} else {
 		float radius = length(inTexCoord - vec2(0.5)) * 2.0;

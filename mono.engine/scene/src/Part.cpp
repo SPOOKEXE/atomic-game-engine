@@ -3255,7 +3255,6 @@ namespace engine::scene {
 			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
 
 			ecs::Classes::Property<&GpuParticleField::Enabled>(gpuParticleFieldClass, "Enabled");
-			ecs::Classes::Property<&GpuParticleField::CloudDensity>(gpuParticleFieldClass, "CloudDensity");
 			ecs::Classes::Computed(gpuParticleFieldClass, GpuParticleLayersProperty());
 			ecs::Classes::Property<&GpuParticleField::RequestedCount>(
 				gpuParticleFieldClass, "RequestedCount"

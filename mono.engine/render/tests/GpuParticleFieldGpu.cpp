@@ -183,10 +183,11 @@ TEST_CASE(
 	CHECK(ChangedBytes(empty, redImage) > 64);
 	CHECK(RedDominantPixels(redImage, empty) > 64);
 	const PixelBounds condensation = RedParticleBounds(redImage, empty);
-	// The red-only capture isolates the condensation lanes. Its tall, narrow
-	// envelope proves reset placed them around the height-scaled funnel wall,
-	// rather than across the full storm influence radius.
-	CHECK(condensation.Height() > target.Height / 3);
+	// The red-only capture isolates the condensation lanes. Its tall, bounded
+	// envelope proves parcels recycle below the zero-lift ceiling instead of
+	// accumulating into an upper rectangular cap.
+	CHECK(condensation.Height() > target.Height / 4);
+	CHECK(condensation.Height() < target.Height * 3 / 8);
 	CHECK(condensation.Width() < target.Width / 3);
 
 	auto shortFunnel = FieldView(target, 262'144, 17);

@@ -30,12 +30,10 @@ namespace engine::scene {
 	struct GpuParticleField {
 		// Whether the renderer emits this field.
 		bool Enabled = true;
-		// Whether the renderer builds the storm-cloud octree beside this field.
-		bool CloudDensity = true;
 		// Visible layers as a bit mask of GpuParticleLayer values.
 		uint8_t Layers = GPU_PARTICLE_ALL_LAYERS;
 		// Reserved for future field settings and preserved in the saved record.
-		uint8_t Reserved = 0;
+		uint16_t Reserved = 0;
 		// Exact supported count, normalized to the nearest safe preset by the renderer.
 		uint32_t RequestedCount = 1'048'576;
 		// Seed used to place particles deterministically when the field resets.
