@@ -8,7 +8,7 @@
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Part.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
