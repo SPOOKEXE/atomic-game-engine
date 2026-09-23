@@ -1229,7 +1229,7 @@ local function updateLayers()
 		local enabled = layerActive(activeLayers, bit)
 		control.BackgroundColor3 = if enabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
 	end
-	setEmitterLayer(condensationEmitters, layerActive(activeLayers, 1), 1)
+	setEmitterLayer(condensationEmitters, layerActive(activeLayers, 1) and activeLayers ~= 1, 1)
 	setEmitterLayer(rainEmitters, layerActive(activeLayers, 2), rainDensity)
 	setEmitterLayer(debrisEmitters, layerActive(activeLayers, 4), 1)
 	visualField.RainAlpha = 0.10 * rainOpacity * rainDensity
