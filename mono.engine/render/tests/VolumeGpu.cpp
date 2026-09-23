@@ -306,7 +306,10 @@ TEST_CASE(
 	instance.Source = 1;
 	instance.Mesh = receiver;
 	instance.Frame.Position = {0.0f, 0.0f, -6.0f};
-	instance.HalfExtent = {4.0f, 4.0f, 0.01f};
+	// Leave a broad sky border. The first version filled the 90-degree view with
+	// this receiver, which reduced the generated environment to a few edge
+	// pixels and made its cloud and shaft captures meaningless.
+	instance.HalfExtent = {2.0f, 2.0f, 0.01f};
 	instance.Tint = {0.65f, 0.65f, 0.65f};
 	instance.CastShadow = false;
 
@@ -329,9 +332,10 @@ TEST_CASE(
 	OverlayImage overlay;
 
 	const FrameResult combinedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	// Compute handlers do not open a render pass, so `FrameResult::Ran` has no
+	// entry for them. Their two real environment dispatches are the execution
+	// evidence, while the captured images prove their pixels reached the view.
 	CHECK(combinedFrame.ComputeDispatches >= 2);
-	CHECK(combinedFrame.Ran(core::Name("skybox-compute")));
-	CHECK(combinedFrame.Ran(core::Name("clouds-compute")));
 	CHECK(combinedFrame.Ran(core::Name("fog")));
 	CHECK(combinedFrame.Ran(core::Name("god-rays")));
 	const CapturedImage combined = CaptureResource(
