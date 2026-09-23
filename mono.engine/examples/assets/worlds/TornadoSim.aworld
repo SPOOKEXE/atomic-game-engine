@@ -124,11 +124,11 @@ end
 
 -- A computed sky and a dark cloud deck keep the pale funnel visible. A black
 -- clear colour removes its silhouette before any particle system can help.
-Lighting.ClockTime = 17.7
+Lighting.ClockTime = 20.4
 Lighting.GeographicLatitude = 35
-Lighting.Brightness = 1.15
-Lighting.Ambient = Color3.fromRGB(18, 23, 29)
-Lighting.OutdoorAmbient = Color3.fromRGB(37, 47, 55)
+Lighting.Brightness = 0.38
+Lighting.Ambient = Color3.fromRGB(9, 13, 18)
+Lighting.OutdoorAmbient = Color3.fromRGB(18, 25, 29)
 Lighting.BloomThreshold = 1.1
 Lighting.BloomIntensity = 0.45
 Lighting.BloomRadius = 6
@@ -138,8 +138,8 @@ Lighting.GodRayRadius = 46
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Tornado Storm Sky"
-sky.Shader = Enum.SkyboxComputeShader.Sunset
-sky.SunSize = 0.026
+sky.Shader = Enum.SkyboxComputeShader.Night
+sky.SunSize = 0.01
 sky.Seed = 401
 sky.Parent = Lighting
 
@@ -170,7 +170,27 @@ clouds.Steps = 32
 clouds.Seed = 957
 clouds.Parent = Lighting
 
-local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -1.5, 80), Color3.fromRGB(38, 54, 35))
+-- The original sparse world rows remain for simulation compatibility. Hide
+-- their placeholder surfaces before constructing the visible scene, otherwise
+-- the coplanar white terrain intermittently wins the depth test.
+local authoredWorld = Workspace:FindFirstChild("TornadoSimWorld")
+if authoredWorld then
+	local placeholderTerrain = authoredWorld:FindFirstChild("Terrain")
+	if placeholderTerrain then placeholderTerrain.Visible = false end
+	local placeholderTrees = authoredWorld:FindFirstChild("TreeLine")
+	if placeholderTrees then placeholderTrees.Visible = false end
+	local placeholderSign = authoredWorld:FindFirstChild("RoadSign")
+	if placeholderSign then placeholderSign.Visible = false end
+	local placeholderVehicle = authoredWorld:FindFirstChild("ChaseVehicle")
+	if placeholderVehicle then placeholderVehicle.Visible = false end
+	for _, name in ipairs({"Farmhouse", "Barn", "Workshop"}) do
+		local structure = authoredWorld:FindFirstChild(name)
+		local roof = if structure then structure:FindFirstChild("RoofPanel") else nil
+		if roof then roof.Visible = false end
+	end
+end
+
+local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -2.0, 80), Color3.fromRGB(32, 47, 31))
 local road = makePart("Storm Chase Road", Vector3.new(18, 0.18, 650), Vector3.new(-82, 0.1, 84), Color3.fromRGB(43, 43, 41))
 for index = -14, 14 do
 	makePart("Road Mark " .. index, Vector3.new(0.55, 0.04, 9), Vector3.new(-82, 0.22, 84 + index * 20), Color3.fromRGB(193, 169, 99))
