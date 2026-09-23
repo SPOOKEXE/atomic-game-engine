@@ -1724,6 +1724,7 @@ declare extern type MeshPart extends BasePart with
 	write EmissiveMap: string?
 	read HeightMap: string
 	write HeightMap: string?
+	IndexOfRefraction: number
 	Lod1Distance: number
 	read Lod1MeshId: string
 	write Lod1MeshId: string?
@@ -1758,6 +1759,7 @@ declare extern type MeshPart extends BasePart with
 	SpecularFactor: number
 	read TextureID: string
 	write TextureID: string?
+	Thickness: number
 	TransmissionFactor: number
 	read TrianglesCount: number
 end

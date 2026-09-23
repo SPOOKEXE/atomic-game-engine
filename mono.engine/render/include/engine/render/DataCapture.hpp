@@ -102,7 +102,7 @@ namespace engine::render {
 		PbrMaterial,
 		PbrEmissive,
 		// Scalar authored factors. The rendered RGB capture uses the engine's
-		// screen-space refraction model when transmission is nonzero.
+		// authored IOR and thickness with a bounded offscreen guard raster when transmission is nonzero.
 		PbrSpecular,
 		PbrTransmission,
 		// Perspective-correct interpolated authored mesh texcoords at visible opaque pixels.

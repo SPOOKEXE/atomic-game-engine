@@ -174,6 +174,8 @@ namespace engine::render {
 		// its layout. Channel selectors are roughness, occlusion, height,
 		// metalness, with R=0 through A=3.
 		glm::vec4 PackedPbrChannels{0.0f, 0.0f, 0.0f, 0.0f};
+		// x: dielectric IOR, y: surface thickness in metres.
+		glm::vec4 Transmission{1.5f, 0.0f, 0.0f, 0.0f};
 	};
 
 	struct ShadowUniforms {

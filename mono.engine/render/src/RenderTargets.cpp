@@ -435,7 +435,9 @@ namespace engine::render {
 			  slot.SecondSurfaceValidity,
 			  slot.Occlusion,
 			  slot.Lit,
-			  slot.SkyLit}) {
+			  slot.SkyLit,
+			  slot.RefractionGuard,
+			  slot.RefractionGuardDepth}) {
 			if (texture != nullptr) {
 				gpu::ReleaseTexture(Device, texture);
 			}
@@ -444,6 +446,40 @@ namespace engine::render {
 		// the next allocation.
 		slot.OcclusionProvenance = {};
 		slot = {};
+	}
+
+	bool Renderer::Impl::EnsureRefractionGuard(PbrSlot &slot, uint32_t width, uint32_t height) {
+		if (slot.RefractionGuard != nullptr && slot.RefractionGuardWidth == width &&
+			slot.RefractionGuardHeight == height)
+			return true;
+		if (slot.RefractionGuard != nullptr) gpu::ReleaseTexture(Device, slot.RefractionGuard);
+		if (slot.RefractionGuardDepth != nullptr) gpu::ReleaseTexture(Device, slot.RefractionGuardDepth);
+		slot.RefractionGuard = nullptr;
+		slot.RefractionGuardDepth = nullptr;
+		slot.RefractionGuardWidth = slot.RefractionGuardHeight = 0;
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+		info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		info.width = width;
+		info.height = height;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+		slot.RefractionGuard = gpu::CreateTexture(Device, &info);
+		info.format = DepthFormat;
+		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		slot.RefractionGuardDepth = gpu::CreateTexture(Device, &info);
+		if (slot.RefractionGuard == nullptr || slot.RefractionGuardDepth == nullptr) {
+			if (slot.RefractionGuard != nullptr) gpu::ReleaseTexture(Device, slot.RefractionGuard);
+			if (slot.RefractionGuardDepth != nullptr) gpu::ReleaseTexture(Device, slot.RefractionGuardDepth);
+			slot.RefractionGuard = nullptr;
+			slot.RefractionGuardDepth = nullptr;
+			return false;
+		}
+		slot.RefractionGuardWidth = width;
+		slot.RefractionGuardHeight = height;
+		return true;
 	}
 
 	bool Renderer::Impl::EnsurePbr(size_t index, const PbrDimensions &dimensions) {

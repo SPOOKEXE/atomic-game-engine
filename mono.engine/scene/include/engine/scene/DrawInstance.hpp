@@ -112,6 +112,8 @@ namespace engine::scene {
 		uint8_t MetalnessChannel = 255;
 		float SpecularFactor = 1.0f;
 		float TransmissionFactor = 0.0f;
+		float IndexOfRefraction = 1.5f;
+		float Thickness = 0.0f;
 		//@}
 
 		// Which shader draws this instance, or invalid for the engine's own.
@@ -489,6 +491,8 @@ namespace engine::scene {
 			instance.MetalnessChannel = appearance->MetalnessChannel;
 			instance.SpecularFactor = appearance->SpecularFactor;
 			instance.TransmissionFactor = appearance->TransmissionFactor;
+			instance.IndexOfRefraction = appearance->IndexOfRefraction;
+			instance.Thickness = appearance->Thickness;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

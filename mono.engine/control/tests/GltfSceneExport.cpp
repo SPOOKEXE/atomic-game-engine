@@ -109,6 +109,11 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 			}
 		);
 		Identify(store, part, "export/cube");
+		auto appearance = *store.Get<engine::scene::SurfaceAppearance>(part);
+		appearance.TransmissionFactor = 0.7f;
+		appearance.IndexOfRefraction = 2.0f;
+		appearance.Thickness = 0.5f;
+		store.Set(part, appearance);
 		auto visual = *store.Get<engine::scene::Visual>(part);
 		visual.Transparency = 0.5f;
 		store.Set(part, visual);
@@ -140,6 +145,10 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 	const json document = GltfJson(bytes);
 	CHECK(document.at("materials").at(0).at("alphaMode") == "BLEND");
 	CHECK(document.at("materials").at(0).at("pbrMetallicRoughness").at("baseColorFactor").at(3) == 0.5f);
+	const auto &extensions = document.at("materials").at(0).at("extensions");
+	CHECK(extensions.at("KHR_materials_transmission").at("transmissionFactor") == 0.7f);
+	CHECK(extensions.at("KHR_materials_ior").at("ior") == 2.0f);
+	CHECK(extensions.at("KHR_materials_volume").at("thicknessFactor") == 0.5f);
 	CHECK(engine::assets::Hasher::Of(bytes).ToHex() == reply.at("hash").get<std::string>());
 }
 

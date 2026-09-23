@@ -691,10 +691,17 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	CHECK(Read<int32_t>(store, part, "PackedRoughnessChannel") == 2);
 	REQUIRE(Write(store, part, "SpecularFactor", 0.35f));
 	REQUIRE(Write(store, part, "TransmissionFactor", 0.2f));
+	REQUIRE(Write(store, part, "IndexOfRefraction", 2.4f));
+	REQUIRE(Write(store, part, "Thickness", 1.25f));
 	CHECK(Read<float>(store, part, "SpecularFactor") == 0.35f);
 	CHECK(Read<float>(store, part, "TransmissionFactor") == 0.2f);
+	CHECK(Read<float>(store, part, "IndexOfRefraction") == 2.4f);
+	CHECK(Read<float>(store, part, "Thickness") == 1.25f);
 	CHECK_FALSE(Write(store, part, "SpecularFactor", 1.1f));
 	CHECK_FALSE(Write(store, part, "TransmissionFactor", -0.1f));
+	CHECK_FALSE(Write(store, part, "IndexOfRefraction", 0.99f));
+	CHECK_FALSE(Write(store, part, "IndexOfRefraction", 3.01f));
+	CHECK_FALSE(Write(store, part, "Thickness", -0.1f));
 
 	// **One spelling and not two.** `Mesh` and `ColorMap` were aliases of these
 	// on `BasePart` and are gone: two names for one field is the duplication

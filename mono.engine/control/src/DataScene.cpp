@@ -764,6 +764,42 @@ namespace engine::control {
 				if (node.Material.MetallicRoughnessTexture)
 					pbr["metallicRoughnessTexture"] = textureRef(node.Material.MetallicRoughnessTexture);
 				json materialRecord{{"pbrMetallicRoughness", std::move(pbr)}};
+				if (node.Material.TransmissionFactor > 0.0f) {
+					materialRecord["extensions"]["KHR_materials_transmission"] = {
+						{"transmissionFactor", node.Material.TransmissionFactor}
+					};
+					if (!document.contains("extensionsUsed")) document["extensionsUsed"] = json::array();
+					if (std::find(
+							document["extensionsUsed"].begin(),
+							document["extensionsUsed"].end(),
+							"KHR_materials_transmission"
+						) == document["extensionsUsed"].end())
+						document["extensionsUsed"].push_back("KHR_materials_transmission");
+				}
+				if (node.Material.IndexOfRefraction != 1.5f) {
+					materialRecord["extensions"]["KHR_materials_ior"] = {
+						{"ior", node.Material.IndexOfRefraction}
+					};
+					if (!document.contains("extensionsUsed")) document["extensionsUsed"] = json::array();
+					if (std::find(
+							document["extensionsUsed"].begin(),
+							document["extensionsUsed"].end(),
+							"KHR_materials_ior"
+						) == document["extensionsUsed"].end())
+						document["extensionsUsed"].push_back("KHR_materials_ior");
+				}
+				if (node.Material.Thickness > 0.0f) {
+					materialRecord["extensions"]["KHR_materials_volume"] = {
+						{"thicknessFactor", node.Material.Thickness}
+					};
+					if (!document.contains("extensionsUsed")) document["extensionsUsed"] = json::array();
+					if (std::find(
+							document["extensionsUsed"].begin(),
+							document["extensionsUsed"].end(),
+							"KHR_materials_volume"
+						) == document["extensionsUsed"].end())
+						document["extensionsUsed"].push_back("KHR_materials_volume");
+				}
 				switch (node.Material.AlphaMode) {
 				case script::GltfExportAlphaMode::Opaque:
 					materialRecord["alphaMode"] = "OPAQUE";

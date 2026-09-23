@@ -15,7 +15,9 @@ namespace engine::assets {
 			(data.MetalnessChannel > 3 && data.MetalnessChannel != 255) ||
 			!std::isfinite(data.SpecularFactor) || data.SpecularFactor < 0.0f || data.SpecularFactor > 1.0f ||
 			!std::isfinite(data.TransmissionFactor) || data.TransmissionFactor < 0.0f ||
-			data.TransmissionFactor > 1.0f) {
+			data.TransmissionFactor > 1.0f || !std::isfinite(data.IndexOfRefraction) ||
+			data.IndexOfRefraction < 1.0f || data.IndexOfRefraction > 3.0f ||
+			!std::isfinite(data.Thickness) || data.Thickness < 0.0f || data.Thickness > 1000.0f) {
 			return false;
 		}
 
@@ -41,6 +43,8 @@ namespace engine::assets {
 		writer.WriteUInt8(data.MetalnessChannel);
 		writer.WriteFloat(data.SpecularFactor);
 		writer.WriteFloat(data.TransmissionFactor);
+		writer.WriteFloat(data.IndexOfRefraction);
+		writer.WriteFloat(data.Thickness);
 		return true;
 	}
 
@@ -80,6 +84,7 @@ namespace engine::assets {
 		std::string_view packedPbr;
 		uint8_t roughnessChannel = 255, occlusionChannel = 255, heightChannel = 255, metalnessChannel = 255;
 		float specularFactor = 1.0f, transmissionFactor = 0.0f;
+		float indexOfRefraction = 1.5f, thickness = 0.0f;
 		if (version >= 2) {
 			normal = reader.ReadString();
 			roughness = reader.ReadString();
@@ -119,13 +124,19 @@ namespace engine::assets {
 				specularFactor = reader.ReadFloat();
 				transmissionFactor = reader.ReadFloat();
 			}
+			if (version >= 7) {
+				indexOfRefraction = reader.ReadFloat();
+				thickness = reader.ReadFloat();
+			}
 			if (reader.Failed() || packedPbr.size() > MAXIMUM_NAME ||
 				(roughnessChannel > 3 && roughnessChannel != 255) ||
 				(occlusionChannel > 3 && occlusionChannel != 255) ||
 				(heightChannel > 3 && heightChannel != 255) ||
 				(metalnessChannel > 3 && metalnessChannel != 255) || !std::isfinite(specularFactor) ||
 				specularFactor < 0.0f || specularFactor > 1.0f || !std::isfinite(transmissionFactor) ||
-				transmissionFactor < 0.0f || transmissionFactor > 1.0f) {
+				transmissionFactor < 0.0f || transmissionFactor > 1.0f || !std::isfinite(indexOfRefraction) ||
+				indexOfRefraction < 1.0f || indexOfRefraction > 3.0f || !std::isfinite(thickness) ||
+				thickness < 0.0f || thickness > 1000.0f) {
 				return false;
 			}
 		}
@@ -144,6 +155,8 @@ namespace engine::assets {
 		out.MetalnessChannel = metalnessChannel;
 		out.SpecularFactor = specularFactor;
 		out.TransmissionFactor = transmissionFactor;
+		out.IndexOfRefraction = indexOfRefraction;
+		out.Thickness = thickness;
 		return true;
 	}
 }

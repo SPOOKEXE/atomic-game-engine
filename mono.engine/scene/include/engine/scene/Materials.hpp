@@ -137,6 +137,8 @@ namespace engine::scene {
 		float SpecularFactor = 1.0f;
 		// Authored transmission amount, from 0 to 1.
 		float TransmissionFactor = 0.0f;
+		float IndexOfRefraction = 1.5f;
+		float Thickness = 0.0f;
 
 		// Whether this names anything at all.
 		//

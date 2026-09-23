@@ -571,6 +571,8 @@ namespace client {
 					.MetalnessChannel = material.MetalnessChannel,
 					.SpecularFactor = material.SpecularFactor,
 					.TransmissionFactor = material.TransmissionFactor,
+					.IndexOfRefraction = material.IndexOfRefraction,
+					.Thickness = material.Thickness,
 				};
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and

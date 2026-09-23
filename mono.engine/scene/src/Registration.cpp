@@ -1037,6 +1037,8 @@ namespace engine::scene {
 				writer.WriteUInt8(appearances[index].MetalnessChannel);
 				writer.WriteFloat(appearances[index].SpecularFactor);
 				writer.WriteFloat(appearances[index].TransmissionFactor);
+				writer.WriteFloat(appearances[index].IndexOfRefraction);
+				writer.WriteFloat(appearances[index].Thickness);
 			}
 		}
 
@@ -1119,6 +1121,8 @@ namespace engine::scene {
 				appearances[index].MetalnessChannel = channel();
 				appearances[index].SpecularFactor = reader.ReadFloat();
 				appearances[index].TransmissionFactor = reader.ReadFloat();
+				appearances[index].IndexOfRefraction = reader.ReadFloat();
+				appearances[index].Thickness = reader.ReadFloat();
 			}
 		}
 

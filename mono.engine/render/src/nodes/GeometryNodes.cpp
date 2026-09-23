@@ -366,6 +366,12 @@ namespace engine::render {
 					State->SlotTransmissionFactor[entry.Instance]
 				};
 				material.PackedPbrChannels = State->SlotPackedPbrChannels[entry.Instance];
+				material.Transmission = glm::vec4{
+					State->SlotIndexOfRefraction[entry.Instance],
+					State->SlotThickness[entry.Instance],
+					0.0f,
+					0.0f
+				};
 				const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
 				material.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				material.SeamPlane = State->SlotSeam[entry.Instance];
@@ -896,7 +902,7 @@ namespace engine::render {
 						phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
 						Impl::PipelineFamily::Other
 					);
-					SDL_BindGPUFragmentSamplers(pass, 12, bounds, 2);
+					SDL_BindGPUFragmentSamplers(pass, 13, bounds, 2);
 					State->BindInstanceBuffers(pass);
 					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -1124,6 +1130,67 @@ namespace engine::render {
 				target = graphTexture(resource, context, true);
 				if (target.IsValid()) {
 					break;
+				}
+			}
+			State->RefractionGuardTexture = nullptr;
+			bool hasTransmission = false;
+			for (uint32_t index = 0; index < plainTransparent; ++index) {
+				const uint32_t slot = sceneCount + static_cast<uint32_t>(opaqueCount) + index;
+				if (slot < State->SlotTransmissionFactor.size() &&
+					State->SlotTransmissionFactor[slot] > 0.00001f) {
+					hasTransmission = true;
+					break;
+				}
+			}
+			// Source slots contain every opaque row before camera culling, so this
+			// wider raster can see geometry the presentation frustum rejected.
+			const uint32_t guardWidth = sceneWidth + sceneWidth / 2;
+			const uint32_t guardHeight = sceneHeight + sceneHeight / 2;
+			if (hasTransmission && recording.Pbr != nullptr && recording.SceneOpaque > 0 &&
+				guardWidth <= 4096 && guardHeight <= 4096 && State->HdrOpaquePipeline != nullptr &&
+				State->EnsureRefractionGuard(*recording.Pbr, guardWidth, guardHeight)) {
+				const SDL_GPUViewport guardViewport{
+					0.0f, 0.0f, static_cast<float>(guardWidth), static_cast<float>(guardHeight), 0.0f, 1.0f
+				};
+				SDL_GPURenderPass *guard = recording.OpenScenePass(
+					recording.Pbr->RefractionGuard,
+					recording.Pbr->RefractionGuardDepth,
+					false,
+					&guardViewport,
+					lightUniforms,
+					nullptr,
+					WorldColourTarget::Hdr
+				);
+				if (guard != nullptr) {
+					glm::mat4 guardProjection = matrices.Projection;
+					guardProjection[0][0] *= static_cast<float>(sceneWidth) / guardWidth;
+					guardProjection[1][1] *= static_cast<float>(sceneHeight) / guardHeight;
+					const FrameUniforms guardFrame{
+						guardProjection * matrices.View, lightViewProjection, glm::mat4{1.0f}
+					};
+					SDL_PushGPUVertexUniformData(command, 0, &guardFrame, sizeof(guardFrame));
+					const LightingUniforms guardLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+					result.DrawCalls += State->DrawSlots(
+						command,
+						guard,
+						0,
+						static_cast<uint32_t>(recording.SceneOpaque),
+						&guardLighting,
+						State->ShadowTexture,
+						State->ShadowSampler,
+						nullptr,
+						State->SurfaceSampler,
+						0,
+						result.Triangles,
+						nullptr,
+						Impl::SlotSelection::All,
+						Impl::VisibilityPass::Secondary
+					);
+					SDL_EndGPURenderPass(guard);
+					State->RefractionGuardTexture = recording.Pbr->RefractionGuard;
+					core::Metrics::Count(
+						"render.refraction_guard.pixels", uint64_t(guardWidth) * guardHeight
+					);
 				}
 			}
 			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
@@ -1445,6 +1512,7 @@ namespace engine::render {
 				}
 			}
 			State->RefractionTexture = nullptr;
+			State->RefractionGuardTexture = nullptr;
 			State->RefractionSampler = nullptr;
 			return true;
 		});

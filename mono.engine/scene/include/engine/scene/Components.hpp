@@ -951,6 +951,8 @@ namespace engine::scene {
 		uint8_t MetalnessChannel = 255;
 		float SpecularFactor = 1.0f;
 		float TransmissionFactor = 0.0f;
+		float IndexOfRefraction = 1.5f;
+		float Thickness = 0.0f;
 		//@}
 
 		// Which shader this surface is drawn with, or invalid for the engine's.

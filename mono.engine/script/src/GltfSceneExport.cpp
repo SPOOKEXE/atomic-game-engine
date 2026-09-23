@@ -489,6 +489,9 @@ namespace engine::script {
 				return index;
 			};
 			if (surface != nullptr) {
+				material.TransmissionFactor = surface->TransmissionFactor;
+				material.IndexOfRefraction = surface->IndexOfRefraction;
+				material.Thickness = surface->Thickness;
 				material.Pixelated = surface->Resample == scene::SurfaceResampleMode::Pixelated;
 				material.BaseColour.R *= surface->Colour.R;
 				material.BaseColour.G *= surface->Colour.G;

@@ -150,6 +150,7 @@ namespace engine::scene {
 			b = MixSignature(b, Pair(instance.EmissiveMap.Id(), instance.Shader.Id()));
 			c = MixSignature(c, Pair(instance.MetalnessMap.Id(), BitsOf(instance.EmissiveStrength)));
 			d = MixSignature(d, Pair(BitsOf(instance.SpecularFactor), BitsOf(instance.TransmissionFactor)));
+			d = MixSignature(d, Pair(BitsOf(instance.IndexOfRefraction), BitsOf(instance.Thickness)));
 			d = MixSignature(d, Pair(instance.SkinFirst, instance.SkinCount));
 			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
 				a = MixSignature(a, Pair(instance.LodMeshes[level].Id(), BitsOf(instance.LodRatios[level])));

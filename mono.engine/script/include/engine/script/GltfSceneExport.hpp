@@ -86,6 +86,9 @@ namespace engine::script {
 		float RoughnessFactor = 0.65f;
 		// Metalness factor.
 		float MetalnessFactor = 0.0f;
+		float TransmissionFactor = 0.0f;
+		float IndexOfRefraction = 1.5f;
+		float Thickness = 0.0f;
 		// Emissive factor.
 		core::Color3 EmissiveFactor{0.0f, 0.0f, 0.0f};
 		// Whether texture sampling requests nearest-neighbour filtering.

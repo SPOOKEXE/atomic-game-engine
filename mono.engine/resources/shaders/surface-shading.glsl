@@ -38,6 +38,9 @@ layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
 // different texture from the active colour target, so transmission never reads
 // and writes the same image in one render pass.
 layout(set = 2, binding = 11) uniform sampler2D refractionImage;
+// Wider opaque raster from this camera. Its central rectangle matches the
+// presented view and its border contains geometry outside that view.
+layout(set = 2, binding = 12) uniform sampler2D refractionGuardImage;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -117,6 +120,8 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
 	vec4 PackedPbrChannels;
+	// x: authored IOR. y: authored surface thickness in metres.
+	vec4 Transmission;
 } lighting;
 
 float PackedPbrValue(vec2 uv, float channel) {
@@ -694,20 +699,40 @@ void shadeSurface() {
 		return;
 	}
 
-	// A thin screen-space dielectric has no authored thickness or IOR in the
-	// current material model. IOR 1.5 is the conventional glass baseline; the
-	// normal-derived displacement approximates its refracted ray against the
-	// completed opaque scene. The factor makes zero exactly match opaque shading.
-	const float fixedIor = 1.5;
-	const float refractionScale = (1.0 - 1.0 / fixedIor) * 0.08;
+	// The thin term preserves the original zero-thickness glass appearance.
+	// Physical thickness advances a Snell-refracted ray through the surface;
+	// screen derivatives turn that world displacement into local pixel motion.
+	float ior = clamp(lighting.Transmission.x, 1.0, 3.0);
+	float thickness = max(lighting.Transmission.y, 0.0);
+	float refractionScale = (1.0 - 1.0 / ior) * 0.08;
 	vec2 sourceSize = vec2(textureSize(refractionImage, 0));
 	vec2 screenUv = gl_FragCoord.xy / max(sourceSize, vec2(1.0));
-	vec2 refractedUv = clamp(
-		screenUv + normal.xy * (refractionScale * transmission / max(abs(normal.z), 0.2)),
-		vec2(0.0),
-		vec2(1.0)
-	);
-	vec3 refracted = texture(refractionImage, refractedUv).rgb;
+	vec2 offset = normal.xy * (refractionScale * transmission / max(abs(normal.z), 0.2));
+	if (thickness > 0.0) {
+		vec3 incident = normalize(inWorldPosition - lighting.Eye.xyz);
+		vec3 facing = dot(incident, normal) < 0.0 ? normal : -normal;
+		vec3 ray = refract(incident, facing, 1.0 / ior);
+		vec3 horizontal = dFdx(inWorldPosition);
+		vec3 vertical = dFdy(inWorldPosition);
+		vec2 pixels = vec2(
+			dot(ray, horizontal) / max(dot(horizontal, horizontal), 1e-6),
+			dot(ray, vertical) / max(dot(vertical, vertical), 1e-6)
+		) * thickness;
+		offset += pixels / max(sourceSize, vec2(1.0));
+	}
+	vec2 refractedUv = screenUv + offset;
+	vec3 refracted;
+	if (all(greaterThanEqual(refractedUv, vec2(0.0))) &&
+		all(lessThanEqual(refractedUv, vec2(1.0)))) {
+		refracted = texture(refractionImage, refractedUv).rgb;
+	} else if (lighting.Transmission.z > 0.5) {
+		vec2 guardSize = vec2(textureSize(refractionGuardImage, 0));
+		vec2 scale = sourceSize / max(guardSize, vec2(1.0));
+		vec2 guardUv = 0.5 * (vec2(1.0) - scale) + refractedUv * scale;
+		refracted = texture(refractionGuardImage, clamp(guardUv, vec2(0.0), vec2(1.0))).rgb;
+	} else {
+		refracted = texture(refractionImage, clamp(refractedUv, vec2(0.0), vec2(1.0))).rgb;
+	}
 	vec3 transmitted = mix(lit, refracted, transmission);
 	// Transmission is optical coverage, not a second alpha blend over the same
 	// source. The material owns this pixel, and the factor already selected the

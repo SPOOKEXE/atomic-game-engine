@@ -1461,6 +1461,7 @@ declare interface MeshPart extends BasePart {
 	CustomLodTargetQuadArea: number;
 	EmissiveMap: string;
 	HeightMap: string;
+	IndexOfRefraction: number;
 	Lod1Distance: number;
 	Lod1MeshId: string;
 	Lod1Ratio: number;
@@ -1484,6 +1485,7 @@ declare interface MeshPart extends BasePart {
 	RoughnessMap: string;
 	SpecularFactor: number;
 	TextureID: string;
+	Thickness: number;
 	TransmissionFactor: number;
 	readonly TrianglesCount: number;
 }

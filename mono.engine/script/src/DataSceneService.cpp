@@ -1940,6 +1940,10 @@ namespace engine::script {
 						{"base_color", Colour(appearance->Colour)},
 						{"emissive_tint", Colour(appearance->EmissiveTint)},
 						{"emissive_strength", Number(appearance->EmissiveStrength)},
+						{"specular_factor", Number(appearance->SpecularFactor)},
+						{"transmission_factor", Number(appearance->TransmissionFactor)},
+						{"index_of_refraction", Number(appearance->IndexOfRefraction)},
+						{"thickness_metres", Number(appearance->Thickness)},
 						{"alpha_cutoff", Number(appearance->AlphaCutoff)},
 					})
 				);

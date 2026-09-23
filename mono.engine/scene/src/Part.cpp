@@ -1895,7 +1895,7 @@ namespace engine::scene {
 			return property;
 		}
 
-		template <float SurfaceAppearance::*Factor>
+		template <float SurfaceAppearance::*Factor, int Minimum = 0, int Maximum = 1>
 		PropertyDescriptor BoundedSurfaceFactorProperty(const char *name) {
 			PropertyDescriptor property;
 			property.Name = core::Name(name);
@@ -1912,7 +1912,8 @@ namespace engine::scene {
 			};
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				const float factor = *static_cast<const float *>(value);
-				if (!std::isfinite(factor) || factor < 0.0f || factor > 1.0f) return false;
+				if (!std::isfinite(factor) || factor < float(Minimum) || factor > float(Maximum))
+					return false;
 				SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(instance);
 				if (appearance == nullptr) return false;
 				appearance->*Factor = factor;
@@ -3510,6 +3511,13 @@ namespace engine::scene {
 			ecs::Classes::Computed(
 				meshPart,
 				BoundedSurfaceFactorProperty<&SurfaceAppearance::TransmissionFactor>("TransmissionFactor")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				BoundedSurfaceFactorProperty<&SurfaceAppearance::IndexOfRefraction, 1, 3>("IndexOfRefraction")
+			);
+			ecs::Classes::Computed(
+				meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::Thickness, 0, 1000>("Thickness")
 			);
 			ecs::Classes::Computed(
 				meshPart,

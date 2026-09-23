@@ -652,6 +652,10 @@ namespace engine::render {
 			AmbientOcclusionProvenance OcclusionProvenance;
 			SDL_GPUTexture *Lit = nullptr;
 			SDL_GPUTexture *SkyLit = nullptr;
+			SDL_GPUTexture *RefractionGuard = nullptr;
+			SDL_GPUTexture *RefractionGuardDepth = nullptr;
+			uint32_t RefractionGuardWidth = 0;
+			uint32_t RefractionGuardHeight = 0;
 			PbrDimensions Dimensions;
 		};
 
@@ -665,6 +669,7 @@ namespace engine::render {
 		}
 
 		bool EnsurePbr(size_t slot, const PbrDimensions &dimensions);
+		bool EnsureRefractionGuard(PbrSlot &slot, uint32_t width, uint32_t height);
 		void ReleasePbr(PbrSlot &slot);
 
 		// Graph-owned history images hold each world's sky and cloud layers. This
@@ -977,6 +982,7 @@ namespace engine::render {
 		// this tail. Transmission samples that immutable copy, never the target it
 		// is blending into, which avoids a read/write feedback loop.
 		SDL_GPUTexture *RefractionTexture = nullptr;
+		SDL_GPUTexture *RefractionGuardTexture = nullptr;
 		SDL_GPUSampler *RefractionSampler = nullptr;
 
 		// The ground grid, drawn in the transparent pass. See `grid.frag`: a
@@ -1282,6 +1288,8 @@ namespace engine::render {
 		std::vector<glm::vec4> SlotPackedPbrChannels;
 		std::vector<float> SlotSpecularFactor;
 		std::vector<float> SlotTransmissionFactor;
+		std::vector<float> SlotIndexOfRefraction;
+		std::vector<float> SlotThickness;
 		std::vector<scene::SurfaceResampleMode> SlotResample;
 		// Whether a shadow run needs per-material alpha or seam state.
 		std::vector<uint8_t> SlotShadowDetail;
@@ -1503,8 +1511,10 @@ namespace engine::render {
 				   glm::all(glm::equal(SlotPackedPbrChannels[next], SlotPackedPbrChannels[slot])) &&
 				   SlotSpecularFactor[next] == SlotSpecularFactor[slot] &&
 				   SlotTransmissionFactor[next] == SlotTransmissionFactor[slot] &&
-				   SlotResample[next] == SlotResample[slot] && SlotShader[next] == SlotShader[slot] &&
-				   SlotSeam[next] == SlotSeam[slot] && SlotSeamFirst[next] == SlotSeamFirst[slot] &&
+				   SlotIndexOfRefraction[next] == SlotIndexOfRefraction[slot] &&
+				   SlotThickness[next] == SlotThickness[slot] && SlotResample[next] == SlotResample[slot] &&
+				   SlotShader[next] == SlotShader[slot] && SlotSeam[next] == SlotSeam[slot] &&
+				   SlotSeamFirst[next] == SlotSeamFirst[slot] &&
 				   SlotSeamSecond[next] == SlotSeamSecond[slot] &&
 				   SlotSeamCentre[next] == SlotSeamCentre[slot] && SlotSeamLight[next] == SlotSeamLight[slot];
 		}

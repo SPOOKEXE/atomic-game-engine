@@ -236,6 +236,8 @@ TEST_CASE("a material round-trips bounded scalar PBR factors", "[assets]") {
 	MaterialData written;
 	written.SpecularFactor = 0.35f;
 	written.TransmissionFactor = 0.2f;
+	written.IndexOfRefraction = 2.4f;
+	written.Thickness = 1.25f;
 	ByteWriter writer;
 	REQUIRE(Material::Write(writer, written));
 	ByteReader reader(writer.Bytes());
@@ -243,6 +245,8 @@ TEST_CASE("a material round-trips bounded scalar PBR factors", "[assets]") {
 	REQUIRE(Material::Read(reader, read));
 	CHECK(read.SpecularFactor == written.SpecularFactor);
 	CHECK(read.TransmissionFactor == written.TransmissionFactor);
+	CHECK(read.IndexOfRefraction == written.IndexOfRefraction);
+	CHECK(read.Thickness == written.Thickness);
 
 	for (const float invalid : {-0.1f, 1.1f, std::numeric_limits<float>::infinity()}) {
 		written.SpecularFactor = invalid;

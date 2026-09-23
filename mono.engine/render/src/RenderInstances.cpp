@@ -162,7 +162,7 @@ namespace engine::render {
 									   native == HdrOpaquePipeline || native == HdrTransparentPipeline ||
 									   native == ForwardPipeline || native == TransparentLayerPipeline ||
 									   native == TransparentLayerColourPipeline;
-			materialSamplerCount = authoredMaterial ? 10u : surfaceShader ? 12u : 11u;
+			materialSamplerCount = authoredMaterial ? 10u : surfaceShader ? 13u : 11u;
 			if (want != bound) {
 				SDL_BindGPUGraphicsPipeline(pass, want);
 				bound = want;
@@ -329,6 +329,8 @@ namespace engine::render {
 					{packedPbr != nullptr ? packedPbr : FallbackTexture, materialSampler},
 					{RefractionTexture != nullptr ? RefractionTexture : FallbackTexture,
 					 RefractionSampler != nullptr ? RefractionSampler : fallbackSampler},
+					{RefractionGuardTexture != nullptr ? RefractionGuardTexture : FallbackTexture,
+					 RefractionSampler != nullptr ? RefractionSampler : fallbackSampler},
 				};
 				SDL_BindGPUFragmentSamplers(pass, 0, samplers, materialSamplerCount);
 
@@ -365,6 +367,12 @@ namespace engine::render {
 					SlotTransmissionFactor[slot]
 				};
 				uniforms.PackedPbrChannels = SlotPackedPbrChannels[slot];
+				uniforms.Transmission = glm::vec4{
+					SlotIndexOfRefraction[slot],
+					SlotThickness[slot],
+					RefractionGuardTexture != nullptr ? 1.0f : 0.0f,
+					0.0f
+				};
 
 				// **The cell is per draw, not per instance**, which is the whole
 				// simplification: a sheet plays on the clock rather than on

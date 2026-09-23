@@ -109,6 +109,8 @@ namespace engine::scene {
 				appearance->MetalnessChannel = maps.MetalnessChannel;
 				appearance->SpecularFactor = maps.SpecularFactor;
 				appearance->TransmissionFactor = maps.TransmissionFactor;
+				appearance->IndexOfRefraction = maps.IndexOfRefraction;
+				appearance->Thickness = maps.Thickness;
 			}
 
 			// **From the material instance and not from the catalogue**, which
@@ -176,6 +178,8 @@ namespace engine::scene {
 				appearance->MetalnessChannel = 255;
 				appearance->SpecularFactor = 1.0f;
 				appearance->TransmissionFactor = 0.0f;
+				appearance->IndexOfRefraction = 1.5f;
+				appearance->Thickness = 0.0f;
 
 				// **And the shader with them**, for the same reason: a part
 				// whose material was deleted would otherwise go on being drawn
