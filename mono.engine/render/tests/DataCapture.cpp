@@ -469,6 +469,7 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 		.Pipeline = std::string(pipeline.Text()),
 		.CaptureNode = "data-capture",
 		.Channels = {"linear_depth", "ambient_occlusion", "pbr_material", "packed_gpu"},
+		.LocalLightIds = {},
 		.TemporalHistory = "preserve",
 		.PackedPlanes = {},
 	};
@@ -685,7 +686,6 @@ TEST_CASE(
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
-		.LocalLightIds = {},
 		.LocalLightIds = {"light/key", "light/fill"},
 	};
 	DataCaptureTicket ticket;
@@ -985,6 +985,7 @@ namespace {
 			.Pipeline = "pipeline",
 			.CaptureNode = "capture",
 			.Channels = {"rgb_linear_hdr"},
+			.LocalLightIds = {},
 			.TemporalHistory = "preserve",
 			.PackedPlanes = {},
 		};
@@ -1768,9 +1769,9 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 			 "part_ids",
 			 "second_surface_depth",
 			 "second_surface_validity"},
+		.LocalLightIds = {},
 		.TemporalHistory = "preserve",
 		.PackedPlanes = {},
-		.LocalLightIds = {},
 	};
 	uint64_t broadTicket = 0;
 	REQUIRE(first.Queue("data-world", broad, broadTicket, detail));

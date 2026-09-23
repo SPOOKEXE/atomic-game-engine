@@ -4940,6 +4940,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 		.Pipeline = stablePipeline,
 		.CaptureNode = "image-export",
 		.Channels = {"object_ids"},
+		.LocalLightIds = {},
 		.TemporalHistory = "preserve",
 		.IncludeSceneData = true,
 		.PackedPlanes = {},
