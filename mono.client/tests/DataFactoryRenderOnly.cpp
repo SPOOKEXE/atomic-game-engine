@@ -37,7 +37,29 @@ TEST_CASE("client render-only adapter holds one copied preserve request", "[clie
 	CHECK_FALSE(queue.Pending());
 	CHECK(queue.Request() == nullptr);
 	CHECK(queue.AllowsInteractiveGui());
+	CHECK_FALSE(queue.AllowsInteractiveGui(true));
 	CHECK(queue.ParticleDelta(0.25f) == 0.25f);
+}
+
+TEST_CASE(
+	"paused capture retains the existing interface without mutating its world", "[client][data-factory]"
+) {
+	engine::world::Universe worlds;
+	engine::world::WorldSettings settings;
+	settings.Name = engine::core::Name("paused-interface");
+	const engine::world::WorldId world = worlds.Create(settings);
+	client::data_factory_render_only::Queue queue;
+	engine::core::ByteWriter before;
+	REQUIRE(worlds.Save(before));
+	int interfaceMutations = 0;
+	if (queue.AllowsInteractiveGui(true)) {
+		++interfaceMutations;
+		(void)worlds.SetState(world, engine::world::WorldState::Suspended);
+	}
+	engine::core::ByteWriter after;
+	REQUIRE(worlds.Save(after));
+	CHECK(interfaceMutations == 0);
+	CHECK(std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin()));
 }
 
 TEST_CASE("client render-only adapter refuses policies the renderer cannot apply", "[client][data-factory]") {

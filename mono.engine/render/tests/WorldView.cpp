@@ -549,6 +549,36 @@ TEST_CASE(
 	measureVolumes();
 }
 
+TEST_CASE("frozen camera GUI collection preserves snapshot bytes", "[render][world-view]") {
+	RegisterViewClasses();
+	ecs::Store store("frozen-camera-gui");
+	const auto workspace = scene::InstallServices(store);
+	const auto part = PartAt(store, {0, 0, -10});
+	REQUIRE(store.SetParent(part, workspace));
+	const auto billboard = store.CreateInstance(gui::GuiClass("BillboardGui"), "WorldLabel");
+	REQUIRE(store.SetParent(billboard, part));
+	gui::Billboard label;
+	label.Size = {2, 0, 2, 0};
+	store.Set(billboard, label);
+	const auto panel = store.CreateInstance(gui::GuiClass("Frame"), "Panel");
+	REQUIRE(store.SetParent(panel, billboard));
+	gui::Element element;
+	element.Size = {1, 0, 1, 0};
+	store.Set(panel, element);
+	store.Set(panel, gui::Background{});
+	core::ByteWriter before;
+	REQUIRE(store.Save(before));
+	render::View eye;
+	render::WorldCameraFrame captured;
+	render::CollectWorldCamera(store, eye, {200, 200}, captured, true);
+	core::ByteWriter after;
+	REQUIRE(store.Save(after));
+	CHECK(before.Bytes().size() == after.Bytes().size());
+	CHECK(std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin()));
+	REQUIRE_FALSE(captured.SpatialCommands.Commands.empty());
+	CHECK(captured.SpatialCollectors.size() == 1);
+}
+
 TEST_CASE(
 	"light collection keeps an offscreen light that reaches visible receivers", "[render][world-view]"
 ) {

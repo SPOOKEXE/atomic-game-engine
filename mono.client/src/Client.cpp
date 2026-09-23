@@ -4309,7 +4309,7 @@ namespace client {
 			if (ReportedJoin) prepareEditable(Replicated);
 		}
 
-		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui()) {
+		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui(factoryPaused)) {
 			ENGINE_HEAP_SCOPE("client.interface");
 
 			engine::gui::CompileRequest request;

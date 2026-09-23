@@ -99,7 +99,7 @@ namespace client {
 			scene.View.CameraFrame = placement->Frame;
 			scene.View.Camera = *lens;
 			scene.View.Portals = scene.Frame->Portals;
-			engine::render::CollectWorldCamera(store, scene.View, extent, *scene.CameraLayers);
+			engine::render::CollectWorldCamera(store, scene.View, extent, *scene.CameraLayers, frozen);
 			if (!engine::render::BindWorldView(
 					*scene.Frame,
 					*scene.CameraLayers,

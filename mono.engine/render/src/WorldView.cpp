@@ -258,7 +258,7 @@ namespace engine::render {
 	}
 
 	void CollectWorldCamera(
-		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame
+		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame, bool frozen
 	) {
 		ENGINE_PROFILE_CAT("world camera collect", core::ProfileCategory::Render);
 		const core::CFrame &visibilityFrame = view.VisibilityCameraFrame();
@@ -287,17 +287,29 @@ namespace engine::render {
 		gui::Screen screen;
 		screen.Width = extent.X;
 		screen.Height = extent.Y;
-		ResolveSpatialCanvases(store, screen, &view.Camera, &visibilityFrame);
+		std::optional<ecs::Store> frozenGui;
+		ecs::Store *guiStore = &store;
+		if (frozen) {
+			frozenGui.emplace("capture-spatial-gui");
+			if (!store.CloneTo(*frozenGui)) {
+				frame.SpatialCommands = {};
+				frame.SpatialCollectors.clear();
+				return;
+			}
+			guiStore = &*frozenGui;
+		}
+		ResolveSpatialCanvases(*guiStore, screen, &view.Camera, &visibilityFrame);
 		gui::CompileRequest compile;
 		compile.Display = screen;
 		compile.Seconds = store.Time().Elapsed;
-		frame.Compiled.Rebuild(store, compile);
+		frame.Compiled.Rebuild(*guiStore, compile);
 		frame.SpatialCommands = frame.Compiled.Commands();
 		std::erase_if(frame.SpatialCommands.Commands, [&](const gui::DrawCommand &command) {
-			return store.Get<gui::SpatialCanvas>(command.Collector) == nullptr;
+			return guiStore->Get<gui::SpatialCanvas>(command.Collector) == nullptr;
 		});
 		frame.SpatialCollectors.clear();
-		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &canvas) {
+		guiStore->Each<const gui::SpatialCanvas>([&](ecs::Entity collector,
+													 const gui::SpatialCanvas &canvas) {
 			frame.SpatialCollectors.push_back({collector, canvas});
 		});
 	}

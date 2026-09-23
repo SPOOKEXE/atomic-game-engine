@@ -180,8 +180,14 @@ namespace engine::render {
 	// Uses the supplied camera and target size without replacing ActiveCamera.
 	// Only spatial collectors enter the packet; the player's screen UI has its
 	// own owner. The world must already have completed its presentation phase.
+	// A frozen capture compiles camera-dependent GUI in a copied store so its
+	// retained source snapshot stays byte-identical.
 	void CollectWorldCamera(
-		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame
+		ecs::Store &store,
+		const View &view,
+		const core::Vector2 &extent,
+		WorldCameraFrame &frame,
+		bool frozen = false
 	);
 
 }
