@@ -92,6 +92,20 @@
 			]
 		},
 		{
+			"name": "GpuParticleField",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.GpuParticleField"],
+			"properties": [
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
+				{"name": "Layers", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "RequestedCount", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]},
+				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.GpuParticleField"], "writes": ["scene.GpuParticleField"]}
+			]
+		},
+		{
 			"name": "BasePart",
 			"parent": "PVInstance",
 			"constructible": false,

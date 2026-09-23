@@ -1591,6 +1591,13 @@ declare extern type VectorField3D extends PVInstance with
 	Vector: Vector3
 end
 
+declare extern type GpuParticleField extends Instance with
+	Enabled: boolean
+	Layers: number
+	RequestedCount: number
+	Seed: number
+end
+
 declare extern type BasePart extends PVInstance with
 	AffordanceEnabled: boolean
 	read AffordanceId: string
@@ -3535,6 +3542,7 @@ type CreatableInstances = {
 	Folder: Folder,
 	VectorField2D: VectorField2D,
 	VectorField3D: VectorField3D,
+	GpuParticleField: GpuParticleField,
 	Part: Part,
 	SpawnLocation: SpawnLocation,
 	Model: Model,

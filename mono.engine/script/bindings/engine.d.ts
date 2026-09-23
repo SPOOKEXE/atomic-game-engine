@@ -1343,6 +1343,13 @@ declare interface VectorField3D extends PVInstance {
 	Vector: Vector3;
 }
 
+declare interface GpuParticleField extends Instance {
+	Enabled: boolean;
+	Layers: number;
+	RequestedCount: number;
+	Seed: number;
+}
+
 declare interface BasePart extends PVInstance {
 	AffordanceEnabled: boolean;
 	AffordanceId: string;
@@ -3077,6 +3084,7 @@ declare const Instance: {
 		(className: "Folder", parent?: Instance): Folder;
 		(className: "VectorField2D", parent?: Instance): VectorField2D;
 		(className: "VectorField3D", parent?: Instance): VectorField3D;
+		(className: "GpuParticleField", parent?: Instance): GpuParticleField;
 		(className: "Part", parent?: Instance): Part;
 		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
