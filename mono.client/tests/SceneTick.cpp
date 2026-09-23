@@ -26,6 +26,7 @@
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Storm.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/InterfacePass.hpp>
@@ -1376,6 +1377,8 @@ TEST_CASE(
 
 	universe.Enter(id, [&](Store &store, Scheduler &systems) {
 		client::InstallPresentation(store, systems);
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
 		REQUIRE(client::EnsureLocalPlayer(store) != engine::ecs::NULL_ENTITY);
 
 		engine::script::RuntimeLimits limits;
@@ -1442,6 +1445,8 @@ TEST_CASE(
 		store.DestroyInstance(woodenLink);
 		CHECK(FirstNamedDescendant(store, interaction, "WoodenSign") == engine::ecs::NULL_ENTITY);
 		CHECK(FirstNamedDescendant(store, interaction, "Wood Sign Wind Link") == engine::ecs::NULL_ENTITY);
+		systems.Tick(store, STEP);
+		CHECK(runtime->LastError().empty());
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"reset"}')
