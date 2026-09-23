@@ -74,6 +74,13 @@ namespace engine::render {
 			const DeviceCaps *caps = nullptr,
 			std::span<const core::Name> customKinds = {}
 		) {
+			// BackendTable registers the catalogue metadata that CompileSchedule uses
+			// to classify node queues.
+			NodeTable available = BackendTable([](const graph::RunContext &) { return true; });
+			for (const core::Name kind : customKinds) {
+				available.Set(kind, [](const graph::RunContext &) { return true; });
+			}
+
 			const graph::GraphStatus graphStatus = pipeline.Compile(compiled, offender);
 			if (graphStatus != graph::GraphStatus::Ok) {
 				stage = PipelineAdmissionStage::Graph;
@@ -120,10 +127,6 @@ namespace engine::render {
 				}
 			}
 
-			NodeTable available = BackendTable([](const graph::RunContext &) { return true; });
-			for (const core::Name kind : customKinds) {
-				available.Set(kind, [](const graph::RunContext &) { return true; });
-			}
 			const std::vector<core::Name> missing = available.Missing(pipeline);
 			if (!missing.empty()) {
 				stage = PipelineAdmissionStage::Backend;
