@@ -36,7 +36,10 @@ float FunnelRadiusAt(float height) {
 
 float ParticleKind(uint index) {
 	uint lane = index % 16u;
-	return float(lane < 7u ? 0u : (lane < 12u ? 1u : (lane < 14u ? 2u : 3u)));
+	// Nine lanes match the tornado-family proportion used by the reference
+	// simulation. More overlapping condensation billows keep the funnel from
+	// breaking into isolated puffs at the one-million-particle preset.
+	return float(lane < 9u ? 0u : (lane < 14u ? 1u : (lane < 15u ? 2u : 3u)));
 }
 
 void Reset(uint index, uint cycle) {
@@ -49,7 +52,7 @@ void Reset(uint index, uint cycle) {
 	float heightSample = Unit(index * 5u + randomCycle + 3u);
 	// Condensation is recycled before the anvil. Letting parcels hover at the
 	// zero-lift ceiling accumulates an opaque rectangular cap.
-	float height = kind < 0.5 ? 0.25 + pow(heightSample, 1.25) * field.radii.z * 0.74
+	float height = kind < 0.5 ? 0.25 + pow(heightSample, 1.25) * field.radii.z * 0.65
 		: (kind < 1.5 ? 80.0 + heightSample * max(field.radii.z - 80.0, 1.0)
 		: (kind < 2.5 ? 0.5 + pow(heightSample, 1.6) * 7.0
 					  : 0.5 + pow(heightSample, 1.3) * 14.0));
@@ -101,7 +104,7 @@ void main() {
 	velocityAge.w += field.radii.w;
 	if (length(positionKind.xyz - field.centreTime.xyz) > field.radii.y * 1.25 ||
 		positionKind.y < 0.0 || positionKind.y > field.radii.z ||
-		(positionKind.w < 0.5 && offset.y > field.radii.z * 0.80)) {
+		(positionKind.w < 0.5 && offset.y > field.radii.z * 0.70)) {
 		Reset(index, uint(max(velocityAge.w, 0.0) * 31.0) + 1u);
 	}
 	else {

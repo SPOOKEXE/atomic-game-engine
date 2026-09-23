@@ -37,7 +37,7 @@ void main() {
 		size *= mix(0.92, 1.42, pow(smoothstep(0.03, 0.68, height), 0.72)) * mix(0.76, 1.26, seed);
 		float luminance = dot(visual.rgb, vec3(0.2126, 0.7152, 0.0722));
 		visual.rgb = mix(visual.rgb, vec3(luminance), 0.78) * mix(0.78, 1.08, seed);
-		visual.a *= mix(0.00040, 0.00078, smoothstep(0.08, 0.64, height));
+		visual.a *= mix(0.00048, 0.00100, smoothstep(0.08, 0.64, height));
 	}
 	vec3 right = normalize(cross(frame.CameraUp.xyz, frame.CameraForward.xyz));
 	vec3 world = inPositionKind.xyz + right * corner.x * size + frame.CameraUp.xyz * corner.y * size;

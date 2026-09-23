@@ -1064,9 +1064,9 @@ if gpuField == nil then
 	local visualField = gpuField :: any
 	visualField.RequestedCount = 1048576
 	visualField.Seed = 123456789
-	visualField.CondensationColor = Color3.fromRGB(62, 59, 53)
-	visualField.CondensationAlpha = 0.09
-	visualField.CondensationSize = 9.5
+	visualField.CondensationColor = Color3.fromRGB(132, 135, 132)
+	visualField.CondensationAlpha = 0.12
+	visualField.CondensationSize = 11.5
 	visualField.RainColor = Color3.fromRGB(41, 51, 56)
 	visualField.RainAlpha = 0.10
 	visualField.RainSize = 0.30
