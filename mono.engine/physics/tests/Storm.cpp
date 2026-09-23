@@ -110,6 +110,56 @@ TEST_CASE("storm link break disables the real weld and rebuilds connectivity", "
 	CHECK_FALSE(store.Resource<engine::physics::PhysicsWorld>()->RigidlyConnected(first, second));
 }
 
+TEST_CASE("storm wind bends static vegetation and restores its authored pose", "[physics][storm]") {
+	engine::scene::RegisterSceneClasses();
+	Store store("physics.storm.vegetation");
+	engine::physics::PreparePhysicsWorld(store);
+	const auto storm = StormAtOrigin();
+	engine::physics::SetStorm(store, storm);
+
+	engine::scene::PartDesc staticDescription;
+	staticDescription.Frame = CFrame{{storm.State.Parameters.CoreRadius, 8.0f, 0.0f}};
+	const Entity tree = engine::scene::MakePart(store, staticDescription);
+	const CFrame rest = store.Get<engine::scene::Transform>(tree)->Frame;
+	store.Set(
+		tree,
+		engine::physics::StormVegetation{
+			.RestFrame = rest,
+			.MaximumBendRadians = .7f,
+			.ResponsePerSecond = 120.0f,
+			.WindSpeedForMaximumBend = 1.0f,
+		}
+	);
+
+	const Entity dynamic = DynamicPart(store, {storm.State.Parameters.CoreRadius, 8.0f, 1.0f}, 1.0f);
+	const CFrame dynamicRest = store.Get<engine::scene::Transform>(dynamic)->Frame;
+	store.Set(
+		dynamic,
+		engine::physics::StormVegetation{
+			.RestFrame = dynamicRest,
+			.MaximumBendRadians = .7f,
+			.ResponsePerSecond = 120.0f,
+			.WindSpeedForMaximumBend = 1.0f,
+		}
+	);
+
+	store.AdvanceTick(TICK);
+	engine::physics::ApplyStormForces(store);
+	const auto *vegetation = store.Get<engine::physics::StormVegetation>(tree);
+	REQUIRE(vegetation != nullptr);
+	CHECK(vegetation->BendRadians == Approx(.7f));
+	CHECK(store.Get<engine::scene::Transform>(tree)->Frame.VectorToWorldSpace(Vector3::YAxis).Y < .9f);
+	CHECK(store.Get<engine::scene::Transform>(dynamic)->Frame.FuzzyEq(dynamicRest, 1.0e-6f));
+
+	auto calm = *engine::physics::StormOf(store);
+	calm.State.Parameters.Energy = 0.0f;
+	engine::physics::SetStorm(store, calm);
+	store.AdvanceTick(TICK);
+	engine::physics::ApplyStormForces(store);
+	CHECK(store.Get<engine::physics::StormVegetation>(tree)->BendRadians == Approx(0.0f));
+	CHECK(store.Get<engine::scene::Transform>(tree)->Frame.FuzzyEq(rest, 1.0e-5f));
+}
+
 TEST_CASE("storm state and force outcomes are deterministic fixtures", "[physics][storm]") {
 	auto populate = [](Store &store) {
 		engine::scene::RegisterSceneClasses();

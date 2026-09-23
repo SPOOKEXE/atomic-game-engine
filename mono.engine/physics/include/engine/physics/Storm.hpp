@@ -4,6 +4,7 @@
 //
 // @tier L8 · shared
 
+#include <engine/core/types/CFrame.hpp>
 #include <engine/scene/Storm.hpp>
 
 #include <cstdint>
@@ -39,6 +40,19 @@ namespace engine::physics {
 		float MaterialStrength = 1.0f; // Material-specific strength multiplier.
 		bool Enabled = true;		   // Whether wind may fail this link.
 		uint8_t Reserved[3] = {};	   // Explicit initialized serialization padding.
+	};
+
+	// Fixed-base vegetation that flexes toward the sampled horizontal wind. RestFrame
+	// is authored state, while the current bend is replicated simulation state.
+	struct StormVegetation {
+		core::CFrame RestFrame;					// Unbent authored pose.
+		float BendRadians = 0.0f;				// Current lean from RestFrame.
+		float BendDirectionRadians = 0.0f;		// World-space horizontal lean direction.
+		float MaximumBendRadians = 0.82f;		// Largest permitted lean.
+		float ResponsePerSecond = 4.5f;			// Rate at which the stem follows wind.
+		float WindSpeedForMaximumBend = 115.0f; // Horizontal speed that reaches the limit.
+		bool Enabled = true;					// Whether this object flexes in storm wind.
+		uint8_t Reserved[3] = {};				// Explicit initialized serialization padding.
 	};
 
 	// Registers storm resource and response components under stable names.

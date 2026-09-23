@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 namespace engine::physics {
@@ -95,6 +96,62 @@ namespace engine::physics {
 			return link.Enabled && Finite(link.BreakForce) && Finite(link.MaterialStrength) &&
 				   link.BreakForce > 0.0f && link.MaterialStrength > 0.0f &&
 				   load > link.BreakForce * link.MaterialStrength;
+		}
+
+		float WrapRadians(float radians) {
+			constexpr float FULL_TURN = std::numbers::pi_v<float> * 2.0f;
+			while (radians > std::numbers::pi_v<float>)
+				radians -= FULL_TURN;
+			while (radians < -std::numbers::pi_v<float>)
+				radians += FULL_TURN;
+			return radians;
+		}
+
+		void BendVegetation(
+			ecs::Store &store, const scene::PreparedTornadoField &field, const Storm &storm, float delta
+		) {
+			store.Query<scene::Transform, StormVegetation>().Each([&](ecs::Entity entity,
+																	  scene::Transform &transform,
+																	  StormVegetation &vegetation) {
+				if (store.Has<scene::Simulated>(entity) || !vegetation.Enabled ||
+					!Finite(vegetation.MaximumBendRadians) || !Finite(vegetation.ResponsePerSecond) ||
+					!Finite(vegetation.WindSpeedForMaximumBend) || vegetation.MaximumBendRadians < 0.0f ||
+					vegetation.ResponsePerSecond <= 0.0f || vegetation.WindSpeedForMaximumBend <= 0.0f) {
+					return;
+				}
+
+				const scene::StormSample sample = scene::SampleTornadoField(
+					field, storm.State.Position, transform.Frame.Position, storm.State.ElapsedSeconds
+				);
+				core::Vector3 horizontal = sample.Velocity;
+				horizontal.Y = 0.0f;
+				const float horizontalSpeed = horizontal.Magnitude();
+				const float targetBend = std::min(
+					vegetation.MaximumBendRadians,
+					horizontalSpeed / vegetation.WindSpeedForMaximumBend * vegetation.MaximumBendRadians
+				);
+				const float follow = std::min(delta * vegetation.ResponsePerSecond, 1.0f);
+				vegetation.BendRadians += (targetBend - vegetation.BendRadians) * follow;
+
+				if (horizontalSpeed > 1.0e-5f) {
+					const float targetDirection = std::atan2(horizontal.Z, horizontal.X);
+					vegetation.BendDirectionRadians +=
+						WrapRadians(targetDirection - vegetation.BendDirectionRadians) * follow;
+				}
+
+				const core::Vector3 restUp =
+					vegetation.RestFrame.VectorToWorldSpace(core::Vector3::YAxis).Unit();
+				if (restUp == core::Vector3::Zero) return;
+				const core::Vector3 bendDirection{
+					std::cos(vegetation.BendDirectionRadians), 0.0f, std::sin(vegetation.BendDirectionRadians)
+				};
+				const core::Vector3 targetUp = (restUp * std::cos(vegetation.BendRadians) +
+												bendDirection * std::sin(vegetation.BendRadians))
+												   .Unit();
+				const core::CFrame correction = core::CFrame::FromRotationBetweenVectors(restUp, targetUp);
+				const core::CFrame rotation = correction * vegetation.RestFrame.RotationOnly();
+				transform.Frame = core::CFrame(transform.Frame.Position, rotation.Rotation());
+			});
 		}
 
 		void WriteStorms(core::ByteWriter &writer, const void *source, size_t count) {
@@ -183,6 +240,7 @@ namespace engine::physics {
 		ecs::Components::Register<Storm>(StormName().Text(), WriteStorms, ReadStorms);
 		ecs::Components::Register<StormResponse>("physics.StormResponse");
 		ecs::Components::Register<StormLink>("physics.StormLink");
+		ecs::Components::Register<StormVegetation>("physics.StormVegetation");
 	}
 
 	void SetStorm(ecs::Store &store, const Storm &storm) {
@@ -215,6 +273,7 @@ namespace engine::physics {
 		if (!(delta > 0.0f) || !Finite(delta)) return;
 		scene::AdvanceStorm(storm->State, delta);
 		const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
+		BendVegetation(store, field, *storm, delta);
 
 		store.Query<scene::WeldConstraint, const StormLink>().Each(
 			[&](ecs::Entity, scene::WeldConstraint &joint, const StormLink &link) {
