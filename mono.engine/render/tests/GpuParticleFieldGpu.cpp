@@ -185,6 +185,28 @@ TEST_CASE(
 	CHECK(condensation.Height() > target.Height / 3);
 	CHECK(condensation.Width() < target.Width / 3);
 
+	auto shortFunnel = FieldView(target, 262'144, 17);
+	shortFunnel.World = 72;
+	shortFunnel.WorldName = core::Name("gpu-particle-field-short-funnel-test");
+	shortFunnel.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
+	shortFunnel.GpuParticles->Field.CondensationColor = {1.0f, 0.0f, 0.0f};
+	shortFunnel.GpuParticles->Field.CondensationAlpha = 0.8f;
+	shortFunnel.GpuParticles->Field.CondensationSize = 3.0f;
+	shortFunnel.GpuParticles->Storm.TopHeight = 120.0f;
+	fixture.Render.Render(std::span(&shortFunnel, 1), overlay, nullptr, false);
+	const CapturedImage shortFunnelImage = CaptureResource(
+		fixture.Render,
+		core::Name("composed-image"),
+		shortFunnel.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Bgra8Unorm
+	);
+	// Condensation size and opacity are both normalized to storm height. A
+	// shorter analytical field must therefore produce a distinct captured puff
+	// envelope rather than reusing the tall funnel's fixed billboard pattern.
+	CHECK(ChangedBytes(redImage, shortFunnelImage) > 512);
+
 	auto smallerFainter = FieldView(target, 262'144, 17);
 	smallerFainter.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
 	smallerFainter.GpuParticles->Field.CondensationColor = {1.0f, 0.0f, 0.0f};

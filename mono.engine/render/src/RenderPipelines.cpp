@@ -712,7 +712,7 @@ namespace engine::render {
 		// deliberately has a separate vertex program: allocating the ordinary
 		// particle instance stream as well would double the 50M preset's memory.
 		auto *fieldVertex = LoadShader("gpu-particle-field.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-		auto *fieldFragment = LoadShader("particle.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		auto *fieldFragment = LoadShader("gpu-particle-field.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		if (fieldVertex != nullptr && fieldFragment != nullptr) {
 			const SDL_GPUVertexBufferDescription buffers[] = {
 				{0, sizeof(glm::vec4) * 2, SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},

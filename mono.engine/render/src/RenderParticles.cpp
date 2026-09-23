@@ -1720,6 +1720,8 @@ namespace engine::render {
 			glm::vec4 Control;
 		};
 		const scene::TornadoParameters parameters = scene::SanitizeTornadoParameters(source.Storm);
+		state.TopHeight = parameters.TopHeight;
+		state.CentreY = source.Centre.Y;
 		const FieldUniforms uniforms{
 			{source.Centre.X, source.Centre.Y, source.Centre.Z, source.Seconds},
 			{parameters.CoreRadius, parameters.InfluenceRadius, parameters.TopHeight, view.ParticleDelta},
@@ -1802,7 +1804,8 @@ namespace engine::render {
 			{right.X, right.Y, right.Z, 0.0f},
 			{up.X, up.Y, up.Z, 0.0f},
 			{forward.X, forward.Y, forward.Z, 0.0f},
-			{1.0f, 0.0f, 0.0f, 0.0f},
+			{ActiveGpuParticleFieldWorld->TopHeight, ActiveGpuParticleFieldWorld->CentreY,
+			 static_cast<float>(ActiveGpuParticleFieldWorld->Seed), 0.0f},
 			{ActiveGpuParticleFieldWorld->Field.CondensationColor.R,
 			 ActiveGpuParticleFieldWorld->Field.CondensationColor.G,
 			 ActiveGpuParticleFieldWorld->Field.CondensationColor.B,

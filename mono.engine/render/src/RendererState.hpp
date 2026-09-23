@@ -1563,6 +1563,8 @@ namespace engine::render {
 			uint32_t RequestedCount = 0;
 			uint32_t Seed = 0;
 			uint8_t Layers = 0;
+			float TopHeight = 1.0f;
+			float CentreY = 0.0f;
 			scene::GpuParticleField Field;
 			scene::WorldLighting Lighting;
 			bool ResetPending = true;
