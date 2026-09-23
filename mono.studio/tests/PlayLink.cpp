@@ -2642,7 +2642,13 @@ namespace {
 			);
 			if (AssertResolvedEye && Frame >= 27 && Frame <= 80) {
 				CHECK(visual == link.AuthorityWorld());
-				CHECK((view.CameraFrame.Position - storedEye.Position).Magnitude() < .001f);
+				// The replica eye is decoded from the position wire grid before its
+				// route is reconciled with the authority world.  A valid handoff may
+				// therefore differ by the documented wire-position bound.
+				CHECK(
+					(view.CameraFrame.Position - storedEye.Position).Magnitude() <=
+					WIRE_POSITION_TOLERANCE_METRES
+				);
 				CHECK(view.CameraFrame.LookVector().Dot(storedEye.LookVector()) > .9999f);
 				CHECK(view.CameraFrame.UpVector().Dot(storedEye.UpVector()) > .9999f);
 			}
