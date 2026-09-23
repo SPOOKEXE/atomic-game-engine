@@ -1382,6 +1382,8 @@
 				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
 				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
 				{"name": "StormBreakForce", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormDamageRate", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormIntegrity", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
 				{"name": "StormLinkEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
 				{"name": "StormMaterialStrength", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]}
 			]
@@ -1399,6 +1401,8 @@
 				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
 				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
 				{"name": "StormBreakForce", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormDamageRate", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
+				{"name": "StormIntegrity", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
 				{"name": "StormLinkEnabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]},
 				{"name": "StormMaterialStrength", "type": "float", "kind": "structural", "bytes": 4, "writable": true, "reads": ["physics.StormLink"], "writes": ["physics.StormLink"]}
 			]

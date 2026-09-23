@@ -178,6 +178,11 @@ declare interface ChangedSignal {
 	Equals(other: ChangedSignal): boolean;
 }
 
+declare interface RemoteEventSignal {
+	Connect(handler: (payload: string) => void): RBXScriptConnection;
+	Once(handler: (payload: string) => void): RBXScriptConnection;
+}
+
 // The instance tree's signals, matching the Luau half - undeclared until v0.13
 // for the reason given there.
 declare interface InstanceSignal {
@@ -1800,6 +1805,8 @@ declare interface JointInstance extends Instance {
 
 declare interface Weld extends JointInstance {
 	StormBreakForce: number;
+	StormDamageRate: number;
+	StormIntegrity: number;
 	StormLinkEnabled: boolean;
 	StormMaterialStrength: number;
 }
@@ -1810,6 +1817,8 @@ declare interface WeldConstraint extends Instance {
 	Part0: Instance;
 	Part1: Instance;
 	StormBreakForce: number;
+	StormDamageRate: number;
+	StormIntegrity: number;
 	StormLinkEnabled: boolean;
 	StormMaterialStrength: number;
 }
@@ -1858,6 +1867,8 @@ declare interface ModuleScript extends LuaSourceContainer {
 }
 
 declare interface RemoteEvent extends Instance {
+	FireServer(payload: string): void;
+	readonly OnServerEvent: RemoteEventSignal;
 }
 
 declare interface BindableEvent extends Instance {

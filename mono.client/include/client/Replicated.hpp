@@ -280,7 +280,8 @@ namespace client {
 	std::shared_ptr<engine::script::Runtime> BuildReplicatedWorld(
 		engine::ecs::Store &store,
 		engine::ecs::Scheduler &scheduler,
-		const engine::replication::InterpolationSettings &interpolation = {}
+		const engine::replication::InterpolationSettings &interpolation = {},
+		const engine::script::RuntimeLimits &limits = {}
 	);
 
 	// Records where everything in a replicated world is, at the tick that put it

@@ -181,6 +181,11 @@ declare extern type ChangedSignal with
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
 end
 
+declare extern type RemoteEventSignal with
+	function Connect(self, handler: (payload: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (payload: string) -> ()): RBXScriptConnection
+end
+
 -- --- input ------------------------------------------------------------------
 --
 -- **Hand-written, because these two are script globals rather than classes.**
@@ -2090,6 +2095,8 @@ end
 
 declare extern type Weld extends JointInstance with
 	StormBreakForce: number
+	StormDamageRate: number
+	StormIntegrity: number
 	StormLinkEnabled: boolean
 	StormMaterialStrength: number
 end
@@ -2100,6 +2107,8 @@ declare extern type WeldConstraint extends Instance with
 	Part0: Instance
 	Part1: Instance
 	StormBreakForce: number
+	StormDamageRate: number
+	StormIntegrity: number
 	StormLinkEnabled: boolean
 	StormMaterialStrength: number
 end
@@ -2150,6 +2159,8 @@ declare extern type ModuleScript extends LuaSourceContainer with
 end
 
 declare extern type RemoteEvent extends Instance with
+	function FireServer(self, payload: string): ()
+	OnServerEvent: RemoteEventSignal
 end
 
 declare extern type BindableEvent extends Instance with

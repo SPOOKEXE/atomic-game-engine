@@ -25,6 +25,9 @@
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Protocol.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -306,6 +309,53 @@ TEST_CASE("a message is reliable and ordered", "[replication][user]") {
 	for (int index = 0; index < 16; index++) {
 		CHECK(heard[static_cast<size_t>(index)] == "edit " + std::to_string(index));
 	}
+}
+
+TEST_CASE("a Luau RemoteEvent reaches an authority callback over the user lane", "[replication][user][remote-event]") {
+	Pair pair;
+	REQUIRE(pair.Admit());
+	engine::script::ScriptClass();
+
+	engine::script::RuntimeLimits authorityLimits;
+	authorityLimits.Role = engine::script::HostRole::OfServer();
+	auto authority = engine::script::MakeRuntime(pair.World, engine::script::Language::Luau, authorityLimits);
+	pair.Server->OnUserMessage([&](ClientId, std::span<const std::byte> message) {
+		engine::script::RemoteEventMessage decoded;
+		REQUIRE(engine::script::DecodeRemoteEvent(message, decoded));
+		REQUIRE(authority->DeliverRemoteEvent(message));
+	});
+	REQUIRE(authority->Run(R"(
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = "Damage"
+		remote.Parent = workspace
+		remote.OnServerEvent:Connect(function(payload)
+			assert(payload == "copied payload")
+			local proof = Instance.new("Part")
+			proof.Name = payload
+		end)
+	)"));
+	pair.Settle(500);
+
+	engine::script::RuntimeLimits clientLimits;
+	clientLimits.Role = engine::script::HostRole::OfClient();
+	clientLimits.RemoteEventSender = [&](std::span<const std::byte> message) {
+		return pair.Client->SendUser(message, pair.Now);
+	};
+	auto client = engine::script::MakeRuntime(pair.Replica, engine::script::Language::Luau, clientLimits);
+	// The fixture's replica admits only authority allocations. This endpoint is
+	// normally part of the replicated scene; create its matching test copy here
+	// so the test can drive FireServer through the real connected session.
+	pair.Replica.SetAdoptOnly(false);
+	REQUIRE(client->Run(R"(
+		local root = Instance.new("Folder")
+		root.Name = "Workspace"
+		local remote = Instance.new("RemoteEvent", root)
+		remote.Name = "Damage"
+		remote:FireServer("copied payload")
+	)"));
+	pair.Replica.SetAdoptOnly(true);
+	pair.Settle(600);
+	CHECK(pair.World.FindFirstRoot("copied payload") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("a broadcast reaches everybody except who it came from", "[replication][user]") {

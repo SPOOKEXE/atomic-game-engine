@@ -4,6 +4,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/InstanceShim.hpp>
+#include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Subtree.hpp>
 
 #include <algorithm>
@@ -35,6 +36,32 @@ namespace engine::script {
 				luaL_typeerrorL(state, index, "Instance");
 			}
 			return *static_cast<Entity *>(value);
+		}
+
+		bool IsRemoteEvent(const Store &store, Entity instance) {
+			return store.IsA(instance, ecs::Classes::Find(core::Name("RemoteEvent")));
+		}
+
+		int RemoteEventFireServer(lua_State *state) {
+			LuauContext &context = UpvalueContext(state);
+			const Entity instance = CheckInstance(state, 1);
+			if (!context.Role.Client || !IsRemoteEvent(*context.World, instance)) {
+				luaL_errorL(state, "FireServer is only available on a client RemoteEvent");
+				return 0;
+			}
+			size_t bytes = 0;
+			const char *payload = luaL_checklstring(state, 2, &bytes);
+			std::vector<std::byte> message;
+			if (!EncodeRemoteEvent(
+					context.World->GetFullName(instance),
+					std::as_bytes(std::span(payload, bytes)),
+					message
+				) ||
+				!context.RemoteEventSender || !context.RemoteEventSender(message)) {
+				luaL_errorL(state, "RemoteEvent:FireServer could not send this payload");
+				return 0;
+			}
+			return 0;
 		}
 
 		// This world's `Workspace`, as `OpenWorkspace` resolved it.
@@ -150,6 +177,15 @@ namespace engine::script {
 			// says to refuse.
 			if (name == "Changed") {
 				PushSignal(state, SignalKind::Changed, instance);
+				return 1;
+			}
+			if (name == "OnServerEvent" && IsRemoteEvent(store, instance)) {
+				PushSignal(state, SignalKind::RemoteEvent, instance);
+				return 1;
+			}
+			if (name == "FireServer" && IsRemoteEvent(store, instance)) {
+				lua_pushlightuserdata(state, &UpvalueContext(state));
+				lua_pushcclosure(state, RemoteEventFireServer, "FireServer", 1);
 				return 1;
 			}
 

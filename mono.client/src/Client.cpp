@@ -2140,8 +2140,12 @@ namespace client {
 				// something mysterious.
 				engine::replication::InterpolationSettings interpolation;
 				interpolation.TickRate = Settings.TickRate;
+				engine::script::RuntimeLimits limits;
+				limits.RemoteEventSender = [this](std::span<const std::byte> payload) {
+					return Connection != nullptr && Connection->SendUser(payload, engine::core::Clock::Seconds());
+				};
 
-				replicaScripts = BuildReplicatedWorld(store, systems, interpolation);
+				replicaScripts = BuildReplicatedWorld(store, systems, interpolation, limits);
 			}
 		);
 

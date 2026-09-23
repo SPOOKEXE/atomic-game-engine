@@ -766,6 +766,11 @@ declare extern type ChangedSignal with
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
 end
 
+declare extern type RemoteEventSignal with
+	function Connect(self, handler: (payload: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (payload: string) -> ()): RBXScriptConnection
+end
+
 -- --- input ------------------------------------------------------------------
 --
 -- **Hand-written, because these two are script globals rather than classes.**
@@ -2546,6 +2551,10 @@ declare task: {
 				out << "\tfunction SetVirtualPage(self, first: number, extentBefore: number, records: { { "
 					   "Key: string, Extent: number?, Fields: { [string]: any } } }, revision: number): ()\n";
 			}
+			if (name == "RemoteEvent") {
+				out << "\tfunction FireServer(self, payload: string): ()\n";
+				out << "\tOnServerEvent: RemoteEventSignal\n";
+			}
 
 			// The member only the Workspace answers, for the reason
 			// `LuauInstances.cpp` keeps it in a table of its own: a `Raycast` on a
@@ -2899,6 +2908,11 @@ declare interface ChangedSignal {
 	Connect(handler: (property: string) => void): RBXScriptConnection;
 	Once(handler: (property: string) => void): RBXScriptConnection;
 	Equals(other: ChangedSignal): boolean;
+}
+
+declare interface RemoteEventSignal {
+	Connect(handler: (payload: string) => void): RBXScriptConnection;
+	Once(handler: (payload: string) => void): RBXScriptConnection;
 }
 
 // The instance tree's signals, matching the Luau half - undeclared until v0.13
@@ -4204,6 +4218,10 @@ declare const task: {
 			if (name == "UIVirtualCollection") {
 				out << "\tSetVirtualPage(first: number, extentBefore: number, records: { Key: string; "
 					   "Extent?: number; Fields: Record<string, unknown> }[], revision: number): void;\n";
+			}
+			if (name == "RemoteEvent") {
+				out << "\tFireServer(payload: string): void;\n";
+				out << "\treadonly OnServerEvent: RemoteEventSignal;\n";
 			}
 
 			// The member only the Workspace answers, matching the Luau half.

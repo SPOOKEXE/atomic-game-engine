@@ -9,6 +9,7 @@
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptluau/Runtime.hpp>
@@ -527,6 +528,7 @@ namespace engine::script {
 		bounds->Context.Access = limits.EffectiveCapabilities();
 		bounds->Context.DataCapture = limits.DataCapture;
 		bounds->Context.DataLifecycle = limits.DataLifecycle;
+		bounds->Context.RemoteEventSender = limits.RemoteEventSender;
 		bounds->Context.Profiler = &ScriptProfile;
 
 		State = lua_newstate(Allocate, bounds);
@@ -618,6 +620,36 @@ namespace engine::script {
 		// can read `math.floor` and cannot replace it, so one script cannot
 		// change the language the next one runs in.
 		luaL_sandbox(State);
+	}
+
+	bool LuauRuntime::DeliverRemoteEvent(std::span<const std::byte> bytes) {
+		if (!Role().Server) return false;
+
+		RemoteEventMessage message;
+		if (!DecodeRemoteEvent(bytes, message)) return false;
+
+		const ecs::ClassId remoteEvent = ecs::Classes::Find(core::Name("RemoteEvent"));
+		ecs::Entity subject = ecs::NULL_ENTITY;
+		bool ambiguous = false;
+		Store.Each<const ecs::InstanceClass>([&](ecs::Entity entity, const ecs::InstanceClass &) {
+			if (ambiguous) return;
+			if (Store.IsA(entity, remoteEvent) && Store.GetFullName(entity) == message.Event) {
+				if (subject != ecs::NULL_ENTITY) {
+					ambiguous = true;
+					return;
+				}
+				subject = entity;
+			}
+		});
+		if (subject == ecs::NULL_ENTITY || ambiguous) return false;
+
+		lua_pushlstring(
+			State,
+			reinterpret_cast<const char *>(message.Payload.data()),
+			message.Payload.size()
+		);
+		Error = FireSignal(State, SignalKind::RemoteEvent, subject, 1);
+		return Error.empty();
 	}
 
 	LuauRuntime::~LuauRuntime() {

@@ -2015,6 +2015,17 @@ namespace server {
 		Replication->OnUserMessage(
 			[this, admitFresh](engine::replication::ClientId client, std::span<const std::byte> payload) {
 				if (ReceivePlayerPresentation(client, payload)) return;
+				engine::script::RemoteEventMessage remote;
+				if (engine::script::DecodeRemoteEvent(payload, remote)) {
+					Worlds().Enter(PrimaryWorld, [this, payload](engine::ecs::Store &) {
+						if (engine::script::Runtime *runtime = RuntimeOf(PrimaryWorld); runtime != nullptr) {
+							if (!runtime->DeliverRemoteEvent(payload)) {
+								ENGINE_WARN("server: refused RemoteEvent payload");
+							}
+						}
+					});
+					return;
+				}
 				engine::game::PortalSessionMessage admission;
 				if (engine::game::DecodePortalSession(payload, admission)) {
 					if (admission.Kind == engine::game::PortalSessionKind::Fresh) {

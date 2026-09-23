@@ -52,6 +52,9 @@ namespace engine::script {
 		// property per instance for a surface most scripts never touch.
 		PropertyChanged,
 
+		// `RemoteEvent.OnServerEvent`. The subject is the event instance.
+		RemoteEvent,
+
 		// `UserInputService` events. One per world and filtered by their public
 		// signal name. Separate from `PropertyChanged` because controller state is
 		// a resource change, not an instance property event, and the generic change

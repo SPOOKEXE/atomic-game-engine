@@ -100,6 +100,7 @@ namespace engine::script {
 		// Installed by the host, never shared through a process-global registry.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		std::function<bool(std::span<const std::byte>)> RemoteEventSender;
 
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;

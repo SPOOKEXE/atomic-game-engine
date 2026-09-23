@@ -488,7 +488,12 @@ namespace client {
 	}
 
 	std::shared_ptr<engine::script::Runtime>
-	BuildReplicatedWorld(Store &store, Scheduler &scheduler, const InterpolationSettings &interpolation) {
+	BuildReplicatedWorld(
+		Store &store,
+		Scheduler &scheduler,
+		const InterpolationSettings &interpolation,
+		const engine::script::RuntimeLimits &runtimeLimits
+	) {
 		// Register snapshot component names before applying one.
 		engine::scene::RegisterSceneComponents();
 
@@ -639,7 +644,7 @@ namespace client {
 		// **A client's VM, over a world it does not own.** The role is what
 		// decides which scripts it may run at all - a `Script` is the server's -
 		// and `ClientScriptsIn` adds the container half below.
-		engine::script::RuntimeLimits limits;
+		engine::script::RuntimeLimits limits = runtimeLimits;
 		limits.Role = engine::script::HostRole::OfClient();
 
 		std::string failure;
