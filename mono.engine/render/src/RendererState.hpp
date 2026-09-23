@@ -1257,6 +1257,9 @@ namespace engine::render {
 		scene::Environment EnvironmentState;
 		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
 		size_t VolumeCount = 0;
+		SDL_GPUBuffer *CloudDensityBuffer = nullptr;
+		SDL_GPUTransferBuffer *CloudDensityTransfer = nullptr;
+		uint32_t CloudDensityCapacity = 0;
 		std::array<scene::ShaderLensState, scene::MAX_SCENE_SHADER_LENSES> ShaderLenses{};
 		size_t ShaderLensCount = 0;
 

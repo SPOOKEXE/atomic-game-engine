@@ -55,6 +55,45 @@ namespace engine::render {
 		}
 	}
 
+	bool ViewRecording::UploadCloudDensity() {
+		const auto &cloud = Request.Source->CloudDensity;
+		scene::CloudDensityGpuNode empty{};
+		empty.ChildrenLow.fill(UINT32_MAX);
+		empty.ChildrenHigh.fill(UINT32_MAX);
+		const std::span<const scene::CloudDensityGpuNode> nodes =
+			cloud && cloud->IsValid() ? std::span(cloud->Nodes) : std::span(&empty, size_t{1});
+		const size_t bytes = nodes.size_bytes();
+		if (bytes > UINT32_MAX) return false;
+		if (State->CloudDensityCapacity < bytes) {
+			if (State->CloudDensityBuffer) gpu::ReleaseBuffer(State->Device, State->CloudDensityBuffer);
+			if (State->CloudDensityTransfer) gpu::ReleaseTransferBuffer(State->Device, State->CloudDensityTransfer);
+			State->CloudDensityBuffer = nullptr;
+			State->CloudDensityTransfer = nullptr;
+			SDL_GPUBufferCreateInfo buffer{};
+			buffer.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			buffer.size = static_cast<uint32_t>(bytes);
+			State->CloudDensityBuffer = gpu::CreateBuffer(State->Device, &buffer);
+			SDL_GPUTransferBufferCreateInfo transfer{};
+			transfer.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+			transfer.size = static_cast<uint32_t>(bytes);
+			State->CloudDensityTransfer = gpu::CreateTransferBuffer(State->Device, &transfer);
+			if (!State->CloudDensityBuffer || !State->CloudDensityTransfer) return false;
+			State->CloudDensityCapacity = static_cast<uint32_t>(bytes);
+		}
+		void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->CloudDensityTransfer, false);
+		if (!mapped) return false;
+		std::memcpy(mapped, nodes.data(), bytes);
+		SDL_UnmapGPUTransferBuffer(State->Device, State->CloudDensityTransfer);
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Command);
+		if (!copy) return false;
+		const SDL_GPUTransferBufferLocation source{State->CloudDensityTransfer, 0};
+		const SDL_GPUBufferRegion destination{State->CloudDensityBuffer, 0, static_cast<uint32_t>(bytes)};
+		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+		SDL_EndGPUCopyPass(copy);
+		Result.UploadedBytes += bytes;
+		return true;
+	}
+
 	ViewStart ViewRecording::Begin(const ViewRequest &request) {
 		ENGINE_PROFILE_CAT("ViewRecording::Begin", core::ProfileCategory::Render);
 
@@ -1772,6 +1811,13 @@ namespace engine::render {
 			0.0f,
 		};
 		uniforms.VolumeCount = glm::vec4{static_cast<float>(currentLighting.VolumeCount), 0.0f, 0.0f, 0.0f};
+		if (const auto &cloud = source.CloudDensity; cloud && cloud->IsValid()) {
+			uniforms.CloudMinimumNodeCount = glm::vec4{cloud->Config.RootMinimum.X, cloud->Config.RootMinimum.Y,
+				cloud->Config.RootMinimum.Z, static_cast<float>(cloud->Nodes.size())};
+			uniforms.CloudSizeDepth = glm::vec4{cloud->Config.RootSize.X, cloud->Config.RootSize.Y,
+				cloud->Config.RootSize.Z, static_cast<float>(cloud->Config.MaximumDepth)};
+			uniforms.CloudCentreEnabled = glm::vec4{cloud->Centre.X, cloud->Centre.Y, cloud->Centre.Z, 1.0f};
+		}
 		for (size_t index = 0; index < currentLighting.VolumeCount; index++) {
 			const scene::VolumeState &volume = currentLighting.Volumes[index];
 			PbrUniforms::VolumeUniform &out = uniforms.Volumes[index];

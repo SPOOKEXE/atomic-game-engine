@@ -25,6 +25,16 @@ struct Volume {
 	vec4 Steps;
 };
 
+struct CloudNode {
+	uvec4 ChildrenLow;
+	uvec4 ChildrenHigh;
+	vec4 Values;
+};
+
+layout(set = 0, binding = 0, std430) readonly buffer CloudNodes {
+	CloudNode nodes[];
+} cloud;
+
 layout(set = 3, binding = 0) uniform Pass {
 	mat4 InverseViewProjection;
 	mat4 LightViewProjection;
@@ -45,6 +55,9 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 SeamSecond[2];
 	Volume Volumes[MAX_VOLUMES];
 	vec4 VolumeCount;
+	vec4 CloudMinimumNodeCount;
+	vec4 CloudSizeDepth;
+	vec4 CloudCentreEnabled;
 } pass;
 
 float Hash(vec3 point) {
@@ -118,6 +131,47 @@ float DensityAt(Volume volume, vec3 world) {
 	return volume.ColourDensity.w * fade * mix(1.0, signal, volume.ExtinctionNoise.z);
 }
 
+bool CloudInterval(vec3 origin, vec3 direction, float maximum, out float enter, out float exit) {
+	vec3 minimum = pass.CloudCentreEnabled.xyz + pass.CloudMinimumNodeCount.xyz;
+	vec3 maximumPoint = minimum + pass.CloudSizeDepth.xyz;
+	vec3 inverse = 1.0 / max(abs(direction), vec3(1e-5)) * sign(direction + vec3(1e-5));
+	vec3 first = (minimum - origin) * inverse;
+	vec3 second = (maximumPoint - origin) * inverse;
+	vec3 low = min(first, second);
+	vec3 high = max(first, second);
+	enter = max(max(low.x, low.y), max(low.z, 0.0));
+	exit = min(min(high.x, high.y), min(high.z, maximum));
+	return exit > enter;
+}
+
+float CloudDensityAt(vec3 world) {
+	if (pass.CloudCentreEnabled.w < 0.5 || pass.CloudMinimumNodeCount.w < 1.0) return 0.0;
+	vec3 minimum = pass.CloudMinimumNodeCount.xyz;
+	vec3 size = pass.CloudSizeDepth.xyz;
+	vec3 point = world - pass.CloudCentreEnabled.xyz;
+	if (any(lessThan(point, minimum)) || any(greaterThanEqual(point, minimum + size))) return 0.0;
+	uint nodeIndex = 0u;
+	uint count = uint(pass.CloudMinimumNodeCount.w);
+	uint depth = uint(pass.CloudSizeDepth.w);
+	for (uint level = 0u; level < 8u; ++level) {
+		if (nodeIndex >= count) return 0.0;
+		CloudNode node = cloud.nodes[nodeIndex];
+		if (all(equal(node.ChildrenLow, uvec4(0xffffffffu))) &&
+			all(equal(node.ChildrenHigh, uvec4(0xffffffffu)))) return node.Values.x;
+		if (level >= depth) return node.Values.x;
+		vec3 halfSize = size * 0.5;
+		vec3 middle = minimum + halfSize;
+		uint octant = uint(point.x >= middle.x) | (uint(point.y >= middle.y) << 1u) |
+			(uint(point.z >= middle.z) << 2u);
+		nodeIndex = octant < 4u ? node.ChildrenLow[octant] : node.ChildrenHigh[octant - 4u];
+		if ((octant & 1u) != 0u) minimum.x = middle.x;
+		if ((octant & 2u) != 0u) minimum.y = middle.y;
+		if ((octant & 4u) != 0u) minimum.z = middle.z;
+		size = halfSize;
+	}
+	return 0.0;
+}
+
 float LightTransmittance(Volume volume, vec3 point) {
 	vec3 toLight = normalize(-pass.Direction.xyz);
 	float enter;
@@ -139,7 +193,7 @@ float LightTransmittance(Volume volume, vec3 point) {
 
 void main() {
 	vec4 base = texture(litImage, inUv);
-	if (pass.VolumeCount.x < 0.5) {
+	if (pass.VolumeCount.x < 0.5 && pass.CloudCentreEnabled.w < 0.5) {
 		outColour = base;
 		return;
 	}
@@ -160,6 +214,13 @@ void main() {
 		first = min(first, enter);
 		last = max(last, exit);
 		steps = max(steps, uint(clamp(pass.Volumes[volumeIndex].Steps.x, 1.0, 64.0)));
+	}
+	float cloudEnter;
+	float cloudExit;
+	if (CloudInterval(pass.Eye.xyz, ray, maximum, cloudEnter, cloudExit)) {
+		first = min(first, cloudEnter);
+		last = max(last, cloudExit);
+		steps = max(steps, 64u);
 	}
 	if (!(last > first)) {
 		outColour = base;
@@ -187,6 +248,9 @@ void main() {
 			extinction += volume.ExtinctionNoise.x * density;
 			source += volume.ColourDensity.rgb * (pass.Ambient.rgb + pass.Direct.rgb * light) * density;
 		}
+		float cloudDensity = CloudDensityAt(point);
+		extinction += cloudDensity * 0.012;
+		source += mix(pass.FogColour.rgb, vec3(0.85), 0.35) * pass.Ambient.rgb * cloudDensity * 0.22;
 		scattering += transmittance * source * delta;
 		transmittance *= exp(-extinction * delta);
 	}

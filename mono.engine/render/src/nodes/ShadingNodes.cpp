@@ -1258,6 +1258,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("fog"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl::PbrSlot &pbr = *recording.Pbr;
+			if (!recording.UploadCloudDensity()) return false;
 			const std::array bindings{
 				SDL_GPUTextureSamplerBinding{pbr.SkyLit, recording.Sampler},
 				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
@@ -1271,7 +1272,11 @@ namespace engine::render {
 				bindings,
 				&recording.Uniforms,
 				nullptr,
-				SDL_FColor{}
+				SDL_FColor{},
+				nullptr,
+				0,
+				nullptr,
+				recording.State->CloudDensityBuffer
 			);
 			return true;
 		});

@@ -1099,6 +1099,12 @@ namespace engine::render {
 		if (State->OverlayTransfer) {
 			gpu::ReleaseTransferBuffer(device, State->OverlayTransfer);
 		}
+		if (State->CloudDensityBuffer) {
+			gpu::ReleaseBuffer(device, State->CloudDensityBuffer);
+		}
+		if (State->CloudDensityTransfer) {
+			gpu::ReleaseTransferBuffer(device, State->CloudDensityTransfer);
+		}
 		if (State->OverlaySampler) {
 			SDL_ReleaseGPUSampler(device, State->OverlaySampler);
 		}

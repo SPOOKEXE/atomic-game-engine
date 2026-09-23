@@ -272,6 +272,9 @@ namespace engine::render {
 		};
 		VolumeUniform Volumes[scene::MAX_SCENE_VOLUMES]{};
 		glm::vec4 VolumeCount{};
+		glm::vec4 CloudMinimumNodeCount{};
+		glm::vec4 CloudSizeDepth{};
+		glm::vec4 CloudCentreEnabled{};
 	};
 
 	// The built-in bloom and tone-map passes share these controls. This stays

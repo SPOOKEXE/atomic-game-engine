@@ -733,7 +733,8 @@ namespace engine::render {
 		SDL_FColor clear,
 		const void *rawUniforms,
 		size_t rawUniformBytes,
-		const BeamUniforms *passBeams
+		const BeamUniforms *passBeams,
+		SDL_GPUBuffer *fragmentStorage
 	) {
 		FrameResult &result = Result;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -747,6 +748,7 @@ namespace engine::render {
 		colour.cycle = true;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
 		SDL_BindGPUGraphicsPipeline(pass, pipeline);
+		if (fragmentStorage != nullptr) SDL_BindGPUFragmentStorageBuffers(pass, 0, &fragmentStorage, 1);
 		if (!bindings.empty()) {
 			SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
 		}

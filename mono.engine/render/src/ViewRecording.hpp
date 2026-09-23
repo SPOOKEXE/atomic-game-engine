@@ -528,8 +528,11 @@ namespace engine::render {
 			SDL_FColor clear,
 			const void *rawUniforms = nullptr,
 			size_t rawUniformBytes = 0,
-			const BeamUniforms *passBeams = nullptr
+			const BeamUniforms *passBeams = nullptr,
+			SDL_GPUBuffer *fragmentStorage = nullptr
 		);
+
+		bool UploadCloudDensity();
 
 		// The renderer-owned texture a named resource role resolves to.
 		//

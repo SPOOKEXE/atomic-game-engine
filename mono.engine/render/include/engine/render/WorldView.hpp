@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 
 namespace engine::render {
 	class ShaderLibrary;
@@ -86,6 +87,8 @@ namespace engine::render {
 		float ParticleDelta = 0.0f;
 		// Camera-independent lighting copied from the world.
 		scene::WorldLighting Lighting;
+		// Packed cloud-density snapshot copied from the storm field.
+		std::optional<scene::CloudDensitySnapshot> CloudDensity;
 		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
 		// Object labels for capture output.

@@ -30,6 +30,7 @@
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Storm.hpp>
+#include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
@@ -677,6 +678,8 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// Immutable packed cloud density copied from the source world.
+		std::optional<scene::CloudDensitySnapshot> CloudDensity;
 		// An HDR image owned by this world and viewport. The eye-image node defaults
 		// to whole-eye projection; seam intermediates require its explicit projection option.
 		// Zero denotes an unavailable image.

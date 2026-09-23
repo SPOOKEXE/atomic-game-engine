@@ -132,6 +132,7 @@ namespace engine::render {
 		view.PartLabelsValid = frame.PartLabelsValid;
 		view.JointFrames = frame.Joints;
 		view.Lighting = frame.Lighting;
+		view.CloudDensity = frame.CloudDensity;
 		view.Lighting.Volumes = camera.Volumes;
 		view.Lighting.VolumeCount = camera.VolumeCount;
 		view.OverrideLighting = true;
@@ -172,6 +173,8 @@ namespace engine::render {
 		frame.Seconds = time.Elapsed;
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
 		frame.GpuParticles.reset();
+		frame.Lighting = scene::LightingOf(store);
+		frame.CloudDensity.reset();
 		if (const auto *storm = physics::StormOf(store)) {
 			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
 				if (!frame.GpuParticles.has_value()) {
@@ -180,8 +183,25 @@ namespace engine::render {
 					};
 				}
 			});
+			const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
+			const float extent = field.Parameters.InfluenceRadius;
+			const scene::CloudDensityOctreeConfig config{
+				.RootMinimum = {-extent, 0.0f, -extent},
+				.RootSize = {extent * 2.0f, field.Parameters.TopHeight * 1.16f, extent * 2.0f},
+				.MaximumDepth = 7,
+			};
+			if (auto tree = scene::CloudDensityOctree::Create(config)) {
+				const scene::CloudDensityBuildStats built =
+					scene::BuildCloudDensity(*tree, field, storm->State.ElapsedSeconds);
+				if (built.Nodes != 0) {
+					frame.CloudDensity = scene::CloudDensitySnapshot{
+						.Centre = storm->State.Position,
+						.Config = config,
+						.Nodes = tree->GpuNodes(),
+					};
+				}
+			}
 		}
-		frame.Lighting = scene::LightingOf(store);
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||
 			frame.Lighting.EnvironmentState.CloudLayer.WindSpeed <= 0)

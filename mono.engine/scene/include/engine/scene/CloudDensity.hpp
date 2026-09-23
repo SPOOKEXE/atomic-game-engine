@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace engine::scene {
 
@@ -31,6 +32,18 @@ namespace engine::scene {
 		size_t FineCells = 0;
 		size_t StoredLeaves = 0;
 		size_t Nodes = 0;
+	};
+
+	// An owned, renderer-facing cloud field. Coordinates are tornado-local;
+	// Centre translates them into the presented world's coordinates.
+	struct CloudDensitySnapshot {
+		core::Vector3 Centre;
+		CloudDensityOctreeConfig Config;
+		std::vector<CloudDensityGpuNode> Nodes;
+
+		[[nodiscard]] bool IsValid() const {
+			return !Nodes.empty();
+		}
 	};
 
 	// Maps tornado-local airflow into normalized visible moisture.

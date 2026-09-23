@@ -5,6 +5,7 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/testing/Suite.hpp>
@@ -155,6 +156,23 @@ TEST_CASE(
 	const CapturedImage withoutVolumes = CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
 	);
+	scene::CloudDensityGpuNode cloudNode;
+	cloudNode.ChildrenLow.fill(UINT32_MAX);
+	cloudNode.ChildrenHigh.fill(UINT32_MAX);
+	cloudNode.Values[0] = 1.0f;
+	view.CloudDensity = scene::CloudDensitySnapshot{
+		.Centre = {},
+		.Config = {.RootMinimum = {-3.0f, -3.0f, -7.0f}, .RootSize = {6.0f, 6.0f, 6.0f}, .MaximumDepth = 1},
+		.Nodes = {cloudNode},
+	};
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("fog")));
+	const CapturedImage sparseCloud = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
+	);
+	const ImageComparison cloudEffect = CompareImages(withoutVolumes.View(), sparseCloud.View());
+	INFO("cloud changed pixels=" << cloudEffect.MismatchedPixels << ", max=" << cloudEffect.MaximumAbsoluteError);
+	CHECK(cloudEffect.MismatchedPixels > size_t(EXTENT) * EXTENT / 4);
+	view.CloudDensity.reset();
 	const CapturedImage forward = RenderOrder(fixture.Render, view, false);
 	const CapturedImage reverse = RenderOrder(fixture.Render, view, true);
 
