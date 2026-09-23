@@ -99,7 +99,7 @@ namespace engine::render {
 		}
 
 		void FillPlane(DataCapturePlane &plane, ResourceImage &image) {
-			const core::Name lit("lit"), albedo("albedo"), material("material"), emissive("emissive"),
+			const core::Name display("display"), albedo("albedo"), material("material"), emissive("emissive"),
 				depth("linear-depth"), normal("normal"), directionalResponse("directional-response");
 			auto primary = [&](core::Name expected,
 							   DataCaptureScalar scalar,
@@ -120,11 +120,15 @@ namespace engine::render {
 			switch (plane.Channel) {
 			case DataCaptureChannel::RgbLinearHdr:
 				primary(
-					lit,
+					display,
 					DataCaptureScalar::Float16,
 					DataCaptureColourSpace::Linear,
 					ResourceImageFormat::RGBA16_Float
 				);
+				if (plane.Status == DataCaptureStatus::Ready)
+					plane.Provenance =
+						"scene_linear_hdr/v2;source=transparent_composited_display;"
+						"includes=opaque_sky_fog_portal_mirror_transparent;before=lenses_and_tonemap";
 				break;
 			case DataCaptureChannel::LinearDepth:
 				if (image.DepthResource == depth && !image.Depth.empty())

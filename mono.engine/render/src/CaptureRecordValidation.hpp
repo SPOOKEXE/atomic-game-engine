@@ -220,6 +220,9 @@ namespace engine::render::capture_record_validation {
 			 : plane.Channel == DataCaptureChannel::PackedGpu
 				 ? plane.Provenance != "render_graph_pack_channels/"
 									   "v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r"
+			 : plane.Channel == DataCaptureChannel::RgbLinearHdr
+				 ? plane.Provenance != "scene_linear_hdr/v2;source=transparent_composited_display;"
+										 "includes=opaque_sky_fog_portal_mirror_transparent;before=lenses_and_tonemap"
 			 : plane.Channel == DataCaptureChannel::MotionVectors
 				 ? plane.Provenance != "camera_reprojection/v1;components=delta_x_delta_y;units=pixels;"
 									   "surface=visible_static_builtin_opaque_or_masked;object_motion=false;"

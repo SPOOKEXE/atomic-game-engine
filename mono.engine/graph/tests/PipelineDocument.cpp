@@ -143,6 +143,24 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 	CHECK(occlusion->Divisor == 2);
 }
 
+TEST_CASE("the HDR capture reads the completed transparent scene", "[graph][data-capture]") {
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(
+		Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) == PipelineDocumentStatus::Ok
+	);
+	const engine::graph::Node *capture = nullptr;
+	for (uint32_t index = 1; index <= graph.Count(); ++index) {
+		const auto *node = graph.Find(NodeId{index});
+		if (node && node->Name == Name("data-capture")) capture = node;
+	}
+	REQUIRE(capture != nullptr);
+	const auto *source = graph.FindResource(capture->Reads.front());
+	REQUIRE(source != nullptr);
+	CHECK(source->Name == Name("display"));
+	CHECK(source->Format == engine::graph::ResourceFormat::RGBA16F);
+}
+
 TEST_CASE(
 	"the data capture document retains directional response for shadow visibility", "[graph][data-capture]"
 ) {

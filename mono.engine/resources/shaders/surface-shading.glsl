@@ -713,7 +713,5 @@ void shadeSurface() {
 	// source. The material owns this pixel, and the factor already selected the
 	// lit and refracted energy above. A second blend would apply transmission
 	// twice and make a 0.2 glass surface nearly disappear.
-	// Temporary live diagnostic: prove whether the forward material path retains
-	// the surface radiance before it is mixed with the captured background.
-	outColour = vec4(Encode(lit), 1.0);
+	outColour = vec4(Encode(transmitted), 1.0);
 }

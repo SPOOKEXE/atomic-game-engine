@@ -1527,8 +1527,11 @@ namespace engine::graph {
 			 .NodeKind = core::Name("capture"),
 			 .Scope = NodeScope::Frame}
 		);
+		// `lit` is retained as the immutable opaque refraction source. RGB capture
+		// reads `display`, the HDR scene after transparent composition and before
+		// optional lenses and tonemapping.
 		for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 3>{
-				 {{"lit", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}}
+				 {{"display", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}}
 			 }) {
 			document.Record(
 				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
