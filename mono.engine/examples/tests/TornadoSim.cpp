@@ -34,6 +34,17 @@ namespace {
 		return Vector3Components{std::stof(match[1]), std::stof(match[2]), std::stof(match[3])};
 	}
 
+	std::optional<std::array<int, 2>> PanelCanvasPixels(const std::string &document) {
+		const std::regex assignment(
+			R"(panel\.CanvasSize\s*=\s*UDim2\.new\(\s*0\s*,\s*([0-9]+)\s*,\s*0\s*,\s*([0-9]+)\s*\))"
+		);
+		std::smatch match;
+		if (!std::regex_search(document, match, assignment)) {
+			return std::nullopt;
+		}
+		return std::array<int, 2>{std::stoi(match[1]), std::stoi(match[2])};
+	}
+
 	struct StagedAssets {
 		std::filesystem::path Previous = engine::core::Paths::Assets();
 
@@ -184,9 +195,13 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK((*cameraHome)[0] < -80.0f);
 	CHECK((*cameraHome)[2] < -50.0f);
 	CHECK(2.0f * eyeToTarget * std::tan(57.0f * 0.5f * 0.0174532925f) >= 1.5f * 285.0f);
-	CHECK(document.find("camera.CFrame = CFrame.lookAt(cameraHome, cameraTarget)") != std::string::npos);
+	CHECK(document.find("return CFrame.lookAt(eye, target)") != std::string::npos);
+	CHECK(document.find("camera.CFrame = cameraFrame(cameraTarget)") != std::string::npos);
 	CHECK(document.find("Instance.new(\"ScrollingFrame\")") != std::string::npos);
-	CHECK(document.find("panel.CanvasSize = UDim2.new(0, 352, 0, 704)") != std::string::npos);
+	const std::optional<std::array<int, 2>> panelCanvas = PanelCanvasPixels(document);
+	REQUIRE(panelCanvas.has_value());
+	CHECK((*panelCanvas)[0] == 352);
+	CHECK((*panelCanvas)[1] > 884);
 	CHECK(document.find("panel.CanvasPosition = Vector2.new(0, 0)") != std::string::npos);
 	CHECK(document.find("panel.ScrollBarThickness = 8") != std::string::npos);
 
