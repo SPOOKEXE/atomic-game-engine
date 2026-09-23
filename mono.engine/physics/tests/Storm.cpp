@@ -110,6 +110,34 @@ TEST_CASE("storm link break disables the real weld and rebuilds connectivity", "
 	CHECK_FALSE(store.Resource<engine::physics::PhysicsWorld>()->RigidlyConnected(first, second));
 }
 
+TEST_CASE("storm link material strength separates wooden and steel failures", "[physics][storm]") {
+	auto brokenWithStrength = [](float materialStrength) {
+		engine::scene::RegisterSceneClasses();
+		Store store("physics.storm.material");
+		const Entity workspace = engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+		const auto storm = StormAtOrigin();
+		engine::physics::SetStorm(store, storm);
+		const Entity mast = DynamicPart(store, {storm.State.Parameters.CoreRadius, 0.0f, 0.0f}, 1.0f);
+		const Entity panel = DynamicPart(store, {storm.State.Parameters.CoreRadius + 1.0f, 0.0f, 0.0f}, 1.0f);
+		store.SetParent(mast, workspace);
+		store.SetParent(panel, workspace);
+		store.Set(mast, engine::physics::StormResponse{.ExposedArea = 2.0f});
+		store.Set(panel, engine::physics::StormResponse{.ExposedArea = 2.0f});
+		const Entity link =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("WeldConstraint")), "MaterialLink");
+		store.SetParent(link, mast);
+		store.Set(link, engine::scene::WeldConstraint{mast, panel});
+		store.Set(link, engine::physics::StormLink{.BreakForce = 1.0f, .MaterialStrength = materialStrength});
+		store.AdvanceTick(TICK);
+		engine::physics::ApplyStormForces(store);
+		return store.Get<engine::scene::WeldConstraint>(link)->Enabled;
+	};
+
+	CHECK_FALSE(brokenWithStrength(0.55f));
+	CHECK(brokenWithStrength(1000000.0f));
+}
+
 TEST_CASE("storm wind bends static vegetation and restores its authored pose", "[physics][storm]") {
 	engine::scene::RegisterSceneClasses();
 	Store store("physics.storm.vegetation");

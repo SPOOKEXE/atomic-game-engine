@@ -49,6 +49,16 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Storm.Sample") != std::string::npos);
 	CHECK(document.find("Storm.Visibility") != std::string::npos);
 	CHECK(document.find("Storm.Damage") != std::string::npos);
+	CHECK(document.find("StormInteraction") != std::string::npos);
+	CHECK(document.find("WoodenSign") != std::string::npos);
+	CHECK(document.find("SteelPanel") != std::string::npos);
+	CHECK(document.find("WindBentTree") != std::string::npos);
+	CHECK(document.find("StormExposedArea") != std::string::npos);
+	CHECK(document.find("StormBreakForce") != std::string::npos);
+	CHECK(document.find("StormMaterialStrength") != std::string::npos);
+	CHECK(document.find("StormRestFrame") != std::string::npos);
+	CHECK(document.find("retireWhenBroken") != std::string::npos);
+	CHECK(document.find("Debris:AddItem") != std::string::npos);
 	CHECK(document.find("MessagingService:PublishAsync(\"tornado.sim.control\"") != std::string::npos);
 	CHECK(document.find("MessagingService:SubscribeAsync(\"tornado.sim.control\"") != std::string::npos);
 	CHECK(document.find("Controls.parameters") != std::string::npos);

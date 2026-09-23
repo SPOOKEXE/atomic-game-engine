@@ -63,6 +63,8 @@ return Controls
 ]]></Source>
 		<Source path="scripts/server/TornadoServer.server.luau"><![CDATA[--!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
 local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
 
 -- The fixed-step physics resource owns lifecycle and force application.
@@ -118,6 +120,57 @@ MessagingService:SubscribeAsync("tornado.sim.control", function(message)
 		Storm.Configure({ LifecycleEnabled = request.value })
 	end
 end)
+
+local interaction = workspace:FindFirstChild("StormInteraction")
+if interaction ~= nil then
+	local mast = interaction:FindFirstChild("SteelMast") :: Part
+	local woodenSign = interaction:FindFirstChild("WoodenSign") :: Part
+	local steelPanel = interaction:FindFirstChild("SteelPanel") :: Part
+	local tree = interaction:FindFirstChild("WindBentTree") :: Part
+
+	-- Each failure keeps its material multiplier separate from the structural rating.
+	woodenSign.StormExposedArea = 12.0
+	woodenSign.StormDragCoefficient = 1.15
+	woodenSign.StormForceScale = 1.0
+	steelPanel.StormExposedArea = 7.0
+	steelPanel.StormDragCoefficient = 1.05
+	steelPanel.StormForceScale = 0.7
+
+	tree.StormRestFrame = tree.CFrame
+	tree.StormMaximumBendRadians = 0.52
+	tree.StormResponsePerSecond = 5.0
+	tree.StormWindSpeedForMaximumBend = 72.0
+
+	local woodLink = Instance.new("WeldConstraint")
+	woodLink.Name = "Wood Sign Wind Link"
+	woodLink.Part0 = mast
+	woodLink.Part1 = woodenSign
+	woodLink.StormBreakForce = 360.0
+	woodLink.StormMaterialStrength = 0.55
+	woodLink.Parent = interaction
+
+	local steelLink = Instance.new("WeldConstraint")
+	steelLink.Name = "Steel Panel Wind Link"
+	steelLink.Part0 = mast
+	steelLink.Part1 = steelPanel
+	steelLink.StormBreakForce = 640.0
+	steelLink.StormMaterialStrength = 1.65
+	steelLink.Parent = interaction
+
+	local function retireWhenBroken(link: WeldConstraint, part: Part)
+		local retired = false
+		RunService.Heartbeat:Connect(function()
+			if retired or link.Enabled then return end
+			retired = true
+			local damage = Storm.Damage(part.Position)
+			Debris:AddItem(part, if damage.Potential > 0.5 then 5.0 else 10.0)
+			Debris:AddItem(link, 10.0)
+		end)
+	end
+
+	retireWhenBroken(woodLink, woodenSign)
+	retireWhenBroken(steelLink, steelPanel)
+end
 ]]></Source>
 		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
 local StarterGui = game:GetService("StarterGui")
@@ -811,6 +864,32 @@ end)
 			<Item class="Part" name="ChaseVehicle" id="11"><Property name="Size" type="Vector3">4,2,8</Property><Property name="Position" type="Vector3">-10,2,-55</Property></Item>
 			<Item class="Part" name="StormAnchor" id="12"><Property name="Position" type="Vector3">0,0,95</Property>
 		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property><Property name="CondensationColor" type="Color3">0.34,0.27,0.20</Property><Property name="CondensationAlpha" type="float">0.16</Property><Property name="CondensationSize" type="float">8.5</Property><Property name="RainColor" type="Color3">0.16,0.20,0.22</Property><Property name="RainAlpha" type="float">0.10</Property><Property name="RainSize" type="float">0.30</Property><Property name="DebrisColor" type="Color3">0.22,0.15,0.09</Property><Property name="DebrisAlpha" type="float">0.16</Property><Property name="DebrisSize" type="float">0.8</Property></Item>
+			</Item>
+		</Item>
+		<Item class="Model" name="StormInteraction" id="25">
+			<Item class="Part" name="SteelMast" id="26">
+				<Property name="Size" type="Vector3">0.7,10,0.7</Property>
+				<Property name="Position" type="Vector3">-28,5,-12</Property>
+				<Property name="Color" type="Color3">0.18,0.20,0.22</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="Part" name="WoodenSign" id="27">
+				<Property name="Size" type="Vector3">5,2.8,0.25</Property>
+				<Property name="Position" type="Vector3">-25.3,7,-12</Property>
+				<Property name="Color" type="Color3">0.32,0.18,0.08</Property>
+				<Property name="Anchored" type="bool">false</Property>
+			</Item>
+			<Item class="Part" name="SteelPanel" id="28">
+				<Property name="Size" type="Vector3">3.2,2.1,0.2</Property>
+				<Property name="Position" type="Vector3">-25.8,3.5,-12</Property>
+				<Property name="Color" type="Color3">0.34,0.36,0.37</Property>
+				<Property name="Anchored" type="bool">false</Property>
+			</Item>
+			<Item class="Part" name="WindBentTree" id="29">
+				<Property name="Size" type="Vector3">2.4,14,2.4</Property>
+				<Property name="Position" type="Vector3">18,7,-26</Property>
+				<Property name="Color" type="Color3">0.10,0.24,0.08</Property>
+				<Property name="Anchored" type="bool">true</Property>
 			</Item>
 		</Item>
 	</Item>
