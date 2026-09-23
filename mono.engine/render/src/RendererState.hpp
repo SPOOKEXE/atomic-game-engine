@@ -1560,6 +1560,7 @@ namespace engine::render {
 			uint32_t RequestedCount = 0;
 			uint32_t Seed = 0;
 			uint8_t Layers = 0;
+			scene::GpuParticleField Field;
 			scene::WorldLighting Lighting;
 			bool ResetPending = true;
 			bool SubmissionPending = false;

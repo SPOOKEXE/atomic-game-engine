@@ -1344,8 +1344,17 @@ declare interface VectorField3D extends PVInstance {
 }
 
 declare interface GpuParticleField extends Instance {
+	CondensationAlpha: number;
+	CondensationColor: Color3;
+	CondensationSize: number;
+	DebrisAlpha: number;
+	DebrisColor: Color3;
+	DebrisSize: number;
 	Enabled: boolean;
 	Layers: number;
+	RainAlpha: number;
+	RainColor: Color3;
+	RainSize: number;
 	RequestedCount: number;
 	Seed: number;
 }

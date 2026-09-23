@@ -1709,6 +1709,7 @@ namespace engine::render {
 		state.RequestedCount = requested;
 		state.Seed = source.Field.Seed;
 		state.Layers = source.Field.Layers;
+		state.Field = source.Field;
 		state.Lighting = view.Lighting;
 		if (changed) state.ResetPending = true;
 
@@ -1802,10 +1803,22 @@ namespace engine::render {
 			{up.X, up.Y, up.Z, 0.0f},
 			{forward.X, forward.Y, forward.Z, 0.0f},
 			{1.0f, 0.0f, 0.0f, 0.0f},
-			{source.Field.CondensationColor.R, source.Field.CondensationColor.G, source.Field.CondensationColor.B, source.Field.CondensationAlpha},
-			{source.Field.RainColor.R, source.Field.RainColor.G, source.Field.RainColor.B, source.Field.RainAlpha},
-			{source.Field.DebrisColor.R, source.Field.DebrisColor.G, source.Field.DebrisColor.B, source.Field.DebrisAlpha},
-			{source.Field.CondensationSize, source.Field.RainSize, source.Field.DebrisSize, 0.0f},
+			{ActiveGpuParticleFieldWorld->Field.CondensationColor.R,
+			 ActiveGpuParticleFieldWorld->Field.CondensationColor.G,
+			 ActiveGpuParticleFieldWorld->Field.CondensationColor.B,
+			 ActiveGpuParticleFieldWorld->Field.CondensationAlpha},
+			{ActiveGpuParticleFieldWorld->Field.RainColor.R,
+			 ActiveGpuParticleFieldWorld->Field.RainColor.G,
+			 ActiveGpuParticleFieldWorld->Field.RainColor.B,
+			 ActiveGpuParticleFieldWorld->Field.RainAlpha},
+			{ActiveGpuParticleFieldWorld->Field.DebrisColor.R,
+			 ActiveGpuParticleFieldWorld->Field.DebrisColor.G,
+			 ActiveGpuParticleFieldWorld->Field.DebrisColor.B,
+			 ActiveGpuParticleFieldWorld->Field.DebrisAlpha},
+			{ActiveGpuParticleFieldWorld->Field.CondensationSize,
+			 ActiveGpuParticleFieldWorld->Field.RainSize,
+			 ActiveGpuParticleFieldWorld->Field.DebrisSize,
+			 0.0f},
 		};
 		FieldMaterial material{};
 		material.Flags = {0.0f, 0.0f, 0.75f, 1.0f};

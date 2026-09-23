@@ -8,9 +8,9 @@
 //
 // @tier L7 · shared
 
-#include <cstdint>
+#include <engine/core/types/Color3.hpp>
 
-#include <engine/core/Color3.hpp>
+#include <cstdint>
 
 namespace engine::scene {
 

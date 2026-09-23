@@ -1592,8 +1592,17 @@ declare extern type VectorField3D extends PVInstance with
 end
 
 declare extern type GpuParticleField extends Instance with
+	CondensationAlpha: number
+	CondensationColor: Color3
+	CondensationSize: number
+	DebrisAlpha: number
+	DebrisColor: Color3
+	DebrisSize: number
 	Enabled: boolean
 	Layers: number
+	RainAlpha: number
+	RainColor: Color3
+	RainSize: number
 	RequestedCount: number
 	Seed: number
 end
