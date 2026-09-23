@@ -17,6 +17,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/DemosLoader.hpp>
@@ -50,6 +51,7 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/DataSceneService.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/world/HostLink.hpp>
@@ -76,6 +78,7 @@
 #include <nlohmann/json.hpp>
 #include <thread>
 #include <type_traits>
+#include <unordered_set>
 
 namespace client {
 
@@ -85,6 +88,32 @@ namespace client {
 	using engine::render::ProfilerTab;
 
 	namespace {
+		bool IdentifyAuthoredInstances(engine::ecs::Store &store) {
+			const engine::core::Name key(engine::script::DATA_SCENE_ID_ATTRIBUTE);
+			std::vector<engine::ecs::Entity> missing;
+			std::unordered_set<std::string> used;
+			store.Each<const engine::ecs::InstanceName>([&](engine::ecs::Entity entity, const auto &) {
+				engine::ecs::AttributeValue value;
+				if (engine::ecs::GetAttribute(store, entity, key, value) &&
+					value.Type == engine::ecs::PropertyType::String && !value.String.empty()) {
+					used.insert(value.String);
+				} else {
+					missing.push_back(entity);
+				}
+			});
+			for (const engine::ecs::Entity entity : missing) {
+				std::string id = "authored/" + std::to_string(entity.Id);
+				while (used.contains(id))
+					id += "_";
+				used.insert(id);
+				engine::ecs::AttributeValue value;
+				value.Type = engine::ecs::PropertyType::String;
+				value.String = std::move(id);
+				if (!engine::ecs::SetAttribute(store, entity, key, value)) return false;
+			}
+			return true;
+		}
+
 		uint64_t MixCameraTemporal(uint64_t state, uint64_t value) {
 			return (state ^ value) * 1099511628211ull;
 		}
@@ -665,6 +694,19 @@ namespace client {
 					});
 					return true;
 				}
+				if (paused && !Settings.ScriptPath.empty()) {
+					bool identified = false;
+					if (Universe_->Enter(
+							world,
+							[&identified](engine::ecs::Store &store) {
+								identified = IdentifyAuthoredInstances(store);
+							}
+						) != engine::world::WorldStatus::Ok ||
+						!identified) {
+						detail = "client could not identify authored scene instances";
+						return false;
+					}
+				}
 				if (Sound == nullptr) return true;
 				const bool before = Sound->Paused();
 				if (Sound->SetPaused(paused)) return true;
@@ -825,6 +867,13 @@ namespace client {
 		// camera comes from. A client draws one world's worth of camera however
 		// many it composites.
 		if (!Simulated.empty()) Rendered = Simulated.front();
+		if (Settings.DataFactory && !Settings.ScriptPath.empty()) {
+			const auto adopted = DataFactory->AdoptWorld(Universe_->NameOf(Rendered).Text());
+			if (adopted.Status != engine::world::DataFactoryStatus::Ok) {
+				ENGINE_ERROR("could not adopt authored data-factory world: {}", adopted.Detail);
+				return false;
+			}
+		}
 
 		if (!BeginConnecting()) {
 			return false;
