@@ -4347,8 +4347,8 @@ TEST_CASE(
 	REQUIRE(captured.Planes.size() == 5);
 	for (const auto &plane : captured.Planes) {
 		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
-		CHECK(plane.Width > 0);
-		CHECK(plane.Height > 0);
+		CHECK(plane.Width == target.Width);
+		CHECK(plane.Height == target.Height);
 		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
 	}
 	CHECK(captured.Planes[0].Channel == render::DataCaptureChannel::RgbLinearHdr);
@@ -4425,6 +4425,10 @@ TEST_CASE(
 	for (const auto &plane : captured.Planes) {
 		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
 		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
+		if (plane.Channel != render::DataCaptureChannel::AmbientOcclusion) {
+			CHECK(plane.Width == target.Width);
+			CHECK(plane.Height == target.Height);
+		}
 	}
 	CHECK_FALSE(captured.Planes[0].Bytes.empty());
 	CHECK_FALSE(captured.Planes[1].Bytes.empty());
