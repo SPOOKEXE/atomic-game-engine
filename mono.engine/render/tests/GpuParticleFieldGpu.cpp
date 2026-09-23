@@ -236,6 +236,19 @@ TEST_CASE(
 	CHECK(refusedFrame.ParticlesDrawn >= 262'144);
 	CHECK(refusedFrame.ParticlesDrawn < 1'048'576);
 	CHECK(fixture.Render.MemoryStatistics().BufferBytes == firstMemory.BufferBytes);
+	const CapturedImage refusedImage = CaptureResource(
+		fixture.Render,
+		core::Name("composed-image"),
+		refused.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Bgra8Unorm
+	);
+	// The refused request changes the authored field back to its default grey
+	// condensation. Red pixels prove the retained GPU state and its preceding
+	// authored presentation values still draw after allocation fails.
+	CHECK(ChangedBytes(empty, refusedImage) > 64);
+	CHECK(RedDominantPixels(refusedImage, empty) > 64);
 
 	auto resized = FieldView(target, 1'048'576, 23);
 	const render::FrameResult resizedFrame =
