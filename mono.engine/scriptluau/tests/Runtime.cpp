@@ -136,9 +136,12 @@ TEST_CASE(
 		Storm.Preset("EF4")
 		Storm.Configure({ Position = Vector3.new(4, 0, 8), LifecycleEnabled = true })
 		local field = Storm.Sample(Vector3.new(32, 12, 8))
+		local snapshot = Storm.Snapshot()
 		local visibility = Storm.Visibility(Vector3.new(32, 12, 8), 400)
 		local damage = Storm.Damage(Vector3.new(32, 12, 8))
-		assert(field.Influence > 0 and visibility.EffectiveDistance > 0 and damage.Potential >= 0)
+		assert(field.Influence > 0 and snapshot.Position == Vector3.new(4, 0, 8))
+		assert(snapshot.Parameters.Energy > 0 and snapshot.LifecycleEnabled)
+		assert(visibility.EffectiveDistance > 0 and damage.Potential >= 0)
 	)"));
 
 	const engine::physics::Storm *storm = engine::physics::StormOf(store);

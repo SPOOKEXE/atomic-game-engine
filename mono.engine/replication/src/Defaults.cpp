@@ -145,6 +145,15 @@ namespace engine::replication {
 			return false;
 		}
 
+		constexpr std::string_view WORLD_RESOURCES[] = {"physics.Storm"};
+
+		bool IsSharedWorldResource(std::string_view component) {
+			for (const std::string_view named : WORLD_RESOURCES) {
+				if (component == named) return true;
+			}
+			return false;
+		}
+
 		// The two written by a system every tick, so the dirty bits already
 		// know.
 		//
@@ -470,7 +479,9 @@ namespace engine::replication {
 					ecs::Components::Describe(ecs::ComponentId{static_cast<uint32_t>(index)});
 
 				const std::string_view name = type.Name.Text();
-				const bool shared = UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name);
+				const bool resource = IsSharedWorldResource(name);
+				const bool shared =
+					UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name) || resource;
 				if (!shared || LocalToTheClient(name)) {
 					continue;
 				}
@@ -563,6 +574,7 @@ namespace engine::replication {
 					ReplicatedComponent{
 						name,
 						observed ? ChangeDetection::Observed : ChangeDetection::Signature,
+						resource,
 						suppressor,
 					}
 				);

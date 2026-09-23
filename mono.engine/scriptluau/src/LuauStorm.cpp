@@ -70,6 +70,36 @@ namespace engine::script {
 			ReadBool(state, table, "CounterClockwise", p.CounterClockwise);
 		}
 
+		void PushParameters(lua_State *state, const TornadoParameters &p) {
+			lua_newtable(state);
+			const auto number = [&](const char *name, float value) {
+				lua_pushnumber(state, value);
+				lua_setfield(state, -2, name);
+			};
+			number("Energy", p.Energy);
+			number("CoreRadius", p.CoreRadius);
+			number("InfluenceRadius", p.InfluenceRadius);
+			number("PeakTangentialSpeed", p.PeakTangentialSpeed);
+			number("PeakInflowSpeed", p.PeakInflowSpeed);
+			number("PeakUpdraftSpeed", p.PeakUpdraftSpeed);
+			number("PeakDowndraftSpeed", p.PeakDowndraftSpeed);
+			number("SurfaceOutflowSpeed", p.SurfaceOutflowSpeed);
+			number("PressureDrop", p.PressureDrop);
+			number("Humidity", p.Humidity);
+			number("RainRate", p.RainRate);
+			number("Turbulence", p.Turbulence);
+			number("GroundFriction", p.GroundFriction);
+			number("DebrisDensity", p.DebrisDensity);
+			number("VortexTightness", p.VortexTightness);
+			number("TopHeight", p.TopHeight);
+			*PushVector3(state) = p.UpperWind;
+			lua_setfield(state, -2, "UpperWind");
+			*PushVector3(state) = p.TranslationVelocity;
+			lua_setfield(state, -2, "TranslationVelocity");
+			lua_pushboolean(state, p.CounterClockwise);
+			lua_setfield(state, -2, "CounterClockwise");
+		}
+
 		int Configure(lua_State *state) {
 			if (!RequireAuthority(state)) return 0;
 			luaL_checktype(state, 1, LUA_TTABLE);
@@ -117,6 +147,22 @@ namespace engine::script {
 			return 1;
 		}
 
+		int Snapshot(lua_State *state) {
+			const Storm storm = CurrentStorm(state);
+			lua_newtable(state);
+			*PushVector3(state) = storm.State.Position;
+			lua_setfield(state, -2, "Position");
+			lua_pushnumber(state, storm.State.ElapsedSeconds);
+			lua_setfield(state, -2, "ElapsedSeconds");
+			lua_pushboolean(state, storm.State.LifecycleEnabled);
+			lua_setfield(state, -2, "LifecycleEnabled");
+			lua_pushboolean(state, storm.Enabled);
+			lua_setfield(state, -2, "Enabled");
+			PushParameters(state, storm.State.Parameters);
+			lua_setfield(state, -2, "Parameters");
+			return 1;
+		}
+
 		int Visibility(lua_State *state) {
 			const Storm storm = CurrentStorm(state);
 			const scene::VisibilityResult result = scene::QueryStormVisibility(
@@ -158,6 +204,8 @@ namespace engine::script {
 		lua_setfield(state, -2, "Preset");
 		lua_pushcfunction(state, Sample, "Sample");
 		lua_setfield(state, -2, "Sample");
+		lua_pushcfunction(state, Snapshot, "Snapshot");
+		lua_setfield(state, -2, "Snapshot");
 		lua_pushcfunction(state, Visibility, "Visibility");
 		lua_setfield(state, -2, "Visibility");
 		lua_pushcfunction(state, Damage, "Damage");

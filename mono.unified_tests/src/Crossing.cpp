@@ -206,7 +206,7 @@ namespace unified {
 
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {
-			Authority_.Replicate(engine::core::Name(component.Name), component.Detection);
+			Authority_.Replicate(engine::core::Name(component.Name), component.Detection, component.Resource);
 		}
 
 		Handle = Authority_.Admit();

@@ -1754,7 +1754,7 @@ namespace server {
 		// gone is three chances to declare them differently.
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {
-			Replication->Authority().Replicate(engine::core::Name(component.Name), component.Detection);
+			Replication->Authority().Replicate(engine::core::Name(component.Name), component.Detection, component.Resource);
 
 			// After `Replicate`, which is what declares the slot this names.
 			if (!component.Suppressor.empty()) {

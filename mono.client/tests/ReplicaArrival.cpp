@@ -30,6 +30,8 @@
 #include <engine/gui/Typing.hpp>
 #include <engine/gui/VirtualCollection.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/physics/Pipeline.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Defaults.hpp>
@@ -105,6 +107,7 @@ namespace {
 			engine::scene::EnsureClassTree();
 			engine::scene::RegisterSceneComponents();
 			engine::scene::RegisterSceneClasses();
+			engine::physics::RegisterPhysicsComponents();
 			(void)engine::gui::RegisterGuiClasses();
 			(void)engine::script::ScriptClass();
 
@@ -140,7 +143,7 @@ namespace {
 			Server = std::make_unique<Listener>(*Transports[0], streaming);
 			for (const engine::replication::ReplicatedComponent &component :
 				 engine::replication::DefaultReplicatedComponents()) {
-				Server->Authority().Replicate(Name(component.Name), component.Detection);
+				Server->Authority().Replicate(Name(component.Name), component.Detection, component.Resource);
 				if (!component.Suppressor.empty()) {
 					Server->Authority().SuppressWhenTagged(Name(component.Name), Name(component.Suppressor));
 				}
@@ -349,6 +352,7 @@ namespace {
 	void RegisterEverything() {
 		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
+		engine::physics::RegisterPhysicsComponents();
 		(void)engine::gui::RegisterGuiClasses();
 		(void)engine::script::ScriptClass();
 	}
@@ -873,6 +877,41 @@ TEST_CASE(
 	CHECK(link.Replica.Get<engine::gui::Label>(watched) == nullptr);
 	CHECK(link.Replica.Alive(viewer));
 	CHECK(link.Client->Forgotten().empty());
+}
+
+TEST_CASE("a server storm reaches replica scripts as authoritative state", "[client][replication][storm]") {
+	Link link;
+	engine::physics::Storm storm;
+	storm.State.Position = {37.0f, 4.0f, -12.0f};
+	storm.State.ElapsedSeconds = 9.5f;
+	storm.State.Parameters.Energy = 3.0f;
+	storm.State.LifecycleEnabled = true;
+	engine::physics::SetStorm(link.World, storm);
+
+	REQUIRE(link.Join());
+	link.Settle();
+
+	const engine::physics::Storm *arrived = engine::physics::StormOf(link.Replica);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->State.Position.FuzzyEq(storm.State.Position));
+	CHECK(arrived->State.ElapsedSeconds == storm.State.ElapsedSeconds);
+	CHECK(arrived->State.Parameters.Energy == storm.State.Parameters.Energy);
+
+	storm.State.Position.X = 51.0f;
+	storm.State.ElapsedSeconds = 10.0f;
+	engine::physics::SetStorm(link.World, storm);
+	link.Settle();
+
+	arrived = engine::physics::StormOf(link.Replica);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->State.Position.FuzzyEq(storm.State.Position));
+	CHECK(arrived->State.ElapsedSeconds == storm.State.ElapsedSeconds);
+	REQUIRE(link.ReplicaScripts != nullptr);
+	CHECK(link.ReplicaScripts->Run(R"(
+		local state = Storm.Snapshot()
+		assert(state.Position == Vector3.new(51, 4, -12))
+		assert(state.ElapsedSeconds == 10 and state.Parameters.Energy == 3)
+	)"));
 }
 
 TEST_CASE("an unchanged script costs nothing per tick", "[client][replication][scripting]") {

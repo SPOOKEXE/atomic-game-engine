@@ -257,19 +257,22 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::Replicate(core::Name component, ChangeDetection detection) {
+	void Authority::Replicate(core::Name component, ChangeDetection detection, bool resource) {
 		if (!component.IsValid()) {
 			return;
 		}
 
 		const auto at = std::find(Components.begin(), Components.end(), component);
 		if (at != Components.end()) {
-			Detection[static_cast<size_t>(std::distance(Components.begin(), at))] = detection;
+			const size_t slot = static_cast<size_t>(std::distance(Components.begin(), at));
+			Detection[slot] = detection;
+			Resources[slot] = resource;
 			return;
 		}
 
 		Components.push_back(component);
 		Detection.push_back(detection);
+		Resources.push_back(resource);
 		Suppressors.emplace_back();
 		Signatures.emplace_back();
 	}
@@ -434,6 +437,7 @@ namespace engine::replication {
 				crossing.Id = ecs::ComponentId{};
 				crossing.Descriptor = nullptr;
 				crossing.Sendable = false;
+				crossing.Resource = false;
 				crossing.Changed.clear();
 
 				const core::Name name = Components[slot];
@@ -445,6 +449,7 @@ namespace engine::replication {
 
 				crossing.Id = id;
 				crossing.Descriptor = &ecs::Components::Describe(id);
+				crossing.Resource = Resources[slot];
 
 				// **The two guards a delta row has to pass, asked about the
 				// component rather than about a row and asked once a tick.** A
@@ -876,6 +881,15 @@ namespace engine::replication {
 				scratch.SetComponent(entity, id, decoded.data());
 				descriptor.Destruct(decoded.data(), 1);
 			}
+		}
+
+		// World resources have no entity to enter the interest-selected loop
+		// above. The declaration marks the small set that crosses whole, and a
+		// scratch copy keeps their save format identical to ordinary snapshots.
+		for (const Crossing &crossing : Crossings) {
+			if (!crossing.Sendable || !crossing.Resource) continue;
+			const void *value = store.ResourceById(crossing.Id);
+			if (value != nullptr) scratch.SetResourceById(crossing.Id, value);
 		}
 
 		core::ByteWriter writer;
@@ -1850,6 +1864,20 @@ namespace engine::replication {
 				);
 				component.Entities.push_back(entity);
 			};
+
+			if (crossing.Resource) {
+				// Resources are authoritative world state. Sending the current copy
+				// every tick avoids a second dirty tracker for data outside ECS rows.
+				if (const void *value = store.ResourceById(id)) offer(ecs::NULL_ENTITY, value);
+				if (component.Entities.empty()) {
+					lane.Candidates.resize(before);
+					continue;
+				}
+				component.Values = values.TakeBytes();
+				lane.SourceSlot.push_back(slot);
+				delta.Components.push_back(std::move(component));
+				continue;
+			}
 
 			// The tag that takes this component's rows off the wire per entity,
 			// or invalid when this slot has none - which is every slot by

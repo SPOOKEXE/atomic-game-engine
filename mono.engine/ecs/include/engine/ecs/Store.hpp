@@ -546,6 +546,20 @@ namespace engine::ecs {
 			RemoveResourceRaw(Components::Of<T>());
 		}
 
+		// The type-erased resource boundary used by serializers that resolve a
+		// stable component name at runtime.
+		const void *ResourceById(ComponentId id) const {
+			return GetResourceRaw(id);
+		}
+		void SetResourceById(ComponentId id, const void *value) {
+			RequireOwningThread("SetResourceById");
+			SetResourceRaw(id, value);
+		}
+		void RemoveResourceById(ComponentId id) {
+			RequireOwningThread("RemoveResourceById");
+			RemoveResourceRaw(id);
+		}
+
 		// --- time ----------------------------------------------------------
 		//
 		// The clock is created as a resource and has dedicated read/write methods.

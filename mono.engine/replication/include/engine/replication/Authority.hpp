@@ -218,7 +218,9 @@ namespace engine::replication {
 		//
 		// @param component The component's registered name.
 		// @param detection How changes are detected.
-		void Replicate(core::Name component, ChangeDetection detection = ChangeDetection::Observed);
+		void Replicate(
+			core::Name component, ChangeDetection detection = ChangeDetection::Observed, bool resource = false
+		);
 
 		// How a replicated component's changes are noticed.
 		//
@@ -1082,6 +1084,8 @@ namespace engine::replication {
 			// be warned about once per client per tick.
 			bool Sendable = false;
 
+			bool Resource = false;
+
 			// This tick's changed rows, for a slot whose detection reads the
 			// store's dirty bits. Empty for a signed slot, which carries its
 			// changed ids in `Signature::Changed` instead.
@@ -1472,6 +1476,7 @@ namespace engine::replication {
 		uint64_t ObservationRound = 0;
 
 		std::vector<ChangeDetection> Detection;
+		std::vector<bool> Resources;
 
 		// Per slot, the tag whose presence suppresses that component's deltas for
 		// one entity, or an invalid name for none. See `SuppressWhenTagged`.

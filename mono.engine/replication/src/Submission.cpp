@@ -77,13 +77,16 @@ namespace engine::replication {
 			std::vector<std::byte> scratch(descriptor.Size);
 
 			for (const ecs::Entity entity : component.Entities) {
-				const bool permitted = !allow || allow(component.Component, entity);
+				const bool resource = entity == ecs::NULL_ENTITY;
+				const bool permitted = !allow || (!resource && allow(component.Component, entity));
 
 				// A tag carries no value, so there is no stream to keep in step
 				// and a refusal is simply a write that does not happen.
 				if (descriptor.Size == 0) {
 					if (!permitted) {
 						outcome.Refused++;
+					} else if (resource) {
+						store.RemoveResourceById(id);
 					} else if (!store.Alive(entity)) {
 						outcome.Whole = false;
 					} else {
@@ -118,6 +121,8 @@ namespace engine::replication {
 				// header.
 				if (!permitted) {
 					outcome.Refused++;
+				} else if (resource) {
+					store.SetResourceById(id, scratch.data());
 				} else if (!store.Alive(entity)) {
 					outcome.Whole = false;
 				} else if (id == hierarchy) {

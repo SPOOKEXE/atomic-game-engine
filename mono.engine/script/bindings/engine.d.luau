@@ -3411,10 +3411,19 @@ declare extern type StormDamage with
 	Band: number
 end
 
+declare extern type StormSnapshot with
+	Position: Vector3
+	ElapsedSeconds: number
+	LifecycleEnabled: boolean
+	Enabled: boolean
+	Parameters: { [string]: any }
+end
+
 declare extern type StormService with
 	function Configure(self, values: { [string]: any }): ()
 	function Preset(self, name: string): ()
 	function Sample(self, position: Vector3): StormFieldSample
+	function Snapshot(self): StormSnapshot
 	function Visibility(self, position: Vector3, viewDistance: number): StormVisibility
 	function Damage(self, position: Vector3): StormDamage
 end
