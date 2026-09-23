@@ -180,6 +180,7 @@ namespace engine::render {
 			frame.CloudParameters.reset();
 		}
 		if (const auto *storm = physics::StormOf(store)) {
+			bool cloudDensityEnabled = true;
 			bool cloudInputsChanged = false;
 			if (frame.CloudParameters) {
 				auto previous = *frame.CloudParameters;
@@ -192,14 +193,17 @@ namespace engine::render {
 									 (frame.CloudBuiltSeconds == time.Elapsed && energyChange > 0.0f);
 			}
 			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
+				cloudDensityEnabled = cloudDensityEnabled && field.CloudDensity;
 				if (!frame.GpuParticles.has_value()) {
 					frame.GpuParticles = GpuParticleFieldView{
 						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds
 					};
 				}
 			});
-			if (!frame.CloudDensity || cloudInputsChanged || time.Elapsed < frame.CloudBuiltSeconds ||
-				time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
+			if (!cloudDensityEnabled) {
+				frame.CloudDensity.reset();
+			} else if (!frame.CloudDensity || cloudInputsChanged || time.Elapsed < frame.CloudBuiltSeconds ||
+					   time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
 				ENGINE_PROFILE_CAT("storm cloud density build", core::ProfileCategory::Render);
 				frame.CloudBuiltSeconds = time.Elapsed;
 				frame.CloudParameters = storm->State.Parameters;

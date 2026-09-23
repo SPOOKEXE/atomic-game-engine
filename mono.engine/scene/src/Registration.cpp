@@ -54,8 +54,9 @@ namespace engine::scene {
 			const auto *fields = static_cast<const GpuParticleField *>(source);
 			for (size_t index = 0; index < count; ++index) {
 				writer.WriteBool(fields[index].Enabled);
+				writer.WriteBool(fields[index].CloudDensity);
 				writer.WriteUInt8(fields[index].Layers);
-				writer.WriteUInt16(fields[index].Reserved);
+				writer.WriteUInt8(fields[index].Reserved);
 				writer.WriteUInt32(fields[index].RequestedCount);
 				writer.WriteUInt32(fields[index].Seed);
 				for (const core::Color3 colour :
@@ -78,8 +79,9 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; ++index) {
 				GpuParticleField field;
 				field.Enabled = reader.ReadBool();
+				field.CloudDensity = reader.ReadBool();
 				field.Layers = reader.ReadUInt8();
-				field.Reserved = reader.ReadUInt16();
+				field.Reserved = reader.ReadUInt8();
 				field.RequestedCount = reader.ReadUInt32();
 				field.Seed = reader.ReadUInt32();
 				field.CondensationColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};

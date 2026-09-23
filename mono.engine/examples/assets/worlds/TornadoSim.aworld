@@ -1254,6 +1254,7 @@ funnelOnlyControl = button("FUNNEL", 119, 810, function()
 	activeLayers = if activeLayers == 1 then 7 else 1
 	clouds.Cover = if activeLayers == 1 then 0 else 0.98
 	clouds.Density = if activeLayers == 1 then 0 else 0.98
+	visualField.CloudDensity = activeLayers ~= 1
 	for _, volume in ipairs(funnelVolumes) do volume.Enabled = activeLayers ~= 1 end
 	for _, shelf in ipairs(cloudShelf) do shelf.Enabled = activeLayers ~= 1 end
 	updateLayers()
