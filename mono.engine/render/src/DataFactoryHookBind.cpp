@@ -680,6 +680,15 @@ namespace engine::render {
 				poll.PipelineRevision = batch.Observation.PipelineRevision;
 				poll.WorldName = batch.Observation.WorldName;
 				poll.ViewSlot = batch.Observation.ViewSlot;
+			} else if (poll.Status == DataCaptureStatus::Partial) {
+				// PollDataCapture already proved every retained image belongs to one
+				// capture bundle. A disabled sibling has no image and may otherwise
+				// leave the hook observing its node instead of the retained one.
+				batch.Observation.Frame = poll.CaptureFrame;
+				batch.Observation.Pipeline = poll.Pipeline;
+				batch.Observation.PipelineRevision = poll.PipelineRevision;
+				batch.Observation.WorldName = poll.WorldName;
+				batch.Observation.ViewSlot = poll.ViewSlot;
 			}
 			if (poll.SnapshotId != batch.Observation.SnapshotId ||
 				poll.CaptureFrame != batch.Observation.Frame || poll.Pipeline != batch.Observation.Pipeline ||
