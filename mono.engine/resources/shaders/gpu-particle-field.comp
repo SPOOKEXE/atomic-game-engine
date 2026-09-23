@@ -34,8 +34,22 @@ float FunnelRadiusAt(float height) {
 	return max(field.radii.x, 1.0) * (0.48 + 0.0024 * max(height, 0.0) * heightScale);
 }
 
+uint DrawBudget(uint activeCount) {
+	return activeCount <= 1000000u ? 18000u
+		: (activeCount <= 2000000u ? 36000u
+		: (activeCount <= 5000000u ? 64000u
+		: (activeCount <= 10000000u ? 96000u
+		: (activeCount <= 15000000u ? 128000u : 160000u))));
+}
+
 float ParticleKind(uint index) {
-	uint lane = index % 16u;
+	const uint drawBudget = DrawBudget(uint(field.control.x));
+	// Keep small, contiguous cohorts at the front of the device-only simulation
+	// buffer. The graphics pass can draw these without copying or reading back
+	// the full field, then place every parcel in one ordered depth slice.
+	if (index < drawBudget) return 0.0;
+	if (index < drawBudget * 2u) return 1.0;
+	uint lane = (index - drawBudget * 2u) % 16u;
 	// Nine lanes match the tornado-family proportion used by the reference
 	// simulation. More overlapping condensation billows keep the funnel from
 	// breaking into isolated puffs at the one-million-particle preset.

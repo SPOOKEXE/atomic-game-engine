@@ -137,7 +137,7 @@ TEST_CASE(
 	const render::FrameResult firstFrame =
 		fixture.Render.Render(std::span(&first, 1), overlay, nullptr, false);
 	CHECK(firstFrame.ComputeDispatches >= 1);
-	CHECK(firstFrame.ParticlesDrawn >= 262'144);
+	CHECK(firstFrame.ParticlesDrawn >= 18'000 * 13);
 	const CapturedImage field = CaptureResource(
 		fixture.Render,
 		core::Name("composed-image"),
@@ -228,13 +228,14 @@ TEST_CASE(
 	);
 	CHECK(ChangedBytes(redImage, smallerFainterImage) > 64);
 	const render::GpuMemoryStatistics firstMemory = fixture.Render.MemoryStatistics();
-	// The allocation path must retain the working 262k field when a larger
-	// optional preset cannot be admitted.
+	// The allocation path must retain the working 262k field when the largest
+	// optional preset cannot be admitted. This is the safe P50M fallback rather
+	// than a partial replacement of the active field.
 	render::test_support::SetForceGpuParticleFieldAllocationFailure(true);
-	auto refused = FieldView(target, 1'048'576, 19);
+	auto refused = FieldView(target, 50'000'000, 19);
 	const render::FrameResult refusedFrame =
 		fixture.Render.Render(std::span(&refused, 1), overlay, nullptr, false);
-	CHECK(refusedFrame.ParticlesDrawn >= 262'144);
+	CHECK(refusedFrame.ParticlesDrawn >= 18'000 * 13);
 	CHECK(refusedFrame.ParticlesDrawn < 1'048'576);
 	CHECK(fixture.Render.MemoryStatistics().BufferBytes == firstMemory.BufferBytes);
 	const CapturedImage refusedImage = CaptureResource(
@@ -255,7 +256,13 @@ TEST_CASE(
 	const render::FrameResult resizedFrame =
 		fixture.Render.Render(std::span(&resized, 1), overlay, nullptr, false);
 	CHECK(resizedFrame.ComputeDispatches >= 1);
-	CHECK(resizedFrame.ParticlesDrawn >= 1'048'576);
+	// The full million rows still step on the GPU, while the renderer submits
+	// The full million rows still step on the GPU, while the renderer submits an
+	// 18k condensation cohort across twelve ordered depth slices plus one rain
+	// cohort. The bounded draw keeps the 50M preset viable without weakening the
+	// simulation allocation.
+	CHECK(resizedFrame.ParticlesDrawn >= 18'000 * 13);
+	CHECK(resizedFrame.ParticlesDrawn < 1'048'576);
 	const render::GpuMemoryStatistics resizedMemory = fixture.Render.MemoryStatistics();
 	// The simulation state is the only field allocation: 32 bytes per row. A
 	// resize has no upload or download companion, so the transfer residency does

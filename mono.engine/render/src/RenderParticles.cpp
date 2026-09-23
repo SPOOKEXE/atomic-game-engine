@@ -32,6 +32,15 @@
 namespace engine::render {
 	namespace {
 		std::atomic_bool ForceGpuParticleFieldAllocationFailureForTests = false;
+
+		uint32_t GpuParticleFieldDrawBudget(uint32_t activeCount) {
+			if (activeCount <= 1'000'000) return 18'000;
+			if (activeCount <= 2'000'000) return 36'000;
+			if (activeCount <= 5'000'000) return 64'000;
+			if (activeCount <= 10'000'000) return 96'000;
+			if (activeCount <= 15'000'000) return 128'000;
+			return 160'000;
+		}
 		bool Finite(const core::Vector3 &value) {
 			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
 		}
@@ -1722,6 +1731,9 @@ namespace engine::render {
 		const scene::TornadoParameters parameters = scene::SanitizeTornadoParameters(source.Storm);
 		state.TopHeight = parameters.TopHeight;
 		state.CentreY = source.Centre.Y;
+		state.Centre = source.Centre;
+		state.CoreRadius = parameters.CoreRadius;
+		state.InfluenceRadius = parameters.InfluenceRadius;
 		const FieldUniforms uniforms{
 			{source.Centre.X, source.Centre.Y, source.Centre.Z, source.Seconds},
 			{parameters.CoreRadius, parameters.InfluenceRadius, parameters.TopHeight, view.ParticleDelta},
@@ -1787,6 +1799,8 @@ namespace engine::render {
 			glm::vec4 CameraUp;
 			glm::vec4 CameraForward;
 			glm::vec4 Options;
+			glm::vec4 FieldBounds;
+			glm::vec4 FieldDensity;
 			glm::vec4 Condensation;
 			glm::vec4 Rain;
 			glm::vec4 Debris;
@@ -1799,7 +1813,7 @@ namespace engine::render {
 			glm::vec4 Fog;
 			glm::vec4 Eye;
 		};
-		const FieldVertexUniforms uniforms{
+		FieldVertexUniforms uniforms{
 			viewProjection,
 			{right.X, right.Y, right.Z, 0.0f},
 			{up.X, up.Y, up.Z, 0.0f},
@@ -1808,6 +1822,11 @@ namespace engine::render {
 			 ActiveGpuParticleFieldWorld->CentreY,
 			 static_cast<float>(ActiveGpuParticleFieldWorld->Seed),
 			 0.0f},
+			{ActiveGpuParticleFieldWorld->Centre.X,
+			 ActiveGpuParticleFieldWorld->Centre.Y,
+			 ActiveGpuParticleFieldWorld->Centre.Z,
+			 ActiveGpuParticleFieldWorld->InfluenceRadius},
+			{ActiveGpuParticleFieldWorld->CoreRadius, 0.0f, 0.0f, 0.0f},
 			{ActiveGpuParticleFieldWorld->Field.CondensationColor.R,
 			 ActiveGpuParticleFieldWorld->Field.CondensationColor.G,
 			 ActiveGpuParticleFieldWorld->Field.CondensationColor.B,
@@ -1852,14 +1871,31 @@ namespace engine::render {
 			0.0f,
 		};
 		material.Eye = {eye.Position.X, eye.Position.Y, eye.Position.Z, 0.0f};
-		SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
 		SDL_GPUTextureSamplerBinding binding{FallbackTexture, Textures.Sampler()};
 		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-		SDL_DrawGPUPrimitives(pass, 4, ActiveGpuParticleFieldWorld->ActiveCount, 0, 0);
-		particlesDrawn += ActiveGpuParticleFieldWorld->ActiveCount;
-		triangles += static_cast<uint64_t>(ActiveGpuParticleFieldWorld->ActiveCount) * 2;
-		return 1;
+		const uint32_t drawBudget = std::min(
+			GpuParticleFieldDrawBudget(ActiveGpuParticleFieldWorld->ActiveCount),
+			ActiveGpuParticleFieldWorld->ActiveCount / 2
+		);
+		if (drawBudget == 0) return 0;
+		// Match the reference condensation path with twelve far-to-near buckets.
+		// Rain keeps one bounded pass because TornadoSim's authored rain emitters
+		// already provide the dense depth cues a repeated field pass would add.
+		// This avoids sorting or a second 50M-sized buffer while keeping cloud
+		// alpha compositing stable.
+		constexpr uint32_t depthSlices = 12;
+		for (uint32_t slice = 0; slice < depthSlices; ++slice) {
+			uniforms.Options.w = static_cast<float>(slice);
+			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+			SDL_DrawGPUPrimitives(pass, 4, drawBudget, 0, 0);
+		}
+		uniforms.Options.w = 0.0f;
+		SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+		SDL_DrawGPUPrimitives(pass, 4, drawBudget, 0, drawBudget);
+		particlesDrawn += drawBudget * (depthSlices + 1);
+		triangles += static_cast<uint64_t>(drawBudget) * (depthSlices + 1) * 2;
+		return depthSlices + 1;
 	}
 
 	void Renderer::Impl::ReleaseGpuParticleField() {

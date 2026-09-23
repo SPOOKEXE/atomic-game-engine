@@ -1560,7 +1560,8 @@ namespace engine::render {
 
 		// The analytical storm field shares no allocation or simulation path with
 		// authored emitters. Its one state row is both compute storage and the
-		// vertex stream, so even fifty million particles remain device-local.
+		// vertex stream. A bounded front cohort feeds the depth-sliced cloud draw,
+		// so even fifty million particles remain device-local.
 		SDL_GPUComputePipeline *GpuParticleFieldStep = nullptr;
 		SDL_GPUGraphicsPipeline *GpuParticleFieldPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrGpuParticleFieldPipeline = nullptr;
@@ -1575,6 +1576,9 @@ namespace engine::render {
 			uint8_t Layers = 0;
 			float TopHeight = 1.0f;
 			float CentreY = 0.0f;
+			core::Vector3 Centre;
+			float CoreRadius = 1.0f;
+			float InfluenceRadius = 1.0f;
 			scene::GpuParticleField Field;
 			scene::WorldLighting Lighting;
 			bool ResetPending = true;
