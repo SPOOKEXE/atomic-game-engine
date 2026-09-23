@@ -580,6 +580,28 @@ namespace engine::render {
 		}
 
 		if (!ticket.ImagesTaken) {
+			// A disabled local shadow has no producer. Remove its pending readback
+			// before waiting on the remaining selected lights, then compact their
+			// resource indices so a partial capture can complete normally.
+			for (size_t index = 0; index < ticket.Channels.size(); ++index) {
+				if (ticket.Channels[index] != DataCaptureChannel::LocalLightShadowVisibility ||
+					(ticket.LocalLightMatched[index] && ticket.LocalLightShadowAvailable[index]) ||
+					ticket.ChannelResourceIndices[index] == NO_DATA_CAPTURE_RESOURCE)
+					continue;
+				(void)CancelResourceImage(ticket.ResourceTokens[ticket.ChannelResourceIndices[index]]);
+				ticket.ChannelResourceIndices[index] = NO_DATA_CAPTURE_RESOURCE;
+			}
+			std::vector<uint8_t> remapped(ticket.ResourceTokens.size(), NO_DATA_CAPTURE_RESOURCE);
+			std::vector<uint64_t> retainedTokens;
+			for (uint8_t &resource : ticket.ChannelResourceIndices) {
+				if (resource == NO_DATA_CAPTURE_RESOURCE) continue;
+				if (remapped[resource] == NO_DATA_CAPTURE_RESOURCE) {
+					remapped[resource] = static_cast<uint8_t>(retainedTokens.size());
+					retainedTokens.push_back(ticket.ResourceTokens[resource]);
+				}
+				resource = remapped[resource];
+			}
+			ticket.ResourceTokens = std::move(retainedTokens);
 			auto completed = ticket.ResourceTokens.empty()
 								 ? std::optional<std::vector<ResourceImage>>(std::in_place)
 								 : TakeResourceImages(ticket.ResourceTokens);
