@@ -70,6 +70,28 @@ TEST_CASE("retained cloud density follows a frozen storm preset change", "[rende
 	CHECK(frame.CloudParameters->Energy == storm.State.Parameters.Energy);
 }
 
+TEST_CASE("storm cloud density follows the selected GPU particle field", "[render][world-view][cloud]") {
+	RegisterViewClasses();
+	ecs::Store store("selected-cloud-field");
+	physics::SetStorm(store, {});
+	const ecs::Entity selected = PartAt(store, {});
+	const ecs::Entity ignored = PartAt(store, {1.0f, 0.0f, 0.0f});
+	store.Set(selected, scene::GpuParticleField{.CloudDensity = false});
+	store.Set(ignored, scene::GpuParticleField{.CloudDensity = true});
+
+	render::WorldViewFrame frame;
+	render::CollectWorldView(store, core::Name("selected-cloud-field"), frame);
+	REQUIRE(frame.GpuParticles.has_value());
+	CHECK_FALSE(frame.GpuParticles->Field.CloudDensity);
+	CHECK_FALSE(frame.CloudDensity.has_value());
+
+	store.Set(selected, scene::GpuParticleField{.CloudDensity = true});
+	store.Set(ignored, scene::GpuParticleField{.CloudDensity = false});
+	render::CollectWorldView(store, core::Name("selected-cloud-field"), frame);
+	CHECK(frame.GpuParticles->Field.CloudDensity);
+	CHECK(frame.CloudDensity.has_value());
+}
+
 TEST_CASE(
 	"current-tick draw collection ignores a stale presentation alpha", "[render][world-view][data-capture]"
 ) {

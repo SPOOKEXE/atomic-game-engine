@@ -193,8 +193,8 @@ namespace engine::render {
 									 (frame.CloudBuiltSeconds == time.Elapsed && energyChange > 0.0f);
 			}
 			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
-				cloudDensityEnabled = cloudDensityEnabled && field.CloudDensity;
 				if (!frame.GpuParticles.has_value()) {
+					cloudDensityEnabled = field.CloudDensity;
 					frame.GpuParticles = GpuParticleFieldView{
 						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds
 					};
