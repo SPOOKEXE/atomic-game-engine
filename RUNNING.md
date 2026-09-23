@@ -147,6 +147,8 @@ directory. Use the `bench` preset for comparable measurements.
 | `bench-all [args...]` | Run every benchmark. |
 | `bench-accept [args...]` | Accept benchmark baselines. |
 | `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
+| `volume-light-stress [frames]` | Check lighting stress scene, selection costs, and Vulkan fog stress. Default: `120`. |
+| `lighting-stress-scene [frames]` | Run the 256 point, 256 spot, 256 fog volume scene. Default: `720`. |
 | `data-capture-hook-bench [samples]` | Measure renderer data-capture hooks. Default: `5`. |
 | `gpu-texture-atlas-bench [samples]` | Measure GPU texture-atlas work. Default: `1`. |
 | `check-bench-render-shaders` | Confirm benchmark shader staging. |

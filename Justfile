@@ -179,7 +179,7 @@ volume-light-stress frames="120":
     MONO_VOLUME_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][gpu][volume-stress]"
 
 # Runs the authored 256-point, 256-spot and 256-volume course through the
-# release renderer. Statistics and the frame graph stay on the terminal.
+# release renderer. The end-of-run statistics print to the terminal.
 lighting-stress-scene frames="720": (build "client")
     ./{{build}}/client/client --headless --script mono.engine/examples/assets/scripts/LightingStress.luau --frames {{frames}} --stats --graph --uncapped
 

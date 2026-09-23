@@ -86,10 +86,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] build a self-contained `TornadoSim.aworld` with reusable storm queries, in-game controls, damage interactions, audio, lightning, weather layers, and a GPU particle field.
 - [x] make Studio GUI Preview Controls hidden by default and interactive when enabled.
 - [x] remove the HarfBuzz configure notice from the Studio launcher build.
-- [_] validate combined lighting behavior with overlapping fog volumes, clouds, atmosphere, and god rays; expand compute shader tests and captures, and fix issues found.
-- [_] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks.
-- [_] compare TornadoSim field samples, presets, lifecycle, damage, and matched default and mature-funnel captures against the C++ reference; finish GPU preset and failure-fallback validation.
-- [_] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene.
+- [x] validate combined lighting behavior with overlapping fog volumes, clouds, atmosphere, and god rays; expand compute shader tests and captures, and fix issues found.
+- [x] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks.
+- [x] compare TornadoSim field samples, presets, lifecycle, damage, and matched default and mature-funnel captures against the C++ reference; finish GPU preset and failure-fallback validation.
+- [x] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene.
 
 ### v0.26
 

@@ -27,4 +27,10 @@ The existing `TornadoSim.luau` is a smaller demonstration. It has three EF prese
 
 The original uses direct Vulkan while the engine uses SDL GPU. The same appearance and behavior are the target, but exact pixels and identical GPU timings are not portable across these renderers. The 50M preset requires about 1.6 GiB in the reference and must stay optional with a clear allocation failure path.
 
-Implementation begins after the user approves this plan. Lighting capabilities and their stress tests are tracked separately and are prerequisites for final visual parity.
+The user approved this plan. Lighting capabilities and their stress tests are tracked separately.
+
+## Verification record
+
+The C++ reference passes all three CTest suites. Engine fixtures cover field samples, EF and Q presets, lifecycle, damage, and the 1M default. The Vulkan particle test covers depth-sliced drawing, preset resizing, and a forced 50M allocation failure that retains the previous working field without a CPU particle readback.
+
+Default and mature funnel captures were compared; the matched mature capture used 1200 frames at 1440 by 900 pixels. The mature engine camera was aligned to the reference horizon and funnel framing. Bounded, depth-ordered condensation drawing and broader billow blending removed the detached cap and made the middle of the funnel more continuous. The remaining silhouette texture and scenery differ between the SDL GPU engine scene and the direct Vulkan reference.
