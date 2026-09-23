@@ -112,6 +112,7 @@ controlEvent.OnServerEvent:Connect(function(payload: string)
 	elseif request.kind == "layers" and particleField ~= nil and type(request.mask) == "number"
 		and request.mask >= 0 and request.mask <= 7 and request.mask % 1 == 0 then
 		particleField.Layers = request.mask
+		if type(request.cloudDensity) == "boolean" then particleField.CloudDensity = request.cloudDensity end
 	elseif request.kind == "motion" and type(request.x) == "number" and type(request.y) == "number"
 		and type(request.z) == "number" and math.abs(request.x) <= 60 and math.abs(request.y) <= 60
 		and math.abs(request.z) <= 60 then
@@ -1223,7 +1224,7 @@ local function setEmitterLayer(emitters: { ParticleEmitter }, enabled: boolean, 
 	end
 end
 local function updateLayers()
-	request({ kind = "layers", mask = activeLayers })
+	request({ kind = "layers", mask = activeLayers, cloudDensity = activeLayers ~= 1 })
 	rainBank.Enabled = layerActive(activeLayers, 2)
 	for bit, control in pairs(layerButtons) do
 		local enabled = layerActive(activeLayers, bit)
