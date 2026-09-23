@@ -275,28 +275,31 @@ debris.Size = NumberSequence.new(0.5, 1.7)
 debris.Transparency = NumberSequence.new(0.76, 0.985)
 debris.Acceleration = Vector3.new(0, 8, 0)
 
--- Each source is a volume rather than a point. Low-opacity overlapping discs
--- make a taper with broken edges, while the GPU field keeps rain and debris
--- scalable without turning the condensation column into a white billboard.
+-- Each source is a shallow volume rather than a point. Slow overlapping wisps
+-- close the vertical seams, leaving a single taper instead of stacked puffs.
 local function condensationLayer(name: string, height: number, radius: number, rate: number, colour: Color3)
-	local host = makePart(name .. " Host", Vector3.new(radius * 2, 4, radius * 2), Vector3.new(0, height, 95), Color3.new(1, 1, 1))
+	local host = makePart(name .. " Host", Vector3.new(radius * 2, radius * 1.2, radius * 2), Vector3.new(0, height, 95), Color3.new(1, 1, 1))
 	host.Visible = false
 	local layer = emitter(name, host, rate, colour)
 	layer.MaxParticles = 900
+	layer.Shape = Enum.ParticleEmitterShape.Cylinder
 	layer.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
-	layer.Lifetime = NumberRange.new(2.6, 4.6)
-	layer.Speed = NumberRange.new(5, 13)
+	layer.Lifetime = NumberRange.new(3.4, 5.4)
+	layer.Speed = NumberRange.new(2, 6)
 	layer.SpreadAngle = Vector2.new(48, 48)
-	layer.Size = NumberSequence.new(radius * 0.16, radius * 0.32)
-	layer.Transparency = NumberSequence.new(0.78, 0.97)
-	layer.Acceleration = Vector3.new(0, 13, 0)
+	layer.Size = NumberSequence.new(radius * 0.14, radius * 0.28)
+	layer.Transparency = NumberSequence.new(0.87, 0.985)
+	layer.Acceleration = Vector3.new(0, 5, 0)
 	return layer
 end
 
-condensationLayer("Condensation Streamers", 7, 14, 80, Color3.fromRGB(79, 55, 36))
-condensationLayer("Funnel Lower Wisps", 31, 19, 110, Color3.fromRGB(89, 71, 52))
-condensationLayer("Funnel Mid Wisps", 72, 27, 140, Color3.fromRGB(83, 76, 67))
-condensationLayer("Funnel Upper Wisps", 125, 37, 180, Color3.fromRGB(68, 70, 68))
+condensationLayer("Condensation Streamers", 7, 14, 120, Color3.fromRGB(51, 34, 21))
+condensationLayer("Funnel Lower Wisps", 22, 20, 140, Color3.fromRGB(59, 45, 31))
+condensationLayer("Funnel Lower Body", 43, 27, 150, Color3.fromRGB(64, 54, 41))
+condensationLayer("Funnel Mid Wisps", 69, 35, 160, Color3.fromRGB(63, 60, 53))
+condensationLayer("Funnel Mid Body", 101, 46, 140, Color3.fromRGB(57, 58, 55))
+condensationLayer("Funnel Upper Wisps", 138, 60, 115, Color3.fromRGB(49, 51, 50))
+condensationLayer("Funnel Anvil Wisps", 176, 82, 80, Color3.fromRGB(43, 45, 44))
 
 -- Layers is a field mask. Preserve condensation with rain and debris: omitting
 -- bit one leaves only a thin spray column, even with a million GPU particles.
