@@ -108,10 +108,12 @@ namespace engine::render {
 		if (cache->Sky.Matches(signature, command)) return true;
 		SDL_GPUStorageTextureReadWriteBinding destination{};
 		destination.texture = destinationTexture;
-		// An authored edit can land while the previous environment version is
-		// still sampled by an in-flight frame. Cycling preserves that reader and
-		// hands this rare regeneration a writable backing image.
-		destination.cycle = true;
+		// Clouds sample this sky later in the same command buffer. SDL cycling can
+		// redirect that write to a new backing image while the sampler remains on
+		// the older history image, producing and then retaining a blank cloud map.
+		// Commands on the renderer's unified queue already order prior readers
+		// before this rare regeneration, so retain this backing through the chain.
+		destination.cycle = false;
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &destination, 1, nullptr, 0);
 		if (pass == nullptr) {
 			return false;
@@ -270,7 +272,10 @@ namespace engine::render {
 
 		SDL_GPUStorageTextureReadWriteBinding destination{};
 		destination.texture = destinationTexture;
-		destination.cycle = true;
+		// The sky pass samples this image later in the same command buffer. Keep
+		// one backing so that sampler sees this dispatch rather than an older
+		// cycled history image.
+		destination.cycle = false;
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &destination, 1, nullptr, 0);
 		if (pass == nullptr) {
 			ENGINE_ERROR("cloud environment compute pass: {}", SDL_GetError());
