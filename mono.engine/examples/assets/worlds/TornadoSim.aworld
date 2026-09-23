@@ -170,6 +170,82 @@ if interaction ~= nil then
 	retireWhenBroken(woodLink, woodenSign)
 	retireWhenBroken(steelLink, steelPanel)
 end
+
+-- Every assembly has an anchored foundation row. The physics weld pass selects
+-- that row as its root while support links survive, then the same connected
+-- component becomes dynamic when storm fatigue opens a path through it.
+local material = {
+	timber = { Colour = Color3.fromRGB(133, 87, 48), Strength = 0.72, BreakForce = 18500, DamageRate = 1.45 },
+	masonry = { Colour = Color3.fromRGB(128, 126, 119), Strength = 1.05, BreakForce = 32500, DamageRate = 0.72 },
+	steel = { Colour = Color3.fromRGB(104, 128, 145), Strength = 1.65, BreakForce = 42000, DamageRate = 0.38 },
+	glass = { Colour = Color3.fromRGB(112, 178, 192), Strength = 0.42, BreakForce = 9000, DamageRate = 2.1 },
+}
+
+local assemblies = Instance.new("Folder")
+assemblies.Name = "Storm Structure Assemblies"
+assemblies.Parent = workspace
+
+local function structuralPart(name: string, frame: CFrame, size: Vector3, profile: any, anchored: boolean, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.CFrame = frame
+	part.Size = size
+	part.Color = profile.Colour
+	part.Anchored = anchored
+	part.StormExposedArea = size.X * size.Y
+	part.StormDragCoefficient = 1.08
+	part.StormForceScale = 0.82
+	part.Parent = parent
+	return part
+end
+
+local function stormJoint(name: string, first: Part, second: Part, profile: any, parent: Instance)
+	local joint = Instance.new("WeldConstraint")
+	joint.Name = name
+	joint.Part0 = first
+	joint.Part1 = second
+	joint.StormBreakForce = profile.BreakForce
+	joint.StormMaterialStrength = profile.Strength
+	joint.StormIntegrity = 1.0
+	joint.StormDamageRate = profile.DamageRate
+	joint.Parent = parent
+	return joint
+end
+
+local function assembly(name: string, origin: Vector3, yaw: number, columns: number, rows: number, depths: number, profile: any)
+	local model = Instance.new("Folder")
+	model.Name = name
+	model.Parent = assemblies
+	local parts: { [string]: Part } = {}
+	local frame = CFrame.new(origin) * CFrame.Angles(0, yaw, 0)
+	local function key(row: number, column: number, depth: number): string
+		return row .. ":" .. column .. ":" .. depth
+	end
+	for row = 0, rows - 1 do
+		for column = 0, columns - 1 do
+			for depth = 0, depths - 1 do
+				local localFrame = CFrame.new((column - (columns - 1) * 0.5) * 4.4, 1.65 + row * 3.3, (depth - (depths - 1) * 0.5) * 4.4)
+				local outerFace = row > 0 and (column == 0 or column == columns - 1 or depth == 0 or depth == depths - 1)
+				local memberProfile = outerFace and material.glass or profile
+				parts[key(row, column, depth)] = structuralPart(name .. " Member " .. key(row, column, depth), frame * localFrame, Vector3.new(3.8, 2.9, 3.8), memberProfile, row == 0, model)
+			end
+		end
+	end
+	for row = 0, rows - 1 do
+		for column = 0, columns - 1 do
+			for depth = 0, depths - 1 do
+				local current = parts[key(row, column, depth)]
+				if row + 1 < rows then stormJoint(name .. " Vertical " .. key(row, column, depth), current, parts[key(row + 1, column, depth)], profile, model) end
+				if column + 1 < columns then stormJoint(name .. " Cross " .. key(row, column, depth), current, parts[key(row, column + 1, depth)], profile, model) end
+				if depth + 1 < depths then stormJoint(name .. " Depth " .. key(row, column, depth), current, parts[key(row, column, depth + 1)], profile, model) end
+			end
+		end
+	end
+end
+
+assembly("Timber Farmhouse", Vector3.new(-76, 0, 119), math.rad(24), 3, 3, 2, material.timber)
+assembly("Masonry Depot", Vector3.new(46, 0, 83), math.rad(-31), 4, 2, 3, material.masonry)
+assembly("Steel Workshop", Vector3.new(96, 0, 177), math.rad(47), 2, 4, 2, material.steel)
 ]]></Source>
 		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
 local StarterGui = game:GetService("StarterGui")

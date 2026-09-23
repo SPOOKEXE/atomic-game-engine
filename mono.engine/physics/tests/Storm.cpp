@@ -139,6 +139,61 @@ TEST_CASE("storm link material strength separates wooden and steel failures", "[
 	CHECK(brokenWithStrength(1000000.0f));
 }
 
+TEST_CASE("storm links accumulate damage before releasing unsupported assemblies", "[physics][storm]") {
+	engine::scene::RegisterSceneClasses();
+	Store store("physics.storm.progressive-support");
+	const Entity workspace = engine::scene::InstallServices(store);
+	engine::physics::PreparePhysicsWorld(store);
+	const auto storm = StormAtOrigin();
+	engine::physics::SetStorm(store, storm);
+
+	engine::scene::PartDesc foundationDescription;
+	foundationDescription.Frame = CFrame{{storm.State.Parameters.CoreRadius, 0.0f, 0.0f}};
+	const Entity foundation = engine::scene::MakePart(store, foundationDescription);
+	const Entity lower = DynamicPart(store, {storm.State.Parameters.CoreRadius, 3.0f, 0.0f}, 1.0f);
+	const Entity upper = DynamicPart(store, {storm.State.Parameters.CoreRadius, 6.0f, 0.0f}, 1.0f);
+	for (const Entity part : {foundation, lower, upper}) {
+		store.SetParent(part, workspace);
+		store.Set(part, engine::physics::StormResponse{.ExposedArea = 2.0f});
+	}
+	const auto link = [&](const char *name, Entity first, Entity second, engine::physics::StormLink damage) {
+		const Entity entity =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("WeldConstraint")), name);
+		store.SetParent(entity, first);
+		store.Set(entity, engine::scene::WeldConstraint{first, second});
+		store.Set(entity, damage);
+		return entity;
+	};
+	const Entity baseLink = link(
+		"foundation-to-lower",
+		foundation,
+		lower,
+		{.BreakForce = 8000.0f, .MaterialStrength = 0.72f, .DamageRate = 4.0f}
+	);
+	link(
+		"lower-to-upper",
+		lower,
+		upper,
+		{.BreakForce = 40000.0f, .MaterialStrength = 1.65f, .DamageRate = 0.05f}
+	);
+
+	store.AdvanceTick(TICK);
+	engine::physics::ApplyStormForces(store);
+	const auto *damaged = store.Get<engine::physics::StormLink>(baseLink);
+	REQUIRE(damaged != nullptr);
+	CHECK(damaged->Integrity < 1.0f);
+	CHECK(damaged->Integrity > 0.0f);
+	CHECK(store.Get<engine::scene::WeldConstraint>(baseLink)->Enabled);
+
+	for (int tick = 0; tick < 240 && store.Get<engine::scene::WeldConstraint>(baseLink)->Enabled; ++tick) {
+		store.AdvanceTick(TICK);
+		engine::physics::ApplyStormForces(store);
+	}
+	CHECK_FALSE(store.Get<engine::scene::WeldConstraint>(baseLink)->Enabled);
+	engine::physics::SolveRigidJoints(store);
+	CHECK_FALSE(store.Resource<engine::physics::PhysicsWorld>()->RigidlyConnected(foundation, upper));
+}
+
 TEST_CASE("storm wind bends static vegetation and restores its authored pose", "[physics][storm]") {
 	engine::scene::RegisterSceneClasses();
 	Store store("physics.storm.vegetation");

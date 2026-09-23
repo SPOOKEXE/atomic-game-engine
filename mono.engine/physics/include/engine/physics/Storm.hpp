@@ -38,6 +38,8 @@ namespace engine::physics {
 	struct StormLink {
 		float BreakForce = 0.0f;	   // Newtons before material scaling, zero means unbreakable.
 		float MaterialStrength = 1.0f; // Material-specific strength multiplier.
+		float Integrity = 1.0f;		   // Remaining fatigue capacity, depleted by sustained overload.
+		float DamageRate = 1.0f;	   // Fatigue accumulated per overloaded second.
 		bool Enabled = true;		   // Whether wind may fail this link.
 		uint8_t Reserved[3] = {};	   // Explicit initialized serialization padding.
 	};

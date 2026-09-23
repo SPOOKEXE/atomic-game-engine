@@ -92,10 +92,16 @@ namespace engine::physics {
 				.Magnitude();
 		}
 
-		bool Broken(const StormLink &link, float load) {
-			return link.Enabled && Finite(link.BreakForce) && Finite(link.MaterialStrength) &&
-				   link.BreakForce > 0.0f && link.MaterialStrength > 0.0f &&
-				   load > link.BreakForce * link.MaterialStrength;
+		bool Degrade(StormLink &link, float load, float delta) {
+			if (!link.Enabled || !Finite(link.BreakForce) || !Finite(link.MaterialStrength) ||
+				!Finite(link.Integrity) || !Finite(link.DamageRate) || link.BreakForce <= 0.0f ||
+				link.MaterialStrength <= 0.0f || link.DamageRate < 0.0f) {
+				return false;
+			}
+			const float capacity = link.BreakForce * link.MaterialStrength;
+			const float overload = std::max(load / capacity - 0.55f, 0.0f);
+			link.Integrity = std::clamp(link.Integrity - overload * link.DamageRate * delta, 0.0f, 1.0f);
+			return link.Integrity <= 0.0f;
 		}
 
 		float WrapRadians(float radians) {
@@ -275,26 +281,28 @@ namespace engine::physics {
 		const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
 		BendVegetation(store, field, *storm, delta);
 
-		store.Query<scene::WeldConstraint, const StormLink>().Each(
-			[&](ecs::Entity, scene::WeldConstraint &joint, const StormLink &link) {
-				if (!joint.Enabled || Broken(
+		store.Query<scene::WeldConstraint, StormLink>().Each(
+			[&](ecs::Entity, scene::WeldConstraint &joint, StormLink &link) {
+				if (!joint.Enabled || Degrade(
 										  link,
 										  std::max(
 											  LinkLoad(store, field, *storm, joint.Part0),
 											  LinkLoad(store, field, *storm, joint.Part1)
-										  )
+										  ),
+										  delta
 									  ))
 					joint.Enabled = false;
 			}
 		);
-		store.Query<scene::JointInstance, const StormLink>().Each(
-			[&](ecs::Entity, scene::JointInstance &joint, const StormLink &link) {
-				if (!joint.Enabled || Broken(
+		store.Query<scene::JointInstance, StormLink>().Each(
+			[&](ecs::Entity, scene::JointInstance &joint, StormLink &link) {
+				if (!joint.Enabled || Degrade(
 										  link,
 										  std::max(
 											  LinkLoad(store, field, *storm, joint.Part0),
 											  LinkLoad(store, field, *storm, joint.Part1)
-										  )
+										  ),
+										  delta
 									  ))
 					joint.Enabled = false;
 			}

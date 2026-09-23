@@ -98,6 +98,8 @@ namespace engine::physics {
 			ecs::Classes::Computed(
 				link, StormProperty<StormLink, &StormLink::MaterialStrength>("StormMaterialStrength")
 			);
+			ecs::Classes::Computed(link, StormProperty<StormLink, &StormLink::Integrity>("StormIntegrity"));
+			ecs::Classes::Computed(link, StormProperty<StormLink, &StormLink::DamageRate>("StormDamageRate"));
 			ecs::Classes::Computed(link, StormProperty<StormLink, &StormLink::Enabled>("StormLinkEnabled"));
 		}
 	}

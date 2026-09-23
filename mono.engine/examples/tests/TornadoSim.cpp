@@ -56,6 +56,8 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("StormExposedArea") != std::string::npos);
 	CHECK(document.find("StormBreakForce") != std::string::npos);
 	CHECK(document.find("StormMaterialStrength") != std::string::npos);
+	CHECK(document.find("StormIntegrity") != std::string::npos);
+	CHECK(document.find("StormDamageRate") != std::string::npos);
 	CHECK(document.find("StormRestFrame") != std::string::npos);
 	CHECK(document.find("retireWhenBroken") != std::string::npos);
 	CHECK(document.find("Debris:AddItem") != std::string::npos);
@@ -71,6 +73,14 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Farmhouse") != std::string::npos);
 	CHECK(document.find("Barn") != std::string::npos);
 	CHECK(document.find("Workshop") != std::string::npos);
+	CHECK(document.find("Storm Structure Assemblies") != std::string::npos);
+	CHECK(document.find("Timber Farmhouse") != std::string::npos);
+	CHECK(document.find("Masonry Depot") != std::string::npos);
+	CHECK(document.find("Steel Workshop") != std::string::npos);
+	CHECK(document.find("material.glass") != std::string::npos);
+	CHECK(document.find("CFrame.Angles(0, yaw, 0)") != std::string::npos);
+	CHECK(document.find("row == 0") != std::string::npos);
+	CHECK(document.find("stormJoint") != std::string::npos);
 	CHECK(document.find("Tornado Storm Sky") != std::string::npos);
 	CHECK(document.find("Tornado Anvil Cloud Deck") != std::string::npos);
 	CHECK(document.find("Funnel Ground Spray") != std::string::npos);
