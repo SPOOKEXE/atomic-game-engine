@@ -190,7 +190,9 @@ namespace engine::render::capture_record_validation {
 								  plane.Status == DataCaptureStatus::Cancelled;
 			const bool localUnavailable =
 				localLight && plane.Status == DataCaptureStatus::Unsupported &&
-				plane.Provenance == "unavailable/local_light_not_visible_or_culled/v1";
+				(plane.Provenance == "unavailable/local_light_not_visible_or_culled/v1" ||
+				 (plane.Channel == DataCaptureChannel::LocalLightShadowVisibility &&
+				  plane.Provenance == "unavailable/local_light_shadows_disabled/v1"));
 			const bool authoredUnavailable = plane.Channel == DataCaptureChannel::MotionVectors ||
 											 plane.Channel == DataCaptureChannel::OpticalFlow;
 			const std::string_view expectedUnavailable =

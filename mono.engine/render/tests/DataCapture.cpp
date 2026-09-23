@@ -843,6 +843,19 @@ TEST_CASE(
 	CHECK(capture_record_validation::Plane(ticket, ready, 17, state));
 	CHECK(capture_record_validation::Plane(ticket, unavailable, 17, state));
 
+	DataCaptureTicket disabledTicket;
+	disabledTicket.CaptureNode = engine::core::Name("capture");
+	disabledTicket.Channels = {DataCaptureChannel::LocalLightShadowVisibility};
+	disabledTicket.LightIds = {"light/disabled"};
+	DataCapturePlane disabled;
+	disabled.Channel = DataCaptureChannel::LocalLightShadowVisibility;
+	disabled.CaptureNode = disabledTicket.CaptureNode;
+	disabled.Status = DataCaptureStatus::Unsupported;
+	disabled.LightId = "light/disabled";
+	disabled.Provenance = "unavailable/local_light_shadows_disabled/v1";
+	capture_record_validation::State disabledState;
+	CHECK(capture_record_validation::Plane(disabledTicket, disabled, 17, disabledState));
+
 	DataCapturePlane duplicate = ready;
 	duplicate.Resource = engine::core::Name("local-light-key-duplicate");
 	CHECK_FALSE(capture_record_validation::Plane(ticket, duplicate, 17, state));
