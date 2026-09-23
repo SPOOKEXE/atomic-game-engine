@@ -316,15 +316,56 @@ for row = 0, 3 do
 	end
 end
 for index = 0, 95 do
-	local angle = index * 2.399
-	local radius = 118 + (index % 9) * 15
-	local x = math.cos(angle) * radius
-	local z = 95 + math.sin(angle) * radius * 0.68
-	local trunkHeight = 8 + index % 6
-	makePart("Tree Trunk " .. index, Vector3.new(1.1, trunkHeight, 1.1), Vector3.new(x, trunkHeight * 0.5, z), Color3.fromRGB(70, 55, 37))
-	local crownWidth = 7 + index % 5 * 2
-	makePart("Tree Crown Low " .. index, Vector3.new(crownWidth, 5 + index % 3, crownWidth), Vector3.new(x, trunkHeight + 2.8, z), Color3.fromRGB(39, 66 + index % 4 * 6, 38))
-	makePart("Tree Crown High " .. index, Vector3.new(crownWidth * 0.72, 4 + index % 3, crownWidth * 0.72), Vector3.new(x + (index % 3 - 1) * 0.9, trunkHeight + 6, z), Color3.fromRGB(42, 73 + index % 4 * 5, 40))
+	-- This slot is the replicated WindBentTree. The authority owns its pose, so
+	-- the local forest must leave the spot open instead of drawing a static twin.
+	if index ~= 57 then
+		local angle = index * 2.399
+		local radius = 118 + (index % 9) * 15
+		local x = math.cos(angle) * radius
+		local z = 95 + math.sin(angle) * radius * 0.68
+		local trunkHeight = 8 + index % 6
+		makePart("Tree Trunk " .. index, Vector3.new(1.1, trunkHeight, 1.1), Vector3.new(x, trunkHeight * 0.5, z), Color3.fromRGB(70, 55, 37))
+		local crownWidth = 7 + index % 5 * 2
+		makePart("Tree Crown Low " .. index, Vector3.new(crownWidth, 5 + index % 3, crownWidth), Vector3.new(x, trunkHeight + 2.8, z), Color3.fromRGB(39, 66 + index % 4 * 6, 38))
+		makePart("Tree Crown High " .. index, Vector3.new(crownWidth * 0.72, 4 + index % 3, crownWidth * 0.72), Vector3.new(x + (index % 3 - 1) * 0.9, trunkHeight + 6, z), Color3.fromRGB(42, 73 + index % 4 * 5, 40))
+	end
+end
+
+type DamageScenery = {
+	Source: Part,
+	Decoration: Part,
+	LocalFrame: CFrame,
+}
+
+-- The server parts are the simulation and replication source. These local
+-- details deliberately follow their received CFrames instead of rebuilding a
+-- second wind model on the client.
+local damageScenery: { DamageScenery } = {}
+local damageSceneryBound = false
+
+local function attachDamageScenery(name: string, source: Part, size: Vector3, colour: Color3, localFrame: CFrame)
+	local decoration = makePart(name, size, source.Position, colour)
+	decoration.CFrame = source.CFrame * localFrame
+	table.insert(damageScenery, { Source = source, Decoration = decoration, LocalFrame = localFrame })
+end
+
+local function bindStormDamageScenery()
+	if damageSceneryBound then return end
+	local interaction = Workspace:FindFirstChild("StormInteraction")
+	if not interaction then return end
+	local woodenSign = interaction:FindFirstChild("WoodenSign")
+	local steelPanel = interaction:FindFirstChild("SteelPanel")
+	local tree = interaction:FindFirstChild("WindBentTree")
+	if not woodenSign or not woodenSign:IsA("Part") or not steelPanel or not steelPanel:IsA("Part") or not tree or
+		not tree:IsA("Part") then
+		return
+	end
+
+	damageSceneryBound = true
+	attachDamageScenery("Wood Sign Face", woodenSign, Vector3.new(4.7, 2.45, 0.06), Color3.fromRGB(156, 97, 42), CFrame.new(0, 0, -0.16))
+	attachDamageScenery("Steel Panel Stripe", steelPanel, Vector3.new(2.9, 0.26, 0.06), Color3.fromRGB(184, 159, 74), CFrame.new(0, 0, -0.14))
+	attachDamageScenery("WindBentTree Crown Low", tree, Vector3.new(10, 5.8, 10), Color3.fromRGB(45, 82, 43), CFrame.new(0, 5.1, 0))
+	attachDamageScenery("WindBentTree Crown High", tree, Vector3.new(7.2, 4.6, 7.2), Color3.fromRGB(49, 91, 45), CFrame.new(0.7, 8.7, 0))
 end
 for index = -9, 9 do
 	local fenceZ = -58 + index * 12
@@ -809,6 +850,14 @@ local elapsed = 0
 local stormOffset = Vector3.zero
 RunService.Heartbeat:Connect(function(delta: number)
 	elapsed += delta
+	bindStormDamageScenery()
+	for _, scenery in ipairs(damageScenery) do
+		if scenery.Source.Parent == nil then
+			scenery.Decoration.Visible = false
+		else
+			scenery.Decoration.CFrame = scenery.Source.CFrame * scenery.LocalFrame
+		end
+	end
 	local snapshot = Storm.Snapshot()
 	-- A replica starts without the server resource. Keep the authored origin
 	-- until its first fixed-step snapshot arrives, then move every local effect
@@ -892,9 +941,9 @@ end)
 				<Property name="Anchored" type="bool">false</Property>
 			</Item>
 			<Item class="Part" name="WindBentTree" id="29">
-				<Property name="Size" type="Vector3">2.4,14,2.4</Property>
-				<Property name="Position" type="Vector3">18,7,-26</Property>
-				<Property name="Color" type="Color3">0.10,0.24,0.08</Property>
+				<Property name="Size" type="Vector3">1.1,14,1.1</Property>
+				<Property name="Position" type="Vector3">13.630354,7,-15.45179</Property>
+				<Property name="Color" type="Color3">0.27,0.20,0.12</Property>
 				<Property name="Anchored" type="bool">true</Property>
 			</Item>
 		</Item>

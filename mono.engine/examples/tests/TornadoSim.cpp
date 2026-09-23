@@ -83,6 +83,12 @@ TEST_CASE("the TornadoSim world carries its storm service and in-game controls",
 	CHECK(document.find("Prairie Grid NS") != std::string::npos);
 	CHECK(document.find("Prairie Grid EW") != std::string::npos);
 	CHECK(document.find("Tree Crown High") != std::string::npos);
+	CHECK(document.find("if index ~= 57 then") != std::string::npos);
+	CHECK(document.find("bindStormDamageScenery") != std::string::npos);
+	CHECK(document.find("WindBentTree Crown Low") != std::string::npos);
+	CHECK(document.find("Wood Sign Face") != std::string::npos);
+	CHECK(document.find("Steel Panel Stripe") != std::string::npos);
+	CHECK(document.find("scenery.Source.CFrame * scenery.LocalFrame") != std::string::npos);
 	CHECK(document.find("Fence Rail") != std::string::npos);
 	CHECK(document.find("Ground Debris Inflow") != std::string::npos);
 	CHECK(document.find("Wall Cloud Near") != std::string::npos);
