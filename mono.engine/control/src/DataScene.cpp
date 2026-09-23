@@ -789,16 +789,30 @@ namespace engine::control {
 						document["extensionsUsed"].push_back("KHR_materials_ior");
 				}
 				if (node.Material.Thickness > 0.0f) {
-					materialRecord["extensions"]["KHR_materials_volume"] = {
-						{"thicknessFactor", node.Material.Thickness}
-					};
-					if (!document.contains("extensionsUsed")) document["extensionsUsed"] = json::array();
-					if (std::find(
-							document["extensionsUsed"].begin(),
-							document["extensionsUsed"].end(),
-							"KHR_materials_volume"
-						) == document["extensionsUsed"].end())
-						document["extensionsUsed"].push_back("KHR_materials_volume");
+					const bool uniformScale = std::abs(node.Scale.X - node.Scale.Y) <= 1e-5f &&
+											  std::abs(node.Scale.X - node.Scale.Z) <= 1e-5f;
+					if (uniformScale) {
+						materialRecord["extensions"]["KHR_materials_volume"] = {
+							{"thicknessFactor", node.Material.Thickness / node.Scale.X}
+						};
+						if (!document.contains("extensionsUsed")) document["extensionsUsed"] = json::array();
+						if (std::find(
+								document["extensionsUsed"].begin(),
+								document["extensionsUsed"].end(),
+								"KHR_materials_volume"
+							) == document["extensionsUsed"].end())
+							document["extensionsUsed"].push_back("KHR_materials_volume");
+					} else {
+						// glTF thickness is mesh-local; a single scalar cannot retain
+						// authored world thickness under three different axis scales.
+						document["extras"]["unavailable"].push_back(
+							{{"stable_id", node.StableId},
+							 {"feature", "material_thickness"},
+							 {"reason", "nonuniform_scale_cannot_encode_world_thickness"}}
+						);
+						materialRecord["extras"]["engine_authored_thickness_metres"] =
+							node.Material.Thickness;
+					}
 				}
 				switch (node.Material.AlphaMode) {
 				case script::GltfExportAlphaMode::Opaque:

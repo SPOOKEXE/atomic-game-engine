@@ -102,7 +102,7 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 			store,
 			{
 				.Frame = {},
-				.Size = {1, 1, 1},
+				.Size = {2, 2, 2},
 				.Material = {},
 				.Mesh = engine::core::Name(engine::assets::BuiltinName(engine::assets::BuiltinMesh::Cube)),
 				.Class = {},
@@ -117,6 +117,19 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 		auto visual = *store.Get<engine::scene::Visual>(part);
 		visual.Transparency = 0.5f;
 		store.Set(part, visual);
+		const auto uneven = engine::scene::MakePart(
+			store,
+			{.Frame = {},
+			 .Size = {2, 1, 1},
+			 .Material = {},
+			 .Mesh = engine::core::Name(engine::assets::BuiltinName(engine::assets::BuiltinMesh::Cube)),
+			 .Class = {}}
+		);
+		Identify(store, uneven, "export/nonuniform");
+		auto unevenAppearance = *store.Get<engine::scene::SurfaceAppearance>(uneven);
+		unevenAppearance.TransmissionFactor = 0.7f;
+		unevenAppearance.Thickness = 0.5f;
+		store.Set(uneven, unevenAppearance);
 		const auto unavailable = engine::scene::MakePart(
 			store,
 			{.Frame = {},
@@ -148,7 +161,14 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 	const auto &extensions = document.at("materials").at(0).at("extensions");
 	CHECK(extensions.at("KHR_materials_transmission").at("transmissionFactor") == 0.7f);
 	CHECK(extensions.at("KHR_materials_ior").at("ior") == 2.0f);
-	CHECK(extensions.at("KHR_materials_volume").at("thicknessFactor") == 0.5f);
+	CHECK(extensions.at("KHR_materials_volume").at("thicknessFactor") == 0.25f);
+	const auto &unevenMaterial = document.at("materials").at(1);
+	CHECK_FALSE(unevenMaterial.at("extensions").contains("KHR_materials_volume"));
+	CHECK(unevenMaterial.at("extras").at("engine_authored_thickness_metres") == 0.5f);
+	CHECK(
+		document.at("extras").at("unavailable").at(1).at("reason") ==
+		"nonuniform_scale_cannot_encode_world_thickness"
+	);
 	CHECK(engine::assets::Hasher::Of(bytes).ToHex() == reply.at("hash").get<std::string>());
 }
 
