@@ -281,6 +281,69 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("default PBR preserves distinct part tints through the display transform", "[render][gpu][colour][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallFixture(fixture.Render);
+	const std::array planes{
+		Plane{-1.2f, 0.0f, 4.0f, .8f, 1.0f, 0xFF0000FFu},
+		Plane{1.2f, 0.0f, 4.0f, .8f, 1.0f, 0xFF00FF00u},
+	};
+	const auto instances = DrawPlanes(planes);
+	render::SceneTarget target{96, 64};
+	render::View view;
+	view.World = 905;
+	view.WorldName = core::Name("fixture.part-colour");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32.0f;
+	view.Instances = instances;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1.0f, 1.0f, 1.0f};
+	view.Lighting.OutdoorAmbient = {};
+	view.Lighting.Direct = {};
+	render::OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Ran(core::Name("gbuffer")));
+	REQUIRE(frame.Ran(core::Name("deferred-lighting")));
+	REQUIRE(frame.Ran(core::Name("tonemap")));
+
+	const auto sample = [](const CapturedImage &image, uint32_t x, uint32_t y) {
+		const std::byte *pixel = image.Bytes.data() + y * image.RowStrideBytes + x * 4;
+		return std::array{
+			std::to_integer<uint8_t>(pixel[0]),
+			std::to_integer<uint8_t>(pixel[1]),
+			std::to_integer<uint8_t>(pixel[2]),
+		};
+	};
+	const CapturedImage albedo = CaptureResource(
+		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
+	);
+	const CapturedImage display = CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
+	);
+	const auto redAlbedo = sample(albedo, 38, 32);
+	const auto greenAlbedo = sample(albedo, 58, 32);
+	const auto redDisplay = sample(display, 38, 32);
+	const auto greenDisplay = sample(display, 58, 32);
+	INFO("red albedo=" << int(redAlbedo[0]) << ',' << int(redAlbedo[1]) << ',' << int(redAlbedo[2])
+						<< " display=" << int(redDisplay[0]) << ',' << int(redDisplay[1]) << ','
+						<< int(redDisplay[2]));
+	INFO("green albedo=" << int(greenAlbedo[0]) << ',' << int(greenAlbedo[1]) << ','
+						  << int(greenAlbedo[2]) << " display=" << int(greenDisplay[0]) << ','
+						  << int(greenDisplay[1]) << ',' << int(greenDisplay[2]));
+	CHECK(redAlbedo[0] > redAlbedo[1] + 80);
+	CHECK(redAlbedo[0] > redAlbedo[2] + 80);
+	CHECK(greenAlbedo[1] > greenAlbedo[0] + 80);
+	CHECK(greenAlbedo[1] > greenAlbedo[2] + 80);
+	CHECK(redDisplay[0] > redDisplay[1] + 40);
+	CHECK(redDisplay[0] > redDisplay[2] + 40);
+	CHECK(greenDisplay[1] > greenDisplay[0] + 40);
+	CHECK(greenDisplay[1] > greenDisplay[2] + 40);
+}
+
 TEST_CASE("completed camera submission publishes bounded visibility facts", "[render][gpu][visibility][.]") {
 	FixtureDevice fixture;
 	fixture.Initialise();
