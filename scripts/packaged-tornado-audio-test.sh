@@ -28,7 +28,7 @@ timeout 60s "$binary" \
 	--game "$build/assets/examples/worlds/TornadoSim.aworld" \
 	--cdn "dir:$store" \
 	--content-cache "$cache" \
-	--publisher-key "$(printf '00%.0s' {1..32})" \
+	--publisher-key 430f6fbd2ad9d7783aa781eccd5ec4b32c0a7032e86206d806043de24a0319da \
 	> "$log" 2>&1
 
 if ! grep -q "audio: 5 packaged sound(s) registered" "$log"; then
