@@ -53,6 +53,63 @@ namespace engine::render {
 		constexpr Colour TEXT_WARN{240, 180, 80};
 		constexpr Colour TEXT_BAD{236, 96, 96};
 		constexpr uint8_t PANEL_ALPHA = 208;
+		constexpr uint8_t CLOSE_BUTTON_RED = 150;
+		constexpr uint8_t CLOSE_BUTTON_GREEN = 54;
+		constexpr uint8_t CLOSE_BUTTON_BLUE = 54;
+
+		struct Rect {
+			int X = 0;
+			int Y = 0;
+			int Width = 0;
+			int Height = 0;
+
+			bool Contains(int x, int y) const {
+				return x >= X && y >= Y && x < X + Width && y < Y + Height;
+			}
+		};
+
+		Rect CloseButtonBounds(
+			int panelX, int panelY, int panelWidth, int imageWidth, int imageHeight, int scale
+		) {
+			const int buttonWidth = 12 * std::max(scale, 1);
+			const int buttonHeight = DebugText::LineHeight(scale);
+			const int x = panelX + panelWidth - buttonWidth;
+			const int y = panelY;
+			const int left = std::max(x, 0);
+			const int top = std::max(y, 0);
+			const int right = std::min(x + buttonWidth, imageWidth);
+			const int bottom = std::min(y + buttonHeight, imageHeight);
+			return {left, top, std::max(right - left, 0), std::max(bottom - top, 0)};
+		}
+
+		void DrawCloseButton(OverlayImage &image, Rect bounds, int scale) {
+			if (bounds.Width <= 0 || bounds.Height <= 0) {
+				return;
+			}
+
+			image.Fill(
+				bounds.X,
+				bounds.Y,
+				bounds.Width,
+				bounds.Height,
+				CLOSE_BUTTON_RED,
+				CLOSE_BUTTON_GREEN,
+				CLOSE_BUTTON_BLUE,
+				230
+			);
+			const int glyphWidth = DebugText::Measure("X", scale);
+			const int glyphHeight = DebugText::GLYPH_HEIGHT * std::max(scale, 1);
+			DebugText::Draw(
+				image,
+				bounds.X + std::max((bounds.Width - glyphWidth) / 2, 0),
+				bounds.Y + std::max((bounds.Height - glyphHeight) / 2, 0),
+				"X",
+				255,
+				238,
+				238,
+				scale
+			);
+		}
 
 		// One colour per category, so a glance at the flamegraph says where the
 		// frame went before any label is read.
@@ -266,7 +323,9 @@ namespace engine::render {
 		// beside it, which told you what you were looking at and nothing about
 		// what else there was. A strip says both: four names, one lit, and the
 		// keys that move between them - a panel with a hidden control has none.
-		void DrawTabStrip(OverlayImage &image, const DebugPanelData &data, int x, int y, int width) {
+		void DrawTabStrip(
+			OverlayImage &image, const DebugPanelData &data, int x, int y, int width, Rect closeButton
+		) {
 			const int scale = data.Scale;
 			const int glyphHeight = DebugText::GLYPH_HEIGHT * scale;
 			const int gap = DebugText::ADVANCE * scale;
@@ -303,9 +362,10 @@ namespace engine::render {
 			// it is explaining is worse than no hint.
 			constexpr std::string_view HINT = "F6/F7 TAB  PGUP/PGDN  -/= DEPTH  F8 SNAP";
 			const int hintWidth = DebugText::Measure(HINT, scale);
-			if (pen + gap + hintWidth <= x + width) {
+			const int hintRight = std::min(x + width, closeButton.X - gap);
+			if (pen + gap + hintWidth <= hintRight) {
 				DebugText::Draw(
-					image, x + width - hintWidth, y, HINT, TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
+					image, hintRight - hintWidth, y, HINT, TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
 				);
 			}
 		}
@@ -343,11 +403,48 @@ namespace engine::render {
 			return lines * DebugText::LineHeight(data.Scale) + 4 * data.Scale * 2;
 		}
 
-		void DrawStatistics(OverlayImage &image, const DebugPanelData &data) {
-			const int scale = data.Scale;
+		int StatisticsWidth(const DebugPanelData &data, int imageWidth) {
+			const int scale = std::max(data.Scale, 1);
 			const int padding = 4 * scale;
+			const int buttonWidth = 12 * scale;
+			const int contentWidth = DebugText::Measure("MIN 000.0  AVG 000.0  MAX 000.0", scale);
+			return std::min(imageWidth, contentWidth + padding * 2 + buttonWidth + padding / 2);
+		}
 
-			const int width = DebugText::Measure("MIN 000.0  AVG 000.0  MAX 000.0", scale) + padding * 2;
+		int FrameGraphWidth(const DebugPanelData &data, int imageWidth) {
+			const int scale = std::max(data.Scale, 1);
+			const int padding = 4 * scale;
+			const int columnsWidth = MeasureChars(ROW_CHARS, scale);
+			const int buttonWidth = 12 * scale;
+			const int wanted = padding * 2 + CHIP_WIDTH * scale + CHIP_GAP * scale + columnsWidth +
+							   TIMELINE_GAP * scale + TIMELINE_WIDTH * scale + buttonWidth + padding / 2;
+			return std::min(imageWidth, wanted);
+		}
+
+		int NetworkWidth(const DebugPanelData &data, int imageWidth) {
+			const int scale = std::max(data.Scale, 1);
+			const int padding = 4 * scale;
+			const int buttonWidth = 12 * scale;
+			return std::min(
+				imageWidth,
+				DebugText::Measure("DOWN 1000.0 KB/S (100000 B/S)", scale) + padding * 2 + buttonWidth +
+					padding / 2
+			);
+		}
+
+		Rect NetworkBounds(const DebugPanelData &data, int imageWidth, int imageHeight) {
+			const int scale = std::max(data.Scale, 1);
+			const int padding = 4 * scale;
+			const int width = NetworkWidth(data, imageWidth);
+			const int height = 12 * DebugText::LineHeight(scale) + padding * 2;
+			const int left = std::max(0, imageWidth - width);
+			return {left, 0, width, std::min(height, imageHeight)};
+		}
+
+		void DrawStatistics(OverlayImage &image, const DebugPanelData &data) {
+			const int scale = std::max(data.Scale, 1);
+			const int padding = 4 * scale;
+			const int width = StatisticsWidth(data, image.GetWidth());
 			const int height = StatisticsHeight(data);
 
 			{
@@ -362,6 +459,9 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("statistics text", core::ProfileCategory::Render);
 
 			Writer writer{image, padding, padding, scale};
+			DrawCloseButton(
+				image, CloseButtonBounds(0, padding, width - padding, image.GetWidth(), height, scale), scale
+			);
 
 			if (!data.Statistics || !data.Statistics->HasSamples()) {
 				writer.Line("MEASURING", TEXT_DIM);
@@ -461,15 +561,15 @@ namespace engine::render {
 		// overlap rather than a hole punched in the panel underneath.
 		void DrawNetwork(OverlayImage &image, const DebugPanelData &data) {
 			const NetworkStatistics &net = data.Network;
-			const int scale = data.Scale;
+			const int scale = std::max(data.Scale, 1);
 			const int padding = 4 * scale;
 
 			// Sized from the widest line this can produce, so the box does not
 			// change width as the numbers do.
-			const int width = DebugText::Measure("DOWN 1000.0 KB/S (100000 B/S)", scale) + padding * 2;
-			const int lines = 12;
-			const int height = lines * DebugText::LineHeight(scale) + padding * 2;
-			const int left = std::max(0, image.GetWidth() - width);
+			const Rect bounds = NetworkBounds(data, image.GetWidth(), image.GetHeight());
+			const int width = bounds.Width;
+			const int height = bounds.Height;
+			const int left = bounds.X;
 
 			{
 				ENGINE_PROFILE_CAT("network background", core::ProfileCategory::Render);
@@ -485,6 +585,11 @@ namespace engine::render {
 				);
 				image.Blend(left, 0, width, 1, 90, 100, 120, 255);
 			}
+			DrawCloseButton(
+				image,
+				CloseButtonBounds(left, padding, width - padding, image.GetWidth(), height, scale),
+				scale
+			);
 
 			ENGINE_PROFILE_CAT("network text", core::ProfileCategory::Render);
 			Writer writer{image, left + padding, padding, scale};
@@ -1461,17 +1566,10 @@ namespace engine::render {
 		}
 
 		void DrawFrameGraphPanel(OverlayImage &image, const DebugPanelData &data) {
-			const int scale = data.Scale;
+			const int scale = std::max(data.Scale, 1);
 			const int padding = 4 * scale;
 			const int lineHeight = DebugText::LineHeight(scale);
-
-			// Wide enough for the columns, the chip and a timeline worth
-			// reading. Narrower and the timeline is a smear; wider and the panel
-			// is covering the game for no extra information.
-			const int columnsWidth = MeasureChars(ROW_CHARS, scale);
-			const int wanted = padding * 2 + CHIP_WIDTH * scale + CHIP_GAP * scale + columnsWidth +
-							   TIMELINE_GAP * scale + TIMELINE_WIDTH * scale;
-			const int width = std::min(image.GetWidth(), wanted);
+			const int width = FrameGraphWidth(data, image.GetWidth());
 
 			// Sized to what is actually in it. A fixed half-screen panel spends
 			// most of its life as a large dark rectangle over the game, which
@@ -1550,13 +1648,16 @@ namespace engine::render {
 			}
 
 			Writer writer{image, padding, top + padding, scale};
+			const Rect closeButton =
+				CloseButtonBounds(0, writer.Y, width - padding, image.GetWidth(), image.GetHeight(), scale);
 
 			{
 				ENGINE_PROFILE_CAT("panel chrome", core::ProfileCategory::Render);
 
 				// Which views there are, which is open, and the keys that move
 				// between them.
-				DrawTabStrip(image, data, writer.X, writer.Y, width - padding * 2);
+				DrawTabStrip(image, data, writer.X, writer.Y, width - padding * 2, closeButton);
+				DrawCloseButton(image, closeButton, scale);
 				writer.Skip();
 
 				// RMAX is only meaningful against a window, so the window says how
@@ -1619,6 +1720,46 @@ namespace engine::render {
 				break;
 			}
 		}
+	}
+
+	DebugPanelCloseAction
+	DebugPanelCloseAt(const DebugPanelData &data, int imageWidth, int imageHeight, int x, int y) {
+		if (imageWidth <= 0 || imageHeight <= 0 || x < 0 || y < 0 || x >= imageWidth || y >= imageHeight) {
+			return DebugPanelCloseAction::None;
+		}
+
+		const int scale = std::max(data.Scale, 1);
+		const int padding = 4 * scale;
+		if (data.ShowFrameGraph) {
+			const int top = data.ShowStatistics ? StatisticsHeight(data) + padding : 0;
+			const int width = FrameGraphWidth(data, imageWidth);
+			const Rect close =
+				CloseButtonBounds(0, top + padding, width - padding, imageWidth, imageHeight, scale);
+			if (close.Contains(x, y)) {
+				return DebugPanelCloseAction::FrameGraph;
+			}
+		}
+
+		if (data.ShowNetwork && data.Network.Connected) {
+			const Rect panel = NetworkBounds(data, imageWidth, imageHeight);
+			if (panel.Contains(x, y)) {
+				const Rect close = CloseButtonBounds(
+					panel.X, padding, panel.Width - padding, imageWidth, imageHeight, scale
+				);
+				return close.Contains(x, y) ? DebugPanelCloseAction::Network : DebugPanelCloseAction::None;
+			}
+		}
+
+		if (data.ShowStatistics) {
+			const int width = StatisticsWidth(data, imageWidth);
+			const Rect close =
+				CloseButtonBounds(0, padding, width - padding, imageWidth, StatisticsHeight(data), scale);
+			if (close.Contains(x, y)) {
+				return DebugPanelCloseAction::Statistics;
+			}
+		}
+
+		return DebugPanelCloseAction::None;
 	}
 
 	void DrawDebugPanels(OverlayImage &image, const DebugPanelData &data) {

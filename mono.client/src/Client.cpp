@@ -2684,6 +2684,14 @@ namespace client {
 		// event.
 		Input.BeginFrame();
 
+		const auto refreshFrameGraphCollection = [this]() {
+			FrameGraph::SetEnabled(Settings.ShowFrameGraph);
+			HeapProfile::SetSamplingEnabled(
+				Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
+			);
+			ProfilerScroll = 0;
+		};
+
 		{
 			// **The pump on its own.** `pump events` covered the poll and every
 			// key it then acted on, and the poll is the half that can block on
@@ -2745,15 +2753,75 @@ namespace client {
 					"event", EventName(event.type), engine::core::ProfileCategory::Engine
 				);
 
+				bool debugPanelConsumedEvent = false;
+				if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+					DebugPanelMouseCaptured = false;
+				}
+				if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT &&
+					DebugPanelMouseCaptured) {
+					DebugPanelMouseCaptured = false;
+					debugPanelConsumedEvent = true;
+				}
+				if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
+					Window != nullptr && !Overlay.IsEmpty()) {
+					int windowWidth = 0;
+					int windowHeight = 0;
+					(void)SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
+					if (windowWidth > 0 && windowHeight > 0) {
+						engine::render::DebugPanelData visiblePanels;
+						visiblePanels.ShowStatistics = Settings.ShowStatistics;
+						visiblePanels.ShowNetwork = Settings.ShowNetwork;
+						visiblePanels.Network.Connected = Connection != nullptr;
+						visiblePanels.ShowFrameGraph = Settings.ShowFrameGraph;
+						visiblePanels.TickRate = Settings.TickRate;
+						visiblePanels.Scale = Overlay.GetWidth() >= 2400 ? 3 : 2;
+
+						const int pixelX = static_cast<int>(
+							event.button.x * static_cast<float>(Overlay.GetWidth()) /
+							static_cast<float>(windowWidth)
+						);
+						const int pixelY = static_cast<int>(
+							event.button.y * static_cast<float>(Overlay.GetHeight()) /
+							static_cast<float>(windowHeight)
+						);
+						const engine::render::DebugPanelCloseAction action =
+							engine::render::DebugPanelCloseAt(
+								visiblePanels, Overlay.GetWidth(), Overlay.GetHeight(), pixelX, pixelY
+							);
+						switch (action) {
+						case engine::render::DebugPanelCloseAction::Statistics:
+							Settings.ShowStatistics = false;
+							break;
+						case engine::render::DebugPanelCloseAction::Network:
+							Settings.ShowNetwork = false;
+							break;
+						case engine::render::DebugPanelCloseAction::FrameGraph:
+							Settings.ShowFrameGraph = false;
+							refreshFrameGraphCollection();
+							break;
+						case engine::render::DebugPanelCloseAction::None:
+							break;
+						}
+						if (action != engine::render::DebugPanelCloseAction::None) {
+							DebugPanelMouseCaptured = true;
+							debugPanelConsumedEvent = true;
+							PresentationInvalidated = true;
+						}
+					}
+				}
+				if (DebugPanelMouseCaptured &&
+					(event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
+					 event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)) {
+					debugPanelConsumedEvent = true;
+				}
+
 				Actions.HandleEvent(event);
 
-				// **Both, unconditionally, and neither consumes for the other.**
-				// `Actions::HandleEvent` reports whether it took an event and that
-				// answer is about the *client's* bindings - a script watching F5
-				// should still see F5. Gating this on that return would make the
-				// engine's own keybindings invisible to the game, which is a rule
-				// nobody asked for.
-				Input.HandleEvent(event);
+				// Host close controls own their pointer gesture. Every other event
+				// still reaches game input, even when Actions handled the same key.
+				if (!debugPanelConsumedEvent) {
+					Input.HandleEvent(event);
+				}
 			}
 		}
 
@@ -2891,18 +2959,7 @@ namespace client {
 
 		if (Actions.Fired(Action::ToggleFrameGraph)) {
 			Settings.ShowFrameGraph = !Settings.ShowFrameGraph;
-			// Collection is off until something asks for it, so opening the
-			// panel is what turns it on.
-			FrameGraph::SetEnabled(Settings.ShowFrameGraph);
-
-			// **Not turned off with the panel when a report was asked for.**
-			// Closing F5 mid-run would otherwise throw away the window the
-			// report is fitted over, and the panel is the natural thing to
-			// close once you have seen the shape you were looking for.
-			HeapProfile::SetSamplingEnabled(
-				Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
-			);
-			ProfilerScroll = 0;
+			refreshFrameGraphCollection();
 		}
 
 		if (Actions.Fired(Action::ToggleWireframe)) {

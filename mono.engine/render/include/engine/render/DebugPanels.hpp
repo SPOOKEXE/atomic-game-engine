@@ -338,6 +338,28 @@ namespace engine::render {
 		int Scale = 2;
 	};
 
+	// Which visible debug panel owns a close-button click.
+	enum class DebugPanelCloseAction : uint8_t {
+		None,
+		Statistics,
+		Network,
+		FrameGraph,
+	};
+
+	// Finds the panel close control beneath an image-pixel coordinate.
+	//
+	// Coordinates use the same pixel space as `OverlayImage`. Later panels win
+	// when their translucent backgrounds overlap an earlier panel.
+	//
+	// @param data       The visibility and scale used to draw the panels.
+	// @param imageWidth The overlay image width in pixels.
+	// @param imageHeight The overlay image height in pixels.
+	// @param x          The clicked image pixel.
+	// @param y          The clicked image pixel.
+	// @return The panel to close, or `None` when the click missed.
+	DebugPanelCloseAction
+	DebugPanelCloseAt(const DebugPanelData &data, int imageWidth, int imageHeight, int x, int y);
+
 	// The share arithmetic these panels are drawn from - `BusyShares`,
 	// `BusyMillisecondsOf`, `CategoryShares` - is in `src/PanelShares.hpp`.
 	//

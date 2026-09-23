@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.debugpanels")
@@ -14,6 +15,8 @@ TEST_DEPENDS("engine.core.framegraph")
 using Catch::Approx;
 using engine::core::FrameSpan;
 using engine::core::ProfileCategory;
+using engine::render::DebugPanelCloseAction;
+using engine::render::DebugPanelCloseAt;
 using engine::render::DebugPanelData;
 using engine::render::DrawDebugPanels;
 using engine::render::FrameStatistics;
@@ -967,6 +970,55 @@ TEST_CASE("a heap tag holding nothing does not scale the plot to zero", "[panels
 	// state a heap can be in.
 	DrawDebugPanels(image, data);
 	REQUIRE(image.IsDirty());
+}
+
+TEST_CASE("close buttons stay attached to visible debug panels at display scales", "[panels][interaction]") {
+	struct Display {
+		int Width;
+		int Height;
+		int Scale;
+	};
+	constexpr std::array<Display, 3> DISPLAYS{{{1280, 720, 2}, {1920, 1080, 2}, {2560, 1440, 3}}};
+	constexpr std::array<DebugPanelCloseAction, 3> ACTIONS{
+		DebugPanelCloseAction::Statistics,
+		DebugPanelCloseAction::Network,
+		DebugPanelCloseAction::FrameGraph,
+	};
+
+	for (const Display display : DISPLAYS) {
+		OverlayImage image;
+		image.Resize(display.Width, display.Height);
+
+		DebugPanelData data;
+		data.ShowStatistics = true;
+		data.ShowNetwork = true;
+		data.Network.Connected = true;
+		data.ShowFrameGraph = true;
+		data.TickRate = 60.0;
+		data.Scale = display.Scale;
+		DrawDebugPanels(image, data);
+
+		for (const DebugPanelCloseAction action : ACTIONS) {
+			bool found = false;
+			for (int y = 0; y < display.Height && !found; y++) {
+				for (int x = 0; x < display.Width; x++) {
+					if (DebugPanelCloseAt(data, display.Width, display.Height, x, y) != action) {
+						continue;
+					}
+
+					const size_t pixel = (static_cast<size_t>(y) * static_cast<size_t>(display.Width) +
+										  static_cast<size_t>(x)) *
+										 4;
+					REQUIRE(image.GetPixels()[pixel] > image.GetPixels()[pixel + 1] * 2);
+					found = true;
+					break;
+				}
+			}
+			CHECK(found);
+		}
+
+		CHECK(DebugPanelCloseAt(data, display.Width, display.Height, 0, 0) == DebugPanelCloseAction::None);
+	}
 }
 
 TEST_CASE("scrolling past the last heap row draws the header and stops", "[panels][heap]") {

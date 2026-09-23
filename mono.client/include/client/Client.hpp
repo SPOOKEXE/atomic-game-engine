@@ -468,6 +468,9 @@ namespace client {
 
 		engine::render::OverlayImage Overlay;
 
+		// Keeps a click released after closing a raster debug panel from reaching the game input state.
+		bool DebugPanelMouseCaptured = false;
+
 		// **What draws a `ScreenGui` in a shipped client.** `mono.client` does
 		// not link `Engine::ui` and must not - that is what keeps Dear ImGui out
 		// of a game binary - so the interface hook here is the engine's own
