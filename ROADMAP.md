@@ -79,7 +79,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [x] Fix client cleanup for rows after a visibility Forgotten message, with regression coverage.
 - [x] Optimize recovery-row serialization by moving the ByteWriter buffer. The recovery benchmark improved from 294±35 to 212±22 ns/item across 15 samples.
-- [_] Investigate scoring performance. A candidate fast path showed a noisy 4-5% mean improvement and was reverted, so scoring remains unresolved.
+- [x] Improve scoring performance by selecting the exact replication prefix with `nth_element` followed by `sort`. Controlled release A/B runs with 15 samples each measured baseline means of 2,427,371 and 2,315,204 ns/item, and candidate means of 2,122,163 and 2,147,329 ns/item, about 10% lower at the midpoint of the two run means. 138 affected dev suites pass, including packet-order coverage.
 
 - [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground" - maybe 'fog volumes' with different shapes and size/squash/fluffy sliders?).
 - [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
