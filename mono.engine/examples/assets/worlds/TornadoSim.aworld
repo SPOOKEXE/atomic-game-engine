@@ -127,8 +127,8 @@ end
 Lighting.ClockTime = 17.2
 Lighting.GeographicLatitude = 35
 Lighting.Brightness = 0.33
-Lighting.Ambient = Color3.fromRGB(70, 80, 96)
-Lighting.OutdoorAmbient = Color3.fromRGB(55, 65, 75)
+Lighting.Ambient = Color3.fromRGB(42, 50, 64)
+Lighting.OutdoorAmbient = Color3.fromRGB(34, 42, 53)
 Lighting.BloomThreshold = 1.1
 Lighting.BloomIntensity = 0.45
 Lighting.BloomRadius = 6
@@ -225,11 +225,11 @@ end
 -- Five local overlapping cells form a condensation funnel. The broad dirty
 -- base and the upper anvil feed preserve the reference's multi-layer shape.
 local funnelVolumes = {
-	makeVolume("Funnel Ground Spray", Vector3.new(0, 10, 95), Vector3.new(46, 12, 46), 0.23),
-	makeVolume("Funnel Lower Condensation", Vector3.new(0, 38, 95), Vector3.new(38, 32, 38), 0.20),
-	makeVolume("Funnel Mid Condensation", Vector3.new(0, 91, 95), Vector3.new(58, 50, 58), 0.17),
-	makeVolume("Funnel Upper Condensation", Vector3.new(0, 166, 95), Vector3.new(84, 64, 84), 0.14),
-	makeVolume("Funnel Anvil Feed", Vector3.new(0, 250, 95), Vector3.new(162, 34, 118), 0.10),
+	makeVolume("Funnel Ground Spray", Vector3.new(0, 10, 95), Vector3.new(46, 12, 46), 0.10),
+	makeVolume("Funnel Lower Condensation", Vector3.new(0, 38, 95), Vector3.new(38, 32, 38), 0.08),
+	makeVolume("Funnel Mid Condensation", Vector3.new(0, 91, 95), Vector3.new(58, 50, 58), 0.065),
+	makeVolume("Funnel Upper Condensation", Vector3.new(0, 166, 95), Vector3.new(84, 64, 84), 0.05),
+	makeVolume("Funnel Anvil Feed", Vector3.new(0, 250, 95), Vector3.new(162, 34, 118), 0.035),
 }
 funnelVolumes[1].Color = Color3.fromRGB(170, 137, 92)
 funnelVolumes[1].NoiseStrength = 1
@@ -237,7 +237,7 @@ funnelVolumes[2].Color = Color3.fromRGB(192, 194, 190)
 funnelVolumes[3].Color = Color3.fromRGB(184, 188, 188)
 funnelVolumes[4].Color = Color3.fromRGB(164, 170, 174)
 funnelVolumes[5].Color = Color3.fromRGB(135, 145, 153)
-local rainBank = makeVolume("Rain Curtain", Vector3.new(-34, 38, 44), Vector3.new(120, 46, 105), 0.09)
+local rainBank = makeVolume("Rain Curtain", Vector3.new(-34, 38, 44), Vector3.new(120, 46, 105), 0.035)
 rainBank.Color = Color3.fromRGB(112, 129, 140)
 rainBank.Falloff = 0.72
 
@@ -294,7 +294,7 @@ local camera = Instance.new("Camera")
 camera.Name = "TornadoChaseCamera"
 camera.FieldOfView = 57
 camera.FarPlaneZ = 1500
-camera.CFrame = CFrame.lookAt(Vector3.new(-145, 62, -175), Vector3.new(-45, 98, 95))
+camera.CFrame = CFrame.lookAt(Vector3.new(-145, 62, -175), Vector3.new(60, 60, 95))
 camera.Parent = Workspace
 Workspace.CurrentCamera = camera
 
