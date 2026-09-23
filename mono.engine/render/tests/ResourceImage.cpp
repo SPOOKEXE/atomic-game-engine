@@ -4908,7 +4908,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(world.IsValid());
 	const std::string stablePipeline = "image-export-pipeline";
 	const std::string runtimePipeline = stablePipeline + "#" + std::to_string(world.Index);
-	InstallImageCapture(renderer, "lit", true, false, false, runtimePipeline);
+	InstallImageCapture(renderer, "display", true, false, false, runtimePipeline);
 	world::DataFactorySession session(worlds);
 	session.SetPauseParticipant(
 		[world](world::WorldId paused, world::DataFactoryPauseScope scope, bool, std::string &) {
