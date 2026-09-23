@@ -60,14 +60,14 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
 - [x] review and plan a cleanup of the render pipeline. Write docs/v025-RENDER-PIPELINE-CLEANUP.md. This can be logic cleanup, better layout, components separation, merging, renaming, potential test points, areas to investigate logic (that seem wrong and need to be investigated), etc.
 - [x] plan a consolidation and cleanup for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them). Write docs/v025-MCP-CLEANUP.md.
-- [x] add a "light path visualiser" that shows a visualisation of the spatial casting of light emitters so i can see what path they take, what they hit, etc. basically blue for empty space it travels, red for end of light, orange for pass-through or reflections.
+- [_] add a "light path visualiser" that shows a visualisation of the spatial casting of light emitters so i can see what path they take, what they hit, etc. basically blue for empty space it travels, red for end of light, orange for pass-through or reflections. Blue influence segments and red termination exist; orange pass-through and reflection events remain open.
 - [x] create a "SkyGridPBR" demo of floating terrain balls with each one having one of 8 custom made shaders, then have the camera fly forward between the seams. this is a benchmark called BenchmarkSkyGrid.luau built-in demo example. We'll also use this as a performance profiler for editablemesh + terrain + etc.
 - [x] create two stress test demos: 100 unique 4k textures on material spheres with PBR (like the PBR demo), and 1 unique 4k texture on material spheres with PBR. tests instancing (for 1 duplicate item) and mem/compute usage for the uniques.
-- [x] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors.
+- [_] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors. Culling and LOD use the locked view; inspect the remaining camera behavior against the full claim.
 - [x] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
-- [x] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`
-- [x] Do cleanup in `docs/v025-MCP-CLEANUP.md`
-- [x] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations.
+- [_] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`. Extracted owners exist; `PortalImageRuntime` still calls `Renderer` directly and the final GPU gate remains open.
+- [_] Do cleanup in `docs/v025-MCP-CLEANUP.md`. Owner-tagged hooks exist; host manifests, typed hook contexts and resource ownership, and unified product registration remain open.
+- [_] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations. The current audit covers 22 of 31 engine modules and records opportunities; complete coverage and measured results remain open.
 - [x] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
 - [x] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
 - [x] optimise server startup time
@@ -75,7 +75,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] LOD system billboard render support
 - [x] /docs/future-work/ui-system.md
 - [x] plan how to fix portals so they are seamless. really plan out how to make them seamless and how to handle "standing in the middle" so objects are visually there on both sides of the portal with no seam especially during movement (and how to make replication seamless too). Write docs/v025-SEAMLESS-PORTALS.md.
-- [x] implement seamless portals plan
+- [_] implement seamless portals plan. Production body splitting, transfer fences, and dynamic island solving exist; complete the plan's frame-rate, network, resolution, profiling, and GPU acceptance matrix.
 
 - [x] Fix client cleanup for rows after a visibility Forgotten message, with regression coverage.
 - [x] Optimize recovery-row serialization by moving the ByteWriter buffer. The recovery benchmark improved from 294±35 to 212±22 ns/item across 15 samples.
@@ -87,9 +87,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] make Studio GUI Preview Controls hidden by default and interactive when enabled.
 - [x] remove the HarfBuzz configure notice from the Studio launcher build.
 - [x] validate combined lighting behavior with overlapping fog volumes, clouds, atmosphere, and god rays; expand compute shader tests and captures, and fix issues found.
-- [x] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks.
+- [_] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks. The large-count scene exists; record before and after measurements for the claimed optimizations.
 - [x] compare TornadoSim field samples, presets, lifecycle, damage, and matched default and mature-funnel captures against the C++ reference; finish GPU preset and failure-fallback validation.
-- [x] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene.
+- [_] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene. A live session created and edited a Part, played and stopped a client, then saved and reopened the game; the Worlds dock showed stale content after reopen and needs a repeat check.
+
+The [v0.25 roadmap audit](docs/v025-roadmap-audit.md) records source evidence and remaining verification limits for all 49 items. The opt-in GPU suite and live Studio reopen check found failures; release benchmarks remain unverified.
 
 ### v0.26
 

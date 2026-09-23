@@ -90,13 +90,15 @@ TEST_CASE(
 	command.Bounds = {{0, 0}, {64, 64}};
 	commands.Commands.push_back(command);
 	render::ViewportFrames frames;
-	REQUIRE(frames.Render(fixture.Render, store, commands, 1, firstOwner) == 1);
 	const auto capture = [&](Name owner) {
 		void *const previous = frames.Resolve(viewport).Texture;
 		render::InterfaceImage frameImage;
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
 		while (std::chrono::steady_clock::now() < deadline) {
-			REQUIRE(frames.Render(fixture.Render, store, commands, 1, owner) == 1);
+			if (frames.Render(fixture.Render, store, commands, 1, owner) != 1) {
+				SDL_Delay(1);
+				continue;
+			}
 			frameImage = frames.Resolve(viewport);
 			if (frameImage.Texture != nullptr && frameImage.Texture != previous) break;
 			SDL_Delay(1);

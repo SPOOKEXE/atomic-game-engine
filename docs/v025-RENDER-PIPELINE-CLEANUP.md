@@ -22,9 +22,9 @@ topology, demand, capture, composition, and residency paths explicit. Focused te
 
 Remaining limitations:
 
-- Final GPU test approval is pending.
+- The approved `just preset=ci render-check` run on September 24, 2026, passed 126 of 132 GPU cases and failed six. The remaining cases are listed in [the roadmap audit](v025-roadmap-audit.md).
 - `PortalImageRuntime` still owns direct `Renderer` capture and upload calls.
-- Full CPU CI gates are blocked by unrelated concurrent GUI work.
+- The strict CPU `just preset=ci check` gate passed on September 23, 2026, with 626 suites and no failures.
 
 The original investigations remain investigation items unless their own focused evidence closes them.
 

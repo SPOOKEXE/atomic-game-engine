@@ -65,6 +65,7 @@ namespace engine::render {
 		const size_t bytes = nodes.size_bytes();
 		if (bytes > UINT32_MAX) return false;
 		if (State->CloudDensityCapacity < bytes) {
+			State->CloudDensityUploadedNodes.clear();
 			if (State->CloudDensityBuffer) gpu::ReleaseBuffer(State->Device, State->CloudDensityBuffer);
 			if (State->CloudDensityTransfer)
 				gpu::ReleaseTransferBuffer(State->Device, State->CloudDensityTransfer);
@@ -81,6 +82,11 @@ namespace engine::render {
 			if (!State->CloudDensityBuffer || !State->CloudDensityTransfer) return false;
 			State->CloudDensityCapacity = static_cast<uint32_t>(bytes);
 		}
+		// The fallback node is present in every ordinary frame. Reuse the resident
+		// buffer when its packed contents are unchanged, including across views.
+		if (State->CloudDensityUploadedNodes.size() == nodes.size() &&
+			std::memcmp(State->CloudDensityUploadedNodes.data(), nodes.data(), bytes) == 0)
+			return true;
 		void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->CloudDensityTransfer, false);
 		if (!mapped) return false;
 		std::memcpy(mapped, nodes.data(), bytes);
@@ -91,6 +97,7 @@ namespace engine::render {
 		const SDL_GPUBufferRegion destination{State->CloudDensityBuffer, 0, static_cast<uint32_t>(bytes)};
 		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
 		SDL_EndGPUCopyPass(copy);
+		State->CloudDensityUploadedNodes.assign(nodes.begin(), nodes.end());
 		Result.UploadedBytes += bytes;
 		return true;
 	}

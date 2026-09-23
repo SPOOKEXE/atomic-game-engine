@@ -49,7 +49,7 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 		graph::PipelineDocument d;
 		bool inserted = false;
 		for (auto &e : base.Edits()) {
-			if (e.Kind == graph::EditKind::AddNode && e.Name == core::Name("grade-exposure") && !inserted) {
+			if (e.Kind == graph::EditKind::AddNode && e.Name == core::Name("dof") && !inserted) {
 				d.Record(
 					{.Kind = graph::EditKind::Enable, .Name = core::Name("shader-lenses"), .Enabled = false}
 				);

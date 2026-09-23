@@ -1665,6 +1665,82 @@
           "input_schema": {
             "additionalProperties": false,
             "properties": {
+              "byte_begin": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "byte_end": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "hash": {
+                "type": "string"
+              },
+              "instance_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "options": {
+                "properties": {
+                  "expected_tick": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "expected_world_epoch": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "expected_world_version": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expected_tick",
+                  "expected_world_epoch",
+                  "expected_world_version"
+                ],
+                "type": "object"
+              },
+              "resource_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instance_id",
+              "options",
+              "resource_id",
+              "hash",
+              "byte_begin",
+              "byte_end"
+            ],
+            "type": "object"
+          },
+          "name": "get_scene_snapshot_chunk"
+        },
+        {
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "instance_id": {
+                "type": "string"
+              },
+              "resource_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instance_id",
+              "resource_id"
+            ],
+            "type": "object"
+          },
+          "name": "release_scene_snapshot"
+        },
+        {
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
               "instance_id": {
                 "minLength": 1,
                 "type": "string"

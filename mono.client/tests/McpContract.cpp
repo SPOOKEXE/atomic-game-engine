@@ -86,10 +86,13 @@ namespace {
 		asio::io_context context;
 		asio::ip::tcp::socket socket(context);
 		std::error_code failure;
-		for (int attempt = 0; attempt < 200; ++attempt) {
+		// Vulkan and asset startup can exceed two seconds while the full suite runs.
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		for (;;) {
 			socket.connect({asio::ip::address_v4::loopback(), port}, failure);
 			if (!failure) break;
 			socket.close();
+			if (std::chrono::steady_clock::now() >= deadline) break;
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
 		REQUIRE_FALSE(failure);

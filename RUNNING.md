@@ -151,10 +151,13 @@ directory. Use the `bench` preset for comparable measurements.
 | `lighting-stress-scene [frames]` | Run the 256 point, 256 spot, 256 fog volume scene. Default: `720`. |
 | `data-capture-hook-bench [samples]` | Measure renderer data-capture hooks. Default: `5`. |
 | `gpu-texture-atlas-bench [samples]` | Measure GPU texture-atlas work. Default: `1`. |
+| `gpu-particle-field-bench [samples]` | Measure GPU particle-field presets. Default: `1`. |
 | `check-bench-render-shaders` | Confirm benchmark shader staging. |
 | `medium-render-profile [seconds]` | Capture a medium render profile. Default: `15`. |
 | `shader-fuzz [runs] [compiler]` | Fuzz cooked shader parsing. Defaults: `10000`, `clang++-21`. |
 | `presentation-fuzz [runs] [compiler]` | Fuzz presentation-message parsing. Defaults: `10000`, `clang++-21`. |
+| `fuzz-ui [runs] [compiler]` | Fuzz GUI documents, text, bindings, and bake SVGs. Defaults: `1000`, `clang++-21`. |
+| `bakegraph-pipeline-set-bench [samples]` | Measure lookup across a large pipeline set. Default: `5`. |
 | `portal-exchange-bench [samples]` | Measure portal exchange. Default: `5`. |
 | `portal-ambient-bench [samples]` | Measure portal ambient codec work. Default: `5`. |
 | `portal-directional-bench [samples]` | Measure portal directional codec work. Default: `5`. |
@@ -173,6 +176,8 @@ directory. Use the `bench` preset for comparable measurements.
 | `dynamic-bvh-bench [samples]` | Measure dynamic BVH work. Default: `5`. |
 | `simulation-sweep [samples]` | Measure simulation configurations. Default: `5`. |
 | `simulation-publish-sweep [samples]` | Measure simulation publication. Default: `3`. |
+| `priority-refinement-bench [samples]` | Measure refined multi-row replication publishing. Default: `5`. |
+| `recovery-rows-bench [samples]` | Measure recovery-row re-offer work. Default: `5`. |
 | `bench-mesh-lod [samples]` | Measure mesh LOD generation. Default: `5`. |
 
 Profile and soak outputs are retained under `.cache/`, including
@@ -185,6 +190,7 @@ Profile and soak outputs are retained under `.cache/`, including
 |---|---|
 | `studio-smoke [game] [out] [meshes]` | Headlessly run Studio and capture images. Defaults: empty game, `.cache/studio-smoke.bmp`, `.cache/studio-meshes.bmp`. |
 | `client-smoke` | Headlessly exercise a client UI interaction. |
+| `packaged-tornado-audio` | Check packaged TornadoSim audio resolves beside the client. |
 | `ui-check` | Capture and compare client UI output. |
 | `client-exit` | Check headless and windowed client shutdown. |
 | `heap-soak [seconds] [limit] [warmup] [scenes]` | Detect client heap growth. Defaults: `60`, `8192`, `15`, `Rings Particles Meshes Interface StressPhysics`. |
@@ -195,6 +201,7 @@ Profile and soak outputs are retained under `.cache/`, including
 | `replay-check [entities] [ticks]` | Check server replay behavior. Defaults: `256`, `120`. |
 | `stress [label] [clients] [seconds] [port]` | Run a server load test. Defaults: `baseline`, `200`, `45`, `45100`. |
 | `stress-motion [label] [clients] [seconds] [port] [window]` | Run motion load testing. Defaults: `motion-baseline`, `1`, `20`, `45200`, `30`. |
+| `stress-random-motion [label] [clients] [seconds] [port] [window] [seed] [every]` | Run fixed-seed random-motion load testing. Defaults: `random-motion`, `200`, `45`, `45300`, `30`, `1`, `30`. |
 
 Use positional arguments for recipe parameters: `just heap-soak 300 8192 15
 "StressPhysics"` and `just determinism 1024 400`.

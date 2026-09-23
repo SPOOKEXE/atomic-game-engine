@@ -1266,6 +1266,7 @@ namespace engine::render {
 		SDL_GPUBuffer *CloudDensityBuffer = nullptr;
 		SDL_GPUTransferBuffer *CloudDensityTransfer = nullptr;
 		uint32_t CloudDensityCapacity = 0;
+		std::vector<scene::CloudDensityGpuNode> CloudDensityUploadedNodes;
 		std::array<scene::ShaderLensState, scene::MAX_SCENE_SHADER_LENSES> ShaderLenses{};
 		size_t ShaderLensCount = 0;
 

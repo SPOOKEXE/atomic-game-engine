@@ -1465,7 +1465,7 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 			CHECK(observation.Camera.WorldFromCamera[column * 4 + row] == expectedCamera[column][row]);
 	CHECK(observation.ReadCount == 3);
 	CHECK(observation.ReadCount <= render::MAX_RENDER_OBSERVATION_RESOURCES);
-	CHECK(observation.ReadResources[0] == core::Name("lit"));
+	CHECK(observation.ReadResources[0] == core::Name("display"));
 	CHECK(observation.ReadResources[1] == core::Name("linear-depth"));
 	CHECK(observation.ReadResources[2] == core::Name("normal"));
 	CHECK(observation.WriteCount == 0);
@@ -1677,6 +1677,7 @@ TEST_CASE(
 	wall.CastShadow = false;
 	wall.EmissiveMap = emission;
 	wall.EmissiveTint = {0, 0, 1};
+	wall.EmissiveStrength = 1.0f;
 	render::SceneTarget target{65, 37};
 	render::View source;
 	source.World = 22;
@@ -2643,6 +2644,7 @@ TEST_CASE(
 	body.CastShadow = false;
 	body.Tint = {};
 	body.EmissiveMap = emission;
+	body.EmissiveStrength = 1.0f;
 	view.Instances = std::span(&body, 1);
 	render::PortalImageBinding binding;
 	binding.WorldName = view.WorldName;

@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::control {
 
@@ -32,20 +33,28 @@ namespace engine::control {
 			return json{{"name", name}, {"supported", false}, {"reason", reason}};
 		}
 
-		json DescribeOperations(const Surface &surface) {
-			json operations = json::array();
+		std::vector<const Tool *> VisibleOperations(const Surface &surface) {
+			std::vector<const Tool *> operations;
 			for (const Tool &tool : surface.Registered()) {
+				if (surface.Hooks().VisibleTool(tool.Name)) operations.push_back(&tool);
+			}
+			return operations;
+		}
+
+		json DescribeOperations(const std::vector<const Tool *> &visible) {
+			json operations = json::array();
+			for (const Tool *tool : visible) {
 				operations.push_back(
 					json{
-						{"name", tool.Name},
-						{"input_schema", tool.Schema ? tool.Schema() : json{{"type", "object"}}}
+						{"name", tool->Name},
+						{"input_schema", tool->Schema ? tool->Schema() : json{{"type", "object"}}}
 					}
 				);
 			}
 			return operations;
 		}
 
-		json DescribeUnavailableOperations(const Surface &surface) {
+		json DescribeUnavailableOperations(const std::vector<const Tool *> &visible) {
 			json operations = json::array();
 			for (std::string_view name : std::array{
 					 "reset_world",
@@ -63,11 +72,9 @@ namespace engine::control {
 					 "apply_intervention",
 					 "step_and_capture",
 				 }) {
-				const bool registered = std::any_of(
-					surface.Registered().begin(), surface.Registered().end(), [name](const Tool &tool) {
-						return tool.Name == name;
-					}
-				);
+				const bool registered = std::any_of(visible.begin(), visible.end(), [name](const Tool *tool) {
+					return tool->Name == name;
+				});
 				if (registered) continue;
 				operations.push_back(
 					Unsupported(name, "this host does not implement the data-factory operation")
@@ -235,14 +242,15 @@ namespace engine::control {
 					);
 				}
 
+				const std::vector<const Tool *> visible = VisibleOperations(*this);
 				return json{
 					{"contract_version", CONTRACT_VERSION},
 					{"schema_version", SCHEMA_VERSION},
 					{"engine_version", std::string(core::Version())},
 					{"control_generation", Hooks().ControlGeneration()},
 					{"hooks", DescribeHooks(*this)},
-					{"operations", DescribeOperations(*this)},
-					{"unsupported_operations", DescribeUnavailableOperations(*this)},
+					{"operations", DescribeOperations(visible)},
+					{"unsupported_operations", DescribeUnavailableOperations(visible)},
 					{"requested_channels", std::move(channels)},
 					{"limits", std::move(limits)},
 					{"headless_cpu", Unsupported("headless_cpu", "not declared by this control host")},

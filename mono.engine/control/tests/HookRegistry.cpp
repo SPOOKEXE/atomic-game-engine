@@ -12,6 +12,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 TEST_SUITE_ID("engine.control.hook-registry")
 
@@ -44,6 +45,13 @@ namespace {
 			.Dependencies = std::move(dependencies),
 			.Limits = {}
 		};
+	}
+
+	const json *Named(const json &rows, std::string_view name) {
+		for (const json &row : rows) {
+			if (row["name"] == name) return &row;
+		}
+		return nullptr;
 	}
 }
 
@@ -190,6 +198,40 @@ TEST_CASE("negotiate reports active hook metadata and control generation", "[con
 	const json removed = Call(surface, "negotiate");
 	CHECK(removed["control_generation"] == 2);
 	CHECK(removed["hooks"].empty());
+}
+
+TEST_CASE("negotiate hides draining hook tools with tools/list", "[control][hooks][discovery]") {
+	Surface surface("test", "hook registry");
+	surface.AddDiscoveryTools();
+	bool terminal = false;
+	std::string failure;
+	HookLease lease = surface.ActivateHook(
+		Descriptor("test.discovery-drain"),
+		[&terminal](HookRegistration &rows) {
+			rows.SetDrain([&terminal] { return terminal; });
+			rows.Add(Tool{"capture", "draining discovery row", nullptr, [](const json &, std::string &) {
+							  return json{};
+						  }});
+		},
+		failure
+	);
+	REQUIRE(failure.empty());
+
+	lease.Close();
+	const json tools = Ask(surface, "tools/list")["result"]["tools"];
+	const json negotiated = Call(surface, "negotiate");
+	CHECK(tools.size() == negotiated["operations"].size());
+	CHECK(Named(tools, "negotiate") != nullptr);
+	CHECK(Named(negotiated["operations"], "negotiate") != nullptr);
+	CHECK(Named(tools, "capture") == nullptr);
+	CHECK(Named(negotiated["operations"], "capture") == nullptr);
+	CHECK(Named(negotiated["unsupported_operations"], "capture") != nullptr);
+	CHECK(Call(surface, "capture")["error"] == "hook is draining: capture");
+
+	terminal = true;
+	surface.PumpHooks();
+	CHECK(surface.Hooks().Active().empty());
+	CHECK(surface.Count() == 1);
 }
 
 TEST_CASE("owned dependencies keep their providers active until children close", "[control][hooks]") {

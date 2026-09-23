@@ -338,9 +338,14 @@ namespace engine::render {
 					{emissive != nullptr ? emissive : State->FallbackTexture, sampler},
 					{height != nullptr ? height : State->FallbackTexture, sampler},
 					{metalness != nullptr ? metalness : State->FallbackTexture, sampler},
-					{packedPbr != nullptr ? packedPbr : State->FallbackTexture, sampler}
+					{packedPbr != nullptr ? packedPbr : State->FallbackTexture, sampler},
+					{State->RefractionTexture != nullptr ? State->RefractionTexture : State->FallbackTexture,
+					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler},
+					{State->RefractionGuardTexture != nullptr ? State->RefractionGuardTexture
+															  : State->FallbackTexture,
+					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler}
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 11);
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
 				LightingUniforms material = Lighting;
 				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
 				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
