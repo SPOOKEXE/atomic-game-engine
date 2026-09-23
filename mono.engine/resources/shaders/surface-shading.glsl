@@ -700,8 +700,9 @@ void shadeSurface() {
 	}
 
 	// The thin term preserves the original zero-thickness glass appearance.
-	// Physical thickness advances a Snell-refracted ray through the surface;
-	// screen derivatives turn that world displacement into local pixel motion.
+	// Physical thickness measures the difference between refracted and straight
+	// travel through a slab. At IOR 1 the paths coincide exactly. Screen
+	// derivatives turn that world displacement into local pixel motion.
 	float ior = clamp(lighting.Transmission.x, 1.0, 3.0);
 	float thickness = max(lighting.Transmission.y, 0.0);
 	float refractionScale = (1.0 - 1.0 / ior) * 0.08;
@@ -712,12 +713,16 @@ void shadeSurface() {
 		vec3 incident = normalize(inWorldPosition - lighting.Eye.xyz);
 		vec3 facing = dot(incident, normal) < 0.0 ? normal : -normal;
 		vec3 ray = refract(incident, facing, 1.0 / ior);
+		vec3 travel = thickness * (
+			ray / max(-dot(ray, facing), 0.05) -
+			incident / max(-dot(incident, facing), 0.05)
+		);
 		vec3 horizontal = dFdx(inWorldPosition);
 		vec3 vertical = dFdy(inWorldPosition);
 		vec2 pixels = vec2(
-			dot(ray, horizontal) / max(dot(horizontal, horizontal), 1e-6),
-			dot(ray, vertical) / max(dot(vertical, vertical), 1e-6)
-		) * thickness;
+			dot(travel, horizontal) / max(dot(horizontal, horizontal), 1e-6),
+			dot(travel, vertical) / max(dot(vertical, vertical), 1e-6)
+		);
 		offset += pixels / max(sourceSize, vec2(1.0));
 	}
 	vec2 refractedUv = screenUv + offset;
