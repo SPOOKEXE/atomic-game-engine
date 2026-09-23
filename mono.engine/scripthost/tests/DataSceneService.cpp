@@ -865,7 +865,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				options.CaptureNode = "lit"
 				options.Channels = {"rgb_linear_hdr", "object_ids"}
 				local queued = service:CaptureBundle("fixture/snapshot", options)
-				assert(queued.status == "queued" and queued.options.CameraId == "current_view")
+				assert(queued.status == "queued", "bundle status=" .. tostring(queued.status) .. " reason=" .. tostring(queued.reason))
+				assert(queued.options.CameraId == "current_view")
 				local invalid = service:CreateOptions()
 				invalid.CameraId = "fixture/camera"
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "queued")
@@ -913,7 +914,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				options.CaptureNode = "lit";
 				options.Channels = ["rgb_linear_hdr", "object_ids"];
 				const queued = service.CaptureBundle("fixture/snapshot", options);
-				if (queued.status !== "queued" || queued.options.CameraId !== "current_view") throw new Error("queue");
+				if (queued.status !== "queued") throw new Error("bundle status=" + queued.status + " reason=" + queued.reason);
+				if (queued.options.CameraId !== "current_view") throw new Error("queue options");
 				let invalid = service.CreateOptions();
 				invalid.CameraId = "fixture/camera";
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "queued") throw new Error("camera");
