@@ -3422,7 +3422,7 @@ namespace studio {
 		bool prepared = false;
 		if (universe.Enter(
 				world,
-				[this, &prepared, &settings](Store &store, Scheduler &systems) {
+				[&prepared, &settings](Store &store, Scheduler &systems) {
 					PrepareWorld(store, systems);
 					engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
 					engine::script::SetScriptTickRate(store, settings.ScriptTickRate);

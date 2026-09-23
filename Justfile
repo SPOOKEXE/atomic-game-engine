@@ -181,7 +181,7 @@ volume-light-stress frames="120":
 # Runs the authored 256-point, 256-spot and 256-volume course through the
 # release renderer. Statistics and the frame graph stay on the terminal.
 lighting-stress-scene frames="720": (build "client")
-    ./{{build}}/client/client --headless --script LightingStress.luau --frames {{frames}} --stats --graph --uncapped
+    ./{{build}}/client/client --headless --script mono.engine/examples/assets/scripts/LightingStress.luau --frames {{frames}} --stats --graph --uncapped
 
 # Whole camera-batch signature costs, with unchanged rows and one-row edits.
 render-preparation-bench samples="5":

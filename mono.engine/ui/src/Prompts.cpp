@@ -118,7 +118,8 @@ namespace engine::ui {
 		ImGui::EndChild();
 
 		ImGui::SetNextItemWidth(-1.0f);
-		const bool entered = TextField("##name", state->Name, "file name");
+		TextField("##name", state->Name, "file name");
+		const bool entered = ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_Enter);
 
 		const std::filesystem::path chosen =
 			state->Name.empty() ? std::filesystem::path{} : listing.Directory / state->Name;
