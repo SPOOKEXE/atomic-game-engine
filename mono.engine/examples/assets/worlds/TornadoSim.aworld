@@ -88,6 +88,7 @@ for _, parameter in ipairs(Controls.parameters) do
 	parameterBounds[parameter.Key] = parameter
 end
 local particleField = workspace:FindFirstChild("TornadoParticles", true)
+local environmentResetRequested = false
 
 -- Authority applies validated requests from the in-game controls.
 controlEvent.OnServerEvent:Connect(function(payload: string)
@@ -118,6 +119,7 @@ controlEvent.OnServerEvent:Connect(function(payload: string)
 		Storm.Configure({ Enabled = request.value })
 	elseif request.kind == "reset" then
 		Storm.Configure(Controls.default)
+		environmentResetRequested = true
 	elseif request.kind == "lifecycle" and type(request.value) == "boolean" then
 		Storm.Configure({ LifecycleEnabled = request.value })
 	end
@@ -249,6 +251,174 @@ end
 assembly("Timber Farmhouse", Vector3.new(-76, 0, 119), math.rad(24), 3, 3, 2, material.timber)
 assembly("Masonry Depot", Vector3.new(46, 0, 83), math.rad(-31), 4, 2, 3, material.masonry)
 assembly("Steel Workshop", Vector3.new(96, 0, 177), math.rad(47), 2, 4, 2, material.steel)
+
+-- The vehicle body and every wheel are regular rigid parts. A single weak
+-- tie-down uses StormLink, so the same fatigue pass that releases roof panels
+-- turns a parked chase vehicle into a storm-driven physics assembly.
+local function vehiclePart(name: string, frame: CFrame, size: Vector3, colour: Color3, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.CFrame = frame
+	part.Size = size
+	part.Color = colour
+	part.Anchored = false
+	part.CanCollide = true
+	part.StormExposedArea = size.X * size.Y
+	part.StormDragCoefficient = 1.04
+	part.StormForceScale = 0.62
+	part.Parent = parent
+	return part
+end
+
+local function vehicleJoint(name: string, first: Part, second: Part, parent: Instance): WeldConstraint
+	local joint = Instance.new("WeldConstraint")
+	joint.Name = name
+	joint.Part0 = first
+	joint.Part1 = second
+	joint.StormBreakForce = 24000
+	joint.StormMaterialStrength = 1.45
+	joint.StormDamageRate = 0.5
+	joint.Parent = parent
+	return joint
+end
+
+local function chaseVehicle(name: string, position: Vector3, yaw: number, parent: Instance)
+	local vehicle = Instance.new("Folder")
+	vehicle.Name = name
+	vehicle.Parent = parent
+	local frame = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	local chassis = vehiclePart(name .. " Chassis", frame * CFrame.new(0, 1.55, 0), Vector3.new(2.35, 0.65, 4.9), Color3.fromRGB(49, 62, 67), vehicle)
+	chassis.StormExposedArea = 10.6
+	chassis.StormForceScale = 0.72
+	local cabin = vehiclePart(name .. " Cabin", frame * CFrame.new(0, 2.35, -0.28), Vector3.new(2.15, 1.12, 2.35), Color3.fromRGB(77, 92, 96), vehicle)
+	cabin.StormExposedArea = 7.2
+	vehicleJoint(name .. " Cabin Mount", chassis, cabin, vehicle)
+	for _, wheelOffset in ipairs({
+		Vector3.new(-1.32, 0.75, -1.55), Vector3.new(1.32, 0.75, -1.55),
+		Vector3.new(-1.32, 0.75, 1.55), Vector3.new(1.32, 0.75, 1.55),
+	}) do
+		local wheel = vehiclePart(name .. " Wheel", frame * CFrame.new(wheelOffset), Vector3.new(0.5, 1.08, 1.08), Color3.fromRGB(24, 26, 25), vehicle)
+		wheel.StormEnabled = false
+		vehicleJoint(name .. " Wheel Mount", chassis, wheel, vehicle)
+	end
+
+	local anchor = Instance.new("Part")
+	anchor.Name = name .. " Tie Down"
+	anchor.CFrame = frame * CFrame.new(0, 0.35, 0)
+	anchor.Size = Vector3.new(0.4, 0.4, 0.4)
+	anchor.Anchored = true
+	anchor.Visible = false
+	anchor.Parent = vehicle
+	local tieDown = vehicleJoint(name .. " Storm Tie Down", anchor, chassis, vehicle)
+	tieDown.StormBreakForce = 4300
+	tieDown.StormMaterialStrength = 0.88
+	tieDown.StormDamageRate = 1.35
+end
+
+-- This follows the reference's 160 metre deterministic scenery cells. At most
+-- nine cells are retained, so scenery stays bounded as the translating storm
+-- crosses the prairie. Every cell has nine mixed objects and selected cells
+-- carry a complete wind-releasable chase vehicle.
+local environment = Instance.new("Folder")
+environment.Name = "Tornado Environment Cells"
+environment.Parent = workspace
+local loadedCells: { [string]: Folder } = {}
+local environmentCellSize = 160
+local environmentRadius = 1
+
+local function environmentKey(cellX: number, cellZ: number): string
+	return cellX .. ":" .. cellZ
+end
+
+local function environmentalPart(name: string, position: Vector3, size: Vector3, colour: Color3, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Position = position
+	part.Size = size
+	part.Color = colour
+	part.Anchored = true
+	part.Parent = parent
+	return part
+end
+
+local function appendEnvironmentCell(cellX: number, cellZ: number)
+	local key = environmentKey(cellX, cellZ)
+	if loadedCells[key] ~= nil then return end
+	local cell = Instance.new("Folder")
+	cell.Name = "Storm Cell " .. key
+	cell.Parent = environment
+	loadedCells[key] = cell
+	local origin = Vector3.new(cellX * environmentCellSize, 0, cellZ * environmentCellSize + 95)
+	for index = 0, 7 do
+		local x = origin.X + ((index * 47 + cellZ * 19) % 130) - 65
+		local z = origin.Z + ((index * 71 + cellX * 23) % 130) - 65
+		if index % 3 == 0 then
+			environmentalPart("Cell Tree " .. index, Vector3.new(x, 5.5, z), Vector3.new(1.05, 11, 1.05), Color3.fromRGB(67, 55, 36), cell)
+		elseif index % 3 == 1 then
+			environmentalPart("Cell Sign " .. index, Vector3.new(x, 2.1, z), Vector3.new(3.6, 1.8, 0.2), Color3.fromRGB(137, 87, 42), cell)
+		else
+			environmentalPart("Cell Roof Panel " .. index, Vector3.new(x, 1.4, z), Vector3.new(4.4, 0.18, 2.8), Color3.fromRGB(85, 59, 44), cell)
+		end
+	end
+	if math.abs(cellX * 17 + cellZ * 31) % 3 == 0 then
+		chaseVehicle("Cell Chase Vehicle", origin + Vector3.new(-28, 1, 24), math.rad((cellX - cellZ) * 13), cell)
+	else
+		environmentalPart("Cell Windbreak", origin + Vector3.new(28, 1.2, -24), Vector3.new(7.5, 2.4, 0.3), Color3.fromRGB(91, 76, 52), cell)
+	end
+	local panel = vehiclePart("Cell Loose Roof Panel", CFrame.new(origin + Vector3.new(34, 2.0, -32)), Vector3.new(4.8, 0.16, 2.9), Color3.fromRGB(83, 57, 42), cell)
+	panel.StormExposedArea = 13.9
+	panel.StormForceScale = 0.9
+	local panelAnchor = environmentalPart("Cell Roof Anchor", origin + Vector3.new(34, 0.45, -32), Vector3.new(0.25, 0.25, 0.25), Color3.fromRGB(0, 0, 0), cell)
+	panelAnchor.Visible = false
+	local panelLink = vehicleJoint("Cell Roof Wind Link", panelAnchor, panel, cell)
+	panelLink.StormBreakForce = 1900
+	panelLink.StormMaterialStrength = 0.65
+	panelLink.StormDamageRate = 1.6
+end
+
+local function streamEnvironmentCells(position: Vector3)
+	local centreX = math.floor(position.X / environmentCellSize)
+	local centreZ = math.floor((position.Z - 95) / environmentCellSize)
+	local wanted: { [string]: boolean } = {}
+	for cellZ = centreZ - environmentRadius, centreZ + environmentRadius do
+		for cellX = centreX - environmentRadius, centreX + environmentRadius do
+			local key = environmentKey(cellX, cellZ)
+			wanted[key] = true
+			appendEnvironmentCell(cellX, cellZ)
+		end
+	end
+	for key, cell in pairs(loadedCells) do
+		if not wanted[key] then
+			cell:Destroy()
+			loadedCells[key] = nil
+		end
+	end
+end
+
+local function resetEnvironment()
+	for key, cell in pairs(loadedCells) do
+		cell:Destroy()
+		loadedCells[key] = nil
+	end
+	local intercept = environment:FindFirstChild("Tornado Chase Intercept")
+	if intercept then intercept:Destroy() end
+	chaseVehicle("Tornado Chase Intercept", Vector3.new(-84, 1, -54), math.rad(2), environment)
+	streamEnvironmentCells(Controls.default.Position)
+end
+
+resetEnvironment()
+local environmentClock = 0.0
+RunService.Heartbeat:Connect(function(delta: number)
+	if environmentResetRequested then
+		environmentResetRequested = false
+		resetEnvironment()
+	end
+	environmentClock += delta
+	if environmentClock < 0.75 then return end
+	environmentClock = 0
+	streamEnvironmentCells(Storm.Snapshot().Position)
+end)
+streamEnvironmentCells(Controls.default.Position)
 ]]></Source>
 		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
 local StarterGui = game:GetService("StarterGui")
@@ -259,6 +429,7 @@ local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
 local controlEvent = ReplicatedStorage.TornadoControl
 
 local function makePart(name: string, size: Vector3, position: Vector3, colour: Color3): Part
@@ -364,6 +535,39 @@ local road = makePart("Storm Chase Road", Vector3.new(18, 0.18, 650), Vector3.ne
 for index = -14, 14 do
 	makePart("Road Mark " .. index, Vector3.new(0.55, 0.04, 9), Vector3.new(-82, 0.22, 84 + index * 20), Color3.fromRGB(193, 169, 99))
 end
+
+-- A local humanoid-shaped observer gives the field a playable scale. It is a
+-- camera proxy rather than an authority-owned character: moving it never
+-- writes a second simulation body into the replicated storm world.
+local observer = Instance.new("Model")
+observer.Name = "Storm Field Observer"
+observer.Parent = Workspace
+local observerRoot = makePart("Observer Root", Vector3.new(0.7, 4.6, 0.7), Vector3.new(-114, 2.3, -92), Color3.fromRGB(255, 255, 255))
+observerRoot.Visible = false
+observerRoot.Parent = observer
+local observerHumanoid = Instance.new("Humanoid")
+observerHumanoid.Name = "Humanoid"
+observerHumanoid.RootPart = observerRoot
+observerHumanoid.WalkSpeed = 8
+observerHumanoid.Parent = observer
+local observerTorso = makePart("Observer Storm Jacket", Vector3.new(1.45, 2.15, 0.82), observerRoot.Position, Color3.fromRGB(39, 72, 91))
+observerTorso.Parent = observer
+local observerHead = makePart("Observer Head", Vector3.new(1.02, 1.02, 1.02), observerRoot.Position, Color3.fromRGB(201, 166, 122))
+observerHead.Parent = observer
+local observerPosition = observerRoot.Position
+local observerHeading = Vector3.new(0, 0, 1)
+local observerFollow = false
+
+local function updateObserverVisual()
+	observerRoot.Position = observerPosition
+	observerTorso.CFrame = CFrame.lookAt(observerPosition + Vector3.new(0, 0.15, 0), observerPosition + observerHeading)
+	observerHead.CFrame = CFrame.lookAt(observerPosition + Vector3.new(0, 1.65, 0), observerPosition + observerHeading)
+end
+
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed or input.KeyCode ~= Enum.KeyCode.F then return end
+	observerFollow = not observerFollow
+end)
 
 -- The reference keeps a projected grid locked to the prairie. These thin
 -- geometry lines give the same world scale without a per-frame projection pass.
@@ -1086,15 +1290,38 @@ RunService.Heartbeat:Connect(function(delta: number)
 			for _, visual in ipairs(stormVisuals) do
 				visual.Object.Position = visual.Origin + stormOffset
 			end
-			if not cameraOrbit and not cameraShake then
+	if not cameraOrbit and not cameraShake and not observerFollow then
 				camera.CFrame = CFrame.lookAt(cameraHome + stormOffset, cameraTarget + stormOffset)
 			end
 		end
 	end
+	if UserInputService:GetFocusedTextBox() == nil then
+		local move = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += Vector3.new(0, 0, 1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then move += Vector3.new(0, 0, -1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then move += Vector3.new(-1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += Vector3.new(1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Q) then move += Vector3.new(0, -1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.E) then move += Vector3.new(0, 1, 0) end
+		if move.Magnitude > 0 then
+			local direction = move.Unit
+			observerHumanoid.MoveDirection = direction
+			observerPosition += direction * observerHumanoid.WalkSpeed * delta
+			if direction.X ~= 0 or direction.Z ~= 0 then
+				observerHeading = Vector3.new(direction.X, 0, direction.Z).Unit
+			end
+		else
+			observerHumanoid.MoveDirection = Vector3.zero
+		end
+	end
+	updateObserverVisual()
 	if cameraOrbit then
 		local orbit = elapsed * 0.16
 		local position = Vector3.new(math.cos(orbit) * 205, 72, 95 + math.sin(orbit) * 205) + stormOffset
 		camera.CFrame = CFrame.lookAt(position, cameraTarget + stormOffset)
+	elseif observerFollow then
+		local eye = observerPosition - observerHeading * 15 + Vector3.new(0, 7, 0)
+		camera.CFrame = CFrame.lookAt(eye, observerPosition + Vector3.new(0, 1.3, 0))
 	elseif cameraShake then
 		camera.CFrame = CFrame.lookAt(cameraHome + stormOffset, cameraTarget + stormOffset)
 	end
