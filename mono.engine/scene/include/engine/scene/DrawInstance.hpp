@@ -74,7 +74,7 @@ namespace engine::scene {
 		core::Color3 Tint{1.0f, 1.0f, 1.0f};
 		core::Color3 SurfaceColour{1.0f, 1.0f, 1.0f};
 		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
-		float EmissiveStrength = 1.0f;
+		float EmissiveStrength = 0.0f;
 		//@}
 
 		// Which mesh, by name. Invalid means the consumer's default.

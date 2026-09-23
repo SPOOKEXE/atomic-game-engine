@@ -29,7 +29,7 @@ namespace engine::render {
 			std::array<float, 3> Tint{1, 1, 1};
 			std::array<float, 3> SurfaceColour{1, 1, 1};
 			std::array<float, 3> EmissiveTint{1, 1, 1};
-			float EmissiveStrength = 1;
+			float EmissiveStrength = 0;
 			float Transparency = 0;
 			float AlphaCutoff = .5f;
 			std::array<float, 4> SeamPlane{};

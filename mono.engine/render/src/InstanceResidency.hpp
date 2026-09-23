@@ -126,7 +126,7 @@ namespace engine::render {
 			core::Color3 Tint;
 			core::Color3 SurfaceColour;
 			core::Color3 EmissiveTint;
-			float EmissiveStrength = 1.0f;
+			float EmissiveStrength = 0.0f;
 		};
 
 		struct Entry {

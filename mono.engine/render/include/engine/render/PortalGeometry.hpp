@@ -55,7 +55,7 @@ namespace engine::render {
 		// Linear RGB emission tint.
 		std::array<float, 3> EmissiveTint{1, 1, 1};
 		// Scalar multiplier applied to EmissiveTint.
-		float EmissiveStrength = 1;
+		float EmissiveStrength = 0;
 		// Material transparency from opaque zero to fully transparent one.
 		float Transparency = 0;
 		// Alpha-test threshold used by cutout materials.

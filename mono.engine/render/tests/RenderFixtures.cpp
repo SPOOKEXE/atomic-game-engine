@@ -308,6 +308,8 @@ TEST_CASE("default PBR preserves distinct part tints through the display transfo
 		Plane{1.2f, 0.0f, 4.0f, .8f, 1.0f, 0xFF00FF00u},
 	};
 	const auto instances = DrawPlanes(planes);
+	CHECK(instances[0].EmissiveStrength == 0.0f);
+	CHECK(instances[1].EmissiveStrength == 0.0f);
 	render::SceneTarget target{96, 64};
 	render::View view;
 	view.World = 905;
@@ -394,6 +396,18 @@ TEST_CASE("default PBR preserves distinct part tints through the display transfo
 	CHECK(redAlbedo[0] > redAlbedo[2] + 80);
 	CHECK(greenAlbedo[1] > greenAlbedo[0] + 80);
 	CHECK(greenAlbedo[1] > greenAlbedo[2] + 80);
+	CHECK(redLit[0] > .95f);
+	CHECK(std::abs(redLit[1]) < .02f);
+	CHECK(std::abs(redLit[2]) < .02f);
+	CHECK(greenLit[1] > .95f);
+	CHECK(std::abs(greenLit[0]) < .02f);
+	CHECK(std::abs(greenLit[2]) < .02f);
+	CHECK(redGodRays[0] > .95f);
+	CHECK(std::abs(redGodRays[1]) < .02f);
+	CHECK(std::abs(redGodRays[2]) < .02f);
+	CHECK(greenGodRays[1] > .95f);
+	CHECK(std::abs(greenGodRays[0]) < .02f);
+	CHECK(std::abs(greenGodRays[2]) < .02f);
 	CHECK(redDisplay[0] > redDisplay[1] + 40);
 	CHECK(redDisplay[0] > redDisplay[2] + 40);
 	CHECK(greenDisplay[1] > greenDisplay[0] + 40);

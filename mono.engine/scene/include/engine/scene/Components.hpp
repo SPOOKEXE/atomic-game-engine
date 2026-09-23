@@ -975,7 +975,7 @@ namespace engine::scene {
 		// Emission is tinted and scaled per surface. The map remains optional.
 		//@{
 		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
-		float EmissiveStrength = 1.0f;
+		float EmissiveStrength = 0.0f;
 		//@}
 
 		// Below this alpha a fragment is discarded rather than blended, when
