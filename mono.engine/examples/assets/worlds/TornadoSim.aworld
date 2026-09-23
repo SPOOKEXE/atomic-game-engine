@@ -196,9 +196,21 @@ for index = -14, 14 do
 	makePart("Road Mark " .. index, Vector3.new(0.55, 0.04, 9), Vector3.new(-82, 0.22, 84 + index * 20), Color3.fromRGB(193, 169, 99))
 end
 
+-- The reference keeps a projected grid locked to the prairie. These thin
+-- geometry lines give the same world scale without a per-frame projection pass.
+for index = -12, 12 do
+	local offset = index * 45
+	local northSouth = makePart("Prairie Grid NS " .. index, Vector3.new(0.10, 0.025, 1080), Vector3.new(offset, -0.47, 95), Color3.fromRGB(94, 101, 73))
+	northSouth.Transparency = 0.44
+	local eastWest = makePart("Prairie Grid EW " .. index, Vector3.new(1080, 0.025, 0.10), Vector3.new(0, -0.47, 95 + offset), Color3.fromRGB(94, 101, 73))
+	eastWest.Transparency = 0.44
+end
+
 local function building(name: string, x: number, z: number, width: number, depth: number, height: number, colour: Color3)
 	makePart(name .. " Walls", Vector3.new(width, height, depth), Vector3.new(x, height * 0.5, z), colour)
 	local roof = makePart(name .. " Roof", Vector3.new(width + 2, 1.5, depth + 2), Vector3.new(x, height + 0.75, z), Color3.fromRGB(68, 47, 39))
+	makePart(name .. " Foundation", Vector3.new(width + 1, 0.8, depth + 1), Vector3.new(x, 0.4, z), Color3.fromRGB(70, 62, 50))
+	makePart(name .. " Roof Ridge", Vector3.new(width * 0.72, 1.2, 1.0), Vector3.new(x, height + 1.75, z), Color3.fromRGB(55, 42, 37))
 	for window = -1, 1, 2 do
 		local pane = makePart(name .. " Window " .. window, Vector3.new(2.4, 2.6, 0.12), Vector3.new(x + window * width * 0.28, height * 0.57, z - depth * 0.505), Color3.fromRGB(116, 139, 146))
 		pane.EmissiveStrength = 0.15
@@ -213,13 +225,21 @@ for row = 0, 3 do
 		local bale = makePart("Hay Bale " .. row .. "/" .. column, Vector3.new(3.5, 2.1, 3.5), Vector3.new(-8 + column * 7, 1.05, 10 + row * 8), Color3.fromRGB(133, 107, 51))
 	end
 end
-for index = 0, 52 do
+for index = 0, 95 do
 	local angle = index * 2.399
-	local radius = 126 + (index % 6) * 13
+	local radius = 118 + (index % 9) * 15
 	local x = math.cos(angle) * radius
 	local z = 95 + math.sin(angle) * radius * 0.68
-	local trunk = makePart("Tree Trunk " .. index, Vector3.new(1.2, 9 + index % 5, 1.2), Vector3.new(x, 4.5 + index % 5 * 0.5, z), Color3.fromRGB(70, 55, 37))
-	local crown = makePart("Tree Crown " .. index, Vector3.new(8 + index % 4 * 2, 8 + index % 3 * 2, 8 + index % 4 * 2), Vector3.new(x, 12 + index % 5, z), Color3.fromRGB(43, 76 + index % 3 * 5, 42))
+	local trunkHeight = 8 + index % 6
+	makePart("Tree Trunk " .. index, Vector3.new(1.1, trunkHeight, 1.1), Vector3.new(x, trunkHeight * 0.5, z), Color3.fromRGB(70, 55, 37))
+	local crownWidth = 7 + index % 5 * 2
+	makePart("Tree Crown Low " .. index, Vector3.new(crownWidth, 5 + index % 3, crownWidth), Vector3.new(x, trunkHeight + 2.8, z), Color3.fromRGB(39, 66 + index % 4 * 6, 38))
+	makePart("Tree Crown High " .. index, Vector3.new(crownWidth * 0.72, 4 + index % 3, crownWidth * 0.72), Vector3.new(x + (index % 3 - 1) * 0.9, trunkHeight + 6, z), Color3.fromRGB(42, 73 + index % 4 * 5, 40))
+end
+for index = -9, 9 do
+	local fenceZ = -58 + index * 12
+	makePart("Fence Post " .. index, Vector3.new(0.5, 3.8, 0.5), Vector3.new(39, 1.9, fenceZ), Color3.fromRGB(85, 67, 45))
+	makePart("Fence Rail " .. index, Vector3.new(0.35, 0.24, 12), Vector3.new(39, 2.4, fenceZ + 6), Color3.fromRGB(94, 72, 48))
 end
 
 -- Five local overlapping cells form a condensation funnel. The broad dirty
@@ -241,6 +261,23 @@ funnelVolumes[5].Density = 0.055
 local rainBank = makeVolume("Rain Curtain", Vector3.new(-34, 38, 44), Vector3.new(120, 46, 105), 0.035)
 rainBank.Color = Color3.fromRGB(112, 129, 140)
 rainBank.Falloff = 0.72
+
+-- A shallow stack makes the storm's wall cloud recede behind the funnel. The
+-- distant layers use fewer march steps because they only establish silhouette.
+local cloudShelf = {
+	makeVolume("Wall Cloud Near", Vector3.new(-92, 187, 112), Vector3.new(210, 52, 135), 0.024),
+	makeVolume("Wall Cloud West", Vector3.new(-205, 208, 61), Vector3.new(250, 64, 176), 0.021),
+	makeVolume("Wall Cloud East", Vector3.new(182, 221, 141), Vector3.new(280, 70, 192), 0.019),
+	makeVolume("Anvil Back Shelf", Vector3.new(28, 260, 246), Vector3.new(455, 54, 220), 0.017),
+}
+for index, shelf in ipairs(cloudShelf) do
+	shelf.Color = Color3.fromRGB(47 + index * 3, 53 + index * 3, 57 + index * 4)
+	shelf.Falloff = 0.68
+	shelf.NoiseScale = 0.22
+	shelf.NoiseStrength = 0.94
+	shelf.Steps = 20
+	shelf.ShadowSteps = 6
+end
 
 local function emitter(name: string, host: Part, rate: number, colour: Color3): ParticleEmitter
 	local effect = Instance.new("ParticleEmitter")
@@ -267,6 +304,15 @@ end
 
 local stormHost = makePart("Storm Cosmetic Host", Vector3.new(24, 3, 24), Vector3.new(0, 1, 95), Color3.new(1, 1, 1))
 stormHost.Visible = false
+local windBed = Instance.new("Sound")
+windBed.Name = "Tornado Wind Bed"
+windBed.SoundId = "examples/audio/tornado-wind.wav"
+windBed.Volume = 0.34
+windBed.RollOffMinDistance = 48
+windBed.RollOffMaxDistance = 740
+windBed.Looped = true
+windBed.Playing = true
+windBed.Parent = stormHost
 local debris = emitter("Debris Skirt", stormHost, 64, Color3.fromRGB(96, 75, 54))
 debris.Shape = Enum.ParticleEmitterShape.Cylinder
 debris.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
@@ -274,6 +320,27 @@ debris.Lifetime = NumberRange.new(2.8, 5.0)
 debris.Size = NumberSequence.new(0.5, 1.7)
 debris.Transparency = NumberSequence.new(0.76, 0.985)
 debris.Acceleration = Vector3.new(0, 8, 0)
+
+-- Dirt first slides inward across the field, then the existing field particles
+-- loft it through the lower funnel. Several sparse sources read as one broad
+-- skirt while keeping the cosmetic emitter count bounded.
+for index = 0, 11 do
+	local angle = index * math.pi * 2 / 12
+	local radius = 46 + index % 3 * 9
+	local x = math.cos(angle) * radius
+	local z = 95 + math.sin(angle) * radius * 0.72
+	local host = makePart("Ground Debris Host " .. index, Vector3.new(12, 1, 12), Vector3.new(x, 0.6, z), Color3.new(1, 1, 1))
+	host.Visible = false
+	local dust = emitter("Ground Debris Inflow", host, 16, Color3.fromRGB(105, 78, 49))
+	dust.MaxParticles = 480
+	dust.Lifetime = NumberRange.new(2.2, 3.7)
+	dust.Speed = NumberRange.new(3, 7)
+	dust.Shape = Enum.ParticleEmitterShape.Cylinder
+	dust.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+	dust.Size = NumberSequence.new(0.45, 1.35)
+	dust.Transparency = NumberSequence.new(0.82, 0.985)
+	dust.Acceleration = Vector3.new(-x * 0.11, 5.5, -(z - 95) * 0.11)
+end
 
 -- Each source is a shallow volume rather than a point. Slow overlapping wisps
 -- close the vertical seams, leaving a single taper instead of stacked puffs.
@@ -413,6 +480,9 @@ end)
 button("OFF", 171, 91, function()
 	request({ kind = "lifecycle", value = false })
 end)
+button("AUDIO", 212, 91, function()
+	windBed.Playing = not windBed.Playing
+end, 39)
 
 local counts = { 262144, 1048576, 4194304, 16777216, 50000000 }
 for index, count in ipairs(counts) do
