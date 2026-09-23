@@ -478,6 +478,8 @@ namespace engine::render {
 			}
 		}
 
+		const std::vector<uint8_t> localLightShadowAvailable(expandedChannels.size(), 1);
+
 		DataCaptureTicket queued{
 			.SnapshotId = request.SnapshotId,
 			.Pipeline = request.Pipeline,
@@ -487,7 +489,7 @@ namespace engine::render {
 			.Channels = std::move(expandedChannels),
 			.LightIds = std::move(expandedLightIds),
 			.LocalLightMatched = std::move(localLightMatched),
-			.LocalLightShadowAvailable = std::vector<uint8_t>(expandedChannels.size(), 1),
+			.LocalLightShadowAvailable = localLightShadowAvailable,
 			.ObjectLabels = wantsObjectIds ? request.ObjectLabels : std::vector<DataCaptureObjectLabel>{},
 			.SemanticLabels =
 				wantsSemantic ? request.SemanticLabels : std::vector<DataCaptureSemanticLabel>{},
