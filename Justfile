@@ -1203,6 +1203,11 @@ client-smoke: (build "client")
         || { echo "FAIL: the button was pressed and its Activated never reached the script"; tail -20 "$log"; exit 1; }
     echo "client ok - pressed a button with no display and the script heard it"
 
+# Runs the packaged TornadoSim world without publishing or serving content. The
+# check proves its sound rows resolve from the files staged beside the client.
+packaged-tornado-audio: (build "client")
+    PRESET={{preset}} ./scripts/packaged-tornado-audio-test.sh "./{{build}}/client/client"
+
 # Capture the shipped GUI compositor at two sizes and compare click-driven
 # status changes. The report keeps the BMPs beside the build for human review.
 ui-check: (build "client")

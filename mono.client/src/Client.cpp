@@ -1740,6 +1740,7 @@ namespace client {
 					decoded->Seconds()
 				);
 			}
+			LoadPackagedAudio();
 			return true;
 		}
 		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
@@ -1748,6 +1749,7 @@ namespace client {
 			DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
 			DataAudioEpoch = clock.WorldEpoch;
 		}
+		LoadPackagedAudio();
 		if (!decoded) {
 			return true;
 		}

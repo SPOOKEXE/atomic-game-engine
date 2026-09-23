@@ -65,6 +65,10 @@ programs="client studio server cdn launcher"
 # scenes from its own directory.
 scene_programs="client studio server"
 
+# Sounds are client runtime content. The server only hosts worlds and the
+# launcher only starts programs, so neither receives files it cannot read.
+audio_programs="client studio"
+
 name="atomic-$version-$platform${flavour:+-$flavour}"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -113,6 +117,16 @@ if [ ! -d "$scenes" ]; then
 fi
 for program in $scene_programs; do
 	cp -a "$scenes" "$work/$name/$program/examples"
+done
+
+audio="$build/assets/audio"
+if [ ! -d "$audio" ]; then
+	echo "no packaged audio at $audio" >&2
+	echo "  Engine::examples stages it during the build; an absent directory is a partial build." >&2
+	exit 1
+fi
+for program in $audio_programs; do
+	cp -a "$audio" "$work/$name/$program/audio"
 done
 
 # Named explicitly rather than found by walking the tree and testing each file

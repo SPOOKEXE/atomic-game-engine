@@ -4,6 +4,7 @@
 #include <engine/assets/Material.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/examples/PackagedAssets.hpp>
 #include <engine/game/CollisionContent.hpp>
@@ -53,6 +54,64 @@ namespace client {
 				.FrameRate = stored.FlipbookFrameRate,
 			};
 		}
+	}
+
+	void Client::LoadPackagedAudio() {
+		std::filesystem::path directory = engine::core::Paths::Assets() / "audio";
+		std::error_code error;
+		if (!std::filesystem::is_directory(directory, error)) {
+			const std::filesystem::path staged =
+				engine::core::Paths::Base().parent_path() / "assets" / "audio";
+			error.clear();
+			if (std::filesystem::is_directory(staged, error)) directory = staged;
+		}
+		if (error) {
+			ENGINE_WARN("audio: cannot find packaged sounds in {}", directory.string());
+			return;
+		}
+
+		std::vector<std::filesystem::path> files;
+		for (std::filesystem::directory_iterator entries(directory, error), end; entries != end && !error;
+			 entries.increment(error)) {
+			if (!entries->is_regular_file(error) || entries->path().extension() != ".wav") continue;
+			files.push_back(entries->path());
+		}
+		if (error) {
+			ENGINE_WARN("audio: cannot list packaged sounds in {}", directory.string());
+			return;
+		}
+		std::sort(files.begin(), files.end());
+
+		size_t registered = 0;
+		const engine::audio::AudioFormat target = Sound ? Sound->Format() : engine::audio::AudioFormat{};
+		for (const std::filesystem::path &path : files) {
+			std::ifstream input(path, std::ios::binary | std::ios::ate);
+			if (!input) {
+				ENGINE_WARN("audio: cannot read packaged sound {}", path.string());
+				continue;
+			}
+			const std::streamoff size = input.tellg();
+			if (size <= 0) {
+				ENGINE_WARN("audio: packaged sound {} is empty", path.string());
+				continue;
+			}
+			input.seekg(0);
+			std::vector<std::byte> bytes(static_cast<size_t>(size));
+			if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) {
+				ENGINE_WARN("audio: cannot read packaged sound {}", path.string());
+				continue;
+			}
+			const std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(bytes);
+			if (!samples) {
+				ENGINE_WARN("audio: packaged sound {} is not audio this engine decodes", path.string());
+				continue;
+			}
+
+			const engine::core::Name name("audio/" + path.filename().generic_string());
+			auto ready = std::make_shared<const engine::audio::SampleBuffer>(samples->ConvertTo(target));
+			if (Audible.Add(name, std::move(ready))) ++registered;
+		}
+		ENGINE_INFO("audio: {} packaged sound(s) registered", registered);
 	}
 
 	void Client::RefreshContentBindings() {

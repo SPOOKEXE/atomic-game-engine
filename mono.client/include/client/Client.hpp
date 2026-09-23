@@ -280,6 +280,7 @@ namespace client {
 		void PumpContent();
 		void RefreshContentBindings();
 		void LoadPackagedExampleTextures(ContentSession &content);
+		void LoadPackagedAudio();
 		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 
 		// Hands the session's worlds the mesh names its store published.
