@@ -261,8 +261,8 @@ TEST_CASE("world view owns a published replica pose and particle inputs", "[rend
 		store.Set(emitter, emission);
 		effects::InstallParticles(store, 128);
 		store.ResourceMutable<effects::ParticleSystem>()->DeviceStepped = true;
-		REQUIRE(effects::RefreshEmitters(store) == 1);
 		REQUIRE(effects::EmitParticles(store, emitter, 1));
+		REQUIRE(effects::RefreshEmitters(store) == 1);
 		store.AdvanceTick(.1);
 		render::CollectWorldView(store, core::Name("source"), frame);
 		REQUIRE(frame.Particles.Batches.size() == 1);
