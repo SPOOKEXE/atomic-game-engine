@@ -171,9 +171,7 @@ clouds.Seed = 957
 clouds.Parent = Lighting
 
 local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -1.5, 80), Color3.fromRGB(38, 54, 35))
-ground.Material = Enum.Material.Grass
 local road = makePart("Storm Chase Road", Vector3.new(18, 0.18, 650), Vector3.new(-82, 0.1, 84), Color3.fromRGB(43, 43, 41))
-road.Material = Enum.Material.Asphalt
 for index = -14, 14 do
 	makePart("Road Mark " .. index, Vector3.new(0.55, 0.04, 9), Vector3.new(-82, 0.22, 84 + index * 20), Color3.fromRGB(193, 169, 99))
 end
@@ -181,7 +179,6 @@ end
 local function building(name: string, x: number, z: number, width: number, depth: number, height: number, colour: Color3)
 	makePart(name .. " Walls", Vector3.new(width, height, depth), Vector3.new(x, height * 0.5, z), colour)
 	local roof = makePart(name .. " Roof", Vector3.new(width + 2, 1.5, depth + 2), Vector3.new(x, height + 0.75, z), Color3.fromRGB(68, 47, 39))
-	roof.Material = Enum.Material.Wood
 	for window = -1, 1, 2 do
 		local pane = makePart(name .. " Window " .. window, Vector3.new(2.4, 2.6, 0.12), Vector3.new(x + window * width * 0.28, height * 0.57, z - depth * 0.505), Color3.fromRGB(116, 139, 146))
 		pane.EmissiveStrength = 0.15
@@ -194,7 +191,6 @@ building("Workshop", 94, -12, 28, 20, 13, Color3.fromRGB(86, 88, 80))
 for row = 0, 3 do
 	for column = 0, 4 do
 		local bale = makePart("Hay Bale " .. row .. "/" .. column, Vector3.new(3.5, 2.1, 3.5), Vector3.new(-8 + column * 7, 1.05, 10 + row * 8), Color3.fromRGB(133, 107, 51))
-		bale.Material = Enum.Material.Grass
 	end
 end
 for index = 0, 52 do
@@ -203,9 +199,7 @@ for index = 0, 52 do
 	local x = math.cos(angle) * radius
 	local z = 95 + math.sin(angle) * radius * 0.68
 	local trunk = makePart("Tree Trunk " .. index, Vector3.new(1.2, 9 + index % 5, 1.2), Vector3.new(x, 4.5 + index % 5 * 0.5, z), Color3.fromRGB(70, 55, 37))
-	trunk.Material = Enum.Material.Wood
 	local crown = makePart("Tree Crown " .. index, Vector3.new(8 + index % 4 * 2, 8 + index % 3 * 2, 8 + index % 4 * 2), Vector3.new(x, 12 + index % 5, z), Color3.fromRGB(43, 76 + index % 3 * 5, 42))
-	crown.Material = Enum.Material.Grass
 end
 
 -- Five local overlapping cells form a condensation funnel. The broad dirty
