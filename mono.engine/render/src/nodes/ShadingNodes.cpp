@@ -849,7 +849,9 @@ namespace engine::render {
 								2.0f * acos(glm::clamp(selected.Direction[0].w, -0.999f, 0.999f));
 							projection = glm::perspectiveRH_ZO(angle, 1.0f, 0.05f, selected.Position[0].w);
 							const glm::vec3 direction = glm::normalize(glm::vec3(selected.Direction[0]));
-							view = glm::lookAtRH(position, position + direction, glm::vec3{0, 1, 0});
+							const glm::vec3 up =
+								std::abs(direction.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
+							view = glm::lookAtRH(position, position + direction, up);
 						}
 						if (!recording.RecordLocalLightShadow(projection * view)) return false;
 						PbrUniforms localUniforms = uniforms;
@@ -997,6 +999,10 @@ namespace engine::render {
 						recording.SceneLightIds.begin() + static_cast<size_t>(lightUniforms.Count.x);
 					const auto row = std::find(recording.SceneLightIds.begin(), activeLightEnd, requested);
 					recording.LocalLightCaptureMatched[index] = row != activeLightEnd;
+					recording.LocalLightShadowCaptureAvailable[index] =
+						recording.LocalLightCaptureMatched[index] &&
+						recording
+							.SceneLightShadows[static_cast<size_t>(row - recording.SceneLightIds.begin())];
 					const core::Name port(std::string("local-light-response-") + std::to_string(index));
 					auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
 					if (found == node->WritePorts.end()) continue;
@@ -1088,7 +1094,9 @@ namespace engine::render {
 								projection =
 									glm::perspectiveRH_ZO(angle, 1.0f, 0.05f, selected.Position[0].w);
 								const glm::vec3 direction = glm::normalize(glm::vec3(selected.Direction[0]));
-								view = glm::lookAtRH(position, position + direction, glm::vec3{0, 1, 0});
+								const glm::vec3 up =
+									std::abs(direction.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
+								view = glm::lookAtRH(position, position + direction, up);
 							}
 							if (!recording.RecordLocalLightShadow(projection * view)) return false;
 							localUniforms.LightViewProjection = projection * view;

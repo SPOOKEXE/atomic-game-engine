@@ -547,6 +547,11 @@ namespace engine::render {
 		std::fill(
 			recording.LocalLightCaptureMatched.begin(), recording.LocalLightCaptureMatched.end(), false
 		);
+		std::fill(
+			recording.LocalLightShadowCaptureAvailable.begin(),
+			recording.LocalLightShadowCaptureAvailable.end(),
+			false
+		);
 		for (const auto &batch : State->Batches) {
 			if (!batch.Used || !batch.Submitted || batch.Ready || !State->Valid(batch.Connection)) continue;
 			const auto &connection = State->Connections[batch.Connection.Slot];
@@ -603,9 +608,12 @@ namespace engine::render {
 				for (size_t prior = 0; prior < index; ++prior)
 					if (batch.Ticket.Channels[prior] == channel) ++localSlot;
 				if (index < batch.Ticket.LocalLightMatched.size() &&
-					localSlot < recording.LocalLightCaptureMatched.size())
+					localSlot < recording.LocalLightCaptureMatched.size()) {
 					batch.Ticket.LocalLightMatched[index] =
 						recording.LocalLightCaptureMatched[localSlot] ? 1 : 0;
+					batch.Ticket.LocalLightShadowAvailable[index] =
+						recording.LocalLightShadowCaptureAvailable[localSlot] ? 1 : 0;
+				}
 			}
 			return;
 		}

@@ -277,6 +277,7 @@ namespace engine::render {
 		std::array<bool, MAX_SCENE_LIGHTS> SceneLightShadows{};
 		std::array<core::Name, 4> LocalLightCaptureIds{};
 		std::array<bool, 4> LocalLightCaptureMatched{};
+		std::array<bool, 4> LocalLightShadowCaptureAvailable{};
 		LightingUniforms Lighting;
 		FrameUniforms Frame;
 		PbrUniforms Uniforms;

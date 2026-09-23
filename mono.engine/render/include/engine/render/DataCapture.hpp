@@ -298,6 +298,8 @@ namespace engine::render {
 		std::vector<std::string> LightIds;
 		// Set after rendering when the requested local light matched a visible row.
 		std::vector<uint8_t> LocalLightMatched;
+		// Set for local-light shadow planes whose resolved light has shadows enabled.
+		std::vector<uint8_t> LocalLightShadowAvailable;
 		// Object label table retained for the final result.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Semantic label table retained for the final result.

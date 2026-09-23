@@ -487,6 +487,7 @@ namespace engine::render {
 			.Channels = std::move(expandedChannels),
 			.LightIds = std::move(expandedLightIds),
 			.LocalLightMatched = std::move(localLightMatched),
+			.LocalLightShadowAvailable = std::vector<uint8_t>(expandedChannels.size(), 1),
 			.ObjectLabels = wantsObjectIds ? request.ObjectLabels : std::vector<DataCaptureObjectLabel>{},
 			.SemanticLabels =
 				wantsSemantic ? request.SemanticLabels : std::vector<DataCaptureSemanticLabel>{},
@@ -560,6 +561,13 @@ namespace engine::render {
 		if (ticket.SnapshotId.empty() || ticket.Channels.empty() ||
 			ticket.LightIds.size() != ticket.Channels.size() ||
 			ticket.LocalLightMatched.size() != ticket.Channels.size() ||
+			(std::ranges::any_of(
+				 ticket.Channels,
+				 [](DataCaptureChannel channel) {
+					 return channel == DataCaptureChannel::LocalLightShadowVisibility;
+				 }
+			 ) &&
+			 ticket.LocalLightShadowAvailable.size() != ticket.Channels.size()) ||
 			ticket.ChannelResourceIndices.size() != ticket.Channels.size() ||
 			!HasSecondSurfacePair(ticket.Channels) ||
 			std::ranges::any_of(ticket.ChannelResourceIndices, [&](uint8_t index) {
@@ -672,6 +680,12 @@ namespace engine::render {
 				 channel == DataCaptureChannel::LocalLightShadowVisibility) &&
 				!ticket.LocalLightMatched[index]) {
 				plane.Provenance = "unavailable/local_light_not_visible_or_culled/v1";
+				poll.Planes.push_back(std::move(plane));
+				continue;
+			}
+			if (channel == DataCaptureChannel::LocalLightShadowVisibility &&
+				!ticket.LocalLightShadowAvailable[index]) {
+				plane.Provenance = "unavailable/local_light_shadows_disabled/v1";
 				poll.Planes.push_back(std::move(plane));
 				continue;
 			}
