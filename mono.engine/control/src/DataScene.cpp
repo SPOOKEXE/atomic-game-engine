@@ -79,8 +79,8 @@ namespace engine::control {
 		}
 
 		// Charges encoded response bytes against the fixed data-scene reply budget.
-		inline bool Spend(size_t &bytes, size_t amount) {
-			if (amount > MAXIMUM_RESULT_BYTES - bytes) return false;
+		inline bool Spend(size_t &bytes, size_t amount, size_t limit) {
+			if (amount > limit - bytes) return false;
 			bytes += amount;
 			return true;
 		}
@@ -99,20 +99,22 @@ namespace engine::control {
 		}
 
 		// Converts a script return value into bounded JSON without lossy integer coercion.
-		bool JsonValue(const script::ScriptValue &source, json &destination, size_t depth, size_t &bytes) {
+		bool BoundedJsonValue(
+			const script::ScriptValue &source, json &destination, size_t depth, size_t &bytes, size_t limit
+		) {
 			if (depth > MAXIMUM_DEPTH) return false;
 			switch (source.Tag) {
 			case script::ValueTag::Nil:
-				if (!Spend(bytes, 4)) return false;
+				if (!Spend(bytes, 4, limit)) return false;
 				destination = nullptr;
 				return true;
 			case script::ValueTag::False:
 			case script::ValueTag::True:
-				if (!Spend(bytes, 5)) return false;
+				if (!Spend(bytes, 5, limit)) return false;
 				destination = source.Boolean;
 				return true;
 			case script::ValueTag::Number:
-				if (!std::isfinite(source.Number) || !Spend(bytes, 32)) return false;
+				if (!std::isfinite(source.Number) || !Spend(bytes, 32, limit)) return false;
 				if (std::trunc(source.Number) == source.Number &&
 					source.Number >= -MAXIMUM_EXACT_JSON_INTEGER &&
 					source.Number <= MAXIMUM_EXACT_JSON_INTEGER)
@@ -121,14 +123,16 @@ namespace engine::control {
 					destination = source.Number;
 				return true;
 			case script::ValueTag::String:
-				if (!Spend(bytes, source.Text.size() + 2)) return false;
+				if (!Spend(bytes, source.Text.size() + 2, limit)) return false;
 				destination = source.Text;
 				return true;
 			case script::ValueTag::Array: {
 				destination = json::array();
 				for (const script::ScriptValue &item : source.Items) {
 					json converted;
-					if (!Spend(bytes, 1) || !JsonValue(item, converted, depth + 1, bytes)) return false;
+					if (!Spend(bytes, 1, limit) ||
+						!BoundedJsonValue(item, converted, depth + 1, bytes, limit))
+						return false;
 					destination.push_back(std::move(converted));
 				}
 				return true;
@@ -137,7 +141,8 @@ namespace engine::control {
 				destination = json::object();
 				for (const auto &[name, item] : source.Entries) {
 					json converted;
-					if (!Spend(bytes, name.size() + 4) || !JsonValue(item, converted, depth + 1, bytes) ||
+					if (!Spend(bytes, name.size() + 4, limit) ||
+						!BoundedJsonValue(item, converted, depth + 1, bytes, limit) ||
 						destination.contains(name))
 						return false;
 					destination[name] = std::move(converted);
@@ -146,13 +151,13 @@ namespace engine::control {
 			}
 			case script::ValueTag::Vector3:
 				if (!Finite(source.Vector.X) || !Finite(source.Vector.Y) || !Finite(source.Vector.Z) ||
-					!Spend(bytes, 96))
+					!Spend(bytes, 96, limit))
 					return false;
 				destination = json{{"x", source.Vector.X}, {"y", source.Vector.Y}, {"z", source.Vector.Z}};
 				return true;
 			case script::ValueTag::Color3:
 				if (!Finite(source.Colour.R) || !Finite(source.Colour.G) || !Finite(source.Colour.B) ||
-					!Spend(bytes, 96))
+					!Spend(bytes, 96, limit))
 					return false;
 				destination = json{{"r", source.Colour.R}, {"g", source.Colour.G}, {"b", source.Colour.B}};
 				return true;
@@ -160,7 +165,7 @@ namespace engine::control {
 				if (!Finite(source.Frame.Position.X) || !Finite(source.Frame.Position.Y) ||
 					!Finite(source.Frame.Position.Z) || !Finite(source.Frame.QuaternionX) ||
 					!Finite(source.Frame.QuaternionY) || !Finite(source.Frame.QuaternionZ) ||
-					!Finite(source.Frame.QuaternionW) || !Spend(bytes, 192))
+					!Finite(source.Frame.QuaternionW) || !Spend(bytes, 192, limit))
 					return false;
 				destination = json{
 					{"position", {source.Frame.Position.X, source.Frame.Position.Y, source.Frame.Position.Z}},
@@ -173,6 +178,10 @@ namespace engine::control {
 				return true;
 			}
 			return false;
+		}
+
+		bool JsonValue(const script::ScriptValue &source, json &destination, size_t depth, size_t &bytes) {
+			return BoundedJsonValue(source, destination, depth, bytes, MAXIMUM_RESULT_BYTES);
 		}
 
 		// Converts a script data-scene result into a bounded host reply and propagates script failure text.
@@ -269,6 +278,26 @@ namespace engine::control {
 			uint64_t NextId = 1;
 			// Retained raw-scene payloads available to host resource reads.
 			std::vector<RawSceneResource> Entries;
+		};
+
+		inline constexpr size_t MAX_SCENE_SNAPSHOT_BYTES = 64u * 1024u * 1024u;
+		inline constexpr size_t MAX_SCENE_SNAPSHOT_RESOURCES = 2;
+		inline constexpr size_t MAX_SCENE_SNAPSHOT_READ_BYTES = 32u * 1024u;
+
+		struct SceneSnapshotResource {
+			std::string Id;
+			std::string Instance;
+			uint64_t Tick = 0;
+			uint64_t WorldEpoch = 0;
+			uint64_t WorldVersion = 0;
+			std::string Hash;
+			std::string Bytes;
+		};
+
+		struct SceneSnapshotResources {
+			std::mutex Mutex;
+			uint64_t NextId = 1;
+			std::vector<SceneSnapshotResource> Entries;
 		};
 
 		// Appends one little-endian unsigned 32-bit word to the raw-scene payload.
@@ -1078,6 +1107,7 @@ namespace engine::control {
 		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
 		auto gltfResources = std::make_shared<data_scene_detail::GltfResources>();
 		auto rawSceneResources = std::make_shared<data_scene_detail::RawSceneResources>();
+		auto sceneSnapshotResources = std::make_shared<data_scene_detail::SceneSnapshotResources>();
 		auto schema = [session] {
 			json options{{"type", "object"}};
 			if (session != nullptr) {
@@ -1102,9 +1132,10 @@ namespace engine::control {
 		};
 		Add(Tool{
 			"get_scene_snapshot",
-			"A bounded read-only snapshot of one scene, using stable authored ids.",
+			"A read-only snapshot of one scene using stable authored ids. Large results return an "
+			"immutable resource for get_scene_snapshot_chunk and release_scene_snapshot.",
 			schema,
-			[worlds, session](const json &arguments, std::string &failure) -> json {
+			[worlds, session, sceneSnapshotResources](const json &arguments, std::string &failure) -> json {
 				using namespace data_scene_detail;
 				if (!Only(arguments, {"instance_id", "options"}, failure)) return nullptr;
 				if (!arguments.contains("options") || !arguments["options"].is_object()) {
@@ -1133,10 +1164,168 @@ namespace engine::control {
 				}
 				json out;
 				const world::WorldStatus status = worlds->Enter(id, [&](ecs::Store &store) {
-					out = Result(script::GetSceneSnapshot(store, limit), failure);
+					const script::DataSceneResult snapshot = script::GetSceneSnapshot(store, limit);
+					size_t bytes = 0;
+					if (!BoundedJsonValue(snapshot.Value, out, 0, bytes, MAX_SCENE_SNAPSHOT_BYTES)) {
+						failure = "data-scene result exceeds the snapshot resource limit";
+						return;
+					}
+					if (std::strcmp(snapshot.Status, "ok") != 0) failure = out.dump();
 				});
 				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
-				return out;
+				if (!failure.empty()) return out;
+				std::string encoded = out.dump();
+				if (encoded.size() <= MAXIMUM_RESULT_BYTES) return out;
+				if (encoded.size() > MAX_SCENE_SNAPSHOT_BYTES) {
+					failure = "data-scene result exceeds the snapshot resource limit";
+					return nullptr;
+				}
+				const assets::ContentHash hash =
+					assets::Hasher::Of(std::as_bytes(std::span(encoded.data(), encoded.size())));
+				std::lock_guard lock(sceneSnapshotResources->Mutex);
+				if (sceneSnapshotResources->Entries.size() == MAX_SCENE_SNAPSHOT_RESOURCES ||
+					sceneSnapshotResources->NextId == 0) {
+					failure = "scene snapshot resource capacity reached";
+					return nullptr;
+				}
+				const std::string resource = "scene/" + std::to_string(sceneSnapshotResources->NextId++);
+				const uint64_t tick =
+					session == nullptr ? 0 : arguments["options"]["expected_tick"].get<uint64_t>();
+				const uint64_t epoch =
+					session == nullptr ? 0 : arguments["options"]["expected_world_epoch"].get<uint64_t>();
+				const uint64_t version =
+					session == nullptr ? 0 : arguments["options"]["expected_world_version"].get<uint64_t>();
+				json reply{
+					{"status", "ok"},
+					{"schema_version", "data-scene-resource/v1"},
+					{"encoding", "resource"},
+					{"resource_id", resource},
+					{"instance_id", instance},
+					{"tick", out.at("tick")},
+					{"world_epoch", epoch},
+					{"world_version", version},
+					{"byte_length", encoded.size()},
+					{"hash_algorithm", "blake3-256"},
+					{"hash", hash.ToHex()},
+					{"chunk_byte_limit", MAX_SCENE_SNAPSHOT_READ_BYTES}
+				};
+				sceneSnapshotResources->Entries.push_back(
+					{resource, instance, tick, epoch, version, hash.ToHex(), std::move(encoded)}
+				);
+				return reply;
+			}
+		});
+
+		Add(Tool{
+			"get_scene_snapshot_chunk",
+			"Returns at most 32768 bytes of the retained exact snapshot JSON as base64 at its original "
+			"revision.",
+			[schema] {
+				json result = schema();
+				result["properties"]["resource_id"] = {{"type", "string"}};
+				result["properties"]["hash"] = {{"type", "string"}};
+				result["properties"]["byte_begin"] = {{"type", "integer"}, {"minimum", 0}};
+				result["properties"]["byte_end"] = {{"type", "integer"}, {"minimum", 1}};
+				for (const char *field : {"resource_id", "hash", "byte_begin", "byte_end"})
+					result["required"].push_back(field);
+				return result;
+			},
+			[worlds, session, sceneSnapshotResources](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(
+						arguments,
+						{"instance_id", "resource_id", "hash", "byte_begin", "byte_end", "options"},
+						failure
+					) ||
+					!arguments.contains("options") || !arguments["options"].is_object() ||
+					!Options(arguments["options"], {}, session != nullptr, failure))
+					return nullptr;
+				std::string instance, resource, digest;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure) ||
+					!GltfText(arguments.value("resource_id", json{}), "resource_id", resource, failure) ||
+					!GltfText(arguments.value("hash", json{}), "hash", digest, failure))
+					return nullptr;
+				const json &beginValue = arguments.value("byte_begin", json{});
+				const json &endValue = arguments.value("byte_end", json{});
+				if (!beginValue.is_number_unsigned() || !endValue.is_number_unsigned()) {
+					failure = "scene snapshot byte range must use unsigned integers";
+					return nullptr;
+				}
+				const uint64_t begin = beginValue.get<uint64_t>(), end = endValue.get<uint64_t>();
+				if (end <= begin || end - begin > MAX_SCENE_SNAPSHOT_READ_BYTES) {
+					failure = "scene snapshot byte range is invalid";
+					return nullptr;
+				}
+				json fence;
+				if (!data_factory_read_fence::Validate(
+						session, instance, arguments["options"], fence, failure
+					))
+					return fence;
+				if (!worlds->Find(core::Name(instance)).IsValid()) {
+					failure = "scene snapshot instance is unavailable";
+					return nullptr;
+				}
+				std::lock_guard lock(sceneSnapshotResources->Mutex);
+				const auto found = std::find_if(
+					sceneSnapshotResources->Entries.begin(),
+					sceneSnapshotResources->Entries.end(),
+					[&](const SceneSnapshotResource &entry) {
+						return entry.Id == resource && entry.Instance == instance;
+					}
+				);
+				if (found == sceneSnapshotResources->Entries.end() || found->Hash != digest ||
+					end > found->Bytes.size() ||
+					(session != nullptr &&
+					 (found->Tick != arguments["options"]["expected_tick"].get<uint64_t>() ||
+					  found->WorldEpoch != arguments["options"]["expected_world_epoch"].get<uint64_t>() ||
+					  found->WorldVersion !=
+						  arguments["options"]["expected_world_version"].get<uint64_t>()))) {
+					failure = "scene snapshot resource is unavailable at this revision";
+					return nullptr;
+				}
+				return {
+					{"resource_id", resource},
+					{"hash", digest},
+					{"byte_begin", begin},
+					{"byte_end", end},
+					{"base64", Base64(std::as_bytes(std::span(found->Bytes.data() + begin, end - begin)))}
+				};
+			}
+		});
+
+		Add(Tool{
+			"release_scene_snapshot",
+			"Releases one retained scene snapshot, including after its world revision changes.",
+			[] {
+				return json{
+					{"type", "object"},
+					{"properties",
+					 {{"instance_id", {{"type", "string"}}}, {"resource_id", {{"type", "string"}}}}},
+					{"required", json::array({"instance_id", "resource_id"})},
+					{"additionalProperties", false}
+				};
+			},
+			[sceneSnapshotResources](const json &arguments, std::string &failure) -> json {
+				using namespace data_scene_detail;
+				if (!Only(arguments, {"instance_id", "resource_id"}, failure)) return nullptr;
+				std::string instance, resource;
+				if (!data_factory_read_fence::InstanceId(arguments, instance, failure) ||
+					!GltfText(arguments.value("resource_id", json{}), "resource_id", resource, failure))
+					return nullptr;
+				std::lock_guard lock(sceneSnapshotResources->Mutex);
+				const auto found = std::find_if(
+					sceneSnapshotResources->Entries.begin(),
+					sceneSnapshotResources->Entries.end(),
+					[&](const SceneSnapshotResource &entry) {
+						return entry.Id == resource && entry.Instance == instance;
+					}
+				);
+				if (found == sceneSnapshotResources->Entries.end()) {
+					failure = "scene snapshot resource is unavailable";
+					return nullptr;
+				}
+				sceneSnapshotResources->Entries.erase(found);
+				return {{"status", "released"}, {"resource_id", resource}};
 			}
 		});
 

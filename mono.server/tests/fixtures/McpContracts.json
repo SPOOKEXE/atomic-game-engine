@@ -160,6 +160,8 @@
           "state": "active",
           "tools": [
             "get_scene_snapshot",
+            "get_scene_snapshot_chunk",
+            "release_scene_snapshot",
             "export_gltf_scene",
             "get_gltf_scene_chunk",
             "release_gltf_scene",
@@ -3812,7 +3814,7 @@
         "name": "get_resources"
       },
       "get_scene_snapshot": {
-        "description": "A bounded read-only snapshot of one scene, using stable authored ids.",
+        "description": "A read-only snapshot of one scene using stable authored ids. Large results return an immutable resource for get_scene_snapshot_chunk and release_scene_snapshot.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -3850,6 +3852,64 @@
           "type": "object"
         },
         "name": "get_scene_snapshot"
+      },
+      "get_scene_snapshot_chunk": {
+        "description": "Returns at most 32768 bytes of the retained exact snapshot JSON as base64 at its original revision.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "byte_begin": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "byte_end": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "hash": {
+              "type": "string"
+            },
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            },
+            "resource_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options",
+            "resource_id",
+            "hash",
+            "byte_begin",
+            "byte_end"
+          ],
+          "type": "object"
+        },
+        "name": "get_scene_snapshot_chunk"
       },
       "get_signed_distance_field": {
         "description": "Samples a bounded world-space signed-distance grid at cell centres against one retained paused snapshot. Distances are metres, negative inside and positive outside. Exact values require one authored analytic box, sphere or cylinder; unions and baked geometry are returned as unknown.",
@@ -4459,6 +4519,26 @@
           "type": "object"
         },
         "name": "release_raw_scene_extract"
+      },
+      "release_scene_snapshot": {
+        "description": "Releases one retained scene snapshot, including after its world revision changes.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "type": "string"
+            },
+            "resource_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "resource_id"
+          ],
+          "type": "object"
+        },
+        "name": "release_scene_snapshot"
       },
       "restore": {
         "description": "Restores a compatible checkpoint through a scratch universe and starts a fresh epoch.",

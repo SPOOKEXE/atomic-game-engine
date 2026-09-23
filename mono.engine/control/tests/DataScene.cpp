@@ -28,6 +28,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <numbers>
@@ -80,6 +81,111 @@ namespace {
 		value.String = id;
 		REQUIRE(engine::ecs::SetAttribute(store, entity, Name("DataFactoryId"), value));
 	}
+
+	std::string DecodeBase64(std::string_view encoded) {
+		constexpr std::string_view alphabet =
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+		std::string decoded;
+		unsigned int bits = 0;
+		int count = 0;
+		for (char character : encoded) {
+			if (character == '=') break;
+			const size_t digit = alphabet.find(character);
+			REQUIRE(digit != std::string_view::npos);
+			bits = (bits << 6) | static_cast<unsigned int>(digit);
+			count += 6;
+			if (count >= 8) {
+				count -= 8;
+				decoded.push_back(static_cast<char>((bits >> count) & 0xff));
+			}
+		}
+		return decoded;
+	}
+}
+
+TEST_CASE("large scene snapshot chunks reconstruct one exact bounded response", "[control][datascene]") {
+	Universe universe;
+	const WorldId world = World(universe, "large_snapshot");
+	Surface surface("test", "test");
+	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		engine::scene::RegisterSceneClasses();
+		const auto part = engine::ecs::Classes::Find(Name("Part"));
+		for (size_t index = 0; index < 400; ++index) {
+			const std::string id = "large/" + std::to_string(index);
+			Identify(store, store.CreateInstance(part, "SnapshotPart"), id);
+		}
+	});
+
+	bool failed = false;
+	const json begin = Call(
+		surface,
+		"get_scene_snapshot",
+		{{"instance_id", "large_snapshot"}, {"options", json::object()}},
+		failed
+	);
+	INFO(begin.dump());
+	REQUIRE_FALSE(failed);
+	REQUIRE(begin.at("schema_version") == "data-scene-resource/v1");
+	REQUIRE(begin.at("encoding") == "resource");
+	REQUIRE(begin.at("byte_length").get<size_t>() > 64u * 1024u);
+	universe.Enter(world, [](engine::ecs::Store &store) {
+		const auto part = engine::ecs::Classes::Find(Name("Part"));
+		Identify(store, store.CreateInstance(part, "NewAfterSnapshot"), "large/after");
+	});
+	const size_t length = begin.at("byte_length").get<size_t>();
+	const size_t chunkLimit = begin.at("chunk_byte_limit").get<size_t>();
+	std::string bytes;
+	for (size_t offset = 0; offset < length; offset += chunkLimit) {
+		const size_t end = std::min(offset + chunkLimit, length);
+		const json chunk = Call(
+			surface,
+			"get_scene_snapshot_chunk",
+			{{"instance_id", "large_snapshot"},
+			 {"options", json::object()},
+			 {"resource_id", begin.at("resource_id")},
+			 {"hash", begin.at("hash")},
+			 {"byte_begin", offset},
+			 {"byte_end", end}},
+			failed
+		);
+		REQUIRE_FALSE(failed);
+		REQUIRE(chunk.at("byte_begin") == offset);
+		REQUIRE(chunk.at("byte_end") == end);
+		bytes += DecodeBase64(chunk.at("base64").get<std::string>());
+	}
+	REQUIRE(bytes.size() == length);
+	const json snapshot = json::parse(bytes);
+	CHECK(snapshot.at("schema_version") == "data-scene/v1");
+	CHECK(snapshot.at("tick") == begin.at("tick"));
+	REQUIRE(snapshot.at("entities").size() == 400);
+	CHECK(snapshot.at("entities").at(0).at("id") == "large/0");
+	CHECK(snapshot.at("entities").at(399).at("id") == "large/99");
+	CHECK(snapshot.contains("lighting_observation"));
+	CHECK(snapshot.contains("physics_observations"));
+
+	const json released = Call(
+		surface,
+		"release_scene_snapshot",
+		{{"instance_id", "large_snapshot"}, {"resource_id", begin.at("resource_id")}},
+		failed
+	);
+	CHECK_FALSE(failed);
+	CHECK(released.at("status") == "released");
+	const json missing = Call(
+		surface,
+		"get_scene_snapshot_chunk",
+		{{"instance_id", "large_snapshot"},
+		 {"options", json::object()},
+		 {"resource_id", begin.at("resource_id")},
+		 {"hash", begin.at("hash")},
+		 {"byte_begin", 0},
+		 {"byte_end", 1}},
+		failed
+	);
+	CHECK(failed);
+	CHECK(missing.at("error").get<std::string>().find("unavailable") != std::string::npos);
 }
 
 TEST_CASE(

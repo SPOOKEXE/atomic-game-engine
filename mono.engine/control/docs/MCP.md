@@ -332,6 +332,15 @@ subset rather than a hidden complete world dump. It contains time, stable entity
 records, resolved-lighting provenance, coverage, and omission counts. Do not
 treat an omitted entity as absent or invisible.
 
+If the snapshot exceeds the 64 KiB MCP reply limit, the tool returns a
+`data-scene-resource/v1` manifest. Read its immutable JSON bytes with
+`get_scene_snapshot_chunk` using `resource_id`, `hash`, and contiguous
+`byte_begin`/`byte_end` ranges no larger than `chunk_byte_limit`. Concatenate
+decoded base64 chunks, verify the declared BLAKE3 hash and byte length, parse
+the result as `data-scene/v1`, then call `release_scene_snapshot`. Factory reads
+must pass the same revision options to each chunk call. A changed revision
+refuses the read; release remains available after the revision changes.
+
 `get_camera_rendering_data` reads calibration for a stable authored camera ID or
 the active camera. Its reply states the source of intrinsics and extrinsics, axes,
 units, image convention, and whether an exact resolved projection is available.
