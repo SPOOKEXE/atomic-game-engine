@@ -23,6 +23,8 @@ add_subdirectory(script)    # L9 what a script may name, with no VM in it [share
 add_subdirectory(bakegraph) # L9 what a bake pipeline is, with no decoders [shared]
 add_subdirectory(bake)      # L9 importing and baking content [shared]
 add_subdirectory(graph)     # L9 what is drawn, before binding [shared]
+add_subdirectory(imagegraph) # L9 authored image graphs, before execution [shared]
+add_subdirectory(imagegraphio) # L10 foreign image graph adapter [shared]
 add_subdirectory(scriptluau) # L10 the Luau adapter        [shared]
 add_subdirectory(scriptjs)  # L10 the QuickJS adapter      [shared]
 add_subdirectory(scripthost) # L11 which VM to open        [shared]

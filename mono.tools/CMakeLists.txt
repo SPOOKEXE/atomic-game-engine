@@ -83,6 +83,12 @@ add_subdirectory(sourcecheck)
 # Asset compiler; shared-tier and device-free.
 add_subdirectory(assetc)
 
+# Headless, deterministic imagegraph output runner.
+add_subdirectory(imagegraph)
+
+# Source-backed PXCX to native imagegraph document import.
+add_subdirectory(pxcimport)
+
 # The tier rule is enforced at configure time; this compares the graph with its
 # checked-in architectural expectation.
 if(MONO_BUILD_TESTS)

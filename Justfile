@@ -679,6 +679,14 @@ recovery-rows-bench samples="5":
 linecount *args: (build "linecount")
     @./{{build}}/tools/linecount {{args}}
 
+# Evaluate one static imagegraph output to deterministic RGBA8 PNG.
+imagegraph *args: (build "imagegraph")
+    @./{{build}}/tools/imagegraph {{args}}
+
+# Import a Pixel Composer PXCX project as a native authored graph projection.
+pxcimport *args: (build "pxcimport")
+    @./{{build}}/tools/pxcimport {{args}}
+
 # The architecture test on its own - the target graph against the expectation.
 # Needs a configure, not a build: it reads what CMake emitted.
 #

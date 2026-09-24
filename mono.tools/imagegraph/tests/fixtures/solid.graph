@@ -1,0 +1,6 @@
+imagegraph 1
+node "solid" "image.solid" "" 0 0
+value 0 "solid" "width" i 2
+value 0 "solid" "height" i 1
+value 0 "solid" "colour" c 12 34 56 255
+output "final" "solid" "image"

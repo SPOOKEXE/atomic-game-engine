@@ -1,0 +1,15 @@
+imagegraph 2
+node "red" "image.solid" "" 0 0
+value 0 "red" "width" i 1
+value 0 "red" "height" i 1
+value 0 "red" "colour" c 255 0 0 255
+node "blue" "image.solid" "" 0 0
+value 1 "blue" "width" i 1
+value 1 "blue" "height" i 1
+value 1 "blue" "colour" c 0 0 255 255
+node "items" "value.array" "" 0 0
+dynamic 2 "items" "first" image 0
+dynamic 2 "items" "second" image 0
+link "red" "image" "items" "first"
+link "blue" "image" "items" "second"
+output "all" "items" "array"

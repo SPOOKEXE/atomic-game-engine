@@ -1,0 +1,511 @@
+{
+  "observed_utc": "2026-09-23T20:44:33+00:00",
+  "project_to_capture_mapping": "unverified",
+  "fixtures": [
+    {
+      "file": "001_effect_2.gif",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/001_effect_2.gif",
+      "size_bytes": 445836,
+      "sha256": "69fe490260b5371c71bec2a6150aaad0411e57c1c7925d3f26b0828c11bdf7ed",
+      "media_format": "GIF",
+      "width": 1912,
+      "height": 1014,
+      "frame_count": 15,
+      "frames": [
+        {
+          "index": 0,
+          "duration_ms": 70,
+          "rgba_sha256": "629161a7fc03d9f4c2056cd0eac87d3be389fad9f5479d7ea41c6d7986c81684"
+        },
+        {
+          "index": 1,
+          "duration_ms": 70,
+          "rgba_sha256": "1a17b9498ab71a7078dc292b7b7f0762e015f54838fe74f6fbaab3b4b51cbf05"
+        },
+        {
+          "index": 2,
+          "duration_ms": 70,
+          "rgba_sha256": "eb6a29a60502ceccd1b870796374dc4e2eee51169a8c8c6b318ebb34f81cd913"
+        },
+        {
+          "index": 3,
+          "duration_ms": 70,
+          "rgba_sha256": "ac54f27eeedb1b7ef50f3acb0c2c084db291307cb885378f18b5bcf3fa65f709"
+        },
+        {
+          "index": 4,
+          "duration_ms": 70,
+          "rgba_sha256": "0a1207930ed9af0194519d8e4bafa448635902f92238a3b793e1b145fdb5da42"
+        },
+        {
+          "index": 5,
+          "duration_ms": 70,
+          "rgba_sha256": "f62141899dad781efcc4986e0e7565e8cf9da6658e2d2e34a88df84b3a4e0b97"
+        },
+        {
+          "index": 6,
+          "duration_ms": 70,
+          "rgba_sha256": "d5bafba0391270631658d27989f55a89dde7f473a444ec80a3b9adf1fadd410b"
+        },
+        {
+          "index": 7,
+          "duration_ms": 70,
+          "rgba_sha256": "75196b289e99e20d14313d22125daf91493caea904542ca47f43f9a17c3e9096"
+        },
+        {
+          "index": 8,
+          "duration_ms": 70,
+          "rgba_sha256": "b05db8521f5c9652d2e94af756027f0925105a8a0fa03a2fb7a81d48f888aef7"
+        },
+        {
+          "index": 9,
+          "duration_ms": 70,
+          "rgba_sha256": "737f83108fbbaf14149312499c19f2f74ca3d53c91516c7b5acb46a67d812fb6"
+        },
+        {
+          "index": 10,
+          "duration_ms": 70,
+          "rgba_sha256": "19dd149411df2e1602e00df703ac22146c3ded24a06e41649f585952efbdf2c5"
+        },
+        {
+          "index": 11,
+          "duration_ms": 70,
+          "rgba_sha256": "492921d341cda0f11aa735fc9f574d987c00e68889d32548ec04aa620993f1a6"
+        },
+        {
+          "index": 12,
+          "duration_ms": 70,
+          "rgba_sha256": "f200e1ec521555f40b33eb28e48dd6552d163216bb44a6aa80ca2f1144fa7432"
+        },
+        {
+          "index": 13,
+          "duration_ms": 70,
+          "rgba_sha256": "05b0946256dda92e0786612e89f1e6528842cb26e830c367353af884101ba53f"
+        },
+        {
+          "index": 14,
+          "duration_ms": 70,
+          "rgba_sha256": "22439893afcdad9138c7435ffcb5cbe8c69e90e29542200863d342d6e5f4a7c5"
+        }
+      ]
+    },
+    {
+      "file": "005_nodes.png",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/005_nodes.png",
+      "size_bytes": 374740,
+      "sha256": "d30c2942b4460bc21bf6024a07213eb1172895fdf54bc4437a6d9a95dc49134a",
+      "media_format": "PNG",
+      "width": 1920,
+      "height": 1080,
+      "frame_count": 1,
+      "frames": [
+        {
+          "index": 0,
+          "duration_ms": 0,
+          "rgba_sha256": "927de7a4dd21abdf187d74a3c648c4597e2518ceb8394495be00a6cc3c91e76e"
+        }
+      ]
+    },
+    {
+      "file": "006_effects.gif",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/006_effects.gif",
+      "size_bytes": 3078912,
+      "sha256": "ff44b5326d09060954e578725e7527fc2164bb01a5b3acce089087748307fb01",
+      "media_format": "GIF",
+      "width": 960,
+      "height": 540,
+      "frame_count": 30,
+      "frames": [
+        {
+          "index": 0,
+          "duration_ms": 30,
+          "rgba_sha256": "36872b3099fb883dbc88ec60cde26d9b7b89e309fc07626e07d8d53216f0b0b3"
+        },
+        {
+          "index": 1,
+          "duration_ms": 40,
+          "rgba_sha256": "bbb304db931fa4e56d205805bf49353627565582630bfc344b866bd6858c5505"
+        },
+        {
+          "index": 2,
+          "duration_ms": 30,
+          "rgba_sha256": "4a16984ffa5374e6a93c2b548e0f6278f816a20f2883f71fd5dbd2d6aa223bb1"
+        },
+        {
+          "index": 3,
+          "duration_ms": 30,
+          "rgba_sha256": "8d009ea6144b54c5c55edb32e706ade2df0fa08487184a813ac2f74f61e3fd03"
+        },
+        {
+          "index": 4,
+          "duration_ms": 30,
+          "rgba_sha256": "057be9a9697279dc1227a8e4b3a786b2665dc8736212d001acc20572e3a5cd03"
+        },
+        {
+          "index": 5,
+          "duration_ms": 50,
+          "rgba_sha256": "fea6ce2beba162cbe33b211c0083e22d264c3af48e2d678445ffffacb4bf6fb1"
+        },
+        {
+          "index": 6,
+          "duration_ms": 30,
+          "rgba_sha256": "6ec19520efd9f350c633ae86ef94e38e1090eb1ea9610959f9e28f9289db16dd"
+        },
+        {
+          "index": 7,
+          "duration_ms": 30,
+          "rgba_sha256": "e33e628b066228138df3fe1a3c7ac81064cb9b363781eee1b0a06ed736a383ec"
+        },
+        {
+          "index": 8,
+          "duration_ms": 30,
+          "rgba_sha256": "19c8baf494a18388e49a178f1092ff792da07b8ae7ee589e07a47e650e89cc60"
+        },
+        {
+          "index": 9,
+          "duration_ms": 40,
+          "rgba_sha256": "999dc1560f9c63016410027e0c428a93a456f417828b8597292fb1f36c9625d6"
+        },
+        {
+          "index": 10,
+          "duration_ms": 30,
+          "rgba_sha256": "727f3c3442281ddd2fa0e5099955f620f5985d8a15be6ca448f813da09a3cea5"
+        },
+        {
+          "index": 11,
+          "duration_ms": 40,
+          "rgba_sha256": "8ccb5d0c15be627a63e3ecf2059ee940cbb93712fc502e9ae8d71301ef83863b"
+        },
+        {
+          "index": 12,
+          "duration_ms": 30,
+          "rgba_sha256": "652aa2126f8865d9d3c36bd5eb2796e75347e5082b78976c0744ba432bf8b17e"
+        },
+        {
+          "index": 13,
+          "duration_ms": 30,
+          "rgba_sha256": "658a616507e50f375d3b977119c65fba8788a4ce4e4e88669fba5c0bb07e0a32"
+        },
+        {
+          "index": 14,
+          "duration_ms": 30,
+          "rgba_sha256": "90c99ba87a50efe5d86794a75e412d19f5ab8ed929b50300bf25754b6c7559e7"
+        },
+        {
+          "index": 15,
+          "duration_ms": 30,
+          "rgba_sha256": "02a98d796f067146974275412221f4f45bc46118e75725025a3c5684aa168802"
+        },
+        {
+          "index": 16,
+          "duration_ms": 40,
+          "rgba_sha256": "1914f68f67b84254f5b5cab1900ad6fc85541146d14e64d230b1f3a01cab738b"
+        },
+        {
+          "index": 17,
+          "duration_ms": 30,
+          "rgba_sha256": "f62bb64520a68b5b0cb10dcb430f0294237a6df16e5d1f5ea3c9c5c4c8ea4ae7"
+        },
+        {
+          "index": 18,
+          "duration_ms": 30,
+          "rgba_sha256": "5b74a7652e307c21d76e4431d6d41bfcb942f7827281e92e9d63ba0f1d382deb"
+        },
+        {
+          "index": 19,
+          "duration_ms": 30,
+          "rgba_sha256": "929826e9c6d3edd6a3e83aa99c94c22ac72430afff6448407d6666af278c84e2"
+        },
+        {
+          "index": 20,
+          "duration_ms": 40,
+          "rgba_sha256": "84beaddb0905e57637e1bc11d5a4c228c1774a346b7f3e31b907c0fcfeaa5080"
+        },
+        {
+          "index": 21,
+          "duration_ms": 30,
+          "rgba_sha256": "adacab08280c4f2f194797525a77b0bea66e01cf810294725a722b6c9b680006"
+        },
+        {
+          "index": 22,
+          "duration_ms": 30,
+          "rgba_sha256": "aeeedc25a5c6c8bdfea730432b6d1434f397a767f47ca3ec79b9703048dc2089"
+        },
+        {
+          "index": 23,
+          "duration_ms": 40,
+          "rgba_sha256": "da555407e02ca4f4ee690bf61b8ec247ca6628a2e2d5cc5aa16eed889e121ddb"
+        },
+        {
+          "index": 24,
+          "duration_ms": 40,
+          "rgba_sha256": "f1c64c0d566caf60f0265081dd3a959126f2c85a28ea3771b605a2a48086f47b"
+        },
+        {
+          "index": 25,
+          "duration_ms": 30,
+          "rgba_sha256": "48bb9382c0218ff9846da1fa79c3710a61e45b2df3ba7505908bba79457472fa"
+        },
+        {
+          "index": 26,
+          "duration_ms": 30,
+          "rgba_sha256": "f0cd5c6d5755206767a13b03862521741b9f59691954ea2b0627d4e32fadabdb"
+        },
+        {
+          "index": 27,
+          "duration_ms": 40,
+          "rgba_sha256": "f19c956bb6152a9e5f84f6b7b3f00b0224173466104061dd81ff711f1a91fa88"
+        },
+        {
+          "index": 28,
+          "duration_ms": 30,
+          "rgba_sha256": "9bb2b2905b001b42af4849f3cecacb65a17c3c755818a2f4e541b27d063826cc"
+        },
+        {
+          "index": 29,
+          "duration_ms": 30,
+          "rgba_sha256": "6d7e7ec07fbff40208ec2ed1f8cde338fabea90af38549747181f51578516184"
+        }
+      ]
+    },
+    {
+      "file": "007_simulation.gif",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/007_simulation.gif",
+      "size_bytes": 1364814,
+      "sha256": "a0e3453f8b553105d89e9f9801491ac642065a3a35826be7a0cfc4476ced9507",
+      "media_format": "GIF",
+      "width": 960,
+      "height": 540,
+      "frame_count": 30,
+      "frames": [
+        {
+          "index": 0,
+          "duration_ms": 30,
+          "rgba_sha256": "c5d3b692d13fe37ac0c34ece615a5d1b73b23596e869993649cde8ee2a806b90"
+        },
+        {
+          "index": 1,
+          "duration_ms": 40,
+          "rgba_sha256": "4940e2b63b8df1564691d44db837451beb8d0f9fc50a093e27a53d0df0345274"
+        },
+        {
+          "index": 2,
+          "duration_ms": 30,
+          "rgba_sha256": "3d4c35952f436eba930d4d6f7f8b2e0ed7fc929e1fde66ec3fef83aaa21f9c80"
+        },
+        {
+          "index": 3,
+          "duration_ms": 30,
+          "rgba_sha256": "3106e8dd383ff0482a0d816898adb0c4e833d21526d496d7553f901950a907fe"
+        },
+        {
+          "index": 4,
+          "duration_ms": 40,
+          "rgba_sha256": "8879fc1fa299c86335080e3a39a0ddc70dee077de276b580b085718bbd1054e9"
+        },
+        {
+          "index": 5,
+          "duration_ms": 30,
+          "rgba_sha256": "c84831b82db1cdf341ce8081c869377ba40814712f3e3b9012a52c207094fe9d"
+        },
+        {
+          "index": 6,
+          "duration_ms": 30,
+          "rgba_sha256": "adf63f7385ac8e2d045c9e64f1e12eab66f0d86feabf24ba5a9872462b5fcb4c"
+        },
+        {
+          "index": 7,
+          "duration_ms": 30,
+          "rgba_sha256": "f5675ddb857ef04a5437d238581459cfaf35fe514a8c2b84ad11974e30f87df8"
+        },
+        {
+          "index": 8,
+          "duration_ms": 40,
+          "rgba_sha256": "f2236d4f63db43d5b5a0d7ef586cfe2ffb235bb51a47e4df58e7270fa0011459"
+        },
+        {
+          "index": 9,
+          "duration_ms": 30,
+          "rgba_sha256": "2588033a0a61be45d6ea7601f82bba1e0fdd93475833853ccdc089b01077369d"
+        },
+        {
+          "index": 10,
+          "duration_ms": 30,
+          "rgba_sha256": "709a7c60ca2c20466263541252c3d038a17426a32d316bf0e50076e30a765129"
+        },
+        {
+          "index": 11,
+          "duration_ms": 40,
+          "rgba_sha256": "5fd78c6ec41302fb316ee58df0e84ab4a051842b2e5f17e4d76d6f5c088d7348"
+        },
+        {
+          "index": 12,
+          "duration_ms": 30,
+          "rgba_sha256": "96353bc03f5e084aa51fe1e4649dbd6df0d29e290e2a7291f9610800031db982"
+        },
+        {
+          "index": 13,
+          "duration_ms": 30,
+          "rgba_sha256": "a27f1903bcf5bab6c7a785f0296f41a80b39b960dd5d5beecc5139df75d5eb80"
+        },
+        {
+          "index": 14,
+          "duration_ms": 30,
+          "rgba_sha256": "1b8655e4594726bc669afd1ebc9cfbac9fee097f3f3a87fced4f833ecb4a718e"
+        },
+        {
+          "index": 15,
+          "duration_ms": 40,
+          "rgba_sha256": "a2d412574611a4e067b6cde3c3acdf2b0cd66701a6ae6ceb0e8e61b27cda3081"
+        },
+        {
+          "index": 16,
+          "duration_ms": 30,
+          "rgba_sha256": "a7f67e18b4528b8f7af84a2bcdd08f74fb8571e0ad4d6569cb9896cb469bb522"
+        },
+        {
+          "index": 17,
+          "duration_ms": 30,
+          "rgba_sha256": "b3fed226215f470c064f6c874810fe8806a838f5075cd1ec1cb2e308fb4c1721"
+        },
+        {
+          "index": 18,
+          "duration_ms": 40,
+          "rgba_sha256": "c0ccea170aae60319311feb9718032e0af14c6aa07621e4c74616dd58dfb9a64"
+        },
+        {
+          "index": 19,
+          "duration_ms": 30,
+          "rgba_sha256": "3b4428100d8bac8b5a1b2370f6ee586c16ad960b23cd720ee783efe0a6e1d978"
+        },
+        {
+          "index": 20,
+          "duration_ms": 30,
+          "rgba_sha256": "43dd72ad3a4fbad74f0fba704c2fd85396377459f57a5540b3cce1f315976e97"
+        },
+        {
+          "index": 21,
+          "duration_ms": 40,
+          "rgba_sha256": "ea8f6b3786ae322195883f069e107fcd6323b1251b8161994c46960260617735"
+        },
+        {
+          "index": 22,
+          "duration_ms": 30,
+          "rgba_sha256": "1fb4102ab3c0c96c7c636cba9a3c6c54986ca0d39f10e0040e3033eac99a09b2"
+        },
+        {
+          "index": 23,
+          "duration_ms": 30,
+          "rgba_sha256": "1ca2ebe2034746e018992140284abf77694ec41ac0b370e99b401d457dfe6d7e"
+        },
+        {
+          "index": 24,
+          "duration_ms": 30,
+          "rgba_sha256": "0e89d2b79c87ab6f1caa44dd3e2a841eb92ab859a3c87f7f783d2665c16dea52"
+        },
+        {
+          "index": 25,
+          "duration_ms": 40,
+          "rgba_sha256": "a069417b99afeabd835416552810ba79316d3fb4295f3d2cfee2225fc7d58058"
+        },
+        {
+          "index": 26,
+          "duration_ms": 40,
+          "rgba_sha256": "93751edf65280d849dc9cf81667d540da4372e2aaeff814db15c04909d5a72e0"
+        },
+        {
+          "index": 27,
+          "duration_ms": 30,
+          "rgba_sha256": "77ccde98d47bbca949db03bdc390be700cf0a317de533e1e10bc62cf6c38c623"
+        },
+        {
+          "index": 28,
+          "duration_ms": 30,
+          "rgba_sha256": "12fc2cfbe4e21c8a6f0c67c8d544cae3a98a3127391f6328b5a63296a4606781"
+        },
+        {
+          "index": 29,
+          "duration_ms": 30,
+          "rgba_sha256": "1fac5e2a4b244eb21b31f19fc080085bb603b57465ed9045d9de752831cdb9ca"
+        }
+      ]
+    },
+    {
+      "file": "008_3d.png",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/008_3d.png",
+      "size_bytes": 423813,
+      "sha256": "f03d9f72bb9cf6f19929895dde5ce50e7869e539f78d2873875e6c34a8668c9e",
+      "media_format": "PNG",
+      "width": 1920,
+      "height": 1080,
+      "frame_count": 1,
+      "frames": [
+        {
+          "index": 0,
+          "duration_ms": 0,
+          "rgba_sha256": "a3277738b70c4aa2ed5ed214d33ec5e80ffd95300b2739274d8c6530607ccf49"
+        }
+      ]
+    },
+    {
+      "file": "Black-Hole_121092.pxc",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/Black-Hole_121092.pxc",
+      "size_bytes": 24977,
+      "sha256": "9eaa66e9b0135dfae8938521a06971c87a8867cdc5e15fd4247165e9d430dd65",
+      "observed_prefix_hex": "505843587715000054484d424f150000",
+      "observed_prefix_ascii": "PXCX",
+      "embedded_version_string_observed": "1.22.10.201",
+      "format_layout": "unverified",
+      "graph_structure": "unverified",
+      "source_application_version": "unverified"
+    },
+    {
+      "file": "Fire-Tornado_121092.pxc",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/Fire-Tornado_121092.pxc",
+      "size_bytes": 108529,
+      "sha256": "44a72458b147c1b6f75fd1927494ff63aaaf3671a5146359e8afeb223e1ba2d9",
+      "observed_prefix_hex": "50584358e409000054484d42bc090000",
+      "observed_prefix_ascii": "PXCX",
+      "embedded_version_string_observed": "1.22.10.201",
+      "format_layout": "unverified",
+      "graph_structure": "unverified",
+      "source_application_version": "unverified"
+    },
+    {
+      "file": "Glass-Block-Refraction_121092.pxc",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/Glass-Block-Refraction_121092.pxc",
+      "size_bytes": 17188,
+      "sha256": "cf9688cc257d80353f62dbfbba90977f434806a74128880bade5148016f06f75",
+      "observed_prefix_hex": "50584358500e000054484d42280e0000",
+      "observed_prefix_ascii": "PXCX",
+      "embedded_version_string_observed": "1.22.10.201",
+      "format_layout": "unverified",
+      "graph_structure": "unverified",
+      "source_application_version": "unverified"
+    },
+    {
+      "file": "Ornate-Trim_121092.pxc",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/Ornate-Trim_121092.pxc",
+      "size_bytes": 11502,
+      "sha256": "955a4b2f5c758c68fb7c6df356597e09436ecc8884f006c6faee44f8552e4fd6",
+      "observed_prefix_hex": "505843582409000054484d42fc080000",
+      "observed_prefix_ascii": "PXCX",
+      "embedded_version_string_observed": "1.22.10.201",
+      "format_layout": "unverified",
+      "graph_structure": "unverified",
+      "source_application_version": "unverified"
+    },
+    {
+      "file": "Spark-Bolt_121092.pxc",
+      "source_path": "../atomic-game-engine-hidden-docs/files/pixel-composer-com/Spark-Bolt_121092.pxc",
+      "size_bytes": 19669,
+      "sha256": "34b39a7969be45071b2035a76796418ee777546decf4d8255d68e282d17a1bd1",
+      "observed_prefix_hex": "50584358740e000054484d424c0e0000",
+      "observed_prefix_ascii": "PXCX",
+      "embedded_version_string_observed": "1.22.10.201",
+      "format_layout": "unverified",
+      "graph_structure": "unverified",
+      "source_application_version": "unverified"
+    }
+  ]
+}

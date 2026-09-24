@@ -1,0 +1,12 @@
+imagegraph 2
+node "red" "image.solid" "" 0 0
+value 0 "red" "width" i 1
+value 0 "red" "height" i 1
+value 0 "red" "colour" c 255 0 0 255
+node "inner" "value.array" "" 0 0
+dynamic 1 "inner" "leaf" image 0
+node "outer" "value.array" "" 0 0
+dynamic 2 "outer" "nested" array 0
+link "red" "image" "inner" "leaf"
+link "inner" "array" "outer" "nested"
+output "all" "outer" "array"
