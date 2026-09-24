@@ -98,6 +98,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] make the portal acceptance matrix runnable and fix the latency livelock it found. `just portal-product-acceptance` runs product walks at 144 and 240 FPS, a variable frame and stall schedule, the 24-cell RTT, jitter, loss, duplicate, and reorder grid, matched seam captures, and uncaptured timing. Without capture the seam scene achieves 240.0 FPS at 1080p. A stale camera route livelocked every cell at 150 ms RTT or more; `676df971` fixes it. Missing destination images now report `AwaitingImage`.
 - [_] pass the portal acceptance matrix in `docs/to-delete/v025-SEAMLESS-PORTALS.md`. It runs, but unimpaired and impaired product walks fail intermittently. The v0.26 flakiness item is the blocker.
 
+- [_] Can you make a just benchmark job that builds a docs/ENGINE_STRESS_TEST.md markdown file with the stress
+  test components mentioned in "ENGINE_STRESS_AUDIT_2026-09-22.md" as one big table? I plan to remove this
+  document and I think it would be good to have in general. Expand where appropriate to include more
+  benchmark variants.
+
 - [_] measure and implement the remaining stress candidates, including a matched 200-client Authority `RecoverRows` rerun with complete profiling evidence.
 - [_] complete the native Pixel Composer graph, Studio workflow, documented node catalogue, animation, audio, simulation, 3D, PXC interchange, and engine output bindings through M0 to M7 in `docs/v026-pixel-composer.md`. The Audio Window static slice is present; the larger work remains open. Verify every documented row and product workflow. Exact executable parity remains unverified without a licensed reference build.
 
