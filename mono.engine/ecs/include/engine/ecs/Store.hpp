@@ -1705,6 +1705,15 @@ namespace engine::ecs {
 			return ComponentChangeVersionRaw(Components::Of<T>());
 		}
 
+		// The monotonic membership epoch for one observed component.
+		// It advances when an entity gains or loses `T`, including destruction.
+		// Existing-value writes do not advance it. Zero means the component is not observed.
+		//
+		// @return A counter that increases on membership changes.
+		template <class T> uint64_t ComponentMembershipVersion() const {
+			return ComponentMembershipVersionRaw(Components::Of<T>());
+		}
+
 		// Runtime component-name consumers can observe the same narrow epoch
 		// without naming a higher-layer component type in their public headers.
 		void Observe(ComponentId id) {
@@ -2429,6 +2438,7 @@ namespace engine::ecs {
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
 		uint64_t ComponentChangeVersionRaw(ComponentId id) const;
+		uint64_t ComponentMembershipVersionRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
 		bool ChangedRaw(Entity entity, ComponentId id) const;
 		void VisitChanged(ComponentId subject, const std::function<void(Entity, void *)> &body);

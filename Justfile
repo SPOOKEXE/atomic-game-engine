@@ -409,6 +409,54 @@ bakegraph-pipeline-set-bench samples="5":
     cmake --build --preset bench --target bench_bakegraph
     ./.cache/build/bench/bench/bench_bakegraph --suite engine.bakegraph.bench.pipeline-set --samples {{samples}}
 
+# Durable datastore cost for a complete snapshot, using a disposable SQLite file under the bench build.
+datastore-sqlite-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_datastore
+    ./.cache/build/bench/bench/bench_datastore --suite engine.datastore.bench.sqlite-snapshot --samples {{samples}}
+
+# Evaluate a fixed 256x256 three-octave imagegraph output on the CPU.
+imagegraph-evaluation-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagegraph
+    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluation --samples {{samples}}
+
+# Project a generated PXCX chain while retaining its parsed source archive.
+imagegraphio-pxcx-import-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagegraphio
+    ./.cache/build/bench/bench/bench_imagegraphio --suite engine.imagegraphio.bench.pxcx-import --samples {{samples}}
+
+# Example orbit and spin systems over deterministic ECS fixtures.
+examples-motion-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_examples
+    ./.cache/build/bench/bench/bench_examples --suite engine.examples.bench.motion --samples {{samples}}
+
+# Runtime SPIR-V to MSL translation through the same fixture used by the unit suite.
+msl-translation-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_msl
+    ./.cache/build/bench/bench/bench_msl --suite engine.msl.bench.translate --samples {{samples}}
+
+# Steady-state script source mirroring for cached LocalScripts.
+script-source-mirror-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_script
+    ./.cache/build/bench/bench/bench_script --suite engine.script.bench.source-mirror --samples {{samples}}
+
+# QuickJS property reads and writes through the engine's ECS bindings.
+scriptjs-property-access-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_scriptjs
+    ./.cache/build/bench/bench/bench_scriptjs --suite engine.scriptjs.bench.property-access --samples {{samples}}
+
+# Headless ImGui layout and geometry hashing; this does not open a GPU device.
+ui-headless-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_ui
+    ./.cache/build/bench/bench/bench_ui --suite engine.ui.bench.headless-interface --samples {{samples}}
+
 # Portal reply encoding and decoding, per complete batch. No GPU or process transport.
 # Run the binary directly so measurements stay on the terminal.
 portal-exchange-bench samples="5":
@@ -454,6 +502,12 @@ script-binding-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_scriptluau
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
 
+# Active input dispatch through both VMs, with unchanged and sparse key words.
+script-input-dispatch-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scripthost
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scripthost.bench.input-dispatch --all --samples {{samples}}
+
 # Repeated public ParticleEmitter:Emit calls plus one enabled-emitter tick. This
 # is the Luau boundary row for the ECS burst queue, measured in the bench preset.
 particle-emit-bench samples="5":
@@ -497,6 +551,12 @@ persistent-manifold-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.narrowphase --all --samples {{samples}}
+
+# Compare candidate counts and stage costs for the deterministic 4,000-body pile.
+physics-pile-cell-bench samples="1":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_physics
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.pile-cells --samples {{samples}}
 
 # Separated closing pairs through speculative generation, with and without the
 # broad-phase sync and query. Output remains on the terminal.
@@ -1576,6 +1636,12 @@ stress-motion label="motion-baseline" clients="1" seconds="20" port="45200" wind
 # changes. The script records both random-heading arguments beside the capture.
 stress-random-motion label="random-motion" clients="200" seconds="45" port="45300" window="30" seed="1" every="30": (build "server") (build "loadtest")
     ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}} Stress.luau {{window}} {{seed}} {{every}}
+
+# One driver, eight hosted remote worlds, 200 moving clients and a signed CDN
+# fetch cohort. Run with `just preset=release integrated-stress`; output stays
+# under the selected build directory's integrated-stress/ folder.
+integrated-stress seconds="45" port="45100": (build "server") (build "cdn") (build "loadtest")
+    ./scripts/integrated-stress-test.sh ./{{build}} {{seconds}} {{port}}
 
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.

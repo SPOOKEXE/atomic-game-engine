@@ -40,6 +40,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -1971,6 +1972,139 @@ TEST_CASE("an input signal hands over an InputObject", "[scripting]") {
 		local held = UIS:GetMouseButtonsPressed()
 		assert(#held == 0, 'nothing is pressed')
 	)");
+}
+
+TEST_CASE("keyboard edge dispatch preserves order and callback rebinding", "[scripting][input]") {
+	std::array<std::vector<std::string>, 2> traces;
+	size_t languageIndex = 0;
+
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store(language == Language::Luau ? "input_luau" : "input_js");
+		store.SetResource(engine::scene::InputState{});
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const Entity log = MakeLog(store);
+		const bool luau = language == Language::Luau;
+		const std::string source = luau ? R"(
+			local log = workspace:FindFirstChild('Log')
+			local cas = game:GetService('ContextActionService')
+			local input = game:GetService('UserInputService')
+			local function replacement(name, state, object)
+				log.Name = log.Name .. 'late:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+			end
+			cas:BindActionAtPriority('early', function(name, state, object)
+				log.Name = log.Name .. 'early:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+				if object.KeyCode.Name == 'A' and state.Name == 'Begin' then
+					cas:BindActionAtPriority('late', replacement, false, 3, Enum.KeyCode.Z)
+				end
+				return Enum.ContextActionResult.Pass
+			end, false, 10, Enum.KeyCode.A)
+			cas:BindActionAtPriority('middle', function(name, state, object)
+				log.Name = log.Name .. 'middle:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+				return Enum.ContextActionResult.Pass
+			end, false, 5, Enum.KeyCode.A)
+			cas:BindActionAtPriority('late', function(name, state, object)
+				log.Name = log.Name .. 'old:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+			end, false, 3, Enum.KeyCode.Z)
+			input.InputBegan:Connect(function(object)
+				log.Name = log.Name .. 'signal:' .. object.KeyCode.Name .. ':' .. object.UserInputState.Name .. ';'
+			end)
+			input.InputEnded:Connect(function(object)
+				log.Name = log.Name .. 'signal:' .. object.KeyCode.Name .. ':' .. object.UserInputState.Name .. ';'
+			end)
+		)"
+										: R"(
+			const log = workspace.FindFirstChild('Log');
+			const cas = game.GetService('ContextActionService');
+			const input = game.GetService('UserInputService');
+			const replacement = (name, state, object) => {
+				log.Name = log.Name + 'late:' + object.KeyCode.Name + ':' + state.Name + ';';
+			};
+			cas.BindActionAtPriority('early', (name, state, object) => {
+				log.Name = log.Name + 'early:' + object.KeyCode.Name + ':' + state.Name + ';';
+				if (object.KeyCode.Name === 'A' && state.Name === 'Begin') {
+					cas.BindActionAtPriority('late', replacement, false, 3, Enum.KeyCode.Z);
+				}
+				return Enum.ContextActionResult.Pass;
+			}, false, 10, Enum.KeyCode.A);
+			cas.BindActionAtPriority('middle', (name, state, object) => {
+				log.Name = log.Name + 'middle:' + object.KeyCode.Name + ':' + state.Name + ';';
+				return Enum.ContextActionResult.Pass;
+			}, false, 5, Enum.KeyCode.A);
+			cas.BindActionAtPriority('late', (name, state, object) => {
+				log.Name = log.Name + 'old:' + object.KeyCode.Name + ':' + state.Name + ';';
+			}, false, 3, Enum.KeyCode.Z);
+			input.InputBegan.Connect(object => {
+				log.Name = log.Name + 'signal:' + object.KeyCode.Name + ':' + object.UserInputState.Name + ';';
+			});
+			input.InputEnded.Connect(object => {
+				log.Name = log.Name + 'signal:' + object.KeyCode.Name + ':' + object.UserInputState.Name + ';';
+			});
+		)";
+		MustRun(*runtime, source.c_str());
+
+		auto &input = *store.ResourceMutable<engine::scene::InputState>();
+		auto recordFrame = [&] {
+			REQUIRE(runtime->Heartbeat(0.016f));
+			traces[languageIndex].push_back(Trace(store, log));
+		};
+
+		recordFrame();
+		recordFrame();
+
+		// Set the bits in reverse order. The pump's report order stays numeric.
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::Z, true);
+		input.Down.Set(engine::scene::KeyCode::Q, true);
+		input.Down.Set(engine::scene::KeyCode::A, true);
+		recordFrame();
+
+		// A mouse edge makes this an active input frame with no new keyboard edge.
+		input.Previous = input.Down;
+		input.MouseDelta = engine::core::Vector2{1.0f, 0.0f};
+		recordFrame();
+
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::Z, false);
+		input.Down.Set(engine::scene::KeyCode::Q, false);
+		input.Down.Set(engine::scene::KeyCode::A, false);
+		input.MouseDelta = {};
+		recordFrame();
+
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::W, true);
+		recordFrame();
+
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::W, false);
+		recordFrame();
+		input.Previous = input.Down;
+		recordFrame();
+
+		languageIndex++;
+	}
+
+	const std::vector<std::string> expected{
+		"",
+		"",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;"
+		"signal:W:Begin;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;"
+		"signal:W:Begin;signal:W:End;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;"
+		"signal:W:Begin;signal:W:End;",
+	};
+	CHECK(traces[0] == traces[1]);
+	CHECK(traces[0] == expected);
 }
 
 TEST_CASE("a mouse button is an input, which it never was before", "[scripting]") {

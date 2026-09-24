@@ -18,6 +18,7 @@
 #include <engine/datastore/Sqlite.hpp>
 #include <engine/delivery/Relay.hpp>
 #include <engine/delivery/Validation.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/game/Content.hpp>
@@ -934,6 +935,10 @@ namespace server {
 		if (Settings.ProfileWindowTicks > 0) {
 			driver.Hosts.Arguments.emplace_back("--profile-window");
 			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.ProfileWindowTicks));
+		}
+		if (Settings.MetricsReportSeconds > 0.0) {
+			driver.Hosts.Arguments.emplace_back("--metrics-every");
+			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.MetricsReportSeconds));
 		}
 
 		if (Settings.Chatter) {
@@ -4059,6 +4064,12 @@ namespace server {
 
 		uint64_t lastObservedTick = 0;
 		uint64_t cumulativeObservedTicks = 0;
+		uint64_t lastHostMetricsReport = started;
+		uint64_t hostTrafficAcceptedWindow = 0;
+		uint64_t hostDeliveriesSentWindow = 0;
+		uint64_t hostDeliveriesDroppedWindow = 0;
+		std::vector<engine::core::Name> reportedReadyHosts;
+		reportedReadyHosts.reserve(Settings.RemoteWorlds.size());
 		const auto ticksSoFar = [this, &lastObservedTick, &cumulativeObservedTicks] {
 			const uint64_t observed = !Worlds().IsRemote(PrimaryWorld)
 										  ? Worlds().StatisticsOf(PrimaryWorld).Ticks
@@ -4220,6 +4231,52 @@ namespace server {
 				// Other deployments start their fixed frame through Driver here.
 				if (!HostExchange)
 					Driver_->Tick(delta, static_cast<double>(engine::core::Clock::Nanoseconds()) / 1e9);
+
+				if (Link == nullptr && !Settings.RemoteWorlds.empty()) {
+					const engine::world::DriverStatistics &driverStats = Driver_->Statistics();
+					hostTrafficAcceptedWindow += driverStats.TrafficAccepted;
+					hostDeliveriesSentWindow += driverStats.DeliveriesSent;
+					hostDeliveriesDroppedWindow += driverStats.DeliveriesDropped;
+					const uint64_t hostNow = engine::core::Clock::Nanoseconds();
+					for (const engine::world::HostStatus &host : Driver_->Hosts().Hosts()) {
+						if (!host.Ready || host.Port == 0 || host.Worlds.size() != 1) continue;
+						if (std::find(reportedReadyHosts.begin(), reportedReadyHosts.end(), host.Name) ==
+							reportedReadyHosts.end()) {
+							reportedReadyHosts.push_back(host.Name);
+							ENGINE_INFO(
+								"host-ready host={} world={} port={}",
+								host.Name.Text(),
+								host.Worlds.front().Text(),
+								host.Port
+							);
+						}
+					}
+
+					if (Settings.MetricsReportSeconds > 0.0 &&
+						static_cast<double>(hostNow - lastHostMetricsReport) / 1e9 >=
+							Settings.MetricsReportSeconds) {
+						lastHostMetricsReport = hostNow;
+						ENGINE_INFO(
+							"host-bus-window accepted={} sent={} dropped={}",
+							hostTrafficAcceptedWindow,
+							hostDeliveriesSentWindow,
+							hostDeliveriesDroppedWindow
+						);
+						hostTrafficAcceptedWindow = 0;
+						hostDeliveriesSentWindow = 0;
+						hostDeliveriesDroppedWindow = 0;
+						for (const engine::world::HostStatus &host : Driver_->Hosts().Hosts()) {
+							if (!host.Ready || host.Worlds.size() != 1) continue;
+							ENGINE_INFO(
+								"host-metric host={} world={} tick={} tick-ms={:.3f}",
+								host.Name.Text(),
+								host.Worlds.front().Text(),
+								host.Tick,
+								host.Milliseconds
+							);
+						}
+					}
+				}
 				// Journal I/O is deliberately outside `Driver::Tick`; an acknowledgement affects the next
 				// tick.
 				(void)FlushPortalTransferDecisions();

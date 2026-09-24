@@ -380,6 +380,68 @@ TEST_CASE("component change epochs ignore unrelated writes", "[ecs]") {
 	REQUIRE(store.ComponentChangeVersion<Drift>() == held);
 }
 
+TEST_CASE("component membership epochs follow structural changes", "[ecs]") {
+	Store store("test");
+	store.Observe<Spot>();
+	store.Observe<Drift>();
+
+	const uint64_t spotBefore = store.ComponentMembershipVersion<Spot>();
+	const uint64_t driftBefore = store.ComponentMembershipVersion<Drift>();
+	REQUIRE(spotBefore != 0);
+	REQUIRE(driftBefore != 0);
+	REQUIRE(store.ComponentMembershipVersion<Quiet>() == 0);
+
+	const Entity entity = store.Create();
+	store.Set<Spot>(entity, Spot{1.0f});
+	const uint64_t spotAfterAdd = store.ComponentMembershipVersion<Spot>();
+	REQUIRE(spotAfterAdd > spotBefore);
+
+	store.Set<Spot>(entity, Spot{2.0f});
+	REQUIRE(store.ComponentMembershipVersion<Spot>() == spotAfterAdd);
+
+	store.Set<Drift>(entity, Drift{1.0f});
+	REQUIRE(store.ComponentMembershipVersion<Spot>() == spotAfterAdd);
+	const uint64_t driftAfterAdd = store.ComponentMembershipVersion<Drift>();
+	REQUIRE(driftAfterAdd > driftBefore);
+
+	store.Remove<Drift>(entity);
+	REQUIRE(store.ComponentMembershipVersion<Spot>() == spotAfterAdd);
+	REQUIRE(store.ComponentMembershipVersion<Drift>() > driftAfterAdd);
+
+	store.Remove<Spot>(entity);
+	REQUIRE(store.ComponentMembershipVersion<Spot>() > spotAfterAdd);
+}
+
+TEST_CASE("component membership epoch detects equal-count replacement", "[ecs]") {
+	Store store("test");
+	store.Observe<Spot>();
+
+	const Entity removed = store.Create();
+	const Entity added = store.Create();
+	store.Set<Spot>(removed, Spot{});
+	const uint64_t before = store.ComponentMembershipVersion<Spot>();
+	REQUIRE(store.CountMatching<Spot>() == 1);
+
+	store.Remove<Spot>(removed);
+	store.Set<Spot>(added, Spot{});
+
+	CHECK(store.CountMatching<Spot>() == 1);
+	CHECK(store.ComponentMembershipVersion<Spot>() > before);
+}
+
+TEST_CASE("destroying an entity changes observed component membership", "[ecs]") {
+	Store store("test");
+	store.Observe<Spot>();
+
+	const Entity entity = store.Create();
+	store.Set<Spot>(entity, Spot{});
+	const uint64_t before = store.ComponentMembershipVersion<Spot>();
+
+	store.Destroy(entity);
+
+	CHECK(store.ComponentMembershipVersion<Spot>() > before);
+}
+
 TEST_CASE("runtime component epochs match typed observation", "[ecs]") {
 	Store store("test");
 	const auto spot = Components::Of<Spot>();

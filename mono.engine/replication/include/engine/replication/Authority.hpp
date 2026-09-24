@@ -86,8 +86,9 @@ namespace engine::replication {
 		// re-offers every value a client has not acknowledged, which is right
 		// while a client is keeping up and is the whole world once it is not:
 		// at two hundred clients the measured link took about forty rows a tick
-		// and this function was serialising two thousand of them per component
-		// to choose from.
+		// while the recovery walk considered two thousand rows per component.
+		// Fixed width values can wait until packing chooses rows; dynamic writers
+		// still have to run here to learn their exact lengths.
 		//
 		// Large enough that a healthy connection never reaches it, so this
 		// changes nothing until a client is far behind - which is exactly when a
@@ -999,7 +1000,8 @@ namespace engine::replication {
 			uint32_t Entry = 0;
 
 			// Where this row's encoded value sits inside its entry's `Values`,
-			// and how long it is.
+			// and how long it is. `Deferred` rows get their offset when `Pack`
+			// first selects them; their fixed width is already known here.
 			//
 			// **A span rather than a row number times a stride, because a row is
 			// not a fixed width.** A component may serialise to a different
@@ -1021,6 +1023,8 @@ namespace engine::replication {
 			size_t BearingSlot = NOWHERE;
 
 			float Hint = 0.0f;
+
+			bool Deferred = false;
 		};
 
 		// How much of a delta a packing pass got onto the wire.
@@ -1426,7 +1430,8 @@ namespace engine::replication {
 
 		void BuildComponents(Lane &lane, ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
 		void Prioritise(Lane &lane, ClientId client, uint64_t tick);
-		Placement Pack(Lane &lane, Client &client, const Delta &delta, size_t messageLimit);
+		Placement
+		Pack(Lane &lane, Client &client, const ecs::Store &store, Delta &delta, size_t messageLimit);
 		void Record(Lane &lane, Client &client, const Placement &placed, uint64_t tick);
 		void EmitStructure(Client &client, const Structure &structure);
 

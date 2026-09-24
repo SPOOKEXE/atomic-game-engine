@@ -357,6 +357,16 @@ namespace engine::scene {
 	// @since v0.17
 	bool InReplicatedFirst(const ecs::Store &store, ecs::Entity instance);
 
+	// Checks the same ancestry using a class id resolved by a caller that will
+	// ask about many instances repeatedly.
+	//
+	// @param store The world.
+	// @param instance Anything in the tree.
+	// @param replicatedFirst The registered `ReplicatedFirst` class.
+	// @return `true` for anything under `ReplicatedFirst`.
+	// @since v0.25
+	bool InReplicatedFirst(const ecs::Store &store, ecs::Entity instance, ecs::ClassId replicatedFirst);
+
 	// Which player this host is, when it is a client.
 	//
 	// **A resource rather than a component, because there is one of it.** A

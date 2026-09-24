@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -1344,7 +1345,7 @@ namespace engine::replication {
 	}
 
 	Authority::Placement
-	Authority::Pack(Lane &lane, Client &client, const Delta &delta, size_t messageLimit) {
+	Authority::Pack(Lane &lane, Client &client, const ecs::Store &store, Delta &delta, size_t messageLimit) {
 
 		const size_t budget = Settings_.ChunkBytes;
 
@@ -1370,6 +1371,7 @@ namespace engine::replication {
 
 		Delta emitted;
 		size_t emittedAt = NOWHERE;
+		core::ByteWriter encodedValue;
 
 		const auto flush = [&]() -> bool {
 			if (!piece.Components.empty()) {
@@ -1406,7 +1408,7 @@ namespace engine::replication {
 
 		bool room = true;
 		for (size_t position = 0; room && position < lane.Order.size(); position++) {
-			const Candidate &candidate = lane.Candidates[lane.Order[position]];
+			Candidate &candidate = lane.Candidates[lane.Order[position]];
 			const size_t perEntity = sizeof(uint64_t) + candidate.Bytes;
 
 			size_t entry = lane.OpenEntry[candidate.Entry];
@@ -1420,6 +1422,25 @@ namespace engine::replication {
 				needs = perEntity + ENTRY_OVERHEAD;
 			}
 
+			ComponentDelta &source = delta.Components[candidate.Entry];
+			if (candidate.Deferred) {
+				const Crossing &crossing = Crossings[lane.SourceSlot[candidate.Entry]];
+				const void *value = store.GetComponent(candidate.Entity, crossing.Id);
+				if (value == nullptr) {
+					continue;
+				}
+
+				encodedValue.Clear();
+				encodedValue.Reserve(candidate.Bytes);
+				WriteValue(encodedValue, *crossing.Descriptor, value);
+				assert(encodedValue.Size() == candidate.Bytes);
+
+				candidate.Offset = static_cast<uint32_t>(source.Values.size());
+				candidate.Deferred = false;
+				const std::span<const std::byte> encoded = encodedValue.Bytes();
+				source.Values.insert(source.Values.end(), encoded.begin(), encoded.end());
+			}
+
 			if (entry == NOWHERE) {
 				entry = piece.Components.size();
 				lane.OpenEntry[candidate.Entry] = entry;
@@ -1429,7 +1450,6 @@ namespace engine::replication {
 				piece.Components.push_back(std::move(opened));
 			}
 
-			const ComponentDelta &source = delta.Components[candidate.Entry];
 			ComponentDelta &into = piece.Components[entry];
 			into.Entities.push_back(candidate.Entity);
 			into.Values.insert(
@@ -1795,13 +1815,12 @@ namespace engine::replication {
 			const size_t before = lane.Candidates.size();
 
 			core::ByteWriter values;
+			const bool deferred = !crossing.Resource && descriptor.Size > 0 &&
+								  (descriptor.Wire.Present() || descriptor.RawSerialisation);
 
-			// **The value is written here rather than beside each call, so that
-			// one place records where it landed.** A row's encoded length is
-			// only known once it has been written - `scene.Visual` and
-			// `ecs.InstanceName` both write names, and a name is as long as its
-			// text - and `Pack` has to be able to slice any one row back out
-			// after the priority sort has reordered them.
+			// Fixed width values have a known size, so their writer can wait until
+			// Pack has chosen the row. Dynamic writers still run here because their
+			// exact lengths decide both budget order and the slice Pack copies.
 			const auto offer = [&](ecs::Entity entity, const void *value) {
 				Outstanding &pending = unconfirmed[entity.Id];
 				if (pending.WaitingSince == 0) {
@@ -1810,7 +1829,7 @@ namespace engine::replication {
 				pending.ConsideredAt = tick;
 
 				const size_t at = values.Bytes().size();
-				if (descriptor.Size > 0) {
+				if (descriptor.Size > 0 && !deferred) {
 					WriteValue(values, descriptor, value);
 				}
 
@@ -1843,7 +1862,7 @@ namespace engine::replication {
 				// The bytes stay in `values` because `core::ByteWriter` does not
 				// rewind. Nothing reads them: a row is only ever sliced out
 				// through a `Candidate`, and this one produces none.
-				const size_t wrote = values.Bytes().size() - at;
+				const size_t wrote = deferred ? WireBytes(descriptor) : values.Bytes().size() - at;
 				if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + wrote > Settings_.ChunkBytes) {
 					unconfirmed.Erase(entity.Id);
 					client.Oversize.push_back(entity.Id);
@@ -1855,11 +1874,12 @@ namespace engine::replication {
 					Candidate{
 						entry,
 						static_cast<uint32_t>(at),
-						static_cast<uint32_t>(values.Bytes().size() - at),
+						static_cast<uint32_t>(wrote),
 						entity,
 						pending.WaitingSince,
 						NOWHERE,
-						0.0f
+						0.0f,
+						deferred
 					}
 				);
 				component.Entities.push_back(entity);
@@ -2157,7 +2177,7 @@ namespace engine::replication {
 			Placement placed;
 			{
 				const Lane::Timed timed(lane, Lane::Phase::Pack);
-				placed = Pack(lane, client, delta, Settings_.MessagesPerTick);
+				placed = Pack(lane, client, store, delta, Settings_.MessagesPerTick);
 			}
 
 			if (placed.Values < lane.Candidates.size()) {
@@ -2168,7 +2188,7 @@ namespace engine::replication {
 				Prioritise(lane, handle, tick);
 
 				const Lane::Timed repacked(lane, Lane::Phase::Pack);
-				placed = Pack(lane, client, delta, Settings_.MessagesPerTick);
+				placed = Pack(lane, client, store, delta, Settings_.MessagesPerTick);
 			}
 
 			const Lane::Timed recorded(lane, Lane::Phase::Record);

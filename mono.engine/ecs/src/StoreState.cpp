@@ -17,6 +17,15 @@ namespace engine::ecs {
 			return std::find(state.Watched.begin(), state.Watched.end(), id) != state.Watched.end();
 		}
 
+		// Row removal cannot be represented by ChangedRows, so cache consumers
+		// also get an epoch for observed components entering or leaving a table.
+		void MarkMembershipChanged(StoreState &state, ComponentId id) {
+			if (id.Index < state.ComponentMembershipChanges.size() &&
+				state.ComponentMembershipChanges[id.Index] != 0) {
+				state.ComponentMembershipChanges[id.Index]++;
+			}
+		}
+
 		// The set a table actually holds, which gains a DirtyBits column when
 		// any member of it is observed.
 		//
@@ -82,7 +91,11 @@ namespace engine::ecs {
 			state.ComponentChanges.resize(static_cast<size_t>(id.Index) + 1, 0);
 			state.ChangedEntities.resize(static_cast<size_t>(id.Index) + 1);
 		}
+		if (state.ComponentMembershipChanges.size() <= id.Index) {
+			state.ComponentMembershipChanges.resize(static_cast<size_t>(id.Index) + 1, 0);
+		}
 		state.ComponentChanges[id.Index] = 1;
+		state.ComponentMembershipChanges[id.Index] = 1;
 
 		// The edges are now wrong rather than merely cold: a table holding this
 		// component needs a `DirtyBits` column from here on, so a transition
@@ -116,6 +129,17 @@ namespace engine::ecs {
 
 		Archetype &destination = state.Tables[toTable];
 		const Entity entity = EntityId::Pack(index, state.Directory.Generation(index));
+		const ComponentSet &fromSet = from.Archetype == EntityLocation::NO_ARCHETYPE
+										  ? ComponentSet::Empty()
+										  : state.Tables[from.Archetype].Set();
+		const ComponentSet &toSet = destination.Set();
+		// DirtyBits can change with tracking setup, but observed user membership
+		// only changes when one of these watched IDs differs between the sets.
+		for (const ComponentId id : state.Watched) {
+			if (fromSet.Contains(id) != toSet.Contains(id)) {
+				MarkMembershipChanged(state, id);
+			}
+		}
 
 		uint32_t row = 0;
 		if (from.Archetype == EntityLocation::NO_ARCHETYPE) {
@@ -141,6 +165,11 @@ namespace engine::ecs {
 		}
 
 		Archetype &table = state.Tables[from.Archetype];
+		for (const ComponentId id : state.Watched) {
+			if (table.Set().Contains(id)) {
+				MarkMembershipChanged(state, id);
+			}
+		}
 		const Entity moved = table.RemoveSwapBack(from.Row);
 		if (moved != NULL_ENTITY) {
 			state.Directory.Relocate(EntityId::Of(moved).Index, EntityLocation{from.Archetype, from.Row});
@@ -431,6 +460,7 @@ namespace engine::ecs {
 		state.Plans.clear();
 		state.Commands.clear();
 		state.Watched.clear();
+		state.ComponentMembershipChanges.clear();
 		state.DeferDepth = 0;
 
 		const WorldTime clock{};

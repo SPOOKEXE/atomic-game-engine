@@ -192,6 +192,39 @@ TEST_CASE("the mirror fills a client-runnable script and nothing else", "[script
 	CHECK(store.Get<engine::script::Program>(server) == nullptr);
 }
 
+TEST_CASE("the mirror follows a selected JavaScript source without a cache edit", "[script][sourcecache]") {
+	Store store = MakeWorld();
+
+	SourceCache cache;
+	cache.Set(Name("Local.luau"), "-- Luau source");
+	cache.Set(Name("Local.ts"), "// JavaScript source");
+	store.SetResource(cache);
+
+	const engine::ecs::Entity local = engine::script::MakeScript(store, "Local.luau", "Local", true);
+	engine::script::SourceMirror mirror;
+	engine::script::MirrorSourcePrograms(store, mirror);
+
+	const engine::script::Program *initial = store.Get<engine::script::Program>(local);
+	REQUIRE(initial != nullptr);
+	CHECK(initial->Path == Name("Local.luau"));
+	CHECK(initial->Text == "-- Luau source");
+
+	const engine::script::SourceCache *heldCache = store.Resource<engine::script::SourceCache>();
+	REQUIRE(heldCache != nullptr);
+	const uint64_t generation = heldCache->Generation;
+	engine::script::SetSourcePath(store, local, Name("Local.ts"));
+	const engine::script::SourceCache *unchangedCache = store.Resource<engine::script::SourceCache>();
+	REQUIRE(unchangedCache != nullptr);
+	CHECK(unchangedCache->Generation == generation);
+
+	engine::script::MirrorSourcePrograms(store, mirror);
+
+	const engine::script::Program *selected = store.Get<engine::script::Program>(local);
+	REQUIRE(selected != nullptr);
+	CHECK(selected->Path == Name("Local.ts"));
+	CHECK(selected->Text == "// JavaScript source");
+}
+
 TEST_CASE("a tick that edited nothing writes no row", "[script][sourcecache]") {
 	Store store = MakeWorld();
 

@@ -279,8 +279,13 @@ namespace engine::script {
 		// The Luau container is in every script class's component set, whichever
 		// language the instance is set to run - `ScriptsIn` walks the same way
 		// and for the same reason.
-		store.Each<const LuaSourceContainer>([&](ecs::Entity instance, const LuaSourceContainer &) {
-			const core::Name path = ActiveSourceOf(store, instance);
+		store.Each<const LuaSourceContainer>([&](ecs::Entity instance, const LuaSourceContainer &lua) {
+			// The query already has the Luau path; only JavaScript needs another component lookup.
+			core::Name path = lua.Path;
+			if (ActiveLanguageOf(store, instance) == Language::JavaScript) {
+				const JavaScriptSourceContainer *javascript = store.Get<JavaScriptSourceContainer>(instance);
+				path = javascript != nullptr ? javascript->Path : core::Name{};
+			}
 			if (!path.IsValid()) {
 				return;
 			}

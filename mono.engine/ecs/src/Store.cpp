@@ -1106,6 +1106,13 @@ namespace engine::ecs {
 		return State->ComponentChanges[id.Index];
 	}
 
+	uint64_t Store::ComponentMembershipVersionRaw(ComponentId id) const {
+		if (!id.IsValid() || id.Index >= State->ComponentMembershipChanges.size()) {
+			return 0;
+		}
+		return State->ComponentMembershipChanges[id.Index];
+	}
+
 	bool Store::ChangedRaw(Entity entity, ComponentId id) const {
 		const EntityId key = EntityId::Of(entity);
 		if (!State->Directory.Alive(key.Index, key.Generation) || !id.IsValid()) {

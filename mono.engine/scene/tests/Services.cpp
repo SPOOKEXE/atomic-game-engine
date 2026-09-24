@@ -17,6 +17,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <vector>
+
 TEST_SUITE_ID("engine.scene.services")
 
 using engine::core::Name;
@@ -490,6 +494,8 @@ TEST_CASE("only ReplicatedFirst is replicated first", "[scene][services]") {
 	const Entity first = store.FindFirstRoot("ReplicatedFirst");
 	const Entity shared = store.FindFirstRoot("ReplicatedStorage");
 	REQUIRE(first != NULL_ENTITY);
+	const engine::ecs::ClassId replicatedFirst = Classes::Find(Name("ReplicatedFirst"));
+	REQUIRE(replicatedFirst.IsValid());
 
 	const auto plain = Classes::Find(Name("Instance"));
 	const Entity screen = store.CreateInstance(plain, "LoadingScreen");
@@ -498,17 +504,67 @@ TEST_CASE("only ReplicatedFirst is replicated first", "[scene][services]") {
 	const Entity deep = store.CreateInstance(plain, "Logo");
 	store.SetParent(deep, screen);
 
+	const Entity workspace = WorkspaceOf(store);
+	const std::array<Entity, 5> candidates{first, shared, workspace, screen, deep};
+	// Resolve per candidate to preserve the pre-hoist result as the oracle.
+	const auto legacyContains = [&](Entity entity) {
+		const engine::ecs::ClassId klass = Classes::Find(Name("ReplicatedFirst"));
+		if (!klass.IsValid()) {
+			return false;
+		}
+		for (Entity at = entity; at != engine::ecs::NULL_ENTITY; at = store.ParentOf(at)) {
+			if (store.IsA(at, klass)) {
+				return true;
+			}
+		}
+		return false;
+	};
+	const auto ordered = [&](bool useCachedClass) {
+		std::vector<Entity> result(candidates.begin(), candidates.end());
+		const auto contains = [&](Entity entity) {
+			return useCachedClass ? engine::scene::InReplicatedFirst(store, entity, replicatedFirst)
+								  : legacyContains(entity);
+		};
+		std::sort(result.begin(), result.end(), [&](Entity left, Entity right) {
+			const bool leftFirst = contains(left);
+			const bool rightFirst = contains(right);
+			if (leftFirst != rightFirst) {
+				return leftFirst;
+			}
+			return left.Id < right.Id;
+		});
+		return result;
+	};
+	const auto checkOrderParity = [&] {
+		for (const Entity entity : candidates) {
+			CHECK(legacyContains(entity) == engine::scene::InReplicatedFirst(store, entity, replicatedFirst));
+		}
+		const std::vector<Entity> legacyOrder = ordered(false);
+		CHECK(legacyOrder == ordered(true));
+		CHECK(legacyOrder[0] == first);
+		if (legacyContains(screen)) {
+			CHECK(legacyOrder[1] == screen);
+			CHECK(legacyOrder[2] == deep);
+		}
+	};
+
+	checkOrderParity();
 	CHECK(engine::scene::InReplicatedFirst(store, first));
 	CHECK(engine::scene::InReplicatedFirst(store, screen));
 	CHECK(engine::scene::InReplicatedFirst(store, deep));
-
 	CHECK(!engine::scene::InReplicatedFirst(store, shared));
-	CHECK(!engine::scene::InReplicatedFirst(store, WorkspaceOf(store)));
+	CHECK(!engine::scene::InReplicatedFirst(store, workspace));
 
-	// Moved out, it stops being first - with nothing else edited.
+	// Reparenting changes the answer immediately and the next ordering follows it.
 	store.SetParent(screen, shared);
+	checkOrderParity();
 	CHECK(!engine::scene::InReplicatedFirst(store, screen));
 	CHECK(!engine::scene::InReplicatedFirst(store, deep));
+
+	store.SetParent(screen, first);
+	checkOrderParity();
+	CHECK(engine::scene::InReplicatedFirst(store, screen));
+	CHECK(engine::scene::InReplicatedFirst(store, deep));
 }
 
 TEST_CASE("every player container is that player's alone", "[scene][services]") {

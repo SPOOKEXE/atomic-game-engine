@@ -4,6 +4,7 @@
 #include <engine/game/PortalSession.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
@@ -154,6 +155,21 @@ namespace loadtest {
 		Link->Poll(Store_, nowSeconds);
 		ApplyMicroseconds += static_cast<double>(engine::core::Clock::Nanoseconds() - before) / 1000.0;
 		Polls++;
+		if (Mine != engine::ecs::NULL_ENTITY) {
+			const engine::ecs::Entity model = engine::scene::CharacterOf(Store_, Mine);
+			const engine::scene::Character *character =
+				model == engine::ecs::NULL_ENTITY ? nullptr : Store_.Get<engine::scene::Character>(model);
+			const engine::scene::Transform *transform =
+				character == nullptr ? nullptr : Store_.Get<engine::scene::Transform>(character->Root);
+			if (transform != nullptr) {
+				const engine::core::Vector3 position = transform->Frame.Position;
+				if (HasLastCharacterPosition) {
+					CharacterMovement += (position - LastCharacterPosition).Magnitude();
+				}
+				LastCharacterPosition = position;
+				HasLastCharacterPosition = true;
+			}
+		}
 		if (!FreshAdmissionSent && Link->Admitted()) {
 			engine::game::PortalSessionMessage fresh;
 			fresh.Kind = engine::game::PortalSessionKind::Fresh;
@@ -229,6 +245,8 @@ namespace loadtest {
 	SessionReport Session::Report() {
 		SessionReport report;
 		report.Final = Stage_;
+		report.PlayerId = Mine.Id;
+		report.CharacterMovement = CharacterMovement;
 		report.InputsSent = InputsSent;
 		report.InputsRefused = InputsRefused;
 		report.ApplyMicroseconds = ApplyMicroseconds;

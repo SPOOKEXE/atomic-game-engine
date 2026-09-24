@@ -107,6 +107,23 @@ TEST_CASE("the smallest replica is a real reading and not a zero", "[loadtest]")
 	REQUIRE(summary.LargestReplica == 512);
 }
 
+TEST_CASE("player handles and replicated character movement stay visible", "[loadtest]") {
+	std::vector<SessionReport> reports(3);
+	reports[0].Final = Stage::Playing;
+	reports[0].PlayerId = 101;
+	reports[0].CharacterMovement = 2.5;
+	reports[1].Final = Stage::Playing;
+	reports[1].PlayerId = 102;
+	reports[1].CharacterMovement = 0.75;
+	reports[2].Final = Stage::Playing;
+	reports[2].PlayerId = 102;
+
+	const loadtest::Summary summary = Summarise(reports, 1.0);
+	REQUIRE(summary.UniquePlayerIds == 2);
+	REQUIRE(summary.MovingCharacters == 2);
+	REQUIRE(summary.CharacterMovement == 3.25);
+}
+
 TEST_CASE("the apply cost is a mean over polls and not over sessions", "[loadtest]") {
 	// A session that joined late polled fewer times, so dividing by the session
 	// count reports a per-poll cost that is really a per-session one - and the

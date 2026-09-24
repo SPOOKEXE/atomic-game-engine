@@ -149,6 +149,13 @@ namespace loadtest {
 		// Entities in the replica when the run ended. A world this client can
 		// see none of is a run that proved nothing.
 		uint64_t Entities = 0;
+
+		// The authoritative player handle and observed movement of its character.
+		// Handles are compared only within this world's client cohort.
+		//@{
+		uint64_t PlayerId = 0;
+		double CharacterMovement = 0.0;
+		//@}
 	};
 
 	// How a virtual client is set up.
@@ -248,6 +255,9 @@ namespace loadtest {
 
 		uint64_t InputsSent = 0;
 		uint64_t InputsRefused = 0;
+		bool HasLastCharacterPosition = false;
+		engine::core::Vector3 LastCharacterPosition;
+		double CharacterMovement = 0.0;
 		double ApplyMicroseconds = 0.0;
 		uint64_t Polls = 0;
 	};

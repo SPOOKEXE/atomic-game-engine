@@ -1067,21 +1067,25 @@ namespace engine::scene {
 	}
 
 	bool InReplicatedFirst(const Store &store, Entity instance) {
-		const ecs::ClassId klass = Classes::Find(core::Name("ReplicatedFirst"));
-		if (!klass.IsValid()) {
+		return InReplicatedFirst(store, instance, Classes::Find(core::Name("ReplicatedFirst")));
+	}
+
+	bool InReplicatedFirst(const Store &store, Entity instance, ecs::ClassId replicatedFirst) {
+		if (!replicatedFirst.IsValid()) {
 			return false;
 		}
 
 		// **Up the chain rather than down from the service**, which is
 		// `ScopeOfInstance`'s walk and its argument: containment is the fact,
 		// and a flag copied onto every descendant would be the one that went
-		// stale on a reparent. A world's tree is shallow, and this is asked once
-		// per entity per publish beside a walk that already happens.
+		// stale on a reparent. A caller asking about many entities can resolve
+		// the class once and use this overload; the answer still comes from the
+		// current tree.
 		//
 		// Bounded by the walk itself: `SetParent` refuses a cycle, so every
 		// chain ends.
 		for (Entity at = instance; at != NULL_ENTITY; at = store.ParentOf(at)) {
-			if (store.IsA(at, klass)) {
+			if (store.IsA(at, replicatedFirst)) {
 				return true;
 			}
 		}

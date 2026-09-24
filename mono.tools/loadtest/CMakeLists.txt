@@ -33,8 +33,8 @@ mono_add_library(loadtest
 		Engine::game
 )
 
-add_executable(loadtest app/main.cpp)
-target_link_libraries(loadtest PRIVATE Tool::loadtest Engine::core)
+add_executable(loadtest app/main.cpp app/CdnTraffic.cpp)
+target_link_libraries(loadtest PRIVATE Tool::loadtest Engine::core Engine::assets Engine::delivery)
 target_compile_options(loadtest PRIVATE ${MONO_COMPILE_OPTIONS})
 
 # Tools stage together, apart from the products.

@@ -3,14 +3,19 @@
 // `just stress` starts a server and points this at it. Everything worth reading
 // is in `loadtest/Harness.hpp`.
 
+#include "CdnTraffic.hpp"
+
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 
+#include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <loadtest/Harness.hpp>
 #include <loadtest/Options.hpp>
+#include <optional>
 
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("loadtest");
@@ -36,6 +41,14 @@ int main(int argc, char **argv) {
 	arguments.Value("random-heading-every-ticks", "N", "Submitted inputs per random heading (default 30)");
 	arguments.Value("stall-seconds", "N", "How long a session may make no progress (default 20)");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
+	arguments.Flag("cdn-only", "Run the signed, hash-checked HTTP content cohort instead of UDP clients");
+	arguments.Value("cdn-store", "DIR", "Trusted local content store to compare with the CDN response");
+	arguments.Value("cdn-publisher-key", "HEX", "Publisher public key for the signed manifest");
+	arguments.Value("cdn-grant-key", "HEX", "Shared grant key for bundle requests");
+	arguments.Value("cdn-address", "HOST", "CDN origin address (default 127.0.0.1)");
+	arguments.Value("cdn-port", "PORT", "CDN origin HTTP port");
+	arguments.Value("cdn-requests", "N", "CDN bundle requests from 5 to 1000 (default 25)");
+	arguments.Value("cdn-concurrency", "N", "Maximum CDN requests in flight (default 8)");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -66,6 +79,47 @@ int main(int argc, char **argv) {
 	}
 	if (engine::core::Config::ListingWanted(arguments)) {
 		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
+		return 0;
+	}
+	if (arguments.Has("cdn-only")) {
+		const std::optional<std::string_view> store = arguments.Get("cdn-store");
+		const std::optional<std::string_view> publisherKey = arguments.Get("cdn-publisher-key");
+		const std::optional<std::string_view> grantKey = arguments.Get("cdn-grant-key");
+		const int64_t cdnPortValue = arguments.GetInteger("cdn-port", 0);
+		if (!store || !publisherKey || !grantKey || cdnPortValue < 1 || cdnPortValue > 65535) {
+			std::fprintf(
+				stderr,
+				"--cdn-only needs --cdn-store, --cdn-publisher-key, --cdn-grant-key and a valid --cdn-port.\n"
+			);
+			return 2;
+		}
+		const std::string_view address = arguments.Get("cdn-address").value_or("127.0.0.1");
+		const int64_t requestValue = arguments.GetInteger("cdn-requests", 25);
+		const int64_t concurrencyValue = arguments.GetInteger("cdn-concurrency", 8);
+		if (requestValue < 5 || requestValue > 1000 || concurrencyValue < 1 || concurrencyValue > 16) {
+			std::fprintf(
+				stderr, "--cdn-requests must be from 5 to 1000 and --cdn-concurrency from 1 to 16.\n"
+			);
+			return 2;
+		}
+		const uint16_t cdnPort = static_cast<uint16_t>(cdnPortValue);
+		const uint32_t requests = static_cast<uint32_t>(requestValue);
+		const uint32_t concurrency = static_cast<uint32_t>(concurrencyValue);
+		engine::core::Flags::Freeze();
+		std::string error;
+		if (!loadtest::RunCdnTraffic(
+				std::filesystem::path(*store),
+				*publisherKey,
+				*grantKey,
+				address,
+				cdnPort,
+				requests,
+				concurrency,
+				error
+			)) {
+			std::fprintf(stderr, "FAIL: CDN fetch cohort: %s\n", error.c_str());
+			return 1;
+		}
 		return 0;
 	}
 

@@ -1016,7 +1016,6 @@ namespace engine::physics {
 				PipelineInternals::SolverTopologyScratch(*world);
 
 			bool reused = !solverTopologyChanged && PipelineInternals::SolverColorTopologyKnown(*world) &&
-						  topology == topologyScratch &&
 						  (PipelineInternals::SolverColorTopologyAccepted(*world)
 							   ? colourOfManifold.size() == manifolds.size()
 							   : colourOfManifold.empty());

@@ -96,6 +96,14 @@ namespace loadtest {
 		uint64_t LargestReplica = 0;
 		//@}
 
+		// Distinct authoritative player handles and clients whose replicated
+		// character transform changed during the run.
+		//@{
+		size_t UniquePlayerIds = 0;
+		size_t MovingCharacters = 0;
+		double CharacterMovement = 0.0;
+		//@}
+
 		// Wall time the run took, and the bytes per second that follow from it.
 		//@{
 		double Seconds = 0.0;

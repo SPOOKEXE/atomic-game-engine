@@ -5,7 +5,7 @@ This audit covers every `mono.engine` module, the CDN, and real connected player
 ## Method and limits
 
 - Host: AMD Ryzen 9 9900X, 12 cores and 24 hardware threads, 123 GiB RAM. Benchmark samples used the optimized `bench` preset.
-- The existing benchmark catalog has 63 suite files and 628 declared benchmark rows across the engine and CDN. An isolated, optimized `benchrunner --all --samples 2` completed 69 discovered suites and 763 measured rows across the repository. The new input suite was built and run separately because it was absent from the clean base commit. Twenty-two of the 31 engine modules have a benchmark suite after that addition. The missing nine are `bakegraph`, `control`, `datastore`, `examples`, `msl`, `resources`, `script`, `scriptjs`, and `ui`.
+- At the initial audit, the benchmark catalog had 63 suite files and 628 declared benchmark rows across the engine and CDN. An isolated, optimized `benchrunner --all --samples 2` completed 69 discovered suites and 763 measured rows across the repository. The new input suite was built and run separately because it was absent from the clean base commit. Twenty-two of the 31 engine modules had a benchmark suite after that addition. The missing nine at that point were `bakegraph`, `control`, `datastore`, `examples`, `msl`, `resources`, `script`, `scriptjs`, and `ui`; see the 2026-09-24 coverage update below for the current inventory.
 - Focused world, physics, and parallel runs completed with three samples. Asset and CDN suites completed with three samples while unrelated Ninja builds were active. Their figures indicate workload scale and cannot be used as comparison baselines.
 - The main working tree had independent, uncommitted changes during this audit. Its release server build failed in `mono.engine/replication/include/engine/replication/Replica.hpp` before the 200-client test could start. The isolated load run below used commit `767dc4cde0562520ae2b01d6a968b5bf951c55e6` plus only the new loadtest harness patch. No independent changes were reverted or committed here.
 - The full benchmark catalog completed, including render and Studio suite binaries, but no live graphical scene or GPU output was visually checked. A benchmark missing from a module is an explicit coverage gap.
@@ -104,11 +104,13 @@ The module policy says the worker pool is never destroyed (`mono.engine/parallel
 
 ### `assets`
 
-1. Add a no-op or copy fast path for same-size `ResizeImage` after pixel parity checks; `mono.engine/assets/src/Resample.cpp:39` currently resamples every pixel, and the exploratory 2048-square case took 43.41 ms.
-2. Avoid the full base texture copy when building mip chains; `Resample.cpp:134` copies the initial `TextureData`.
-3. Batch manifest construction rather than repeated sorted inserts and root-index shifts; `mono.engine/assets/src/Manifest.cpp:139` and `:288`.
-4. Stream verified chunks into the final asset buffer instead of holding per-chunk and whole-asset copies at once; `mono.engine/assets/src/ChunkStore.cpp:152` and `:190`.
-5. Size an import buffer from the checked file length and bulk-read instead of per-byte stream iteration; `mono.engine/assets/src/LocalStore.cpp:146`.
+1. Precompute source row and column ranges for each mip level, then compare them with the current integer-bound calculations. Keep exact pixel bytes for odd dimensions.
+2. Batch manifest asset construction rather than repeated sorted inserts and root-index shifts; `mono.engine/assets/src/Manifest.cpp:139` and `:288`.
+3. Stream verified chunks into the final asset buffer instead of holding per-chunk and whole-asset copies at once; `mono.engine/assets/src/ChunkStore.cpp:152` and `:190`.
+4. Size an import buffer from the checked file length and bulk-read instead of per-byte stream iteration; `mono.engine/assets/src/LocalStore.cpp:146`.
+5. Write the manifest signature and encoded body without first copying the body into a second full-file vector; `mono.engine/assets/src/ChunkStore.cpp:234`.
+
+The same-size `ResizeImage` path is already implemented and measured. The optimized preset row moved from 30.64 ms to 0.39 ms on an isolated revision, with pixel parity covered by the Resample suite. A separate `BuildMipChain` copy candidate targeted each generated mip buffer: it copies the previous level's `Pixels` into `image.Mips`, not the full base `TextureData`. An 11-sample direct A/B under concurrent host builds was noisy and did not support keeping the change. Old versus new minima and ranges were 1.204/0.199 ms versus 1.285/0.459 ms at 512, 3.894/2.218 ms versus 5.608/1.705 ms at 1024, and 24.058/3.689 ms versus 20.512/4.982 ms at 2048. No mip-chain speedup is claimed, and the copy change was discarded.
 
 ### `physics`
 
@@ -289,7 +291,7 @@ All 31 `mono.engine` modules were scanned again for a small, local improvement. 
 
 | Change | Optimized preset observation | Verification |
 |---|---|---|
-| Assets, 2048 by 2048 same-size resize | 30.64 ms baseline, 0.39 ms after, on an isolated revision | Resample suite: 67 assertions in 11 cases. |
+| Assets, same-size resize at 2048 by 2048 | 30.64 ms baseline, 0.39 ms after, on an isolated revision | Resample suite: 67 assertions in 11 cases. |
 | Audio, one voice output mix | 2,225 ns baseline, 1,973 ns after | Mixer suite: 2,276 assertions in 29 cases. The 16 to 512 voice rows showed little or inconsistent difference. |
 | Bakegraph, 4,096 pipeline lookup | 377 ns linear control, 268 ns binary control, 266 ns live lookup | Bakegraph suite: 8,403 assertions in 27 cases. Linear lookup was faster through 2,048 entries. |
 | Core frame snapshot | One sort per sample distribution instead of repeated copies and sorts | FrameGraph suite: 294 assertions in 61 cases. No direct speed measurement yet. |
@@ -442,3 +444,218 @@ result remains the existing zero-directional-light fog branch, from 38.414 ms to
 4.785 ms on its controlled capture. The new release repeat supports retaining that
 result while keeping shadowed direct-light sampling and visible-image parity as the
 next optimization gate.
+
+### Broadphase pair-sort candidate, 2026-09-24
+
+The optimized `bench` preset measured `Pairs only · 4000 colliders, 4m cells` at
+281.54 us ±9% for the existing 11-bit radix digit. A bounded 16-bit digit
+experiment reduces each 64-bit key from six passes to four. In alternating
+11-sample runs on the same row, with concurrent builds on the host, the 11-bit
+control measured 322.85 us ±29% and 327.75 us ±30%; the 16-bit candidate measured
+651.18 us ±5% and 444.45 us ±14%. The second candidate spread overlaps the
+controls, and neither round demonstrates a stable gain. The 16-bit change was
+rejected and the 11-bit implementation remains. These fixture timings do not
+claim a whole-engine gain.
+
+The retained implementation's 24 physics suites were green, including broadphase
+ordering (22 cases, 99 assertions) and contact event coverage (4 cases, 14
+assertions). The optimized server produced byte-identical recordings across two
+200-tick runs with 512 entities, and replay reproduced all 120 barriers in the
+256-entity fixture. The next ranked physics candidate is reducing repeated
+parallel dispatch for dense contacts below the measured 39.66 us empty-dispatch
+floor. Any such path must preserve pair, manifold, and event order and pass the
+same determinism and replay checks.
+
+### Missing engine stress suites, 2026-09-24
+
+The initial nine-module list is historical. At that inventory point, benchmark
+suites covered 30 of 31 `mono.engine` modules. The two new modules added during
+this goal bring the current total to 33, with suites in 32. `bakegraph` has
+`engine.bakegraph.bench.pipeline-set`; `control` has
+`engine.control.bench.mcp-control`. The following targeted suites close six
+runtime gaps. All six optimized binaries built and ran with three samples. The
+bench preset reconfigured after a glob mismatch and completed a 1,562-step
+incremental build at `-j2`. A Barotrauma process was active during the suite
+runs; the build also overlapped a portal product test and other host work.
+Retain these values as functional evidence only, not as performance baselines.
+The report's nanosecond and spread fields are normalized by each row's
+iteration count; spread is the slowest sample minus the fastest sample.
+
+| Module | Suite and workload | Coverage limit |
+|---|---|---|
+| `datastore` | `engine.datastore.bench.sqlite-snapshot`: replace and load a 1,024-entry SQLite snapshot with 256-byte values. | Measures local durable storage; does not model HTTP latency or remote provider contention. The temporary database is under `.cache/build/bench/benchmark-data/` and is removed at exit. |
+| `examples` | `engine.examples.bench.motion`: full scheduler ticks over 128, 1,024, and 4,096 `Part` entities with the example orbit and spin systems installed. | Measures the C++ motion systems; does not time loading a staged authored scene or its VM startup. |
+| `msl` | `engine.msl.bench.translate`: repeated SPIR-V to MSL translation using the four-resource fragment fixture shared with the unit suite. | Measures CPU translation on this host; there is no Metal compiler or device here to execute the result. |
+| `script` | `engine.script.bench.source-mirror`: unchanged `MirrorSourcePrograms` passes over 64, 512, and 2,048 cached scripts. | Measures the neutral script source mirror; VM execution is covered separately. |
+| `scriptjs` | `engine.scriptjs.bench.property-access`: QuickJS bound `Position` read and write cycles at 64, 256, and 1,024 operations. | Includes the short `Run` wrapper evaluation around a function compiled during setup; does not measure source-map parsing or sustained promise-job drains. |
+| `ui` | `engine.ui.bench.headless-interface`: a 96-control ImGui frame through layout, draw-list generation, and geometry signature hashing. | Exercises the CPU frame path only; it omits backend upload, GPU draw, and presentation. |
+
+The values below are the report's normalized nanoseconds and spread, with the
+row unit and sample count shown. All rows used three samples.
+
+| Suite | Row | ns | spread ns | unit |
+|---|---|---:|---:|---|
+| datastore | SQLite atomic snapshot replace, 1,024 entries x 256 bytes | 591,731 | 11,863 | call |
+| datastore | SQLite snapshot load, 1,024 entries x 256 bytes | 207,650 | 11,682 | call |
+| examples | example motion tick, 128 orbiting and spinning Parts | 32 | 0 | item |
+| examples | example motion tick, 1,024 orbiting and spinning Parts | 29 | 0 | item |
+| examples | example motion tick, 4,096 orbiting and spinning Parts | 28 | 8 | item |
+| msl | SPIR-V translation of four-resource fragment | 1,849 | 31 | call |
+| script | unchanged source mirror tick, 64 cached scripts | 51 | 0 | item |
+| script | unchanged source mirror tick, 512 cached scripts | 50 | 2 | item |
+| script | unchanged source mirror tick, 2,048 cached scripts | 50 | 0 | item |
+| scriptjs | QuickJS bound `Position` read and write, 64 cycles | 625 | 40 | item |
+| scriptjs | QuickJS bound `Position` read and write, 256 cycles | 438 | 58 | item |
+| scriptjs | QuickJS bound `Position` read and write, 1,024 cycles | 401 | 17 | item |
+| ui | headless UI frame and geometry signature hash, 96 controls | 457 | 2 | item |
+
+The UI run reported that no preset fonts were staged under
+`.cache/build/bench/bench/fonts` and used ImGui's built-in font. All six suite
+processes exited successfully and emitted their expected rows.
+
+`resources` remains the only engine module without a benchmark suite. Its runtime
+work is path construction, while shader compilation and file access belong to
+consumers. Its module invariant describes no device work or I/O, and the audit
+found no frame-time evidence that would make a synthetic path benchmark useful.
+The image graph CPU workloads added during this pass are measured below.
+
+### Script source mirror path reuse, 2026-09-24
+
+The ordinary mirror walk already receives each `LuaSourceContainer` from its
+ECS query. It now reads that row's Luau path directly, while still consulting
+the language selector and fetching `JavaScriptSourceContainer` for scripts
+running JavaScript. This removes one redundant component lookup per Luau
+script. The sourcecache test verifies that switching from `.luau` to `.ts`
+updates the mirrored path and text while the source-cache generation stays
+unchanged.
+
+The optimized `bench` preset ran the existing source-mirror suite before and
+after the change with 11 samples each. The report values are the fastest
+normalized nanoseconds per item, and spread is slowest minus fastest:
+
+| Cached scripts | Before ns/item (spread) | After ns/item (spread) |
+|---:|---:|---:|
+| 64 | 50 (0) | 36 (0) |
+| 512 | 49 (0) | 34 (0) |
+| 2,048 | 49 (1) | 34 (0) |
+
+The paired run overlapped unrelated compiles, and Barotrauma was active during
+the candidate run. Timing evidence is inconclusive and does not support a
+performance claim. The focused sourcecache suite passed 50 assertions in 13
+cases.
+
+### New image graph module opportunities, 2026-09-24
+
+`imagegraph` and `imagegraphio` were added after the earlier 31-module
+inventory. Neither has a benchmark suite yet. The following source-based
+opportunities are hypotheses to test, not claims of a measured bottleneck.
+
+#### `imagegraph`
+
+1. Measure validating and compiling the supplied plan on every evaluation; `mono.engine/imagegraph/src/Document.cpp:2684-87` and `:3875-82` rebuild and compare it. Any reuse must still reject a plan for a changed document.
+2. Retain exact node indices and upstream adjacency in the compiled plan instead of rebuilding them for every output evaluation; `Document.cpp:2701-19` and `:3892-3909` build the node map and adjacency before walking reachability. Preserve output-specific reachable nodes.
+3. Index effective links and resolved defaults by destination node and port; `Document.cpp:2740-44`, `:2780-84`, and `:2817-29` linearly scan the full lists while resolving each input. Keep missing-port and duplicate-input diagnostics unchanged.
+4. Avoid deep-copying the entire document for each animated evaluation by applying evaluated keyframes through an exact overlay or touched-node copy; `Document.cpp:3911-23` builds tracks and then copies the document. Preserve source immutability and keyframe order.
+5. Split Gaussian blur interior pixels from border pixels to avoid per-sample bounds checks for in-range taps; `mono.engine/imagegraph/src/PixelOpsBlur.hpp:55-80` checks each offset for every pixel. Preserve edge normalization, alpha handling, and gamma output byte-for-byte.
+
+#### `imagegraphio`
+
+1. Index links by source and destination before testing representability; `mono.engine/imagegraphio/src/PxcxImport.cpp:371-75` scans every link for each node at `:415`. Keep unsupported sockets opaque with the same diagnostics.
+2. Index project-output links by destination instead of scanning all links for each output node; `PxcxImport.cpp:458-65` nests the output-node walk over the complete link list. Preserve the first matching input-zero link.
+3. Defer building the opaque node type until a native mapping fails; `PxcxImport.cpp:413-29` first creates an opaque type, then successful node mappings replace it. Keep opaque source nodes byte-preserving.
+4. Bind each node's input array and current-value records once during mapping; `PxcxImport.cpp:47-63` repeats `inputs`, `r`, and `d` lookups through helpers called for each authored control. Retain rejection of animation and linked controls.
+5. Reserve the gradient key vector from the already checked JSON key count before appending; `PxcxImport.cpp:265-81` knows the count but grows `gradient.Keys` incrementally. Preserve increasing-time validation and exact order.
+6. Measure repeated reference-preview requests before caching the thumbnail hash; `PxcxImport.cpp:14-21` recalculates FNV over all 256 by 256 RGBA bytes per call. Keep the preview span tied to `Source` and verify the cached hash against the source bytes.
+
+### SQLite blob binding experiment, 2026-09-24
+
+The save path binds the encoded image with `SQLITE_STATIC`. SQLite requires
+that this buffer stay alive until the statement is finalized ([binding
+contract](https://www.sqlite.org/c3ref/bind_blob.html)). `image` is declared
+before the database and statement objects, so reverse destruction order
+finalizes the statement before destroying the byte vector on success and error
+returns. This meets SQLite's documented binding lifetime. The focused success
+and atomic-replacement cases passed 11 assertions in 2 cases before the
+failure-path test was added. The trigger-based rollback case checks that a
+failed step preserves the prior snapshot. The focused SQLite suite now passes
+18 assertions in 3 cases, including the failed replacement path.
+
+The optimized `bench` preset ran two interleaved 11-sample rounds with the
+existing `engine.datastore.bench.sqlite-snapshot` suite. Each pair used the
+same 1,024-entry by 256-byte workload:
+
+| Round | Bind lifetime | Save us (spread) | Load us (spread) |
+|---|---|---:|---:|
+| 1 | `SQLITE_TRANSIENT` | 552.78 (17%) | 198.09 (7%) |
+| 1 | `SQLITE_STATIC` | 513.17 (36%) | 197.49 (9%) |
+| 2 | `SQLITE_TRANSIENT` | 588.63 (7%) | 207.87 (11%) |
+| 2 | `SQLITE_STATIC` | 610.29 (25%) | 213.26 (34%) |
+
+The pre-run process check found no build, benchmark runner, or Barotrauma
+process. The save candidate was faster in the first pair and slower in the
+second, with broad sample spreads. These measurements do not support a speed
+claim. The lifetime and rollback gates pass, but no optimization gain is
+claimed.
+
+### Image graph CPU benchmark fixtures, 2026-09-24
+
+The image graph modules now have bounded CPU suites. Their preflight checks run
+before measured iterations and compare repeated results. Both builds and Just
+jobs passed. GDA was compiling on the host during the runs, so these numbers are
+functional workload evidence, not quiet baselines.
+
+| Module | Workload | Min ns/call | Spread ns | Samples | Coverage limit |
+|---|---|---:|---:|---:|---|
+| `imagegraph` | Evaluate a 256 by 256, three-octave simplex output | 59,788,331 | 449,814 | 5 | One synthetic noise node with a precompiled plan; does not cover Studio editing, PXCX import, or multi-node image pipelines. |
+| `imagegraphio` | Project a synthetic chain of 256 opaque nodes, one mapped solid node, and 257 links while retaining parsed source bytes | 1,141,856 | 14,547 | 5 | Measures in-memory projection from a parsed archive; excludes file access, archive decoding, real Pixel Composer projects, and native pixel evaluation. |
+
+The imagegraph unity build passed with a GCC `-Wmaybe-uninitialized` warning
+in `Document.cpp:2482-2505` while checking optional source and target port
+types. An explicit `if (!source || !target) return` precedes the reported
+dereferences. This appears to be an optional-flow false-positive candidate;
+the source was left unchanged during the benchmark work.
+
+### Replication optimization parity gates, 2026-09-24
+
+Two narrow replication changes now have focused parity gates. These tests show
+that the changes preserve the exercised output; matched release measurements
+are pending because host contention prevents a reliable A/B run.
+
+The fixed-width recovery deferral gate, `test_replication
+'[replication][priority][recovery]'`, passed 62 assertions in one focused case.
+Under a constrained byte allowance it compares the exact outgoing packet bytes
+and priority/budget order across two `Pack` passes. It also covers a refused
+`Unsent` row and retry after the source changes. The fixture records six writer
+calls for four transmitted rows across the two passes, matching the existing
+flush decision. This is a parity and work-count bound, not a measured runtime
+gain.
+
+The class-id lookup gate passed `test_scene '[scene][services]'` with 236
+assertions in 15 cases and `test_server '[server][replication]'` with 201
+assertions in 14 cases. The scene fixture compares the helper's ordered
+replicated result with the prior per-candidate lookup path before and after
+subtree reparenting. The server hook resolves and captures the class id when
+priority is configured, avoiding a registry lookup for each candidate. If
+configuration has no valid id, it retains the prior lookup path. This gate
+does not establish a connected-player performance gain.
+
+No matched 200-client release rerun has been completed after these changes.
+The connected run earlier in this audit is a baseline only and must not be
+attributed to either change.
+
+### Next independent engine-system candidate
+
+The colored-dispatch probe did not establish a one-task trigger. The
+`ConnectedLattice(64)` fixture selected the color schedule but had no wave with
+at most 64 groups, so the proposed minimum-task change was not made.
+
+The next measurement should use the existing 4,000-body pile in
+`mono.engine/physics/benchmarks/Stepping.cpp`. It places 1m boxes in a 3m span
+with a 4m grid cell and measured 39.19 ms per tick, but the audit has no
+candidate-pair count or per-stage breakdown for this fixture. Compare 4m, 2m,
+and 1m cells while recording pair counts and `SyncBroadphase`, `BroadPhase`,
+`NarrowPhase`, `Solve`, and whole-tick costs. Before considering a cell-size
+change, require identical ordered pairs and manifolds, contact events, and
+final body state across the settings, and retain the stacked and scattered
+rows as controls. This is a proposed measurement only; production behavior and
+the prior broadphase default remain unchanged.

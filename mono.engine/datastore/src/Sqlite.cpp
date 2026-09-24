@@ -215,8 +215,9 @@ namespace engine::datastore {
 					static_cast<int>(store.Text().size()),
 					SQLITE_TRANSIENT
 				);
+				// The encoded image outlives Statement, so SQLite can borrow it through finalization.
 				const int imageBound = sqlite3_bind_blob(
-					statement.Handle, 2, image.data(), static_cast<int>(image.size()), SQLITE_TRANSIENT
+					statement.Handle, 2, image.data(), static_cast<int>(image.size()), SQLITE_STATIC
 				);
 				if (nameBound != SQLITE_OK || imageBound != SQLITE_OK) {
 					return Fail(database.Handle, sqlite3_errcode(database.Handle), error);
