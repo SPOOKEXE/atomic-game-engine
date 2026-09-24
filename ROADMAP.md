@@ -85,14 +85,20 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks. The large-count scene and release measurements cover local light selection, a 16-volume GPU fixture, 600-frame fog capture, and a controlled zero-light fog optimization.
 - [x] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene. Live sessions created and edited Model, Part, PointLight, and Sound, played and stopped, verified restoration, then used MCP clicks to open the world dropdown and select MeshGrid.
 
-- [_] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors. Culling and LOD use the locked view; inspect the remaining camera behavior against the full claim.
-- [_] Do cleanup in `docs/v025-RENDER-PIPELINE-CLEANUP.md`. Extracted owners and a portal render operations facade exist, and the full GPU gate passes. Remaining plan gates need review before calling the cleanup complete.
-- [_] Do cleanup in `docs/v025-MCP-CLEANUP.md`. Owner-tagged hooks, typed contexts, product manifests, and headless MCP input and entity tools exist. Release performance and capture drain verification in the cleanup plan remain open.
-- [_] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations. The audit now lists at least five candidates per engine module and records connected, lighting, bakegraph, and GPU fog measurements; measured implementation of the broader candidates remains open.
-- [_] implement seamless portals plan. Production body splitting, transfer fences, and dynamic island solving exist. The strict crossing capture loses body pixels after frame 0; fix that defect and complete the plan's frame-rate, network, resolution, profiling, and GPU acceptance matrix.
-- [_] create pixel composer for live changing images
+- [x] add a Studio virtual camera position lock with a visible frustum adornment. The inspection view stays free while culling, LOD, lighting, particles, and portal demand use the frozen position and live direction. Focused checks cover the implemented paths.
+- [_] audit the remaining camera-dependent behavior and pass a combined product capture gate for the virtual lock.
+- [x] extract render owners and the portal render operations facade from `docs/v025-RENDER-PIPELINE-CLEANUP.md`. The earlier full Vulkan render gate passed 150 cases. Focused lifetime, supersession, cancellation, and invalid-layer preflight checks also passed.
+- [_] finish the remaining render cleanup gates, including an actual failure after a portal import is staged and accepted changed-eye cancellation with a pending body job; rerun the full gate on the final tree.
+- [x] implement MCP cleanup stages 0 through 5 and the M6 PNG bundle tool, with owner-tagged hooks, typed contexts, product manifests, and headless control surfaces. Focused checks and a 128-cycle capture-hook soak passed.
+- [_] finish the MCP cleanup's quiet paired release timing, real renderer capture drain verification, and broad CI gate.
+- [x] audit stress and optimization candidates across the engine, listing at least five per module, and validate selected replication, physics, and MSL changes under parity. Large lighting, fog, and connected-client workloads have measured evidence.
+- [_] measure and implement the remaining stress candidates, including a matched 200-client Authority `RecoverRows` rerun with complete profiling evidence.
+- [x] implement the seamless portal plan's body splitting, transfer fences, dynamic island solving, and destination prediction seed. Focused portal adoption and client portal tests pass.
+- [_] fix the strict product crossing captures at 30 and 60 Hz, then pass the 30/60/144/240 frame-rate, network impairment, resolution, profiling, and GPU acceptance matrix in `docs/v025-SEAMLESS-PORTALS.md`.
+- [x] establish the Pixel Composer reference inventory from the supplied five PXC projects and captures, with 990 documented node rows. Five spatial warp nodes, a bounded audio capture parser, and `.aseq` sequence bake and GIF timing slices have focused passing tests.
+- [_] complete the native Pixel Composer graph, Studio workflow, documented node catalogue, animation, audio, simulation, 3D, PXC interchange, and engine output bindings through M0 to M7 in `docs/v026-pixel-composer.md`. Verify every documented row and product workflow. Exact executable parity remains unverified without a licensed reference build.
 
-The [v0.25 roadmap audit](docs/v025-roadmap-audit.md) records source evidence and remaining verification limits for all 49 items. The opt-in GPU suite passes all 132 cases. Selected release benchmarks and the live Studio workflow were verified; the strict portal crossing capture and broader performance matrix remain open.
+The [v0.25 roadmap audit](docs/v025-roadmap-audit.md) records source evidence and verification limits for the original 49 items. Its 132-case GPU result and selected release benchmarks are historical gates; the final render, portal, MCP, stress, and Pixel Composer gates above remain open.
 
 ### v0.26
 
