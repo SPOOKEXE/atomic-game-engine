@@ -414,6 +414,10 @@ namespace engine::render {
 		return State->GpuTimings;
 	}
 
+	uint64_t Renderer::PassTimingSequence() const {
+		return State->ResolvedTimingSequence;
+	}
+
 	const std::unordered_map<uint32_t, double> &Renderer::PassWallTimes() const {
 		return State->WallTimings;
 	}

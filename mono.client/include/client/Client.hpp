@@ -67,6 +67,7 @@
 #include <cstdint>
 #include <discord/Link.hpp>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <network/Presence.hpp>
 #include <optional>
@@ -744,6 +745,20 @@ namespace client {
 		// The completed product packets for every active world. Its views are
 		// copied on the presentation lanes and submitted together below.
 		ActiveSceneCollector ActiveScenes;
+
+		// Opens one ephemeral UDP socket for this client, wrapped in the seeded
+		// Settings.Impairment when one is active. `salt` gives each socket its
+		// own draws under one seed. Null when the socket cannot be opened.
+		std::unique_ptr<engine::net::Transport> OpenSocket(uint32_t salt);
+
+		// Due capture frames advanced so far, indexing CaptureFrameSchedule.
+		size_t CaptureScheduleIndex = 0;
+
+		// Settings.FrameTimings output and the state its rows are measured from.
+		std::ofstream FrameTimingFile;
+		std::optional<engine::render::PresentationSchedule::TimePoint> LastTimedFrame;
+		uint64_t LastGpuTimingSequence = 0;
+		void RecordFrameTiming(engine::render::PresentationSchedule::TimePoint stepStarted);
 
 		// The socket and the connection to a server. Both null unless
 		// `--connect` was given, which is what keeps a single-player run from

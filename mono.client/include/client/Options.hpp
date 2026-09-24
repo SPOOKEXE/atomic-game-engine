@@ -472,5 +472,37 @@ namespace client {
 		// Optional fixed interpolation phase for deterministic comparison captures.
 		// Only used with CaptureSequence; ordinary presentation keeps the world clock.
 		std::optional<float> CaptureAlpha;
+
+		// Simulation seconds each due frame advances in a capture sequence,
+		// cycled in order. Empty advances 1 / MaximumFrameRate per frame. A
+		// schedule with unequal and long entries replays the same variable
+		// frame timing and stalls on every run. Only used with CaptureSequence.
+		std::vector<float> CaptureFrameSchedule;
+
+		// One CSV row per drawn frame: interval since the previous frame, CPU
+		// time of this frame's step, and the summed GPU pass time of the newest
+		// frame whose timestamps resolved since the last row (blank when none
+		// did). Percentiles over a whole run come from this, not from the
+		// frame graph's five-second window. Empty writes nothing.
+		std::filesystem::path FrameTimings;
+
+		// Seeded impairment applied where this client's sockets receive, for
+		// acceptance runs. The whole round trip is applied on arrival, so
+		// RoundTripSeconds models that round trip for request and reply pairs.
+		// Every decision is drawn from the arrival number and Seed.
+		struct NetworkImpairment {
+			double RoundTripSeconds = 0.0;
+			double JitterSeconds = 0.0;
+			float LossChance = 0.0f;
+			float DuplicateChance = 0.0f;
+			float ReorderChance = 0.0f;
+			uint32_t Seed = 0;
+
+			bool Active() const {
+				return RoundTripSeconds > 0.0 || JitterSeconds > 0.0 || LossChance > 0.0f ||
+					   DuplicateChance > 0.0f || ReorderChance > 0.0f;
+			}
+		};
+		NetworkImpairment Impairment;
 	};
 }

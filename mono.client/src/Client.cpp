@@ -34,6 +34,7 @@
 #include <engine/gui/SettingsMenu.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/input/Translate.hpp>
+#include <engine/net/LossyTransport.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
@@ -1924,7 +1925,7 @@ namespace client {
 		// **Opened before the search, not after it.** The search punches on
 		// this socket, and a hole punched on any other one is a hole to a port
 		// the server will never send to.
-		Socket = engine::net::MakeUdpTransport(0);
+		Socket = OpenSocket(0);
 		if (Socket == nullptr) {
 			ENGINE_ERROR("could not open a socket to connect from");
 			return false;
@@ -3011,6 +3012,58 @@ namespace client {
 		}
 	}
 
+	std::unique_ptr<engine::net::Transport> Client::OpenSocket(uint32_t salt) {
+		auto socket = engine::net::MakeUdpTransport(0);
+		const Options::NetworkImpairment &impairment = Settings.Impairment;
+		if (socket == nullptr || !impairment.Active()) return socket;
+		engine::net::LossSettings loss;
+		loss.DelaySeconds = impairment.RoundTripSeconds;
+		loss.JitterSeconds = impairment.JitterSeconds;
+		loss.LossChance = impairment.LossChance;
+		loss.DuplicateChance = impairment.DuplicateChance;
+		loss.ReorderChance = impairment.ReorderChance;
+		loss.Seed = impairment.Seed ^ salt;
+		ENGINE_INFO(
+			"network impairment on socket {}: rtt {:.0f} ms, jitter {:.0f} ms, loss {:.1f}%, duplicate "
+			"{:.1f}%, "
+			"reorder {:.1f}%, seed {}",
+			salt,
+			impairment.RoundTripSeconds * 1000.0,
+			impairment.JitterSeconds * 1000.0,
+			impairment.LossChance * 100.0f,
+			impairment.DuplicateChance * 100.0f,
+			impairment.ReorderChance * 100.0f,
+			loss.Seed
+		);
+		return std::make_unique<engine::net::LossyTransport>(std::move(socket), loss);
+	}
+
+	void Client::RecordFrameTiming(engine::render::PresentationSchedule::TimePoint stepStarted) {
+		using Milliseconds = std::chrono::duration<double, std::milli>;
+		if (!FrameTimingFile.is_open()) {
+			FrameTimingFile.open(Settings.FrameTimings, std::ios::trunc);
+			if (!FrameTimingFile) {
+				ENGINE_ERROR("could not write frame timings to {}", Settings.FrameTimings.string());
+				Settings.FrameTimings.clear();
+				return;
+			}
+			FrameTimingFile << "frame,interval_ms,cpu_ms,gpu_ms\n";
+		}
+		const auto now = engine::render::PresentationSchedule::Clock::now();
+		FrameTimingFile << FramesDrawn << ',';
+		if (LastTimedFrame) FrameTimingFile << Milliseconds(now - *LastTimedFrame).count();
+		FrameTimingFile << ',' << Milliseconds(now - stepStarted).count() << ',';
+		if (const uint64_t sequence = Renderer.PassTimingSequence(); sequence > LastGpuTimingSequence) {
+			LastGpuTimingSequence = sequence;
+			double microseconds = 0.0;
+			for (const auto &[pass, time] : Renderer.PassTimings())
+				microseconds += time;
+			FrameTimingFile << microseconds / 1000.0;
+		}
+		FrameTimingFile << '\n';
+		LastTimedFrame = now;
+	}
+
 	void Client::WriteSnapshot() {
 		// Beside the binary rather than in the working directory, which is
 		// wherever the launcher happened to be.
@@ -3125,12 +3178,17 @@ namespace client {
 		// Reference sequences sample one declared simulation interval per due image.
 		// Wall-driven catch-up would give separately captured scenes different ticks
 		// whenever their render cost differs, even with a fixed presentation alpha.
-		const float delta =
-			Settings.CaptureSequence.empty()
-				? wallDelta
-				: (presentationDue
-					   ? 1.0f / float(Settings.MaximumFrameRate == 0 ? 60 : Settings.MaximumFrameRate)
-					   : 0.0f);
+		// A frame schedule replays the same variable intervals and stalls.
+		float delta = wallDelta;
+		if (!Settings.CaptureSequence.empty()) {
+			delta = 0.0f;
+			if (presentationDue && !Settings.CaptureFrameSchedule.empty()) {
+				const auto &schedule = Settings.CaptureFrameSchedule;
+				delta = schedule[CaptureScheduleIndex++ % schedule.size()];
+			} else if (presentationDue) {
+				delta = 1.0f / float(Settings.MaximumFrameRate == 0 ? 60 : Settings.MaximumFrameRate);
+			}
+		}
 
 		{
 			ENGINE_HEAP_SCOPE("client.events");
@@ -5083,6 +5141,7 @@ namespace client {
 		// would never end - which is the one failure mode a build server cannot
 		// recover from. The editor makes the same allowance for the same reason.
 		if (LastFrame.Presented || Settings.Headless) {
+			if (!Settings.FrameTimings.empty()) RecordFrameTiming(presentationNow);
 			FramesDrawn++;
 		}
 

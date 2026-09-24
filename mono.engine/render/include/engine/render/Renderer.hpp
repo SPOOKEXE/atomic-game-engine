@@ -1947,6 +1947,11 @@ namespace engine::render {
 		const std::unordered_map<uint32_t, double> &PassWallTimes() const;
 		//@}
 
+		// Sequence number of the frame whose GPU times PassTimings shows. It only
+		// grows, when a newer frame's timestamps resolve, so a caller can take
+		// each resolved frame's GPU totals exactly once.
+		uint64_t PassTimingSequence() const;
+
 		// Whether this backend can produce GPU timestamps.
 		bool Timed() const;
 

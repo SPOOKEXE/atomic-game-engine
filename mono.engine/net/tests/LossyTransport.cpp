@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -271,4 +272,85 @@ TEST_CASE("a held datagram is released rather than lost", "[net][transport][loss
 	link.Say("alone");
 
 	CHECK(link.Heard() == std::vector<std::string>{"alone"});
+}
+
+namespace lossy_test {
+	// The clock delayed cases read, advanced by hand so a wait is a step.
+	double ManualSeconds = 0.0;
+	double ManualNow() {
+		return ManualSeconds;
+	}
+
+	std::vector<std::string> Numbered(size_t count) {
+		std::vector<std::string> said;
+		for (size_t index = 0; index < count; ++index)
+			said.push_back(std::to_string(index));
+		return said;
+	}
+}
+
+TEST_CASE("a delayed datagram waits out its delay", "[net][transport][lossy]") {
+	ManualSeconds = 10.0;
+	LossSettings settings;
+	settings.DelaySeconds = 0.150;
+	settings.Now = ManualNow;
+
+	Link link(settings);
+	link.Say("late");
+	CHECK(link.Heard().empty());
+	ManualSeconds += 0.149;
+	CHECK(link.Heard().empty());
+	ManualSeconds += 0.002;
+	CHECK(link.Heard() == std::vector<std::string>{"late"});
+	CHECK(link.Receiver->Stats().Delayed == 1);
+	CHECK(link.Receiver->Stats().Dropped == 0);
+}
+
+TEST_CASE("seeded jitter reorders without losing and repeats under one seed", "[net][transport][lossy]") {
+	const auto run = [] {
+		ManualSeconds = 0.0;
+		LossSettings settings;
+		settings.DelaySeconds = 0.050;
+		settings.JitterSeconds = 0.030;
+		settings.Seed = 7;
+		settings.Now = ManualNow;
+		Link link(settings);
+		for (const std::string &text : Numbered(40))
+			link.Say(text);
+		CHECK(link.Heard().empty());
+		ManualSeconds = 0.080;
+		std::vector<std::string> heard = link.Heard();
+		CHECK(link.Receiver->Stats().Delayed == 40);
+		return heard;
+	};
+	const std::vector<std::string> first = run();
+	const std::vector<std::string> second = run();
+	CHECK(first == second);
+	CHECK(first != Numbered(40));
+	std::vector<std::string> sorted = first;
+	std::sort(sorted.begin(), sorted.end(), [](const std::string &left, const std::string &right) {
+		return std::stoi(left) < std::stoi(right);
+	});
+	CHECK(sorted == Numbered(40));
+}
+
+TEST_CASE("seeded duplicate and reorder chances repeat under one seed", "[net][transport][lossy]") {
+	const auto run = [] {
+		LossSettings settings;
+		settings.DuplicateChance = 0.2f;
+		settings.ReorderChance = 0.2f;
+		settings.Seed = 11;
+		Link link(settings);
+		for (const std::string &text : Numbered(60))
+			link.Say(text);
+		const std::vector<std::string> heard = link.Heard();
+		CHECK(link.Receiver->Stats().Duplicated > 0);
+		CHECK(link.Receiver->Stats().Reordered > 0);
+		CHECK(heard.size() == 60 + link.Receiver->Stats().Duplicated);
+		return heard;
+	};
+	const std::vector<std::string> first = run();
+	CHECK(first == run());
+	for (const std::string &text : Numbered(60))
+		CHECK(std::find(first.begin(), first.end(), text) != first.end());
 }

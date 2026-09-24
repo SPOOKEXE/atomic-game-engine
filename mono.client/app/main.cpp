@@ -195,6 +195,9 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"capture-alpha", "PHASE", "Fix interpolation to [0, 1) for --capture-sequence comparisons"
 	);
+	arguments.Value(
+		"frame-timings", "PATH", "Write one CSV row per drawn frame: interval, CPU step and resolved GPU ms"
+	);
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -424,6 +427,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);
+	}
+	if (auto timings = arguments.Get("frame-timings")) {
+		options.FrameTimings = std::filesystem::path(*timings);
 	}
 	if (auto sequence = arguments.Get("capture-sequence")) {
 		options.CaptureSequence = std::filesystem::path(*sequence);
