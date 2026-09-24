@@ -26,12 +26,13 @@
 // **Wrap the end that receives.** To lose traffic in the other direction, wrap
 // the other end.
 //
-// **Deterministic, and that is this module's whole discipline.** No clock, no
+// **Deterministic, and that is this module's whole discipline.** No
 // `std::random_device`, no unordered iteration. A datagram is numbered by the
-// order it arrived and whether it is lost is a pure function of that number and
-// a seed the caller states - `core::Random` is indexed rather than streamed for
-// exactly this reason. A failing case is reproducible from its seed alone, and
-// nothing here can reach a recorded run.
+// order it arrived, and whether it is lost, duplicated, reordered or delayed,
+// and for how long, is a pure function of that number and a seed the caller
+// states - `core::Random` is indexed rather than streamed for exactly this
+// reason. A failing case is reproducible from its seed alone. The only clock is
+// the one that says a stated delay is over, and a test can replace it.
 //
 // **Nominating one datagram is worth more than a percentage.** "The third
 // datagram never arrived" is a test; "ten percent loss" is a flake with a
@@ -88,7 +89,35 @@ namespace engine::net {
 		// Zero, the default, loses nothing.
 		float LossChance = 0.0f;
 
-		// The seed the chance is drawn against.
+		// The chance that a surviving arrival is delivered twice, in `[0, 1)`.
+		//
+		// Drawn like `LossChance`, from the arrival number and `Seed`, so a
+		// seeded run duplicates the same arrivals every time.
+		float DuplicateChance = 0.0f;
+
+		// The chance that a surviving arrival is held behind the next one, in
+		// `[0, 1)`. Drawn like `LossChance`.
+		float ReorderChance = 0.0f;
+
+		// Seconds every surviving arrival waits before it is handed over.
+		//
+		// **The one place this file reads a clock, and only for *when*.**
+		// Whether an arrival is lost, duplicated or reordered, and how long it
+		// waits, are still functions of its number and `Seed`. The clock only
+		// says whether that wait is over. Applied on the receiving end, so a
+		// value equal to a round trip models that round trip.
+		double DelaySeconds = 0.0;
+
+		// Extra wait, uniform in `[0, JitterSeconds)` per arrival and drawn
+		// from its number and `Seed`. Unequal waits deliver arrivals out of
+		// order, which is what jitter does on a real path.
+		double JitterSeconds = 0.0;
+
+		// The clock the waits are measured on, in seconds. Null uses a steady
+		// clock; a test passes its own so a delay is a step it controls.
+		double (*Now)() = nullptr;
+
+		// The seed the chances are drawn against.
 		//
 		// Two runs with the same seed lose the same datagrams, so a failure is
 		// reported as a seed and reproduced from it.
@@ -117,6 +146,9 @@ namespace engine::net {
 
 		// Datagrams held back and delivered behind a later one.
 		uint64_t Reordered = 0;
+
+		// Datagrams that waited out `DelaySeconds` or `JitterSeconds`.
+		uint64_t Delayed = 0;
 	};
 
 	// A transport that discards some of what arrives at it.
@@ -170,7 +202,7 @@ namespace engine::net {
 		// @return `false` once closed, and for a null transport underneath.
 		bool Open() const override;
 
-		// Closes this end, dropping anything held back for reordering.
+		// Closes this end, dropping anything held back or still waiting.
 		void Close() override;
 
 		// Loses the next `datagrams` arrivals, whatever their numbers turn out
@@ -236,9 +268,15 @@ namespace engine::net {
 		struct Waiting {
 			Endpoint From;
 			std::vector<std::byte> Bytes;
+			// Arrival number, which also seeds this datagram's jitter.
+			uint64_t Number = 0;
 		};
 
 		bool Loses(uint64_t number) const;
+		bool Chance(uint64_t number, float chance, uint32_t salt) const;
+		double Clock() const;
+		void Deliver(Waiting survivor, uint64_t number);
+		void ReleaseDue();
 
 		std::unique_ptr<Transport> Inner;
 		LossSettings Settings;
@@ -258,5 +296,17 @@ namespace engine::net {
 
 		// The one datagram being held back behind the next.
 		std::optional<Waiting> Held;
+
+		// Survivors still waiting out their delay, in arrival order. Released
+		// to `Ready` in order of the time they become due.
+		struct Pending {
+			double DueSeconds = 0.0;
+			uint64_t Number = 0;
+			Waiting Datagram;
+		};
+		std::vector<Pending> Delaying;
+
+		// Whether Close has already reported a seeded impairment's counters.
+		bool Reported = false;
 	};
 }

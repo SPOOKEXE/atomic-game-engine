@@ -497,15 +497,16 @@ portal-ambient-profile samples="5":
     cmake --build --preset bench --target bench_render
     MONO_PORTAL_CODEC_PROFILE=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
 
-# Runs the supported portal product acceptance rows and writes one reviewable
-# report under the release-tests build. `mode=full` records unsupported product
-# controls and exits nonzero, so it cannot be mistaken for full acceptance.
-portal-product-acceptance mode="full":
+# Runs the portal product acceptance matrix and writes one reviewable report
+# under the release-tests build: product walks at every rate, the stall schedule,
+# the 24-cell impairment grid, matched seam captures and uncaptured timing. It
+# exits nonzero unless every row passed.
+portal-product-acceptance:
     #!/usr/bin/env bash
     set -euo pipefail
     cmake --preset release-tests > /dev/null
-    cmake --build --preset release-tests --target client test_client test_script
-    python3 scripts/demos/portal-product-acceptance.py --build .cache/build/release-tests --mode {{mode}}
+    cmake --build --preset release-tests --target client server test_client test_script
+    python3 scripts/demos/portal-product-acceptance.py --build .cache/build/release-tests
 
 # The Luau boundary rows, including the complete async compute lifecycle. Keep
 # this explicit because a binding benchmark is useful while working on the VM

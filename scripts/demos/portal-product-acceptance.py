@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Run the supported portal product acceptance rows and record the remaining gaps.
+"""Run the portal product acceptance matrix and record every row's evidence.
 
-The script deliberately keeps product, protocol, and visual evidence distinct.
-The product fixture only exposes 30 and 60 Hz world rates today, while the
-seam capture can exercise all four requested presentation rates.  A missing
-control remains an ``unsupported`` matrix row and makes ``--mode full`` fail.
+Product, protocol, visual and timing evidence stay distinct rows. Product walks
+run at 30 and 60 Hz world rates, at 144 and 240 FPS presentation, under a
+variable frame and stall schedule, and across the 24-cell network impairment
+grid. Timing rows run the seam scene without image capture, because capture
+reads back and writes every frame and would measure disk rather than rendering.
+A failing product cell is recorded, not raised, so the report shows every cell;
+``full_acceptance_passed`` is true only when every row passed.
 """
 
 from __future__ import annotations
@@ -21,6 +24,11 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PRODUCT_IMPAIRMENT_PATTERN = re.compile(
+	r"portal product impairment rtt_ms=(\d+) jitter_ms=(\d+) loss_percent=(\d+) arrived=(\d+) dropped=(\d+) "
+	r"duplicated=(\d+) reordered=(\d+) delayed=(\d+) adoptions=(\d+)"
+)
+FAILURE_PATTERN = re.compile(r"PortalWalk\.cpp:(\d+): failed: (.*?) for:")
 IMPAIRMENT_PATTERN = re.compile(
 	r"portal process impairment rtt_ms=(\d+) jitter_ms=(\d+) loss_percent=(\d+) "
 	r"sample=(\d+) committed_at_tick=(\d+) dropped=(\d+) duplicated=(\d+) reordered=(\d+)"
@@ -38,6 +46,83 @@ def run(command: list[str], output: Path, environment: dict[str, str] | None = N
 		completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, text=True)
 	if completed.returncode:
 		raise RuntimeError(f"command failed ({completed.returncode}): {' '.join(command)}; see {output}")
+
+
+def run_status(command: list[str], output: Path, environment: dict[str, str] | None = None) -> int:
+	"""Run one row that may legitimately fail and return its exit status."""
+	output.parent.mkdir(parents=True, exist_ok=True)
+	env = {**__import__("os").environ, **(environment or {})}
+	with output.open("w", encoding="utf-8") as log:
+		return subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, text=True).returncode
+
+
+def product_impairment_cells(log: Path) -> list[dict[str, Any]]:
+	"""Give each product grid cell the failures reported before its summary line.
+
+	Catch prints a walk's failed assertions as they happen and the walk prints
+	its summary after them, so failures belong to the next summary line.
+	"""
+	cells: list[dict[str, Any]] = []
+	failures: dict[str, int] = {}
+	for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+		failure = FAILURE_PATTERN.search(line)
+		if failure:
+			key = f"{failure.group(1)}: {failure.group(2)}"
+			failures[key] = failures.get(key, 0) + 1
+			continue
+		match = PRODUCT_IMPAIRMENT_PATTERN.match(line)
+		if not match:
+			continue
+		values = [int(group) for group in match.groups()]
+		names = ("rtt_ms", "jitter_ms", "loss_percent", "arrived", "dropped", "duplicated", "reordered", "delayed", "adoptions")
+		cells.append({**dict(zip(names, values)), "status": "failed" if failures else "passed", "failures": failures})
+		failures = {}
+	actual = {(cell["rtt_ms"], cell["jitter_ms"], cell["loss_percent"]) for cell in cells}
+	if actual != EXPECTED_IMPAIRMENTS:
+		raise RuntimeError(f"product impairment grid differs from requested rows: {sorted(actual)}")
+	return sorted(cells, key=lambda cell: (cell["rtt_ms"], cell["jitter_ms"], cell["loss_percent"]))
+
+
+def percentile(values: list[float], fraction: float) -> float | None:
+	"""Nearest rank, matching the frame graph snapshot."""
+	if not values:
+		return None
+	ordered = sorted(values)
+	return ordered[min(len(ordered) - 1, int(fraction * (len(ordered) - 1) + 0.5))]
+
+
+def timing_summary(csv_path: Path, warmup_frames: int = 60) -> dict[str, Any]:
+	"""Achieved rate and p50/p95/p99 from a client --frame-timings series."""
+	intervals: list[float] = []
+	cpu: list[float] = []
+	gpu: list[float] = []
+	with csv_path.open(encoding="utf-8") as handle:
+		for index, row in enumerate(__import__("csv").DictReader(handle)):
+			if index < warmup_frames:
+				continue
+			if row["interval_ms"]:
+				intervals.append(float(row["interval_ms"]))
+			cpu.append(float(row["cpu_ms"]))
+			if row["gpu_ms"]:
+				gpu.append(float(row["gpu_ms"]))
+	if not intervals:
+		raise RuntimeError(f"{csv_path} has no timed frames after warm-up")
+
+	def stats(values: list[float]) -> dict[str, float | int | None]:
+		return {
+			"samples": len(values),
+			"p50_ms": percentile(values, 0.50),
+			"p95_ms": percentile(values, 0.95),
+			"p99_ms": percentile(values, 0.99),
+			"max_ms": max(values) if values else None,
+		}
+
+	return {
+		"achieved_fps": 1000.0 * len(intervals) / sum(intervals),
+		"interval": stats(intervals),
+		"cpu": stats(cpu),
+		"gpu": stats(gpu),
+	}
 
 
 def protocol_rows(log: Path) -> list[dict[str, int]]:
@@ -72,15 +157,14 @@ def row(name: str, status: str, **details: Any) -> dict[str, Any]:
 
 
 def write_report(output: Path, rows: list[dict[str, Any]], mode: str) -> Path:
-	unsupported = [entry["name"] for entry in rows if entry["status"] == "unsupported"]
+	failed = [entry["name"] for entry in rows if entry["status"] == "failed"]
 	report = {
 		"fixture": "portal-product-acceptance",
 		"mode": mode,
 		"generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
 		"rows": rows,
-		"supported_rows_passed": all(entry["status"] != "failed" for entry in rows),
-		"unsupported_rows": unsupported,
-		"full_acceptance_passed": not unsupported and all(entry["status"] == "passed" for entry in rows),
+		"failed_rows": failed,
+		"full_acceptance_passed": bool(rows) and all(entry["status"] == "passed" for entry in rows),
 	}
 	path = output / "acceptance-report.json"
 	path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -144,25 +228,74 @@ def run_supported(build: Path, output: Path, rows: list[dict[str, Any]]) -> None
 	rows.append(row("protocol-handoff-percentiles", "passed", repeats=100, report=str(handoff / "handoff-profile.json")))
 
 	capture_visual_rows(build, output, rows)
+	product_rows(build, output, rows)
+	timing_rows(build, output, rows)
 
 
-def unsupported_rows(rows: list[dict[str, Any]]) -> None:
-	rows.extend(
-		[
-			row("product-handoff-144fps", "unsupported", reason="PortalWalk exposes only 30 and 60 Hz world rates."),
-			row("product-handoff-240fps", "unsupported", reason="PortalWalk exposes only 30 and 60 Hz world rates."),
-			row("product-variable-frame-stall", "unsupported", reason="No product fixture controls a deterministic variable frame stall."),
-			row("product-visual-impairment-grid", "unsupported", reason="The product fixture has no RTT, jitter, loss, duplicate, or reorder controls."),
-			row("product-cpu-gpu-percentiles", "unsupported", reason="Current product sidecars expose counters and snapshots, but no per-frame CPU/GPU percentile series."),
-		]
+def product_rows(build: Path, output: Path, rows: list[dict[str, Any]]) -> None:
+	"""Product walks for the presentation rates, the stall schedule and the impairment grid."""
+	test_client = build / "tests/test_client"
+	for name, filter_text in (
+		("product-handoff-144-240fps", "[portal-product-image-handoff-high-fps]"),
+		("product-variable-frame-stall", "[portal-product-frame-stall]"),
+	):
+		log = output / name / "command.log"
+		status = run_status([str(test_client), filter_text, "--reporter", "compact"], log)
+		rows.append(row(name, "passed" if status == 0 else "failed", exit_status=status, log=str(log)))
+
+	log = output / "product-impairment-grid" / "command.log"
+	status = run_status([str(test_client), "[portal-product-impairment]", "--reporter", "compact"], log)
+	cells = product_impairment_cells(log)
+	(log.parent / "cells.json").write_text(json.dumps(cells, indent=2) + "\n", encoding="utf-8")
+	failed = [f"{cell['rtt_ms']}/{cell['jitter_ms']}/{cell['loss_percent']}" for cell in cells if cell["status"] == "failed"]
+	rows.append(
+		row(
+			"product-impairment-grid",
+			"failed" if failed or status != 0 else "passed",
+			cells=len(cells),
+			failed_cells=failed,
+			report=str(log.parent / "cells.json"),
+		)
 	)
+
+
+def timing_rows(build: Path, output: Path, rows: list[dict[str, Any]]) -> None:
+	"""Uncaptured seam scene timing at every requested rate and resolution."""
+	client = build / "client/client"
+	scene = build / "assets/examples/scripts/PortalSeam.luau"
+	for fps in (30, 60, 144, 240):
+		for width, height in ((1920, 1080), (3840, 2160)):
+			name = f"seam-timing-{width}x{height}-{fps}fps"
+			directory = output / name
+			series = directory / "frame-timings.csv"
+			run(
+				[
+					str(client), "--headless", "--uncapped", "--max-fps", str(fps), "--width", str(width),
+					"--height", str(height), "--script", str(scene), "--frames", str(fps * 10),
+					"--frame-timings", str(series),
+				],
+				directory / "command.log",
+			)
+			summary = timing_summary(series)
+			(directory / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+			# The requested rate is a cap; the row records what was achieved beside it.
+			rows.append(
+				row(
+					name,
+					"passed" if summary["achieved_fps"] >= 0.95 * fps else "failed",
+					target_fps=fps,
+					achieved_fps=summary["achieved_fps"],
+					resolution=f"{width}x{height}",
+					report=str(directory / "summary.json"),
+				)
+			)
 
 
 def main() -> None:
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("--build", type=Path, default=ROOT / ".cache/build/release-tests")
 	parser.add_argument("--out", type=Path)
-	parser.add_argument("--mode", choices=("full", "implemented"), default="full")
+	parser.add_argument("--mode", choices=("full",), default="full")
 	args = parser.parse_args()
 	build = args.build.resolve()
 	stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -178,12 +311,10 @@ def main() -> None:
 		path = write_report(output, rows, args.mode)
 		print(f"portal acceptance failed: {path}", file=sys.stderr)
 		raise SystemExit(1) from error
-	if args.mode == "full":
-		unsupported_rows(rows)
 	path = write_report(output, rows, args.mode)
 	print(f"portal acceptance report: {path}")
-	if args.mode == "full":
-		raise SystemExit("full portal acceptance remains incomplete; see unsupported_rows in the report")
+	if not json.loads(path.read_text(encoding="utf-8"))["full_acceptance_passed"]:
+		raise SystemExit("portal acceptance failed; see failed_rows in the report")
 
 
 if __name__ == "__main__":

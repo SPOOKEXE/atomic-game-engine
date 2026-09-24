@@ -828,7 +828,7 @@ namespace client {
 				if (auto runtime = BuildReplicatedWorld(store, systems, interpolation))
 					Runtimes.emplace_back(approach.World, std::move(runtime));
 			});
-			approach.Socket = net::MakeUdpTransport(0);
+			approach.Socket = OpenSocket(1);
 			if (!approach.Socket || !ClientIdentity) {
 				DropPortalApproach();
 				return;
@@ -1004,7 +1004,7 @@ namespace client {
 				auto runtime = BuildReplicatedWorld(store, systems, interpolation);
 				if (runtime) Runtimes.emplace_back(next.World, std::move(runtime));
 			});
-			next.Socket = net::MakeUdpTransport(0);
+			next.Socket = OpenSocket(2);
 			if (!next.Socket || !ClientIdentity) {
 				next.Failure = "destination transport could not be opened";
 				return;

@@ -24,6 +24,7 @@
 #include <client/Replicated.hpp>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -117,7 +118,9 @@ static void RunPortalWalk(
 	bool ownedContent = false,
 	RoomShader roomShader = RoomShader::None,
 	PortalWalkFault fault = PortalWalkFault::None,
-	uint32_t captureFrameRate = 60
+	uint32_t captureFrameRate = 60,
+	client::Options::NetworkImpairment impairment = {},
+	std::vector<float> frameSchedule = {}
 ) {
 	using namespace engine;
 	const bool authoredShaders = roomShader != RoomShader::None;
@@ -132,6 +135,14 @@ static void RunPortalWalk(
 		lateClear,
 		warmPortal,
 		fault
+	);
+	CAPTURE(
+		impairment.RoundTripSeconds,
+		impairment.JitterSeconds,
+		impairment.LossChance,
+		impairment.DuplicateChance,
+		impairment.ReorderChance,
+		frameSchedule.size()
 	);
 	const auto programs = core::Paths::Base().parent_path();
 	const auto serverProgram = programs / "server" / core::Paths::Program("server");
@@ -412,6 +423,9 @@ end)
 		size_t MisalignedSubmittedMoves = 0;
 		std::optional<uint64_t> FirstMisalignedFrame;
 		std::array<float, 3> FirstMisalignedMove{};
+		// Summed from each impaired socket's close report.
+		uint64_t ImpairedArrived = 0, ImpairedDropped = 0, ImpairedDuplicated = 0, ImpairedReordered = 0,
+				 ImpairedDelayed = 0;
 	} observed;
 	std::filesystem::path captureDirectory;
 	const auto key = [](SDL_Scancode scan, SDL_Keycode code, bool down) {
@@ -439,6 +453,23 @@ end)
 	auto sink = std::make_shared<spdlog::sinks::callback_sink_mt>([&](const spdlog::details::log_msg &entry) {
 		std::string_view message(entry.payload.data(), entry.payload.size());
 		std::lock_guard lock(observed.Mutex);
+		if (const size_t report = message.find("impaired link closed: "); report != std::string_view::npos) {
+			const auto field = [&](std::string_view name) {
+				const size_t at = message.find(name, report);
+				uint64_t value = 0;
+				if (at != std::string_view::npos)
+					std::from_chars(
+						message.data() + at + name.size(), message.data() + message.size(), value
+					);
+				return value;
+			};
+			observed.ImpairedArrived += field("arrived=");
+			observed.ImpairedDropped += field("dropped=");
+			observed.ImpairedDuplicated += field("duplicated=");
+			observed.ImpairedReordered += field("reordered=");
+			observed.ImpairedDelayed += field("delayed=");
+			return;
+		}
 		if (message == "[scriptluau] [script] portal-camera-cleared\tserver.world") {
 			observed.CameraCleared = true;
 			return;
@@ -683,6 +714,12 @@ end)
 	options.MaximumFrames = fault == PortalWalkFault::DropAcknowledgement ? 960
 							: fault == PortalWalkFault::Delay			  ? 660
 																		  : 600;
+	// The walk needs the same simulated time at any presentation rate, and
+	// impaired links need room for their added round trips and resends.
+	if (captureFrameRate > 60) options.MaximumFrames = options.MaximumFrames * int(captureFrameRate) / 60;
+	if (impairment.Active()) options.MaximumFrames = options.MaximumFrames * 8 / 5;
+	options.Impairment = impairment;
+	options.CaptureFrameSchedule = frameSchedule;
 	options.CaptureSequence =
 		core::Paths::Base() /
 		("portal-client-walk-" + std::to_string(static_cast<int>(worldTickRate)) +
@@ -696,11 +733,18 @@ end)
 	if (roomShader == RoomShader::SpatialOverlay) options.CaptureSequence += "-spatial-overlay";
 	if (roomShader == RoomShader::Lens) options.CaptureSequence += "-captured-lens";
 	if (captureFrameRate != 60) options.CaptureSequence += "-render" + std::to_string(captureFrameRate);
+	if (impairment.Active())
+		options.CaptureSequence += "-rtt" + std::to_string(int(impairment.RoundTripSeconds * 1000.0 + .5)) +
+								   "-jitter" + std::to_string(int(impairment.JitterSeconds * 1000.0 + .5)) +
+								   "-loss" + std::to_string(int(impairment.LossChance * 100.0f + .5f));
+	if (!frameSchedule.empty()) options.CaptureSequence += "-stall";
 	if (const char *profile = std::getenv("PORTAL_PROFILE_SNAPSHOT");
 		profile && std::string_view(profile) == "1")
 		options.ProfileSnapshot = options.CaptureSequence / "frame-graph-snapshot.txt";
 	captureDirectory = options.CaptureSequence;
 	std::filesystem::remove_all(options.CaptureSequence);
+	// Beside the sequence: its intervals include capture, its GPU pass times do not.
+	options.FrameTimings = options.CaptureSequence.string() + "-frame-timings.csv";
 	const auto finalCapture = options.CaptureSequence / (std::to_string(options.MaximumFrames - 1) + ".bmp");
 	client::Client player;
 	REQUIRE(player.Initialise(options));
@@ -1293,7 +1337,12 @@ end)
 		CHECK(clearedAdoptions == 1);
 	}
 	if (imageHandoff) {
-		CHECK(hiddenPortalSamples > 0);
+		// An evenly paced walk turns the camera away from the portal on its
+		// return, so the hidden-demand path must be seen. A stall schedule
+		// advances the walk faster than the approach connection, adopts
+		// directly and returns without that turn; its hidden samples, if any,
+		// are still checked frame by frame above.
+		if (frameSchedule.empty()) CHECK(hiddenPortalSamples > 0);
 		CHECK(nativeReturnSamples > 16);
 	}
 	if (imageHandoff && !firstPerson) CHECK(observedEyeSamples > 0);
@@ -1333,6 +1382,24 @@ end)
 	CHECK(readable);
 	CHECK(visiblePixels > static_cast<size_t>(options.Width * options.Height) / 8);
 	player.Shutdown();
+	if (impairment.Active()) {
+		std::lock_guard lock(observed.Mutex);
+		// One row per impaired walk for the acceptance report, and proof that
+		// every requested fault really reached this client's sockets.
+		std::cout << "portal product impairment rtt_ms=" << int(impairment.RoundTripSeconds * 1000.0 + .5)
+				  << " jitter_ms=" << int(impairment.JitterSeconds * 1000.0 + .5)
+				  << " loss_percent=" << int(impairment.LossChance * 100.0f + .5f)
+				  << " arrived=" << observed.ImpairedArrived << " dropped=" << observed.ImpairedDropped
+				  << " duplicated=" << observed.ImpairedDuplicated
+				  << " reordered=" << observed.ImpairedReordered << " delayed=" << observed.ImpairedDelayed
+				  << " adoptions=" << observed.Adoptions.size() << '\n';
+		CHECK(observed.ImpairedArrived > 0);
+		if (impairment.LossChance > 0.0f) CHECK(observed.ImpairedDropped > 0);
+		if (impairment.DuplicateChance > 0.0f) CHECK(observed.ImpairedDuplicated > 0);
+		if (impairment.ReorderChance > 0.0f) CHECK(observed.ImpairedReordered > 0);
+		if (impairment.RoundTripSeconds > 0.0 || impairment.JitterSeconds > 0.0)
+			CHECK(observed.ImpairedDelayed > 0);
+	}
 	REQUIRE(server.RequestStop());
 	const auto stopDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 	auto stopped = server.Poll();
@@ -1477,4 +1544,91 @@ TEST_CASE(
 	"[client][gpu][portal-product-captured-lens][.]"
 ) {
 	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::Lens);
+}
+
+TEST_CASE(
+	"portal image handoff at 144 and 240 FPS keeps both worlds at 60 Hz",
+	"[client][portal-product-image-handoff-high-fps][gpu][.]"
+) {
+	const uint32_t frameRate = GENERATE(144u, 240u);
+	RunPortalWalk(
+		60, false, true, true, true, true, false, false, RoomShader::None, PortalWalkFault::None, frameRate
+	);
+}
+
+TEST_CASE(
+	"portal image handoff survives variable frame intervals and long stalls",
+	"[client][portal-product-frame-stall][gpu][.]"
+) {
+	// Deterministic variable pacing: ordinary, fast and slow frames, with a
+	// 0.2 s stall every 12 frames. A handoff spans about 30 frames, so at least
+	// two stalls land inside each one as well as across the approach and return.
+	const std::vector<float> schedule{
+		1.0f / 60.0f,
+		1.0f / 144.0f,
+		1.0f / 60.0f,
+		1.0f / 30.0f,
+		1.0f / 60.0f,
+		1.0f / 144.0f,
+		1.0f / 60.0f,
+		1.0f / 60.0f,
+		1.0f / 30.0f,
+		1.0f / 144.0f,
+		1.0f / 60.0f,
+		.2f
+	};
+	RunPortalWalk(
+		60,
+		false,
+		true,
+		true,
+		true,
+		true,
+		false,
+		false,
+		RoomShader::None,
+		PortalWalkFault::None,
+		60,
+		{},
+		schedule
+	);
+}
+
+TEST_CASE(
+	"portal image handoff under round trip, jitter, loss, duplicate and reorder impairment",
+	"[client][portal-product-impairment][gpu][.]"
+) {
+	const int rttMilliseconds = GENERATE(0, 50, 150, 300);
+	const int jitterMilliseconds = GENERATE(0, 30);
+	const int lossPercent = GENERATE(0, 1, 5);
+	// PORTAL_IMPAIRMENT_ROW=rtt,jitter,loss[;rtt,jitter,loss...] reruns only those
+	// cells, in grid order, while diagnosing them.
+	if (const char *only = std::getenv("PORTAL_IMPAIRMENT_ROW")) {
+		const std::string cell = std::to_string(rttMilliseconds) + "," + std::to_string(jitterMilliseconds) +
+								 "," + std::to_string(lossPercent);
+		if ((";" + std::string(only) + ";").find(";" + cell + ";") == std::string::npos) return;
+	}
+	client::Options::NetworkImpairment impairment;
+	impairment.RoundTripSeconds = rttMilliseconds / 1000.0;
+	impairment.JitterSeconds = jitterMilliseconds / 1000.0;
+	impairment.LossChance = lossPercent / 100.0f;
+	// Duplicate and reorder injection ride on every row, so even the zero
+	// latency, zero loss row exercises them.
+	impairment.DuplicateChance = .01f;
+	impairment.ReorderChance = .01f;
+	impairment.Seed = uint32_t(rttMilliseconds * 131 + jitterMilliseconds * 17 + lossPercent + 1);
+	RunPortalWalk(
+		60,
+		false,
+		true,
+		true,
+		true,
+		true,
+		false,
+		false,
+		RoomShader::None,
+		PortalWalkFault::None,
+		60,
+		impairment
+	);
 }

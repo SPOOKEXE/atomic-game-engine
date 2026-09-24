@@ -46,15 +46,43 @@ class PortalProductAcceptanceTest(unittest.TestCase):
 			with self.assertRaises(RuntimeError):
 				MODULE.protocol_rows(log)
 
-	def test_full_report_names_unsupported_rows_and_cannot_pass(self) -> None:
+	def test_product_grid_assigns_failures_to_the_following_cell(self) -> None:
 		with tempfile.TemporaryDirectory() as temporary:
-			output = Path(temporary)
-			rows = [MODULE.row("supported", "passed")]
-			MODULE.unsupported_rows(rows)
-			report_path = MODULE.write_report(output, rows, "full")
-			report = json.loads(report_path.read_text(encoding="utf-8"))
+			log = Path(temporary) / "product.log"
+			lines = []
+			for rtt, jitter, loss in sorted(MODULE.EXPECTED_IMPAIRMENTS):
+				if (rtt, jitter, loss) == (150, 0, 0):
+					lines.append("/x/PortalWalk.cpp:1117: failed: sample.value(\"eye_image\", false) for: false")
+					lines.append("/x/PortalWalk.cpp:1117: failed: sample.value(\"eye_image\", false) for: false")
+				lines.append(
+					"portal product impairment "
+					f"rtt_ms={rtt} jitter_ms={jitter} loss_percent={loss} arrived=10 dropped={loss} "
+					f"duplicated=1 reordered=1 delayed={rtt} adoptions=2"
+				)
+			log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+			cells = MODULE.product_impairment_cells(log)
+			failed = [cell for cell in cells if cell["status"] == "failed"]
+			self.assertEqual(len(cells), 24)
+			self.assertEqual([(cell["rtt_ms"], cell["jitter_ms"], cell["loss_percent"]) for cell in failed], [(150, 0, 0)])
+			self.assertEqual(failed[0]["failures"], {"1117: sample.value(\"eye_image\", false)": 2})
+
+	def test_timing_summary_skips_warmup_and_reports_the_achieved_rate(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			series = Path(temporary) / "frame-timings.csv"
+			rows = ["frame,interval_ms,cpu_ms,gpu_ms", "0,,30,"]
+			rows += [f"{index},4,0.5,{'0.3' if index % 4 == 0 else ''}" for index in range(1, 201)]
+			series.write_text("\n".join(rows) + "\n", encoding="utf-8")
+			summary = MODULE.timing_summary(series, warmup_frames=10)
+			self.assertAlmostEqual(summary["achieved_fps"], 250.0)
+			self.assertEqual(summary["interval"]["p99_ms"], 4.0)
+			self.assertEqual(summary["gpu"]["samples"], 48)
+
+	def test_a_failed_row_blocks_full_acceptance(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			rows = [MODULE.row("passing", "passed"), MODULE.row("product-impairment-grid", "failed")]
+			report = json.loads(MODULE.write_report(Path(temporary), rows, "full").read_text(encoding="utf-8"))
 			self.assertFalse(report["full_acceptance_passed"])
-			self.assertIn("product-variable-frame-stall", report["unsupported_rows"])
+			self.assertEqual(report["failed_rows"], ["product-impairment-grid"])
 
 
 if __name__ == "__main__":
