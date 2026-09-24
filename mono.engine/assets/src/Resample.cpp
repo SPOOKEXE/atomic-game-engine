@@ -25,6 +25,7 @@ namespace engine::assets {
 			resized.FlipbookSide = source.FlipbookSide;
 			resized.FlipbookFrames = source.FlipbookFrames;
 			resized.FlipbookFrameRate = source.FlipbookFrameRate;
+			resized.FlipbookFrameDurations = source.FlipbookFrameDurations;
 			resized.Pixels = source.Pixels;
 			out = std::move(resized);
 			return true;
@@ -40,7 +41,7 @@ namespace engine::assets {
 		// **Carried across, because a resize does not change what the cells
 		// are.** A flipbook sheet shrunk to fit a texture budget is the same
 		// animation at a lower resolution - same grid, same frame count, same
-		// rate - and dropping the three fields here would turn every imported
+		// rate and optional durations - and dropping the timing here would turn every imported
 		// GIF larger than `--max-texture` back into an anonymous atlas. That is
 		// the whole failure this note exists to prevent: it would look like the
 		// decoder was broken, and the decoder would be fine.
@@ -52,6 +53,7 @@ namespace engine::assets {
 		resized.FlipbookSide = source.FlipbookSide;
 		resized.FlipbookFrames = source.FlipbookFrames;
 		resized.FlipbookFrameRate = source.FlipbookFrameRate;
+		resized.FlipbookFrameDurations = source.FlipbookFrameDurations;
 
 		resized.Pixels.resize(static_cast<size_t>(width) * height * channels);
 

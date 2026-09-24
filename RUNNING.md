@@ -161,6 +161,7 @@ directory. Use the `bench` preset for comparable measurements.
 | `shader-fuzz [runs] [compiler]` | Fuzz cooked shader parsing. Defaults: `10000`, `clang++-21`. |
 | `presentation-fuzz [runs] [compiler]` | Fuzz presentation-message parsing. Defaults: `10000`, `clang++-21`. |
 | `fuzz-ui [runs] [compiler]` | Fuzz GUI documents, text, bindings, and bake SVGs. Defaults: `1000`, `clang++-21`. |
+| `bake-pxcx-fuzz [runs] [compiler]` | Fuzz the bounded PXCX archive reader. Defaults: `1000`, `clang++-21`. |
 | `bakegraph-pipeline-set-bench [samples]` | Measure lookup across a large pipeline set. Default: `5`. |
 | `portal-exchange-bench [samples]` | Measure portal exchange. Default: `5`. |
 | `portal-ambient-bench [samples]` | Measure portal ambient codec work. Default: `5`. |

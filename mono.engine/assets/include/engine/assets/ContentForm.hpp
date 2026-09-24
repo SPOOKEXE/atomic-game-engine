@@ -58,9 +58,11 @@ namespace engine::assets {
 		Fbx,
 		Pmx,
 
-		// Textures. `ATex` is the baked form; `Ktx2`, `Dds` and `Basis` arrive
+		// Textures. `ATex` is a baked image; `Ktx2`, `Dds` and `Basis` arrive
 		// already compressed for a GPU and are not this engine's to bake.
 		ATex,
+		// Ordered, individually timed RGBA8 frames beyond the atlas cell limit.
+		ASeq,
 		Png,
 		Jpeg,
 		Bmp,
@@ -69,10 +71,10 @@ namespace engine::assets {
 		Dds,
 		Basis,
 
-		// **A texture whose baked form is a flipbook sheet**, which is why it is
+		// **An image source whose short baked form is a flipbook sheet**, which is why it is
 		// its own form rather than a variation of `Png`: turning it off is a
-		// decision about an animation decoder and about `bake/src/Gif.cpp`'s
-		// frame-count truncation, not about images.
+		// decision about an animation decoder. Longer GIFs become `.aseq`; neither
+		// path truncates source frames.
 		Gif,
 
 		// **A texture whose bake is a rasterisation**, and the form most worth

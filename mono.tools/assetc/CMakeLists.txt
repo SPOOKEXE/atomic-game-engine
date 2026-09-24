@@ -6,6 +6,7 @@ mono_add_library(assetc
 		Engine::core
 		Engine::assets
 		Engine::bake
+		Engine::imagegraph
 )
 
 add_executable(assetc app/main.cpp)

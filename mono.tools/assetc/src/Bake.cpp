@@ -1,9 +1,13 @@
 #include <engine/assets/Material.hpp>
+#include <engine/assets/Resample.hpp>
+#include <engine/assets/TextureSequence.hpp>
+#include <engine/bake/GifSequence.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/imagegraph/Document.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,6 +31,7 @@ namespace assetc {
 		// Extensions recognized by the runtime asset catalogue.
 		constexpr std::string_view MESH_EXTENSION = ".amesh";
 		constexpr std::string_view TEXTURE_EXTENSION = ".atex";
+		constexpr std::string_view SEQUENCE_EXTENSION = ".aseq";
 		constexpr std::string_view MATERIAL_EXTENSION = ".amat";
 
 		std::string Lowered(std::string text) {
@@ -71,12 +76,8 @@ namespace assetc {
 		}
 
 		bool IsImage(std::string_view extension) {
-			// **`.gif` is here and its output is a flipbook sheet**, which is the
-			// one entry whose baked result is not a picture of its input.
-			// `bake::ReadGif` lays the frames out as a square power-of-two grid,
-			// so a GIF becomes an ordinary texture and every path downstream -
-			// the chunker, the manifest, the renderer's table - handles it with no
-			// knowledge that it animates. `bake/src/Gif.cpp` carries the argument.
+			// A short GIF becomes a flipbook sheet; a longer one becomes an ordered
+			// `.aseq` sequence with each source delay intact.
 			//
 			// **`.svg` is here and it is the one that has no size of its own**,
 			// which is why it enters the graph through a different node - see
@@ -92,6 +93,166 @@ namespace assetc {
 		// and how the texture cap is applied.
 		bool IsVector(std::string_view extension) {
 			return extension == ".svg";
+		}
+
+		bool PackGraphFlipbook(
+			const engine::imagegraph::ImageArray &frames,
+			const Settings &settings,
+			engine::assets::TextureData &texture,
+			std::string &failure
+		) {
+			if (settings.FlipbookSide != 0 || settings.FlipbookFrames != 0) {
+				failure = "image graph array computes its own flipbook side and frame count";
+				return false;
+			}
+			if (!std::isfinite(settings.FlipbookFps) || settings.FlipbookFps <= 0.0f ||
+				settings.FlipbookFps >= 1000.0f) {
+				failure = "image graph array needs --flipbook-fps in (0, 1000)";
+				return false;
+			}
+			if (frames.Items.empty() || frames.Items.size() > 256) {
+				failure = "image graph flipbook needs 1 to 256 frames";
+				return false;
+			}
+			uint32_t side = 1;
+			while (side * side < frames.Items.size())
+				side *= 2;
+			const auto *firstIndex = std::get_if<size_t>(&frames.Items.front().Data);
+			if (!firstIndex || *firstIndex >= frames.Images.size()) {
+				failure = "image graph flipbook needs flat, valid image leaves";
+				return false;
+			}
+			const auto &first = frames.Images[*firstIndex];
+			const uint64_t width = static_cast<uint64_t>(first.Width) * side;
+			const uint64_t height = static_cast<uint64_t>(first.Height) * side;
+			const uint32_t dimensionCap =
+				settings.MaximumTexture == 0
+					? engine::assets::Texture::MAXIMUM_DIMENSION
+					: std::min(settings.MaximumTexture, engine::assets::Texture::MAXIMUM_DIMENSION);
+			if (first.Width == 0 || first.Height == 0 || width > dimensionCap || height > dimensionCap) {
+				failure = "image graph flipbook atlas exceeds the texture dimension limit";
+				return false;
+			}
+			uint64_t levelWidth = width, levelHeight = height, totalBytes = 0;
+			uint32_t cellWidth = first.Width, cellHeight = first.Height;
+			for (;;) {
+				totalBytes += levelWidth * levelHeight * 4;
+				if (totalBytes > engine::imagegraph::Limits::MaximumOutputBytes) {
+					failure = "image graph flipbook atlas and mips exceed 64 MiB";
+					return false;
+				}
+				if (!settings.Mipmaps || (levelWidth == 1 && levelHeight == 1) ||
+					(side > 1 && ((cellWidth % 2) != 0 || (cellHeight % 2) != 0)))
+					break;
+				levelWidth = std::max<uint64_t>(1, levelWidth / 2);
+				levelHeight = std::max<uint64_t>(1, levelHeight / 2);
+				cellWidth = std::max<uint32_t>(1, cellWidth / 2);
+				cellHeight = std::max<uint32_t>(1, cellHeight / 2);
+			}
+			const uint64_t cellBytes = static_cast<uint64_t>(first.Width) * first.Height * 4;
+			for (const auto &item : frames.Items) {
+				const auto *index = std::get_if<size_t>(&item.Data);
+				if (!index || *index >= frames.Images.size()) {
+					failure = "image graph flipbook needs flat, valid image leaves";
+					return false;
+				}
+				const auto &image = frames.Images[*index];
+				if (image.Width != first.Width || image.Height != first.Height ||
+					image.Pixels.size() != cellBytes) {
+					failure = "image graph flipbook frames need equal-size RGBA8 pixels";
+					return false;
+				}
+			}
+			texture.Width = static_cast<uint32_t>(width);
+			texture.Height = static_cast<uint32_t>(height);
+			texture.FlipbookSide = static_cast<uint8_t>(side);
+			texture.FlipbookFrames = static_cast<uint16_t>(frames.Items.size());
+			texture.FlipbookFrameRate = settings.FlipbookFps;
+			texture.Pixels.resize(static_cast<size_t>(width * height * 4));
+			// Items, including repeated leaves, define playback order. Unused cells stay transparent.
+			for (size_t frame = 0; frame < frames.Items.size(); frame++) {
+				const auto &image = frames.Images[std::get<size_t>(frames.Items[frame].Data)];
+				const uint64_t cellX = (frame % side) * first.Width;
+				const uint64_t cellY = (frame / side) * first.Height;
+				for (uint32_t row = 0; row < first.Height; row++) {
+					const size_t source = static_cast<size_t>(row) * first.Width * 4;
+					const size_t target = static_cast<size_t>(((cellY + row) * width + cellX) * 4);
+					std::copy_n(
+						reinterpret_cast<const std::byte *>(image.Pixels.data()) + source,
+						static_cast<size_t>(first.Width) * 4,
+						texture.Pixels.data() + target
+					);
+				}
+			}
+			return true;
+		}
+
+		bool PackGraphSequence(
+			const engine::imagegraph::ImageArray &frames,
+			const Settings &settings,
+			engine::assets::TextureSequenceData &sequence,
+			std::string &failure
+		) {
+			if (settings.FlipbookSide != 0 || settings.FlipbookFrames != 0) {
+				failure = "image graph array computes its own frame count";
+				return false;
+			}
+			if (!std::isfinite(settings.FlipbookFps) || settings.FlipbookFps <= 0.0f ||
+				settings.FlipbookFps >= 1000.0f) {
+				failure = "image graph sequence needs --flipbook-fps in (0, 1000)";
+				return false;
+			}
+			if (frames.Items.size() <= 256 ||
+				frames.Items.size() > engine::assets::TextureSequence::MAXIMUM_FRAMES) {
+				failure = "image graph sequence needs 257 to 4096 frames";
+				return false;
+			}
+			const auto *firstIndex = std::get_if<size_t>(&frames.Items.front().Data);
+			if (!firstIndex || *firstIndex >= frames.Images.size()) {
+				failure = "image graph sequence needs flat, valid image leaves";
+				return false;
+			}
+			const auto &first = frames.Images[*firstIndex];
+			const uint32_t dimensionCap =
+				settings.MaximumTexture == 0
+					? engine::assets::Texture::MAXIMUM_DIMENSION
+					: std::min(settings.MaximumTexture, engine::assets::Texture::MAXIMUM_DIMENSION);
+			if (first.Width == 0 || first.Height == 0 || first.Width > dimensionCap ||
+				first.Height > dimensionCap) {
+				failure = "image graph sequence exceeds the frame dimension limit";
+				return false;
+			}
+			const uint64_t frameBytes = uint64_t(first.Width) * first.Height * 4;
+			if (frameBytes > engine::assets::TextureSequence::MAXIMUM_PIXEL_BYTES / frames.Items.size()) {
+				failure = "image graph sequence exceeds 256 MiB of frame pixels";
+				return false;
+			}
+			engine::assets::TextureSequenceData packed;
+			packed.Width = first.Width;
+			packed.Height = first.Height;
+			packed.FrameDurations.assign(frames.Items.size(), 1.0f / settings.FlipbookFps);
+			packed.Pixels.reserve(static_cast<size_t>(frameBytes * frames.Items.size()));
+			for (const auto &item : frames.Items) {
+				const auto *index = std::get_if<size_t>(&item.Data);
+				if (!index || *index >= frames.Images.size()) {
+					failure = "image graph sequence needs flat, valid image leaves";
+					return false;
+				}
+				const auto &image = frames.Images[*index];
+				if (image.Width != first.Width || image.Height != first.Height ||
+					image.Pixels.size() != frameBytes) {
+					failure = "image graph sequence frames need equal-size RGBA8 pixels";
+					return false;
+				}
+				const auto *begin = reinterpret_cast<const std::byte *>(image.Pixels.data());
+				packed.Pixels.insert(packed.Pixels.end(), begin, begin + frameBytes);
+			}
+			if (!packed.IsValid()) {
+				failure = "image graph sequence timing or pixels exceed the sequence limit";
+				return false;
+			}
+			sequence = std::move(packed);
+			return true;
 		}
 
 		std::vector<std::byte> ReadFile(const fs::path &path) {
@@ -301,6 +462,9 @@ namespace assetc {
 		if (IsImage(extension)) {
 			return WithoutExtension(path) + std::string(TEXTURE_EXTENSION);
 		}
+		if (extension == ".graph") {
+			return WithoutExtension(path) + std::string(TEXTURE_EXTENSION);
+		}
 		if (IsMaterial(extension)) {
 			return WithoutExtension(path) + std::string(MATERIAL_EXTENSION);
 		}
@@ -314,12 +478,13 @@ namespace assetc {
 		if (staticFlipbook) {
 			const uint32_t side = settings.FlipbookSide;
 			const uint32_t cells = side * side;
-			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8;
+			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8 || side == 16;
 			if (!powerOfTwoSide || settings.FlipbookFrames == 0 || settings.FlipbookFrames > cells ||
 				!std::isfinite(settings.FlipbookFps) || settings.FlipbookFps <= 0.0f ||
 				settings.FlipbookFps >= 1000.0f) {
-				failure = "assetc: static flipbook needs side 1, 2, 4 or 8, a frame count within its grid, "
-						  "and FPS in (0, 1000)";
+				failure =
+					"assetc: static flipbook needs side 1, 2, 4, 8 or 16, a frame count within its grid, "
+					"and FPS in (0, 1000)";
 				return report;
 			}
 		}
@@ -400,6 +565,27 @@ namespace assetc {
 		for (const std::string &relative : sources) {
 			Baked baked;
 			baked.Source = relative;
+			const std::string extension = ExtensionOf(relative);
+			if (extension == ".graph") {
+				std::error_code sizeError;
+				const uintmax_t fileBytes = fs::file_size(settings.Input / relative, sizeError);
+				if (sizeError || fileBytes > 8u * 1024u * 1024u) {
+					baked.Failure = "image graph source exceeds 8 MiB or is unavailable";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+			}
+			if (extension == ".gif") {
+				std::error_code sizeError;
+				const uintmax_t fileBytes = fs::file_size(settings.Input / relative, sizeError);
+				if (sizeError || fileBytes > engine::assets::TextureSequence::MAXIMUM_PIXEL_BYTES) {
+					baked.Failure = "GIF source exceeds 256 MiB or is unavailable";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+			}
 
 			const std::vector<std::byte> bytes = ReadFile(settings.Input / relative);
 			report.SourceBytes += bytes.size();
@@ -425,9 +611,140 @@ namespace assetc {
 				continue;
 			}
 
-			const std::string extension = ExtensionOf(relative);
 			const bool model = IsModel(extension);
 			const bool image = IsImage(extension);
+			if (extension == ".graph") {
+				if (numericTextures.contains(relative) && displayTextures.contains(relative)) {
+					baked.Failure = "a texture cannot be both display colour and numeric material data";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				engine::imagegraph::Document document;
+				engine::imagegraph::Plan plan;
+				engine::imagegraph::Diagnostic diagnostic;
+				const std::string source(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+				const size_t failuresBefore = report.Failures;
+				if (engine::imagegraph::Read(source, document, diagnostic) !=
+						engine::imagegraph::Status::Ok ||
+					engine::imagegraph::Compile(document, plan, diagnostic) !=
+						engine::imagegraph::Status::Ok) {
+					baked.Failure = "image graph: " + diagnostic.Message;
+				} else {
+					const std::string selected = settings.GraphOutput.empty() && document.Outputs.size() == 1
+													 ? document.Outputs.front().Id
+													 : settings.GraphOutput;
+					if (selected.empty()) {
+						baked.Failure = "image graph needs --graph-output when it has several outputs";
+					} else {
+						const auto output = std::find_if(
+							document.Outputs.begin(), document.Outputs.end(), [&](const auto &candidate) {
+								return candidate.Id == selected;
+							}
+						);
+						bool arrayOutput = false;
+						if (output != document.Outputs.end()) {
+							const auto node = std::find_if(
+								document.Nodes.begin(), document.Nodes.end(), [&](const auto &candidate) {
+									return candidate.Id == output->NodeId;
+								}
+							);
+							const auto *schema = engine::imagegraph::FindSchema(node->Type);
+							arrayOutput = std::any_of(
+								schema->Ports.begin(), schema->Ports.end(), [&](const auto &port) {
+									return port.Id == output->Port &&
+										   port.Direction == engine::imagegraph::PortDirection::Output &&
+										   port.Type == engine::imagegraph::ValueType::Array;
+								}
+							);
+						}
+						const engine::imagegraph::EvaluationRequest request{
+							.Tick = settings.GraphTick, .Seed = settings.GraphSeed
+						};
+						engine::assets::TextureData texture;
+						engine::assets::TextureSequenceData sequence;
+						bool sequenceOutput = false;
+						if (arrayOutput) {
+							engine::imagegraph::ImageArray frames;
+							if (engine::imagegraph::EvaluateArray(
+									document, plan, selected, request, frames, diagnostic
+								) != engine::imagegraph::Status::Ok)
+								baked.Failure = "image graph: " + diagnostic.Message;
+							else if (frames.Items.size() > 256) {
+								sequenceOutput = true;
+								PackGraphSequence(frames, settings, sequence, baked.Failure);
+							} else
+								PackGraphFlipbook(frames, settings, texture, baked.Failure);
+						} else {
+							engine::imagegraph::Image evaluated;
+							if (engine::imagegraph::Evaluate(
+									document, plan, selected, request, evaluated, diagnostic
+								) != engine::imagegraph::Status::Ok) {
+								baked.Failure = "image graph: " + diagnostic.Message;
+							} else {
+								texture.Width = evaluated.Width;
+								texture.Height = evaluated.Height;
+								texture.Pixels.assign(
+									reinterpret_cast<const std::byte *>(evaluated.Pixels.data()),
+									reinterpret_cast<const std::byte *>(
+										evaluated.Pixels.data() + evaluated.Pixels.size()
+									)
+								);
+								const uint32_t longest = std::max(texture.Width, texture.Height);
+								if (settings.MaximumTexture > 0 && longest > settings.MaximumTexture) {
+									const double scale =
+										static_cast<double>(settings.MaximumTexture) / longest;
+									engine::assets::TextureData resized;
+									if (!engine::assets::ResizeImage(
+											texture,
+											std::max<uint32_t>(
+												1, static_cast<uint32_t>(texture.Width * scale)
+											),
+											std::max<uint32_t>(
+												1, static_cast<uint32_t>(texture.Height * scale)
+											),
+											resized
+										)) {
+										baked.Failure = "image graph texture cannot be resized";
+									} else
+										texture = std::move(resized);
+								}
+								if (baked.Failure.empty() && staticFlipbook) {
+									texture.FlipbookSide = settings.FlipbookSide;
+									texture.FlipbookFrames = settings.FlipbookFrames;
+									texture.FlipbookFrameRate = settings.FlipbookFps;
+								}
+							}
+						}
+						if (baked.Failure.empty() && sequenceOutput &&
+							(numericTextures.contains(relative) || displayTextures.contains(relative)))
+							baked.Failure = "image graph sequence cannot be a material texture map";
+						if (baked.Failure.empty() && !sequenceOutput) {
+							if (numericTextures.contains(relative))
+								texture.Format = engine::assets::TextureFormat::RGBA8_LINEAR;
+							if (settings.Mipmaps && !engine::assets::BuildMipChain(texture))
+								baked.Failure = "image graph mip chain could not be built";
+						}
+						if (baked.Failure.empty()) {
+							engine::core::ByteWriter writer;
+							if (sequenceOutput && !engine::assets::TextureSequence::Write(writer, sequence))
+								baked.Failure = "image graph sequence cannot be serialized";
+							else if (!sequenceOutput && !engine::assets::Texture::Write(writer, texture))
+								baked.Failure = "image graph texture cannot be serialized";
+							else {
+								baked.Output = sequenceOutput ? WithoutExtension(relative) +
+																	std::string(SEQUENCE_EXTENSION)
+															  : BakedName(relative);
+								baked.Kind = sequenceOutput ? AssetKind::Animation : AssetKind::Texture;
+								Emit(settings, report, baked, writer.Bytes());
+							}
+						}
+					}
+				}
+				if (!baked.Failure.empty() && report.Failures == failuresBefore) report.Failures++;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
 
 			// **Handled before the graph, because a material has no pixels.**
 			// Everything below this decodes an image or a model; a material is a
@@ -540,6 +857,48 @@ namespace assetc {
 				report.Failures++;
 				report.Assets.push_back(std::move(baked));
 				continue;
+			}
+			if (extension == ".gif") {
+				engine::assets::TextureSequenceData sequence;
+				std::string decodeFailure;
+				if (!engine::bake::ReadGifSequence(bytes, sequence, decodeFailure)) {
+					baked.Failure = "GIF sequence: " + decodeFailure;
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				if (sequence.FrameDurations.size() > 256) {
+					const size_t failuresBefore = report.Failures;
+					if (staticFlipbook)
+						baked.Failure = "GIF sequence cannot use a static flipbook layout";
+					else if (numericTexture || displayTextures.contains(relative))
+						baked.Failure = "GIF sequence cannot be a material texture map";
+					else if (settings.MaximumTexture != 0 &&
+							 (std::max(sequence.Width, sequence.Height) > settings.MaximumTexture))
+						baked.Failure = "GIF sequence exceeds the frame dimension limit";
+					else if (settings.FlipbookFps != 0.0f || !std::isfinite(settings.FlipbookFps)) {
+						if (!std::isfinite(settings.FlipbookFps) || settings.FlipbookFps <= 0.0f ||
+							settings.FlipbookFps >= 1000.0f)
+							baked.Failure = "GIF sequence needs FPS in (0, 1000)";
+						else
+							sequence.FrameDurations.assign(
+								sequence.FrameDurations.size(), 1.0f / settings.FlipbookFps
+							);
+					}
+					if (baked.Failure.empty()) {
+						engine::core::ByteWriter writer;
+						if (!engine::assets::TextureSequence::Write(writer, sequence))
+							baked.Failure = "GIF sequence cannot be serialized";
+						else {
+							baked.Output = WithoutExtension(relative) + std::string(SEQUENCE_EXTENSION);
+							baked.Kind = AssetKind::Animation;
+							Emit(settings, report, baked, writer.Bytes());
+						}
+					}
+					if (!baked.Failure.empty() && report.Failures == failuresBefore) report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
 			}
 
 			engine::bake::Graph graph;

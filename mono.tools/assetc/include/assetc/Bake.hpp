@@ -47,12 +47,18 @@ namespace assetc {
 		//
 		uint32_t MaximumTexture = 2048;
 
+		// Native image graph export. An empty output selects the sole named output;
+		// documents with several outputs require GraphOutput. Tick and seed are
+		// explicit inputs so a repeat bake selects the same image.
+		std::string GraphOutput;
+		uint64_t GraphTick = 0;
+		uint64_t GraphSeed = 0;
+
 		// The frame rate to stamp on every imported flipbook, overriding what
 		// the source said. Zero keeps what the source said.
 		//
 		// **An override and not a default**, which is why zero means "leave it
-		// alone" rather than "use twelve": a GIF states a delay per frame and
-		// the decoder averages those into a rate, so the common case needs
+		// alone" rather than "use twelve": a fixed-delay GIF states its rate, so the common case needs
 		// nothing said here. This exists for the case where the source is wrong
 		// - an exporter that wrote 100ms on every frame of something drawn at
 		// 24fps, which is a thing exporters do - and for re-timing an animation
@@ -61,6 +67,8 @@ namespace assetc {
 		// It applies to every flipbook in the run, because `assetc` bakes a
 		// tree and has no per-file switches. Re-timing one animation means
 		// baking it on its own.
+		// Native image-array outputs require an explicit positive FPS and derive
+		// their grid and frame count from the selected array.
 		//
 		// @since v0.10
 		float FlipbookFps = 0.0f;
@@ -74,7 +82,7 @@ namespace assetc {
 		// @since v0.24
 		//@{
 		uint8_t FlipbookSide = 0;
-		uint8_t FlipbookFrames = 0;
+		uint16_t FlipbookFrames = 0;
 		//@}
 
 		// Finds the source a model's texture reference means, when the tree

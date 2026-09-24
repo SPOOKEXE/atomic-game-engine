@@ -17,12 +17,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.assets.resample")
 
 using engine::assets::BuildMipChain;
 using engine::assets::MipChainLevels;
+using engine::assets::MipExtent;
 using engine::assets::MipLevelCount;
 using engine::assets::ResizeImage;
 using engine::assets::TextureData;
@@ -255,8 +257,8 @@ TEST_CASE("a sheet whose cells cannot be halved gets no chain at all", "[assets]
 
 	// A grid the dimensions do not divide evenly is the same event: there is no
 	// smaller sheet that still holds the same cells.
-	TextureData ragged = Sheet(2, 4, 4);
-	ragged.FlipbookSide = 3;
+	TextureData ragged = Sheet(2, 3, 4);
+	ragged.FlipbookSide = 4;
 	CHECK(MipChainLevels(ragged) == 1);
 }
 
@@ -276,6 +278,8 @@ TEST_CASE("a resize drops the chain it cannot carry", "[assets][resample]") {
 
 TEST_CASE("a same-size resize copies the base level without retaining mips", "[assets][resample]") {
 	TextureData source = Sheet(2, 4, 3);
+	source.FlipbookFrameRate = 0.0f;
+	source.FlipbookFrameDurations = {0.04f, 0.10f, 0.06f};
 	REQUIRE(BuildMipChain(source));
 	REQUIRE_FALSE(source.Mips.empty());
 
@@ -286,12 +290,24 @@ TEST_CASE("a same-size resize copies the base level without retaining mips", "[a
 	CHECK(out.FlipbookSide == source.FlipbookSide);
 	CHECK(out.FlipbookFrames == source.FlipbookFrames);
 	CHECK(out.FlipbookFrameRate == source.FlipbookFrameRate);
+	CHECK(out.FlipbookFrameDurations == source.FlipbookFrameDurations);
 	CHECK(out.Mips.empty());
 	CHECK(out.IsValid());
 
 	REQUIRE(ResizeImage(source, source.Width, source.Height, source));
 	CHECK(source.Mips.empty());
 	CHECK(source.IsValid());
+	CHECK(source.FlipbookFrameDurations == out.FlipbookFrameDurations);
+}
+
+TEST_CASE("a resized flipbook retains variable timing", "[assets][resample]") {
+	TextureData source = Sheet(2, 4, 3);
+	source.FlipbookFrameRate = 0.0f;
+	source.FlipbookFrameDurations = {0.04f, 0.10f, 0.06f};
+	TextureData resized;
+	REQUIRE(ResizeImage(source, 8, 8, resized));
+	CHECK(resized.FlipbookFrameDurations == source.FlipbookFrameDurations);
+	CHECK(resized.IsValid());
 }
 
 TEST_CASE("building a chain twice gives the same chain", "[assets][resample]") {
@@ -304,4 +320,51 @@ TEST_CASE("building a chain twice gives the same chain", "[assets][resample]") {
 	TextureData twice = once;
 	REQUIRE(BuildMipChain(twice));
 	CHECK(twice.Mips == once.Mips);
+}
+
+TEST_CASE("a built chain matches repeated resize bytes and keeps image metadata", "[assets][resample]") {
+	const TextureData source = Sheet(2, 8, 3);
+	TextureData chained = source;
+	std::vector<std::vector<std::byte>> expected;
+	TextureData previous = source;
+
+	for (uint32_t level = 1; level < MipChainLevels(source); level++) {
+		TextureData next;
+		REQUIRE(ResizeImage(previous, MipExtent(source.Width, level), MipExtent(source.Height, level), next));
+		expected.push_back(next.Pixels);
+		previous = std::move(next);
+	}
+
+	REQUIRE(BuildMipChain(chained));
+	CHECK(chained.Mips == expected);
+	CHECK(chained.Width == source.Width);
+	CHECK(chained.Height == source.Height);
+	CHECK(chained.Format == source.Format);
+	CHECK(chained.Pixels == source.Pixels);
+	CHECK(chained.FlipbookSide == source.FlipbookSide);
+	CHECK(chained.FlipbookFrames == source.FlipbookFrames);
+	CHECK(chained.FlipbookFrameRate == source.FlipbookFrameRate);
+	CHECK(chained.LevelCount() == MipChainLevels(source));
+	CHECK(chained.IsValid());
+
+	for (size_t index = 0; index < chained.Mips.size(); index++) {
+		const uint32_t level = static_cast<uint32_t>(index) + 1;
+		const size_t expectedBytes = static_cast<size_t>(MipExtent(source.Width, level)) *
+									 MipExtent(source.Height, level) *
+									 engine::assets::BytesPerPixel(source.Format);
+		CHECK(chained.Mips[index].size() == expectedBytes);
+	}
+}
+
+TEST_CASE("a failed chain build leaves the input levels alone", "[assets][resample]") {
+	TextureData invalid;
+	invalid.Width = 2;
+	invalid.Height = 2;
+	invalid.Pixels = {std::byte{7}};
+	invalid.Mips = {{std::byte{19}}};
+	const auto priorMips = invalid.Mips;
+
+	CHECK_FALSE(BuildMipChain(invalid));
+	CHECK(invalid.Mips == priorMips);
+	CHECK_FALSE(invalid.IsValid());
 }

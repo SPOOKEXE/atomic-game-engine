@@ -4,7 +4,9 @@
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/assets/TextureSequence.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/imagegraph/Document.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -131,12 +133,44 @@ f 1//1 3//1 2//1
 		REQUIRE(engine::assets::Texture::Read(reader, texture));
 		return texture;
 	}
+
+	engine::imagegraph::Document FlipbookGraph(uint32_t blueWidth = 1) {
+		using namespace engine::imagegraph;
+		Document document;
+		document.FormatVersion = 2;
+		const auto solid = [](std::string id, uint32_t width, Colour colour) {
+			return Node{
+				std::move(id),
+				"image.solid",
+				"",
+				{},
+				{{"width", int64_t{width}}, {"height", int64_t{1}}, {"colour", colour}}
+			};
+		};
+		document.Nodes.push_back(solid("red", 1, {255, 0, 0, 255}));
+		document.Nodes.push_back(solid("blue", blueWidth, {0, 0, 255, 255}));
+		Node array{"frames", "value.array", "", {}, {}};
+		array.DynamicInputs = {
+			{"first", ValueType::Image, std::nullopt},
+			{"second", ValueType::Image, std::nullopt},
+			{"third", ValueType::Image, std::nullopt}
+		};
+		document.Nodes.push_back(std::move(array));
+		document.Links = {
+			{"red", "image", "frames", "first"},
+			{"blue", "image", "frames", "second"},
+			{"red", "image", "frames", "third"}
+		};
+		document.Outputs = {{"animation", "frames", "array"}};
+		return document;
+	}
 }
 
 TEST_CASE("a baked name replaces the extension", "[assetc][bake]") {
 	CHECK(BakedName("characters/miku.pmx") == "characters/miku.amesh");
 	CHECK(BakedName("props/crate.glb") == "props/crate.amesh");
 	CHECK(BakedName("props/crate.OBJ") == "props/crate.amesh");
+	CHECK(BakedName("imagegraphs/spark.graph") == "imagegraphs/spark.atex");
 	CHECK(BakedName("materials/oak.mat") == "materials/oak.amat");
 	CHECK(BakedName("tex/skin.png") == "tex/skin.atex");
 	CHECK(BakedName("tex/skin.jpg") == "tex/skin.atex");
@@ -787,6 +821,273 @@ TEST_CASE("a bake to disk carries no payload", "[assetc][memory]") {
 	// of memory on success - `Baked::Payload` says so and this is what checks it.
 	REQUIRE(report.Assets.front().Payload.empty());
 	REQUIRE(fs::exists(scratch.Out() / "tile.atex"));
+}
+
+TEST_CASE("native image graph rebakes into ordinary texture data", "[assetc][bake][imagegraph]") {
+	const Scratch scratch("imagegraph-static");
+	const auto document = [](int red, int green) {
+		return "imagegraph 1\n"
+			   "node \"solid\" \"image.solid\" \"\" 0 0\n"
+			   "value 0 \"solid\" \"width\" i 4\n"
+			   "value 0 \"solid\" \"height\" i 4\n"
+			   "value 0 \"solid\" \"colour\" c " +
+			   std::to_string(red) + " " + std::to_string(green) +
+			   " 0 255\n"
+			   "output \"final\" \"solid\" \"image\"\n";
+	};
+	scratch.Write("imagegraphs/spark.graph", document(255, 0));
+	Settings settings;
+	settings.GraphOutput = "final";
+	settings.GraphTick = 0;
+	settings.GraphSeed = 9;
+	const Report first = Baked(scratch, settings);
+	REQUIRE(first.Failures == 0);
+	REQUIRE(first.Assets.size() == 1);
+	REQUIRE(first.Assets.front().Output == "imagegraphs/spark.atex");
+	const auto initial = ReadTexture(scratch.Out() / "imagegraphs/spark.atex");
+	REQUIRE(initial.IsValid());
+	CHECK(initial.Width == 4);
+	CHECK(initial.Height == 4);
+	CHECK(initial.LevelCount() == 3);
+	CHECK(std::to_integer<uint8_t>(initial.Pixels[0]) == 255);
+	CHECK(std::to_integer<uint8_t>(initial.Pixels[1]) == 0);
+	scratch.Write("imagegraphs/spark.graph", document(0, 255));
+	const Report second = Baked(scratch, settings);
+	REQUIRE(second.Failures == 0);
+	const auto updated = ReadTexture(scratch.Out() / "imagegraphs/spark.atex");
+	REQUIRE(updated.IsValid());
+	CHECK(std::to_integer<uint8_t>(updated.Pixels[0]) == 0);
+	CHECK(std::to_integer<uint8_t>(updated.Pixels[1]) == 255);
+	CHECK(updated.Mips.size() == initial.Mips.size());
+}
+
+TEST_CASE("native graph with several outputs needs an explicit selector", "[assetc][bake][imagegraph]") {
+	const Scratch scratch("imagegraph-output-choice");
+	scratch.Write(
+		"choice.graph",
+		"imagegraph 1\n"
+		"node \"solid\" \"image.solid\" \"\" 0 0\n"
+		"value 0 \"solid\" \"width\" i 2\n"
+		"value 0 \"solid\" \"height\" i 2\n"
+		"value 0 \"solid\" \"colour\" c 7 9 11 255\n"
+		"output \"first\" \"solid\" \"image\"\n"
+		"output \"second\" \"solid\" \"image\"\n"
+	);
+	const Report refused = Baked(scratch, Settings{});
+	REQUIRE(refused.Failures == 1);
+	REQUIRE(refused.Assets.size() == 1);
+	CHECK_FALSE(fs::exists(scratch.Out() / "choice.atex"));
+	Settings selected;
+	selected.GraphOutput = "second";
+	const Report accepted = Baked(scratch, selected);
+	REQUIRE(accepted.Failures == 0);
+	CHECK(ReadTexture(scratch.Out() / "choice.atex").IsValid());
+}
+
+TEST_CASE("graph output keeps numeric format and authored atlas facts", "[assetc][bake][imagegraph]") {
+	const Scratch scratch("imagegraph-texture-facts");
+	scratch.Write(
+		"tile.graph",
+		"imagegraph 1\n"
+		"node \"solid\" \"image.solid\" \"\" 0 0\n"
+		"value 0 \"solid\" \"width\" i 4\n"
+		"value 0 \"solid\" \"height\" i 4\n"
+		"value 0 \"solid\" \"colour\" c 70 80 90 255\n"
+		"output \"final\" \"solid\" \"image\"\n"
+	);
+	scratch.Write("surface.mat", "normal = tile.graph\n");
+	Settings settings;
+	settings.GraphOutput = "final";
+	settings.FlipbookSide = 2;
+	settings.FlipbookFrames = 3;
+	settings.FlipbookFps = 12.0f;
+	const Report report = Baked(scratch, settings);
+	REQUIRE(report.Failures == 0);
+	const auto texture = ReadTexture(scratch.Out() / "tile.atex");
+	CHECK(texture.Format == engine::assets::TextureFormat::RGBA8_LINEAR);
+	CHECK(texture.FlipbookSide == 2);
+	CHECK(texture.FlipbookFrames == 3);
+	CHECK(texture.FlipbookFrameRate == 12.0f);
+	CHECK(texture.LevelCount() == 2);
+}
+
+TEST_CASE(
+	"flat graph image array bakes ordered repeated frames and transparent padding",
+	"[assetc][bake][imagegraph]"
+) {
+	const Scratch scratch("imagegraph-flipbook");
+	auto document = FlipbookGraph();
+	scratch.Write("frames.graph", engine::imagegraph::Write(document));
+	Settings settings;
+	settings.FlipbookFps = 12.5f;
+	const Report first = Baked(scratch, settings);
+	REQUIRE(first.Failures == 0);
+	REQUIRE(first.Assets.size() == 1);
+	REQUIRE(first.Assets[0].Output == "frames.atex");
+	const auto texture = ReadTexture(scratch.Out() / "frames.atex");
+	REQUIRE(texture.IsValid());
+	CHECK(texture.Width == 2);
+	CHECK(texture.Height == 2);
+	CHECK(texture.FlipbookSide == 2);
+	CHECK(texture.FlipbookFrames == 3);
+	CHECK(texture.FlipbookFrameRate == 12.5f);
+	CHECK(texture.LevelCount() == 1);
+	const auto pixel = [&](const engine::assets::TextureData &image, size_t cell) {
+		const size_t offset = cell * 4;
+		return std::array{
+			std::to_integer<uint8_t>(image.Pixels[offset]),
+			std::to_integer<uint8_t>(image.Pixels[offset + 1]),
+			std::to_integer<uint8_t>(image.Pixels[offset + 2]),
+			std::to_integer<uint8_t>(image.Pixels[offset + 3])
+		};
+	};
+	CHECK(pixel(texture, 0) == (std::array<uint8_t, 4>{255, 0, 0, 255}));
+	CHECK(pixel(texture, 1) == (std::array<uint8_t, 4>{0, 0, 255, 255}));
+	CHECK(pixel(texture, 2) == (std::array<uint8_t, 4>{255, 0, 0, 255}));
+	CHECK(pixel(texture, 3) == (std::array<uint8_t, 4>{0, 0, 0, 0}));
+
+	document.Nodes[0].Values[2].Data = engine::imagegraph::Colour{0, 255, 0, 255};
+	scratch.Write("frames.graph", engine::imagegraph::Write(document));
+	const Report second = Baked(scratch, settings);
+	REQUIRE(second.Failures == 0);
+	const auto updated = ReadTexture(scratch.Out() / "frames.atex");
+	CHECK(pixel(updated, 0) == (std::array<uint8_t, 4>{0, 255, 0, 255}));
+	CHECK(pixel(updated, 2) == (std::array<uint8_t, 4>{0, 255, 0, 255}));
+	CHECK(pixel(updated, 3) == (std::array<uint8_t, 4>{0, 0, 0, 0}));
+}
+
+TEST_CASE(
+	"graph flipbook rejects missing rate, incompatible cells and nested shape", "[assetc][bake][imagegraph]"
+) {
+	const Scratch scratch("imagegraph-flipbook-invalid");
+	const auto write = [&](const engine::imagegraph::Document &document) {
+		scratch.Write("frames.graph", engine::imagegraph::Write(document));
+	};
+	write(FlipbookGraph());
+	const Report missingRate = Baked(scratch, Settings{});
+	REQUIRE(missingRate.Failures == 1);
+	CHECK(missingRate.Assets[0].Failure.find("--flipbook-fps") != std::string::npos);
+	CHECK_FALSE(fs::exists(scratch.Out() / "frames.atex"));
+	Settings settings;
+	settings.FlipbookFps = 12.0f;
+	settings.MaximumTexture = 1;
+	const Report capped = Baked(scratch, settings);
+	REQUIRE(capped.Failures == 1);
+	CHECK(capped.Assets[0].Failure.find("dimension limit") != std::string::npos);
+	settings.MaximumTexture = 2048;
+	write(FlipbookGraph(2));
+	const Report unequal = Baked(scratch, settings);
+	REQUIRE(unequal.Failures == 1);
+	CHECK(unequal.Assets[0].Failure.find("equal-size RGBA8") != std::string::npos);
+
+	auto nested = FlipbookGraph();
+	nested.Nodes[2].DynamicInputs.resize(1);
+	nested.Links.resize(1);
+	engine::imagegraph::Node outer{"outer", "value.array", "", {}, {}};
+	outer.DynamicInputs.push_back({"child", engine::imagegraph::ValueType::Array, std::nullopt});
+	nested.Nodes.push_back(std::move(outer));
+	nested.Links.push_back({"frames", "array", "outer", "child"});
+	nested.Outputs = {{"animation", "outer", "array"}};
+	write(nested);
+	const Report nestedResult = Baked(scratch, settings);
+	REQUIRE(nestedResult.Failures == 1);
+	CHECK(nestedResult.Assets[0].Failure.find("flat") != std::string::npos);
+
+	auto tooMany = FlipbookGraph();
+	tooMany.Nodes[2].DynamicInputs.clear();
+	tooMany.Links.clear();
+	for (size_t group = 0; group < 4; group++) {
+		const std::string nodeId = group == 0 ? "frames" : "frames" + std::to_string(group);
+		if (group > 0) tooMany.Nodes.push_back({nodeId, "value.array", "", {}, {}});
+		auto &array = tooMany.Nodes[group == 0 ? 2 : tooMany.Nodes.size() - 1];
+		for (size_t index = 0; index < 64; index++) {
+			const std::string port = "frame" + std::to_string(index);
+			array.DynamicInputs.push_back({port, engine::imagegraph::ValueType::Image, std::nullopt});
+			tooMany.Links.push_back({"red", "image", nodeId, port});
+		}
+	}
+	engine::imagegraph::Node spread{"spread", "value.array", "", {}, {{"spread", true}}};
+	for (size_t group = 0; group < 4; group++) {
+		spread.DynamicInputs.push_back(
+			{"group" + std::to_string(group), engine::imagegraph::ValueType::Array, std::nullopt}
+		);
+	}
+	tooMany.Nodes.push_back(std::move(spread));
+	for (size_t group = 0; group < 4; group++) {
+		const std::string nodeId = group == 0 ? "frames" : "frames" + std::to_string(group);
+		tooMany.Links.push_back({nodeId, "array", "spread", "group" + std::to_string(group)});
+	}
+	tooMany.Outputs = {{"animation", "spread", "array"}};
+	write(tooMany);
+	const Report atLimit = Baked(scratch, settings);
+	REQUIRE(atLimit.Failures == 0);
+	const auto packed = ReadTexture(scratch.Out() / "frames.atex");
+	CHECK(packed.FlipbookSide == 16);
+	CHECK(packed.FlipbookFrames == 256);
+
+	tooMany.Nodes.back().DynamicInputs.push_back(
+		{"last", engine::imagegraph::ValueType::Image, std::nullopt}
+	);
+	tooMany.Links.push_back({"blue", "image", "spread", "last"});
+	write(tooMany);
+	const Report overCount = Baked(scratch, settings);
+	REQUIRE(overCount.Failures == 0);
+	REQUIRE(overCount.Assets[0].Output == "frames.aseq");
+	CHECK(overCount.Assets[0].Kind == AssetKind::Animation);
+	const auto rawSequence = [&] {
+		std::ifstream file(scratch.Out() / "frames.aseq", std::ios::binary);
+		return std::vector<char>(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+	}();
+	engine::core::ByteReader sequenceReader(
+		{reinterpret_cast<const std::byte *>(rawSequence.data()), rawSequence.size()}
+	);
+	engine::assets::TextureSequenceData sequence;
+	REQUIRE(engine::assets::TextureSequence::Read(sequenceReader, sequence));
+	REQUIRE(sequence.FrameDurations.size() == 257);
+	CHECK(sequence.FrameDurations[0] == Catch::Approx(1.0f / settings.FlipbookFps));
+	CHECK(sequence.FrameDurations[256] == Catch::Approx(1.0f / settings.FlipbookFps));
+	CHECK(std::to_integer<uint8_t>(sequence.FramePixels(0)[0]) == 255);
+	CHECK(std::to_integer<uint8_t>(sequence.FramePixels(256)[2]) == 255);
+	settings.FlipbookFps = 0.0f;
+	const Report missingSequenceRate = Baked(scratch, settings);
+	REQUIRE(missingSequenceRate.Failures == 1);
+	CHECK(missingSequenceRate.Assets[0].Failure.find("--flipbook-fps") != std::string::npos);
+	settings.FlipbookFps = 12.0f;
+
+	write(FlipbookGraph());
+	settings.FlipbookSide = 2;
+	settings.FlipbookFrames = 3;
+	const Report conflictingLayout = Baked(scratch, settings);
+	REQUIRE(conflictingLayout.Failures == 1);
+	CHECK(conflictingLayout.Assets[0].Failure.find("computes its own") != std::string::npos);
+
+	settings.FlipbookSide = 0;
+	settings.FlipbookFrames = 0;
+	settings.MaximumTexture = 0;
+	auto large = FlipbookGraph();
+	for (auto &node : large.Nodes) {
+		if (node.Type != "image.solid") continue;
+		node.Values[0].Data = int64_t{2048};
+		node.Values[1].Data = int64_t{2048};
+	}
+	write(large);
+	const Report overBytes = Baked(scratch, settings);
+	REQUIRE(overBytes.Failures == 1);
+	CHECK(overBytes.Assets[0].Failure.find("64 MiB") != std::string::npos);
+}
+
+TEST_CASE("oversized native graph is refused before it is read", "[assetc][bake][imagegraph]") {
+	const Scratch scratch("imagegraph-byte-limit");
+	{
+		std::ofstream file(scratch.In() / "oversized.graph", std::ios::binary);
+		file.seekp(8u * 1024u * 1024u);
+		file.put('x');
+	}
+	const Report report = Baked(scratch, Settings{});
+	REQUIRE(report.Failures == 1);
+	REQUIRE(report.Assets.size() == 1);
+	CHECK(report.Assets.front().Failure.find("8 MiB") != std::string::npos);
+	CHECK_FALSE(fs::exists(scratch.Out() / "oversized.atex"));
 }
 
 TEST_CASE("a drawing bakes to a texture at the cap rather than past it", "[assetc][bake]") {

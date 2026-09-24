@@ -172,25 +172,29 @@ namespace engine::assets {
 		// which is where the same number ends up.
 		//
 		// @since v0.10
-		uint8_t FlipbookFrames = 0;
+		uint16_t FlipbookFrames = 0;
 
 		// Frames a second the source was authored at, or zero when unknown.
 		//
-		// **Read from the source rather than assumed.** A GIF states a delay
-		// per frame and this is what those delays average to; a sheet drawn by
+		// **Read from the source rather than assumed.** A fixed-delay GIF states
+		// one exact rate; a sheet drawn by
 		// hand states nothing, which is what zero means. A consumer that gets
 		// zero picks its own rate - for a particle that is "one loop over the
 		// lifetime", which is what the engine did before there was anything to
 		// ask.
 		//
-		// **One rate for the sheet, and a GIF may not have one.** Per-frame
-		// delays are a thing GIF permits and encoders occasionally use; a
-		// flipbook has a single rate by construction, so a varying one is
-		// averaged and that is a real approximation rather than a lossless
-		// conversion.
+		// **One rate for the sheet.** A GIF with varying delays is refused until
+		// the texture and effect contracts can preserve each duration.
 		//
 		// @since v0.10
 		float FlipbookFrameRate = 0.0f;
+
+		// Authored time for each populated cell, in seconds. Empty means the
+		// fixed-rate path above. A nonempty list has exactly FlipbookFrames
+		// positive finite entries and owns the timing, so FrameRate is zero.
+		//
+		// @since v0.26
+		std::vector<float> FlipbookFrameDurations;
 
 		// Whether this describes an image at all.
 		//
@@ -229,8 +233,10 @@ namespace engine::assets {
 
 		// The version. Bumped when the layout changes, never reused.
 		//
-		// **3 adds the mip chain, 2 added the three flipbook fields, and 1 is
-		// still read.** Not compatibility for its own sake - this is pre-release
+		// **5 adds exact per-frame durations for variable timing, 4 widens the frame
+		// count, 3 adds the mip chain, 2 added the flipbook fields, and 1 is
+		// still read.** Fixed-rate writers retain the v4 layout. This is not
+		// compatibility for its own sake - this is pre-release
 		// and the standing rule is that a format break is acceptable - but
 		// because every absent case has an obviously right answer: a v1 file is a
 		// still image and a v2 file is a texture with one level, which is what
@@ -243,7 +249,7 @@ namespace engine::assets {
 		// unreachable. **The count is bounded by `MipLevelCount` of the
 		// dimensions rather than by a constant of its own**, which is the tighter
 		// bound and the one that stays true if `MAXIMUM_DIMENSION` moves.
-		static constexpr uint16_t VERSION = 3;
+		static constexpr uint16_t VERSION = 5;
 
 		// The largest image this will read.
 		//
@@ -266,7 +272,9 @@ namespace engine::assets {
 		//
 		// Refuses a wrong magic, an unknown version, a format outside the enum,
 		// a dimension of zero or past `MAXIMUM_DIMENSION`, a level count of zero
-		// or past what the dimensions allow, and a pixel count that disagrees
+		// or past what the dimensions allow, a frame count outside its grid,
+		// a v5 duration count or value that cannot form a finite positive timeline,
+		// and a pixel count that disagrees
 		// with the dimensions. **The whole chain's size is summed and checked
 		// against the bytes actually present before anything is allocated**,
 		// which is the difference between a refusal and a decompression bomb.

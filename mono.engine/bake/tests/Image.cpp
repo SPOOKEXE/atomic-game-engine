@@ -871,20 +871,34 @@ TEST_CASE("a GIF's delays become one frame rate", "[bake]") {
 	CHECK(texture.Height == 2);
 }
 
-TEST_CASE("frames with different delays average to one rate", "[bake]") {
-	// **A real approximation, stated rather than hidden.** GIF permits a delay
-	// per frame and a flipbook has one rate by construction, so a sheet cannot
-	// hold both - the total duration over the frame count is what a single rate
-	// can honestly be. `fox_dance.gif` is exactly this case: forty-eight frames
-	// alternating four and five hundredths, two seconds, 24fps.
+TEST_CASE("frames with different delays retain their authored timeline", "[bake]") {
 	engine::assets::TextureData texture;
 	std::string failure;
 
 	REQUIRE(engine::bake::ReadImage(AnimatedGif({4, 5, 4, 5}), texture, failure));
+	CHECK(failure.empty());
+	CHECK(texture.FlipbookFrameRate == 0.0f);
+	REQUIRE(texture.FlipbookFrameDurations.size() == 4);
+	CHECK(texture.FlipbookFrameDurations[0] == Catch::Approx(0.04f));
+	CHECK(texture.FlipbookFrameDurations[1] == Catch::Approx(0.05f));
+	CHECK(texture.FlipbookFrameDurations[2] == Catch::Approx(0.04f));
+	CHECK(texture.FlipbookFrameDurations[3] == Catch::Approx(0.05f));
+}
 
-	// 0.18 seconds for four frames.
-	CHECK(texture.FlipbookFrames == 4);
-	CHECK(texture.FlipbookFrameRate == Catch::Approx(4.0f / 0.18f).epsilon(0.001));
+TEST_CASE("a GIF keeps at most 256 frames", "[bake]") {
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	const std::vector<uint16_t> limit(256, 4);
+	REQUIRE(engine::bake::ReadImage(AnimatedGif(limit), texture, failure));
+	CHECK(texture.FlipbookSide == 16);
+	CHECK(texture.FlipbookFrames == 256);
+	CHECK(texture.Width == 32);
+	CHECK(texture.Height == 16);
+
+	const std::vector<uint16_t> overLimit(257, 4);
+	CHECK_FALSE(engine::bake::ReadImage(AnimatedGif(overLimit), texture, failure));
+	CHECK(failure.find("more than 256") != std::string::npos);
 }
 
 TEST_CASE("a delay of zero is read the way every browser reads it", "[bake]") {

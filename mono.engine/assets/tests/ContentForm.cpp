@@ -49,6 +49,7 @@ namespace {
 		{"ashader", ContentForm::AShader, AssetKind::Shader, false},
 
 		{"atex", ContentForm::ATex, AssetKind::Texture, false},
+		{"aseq", ContentForm::ASeq, AssetKind::Animation, false},
 		{"png", ContentForm::Png, AssetKind::Texture, true},
 		{"jpg", ContentForm::Jpeg, AssetKind::Texture, true},
 		{"jpeg", ContentForm::Jpeg, AssetKind::Texture, true},

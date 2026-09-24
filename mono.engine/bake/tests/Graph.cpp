@@ -48,6 +48,18 @@ namespace {
 		0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00,
 	}};
 
+	std::vector<uint8_t> TimedGif() {
+		std::vector<uint8_t> bytes{
+			'G', 'I', 'F', '8', '9', 'a', 2, 0, 1, 0, 0x80, 0, 0, 0xFF, 0, 0, 0, 0, 0xFF,
+		};
+		for (const uint8_t delay : {4u, 5u}) {
+			bytes.insert(bytes.end(), {0x21, 0xF9, 4, 0, delay, 0, 0, 0});
+			bytes.insert(bytes.end(), {0x2C, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 2, 0x44, 0x0A, 0});
+		}
+		bytes.push_back(0x3B);
+		return bytes;
+	}
+
 	std::span<const std::byte> Bytes(std::span<const uint8_t> raw) {
 		return {reinterpret_cast<const std::byte *>(raw.data()), raw.size()};
 	}
@@ -248,6 +260,41 @@ TEST_CASE("a static RGBA atlas gains checked flipbook facts", "[bake][graph]") {
 		REQUIRE(invalid.Connect(badImport, badAtlas));
 		CHECK(Ran(invalid).find("static RGBA flipbook atlas") != std::string::npos);
 	}
+}
+
+TEST_CASE("a static atlas retains 256 frame metadata", "[bake][graph]") {
+	Graph graph;
+	const NodeId source = graph.AddSource("textures/particles.bmp", Bytes(BMP));
+	const NodeId import = graph.Add(NodeKind::Import);
+	const NodeId resize = graph.AddResize(16, 16);
+	const NodeId flipbook = graph.AddFlipbook(16, 256, 24.0f);
+	REQUIRE(graph.Connect(source, import));
+	REQUIRE(graph.Connect(import, resize));
+	REQUIRE(graph.Connect(resize, flipbook));
+	REQUIRE(Ran(graph).empty());
+	CHECK(graph.Output(flipbook).Texture.FlipbookSide == 16);
+	CHECK(graph.Output(flipbook).Texture.FlipbookFrames == 256);
+}
+
+TEST_CASE("retiming a variable GIF scales each duration through the written texture", "[bake][graph]") {
+	Graph graph;
+	const std::vector<uint8_t> gif = TimedGif();
+	const NodeId source = graph.AddSource("textures/variable.gif", Bytes(gif));
+	const NodeId import = graph.Add(NodeKind::Import);
+	const NodeId retime = graph.AddRetime(10.0f);
+	const NodeId write = graph.AddWrite("textures/variable");
+	REQUIRE(graph.Connect(source, import));
+	REQUIRE(graph.Connect(import, retime));
+	REQUIRE(graph.Connect(retime, write));
+	REQUIRE(Ran(graph).empty());
+	REQUIRE(graph.Baked().size() == 1);
+	TextureData read;
+	ByteReader reader(graph.Baked()[0].Bytes);
+	REQUIRE(engine::assets::Texture::Read(reader, read));
+	REQUIRE(read.FlipbookFrameDurations.size() == 2);
+	CHECK(read.FlipbookFrameRate == 0.0f);
+	CHECK(read.FlipbookFrameDurations[0] == Approx(0.2f * 4.0f / 9.0f));
+	CHECK(read.FlipbookFrameDurations[1] == Approx(0.2f * 5.0f / 9.0f));
 }
 
 TEST_CASE("an opaque node fills the alpha channel", "[bake][graph]") {

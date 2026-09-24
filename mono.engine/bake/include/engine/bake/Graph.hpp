@@ -185,15 +185,15 @@ namespace engine::bake {
 		// Marks a static RGBA atlas as a flipbook.
 		//
 		// The input must be an ordinary RGBA8 texture whose width and height both
-		// divide evenly by `side`. The engine draws grids no wider than 8x8, so
-		// every side is one of 1, 2, 4 and 8 and `frames` cannot exceed its cells.
+		// divide evenly by `side`. The engine draws grids no wider than 16x16, so
+		// every side is one of 1, 2, 4, 8 and 16 and `frames` cannot exceed its cells.
 		//
 		// @param side   Cells along one atlas edge.
 		// @param frames Populated cells, in row-major order.
 		// @param fps    Authored frames per second.
 		// @return The node.
 		// @since v0.24
-		NodeId AddFlipbook(uint8_t side, uint8_t frames, float fps);
+		NodeId AddFlipbook(uint8_t side, uint16_t frames, float fps);
 
 		// Adds a `Decimate` node.
 		//
@@ -258,7 +258,7 @@ namespace engine::bake {
 			uint32_t Width = 0;
 			uint32_t Height = 0;
 			uint8_t FlipbookSide = 0;
-			uint8_t FlipbookFrames = 0;
+			uint16_t FlipbookFrames = 0;
 			Payload Result;
 		};
 

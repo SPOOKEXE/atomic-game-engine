@@ -378,6 +378,19 @@ fuzz-ui runs="1000" compiler="clang++-21":
         "$fuzz_build/fuzz/$target" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$artifacts/"
     done
 
+# Coverage-guided parsing of bounded PXCX archives under AddressSanitizer and UBSan.
+bake-pxcx-fuzz runs="1000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/gui-fuzz"
+    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_GUI=ON -DMONO_FUZZ_BAKE=ON
+    cmake --build "$fuzz_build" --target fuzz_bake_pxcx -j 4
+    corpus="$fuzz_build/fuzz/fuzz_bake_pxcx-corpus"
+    artifacts="$fuzz_build/fuzz/fuzz_bake_pxcx-artifacts"
+    mkdir -p "$corpus" "$artifacts"
+    "$fuzz_build/fuzz/fuzz_bake_pxcx" --write-seeds "$corpus"
+    "$fuzz_build/fuzz/fuzz_bake_pxcx" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=2048 -malloc_limit_mb=128 -artifact_prefix="$artifacts/"
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A

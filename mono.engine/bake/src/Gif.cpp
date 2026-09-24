@@ -1,24 +1,9 @@
-// GIF87a/GIF89a into one flipbook sheet.
+// GIF87a/GIF89a into one flipbook sheet or an ordered frame sequence.
 //
-// **The output is a grid and not a list of frames, and that is the whole design
-// decision.** `ROADMAP.md` v0.10 asks for GIF support and for flipbook particle
-// animation in the same version, and they are the same feature seen from two
-// ends: a GIF is a short looping animation, and the thing this engine can already
-// *draw* animated is a flipbook - `effects::FlipbookLayout`, a square
-// power-of-two grid sampled by cell. So a decoded GIF is laid out as that grid
-// and becomes an ordinary texture, which every path in the engine already
-// handles.
-//
-// The alternative was an animated texture type: a `TextureData` per frame, a
-// player, a clock, and a second thing for the renderer to bind per draw. That is
-// a real feature and it is not this one - and it would leave a GIF unable to be a
-// particle, which is the case that actually asked for it.
-//
-// **What that costs is stated rather than hidden.** A grid is square and a power
-// of two on each side, so a 12-frame GIF lands in a 4x4 with four cells unused
-// and a 70-frame GIF is truncated to 64. Both are reported through `failure`
-// being left alone and the frame count being what it is; a caller that cares
-// reads the sheet's dimensions.
+// Short GIFs become a square power-of-two flipbook sheet. Longer GIFs can be
+// decoded as an ordered `.aseq` sequence with their individual frame delays.
+// The atlas reader still refuses a 257th frame because its 16x16 grid cannot
+// address one; neither reader drops source frames.
 //
 // ## What is supported
 //
@@ -29,10 +14,13 @@
 
 #include "Decoders.hpp"
 
+#include <engine/bake/GifSequence.hpp>
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace engine::bake {
@@ -40,18 +28,17 @@ namespace engine::bake {
 	namespace {
 		// The largest sheet this will build, on a side.
 		//
-		// **8x8 cells, matching `effects::FlipbookLayout`'s widest.** A GIF with
-		// more frames than that is truncated rather than refused: a 100-frame
-		// animation played as its first 64 is a shorter animation, and refusing it
-		// would turn a usable asset into a failed import.
-		constexpr uint32_t MAX_SIDE = 8;
+		// **16x16 cells, the largest grid the flipbook contract accepts.** A
+		// 257th frame is refused below rather than quietly discarded.
+		constexpr uint32_t MAX_SIDE = 16;
 
-		// The largest canvas or output sheet this decoder will allocate.
+		// The largest canvas or RGBA8 output sheet the atlas reader will allocate.
 		//
 		// The sheet has a grid cap below, but the compositing canvas is allocated
 		// before that grid exists. It needs the same bound before a hostile header
-		// can turn two 16-bit dimensions into a multi-gigabyte allocation.
-		constexpr uint64_t MAXIMUM_PIXELS = 64ull * 1024 * 1024;
+		// can turn two 16-bit dimensions into a multi-gigabyte allocation. Four
+		// bytes per pixel keeps its canvas and output at the 64 MiB bake bound.
+		constexpr uint64_t MAXIMUM_PIXELS = (64ull * 1024 * 1024) / 4;
 
 		// What a delay of 0 or 1 is taken to mean, in hundredths of a second.
 		//
@@ -291,7 +278,16 @@ namespace engine::bake {
 		}
 	}
 
-	bool ReadGif(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure) {
+	bool DecodeGif(
+		std::span<const std::byte> bytes,
+		assets::TextureData *atlas,
+		assets::TextureSequenceData *sequence,
+		std::string &failure
+	) {
+		const uint32_t maximumFrames =
+			sequence ? assets::TextureSequence::MAXIMUM_FRAMES : MAX_SIDE * MAX_SIDE;
+		const uint64_t maximumFrameBytes =
+			sequence ? assets::TextureSequence::MAXIMUM_PIXEL_BYTES : 64ull * 1024 * 1024;
 		Reader reader{bytes, 0};
 
 		if (!reader.Has(13)) {
@@ -345,27 +341,26 @@ namespace engine::bake {
 		// The delay the last graphic control block named, in hundredths of a
 		// second, and the sum of the ones that were actually used.
 		//
-		// **Summed rather than kept per frame, because a flipbook has one
-		// rate.** GIF permits a different delay on every frame and encoders
-		// occasionally use it; a grid sampled by cell index cannot express that,
-		// so the total over the whole animation is what a single rate is derived
-		// from. That is a real approximation and `TextureData::FlipbookFrameRate`
-		// says so rather than pretending the conversion is lossless.
+		// A flipbook has one rate. Retain the first normalised GIF delay so a
+		// variable-delay source can be refused instead of losing its timing.
 		uint16_t pendingDelay = 0;
 		uint64_t totalHundredths = 0;
+		uint16_t firstDelay = 0;
+		bool varyingDelays = false;
+		std::vector<uint16_t> frameDelays;
 
 		std::vector<uint8_t> blocks;
 		std::vector<uint8_t> indices;
 		std::vector<Pixel> local;
 
-		// Counted past the cap so the line below can say what was lost rather
-		// than only what was kept.
 		uint32_t seenImages = 0;
+		bool sawTrailer = false;
 
-		while (reader.Has(1) && frames.size() < MAX_SIDE * MAX_SIDE) {
+		while (reader.Has(1)) {
 			const uint8_t marker = reader.Byte();
 
 			if (marker == 0x3B) {
+				sawTrailer = true;
 				break; // Trailer.
 			}
 
@@ -409,6 +404,10 @@ namespace engine::bake {
 
 			// An image descriptor.
 			seenImages++;
+			if (seenImages > maximumFrames) {
+				failure = sequence ? "a GIF has more than 4096 frames" : "a GIF has more than 256 frames";
+				return false;
+			}
 			if (!reader.Has(9)) {
 				failure = "an image descriptor running past the end";
 				return false;
@@ -482,6 +481,14 @@ namespace engine::bake {
 				}
 			}
 
+			// Each composited frame is a full canvas. Refuse before adding it to
+			// the retained frame list, including when the compressed source is tiny.
+			const uint64_t frameBytes = uint64_t(canvasWidth) * canvasHeight * sizeof(Pixel);
+			if (seenImages > maximumFrameBytes / frameBytes) {
+				failure = sequence ? "a GIF sequence exceeds 256 MiB of frame pixels"
+								   : "a GIF flipbook exceeds 64 MiB of frame pixels";
+				return false;
+			}
 			frames.push_back(canvas);
 
 			// **A delay of 0 or 1 means "as fast as the viewer can", and every
@@ -489,7 +496,14 @@ namespace engine::bake {
 			// than the specification is the right call here: an encoder writing
 			// zero expected the thing everybody actually does, and taking it
 			// literally would divide by zero or claim a hundred frames a second.
-			totalHundredths += pendingDelay < 2 ? DEFAULT_HUNDREDTHS : pendingDelay;
+			const uint16_t frameDelay = pendingDelay < 2 ? DEFAULT_HUNDREDTHS : pendingDelay;
+			if (frames.size() == 1) {
+				firstDelay = frameDelay;
+			} else if (frameDelay != firstDelay) {
+				varyingDelays = true;
+			}
+			totalHundredths += frameDelay;
+			frameDelays.push_back(frameDelay);
 			pendingDelay = 0;
 
 			if (disposal == 2) {
@@ -504,20 +518,61 @@ namespace engine::bake {
 			}
 		}
 
+		if (!sawTrailer) {
+			failure = "a GIF missing its trailer";
+			return false;
+		}
 		if (frames.empty()) {
 			failure = "a GIF with no frames";
 			return false;
 		}
+		if (sequence) {
+			assets::TextureSequenceData decoded;
+			decoded.Width = canvasWidth;
+			decoded.Height = canvasHeight;
+			decoded.FrameDurations.reserve(frameDelays.size());
+			decoded.Pixels.reserve(frames.size() * uint64_t(canvasWidth) * canvasHeight * 4);
+			float end = 0.0f;
+			for (const uint16_t delay : frameDelays) {
+				const float duration = static_cast<float>(delay) / 100.0f;
+				const float next = end + duration;
+				if (!std::isfinite(next) || next <= end) {
+					failure = "a GIF frame delay cannot be represented on the sequence timeline";
+					return false;
+				}
+				decoded.FrameDurations.push_back(duration);
+				end = next;
+			}
+			for (const auto &frame : frames) {
+				for (const Pixel &pixel : frame) {
+					decoded.Pixels.push_back(static_cast<std::byte>(pixel.R));
+					decoded.Pixels.push_back(static_cast<std::byte>(pixel.G));
+					decoded.Pixels.push_back(static_cast<std::byte>(pixel.B));
+					decoded.Pixels.push_back(static_cast<std::byte>(pixel.A));
+				}
+			}
+			if (!decoded.IsValid()) {
+				failure = "a GIF sequence exceeds its frame or pixel limit";
+				return false;
+			}
+			*sequence = std::move(decoded);
+			return true;
+		}
 
-		// **The truncation is documented in the file comment and silent at run
-		// time.** A 70-frame GIF becomes a 64-frame one and the animation is
-		// simply shorter, which is the kind of thing a person reports as the
-		// import being broken.
-		if (reader.Has(1) && frames.size() >= MAX_SIDE * MAX_SIDE) {
-			ENGINE_WARN(
-				"gif truncated at {} frames; the grid holds no more and the rest of the file is not read",
-				frames.size()
-			);
+		std::vector<float> durations;
+		if (varyingDelays) {
+			durations.reserve(frameDelays.size());
+			float end = 0.0f;
+			for (const uint16_t delay : frameDelays) {
+				const float duration = static_cast<float>(delay) / 100.0f;
+				const float next = end + duration;
+				if (!std::isfinite(next) || next <= end) {
+					failure = "a GIF frame delay cannot be represented on the flipbook timeline";
+					return false;
+				}
+				durations.push_back(duration);
+				end = next;
+			}
 		}
 		ENGINE_DEBUG(
 			"gif: {} frame(s) kept of {} image descriptor(s), {}x{} canvas",
@@ -540,34 +595,34 @@ namespace engine::bake {
 		const uint32_t sheetHeight = canvasHeight * side;
 
 		// The same ceiling every other decoder here uses, so a hostile GIF cannot
-		// ask for a gigabyte by claiming a large canvas and sixty-four frames.
+		// ask for a gigabyte by claiming a large canvas and 256 frames.
 		if (static_cast<uint64_t>(sheetWidth) * sheetHeight > MAXIMUM_PIXELS) {
 			failure = "a GIF whose flipbook would be larger than the pixel ceiling";
 			return false;
 		}
 
-		out.Width = sheetWidth;
-		out.Height = sheetHeight;
-		out.Format = assets::TextureFormat::RGBA8;
+		atlas->Width = sheetWidth;
+		atlas->Height = sheetHeight;
+		atlas->Format = assets::TextureFormat::RGBA8;
 
 		// **The grid, how much of it holds a frame, and how fast it plays.**
 		// Without these three the sheet is just pixels: a 4x4 flipbook and a 4x4
 		// tile atlas are the same image, and every scene that wanted to play one
 		// would have to be told the numbers by hand. `TextureData` carries why
 		// they belong on the texture rather than on whatever draws it.
-		out.FlipbookSide = static_cast<uint8_t>(side);
-		out.FlipbookFrames = static_cast<uint8_t>(frames.size());
+		atlas->FlipbookSide = static_cast<uint8_t>(side);
+		atlas->FlipbookFrames = static_cast<uint16_t>(frames.size());
 
-		// Total duration over frame count, which is a mean and is stated as one.
-		// A GIF whose frames each name a different delay cannot be a flipbook
-		// without this approximation, and the alternative - refusing it - would
-		// turn a usable asset into a failed import for a property nothing in the
-		// engine could have used anyway.
+		// Equal delays keep the older fixed-rate bytes. Unequal delays carry an
+		// explicit duration per frame, with no average substituted at playback.
 		const double seconds = static_cast<double>(totalHundredths) / 100.0;
-		out.FlipbookFrameRate =
-			seconds > 0.0 ? static_cast<float>(static_cast<double>(frames.size()) / seconds) : 0.0f;
+		atlas->FlipbookFrameRate =
+			varyingDelays
+				? 0.0f
+				: (seconds > 0.0 ? static_cast<float>(static_cast<double>(frames.size()) / seconds) : 0.0f);
+		atlas->FlipbookFrameDurations = std::move(durations);
 
-		out.Pixels.assign(static_cast<size_t>(sheetWidth) * sheetHeight * 4, std::byte{0});
+		atlas->Pixels.assign(static_cast<size_t>(sheetWidth) * sheetHeight * 4, std::byte{0});
 
 		for (size_t frame = 0; frame < frames.size(); frame++) {
 			const uint32_t cellX = static_cast<uint32_t>(frame % side) * canvasWidth;
@@ -577,14 +632,24 @@ namespace engine::bake {
 				for (uint32_t x = 0; x < canvasWidth; x++) {
 					const Pixel &pixel = frames[frame][static_cast<size_t>(y) * canvasWidth + x];
 					const size_t at = ((static_cast<size_t>(cellY + y) * sheetWidth) + (cellX + x)) * 4;
-					out.Pixels[at + 0] = static_cast<std::byte>(pixel.R);
-					out.Pixels[at + 1] = static_cast<std::byte>(pixel.G);
-					out.Pixels[at + 2] = static_cast<std::byte>(pixel.B);
-					out.Pixels[at + 3] = static_cast<std::byte>(pixel.A);
+					atlas->Pixels[at + 0] = static_cast<std::byte>(pixel.R);
+					atlas->Pixels[at + 1] = static_cast<std::byte>(pixel.G);
+					atlas->Pixels[at + 2] = static_cast<std::byte>(pixel.B);
+					atlas->Pixels[at + 3] = static_cast<std::byte>(pixel.A);
 				}
 			}
 		}
 
 		return true;
+	}
+
+	bool ReadGif(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure) {
+		return DecodeGif(bytes, &out, nullptr, failure);
+	}
+
+	bool ReadGifSequence(
+		std::span<const std::byte> bytes, assets::TextureSequenceData &out, std::string &failure
+	) {
+		return DecodeGif(bytes, nullptr, &out, failure);
 	}
 }

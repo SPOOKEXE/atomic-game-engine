@@ -44,9 +44,12 @@ int main(int argc, char **argv) {
 		"Override imported flipbook FPS, or state static-atlas FPS with --flipbook-side and --flipbook-frames"
 	);
 	arguments.Value(
-		"flipbook-side", "CELLS", "Mark ordinary image atlases as a 1, 2, 4 or 8 cell-wide flipbook"
+		"flipbook-side", "CELLS", "Mark ordinary image atlases as a 1, 2, 4, 8 or 16 cell-wide flipbook"
 	);
 	arguments.Value("flipbook-frames", "COUNT", "Populated static-atlas flipbook cells, up to side squared");
+	arguments.Value("graph-output", "NAME", "Select this named image graph output when baking .graph files");
+	arguments.Value("graph-tick", "TICK", "Evaluate .graph files at this fixed tick (default: 0)");
+	arguments.Value("graph-seed", "SEED", "Evaluate .graph files with this seed (default: 0)");
 	arguments.Flag("no-mipmaps", "Skip the mip chain, leaving every texture one level");
 	arguments.Flag("no-copy", "Skip files this cannot bake instead of copying them across");
 	arguments.Flag("quiet", "Print the summary only, not a row per asset");
@@ -103,16 +106,27 @@ int main(int argc, char **argv) {
 	settings.ModelSize = static_cast<float>(arguments.GetNumber("model-size", settings.ModelSize));
 	settings.MaximumTexture =
 		static_cast<uint32_t>(arguments.GetInteger("max-texture", settings.MaximumTexture));
+	if (const auto outputName = arguments.Get("graph-output")) settings.GraphOutput = *outputName;
+	const int64_t graphTick = arguments.GetInteger("graph-tick", 0);
+	const int64_t graphSeed = arguments.GetInteger("graph-seed", 0);
+	if (graphTick < 0 || graphSeed < 0) {
+		ENGINE_ERROR("assetc: --graph-tick and --graph-seed must be nonnegative");
+		return 2;
+	}
+	settings.GraphTick = static_cast<uint64_t>(graphTick);
+	settings.GraphSeed = static_cast<uint64_t>(graphSeed);
 	settings.FlipbookFps = static_cast<float>(arguments.GetNumber("flipbook-fps", settings.FlipbookFps));
 	const int64_t flipbookSide = arguments.GetInteger("flipbook-side", settings.FlipbookSide);
 	const int64_t flipbookFrames = arguments.GetInteger("flipbook-frames", settings.FlipbookFrames);
 	if (flipbookSide < 0 || flipbookSide > std::numeric_limits<uint8_t>::max() || flipbookFrames < 0 ||
-		flipbookFrames > std::numeric_limits<uint8_t>::max()) {
-		ENGINE_ERROR("assetc: --flipbook-side and --flipbook-frames must be between 0 and 255");
+		flipbookFrames > 256) {
+		ENGINE_ERROR(
+			"assetc: --flipbook-side must be between 0 and 255 and --flipbook-frames between 0 and 256"
+		);
 		return 2;
 	}
 	settings.FlipbookSide = static_cast<uint8_t>(flipbookSide);
-	settings.FlipbookFrames = static_cast<uint8_t>(flipbookFrames);
+	settings.FlipbookFrames = static_cast<uint16_t>(flipbookFrames);
 
 	std::string failure;
 	const assetc::Report report = assetc::Bake(settings, failure);

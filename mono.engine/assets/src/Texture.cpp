@@ -1,12 +1,32 @@
 #include <engine/assets/Texture.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace engine::assets {
 
 	bool TextureData::IsValid() const {
 		if (Width == 0 || Height == 0) {
 			return false;
+		}
+		const uint32_t side = FlipbookSide;
+		if ((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16) ||
+			(side == 0 && FlipbookFrames != 0) ||
+			(side != 0 && (FlipbookFrames == 0 || FlipbookFrames > side * side))) {
+			return false;
+		}
+		if (!FlipbookFrameDurations.empty()) {
+			if (FlipbookFrameDurations.size() != FlipbookFrames || FlipbookFrameRate != 0.0f) {
+				return false;
+			}
+			float end = 0.0f;
+			for (const float duration : FlipbookFrameDurations) {
+				const float next = end + duration;
+				if (!std::isfinite(duration) || duration <= 0.0f || !std::isfinite(next) || next <= end) {
+					return false;
+				}
+				end = next;
+			}
 		}
 
 		// **Computed in 64 bits and compared against the vector's size**, so a
@@ -43,9 +63,15 @@ namespace engine::assets {
 		if (data.Width > MAXIMUM_DIMENSION || data.Height > MAXIMUM_DIMENSION) {
 			return false;
 		}
+		const uint32_t side = data.FlipbookSide;
+		if ((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16) ||
+			(side == 0 && data.FlipbookFrames != 0) ||
+			(side != 0 && (data.FlipbookFrames == 0 || data.FlipbookFrames > side * side))) {
+			return false;
+		}
 
 		writer.WriteUInt32(MAGIC);
-		writer.WriteUInt16(VERSION);
+		writer.WriteUInt16(data.FlipbookFrameDurations.empty() ? 4 : VERSION);
 		writer.WriteUInt8(static_cast<uint8_t>(data.Format));
 		writer.WriteUInt32(data.Width);
 		writer.WriteUInt32(data.Height);
@@ -55,8 +81,13 @@ namespace engine::assets {
 		// of the payload as the image, which is exactly what stops a second
 		// count from disagreeing with the first.
 		writer.WriteUInt8(data.FlipbookSide);
-		writer.WriteUInt8(data.FlipbookFrames);
+		writer.WriteUInt16(data.FlipbookFrames);
 		writer.WriteFloat(data.FlipbookFrameRate);
+		if (!data.FlipbookFrameDurations.empty()) {
+			writer.WriteUInt16(static_cast<uint16_t>(data.FlipbookFrameDurations.size()));
+			for (const float duration : data.FlipbookFrameDurations)
+				writer.WriteFloat(duration);
+		}
 
 		// The count and not the levels' sizes, which `MipExtent` derives. Bounded
 		// by `MipLevelCount` and therefore by `MAXIMUM_DIMENSION`, so the cast is
@@ -77,7 +108,7 @@ namespace engine::assets {
 		if (reader.ReadUInt32() != MAGIC) {
 			return false;
 		}
-		// **1, 2 and 3 are all read.** A v1 file is a still image and a v2 file
+		// **1 through 5 are all read.** A v1 file is a still image and a v2 file
 		// is a one-level texture, which is what their zeroes and their absent
 		// count already mean - see `VERSION`.
 		const uint16_t version = reader.ReadUInt16();
@@ -98,12 +129,31 @@ namespace engine::assets {
 		const uint32_t height = reader.ReadUInt32();
 
 		uint8_t side = 0;
-		uint8_t frames = 0;
+		uint16_t frames = 0;
 		float frameRate = 0.0f;
 		if (version >= 2) {
 			side = reader.ReadUInt8();
-			frames = reader.ReadUInt8();
+			frames = version >= 4 ? reader.ReadUInt16() : reader.ReadUInt8();
 			frameRate = reader.ReadFloat();
+		}
+		std::vector<float> durations;
+		if (version >= 5) {
+			const uint16_t count = reader.ReadUInt16();
+			if (reader.Failed() || count == 0 || count != frames || count > 256 || frameRate != 0.0f ||
+				reader.Remaining() < static_cast<size_t>(count) * sizeof(float) + 1) {
+				return false;
+			}
+			durations.reserve(count);
+			float end = 0.0f;
+			for (uint16_t index = 0; index < count; index++) {
+				const float duration = reader.ReadFloat();
+				const float next = end + duration;
+				if (!std::isfinite(duration) || duration <= 0.0f || !std::isfinite(next) || next <= end) {
+					return false;
+				}
+				durations.push_back(duration);
+				end = next;
+			}
 		}
 
 		// A file from before the chain existed is a texture with one level.
@@ -116,6 +166,11 @@ namespace engine::assets {
 			return false;
 		}
 		if (width == 0 || height == 0 || width > MAXIMUM_DIMENSION || height > MAXIMUM_DIMENSION) {
+			return false;
+		}
+		if (version >= 4 &&
+			((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16) ||
+			 (side == 0 && frames != 0) || (side != 0 && (frames == 0 || frames > side * side)))) {
 			return false;
 		}
 
@@ -169,14 +224,11 @@ namespace engine::assets {
 		out.Height = height;
 		out.Format = static_cast<TextureFormat>(format);
 
-		// **A frame count past the grid is clamped rather than refused**, which
-		// is the opposite of how every other field here is treated and is right
-		// for the same reason the rest are not: the others decide how many bytes
-		// to allocate, and this one decides which cell to sample. A wrong count
-		// is a shorter animation; a wrong dimension is a buffer overrun.
+		// Legacy v2/v3 files keep their clamping rule. Version 4 validates above
+		// so a new authored frame count cannot silently become a shorter animation.
 		out.FlipbookSide = side;
 		out.FlipbookFrames = side == 0 ? 0
-									   : static_cast<uint8_t>(std::min<uint32_t>(
+									   : static_cast<uint16_t>(std::min<uint32_t>(
 											 frames == 0 ? static_cast<uint32_t>(side) * side : frames,
 											 static_cast<uint32_t>(side) * side
 										 ));
@@ -185,6 +237,7 @@ namespace engine::assets {
 		// refused, for the reason above - and because a consumer already has to
 		// handle zero.
 		out.FlipbookFrameRate = frameRate > 0.0f && frameRate < 1000.0f ? frameRate : 0.0f;
+		out.FlipbookFrameDurations = std::move(durations);
 
 		out.Pixels.assign(pixels.begin(), pixels.end());
 		out.Mips = std::move(mips);
