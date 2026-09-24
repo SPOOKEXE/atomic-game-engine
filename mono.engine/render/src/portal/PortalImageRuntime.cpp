@@ -3035,12 +3035,29 @@ namespace engine::render {
 				continue;
 			}
 			auto &job = *pending.Work;
-			if (now >= job.Output.Deadline ||
-				state.Universe.LookupPresentation(
-					state.Universe.Find(core::Name(job.Output.ReplyTo.World)), job.Output.ReplyTo.Channel
-				) != job.Output.ReplyTo) {
+			const bool expired = now >= job.Output.Deadline;
+			const auto requester = state.Universe.LookupPresentation(
+				state.Universe.Find(core::Name(job.Output.ReplyTo.World)), job.Output.ReplyTo.Channel
+			);
+			if (expired || requester != job.Output.ReplyTo) {
 				job.Output.Reply.Status = PortalImageStatus::Unavailable;
-				job.Output.Reply.Diagnostic = "nested destination capture expired or requester retired";
+				job.Output.Reply.Diagnostic =
+					expired ? "nested destination capture expired" : "nested destination requester retired";
+				if (state.EyeDiagnostic && state.EyeDiagnosticCount++ < 64)
+					ENGINE_WARN(
+						"portal eye producer job ended world={} reason={} reply_to={}/{}/{}/{} "
+						"current={}/{}/{}/{}",
+						state.Requests.World,
+						expired ? "expired" : "requester-retired",
+						job.Output.ReplyTo.World,
+						job.Output.ReplyTo.Channel,
+						job.Output.ReplyTo.Session,
+						job.Output.ReplyTo.Generation,
+						requester.World,
+						requester.Channel,
+						requester.Session,
+						requester.Generation
+					);
 				state.SendFailure(job.Output, progress);
 				state.Finish(slot);
 				continue;

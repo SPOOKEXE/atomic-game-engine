@@ -789,6 +789,7 @@ end)
 	size_t faultBodyFrames = 0;
 	size_t faultNonBlackEyeFrames = 0;
 	size_t hiddenPortalSamples = 0;
+	size_t awaitingImageBodyFrames = 0;
 	std::vector<std::string> nativeWorlds;
 	std::unordered_map<uint64_t, int> crossedReadyWithoutTerminal;
 	for (int frame = 0; frame < options.MaximumFrames; ++frame) {
@@ -1205,7 +1206,18 @@ end)
 			if (fault != PortalWalkFault::None && visible) ++faultVisibleFrames;
 			// Prediction can carry the body fully beyond the plane before its
 			// authority changes worlds. Check that interval as well as adoption.
-			if (expectBody && fault == PortalWalkFault::None) CHECK(yellowPixels > 0);
+			if (expectBody && fault == PortalWalkFault::None) {
+				// Under impairment the destination image can arrive after the body has
+				// passed the plane. That frame must name the state, not hide it.
+				const auto &views = sample.at("portal_views");
+				const bool awaitingImage = std::any_of(views.begin(), views.end(), [](const auto &portal) {
+					return portal.value("presentation", "") == "awaiting-image";
+				});
+				if (impairment.Active() && awaitingImage && yellowPixels == 0)
+					++awaitingImageBodyFrames;
+				else
+					CHECK(yellowPixels > 0);
+			}
 			if (fault != PortalWalkFault::None && expectBody && yellowPixels > 0) ++faultBodyFrames;
 			if (sample.value("eye_image", false)) {
 				REQUIRE(SDL_ReadSurfacePixel(eye.get(), eye->w / 2, eye->h - 1, &red, &green, &blue, &alpha));
@@ -1392,7 +1404,8 @@ end)
 				  << " arrived=" << observed.ImpairedArrived << " dropped=" << observed.ImpairedDropped
 				  << " duplicated=" << observed.ImpairedDuplicated
 				  << " reordered=" << observed.ImpairedReordered << " delayed=" << observed.ImpairedDelayed
-				  << " adoptions=" << observed.Adoptions.size() << '\n';
+				  << " adoptions=" << observed.Adoptions.size()
+				  << " awaiting_image_body_frames=" << awaitingImageBodyFrames << '\n';
 		CHECK(observed.ImpairedArrived > 0);
 		if (impairment.LossChance > 0.0f) CHECK(observed.ImpairedDropped > 0);
 		if (impairment.DuplicateChance > 0.0f) CHECK(observed.ImpairedDuplicated > 0);

@@ -261,6 +261,17 @@ namespace client {
 				}
 				return "none";
 			};
+			const auto presentation = [&] {
+				switch (engine::render::PresentationOf(portal)) {
+				case engine::render::PortalPresentation::Current:
+					return "current";
+				case engine::render::PortalPresentation::Unrequested:
+					return "unrequested";
+				case engine::render::PortalPresentation::AwaitingImage:
+					return "awaiting-image";
+				}
+				return "unrequested";
+			};
 			frame["portal_views"].push_back({
 				{"index", portal.Index},
 				{"key", std::string(portal.ImagePortal.Text())},
@@ -277,6 +288,7 @@ namespace client {
 					 {"scale", portal.Warp.Scale}
 				 }},
 				{"image", portal.ImportedImage},
+				{"presentation", presentation()},
 				{"capture", portal.ExternalImage ? captureOf(portal.ImagePortal) : json(nullptr)},
 				{"centre", vector(portal.Centre)},
 				{"normal", vector(portal.Normal)},
