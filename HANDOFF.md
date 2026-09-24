@@ -1,18 +1,54 @@
 # Work handoff
 
 Updated 2026-09-24. This records the unfinished work in the main `v0.25`
-checkout and the linked worktrees. It is a working note, not a completion claim.
+checkout. The worktree cleanup is complete; only the main checkout remains.
+The detailed worktree history below is archival. This is a working note, not a
+completion claim.
+
+## Latest verified status
+
+- The virtual camera lock has a passing combined live Studio capture at
+  `.cache/build/dev/studio-virtual-camera-capture-20260924-201453`.
+  `just studio-virtual-camera-capture` exercised the View menu under Xvfb,
+  moved the inspection camera with fixed orientation, retained the behavior
+  signature for culling, Auto LOD, light, particles, and portal demand, then
+  checked recapture and unlock. The viewport image changed as expected.
+- The final dev Vulkan render gate on the current tree failed 2
+  `PortalImageHost` cases, with 8 failed assertions out of 1,679,140. The run is
+  recorded in `/tmp/atomic-render-final-current.log`; a focused fix is underway.
+- MCP real Vulkan capture drain passed 94 assertions. Three paired release
+  control and GPU runs were measured under normal desktop load with Brave,
+  Discord, Spotify, and Steam open, as the user requested. The results and
+  timing spread are in `docs/v025-MCP-PERF-EVIDENCE.md`. Server and CDN
+  headless artifact checks passed. Broad CI remains open.
+- Broad `just preset=ci check` compiled and failed only `studio.mcpcontract` on
+  a stale `viewport_behavior_diagnostics` description in the fixture. The
+  fixture now matches the current “focused viewport” description. The focused
+  `[studio][mcp]` suite passed 495 assertions in 2 cases; a broad CI rerun is
+  pending.
+- The strict process-hosted 30/60 portal product capture now passes 21,853
+  assertions in 1 case. Evidence is in
+  `/tmp/atomic-portal-product-final-1-NkxJ4k`; rendered continuity, both
+  adoptions, body checks, and capture checks pass. The wider portal acceptance
+  matrix remains open.
+- Portal transport now carries explicit request-scoped transfer-eye priority.
+  The server selects urgent per-endpoint heads ahead of routine replies and
+  limits routine stream backlog. Focused world, server, and render runtime
+  tests pass.
+- `ROADMAP.md` tracks these completed and open gates. The Pixel Composer Audio
+  Window static slice is in place; the larger M0 to M7 work remains open. The
+  five PXC projects and GIFs are under
+  `/home/declan/Documents/GitHub/atomic-game-engine-hidden-docs/files/pixel-composer-com`.
+  No licensed executable is available, and the user directed GIF-based
+  reconstruction of all features.
 
 ## Current direction
 
-- Finish the smaller worktrees first, one at a time. Keep Pixel Composer moving
-  where it has an independent path. Handle larger remaining items afterward.
+- Finish the camera, render, MCP, and portal gates before claiming their
+  current work complete. Keep the larger stress and Pixel Composer items open.
 - Merge a completed branch into `v0.25` when safe, as the user requested.
-  Patch equivalent branches need no merge. The main checkout has extensive
-  uncommitted changes, so inspect overlap before any merge.
-- Preserve every dirty worktree until its changes are understood. Do not use
-  `git worktree remove --force`, `git clean`, or `git reset --hard` to make a
-  worktree look finished.
+  The main checkout has extensive uncommitted changes, so inspect overlap
+  before any merge. Only the main worktree remains.
 - The main checkout contains concurrent uncommitted work from several tasks.
   Review ownership before editing shared files or committing. In particular,
   do not commit changes made by another agent or the user.
@@ -24,12 +60,13 @@ checkout and the linked worktrees. It is a working note, not a completion claim.
 
 Path: `/home/declan/Documents/GitHub/atomic-game-engine`, branch `v0.25`,
 The priority phase benchmark was integrated as `5e30f523`. This handoff and
-the portal test fixture fix were committed afterward. The active goal is the
-six items in `/home/declan/.codex/attachments/ccb8ba64-ca25-4eaf-a502-18231242fbeb/pasted-text-1.txt`:
-virtual camera lock, v0.25 render cleanup, v0.25 MCP cleanup, engine stress
-and optimization audit, seamless portals, and Pixel Composer. All remain open.
+the portal test fixture fix were committed afterward. Current task status is
+in the latest verified status above and `ROADMAP.md`.
 
-### Verified work and next steps
+### Prior checkpoint and historical next steps
+
+The list below records an earlier checkpoint. Use the latest verified status
+above for present gate results.
 
 1. **Virtual camera lock.** A free inspection viewport uses the live camera;
    culling, LOD, lighting, particles, and portal demand use the frozen behavior
