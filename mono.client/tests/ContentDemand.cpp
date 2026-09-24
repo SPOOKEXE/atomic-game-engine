@@ -75,6 +75,8 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	const Entity label = store.Create();
 	engine::gui::Picture badge;
 	badge.Image = Name("label.atex");
+	badge.HoverImage = Name("label-hover.atex");
+	badge.PressedImage = Name("label-pressed.atex");
 	store.Set(label, badge);
 
 	const Entity emitter = store.Create();
@@ -132,6 +134,8 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	CHECK(Holds(wanted, "part-metalness.atex"));
 	CHECK(Holds(wanted, "part-emissive.atex"));
 	CHECK(Holds(wanted, "label.atex"));
+	CHECK(Holds(wanted, "label-hover.atex"));
+	CHECK(Holds(wanted, "label-pressed.atex"));
 	CHECK(Holds(wanted, "spark.atex"));
 	CHECK(Holds(wanted, "bolt.atex"));
 	CHECK(Holds(wanted, "swoosh.atex"));
@@ -207,6 +211,18 @@ TEST_CASE("content property changes advance the precise demand revision", "[clie
 	store.GetMutable<engine::effects::ParticleEmitter>(emitter)->Texture = Name("changed.atex");
 
 	CHECK(client::WantedContentRevision(store) != before);
+}
+
+TEST_CASE("ImageButton state image changes advance content demand", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.button");
+	const Entity button = store.Create();
+	store.Set(button, engine::gui::Picture{});
+	const uint64_t before = client::WantedContentRevision(store);
+	store.GetMutable<engine::gui::Picture>(button)->HoverImage = Name("hover.atex");
+	const uint64_t hovered = client::WantedContentRevision(store);
+	CHECK(hovered != before);
+	store.GetMutable<engine::gui::Picture>(button)->PressedImage = Name("pressed.atex");
+	CHECK(client::WantedContentRevision(store) != hovered);
 }
 
 TEST_CASE("collecting demand does not dirty the references it reads", "[client][contentdemand]") {

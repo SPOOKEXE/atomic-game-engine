@@ -105,9 +105,13 @@ namespace client {
 			}
 		);
 
-		store.Each<const engine::gui::Picture>([&out, &seen](
-												   engine::ecs::Entity, const engine::gui::Picture &picture
-											   ) { Want(out, seen, picture.Image); });
+		store.Each<const engine::gui::Picture>(
+			[&out, &seen](engine::ecs::Entity, const engine::gui::Picture &picture) {
+				Want(out, seen, picture.Image);
+				Want(out, seen, picture.HoverImage);
+				Want(out, seen, picture.PressedImage);
+			}
+		);
 
 		store.Each<const engine::effects::ParticleEmitter>(
 			[&out, &seen](engine::ecs::Entity, const engine::effects::ParticleEmitter &emitter) {
