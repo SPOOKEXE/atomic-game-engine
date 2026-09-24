@@ -290,6 +290,37 @@ namespace {
 		return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 	}
 
+	// Replaces the `pad` cell of every component row with `?`.
+	//
+	// Used by `--check` on a toolchain without `__builtin_clear_padding` (AppleClang
+	// on macOS; Linux builds are pinned to GCC), where every row would read `.` and
+	// the catalogue GCC wrote would look stale. Masking both sides still compares every other
+	// column. The cell is the sixth `|`-delimited field of a line opening "| `".
+	std::string MaskPadColumn(const std::string &text) {
+		std::string masked;
+		masked.reserve(text.size());
+		size_t start = 0;
+		while (start < text.size()) {
+			size_t end = text.find('\n', start);
+			end = end == std::string::npos ? text.size() : end + 1;
+			std::string line = text.substr(start, end - start);
+			start = end;
+
+			if (line.rfind("| `", 0) == 0) {
+				size_t open = 0;
+				for (int bar = 0; bar < 6 && open != std::string::npos; bar++) {
+					open = line.find('|', bar == 0 ? 0 : open + 1);
+				}
+				const size_t close = open == std::string::npos ? open : line.find('|', open + 1);
+				if (close != std::string::npos) {
+					line.replace(open + 1, close - open - 1, " ? ");
+				}
+			}
+			masked += line;
+		}
+		return masked;
+	}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -392,7 +423,17 @@ int main(int argc, char **argv) {
 					 "hand-written Write/Read pair.\n";
 	}
 
+	// Without `__builtin_clear_padding` every `pad` cell reads `.` and the leak
+	// check above cannot fire. Writing would record that as fact, so refuse and
+	// name the build that can answer; `--check` compares the other columns.
+	const bool padding = engine::ecs::PaddingIsDetectable();
+
 	if (!arguments.Has("check")) {
+		if (!padding) {
+			std::cerr << "this toolchain cannot detect padding (no __builtin_clear_padding), so the "
+						 "`pad` column would be wrong. Regenerate on Linux, where builds use GCC.\n";
+			return 2;
+		}
 		if (!WriteFile(out, rendered)) {
 			std::cerr << "cannot write " << out << "\n";
 			return 2;
@@ -403,7 +444,9 @@ int main(int argc, char **argv) {
 	}
 
 	int status = 0;
-	if (ReadFile(out) != rendered) {
+	const std::string existing = ReadFile(out);
+	const bool stale = padding ? existing != rendered : MaskPadColumn(existing) != MaskPadColumn(rendered);
+	if (stale) {
 		std::cerr << out.string() << " is out of date. Run `just components`.\n";
 		status = 1;
 	}
@@ -424,7 +467,11 @@ int main(int argc, char **argv) {
 	if (!leaky.empty()) {
 		status = 1;
 	}
-	if (status == 0) {
+	if (status == 0 && !padding) {
+		std::cout << "componentdoc ok - " << rows.size()
+				  << " component(s), all documented. Padding NOT checked: this toolchain has no "
+					 "__builtin_clear_padding, run `just components-check` on Linux for that.\n";
+	} else if (status == 0) {
 		std::cout << "componentdoc ok - " << rows.size()
 				  << " component(s), all documented, none leaking padding into a save\n";
 	}
