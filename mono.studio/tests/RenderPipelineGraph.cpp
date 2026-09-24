@@ -264,6 +264,7 @@ TEST_CASE("canvas document round trip retains resource and unknown authored data
 }
 
 TEST_CASE("authored binding order survives the nodegraph adapter", "[studio][pipeline]") {
+	studio::RegisterRenderPipelineNodeTypes();
 	const PipelineDocument defaults = DefaultPbrDocument();
 	std::vector<Edit> edits(defaults.Edits().begin(), defaults.Edits().end());
 	const NodeKindSpec *ssao = NodeCatalogue::Find(engine::core::Name("ssao"));
