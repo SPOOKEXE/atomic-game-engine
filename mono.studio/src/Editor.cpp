@@ -31,6 +31,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
@@ -2649,6 +2650,8 @@ namespace studio {
 							: engine::core::Name{};
 					if (Shaders.Refresh(store) > 0) {
 						VisualResourceRevision++;
+						std::vector<engine::core::Name> materialShaders;
+						engine::scene::DemandedShaders(store, materialShaders);
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
 							// A removed source has no accepted module. Drop its device
@@ -2665,7 +2668,9 @@ namespace studio {
 								continue;
 							}
 
-							(void)Renderer.AddShader(shader, module->SpirV);
+							if (std::find(materialShaders.begin(), materialShaders.end(), shader) !=
+								materialShaders.end())
+								(void)Renderer.AddMaterialShader(shader, module->SpirV);
 							if (shader == wantedPostProcess &&
 								Renderer.SetPostProcessShader(shader, module->SpirV)) {
 								LastPostProcessShader = shader;
