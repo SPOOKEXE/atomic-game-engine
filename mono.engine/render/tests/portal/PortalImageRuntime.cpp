@@ -1,3 +1,6 @@
+#include "PortalRendererTerminalTrace.hpp"
+#include "RendererTestHooks.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -8,6 +11,7 @@
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/PortalResidentImages.hpp>
+#include <engine/render/PortalShadowTransport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -372,6 +376,38 @@ TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render
 		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 	}
 
+	SECTION("transfer eye supersedes a routine request and rejects its stale reply") {
+		auto transfer = latest;
+		transfer.TransferEye = true;
+		CHECK(source.Issue(worlds.Requests, transfer, Binding(), START).Status == PortalInboxStatus::Issued);
+		const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+		REQUIRE(messages.size() == 2);
+		const auto routine = std::find_if(messages.begin(), messages.end(), [](const auto &message) {
+			PortalImageRequest decoded;
+			std::string error;
+			return DecodePortalImageRequest(message.Payload, decoded, error) && !decoded.TransferEye;
+		});
+		const auto urgent = std::find_if(messages.begin(), messages.end(), [](const auto &message) {
+			PortalImageRequest decoded;
+			std::string error;
+			return DecodePortalImageRequest(message.Payload, decoded, error) && decoded.TransferEye;
+		});
+		REQUIRE(routine != messages.end());
+		REQUIRE(urgent != messages.end());
+		CHECK(routine->Correlation != urgent->Correlation);
+		PortalImageRequest decoded;
+		std::string error;
+		REQUIRE(DecodePortalImageRequest(urgent->Payload, decoded, error));
+		CHECK(decoded.TransferEye);
+		CHECK(decoded.Position == transfer.Position);
+		REQUIRE(
+			worlds.Universe.SendPresentation(
+				worlds.Destination, worlds.Requests, worlds.Replies, routine->Correlation, routine->Payload
+			) == world::PresentationStatus::Ok
+		);
+		CHECK(source.Poll(START).empty());
+	}
+
 	SECTION("endpoint invalidation drops the retained demand") {
 		CHECK(source.Issue(worlds.Requests, second, Binding(), START).Status == PortalInboxStatus::Busy);
 		source.InvalidateEndpoint(worlds.Requests);
@@ -530,6 +566,16 @@ TEST_CASE("source clear retires its resident reservation", "[render][portal-runt
 	source.Clear();
 	CHECK_FALSE(images.Contains(worlds.Replies, worlds.Requests, request, START));
 	source.Clear();
+}
+
+TEST_CASE("source rejects a resident table owned by another renderer", "[render][portal-runtime]") {
+	RuntimeWorlds worlds;
+	Renderer renderer, other;
+	PortalResidentImages images(other);
+	PortalImageSource source(worlds.Universe, renderer, worlds.Source, worlds.Replies, {}, &images);
+	const auto request = Request();
+	CHECK(source.Issue(worlds.Requests, request, Binding(), START).Status == PortalInboxStatus::Invalid);
+	CHECK_FALSE(images.Contains(worlds.Replies, worlds.Requests, request, START));
 }
 
 TEST_CASE("portal reply endpoints isolate views of the same world and mouth", "[render][portal-runtime]") {
@@ -698,7 +744,8 @@ TEST_CASE(
 		 cancelNested = false, replaceNested = false, timeoutNested = false, moveNested = false,
 		 appearNested = false, foregroundFloor = false, floorDefaultMaterial = false,
 		 floorDefaultLighting = false, productEye = false, forwardBody = false, retireProducer = false,
-		 replaceProducer = false, retirePending = false, nestedOrdered = false, shadowRoutes = false;
+		 replaceProducer = false, retirePending = false, nestedOrdered = false, shadowRoutes = false,
+		 radianceChild = false;
 	int seamChange = 0;
 	core::Vector3 authoredEye{0, 0, 4};
 	const std::array<core::Vector3, 10> authoredEyes{
@@ -727,6 +774,11 @@ TEST_CASE(
 	}
 	SECTION("copied parent waits for a cross-world child image") {
 		nestedWorld = complete = true;
+		expectedRed = 0;
+		expectedBlue = .5;
+	}
+	SECTION("copied parent accepts one seam with image and radiance children") {
+		nestedWorld = complete = radianceChild = true;
 		expectedRed = 0;
 		expectedBlue = .5;
 	}
@@ -1221,6 +1273,7 @@ TEST_CASE(
 							   : mirrorOnly ? 2
 											: 1) +
 						  (mixedSurface ? 2 * 128 * 128 : 0);
+	if (radianceChild) request.PixelBudget += 2 * 128 * 128;
 	request.RecursionDepth = mixedSurface ? 2 : mirrorOnly ? 1 : 0;
 	if (carriedBody && !authoredBody) {
 		PortalGeometry geometry;
@@ -1330,7 +1383,8 @@ TEST_CASE(
 	ecs::Entity childColourEntity, nestedEntrance, nestedExit;
 	if (nestedWorld) {
 		request.RecursionDepth = 1;
-		request.PixelBudget = (shortSurfaceBudget ? 1 : 2) * captureExtent * captureExtent;
+		request.PixelBudget = (shortSurfaceBudget ? 1 : 2) * captureExtent * captureExtent +
+							  (radianceChild ? 2 * 128 * 128 : 0);
 		// Neither node authors top GUI: four ordered captures per node cover this tree.
 		if (nestedOrdered) request.PixelBudget = 2 * 4 * captureExtent * captureExtent;
 		worlds.Universe.Enter(worlds.Source, [&](ecs::Store &store) {
@@ -1869,6 +1923,10 @@ TEST_CASE(
 	} else {
 		// Copied images may compress below their expanded CPU allocation.
 		CHECK(worlds.Universe.PresentationTrafficCounts().EnqueuedBytes > requestBytes);
+	}
+	if (radianceChild) {
+		// The delayed parent must complete when one seam has image and radiance children.
+		return;
 	}
 	worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
 		if (alreadyPresented) {
@@ -3158,6 +3216,229 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"producer terminal triggers cancel an in-flight copied capture once",
+	"[render][gpu][portal-runtime][producer-retirement][.]"
+) {
+	const int trigger = GENERATE(0, 1, 2);
+	CAPTURE(trigger);
+	RuntimeWorlds worlds;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) {
+		const auto workspace = scene::InstallServices(store);
+		scene::PartDesc wall;
+		wall.Frame.Position = {0, 0, -4};
+		wall.Size = {2, 2, .1f};
+		wall.Simulated = false;
+		REQUIRE(store.SetParent(scene::MakePart(store, wall), workspace));
+	});
+	worlds.Universe.Tick(.01f);
+	world::PresentationBindings replacement;
+	PortalImageProducer producer(worlds.Universe, fixture.Render, worlds.Destination, worlds.Requests);
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalRendererTerminalTrace terminals(fixture.Render);
+#endif
+	auto request = Request();
+	request.Key.RequestId = 42;
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, worlds.Replies, worlds.Requests, 42, wire) ==
+		world::PresentationStatus::Ok
+	);
+	REQUIRE(producer.Pump(0, 0, START).Rendered == 1);
+	CHECK(worlds.Universe.TakePresentation(worlds.Replies).empty());
+	if (trigger == 0) {
+		producer.Clear();
+	} else if (trigger == 1) {
+		producer.SetEndpointBindings(&replacement);
+		producer.SetEndpointBindings(&replacement);
+	} else {
+		REQUIRE(worlds.Universe.ClosePresentation(worlds.Requests) == world::PresentationStatus::Ok);
+		// Endpoint retirement is owned by the host, which clears the producer
+		// after closing its request channel.
+		producer.Clear();
+	}
+#if ENGINE_ASSERTS_ENABLED
+	std::vector<uint64_t> retired;
+	for (const auto &call : terminals.Calls)
+		if (call.Kind == test_support::PortalRendererTerminalKind::CancelResourceImage && call.Token != 0 &&
+			call.Applied)
+			retired.push_back(call.Token);
+	REQUIRE(retired.size() == 1);
+	CHECK(
+		terminals.Count(test_support::PortalRendererTerminalKind::CancelResourceImage, retired.front()) == 1
+	);
+#endif
+	producer.Clear();
+	CHECK(worlds.Universe.TakePresentation(worlds.Replies).empty());
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(
+		terminals.Count(test_support::PortalRendererTerminalKind::CancelResourceImage, retired.front()) == 1
+	);
+#endif
+}
+
+#if ENGINE_ASSERTS_ENABLED
+TEST_CASE(
+	"producer timeout cancels a queued capture left pending by acquisition refusal",
+	"[render][gpu][portal-runtime][producer-retirement][.]"
+) {
+	RuntimeWorlds worlds;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) {
+		const auto workspace = scene::InstallServices(store);
+		scene::PartDesc wall;
+		wall.Frame.Position = {0, 0, -4};
+		wall.Size = {2, 2, .1f};
+		wall.Simulated = false;
+		REQUIRE(store.SetParent(scene::MakePart(store, wall), workspace));
+	});
+	worlds.Universe.Tick(.01f);
+	PortalImageProducer producer(worlds.Universe, fixture.Render, worlds.Destination, worlds.Requests);
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalRendererTerminalTrace terminals(fixture.Render);
+#endif
+	auto request = Request();
+	request.Key.RequestId = 43;
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, worlds.Replies, worlds.Requests, 43, wire) ==
+		world::PresentationStatus::Ok
+	);
+	struct ResetAcquisitionFailure {
+		~ResetAcquisitionFailure() {
+			render::test_support::SetFrameBatchAcquisitionFailureForTests(false);
+		}
+	} reset;
+	render::test_support::SetFrameBatchAcquisitionFailureForTests(true);
+	REQUIRE(producer.Pump(0, 0, START).Rendered == 1);
+	CHECK(worlds.Universe.TakePresentation(worlds.Replies).empty());
+
+	const auto expired = producer.Pump(0, 0, START + std::chrono::seconds(2));
+	CHECK(expired.Rendered == 0);
+	CHECK(expired.Sent == 1);
+	const auto replies = worlds.Universe.TakePresentation(worlds.Replies);
+	REQUIRE(replies.size() == 1);
+	PortalImageReply reply;
+	REQUIRE(DecodePortalImageReply(replies.front().Payload, reply, error));
+	CHECK(reply.Key == request.Key);
+	CHECK(reply.Status == PortalImageStatus::Failed);
+	CHECK(reply.Diagnostic == "destination capture expired");
+#if ENGINE_ASSERTS_ENABLED
+	std::vector<uint64_t> retired;
+	for (const auto &call : terminals.Calls)
+		if (call.Kind == test_support::PortalRendererTerminalKind::CancelResourceImage && call.Token != 0 &&
+			call.Applied)
+			retired.push_back(call.Token);
+	REQUIRE(retired.size() == 1);
+	CHECK(
+		terminals.Count(test_support::PortalRendererTerminalKind::CancelResourceImage, retired.front()) == 1
+	);
+#endif
+	producer.Clear();
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(
+		terminals.Count(test_support::PortalRendererTerminalKind::CancelResourceImage, retired.front()) == 1
+	);
+#endif
+	CHECK(worlds.Universe.TakePresentation(worlds.Replies).empty());
+}
+#endif
+
+#if ENGINE_ASSERTS_ENABLED
+TEST_CASE(
+	"producer clear cancels an in-flight retained shadow fit once",
+	"[render][gpu][portal-runtime][producer-retirement][.]"
+) {
+	RuntimeWorlds worlds;
+	scene::RegisterSceneClasses();
+	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) { scene::InstallServices(store); });
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	PortalImageProducer producer(worlds.Universe, fixture.Render, worlds.Destination, worlds.Requests);
+	producer.SetRetainedBodyAuthorization([&](const auto &requester, std::string_view player) {
+		return requester == worlds.Replies && player == "91";
+	});
+	test_support::PortalRendererTerminalTrace terminals(fixture.Render);
+	auto request = Request();
+	request.Key.RequestId = 44;
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.OrderedLayers = true;
+	request.RetainedBodyPlayer = "91";
+	request.Projection = PortalImageProjection::Eye;
+	request.ClipPlane = {};
+	request.PixelBudget = 4 * request.Width * request.Height;
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, worlds.Replies, worlds.Requests, 44, wire) ==
+		world::PresentationStatus::Ok
+	);
+	REQUIRE(producer.Pump(0, 1, START).Rendered == 1);
+	std::vector<world::PresentationMessage> completed;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+	while (completed.empty() && std::chrono::steady_clock::now() < deadline) {
+		completed = worlds.Universe.TakePresentation(worlds.Replies);
+		if (completed.empty()) {
+			producer.Pump(0, 1, START);
+			SDL_Delay(1);
+		}
+	}
+	REQUIRE(completed.size() == 1);
+	PortalImageLayerSet layers;
+	REQUIRE(DecodePortalImageLayerSet(completed.front().Payload, layers, error));
+	REQUIRE(layers.Opaque.Status == PortalImageStatus::Ok);
+	REQUIRE(producer.ShadowUsage().Ready == 1);
+
+	// The completed eye owns a route. A fitted pull adds one pending renderer token.
+	PortalShadowPull pull;
+	pull.ParentEye = request.Key;
+	pull.TargetProducer = {
+		worlds.Requests.World, worlds.Requests.Channel, worlds.Requests.Session, worlds.Requests.Generation
+	};
+	pull.TargetEye = request.Key;
+	pull.BodyBounds = core::AABB{{-1, -1, -5}, {1, 1, -3}};
+	REQUIRE(EncodePortalShadowPull(pull, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, worlds.Replies, worlds.Requests, 45, wire) ==
+		world::PresentationStatus::Ok
+	);
+	struct ResetAcquisitionFailure {
+		~ResetAcquisitionFailure() {
+			render::test_support::SetFrameBatchAcquisitionFailureForTests(false);
+		}
+	} reset;
+	render::test_support::SetFrameBatchAcquisitionFailureForTests(true);
+	producer.Pump(0, 1, START);
+	REQUIRE(producer.HasPendingShadowFits());
+	const size_t before = terminals.Calls.size();
+	producer.Clear();
+	CHECK_FALSE(producer.HasPendingShadowFits());
+	std::vector<uint64_t> retired;
+	for (const auto &call : std::span(terminals.Calls).subspan(before))
+		if (call.Kind == test_support::PortalRendererTerminalKind::CancelResourceImage && call.Token != 0 &&
+			call.Applied)
+			retired.push_back(call.Token);
+	REQUIRE(retired.size() == 1);
+	CHECK(
+		terminals.Count(test_support::PortalRendererTerminalKind::CancelResourceImage, retired.front()) == 1
+	);
+	producer.Clear();
+	CHECK(
+		terminals.Count(test_support::PortalRendererTerminalKind::CancelResourceImage, retired.front()) == 1
+	);
+}
+#endif
+
+TEST_CASE(
 	"seam captures exclude only the selected primary body",
 	"[render][gpu][portal-runtime][portal-primary-selection][.]"
 ) {
@@ -3651,6 +3932,9 @@ TEST_CASE(
 	RuntimeWorlds worlds;
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalRendererTerminalTrace rendererTerminals(fixture.Render);
+#endif
 	std::ifstream programFile(
 		resources::Shader("gravitational-lens.frag", resources::ShaderForm::SpirV),
 		std::ios::binary | std::ios::ate
@@ -3769,6 +4053,12 @@ TEST_CASE(
 	CHECK((original->LensPrograms == 0) == overlayFirst);
 	CHECK(original->Lenses.Programs.empty());
 	CHECK(original->Lenses.TimeSeconds == (overlayFirst ? 0.f : 1.f));
+	const std::array originalHandles{
+		original->Image,
+		original->TransparentImages[0],
+		original->TransparentImages[1],
+		original->SpatialOverlayImage
+	};
 	CHECK(source.CurrentImage("Door") == original->Image);
 	CHECK(fixture.Render.PortalImageUsage().Images == size_t{3} + overlayFirst);
 	const auto second = issue(3);
@@ -3796,8 +4086,28 @@ TEST_CASE(
 	CHECK((current->LensPrograms == 0) != overlayFirst);
 	CHECK(current->Lenses.Programs.empty());
 	CHECK(current->Lenses.TimeSeconds == (overlayFirst ? 2.f : 0.f));
+	const std::array currentHandles{
+		current->Image,
+		current->TransparentImages[0],
+		current->TransparentImages[1],
+		current->SpatialOverlayImage
+	};
 	CHECK(fixture.Render.PortalImageUsage().Images == size_t{3} + !overlayFirst);
 	CHECK_FALSE(fixture.Render.DropPortalImage(original->Image));
+#if ENGINE_ASSERTS_ENABLED
+	for (const uint64_t handle : originalHandles)
+		if (handle != 0)
+			CHECK(
+				rendererTerminals.AppliedCount(
+					test_support::PortalRendererTerminalKind::ReleasePortalImport, handle
+				) == 1
+			);
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::DropPortalImage, original->Image
+		) == 1
+	);
+#endif
 	for (const bool submit : {false, true}) {
 		const auto cancelled = issue(5);
 		REQUIRE(cancelled.Status == PortalInboxStatus::Issued);
@@ -3826,6 +4136,21 @@ TEST_CASE(
 	CHECK(source.Capture("Door")->Lenses == PortalCaptureLenses{});
 	CHECK(fixture.Render.PortalImageUsage().Images == 1);
 	CHECK_FALSE(fixture.Render.DropPortalImage(current->Image));
+#if ENGINE_ASSERTS_ENABLED
+	for (const uint64_t handle : currentHandles)
+		if (handle != 0)
+			CHECK(
+				rendererTerminals.AppliedCount(
+					test_support::PortalRendererTerminalKind::ReleasePortalImport, handle
+				) == 1
+			);
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::DropPortalImage, current->Image
+		) == 1
+	);
+#endif
+	const uint64_t flatImage = source.Capture("Door")->Image;
 	upload();
 	const auto withdrawn = issue(7);
 	REQUIRE(withdrawn.Status == PortalInboxStatus::Issued);
@@ -3839,6 +4164,18 @@ TEST_CASE(
 	CHECK(fixture.Render.PortalImageUsage().Images == 0);
 	CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
 	CHECK(fixture.Render.PortalImageUsage().CachedTextureBytes == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::ReleasePortalImport, flatImage
+		) == 1
+	);
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::DropPortalImage, flatImage
+		) == 1
+	);
+#endif
 }
 
 namespace {
@@ -4110,6 +4447,22 @@ TEST_CASE(
 	} else {
 		CHECK(captured->Tree == 0);
 	}
+	const auto replacementWorld = worlds.Universe.Create({.Name = core::Name("replacement-producer")});
+	REQUIRE(replacementWorld.IsValid());
+	const auto replacement =
+		worlds.Universe.OpenPresentation(replacementWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	auto replacementRequest = request;
+	++replacementRequest.Key.CameraRevision;
+	replacementRequest.Key.RequestId = 0;
+	REQUIRE(
+		source.Issue(replacement, replacementRequest, Binding(), START).Status == PortalInboxStatus::Issued
+	);
+	CHECK(source.Image("Door") == captured->Image);
+	const auto retainedCapture = source.Capture("Door");
+	REQUIRE(retainedCapture);
+	CHECK(retainedCapture->Producer == worlds.Requests);
+	source.InvalidateEndpoint(worlds.Requests);
+	CHECK(source.Image("Door") == 0);
 	source.Clear();
 	CHECK_FALSE(source.Capture("Door"));
 	CHECK(fixture.Render.PortalImageUsage().Images == 0);

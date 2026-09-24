@@ -1,4 +1,5 @@
 #include "RenderFixture.hpp"
+#include "portal/PortalRendererTerminalTrace.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
@@ -548,6 +549,9 @@ TEST_CASE(
 ) {
 	FixtureDevice fixture;
 	fixture.Initialise();
+#if ENGINE_ASSERTS_ENABLED
+	render::test_support::PortalRendererTerminalTrace terminals(fixture.Render);
+#endif
 	render::PortalImageBinding binding;
 	binding.World = 940;
 	binding.WorldName = core::Name("import.admission");
@@ -577,11 +581,14 @@ TEST_CASE(
 		CHECK(fixture.Render.QueuePortalImage(binding, std::move(reply)) == 0);
 	}
 	CHECK(fixture.Render.PortalImageUsage().Images == 0);
+	std::vector<uint64_t> handles;
 	for (size_t index = 0; index < render::MAX_IMPORTED_PORTAL_IMAGES; index++) {
 		binding.Portal = core::Name("import.admission." + std::to_string(index));
 		binding.Expected.PortalKey = binding.Portal.Text();
 		auto reply = Image(binding.Expected);
-		REQUIRE(fixture.Render.QueuePortalImage(binding, std::move(reply)) != 0);
+		const uint64_t handle = fixture.Render.QueuePortalImage(binding, std::move(reply));
+		REQUIRE(handle != 0);
+		handles.push_back(handle);
 	}
 	const auto full = fixture.Render.PortalImageUsage();
 	CHECK(full.Images == render::MAX_IMPORTED_PORTAL_IMAGES);
@@ -596,4 +603,42 @@ TEST_CASE(
 	fixture.Render.ForgetWorld(binding.World, binding.WorldName);
 	CHECK(fixture.Render.PortalImageUsage().Images == 0);
 	CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
+#if ENGINE_ASSERTS_ENABLED
+	for (const uint64_t handle : handles)
+		CHECK(
+			terminals.AppliedCount(
+				render::test_support::PortalRendererTerminalKind::ReleasePortalImport, handle
+			) == 1
+		);
+#endif
+}
+
+TEST_CASE("portal image shutdown retires the remaining import once", "[render][gpu][portal-import][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+#if ENGINE_ASSERTS_ENABLED
+	render::test_support::PortalRendererTerminalTrace terminals(fixture.Render);
+#endif
+	render::PortalImageBinding binding;
+	binding.World = 941;
+	binding.WorldName = core::Name("import.shutdown");
+	binding.Portal = core::Name("Door");
+	binding.Expected = {1, "Door", 1, 1};
+	const uint64_t handle = fixture.Render.QueuePortalImage(binding, Image(binding.Expected));
+	REQUIRE(handle != 0);
+	fixture.Render.Shutdown();
+	CHECK(fixture.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(
+		terminals.AppliedCount(
+			render::test_support::PortalRendererTerminalKind::ReleasePortalImport, handle
+		) == 1
+	);
+#endif
+	fixture.Render.Shutdown();
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(
+		terminals.Count(render::test_support::PortalRendererTerminalKind::ReleasePortalImport, handle) == 1
+	);
+#endif
 }

@@ -45,6 +45,10 @@ namespace engine::world {
 		bool operator==(const PresentationDirectory &) const = default;
 	};
 
+	// Presentation transport urgency. Only protocol producers may mark a message
+	// urgent; receivers preserve each endpoint's sequence regardless of urgency.
+	enum class PresentationPriority : uint8_t { Routine, TransferEye };
+
 	// An owned message. Sequence is stamped by the sending endpoint; Correlation
 	// belongs to the consumer protocol and is never interpreted by this layer.
 	// arch-crossing
@@ -59,6 +63,8 @@ namespace engine::world {
 		uint64_t Correlation = 0;
 		// Owned consumer bytes, bounded before allocation.
 		std::vector<std::byte> Payload;
+		// Scheduling hint carried by the authenticated presentation route.
+		PresentationPriority Priority = PresentationPriority::Routine;
 	};
 
 	// Hard wire bounds apply before names or payloads are allocated. Wire names
@@ -184,7 +190,8 @@ namespace engine::world {
 			const PresentationAddress &from,
 			const PresentationAddress &to,
 			uint64_t correlation,
-			std::span<const std::byte> payload
+			std::span<const std::byte> payload,
+			PresentationPriority priority = PresentationPriority::Routine
 		);
 		// Validates the sender against an authenticated host connection.
 		// Admits a message from an authenticated remote host.

@@ -36,6 +36,7 @@
 #include <bit>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 
 namespace engine::render {
 	namespace {
@@ -517,6 +518,8 @@ namespace engine::render {
 		PortalImageSourceDelivery Delivery = PortalImageSourceDelivery::ImportedImages;
 		const world::PresentationBindings *EndpointBindings = nullptr;
 		std::optional<size_t> ViewSlot = ReplySlot(Replies.Channel);
+		bool EyeDiagnostic = std::getenv("PORTAL_EYE_SOURCE_DIAGNOSTIC") != nullptr;
+		size_t EyeDiagnosticCount = 0;
 		std::optional<world::PresentationMessage> ShadowReply;
 		std::optional<Time> LastTime;
 		bool EndpointCurrent(PortalEndpointView endpoint) const {
@@ -535,6 +538,7 @@ namespace engine::render {
 			uint64_t Handle = 0;
 			Time PendingDeadline;
 			Time ImageDeadline;
+			Time AcceptedAt{};
 			std::optional<Time> CapturePinDeadline;
 			bool CapturePinned = false;
 			uint64_t CaptureLease = 0;
@@ -546,6 +550,7 @@ namespace engine::render {
 			std::optional<Demand> Deferred;
 			PortalImageBinding CapturedBinding{};
 			PortalCaptureCamera CapturedCamera{};
+			world::PresentationAddress CapturedProducer;
 			std::string CapturedEyePlayer{};
 			std::string RetainedBodyPlayer{}, CapturedRetainedBodyPlayer{};
 			bool OrderedLayers = false;
@@ -561,13 +566,15 @@ namespace engine::render {
 			uint64_t UploadLensPrograms = 0;
 			std::array<uint64_t, MAX_PORTAL_TRANSPARENT_LAYERS + 2> UploadImages{};
 			std::optional<PortalResidentReceipt> UploadVersion;
-			void CaptureAccepted() {
+			void CaptureAccepted(Time now) {
+				AcceptedAt = now;
 				if (CaptureLease == 0) {
 					CapturePinDeadline.reset();
 					CapturePinned = false;
 				}
 				CapturedBinding = Binding;
 				CapturedCamera = PendingCamera;
+				CapturedProducer = Producer;
 				CapturedEyePlayer = EyePlayer;
 				CapturedRetainedBodyPlayer = RetainedBodyPlayer;
 			}
@@ -675,6 +682,7 @@ namespace engine::render {
 				Render.ReleaseImage(preview.Handle);
 			preview.Tree = 0;
 			preview.Handle = 0;
+			preview.CapturedProducer = {};
 		}
 		void RetireImage(Preview &preview) {
 			Render.DropPortalCaptureTree(preview.Tree);
@@ -718,7 +726,19 @@ namespace engine::render {
 					);
 				};
 				if (std::any_of(preview.TreeProducers.begin(), preview.TreeProducers.end(), retired))
+					if (EyeDiagnostic && ViewSlot && *ViewSlot == 5 && EyeDiagnosticCount++ < 256)
+						ENGINE_WARN(
+							"portal source retire slot=5 reason=tree-producer handle={}", preview.Handle
+						);
+				if (std::any_of(preview.TreeProducers.begin(), preview.TreeProducers.end(), retired))
 					RetireImage(preview);
+				if (preview.Handle != 0 && !EndpointCurrent(Borrow(preview.CapturedProducer))) {
+					if (EyeDiagnostic && ViewSlot && *ViewSlot == 5 && EyeDiagnosticCount++ < 256)
+						ENGINE_WARN(
+							"portal source retire slot=5 reason=capture-producer handle={}", preview.Handle
+						);
+					RetireImage(preview);
+				}
 				if (std::any_of(
 						preview.UploadTreeProducers.begin(), preview.UploadTreeProducers.end(), retired
 					))
@@ -729,6 +749,10 @@ namespace engine::render {
 					PublishedEndpoint(EndpointBindings, Borrow(preview.Producer)) !=
 						Borrow(preview.ExpectedProducer)) {
 					// A retained picture cannot authorize entry into a retired producer incarnation.
+					if (EyeDiagnostic && ViewSlot && *ViewSlot == 5 && EyeDiagnosticCount++ < 256)
+						ENGINE_WARN(
+							"portal source drop slot=5 reason=current-producer handle={}", preview.Handle
+						);
 					Inbox.InvalidateEndpoint(Borrow(preview.Producer));
 					Drop(preview);
 					return true;
@@ -819,7 +843,7 @@ namespace engine::render {
 		if (request.Geometry.size() > MAX_PORTAL_GEOMETRY_BYTES || !state.ViewSlot ||
 			(state.Delivery == PortalImageSourceDelivery::CapturePayloads && !request.OrderedLayers) ||
 			binding.ViewSlot != *state.ViewSlot ||
-			(state.Resident != nullptr && !state.Resident->Owns(state.Render.RendererRef())) ||
+			(state.Resident != nullptr && !state.Render.OwnsResident(*state.Resident)) ||
 			!Local(state.Universe, state.World, state.Replies) ||
 			producer.Channel != PORTAL_REQUEST_CHANNEL || binding.World != state.World.Index ||
 			binding.WorldName.Text() != state.Replies.World ||
@@ -862,6 +886,17 @@ namespace engine::render {
 			std::find_if(state.Previews.begin(), state.Previews.end(), [&](const Impl::Preview &preview) {
 				return preview.Binding.Portal == binding.Portal;
 			});
+		// A handoff eye may arrive after this viewport already issued a routine
+		// request. Replace that local correlation so the producer can prioritize its
+		// reply. A late routine reply is ignored by the new expected request id.
+		if (existing != state.Previews.end() && existing->Pending != 0 && request.TransferEye &&
+			!existing->PendingRequest.TransferEye && existing->Producer == producer &&
+			state.SameBindingProfile(existing->Binding, binding)) {
+			if (state.Resident != nullptr) state.Resident->Cancel(state.Replies, existing->Pending);
+			state.Inbox.CancelRequest(existing->Pending);
+			existing->Pending = 0;
+			existing->Deferred.reset();
+		}
 		// Keep the current request alive, but retain only the latest normalized
 		// demand. Geometry contributes to CameraRevision above, before this decision.
 		if (existing != state.Previews.end() && existing->Pending != 0 && existing->Producer == producer &&
@@ -971,7 +1006,11 @@ namespace engine::render {
 			if (state.Resident != nullptr) {
 				state.Resident->Cancel(state.Replies, existing->Pending);
 			}
-			if (existing->Producer == producer && existing->Binding.World == preview.Binding.World &&
+			// The rendered handle belongs to this renderer, rather than the producer
+			// endpoint. Keep it while a route changes producer so a complete portal
+			// frame remains drawable until the replacement reply lands. Endpoint
+			// invalidation still retires it when its old producer is no longer valid.
+			if (existing->Binding.World == preview.Binding.World &&
 				existing->Binding.ViewSlot == preview.Binding.ViewSlot &&
 				existing->Binding.Index == preview.Binding.Index) {
 				preview.Handle = existing->Handle;
@@ -984,6 +1023,7 @@ namespace engine::render {
 				preview.LensPrograms = existing->LensPrograms;
 				existing->LensPrograms = 0;
 				preview.ImageDeadline = existing->ImageDeadline;
+				preview.AcceptedAt = existing->AcceptedAt;
 				preview.CapturePinDeadline = existing->CapturePinDeadline;
 				preview.CapturePinned = existing->CapturePinned;
 				preview.CaptureLease = existing->CaptureLease;
@@ -991,6 +1031,7 @@ namespace engine::render {
 				preview.ImageVersion = existing->ImageVersion;
 				preview.CapturedBinding = std::move(existing->CapturedBinding);
 				preview.CapturedCamera = existing->CapturedCamera;
+				preview.CapturedProducer = existing->CapturedProducer;
 				preview.CapturedEyePlayer = std::move(existing->CapturedEyePlayer);
 				preview.CapturedRetainedBodyPlayer = std::move(existing->CapturedRetainedBodyPlayer);
 			} else {
@@ -1029,8 +1070,17 @@ namespace engine::render {
 				preview.LensPrograms = 0;
 				preview.ImageVersion = std::move(preview.UploadVersion);
 				preview.UploadVersion.reset();
-				preview.CaptureAccepted();
+				preview.CaptureAccepted(now);
 				preview.ImageDeadline = now + state.Limits.Timeout;
+				if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 && *state.ViewSlot <= 3 &&
+					state.EyeDiagnosticCount++ < 256)
+					ENGINE_WARN(
+						"portal eye source completed tree slot={} request={} handle={} capture_tick={}",
+						*state.ViewSlot,
+						preview.Pending,
+						preview.Handle,
+						preview.ImageVersion->CaptureTick
+					);
 				completions.push_back(
 					{preview.Pending,
 					 PortalImageStatus::Ok,
@@ -1061,8 +1111,17 @@ namespace engine::render {
 			preview.ImageVersion = std::move(preview.UploadVersion);
 			preview.UploadVersion.reset();
 			preview.UploadImages = {};
-			preview.CaptureAccepted();
+			preview.CaptureAccepted(now);
 			preview.ImageDeadline = now + state.Limits.Timeout;
+			if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 && *state.ViewSlot <= 3 &&
+				state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN(
+					"portal eye source completed layers slot={} request={} handle={} capture_tick={}",
+					*state.ViewSlot,
+					preview.Pending,
+					preview.Handle,
+					preview.ImageVersion->CaptureTick
+				);
 			completions.push_back(
 				{preview.Pending,
 				 PortalImageStatus::Ok,
@@ -1073,6 +1132,18 @@ namespace engine::render {
 			preview.Pending = 0;
 		}
 		for (auto &message : state.Universe.TakePresentation(state.Replies)) {
+			if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 && *state.ViewSlot <= 3 &&
+				state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN(
+					"portal eye source received slot={} correlation={} from={} channel={} session={} "
+					"bytes={}",
+					*state.ViewSlot,
+					message.Correlation,
+					message.From.World,
+					message.From.Channel,
+					message.From.Session,
+					message.Payload.size()
+				);
 			if (IsPortalShadowPacket(message.Payload)) {
 				PortalShadowPacket packet;
 				std::string error;
@@ -1103,7 +1174,7 @@ namespace engine::render {
 					state.Inbox.CancelRequest(preview.Pending);
 					preview.Pending = 0;
 					preview.ImageVersion = renewed;
-					preview.CaptureAccepted();
+					preview.CaptureAccepted(now);
 					preview.ImageDeadline = now + state.Limits.Timeout;
 					completions.push_back(
 						{message.Correlation,
@@ -1121,6 +1192,19 @@ namespace engine::render {
 				PortalResidentReceipt receipt;
 				std::string error;
 				if (DecodePortalResidentReceipt(message.Payload, receipt, error)) {
+					const bool traceEye = state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 1 &&
+										  *state.ViewSlot <= 3 && state.EyeDiagnosticCount++ < 256;
+					if (traceEye)
+						ENGINE_WARN(
+							"portal eye resident receipt slot={} correlation={} request={} producer={} "
+							"capture_tick={}",
+							*state.ViewSlot,
+							message.Correlation,
+							receipt.Key.RequestId,
+							message.From.World,
+							receipt.CaptureTick
+						);
+					bool matched = false;
 					for (auto &preview : state.Previews) {
 						if (preview.OrderedLayers || preview.Pending != message.Correlation ||
 							preview.Producer != message.From || message.To != state.Replies ||
@@ -1128,7 +1212,16 @@ namespace engine::render {
 							preview.Binding.ExpectedScope != receipt.Scope) {
 							continue;
 						}
+						matched = true;
 						const auto handle = state.Resident->Take(state.Replies, message.From, receipt, now);
+						if (traceEye)
+							ENGINE_WARN(
+								"portal eye resident take slot={} request={} handle={} deferred={}",
+								*state.ViewSlot,
+								receipt.Key.RequestId,
+								handle,
+								preview.Deferred.has_value()
+							);
 						if (handle == 0) {
 							continue;
 						}
@@ -1145,7 +1238,7 @@ namespace engine::render {
 						preview.LensPrograms = 0;
 						preview.Handle = handle;
 						preview.ImageVersion = receipt;
-						preview.CaptureAccepted();
+						preview.CaptureAccepted(now);
 						preview.ImageDeadline = now + state.Limits.Timeout;
 						completions.push_back(
 							{message.Correlation,
@@ -1156,6 +1249,13 @@ namespace engine::render {
 						);
 						break;
 					}
+					if (traceEye && !matched)
+						ENGINE_WARN(
+							"portal eye resident unmatched slot={} request={} previews={}",
+							*state.ViewSlot,
+							receipt.Key.RequestId,
+							state.Previews.size()
+						);
 					continue;
 				}
 			}
@@ -1168,11 +1268,28 @@ namespace engine::render {
 				[&](PortalCaptureTreeEndpointView endpoint) { return state.EndpointCurrent(endpoint); },
 				PublishedEndpoint(state.EndpointBindings, Borrow(message.From))
 			);
+			if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 && *state.ViewSlot <= 3 &&
+				state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN(
+					"portal eye source admission slot={} correlation={} status={} error={}",
+					*state.ViewSlot,
+					message.Correlation,
+					static_cast<int>(accepted.Status),
+					accepted.Error
+				);
 			auto preview =
 				std::find_if(state.Previews.begin(), state.Previews.end(), [&](const Impl::Preview &entry) {
 					return entry.Pending == message.Correlation;
 				});
 			if (preview == state.Previews.end()) {
+				if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 && *state.ViewSlot <= 3 &&
+					state.EyeDiagnosticCount++ < 256)
+					ENGINE_WARN(
+						"portal eye source ignored slot={} correlation={} admission={} preview=missing",
+						*state.ViewSlot,
+						message.Correlation,
+						static_cast<int>(accepted.Status)
+					);
 				continue;
 			}
 			if (accepted.Status == PortalInboxStatus::CompletedFailure) {
@@ -1197,7 +1314,7 @@ namespace engine::render {
 			}
 			if (state.Delivery == PortalImageSourceDelivery::CapturePayloads) {
 				preview->PayloadReady = true;
-				preview->CaptureAccepted();
+				preview->CaptureAccepted(now);
 				preview->ImageDeadline = now + state.Limits.Timeout;
 				preview->Pending = 0;
 				completions.push_back({message.Correlation, PortalImageStatus::Ok, 0, {}, {}});
@@ -1261,6 +1378,15 @@ namespace engine::render {
 					preview->UploadTree = token;
 					preview->UploadTreeProducers = std::move(producers);
 					preview->UploadVersion = version;
+					if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 &&
+						*state.ViewSlot <= 3 && state.EyeDiagnosticCount++ < 256)
+						ENGINE_WARN(
+							"portal eye source queued tree slot={} request={} token={} capture_tick={}",
+							*state.ViewSlot,
+							preview->Pending,
+							token,
+							version.CaptureTick
+						);
 					continue;
 				}
 				if (!layers) continue;
@@ -1317,6 +1443,14 @@ namespace engine::render {
 				Borrow(state.Replies), Borrow(message.From), preview->Binding.Expected.PortalKey, now
 			);
 			if (!image) {
+				if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 && *state.ViewSlot <= 3 &&
+					state.EyeDiagnosticCount++ < 256)
+					ENGINE_WARN(
+						"portal eye source accepted without image slot={} correlation={} expected={}",
+						*state.ViewSlot,
+						message.Correlation,
+						preview->Binding.Expected.RequestId
+					);
 				continue;
 			}
 			const PortalResidentReceipt imageVersion{
@@ -1331,6 +1465,15 @@ namespace engine::render {
 			};
 			const auto handle = state.Render.QueuePortalImage(preview->Binding, std::move(*image));
 			preview->Pending = 0;
+			if (state.EyeDiagnostic && state.ViewSlot && *state.ViewSlot >= 2 && *state.ViewSlot <= 3 &&
+				state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN(
+					"portal eye source imported slot={} correlation={} handle={} capture_tick={}",
+					*state.ViewSlot,
+					message.Correlation,
+					handle,
+					imageVersion.CaptureTick
+				);
 			if (handle == 0) {
 				completions.push_back(
 					{message.Correlation,
@@ -1358,7 +1501,7 @@ namespace engine::render {
 				handle
 			);
 			preview->ImageVersion = imageVersion;
-			preview->CaptureAccepted();
+			preview->CaptureAccepted(now);
 			preview->ImageDeadline = now + state.Limits.Timeout;
 			completions.push_back(
 				{message.Correlation,
@@ -1488,9 +1631,23 @@ namespace engine::render {
 	uint64_t PortalImageSource::Image(std::string_view portal) const {
 		for (const auto &preview : State->Previews) {
 			if (preview.Binding.Portal.Text() == portal) {
+				if (State->EyeDiagnostic && State->ViewSlot == 1 && portal == "viewport-eye" &&
+					State->EyeDiagnosticCount++ < 64)
+					ENGINE_WARN(
+						"portal eye resident image slot=1 pending={} handle={} image_request={} "
+						"expected_request={} deferred={}",
+						preview.Pending,
+						preview.Handle,
+						preview.ImageVersion ? preview.ImageVersion->Key.RequestId : 0,
+						preview.Binding.Expected.RequestId,
+						preview.Deferred.has_value()
+					);
 				return preview.Handle;
 			}
 		}
+		if (State->EyeDiagnostic && State->ViewSlot == 1 && portal == "viewport-eye" &&
+			State->EyeDiagnosticCount++ < 64)
+			ENGINE_WARN("portal eye resident image slot=1 preview-missing");
 		return 0;
 	}
 	uint64_t PortalImageSource::CurrentImage(std::string_view portal) const {
@@ -1501,12 +1658,15 @@ namespace engine::render {
 		}
 		return 0;
 	}
+	PortalInboxUsage PortalImageSource::InboxUsage() const {
+		return State->Inbox.Usage();
+	}
 	std::optional<PortalImageCapture> PortalImageSource::Capture(std::string_view portal) const {
 		for (const auto &preview : State->Previews) {
 			if (preview.Binding.Portal.Text() == portal && preview.Handle != 0 && preview.ImageVersion)
 				return PortalImageCapture{
 					preview.Handle,
-					preview.Producer,
+					preview.CapturedProducer,
 					preview.CapturedBinding,
 					preview.CapturedCamera,
 					preview.CapturedEyePlayer,
@@ -1518,7 +1678,9 @@ namespace engine::render {
 					preview.CapturedLenses,
 					preview.LensPrograms,
 					preview.Tree,
-					preview.CapturedRetainedBodyPlayer
+					preview.CapturedRetainedBodyPlayer,
+					preview.AcceptedAt,
+					preview.ImageVersion->CaptureTick
 				};
 		}
 		return {};
@@ -1606,6 +1768,7 @@ namespace engine::render {
 				State->Drop(preview);
 				return true;
 			}
+			if (preview.Handle != 0 && preview.CapturedProducer == endpoint) State->RetireImage(preview);
 			if (dependent(preview.TreeProducers)) State->RetireImage(preview);
 			if (dependent(preview.UploadTreeProducers)) State->CancelPending(preview);
 			return preview.Pending == 0 && preview.Handle == 0 && !preview.PayloadReady;
@@ -1676,6 +1839,8 @@ namespace engine::render {
 		std::unique_ptr<ShaderLibrary> OwnedShaders;
 		ShaderLibrary *Shaders = nullptr;
 		bool PostProcessing = true;
+		bool EyeDiagnostic = std::getenv("PORTAL_EYE_PRODUCER_DIAGNOSTIC") != nullptr;
+		size_t EyeDiagnosticCount = 0;
 		std::vector<core::Name> GuiShaders;
 		uint64_t GuiShaderSignature = 0;
 		std::vector<WorldContentOwner> ForeignContentOwners;
@@ -1701,6 +1866,7 @@ namespace engine::render {
 			world::PresentationAddress ReplyTo;
 			PortalImageReply Reply;
 			std::vector<std::byte> Wire;
+			bool TransferEye = false;
 			uint64_t Token = 0;
 			std::array<uint64_t, MAX_PORTAL_TRANSPARENT_LAYERS + 1> LayerTokens{};
 			uint64_t OverlayToken = 0;
@@ -2592,9 +2758,22 @@ namespace engine::render {
 				std::vector<std::byte>().swap(capture.Reply.LightingBaseline);
 				std::vector<std::byte>().swap(capture.Reply.DirectionalResponse);
 			}
+			const auto priority = capture.TransferEye ? world::PresentationPriority::TransferEye
+													  : world::PresentationPriority::Routine;
 			const auto status = Universe.SendPresentation(
-				World, Requests, capture.ReplyTo, capture.Reply.Key.RequestId, capture.Wire
+				World, Requests, capture.ReplyTo, capture.Reply.Key.RequestId, capture.Wire, priority
 			);
+			if (EyeDiagnostic && capture.Reply.Key.PortalKey == "viewport-eye" && EyeDiagnosticCount++ < 64)
+				ENGINE_WARN(
+					"portal eye producer send world={} request={} reply_status={} transport={} bytes={} "
+					"diagnostic={}",
+					Requests.World,
+					capture.Reply.Key.RequestId,
+					static_cast<int>(capture.Reply.Status),
+					static_cast<int>(status),
+					capture.Wire.size(),
+					capture.Reply.Diagnostic
+				);
 			if (status == world::PresentationStatus::Ok) {
 				if (capture.ShadowSlot) {
 					auto &shadow = *Shadows[*capture.ShadowSlot];
@@ -2785,7 +2964,7 @@ namespace engine::render {
 			return progress;
 		}
 		if (state.Requests.Channel != PORTAL_REQUEST_CHANNEL ||
-			(state.Resident != nullptr && !state.Resident->Owns(state.Render.RendererRef())) ||
+			(state.Resident != nullptr && !state.Render.OwnsResident(*state.Resident)) ||
 			!Local(state.Universe, state.World, state.Requests)) {
 			Clear();
 			return progress;
@@ -2912,13 +3091,34 @@ namespace engine::render {
 			if (!ReplySlot(message.From.Channel) ||
 				!DecodePortalImageRequest(message.Payload, request, error) ||
 				request.Key.RequestId != message.Correlation) {
+				if (state.EyeDiagnostic && state.EyeDiagnosticCount++ < 64)
+					ENGINE_WARN(
+						"portal eye producer decode refused world={} correlation={} from={} reason={}",
+						state.Requests.World,
+						message.Correlation,
+						message.From.Channel,
+						error
+					);
 				++progress.Refused;
 				continue;
 			}
+			if (state.EyeDiagnostic && request.Key.PortalKey == "viewport-eye" &&
+				state.EyeDiagnosticCount++ < 64)
+				ENGINE_WARN(
+					"portal eye producer received world={} request={} from={} eye_player={} "
+					"retained_player={}",
+					state.Requests.World,
+					request.Key.RequestId,
+					message.From.Channel,
+					request.EyePlayer,
+					request.RetainedBodyPlayer
+				);
 			Impl::Capture capture;
 			capture.ReplyTo = std::move(message.From);
 			capture.Reply.Key = request.Key;
 			capture.Reply.Scope = request.Scope;
+			capture.TransferEye = request.TransferEye;
+			if (request.TransferEye) core::Metrics::Count("render.portal.transfer-eye.received", 1);
 			capture.RetainedBodyPlayer = request.RetainedBodyPlayer;
 			capture.Deadline = now + CAPTURE_TIMEOUT;
 			if (!state.Authorized(capture.ReplyTo, request.RetainedBodyPlayer)) {
@@ -3214,7 +3414,8 @@ namespace engine::render {
 						if (!seam.Crosses || (frame.Entrance && seam.Surface == *frame.Entrance)) continue;
 						const auto child = std::find_if(
 							job.Children.begin(), job.Children.end(), [&](const auto &candidate) {
-								return candidate.Demand.Portal.Index == seam.Surface;
+								return !candidate.Demand.SeamRadiance &&
+									   candidate.Demand.Portal.Index == seam.Surface;
 							}
 						);
 						const auto key = child == job.Children.end() ? core::Name("nested-validation")
@@ -3230,7 +3431,13 @@ namespace engine::render {
 						}
 						++matched;
 					}
-					if (matched != job.Children.size())
+					const size_t primaryChildren = static_cast<size_t>(
+						std::count_if(job.Children.begin(), job.Children.end(), [](const auto &child) {
+							return !child.Demand.SeamRadiance;
+						})
+					);
+					// A radiance child shares its seam with the primary image child.
+					if (matched != primaryChildren)
 						job.Failure = "nested portal mapping changed while capture waited";
 				}
 
@@ -3902,6 +4109,16 @@ namespace engine::render {
 				state.SendFailure(job.Output, progress);
 				continue;
 			}
+			if (state.EyeDiagnostic && job.Request.Key.PortalKey == "viewport-eye" &&
+				state.EyeDiagnosticCount++ < 64)
+				ENGINE_WARN(
+					"portal eye producer queued world={} request={} token={} rows={} eye_rig={}",
+					state.Requests.World,
+					job.Request.Key.RequestId,
+					job.Output.Token,
+					view.Instances.size(),
+					view.EyeRig
+				);
 			OverlayImage overlay;
 			state.Render.SetAnimationTime(state.Frames[index].PresentationSeconds);
 			const auto rendered = state.Render.RenderViews(std::span(&view, 1), overlay, interface, false);

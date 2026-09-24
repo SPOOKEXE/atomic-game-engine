@@ -19,7 +19,8 @@ namespace engine::world {
 		}
 		bool Valid(const PresentationMessage &message) {
 			return Valid(message.From) && Valid(message.To) && message.Sequence != 0 &&
-				   message.Payload.size() <= MAX_PRESENTATION_PAYLOAD;
+				   message.Payload.size() <= MAX_PRESENTATION_PAYLOAD &&
+				   message.Priority <= PresentationPriority::TransferEye;
 		}
 		void WriteAddress(core::ByteWriter &writer, const PresentationAddress &address) {
 			writer.WriteString(address.World);
@@ -56,6 +57,7 @@ namespace engine::world {
 		WriteAddress(writer, message.To);
 		writer.WriteUInt64(message.Sequence);
 		writer.WriteUInt64(message.Correlation);
+		writer.WriteUInt8(static_cast<uint8_t>(message.Priority));
 		writer.WriteUInt32(static_cast<uint32_t>(message.Payload.size()));
 		writer.WriteRaw(message.Payload.data(), message.Payload.size());
 		return true;
@@ -67,9 +69,11 @@ namespace engine::world {
 		const ReadAddress to = ReadEndpoint(reader);
 		const uint64_t sequence = reader.ReadUInt64();
 		const uint64_t correlation = reader.ReadUInt64();
+		const auto priority = static_cast<PresentationPriority>(reader.ReadUInt8());
 		const uint32_t count = reader.ReadUInt32();
 		if (reader.Failed() || magic != PRESENTATION_MAGIC || !Valid(from) || !Valid(to) || sequence == 0 ||
-			count > MAX_PRESENTATION_PAYLOAD || count > reader.Remaining()) {
+			priority > PresentationPriority::TransferEye || count > MAX_PRESENTATION_PAYLOAD ||
+			count > reader.Remaining()) {
 			reader.Fail();
 			return false;
 		}
@@ -80,6 +84,7 @@ namespace engine::world {
 		decoded.Sequence = sequence;
 		decoded.Correlation = correlation;
 		decoded.Payload.assign(bytes.begin(), bytes.end());
+		decoded.Priority = priority;
 		message = std::move(decoded);
 		return true;
 	}
@@ -385,7 +390,12 @@ namespace engine::world {
 			return PresentationStatus::Full;
 		}
 		PresentationMessage owned{
-			message.From, message.To, message.Sequence, message.Correlation, {payload.begin(), payload.end()}
+			message.From,
+			message.To,
+			message.Sequence,
+			message.Correlation,
+			{payload.begin(), payload.end()},
+			message.Priority
 		};
 		Pending.push_back({destination->Host, std::move(owned)});
 		Size.Bytes += bytes;
@@ -401,7 +411,8 @@ namespace engine::world {
 		const PresentationAddress &from,
 		const PresentationAddress &to,
 		uint64_t correlation,
-		std::span<const std::byte> payload
+		std::span<const std::byte> payload,
+		PresentationPriority priority
 	) {
 		Endpoint *source = Find(from);
 		if (source == nullptr) {
@@ -419,7 +430,7 @@ namespace engine::world {
 		if (payload.size() > Limits.MaximumPayload || payload.size() > MAX_PRESENTATION_PAYLOAD) {
 			return PresentationStatus::TooLarge;
 		}
-		PresentationMessage message{source->Address, to, source->Sequence + 1, correlation, {}};
+		PresentationMessage message{source->Address, to, source->Sequence + 1, correlation, {}, priority};
 		const PresentationStatus status = Route(message, payload);
 		if (status == PresentationStatus::Ok) {
 			source->Sequence++;

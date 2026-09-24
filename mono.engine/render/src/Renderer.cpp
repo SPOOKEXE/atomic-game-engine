@@ -7,6 +7,7 @@
 #include "SurfaceScale.hpp"
 #include "ViewRecording.hpp"
 #include "VulkanTimestamps.hpp"
+#include "portal/PortalRendererTerminalObserver.hpp"
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
@@ -807,7 +808,16 @@ namespace engine::render {
 			slot = {};
 		}
 		for (auto &image : State->ImportedPortals) {
+#if ENGINE_ASSERTS_ENABLED
+			const uint64_t released = image.Handle;
+#endif
 			State->ReleasePortalImport(image);
+#if ENGINE_ASSERTS_ENABLED
+			if (released != 0)
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::ReleasePortalImport, released, true}
+				);
+#endif
 		}
 		for (auto &image : State->ImportedPortalShadows) {
 			State->ReleasePortalShadow(image);
@@ -1139,7 +1149,16 @@ namespace engine::render {
 				DropPortalCaptureTree(tree.Token);
 		for (auto &image : State->ImportedPortals) {
 			if (image.Binding.World == world && image.Binding.WorldName == name) {
+#if ENGINE_ASSERTS_ENABLED
+				const uint64_t released = image.Handle;
+#endif
 				State->ReleasePortalImport(image);
+#if ENGINE_ASSERTS_ENABLED
+				if (released != 0)
+					test_support::ObservePortalRendererTerminal(
+						{this, test_support::PortalRendererTerminalKind::ReleasePortalImport, released, true}
+					);
+#endif
 			}
 		}
 		for (auto &image : State->ImportedPortalShadows) {

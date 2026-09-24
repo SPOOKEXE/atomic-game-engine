@@ -24,6 +24,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class PortalSeamReportTest(unittest.TestCase):
+	def test_body_mask_tracks_yellow_hue_across_lighting(self) -> None:
+		def selected(pixel: tuple[int, int, int]) -> int:
+			return MODULE.nonzero_pixels(MODULE.straddler_mask(Image.new("RGB", (1, 1), pixel)))
+
+		self.assertEqual(selected((169, 96, 45)), 0)
+		self.assertEqual(selected((84, 73, 0)), 1)
+		self.assertEqual(selected((108, 131, 0)), 1)
+		self.assertEqual(selected((155, 142, 58)), 1)
+		self.assertEqual(selected((120, 230, 120)), 0)
+
 	def test_sequence_records_temporal_and_topology_metadata(self) -> None:
 		with tempfile.TemporaryDirectory() as temporary:
 			sequence = Path(temporary) / "portal-seam-side"
@@ -44,7 +54,10 @@ class PortalSeamReportTest(unittest.TestCase):
 						"tick": 120,
 						"alpha": 0.5,
 						"eye_capture": {"seam_revision": 3},
-						"portal_views": [{"capture": {"seam_revision": 5}}],
+						"previous_render_uploaded_bytes": 4096,
+						"portal_import": {"uploaded_bytes": 8192},
+						"portal_inbox": {"pending_count": 2, "held_count": 1, "decoded_bytes": 16384},
+						"portal_views": [{"capture": {"seam_revision": 5, "accepted_age_ms": 12.5}}],
 					}
 				),
 				encoding="utf-8",
@@ -62,6 +75,10 @@ class PortalSeamReportTest(unittest.TestCase):
 				"simulation_alpha": 0.5,
 			})
 			self.assertEqual(row["topology_revisions"], [3, 5])
+			self.assertEqual(row["straddler_body_pixels"], 100)
+			self.assertEqual(row["render_metrics"]["portal_capture_ages_ms"], [12.5])
+			self.assertEqual(recorded["render_usage"][0]["portal_inbox_pending_count_max"], 2)
+			self.assertEqual(recorded["render_usage"][0]["portal_inbox_decoded_bytes_end"], 16384)
 			self.assertEqual(row["side"]["ratio"], 1.0)
 			self.assertTrue(recorded["sequence"]["metadata_complete"])
 
@@ -112,12 +129,23 @@ class PortalSeamReportTest(unittest.TestCase):
 			reference = root / "portal-seam-reference-front"
 			portal.mkdir()
 			reference.mkdir()
-			floor = (40, 60, 90)
+			floor = (169, 96, 45)
+			body = (155, 142, 58)
 			portal_image = Image.new("RGB", (24, 16), floor)
 			reference_image = Image.new("RGB", (24, 16), floor)
+			red, green, blue = portal_image.split()
+			old_floor_pixels = MODULE.nonzero_pixels(MODULE.ImageMath.eval(
+				"convert(((r > 70) & (g > 60) & (b < 150) & (r * 2 > b * 3) & (g * 2 > b * 3)) * 255, 'L')",
+				r=red,
+				g=green,
+				b=blue,
+			))
 			for x in range(8, 12):
 				for y in range(5, 10):
-					reference_image.putpixel((x, y), (255, 214, 0))
+					reference_image.putpixel((x, y), body)
+			self.assertEqual(old_floor_pixels, 24 * 16)
+			self.assertEqual(MODULE.nonzero_pixels(MODULE.straddler_mask(portal_image)), 0)
+			self.assertEqual(MODULE.nonzero_pixels(MODULE.straddler_mask(reference_image)), 20)
 			portal_image.save(portal / "0.bmp")
 			reference_image.save(reference / "0.bmp")
 			for sequence in (portal, reference):
@@ -130,6 +158,23 @@ class PortalSeamReportTest(unittest.TestCase):
 			self.assertGreater(comparison["uncovered_body_samples"], 0)
 			self.assertEqual(comparison["portal_body_samples"], 0)
 			self.assertFalse(MODULE.full_reference_passes(recorded, 0))
+
+	def test_extra_body_over_an_opaque_floor_is_a_reference_mismatch(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			root = Path(temporary)
+			portal = root / "portal.bmp"
+			reference = root / "reference.bmp"
+			portal_image = Image.new("RGB", (24, 16), (169, 96, 45))
+			reference_image = Image.new("RGB", (24, 16), (169, 96, 45))
+			for x in range(8, 12):
+				for y in range(5, 10):
+					portal_image.putpixel((x, y), (108, 131, 0))
+			portal_image.save(portal)
+			reference_image.save(reference)
+
+			comparison = MODULE.full_reference_measurement(portal, reference, 0)
+			self.assertEqual(comparison["uncovered_body_samples"], 0)
+			self.assertEqual(comparison["duplicate_body_samples"], 20)
 
 	def test_reference_requires_the_same_fixed_step_phase(self) -> None:
 		portal = {"presentation_time": {"simulation_tick": 120, "simulation_alpha": 0.5}}

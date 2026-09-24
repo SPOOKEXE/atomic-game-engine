@@ -89,14 +89,22 @@ namespace engine::render {
 			View &view,
 			const PortalImageDemandSettings &settings,
 			Time now,
-			const PortalEyeGeometrySource &geometry = {}
+			const PortalEyeGeometrySource &geometry = {},
+			bool transferEye = false
 		);
 		// Pump once after submitting all demanded views. CPU snapshots remain joined
 		// to their destination presentation; only owned messages cross worlds.
-		// destinationPresented uses the host's already completed presentations and
-		// their per-world interpolation alpha, without running PreRender again.
-		PortalProducerProgress
-		Pump(float frameSeconds, float alpha, Time now, bool destinationPresented = false);
+		// Only the named world may borrow an already completed presentation. Other
+		// producers must run PreRender before capturing their draw rows.
+		PortalProducerProgress Pump(
+			float frameSeconds,
+			float alpha,
+			Time now,
+			world::WorldId presentedWorld = {},
+			world::WorldId alsoPresentedWorld = {}
+		);
+		// Latest inbox totals, accumulated while Pump already visits each source.
+		PortalInboxUsage InboxUsage() const;
 		// Render a view to submit queued groups even when displayed pixels are cached.
 		bool HasPendingUploads() const;
 		// Borrows the latest accepted image for a viewport portal, or zero.

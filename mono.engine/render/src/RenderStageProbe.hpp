@@ -22,10 +22,19 @@ namespace engine::render {
 		uint64_t First = 0, Last = 8, Sequence = 0;
 		size_t PendingBytes = 0;
 		uint64_t ViewSlot = UINT64_MAX;
+		std::string TransitionFrom, TransitionTo, PreviousDisplayWorld;
+		uint64_t TransitionSlot = UINT64_MAX, TriggeredFrame = UINT64_MAX;
+		bool TransitionArmed = false, TransitionUsed = false;
 		std::vector<Snapshot> Pending;
 
 		static std::string Quote(std::string_view value);
 		void Configure();
+		void ObserveDisplay(std::string_view world, uint64_t slot);
+		void ActivateView(uint64_t frame, std::string_view world, uint64_t slot, bool finalView);
+		bool TransitionMode() const {
+			return !TransitionFrom.empty();
+		}
+		bool Wants(std::string_view stage, std::string_view resource) const;
 		bool Enabled(uint64_t frame, uint64_t view = UINT64_MAX) const;
 		void Record(
 			SDL_GPUDevice *device,

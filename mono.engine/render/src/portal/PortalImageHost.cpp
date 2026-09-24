@@ -12,7 +12,9 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 
 namespace engine::render {
 	struct PortalImageHost::Impl {
@@ -22,6 +24,8 @@ namespace engine::render {
 		}
 		world::Universe &Universe;
 		bool EyePipelineInstalled = false;
+		bool EyeDiagnostic = std::getenv("PORTAL_EYE_SUBMIT_DIAGNOSTIC") != nullptr;
+		size_t EyeDiagnosticCount = 0;
 		PortalRenderOperations Render;
 		PortalResidentImages Resident;
 		PortalTopologyHost Topology;
@@ -98,6 +102,7 @@ namespace engine::render {
 			std::unique_ptr<PortalImageProducer> Runtime;
 		};
 		std::vector<Source> Sources;
+		PortalInboxUsage InboxUse;
 		std::vector<Producer> Producers;
 		struct ContentBinding {
 			world::WorldId World;
@@ -247,7 +252,10 @@ namespace engine::render {
 				Render.CancelPreparation(BodyJob->Token);
 			else
 				Render.CancelComposition(BodyJob->Token);
-			if (BodyJob->PreparationToken) Render.CancelPreparation(BodyJob->PreparationToken);
+			// A queued preparation stores its one renderer token in both fields.
+			if (BodyJob->PreparationToken &&
+				(!BodyJob->Preparation || BodyJob->PreparationToken != BodyJob->Token))
+				Render.CancelPreparation(BodyJob->PreparationToken);
 			if (BodyJob->Route) ReleaseShadowRoute(*BodyJob->Route, now);
 			if (BodyJob->Stage == BodyStage::Complete) {
 				for (auto &source : Sources)
@@ -624,22 +632,44 @@ namespace engine::render {
 		View &view,
 		const PortalImageDemandSettings &settings,
 		Time now,
-		const PortalEyeGeometrySource &geometry
+		const PortalEyeGeometrySource &geometry,
+		bool transferEye
 	) {
 		auto &state = *State;
+		const auto traceEye = [&](const char *status) {
+			if (state.EyeDiagnostic && state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN(
+					"portal eye submit slot={} source={} destination={} endpoint={} status={}",
+					view.Slot,
+					state.Universe.NameOf(source).Text(),
+					destination.Authored.Text(),
+					destination.World.Index,
+					status
+				);
+		};
 		const auto sourceName = state.Universe.NameOf(source);
-		if (!sourceName.IsValid() || state.Universe.IsRemote(source)) return 0;
+		if (!sourceName.IsValid() || state.Universe.IsRemote(source)) {
+			traceEye("source-invalid-or-remote");
+			return 0;
+		}
 		PortalImageDemand demand;
 		const core::Name key("viewport-eye");
-		if (BuildPortalEyeDemand(key, view, settings, demand) != PortalDemandStatus::Ready) return 0;
+		if (BuildPortalEyeDemand(key, view, settings, demand) != PortalDemandStatus::Ready) {
+			traceEye("demand-refused");
+			return 0;
+		}
+		demand.Request.TransferEye = transferEye;
+		if (transferEye) core::Metrics::Count("render.portal.transfer-eye.submitted", 1);
 		const core::Name pipelineName("product-eye-view");
 		if (!state.EyePipelineInstalled) {
 			graph::RenderGraph pipeline;
 			core::Name offender;
 			if (graph::Build(graph::DefaultEyeDocument(), pipeline, offender) !=
 					graph::PipelineDocumentStatus::Ok ||
-				!state.Render.InstallPipeline(pipelineName, pipeline))
+				!state.Render.InstallPipeline(pipelineName, pipeline)) {
+				traceEye("pipeline-refused");
 				return 0;
+			}
 			state.EyePipelineInstalled = true;
 		}
 		view.World = source.Index;
@@ -649,6 +679,7 @@ namespace engine::render {
 		view.EyeImage = 0;
 		if (!destination.Authored.IsValid()) {
 			RemoveViewport(view.Slot);
+			traceEye("destination-invalid");
 			return 0;
 		}
 		if (!geometry.Instances.empty()) {
@@ -669,6 +700,7 @@ namespace engine::render {
 				core::Metrics::Count("render.portal_eye.geometry_refused", 1);
 				ENGINE_DEBUG("eye geometry for viewport {} refused: {}", view.Slot, error);
 				view.EyeImage = Image(view.Slot, key);
+				traceEye("geometry-refused");
 				return 0;
 			}
 		}
@@ -679,6 +711,7 @@ namespace engine::render {
 		demand.Binding.Portal = key;
 		const auto issued = Submit(source, view.Slot, std::span(&demand, 1), std::span(&destination, 1), now);
 		view.EyeImage = Image(view.Slot, key);
+		if (issued == 0) traceEye("submit-zero");
 		return issued;
 	}
 
@@ -784,16 +817,24 @@ namespace engine::render {
 		Time now
 	) {
 		auto &state = *State;
+		const bool eye = demands.size() == 1 && demands.front().Binding.Portal == core::Name("viewport-eye");
+		const auto traceEye = [&](const char *status, int detail = -1) {
+			if (eye && state.EyeDiagnostic && state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN("portal eye route slot={} status={} detail={}", viewSlot, status, detail);
+		};
 		if (!state.Clock(now) || demands.size() > MAX_IMPORTED_PORTAL_IMAGES || !source.IsValid() ||
 			state.Universe.IsRemote(source)) {
+			traceEye("submit-precondition");
 			return 0;
 		}
 		const auto sourceName = state.Universe.NameOf(source);
 		if (!sourceName.IsValid()) {
+			traceEye("source-name-invalid");
 			return 0;
 		}
 		if (demands.empty()) {
 			RemoveViewport(viewSlot);
+			traceEye("empty-demand");
 			return 0;
 		}
 		for (size_t index = 0; index < demands.size(); ++index) {
@@ -801,10 +842,12 @@ namespace engine::render {
 			if (demand.Binding.World != source.Index || demand.Binding.WorldName != sourceName ||
 				demand.Binding.ViewSlot != viewSlot || !demand.DestinationWorld.IsValid() ||
 				demand.Binding.Portal.Text() != demand.Request.Key.PortalKey) {
+				traceEye("binding-invalid");
 				return 0;
 			}
 			for (size_t previous = 0; previous < index; ++previous) {
 				if (demands[previous].Binding.Portal == demand.Binding.Portal) {
+					traceEye("duplicate-demand");
 					return 0;
 				}
 			}
@@ -814,20 +857,33 @@ namespace engine::render {
 				return entry.Slot == viewSlot;
 			});
 		if (found != state.Sources.end() && found->World != source) {
+			if (state.EyeDiagnostic && state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN(
+					"portal image source replaced slot={} old={} new={}",
+					viewSlot,
+					state.Universe.NameOf(found->World).Text(),
+					sourceName.Text()
+				);
 			RemoveViewport(viewSlot);
 			found = state.Sources.end();
 		}
 		if (found == state.Sources.end()) {
 			if (state.Sources.size() >= MAX_IMPORTED_PORTAL_IMAGES) {
+				traceEye("source-capacity");
 				return 0;
 			}
 			auto opened = state.Universe.OpenPresentation(source, PortalReplyChannel(viewSlot));
 			if (opened.Status != world::PresentationStatus::Ok) {
+				traceEye("open-presentation", static_cast<int>(opened.Status));
 				return 0;
 			}
-			auto runtime = state.Render.CreateSource(
-				state.Universe, source, opened.Address, PortalInboxLimits{}, &state.Resident
-			);
+			PortalInboxLimits limits;
+			// A process-hosted producer can finish within its capture budget while the
+			// reply waits behind another world's presentation lane. Retain the issued
+			// correlation across that transport delay so its completed image is usable.
+			limits.Timeout = std::chrono::seconds(5);
+			auto runtime =
+				state.Render.CreateSource(state.Universe, source, opened.Address, limits, &state.Resident);
 			if (state.DriverBindingsEnabled) runtime->SetEndpointBindings(&state.DriverBindings);
 			state.Sources.push_back({source, viewSlot, opened.Address, std::move(runtime), {}, {}});
 			found = std::prev(state.Sources.end());
@@ -849,6 +905,7 @@ namespace engine::render {
 				}
 			);
 			if (destination == destinations.end() || !destination->World.IsValid()) {
+				traceEye("destination-world-unavailable");
 				// A topology or replica lookup can miss for one frame. Keep a live route so its
 				// owned image stays visible while the same capture remains in flight.
 				const auto retained = std::find_if(
@@ -863,17 +920,34 @@ namespace engine::render {
 			found->Portals.push_back({demand.Binding.Portal, destination->World});
 			const auto address = state.Destination(*destination);
 			if (address.Session == 0) {
+				traceEye("endpoint-unavailable");
 				found->Runtime->InvalidatePortal(demand.Binding.Portal.Text());
 				continue;
 			}
 			const auto result = found->Runtime->Issue(address, demand.Request, demand.Binding, now);
+			if (eye && state.EyeDiagnostic && state.EyeDiagnosticCount++ < 256)
+				ENGINE_WARN(
+					"portal eye route slot={} status=issue destination={} session={} inbox={} transport={} "
+					"request={}",
+					viewSlot,
+					demand.DestinationWorld.Text(),
+					address.Session,
+					static_cast<int>(result.Status),
+					static_cast<int>(result.Transport),
+					result.RequestId
+				);
 			issued += result.Status == PortalInboxStatus::Issued ? 1 : 0;
 		}
 		state.RetireCompositions(*found);
 		return issued;
 	}
-	PortalProducerProgress
-	PortalImageHost::Pump(float frameSeconds, float alpha, Time now, bool destinationPresented) {
+	PortalProducerProgress PortalImageHost::Pump(
+		float frameSeconds,
+		float alpha,
+		Time now,
+		world::WorldId presentedWorld,
+		world::WorldId alsoPresentedWorld
+	) {
 		auto &state = *State;
 		PortalProducerProgress total;
 		if (!std::isfinite(frameSeconds) || frameSeconds < 0 || !std::isfinite(alpha) || alpha < 0 ||
@@ -882,22 +956,42 @@ namespace engine::render {
 		}
 		state.PruneRetiredProducers();
 		for (auto &producer : state.Producers) {
-			const auto result = producer.Runtime->Pump(frameSeconds, alpha, now, destinationPresented);
+			const auto result = producer.Runtime->Pump(
+				frameSeconds,
+				alpha,
+				now,
+				producer.World == presentedWorld || producer.World == alsoPresentedWorld
+			);
 			total.Requests += result.Requests;
 			total.Rendered += result.Rendered;
 			total.Reused += result.Reused;
 			total.Sent += result.Sent;
 			total.Refused += result.Refused;
 		}
+		state.InboxUse = {};
 		for (auto &source : state.Sources) {
 			(void)source.Runtime->Poll(now);
 			state.RetireCompositions(source);
 			while (auto reply = source.Runtime->TakeShadowReply())
 				state.AcceptShadowReply(*reply, now);
+			const auto usage = source.Runtime->InboxUsage();
+			state.InboxUse.PendingCount += usage.PendingCount;
+			state.InboxUse.PendingBytes += usage.PendingBytes;
+			state.InboxUse.HeldCount += usage.HeldCount;
+			state.InboxUse.HeldBytes += usage.HeldBytes;
+			state.InboxUse.DecodedBytes += usage.DecodedBytes;
+			state.InboxUse.StaleRejections += usage.StaleRejections;
+			state.InboxUse.PendingCapacity += usage.PendingCapacity;
+			state.InboxUse.HeldCapacity += usage.HeldCapacity;
+			state.InboxUse.PendingByteCapacity += usage.PendingByteCapacity;
+			state.InboxUse.HeldByteCapacity += usage.HeldByteCapacity;
 		}
 		state.AdvanceBody(now);
 		state.Topology.Pump(now);
 		return total;
+	}
+	PortalInboxUsage PortalImageHost::InboxUsage() const {
+		return State->InboxUse;
 	}
 	bool PortalImageHost::HasPendingUploads() const {
 		for (const auto &source : State->Sources)
@@ -1324,6 +1418,7 @@ namespace engine::render {
 		});
 	}
 	void PortalImageHost::Clear() {
+		State->InboxUse = {};
 		State->AbortBody(State->LastTime.value_or(Time{}));
 		for (auto &prepared : State->PreparedBodies) {
 			State->Render.CancelPreparation(prepared.PreparationToken);

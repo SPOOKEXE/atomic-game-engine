@@ -136,11 +136,16 @@ namespace client {
 	// Resolves authored destinations through this product's replica policy. Viewer
 	// rows precede foreground clone attachment. Refresh caller spans after this
 	// appends portal claims and removes legacy surfaces; restore animation time
-	// before rendering the source view. Destinations were already presented.
-	// topologyOwner follows the same lifetime policy as ResolveCameraPortalWorld.
+	// before rendering the source view. Only explicitly named worlds were presented.
+	// TopologyOwner follows the same lifetime policy as ResolveCameraPortalWorld.
 	// True once every demanded portal has a retained image for this viewport.
 	// An explicitly admitted, snapshot-ready replica may replace its remote
 	// producer. Merely discovering or staging a replica does not select it.
+	struct PortalImageWorldSelection {
+		engine::world::WorldId TopologyOwner;
+		engine::world::WorldId AdmittedDestination;
+		engine::world::WorldId PresentedDestination;
+	};
 	bool UpdatePortalImages(
 		engine::world::Universe &universe,
 		engine::render::PortalImageHost &images,
@@ -151,8 +156,7 @@ namespace client {
 		std::vector<engine::render::SurfaceView> &surfaces,
 		float alpha,
 		engine::render::PortalImageHost::Time now,
-		engine::world::WorldId topologyOwner = {},
-		engine::world::WorldId admittedDestination = {}
+		PortalImageWorldSelection worlds = {}
 	);
 
 	// Builds the scene by running a Luau file instead of a C++ loop.

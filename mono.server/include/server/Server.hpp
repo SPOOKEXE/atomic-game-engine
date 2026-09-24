@@ -34,6 +34,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
+#include <deque>
 #include <discord/Link.hpp>
 #include <filesystem>
 #include <functional>
@@ -1368,6 +1369,8 @@ namespace server {
 			engine::replication::ClientId Client;
 			engine::world::PresentationStream Stream;
 			engine::world::PresentationPeer Grant;
+			std::deque<engine::world::PresentationMessage> PendingReplies;
+			size_t DiagnosedReplyBackpressure = 0;
 			uint64_t PublishedSession = 0, PublishedRevision = 0;
 			PlayerPresentation(
 				engine::world::Universe &universe,

@@ -2,6 +2,7 @@
 #include "DataCaptureCompact.hpp"
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
+#include "portal/PortalRendererTerminalTrace.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -5348,4 +5349,83 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(bridge.Poll("script-capture-world", shutdownTicket, poll, detail));
 	CHECK(poll.Status == "cancelled");
 	REQUIRE(bridge.Release("script-capture-world", shutdownTicket, detail));
+}
+
+TEST_CASE(
+	"resident portal owners cancel each capture token once across retirement causes",
+	"[render][gpu][portal-resident][retirement][.]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	InstallImageCapture(renderer, "lit", true);
+	const core::Name pipeline("image-export-pipeline");
+	const core::Name output("image-export");
+	std::array<uint64_t, 4> tokens{};
+	for (auto &token : tokens) {
+		token = renderer.QueueResourceImage(pipeline, output, 0, render::ResourceImageDelivery::Resident);
+		REQUIRE(token != 0);
+	}
+	const uint64_t probe = renderer.QueueResourceImage(pipeline, output);
+	REQUIRE(probe != 0);
+	render::SceneTarget target{65, 37};
+	render::View view;
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(output));
+	REQUIRE(AwaitImage(renderer, probe).Status == render::ResourceImageStatus::Ok);
+	for (const uint64_t token : tokens)
+		REQUIRE(renderer.CanPublishResourceImage(token, 65, 37));
+
+	const render::PortalResidentImages::Time now{};
+	const world::PresentationAddress source{"resident-source", "replies", 1, 1};
+	render::PortalResidentImages resident(renderer);
+#if ENGINE_ASSERTS_ENABLED
+	render::test_support::PortalRendererTerminalTrace terminals(renderer);
+#endif
+	const auto publish = [&](size_t index, render::PortalResidentImages::Time at) {
+		const world::PresentationAddress producer{"producer-" + std::to_string(index), "requests", 1, 1};
+		render::PortalImageRequest request;
+		request.Key = {index + 1, "Door", 1, 1};
+		request.Width = 65;
+		request.Height = 37;
+		request.PixelBudget = 65 * 37;
+		render::PortalImageBinding binding;
+		binding.WorldName = core::Name(source.World);
+		binding.Portal = core::Name("Door");
+		binding.Expected = request.Key;
+		REQUIRE(resident.Reserve(source, producer, request, binding, at));
+		const render::PortalResidentReceipt receipt{request.Key, request.Scope, 0, 0, 0, 65, 37};
+		REQUIRE(resident.Publish(source, producer, receipt, tokens[index], at));
+		return producer;
+	};
+	const auto cancelledProducer = publish(0, now);
+	const auto invalidatedProducer = publish(1, now);
+	const auto expiredProducer = publish(2, now);
+	(void)cancelledProducer;
+	(void)expiredProducer;
+	resident.Cancel(source, 1);
+	resident.Cancel(source, 1);
+	resident.Invalidate(invalidatedProducer);
+	resident.Invalidate(invalidatedProducer);
+	REQUIRE(resident.Expire(now + std::chrono::seconds(2)));
+	CHECK(resident.Expire(now + std::chrono::seconds(2)));
+	const auto clearedProducer = publish(3, now + std::chrono::seconds(2));
+	(void)clearedProducer;
+	resident.Clear();
+	resident.Clear();
+#if ENGINE_ASSERTS_ENABLED
+	for (const uint64_t token : tokens) {
+		CHECK(
+			terminals.Count(render::test_support::PortalRendererTerminalKind::CancelResourceImage, token) == 1
+		);
+		CHECK(
+			terminals.AppliedCount(
+				render::test_support::PortalRendererTerminalKind::CancelResourceImage, token
+			) == 1
+		);
+	}
+#endif
 }

@@ -108,7 +108,7 @@ namespace engine::render {
 			PortalImageDemand &radiance
 		) {
 			constexpr uint32_t EXTENT = 128;
-			const float side = scene::SeamOffset(seam, viewer.CameraFrame.Position);
+			const float side = scene::SeamOffset(seam, viewer.VisibilityCameraFrame().Position);
 			if (!std::isfinite(side)) return PortalDemandStatus::Invalid;
 			const core::Vector3 outward = seam.Normal * (side >= 0 ? 1.0f : -1.0f);
 			constexpr float STAND_OFF = 0.5f;
@@ -175,8 +175,9 @@ namespace engine::render {
 		PortalImageDemand &demand
 	) {
 		const auto &camera = eye.Camera;
+		const core::CFrame &cameraFrame = eye.VisibilityCameraFrame();
 		if (!cameraKey.IsValid() || cameraKey.Text().size() > 256 ||
-			cameraKey.Text().find('\0') != std::string_view::npos || !Rigid(eye.CameraFrame) ||
+			cameraKey.Text().find('\0') != std::string_view::npos || !Rigid(cameraFrame) ||
 			settings.Width == 0 || settings.Height == 0 || settings.MaximumExtent == 0 ||
 			settings.MaximumExtent > MAX_PORTAL_IMAGE_EXTENT ||
 			settings.RecursionDepth > MAX_PORTAL_IMAGE_RECURSION || settings.PixelBudget == 0 ||
@@ -186,7 +187,7 @@ namespace engine::render {
 			camera.FieldOfViewRadians >= 3.14159265358979323846f)
 			return PortalDemandStatus::Invalid;
 		const auto projection = eye.Projection.value_or(
-			scene::ResolveCamera(eye.CameraFrame, camera, float(settings.Width) / settings.Height).Projection
+			scene::ResolveCamera(cameraFrame, camera, float(settings.Width) / settings.Height).Projection
 		);
 		if (!Finite(projection) || projection[0][0] <= 0 || projection[1][1] <= 0)
 			return PortalDemandStatus::Invalid;
@@ -195,8 +196,8 @@ namespace engine::render {
 		if (eye.EyePlayer) result.EyePlayer = std::to_string(*eye.EyePlayer);
 		result.ClipPlane = {};
 		result.Key.PortalKey = cameraKey.Text();
-		const auto &position = eye.CameraFrame.Position;
-		const auto rotation = eye.CameraFrame.Rotation();
+		const auto &position = cameraFrame.Position;
+		const auto rotation = cameraFrame.Rotation();
 		result.Position = {position.X, position.Y, position.Z};
 		result.Orientation = {rotation.x, rotation.y, rotation.z, rotation.w};
 		const float near = camera.NearPlane;
@@ -215,7 +216,7 @@ namespace engine::render {
 		lens.Top = result.Frustum[3];
 		lens.NearPlane = near;
 		lens.FarPlane = camera.FarPlane;
-		const auto reconstructed = scene::SurfaceProjection(lens, eye.CameraFrame);
+		const auto reconstructed = scene::SurfaceProjection(lens, cameraFrame);
 		if (!Finite(reconstructed)) return PortalDemandStatus::Invalid;
 		for (int column = 0; column < 4; ++column)
 			for (int row = 0; row < 4; ++row)
@@ -228,7 +229,7 @@ namespace engine::render {
 		if (uint64_t(result.Width) * result.Height > settings.PixelBudget) return PortalDemandStatus::Invalid;
 		result.PixelBudget = settings.PixelBudget;
 		result.RecursionDepth = settings.RecursionDepth;
-		Sign(result.Key.CameraRevision, eye.CameraFrame);
+		Sign(result.Key.CameraRevision, cameraFrame);
 		for (const unsigned char byte : result.EyePlayer)
 			result.Key.CameraRevision = scene::MixSignature(result.Key.CameraRevision, byte);
 		for (float value : result.Frustum)
@@ -241,7 +242,7 @@ namespace engine::render {
 		built.Binding.WorldName = eye.WorldName;
 		built.Binding.ViewSlot = eye.Slot;
 		built.Binding.Portal = cameraKey;
-		built.Binding.Sampling = scene::ResolveSurfaceCamera(eye.CameraFrame, reconstructed).ViewProjection;
+		built.Binding.Sampling = scene::ResolveSurfaceCamera(cameraFrame, reconstructed).ViewProjection;
 		if (!Finite(built.Binding.Sampling)) return PortalDemandStatus::Invalid;
 		demand = std::move(built);
 		return PortalDemandStatus::Ready;
@@ -311,9 +312,9 @@ namespace engine::render {
 			return true;
 		}
 		const auto native = [&](const scene::DrawInstance &row) {
-			// Only the source entity can begin a new crossing. A synthetic form or
-			// finite portal mask is a prior portal result and cannot cross again.
-			return row.Variant == 0 && row.SeamMask == 0 &&
+			// A local rig's near half remains the source body after the scene cut.
+			// Synthetic forms and far-half masks cannot begin another crossing.
+			return row.Variant == 0 && (row.SeamMask == 0 || (row.SeamMask == 1 && row.Rig != 0)) &&
 				   (!row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name());
 		};
 		std::vector<scene::DrawInstance> owned;
@@ -449,7 +450,16 @@ namespace engine::render {
 				fitted.PixelBudget /= 5;
 			}
 			PortalImageDemand demand;
-			switch (BuildPortalImageDemand(seam, claim.ImagePortal, viewer, viewer.Slot, fitted, demand)) {
+			PortalDemandHiddenReason hiddenReason;
+			const PortalDemandStatus demandStatus = BuildPortalImageDemand(
+				seam, claim.ImagePortal, viewer, viewer.Slot, fitted, demand, &hiddenReason
+			);
+			claim.ImageDemandStatus = demandStatus;
+			claim.ImageHiddenReason = hiddenReason;
+			claim.ImageFrustumVisible = demandStatus != PortalDemandStatus::Hidden ||
+										hiddenReason != PortalDemandHiddenReason::Frustum;
+			claim.ImageDemandCamera = viewer.VisibilityCameraFrame();
+			switch (demandStatus) {
 			case PortalDemandStatus::Ready: {
 				if (composeBody) {
 					demand.Request.OrderedLayers = true;
@@ -493,7 +503,8 @@ namespace engine::render {
 						const auto radianceStatus =
 							BuildSeamRadianceDemand(seam, *lightKey, viewer, viewer.Slot, demand, probe);
 						if (radianceStatus == PortalDemandStatus::Ready) {
-							const float side = scene::SeamOffset(seam, viewer.CameraFrame.Position);
+							const float side =
+								scene::SeamOffset(seam, viewer.VisibilityCameraFrame().Position);
 							demand.Portal.LightImagePortal = *lightKey;
 							demand.Portal.LightOutward = seam.Normal * (side >= 0 ? 1.0f : -1.0f);
 							radiance = std::move(probe);
@@ -501,7 +512,13 @@ namespace engine::render {
 						}
 					}
 				}
+				demand.Portal.ImageDemandStatus = PortalDemandStatus::Ready;
 				claim = demand.Portal;
+				claim.ImageDemandStatus = demandStatus;
+				claim.ImageHiddenReason = hiddenReason;
+				claim.ImageFrustumVisible = true;
+				claim.ImageDemandCamera = viewer.VisibilityCameraFrame();
+				claim.ImageCameraRevision = demand.Request.Key.CameraRevision;
 				demands.push_back(std::move(demand));
 				if (radiance) demands.push_back(std::move(*radiance));
 				counts.Ready++;
@@ -528,16 +545,19 @@ namespace engine::render {
 		const View &viewer,
 		size_t viewSlot,
 		const PortalImageDemandSettings &settings,
-		PortalImageDemand &demand
+		PortalImageDemand &demand,
+		PortalDemandHiddenReason *hiddenReason
 	) {
+		if (hiddenReason) *hiddenReason = PortalDemandHiddenReason::None;
+		const core::CFrame &cameraFrame = viewer.VisibilityCameraFrame();
 		if (!seam.Crosses || !seam.DestinationWorld.IsValid() || !portalKey.IsValid() ||
 			portalKey.Text().size() > 256 || !viewer.WorldName.IsValid() || seam.Surface < 0 ||
 			size_t(seam.Surface) >= scene::MAX_SURFACES || settings.Width == 0 || settings.Height == 0 ||
 			settings.MaximumExtent == 0 || settings.MaximumExtent > MAX_PORTAL_IMAGE_EXTENT ||
 			settings.RecursionDepth > MAX_PORTAL_IMAGE_RECURSION || settings.PixelBudget == 0 ||
 			settings.PixelBudget > MAX_PORTAL_IMAGE_PIXELS || !std::isfinite(seam.Scale) || seam.Scale <= 0 ||
-			!Rigid(viewer.CameraFrame) || !Rigid(seam.Destination) || !Finite(seam.Centre) ||
-			!Finite(seam.Normal) || !Finite(seam.First) || !Finite(seam.Second) || !Finite(seam.Up) ||
+			!Rigid(cameraFrame) || !Rigid(seam.Destination) || !Finite(seam.Centre) || !Finite(seam.Normal) ||
+			!Finite(seam.First) || !Finite(seam.Second) || !Finite(seam.Up) ||
 			std::abs(seam.Normal.Dot(seam.Normal) - 1.0f) > 0.001f) {
 			return PortalDemandStatus::Invalid;
 		}
@@ -560,11 +580,11 @@ namespace engine::render {
 		auto camera = viewer.Camera;
 		camera.NearPlane = scene::PortalNearPlane(
 			camera.NearPlane,
-			scene::RectangleDistance(seam.Centre, seam.First, seam.Second, viewer.CameraFrame.Position)
+			scene::RectangleDistance(seam.Centre, seam.First, seam.Second, cameraFrame.Position)
 		);
 		const float aspect = float(settings.Width) / float(settings.Height);
 		const auto projection =
-			viewer.Projection.value_or(scene::ResolveCamera(viewer.CameraFrame, camera, aspect).Projection);
+			viewer.Projection.value_or(scene::ResolveCamera(cameraFrame, camera, aspect).Projection);
 		if (!Finite(projection) || projection[0][0] <= 0 || projection[1][1] <= 0 ||
 			!std::isfinite(camera.NearPlane) || camera.NearPlane <= 0 || !std::isfinite(camera.FarPlane) ||
 			camera.FarPlane <= camera.NearPlane) {
@@ -576,18 +596,20 @@ namespace engine::render {
 			projection[1][0] != 0 || projection[3][0] != 0 || projection[3][1] != 0) {
 			return PortalDemandStatus::Unsupported;
 		}
-		const auto sourceMatrices = scene::ResolveSurfaceCamera(viewer.CameraFrame, projection);
+		const auto sourceMatrices = scene::ResolveSurfaceCamera(cameraFrame, projection);
 		if (!graph::VisiblePane(sourceMatrices.ViewProjection, seam.Centre, seam.First, seam.Second)) {
+			if (hiddenReason) *hiddenReason = PortalDemandHiddenReason::Frustum;
 			return PortalDemandStatus::Hidden;
 		}
 		const auto through = scene::SeamMapping(seam);
-		const auto frame = through.Place(viewer.CameraFrame);
-		const float side = scene::SeamOffset(seam, viewer.CameraFrame.Position);
+		const auto frame = through.Place(cameraFrame);
+		const float side = scene::SeamOffset(seam, cameraFrame.Position);
 		const auto normal = through.Rotate(seam.Normal) * (side >= 0 ? -1.0f : 1.0f);
 		const auto point =
 			through.Point(seam.Centre) - normal * scene::PortalClipBias(through.Length(std::abs(side)));
 		const float clipDistance = normal.Dot(point);
 		if (!std::isfinite(side) || normal.Dot(frame.Position) - clipDistance >= -1e-4f) {
+			if (hiddenReason) *hiddenReason = PortalDemandHiddenReason::ClipPlane;
 			return PortalDemandStatus::Hidden;
 		}
 		PortalImageDemand result;
@@ -634,7 +656,7 @@ namespace engine::render {
 		request.RecursionDepth = settings.RecursionDepth;
 		request.PixelBudget = settings.PixelBudget;
 		uint64_t &cameraSignature = request.Key.CameraRevision;
-		Sign(cameraSignature, viewer.CameraFrame);
+		Sign(cameraSignature, cameraFrame);
 		for (const auto value : request.Frustum) {
 			Sign(cameraSignature, value);
 		}

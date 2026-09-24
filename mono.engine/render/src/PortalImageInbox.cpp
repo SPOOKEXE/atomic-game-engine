@@ -1,3 +1,4 @@
+#include <engine/core/Metrics.hpp>
 #include <engine/render/PortalImageInbox.hpp>
 
 #include <algorithm>
@@ -21,6 +22,11 @@ namespace engine::render {
 		}
 		bool Fits(size_t current, size_t extra, size_t maximum) {
 			return extra <= maximum && current <= maximum - extra;
+		}
+		size_t ImagePlaneBytes(const PortalImageReply &image) {
+			return image.Pixels.size() + image.Depth.size() + image.Normal.size() +
+				   image.AmbientResponse.size() + image.LightingBaseline.size() +
+				   image.DirectionalResponse.size();
 		}
 	}
 
@@ -59,7 +65,12 @@ namespace engine::render {
 			   Limits.Timeout <= MAX_TIMEOUT;
 	}
 	PortalInboxUsage PortalImageInbox::Usage() const {
-		PortalInboxUsage usage{Requests.size(), 0, Images.size(), 0};
+		PortalInboxUsage usage{Requests.size(), 0, Images.size(), 0, DecodedBytes};
+		usage.StaleRejections = StaleRejections;
+		usage.PendingCapacity = Limits.PendingCount;
+		usage.HeldCapacity = Limits.HeldCount;
+		usage.PendingByteCapacity = Limits.PendingBytes;
+		usage.HeldByteCapacity = Limits.HeldBytes;
 		for (const auto &request : Requests) {
 			usage.PendingBytes += request.Bytes();
 		}
@@ -207,6 +218,8 @@ namespace engine::render {
 				}
 				if (held != Images.end() && measured.CaptureTick < held->Reply.CaptureTick) {
 					result.Status = PortalInboxStatus::Stale;
+					++StaleRejections;
+					core::Metrics::Count("render.portal_image.stale_rejections", 1);
 					return result;
 				}
 				PortalCaptureTree tree;
@@ -214,9 +227,19 @@ namespace engine::render {
 					result.Status = PortalInboxStatus::Malformed;
 					return result;
 				}
+				size_t decodedBytes = 0;
+				for (const auto &node : tree.Nodes) {
+					decodedBytes += ImagePlaneBytes(node.Layers.Opaque);
+					for (const auto &layer : node.Layers.Transparent)
+						decodedBytes += ImagePlaneBytes(layer);
+					if (node.Layers.SpatialOverlay)
+						decodedBytes += ImagePlaneBytes(*node.Layers.SpatialOverlay);
+				}
 				const auto &root = tree.Nodes.front().Layers.Opaque;
 				if (held != Images.end() && root.CaptureTick < held->Reply.CaptureTick) {
 					result.Status = PortalInboxStatus::Stale;
+					++StaleRejections;
+					core::Metrics::Count("render.portal_image.stale_rejections", 1);
 					return result;
 				}
 				Held image;
@@ -236,6 +259,8 @@ namespace engine::render {
 				else
 					*held = std::move(image);
 				Requests.erase(pending);
+				DecodedBytes += decodedBytes;
+				core::Metrics::Count("render.portal_image.decoded_bytes", decodedBytes);
 				result.Status = PortalInboxStatus::Accepted;
 				return result;
 			}
@@ -251,6 +276,8 @@ namespace engine::render {
 								 );
 		if (!match || (pending->OrderedLayers && !layerMatch && match->Status == PortalImageStatus::Ok)) {
 			result.Status = PortalInboxStatus::Stale;
+			++StaleRejections;
+			core::Metrics::Count("render.portal_image.stale_rejections", 1);
 			return result;
 		}
 		const auto held = std::find_if(Images.begin(), Images.end(), [&](const Held &image) {
@@ -273,6 +300,8 @@ namespace engine::render {
 		if (match->Status == PortalImageStatus::Ok && held != Images.end() &&
 			match->CaptureTick < held->Reply.CaptureTick) {
 			result.Status = PortalInboxStatus::Stale;
+			++StaleRejections;
+			core::Metrics::Count("render.portal_image.stale_rejections", 1);
 			return result;
 		}
 		PortalImageReply reply;
@@ -291,6 +320,10 @@ namespace engine::render {
 			Requests.erase(pending);
 			return result;
 		}
+		size_t decodedBytes = ImagePlaneBytes(reply);
+		for (const auto &layer : decoded.Transparent)
+			decodedBytes += ImagePlaneBytes(layer);
+		if (decoded.SpatialOverlay) decodedBytes += ImagePlaneBytes(*decoded.SpatialOverlay);
 		Held image{
 			pending->Local,
 			pending->Remote,
@@ -306,6 +339,8 @@ namespace engine::render {
 			*held = std::move(image);
 		}
 		Requests.erase(pending);
+		DecodedBytes += decodedBytes;
+		core::Metrics::Count("render.portal_image.decoded_bytes", decodedBytes);
 		result.Status = PortalInboxStatus::Accepted;
 		return result;
 	}

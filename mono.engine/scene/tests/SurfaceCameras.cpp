@@ -3173,6 +3173,74 @@ TEST_CASE("a static prop stays whole through a local portal", "[scene][surfaceca
 	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
 	CHECK(drawn[0].SeamNormal != Vector3{});
 	CHECK(drawn[1].SeamNormal != Vector3{});
+
+	// A sideways scripted move at the pane's front thickness keeps the authored
+	// front half. Centre-based ownership would put that half behind the pane.
+	row.Frame = CFrame(Vector3{0.0f, 0.0f, 0.0f});
+	row.HalfExtent = Vector3{0.5f, 1.0f, 5.0f};
+	mirror.World.Set<Transform>(prop, Transform{row.Frame});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		prop, engine::scene::PreviousTransform{CFrame(Vector3{-0.1f, 0.0f, 0.0f})}
+	);
+	drawn = {row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	CHECK(drawn[0].SeamNormal == Vector3{0.0f, 0.0f, -1.0f});
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	CHECK(
+		(drawn[1].SeamNormal - engine::scene::SeamMapping(seams[0]).Rotate(-seams[0].Normal)).Magnitude() <
+		TOLERANCE
+	);
+	row.Frame = CFrame(Vector3{0.0f, 0.0f, -0.3f});
+	mirror.World.Set<Transform>(prop, Transform{row.Frame});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		prop, engine::scene::PreviousTransform{CFrame(Vector3{-0.1f, 0.0f, -0.3f})}
+	);
+	drawn = {row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	CHECK(drawn[0].SeamNormal == Vector3{0.0f, 0.0f, -1.0f});
+
+	row.Frame = CFrame(Vector3{0.0f, 0.0f, 0.0f});
+	mirror.World.Set<Transform>(prop, Transform{row.Frame});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		prop, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, -0.5f})}
+	);
+	drawn = {row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	CHECK(drawn[0].SeamNormal == Vector3{0.0f, 0.0f, 1.0f});
+
+	mirror.World.Set<engine::scene::Simulated>(prop, {});
+	drawn = {row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	CHECK(drawn[0].SeamNormal == Vector3{0.0f, 0.0f, 1.0f});
+}
+
+TEST_CASE("a rotated side pane uses its face depth for a tangent part", "[scene][surfacecameras]") {
+	const CFrame paneFrame = CFrame::Angles(0.0f, 0.45f, 0.0f);
+	Mirror mirror(NormalId::Right, paneFrame);
+	mirror.World.Set<Bounds>(mirror.Pane, Bounds{Vector3{0.2f, 4.5f, 8.0f}});
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{0.2f, 4.5f, 8.0f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	const Entity prop =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "TangentProp");
+	const Vector3 tangent = paneFrame.VectorToWorldSpace(Vector3{0.0f, 1.0f, 0.0f});
+	engine::scene::DrawInstance row;
+	row.Source = prop.Id;
+	row.Frame = CFrame(Vector3::Zero);
+	row.HalfExtent = Vector3{5.0f, 1.0f, 5.0f};
+	mirror.World.Set<Transform>(prop, Transform{row.Frame});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		prop, engine::scene::PreviousTransform{CFrame(-tangent * 0.1f)}
+	);
+	std::vector<engine::scene::DrawInstance> drawn{row};
+	REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	CHECK((drawn[0].SeamNormal - seams[0].Normal).Magnitude() < TOLERANCE);
 }
 
 TEST_CASE("a hole's camera stands where its own map says", "[scene][surfacecameras]") {
@@ -3472,6 +3540,43 @@ TEST_CASE(
 		);
 		CHECK(store.Resource<engine::scene::PortalBodyView>() == nullptr);
 	}
+}
+
+TEST_CASE(
+	"a presented rig owns its cut side while its root snapshot lags", "[scene][surfacecameras][body-view]"
+) {
+	Window window(Vector3{0, 0, -20});
+	auto &store = window.Room.World;
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 1);
+	const auto &seam = seams.front();
+	const float side = GENERATE(-1.f, 1.f);
+	CAPTURE(side);
+	const Vector3 presented = seam.Centre + seam.Normal * (0.5f * side);
+	const Vector3 snapshot = seam.Centre - seam.Normal * (4.f * side);
+	const Entity root = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Root");
+	store.Set(root, Transform{CFrame(snapshot)});
+	std::vector drawn{Window::Row(presented, Vector3{0.5f, 1.f, 2.f})};
+	drawn.front().Rig = root.Id;
+	drawn.front().Source = root.Id;
+	engine::scene::UpdatePortalBodyView(store, root, presented, drawn);
+	const auto *view = store.Resource<engine::scene::PortalBodyView>();
+	REQUIRE(view);
+	CHECK((view->Previous - presented).Magnitude() < TOLERANCE);
+	CHECK_FALSE(view->Crossing.has_value());
+	REQUIRE(engine::scene::CutAndCloneSeams(store, drawn) == 0);
+	REQUIRE(drawn.front().SeamMask == 1);
+	CHECK(presented.Dot(drawn.front().SeamNormal) >= drawn.front().SeamOffset);
+	CHECK(snapshot.Dot(drawn.front().SeamNormal) < drawn.front().SeamOffset);
+
+	engine::scene::UpdatePortalBodyView(store, engine::ecs::NULL_ENTITY, presented, drawn);
+	CHECK(store.Resource<engine::scene::PortalBodyView>() == nullptr);
+	drawn = {Window::Row(presented, Vector3{0.5f, 1.f, 2.f})};
+	drawn.front().Rig = root.Id;
+	drawn.front().Source = root.Id;
+	REQUIRE(engine::scene::CutAndCloneSeams(store, drawn) == 0);
+	REQUIRE(drawn.front().SeamMask == 1);
+	CHECK(snapshot.Dot(drawn.front().SeamNormal) >= drawn.front().SeamOffset);
 }
 
 TEST_CASE("a cross-world hole cuts both halves of what stands in it", "[scene][surfacecameras]") {

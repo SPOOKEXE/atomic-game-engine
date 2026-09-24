@@ -4,10 +4,13 @@
 // accepted only when every enabled node has a backend implementation. The
 // default output path belongs to the engine's default graph, not this boundary.
 
+#include "../src/PipelineCompiler.hpp"
 #include "EnvironmentModes.hpp"
 
+#include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Schedule.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -15,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -23,6 +27,7 @@ TEST_SUITE_ID("engine.render.passes")
 
 // Graph implementation changes must re-run the backend acceptance checks.
 TEST_DEPENDS("engine.graph.rendergraph")
+TEST_DEPENDS("engine.graph.pipelinedocument")
 
 using engine::core::Name;
 using engine::graph::RenderGraph;
@@ -30,6 +35,84 @@ using engine::render::FrameResult;
 using engine::render::Renderer;
 
 namespace {
+	std::vector<std::string>
+	NodeNames(const RenderGraph &graph, std::span<const engine::graph::NodeId> nodes) {
+		std::vector<std::string> names;
+		names.reserve(nodes.size());
+		for (const engine::graph::NodeId id : nodes) {
+			const engine::graph::Node *node = graph.Find(id);
+			REQUIRE(node != nullptr);
+			names.emplace_back(node->Name.Text());
+		}
+		return names;
+	}
+
+	std::vector<std::string> ResourceNames(const RenderGraph &graph) {
+		std::vector<std::string> names;
+		names.reserve(graph.ResourceCount());
+		for (uint32_t value = 1; value <= graph.ResourceCount(); ++value) {
+			const engine::graph::ResourceDesc *resource =
+				graph.FindResource(engine::graph::ResourceId{value});
+			REQUIRE(resource != nullptr);
+			names.emplace_back(resource->Name.Text());
+		}
+		return names;
+	}
+
+	std::vector<std::string>
+	ScheduleNames(const RenderGraph &graph, const engine::graph::ExecutionSchedule &schedule) {
+		std::vector<std::string> waves;
+		waves.reserve(schedule.Waves.size());
+		for (const engine::graph::ExecutionWave &wave : schedule.Waves) {
+			std::string signature = wave.Concurrent ? "concurrent" : "serial";
+			for (const engine::graph::ScheduledNode &scheduled : wave.Nodes) {
+				const engine::graph::Node *node = graph.Find(scheduled.Node);
+				REQUIRE(node != nullptr);
+				signature += ":";
+				signature += node->Name.Text();
+				signature += "@";
+				signature += engine::graph::Describe(scheduled.Queue);
+			}
+			waves.push_back(std::move(signature));
+		}
+		return waves;
+	}
+
+	std::vector<std::string> CommandBufferNames(
+		const RenderGraph &graph, std::span<const engine::graph::PlannedCommandBuffer> buffers
+	) {
+		std::vector<std::string> signatures;
+		signatures.reserve(buffers.size());
+		for (const engine::graph::PlannedCommandBuffer &buffer : buffers) {
+			std::string signature(engine::graph::Describe(buffer.Class));
+			signature += ":" + std::to_string(buffer.FirstWave) + "-" + std::to_string(buffer.LastWave);
+			for (const engine::graph::NodeId id : buffer.Nodes) {
+				const engine::graph::Node *node = graph.Find(id);
+				REQUIRE(node != nullptr);
+				signature += ":";
+				signature += node->Name.Text();
+			}
+			signatures.push_back(std::move(signature));
+		}
+		return signatures;
+	}
+
+	std::vector<std::string>
+	AliasOwnerNames(const RenderGraph &graph, const engine::graph::ResourceAliasPlan &aliases) {
+		std::vector<std::string> names;
+		names.reserve(aliases.Allocations.size());
+		for (const engine::graph::ResourceId owner : aliases.Allocations) {
+			if (!owner.IsValid()) {
+				names.emplace_back("-");
+				continue;
+			}
+			const engine::graph::ResourceDesc *resource = graph.FindResource(owner);
+			REQUIRE(resource != nullptr);
+			names.emplace_back(resource->Name.Text());
+		}
+		return names;
+	}
+
 	RenderGraph DefaultGraph() {
 		RenderGraph graph;
 		Name offender;
@@ -91,8 +174,14 @@ TEST_CASE("named render graphs compile before entering the runtime cache", "[ren
 	CHECK(after->Revision == before->Revision);
 	CHECK(after->Graph.Count() == before->Graph.Count());
 	CHECK(after->Compiled.Shared == before->Compiled.Shared);
+	CHECK(after->Compiled.PerView == before->Compiled.PerView);
+	CHECK(after->Compiled.Final == before->Compiled.Final);
 	CHECK(after->Schedule.Waves.size() == before->Schedule.Waves.size());
+	CHECK(ScheduleNames(after->Graph, after->Schedule) == ScheduleNames(before->Graph, before->Schedule));
 	CHECK(after->Aliases.Allocations == before->Aliases.Allocations);
+	CHECK(after->Profile.Passes.size() == before->Profile.Passes.size());
+	CHECK(after->Profile.Resources.size() == before->Profile.Resources.size());
+	CHECK(after->Profile.PeakBytes == before->Profile.PeakBytes);
 
 	CHECK(renderer.RemovePipeline(first));
 	CHECK_FALSE(renderer.RemovePipeline(first));
@@ -100,6 +189,213 @@ TEST_CASE("named render graphs compile before entering the runtime cache", "[ren
 
 	renderer.ResetPipelines();
 	CHECK(renderer.Pipelines().empty());
+}
+
+TEST_CASE("pipeline admission reports the failing boundary", "[render][graph][diagnostic]") {
+	using engine::render::PipelineAdmissionStage;
+	using engine::render::PipelineCompilation;
+	using engine::render::PipelineFailure;
+
+	struct Case {
+		const char *Label;
+		RenderGraph (*Build)();
+		bool CheckCapabilities;
+		PipelineAdmissionStage Stage;
+		Name Offender;
+		const char *Reason;
+	};
+	const std::array cases{
+		Case{
+			.Label = "graph",
+			.Build =
+				[] {
+					RenderGraph graph;
+					engine::graph::Node invalid;
+					invalid.Name = Name("invalid-resource");
+					invalid.Kind = Name("unknown-kind");
+					invalid.Writes = {engine::graph::ResourceId{42}};
+					graph.AddNode(std::move(invalid));
+					return graph;
+				},
+			.CheckCapabilities = false,
+			.Stage = PipelineAdmissionStage::Graph,
+			.Offender = Name("invalid-resource"),
+			.Reason = "a node names a resource this graph does not hold",
+		},
+		Case{
+			.Label = "schedule",
+			.Build =
+				[] {
+					RenderGraph graph;
+					const auto storage = graph.AddResource({
+						.Name = Name("storage"),
+						.Kind = engine::graph::ResourceKind::Storage,
+					});
+					engine::graph::Node invalid;
+					invalid.Name = Name("bad-dispatch");
+					invalid.Kind = Name("compute");
+					invalid.Writes = {storage};
+					invalid.Parameters = {{Name("dispatch.x"), "zero"}};
+					graph.AddNode(std::move(invalid));
+					return graph;
+				},
+			.CheckCapabilities = false,
+			.Stage = PipelineAdmissionStage::Schedule,
+			.Offender = Name("bad-dispatch"),
+			.Reason = "a scheduling hint is not valid",
+		},
+		Case{
+			.Label = "backend",
+			.Build =
+				[] {
+					RenderGraph graph;
+					const auto image = graph.AddResource({
+						.Name = Name("image"),
+						.Kind = engine::graph::ResourceKind::Colour,
+					});
+					engine::graph::Node unsupported;
+					unsupported.Name = Name("unsupported-node");
+					unsupported.Kind = Name("unsupported-test-kind");
+					unsupported.Writes = {image};
+					graph.AddNode(std::move(unsupported));
+					return graph;
+				},
+			.CheckCapabilities = false,
+			.Stage = PipelineAdmissionStage::Backend,
+			.Offender = Name("unsupported-test-kind"),
+			.Reason = "the renderer has no backend node for this kind",
+		},
+		Case{
+			.Label = "capability",
+			.Build =
+				[] {
+					RenderGraph graph;
+					const auto source = graph.AddResource({
+						.Name = Name("source"),
+						.Kind = engine::graph::ResourceKind::Texture,
+						.Format = engine::graph::ResourceFormat::RGBA16F,
+						.External = true,
+					});
+					const auto target = graph.AddResource({
+						.Name = Name("target"),
+						.Kind = engine::graph::ResourceKind::Colour,
+						.Format = engine::graph::ResourceFormat::RGBA16F,
+					});
+					engine::graph::Node blit;
+					blit.Name = Name("format-limited-blit");
+					blit.Kind = Name("blit");
+					blit.Reads = {source};
+					blit.Writes = {target};
+					graph.AddNode(std::move(blit));
+					return graph;
+				},
+			.CheckCapabilities = true,
+			.Stage = PipelineAdmissionStage::Capability,
+			.Offender = Name("format-limited-blit"),
+			.Reason = "the device does not support a required texture format: RGBA16F",
+		},
+	};
+
+	const engine::render::DeviceCaps noCapabilities;
+	for (const Case &test : cases) {
+		INFO(test.Label);
+		PipelineCompilation compilation = engine::render::CompilePipeline(
+			Name(test.Label), test.Build(), test.CheckCapabilities ? &noCapabilities : nullptr, {}
+		);
+		REQUIRE_FALSE(compilation);
+		const PipelineFailure &failure = compilation.Failure;
+		CHECK(failure.Stage == test.Stage);
+		CHECK(failure.Offender == test.Offender);
+		CHECK(failure.Reason == test.Reason);
+	}
+}
+
+TEST_CASE(
+	"document admission keeps compiler diagnostics and the prior install", "[render][graph][diagnostic]"
+) {
+	using engine::graph::Edit;
+	using engine::graph::EditKind;
+	using engine::graph::PipelineDocument;
+	using engine::graph::PipelineDocumentStatus;
+	using engine::graph::ResourceKind;
+	using engine::render::PipelineAdmissionStage;
+
+	PipelineDocument document;
+	document.Record(
+		Edit{
+			.Kind = EditKind::AddResource,
+			.Name = Name("storage"),
+			.Resource = ResourceKind::Storage,
+		}
+	);
+	document.Record(
+		Edit{
+			.Kind = EditKind::AddNode,
+			.Name = Name("bad-dispatch"),
+			.NodeKind = Name("compute"),
+		}
+	);
+	document.Record(Edit{.Kind = EditKind::Writes, .Target = Name("storage")});
+	document.Record(
+		Edit{
+			.Kind = EditKind::Set,
+			.Key = Name("dispatch.x"),
+			.Value = "zero",
+		}
+	);
+
+	RenderGraph graph;
+	Name graphOffender;
+	CHECK(engine::graph::Build(document, graph, graphOffender) == PipelineDocumentStatus::Invalid);
+	CHECK(graphOffender == Name("bad-dispatch"));
+	engine::graph::ExecutionSchedule schedule;
+	Name scheduleOffender;
+	const engine::graph::ScheduleStatus scheduleStatus =
+		engine::graph::CompileSchedule(graph, schedule, scheduleOffender);
+	CHECK(scheduleStatus == engine::graph::ScheduleStatus::InvalidHint);
+	CHECK(scheduleOffender == Name("bad-dispatch"));
+	CHECK(engine::graph::Describe(scheduleStatus) == std::string("a scheduling hint is not valid"));
+	const engine::render::PipelineCompilation compiled =
+		engine::render::CompilePipeline(Name("bad document"), graph, nullptr, {});
+	REQUIRE_FALSE(compiled);
+	CHECK(compiled.Failure.Stage == PipelineAdmissionStage::Schedule);
+	CHECK(compiled.Failure.Offender == Name("bad-dispatch"));
+	CHECK(compiled.Failure.Reason == "a scheduling hint is not valid");
+
+	Renderer renderer;
+	const engine::render::PipelineAdmissionResult validation = renderer.ValidatePipelineDocument(document);
+	REQUIRE_FALSE(validation);
+	REQUIRE(validation.Failure.has_value());
+	CHECK(validation.Failure->Stage == compiled.Failure.Stage);
+	CHECK(validation.Failure->Offender == compiled.Failure.Offender);
+	CHECK(validation.Failure->Reason == compiled.Failure.Reason);
+	CHECK(
+		engine::render::FormatPipelineFailure(*validation.Failure) ==
+		"refused during schedule: a scheduling hint is not valid at 'bad-dispatch'"
+	);
+	const engine::render::PipelineAdmissionResult direct =
+		renderer.SetPipelineWithResult(Name("direct refusal"), graph);
+	REQUIRE_FALSE(direct);
+	REQUIRE(direct.Failure.has_value());
+	CHECK(direct.Failure->Stage == validation.Failure->Stage);
+	CHECK(direct.Failure->Offender == validation.Failure->Offender);
+	CHECK(direct.Failure->Reason == validation.Failure->Reason);
+
+	const Name installedName("replace-me");
+	REQUIRE(renderer.SetPipeline(installedName, DefaultGraph()));
+	const auto before = renderer.DescribePipeline(installedName, 320, 240);
+	REQUIRE(before);
+	const engine::render::PipelineAdmissionResult replacement =
+		renderer.SetPipelineDocument(installedName, document);
+	REQUIRE_FALSE(replacement);
+	REQUIRE(replacement.Failure.has_value());
+	CHECK(replacement.Failure->Stage == validation.Failure->Stage);
+	CHECK(replacement.Failure->Offender == validation.Failure->Offender);
+	CHECK(replacement.Failure->Reason == validation.Failure->Reason);
+	const auto after = renderer.DescribePipeline(installedName, 320, 240);
+	REQUIRE(after);
+	CHECK(after->Revision == before->Revision);
+	CHECK(after->Graph.Count() == before->Graph.Count());
 }
 
 TEST_CASE("the default PBR graph compiles into the graph backend", "[render][graph]") {
@@ -136,6 +432,326 @@ TEST_CASE("default and named PBR installs have the same execution plan", "[rende
 	for (size_t index = 0; index < named->Profile.Passes.size(); ++index) {
 		CHECK(named->Profile.Passes[index].Name == builtIn->Profile.Passes[index].Name);
 		CHECK(named->Profile.Passes[index].Kind == builtIn->Profile.Passes[index].Kind);
+	}
+}
+
+TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][graph][characterization]") {
+	using namespace engine::graph;
+	Renderer renderer;
+	const auto installed = renderer.DescribePipeline(Name("Engine Default"), 640, 480);
+	REQUIRE(installed);
+	CHECK(installed->Pipeline == Name("Engine Default"));
+	CHECK(installed->Revision > 0);
+
+	const engine::render::PipelineCompilation compilation =
+		engine::render::CompilePipeline(Name("Engine Default"), DefaultGraph(), nullptr, {});
+	REQUIRE(compilation);
+	const engine::render::InstalledPipeline &package = *compilation.Package;
+	CHECK(package.Name == Name("Engine Default"));
+	CHECK(package.RetainedNodes.size() == package.Graph.Count());
+	std::vector<std::string> retainedNames;
+	for (uint32_t value = 1; value <= package.Graph.Count(); ++value) {
+		if (package.RetainedNodes[value - 1] == 0) continue;
+		const Node *node = package.Graph.Find(NodeId{value});
+		REQUIRE(node != nullptr);
+		retainedNames.emplace_back(node->Name.Text());
+	}
+	CHECK(retainedNames == std::vector<std::string>{"present", "overlay", "output-image"});
+	CHECK(package.RetainedFamilies == 0);
+
+	const std::vector<std::string> expectedResources{
+		"shadow",
+		"last-frame",
+		"mirror-views",
+		"portal-image",
+		"portal-light",
+		"world-entities",
+		"view-camera",
+		"view-entities",
+		"visible-entities",
+		"ordered-entities",
+		"resident-meshes",
+		"environment-sky",
+		"environment-clouds",
+		"view-instances",
+		"lod-instances",
+		"albedo",
+		"normal",
+		"material",
+		"emissive",
+		"mesh-uv",
+		"object-ids",
+		"semantic-ids",
+		"part-ids",
+		"depth",
+		"linear-depth",
+		"second-surface-z",
+		"second-surface-depth",
+		"second-surface-validity",
+		"occlusion",
+		"lit",
+		"sky-lit",
+		"volume-lit",
+		"lens-b",
+		"lens-scratch",
+		"dof",
+		"god-rays",
+		"bloom",
+		"tonemapped",
+		"portaled",
+		"mirrored",
+		"display",
+		"scene-image",
+		"interface-image",
+		"composed-image",
+	};
+	CHECK(ResourceNames(installed->Graph) == expectedResources);
+
+	const std::vector<std::string> authoredNodes{
+		"world",
+		"mesh-residency",
+		"shadow",
+		"skybox-compute",
+		"clouds-compute",
+		"camera",
+		"last-frame",
+		"entities",
+		"cull-frustum",
+		"order-draw",
+		"delta-upload",
+		"select-lod",
+		"surface-capture",
+		"gbuffer",
+		"depth-peel",
+		"depth-linearise",
+		"ssao",
+		"deferred-lighting",
+		"sky",
+		"fog",
+		"portal-overlay",
+		"mirror-overlay",
+		"transparent",
+		"shader-lenses",
+		"dof",
+		"god-rays",
+		"bloom",
+		"tonemap",
+		"present",
+		"interface",
+		"overlay",
+		"output-image",
+	};
+	std::vector<std::string> actualAuthoredNodes;
+	for (uint32_t value = 1; value <= installed->Graph.Count(); ++value) {
+		const Node *node = installed->Graph.Find(NodeId{value});
+		REQUIRE(node != nullptr);
+		actualAuthoredNodes.emplace_back(node->Name.Text());
+	}
+	CHECK(actualAuthoredNodes == authoredNodes);
+	const Node *disabledDepthPeel = installed->Graph.Find(NodeId{15});
+	REQUIRE(disabledDepthPeel != nullptr);
+	CHECK_FALSE(disabledDepthPeel->Enabled);
+
+	const std::vector<std::string> expectedShared{
+		"world",
+		"mesh-residency",
+		"skybox-compute",
+		"shadow",
+		"clouds-compute",
+	};
+	const std::vector<std::string> expectedPerView{
+		"camera",
+		"last-frame",
+		"entities",
+		"cull-frustum",
+		"order-draw",
+		"delta-upload",
+		"select-lod",
+		"surface-capture",
+		"gbuffer",
+		"depth-linearise",
+		"ssao",
+		"deferred-lighting",
+		"sky",
+		"fog",
+		"portal-overlay",
+		"mirror-overlay",
+		"transparent",
+		"shader-lenses",
+		"dof",
+		"god-rays",
+		"bloom",
+		"tonemap",
+	};
+	const std::vector<std::string> expectedFinal{"present", "interface", "overlay", "output-image"};
+	CHECK(NodeNames(installed->Graph, installed->Compiled.Shared) == expectedShared);
+	CHECK(NodeNames(installed->Graph, installed->Compiled.PerView) == expectedPerView);
+	CHECK(NodeNames(installed->Graph, installed->Compiled.Final) == expectedFinal);
+
+	const PipelineProfile &profile = installed->Profile;
+	const std::vector<std::string> expectedPasses{
+		"world",
+		"mesh-residency",
+		"skybox-compute",
+		"shadow",
+		"clouds-compute",
+		"camera",
+		"last-frame",
+		"entities",
+		"cull-frustum",
+		"order-draw",
+		"delta-upload",
+		"select-lod",
+		"surface-capture",
+		"gbuffer",
+		"depth-linearise",
+		"ssao",
+		"deferred-lighting",
+		"sky",
+		"fog",
+		"portal-overlay",
+		"mirror-overlay",
+		"transparent",
+		"shader-lenses",
+		"dof",
+		"god-rays",
+		"bloom",
+		"tonemap",
+		"present",
+		"interface",
+		"overlay",
+		"output-image",
+	};
+	REQUIRE(profile.Passes.size() == expectedPasses.size());
+	CHECK(profile.Cells.size() == profile.Resources.size() * profile.Passes.size());
+	REQUIRE(profile.Resources.size() == expectedResources.size());
+	for (size_t index = 0; index < profile.Passes.size(); ++index) {
+		const ProfilePass &pass = profile.Passes[index];
+		const Node *node = installed->Graph.Find(pass.Node);
+		REQUIRE(node != nullptr);
+		CHECK(pass.Name == Name(expectedPasses[index]));
+		CHECK(pass.Name == node->Name);
+		CHECK(pass.Kind == node->Kind);
+		CHECK(pass.Where == (index < 5 ? Band::Shared : (index < 27 ? Band::PerView : Band::Final)));
+		CHECK(pass.Elapsed == 0.0);
+		CHECK(pass.Wall == 0.0);
+	}
+	for (size_t index = 0; index < profile.Resources.size(); ++index) {
+		const ProfileResource &resource = profile.Resources[index];
+		CHECK(resource.Id.Value == index + 1);
+		CHECK(resource.Name == Name(expectedResources[index]));
+		CHECK(resource.Allocation == installed->Aliases.AllocationOf(resource.Id));
+	}
+	CHECK(profile.At(15, 13) == Access::Write);
+	CHECK(profile.At(23, 13) == Access::Write);
+	CHECK(profile.At(23, 14) == Access::Read);
+	CHECK(profile.At(24, 15) == Access::Read);
+	CHECK(profile.At(42, 28) == Access::Write);
+	CHECK(profile.At(43, 30) == Access::Read);
+	CHECK(profile.Resources[11].Width == 1024);
+	CHECK(profile.Resources[11].Height == 512);
+	CHECK(profile.Resources[28].Width == 320);
+	CHECK(profile.Resources[28].Height == 240);
+	CHECK(profile.PeakBytes == 32'119'808);
+	CHECK(profile.TotalBytes == 67'447'808);
+	CHECK(profile.AllocatedBytes == 23'347'200);
+	CHECK(profile.AliasedResources == 9);
+
+	CHECK(installed->Aliases.Allocations.size() == installed->Graph.ResourceCount());
+	CHECK(installed->Aliases.PhysicalTargets == 15);
+	CHECK(installed->Aliases.AliasedResources == 9);
+	const std::vector<std::string> expectedAliases{
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"albedo",
+		"normal",
+		"material",
+		"emissive",
+		"mesh-uv",
+		"object-ids",
+		"semantic-ids",
+		"part-ids",
+		"depth",
+		"linear-depth",
+		"-",
+		"-",
+		"-",
+		"-",
+		"lit",
+		"emissive",
+		"lit",
+		"emissive",
+		"lit",
+		"lit",
+		"emissive",
+		"lit",
+		"albedo",
+		"portaled",
+		"mirrored",
+		"portaled",
+		"scene-image",
+		"-",
+		"composed-image",
+	};
+	CHECK(AliasOwnerNames(installed->Graph, installed->Aliases) == expectedAliases);
+	const std::vector<std::string> expectedWaves{
+		"concurrent:world@cpu:mesh-residency@transfer:skybox-compute@compute",
+		"concurrent:shadow@graphics:clouds-compute@compute",
+		"serial:camera@cpu:last-frame@graphics:entities@cpu",
+		"serial:cull-frustum@cpu",
+		"serial:order-draw@cpu",
+		"serial:delta-upload@transfer",
+		"serial:select-lod@compute",
+		"serial:surface-capture@graphics:gbuffer@graphics",
+		"serial:depth-linearise@graphics",
+		"serial:ssao@graphics",
+		"serial:deferred-lighting@graphics",
+		"serial:sky@graphics",
+		"serial:fog@graphics",
+		"serial:portal-overlay@graphics",
+		"serial:mirror-overlay@graphics",
+		"serial:transparent@graphics",
+		"serial:shader-lenses@graphics",
+		"serial:dof@graphics",
+		"serial:god-rays@graphics",
+		"serial:bloom@graphics",
+		"serial:tonemap@graphics",
+		"serial:present@graphics:interface@graphics",
+		"serial:overlay@graphics",
+		"serial:output-image@transfer",
+	};
+	CHECK(ScheduleNames(installed->Graph, installed->Schedule) == expectedWaves);
+	const std::vector<std::string> expectedBuffers{
+		"transfer:0-0:mesh-residency",
+		"compute:0-1:skybox-compute:clouds-compute",
+		"graphics:1-2:shadow:last-frame",
+		"transfer:5-5:delta-upload",
+		"compute:6-6:select-lod",
+		"graphics:7-22:surface-capture:gbuffer:depth-linearise:ssao:deferred-lighting:sky:fog:portal-overlay:"
+		"mirror-overlay:transparent:shader-lenses:dof:god-rays:bloom:tonemap:present:interface:overlay",
+		"transfer:23-23:output-image",
+	};
+	const std::vector<PlannedCommandBuffer> replannedBuffers = PlanCommandBuffers(package.Schedule);
+	REQUIRE_FALSE(package.Buffers.empty());
+	CHECK(CommandBufferNames(package.Graph, package.Buffers) == expectedBuffers);
+	CHECK(CommandBufferNames(package.Graph, replannedBuffers) == expectedBuffers);
+	CHECK(ScheduleNames(package.Graph, package.Schedule) == expectedWaves);
+	for (const PlannedCommandBuffer &buffer : package.Buffers) {
+		CHECK(buffer.FirstWave <= buffer.LastWave);
+		CHECK(buffer.LastWave < package.Schedule.Waves.size());
 	}
 }
 

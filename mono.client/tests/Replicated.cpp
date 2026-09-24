@@ -1172,6 +1172,43 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"portal adoption seeds a missing motion from the applied destination snapshot",
+	"[client][prediction][portal-adoption]"
+) {
+	namespace scene = engine::scene;
+	Replica destination;
+	auto &store = destination.World;
+	scene::InstallServices(store);
+	const auto player = scene::AddPlayer(store, "arrived", false, 92);
+	const auto model = scene::LoadCharacter(store, player);
+	REQUIRE(model != engine::ecs::NULL_ENTITY);
+	const auto rig = *store.Get<scene::Character>(model);
+	store.SetResource(scene::LocalPlayer{player});
+	store.SetAdoptOnly(true);
+	store.AdvanceTick(1.0f / 60.0f);
+
+	CHECK_FALSE(client::SeedPortalAdoptionPrediction(store, player, 0, {}, 7));
+	CHECK_FALSE(store.HasResource<client::LocalPlayerPrediction>());
+	CHECK_FALSE(client::SeedPortalAdoptionPrediction(store, engine::ecs::NULL_ENTITY, 39, {}, 7));
+	CHECK_FALSE(store.HasResource<client::LocalPlayerPrediction>());
+	CHECK_FALSE(client::SeedPortalAdoptionPrediction(store, player, 39, {}, 0));
+	CHECK_FALSE(store.HasResource<client::LocalPlayerPrediction>());
+	REQUIRE(client::SeedPortalAdoptionPrediction(store, player, 39, {}, 7));
+	const auto *prediction = store.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(prediction);
+	CHECK(prediction->Active);
+	CHECK(prediction->Player == player);
+	CHECK(prediction->Root == rig.Root);
+	CHECK(prediction->AuthorityTick == 39);
+	CHECK(prediction->Frame.Position == store.Get<scene::Transform>(rig.Root)->Frame.Position);
+	const auto *native = store.Resource<client::NativePlayerPrediction>();
+	REQUIRE(native);
+	CHECK(native->Incarnation == 7);
+	CHECK(native->AppliedPoseTick == 0);
+	CHECK_FALSE(native->Sample);
+}
+
+TEST_CASE(
 	"portal replay retains submitted durations and maps through a scaled seam",
 	"[client][prediction][portal-input-history]"
 ) {

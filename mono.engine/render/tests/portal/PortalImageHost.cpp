@@ -7,7 +7,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <chrono>
 #include <cmath>
+#include <memory>
 #include <optional>
 
 TEST_SUITE_ID("engine.render.portalimagehost")
@@ -17,6 +19,7 @@ namespace {
 	using namespace engine;
 	using namespace engine::render;
 	constexpr PortalImageHost::Time START{};
+	constexpr auto HOST_SOURCE_TIMEOUT = std::chrono::seconds(5);
 	struct Worlds {
 		world::Universe Universe;
 		world::WorldId Source = Universe.Create({.Name = core::Name("near")});
@@ -337,6 +340,8 @@ TEST_CASE(
 }
 
 #include "../RenderFixture.hpp"
+#include "PortalRendererTerminalTrace.hpp"
+#include "PortalTerminalTrace.hpp"
 
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Characters.hpp>
@@ -345,6 +350,7 @@ TEST_CASE(
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/scene/Visibility.hpp>
 
 TEST_CASE(
 	"portal host delivers distinct resident images and retires hidden viewports",
@@ -411,7 +417,7 @@ TEST_CASE(
 	CHECK_FALSE(host.Capture(0, core::Name("Door")));
 	REQUIRE(host.Capture(2, core::Name("Door")));
 	CHECK(host.Image(2, core::Name("Door")) == secondImage);
-	const auto expired = START + PortalInboxLimits{}.Timeout;
+	const auto expired = START + HOST_SOURCE_TIMEOUT;
 	(void)host.Pump(0, 0, expired);
 	CHECK(host.CurrentImage(2, core::Name("Door")) == 0);
 	CHECK(host.Image(2, core::Name("Door")) == 0);
@@ -542,6 +548,98 @@ TEST_CASE("resident portal images stay bounded through world replacement", "[ren
 		);
 	}
 	host.Clear();
+}
+
+TEST_CASE(
+	"portal host presents a speculative replica before its resident image capture",
+	"[render][gpu][portal-host][.]"
+) {
+	Worlds worlds;
+	scene::RegisterSceneClasses();
+	size_t sourcePresentations = 0, destinationPresentations = 0;
+	worlds.Universe.Enter(worlds.Source, [&](ecs::Store &, ecs::Scheduler &systems) {
+		systems.Add("count-near-presentation", ecs::Phase::PreRender, [&](ecs::Store &) {
+			++sourcePresentations;
+		});
+	});
+	worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store, ecs::Scheduler &systems) {
+		const auto workspace = scene::InstallServices(store);
+		scene::PartDesc wall;
+		wall.Frame.Position = {0, 0, -4};
+		wall.Size = {8, 8, .1f};
+		const auto part = scene::MakePart(store, wall);
+		REQUIRE(store.SetParent(part, workspace));
+		store.GetMutable<scene::Visual>(part)->Tint = {1, 0, 0};
+		store.SetResource(scene::Sun{{0, 0, 1}, {.5f, .5f, .5f}});
+		store.SetResource(DrawList{});
+		store.SetAdoptOnly(true);
+		systems.Add("collect-speculative-rows", ecs::Phase::PreRender, [&](ecs::Store &world) {
+			++destinationPresentations;
+			(void)scene::SyncRendered(world);
+			CollectInstances(world);
+		});
+	});
+	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) {
+		const auto *draw = store.Resource<DrawList>();
+		CHECK((draw == nullptr || draw->Instances.empty()));
+	});
+	REQUIRE(worlds.Universe.Present(worlds.Source, 0, 0) == world::WorldStatus::Ok);
+	REQUIRE(sourcePresentations == 1);
+
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	PortalImageHost host(worlds.Universe, fixture.Render);
+	REQUIRE(host.Serve(worlds.Source).Generation != 0);
+	SceneTarget target{65, 65};
+	View eye;
+	eye.Target = &target;
+	REQUIRE(
+		host.SubmitEye(
+			worlds.Source,
+			worlds.Route(),
+			eye,
+			{.Width = 65, .Height = 65, .RecursionDepth = 0, .PixelBudget = 65 * 65},
+			START
+		) == 1
+	);
+	REQUIRE(host.Pump(0, 0, START, worlds.Source).Rendered == 1);
+	CHECK(sourcePresentations == 1);
+	CHECK(destinationPresentations == 1);
+	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) {
+		const auto *draw = store.Resource<DrawList>();
+		REQUIRE(draw != nullptr);
+		CHECK_FALSE(draw->Instances.empty());
+	});
+	eye.EyeImage = host.Image(eye.Slot, eye.EyeImageKey);
+	REQUIRE(eye.EyeImage != 0);
+	OverlayImage overlay;
+	(void)fixture.Render.Render(std::span(&eye, 1), overlay, nullptr, false);
+	const auto image = render::test::CaptureResource(
+		fixture.Render, core::Name("composed-image"), eye.Slot, 65, 65, render::test::ImageFormat::Rgba8Unorm
+	);
+	const auto format = fixture.Render.Backend().ColourFormat;
+	const bool bgra =
+		format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM || format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+	const size_t centre = 32 * image.RowStrideBytes + 32 * 4;
+	const auto red = std::to_integer<uint8_t>(image.Bytes[centre + (bgra ? 2 : 0)]);
+	const auto blue = std::to_integer<uint8_t>(image.Bytes[centre + (bgra ? 0 : 2)]);
+	CHECK(red > blue);
+	REQUIRE(worlds.Universe.Present(worlds.Destination, 0, 0) == world::WorldStatus::Ok);
+	REQUIRE(destinationPresentations == 2);
+	eye.CameraFrame.Position.X = .1f;
+	const auto next = START + std::chrono::milliseconds(1);
+	REQUIRE(
+		host.SubmitEye(
+			worlds.Source,
+			worlds.Route(),
+			eye,
+			{.Width = 65, .Height = 65, .RecursionDepth = 0, .PixelBudget = 65 * 65},
+			next
+		) == 1
+	);
+	REQUIRE(host.Pump(0, 0, next, worlds.Source, worlds.Destination).Rendered == 1);
+	CHECK(sourcePresentations == 1);
+	CHECK(destinationPresentations == 2);
 }
 
 #include <engine/core/Paths.hpp>
@@ -1241,11 +1339,17 @@ TEST_CASE(
 	"portal host submits prefetched layer groups through an unrelated view",
 	"[render][gpu][portal-host][layer-host][.]"
 ) {
+	const bool cancelDuringUpload = GENERATE(false, true);
+	CAPTURE(cancelDuringUpload);
 	Worlds worlds;
 	scene::RegisterSceneClasses();
 	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) { (void)scene::InstallServices(store); });
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalTerminalTrace terminals(fixture.Render);
+	test_support::PortalRendererTerminalTrace rendererTerminals(fixture.Render);
+#endif
 	PortalImageHost host(worlds.Universe, fixture.Render);
 	auto demand = worlds.Demand(2);
 	demand.Request.OrderedLayers = true;
@@ -1258,6 +1362,20 @@ TEST_CASE(
 		(void)host.Pump(0, 0, START);
 	REQUIRE(host.HasPendingUploads());
 	CHECK_FALSE(host.Capture(2, core::Name("Door")));
+	if (cancelDuringUpload) {
+		REQUIRE(fixture.Render.PortalImageUsage().Images > 0);
+		host.RemoveViewport(2);
+		CHECK_FALSE(host.HasPendingUploads());
+		CHECK(host.Image(2, core::Name("Door")) == 0);
+		CHECK_FALSE(host.Capture(2, core::Name("Door")));
+		CHECK(fixture.Render.PortalImageUsage().Images == 0);
+		host.RemoveViewport(2);
+		host.Clear();
+		host.Clear();
+		CHECK_FALSE(host.HasPendingUploads());
+		CHECK(fixture.Render.PortalImageUsage().Images == 0);
+		return;
+	}
 	SceneTarget target{8, 8};
 	View view;
 	view.World = worlds.Destination.Index;
@@ -1285,7 +1403,37 @@ TEST_CASE(
 	const auto replaced = host.ComposeBodyImage(core::Name("Door"), view);
 	REQUIRE(replaced != 0);
 	CHECK_FALSE(fixture.Render.DropPortalImage(composed));
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK_FALSE(terminals.Released(composed));
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::ReleasePortalImport, composed
+		) == 1
+	);
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::ReplacePortalImage, composed
+		) == 1
+	);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		0
+	);
+#endif
 	CHECK(fixture.Render.PortalImageUsage().Images == 4);
+	// Repeated demand refreshes the eye while the accepted body image stays owned.
+	REQUIRE(host.Submit(worlds.Source, 2, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	CHECK(host.Submit(worlds.Source, 2, std::span(&demand, 1), std::span(&route, 1), START) == 0);
+	CHECK(host.Image(2, core::Name("Door")) == capture->Image);
+	CHECK(fixture.Render.PortalImageUsage().Images == 4);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, replaced) == 0);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, replaced) ==
+		0
+	);
+#endif
 	view.WorldName = core::Name("wrong-body-owner");
 	CHECK(host.ComposeBodyImage(core::Name("Door"), view) == replaced);
 	CHECK(fixture.Render.PortalImageUsage().Images == 4);
@@ -1305,7 +1453,7 @@ TEST_CASE(
 		(void)host.Submit(worlds.Source, 2, {}, {}, START);
 		break;
 	case 4:
-		(void)host.Pump(0, 0, START + PortalInboxLimits{}.Timeout);
+		(void)host.Pump(0, 0, START + HOST_SOURCE_TIMEOUT);
 		break;
 	case 5:
 		REQUIRE(worlds.Universe.ClosePresentation(capture->Producer) == world::PresentationStatus::Ok);
@@ -1316,4 +1464,430 @@ TEST_CASE(
 	CHECK_FALSE(host.Capture(2, core::Name("Door")));
 	CHECK_FALSE(host.HasPendingUploads());
 	CHECK(fixture.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, replaced) == 1);
+	CHECK(terminals.Released(replaced));
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::ReleasePortalImport, replaced
+		) == 1
+	);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, replaced) ==
+		1
+	);
+#endif
+	host.RemoveViewport(2);
+	host.Clear();
+	host.Clear();
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, replaced) == 1);
+	CHECK(
+		rendererTerminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::ReplacePortalImage, composed
+		) == 1
+	);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, replaced) ==
+		1
+	);
+#endif
+}
+
+namespace {
+	struct LayeredOwnerFixture {
+		Worlds WorldState;
+		render::test::FixtureDevice Device;
+		std::unique_ptr<PortalImageHost> Host;
+		PortalImageDemand Demand;
+		PortalImageDestination Route;
+		SceneTarget Target{8, 8};
+		OverlayImage Overlay;
+
+		LayeredOwnerFixture() : Demand(WorldState.Demand(2)), Route(WorldState.Route()) {
+			scene::RegisterSceneClasses();
+			WorldState.Universe.Enter(WorldState.Destination, [](ecs::Store &store) {
+				(void)scene::InstallServices(store);
+			});
+			Device.Initialise();
+			Host = std::make_unique<PortalImageHost>(WorldState.Universe, Device.Render);
+			Demand.Request.OrderedLayers = true;
+			Demand.Request.Scope = PortalImageScope::OpaqueLighting;
+			Demand.Request.PixelBudget = 4 * 64;
+		}
+		size_t Submit() {
+			return Host->Submit(WorldState.Source, 2, std::span(&Demand, 1), std::span(&Route, 1), START);
+		}
+		PortalImageCapture Complete() {
+			for (unsigned attempt = 0; attempt < 1000 && !Host->HasPendingUploads(); ++attempt)
+				(void)Host->Pump(0, 0, START);
+			REQUIRE(Host->HasPendingUploads());
+			View upload;
+			upload.World = WorldState.Destination.Index;
+			upload.WorldName = core::Name("far replica");
+			upload.Slot = 7;
+			upload.Target = &Target;
+			REQUIRE(Device.Render.Render(std::span(&upload, 1), Overlay, nullptr, false)
+						.Ran(core::Name("surface-capture")));
+			(void)Host->Pump(0, 0, START);
+			REQUIRE_FALSE(Host->HasPendingUploads());
+			const auto capture = Host->Capture(2, core::Name("Door"));
+			REQUIRE(capture);
+			return *capture;
+		}
+		uint64_t Compose() {
+			View body;
+			body.World = WorldState.Source.Index;
+			body.WorldName = core::Name("near");
+			body.Slot = 2;
+			body.Target = &Target;
+			return Host->ComposeBodyImage(core::Name("Door"), body);
+		}
+	};
+}
+
+TEST_CASE(
+	"portal host keeps its last composed image through same-owner immediate supersession",
+	"[render][gpu][portal-host][demand-supersession][.]"
+) {
+	LayeredOwnerFixture fixture;
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalTerminalTrace terminals(fixture.Device.Render);
+	test_support::PortalRendererTerminalTrace rendererTerminals(fixture.Device.Render);
+#endif
+	REQUIRE(fixture.Submit() == 1);
+	const auto initial = fixture.Complete();
+	const uint64_t composed = fixture.Compose();
+	REQUIRE(composed != 0);
+	fixture.Demand.Request.Key.CameraRevision = 2;
+	fixture.Demand.Request.Position[0] = 1;
+	REQUIRE(fixture.Submit() == 1);
+	fixture.Demand.Request.Key.CameraRevision = 3;
+	fixture.Demand.Request.Key.SeamRevision = 1;
+	fixture.Demand.Request.Position[0] = 2;
+	REQUIRE(fixture.Submit() == 1);
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == initial.Image);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 4);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 0);
+#endif
+	const auto accepted = fixture.Complete();
+	CHECK(accepted.Camera.Position[0] == 2);
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == accepted.Image);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 4);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 0);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		0
+	);
+#endif
+	fixture.Host->RemoveViewport(2);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		1
+	);
+#endif
+	fixture.Host->Clear();
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+#endif
+}
+
+TEST_CASE(
+	"portal host isolates a staged local source from the displayed capture slot",
+	"[render][gpu][portal-host][staged-source-slot][.]"
+) {
+	LayeredOwnerFixture fixture;
+	REQUIRE(fixture.Submit() == 1);
+	const auto displayed = fixture.Complete();
+	const auto stagedWorld = fixture.WorldState.Universe.Create({.Name = core::Name("staged-local")});
+	for (const size_t slot : {size_t{1}, size_t{4}, size_t{5}}) {
+		auto staged = fixture.Demand;
+		staged.Binding.World = stagedWorld.Index;
+		staged.Binding.WorldName = core::Name("staged-local");
+		staged.Binding.ViewSlot = slot;
+		staged.Request.Key.CameraRevision += slot;
+		REQUIRE(
+			fixture.Host->Submit(
+				stagedWorld, slot, std::span(&staged, 1), std::span(&fixture.Route, 1), START
+			) == 1
+		);
+	}
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == displayed.Image);
+	for (const size_t slot : {size_t{1}, size_t{4}, size_t{5}}) {
+		fixture.Host->RemoveViewport(slot);
+		CHECK(fixture.Host->Image(2, core::Name("Door")) == displayed.Image);
+	}
+	fixture.Host->RemoveViewport(2);
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == 0);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 0);
+}
+
+TEST_CASE(
+	"portal host cancels a staged layer upload without dropping its last image",
+	"[render][gpu][portal-host][staged-upload][.]"
+) {
+	LayeredOwnerFixture fixture;
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalTerminalTrace terminals(fixture.Device.Render);
+	test_support::PortalRendererTerminalTrace rendererTerminals(fixture.Device.Render);
+#endif
+	REQUIRE(fixture.Submit() == 1);
+	const auto initial = fixture.Complete();
+	const uint64_t composed = fixture.Compose();
+	REQUIRE(composed != 0);
+	fixture.Demand.Request.Key.CameraRevision = 2;
+	fixture.Demand.Request.Position[0] = 1;
+	REQUIRE(fixture.Submit() == 1);
+	for (unsigned attempt = 0; attempt < 1000 && !fixture.Host->HasPendingUploads(); ++attempt)
+		(void)fixture.Host->Pump(0, 0, START);
+	REQUIRE(fixture.Host->HasPendingUploads());
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 7);
+#if ENGINE_ASSERTS_ENABLED
+	const size_t before = rendererTerminals.Calls.size();
+#endif
+	fixture.Demand.Request.Key.CameraRevision = 3;
+	fixture.Demand.Request.Key.SeamRevision = 1;
+	fixture.Demand.Request.Position[0] = 2;
+	REQUIRE(fixture.Submit() == 1);
+	CHECK_FALSE(fixture.Host->HasPendingUploads());
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == initial.Image);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 4);
+#if ENGINE_ASSERTS_ENABLED
+	std::vector<uint64_t> staged;
+	for (const auto &call : std::span(rendererTerminals.Calls).subspan(before))
+		if (call.Kind == test_support::PortalRendererTerminalKind::ReleasePortalImport && call.Applied)
+			staged.push_back(call.Token);
+	REQUIRE(staged.size() == 3);
+	for (const uint64_t handle : staged)
+		CHECK(
+			rendererTerminals.AppliedCount(
+				test_support::PortalRendererTerminalKind::ReleasePortalImport, handle
+			) == 1
+		);
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 0);
+#endif
+	const auto accepted = fixture.Complete();
+	CHECK(accepted.Camera.Position[0] == 2);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 4);
+	fixture.Host->RemoveViewport(2);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		1
+	);
+	for (const uint64_t handle : staged)
+		CHECK(
+			rendererTerminals.AppliedCount(
+				test_support::PortalRendererTerminalKind::ReleasePortalImport, handle
+			) == 1
+		);
+#endif
+	fixture.Host->Clear();
+}
+
+TEST_CASE(
+	"portal host retires an incompatible owner profile before accepting its replacement",
+	"[render][gpu][portal-host][owner-profile][.]"
+) {
+	LayeredOwnerFixture fixture;
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalTerminalTrace terminals(fixture.Device.Render);
+	test_support::PortalRendererTerminalTrace rendererTerminals(fixture.Device.Render);
+#endif
+	REQUIRE(fixture.Submit() == 1);
+	const auto initial = fixture.Complete();
+	const uint64_t composed = fixture.Compose();
+	REQUIRE(composed != 0);
+	fixture.Demand.Request.Key.CameraRevision = 2;
+	fixture.Demand.Request.Position[0] = 1;
+	REQUIRE(fixture.Submit() == 1);
+	// Index changes the binding owner, so the prior capture cannot be the new owner's last good image.
+	fixture.Demand.Binding.Index++;
+	fixture.Demand.Request.Key.CameraRevision = 3;
+	fixture.Demand.Request.Position[0] = 2;
+	REQUIRE(fixture.Submit() == 1);
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == 0);
+	CHECK_FALSE(fixture.Host->Capture(2, core::Name("Door")));
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, initial.Image) == 1);
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		1
+	);
+#endif
+	const auto accepted = fixture.Complete();
+	CHECK(accepted.Binding.Index == fixture.Demand.Binding.Index);
+	CHECK(accepted.Camera.Position[0] == 2);
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == accepted.Image);
+	fixture.Host->RemoveViewport(2);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, initial.Image) == 1);
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+#endif
+	fixture.Host->Clear();
+}
+
+TEST_CASE(
+	"portal host retains its last image when an invalid layer is refused before upload",
+	"[render][gpu][portal-host][preflight-refusal][.]"
+) {
+	LayeredOwnerFixture fixture;
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalTerminalTrace terminals(fixture.Device.Render);
+	test_support::PortalRendererTerminalTrace rendererTerminals(fixture.Device.Render);
+#endif
+	REQUIRE(fixture.Submit() == 1);
+	const auto initial = fixture.Complete();
+	const uint64_t composed = fixture.Compose();
+	REQUIRE(composed != 0);
+	// The invalid binding is rejected before the upload stage, leaving the
+	// previously composed image owned by this viewport.
+	fixture.Demand.Binding.Layer = 1;
+	fixture.Demand.Request.Key.CameraRevision = 2;
+	REQUIRE(fixture.Submit() == 1);
+	for (unsigned attempt = 0; attempt < 1000; ++attempt)
+		(void)fixture.Host->Pump(0, 0, START);
+	CHECK_FALSE(fixture.Host->HasPendingUploads());
+	CHECK(fixture.Host->InboxUsage().PendingCount == 0);
+	CHECK(fixture.Host->Image(2, core::Name("Door")) == initial.Image);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 4);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 0);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		0
+	);
+#endif
+	fixture.Host->RemoveViewport(2);
+	CHECK(fixture.Device.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		1
+	);
+#endif
+	fixture.Host->Clear();
+}
+
+TEST_CASE(
+	"portal host retains a composed image while camera demand defers or reverts",
+	"[render][gpu][portal-host][deferred-demand][.]"
+) {
+	const bool revert = GENERATE(false, true);
+	CAPTURE(revert);
+	Worlds worlds;
+	scene::RegisterSceneClasses();
+	worlds.Universe.Enter(worlds.Destination, [](ecs::Store &store) { (void)scene::InstallServices(store); });
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalTerminalTrace terminals(fixture.Render);
+	test_support::PortalRendererTerminalTrace rendererTerminals(fixture.Render);
+#endif
+	PortalImageHost host(worlds.Universe, fixture.Render);
+	auto demand = worlds.Demand(2);
+	demand.Request.OrderedLayers = true;
+	demand.Request.Scope = PortalImageScope::OpaqueLighting;
+	demand.Request.PixelBudget = 4 * 64;
+	const auto route = worlds.Route();
+	SceneTarget target{8, 8};
+	View upload;
+	upload.World = worlds.Destination.Index;
+	upload.WorldName = core::Name("far replica");
+	upload.Slot = 7;
+	upload.Target = &target;
+	OverlayImage overlay;
+	const auto complete = [&] {
+		for (unsigned attempt = 0; attempt < 1000 && !host.HasPendingUploads(); ++attempt)
+			(void)host.Pump(0, 0, START);
+		REQUIRE(host.HasPendingUploads());
+		REQUIRE(fixture.Render.Render(std::span(&upload, 1), overlay, nullptr, false)
+					.Ran(core::Name("surface-capture")));
+		(void)host.Pump(0, 0, START);
+		REQUIRE_FALSE(host.HasPendingUploads());
+		const auto captured = host.Capture(2, core::Name("Door"));
+		REQUIRE(captured);
+		return *captured;
+	};
+	REQUIRE(host.Submit(worlds.Source, 2, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	const auto initial = complete();
+	View body;
+	body.World = worlds.Source.Index;
+	body.WorldName = core::Name("near");
+	body.Slot = 2;
+	body.Target = &target;
+	const uint64_t composed = host.ComposeBodyImage(core::Name("Door"), body);
+	REQUIRE(composed != 0);
+	CHECK(fixture.Render.PortalImageUsage().Images == 4);
+
+	demand.Request.Key.CameraRevision = 2;
+	demand.Request.Position[0] = 1;
+	REQUIRE(host.Submit(worlds.Source, 2, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	demand.Request.Key.CameraRevision = 3;
+	demand.Request.Position[0] = 2;
+	CHECK(host.Submit(worlds.Source, 2, std::span(&demand, 1), std::span(&route, 1), START) == 0);
+	if (revert) {
+		demand.Request.Key.CameraRevision = 2;
+		demand.Request.Position[0] = 1;
+		CHECK(host.Submit(worlds.Source, 2, std::span(&demand, 1), std::span(&route, 1), START) == 0);
+	}
+	CHECK(host.Image(2, core::Name("Door")) == initial.Image);
+	CHECK(fixture.Render.PortalImageUsage().Images == 4);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 0);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		0
+	);
+#endif
+	const auto acceptedA = complete();
+	CHECK(acceptedA.Camera.Position[0] == 1);
+	CHECK_FALSE(host.HasPendingUploads());
+	CHECK(host.Image(2, core::Name("Door")) == acceptedA.Image);
+	CHECK(fixture.Render.PortalImageUsage().Images == 4);
+	if (!revert) {
+		const auto acceptedB = complete();
+		CHECK(acceptedB.Camera.Position[0] == 2);
+		CHECK(host.Image(2, core::Name("Door")) == acceptedB.Image);
+	} else {
+		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
+	}
+	CHECK(fixture.Render.PortalImageUsage().Images == 4);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 0);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		0
+	);
+#endif
+	host.RemoveViewport(2);
+	CHECK(fixture.Render.PortalImageUsage().Images == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		1
+	);
+#endif
+	host.Clear();
+	host.Clear();
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.Count(test_support::PortalTerminalKind::ReleaseImage, composed) == 1);
+	CHECK(
+		rendererTerminals.AppliedCount(test_support::PortalRendererTerminalKind::DropPortalImage, composed) ==
+		1
+	);
+#endif
 }

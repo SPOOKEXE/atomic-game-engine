@@ -81,6 +81,8 @@ struct SDL_Joystick;
 
 namespace client {
 	class PortalReadinessController;
+	struct PortalReadinessEvidence;
+	struct PortalReadiness;
 
 	// The window, the renderer and the frame loop over one world.
 	//
@@ -366,6 +368,7 @@ namespace client {
 		void PumpPortalObservation(double nowSeconds);
 		void DropPortalObservation();
 		void RetainPortalObservation(engine::world::WorldId world);
+		engine::world::WorldId AdmittedPortalCaptureWorld(double nowSeconds) const;
 		struct PortalWorldView;
 		bool PreparePortalWorldView(
 			PortalWorldView &packet,
@@ -380,7 +383,8 @@ namespace client {
 			engine::world::WorldId inputWorld,
 			uint32_t width,
 			uint32_t height,
-			bool prepareNative = false
+			bool prepareNative = false,
+			bool honorDisplayHold = true
 		);
 		void DropPortalReplica(engine::world::WorldId world);
 		void DropPortalApproach();
@@ -757,6 +761,7 @@ namespace client {
 		};
 		struct PortalSuccessor {
 			PortalWorldView View;
+			std::unique_ptr<PortalWorldView> LocalTrailingEye;
 			engine::game::PortalSessionMessage Offer;
 			std::optional<engine::game::PortalSessionMessage> Following;
 			engine::net::Endpoint Endpoint;
@@ -778,7 +783,19 @@ namespace client {
 			double CancellationRetryAt = 0;
 			double ReconnectAt = 0;
 			bool DrawingArrivedPlayer = false;
+			// Resolved primary eye destination that must reach the gate before adoption.
+			engine::core::Name ArrivedEyeWorld;
+			const char *PromotionBlocker = nullptr;
 			bool ProceedSent = false;
+			const char *ProceedBlocker = nullptr;
+			uint64_t ProceedEyeImage = 0;
+			size_t ProceedEyeSubmitted = 0;
+			std::string ProceedEyeSource;
+			bool ProceedEyeSourceRemote = false;
+			uint64_t ProceedEyeCapture = 0;
+			size_t ProceedProducerRequests = 0;
+			size_t ProceedProducerRendered = 0;
+			size_t ProceedProducerRefused = 0;
 			bool Crossed = false;
 			bool ResumeSent = false;
 			bool Ready = false;
@@ -787,6 +804,28 @@ namespace client {
 			// The retained image stays selected until this staged replica has every
 			// receipt, asset, pose and capacity fact needed for live presentation.
 			std::shared_ptr<PortalReadinessController> Readiness;
+			std::optional<uint64_t> EmptyContentDemandRevision;
+			size_t UndeliverableAssetNames = 0;
+			// Capture-only snapshot of the facts that kept a crossed successor image-only.
+			std::shared_ptr<PortalReadinessEvidence> CapturedReadiness;
+			std::shared_ptr<PortalReadiness> CapturedReadinessDecision;
+			struct EyeProbe {
+				std::string SelectedWorld;
+				std::string EyeWorld;
+				std::string ImageKey;
+				std::string BoundWorld;
+				bool Prepared = false;
+				size_t Slot = 0;
+				uint64_t Image = 0;
+				uint64_t CurrentImage = 0;
+				uint64_t CaptureImage = 0;
+				uint64_t CaptureTick = 0;
+				size_t Submitted = 0;
+				bool ProducerValid = false;
+				std::array<uint64_t, 2> ViewportImages{};
+				std::array<std::string, 2> ViewportDestinations{};
+			};
+			std::optional<EyeProbe> CapturedEyeProbe;
 			std::optional<engine::script::PortalTransferFence> SourceFence;
 			std::optional<engine::script::PortalTransferFence> DestinationFence;
 			float ReadinessDistance = 0;
@@ -813,6 +852,7 @@ namespace client {
 			PortalWorldView View;
 			engine::world::WorldId World;
 			engine::core::Name Authored;
+			bool HoldDisplayEye = false;
 			std::unique_ptr<engine::net::Transport> Socket;
 			std::unique_ptr<engine::replication::Connector> Connection;
 			std::unique_ptr<ContentSession> Content;
@@ -985,6 +1025,7 @@ namespace client {
 		// One input timeline survives replica replacement. The epochs map the
 		// current replica's clock without changing that world's simulation time.
 		uint64_t SubmittedMoveTick = 0;
+		std::array<float, 3> CapturedSubmittedMoveDirection{};
 		uint64_t InputLocalEpoch = 0;
 		uint64_t InputSequenceEpoch = 0;
 

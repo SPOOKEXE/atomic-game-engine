@@ -5,10 +5,27 @@
 #include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/Renderer.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 
 namespace engine::render {
+#if ENGINE_ASSERTS_ENABLED
+	namespace test_support {
+		enum class PortalTerminalKind { ReleaseImage, CancelComposition, CancelPreparation };
+		struct PortalTerminalCall {
+			const Renderer *Owner = nullptr;
+			PortalTerminalKind Kind = PortalTerminalKind::ReleaseImage;
+			uint64_t Token = 0;
+			bool Released = false;
+		};
+		struct PortalTerminalObserver {
+			void *Context = nullptr;
+			void (*Record)(void *, PortalTerminalCall) = nullptr;
+		};
+		inline thread_local PortalTerminalObserver PortalTerminalObserverForTests;
+	}
+#endif
 	// The portal coordinator only needs this bounded set of renderer operations.
 	// Keeping it here stops transport and retirement state from depending on the
 	// renderer's general frame and resource APIs.
@@ -50,6 +67,9 @@ namespace engine::render {
 		}
 		const Renderer &RendererRef() const {
 			return Render;
+		}
+		bool OwnsResident(const PortalResidentImages &resident) const {
+			return resident.Owns(Render);
 		}
 		// Source and producer state own portal work. These are the complete GPU
 		// operations that state may request, so neither role reaches the renderer's
@@ -107,11 +127,11 @@ namespace engine::render {
 		template <typename... Args> decltype(auto) TakeResourceImages(Args &&...args) {
 			return Render.TakeResourceImages(std::forward<Args>(args)...);
 		}
-		template <typename... Args> decltype(auto) CancelResourceImage(Args &&...args) {
-			return Render.CancelResourceImage(std::forward<Args>(args)...);
+		bool CancelResourceImage(uint64_t token) {
+			return Render.CancelResourceImage(token);
 		}
-		template <typename... Args> decltype(auto) ResourceRevision(Args &&...args) const {
-			return Render.ResourceRevision(std::forward<Args>(args)...);
+		uint64_t ResourceRevision() const {
+			return Render.ResourceRevision();
 		}
 		template <typename... Args> decltype(auto) ForgetWorld(Args &&...args) {
 			return Render.ForgetWorld(std::forward<Args>(args)...);
@@ -190,13 +210,38 @@ namespace engine::render {
 							   : Render.PollPortalCaptureTreeComposition(job);
 		}
 		void CancelComposition(uint64_t job) {
+#if ENGINE_ASSERTS_ENABLED
+			const auto observer = test_support::PortalTerminalObserverForTests;
+			if (observer.Record)
+				observer.Record(
+					observer.Context, {&Render, test_support::PortalTerminalKind::CancelComposition, job}
+				);
+#endif
 			Render.CancelPortalCaptureTreeComposition(job);
 		}
 		void CancelPreparation(uint64_t preparation) {
+#if ENGINE_ASSERTS_ENABLED
+			const auto observer = test_support::PortalTerminalObserverForTests;
+			if (observer.Record)
+				observer.Record(
+					observer.Context,
+					{&Render, test_support::PortalTerminalKind::CancelPreparation, preparation}
+				);
+#endif
 			Render.CancelPortalCaptureTreePreparation(preparation);
 		}
 		void ReleaseImage(uint64_t image) {
+#if ENGINE_ASSERTS_ENABLED
+			const bool released = Render.DropPortalImage(image);
+			const auto observer = test_support::PortalTerminalObserverForTests;
+			if (observer.Record)
+				observer.Record(
+					observer.Context,
+					{&Render, test_support::PortalTerminalKind::ReleaseImage, image, released}
+				);
+#else
 			Render.DropPortalImage(image);
+#endif
 		}
 
 	  private:

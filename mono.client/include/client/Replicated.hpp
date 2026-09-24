@@ -245,6 +245,15 @@ namespace client {
 		const PortalPredictionContinuation &continuation,
 		float alpha = 0
 	);
+	// Seeds an arrived player from an applied destination snapshot when no source
+	// motion continuation has arrived yet. Refusal leaves the replica untouched.
+	bool SeedPortalAdoptionPrediction(
+		engine::ecs::Store &store,
+		engine::ecs::Entity player,
+		uint64_t appliedTick,
+		std::span<const engine::replication::Input> unconfirmed,
+		uint64_t destinationIncarnation
+	);
 
 	// Installs the presentation half of a replicated world, and opens its VM.
 	//

@@ -1861,18 +1861,24 @@ namespace server {
 			// below have to agree about it: one grants the rank and the other has
 			// to recognise it in order to leave it alone.
 			constexpr float REPLICATED_FIRST = 2.0f;
+			const engine::ecs::ClassId replicatedFirstClass =
+				engine::ecs::Classes::Find(engine::core::Name("ReplicatedFirst"));
 
-			Replication->Authority().SetPriority(
-				[this, score](engine::replication::ClientId client, engine::ecs::Entity entity) {
-					// The publish's own store, for `PositionOf`'s reason: this runs
-					// once per candidate per client and re-entering the world to
-					// walk one entity's ancestry was the second of the two entries
-					// this path was paying per call.
-					const bool first =
-						Publishing != nullptr && engine::scene::InReplicatedFirst(*Publishing, entity);
-					return first ? REPLICATED_FIRST : score(client, entity);
-				}
-			);
+			Replication->Authority().SetPriority([this, score, replicatedFirstClass](
+													 engine::replication::ClientId client,
+													 engine::ecs::Entity entity
+												 ) {
+				// The publish's own store, for `PositionOf`'s reason: this runs
+				// once per candidate per client. A registered class id is stable for
+				// the process, so the common path avoids a registry lock. Keep the
+				// name lookup if services are registered after listener setup.
+				const bool first =
+					Publishing != nullptr &&
+					(replicatedFirstClass.IsValid()
+						 ? engine::scene::InReplicatedFirst(*Publishing, entity, replicatedFirstClass)
+						 : engine::scene::InReplicatedFirst(*Publishing, entity));
+				return first ? REPLICATED_FIRST : score(client, entity);
+			});
 
 			// **The occlusion raycast, asked only about the rows in
 			// contention.** `SetPriorityRefinement` is consulted for what a
@@ -3055,6 +3061,21 @@ namespace server {
 		std::vector<std::pair<replication::ClientId, script::PortalTransferReceipt>> receipts;
 		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
 			const auto history = script::PortalTransferReceipts(store);
+			if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+				diagnostic && *diagnostic == '1' && store.Name() == "walk.destination" && !history.empty()) {
+				static std::atomic<uint32_t> emitted{0};
+				if (emitted.fetch_add(1, std::memory_order_relaxed) < 8)
+					ENGINE_INFO(
+						"portal return departure scan: tick={} players={} receipts={} pending={} "
+						"first_stage={} first_subject={}",
+						store.Time().Tick,
+						Players.size(),
+						history.size(),
+						PortalDepartures.size(),
+						static_cast<int>(history.front().Stage),
+						history.front().Id.Sequence
+					);
+			}
 			for (const auto &[index, player] : Players) {
 				const auto pending = PortalDepartures.find(index);
 				if (pending != PortalDepartures.end() &&
@@ -3102,6 +3123,29 @@ namespace server {
 			}
 			auto &departure = found->second;
 			if (departure.Client != client || departure.Request.Claim.Transfer != receipt.Id) continue;
+			if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+				diagnostic && *diagnostic == '1' && receipt.Id.SourceWorld == "walk.destination" &&
+				receipt.Id.Sequence == 1 && (receipt.Fence.H.SourceTick % 10 == 0 || !departure.Route)) {
+				static std::atomic<uint32_t> emitted{0};
+				if (emitted.fetch_add(1, std::memory_order_relaxed) < 16)
+					ENGINE_INFO(
+						"portal return lease: attempt={} stage={} route={} notified={} accepted={} "
+						"crossed={} destination_endpoint={} now={} retry={}",
+						departure.Request.Attempt,
+						static_cast<int>(receipt.Stage),
+						departure.Route.has_value(),
+						departure.Notified,
+						departure.Accepted,
+						departure.CrossedSent,
+						Worlds()
+							.LookupPresentation(
+								Worlds().Find(core::Name(receipt.DestinationWorld)), "portal-sessions"
+							)
+							.Generation,
+						nowSeconds,
+						departure.RetryAt
+					);
+			}
 			if (receipt.Stage == script::PortalTransferStage::Refused) {
 				game::PortalSessionMessage terminal;
 				terminal.Attempt = departure.Request.Attempt;

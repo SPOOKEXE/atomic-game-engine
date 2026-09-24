@@ -58,6 +58,16 @@ namespace engine::graph {
 }
 
 namespace engine::render {
+	// Planner outcome recorded with a portal view for capture diagnostics.
+	enum class PortalDemandStatus { Ready, Hidden, Invalid, Unsupported };
+
+	// Distinguishes the two geometric refusals folded into PortalDemandStatus::Hidden.
+	enum class PortalDemandHiddenReason { None, Frustum, ClipPlane };
+
+	namespace test_support {
+		struct TransformImage3DResidentTestAccess;
+	}
+	struct TextureBatchImage;
 	class DataFactoryHookBind;
 	struct PackedMeshData;
 	enum class MeshCopyStatus : uint8_t;
@@ -332,6 +342,15 @@ namespace engine::render {
 		// ImportedImage is a renderer-local generation handle. ImagePortal names
 		// the authored entrance. ExternalImage stays true while an image is absent.
 		bool ExternalImage = false;
+		// Planner outcome for this aperture. It is diagnostic metadata and does
+		// not change the renderer's external image mode.
+		PortalDemandStatus ImageDemandStatus = PortalDemandStatus::Invalid;
+		PortalDemandHiddenReason ImageHiddenReason = PortalDemandHiddenReason::None;
+		bool ImageFrustumVisible = false;
+		// Culling frame used for ImageDemandStatus. It can differ from the raster
+		// camera while a presentation route retains its source eye.
+		core::CFrame ImageDemandCamera;
+		uint64_t ImageCameraRevision = 0;
 		// Generation handle of the accepted imported image, or zero.
 		uint64_t ImportedImage = 0;
 		// Authored portal key used to resolve that imported image.

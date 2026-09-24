@@ -75,13 +75,14 @@ namespace engine::world {
 		const PresentationAddress &from,
 		const PresentationAddress &to,
 		uint64_t correlation,
-		std::span<const std::byte> payload
+		std::span<const std::byte> payload,
+		PresentationPriority priority
 	) {
 		RequireDriverThread("SendPresentation");
 		if (Ticking || NameOf(source).Text() != from.World || IsRemote(source)) {
 			return PresentationStatus::WrongHost;
 		}
-		return PresentationMessages.Send(from, to, correlation, payload);
+		return PresentationMessages.Send(from, to, correlation, payload, priority);
 	}
 	PresentationStatus Universe::IngestPresentation(core::Name host, const PresentationMessage &message) {
 		RequireDriverThread("IngestPresentation");

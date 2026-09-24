@@ -162,6 +162,10 @@ namespace engine::render {
 					near.Apertures.push_back(
 						{.Index = surface,
 						 .ExternalImage = true,
+						 .ImageHiddenReason = PortalDemandHiddenReason::None,
+						 .ImageFrustumVisible = false,
+						 .ImageDemandCamera = {},
+						 .ImageCameraRevision = 0,
 						 .ImagePortal = core::Name(edge.PortalKey),
 						 .ImportedLightImage = 0,
 						 .LightImagePortal = {},

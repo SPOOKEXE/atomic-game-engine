@@ -1377,17 +1377,20 @@ namespace engine::scene {
 				}
 				if (found == nullptr) {
 					Vector3 owner = row.Frame.Position;
-					// The live root owns every limb's side even when an animated
-					// hand is across the plane. Foreign numeric ids never resolve here.
-					if (!row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name()) {
-						if (const Transform *root = store.Get<Transform>(Entity{row.Rig}))
+					const bool local = !row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name();
+					const auto *view = store.Resource<PortalBodyView>();
+					// The presented root owns the rig's cut side when its rows were
+					// predicted ahead of the authoritative Transform. Foreign ids do
+					// not resolve in this store.
+					if (local) {
+						if (view && view->Root.Id == row.Rig)
+							owner = view->Previous;
+						else if (const Transform *root = store.Get<Transform>(Entity{row.Rig}))
 							owner = root->Frame.Position;
 					}
 					RigFit fit{row.Rig, row.SourceWorld, owner, fitted};
-					const auto *view = store.Resource<PortalBodyView>();
-					if ((!row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name()) && view &&
-						view->Root.Id == row.Rig && view->Crossing && view->Crossing->Pane == seam.Pane &&
-						view->Crossing->Camera == seam.Camera &&
+					if (local && view && view->Root.Id == row.Rig && view->Crossing &&
+						view->Crossing->Pane == seam.Pane && view->Crossing->Camera == seam.Camera &&
 						view->Crossing->DestinationWorld == seam.DestinationWorld) {
 						fit.Fits = true;
 						fit.EntryNormal = view->EntryNormal;
@@ -2631,6 +2634,26 @@ namespace engine::scene {
 										   current->Frame.QuaternionW != previous->Frame.QuaternionW);
 				const bool staticLocal = !seam.Crosses && out[index].Rig == 0 && body && store.Alive(body) &&
 										 !store.Has<Simulated>(body) && !scriptMoving;
+				const Transform *const pane = store.Get<Transform>(seam.Pane);
+				constexpr float PANE_TOUCH = 1.0e-3f;
+				const float centreDepth = (out[index].Frame.Position - seam.Centre).Dot(seam.Normal);
+				// The seam is the pane's chosen face, so the opposite face is twice the
+				// pane-centre depth away. This works for every face and rotated pane.
+				const float backDepth =
+					pane ? 2.0f * (pane->Frame.Position - seam.Centre).Dot(seam.Normal) : 0.0f;
+				const bool tangentAtPane =
+					!seam.Crosses && out[index].Rig == 0 && body && !store.Has<Simulated>(body) &&
+					scriptMoving && pane != nullptr && centreDepth < 0.0f &&
+					centreDepth >= backDepth - PANE_TOUCH &&
+					std::abs((current->Frame.Position - previous->Frame.Position).Dot(seam.Normal)) <=
+						PANE_TOUCH;
+				if (tangentAtPane) {
+					// A part following the mouth sideways can sit just behind its front face.
+					// Keep the authored front as its source side until it moves through.
+					SetCutPlanes(cut, seam, through, seam.Normal);
+					ghost.SeamNormal = cut.FarNormal;
+					ghost.SeamOffset = cut.FarOffset;
+				}
 				if (!staticLocal) {
 					out[index].SeamNormal = cut.NearNormal;
 					out[index].SeamOffset = cut.NearOffset;

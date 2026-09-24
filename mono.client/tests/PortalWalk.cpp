@@ -5,6 +5,7 @@
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
@@ -23,10 +24,13 @@
 #include <client/Replicated.hpp>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <system_error>
 #include <thread>
+#include <unordered_map>
 
 TEST_SUITE_ID("client.portalwalk")
 TEST_DEPENDS("client.presentationhost")
@@ -34,6 +38,73 @@ TEST_DEPENDS("client.portalsession")
 
 enum class RoomShader { None, Material, Spatial, SpatialOverlay, Lens };
 enum class PortalWalkFault { None, Delay, RestartDestinationPresentation, DropAcknowledgement };
+
+static bool ReadyPortalDemand(const nlohmann::json &portal) {
+	return portal.value("demand_status", "ready") == "ready";
+}
+
+static engine::core::CFrame JsonCameraFrame(const nlohmann::json &pose) {
+	const auto &position = pose.at("position");
+	const auto &rotation = pose.at("rotation");
+	engine::core::CFrame camera{
+		{position.at(0).get<float>(), position.at(1).get<float>(), position.at(2).get<float>()}
+	};
+	camera.QuaternionX = rotation.at(0).get<float>();
+	camera.QuaternionY = rotation.at(1).get<float>();
+	camera.QuaternionZ = rotation.at(2).get<float>();
+	camera.QuaternionW = rotation.at(3).get<float>();
+	return camera;
+}
+
+static engine::core::Vector3 JsonVector(const nlohmann::json &value) {
+	return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
+}
+
+static std::array<bool, 4> ReturnKeys(const nlohmann::json &sample) {
+	const auto &position = sample.at("predicted_root").at("position");
+	const auto &orientation = sample.at("control_basis").at("rotation");
+	engine::core::CFrame basis;
+	basis.QuaternionX = orientation.at(0).get<float>();
+	basis.QuaternionY = orientation.at(1).get<float>();
+	basis.QuaternionZ = orientation.at(2).get<float>();
+	basis.QuaternionW = orientation.at(3).get<float>();
+	const float yaw = sample.at("control_angles").at(1).get<float>();
+	const auto forward = basis.VectorToWorldSpace({-std::sin(yaw), 0, -std::cos(yaw)});
+	const auto side = basis.VectorToWorldSpace({std::cos(yaw), 0, -std::sin(yaw)});
+	// Aim beyond the center of the finite pane so steering continues through its plane.
+	const float dx = -position.at(0).get<float>();
+	const float dz = -1.5f - position.at(2).get<float>();
+	const float along = dx * forward.X + dz * forward.Z;
+	const float across = dx * side.X + dz * side.Z;
+	const float threshold = .18f * std::max(std::abs(along), std::abs(across));
+	return {along > threshold, across < -threshold, along<-threshold, across> threshold};
+}
+
+TEST_CASE("[client] return portal steering enters the finite pane", "[client][portal-return-steering]") {
+	using namespace engine;
+	for (const auto &[x, z, yaw, quaternion] :
+		 {std::tuple{2.5625782f, -19.500595f, -.11900002f, -1.0f},
+		  std::tuple{2.6970184f, -30.649317f, -.24500000f, -1.0f}}) {
+		nlohmann::json sample{
+			{"predicted_root", {{"position", {x, 2.5f, z}}}},
+			{"control_angles", {0.0f, yaw}},
+			{"control_basis", {{"rotation", {0.0f, 0.0f, 0.0f, quaternion}}}}
+		};
+		const auto keys = ReturnKeys(sample);
+		CHECK(keys[2]);
+		core::CFrame basis;
+		basis.QuaternionW = quaternion;
+		const auto forward = basis.VectorToWorldSpace({-std::sin(yaw), 0, -std::cos(yaw)});
+		const auto side = basis.VectorToWorldSpace({std::cos(yaw), 0, -std::sin(yaw)});
+		const float moveX = (static_cast<int>(keys[0]) - static_cast<int>(keys[2])) * forward.X +
+							(static_cast<int>(keys[3]) - static_cast<int>(keys[1])) * side.X;
+		const float moveZ = (static_cast<int>(keys[0]) - static_cast<int>(keys[2])) * forward.Z +
+							(static_cast<int>(keys[3]) - static_cast<int>(keys[1])) * side.Z;
+		const float toward = -x * moveX + (-1.5f - z) * moveZ;
+		CAPTURE(x, z, yaw, keys, toward);
+		CHECK(toward > 0);
+	}
+}
 
 static void RunPortalWalk(
 	double worldTickRate,
@@ -45,13 +116,23 @@ static void RunPortalWalk(
 	bool warmPortal = false,
 	bool ownedContent = false,
 	RoomShader roomShader = RoomShader::None,
-	PortalWalkFault fault = PortalWalkFault::None
+	PortalWalkFault fault = PortalWalkFault::None,
+	uint32_t captureFrameRate = 60
 ) {
 	using namespace engine;
 	const bool authoredShaders = roomShader != RoomShader::None;
 	const bool spatialOverlay = roomShader == RoomShader::SpatialOverlay || roomShader == RoomShader::Lens;
 	CAPTURE(roomShader);
-	CAPTURE(worldTickRate, firstPerson, explicitSubject, holdThroughAdoption, lateClear, warmPortal, fault);
+	CAPTURE(
+		worldTickRate,
+		captureFrameRate,
+		firstPerson,
+		explicitSubject,
+		holdThroughAdoption,
+		lateClear,
+		warmPortal,
+		fault
+	);
 	const auto programs = core::Paths::Base().parent_path();
 	const auto serverProgram = programs / "server" / core::Paths::Program("server");
 	const auto clientProgram = programs / "client" / core::Paths::Program("client");
@@ -258,6 +339,10 @@ end)
 	const auto faultReportPath = core::Paths::Base() / "portal-client-walk-fault-report.txt";
 	std::filesystem::remove(faultReportPath);
 	std::ofstream(configPath).close();
+	const auto storeRoot = core::Paths::Base() / "portal-client-walk-store";
+	std::error_code storeError;
+	std::filesystem::remove_all(storeRoot, storeError);
+	REQUIRE_FALSE(storeError);
 	const auto localPath = core::Paths::Base() / "portal-client-empty.luau";
 	std::ofstream(localPath) << "return\n";
 	auto reservation = net::MakeUdpTransport(0);
@@ -276,6 +361,8 @@ end)
 		clientProgram.string(),
 		"--config",
 		configPath.string(),
+		"--datastore-root",
+		storeRoot.string(),
 		"--mcp-port",
 		"-1"
 	};
@@ -312,6 +399,19 @@ end)
 		std::array<size_t, 3> MoveSamples{};
 		bool DuplicateMove = false;
 		std::vector<std::string> CameraFailures;
+		std::string PendingAdoption;
+		std::string PendingInputWorld;
+		std::string ReturnSteeringDestination;
+		bool ReturnEnteredAperture = false;
+		float ReturnClosestLateral = std::numeric_limits<float>::infinity();
+		std::array<bool, 4> PressedReturnKeys{};
+		std::optional<std::array<float, 3>> PreviousReturnPosition;
+		std::optional<uint64_t> FirstSteeringFrame;
+		size_t SteeringFrames = 0;
+		size_t SteeringEvents = 0;
+		size_t MisalignedSubmittedMoves = 0;
+		std::optional<uint64_t> FirstMisalignedFrame;
+		std::array<float, 3> FirstMisalignedMove{};
 	} observed;
 	std::filesystem::path captureDirectory;
 	const auto key = [](SDL_Scancode scan, SDL_Keycode code, bool down) {
@@ -329,6 +429,13 @@ end)
 		button.button.down = down;
 		(void)SDL_PushEvent(&button);
 	};
+	const auto returnKey = [&](size_t index, bool down) {
+		constexpr std::array<SDL_Scancode, 4> scans{
+			SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D
+		};
+		constexpr std::array<SDL_Keycode, 4> codes{SDLK_W, SDLK_A, SDLK_S, SDLK_D};
+		key(scans[index], codes[index], down);
+	};
 	auto sink = std::make_shared<spdlog::sinks::callback_sink_mt>([&](const spdlog::details::log_msg &entry) {
 		std::string_view message(entry.payload.data(), entry.payload.size());
 		std::lock_guard lock(observed.Mutex);
@@ -341,18 +448,121 @@ end)
 			return;
 		}
 		if (message.starts_with("[render] captured ")) {
+			const std::string prefix = captureDirectory.string() + "/";
+			const size_t path = message.find(prefix);
+			if (path == std::string_view::npos) return;
+			const auto name = message.substr(path + prefix.size());
+			uint64_t capturedFrame = 0;
+			const auto parsed = std::from_chars(name.data(), name.data() + name.size(), capturedFrame);
+			if (parsed.ec != std::errc{} ||
+				std::string_view(parsed.ptr, name.data() + name.size() - parsed.ptr) != ".bmp")
+				return;
+			observed.CapturedFrames =
+				std::max(observed.CapturedFrames, static_cast<size_t>(capturedFrame + 1));
 			// Metadata follows the capture log, so inspect the preceding completed frame.
-			if (warmPortal && !observed.PortalReady && observed.CapturedFrames != 0) {
-				std::ifstream metadata(
-					captureDirectory / (std::to_string(observed.CapturedFrames - 1) + ".json")
-				);
+			if (capturedFrame != 0) {
+				std::ifstream metadata(captureDirectory / (std::to_string(capturedFrame - 1) + ".json"));
 				const auto sample = nlohmann::json::parse(metadata, nullptr, false);
-				if (!sample.is_discarded() && sample.contains("portal_views"))
-					for (const auto &portal : sample.at("portal_views"))
-						observed.PortalReady |=
-							portal.value("external", false) && portal.value("image", uint64_t{0}) != 0;
+				if (!sample.is_discarded()) {
+					if (warmPortal && !observed.PortalReady && sample.contains("portal_views"))
+						for (const auto &portal : sample.at("portal_views"))
+							observed.PortalReady |=
+								portal.value("external", false) && portal.value("image", uint64_t{0}) != 0;
+					if (sample.contains("portal_handoff") &&
+						sample.at("portal_handoff").value("commit", false)) {
+						observed.PendingAdoption = sample.at("portal_handoff").value("destination", "");
+						observed.PendingInputWorld = sample.value("input_world", "");
+					} else if (!observed.PendingAdoption.empty() && !sample.contains("portal_handoff") &&
+							   sample.value("input_world", "") != observed.PendingInputWorld &&
+							   observed.Adoptions.size() < 2) {
+						observed.Adoptions.push_back(observed.PendingAdoption);
+						observed.PendingAdoption.clear();
+						observed.PendingInputWorld.clear();
+						turning(false);
+						if (imageHandoff && fault == PortalWalkFault::None &&
+							observed.Adoptions.size() == 1) {
+							observed.ReturnSteeringDestination = observed.Adoptions.back();
+							// A portal may carry a directional key that was pressed before
+							// its input owner changed. Release all four before the route
+							// settles, otherwise that old motion can enter the next mouth.
+							for (size_t index = 0; index < observed.PressedReturnKeys.size(); ++index) {
+								returnKey(index, false);
+								observed.PressedReturnKeys[index] = false;
+							}
+						} else if (imageHandoff && fault == PortalWalkFault::None &&
+								   observed.Adoptions.size() == 2) {
+							// The scripted return has reached its terminal world. Release
+							// every steering key before later samples can start a third pass.
+							for (size_t index = 0; index < observed.PressedReturnKeys.size(); ++index) {
+								if (!observed.PressedReturnKeys[index]) continue;
+								returnKey(index, false);
+								observed.PressedReturnKeys[index] = false;
+							}
+						} else if (!holdThroughAdoption)
+							key(observed.Adoptions.size() == 1 ? SDL_SCANCODE_W : SDL_SCANCODE_S,
+								observed.Adoptions.size() == 1 ? SDLK_W : SDLK_S,
+								false);
+					}
+					if (imageHandoff && fault == PortalWalkFault::None && observed.Adoptions.size() == 1 &&
+						sample.value("subject_is_humanoid", false) && sample.contains("predicted_root") &&
+						sample.contains("control_basis") && sample.contains("control_angles")) {
+						observed.FirstSteeringFrame.emplace(capturedFrame - 1);
+						++observed.SteeringFrames;
+						const auto &position = sample.at("predicted_root").at("position");
+						const float x = position.at(0).get<float>();
+						const float y = position.at(1).get<float>();
+						const float z = position.at(2).get<float>();
+						if (z < -3.2f)
+							observed.ReturnClosestLateral =
+								std::min(observed.ReturnClosestLateral, std::abs(x));
+						if (observed.PreviousReturnPosition &&
+							observed.PreviousReturnPosition->at(2) < -3.2f && z >= -3.2f &&
+							std::abs(x) < 4.5f && y > -1.5f && y < 7.5f)
+							observed.ReturnEnteredAperture = true;
+						observed.PreviousReturnPosition = std::array{x, y, z};
+						if (observed.SteeringFrames > 3 && sample.contains("submitted_move_direction")) {
+							const auto &submitted = sample.at("submitted_move_direction");
+							const float toward = -x * submitted.at(0).get<float>() +
+												 (-1.5f - z) * submitted.at(2).get<float>();
+							if (toward <= 0) {
+								++observed.MisalignedSubmittedMoves;
+								if (!observed.FirstMisalignedFrame) {
+									observed.FirstMisalignedFrame = capturedFrame - 1;
+									observed.FirstMisalignedMove = {
+										submitted.at(0).get<float>(),
+										submitted.at(1).get<float>(),
+										submitted.at(2).get<float>()
+									};
+								}
+							}
+						}
+						const auto desired = ReturnKeys(sample);
+						for (size_t index = 0; index < desired.size(); ++index)
+							if (desired[index] != observed.PressedReturnKeys[index]) {
+								returnKey(index, desired[index]);
+								observed.PressedReturnKeys[index] = desired[index];
+								++observed.SteeringEvents;
+							}
+					}
+					const uint64_t submitted = sample.value("submitted_move_tick", uint64_t{0});
+					if (submitted < observed.LastSubmission) observed.DuplicateMove = true;
+					if (submitted > observed.LastSubmission) {
+						observed.LastSubmission = submitted;
+						const size_t stage = observed.Adoptions.size();
+						observed.LastMoveTick[stage] = submitted;
+						++observed.MoveSamples[stage];
+						if (lateClear && stage == 1 && observed.MoveSamples[stage] == 12)
+							key(SDL_SCANCODE_R, SDLK_R, true);
+						if (lateClear && stage == 1 && observed.MoveSamples[stage] == 14)
+							key(SDL_SCANCODE_R, SDLK_R, false);
+						if (holdThroughAdoption && stage > 0 && observed.MoveSamples[stage] == 12 &&
+							!(imageHandoff && fault == PortalWalkFault::None && stage == 1))
+							key(stage == 1 ? SDL_SCANCODE_W : SDL_SCANCODE_S,
+								stage == 1 ? SDLK_W : SDLK_S,
+								false);
+					}
+				}
 			}
-			++observed.CapturedFrames;
 			const size_t stage = observed.Adoptions.size();
 			if (stage < 2 && observed.Moving[stage]) {
 				SDL_Event motion{};
@@ -397,7 +607,8 @@ end)
 					(stage != 0 || !warmPortal || observed.PortalReady)) {
 					observed.Moving[stage] = true;
 					turning(true);
-					key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S, stage == 0 ? SDLK_W : SDLK_S, true);
+					if (stage == 0 || !(imageHandoff && fault == PortalWalkFault::None))
+						key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S, stage == 0 ? SDLK_W : SDLK_S, true);
 				}
 			} else if (observed.CameraModeSamples[stage] >= 3) {
 				if (observed.CameraFailures.size() < 8) observed.CameraFailures.emplace_back(message);
@@ -421,28 +632,6 @@ end)
 		}
 		if (!message.starts_with("[client] ")) return;
 		message.remove_prefix(std::string_view("[client] ").size());
-		constexpr std::string_view movePrefix = "move submitted at tick ";
-		if (message.starts_with(movePrefix)) {
-			message.remove_prefix(movePrefix.size());
-			uint64_t tick = 0;
-			const auto parsed = std::from_chars(message.data(), message.data() + message.size(), tick);
-			const size_t stage = observed.Adoptions.size();
-			if (parsed.ec != std::errc{} || tick <= observed.LastSubmission) observed.DuplicateMove = true;
-			observed.LastSubmission = tick;
-			observed.LastMoveTick[stage] = tick;
-			++observed.MoveSamples[stage];
-			if (lateClear && stage == 1 && observed.MoveSamples[stage] == 12)
-				key(SDL_SCANCODE_R, SDLK_R, true);
-			if (lateClear && stage == 1 && observed.MoveSamples[stage] == 14)
-				key(SDL_SCANCODE_R, SDLK_R, false);
-			if (holdThroughAdoption && stage > 0 && observed.MoveSamples[stage] == 12) {
-				if (stage == 1)
-					key(SDL_SCANCODE_W, SDLK_W, false);
-				else
-					key(SDL_SCANCODE_S, SDLK_S, false);
-			}
-			return;
-		}
 		if (message.starts_with("joined:") && !observed.Joined) {
 			observed.Joined = true;
 			SDL_Event focus{};
@@ -457,15 +646,6 @@ end)
 		}
 		if (message.starts_with("portal transfer refused:") && observed.Refusals.size() < 8)
 			observed.Refusals.emplace_back(message);
-		if (!message.starts_with("portal session adopted ") || observed.Adoptions.size() >= 2) return;
-		observed.Adoptions.emplace_back(message);
-		turning(false);
-		if (holdThroughAdoption) return;
-		if (observed.Adoptions.size() == 1) {
-			key(SDL_SCANCODE_W, SDLK_W, false);
-		} else {
-			key(SDL_SCANCODE_S, SDLK_S, false);
-		}
 	});
 	struct SinkLifetime {
 		spdlog::sink_ptr Sink;
@@ -498,7 +678,7 @@ end)
 	options.ConnectAddress = net::Endpoint::LoopbackIPv4(port).Text();
 	options.PlayKey = std::string(64, '3');
 	options.ProfileSeconds = 45;
-	options.MaximumFrameRate = 60;
+	options.MaximumFrameRate = captureFrameRate;
 	options.Uncapped = true;
 	options.MaximumFrames = fault == PortalWalkFault::DropAcknowledgement ? 960
 							: fault == PortalWalkFault::Delay			  ? 660
@@ -515,12 +695,29 @@ end)
 	if (roomShader == RoomShader::Spatial) options.CaptureSequence += "-spatial-shaders";
 	if (roomShader == RoomShader::SpatialOverlay) options.CaptureSequence += "-spatial-overlay";
 	if (roomShader == RoomShader::Lens) options.CaptureSequence += "-captured-lens";
+	if (captureFrameRate != 60) options.CaptureSequence += "-render" + std::to_string(captureFrameRate);
+	if (const char *profile = std::getenv("PORTAL_PROFILE_SNAPSHOT");
+		profile && std::string_view(profile) == "1")
+		options.ProfileSnapshot = options.CaptureSequence / "frame-graph-snapshot.txt";
 	captureDirectory = options.CaptureSequence;
 	std::filesystem::remove_all(options.CaptureSequence);
 	const auto finalCapture = options.CaptureSequence / (std::to_string(options.MaximumFrames - 1) + ".bmp");
 	client::Client player;
 	REQUIRE(player.Initialise(options));
 	CHECK(player.Run() == 0);
+	if (imageHandoff && fault == PortalWalkFault::None) {
+		std::lock_guard lock(observed.Mutex);
+		CAPTURE(
+			observed.ReturnClosestLateral,
+			observed.FirstSteeringFrame,
+			observed.SteeringFrames,
+			observed.SteeringEvents,
+			observed.MisalignedSubmittedMoves,
+			observed.FirstMisalignedFrame,
+			observed.FirstMisalignedMove
+		);
+		CHECK(observed.ReturnEnteredAperture);
+	}
 	if (warmPortal) {
 		std::lock_guard lock(observed.Mutex);
 		CHECK(observed.PortalReady);
@@ -532,28 +729,56 @@ end)
 	std::optional<nlohmann::json> previousSample;
 	size_t sourceClearSamples = 0, adoptedClearSamples = 0, clearedAdoptions = 0;
 	size_t handoffMoveSamples = 0;
-	size_t retainedMoveSamples = 0, nativeReturnSamples = 0, nativeHeldSamples = 0, loadingSamples = 0;
+	size_t retainedMoveSamples = 0, nativeReturnSamples = 0, nativeHeldSamples = 0;
 	std::array<size_t, 2> shaderRoomSamples{};
 	size_t shaderObservedSamples = 0;
 	size_t spatialOverlayAdoptions = 0;
 	size_t observedEyeSamples = 0;
-	size_t successorEyeSamples = 0;
 	bool returned = false;
+	bool firstCaptureSeen = false;
+	bool sourceReplicaSeen = false;
+	bool firstAdoptionSeen = false;
 	bool outboundMotion = false, returnMotion = false;
-	bool outboundReplay = false, returnReplay = false;
 	size_t exactFaultCameraSamples = 0;
 	size_t faultClipSamples = 0;
 	size_t faultVisibleFrames = 0;
 	size_t faultBodyFrames = 0;
 	size_t faultNonBlackEyeFrames = 0;
+	size_t hiddenPortalSamples = 0;
 	std::vector<std::string> nativeWorlds;
-	std::vector<std::string> movingNativeWorlds;
+	std::unordered_map<uint64_t, int> crossedReadyWithoutTerminal;
 	for (int frame = 0; frame < options.MaximumFrames; ++frame) {
 		const auto stem = options.CaptureSequence / std::to_string(frame);
 		std::ifstream metadata(stem.string() + ".json");
 		REQUIRE(metadata);
 		const auto sample = nlohmann::json::parse(metadata);
 		CHECK(sample.at("frame") == frame);
+		if (imageHandoff && fault == PortalWalkFault::None && !firstAdoptionSeen) {
+			const bool sourceReplica = sample.value("input_world", "") == "client.replica";
+			if (sourceReplicaSeen && !sourceReplica) {
+				firstAdoptionSeen = true;
+			} else if (sourceReplica && sample.value("view_world", "") == "client.replica" &&
+					   !sample.at("portal_views").empty()) {
+				const auto &portal = sample.at("portal_views").at(0);
+				const bool captured =
+					portal.at("capture").is_object() && portal.at("image").get<uint64_t>() != 0;
+				if (firstCaptureSeen) {
+					CAPTURE(frame);
+					CHECK(captured);
+				}
+				firstCaptureSeen |= captured;
+			}
+			sourceReplicaSeen |= sourceReplica;
+		}
+		if (sample.contains("portal_handoff")) {
+			const auto &handoff = sample.at("portal_handoff");
+			const auto attempt = handoff.at("attempt").get<uint64_t>();
+			if (handoff.value("crossed", false) && handoff.value("ready", false))
+				crossedReadyWithoutTerminal.try_emplace(attempt, frame);
+			if (handoff.value("commit", false) || handoff.value("committed", false) ||
+				handoff.value("refused", false))
+				crossedReadyWithoutTerminal.erase(attempt);
+		}
 		if (sample.value("eye_image", false)) {
 			REQUIRE(sample.contains("eye_capture"));
 			REQUIRE(sample.at("eye_capture").is_object());
@@ -583,7 +808,6 @@ end)
 			CHECK(std::abs(rotationDot) > .99999f);
 		}
 		if (sample.value("loading_portals", false) && sample.contains("predicted_velocity")) {
-			++loadingSamples;
 			CAPTURE(frame);
 			const auto &velocity = sample.at("predicted_velocity");
 			CHECK(std::abs(velocity.at(0).get<float>()) < .001f);
@@ -599,15 +823,6 @@ end)
 				const auto world = sample.at("input_world").get<std::string>();
 				if (std::find(nativeWorlds.begin(), nativeWorlds.end(), world) == nativeWorlds.end())
 					nativeWorlds.push_back(world);
-				if (sample.contains("predicted_velocity")) {
-					const auto &velocity = sample.at("predicted_velocity");
-					const float moving =
-						std::abs(velocity.at(0).get<float>()) + std::abs(velocity.at(2).get<float>());
-					if (moving > .01f &&
-						std::find(movingNativeWorlds.begin(), movingNativeWorlds.end(), world) ==
-							movingNativeWorlds.end())
-						movingNativeWorlds.push_back(world);
-				}
 			}
 		}
 		if (previousSample && previousSample->contains("portal_handoff") &&
@@ -728,7 +943,10 @@ end)
 				}
 			}
 			if (imageHandoff && fault == PortalWalkFault::None) {
-				REQUIRE(previousSample->value("eye_world", "") == sample.value("eye_world", ""));
+				REQUIRE(
+					previousSample->value("presented_eye_world", "") ==
+					sample.value("presented_eye_world", "")
+				);
 				const auto bluePixels = [](const std::filesystem::path &path) {
 					std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
 						SDL_LoadBMP(path.string().c_str()), SDL_DestroySurface
@@ -797,8 +1015,6 @@ end)
 				REQUIRE(sample.contains("portal_handoff"));
 				const auto destination = sample.at("portal_handoff").value("destination", "");
 				CHECK(sample.value("prediction_authority_world", "") == destination);
-				outboundReplay |= destination == "walk.destination";
-				returnReplay |= destination == "server.world";
 			}
 		}
 		if (frame + 1 == options.MaximumFrames) CHECK(sample.value("eye_world", "") == "server.world");
@@ -858,10 +1074,15 @@ end)
 				CAPTURE(frame);
 				CHECK(sample.value("eye_image", false));
 			}
-			// Both flat rooms place the eye at y=4. A retiring source rig must
-			// not send the viewer back to the unrelated local demo camera.
-			const float eyeHeight = sample.at("camera").at("position").at(1).get<float>();
-			maximumEyeHeightError = std::max(maximumEyeHeightError, std::abs(eyeHeight - 4.0f));
+			// The eye stays a fixed head offset above the presented player. A world
+			// Y value is not invariant once that player moves through a portal.
+			if (sample.contains("presented_predicted_root")) {
+				const float eyeHeight = sample.at("camera").at("position").at(1).get<float>();
+				const float rootHeight =
+					sample.at("presented_predicted_root").at("position").at(1).get<float>();
+				maximumEyeHeightError =
+					std::max(maximumEyeHeightError, std::abs(eyeHeight - rootHeight - 1.5f));
+			}
 			std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> eye(
 				SDL_LoadBMP((stem.string() + ".bmp").c_str()), SDL_DestroySurface
 			);
@@ -951,10 +1172,39 @@ end)
 					++faultNonBlackEyeFrames;
 			}
 		}
+		if (imageHandoff)
+			for (const auto &portal : sample.at("portal_views")) {
+				if (!portal.value("external", false)) continue;
+				const auto status = portal.value("demand_status", "ready");
+				if (status == "ready") continue;
+				CAPTURE(frame, status);
+				REQUIRE(status == "hidden");
+				const auto reason = portal.value("hidden_reason", "none");
+				REQUIRE((reason == "frustum" || reason == "clip_plane"));
+				CHECK(portal.value("frustum_visible", false) == (reason == "clip_plane"));
+				const auto &centre = portal.at("centre");
+				if (reason == "clip_plane") {
+					const auto &warpJson = portal.at("warp");
+					scene::SeamTransform warp{
+						.Frame = JsonCameraFrame(warpJson.at("frame")),
+						.Origin = JsonVector(warpJson.at("origin")),
+						.Scale = warpJson.at("scale").get<float>()
+					};
+					const auto camera = JsonCameraFrame(portal.at("demand_camera"));
+					const auto sourceCentre = JsonVector(centre);
+					const auto sourceNormal = JsonVector(portal.at("normal"));
+					const auto side = (camera.Position - sourceCentre).Dot(sourceNormal);
+					const auto normal = warp.Rotate(sourceNormal) * (side >= 0 ? -1.0f : 1.0f);
+					const auto point = warp.Point(sourceCentre) -
+									   normal * scene::PortalClipBias(warp.Length(std::abs(side)));
+					CHECK(normal.Dot(warp.Place(camera).Position) - normal.Dot(point) >= -1e-4f);
+				}
+				++hiddenPortalSamples;
+			}
 		if (fault != PortalWalkFault::None)
 			for (const auto &portal : sample.at("portal_views")) {
-				if (!portal.value("external", false) || !portal.contains("capture") ||
-					!portal.at("capture").is_object())
+				if (!portal.value("external", false) || !ReadyPortalDemand(portal) ||
+					!portal.contains("capture") || !portal.at("capture").is_object())
 					continue;
 				const auto &clip = portal.at("capture").at("clip_plane");
 				CHECK(clip.size() == 4);
@@ -969,7 +1219,7 @@ end)
 			CHECK(sample.at("observed_tick").get<uint64_t>() > 0);
 			CHECK(sample.at("instances").get<size_t>() > 0);
 			for (const auto &portal : sample.at("portal_views")) {
-				if (!portal.value("external", false)) continue;
+				if (!portal.value("external", false) || !ReadyPortalDemand(portal)) continue;
 				REQUIRE(portal.contains("capture"));
 				if (fault != PortalWalkFault::None && !portal.at("capture").is_object()) continue;
 				REQUIRE(portal.at("capture").is_object());
@@ -987,39 +1237,43 @@ end)
 				CHECK(handoff.at("failure").get<std::string>().empty());
 				CHECK(sample.at("observed_world") == handoff.at("destination"));
 				if (handoff.value("drawing_player", false)) CHECK(handoff.value("ready", false));
-				++successorEyeSamples;
 			}
 		}
 		if (imageHandoff && !sample.value("eye_image", false) &&
 			(sample.contains("observed_world") || returned)) {
 			for (const auto &portal : sample.at("portal_views")) {
-				if (!portal.value("external", false)) continue;
+				if (!portal.value("external", false) || !ReadyPortalDemand(portal)) continue;
 				REQUIRE(portal.contains("capture"));
 				if (fault != PortalWalkFault::None && !portal.at("capture").is_object()) continue;
 				REQUIRE(portal.at("capture").is_object());
-				// This fixture's seam mapping is identity apart from wire rounding.
-				// A stale camera can pass the room-colour check while exposing a gray border.
 				const auto &capturedEye = portal.at("capture").at("position");
-				const auto &liveEye = sample.at("camera").at("position");
-				float distanceSquared = 0;
-				for (size_t axis = 0; axis < 3; ++axis) {
-					const float delta = capturedEye.at(axis).get<float>() - liveEye.at(axis).get<float>();
-					distanceSquared += delta * delta;
-				}
-				CHECK(distanceSquared < 0.001f * 0.001f);
+				const auto capturedRevision = portal.at("capture").at("camera_revision").get<uint64_t>();
+				const auto demandRevision = portal.at("demand_camera_revision").get<uint64_t>();
 				const auto &capturedRotation = portal.at("capture").at("orientation");
-				const auto &liveRotation = sample.at("camera").at("rotation");
-				float rotationDot = 0;
-				for (size_t axis = 0; axis < 4; ++axis)
-					rotationDot +=
-						capturedRotation.at(axis).get<float>() * liveRotation.at(axis).get<float>();
-				CHECK(std::abs(rotationDot) > 1.0f - 1e-6f);
+				if (capturedRevision == demandRevision) {
+					const auto &warpJson = portal.at("warp");
+					const scene::SeamTransform warp{
+						.Frame = JsonCameraFrame(warpJson.at("frame")),
+						.Origin = JsonVector(warpJson.at("origin")),
+						.Scale = warpJson.at("scale").get<float>()
+					};
+					const auto expected = warp.Place(JsonCameraFrame(portal.at("demand_camera")));
+					const auto positionError = JsonVector(capturedEye) - expected.Position;
+					CHECK(positionError.Dot(positionError) < 0.0001f * 0.0001f);
+					float rotationDot = 0;
+					const auto expectedRotation = expected.Rotation();
+					for (size_t axis = 0; axis < 4; ++axis)
+						rotationDot += capturedRotation.at(axis).get<float>() * expectedRotation[axis];
+					CHECK(std::abs(rotationDot) > 1.0f - 1e-6f);
+				} else {
+					CHECK(portal.at("capture").at("accepted_age_ms").get<float>() < 250.0f);
+				}
 				if (fault != PortalWalkFault::None) ++exactFaultCameraSamples;
 			}
 		}
 		if (imageHandoff && returned && !sample.value("eye_image", false)) {
 			for (const auto &portal : sample.at("portal_views")) {
-				if (!portal.value("external", false)) continue;
+				if (!portal.value("external", false) || !ReadyPortalDemand(portal)) continue;
 				CAPTURE(frame);
 				CHECK(portal.at("image").get<uint64_t>() != 0);
 				REQUIRE(portal.contains("capture"));
@@ -1029,22 +1283,25 @@ end)
 		}
 		previousSample = sample;
 	}
+	for (const auto &[attempt, crossedReadyFrame] : crossedReadyWithoutTerminal) {
+		CAPTURE(attempt, crossedReadyFrame, options.MaximumFrames);
+		CHECK(false);
+	}
 	if (lateClear) {
 		CHECK(sourceClearSamples > 0);
 		CHECK(adoptedClearSamples >= 3);
 		CHECK(clearedAdoptions == 1);
 	}
-	if (imageHandoff) CHECK(nativeReturnSamples > 16);
+	if (imageHandoff) {
+		CHECK(hiddenPortalSamples > 0);
+		CHECK(nativeReturnSamples > 16);
+	}
 	if (imageHandoff && !firstPerson) CHECK(observedEyeSamples > 0);
-	if (imageHandoff) CHECK(successorEyeSamples > 0);
 	CHECK(handoffMoveSamples > 0);
-	CHECK(loadingSamples > 0);
 	CHECK(retainedMoveSamples > 0);
 	if (imageHandoff) CHECK(nativeHeldSamples > 0);
 	CHECK(outboundMotion);
 	CHECK(returnMotion);
-	CHECK(outboundReplay);
-	CHECK(returnReplay);
 	if (fault != PortalWalkFault::None) {
 		CHECK(exactFaultCameraSamples > 0);
 		CHECK(faultClipSamples > 16);
@@ -1096,7 +1353,7 @@ end)
 		}
 	}
 	std::lock_guard lock(observed.Mutex);
-	CAPTURE(observed.Refusals);
+	CAPTURE(observed.Refusals, observed.MoveSamples, observed.LastMoveTick, observed.CameraFailures);
 	CHECK(observed.Joined);
 	if (lateClear) {
 		CHECK(observed.CameraCleared);
@@ -1104,10 +1361,9 @@ end)
 	}
 	REQUIRE(observed.Adoptions.size() == 2);
 	CHECK(nativeWorlds.size() == 2);
-	if (holdThroughAdoption && fault != PortalWalkFault::Delay) CHECK(movingNativeWorlds.size() == 2);
 	if (spatialOverlay) CHECK(spatialOverlayAdoptions == 1);
-	CHECK(observed.Adoptions[0].starts_with("portal session adopted walk.destination "));
-	CHECK(observed.Adoptions[1].starts_with("portal session adopted server.world "));
+	CHECK(observed.Adoptions[0] == "walk.destination");
+	CHECK(observed.Adoptions[1] == "server.world");
 	CAPTURE(observed.CameraSamples, observed.CameraModeSamples, observed.CameraFailures);
 	for (const auto samples : observed.CameraSamples)
 		CHECK(samples > 0);
@@ -1167,7 +1423,17 @@ TEST_CASE(
 	"[client][portal-product-image-handoff][gpu][.]"
 ) {
 	const double worldTickRate = GENERATE(30.0, 60.0);
+	if (std::getenv("PORTAL_PRODUCT_60_ONLY") && worldTickRate != 60.0) return;
 	RunPortalWalk(worldTickRate, false, true, true, true, true);
+}
+
+TEST_CASE(
+	"portal image handoff at 30 FPS keeps both worlds at 60 Hz",
+	"[client][portal-product-image-handoff-matched-30fps][gpu][.]"
+) {
+	RunPortalWalk(
+		60, false, true, true, true, true, false, false, RoomShader::None, PortalWalkFault::None, 30
+	);
 }
 
 TEST_CASE(

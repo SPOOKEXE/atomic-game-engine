@@ -131,12 +131,11 @@ def capture_route_and_view(image: Path) -> tuple[str, str]:
 
 
 def straddler_mask(image: Image.Image) -> Image.Image:
-	# The acceptance target is the body that crosses the seam. Scene floors and
-	# portal panes are opaque too, so a general luminance mask would report a
-	# complete frame after the yellow body vanished behind either one.
+	# Use yellow hue and low blue chroma so lighting does not hide the same body
+	# in one capture. The red-to-green ratio excludes the orange floor.
 	red, green, blue = image.convert("RGB").split()
 	return ImageMath.eval(
-		"convert(((r > 70) & (g > 60) & (b < 150) & (r * 2 > b * 3) & (g * 2 > b * 3)) * 255, 'L')",
+		"convert(((r * 100 > g * 55) & (r * 100 < g * 155) & (b * 2 < r) & (b * 2 < g)) * 255, 'L')",
 		r=red,
 		g=green,
 		b=blue,
@@ -270,8 +269,22 @@ def measurement(image_path: Path) -> dict[str, Any]:
 			"simulation_alpha": frame.get("alpha") if frame else None,
 		},
 		"topology_revisions": seam_revisions(frame),
+		"pipeline": frame.get("pipeline") if frame else None,
+		"render_metrics": {
+			"previous_render_uploaded_bytes": frame.get("previous_render_uploaded_bytes"),
+			"portal_import": frame.get("portal_import"),
+			"portal_inbox": frame.get("portal_inbox"),
+			"portal_capture_ages_ms": [
+				capture["accepted_age_ms"]
+				for portal in frame.get("portal_views", [])
+				if isinstance(portal, dict)
+				for capture in [portal.get("capture")]
+				if isinstance(capture, dict) and isinstance(capture.get("accepted_age_ms"), (int, float))
+			],
+		} if frame else None,
 		"metadata_available": frame is not None,
 	}
+	result["straddler_body_pixels"] = nonzero_pixels(straddler_mask(image))
 	if view == "side":
 		result["side"] = side_measurement(image)
 	elif view == "far":
@@ -397,6 +410,38 @@ def full_reference_passes(recorded: dict[str, Any], body_mismatch_maximum: int) 
 	)
 
 
+def measured_render_usage(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+	sequences: dict[tuple[str, str], list[dict[str, Any]]] = {}
+	for row in rows:
+		if isinstance(row.get("render_metrics"), dict):
+			sequences.setdefault((row["route"], row["view"]), []).append(row["render_metrics"])
+	result = []
+	for (route, view), samples in sorted(sequences.items()):
+		uploads = [
+			sample["previous_render_uploaded_bytes"] for sample in samples
+			if isinstance(sample.get("previous_render_uploaded_bytes"), int)
+		]
+		imports = [sample["portal_import"] for sample in samples if isinstance(sample.get("portal_import"), dict)]
+		inboxes = [sample["portal_inbox"] for sample in samples if isinstance(sample.get("portal_inbox"), dict)]
+		ages = [age for sample in samples for age in sample["portal_capture_ages_ms"]]
+		result.append({
+			"route": route,
+			"view": view,
+			"previous_render_uploaded_bytes_mean": sum(uploads) / len(uploads) if uploads else None,
+			"previous_render_uploaded_bytes_max": max(uploads) if uploads else None,
+			"portal_import_uploaded_bytes_start": imports[0].get("uploaded_bytes") if imports else None,
+			"portal_import_uploaded_bytes_end": imports[-1].get("uploaded_bytes") if imports else None,
+			"portal_inbox_pending_count_max": max((entry.get("pending_count", 0) for entry in inboxes), default=None),
+			"portal_inbox_held_count_max": max((entry.get("held_count", 0) for entry in inboxes), default=None),
+			"portal_inbox_decoded_bytes_start": inboxes[0].get("decoded_bytes") if inboxes else None,
+			"portal_inbox_decoded_bytes_end": inboxes[-1].get("decoded_bytes") if inboxes else None,
+			"portal_inbox_stale_rejections_end": inboxes[-1].get("stale_rejections") if inboxes else None,
+			"portal_inbox_pending_capacity_max": max((entry.get("pending_capacity", 0) for entry in inboxes), default=None),
+			"portal_capture_age_ms_max": max(ages) if ages else None,
+		})
+	return result
+
+
 def report(
 	images: list[Path],
 	fixture: str,
@@ -411,10 +456,29 @@ def report(
 ) -> dict[str, Any]:
 	rows = [measurement(image) for image in images]
 	frames = [row["presentation_time"]["frame"] for row in rows]
+	valid_pipelines = [
+		row["pipeline"] for row in rows
+		if isinstance(row["pipeline"], dict)
+		and isinstance(row["pipeline"].get("name"), str)
+		and isinstance(row["pipeline"].get("revision"), int)
+	]
+	identities = {
+		(pipeline["name"], pipeline["revision"])
+		for pipeline in valid_pipelines
+	}
+	pipeline_identity_complete = len(rows) > 0 and len(valid_pipelines) == len(rows) and len(identities) == 1
+	if pipeline_identity_complete:
+		observed_revision = str(next(iter(identities))[1])
+		if pipeline_revision not in ("unknown", observed_revision):
+			raise ValueError("declared pipeline revision differs from capture sidecars")
+		pipeline_revision = observed_revision
 	return {
 		"fixture": fixture,
 		"backend": backend,
 		"pipeline_revision": pipeline_revision,
+		"pipeline_identities": [
+			{"name": name, "revision": revision} for name, revision in sorted(identities)
+		],
 		"target_fps": target_fps,
 		"tolerance": {
 			"side_ratio_maximum": side_ratio_maximum,
@@ -426,9 +490,11 @@ def report(
 		"full_reference": reference_pairs(rows, position_tolerance_pixels, alpha_tolerance, aperture_only),
 		"moving_front_seam": moving_front_seam(rows, front_motion_minimum_pixels),
 		"capture_rates": measured_capture_rates(rows),
+		"render_usage": measured_render_usage(rows),
 		"sequence": {
 			"capture_count": len(rows),
 			"metadata_complete": all(row["metadata_available"] for row in rows),
+			"pipeline_identity_complete": pipeline_identity_complete,
 			"first_frame": min((frame for frame in frames if isinstance(frame, int)), default=None),
 			"last_frame": max((frame for frame in frames if isinstance(frame, int)), default=None),
 		},
@@ -465,6 +531,7 @@ def main() -> None:
 	parser.add_argument("--body-mismatch-maximum", type=int, default=0)
 	parser.add_argument("--require-moving-front", action="store_true")
 	parser.add_argument("--require-full-reference", action="store_true")
+	parser.add_argument("--require-pipeline-identity", action="store_true")
 	parser.add_argument("--aperture-only", action="store_true", help="compare the body within the projected portal aperture")
 	parser.add_argument("--output", type=Path, help="write the complete machine-readable report here")
 	args = parser.parse_args()
@@ -514,6 +581,8 @@ def main() -> None:
 	if args.require_full_reference:
 		if not full_reference_passes(recorded, args.body_mismatch_maximum):
 			raise SystemExit("portal body silhouette or fixed-step phase differed from the matched-room reference")
+	if args.require_pipeline_identity and not recorded["sequence"]["pipeline_identity_complete"]:
+		raise SystemExit("capture pipeline identity was absent or changed within the sequence")
 	if args.require_moving_front and not recorded["moving_front_seam"]["observed"]:
 		raise SystemExit("front seam did not move far enough in the portal capture sequence")
 

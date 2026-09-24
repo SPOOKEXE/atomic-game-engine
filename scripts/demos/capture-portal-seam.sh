@@ -10,7 +10,7 @@
 # report keeps the side and far image measurements, then records the presented
 # frame, camera route revisions, fixture, resolution, backend, pipeline revision
 # and tolerance in one reviewable report. The backend comes from the renderer
-# startup log. Set PIPELINE_REVISION when the runtime exposes that value.
+# startup log; each capture sidecar records its selected pipeline identity.
 
 set -euo pipefail
 
@@ -30,6 +30,8 @@ backend=${BACKEND:-unknown}
 detected_backend=
 pipeline_revision=${PIPELINE_REVISION:-unknown}
 side_ratio_maximum=${SIDE_RATIO_MAXIMUM:-0.75}
+skip_build=${SKIP_BUILD:-0}
+profile_snapshot=${PROFILE_SNAPSHOT:-0}
 
 if ! [[ "$frames" =~ ^[1-9][0-9]*$ ]]; then
 	echo "FRAMES must be a positive integer" >&2
@@ -41,9 +43,20 @@ for setting in width height fps capture_timeout; do
 		exit 1
 	fi
 done
+for setting in skip_build profile_snapshot; do
+	if [ "${!setting}" != 0 ] && [ "${!setting}" != 1 ]; then
+		echo "${setting^^} must be 0 or 1" >&2
+		exit 1
+	fi
+done
 
-cmake -S "$root" --preset "$preset" > /dev/null
-cmake --build "$build" --target client
+if [ "$skip_build" = 0 ]; then
+	cmake -S "$root" --preset "$preset" > /dev/null
+	cmake --build "$build" --target client
+elif [ ! -x "$build/client/client" ]; then
+	echo "no prebuilt client at $build/client/client" >&2
+	exit 1
+fi
 
 scene="$build/assets/examples/scripts/PortalSeam.luau"
 reference_scene="$build/assets/examples/scripts/PortalSeamMatchedRoom.luau"
@@ -65,10 +78,15 @@ capture_sequence() {
 	mkdir -p "$sequence"
 	rm -f "$sequence"/*.bmp "$sequence"/*.json
 	echo "capturing $label ($frames frames)"
+	local profile_arguments=()
+	if [ "$profile_snapshot" = 1 ]; then
+		profile_arguments=(--profile-snapshot "$sequence/frame-graph-snapshot.txt")
+	fi
 	timeout "$capture_timeout" "$build/client/client" \
 		--headless --uncapped --max-fps "$fps" --width "$width" --height "$height" \
 		--script "$staged_scene" --frames "$frames" \
 		--capture-alpha "$capture_alpha" \
+		"${profile_arguments[@]}" \
 		--capture-sequence "$sequence" > "$sequence/runtime.log" 2>&1
 	local ready_line
 	ready_line=$(grep -E 'renderer ready on [[:alnum:]_-]+' "$sequence/runtime.log" | tail -1 || true)
@@ -152,6 +170,7 @@ python3 "$here/portal-seam-report.py" \
 	--pipeline-revision "$pipeline_revision" \
 	--target-fps "$fps" \
 	--expected-alpha "$capture_alpha" \
+	--require-pipeline-identity \
 	--aperture-only \
 	--side-ratio-maximum "$side_ratio_maximum" \
 	"${report_requirements[@]}" \

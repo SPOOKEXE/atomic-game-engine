@@ -93,6 +93,10 @@ namespace engine::render {
 		uint64_t Tree = 0;
 		// Authorized body retained in this non-primary capture.
 		std::string RetainedBodyPlayer{};
+		// Local steady-clock admission time for measuring retained image age.
+		PortalImageInbox::Time AcceptedAt{};
+		// Source world's capture tick, meaningful only with that world's tick rate.
+		uint64_t CaptureTick = 0;
 	};
 	// Terminal completion reported for one issued portal request.
 	struct PortalRuntimeCompletion {
@@ -194,6 +198,8 @@ namespace engine::render {
 		);
 		// Advances requests, expiry, and completed reply processing.
 		std::vector<PortalRuntimeCompletion> Poll(Time now);
+		// Current inbox use and cumulative successful decode bytes.
+		PortalInboxUsage InboxUsage() const;
 		// One bounded protocol reply, separated from ordinary eye-image completions.
 		// The caller matches its authenticated envelope and exact outstanding pull.
 		std::optional<world::PresentationMessage> TakeShadowReply();

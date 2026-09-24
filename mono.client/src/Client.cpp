@@ -3,6 +3,7 @@
 #include "DataFactoryPausedPresentation.hpp"
 #include "DisplayedSceneView.hpp"
 #include "NamedCaptureView.hpp"
+#include "PortalReadiness.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
@@ -2364,6 +2365,8 @@ namespace client {
 		if (tick != SubmittedMoveTick &&
 			Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
 			SubmittedMoveTick = tick;
+			if (!Settings.CaptureSequence.empty())
+				CapturedSubmittedMoveDirection = {move.Direction.X, move.Direction.Y, move.Direction.Z};
 			ENGINE_TRACE("move submitted at tick {}", tick);
 			Universe_->Enter(Replicated, [&move, tick](engine::ecs::Store &store) {
 				(void)RecordPortalPredictionInput(store, tick, move, store.Time().Delta);
@@ -3106,7 +3109,16 @@ namespace client {
 			renderingActive = Renderer.WaitForFrame();
 		}
 
-		const float delta = Clock.Tick();
+		const float wallDelta = Clock.Tick();
+		// Reference sequences sample one declared simulation interval per due image.
+		// Wall-driven catch-up would give separately captured scenes different ticks
+		// whenever their render cost differs, even with a fixed presentation alpha.
+		const float delta =
+			Settings.CaptureSequence.empty()
+				? wallDelta
+				: (presentationDue
+					   ? 1.0f / float(Settings.MaximumFrameRate == 0 ? 60 : Settings.MaximumFrameRate)
+					   : 0.0f);
 
 		{
 			ENGINE_HEAP_SCOPE("client.events");
@@ -3797,7 +3809,13 @@ namespace client {
 		if (PresentationLink && Particles.Batches.empty()) {
 			// Captures consume the prepared world directly. GPU particles still need their normal step.
 			Renderer.SetAnimationTime(AnimationSeconds);
-			const auto progress = PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
+			const auto progress = PortalImages->Pump(
+				0,
+				1,
+				std::chrono::steady_clock::now(),
+				ReportedJoin ? Replicated : Rendered,
+				ReportedJoin ? Rendered : engine::world::WorldId{}
+			);
 			Metrics::Count("render.portal-producer.captures", progress.Rendered);
 			Metrics::Count("render.portal-producer.replies", progress.Sent);
 			Statistics.Record(Clock.Now(), presentationDelta);
@@ -4692,6 +4710,11 @@ namespace client {
 				auto sourceView = view;
 				sourceView.Instances = Views.Instances();
 				sourceView.JointFrames = Views.JointFrames();
+				// Keep the authenticated local producer through route discovery and
+				// preparation. Switching to a newly published remote endpoint would
+				// discard its visible capture while the replacement is still in flight.
+				const auto admittedPortalDestination =
+					AdmittedPortalCaptureWorld(engine::core::Clock::Seconds());
 				UpdatePortalImages(
 					*Universe_,
 					*PortalImages,
@@ -4702,7 +4725,9 @@ namespace client {
 					Surfaces,
 					PresentationAlpha(presentationWorld),
 					std::chrono::steady_clock::now(),
-					Rendered
+					{.TopologyOwner = Rendered,
+					 .AdmittedDestination = admittedPortalDestination,
+					 .PresentedDestination = ReportedJoin ? Rendered : engine::world::WorldId{}}
 				);
 			}
 			Renderer.SetAnimationTime(AnimationSeconds);
@@ -4884,6 +4909,74 @@ namespace client {
 					return Renderer.Render(cameraBatch, Overlay, hook);
 				}
 			);
+			if (!Settings.CaptureSequence.empty() && std::getenv("PORTAL_VISIBILITY_DIAGNOSTIC") &&
+				FramesDrawn < 600 && LastFrame.Submitted) {
+				const auto visibility = Renderer.Visibility();
+				nlohmann::json bodyRows = nlohmann::json::array();
+				if (visibility.Valid && visibility.ViewSlot == view.Slot &&
+					visibility.World == view.WorldName) {
+					for (const auto &row : view.Instances) {
+						if (row.Rig == 0 || bodyRows.size() == 64) continue;
+						const auto world = row.SourceWorld.IsValid() ? row.SourceWorld : view.WorldName;
+						const auto observed = std::find_if(
+							visibility.Observations.begin(),
+							visibility.Observations.end(),
+							[&](const auto &entry) {
+								return entry.World == world && entry.Entity == row.Source;
+							}
+						);
+						bodyRows.push_back({
+							{"world", std::string(world.Text())},
+							{"entity", row.Source},
+							{"rig", row.Rig},
+							{"body_key", {row.BodyKeyHigh, row.BodyKeyLow, row.BodyGeneration}},
+							{"variant", row.Variant},
+							{"seam_mask", row.SeamMask},
+							{"position", {row.Frame.Position.X, row.Frame.Position.Y, row.Frame.Position.Z}},
+							{"visibility",
+							 observed == visibility.Observations.end()
+								 ? "missing"
+								 : engine::render::Describe(observed->State)},
+							{"cause",
+							 observed == visibility.Observations.end()
+								 ? "missing"
+								 : engine::render::Describe(observed->Cause)},
+						});
+					}
+				}
+				std::ofstream output(
+					Settings.CaptureSequence / (std::to_string(FramesDrawn) + ".visibility.json")
+				);
+				output << nlohmann::json{
+					{"frame", FramesDrawn},
+					{"renderer_frame", visibility.Frame},
+					{"view_world", std::string(view.WorldName.Text())},
+					{"visibility_world", std::string(visibility.World.Text())},
+					{"view_slot", view.Slot},
+					{"visibility_slot", visibility.ViewSlot},
+					{"valid", visibility.Valid},
+					{"dropped", visibility.Dropped},
+					{"body_rows", std::move(bodyRows)},
+				}.dump() << '\n';
+			}
+			if (!Settings.CaptureSequence.empty() && std::getenv("PORTAL_RENDER_FRAME_DIAGNOSTIC") &&
+				LastFrame.Submitted) {
+				const auto visibility = Renderer.Visibility();
+				const bool matched = visibility.Valid && visibility.ViewSlot == view.Slot &&
+									 visibility.World == view.WorldName;
+				std::ofstream output(
+					Settings.CaptureSequence / (std::to_string(FramesDrawn) + ".renderer.json")
+				);
+				output << nlohmann::json{
+					{"frame", FramesDrawn},
+					{"renderer_frame", matched ? nlohmann::json(visibility.Frame) : nlohmann::json(nullptr)},
+					{"view_world", std::string(view.WorldName.Text())},
+					{"visibility_world", std::string(visibility.World.Text())},
+					{"view_slot", view.Slot},
+					{"visibility_slot", visibility.ViewSlot},
+					{"matched", matched},
+				}.dump() << '\n';
+			}
 			if (sameFrameCapture && !LastFrame.Submitted)
 				DataCapture->AbortPreparedBatch(preparedCaptureBatch);
 			if (renderOnlyPending) {
@@ -4897,7 +4990,14 @@ namespace client {
 				});
 				DataFactoryRenderOnly.Consume();
 			}
-			if (PresentationLink) (void)PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
+			if (PresentationLink)
+				(void)PortalImages->Pump(
+					0,
+					1,
+					std::chrono::steady_clock::now(),
+					ReportedJoin ? Replicated : Rendered,
+					ReportedJoin ? Rendered : engine::world::WorldId{}
+				);
 		}
 		{
 			ENGINE_HEAP_SCOPE("client.statistics");

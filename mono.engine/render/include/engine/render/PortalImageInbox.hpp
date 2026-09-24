@@ -89,6 +89,15 @@ namespace engine::render {
 		size_t HeldCount = 0;
 		// Bytes owned by retained completed images.
 		size_t HeldBytes = 0;
+		// Cumulative payload bytes decoded and admitted as usable images.
+		uint64_t DecodedBytes = 0;
+		// Requests/replies rejected as stale or carrying a mismatched capture key.
+		uint64_t StaleRejections = 0;
+		// This inbox's configured queue capacities.
+		size_t PendingCapacity = 0;
+		size_t HeldCapacity = 0;
+		size_t PendingByteCapacity = 0;
+		size_t HeldByteCapacity = 0;
 	};
 
 	// Single-owner CPU state. Passed times must come from the same steady clock.
@@ -186,5 +195,7 @@ namespace engine::render {
 		std::optional<Time> LastTime;
 		std::vector<Pending> Requests;
 		std::vector<Held> Images;
+		uint64_t DecodedBytes = 0;
+		uint64_t StaleRejections = 0;
 	};
 }

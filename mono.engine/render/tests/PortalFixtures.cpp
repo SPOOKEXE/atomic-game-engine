@@ -475,6 +475,50 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"portal recursion follows the locked behavior eye while inspection moves",
+	"[render][gpu][fixture][portal][camera-lock][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render);
+
+	auto pane = Plane(3, {}, HALF_WIDTH, HALF_HEIGHT, {0.3f, 0.3f, 0.3f});
+	pane.Surface = 0;
+	render::PortalView portal;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = {DESTINATION_X, 0, 0};
+	render::SceneTarget target{WIDTH, HEIGHT};
+	render::View view;
+	view.World = 939;
+	view.WorldName = core::Name("portal.camera-lock");
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
+	view.VisibilityFrame = view.CameraFrame;
+	view.Camera.FieldOfViewRadians = 1.0471975512f;
+	view.Camera.NearPlane = 0.1f;
+	view.Camera.FarPlane = 64;
+	view.Instances = std::span(&pane, 1);
+	view.Portals = std::span(&portal, 1);
+	render::OverlayImage overlay;
+
+	const auto locked = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(locked.PortalPasses > 0);
+
+	view.CameraFrame = core::CFrame::LookAt({50, 0, 4}, {50, 0, 0});
+	view.Damage.Scene = true;
+	const auto inspected = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(inspected.PortalPasses == locked.PortalPasses);
+
+	view.VisibilityFrame.reset();
+	view.Damage.Scene = true;
+	const auto unlocked = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(unlocked.PortalPasses == 0);
+}
+
+TEST_CASE(
 	"portal pixels follow destination light edits with a fixed viewer",
 	"[render][gpu][fixture][portal-lighting][.]"
 ) {

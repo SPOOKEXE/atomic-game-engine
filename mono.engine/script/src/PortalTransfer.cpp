@@ -27,7 +27,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 namespace engine::script {
@@ -1930,6 +1932,34 @@ namespace engine::script {
 				std::any_of(state->Out.begin(), state->Out.end(), [&](const auto &r) {
 					return r.Subject == subject && Active(r);
 				})) {
+				if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+					diagnostic && *diagnostic == '1') {
+					static std::atomic<uint32_t> emitted{0};
+					if (emitted.fetch_add(1, std::memory_order_relaxed) < 12) {
+						const auto active = std::count_if(state->Out.begin(), state->Out.end(), Active);
+						const auto existing =
+							std::find_if(state->Out.begin(), state->Out.end(), [&](const auto &record) {
+								return record.Subject == subject && Active(record);
+							});
+						ENGINE_INFO(
+							"portal return bound: world={} tick={} subject={} kind={} destination={} "
+							"out={} active={} next_sequence={} duplicate={} prior_destination={} stage={} "
+							"sequence={}",
+							store.Name(),
+							store.Time().Tick,
+							subject.Id,
+							static_cast<int>(kind),
+							destination,
+							state->Out.size(),
+							active,
+							state->NextSequence,
+							existing != state->Out.end(),
+							existing != state->Out.end() ? existing->Receipt.DestinationWorld : std::string{},
+							existing != state->Out.end() ? static_cast<int>(existing->Receipt.Stage) : -1,
+							existing != state->Out.end() ? existing->Receipt.Id.Sequence : uint64_t{0}
+						);
+					}
+				}
 				failure = "portal source transfer bound reached";
 				return false;
 			}
@@ -2094,6 +2124,16 @@ namespace engine::script {
 		}
 		for (const auto &delivery : deliveries) {
 			if (delivery.Reply.Expected()) {
+				if (std::getenv("PORTAL_RETURN_DIAGNOSTIC") &&
+					(std::string_view(store.Name()) == "walk.destination" ||
+					 std::string_view(store.Name()) == "server.world"))
+					ENGINE_INFO(
+						"portal return bus reply: world={} tick={} status={} ticket={}",
+						store.Name(),
+						store.Time().Tick,
+						static_cast<int>(delivery.Status),
+						delivery.Reply.Value
+					);
 				if (delivery.Reply == state->Opening) {
 					state->Open = delivery.Status == world::BusStatus::Ok;
 					state->Opening = {};
@@ -2109,7 +2149,22 @@ namespace engine::script {
 			Message message;
 			core::Metrics::Count("world.portal.received.messages", 1);
 			core::Metrics::Count("world.portal.received.bytes", delivery.Payload.size());
-			if (Decode(delivery.Payload, message)) Process(store, *state, delivery.From.Text(), message);
+			if (Decode(delivery.Payload, message)) {
+				if (std::getenv("PORTAL_RETURN_DIAGNOSTIC") && message.Id.Sequence == 1 &&
+					message.Id.SourceWorld == "walk.destination")
+					ENGINE_INFO(
+						"portal return received: world={} tick={} from={} kind={} incarnation={} "
+						"destination_incarnation={} bytes={}",
+						store.Name(),
+						store.Time().Tick,
+						delivery.From.Text(),
+						static_cast<int>(message.Kind),
+						message.Id.SourceIncarnation,
+						message.DestinationIncarnation,
+						message.Body.size()
+					);
+				Process(store, *state, delivery.From.Text(), message);
+			}
 		}
 		// Consume one queued control record at this fixed tick boundary. A batched
 		// packet must not collapse a turn, stop, or jump into its final row.
@@ -2286,6 +2341,30 @@ namespace engine::script {
 						// that seam before the next topology observation changes it.
 						const float prior = (previousFrame.Position - seam.Centre).Dot(seam.Normal);
 						const float current = (currentFrame.Position - seam.Centre).Dot(seam.Normal);
+						if (kind == scene::PortalBodyKind::Player) {
+							if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+								diagnostic && *diagnostic == '1') {
+								static std::atomic<uint32_t> emitted{0};
+								if (emitted.fetch_add(1, std::memory_order_relaxed) < 12)
+									ENGINE_INFO(
+										"portal crossing candidate: world={} tick={} subject={} pane={} "
+										"destination={} prior={} current={} velocity={},{},{} epoch={} "
+										"bidirectional={}",
+										store.Name(),
+										store.Time().Tick,
+										subject.Id,
+										seam.Pane.Id,
+										seam.DestinationWorld.Text(),
+										prior,
+										current,
+										linearVelocity.X,
+										linearVelocity.Y,
+										linearVelocity.Z,
+										crossing->AuthorityEpoch,
+										seam.Bidirectional
+									);
+							}
+						}
 						crossing->Pin = {
 							seam.Pane,
 							seam.Far,
@@ -2472,14 +2551,18 @@ namespace engine::script {
 		}
 		if (clock->AnchorInputTick == 0 || clock->InputStep <= 0 || clock->WorldStep <= 0)
 			return Result::Immediate;
-		auto refuse = [] {
+		auto refuse = [](std::string_view reason) {
 			core::Metrics::Count("world.portal.native.refused", 1);
+			core::Metrics::Count(reason, 1);
 			return Result::Refused;
 		};
-		if (stepSeconds != clock->InputStep || store.Time().Delta != clock->WorldStep) return refuse();
-		if (inputTick <= clock->LastQueuedInputTick) return clock->Native ? Result::Queued : refuse();
+		if (stepSeconds != clock->InputStep || store.Time().Delta != clock->WorldStep)
+			return refuse("world.portal.native.refused.step");
+		if (inputTick <= clock->LastQueuedInputTick)
+			return clock->Native ? Result::Queued : refuse("world.portal.native.refused.stale");
 		const auto now = store.Time().Tick;
-		if (now == std::numeric_limits<uint64_t>::max()) return refuse();
+		if (now == std::numeric_limits<uint64_t>::max())
+			return refuse("world.portal.native.refused.tick-overflow");
 		// Subtract integer epochs before converting, preserving precision on long sessions.
 		const long double offset = std::ceil(
 			static_cast<long double>(inputTick - clock->AnchorInputTick) * clock->InputStep /
@@ -2488,12 +2571,19 @@ namespace engine::script {
 		);
 		if (!std::isfinite(offset) || offset < 0 ||
 			offset >= static_cast<long double>(std::numeric_limits<uint64_t>::max() - clock->AnchorWorldTick))
-			return refuse();
-		const uint64_t due = std::max(now + 1, clock->AnchorWorldTick + static_cast<uint64_t>(offset));
+			return refuse("world.portal.native.refused.offset");
+		uint64_t due = std::max(now + 1, clock->AnchorWorldTick + static_cast<uint64_t>(offset));
 		// A corrupt or incompatible input clock cannot reserve an unbounded future.
 		if (static_cast<long double>(due - now) * clock->WorldStep >
-			std::max(1.0L, static_cast<long double>(clock->WorldStep)) + 1e-6L)
-			return refuse();
+			std::max(1.0L, static_cast<long double>(clock->WorldStep)) + 1e-6L) {
+			if (clock->Native) return refuse("world.portal.native.refused.horizon");
+			// Forwarded input can lag the authenticated client's clock at takeover.
+			// Re-anchor once, then keep the ordinary horizon for every native move.
+			clock->AnchorWorldTick = now;
+			clock->AnchorInputTick = inputTick;
+			due = now + 1;
+			core::Metrics::Count("world.portal.native.reanchored", 1);
+		}
 		if (clock->Count != 0 &&
 			clock->Pending[(clock->Begin + clock->Count - 1) % MAXIMUM_NATIVE_INPUTS].PhysicsTick == due) {
 			auto &pending = clock->Pending[(clock->Begin + clock->Count - 1) % MAXIMUM_NATIVE_INPUTS];
@@ -2502,7 +2592,7 @@ namespace engine::script {
 			pending.Jump |= jump;
 			core::Metrics::Count("world.portal.native.coalesced", 1);
 		} else {
-			if (clock->Count == MAXIMUM_NATIVE_INPUTS) return refuse();
+			if (clock->Count == MAXIMUM_NATIVE_INPUTS) return refuse("world.portal.native.refused.capacity");
 			clock->Pending[(clock->Begin + clock->Count) % MAXIMUM_NATIVE_INPUTS] = {
 				inputTick, due, direction, jump
 			};

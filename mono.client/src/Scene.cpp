@@ -512,8 +512,7 @@ namespace client {
 		std::vector<engine::render::SurfaceView> &surfaces,
 		float alpha,
 		engine::render::PortalImageHost::Time now,
-		engine::world::WorldId topologyOwner,
-		engine::world::WorldId admittedDestination
+		PortalImageWorldSelection selection
 	) {
 		ENGINE_PROFILE("product.portal images");
 		bool requested = false;
@@ -538,8 +537,8 @@ namespace client {
 		std::vector<WorldIdentity> worlds;
 		SurveyWorlds(universe, worlds);
 		const auto admitted = std::find_if(worlds.begin(), worlds.end(), [&](const auto &candidate) {
-			return candidate.Id == admittedDestination && candidate.Id != world && candidate.IsReplica &&
-				   candidate.Ready && candidate.Authored.IsValid();
+			return candidate.Id == selection.AdmittedDestination && candidate.Id != world &&
+				   candidate.IsReplica && candidate.Ready && candidate.Authored.IsValid();
 		});
 		auto captureSettings = settings;
 		captureSettings.ResidentDestinations = {};
@@ -568,12 +567,12 @@ namespace client {
 				// Fetch return seams while the entrance image is already demanded.
 				if (universe.IsRemote(destination))
 					(void)images.RequestTopology(
-						topologyOwner.IsValid() ? topologyOwner : world, destination, now
+						selection.TopologyOwner.IsValid() ? selection.TopologyOwner : world, destination, now
 					);
 			}
 		}
 		const auto issued = images.Submit(world, viewer.Slot, demands, routes, now);
-		const auto progress = images.Pump(0, alpha, now, true);
+		const auto progress = images.Pump(0, alpha, now, world, selection.PresentedDestination);
 		engine::core::Metrics::Count("product.portal.requests", issued);
 		engine::core::Metrics::Count("product.portal.captures", progress.Rendered);
 		engine::core::Metrics::Count("product.portal.replies", progress.Sent);

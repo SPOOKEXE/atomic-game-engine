@@ -1,5 +1,6 @@
 #include "PortalImageSamples.hpp"
 #include "RendererState.hpp"
+#include "portal/PortalRendererTerminalObserver.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
@@ -453,7 +454,20 @@ namespace engine::render {
 			auto &slot = *adoption.Capture;
 			auto &image = *adoption.Destination;
 			State->CacheResidentImage(image);
+#if ENGINE_ASSERTS_ENABLED
+			const uint64_t replaced = image.Handle;
+#endif
 			State->ReleasePortalImport(image, true);
+#if ENGINE_ASSERTS_ENABLED
+			if (replaced != 0) {
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::ReleasePortalImport, replaced, true}
+				);
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::ReplacePortalImage, replaced, true}
+				);
+			}
+#endif
 			image.Handle = NextPortalImageHandle.fetch_add(1, std::memory_order_relaxed);
 			image.Binding = std::move(adoption.Binding);
 			// A local GPU frame has no authenticated producer simulation tick.
@@ -491,22 +505,57 @@ namespace engine::render {
 					for (const auto &node : tree.Nodes)
 						if (std::find(node.Images.begin(), node.Images.end(), handle) != node.Images.end()) {
 							DropPortalCaptureTree(tree.Token);
+#if ENGINE_ASSERTS_ENABLED
+							test_support::ObservePortalRendererTerminal(
+								{this,
+								 test_support::PortalRendererTerminalKind::DropPortalImage,
+								 handle,
+								 false}
+							);
+#endif
 							return true;
 						}
 		for (auto &image : State->ImportedPortals) {
 			if (handle != 0 && image.Handle == handle) {
 				const auto group = image.LayerSet;
-				if (group == 0)
+				if (group == 0) {
 					State->ReleasePortalImport(image);
-				else
+#if ENGINE_ASSERTS_ENABLED
+					test_support::ObservePortalRendererTerminal(
+						{this, test_support::PortalRendererTerminalKind::ReleasePortalImport, handle, true}
+					);
+#endif
+				} else
 					for (auto &member : State->ImportedPortals)
 						if (member.LayerSet == group) {
+#if ENGINE_ASSERTS_ENABLED
+							const uint64_t released = member.Handle;
+#endif
 							State->CacheResidentImage(member);
 							State->ReleasePortalImport(member);
+#if ENGINE_ASSERTS_ENABLED
+							if (released != 0)
+								test_support::ObservePortalRendererTerminal(
+									{this,
+									 test_support::PortalRendererTerminalKind::ReleasePortalImport,
+									 released,
+									 true}
+								);
+#endif
 						}
+#if ENGINE_ASSERTS_ENABLED
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::DropPortalImage, handle, true}
+				);
+#endif
 				return true;
 			}
 		}
+#if ENGINE_ASSERTS_ENABLED
+		test_support::ObservePortalRendererTerminal(
+			{this, test_support::PortalRendererTerminalKind::DropPortalImage, handle, false}
+		);
+#endif
 		return false;
 	}
 

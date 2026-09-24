@@ -90,7 +90,10 @@ namespace engine::render {
 						.WasReady = matchesProjector(bank.SeamLights[projector.Index], projector),
 						.ScreenCoverage = SeamLightScreenCoverage(projector, Matrices.ViewProjection),
 						.InfluenceDistance = SeamLightStaticInfluenceDistanceSquared(
-							projector, State->VisibleInstances, State->DrawOrder, Request.CameraFrame.Position
+							projector,
+							State->VisibleInstances,
+							State->DrawOrder,
+							Request.VisibilityCameraFrame.Position
 						),
 					};
 				}
@@ -118,7 +121,10 @@ namespace engine::render {
 					.WasReady = matchesProjector(bank.SeamLights[projector.Index], projector),
 					.ScreenCoverage = SeamLightScreenCoverage(projector, Matrices.ViewProjection),
 					.InfluenceDistance = SeamLightStaticInfluenceDistanceSquared(
-						projector, State->VisibleInstances, State->DrawOrder, Request.CameraFrame.Position
+						projector,
+						State->VisibleInstances,
+						State->DrawOrder,
+						Request.VisibilityCameraFrame.Position
 					),
 				};
 			}
@@ -266,7 +272,6 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
 			const size_t targetSlot = recording.Request.TargetSlot;
 			const float nearestPane = recording.NearestPane;
@@ -279,7 +284,6 @@ namespace engine::render {
 			const auto &portalOf = recording.PortalOf;
 			const bool havePortals = recording.HavePortals;
 			const uint32_t portalLevels = recording.PortalLevels;
-			const glm::mat4 &cameraMatrix = recording.CameraMatrix;
 			const glm::mat4 &lightViewProjection = recording.LightViewProjection;
 			const scene::ScenePlan &plan = recording.Plan;
 			const uint32_t sceneCount = recording.SceneCount;
@@ -335,7 +339,7 @@ namespace engine::render {
 				// matrix. Starting from this every time is what makes each level's
 				// frustum the screen's own, which is what makes the screen-position
 				// lookup in `opaque.frag` exact.
-				const glm::mat4 screenProjection = recording.Matrices.Projection;
+				const glm::mat4 screenProjection = recording.BehaviourMatrices.Projection;
 
 				// **Made before anything is captured, because a world of nothing but
 				// holes never reaches `EnsureSurface`.** The sampler used to be
@@ -664,12 +668,7 @@ namespace engine::render {
 				};
 
 				fillLevel(
-					scene::CameraMatrices{
-						glm::inverse(cameraFrame.ToMatrix()), screenProjection, cameraMatrix
-					},
-					cameraFrame,
-					portalLevels - 1,
-					-1
+					recording.BehaviourMatrices, recording.Request.VisibilityCameraFrame, portalLevels - 1, -1
 				);
 
 				if (!recording.CaptureSeamLights(WorldColourTarget::Display)) {
@@ -748,6 +747,7 @@ namespace engine::render {
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
 			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::CFrame &behaviourFrame = recording.Request.VisibilityCameraFrame;
 			const bool haveInstances = recording.HaveInstances;
 			Impl::SurfaceBank &bank = *recording.Bank;
 			const auto &portalOf = recording.PortalOf;
@@ -821,7 +821,7 @@ namespace engine::render {
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
 
-				const LightingUniforms portalLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+				const LightingUniforms portalLighting = lightingAt(behaviourFrame.Position, 0.0f, 0.0f);
 				const ShadowBinding shadow = shadowBinding();
 				const auto drawPortals = [&](bool blended) {
 					if (blended) {

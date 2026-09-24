@@ -1115,6 +1115,42 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"native portal input catches up when the authenticated client is ahead of forwarded input",
+	"[script][portal-transfer][portal-move][portal-native-catchup]"
+) {
+	Pair pair;
+	const auto id = pair.Begin();
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {0, 0, -1}, false, 40, 1.0 / 60));
+	});
+	pair.Tick(9);
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		const auto player = PortalTransferPlayer(store, id);
+		REQUIRE(player != ecs::NULL_ENTITY);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, player));
+		REQUIRE(store.Get<scene::Humanoid>(rig.Humanoid)->MoveDirection == core::Vector3{0, 0, -1});
+		CHECK(
+			SchedulePortalPlayerMove(store, player, {0, 0, 1}, false, 119, 1.0 / 30) ==
+			PortalInputDisposition::Refused
+		);
+		CHECK(
+			SchedulePortalPlayerMove(store, player, {0, 0, 1}, false, 119, 1.0 / 60) ==
+			PortalInputDisposition::Queued
+		);
+		CHECK(
+			SchedulePortalPlayerMove(store, player, {1, 0, 0}, false, 5000, 1.0 / 60) ==
+			PortalInputDisposition::Refused
+		);
+	});
+	pair.Tick();
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		const auto player = PortalTransferPlayer(store, id);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, player));
+		CHECK(store.Get<scene::Humanoid>(rig.Humanoid)->MoveDirection == core::Vector3{0, 0, 1});
+	});
+}
+
+TEST_CASE(
 	"portal movement and acknowledgements replay across snapshots", "[script][portal-transfer][portal-move]"
 ) {
 	for (int snapshotTick = 0; snapshotTick < 12; ++snapshotTick) {

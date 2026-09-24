@@ -1,8 +1,16 @@
 #include "PortalReadiness.hpp"
 
+#include <engine/ecs/Store.hpp>
+#include <engine/effects/Registration.hpp>
+#include <engine/gui/Registration.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <client/ContentDemand.hpp>
+#include <vector>
 
 TEST_SUITE_ID("client.portalreadiness")
 
@@ -63,6 +71,50 @@ TEST_CASE("Portal readiness promotes only a complete local replica") {
 	const auto stale = readiness.Evaluate(evidence);
 	CHECK_FALSE(stale.Live);
 	CHECK(stale.ImageOnly == client::PortalImageOnlyReason::ReplicaBaseline);
+}
+
+TEST_CASE("An origin-free portal promotes empty demand but refuses named assets") {
+	engine::scene::RegisterSceneComponents();
+	engine::gui::RegisterGuiComponents();
+	engine::effects::RegisterEffectComponents();
+	engine::ecs::Store store("portal.assetless");
+	client::PortalReadinessController readiness(
+		{.EnterDistance = 4, .ExitDistance = 6, .CapacityBytes = 1024}
+	);
+	REQUIRE(readiness.Reserve(SmallReservation()));
+	auto evidence = ReadyEvidence();
+	evidence.RequiredAssetRevision = 0;
+	evidence.ResidentAssetRevision = 0;
+	evidence.AssetsResident = false;
+	std::vector<engine::core::Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	const uint64_t emptyRevision = client::WantedContentRevision(store);
+	REQUIRE(wanted.empty());
+	REQUIRE(emptyRevision != 0);
+	REQUIRE(client::ApplyAssetlessReadiness(evidence, emptyRevision, wanted.size()));
+	CHECK(readiness.Evaluate(evidence).Live);
+
+	const auto part = store.Create();
+	engine::scene::Visual visual;
+	visual.Mesh = engine::core::Name("remote.amesh");
+	store.Set(part, visual);
+	wanted.clear();
+	client::CollectWantedContent(store, wanted);
+	const uint64_t namedRevision = client::WantedContentRevision(store);
+	REQUIRE(namedRevision != emptyRevision);
+	REQUIRE(wanted.size() == 1);
+	evidence.RequiredAssetRevision = 0;
+	evidence.ResidentAssetRevision = 0;
+	evidence.AssetsResident = false;
+	CHECK_FALSE(client::ApplyAssetlessReadiness(evidence, namedRevision, wanted.size()));
+	CHECK(readiness.Evaluate(evidence).ImageOnly == client::PortalImageOnlyReason::Assets);
+}
+
+TEST_CASE("Arrived portal eye uses bound geometry or a completed foreign image") {
+	CHECK_FALSE(client::PortalArrivedEyeBlocked(false, false, 0));
+	CHECK_FALSE(client::PortalArrivedEyeBlocked(true, true, 0));
+	CHECK_FALSE(client::PortalArrivedEyeBlocked(true, false, 7));
+	CHECK(client::PortalArrivedEyeBlocked(true, false, 0));
 }
 
 TEST_CASE("Portal readiness refuses a stale same-tick sealed baseline hash") {
@@ -205,6 +257,30 @@ TEST_CASE("Portal approach promotes only its authenticated destination route") {
 	transfer.Port = approach.Port;
 	transfer.Identity.Value[0] = 8;
 	CHECK_FALSE(client::PortalApproachMatchesTransfer(approach, transfer));
+}
+
+TEST_CASE("Portal image producer stays on an admitted local route through handoff") {
+	using engine::world::WorldId;
+	const WorldId rendered(1), approachWorld(2), successorWorld(3);
+	client::PortalCaptureCandidate approach{approachWorld, true, true, true, false, false};
+	client::PortalCaptureCandidate successor;
+	CHECK(client::PortalCaptureDestination(rendered, approach, successor) == approachWorld);
+	approach.Failed = true;
+	CHECK(client::PortalCaptureDestination(rendered, approach, successor) == rendered);
+	approach.Failed = false;
+
+	successor = {successorWorld, true, false, true, false, false};
+	CHECK(client::PortalCaptureDestination(rendered, approach, successor) == approachWorld);
+	successor.Joined = true;
+	CHECK(client::PortalCaptureDestination(rendered, approach, successor) == successorWorld);
+
+	// A failed transfer cannot keep its old producer alive after the approach retires.
+	approach = {};
+	successor.Rejected = true;
+	CHECK(client::PortalCaptureDestination(rendered, approach, successor) == rendered);
+	successor.Rejected = false;
+	successor.Failed = true;
+	CHECK(client::PortalCaptureDestination(rendered, approach, successor) == rendered);
 }
 
 TEST_CASE("Portal readiness retains a near-field approach through its 20 metre exit range") {

@@ -606,7 +606,7 @@ namespace engine::render {
 		writer.WriteUInt8(static_cast<uint8_t>(request.Scope));
 		writer.WriteUInt8(static_cast<uint8_t>(request.Projection));
 		writer.WriteUInt8(request.OrderedLayers);
-		writer.WriteUInt8(0);
+		writer.WriteUInt8(request.TransferEye);
 		writer.WriteString(request.EyePlayer);
 		writer.WriteString(request.RetainedBodyPlayer);
 		Floats(writer, request.Position);
@@ -648,8 +648,10 @@ namespace engine::render {
 		request.Scope = static_cast<PortalImageScope>(reader.ReadUInt8());
 		request.Projection = static_cast<PortalImageProjection>(reader.ReadUInt8());
 		const auto ordered = reader.ReadUInt8();
+		const auto transferEye = reader.ReadUInt8();
 		request.OrderedLayers = ordered != 0;
-		if (ordered > 1 || reader.ReadUInt8() != 0) {
+		request.TransferEye = transferEye != 0;
+		if (ordered > 1 || transferEye > 1) {
 			return Refuse(error, "noncanonical portal request profile");
 		}
 		const auto eyePlayer = reader.ReadString();

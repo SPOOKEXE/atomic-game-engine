@@ -38,9 +38,6 @@ namespace engine::render {
 		bool SeamRadiance = false;
 	};
 
-	// Planner outcomes for a candidate portal capture.
-	enum class PortalDemandStatus { Ready, Hidden, Invalid, Unsupported };
-
 	// The pose is already in the eye's destination world. Builds an owned camera
 	// demand without source geometry or a seam plane. Sampling maps destination-world
 	// positions to the capture clip space. Unchanged output on refusal.
@@ -104,6 +101,7 @@ namespace engine::render {
 		const View &viewer,
 		size_t viewSlot,
 		const PortalImageDemandSettings &settings,
-		PortalImageDemand &demand
+		PortalImageDemand &demand,
+		PortalDemandHiddenReason *hiddenReason = nullptr
 	);
 }

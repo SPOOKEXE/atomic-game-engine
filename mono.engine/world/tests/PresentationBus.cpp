@@ -171,7 +171,8 @@ TEST_CASE(
 	const auto source = Open(bus, "source");
 	const auto destination = Open(bus, "destination");
 	REQUIRE(bus.Send(source, destination, 999, std::vector<std::byte>(137, std::byte{0xAC})) == Status::Ok);
-	const auto message = bus.Take(destination).front();
+	auto message = bus.Take(destination).front();
+	message.Priority = PresentationPriority::TransferEye;
 	core::ByteWriter writer;
 	REQUIRE(WritePresentationMessage(writer, message));
 	for (size_t length = 0; length < writer.Size(); length++) {
@@ -188,6 +189,7 @@ TEST_CASE(
 	CHECK(read.From == source);
 	CHECK(read.To == destination);
 	CHECK(read.Payload == message.Payload);
+	CHECK(read.Priority == PresentationPriority::TransferEye);
 	CHECK(reader.Remaining() == 0);
 	const size_t before = writer.Size();
 	read.From.Session = 0;

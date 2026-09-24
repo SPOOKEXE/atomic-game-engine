@@ -1,4 +1,6 @@
 #include "RenderFixture.hpp"
+#include "portal/PortalRendererTerminalTrace.hpp"
+#include "portal/PortalTerminalTrace.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -30,9 +32,9 @@ TEST_CASE(
 ) {
 	using namespace engine;
 	using namespace engine::render;
-	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+	const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
 	const bool nested = mode == 1 || mode == 4;
-	const bool prepared = mode >= 9;
+	const bool prepared = mode >= 9 && mode <= 13;
 	const bool animatedAccessory = mode == 12;
 	const bool withdrawAuthorization = mode == 13;
 	CAPTURE(mode);
@@ -43,7 +45,8 @@ TEST_CASE(
 	for (size_t index = 0; index < rooms.size(); ++index)
 		rooms[index] = worlds.Create({.Name = core::Name("shadow-transport-room-" + std::to_string(index))});
 	world::PresentationLimits limits;
-	limits.MessagesPerEndpoint = 1;
+	// The changed-eye case needs one slot for its pending shadow pull and one for the replacement capture.
+	limits.MessagesPerEndpoint = mode == 14 ? 2 : 1;
 	REQUIRE(worlds.ConfigurePresentation(913, limits));
 	test::FixtureDevice fixture;
 	fixture.Initialise();
@@ -139,6 +142,10 @@ TEST_CASE(
 	REQUIRE(graph::Build(eyeDocument, eyePipeline, offender) == graph::PipelineDocumentStatus::Ok);
 	const core::Name eyePipelineName("shadow-composed-eye");
 	REQUIRE(renderer.SetPipeline(eyePipelineName, eyePipeline));
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalTerminalTrace terminals(renderer);
+	test_support::PortalRendererTerminalTrace rendererTerminals(renderer);
+#endif
 	PortalImageHost host(worlds, renderer);
 	for (const auto room : rooms) {
 		REQUIRE(host.SetRetainedBodyAuthorization(room, [&](const auto &requester, std::string_view player) {
@@ -181,7 +188,7 @@ TEST_CASE(
 		if (host.HasPendingUploads()) renderer.Render(std::span(&upload, 1), overlay, nullptr, false);
 		SDL_Delay(1);
 	}
-	const auto capture = host.Capture(0, portal);
+	auto capture = host.Capture(0, portal);
 	REQUIRE(capture);
 	REQUIRE(capture->Tree != 0);
 	const auto *tree = renderer.FindPortalCaptureTree(capture->Tree);
@@ -235,12 +242,18 @@ TEST_CASE(
 			now += std::chrono::seconds(11);
 			host.Pump(0, 1, now);
 			CHECK(host.PollBodyPreparation(preparation, now).Status == PortalTreeCompositionStatus::Invalid);
+#if ENGINE_ASSERTS_ENABLED
+			CHECK(terminals.Count(test_support::PortalTerminalKind::CancelPreparation, preparation) == 1);
+#endif
 			return;
 		}
 		if (mode == 11) {
 			REQUIRE(worlds.ClosePresentation(capture->Producer) == world::PresentationStatus::Ok);
 			host.Pump(0, 1, now);
 			CHECK(host.PollBodyPreparation(preparation, now).Status == PortalTreeCompositionStatus::Invalid);
+#if ENGINE_ASSERTS_ENABLED
+			CHECK(terminals.Count(test_support::PortalTerminalKind::CancelPreparation, preparation) == 1);
+#endif
 			return;
 		}
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
@@ -268,6 +281,70 @@ TEST_CASE(
 	} else
 		REQUIRE(host.BeginBodyComposition(portal, upload, now, job) == PortalTreeCompositionStatus::Pending);
 	REQUIRE(job != 0);
+	if (mode == 14) {
+		const uint64_t oldTree = capture->Tree;
+		const auto oldEye = capture->Binding.Expected;
+#if ENGINE_ASSERTS_ENABLED
+		const size_t terminalStart = terminals.Calls.size();
+		const size_t rendererTerminalStart = rendererTerminals.Calls.size();
+#endif
+		demand.Request.Key.CameraRevision++;
+		demand.Request.Position[0] += .25f;
+		const size_t changedEyeIssued =
+			host.Submit(viewer, 0, std::span(&demand, 1), std::span(&destination, 1), now);
+		CHECK(changedEyeIssued <= 1);
+		const auto replacementDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		std::optional<PortalImageCapture> replacement;
+		while (std::chrono::steady_clock::now() < replacementDeadline) {
+			host.Pump(0, 1, now);
+			if (host.HasPendingUploads()) renderer.Render(std::span(&upload, 1), overlay, nullptr, false);
+			replacement = host.Capture(0, portal);
+			if (replacement && replacement->Binding.Expected != oldEye) break;
+			now += std::chrono::milliseconds(1);
+			SDL_Delay(1);
+		}
+		REQUIRE(replacement);
+		REQUIRE(replacement->Binding.Expected != oldEye);
+		REQUIRE(replacement->Tree != oldTree);
+		CHECK(replacement->Camera.Position == demand.Request.Position);
+		CHECK(host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Invalid);
+		CHECK_FALSE(renderer.FindPortalCaptureTree(oldTree));
+#if ENGINE_ASSERTS_ENABLED
+		const auto terminalCalls = std::span(terminals.Calls).subspan(terminalStart);
+		const auto rendererCalls = std::span(rendererTerminals.Calls).subspan(rendererTerminalStart);
+		CHECK(std::count_if(terminalCalls.begin(), terminalCalls.end(), [&](const auto &call) {
+				  return call.Kind == test_support::PortalTerminalKind::CancelComposition &&
+						 call.Token == job;
+			  }) == 1);
+		CHECK(std::count_if(rendererCalls.begin(), rendererCalls.end(), [&](const auto &call) {
+				  return call.Kind == test_support::PortalRendererTerminalKind::DropCaptureTree &&
+						 call.Token == oldTree && call.Applied;
+			  }) == 1);
+#endif
+		host.Clear();
+#if ENGINE_ASSERTS_ENABLED
+		const auto terminalCallsAfterClear = std::span(terminals.Calls).subspan(terminalStart);
+		const auto rendererCallsAfterClear =
+			std::span(rendererTerminals.Calls).subspan(rendererTerminalStart);
+		CHECK(
+			std::count_if(
+				terminalCallsAfterClear.begin(), terminalCallsAfterClear.end(), [&](const auto &call) {
+					return call.Kind == test_support::PortalTerminalKind::CancelComposition &&
+						   call.Token == job;
+				}
+			) == 1
+		);
+		CHECK(
+			std::count_if(
+				rendererCallsAfterClear.begin(), rendererCallsAfterClear.end(), [&](const auto &call) {
+					return call.Kind == test_support::PortalRendererTerminalKind::DropCaptureTree &&
+						   call.Token == oldTree && call.Applied;
+				}
+			) == 1
+		);
+#endif
+		return;
+	}
 	if (!nested && !prepared) {
 		const auto lost = worlds.TakePresentation(host.Serve(rooms[0]));
 		REQUIRE(lost.size() == 1);
@@ -308,7 +385,11 @@ TEST_CASE(
 		host.CancelBodyComposition(job);
 		CHECK(host.PollBodyComposition(job, now).Status == PortalTreeCompositionStatus::Invalid);
 		CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
+		host.CancelBodyComposition(job);
 		host.RemoveViewport(0);
+#if ENGINE_ASSERTS_ENABLED
+		CHECK(terminals.Count(test_support::PortalTerminalKind::CancelComposition, job) == 1);
+#endif
 		now += std::chrono::seconds(11);
 		host.Pump(0, 1, now);
 		CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);

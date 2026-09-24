@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -439,19 +440,19 @@ namespace client {
 			);
 
 			engine::render::CollectSkinPalettes(store, *drawList);
-			if (!engine::scene::ContinueCameraBodyPose(
-					store, presented, drawList->Instances, drawList->JointFrames
-				))
-				engine::core::Metrics::Count("replica.body-pose.refused", 1);
-			const auto *heldBody = store.Resource<engine::scene::CameraCharacterHold>();
-			engine::scene::UpdatePortalBodyView(
-				store,
-				heldBody && heldBody->Active	   ? heldBody->SourceRoot
-				: prediction && prediction->Active ? prediction->Root
-												   : engine::ecs::NULL_ENTITY,
-				presented.Position,
-				drawList->Instances
+			const bool continuedBody = engine::scene::ContinueCameraBodyPose(
+				store, presented, drawList->Instances, drawList->JointFrames
 			);
+			if (!continuedBody) engine::core::Metrics::Count("replica.body-pose.refused", 1);
+			const auto *heldBody = store.Resource<engine::scene::CameraCharacterHold>();
+			Entity bodyRoot = engine::ecs::NULL_ENTITY;
+			if (continuedBody) {
+				if (heldBody && heldBody->Active)
+					bodyRoot = heldBody->SourceRoot;
+				else if (prediction && prediction->Active)
+					bodyRoot = prediction->Root;
+			}
+			engine::scene::UpdatePortalBodyView(store, bodyRoot, presented.Position, drawList->Instances);
 			engine::core::Metrics::Count(
 				"replica.instances", static_cast<double>(drawList->Instances.size())
 			);
@@ -835,6 +836,40 @@ namespace client {
 		RetainPositionCorrection(previousPrediction, prediction);
 	}
 
+	bool SeedPortalAdoptionPrediction(
+		Store &store,
+		Entity player,
+		uint64_t appliedTick,
+		std::span<const engine::replication::Input> unconfirmed,
+		uint64_t destinationIncarnation
+	) {
+		if (!store.AdoptOnly() || appliedTick == 0 || destinationIncarnation == 0 ||
+			player == engine::ecs::NULL_ENTITY)
+			return false;
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		if (!local || local->Instance != player) return false;
+		const auto *rig = store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
+		if (!rig || !store.Has<Transform>(rig->Root) || !store.Has<engine::scene::Humanoid>(rig->Humanoid))
+			return false;
+		ReconcileLocalPlayerPrediction(store, appliedTick, unconfirmed);
+		const auto *prediction = store.Resource<LocalPlayerPrediction>();
+		if (!prediction || !prediction->Active || prediction->Player != player ||
+			prediction->Root != rig->Root || prediction->AuthorityTick < appliedTick)
+			return false;
+		// The snapshot establishes the body pose but cannot acknowledge inputs. The
+		// accepted claim supplies the destination incarnation for later PlayerMotion.
+		store.SetResource(
+			NativePlayerPrediction{
+				.Incarnation = destinationIncarnation,
+				.AppliedPoseTick = 0,
+				.AppliedInputTick = 0,
+				.Sample = {},
+				.Clock = {}
+			}
+		);
+		return true;
+	}
+
 	std::optional<CFrame> PresentedPlayerPrediction(const Store &store) {
 		const auto *prediction = store.Resource<LocalPlayerPrediction>();
 		if (!prediction || !prediction->Active) return {};
@@ -976,16 +1011,48 @@ namespace client {
 	AcceptNativePlayerMotion(Store &store, const engine::game::PlayerMotion &sample, uint64_t submittedTick) {
 		auto *native = store.ResourceMutable<NativePlayerPrediction>();
 		const auto *local = store.Resource<engine::scene::LocalPlayer>();
-		if (!native || !local || local->Instance != sample.Player ||
-			sample.Root == engine::ecs::NULL_ENTITY || sample.Root == sample.Player ||
-			sample.Motion.DestinationIncarnation != native->Incarnation || sample.Motion.InputTick == 0 ||
-			sample.Motion.InputTick > submittedTick ||
-			!engine::script::ValidPortalTransferMotion(sample.Motion))
+		static size_t diagnosticCount = 0;
+		const auto trace = [&](std::string_view status) {
+			if (native == nullptr || std::getenv("PORTAL_NATIVE_PREDICTION_DIAGNOSTIC") == nullptr ||
+				diagnosticCount++ >= 64)
+				return;
+			ENGINE_WARN(
+				"native motion {} input={} submitted={} destination_tick={} incarnation={}",
+				status,
+				sample.Motion.InputTick,
+				submittedTick,
+				sample.Motion.DestinationTick,
+				sample.Motion.DestinationIncarnation
+			);
+		};
+		const auto refused = [](std::string_view reason) {
+			engine::core::Metrics::Count(
+				std::string("client.native-motion.refused.") + std::string(reason), 1
+			);
 			return false;
+		};
+		if (!native) return refused("missing-prediction");
+		if (!local || local->Instance != sample.Player) {
+			trace("player");
+			return refused("player");
+		}
+		if (sample.Root == engine::ecs::NULL_ENTITY || sample.Root == sample.Player) return refused("root");
+		if (sample.Motion.DestinationIncarnation != native->Incarnation) {
+			trace("incarnation");
+			return refused("incarnation");
+		}
+		if (sample.Motion.InputTick == 0) return refused("zero-input");
+		if (sample.Motion.InputTick > submittedTick) {
+			trace("future-input");
+			return refused("future-input");
+		}
+		if (!engine::script::ValidPortalTransferMotion(sample.Motion)) return refused("invalid");
 		if (native->Sample && (sample.Motion.DestinationTick <= native->Sample->Motion.DestinationTick ||
 							   sample.Motion.InputTick < native->Sample->Motion.InputTick))
-			return false;
+			return trace("stale"), refused("stale");
 		native->Sample = sample;
+		trace("accepted");
+		engine::core::Metrics::Count("client.native-motion.accepted", 1);
 		return true;
 	}
 
@@ -993,21 +1060,42 @@ namespace client {
 		Store &store, std::span<const engine::replication::Input> inputs, uint64_t coveredThrough
 	) {
 		auto *native = store.ResourceMutable<NativePlayerPrediction>();
-		if (!native || !native->Sample) return {};
+		const auto refused = [](std::string_view reason) {
+			engine::core::Metrics::Count(
+				std::string("client.native-reconcile.refused.") + std::string(reason), 1
+			);
+			return std::optional<uint64_t>{};
+		};
+		if (!native || !native->Sample) return refused("missing-sample");
 		const auto &sample = *native->Sample;
+		static size_t diagnosticCount = 0;
+		const auto trace = [&](std::string_view status) {
+			if (std::getenv("PORTAL_NATIVE_PREDICTION_DIAGNOSTIC") == nullptr || diagnosticCount++ >= 64)
+				return;
+			ENGINE_WARN(
+				"native reconcile {} input={} covered={} destination_tick={} applied_pose={}",
+				status,
+				sample.Motion.InputTick,
+				coveredThrough,
+				sample.Motion.DestinationTick,
+				native->AppliedPoseTick
+			);
+		};
 		const auto *local = store.Resource<engine::scene::LocalPlayer>();
 		const auto *rig =
 			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, sample.Player));
 		if (!local || local->Instance != sample.Player || !rig || rig->Root != sample.Root ||
-			!store.Has<Transform>(sample.Root) || sample.Motion.InputTick < coveredThrough ||
-			sample.Motion.DestinationTick <= native->AppliedPoseTick)
-			return {};
+			!store.Has<Transform>(sample.Root))
+			return refused("identity");
+		if (sample.Motion.InputTick < coveredThrough) return trace("covered-input"), refused("covered-input");
+		if (sample.Motion.DestinationTick <= native->AppliedPoseTick)
+			return trace("stale-pose"), refused("stale-pose");
 		const auto *humanoid = store.Get<engine::scene::Humanoid>(rig->Humanoid);
-		if (!humanoid) return {};
+		if (!humanoid) return refused("missing-humanoid");
 		if (const auto *current = store.Resource<LocalPlayerPrediction>();
 			current && current->Active && current->Player == sample.Player && current->Root == sample.Root &&
 			current->AuthorityTick > sample.Motion.DestinationTick)
-			return {};
+			return refused("newer-authority");
 		ENGINE_PROFILE("native player prediction replay");
 		LocalPlayerPrediction prediction;
 		if (const auto *current = store.Resource<LocalPlayerPrediction>();
@@ -1034,14 +1122,14 @@ namespace client {
 			acknowledgedThrough = input.Tick;
 		}
 		auto clock = ReplayClock(native->Clock, sample.Motion, acknowledgedSeconds, acknowledgedThrough);
-		if (!clock) return {};
+		if (!clock) return refused("clock");
 		BeginTimedReplay(prediction, clock->InputLeadSeconds);
 		double skip = std::max(0.0, -clock->InputLeadSeconds);
 		for (const auto &input : inputs) {
 			if (input.Tick <= sample.Motion.InputTick) continue;
 			engine::game::MoveInput move;
 			if (!engine::game::DecodeMoveInput(input.Bytes, move)) continue;
-			if (move.StepSeconds > std::numeric_limits<float>::max()) return {};
+			if (move.StepSeconds > std::numeric_limits<float>::max()) return refused("duration");
 			const float delta =
 				move.StepSeconds > 0 ? static_cast<float>(move.StepSeconds) : store.Time().Delta;
 			ReplayTimedInput(prediction, move, delta, skip);
@@ -1052,7 +1140,7 @@ namespace client {
 		auto validated = sample.Motion;
 		validated.Frame = prediction.Frame;
 		validated.Linear = prediction.Linear;
-		if (!engine::script::ValidPortalTransferMotion(validated)) return {};
+		if (!engine::script::ValidPortalTransferMotion(validated)) return refused("invalid-replay");
 		if (const auto *previous = store.Resource<LocalPlayerPrediction>())
 			RetainPositionCorrection(*previous, prediction);
 		store.SetResource(prediction);
@@ -1060,6 +1148,8 @@ namespace client {
 		native->AppliedPoseTick = sample.Motion.DestinationTick;
 		native->AppliedInputTick = sample.Motion.InputTick;
 		native->Clock = *clock;
+		trace("applied");
+		engine::core::Metrics::Count("client.native-reconcile.applied", 1);
 		return sample.Motion.InputTick;
 	}
 

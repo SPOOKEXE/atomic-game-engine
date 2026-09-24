@@ -5,7 +5,9 @@
 // Bounded client-side evidence required before a portal may replace its retained image with local geometry.
 
 #include <engine/assets/ContentHash.hpp>
+#include <engine/world/World.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -21,6 +23,29 @@ namespace client {
 			   transfer.Kind == engine::game::PortalSessionKind::Transfer &&
 			   approach.Destination == transfer.Claim.Destination && approach.Identity == transfer.Identity &&
 			   approach.Port == transfer.Port;
+	}
+	// Only a live authenticated replica may keep producing an aperture image.
+	// The successor takes precedence once an advisory approach becomes a transfer.
+	struct PortalCaptureCandidate {
+		engine::world::WorldId World;
+		bool Admitted = false;
+		bool Joined = false;
+		bool Live = false;
+		bool Rejected = false;
+		bool Failed = false;
+	};
+	inline engine::world::WorldId PortalCaptureDestination(
+		engine::world::WorldId rendered,
+		const PortalCaptureCandidate &approach,
+		const PortalCaptureCandidate &successor
+	) {
+		const auto eligible = [](const PortalCaptureCandidate &candidate) {
+			return candidate.World.IsValid() && candidate.Admitted && candidate.Joined && candidate.Live &&
+				   !candidate.Rejected && !candidate.Failed;
+		};
+		if (eligible(successor)) return successor.World;
+		if (eligible(approach)) return approach.World;
+		return rendered;
 	}
 	// Why the portal remains image-only for this presentation frame.
 	enum class PortalImageOnlyReason : uint8_t {
@@ -64,6 +89,22 @@ namespace client {
 		bool RetainedCapture = false;
 		bool RetainedCaptureFresh = false;
 	};
+
+	// An origin-free world may promote only after a demand scan proves it names no
+	// external assets. The scanned revision is the evidence; zero is not one.
+	inline bool
+	ApplyAssetlessReadiness(PortalReadinessEvidence &evidence, uint64_t scannedRevision, size_t namedAssets) {
+		if (scannedRevision == 0 || namedAssets != 0) return false;
+		evidence.RequiredAssetRevision = scannedRevision;
+		evidence.ResidentAssetRevision = scannedRevision;
+		evidence.AssetsResident = true;
+		return true;
+	}
+
+	// A freshly bound local world draws its own geometry. A foreign eye needs a completed image.
+	inline bool PortalArrivedEyeBlocked(bool prepared, bool boundLocalWorld, uint64_t eyeImage) {
+		return prepared && !boundLocalWorld && eyeImage == 0;
+	}
 
 	// Bounds local portal work independently of how many portal images are visible.
 	struct PortalReadinessSettings {

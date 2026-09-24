@@ -115,6 +115,8 @@ namespace engine::render {
 		// All four captures count against PixelBudget. Recursive requests require a
 		// bounded capture tree; renewal remains unavailable for this profile.
 		bool OrderedLayers = false;
+		// A portal handoff needs this eye before routine presentation work.
+		bool TransferEye = false;
 		// Compares the full request, including optional geometry and lens policy.
 		bool operator==(const PortalImageRequest &) const = default;
 	};

@@ -1,4 +1,5 @@
 #include "RendererState.hpp"
+#include "portal/PortalRendererTerminalObserver.hpp"
 
 #include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
@@ -180,7 +181,14 @@ namespace engine::render {
 
 	void Renderer::ReleasePortalCaptureTreeLease(uint64_t lease) {
 		RequireOwningThread("ReleasePortalCaptureTreeLease");
-		if (lease == 0) return;
+		if (lease == 0) {
+#if ENGINE_ASSERTS_ENABLED
+			test_support::ObservePortalRendererTerminal(
+				{this, test_support::PortalRendererTerminalKind::ReleaseCaptureTreeLease, lease, false}
+			);
+#endif
+			return;
+		}
 		for (auto &tree : State->ImportedPortalTrees) {
 			for (auto &held : tree.Leases) {
 				if (held != lease) continue;
@@ -189,9 +197,19 @@ namespace engine::render {
 						return value != 0;
 					}))
 					DropPortalCaptureTree(tree.Token);
+#if ENGINE_ASSERTS_ENABLED
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::ReleaseCaptureTreeLease, lease, true}
+				);
+#endif
 				return;
 			}
 		}
+#if ENGINE_ASSERTS_ENABLED
+		test_support::ObservePortalRendererTerminal(
+			{this, test_support::PortalRendererTerminalKind::ReleaseCaptureTreeLease, lease, false}
+		);
+#endif
 	}
 
 	void Renderer::ReleasePortalCaptureTree(uint64_t token) {
@@ -208,9 +226,22 @@ namespace engine::render {
 
 	void Renderer::DropPortalCaptureTree(uint64_t token) {
 		RequireOwningThread("DropPortalCaptureTree");
-		if (token == 0) return;
+		if (token == 0) {
+#if ENGINE_ASSERTS_ENABLED
+			test_support::ObservePortalRendererTerminal(
+				{this, test_support::PortalRendererTerminalKind::DropCaptureTree, token, false}
+			);
+#endif
+			return;
+		}
+#if ENGINE_ASSERTS_ENABLED
+		bool firstRevocation = false;
+#endif
 		for (auto &tree : State->ImportedPortalTrees) {
 			if (tree.Token != token) continue;
+#if ENGINE_ASSERTS_ENABLED
+			firstRevocation = !tree.Revoked;
+#endif
 			tree.Owner = false;
 			tree.Revoked = true;
 			break;
@@ -222,7 +253,14 @@ namespace engine::render {
 			if (tree.Token != token) continue;
 			const bool leased =
 				std::any_of(tree.Leases.begin(), tree.Leases.end(), [](auto lease) { return lease != 0; });
-			if (State->PortalTreeJob.Tree == token || leased) return;
+			if (State->PortalTreeJob.Tree == token || leased) {
+#if ENGINE_ASSERTS_ENABLED
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::DropCaptureTree, token, firstRevocation}
+				);
+#endif
+				return;
+			}
 			// Remove membership before dropping groups: member retirement routes here.
 			auto retired = std::move(tree);
 			tree = {};
@@ -230,7 +268,17 @@ namespace engine::render {
 				DropPortalImage(node.Images[0]);
 				ReleasePortalLensPrograms(node.LensPrograms);
 			}
+#if ENGINE_ASSERTS_ENABLED
+			test_support::ObservePortalRendererTerminal(
+				{this, test_support::PortalRendererTerminalKind::DropCaptureTree, token, firstRevocation}
+			);
+#endif
 			return;
 		}
+#if ENGINE_ASSERTS_ENABLED
+		test_support::ObservePortalRendererTerminal(
+			{this, test_support::PortalRendererTerminalKind::DropCaptureTree, token, false}
+		);
+#endif
 	}
 }

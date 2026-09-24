@@ -1,5 +1,8 @@
+#include "PortalReadiness.hpp"
+
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/render/PortalImageImport.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/CameraPortalView.hpp>
@@ -7,8 +10,10 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Services.hpp>
 
+#include <chrono>
 #include <client/Client.hpp>
 #include <client/Replicated.hpp>
+#include <cstdlib>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
@@ -32,6 +37,7 @@ namespace client {
 			{"frame", FramesDrawn},
 			{"loading_portals", WaitingForPortalViews()},
 			{"submitted_move_tick", SubmittedMoveTick},
+			{"submitted_move_direction", CapturedSubmittedMoveDirection},
 			{"seconds", core::Clock::Seconds()},
 			{"input_world", std::string(Universe_->NameOf(inputWorld).Text())},
 			{"view_world", std::string(view.WorldName.Text())},
@@ -47,6 +53,82 @@ namespace client {
 			{"instances", view.Instances.size()},
 			{"portals", view.Portals.size()},
 		};
+		if (std::getenv("PORTAL_BODY_ROWS_DIAGNOSTIC") != nullptr) {
+			frame["eye_hidden_rows"] =
+				std::vector<uint32_t>(view.EyeHiddenRows.begin(), view.EyeHiddenRows.end());
+			json rows = json::array();
+			for (const auto &row : view.Instances)
+				rows.push_back({
+					{"source_world", std::string(row.SourceWorld.Text())},
+					{"mesh", std::string(row.Mesh.Text())},
+					{"content_owner", std::string(view.ContentOwnerOf(row.SourceWorld).Text())},
+					{"source", row.Source},
+					{"rig", row.Rig},
+					{"body_key", json::array({row.BodyKeyHigh, row.BodyKeyLow, row.BodyGeneration})},
+					{"variant", row.Variant},
+					{"position", vector(row.Frame.Position)},
+					{"tint", json::array({row.Tint.R, row.Tint.G, row.Tint.B})},
+					{"seam_normal", vector(row.SeamNormal)},
+					{"seam_offset", row.SeamOffset},
+					{"seam_mask", row.SeamMask},
+				});
+			frame["draw_rows"] = std::move(rows);
+		}
+		const double portalCaptureNow = core::Clock::Seconds();
+		PortalCaptureCandidate approachCapture;
+		if (PortalApproach && PortalApproach->Connection) {
+			const auto &connection = *PortalApproach->Connection;
+			approachCapture = {
+				PortalApproach->World,
+				connection.Admitted(),
+				connection.Joined(),
+				connection.Live(),
+				connection.Rejected(),
+				portalCaptureNow >= PortalApproach->Deadline
+			};
+		}
+		PortalCaptureCandidate successorCapture;
+		if (PortalNext && PortalNext->Connection) {
+			const auto &connection = *PortalNext->Connection;
+			successorCapture = {
+				PortalNext->World,
+				connection.Admitted(),
+				connection.Joined(),
+				connection.Live(),
+				connection.Rejected() || PortalNext->Refused,
+				!PortalNext->Failure.empty() || portalCaptureNow >= PortalNext->Deadline
+			};
+		}
+		const auto captureCandidate = [&](const PortalCaptureCandidate &candidate) {
+			return json{
+				{"world", std::string(Universe_->NameOf(candidate.World).Text())},
+				{"admitted", candidate.Admitted},
+				{"joined", candidate.Joined},
+				{"live", candidate.Live},
+				{"rejected", candidate.Rejected},
+				{"failed", candidate.Failed}
+			};
+		};
+		frame["portal_capture_route"] = {
+			{"selected",
+			 std::string(Universe_
+							 ->NameOf(PortalCaptureDestination(Rendered, approachCapture, successorCapture))
+							 .Text())},
+			{"approach", captureCandidate(approachCapture)},
+			{"successor", captureCandidate(successorCapture)},
+		};
+		if (PortalApproach) {
+			frame["portal_capture_route"]["approach"]["active"] = PortalApproach->Active;
+			frame["portal_capture_route"]["approach"]["distance"] = PortalApproach->LastDistance;
+			frame["portal_capture_route"]["approach"]["through_origin"] =
+				vector(PortalApproach->Route.Through.Origin);
+		}
+		if (const auto pipeline = Renderer.ResolvePipelineIdentity(view.Pipeline)) {
+			frame["pipeline"] = {
+				{"name", std::string(pipeline->Name.Text())},
+				{"revision", pipeline->Revision},
+			};
+		}
 		const auto memory = Renderer.MemoryStatistics();
 		frame["gpu_memory"] = {
 			{"live_bytes", memory.LiveBytes},
@@ -55,6 +137,35 @@ namespace client {
 			{"buffer_bytes", memory.BufferBytes},
 			{"released_bytes", memory.ReleasedBytes}
 		};
+		// CaptureFrame runs before this frame's render. These are completed work
+		// and residency observed at that boundary, with no guessed upload sizes.
+		frame["previous_render_uploaded_bytes"] = LastFrame.UploadedBytes;
+		const auto import = Renderer.PortalImageUsage();
+		frame["portal_import"] = {
+			{"images", import.Images},
+			{"pending_cpu_bytes", import.PendingCpuBytes},
+			{"texture_bytes", import.TextureBytes},
+			{"cached_texture_bytes", import.CachedTextureBytes},
+			{"staging_bytes", import.StagingBytes},
+			{"uploads", import.Uploads},
+			{"uploaded_bytes", import.UploadedBytes},
+			{"reuses", import.Reuses},
+		};
+		if (PortalImages) {
+			const auto inbox = PortalImages->InboxUsage();
+			frame["portal_inbox"] = {
+				{"pending_count", inbox.PendingCount},
+				{"pending_bytes", inbox.PendingBytes},
+				{"held_count", inbox.HeldCount},
+				{"held_bytes", inbox.HeldBytes},
+				{"decoded_bytes", inbox.DecodedBytes},
+				{"stale_rejections", inbox.StaleRejections},
+				{"pending_capacity", inbox.PendingCapacity},
+				{"held_capacity", inbox.HeldCapacity},
+				{"pending_byte_capacity", inbox.PendingByteCapacity},
+				{"held_byte_capacity", inbox.HeldByteCapacity},
+			};
+		}
 		const auto pending = [](const std::unique_ptr<ContentSession> &content) {
 			return content ? content->Pending.size() + content->Issued.size() : size_t{0};
 		};
@@ -88,6 +199,12 @@ namespace client {
 				{"session", capture->Producer.Session},
 				{"generation", capture->Producer.Generation},
 				{"request", capture->Binding.Expected.RequestId},
+				{"capture_tick", capture->CaptureTick},
+				{"accepted_age_ms",
+				 std::chrono::duration<double, std::milli>(
+					 std::chrono::steady_clock::now() - capture->AcceptedAt
+				 )
+					 .count()},
 				{"camera_revision", capture->Binding.Expected.CameraRevision},
 				{"seam_revision", capture->Binding.Expected.SeamRevision},
 				{"position", capture->Camera.Position},
@@ -120,10 +237,45 @@ namespace client {
 		}
 		frame["portal_views"] = json::array();
 		for (const auto &portal : view.Portals) {
+			const auto demandStatus = [&] {
+				switch (portal.ImageDemandStatus) {
+				case engine::render::PortalDemandStatus::Ready:
+					return "ready";
+				case engine::render::PortalDemandStatus::Hidden:
+					return "hidden";
+				case engine::render::PortalDemandStatus::Invalid:
+					return "invalid";
+				case engine::render::PortalDemandStatus::Unsupported:
+					return "unsupported";
+				}
+				return "invalid";
+			};
+			const auto hiddenReason = [&] {
+				switch (portal.ImageHiddenReason) {
+				case engine::render::PortalDemandHiddenReason::None:
+					return "none";
+				case engine::render::PortalDemandHiddenReason::Frustum:
+					return "frustum";
+				case engine::render::PortalDemandHiddenReason::ClipPlane:
+					return "clip_plane";
+				}
+				return "none";
+			};
 			frame["portal_views"].push_back({
 				{"index", portal.Index},
 				{"key", std::string(portal.ImagePortal.Text())},
 				{"external", portal.ExternalImage},
+				{"demand_status", demandStatus()},
+				{"hidden_reason", hiddenReason()},
+				{"frustum_visible", portal.ImageFrustumVisible},
+				{"demand_camera", pose(portal.ImageDemandCamera)},
+				{"demand_camera_revision", portal.ImageCameraRevision},
+				{"warp",
+				 json{
+					 {"frame", pose(portal.Warp.Frame)},
+					 {"origin", vector(portal.Warp.Origin)},
+					 {"scale", portal.Warp.Scale}
+				 }},
 				{"image", portal.ImportedImage},
 				{"capture", portal.ExternalImage ? captureOf(portal.ImagePortal) : json(nullptr)},
 				{"centre", vector(portal.Centre)},
@@ -145,6 +297,8 @@ namespace client {
 				frame["head_offset"] = vector(control->Basis.UpVector() * control->HeadHeight);
 			}
 			if (active) {
+				if (const auto *cameraFrame = store.Get<scene::Transform>(active->Entity))
+					frame["input_camera"] = pose(cameraFrame->Frame);
 				if (const auto *subject = store.Get<scene::CameraSubject>(active->Entity)) {
 					frame["subject"] = subject->Target.Id;
 					frame["subject_automatic"] = subject->Automatic;
@@ -156,6 +310,7 @@ namespace client {
 					frame["eye_from_input"] = pose(history->FromInput.Frame);
 					frame["eye_origin"] = vector(history->FromInput.Origin);
 					frame["eye_scale"] = history->FromInput.Scale;
+					frame["eye_route_hops"] = history->Route.size();
 					if (!history->ArrivedFrom.empty()) {
 						frame["arrival_from"] = history->ArrivedFrom;
 						frame["arrival_point"] = vector(history->ArrivalPoint);
@@ -222,12 +377,30 @@ namespace client {
 				frame["predicted_move_direction"] = vector(prediction->Humanoid.MoveDirection);
 			}
 		});
+		std::string presentedEyeWorld = frame.value("eye_world", std::string(view.WorldName.Text()));
+		if (PortalPrevious && PortalDrawing == &PortalPrevious->View) {
+			Universe_->Enter(PortalPrevious->World, [&](ecs::Store &store) {
+				const auto *active = store.Resource<scene::ActiveCamera>();
+				const auto *history = active ? store.Get<scene::CameraPortalView>(active->Entity) : nullptr;
+				if (history && history->Started) presentedEyeWorld = history->World;
+			});
+		}
+		frame["presented_eye_world"] = presentedEyeWorld;
 		if (PortalNext) {
 			const auto &next = *PortalNext;
 			json handoff{
 				{"attempt", next.Offer.Attempt},
 				{"destination", next.Offer.Claim.Destination},
 				{"proceed", next.ProceedSent},
+				{"proceed_blocker", next.ProceedBlocker ? next.ProceedBlocker : ""},
+				{"proceed_eye_image", next.ProceedEyeImage},
+				{"proceed_eye_submitted", next.ProceedEyeSubmitted},
+				{"proceed_eye_source", next.ProceedEyeSource},
+				{"proceed_eye_source_remote", next.ProceedEyeSourceRemote},
+				{"proceed_eye_capture", next.ProceedEyeCapture},
+				{"proceed_producer_requests", next.ProceedProducerRequests},
+				{"proceed_producer_rendered", next.ProceedProducerRendered},
+				{"proceed_producer_refused", next.ProceedProducerRefused},
 				{"crossed", next.Crossed},
 				{"resume", next.ResumeSent},
 				{"ready", next.Ready},
@@ -238,9 +411,88 @@ namespace client {
 				{"refused", next.Refused},
 				{"failure", next.Failure},
 				{"commit", next.CommitSent},
+				{"committed", next.Committed},
 				{"drawing_player", next.DrawingArrivedPlayer},
+				{"promotion_blocker", next.PromotionBlocker ? next.PromotionBlocker : ""},
 				{"reconnecting", next.ReconnectAt > core::Clock::Seconds()},
 			};
+			if (next.CapturedEyeProbe) {
+				const auto &probe = *next.CapturedEyeProbe;
+				handoff["arrived_eye_probe"] = {
+					{"selected_world", probe.SelectedWorld},
+					{"eye_world", probe.EyeWorld},
+					{"image_key", probe.ImageKey},
+					{"bound_world", probe.BoundWorld},
+					{"prepared", probe.Prepared},
+					{"slot", probe.Slot},
+					{"image", probe.Image},
+					{"current_image", probe.CurrentImage},
+					{"capture_image", probe.CaptureImage},
+					{"capture_tick", probe.CaptureTick},
+					{"submitted", probe.Submitted},
+					{"producer_valid", probe.ProducerValid},
+					{"viewport_images", probe.ViewportImages},
+					{"viewport_destinations", probe.ViewportDestinations},
+				};
+			}
+			if (next.CapturedReadiness && next.CapturedReadinessDecision) {
+				const auto &facts = *next.CapturedReadiness;
+				const auto &decision = *next.CapturedReadinessDecision;
+				const auto reason = [](PortalImageOnlyReason value) {
+					switch (value) {
+					case PortalImageOnlyReason::None:
+						return "none";
+					case PortalImageOnlyReason::OutsideEnterRange:
+						return "outside-enter-range";
+					case PortalImageOnlyReason::ReplicaBaseline:
+						return "replica-baseline";
+					case PortalImageOnlyReason::Topology:
+						return "topology";
+					case PortalImageOnlyReason::Assets:
+						return "assets";
+					case PortalImageOnlyReason::PoseRange:
+						return "pose-range";
+					case PortalImageOnlyReason::Capacity:
+						return "capacity";
+					case PortalImageOnlyReason::StaleCapture:
+						return "stale-capture";
+					}
+					return "unknown";
+				};
+				handoff["readiness"] = {
+					{"reason", reason(decision.ImageOnly)},
+					{"live", decision.Live},
+					{"distance", facts.Distance},
+					{"required_baseline", facts.RequiredBaseline},
+					{"replica_baseline", facts.ReplicaBaseline},
+					{"baseline_hash_match",
+					 !facts.RequiredBaselineHash.IsZero() &&
+						 facts.RequiredBaselineHash == facts.ReplicaBaselineHash},
+					{"required_topology", facts.RequiredTopologyRevision},
+					{"replica_topology", facts.ReplicaTopologyRevision},
+					{"required_authority_epoch", facts.RequiredAuthorityEpoch},
+					{"replica_authority_epoch", facts.ReplicaAuthorityEpoch},
+					{"required_prepare_revision", facts.RequiredPrepareRevision},
+					{"replica_prepare_revision", facts.ReplicaPrepareRevision},
+					{"clock_domain_match",
+					 !facts.RequiredClockDomain.empty() &&
+						 facts.RequiredClockDomain == facts.ReplicaClockDomain},
+					{"required_source_tick", facts.RequiredSourceTick},
+					{"replica_source_tick", facts.ReplicaSourceTick},
+					{"required_destination_tick", facts.RequiredDestinationTick},
+					{"replica_destination_tick", facts.ReplicaDestinationTick},
+					{"required_asset_revision", facts.RequiredAssetRevision},
+					{"resident_asset_revision", facts.ResidentAssetRevision},
+					{"assets_resident", facts.AssetsResident},
+					{"required_pose_begin", facts.RequiredPoseBegin},
+					{"required_pose_end", facts.RequiredPoseEnd},
+					{"replica_pose_begin", facts.ReplicaPoseBegin},
+					{"replica_pose_end", facts.ReplicaPoseEnd},
+					{"capacity_reserved", facts.CapacityReserved},
+					{"retained_capture", facts.RetainedCapture},
+					{"retained_capture_fresh", facts.RetainedCaptureFresh}
+				};
+			}
 			if (next.Motion) {
 				handoff["completed_motion"] = {
 					{"input_tick", next.Motion->InputTick},

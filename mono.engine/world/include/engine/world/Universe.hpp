@@ -809,7 +809,8 @@ namespace engine::world {
 			const PresentationAddress &from,
 			const PresentationAddress &to,
 			uint64_t correlation,
-			std::span<const std::byte> payload
+			std::span<const std::byte> payload,
+			PresentationPriority priority = PresentationPriority::Routine
 		);
 		// Admits presentation traffic from an authenticated remote host.
 		PresentationStatus IngestPresentation(core::Name host, const PresentationMessage &message);

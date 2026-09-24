@@ -1,6 +1,7 @@
 #include "AmbientOcclusionCapture.hpp"
 #include "RendererState.hpp"
 #include "SecondSurfaceDepth.hpp"
+#include "portal/PortalRendererTerminalObserver.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -269,6 +270,9 @@ namespace engine::render {
 			if (slot.Phase == Impl::ResourceImagePhase::Free || slot.Image.Request.Token != token) {
 				continue;
 			}
+#if ENGINE_ASSERTS_ENABLED
+			const bool firstCancellation = !slot.Cancelled;
+#endif
 			slot.Cancelled = true;
 			if (slot.Phase == Impl::ResourceImagePhase::Queued ||
 				slot.Phase == Impl::ResourceImagePhase::Ready) {
@@ -276,8 +280,21 @@ namespace engine::render {
 				slot.Image = {};
 				slot.Phase = Impl::ResourceImagePhase::Free;
 			}
+#if ENGINE_ASSERTS_ENABLED
+			test_support::ObservePortalRendererTerminal(
+				{this,
+				 test_support::PortalRendererTerminalKind::CancelResourceImage,
+				 token,
+				 firstCancellation}
+			);
+#endif
 			return true;
 		}
+#if ENGINE_ASSERTS_ENABLED
+		test_support::ObservePortalRendererTerminal(
+			{this, test_support::PortalRendererTerminalKind::CancelResourceImage, token, false}
+		);
+#endif
 		return false;
 	}
 
