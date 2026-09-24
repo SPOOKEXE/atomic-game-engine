@@ -160,15 +160,14 @@ namespace engine::effects {
 
 		// How many of the grid's cells hold a frame, as a number a script writes.
 		//
-		// **A conversion, because `uint8_t` is not a `PropertyType`.** The storage
-		// is one byte - the ceiling is 64 and it fits the padding after the flags -
-		// and `Classes::TypeOf` has cases for 32- and 64-bit integers and none for
-		// a byte, so a generated property over this field is `Opaque` and its
-		// setter refuses every write. That is not a compile error and not a load
-		// error: it surfaces as `'FlipbookFrames' cannot take that value` the first
-		// time a scene sets it, which is exactly how it was found.
+		// **A conversion, because `uint16_t` is not a `PropertyType`.** The storage
+		// is two bytes for 256 frames, but `Classes::TypeOf` has cases for 32- and
+		// 64-bit integers and none for a halfword, so a generated property over this field is `Opaque` and
+		// its setter refuses every write. That is not a compile error and not a load error: it surfaces as
+		// `'FlipbookFrames' cannot take that value` the first time a scene sets it, which is exactly how it
+		// was found.
 		//
-		// So the value that crosses is an `int32` and the storage stays a byte,
+		// So the value that crosses is an `int32` and the storage stays compact,
 		// which is the same shape `Size` has against `Bounds::HalfExtent`: a
 		// property is a conversion, and this is one.
 		//
@@ -201,9 +200,9 @@ namespace engine::effects {
 				}
 
 				// Zero is "the whole grid" and is the default, so the low bound is
-				// zero rather than one. Sixty-four is the widest grid drawn.
+				// zero rather than one. Two hundred and fifty-six is the widest grid drawn.
 				const int32_t wanted = *static_cast<const int32_t *>(value);
-				emitter->FlipbookFrames = static_cast<uint8_t>(std::clamp(wanted, 0, 64));
+				emitter->FlipbookFrames = static_cast<uint16_t>(std::clamp(wanted, 0, 256));
 				return true;
 			};
 
@@ -239,7 +238,7 @@ namespace engine::effects {
 			);
 			ecs::EnumTable::Register(
 				FlipbookLayoutEnum().Text(),
-				std::array<std::string_view, 4>{"None", "Grid2x2", "Grid4x4", "Grid8x8"}
+				std::array<std::string_view, 5>{"None", "Grid2x2", "Grid4x4", "Grid8x8", "Grid16x16"}
 			);
 			ecs::EnumTable::Register(
 				FlipbookModeEnum().Text(),

@@ -9,7 +9,9 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <new>
 #include <vector>
 
 namespace engine::render {
@@ -126,6 +128,7 @@ namespace engine::render {
 		}
 
 		Textures.clear();
+		TimingGeneration++;
 		Awaiting.clear();
 		DefaultHandle = nullptr;
 		MissingHandle = nullptr;
@@ -255,9 +258,17 @@ namespace engine::render {
 			.FlipbookSide = image.FlipbookSide,
 			.FlipbookFrames = image.FlipbookFrames,
 			.FlipbookFrameRate = image.FlipbookFrameRate,
+			.FlipbookFrameDurations = image.FlipbookFrameDurations,
+			.FlipbookCumulativeEnds = {},
 			.SourcePixels = {},
 			.CopyStatus = TextureCopyStatus::Unsupported,
 		};
+		entry.FlipbookCumulativeEnds.reserve(image.FlipbookFrameDurations.size());
+		float elapsed = 0.0f;
+		for (float duration : image.FlipbookFrameDurations) {
+			elapsed += duration;
+			entry.FlipbookCumulativeEnds.push_back(elapsed);
+		}
 		if (retainSource) {
 			entry.SourcePixels = image.Pixels;
 			entry.CopyStatus = TextureCopyStatus::Copied;
@@ -273,9 +284,19 @@ namespace engine::render {
 		if (found == Textures.end()) {
 			return {};
 		}
-		return FlipbookCellAt(
-			found->second.FlipbookSide, found->second.FlipbookFrames, found->second.FlipbookFrameRate, seconds
-		);
+		const Entry &entry = found->second;
+		return entry.FlipbookCumulativeEnds.empty()
+				   ? FlipbookCellAt(
+						 entry.FlipbookSide, entry.FlipbookFrames, entry.FlipbookFrameRate, seconds
+					 )
+				   : FlipbookCellAt(entry.FlipbookSide, entry.FlipbookCumulativeEnds, seconds);
+	}
+
+	std::span<const float> TextureTable::TimingOf(const core::Name &name, core::Name owner) const {
+		if (!name.IsValid()) return {};
+		const auto found = Textures.find(TextureKey(name, owner));
+		return found == Textures.end() ? std::span<const float>{}
+									   : std::span<const float>(found->second.FlipbookCumulativeEnds);
 	}
 
 	uint64_t TextureTable::AnimationSignature(double seconds) const {
@@ -285,7 +306,10 @@ namespace engine::render {
 				continue;
 			}
 
-			const uint64_t frame = FlipbookFrameAt(entry.FlipbookFrames, entry.FlipbookFrameRate, seconds);
+			const uint64_t frame =
+				entry.FlipbookCumulativeEnds.empty()
+					? FlipbookFrameAt(entry.FlipbookFrames, entry.FlipbookFrameRate, seconds)
+					: FlipbookFrameAt(entry.FlipbookCumulativeEnds, seconds);
 			const uint64_t word = (name * 0x9E3779B97F4A7C15ull) ^ frame;
 			// Commutative because the catalogue is an unordered map. The name is
 			// part of every term, so two sheets on the same frame remain distinct.
@@ -306,11 +330,16 @@ namespace engine::render {
 		for (const std::vector<std::byte> &level : image.Mips) {
 			bytes += level.size();
 		}
-		if (UploadedBytes > MaximumBytes || bytes > MaximumBytes - UploadedBytes) {
+		const auto existing = Textures.find(TextureKey(name, owner));
+		const size_t oldBytes =
+			existing == Textures.end() ? 0 : std::min(UploadedBytes, existing->second.Bytes);
+		const size_t residentBytes = UploadedBytes - oldBytes;
+		// The old handle stays alive until upload succeeds, but it should not consume
+		// the steady-state budget for its own replacement.
+		if (residentBytes > MaximumBytes || bytes > MaximumBytes - residentBytes) {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
 			return false;
 		}
-		const auto existing = Textures.find(TextureKey(name, owner));
 		const size_t oldCopyBytes = existing == Textures.end() ? 0 : existing->second.SourcePixels.size();
 		const bool sourceTooLarge = image.Pixels.size() > MAXIMUM_COPY_BYTES;
 		const bool retainedOverLimit =
@@ -355,6 +384,102 @@ namespace engine::render {
 		// texture is still in flight, and a rule the type enforces is one no
 		// host can forget.
 		Awaiting.erase(TextureKey(name, owner));
+		TimingGeneration++;
+		return true;
+	}
+
+	bool TextureTable::AddBatch(std::span<const TextureBatchImage> images, core::Name owner) {
+		if (Device == nullptr || images.empty() || images.size() > 6) return false;
+		struct Pending {
+			uint64_t Key = 0;
+			SDL_GPUTexture *Texture = nullptr;
+			Entry Prepared;
+			bool Inserted = false;
+		};
+		std::array<Pending, 6> pending{};
+		size_t residentBytes = UploadedBytes;
+		size_t retainedBytes = RetainedCopyBytes;
+		for (size_t index = 0; index < images.size(); ++index) {
+			const TextureBatchImage &item = images[index];
+			if (!item.Name.IsValid() || item.Image == nullptr || !item.Image->IsValid() ||
+				(item.Image->Format != assets::TextureFormat::RGBA8 &&
+				 item.Image->Format != assets::TextureFormat::RGBA8_LINEAR))
+				return false;
+			pending[index].Key = TextureKey(item.Name, owner);
+			for (size_t earlier = 0; earlier < index; ++earlier)
+				if (pending[earlier].Key == pending[index].Key) return false;
+			const auto existing = Textures.find(pending[index].Key);
+			if (existing != Textures.end()) {
+				residentBytes -= std::min(residentBytes, existing->second.Bytes);
+				retainedBytes -= std::min(retainedBytes, existing->second.SourcePixels.size());
+			}
+		}
+		size_t newBytes = 0;
+		for (const TextureBatchImage &item : images) {
+			size_t bytes = item.Image->Pixels.size();
+			for (const auto &level : item.Image->Mips) {
+				if (level.size() > MaximumBytes - std::min(bytes, MaximumBytes)) return false;
+				bytes += level.size();
+			}
+			if (residentBytes > MaximumBytes || newBytes > MaximumBytes - residentBytes ||
+				bytes > MaximumBytes - residentBytes - newBytes)
+				return false;
+			newBytes += bytes;
+		}
+
+		const auto cleanup = [&] {
+			for (size_t index = 0; index < images.size(); ++index) {
+				if (pending[index].Texture != nullptr) gpu::ReleaseTexture(Device, pending[index].Texture);
+				if (pending[index].Inserted) Textures.erase(pending[index].Key);
+			}
+		};
+		try {
+			Textures.reserve(Textures.size() + images.size());
+			for (size_t index = 0; index < images.size(); ++index)
+				pending[index].Inserted = Textures.try_emplace(pending[index].Key).second;
+		} catch (const std::bad_alloc &) {
+			cleanup();
+			return false;
+		}
+
+		size_t newRetainedBytes = 0;
+		for (size_t index = 0; index < images.size(); ++index) {
+			const auto &image = *images[index].Image;
+			size_t uploadBytes = 0;
+			pending[index].Texture = Upload(image, images[index].Name.Text(), uploadBytes);
+			if (pending[index].Texture == nullptr) {
+				cleanup();
+				return false;
+			}
+			const bool sourceTooLarge = image.Pixels.size() > MAXIMUM_COPY_BYTES;
+			const bool retainedOverLimit =
+				image.Pixels.size() > MAXIMUM_RETAINED_COPY_BYTES - retainedBytes - newRetainedBytes;
+			const bool retainSource = RetainSources && !sourceTooLarge && !retainedOverLimit;
+			try {
+				pending[index].Prepared = Describe(pending[index].Texture, uploadBytes, image, retainSource);
+			} catch (const std::bad_alloc &) {
+				cleanup();
+				return false;
+			}
+			if (!RetainSources)
+				pending[index].Prepared.CopyStatus = TextureCopyStatus::Unsupported;
+			else if (sourceTooLarge)
+				pending[index].Prepared.CopyStatus = TextureCopyStatus::OverLimit;
+			else if (retainedOverLimit)
+				pending[index].Prepared.CopyStatus = TextureCopyStatus::Unsupported;
+			else
+				newRetainedBytes += pending[index].Prepared.SourcePixels.size();
+		}
+		for (size_t index = 0; index < images.size(); ++index) {
+			Entry &old = Textures.find(pending[index].Key)->second;
+			if (old.Texture != nullptr) gpu::ReleaseTexture(Device, old.Texture);
+			old = std::move(pending[index].Prepared);
+			pending[index].Texture = nullptr;
+			Awaiting.erase(pending[index].Key);
+		}
+		UploadedBytes = residentBytes + newBytes;
+		RetainedCopyBytes = retainedBytes + newRetainedBytes;
+		TimingGeneration++;
 		return true;
 	}
 
@@ -406,6 +531,7 @@ namespace engine::render {
 		copied.FlipbookSide = entry.FlipbookSide;
 		copied.FlipbookFrames = entry.FlipbookFrames;
 		copied.FlipbookFrameRate = entry.FlipbookFrameRate;
+		copied.FlipbookFrameDurations = entry.FlipbookFrameDurations;
 		if (!copied.IsValid()) return TextureCopyStatus::Invalid;
 		out = std::move(copied);
 		return TextureCopyStatus::Copied;
@@ -460,6 +586,43 @@ namespace engine::render {
 		// texture is still in flight, and a rule the type enforces is one no
 		// host can forget.
 		Awaiting.erase(TextureKey(name, owner));
+		TimingGeneration++;
+		return true;
+	}
+
+	bool TextureTable::ReplaceAdopt(
+		const core::Name &name,
+		SDL_GPUTexture *texture,
+		uint32_t width,
+		uint32_t height,
+		size_t bytes,
+		core::Name owner,
+		SDL_GPUTexture *&retired
+	) {
+		retired = nullptr;
+		if (Device == nullptr || !name.IsValid() || texture == nullptr) return false;
+		const auto existing = Textures.find(TextureKey(name, owner));
+		if (existing != Textures.end() && existing->second.Texture == texture) return false;
+		const size_t oldBytes = existing == Textures.end() ? 0 : existing->second.Bytes;
+		const size_t resident = UploadedBytes - std::min(UploadedBytes, oldBytes);
+		if (resident > MaximumBytes || bytes > MaximumBytes - resident) return false;
+		Entry entry;
+		entry.Texture = texture;
+		entry.Bytes = bytes;
+		entry.Width = width;
+		entry.Height = height;
+		entry.CopyStatus = TextureCopyStatus::Unsupported;
+		if (existing != Textures.end()) {
+			retired = existing->second.Texture;
+			RetainedCopyBytes -= std::min(RetainedCopyBytes, existing->second.SourcePixels.size());
+			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
+			existing->second = std::move(entry);
+		} else {
+			Textures.emplace(TextureKey(name, owner), std::move(entry));
+		}
+		UploadedBytes += bytes;
+		Awaiting.erase(TextureKey(name, owner));
+		TimingGeneration++;
 		return true;
 	}
 
@@ -499,19 +662,22 @@ namespace engine::render {
 		UploadedBytes -= std::min(UploadedBytes, found->second.Bytes);
 		RetainedCopyBytes -= std::min(RetainedCopyBytes, found->second.SourcePixels.size());
 		Textures.erase(found);
+		TimingGeneration++;
 		return true;
 	}
 	size_t TextureTable::DropOwner(core::Name owner) {
 		if (!owner.IsValid()) return 0;
 		const uint32_t ownerId = owner.Id();
 		std::erase_if(Awaiting, [ownerId](uint64_t key) { return uint32_t(key >> 32) == ownerId; });
-		return std::erase_if(Textures, [&](const auto &pair) {
+		const size_t removed = std::erase_if(Textures, [&](const auto &pair) {
 			if (uint32_t(pair.first >> 32) != ownerId) return false;
 			gpu::ReleaseTexture(Device, pair.second.Texture);
 			UploadedBytes -= std::min(UploadedBytes, pair.second.Bytes);
 			RetainedCopyBytes -= std::min(RetainedCopyBytes, pair.second.SourcePixels.size());
 			return true;
 		});
+		if (removed != 0) TimingGeneration++;
+		return removed;
 	}
 
 }

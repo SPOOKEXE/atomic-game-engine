@@ -75,7 +75,7 @@ const uint INSTANCE_SLOT = 6u;
 // when layout or material grouping changes. Staging all of it every frame is
 // thirty-nine megabytes at the roadmap's hundred thousand emitters, which is
 // more than the whole particle pool used to cost. See `particle-scatter.comp`.
-const uint PARAM_WORDS = 70u;
+const uint PARAM_WORDS = 72u;
 const uint PARAM_ROTATION = 0u;  // xyzw, the emitter frame's turn
 const uint PARAM_POSITION = 4u;  // xyz
 const uint PARAM_ACCELERATION = 7u;  // xyz
@@ -102,6 +102,8 @@ const uint PARAM_FIELD_RADIAL = 66u;
 const uint PARAM_FIELD_TANGENTIAL = 67u;
 const uint PARAM_FIELD_FALLOFF = 68u;
 const uint PARAM_FIELD_FLAGS = 69u;
+const uint PARAM_TIMELINE_OFFSET = 70u;
+const uint PARAM_TIMELINE_SCALE = 71u;
 
 // The four sixteen-sample curves, in a table indexed by block. Declared as
 // words rather than floats because the colour curve is packed RGB and the other
@@ -136,6 +138,7 @@ layout(set = 0, binding = 0) readonly buffer Work { uint words[]; } work_;
 layout(set = 0, binding = 1) readonly buffer Params { uint words[]; } params;
 layout(set = 0, binding = 2) readonly buffer Curves { uint words[]; } curves;
 layout(set = 0, binding = 3) readonly buffer Seams { uint words[]; } seams;
+layout(set = 0, binding = 4) readonly buffer Timelines { uint words[]; } timelines;
 
 layout(set = 1, binding = 0) buffer States { uint words[]; } states;
 layout(set = 1, binding = 1) writeonly buffer Instances { uint words[]; } instances;
@@ -301,6 +304,37 @@ uint FlipbookCell(uint base, float age, float lifetime, uint cells, uint start) 
 	}
 
 	uint playback = BlockUint(base, PARAM_PLAYBACK);
+	uint offset = BlockUint(base, PARAM_TIMELINE_OFFSET);
+	if (offset != 0u) {
+		uint count = timelines.words[offset];
+		if (count != cells || count > 256u) return 0u;
+		float total = uintBitsToFloat(timelines.words[offset + 1u]);
+		float initial = start == 0u ? 0.0 : uintBitsToFloat(timelines.words[offset + 1u + start]);
+		float position;
+		if (playback == 1u) {
+			float fraction = lifetime > 0.0 ? clamp(age / lifetime, 0.0, 1.0) : 0.0;
+			position = initial + fraction * (total - initial);
+		} else {
+			float first = uintBitsToFloat(timelines.words[offset + 2u]);
+			float beforeLast = uintBitsToFloat(timelines.words[offset + count]);
+			float last = total - beforeLast;
+			float period = playback == 2u ? 2.0 * total - first - last : total;
+			position = mod(initial + age * BlockFloat(base, PARAM_TIMELINE_SCALE), period);
+			if (playback == 2u && position >= total) {
+				float reverse = 2.0 * total - last - position;
+				for (uint frame = 0u; frame < count; frame++) {
+					if (uintBitsToFloat(timelines.words[offset + 2u + frame]) >= reverse)
+						return frame;
+				}
+				return 0u;
+			}
+		}
+		for (uint frame = 0u; frame < count; frame++) {
+			if (position < uintBitsToFloat(timelines.words[offset + 2u + frame]))
+				return frame;
+		}
+		return count - 1u;
+	}
 	if (playback == 1u) {
 		float fraction = lifetime > 0.0 ? age / lifetime : 0.0;
 		return min(start + uint(fraction * float(cells)), cells - 1u);

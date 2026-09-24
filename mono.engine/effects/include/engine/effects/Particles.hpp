@@ -137,6 +137,9 @@ namespace engine::effects {
 
 		// Sixty-four.
 		Grid8x8 = 3,
+
+		// Two hundred and fifty-six.
+		Grid16x16 = 4,
 	};
 
 	// How many cells a layout has on each side.
@@ -145,7 +148,7 @@ namespace engine::effects {
 	// per particle per frame inside the step.
 	//
 	// @param layout The layout.
-	// @return 1, 2, 4 or 8.
+	// @return 1, 2, 4, 8 or 16.
 	constexpr uint32_t FlipbookSide(FlipbookLayout layout) {
 		return layout == FlipbookLayout::None ? 1u : 1u << static_cast<uint32_t>(layout);
 	}
@@ -153,7 +156,7 @@ namespace engine::effects {
 	// How many cells a layout has in total.
 	//
 	// @param layout The layout.
-	// @return 1, 4, 16 or 64.
+	// @return 1, 4, 16, 64 or 256.
 	constexpr uint32_t FlipbookCells(FlipbookLayout layout) {
 		const uint32_t side = FlipbookSide(layout);
 		return side * side;
@@ -250,8 +253,8 @@ namespace engine::effects {
 		// say how long it takes.
 		//
 		// **Zero means "ask the texture, then fall back to twelve".** An
-		// imported animation states its own rate - a GIF has a delay per frame,
-		// and `scene::TextureCatalogue` carries what those average to - so a
+		// imported animation states its own rate. A fixed-delay GIF has an exact
+		// rate, and `scene::TextureCatalogue` carries it, so a
 		// scene pointing an emitter at one should not have to repeat a number
 		// the file already holds. An author who sets this means it and wins;
 		// `ResolvedRate` in `ParticleSystem.cpp` is the order.
@@ -384,10 +387,8 @@ namespace engine::effects {
 		// carries it - and only a scene that knows better than both has to
 		// speak.
 		//
-		// A `uint8_t` because the ceiling is 64 - the widest grid this engine
-		// draws. It sits here rather than beside `Flipbook` because it fits the
-		// padding after the flags, which is what named padding is for.
-		uint8_t FlipbookFrames = 0;
+		// A 16x16 sheet holds 256 frames, so the count needs two bytes.
+		uint16_t FlipbookFrames = 0;
 
 		// Whether every particle starts on a cell of its own choosing.
 		bool FlipbookStartRandom = false;
@@ -461,7 +462,7 @@ namespace engine::effects {
 		//
 		// Rotation in the low sixteen bits as a turn over 65,536, which is a
 		// hundredth of a degree - finer than a screen can show. The cell in the
-		// high sixteen, which is sixty-four values used out of the range.
+		// high sixteen, which supports all 256 cells of the widest grid.
 		uint32_t RotationAndCell = 0;
 
 		// Its colour and alpha, as RGBA8.

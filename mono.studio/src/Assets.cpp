@@ -534,6 +534,8 @@ namespace studio {
 					.Side = image.FlipbookSide,
 					.Frames = image.FlipbookFrames,
 					.FrameRate = image.FlipbookFrameRate,
+					.FrameDurations = image.FlipbookFrameDurations,
+					.CumulativeEnds = {},
 				};
 				ContentTextureFacts[interned.Id()] = facts;
 				if (Universe != nullptr) {

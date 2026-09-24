@@ -52,6 +52,8 @@ namespace client {
 				.Side = stored.FlipbookSide,
 				.Frames = stored.FlipbookFrames,
 				.FrameRate = stored.FlipbookFrameRate,
+				.FrameDurations = stored.FlipbookFrameDurations,
+				.CumulativeEnds = {},
 			};
 		}
 	}
@@ -530,6 +532,8 @@ namespace client {
 						.Side = image.FlipbookSide,
 						.Frames = image.FlipbookFrames,
 						.FrameRate = image.FlipbookFrameRate,
+						.FrameDurations = image.FlipbookFrameDurations,
+						.CumulativeEnds = {},
 					};
 					for (const engine::world::WorldId id : worlds) {
 						Universe_->Enter(id, [&name, &facts](engine::ecs::Store &store) {

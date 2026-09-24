@@ -1,10 +1,11 @@
 #include <engine/render/Flipbook.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace engine::render {
 
-	uint32_t FlipbookFrameAt(uint8_t frames, float rate, double seconds) {
+	uint32_t FlipbookFrameAt(uint16_t frames, float rate, double seconds) {
 		if (frames <= 1) {
 			return 0;
 		}
@@ -30,7 +31,17 @@ namespace engine::render {
 		return static_cast<uint32_t>(std::fmod(elapsed, static_cast<double>(frames)));
 	}
 
-	FlipbookCell FlipbookCellAt(uint8_t side, uint8_t frames, float rate, double seconds) {
+	uint32_t FlipbookFrameAt(std::span<const float> cumulativeEnds, double seconds) {
+		if (cumulativeEnds.size() <= 1 || !(seconds > 0.0) || !std::isfinite(seconds)) return 0;
+		const double total = cumulativeEnds.back();
+		if (!(total > 0.0)) return 0;
+		const float position = static_cast<float>(std::fmod(seconds, total));
+		return static_cast<uint32_t>(
+			std::upper_bound(cumulativeEnds.begin(), cumulativeEnds.end(), position) - cumulativeEnds.begin()
+		);
+	}
+
+	FlipbookCell FlipbookCellAt(uint8_t side, uint16_t frames, float rate, double seconds) {
 		if (side <= 1 || frames == 0) {
 			return {};
 		}
@@ -48,5 +59,16 @@ namespace engine::render {
 		cell.OffsetU = static_cast<float>(frame % side) / grid;
 		cell.OffsetV = static_cast<float>(frame / side) / grid;
 		return cell;
+	}
+
+	FlipbookCell FlipbookCellAt(uint8_t side, std::span<const float> cumulativeEnds, double seconds) {
+		if (side <= 1 || cumulativeEnds.empty()) return {};
+		const uint32_t frame = FlipbookFrameAt(cumulativeEnds, seconds);
+		const float grid = static_cast<float>(side);
+		return FlipbookCell{
+			.Scale = 1.0f / grid,
+			.OffsetU = static_cast<float>(frame % side) / grid,
+			.OffsetV = static_cast<float>(frame / side) / grid,
+		};
 	}
 }

@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -166,7 +167,8 @@ namespace engine::render {
 
 		// The block's parameters, in a table indexed by block. Forces and spawn
 		// configuration live here without widening a particle row.
-		constexpr uint32_t PARTICLE_PARAM_WORDS = 70;
+		constexpr uint32_t PARTICLE_PARAM_WORDS = 72;
+		constexpr uint32_t PARTICLE_TIMELINE_MAX_WORDS = 16u * 1024u * 1024u / sizeof(uint32_t);
 		constexpr uint32_t PARTICLE_PARAM_ROTATION = 0;
 		constexpr uint32_t PARTICLE_PARAM_POSITION = 4;
 		constexpr uint32_t PARTICLE_PARAM_ACCELERATION = 7;
@@ -208,6 +210,8 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_PARAM_FIELD_TANGENTIAL = 67;
 		constexpr uint32_t PARTICLE_PARAM_FIELD_FALLOFF = 68;
 		constexpr uint32_t PARTICLE_PARAM_FIELD_FLAGS = 69;
+		constexpr uint32_t PARTICLE_PARAM_TIMELINE_OFFSET = 70;
+		constexpr uint32_t PARTICLE_PARAM_TIMELINE_SCALE = 71;
 
 		// The four curves, in a second table indexed by block. Words rather than
 		// floats because the colour curve is packed RGB and the other three are
@@ -287,7 +291,8 @@ namespace engine::render {
 			uint32_t *words,
 			const effects::EmitterBlock &block,
 			const effects::EmitterSpawnState &spawn,
-			const effects::EmitterRuntime &runtime
+			const effects::EmitterRuntime &runtime,
+			uint32_t timelineOffset
 		) {
 			const glm::quat turn = block.Frame.Rotation();
 			PutFloat(words, PARTICLE_PARAM_ROTATION, turn.x);
@@ -355,6 +360,8 @@ namespace engine::render {
 			words[PARTICLE_PARAM_FIELD_FLAGS] = (field.Source != ecs::NULL_ENTITY ? 1u : 0u) |
 												(field.LocalSpace ? 2u : 0u) |
 												(field.TwoDimensional ? 4u : 0u);
+			words[PARTICLE_PARAM_TIMELINE_OFFSET] = timelineOffset;
+			PutFloat(words, PARTICLE_PARAM_TIMELINE_SCALE, block.FlipbookTimelineScale);
 		}
 
 		// Fills one row of the curve table.
@@ -736,6 +743,97 @@ namespace engine::render {
 			   );
 	}
 
+	bool Renderer::Impl::PrepareParticleTimeline(const View &view, SDL_GPUCommandBuffer *command) {
+		ParticlePool &pool = ActiveParticleWorld->Pool;
+		if (command == nullptr) return false;
+
+		std::vector<uint32_t> words{0};
+		std::unordered_map<uint64_t, uint32_t> offsets;
+		bool incomplete = false;
+		for (const ParticleBatch &batch : view.Particles) {
+			if (batch.Block == nullptr || !batch.Block->VariableFlipbookTiming) continue;
+			if (batch.Block->InvalidFlipbookTiming) {
+				incomplete = true;
+				continue;
+			}
+			const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner);
+			const uint64_t key = (uint64_t(owner.Id()) << 32) | batch.Texture.Id();
+			const std::span<const float> ends = Textures.TimingOf(batch.Texture, owner);
+			if (ends.size() != batch.Block->Frames || ends.empty() || ends.size() > 256) {
+				ENGINE_WARN(
+					"particle timeline {}: texture timing does not match emitter frame count",
+					batch.Texture.Text()
+				);
+				incomplete = true;
+				continue;
+			}
+			if (offsets.contains(key)) continue;
+			if (words.size() + ends.size() + 2 > PARTICLE_TIMELINE_MAX_WORDS) {
+				ENGINE_WARN(
+					"particle timeline {}: 16 MiB world timing budget exceeded", batch.Texture.Text()
+				);
+				incomplete = true;
+				continue;
+			}
+			const uint32_t offset = static_cast<uint32_t>(words.size());
+			offsets.emplace(key, offset);
+			words.push_back(static_cast<uint32_t>(ends.size()));
+			uint32_t bits = 0;
+			const float total = ends.back();
+			std::memcpy(&bits, &total, sizeof(bits));
+			words.push_back(bits);
+			for (float end : ends) {
+				std::memcpy(&bits, &end, sizeof(bits));
+				words.push_back(bits);
+			}
+		}
+
+		const uint32_t bytes = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+		info.size = bytes;
+		SDL_GPUBuffer *next = gpu::CreateBuffer(Device, &info);
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
+		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		transferInfo.size = bytes;
+		SDL_GPUTransferBuffer *staging = gpu::CreateTransferBuffer(Device, &transferInfo);
+		if (next == nullptr || staging == nullptr) {
+			if (next != nullptr) gpu::ReleaseBuffer(Device, next);
+			if (staging != nullptr) gpu::ReleaseTransferBuffer(Device, staging);
+			ENGINE_ERROR("particle timeline: could not allocate {} bytes: {}", bytes, SDL_GetError());
+			return false;
+		}
+		void *mapped = SDL_MapGPUTransferBuffer(Device, staging, false);
+		if (mapped == nullptr) {
+			gpu::ReleaseBuffer(Device, next);
+			gpu::ReleaseTransferBuffer(Device, staging);
+			return false;
+		}
+		std::memcpy(mapped, words.data(), bytes);
+		SDL_UnmapGPUTransferBuffer(Device, staging);
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+		if (copy == nullptr) {
+			gpu::ReleaseBuffer(Device, next);
+			gpu::ReleaseTransferBuffer(Device, staging);
+			return false;
+		}
+		const SDL_GPUTransferBufferLocation source{staging, 0};
+		const SDL_GPUBufferRegion destination{next, 0, bytes};
+		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+		SDL_EndGPUCopyPass(copy);
+		gpu::ReleaseTransferBuffer(Device, staging);
+		if (pool.Timeline != nullptr) gpu::ReleaseBuffer(Device, pool.Timeline);
+		pool.Timeline = next;
+		pool.TimelineOffsets = std::move(offsets);
+		pool.TimelineRevision = Textures.TimingRevision();
+		pool.TimelineLayoutRevision = view.ParticleLayoutRevision;
+		pool.TimelineResidentRevision = view.ParticleResidentRevision;
+		pool.TimelineIncomplete = incomplete;
+		pool.TimelineOwner = view.ContentOwner;
+		std::fill(pool.ParamRevision.begin(), pool.ParamRevision.end(), ParticlePool::UNUPLOADED_REVISION);
+		return true;
+	}
+
 	void Renderer::Impl::ReleaseParticlePool() {
 		for (ParticleWorld &world : ParticleWorlds) {
 			ParticlePool &Particles = world.Pool;
@@ -748,7 +846,8 @@ namespace engine::render {
 				  &Particles.EmitterRuntime,
 				  &Particles.ParamUpdateBuffer,
 				  &Particles.CurveUpdateBuffer,
-				  &Particles.Seams}) {
+				  &Particles.Seams,
+				  &Particles.Timeline}) {
 				if (*buffer != nullptr) {
 					gpu::ReleaseBuffer(Device, *buffer);
 					*buffer = nullptr;
@@ -955,10 +1054,10 @@ namespace engine::render {
 			}
 
 			SDL_BindGPUComputePipeline(pass, ParticleStep);
-			SDL_GPUBuffer *const reads[4] = {
-				Particles.Work, Particles.Params, Particles.Curves, Particles.Seams
+			SDL_GPUBuffer *const reads[5] = {
+				Particles.Work, Particles.Params, Particles.Curves, Particles.Seams, Particles.Timeline
 			};
-			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 4);
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 5);
 
 			const float step[4] = {
 				Particles.Delta,
@@ -1072,9 +1171,26 @@ namespace engine::render {
 			ActiveParticleWorld->DrawPlanStamp.Valid = false;
 			return {};
 		}
+		const bool variableTimeline =
+			std::any_of(batches.begin(), batches.end(), [](const ParticleBatch &batch) {
+				return batch.Block != nullptr && batch.Block->VariableFlipbookTiming;
+			});
+		const bool timelineHasData = Particles.TimelineIncomplete || !Particles.TimelineOffsets.empty();
+		const bool authoredTimelineChanged =
+			Particles.TimelineResidentRevision != view.ParticleResidentRevision &&
+			(timelineHasData || variableTimeline);
+		// Fixed-rate emitters bind the one-word sentinel forever. Their layout may
+		// grow every frame without requiring another device allocation.
+		const bool timingChanged =
+			Particles.Timeline == nullptr ||
+			((timelineHasData || variableTimeline) &&
+			 (Particles.TimelineRevision != Textures.TimingRevision() ||
+			  Particles.TimelineLayoutRevision != view.ParticleLayoutRevision ||
+			  Particles.TimelineOwner != view.ContentOwner || authoredTimelineChanged));
+		if (timingChanged && !PrepareParticleTimeline(view, command)) return {};
 
 		const bool rebuildLayout =
-			!ActiveParticleWorld->PreparedRevisionValid ||
+			timingChanged || !ActiveParticleWorld->PreparedRevisionValid ||
 			ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision ||
 			ActiveParticleWorld->PreparedBatches.size() != batches.size();
 		// A resident pool still has to advance when no authored emitter value did.
@@ -1254,6 +1370,22 @@ namespace engine::render {
 					continue;
 				}
 				const effects::EmitterBlock &block = *batch.Block;
+				uint32_t timelineOffset = 0;
+				if (block.VariableFlipbookTiming) {
+					if (block.InvalidFlipbookTiming) {
+						residentIncomplete = true;
+						continue;
+					}
+					const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner);
+					const uint64_t key = (uint64_t(owner.Id()) << 32) | batch.Texture.Id();
+					const auto found = Particles.TimelineOffsets.find(key);
+					if (found == Particles.TimelineOffsets.end() || found->second == 0 ||
+						Textures.TimingOf(batch.Texture, owner).size() != block.Frames) {
+						residentIncomplete = true;
+						continue;
+					}
+					timelineOffset = found->second;
+				}
 
 				// **Brought up to date first, and left out of the frame if it cannot
 				// be.** The step reads a block's capacity out of the parameter table,
@@ -1274,7 +1406,7 @@ namespace engine::render {
 					if (needParams) {
 						uint32_t *const row = changedParams + params * (PARTICLE_PARAM_WORDS + 1);
 						row[0] = batch.Index;
-						WriteParticleParams(row + 1, block, *batch.Spawn, *batch.Runtime);
+						WriteParticleParams(row + 1, block, *batch.Spawn, *batch.Runtime, timelineOffset);
 						Particles.ParamRevision[batch.Index] = block.Revision;
 						params++;
 					}

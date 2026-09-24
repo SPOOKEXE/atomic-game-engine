@@ -32,6 +32,7 @@
 // @tier L12 · client
 
 #include <cstdint>
+#include <span>
 
 namespace engine::render {
 
@@ -69,7 +70,10 @@ namespace engine::render {
 	//                for ever is the one answer that is certainly wrong.
 	// @param seconds How long the animation has been running.
 	// @return The frame index, always below `frames`, or zero for a still.
-	uint32_t FlipbookFrameAt(uint8_t frames, float rate, double seconds);
+	uint32_t FlipbookFrameAt(uint16_t frames, float rate, double seconds);
+
+	// Endpoints are the cumulative seconds for a validated variable timeline.
+	uint32_t FlipbookFrameAt(std::span<const float> cumulativeEnds, double seconds);
 
 	// Where that frame sits in the sheet.
 	//
@@ -78,7 +82,8 @@ namespace engine::render {
 	// @param rate    Frames a second, or zero for `DEFAULT_RATE`.
 	// @param seconds How long the animation has been running.
 	// @return The transform. The identity for anything that is not a sheet.
-	FlipbookCell FlipbookCellAt(uint8_t side, uint8_t frames, float rate, double seconds);
+	FlipbookCell FlipbookCellAt(uint8_t side, uint16_t frames, float rate, double seconds);
+	FlipbookCell FlipbookCellAt(uint8_t side, std::span<const float> cumulativeEnds, double seconds);
 
 	// What a sheet that states no rate is played at.
 	//

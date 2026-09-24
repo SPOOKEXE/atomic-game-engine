@@ -3483,7 +3483,7 @@
 		{"name": "ParticleEmitterShape", "members": ["Box", "Sphere", "Cylinder", "Disc"]},
 		{"name": "ParticleEmitterShapeInOut", "members": ["Outward", "Inward", "InAndOut"]},
 		{"name": "ParticleEmitterShapeStyle", "members": ["Volume", "Surface"]},
-		{"name": "ParticleFlipbookLayout", "members": ["None", "Grid2x2", "Grid4x4", "Grid8x8"]},
+		{"name": "ParticleFlipbookLayout", "members": ["None", "Grid2x2", "Grid4x4", "Grid8x8", "Grid16x16"]},
 		{"name": "ParticleFlipbookMode", "members": ["Loop", "OneShot", "PingPong", "Random"]},
 		{"name": "ParticleOrientation", "members": ["FacingCamera", "FacingCameraWorldUp", "VelocityParallel", "VelocityPerpendicular"]},
 		{"name": "ResamplerMode", "members": ["Default", "Pixelated"]},

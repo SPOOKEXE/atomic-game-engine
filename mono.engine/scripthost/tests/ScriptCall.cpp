@@ -1068,7 +1068,13 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 				 engine::scene::RecordTexture(
 					 store,
 					 engine::core::Name("fx/fire.atex"),
-					 engine::scene::FlipbookFacts{.Side = 3, .Frames = 9, .FrameRate = 12.0f}
+					 engine::scene::FlipbookFacts{
+						 .Side = 3,
+						 .Frames = 9,
+						 .FrameRate = 12.0f,
+						 .FrameDurations = {},
+						 .CumulativeEnds = {}
+					 }
 				 )
 			 );
 		 }},

@@ -16,6 +16,7 @@
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.scene.texturecatalogue")
@@ -42,7 +43,9 @@ namespace {
 	}
 
 	FlipbookFacts Fox() {
-		return FlipbookFacts{.Side = 8, .Frames = 48, .FrameRate = 24.0f};
+		return FlipbookFacts{
+			.Side = 8, .Frames = 48, .FrameRate = 24.0f, .FrameDurations = {}, .CumulativeEnds = {}
+		};
 	}
 }
 
@@ -57,6 +60,86 @@ TEST_CASE("a recorded texture reads back", "[scene][texturecatalogue]") {
 	CHECK(facts.Frames == 48);
 	CHECK(facts.FrameRate == 24.0f);
 	CHECK(facts.IsFlipbook());
+}
+
+TEST_CASE("a 16 by 16 texture keeps all 256 frame facts", "[scene][texturecatalogue]") {
+	Store store = Fresh("texturecatalogue.large");
+	const Name texture("effects/large.atex");
+	REQUIRE(RecordTexture(
+		store,
+		texture,
+		FlipbookFacts{
+			.Side = 16, .Frames = 256, .FrameRate = 30.0f, .FrameDurations = {}, .CumulativeEnds = {}
+		}
+	));
+	const FlipbookFacts facts = FlipbookOf(store, texture);
+	CHECK(facts.Side == 16);
+	CHECK(facts.Frames == 256);
+	CHECK(facts.FrameRate == 30.0f);
+}
+
+TEST_CASE("variable frame durations replace prior texture timing", "[scene][texturecatalogue]") {
+	Store store = Fresh("texturecatalogue.variable");
+	const Name texture("effects/variable.atex");
+	REQUIRE(RecordTexture(
+		store,
+		texture,
+		FlipbookFacts{.Side = 2, .Frames = 3, .FrameDurations = {0.04f, 0.10f, 0.06f}, .CumulativeEnds = {}}
+	));
+	const uint64_t recorded = TexturesOf(store).Revision;
+	CHECK(FlipbookOf(store, texture).FrameDurations == std::vector<float>{0.04f, 0.10f, 0.06f});
+	CHECK(FlipbookOf(store, texture).CumulativeEnds == std::vector<float>{0.04f, 0.14f, 0.20f});
+	REQUIRE(RecordTexture(
+		store,
+		texture,
+		FlipbookFacts{.Side = 2, .Frames = 3, .FrameRate = 12.0f, .FrameDurations = {}, .CumulativeEnds = {}}
+	));
+	CHECK(TexturesOf(store).Revision > recorded);
+	CHECK(FlipbookOf(store, texture).FrameDurations.empty());
+	CHECK(FlipbookOf(store, texture).CumulativeEnds.empty());
+}
+
+TEST_CASE(
+	"a 257-frame sequence records exact ordered timing without an atlas side", "[scene][texturecatalogue]"
+) {
+	Store store = Fresh("texturecatalogue.sequence");
+	const Name texture("effects/long.aseq");
+	FlipbookFacts authored;
+	authored.Frames = 257;
+	for (uint32_t frame = 0; frame < 257; ++frame)
+		authored.FrameDurations.push_back((frame & 1) == 0 ? 0.04f : 0.11f);
+	REQUIRE(RecordTexture(store, texture, authored));
+	const FlipbookFacts recorded = FlipbookOf(store, texture);
+	CHECK(recorded.IsFlipbook());
+	CHECK(recorded.Side == 0);
+	CHECK(recorded.Frames == 257);
+	REQUIRE(recorded.CumulativeEnds.size() == 257);
+	CHECK(recorded.CumulativeEnds[0] == Catch::Approx(0.04f));
+	CHECK(recorded.CumulativeEnds[1] == Catch::Approx(0.15f));
+	CHECK(recorded.TotalDuration == Catch::Approx(recorded.CumulativeEnds.back()));
+	const uint64_t revision = TexturesOf(store).Revision;
+	authored.FrameDurations.pop_back();
+	CHECK_FALSE(RecordTexture(store, texture, authored));
+	CHECK(TexturesOf(store).Revision == revision);
+	CHECK(FlipbookOf(store, texture).Frames == 257);
+}
+
+TEST_CASE("invalid variable timing leaves the recorded texture unchanged", "[scene][texturecatalogue]") {
+	Store store = Fresh("texturecatalogue.invalid");
+	const Name texture("effects/variable.atex");
+	REQUIRE(RecordTexture(
+		store,
+		texture,
+		FlipbookFacts{.Side = 2, .Frames = 3, .FrameDurations = {0.04f, 0.10f, 0.06f}, .CumulativeEnds = {}}
+	));
+	const uint64_t revision = TexturesOf(store).Revision;
+	CHECK_FALSE(RecordTexture(
+		store,
+		texture,
+		FlipbookFacts{.Side = 2, .Frames = 3, .FrameDurations = {0.04f, 0.0f, 0.06f}, .CumulativeEnds = {}}
+	));
+	CHECK(TexturesOf(store).Revision == revision);
+	CHECK(FlipbookOf(store, texture).FrameDurations[1] == 0.10f);
 }
 
 TEST_CASE("an unknown texture answers zeroes rather than guessing", "[scene][texturecatalogue]") {
@@ -98,7 +181,11 @@ TEST_CASE("re-recording a texture replaces what was there", "[scene][texturecata
 	const Name texture("effects/fox_dance.atex");
 
 	REQUIRE(RecordTexture(store, texture, Fox()));
-	REQUIRE(RecordTexture(store, texture, FlipbookFacts{.Side = 4, .Frames = 12, .FrameRate = 30.0f}));
+	REQUIRE(RecordTexture(
+		store,
+		texture,
+		FlipbookFacts{.Side = 4, .Frames = 12, .FrameRate = 30.0f, .FrameDurations = {}, .CumulativeEnds = {}}
+	));
 
 	const FlipbookFacts facts = FlipbookOf(store, texture);
 	CHECK(facts.Side == 4);

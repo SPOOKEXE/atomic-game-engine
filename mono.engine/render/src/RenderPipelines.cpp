@@ -916,7 +916,7 @@ namespace engine::render {
 			// tables, then writes newborn state and per-emitter counters. Integration
 			// reads those plus curves and portal panes, then writes the state pool and
 			// instance stream. The scatter updates changed parameter or curve rows.
-			ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
+			ParticleStep = LoadComputePipeline("particle-step.comp", 0, 5, 0, 2, 64, 1);
 			ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
 			ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
 			GpuParticleFieldStep = LoadComputePipeline("gpu-particle-field.comp", 0, 1, 0, 1, 256, 1);

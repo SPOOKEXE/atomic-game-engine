@@ -1763,6 +1763,16 @@ namespace engine::render {
 			uint32_t SeamCapacity = 0;
 			//@}
 
+			// One bounded table of distinct variable timelines for this world.
+			// Offset zero is the fixed-rate sentinel.
+			SDL_GPUBuffer *Timeline = nullptr;
+			std::unordered_map<uint64_t, uint32_t> TimelineOffsets;
+			uint64_t TimelineRevision = 0;
+			uint64_t TimelineLayoutRevision = 0;
+			uint64_t TimelineResidentRevision = 0;
+			bool TimelineIncomplete = false;
+			core::Name TimelineOwner;
+
 			// What changed for the dispatch being recorded.
 			//@{
 			uint32_t WorkItems = 0;
@@ -1848,6 +1858,7 @@ namespace engine::render {
 		// frame.
 		//@{
 		bool ReserveParticlePool(uint32_t slots, SDL_GPUCommandBuffer *command);
+		bool PrepareParticleTimeline(const View &view, SDL_GPUCommandBuffer *command);
 		bool ReserveParticleTables(uint32_t blocks, SDL_GPUCommandBuffer *command);
 		bool ReserveParticleStaging(uint32_t workItems, uint32_t seams);
 		//@}

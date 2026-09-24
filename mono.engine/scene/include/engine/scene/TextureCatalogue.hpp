@@ -33,6 +33,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -44,21 +45,30 @@ namespace engine::scene {
 	//
 	// @since v0.10
 	struct FlipbookFacts {
-		// The grid's side. Zero means the texture is a still image, or that
-		// this world has not been told about it - see `TextureCatalogue::Find`.
+		// The grid's side. Zero with more than 256 timed frames means an ordered
+		// sequence; zero frames means a still or an unknown name.
 		uint8_t Side = 0;
 
-		// How many of the grid's cells hold a frame.
-		uint8_t Frames = 0;
+		// How many frames the atlas grid or ordered sequence holds.
+		uint16_t Frames = 0;
 
 		// Frames a second the source was authored at, or zero when the source
-		// did not say. A hand-drawn sheet says nothing; a GIF states a delay per
-		// frame and this is what those average to.
+		// did not say. A hand-drawn sheet says nothing; a fixed-delay GIF states
+		// one exact rate.
 		float FrameRate = 0.0f;
+
+		// Exact seconds per populated frame for a variable-duration source.
+		// Empty retains fixed-rate playback. This is derived content data and
+		// crosses into each world by value, like the grid facts above.
+		std::vector<float> FrameDurations;
+
+		// Derived once when recorded. Each endpoint is strictly increasing.
+		std::vector<float> CumulativeEnds;
+		float TotalDuration = 0.0f;
 
 		// Whether this describes an animation at all.
 		bool IsFlipbook() const {
-			return Side > 0 && Frames > 0;
+			return Frames > 0;
 		}
 	};
 
@@ -88,10 +98,8 @@ namespace engine::scene {
 
 		// What is known about a texture, or a zeroed record.
 		//
-		// **A zero `Side` means "not known here", not "one cell".** A still
-		// image and an unregistered name give the same answer on purpose:
-		// neither is something to play, and a consumer that had to tell them
-		// apart would be asking a question with no use.
+		// Zero side and zero frames means still or unknown. Zero side with more
+		// than 256 timed frames identifies a sequence without a GPU atlas layout.
 		//
 		// @param texture The texture's name.
 		// @return The facts, or a zeroed record.

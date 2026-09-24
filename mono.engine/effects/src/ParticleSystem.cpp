@@ -271,8 +271,8 @@ namespace engine::effects {
 		// Zero on the emitter means the whole grid, which is what an authored
 		// sheet is; a GIF import says how many it actually decoded. Clamped to the
 		// grid, because a count larger than the grid would index past the sheet.
-		uint8_t ResolvedFrames(const ParticleEmitter &emitter, const scene::FlipbookFacts &facts) {
-			const auto cells = static_cast<uint8_t>(FlipbookCells(emitter.Flipbook));
+		uint16_t ResolvedFrames(const ParticleEmitter &emitter, const scene::FlipbookFacts &facts) {
+			const auto cells = static_cast<uint16_t>(FlipbookCells(emitter.Flipbook));
 			if (emitter.FlipbookFrames != 0) {
 				return std::min(emitter.FlipbookFrames, cells);
 			}
@@ -347,7 +347,21 @@ namespace engine::effects {
 			}
 			const scene::FlipbookFacts facts = scene::FlipbookOf(store, emitter.Texture);
 			const float rate = ResolvedRate(emitter, facts);
-			const uint8_t frames = ResolvedFrames(emitter, facts);
+			const uint16_t frames = ResolvedFrames(emitter, facts);
+			const bool variable = !facts.FrameDurations.empty();
+			const bool invalidTiming =
+				variable && (facts.Side != FlipbookSide(emitter.Flipbook) || frames != facts.Frames ||
+							 facts.CumulativeEnds.size() != frames);
+			const float timelineScale =
+				variable && !invalidTiming && emitter.FlipbookFramerate.Maximum > 0.0f
+					? emitter.FlipbookFramerate.Maximum * facts.TotalDuration / static_cast<float>(frames)
+					: 1.0f;
+			if (invalidTiming) {
+				ENGINE_WARN(
+					"particle flipbook {}: layout/frame count conflicts with variable-duration texture",
+					emitter.Texture.Text()
+				);
+			}
 
 			const bool authoredSame =
 				!authoredChanged ||
@@ -360,7 +374,10 @@ namespace engine::effects {
 				 block.Locked == emitter.LockedToPart &&
 				 block.FlipbookStartRandom == emitter.FlipbookStartRandom &&
 				 block.Flipbook == emitter.Flipbook && block.FlipbookPlayback == emitter.FlipbookPlayback);
-			if (authoredSame && block.FlipbookRate == rate && block.Frames == frames) {
+			if (authoredSame && block.FlipbookRate == rate && block.Frames == frames &&
+				block.FlipbookTexture == emitter.Texture && block.VariableFlipbookTiming == variable &&
+				block.InvalidFlipbookTiming == invalidTiming &&
+				block.FlipbookTimelineScale == timelineScale && (!catalogueChanged || !variable)) {
 				return false;
 			}
 
@@ -380,6 +397,10 @@ namespace engine::effects {
 			}
 			block.FlipbookRate = rate;
 			block.Frames = frames;
+			block.FlipbookTexture = emitter.Texture;
+			block.VariableFlipbookTiming = variable;
+			block.InvalidFlipbookTiming = invalidTiming;
+			block.FlipbookTimelineScale = timelineScale;
 			return true;
 		}
 
@@ -407,7 +428,25 @@ namespace engine::effects {
 					   : std::min(static_cast<uint32_t>(Unit(seed) * static_cast<float>(span)), span - 1);
 		}
 
-		uint32_t FlipbookCell(const EmitterBlock &block, float age, float lifetime, uint32_t start) {
+		const scene::FlipbookFacts *
+		TimelineOf(const scene::TextureCatalogue *catalogue, const EmitterBlock &block) {
+			if (!block.VariableFlipbookTiming || block.InvalidFlipbookTiming || catalogue == nullptr ||
+				!block.FlipbookTexture.IsValid()) {
+				return nullptr;
+			}
+			const auto found = catalogue->Flipbooks.find(block.FlipbookTexture.Id());
+			return found != catalogue->Flipbooks.end() && found->second.CumulativeEnds.size() == block.Frames
+					   ? &found->second
+					   : nullptr;
+		}
+
+		uint32_t FlipbookCell(
+			const EmitterBlock &block,
+			const scene::FlipbookFacts *timeline,
+			float age,
+			float lifetime,
+			uint32_t start
+		) {
 			// **What the *sheet* holds, not what the grid could.** A GIF has
 			// whatever number of frames the animation has and the grid is the next
 			// square power of two that fits, so playing every cell would spend the
@@ -415,6 +454,41 @@ namespace engine::effects {
 			const uint32_t cells = std::min<uint32_t>(block.Frames, FlipbookCells(block.Flipbook));
 			if (cells <= 1) {
 				return 0;
+			}
+			if (block.InvalidFlipbookTiming || (block.VariableFlipbookTiming && timeline == nullptr)) {
+				return 0;
+			}
+			if (timeline != nullptr) {
+				if (block.FlipbookPlayback == FlipbookMode::Random) {
+					return start;
+				}
+				const float initial = start == 0 ? 0.0f : timeline->CumulativeEnds[start - 1];
+				double position = 0.0;
+				const std::vector<float> &ends = timeline->CumulativeEnds;
+				if (block.FlipbookPlayback == FlipbookMode::OneShot) {
+					const double fraction =
+						lifetime > 0.0f ? std::clamp(static_cast<double>(age) / lifetime, 0.0, 1.0) : 0.0;
+					position = initial + fraction * (timeline->TotalDuration - initial);
+				} else {
+					const double period = block.FlipbookPlayback == FlipbookMode::PingPong
+											  ? 2.0 * timeline->TotalDuration - ends.front() -
+													(timeline->TotalDuration - ends[cells - 2])
+											  : timeline->TotalDuration;
+					position =
+						std::fmod(initial + static_cast<double>(age) * block.FlipbookTimelineScale, period);
+				}
+				if (block.FlipbookPlayback == FlipbookMode::PingPong && position >= timeline->TotalDuration) {
+					const float lastDuration = timeline->TotalDuration - ends[cells - 2];
+					const float reverse =
+						static_cast<float>(2.0 * timeline->TotalDuration - lastDuration - position);
+					return static_cast<uint32_t>(
+						std::lower_bound(ends.begin(), ends.end(), reverse) - ends.begin()
+					);
+				}
+				const uint32_t ordinal = static_cast<uint32_t>(
+					std::upper_bound(ends.begin(), ends.end(), static_cast<float>(position)) - ends.begin()
+				);
+				return std::min(ordinal, cells - 1);
 			}
 
 			switch (block.FlipbookPlayback) {
@@ -1545,6 +1619,7 @@ namespace engine::effects {
 		// fights over, and the sum is the same number either way.
 		std::vector<EmitterBlock> &blocks = system->Blocks;
 		std::vector<EmitterRuntime> &runtimes = system->RuntimeStates;
+		const scene::TextureCatalogue *const textures = store.Resource<scene::TextureCatalogue>();
 
 		// **Two spans, because the two halves answer to different things.**
 		// Ageing is proportional to particles *alive* and is parallel over
@@ -1560,7 +1635,7 @@ namespace engine::effects {
 			parallel::Jobs::For(
 				blocks.size(),
 				BLOCK_GRAIN,
-				[&blocks, &runtimes, instances, states, capacity, delta](size_t begin, size_t end) {
+				[&blocks, &runtimes, instances, states, capacity, delta, textures](size_t begin, size_t end) {
 					for (size_t index = begin; index < end; index++) {
 						EmitterBlock &block = blocks[index];
 						EmitterRuntime &runtime = runtimes[index];
@@ -1589,6 +1664,7 @@ namespace engine::effects {
 						const uint32_t cells =
 							std::min<uint32_t>(block.Frames, FlipbookCells(block.Flipbook));
 						const bool animated = cells > 1;
+						const scene::FlipbookFacts *const timeline = TimelineOf(textures, block);
 
 						// --- age what is alive ---------------------------------
 						//
@@ -1667,7 +1743,8 @@ namespace engine::effects {
 
 							const uint32_t phase = state.Rotation >> 16;
 							const uint32_t cell =
-								animated ? FlipbookCell(block, state.Age, state.Lifetime, phase) : 0u;
+								animated ? FlipbookCell(block, timeline, state.Age, state.Lifetime, phase)
+										 : 0u;
 							state.Rotation = rotation | (phase << 16);
 							instance.RotationAndCell = rotation | (cell << 16);
 							instance.Colour = WithAlpha(
@@ -1791,11 +1868,12 @@ namespace engine::effects {
 			parallel::Jobs::For(
 				plans.size(),
 				SPAWN_GRAIN,
-				[instances, states, &blocks, &runtimes, planned](size_t begin, size_t end) {
+				[instances, states, &blocks, &runtimes, planned, textures](size_t begin, size_t end) {
 					for (size_t at = begin; at < end; at++) {
 						SpawnPlan &plan = planned[at];
 						EmitterBlock &block = blocks[plan.Block];
 						EmitterRuntime &runtime = runtimes[plan.Block];
+						const scene::FlipbookFacts *const timeline = TimelineOf(textures, block);
 
 						const uint32_t id = plan.Id;
 						const Vector3 &half = plan.Half;
@@ -1868,7 +1946,7 @@ namespace engine::effects {
 							instance.Position = state.Position;
 							instance.Slot = bornSlot;
 							const uint32_t cell =
-								cells > 1 ? FlipbookCell(block, 0.0f, state.Lifetime, phase) : 0u;
+								cells > 1 ? FlipbookCell(block, timeline, 0.0f, state.Lifetime, phase) : 0u;
 							instance.RotationAndCell = state.Rotation | (cell << 16);
 							instance.Size = bornSize;
 							instance.Colour = bornColour;

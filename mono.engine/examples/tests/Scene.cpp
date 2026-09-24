@@ -2342,7 +2342,11 @@ TEST_CASE("the packaged particle flipbook resolves without a CDN", "[examples][s
 		engine::scene::RecordTexture(
 			store,
 			Name("effects/fox_dance.atex"),
-			{.Side = atlas.FlipbookSide, .Frames = atlas.FlipbookFrames, .FrameRate = atlas.FlipbookFrameRate}
+			{.Side = atlas.FlipbookSide,
+			 .Frames = atlas.FlipbookFrames,
+			 .FrameRate = atlas.FlipbookFrameRate,
+			 .FrameDurations = atlas.FlipbookFrameDurations,
+			 .CumulativeEnds = {}}
 		)
 	);
 	systems.Tick(store, 1.0f / 60.0f);

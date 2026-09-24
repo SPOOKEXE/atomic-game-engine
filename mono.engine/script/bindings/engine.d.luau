@@ -1041,6 +1041,7 @@ declare Enum: {
 		Grid2x2: Enum_ParticleFlipbookLayout,
 		Grid4x4: Enum_ParticleFlipbookLayout,
 		Grid8x8: Enum_ParticleFlipbookLayout,
+		Grid16x16: Enum_ParticleFlipbookLayout,
 	},
 	ParticleFlipbookMode: {
 		Loop: Enum_ParticleFlipbookMode,

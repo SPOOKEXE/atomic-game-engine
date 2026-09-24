@@ -1218,7 +1218,8 @@ namespace engine::render {
 				  &pool.EmitterRuntime,
 				  &pool.ParamUpdateBuffer,
 				  &pool.CurveUpdateBuffer,
-				  &pool.Seams}) {
+				  &pool.Seams,
+				  &pool.Timeline}) {
 				if (*buffer != nullptr) {
 					gpu::ReleaseBuffer(State->Device, *buffer);
 					*buffer = nullptr;

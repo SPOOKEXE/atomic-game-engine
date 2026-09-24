@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -23,6 +24,12 @@ struct SDL_GPUSampler;
 struct SDL_GPUTexture;
 
 namespace engine::render {
+	// One named image in a texture-table transaction. The caller owns Image
+	// through the synchronous AddBatch call.
+	struct TextureBatchImage {
+		core::Name Name;
+		const assets::TextureData *Image = nullptr;
+	};
 
 	// Which of the three textures a drawable naming one should sample.
 	//
@@ -136,6 +143,10 @@ namespace engine::render {
 		//         upload.
 		bool Add(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
 
+		// Replaces up to six names together. A refusal leaves every old entry
+		// available; no draw can observe only some of a new skybox generation.
+		bool AddBatch(std::span<const TextureBatchImage> images, core::Name owner = {});
+
 		// Takes ownership of a texture somebody else created.
 		//
 		// **The one way into this table that does not start from pixels on the
@@ -168,6 +179,18 @@ namespace engine::render {
 			uint32_t height,
 			size_t bytes,
 			core::Name owner = {}
+		);
+
+		// Replaces one owned texture without releasing the prior handle. The caller
+		// must retire that handle only after the frame which sampled it completes.
+		bool ReplaceAdopt(
+			const core::Name &name,
+			SDL_GPUTexture *texture,
+			uint32_t width,
+			uint32_t height,
+			size_t bytes,
+			core::Name owner,
+			SDL_GPUTexture *&retired
 		);
 
 		// The texture for a name, or null when it is not registered.
@@ -306,6 +329,13 @@ namespace engine::render {
 		// @since v0.10
 		FlipbookCell CellOf(const core::Name &name, double seconds, core::Name owner = {}) const;
 
+		// Empty for a fixed-rate sheet or missing name. The span remains valid
+		// until this texture is replaced or dropped.
+		std::span<const float> TimingOf(const core::Name &name, core::Name owner = {}) const;
+		uint64_t TimingRevision() const {
+			return TimingGeneration;
+		}
+
 		// A process-local signature of every registered animated sheet's current
 		// frame. Static textures contribute nothing.
 		uint64_t AnimationSignature(double seconds) const;
@@ -379,10 +409,13 @@ namespace engine::render {
 			// name.** A GIF bakes to an ordinary texture carrying its grid,
 			// frame count and rate - `assets::TextureData` - and every one of
 			// those was thrown away on upload, so nothing downstream could tell
-			// an animation from a tile atlas. They are three bytes an entry.
+			// an animation from a tile atlas. Variable timing also retains the
+			// bounded duration and cumulative-end arrays used by consumers.
 			uint8_t FlipbookSide = 0;
-			uint8_t FlipbookFrames = 0;
+			uint16_t FlipbookFrames = 0;
 			float FlipbookFrameRate = 0.0f;
+			std::vector<float> FlipbookFrameDurations;
+			std::vector<float> FlipbookCumulativeEnds;
 
 			// The decoded base level is retained for exact host-owned export. Mips
 			// stay device-only: the export seam promises source pixels, not a second
@@ -413,6 +446,7 @@ namespace engine::render {
 		Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image, bool retainSource);
 
 		SDL_GPUDevice *Device = nullptr;
+		uint64_t TimingGeneration = 1;
 		SDL_GPUSampler *SharedSampler = nullptr;
 		SDL_GPUSampler *NearestSampler = nullptr;
 
