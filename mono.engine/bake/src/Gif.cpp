@@ -341,8 +341,9 @@ namespace engine::bake {
 		// The delay the last graphic control block named, in hundredths of a
 		// second, and the sum of the ones that were actually used.
 		//
-		// A flipbook has one rate. Retain the first normalised GIF delay so a
-		// variable-delay source can be refused instead of losing its timing.
+		// Every normalised delay is kept. Equal delays become one fixed rate; any
+		// difference from the first delay switches the sheet to exact per-frame
+		// durations.
 		uint16_t pendingDelay = 0;
 		uint64_t totalHundredths = 0;
 		uint16_t firstDelay = 0;

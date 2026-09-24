@@ -183,8 +183,8 @@ namespace engine::assets {
 		// lifetime", which is what the engine did before there was anything to
 		// ask.
 		//
-		// **One rate for the sheet.** A GIF with varying delays is refused until
-		// the texture and effect contracts can preserve each duration.
+		// A GIF with varying delays sets this to zero and states its timing in
+		// FlipbookFrameDurations below instead.
 		//
 		// @since v0.10
 		float FlipbookFrameRate = 0.0f;
