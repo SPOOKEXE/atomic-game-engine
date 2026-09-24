@@ -466,6 +466,30 @@ TEST_CASE("completed camera submission publishes bounded visibility facts", "[re
 	CHECK(snapshot.Observations[2].Entity == 303);
 	CHECK(snapshot.Observations[2].State == render::VisibilityState::SubmittedBlended);
 
+	view.VisibilityFrame = view.CameraFrame;
+	view.CameraFrame = core::CFrame(core::Vector3{8, 0, 0});
+	view.Damage.Scene = true;
+	const auto lockedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(lockedFrame.Submitted);
+	CHECK(lockedFrame.DrawCalls > 0);
+	const auto locked = fixture.Render.Visibility();
+	REQUIRE(locked.Valid);
+	REQUIRE(locked.Observations.size() == 3);
+	CHECK(locked.Observations[0].State == render::VisibilityState::SubmittedOpaqueOrMasked);
+	CHECK(locked.Observations[1].State == render::VisibilityState::FrustumCulled);
+
+	view.VisibilityFrame.reset();
+	view.Damage.Scene = true;
+	const auto unlockedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(unlockedFrame.Submitted);
+	CHECK(unlockedFrame.DrawCalls > 0);
+	const auto unlocked = fixture.Render.Visibility();
+	REQUIRE(unlocked.Valid);
+	REQUIRE(unlocked.Observations.size() == 3);
+	CHECK(unlocked.Observations[0].State == render::VisibilityState::FrustumCulled);
+	CHECK(unlocked.Observations[1].State == render::VisibilityState::SubmittedOpaqueOrMasked);
+	view.CameraFrame = {};
+
 	view.Instances = {};
 	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 	const auto empty = fixture.Render.Visibility();

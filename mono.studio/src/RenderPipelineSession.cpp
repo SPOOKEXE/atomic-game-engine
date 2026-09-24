@@ -1,9 +1,23 @@
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/PipelineAdmission.hpp>
 
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
 
 namespace studio {
+	bool ValidateRenderPipelineAdmission(
+		const engine::graph::PipelineDocument &document,
+		const engine::render::Renderer &renderer,
+		std::string &error
+	) {
+		const engine::render::PipelineAdmissionResult admission = renderer.ValidatePipelineDocument(document);
+		if (admission) {
+			error.clear();
+			return true;
+		}
+		error = engine::render::FormatPipelineFailure(*admission.Failure);
+		return false;
+	}
 
 	void Editor::LoadRenderPipeline(WorldId world, engine::core::Name wanted) {
 		if (Universe == nullptr || !world.IsValid()) {
@@ -50,6 +64,9 @@ namespace studio {
 		}
 		if (Universe == nullptr || !RenderPipelineWorld.IsValid() || !RenderPipelineName.IsValid()) {
 			RenderPipelineStatus = "no universe to save into";
+			return false;
+		}
+		if (!ValidateRenderPipelineAdmission(saved, Renderer, RenderPipelineStatus)) {
 			return false;
 		}
 

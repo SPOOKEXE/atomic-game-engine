@@ -31,6 +31,11 @@ namespace engine::render {
 		return "pipeline validation";
 	}
 
+	std::string FormatPipelineFailure(const PipelineFailure &failure) {
+		return std::string("refused during ") + DescribePipelineAdmission(failure.Stage) + ": " +
+			   failure.Reason + " at '" + std::string(failure.Offender.Text()) + "'";
+	}
+
 	namespace {
 
 		bool DependsOnKind(
@@ -105,6 +110,7 @@ namespace engine::render {
 				for (const graph::ScheduledNode &scheduled : wave.Nodes) {
 					const graph::Node *node = pipeline.Find(scheduled.Node);
 					if (node == nullptr) {
+						stage = PipelineAdmissionStage::Schedule;
 						offender = {};
 						reason = "the compiled schedule names no node";
 						return false;
@@ -140,6 +146,7 @@ namespace engine::render {
 				for (const graph::ScheduledNode &scheduled : wave.Nodes) {
 					const graph::Node *node = pipeline.Find(scheduled.Node);
 					if (node == nullptr) {
+						stage = PipelineAdmissionStage::Schedule;
 						offender = {};
 						reason = "the compiled schedule names no node";
 						return false;
@@ -529,7 +536,7 @@ namespace engine::render {
 
 	}
 
-	Renderer::Impl::PipelineCompilation Renderer::Impl::CompilePipeline(
+	PipelineCompilation CompilePipeline(
 		core::Name name,
 		const graph::RenderGraph &pipeline,
 		const DeviceCaps *caps,

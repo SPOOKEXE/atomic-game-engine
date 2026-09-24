@@ -2,7 +2,6 @@
 
 #include <engine/core/Chars.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
-#include <engine/graph/Schedule.hpp>
 
 #include <algorithm>
 #include <array>
@@ -45,6 +44,11 @@ namespace studio {
 
 		constexpr const char *PREVIEW_ENABLED = "preview.enabled";
 		constexpr const char *PREVIEW_REVERSE = "preview.reverse-spectrum";
+		constexpr const char *ORIGINAL_NAME = "__render.authoring.original-name";
+		constexpr const char *AUTHORING_COMMENT = "__render.authoring.comment";
+		constexpr const char *AUTHORING_MUTED = "__render.authoring.muted";
+		constexpr const char *AUTHORING_PREVIEW = "__render.authoring.preview";
+		constexpr const char *AUTHORING_PREVIEW_PORT = "__render.authoring.preview-port";
 
 		std::string ResourceType(ResourceKind kind) {
 			switch (kind) {
@@ -138,6 +142,73 @@ namespace studio {
 			return "resource." + std::string(port) + "." + std::string(setting);
 		}
 
+		std::string BindingMetadataKey(bool write, size_t index, std::string_view field) {
+			return std::string(INTERNAL_PREFIX) + "binding." + (write ? "write." : "read.") +
+				   std::to_string(index) + "." + std::string(field);
+		}
+
+		std::string BindingCountKey(bool write) {
+			return std::string(INTERNAL_PREFIX) + "binding." + (write ? "write" : "read") + ".count";
+		}
+
+		void PutBindings(nodegraph::Node &node, bool write, const std::vector<Binding> &bindings) {
+			PutNumber(node, BindingCountKey(write).c_str(), static_cast<double>(bindings.size()));
+			for (size_t index = 0; index < bindings.size(); index++) {
+				PutText(node, BindingMetadataKey(write, index, "port"), bindings[index].Port);
+				PutText(
+					node,
+					BindingMetadataKey(write, index, "resource"),
+					std::string(bindings[index].Resource.Text())
+				);
+			}
+		}
+
+		size_t BindingCount(const nodegraph::Node &node, bool write) {
+			const auto found = node.Widgets.find(BindingCountKey(write));
+			if (found == node.Widgets.end() || !std::isfinite(found->second.Number) ||
+				found->second.Number < 0.0) {
+				return 0;
+			}
+			return static_cast<size_t>(found->second.Number);
+		}
+
+		std::string
+		BindingMetadata(const nodegraph::Node &node, bool write, size_t index, std::string_view field) {
+			return TextOf(node, BindingMetadataKey(write, index, field));
+		}
+
+		bool HasBinding(const nodegraph::Node &node, bool write, std::string_view port) {
+			for (size_t index = 0; index < BindingCount(node, write); index++) {
+				if (BindingMetadata(node, write, index, "port") == port) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		std::string OriginalBindingResource(const nodegraph::Node &node, bool write, std::string_view port) {
+			std::string resource;
+			for (size_t index = 0; index < BindingCount(node, write); index++) {
+				if (BindingMetadata(node, write, index, "port") == port) {
+					resource = BindingMetadata(node, write, index, "resource");
+				}
+			}
+			return resource;
+		}
+
+		std::string ResolutionOf(const Edit &resource) {
+			return resource.Width > 0 && resource.Height > 0 ? "fixed"
+				   : resource.Divisor >= 8					 ? "eighth"
+				   : resource.Divisor >= 4					 ? "quarter"
+				   : resource.Divisor >= 2					 ? "half"
+															 : "full";
+		}
+
+		std::string LifetimeOf(const Edit &resource) {
+			return resource.External || resource.Lifetime != ResourceLifetime::Transient ? "external"
+																						 : "transient";
+		}
+
 		std::string BindingPort(
 			const render_pipeline::Binding &binding, const std::vector<PortSpec> &ports, size_t index
 		) {
@@ -204,6 +275,204 @@ namespace studio {
 				candidate = Name(base + "." + std::to_string(suffix++));
 			}
 			return candidate;
+		}
+
+		void AppendEditedAuthoringMetadata(
+			const PipelineDocument &basis,
+			const nodegraph::Graph &graph,
+			const std::unordered_map<nodegraph::NodeId, Name> &names,
+			PipelineDocument &document
+		) {
+			using namespace engine::graph;
+			std::unordered_set<uint32_t> basisNodeNames;
+			std::unordered_map<uint32_t, std::string> basisComments;
+			std::unordered_map<uint32_t, bool> basisMutes;
+			for (const Edit &edit : basis.Edits()) {
+				if (edit.Kind == EditKind::AddNode) {
+					basisNodeNames.insert(edit.Name.Id());
+				} else if (edit.Kind == EditKind::Comment) {
+					basisComments[edit.Name.Id()] = edit.Value;
+				} else if (edit.Kind == EditKind::Mute) {
+					basisMutes[edit.Name.Id()] = edit.Enabled;
+				}
+			}
+
+			std::unordered_map<uint32_t, const nodegraph::Node *> nodesByOriginalName;
+			for (const nodegraph::Node &node : graph.Nodes()) {
+				const std::string original = TextOf(node, ORIGINAL_NAME);
+				if (!original.empty()) {
+					nodesByOriginalName[Name(original).Id()] = &node;
+				}
+			}
+
+			const auto groupKey = [](nodegraph::GroupId group, nodegraph::NodeId member) {
+				return (static_cast<uint64_t>(group) << 32) | member;
+			};
+			std::unordered_map<uint64_t, size_t> recordedGroupMembers;
+			std::unordered_set<uint32_t> originalComments;
+			std::unordered_set<uint32_t> originalMutes;
+			std::unordered_set<uint64_t> originalPreviews;
+			std::unordered_map<uint32_t, std::vector<std::pair<nodegraph::NodeId, std::string>>> writers;
+			for (const nodegraph::Node &node : graph.Nodes()) {
+				for (size_t index = 0; index < BindingCount(node, true); index++) {
+					const std::string resource = BindingMetadata(node, true, index, "resource");
+					const std::string port = BindingMetadata(node, true, index, "port");
+					if (!resource.empty()) {
+						writers[Name(resource).Id()].push_back({node.Id, port});
+					}
+				}
+			}
+
+			const auto recordGroup = [&](Name title, Name target) {
+				Edit edit;
+				edit.Kind = EditKind::Group;
+				edit.Name = title;
+				edit.Target = target;
+				document.Record(std::move(edit));
+			};
+			for (const Edit &edit : basis.Edits()) {
+				switch (edit.Kind) {
+				case EditKind::Group: {
+					const auto found = nodesByOriginalName.find(edit.Target.Id());
+					if (found == nodesByOriginalName.end()) {
+						if (!basisNodeNames.contains(edit.Target.Id())) {
+							document.Record(edit);
+						}
+						break;
+					}
+					const nodegraph::Node &node = *found->second;
+					const nodegraph::GroupId groupId = graph.GroupOf(node.Id);
+					const nodegraph::Group *group = graph.FindGroup(groupId);
+					if (group != nullptr) {
+						recordGroup(Name(group->Title), names.at(node.Id));
+						recordedGroupMembers[groupKey(groupId, node.Id)]++;
+					}
+					break;
+				}
+				case EditKind::Comment: {
+					originalComments.insert(edit.Name.Id());
+					const auto found = nodesByOriginalName.find(edit.Name.Id());
+					if (found == nodesByOriginalName.end()) {
+						if (!basisNodeNames.contains(edit.Name.Id())) document.Record(edit);
+						break;
+					}
+					const nodegraph::Node &node = *found->second;
+					if (node.Widgets.contains(AUTHORING_COMMENT)) {
+						Edit updated = edit;
+						updated.Name = names.at(node.Id);
+						if (TextOf(node, AUTHORING_COMMENT) != basisComments.at(edit.Name.Id())) {
+							updated.Value = TextOf(node, AUTHORING_COMMENT);
+						}
+						document.Record(std::move(updated));
+					}
+					break;
+				}
+				case EditKind::Mute: {
+					originalMutes.insert(edit.Name.Id());
+					const auto found = nodesByOriginalName.find(edit.Name.Id());
+					if (found == nodesByOriginalName.end()) {
+						if (!basisNodeNames.contains(edit.Name.Id())) document.Record(edit);
+						break;
+					}
+					const nodegraph::Node &node = *found->second;
+					if (node.Widgets.contains(AUTHORING_MUTED)) {
+						Edit updated = edit;
+						updated.Name = names.at(node.Id);
+						if (ToggleOf(node, AUTHORING_MUTED, edit.Enabled) != basisMutes.at(edit.Name.Id())) {
+							updated.Enabled = ToggleOf(node, AUTHORING_MUTED, edit.Enabled);
+						}
+						document.Record(std::move(updated));
+					}
+					break;
+				}
+				case EditKind::Preview: {
+					const auto found = writers.find(edit.Target.Id());
+					if (found == writers.end() || found->second.empty()) {
+						document.Record(edit);
+						break;
+					}
+					const auto [nodeId, port] = found->second.front();
+					const nodegraph::Node *node = graph.Find(nodeId);
+					if (node == nullptr) {
+						break;
+					}
+					if (!ToggleOf(*node, AUTHORING_PREVIEW, false)) {
+						break;
+					}
+					std::string resource = TextOf(*node, Key("write", port));
+					if (resource.empty()) {
+						break;
+					}
+					Edit updated = edit;
+					updated.Target = Name(resource);
+					document.Record(std::move(updated));
+					originalPreviews.insert(groupKey(0, nodeId));
+					break;
+				}
+				default:
+					break;
+				}
+			}
+
+			for (const nodegraph::Group &group : graph.Groups()) {
+				for (const nodegraph::NodeId member : group.Members) {
+					const uint64_t key = groupKey(group.Id, member);
+					auto recorded = recordedGroupMembers.find(key);
+					if (recorded != recordedGroupMembers.end() && recorded->second > 0) {
+						recorded->second--;
+						continue;
+					}
+					const auto name = names.find(member);
+					if (name != names.end()) {
+						recordGroup(Name(group.Title), name->second);
+					}
+				}
+			}
+
+			for (const nodegraph::Node &node : graph.Nodes()) {
+				const std::string original = TextOf(node, ORIGINAL_NAME);
+				const uint32_t oldName = original.empty() ? 0 : Name(original).Id();
+				if (node.Widgets.contains(AUTHORING_COMMENT) && !originalComments.contains(oldName)) {
+					Edit edit;
+					edit.Kind = EditKind::Comment;
+					edit.Name = names.at(node.Id);
+					edit.Value = TextOf(node, AUTHORING_COMMENT);
+					document.Record(std::move(edit));
+				}
+				if (node.Widgets.contains(AUTHORING_MUTED) && !originalMutes.contains(oldName)) {
+					Edit edit;
+					edit.Kind = EditKind::Mute;
+					edit.Name = names.at(node.Id);
+					edit.Enabled = ToggleOf(node, AUTHORING_MUTED, false);
+					document.Record(std::move(edit));
+				}
+				if (ToggleOf(node, AUTHORING_PREVIEW, false) &&
+					!originalPreviews.contains(groupKey(0, node.Id))) {
+					const std::string port = TextOf(node, AUTHORING_PREVIEW_PORT);
+					const std::string resource = TextOf(node, Key("write", port));
+					if (!resource.empty()) {
+						Edit edit;
+						edit.Kind = EditKind::Preview;
+						edit.Target = Name(resource);
+						document.Record(std::move(edit));
+					}
+				}
+			}
+		}
+
+		void AppendOrphanNodeEdits(const PipelineDocument &basis, PipelineDocument &document) {
+			using namespace engine::graph;
+			bool hasOpenNode = false;
+			for (const Edit &edit : basis.Edits()) {
+				if (edit.Kind == EditKind::AddNode) {
+					hasOpenNode = true;
+				} else if (edit.Kind == EditKind::AddResource || edit.Kind == EditKind::Enable) {
+					hasOpenNode = false;
+				} else if (!hasOpenNode && (edit.Kind == EditKind::Set || edit.Kind == EditKind::Reads ||
+											edit.Kind == EditKind::Writes)) {
+					document.Record(edit);
+				}
+			}
 		}
 	}
 
@@ -350,12 +619,19 @@ namespace studio {
 
 		const std::vector<AuthoredNode> authored = render_pipeline::AuthoredNodes(document);
 		std::unordered_map<uint32_t, Edit> resourceSettings;
+		std::unordered_map<uint32_t, std::string> comments;
+		std::unordered_map<uint32_t, bool> muteStates;
 		for (const Edit &edit : document.Edits()) {
 			if (edit.Kind == EditKind::AddResource) {
 				resourceSettings[edit.Name.Id()] = edit;
+			} else if (edit.Kind == EditKind::Comment) {
+				comments[edit.Name.Id()] = edit.Value;
+			} else if (edit.Kind == EditKind::Mute) {
+				muteStates[edit.Name.Id()] = edit.Enabled;
 			}
 		}
 		std::vector<nodegraph::NodeId> ids;
+		std::unordered_map<uint32_t, nodegraph::NodeId> nodeIdsByName;
 		ids.reserve(authored.size());
 		for (size_t index = 0; index < authored.size(); index++) {
 			const AuthoredNode &source = authored[index];
@@ -372,11 +648,22 @@ namespace studio {
 			}
 			nodegraph::Node &node = *graph.Find(id);
 			node.Label = std::string(source.Name.Text());
+			PutText(node, ORIGINAL_NAME, std::string(source.Name.Text()));
 			PutToggle(node, "enabled", source.Enabled);
 			PutSelect(node, "scope", Describe(source.Scope));
+			PutBindings(node, false, source.Reads);
+			PutBindings(node, true, source.Writes);
+			if (const auto comment = comments.find(source.Name.Id()); comment != comments.end()) {
+				PutText(node, AUTHORING_COMMENT, comment->second);
+			}
+			if (const auto mute = muteStates.find(source.Name.Id()); mute != muteStates.end()) {
+				PutToggle(node, AUTHORING_MUTED, mute->second);
+			}
+			nodeIdsByName[source.Name.Id()] = id;
 			const NodeKindSpec *spec = NodeCatalogue::Find(source.Kind);
 			for (const NodeParameter &parameter : source.Parameters) {
 				const std::string key(parameter.Key.Text());
+				PutText(node, Key("original-parameter", key), parameter.Value);
 				if (key == PREVIEW_ENABLED || key == PREVIEW_REVERSE || key == "profile") {
 					PutToggle(node, key.c_str(), parameter.Value == "true");
 				} else if (key == "queue" || key == "async") {
@@ -414,11 +701,7 @@ namespace studio {
 				const auto found = resourceSettings.find(source.Writes[index].Resource.Id());
 				if (found != resourceSettings.end()) {
 					const Edit &resource = found->second;
-					PutSelect(
-						node,
-						ResourceKey("lifetime", port).c_str(),
-						resource.External ? "external" : "transient"
-					);
+					PutSelect(node, ResourceKey("lifetime", port).c_str(), LifetimeOf(resource));
 					const std::string resolution = resource.Width > 0 && resource.Height > 0 ? "fixed"
 												   : resource.Divisor >= 8					 ? "eighth"
 												   : resource.Divisor >= 4					 ? "quarter"
@@ -438,6 +721,31 @@ namespace studio {
 			ids.push_back(id);
 		}
 
+		struct GroupProjection {
+			std::string Title;
+			std::vector<nodegraph::NodeId> Members;
+		};
+		std::vector<GroupProjection> groups;
+		std::unordered_map<std::string, size_t> groupIndices;
+		for (const Edit &edit : document.Edits()) {
+			if (edit.Kind != EditKind::Group) {
+				continue;
+			}
+			const auto member = nodeIdsByName.find(edit.Target.Id());
+			if (member == nodeIdsByName.end()) {
+				continue;
+			}
+			const std::string title(edit.Name.Text());
+			auto [found, inserted] = groupIndices.emplace(title, groups.size());
+			if (inserted) {
+				groups.push_back({title, {}});
+			}
+			groups[found->second].Members.push_back(member->second);
+		}
+		for (GroupProjection &group : groups) {
+			graph.Group(std::move(group.Members), std::move(group.Title), nodegraph::Colour::Hex(0x5F6675));
+		}
+
 		struct Writer {
 			nodegraph::NodeId Node = nodegraph::NO_NODE;
 			std::string Port;
@@ -452,12 +760,29 @@ namespace studio {
 				);
 			}
 		}
+		for (const Edit &edit : document.Edits()) {
+			if (edit.Kind != EditKind::Preview) {
+				continue;
+			}
+			const auto found = writers.find(edit.Target.Id());
+			if (found == writers.end() || found->second.empty()) {
+				continue;
+			}
+			nodegraph::Node *node = graph.Find(found->second.front().Node);
+			if (node != nullptr) {
+				PutToggle(*node, AUTHORING_PREVIEW, true);
+				PutText(*node, AUTHORING_PREVIEW_PORT, found->second.front().Port);
+			}
+		}
 
 		for (size_t index = 0; index < authored.size(); index++) {
 			const NodeKindSpec *spec = NodeCatalogue::Find(authored[index].Kind);
 			for (size_t slot = 0; spec != nullptr && slot < authored[index].Reads.size(); slot++) {
 				const Binding &read = authored[index].Reads[slot];
 				const std::string input = BindingPort(read, spec->Inputs, slot);
+				PutText(
+					*graph.Find(ids[index]), Key("read-baseline", input), std::string(read.Resource.Text())
+				);
 				const auto found = writers.find(read.Resource.Id());
 				if (found == writers.end()) {
 					PutText(*graph.Find(ids[index]), Key("external", input), "yes");
@@ -482,6 +807,12 @@ namespace studio {
 						graph.Clear();
 						return false;
 					}
+					PutText(*graph.Find(ids[index]), Key("connected", input), "yes");
+					PutText(
+						*graph.Find(ids[index]),
+						Key("read-baseline", input),
+						std::string(read.Resource.Text())
+					);
 				}
 			}
 		}
@@ -507,6 +838,7 @@ namespace studio {
 				resourceOrder.push_back(edit.Name);
 			}
 		}
+		const std::unordered_map<uint32_t, Edit> originalResources = resources;
 
 		std::unordered_map<nodegraph::NodeId, Name> names;
 		std::unordered_set<uint32_t> usedNames;
@@ -516,7 +848,13 @@ namespace studio {
 				error = "the canvas contains a non-render node";
 				return false;
 			}
-			names[node.Id] = UniqueNodeName(node, kind, usedNames);
+			const std::string originalName = TextOf(node, ORIGINAL_NAME);
+			if (!originalName.empty() && node.Label == originalName) {
+				names[node.Id] = Name(originalName);
+				usedNames.insert(names[node.Id].Id());
+			} else {
+				names[node.Id] = UniqueNodeName(node, kind, usedNames);
+			}
 		}
 
 		for (const nodegraph::Link &link : graph.Links()) {
@@ -541,15 +879,17 @@ namespace studio {
 			}
 		}
 
-		const auto ensureResource = [&](Name name, const PortSpec &port) {
+		const auto ensureResource = [&](Name name, const PortSpec &port, const Edit *basisResource) {
 			if (resources.contains(name.Id())) {
 				return;
 			}
-			Edit resource;
+			Edit resource = basisResource == nullptr ? Edit{} : *basisResource;
 			resource.Kind = EditKind::AddResource;
 			resource.Name = name;
-			resource.Resource = port.Kind;
-			resource.Format = port.Format;
+			if (basisResource == nullptr) {
+				resource.Resource = port.Kind;
+				resource.Format = port.Format;
+			}
 			resources.emplace(name.Id(), resource);
 			resourceOrder.push_back(name);
 		};
@@ -562,35 +902,68 @@ namespace studio {
 				return false;
 			}
 			for (const PortSpec &port : spec->Outputs) {
-				std::string resource = TextOf(node, Key("write", port.Name.Text()));
-				if (resource.empty()) {
-					resource = std::string(names[node.Id].Text()) + "." + std::string(port.Name.Text());
+				const std::string output(port.Name.Text());
+				const std::string originalResource = OriginalBindingResource(node, true, output);
+				const auto original = originalResources.find(Name(originalResource).Id());
+				const Edit *baseline = original == originalResources.end() ? nullptr : &original->second;
+				const bool isExisting = node.Widgets.contains(ORIGINAL_NAME);
+				const bool hadBinding = HasBinding(node, true, output);
+				std::string resource = TextOf(node, Key("write", output));
+				const bool outputLinked =
+					std::any_of(graph.Links().begin(), graph.Links().end(), [&](const nodegraph::Link &link) {
+						return link.From == node.Id && link.FromPort == output;
+					});
+				if (resource.empty() && (!isExisting || outputLinked)) {
+					resource = std::string(names[node.Id].Text()) + "." + output;
 				}
-				ensureResource(Name(resource), port);
-				Edit &settings = resources.at(Name(resource).Id());
+				if (resource.empty() || (isExisting && !hadBinding &&
+										 TextOf(node, Key("write", output)).empty() && !outputLinked)) {
+					continue;
+				}
+				const Name resourceName(resource);
+				ensureResource(resourceName, port, baseline);
+				Edit &settings = resources.at(resourceName.Id());
 				if (kind == Name("blit")) {
 					ResourceFormat selected = ResourceFormat::RGBA16F;
 					if (!ParseResourceFormat(SelectOf(node, "format", "RGBA16F"), selected)) {
 						error = "blit target format is not recognised";
 						return false;
 					}
-					settings.Format = selected;
+					const ParameterSpec *format = ParameterNamed(*spec, "format");
+					const std::string defaultFormat = format == nullptr ? "RGBA16F" : format->Default;
+					const std::string originalKey = Key("original-parameter", "format");
+					const std::string originalValue =
+						node.Widgets.contains(originalKey) ? TextOf(node, originalKey) : defaultFormat;
+					if (!isExisting || SelectOf(node, "format", defaultFormat) != originalValue) {
+						settings.Format = selected;
+					}
 				}
-				const std::string output(port.Name.Text());
-				settings.External =
-					SelectOf(node, ResourceKey("lifetime", output).c_str(), "transient") == "external";
+				const std::string lifetime =
+					SelectOf(node, ResourceKey("lifetime", output).c_str(), "transient");
+				if (baseline == nullptr || lifetime != LifetimeOf(*baseline)) {
+					settings.External = lifetime == "external";
+					settings.Lifetime =
+						settings.External ? ResourceLifetime::External : ResourceLifetime::Transient;
+				}
 				const std::string resolution =
 					SelectOf(node, ResourceKey("resolution", output).c_str(), "full");
-				settings.Divisor = resolution == "eighth"	 ? 8
-								   : resolution == "quarter" ? 4
-								   : resolution == "half"	 ? 2
-															 : 1;
-				if (resolution == "fixed") {
-					settings.Width = NumberOf(node, ResourceKey("width", output), 1920);
-					settings.Height = NumberOf(node, ResourceKey("height", output), 1080);
-				} else {
-					settings.Width = 0;
-					settings.Height = 0;
+				if (baseline == nullptr || resolution != ResolutionOf(*baseline)) {
+					if (resolution == "fixed") {
+						settings.Width = NumberOf(node, ResourceKey("width", output), 1920);
+						settings.Height = NumberOf(node, ResourceKey("height", output), 1080);
+					} else {
+						settings.Divisor = resolution == "eighth"	 ? 8
+										   : resolution == "quarter" ? 4
+										   : resolution == "half"	 ? 2
+																	 : 1;
+						settings.Width = 0;
+						settings.Height = 0;
+					}
+				} else if (resolution == "fixed") {
+					const uint32_t width = NumberOf(node, ResourceKey("width", output), baseline->Width);
+					const uint32_t height = NumberOf(node, ResourceKey("height", output), baseline->Height);
+					if (width != baseline->Width) settings.Width = width;
+					if (height != baseline->Height) settings.Height = height;
 				}
 			}
 		}
@@ -616,40 +989,83 @@ namespace studio {
 										   : NodeScope::View;
 			document.Record(add);
 
-			for (const PortSpec &port : spec.Inputs) {
-				Name target;
-				if (const nodegraph::Link *link = graph.LinkInto(node.Id, std::string(port.Name.Text()));
+			const auto currentRead = [&](std::string_view port) {
+				if (const nodegraph::Link *link = graph.LinkInto(node.Id, std::string(port));
 					link != nullptr) {
 					const nodegraph::Node *producer = graph.Find(link->From);
-					if (producer != nullptr) {
-						std::string resource = TextOf(*producer, Key("write", link->FromPort));
-						if (resource.empty()) {
-							resource = std::string(names.at(producer->Id).Text()) + "." + link->FromPort;
-						}
-						target = Name(resource);
+					if (producer == nullptr) {
+						return std::string();
 					}
-				} else if (TextOf(node, Key("external", port.Name.Text())) == "yes") {
-					target = Name(TextOf(node, Key("read", port.Name.Text())));
+					std::string resource = TextOf(*producer, Key("write", link->FromPort));
+					if (resource.empty()) {
+						resource = std::string(names.at(producer->Id).Text()) + "." + link->FromPort;
+					}
+					return resource;
 				}
-				if (target.IsValid()) {
-					Edit read;
-					read.Kind = EditKind::Reads;
-					read.Key = port.Name;
-					read.Target = target;
-					document.Record(read);
+				if (TextOf(node, Key("external", port)) == "yes") {
+					return TextOf(node, Key("read", port));
+				}
+				if (TextOf(node, Key("connected", port)) != "yes") {
+					return TextOf(node, Key("read", port));
+				}
+				return std::string();
+			};
+			const auto recordBinding =
+				[&](EditKind bindingKind, std::string_view port, std::string_view resource) {
+					Edit binding;
+					binding.Kind = bindingKind;
+					binding.Key = Name(port);
+					binding.Target = Name(resource);
+					document.Record(std::move(binding));
+				};
+
+			const size_t originalReads = BindingCount(node, false);
+			for (size_t index = 0; index < originalReads; index++) {
+				const std::string port = BindingMetadata(node, false, index, "port");
+				const std::string original = BindingMetadata(node, false, index, "resource");
+				if (PortNamed(spec.Inputs, port) == nullptr) {
+					recordBinding(EditKind::Reads, port, original);
+				} else {
+					const std::string current = currentRead(port);
+					const std::string baseline = TextOf(node, Key("read-baseline", port));
+					recordBinding(EditKind::Reads, port, current == baseline ? original : current);
+				}
+			}
+			for (const PortSpec &port : spec.Inputs) {
+				const std::string key(port.Name.Text());
+				if (HasBinding(node, false, key)) {
+					continue;
+				}
+				const std::string resource = currentRead(key);
+				if (!resource.empty()) {
+					recordBinding(EditKind::Reads, key, resource);
 				}
 			}
 
-			for (const PortSpec &port : spec.Outputs) {
-				std::string resource = TextOf(node, Key("write", port.Name.Text()));
-				if (resource.empty()) {
-					resource = std::string(name.Text()) + "." + std::string(port.Name.Text());
+			const size_t originalWrites = BindingCount(node, true);
+			for (size_t index = 0; index < originalWrites; index++) {
+				const std::string port = BindingMetadata(node, true, index, "port");
+				const std::string original = BindingMetadata(node, true, index, "resource");
+				if (PortNamed(spec.Outputs, port) == nullptr) {
+					recordBinding(EditKind::Writes, port, original);
+				} else {
+					const std::string current = TextOf(node, Key("write", port));
+					const std::string baseline = OriginalBindingResource(node, true, port);
+					recordBinding(EditKind::Writes, port, current == baseline ? original : current);
 				}
-				Edit write;
-				write.Kind = EditKind::Writes;
-				write.Key = port.Name;
-				write.Target = Name(resource);
-				document.Record(write);
+			}
+			for (const PortSpec &port : spec.Outputs) {
+				const std::string key(port.Name.Text());
+				if (HasBinding(node, true, key)) {
+					continue;
+				}
+				std::string resource = TextOf(node, Key("write", key));
+				if (resource.empty() && !node.Widgets.contains(ORIGINAL_NAME)) {
+					resource = std::string(name.Text()) + "." + key;
+				}
+				if (!resource.empty()) {
+					recordBinding(EditKind::Writes, key, resource);
+				}
 			}
 
 			for (const auto &[key, value] : node.Widgets) {
@@ -727,24 +1143,8 @@ namespace studio {
 		for (Edit &edit : moves) {
 			document.Record(std::move(edit));
 		}
-		// The canvas has no controls for these document records yet. Keep the
-		// authored metadata through a save, since Build deliberately ignores it.
-		render_pipeline::AppendUncontrolledAuthoringMetadata(basis, document);
-
-		RenderGraph built;
-		Name offender;
-		const PipelineDocumentStatus builtStatus = Build(document, built, offender);
-		if (builtStatus != PipelineDocumentStatus::Ok) {
-			error = std::string(Describe(builtStatus)) + ": " + std::string(offender.Text());
-			return false;
-		}
-
-		ExecutionSchedule schedule;
-		const ScheduleStatus scheduled = CompileSchedule(built, schedule, offender);
-		if (scheduled != ScheduleStatus::Ok) {
-			error = std::string(Describe(scheduled)) + ": " + std::string(offender.Text());
-			return false;
-		}
+		AppendEditedAuthoringMetadata(basis, graph, names, document);
+		AppendOrphanNodeEdits(basis, document);
 		return true;
 	}
 }

@@ -19,6 +19,7 @@
 #include "InstanceResidency.hpp"
 #include "LodSelection.hpp"
 #include "ParticleWork.hpp"
+#include "PipelineCompiler.hpp"
 #include "RenderStageProbe.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
@@ -69,26 +70,6 @@
 namespace engine::render {
 	// Which half of the two-pass transparent-layer capture a draw records.
 	enum class TransparentLayerPhase : uint8_t { None, Nearest, Colour };
-	enum RetainedNodeFamily : uint16_t {
-		RetainedUpload = 1u << 0,
-		RetainedShadow = 1u << 1,
-		RetainedMirror = 1u << 2,
-		RetainedPortal = 1u << 3,
-		RetainedSurface = 1u << 4,
-		RetainedAuthored = 1u << 5,
-		RetainedShading = 1u << 6,
-		RetainedGeometry = 1u << 7,
-	};
-
-	// The compiler reports where admission stopped, with the graph name that
-	// identifies the failed declaration. This stays private to renderer policy.
-	enum class PipelineAdmissionStage : uint8_t { Graph, Schedule, Backend, Validation, Capability };
-
-	struct PipelineFailure {
-		PipelineAdmissionStage Stage = PipelineAdmissionStage::Validation;
-		core::Name Offender;
-		std::string Reason;
-	};
 
 	struct DataCaptureSource {
 		std::string SnapshotId;
@@ -107,44 +88,8 @@ namespace engine::render {
 		RenderStageProbe StageProbe;
 		DeviceCaps Caps;
 
-		// One immutable execution package. Admission builds this whole value before
-		// touching the registry, so a refused replacement leaves its prior package
-		// and GPU state intact.
-		struct InstalledPipeline {
-			core::Name Name;
-			graph::RenderGraph Graph;
-			graph::CompiledGraph Compiled;
-			std::vector<graph::NodeId> EntityNodes;
-			// Nodes that must still execute while scene inputs are retained. This
-			// includes output/custom nodes and the forward closure from history.
-			std::vector<uint8_t> RetainedNodes;
-			// Built-in handler families represented in RetainedNodes, computed once
-			// when the pipeline is installed so cached frames do no graph scans.
-			uint16_t RetainedFamilies = 0;
-			graph::ExecutionSchedule Schedule;
-			graph::ResourceAliasPlan Aliases;
-
-			// The schedule's traffic plan, computed once at install. It decides
-			// which command buffer class records each node, and its order is the
-			// frame's submission order on SDL's one unified queue.
-			std::vector<graph::PlannedCommandBuffer> Buffers;
-			uint64_t Revision = 0;
-		};
-		struct PipelineCompilation {
-			std::optional<InstalledPipeline> Package;
-			PipelineFailure Failure;
-
-			explicit operator bool() const {
-				return Package.has_value();
-			}
-		};
-
-		static PipelineCompilation CompilePipeline(
-			core::Name name,
-			const graph::RenderGraph &pipeline,
-			const DeviceCaps *caps,
-			std::span<const core::Name> customKinds
-		);
+		using InstalledPipeline = engine::render::InstalledPipeline;
+		using PipelineCompilation = engine::render::PipelineCompilation;
 
 		uint64_t PipelineRevision = 0;
 		uint64_t RenderGeneration = 0;
@@ -375,6 +320,18 @@ namespace engine::render {
 		// A multi-view frame lends one command buffer to each view in turn. The
 		// ordinary Render body still records a complete view, while these fields
 		// keep acquisition, graph scope, timings, and submission frame-owned.
+		enum class BatchSubmitStatus : uint8_t { NotAttempted, Submitted, Failed };
+		struct BatchSubmitResult {
+			// While NotAttempted, this is the command the batch still owns. After
+			// submission it identifies the command whose history must be settled.
+			SDL_GPUCommandBuffer *Command = nullptr;
+			BatchSubmitStatus Status = BatchSubmitStatus::NotAttempted;
+
+			bool OwnsCommand() const {
+				return Command != nullptr && Status == BatchSubmitStatus::NotAttempted;
+			}
+		};
+		BatchSubmitResult BatchSubmit;
 		bool BatchActive = false;
 		bool BatchFirst = false;
 		bool BatchFinal = false;
@@ -386,7 +343,6 @@ namespace engine::render {
 		bool BatchFailed = false;
 		size_t BatchViewIndex = 0;
 		size_t BatchWorldIndex = 0;
-		SDL_GPUCommandBuffer *BatchCommand = nullptr;
 		SDL_GPUTexture *BatchSwapchain = nullptr;
 		uint32_t BatchWidth = 0;
 		uint32_t BatchHeight = 0;
@@ -3087,6 +3043,7 @@ namespace engine::render {
 		bool EnsureWindowCapture(uint32_t width, uint32_t height);
 		bool RetainSceneFrame(SDL_GPUCommandBuffer *command, size_t slot, const FrameResult &result);
 		bool SubmitSceneCommand(SDL_GPUCommandBuffer *command);
+		bool SubmitFrameBatchCommand(SDL_GPUCommandBuffer *command);
 		void DropStagedSceneFrames();
 		void PollSceneFrames();
 		bool EnsureHistory(size_t slot, uint32_t width, uint32_t height);

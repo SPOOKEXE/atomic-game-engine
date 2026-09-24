@@ -778,15 +778,7 @@ namespace engine::render {
 		size_t matching = 0;
 		{
 			ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-			matching = store.CountMatching<
-				Transform,
-				PreviousTransform,
-				Bounds,
-				Visual,
-				SurfaceAppearance,
-				Tags,
-				LocalTransparency,
-				Rendered>();
+			matching = PresentationSource::CountWorldDrawables(store);
 		}
 		const size_t skeletons = store.CountMatching<Skeleton>();
 		const size_t bones = skeletons == 0 ? 0 : store.CountMatching<Bone>();
@@ -986,13 +978,13 @@ namespace engine::render {
 					// what the world knows, and `render` is what turns it
 					// into something a GPU binds.
 					//
-					out[at + row] = scene::MakeDrawInstance(
+					out[at + row] = PresentationSource::MakeDrawInstance(
 						previous[row].Frame.NLerp(transforms[row].Frame, alpha),
 						bounds[row],
 						visuals[row],
 						&appearances[row],
 						&tags[row],
-						entities[row].Id,
+						entities[row],
 						&locals[row],
 						limbs == nullptr ? nullptr : &limbs[row]
 					);
@@ -1006,16 +998,7 @@ namespace engine::render {
 				}
 			};
 
-			const size_t loose = store
-									 .Query<
-										 const Transform,
-										 const PreviousTransform,
-										 const Bounds,
-										 const Visual,
-										 const SurfaceAppearance,
-										 const Tags,
-										 const LocalTransparency>()
-									 .With<Rendered>()
+			const size_t loose = PresentationSource::QueryWorldDrawables(store)
 									 .Without<CharacterLimb>()
 									 .EachBatchEntitiesParallel(
 										 [&write](
@@ -1053,48 +1036,38 @@ namespace engine::render {
 			// `EachBatch` already says a batch boundary is not a unit
 			// anybody declared - and within each half it is as deterministic
 			// as it was.
-			const size_t rigged = store
-									  .Query<
-										  const Transform,
-										  const PreviousTransform,
-										  const Bounds,
-										  const Visual,
-										  const SurfaceAppearance,
-										  const Tags,
-										  const LocalTransparency,
-										  const CharacterLimb>()
-									  .With<Rendered>()
-									  .EachBatchEntitiesParallel(
-										  [&write, loose](
-											  size_t first,
-											  size_t rows,
-											  const Entity *entities,
-											  const Transform *transforms,
-											  const PreviousTransform *previous,
-											  const Bounds *bounds,
-											  const Visual *visuals,
-											  const SurfaceAppearance *appearances,
-											  const Tags *tags,
-											  const LocalTransparency *locals,
-											  const CharacterLimb *limbs
-										  ) {
-											  write(
-												  loose,
-												  first,
-												  rows,
-												  entities,
-												  transforms,
-												  previous,
-												  bounds,
-												  visuals,
-												  appearances,
-												  tags,
-												  locals,
-												  limbs
-											  );
-										  },
-										  DRAW_LIST_GRAIN
-									  );
+			const size_t rigged =
+				PresentationSource::QueryRiggedWorldDrawables(store).EachBatchEntitiesParallel(
+					[&write, loose](
+						size_t first,
+						size_t rows,
+						const Entity *entities,
+						const Transform *transforms,
+						const PreviousTransform *previous,
+						const Bounds *bounds,
+						const Visual *visuals,
+						const SurfaceAppearance *appearances,
+						const Tags *tags,
+						const LocalTransparency *locals,
+						const CharacterLimb *limbs
+					) {
+						write(
+							loose,
+							first,
+							rows,
+							entities,
+							transforms,
+							previous,
+							bounds,
+							visuals,
+							appearances,
+							tags,
+							locals,
+							limbs
+						);
+					},
+					DRAW_LIST_GRAIN
+				);
 
 			written = loose + rigged;
 		}
@@ -1475,33 +1448,17 @@ namespace engine::render {
 			const graph::PipelineDocument *document = available->Find(name);
 			assert(document != nullptr);
 
-			graph::RenderGraph pipeline;
-			core::Name offender;
-			const graph::PipelineDocumentStatus status = graph::Build(*document, pipeline, offender);
-			if (status != graph::PipelineDocumentStatus::Ok) {
-				ENGINE_ERROR(
-					"pipeline '{}' does not build: {} at '{}'",
-					name.Text(),
-					graph::Describe(status),
-					offender.Text()
-				);
-				continue;
-			}
-
 			const core::Name key = WorldPipelineKey(name, world);
-			if (renderer.SetPipeline(key, pipeline)) {
+			if (renderer.SetPipelineDocument(key, *document)) {
 				return key;
 			}
 		}
 
 		if (profiles.Count() > 0 && tier != DefaultPipelineTier::Unavailable) {
-			graph::RenderGraph pipeline;
-			core::Name offender;
-			if (graph::Build(defaultDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok) {
-				const core::Name key = WorldPipelineKey(core::Name("Default PBR"), world);
-				if (renderer.SetPipeline(key, pipeline)) {
-					return key;
-				}
+			const graph::PipelineDocument fallback = defaultDocument();
+			const core::Name key = WorldPipelineKey(core::Name("Default PBR"), world);
+			if (renderer.SetPipelineDocument(key, fallback)) {
+				return key;
 			}
 		}
 		return {};
@@ -1749,7 +1706,8 @@ namespace engine::render {
 					view.PaneNear = pane.NearPlane;
 					view.PaneFar = pane.FarPlane;
 					if (viewer != nullptr) {
-						const auto reflected = scene::ReflectCamera(pane, viewer->CameraFrame, {});
+						const auto reflected =
+							scene::ReflectCamera(pane, viewer->VisibilityCameraFrame(), {});
 						if (!reflected.Renders) {
 							return;
 						}

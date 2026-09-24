@@ -1,7 +1,6 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
-#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
@@ -25,22 +24,6 @@ namespace studio {
 				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
 			}
 			return text.find(wanted) != std::string::npos;
-		}
-
-		bool IsImage(engine::graph::ResourceKind kind) {
-			using engine::graph::ResourceKind;
-			return kind == ResourceKind::Colour || kind == ResourceKind::Depth ||
-				   kind == ResourceKind::Texture || kind == ResourceKind::Storage;
-		}
-
-		const engine::graph::ProfileResource *
-		ProfileResourceOf(const engine::graph::PipelineProfile &profile, engine::graph::ResourceId wanted) {
-			for (const engine::graph::ProfileResource &resource : profile.Resources) {
-				if (resource.Id == wanted) {
-					return &resource;
-				}
-			}
-			return nullptr;
 		}
 
 		template <typename Timings>
@@ -82,23 +65,6 @@ namespace studio {
 			return text.empty() ? "none" : text;
 		}
 
-		template <typename Draw>
-		bool DrawStageImages(
-			const engine::graph::PipelineProfile &profile, const engine::graph::Node &node, Draw draw
-		) {
-			const std::vector<engine::graph::ResourceId> &images =
-				node.Writes.empty() ? node.Reads : node.Writes;
-			bool drewImage = false;
-			for (const engine::graph::ResourceId resourceId : images) {
-				const engine::graph::ProfileResource *resource = ProfileResourceOf(profile, resourceId);
-				if (resource == nullptr || !IsImage(resource->Kind)) {
-					continue;
-				}
-				drewImage = true;
-				draw(*resource);
-			}
-			return drewImage;
-		}
 	}
 
 	void Editor::DrawRenderPipeline() {

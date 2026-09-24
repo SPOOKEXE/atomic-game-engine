@@ -4,6 +4,7 @@
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Schedule.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -11,6 +12,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -127,6 +129,191 @@ TEST_CASE("world work is shared while view work is repeated", "[render][graph]")
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@1") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@2") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "present") == 1);
+}
+
+TEST_CASE("graph runner readers observe authored resource versions", "[render][graph]") {
+	for (const bool secondEnabled : {true, false}) {
+		CAPTURE(secondEnabled);
+		RenderGraph graph;
+		const auto colour =
+			graph.AddResource({.Name = Name("authored-colour"), .Kind = engine::graph::ResourceKind::Colour});
+		const auto add = [&](const char *name, const char *kind, bool writes, bool enabled = true) {
+			engine::graph::Node node;
+			node.Name = Name(name);
+			node.Kind = Name(kind);
+			node.Scope = engine::graph::NodeScope::View;
+			node.Enabled = enabled;
+			if (writes)
+				node.Writes = {colour};
+			else
+				node.Reads = {colour};
+			graph.AddNode(node);
+		};
+		add("first", "write-authored-colour", true);
+		add("before-overwrite", "read-authored-colour", false);
+		add("second", "write-authored-colour", true, secondEnabled);
+		add("after-overwrite", "read-authored-colour", false);
+
+		std::array<std::string, 2> current;
+		std::vector<std::string> observed;
+		std::vector<std::string> order;
+		NodeTable table;
+		REQUIRE(table.Set(Name("write-authored-colour"), [&](const RunContext &context) {
+			REQUIRE(context.View < current.size());
+			current[context.View] = std::string(context.Name.Text());
+			order.push_back(current[context.View] + "@" + std::to_string(context.View));
+			return true;
+		}));
+		REQUIRE(table.Set(Name("read-authored-colour"), [&](const RunContext &context) {
+			REQUIRE(context.View < current.size());
+			const std::string label = std::string(context.Name.Text()) + "@" + std::to_string(context.View);
+			order.push_back(label);
+			observed.push_back(label + "=" + current[context.View]);
+			return true;
+		}));
+		GraphRunner runner(table);
+		const uint64_t worlds[] = {7, 8};
+		REQUIRE(graph.Execute(Compile(graph), runner, worlds));
+		CHECK(runner.Submitted() == (secondEnabled ? 8 : 6));
+		std::vector<std::string> expectedOrder;
+		std::vector<std::string> expectedObserved;
+		for (size_t view = 0; view < 2; ++view) {
+			const std::string suffix = "@" + std::to_string(view);
+			expectedOrder.push_back("first" + suffix);
+			expectedOrder.push_back("before-overwrite" + suffix);
+			if (secondEnabled) expectedOrder.push_back("second" + suffix);
+			expectedOrder.push_back("after-overwrite" + suffix);
+			expectedObserved.push_back("before-overwrite" + suffix + "=first");
+			expectedObserved.push_back("after-overwrite" + suffix + (secondEnabled ? "=second" : "=first"));
+		}
+		CHECK(order == expectedOrder);
+		CHECK(observed == expectedObserved);
+	}
+}
+
+TEST_CASE("graph runner dispatches history reads before same-frame writes", "[render][graph]") {
+	RenderGraph graph;
+	const auto history = graph.AddResource(
+		{.Name = Name("history-colour"),
+		 .Kind = engine::graph::ResourceKind::Colour,
+		 .External = true,
+		 .Lifetime = engine::graph::ResourceLifetime::History}
+	);
+	const auto add = [&](const char *name, const char *kind, bool writes) {
+		engine::graph::Node node;
+		node.Name = Name(name);
+		node.Kind = Name(kind);
+		node.Scope = engine::graph::NodeScope::View;
+		if (writes)
+			node.Writes = {history};
+		else
+			node.Reads = {history};
+		graph.AddNode(node);
+	};
+	add("read-previous", "read-history", false);
+	add("first-write", "write-history", true);
+	add("second-write", "write-history", true);
+	engine::graph::ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok);
+	const auto compiled = Compile(graph);
+
+	// This small store models generations to check dispatch. It does not exercise GPU aliasing.
+	std::string previous = "prior";
+	std::string next;
+	std::vector<std::string> observed;
+	std::vector<std::string> order;
+	NodeTable table;
+	REQUIRE(table.Set(Name("read-history"), [&](const RunContext &context) {
+		order.emplace_back(context.Name.Text());
+		observed.push_back(previous);
+		return true;
+	}));
+	REQUIRE(table.Set(Name("write-history"), [&](const RunContext &context) {
+		order.emplace_back(context.Name.Text());
+		next = std::string(context.Name.Text());
+		return true;
+	}));
+	const uint64_t worlds[] = {7};
+	for (size_t frame = 0; frame < 2; ++frame) {
+		GraphRunner runner(table);
+		REQUIRE(graph.Execute(compiled, runner, worlds));
+		CHECK(runner.Submitted() == 3);
+		CHECK(next == "second-write");
+		previous = next;
+		next.clear();
+	}
+	CHECK(observed == std::vector<std::string>{"prior", "second-write"});
+	CHECK(
+		order ==
+		std::vector<std::string>{
+			"read-previous", "first-write", "second-write", "read-previous", "first-write", "second-write"
+		}
+	);
+}
+
+TEST_CASE("graph runner carries world values through views before frame work", "[render][graph]") {
+	RenderGraph graph;
+	const auto worldColour =
+		graph.AddResource({.Name = Name("world-colour"), .Kind = engine::graph::ResourceKind::Colour});
+	const auto viewColour =
+		graph.AddResource({.Name = Name("view-colour"), .Kind = engine::graph::ResourceKind::Colour});
+	engine::graph::Node world;
+	world.Name = Name("world-write");
+	world.Kind = Name("write-world-colour");
+	world.Scope = engine::graph::NodeScope::World;
+	world.Writes = {worldColour};
+	graph.AddNode(world);
+	engine::graph::Node view;
+	view.Name = Name("view-read");
+	view.Kind = Name("read-world-colour");
+	view.Scope = engine::graph::NodeScope::View;
+	view.Reads = {worldColour};
+	view.Writes = {viewColour};
+	graph.AddNode(view);
+	engine::graph::Node frame;
+	frame.Name = Name("frame-read");
+	frame.Kind = Name("read-view-colour");
+	frame.Scope = engine::graph::NodeScope::Frame;
+	frame.Reads = {viewColour};
+	graph.AddNode(frame);
+	engine::graph::ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok);
+
+	std::array<std::string, 2> worldValues;
+	std::array<std::string, 3> viewValues;
+	std::vector<std::string> order;
+	std::string frameValue;
+	NodeTable table;
+	REQUIRE(table.Set(Name("write-world-colour"), [&](const RunContext &context) {
+		REQUIRE(context.View == RunContext::WHOLE_FRAME);
+		REQUIRE(context.World < worldValues.size());
+		worldValues[context.World] = "world" + std::to_string(context.World);
+		order.push_back("W" + std::to_string(context.World));
+		return true;
+	}));
+	REQUIRE(table.Set(Name("read-world-colour"), [&](const RunContext &context) {
+		REQUIRE(context.View < viewValues.size());
+		REQUIRE(context.World < worldValues.size());
+		viewValues[context.View] = worldValues[context.World];
+		order.push_back("V" + std::to_string(context.View));
+		return true;
+	}));
+	REQUIRE(table.Set(Name("read-view-colour"), [&](const RunContext &context) {
+		REQUIRE(context.View == RunContext::WHOLE_FRAME);
+		REQUIRE(context.World == RunContext::WHOLE_FRAME);
+		frameValue = viewValues[0] + "," + viewValues[1] + "," + viewValues[2];
+		order.push_back("F");
+		return true;
+	}));
+	GraphRunner runner(table);
+	const uint64_t worlds[] = {7, 7, 9};
+	REQUIRE(graph.Execute(Compile(graph), runner, worlds));
+	CHECK(runner.Submitted() == 6);
+	CHECK(order == std::vector<std::string>{"W0", "V0", "V1", "W1", "V2", "F"});
+	CHECK(viewValues == std::array<std::string, 3>{"world0", "world0", "world1"});
+	CHECK(frameValue == "world0,world0,world1");
 }
 
 TEST_CASE("clouds consume the skybox producer in the same world invocation", "[render][graph]") {

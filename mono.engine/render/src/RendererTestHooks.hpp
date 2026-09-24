@@ -15,4 +15,11 @@ namespace engine::render::test_support {
 	// a real command buffer, so cleanup follows the same partial-submit path.
 	// Passing no group disables the hook; release builds always leave it disabled.
 	void SetFrameBatchFailureBeforeGroupForTests(std::optional<size_t> group);
+
+	// Simulates a failed acquisition before the backend is called.
+	void SetFrameBatchAcquisitionFailureForTests(bool enabled);
+
+	// Cancels the next batch command at the submission boundary.
+	void SetFrameBatchSubmissionFailureForTests(bool enabled);
+	bool ConsumeFrameBatchSubmissionFailureForTests();
 }

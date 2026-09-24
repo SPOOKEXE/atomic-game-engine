@@ -1,5 +1,7 @@
 #include "PresentationSourceRows.hpp"
 
+#include "PresentationSource.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Visibility.hpp>
@@ -21,7 +23,6 @@ namespace engine::render {
 		using scene::CharacterLimb;
 		using scene::LocalTransparency;
 		using scene::PreviousTransform;
-		using scene::Rendered;
 		using scene::SurfaceAppearance;
 		using scene::Tags;
 		using scene::Transform;
@@ -56,59 +57,38 @@ namespace engine::render {
 			if (foundInterpolation) hasInterpolation.store(true, std::memory_order_relaxed);
 		};
 
-		const size_t loose = store
-								 .Query<
-									 const Transform,
-									 const PreviousTransform,
-									 const Bounds,
-									 const Visual,
-									 const SurfaceAppearance,
-									 const Tags,
-									 const LocalTransparency>()
-								 .With<Rendered>()
-								 .Without<CharacterLimb>()
-								 .EachBatchEntitiesParallel(
-									 [&write](
-										 size_t first,
-										 size_t rows,
-										 const ecs::Entity *entities,
-										 const Transform *transforms,
-										 const PreviousTransform *previous,
-										 const Bounds *,
-										 const Visual *,
-										 const SurfaceAppearance *,
-										 const Tags *,
-										 const LocalTransparency *
-									 ) { write(0, first, rows, entities, transforms, previous); },
-									 grain
-								 );
-		const size_t rigged = store
-								  .Query<
-									  const Transform,
-									  const PreviousTransform,
-									  const Bounds,
-									  const Visual,
-									  const SurfaceAppearance,
-									  const Tags,
-									  const LocalTransparency,
-									  const CharacterLimb>()
-								  .With<Rendered>()
-								  .EachBatchEntitiesParallel(
-									  [&write, loose](
-										  size_t first,
-										  size_t rows,
-										  const ecs::Entity *entities,
-										  const Transform *transforms,
-										  const PreviousTransform *previous,
-										  const Bounds *,
-										  const Visual *,
-										  const SurfaceAppearance *,
-										  const Tags *,
-										  const LocalTransparency *,
-										  const CharacterLimb *
-									  ) { write(loose, first, rows, entities, transforms, previous); },
-									  grain
-								  );
+		const size_t loose =
+			PresentationSource::QueryWorldDrawables(store).Without<CharacterLimb>().EachBatchEntitiesParallel(
+				[&write](
+					size_t first,
+					size_t rows,
+					const ecs::Entity *entities,
+					const Transform *transforms,
+					const PreviousTransform *previous,
+					const Bounds *,
+					const Visual *,
+					const SurfaceAppearance *,
+					const Tags *,
+					const LocalTransparency *
+				) { write(0, first, rows, entities, transforms, previous); },
+				grain
+			);
+		const size_t rigged = PresentationSource::QueryRiggedWorldDrawables(store).EachBatchEntitiesParallel(
+			[&write, loose](
+				size_t first,
+				size_t rows,
+				const ecs::Entity *entities,
+				const Transform *transforms,
+				const PreviousTransform *previous,
+				const Bounds *,
+				const Visual *,
+				const SurfaceAppearance *,
+				const Tags *,
+				const LocalTransparency *,
+				const CharacterLimb *
+			) { write(loose, first, rows, entities, transforms, previous); },
+			grain
+		);
 		drawList.HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
 		return sourceOrderChanged.load(std::memory_order_relaxed) ? 0 : loose + rigged;
 	}

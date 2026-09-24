@@ -23,9 +23,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 namespace engine::render {
@@ -42,7 +44,14 @@ namespace engine::render {
 		glm::uvec4 ArgumentCounts;
 	};
 
+	static_assert(std::is_standard_layout_v<GpuLodSelection>);
 	static_assert(sizeof(GpuLodSelection) == 96);
+	static_assert(offsetof(GpuLodSelection, CentreTarget) == 0);
+	static_assert(offsetof(GpuLodSelection, ExtentLevels) == 16);
+	static_assert(offsetof(GpuLodSelection, MinimumDistances) == 32);
+	static_assert(offsetof(GpuLodSelection, Triangles) == 48);
+	static_assert(offsetof(GpuLodSelection, FirstArguments) == 64);
+	static_assert(offsetof(GpuLodSelection, ArgumentCounts) == 80);
 
 	// std430 cluster page consumed by lod-select.comp. Centre and extent are
 	// already transformed into world space because the selection pass has no

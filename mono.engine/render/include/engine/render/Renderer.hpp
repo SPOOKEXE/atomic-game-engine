@@ -21,6 +21,7 @@
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/PipelineAdmission.hpp>
 #include <engine/render/PortalCaptureTreeCompose.hpp>
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
@@ -1757,6 +1758,17 @@ namespace engine::render {
 		// @return Whether the complete graph can run on this backend.
 		bool SetPipeline(core::Name name, const graph::RenderGraph &pipeline);
 
+		// Compiles and installs a graph while retaining the precise refusal reason.
+		// The bool overload above remains for callers that only need acceptance.
+		PipelineAdmissionResult SetPipelineWithResult(core::Name name, const graph::RenderGraph &pipeline);
+
+		// Builds and installs an authored document with the same diagnostics as
+		// direct graph admission.
+		PipelineAdmissionResult SetPipelineDocument(core::Name name, const graph::PipelineDocument &document);
+
+		// Checks an authored document against this renderer without installing it.
+		PipelineAdmissionResult ValidatePipelineDocument(const graph::PipelineDocument &document) const;
+
 		// Installs, or replaces, the native implementation of a custom node kind.
 		//
 		// RegisterNodeKind must have declared the kind first. Built-in handlers
@@ -2323,6 +2335,11 @@ namespace engine::render {
 		// @since v0.15
 		// Identical owner, name and words reuse the pipeline without a frame wait or invalidation.
 		bool AddShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+
+		// Reflects and admits a material fragment against the renderer's named
+		// sampler slots, then installs it through the normal replacement path.
+		bool
+		AddMaterialShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
 
 		// Forgets a registered shader and frees its pipelines.
 		//

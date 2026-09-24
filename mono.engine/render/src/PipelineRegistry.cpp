@@ -1,19 +1,63 @@
 // Named installed-pipeline ownership and inspection.
 
 #include "PipelineCompiler.hpp"
+#include "RendererState.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace engine::render {
-	bool Renderer::SetPipeline(core::Name name, const graph::RenderGraph &pipeline) {
-		RequireOwningThread("SetPipeline");
-		if (!name.IsValid()) {
-			ENGINE_ERROR("a render pipeline needs a name a view can select");
+	namespace {
+		PipelineAdmissionResult
+		Refused(PipelineAdmissionStage stage, core::Name offender, std::string reason) {
+			return {
+				.Failure = PipelineFailure{
+					.Stage = stage,
+					.Offender = offender,
+					.Reason = std::move(reason),
+				}
+			};
+		}
+
+		void LogPipelineFailure(core::Name name, const PipelineFailure &failure) {
+			ENGINE_ERROR("pipeline '{}': {}", name.Text(), FormatPipelineFailure(failure));
+		}
+
+		bool BuildPipelineDocument(
+			const graph::PipelineDocument &document,
+			graph::RenderGraph &pipeline,
+			core::Name &offender,
+			PipelineAdmissionResult &failure
+		) {
+			const graph::PipelineDocumentStatus status = graph::Build(document, pipeline, offender);
+			if (status == graph::PipelineDocumentStatus::Ok) {
+				return true;
+			}
+			// `Invalid` means the document's schedule failed. The renderer compiler
+			// runs next to recover its detailed boundary, or an earlier graph error.
+			if (status == graph::PipelineDocumentStatus::Invalid) return true;
+			failure = Refused(PipelineAdmissionStage::Graph, offender, graph::Describe(status));
 			return false;
+		}
+	}
+
+	bool Renderer::SetPipeline(core::Name name, const graph::RenderGraph &pipeline) {
+		return static_cast<bool>(SetPipelineWithResult(name, pipeline));
+	}
+
+	PipelineAdmissionResult
+	Renderer::SetPipelineWithResult(core::Name name, const graph::RenderGraph &pipeline) {
+		RequireOwningThread("SetPipelineWithResult");
+		if (!name.IsValid()) {
+			PipelineAdmissionResult result = Refused(
+				PipelineAdmissionStage::Validation, name, "a render pipeline needs a name a view can select"
+			);
+			LogPipelineFailure(name, *result.Failure);
+			return result;
 		}
 
 		std::vector<core::Name> customKinds;
@@ -22,19 +66,14 @@ namespace engine::render {
 			customKinds.push_back(installed.Kind);
 		}
 		const DeviceCaps *caps = State->Device != nullptr ? &State->Caps : nullptr;
-		Impl::PipelineCompilation compilation = Impl::CompilePipeline(name, pipeline, caps, customKinds);
+		PipelineCompilation compilation = CompilePipeline(name, pipeline, caps, customKinds);
 		if (!compilation) {
-			ENGINE_ERROR(
-				"pipeline '{}' refused during {}: {} at '{}'",
-				name.Text(),
-				DescribePipelineAdmission(compilation.Failure.Stage),
-				compilation.Failure.Reason,
-				compilation.Failure.Offender.Text()
-			);
-			return false;
+			PipelineAdmissionResult result{.Failure = compilation.Failure};
+			LogPipelineFailure(name, *result.Failure);
+			return result;
 		}
 
-		for (const Impl::InstalledPipeline &installed : State->InstalledPipelines) {
+		for (const InstalledPipeline &installed : State->InstalledPipelines) {
 			if (installed.Name != name) {
 				continue;
 			}
@@ -43,11 +82,54 @@ namespace engine::render {
 			}
 			(void)State->RetireNamed(name);
 			State->InstallNamed(std::move(*compilation.Package));
-			return true;
+			return {};
 		}
 
 		State->InstallNamed(std::move(*compilation.Package));
-		return true;
+		return {};
+	}
+
+	PipelineAdmissionResult
+	Renderer::SetPipelineDocument(core::Name name, const graph::PipelineDocument &document) {
+		RequireOwningThread("SetPipelineDocument");
+		if (!name.IsValid()) {
+			PipelineAdmissionResult result = Refused(
+				PipelineAdmissionStage::Validation, name, "a render pipeline needs a name a view can select"
+			);
+			LogPipelineFailure(name, *result.Failure);
+			return result;
+		}
+
+		graph::RenderGraph pipeline;
+		core::Name offender;
+		PipelineAdmissionResult failure;
+		if (!BuildPipelineDocument(document, pipeline, offender, failure)) {
+			LogPipelineFailure(name, *failure.Failure);
+			return failure;
+		}
+
+		// Build collapses schedule errors to Invalid. Renderer admission retains
+		// the detailed failure from the same graph.
+		return SetPipelineWithResult(name, pipeline);
+	}
+
+	PipelineAdmissionResult
+	Renderer::ValidatePipelineDocument(const graph::PipelineDocument &document) const {
+		RequireOwningThread("ValidatePipelineDocument");
+		graph::RenderGraph pipeline;
+		core::Name offender;
+		PipelineAdmissionResult failure;
+		if (!BuildPipelineDocument(document, pipeline, offender, failure)) return failure;
+
+		std::vector<core::Name> customKinds;
+		customKinds.reserve(CustomNodeHandlers.size());
+		for (const InstalledNodeHandler &installed : CustomNodeHandlers)
+			customKinds.push_back(installed.Kind);
+		const DeviceCaps *caps = State->Device != nullptr ? &State->Caps : nullptr;
+		PipelineCompilation compilation =
+			CompilePipeline(core::Name("pipeline document validation"), pipeline, caps, customKinds);
+		if (!compilation) return {.Failure = std::move(compilation.Failure)};
+		return {};
 	}
 
 	std::optional<Renderer::RenderGraphSnapshot>
@@ -146,20 +228,16 @@ namespace engine::render {
 	bool Renderer::InstallEngineDefault(const graph::PipelineDocument &document) {
 		graph::RenderGraph pipeline;
 		core::Name offender;
-		if (graph::Build(document, pipeline, offender) != graph::PipelineDocumentStatus::Ok) {
-			ENGINE_ERROR("engine default render graph did not build at '{}'", offender.Text());
+		PipelineAdmissionResult failure;
+		if (!BuildPipelineDocument(document, pipeline, offender, failure)) {
+			ENGINE_ERROR("engine default render graph {}", FormatPipelineFailure(*failure.Failure));
 			return false;
 		}
 
-		Impl::PipelineCompilation compilation =
-			Impl::CompilePipeline(core::Name("Engine Default"), pipeline, nullptr, {});
+		PipelineCompilation compilation =
+			CompilePipeline(core::Name("Engine Default"), pipeline, nullptr, {});
 		if (!compilation) {
-			ENGINE_ERROR(
-				"engine default render graph refused during {}: {} at '{}'",
-				DescribePipelineAdmission(compilation.Failure.Stage),
-				compilation.Failure.Reason,
-				compilation.Failure.Offender.Text()
-			);
+			ENGINE_ERROR("engine default render graph {}", FormatPipelineFailure(compilation.Failure));
 			return false;
 		}
 		State->InstallDefault(std::move(*compilation.Package));

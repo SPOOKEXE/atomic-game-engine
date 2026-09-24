@@ -1,3 +1,4 @@
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
@@ -8,6 +9,7 @@
 #include <array>
 #include <studio/RenderPipelineGraph.hpp>
 #include <utility>
+#include <vector>
 
 TEST_SUITE_ID("studio.renderpipelinegraph")
 TEST_DEPENDS("engine.graph.pipelinedocument")
@@ -167,6 +169,25 @@ TEST_CASE("canvas document round trip retains resource and unknown authored data
 		 .External = true}
 	);
 	basis.Record(
+		{.Kind = EditKind::AddResource,
+		 .Name = engine::core::Name("display"),
+		 .Resource = ResourceKind::Colour,
+		 .Format = ResourceFormat::RGBA16F,
+		 .Divisor = 3,
+		 .Access = ResourceAccess::Write,
+		 .Samples = 4,
+		 .Depth = 3,
+		 .Layers = 6,
+		 .FirstMip = 2,
+		 .MipCount = 5,
+		 .ColourSpace = ResourceColourSpace::SRGB,
+		 .AlphaSpace = ResourceAlphaSpace::Straight,
+		 .BufferStride = 68,
+		 .Lifetime = ResourceLifetime::External,
+		 .Owner = engine::core::Name("display-owner"),
+		 .HistoryGeneration = 7}
+	);
+	basis.Record(
 		{.Kind = EditKind::AddNode,
 		 .Name = engine::core::Name("tone"),
 		 .NodeKind = engine::core::Name("tonemap"),
@@ -206,6 +227,29 @@ TEST_CASE("canvas document round trip retains resource and unknown authored data
 	CHECK(source->External);
 	CHECK(source->Divisor == 2);
 	CHECK(source->Format == ResourceFormat::RGBA16F);
+	const auto display = std::find_if(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
+		return edit.Kind == EditKind::AddResource && edit.Name == engine::core::Name("display");
+	});
+	REQUIRE(display != saved.Edits().end());
+	CHECK(display->Divisor == 3);
+	CHECK_FALSE(display->External);
+	CHECK(display->Access == ResourceAccess::Write);
+	CHECK(display->Samples == 4);
+	CHECK(display->Depth == 3);
+	CHECK(display->Layers == 6);
+	CHECK(display->FirstMip == 2);
+	CHECK(display->MipCount == 5);
+	CHECK(display->ColourSpace == ResourceColourSpace::SRGB);
+	CHECK(display->AlphaSpace == ResourceAlphaSpace::Straight);
+	CHECK(display->BufferStride == 68);
+	CHECK(display->Lifetime == ResourceLifetime::External);
+	CHECK(display->Owner == engine::core::Name("display-owner"));
+	CHECK(display->HistoryGeneration == 7);
+	const auto tone = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
+		return node.Label == "tone";
+	});
+	REQUIRE(tone != canvas.Nodes().end());
+	CHECK(tone->Widgets.at("resource.display.lifetime").Text == "external");
 	const auto unknown = std::find_if(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
 		return edit.Kind == EditKind::Set && edit.Key == engine::core::Name("unknown-authored-text");
 	});
@@ -217,6 +261,201 @@ TEST_CASE("canvas document round trip retains resource and unknown authored data
 	PipelineDocument canonical;
 	REQUIRE(studio::SaveRenderPipelineGraph(restored, saved, canonical, error));
 	CHECK(Write(canonical) == Write(saved));
+}
+
+TEST_CASE("authored binding order survives the nodegraph adapter", "[studio][pipeline]") {
+	const PipelineDocument defaults = DefaultPbrDocument();
+	std::vector<Edit> edits(defaults.Edits().begin(), defaults.Edits().end());
+	const NodeKindSpec *ssao = NodeCatalogue::Find(engine::core::Name("ssao"));
+	REQUIRE(ssao != nullptr);
+	REQUIRE(ssao->Inputs.size() >= 2);
+	const NodeKindSpec *gbuffer = NodeCatalogue::Find(engine::core::Name("gbuffer"));
+	REQUIRE(gbuffer != nullptr);
+	REQUIRE(gbuffer->Outputs.size() >= 2);
+
+	std::vector<size_t> readSlots;
+	std::vector<size_t> writeSlots;
+	for (size_t index = 0; index < edits.size(); ++index) {
+		if (edits[index].Kind == EditKind::AddNode && edits[index].Name == engine::core::Name("ssao")) {
+			for (size_t next = index + 1; next < edits.size(); ++next) {
+				if (edits[next].Kind == EditKind::AddNode || edits[next].Kind == EditKind::AddResource) {
+					break;
+				}
+				if (edits[next].Kind == EditKind::Reads) {
+					readSlots.push_back(next);
+				}
+			}
+		} else if (edits[index].Kind == EditKind::AddNode &&
+				   edits[index].Name == engine::core::Name("gbuffer")) {
+			for (size_t next = index + 1; next < edits.size(); ++next) {
+				if (edits[next].Kind == EditKind::AddNode || edits[next].Kind == EditKind::AddResource) {
+					break;
+				}
+				if (edits[next].Kind == EditKind::Writes) {
+					writeSlots.push_back(next);
+				}
+			}
+		}
+	}
+	REQUIRE(readSlots.size() >= 2);
+	REQUIRE(writeSlots.size() >= 2);
+	std::vector<Edit> reads;
+	for (const size_t slot : readSlots) {
+		reads.push_back(edits[slot]);
+	}
+	std::reverse(reads.begin(), reads.end());
+	for (size_t index = 0; index < readSlots.size(); ++index) {
+		edits[readSlots[index]] = reads[index];
+	}
+	std::vector<Edit> writes;
+	for (const size_t slot : writeSlots) {
+		writes.push_back(edits[slot]);
+	}
+	std::reverse(writes.begin(), writes.end());
+	for (size_t index = 0; index < writeSlots.size(); ++index) {
+		edits[writeSlots[index]] = writes[index];
+	}
+
+	PipelineDocument basis;
+	for (const Edit &edit : edits) {
+		basis.Record(edit);
+	}
+
+	std::vector<engine::core::Name> expected;
+	for (const size_t slot : readSlots) {
+		expected.push_back(edits[slot].Key);
+	}
+	std::vector<engine::core::Name> expectedWrites;
+	for (const size_t slot : writeSlots) {
+		expectedWrites.push_back(edits[slot].Key);
+	}
+
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+
+	std::vector<engine::core::Name> actual;
+	std::vector<engine::core::Name> actualWrites;
+	bool inSsao = false;
+	bool inGbuffer = false;
+	for (const Edit &edit : saved.Edits()) {
+		if (edit.Kind == EditKind::AddNode) {
+			inSsao = edit.Name == engine::core::Name("ssao");
+			inGbuffer = edit.Name == engine::core::Name("gbuffer");
+		} else if (inSsao && edit.Kind == EditKind::Reads) {
+			actual.push_back(edit.Key);
+		} else if (inGbuffer && edit.Kind == EditKind::Writes) {
+			actualWrites.push_back(edit.Key);
+		}
+	}
+	CHECK(actual == expected);
+	CHECK(actualWrites == expectedWrites);
+}
+
+TEST_CASE("group, comment, mute, and selected preview metadata follow canvas edits", "[studio][pipeline]") {
+	PipelineDocument basis = DefaultPbrDocument();
+	basis.Record(
+		{.Kind = EditKind::Group,
+		 .Name = engine::core::Name("lighting"),
+		 .Target = engine::core::Name("gbuffer")}
+	);
+	basis.Record({.Kind = EditKind::Comment, .Name = engine::core::Name("gbuffer"), .Value = "world pass"});
+	basis.Record({.Kind = EditKind::Mute, .Name = engine::core::Name("ssao"), .Enabled = true});
+	basis.Record({.Kind = EditKind::Preview, .Target = engine::core::Name("albedo")});
+
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	REQUIRE(canvas.Groups().size() == 1);
+	const nodegraph::Group &lighting = canvas.Groups().front();
+	CHECK(lighting.Title == "lighting");
+	REQUIRE(lighting.Members.size() == 1);
+	const nodegraph::Node *gbuffer = canvas.Find(lighting.Members.front());
+	REQUIRE(gbuffer != nullptr);
+	CHECK(gbuffer->Label == "gbuffer");
+	CHECK(gbuffer->Widgets.at("__render.authoring.comment").Text == "world pass");
+	const auto ssaoNode = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
+		return node.Label == "ssao";
+	});
+	REQUIRE(ssaoNode != canvas.Nodes().end());
+	CHECK(ssaoNode->Widgets.at("__render.authoring.muted").Flag);
+
+	const auto gbufferNode = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
+		return node.Label == "gbuffer";
+	});
+	REQUIRE(gbufferNode != canvas.Nodes().end());
+	CHECK(gbufferNode->Widgets.at("__render.authoring.preview").Flag);
+
+	nodegraph::Group *editedLighting = canvas.FindGroup(lighting.Id);
+	REQUIRE(editedLighting != nullptr);
+	editedLighting->Title = "lighting-edited";
+	nodegraph::Node *editedGbuffer = canvas.Find(gbufferNode->Id);
+	REQUIRE(editedGbuffer != nullptr);
+	editedGbuffer->Label = "gbuffer-edited";
+	editedGbuffer->Widgets["__render.authoring.comment"].Text = "edited pass";
+
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	std::vector<Edit> metadata;
+	for (const Edit &edit : saved.Edits()) {
+		if (edit.Kind == EditKind::Group || edit.Kind == EditKind::Comment || edit.Kind == EditKind::Mute ||
+			edit.Kind == EditKind::Preview) {
+			metadata.push_back(edit);
+		}
+	}
+	REQUIRE(metadata.size() == 4);
+	CHECK(metadata[0].Kind == EditKind::Group);
+	CHECK(metadata[0].Name == engine::core::Name("lighting-edited"));
+	CHECK(metadata[0].Target == engine::core::Name("gbuffer-edited"));
+	CHECK(metadata[1].Kind == EditKind::Comment);
+	CHECK(metadata[1].Name == engine::core::Name("gbuffer-edited"));
+	CHECK(metadata[1].Value == "edited pass");
+	CHECK(metadata[2].Kind == EditKind::Mute);
+	CHECK(metadata[2].Name == engine::core::Name("ssao"));
+	CHECK(metadata[2].Enabled);
+	CHECK(metadata[3].Kind == EditKind::Preview);
+	CHECK(metadata[3].Target == engine::core::Name("albedo"));
+}
+
+TEST_CASE("partial canvas records round trip without graph validation", "[studio][pipeline]") {
+	PipelineDocument basis;
+	basis.Record({.Kind = EditKind::Set, .Key = engine::core::Name("orphan"), .Value = "keep me"});
+	basis.Record(
+		{.Kind = EditKind::AddNode,
+		 .Name = engine::core::Name("tone"),
+		 .NodeKind = engine::core::Name("tonemap"),
+		 .Scope = NodeScope::View}
+	);
+	basis.Record({.Kind = EditKind::Reads, .Key = engine::core::Name("colour")});
+	basis.Record(
+		{.Kind = EditKind::Writes,
+		 .Target = engine::core::Name("display"),
+		 .Key = engine::core::Name("display")}
+	);
+
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+
+	const auto orphan = std::find_if(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
+		return edit.Kind == EditKind::Set && edit.Key == engine::core::Name("orphan");
+	});
+	REQUIRE(orphan != saved.Edits().end());
+	CHECK(orphan->Value == "keep me");
+	const auto unbound = std::find_if(saved.Edits().begin(), saved.Edits().end(), [](const Edit &edit) {
+		return edit.Kind == EditKind::Reads && edit.Key == engine::core::Name("colour");
+	});
+	REQUIRE(unbound != saved.Edits().end());
+	CHECK_FALSE(unbound->Target.IsValid());
+
+	RenderGraph rebuilt;
+	engine::core::Name offender;
+	CHECK(Build(saved, rebuilt, offender) == PipelineDocumentStatus::UnknownName);
+	CHECK(offender == engine::core::Name("display"));
 }
 
 TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][pipeline][compositor]") {

@@ -1,11 +1,15 @@
 // Device-free checks for the shared world-to-renderer presentation boundary.
 
+#include "ViewportFrameScene.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/CameraContinuation.hpp>
@@ -27,6 +31,7 @@
 
 TEST_SUITE_ID("engine.render.worldpresentation")
 TEST_DEPENDS("engine.graph.pipelinedocument")
+TEST_DEPENDS("engine.gui.registration")
 TEST_DEPENDS("engine.render.passes")
 TEST_DEPENDS("engine.scene.services")
 
@@ -311,6 +316,114 @@ TEST_CASE("source rows keep ordinary parts before character limbs", "[render][pr
 	REQUIRE(drawList->Instances.size() == 2);
 	CHECK(drawList->Instances[0].Source == ordinary.Id);
 	CHECK(drawList->Instances[1].Source == limb.Id);
+}
+
+TEST_CASE(
+	"world and viewport presentation copy the same declared draw state",
+	"[render][presentation][viewportframe]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("presentation-copy-parity");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity viewport = store.CreateInstance(gui::GuiClass("ViewportFrame"), "Preview");
+	const ecs::Entity viewportWorld = store.CreateInstance(ecs::Classes::Find(Name("WorldModel")), "World");
+	REQUIRE(store.SetParent(viewportWorld, viewport));
+
+	scene::PartDesc desc;
+	desc.Frame.Position = {3.0f, -2.0f, 5.0f};
+	desc.Size = {2.0f, 4.0f, 6.0f};
+	const ecs::Entity worldPart = scene::MakePart(store, desc);
+	const ecs::Entity viewportPart = scene::MakePart(store, desc);
+	REQUIRE(store.SetParent(worldPart, workspace));
+	REQUIRE(store.SetParent(viewportPart, viewportWorld));
+
+	const auto configure = [&](ecs::Entity entity) {
+		scene::Visual visual = *store.Get<scene::Visual>(entity);
+		visual.Tint = {0.2f, 0.4f, 0.8f};
+		visual.Mesh = Name("presentation.parity.mesh");
+		visual.Transparency = 0.25f;
+		visual.CastShadow = false;
+		store.Set(entity, visual);
+
+		scene::SurfaceAppearance appearance;
+		appearance.ColourMap = Name("presentation.parity.colour");
+		appearance.NormalMap = Name("presentation.parity.normal");
+		appearance.Colour = {0.7f, 0.5f, 0.3f};
+		appearance.EmissiveTint = {0.1f, 0.2f, 0.3f};
+		appearance.EmissiveStrength = 0.4f;
+		store.Set(entity, appearance);
+		store.Set(entity, scene::Tags{.Mask = 0x15});
+		store.Set(entity, scene::LocalTransparency{.Value = 0.0f});
+
+		scene::LODAuto automatic;
+		automatic.Meshes[0] = Name("presentation.parity.auto-half");
+		automatic.Meshes[1] = Name("presentation.parity.auto-quarter");
+		automatic.Levels = 3;
+		store.Set(entity, automatic);
+		scene::LODCustom custom;
+		custom.Meshes[0] = Name("presentation.parity.custom-half");
+		custom.Levels = 2;
+		store.Set(entity, custom);
+		scene::LODSettings lodSettings;
+		lodSettings.MinimumDistances[0] = 12.0f;
+		store.Set(entity, lodSettings);
+		scene::RenderEffects effects;
+		effects.Attachments[0].Node = Name("presentation.parity.outline");
+		effects.Attachments[0].Enabled = true;
+		effects.Count = 1;
+		store.Set(entity, effects);
+	};
+	configure(worldPart);
+	configure(viewportPart);
+
+	REQUIRE(scene::SyncRendered(store) == 1);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	const auto *drawList = store.Resource<render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 1);
+	std::vector<scene::DrawInstance> viewportInstances;
+	render::CollectViewportInstances(store, viewport, viewportInstances);
+	REQUIRE(viewportInstances.size() == 1);
+	const scene::DrawInstance &world = drawList->Instances.front();
+	const scene::DrawInstance &miniature = viewportInstances.front();
+
+	CHECK(world.Source == worldPart.Id);
+	CHECK(miniature.Source == viewportPart.Id);
+	CHECK(world.Frame.Position.X == miniature.Frame.Position.X);
+	CHECK(world.Frame.Position.Y == miniature.Frame.Position.Y);
+	CHECK(world.Frame.Position.Z == miniature.Frame.Position.Z);
+	CHECK(world.HalfExtent.X == miniature.HalfExtent.X);
+	CHECK(world.HalfExtent.Y == miniature.HalfExtent.Y);
+	CHECK(world.HalfExtent.Z == miniature.HalfExtent.Z);
+	CHECK(world.Tint.R == miniature.Tint.R);
+	CHECK(world.Tint.G == miniature.Tint.G);
+	CHECK(world.Tint.B == miniature.Tint.B);
+	CHECK(world.SurfaceColour.R == miniature.SurfaceColour.R);
+	CHECK(world.SurfaceColour.G == miniature.SurfaceColour.G);
+	CHECK(world.SurfaceColour.B == miniature.SurfaceColour.B);
+	CHECK(world.EmissiveTint.R == miniature.EmissiveTint.R);
+	CHECK(world.EmissiveTint.G == miniature.EmissiveTint.G);
+	CHECK(world.EmissiveTint.B == miniature.EmissiveTint.B);
+	CHECK(world.EmissiveStrength == miniature.EmissiveStrength);
+	CHECK(world.Mesh == miniature.Mesh);
+	CHECK(world.Texture == miniature.Texture);
+	CHECK(world.NormalMap == miniature.NormalMap);
+	CHECK(world.TagMask == miniature.TagMask);
+	CHECK(world.Transparency == miniature.Transparency);
+	CHECK(world.CastShadow == miniature.CastShadow);
+	CHECK(world.LodMeshes[0] == miniature.LodMeshes[0]);
+	CHECK(world.LodMeshes[1] == miniature.LodMeshes[1]);
+	CHECK(world.LodMinimumDistances[0] == miniature.LodMinimumDistances[0]);
+	CHECK(world.Effects.Count == miniature.Effects.Count);
+	CHECK(world.Effects.Attachments[0].Node == miniature.Effects.Attachments[0].Node);
+	CHECK(world.Effects.Attachments[0].Enabled == miniature.Effects.Attachments[0].Enabled);
+	CHECK(world.LodMeshes[0] == Name("presentation.parity.custom-half"));
+	CHECK(world.LodMeshes[1] == Name("presentation.parity.auto-quarter"));
+	CHECK(world.Effects.Attachments[0].Node == Name("presentation.parity.outline"));
 }
 
 TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][presentation]") {
@@ -1119,14 +1232,21 @@ TEST_CASE(
 	}
 	render::View viewer;
 	viewer.CameraFrame.Position = {0, 0, 2};
+	viewer.VisibilityFrame = core::CFrame(core::Vector3{0, 0, 6});
 	std::vector<render::SurfaceView> surfaces;
 	REQUIRE(render::CollectSurfaceViews(store, surfaces, {}, &viewer) == 2);
 	CHECK(surfaces[0].Index == 0);
 	CHECK(surfaces[1].Index == 1);
+	const std::array<core::CFrame, 2> lockedFrames{surfaces[0].Frame, surfaces[1].Frame};
+	CHECK(viewer.CameraFrame.Position == core::Vector3{0, 0, 2});
+
+	viewer.VisibilityFrame.reset();
+	REQUIRE(render::CollectSurfaceViews(store, surfaces, {}, &viewer) == 2);
 	for (size_t index = 0; index < cameras.size(); ++index) {
 		CHECK(store.Get<scene::SurfaceCamera>(cameras[index])->Surface == -1);
 		CHECK(store.Get<scene::Transform>(cameras[index])->Frame.Position == core::Vector3{});
 		CHECK(surfaces[index].Frame.Position.Z < -4);
+		CHECK(surfaces[index].Frame.Position != lockedFrames[index].Position);
 	}
 	CHECK(store.Resource<scene::ActiveCamera>() == nullptr);
 }

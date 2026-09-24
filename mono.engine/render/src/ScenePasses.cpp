@@ -81,10 +81,8 @@ namespace engine::render {
 		SDL_GPUCommandBuffer *const command = Command;
 
 		if (State->BatchActive) {
-			// The batch owner drops any recorded downloads with the frame.
+			// The batch owner settles downloads and visibility with its outcome.
 			State->BatchFailed = true;
-			State->VisibilityWorking.Invalidate();
-			State->VisibilityCompleted = {};
 		} else {
 			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
 			if (submitted) {

@@ -50,24 +50,29 @@ namespace engine::render {
 	// while serialisation deliberately writes no instances because PreRender
 	// rebuilds them before use.
 	struct DrawList {
-		// Monotonic source epochs last inspected by CollectInstances. Named fields
-		// keep a new source component from being coupled to an array position.
+		struct SourceRevision {
+			uint64_t Writes = 0;	 // Writes to existing component values.
+			uint64_t Membership = 0; // Entities gaining or losing the component.
+		};
+
+		// Source epochs last inspected by CollectInstances. Named fields keep a
+		// new source component from being coupled to an array position.
 		struct SourceRevisions {
-			uint64_t Transform = 0;			// Transform source epoch.
-			uint64_t PreviousTransform = 0; // Previous-transform source epoch.
-			uint64_t Bounds = 0;			// Bounds source epoch.
-			uint64_t Visual = 0;			// Visual source epoch.
-			uint64_t SurfaceAppearance = 0; // Surface source epoch.
-			uint64_t Tags = 0;				// Tag source epoch.
-			uint64_t LocalTransparency = 0; // Transparency source epoch.
-			uint64_t CharacterLimb = 0;		// Limb source epoch.
-			uint64_t Skeleton = 0;			// Skeleton source epoch.
-			uint64_t Bone = 0;				// Bone source epoch.
-			uint64_t Rendered = 0;			// Rendered-state source epoch.
-			uint64_t LODAuto = 0;			// Automatic LOD source epoch.
-			uint64_t LODCustom = 0;			// Custom LOD source epoch.
-			uint64_t LODSettings = 0;		// LOD-settings source epoch.
-			uint64_t RenderEffects = 0;		// Render-effect source epoch.
+			SourceRevision Transform{};
+			SourceRevision PreviousTransform{};
+			SourceRevision Bounds{};
+			SourceRevision Visual{};
+			SourceRevision SurfaceAppearance{};
+			SourceRevision Tags{};
+			SourceRevision LocalTransparency{};
+			SourceRevision CharacterLimb{};
+			SourceRevision Skeleton{};
+			SourceRevision Bone{};
+			SourceRevision Rendered{};
+			SourceRevision LODAuto{};
+			SourceRevision LODCustom{};
+			SourceRevision LODSettings{};
+			SourceRevision RenderEffects{};
 		};
 
 		// One row per visible scene instance.

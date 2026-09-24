@@ -543,6 +543,10 @@ namespace client {
 					runtime, static_cast<uint32_t>(viewWidth), static_cast<uint32_t>(viewHeight)
 				);
 				if (!graph) {
+					const engine::graph::PipelineDocument *document = RenderingProfiles.Find(requested);
+					if (document != nullptr && RenderGraphAdmissionFailure(Renderer, *document, failure)) {
+						return nlohmann::json(nullptr);
+					}
 					failure = "unavailable: pipeline is not installed";
 					return nlohmann::json(nullptr);
 				}

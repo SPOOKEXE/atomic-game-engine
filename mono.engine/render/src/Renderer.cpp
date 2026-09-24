@@ -1,5 +1,6 @@
 #include "DisplayColour.hpp"
 #include "FrameBatch.hpp"
+#include "MaterialSamplerAdmission.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "ResourcePreview.hpp"
@@ -1635,6 +1636,15 @@ namespace engine::render {
 		return true;
 	}
 
+	bool
+	Renderer::AddMaterialShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
+		if (const auto failure = AdmitMaterialSamplers(InspectShaderCapabilities(spirv))) {
+			ENGINE_ERROR("material shader '{}': {}", name.Text(), *failure);
+			return false;
+		}
+		return AddShader(name, spirv, owner);
+	}
+
 	bool Renderer::DropShader(const core::Name &name, core::Name owner) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
@@ -2008,7 +2018,7 @@ namespace engine::render {
 				}
 				const auto refused = refusals.find(key);
 				if (refused != refusals.end() && refused->second == module->CodeHash) continue;
-				const bool installed = family == 0	 ? AddShader(name, module->SpirV, owner)
+				const bool installed = family == 0	 ? AddMaterialShader(name, module->SpirV, owner)
 									   : family == 1 ? AddLensShader(name, module->SpirV, owner)
 													 : SetPostProcessShader(name, module->SpirV, owner);
 				if (installed)
