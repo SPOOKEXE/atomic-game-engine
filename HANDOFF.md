@@ -40,8 +40,11 @@ and optimization audit, seamless portals, and Pixel Composer. All remain open.
    1,678,712 assertions in 150 cases. Later history, scope, deferred host,
    supersession, and cancellation gates passed. Two real host fixtures for an
    incompatible binding and viewport removal passed after correcting fixture
-   premises. A staged import refusal fixture is syntax clean but has not had
-   its linked Vulkan gate. Review remaining gates in
+   premises. The attempted staged layer import refusal fixture failed its
+   pending upload premise because an invalid layer is rejected before upload.
+   It now checks that preflight refusal and last image retention; the focused
+   Vulkan case passed 20 assertions. An actual failure after staging is still
+   untested. Review remaining gates in
    `docs/v025-RENDER-PIPELINE-CLEANUP.md` before closing this item.
 3. **MCP cleanup.** Stages 0 through 5 and the M6 PNG bundle tool are present.
    Focused Runner, CLI, architecture, listener, bridge, and 128 cycle soak
@@ -206,10 +209,11 @@ patches are reference material, not accepted code.
   benchmark passed `git diff --cached --check` before integration.
 - At 09:14 UTC, the filesystem had about 114 GiB free. Avoid duplicating full
   build trees without checking space first.
-- Three commits were created in this handoff session. `5e30f523` preserved the
+- Commits in this handoff session include `5e30f523`, which preserved the
   original benchmark commit's author and message and contains only
-  `mono.engine/replication/benchmarks/PriorityRefinement.cpp`. The second
-  contains this handoff and the portal lighting test fixture cleanup. The third
-  updates the handoff after worktree cleanup and GPU validation.
+  `mono.engine/replication/benchmarks/PriorityRefinement.cpp`; `0598d7ce`,
+  which contains this handoff and the portal lighting test fixture cleanup;
+  and `4d2d8175`, which updates the handoff after worktree cleanup and GPU
+  validation. Later handoff edits may be uncommitted.
 - Web reference for worktree removal semantics:
   <https://git-scm.com/docs/git-worktree>.
