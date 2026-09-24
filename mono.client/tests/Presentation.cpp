@@ -7,6 +7,7 @@
 // headless test over the same sequence is where that gets cornered.
 
 #include "../src/DisplayedSceneView.hpp"
+#include "../src/PortalEyeHandoff.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -325,6 +326,71 @@ TEST_CASE("a trailing eye draws its original world after body admission", "[clie
 }
 
 TEST_CASE(
+	"admitted body keeps the paired portal preview until its eye crosses", "[client][camera-portal-world]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Store adopted("adopted");
+	const auto camera = adopted.CreateInstance(scene::CameraClass(), "Eye");
+	adopted.SetResource(scene::ActiveCamera{camera});
+	const auto player = adopted.Create();
+	const auto model = adopted.Create();
+	const auto root = adopted.Create();
+	adopted.Set(root, scene::Transform{core::CFrame(Vector3{0, 1, 5})});
+	adopted.Set(player, scene::PlayerCharacter{model});
+	adopted.Set(model, scene::Character{root, {}, player});
+	adopted.SetResource(scene::LocalPlayer{player});
+	CHECK(scene::CameraSubjectRoot(adopted, camera) == ecs::NULL_ENTITY);
+	REQUIRE(client::PortalHandoffBody(adopted));
+	CHECK(*client::PortalHandoffBody(adopted) == Vector3{0, 1, 5});
+	adopted.Set(model, scene::Character{root, {}, {}});
+	CHECK_FALSE(client::PortalHandoffBody(adopted));
+	adopted.Set(model, scene::Character{root, {}, player});
+	scene::PortalSeam forward;
+	forward.Centre = {0, 0, 0};
+	forward.Normal = {0, 0, 1};
+	forward.First = {2, 0, 0};
+	forward.Second = {0, 3, 0};
+	forward.Destination = core::CFrame(Vector3{0, 0, 10});
+	forward.Crosses = true;
+	forward.DestinationWorld = Name("former source");
+	const std::array seams{forward};
+	const auto before = client::TrailingPortalEye(seams, Name("former source"), {0, 1, -4}, {0, 1, 5});
+	REQUIRE(before.has_value());
+	CHECK(before->Place(core::CFrame(Vector3{0, 1, -4})).Position.Z == Catch::Approx(6));
+	const auto moved = client::TrailingPortalEye(seams, Name("former source"), {0, 1, -2}, {0, 1, 5});
+	REQUIRE(moved.has_value());
+	CHECK(
+		moved->Place(core::CFrame(Vector3{0, 1, -2})).Position.Z !=
+		before->Place(core::CFrame(Vector3{0, 1, -4})).Position.Z
+	);
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("different source"), {0, 1, -4}, {0, 1, 5}));
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("former source"), {0, 1, 1}, {0, 1, 5}));
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("former source"), {0, 1, 0}, {0, 1, 5}));
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("former source"), {0, 1, -4}, {0, 1, -5}));
+	auto otherMouth = forward;
+	otherMouth.Centre.X = 20;
+	CHECK(
+		client::TrailingPortalEye(
+			std::array{otherMouth, forward}, Name("former source"), {0, 1, -4}, {0, 1, 5}
+		)
+	);
+	CHECK_FALSE(
+		client::TrailingPortalEye(std::array{forward, forward}, Name("former source"), {0, 1, -4}, {0, 1, 5})
+	);
+
+	// Returning through the paired face reverses its normal and the eye's side.
+	auto inverse = forward;
+	inverse.Normal = {0, 0, -1};
+	inverse.Destination = core::CFrame(Vector3{0, 0, -10});
+	const std::array returnSeams{inverse};
+	CHECK(client::TrailingPortalEye(returnSeams, Name("former source"), {0, 1, 4}, {0, 1, -5}));
+	CHECK_FALSE(client::TrailingPortalEye(returnSeams, Name("former source"), {0, 1, -1}, {0, 1, -5}));
+	inverse.Crosses = false;
+	CHECK_FALSE(client::TrailingPortalEye(std::array{inverse}, Name("former source"), {0, 1, 4}, {0, 1, -5}));
+}
+
+TEST_CASE(
 	"camera routing crosses and returns through copied destination topology", "[client][remote-eye-route]"
 ) {
 	using namespace engine;
@@ -525,7 +591,16 @@ TEST_CASE(
 	constexpr render::PortalImageHost::Time now{};
 	CHECK_FALSE(
 		client::UpdatePortalImages(
-			viewer, images, near, view, {.Width = 32, .Height = 32}, portals, surfaces, 0, now, {}, joining
+			viewer,
+			images,
+			near,
+			view,
+			{.Width = 32, .Height = 32},
+			portals,
+			surfaces,
+			0,
+			now,
+			{.TopologyOwner = {}, .AdmittedDestination = joining, .PresentedDestination = {}}
 		)
 	);
 	REQUIRE(portals.size() == 1);
@@ -558,8 +633,7 @@ TEST_CASE(
 			surfaces,
 			0,
 			now + std::chrono::milliseconds(2),
-			{},
-			near
+			{.TopologyOwner = {}, .AdmittedDestination = near, .PresentedDestination = {}}
 		);
 		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation == 0);
 		(void)client::UpdatePortalImages(
@@ -572,8 +646,7 @@ TEST_CASE(
 			surfaces,
 			0,
 			now + std::chrono::milliseconds(3),
-			{},
-			joining
+			{.TopologyOwner = {}, .AdmittedDestination = joining, .PresentedDestination = {}}
 		);
 		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation != 0);
 		CHECK(viewer.LookupPresentation(remote, render::PORTAL_REQUEST_CHANNEL) == endpoint);
