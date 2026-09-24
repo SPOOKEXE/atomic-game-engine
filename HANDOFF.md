@@ -1,6 +1,6 @@
 # Work handoff
 
-Updated 2026-09-24. This records the unfinished work in the main `v0.25`
+Updated 2026-09-25. This records the unfinished work in the main `v0.25`
 checkout. The worktree cleanup is complete; only the main checkout remains.
 The detailed worktree history below is archival. This is a working note, not a
 completion claim.
@@ -20,17 +20,33 @@ completion claim.
   control and GPU runs were measured under normal desktop load with Brave,
   Discord, Spotify, and Steam open, as the user requested. The results and
   timing spread are in `docs/v025-MCP-PERF-EVIDENCE.md`. Server and CDN
-  headless artifact checks passed. Broad CI remains open.
-- Broad `just preset=ci check` compiled and failed only `studio.mcpcontract` on
-  a stale `viewport_behavior_diagnostics` description in the fixture. The
-  fixture now matches the current “focused viewport” description. The focused
-  `[studio][mcp]` suite passed 495 assertions in 2 cases; a broad CI rerun is
-  pending.
-- The strict process-hosted 30/60 portal product capture now passes 21,853
-  assertions in 1 case. Evidence is in
-  `/tmp/atomic-portal-product-final-1-NkxJ4k`; rendered continuity, both
-  adoptions, body checks, and capture checks pass. The wider portal acceptance
-  matrix remains open.
+  headless artifact checks passed.
+- On 2026-09-25 the uncommitted work was committed in topic order, portal
+  first. The committed tree passed every `just preset=ci check` step except
+  `studio.renderpipelinegraph`, which read the node catalogue before
+  registering it and failed when run alone or first. `6a468a42` fixes it. One
+  full broad CI rerun on the final tree still closes the MCP item.
+- The portal acceptance matrix now runs end to end (`f28827fe`):
+  `just portal-product-acceptance` covers product walks at 144 and 240 FPS, a
+  variable frame and stall schedule, the 24-cell RTT, jitter, loss, duplicate
+  and reorder grid (`PORTAL_IMPAIRMENT_ROW=rtt,jitter,loss` reruns cells),
+  matched seam captures and uncaptured `--frame-timings` series. The old
+  60.58 FPS reading was capture I/O; uncaptured, the seam scene holds
+  240.0 FPS at 1080p.
+- `676df971` fixes a latency livelock. A camera route that started before the
+  replica learned its authored name kept the local name, lost its world every
+  frame once the identity arrived, and churned eye slot 2 so no eye reply
+  could land at 150 ms RTT or more. Portal views now report
+  `PortalPresentation::AwaitingImage` when a demanded image has not arrived.
+- Open blocker: the product walks are flaky with or without impairment. The
+  strict 30/60 handoff failed 3 of 3 runs on the tree from before the
+  2026-09-25 portal changes, so the 2026-09-24 pass does not reproduce. The
+  clearest failure is a third crossing: after the return the body rests
+  behind the source pane and is transferred back about 44 frames later
+  without moving. Diagnostic logging hides it. The v0.26 roadmap item tracks
+  the trace and fix. After the livelock fix, every 150 ms grid cell adopts,
+  but most cells still fail on black frames, single adoptions or camera
+  checks.
 - Portal transport now carries explicit request-scoped transfer-eye priority.
   The server selects urgent per-endpoint heads ahead of routine replies and
   limits routine stream backlog. Focused world, server, and render runtime
@@ -47,11 +63,9 @@ completion claim.
 - Finish the camera, render, MCP, and portal gates before claiming their
   current work complete. Keep the larger stress and Pixel Composer items open.
 - Merge a completed branch into `v0.25` when safe, as the user requested.
-  The main checkout has extensive uncommitted changes, so inspect overlap
-  before any merge. Only the main worktree remains.
-- The main checkout contains concurrent uncommitted work from several tasks.
-  Review ownership before editing shared files or committing. In particular,
-  do not commit changes made by another agent or the user.
+  Only the main worktree remains; its work was committed on 2026-09-25.
+- Review ownership before editing shared files or committing. Do not commit
+  changes made by another agent or the user.
 - Follow the repository `AGENTS.md` and each touched module's `AGENTS.md`.
   Use CodeGraph first when `.codegraph/` exists. Read `RUNNING.md` before
   choosing commands. Never edit the protected instruction documents.
